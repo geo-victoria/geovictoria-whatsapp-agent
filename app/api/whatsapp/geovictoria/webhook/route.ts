@@ -70,6 +70,29 @@ function getEnv(name: string) {
   return (process.env[name] || "").trim()
 }
 
+function formatPhone(from: string): string {
+  const digits = from.replace(/\D/g, "")
+  return `+${digits}`
+}
+
+function inferCountry(from: string): string {
+  const digits = from.replace(/\D/g, "")
+  const prefixes: [string, string][] = [
+    ["593", "Ecuador"], ["595", "Paraguay"], ["598", "Uruguay"],
+    ["591", "Bolivia"], ["502", "Guatemala"], ["503", "El Salvador"],
+    ["504", "Honduras"], ["505", "Nicaragua"], ["506", "Costa Rica"],
+    ["507", "Panamá"], ["509", "Haití"], ["569", "Chile"], ["56", "Chile"],
+    ["54", "Argentina"], ["55", "Brasil"], ["57", "Colombia"],
+    ["51", "Perú"], ["52", "México"], ["58", "Venezuela"],
+    ["34", "España"], ["44", "Reino Unido"], ["49", "Alemania"],
+    ["33", "Francia"], ["39", "Italia"], ["1", "Estados Unidos"],
+  ]
+  for (const [prefix, country] of prefixes) {
+    if (digits.startsWith(prefix)) return country
+  }
+  return ""
+}
+
 function isoNow() {
   return new Date().toISOString()
 }
@@ -439,6 +462,8 @@ export async function POST(request: Request) {
 
       const stateAfterAssistant = appendMessage(from, "assistant", finalReply)
       if (lead) {
+        lead.telefono = formatPhone(from)
+        lead.pais = inferCountry(from)
         stateAfterAssistant.lead = lead
         await pushLeadToCrm(stateAfterAssistant)
       }
