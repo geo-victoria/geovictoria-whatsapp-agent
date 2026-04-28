@@ -329,16 +329,29 @@ async function pushEvaluation(state: ConversationState, evaluation: EvaluationRe
   })
 }
 
-async function callVicSalesAgent(request: Request, messages: ConversationMessage[]) {
+async function callVicSalesAgent(request: Request, messages: ConversationMessage[], lead?: LeadData) {
   const endpoint = new URL("/api/vic-sales-agent", request.url)
+
+  const leadFields = lead ? Object.entries({
+    nombre: lead.nombre, empresa: lead.empresa, trabajadores: lead.trabajadores,
+    email: lead.email || lead.correo, necesidad: lead.necesidad,
+    reunion_agendada: lead.reunion_agendada, preferencia_horario: lead.preferencia_horario,
+  }).filter(([, v]) => v !== undefined && v !== "" && v !== null).map(([k, v]) => `${k}: ${v}`).join(", ") : ""
+
+  const contextMessage = leadFields
+    ? `[CONTEXTO INTERNO — NO MENCIONAR AL USUARIO] Datos ya capturados en esta conversación: ${leadFields}. NO volver a pedir estos datos.`
+    : ""
+
+  const messagesWithContext = contextMessage
+    ? [{ role: "user" as const, content: contextMessage }, { role: "assistant" as const, content: "Entendido, tengo esos datos registrados." }, ...messages.map((m) => ({ role: m.role, content: m.content }))]
+    : messages.map((m) => ({ role: m.role, content: m.content }))
+
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    }),
+    body: JSON.stringify({ messages: messagesWithContext }),
     cache: "no-store",
   })
 
@@ -459,7 +472,7 @@ export async function POST(request: Request) {
 
       let rawReply = "Recibi tu mensaje. En breve te ayudo."
       try {
-        rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40))
+        rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead)
       } catch (error) {
         const messageText = error instanceof Error ? error.message : "Error inesperado"
         rawReply = `No pude procesar tu solicitud ahora (${messageText}).`
