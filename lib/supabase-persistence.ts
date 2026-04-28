@@ -171,6 +171,43 @@ export async function saveEvaluation(state: ConversationState, evaluation: Evalu
   })
 }
 
+export async function fetchConversationByContact(contact: string): Promise<ConversationState | null> {
+  if (!isSupabaseConfigured()) return null
+
+  const rows = (await supabaseRequest(
+    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation&contact=eq.${encodeURIComponent(contact)}&limit=1`,
+    { method: "GET" },
+  )) as Array<{
+    id: string
+    contact: string
+    started_at: string
+    updated_at: string
+    last_user_at: string | null
+    lead: LeadData | null
+    last_evaluation_at: string | null
+    last_evaluation: EvaluationResult | null
+  }> | null
+
+  const one = rows?.[0]
+  if (!one) return null
+
+  const msgRows = (await supabaseRequest(
+    `vic_messages?select=role,content,at&conversation_id=eq.${one.id}&order=at.asc`,
+    { method: "GET" },
+  )) as Array<{ role: "user" | "assistant"; content: string; at: string }> | null
+
+  return {
+    contact: one.contact,
+    startedAt: one.started_at,
+    updatedAt: one.updated_at,
+    lastUserAt: one.last_user_at || undefined,
+    messages: msgRows || [],
+    lead: one.lead || undefined,
+    lastEvaluationAt: one.last_evaluation_at || undefined,
+    lastEvaluation: one.last_evaluation || undefined,
+  }
+}
+
 export async function fetchConversations(contact?: string): Promise<ConversationState[] | ConversationState | null> {
   if (!isSupabaseConfigured()) return null
 

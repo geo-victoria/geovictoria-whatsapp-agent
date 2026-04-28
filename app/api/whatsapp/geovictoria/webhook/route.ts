@@ -1,7 +1,7 @@
 import crypto from "node:crypto"
 
 import { NextResponse } from "next/server"
-import { saveEvaluation, saveLead, upsertConversationSnapshot } from "@/lib/supabase-persistence"
+import { fetchConversationByContact, saveEvaluation, saveLead, upsertConversationSnapshot } from "@/lib/supabase-persistence"
 
 type MetaWebhookMessage = {
   from?: string
@@ -410,6 +410,11 @@ export async function POST(request: Request) {
 
       const prompt = (incoming.text?.body || "").trim()
       if (!prompt) continue
+
+      if (!conversations.has(from)) {
+        const saved = await fetchConversationByContact(from)
+        if (saved) conversations.set(from, saved)
+      }
 
       const stateBefore = getConversation(from)
       if (minutesSince(stateBefore.lastUserAt) >= INACTIVITY_MINUTES && stateBefore.messages.length > 0) {
