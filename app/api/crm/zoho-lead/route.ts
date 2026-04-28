@@ -7,6 +7,7 @@ type LeadPayload = {
     nombre?: string
     empresa?: string
     cargo?: string
+    email?: string
     correo?: string
     telefono?: string
     pais?: string
@@ -14,7 +15,9 @@ type LeadPayload = {
     trabajadores?: string
     necesidad?: string
     idioma?: string
+    reunion_agendada?: boolean | string
     agendar_reunion?: string
+    preferencia_horario?: string
     fecha_propuesta?: string
     sistema_actual?: string
   }
@@ -100,7 +103,7 @@ export async function POST(request: Request) {
       First_Name: names.firstName,
       Last_Name: names.lastName,
       Company: (lead.empresa || "Prospecto WhatsApp").slice(0, 200),
-      Email: (lead.correo || "").trim() || undefined,
+      Email: (lead.email || lead.correo || "").trim() || undefined,
       Phone: (lead.telefono || "").trim() || undefined,
       Country: (lead.pais || "").trim() || undefined,
       City: (lead.ciudad || "").trim() || undefined,

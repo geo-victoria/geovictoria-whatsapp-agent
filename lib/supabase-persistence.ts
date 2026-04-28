@@ -8,24 +8,30 @@ type LeadData = {
   nombre?: string
   empresa?: string
   cargo?: string
+  email?: string
   correo?: string
   telefono?: string
   pais?: string
   trabajadores?: string
   necesidad?: string
   idioma?: string
+  reunion_agendada?: boolean | string
   agendar_reunion?: string
+  preferencia_horario?: string
 }
 
 type EvaluationResult = {
   score_total: number
-  conversion: number
-  engagement: number
-  calidad_info: number
-  tono_experiencia: number
-  diagnostico_abandono: string
-  tramo: "80-100" | "50-79" | "20-49" | "0-19"
-  analizadas: number
+  dimensiones: {
+    conversion: number
+    engagement: number
+    calidad_info: number
+    tono_experiencia: number
+  }
+  lead_capturado: boolean
+  reunion_agendada: boolean
+  punto_de_quiebre: string | null
+  resumen: string
 }
 
 export type ConversationState = {

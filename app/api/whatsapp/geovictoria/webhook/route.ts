@@ -21,13 +21,16 @@ type LeadData = {
   nombre?: string
   empresa?: string
   cargo?: string
+  email?: string
   correo?: string
   telefono?: string
   pais?: string
   trabajadores?: string
   necesidad?: string
   idioma?: string
+  reunion_agendada?: boolean | string
   agendar_reunion?: string
+  preferencia_horario?: string
 }
 
 type ConversationState = {
@@ -43,13 +46,16 @@ type ConversationState = {
 
 type EvaluationResult = {
   score_total: number
-  conversion: number
-  engagement: number
-  calidad_info: number
-  tono_experiencia: number
-  diagnostico_abandono: string
-  tramo: "80-100" | "50-79" | "20-49" | "0-19"
-  analizadas: number
+  dimensiones: {
+    conversion: number
+    engagement: number
+    calidad_info: number
+    tono_experiencia: number
+  }
+  lead_capturado: boolean
+  reunion_agendada: boolean
+  punto_de_quiebre: string | null
+  resumen: string
 }
 
 const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
@@ -83,7 +89,7 @@ function verifyMetaSignature(rawBody: string, signatureHeader: string | null, ap
   return safeCompare(parts[1], expected)
 }
 
-function extractInboundTextMessages(payload: any): MetaWebhookMessage[] {
+function extractInboundMessages(payload: any): MetaWebhookMessage[] {
   const entries = Array.isArray(payload?.entry) ? payload.entry : []
   const result: MetaWebhookMessage[] = []
 
@@ -93,10 +99,11 @@ function extractInboundTextMessages(payload: any): MetaWebhookMessage[] {
       const value = change?.value
       const messages = Array.isArray(value?.messages) ? value.messages : []
       for (const message of messages) {
-        if (message?.type !== "text") continue
+        const from = typeof message?.from === "string" ? message.from : ""
+        if (!from) continue
         result.push({
-          from: typeof message?.from === "string" ? message.from : "",
-          type: message.type,
+          from,
+          type: message?.type || "unknown",
           text: {
             body: typeof message?.text?.body === "string" ? message.text.body : "",
           },
@@ -162,55 +169,78 @@ function minutesSince(isoDate?: string) {
   return Math.max(0, Math.floor(ms / 60000))
 }
 
-function evaluateConversation(state: ConversationState): EvaluationResult {
-  // PDF rule: evaluate last 10 interactions.
+const EVALUATION_SYSTEM_PROMPT = `Eres un evaluador de calidad de conversaciones de ventas para GeoVictoria.
+
+Analiza la conversación y devuelve ÚNICAMENTE un JSON válido con esta estructura exacta (sin texto adicional, sin backticks):
+{
+  "score_total": <número 0-100>,
+  "dimensiones": {
+    "conversion": <0-40, ¿se agendó reunión o se capturaron datos completos?>,
+    "engagement": <0-30, ¿cuántos intercambios hubo? ¿fluidez?>,
+    "calidad_info": <0-20, ¿qué tan completo quedó el lead (nombre, empresa, trabajadores, email)?>,
+    "tono_experiencia": <0-10, ¿el cliente se fue bien o frustrado?>
+  },
+  "lead_capturado": <true/false>,
+  "reunion_agendada": <true/false>,
+  "punto_de_quiebre": "<en qué paso o mensaje bajó el interés, null si fue exitosa>",
+  "resumen": "<2-3 oraciones describiendo cómo fue la conversación y qué mejorar>"
+}
+
+Referencia de scores:
+- 80-100: Excelente, lead completo y/o reunión agendada
+- 50-79: Parcial, algunos datos capturados
+- 20-49: Incompleto, cliente perdió interés
+- 0-19: Cliente se aburrió, casi sin engagement`
+
+async function evaluateConversation(state: ConversationState): Promise<EvaluationResult> {
   const turns = state.messages.slice(-10)
-  const userTurns = turns.filter((m) => m.role === "user")
-  const assistantTurns = turns.filter((m) => m.role === "assistant")
+  const conversationText = turns
+    .map((m) => `${m.role === "user" ? "PROSPECTO" : "VICTORIA"}: ${m.content}`)
+    .join("\n\n")
 
-  const lead = state.lead || {}
-  const required = [lead.nombre, lead.empresa, lead.cargo, lead.correo, lead.telefono].filter(Boolean).length
-  const completeLead = required === 5
-  const meetingSignal = /agendar|reunion|meeting/i.test(turns.map((t) => t.content).join(" "))
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  const model = (process.env.ANTHROPIC_SALES_AGENT_MODEL || "").trim() || "claude-haiku-4-5-20251001"
 
-  // 0-40: objective achievement (lead + meeting).
-  const conversion = Math.min(40, (completeLead ? 25 : required * 5) + (meetingSignal ? 15 : 0))
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 800,
+        system: EVALUATION_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: `Evalúa esta conversación:\n\n${conversationText}` }],
+      }),
+      cache: "no-store",
+    })
 
-  // 0-30: message exchange + fluidity.
-  const alternation = Math.min(userTurns.length, assistantTurns.length)
-  const engagement = Math.min(30, alternation * 4 + Math.min(10, userTurns.length * 2))
+    if (!response.ok) throw new Error(`Anthropic eval error (${response.status})`)
 
-  // 0-20: PDF mentions quality by name/company/role/email.
-  const qualityFields = [lead.nombre, lead.empresa, lead.cargo, lead.correo].filter(Boolean).length
-  const calidadInfo = Math.min(20, qualityFields * 5)
+    const data = await response.json()
+    const raw = (data?.content as Array<{ type: string; text: string }>)
+      ?.filter((b) => b?.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim()
 
-  const joined = turns.map((t) => t.content.toLowerCase()).join(" ")
-  const frustration = /no sirve|malo|molesto|frustr|chao|adios/i.test(joined)
-  const tono = frustration ? 3 : 10
-
-  const score = Math.max(0, Math.min(100, conversion + engagement + calidadInfo + tono))
-
-  let diagnostico = "Conversacion activa o parcial sin abandono claro."
-  if (score < 50) {
-    if (!lead.correo) diagnostico = "El usuario dejo de responder al pedir el correo electronico."
-    else if (!lead.telefono) diagnostico = "El usuario dejo de responder al pedir el telefono."
-    else if (/precio|cost/i.test(joined)) diagnostico = "El cliente pregunto por precio y se enfrio antes de agendar."
-    else if (turns.length <= 2) diagnostico = "Solo hubo 2 mensajes antes del abandono."
-    else diagnostico = "Hubo bajo intercambio y el lead quedo incompleto."
-  }
-
-  const tramo: EvaluationResult["tramo"] =
-    score >= 80 ? "80-100" : score >= 50 ? "50-79" : score >= 20 ? "20-49" : "0-19"
-
-  return {
-    score_total: score,
-    conversion,
-    engagement,
-    calidad_info: calidadInfo,
-    tono_experiencia: tono,
-    diagnostico_abandono: diagnostico,
-    tramo,
-    analizadas: turns.length,
+    const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim()) as EvaluationResult
+    return parsed
+  } catch {
+    const lead = state.lead || {}
+    const hasEmail = Boolean(lead.email || lead.correo)
+    const hasMeeting = lead.reunion_agendada === true || lead.agendar_reunion === "si"
+    return {
+      score_total: hasEmail && hasMeeting ? 80 : hasEmail ? 50 : 20,
+      dimensiones: { conversion: hasEmail ? 25 : 10, engagement: 15, calidad_info: hasEmail ? 15 : 5, tono_experiencia: 7 },
+      lead_capturado: hasEmail,
+      reunion_agendada: Boolean(hasMeeting),
+      punto_de_quiebre: null,
+      resumen: "Evaluación automática (fallback por error en Claude).",
+    }
   }
 }
 
@@ -332,7 +362,7 @@ function scheduleInactivityEvaluation(contact: string) {
     const lastEvalMinutes = minutesSince(state.lastEvaluationAt)
     if (lastEvalMinutes < INACTIVITY_MINUTES) return
 
-    const evaluation = evaluateConversation(state)
+    const evaluation = await evaluateConversation(state)
     state.lastEvaluationAt = isoNow()
     state.lastEvaluation = evaluation
     await pushEvaluation(state, evaluation)
@@ -367,16 +397,23 @@ export async function POST(request: Request) {
     }
 
     const payload = rawBody ? JSON.parse(rawBody) : {}
-    const inboundMessages = extractInboundTextMessages(payload)
+    const inboundMessages = extractInboundMessages(payload)
 
     for (const incoming of inboundMessages) {
       const from = (incoming.from || "").trim()
+      if (!from) continue
+
+      if (incoming.type !== "text") {
+        await sendWhatsAppText(from, "Solo proceso mensajes de texto por ahora 😊 ¿En qué puedo ayudarte con GeoVictoria?")
+        continue
+      }
+
       const prompt = (incoming.text?.body || "").trim()
-      if (!from || !prompt) continue
+      if (!prompt) continue
 
       const stateBefore = getConversation(from)
       if (minutesSince(stateBefore.lastUserAt) >= INACTIVITY_MINUTES && stateBefore.messages.length > 0) {
-        const evalBefore = evaluateConversation(stateBefore)
+        const evalBefore = await evaluateConversation(stateBefore)
         stateBefore.lastEvaluationAt = isoNow()
         stateBefore.lastEvaluation = evalBefore
         await pushEvaluation(stateBefore, evalBefore)
