@@ -107,23 +107,20 @@ export async function POST(request: Request) {
       Phone: (lead.telefono || "").trim() || undefined,
       Country: (lead.pais || "").trim() || undefined,
       City: (lead.ciudad || "").trim() || undefined,
-      Description: [
-        `Canal: WhatsApp`,
+      Canal: "WhatsApp",
+      Comentario: [
         `Necesidad: ${lead.necesidad || ""}`,
         `Cargo: ${lead.cargo || ""}`,
         `Trabajadores: ${lead.trabajadores || ""}`,
         `Sistema actual: ${lead.sistema_actual || ""}`,
         `Idioma: ${lead.idioma || ""}`,
-        `Agendar reunión: ${lead.agendar_reunion || ""}`,
-        `Fecha propuesta: ${lead.fecha_propuesta || ""}`,
+        `Reunión agendada: ${lead.reunion_agendada ?? lead.agendar_reunion ?? ""}`,
+        `Preferencia horario: ${lead.preferencia_horario || lead.fecha_propuesta || ""}`,
         `Contacto WA: ${body.contact || ""}`,
-        ``,
-        `--- Conversación ---`,
-        transcript,
       ]
         .join("\n")
-        .trim()
-        .slice(0, 32000),
+        .trim(),
+      Conversaci_n_Botmaker: transcript || undefined,
     }
 
     const createResponse = await fetch(`${apiDomain}/crm/v2/${moduleName}`, {
