@@ -301,13 +301,21 @@ async function persistConversationSnapshot(state: ConversationState) {
 async function pushLeadToCrm(state: ConversationState) {
   if (!state.lead) return
   await saveLead(state)
-  await postJsonIfConfigured(getEnv("CRM_LEAD_WEBHOOK_URL"), {
-    type: "lead_captured",
-    contact: state.contact,
-    lead: state.lead,
-    conversation: state.messages,
-    source: "whatsapp_agent_vic",
-  })
+  const url = getEnv("CRM_LEAD_WEBHOOK_URL")
+  if (!url) return
+  // Fire-and-forget: don't block the WhatsApp response waiting for Zoho
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "lead_captured",
+      contact: state.contact,
+      lead: state.lead,
+      conversation: state.messages,
+      source: "whatsapp_agent_vic",
+    }),
+    cache: "no-store",
+  }).catch((err) => console.error("[vic] CRM push error:", err))
 }
 
 async function pushEvaluation(state: ConversationState, evaluation: EvaluationResult) {

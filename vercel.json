@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "app/api/whatsapp/geovictoria/webhook/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/crm/zoho-lead/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}
