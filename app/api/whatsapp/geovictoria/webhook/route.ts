@@ -218,7 +218,7 @@ Referencia de scores:
 async function evaluateConversation(state: ConversationState): Promise<EvaluationResult> {
   const turns = state.messages.slice(-10)
   const conversationText = turns
-    .map((m) => `${m.role === "user" ? "PROSPECTO" : "VICTORIA"}: ${m.content}`)
+    .map((m) => `${m.role === "user" ? "PROSPECTO" : "VICKY"}: ${m.content}`)
     .join("\n\n")
 
   const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
