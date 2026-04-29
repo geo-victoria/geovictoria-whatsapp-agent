@@ -2,6 +2,7 @@ import crypto from "node:crypto"
 
 import { NextResponse } from "next/server"
 import { fetchConversationByContact, saveEvaluation, saveLead, upsertConversationSnapshot } from "@/lib/supabase-persistence"
+import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getTimezone } from "@/lib/calendar"
 
 type MetaWebhookMessage = {
   id?: string
@@ -43,6 +44,9 @@ type ConversationState = {
   lead?: LeadData
   lastEvaluationAt?: string
   lastEvaluation?: EvaluationResult
+  pendingSlots?: string[]
+  meetingBooked?: boolean
+  meetingBookingId?: string
 }
 
 type EvaluationResult = {
@@ -210,6 +214,24 @@ function appendMessage(contact: string, role: "user" | "assistant", content: str
   return state
 }
 
+function extractSlotMarker(raw: string): {
+  cleanReply: string
+  slotConfirmed: number | null
+  slotCustom: string | null
+} {
+  const confirmedMatch = raw.match(/SLOT_CONFIRMED:(\d)/m)
+  const customMatch = raw.match(/SLOT_CUSTOM:([^\n]+)/m)
+  let cleanReply = raw
+    .replace(/SLOT_CONFIRMED:\d/gm, "")
+    .replace(/SLOT_CUSTOM:[^\n]+/gm, "")
+    .trim()
+  return {
+    cleanReply,
+    slotConfirmed: confirmedMatch ? parseInt(confirmedMatch[1]) : null,
+    slotCustom: customMatch ? customMatch[1].trim() : null,
+  }
+}
+
 function extractLead(raw: string): { cleanReply: string; lead: LeadData | null } {
   const marker = /LEAD_CAPTURED:(\{[\s\S]*?\})/m
   const match = raw.match(marker)
@@ -371,7 +393,7 @@ async function pushEvaluation(state: ConversationState, evaluation: EvaluationRe
   })
 }
 
-async function callVicSalesAgent(request: Request, messages: ConversationMessage[], lead?: LeadData) {
+async function callVicSalesAgent(request: Request, messages: ConversationMessage[], lead?: LeadData, extraContext?: string) {
   const endpoint = new URL("/api/vic-sales-agent", request.url)
 
   const leadFields = lead ? Object.entries({
@@ -380,13 +402,21 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
     reunion_agendada: lead.reunion_agendada, preferencia_horario: lead.preferencia_horario,
   }).filter(([, v]) => v !== undefined && v !== "" && v !== null).map(([k, v]) => `${k}: ${v}`).join(", ") : ""
 
-  const contextMessage = leadFields
-    ? `[CONTEXTO INTERNO — NO MENCIONAR AL USUARIO] Datos ya capturados en esta conversación: ${leadFields}. NO volver a pedir estos datos.`
-    : ""
+  const contextParts: Array<{ role: "user" | "assistant"; content: string }> = []
 
-  const messagesWithContext = contextMessage
-    ? [{ role: "user" as const, content: contextMessage }, { role: "assistant" as const, content: "Entendido, tengo esos datos registrados." }, ...messages.map((m) => ({ role: m.role, content: m.content }))]
-    : messages.map((m) => ({ role: m.role, content: m.content }))
+  if (leadFields) {
+    contextParts.push({ role: "user", content: `[CONTEXTO INTERNO — NO MENCIONAR AL USUARIO] Datos ya capturados: ${leadFields}. NO volver a pedir estos datos.` })
+    contextParts.push({ role: "assistant", content: "Entendido, tengo esos datos registrados." })
+  }
+  if (extraContext) {
+    contextParts.push({ role: "user", content: extraContext })
+    contextParts.push({ role: "assistant", content: "Entendido." })
+  }
+
+  const messagesWithContext = [
+    ...contextParts,
+    ...messages.map((m) => ({ role: m.role, content: m.content })),
+  ]
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -514,23 +544,66 @@ async function processInboundMessages(payload: any, request: Request) {
 
     const stateAfterUser = appendMessage(from, "user", prompt)
 
+    // Inyectar slots pendientes como contexto interno si existen
+    const pendingSlots = stateAfterUser.pendingSlots || []
+    let extraContext: string | undefined
+    if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
+      const country = stateAfterUser.lead?.pais || inferCountry(from)
+      const slotsText = formatSlotsForProspect(pendingSlots, country)
+      extraContext = `[SLOTS_DISPONIBLES]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
+    }
+
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
     try {
-      rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead)
+      rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext)
     } catch {
       // error interno — no exponer al usuario
     }
 
-    const { cleanReply, lead } = extractLead(rawReply)
+    // Extraer marcadores de lead y de slot en paralelo
+    const { cleanReply: afterLead, lead } = extractLead(rawReply)
+    const { cleanReply, slotConfirmed, slotCustom } = extractSlotMarker(afterLead)
     const finalReply = cleanReply || "Gracias por escribir."
 
     const stateAfterAssistant = appendMessage(from, "assistant", finalReply)
+
+    // Procesar LEAD_CAPTURED
     if (lead) {
       const sanitized = validateAndSanitizeLead(lead)
       sanitized.telefono = formatPhone(from)
       sanitized.pais = inferCountry(from)
       stateAfterAssistant.lead = sanitized
       await pushLeadToCrm(stateAfterAssistant)
+
+      // Si quiere agendar, buscar slots disponibles
+      if (sanitized.reunion_agendada === true) {
+        const country = sanitized.pais || inferCountry(from)
+        const slots = await getAvailableSlots(country)
+        stateAfterAssistant.pendingSlots = slots
+      }
+    }
+
+    // Procesar confirmación de slot
+    if (slotConfirmed && pendingSlots.length >= slotConfirmed && !stateAfterUser.meetingBooked) {
+      const slot = pendingSlots[slotConfirmed - 1]
+      const leadData = stateAfterAssistant.lead || {}
+      const country = leadData.pais || inferCountry(from)
+      const result = await bookMeeting({
+        slotIso: slot,
+        prospectName: leadData.nombre || "Prospecto",
+        prospectEmail: leadData.email || leadData.correo || "",
+        timeZone: getTimezone(country),
+      })
+      if (result.success) {
+        stateAfterAssistant.meetingBooked = true
+        stateAfterAssistant.meetingBookingId = result.bookingId
+        stateAfterAssistant.pendingSlots = []
+      }
+    }
+
+    // Procesar horario propuesto por el prospecto (revisión manual)
+    if (slotCustom && stateAfterAssistant.lead) {
+      stateAfterAssistant.lead.preferencia_horario = slotCustom
     }
 
     await persistConversationSnapshot(stateAfterAssistant)

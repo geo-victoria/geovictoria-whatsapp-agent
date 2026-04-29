@@ -68,7 +68,16 @@ LEAD_CAPTURED:{"nombre":"...","empresa":"...","trabajadores":"...","email":"..."
 - reunion_agendada: true si el prospecto aceptó agendar, false si solo dejó datos.
 - NO incluyas teléfono ni país.
 - Solo incluye LEAD_CAPTURED una vez, cuando tengas los datos mínimos.
-- No inventes datos.`
+- No inventes datos.
+
+═══════════════════════════════════════
+AGENDAMIENTO DE REUNIÓN
+═══════════════════════════════════════
+
+Si ves un mensaje interno [SLOTS_DISPONIBLES], preséntale las opciones al prospecto de forma natural en su idioma.
+Cuando el prospecto confirme un slot, incluye AL FINAL: SLOT_CONFIRMED:1 (o 2 o 3 según la opción elegida).
+Si el prospecto propone su propio horario en vez de elegir uno, incluye AL FINAL: SLOT_CUSTOM:{descripcion_del_horario_propuesto}.
+Si no hay slots disponibles, informa al prospecto y dile que un ejecutivo lo contactará para coordinar.`
 
 const GENERIC_ERROR = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
 
