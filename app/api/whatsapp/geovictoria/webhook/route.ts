@@ -470,6 +470,75 @@ export async function GET(request: Request) {
   return NextResponse.json({ success: false, error: "Verificacion fallida" }, { status: 403 })
 }
 
+async function processInboundMessages(payload: any, request: Request) {
+  const inboundMessages = extractInboundMessages(payload)
+
+  for (const incoming of inboundMessages) {
+    const from = (incoming.from || "").trim()
+    if (!from) continue
+
+    // Deduplicación por message ID — previene doble procesamiento por retries de Meta
+    const msgId = incoming.id || ""
+    if (isDuplicate(msgId)) continue
+
+    if (incoming.type !== "text") {
+      await sendWhatsAppText(from, "Solo proceso mensajes de texto. ¿En qué puedo ayudarte con GeoVictoria?")
+      continue
+    }
+
+    const prompt = (incoming.text?.body || "").trim()
+    if (!prompt) continue
+
+    if (prompt.length > MAX_INPUT_CHARS) {
+      await sendWhatsAppText(from, "Veo que tienes una operación compleja. Todo eso lo analiza el ejecutivo en una reunión personalizada. Dame tu nombre y email y te conecto.")
+      continue
+    }
+
+    if (containsInjection(prompt)) {
+      await sendWhatsAppText(from, "El formato del mensaje no es válido. ¿Me envías tus datos uno por uno?")
+      continue
+    }
+
+    if (!conversations.has(from)) {
+      const saved = await fetchConversationByContact(from)
+      if (saved) conversations.set(from, saved)
+    }
+
+    const stateBefore = getConversation(from)
+    if (minutesSince(stateBefore.lastUserAt) >= INACTIVITY_MINUTES && stateBefore.messages.length > 0) {
+      const evalBefore = await evaluateConversation(stateBefore)
+      stateBefore.lastEvaluationAt = isoNow()
+      stateBefore.lastEvaluation = evalBefore
+      await pushEvaluation(stateBefore, evalBefore)
+    }
+
+    const stateAfterUser = appendMessage(from, "user", prompt)
+
+    let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
+    try {
+      rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead)
+    } catch {
+      // error interno — no exponer al usuario
+    }
+
+    const { cleanReply, lead } = extractLead(rawReply)
+    const finalReply = cleanReply || "Gracias por escribir."
+
+    const stateAfterAssistant = appendMessage(from, "assistant", finalReply)
+    if (lead) {
+      const sanitized = validateAndSanitizeLead(lead)
+      sanitized.telefono = formatPhone(from)
+      sanitized.pais = inferCountry(from)
+      stateAfterAssistant.lead = sanitized
+      await pushLeadToCrm(stateAfterAssistant)
+    }
+
+    await persistConversationSnapshot(stateAfterAssistant)
+    scheduleInactivityEvaluation(from)
+    await sendWhatsAppText(from, finalReply)
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const rawBody = await request.text()
@@ -483,77 +552,9 @@ export async function POST(request: Request) {
     }
 
     const payload = rawBody ? JSON.parse(rawBody) : {}
-    const inboundMessages = extractInboundMessages(payload)
 
-    for (const incoming of inboundMessages) {
-      const from = (incoming.from || "").trim()
-      if (!from) continue
-
-      // H11 — deduplicación por message ID
-      const msgId = (incoming as any).id || ""
-      if (isDuplicate(msgId)) continue
-
-      if (incoming.type !== "text") {
-        await sendWhatsAppText(from, "Solo proceso mensajes de texto. ¿En qué puedo ayudarte con GeoVictoria?")
-        continue
-      }
-
-      const prompt = (incoming.text?.body || "").trim()
-      if (!prompt) continue
-
-      // H11/H14 — límite de longitud de input
-      if (prompt.length > MAX_INPUT_CHARS) {
-        await sendWhatsAppText(from, "Veo que tienes una operación compleja. Todo eso lo analiza el ejecutivo en una reunión personalizada. Dame tu nombre y email y te conecto.")
-        continue
-      }
-
-      // H07/H08 — detección de inyección: respuesta neutra sin detallar qué se detectó
-      if (containsInjection(prompt)) {
-        await sendWhatsAppText(from, "El formato del mensaje no es válido. ¿Me envías tus datos uno por uno?")
-        continue
-      }
-
-      if (!conversations.has(from)) {
-        const saved = await fetchConversationByContact(from)
-        if (saved) conversations.set(from, saved)
-      }
-
-      const stateBefore = getConversation(from)
-      if (minutesSince(stateBefore.lastUserAt) >= INACTIVITY_MINUTES && stateBefore.messages.length > 0) {
-        const evalBefore = await evaluateConversation(stateBefore)
-        stateBefore.lastEvaluationAt = isoNow()
-        stateBefore.lastEvaluation = evalBefore
-        await pushEvaluation(stateBefore, evalBefore)
-      }
-
-      const stateAfterUser = appendMessage(from, "user", prompt)
-
-      // H10/H14 — error handling genérico: nunca exponer detalles técnicos al usuario
-      let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
-      try {
-        rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead)
-      } catch {
-        // error interno — no exponer al usuario
-      }
-
-      const { cleanReply, lead } = extractLead(rawReply)
-      const finalReply = cleanReply || "Gracias por escribir."
-
-      const stateAfterAssistant = appendMessage(from, "assistant", finalReply)
-      if (lead) {
-        // H07 — sanitizar y validar datos antes de persistir en CRM
-        const sanitized = validateAndSanitizeLead(lead)
-        sanitized.telefono = formatPhone(from)
-        sanitized.pais = inferCountry(from)
-        stateAfterAssistant.lead = sanitized
-        await pushLeadToCrm(stateAfterAssistant)
-      }
-
-      await persistConversationSnapshot(stateAfterAssistant)
-      scheduleInactivityEvaluation(from)
-      await sendWhatsAppText(from, finalReply)
-    }
-
+    // Responder 200 a Meta INMEDIATAMENTE para evitar retries por timeout
+    processInboundMessages(payload, request).catch(() => {})
     return NextResponse.json({ success: true })
   } catch {
     // H10/H14 — nunca exponer errores internos al usuario ni a Meta
