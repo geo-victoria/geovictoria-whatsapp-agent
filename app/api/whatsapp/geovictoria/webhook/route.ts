@@ -553,8 +553,9 @@ export async function POST(request: Request) {
 
     const payload = rawBody ? JSON.parse(rawBody) : {}
 
-    // Responder 200 a Meta INMEDIATAMENTE para evitar retries por timeout
-    processInboundMessages(payload, request).catch(() => {})
+    // Procesamiento síncrono — fire-and-forget se termina en Vercel al retornar
+    // El dedup por message ID previene doble procesamiento si Meta reintenta
+    await processInboundMessages(payload, request)
     return NextResponse.json({ success: true })
   } catch {
     // H10/H14 — nunca exponer errores internos al usuario ni a Meta
