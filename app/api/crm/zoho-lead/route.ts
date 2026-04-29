@@ -43,6 +43,11 @@ function splitName(fullName?: string) {
   }
 }
 
+function sanitize(text: string | undefined, maxLen = 200): string {
+  if (!text) return ""
+  return text.replace(/[^\x20-\x7EÀ-ɏ -ÿ\n]/g, " ").slice(0, maxLen).trim()
+}
+
 function buildTranscript(conversation: LeadPayload["conversation"]) {
   const rows = Array.isArray(conversation) ? conversation : []
   return rows
@@ -100,13 +105,13 @@ export async function POST(request: Request) {
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
 
     const record = {
-      First_Name: names.firstName,
-      Last_Name: names.lastName,
-      Company: (lead.empresa || "Prospecto WhatsApp").slice(0, 200),
+      First_Name: sanitize(names.firstName, 100),
+      Last_Name: sanitize(names.lastName, 100) || "Prospecto",
+      Company: sanitize(lead.empresa, 200) || "Prospecto WhatsApp",
       Email: (lead.email || lead.correo || "").trim() || undefined,
       Phone: (lead.telefono || "").trim() || undefined,
-      Country: (lead.pais || "").trim() || undefined,
-      City: (lead.ciudad || "").trim() || undefined,
+      Country: sanitize(lead.pais, 100) || undefined,
+      City: sanitize(lead.ciudad, 100) || undefined,
       Canal: "WhatsApp",
       Comentario: [
         `Necesidad: ${lead.necesidad || ""}`,

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server"
 import { fetchConversationByContact, saveEvaluation, saveLead, upsertConversationSnapshot } from "@/lib/supabase-persistence"
 
 type MetaWebhookMessage = {
+  id?: string
   from?: string
   type?: string
   text?: {
@@ -58,13 +59,53 @@ type EvaluationResult = {
   resumen: string
 }
 
-const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
-if (!globalStore.__vicConversations) {
-  globalStore.__vicConversations = new Map<string, ConversationState>()
+const globalStore = globalThis as unknown as {
+  __vicConversations?: Map<string, ConversationState>
+  __vicProcessedMsgIds?: Map<string, number>
 }
+if (!globalStore.__vicConversations) globalStore.__vicConversations = new Map()
+if (!globalStore.__vicProcessedMsgIds) globalStore.__vicProcessedMsgIds = new Map()
 const conversations = globalStore.__vicConversations
+const processedMsgIds = globalStore.__vicProcessedMsgIds
 
 const INACTIVITY_MINUTES = Number((process.env.CONVERSATION_INACTIVITY_MINUTES || "20").trim() || "20")
+const MAX_INPUT_CHARS = 2000
+
+function isDuplicate(msgId: string): boolean {
+  if (!msgId) return false
+  if (processedMsgIds.has(msgId)) return true
+  processedMsgIds.set(msgId, Date.now())
+  if (processedMsgIds.size > 5000) {
+    const cutoff = Date.now() - 3600_000
+    for (const [id, ts] of processedMsgIds) if (ts < cutoff) processedMsgIds.delete(id)
+  }
+  return false
+}
+
+const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
+const INJECT_RE = /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script/i
+
+function sanitizeText(text: string, maxLen = 200): string {
+  return text.replace(/[^\x20-\x7EÀ-ɏ -ÿ]/g, " ").slice(0, maxLen).trim()
+}
+
+function validateAndSanitizeLead(lead: LeadData): LeadData {
+  const email = (lead.email || lead.correo || "").trim()
+  return {
+    ...lead,
+    nombre: lead.nombre ? sanitizeText(lead.nombre, 100) : lead.nombre,
+    empresa: lead.empresa ? sanitizeText(lead.empresa, 150) : lead.empresa,
+    trabajadores: lead.trabajadores ? String(lead.trabajadores).replace(/\D/g, "").slice(0, 7) : lead.trabajadores,
+    email: EMAIL_RE.test(email) ? email : "",
+    correo: EMAIL_RE.test(email) ? email : "",
+    necesidad: lead.necesidad ? sanitizeText(lead.necesidad, 200) : lead.necesidad,
+    preferencia_horario: lead.preferencia_horario ? sanitizeText(lead.preferencia_horario, 100) : lead.preferencia_horario,
+  }
+}
+
+function containsInjection(text: string): boolean {
+  return INJECT_RE.test(text) || text.length > MAX_INPUT_CHARS
+}
 
 function getEnv(name: string) {
   return (process.env[name] || "").trim()
@@ -125,6 +166,7 @@ function extractInboundMessages(payload: any): MetaWebhookMessage[] {
         const from = typeof message?.from === "string" ? message.from : ""
         if (!from) continue
         result.push({
+          id: typeof message?.id === "string" ? message.id : "",
           from,
           type: message?.type || "unknown",
           text: {
@@ -447,13 +489,29 @@ export async function POST(request: Request) {
       const from = (incoming.from || "").trim()
       if (!from) continue
 
+      // H11 — deduplicación por message ID
+      const msgId = (incoming as any).id || ""
+      if (isDuplicate(msgId)) continue
+
       if (incoming.type !== "text") {
-        await sendWhatsAppText(from, "Solo proceso mensajes de texto por ahora 😊 ¿En qué puedo ayudarte con GeoVictoria?")
+        await sendWhatsAppText(from, "Solo proceso mensajes de texto. ¿En qué puedo ayudarte con GeoVictoria?")
         continue
       }
 
       const prompt = (incoming.text?.body || "").trim()
       if (!prompt) continue
+
+      // H11/H14 — límite de longitud de input
+      if (prompt.length > MAX_INPUT_CHARS) {
+        await sendWhatsAppText(from, "Veo que tienes una operación compleja. Todo eso lo analiza el ejecutivo en una reunión personalizada. Dame tu nombre y email y te conecto.")
+        continue
+      }
+
+      // H07/H08 — detección de inyección: respuesta neutra sin detallar qué se detectó
+      if (containsInjection(prompt)) {
+        await sendWhatsAppText(from, "El formato del mensaje no es válido. ¿Me envías tus datos uno por uno?")
+        continue
+      }
 
       if (!conversations.has(from)) {
         const saved = await fetchConversationByContact(from)
@@ -470,12 +528,12 @@ export async function POST(request: Request) {
 
       const stateAfterUser = appendMessage(from, "user", prompt)
 
-      let rawReply = "Recibi tu mensaje. En breve te ayudo."
+      // H10/H14 — error handling genérico: nunca exponer detalles técnicos al usuario
+      let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
       try {
         rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead)
-      } catch (error) {
-        const messageText = error instanceof Error ? error.message : "Error inesperado"
-        rawReply = `No pude procesar tu solicitud ahora (${messageText}).`
+      } catch {
+        // error interno — no exponer al usuario
       }
 
       const { cleanReply, lead } = extractLead(rawReply)
@@ -483,9 +541,11 @@ export async function POST(request: Request) {
 
       const stateAfterAssistant = appendMessage(from, "assistant", finalReply)
       if (lead) {
-        lead.telefono = formatPhone(from)
-        lead.pais = inferCountry(from)
-        stateAfterAssistant.lead = lead
+        // H07 — sanitizar y validar datos antes de persistir en CRM
+        const sanitized = validateAndSanitizeLead(lead)
+        sanitized.telefono = formatPhone(from)
+        sanitized.pais = inferCountry(from)
+        stateAfterAssistant.lead = sanitized
         await pushLeadToCrm(stateAfterAssistant)
       }
 
@@ -495,8 +555,8 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ success: true })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Error inesperado"
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+  } catch {
+    // H10/H14 — nunca exponer errores internos al usuario ni a Meta
+    return NextResponse.json({ success: true })
   }
 }
