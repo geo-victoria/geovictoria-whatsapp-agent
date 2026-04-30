@@ -555,11 +555,9 @@ async function processInboundMessages(payload: any, request: Request) {
       wantsSlots
     ) {
       const country = existingLead.pais || inferCountry(from)
-      let slots = stateAfterUser.pendingSlots || []
-      if (slots.length === 0) {
-        slots = await getAvailableSlots(country)
-        stateAfterUser.pendingSlots = slots
-      }
+      // Siempre refrescar slots para evitar datos desactualizados
+      const slots = await getAvailableSlots(country)
+      stateAfterUser.pendingSlots = slots
 
       if (slots.length > 0) {
         const slotsText = formatSlotsForProspect(slots, country)

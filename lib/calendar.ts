@@ -189,18 +189,23 @@ export async function bookMeeting(params: {
 
   const data = await res.json() as {
     status?: string
-    data?: { uid?: string; meetingUrl?: string; id?: number }
-    error?: string
+    data?: { uid?: string; meetingUrl?: string; id?: number; start?: string }
+    error?: unknown
     message?: string
+    statusCode?: number
   }
 
-  if (!res.ok || data.status === "error") {
-    return { success: false, error: data.message || data.error || "Error al agendar" }
+  // Consideramos éxito solo si hay uid en la respuesta
+  const uid = data.data?.uid || data.data?.id
+  if (!res.ok || data.status === "error" || data.statusCode || !uid) {
+    const errMsg = data.message || JSON.stringify(data.error || data).slice(0, 200)
+    console.error("[calendar] booking failed:", res.status, errMsg)
+    return { success: false, error: errMsg }
   }
 
   return {
     success: true,
-    bookingId: data.data?.uid || String(data.data?.id || ""),
+    bookingId: String(uid),
     meetingUrl: data.data?.meetingUrl,
   }
 }
