@@ -47,6 +47,7 @@ type ConversationState = {
   pendingSlots?: string[]
   meetingBooked?: boolean
   meetingBookingId?: string
+  zohoLeadId?: string
 }
 
 type EvaluationResult = {
@@ -362,24 +363,32 @@ async function persistConversationSnapshot(state: ConversationState) {
   })
 }
 
-async function pushLeadToCrm(state: ConversationState) {
-  if (!state.lead) return
+async function pushLeadToCrm(state: ConversationState): Promise<string | null> {
+  if (!state.lead) return null
   await saveLead(state)
   const url = getEnv("CRM_LEAD_WEBHOOK_URL")
-  if (!url) return
-  // Fire-and-forget: don't block the WhatsApp response waiting for Zoho
-  fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      type: "lead_captured",
-      contact: state.contact,
-      lead: state.lead,
-      conversation: state.messages,
-      source: "whatsapp_agent_vic",
-    }),
-    cache: "no-store",
-  }).catch((err) => console.error("[vic] CRM push error:", err))
+  if (!url) return null
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "lead_captured",
+        contact: state.contact,
+        lead: state.lead,
+        conversation: state.messages,
+        source: "whatsapp_agent_vic",
+      }),
+      cache: "no-store",
+    })
+    if (res.ok) {
+      const data = await res.json() as { leadId?: string }
+      return data.leadId || null
+    }
+  } catch (err) {
+    console.error("[vic] CRM push error:", err)
+  }
+  return null
 }
 
 async function pushEvaluation(state: ConversationState, evaluation: EvaluationResult) {
@@ -600,6 +609,23 @@ async function processInboundMessages(payload: any, request: Request) {
           stateAfterUser.meetingBooked = true
           stateAfterUser.meetingBookingId = result.bookingId
           stateAfterUser.pendingSlots = []
+
+          // Crear Meeting en Zoho CRM vinculado al lead
+          const zohoMeetingUrl = getEnv("CRM_LEAD_WEBHOOK_URL").replace("/zoho-lead", "/zoho-meeting")
+          if (zohoMeetingUrl && stateAfterUser.zohoLeadId) {
+            fetch(zohoMeetingUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                leadId: stateAfterUser.zohoLeadId,
+                slot: slot,
+                meetingUrl: result.meetingUrl,
+                prospectName: leadData.nombre,
+                prospectEmail: leadData.email || leadData.correo,
+              }),
+              cache: "no-store",
+            }).catch(() => {})
+          }
         }
 
         const stateConfirmed = appendMessage(from, "assistant", confirmMsg)
@@ -638,7 +664,8 @@ async function processInboundMessages(payload: any, request: Request) {
       sanitized.telefono = formatPhone(from)
       sanitized.pais = inferCountry(from)
       stateAfterAssistant.lead = sanitized
-      await pushLeadToCrm(stateAfterAssistant)
+      const zohoLeadId = await pushLeadToCrm(stateAfterAssistant)
+      if (zohoLeadId) stateAfterAssistant.zohoLeadId = zohoLeadId
 
       // Si quiere agendar, buscar slots disponibles
       if (sanitized.reunion_agendada === true) {
