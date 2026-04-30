@@ -572,13 +572,49 @@ async function processInboundMessages(payload: any, request: Request) {
       }
     }
 
-    // Inyectar slots pendientes como contexto si existen (para confirmar selección)
+    // Detectar selección directa de slot desde el mensaje del usuario
     const pendingSlots = stateAfterUser.pendingSlots || []
+    if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
+      const slotIndex =
+        /\b1\b|primer[ao]|jueves|lunes|martes|miércoles|mi[eé]rcoles|viernes/.test(prompt) && pendingSlots[0] ? 1 :
+        /\b2\b|segund[ao]/.test(prompt) && pendingSlots[1] ? 2 :
+        /\b3\b|tercer[ao]/.test(prompt) && pendingSlots[2] ? 3 : null
+
+      if (slotIndex) {
+        const slot = pendingSlots[slotIndex - 1]
+        const leadData = stateAfterUser.lead || {}
+        const country = leadData.pais || inferCountry(from)
+        const result = await bookMeeting({
+          slotIso: slot,
+          prospectName: leadData.nombre || "Prospecto",
+          prospectEmail: leadData.email || leadData.correo || "",
+          timeZone: getTimezone(country),
+        })
+
+        const confirmMsg = result.success
+          ? `¡Perfecto! ✅ Reunión confirmada.\n\nRecibirás un email de confirmación en ${leadData.email || leadData.correo} con el enlace y todos los detalles.\n\n¡Nos vemos pronto! 😊`
+          : `Tuve un problema al agendar. Un ejecutivo te contactará a ${leadData.email || leadData.correo} para confirmar el horario.`
+
+        if (result.success) {
+          stateAfterUser.meetingBooked = true
+          stateAfterUser.meetingBookingId = result.bookingId
+          stateAfterUser.pendingSlots = []
+        }
+
+        const stateConfirmed = appendMessage(from, "assistant", confirmMsg)
+        await persistConversationSnapshot(stateConfirmed)
+        scheduleInactivityEvaluation(from)
+        await sendWhatsAppText(from, confirmMsg)
+        continue
+      }
+    }
+
+    // Inyectar slots pendientes como contexto si el usuario no seleccionó aún
     let extraContext: string | undefined
     if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
       const country = stateAfterUser.lead?.pais || inferCountry(from)
       const slotsText = formatSlotsForProspect(pendingSlots, country)
-      extraContext = `[SLOTS_DISPONIBLES — el prospecto ya los vio]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
+      extraContext = `[SLOTS_DISPONIBLES — ya presentados al prospecto]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
     }
 
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
