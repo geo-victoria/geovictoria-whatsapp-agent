@@ -544,6 +544,19 @@ async function processInboundMessages(payload: any, request: Request) {
 
     const stateAfterUser = appendMessage(from, "user", prompt)
 
+    // Si ya hay lead con reunion_agendada pero sin slots, buscarlos ahora
+    const existingLead = stateAfterUser.lead
+    if (
+      existingLead &&
+      existingLead.reunion_agendada === true &&
+      (!stateAfterUser.pendingSlots || stateAfterUser.pendingSlots.length === 0) &&
+      !stateAfterUser.meetingBooked
+    ) {
+      const country = existingLead.pais || inferCountry(from)
+      const slots = await getAvailableSlots(country)
+      stateAfterUser.pendingSlots = slots
+    }
+
     // Inyectar slots pendientes como contexto interno si existen
     const pendingSlots = stateAfterUser.pendingSlots || []
     let extraContext: string | undefined
