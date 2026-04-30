@@ -45,7 +45,9 @@ export async function POST(request: Request) {
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
 
+    const ownerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000000211701"
     const record = {
+      Owner: { id: ownerId },
       Event_Title: `Demo GeoVictoria — ${prospectName || "Prospecto"}`,
       Start_DateTime: startDate.toISOString().replace("Z", "+00:00"),
       End_DateTime: endDate.toISOString().replace("Z", "+00:00"),

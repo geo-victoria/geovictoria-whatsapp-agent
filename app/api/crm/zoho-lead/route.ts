@@ -104,7 +104,9 @@ export async function POST(request: Request) {
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
 
+    const ownerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000000211701"
     const record = {
+      Owner: { id: ownerId },
       First_Name: sanitize(names.firstName, 100),
       Last_Name: sanitize(names.lastName, 100) || "Prospecto",
       Company: sanitize(lead.empresa, 200) || "Prospecto WhatsApp",
