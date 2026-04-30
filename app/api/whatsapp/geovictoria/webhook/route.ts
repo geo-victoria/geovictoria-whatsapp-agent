@@ -563,7 +563,10 @@ async function processInboundMessages(payload: any, request: Request) {
 
       if (slots.length > 0) {
         const slotsText = formatSlotsForProspect(slots, country)
-        const slotReply = `Aquí tienes 3 opciones disponibles:\n\n${slotsText}\n\n¿Cuál te acomoda mejor? Responde con el número (1, 2 o 3).`
+        const lead = stateAfterUser.lead
+        const name = lead?.nombre?.split(" ")[0] || ""
+        const greeting = name ? `${name}, r` : "R"
+        const slotReply = `${greeting}evisé la agenda y tengo estas opciones disponibles:\n\n${slotsText}\n\n¿Cuál te viene mejor? Responde 1, 2 o 3 😊`
         const stateWithSlots = appendMessage(from, "assistant", slotReply)
         await persistConversationSnapshot(stateWithSlots)
         scheduleInactivityEvaluation(from)

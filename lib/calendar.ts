@@ -120,23 +120,41 @@ export async function getAvailableSlots(country: string): Promise<string[]> {
   return validSlots
 }
 
+const DAYS_ES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+const MONTHS_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+const DAYS_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+const DAYS_PT = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"]
+const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+function formatSlotLabel(isoTime: string, tz: string, language: string): string {
+  const date = new Date(isoTime)
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short", day: "numeric", month: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: false,
+  }).formatToParts(date)
+
+  const get = (type: string) => parts.find(p => p.type === type)?.value || ""
+  const dow = new Date(date.toLocaleString("en-US", { timeZone: tz })).getDay()
+  const month = parseInt(get("month")) - 1
+  const day = get("day")
+  const hour = get("hour").padStart(2, "0")
+  const min = get("minute")
+
+  if (language === "en") {
+    return `${DAYS_EN[dow]} ${MONTHS_EN[month]} ${day} at ${hour}:${min}`
+  }
+  if (language === "pt") {
+    return `${DAYS_PT[dow]}, ${day} de ${MONTHS_PT[month]} às ${hour}h${min !== "00" ? min : ""}`
+  }
+  return `${DAYS_ES[dow]} ${day} de ${MONTHS_ES[month]} a las ${hour}:${min} hrs`
+}
+
 export function formatSlotsForProspect(slots: string[], country: string, language = "es"): string {
   const tz = getTimezone(country)
-  const formatted = slots.map((isoTime, i) => {
-    const date = new Date(isoTime)
-    const options: Intl.DateTimeFormatOptions = {
-      timeZone: tz,
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      hour: "2-digit",
-      minute: "2-digit",
-    }
-    const locale = language === "pt" ? "pt-BR" : language === "en" ? "en-US" : "es-CL"
-    const label = date.toLocaleString(locale, options)
-    return `${i + 1}. ${label}`
-  })
-  return formatted.join("\n")
+  const bullets = ["•", "•", "•"]
+  return slots.map((isoTime, i) => `${bullets[i]} ${formatSlotLabel(isoTime, tz, language)}`).join("\n")
 }
 
 export async function bookMeeting(params: {
