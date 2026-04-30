@@ -668,11 +668,22 @@ async function processInboundMessages(payload: any, request: Request) {
       const zohoLeadId = await pushLeadToCrm(stateAfterAssistant)
       if (zohoLeadId) stateAfterAssistant.zohoLeadId = zohoLeadId
 
-      // Si quiere agendar, buscar slots disponibles
-      if (sanitized.reunion_agendada === true) {
-        const country = sanitized.pais || inferCountry(from)
-        const slots = await getAvailableSlots(country)
-        stateAfterAssistant.pendingSlots = slots
+      // Siempre buscar slots al capturar lead — mostrarlos proactivamente
+      const country = sanitized.pais || inferCountry(from)
+      const slots = await getAvailableSlots(country)
+      stateAfterAssistant.pendingSlots = slots
+
+      // Enviar slots proactivamente en mensaje separado
+      if (slots.length > 0) {
+        const name = sanitized.nombre?.split(" ")[0] || ""
+        const greeting = name ? `${name}, r` : "R"
+        const slotsText = formatSlotsForProspect(slots, country)
+        const slotMsg = `${greeting}evisé la agenda y tengo estas opciones disponibles:\n\n${slotsText}\n\n¿Cuál te viene mejor? Responde 1, 2 o 3 😊`
+        const stateWithSlots = appendMessage(from, "assistant", slotMsg)
+        await persistConversationSnapshot(stateWithSlots)
+        await sendWhatsAppText(from, slotMsg)
+        scheduleInactivityEvaluation(from)
+        return NextResponse.json({ success: true })
       }
     }
 
