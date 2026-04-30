@@ -557,9 +557,10 @@ async function processInboundMessages(payload: any, request: Request) {
     const existingLead = stateAfterUser.lead
     const wantsSlots = /horario|agenda|agendar|slot|reuni[oó]n|disponib|fecha|cu[aá]ndo/i.test(prompt)
 
+    const hasLeadData = !!(existingLead?.email || existingLead?.correo)
     if (
       existingLead &&
-      existingLead.reunion_agendada === true &&
+      hasLeadData &&
       !stateAfterUser.meetingBooked &&
       wantsSlots
     ) {
