@@ -402,7 +402,7 @@ async function pushEvaluation(state: ConversationState, evaluation: EvaluationRe
   })
 }
 
-async function callVicSalesAgent(request: Request, messages: ConversationMessage[], lead?: LeadData, extraContext?: string) {
+async function callVicSalesAgent(request: Request, messages: ConversationMessage[], lead?: LeadData, extraContext?: string, contact?: string) {
   const endpoint = new URL("/api/vic-sales-agent", request.url)
 
   const leadFields = lead ? Object.entries({
@@ -432,7 +432,7 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ messages: messagesWithContext }),
+    body: JSON.stringify({ messages: messagesWithContext, contact, lead }),
     cache: "no-store",
   })
 
@@ -657,7 +657,7 @@ async function processInboundMessages(payload: any, request: Request) {
 
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
     try {
-      rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext)
+      rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext, from)
     } catch {
       // error interno — no exponer al usuario
     }

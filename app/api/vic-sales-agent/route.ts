@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { createConversationTrace, traceGeneration } from "@/lib/langfuse"
 
 const MAX_INPUT_CHARS = 2000
 
@@ -151,7 +152,11 @@ async function callOpenAI(messages: { role: "user" | "assistant"; content: strin
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { messages?: InputMessage[] }
+    const body = (await request.json()) as {
+      messages?: InputMessage[]
+      contact?: string
+      lead?: Record<string, unknown>
+    }
 
     const lastUserMessage = (body.messages || []).findLast((m) => m?.role === "user")
     if (lastUserMessage?.content && lastUserMessage.content.length > MAX_INPUT_CHARS) {
@@ -166,8 +171,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, message: GENERIC_ERROR })
     }
 
+    const startTime = new Date()
+    const { trace, lf } = createConversationTrace({
+      contact: body.contact || "unknown",
+      lead: body.lead,
+    })
+
     let content = await callAnthropic(messages)
     if (!content) content = await callOpenAI(messages)
+
+    // Trazar la generación en Langfuse
+    if (trace && lf && content) {
+      const model = (process.env.ANTHROPIC_SALES_AGENT_MODEL || "claude-haiku-4-5-20251001").trim()
+      await traceGeneration({
+        trace, lf,
+        name: "vicky-response",
+        model,
+        input: messages,
+        output: content,
+        startTime,
+        metadata: { turn: messages.length / 2 },
+      })
+    }
 
     return NextResponse.json({
       success: true,
