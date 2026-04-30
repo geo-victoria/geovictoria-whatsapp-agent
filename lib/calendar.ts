@@ -76,8 +76,8 @@ export async function getAvailableSlots(country: string): Promise<string[]> {
   const tz = getTimezone(country)
 
   const now = new Date()
-  // Min start: 3 business hours from now (approx 3h)
-  const minStart = new Date(now.getTime() + 3 * 60 * 60 * 1000)
+  // Min start: 25h from now — ensures slots are always bookable by Cal.com
+  const minStart = new Date(now.getTime() + 25 * 60 * 60 * 1000)
   const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) // 2 weeks ahead
 
   const year = now.getFullYear()
