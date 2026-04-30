@@ -43,6 +43,10 @@ export type ConversationState = {
   lead?: LeadData
   lastEvaluationAt?: string
   lastEvaluation?: EvaluationResult
+  zohoLeadId?: string
+  meetingBooked?: boolean
+  meetingBookingId?: string
+  pendingSlots?: string[]
 }
 
 function getEnv(name: string) {
@@ -105,6 +109,9 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     lead: state.lead || null,
     last_evaluation_at: state.lastEvaluationAt || null,
     last_evaluation: state.lastEvaluation || null,
+    zoho_lead_id: state.zohoLeadId || null,
+    meeting_booked: state.meetingBooked || false,
+    meeting_booking_id: state.meetingBookingId || null,
   }
 
   const upsertResult = (await supabaseRequest("vic_conversations?on_conflict=contact", {
@@ -228,7 +235,7 @@ export async function fetchConversations(contact?: string): Promise<Conversation
         }>
       | null
 
-    const one = rows?.[0]
+    const one = rows?.[0] as any
     if (!one) return null
 
     const msgRows = (await supabaseRequest(
@@ -245,6 +252,9 @@ export async function fetchConversations(contact?: string): Promise<Conversation
       lead: one.lead || undefined,
       lastEvaluationAt: one.last_evaluation_at || undefined,
       lastEvaluation: one.last_evaluation || undefined,
+      zohoLeadId: one.zoho_lead_id || undefined,
+      meetingBooked: one.meeting_booked || undefined,
+      meetingBookingId: one.meeting_booking_id || undefined,
     }
   }
 

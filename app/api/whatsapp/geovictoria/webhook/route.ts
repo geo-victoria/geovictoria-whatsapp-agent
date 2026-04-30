@@ -613,16 +613,26 @@ async function processInboundMessages(payload: any, request: Request) {
 
           // Crear Meeting en Zoho CRM vinculado al lead
           const zohoMeetingUrl = getEnv("CRM_LEAD_WEBHOOK_URL").replace("/zoho-lead", "/zoho-meeting")
-          if (zohoMeetingUrl && stateAfterUser.zohoLeadId) {
+          const zohoLeadId = stateAfterUser.zohoLeadId
+          if (zohoMeetingUrl && zohoLeadId) {
+            const country = leadData.pais || inferCountry(from)
             fetch(zohoMeetingUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                leadId: stateAfterUser.zohoLeadId,
-                slot: slot,
+                leadId: zohoLeadId,
+                slot,
+                slotEnd: new Date(new Date(slot).getTime() + 45 * 60 * 1000).toISOString(),
                 meetingUrl: result.meetingUrl,
                 prospectName: leadData.nombre,
                 prospectEmail: leadData.email || leadData.correo,
+                prospectTimezone: getTimezone(country),
+                hostName: "Rodrigo Lewit",
+                hostEmail: "rlewit@geovictoria.com",
+                hostTimezone: "America/Santiago",
+                empresa: leadData.empresa,
+                trabajadores: leadData.trabajadores,
+                necesidad: leadData.necesidad,
               }),
               cache: "no-store",
             }).catch(() => {})

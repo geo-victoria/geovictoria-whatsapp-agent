@@ -3,9 +3,17 @@ import { NextResponse } from "next/server"
 type MeetingPayload = {
   leadId?: string
   slot?: string
+  slotEnd?: string
   meetingUrl?: string
   prospectName?: string
   prospectEmail?: string
+  prospectTimezone?: string
+  hostName?: string
+  hostEmail?: string
+  hostTimezone?: string
+  empresa?: string
+  trabajadores?: string
+  necesidad?: string
 }
 
 function getEnv(name: string) {
@@ -33,32 +41,63 @@ async function getZohoAccessToken() {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as MeetingPayload
-    const { leadId, slot, meetingUrl, prospectName, prospectEmail } = body
+    const {
+      leadId, slot, slotEnd, meetingUrl,
+      prospectName, prospectEmail, prospectTimezone,
+      hostName, hostEmail, hostTimezone,
+      empresa, trabajadores, necesidad,
+    } = body
 
     if (!leadId || !slot) {
       return NextResponse.json({ success: false, error: "leadId y slot requeridos" }, { status: 400 })
     }
 
     const startDate = new Date(slot)
-    const endDate = new Date(startDate.getTime() + 45 * 60 * 1000)
+    const endDate = slotEnd ? new Date(slotEnd) : new Date(startDate.getTime() + 45 * 60 * 1000)
+    const tz = prospectTimezone || "America/Santiago"
+
+    const fmt = (d: Date) => d.toLocaleString("es-CL", {
+      timeZone: tz, weekday: "long", day: "numeric",
+      month: "long", year: "numeric", hour: "2-digit", minute: "2-digit",
+    })
+
+    const description = [
+      "Reunión agendada automáticamente vía WhatsApp por Vicky (GeoVictoria)\n",
+      "═══ HOST ═══",
+      hostName || "Ejecutivo GeoVictoria",
+      hostEmail || "",
+      hostTimezone ? `Zona horaria: ${hostTimezone}` : "",
+      "",
+      "═══ ASISTENTE (PROSPECTO) ═══",
+      prospectName || "Prospecto",
+      prospectEmail || "",
+      empresa ? `Empresa: ${empresa}` : "",
+      trabajadores ? `Trabajadores: ${trabajadores}` : "",
+      necesidad ? `Necesidad: ${necesidad}` : "",
+      `Zona horaria: ${tz}`,
+      "",
+      "═══ FECHA Y HORA ═══",
+      `Inicio: ${fmt(startDate)}`,
+      `Fin:    ${fmt(endDate)}`,
+      "",
+      "═══ LINK REUNIÓN ═══",
+      meetingUrl || "(sin link)",
+    ].filter((l) => l !== undefined).join("\n")
 
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
-
     const ownerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000000211701"
+
     const record = {
       Owner: { id: ownerId },
-      Event_Title: `Demo GeoVictoria — ${prospectName || "Prospecto"}`,
+      Event_Title: `Demo GeoVictoria — ${prospectName || "Prospecto"}${empresa ? ` (${empresa})` : ""}`,
       Start_DateTime: startDate.toISOString().replace("Z", "+00:00"),
       End_DateTime: endDate.toISOString().replace("Z", "+00:00"),
-      Description: [
-        `Reunión agendada automáticamente vía WhatsApp por Vicky.`,
-        meetingUrl ? `Link videollamada: ${meetingUrl}` : "",
-        prospectEmail ? `Email prospecto: ${prospectEmail}` : "",
-      ].filter(Boolean).join("\n"),
+      Description: description,
       What_Id: leadId,
+      "$se_module": "Leads",
       Status: "Not Started",
-      Venue: meetingUrl || "",
+      Venue: meetingUrl ? "Microsoft Teams" : "",
     }
 
     const res = await fetch(`${apiDomain}/crm/v2/Events`, {
@@ -67,16 +106,16 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
         Authorization: `Zoho-oauthtoken ${accessToken}`,
       },
-      body: JSON.stringify({ data: [record], trigger: ["workflow"] }),
+      body: JSON.stringify({ data: [record] }),
       cache: "no-store",
     })
 
     const data = await res.json()
-    const status = data?.data?.[0]?.status || ""
+    const status = data?.data?.[0]?.code || data?.data?.[0]?.status || ""
     const eventId = data?.data?.[0]?.details?.id || null
 
     return NextResponse.json({
-      success: res.ok && status === "success",
+      success: status === "SUCCESS" || status === "success",
       eventId,
       zohoStatus: status,
     })
