@@ -3,7 +3,7 @@ const CAL_EVENT_TYPE_ID = (process.env.CAL_EVENT_TYPE_ID || "5538437").trim()
 const CAL_BASE = "https://api.cal.com/v2"
 const CAL_HEADERS = {
   Authorization: `Bearer ${CAL_API_KEY}`,
-  "cal-api-version": "2024-06-14",
+  "cal-api-version": "2024-08-13",
   "Content-Type": "application/json",
 }
 
