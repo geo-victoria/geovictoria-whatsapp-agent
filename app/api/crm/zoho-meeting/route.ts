@@ -88,6 +88,13 @@ export async function POST(request: Request) {
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const ownerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000000211701"
 
+    const participants: { participant: string; type: string }[] = [
+      { participant: ownerId, type: "user" },
+    ]
+    if (leadId) {
+      participants.push({ participant: leadId, type: "lead" })
+    }
+
     const record = {
       Owner: { id: ownerId },
       Event_Title: `Demo GeoVictoria — ${prospectName || "Prospecto"}${empresa ? ` (${empresa})` : ""}`,
@@ -98,6 +105,7 @@ export async function POST(request: Request) {
       "$se_module": "Leads",
       Status: "Not Started",
       Venue: meetingUrl ? "Microsoft Teams" : "",
+      Participants: participants,
     }
 
     const res = await fetch(`${apiDomain}/crm/v2/Events`, {
