@@ -544,26 +544,41 @@ async function processInboundMessages(payload: any, request: Request) {
 
     const stateAfterUser = appendMessage(from, "user", prompt)
 
-    // Si ya hay lead con reunion_agendada pero sin slots, buscarlos ahora
+    // Si hay lead con reunion_agendada y piden horarios → mostrar slots directamente sin LLM
     const existingLead = stateAfterUser.lead
+    const wantsSlots = /horario|agenda|agendar|slot|reuni[oó]n|disponib|fecha|cu[aá]ndo/i.test(prompt)
+
     if (
       existingLead &&
       existingLead.reunion_agendada === true &&
-      (!stateAfterUser.pendingSlots || stateAfterUser.pendingSlots.length === 0) &&
-      !stateAfterUser.meetingBooked
+      !stateAfterUser.meetingBooked &&
+      wantsSlots
     ) {
       const country = existingLead.pais || inferCountry(from)
-      const slots = await getAvailableSlots(country)
-      stateAfterUser.pendingSlots = slots
+      let slots = stateAfterUser.pendingSlots || []
+      if (slots.length === 0) {
+        slots = await getAvailableSlots(country)
+        stateAfterUser.pendingSlots = slots
+      }
+
+      if (slots.length > 0) {
+        const slotsText = formatSlotsForProspect(slots, country)
+        const slotReply = `Aquí tienes 3 opciones disponibles:\n\n${slotsText}\n\n¿Cuál te acomoda mejor? Responde con el número (1, 2 o 3).`
+        const stateWithSlots = appendMessage(from, "assistant", slotReply)
+        await persistConversationSnapshot(stateWithSlots)
+        scheduleInactivityEvaluation(from)
+        await sendWhatsAppText(from, slotReply)
+        continue
+      }
     }
 
-    // Inyectar slots pendientes como contexto interno si existen
+    // Inyectar slots pendientes como contexto si existen (para confirmar selección)
     const pendingSlots = stateAfterUser.pendingSlots || []
     let extraContext: string | undefined
     if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
       const country = stateAfterUser.lead?.pais || inferCountry(from)
       const slotsText = formatSlotsForProspect(pendingSlots, country)
-      extraContext = `[SLOTS_DISPONIBLES]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
+      extraContext = `[SLOTS_DISPONIBLES — el prospecto ya los vio]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
     }
 
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
@@ -573,7 +588,7 @@ async function processInboundMessages(payload: any, request: Request) {
       // error interno — no exponer al usuario
     }
 
-    // Extraer marcadores de lead y de slot en paralelo
+    // Extraer marcadores de lead y de slot
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
     const { cleanReply, slotConfirmed, slotCustom } = extractSlotMarker(afterLead)
     const finalReply = cleanReply || "Gracias por escribir."
