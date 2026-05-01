@@ -523,6 +523,7 @@ export async function GET(request: Request) {
 
 async function processInboundMessages(payload: any, request: Request) {
   const inboundMessages = extractInboundMessages(payload)
+  console.log("[vic] inbound count:", inboundMessages.length, "| payload keys:", Object.keys(payload?.entry?.[0]?.changes?.[0]?.value || {}).join(","))
 
   for (const incoming of inboundMessages) {
     const from = (incoming.from || "").trim()
