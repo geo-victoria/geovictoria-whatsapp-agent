@@ -556,14 +556,6 @@ async function processInboundMessages(payload: any, request: Request) {
       if (saved) conversations.set(from, saved)
     }
 
-    const stateBefore = getConversation(from)
-    if (minutesSince(stateBefore.lastUserAt) >= INACTIVITY_MINUTES && stateBefore.messages.length > 0) {
-      const evalBefore = await evaluateConversation(stateBefore)
-      stateBefore.lastEvaluationAt = isoNow()
-      stateBefore.lastEvaluation = evalBefore
-      await pushEvaluation(stateBefore, evalBefore)
-    }
-
     const stateAfterUser = appendMessage(from, "user", prompt)
 
     // Si hay lead con reunion_agendada y piden horarios → mostrar slots directamente sin LLM
