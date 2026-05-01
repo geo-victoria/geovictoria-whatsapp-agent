@@ -737,8 +737,10 @@ async function processInboundMessages(payload: any, request: Request) {
 
     await persistConversationSnapshot(stateAfterAssistant)
     scheduleInactivityEvaluation(from)
+    console.log("[vic] sending to:", from, "| reply:", finalReply.slice(0, 80))
     try {
       await sendWhatsAppText(from, finalReply)
+      console.log("[vic] sent OK to:", from)
     } catch (err) {
       console.error("[vic] sendWhatsAppText failed:", err instanceof Error ? err.message : String(err))
     }
