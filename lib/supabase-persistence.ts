@@ -110,6 +110,9 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     lead: state.lead || null,
     last_evaluation_at: state.lastEvaluationAt || null,
     last_evaluation: state.lastEvaluation || null,
+    zoho_lead_id: state.zohoLeadId || null,
+    meeting_booked: state.meetingBooked || false,
+    meeting_booking_id: state.meetingBookingId || null,
   }
 
   const upsertResult = (await supabaseRequest("vic_conversations?on_conflict=contact", {
@@ -180,7 +183,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
   if (!isSupabaseConfigured()) return null
 
   const rows = (await supabaseRequest(
-    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation&contact=eq.${encodeURIComponent(contact)}&limit=1`,
+    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,zoho_lead_id,meeting_booked,meeting_booking_id&contact=eq.${encodeURIComponent(contact)}&limit=1`,
     { method: "GET" },
   )) as Array<{
     id: string
@@ -191,6 +194,9 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     lead: LeadData | null
     last_evaluation_at: string | null
     last_evaluation: EvaluationResult | null
+    zoho_lead_id: string | null
+    meeting_booked: boolean | null
+    meeting_booking_id: string | null
   }> | null
 
   const one = rows?.[0]
@@ -210,6 +216,9 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     lead: one.lead || undefined,
     lastEvaluationAt: one.last_evaluation_at || undefined,
     lastEvaluation: one.last_evaluation || undefined,
+    zohoLeadId: one.zoho_lead_id || undefined,
+    meetingBooked: one.meeting_booked || undefined,
+    meetingBookingId: one.meeting_booking_id || undefined,
   }
 }
 
