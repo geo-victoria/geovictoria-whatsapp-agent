@@ -551,10 +551,12 @@ async function processInboundMessages(payload: any, request: Request) {
       continue
     }
 
+    console.log("[vic] step1: loading state for", from)
     if (!conversations.has(from)) {
       const saved = await fetchConversationByContact(from)
       if (saved) conversations.set(from, saved)
     }
+    console.log("[vic] step2: state loaded, meetingBooked:", conversations.get(from)?.meetingBooked)
 
     const stateAfterUser = appendMessage(from, "user", prompt)
 
@@ -661,12 +663,14 @@ async function processInboundMessages(payload: any, request: Request) {
       extraContext = `[SLOTS_DISPONIBLES — ya presentados al prospecto]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
     }
 
+    console.log("[vic] step3: calling LLM")
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
     try {
       rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext, from)
-    } catch {
-      // error interno — no exponer al usuario
+    } catch (e) {
+      console.error("[vic] callVicSalesAgent error:", e instanceof Error ? e.message : String(e))
     }
+    console.log("[vic] step4: LLM replied, length:", rawReply.length)
 
     // Extraer marcadores de lead y de slot
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
