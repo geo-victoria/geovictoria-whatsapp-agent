@@ -133,24 +133,26 @@ async function runConversation(persona) {
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     // Cliente genera su próximo mensaje
+    const historial = messages.length === 0
+      ? ""
+      : "\n\nConversación hasta ahora:\n" + messages.map((m) => `${m.role === "user" ? "TÚ" : "AGENTE"}: ${m.content}`).join("\n\n")
     const clientMsg = await callClaude(
-      `${persona.instrucciones}\n\nResponde SOLO con tu próximo mensaje al agente (sin explicaciones). Máximo 2 oraciones. Si ya completaste tu objetivo o llevas más de 8 turnos sin progreso, responde exactamente: [FIN]`,
-      messages.length === 0
-        ? [{ role: "user", content: "Inicia la conversación con un saludo breve." }]
-        : messages,
+      `${persona.instrucciones}${historial}\n\nResponde SOLO con tu próximo mensaje al agente (sin explicaciones ni encabezados). Máximo 2 oraciones. Si ya completaste tu objetivo o llevas más de 8 turnos sin progreso, responde exactamente: [FIN]`,
+      [{ role: "user", content: messages.length === 0 ? "Inicia la conversación con un saludo breve." : "¿Qué dices ahora?" }],
       "claude-haiku-4-5-20251001",
       150
     )
 
     if (clientMsg.includes("[FIN]")) break
+    if (!clientMsg.trim()) break
 
-    messages.push({ role: "user", content: clientMsg })
+    messages.push({ role: "user", content: clientMsg.trim() })
 
     // Vicky responde
     const vickyMsg = await callVicky(messages)
-    const cleanVicky = vickyMsg.replace(/LEAD_CAPTURED:\{.*?\}/s, "").trim()
+    const cleanVicky = vickyMsg.replace(/LEAD_CAPTURED:\{.*?\}/s, "").replace(/SLOT_CONFIRMED:\d/g, "").replace(/SLOT_CUSTOM:[^\n]+/g, "").trim()
 
-    messages.push({ role: "assistant", content: cleanVicky })
+    messages.push({ role: "assistant", content: cleanVicky || "..." })
 
     if (vickyMsg.includes("LEAD_CAPTURED:")) leadCaptured = true
 
