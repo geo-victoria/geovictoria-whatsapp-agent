@@ -186,10 +186,10 @@ export async function POST(request: Request) {
     let content = await callAnthropic(messages)
     if (!content) content = await callOpenAI(messages)
 
-    // Trazar la generación en Langfuse
+    // Trazar en Langfuse sin bloquear la respuesta
     if (trace && lf && content) {
       const model = (process.env.ANTHROPIC_SALES_AGENT_MODEL || "claude-haiku-4-5-20251001").trim()
-      await traceGeneration({
+      traceGeneration({
         trace, lf,
         name: "vicky-response",
         model,
@@ -197,7 +197,7 @@ export async function POST(request: Request) {
         output: content,
         startTime,
         metadata: { turn: messages.length / 2 },
-      })
+      }).catch(() => {})
     }
 
     return NextResponse.json({
