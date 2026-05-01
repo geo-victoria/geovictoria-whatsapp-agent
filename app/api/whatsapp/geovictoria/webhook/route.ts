@@ -553,8 +553,15 @@ async function processInboundMessages(payload: any, request: Request) {
 
     console.log("[vic] step1: loading state for", from)
     if (!conversations.has(from)) {
-      const saved = await fetchConversationByContact(from)
-      if (saved) conversations.set(from, saved)
+      try {
+        const saved = await Promise.race([
+          fetchConversationByContact(from),
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error("supabase_timeout")), 4000)),
+        ])
+        if (saved) conversations.set(from, saved)
+      } catch (err) {
+        console.error("[vic] fetchConversation error:", err instanceof Error ? err.message : String(err))
+      }
     }
     console.log("[vic] step2: state loaded, meetingBooked:", conversations.get(from)?.meetingBooked)
 
