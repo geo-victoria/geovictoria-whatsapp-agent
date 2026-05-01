@@ -523,7 +523,6 @@ export async function GET(request: Request) {
 
 async function processInboundMessages(payload: any, request: Request) {
   const inboundMessages = extractInboundMessages(payload)
-  console.log("[vic] inbound count:", inboundMessages.length, "| payload keys:", Object.keys(payload?.entry?.[0]?.changes?.[0]?.value || {}).join(","))
 
   for (const incoming of inboundMessages) {
     const from = (incoming.from || "").trim()
@@ -551,7 +550,6 @@ async function processInboundMessages(payload: any, request: Request) {
       continue
     }
 
-    console.log("[vic] step1: loading state for", from)
     if (!conversations.has(from)) {
       try {
         const saved = await Promise.race([
@@ -559,11 +557,10 @@ async function processInboundMessages(payload: any, request: Request) {
           new Promise<null>((_, reject) => setTimeout(() => reject(new Error("supabase_timeout")), 4000)),
         ])
         if (saved) conversations.set(from, saved)
-      } catch (err) {
-        console.error("[vic] fetchConversation error:", err instanceof Error ? err.message : String(err))
+      } catch {
+        // continuar sin historial si Supabase no responde
       }
     }
-    console.log("[vic] step2: state loaded, meetingBooked:", conversations.get(from)?.meetingBooked)
 
     const stateAfterUser = appendMessage(from, "user", prompt)
 
@@ -670,14 +667,12 @@ async function processInboundMessages(payload: any, request: Request) {
       extraContext = `[SLOTS_DISPONIBLES — ya presentados al prospecto]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
     }
 
-    console.log("[vic] step3: calling LLM")
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
     try {
       rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext, from)
-    } catch (e) {
-      console.error("[vic] callVicSalesAgent error:", e instanceof Error ? e.message : String(e))
+    } catch {
+      // error interno — no exponer al usuario
     }
-    console.log("[vic] step4: LLM replied, length:", rawReply.length)
 
     // Extraer marcadores de lead y de slot
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
@@ -741,12 +736,10 @@ async function processInboundMessages(payload: any, request: Request) {
 
     await persistConversationSnapshot(stateAfterAssistant)
     scheduleInactivityEvaluation(from)
-    console.log("[vic] sending to:", from, "| reply:", finalReply.slice(0, 80))
     try {
       await sendWhatsAppText(from, finalReply)
-      console.log("[vic] sent OK to:", from)
-    } catch (err) {
-      console.error("[vic] sendWhatsAppText failed:", err instanceof Error ? err.message : String(err))
+    } catch {
+      // fallo silencioso — Meta reintentará
     }
   }
 }
