@@ -420,12 +420,12 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
   }
 
   if (lead?.meetingSlot) {
-    const slotDate = new Date(lead.meetingSlot)
-    const slotFormatted = slotDate.toLocaleString("es-CL", {
-      timeZone: "America/Santiago",
-      weekday: "long", day: "numeric", month: "long",
-      hour: "2-digit", minute: "2-digit",
-    })
+    let slotFormatted = lead.meetingSlot
+    try {
+      const d = new Date(lead.meetingSlot)
+      const pad = (n: number) => String(n).padStart(2, "0")
+      slotFormatted = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`
+    } catch { /* mantener el ISO original si falla */ }
     contextParts.push({ role: "user", content: `[REUNION_CONFIRMADA] Este prospecto ya tiene una reunión agendada para el ${slotFormatted}. NO ofrecer ni agendar una nueva reunión. Si pregunta sobre su reunión, confirmar la fecha. Si quiere reagendar, indicar que puede hacerlo respondiendo con el nuevo horario preferido.` })
     contextParts.push({ role: "assistant", content: "Entendido, la reunión ya está confirmada." })
   }
