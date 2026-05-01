@@ -33,6 +33,7 @@ type LeadData = {
   reunion_agendada?: boolean | string
   agendar_reunion?: string
   preferencia_horario?: string
+  meetingSlot?: string
 }
 
 type ConversationState = {
@@ -417,6 +418,17 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
     contextParts.push({ role: "user", content: `[CONTEXTO INTERNO — NO MENCIONAR AL USUARIO] Datos ya capturados: ${leadFields}. NO volver a pedir estos datos.` })
     contextParts.push({ role: "assistant", content: "Entendido, tengo esos datos registrados." })
   }
+
+  if (lead?.meetingSlot) {
+    const slotDate = new Date(lead.meetingSlot)
+    const slotFormatted = slotDate.toLocaleString("es-CL", {
+      timeZone: "America/Santiago",
+      weekday: "long", day: "numeric", month: "long",
+      hour: "2-digit", minute: "2-digit",
+    })
+    contextParts.push({ role: "user", content: `[REUNION_CONFIRMADA] Este prospecto ya tiene una reunión agendada para el ${slotFormatted}. NO ofrecer ni agendar una nueva reunión. Si pregunta sobre su reunión, confirmar la fecha. Si quiere reagendar, indicar que puede hacerlo respondiendo con el nuevo horario preferido.` })
+    contextParts.push({ role: "assistant", content: "Entendido, la reunión ya está confirmada." })
+  }
   if (extraContext) {
     contextParts.push({ role: "user", content: extraContext })
     contextParts.push({ role: "assistant", content: "Entendido." })
@@ -610,6 +622,7 @@ async function processInboundMessages(payload: any, request: Request) {
           stateAfterUser.meetingBooked = true
           stateAfterUser.meetingBookingId = result.bookingId
           stateAfterUser.pendingSlots = []
+          if (stateAfterUser.lead) stateAfterUser.lead.meetingSlot = slot
 
           // Crear Meeting en Zoho CRM vinculado al lead
           const zohoMeetingUrl = getEnv("CRM_LEAD_WEBHOOK_URL").replace("/zoho-lead", "/zoho-meeting")
@@ -713,6 +726,7 @@ async function processInboundMessages(payload: any, request: Request) {
         stateAfterAssistant.meetingBooked = true
         stateAfterAssistant.meetingBookingId = result.bookingId
         stateAfterAssistant.pendingSlots = []
+        if (stateAfterAssistant.lead) stateAfterAssistant.lead.meetingSlot = slot
       }
     }
 

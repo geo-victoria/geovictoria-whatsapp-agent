@@ -39,6 +39,8 @@ REGLAS OBLIGATORIAS
    e) Confirma día/hora
    f) Cierra con confirmación cálida
 
+8. REUNIÓN YA CONFIRMADA: Si el contexto interno indica [REUNION_CONFIRMADA], NO ofrezcas ni agendes una nueva reunión. Confirma la fecha existente si el prospecto pregunta. Si quiere reagendar, responde SOLO: "Claro, ¿qué día y hora te vendría mejor?" y captura su preferencia.
+
 ═══════════════════════════════════════
 SEÑAL DE LEAD COMPLETO
 ═══════════════════════════════════════
