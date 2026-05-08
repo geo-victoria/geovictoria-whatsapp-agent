@@ -25,6 +25,17 @@
     "fbclid",      // Facebook Click ID (por si se usa Meta Ads también)
   ];
 
+  function inferOrganicSource() {
+    const ref = document.referrer || "";
+    if (!ref) return { utm_source: "direct", utm_medium: "direct" };
+    if (/google\./i.test(ref))  return { utm_source: "google",   utm_medium: "organic" };
+    if (/bing\./i.test(ref))    return { utm_source: "bing",     utm_medium: "organic" };
+    if (/yahoo\./i.test(ref))   return { utm_source: "yahoo",    utm_medium: "organic" };
+    if (/linkedin\./i.test(ref)) return { utm_source: "linkedin", utm_medium: "social" };
+    if (/facebook\.|instagram\.|fb\.com/i.test(ref)) return { utm_source: "facebook", utm_medium: "social" };
+    return { utm_source: "referral", utm_medium: "referral", utm_content: ref.split("/")[2] };
+  }
+
   function getUTMData() {
     const params = new URLSearchParams(window.location.search);
     const data = {};
@@ -41,12 +52,17 @@
       } catch (_) {}
     }
 
-    // Recuperar si no hay UTMs en la URL actual pero sí en sesión previa
+    // Recuperar si no hay UTMs en la URL actual pero sí en sesión previa (ej: llegó a home y navegó)
     if (Object.keys(data).length === 0) {
       try {
         const stored = sessionStorage.getItem("vicky_utm");
         if (stored) return JSON.parse(stored);
       } catch (_) {}
+    }
+
+    // Si tampoco hay en sesión, inferir desde referrer (tráfico orgánico / directo)
+    if (Object.keys(data).length === 0) {
+      return inferOrganicSource();
     }
 
     return data;
