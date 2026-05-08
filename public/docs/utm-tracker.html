@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vicky UTM Tracker — Guía de integración | GeoVictoria</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #1a1a2e; line-height: 1.6; }
+    .header { background: #1A3A5C; color: white; padding: 40px 0; }
+    .header-inner { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+    .header h1 { font-size: 28px; font-weight: 700; }
+    .header p { margin-top: 8px; opacity: 0.8; font-size: 15px; }
+    .badge { display: inline-block; background: #27AE60; color: white; font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 20px; margin-left: 10px; vertical-align: middle; }
+    .container { max-width: 860px; margin: 0 auto; padding: 40px 24px; }
+    .section { background: white; border-radius: 12px; padding: 32px; margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    h2 { font-size: 20px; color: #1A3A5C; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    h3 { font-size: 15px; font-weight: 600; margin: 20px 0 8px; color: #2c3e50; }
+    p { color: #555; margin-bottom: 12px; font-size: 15px; }
+    .step-num { background: #1A3A5C; color: white; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+    .step { display: flex; gap: 16px; margin-bottom: 24px; align-items: flex-start; }
+    .step-content { flex: 1; }
+    .step-content p { margin-bottom: 8px; }
+    pre { background: #1e2a38; color: #e8f4f8; padding: 20px; border-radius: 8px; font-size: 13px; overflow-x: auto; margin: 12px 0; line-height: 1.7; }
+    code { background: #eef2f7; color: #c0392b; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'SF Mono', Consolas, monospace; }
+    pre code { background: none; color: inherit; padding: 0; }
+    .highlight { background: #fff3cd; border-left: 4px solid #f0ad4e; padding: 14px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px; }
+    .success { background: #d4edda; border-left: 4px solid #27AE60; padding: 14px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0; }
+    th { background: #1A3A5C; color: white; padding: 10px 14px; text-align: left; font-weight: 600; }
+    td { padding: 10px 14px; border-bottom: 1px solid #eee; }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) td { background: #f8f9fa; }
+    .tag { display: inline-block; background: #EBF5FB; color: #2E86C1; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+    .tag.green { background: #D5F5E3; color: #1A6B3C; }
+    .tag.red { background: #FADBD8; color: #c0392b; }
+    .url-box { background: #EBF5FB; border: 1px solid #AED6F1; border-radius: 8px; padding: 14px 18px; font-family: monospace; font-size: 14px; color: #1A3A5C; word-break: break-all; margin: 12px 0; }
+    .url-box a { color: #2E86C1; text-decoration: none; }
+    .url-box a:hover { text-decoration: underline; }
+    footer { text-align: center; padding: 32px 24px; color: #aaa; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <h1>Vicky UTM Tracker <span class="badge">v1.0</span></h1>
+    <p>Guía de integración para el equipo web de GeoVictoria — Atribución de leads desde WhatsApp</p>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- QUÉ HACE -->
+  <div class="section">
+    <h2>¿Qué hace este script?</h2>
+    <p>Cuando un visitante llega a <strong>geovictoria.com</strong> desde un anuncio de Google Ads (o cualquier otro origen) y hace clic en el botón de WhatsApp para hablar con Vicky, el script captura automáticamente:</p>
+    <ul style="padding-left:20px; color:#555; font-size:15px; margin-bottom:12px;">
+      <li style="margin-bottom:6px;"><strong>GCLID</strong> — ID de clic de Google Ads (clave para atribución server-to-server)</li>
+      <li style="margin-bottom:6px;"><strong>UTMs</strong> — utm_source, utm_medium, utm_campaign, utm_content, utm_term</li>
+      <li style="margin-bottom:6px;"><strong>Fuente orgánica</strong> — infiere Google/Bing/LinkedIn/directo si no hay UTMs</li>
+      <li style="margin-bottom:6px;"><strong>Landing Page</strong> — URL de la página de origen</li>
+    </ul>
+    <p>Esos datos viajan con el prospecto hasta Zoho CRM, donde quedan registrados en los campos de Marketing del lead.</p>
+    <div class="success">✅ <strong>No requiere modificar el código del botón de WhatsApp.</strong> El script lo detecta automáticamente.</div>
+  </div>
+
+  <!-- INSTALACIÓN -->
+  <div class="section">
+    <h2>⚡ Instalación — 1 línea de código</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <p>Agregar <strong>antes del <code>&lt;/body&gt;</code></strong> en todas las páginas que tengan botón de WhatsApp:</p>
+        <pre><code>&lt;script src="https://geovictoria-whatsapp-agent.vercel.app/vicky-utm-tracker.js"&gt;&lt;/script&gt;</code></pre>
+        <div class="highlight">💡 Si el sitio usa Google Tag Manager, se puede agregar como tag HTML personalizado con trigger "All Pages".</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <p>Verificar que los botones de WhatsApp tengan uno de estos formatos (el script los detecta automáticamente):</p>
+        <pre><code>&lt;!-- Cualquiera de estos funciona --&gt;
+&lt;a href="https://wa.me/56966765498"&gt;WhatsApp&lt;/a&gt;
+&lt;a href="https://api.whatsapp.com/send?phone=56966765498"&gt;WhatsApp&lt;/a&gt;
+&lt;a class="vicky-whatsapp-btn" href="#"&gt;WhatsApp&lt;/a&gt;
+&lt;button data-whatsapp="true"&gt;WhatsApp&lt;/button&gt;</code></pre>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <p>Listo. No se necesita ningún otro cambio.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- CÓMO FUNCIONA -->
+  <div class="section">
+    <h2>🔍 Cómo funciona</h2>
+    <h3>Tráfico de Google Ads</h3>
+    <p>Cuando Google Ads trae un visitante, la URL tiene <code>?gclid=Cj0KCQ...</code>. El script lo captura junto con los UTMs y los codifica en el primer mensaje de WhatsApp:</p>
+    <pre><code>https://wa.me/56966765498?text=%5BREF%3AeyJ1dG1fc291cmNlIjoiZ29vZ2xlIiwiZ2NsaWQiOiJDajBLQ1EuLi4ifQ%3D%3D%5D</code></pre>
+    <p>Vicky lee ese código invisible, lo decodifica y lo envía a Zoho CRM con el lead.</p>
+
+    <h3>Tráfico orgánico y directo</h3>
+    <p>Si no hay UTMs en la URL, el script infiere la fuente desde el referrer del navegador:</p>
+    <table>
+      <tr><th>Origen del visitante</th><th>utm_source</th><th>utm_medium</th></tr>
+      <tr><td>Google Ads (con GCLID)</td><td>google</td><td>cpc</td></tr>
+      <tr><td>Google orgánico</td><td>google</td><td>organic</td></tr>
+      <tr><td>Sin referrer (directo)</td><td>direct</td><td>direct</td></tr>
+      <tr><td>LinkedIn</td><td>linkedin</td><td>social</td></tr>
+      <tr><td>Facebook / Instagram</td><td>facebook</td><td>social</td></tr>
+      <tr><td>Otro sitio</td><td>referral</td><td>referral</td></tr>
+    </table>
+  </div>
+
+  <!-- ZOHO CRM -->
+  <div class="section">
+    <h2>📋 Campos que se llenan en Zoho CRM</h2>
+    <p>Cuando Vicky captura los datos del prospecto, estos campos de Marketing se completan automáticamente en el Lead:</p>
+    <table>
+      <tr><th>Campo en Zoho</th><th>Dato capturado</th><th>Ejemplo</th></tr>
+      <tr><td>ID de clic en anuncio de Google</td><td>GCLID</td><td>Cj0KCQjw...</td></tr>
+      <tr><td>Medium</td><td>utm_medium</td><td>cpc / organic / social</td></tr>
+      <tr><td>Campaign</td><td>utm_campaign</td><td>brand_chile_mayo2026</td></tr>
+      <tr><td>Ad Group</td><td>utm_content</td><td>control_asistencia_pymes</td></tr>
+      <tr><td>Keyword Ads</td><td>utm_term</td><td>control de asistencia</td></tr>
+      <tr><td>Landing Page</td><td>URL de origen</td><td>geovictoria.com/cl/control-asistencia</td></tr>
+    </table>
+    <div class="highlight">⚠️ <strong>utm_source</strong> no tiene campo propio en Zoho — queda registrado en el campo <strong>Comentario</strong> del lead junto al resto de la conversación.</div>
+  </div>
+
+  <!-- VERIFICACIÓN -->
+  <div class="section">
+    <h2>✅ Cómo verificar que funciona</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <p>Abrir la página con un UTM de prueba en la URL:</p>
+        <div class="url-box">geovictoria.com/cl/?utm_source=test&utm_medium=cpc&utm_campaign=prueba_script</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <p>Hacer clic en el botón de WhatsApp. El mensaje pre-escrito debería contener un texto que empieza con <code>[REF:</code>.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <p>Enviar el mensaje a Vicky y completar la conversación hasta dar nombre, empresa y email. El lead creado en Zoho debería tener los campos de Marketing completos.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPT URL -->
+  <div class="section">
+    <h2>🔗 URL del script</h2>
+    <div class="url-box">
+      <a href="https://geovictoria-whatsapp-agent.vercel.app/vicky-utm-tracker.js" target="_blank">
+        https://geovictoria-whatsapp-agent.vercel.app/vicky-utm-tracker.js
+      </a>
+    </div>
+    <p style="margin-top:8px;">El script se actualiza automáticamente — siempre apunta a la última versión. No es necesario actualizarlo manualmente en el sitio.</p>
+  </div>
+
+</div>
+
+<footer>
+  GeoVictoria — Agente Vicky | Equipo de Tecnología
+</footer>
+
+</body>
+</html>
