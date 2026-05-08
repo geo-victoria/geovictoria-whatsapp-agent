@@ -36,6 +36,17 @@ type LeadData = {
   meetingSlot?: string
 }
 
+type UTMData = {
+  utm_source?: string
+  utm_medium?: string
+  utm_campaign?: string
+  utm_content?: string
+  utm_term?: string
+  gclid?: string
+  fbclid?: string
+  landing_page?: string
+}
+
 type ConversationState = {
   contact: string
   startedAt: string
@@ -49,6 +60,7 @@ type ConversationState = {
   meetingBooked?: boolean
   meetingBookingId?: string
   zohoLeadId?: string
+  utm?: UTMData
 }
 
 type EvaluationResult = {
@@ -379,6 +391,7 @@ async function pushLeadToCrm(state: ConversationState): Promise<string | null> {
         lead: state.lead,
         conversation: state.messages,
         source: "whatsapp_agent_vic",
+        utm: state.utm || null,
       }),
       cache: "no-store",
     })
@@ -548,6 +561,29 @@ async function processInboundMessages(payload: any, request: Request) {
     if (containsInjection(prompt)) {
       await sendWhatsAppText(from, "El formato del mensaje no es válido. ¿Me envías tus datos uno por uno?")
       continue
+    }
+
+    if (!conversations.has(from)) {
+      // Extraer UTMs del primer mensaje si vienen codificados por el tracker JS
+      const refMatch = prompt.match(/\[REF:([A-Za-z0-9+/=]+)\]/)
+      if (refMatch) {
+        try {
+          const utmData = JSON.parse(decodeURIComponent(escape(atob(refMatch[1])))) as UTMData
+          const existing = conversations.get(from) || { contact: from, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), messages: [] }
+          existing.utm = utmData
+          conversations.set(from, existing)
+        } catch { /* ignorar si no se puede decodificar */ }
+      }
+    } else if (!conversations.get(from)?.utm) {
+      // Intentar capturar UTMs en el primer mensaje también si la conversación ya existe sin UTMs
+      const refMatch = prompt.match(/\[REF:([A-Za-z0-9+/=]+)\]/)
+      if (refMatch) {
+        try {
+          const utmData = JSON.parse(decodeURIComponent(escape(atob(refMatch[1])))) as UTMData
+          const state = conversations.get(from)!
+          state.utm = utmData
+        } catch { /* ignorar */ }
+      }
     }
 
     if (!conversations.has(from)) {

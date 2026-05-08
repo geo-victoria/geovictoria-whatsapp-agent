@@ -1,5 +1,16 @@
 import { NextResponse } from "next/server"
 
+type UTMData = {
+  utm_source?: string
+  utm_medium?: string
+  utm_campaign?: string
+  utm_content?: string
+  utm_term?: string
+  gclid?: string
+  fbclid?: string
+  landing_page?: string
+}
+
 type LeadPayload = {
   type?: string
   contact?: string
@@ -26,6 +37,7 @@ type LeadPayload = {
     content?: string
     at?: string
   }>
+  utm?: UTMData
 }
 
 function getEnv(name: string) {
@@ -105,6 +117,7 @@ export async function POST(request: Request) {
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
 
     const ownerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000000211701"
+    const utm = body.utm || {}
     const record = {
       Owner: { id: ownerId },
       First_Name: sanitize(names.firstName, 100),
@@ -115,6 +128,13 @@ export async function POST(request: Request) {
       Country: sanitize(lead.pais, 100) || undefined,
       City: sanitize(lead.ciudad, 100) || undefined,
       Canal: "WhatsApp",
+      // Campos de Google Ads / UTM
+      ...(utm.gclid ? { ID_de_clic_en_anuncio_de_Google: utm.gclid } : {}),
+      ...(utm.utm_medium ? { Medium: utm.utm_medium } : {}),
+      ...(utm.utm_campaign ? { Campaign: utm.utm_campaign } : {}),
+      ...(utm.utm_content ? { Ad_Group: utm.utm_content } : {}),
+      ...(utm.utm_term ? { Keyword_Ads: utm.utm_term } : {}),
+      ...(utm.landing_page ? { Landing_Page: utm.landing_page } : {}),
       Comentario: [
         `Necesidad: ${lead.necesidad || ""}`,
         `Cargo: ${lead.cargo || ""}`,
@@ -124,7 +144,10 @@ export async function POST(request: Request) {
         `Reunión agendada: ${lead.reunion_agendada ?? lead.agendar_reunion ?? ""}`,
         `Preferencia horario: ${lead.preferencia_horario || lead.fecha_propuesta || ""}`,
         `Contacto WA: ${body.contact || ""}`,
+        utm.utm_source ? `UTM Source: ${utm.utm_source}` : "",
+        utm.fbclid ? `FB Click ID: ${utm.fbclid}` : "",
       ]
+        .filter(Boolean)
         .join("\n")
         .trim(),
       Conversaci_n_Botmaker: transcript || undefined,
