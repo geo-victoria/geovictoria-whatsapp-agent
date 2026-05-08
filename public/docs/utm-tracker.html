@@ -132,6 +132,81 @@
     <div class="highlight">⚠️ <strong>utm_source</strong> no tiene campo propio en Zoho — queda registrado en el campo <strong>Comentario</strong> del lead junto al resto de la conversación.</div>
   </div>
 
+  <!-- CÓMO EMBEBER EL BOTÓN -->
+  <div class="section">
+    <h2>💬 Cómo embeber el botón de WhatsApp</h2>
+    <p>El script funciona con cualquiera de estas implementaciones. Elige la que mejor se adapte al diseño del sitio:</p>
+
+    <h3>Opción 1 — Botón flotante (recomendado)</h3>
+    <p>Aparece fijo en la esquina inferior derecha en todas las páginas. Solo agregar este HTML antes del <code>&lt;/body&gt;</code>:</p>
+    <pre><code>&lt;!-- Botón flotante de WhatsApp --&gt;
+&lt;a href="https://wa.me/56966765498"
+   class="vicky-whatsapp-btn"
+   target="_blank"
+   style="
+     position: fixed;
+     bottom: 24px;
+     right: 24px;
+     background: #25D366;
+     color: white;
+     border-radius: 50px;
+     padding: 14px 22px;
+     font-size: 15px;
+     font-weight: 600;
+     text-decoration: none;
+     box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+     display: flex;
+     align-items: center;
+     gap: 8px;
+     z-index: 9999;
+   "
+&gt;
+  &lt;svg width="22" height="22" viewBox="0 0 24 24" fill="white"&gt;
+    &lt;path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/&gt;
+    &lt;path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.558 4.112 1.528 5.837L0 24l6.337-1.507A11.95 11.95 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.818 9.818 0 01-5.015-1.374l-.36-.214-3.732.888.925-3.618-.235-.372A9.818 9.818 0 1112 21.818z"/&gt;
+  &lt;/svg&gt;
+  Hablar con Vicky
+&lt;/a&gt;
+
+&lt;!-- Script UTM Tracker (siempre después del botón) --&gt;
+&lt;script src="https://geovictoria-whatsapp-agent.vercel.app/vicky-utm-tracker.js"&gt;&lt;/script&gt;</code></pre>
+
+    <h3>Opción 2 — Botón inline en el contenido</h3>
+    <p>Para CTAs dentro del cuerpo de la página (hero, sección de precios, etc.):</p>
+    <pre><code>&lt;a href="https://wa.me/56966765498"
+   class="vicky-whatsapp-btn"
+   target="_blank"
+   style="
+     display: inline-flex;
+     align-items: center;
+     gap: 8px;
+     background: #25D366;
+     color: white;
+     padding: 12px 24px;
+     border-radius: 8px;
+     text-decoration: none;
+     font-weight: 600;
+   "
+&gt;
+  WhatsApp con un ejecutivo
+&lt;/a&gt;</code></pre>
+
+    <h3>Opción 3 — Solo el link (sin estilos)</h3>
+    <p>Si el sitio ya tiene su propio diseño de botón:</p>
+    <pre><code>&lt;a href="https://wa.me/56966765498" class="vicky-whatsapp-btn" target="_blank"&gt;
+  Contactar por WhatsApp
+&lt;/a&gt;</code></pre>
+
+    <div class="success">
+      ✅ <strong>El número de WhatsApp de Vicky es: +56 9 6676 5498</strong><br>
+      En formato URL: <code>https://wa.me/56966765498</code> (sin el +, sin espacios)
+    </div>
+
+    <div class="highlight">
+      💡 <strong>Importante:</strong> el script UTM debe cargarse <em>después</em> del botón en el HTML, o bien al final del <code>&lt;body&gt;</code>. Si se carga antes, el botón aún no existe en el DOM y no se modifica.
+    </div>
+  </div>
+
   <!-- VERIFICACIÓN -->
   <div class="section">
     <h2>✅ Cómo verificar que funciona</h2>
