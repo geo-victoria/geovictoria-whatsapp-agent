@@ -201,8 +201,18 @@ export async function POST(request: Request) {
         fetchConversationByContact(contact),
         new Promise<null>((_, reject) => setTimeout(() => reject(new Error("timeout")), 4000)),
       ])
-      if (saved) conversations.set(contact, saved)
-      else conversations.delete(contact) // si no existe en Supabase, limpiar memoria
+      if (saved) {
+        conversations.set(contact, saved)
+        // Restaurar pendingSlots si hay lead con email pero sin reunión — se pierden en Supabase
+        const lead = saved.lead as LeadData | undefined
+        const hasEmail = !!(lead?.email || lead?.correo)
+        if (hasEmail && !saved.meetingBooked && !lead?.meetingSlot && !saved.pendingSlots?.length) {
+          const restoredSlots = await getAvailableSlots(lead?.pais || inferCountry(contact)).catch(() => [])
+          if (restoredSlots.length) saved.pendingSlots = restoredSlots
+        }
+      } else {
+        conversations.delete(contact)
+      }
     } catch { /* continuar con lo que haya en memoria */ }
 
     // Extraer UTMs del token [REF:...] si es el primer mensaje
