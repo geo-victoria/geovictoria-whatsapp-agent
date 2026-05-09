@@ -1,0 +1,6 @@
+samu-*.json
+test-results-*.json
+host-country-*.json
+scripts/
+*.py
+*.mjs

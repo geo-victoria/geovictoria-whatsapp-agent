@@ -2,4 +2,14 @@
 .next
 .vercel
 .env*
-.vercel
+tsconfig.tsbuildinfo
+.vercel-env-pulled
+
+# Datos crudos y scripts de análisis
+samu-*.json
+test-results-*.json
+host-country-*.json
+scripts/
+
+# Claude Code config local
+.claude/

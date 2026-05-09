@@ -1,5 +1,5 @@
 const CAL_API_KEY = (process.env.CAL_API_KEY || "").trim()
-const CAL_EVENT_TYPE_ID = (process.env.CAL_EVENT_TYPE_ID || "5538437").trim()
+const CAL_EVENT_TYPE_ID = (process.env.CAL_EVENT_TYPE_ID || "3188650").trim()
 const CAL_BASE = "https://api.cal.com/v2"
 const CAL_HEADERS = {
   Authorization: `Bearer ${CAL_API_KEY}`,
@@ -62,10 +62,6 @@ async function getPublicHolidays(year: number, countryCode: string): Promise<str
   }
 }
 
-function toDateStr(date: Date): string {
-  return date.toISOString().slice(0, 10)
-}
-
 function isWeekend(date: Date): boolean {
   const day = date.getDay()
   return day === 0 || day === 6
@@ -101,23 +97,67 @@ export async function getAvailableSlots(country: string): Promise<string[]> {
   const data = await res.json() as { data?: { slots?: Record<string, Array<{ time: string }>> } }
   const slotsByDay = data.data?.slots || {}
 
-  const validSlots: string[] = []
+  const validDays: Array<{ day: string; slots: Array<{ time: string }> }> = []
   const days = Object.keys(slotsByDay).sort()
 
   for (const day of days) {
-    if (validSlots.length >= 3) break
     if (isWeekend(new Date(day + "T12:00:00Z"))) continue
     if (allHolidays.has(day)) continue
-
     const daySlots = slotsByDay[day]
     if (!daySlots?.length) continue
-
-    // Take first available slot of the day
-    const slot = daySlots[0]
-    validSlots.push(slot.time)
+    validDays.push({ day, slots: daySlots })
+    if (validDays.length >= 3) break
   }
 
-  return validSlots
+  if (validDays.length === 0) return []
+
+  // Si hay 3 días distintos, tomar el primer slot de cada uno
+  if (validDays.length >= 3) {
+    return validDays.slice(0, 3).map(d => d.slots[0].time)
+  }
+
+  // Si hay menos de 3 días, completar con slots adicionales del mismo día
+  const result: string[] = []
+  for (const { slots } of validDays) {
+    for (const s of slots) {
+      if (result.length >= 3) break
+      if (!result.includes(s.time)) result.push(s.time)
+    }
+    if (result.length >= 3) break
+  }
+  return result
+}
+
+// Detecta qué slot eligió el usuario comparando número o hora mencionada
+export function matchSlotFromMessage(message: string, pendingSlots: string[], tz: string): number | null {
+  const lower = message.toLowerCase()
+
+  // Selección por número
+  if (/\b1\b|primer[ao]/.test(lower) && pendingSlots[0]) return 1
+  if (/\b2\b|segund[ao]/.test(lower) && pendingSlots[1]) return 2
+  if (/\b3\b|tercer[ao]/.test(lower) && pendingSlots[2]) return 3
+
+  // Selección por hora mencionada (ej: "11:30", "las 12", "a las 13")
+  const timeMatch = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(?:hrs?|horas?)?/)
+  if (timeMatch) {
+    const mentionedHour = parseInt(timeMatch[1])
+    const mentionedMin = timeMatch[2] ? parseInt(timeMatch[2]) : null
+
+    for (let i = 0; i < pendingSlots.length; i++) {
+      const slotDate = new Date(pendingSlots[i])
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, hour: "numeric", minute: "2-digit", hour12: false,
+      }).formatToParts(slotDate)
+      const slotHour = parseInt(parts.find(p => p.type === "hour")?.value || "0")
+      const slotMin = parseInt(parts.find(p => p.type === "minute")?.value || "0")
+
+      if (slotHour === mentionedHour && (mentionedMin === null || mentionedMin === slotMin)) {
+        return i + 1
+      }
+    }
+  }
+
+  return null
 }
 
 const DAYS_ES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
@@ -163,7 +203,7 @@ export async function bookMeeting(params: {
   prospectEmail: string
   language?: string
   timeZone?: string
-}): Promise<{ success: boolean; bookingId?: string; meetingUrl?: string; error?: string }> {
+}): Promise<{ success: boolean; bookingId?: string; meetingUrl?: string; organizerEmail?: string; error?: string }> {
   const { slotIso, prospectName, prospectEmail, language = "es", timeZone = "America/Santiago" } = params
 
   const body = {
@@ -189,7 +229,14 @@ export async function bookMeeting(params: {
 
   const data = await res.json() as {
     status?: string
-    data?: { uid?: string; meetingUrl?: string; id?: number; start?: string }
+    data?: {
+      uid?: string
+      meetingUrl?: string
+      id?: number
+      start?: string
+      organizer?: { name?: string; email?: string }
+      hosts?: Array<{ name?: string; email?: string }>
+    }
     error?: unknown
     message?: string
     statusCode?: number
@@ -203,9 +250,15 @@ export async function bookMeeting(params: {
     return { success: false, error: errMsg }
   }
 
+  const organizerEmail =
+    data.data?.organizer?.email ||
+    data.data?.hosts?.[0]?.email ||
+    undefined
+
   return {
     success: true,
     bookingId: String(uid),
     meetingUrl: data.data?.meetingUrl,
+    organizerEmail,
   }
 }

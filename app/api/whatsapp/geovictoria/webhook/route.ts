@@ -2,7 +2,7 @@ import crypto from "node:crypto"
 
 import { NextResponse } from "next/server"
 import { fetchConversationByContact, saveEvaluation, saveLead, upsertConversationSnapshot } from "@/lib/supabase-persistence"
-import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getTimezone } from "@/lib/calendar"
+import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getTimezone, matchSlotFromMessage } from "@/lib/calendar"
 
 type MetaWebhookMessage = {
   id?: string
@@ -154,6 +154,12 @@ function inferCountry(from: string): string {
 
 function isoNow() {
   return new Date().toISOString()
+}
+
+function slotChoicePrompt(count: number): string {
+  if (count === 1) return "¿Te viene bien? Responde *1* para confirmar 😊"
+  if (count === 2) return "¿Cuál te viene mejor? Responde *1* o *2* 😊"
+  return "¿Cuál te viene mejor? Responde *1*, *2* o *3* 😊"
 }
 
 function safeCompare(a: string, b: string) {
@@ -439,7 +445,7 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
       const pad = (n: number) => String(n).padStart(2, "0")
       slotFormatted = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`
     } catch { /* mantener el ISO original si falla */ }
-    contextParts.push({ role: "user", content: `[REUNION_CONFIRMADA] Este prospecto ya tiene una reunión agendada para el ${slotFormatted}. NO ofrecer ni agendar una nueva reunión. Si pregunta sobre su reunión, confirmar la fecha. Si quiere reagendar, indicar que puede hacerlo respondiendo con el nuevo horario preferido.` })
+    contextParts.push({ role: "user", content: `[REUNION_CONFIRMADA] Este prospecto ya tiene una reunión agendada para el ${slotFormatted}. Si pregunta por su reunión, confirmar la fecha. Si pide reagendar o pide horarios disponibles, mostrar nuevas opciones de disponibilidad.` })
     contextParts.push({ role: "assistant", content: "Entendido, la reunión ya está confirmada." })
   }
   if (extraContext) {
@@ -602,15 +608,11 @@ async function processInboundMessages(payload: any, request: Request) {
 
     // Si hay lead con reunion_agendada y piden horarios → mostrar slots directamente sin LLM
     const existingLead = stateAfterUser.lead
-    const wantsSlots = /horario|agenda|agendar|slot|reuni[oó]n|disponib|fecha|cu[aá]ndo/i.test(prompt)
+    const wantsSlots = /horario|agenda|agendar|slot|reuni[oó]n|disponib|fecha|cu[aá]ndo|opcion|opción|reagend|otro d[ií]a|otra fecha|otro horario|lunes|martes|mi[eé]rcoles|jueves|viernes|mañana|tarde/i.test(prompt)
 
     const hasLeadData = !!(existingLead?.email || existingLead?.correo)
-    if (
-      existingLead &&
-      hasLeadData &&
-      !stateAfterUser.meetingBooked &&
-      wantsSlots
-    ) {
+    const alreadyHasSlots = (stateAfterUser.pendingSlots?.length ?? 0) > 0
+    if (existingLead && hasLeadData && wantsSlots && !alreadyHasSlots && !stateAfterUser.meetingBooked && !existingLead.meetingSlot) {
       const country = existingLead.pais || inferCountry(from)
       // Siempre refrescar slots para evitar datos desactualizados
       const slots = await getAvailableSlots(country)
@@ -621,7 +623,7 @@ async function processInboundMessages(payload: any, request: Request) {
         const lead = stateAfterUser.lead
         const name = lead?.nombre?.split(" ")[0] || ""
         const greeting = name ? `${name}, r` : "R"
-        const slotReply = `${greeting}evisé la agenda y tengo estas opciones disponibles:\n\n${slotsText}\n\n¿Cuál te viene mejor? Responde 1, 2 o 3 😊`
+        const slotReply = `${greeting}evisé la agenda y tengo estas opciones disponibles:\n\n${slotsText}\n\n${slotChoicePrompt(slots.length)}`
         const stateWithSlots = appendMessage(from, "assistant", slotReply)
         await persistConversationSnapshot(stateWithSlots)
         scheduleInactivityEvaluation(from)
@@ -632,11 +634,12 @@ async function processInboundMessages(payload: any, request: Request) {
 
     // Detectar selección directa de slot desde el mensaje del usuario
     const pendingSlots = stateAfterUser.pendingSlots || []
+    if (pendingSlots.length > 0) {
+      // Permitir reagendamiento si ya tenía reunión
+      if (stateAfterUser.meetingBooked) stateAfterUser.meetingBooked = false
+    }
     if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
-      const slotIndex =
-        /\b1\b|primer[ao]|jueves|lunes|martes|miércoles|mi[eé]rcoles|viernes/.test(prompt) && pendingSlots[0] ? 1 :
-        /\b2\b|segund[ao]/.test(prompt) && pendingSlots[1] ? 2 :
-        /\b3\b|tercer[ao]/.test(prompt) && pendingSlots[2] ? 3 : null
+      const slotIndex = matchSlotFromMessage(prompt, pendingSlots, getTimezone(existingLead?.pais || inferCountry(from)))
 
       if (slotIndex) {
         const slot = pendingSlots[slotIndex - 1]
@@ -659,6 +662,21 @@ async function processInboundMessages(payload: any, request: Request) {
           stateAfterUser.pendingSlots = []
           if (stateAfterUser.lead) stateAfterUser.lead.meetingSlot = slot
 
+          // Actualizar owner del lead en Zoho con el host asignado por Cal.com
+          const organizerEmail = result.organizerEmail
+          if (organizerEmail && stateAfterUser.zohoLeadId) {
+            const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
+            fetch(crmUrl.replace("/zoho-lead", "/zoho-owner"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                leadId: stateAfterUser.zohoLeadId,
+                ownerEmail: organizerEmail,
+              }),
+              cache: "no-store",
+            }).catch(() => {})
+          }
+
           // Crear Meeting en Zoho CRM vinculado al lead
           const zohoMeetingUrl = getEnv("CRM_LEAD_WEBHOOK_URL").replace("/zoho-lead", "/zoho-meeting")
           const zohoLeadId = stateAfterUser.zohoLeadId
@@ -675,8 +693,7 @@ async function processInboundMessages(payload: any, request: Request) {
                 prospectName: leadData.nombre,
                 prospectEmail: leadData.email || leadData.correo,
                 prospectTimezone: getTimezone(country),
-                hostName: "Rodrigo Lewit",
-                hostEmail: "rlewit@geovictoria.com",
+                hostEmail: organizerEmail || "onboarding@geovictoria.com",
                 hostTimezone: "America/Santiago",
                 empresa: leadData.empresa,
                 trabajadores: leadData.trabajadores,
@@ -737,7 +754,7 @@ async function processInboundMessages(payload: any, request: Request) {
         const empresa = sanitized.empresa ? ` en ${sanitized.empresa}` : ""
         const workers = sanitized.trabajadores ? ` (${sanitized.trabajadores} trabajadores)` : ""
         const slotsText = formatSlotsForProspect(slots, country)
-        const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}${workers}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 45 min:\n\n${slotsText}\n\n¿Cuál te viene mejor? Responde 1, 2 o 3 😊`
+        const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}${workers}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 45 min:\n\n${slotsText}\n\n${slotChoicePrompt(slots.length)}`
         const stateWithSlots = appendMessage(from, "assistant", slotMsg)
         await persistConversationSnapshot(stateWithSlots)
         await sendWhatsAppText(from, slotMsg)
@@ -762,6 +779,19 @@ async function processInboundMessages(payload: any, request: Request) {
         stateAfterAssistant.meetingBookingId = result.bookingId
         stateAfterAssistant.pendingSlots = []
         if (stateAfterAssistant.lead) stateAfterAssistant.lead.meetingSlot = slot
+
+        if (result.organizerEmail && stateAfterAssistant.zohoLeadId) {
+          const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
+          fetch(crmUrl.replace("/zoho-lead", "/zoho-owner"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              leadId: stateAfterAssistant.zohoLeadId,
+              ownerEmail: result.organizerEmail,
+            }),
+            cache: "no-store",
+          }).catch(() => {})
+        }
       }
     }
 

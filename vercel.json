@@ -1,4 +1,5 @@
 {
+  "regions": ["gru1"],
   "functions": {
     "app/api/whatsapp/geovictoria/webhook/route.ts": {
       "maxDuration": 60
