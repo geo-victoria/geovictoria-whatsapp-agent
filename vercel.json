@@ -1,5 +1,11 @@
 {
   "regions": ["gru1"],
+  "crons": [
+    {
+      "path": "/api/reengagement",
+      "schedule": "30 13 * * 1-5"
+    }
+  ],
   "functions": {
     "app/api/whatsapp/geovictoria/webhook/route.ts": {
       "maxDuration": 60
