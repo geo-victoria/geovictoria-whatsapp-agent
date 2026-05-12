@@ -86,7 +86,23 @@ export async function POST(request: Request) {
 
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
-    const ownerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000000211701"
+    const vickyOwnerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000484500876"
+
+    // Resolver hostEmail → Zoho user ID para asignar el Event al host correcto
+    let ownerId = vickyOwnerId
+    if (hostEmail) {
+      try {
+        const usersRes = await fetch(`${apiDomain}/crm/v2/users?type=AllUsers`, {
+          headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+          cache: "no-store",
+        })
+        const usersData = await usersRes.json()
+        const match = (usersData?.users || []).find(
+          (u: { id: string; email: string }) => u.email?.toLowerCase() === hostEmail.toLowerCase()
+        )
+        if (match?.id) ownerId = match.id
+      } catch { /* usar Vicky como fallback */ }
+    }
 
     const participants: { participant: string; type: string }[] = [
       { participant: ownerId, type: "user" },

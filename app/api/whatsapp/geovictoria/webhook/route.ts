@@ -36,17 +36,6 @@ type LeadData = {
   meetingSlot?: string
 }
 
-type UTMData = {
-  utm_source?: string
-  utm_medium?: string
-  utm_campaign?: string
-  utm_content?: string
-  utm_term?: string
-  gclid?: string
-  fbclid?: string
-  landing_page?: string
-}
-
 type ConversationState = {
   contact: string
   startedAt: string
@@ -60,7 +49,6 @@ type ConversationState = {
   meetingBooked?: boolean
   meetingBookingId?: string
   zohoLeadId?: string
-  utm?: UTMData
   zohoSessionId?: string
   sessionStartedAt?: string
   sessionNumber?: number
@@ -427,7 +415,6 @@ async function pushLeadToCrm(state: ConversationState, ownerEmail?: string): Pro
         lead: state.lead,
         conversation: state.messages,
         source: "whatsapp_agent_vic",
-        utm: state.utm || null,
         ...(ownerEmail ? { ownerEmail } : {}),
       }),
       cache: "no-store",
@@ -669,29 +656,6 @@ async function processInboundMessages(payload: any, request: Request) {
     if (containsInjection(prompt)) {
       await sendWhatsAppText(from, "El formato del mensaje no es válido. ¿Me envías tus datos uno por uno?")
       continue
-    }
-
-    if (!conversations.has(from)) {
-      // Extraer UTMs del primer mensaje si vienen codificados por el tracker JS
-      const refMatch = prompt.match(/\[REF:([A-Za-z0-9+/=]+)\]/)
-      if (refMatch) {
-        try {
-          const utmData = JSON.parse(decodeURIComponent(escape(atob(refMatch[1])))) as UTMData
-          const existing = conversations.get(from) || { contact: from, startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), messages: [] }
-          existing.utm = utmData
-          conversations.set(from, existing)
-        } catch { /* ignorar si no se puede decodificar */ }
-      }
-    } else if (!conversations.get(from)?.utm) {
-      // Intentar capturar UTMs en el primer mensaje también si la conversación ya existe sin UTMs
-      const refMatch = prompt.match(/\[REF:([A-Za-z0-9+/=]+)\]/)
-      if (refMatch) {
-        try {
-          const utmData = JSON.parse(decodeURIComponent(escape(atob(refMatch[1])))) as UTMData
-          const state = conversations.get(from)!
-          state.utm = utmData
-        } catch { /* ignorar */ }
-      }
     }
 
     if (!conversations.has(from)) {
@@ -961,18 +925,40 @@ async function processInboundMessages(payload: any, request: Request) {
         const slotOrganizerEmail = result.organizerEmail
 
         if (!stateAfterAssistant.zohoLeadId && stateAfterAssistant.lead) {
-          // Re-engagement lead: create with correct owner immediately
           const newLeadId = await pushLeadToCrm(stateAfterAssistant, slotOrganizerEmail || undefined)
           if (newLeadId) stateAfterAssistant.zohoLeadId = newLeadId
         } else if (slotOrganizerEmail && stateAfterAssistant.zohoLeadId) {
-          // Lead already exists: update owner to assigned host (fire-and-forget)
           const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
           fetch(crmUrl.replace("/zoho-lead", "/zoho-owner"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ leadId: stateAfterAssistant.zohoLeadId, ownerEmail: slotOrganizerEmail }),
+            cache: "no-store",
+          }).catch(() => {})
+        }
+
+        // Crear Event en Zoho vinculado al lead
+        const zohoLeadIdForEvent = stateAfterAssistant.zohoLeadId
+        if (zohoLeadIdForEvent) {
+          const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
+          const leadData = stateAfterAssistant.lead || {}
+          const country = leadData.pais || inferCountry(from)
+          fetch(crmUrl.replace("/zoho-lead", "/zoho-meeting"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              leadId: stateAfterAssistant.zohoLeadId,
-              ownerEmail: slotOrganizerEmail,
+              leadId: zohoLeadIdForEvent,
+              slot,
+              slotEnd: new Date(new Date(slot).getTime() + 45 * 60 * 1000).toISOString(),
+              meetingUrl: result.meetingUrl,
+              prospectName: leadData.nombre,
+              prospectEmail: leadData.email || leadData.correo,
+              prospectTimezone: getTimezone(country),
+              hostEmail: slotOrganizerEmail || "onboarding@geovictoria.com",
+              hostTimezone: "America/Santiago",
+              empresa: leadData.empresa,
+              trabajadores: leadData.trabajadores,
+              necesidad: leadData.necesidad,
             }),
             cache: "no-store",
           }).catch(() => {})

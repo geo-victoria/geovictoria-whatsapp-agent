@@ -1,16 +1,5 @@
 import { NextResponse } from "next/server"
 
-type UTMData = {
-  utm_source?: string
-  utm_medium?: string
-  utm_campaign?: string
-  utm_content?: string
-  utm_term?: string
-  gclid?: string
-  fbclid?: string
-  landing_page?: string
-}
-
 type LeadPayload = {
   type?: string
   contact?: string
@@ -38,7 +27,6 @@ type LeadPayload = {
     content?: string
     at?: string
   }>
-  utm?: UTMData
 }
 
 function getEnv(name: string) {
@@ -54,20 +42,6 @@ function splitName(fullName?: string) {
     firstName: parts.slice(0, -1).join(" "),
     lastName: parts.slice(-1).join(" "),
   }
-}
-
-// Maps utm_source + utm_medium to Zoho Lead_Source picklist
-function mapLeadSource(utm: { utm_source?: string; utm_medium?: string }): string | undefined {
-  const src = (utm.utm_source || "").toLowerCase()
-  const med = (utm.utm_medium || "").toLowerCase()
-  if (src === "organic" || med === "seo" || med === "organic") return "SEO"
-  if (src === "google" && (med === "cpc" || med === "ppc" || med === "paid")) return "Google Ads"
-  if (src === "linkedin") return "LinkedIn"
-  if (src === "facebook" || src === "instagram" || src === "meta") return "Meta Ads"
-  if (src === "referral") return "Referral"
-  if (src === "email") return "Email"
-  if (src) return src  // pass through unknown sources as-is
-  return undefined
 }
 
 // Maps number of employees to Zoho Rango_de_Empleados picklist value
@@ -146,6 +120,24 @@ async function getZohoAccessToken() {
   return String(payload.access_token)
 }
 
+async function getBotmakerChatUrl(phone: string): Promise<string | null> {
+  const bmToken = getEnv("BOTMAKER_ACCESS_TOKEN")
+  if (!bmToken || !phone) return null
+  try {
+    const normalized = phone.replace(/\D/g, "")
+    const res = await fetch("https://api.botmaker.com/v2.0/chats?limit=200", {
+      headers: { "access-token": bmToken, Accept: "application/json" },
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const items = (data?.items || []) as Array<{ chat: { chatId: string; contactId: string } }>
+    const match = items.find((item) => (item?.chat?.contactId || "").replace(/\D/g, "") === normalized)
+    if (match?.chat?.chatId) return `https://go.botmaker.com/#/chats/${match.chat.chatId}`
+  } catch { /* ignorar */ }
+  return null
+}
+
 async function resolveOwnerId(email: string, token: string, apiDomain: string): Promise<string | null> {
   try {
     const res = await fetch(`${apiDomain}/crm/v2/users?type=AllUsers`, {
@@ -181,7 +173,9 @@ export async function POST(request: Request) {
       if (resolved) ownerId = resolved
     }
 
-    const utm = body.utm || {}
+    // Resolver URL real de la conversación en Botmaker
+    const botmakerChatUrl = await getBotmakerChatUrl(body.contact || "")
+
     const record = {
       First_Name: sanitize(names.firstName, 100),
       Last_Name: sanitize(names.lastName, 100) || "Prospecto",
@@ -191,17 +185,10 @@ export async function POST(request: Request) {
       Country: sanitize(lead.pais, 100) || undefined,
       City: sanitize(lead.ciudad, 100) || undefined,
       Canal: "WhatsApp",
-      Lead_Source: mapLeadSource(utm) || getEnv("ZOHO_DEFAULT_LEAD_SOURCE") || "SEO",
+      Lead_Source: getEnv("ZOHO_DEFAULT_LEAD_SOURCE") || "SEO",
       ...(mapProductoSolucion(lead.necesidad) ? { Producto_Soluci_n: mapProductoSolucion(lead.necesidad) } : {}),
       ...(mapRangoEmpleados(lead.trabajadores) ? { Rango_de_Empleados: mapRangoEmpleados(lead.trabajadores) } : {}),
       ...(lead.trabajadores ? { N_Empleados_que_marcan: parseInt((lead.trabajadores).replace(/\D/g, "")) || undefined } : {}),
-      // Campos de Google Ads / UTM
-      ...(utm.gclid ? { ID_de_clic_en_anuncio_de_Google: utm.gclid } : {}),
-      ...(utm.utm_medium ? { Medium: utm.utm_medium } : {}),
-      ...(utm.utm_campaign ? { Campaign: utm.utm_campaign } : {}),
-      ...(utm.utm_content ? { Ad_Group: utm.utm_content } : {}),
-      ...(utm.utm_term ? { Keyword_Ads: utm.utm_term } : {}),
-      ...(utm.landing_page ? { Landing_Page: utm.landing_page } : {}),
       Comentario: [
         `Necesidad: ${lead.necesidad || ""}`,
         `Cargo: ${lead.cargo || ""}`,
@@ -211,16 +198,12 @@ export async function POST(request: Request) {
         `Reunión agendada: ${lead.reunion_agendada ?? lead.agendar_reunion ?? ""}`,
         `Preferencia horario: ${lead.preferencia_horario || lead.fecha_propuesta || ""}`,
         `Contacto WA: ${body.contact || ""}`,
-        utm.utm_source ? `UTM Source: ${utm.utm_source}` : "",
-        utm.fbclid ? `FB Click ID: ${utm.fbclid}` : "",
         transcript ? `\n--- Transcripción ---\n${transcript}` : "",
       ]
         .filter(Boolean)
         .join("\n")
         .trim(),
-      Conversaci_n_Botmaker: body.contact
-        ? `https://go.botmaker.com/#/conversations/${body.contact.replace(/\D/g, "")}`
-        : undefined,
+      Conversaci_n_Botmaker: botmakerChatUrl || undefined,
       Owner: { id: ownerId },
     }
 
