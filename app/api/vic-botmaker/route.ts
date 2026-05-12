@@ -70,17 +70,14 @@ function extractLead(raw: string) {
 function extractSlotMarker(raw: string) {
   const confirmed = raw.match(/SLOT_CONFIRMED:(\d)/m)
   const custom = raw.match(/SLOT_CUSTOM:([^\n]+)/m)
-  const handoff = /HANDOFF_REQUESTED/m.test(raw)
   const clean = raw
     .replace(/SLOT_CONFIRMED:\d/gm, "")
     .replace(/SLOT_CUSTOM:[^\n]+/gm, "")
-    .replace(/HANDOFF_REQUESTED/gm, "")
     .trim()
   return {
     cleanReply: clean,
     slotConfirmed: confirmed ? parseInt(confirmed[1]) : null,
     slotCustom: custom ? custom[1].trim() : null,
-    handoff,
   }
 }
 
@@ -320,7 +317,7 @@ export async function POST(request: Request) {
     } catch { /* silent */ }
 
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
-    const { cleanReply, slotConfirmed, slotCustom, handoff } = extractSlotMarker(afterLead)
+    const { cleanReply, slotConfirmed, slotCustom } = extractSlotMarker(afterLead)
     const finalReply = cleanReply || "Gracias por escribir."
 
     const stateAfterAssistant = appendMessage(contact, "assistant", finalReply)
@@ -377,28 +374,12 @@ export async function POST(request: Request) {
     }
 
     await upsertConversationSnapshot(stateAfterAssistant)
-
-    // Si handoff: setear variable en Botmaker para que el flow pueda asignar el agente
-    if (handoff) {
-      const bmToken = getEnv("BOTMAKER_ACCESS_TOKEN")
-      const bmChannel = getEnv("BOTMAKER_CHANNEL_ID") || "GeoVictoriaEspaol-whatsapp-56967308227"
-      const handoffAgent = getEnv("BOTMAKER_HANDOFF_AGENT_ID") || "pio8v9jfSPUEyO4Jir1oAe9kTLF2"
-      if (bmToken) {
-        fetch(`https://api.botmaker.com/v2.0/chats/${bmChannel}:${contact}`, {
-          method: "PATCH",
-          headers: { "access-token": bmToken, "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ variables: { transferir_agente: "true", agente_id: handoffAgent } }),
-          cache: "no-store",
-        }).catch(() => {})
-      }
-    }
-
-    return NextResponse.json({ reply: finalReply, handoff })
+    return NextResponse.json({ reply: finalReply })
 
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Error inesperado"
     console.error("[vic-botmaker]", msg)
-    return NextResponse.json({ reply: "Tuve un problema técnico. Un ejecutivo te contactará pronto.", handoff: true })
+    return NextResponse.json({ reply: "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?" })
   }
 }
 
