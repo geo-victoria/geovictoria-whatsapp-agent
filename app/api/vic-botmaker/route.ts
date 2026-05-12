@@ -377,6 +377,22 @@ export async function POST(request: Request) {
     }
 
     await upsertConversationSnapshot(stateAfterAssistant)
+
+    // Si handoff: setear variable en Botmaker para que el flow pueda asignar el agente
+    if (handoff) {
+      const bmToken = getEnv("BOTMAKER_ACCESS_TOKEN")
+      const bmChannel = getEnv("BOTMAKER_CHANNEL_ID") || "GeoVictoriaEspaol-whatsapp-56967308227"
+      const handoffAgent = getEnv("BOTMAKER_HANDOFF_AGENT_ID") || "pio8v9jfSPUEyO4Jir1oAe9kTLF2"
+      if (bmToken) {
+        fetch(`https://api.botmaker.com/v2.0/chats/${bmChannel}:${contact}`, {
+          method: "PATCH",
+          headers: { "access-token": bmToken, "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ variables: { transferir_agente: "true", agente_id: handoffAgent } }),
+          cache: "no-store",
+        }).catch(() => {})
+      }
+    }
+
     return NextResponse.json({ reply: finalReply, handoff })
 
   } catch (error) {
