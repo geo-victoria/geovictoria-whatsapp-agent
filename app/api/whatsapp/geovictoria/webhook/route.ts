@@ -61,6 +61,9 @@ type ConversationState = {
   meetingBookingId?: string
   zohoLeadId?: string
   utm?: UTMData
+  zohoSessionId?: string
+  sessionStartedAt?: string
+  sessionNumber?: number
 }
 
 type EvaluationResult = {
@@ -177,25 +180,52 @@ function verifyMetaSignature(rawBody: string, signatureHeader: string | null, ap
   return safeCompare(parts[1], expected)
 }
 
-function extractInboundMessages(payload: any): MetaWebhookMessage[] {
+// Maps quick reply payloads to natural language Vicky understands
+const BUTTON_PAYLOAD_MAP: Record<string, string> = {
+  REENGAGEMENT_YES:   "Sí, me interesa coordinar una reunión",
+  REENGAGEMENT_NO:    "No me interesa por ahora, gracias",
+  NOSHOW_RESCHEDULE:  "Sí, quiero reagendar la reunión",
+  NOSHOW_NO:          "No, gracias",
+  REACTIVATION_YES:   "Sí, me gustaría retomar",
+  REACTIVATION_NO:    "No gracias",
+}
+
+function extractInboundMessages(payload: any): (MetaWebhookMessage & { receiverPhoneId?: string })[] {
   const entries = Array.isArray(payload?.entry) ? payload.entry : []
-  const result: MetaWebhookMessage[] = []
+  const result: (MetaWebhookMessage & { receiverPhoneId?: string })[] = []
 
   for (const entry of entries) {
     const changes = Array.isArray(entry?.changes) ? entry.changes : []
     for (const change of changes) {
       const value = change?.value
+      const receiverPhoneId = value?.metadata?.phone_number_id as string | undefined
       const messages = Array.isArray(value?.messages) ? value.messages : []
       for (const message of messages) {
         const from = typeof message?.from === "string" ? message.from : ""
         if (!from) continue
+
+        // Quick reply button tap (template buttons)
+        let bodyText = typeof message?.text?.body === "string" ? message.text.body : ""
+        let msgType = message?.type || "unknown"
+
+        if (message?.type === "button") {
+          const payload = message?.button?.payload as string | undefined
+          const mapped = payload ? BUTTON_PAYLOAD_MAP[payload] : undefined
+          bodyText = mapped || message?.button?.text || ""
+          msgType = "text"
+        } else if (message?.type === "interactive") {
+          const btnPayload = message?.interactive?.button_reply?.id as string | undefined
+          const mapped = btnPayload ? BUTTON_PAYLOAD_MAP[btnPayload] : undefined
+          bodyText = mapped || message?.interactive?.button_reply?.title || ""
+          msgType = "text"
+        }
+
         result.push({
           id: typeof message?.id === "string" ? message.id : "",
           from,
-          type: message?.type || "unknown",
-          text: {
-            body: typeof message?.text?.body === "string" ? message.text.body : "",
-          },
+          type: msgType,
+          text: { body: bodyText },
+          receiverPhoneId,
         })
       }
     }
@@ -382,7 +412,7 @@ async function persistConversationSnapshot(state: ConversationState) {
   })
 }
 
-async function pushLeadToCrm(state: ConversationState): Promise<string | null> {
+async function pushLeadToCrm(state: ConversationState, ownerEmail?: string): Promise<string | null> {
   if (!state.lead) return null
   await saveLead(state)
   const url = getEnv("CRM_LEAD_WEBHOOK_URL")
@@ -398,6 +428,7 @@ async function pushLeadToCrm(state: ConversationState): Promise<string | null> {
         conversation: state.messages,
         source: "whatsapp_agent_vic",
         utm: state.utm || null,
+        ...(ownerEmail ? { ownerEmail } : {}),
       }),
       cache: "no-store",
     })
@@ -447,6 +478,9 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
     } catch { /* mantener el ISO original si falla */ }
     contextParts.push({ role: "user", content: `[REUNION_CONFIRMADA] Este prospecto ya tiene una reunión agendada para el ${slotFormatted}. Si pregunta por su reunión, confirmar la fecha. Si pide reagendar o pide horarios disponibles, mostrar nuevas opciones de disponibilidad.` })
     contextParts.push({ role: "assistant", content: "Entendido, la reunión ya está confirmada." })
+  } else if (leadFields) {
+    contextParts.push({ role: "user", content: `[LEAD_PREVIO] Este prospecto ya nos había contactado. Salúdalo por nombre, confirma sus datos antes de continuar.` })
+    contextParts.push({ role: "assistant", content: "Entendido." })
   }
   if (extraContext) {
     contextParts.push({ role: "user", content: extraContext })
@@ -474,6 +508,43 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
 
   const payload = await response.json()
   return typeof payload?.message === "string" ? payload.message.trim() : ""
+}
+
+// Zoho session creation removida del webhook — se hace en el cron de conciliación
+// para no bloquear la respuesta al usuario
+
+async function markAsRead(messageId: string) {
+  if (!messageId) return
+  const accessToken = getEnv("WHATSAPP_ACCESS_TOKEN")
+  const phoneNumberId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
+  if (!accessToken || !phoneNumberId) return
+  await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: messageId }),
+    cache: "no-store",
+  }).catch(() => {})
+}
+
+async function sendTypingIndicator(to: string, replyLength: number) {
+  const accessToken = getEnv("WHATSAPP_ACCESS_TOKEN")
+  const phoneNumberId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
+  if (accessToken && phoneNumberId) {
+    await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "typing_indicator",
+        typing_indicator: { type: "text" },
+      }),
+      cache: "no-store",
+    }).catch(() => {})
+  }
+  const delayMs = Math.min(3500, Math.max(800, replyLength * 12))
+  await new Promise(r => setTimeout(r, delayMs))
 }
 
 async function sendWhatsAppText(to: string, text: string) {
@@ -523,6 +594,34 @@ function scheduleInactivityEvaluation(contact: string) {
     state.lastEvaluation = evaluation
     await pushEvaluation(state, evaluation)
     await persistConversationSnapshot(state)
+
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://geovictoria-whatsapp-agent.vercel.app"
+
+    // Actualizar sesión en Zoho con score y transcripción al cierre
+    if (state.zohoSessionId) {
+      const transcript = state.messages
+        .map(m => `[${m.role === "user" ? "Usuario" : "Vicky"}] ${m.content}`)
+        .join("\n")
+      const durationMs = state.lastUserAt
+        ? new Date(state.lastUserAt).getTime() - new Date(state.sessionStartedAt || state.startedAt).getTime()
+        : 0
+      fetch(`${baseUrl}/api/crm/zoho-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update",
+          sessionId: state.zohoSessionId,
+          score: evaluation.score_total,
+          transcript,
+          durationSeconds: Math.round(durationMs / 1000),
+          etapa: state.meetingBooked ? "reunion_agendada"
+            : state.zohoLeadId ? "lead_capturado"
+            : "sin_conversion",
+        }),
+        cache: "no-store",
+      }).catch(() => {})
+    }
+
   }, INACTIVITY_MINUTES * 60 * 1000)
 }
 
@@ -550,6 +649,9 @@ async function processInboundMessages(payload: any, request: Request) {
     // Deduplicación por message ID — previene doble procesamiento por retries de Meta
     const msgId = incoming.id || ""
     if (isDuplicate(msgId)) continue
+
+    // Marcar mensaje como leído inmediatamente (muestra ticks azules)
+    markAsRead(msgId).catch(() => {})
 
     if (incoming.type !== "text") {
       await sendWhatsAppText(from, "Solo proceso mensajes de texto. ¿En qué puedo ayudarte con GeoVictoria?")
@@ -604,7 +706,61 @@ async function processInboundMessages(payload: any, request: Request) {
       }
     }
 
+    // ── Detección de nueva sesión (6h de inactividad o primer contacto) ──
+    const SESSION_GAP_MS = 6 * 60 * 60 * 1000
+    const currentState = conversations.get(from)
+    const lastActivity = currentState?.lastUserAt ? new Date(currentState.lastUserAt).getTime() : 0
+    const isNewSession = !currentState?.sessionStartedAt || (Date.now() - lastActivity > SESSION_GAP_MS)
+    let activeSessionStartedAt: string | undefined
+    if (isNewSession) {
+      activeSessionStartedAt = isoNow()
+      const sessionNum = (currentState?.sessionNumber || 0) + 1
+      if (currentState) {
+        currentState.sessionStartedAt = activeSessionStartedAt
+        currentState.sessionNumber = sessionNum
+        currentState.zohoSessionId = undefined
+      } else {
+        const newState: ConversationState = {
+          contact: from, startedAt: activeSessionStartedAt, updatedAt: activeSessionStartedAt,
+          messages: [], sessionStartedAt: activeSessionStartedAt, sessionNumber: sessionNum,
+        }
+        conversations.set(from, newState)
+      }
+    } else {
+      activeSessionStartedAt = currentState?.sessionStartedAt
+    }
+
     const stateAfterUser = appendMessage(from, "user", prompt)
+
+    // Persistir session_started_at directamente en Supabase si es sesión nueva
+    if (isNewSession && activeSessionStartedAt) {
+      const supabaseUrl = (process.env.SUPABASE_URL || "").trim()
+      const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+      if (supabaseUrl && supabaseKey) {
+        const sessionNum = stateAfterUser.sessionNumber || 1
+        try {
+          await fetch(`${supabaseUrl}/rest/v1/vic_conversations?on_conflict=contact`, {
+            method: "POST",
+            headers: {
+              apikey: supabaseKey,
+              Authorization: `Bearer ${supabaseKey}`,
+              "Content-Type": "application/json",
+              Prefer: "resolution=merge-duplicates",
+            },
+            body: JSON.stringify([{
+              contact: from,
+              started_at: activeSessionStartedAt,
+              updated_at: activeSessionStartedAt,
+              session_started_at: activeSessionStartedAt,
+              session_number: sessionNum,
+              zoho_session_id: null,
+              meeting_booked: false,
+            }]),
+            cache: "no-store",
+          })
+        } catch { /* fallo silencioso */ }
+      }
+    }
 
     // Si hay lead con reunion_agendada y piden horarios → mostrar slots directamente sin LLM
     const existingLead = stateAfterUser.lead
@@ -612,7 +768,11 @@ async function processInboundMessages(payload: any, request: Request) {
 
     const hasLeadData = !!(existingLead?.email || existingLead?.correo)
     const alreadyHasSlots = (stateAfterUser.pendingSlots?.length ?? 0) > 0
-    if (existingLead && hasLeadData && wantsSlots && !alreadyHasSlots && !stateAfterUser.meetingBooked && !existingLead.meetingSlot) {
+    // Si el lead ya está completo (nombre + empresa + email) y el mensaje es afirmativo,
+    // ir directo a slots sin pasar por el LLM — esto es el happy path del re-engagement
+    const hasCompleteData = hasLeadData && !!existingLead?.nombre && !!existingLead?.empresa
+    const isAffirmative = /\bsi+\b|sí|ok\b|dale|claro|perfecto|quiero|agend|interesa|disponib/i.test(prompt)
+    if (existingLead && hasLeadData && (wantsSlots || (hasCompleteData && isAffirmative)) && !alreadyHasSlots && !stateAfterUser.meetingBooked && !existingLead.meetingSlot) {
       const country = existingLead.pais || inferCountry(from)
       // Siempre refrescar slots para evitar datos desactualizados
       const slots = await getAvailableSlots(country)
@@ -652,19 +812,31 @@ async function processInboundMessages(payload: any, request: Request) {
           timeZone: getTimezone(country),
         })
 
+        const slotLabel = formatSlotsForProspect([slot], leadData.pais || inferCountry(from))
+        const meetingLine = result.meetingUrl
+          ? `\n\n🔗 Enlace: ${result.meetingUrl}`
+          : `\n\nRecibirás la confirmación en ${leadData.email || leadData.correo} con el enlace.`
         const confirmMsg = result.success
-          ? `¡Perfecto! ✅ Reunión confirmada.\n\nRecibirás un email de confirmación en ${leadData.email || leadData.correo} con el enlace y todos los detalles.\n\n¡Nos vemos pronto! 😊`
+          ? `¡Perfecto! ✅ Reunión confirmada para el ${slotLabel}.${meetingLine}\n\n¡Nos vemos pronto! 😊`
           : `Tuve un problema al agendar. Un ejecutivo te contactará a ${leadData.email || leadData.correo} para confirmar el horario.`
 
         if (result.success) {
           stateAfterUser.meetingBooked = true
           stateAfterUser.meetingBookingId = result.bookingId
           stateAfterUser.pendingSlots = []
-          if (stateAfterUser.lead) stateAfterUser.lead.meetingSlot = slot
+          if (stateAfterUser.lead) {
+            stateAfterUser.lead.meetingSlot = slot
+            stateAfterUser.lead.reunion_agendada = true
+          }
 
-          // Actualizar owner del lead en Zoho con el host asignado por Cal.com
           const organizerEmail = result.organizerEmail
-          if (organizerEmail && stateAfterUser.zohoLeadId) {
+
+          if (!stateAfterUser.zohoLeadId && stateAfterUser.lead) {
+            // Re-engagement lead: create with correct owner immediately
+            const newLeadId = await pushLeadToCrm(stateAfterUser, organizerEmail || undefined)
+            if (newLeadId) stateAfterUser.zohoLeadId = newLeadId
+          } else if (organizerEmail && stateAfterUser.zohoLeadId) {
+            // Lead already exists: update owner to assigned host (fire-and-forget)
             const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
             fetch(crmUrl.replace("/zoho-lead", "/zoho-owner"), {
               method: "POST",
@@ -740,15 +912,18 @@ async function processInboundMessages(payload: any, request: Request) {
       sanitized.telefono = formatPhone(from)
       sanitized.pais = inferCountry(from)
       stateAfterAssistant.lead = sanitized
-      const zohoLeadId = await pushLeadToCrm(stateAfterAssistant)
-      if (zohoLeadId) stateAfterAssistant.zohoLeadId = zohoLeadId
-
-      // Siempre buscar slots al capturar lead — mostrarlos proactivamente
       const country = sanitized.pais || inferCountry(from)
-      const slots = await getAvailableSlots(country)
+
+      // Crear lead SIN reunión → inmediatamente con owner = Vicky
+      // Si hay reunión → se crea en el momento del booking con owner = host de Cal.com
+      const [zohoLeadId, slots] = await Promise.all([
+        pushLeadToCrm(stateAfterAssistant),  // siempre crear — si luego hay reunión se actualiza owner
+        getAvailableSlots(country),
+      ])
+      if (zohoLeadId) stateAfterAssistant.zohoLeadId = zohoLeadId
       stateAfterAssistant.pendingSlots = slots
 
-      // Enviar slots proactivamente en mensaje separado
+      // Mostrar slots proactivamente
       if (slots.length > 0) {
         const name = sanitized.nombre?.split(" ")[0] || ""
         const empresa = sanitized.empresa ? ` en ${sanitized.empresa}` : ""
@@ -778,16 +953,26 @@ async function processInboundMessages(payload: any, request: Request) {
         stateAfterAssistant.meetingBooked = true
         stateAfterAssistant.meetingBookingId = result.bookingId
         stateAfterAssistant.pendingSlots = []
-        if (stateAfterAssistant.lead) stateAfterAssistant.lead.meetingSlot = slot
+        if (stateAfterAssistant.lead) {
+          stateAfterAssistant.lead.meetingSlot = slot
+          stateAfterAssistant.lead.reunion_agendada = true
+        }
 
-        if (result.organizerEmail && stateAfterAssistant.zohoLeadId) {
+        const slotOrganizerEmail = result.organizerEmail
+
+        if (!stateAfterAssistant.zohoLeadId && stateAfterAssistant.lead) {
+          // Re-engagement lead: create with correct owner immediately
+          const newLeadId = await pushLeadToCrm(stateAfterAssistant, slotOrganizerEmail || undefined)
+          if (newLeadId) stateAfterAssistant.zohoLeadId = newLeadId
+        } else if (slotOrganizerEmail && stateAfterAssistant.zohoLeadId) {
+          // Lead already exists: update owner to assigned host (fire-and-forget)
           const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
           fetch(crmUrl.replace("/zoho-lead", "/zoho-owner"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               leadId: stateAfterAssistant.zohoLeadId,
-              ownerEmail: result.organizerEmail,
+              ownerEmail: slotOrganizerEmail,
             }),
             cache: "no-store",
           }).catch(() => {})
@@ -801,8 +986,10 @@ async function processInboundMessages(payload: any, request: Request) {
     }
 
     await persistConversationSnapshot(stateAfterAssistant)
+
     scheduleInactivityEvaluation(from)
     try {
+      await sendTypingIndicator(from, finalReply.length)
       await sendWhatsAppText(from, finalReply)
     } catch {
       // fallo silencioso — Meta reintentará

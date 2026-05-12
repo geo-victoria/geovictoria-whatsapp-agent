@@ -14,6 +14,7 @@ type UTMData = {
 type LeadPayload = {
   type?: string
   contact?: string
+  ownerEmail?: string
   lead?: {
     nombre?: string
     empresa?: string
@@ -53,6 +54,46 @@ function splitName(fullName?: string) {
     firstName: parts.slice(0, -1).join(" "),
     lastName: parts.slice(-1).join(" "),
   }
+}
+
+// Maps utm_source + utm_medium to Zoho Lead_Source picklist
+function mapLeadSource(utm: { utm_source?: string; utm_medium?: string }): string | undefined {
+  const src = (utm.utm_source || "").toLowerCase()
+  const med = (utm.utm_medium || "").toLowerCase()
+  if (src === "organic" || med === "seo" || med === "organic") return "SEO"
+  if (src === "google" && (med === "cpc" || med === "ppc" || med === "paid")) return "Google Ads"
+  if (src === "linkedin") return "LinkedIn"
+  if (src === "facebook" || src === "instagram" || src === "meta") return "Meta Ads"
+  if (src === "referral") return "Referral"
+  if (src === "email") return "Email"
+  if (src) return src  // pass through unknown sources as-is
+  return undefined
+}
+
+// Maps number of employees to Zoho Rango_de_Empleados picklist value
+function mapRangoEmpleados(trabajadores?: string): string | undefined {
+  const n = parseInt((trabajadores || "").replace(/\D/g, ""))
+  if (isNaN(n) || n <= 0) return undefined
+  if (n <= 19)   return "1 - 19"
+  if (n <= 49)   return "20 - 49"
+  if (n <= 99)   return "50 - 99"
+  if (n <= 199)  return "100 - 199"
+  if (n <= 499)  return "200 - 499"
+  if (n <= 999)  return "500 - 999"
+  if (n <= 1999) return "1000 - 1999"
+  if (n <= 2999) return "2000 - 2999"
+  if (n <= 4999) return "3000 - 4999"
+  return "5000 o más"
+}
+
+// Maps Vicky's product descriptions to Zoho picklist actual_values
+function mapProductoSolucion(necesidad?: string): string | undefined {
+  if (!necesidad) return undefined
+  const n = necesidad.toLowerCase()
+  if (n.includes("acceso")) return "Control de acceso"
+  if (n.includes("comedor")) return "Servicio de  comedor" // double space is intentional — CRM typo
+  if (n.includes("asistencia")) return "Control de Asistencia"
+  return undefined
 }
 
 function sanitize(text: string | undefined, maxLen = 200): string {
@@ -105,6 +146,22 @@ async function getZohoAccessToken() {
   return String(payload.access_token)
 }
 
+async function resolveOwnerId(email: string, token: string, apiDomain: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${apiDomain}/crm/v2/users?type=AllUsers`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const users = (data?.users || []) as Array<{ id: string; email: string }>
+    const match = users.find((u) => u.email?.toLowerCase() === email.toLowerCase())
+    return match?.id || null
+  } catch {
+    return null
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as LeadPayload
@@ -116,10 +173,16 @@ export async function POST(request: Request) {
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
 
-    const ownerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000000211701"
+    // Resolve owner: use provided email, fall back to Vicky's default ID
+    const vickyOwnerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000484500876"
+    let ownerId = vickyOwnerId
+    if (body.ownerEmail) {
+      const resolved = await resolveOwnerId(body.ownerEmail, accessToken, apiDomain)
+      if (resolved) ownerId = resolved
+    }
+
     const utm = body.utm || {}
     const record = {
-      Owner: { id: ownerId },
       First_Name: sanitize(names.firstName, 100),
       Last_Name: sanitize(names.lastName, 100) || "Prospecto",
       Company: sanitize(lead.empresa, 200) || "Prospecto WhatsApp",
@@ -128,6 +191,10 @@ export async function POST(request: Request) {
       Country: sanitize(lead.pais, 100) || undefined,
       City: sanitize(lead.ciudad, 100) || undefined,
       Canal: "WhatsApp",
+      Lead_Source: mapLeadSource(utm) || getEnv("ZOHO_DEFAULT_LEAD_SOURCE") || "SEO",
+      ...(mapProductoSolucion(lead.necesidad) ? { Producto_Soluci_n: mapProductoSolucion(lead.necesidad) } : {}),
+      ...(mapRangoEmpleados(lead.trabajadores) ? { Rango_de_Empleados: mapRangoEmpleados(lead.trabajadores) } : {}),
+      ...(lead.trabajadores ? { N_Empleados_que_marcan: parseInt((lead.trabajadores).replace(/\D/g, "")) || undefined } : {}),
       // Campos de Google Ads / UTM
       ...(utm.gclid ? { ID_de_clic_en_anuncio_de_Google: utm.gclid } : {}),
       ...(utm.utm_medium ? { Medium: utm.utm_medium } : {}),
@@ -146,11 +213,15 @@ export async function POST(request: Request) {
         `Contacto WA: ${body.contact || ""}`,
         utm.utm_source ? `UTM Source: ${utm.utm_source}` : "",
         utm.fbclid ? `FB Click ID: ${utm.fbclid}` : "",
+        transcript ? `\n--- Transcripción ---\n${transcript}` : "",
       ]
         .filter(Boolean)
         .join("\n")
         .trim(),
-      Conversaci_n_Botmaker: transcript || undefined,
+      Conversaci_n_Botmaker: body.contact
+        ? `https://go.botmaker.com/#/conversations/${body.contact.replace(/\D/g, "")}`
+        : undefined,
+      Owner: { id: ownerId },
     }
 
     const createResponse = await fetch(`${apiDomain}/crm/v2/${moduleName}`, {

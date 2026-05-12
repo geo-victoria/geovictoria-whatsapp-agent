@@ -53,7 +53,7 @@ async function logReengagement(contact: string, scenario: string, template: stri
 }
 
 // ─── Botmaker send ────────────────────────────────────────────────────────────
-async function sendTemplate(phone: string, templateName: string): Promise<boolean> {
+async function sendTemplate(phone: string, templateName: string, nombre?: string): Promise<boolean> {
   const res = await fetch("https://api.botmaker.com/v2.0/notifications", {
     method: "POST",
     headers: {
@@ -65,7 +65,7 @@ async function sendTemplate(phone: string, templateName: string): Promise<boolea
       name: `reengagement_${templateName}_${Date.now()}`,
       intentIdOrName: templateName,
       channelId: BM_CHANNEL,
-      contacts: [{ contactId: phone }],
+      contacts: [{ contactId: phone, ...(nombre ? { variables: { nombre } } : {}) }],
     }),
     cache: "no-store",
   })
@@ -111,11 +111,11 @@ async function processLeadsSinReunion(token: string) {
     const attempts = await getReengagementCount(phone, "sin_reunion")
     if (attempts >= 3) continue
 
-    const ok = await sendTemplate(phone, "gv_vicky_sin_reunion_v2")
+    const name = [lead.First_Name, lead.Last_Name].filter(Boolean).join(" ") || "Prospecto"
+    const ok = await sendTemplate(phone, "gv_vicky_sin_reunion_v3", lead.First_Name || undefined)
     if (!ok) continue
 
-    const name = [lead.First_Name, lead.Last_Name].filter(Boolean).join(" ") || "Prospecto"
-    const noteContent = `📱 Re-engagement WhatsApp enviado por Vicky\nTemplate: gv_vicky_sin_reunion_v2\nFecha: ${new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })}\nIntento: ${attempts + 1}/3\nMotivo: Lead sin reunión agendada`
+    const noteContent = `📱 Re-engagement WhatsApp enviado por Vicky\nTemplate: gv_vicky_sin_reunion_v3\nFecha: ${new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })}\nIntento: ${attempts + 1}/3\nMotivo: Lead sin reunión agendada`
     await createZohoNote(token, "Leads", lead.id, "WhatsApp Vicky - Seguimiento reunión", noteContent)
     await logReengagement(phone, "sin_reunion", "gv_vicky_sin_reunion_v2", lead.id, attempts + 1)
     sent++
@@ -167,10 +167,10 @@ async function processNoShows(token: string) {
     const attempts = await getReengagementCount(phone, "noshow")
     if (attempts >= 2) continue
 
-    const ok = await sendTemplate(phone, "gv_vicky_noshow_v2")
+    const ok = await sendTemplate(phone, "gv_vicky_noshow_v3", contact?.firstName || undefined)
     if (!ok) continue
 
-    const noteContent = `📱 Re-engagement WhatsApp enviado por Vicky\nTemplate: gv_vicky_noshow_v2\nFecha: ${new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })}\nIntento: ${attempts + 1}/2\nMotivo: No se conectó a la reunión programada`
+    const noteContent = `📱 Re-engagement WhatsApp enviado por Vicky\nTemplate: gv_vicky_noshow_v3\nFecha: ${new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })}\nIntento: ${attempts + 1}/2\nMotivo: No se conectó a la reunión programada`
     await createZohoNote(token, "Deals", dealId, "WhatsApp Vicky - No-show reunión", noteContent)
     await logReengagement(phone, "noshow", "gv_vicky_noshow_v2", dealId, attempts + 1)
     sent++
@@ -194,19 +194,131 @@ async function processReactivaciones() {
     const attempts = await getReengagementCount(phone, "reactivacion")
     if (attempts >= 1) continue
 
-    const ok = await sendTemplate(phone, "gv_vicky_retomar_v2")
+    const ok = await sendTemplate(phone, "gv_vicky_retomar_v3")
     if (!ok) continue
 
-    await logReengagement(phone, "reactivacion", "gv_vicky_retomar_v2", undefined, 1)
+    await logReengagement(phone, "reactivacion", "gv_vicky_retomar_v3", undefined, 1)
     sent++
   }
 
   return sent
 }
 
+// ─── Conciliación Supabase → Zoho VictorIA ───────────────────────────────────
+async function processConsolidacionZoho(token: string): Promise<number> {
+  // Buscar conversaciones sin registro en VictorIA (sin zoho_session_id)
+  // que tengan al menos 30 minutos de antigüedad
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+  const supabaseUrl = (SUPABASE_URL).trim()
+  const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+  if (!supabaseUrl || !supabaseKey) return 0
+
+  const res = await fetch(
+    `https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?zoho_session_id=is.null&updated_at=lt.${cutoff}&select=contact,lead,zoho_lead_id,session_number,session_started_at,meeting_booked&limit=50`,
+    { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }, cache: "no-store" }
+  )
+  const conversations = await res.json() as Array<Record<string, unknown>>
+  if (!Array.isArray(conversations) || conversations.length === 0) return 0
+
+  const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  let synced = 0
+
+  for (const conv of conversations) {
+    const contact = String(conv.contact || "")
+    if (!contact) continue
+
+    const lead = conv.lead as Record<string, unknown> | null
+    const zohoLeadId = conv.zoho_lead_id as string | null
+    const meetingBooked = Boolean(conv.meeting_booked)
+
+    // Buscar si ya existe en Zoho por teléfono (evita duplicados)
+    const searchRes = await fetch(
+      `${apiDomain}/crm/v2/VictorIA_Dapta_Whatsapp/search?criteria=((Tel_fono_Contacto:equals:${contact}))&fields=id&per_page=1`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" }
+    )
+    const searchData = await searchRes.json()
+    let sessionId: string | null = searchData?.data?.[0]?.id || null
+
+    if (!sessionId) {
+      // Crear nuevo registro
+      const nombre = String(lead?.nombre || "")
+      const nameParts = nombre.trim().split(" ")
+      const etapa = meetingBooked ? "reunion_agendada" : zohoLeadId ? "lead_capturado" : "iniciada"
+      const record: Record<string, unknown> = {
+        Name: nombre ? `${nombre}${lead?.empresa ? ` - ${lead.empresa}` : ""}` : `WA ${contact}`,
+        Canal_Interacci_n: "WhatsApp/Vicky",
+        Tel_fono_Contacto: contact,
+        Etapa_Funnel: etapa,
+        N_mero_Intento: Number(conv.session_number) || 1,
+        appointment_booked: meetingBooked,
+      }
+      if (nameParts.length > 1) { record.first_name = nameParts.slice(0, -1).join(" "); record.last_name = nameParts.slice(-1)[0] }
+      else if (nameParts[0]) record.first_name = nameParts[0]
+      if (lead?.empresa) record.company = String(lead.empresa)
+      if (lead?.email || lead?.correo) record.Email = String(lead?.email || lead?.correo)
+      if (zohoLeadId) record.Lead_Contactado = { id: zohoLeadId }
+
+      const createRes = await fetch(`${apiDomain}/crm/v2/VictorIA_Dapta_Whatsapp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Zoho-oauthtoken ${token}` },
+        body: JSON.stringify({ data: [record] }),
+        cache: "no-store",
+      })
+      const createData = await createRes.json()
+      sessionId = createData?.data?.[0]?.details?.id || null
+    }
+
+    if (sessionId) {
+      // Guardar zoho_session_id en Supabase
+      await fetch(`https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?contact=eq.${contact}`, {
+        method: "PATCH",
+        headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ zoho_session_id: sessionId }),
+        cache: "no-store",
+      })
+      synced++
+    }
+  }
+
+  return synced
+}
+
+// ─── Vincular Lead_Contactado en registros VictorIA existentes ───────────────
+async function processVictoriaLeadLinks(token: string): Promise<number> {
+  const supabaseUrl = SUPABASE_URL.trim()
+  const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+  if (!supabaseUrl || !supabaseKey) return 0
+
+  // Conversaciones que tienen ambos IDs — el link en Zoho podría estar faltando
+  const res = await fetch(
+    `https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?zoho_session_id=not.null&zoho_lead_id=not.null&select=zoho_session_id,zoho_lead_id&limit=100`,
+    { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }, cache: "no-store" }
+  )
+  const rows = await res.json() as Array<{ zoho_session_id: string; zoho_lead_id: string }>
+  if (!Array.isArray(rows) || rows.length === 0) return 0
+
+  const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  let linked = 0
+
+  // Actualizar en lote de 10 para no saturar la API de Zoho
+  const chunks = Array.from({ length: Math.ceil(rows.length / 10) }, (_, i) => rows.slice(i * 10, i * 10 + 10))
+  for (const chunk of chunks) {
+    const data = chunk.map(r => ({ id: r.zoho_session_id, Lead_Contactado: { id: r.zoho_lead_id } }))
+    const putRes = await fetch(`${apiDomain}/crm/v2/VictorIA_Dapta_Whatsapp`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Zoho-oauthtoken ${token}` },
+      body: JSON.stringify({ data }),
+      cache: "no-store",
+    })
+    const putData = await putRes.json()
+    linked += (putData?.data || []).filter((d: any) => d?.status === "success").length
+  }
+
+  return linked
+}
+
 // ─── Handler principal ────────────────────────────────────────────────────────
 export async function GET(request: Request) {
-  // Verificar que sea llamada autorizada (cron de Vercel o llamada manual)
   const authHeader = request.headers.get("authorization")
   const cronSecret = (process.env.CRON_SECRET || "").trim()
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
@@ -216,16 +328,20 @@ export async function GET(request: Request) {
   try {
     const token = await getZohoToken()
 
-    const [sinReunion, noShows, reactivaciones] = await Promise.allSettled([
+    const [sinReunion, noShows, reactivaciones, consolidacion, victoriaLinks] = await Promise.allSettled([
       processLeadsSinReunion(token),
       processNoShows(token),
       processReactivaciones(),
+      processConsolidacionZoho(token),
+      processVictoriaLeadLinks(token),
     ])
 
     const result = {
       sin_reunion: sinReunion.status === "fulfilled" ? sinReunion.value : 0,
       noshow: noShows.status === "fulfilled" ? noShows.value : 0,
       reactivacion: reactivaciones.status === "fulfilled" ? reactivaciones.value : 0,
+      consolidacion_zoho: consolidacion.status === "fulfilled" ? consolidacion.value : 0,
+      victoria_links: victoriaLinks.status === "fulfilled" ? victoriaLinks.value : 0,
       ran_at: new Date().toISOString(),
     }
 

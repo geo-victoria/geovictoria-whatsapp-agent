@@ -48,6 +48,10 @@ export type ConversationState = {
   meetingBooked?: boolean
   meetingBookingId?: string
   pendingSlots?: string[]
+  // Session tracking
+  zohoSessionId?: string
+  sessionStartedAt?: string
+  sessionNumber?: number
 }
 
 function getEnv(name: string) {
@@ -113,6 +117,9 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     zoho_lead_id: state.zohoLeadId || null,
     meeting_booked: state.meetingBooked || false,
     meeting_booking_id: state.meetingBookingId || null,
+    zoho_session_id: state.zohoSessionId || null,
+    session_started_at: state.sessionStartedAt || state.startedAt || null,
+    session_number: state.sessionNumber || 1,
   }
 
   const upsertResult = (await supabaseRequest("vic_conversations?on_conflict=contact", {
@@ -183,7 +190,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
   if (!isSupabaseConfigured()) return null
 
   const rows = (await supabaseRequest(
-    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,zoho_lead_id,meeting_booked,meeting_booking_id&contact=eq.${encodeURIComponent(contact)}&limit=1`,
+    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,zoho_lead_id,meeting_booked,meeting_booking_id,zoho_session_id,session_started_at,session_number&contact=eq.${encodeURIComponent(contact)}&limit=1`,
     { method: "GET" },
   )) as Array<{
     id: string
@@ -197,6 +204,9 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     zoho_lead_id: string | null
     meeting_booked: boolean | null
     meeting_booking_id: string | null
+    zoho_session_id: string | null
+    session_started_at: string | null
+    session_number: number | null
   }> | null
 
   const one = rows?.[0]
@@ -219,6 +229,9 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     zohoLeadId: one.zoho_lead_id || undefined,
     meetingBooked: one.meeting_booked || undefined,
     meetingBookingId: one.meeting_booking_id || undefined,
+    zohoSessionId: one.zoho_session_id || undefined,
+    sessionStartedAt: one.session_started_at || undefined,
+    sessionNumber: one.session_number || undefined,
   }
 }
 
