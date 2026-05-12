@@ -8,14 +8,10 @@ type LeadData = {
   telefono?: string; pais?: string; trabajadores?: string; necesidad?: string
   idioma?: string; reunion_agendada?: boolean | string; preferencia_horario?: string; meetingSlot?: string
 }
-type UTMData = {
-  utm_source?: string; utm_medium?: string; utm_campaign?: string
-  utm_content?: string; utm_term?: string; gclid?: string; fbclid?: string; landing_page?: string
-}
 type ConversationState = {
   contact: string; startedAt: string; updatedAt: string; lastUserAt?: string
   messages: ConversationMessage[]; lead?: LeadData; pendingSlots?: string[]
-  meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string; utm?: UTMData
+  meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string
 }
 
 const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
@@ -118,7 +114,7 @@ async function pushLeadToCrm(state: ConversationState): Promise<string | null> {
       body: JSON.stringify({
         type: "lead_captured", contact: state.contact,
         lead: state.lead, conversation: state.messages,
-        source: "whatsapp_botmaker_vic", utm: state.utm || null,
+        source: "whatsapp_botmaker_vic",
       }),
       cache: "no-store",
     })
@@ -152,6 +148,10 @@ async function callVicSalesAgent(
 
   if (lead?.meetingSlot) {
     contextParts.push({ role: "user", content: `[REUNION_CONFIRMADA] Reunión agendada para el ${lead.meetingSlot}. Si quiere reagendar, mostrar nuevas opciones.` })
+    contextParts.push({ role: "assistant", content: "Entendido." })
+  } else if (leadFields && !lead?.meetingSlot) {
+    // Prospecto recurrente con datos previos pero sin reunión activa
+    contextParts.push({ role: "user", content: `[LEAD_PREVIO] Este prospecto ya nos había contactado. Salúdalo por nombre, confirma sus datos antes de continuar.` })
     contextParts.push({ role: "assistant", content: "Entendido." })
   }
 
@@ -215,16 +215,7 @@ export async function POST(request: Request) {
       }
     } catch { /* continuar con lo que haya en memoria */ }
 
-    // Extraer UTMs del token [REF:...] si es el primer mensaje
     const state = getConversation(contact)
-    if (!state.utm) {
-      const refMatch = message.match(/\[REF:([A-Za-z0-9+/=]+)\]/)
-      if (refMatch) {
-        try {
-          state.utm = JSON.parse(decodeURIComponent(escape(atob(refMatch[1])))) as UTMData
-        } catch { /* ignorar */ }
-      }
-    }
 
     const stateAfterUser = appendMessage(contact, "user", message)
     const existingLead = stateAfterUser.lead
@@ -276,11 +267,35 @@ export async function POST(request: Request) {
           stateAfterUser.pendingSlots = []
           if (stateAfterUser.lead) stateAfterUser.lead.meetingSlot = slot
 
-          if (result.organizerEmail && stateAfterUser.zohoLeadId) {
-            fetch(getEnv("CRM_LEAD_WEBHOOK_URL").replace("/zoho-lead", "/zoho-owner"), {
+          const crmBase = getEnv("CRM_LEAD_WEBHOOK_URL")
+          const zohoLeadId = stateAfterUser.zohoLeadId
+          if (result.organizerEmail && zohoLeadId) {
+            fetch(crmBase.replace("/zoho-lead", "/zoho-owner"), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ leadId: stateAfterUser.zohoLeadId, ownerEmail: result.organizerEmail }),
+              body: JSON.stringify({ leadId: zohoLeadId, ownerEmail: result.organizerEmail }),
+              cache: "no-store",
+            }).catch(() => {})
+          }
+          if (zohoLeadId) {
+            const zohoMeetingUrl = crmBase.replace("/zoho-lead", "/zoho-meeting")
+            fetch(zohoMeetingUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                leadId: zohoLeadId,
+                slot,
+                slotEnd: new Date(new Date(slot).getTime() + 45 * 60 * 1000).toISOString(),
+                meetingUrl: result.meetingUrl,
+                prospectName: leadData.nombre,
+                prospectEmail: leadData.email || leadData.correo,
+                prospectTimezone: getTimezone(country),
+                hostEmail: result.organizerEmail || "onboarding@geovictoria.com",
+                hostTimezone: "America/Santiago",
+                empresa: leadData.empresa,
+                trabajadores: leadData.trabajadores,
+                necesidad: leadData.necesidad,
+              }),
               cache: "no-store",
             }).catch(() => {})
           }
