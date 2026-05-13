@@ -1,3 +1,4 @@
+import { getZohoAccessToken } from '@/lib/zoho-token'
 import { NextResponse } from "next/server"
 
 type MeetingPayload = {
@@ -20,23 +21,7 @@ function getEnv(name: string) {
   return (process.env[name] || "").trim()
 }
 
-async function getZohoAccessToken() {
-  const accountsDomain = getEnv("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
-  const res = await fetch(`${accountsDomain}/oauth/v2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refresh_token: getEnv("ZOHO_REFRESH_TOKEN"),
-      client_id: getEnv("ZOHO_CLIENT_ID"),
-      client_secret: getEnv("ZOHO_CLIENT_SECRET"),
-      grant_type: "refresh_token",
-    }),
-    cache: "no-store",
-  })
-  const data = await res.json()
-  if (!data?.access_token) throw new Error("No Zoho token")
-  return String(data.access_token)
-}
+
 
 export async function POST(request: Request) {
   try {

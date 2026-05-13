@@ -1,3 +1,4 @@
+import { getZohoAccessToken } from '@/lib/zoho-token'
 import { NextResponse } from "next/server"
 
 type LeadPayload = {
@@ -88,37 +89,7 @@ function buildTranscript(conversation: LeadPayload["conversation"]) {
     .slice(0, 32000)
 }
 
-async function getZohoAccessToken() {
-  const accountsDomain = getEnv("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
-  const clientId = getEnv("ZOHO_CLIENT_ID")
-  const clientSecret = getEnv("ZOHO_CLIENT_SECRET")
-  const refreshToken = getEnv("ZOHO_REFRESH_TOKEN")
 
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error("Faltan credenciales OAuth de Zoho CRM")
-  }
-
-  const response = await fetch(`${accountsDomain}/oauth/v2/token`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      refresh_token: refreshToken,
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: "refresh_token",
-    }),
-    cache: "no-store",
-  })
-
-  const payload = await response.json()
-  if (!response.ok || !payload?.access_token) {
-    throw new Error(`No se pudo obtener access token Zoho: ${JSON.stringify(payload).slice(0, 400)}`)
-  }
-
-  return String(payload.access_token)
-}
 
 async function getBotmakerChatUrl(phone: string): Promise<string | null> {
   const bmToken = getEnv("BOTMAKER_ACCESS_TOKEN")

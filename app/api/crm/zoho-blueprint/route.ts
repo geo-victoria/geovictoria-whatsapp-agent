@@ -1,25 +1,11 @@
+import { getZohoAccessToken } from '@/lib/zoho-token'
 import { NextResponse } from "next/server"
 
 function getEnv(name: string) {
   return (process.env[name] || "").trim()
 }
 
-async function getZohoAccessToken() {
-  const res = await fetch(`${getEnv("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"}/oauth/v2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refresh_token: getEnv("ZOHO_REFRESH_TOKEN"),
-      client_id: getEnv("ZOHO_CLIENT_ID"),
-      client_secret: getEnv("ZOHO_CLIENT_SECRET"),
-      grant_type: "refresh_token",
-    }),
-    cache: "no-store",
-  })
-  const d = await res.json()
-  if (!d?.access_token) throw new Error("No Zoho token")
-  return String(d.access_token)
-}
+
 
 // GET: obtener estado actual del Blueprint y transiciones disponibles
 // POST: ejecutar una transición de Blueprint
