@@ -378,6 +378,29 @@ export async function POST(request: Request) {
     }
 
     await upsertConversationSnapshot(stateAfterAssistant)
+
+    // Enviar tarjeta de contacto de soporte vía Meta API (fire-and-forget)
+    if (stateAfterAssistant.isSupport) {
+      const accessToken = getEnv("WHATSAPP_ACCESS_TOKEN")
+      const phoneNumberId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
+      if (accessToken && phoneNumberId) {
+        fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: contact,
+            type: "contacts",
+            contacts: [{
+              name: { formatted_name: "Soporte GeoVictoria", first_name: "Soporte", last_name: "GeoVictoria" },
+              phones: [{ phone: "+56944013873", type: "CELL", wa_id: "56944013873" }],
+            }],
+          }),
+          cache: "no-store",
+        }).catch(() => {})
+      }
+    }
+
     return NextResponse.json({ reply: finalReply })
 
   } catch (error) {
