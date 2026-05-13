@@ -165,12 +165,11 @@ export async function POST(request: Request) {
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
 
-    // Resolver owner y URL de Botmaker en paralelo
+    // Resolver owner en paralelo con el token — Botmaker URL se actualiza después
     const vickyOwnerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000484500876"
-    const [resolvedOwnerId, botmakerChatUrl] = await Promise.all([
-      body.ownerEmail ? resolveOwnerId(body.ownerEmail, accessToken, apiDomain) : Promise.resolve(null),
-      getBotmakerChatUrl(body.contact || ""),
-    ])
+    const resolvedOwnerId = body.ownerEmail
+      ? await resolveOwnerId(body.ownerEmail, accessToken, apiDomain)
+      : null
     const ownerId = resolvedOwnerId || vickyOwnerId
 
     const record = {
@@ -200,7 +199,6 @@ export async function POST(request: Request) {
         .filter(Boolean)
         .join("\n")
         .trim(),
-      Conversaci_n_Botmaker: botmakerChatUrl || undefined,
       Owner: { id: ownerId },
     }
 
@@ -221,6 +219,19 @@ export async function POST(request: Request) {
     const status = createBody?.data?.[0]?.status || ""
     const details = createBody?.data?.[0]?.details || {}
     const leadId = details?.id || null
+
+    // Actualizar URL de Botmaker después de crear — fire-and-forget
+    if (leadId && body.contact) {
+      getBotmakerChatUrl(body.contact).then((chatUrl) => {
+        if (!chatUrl) return
+        fetch(`${apiDomain}/crm/v2/${moduleName}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Authorization: `Zoho-oauthtoken ${accessToken}` },
+          body: JSON.stringify({ data: [{ id: leadId, Conversaci_n_Botmaker: chatUrl }] }),
+          cache: "no-store",
+        }).catch(() => {})
+      }).catch(() => {})
+    }
 
     return NextResponse.json(
       {
