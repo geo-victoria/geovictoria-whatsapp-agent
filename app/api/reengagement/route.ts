@@ -362,6 +362,70 @@ async function processVictoriaLeadLinks(token: string): Promise<number> {
   return linked
 }
 
+// ─── Reporte diario WhatsApp ──────────────────────────────────────────────────
+async function sendReporteDiario(): Promise<void> {
+  const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || "").trim()
+  const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim()
+  const reportPhone = (process.env.VICKY_REPORT_PHONE || "56944668823").trim()
+  const supabaseUrl = SUPABASE_URL.trim()
+  const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+  if (!accessToken || !phoneNumberId || !supabaseUrl || !supabaseKey) return
+
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  yesterday.setHours(0, 0, 0, 0)
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+
+  const res = await fetch(
+    `https://${supabaseUrl.split("//")[1]}/rest/v1/vic_evaluations?created_at=gte.${yesterday.toISOString()}&created_at=lt.${todayStart.toISOString()}&select=contact,evaluation,created_at&limit=200`,
+    { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }, cache: "no-store" }
+  )
+  const evals = await res.json() as Array<{ contact: string; evaluation: { score_total: number; lead_capturado: boolean; reunion_agendada: boolean; punto_de_quiebre: string | null; resumen: string } }>
+  if (!Array.isArray(evals) || evals.length === 0) return
+
+  const total = evals.length
+  const avgScore = Math.round(evals.reduce((s, e) => s + (e.evaluation?.score_total || 0), 0) / total)
+  const leads = evals.filter(e => e.evaluation?.lead_capturado).length
+  const reuniones = evals.filter(e => e.evaluation?.reunion_agendada).length
+  const problematicas = evals.filter(e => (e.evaluation?.score_total || 0) < 50)
+
+  const fecha = yesterday.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })
+
+  const lines = [
+    `📊 *Reporte Vicky — ${fecha}*`,
+    ``,
+    `Conversaciones: ${total} | Leads: ${leads} | Reuniones: ${reuniones} | Score prom: ${avgScore}/100`,
+  ]
+
+  if (problematicas.length > 0) {
+    lines.push(``, `🔴 *Conversaciones problemáticas (score < 50):*`)
+    for (const p of problematicas.slice(0, 5)) {
+      const score = p.evaluation?.score_total || 0
+      const quiebre = p.evaluation?.punto_de_quiebre || "sin datos"
+      lines.push(`• ${p.contact} — score ${score}`)
+      lines.push(`  _${quiebre}_`)
+    }
+    if (problematicas.length > 5) lines.push(`  ...y ${problematicas.length - 5} más`)
+  } else {
+    lines.push(``, `✅ Sin conversaciones problemáticas ayer`)
+  }
+
+  const mensaje = lines.join("\n")
+
+  await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: reportPhone,
+      type: "text",
+      text: { body: mensaje },
+    }),
+    cache: "no-store",
+  })
+}
+
 // ─── Handler principal ────────────────────────────────────────────────────────
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization")
@@ -381,6 +445,8 @@ export async function GET(request: Request) {
       processVictoriaLeadLinks(token),
       processLeadsSinZoho(),
     ])
+
+    sendReporteDiario().catch(() => {})
 
     const result = {
       sin_reunion: sinReunion.status === "fulfilled" ? sinReunion.value : 0,
