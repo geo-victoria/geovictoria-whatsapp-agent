@@ -595,7 +595,9 @@ async function sendSupportContact(to: string) {
       type: "contacts",
       contacts: [{
         name: { formatted_name: "Soporte GeoVictoria", first_name: "Soporte", last_name: "GeoVictoria" },
-        phones: [{ phone: "+56944013873", type: "CELL", wa_id: "56944013873" }],
+        phones: [{ phone: "+56944013873", type: "WORK", wa_id: "56944013873" }],
+        org: { company: "GeoVictoria", department: "Soporte Técnico" },
+        emails: [{ email: "soporte@geovictoria.com", type: "WORK" }],
       }],
     }),
     cache: "no-store",
