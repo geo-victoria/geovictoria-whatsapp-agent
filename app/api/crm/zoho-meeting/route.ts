@@ -87,26 +87,32 @@ export async function POST(request: Request) {
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const vickyOwnerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000484500876"
+    const attendeeEmail = getEnv("ZOHO_MEETING_ATTENDEE_EMAIL") || "egomez@geovictoria.com"
 
-    // Resolver hostEmail → Zoho user ID para asignar el Event al host correcto
+    // Resolver host + asistente fijo en paralelo
     let ownerId = vickyOwnerId
-    if (hostEmail) {
-      try {
-        const usersRes = await fetch(`${apiDomain}/crm/v2/users?type=AllUsers`, {
-          headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
-          cache: "no-store",
-        })
-        const usersData = await usersRes.json()
-        const match = (usersData?.users || []).find(
-          (u: { id: string; email: string }) => u.email?.toLowerCase() === hostEmail.toLowerCase()
-        )
-        if (match?.id) ownerId = match.id
-      } catch { /* usar Vicky como fallback */ }
-    }
+    let attendeeId: string | null = null
+    try {
+      const usersRes = await fetch(`${apiDomain}/crm/v2/users?type=AllUsers`, {
+        headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+        cache: "no-store",
+      })
+      const usersData = await usersRes.json()
+      const users = (usersData?.users || []) as Array<{ id: string; email: string }>
+      if (hostEmail) {
+        const hostMatch = users.find(u => u.email?.toLowerCase() === hostEmail.toLowerCase())
+        if (hostMatch?.id) ownerId = hostMatch.id
+      }
+      const attendeeMatch = users.find(u => u.email?.toLowerCase() === attendeeEmail.toLowerCase())
+      if (attendeeMatch?.id) attendeeId = attendeeMatch.id
+    } catch { /* usar Vicky como fallback */ }
 
     const participants: { participant: string; type: string }[] = [
       { participant: ownerId, type: "user" },
     ]
+    if (attendeeId && attendeeId !== ownerId) {
+      participants.push({ participant: attendeeId, type: "user" })
+    }
     if (leadId) {
       participants.push({ participant: leadId, type: "lead" })
     }
