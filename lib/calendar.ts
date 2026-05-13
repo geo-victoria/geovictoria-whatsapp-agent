@@ -139,8 +139,12 @@ export function matchSlotFromMessage(message: string, pendingSlots: string[], _t
   if (/\b2\b|segund[ao]/.test(lower) && pendingSlots[1]) return 2
   if (/\b3\b|tercer[ao]/.test(lower) && pendingSlots[2]) return 3
 
-  // Si el mensaje es una pregunta, dejarlo al LLM ("¿puedes el martes?", "¿tienes el jueves?")
-  if (message.includes("?") || /\b(puedes|tienes|hay|puede|tiene|podrías|podría)\b/i.test(lower)) {
+  // Si el mensaje es una pregunta o negación, dejarlo al LLM
+  if (
+    message.includes("?") ||
+    /\b(puedes|tienes|hay|puede|tiene|podrías|podría|será|sería|no puede|no hay|no tienen)\b/i.test(lower) ||
+    /^(pero|no |si |¿|oye|oiga|acaso)/i.test(lower.trim())
+  ) {
     return null
   }
 
