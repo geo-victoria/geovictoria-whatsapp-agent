@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node -e \"require('fs').rmSync('.next/types',{recursive:true,force:true})\" && next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "chrono-node": "^2.9.1",
     "langfuse": "^3.38.20",
     "next": "16.0.10",
     "react": "19.2.0",
