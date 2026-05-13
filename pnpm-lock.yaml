@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      chrono-node:
+        specifier: ^2.9.1
+        version: 2.9.1
       langfuse:
         specifier: ^3.38.20
         version: 3.38.20
@@ -243,6 +246,10 @@ packages:
 
   caniuse-lite@1.0.30001791:
     resolution: {integrity: sha512-yk0l/YSrOnFZk3UROpDLQD9+kC1l4meK/wed583AXrzoarMGJcbRi2Q4RaUYbKxYAsZ8sWmaSa/DsLmdBeI1vQ==}
+
+  chrono-node@2.9.1:
+    resolution: {integrity: sha512-nqP8Zp11efCYQIESXPxeDM8ikzN5BDb3Zzou+a66fZq+X2hzKFdsNLQE2/uBAh//BZEMbaMo1eTnagK7hOenAg==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
   client-only@0.0.1:
     resolution: {integrity: sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA==}
@@ -495,6 +502,8 @@ snapshots:
       csstype: 3.2.3
 
   caniuse-lite@1.0.30001791: {}
+
+  chrono-node@2.9.1: {}
 
   client-only@0.0.1: {}
 
