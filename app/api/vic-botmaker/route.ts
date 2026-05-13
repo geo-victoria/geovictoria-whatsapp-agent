@@ -11,7 +11,7 @@ type LeadData = {
 type ConversationState = {
   contact: string; startedAt: string; updatedAt: string; lastUserAt?: string
   messages: ConversationMessage[]; lead?: LeadData; pendingSlots?: string[]
-  meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string
+  isSupport?: boolean; meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string
 }
 
 const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
