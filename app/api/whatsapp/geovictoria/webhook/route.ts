@@ -583,28 +583,6 @@ async function sendTypingIndicator(to: string, delayMs = 0) {
   if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs))
 }
 
-async function sendSupportContact(to: string) {
-  const accessToken = getEnv("WHATSAPP_ACCESS_TOKEN")
-  const phoneNumberId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
-  if (!accessToken || !phoneNumberId) return
-  await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to,
-      type: "contacts",
-      contacts: [{
-        name: { formatted_name: "Soporte GeoVictoria", first_name: "Soporte", last_name: "GeoVictoria" },
-        phones: [{ phone: "+56944013873", type: "WORK", wa_id: "56944013873" }],
-        org: { company: "GeoVictoria", department: "Soporte Técnico" },
-        emails: [{ email: "soporte@geovictoria.com", type: "WORK" }],
-      }],
-    }),
-    cache: "no-store",
-  }).catch(() => {})
-}
-
 async function sendWhatsAppText(to: string, text: string) {
   const accessToken = getEnv("WHATSAPP_ACCESS_TOKEN")
   const phoneNumberId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
@@ -1069,9 +1047,6 @@ async function processInboundMessages(payload: any, request: Request) {
     try {
       await sendTypingIndicator(from, finalReply.length)
       await sendWhatsAppText(from, finalReply)
-      if (stateAfterAssistant.isSupport) {
-        await sendSupportContact(from)
-      }
     } catch {
       // fallo silencioso — Meta reintentará
     }
