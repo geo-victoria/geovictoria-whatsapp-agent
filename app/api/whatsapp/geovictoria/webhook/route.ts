@@ -778,6 +778,12 @@ async function processInboundMessages(payload: any, request: Request) {
       }
     }
 
+    // Detección de soporte a nivel de código — no depende del LLM
+    const SUPPORT_KEYWORDS = /soy cliente|ya soy cliente|somos clientes|ya tenemos contrato|problema con|no funciona|no registra|no marca|error en|falla en|marcajes|biometrico|reloj control|soporte|ayuda con mi cuenta|ayuda con la plataforma|acceso al sistema|no puedo entrar|no me deja/i
+    if (!stateAfterUser.isSupport && SUPPORT_KEYWORDS.test(prompt)) {
+      stateAfterUser.isSupport = true
+    }
+
     // Si hay lead con reunion_agendada y piden horarios → mostrar slots directamente sin LLM
     const existingLead = stateAfterUser.lead
     const wantsSlots = /horario|agenda|agendar|slot|reuni[oó]n|disponib|fecha|cu[aá]ndo|opcion|opción|reagend|otro d[ií]a|otra fecha|otro horario|lunes|martes|mi[eé]rcoles|jueves|viernes|mañana|tarde/i.test(prompt)
