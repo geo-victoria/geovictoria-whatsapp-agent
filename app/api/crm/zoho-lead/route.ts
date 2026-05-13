@@ -165,7 +165,6 @@ export async function POST(request: Request) {
         `Reunión agendada: ${lead.reunion_agendada ?? lead.agendar_reunion ?? ""}`,
         `Preferencia horario: ${lead.preferencia_horario || lead.fecha_propuesta || ""}`,
         `Contacto WA: ${body.contact || ""}`,
-        transcript ? `\n--- Transcripción ---\n${transcript}` : "",
       ]
         .filter(Boolean)
         .join("\n")
@@ -190,6 +189,16 @@ export async function POST(request: Request) {
     const status = createBody?.data?.[0]?.status || ""
     const details = createBody?.data?.[0]?.details || {}
     const leadId = details?.id || null
+
+    // Crear Nota con transcripción completa — fire-and-forget
+    if (leadId && transcript) {
+      fetch(`${apiDomain}/crm/v2/Notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Zoho-oauthtoken ${accessToken}` },
+        body: JSON.stringify({ data: [{ Note_Title: "Transcripción WhatsApp Vicky", Note_Content: transcript, Parent_Id: leadId, "$se_module": moduleName }] }),
+        cache: "no-store",
+      }).catch(() => {})
+    }
 
     // Actualizar URL de Botmaker después de crear — fire-and-forget
     if (leadId && body.contact) {
