@@ -186,7 +186,6 @@ export async function POST(request: Request) {
       City: sanitize(lead.ciudad, 100) || undefined,
       Canal: "WhatsApp",
       Lead_Source: getEnv("ZOHO_DEFAULT_LEAD_SOURCE") || "SEO",
-      Reunion_Agendada: lead.reunion_agendada === true || lead.agendar_reunion === "si" ? true : false,
       ...(mapProductoSolucion(lead.necesidad) ? { Producto_Soluci_n: mapProductoSolucion(lead.necesidad) } : {}),
       ...(mapRangoEmpleados(lead.trabajadores) ? { Rango_de_Empleados: mapRangoEmpleados(lead.trabajadores) } : {}),
       ...(lead.trabajadores ? { N_Empleados_que_marcan: parseInt((lead.trabajadores).replace(/\D/g, "")) || undefined } : {}),
