@@ -54,6 +54,7 @@ type ConversationState = {
   lastEvaluation?: EvaluationResult
   customerProfile?: CustomerProfile
   pendingSlots?: string[]
+  isSupport?: boolean
   meetingBooked?: boolean
   meetingBookingId?: string
   zohoLeadId?: string
@@ -264,17 +265,21 @@ function extractSlotMarker(raw: string): {
   cleanReply: string
   slotConfirmed: number | null
   slotCustom: string | null
+  isSupport: boolean
 } {
   const confirmedMatch = raw.match(/SLOT_CONFIRMED:(\d)/m)
   const customMatch = raw.match(/SLOT_CUSTOM:([^\n]+)/m)
+  const isSupport = /SUPPORT_CASE/m.test(raw)
   let cleanReply = raw
     .replace(/SLOT_CONFIRMED:\d/gm, "")
     .replace(/SLOT_CUSTOM:[^\n]+/gm, "")
+    .replace(/SUPPORT_CASE/gm, "")
     .trim()
   return {
     cleanReply,
     slotConfirmed: confirmedMatch ? parseInt(confirmedMatch[1]) : null,
     slotCustom: customMatch ? customMatch[1].trim() : null,
+    isSupport,
   }
 }
 
@@ -783,7 +788,7 @@ async function processInboundMessages(payload: any, request: Request) {
     // ir directo a slots sin pasar por el LLM — esto es el happy path del re-engagement
     const hasCompleteData = hasLeadData && !!existingLead?.nombre && !!existingLead?.empresa
     const isAffirmative = /\bsi+\b|sí|ok\b|dale|claro|perfecto|quiero|agend|interesa|disponib/i.test(prompt)
-    if (existingLead && hasLeadData && (wantsSlots || (hasCompleteData && isAffirmative)) && !alreadyHasSlots && !stateAfterUser.meetingBooked && !existingLead.meetingSlot) {
+    if (existingLead && hasLeadData && (wantsSlots || (hasCompleteData && isAffirmative)) && !alreadyHasSlots && !stateAfterUser.meetingBooked && !existingLead.meetingSlot && !stateAfterUser.isSupport) {
       const country = existingLead.pais || inferCountry(from)
       // Siempre refrescar slots para evitar datos desactualizados
       const slots = await getAvailableSlots(country)
@@ -915,13 +920,16 @@ async function processInboundMessages(payload: any, request: Request) {
 
     // Extraer marcadores de lead y de slot
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
-    const { cleanReply, slotConfirmed, slotCustom } = extractSlotMarker(afterLead)
+    const { cleanReply, slotConfirmed, slotCustom, isSupport } = extractSlotMarker(afterLead)
     const finalReply = cleanReply || "Gracias por escribir."
 
     const stateAfterAssistant = appendMessage(from, "assistant", finalReply)
 
-    // Procesar LEAD_CAPTURED
-    if (lead) {
+    // Marcar como soporte — bloquea pipeline de leads y slots permanentemente
+    if (isSupport) stateAfterAssistant.isSupport = true
+
+    // Procesar LEAD_CAPTURED — bloqueado para usuarios de soporte
+    if (lead && !stateAfterAssistant.isSupport) {
       const sanitized = validateAndSanitizeLead(lead)
       sanitized.telefono = formatPhone(from)
       sanitized.pais = inferCountry(from)
@@ -953,8 +961,8 @@ async function processInboundMessages(payload: any, request: Request) {
       }
     }
 
-    // Procesar confirmación de slot
-    if (slotConfirmed && pendingSlots.length >= slotConfirmed && !stateAfterUser.meetingBooked) {
+    // Procesar confirmación de slot — bloqueado para usuarios de soporte
+    if (slotConfirmed && pendingSlots.length >= slotConfirmed && !stateAfterUser.meetingBooked && !stateAfterAssistant.isSupport) {
       const slot = pendingSlots[slotConfirmed - 1]
       const leadData = stateAfterAssistant.lead || {}
       const country = leadData.pais || inferCountry(from)
