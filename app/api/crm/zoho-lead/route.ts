@@ -165,16 +165,13 @@ export async function POST(request: Request) {
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
 
-    // Resolve owner: use provided email, fall back to Vicky's default ID
+    // Resolver owner y URL de Botmaker en paralelo
     const vickyOwnerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000484500876"
-    let ownerId = vickyOwnerId
-    if (body.ownerEmail) {
-      const resolved = await resolveOwnerId(body.ownerEmail, accessToken, apiDomain)
-      if (resolved) ownerId = resolved
-    }
-
-    // Resolver URL real de la conversación en Botmaker
-    const botmakerChatUrl = await getBotmakerChatUrl(body.contact || "")
+    const [resolvedOwnerId, botmakerChatUrl] = await Promise.all([
+      body.ownerEmail ? resolveOwnerId(body.ownerEmail, accessToken, apiDomain) : Promise.resolve(null),
+      getBotmakerChatUrl(body.contact || ""),
+    ])
+    const ownerId = resolvedOwnerId || vickyOwnerId
 
     const record = {
       First_Name: sanitize(names.firstName, 100),
