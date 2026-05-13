@@ -292,10 +292,10 @@ async function processLeadsSinZoho(): Promise<number> {
 
   const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
   const res = await fetch(
-    `https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?zoho_lead_id=is.null&updated_at=lt.${cutoff}&lead=not.is.null&select=contact,lead&limit=50`,
+    `https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?zoho_lead_id=is.null&updated_at=lt.${cutoff}&lead=not.is.null&select=contact,lead,organizer_email&limit=50`,
     { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }, cache: "no-store" }
   )
-  const rows = await res.json() as Array<{ contact: string; lead: Record<string, unknown> }>
+  const rows = await res.json() as Array<{ contact: string; lead: Record<string, unknown>; organizer_email?: string }>
   if (!Array.isArray(rows) || rows.length === 0) return 0
 
   let created = 0
@@ -308,7 +308,11 @@ async function processLeadsSinZoho(): Promise<number> {
       const createRes = await fetch(crmUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "lead_captured", contact, lead, source: "whatsapp_agent_vic_cron" }),
+        body: JSON.stringify({
+          type: "lead_captured", contact, lead,
+          source: "whatsapp_agent_vic_cron",
+          ...(row.organizer_email ? { ownerEmail: row.organizer_email } : {}),
+        }),
         cache: "no-store",
       })
       if (!createRes.ok) continue

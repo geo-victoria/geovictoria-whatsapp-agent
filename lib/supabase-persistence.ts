@@ -55,6 +55,7 @@ export type ConversationState = {
   zohoLeadId?: string
   meetingBooked?: boolean
   meetingBookingId?: string
+  organizerEmail?: string
   pendingSlots?: string[]
   // Session tracking
   zohoSessionId?: string
@@ -126,6 +127,7 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     zoho_lead_id: state.zohoLeadId || null,
     meeting_booked: state.meetingBooked || false,
     meeting_booking_id: state.meetingBookingId || null,
+    organizer_email: state.organizerEmail || null,
     zoho_session_id: state.zohoSessionId || null,
     session_started_at: state.sessionStartedAt || state.startedAt || null,
     session_number: state.sessionNumber || 1,
@@ -199,7 +201,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
   if (!isSupabaseConfigured()) return null
 
   const rows = (await supabaseRequest(
-    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,customer_profile,zoho_lead_id,meeting_booked,meeting_booking_id,zoho_session_id,session_started_at,session_number&contact=eq.${encodeURIComponent(contact)}&limit=1`,
+    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,customer_profile,zoho_lead_id,meeting_booked,meeting_booking_id,organizer_email,zoho_session_id,session_started_at,session_number&contact=eq.${encodeURIComponent(contact)}&limit=1`,
     { method: "GET" },
   )) as Array<{
     id: string
@@ -214,6 +216,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     zoho_lead_id: string | null
     meeting_booked: boolean | null
     meeting_booking_id: string | null
+    organizer_email: string | null
     zoho_session_id: string | null
     session_started_at: string | null
     session_number: number | null
@@ -240,6 +243,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     zohoLeadId: one.zoho_lead_id || undefined,
     meetingBooked: one.meeting_booked || undefined,
     meetingBookingId: one.meeting_booking_id || undefined,
+    organizerEmail: one.organizer_email || undefined,
     zohoSessionId: one.zoho_session_id || undefined,
     sessionStartedAt: one.session_started_at || undefined,
     sessionNumber: one.session_number || undefined,

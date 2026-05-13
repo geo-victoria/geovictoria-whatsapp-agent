@@ -57,6 +57,7 @@ type ConversationState = {
   isSupport?: boolean
   meetingBooked?: boolean
   meetingBookingId?: string
+  organizerEmail?: string
   zohoLeadId?: string
   zohoSessionId?: string
   sessionStartedAt?: string
@@ -875,6 +876,7 @@ async function processInboundMessages(payload: any, request: Request) {
           }
 
           const organizerEmail = result.organizerEmail
+          if (organizerEmail) stateAfterUser.organizerEmail = organizerEmail
 
           if (!stateAfterUser.zohoLeadId && stateAfterUser.lead) {
             // Re-engagement lead: create with correct owner immediately
@@ -1012,6 +1014,7 @@ async function processInboundMessages(payload: any, request: Request) {
         }
 
         const slotOrganizerEmail = result.organizerEmail
+        if (slotOrganizerEmail) stateAfterAssistant.organizerEmail = slotOrganizerEmail
 
         if (!stateAfterAssistant.zohoLeadId && stateAfterAssistant.lead) {
           const newLeadId = await pushLeadToCrm(stateAfterAssistant, slotOrganizerEmail || undefined)
