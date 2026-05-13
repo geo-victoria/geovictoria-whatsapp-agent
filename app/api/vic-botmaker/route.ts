@@ -70,14 +70,17 @@ function extractLead(raw: string) {
 function extractSlotMarker(raw: string) {
   const confirmed = raw.match(/SLOT_CONFIRMED:(\d)/m)
   const custom = raw.match(/SLOT_CUSTOM:([^\n]+)/m)
+  const isSupport = /SUPPORT_CASE/m.test(raw)
   const clean = raw
     .replace(/SLOT_CONFIRMED:\d/gm, "")
     .replace(/SLOT_CUSTOM:[^\n]+/gm, "")
+    .replace(/SUPPORT_CASE/gm, "")
     .trim()
   return {
     cleanReply: clean,
     slotConfirmed: confirmed ? parseInt(confirmed[1]) : null,
     slotCustom: custom ? custom[1].trim() : null,
+    isSupport,
   }
 }
 
@@ -317,13 +320,14 @@ export async function POST(request: Request) {
     } catch { /* silent */ }
 
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
-    const { cleanReply, slotConfirmed, slotCustom } = extractSlotMarker(afterLead)
+    const { cleanReply, slotConfirmed, slotCustom, isSupport } = extractSlotMarker(afterLead)
     const finalReply = cleanReply || "Gracias por escribir."
 
     const stateAfterAssistant = appendMessage(contact, "assistant", finalReply)
+    if (isSupport) stateAfterAssistant.isSupport = true
 
-    // Procesar lead capturado
-    if (lead) {
+    // Procesar lead capturado — bloqueado para soporte
+    if (lead && !stateAfterAssistant.isSupport) {
       const sanitized = validateLead(lead)
       sanitized.telefono = formatPhone(contact)
       sanitized.pais = inferCountry(contact)
