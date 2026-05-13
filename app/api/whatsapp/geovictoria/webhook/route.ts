@@ -36,6 +36,13 @@ type LeadData = {
   meetingSlot?: string
 }
 
+type CustomerProfile = {
+  dolores: string[]
+  objeciones: string[]
+  tono: string
+  historial: string
+}
+
 type ConversationState = {
   contact: string
   startedAt: string
@@ -45,6 +52,7 @@ type ConversationState = {
   lead?: LeadData
   lastEvaluationAt?: string
   lastEvaluation?: EvaluationResult
+  customerProfile?: CustomerProfile
   pendingSlots?: string[]
   meetingBooked?: boolean
   meetingBookingId?: string
@@ -308,7 +316,13 @@ Analiza la conversación y devuelve ÚNICAMENTE un JSON válido con esta estruct
   "lead_capturado": <true/false>,
   "reunion_agendada": <true/false>,
   "punto_de_quiebre": "<en qué paso o mensaje bajó el interés, null si fue exitosa>",
-  "resumen": "<2-3 oraciones describiendo cómo fue la conversación y qué mejorar>"
+  "resumen": "<2-3 oraciones describiendo cómo fue la conversación y qué mejorar>",
+  "customer_profile": {
+    "dolores": ["<necesidad o problema que mencionó>"],
+    "objeciones": ["<objeción, duda o barrera que expresó>"],
+    "tono": "<receptivo|neutral|desconfiado|frustrado>",
+    "historial_sesion": "<1-2 oraciones: qué pasó en esta sesión, qué quedó pendiente>"
+  }
 }
 
 Referencia de scores:
@@ -317,8 +331,8 @@ Referencia de scores:
 - 20-49: Incompleto, cliente perdió interés
 - 0-19: Cliente se aburrió, casi sin engagement`
 
-async function evaluateConversation(state: ConversationState): Promise<EvaluationResult> {
-  const turns = state.messages.slice(-10)
+async function evaluateConversation(state: ConversationState): Promise<{ evaluation: EvaluationResult; customerProfile: CustomerProfile | null }> {
+  const turns = state.messages.slice(-20)
   const conversationText = turns
     .map((m) => `${m.role === "user" ? "PROSPECTO" : "VICKY"}: ${m.content}`)
     .join("\n\n")
@@ -336,7 +350,7 @@ async function evaluateConversation(state: ConversationState): Promise<Evaluatio
       },
       body: JSON.stringify({
         model,
-        max_tokens: 800,
+        max_tokens: 1200,
         system: EVALUATION_SYSTEM_PROMPT,
         messages: [{ role: "user", content: `Evalúa esta conversación:\n\n${conversationText}` }],
       }),
@@ -352,19 +366,38 @@ async function evaluateConversation(state: ConversationState): Promise<Evaluatio
       .join("")
       .trim()
 
-    const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim()) as EvaluationResult
-    return parsed
+    const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim()) as EvaluationResult & { customer_profile?: { dolores: string[]; objeciones: string[]; tono: string; historial_sesion: string } }
+
+    const newProfile = parsed.customer_profile
+    let mergedProfile: CustomerProfile | null = null
+    if (newProfile) {
+      const prev = state.customerProfile
+      const prevHistorial = prev?.historial ? `${prev.historial} | ` : ""
+      const sessionDate = new Date().toLocaleDateString("es-CL", { day: "numeric", month: "short" })
+      mergedProfile = {
+        dolores: [...new Set([...(prev?.dolores || []), ...newProfile.dolores])],
+        objeciones: [...new Set([...(prev?.objeciones || []), ...newProfile.objeciones])],
+        tono: newProfile.tono,
+        historial: `${prevHistorial}Sesión ${state.sessionNumber || 1} (${sessionDate}): ${newProfile.historial_sesion}`,
+      }
+    }
+
+    const { customer_profile: _, ...evaluation } = parsed
+    return { evaluation: evaluation as EvaluationResult, customerProfile: mergedProfile }
   } catch {
     const lead = state.lead || {}
     const hasEmail = Boolean(lead.email || lead.correo)
     const hasMeeting = lead.reunion_agendada === true || lead.agendar_reunion === "si"
     return {
-      score_total: hasEmail && hasMeeting ? 80 : hasEmail ? 50 : 20,
-      dimensiones: { conversion: hasEmail ? 25 : 10, engagement: 15, calidad_info: hasEmail ? 15 : 5, tono_experiencia: 7 },
-      lead_capturado: hasEmail,
-      reunion_agendada: Boolean(hasMeeting),
-      punto_de_quiebre: null,
-      resumen: "Evaluación automática (fallback por error en Claude).",
+      evaluation: {
+        score_total: hasEmail && hasMeeting ? 80 : hasEmail ? 50 : 20,
+        dimensiones: { conversion: hasEmail ? 25 : 10, engagement: 15, calidad_info: hasEmail ? 15 : 5, tono_experiencia: 7 },
+        lead_capturado: hasEmail,
+        reunion_agendada: Boolean(hasMeeting),
+        punto_de_quiebre: null,
+        resumen: "Evaluación automática (fallback por error en Claude).",
+      },
+      customerProfile: null,
     }
   }
 }
@@ -440,7 +473,7 @@ async function pushEvaluation(state: ConversationState, evaluation: EvaluationRe
   })
 }
 
-async function callVicSalesAgent(request: Request, messages: ConversationMessage[], lead?: LeadData, extraContext?: string, contact?: string) {
+async function callVicSalesAgent(request: Request, messages: ConversationMessage[], lead?: LeadData, extraContext?: string, contact?: string, customerProfile?: CustomerProfile) {
   const endpoint = new URL("/api/vic-sales-agent", request.url)
 
   const leadFields = lead ? Object.entries({
@@ -468,6 +501,18 @@ async function callVicSalesAgent(request: Request, messages: ConversationMessage
   } else if (leadFields) {
     contextParts.push({ role: "user", content: `[LEAD_PREVIO] Este prospecto ya nos había contactado. Salúdalo por nombre, confirma sus datos antes de continuar.` })
     contextParts.push({ role: "assistant", content: "Entendido." })
+  }
+
+  if (customerProfile) {
+    const profileLines = [
+      `[PERFIL_CLIENTE]`,
+      customerProfile.dolores.length ? `Dolores: ${customerProfile.dolores.join(", ")}` : "",
+      customerProfile.objeciones.length ? `Objeciones previas: ${customerProfile.objeciones.join(", ")}` : "",
+      `Tono habitual: ${customerProfile.tono}`,
+      `Historial: ${customerProfile.historial}`,
+    ].filter(Boolean).join("\n")
+    contextParts.push({ role: "user", content: profileLines })
+    contextParts.push({ role: "assistant", content: "Entendido, tengo el historial de este cliente." })
   }
   if (extraContext) {
     contextParts.push({ role: "user", content: extraContext })
@@ -513,25 +558,23 @@ async function markAsRead(messageId: string) {
   }).catch(() => {})
 }
 
-async function sendTypingIndicator(to: string, replyLength: number) {
+async function sendTypingIndicator(to: string, delayMs = 0) {
   const accessToken = getEnv("WHATSAPP_ACCESS_TOKEN")
   const phoneNumberId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
-  if (accessToken && phoneNumberId) {
-    await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to,
-        type: "typing_indicator",
-        typing_indicator: { type: "text" },
-      }),
-      cache: "no-store",
-    }).catch(() => {})
-  }
-  const delayMs = Math.min(3500, Math.max(800, replyLength * 12))
-  await new Promise(r => setTimeout(r, delayMs))
+  if (!accessToken || !phoneNumberId) return
+  await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "typing_indicator",
+      typing_indicator: { type: "text" },
+    }),
+    cache: "no-store",
+  }).catch(() => {})
+  if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs))
 }
 
 async function sendWhatsAppText(to: string, text: string) {
@@ -576,9 +619,10 @@ function scheduleInactivityEvaluation(contact: string) {
     const lastEvalMinutes = minutesSince(state.lastEvaluationAt)
     if (lastEvalMinutes < INACTIVITY_MINUTES) return
 
-    const evaluation = await evaluateConversation(state)
+    const { evaluation, customerProfile } = await evaluateConversation(state)
     state.lastEvaluationAt = isoNow()
     state.lastEvaluation = evaluation
+    if (customerProfile) state.customerProfile = customerProfile
     await pushEvaluation(state, evaluation)
     await persistConversationSnapshot(state)
 
@@ -641,6 +685,7 @@ async function processInboundMessages(payload: any, request: Request) {
     markAsRead(msgId).catch(() => {})
 
     if (incoming.type !== "text") {
+      await sendTypingIndicator(from, 400)
       await sendWhatsAppText(from, "Solo proceso mensajes de texto. ¿En qué puedo ayudarte con GeoVictoria?")
       continue
     }
@@ -649,11 +694,13 @@ async function processInboundMessages(payload: any, request: Request) {
     if (!prompt) continue
 
     if (prompt.length > MAX_INPUT_CHARS) {
+      await sendTypingIndicator(from, 500)
       await sendWhatsAppText(from, "Veo que tienes una operación compleja. Todo eso lo analiza el ejecutivo en una reunión personalizada. Dame tu nombre y email y te conecto.")
       continue
     }
 
     if (containsInjection(prompt)) {
+      await sendTypingIndicator(from, 400)
       await sendWhatsAppText(from, "El formato del mensaje no es válido. ¿Me envías tus datos uno por uno?")
       continue
     }
@@ -751,6 +798,7 @@ async function processInboundMessages(payload: any, request: Request) {
         const stateWithSlots = appendMessage(from, "assistant", slotReply)
         await persistConversationSnapshot(stateWithSlots)
         scheduleInactivityEvaluation(from)
+        await sendTypingIndicator(from, 700)
         await sendWhatsAppText(from, slotReply)
         continue
       }
@@ -843,6 +891,7 @@ async function processInboundMessages(payload: any, request: Request) {
         const stateConfirmed = appendMessage(from, "assistant", confirmMsg)
         await persistConversationSnapshot(stateConfirmed)
         scheduleInactivityEvaluation(from)
+        await sendTypingIndicator(from, 600)
         await sendWhatsAppText(from, confirmMsg)
         continue
       }
@@ -856,9 +905,10 @@ async function processInboundMessages(payload: any, request: Request) {
       extraContext = `[SLOTS_DISPONIBLES — ya presentados al prospecto]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
     }
 
+    await sendTypingIndicator(from)
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
     try {
-      rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext, from)
+      rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext, from, stateAfterUser.customerProfile)
     } catch {
       // error interno — no exponer al usuario
     }
@@ -896,6 +946,7 @@ async function processInboundMessages(payload: any, request: Request) {
         const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}${workers}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 45 min:\n\n${slotsText}\n\n${slotChoicePrompt(slots.length)}`
         const stateWithSlots = appendMessage(from, "assistant", slotMsg)
         await persistConversationSnapshot(stateWithSlots)
+        await sendTypingIndicator(from, 700)
         await sendWhatsAppText(from, slotMsg)
         scheduleInactivityEvaluation(from)
         return NextResponse.json({ success: true })
@@ -975,7 +1026,6 @@ async function processInboundMessages(payload: any, request: Request) {
 
     scheduleInactivityEvaluation(from)
     try {
-      await sendTypingIndicator(from, finalReply.length)
       await sendWhatsAppText(from, finalReply)
     } catch {
       // fallo silencioso — Meta reintentará
