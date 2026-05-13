@@ -1,3 +1,5 @@
+import * as chrono from "chrono-node"
+
 const CAL_API_KEY = (process.env.CAL_API_KEY || "").trim()
 const CAL_EVENT_TYPE_ID = (process.env.CAL_EVENT_TYPE_ID || "3188650").trim()
 const CAL_BASE = "https://api.cal.com/v2"
@@ -128,34 +130,40 @@ export async function getAvailableSlots(country: string): Promise<string[]> {
   return result
 }
 
-// Detecta qué slot eligió el usuario comparando número o hora mencionada
-export function matchSlotFromMessage(message: string, pendingSlots: string[], tz: string): number | null {
+// Detecta qué slot eligió el usuario usando número explícito o lenguaje natural (chrono-node)
+export function matchSlotFromMessage(message: string, pendingSlots: string[], _tz: string): number | null {
   const lower = message.toLowerCase()
 
-  // Selección por número
+  // Selección por número explícito
   if (/\b1\b|primer[ao]/.test(lower) && pendingSlots[0]) return 1
   if (/\b2\b|segund[ao]/.test(lower) && pendingSlots[1]) return 2
   if (/\b3\b|tercer[ao]/.test(lower) && pendingSlots[2]) return 3
 
-  // Selección por hora mencionada (ej: "11:30", "las 12", "a las 13")
-  const timeMatch = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(?:hrs?|horas?)?/)
-  if (timeMatch) {
-    const mentionedHour = parseInt(timeMatch[1])
-    const mentionedMin = timeMatch[2] ? parseInt(timeMatch[2]) : null
+  // Si el mensaje es una pregunta, dejarlo al LLM ("¿puedes el martes?", "¿tienes el jueves?")
+  if (message.includes("?") || /\b(puedes|tienes|hay|puede|tiene|podrías|podría)\b/i.test(lower)) {
+    return null
+  }
 
-    for (let i = 0; i < pendingSlots.length; i++) {
-      const slotDate = new Date(pendingSlots[i])
-      const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone: tz, hour: "numeric", minute: "2-digit", hour12: false,
-      }).formatToParts(slotDate)
-      const slotHour = parseInt(parts.find(p => p.type === "hour")?.value || "0")
-      const slotMin = parseInt(parts.find(p => p.type === "minute")?.value || "0")
+  // Parseo de lenguaje natural con chrono-node en español
+  const parsed = chrono.es.parse(message, new Date(), { forwardDate: true })
+  if (!parsed.length) return null
 
-      if (slotHour === mentionedHour && (mentionedMin === null || mentionedMin === slotMin)) {
-        return i + 1
-      }
+  const referenceDate = parsed[0].start.date()
+
+  // Encontrar el slot más cercano al tiempo de referencia
+  let bestIndex = -1
+  let bestDiffMs = Infinity
+
+  for (let i = 0; i < pendingSlots.length; i++) {
+    const diffMs = Math.abs(new Date(pendingSlots[i]).getTime() - referenceDate.getTime())
+    if (diffMs < bestDiffMs) {
+      bestDiffMs = diffMs
+      bestIndex = i
     }
   }
+
+  // Retornar si está dentro de 72 horas del tiempo de referencia
+  if (bestIndex >= 0 && bestDiffMs <= 72 * 60 * 60 * 1000) return bestIndex + 1
 
   return null
 }
@@ -206,6 +214,7 @@ export async function bookMeeting(params: {
 }): Promise<{ success: boolean; bookingId?: string; meetingUrl?: string; organizerEmail?: string; error?: string }> {
   const { slotIso, prospectName, prospectEmail, language = "es", timeZone = "America/Santiago" } = params
 
+  const meetingGuest = (process.env.CAL_MEETING_GUEST_EMAIL || "egomez@geovictoria.com").trim()
   const body = {
     eventTypeId: Number(CAL_EVENT_TYPE_ID),
     start: slotIso,
@@ -215,6 +224,7 @@ export async function bookMeeting(params: {
       timeZone,
       language,
     },
+    guests: meetingGuest && meetingGuest !== prospectEmail ? [meetingGuest] : [],
     metadata: {
       source: "whatsapp_vicky",
     },
@@ -234,6 +244,7 @@ export async function bookMeeting(params: {
       meetingUrl?: string
       id?: number
       start?: string
+      status?: string
       organizer?: { name?: string; email?: string }
       hosts?: Array<{ name?: string; email?: string }>
     }
@@ -242,13 +253,19 @@ export async function bookMeeting(params: {
     statusCode?: number
   }
 
-  // Consideramos éxito solo si hay uid en la respuesta
+  // Consideramos éxito solo si hay uid y el booking no quedó en estado inválido
   const uid = data.data?.uid || data.data?.id
+  const bookingStatus = data.data?.status
   if (!res.ok || data.status === "error" || data.statusCode || !uid) {
     const errMsg = data.message || JSON.stringify(data.error || data).slice(0, 200)
     console.error("[calendar] booking failed:", res.status, errMsg)
     return { success: false, error: errMsg }
   }
+  if (bookingStatus && !["accepted", "pending"].includes(String(bookingStatus).toLowerCase())) {
+    console.error("[calendar] booking unexpected status:", bookingStatus)
+    return { success: false, error: `Booking status: ${bookingStatus}` }
+  }
+  console.log("[calendar] booking created:", uid, "status:", bookingStatus)
 
   const organizerEmail =
     data.data?.organizer?.email ||
