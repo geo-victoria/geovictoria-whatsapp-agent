@@ -172,6 +172,20 @@ export async function POST(request: Request) {
       : null
     const ownerId = resolvedOwnerId || vickyOwnerId
 
+    // Verificar si ya existe un lead con este teléfono para evitar duplicados
+    if (body.contact) {
+      const phone = body.contact.replace(/\D/g, "")
+      const searchRes = await fetch(
+        `${apiDomain}/crm/v2/${moduleName}/search?criteria=((Phone:equals:${phone}))&fields=id&per_page=1`,
+        { headers: { Authorization: `Zoho-oauthtoken ${accessToken}` }, cache: "no-store" }
+      )
+      const searchData = await searchRes.json()
+      const existingId = searchData?.data?.[0]?.id
+      if (existingId) {
+        return NextResponse.json({ success: true, zohoStatus: 200, zohoResult: "success", leadId: existingId, details: { id: existingId } })
+      }
+    }
+
     const record = {
       First_Name: sanitize(names.firstName, 100),
       Last_Name: sanitize(names.lastName, 100) || "Prospecto",
