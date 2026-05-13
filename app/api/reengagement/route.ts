@@ -283,6 +283,51 @@ async function processConsolidacionZoho(token: string): Promise<number> {
   return synced
 }
 
+// ─── Crear leads en Zoho para contactos sin zoho_lead_id (ghost users) ──────
+async function processLeadsSinZoho(): Promise<number> {
+  const supabaseUrl = SUPABASE_URL.trim()
+  const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+  const crmUrl = (process.env.CRM_LEAD_WEBHOOK_URL || "").trim()
+  if (!supabaseUrl || !supabaseKey || !crmUrl) return 0
+
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+  const res = await fetch(
+    `https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?zoho_lead_id=is.null&updated_at=lt.${cutoff}&lead=not.is.null&select=contact,lead&limit=50`,
+    { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }, cache: "no-store" }
+  )
+  const rows = await res.json() as Array<{ contact: string; lead: Record<string, unknown> }>
+  if (!Array.isArray(rows) || rows.length === 0) return 0
+
+  let created = 0
+  for (const row of rows) {
+    const contact = String(row.contact || "")
+    const lead = row.lead
+    if (!contact || !lead?.nombre) continue
+
+    try {
+      const createRes = await fetch(crmUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "lead_captured", contact, lead, source: "whatsapp_agent_vic_cron" }),
+        cache: "no-store",
+      })
+      if (!createRes.ok) continue
+      const data = await createRes.json() as { leadId?: string }
+      const leadId = data?.leadId
+      if (!leadId) continue
+
+      await fetch(`https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?contact=eq.${contact}`, {
+        method: "PATCH",
+        headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ zoho_lead_id: leadId }),
+        cache: "no-store",
+      })
+      created++
+    } catch { /* continuar con el siguiente */ }
+  }
+  return created
+}
+
 // ─── Vincular Lead_Contactado en registros VictorIA existentes ───────────────
 async function processVictoriaLeadLinks(token: string): Promise<number> {
   const supabaseUrl = SUPABASE_URL.trim()
@@ -328,12 +373,13 @@ export async function GET(request: Request) {
   try {
     const token = await getZohoToken()
 
-    const [sinReunion, noShows, reactivaciones, consolidacion, victoriaLinks] = await Promise.allSettled([
+    const [sinReunion, noShows, reactivaciones, consolidacion, victoriaLinks, leadsSinZoho] = await Promise.allSettled([
       processLeadsSinReunion(token),
       processNoShows(token),
       processReactivaciones(),
       processConsolidacionZoho(token),
       processVictoriaLeadLinks(token),
+      processLeadsSinZoho(),
     ])
 
     const result = {
@@ -342,6 +388,7 @@ export async function GET(request: Request) {
       reactivacion: reactivaciones.status === "fulfilled" ? reactivaciones.value : 0,
       consolidacion_zoho: consolidacion.status === "fulfilled" ? consolidacion.value : 0,
       victoria_links: victoriaLinks.status === "fulfilled" ? victoriaLinks.value : 0,
+      leads_sin_zoho: leadsSinZoho.status === "fulfilled" ? leadsSinZoho.value : 0,
       ran_at: new Date().toISOString(),
     }
 

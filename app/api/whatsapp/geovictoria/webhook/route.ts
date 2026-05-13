@@ -619,6 +619,12 @@ function scheduleInactivityEvaluation(contact: string) {
     const lastEvalMinutes = minutesSince(state.lastEvaluationAt)
     if (lastEvalMinutes < INACTIVITY_MINUTES) return
 
+    // Si no tiene lead en Zoho aún, crearlo con owner=Vicky para tómbola
+    if (!state.zohoLeadId && state.lead) {
+      const leadId = await pushLeadToCrm(state)
+      if (leadId) state.zohoLeadId = leadId
+    }
+
     const { evaluation, customerProfile } = await evaluateConversation(state)
     state.lastEvaluationAt = isoNow()
     state.lastEvaluation = evaluation
@@ -928,13 +934,10 @@ async function processInboundMessages(payload: any, request: Request) {
       stateAfterAssistant.lead = sanitized
       const country = sanitized.pais || inferCountry(from)
 
-      // Crear lead SIN reunión → inmediatamente con owner = Vicky
-      // Si hay reunión → se crea en el momento del booking con owner = host de Cal.com
-      const [zohoLeadId, slots] = await Promise.all([
-        pushLeadToCrm(stateAfterAssistant),  // siempre crear — si luego hay reunión se actualiza owner
-        getAvailableSlots(country),
-      ])
-      if (zohoLeadId) stateAfterAssistant.zohoLeadId = zohoLeadId
+      // Guardar en Supabase — el lead en Zoho se crea al confirmar reunión (owner=host)
+      // o vía cron fallback si el usuario no agenda (owner=Vicky → tómbola)
+      await saveLead(stateAfterAssistant)
+      const slots = await getAvailableSlots(country)
       stateAfterAssistant.pendingSlots = slots
 
       // Mostrar slots proactivamente
