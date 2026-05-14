@@ -94,9 +94,22 @@ function buildTranscript(conversation: LeadPayload["conversation"]) {
 async function getBotmakerChatUrl(phone: string): Promise<string | null> {
   const bmToken = getEnv("BOTMAKER_ACCESS_TOKEN")
   if (!bmToken || !phone) return null
+  const normalized = phone.replace(/\D/g, "")
   try {
-    const normalized = phone.replace(/\D/g, "")
-    const res = await fetch("https://api.botmaker.com/v2.0/chats?limit=200", {
+    // Búsqueda directa por contactId — más confiable que escanear el listado de chats
+    const directRes = await fetch(`https://api.botmaker.com/v2.0/customers/${normalized}`, {
+      headers: { "access-token": bmToken, Accept: "application/json" },
+      cache: "no-store",
+    })
+    if (directRes.ok) {
+      const data = await directRes.json()
+      const chatId = data?.chatId || data?.chat?.chatId || data?.lastChatId
+      if (chatId) return `https://go.botmaker.com/#/chats/${chatId}`
+    }
+  } catch { /* fallback al listado */ }
+  try {
+    // Fallback: buscar en el listado paginado
+    const res = await fetch("https://api.botmaker.com/v2.0/chats?limit=500", {
       headers: { "access-token": bmToken, Accept: "application/json" },
       cache: "no-store",
     })
