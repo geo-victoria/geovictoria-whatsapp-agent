@@ -57,6 +57,7 @@ export type ConversationState = {
   meetingBookingId?: string
   organizerEmail?: string
   pendingSlots?: string[]
+  isSupport?: boolean
   // Session tracking
   zohoSessionId?: string
   sessionStartedAt?: string
@@ -125,6 +126,7 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     last_evaluation: state.lastEvaluation || null,
     customer_profile: state.customerProfile || null,
     pending_slots: state.pendingSlots?.length ? state.pendingSlots : null,
+    is_support: state.isSupport || false,
     zoho_lead_id: state.zohoLeadId || null,
     meeting_booked: state.meetingBooked || false,
     meeting_booking_id: state.meetingBookingId || null,
