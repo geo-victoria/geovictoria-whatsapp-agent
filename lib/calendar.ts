@@ -271,10 +271,32 @@ export async function bookMeeting(params: {
   }
   console.log("[calendar] booking created:", uid, "status:", bookingStatus)
 
-  const organizerEmail =
+  let organizerEmail =
     data.data?.organizer?.email ||
     data.data?.hosts?.[0]?.email ||
     undefined
+
+  // Cal.com Round Robin no siempre devuelve el host en la respuesta de creación
+  // Si falta, consultamos el booking por UID para obtener el organizer asignado
+  if (!organizerEmail && uid) {
+    try {
+      const bookingRes = await fetch(`${CAL_BASE}/bookings/${uid}`, {
+        headers: CAL_HEADERS,
+        cache: "no-store",
+      })
+      if (bookingRes.ok) {
+        const bookingData = await bookingRes.json() as {
+          data?: { organizer?: { email?: string }; hosts?: Array<{ email?: string }> }
+        }
+        organizerEmail =
+          bookingData.data?.organizer?.email ||
+          bookingData.data?.hosts?.[0]?.email ||
+          undefined
+      }
+    } catch {
+      // fallo silencioso — el lead quedará sin owner hasta que el cron lo corrija
+    }
+  }
 
   return {
     success: true,
