@@ -12,6 +12,7 @@ type ConversationState = {
   contact: string; startedAt: string; updatedAt: string; lastUserAt?: string
   messages: ConversationMessage[]; lead?: LeadData; pendingSlots?: string[]
   isSupport?: boolean; meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string
+  organizerEmail?: string
 }
 
 const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
@@ -281,6 +282,7 @@ export async function POST(request: Request) {
               }
             } catch { /* continuar sin ID */ }
           }
+          if (result.organizerEmail) stateAfterUser.organizerEmail = result.organizerEmail
           if (result.organizerEmail && zohoLeadId) {
             fetch(crmBase.replace("/zoho-lead", "/zoho-owner"), {
               method: "POST",
