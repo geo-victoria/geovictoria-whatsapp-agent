@@ -224,9 +224,11 @@ export async function POST(request: Request) {
 
     const wantsSlots = /horario|agenda|agendar|slot|reuni[oó]n|disponib|fecha|cu[aá]ndo|opcion|opción|reagend|otro d[ií]a|otra fecha|lunes|martes|mi[eé]rcoles|jueves|viernes|mañana|tarde/i.test(message)
     const alreadyHasSlots = (stateAfterUser.pendingSlots?.length ?? 0) > 0
+    const hasCompleteData = hasLeadData && !!existingLead?.nombre && !!existingLead?.empresa
+    const isAffirmative = /\bsi+\b|sí|ok\b|dale|claro|perfecto|quiero|agend|interesa|disponib/i.test(message)
 
-    // Mostrar slots solo si no hay pendientes y no hay reunión ya confirmada
-    if (existingLead && hasLeadData && wantsSlots && !alreadyHasSlots && !stateAfterUser.meetingBooked && !existingLead.meetingSlot) {
+    // Mostrar slots si quiere agenda explícitamente O si tiene datos completos y responde afirmativamente
+    if (existingLead && hasLeadData && (wantsSlots || (hasCompleteData && isAffirmative)) && !alreadyHasSlots && !stateAfterUser.meetingBooked && !existingLead.meetingSlot) {
       const slots = await getAvailableSlots(country)
       stateAfterUser.pendingSlots = slots
       if (slots.length > 0) {
