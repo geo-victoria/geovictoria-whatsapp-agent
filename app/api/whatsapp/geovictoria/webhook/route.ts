@@ -637,6 +637,18 @@ function scheduleInactivityEvaluation(contact: string) {
     const lastEvalMinutes = minutesSince(state.lastEvaluationAt)
     if (lastEvalMinutes < INACTIVITY_MINUTES) return
 
+    // Lead sin reunión: enviar cierre y crear en Zoho antes de evaluar
+    if (state.lead?.email && !state.meetingBooked && !state.zohoLeadId && !state.isSupport) {
+      const name = state.lead.nombre?.split(" ")[0] || ""
+      const closing = `${name ? `${name}, u` : "U"}n ejecutivo de GeoVictoria te contactará a la brevedad con más información. ¡Que tengas un excelente día! 😊`
+      sendWhatsAppText(state.contact, closing).catch(() => {})
+      const zohoLeadId = await pushLeadToCrm(state)
+      if (zohoLeadId) {
+        state.zohoLeadId = zohoLeadId
+        updateLeadZohoId(state.contact, zohoLeadId).catch(() => {})
+      }
+    }
+
     const { evaluation, customerProfile } = await evaluateConversation(state)
     state.lastEvaluationAt = isoNow()
     state.lastEvaluation = evaluation
