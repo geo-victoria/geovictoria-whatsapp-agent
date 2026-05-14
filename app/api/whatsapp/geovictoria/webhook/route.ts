@@ -172,7 +172,7 @@ function isoNow() {
 }
 
 function slotChoicePrompt(_count: number): string {
-  return "¿Cuál te viene mejor? 😊"
+  return "¿Alguna te viene bien, o prefieres que te contactemos directamente? 😊"
 }
 
 function safeCompare(a: string, b: string) {
@@ -954,7 +954,10 @@ async function processInboundMessages(payload: any, request: Request) {
 
     // Extraer marcadores de lead y de slot
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
-    const { cleanReply, slotConfirmed, slotCustom, isSupport } = extractSlotMarker(afterLead)
+    const meetingDeclined = /MEETING_DECLINED/m.test(afterLead)
+    const { cleanReply, slotConfirmed, slotCustom, isSupport } = extractSlotMarker(
+      afterLead.replace(/MEETING_DECLINED/gm, "")
+    )
     const finalReply = cleanReply || "Gracias por escribir."
 
     const stateAfterAssistant = appendMessage(from, "assistant", finalReply)
@@ -1058,6 +1061,17 @@ async function processInboundMessages(payload: any, request: Request) {
             cache: "no-store",
           }).catch(() => {})
         }
+      }
+    }
+
+    // Prospecto declinó reunión — crear lead en Zoho inmediatamente con owner=Vicky
+    if (meetingDeclined && stateAfterAssistant.lead && !stateAfterAssistant.zohoLeadId && !stateAfterAssistant.isSupport) {
+      stateAfterAssistant.lead.reunion_agendada = false
+      stateAfterAssistant.pendingSlots = []
+      const zohoLeadId = await pushLeadToCrm(stateAfterAssistant)
+      if (zohoLeadId) {
+        stateAfterAssistant.zohoLeadId = zohoLeadId
+        updateLeadZohoId(stateAfterAssistant.contact, zohoLeadId).catch(() => {})
       }
     }
 
