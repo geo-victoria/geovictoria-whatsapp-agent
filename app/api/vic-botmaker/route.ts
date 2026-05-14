@@ -53,10 +53,8 @@ function validateLead(lead: LeadData): LeadData {
   }
 }
 
-function slotChoicePrompt(count: number) {
-  if (count === 1) return "¿Te viene bien? Responde *1* para confirmar 😊"
-  if (count === 2) return "¿Cuál te viene mejor? Responde *1* o *2* 😊"
-  return "¿Cuál te viene mejor? Responde *1*, *2* o *3* 😊"
+function slotChoicePrompt(_count: number) {
+  return "¿Cuál te viene mejor? 😊"
 }
 
 function extractLead(raw: string) {
@@ -343,7 +341,7 @@ export async function POST(request: Request) {
         const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 45 min:\n\n${formatSlotsForProspect(slots, sanitized.pais || "Chile")}\n\n${slotChoicePrompt(slots.length)}`
         appendMessage(contact, "assistant", slotMsg)
         await upsertConversationSnapshot(stateAfterAssistant)
-        return NextResponse.json({ reply: `${finalReply}\n\n${slotMsg}`, handoff: false })
+        return NextResponse.json({ reply: slotMsg })
       }
     }
 

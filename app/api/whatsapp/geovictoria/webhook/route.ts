@@ -81,11 +81,14 @@ type EvaluationResult = {
 const globalStore = globalThis as unknown as {
   __vicConversations?: Map<string, ConversationState>
   __vicProcessedMsgIds?: Map<string, number>
+  __vicProcessingContacts?: Map<string, number>
 }
 if (!globalStore.__vicConversations) globalStore.__vicConversations = new Map()
 if (!globalStore.__vicProcessedMsgIds) globalStore.__vicProcessedMsgIds = new Map()
+if (!globalStore.__vicProcessingContacts) globalStore.__vicProcessingContacts = new Map()
 const conversations = globalStore.__vicConversations
 const processedMsgIds = globalStore.__vicProcessedMsgIds
+const processingContacts = globalStore.__vicProcessingContacts
 
 const INACTIVITY_MINUTES = Number((process.env.CONVERSATION_INACTIVITY_MINUTES || "20").trim() || "20")
 const MAX_INPUT_CHARS = 2000
@@ -99,6 +102,17 @@ function isDuplicate(msgId: string): boolean {
     for (const [id, ts] of processedMsgIds) if (ts < cutoff) processedMsgIds.delete(id)
   }
   return false
+}
+
+function isContactProcessing(contact: string): boolean {
+  const last = processingContacts.get(contact)
+  if (last && Date.now() - last < 4000) return true
+  processingContacts.set(contact, Date.now())
+  return false
+}
+
+function releaseContact(contact: string) {
+  processingContacts.delete(contact)
 }
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
@@ -157,10 +171,8 @@ function isoNow() {
   return new Date().toISOString()
 }
 
-function slotChoicePrompt(count: number): string {
-  if (count === 1) return "¿Te viene bien? Responde *1* para confirmar 😊"
-  if (count === 2) return "¿Cuál te viene mejor? Responde *1* o *2* 😊"
-  return "¿Cuál te viene mejor? Responde *1*, *2* o *3* 😊"
+function slotChoicePrompt(_count: number): string {
+  return "¿Cuál te viene mejor? 😊"
 }
 
 function safeCompare(a: string, b: string) {
@@ -686,7 +698,9 @@ async function processInboundMessages(payload: any, request: Request) {
     // Deduplicación por message ID — previene doble procesamiento por retries de Meta
     const msgId = incoming.id || ""
     if (isDuplicate(msgId)) continue
+    if (isContactProcessing(from)) continue
 
+    try {
     // Marcar mensaje como leído inmediatamente (muestra ticks azules)
     markAsRead(msgId).catch(() => {})
 
@@ -920,7 +934,7 @@ async function processInboundMessages(payload: any, request: Request) {
     // Inyectar slots pendientes como contexto si el usuario no seleccionó aún
     let extraContext: string | undefined
     if (stateAfterUser.isSupport) {
-      extraContext = `[SOPORTE] Este usuario es cliente con un problema técnico. Tu ÚNICA función ahora es entregar el contacto de soporte. NUNCA pidas datos ni ofrezcas reunión. Si insiste, reitera el email soporte@geovictoria.com o el WhatsApp +56 9 4401 3873.`
+      extraContext = `[SOPORTE] Este usuario es cliente con un problema técnico. Tu ÚNICA función ahora es entregar los canales de soporte. NUNCA pidas datos ni ofrezcas reunión. Canales disponibles: WhatsApp *+56 9 4401 3873*, email *soporte@geovictoria.com*, teléfonos *228976512* y *228976517*.`
     } else if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
       const country = stateAfterUser.lead?.pais || inferCountry(from)
       const slotsText = formatSlotsForProspect(pendingSlots, country)
@@ -1056,6 +1070,9 @@ async function processInboundMessages(payload: any, request: Request) {
       await sendWhatsAppText(from, finalReply)
     } catch {
       // fallo silencioso — Meta reintentará
+    }
+    } finally {
+      releaseContact(from)
     }
   }
 }
