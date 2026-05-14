@@ -53,6 +53,43 @@ async function logReengagement(contact: string, scenario: string, template: stri
   )
 }
 
+// Textos reales de cada plantilla — para guardar en historial y dar contexto a Vicky
+const TEMPLATE_TEXTS: Record<string, (nombre?: string) => string> = {
+  gv_vicky_sin_reu: (n) => `Hola ${n || "👋"} 👋 Soy Vicky de GeoVictoria. Tenemos tus datos registrados y un ejecutivo está listo para mostrarte cómo funciona el sistema. ¿Te viene bien agendar 45 minutos esta semana?`,
+  gv_vicky_retomar: (n) => `Hola ${n || "👋"} 👋 Soy Vicky de GeoVictoria. Hace un rato nos escribiste sobre nuestros servicios y quería asegurarme de que pudiste resolver tu consulta. Si sigues con dudas o quieres que te conecte con un ejecutivo, aquí estoy.`,
+  gv_vicky_retomar_sin_nombre: () => `Hola 👋 Soy Vicky de GeoVictoria. Hace un rato nos escribiste sobre nuestros servicios y quería asegurarme de que pudiste resolver tu consulta. Si sigues con dudas o quieres que te conecte con un ejecutivo, aquí estoy.`,
+  gv_vicky_sin_reunion_v3: (n) => `Hola ${n || "👋"} 👋 Soy Vicky de GeoVictoria. Quedaste con interés en nuestros servicios, ¿te gustaría que agendemos esa reunión ahora?`,
+  gv_vicky_noshow_v3: (n) => `Hola ${n || "👋"}, teníamos una reunión agendada y no pudimos conectarnos. ¿La reagendamos?`,
+}
+
+async function saveTemplateToHistory(contact: string, templateName: string, nombre?: string) {
+  try {
+    const text = TEMPLATE_TEXTS[templateName]?.(nombre) || `[Plantilla enviada: ${templateName}]`
+    const at = new Date().toISOString()
+
+    // Buscar o crear conversación
+    const rows = await supabaseQuery(
+      `SELECT id FROM vic_conversations WHERE contact = '${contact}' LIMIT 1`
+    )
+    let convId = rows?.[0]?.id as string | undefined
+
+    if (!convId) {
+      const created = await supabaseQuery(
+        `INSERT INTO vic_conversations (contact, started_at, updated_at) VALUES ('${contact}', '${at}', '${at}') RETURNING id`
+      )
+      convId = created?.[0]?.id as string | undefined
+    }
+    if (!convId) return
+
+    await supabaseQuery(
+      `INSERT INTO vic_messages (conversation_id, role, content, at) VALUES ('${convId}', 'assistant', '${text.replace(/'/g, "''")}', '${at}')`
+    )
+    await supabaseQuery(
+      `UPDATE vic_conversations SET updated_at = '${at}' WHERE id = '${convId}'`
+    )
+  } catch { /* fallo silencioso */ }
+}
+
 // ─── Botmaker send ────────────────────────────────────────────────────────────
 async function sendTemplate(phone: string, templateName: string, nombre?: string): Promise<boolean> {
   const res = await fetch("https://api.botmaker.com/v2.0/notifications", {
@@ -70,7 +107,9 @@ async function sendTemplate(phone: string, templateName: string, nombre?: string
     }),
     cache: "no-store",
   })
-  return res.ok || res.status === 201
+  const ok = res.ok || res.status === 201
+  if (ok) saveTemplateToHistory(phone, templateName, nombre).catch(() => {})
+  return ok
 }
 
 // ─── Zoho note ────────────────────────────────────────────────────────────────
