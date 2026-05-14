@@ -66,7 +66,7 @@ async function sendTemplate(phone: string, templateName: string, nombre?: string
       name: `reengagement_${templateName}_${Date.now()}`,
       intentIdOrName: templateName,
       channelId: BM_CHANNEL,
-      contacts: [{ contactId: phone, ...(nombre ? { variables: { nombre } } : {}) }],
+      contacts: [{ contactId: phone, ...(nombre ? { variables: { firstName: nombre } } : {}) }],
     }),
     cache: "no-store",
   })
@@ -184,7 +184,7 @@ async function processNoShows(token: string) {
 async function processReactivaciones() {
   const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
   const rows = await supabaseQuery(
-    `SELECT contact FROM vic_conversations WHERE zoho_lead_id IS NULL AND updated_at < '${cutoff}' AND contact IS NOT NULL`
+    `SELECT contact, lead FROM vic_conversations WHERE zoho_lead_id IS NULL AND updated_at < '${cutoff}' AND contact IS NOT NULL AND is_support IS NOT TRUE`
   )
 
   let sent = 0
@@ -195,10 +195,16 @@ async function processReactivaciones() {
     const attempts = await getReengagementCount(phone, "reactivacion")
     if (attempts >= 1) continue
 
-    const ok = await sendTemplate(phone, "gv_vicky_retomar_v3")
+    // Usar plantilla con nombre si lo tenemos, genérica si no
+    const lead = row.lead as Record<string, string> | null
+    const firstName = lead?.nombre?.split(" ")[0] || ""
+    const templateName = firstName ? "gv_vicky_retomar" : "gv_vicky_retomar_sin_nombre"
+    const variables = firstName ? { firstName } : undefined
+
+    const ok = await sendTemplate(phone, templateName, variables ? firstName : undefined)
     if (!ok) continue
 
-    await logReengagement(phone, "reactivacion", "gv_vicky_retomar_v3", undefined, 1)
+    await logReengagement(phone, "reactivacion", templateName, undefined, 1)
     sent++
   }
 
