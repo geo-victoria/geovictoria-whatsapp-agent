@@ -164,7 +164,7 @@ export async function upsertConversationSnapshot(state: ConversationState) {
   })
 }
 
-export async function saveLead(state: ConversationState) {
+export async function saveLead(state: ConversationState, zohoLeadId?: string) {
   if (!isSupabaseConfigured() || !state.lead) return
   const conversationId = await getConversationIdByContact(state.contact)
   if (!conversationId) return
@@ -176,9 +176,22 @@ export async function saveLead(state: ConversationState) {
         conversation_id: conversationId,
         contact: state.contact,
         lead: state.lead,
+        ...(zohoLeadId ? { zoho_lead_id: zohoLeadId } : {}),
       },
     ]),
   })
+}
+
+export async function updateLeadZohoId(contact: string, zohoLeadId: string) {
+  if (!isSupabaseConfigured()) return
+  await supabaseRequest(
+    `vic_leads?contact=eq.${encodeURIComponent(contact)}&zoho_lead_id=is.null&order=created_at.desc&limit=1`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ zoho_lead_id: zohoLeadId }),
+    }
+  )
 }
 
 export async function saveEvaluation(state: ConversationState, evaluation: EvaluationResult) {

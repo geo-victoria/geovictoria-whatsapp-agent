@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { fetchConversationByContact, saveLead, upsertConversationSnapshot } from "@/lib/supabase-persistence"
+import { fetchConversationByContact, saveLead, updateLeadZohoId, upsertConversationSnapshot } from "@/lib/supabase-persistence"
 import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getTimezone, matchSlotFromMessage } from "@/lib/calendar"
 
 type ConversationMessage = { role: "user" | "assistant"; content: string; at: string }
@@ -101,7 +101,7 @@ function appendMessage(contact: string, role: "user" | "assistant", content: str
   return state
 }
 
-async function pushLeadToCrm(state: ConversationState): Promise<string | null> {
+async function pushLeadToCrm(state: ConversationState, ownerEmail?: string): Promise<string | null> {
   if (!state.lead) return null
   await saveLead(state)
   const url = getEnv("CRM_LEAD_WEBHOOK_URL")
@@ -114,6 +114,7 @@ async function pushLeadToCrm(state: ConversationState): Promise<string | null> {
         type: "lead_captured", contact: state.contact,
         lead: state.lead, conversation: state.messages,
         source: "whatsapp_botmaker_vic",
+        ...(ownerEmail ? { ownerEmail } : {}),
       }),
       cache: "no-store",
     })
@@ -281,6 +282,15 @@ export async function POST(request: Request) {
                 stateAfterUser.zohoLeadId = zohoLeadId
               }
             } catch { /* continuar sin ID */ }
+          }
+          // Con creación diferida, zohoLeadId puede ser null — crear en Zoho ahora con owner correcto
+          if (!zohoLeadId && stateAfterUser.lead) {
+            const newLeadId = await pushLeadToCrm(stateAfterUser, result.organizerEmail || undefined)
+            if (newLeadId) {
+              zohoLeadId = newLeadId
+              stateAfterUser.zohoLeadId = newLeadId
+              updateLeadZohoId(contact, newLeadId).catch(() => {})
+            }
           }
           if (result.organizerEmail) stateAfterUser.organizerEmail = result.organizerEmail
           if (result.organizerEmail && zohoLeadId) {

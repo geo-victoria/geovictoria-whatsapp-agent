@@ -1,7 +1,7 @@
 import crypto from "node:crypto"
 
 import { NextResponse } from "next/server"
-import { fetchConversationByContact, saveEvaluation, saveLead, upsertConversationSnapshot } from "@/lib/supabase-persistence"
+import { fetchConversationByContact, saveEvaluation, saveLead, updateLeadZohoId, upsertConversationSnapshot } from "@/lib/supabase-persistence"
 import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getTimezone, matchSlotFromMessage } from "@/lib/calendar"
 
 type MetaWebhookMessage = {
@@ -880,7 +880,10 @@ async function processInboundMessages(payload: any, request: Request) {
           if (!stateAfterUser.zohoLeadId && stateAfterUser.lead) {
             // Re-engagement lead: create with correct owner immediately
             const newLeadId = await pushLeadToCrm(stateAfterUser, organizerEmail || undefined)
-            if (newLeadId) stateAfterUser.zohoLeadId = newLeadId
+            if (newLeadId) {
+              stateAfterUser.zohoLeadId = newLeadId
+              updateLeadZohoId(stateAfterUser.contact, newLeadId).catch(() => {})
+            }
           } else if (organizerEmail && stateAfterUser.zohoLeadId) {
             // Lead already exists: update owner to assigned host (fire-and-forget)
             const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
@@ -1015,7 +1018,10 @@ async function processInboundMessages(payload: any, request: Request) {
 
         if (!stateAfterAssistant.zohoLeadId && stateAfterAssistant.lead) {
           const newLeadId = await pushLeadToCrm(stateAfterAssistant, slotOrganizerEmail || undefined)
-          if (newLeadId) stateAfterAssistant.zohoLeadId = newLeadId
+          if (newLeadId) {
+            stateAfterAssistant.zohoLeadId = newLeadId
+            updateLeadZohoId(stateAfterAssistant.contact, newLeadId).catch(() => {})
+          }
         } else if (slotOrganizerEmail && stateAfterAssistant.zohoLeadId) {
           const crmUrl = getEnv("CRM_LEAD_WEBHOOK_URL")
           fetch(crmUrl.replace("/zoho-lead", "/zoho-owner"), {
