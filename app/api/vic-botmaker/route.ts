@@ -346,8 +346,9 @@ export async function POST(request: Request) {
       sanitized.telefono = formatPhone(contact)
       sanitized.pais = inferCountry(contact)
       stateAfterAssistant.lead = sanitized
-      const zohoLeadId = await pushLeadToCrm(stateAfterAssistant)
-      if (zohoLeadId) stateAfterAssistant.zohoLeadId = zohoLeadId
+      // Guardar en Supabase — no enviar a Zoho aún.
+      // El lead se crea en Zoho al confirmar el slot, cuando ya conocemos el host de Cal.com.
+      await saveLead(stateAfterAssistant)
 
       const slots = await getAvailableSlots(sanitized.pais || "Chile")
       stateAfterAssistant.pendingSlots = slots

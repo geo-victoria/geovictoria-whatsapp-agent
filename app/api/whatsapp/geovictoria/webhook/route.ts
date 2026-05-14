@@ -967,13 +967,11 @@ async function processInboundMessages(payload: any, request: Request) {
       stateAfterAssistant.lead = sanitized
       const country = sanitized.pais || inferCountry(from)
 
-      // Crear lead inmediatamente con owner=Vicky
-      // reunion_agendada indica la intención del usuario → el workflow de tómbola lo usa
-      const [zohoLeadId, slots] = await Promise.all([
-        pushLeadToCrm(stateAfterAssistant),
-        getAvailableSlots(country),
-      ])
-      if (zohoLeadId) stateAfterAssistant.zohoLeadId = zohoLeadId
+      // Guardar en Supabase — no enviar a Zoho aún.
+      // El lead se crea en Zoho al confirmar el slot, cuando ya conocemos el host de Cal.com.
+      // Así el owner es correcto desde el inicio y el lead no pasa por tómbola.
+      await saveLead(stateAfterAssistant)
+      const slots = await getAvailableSlots(country)
       stateAfterAssistant.pendingSlots = slots
 
       // Mostrar slots proactivamente
