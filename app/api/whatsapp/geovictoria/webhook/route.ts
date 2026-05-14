@@ -817,6 +817,13 @@ async function processInboundMessages(payload: any, request: Request) {
     }
 
     // Detectar selección directa de slot desde el mensaje del usuario
+    // Expirar slots si tienen más de 6 horas (ya no estarán disponibles en Cal.com)
+    const SLOT_EXPIRY_MS = 6 * 60 * 60 * 1000
+    if (stateAfterUser.pendingSlots?.length && stateAfterUser.updatedAt) {
+      const age = Date.now() - new Date(stateAfterUser.updatedAt).getTime()
+      if (age > SLOT_EXPIRY_MS) stateAfterUser.pendingSlots = []
+    }
+
     const pendingSlots = stateAfterUser.pendingSlots || []
     if (pendingSlots.length > 0) {
       // Permitir reagendamiento si ya tenía reunión

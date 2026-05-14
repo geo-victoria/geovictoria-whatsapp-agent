@@ -124,6 +124,7 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     last_evaluation_at: state.lastEvaluationAt || null,
     last_evaluation: state.lastEvaluation || null,
     customer_profile: state.customerProfile || null,
+    pending_slots: state.pendingSlots?.length ? state.pendingSlots : null,
     zoho_lead_id: state.zohoLeadId || null,
     meeting_booked: state.meetingBooked || false,
     meeting_booking_id: state.meetingBookingId || null,
@@ -201,7 +202,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
   if (!isSupabaseConfigured()) return null
 
   const rows = (await supabaseRequest(
-    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,customer_profile,zoho_lead_id,meeting_booked,meeting_booking_id,organizer_email,zoho_session_id,session_started_at,session_number&contact=eq.${encodeURIComponent(contact)}&limit=1`,
+    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,customer_profile,pending_slots,zoho_lead_id,meeting_booked,meeting_booking_id,organizer_email,zoho_session_id,session_started_at,session_number&contact=eq.${encodeURIComponent(contact)}&limit=1`,
     { method: "GET" },
   )) as Array<{
     id: string
@@ -213,6 +214,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     last_evaluation_at: string | null
     last_evaluation: EvaluationResult | null
     customer_profile: CustomerProfile | null
+    pending_slots: string[] | null
     zoho_lead_id: string | null
     meeting_booked: boolean | null
     meeting_booking_id: string | null
@@ -240,6 +242,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     lastEvaluationAt: one.last_evaluation_at || undefined,
     lastEvaluation: one.last_evaluation || undefined,
     customerProfile: one.customer_profile || undefined,
+    pendingSlots: one.pending_slots?.length ? one.pending_slots : undefined,
     zohoLeadId: one.zoho_lead_id || undefined,
     meetingBooked: one.meeting_booked || undefined,
     meetingBookingId: one.meeting_booking_id || undefined,
