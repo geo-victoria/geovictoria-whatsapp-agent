@@ -640,7 +640,7 @@ function scheduleInactivityEvaluation(contact: string) {
     // Lead sin reunión: enviar cierre y crear en Zoho antes de evaluar
     if (state.lead?.email && !state.meetingBooked && !state.zohoLeadId && !state.isSupport) {
       const name = state.lead.nombre?.split(" ")[0] || ""
-      const closing = `${name ? `${name}, u` : "U"}n ejecutivo de GeoVictoria te contactará a la brevedad con más información. ¡Que tengas un excelente día! 😊`
+      const closing = `${name ? `Oye ${name}, n` : "N"}o te preocupes si no pudiste elegir un horario, no es necesario agendar una reunión para que te ayudemos 😊 Ya tenemos tus datos y un ejecutivo te contactará cuanto antes. ¡Hasta pronto!`
       sendWhatsAppText(state.contact, closing).catch(() => {})
       const zohoLeadId = await pushLeadToCrm(state)
       if (zohoLeadId) {
