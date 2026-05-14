@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "calcom": {
-      "url": "https://mcp.cal.com/mcp",
+      "url": "https://mcp.cal.com/mcp?apiKey=cal_live_e103a1058f3a2162693372a62997315e",
       "transport": "http"
     }
   }
