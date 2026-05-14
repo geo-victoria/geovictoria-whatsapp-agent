@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { runQaSuite } from "@/lib/qa-runner"
 
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 const BM_CHANNEL = "GeoVictoriaEspaol-whatsapp-56967308227"
@@ -430,6 +431,28 @@ async function sendReporteDiario(): Promise<void> {
   })
 }
 
+// ─── QA report ───────────────────────────────────────────────────────────────
+async function sendQaReport(): Promise<void> {
+  const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || "").trim()
+  const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim()
+  const reportPhone = (process.env.VICKY_REPORT_PHONE || "56944668823").trim()
+  if (!accessToken || !phoneNumberId) return
+
+  const mensaje = await runQaSuite()
+
+  await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: reportPhone,
+      type: "text",
+      text: { body: mensaje },
+    }),
+    cache: "no-store",
+  })
+}
+
 // ─── Handler principal ────────────────────────────────────────────────────────
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization")
@@ -451,6 +474,7 @@ export async function GET(request: Request) {
     ])
 
     sendReporteDiario().catch(() => {})
+    sendQaReport().catch(() => {})
 
     const result = {
       sin_reunion: sinReunion.status === "fulfilled" ? sinReunion.value : 0,
