@@ -266,7 +266,21 @@ export async function POST(request: Request) {
           if (stateAfterUser.lead) stateAfterUser.lead.meetingSlot = slot
 
           const crmBase = getEnv("CRM_LEAD_WEBHOOK_URL")
-          const zohoLeadId = stateAfterUser.zohoLeadId
+          // Race condition fix: si el lead se creó en otra instancia, buscar el ID en Supabase
+          let zohoLeadId = stateAfterUser.zohoLeadId
+          if (!zohoLeadId) {
+            try {
+              const { fetchConversationByContact: fetchConv } = await import("@/lib/supabase-persistence")
+              const fresh = await Promise.race([
+                fetchConv(contact),
+                new Promise<null>((_, rej) => setTimeout(() => rej(new Error("timeout")), 3000)),
+              ])
+              if (fresh?.zohoLeadId) {
+                zohoLeadId = fresh.zohoLeadId
+                stateAfterUser.zohoLeadId = zohoLeadId
+              }
+            } catch { /* continuar sin ID */ }
+          }
           if (result.organizerEmail && zohoLeadId) {
             fetch(crmBase.replace("/zoho-lead", "/zoho-owner"), {
               method: "POST",
