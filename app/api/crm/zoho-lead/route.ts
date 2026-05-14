@@ -96,28 +96,15 @@ async function getBotmakerChatUrl(phone: string): Promise<string | null> {
   if (!bmToken || !phone) return null
   const normalized = phone.replace(/\D/g, "")
   try {
-    // Búsqueda directa por contactId — más confiable que escanear el listado de chats
-    const directRes = await fetch(`https://api.botmaker.com/v2.0/customers/${normalized}`, {
-      headers: { "access-token": bmToken, Accept: "application/json" },
-      cache: "no-store",
-    })
-    if (directRes.ok) {
-      const data = await directRes.json()
-      const chatId = data?.chatId || data?.chat?.chatId || data?.lastChatId
-      if (chatId) return `https://go.botmaker.com/#/chats/${chatId}`
-    }
-  } catch { /* fallback al listado */ }
-  try {
-    // Fallback: buscar en el listado paginado
-    const res = await fetch("https://api.botmaker.com/v2.0/chats?limit=500", {
+    // Búsqueda directa por contactId — O(1), no depende del tamaño del listado
+    const res = await fetch(`https://api.botmaker.com/v2.0/chats?contactId=${normalized}&limit=1`, {
       headers: { "access-token": bmToken, Accept: "application/json" },
       cache: "no-store",
     })
     if (!res.ok) return null
     const data = await res.json()
-    const items = (data?.items || []) as Array<{ chat: { chatId: string; contactId: string } }>
-    const match = items.find((item) => (item?.chat?.contactId || "").replace(/\D/g, "") === normalized)
-    if (match?.chat?.chatId) return `https://go.botmaker.com/#/chats/${match.chat.chatId}`
+    const chatId = (data?.items as Array<{ chat: { chatId: string } }>)?.[0]?.chat?.chatId
+    if (chatId) return `https://go.botmaker.com/#/chats/${chatId}`
   } catch { /* ignorar */ }
   return null
 }
