@@ -4,10 +4,6 @@
     {
       "path": "/api/reengagement",
       "schedule": "30 13 * * 1-5"
-    },
-    {
-      "path": "/api/leads-check",
-      "schedule": "*/30 12-22 * * 1-5"
     }
   ],
   "functions": {
