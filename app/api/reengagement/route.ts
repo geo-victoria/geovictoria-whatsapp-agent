@@ -498,6 +498,72 @@ async function sendQaReport(): Promise<void> {
   })
 }
 
+// ─── Sync Cal.com bookings → Supabase ────────────────────────────────────────
+async function syncCalBookings(): Promise<number> {
+  const calKey = (process.env.CAL_API_KEY || "").trim()
+  const calEventId = (process.env.CAL_EVENT_TYPE_ID || "3188650").trim()
+  const supabaseUrl = SUPABASE_URL.trim()
+  const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+  if (!calKey || !supabaseUrl || !supabaseKey) return 0
+
+  try {
+    // Últimos 30 días de bookings del event type de Vicky
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const calRes = await fetch(
+      `https://api.cal.com/v2/bookings?eventTypeId=${calEventId}&afterStart=${since}&limit=100`,
+      { headers: { Authorization: `Bearer ${calKey}`, "cal-api-version": "2024-08-13" }, cache: "no-store" }
+    )
+    if (!calRes.ok) return 0
+    const calData = await calRes.json()
+    const bookings = calData?.data?.bookings || calData?.data || []
+    if (!bookings.length) return 0
+
+    // Buscar contactos vinculados en Supabase
+    const convRes = await fetch(
+      `https://${supabaseUrl.split("//")[1]}/rest/v1/vic_conversations?meeting_booking_id=not.is.null&select=contact,zoho_lead_id,meeting_booking_id`,
+      { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` }, cache: "no-store" }
+    )
+    const convs = await convRes.json() as Array<{ contact: string; zoho_lead_id: string | null; meeting_booking_id: string }>
+    const convByUid: Record<string, typeof convs[0]> = {}
+    for (const c of convs) if (c.meeting_booking_id) convByUid[c.meeting_booking_id] = c
+
+    const rows = bookings.map((b: Record<string, unknown>) => ({
+      id: b.id,
+      uid: b.uid,
+      title: b.title || null,
+      status: b.status || null,
+      start_time: b.start || null,
+      end_time: b.end || null,
+      duration: b.duration || null,
+      event_type_id: b.eventTypeId || null,
+      host_name: (b.hosts as Array<{ name: string; email: string }>)?.[0]?.name || null,
+      host_email: (b.hosts as Array<{ name: string; email: string }>)?.[0]?.email || null,
+      absent_host: b.absentHost || false,
+      attendee_name: (b.attendees as Array<{ name: string; email: string }>)?.[0]?.name || null,
+      attendee_email: (b.attendees as Array<{ name: string; email: string }>)?.[0]?.email || null,
+      meeting_url: b.meetingUrl || null,
+      metadata: b.metadata || null,
+      cal_created_at: b.createdAt || null,
+      cal_updated_at: b.updatedAt || null,
+      contact: convByUid[b.uid as string]?.contact || null,
+      zoho_lead_id: convByUid[b.uid as string]?.zoho_lead_id || null,
+      synced_at: new Date().toISOString(),
+    }))
+
+    await fetch(`https://${supabaseUrl.split("//")[1]}/rest/v1/vic_cal_bookings`, {
+      method: "POST",
+      headers: {
+        apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`,
+        "Content-Type": "application/json", Prefer: "resolution=merge-duplicates",
+      },
+      body: JSON.stringify(rows),
+      cache: "no-store",
+    })
+
+    return rows.length
+  } catch { return 0 }
+}
+
 // ─── Handler principal ────────────────────────────────────────────────────────
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization")
@@ -509,13 +575,14 @@ export async function GET(request: Request) {
   try {
     const token = await getZohoToken()
 
-    const [sinReunion, noShows, reactivaciones, consolidacion, victoriaLinks, leadsSinZoho] = await Promise.allSettled([
+    const [sinReunion, noShows, reactivaciones, consolidacion, victoriaLinks, leadsSinZoho, calSync] = await Promise.allSettled([
       processLeadsSinReunion(token),
       processNoShows(token),
       processReactivaciones(),
       processConsolidacionZoho(token),
       processVictoriaLeadLinks(token),
       processLeadsSinZoho(),
+      syncCalBookings(),
     ])
 
     sendReporteDiario().catch(() => {})
@@ -528,6 +595,7 @@ export async function GET(request: Request) {
       consolidacion_zoho: consolidacion.status === "fulfilled" ? consolidacion.value : 0,
       victoria_links: victoriaLinks.status === "fulfilled" ? victoriaLinks.value : 0,
       leads_sin_zoho: leadsSinZoho.status === "fulfilled" ? leadsSinZoho.value : 0,
+      cal_bookings_synced: calSync.status === "fulfilled" ? calSync.value : 0,
       ran_at: new Date().toISOString(),
     }
 
