@@ -37,10 +37,13 @@ function statusLabel(m: Meeting) {
   const end = new Date(m.end_time)
   const start = new Date(m.start_time)
   if (now < start) return { text: "Pendiente", color: "#3498db" }
-  if (m.attendee_absent) return { text: "No-show", color: "#e74c3c" }
-  if (m.host_absent) return { text: "Host ausente", color: "#e67e22" }
-  if (now > end) return { text: "Realizada", color: "#27ae60" }
-  return { text: "En curso", color: "#f39c12" }
+  if (now >= start && now <= end) return { text: "En curso 🟡", color: "#f39c12" }
+  // Reunión pasó
+  if (m.attendee_absent === true)  return { text: "No-show ❌", color: "#e74c3c" }
+  if (m.attendee_absent === false) return { text: "Realizada ✅", color: "#27ae60" }
+  if (m.host_absent === true)      return { text: "Host ausente", color: "#e67e22" }
+  // null = nadie marcó aún
+  return { text: "Por confirmar", color: "#e67e22" }
 }
 
 function MeetingCard({ m, onMark }: { m: Meeting; onMark: (uid: string, field: "attendee_absent" | "host_absent", val: boolean) => void }) {
@@ -100,16 +103,16 @@ function MeetingCard({ m, onMark }: { m: Meeting; onMark: (uid: string, field: "
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => onMark(m.uid, "attendee_absent", false)} style={{
                 flex: 1, padding: "8px 4px", borderRadius: 8, border: "2px solid",
-                borderColor: !m.attendee_absent ? "#27ae60" : "#eee",
-                background: !m.attendee_absent ? "#27ae60" : "#fff",
-                color: !m.attendee_absent ? "#fff" : "#555",
+                borderColor: m.attendee_absent === false ? "#27ae60" : "#eee",
+                background: m.attendee_absent === false ? "#27ae60" : "#fff",
+                color: m.attendee_absent === false ? "#fff" : "#555",
                 cursor: "pointer", fontSize: 13, fontWeight: 600,
               }}>✅ Asistió</button>
               <button onClick={() => onMark(m.uid, "attendee_absent", true)} style={{
                 flex: 1, padding: "8px 4px", borderRadius: 8, border: "2px solid",
-                borderColor: m.attendee_absent ? "#e74c3c" : "#eee",
-                background: m.attendee_absent ? "#e74c3c" : "#fff",
-                color: m.attendee_absent ? "#fff" : "#555",
+                borderColor: m.attendee_absent === true ? "#e74c3c" : "#eee",
+                background: m.attendee_absent === true ? "#e74c3c" : "#fff",
+                color: m.attendee_absent === true ? "#fff" : "#555",
                 cursor: "pointer", fontSize: 13, fontWeight: 600,
               }}>❌ No-show</button>
             </div>
@@ -150,11 +153,12 @@ export default function MeetingsDashboard() {
   }
 
   const total = meetings.filter(m => m.status !== "cancelled").length
-  const realizadas = meetings.filter(m => {
+  const realizadas = meetings.filter(m => m.attendee_absent === false).length
+  const noShows = meetings.filter(m => m.attendee_absent === true).length
+  const porConfirmar = meetings.filter(m => {
     if (m.status === "cancelled") return false
-    return new Date(m.end_time) < new Date() && !m.attendee_absent
+    return m.attendee_absent === null && new Date(m.end_time) < new Date()
   }).length
-  const noShows = meetings.filter(m => m.attendee_absent).length
   const pendientes = meetings.filter(m => m.status !== "cancelled" && new Date(m.start_time) > new Date()).length
 
   return (
@@ -182,9 +186,9 @@ export default function MeetingsDashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
         {[
           { label: "Total", value: total, color: "#3498db" },
-          { label: "Realizadas", value: realizadas, color: "#27ae60" },
-          { label: "No-shows", value: noShows, color: "#e74c3c" },
-          { label: "Pendientes", value: pendientes, color: "#f39c12" },
+          { label: "Realizadas ✅", value: realizadas, color: "#27ae60" },
+          { label: "No-shows ❌", value: noShows, color: "#e74c3c" },
+          { label: "Por confirmar", value: porConfirmar, color: "#e67e22" },
         ].map(s => (
           <div key={s.label} style={{ background: "#fff", borderRadius: 10, padding: "14px 16px", boxShadow: "0 1px 3px rgba(0,0,0,0.07)", borderTop: `3px solid ${s.color}` }}>
             <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>

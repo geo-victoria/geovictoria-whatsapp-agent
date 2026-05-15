@@ -19,9 +19,66 @@ async function supabase(path: string, init: RequestInit = {}) {
   return ct.includes("application/json") ? res.json() : null
 }
 
+const CAL_KEY = (process.env.CAL_API_KEY || "").trim()
+const CAL_EVENT_ID = (process.env.CAL_EVENT_TYPE_ID || "3188650").trim()
+
+async function syncTodayFromCal(date: string) {
+  if (!CAL_KEY) return
+  try {
+    const from = `${date}T00:00:00Z`
+    const to   = `${date}T23:59:59Z`
+    const res = await fetch(
+      `https://api.cal.com/v2/bookings?eventTypeId=${CAL_EVENT_ID}&afterStart=${from}&beforeEnd=${to}&limit=50`,
+      { headers: { Authorization: `Bearer ${CAL_KEY}`, "cal-api-version": "2024-08-13" }, cache: "no-store" }
+    )
+    if (!res.ok) return
+    const data = await res.json()
+    const bookings = data?.data?.bookings || data?.data || []
+    if (!bookings.length) return
+
+    // Buscar contactos vinculados
+    const convRes = await supabase(
+      `vic_conversations?meeting_booking_id=not.is.null&select=contact,zoho_lead_id,meeting_booking_id`
+    ) as Array<{ contact: string; zoho_lead_id: string | null; meeting_booking_id: string }> | null
+    const convByUid: Record<string, { contact: string; zoho_lead_id: string | null }> = {}
+    for (const c of convRes || []) if (c.meeting_booking_id) convByUid[c.meeting_booking_id] = c
+
+    const rows = bookings.map((b: Record<string, unknown>) => ({
+      id: b.id,
+      uid: b.uid,
+      title: b.title || null,
+      status: b.status || null,
+      start_time: b.start || null,
+      end_time: b.end || null,
+      duration: b.duration || null,
+      event_type_id: b.eventTypeId || null,
+      host_name: (b.hosts as Array<{ name: string; email: string }>)?.[0]?.name || null,
+      host_email: (b.hosts as Array<{ name: string; email: string }>)?.[0]?.email || null,
+      attendee_name: (b.attendees as Array<{ name: string; email: string; absent?: boolean }>)?.[0]?.name || null,
+      attendee_email: (b.attendees as Array<{ name: string; email: string; absent?: boolean }>)?.[0]?.email || null,
+      meeting_url: b.meetingUrl || null,
+      cal_created_at: b.createdAt || null,
+      cal_updated_at: b.updatedAt || null,
+      contact: convByUid[b.uid as string]?.contact || null,
+      zoho_lead_id: convByUid[b.uid as string]?.zoho_lead_id || null,
+      synced_at: new Date().toISOString(),
+    }))
+
+    await supabase("vic_cal_bookings", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(rows),
+    })
+  } catch { /* fallo silencioso */ }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const date = searchParams.get("date") || new Date().toISOString().split("T")[0]
+  const today = new Date().toISOString().split("T")[0]
+
+  // Sync en tiempo real solo para hoy
+  if (date === today) await syncTodayFromCal(date)
 
   const from = `${date}T00:00:00Z`
   const to   = `${date}T23:59:59Z`
