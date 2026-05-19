@@ -77,8 +77,9 @@ export async function GET(request: Request) {
   const date = searchParams.get("date") || new Date().toISOString().split("T")[0]
   const today = new Date().toISOString().split("T")[0]
 
-  // Sync en tiempo real solo para hoy
-  if (date === today) await syncTodayFromCal(date)
+  // Sync para hoy y los próximos 14 días
+  const maxDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+  if (date >= today && date <= maxDate) await syncTodayFromCal(date)
 
   const from = `${date}T00:00:00Z`
   const to   = `${date}T23:59:59Z`

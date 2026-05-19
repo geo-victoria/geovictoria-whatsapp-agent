@@ -55,7 +55,7 @@ async function logReengagement(contact: string, scenario: string, template: stri
 
 // Textos reales de cada plantilla — para guardar en historial y dar contexto a Vicky
 const TEMPLATE_TEXTS: Record<string, (nombre?: string) => string> = {
-  gv_vicky_sin_reu: (n) => `Hola ${n || "👋"} 👋 Soy Vicky de GeoVictoria. Tenemos tus datos registrados y un ejecutivo está listo para mostrarte cómo funciona el sistema. ¿Te viene bien agendar 45 minutos esta semana?`,
+  gv_vicky_sin_reu: (n) => `Hola ${n || "👋"} 👋 Soy Vicky de GeoVictoria. Tenemos tus datos registrados y un ejecutivo está listo para mostrarte cómo funciona el sistema. ¿Te viene bien agendar 20 minutos esta semana?`,
   gv_vicky_retomar: (n) => `Hola ${n || "👋"} 👋 Soy Vicky de GeoVictoria. Hace un rato nos escribiste sobre nuestros servicios y quería asegurarme de que pudiste resolver tu consulta. Si sigues con dudas o quieres que te conecte con un ejecutivo, aquí estoy.`,
   gv_vicky_retomar_sin_nombre: () => `Hola 👋 Soy Vicky de GeoVictoria. Hace un rato nos escribiste sobre nuestros servicios y quería asegurarme de que pudiste resolver tu consulta. Si sigues con dudas o quieres que te conecte con un ejecutivo, aquí estoy.`,
   gv_vicky_sin_reunion_v3: (n) => `Hola ${n || "👋"} 👋 Soy Vicky de GeoVictoria. Quedaste con interés en nuestros servicios, ¿te gustaría que agendemos esa reunión ahora?`,
@@ -572,6 +572,13 @@ export async function GET(request: Request) {
   const cronSecret = (process.env.CRON_SECRET || "").trim()
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  // Modo liviano: solo sincronizar leads sin Zoho (cron horario)
+  const { searchParams } = new URL(request.url)
+  if (searchParams.get("mode") === "zoho-sync") {
+    const n = await processLeadsSinZoho()
+    return NextResponse.json({ leads_sin_zoho: n })
   }
 
   try {

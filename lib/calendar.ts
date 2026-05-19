@@ -108,30 +108,45 @@ export async function getAvailableSlots(country: string): Promise<string[]> {
     const daySlots = slotsByDay[day]
     if (!daySlots?.length) continue
     validDays.push({ day, slots: daySlots })
-    if (validDays.length >= 3) break
+    if (validDays.length >= 5) break
   }
 
   if (validDays.length === 0) return []
 
-  // Si hay 3 días distintos, tomar el primer slot de cada uno
-  if (validDays.length >= 3) {
-    return validDays.slice(0, 3).map(d => d.slots[0].time)
+  // Elegir slots variando la hora del día (mañana/tarde) para no mostrar siempre las 09:00
+  function pickSlotNearHour(slots: Array<{ time: string }>, targetHour: number): string {
+    let best = slots[0]
+    let bestDiff = Infinity
+    for (const s of slots) {
+      const localHour = parseInt(
+        new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(new Date(s.time))
+      )
+      const diff = Math.abs(localHour - targetHour)
+      if (diff < bestDiff) { bestDiff = diff; best = s }
+    }
+    return best.time
   }
 
-  // Si hay menos de 3 días, completar con slots adicionales del mismo día
+  // Alterna: día 1 → mañana (9h), día 2 → tarde (15h), día 3 → mañana (11h)
+  const targetHours = [9, 15, 11, 14, 10]
   const result: string[] = []
-  for (const { slots } of validDays) {
-    for (const s of slots) {
+  for (let i = 0; i < validDays.length && result.length < 3; i++) {
+    result.push(pickSlotNearHour(validDays[i].slots, targetHours[i] ?? 9))
+  }
+
+  // Si hay menos de 3 días, completar con slots adicionales del primer día
+  if (result.length < 3 && validDays.length > 0) {
+    for (const s of validDays[0].slots) {
       if (result.length >= 3) break
       if (!result.includes(s.time)) result.push(s.time)
     }
-    if (result.length >= 3) break
   }
+
   return result
 }
 
 // Detecta qué slot eligió el usuario usando número explícito o lenguaje natural (chrono-node)
-export function matchSlotFromMessage(message: string, pendingSlots: string[], _tz: string): number | null {
+export function matchSlotFromMessage(message: string, pendingSlots: string[], tz: string): number | null {
   const lower = message.toLowerCase()
 
   // Selección por número explícito
@@ -166,10 +181,20 @@ export function matchSlotFromMessage(message: string, pendingSlots: string[], _t
     }
   }
 
-  // Retornar si está dentro de 72 horas del tiempo de referencia
-  if (bestIndex >= 0 && bestDiffMs <= 72 * 60 * 60 * 1000) return bestIndex + 1
+  if (bestIndex < 0 || bestDiffMs > 72 * 60 * 60 * 1000) return null
 
-  return null
+  // Si el usuario especificó una hora concreta, verificar que el slot coincida (±3h)
+  // Evita confirmar "martes a las 15h" cuando el slot disponible es a las 9h
+  if (parsed[0].start.isCertain("hour")) {
+    const userHour = parsed[0].start.get("hour") ?? 0
+    const slotLocalHour = parseInt(
+      new Intl.DateTimeFormat("en-US", { timeZone: tz || "America/Santiago", hour: "numeric", hour12: false })
+        .format(new Date(pendingSlots[bestIndex]))
+    )
+    if (Math.abs(userHour - slotLocalHour) > 3) return null
+  }
+
+  return bestIndex + 1
 }
 
 const DAYS_ES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
@@ -207,6 +232,85 @@ export function formatSlotsForProspect(slots: string[], country: string, languag
   const tz = getTimezone(country)
   const bullets = ["•", "•", "•"]
   return slots.map((isoTime, i) => `${bullets[i]} ${formatSlotLabel(isoTime, tz, language)}`).join("\n")
+}
+
+// Busca slots en Cal.com cerca de la fecha/hora preferida por el usuario
+export async function getSlotsByPreference(
+  preferredDate: Date,
+  country: string,
+  preferredLocalHour?: number
+): Promise<string[]> {
+  const tz = getTimezone(country)
+  const countryCode = COUNTRY_CODES[country] || "CL"
+  const now = new Date()
+  const minStart = new Date(now.getTime() + 25 * 60 * 60 * 1000)
+
+  // Ventana: desde el día anterior a la fecha preferida hasta 5 días después
+  const windowStart = new Date(Math.max(minStart.getTime(), preferredDate.getTime() - 24 * 60 * 60 * 1000))
+  const windowEnd = new Date(preferredDate.getTime() + 6 * 24 * 60 * 60 * 1000)
+
+  const year = now.getFullYear()
+  const [holidays, holidaysNext] = await Promise.all([
+    getPublicHolidays(year, countryCode),
+    getPublicHolidays(year + 1, countryCode),
+  ])
+  const allHolidays = new Set([...holidays, ...holidaysNext])
+
+  const res = await fetch(
+    `${CAL_BASE}/slots/available?eventTypeId=${CAL_EVENT_TYPE_ID}&startTime=${windowStart.toISOString()}&endTime=${windowEnd.toISOString()}&timeZone=${encodeURIComponent(tz)}`,
+    { headers: CAL_HEADERS, cache: "no-store" }
+  )
+  if (!res.ok) return []
+
+  const data = await res.json() as { data?: { slots?: Record<string, Array<{ time: string }>> } }
+  const slotsByDay = data.data?.slots || {}
+
+  const allSlots: string[] = []
+  for (const day of Object.keys(slotsByDay).sort()) {
+    if (isWeekend(new Date(day + "T12:00:00Z"))) continue
+    if (allHolidays.has(day)) continue
+    for (const s of slotsByDay[day]) allSlots.push(s.time)
+  }
+  if (!allSlots.length) return []
+
+  // Ordenar por proximidad: primero por diferencia de hora del día, luego por fecha
+  allSlots.sort((a, b) => {
+    const getHour = (iso: string) => parseInt(
+      new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(new Date(iso))
+    )
+    const dateDiffA = Math.abs(new Date(a).getTime() - preferredDate.getTime())
+    const dateDiffB = Math.abs(new Date(b).getTime() - preferredDate.getTime())
+    if (preferredLocalHour !== undefined) {
+      const hourDiffA = Math.abs(getHour(a) - preferredLocalHour)
+      const hourDiffB = Math.abs(getHour(b) - preferredLocalHour)
+      if (hourDiffA !== hourDiffB) return hourDiffA - hourDiffB
+    }
+    return dateDiffA - dateDiffB
+  })
+
+  // Retornar hasta 3 slots, prefiriendo días distintos
+  const result: string[] = []
+  const usedDays = new Set<string>()
+  for (const slot of allSlots) {
+    if (result.length >= 3) break
+    const day = slot.split("T")[0]
+    if (!usedDays.has(day)) { result.push(slot); usedDays.add(day) }
+  }
+  for (const slot of allSlots) {
+    if (result.length >= 3) break
+    if (!result.includes(slot)) result.push(slot)
+  }
+  return result.slice(0, 3)
+}
+
+// Extrae fecha y hora preferida de un mensaje en lenguaje natural
+export function parsePreferredTime(message: string): { date: Date; hour?: number } | null {
+  const parsed = chrono.es.parse(message, new Date(), { forwardDate: true })
+  if (!parsed.length) return null
+  return {
+    date: parsed[0].start.date(),
+    hour: parsed[0].start.isCertain("hour") ? (parsed[0].start.get("hour") ?? undefined) : undefined,
+  }
 }
 
 export async function bookMeeting(params: {

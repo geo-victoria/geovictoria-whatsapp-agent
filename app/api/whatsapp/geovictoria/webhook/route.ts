@@ -956,12 +956,15 @@ async function processInboundMessages(payload: any, request: Request) {
       extraContext = `[SLOTS_DISPONIBLES — ya presentados al prospecto]\n${slotsText}\n[/SLOTS_DISPONIBLES]`
     }
 
-    await sendTypingIndicator(from)
+    // Mantener "escribiendo..." vivo durante toda la generación (Meta lo apaga a los ~5s)
+    const typingInterval = setInterval(() => { sendTypingIndicator(from).catch(() => {}) }, 2500)
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
     try {
       rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext, from, stateAfterUser.customerProfile)
     } catch {
       // error interno — no exponer al usuario
+    } finally {
+      clearInterval(typingInterval)
     }
 
     // Extraer marcadores de lead y de slot
@@ -998,7 +1001,7 @@ async function processInboundMessages(payload: any, request: Request) {
         const empresa = sanitized.empresa ? ` en ${sanitized.empresa}` : ""
         const workers = sanitized.trabajadores ? ` (${sanitized.trabajadores} trabajadores)` : ""
         const slotsText = formatSlotsForProspect(slots, country)
-        const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}${workers}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 45 min:\n\n${slotsText}\n\n${slotChoicePrompt(slots.length)}`
+        const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}${workers}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 20 min:\n\n${slotsText}\n\n${slotChoicePrompt(slots.length)}`
         const stateWithSlots = appendMessage(from, "assistant", slotMsg)
         await persistConversationSnapshot(stateWithSlots)
         await sendTypingIndicator(from, 700)
@@ -1096,7 +1099,7 @@ async function processInboundMessages(payload: any, request: Request) {
 
     scheduleInactivityEvaluation(from)
     try {
-      await sendTypingIndicator(from, finalReply.length)
+      await sendTypingIndicator(from, Math.min(2000, Math.max(600, finalReply.length * 12)))
       await sendWhatsAppText(from, finalReply)
     } catch {
       // fallo silencioso — Meta reintentará

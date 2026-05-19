@@ -4,6 +4,10 @@
     {
       "path": "/api/reengagement",
       "schedule": "30 13 * * 1-5"
+    },
+    {
+      "path": "/api/reengagement?mode=zoho-sync",
+      "schedule": "0 21 * * 1-5"
     }
   ],
   "functions": {

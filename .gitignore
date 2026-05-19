@@ -13,3 +13,4 @@ scripts/
 
 # Claude Code config local
 .claude/
+.env*.local

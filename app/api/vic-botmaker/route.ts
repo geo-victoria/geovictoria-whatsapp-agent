@@ -11,8 +11,8 @@ type LeadData = {
 type ConversationState = {
   contact: string; startedAt: string; updatedAt: string; lastUserAt?: string
   messages: ConversationMessage[]; lead?: LeadData; pendingSlots?: string[]
-  isSupport?: boolean; meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string
-  organizerEmail?: string
+  isSupport?: boolean; firstResponseId?: string; meetingBooked?: boolean
+  meetingBookingId?: string; zohoLeadId?: string; organizerEmail?: string
 }
 
 const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
@@ -508,7 +508,7 @@ export async function POST(request: Request) {
       if (slots.length > 0) {
         const name = sanitized.nombre?.split(" ")[0] || ""
         const empresa = sanitized.empresa ? ` en ${sanitized.empresa}` : ""
-        const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 45 min:\n\n${formatSlotsForProspect(slots, sanitized.pais || "Chile")}\n\n${slotChoicePrompt(slots.length)}`
+        const slotMsg = `¡Perfecto${name ? `, ${name}` : ""}! Registré tu información${empresa}.\n\nRevisé la agenda y tengo estas opciones para tu reunión de 20 min:\n\n${formatSlotsForProspect(slots, sanitized.pais || "Chile")}\n\n${slotChoicePrompt(slots.length)}`
         appendMessage(contact, "assistant", slotMsg)
         await upsertConversationSnapshot(stateAfterAssistant)
         return NextResponse.json({ reply: slotMsg })
