@@ -11,8 +11,8 @@ type LeadData = {
 type ConversationState = {
   contact: string; startedAt: string; updatedAt: string; lastUserAt?: string
   messages: ConversationMessage[]; lead?: LeadData; pendingSlots?: string[]
-  isSupport?: boolean; firstResponseId?: string; meetingBooked?: boolean
-  meetingBookingId?: string; zohoLeadId?: string; organizerEmail?: string
+  isSupport?: boolean; firstResponseId?: string; isKnownClient?: boolean
+  meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string; organizerEmail?: string
 }
 
 const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
@@ -296,27 +296,44 @@ export async function POST(request: Request) {
 
     // Ruta de soporte activa — derivar directo a Victoria (first-response agent)
     if (state.isSupport) {
-      const stateSupport = appendMessage(contact, "user", message)
-      await sendTypingIndicator(phone)
-      try {
-        const { reply, responseId, marker } = await callFirstResponseAgent(message, state.firstResponseId)
-        stateSupport.firstResponseId = responseId
-        const replyText = marker === "ESCALAR" ? ESCALAR_MSG : reply
-        // END o ESCALAR — liberar la sesión de soporte para que Vicky retome si el usuario escribe de nuevo
-        if (marker === "END" || marker === "ESCALAR") {
+      // Cambio de interés explícito — el usuario quiere conocer servicios/precios
+      const wantsSales = /quiero conocer|me interesa el (producto|sistema|servicio)|cu[aá]nto cuesta|cu[aá]nto vale|precio|tarifa|cotiza|quiero comprar|quiero contratar/i.test(message)
+      if (wantsSales) {
+        state.isSupport = false
+        state.firstResponseId = undefined
+        state.isKnownClient = true
+        // Continuar al flujo normal de Vicky (no retornar aquí)
+      } else {
+        const stateSupport = appendMessage(contact, "user", message)
+        await sendTypingIndicator(phone)
+        try {
+          const { reply, responseId, marker } = await callFirstResponseAgent(message, state.firstResponseId)
+          stateSupport.firstResponseId = responseId
+          const replyText = marker === "ESCALAR" ? ESCALAR_MSG : reply
+
+          if (marker === "END") {
+            // Problema resuelto — liberar sesión y marcar como cliente conocido
+            stateSupport.isSupport = false
+            stateSupport.firstResponseId = undefined
+            stateSupport.isKnownClient = true
+          } else if (marker === "ESCALAR") {
+            // Victoria no pudo — liberar sesión, fresh start si vuelve a preguntar
+            stateSupport.isSupport = false
+            stateSupport.firstResponseId = undefined
+            stateSupport.isKnownClient = true
+          }
+
+          appendMessage(contact, "assistant", replyText)
+          await upsertConversationSnapshot(stateSupport)
+          return NextResponse.json({ reply: replyText })
+        } catch {
           stateSupport.isSupport = false
           stateSupport.firstResponseId = undefined
+          stateSupport.isKnownClient = true
+          appendMessage(contact, "assistant", ESCALAR_MSG)
+          await upsertConversationSnapshot(stateSupport)
+          return NextResponse.json({ reply: ESCALAR_MSG })
         }
-        appendMessage(contact, "assistant", replyText)
-        await upsertConversationSnapshot(stateSupport)
-        return NextResponse.json({ reply: replyText })
-      } catch {
-        // Si Victoria falla, liberar la sesión y dar los canales de soporte
-        stateSupport.isSupport = false
-        stateSupport.firstResponseId = undefined
-        appendMessage(contact, "assistant", ESCALAR_MSG)
-        await upsertConversationSnapshot(stateSupport)
-        return NextResponse.json({ reply: ESCALAR_MSG })
       }
     }
 
@@ -470,6 +487,11 @@ export async function POST(request: Request) {
     if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
       extraContext = `[SLOTS_DISPONIBLES — ya presentados]\n${formatSlotsForProspect(pendingSlots, country)}\n[/SLOTS_DISPONIBLES]`
     }
+    // Cliente conocido — ya fue atendido por soporte, no preguntar si es cliente o prospecto
+    if (stateAfterUser.isKnownClient) {
+      const clienteCtx = `[CLIENTE_GEOVICTORIA] Este usuario ya es cliente activo de GeoVictoria. NO preguntes si es cliente. Salúdalo por nombre si lo tienes. Si pregunta por servicios o precios, ofrece agendar una reunión de 20 min con un ejecutivo.`
+      extraContext = extraContext ? `${extraContext}\n${clienteCtx}` : clienteCtx
+    }
 
     // Llamar a Vicky — mantener typing vivo durante la generación
     await sendTypingIndicator(phone)
@@ -496,10 +518,11 @@ export async function POST(request: Request) {
         const { reply: victoriaReply, responseId, marker } = await callFirstResponseAgent(message)
         stateAfterAssistant.firstResponseId = responseId
         const replyToSend = marker === "ESCALAR" ? ESCALAR_MSG : victoriaReply
-        // END o ESCALAR en primer turno — liberar sesión inmediatamente
+        // END o ESCALAR en primer turno — liberar sesión y marcar cliente conocido
         if (marker === "END" || marker === "ESCALAR") {
           stateAfterAssistant.isSupport = false
           stateAfterAssistant.firstResponseId = undefined
+          stateAfterAssistant.isKnownClient = true
         }
         // Reemplazar el último mensaje del asistente (el de Vicky) por el de Victoria
         const msgs = stateAfterAssistant.messages
@@ -509,9 +532,9 @@ export async function POST(request: Request) {
         await upsertConversationSnapshot(stateAfterAssistant)
         return NextResponse.json({ reply: replyToSend })
       } catch {
-        // Si Victoria falla, liberar sesión y dar canales de soporte
         stateAfterAssistant.isSupport = false
         stateAfterAssistant.firstResponseId = undefined
+        stateAfterAssistant.isKnownClient = true
         await upsertConversationSnapshot(stateAfterAssistant)
         return NextResponse.json({ reply: ESCALAR_MSG })
       }

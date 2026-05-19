@@ -59,6 +59,7 @@ export type ConversationState = {
   pendingSlots?: string[]
   isSupport?: boolean
   firstResponseId?: string
+  isKnownClient?: boolean
   // Session tracking
   zohoSessionId?: string
   sessionStartedAt?: string
@@ -140,6 +141,7 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     pending_slots: state.pendingSlots?.length ? state.pendingSlots : null,
     is_support: state.isSupport || false,
     first_response_id: state.firstResponseId || null,
+    is_known_client: state.isKnownClient || false,
     zoho_lead_id: state.zohoLeadId || null,
     meeting_booked: state.meetingBooked || false,
     meeting_booking_id: state.meetingBookingId || null,
@@ -253,6 +255,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     session_number: number | null
     is_support: boolean | null
     first_response_id: string | null
+    is_known_client: boolean | null
   }> | null
 
   const one = rows?.[0]
@@ -283,6 +286,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     sessionNumber: one.session_number || undefined,
     isSupport: one.is_support || undefined,
     firstResponseId: one.first_response_id || undefined,
+    isKnownClient: one.is_known_client || undefined,
   }
 }
 
