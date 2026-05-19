@@ -3,11 +3,27 @@
   "crons": [
     {
       "path": "/api/reengagement",
-      "schedule": "30 13 * * 1-5"
+      "schedule": "0 13 * * 1-5"
+    },
+    {
+      "path": "/api/reengagement",
+      "schedule": "0 19 * * 1-5"
+    },
+    {
+      "path": "/api/reengagement?mode=noshow",
+      "schedule": "0 22 * * 1-5"
     },
     {
       "path": "/api/reengagement?mode=zoho-sync",
-      "schedule": "0 21 * * 1-5"
+      "schedule": "0 14 * * 1-5"
+    },
+    {
+      "path": "/api/reengagement?mode=zoho-sync",
+      "schedule": "0 17 * * 1-5"
+    },
+    {
+      "path": "/api/reengagement?mode=zoho-sync",
+      "schedule": "0 20 * * 1-5"
     }
   ],
   "functions": {
@@ -22,6 +38,9 @@
     },
     "app/api/crm/zoho-meeting/route.ts": {
       "maxDuration": 30
+    },
+    "app/api/reengagement/route.ts": {
+      "maxDuration": 60
     }
   }
 }

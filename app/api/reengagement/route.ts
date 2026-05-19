@@ -574,11 +574,24 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  // Modo liviano: solo sincronizar leads sin Zoho (cron horario)
   const { searchParams } = new URL(request.url)
-  if (searchParams.get("mode") === "zoho-sync") {
+  const mode = searchParams.get("mode")
+
+  // Modo zoho-sync: solo sincronizar leads sin Zoho (corre cada 2-3h)
+  if (mode === "zoho-sync") {
     const n = await processLeadsSinZoho()
     return NextResponse.json({ leads_sin_zoho: n })
+  }
+
+  // Modo noshow: solo procesar no-shows post-reuniones (corre al final del día)
+  if (mode === "noshow") {
+    try {
+      const token = await getZohoToken()
+      const n = await processNoShows(token)
+      return NextResponse.json({ noshow: n })
+    } catch (e) {
+      return NextResponse.json({ error: String(e) }, { status: 500 })
+    }
   }
 
   try {
