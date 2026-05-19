@@ -309,10 +309,10 @@ export async function POST(request: Request) {
 
           const firstName = lookup.prospectName?.split(" ")[0] || ""
           const greeting = firstName ? `¡${firstName}! 👋` : "¡Hola! 👋"
-          const ownerContact = lookup.owner.phone
-            ? `📞 *${lookup.owner.name}*: ${lookup.owner.phone}`
-            : `📧 *${lookup.owner.name}*: ${lookup.owner.email}`
-          const reContactMsg = `${greeting} Veo que ya tienes un ejecutivo GeoVictoria asignado a tu cuenta:\n\n${ownerContact}\n\nTe recomiendo contactarlo directamente, ¡tiene todo el contexto de tu caso! ¿Hay algo más en lo que pueda ayudarte?`
+          const ownerLines: string[] = []
+          if (lookup.owner.phone) ownerLines.push(`📞 *${lookup.owner.name}*: ${lookup.owner.phone}`)
+          ownerLines.push(`📧 ${lookup.owner.email}`)
+          const reContactMsg = `${greeting} Ya tienes un ejecutivo GeoVictoria asignado a tu cuenta:\n\n${ownerLines.join("\n")}\n\nPuedes escribirle directamente para coordinar los detalles. Mientras tanto, con gusto te cuento más sobre GeoVictoria, resuelvo tus dudas o te ayudo a preparar la conversación con él. ¿Qué necesitas? 😊`
 
           // Notificar al ejecutivo por email — fire-and-forget
           if (lookup.recordId && lookup.type) {
