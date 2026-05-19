@@ -26,20 +26,16 @@ const INJECT_RE = /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<scri
 function getEnv(name: string) { return (process.env[name] || "").trim() }
 function isoNow() { return new Date().toISOString() }
 
-async function sendTypingIndicator(to: string) {
-  const token = getEnv("WHATSAPP_ACCESS_TOKEN")
-  const phoneId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
-  if (!token || !phoneId) return
-  await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+async function sendTypingIndicator(contactId: string) {
+  const token = getEnv("BOTMAKER_ACCESS_TOKEN")
+  if (!token) return
+  const channelId = "GeoVictoriaEspaol-whatsapp-56967308227"
+  // Usar contactId sin el + para BotMaker
+  const contact = contactId.replace(/^\+/, "")
+  await fetch("https://api.botmaker.com/v2.0/chats-actions/send-read-typing-feedback", {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "typing_indicator",
-      typing_indicator: { type: "text" },
-    }),
+    headers: { "access-token": token, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ channelId, contactId: contact, typing: true }),
   }).catch(() => {})
 }
 
