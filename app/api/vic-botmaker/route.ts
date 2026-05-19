@@ -16,9 +16,14 @@ type ConversationState = {
   meetingBooked?: boolean; meetingBookingId?: string; zohoLeadId?: string; organizerEmail?: string
 }
 
-const globalStore = globalThis as unknown as { __vicConversations?: Map<string, ConversationState> }
+const globalStore = globalThis as unknown as {
+  __vicConversations?: Map<string, ConversationState>
+  __vicProcessing?: Set<string>
+}
 if (!globalStore.__vicConversations) globalStore.__vicConversations = new Map()
+if (!globalStore.__vicProcessing) globalStore.__vicProcessing = new Set()
 const conversations = globalStore.__vicConversations
+const processing = globalStore.__vicProcessing
 
 const MAX_INPUT_CHARS = 2000
 const EMAIL_RE = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
@@ -248,6 +253,7 @@ async function callVicSalesAgent(
 }
 
 export async function POST(request: Request) {
+  let lockedContact = ""
   try {
     const secret = request.headers.get("x-secret") || ""
     const expected = getEnv("BOTMAKER_SECRET")
@@ -266,6 +272,13 @@ export async function POST(request: Request) {
     if (message.length > MAX_INPUT_CHARS || INJECT_RE.test(message)) {
       return NextResponse.json({ reply: "El formato del mensaje no es válido. ¿Me envías tus datos uno por uno?", handoff: false })
     }
+
+    // Race condition guard: si ya hay un request en vuelo para este contacto, descartar silenciosamente
+    if (processing.has(contact)) {
+      return NextResponse.json({ reply: "" })
+    }
+    processing.add(contact)
+    lockedContact = contact
 
     // Siempre recargar desde Supabase para garantizar estado fresco entre instancias
     try {
@@ -487,7 +500,7 @@ export async function POST(request: Request) {
               body: JSON.stringify({
                 leadId: zohoLeadId,
                 slot,
-                slotEnd: new Date(new Date(slot).getTime() + 45 * 60 * 1000).toISOString(),
+                slotEnd: new Date(new Date(slot).getTime() + 20 * 60 * 1000).toISOString(),
                 meetingUrl: result.meetingUrl,
                 prospectName: leadData.nombre,
                 prospectEmail: leadData.email || leadData.correo,
@@ -668,6 +681,8 @@ export async function POST(request: Request) {
     const msg = error instanceof Error ? error.message : "Error inesperado"
     console.error("[vic-botmaker]", msg)
     return NextResponse.json({ reply: "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?" })
+  } finally {
+    if (lockedContact) processing.delete(lockedContact)
   }
 }
 
