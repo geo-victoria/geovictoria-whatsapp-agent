@@ -58,6 +58,7 @@ export type ConversationState = {
   organizerEmail?: string
   pendingSlots?: string[]
   isSupport?: boolean
+  firstResponseId?: string
   // Session tracking
   zohoSessionId?: string
   sessionStartedAt?: string
@@ -66,6 +67,17 @@ export type ConversationState = {
 
 function getEnv(name: string) {
   return (process.env[name] || "").trim()
+}
+
+function inferCountryFromPhone(contact: string): string {
+  const d = contact.replace(/\D/g, "")
+  const prefixes: [string, string][] = [
+    ["569", "Chile"], ["56", "Chile"], ["54", "Argentina"], ["57", "Colombia"],
+    ["51", "Perú"], ["52", "México"], ["55", "Brasil"], ["593", "Ecuador"],
+    ["591", "Bolivia"], ["595", "Paraguay"], ["598", "Uruguay"], ["58", "Venezuela"],
+  ]
+  for (const [p, c] of prefixes) if (d.startsWith(p)) return c
+  return "Chile"
 }
 
 function getSupabaseConfig() {
@@ -127,6 +139,7 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     customer_profile: state.customerProfile || null,
     pending_slots: state.pendingSlots?.length ? state.pendingSlots : null,
     is_support: state.isSupport || false,
+    first_response_id: state.firstResponseId || null,
     zoho_lead_id: state.zohoLeadId || null,
     meeting_booked: state.meetingBooked || false,
     meeting_booking_id: state.meetingBookingId || null,
@@ -134,6 +147,7 @@ export async function upsertConversationSnapshot(state: ConversationState) {
     zoho_session_id: state.zohoSessionId || null,
     session_started_at: state.sessionStartedAt || state.startedAt || null,
     session_number: state.sessionNumber || 1,
+    pais: inferCountryFromPhone(state.contact),
   }
 
   const upsertResult = (await supabaseRequest("vic_conversations?on_conflict=contact", {
@@ -217,7 +231,7 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
   if (!isSupabaseConfigured()) return null
 
   const rows = (await supabaseRequest(
-    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,customer_profile,pending_slots,zoho_lead_id,meeting_booked,meeting_booking_id,organizer_email,zoho_session_id,session_started_at,session_number&contact=eq.${encodeURIComponent(contact)}&limit=1`,
+    `vic_conversations?select=id,contact,started_at,updated_at,last_user_at,lead,last_evaluation_at,last_evaluation,customer_profile,pending_slots,zoho_lead_id,meeting_booked,meeting_booking_id,organizer_email,zoho_session_id,session_started_at,session_number,is_support,first_response_id&contact=eq.${encodeURIComponent(contact)}&limit=1`,
     { method: "GET" },
   )) as Array<{
     id: string
@@ -237,6 +251,8 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     zoho_session_id: string | null
     session_started_at: string | null
     session_number: number | null
+    is_support: boolean | null
+    first_response_id: string | null
   }> | null
 
   const one = rows?.[0]
@@ -265,6 +281,8 @@ export async function fetchConversationByContact(contact: string): Promise<Conve
     zohoSessionId: one.zoho_session_id || undefined,
     sessionStartedAt: one.session_started_at || undefined,
     sessionNumber: one.session_number || undefined,
+    isSupport: one.is_support || undefined,
+    firstResponseId: one.first_response_id || undefined,
   }
 }
 

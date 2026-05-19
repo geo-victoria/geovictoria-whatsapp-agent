@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { fetchConversationByContact, saveLead, updateLeadZohoId, upsertConversationSnapshot } from "@/lib/supabase-persistence"
-import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getTimezone, matchSlotFromMessage } from "@/lib/calendar"
+import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getSlotsByPreference, getTimezone, matchSlotFromMessage, parsePreferredTime } from "@/lib/calendar"
 
 type ConversationMessage = { role: "user" | "assistant"; content: string; at: string }
 type LeadData = {
@@ -25,6 +25,81 @@ const INJECT_RE = /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<scri
 
 function getEnv(name: string) { return (process.env[name] || "").trim() }
 function isoNow() { return new Date().toISOString() }
+
+async function sendTypingIndicator(to: string) {
+  const token = getEnv("WHATSAPP_ACCESS_TOKEN")
+  const phoneId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
+  if (!token || !phoneId) return
+  await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "typing_indicator",
+      typing_indicator: { type: "text" },
+    }),
+  }).catch(() => {})
+}
+
+async function callFirstResponseAgent(
+  message: string,
+  previousResponseId?: string
+): Promise<{ reply: string; responseId: string; marker: "ESCALAR" | "END" | null }> {
+  const apiKey = getEnv("FOUNDRY_API_KEY")
+  const endpoint = "https://claude-product-design.services.ai.azure.com/api/projects/claude-product-design/openai/v1/responses"
+
+  const body: Record<string, unknown> = {
+    input: message,
+    agent_reference: { name: "first-response-zoho", version: "14", type: "agent_reference" },
+  }
+  if (previousResponseId) body.previous_response_id = previousResponseId
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "api-key": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  })
+  if (!res.ok) throw new Error(`Foundry error: ${res.status}`)
+
+  const data = await res.json() as {
+    id: string
+    output: Array<{ type: string; content: Array<{ type: string; text: string }> }>
+  }
+
+  const rawReply = data.output
+    ?.find(o => o.type === "message")
+    ?.content?.find(c => c.type === "output_text")
+    ?.text ?? ""
+
+  let marker: "ESCALAR" | "END" | null = null
+  let reply = rawReply
+  if (rawReply.includes("[ESCALAR]")) { marker = "ESCALAR"; reply = rawReply.replace("[ESCALAR]", "").trim() }
+  else if (rawReply.includes("[END]")) { marker = "END"; reply = rawReply.replace("[END]", "").trim() }
+
+  return { reply, responseId: data.id, marker }
+}
+
+const ESCALAR_MSG = "No pude resolver esto automáticamente 🙁\n\nSi eres *administrador*, contacta a soporte directamente:\n📲 WhatsApp: *+56 9 4401 3873*\n📧 Email: *soporte@geovictoria.com*\n📞 Teléfono: *228976512* o *228976517*\n\nSi *no eres administrador*, pídele a tu admin que contacte a soporte."
+
+async function sendWhatsAppText(to: string, text: string) {
+  const token = getEnv("WHATSAPP_ACCESS_TOKEN")
+  const phoneId = getEnv("WHATSAPP_PHONE_NUMBER_ID")
+  if (!token || !phoneId) return
+  await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "text",
+      text: { body: text },
+    }),
+  }).catch(() => {})
+}
 function formatPhone(from: string) { return `+${from.replace(/\D/g, "")}` }
 
 function inferCountry(from: string): string {
@@ -217,6 +292,25 @@ export async function POST(request: Request) {
 
     const state = getConversation(contact)
 
+    // Ruta de soporte activa — derivar directo a Victoria (first-response agent)
+    if (state.isSupport) {
+      const stateSupport = appendMessage(contact, "user", message)
+      await sendTypingIndicator(phone)
+      try {
+        const { reply, responseId, marker } = await callFirstResponseAgent(message, state.firstResponseId)
+        stateSupport.firstResponseId = responseId
+        const replyText = marker === "ESCALAR" ? ESCALAR_MSG : reply
+        appendMessage(contact, "assistant", replyText)
+        await upsertConversationSnapshot(stateSupport)
+        return NextResponse.json({ reply: replyText })
+      } catch {
+        const fallback = ESCALAR_MSG
+        appendMessage(contact, "assistant", fallback)
+        await upsertConversationSnapshot(stateSupport)
+        return NextResponse.json({ reply: fallback })
+      }
+    }
+
     const stateAfterUser = appendMessage(contact, "user", message)
     const existingLead = stateAfterUser.lead
     const country = existingLead?.pais || inferCountry(contact)
@@ -333,17 +427,42 @@ export async function POST(request: Request) {
       }
     }
 
+    const phone = `+${contact}`
+
+    // Si hay slots pendientes y el usuario expresa preferencia horaria diferente, buscar en Cal.com
+    if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
+      const preference = parsePreferredTime(message)
+      if (preference) {
+        await sendTypingIndicator(phone)
+        await sendWhatsAppText(phone, "Dame un momento, reviso la agenda 📅")
+        const newSlots = await getSlotsByPreference(preference.date, country, preference.hour).catch(() => [])
+        if (newSlots.length > 0) {
+          stateAfterUser.pendingSlots = newSlots
+          const name = existingLead?.nombre?.split(" ")[0] || ""
+          const intro = name ? `${name}, b` : "B"
+          const reply = `${intro}usqué disponibilidad cerca de ese horario:\n\n${formatSlotsForProspect(newSlots, country)}\n\n¿Alguna te viene bien?`
+          appendMessage(contact, "assistant", reply)
+          await upsertConversationSnapshot(stateAfterUser)
+          return NextResponse.json({ reply })
+        }
+      }
+    }
+
     // Contexto de slots pendientes para el LLM
     let extraContext: string | undefined
     if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
       extraContext = `[SLOTS_DISPONIBLES — ya presentados]\n${formatSlotsForProspect(pendingSlots, country)}\n[/SLOTS_DISPONIBLES]`
     }
 
-    // Llamar a Vicky
+    // Llamar a Vicky — mantener typing vivo durante la generación
+    await sendTypingIndicator(phone)
+    const typingInterval = setInterval(() => { sendTypingIndicator(phone) }, 2500)
     let rawReply = "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
     try {
       rawReply = await callVicSalesAgent(request, stateAfterUser.messages.slice(-40), stateAfterUser.lead, extraContext, contact)
-    } catch { /* silent */ }
+    } catch { /* silent */ } finally {
+      clearInterval(typingInterval)
+    }
 
     const { cleanReply: afterLead, lead } = extractLead(rawReply)
     const meetingDeclined = /MEETING_DECLINED/m.test(afterLead)
@@ -353,7 +472,26 @@ export async function POST(request: Request) {
     const finalReply = cleanReply || "Gracias por escribir."
 
     const stateAfterAssistant = appendMessage(contact, "assistant", finalReply)
-    if (isSupport) stateAfterAssistant.isSupport = true
+    if (isSupport) {
+      stateAfterAssistant.isSupport = true
+      // Primera detección de soporte — llamar a Victoria en vez de mandar canales directamente
+      try {
+        const { reply: victoriaReply, responseId, marker } = await callFirstResponseAgent(message)
+        stateAfterAssistant.firstResponseId = responseId
+        const replyToSend = marker === "ESCALAR" ? ESCALAR_MSG : victoriaReply
+        // Reemplazar el último mensaje del asistente (el de Vicky) por el de Victoria
+        const msgs = stateAfterAssistant.messages
+        if (msgs.length && msgs[msgs.length - 1].role === "assistant") {
+          msgs[msgs.length - 1].content = replyToSend
+        }
+        await upsertConversationSnapshot(stateAfterAssistant)
+        return NextResponse.json({ reply: replyToSend })
+      } catch {
+        // Si Victoria falla, caer al comportamiento actual (canales de soporte)
+        await upsertConversationSnapshot(stateAfterAssistant)
+        return NextResponse.json({ reply: ESCALAR_MSG })
+      }
+    }
 
     // Procesar lead capturado — bloqueado para soporte
     if (lead && !stateAfterAssistant.isSupport) {
