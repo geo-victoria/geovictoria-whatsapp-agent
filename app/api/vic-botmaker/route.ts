@@ -302,14 +302,21 @@ export async function POST(request: Request) {
         const { reply, responseId, marker } = await callFirstResponseAgent(message, state.firstResponseId)
         stateSupport.firstResponseId = responseId
         const replyText = marker === "ESCALAR" ? ESCALAR_MSG : reply
+        // END o ESCALAR — liberar la sesión de soporte para que Vicky retome si el usuario escribe de nuevo
+        if (marker === "END" || marker === "ESCALAR") {
+          stateSupport.isSupport = false
+          stateSupport.firstResponseId = undefined
+        }
         appendMessage(contact, "assistant", replyText)
         await upsertConversationSnapshot(stateSupport)
         return NextResponse.json({ reply: replyText })
       } catch {
-        const fallback = ESCALAR_MSG
-        appendMessage(contact, "assistant", fallback)
+        // Si Victoria falla, liberar la sesión y dar los canales de soporte
+        stateSupport.isSupport = false
+        stateSupport.firstResponseId = undefined
+        appendMessage(contact, "assistant", ESCALAR_MSG)
         await upsertConversationSnapshot(stateSupport)
-        return NextResponse.json({ reply: fallback })
+        return NextResponse.json({ reply: ESCALAR_MSG })
       }
     }
 
@@ -489,6 +496,11 @@ export async function POST(request: Request) {
         const { reply: victoriaReply, responseId, marker } = await callFirstResponseAgent(message)
         stateAfterAssistant.firstResponseId = responseId
         const replyToSend = marker === "ESCALAR" ? ESCALAR_MSG : victoriaReply
+        // END o ESCALAR en primer turno — liberar sesión inmediatamente
+        if (marker === "END" || marker === "ESCALAR") {
+          stateAfterAssistant.isSupport = false
+          stateAfterAssistant.firstResponseId = undefined
+        }
         // Reemplazar el último mensaje del asistente (el de Vicky) por el de Victoria
         const msgs = stateAfterAssistant.messages
         if (msgs.length && msgs[msgs.length - 1].role === "assistant") {
@@ -497,7 +509,9 @@ export async function POST(request: Request) {
         await upsertConversationSnapshot(stateAfterAssistant)
         return NextResponse.json({ reply: replyToSend })
       } catch {
-        // Si Victoria falla, caer al comportamiento actual (canales de soporte)
+        // Si Victoria falla, liberar sesión y dar canales de soporte
+        stateAfterAssistant.isSupport = false
+        stateAfterAssistant.firstResponseId = undefined
         await upsertConversationSnapshot(stateAfterAssistant)
         return NextResponse.json({ reply: ESCALAR_MSG })
       }
