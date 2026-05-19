@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { fetchConversationByContact, saveLead, updateLeadZohoId, upsertConversationSnapshot } from "@/lib/supabase-persistence"
 import { bookMeeting, formatSlotsForProspect, getAvailableSlots, getSlotsByPreference, getTimezone, matchSlotFromMessage, parsePreferredTime } from "@/lib/calendar"
+import { lookupZohoByPhone, sendZohoTemplateEmail, ZOHO_TEMPLATE_LEAD, ZOHO_TEMPLATE_DEAL } from "@/lib/zoho-lookup"
 
 type ConversationMessage = { role: "user" | "assistant"; content: string; at: string }
 type LeadData = {
@@ -289,6 +290,55 @@ export async function POST(request: Request) {
 
     const state = getConversation(contact)
     const phone = `+${contact}`
+
+    // Deduplicación Zoho — solo en el primer mensaje del contacto (messages vacíos = primera vez ever)
+    const isFirstMessage = state.messages.length === 0
+    if (isFirstMessage && !state.zohoLeadId && !state.isKnownClient) {
+      try {
+        const lookup = await Promise.race([
+          lookupZohoByPhone(contact),
+          new Promise<Awaited<ReturnType<typeof lookupZohoByPhone>>>(
+            (_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)
+          ),
+        ])
+
+        if (lookup.found && lookup.isActive && lookup.owner?.email) {
+          // Casos 2, 3, 5: lead/deal activo con ejecutivo asignado → re-contacto
+          state.zohoLeadId = lookup.recordId
+          state.isKnownClient = true
+
+          const firstName = lookup.prospectName?.split(" ")[0] || ""
+          const greeting = firstName ? `¡${firstName}! 👋` : "¡Hola! 👋"
+          const ownerContact = lookup.owner.phone
+            ? `📞 *${lookup.owner.name}*: ${lookup.owner.phone}`
+            : `📧 *${lookup.owner.name}*: ${lookup.owner.email}`
+          const reContactMsg = `${greeting} Veo que ya tienes un ejecutivo GeoVictoria asignado a tu cuenta:\n\n${ownerContact}\n\nTe recomiendo contactarlo directamente, ¡tiene todo el contexto de tu caso! ¿Hay algo más en lo que pueda ayudarte?`
+
+          // Notificar al ejecutivo por email — fire-and-forget
+          if (lookup.recordId && lookup.type) {
+            const templateId = lookup.type === "deal" ? ZOHO_TEMPLATE_DEAL : ZOHO_TEMPLATE_LEAD
+            sendZohoTemplateEmail(lookup.recordId, lookup.type, templateId).catch(() => {})
+          }
+
+          appendMessage(contact, "user", message)
+          appendMessage(contact, "assistant", reContactMsg)
+          await upsertConversationSnapshot(state)
+          return NextResponse.json({ reply: reContactMsg })
+
+        } else if (lookup.found && !lookup.isActive) {
+          // Casos 4, 6: registro inactivo/ganado → flujo normal con datos pre-cargados
+          if (lookup.isClient) state.isKnownClient = true
+          if (lookup.prospectName || lookup.prospectEmail || lookup.empresa) {
+            if (!state.lead) state.lead = {}
+            if (lookup.prospectName && !state.lead.nombre) state.lead.nombre = lookup.prospectName
+            if (lookup.prospectEmail && !(state.lead.email || state.lead.correo)) state.lead.email = lookup.prospectEmail
+            if (lookup.empresa && !state.lead.empresa) state.lead.empresa = lookup.empresa
+          }
+          // Continuar al flujo normal de Vicky
+        }
+        // Caso 1: sin registro → flujo normal (no hacer nada)
+      } catch { /* Zoho no disponible — continuar sin dedup */ }
+    }
 
     // Ruta de soporte activa — derivar directo a Victoria (first-response agent)
     if (state.isSupport) {
