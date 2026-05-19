@@ -291,6 +291,7 @@ export async function POST(request: Request) {
     } catch { /* continuar con lo que haya en memoria */ }
 
     const state = getConversation(contact)
+    const phone = `+${contact}`
 
     // Ruta de soporte activa — derivar directo a Victoria (first-response agent)
     if (state.isSupport) {
@@ -426,8 +427,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ reply, handoff: false })
       }
     }
-
-    const phone = `+${contact}`
 
     // Si hay slots pendientes y el usuario expresa preferencia horaria diferente, buscar en Cal.com
     if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
