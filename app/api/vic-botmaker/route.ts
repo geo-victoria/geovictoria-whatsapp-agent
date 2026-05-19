@@ -312,6 +312,16 @@ export async function POST(request: Request) {
       }
     }
 
+    // Anti-loop: detectar mensaje repetido consecutivo
+    const recentMsgs = state.messages.slice(-6)
+    const userRecentMsgs = recentMsgs.filter(m => m.role === "user")
+    const sameCount = userRecentMsgs.filter(m => m.content.trim().toLowerCase() === message.trim().toLowerCase()).length
+    if (sameCount >= 2) {
+      // Mismo mensaje 2+ veces seguidas — devolver última respuesta del asistente sin llamar al LLM
+      const lastAssistant = [...recentMsgs].reverse().find(m => m.role === "assistant")
+      if (lastAssistant) return NextResponse.json({ reply: lastAssistant.content })
+    }
+
     const stateAfterUser = appendMessage(contact, "user", message)
     const existingLead = stateAfterUser.lead
     const country = existingLead?.pais || inferCountry(contact)
