@@ -509,7 +509,18 @@ export async function POST(request: Request) {
     const stateAfterAssistant = appendMessage(contact, "assistant", finalReply)
     if (isSupport) {
       stateAfterAssistant.isSupport = true
-      // Primera detección de soporte — llamar a Victoria en vez de mandar canales directamente
+      // Si el mensaje es vago (sin problema concreto), pedir contexto antes de llamar a Victoria
+      const isVague = message.trim().split(/\s+/).length <= 6 &&
+        /^(hola|necesito|quiero|busco|ayuda|soporte|comunicarme|hablar|contactar)/i.test(message.trim()) &&
+        !/contrase|clave|reloj|marcaj|factura|usuario|ingresar|error|problema con|no puedo|no me|no funciona/i.test(message)
+      if (isVague) {
+        const clarifyMsg = "¿En qué podemos ayudarte? Cuéntame el problema con más detalle para orientarte mejor 😊"
+        const msgs = stateAfterAssistant.messages
+        if (msgs.length && msgs[msgs.length - 1].role === "assistant") msgs[msgs.length - 1].content = clarifyMsg
+        await upsertConversationSnapshot(stateAfterAssistant)
+        return NextResponse.json({ reply: clarifyMsg })
+      }
+      // Primera detección de soporte con contexto suficiente — llamar a Victoria
       try {
         const { reply: victoriaReply, responseId, marker } = await callFirstResponseAgent(message)
         stateAfterAssistant.firstResponseId = responseId
