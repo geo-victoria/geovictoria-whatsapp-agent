@@ -285,7 +285,8 @@ export async function POST(request: Request) {
           const restoredSlots = await getAvailableSlots(lead?.pais || inferCountry(contact)).catch(() => [])
           if (restoredSlots.length) saved.pendingSlots = restoredSlots
         }
-      } else {
+      } else if (!conversations.has(contact)) {
+        // Solo limpiar si tampoco hay estado en memoria — preservar RAM en caso de timeout Supabase
         conversations.delete(contact)
       }
     } catch { /* continuar con lo que haya en memoria */ }
