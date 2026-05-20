@@ -309,6 +309,8 @@ export async function POST(request: Request) {
     const isFirstMessage = state.messages.length === 0
     if (isFirstMessage && !state.zohoLeadId && !state.isKnownClient) {
       try {
+        // Typing indicator antes del lookup — evita que BotMaker abandone el webhook por timeout
+        await sendTypingIndicator(phone)
         const lookup = await Promise.race([
           lookupZohoByPhone(contact),
           new Promise<Awaited<ReturnType<typeof lookupZohoByPhone>>>(
