@@ -84,7 +84,7 @@ async function callFirstResponseAgent(
   return { reply, responseId: data.id, marker }
 }
 
-const ESCALAR_MSG = "Para esta consulta puedes contactar directamente a nuestro equipo de soporte:\n📲 WhatsApp: *+56 9 4401 3873*\n📧 Email: *soporte@geovictoria.com*\n📞 Teléfono: *228976512* o *228976517*\n¡Ellos te ayudarán de inmediato! 🙌"
+const ESCALAR_MSG = "Para esta consulta puedes contactar directamente a nuestro equipo de soporte:\n📲 WhatsApp: *+56 9 4401 3873*\n📧 Email: *soporte@geovictoria.com*\n📞 Teléfono: *600 914 3819*\n¡Ellos te ayudarán de inmediato! 🙌"
 
 async function sendWhatsAppText(to: string, text: string) {
   const token = getEnv("WHATSAPP_ACCESS_TOKEN")

@@ -67,8 +67,7 @@ const TESTS: QATest[] = [
       { type: "hasMarker", marker: "SUPPORT_CASE" },
       { type: "contains", value: "+56 9 4401 3873" },
       { type: "contains", value: "soporte@geovictoria.com" },
-      { type: "contains", value: "228976512" },
-      { type: "contains", value: "228976517" },
+      { type: "contains", value: "600 914 3819" },
       { type: "noMarker", marker: "LEAD_CAPTURED" },
     ],
   },
@@ -104,7 +103,7 @@ const TESTS: QATest[] = [
       { role: "user", content: "Soy cliente" },
       {
         role: "assistant",
-        content: `Para soporte técnico puedes contactarnos por:\n📲 WhatsApp: *+56 9 4401 3873*\n📧 Email: *soporte@geovictoria.com*\n📞 Teléfono: *228976512* o *228976517*\n¡Ellos te ayudarán de inmediato! 🙌 SUPPORT_CASE`,
+        content: `Para soporte técnico puedes contactarnos por:\n📲 WhatsApp: *+56 9 4401 3873*\n📧 Email: *soporte@geovictoria.com*\n📞 Teléfono: *600 914 3819*\n¡Ellos te ayudarán de inmediato! 🙌 SUPPORT_CASE`,
       },
       { role: "user", content: "Ya llamé y no me contestaron, necesito que me ayuden ahora" },
     ],

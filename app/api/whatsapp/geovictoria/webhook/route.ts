@@ -949,7 +949,7 @@ async function processInboundMessages(payload: any, request: Request) {
     // Inyectar slots pendientes como contexto si el usuario no seleccionó aún
     let extraContext: string | undefined
     if (stateAfterUser.isSupport) {
-      extraContext = `[SOPORTE] Este usuario es cliente con un problema técnico. Tu ÚNICA función ahora es entregar los canales de soporte. NUNCA pidas datos ni ofrezcas reunión. Canales disponibles: WhatsApp *+56 9 4401 3873*, email *soporte@geovictoria.com*, teléfonos *228976512* y *228976517*.`
+      extraContext = `[SOPORTE] Este usuario es cliente con un problema técnico. Tu ÚNICA función ahora es entregar los canales de soporte. NUNCA pidas datos ni ofrezcas reunión. Canales disponibles: WhatsApp *+56 9 4401 3873*, email *soporte@geovictoria.com*, teléfono *600 914 3819*.`
     } else if (pendingSlots.length > 0 && !stateAfterUser.meetingBooked) {
       const country = stateAfterUser.lead?.pais || inferCountry(from)
       const slotsText = formatSlotsForProspect(pendingSlots, country)
