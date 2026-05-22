@@ -6,6 +6,7 @@ const BM_CHANNEL = "GeoVictoriaEspaol-whatsapp-56967308227"
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const ZOHO_BASE = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+const SUPABASE_MGMT_KEY = (process.env.SUPABASE_MANAGEMENT_KEY || "").trim()
 
 // ─── Zoho token ───────────────────────────────────────────────────────────────
 async function getZohoToken() {
@@ -28,10 +29,13 @@ async function getZohoToken() {
 
 // ─── Supabase helpers ─────────────────────────────────────────────────────────
 async function supabaseQuery(sql: string) {
+  if (!SUPABASE_MGMT_KEY) {
+    throw new Error("SUPABASE_MANAGEMENT_KEY no configurada — requerida para queries de gestión")
+  }
   const res = await fetch(`https://api.supabase.com/v1/projects/${SUPABASE_URL.split(".")[0].split("//")[1]}/database/query`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.SUPABASE_MANAGEMENT_KEY || "sbp_d89950a29512ce9051bc08d03a78cf66ee586b82"}`,
+      Authorization: `Bearer ${SUPABASE_MGMT_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query: sql }),
