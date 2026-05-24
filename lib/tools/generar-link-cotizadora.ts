@@ -27,11 +27,36 @@ const SCOPE_MAX_USUARIOS = 50
 const EJECUTIVO_DEFAULT = "Eddyluz Mujica"
 const IVA_RATE = 0.19
 
-// Re-usamos getUFActual del módulo de cotizar-referencial para consistencia
-// (acá hacemos una versión simple inline para evitar import circular)
+// Sectores válidos (espejo del prompt y de la picklist de Zoho).
+const SECTORES_VALIDOS = [
+  "1. Agrícola",
+  "2. Condominio",
+  "3. Construcción",
+  "4. Inmobilaria",
+  "5. Consultoria",
+  "6. Banca y Finanzas",
+  "7. Educación",
+  "8. Municipio",
+  "9. Gobierno",
+  "10. Mineria",
+  "11. Naviera",
+  "12. Outsourcing Seguridad",
+  "12. Outsourcing General",
+  "13. Outsourcing Retail",
+  "14. Planta Productiva",
+  "15. Logistica",
+  "16. Retail Enterprise",
+  "17. Retail SMB",
+  "18. Salud",
+  "19. Servicios",
+  "20. Transporte",
+  "21. Turismo, Hotelería y Gastronomía",
+] as const
+
+type SectorValido = typeof SECTORES_VALIDOS[number]
+
 async function getUFActualSafe(): Promise<number> {
   try {
-    // mindicador.cl es la fuente que usa cotizar-referencial
     const res = await fetch("https://mindicador.cl/api/uf", { cache: "no-store" })
     if (!res.ok) return 0
     const data = await res.json() as { serie?: Array<{ valor: number }> }
@@ -57,6 +82,12 @@ export const generarLinkCotizadoraSchema = {
         type: "number" as const, minimum: 1, maximum: SCOPE_MAX_USUARIOS,
         description: "Cantidad de trabajadores (1-50)",
       },
+      sectorEmpresa: {
+        type: "string" as const,
+        enum: SECTORES_VALIDOS as unknown as string[],
+        description:
+          "Rubro/sector de la empresa, deducido del nombre o preguntado al prospecto. Debe ser exactamente uno de los valores del enum (incluyendo el prefijo numérico). Si no es claro, usa '19. Servicios'.",
+      },
       modulos: {
         type: "array" as const, items: { type: "string" as const },
         description: "IDs de módulos confirmados (deben estar en catálogo). Siempre incluir 'asistencia' como base.",
@@ -75,7 +106,7 @@ export const generarLinkCotizadoraSchema = {
         },
       },
     },
-    required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "modulos"],
+    required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "sectorEmpresa", "modulos"],
   },
 }
 
@@ -86,6 +117,7 @@ export type LinkCotizadoraInput = {
   contactoTelefono?: string
   rutEmpresa: string
   userCount: number
+  sectorEmpresa: SectorValido | string
   modulos: string[]
   hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
 }
@@ -120,10 +152,9 @@ export async function generarLinkCotizadora(
 ): Promise<LinkCotizadoraResultado> {
   const {
     empresa, contacto, contactoEmail, contactoTelefono,
-    rutEmpresa, userCount, modulos = [], hardware = [],
+    rutEmpresa, userCount, sectorEmpresa, modulos = [], hardware = [],
   } = args
 
-  // ── Validaciones básicas ──
   if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
     return { ok: false, error: "Faltan campos obligatorios: empresa, contacto, contactoEmail, rutEmpresa." }
   }
@@ -136,8 +167,11 @@ export async function generarLinkCotizadora(
   if (!Array.isArray(modulos) || modulos.length === 0) {
     return { ok: false, error: "modulos requerido (mínimo 1)" }
   }
+  const sectorNormalizado: SectorValido =
+    (SECTORES_VALIDOS as readonly string[]).includes(sectorEmpresa)
+      ? (sectorEmpresa as SectorValido)
+      : "19. Servicios"
 
-  // ── Calcular items + totales ──
   const items: ItemCotizacion[] = []
   const advertencias: string[] = []
 
@@ -190,7 +224,6 @@ export async function generarLinkCotizadora(
   const ufActual = await getUFActualSafe()
   const totalCLP = Math.round(totalUF * ufActual)
 
-  // ── Llamar al endpoint create-from-vicky ──
   try {
     const response = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky`, {
       method: "POST",
@@ -206,6 +239,7 @@ export async function generarLinkCotizadora(
           contactoTelefono: contactoTelefono?.trim() || "",
           rutEmpresa: rutEmpresa.trim(),
           userCount,
+          sectorEmpresa: sectorNormalizado,
         },
         cotizacion: {
           items,
