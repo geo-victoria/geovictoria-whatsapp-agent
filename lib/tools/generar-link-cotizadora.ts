@@ -1,69 +1,66 @@
 /**
  * Tool: generar_link_cotizadora
  *
- * Genera un enlace a la cotizadora con datos del prospecto pre-cargados.
- * El prospecto abre el link, ve sus datos llenos, ajusta lo que necesite
- * y descarga el PDF.
+ * Crea la cotización en Zoho a través de la cotizadora (endpoint create-from-vicky)
+ * y devuelve tanto pdfUrl como acceptanceUrl.
  *
- * Valida contra el catálogo. Si Vicky intenta meter en el link un módulo
- * o hardware que no está habilitado, la tool rechaza.
+ * Flujo:
+ *   1. Valida inputs contra catálogo gobernable
+ *   2. Calcula items + totales usando la misma lógica que cotizar_referencial
+ *   3. POST a /api/quote-acceptance/create-from-vicky
+ *   4. Devuelve pdfUrl + acceptanceUrl al loop de Vicky
  *
- * Scope: 1-50 trabajadores (alineado con cotizar_referencial).
+ * Scope: 1-50 trabajadores.
  */
 
 import {
   getModuloDisponibleParaVicky,
   getHardwareDisponibleParaVicky,
+  obtenerTierAplicable,
+  validarRangoModulo,
 } from "@/lib/catalogo"
 
-const COTIZADORA_BASE_URL = "https://cotizacion.geovictoria.com"
+const COTIZADORA_API_BASE =
+  process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
+const VICKY_COTIZADORA_SECRET = process.env.VICKY_COTIZADORA_SECRET || ""
 const SCOPE_MAX_USUARIOS = 50
-
-// Default según decisión de Eduardo
 const EJECUTIVO_DEFAULT = "Eddyluz Mujica"
+const IVA_RATE = 0.19
+
+// Re-usamos getUFActual del módulo de cotizar-referencial para consistencia
+// (acá hacemos una versión simple inline para evitar import circular)
+async function getUFActualSafe(): Promise<number> {
+  try {
+    // mindicador.cl es la fuente que usa cotizar-referencial
+    const res = await fetch("https://mindicador.cl/api/uf", { cache: "no-store" })
+    if (!res.ok) return 0
+    const data = await res.json() as { serie?: Array<{ valor: number }> }
+    return data?.serie?.[0]?.valor || 0
+  } catch {
+    return 0
+  }
+}
 
 export const generarLinkCotizadoraSchema = {
   name: "generar_link_cotizadora",
   description:
-    "Genera un enlace personalizado a la cotizadora con los datos del prospecto pre-cargados. Úsala SOLO después de haber presentado el preform de confirmación y que el prospecto haya confirmado explícitamente los datos. NO la uses antes de confirmar.",
+    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala SOLO después de haber presentado el preform de confirmación y que el prospecto haya confirmado explícitamente los datos. NO la uses antes de confirmar.",
   input_schema: {
     type: "object" as const,
     properties: {
-      empresa: {
-        type: "string" as const,
-        description: "Razón social de la empresa.",
-        minLength: 1,
-      },
-      contacto: {
-        type: "string" as const,
-        description: "Nombre del contacto.",
-        minLength: 1,
-      },
-      contactoEmail: {
-        type: "string" as const,
-        description: "Email del contacto.",
-        format: "email",
-      },
-      contactoTelefono: {
-        type: "string" as const,
-        description: "Teléfono del contacto, con código país (+56...).",
-      },
-      rutEmpresa: {
-        type: "string" as const,
-        description:
-          "RUT de la empresa o RUT de persona natural si el prospecto no tiene empresa formal. Acepta ambos formatos.",
-      },
+      empresa: { type: "string" as const, description: "Razón social", minLength: 1 },
+      contacto: { type: "string" as const, description: "Nombre del contacto", minLength: 1 },
+      contactoEmail: { type: "string" as const, description: "Email del contacto", format: "email" },
+      contactoTelefono: { type: "string" as const, description: "Teléfono con +código país" },
+      rutEmpresa: { type: "string" as const, description: "RUT empresa o persona natural" },
       userCount: {
-        type: "number" as const,
-        description: "Cantidad de trabajadores (1-50 inclusive).",
-        minimum: 1,
-        maximum: SCOPE_MAX_USUARIOS,
+        type: "number" as const, minimum: 1, maximum: SCOPE_MAX_USUARIOS,
+        description: "Cantidad de trabajadores (1-50)",
       },
       modulos: {
-        type: "array" as const,
-        items: { type: "string" as const },
-        description:
-          "IDs de módulos confirmados por el prospecto (deben estar en el catálogo habilitado).",
+        type: "array" as const, items: { type: "string" as const },
+        description: "IDs de módulos confirmados (deben estar en catálogo). Siempre incluir 'asistencia' como base.",
+        minItems: 1,
       },
       hardware: {
         type: "array" as const,
@@ -76,10 +73,9 @@ export const generarLinkCotizadoraSchema = {
           },
           required: ["id"],
         },
-        description: "Hardware confirmado (opcional).",
       },
     },
-    required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount"],
+    required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "modulos"],
   },
 }
 
@@ -90,52 +86,46 @@ export type LinkCotizadoraInput = {
   contactoTelefono?: string
   rutEmpresa: string
   userCount: number
-  modulos?: string[]
+  modulos: string[]
   hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+}
+
+type ItemCotizacion = {
+  tipo: "modulo" | "hardware"
+  id: string
+  nombre: string
+  modalidad: string
+  cantidad: number
+  precioUnitarioUF: number
+  subtotalUF: number
+  tierAplicado?: string
 }
 
 export type LinkCotizadoraResultado =
   | {
       ok: true
-      url: string
+      pdfUrl: string
+      acceptanceUrl: string
+      quoteId: string
+      dealId: string
       ejecutivoAsignado: string
-      itemsIncluidos: { modulos: string[]; hardware: string[] }
+      totalUF: number
+      totalCLP: number
+      advertencias: string[]
     }
   | { ok: false; error: string }
 
-/**
- * Codifica un objeto JSON a base64url. Inversa de decodePrefillPayload del
- * index.html de la cotizadora.
- */
-function toBase64Url(json: unknown): string {
-  const jsonStr = JSON.stringify(json)
-  const utf8Bytes = new TextEncoder().encode(jsonStr)
-  let binary = ""
-  for (let i = 0; i < utf8Bytes.length; i++) {
-    binary += String.fromCharCode(utf8Bytes[i])
-  }
-  const base64 = btoa(binary)
-  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
-}
-
-export function generarLinkCotizadora(args: LinkCotizadoraInput): LinkCotizadoraResultado {
+export async function generarLinkCotizadora(
+  args: LinkCotizadoraInput,
+): Promise<LinkCotizadoraResultado> {
   const {
-    empresa,
-    contacto,
-    contactoEmail,
-    contactoTelefono,
-    rutEmpresa,
-    userCount,
-    modulos = [],
-    hardware = [],
+    empresa, contacto, contactoEmail, contactoTelefono,
+    rutEmpresa, userCount, modulos = [], hardware = [],
   } = args
 
   // ── Validaciones básicas ──
   if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
-    return {
-      ok: false,
-      error: "Faltan campos obligatorios: empresa, contacto, contactoEmail, rutEmpresa.",
-    }
+    return { ok: false, error: "Faltan campos obligatorios: empresa, contacto, contactoEmail, rutEmpresa." }
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactoEmail)) {
     return { ok: false, error: `El email '${contactoEmail}' no tiene formato válido.` }
@@ -143,61 +133,124 @@ export function generarLinkCotizadora(args: LinkCotizadoraInput): LinkCotizadora
   if (!Number.isFinite(userCount) || userCount < 1 || userCount > SCOPE_MAX_USUARIOS) {
     return { ok: false, error: `userCount=${userCount} fuera de rango 1-${SCOPE_MAX_USUARIOS}.` }
   }
-
-  // ── Validar que los módulos solicitados estén habilitados ──
-  const modulosValidados: string[] = []
-  for (const moduloId of modulos) {
-    const m = getModuloDisponibleParaVicky(moduloId)
-    if (!m) {
-      return {
-        ok: false,
-        error: `Módulo '${moduloId}' no está habilitado en el catálogo para Vicky. No se puede incluir en el link.`,
-      }
-    }
-    modulosValidados.push(m.id)
+  if (!Array.isArray(modulos) || modulos.length === 0) {
+    return { ok: false, error: "modulos requerido (mínimo 1)" }
   }
 
-  // ── Validar hardware solicitado ──
-  const hardwareValidado: string[] = []
+  // ── Calcular items + totales ──
+  const items: ItemCotizacion[] = []
+  const advertencias: string[] = []
+
+  const modulosConBase = modulos.includes("asistencia") ? modulos : ["asistencia", ...modulos]
+  for (const moduloId of modulosConBase) {
+    const modulo = getModuloDisponibleParaVicky(moduloId)
+    if (!modulo) {
+      return { ok: false, error: `Módulo '${moduloId}' no está habilitado para Vicky.` }
+    }
+    const rangoError = validarRangoModulo(modulo, userCount)
+    if (rangoError) { advertencias.push(rangoError); continue }
+    const tier = obtenerTierAplicable(modulo, userCount)
+    if (!tier) continue
+    const cantidad = tier.modalidad === "fijo" ? 1 : userCount
+    const subtotalUF = tier.modalidad === "fijo" ? tier.precioUF : userCount * tier.precioUF
+    items.push({
+      tipo: "modulo", id: modulo.id, nombre: modulo.nombre,
+      modalidad: tier.modalidad === "fijo" ? "Fijo" : "Por usuario",
+      cantidad,
+      precioUnitarioUF: tier.precioUF,
+      subtotalUF: Number(subtotalUF.toFixed(3)),
+      tierAplicado: `${tier.minUsuarios}-${tier.maxUsuarios} usuarios`,
+    })
+  }
+
   for (const hw of hardware) {
     const dispositivo = getHardwareDisponibleParaVicky(hw.id)
-    if (!dispositivo) {
-      return {
-        ok: false,
-        error: `Hardware '${hw.id}' no está habilitado en el catálogo para Vicky. No se puede incluir en el link.`,
-      }
+    if (!dispositivo) return { ok: false, error: `Hardware '${hw.id}' no está habilitado para Vicky.` }
+    const cantidad = hw.cantidad ?? dispositivo.cantidadSugerida
+    const modalidadElegida: "arriendo" | "venta" = hw.modalidad ?? "arriendo"
+    if (!dispositivo.modalidadesDisponibles.includes(modalidadElegida)) {
+      return { ok: false, error: `${dispositivo.displayName} no disponible en modalidad '${modalidadElegida}'` }
     }
-    hardwareValidado.push(dispositivo.id)
+    const precioUnitario = modalidadElegida === "arriendo" ? dispositivo.arriendoUF : dispositivo.ventaUF
+    if (precioUnitario === 0) return { ok: false, error: `${dispositivo.displayName} sin precio en modalidad '${modalidadElegida}'` }
+    items.push({
+      tipo: "hardware", id: dispositivo.id, nombre: dispositivo.displayName,
+      modalidad: modalidadElegida === "arriendo" ? "Arriendo mensual" : "Venta única",
+      cantidad,
+      precioUnitarioUF: precioUnitario,
+      subtotalUF: Number((cantidad * precioUnitario).toFixed(3)),
+    })
   }
 
-  // ── Construir prefill ──
-  const prefill = {
-    empresa: empresa.trim(),
-    contacto: contacto.trim(),
-    contactoEmail: contactoEmail.trim().toLowerCase(),
-    contactoTelefono: contactoTelefono?.trim() || "",
-    rutEmpresa: rutEmpresa.trim(),
-    ejecutivo: EJECUTIVO_DEFAULT,
-    userCount: String(userCount),
-    source: "vicky_whatsapp_v3",
-    selectedModulos: modulosValidados,
-    selectedHardware: hardware.map((h) => ({
-      id: h.id,
-      cantidad: h.cantidad ?? 1,
-      modalidad: h.modalidad ?? "arriendo",
-    })),
-  }
+  if (items.length === 0) return { ok: false, error: "No hay items válidos para cotizar." }
 
-  const encoded = toBase64Url(prefill)
-  const url = `${COTIZADORA_BASE_URL}/?prefill=${encoded}`
+  const subtotalUF = items.reduce((sum, i) => sum + i.subtotalUF, 0)
+  const ivaUF = subtotalUF * IVA_RATE
+  const totalUF = subtotalUF + ivaUF
+  const ufActual = await getUFActualSafe()
+  const totalCLP = Math.round(totalUF * ufActual)
 
-  return {
-    ok: true,
-    url,
-    ejecutivoAsignado: EJECUTIVO_DEFAULT,
-    itemsIncluidos: {
-      modulos: modulosValidados,
-      hardware: hardwareValidado,
-    },
+  // ── Llamar al endpoint create-from-vicky ──
+  try {
+    const response = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+      },
+      body: JSON.stringify({
+        cliente: {
+          empresa: empresa.trim(),
+          contacto: contacto.trim(),
+          contactoEmail: contactoEmail.trim().toLowerCase(),
+          contactoTelefono: contactoTelefono?.trim() || "",
+          rutEmpresa: rutEmpresa.trim(),
+          userCount,
+        },
+        cotizacion: {
+          items,
+          subtotalUF: Number(subtotalUF.toFixed(3)),
+          ivaUF: Number(ivaUF.toFixed(3)),
+          totalUF: Number(totalUF.toFixed(3)),
+          ufActual: Number(ufActual.toFixed(2)),
+          totalCLP,
+        },
+      }),
+      cache: "no-store",
+    })
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => "")
+      return { ok: false, error: `Cotizadora respondió ${response.status}: ${errBody.slice(0, 200)}` }
+    }
+
+    const data = await response.json() as {
+      ok: boolean
+      pdfUrl?: string
+      acceptanceUrl?: string
+      quoteId?: string
+      dealId?: string
+      error?: string
+      detail?: string
+    }
+
+    if (!data.ok || !data.pdfUrl || !data.acceptanceUrl) {
+      return { ok: false, error: data.error || data.detail || "Respuesta inválida de la cotizadora" }
+    }
+
+    return {
+      ok: true,
+      pdfUrl: data.pdfUrl,
+      acceptanceUrl: data.acceptanceUrl,
+      quoteId: data.quoteId || "",
+      dealId: data.dealId || "",
+      ejecutivoAsignado: EJECUTIVO_DEFAULT,
+      totalUF: Number(totalUF.toFixed(3)),
+      totalCLP,
+      advertencias,
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `No se pudo contactar la cotizadora: ${msg.slice(0, 200)}` }
   }
 }
