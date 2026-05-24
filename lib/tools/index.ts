@@ -54,7 +54,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
         return await cotizarReferencial(input as never)
 
       case "generar_link_cotizadora":
-        return generarLinkCotizadora(input as never)
+        return await generarLinkCotizadora(input as never)
 
       case "derivar_a_soporte":
         return derivarASoporte(input as never)
