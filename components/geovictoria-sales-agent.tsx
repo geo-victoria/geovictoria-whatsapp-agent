@@ -32,35 +32,16 @@ type Message = {
   ts: number
 }
 
-const INITIAL_MESSAGE: Message = {
-  id: "init",
-  role: "assistant",
-  content:
-    "¡Hola! Soy Vicky, de GeoVictoria. Te ayudo si querés cotizar para tu empresa. ¿Cuántas personas trabajan ahí?",
-  ts: Date.now(),
-}
-
 export default function VickyV3Chat() {
-  const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE])
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [showDebug, setShowDebug] = useState(true)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
   }, [messages])
-
-  // Devolver el foco al input cuando termina de cargar la respuesta.
-  // Sin esto, el navegador deja al usuario teniendo que volver a clickear
-  // el campo de texto cada vez que envía un mensaje (porque `disabled={loading}`
-  // hace que el input pierda el foco mientras carga).
-  useEffect(() => {
-    if (!loading) {
-      inputRef.current?.focus()
-    }
-  }, [loading])
 
   async function handleSend() {
     const trimmed = input.trim()
@@ -132,7 +113,7 @@ export default function VickyV3Chat() {
   }
 
   function handleReset() {
-    setMessages([{ ...INITIAL_MESSAGE, ts: Date.now() }])
+    setMessages([])
     setInput("")
   }
 
@@ -184,7 +165,6 @@ export default function VickyV3Chat() {
 
         <footer className="composer">
           <input
-            ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -195,9 +175,8 @@ export default function VickyV3Chat() {
               }
             }}
             disabled={loading}
-            placeholder="Escribí un mensaje…"
+            placeholder="Escribe un mensaje…"
             className="composer-input"
-            autoFocus
           />
           <button
             type="button"
