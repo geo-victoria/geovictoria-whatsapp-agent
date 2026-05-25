@@ -5,14 +5,11 @@
  * El agent-loop usa ALL_TOOLS para invocar la tool correcta según el
  * tool_use block que devuelva el modelo.
  *
- * V3 inicial (chat de prueba):
- *   - cotizar_referencial: cálculo interno para 1-10 trabajadores
- *   - generar_link_cotizadora: URL con prefill base64
+ * V3 actual (chat + Botmaker):
+ *   - buscar_prospect_en_zoho: identificación progresiva del prospect via RUT/email/teléfono
+ *   - cotizar_referencial: cálculo interno para 1-50 trabajadores
+ *   - generar_link_cotizadora: crea registros en Zoho, genera PDF + acceptanceUrl
  *   - derivar_a_soporte: handoff explícito
- *
- * V3 producción (futuro, cuando se conecte a Botmaker):
- *   - agendar_reunion: Cal.com + Zoho lead
- *   - buscar_contacto_zoho: lookup por teléfono
  */
 
 import {
@@ -30,8 +27,14 @@ import {
   derivarASoporte,
   type DerivarASoporteResultado,
 } from "./derivar-a-soporte"
+import {
+  buscarProspectEnZohoSchema,
+  buscarProspectEnZoho,
+  type BuscarProspectResultado,
+} from "./buscar-prospect-en-zoho"
 
 export const TOOL_SCHEMAS = [
+  buscarProspectEnZohoSchema,
   cotizarReferencialSchema,
   generarLinkCotizadoraSchema,
   derivarASoporteSchema,
@@ -41,6 +44,7 @@ export type ToolResult =
   | CotizacionResultado
   | LinkCotizadoraResultado
   | DerivarASoporteResultado
+  | BuscarProspectResultado
   | { ok: false; error: string }
 
 /**
@@ -50,6 +54,9 @@ export type ToolResult =
 export async function dispatchTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
   try {
     switch (name) {
+      case "buscar_prospect_en_zoho":
+        return await buscarProspectEnZoho(input as never)
+
       case "cotizar_referencial":
         return await cotizarReferencial(input as never)
 
@@ -62,7 +69,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: cotizar_referencial, generar_link_cotizadora, derivar_a_soporte.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, derivar_a_soporte.`,
         }
     }
   } catch (err: unknown) {
