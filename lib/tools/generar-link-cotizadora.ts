@@ -4,11 +4,10 @@
  * Crea la cotización en Zoho a través de la cotizadora (endpoint create-from-vicky)
  * y devuelve tanto pdfUrl como acceptanceUrl.
  *
- * Flujo:
- *   1. Valida inputs contra catálogo gobernable
- *   2. Calcula items + totales usando la misma lógica que cotizar_referencial
- *   3. POST a /api/quote-acceptance/create-from-vicky
- *   4. Devuelve pdfUrl + acceptanceUrl al loop de Vicky
+ * Acepta IDs opcionales (accountId, contactId, leadId) cuando Vicky ya identificó
+ * al prospect via buscar_prospect_en_zoho. En ese caso, el endpoint reusa esos IDs
+ * en lugar de crear duplicados. Si pasa leadId, el endpoint convierte el Lead a
+ * Account+Contact+Deal usando los datos nuevos (datos nuevos ganan).
  *
  * Scope: 1-50 trabajadores.
  */
@@ -69,7 +68,7 @@ async function getUFActualSafe(): Promise<number> {
 export const generarLinkCotizadoraSchema = {
   name: "generar_link_cotizadora",
   description:
-    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala SOLO después de haber presentado el preform de confirmación y que el prospecto haya confirmado explícitamente los datos. NO la uses antes de confirmar.",
+    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala SOLO después de haber presentado el preform de confirmación y que el prospect haya confirmado explícitamente los datos. NO la uses antes de confirmar. Si previamente identificaste al prospect con buscar_prospect_en_zoho y obtuviste match, pasa los IDs correspondientes (accountId, contactId, leadId) para evitar duplicados.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -86,7 +85,7 @@ export const generarLinkCotizadoraSchema = {
         type: "string" as const,
         enum: SECTORES_VALIDOS as unknown as string[],
         description:
-          "Rubro/sector de la empresa, deducido del nombre o preguntado al prospecto. Debe ser exactamente uno de los valores del enum (incluyendo el prefijo numérico). Si no es claro, usa '19. Servicios'.",
+          "Rubro/sector de la empresa, deducido del nombre o preguntado al prospect. Debe ser exactamente uno de los valores del enum. Si no es claro, usa '19. Servicios'.",
       },
       modulos: {
         type: "array" as const, items: { type: "string" as const },
@@ -105,6 +104,21 @@ export const generarLinkCotizadoraSchema = {
           required: ["id"],
         },
       },
+      accountId: {
+        type: "string" as const,
+        description:
+          "ID de la Account existente en Zoho. Solo pasarlo si buscar_prospect_en_zoho devolvió match de tipo Account con confianza máxima (RUT empresa) o si el prospect confirmó match de confianza alta/media. Si lo pasas, el endpoint NO crea Account nueva, reusa esta.",
+      },
+      contactId: {
+        type: "string" as const,
+        description:
+          "ID del Contact existente en Zoho. Solo pasarlo si el Contact pertenece a la misma Account que estás usando (o si vas a reasignarlo). Si lo pasas, el endpoint NO crea Contact nuevo.",
+      },
+      leadId: {
+        type: "string" as const,
+        description:
+          "ID de un Lead no convertido en Zoho. Si lo pasas, el endpoint convierte el Lead a Account+Contact+Deal usando los datos nuevos que enviaste (datos nuevos ganan). NO pasar simultáneamente con accountId/contactId.",
+      },
     },
     required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "sectorEmpresa", "modulos"],
   },
@@ -120,6 +134,9 @@ export type LinkCotizadoraInput = {
   sectorEmpresa: SectorValido | string
   modulos: string[]
   hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+  accountId?: string
+  contactId?: string
+  leadId?: string
 }
 
 type ItemCotizacion = {
@@ -140,10 +157,17 @@ export type LinkCotizadoraResultado =
       acceptanceUrl: string
       quoteId: string
       dealId: string
+      accountId: string
+      contactId: string
       ejecutivoAsignado: string
       totalUF: number
       totalCLP: number
       advertencias: string[]
+      reuse: {
+        accountReused: boolean
+        contactReused: boolean
+        leadConverted: boolean
+      }
     }
   | { ok: false; error: string }
 
@@ -153,6 +177,7 @@ export async function generarLinkCotizadora(
   const {
     empresa, contacto, contactoEmail, contactoTelefono,
     rutEmpresa, userCount, sectorEmpresa, modulos = [], hardware = [],
+    accountId, contactId, leadId,
   } = args
 
   if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
@@ -167,11 +192,20 @@ export async function generarLinkCotizadora(
   if (!Array.isArray(modulos) || modulos.length === 0) {
     return { ok: false, error: "modulos requerido (mínimo 1)" }
   }
+  // Validación: leadId no puede venir con accountId/contactId
+  if (leadId && (accountId || contactId)) {
+    return {
+      ok: false,
+      error: "No pasar leadId junto con accountId/contactId. El leadId convierte el Lead a Account+Contact+Deal; ya no hay IDs previos que reusar.",
+    }
+  }
+
   const sectorNormalizado: SectorValido =
     (SECTORES_VALIDOS as readonly string[]).includes(sectorEmpresa)
       ? (sectorEmpresa as SectorValido)
       : "19. Servicios"
 
+  // ── Calcular items + totales ──
   const items: ItemCotizacion[] = []
   const advertencias: string[] = []
 
@@ -241,6 +275,12 @@ export async function generarLinkCotizadora(
           userCount,
           sectorEmpresa: sectorNormalizado,
         },
+        // IDs existentes (opcionales): si se pasan, el endpoint reusa o convierte
+        existing: {
+          accountId: accountId?.trim() || undefined,
+          contactId: contactId?.trim() || undefined,
+          leadId: leadId?.trim() || undefined,
+        },
         cotizacion: {
           items,
           subtotalUF: Number(subtotalUF.toFixed(3)),
@@ -264,6 +304,13 @@ export async function generarLinkCotizadora(
       acceptanceUrl?: string
       quoteId?: string
       dealId?: string
+      accountId?: string
+      contactId?: string
+      reuse?: {
+        accountReused?: boolean
+        contactReused?: boolean
+        leadConverted?: boolean
+      }
       error?: string
       detail?: string
     }
@@ -278,10 +325,17 @@ export async function generarLinkCotizadora(
       acceptanceUrl: data.acceptanceUrl,
       quoteId: data.quoteId || "",
       dealId: data.dealId || "",
+      accountId: data.accountId || "",
+      contactId: data.contactId || "",
       ejecutivoAsignado: EJECUTIVO_DEFAULT,
       totalUF: Number(totalUF.toFixed(3)),
       totalCLP,
       advertencias,
+      reuse: {
+        accountReused: data.reuse?.accountReused || false,
+        contactReused: data.reuse?.contactReused || false,
+        leadConverted: data.reuse?.leadConverted || false,
+      },
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
