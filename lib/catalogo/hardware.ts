@@ -4,22 +4,14 @@
  * Replica el `catalogoEquipos` del index.html de la cotizadora oficial.
  * Para mantener paridad, los `id` deben coincidir EXACTAMENTE.
  *
- * Por defecto, solo el Sense Face 2A está habilitado para Vicky. Para
- * habilitar otro, cambiar `disponibleParaVicky: false` a `true`.
+ * Política de nomenclatura para Vicky:
+ *   - displayName: nombre genérico (lo que Vicky comunica al prospecto)
+ *   - modelo: nombre técnico real (lo que se usa internamente y se incluye
+ *     en el campo Descripcion_Item del subform de Zoho para transparencia
+ *     comercial en el PDF de la cotización formal)
  *
- * NOTA sobre precios del Sense Face 2A en el nuevo scope 1-50:
- *   La cotizadora oficial aplica un descuento promocional por unidad según
- *   tamaño de empresa (sf2aDiscountTiers). Resumido:
- *     - 1-10 trabajadores: máx 1 unidad a precio promo (0.25 UF)
- *     - 11-20: máx 2 unidades promo
- *     - 21-30: máx 2 unidades promo
- *     - 31-50: máx 2 unidades promo
- *
- *   En Vicky asumimos por defecto 1 unidad a precio promo (0.25 UF/mes).
- *   Si el prospecto pide más unidades en la conversación, la tool
- *   cotizar_referencial genera una advertencia para que el modelo aclare
- *   al prospecto que las unidades adicionales pueden tener precio distinto,
- *   y la cotizadora oficial recalculará exactamente al abrir el link.
+ * Vicky NUNCA debe mencionar marcas ni modelos específicos en la conversación.
+ * Solo "reloj control físico" o "aplicación móvil".
  */
 
 import type { Hardware } from "./tipos"
@@ -29,21 +21,18 @@ export const CATALOGO_HARDWARE: Hardware[] = [
   {
     id: "senseface_2a",
     modelo: "Senseface 2A",
-    displayName: "Sense Face 2A",
-    conexion: "-",
-    ventaUF: 0, // no se vende, solo arriendo
-    arriendoUF: 0.25, // precio promocional aplicado a la 1ª unidad
+    displayName: "Reloj control físico",
+    conexion: "WiFi",
+    ventaUF: 0,
+    arriendoUF: 0.35,
     descripcion:
-      "Dispositivo biométrico facial para marcaje sin contacto. Reconocimiento rápido, ideal para empresas que quieren un control físico además del marcaje por app.",
+      "Reloj control físico con biometría facial sin contacto, conexión WiFi. Recomendado para puntos de trabajo con más de 10 personas o cuando los empleados no cuentan con smartphone propio.",
     modalidadesDisponibles: ["arriendo"],
     cantidadSugerida: 1,
     disponibleParaVicky: true,
   },
 
   // ─── DECLARADOS PERO DESHABILITADOS ─────────────────────────────────────
-  // Quedan acá para mantener paridad con el catálogo oficial.
-  // Eduardo puede habilitar uno cambiando el flag.
-
   {
     id: "armorpad",
     modelo: "ARMORPAD",
