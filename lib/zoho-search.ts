@@ -51,8 +51,39 @@ export type SearchProspectResult = {
 }
 
 // ── Normalizadores ──
-function normalizeRut(rut: string): string {
-  return rut.trim().replace(/[.\s-]/g, "").toUpperCase()
+/**
+ * Genera variantes razonables de un RUT chileno para tolerar distintos
+ * formatos de almacenamiento en CRM.
+ *
+ * Para "18.435.922-7" genera:
+ *   - "18.435.922-7"  (formato oficial: puntos + guion)
+ *   - "184359227"     (compacto: sin nada)
+ *   - "18435922-7"    (sin puntos, con guion) ← común en muchos CRMs
+ *   - "18.435.922-7"  (canónico, igual al primero si vino así)
+ *
+ * Cubre el caso donde el RUT está almacenado en cualquiera de estos
+ * formatos en distintos registros de Zoho.
+ */
+function getRutVariants(rut: string): string[] {
+  if (!rut) return []
+  const raw = rut.trim()
+  if (!raw) return []
+  // Compactar: solo dígitos y la K final, sin puntos ni guion
+  const compact = raw.replace(/[.\s-]/g, "").toUpperCase()
+  if (compact.length < 2) return [raw]
+
+  const cuerpo = compact.slice(0, -1) // ej. "18435922"
+  const dv = compact.slice(-1)        // ej. "7" o "K"
+
+  // Insertar puntos cada 3 dígitos desde la derecha en el cuerpo
+  const cuerpoConPuntos = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+
+  return Array.from(new Set([
+    raw,                            // tal como vino
+    compact,                        // "184359227"
+    `${cuerpo}-${dv}`,              // "18435922-7"
+    `${cuerpoConPuntos}-${dv}`,     // "18.435.922-7"
+  ])).filter(Boolean)
 }
 
 function normalizeEmail(email: string): string {
@@ -125,11 +156,8 @@ async function filterOutConvertedLeads(leads: ZohoRecord[]): Promise<ZohoRecord[
 // ── Buscadores por identificador ──
 async function findAccountsByRut(rutEmpresa: string): Promise<ZohoRecord[]> {
   if (!rutEmpresa) return []
-  // Búsqueda exacta. Si está almacenado con/sin puntos, no matchea — el usuario
-  // que ingresa RUT en CRM lo hace normalmente sin formatear pero hay variantes.
-  // Por ahora: probar dos variantes.
-  const rutNorm = normalizeRut(rutEmpresa)
-  const variants = Array.from(new Set([rutEmpresa.trim(), rutNorm])).filter(Boolean)
+  const variants = getRutVariants(rutEmpresa)
+  if (variants.length === 0) return []
 
   const all: ZohoRecord[] = []
   const seen = new Set<string>()
@@ -152,8 +180,8 @@ async function findAccountsByRut(rutEmpresa: string): Promise<ZohoRecord[]> {
 
 async function findLeadsByRut(rutEmpresa: string): Promise<ZohoRecord[]> {
   if (!rutEmpresa) return []
-  const rutNorm = normalizeRut(rutEmpresa)
-  const variants = Array.from(new Set([rutEmpresa.trim(), rutNorm])).filter(Boolean)
+  const variants = getRutVariants(rutEmpresa)
+  if (variants.length === 0) return []
 
   const all: ZohoRecord[] = []
   const seen = new Set<string>()
