@@ -67,6 +67,59 @@ export async function runAgentLoop(params: {
   let finalText = ""
   let iteration = 0
 
+  // ── Capa 2: registro de IDs válidos ──
+  //
+  // Los LLMs cometen errores de transcripción cuando tienen que copiar IDs
+  // numéricos de 19 dígitos (los Zoho IDs). Para evitar pasar IDs alucinados
+  // o mal transcritos a generar_link_cotizadora, mantenemos un registro de
+  // los IDs que efectivamente retornó buscar_prospect_en_zoho en esta
+  // conversación. Si el LLM pasa un ID que no está en el registro, lo
+  // sanitizamos (removemos del input) antes de despachar la tool.
+  const knownIds = {
+    accounts: new Set<string>(),
+    contacts: new Set<string>(),
+    leads: new Set<string>(),
+  }
+
+  type ProspectMatchLite = { modulo: string; id: string }
+
+  function registerKnownIdsFromSearchResult(result: unknown): void {
+    if (!result || typeof result !== "object") return
+    const r = result as { ok?: boolean; matches?: ProspectMatchLite[] }
+    if (!r.ok || !Array.isArray(r.matches)) return
+    for (const match of r.matches) {
+      if (!match?.id) continue
+      const id = String(match.id)
+      if (match.modulo === "Account") knownIds.accounts.add(id)
+      else if (match.modulo === "Contact") knownIds.contacts.add(id)
+      else if (match.modulo === "Lead") knownIds.leads.add(id)
+    }
+  }
+
+  function sanitizeIdsInToolInput(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (toolName !== "generar_link_cotizadora") return input
+    const sanitized: Record<string, unknown> = { ...input }
+    const checks: Array<{ field: "accountId" | "contactId" | "leadId"; set: Set<string> }> = [
+      { field: "accountId", set: knownIds.accounts },
+      { field: "contactId", set: knownIds.contacts },
+      { field: "leadId", set: knownIds.leads },
+    ]
+    for (const { field, set } of checks) {
+      const value = sanitized[field]
+      if (typeof value !== "string" || !value.trim()) continue
+      if (!set.has(value.trim())) {
+        console.warn(
+          `[agent-loop] Capa 2: ID "${value}" en ${field} no coincide con ningún match previo de buscar_prospect_en_zoho. Removido del tool_use.`,
+        )
+        delete sanitized[field]
+      }
+    }
+    return sanitized
+  }
+
   while (iteration < MAX_ITERATIONS) {
     iteration++
 
@@ -96,9 +149,21 @@ export async function runAgentLoop(params: {
         if (block.type !== "tool_use") continue
 
         const toolName = block.name
-        const toolInput = (block.input as Record<string, unknown>) || {}
+        const rawInput = (block.input as Record<string, unknown>) || {}
+
+        // Capa 2: sanitizar IDs en el tool_use antes de despachar.
+        // Si el LLM puso un accountId/contactId/leadId que no vino de un
+        // buscar_prospect_en_zoho previo, lo removemos para forzar fallback
+        // a creación nueva en lugar de update sobre un ID alucinado.
+        const toolInput = sanitizeIdsInToolInput(toolName, rawInput)
 
         const result = await dispatchTool(toolName, toolInput)
+
+        // Si la tool fue buscar_prospect_en_zoho, registrar los IDs que
+        // devolvió como "válidos" para futuras validaciones de Capa 2.
+        if (toolName === "buscar_prospect_en_zoho") {
+          registerKnownIdsFromSearchResult(result)
+        }
 
         toolCalls.push({
           name: toolName,
