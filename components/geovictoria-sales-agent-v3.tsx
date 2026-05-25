@@ -32,16 +32,8 @@ type Message = {
   ts: number
 }
 
-const INITIAL_MESSAGE: Message = {
-  id: "init",
-  role: "assistant",
-  content:
-    "¡Hola! Soy Vicky, de GeoVictoria. Te ayudo si querés cotizar para tu empresa. ¿Cuántas personas trabajan ahí?",
-  ts: Date.now(),
-}
-
 export default function VickyV3Chat() {
-  const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE])
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [showDebug, setShowDebug] = useState(true)
@@ -121,7 +113,7 @@ export default function VickyV3Chat() {
   }
 
   function handleReset() {
-    setMessages([{ ...INITIAL_MESSAGE, ts: Date.now() }])
+    setMessages([])
     setInput("")
   }
 
@@ -183,7 +175,7 @@ export default function VickyV3Chat() {
               }
             }}
             disabled={loading}
-            placeholder="Escribí un mensaje…"
+            placeholder="Escribe un mensaje…"
             className="composer-input"
           />
           <button
