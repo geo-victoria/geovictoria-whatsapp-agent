@@ -22,6 +22,9 @@ export type ModalidadTier = "fijo" | "por_usuario"
 /** Modalidades de adquisición disponibles para un hardware. */
 export type ModalidadHardware = "venta" | "arriendo"
 
+/** Cuán obligatoria es la oferta de un servicio en una cotización. */
+export type ObligatoriedadServicio = "obligatoria" | "recomendada" | "opcional"
+
 /**
  * Tier de precio para un módulo. Cubre un rango de usuarios con una
  * modalidad y precio específicos.
@@ -109,12 +112,50 @@ export type Accesorio = {
 
 /**
  * Servicio asociado (envío, instalación).
+ *
+ * Modelo de precio binario: RM o "otras regiones", alineado con cómo se
+ * estructuran las tarifas comerciales hoy. Si más adelante se necesita
+ * granularidad por región específica, agregar de forma aditiva un campo
+ * opcional `tarifasPorRegion?: Record<string, number>` sin romper este modelo.
  */
 export type Servicio = {
   id: string
   nombre: string
   descripcion: string
-  precioUFRM: number       // Región Metropolitana
-  precioUFRegion: number   // Otras regiones
+
+  /** Precio en UF para Región Metropolitana (por unidad/punto). */
+  precioUFRM: number
+  /** Precio en UF para otras regiones (por unidad/punto). */
+  precioUFRegion: number
+
+  /**
+   * Cuán obligatoria es la oferta del servicio. "recomendada" significa que
+   * Vicky lo ofrece por defecto pero el prospecto puede declinarlo bajo
+   * su responsabilidad.
+   */
+  obligatoriedad: ObligatoriedadServicio
+
+  /**
+   * Si es `true`, el prospecto puede declinar el servicio y asumirlo por
+   * cuenta propia. Si es `false`, no hay opción: o se cotiza con el
+   * servicio o no se vende el producto al que aplica.
+   */
+  permiteAutoInstalacion: boolean
+
+  /**
+   * Mensajes de advertencia que Vicky debe comunicar cuando el prospecto
+   * elige auto-instalación. Se devuelven en el campo `advertencias` de las
+   * tools para que Vicky los incluya en su mensaje al prospecto.
+   */
+  advertenciasAutoInstalacion: string[]
+
+  /**
+   * Si es `true`, el servicio se ofrece automáticamente cuando la cotización
+   * incluye al menos un hardware físico. Permite que la tool detecte la
+   * aplicabilidad sin que Vicky tenga que decidirlo.
+   */
+  aplicaConHardware: boolean
+
+  /** Si es `true`, Vicky puede ofrecerlo. */
   disponibleParaVicky: boolean
 }
