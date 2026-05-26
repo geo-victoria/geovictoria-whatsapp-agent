@@ -20,7 +20,7 @@ export const CATALOGO_SERVICIOS: Servicio[] = [
 
     // TODO(eduardo): confirmar valores reales con telemarketing.
     precioUFRM: 2.0,
-    precioUFRegion: 3.5,
+    precioUFRegion: 5.0,
 
     obligatoriedad: "recomendada",
     permiteAutoInstalacion: true,
