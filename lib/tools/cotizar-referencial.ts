@@ -11,6 +11,14 @@
  * Si un producto no existe en el catálogo o no tiene disponibleParaVicky=true,
  * la tool falla con error legible. Eso garantiza la premisa rectora:
  *   "Solo se cotiza lo que existe en el catálogo Y está habilitado."
+ *
+ * Instalación de hardware:
+ *   Cuando la cotización incluye hardware, las tools requieren el array
+ *   `puntosInstalacion`. Cada punto se clasifica vía `clasificarUbicacion`
+ *   (RM vs regiones) y se inyecta como línea adicional con la tarifa
+ *   correspondiente. Si el prospecto declina la instalación (autoInstalada=true),
+ *   no se cobra pero se agregan las advertencias declaradas en el catálogo
+ *   de servicios.
  */
 
 import {
@@ -18,9 +26,12 @@ import {
   getModulosDisponiblesParaVicky,
   getHardwareDisponibleParaVicky,
   getHardwareDisponiblesParaVicky,
+  getServiciosAplicablesConHardware,
+  obtenerPrecioServicio,
   obtenerTierAplicable,
   validarRangoModulo,
 } from "@/lib/catalogo"
+import { clasificarUbicacion } from "@/lib/geografia"
 
 const IVA_RATE = 0.19
 const SCOPE_MAX_USUARIOS = 50
@@ -29,7 +40,7 @@ const SCOPE_MAX_USUARIOS = 50
 export const cotizarReferencialSchema = {
   name: "cotizar_referencial",
   description:
-    "Calcula un estimado mensual referencial en UF y CLP para una empresa de 1 a 50 trabajadores, según los módulos de software y el hardware de marcaje que el prospecto haya elegido. Úsalo cuando ya tengas userCount confirmado y al menos un módulo o hardware definido. Si el prospecto tiene más de 50 trabajadores, NO uses esta tool — deriva a soporte con derivar_a_soporte.",
+    "Calcula un estimado mensual referencial en UF y CLP para una empresa de 1 a 50 trabajadores, según los módulos de software y el hardware de marcaje que el prospecto haya elegido. Úsalo cuando ya tengas userCount confirmado y al menos un módulo o hardware definido. Si la cotización incluye hardware, también requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un reloj). Si el prospecto tiene más de 50 trabajadores, NO uses esta tool — deriva a soporte con derivar_a_soporte.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -74,6 +85,27 @@ export const cotizarReferencialSchema = {
         description:
           "Lista opcional de hardware de marcaje a incluir. Si el prospecto no menciona necesidad de dispositivo físico, dejar vacío.",
       },
+      puntosInstalacion: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            ubicacion: {
+              type: "string" as const,
+              description:
+                "Ubicación del punto donde se instalará el reloj, tal como la entregó el prospecto. Puede ser una comuna ('Las Condes', 'Concepción'), una región ('Metropolitana', 'Biobío'), un ordinal ('novena región', 'IX'), un número ('región 13'), o un alias ('RM', 'Santiago'). La tool clasifica internamente si es RM o regiones para aplicar la tarifa correcta. Pregunta esto al prospecto, no lo asumas por contexto.",
+            },
+            autoInstalada: {
+              type: "boolean" as const,
+              description:
+                "true si el prospecto decidió instalar el reloj por su cuenta (no se cobra el servicio, pero se incluyen advertencias). false si la instalación la realiza GeoVictoria (recomendado).",
+            },
+          },
+          required: ["ubicacion", "autoInstalada"],
+        },
+        description:
+          "Lista de puntos físicos donde se instalará hardware. OBLIGATORIO si la cotización incluye al menos un hardware. La instalación se cobra por punto, no por reloj: un punto con 2 relojes tiene una sola instalación. Si la cotización no incluye hardware, omitir.",
+      },
     },
     required: ["userCount", "modulos"],
   },
@@ -81,7 +113,7 @@ export const cotizarReferencialSchema = {
 
 // ─── Tipos de resultado ──────────────────────────────────────────────────
 export type ItemCotizacion = {
-  tipo: "modulo" | "hardware"
+  tipo: "modulo" | "hardware" | "servicio"
   id: string
   nombre: string
   modalidad: string
@@ -89,6 +121,11 @@ export type ItemCotizacion = {
   precioUnitarioUF: number
   subtotalUF: number
   tierAplicado?: string // ej. "11-20 usuarios"
+}
+
+export type PuntoInstalacionInput = {
+  ubicacion: string
+  autoInstalada: boolean
 }
 
 export type CotizacionResultado =
@@ -128,8 +165,9 @@ export async function cotizarReferencial(args: {
   userCount: number
   modulos: string[]
   hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+  puntosInstalacion?: PuntoInstalacionInput[]
 }): Promise<CotizacionResultado> {
-  const { userCount, modulos, hardware = [] } = args
+  const { userCount, modulos, hardware = [], puntosInstalacion = [] } = args
   const advertencias: string[] = []
 
   // ── Validación de rango ──
@@ -188,6 +226,7 @@ export async function cotizarReferencial(args: {
   }
 
   // ── Procesar hardware ──
+  let hayHardware = false
   for (const hw of hardware) {
     const dispositivo = getHardwareDisponibleParaVicky(hw.id)
     if (!dispositivo) {
@@ -227,12 +266,82 @@ export async function cotizarReferencial(args: {
       precioUnitarioUF: precioUnitario,
       subtotalUF: Number((cantidad * precioUnitario).toFixed(3)),
     })
+    hayHardware = true
 
     // Aviso si pidió más de la cantidad sugerida (heads-up para Vicky)
     if (cantidad > dispositivo.cantidadSugerida) {
       advertencias.push(
         `Para ${dispositivo.displayName} se está cotizando ${cantidad} unidades. La cotizadora oficial puede aplicar precios distintos a las unidades adicionales (descuento promo aplica solo a las primeras unidades).`
       )
+    }
+  }
+
+  // ── Procesar puntos de instalación ──
+  if (hayHardware) {
+    if (puntosInstalacion.length === 0) {
+      return {
+        ok: false,
+        error:
+          "La cotización incluye hardware pero no se entregó 'puntosInstalacion'. " +
+          "Por cada punto físico donde se instalará un reloj, debes pasar { ubicacion, autoInstalada }. " +
+          "Si el prospecto aún no ha entregado la ubicación, pregúntale la comuna o región antes de cotizar.",
+      }
+    }
+
+    // Pre-validación: si algún punto es no_clasificable, fallar con mensaje útil
+    for (const punto of puntosInstalacion) {
+      const c = clasificarUbicacion(punto.ubicacion)
+      if (c.tipo === "no_clasificable") {
+        return {
+          ok: false,
+          error:
+            `No pude clasificar la ubicación '${punto.ubicacion}' (${c.razon}). ` +
+            `Pregúntale al prospecto la comuna o región específica donde se instalará el reloj ` +
+            `y vuelve a llamar la tool.`,
+        }
+      }
+    }
+
+    // Inyectar líneas de servicios aplicables (instalación)
+    const serviciosAplicables = getServiciosAplicablesConHardware()
+    for (const servicio of serviciosAplicables) {
+      for (const punto of puntosInstalacion) {
+        const clasificacion = clasificarUbicacion(punto.ubicacion)
+        // tipo "no_clasificable" ya filtrado arriba
+        if (clasificacion.tipo === "no_clasificable") continue
+
+        if (!clasificacion.reconocida) {
+          advertencias.push(
+            `Ubicación '${punto.ubicacion}' no reconocida en la lista oficial. ` +
+            `Se aplicó tarifa de regiones por defecto. El ejecutivo confirmará la ubicación exacta al revisar la cotización.`,
+          )
+        }
+
+        if (punto.autoInstalada) {
+          if (!servicio.permiteAutoInstalacion) {
+            return {
+              ok: false,
+              error: `El servicio '${servicio.nombre}' no permite auto-instalación. Es obligatorio cotizarlo.`,
+            }
+          }
+          for (const adv of servicio.advertenciasAutoInstalacion) {
+            advertencias.push(`Auto-instalación en ${punto.ubicacion}: ${adv}`)
+          }
+          continue
+        }
+
+        const esRM = clasificacion.tipo === "RM"
+        const precioUF = obtenerPrecioServicio(servicio, esRM)
+        items.push({
+          tipo: "servicio",
+          id: servicio.id,
+          nombre: `${servicio.nombre} (${punto.ubicacion})`,
+          modalidad: "Cobro único",
+          cantidad: 1,
+          precioUnitarioUF: precioUF,
+          subtotalUF: Number(precioUF.toFixed(3)),
+        })
+      }
     }
   }
 
@@ -261,6 +370,9 @@ export async function cotizarReferencial(args: {
     }
     if (i.modalidad === "Arriendo mensual") {
       return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${i.precioUnitarioUF.toFixed(3)} UF = ${i.subtotalUF.toFixed(3)} UF/mes`
+    }
+    if (i.modalidad === "Cobro único") {
+      return `- ${i.nombre}: ${i.subtotalUF.toFixed(3)} UF (cobro único)`
     }
     return `- ${i.nombre}: ${i.cantidad} × ${i.precioUnitarioUF.toFixed(3)} UF = ${i.subtotalUF.toFixed(3)} UF`
   })
@@ -293,6 +405,9 @@ export async function cotizarReferencial(args: {
     }
     if (i.modalidad === "Arriendo mensual") {
       return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF/mes`
+    }
+    if (i.modalidad === "Cobro único") {
+      return `- ${i.nombre}: ${fmtNumCL(i.subtotalUF, 3)} UF (cobro único)`
     }
     return `- ${i.nombre}: ${i.cantidad} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF`
   })
