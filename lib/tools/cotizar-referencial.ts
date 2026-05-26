@@ -29,7 +29,7 @@ const SCOPE_MAX_USUARIOS = 50
 export const cotizarReferencialSchema = {
   name: "cotizar_referencial",
   description:
-    "Calcula un estimado mensual referencial en UF y CLP para una empresa de 1 a 50 trabajadores, según los módulos de software y el hardware de marcaje que el prospecto haya elegido. Úsalo cuando ya tengas userCount confirmado y al menos un módulo o hardware definido. Si el prospecto tiene más de 50 trabajadores, NO uses esta tool — derivá a soporte con derivar_a_soporte.",
+    "Calcula un estimado mensual referencial en UF y CLP para una empresa de 1 a 50 trabajadores, según los módulos de software y el hardware de marcaje que el prospecto haya elegido. Úsalo cuando ya tengas userCount confirmado y al menos un módulo o hardware definido. Si el prospecto tiene más de 50 trabajadores, NO uses esta tool — deriva a soporte con derivar_a_soporte.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -102,6 +102,7 @@ export type CotizacionResultado =
       ufActual: number
       totalCLP: number
       resumenLegible: string
+      mensajeParaProspecto: string
       advertencias: string[]
     }
   | { ok: false; error: string }
@@ -135,7 +136,7 @@ export async function cotizarReferencial(args: {
   if (!Number.isFinite(userCount) || userCount < 1 || userCount > SCOPE_MAX_USUARIOS) {
     return {
       ok: false,
-      error: `userCount=${userCount} fuera de rango. Esta tool cubre empresas de 1 a ${SCOPE_MAX_USUARIOS} trabajadores. Para empresas más grandes, derivá con derivar_a_soporte motivo "fuera_de_rango_trabajadores".`,
+      error: `userCount=${userCount} fuera de rango. Esta tool cubre empresas de 1 a ${SCOPE_MAX_USUARIOS} trabajadores. Para empresas más grandes, deriva con derivar_a_soporte motivo "fuera_de_rango_trabajadores".`,
     }
   }
 
@@ -265,6 +266,52 @@ export async function cotizarReferencial(args: {
   })
   const resumenLegible = lineas.join("\n")
 
+  // ── Mensaje canónico para que Vicky lo pegue literal al prospecto ──
+  //
+  // Este string es la ÚNICA fuente de verdad para comunicar precios al usuario.
+  // Vicky no decide formato, no escoge etiquetas, no parafrasea: copia este
+  // bloque tal cual. Si en el futuro cambia el formato de presentación
+  // (descuentos, planes anuales, etc.), se modifica acá y se propaga a todas
+  // las superficies que consuman esta tool.
+
+  // Formato chileno completo: "." separador de miles, "," separador decimal.
+  // Ej: 40522.38 → "40.522,38"; 3.85 → "3,850" (con 3 decimales).
+  const fmtNumCL = (n: number, decimals: number): string => {
+    const [entero, dec] = n.toFixed(decimals).split(".")
+    const conMiles = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+    return dec ? `${conMiles},${dec}` : conMiles
+  }
+
+  // Items reformateados con formato chileno consistente
+  const itemsCL = items.map((i) => {
+    const sufijoTier = i.tierAplicado ? ` [tier ${i.tierAplicado}]` : ""
+    if (i.modalidad === "Fijo") {
+      return `- ${i.nombre}: ${fmtNumCL(i.subtotalUF, 3)} UF (fijo mensual)${sufijoTier}`
+    }
+    if (i.modalidad === "Por usuario") {
+      return `- ${i.nombre}: ${i.cantidad} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF${sufijoTier}`
+    }
+    if (i.modalidad === "Arriendo mensual") {
+      return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF/mes`
+    }
+    return `- ${i.nombre}: ${i.cantidad} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF`
+  })
+
+  const bloqueTotales = [
+    `Subtotal: ${fmtNumCL(subtotalUF, 3)} UF`,
+    `IVA (19%): ${fmtNumCL(ivaUF, 3)} UF`,
+    `Total con IVA: ${fmtNumCL(totalUF, 3)} UF`,
+    `Equivalente aproximado: $${fmtNumCL(totalCLP, 0)} CLP/mes (UF del día: $${fmtNumCL(ufActual, 2)})`,
+  ].join("\n")
+
+  const mensajeParaProspecto = [
+    "Estimado mensual referencial:",
+    "",
+    itemsCL.join("\n"),
+    "",
+    bloqueTotales,
+  ].join("\n")
+
   return {
     ok: true,
     userCount,
@@ -275,6 +322,7 @@ export async function cotizarReferencial(args: {
     ufActual: Number(ufActual.toFixed(2)),
     totalCLP,
     resumenLegible,
+    mensajeParaProspecto,
     advertencias,
   }
 }
