@@ -10,14 +10,22 @@
  * Account+Contact+Deal usando los datos nuevos (datos nuevos ganan).
  *
  * Scope: 1-50 trabajadores.
+ *
+ * Instalación de hardware:
+ *   Cuando la cotización incluye hardware, requiere el array `puntosInstalacion`.
+ *   La lógica es idéntica a `cotizar_referencial` y los items resultantes se
+ *   envían al endpoint create-from-vicky como líneas con tipo "servicio".
  */
 
 import {
   getModuloDisponibleParaVicky,
   getHardwareDisponibleParaVicky,
+  getServiciosAplicablesConHardware,
+  obtenerPrecioServicio,
   obtenerTierAplicable,
   validarRangoModulo,
 } from "@/lib/catalogo"
+import { clasificarUbicacion } from "@/lib/geografia"
 
 const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -68,7 +76,7 @@ async function getUFActualSafe(): Promise<number> {
 export const generarLinkCotizadoraSchema = {
   name: "generar_link_cotizadora",
   description:
-    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala SOLO después de haber presentado el preform de confirmación y que el prospect haya confirmado explícitamente los datos. NO la uses antes de confirmar. Si previamente identificaste al prospect con buscar_prospect_en_zoho y obtuviste match, pasa los IDs correspondientes (accountId, contactId, leadId) para evitar duplicados.",
+    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala SOLO después de haber presentado el preform de confirmación y que el prospect haya confirmado explícitamente los datos. NO la uses antes de confirmar. Si la cotización incluye hardware, requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un reloj). Si previamente identificaste al prospect con buscar_prospect_en_zoho y obtuviste match, pasa los IDs correspondientes (accountId, contactId, leadId) para evitar duplicados.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -104,6 +112,27 @@ export const generarLinkCotizadoraSchema = {
           required: ["id"],
         },
       },
+      puntosInstalacion: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            ubicacion: {
+              type: "string" as const,
+              description:
+                "Ubicación del punto, tal como la entregó el prospecto (comuna, región, ordinal, etc.). La tool clasifica internamente RM vs regiones.",
+            },
+            autoInstalada: {
+              type: "boolean" as const,
+              description:
+                "true si el prospecto instalará por su cuenta (sin cobro, con advertencias). false si la realiza GeoVictoria.",
+            },
+          },
+          required: ["ubicacion", "autoInstalada"],
+        },
+        description:
+          "Lista de puntos físicos de instalación. OBLIGATORIO si la cotización incluye hardware. Una entrada por punto, no por reloj.",
+      },
       accountId: {
         type: "string" as const,
         description:
@@ -124,6 +153,11 @@ export const generarLinkCotizadoraSchema = {
   },
 }
 
+export type PuntoInstalacionInput = {
+  ubicacion: string
+  autoInstalada: boolean
+}
+
 export type LinkCotizadoraInput = {
   empresa: string
   contacto: string
@@ -134,13 +168,14 @@ export type LinkCotizadoraInput = {
   sectorEmpresa: SectorValido | string
   modulos: string[]
   hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+  puntosInstalacion?: PuntoInstalacionInput[]
   accountId?: string
   contactId?: string
   leadId?: string
 }
 
 type ItemCotizacion = {
-  tipo: "modulo" | "hardware"
+  tipo: "modulo" | "hardware" | "servicio"
   id: string
   nombre: string
   modalidad: string
@@ -177,6 +212,7 @@ export async function generarLinkCotizadora(
   const {
     empresa, contacto, contactoEmail, contactoTelefono,
     rutEmpresa, userCount, sectorEmpresa, modulos = [], hardware = [],
+    puntosInstalacion = [],
     accountId, contactId, leadId,
   } = args
 
@@ -231,6 +267,7 @@ export async function generarLinkCotizadora(
     })
   }
 
+  let hayHardware = false
   for (const hw of hardware) {
     const dispositivo = getHardwareDisponibleParaVicky(hw.id)
     if (!dispositivo) return { ok: false, error: `Hardware '${hw.id}' no está habilitado para Vicky.` }
@@ -248,6 +285,71 @@ export async function generarLinkCotizadora(
       precioUnitarioUF: precioUnitario,
       subtotalUF: Number((cantidad * precioUnitario).toFixed(3)),
     })
+    hayHardware = true
+  }
+
+  // ── Procesar puntos de instalación ──
+  if (hayHardware) {
+    if (puntosInstalacion.length === 0) {
+      return {
+        ok: false,
+        error:
+          "La cotización incluye hardware pero no se entregó 'puntosInstalacion'. " +
+          "Pregunta al prospecto la comuna o región de cada punto antes de generar el link.",
+      }
+    }
+
+    for (const punto of puntosInstalacion) {
+      const c = clasificarUbicacion(punto.ubicacion)
+      if (c.tipo === "no_clasificable") {
+        return {
+          ok: false,
+          error:
+            `No pude clasificar la ubicación '${punto.ubicacion}' (${c.razon}). ` +
+            `Pregúntale al prospecto la comuna o región específica y vuelve a llamar la tool.`,
+        }
+      }
+    }
+
+    const serviciosAplicables = getServiciosAplicablesConHardware()
+    for (const servicio of serviciosAplicables) {
+      for (const punto of puntosInstalacion) {
+        const clasificacion = clasificarUbicacion(punto.ubicacion)
+        if (clasificacion.tipo === "no_clasificable") continue
+
+        if (!clasificacion.reconocida) {
+          advertencias.push(
+            `Ubicación '${punto.ubicacion}' no reconocida en la lista oficial. ` +
+            `Se aplicó tarifa de regiones por defecto. El ejecutivo confirmará al revisar la cotización.`,
+          )
+        }
+
+        if (punto.autoInstalada) {
+          if (!servicio.permiteAutoInstalacion) {
+            return {
+              ok: false,
+              error: `El servicio '${servicio.nombre}' no permite auto-instalación.`,
+            }
+          }
+          for (const adv of servicio.advertenciasAutoInstalacion) {
+            advertencias.push(`Auto-instalación en ${punto.ubicacion}: ${adv}`)
+          }
+          continue
+        }
+
+        const esRM = clasificacion.tipo === "RM"
+        const precioUF = obtenerPrecioServicio(servicio, esRM)
+        items.push({
+          tipo: "servicio",
+          id: servicio.id,
+          nombre: `${servicio.nombre} (${punto.ubicacion})`,
+          modalidad: "Cobro único",
+          cantidad: 1,
+          precioUnitarioUF: precioUF,
+          subtotalUF: Number(precioUF.toFixed(3)),
+        })
+      }
+    }
   }
 
   if (items.length === 0) return { ok: false, error: "No hay items válidos para cotizar." }
