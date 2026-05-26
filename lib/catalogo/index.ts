@@ -12,11 +12,13 @@
 
 import { CATALOGO_MODULOS } from "./modulos"
 import { CATALOGO_HARDWARE } from "./hardware"
-import type { ModuloSoftware, Hardware, TierPrecio } from "./tipos"
+import { CATALOGO_SERVICIOS } from "./servicios"
+import type { ModuloSoftware, Hardware, Servicio, TierPrecio } from "./tipos"
 
 // ─── Re-exports ──────────────────────────────────────────────────────────
 export { CATALOGO_MODULOS } from "./modulos"
 export { CATALOGO_HARDWARE } from "./hardware"
+export { CATALOGO_SERVICIOS } from "./servicios"
 export type * from "./tipos"
 
 // ─── Helpers para MÓDULOS ────────────────────────────────────────────────
@@ -100,4 +102,39 @@ export function getHardwareDisponibleParaVicky(id: string): Hardware | null {
  */
 export function getHardwareDisponiblesParaVicky(): Hardware[] {
   return CATALOGO_HARDWARE.filter((h) => h.disponibleParaVicky)
+}
+
+// ─── Helpers para SERVICIOS ──────────────────────────────────────────────
+
+export function getServicioById(id: string): Servicio | null {
+  return CATALOGO_SERVICIOS.find((s) => s.id === id) || null
+}
+
+/**
+ * Busca servicio por id solo si está habilitado para Vicky.
+ */
+export function getServicioDisponibleParaVicky(id: string): Servicio | null {
+  const s = getServicioById(id)
+  if (!s) return null
+  if (!s.disponibleParaVicky) return null
+  return s
+}
+
+/**
+ * Devuelve los servicios disponibles que aplican automáticamente cuando
+ * la cotización incluye hardware. Las tools los inyectan como líneas
+ * adicionales sin que Vicky tenga que pedirlos explícitamente.
+ */
+export function getServiciosAplicablesConHardware(): Servicio[] {
+  return CATALOGO_SERVICIOS.filter(
+    (s) => s.disponibleParaVicky && s.aplicaConHardware,
+  )
+}
+
+/**
+ * Calcula el precio en UF para un servicio dado un punto.
+ * @param esRM true si el punto está en Región Metropolitana.
+ */
+export function obtenerPrecioServicio(servicio: Servicio, esRM: boolean): number {
+  return esRM ? servicio.precioUFRM : servicio.precioUFRegion
 }
