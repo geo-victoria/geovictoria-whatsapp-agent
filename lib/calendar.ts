@@ -272,10 +272,7 @@ export async function bookMeeting(params: {
   prospectEmail: string
   language?: string
   timeZone?: string
-}): Promise
-  | { success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string }
-  | { success: false; error: string }
-> {
+}): Promise<{ success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string } | { success: false; error: string }> {
   if (!CAL_API_KEY) {
     return { success: false, error: "CAL_API_KEY no configurada en el entorno." }
   }
