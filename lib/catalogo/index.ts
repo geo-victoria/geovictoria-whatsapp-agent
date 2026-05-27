@@ -1,140 +1,91 @@
 /**
- * Punto de entrada del catálogo de productos.
+ * Catálogo central de tools para Vicky V3.
  *
- * Las tools NUNCA hardcodean precios ni IDs. Siempre consumen el catálogo
- * a través de los helpers exportados acá. Si un producto no existe o no
- * tiene `disponibleParaVicky === true`, los helpers devuelven null y las
- * tools fallan con error legible.
+ * Cada tool exporta su schema (para Claude API) y su implementación.
+ * El agent-loop usa ALL_TOOLS para invocar la tool correcta según el
+ * tool_use block que devuelva el modelo.
  *
- * Premisa rectora del repo:
- *   "Solo se cotiza lo que existe en el catálogo Y está habilitado."
+ * V3 actual (chat + Botmaker):
+ *   - buscar_prospect_en_zoho: identificación progresiva del prospect via RUT/email/teléfono
+ *   - cotizar_referencial: cálculo interno para 1-50 trabajadores
+ *   - generar_link_cotizadora: crea registros en Zoho, genera PDF + acceptanceUrl
+ *   - consultar_agente_soporte: consulta operativa al agente IA de soporte (Foundry/Azure AI)
+ *   - derivar_a_soporte: handoff explícito
  */
 
-import { CATALOGO_MODULOS } from "./modulos"
-import { CATALOGO_HARDWARE } from "./hardware"
-import { CATALOGO_SERVICIOS } from "./servicios"
-import type { ModuloSoftware, Hardware, Servicio, TierPrecio } from "./tipos"
+import {
+  cotizarReferencialSchema,
+  cotizarReferencial,
+  type CotizacionResultado,
+} from "./cotizar-referencial"
+import {
+  generarLinkCotizadoraSchema,
+  generarLinkCotizadora,
+  type LinkCotizadoraResultado,
+} from "./generar-link-cotizadora"
+import {
+  derivarASoporteSchema,
+  derivarASoporte,
+  type DerivarASoporteResultado,
+} from "./derivar-a-soporte"
+import {
+  buscarProspectEnZohoSchema,
+  buscarProspectEnZoho,
+  type BuscarProspectResultado,
+} from "./buscar-prospect-en-zoho"
+import {
+  consultarAgenteSoporteSchema,
+  consultarAgenteSoporte,
+  type ConsultarAgenteSoporteResultado,
+} from "./consultar-agente-soporte"
 
-// ─── Re-exports ──────────────────────────────────────────────────────────
-export { CATALOGO_MODULOS } from "./modulos"
-export { CATALOGO_HARDWARE } from "./hardware"
-export { CATALOGO_SERVICIOS } from "./servicios"
-export type * from "./tipos"
+export const TOOL_SCHEMAS = [
+  buscarProspectEnZohoSchema,
+  cotizarReferencialSchema,
+  generarLinkCotizadoraSchema,
+  consultarAgenteSoporteSchema,
+  derivarASoporteSchema,
+] as const
 
-// ─── Helpers para MÓDULOS ────────────────────────────────────────────────
+export type ToolResult =
+  | CotizacionResultado
+  | LinkCotizadoraResultado
+  | DerivarASoporteResultado
+  | BuscarProspectResultado
+  | ConsultarAgenteSoporteResultado
+  | { ok: false; error: string }
 
 /**
- * Busca un módulo por id. Devuelve null si no existe.
- * NO valida disponibleParaVicky — usar getModuloDisponibleParaVicky para eso.
+ * Despacha la invocación de tool según el name que envíe el modelo.
+ * Devuelve un objeto que se serializa y se le pasa al modelo como tool_result.
  */
-export function getModuloById(id: string): ModuloSoftware | null {
-  return CATALOGO_MODULOS.find((m) => m.id === id) || null
-}
+export async function dispatchTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
+  try {
+    switch (name) {
+      case "buscar_prospect_en_zoho":
+        return await buscarProspectEnZoho(input as never)
 
-/**
- * Busca un módulo por id pero solo lo devuelve si está habilitado para Vicky.
- * Devuelve null si no existe o si está deshabilitado.
- *
- * Este es el helper que deben usar las tools de Vicky para garantizar
- * que solo se cotice lo habilitado.
- */
-export function getModuloDisponibleParaVicky(id: string): ModuloSoftware | null {
-  const m = getModuloById(id)
-  if (!m) return null
-  if (!m.disponibleParaVicky) return null
-  return m
-}
+      case "cotizar_referencial":
+        return await cotizarReferencial(input as never)
 
-/**
- * Devuelve la lista completa de módulos habilitados para Vicky.
- * Útil para que el modelo conozca el catálogo disponible en su contexto.
- */
-export function getModulosDisponiblesParaVicky(): ModuloSoftware[] {
-  return CATALOGO_MODULOS.filter((m) => m.disponibleParaVicky)
-}
+      case "generar_link_cotizadora":
+        return await generarLinkCotizadora(input as never)
 
-/**
- * Busca el tier de precio que aplica para un módulo dado un userCount.
- * Si el módulo tiene `minUsuariosTotal` y el userCount no llega, devuelve null.
- * Si no hay ningún tier que cubra el userCount, también devuelve null.
- */
-export function obtenerTierAplicable(modulo: ModuloSoftware, userCount: number): TierPrecio | null {
-  if (modulo.minUsuariosTotal !== undefined && userCount < modulo.minUsuariosTotal) {
-    return null
+      case "consultar_agente_soporte":
+        return await consultarAgenteSoporte(input as never)
+
+      case "derivar_a_soporte":
+        return derivarASoporte(input as never)
+
+      default:
+        return {
+          ok: false,
+          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, derivar_a_soporte.`,
+        }
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[vicky-v3] Error ejecutando tool '${name}':`, err)
+    return { ok: false, error: `Error interno al ejecutar tool '${name}': ${message}` }
   }
-  return modulo.tiers.find((t) => userCount >= t.minUsuarios && userCount <= t.maxUsuarios) ?? null
-}
-
-/**
- * Valida que un módulo aplique para una cantidad de usuarios dada.
- * Devuelve null si todo OK, o un string con el motivo del rechazo.
- */
-export function validarRangoModulo(modulo: ModuloSoftware, userCount: number): string | null {
-  if (modulo.minUsuariosTotal !== undefined && userCount < modulo.minUsuariosTotal) {
-    return `${modulo.nombre} requiere mínimo ${modulo.minUsuariosTotal} trabajadores (la empresa tiene ${userCount}).`
-  }
-  const tier = obtenerTierAplicable(modulo, userCount)
-  if (!tier) {
-    const rangos = modulo.tiers.map((t) => `${t.minUsuarios}-${t.maxUsuarios}`).join(", ")
-    return `${modulo.nombre} no tiene tier definido para ${userCount} trabajadores. Rangos cubiertos: ${rangos}.`
-  }
-  return null
-}
-
-// ─── Helpers para HARDWARE ───────────────────────────────────────────────
-
-export function getHardwareById(id: string): Hardware | null {
-  return CATALOGO_HARDWARE.find((h) => h.id === id) || null
-}
-
-/**
- * Busca hardware por id solo si está habilitado para Vicky.
- */
-export function getHardwareDisponibleParaVicky(id: string): Hardware | null {
-  const h = getHardwareById(id)
-  if (!h) return null
-  if (!h.disponibleParaVicky) return null
-  return h
-}
-
-/**
- * Devuelve la lista de hardware habilitado para Vicky.
- */
-export function getHardwareDisponiblesParaVicky(): Hardware[] {
-  return CATALOGO_HARDWARE.filter((h) => h.disponibleParaVicky)
-}
-
-// ─── Helpers para SERVICIOS ──────────────────────────────────────────────
-
-export function getServicioById(id: string): Servicio | null {
-  return CATALOGO_SERVICIOS.find((s) => s.id === id) || null
-}
-
-/**
- * Busca servicio por id solo si está habilitado para Vicky.
- */
-export function getServicioDisponibleParaVicky(id: string): Servicio | null {
-  const s = getServicioById(id)
-  if (!s) return null
-  if (!s.disponibleParaVicky) return null
-  return s
-}
-
-/**
- * Devuelve los servicios disponibles que aplican automáticamente cuando
- * la cotización incluye hardware. Las tools los inyectan como líneas
- * adicionales sin que Vicky tenga que pedirlos explícitamente.
- */
-export function getServiciosAplicablesConHardware(): Servicio[] {
-  return CATALOGO_SERVICIOS.filter(
-    (s) => s.disponibleParaVicky && s.aplicaConHardware,
-  )
-}
-
-/**
- * Calcula el precio en UF para un servicio dado un punto.
- * @param esRM true si el punto está en Región Metropolitana.
- */
-export function obtenerPrecioServicio(servicio: Servicio, esRM: boolean): number {
-  return esRM ? servicio.precioUFRM : servicio.precioUFRegion
 }
