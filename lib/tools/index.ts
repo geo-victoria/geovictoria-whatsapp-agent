@@ -1,17 +1,19 @@
 /**
- * Catálogo central de tools para Vicky V3.
+ * Catálogo central de tools para Vicky V3 — versión final con 8 capacidades.
  *
  * Cada tool exporta su schema (para Claude API) y su implementación.
  * El agent-loop usa ALL_TOOLS para invocar la tool correcta según el
  * tool_use block que devuelva el modelo.
  *
- * V3 actual (chat + Botmaker):
+ * V3 final (chat + Botmaker):
  *   - buscar_prospect_en_zoho: identificación progresiva del prospect via RUT/email/teléfono
  *   - cotizar_referencial: cálculo interno para 1-50 trabajadores
  *   - generar_link_cotizadora: crea registros en Zoho, genera PDF + acceptanceUrl
  *   - consultar_agente_soporte: consulta operativa al agente IA de soporte (Foundry/Azure AI)
  *   - registrar_solicitud_callback: Lead en Zoho con owner default → entra a tómbola
- *   - derivar_a_soporte: handoff explícito
+ *   - consultar_disponibilidad_horario: verifica disponibilidad en Cal.com para slot propuesto por el cliente
+ *   - agendar_reunion: agenda en Cal.com + Lead Zoho con KAM + Event Zoho
+ *   - derivar_a_soporte: handoff explícito (red de seguridad)
  */
 
 import {
@@ -44,6 +46,16 @@ import {
   registrarSolicitudCallback,
   type RegistrarSolicitudCallbackResultado,
 } from "./registrar-solicitud-callback"
+import {
+  consultarDisponibilidadHorarioSchema,
+  consultarDisponibilidadHorario,
+  type ConsultarDisponibilidadHorarioResultado,
+} from "./consultar-disponibilidad-horario"
+import {
+  agendarReunionSchema,
+  agendarReunion,
+  type AgendarReunionResultado,
+} from "./agendar-reunion"
 
 export const TOOL_SCHEMAS = [
   buscarProspectEnZohoSchema,
@@ -51,6 +63,8 @@ export const TOOL_SCHEMAS = [
   generarLinkCotizadoraSchema,
   consultarAgenteSoporteSchema,
   registrarSolicitudCallbackSchema,
+  consultarDisponibilidadHorarioSchema,
+  agendarReunionSchema,
   derivarASoporteSchema,
 ] as const
 
@@ -61,6 +75,8 @@ export type ToolResult =
   | BuscarProspectResultado
   | ConsultarAgenteSoporteResultado
   | RegistrarSolicitudCallbackResultado
+  | ConsultarDisponibilidadHorarioResultado
+  | AgendarReunionResultado
   | { ok: false; error: string }
 
 /**
@@ -85,13 +101,19 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       case "registrar_solicitud_callback":
         return await registrarSolicitudCallback(input as never)
 
+      case "consultar_disponibilidad_horario":
+        return await consultarDisponibilidadHorario(input as never)
+
+      case "agendar_reunion":
+        return await agendarReunion(input as never)
+
       case "derivar_a_soporte":
         return derivarASoporte(input as never)
 
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, derivar_a_soporte.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte.`,
         }
     }
   } catch (err: unknown) {
