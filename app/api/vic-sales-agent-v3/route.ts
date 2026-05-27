@@ -28,20 +28,21 @@
  * NOTA: este endpoint NO persiste en Supabase. El historial se mantiene
  * en el cliente (React state). Esto es intencional para el chat de prueba:
  * cada refresh es una conversación nueva, sin contaminar BD de producción.
+ *
+ * IMPORTANTE: usa getSystemPromptV3() (función) en lugar de SYSTEM_PROMPT_V3
+ * (constante) para que la fecha actual se inyecte dinámicamente en cada
+ * request. Sin esto, Vicky alucinaría el año al interpretar fechas relativas
+ * ("el viernes a las 11") porque su knowledge cutoff no coincide con hoy.
  */
-
 import { NextResponse } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
-import { SYSTEM_PROMPT_V3 } from "./prompt"
-
+import { getSystemPromptV3 } from "./prompt"
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
-
 type RequestBody = {
   history?: unknown
   message?: unknown
 }
-
 function isValidMessage(m: unknown): m is ConversationMessage {
   if (!m || typeof m !== "object") return false
   const obj = m as Record<string, unknown>
@@ -51,11 +52,9 @@ function isValidMessage(m: unknown): m is ConversationMessage {
     obj.content.length > 0
   )
 }
-
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as RequestBody
-
     // Validar input
     const userMessage = typeof body.message === "string" ? body.message.trim() : ""
     if (!userMessage) {
@@ -64,14 +63,11 @@ export async function POST(req: Request) {
     if (userMessage.length > 2000) {
       return NextResponse.json({ error: "Mensaje demasiado largo (máx 2000 caracteres)." }, { status: 400 })
     }
-
     const history: ConversationMessage[] = Array.isArray(body.history)
       ? body.history.filter(isValidMessage)
       : []
-
     // Limitar historial a los últimos 40 mensajes para controlar costos.
     const trimmedHistory = history.slice(-40)
-
     // API key
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) {
@@ -81,15 +77,15 @@ export async function POST(req: Request) {
         { status: 503 }
       )
     }
-
     // Ejecutar el agent loop
+    // getSystemPromptV3() inyecta la fecha actual en cada llamada — crítico para
+    // que Vicky pueda interpretar "mañana", "el jueves", etc. con año correcto.
     const result = await runAgentLoop({
-      systemPrompt: SYSTEM_PROMPT_V3,
+      systemPrompt: getSystemPromptV3(),
       history: trimmedHistory,
       userMessage,
       apiKey,
     })
-
     return NextResponse.json({
       reply: result.reply,
       handoff: result.handoff,
