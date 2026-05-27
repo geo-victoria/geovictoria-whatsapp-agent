@@ -10,6 +10,7 @@
  *   - cotizar_referencial: cálculo interno para 1-50 trabajadores
  *   - generar_link_cotizadora: crea registros en Zoho, genera PDF + acceptanceUrl
  *   - consultar_agente_soporte: consulta operativa al agente IA de soporte (Foundry/Azure AI)
+ *   - registrar_solicitud_callback: Lead en Zoho con owner default → entra a tómbola
  *   - derivar_a_soporte: handoff explícito
  */
 
@@ -38,12 +39,18 @@ import {
   consultarAgenteSoporte,
   type ConsultarAgenteSoporteResultado,
 } from "./consultar-agente-soporte"
+import {
+  registrarSolicitudCallbackSchema,
+  registrarSolicitudCallback,
+  type RegistrarSolicitudCallbackResultado,
+} from "./registrar-solicitud-callback"
 
 export const TOOL_SCHEMAS = [
   buscarProspectEnZohoSchema,
   cotizarReferencialSchema,
   generarLinkCotizadoraSchema,
   consultarAgenteSoporteSchema,
+  registrarSolicitudCallbackSchema,
   derivarASoporteSchema,
 ] as const
 
@@ -53,6 +60,7 @@ export type ToolResult =
   | DerivarASoporteResultado
   | BuscarProspectResultado
   | ConsultarAgenteSoporteResultado
+  | RegistrarSolicitudCallbackResultado
   | { ok: false; error: string }
 
 /**
@@ -74,13 +82,16 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       case "consultar_agente_soporte":
         return await consultarAgenteSoporte(input as never)
 
+      case "registrar_solicitud_callback":
+        return await registrarSolicitudCallback(input as never)
+
       case "derivar_a_soporte":
         return derivarASoporte(input as never)
 
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, derivar_a_soporte.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, derivar_a_soporte.`,
         }
     }
   } catch (err: unknown) {
