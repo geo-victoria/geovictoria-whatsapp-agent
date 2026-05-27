@@ -78,8 +78,10 @@ export async function getAvailableSlots(country: string): Promise<string[]> {
   ])
   const allHolidays = new Set([...holidays, ...holidaysNext])
 
+  // Cal.com decide el "minimum booking notice" por su Event Type — no aplicamos
+  // buffer manual aquí. Pedimos slots desde ahora; Cal.com filtra los inválidos.
   const now = new Date()
-  const start = new Date(now.getTime() + 25 * 60 * 60 * 1000)
+  const start = now
   const end = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000)
 
   const url =
@@ -149,7 +151,6 @@ export function matchSlotFromMessage(message: string, pendingSlots: string[], tz
   if (!message || pendingSlots.length === 0) return null
   const m = message.toLowerCase().trim()
 
-  // 1. Match por número ordinal explícito: "el 1", "primero", "segundo", etc.
   const ordinals: Record<string, number> = {
     "primero": 0, "primera": 0, "el primero": 0, "uno": 0, "1": 0, "el 1": 0,
     "segundo": 1, "segunda": 1, "el segundo": 1, "dos": 1, "2": 1, "el 2": 1,
@@ -161,7 +162,6 @@ export function matchSlotFromMessage(message: string, pendingSlots: string[], tz
     }
   }
 
-  // 2. Match por día de la semana
   const daysInMessage: number[] = []
   DAYS_ES.forEach((d, i) => { if (m.includes(d)) daysInMessage.push(i) })
   if (daysInMessage.length > 0) {
@@ -173,7 +173,6 @@ export function matchSlotFromMessage(message: string, pendingSlots: string[], tz
     }
   }
 
-  // 3. Match por hora ("las 11", "las 14", "11 hrs", etc.)
   const hourMatch = m.match(/(\d{1,2})(?:\s*hrs?|\s*h|:\d{2})?/)
   if (hourMatch) {
     const hour = parseInt(hourMatch[1])
@@ -183,7 +182,6 @@ export function matchSlotFromMessage(message: string, pendingSlots: string[], tz
     }
   }
 
-  // 4. Match por afirmación simple si solo hay 1 slot
   if (pendingSlots.length === 1) {
     if (/(sí|si|ok|dale|listo|vale|perfecto|confirmo|me sirve|me funciona)/i.test(m)) {
       return 0
@@ -214,9 +212,9 @@ export async function getSlotsByPreference(
   ])
   const allHolidays = new Set([...holidays, ...holidaysNext])
 
+  // Cal.com decide el "minimum booking notice" — no aplicamos buffer manual.
   const now = new Date()
-  const minStart = new Date(now.getTime() + 25 * 60 * 60 * 1000)
-  const start = new Date(Math.max(minStart.getTime(), preferredDate.getTime() - 24 * 60 * 60 * 1000))
+  const start = new Date(Math.max(now.getTime(), preferredDate.getTime() - 24 * 60 * 60 * 1000))
   const end = new Date(preferredDate.getTime() + 6 * 24 * 60 * 60 * 1000)
 
   const url =
@@ -238,7 +236,6 @@ export async function getSlotsByPreference(
     }
     if (valid.length === 0) return []
 
-    // Si hay hora preferida, ordenar por proximidad a esa hora
     if (preferredHour !== undefined) {
       const scored = valid.map((slot) => {
         const slotHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).format(new Date(slot)))
@@ -249,7 +246,6 @@ export async function getSlotsByPreference(
       return scored.slice(0, 3).map((s) => s.slot)
     }
 
-    // Si no hay hora preferida, tomar 3 distribuidos
     if (valid.length <= 3) return valid
     const indices = [0, Math.floor(valid.length / 2), valid.length - 1]
     return indices.map((i) => valid[i])
@@ -259,9 +255,8 @@ export async function getSlotsByPreference(
 }
 
 export function parsePreferredTime(message: string): { date: Date; hour?: number } | null {
-  // Esta función queda como stub legacy. V3 ya no la usa.
-  // V1/V2 podría seguir invocándola desde vic-botmaker/route.ts.
-  // Devolvemos null para no romper imports existentes.
+  // Stub legacy. V3 ya no la usa. V1/V2 podría seguir invocándola desde
+  // vic-botmaker/route.ts; devolvemos null para no romper imports existentes.
   if (!message) return null
   return null
 }
@@ -376,6 +371,10 @@ export async function bookMeeting(params: {
 // En V3 el cliente propone día/hora y Vicky verifica disponibilidad. Si el
 // slot exacto no está, Vicky ofrece alternativas cercanas (no propone primero).
 // Reusa COUNTRY_CODES, isWeekend y getPublicHolidays definidos arriba.
+//
+// Cal.com decide el "minimum booking notice" por su Event Type — no aplicamos
+// validación local de cuán pronto puede ser la fecha. Solo rechazamos fechas
+// pasadas (estrictamente menores a now). El resto lo decide Cal.com.
 
 export type CheckSlotResult =
   | { ok: true; estado: "disponible_exacto"; slotIso: string }
@@ -431,6 +430,9 @@ async function filterValidSlotsV3(
  *   - Busca alternativas el MISMO día → "alternativas_mismo_dia"
  *   - Si nada ese día, busca en los 5 días siguientes → "alternativas_dias_cercanos"
  *   - Si nada en la ventana → "sin_disponibilidad"
+ *
+ * Solo rechaza la propuesta si está estrictamente en el pasado. El minimum
+ * booking notice lo decide Cal.com vía su Event Type config.
  */
 export async function checkSlotAvailability(params: {
   slotIso: string
@@ -448,12 +450,11 @@ export async function checkSlotAvailability(params: {
 
   const tz = getTimezone(country)
   const now = new Date()
-  const minStart = new Date(now.getTime() + 25 * 60 * 60 * 1000)
 
-  if (propuesta.getTime() < minStart.getTime()) {
+  if (propuesta.getTime() < now.getTime()) {
     return {
       ok: false,
-      error: "La fecha propuesta es demasiado pronto. Cal.com requiere al menos 25h de anticipación.",
+      error: "La fecha propuesta ya pasó. Propón una fecha futura.",
     }
   }
 
@@ -489,7 +490,7 @@ export async function checkSlotAvailability(params: {
     }
 
     const wideStart = new Date(
-      Math.max(minStart.getTime(), propuesta.getTime() - 1 * 24 * 60 * 60 * 1000),
+      Math.max(now.getTime(), propuesta.getTime() - 1 * 24 * 60 * 60 * 1000),
     )
     const wideEnd = new Date(propuesta.getTime() + 5 * 24 * 60 * 60 * 1000)
     const wideSlots = await fetchSlotsRawV3(wideStart, wideEnd, tz)
