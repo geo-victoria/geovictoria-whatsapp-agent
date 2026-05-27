@@ -9,6 +9,7 @@
  *   - buscar_prospect_en_zoho: identificación progresiva del prospect via RUT/email/teléfono
  *   - cotizar_referencial: cálculo interno para 1-50 trabajadores
  *   - generar_link_cotizadora: crea registros en Zoho, genera PDF + acceptanceUrl
+ *   - consultar_agente_soporte: consulta operativa al agente IA de soporte (Foundry/Azure AI)
  *   - derivar_a_soporte: handoff explícito
  */
 
@@ -32,11 +33,17 @@ import {
   buscarProspectEnZoho,
   type BuscarProspectResultado,
 } from "./buscar-prospect-en-zoho"
+import {
+  consultarAgenteSoporteSchema,
+  consultarAgenteSoporte,
+  type ConsultarAgenteSoporteResultado,
+} from "./consultar-agente-soporte"
 
 export const TOOL_SCHEMAS = [
   buscarProspectEnZohoSchema,
   cotizarReferencialSchema,
   generarLinkCotizadoraSchema,
+  consultarAgenteSoporteSchema,
   derivarASoporteSchema,
 ] as const
 
@@ -45,6 +52,7 @@ export type ToolResult =
   | LinkCotizadoraResultado
   | DerivarASoporteResultado
   | BuscarProspectResultado
+  | ConsultarAgenteSoporteResultado
   | { ok: false; error: string }
 
 /**
@@ -63,13 +71,16 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       case "generar_link_cotizadora":
         return await generarLinkCotizadora(input as never)
 
+      case "consultar_agente_soporte":
+        return await consultarAgenteSoporte(input as never)
+
       case "derivar_a_soporte":
         return derivarASoporte(input as never)
 
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, derivar_a_soporte.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, derivar_a_soporte.`,
         }
     }
   } catch (err: unknown) {
