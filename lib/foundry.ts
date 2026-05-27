@@ -1,20 +1,24 @@
 /**
  * Cliente para el agente Foundry "first-response-zoho" v14 hospedado en
- * Azure AI Foundry. Reemplaza la lógica de respuesta automática a clientes
- * existentes que antes vivía en /api/support (V1/V2).
+ * Azure AI Foundry, vía la Responses API.
  *
- * El agente devuelve la respuesta al usuario y opcionalmente un marker:
- *   - [ESCALAR]: la consulta necesita un humano. Vicky comunica los
- *     canales de soporte (WhatsApp, email, teléfono).
- *   - [END]: la conversación quedó cerrada. Vicky despide amablemente.
- *   - (sin marker): conversación continúa, mantener responseId para el
- *     próximo turno.
+ * Endpoint y schema conformes a la guía oficial de integración:
+ *   POST {ENDPOINT}/openai/v1/responses
+ *   Body: { input, agent_reference: { name, version, type }, previous_response_id? }
+ *   Auth header: api-key: <FOUNDRY_API_KEY>
  *
- * Si Azure devuelve error o timeout, la función propaga el error y la
- * tool wrapper (consultar_agente_soporte) decide cómo actuar.
+ * El agente puede devolver markers de control al final del texto:
+ *   - [ESCALAR]: requiere derivación humana
+ *   - [END]: conversación cerrada por el usuario
+ *
+ * Threading: Foundry guarda el historial server-side. Solo se reenvía el
+ * response_id del turno anterior como previous_response_id. NO se reenvía
+ * el historial completo.
  */
 
-const FOUNDRY_ENDPOINT = "https://claude-product-design.services.ai.azure.com"
+const FOUNDRY_ENDPOINT =
+  "https://claude-product-design.services.ai.azure.com/api/projects/claude-product-design/openai/v1/responses"
+
 const AGENT_REFERENCE = {
   name: "first-response-zoho",
   version: "14",
@@ -38,6 +42,41 @@ export type FoundryAgentResponse = {
 }
 
 /**
+ * Tipos parciales del shape de respuesta de la Responses API.
+ * No exhaustivo; solo lo que parseamos.
+ */
+type FoundryOutputContent = {
+  type?: string
+  text?: string
+}
+
+type FoundryOutputMessage = {
+  type?: string
+  content?: FoundryOutputContent[]
+}
+
+type FoundryResponsesAPIResponse = {
+  id?: string
+  output?: FoundryOutputMessage[]
+  error?: { code?: string; message?: string }
+}
+
+function extractReplyFromOutput(output: FoundryOutputMessage[] | undefined): string {
+  if (!output || !Array.isArray(output)) return ""
+  for (const item of output) {
+    if (item?.type !== "message") continue
+    const contents = item?.content
+    if (!Array.isArray(contents)) continue
+    for (const c of contents) {
+      if (c?.type === "output_text" && typeof c.text === "string") {
+        return c.text
+      }
+    }
+  }
+  return ""
+}
+
+/**
  * Invoca el agente Foundry. Mantiene contexto vía previousResponseId.
  */
 export async function callFirstResponseAgent(
@@ -45,8 +84,6 @@ export async function callFirstResponseAgent(
   previousResponseId?: string,
 ): Promise<FoundryAgentResponse> {
   const apiKey = getApiKey()
-
-  const url = `${FOUNDRY_ENDPOINT}/api/projects/claude-product-design/agents/${AGENT_REFERENCE.name}/versions/${AGENT_REFERENCE.version}/run`
 
   const body: Record<string, unknown> = {
     input: message,
@@ -56,7 +93,7 @@ export async function callFirstResponseAgent(
     body.previous_response_id = previousResponseId
   }
 
-  const res = await fetch(url, {
+  const res = await fetch(FOUNDRY_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -68,24 +105,26 @@ export async function callFirstResponseAgent(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "")
-    console.error(`[foundry] HTTP ${res.status}:`, errText.slice(0, 300))
+    console.error(`[foundry] HTTP ${res.status}:`, errText.slice(0, 500))
     throw new Error(`Foundry agent HTTP ${res.status}`)
   }
 
-  const data = (await res.json()) as {
-    output?: string
-    response_id?: string
-    id?: string
+  const data = (await res.json()) as FoundryResponsesAPIResponse
+
+  if (data.error) {
+    console.error("[foundry] API error:", data.error)
+    throw new Error(`Foundry agent error: ${data.error.message || data.error.code || "unknown"}`)
   }
 
-  const rawReply = (data.output || "").trim()
+  const rawReply = extractReplyFromOutput(data.output).trim()
   if (!rawReply) {
-    throw new Error("Foundry agent devolvió respuesta vacía")
+    console.error("[foundry] respuesta sin output_text:", JSON.stringify(data).slice(0, 500))
+    throw new Error("Foundry agent devolvió respuesta vacía o con formato inesperado")
   }
 
-  const responseId = data.response_id || data.id || ""
+  const responseId = data.id || ""
 
-  // Detectar y limpiar markers
+  // Detectar y limpiar markers (mutuamente excluyentes: ESCALAR o END, no ambos)
   let marker: FoundryMarker = null
   let reply = rawReply
   if (/\[ESCALAR\]/i.test(rawReply)) {
