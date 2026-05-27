@@ -6,10 +6,8 @@
  * el flag `disponibleParaVicky`, el prompt se actualiza automáticamente
  * sin tocar este archivo.
  *
- * Cuando un módulo tiene múltiples tiers de precio (ej. Asistencia cambia
- * a 11 trabajadores), el prompt muestra los tiers para que el modelo pueda
- * razonar conversacionalmente sobre el orden de magnitud antes de llamar
- * a la tool.
+ * La fecha actual se inyecta vía getSystemPromptV3() en cada request, para
+ * que Vicky no aluciné años antiguos al interpretar fechas relativas.
  */
 
 import {
@@ -66,6 +64,41 @@ ${lineasModulos}
 ${lineasHardware}
 
 ⚠️ IMPORTANTE: Solo puedes ofrecer productos que aparezcan en estas dos listas. Si un prospecto te pregunta por un módulo o dispositivo que no está acá, deriva con un ejecutivo (usa derivar_a_soporte motivo "fuera_de_scope").`
+}
+
+function formatFechaActualParaPrompt(): string {
+  const now = new Date()
+  const tz = "America/Santiago"
+  const isoUTC = now.toISOString()
+  const fechaLegible = now.toLocaleString("es-CL", {
+    timeZone: tz,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+  return `# Anclaje temporal (CRÍTICO para agendar reuniones)
+
+**HOY ES**: ${fechaLegible} (Chile)
+**FECHA ISO UTC ACTUAL**: ${isoUTC}
+
+Cuando el cliente proponga un día relativo ("mañana", "el jueves", "la próxima semana"), interprétalo en base a la fecha indicada arriba — NO en base a tu conocimiento de entrenamiento, que puede estar desactualizado. Antes de invocar consultar_disponibilidad_horario, calcula la fecha ISO 8601 correcta tomando como base el HOY indicado arriba y devuelve un ISO con el AÑO ACTUAL real (${now.getFullYear()}), no un año anterior.
+
+Cal.com tiene configurado su propio "minimum booking notice" (mínima anticipación) en el Event Type — si el cliente propone algo muy próximo en el tiempo, la tool devolverá alternativas o "sin disponibilidad" según lo que Cal.com permita. No filtres por tu cuenta — pasa la fecha tal cual el cliente la propuso (ajustada al año actual) y deja que la tool decida.
+
+---
+
+`
+}
+
+/**
+ * Devuelve el system prompt con la fecha actual inyectada. Usar en route.ts
+ * en cada request para que Vicky tenga anclaje temporal preciso.
+ */
+export function getSystemPromptV3(): string {
+  return formatFechaActualParaPrompt() + SYSTEM_PROMPT_V3
 }
 
 export const SYSTEM_PROMPT_V3 = `Eres Vicky, vendedora virtual de GeoVictoria por WhatsApp.
@@ -376,7 +409,7 @@ Flujo:
 
 2. Captura datos mínimos del Lead (nombre, email, empresa) en paralelo o antes de verificar disponibilidad.
 
-3. Cuando el cliente propone fecha/hora, invoca consultar_disponibilidad_horario pasando la fechaPropuesta en ISO 8601 (interpreta su mensaje en timezone del país, default Chile).
+3. Cuando el cliente propone fecha/hora, invoca consultar_disponibilidad_horario pasando la fechaPropuesta en ISO 8601 (interpreta su mensaje en timezone del país, default Chile, usando el HOY indicado al inicio del prompt para resolver referencias relativas).
 
 4. Según el estado devuelto:
    - disponible_exacto → "Perfecto, el [fecha en prosa] está disponible. ¿Te lo agendo?" Si confirma, invoca agendar_reunion con el slotIso.
