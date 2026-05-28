@@ -19,6 +19,18 @@
  *   correspondiente. Si el prospecto declina la instalación (autoInstalada=true),
  *   no se cobra pero se agregan las advertencias declaradas en el catálogo
  *   de servicios.
+ *
+ * Formato del mensajeParaProspecto:
+ *   - Se separa en dos secciones: "Resumen mensual recurrente" (módulos +
+ *     hardware en arriendo) y "Pago único" (hardware en compra + instalaciones).
+ *   - Cada sección tiene su propio subtotal, IVA, total y equivalente CLP.
+ *   - Si solo hay items recurrentes (ej. solo app móvil), la sección "Pago
+ *     único" se omite por completo.
+ *   - Decimales: subtotales/totales redondean a 1 decimal (sin .0 si queda
+ *     entero). Precios unitarios mantienen precisión natural sin ceros
+ *     trailing innecesarios.
+ *   - NO incluye el sufijo "[tier X-Y usuarios]" — esa info queda solo en
+ *     items[].tierAplicado del objeto retornado, para uso interno/debug.
  */
 
 import {
@@ -120,7 +132,7 @@ export type ItemCotizacion = {
   cantidad: number
   precioUnitarioUF: number
   subtotalUF: number
-  tierAplicado?: string // ej. "11-20 usuarios"
+  tierAplicado?: string // ej. "11-20 usuarios" — uso interno, NO se muestra al prospecto
 }
 
 export type PuntoInstalacionInput = {
@@ -133,11 +145,22 @@ export type CotizacionResultado =
       ok: true
       userCount: number
       items: ItemCotizacion[]
+      // Totales globales (suma de recurrente + único). Se mantienen por
+      // compatibilidad con consumidores externos que ya leen estos campos.
       subtotalUF: number
       ivaUF: number
       totalUF: number
       ufActual: number
       totalCLP: number
+      // Totales separados por sección (nuevos)
+      subtotalRecurrenteUF: number
+      ivaRecurrenteUF: number
+      totalRecurrenteUF: number
+      totalRecurrenteCLP: number
+      subtotalUnicoUF: number
+      ivaUnicoUF: number
+      totalUnicoUF: number
+      totalUnicoCLP: number
       resumenLegible: string
       mensajeParaProspecto: string
       advertencias: string[]
@@ -158,6 +181,64 @@ async function getUFActual(): Promise<number> {
     /* fall back */
   }
   return 39000 // fallback aproximado mayo 2026
+}
+
+// ─── Helpers de formato ─────────────────────────────────────────────────
+// Formato chileno: "." separador de miles, "," separador decimal.
+// Ej: 40522.38 → "40.522,38"; 3.5 con 1 decimal → "3,5".
+function fmtNumCL(n: number, decimals: number): string {
+  const [entero, dec] = n.toFixed(decimals).split(".")
+  const conMiles = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+  return dec ? `${conMiles},${dec}` : conMiles
+}
+
+// Formato para PRECIOS UNITARIOS: mantiene precisión natural del catálogo
+// (hasta 3 decimales) pero elimina ceros trailing innecesarios.
+// Ej: 0.070 → "0,07"; 0.350 → "0,35"; 8 → "8"; 0.5 → "0,5"
+function fmtUF_precio(n: number): string {
+  if (Number.isInteger(n)) return fmtNumCL(n, 0)
+  const s = fmtNumCL(n, 3)
+  return s.replace(/0+$/, "").replace(/,$/, "")
+}
+
+// Formato para SUBTOTALES/TOTALES/IVA: redondeo a 1 decimal, sin .0 si queda
+// entero (regla acordada con Rodrigo).
+// Ej: 6.961 → "7"; 3.5 → "3,5"; 0.665 → "0,7"; 10.04 → "10"; 10.05 → "10,1"
+function fmtUF_total(n: number): string {
+  const rounded = Math.round(n * 10) / 10
+  if (Number.isInteger(rounded)) return fmtNumCL(rounded, 0)
+  return fmtNumCL(rounded, 1)
+}
+
+// ─── Clasificación de modalidad → sección del preform ────────────────────
+type Seccion = "recurrente" | "unico"
+
+function seccionDe(modalidad: string): Seccion {
+  if (modalidad === "Fijo" || modalidad === "Por usuario" || modalidad === "Arriendo mensual") {
+    return "recurrente"
+  }
+  // "Venta única", "Cobro único"
+  return "unico"
+}
+
+// ─── Formato de cada item según su modalidad ─────────────────────────────
+function formatItem(i: ItemCotizacion): string {
+  if (i.modalidad === "Fijo") {
+    return `- ${i.nombre}: ${fmtUF_total(i.subtotalUF)} UF/mes`
+  }
+  if (i.modalidad === "Por usuario") {
+    return `- ${i.nombre}: ${i.cantidad} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF/mes`
+  }
+  if (i.modalidad === "Arriendo mensual") {
+    return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF/mes`
+  }
+  if (i.modalidad === "Venta única") {
+    return `- ${i.nombre} (compra): ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF`
+  }
+  if (i.modalidad === "Cobro único") {
+    return `- ${i.nombre}: ${fmtUF_total(i.subtotalUF)} UF`
+  }
+  return `- ${i.nombre}: ${i.cantidad} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF`
 }
 
 // ─── Implementación ──────────────────────────────────────────────────────
@@ -198,13 +279,12 @@ export async function cotizarReferencial(args: {
     const rangoError = validarRangoModulo(modulo, userCount)
     if (rangoError) {
       advertencias.push(rangoError)
-      continue // saltar este módulo pero no fallar la cotización entera
+      continue
     }
 
     // Obtener tier aplicable
     const tier = obtenerTierAplicable(modulo, userCount)
     if (!tier) {
-      // Defensa redundante con validarRangoModulo, pero por las dudas
       advertencias.push(`No se encontró tier aplicable para ${modulo.nombre} con ${userCount} trabajadores.`)
       continue
     }
@@ -268,7 +348,6 @@ export async function cotizarReferencial(args: {
     })
     hayHardware = true
 
-    // Aviso si pidió más de la cantidad sugerida (heads-up para Vicky)
     if (cantidad > dispositivo.cantidadSugerida) {
       advertencias.push(
         `Para ${dispositivo.displayName} se está cotizando ${cantidad} unidades. La cotizadora oficial puede aplicar precios distintos a las unidades adicionales (descuento promo aplica solo a las primeras unidades).`
@@ -288,7 +367,6 @@ export async function cotizarReferencial(args: {
       }
     }
 
-    // Pre-validación: si algún punto es no_clasificable, fallar con mensaje útil
     for (const punto of puntosInstalacion) {
       const c = clasificarUbicacion(punto.ubicacion)
       if (c.tipo === "no_clasificable") {
@@ -302,12 +380,10 @@ export async function cotizarReferencial(args: {
       }
     }
 
-    // Inyectar líneas de servicios aplicables (instalación)
     const serviciosAplicables = getServiciosAplicablesConHardware()
     for (const servicio of serviciosAplicables) {
       for (const punto of puntosInstalacion) {
         const clasificacion = clasificarUbicacion(punto.ubicacion)
-        // tipo "no_clasificable" ya filtrado arriba
         if (clasificacion.tipo === "no_clasificable") continue
 
         if (!clasificacion.reconocida) {
@@ -352,80 +428,65 @@ export async function cotizarReferencial(args: {
     }
   }
 
-  // ── Totales ──
+  // ── Totales globales (compatibilidad) ──
   const subtotalUF = items.reduce((sum, i) => sum + i.subtotalUF, 0)
   const ivaUF = subtotalUF * IVA_RATE
   const totalUF = subtotalUF + ivaUF
   const ufActual = await getUFActual()
   const totalCLP = Math.round(totalUF * ufActual)
 
-  // ── Resumen legible para el modelo ──
-  const lineas = items.map((i) => {
-    const sufijoTier = i.tierAplicado ? ` [tier ${i.tierAplicado}]` : ""
-    if (i.modalidad === "Fijo") {
-      return `- ${i.nombre}: ${i.subtotalUF.toFixed(3)} UF (fijo mensual)${sufijoTier}`
-    }
-    if (i.modalidad === "Por usuario") {
-      return `- ${i.nombre}: ${i.cantidad} × ${i.precioUnitarioUF.toFixed(3)} UF = ${i.subtotalUF.toFixed(3)} UF${sufijoTier}`
-    }
-    if (i.modalidad === "Arriendo mensual") {
-      return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${i.precioUnitarioUF.toFixed(3)} UF = ${i.subtotalUF.toFixed(3)} UF/mes`
-    }
-    if (i.modalidad === "Cobro único") {
-      return `- ${i.nombre}: ${i.subtotalUF.toFixed(3)} UF (cobro único)`
-    }
-    return `- ${i.nombre}: ${i.cantidad} × ${i.precioUnitarioUF.toFixed(3)} UF = ${i.subtotalUF.toFixed(3)} UF`
-  })
-  const resumenLegible = lineas.join("\n")
+  // ── Totales separados por sección ──
+  const itemsRecurrentes = items.filter((i) => seccionDe(i.modalidad) === "recurrente")
+  const itemsUnicos = items.filter((i) => seccionDe(i.modalidad) === "unico")
 
-  // ── Mensaje canónico para que Vicky lo pegue literal al prospecto ──
-  //
+  const subtotalRecurrenteUF = itemsRecurrentes.reduce((sum, i) => sum + i.subtotalUF, 0)
+  const ivaRecurrenteUF = subtotalRecurrenteUF * IVA_RATE
+  const totalRecurrenteUF = subtotalRecurrenteUF + ivaRecurrenteUF
+  const totalRecurrenteCLP = Math.round(totalRecurrenteUF * ufActual)
+
+  const subtotalUnicoUF = itemsUnicos.reduce((sum, i) => sum + i.subtotalUF, 0)
+  const ivaUnicoUF = subtotalUnicoUF * IVA_RATE
+  const totalUnicoUF = subtotalUnicoUF + ivaUnicoUF
+  const totalUnicoCLP = Math.round(totalUnicoUF * ufActual)
+
+  // ── Construir mensaje canónico en secciones ──
   // Este string es la ÚNICA fuente de verdad para comunicar precios al usuario.
-  // Vicky no decide formato, no escoge etiquetas, no parafrasea: copia este
-  // bloque tal cual. Si en el futuro cambia el formato de presentación
+  // Vicky copia este bloque tal cual al prospecto. Si cambia el formato
   // (descuentos, planes anuales, etc.), se modifica acá y se propaga a todas
   // las superficies que consuman esta tool.
+  const partes: string[] = []
 
-  // Formato chileno completo: "." separador de miles, "," separador decimal.
-  // Ej: 40522.38 → "40.522,38"; 3.85 → "3,850" (con 3 decimales).
-  const fmtNumCL = (n: number, decimals: number): string => {
-    const [entero, dec] = n.toFixed(decimals).split(".")
-    const conMiles = entero.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
-    return dec ? `${conMiles},${dec}` : conMiles
+  if (itemsRecurrentes.length > 0) {
+    partes.push("Resumen mensual recurrente:")
+    partes.push("")
+    partes.push(itemsRecurrentes.map(formatItem).join("\n"))
+    partes.push("")
+    partes.push(`Subtotal mensual: ${fmtUF_total(subtotalRecurrenteUF)} UF`)
+    partes.push(`IVA (19%): ${fmtUF_total(ivaRecurrenteUF)} UF`)
+    partes.push(`Total mensual con IVA: ${fmtUF_total(totalRecurrenteUF)} UF`)
+    partes.push(
+      `Equivalente: $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes (UF del día: $${fmtNumCL(ufActual, 2)})`,
+    )
   }
 
-  // Items reformateados con formato chileno consistente
-  const itemsCL = items.map((i) => {
-    const sufijoTier = i.tierAplicado ? ` [tier ${i.tierAplicado}]` : ""
-    if (i.modalidad === "Fijo") {
-      return `- ${i.nombre}: ${fmtNumCL(i.subtotalUF, 3)} UF (fijo mensual)${sufijoTier}`
-    }
-    if (i.modalidad === "Por usuario") {
-      return `- ${i.nombre}: ${i.cantidad} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF${sufijoTier}`
-    }
-    if (i.modalidad === "Arriendo mensual") {
-      return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF/mes`
-    }
-    if (i.modalidad === "Cobro único") {
-      return `- ${i.nombre}: ${fmtNumCL(i.subtotalUF, 3)} UF (cobro único)`
-    }
-    return `- ${i.nombre}: ${i.cantidad} × ${fmtNumCL(i.precioUnitarioUF, 3)} UF = ${fmtNumCL(i.subtotalUF, 3)} UF`
-  })
+  if (itemsUnicos.length > 0) {
+    if (partes.length > 0) partes.push("")
+    partes.push("Pago único:")
+    partes.push("")
+    partes.push(itemsUnicos.map(formatItem).join("\n"))
+    partes.push("")
+    partes.push(`Subtotal único: ${fmtUF_total(subtotalUnicoUF)} UF`)
+    partes.push(`IVA (19%): ${fmtUF_total(ivaUnicoUF)} UF`)
+    partes.push(`Total único con IVA: ${fmtUF_total(totalUnicoUF)} UF`)
+    partes.push(`Equivalente único: $${fmtNumCL(totalUnicoCLP, 0)} CLP`)
+  }
 
-  const bloqueTotales = [
-    `Subtotal: ${fmtNumCL(subtotalUF, 3)} UF`,
-    `IVA (19%): ${fmtNumCL(ivaUF, 3)} UF`,
-    `Total con IVA: ${fmtNumCL(totalUF, 3)} UF`,
-    `Equivalente aproximado: $${fmtNumCL(totalCLP, 0)} CLP/mes (UF del día: $${fmtNumCL(ufActual, 2)})`,
-  ].join("\n")
+  const mensajeParaProspecto = partes.join("\n")
 
-  const mensajeParaProspecto = [
-    "Estimado mensual referencial:",
-    "",
-    itemsCL.join("\n"),
-    "",
-    bloqueTotales,
-  ].join("\n")
+  // resumenLegible (uso interno del modelo) usa el mismo formato — una sola
+  // fuente de verdad para que no haya inconsistencias entre lo que ve el
+  // modelo internamente y lo que comunica al prospecto.
+  const resumenLegible = mensajeParaProspecto
 
   return {
     ok: true,
@@ -436,6 +497,14 @@ export async function cotizarReferencial(args: {
     totalUF: Number(totalUF.toFixed(3)),
     ufActual: Number(ufActual.toFixed(2)),
     totalCLP,
+    subtotalRecurrenteUF: Number(subtotalRecurrenteUF.toFixed(3)),
+    ivaRecurrenteUF: Number(ivaRecurrenteUF.toFixed(3)),
+    totalRecurrenteUF: Number(totalRecurrenteUF.toFixed(3)),
+    totalRecurrenteCLP,
+    subtotalUnicoUF: Number(subtotalUnicoUF.toFixed(3)),
+    ivaUnicoUF: Number(ivaUnicoUF.toFixed(3)),
+    totalUnicoUF: Number(totalUnicoUF.toFixed(3)),
+    totalUnicoCLP,
     resumenLegible,
     mensajeParaProspecto,
     advertencias,
