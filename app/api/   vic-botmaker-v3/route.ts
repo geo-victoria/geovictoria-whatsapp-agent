@@ -16,10 +16,6 @@
  *
  * El filtro de teléfonos autorizados vive en el Master Bot de Botmaker —
  * solo derivan a este endpoint los contactos en la lista de pruebas.
- *
- * NO contiene lógica de V1/V2 (sin LEAD_CAPTURED, sin SLOT_CONFIRMED, sin
- * llamadas manuales a Foundry, sin lookup de Zoho). Toda la inteligencia
- * está en el agent-loop + las tools de V3, los mismos que usa la versión web.
  */
 
 import { NextResponse } from "next/server"
@@ -34,8 +30,6 @@ const MAX_INPUT_CHARS = 2000
 const INJECT_RE =
   /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
 
-// Race condition guard: in-memory set para descartar requests concurrentes
-// del mismo contact mientras hay uno en vuelo. Igual al patrón productivo.
 const globalStore = globalThis as unknown as { __vicV3Processing?: Set<string> }
 if (!globalStore.__vicV3Processing) globalStore.__vicV3Processing = new Set()
 const processing = globalStore.__vicV3Processing
@@ -48,21 +42,25 @@ function normalizeContact(raw: string): string {
   return raw.replace(/\D/g, "")
 }
 
+type ToolCallRecord = {
+  name: string
+  ok: boolean
+  output?: unknown
+}
+
+type PdfUrlOutput = {
+  pdfUrl?: string
+}
+
 /**
  * Extrae el pdfUrl de los toolCalls si la conversación incluyó una llamada
- * exitosa a generar_link_cotizadora. Si no, devuelve undefined.
- *
- * El shape de toolCalls viene de runAgentLoop: cada item tiene { name, input, ok, output? }.
- * generar_link_cotizadora retorna en su output un campo pdfUrl cuando la
- * cotización se generó OK.
+ * exitosa a generar_link_cotizadora.
  */
-function extractPdfUrl(
-  toolCalls: Array<{ name: string; ok: boolean; output?: unknown }> | undefined,
-): string | undefined {
+function extractPdfUrl(toolCalls: ToolCallRecord[] | undefined): string | undefined {
   if (!toolCalls) return undefined
   for (const call of toolCalls) {
     if (call.name !== "generar_link_cotizadora" || !call.ok) continue
-    const output = call.output as { pdfUrl?: string } | undefined
+    const output = call.output as PdfUrlOutput | undefined
     if (output?.pdfUrl && typeof output.pdfUrl === "string") {
       return output.pdfUrl
     }
@@ -133,7 +131,7 @@ export async function POST(request: Request): Promise<NextResponse<BotmakerRespo
     })
 
     const reply = result.reply || "Gracias por escribir."
-    const pdfUrl = extractPdfUrl(result.toolCalls)
+    const pdfUrl = extractPdfUrl(result.toolCalls as ToolCallRecord[] | undefined)
     const handoff = result.handoff || false
 
     // ── 7. Persistir el turno ────────────────────────────────────────────
