@@ -8,12 +8,14 @@
  * WhatsApp. Este endpoint:
  *
  *   1. Valida el x-secret (autenticación de Botmaker).
- *   2. Valida que el contact esté en la whitelist de pruebas.
- *   3. Rehidrata el historial conversacional desde Supabase (vic_v3_*).
- *   4. Invoca el mismo runAgentLoop que usa /api/vic-sales-agent-v3.
- *   5. Persiste el turno (user + assistant) en Supabase.
- *   6. Extrae pdfUrl si la conversación generó cotización (tool generar_link_cotizadora).
- *   7. Devuelve { reply, handoff?, pdfUrl? } con el contrato esperado por Botmaker.
+ *   2. Rehidrata el historial conversacional desde Supabase (vic_v3_*).
+ *   3. Invoca el mismo runAgentLoop que usa /api/vic-sales-agent-v3.
+ *   4. Persiste el turno (user + assistant) en Supabase.
+ *   5. Extrae pdfUrl si la conversación generó cotización.
+ *   6. Devuelve { reply, handoff?, pdfUrl? } a Botmaker.
+ *
+ * El filtro de teléfonos autorizados vive en el Master Bot de Botmaker —
+ * solo derivan a este endpoint los contactos en la lista de pruebas.
  *
  * NO contiene lógica de V1/V2 (sin LEAD_CAPTURED, sin SLOT_CONFIRMED, sin
  * llamadas manuales a Foundry, sin lookup de Zoho). Toda la inteligencia
@@ -44,24 +46,6 @@ function getEnv(name: string): string {
 
 function normalizeContact(raw: string): string {
   return raw.replace(/\D/g, "")
-}
-
-/**
- * Verifica si el contact normalizado está en la whitelist de pruebas.
- * Env var VICKY_V3_TEST_WHITELIST: lista de teléfonos separados por coma.
- * Ej: "56944668823,56987654321"
- *
- * Si la whitelist está vacía, NADIE puede usar el bot (fail closed por
- * seguridad — evita exponer V3 accidentalmente a producción).
- */
-function isContactWhitelisted(contact: string): boolean {
-  const whitelist = getEnv("VICKY_V3_TEST_WHITELIST")
-  if (!whitelist) return false
-  const allowed = whitelist
-    .split(",")
-    .map((s) => s.trim().replace(/\D/g, ""))
-    .filter((s) => s.length > 0)
-  return allowed.includes(contact)
 }
 
 /**
@@ -120,15 +104,7 @@ export async function POST(request: Request): Promise<NextResponse<BotmakerRespo
       })
     }
 
-    // ── 3. Validar whitelist ─────────────────────────────────────────────
-    if (!isContactWhitelisted(contact)) {
-      console.log(`[v3-botmaker] Contact ${contact} fuera de whitelist`)
-      return NextResponse.json({
-        reply: "Este bot está en periodo de pruebas restringido. Si necesitas atención de GeoVictoria, escríbenos a soporte@geovictoria.com",
-      })
-    }
-
-    // ── 4. Race condition guard ──────────────────────────────────────────
+    // ── 3. Race condition guard ──────────────────────────────────────────
     if (processing.has(contact)) {
       console.log(`[v3-botmaker] Request concurrente descartado para ${contact}`)
       return NextResponse.json({ reply: "" })
@@ -136,7 +112,7 @@ export async function POST(request: Request): Promise<NextResponse<BotmakerRespo
     processing.add(contact)
     lockedContact = contact
 
-    // ── 5. Validar API key de Anthropic ──────────────────────────────────
+    // ── 4. Validar API key de Anthropic ──────────────────────────────────
     const apiKey = getEnv("ANTHROPIC_API_KEY")
     if (!apiKey) {
       console.error("[v3-botmaker] ANTHROPIC_API_KEY no configurada")
@@ -145,10 +121,10 @@ export async function POST(request: Request): Promise<NextResponse<BotmakerRespo
       })
     }
 
-    // ── 6. Rehidratar historial ──────────────────────────────────────────
+    // ── 5. Rehidratar historial ──────────────────────────────────────────
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
 
-    // ── 7. Ejecutar agent-loop de V3 ─────────────────────────────────────
+    // ── 6. Ejecutar agent-loop de V3 ─────────────────────────────────────
     const result = await runAgentLoop({
       systemPrompt: getSystemPromptV3(),
       history,
@@ -160,12 +136,12 @@ export async function POST(request: Request): Promise<NextResponse<BotmakerRespo
     const pdfUrl = extractPdfUrl(result.toolCalls)
     const handoff = result.handoff || false
 
-    // ── 8. Persistir el turno ────────────────────────────────────────────
+    // ── 7. Persistir el turno ────────────────────────────────────────────
     await appendTurnV3(contact, message, reply).catch((err) => {
       console.error("[v3-botmaker] Error persistiendo turno:", err)
     })
 
-    // ── 9. Responder a Botmaker ──────────────────────────────────────────
+    // ── 8. Responder a Botmaker ──────────────────────────────────────────
     const response: BotmakerResponse = { reply }
     if (handoff) response.handoff = true
     if (pdfUrl) response.pdfUrl = pdfUrl
