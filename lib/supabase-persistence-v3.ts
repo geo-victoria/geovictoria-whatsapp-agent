@@ -9,10 +9,6 @@
  * persistimos:
  *   - Una fila por `contact` en vic_v3_conversations (timestamps).
  *   - El historial de mensajes en vic_v3_messages.
- *
- * Cero campos de lead, cero pendingSlots, cero isSupport. Esos conceptos
- * pertenecen a V1/V2 — en V3 las tools manejan ese estado externamente
- * (Zoho, Cal.com) y no se persiste localmente.
  */
 
 import type { ConversationMessage } from "@/lib/agent-loop"
@@ -27,7 +23,10 @@ const SUPABASE_HEADERS = {
   Prefer: "return=representation",
 }
 
-async function supabaseFetch<T = unknown>(
+type ConversationRow = { id: string }
+type MessageRow = { role: "user" | "assistant"; content: string; at: string }
+
+async function supabaseFetch<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T | null> {
@@ -55,14 +54,12 @@ async function supabaseFetch<T = unknown>(
  * Devuelve el UUID de la conversación.
  */
 async function getOrCreateConversationId(contact: string): Promise<string | null> {
-  // Intentar obtener la existente
-  const existing = await supabaseFetch<Array<{ id: string }>>(
+  const existing = await supabaseFetch<ConversationRow[]>(
     `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
   )
   if (existing && existing.length > 0) return existing[0].id
 
-  // No existe → crear
-  const created = await supabaseFetch<Array<{ id: string }>>(
+  const created = await supabaseFetch<ConversationRow[]>(
     `vic_v3_conversations`,
     {
       method: "POST",
@@ -74,25 +71,19 @@ async function getOrCreateConversationId(contact: string): Promise<string | null
 
 /**
  * Carga el historial de mensajes V3 del contacto, ordenado cronológicamente.
- * Si no existe la conversación, devuelve array vacío (no crea la conversación).
- *
- * Limita a los últimos N mensajes para controlar costos del modelo. El default
- * de 40 viene del endpoint `/api/vic-sales-agent-v3` para mantener consistencia.
+ * Limita a los últimos N mensajes para controlar costos del modelo.
  */
 export async function fetchHistoryV3(
   contact: string,
   limit = 40,
 ): Promise<ConversationMessage[]> {
-  const conv = await supabaseFetch<Array<{ id: string }>>(
+  const conv = await supabaseFetch<ConversationRow[]>(
     `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
   )
   if (!conv || conv.length === 0) return []
 
   const conversationId = conv[0].id
-  // Tomar los últimos N en orden descendente, después invertir para cronológico.
-  const messages = await supabaseFetch
-    Array<{ role: "user" | "assistant"; content: string; at: string }>
-  >(
+  const messages = await supabaseFetch<MessageRow[]>(
     `vic_v3_messages?conversation_id=eq.${conversationId}&select=role,content,at&order=at.desc&limit=${limit}`,
   )
   if (!messages || messages.length === 0) return []
@@ -102,9 +93,7 @@ export async function fetchHistoryV3(
 
 /**
  * Persiste un turno completo (mensaje del usuario + respuesta del asistente)
- * en las tablas V3. Crea la conversación si no existía. Idempotente para
- * race conditions: si el contact aparece en paralelo, el segundo INSERT
- * fallará por el UNIQUE de contact y haremos un re-fetch del id existente.
+ * en las tablas V3. Crea la conversación si no existía.
  */
 export async function appendTurnV3(
   contact: string,
@@ -118,8 +107,6 @@ export async function appendTurnV3(
   }
 
   const now = new Date().toISOString()
-  // Insertar ambos mensajes con timestamps distintos (1ms de diferencia) para
-  // asegurar orden correcto al ordenar por `at`.
   const userAt = now
   const assistantAt = new Date(Date.parse(now) + 1).toISOString()
 
@@ -132,7 +119,6 @@ export async function appendTurnV3(
     ]),
   })
 
-  // Actualizar timestamps de la conversación
   await supabaseFetch(
     `vic_v3_conversations?id=eq.${conversationId}`,
     {
