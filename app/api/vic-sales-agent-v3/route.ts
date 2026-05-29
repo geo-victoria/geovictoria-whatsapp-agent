@@ -107,13 +107,14 @@ async function processInBackground(
     // 1. Cargar historial
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
 
-    // 2. Correr el agent
-    const result = await runAgentLoop({
-      systemPrompt: getSystemPromptV3(contact),
-      history,
-      userMessage: message,
-      apiKey,
-    })
+// 2. Correr el agent
+  const result = await runAgentLoop({
+-   systemPrompt: getSystemPromptV3(),
++   systemPrompt: getSystemPromptV3(contact),
+    history,
+    userMessage: message,
+    apiKey,
+  })
 
     let reply = (result.reply || "").trim()
 
