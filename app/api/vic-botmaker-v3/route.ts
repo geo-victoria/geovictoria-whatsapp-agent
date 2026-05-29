@@ -115,7 +115,25 @@ async function processInBackground(
       apiKey,
     })
 
-    const reply = (result.reply || "").trim()
+    let reply = (result.reply || "").trim()
+
+    // 2.5. Guardrail anti-alucinación de URL del PDF.
+    // Si el reply contiene una URL del cotizador pero NO hubo una
+    // invocación exitosa de generar_link_cotizadora en este turno, el
+    // modelo construyó la URL desde su propio output (alucinación).
+    // Sobrescribimos por un mensaje genérico y lo loggeamos para alertar.
+    const hasCotizacionUrl = /cotizacion\.geovictoria\.com\/pdf\//i.test(reply)
+    const toolCalls = (result.toolCalls || []) as ToolCallRecord[]
+    const realCotizacion = toolCalls.some(
+      (c) => c.name === "generar_link_cotizadora" && c.ok,
+    )
+    if (hasCotizacionUrl && !realCotizacion) {
+      console.error(
+        `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+      )
+      reply =
+        "Disculpa, tuve un problema generando tu cotización formal. ¿Me confirmas otra vez para procesarla?"
+    }
 
     // 3. Persistir turno en Supabase
     await appendTurnV3(contact, message, reply).catch((err) => {
