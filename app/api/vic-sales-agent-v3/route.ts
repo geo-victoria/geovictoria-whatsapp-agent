@@ -1,106 +1,259 @@
 /**
- * Endpoint POST /api/vic-sales-agent-v3
+ * Endpoint POST /api/vic-botmaker-v3
  *
- * Endpoint NUEVO para V3 con tool use. NO toca el flujo productivo
- * (`/api/vic-sales-agent` y `/api/vic-botmaker` siguen funcionando como V2).
+ * Adapter entre Botmaker y el agent-loop de V3.
  *
- * Diseñado para ser consumido por la página web de prueba en /vic-v3.
- * Cuando V3 esté validado, se puede:
- *   1. Reescribir `/api/vic-botmaker` para que llame a este endpoint en
- *      lugar de a `/api/vic-sales-agent`.
- *   2. Apagar el endpoint viejo.
- *   3. Mover este archivo a `/api/vic-sales-agent` reemplazando el de V2.
+ * ─── Arquitectura: async + push (refactor 2026-05-29) ──────────────────
  *
- * Request body:
- *   {
- *     history: [{ role: "user" | "assistant", content: string }, ...],
- *     message: string
- *   }
+ * Antes: el endpoint procesaba el mensaje sincrónamente y devolvía
+ * { reply } a Botmaker. Cuando una cotización formal tardaba más que el
+ * timeout del webhook (~17s), Botmaker reintentaba la request, y la segunda
+ * llamada (descartada como concurrente con reply="") era la que Botmaker
+ * tomaba como respuesta válida — el cliente no recibía nada aunque la
+ * cotización sí se hubiera creado en Zoho.
  *
- * Response:
- *   {
- *     reply: string,
- *     handoff: boolean,
- *     iterations: number,
- *     toolCalls: [{ name, input, ok }, ...]
- *   }
+ * Ahora:
+ *   1. El webhook responde INMEDIATO con reply vacío (always).
+ *   2. Antes del response se dispara el typing indicator de WhatsApp.
+ *   3. El procesamiento real corre en background con after() de next/server.
+ *   4. El reply final se entrega vía push de Botmaker
+ *      (/v2.0/chats-actions/send-messages).
+ *   5. Lock distribuido en Supabase (vic_v3_processing_locks) reemplaza
+ *      el Set<string> en memoria, que no servía en serverless.
  *
- * NOTA: este endpoint NO persiste en Supabase. El historial se mantiene
- * en el cliente (React state). Esto es intencional para el chat de prueba:
- * cada refresh es una conversación nueva, sin contaminar BD de producción.
- *
- * IMPORTANTE: usa getSystemPromptV3() (función) en lugar de SYSTEM_PROMPT_V3
- * (constante) para que la fecha actual se inyecte dinámicamente en cada
- * request. Sin esto, Vicky alucinaría el año al interpretar fechas relativas
- * ("el viernes a las 11") porque su knowledge cutoff no coincide con hoy.
+ * El filtro de teléfonos autorizados sigue viviendo en el Master Bot de
+ * Botmaker — solo derivan a este endpoint los contactos en whitelist.
  */
-import { NextResponse } from "next/server"
+
+import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
-import { getSystemPromptV3 } from "./prompt"
+import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
+import { fetchHistoryV3, appendTurnV3 } from "@/lib/supabase-persistence-v3"
+import { acquireLock, releaseLock, hashMessage } from "@/lib/processing-lock-v3"
+import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
+
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
-type RequestBody = {
-  history?: unknown
-  message?: unknown
+
+// ── Guardrails de seguridad ───────────────────────────────────────────
+const MAX_INPUT_CHARS = 2000
+const INJECT_RE =
+  /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
+
+// ── Tipos ─────────────────────────────────────────────────────────────
+type BotmakerRequest = { contact?: string; message?: string }
+
+type ToolCallRecord = {
+  name: string
+  ok: boolean
+  output?: unknown
 }
-function isValidMessage(m: unknown): m is ConversationMessage {
-  if (!m || typeof m !== "object") return false
-  const obj = m as Record<string, unknown>
-  return (
-    (obj.role === "user" || obj.role === "assistant") &&
-    typeof obj.content === "string" &&
-    obj.content.length > 0
-  )
+
+type PdfUrlOutput = { pdfUrl?: string }
+
+// ── Constantes de UX ──────────────────────────────────────────────────
+const ERROR_FALLBACK_MSG =
+  "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes intentar de nuevo en un momento?"
+
+const GENERIC_ERROR_MSG =
+  "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
+
+// ── Utilidades ────────────────────────────────────────────────────────
+function getEnv(name: string) {
+  return (process.env[name] || "").trim()
 }
-export async function POST(req: Request) {
+
+function normalizeContact(raw: string): string {
+  return raw.replace(/\D/g, "")
+}
+
+/**
+ * Busca en los toolCalls una llamada exitosa a generar_link_cotizadora
+ * y extrae el pdfUrl del output. Se usa solo para logging/observabilidad.
+ */
+function extractPdfUrl(
+  toolCalls: ToolCallRecord[] | undefined,
+): string | undefined {
+  if (!toolCalls) return undefined
+  for (const call of toolCalls) {
+    if (call.name !== "generar_link_cotizadora" || !call.ok) continue
+    const output = call.output as PdfUrlOutput | undefined
+    if (output?.pdfUrl && typeof output.pdfUrl === "string") {
+      return output.pdfUrl
+    }
+  }
+  return undefined
+}
+
+// ── Procesamiento en background ───────────────────────────────────────
+/**
+ * Corre el agent-loop completo y entrega el reply vía push de Botmaker.
+ *
+ * Se invoca con after() de next/server para que Vercel mantenga el
+ * container vivo después de que el webhook ya respondió a Botmaker.
+ *
+ * Pasos:
+ *   1. runAgentLoop completo (puede tardar 20+ seg en cotización formal)
+ *   2. Persistir turno en Supabase
+ *   3. Enviar reply final vía push
+ *   4. Liberar lock (siempre, incluso si hay error)
+ */
+async function processInBackground(
+  contact: string,
+  message: string,
+  apiKey: string,
+): Promise<void> {
   try {
-    const body = (await req.json()) as RequestBody
-    // Validar input
-    const userMessage = typeof body.message === "string" ? body.message.trim() : ""
-    if (!userMessage) {
-      return NextResponse.json({ error: "Falta 'message' en el body." }, { status: 400 })
-    }
-    if (userMessage.length > 2000) {
-      return NextResponse.json({ error: "Mensaje demasiado largo (máx 2000 caracteres)." }, { status: 400 })
-    }
-    const history: ConversationMessage[] = Array.isArray(body.history)
-      ? body.history.filter(isValidMessage)
-      : []
-    // Limitar historial a los últimos 40 mensajes para controlar costos.
-    const trimmedHistory = history.slice(-40)
-    // API key
-    const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      console.error("[vicky-v3] ANTHROPIC_API_KEY no configurada")
-      return NextResponse.json(
-        { error: "Servicio no disponible temporalmente. Intentá de nuevo en unos minutos." },
-        { status: 503 }
-      )
-    }
-    // Ejecutar el agent loop
-    // getSystemPromptV3() inyecta la fecha actual en cada llamada — crítico para
-    // que Vicky pueda interpretar "mañana", "el jueves", etc. con año correcto.
+    // 1. Cargar historial
+    const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
+
+    // 2. Correr el agent
     const result = await runAgentLoop({
-      systemPrompt: getSystemPromptV3(),
-      history: trimmedHistory,
-      userMessage,
+      systemPrompt: getSystemPromptV3(contact),
+      history,
+      userMessage: message,
       apiKey,
     })
-    return NextResponse.json({
-      reply: result.reply,
-      handoff: result.handoff,
-      iterations: result.iterations,
-      toolCalls: result.toolCalls,
-    })
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error("[vicky-v3] Error procesando request:", err)
-    return NextResponse.json(
-      {
-        error: "Error procesando tu mensaje.",
-        detail: process.env.NODE_ENV === "development" ? message : undefined,
-      },
-      { status: 500 }
+
+    let reply = (result.reply || "").trim()
+
+    // 2.5. Guardrail anti-alucinación de URL del PDF.
+    // Si el reply contiene una URL del cotizador pero NO hubo una
+    // invocación exitosa de generar_link_cotizadora en este turno, el
+    // modelo construyó la URL desde su propio output (alucinación).
+    // Sobrescribimos por un mensaje genérico y lo loggeamos para alertar.
+    const hasCotizacionUrl = /cotizacion\.geovictoria\.com\/pdf\//i.test(reply)
+    const toolCalls = (result.toolCalls || []) as ToolCallRecord[]
+    const realCotizacion = toolCalls.some(
+      (c) => c.name === "generar_link_cotizadora" && c.ok,
     )
+    if (hasCotizacionUrl && !realCotizacion) {
+      console.error(
+        `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+      )
+      reply =
+        "Disculpa, tuve un problema generando tu cotización formal. ¿Me confirmas otra vez para procesarla?"
+    }
+
+    // 3. Persistir turno en Supabase
+    await appendTurnV3(contact, message, reply).catch((err) => {
+      console.error("[v3-bg] Error persistiendo turno:", err)
+    })
+
+    // 4. Enviar reply final vía push (solo si hay reply real)
+    if (reply) {
+      const sent = await sendBotmakerMessage(contact, reply)
+      if (!sent) {
+        console.error(
+          `[v3-bg] No se pudo enviar reply final a Botmaker para ${contact}`,
+        )
+      }
+    } else {
+      console.warn(`[v3-bg] Reply vacío para ${contact}, no se envía push`)
+    }
+
+    const pdfUrl = extractPdfUrl(result.toolCalls as ToolCallRecord[])
+    console.log(
+      `[v3-bg] DONE contact=${contact} iters=${result.iterations} tools=${result.toolCalls?.length || 0} pdf=${!!pdfUrl}`,
+    )
+  } catch (err) {
+    console.error(`[v3-bg] Error procesando ${contact}:`, err)
+    // Best-effort: avisar al usuario que hubo un problema
+    try {
+      await sendBotmakerMessage(contact, ERROR_FALLBACK_MSG)
+    } catch {
+      // No-op
+    }
+  } finally {
+    // 5. Siempre liberar el lock
+    await releaseLock(contact).catch(() => {})
   }
+}
+
+// ── Webhook entrypoint ────────────────────────────────────────────────
+export async function POST(request: Request): Promise<NextResponse> {
+  try {
+    // 1. Validar secret
+    const secret = request.headers.get("x-secret") || ""
+    const expected = getEnv("BOTMAKER_SECRET")
+    if (expected && secret !== expected) {
+      return NextResponse.json(
+        { reply: "Unauthorized" },
+        { status: 401 },
+      )
+    }
+
+    // 2. Validar body
+    const body = (await request.json()) as BotmakerRequest
+    const contact = normalizeContact(body.contact || "")
+    const message = (body.message || "").trim()
+
+    if (!contact || !message) {
+      return NextResponse.json(
+        { reply: "Error: contact y message son requeridos." },
+        { status: 400 },
+      )
+    }
+
+    // 3. Guardrails de input (largo + prompt injection)
+    if (message.length > MAX_INPUT_CHARS || INJECT_RE.test(message)) {
+      return NextResponse.json({
+        reply: "El formato del mensaje no es válido.",
+      })
+    }
+
+    // 4. Validar API key de Anthropic
+    const apiKey = getEnv("ANTHROPIC_API_KEY")
+    if (!apiKey) {
+      console.error("[v3-botmaker] ANTHROPIC_API_KEY no configurada")
+      return NextResponse.json({
+        reply:
+          "Servicio no disponible temporalmente. Intenta de nuevo en unos minutos.",
+      })
+    }
+
+    // 5. Adquirir lock distribuido (Supabase)
+    const messageHash = hashMessage(contact, message)
+    const lockResult = await acquireLock(contact, messageHash)
+
+    if (!lockResult.acquired) {
+      if (lockResult.existingHash === messageHash) {
+        console.log(
+          `[v3-botmaker] Retry duplicado para ${contact}, ignorando (mismo hash)`,
+        )
+      } else {
+        console.log(
+          `[v3-botmaker] Mensaje nuevo durante procesamiento para ${contact}, ignorando (el anterior está en curso)`,
+        )
+      }
+      // Respuesta vacía rápida. La primera request entrega vía push.
+      return NextResponse.json({ reply: "" })
+    }
+
+    // 6. Typing indicator (fire-and-forget, antes del response)
+    sendTypingIndicator(contact).catch(() => {})
+
+    // 7. Disparar procesamiento en background con after()
+    console.log(
+      `[v3-botmaker] IN contact=${contact} msg=${JSON.stringify(message.slice(0, 60))}`,
+    )
+    after(processInBackground(contact, message, apiKey))
+
+    // 8. Responder INMEDIATO a Botmaker
+    // El reply real se entrega vía push cuando el background termina.
+    return NextResponse.json({ reply: "" })
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error("[v3-botmaker] Error procesando request:", errMsg)
+    return NextResponse.json({
+      reply: GENERIC_ERROR_MSG,
+    })
+  }
+}
+
+export async function OPTIONS(): Promise<NextResponse> {
+  return new NextResponse(null, {
+    status: 204,
+    headers: { Allow: "OPTIONS, POST" },
+  })
 }
