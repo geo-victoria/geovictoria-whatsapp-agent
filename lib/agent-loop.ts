@@ -39,7 +39,7 @@ export type AgentRunResult = {
   reply: string
   handoff: boolean
   iterations: number
-  toolCalls: Array<{ name: string; input: unknown; ok: boolean }>
+  toolCalls: Array<{ name: string; input: unknown; ok: boolean; output?: unknown }>
   rawTrace: Anthropic.Messages.MessageParam[]
 }
 
@@ -169,6 +169,7 @@ export async function runAgentLoop(params: {
           name: toolName,
           input: toolInput,
           ok: "ok" in result ? result.ok : false,
+          output: result,
         })
 
         if ("ok" in result && result.ok && "handoff" in result && result.handoff) {
