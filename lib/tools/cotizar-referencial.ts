@@ -192,22 +192,18 @@ function fmtNumCL(n: number, decimals: number): string {
   return dec ? `${conMiles},${dec}` : conMiles
 }
 
-// Formato para PRECIOS UNITARIOS: mantiene precisión natural del catálogo
-// (hasta 3 decimales) pero elimina ceros trailing innecesarios.
-// Ej: 0.070 → "0,07"; 0.350 → "0,35"; 8 → "8"; 0.5 → "0,5"
-function fmtUF_precio(n: number): string {
-  if (Number.isInteger(n)) return fmtNumCL(n, 0)
-  const s = fmtNumCL(n, 3)
-  return s.replace(/0+$/, "").replace(/,$/, "")
-}
-
-// Formato para SUBTOTALES/TOTALES/IVA: redondeo a 1 decimal, sin .0 si queda
-// entero (regla acordada con Rodrigo).
-// Ej: 6.961 → "7"; 3.5 → "3,5"; 0.665 → "0,7"; 10.04 → "10"; 10.05 → "10,1"
-function fmtUF_total(n: number): string {
-  const rounded = Math.round(n * 10) / 10
+// Formato para UF (regla unificada acordada con Rodrigo):
+//   - Hasta 2 decimales (redondeo).
+//   - Si queda entero, sin decimales.
+//   - Sin ceros trailing innecesarios.
+//   - Coma decimal (formato chileno).
+// Ej: 5 → "5"; 0.07 → "0,07"; 0.35 → "0,35"; 3.5 → "3,5";
+//     3.85 → "3,85"; 0.7315 → "0,73"; 4.5815 → "4,58"; 7.0 → "7"; 6.961 → "6,96".
+function fmtUF(n: number): string {
+  const rounded = Math.round(n * 100) / 100
   if (Number.isInteger(rounded)) return fmtNumCL(rounded, 0)
-  return fmtNumCL(rounded, 1)
+  const s = fmtNumCL(rounded, 2)
+  return s.replace(/0+$/, "").replace(/,$/, "")
 }
 
 // ─── Clasificación de modalidad → sección del preform ────────────────────
@@ -224,21 +220,21 @@ function seccionDe(modalidad: string): Seccion {
 // ─── Formato de cada item según su modalidad ─────────────────────────────
 function formatItem(i: ItemCotizacion): string {
   if (i.modalidad === "Fijo") {
-    return `- ${i.nombre}: ${fmtUF_total(i.subtotalUF)} UF/mes`
+    return `- ${i.nombre}: ${fmtUF(i.subtotalUF)} UF/mes`
   }
   if (i.modalidad === "Por usuario") {
-    return `- ${i.nombre}: ${i.cantidad} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF/mes`
+    return `- ${i.nombre}: ${i.cantidad} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF/mes`
   }
   if (i.modalidad === "Arriendo mensual") {
-    return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF/mes`
+    return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF/mes`
   }
   if (i.modalidad === "Venta única") {
-    return `- ${i.nombre} (compra): ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF`
+    return `- ${i.nombre} (compra): ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF`
   }
   if (i.modalidad === "Cobro único") {
-    return `- ${i.nombre}: ${fmtUF_total(i.subtotalUF)} UF`
+    return `- ${i.nombre}: ${fmtUF(i.subtotalUF)} UF`
   }
-  return `- ${i.nombre}: ${i.cantidad} × ${fmtUF_precio(i.precioUnitarioUF)} UF = ${fmtUF_total(i.subtotalUF)} UF`
+  return `- ${i.nombre}: ${i.cantidad} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF`
 }
 
 // ─── Implementación ──────────────────────────────────────────────────────
@@ -461,9 +457,9 @@ export async function cotizarReferencial(args: {
     partes.push("")
     partes.push(itemsRecurrentes.map(formatItem).join("\n"))
     partes.push("")
-    partes.push(`Subtotal mensual: ${fmtUF_total(subtotalRecurrenteUF)} UF`)
-    partes.push(`IVA (19%): ${fmtUF_total(ivaRecurrenteUF)} UF`)
-    partes.push(`Total mensual con IVA: ${fmtUF_total(totalRecurrenteUF)} UF`)
+    partes.push(`Subtotal mensual: ${fmtUF(subtotalRecurrenteUF)} UF`)
+    partes.push(`IVA (19%): ${fmtUF(ivaRecurrenteUF)} UF`)
+    partes.push(`Total mensual con IVA: ${fmtUF(totalRecurrenteUF)} UF`)
     partes.push(
       `Equivalente: $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes (UF del día: $${fmtNumCL(ufActual, 2)})`,
     )
@@ -475,9 +471,9 @@ export async function cotizarReferencial(args: {
     partes.push("")
     partes.push(itemsUnicos.map(formatItem).join("\n"))
     partes.push("")
-    partes.push(`Subtotal único: ${fmtUF_total(subtotalUnicoUF)} UF`)
-    partes.push(`IVA (19%): ${fmtUF_total(ivaUnicoUF)} UF`)
-    partes.push(`Total único con IVA: ${fmtUF_total(totalUnicoUF)} UF`)
+    partes.push(`Subtotal único: ${fmtUF(subtotalUnicoUF)} UF`)
+    partes.push(`IVA (19%): ${fmtUF(ivaUnicoUF)} UF`)
+    partes.push(`Total único con IVA: ${fmtUF(totalUnicoUF)} UF`)
     partes.push(`Equivalente único: $${fmtNumCL(totalUnicoCLP, 0)} CLP`)
   }
 
