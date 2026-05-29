@@ -109,7 +109,7 @@ async function processInBackground(
 
     // 2. Correr el agent
     const result = await runAgentLoop({
-      systemPrompt: getSystemPromptV3(),
+      systemPrompt: getSystemPromptV3(contact),
       history,
       userMessage: message,
       apiKey,
