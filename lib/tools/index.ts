@@ -61,6 +61,11 @@ import {
   escalarDescuento,
   type EscalarDescuentoResultado,
 } from "./escalar-descuento"
+import {
+  enviarCertificacionSchema,
+  enviarCertificacion,
+  type EnviarCertificacionResultado,
+} from "./enviar-certificacion"
 
 export const TOOL_SCHEMAS = [
   buscarProspectEnZohoSchema,
@@ -72,6 +77,7 @@ export const TOOL_SCHEMAS = [
   agendarReunionSchema,
   derivarASoporteSchema,
   escalarDescuentoSchema,
+  enviarCertificacionSchema,
 ] as const
 
 export type ToolResult =
@@ -84,6 +90,7 @@ export type ToolResult =
   | ConsultarDisponibilidadHorarioResultado
   | AgendarReunionResultado
   | EscalarDescuentoResultado
+  | EnviarCertificacionResultado
   | { ok: false; error: string }
 
 /**
@@ -120,10 +127,13 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       case "escalar_descuento":
         return await escalarDescuento(input as never)
 
+      case "enviar_certificacion":
+        return await enviarCertificacion()
+
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, escalar_descuento.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, escalar_descuento, enviar_certificacion.`,
         }
     }
   } catch (err: unknown) {
