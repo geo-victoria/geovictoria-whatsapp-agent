@@ -124,8 +124,13 @@ async function processInBackground(
     // Sobrescribimos por un mensaje genérico y lo loggeamos para alertar.
     const hasCotizacionUrl = /cotizacion\.geovictoria\.com\/pdf\//i.test(reply)
     const toolCalls = (result.toolCalls || []) as ToolCallRecord[]
+    // Tanto generar_link_cotizadora como aplicar_siguiente_descuento (commit
+    // del descuento) regeneran un PDF legítimo del cotizador.
     const realCotizacion = toolCalls.some(
-      (c) => c.name === "generar_link_cotizadora" && c.ok,
+      (c) =>
+        (c.name === "generar_link_cotizadora" ||
+          c.name === "aplicar_siguiente_descuento") &&
+        c.ok,
     )
     if (hasCotizacionUrl && !realCotizacion) {
       console.error(
@@ -144,8 +149,14 @@ async function processInBackground(
     // enviarlo.
     const ofreceDescuento =
       /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
+    // Un % de descuento es legítimo si vino de consultar_siguiente_descuento
+    // (negociación, solo lectura) o de aplicar_siguiente_descuento (commit).
+    // En ambos casos el porcentaje lo calcula el servidor, no el modelo.
     const realDescuento = toolCalls.some(
-      (c) => c.name === "aplicar_siguiente_descuento" && c.ok,
+      (c) =>
+        (c.name === "consultar_siguiente_descuento" ||
+          c.name === "aplicar_siguiente_descuento") &&
+        c.ok,
     )
     if (ofreceDescuento && !realDescuento) {
       console.error(

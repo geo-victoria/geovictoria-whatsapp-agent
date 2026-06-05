@@ -124,8 +124,13 @@ async function processInBackground(
     // Sobrescribimos por un mensaje genérico y lo loggeamos para alertar.
     const hasCotizacionUrl = /cotizacion\.geovictoria\.com\/pdf\//i.test(reply)
     const toolCalls = (result.toolCalls || []) as ToolCallRecord[]
+    // Tanto generar_link_cotizadora como aplicar_siguiente_descuento (commit
+    // del descuento) regeneran un PDF legítimo del cotizador.
     const realCotizacion = toolCalls.some(
-      (c) => c.name === "generar_link_cotizadora" && c.ok,
+      (c) =>
+        (c.name === "generar_link_cotizadora" ||
+          c.name === "aplicar_siguiente_descuento") &&
+        c.ok,
     )
     if (hasCotizacionUrl && !realCotizacion) {
       console.error(
@@ -133,6 +138,28 @@ async function processInBackground(
       )
       reply =
         "Disculpa, tuve un problema generando tu cotización formal. ¿Me confirmas otra vez para procesarla?"
+    }
+
+    // 2.6. Guardrail anti-alucinación de descuento.
+    // Si el reply menciona un porcentaje de descuento pero NO hubo una
+    // invocación exitosa de consultar_siguiente_descuento (negociación) ni de
+    // aplicar_siguiente_descuento (commit) en este turno, el modelo inventó el
+    // porcentaje. El % real siempre lo calcula el servidor, así que lo
+    // bloqueamos antes de enviarlo.
+    const ofreceDescuento =
+      /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
+    const realDescuento = toolCalls.some(
+      (c) =>
+        (c.name === "consultar_siguiente_descuento" ||
+          c.name === "aplicar_siguiente_descuento") &&
+        c.ok,
+    )
+    if (ofreceDescuento && !realDescuento) {
+      console.error(
+        `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+      )
+      reply =
+        "Permíteme procesar el descuento en el sistema para confirmarte el porcentaje exacto que puedo aplicarte. ¿Te parece?"
     }
 
     // 3. Persistir turno en Supabase
