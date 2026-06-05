@@ -3,7 +3,7 @@
  *
  * Adapter entre Botmaker y el agent-loop de V3.
  *
- * ─── Arquitectura: async + push (refactor 2026-05-29) ──────────────────
+ * ─── Arquitectura: async + push (refactor 2026-05-29) ──────────────
  *
  * Antes: el endpoint procesaba el mensaje sincrónamente y devolvía
  * { reply } a Botmaker. Cuando una cotización formal tardaba más que el
@@ -35,12 +35,12 @@ import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-// ── Guardrails de seguridad ───────────────────────────────────────────
+// ── Guardrails de seguridad ─────────────────────────────────
 const MAX_INPUT_CHARS = 2000
 const INJECT_RE =
   /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
 
-// ── Tipos ─────────────────────────────────────────────────────────────
+// ── Tipos ───────────────────────────────────────────────────
 type BotmakerRequest = { contact?: string; message?: string }
 
 type ToolCallRecord = {
@@ -51,14 +51,14 @@ type ToolCallRecord = {
 
 type PdfUrlOutput = { pdfUrl?: string }
 
-// ── Constantes de UX ──────────────────────────────────────────────────
+// ── Constantes de UX ─────────────────────────────────────────
 const ERROR_FALLBACK_MSG =
   "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes intentar de nuevo en un momento?"
 
 const GENERIC_ERROR_MSG =
   "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
 
-// ── Utilidades ────────────────────────────────────────────────────────
+// ── Utilidades ────────────────────────────────────────────────
 function getEnv(name: string) {
   return (process.env[name] || "").trim()
 }
@@ -85,7 +85,7 @@ function extractPdfUrl(
   return undefined
 }
 
-// ── Procesamiento en background ───────────────────────────────────────
+// ── Procesamiento en background ───────────────────────────────
 /**
  * Corre el agent-loop completo y entrega el reply vía push de Botmaker.
  *
@@ -137,14 +137,15 @@ async function processInBackground(
 
     // 2.6. Guardrail anti-alucinación de descuento.
     // Si el reply ofrece o confirma un porcentaje de descuento pero NO hubo
-    // una invocación exitosa de escalar_descuento en este turno, el modelo
-    // inventó el porcentaje (p. ej. continuó la secuencia 5→10→15 de memoria).
-    // El descuento real solo cambia cuando escalar_descuento corre y escribe
-    // en Zoho, así que bloqueamos el porcentaje fabricado antes de enviarlo.
+    // una invocación exitosa de aplicar_siguiente_descuento en este turno, el
+    // modelo inventó el porcentaje (p. ej. continuó la secuencia de memoria).
+    // El descuento real solo cambia cuando aplicar_siguiente_descuento corre
+    // y regenera el PDF, así que bloqueamos el porcentaje fabricado antes de
+    // enviarlo.
     const ofreceDescuento =
       /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
     const realDescuento = toolCalls.some(
-      (c) => c.name === "escalar_descuento" && c.ok,
+      (c) => c.name === "aplicar_siguiente_descuento" && c.ok,
     )
     if (ofreceDescuento && !realDescuento) {
       console.error(
@@ -189,7 +190,7 @@ async function processInBackground(
   }
 }
 
-// ── Webhook entrypoint ────────────────────────────────────────────────
+// ── Webhook entrypoint ────────────────────────────────────────
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     // 1. Validar secret

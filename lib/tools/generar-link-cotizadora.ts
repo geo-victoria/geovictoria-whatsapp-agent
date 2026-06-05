@@ -183,6 +183,10 @@ type ItemCotizacion = {
   precioUnitarioUF: number
   subtotalUF: number
   tierAplicado?: string
+  // Solo para tipo "servicio" de instalación: indica si la tarifa aplicada
+  // corresponde a Región Metropolitana o regiones. La cotizadora lo persiste
+  // y lo usa para decidir descuentos de instalación.
+  zonaTarifa?: "RM" | "regiones"
 }
 
 export type LinkCotizadoraResultado =
@@ -347,6 +351,7 @@ export async function generarLinkCotizadora(
           cantidad: 1,
           precioUnitarioUF: precioUF,
           subtotalUF: Number(precioUF.toFixed(3)),
+          zonaTarifa: esRM ? "RM" : "regiones",
         })
       }
     }
