@@ -210,6 +210,34 @@ export type LinkCotizadoraResultado =
     }
   | { ok: false; error: string }
 
+// Consolida líneas idénticas (mismo tipo, id, nombre, modalidad, precio
+// unitario y zona) en una sola fila, sumando cantidad y subtotal. Evita que,
+// por ejemplo, 4 instalaciones idénticas (mismo punto) aparezcan como 4 filas
+// repetidas en la cotización y el PDF. No altera totales.
+function consolidarLineasIguales(items: ItemCotizacion[]): ItemCotizacion[] {
+  const porClave = new Map<string, ItemCotizacion>()
+  const orden: string[] = []
+  for (const it of items) {
+    const clave = [
+      it.tipo,
+      it.id,
+      it.nombre,
+      it.modalidad,
+      it.precioUnitarioUF,
+      it.zonaTarifa ?? "",
+    ].join("||")
+    const existente = porClave.get(clave)
+    if (existente) {
+      existente.cantidad += it.cantidad
+      existente.subtotalUF = Number((existente.subtotalUF + it.subtotalUF).toFixed(3))
+    } else {
+      porClave.set(clave, { ...it })
+      orden.push(clave)
+    }
+  }
+  return orden.map((c) => porClave.get(c) as ItemCotizacion)
+}
+
 export async function generarLinkCotizadora(
   args: LinkCotizadoraInput,
 ): Promise<LinkCotizadoraResultado> {
@@ -359,7 +387,10 @@ export async function generarLinkCotizadora(
 
   if (items.length === 0) return { ok: false, error: "No hay items válidos para cotizar." }
 
-  const subtotalUF = items.reduce((sum, i) => sum + i.subtotalUF, 0)
+  // Consolidar líneas idénticas (p. ej. instalaciones repetidas del mismo punto).
+  const itemsFinal = consolidarLineasIguales(items)
+
+  const subtotalUF = itemsFinal.reduce((sum, i) => sum + i.subtotalUF, 0)
   const ivaUF = subtotalUF * IVA_RATE
   const totalUF = subtotalUF + ivaUF
   const ufActual = await getUFActualSafe()
@@ -389,7 +420,7 @@ export async function generarLinkCotizadora(
           leadId: leadId?.trim() || undefined,
         },
         cotizacion: {
-          items,
+          items: itemsFinal,
           subtotalUF: Number(subtotalUF.toFixed(3)),
           ivaUF: Number(ivaUF.toFixed(3)),
           totalUF: Number(totalUF.toFixed(3)),
