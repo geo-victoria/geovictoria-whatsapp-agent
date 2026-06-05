@@ -154,7 +154,8 @@ async function processInBackground(
     // En ambos casos el porcentaje lo calcula el servidor, no el modelo.
     const realDescuento = toolCalls.some(
       (c) =>
-        (c.name === "consultar_siguiente_descuento" ||
+        (c.name === "consultar_descuento_referencial" ||
+          c.name === "consultar_siguiente_descuento" ||
           c.name === "aplicar_siguiente_descuento") &&
         c.ok,
     )

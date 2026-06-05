@@ -57,6 +57,11 @@ import {
   type AgendarReunionResultado,
 } from "./agendar-reunion"
 import {
+  consultarDescuentoReferencialSchema,
+  consultarDescuentoReferencial,
+  type ConsultarDescuentoReferencialResultado,
+} from "./consultar-descuento-referencial"
+import {
   consultarSiguienteDescuentoSchema,
   consultarSiguienteDescuento,
   type ConsultarSiguienteDescuentoResultado,
@@ -81,6 +86,7 @@ export const TOOL_SCHEMAS = [
   consultarDisponibilidadHorarioSchema,
   agendarReunionSchema,
   derivarASoporteSchema,
+  consultarDescuentoReferencialSchema,
   consultarSiguienteDescuentoSchema,
   aplicarSiguienteDescuentoSchema,
   enviarCertificacionSchema,
@@ -95,6 +101,7 @@ export type ToolResult =
   | RegistrarSolicitudCallbackResultado
   | ConsultarDisponibilidadHorarioResultado
   | AgendarReunionResultado
+  | ConsultarDescuentoReferencialResultado
   | ConsultarSiguienteDescuentoResultado
   | AplicarSiguienteDescuentoResultado
   | EnviarCertificacionResultado
@@ -131,6 +138,9 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       case "derivar_a_soporte":
         return derivarASoporte(input as never)
 
+      case "consultar_descuento_referencial":
+        return await consultarDescuentoReferencial(input as never)
+
       case "consultar_siguiente_descuento":
         return await consultarSiguienteDescuento(input as never)
 
@@ -143,7 +153,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_descuento_referencial, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion.`,
         }
     }
   } catch (err: unknown) {

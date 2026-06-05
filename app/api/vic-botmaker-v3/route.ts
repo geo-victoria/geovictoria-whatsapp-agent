@@ -150,7 +150,8 @@ async function processInBackground(
       /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
     const realDescuento = toolCalls.some(
       (c) =>
-        (c.name === "consultar_siguiente_descuento" ||
+        (c.name === "consultar_descuento_referencial" ||
+          c.name === "consultar_siguiente_descuento" ||
           c.name === "aplicar_siguiente_descuento") &&
         c.ok,
     )

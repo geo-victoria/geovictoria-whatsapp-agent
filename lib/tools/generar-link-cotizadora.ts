@@ -62,7 +62,7 @@ const SECTORES_VALIDOS = [
 
 type SectorValido = typeof SECTORES_VALIDOS[number]
 
-async function getUFActualSafe(): Promise<number> {
+export async function getUFActualSafe(): Promise<number> {
   try {
     const res = await fetch("https://mindicador.cl/api/uf", { cache: "no-store" })
     if (!res.ok) return 0
@@ -148,6 +148,12 @@ export const generarLinkCotizadoraSchema = {
         description:
           "ID de un Lead no convertido en Zoho. Si lo pasas, el endpoint convierte el Lead a Account+Contact+Deal usando los datos nuevos que enviaste (datos nuevos ganan). NO pasar simultáneamente con accountId/contactId.",
       },
+      escalonDescuento: {
+        type: "number" as const,
+        minimum: 0,
+        description:
+          "Descuento negociado en el preform. Si el cliente ACEPTÓ un descuento durante la negociación (consultar_descuento_referencial), pasá el `escalon_actual` que devolvió la consulta que el cliente aceptó: la cotización se generará YA con ese descuento (un solo PDF, con el precio acordado). Si no hubo descuento, omití este campo.",
+      },
     },
     required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "sectorEmpresa", "modulos"],
   },
@@ -172,6 +178,7 @@ export type LinkCotizadoraInput = {
   accountId?: string
   contactId?: string
   leadId?: string
+  escalonDescuento?: number
 }
 
 type ItemCotizacion = {
@@ -238,42 +245,25 @@ function consolidarLineasIguales(items: ItemCotizacion[]): ItemCotizacion[] {
   return orden.map((c) => porClave.get(c) as ItemCotizacion)
 }
 
-export async function generarLinkCotizadora(
-  args: LinkCotizadoraInput,
-): Promise<LinkCotizadoraResultado> {
-  const {
-    empresa, contacto, contactoEmail, contactoTelefono,
-    rutEmpresa, userCount, sectorEmpresa, modulos = [], hardware = [],
-    puntosInstalacion = [],
-    accountId, contactId, leadId,
-  } = args
+export type ConstruirItemsArgs = {
+  userCount: number
+  modulos: string[]
+  hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+  puntosInstalacion?: PuntoInstalacionInput[]
+}
 
-  if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
-    return { ok: false, error: "Faltan campos obligatorios: empresa, contacto, contactoEmail, rutEmpresa." }
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactoEmail)) {
-    return { ok: false, error: `El email '${contactoEmail}' no tiene formato válido.` }
-  }
-  if (!Number.isFinite(userCount) || userCount < 1 || userCount > SCOPE_MAX_USUARIOS) {
-    return { ok: false, error: `userCount=${userCount} fuera de rango 1-${SCOPE_MAX_USUARIOS}.` }
-  }
-  if (!Array.isArray(modulos) || modulos.length === 0) {
-    return { ok: false, error: "modulos requerido (mínimo 1)" }
-  }
-  // Validación: leadId no puede venir con accountId/contactId
-  if (leadId && (accountId || contactId)) {
-    return {
-      ok: false,
-      error: "No pasar leadId junto con accountId/contactId. El leadId convierte el Lead a Account+Contact+Deal; ya no hay IDs previos que reusar.",
-    }
-  }
+export type ConstruirItemsResult =
+  | { ok: true; items: ItemCotizacion[]; advertencias: string[] }
+  | { ok: false; error: string }
 
-  const sectorNormalizado: SectorValido =
-    (SECTORES_VALIDOS as readonly string[]).includes(sectorEmpresa)
-      ? (sectorEmpresa as SectorValido)
-      : "19. Servicios"
+// Arma las líneas de la cotización (módulos + hardware + instalaciones) a partir
+// de los parámetros. Lo usan tanto generar_link_cotizadora (para crear la
+// cotización formal) como consultar_descuento_referencial (para previsualizar el
+// descuento en el preform), de modo que el preview y la cotización final tengan
+// ítems idénticos. Aplica la consolidación de líneas repetidas.
+export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirItemsResult {
+  const { userCount, modulos = [], hardware = [], puntosInstalacion = [] } = args
 
-  // ── Calcular items + totales ──
   const items: ItemCotizacion[] = []
   const advertencias: string[] = []
 
@@ -320,7 +310,6 @@ export async function generarLinkCotizadora(
     hayHardware = true
   }
 
-  // ── Procesar puntos de instalación ──
   if (hayHardware) {
     if (puntosInstalacion.length === 0) {
       return {
@@ -389,6 +378,49 @@ export async function generarLinkCotizadora(
 
   // Consolidar líneas idénticas (p. ej. instalaciones repetidas del mismo punto).
   const itemsFinal = consolidarLineasIguales(items)
+  return { ok: true, items: itemsFinal, advertencias }
+}
+
+export async function generarLinkCotizadora(
+  args: LinkCotizadoraInput,
+): Promise<LinkCotizadoraResultado> {
+  const {
+    empresa, contacto, contactoEmail, contactoTelefono,
+    rutEmpresa, userCount, sectorEmpresa, modulos = [], hardware = [],
+    puntosInstalacion = [],
+    accountId, contactId, leadId, escalonDescuento,
+  } = args
+
+  if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
+    return { ok: false, error: "Faltan campos obligatorios: empresa, contacto, contactoEmail, rutEmpresa." }
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactoEmail)) {
+    return { ok: false, error: `El email '${contactoEmail}' no tiene formato válido.` }
+  }
+  if (!Number.isFinite(userCount) || userCount < 1 || userCount > SCOPE_MAX_USUARIOS) {
+    return { ok: false, error: `userCount=${userCount} fuera de rango 1-${SCOPE_MAX_USUARIOS}.` }
+  }
+  if (!Array.isArray(modulos) || modulos.length === 0) {
+    return { ok: false, error: "modulos requerido (mínimo 1)" }
+  }
+  // Validación: leadId no puede venir con accountId/contactId
+  if (leadId && (accountId || contactId)) {
+    return {
+      ok: false,
+      error: "No pasar leadId junto con accountId/contactId. El leadId convierte el Lead a Account+Contact+Deal; ya no hay IDs previos que reusar.",
+    }
+  }
+
+  const sectorNormalizado: SectorValido =
+    (SECTORES_VALIDOS as readonly string[]).includes(sectorEmpresa)
+      ? (sectorEmpresa as SectorValido)
+      : "19. Servicios"
+
+  // ── Calcular items (mismo builder que usa la negociación referencial) ──
+  const construccion = construirItemsCotizacion({ userCount, modulos, hardware, puntosInstalacion })
+  if (!construccion.ok) return { ok: false, error: construccion.error }
+  const itemsFinal = construccion.items
+  const advertencias = construccion.advertencias
 
   const subtotalUF = itemsFinal.reduce((sum, i) => sum + i.subtotalUF, 0)
   const ivaUF = subtotalUF * IVA_RATE
@@ -419,6 +451,12 @@ export async function generarLinkCotizadora(
           contactId: contactId?.trim() || undefined,
           leadId: leadId?.trim() || undefined,
         },
+        // Descuento negociado en el preform (si el cliente aceptó uno): la
+        // cotización nace ya con ese descuento, sin regenerar PDF después.
+        escalonDescuento:
+          typeof escalonDescuento === "number" && escalonDescuento > 0
+            ? escalonDescuento
+            : undefined,
         cotizacion: {
           items: itemsFinal,
           subtotalUF: Number(subtotalUF.toFixed(3)),
