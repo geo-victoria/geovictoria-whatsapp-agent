@@ -129,15 +129,22 @@ export async function appendTurnV3(
   )
 }
 
-// ── Puntero de negociación del preform (pref_escalon) ──────────────────
+// ── Puntero del Borrador negociado en el preform (pref_*) ──────────────
 //
 // El descuento del preform se negocia en un turno y se acepta en otro. Entre
 // turnos solo persistimos texto, así que el `escalonActual` (el escalón que
 // Vicky ofreció) se perdía y, al aceptar, el modelo pasaba un escalón viejo a
 // generar_link_cotizadora → la cotización nacía con un descuento menor al
-// acordado. Para evitarlo, guardamos el último escalón ofrecido por contacto:
-// consultar_descuento_referencial lo escribe y generar_link_cotizadora lo
-// consume. Se limpia al crear la cotización.
+// acordado.
+//
+// Para evitarlo persistimos por contacto, además del último escalón ofrecido
+// (pref_escalon), los IDs del Borrador que la negociación creó en Zoho
+// (pref_quote_id/deal/account/contact). Así:
+//   - consultar_descuento_referencial crea/actualiza UN solo Borrador en Zoho
+//     (reusando esos IDs entre turnos) con el escalón vigente.
+//   - generar_link_cotizadora reusa ese Borrador para finalizarlo (PDF +
+//     correo + "Enviada") en vez de crear una cotización nueva.
+// Todo se limpia al finalizar la cotización (clearPrefDraft).
 //
 // Convención: pref_escalon usa la forma "siguiente índice" (= escalón + 1),
 // idéntica a `escalonDescuento` de generar_link_cotizadora.
@@ -147,53 +154,103 @@ export async function appendTurnV3(
 // nueva sin negociar).
 const PREF_ESCALON_TTL_MS = 6 * 60 * 60 * 1000 // 6 horas
 
-type PrefEscalonRow = { pref_escalon: number | null; pref_escalon_at: string | null }
+type PrefDraftRow = {
+  pref_escalon: number | null
+  pref_escalon_at: string | null
+  pref_quote_id: string | null
+  pref_deal_id: string | null
+  pref_account_id: string | null
+  pref_contact_id: string | null
+}
 
-/**
- * Lee el escalón negociado vigente para el contacto. Devuelve 0 si no hay,
- * si expiró, o si Supabase no está disponible (fallback no-op).
- */
-export async function getPrefEscalon(contact: string): Promise<number> {
-  if (!contact) return 0
-  const rows = await supabaseFetch<PrefEscalonRow[]>(
-    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=pref_escalon,pref_escalon_at&limit=1`,
-  )
-  if (!rows || rows.length === 0) return 0
-  const { pref_escalon, pref_escalon_at } = rows[0]
-  const value = Number(pref_escalon || 0)
-  if (!Number.isFinite(value) || value <= 0) return 0
-  if (pref_escalon_at) {
-    const age = Date.now() - Date.parse(pref_escalon_at)
-    if (Number.isFinite(age) && age > PREF_ESCALON_TTL_MS) return 0
-  }
-  return value
+export type PrefDraft = {
+  escalon: number
+  quoteId: string
+  dealId: string
+  accountId: string
+  contactId: string
+}
+
+const EMPTY_PREF_DRAFT: PrefDraft = {
+  escalon: 0,
+  quoteId: "",
+  dealId: "",
+  accountId: "",
+  contactId: "",
 }
 
 /**
- * Guarda el escalón ofrecido para el contacto. Crea la conversación si no
- * existía. Best-effort: si falla, no rompe el turno.
+ * Lee el Borrador negociado vigente para el contacto (escalón + IDs de Zoho).
+ * Devuelve valores vacíos (escalon 0, IDs "") si no hay, si expiró el TTL, o si
+ * Supabase no está disponible (fallback no-op).
  */
-export async function setPrefEscalon(contact: string, escalon: number): Promise<void> {
+export async function getPrefDraft(contact: string): Promise<PrefDraft> {
+  if (!contact) return { ...EMPTY_PREF_DRAFT }
+  const rows = await supabaseFetch<PrefDraftRow[]>(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=pref_escalon,pref_escalon_at,pref_quote_id,pref_deal_id,pref_account_id,pref_contact_id&limit=1`,
+  )
+  if (!rows || rows.length === 0) return { ...EMPTY_PREF_DRAFT }
+  const row = rows[0]
+  // TTL: una negociación vieja se descarta por completo (escalón e IDs).
+  if (row.pref_escalon_at) {
+    const age = Date.now() - Date.parse(row.pref_escalon_at)
+    if (Number.isFinite(age) && age > PREF_ESCALON_TTL_MS) return { ...EMPTY_PREF_DRAFT }
+  }
+  const escalon = Number(row.pref_escalon || 0)
+  return {
+    escalon: Number.isFinite(escalon) && escalon > 0 ? escalon : 0,
+    quoteId: row.pref_quote_id || "",
+    dealId: row.pref_deal_id || "",
+    accountId: row.pref_account_id || "",
+    contactId: row.pref_contact_id || "",
+  }
+}
+
+/**
+ * Lee solo el escalón negociado vigente (azúcar sobre getPrefDraft).
+ */
+export async function getPrefEscalon(contact: string): Promise<number> {
+  return (await getPrefDraft(contact)).escalon
+}
+
+/**
+ * Guarda/actualiza el Borrador negociado del contacto. Solo persiste los campos
+ * provistos (los `undefined` se omiten). Refresca siempre pref_escalon_at para
+ * mantener vivo el TTL. Crea la conversación si no existía. Best-effort.
+ */
+export async function setPrefDraft(
+  contact: string,
+  fields: {
+    escalon?: number
+    quoteId?: string
+    dealId?: string
+    accountId?: string
+    contactId?: string
+  },
+): Promise<void> {
   if (!contact) return
-  const value = Math.max(0, Number(escalon || 0))
-  if (!value) return
   const conversationId = await getOrCreateConversationId(contact)
   if (!conversationId) return
+
+  const patch: Record<string, unknown> = { pref_escalon_at: new Date().toISOString() }
+  if (typeof fields.escalon === "number" && fields.escalon > 0) patch.pref_escalon = fields.escalon
+  if (fields.quoteId) patch.pref_quote_id = fields.quoteId
+  if (fields.dealId) patch.pref_deal_id = fields.dealId
+  if (fields.accountId) patch.pref_account_id = fields.accountId
+  if (fields.contactId) patch.pref_contact_id = fields.contactId
+
   await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({
-      pref_escalon: value,
-      pref_escalon_at: new Date().toISOString(),
-    }),
+    body: JSON.stringify(patch),
   })
 }
 
 /**
- * Limpia el escalón negociado del contacto (al crear la cotización formal o al
- * abandonar la negociación). Best-effort.
+ * Limpia el Borrador negociado del contacto (al finalizar la cotización formal
+ * o al abandonar la negociación): escalón + IDs del Borrador. Best-effort.
  */
-export async function clearPrefEscalon(contact: string): Promise<void> {
+export async function clearPrefDraft(contact: string): Promise<void> {
   if (!contact) return
   const conv = await supabaseFetch<ConversationRow[]>(
     `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
@@ -202,6 +259,13 @@ export async function clearPrefEscalon(contact: string): Promise<void> {
   await supabaseFetch(`vic_v3_conversations?id=eq.${conv[0].id}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ pref_escalon: null, pref_escalon_at: null }),
+    body: JSON.stringify({
+      pref_escalon: null,
+      pref_escalon_at: null,
+      pref_quote_id: null,
+      pref_deal_id: null,
+      pref_account_id: null,
+      pref_contact_id: null,
+    }),
   })
 }

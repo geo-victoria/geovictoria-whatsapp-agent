@@ -21,9 +21,9 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
 import {
-  getPrefEscalon,
-  setPrefEscalon,
-  clearPrefEscalon,
+  getPrefDraft,
+  setPrefDraft,
+  clearPrefDraft,
 } from "./supabase-persistence-v3"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
@@ -111,7 +111,15 @@ export async function runAgentLoop(params: {
     toolName: string,
     input: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (toolName !== "generar_link_cotizadora") return input
+    // Ambas tools reciben IDs de Zoho del modelo (generar_link para crear la
+    // cotización; consultar_descuento para registrar el Borrador). En las dos
+    // sanitizamos IDs que no vinieron de un buscar_prospect_en_zoho previo.
+    if (
+      toolName !== "generar_link_cotizadora" &&
+      toolName !== "consultar_descuento_referencial"
+    ) {
+      return input
+    }
     const sanitized: Record<string, unknown> = { ...input }
     const checks: Array<{ field: "accountId" | "contactId" | "leadId"; set: Set<string> }> = [
       { field: "accountId", set: knownIds.accounts },
@@ -168,51 +176,69 @@ export async function runAgentLoop(params: {
         // a creación nueva en lugar de update sobre un ID alucinado.
         const toolInput = sanitizeIdsInToolInput(toolName, rawInput)
 
-        // Capa 3: escalón de descuento del preform persistido por contacto.
+        // Capa 3: Borrador de descuento del preform persistido por contacto.
         // La negociación (ofrecer el siguiente escalón) ocurre en un turno y la
         // aceptación en otro, pero entre turnos solo se persiste texto: el
-        // `escalonActual` real se perdía y el modelo terminaba pasando un
-        // escalón viejo → la negociación no avanzaba o la cotización nacía con
-        // menos descuento del acordado. Acá forzamos el escalón al MÁS ALTO
-        // entre el que pasó el modelo y el último ofrecido (persistido), tanto
-        // al seguir negociando como al crear la cotización.
-        if (contact) {
-          const escalonField =
-            toolName === "generar_link_cotizadora"
-              ? "escalonDescuento"
-              : toolName === "consultar_descuento_referencial"
-                ? "escalonActual"
-                : null
-          if (escalonField) {
-            const persisted = await getPrefEscalon(contact).catch(() => 0)
-            if (persisted > 0) {
+        // `escalonActual` real y los IDs del Borrador en Zoho se perdían, y el
+        // modelo terminaba pasando un escalón viejo → la negociación no avanzaba
+        // o la cotización nacía con menos descuento del acordado. Acá:
+        //   1. Forzamos el escalón al MÁS ALTO entre el del modelo y el último
+        //      ofrecido (persistido): la negociación nunca retrocede.
+        //   2. Inyectamos los IDs del Borrador (_draft*) para que la negociación
+        //      reuse/actualice UN solo Borrador y la aceptación lo finalice, en
+        //      vez de crear cotizaciones nuevas.
+        const usaBorrador =
+          toolName === "consultar_descuento_referencial" ||
+          toolName === "generar_link_cotizadora"
+        if (contact && usaBorrador) {
+          const draft = await getPrefDraft(contact).catch(() => null)
+          if (draft) {
+            const escalonField =
+              toolName === "generar_link_cotizadora" ? "escalonDescuento" : "escalonActual"
+            if (draft.escalon > 0) {
               const modelVal = Math.max(0, Number(toolInput[escalonField] || 0))
-              const elegido = Math.max(modelVal, persisted)
+              const elegido = Math.max(modelVal, draft.escalon)
               if (elegido !== modelVal) {
                 console.warn(
-                  `[agent-loop] Capa 3: ${toolName}.${escalonField} del modelo=${modelVal} < negociado=${persisted}; se usa ${elegido} (contacto ${contact}).`,
+                  `[agent-loop] Capa 3: ${toolName}.${escalonField} del modelo=${modelVal} < negociado=${draft.escalon}; se usa ${elegido} (contacto ${contact}).`,
                 )
               }
               toolInput[escalonField] = elegido
             }
+            // IDs del Borrador (ambas tools leen las mismas claves _draft*).
+            if (draft.quoteId) toolInput._draftQuoteId = draft.quoteId
+            if (draft.dealId) toolInput._draftDealId = draft.dealId
+            if (draft.accountId) toolInput._draftAccountId = draft.accountId
+            if (draft.contactId) toolInput._draftContactId = draft.contactId
           }
         }
 
         const result = await dispatchTool(toolName, toolInput)
 
-        // Capa 3 (persistencia): registrar/limpiar el escalón negociado.
+        // Capa 3 (persistencia): registrar/limpiar el Borrador negociado.
         if (contact && "ok" in result && result.ok) {
           if (
             toolName === "consultar_descuento_referencial" &&
             "escalonActual" in result &&
             typeof result.escalonActual === "number"
           ) {
-            // Guardar el escalón ofrecido para que, si el cliente acepta en un
-            // turno posterior, la cotización nazca con ese descuento.
-            await setPrefEscalon(contact, result.escalonActual).catch(() => {})
+            // Guardar el escalón ofrecido + los IDs del Borrador (si se creó),
+            // para que el siguiente turno reuse el mismo Borrador y, al aceptar,
+            // la cotización nazca con ese descuento.
+            const draftIds =
+              "draft" in result && result.draft && typeof result.draft === "object"
+                ? result.draft
+                : null
+            await setPrefDraft(contact, {
+              escalon: result.escalonActual,
+              quoteId: draftIds?.quoteId,
+              dealId: draftIds?.dealId,
+              accountId: draftIds?.accountId,
+              contactId: draftIds?.contactId,
+            }).catch(() => {})
           } else if (toolName === "generar_link_cotizadora") {
-            // Cotización creada: la negociación del preform se consumió.
-            await clearPrefEscalon(contact).catch(() => {})
+            // Cotización finalizada: la negociación del preform se consumió.
+            await clearPrefDraft(contact).catch(() => {})
           }
         }
 

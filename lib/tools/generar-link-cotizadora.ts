@@ -179,6 +179,14 @@ export type LinkCotizadoraInput = {
   contactId?: string
   leadId?: string
   escalonDescuento?: number
+  // IDs del Borrador negociado en el preform. Los inyecta el agent-loop desde
+  // la persistencia por contacto (no los pasa el modelo). Si vienen, el endpoint
+  // reusa ese Borrador y lo finaliza (PDF + correo + "Enviada") en vez de crear
+  // una cotización nueva.
+  _draftQuoteId?: string
+  _draftDealId?: string
+  _draftAccountId?: string
+  _draftContactId?: string
 }
 
 type ItemCotizacion = {
@@ -389,6 +397,7 @@ export async function generarLinkCotizadora(
     rutEmpresa, userCount, sectorEmpresa, modulos = [], hardware = [],
     puntosInstalacion = [],
     accountId, contactId, leadId, escalonDescuento,
+    _draftQuoteId, _draftDealId, _draftAccountId, _draftContactId,
   } = args
 
   if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
@@ -403,8 +412,20 @@ export async function generarLinkCotizadora(
   if (!Array.isArray(modulos) || modulos.length === 0) {
     return { ok: false, error: "modulos requerido (mínimo 1)" }
   }
-  // Validación: leadId no puede venir con accountId/contactId
-  if (leadId && (accountId || contactId)) {
+  // IDs efectivos: si existe un Borrador negociado (inyectado por el agent-loop),
+  // sus IDs mandan y se reusan para FINALIZAR esa misma cotización en vez de
+  // crear una nueva. El Lead, si lo hubo, ya se convirtió al crear el Borrador,
+  // así que ignoramos leadId cuando hay Borrador.
+  const draftExists = Boolean(_draftQuoteId?.trim() || _draftDealId?.trim())
+  const effAccountId = _draftAccountId?.trim() || accountId?.trim() || undefined
+  const effContactId = _draftContactId?.trim() || contactId?.trim() || undefined
+  const effDealId = _draftDealId?.trim() || undefined
+  const effQuoteId = _draftQuoteId?.trim() || undefined
+  const effLeadId = draftExists ? undefined : leadId?.trim() || undefined
+
+  // Validación: leadId no puede venir con accountId/contactId (salvo que haya
+  // Borrador, donde leadId se descarta arriba).
+  if (effLeadId && (effAccountId || effContactId)) {
     return {
       ok: false,
       error: "No pasar leadId junto con accountId/contactId. El leadId convierte el Lead a Account+Contact+Deal; ya no hay IDs previos que reusar.",
@@ -445,11 +466,15 @@ export async function generarLinkCotizadora(
           userCount,
           sectorEmpresa: sectorNormalizado,
         },
-        // IDs existentes (opcionales): si se pasan, el endpoint reusa o convierte
+        // IDs existentes (opcionales): si se pasan, el endpoint reusa o convierte.
+        // Cuando hay Borrador negociado, también van dealId/quoteId para que el
+        // endpoint finalice esa misma cotización (no cree una nueva).
         existing: {
-          accountId: accountId?.trim() || undefined,
-          contactId: contactId?.trim() || undefined,
-          leadId: leadId?.trim() || undefined,
+          accountId: effAccountId,
+          contactId: effContactId,
+          dealId: effDealId,
+          quoteId: effQuoteId,
+          leadId: effLeadId,
         },
         // Descuento negociado en el preform (si el cliente aceptó uno): la
         // cotización nace ya con ese descuento, sin regenerar PDF después.
