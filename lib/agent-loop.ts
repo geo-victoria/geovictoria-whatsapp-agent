@@ -20,6 +20,11 @@
 
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
+import {
+  getPrefEscalon,
+  setPrefEscalon,
+  clearPrefEscalon,
+} from "./supabase-persistence-v3"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -49,8 +54,14 @@ export async function runAgentLoop(params: {
   userMessage: string
   apiKey: string
   model?: string
+  /**
+   * Teléfono del contacto. Necesario para persistir el escalón de descuento
+   * negociado en el preform entre turnos (ver pref_escalon en
+   * supabase-persistence-v3). Si no se entrega, la persistencia se omite.
+   */
+  contact?: string
 }): Promise<AgentRunResult> {
-  const { systemPrompt, history, userMessage, apiKey, model } = params
+  const { systemPrompt, history, userMessage, apiKey, model, contact } = params
 
   const client = new Anthropic({ apiKey })
   const effectiveModel = model || process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || DEFAULT_MODEL
@@ -157,7 +168,53 @@ export async function runAgentLoop(params: {
         // a creación nueva en lugar de update sobre un ID alucinado.
         const toolInput = sanitizeIdsInToolInput(toolName, rawInput)
 
+        // Capa 3: escalón de descuento del preform persistido por contacto.
+        // La negociación (ofrecer el siguiente escalón) ocurre en un turno y la
+        // aceptación en otro, pero entre turnos solo se persiste texto: el
+        // `escalonActual` real se perdía y el modelo terminaba pasando un
+        // escalón viejo → la negociación no avanzaba o la cotización nacía con
+        // menos descuento del acordado. Acá forzamos el escalón al MÁS ALTO
+        // entre el que pasó el modelo y el último ofrecido (persistido), tanto
+        // al seguir negociando como al crear la cotización.
+        if (contact) {
+          const escalonField =
+            toolName === "generar_link_cotizadora"
+              ? "escalonDescuento"
+              : toolName === "consultar_descuento_referencial"
+                ? "escalonActual"
+                : null
+          if (escalonField) {
+            const persisted = await getPrefEscalon(contact).catch(() => 0)
+            if (persisted > 0) {
+              const modelVal = Math.max(0, Number(toolInput[escalonField] || 0))
+              const elegido = Math.max(modelVal, persisted)
+              if (elegido !== modelVal) {
+                console.warn(
+                  `[agent-loop] Capa 3: ${toolName}.${escalonField} del modelo=${modelVal} < negociado=${persisted}; se usa ${elegido} (contacto ${contact}).`,
+                )
+              }
+              toolInput[escalonField] = elegido
+            }
+          }
+        }
+
         const result = await dispatchTool(toolName, toolInput)
+
+        // Capa 3 (persistencia): registrar/limpiar el escalón negociado.
+        if (contact && "ok" in result && result.ok) {
+          if (
+            toolName === "consultar_descuento_referencial" &&
+            "escalonActual" in result &&
+            typeof result.escalonActual === "number"
+          ) {
+            // Guardar el escalón ofrecido para que, si el cliente acepta en un
+            // turno posterior, la cotización nazca con ese descuento.
+            await setPrefEscalon(contact, result.escalonActual).catch(() => {})
+          } else if (toolName === "generar_link_cotizadora") {
+            // Cotización creada: la negociación del preform se consumió.
+            await clearPrefEscalon(contact).catch(() => {})
+          }
+        }
 
         // Si la tool fue buscar_prospect_en_zoho, registrar los IDs que
         // devolvió como "válidos" para futuras validaciones de Capa 2.

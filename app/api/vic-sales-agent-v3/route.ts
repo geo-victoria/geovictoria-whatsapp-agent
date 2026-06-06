@@ -113,6 +113,7 @@ async function processInBackground(
       history,
       userMessage: message,
       apiKey,
+      contact,
     })
 
     let reply = (result.reply || "").trim()

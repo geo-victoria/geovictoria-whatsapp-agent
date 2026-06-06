@@ -128,3 +128,80 @@ export async function appendTurnV3(
     },
   )
 }
+
+// ── Puntero de negociación del preform (pref_escalon) ──────────────────
+//
+// El descuento del preform se negocia en un turno y se acepta en otro. Entre
+// turnos solo persistimos texto, así que el `escalonActual` (el escalón que
+// Vicky ofreció) se perdía y, al aceptar, el modelo pasaba un escalón viejo a
+// generar_link_cotizadora → la cotización nacía con un descuento menor al
+// acordado. Para evitarlo, guardamos el último escalón ofrecido por contacto:
+// consultar_descuento_referencial lo escribe y generar_link_cotizadora lo
+// consume. Se limpia al crear la cotización.
+//
+// Convención: pref_escalon usa la forma "siguiente índice" (= escalón + 1),
+// idéntica a `escalonDescuento` de generar_link_cotizadora.
+
+// Descartar negociaciones abandonadas: si el último escalón se ofreció hace
+// más de esto, se ignora (el cliente probablemente arrancó una cotización
+// nueva sin negociar).
+const PREF_ESCALON_TTL_MS = 6 * 60 * 60 * 1000 // 6 horas
+
+type PrefEscalonRow = { pref_escalon: number | null; pref_escalon_at: string | null }
+
+/**
+ * Lee el escalón negociado vigente para el contacto. Devuelve 0 si no hay,
+ * si expiró, o si Supabase no está disponible (fallback no-op).
+ */
+export async function getPrefEscalon(contact: string): Promise<number> {
+  if (!contact) return 0
+  const rows = await supabaseFetch<PrefEscalonRow[]>(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=pref_escalon,pref_escalon_at&limit=1`,
+  )
+  if (!rows || rows.length === 0) return 0
+  const { pref_escalon, pref_escalon_at } = rows[0]
+  const value = Number(pref_escalon || 0)
+  if (!Number.isFinite(value) || value <= 0) return 0
+  if (pref_escalon_at) {
+    const age = Date.now() - Date.parse(pref_escalon_at)
+    if (Number.isFinite(age) && age > PREF_ESCALON_TTL_MS) return 0
+  }
+  return value
+}
+
+/**
+ * Guarda el escalón ofrecido para el contacto. Crea la conversación si no
+ * existía. Best-effort: si falla, no rompe el turno.
+ */
+export async function setPrefEscalon(contact: string, escalon: number): Promise<void> {
+  if (!contact) return
+  const value = Math.max(0, Number(escalon || 0))
+  if (!value) return
+  const conversationId = await getOrCreateConversationId(contact)
+  if (!conversationId) return
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      pref_escalon: value,
+      pref_escalon_at: new Date().toISOString(),
+    }),
+  })
+}
+
+/**
+ * Limpia el escalón negociado del contacto (al crear la cotización formal o al
+ * abandonar la negociación). Best-effort.
+ */
+export async function clearPrefEscalon(contact: string): Promise<void> {
+  if (!contact) return
+  const conv = await supabaseFetch<ConversationRow[]>(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
+  )
+  if (!conv || conv.length === 0) return
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conv[0].id}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ pref_escalon: null, pref_escalon_at: null }),
+  })
+}
