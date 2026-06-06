@@ -193,6 +193,10 @@ async function processInBackground(
       // No-op
     }
   } finally {
+    // Apagar el "escribiendo..." al terminar: la respuesta de Vicky ya se
+    // entregó (o se envió el mensaje de error), así el indicador no queda
+    // colgado y no aparece después del mensaje de Vicky.
+    sendTypingIndicator(contact, false).catch(() => {})
     // 5. Siempre liberar el lock
     await releaseLock(contact).catch(() => {})
   }

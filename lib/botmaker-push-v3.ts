@@ -90,13 +90,17 @@ export async function sendBotmakerMessage(
 }
 
 /**
- * Envía el indicador "Vicky está escribiendo..." al cliente.
+ * Activa/desactiva el indicador "Vicky está escribiendo..." del cliente.
  * Best-effort: no espera respuesta crítica, ignora errores.
  *
- * Útil para informar al cliente que el bot está procesando, especialmente
- * cuando el procesamiento toma varios segundos (cotización formal).
+ * @param isTyping true para mostrar "escribiendo..." (al recibir un mensaje del
+ *   usuario, antes de responder); false para apagarlo (una vez que Vicky ya
+ *   respondió), así el indicador no queda colgado después del mensaje de Vicky.
  */
-export async function sendTypingIndicator(contactId: string): Promise<void> {
+export async function sendTypingIndicator(
+  contactId: string,
+  isTyping = true,
+): Promise<void> {
   if (!BM_TOKEN || !BM_CHANNEL_V3 || !contactId) return
   const cleanContact = normalizeContactId(contactId)
   try {
@@ -106,7 +110,7 @@ export async function sendTypingIndicator(contactId: string): Promise<void> {
       body: JSON.stringify({
         channelId: BM_CHANNEL_V3,
         contactId: cleanContact,
-        typing: true,
+        typing: isTyping,
       }),
       cache: "no-store",
     })
