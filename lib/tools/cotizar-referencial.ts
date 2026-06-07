@@ -477,6 +477,19 @@ export async function cotizarReferencial(args: {
     partes.push(`Equivalente único: $${fmtNumCL(totalUnicoCLP, 0)} CLP`)
   }
 
+  // Aclaración de base: el "pago inicial" al aceptar junta el pago único + el
+  // primer mes del plan por adelantado. Sin esto, el cliente ve el "único"
+  // separado del mensual y luego percibe que el pago al aceptar "sube".
+  if (itemsUnicos.length > 0 && itemsRecurrentes.length > 0) {
+    partes.push("")
+    partes.push(
+      `Al aceptar, el pago inicial junta el pago único + el primer mes del plan por adelantado: $${fmtNumCL(
+        totalUnicoCLP + totalRecurrenteCLP,
+        0,
+      )} CLP. Desde el segundo mes pagas $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes.`,
+    )
+  }
+
   const mensajeParaProspecto = partes.join("\n")
 
   // resumenLegible (uso interno del modelo) usa el mismo formato — una sola
