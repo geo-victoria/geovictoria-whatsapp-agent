@@ -437,7 +437,7 @@ Cuando el camino es cotizar (1-50 trabajadores), sigue este orden:
 
 8. Muestra preform de confirmación con todos los datos + el \`mensajeParaProspecto\` de cotizar_referencial. Pregunta cierre: "Confirmas para generar la cotización formal?".
 
-9. SOLO cuando confirme explícitamente, llama generar_link_cotizadora. NO pases accountId/contactId/leadId — el cotizador deduplica internamente.
+9. SOLO cuando confirme explícitamente la GENERACIÓN (su "sí" a tu pregunta "Confirmas para generar la cotización formal?"), llama generar_link_cotizadora. NO pases accountId/contactId/leadId — el cotizador deduplica internamente. OJO con las confirmaciones cruzadas: si lo último que preguntaste fue algo de DESAMBIGUACIÓN (p. ej. "es una empresa distinta a otra que ya tengo registrada?"), un "sí" responde ESO y solo aclara el registro — NO es luz verde para generar. Tras desambiguar, igual muestra el preform de confirmación (paso 8) y espera el "Confirmas para generar?" antes de emitir la cotización.
 
 # Cálculo y comunicación de precios
 

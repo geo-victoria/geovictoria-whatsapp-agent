@@ -58,6 +58,44 @@ const ERROR_FALLBACK_MSG =
 const GENERIC_ERROR_MSG =
   "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
 
+// Circuit-breaker (C): tras varios errores seguidos en una misma conversación,
+// escalamos a humano UNA vez en lugar de repetir el fallback en loop (en
+// producción este loop llegó a 60 mensajes idénticos).
+const ESCALADA_ERROR_MSG =
+  "Disculpa, sigo teniendo un problema técnico. Ya le avisé a un ejecutivo para que se contacte contigo a la brevedad. 🙏"
+
+// Saneador anti-voseo (D): la regla del prompt ya pide español chileno (tuteo),
+// pero el modelo se escapa de forma intermitente ("Recordá", "Acá"). Esta capa
+// determinista normaliza los voseos/argentinismos más comunes en el reply de
+// salida, antes de persistir y enviar, preservando la mayúscula inicial. Usa
+// límites Unicode (\p{L}) porque \b no funciona junto a vocales acentuadas.
+const VOSEO_MAP: [RegExp, string][] = [
+  [/(?<!\p{L})record[aá](?!\p{L})/giu, "recuerda"],
+  [/(?<!\p{L})ac[aá](?!\p{L})/giu, "aquí"],
+  [/(?<!\p{L})pod[eé]s(?!\p{L})/giu, "puedes"],
+  [/(?<!\p{L})ten[eé]s(?!\p{L})/giu, "tienes"],
+  [/(?<!\p{L})quer[eé]s(?!\p{L})/giu, "quieres"],
+  [/(?<!\p{L})sab[eé]s(?!\p{L})/giu, "sabes"],
+  [/(?<!\p{L})hac[eé]s(?!\p{L})/giu, "haces"],
+  [/(?<!\p{L})mir[aá](?!\p{L})/giu, "mira"],
+  [/(?<!\p{L})fijate(?!\p{L})/giu, "fíjate"],
+  [/(?<!\p{L})avisame(?!\p{L})/giu, "avísame"],
+  [/(?<!\p{L})contame(?!\p{L})/giu, "cuéntame"],
+]
+
+function sanitizarVoseo(texto: string): string {
+  if (!texto) return texto
+  let out = texto
+  for (const [re, repl] of VOSEO_MAP) {
+    out = out.replace(re, (match) =>
+      match[0] === match[0].toUpperCase()
+        ? repl.charAt(0).toUpperCase() + repl.slice(1)
+        : repl,
+    )
+  }
+  return out
+}
+
 // ── Utilidades ────────────────────────────────────────────────────────
 function getEnv(name: string) {
   return (process.env[name] || "").trim()
@@ -195,6 +233,10 @@ async function processInBackground(
       }
     }
 
+    // 2.7. Saneador anti-voseo determinista (por si el modelo se escapó del
+    // tuteo chileno pese a la regla del prompt).
+    reply = sanitizarVoseo(reply)
+
     // 3. Persistir turno en Supabase
     await appendTurnV3(contact, message, reply).catch((err) => {
       console.error("[v3-bg] Error persistiendo turno:", err)
@@ -218,9 +260,35 @@ async function processInBackground(
     )
   } catch (err) {
     console.error(`[v3-bg] Error procesando ${contact}:`, err)
-    // Best-effort: avisar al usuario que hubo un problema
+    // Circuit-breaker (C): si los turnos anteriores ya fueron mensajes de error,
+    // no repitas el mismo fallback en loop (en producción llegó a 60×). Tras 2
+    // errores seguidos, escala a un humano UNA vez y luego silencia.
     try {
-      await sendBotmakerMessage(contact, ERROR_FALLBACK_MSG)
+      const recientes = await fetchHistoryV3(contact, 6).catch(() => [])
+      const esError = (t?: string) =>
+        t === ERROR_FALLBACK_MSG || t === GENERIC_ERROR_MSG || t === ESCALADA_ERROR_MSG
+      const ultimosAsistente = recientes
+        .filter((m) => m.role === "assistant")
+        .slice(-2)
+        .map((m) => m.content?.trim())
+      const dosErroresSeguidos =
+        ultimosAsistente.length >= 2 && ultimosAsistente.every(esError)
+      let errReply: string
+      if (dosErroresSeguidos) {
+        if (ultimosAsistente[ultimosAsistente.length - 1] === ESCALADA_ERROR_MSG) {
+          console.error(
+            `[v3-bg] CIRCUIT_BREAKER contact=${contact}: errores en loop, silenciando (ya se escaló).`,
+          )
+          return
+        }
+        errReply = ESCALADA_ERROR_MSG
+      } else {
+        errReply = ERROR_FALLBACK_MSG
+      }
+      // Persistimos el mensaje de error para que el próximo turno pueda detectar
+      // el loop (antes no se persistía y el contador nunca avanzaba).
+      await appendTurnV3(contact, message, errReply).catch(() => {})
+      await sendBotmakerMessage(contact, errReply).catch(() => {})
     } catch {
       // No-op
     }
