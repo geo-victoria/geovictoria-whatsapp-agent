@@ -225,6 +225,15 @@ async function processInBackground(
         )
         reply =
           "Para no darte más vueltas con los números: te dejo el mejor precio que te ofrecí y te paso la cotización formal, o si prefieres te contacto con un ejecutivo para revisar el precio. Cómo prefieres?"
+      } else if (committedRecPct >= 30) {
+        // En el tope ya no hay margen y el prompt prohíbe volver a llamar la
+        // tool: en vez de la muletilla "permíteme procesar el descuento" (paso
+        // intermedio que sobra acá), declina firme en UNA sola frase.
+        console.error(
+          `[v3-bg] TOPE_DECLINE_LIMPIO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+        )
+        reply =
+          "Ese es el mejor precio que te puedo ofrecer: 30% de descuento en el plan mensual. Lo tomas así, o prefieres que te contacte un ejecutivo para revisarlo?"
       } else {
         console.error(
           `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
