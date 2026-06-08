@@ -28,7 +28,7 @@
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
-import { fetchHistoryV3, appendTurnV3 } from "@/lib/supabase-persistence-v3"
+import { fetchHistoryV3, appendTurnV3, getPrefEscalon } from "@/lib/supabase-persistence-v3"
 import { acquireLock, releaseLock, hashMessage } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 
@@ -142,11 +142,16 @@ async function processInBackground(
     }
 
     // 2.6. Guardrail anti-alucinación de descuento.
-    // Si el reply menciona un porcentaje de descuento pero NO hubo una
-    // invocación exitosa de consultar_siguiente_descuento (negociación) ni de
-    // aplicar_siguiente_descuento (commit) en este turno, el modelo inventó el
-    // porcentaje. El % real siempre lo calcula el servidor, así que lo
-    // bloqueamos antes de enviarlo.
+    // Si el reply menciona un % de descuento pero NO hubo una tool de descuento
+    // exitosa en este turno, lo normal es que el modelo lo inventó. Pero hay dos
+    // casos legítimos que NO debemos bloquear, y un loop que debemos cortar:
+    //   (B1) el cliente acepta/reconfirma un % que YA está negociado/comiteado
+    //        (incluido el tope) → dejar pasar; bloquear solo si el % es MAYOR al
+    //        ya comiteado (eso sí sería avanzar sin pasar por el servidor).
+    //   (B2) si el turno anterior ya fue la muletilla, NO repetirla: cerrar
+    //        hacia una decisión / derivación en vez de quedar pegados en loop.
+    const MULETILLA_DESCUENTO =
+      "Permíteme procesar el descuento en el sistema para confirmarte el porcentaje exacto que puedo aplicarte. ¿Te parece?"
     const ofreceDescuento =
       /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
     const realDescuento = toolCalls.some(
@@ -156,12 +161,38 @@ async function processInBackground(
           c.name === "aplicar_siguiente_descuento") &&
         c.ok,
     )
-    if (ofreceDescuento && !realDescuento) {
-      console.error(
-        `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
-      )
-      reply =
-        "Permíteme procesar el descuento en el sistema para confirmarte el porcentaje exacto que puedo aplicarte. ¿Te parece?"
+    // (B1) ¿El % mencionado ya está negociado/comiteado para este contacto?
+    // pref_escalon es el "siguiente índice" (idx+1); el % recurrente comiteado
+    // queda determinado por él. Reconfirmar ese % (o uno menor, o el de
+    // instalación) es legítimo; reclamar uno MAYOR sin tool no lo es.
+    const pctMatch = reply.match(/(\d+)\s*%/)
+    const pctEnReply = pctMatch ? Number(pctMatch[1]) : null
+    const prefEscalon = await getPrefEscalon(contact).catch(() => 0)
+    const committedRecPct = prefEscalon >= 3 ? Math.min(30, (prefEscalon - 1) * 5) : 0
+    const pctYaNegociado =
+      pctEnReply !== null &&
+      prefEscalon > 0 &&
+      (pctEnReply <= committedRecPct || pctEnReply === 50 || pctEnReply === 25)
+
+    if (ofreceDescuento && !realDescuento && !pctYaNegociado) {
+      const ultimoAsistente = [...history]
+        .reverse()
+        .find((m) => m.role === "assistant")
+        ?.content?.trim()
+      if (ultimoAsistente === MULETILLA_DESCUENTO) {
+        // (B2) Ya pedimos "procesar el descuento" el turno anterior: romper el
+        // loop cerrando hacia una decisión o derivación.
+        console.error(
+          `[v3-bg] LOOP_MULETILLA_ROTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+        )
+        reply =
+          "Para no darte más vueltas con los números: te dejo el mejor precio que te ofrecí y te paso la cotización formal, o si prefieres te contacto con un ejecutivo para revisar el precio. Cómo prefieres?"
+      } else {
+        console.error(
+          `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+        )
+        reply = MULETILLA_DESCUENTO
+      }
     }
 
     // 3. Persistir turno en Supabase

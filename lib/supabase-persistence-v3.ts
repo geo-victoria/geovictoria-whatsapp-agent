@@ -233,7 +233,14 @@ export async function setPrefDraft(
   if (!conversationId) return
 
   const patch: Record<string, unknown> = { pref_escalon_at: new Date().toISOString() }
-  if (typeof fields.escalon === "number" && fields.escalon > 0) patch.pref_escalon = fields.escalon
+  if (typeof fields.escalon === "number" && fields.escalon > 0) {
+    // Monotonicidad: el escalón negociado NUNCA retrocede. Si el modelo reinició
+    // la negociación en un escalón menor (p. ej. tras un loop de muletilla en el
+    // tope), no degradamos el valor ya alcanzado — esa degradación era la causa
+    // raíz de que un 30% aceptado terminara persistido como 20%.
+    const actual = await getPrefEscalon(contact).catch(() => 0)
+    patch.pref_escalon = Math.max(actual, fields.escalon)
+  }
   if (fields.quoteId) patch.pref_quote_id = fields.quoteId
   if (fields.dealId) patch.pref_deal_id = fields.dealId
   if (fields.accountId) patch.pref_account_id = fields.accountId

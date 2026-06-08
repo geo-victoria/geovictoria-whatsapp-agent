@@ -182,7 +182,14 @@ export const consultarDescuentoReferencialSchema = {
         type: "number" as const,
         minimum: 0,
         description:
-          "Cuántos escalones ya ofreciste en esta negociación. 0 la primera vez. En las siguientes, pasá el `escalonActual` que devolvió la consulta anterior.",
+          "Cuántos escalones ya ofreciste en esta negociación. 0 la primera vez. En las siguientes, pasa el `escalonActual` que devolvió la consulta anterior.",
+      },
+      pctObjetivo: {
+        type: "number" as const,
+        minimum: 0,
+        maximum: 30,
+        description:
+          "% de descuento sobre el plan mensual que el cliente pidió EXPLÍCITAMENTE (ej.: 'me dejas un 20%?' → 20; 'dame el máximo' → 30). El servidor trepa la escalera en UNA sola llamada hasta alcanzar ese % o el tope, así no tienes que volver a llamar escalón por escalón. Omitir si el cliente solo dice 'algo de descuento' sin un número.",
       },
       // ── Identidad del preform (opcional) ──
       // Con estos datos la negociación crea/actualiza la cotización Borrador en
@@ -231,6 +238,7 @@ export const consultarDescuentoReferencialSchema = {
 
 export type ConsultarDescuentoReferencialInput = ConstruirItemsArgs & {
   escalonActual?: number
+  pctObjetivo?: number
   // Identidad del preform (opcional): habilita crear/actualizar el Borrador.
   empresa?: string
   contacto?: string
@@ -293,6 +301,7 @@ export async function consultarDescuentoReferencial(
 
   const ufActual = await getUFActualSafe()
   const escalonActual = Math.max(0, Number(args.escalonActual || 0))
+  const pctObjetivo = Math.max(0, Number(args.pctObjetivo || 0))
 
   try {
     const response = await fetch(
@@ -308,6 +317,7 @@ export async function consultarDescuentoReferencial(
         body: JSON.stringify({
           cotizacion: { items: construccion.items, ufActual },
           escalonActual,
+          pctObjetivo,
         }),
         cache: "no-store",
       },
