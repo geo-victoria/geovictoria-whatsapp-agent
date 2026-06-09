@@ -116,6 +116,9 @@ function normalizar(s: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    // Puntuaci\u00f3n a espacio: "Providencia, Santiago" / "Providencia (Santiago)"
+    // colapsan a "providencia santiago" para poder matchear sub-frases.
+    .replace(/[().,;/]/g, " ")
     .trim()
     .replace(/\s+/g, " ")
 }
@@ -248,6 +251,27 @@ export function clasificarUbicacion(input: string): ClasificacionUbicacion {
   // 4. Match en regiones/ciudades conocidas
   if (ALIAS_REGIONES_NORM.has(target)) {
     return { tipo: "regiones", reconocida: true, canonico: target }
+  }
+
+  // 4.5. Input COMPUESTO (ej. "Providencia, Santiago", "Las Condes - RM"): si el
+  // match exacto falló, busca comuna/alias como sub-frase. Si aparece una
+  // ciudad/región NO-RM conocida, ESA manda (ej. "San Pedro de Atacama" →
+  // regiones); si no, una comuna o alias RM lo clasifica como RM.
+  const acolchado = ` ${target} `
+  for (const r of ALIAS_REGIONES_NORM) {
+    if (acolchado.includes(` ${r} `)) {
+      return { tipo: "regiones", reconocida: true, canonico: r }
+    }
+  }
+  for (const c of COMUNAS_RM_NORM) {
+    if (acolchado.includes(` ${c} `)) {
+      return { tipo: "RM", reconocida: true, canonico: c }
+    }
+  }
+  for (const a of ALIAS_RM_NORM) {
+    if (acolchado.includes(` ${a} `)) {
+      return { tipo: "RM", reconocida: true, canonico: a }
+    }
   }
 
   // 5. Fallback: formato razonable de localidad chilena no listada

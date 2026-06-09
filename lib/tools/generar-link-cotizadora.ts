@@ -26,6 +26,7 @@ import {
   validarRangoModulo,
 } from "@/lib/catalogo"
 import { clasificarUbicacion } from "@/lib/geografia"
+import { getUFActual } from "@/lib/uf"
 
 const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -62,15 +63,10 @@ const SECTORES_VALIDOS = [
 
 type SectorValido = typeof SECTORES_VALIDOS[number]
 
+// Se mantiene el nombre por compatibilidad con quien la importa, pero ahora
+// delega en la fuente única con caché (lib/uf.ts): mismo valor en todo el flujo.
 export async function getUFActualSafe(): Promise<number> {
-  try {
-    const res = await fetch("https://mindicador.cl/api/uf", { cache: "no-store" })
-    if (!res.ok) return 0
-    const data = await res.json() as { serie?: Array<{ valor: number }> }
-    return data?.serie?.[0]?.valor || 0
-  } catch {
-    return 0
-  }
+  return getUFActual()
 }
 
 export const generarLinkCotizadoraSchema = {

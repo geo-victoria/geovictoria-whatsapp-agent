@@ -44,6 +44,7 @@ import {
   validarRangoModulo,
 } from "@/lib/catalogo"
 import { clasificarUbicacion } from "@/lib/geografia"
+import { getUFActual } from "@/lib/uf"
 
 const IVA_RATE = 0.19
 const SCOPE_MAX_USUARIOS = 50
@@ -167,21 +168,9 @@ export type CotizacionResultado =
     }
   | { ok: false; error: string }
 
-// ─── UF actual desde mindicador.cl ───────────────────────────────────────
-async function getUFActual(): Promise<number> {
-  try {
-    const res = await fetch("https://mindicador.cl/api/uf", {
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    })
-    const data = await res.json()
-    const valor = data?.serie?.[0]?.valor
-    if (typeof valor === "number" && valor > 0) return valor
-  } catch {
-    /* fall back */
-  }
-  return 39000 // fallback aproximado mayo 2026
-}
+// ─── UF actual: fuente única compartida (lib/uf.ts) ──────────────────────
+// getUFActual se importa de @/lib/uf para que estimado, negociación y
+// cotización formal usen el MISMO valor (con caché) en una conversación.
 
 // ─── Helpers de formato ─────────────────────────────────────────────────
 // Formato chileno: "." separador de miles, "," separador decimal.
