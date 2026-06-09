@@ -139,6 +139,12 @@ export async function runAgentLoop(params: {
     return sanitized
   }
 
+  // Tope de generación pesada por turno: generar varias cotizaciones formales
+  // (generar_link → Zoho + PDF + correo) en un solo turno supera el maxDuration
+  // (60s), deja el chat sin respuesta y los reintentos regeneran en loop
+  // (correos duplicados). Permitimos UNA cotización formal por turno.
+  let generarLinkEnEsteTurno = 0
+
   while (iteration < MAX_ITERATIONS) {
     iteration++
 
@@ -213,7 +219,22 @@ export async function runAgentLoop(params: {
           }
         }
 
-        const result = await dispatchTool(toolName, toolInput)
+        let result: Awaited<ReturnType<typeof dispatchTool>>
+        if (toolName === "generar_link_cotizadora" && generarLinkEnEsteTurno >= 1) {
+          // Una sola cotización formal por turno (cada PDF es pesado; varias en
+          // un turno revientan el timeout de 60s y dejan el chat sin respuesta).
+          console.warn(
+            `[agent-loop] generar_link bloqueado: ya se generó 1 cotización formal este turno (contacto ${contact}).`,
+          )
+          result = {
+            ok: false,
+            error:
+              "Límite: solo UNA cotización formal por mensaje (cada PDF es pesado). Ya generaste una en este turno. Entrega esa al cliente y, si quiere otra opción en PDF, ofrécele generarla en el PRÓXIMO mensaje, de a una.",
+          } as Awaited<ReturnType<typeof dispatchTool>>
+        } else {
+          if (toolName === "generar_link_cotizadora") generarLinkEnEsteTurno++
+          result = await dispatchTool(toolName, toolInput)
+        }
 
         // Capa 3 (persistencia): registrar/limpiar el Borrador negociado.
         if (contact && "ok" in result && result.ok) {
