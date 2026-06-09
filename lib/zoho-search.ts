@@ -78,12 +78,17 @@ function getRutVariants(rut: string): string[] {
   // Insertar puntos cada 3 dígitos desde la derecha en el cuerpo
   const cuerpoConPuntos = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
 
-  return Array.from(new Set([
+  const variantes = [
     raw,                            // tal como vino
     compact,                        // "184359227"
     `${cuerpo}-${dv}`,              // "18435922-7"
     `${cuerpoConPuntos}-${dv}`,     // "18.435.922-7"
-  ])).filter(Boolean)
+  ]
+  // DV "K": agrega variantes en minúscula por si quedó guardado como "k".
+  if (dv === "K") {
+    variantes.push(`${cuerpo}k`, `${cuerpo}-k`, `${cuerpoConPuntos}-k`)
+  }
+  return Array.from(new Set(variantes)).filter(Boolean)
 }
 
 function normalizeEmail(email: string): string {

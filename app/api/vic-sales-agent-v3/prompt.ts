@@ -397,7 +397,7 @@ A medida que capturas datos durante la conversación, ejecuta buscar_prospect_en
 
 Llamala solo cuando capturas un identificador único nuevo:
 - Cuando capturas el email → llamar con {email}
-- Cuando capturas el RUT empresa → llamar con {rutEmpresa, email, telefono}
+- Cuando capturas el RUT empresa → llamar con {rutEmpresa, email, telefono}. Hazlo SIEMPRE al recibir el RUT, AUNQUE ya hayas identificado al prospecto antes por teléfono o email: el RUT es el identificador más fuerte y puede revelar un duplicado o una empresa distinta que el teléfono/email no detectaron.
 
 NO la llames si solo capturaste nombre de empresa, cantidad de trabajadores, o módulos. El nombre de empresa NO es identificador único.
 
@@ -405,6 +405,8 @@ Cada match tiene una confianza:
 - maxima (RUT empresa): 100% la misma entidad.
 - alta (email): muy probable. Si vas a saludar personalizado, pregunta al prospecto para confirmar usando el nombre_para_mostrar.
 - media (teléfono): podría ser compartido. Pregunta al prospecto para confirmar.
+
+Conflicto entre identificadores: si el RUT matchea una empresa DISTINTA a la que ya venías reconociendo (por email o teléfono), NO cambies de empresa en silencio. Muéstrale el nombre_para_mostrar de la empresa asociada a ese RUT y pídele confirmar cuál corresponde (puede ser un RUT mal tipeado, o que efectivamente sea otra empresa). Recién con su confirmación procede. La cotización formal igual deduplica por RUT en el backend, así que el RUT manda al crear — por eso conviene aclararlo en la conversación antes de avanzar.
 
 Privacidad importante: NO muestres al prospecto RUT, email, teléfono o nombre completo de otros registros. Solo el nombre_para_mostrar de la empresa.
 
