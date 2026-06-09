@@ -477,16 +477,31 @@ export async function cotizarReferencial(args: {
     partes.push(`Equivalente único: $${fmtNumCL(totalUnicoCLP, 0)} CLP`)
   }
 
-  // Aclaración de base: el "pago inicial" al aceptar junta el pago único + el
-  // primer mes del plan por adelantado. Sin esto, el cliente ve el "único"
-  // separado del mensual y luego percibe que el pago al aceptar "sube".
+  // Aclaración de base: dejar SIN AMBIGÜEDAD (1) qué se paga al aceptar —el
+  // pago inicial = pago único + primer mes por adelantado— y (2) cómo sigue el
+  // cobro desde el segundo mes: un plan mensual recurrente. Cubrimos los dos
+  // casos: con pago único (hardware/instalación) y sin él (solo plan, ej. app).
   if (itemsUnicos.length > 0 && itemsRecurrentes.length > 0) {
     partes.push("")
     partes.push(
-      `Al aceptar, el pago inicial junta el pago único + el primer mes del plan por adelantado: $${fmtNumCL(
+      `Al aceptar pagas el pago inicial de $${fmtNumCL(
         totalUnicoCLP + totalRecurrenteCLP,
         0,
-      )} CLP. Desde el segundo mes pagas $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes.`,
+      )} CLP: incluye el pago único (equipos e instalación) + el primer mes del plan por adelantado. A partir del segundo mes se factura solo el plan mensual de $${fmtNumCL(
+        totalRecurrenteCLP,
+        0,
+      )} CLP/mes (IVA incluido), de forma mensual y recurrente mientras mantengas el servicio activo.`,
+    )
+  } else if (itemsRecurrentes.length > 0) {
+    partes.push("")
+    partes.push(
+      `Al aceptar pagas el primer mes del plan por adelantado: $${fmtNumCL(
+        totalRecurrenteCLP,
+        0,
+      )} CLP. A partir del segundo mes se factura el mismo plan mensual de $${fmtNumCL(
+        totalRecurrenteCLP,
+        0,
+      )} CLP/mes (IVA incluido), de forma mensual y recurrente mientras mantengas el servicio activo.`,
     )
   }
 
