@@ -161,6 +161,17 @@ type PrefDraftRow = {
   pref_deal_id: string | null
   pref_account_id: string | null
   pref_contact_id: string | null
+  pref_params: PrefParams | null
+}
+
+// Parámetros de la opción negociada (los mismos que se pasan a
+// generar_link_cotizadora). Se anclan al ofrecer un descuento para que la
+// cotización formal se finalice sobre la MISMA opción negociada.
+export type PrefParams = {
+  userCount?: number
+  modulos?: string[]
+  hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+  puntosInstalacion?: Array<{ ubicacion: string; autoInstalada: boolean }>
 }
 
 export type PrefDraft = {
@@ -169,6 +180,7 @@ export type PrefDraft = {
   dealId: string
   accountId: string
   contactId: string
+  params: PrefParams | null
 }
 
 const EMPTY_PREF_DRAFT: PrefDraft = {
@@ -177,6 +189,7 @@ const EMPTY_PREF_DRAFT: PrefDraft = {
   dealId: "",
   accountId: "",
   contactId: "",
+  params: null,
 }
 
 /**
@@ -187,11 +200,11 @@ const EMPTY_PREF_DRAFT: PrefDraft = {
 export async function getPrefDraft(contact: string): Promise<PrefDraft> {
   if (!contact) return { ...EMPTY_PREF_DRAFT }
   const rows = await supabaseFetch<PrefDraftRow[]>(
-    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=pref_escalon,pref_escalon_at,pref_quote_id,pref_deal_id,pref_account_id,pref_contact_id&limit=1`,
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=pref_escalon,pref_escalon_at,pref_quote_id,pref_deal_id,pref_account_id,pref_contact_id,pref_params&limit=1`,
   )
   if (!rows || rows.length === 0) return { ...EMPTY_PREF_DRAFT }
   const row = rows[0]
-  // TTL: una negociación vieja se descarta por completo (escalón e IDs).
+  // TTL: una negociación vieja se descarta por completo (escalón, IDs y params).
   if (row.pref_escalon_at) {
     const age = Date.now() - Date.parse(row.pref_escalon_at)
     if (Number.isFinite(age) && age > PREF_ESCALON_TTL_MS) return { ...EMPTY_PREF_DRAFT }
@@ -203,6 +216,7 @@ export async function getPrefDraft(contact: string): Promise<PrefDraft> {
     dealId: row.pref_deal_id || "",
     accountId: row.pref_account_id || "",
     contactId: row.pref_contact_id || "",
+    params: row.pref_params && typeof row.pref_params === "object" ? row.pref_params : null,
   }
 }
 
@@ -226,6 +240,7 @@ export async function setPrefDraft(
     dealId?: string
     accountId?: string
     contactId?: string
+    params?: PrefParams | null
   },
 ): Promise<void> {
   if (!contact) return
@@ -245,6 +260,12 @@ export async function setPrefDraft(
   if (fields.dealId) patch.pref_deal_id = fields.dealId
   if (fields.accountId) patch.pref_account_id = fields.accountId
   if (fields.contactId) patch.pref_contact_id = fields.contactId
+  // Anclar los parámetros de la opción negociada (la última que se negoció): al
+  // finalizar, la cotización formal se genera sobre ESTA opción y no sobre la que
+  // el modelo reconstruya en el turno de cierre (causa del "PDF de otra opción").
+  if (fields.params && typeof fields.params === "object") {
+    patch.pref_params = fields.params
+  }
 
   await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
     method: "PATCH",
@@ -273,6 +294,7 @@ export async function clearPrefDraft(contact: string): Promise<void> {
       pref_deal_id: null,
       pref_account_id: null,
       pref_contact_id: null,
+      pref_params: null,
     }),
   })
 }

@@ -24,6 +24,7 @@ import {
   getPrefDraft,
   setPrefDraft,
   clearPrefDraft,
+  type PrefParams,
 } from "./supabase-persistence-v3"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
@@ -216,6 +217,41 @@ export async function runAgentLoop(params: {
             if (draft.dealId) toolInput._draftDealId = draft.dealId
             if (draft.accountId) toolInput._draftAccountId = draft.accountId
             if (draft.contactId) toolInput._draftContactId = draft.contactId
+            // Anclaje de la OPCIÓN negociada: al finalizar, la cotización formal
+            // se genera sobre los MISMOS parámetros que se negociaron, no sobre
+            // los que el modelo reconstruya en el turno de cierre. Sin esto, en
+            // multi-opción el PDF salía con otra opción (app en vez del reloj
+            // negociado) y, como el escalón es type-dependiente, con un % errado.
+            if (
+              toolName === "generar_link_cotizadora" &&
+              draft.escalon > 0 &&
+              draft.params &&
+              typeof draft.params === "object"
+            ) {
+              const p = draft.params
+              const antes = JSON.stringify({
+                userCount: toolInput.userCount,
+                modulos: toolInput.modulos,
+                hardware: toolInput.hardware,
+                puntosInstalacion: toolInput.puntosInstalacion,
+              })
+              if (typeof p.userCount === "number") toolInput.userCount = p.userCount
+              if (Array.isArray(p.modulos)) toolInput.modulos = p.modulos
+              if (Array.isArray(p.hardware)) toolInput.hardware = p.hardware
+              if (Array.isArray(p.puntosInstalacion))
+                toolInput.puntosInstalacion = p.puntosInstalacion
+              const despues = JSON.stringify({
+                userCount: toolInput.userCount,
+                modulos: toolInput.modulos,
+                hardware: toolInput.hardware,
+                puntosInstalacion: toolInput.puntosInstalacion,
+              })
+              if (antes !== despues) {
+                console.warn(
+                  `[agent-loop] Capa 3: generar_link usa la opción negociada anclada (contacto ${contact}). modelo=${antes} → anclado=${despues}`,
+                )
+              }
+            }
           }
         }
 
@@ -250,12 +286,29 @@ export async function runAgentLoop(params: {
               "draft" in result && result.draft && typeof result.draft === "object"
                 ? result.draft
                 : null
+            // Anclar también los parámetros de la opción que se está negociando
+            // (los que el modelo pasó a esta consulta), para finalizar sobre la
+            // MISMA opción aunque en el turno de cierre el modelo mande otra.
+            const params = {
+              userCount:
+                typeof toolInput.userCount === "number" ? toolInput.userCount : undefined,
+              modulos: Array.isArray(toolInput.modulos)
+                ? (toolInput.modulos as string[])
+                : undefined,
+              hardware: Array.isArray(toolInput.hardware)
+                ? (toolInput.hardware as PrefParams["hardware"])
+                : undefined,
+              puntosInstalacion: Array.isArray(toolInput.puntosInstalacion)
+                ? (toolInput.puntosInstalacion as PrefParams["puntosInstalacion"])
+                : undefined,
+            }
             await setPrefDraft(contact, {
               escalon: result.escalonActual,
               quoteId: draftIds?.quoteId,
               dealId: draftIds?.dealId,
               accountId: draftIds?.accountId,
               contactId: draftIds?.contactId,
+              params,
             }).catch(() => {})
           } else if (toolName === "generar_link_cotizadora") {
             // Cotización finalizada: la negociación del preform se consumió.
