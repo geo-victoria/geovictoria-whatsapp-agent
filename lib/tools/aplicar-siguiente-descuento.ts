@@ -2,7 +2,7 @@
  * Tool: aplicar_siguiente_descuento
  *
  * Avanza la cotización al siguiente escalón de descuento según el orden de
- * negocio (instalación RM → instalación regiones → 10% → 15% → 20% → 25% → 30%
+ * negocio (instalación RM → instalación regiones → 10% → 20% → 30% → 35% → 40%
  * sobre el plan mensual). El servidor regenera el PDF con número idéntico,
  * fecha/hora actualizada y versión incrementada (v2, v3, ...), lo sube a
  * storage y devuelve el link nuevo para que Vicky lo reenvíe por WhatsApp.
@@ -26,7 +26,7 @@ const VICKY_COTIZADORA_SECRET = process.env.VICKY_COTIZADORA_SECRET || ""
 export const aplicarSiguienteDescuentoSchema = {
   name: "aplicar_siguiente_descuento",
   description:
-    "Avanza la cotización al siguiente escalón de descuento y devuelve un PDF nuevo (mismo número, fecha/hora actualizada, versión incrementada) para reenviar al cliente. Úsala SOLO cuando el prospecto objeta el precio de forma EXPLÍCITA (dice que es 'muy caro', que 'está fuera de presupuesto', pide rebaja, insiste en bajar el precio después de conocerlo). NUNCA la ofrezcas tú de forma proactiva. NO recibe porcentaje ni tipo: el servidor decide qué escalón corresponde según el orden de negocio (descuento de instalación primero — RM antes que regiones —, luego descuentos sobre el plan mensual de 10 → 15 → 20 → 25 → 30%). Pasa el `quote_id` que devolvió generar_link_cotizadora en esta conversación. Comunica al prospecto SOLO el contenido textual del `mensajeParaProspecto` que devuelve esta tool — incluye el link al PDF nuevo y la condición discursiva si aplica. NUNCA enuncies precios ni totales con descuento. Si la respuesta trae `topeAlcanzado=true`, ya se aplicó el último escalón y no hay más rebajas por ofrecer.",
+    "Avanza la cotización al siguiente escalón de descuento y devuelve un PDF nuevo (mismo número, fecha/hora actualizada, versión incrementada) para reenviar al cliente. Úsala SOLO cuando el prospecto objeta el precio de forma EXPLÍCITA (dice que es 'muy caro', que 'está fuera de presupuesto', pide rebaja, insiste en bajar el precio después de conocerlo). NUNCA la ofrezcas tú de forma proactiva. NO recibe porcentaje ni tipo: el servidor decide qué escalón corresponde según el orden de negocio (descuento de instalación primero — RM antes que regiones —, luego descuentos sobre el plan mensual de 10 → 20 → 30 → 35 → 40%). Pasa el `quote_id` que devolvió generar_link_cotizadora en esta conversación. Comunica al prospecto SOLO el contenido textual del `mensajeParaProspecto` que devuelve esta tool — incluye el link al PDF nuevo y la condición discursiva si aplica. NUNCA enuncies precios ni totales con descuento. Si la respuesta trae `topeAlcanzado=true`, ya se aplicó el último escalón y no hay más rebajas por ofrecer.",
   input_schema: {
     type: "object" as const,
     properties: {

@@ -212,7 +212,14 @@ async function processInBackground(
     const pctMatch = reply.match(/(\d+)\s*%/)
     const pctEnReply = pctMatch ? Number(pctMatch[1]) : null
     const prefEscalon = await getPrefEscalon(contact).catch(() => 0)
-    const committedRecPct = prefEscalon >= 3 ? Math.min(30, (prefEscalon - 1) * 5) : 0
+    // Escalera del plan mensual (espejo de DISCOUNT_LADDER del cotizador):
+    // 10 → 20 → 30 → 35 → 40. pref_escalon usa la forma "siguiente índice" (i+1);
+    // los dos primeros índices son instalación, así que el recurrente arranca en
+    // pref_escalon=3 (=10%). recStep indexa la escalera del plan.
+    const REC_PCTS = [10, 20, 30, 35, 40]
+    const recStep = prefEscalon - 3
+    const committedRecPct =
+      recStep < 0 ? 0 : REC_PCTS[Math.min(recStep, REC_PCTS.length - 1)]
     const pctYaNegociado =
       pctEnReply !== null &&
       prefEscalon > 0 &&
@@ -231,7 +238,7 @@ async function processInBackground(
         )
         reply =
           "Para no darte más vueltas con los números: te dejo el mejor precio que te ofrecí y te paso la cotización formal, o si prefieres te contacto con un ejecutivo para revisar el precio. Cómo prefieres?"
-      } else if (committedRecPct >= 30) {
+      } else if (committedRecPct >= 40) {
         // En el tope ya no hay margen y el prompt prohíbe volver a llamar la
         // tool: en vez de la muletilla "permíteme procesar el descuento" (paso
         // intermedio que sobra acá), declina firme en UNA sola frase.
@@ -239,7 +246,7 @@ async function processInBackground(
           `[v3-bg] TOPE_DECLINE_LIMPIO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
         )
         reply =
-          "Ese es el mejor precio que te puedo ofrecer: 30% de descuento en el plan mensual. Lo tomas así, o prefieres que te contacte un ejecutivo para revisarlo?"
+          "Ese es el mejor precio que te puedo ofrecer: 40% de descuento en el plan mensual. Lo tomas así, o prefieres que te contacte un ejecutivo para revisarlo?"
       } else {
         console.error(
           `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
