@@ -86,7 +86,11 @@ export const TOOL_SCHEMAS = [
   consultarDisponibilidadHorarioSchema,
   agendarReunionSchema,
   derivarASoporteSchema,
-  consultarDescuentoReferencialSchema,
+  // consultar_descuento_referencial (preform) quedó FUERA DE USO: todo descuento
+  // se negocia post-formal (consultar/aplicar_siguiente_descuento) sobre una
+  // cotización formal ya generada. Se omite del set para que el modelo no pueda
+  // crear un Borrador con identidad placeholder (causa raíz del bug "Pendiente").
+  // Se mantiene el import y el case de dispatch como red de seguridad inerte.
   consultarSiguienteDescuentoSchema,
   aplicarSiguienteDescuentoSchema,
   enviarCertificacionSchema,
