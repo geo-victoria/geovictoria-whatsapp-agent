@@ -192,11 +192,17 @@ async function processInBackground(
       "Permíteme procesar el descuento en el sistema para confirmarte el porcentaje exacto que puedo aplicarte. ¿Te parece?"
     const ofreceDescuento =
       /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
+    // generar_link_cotizadora también es un commit legítimo: emite la cotización
+    // formal CON el descuento ya aplicado (escalonDescuento), así que si fue
+    // exitosa, el % que aparece en el reply NO es una alucinación aunque
+    // pref_escalon no se haya seteado por separado. Sin esto, el turno de cierre
+    // (PDF + correo OK) se tapaba con la muletilla cuando pref_escalon era NULL.
     const realDescuento = toolCalls.some(
       (c) =>
         (c.name === "consultar_descuento_referencial" ||
           c.name === "consultar_siguiente_descuento" ||
-          c.name === "aplicar_siguiente_descuento") &&
+          c.name === "aplicar_siguiente_descuento" ||
+          c.name === "generar_link_cotizadora") &&
         c.ok,
     )
     // (B1) ¿El % mencionado ya está negociado/comiteado para este contacto?
