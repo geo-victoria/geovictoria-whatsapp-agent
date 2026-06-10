@@ -27,6 +27,7 @@ import {
 } from "@/lib/catalogo"
 import { clasificarUbicacion } from "@/lib/geografia"
 import { getUFActual } from "@/lib/uf"
+import { rutValido } from "@/lib/rut"
 
 const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -401,6 +402,16 @@ export async function generarLinkCotizadora(
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactoEmail)) {
     return { ok: false, error: `El email '${contactoEmail}' no tiene formato válido.` }
+  }
+  // Validación del RUT/RUN chileno (módulo 11). Si no pasa, NO generamos la
+  // cotización: el modelo debe pedirle al cliente que confirme el RUT correcto.
+  if (!rutValido(rutEmpresa)) {
+    return {
+      ok: false,
+      error:
+        `El RUT '${rutEmpresa}' no es válido (no pasa el dígito verificador). ` +
+        "Pídele al cliente que te confirme su RUT (empresa o persona natural) con el dígito verificador correcto, y NO generes la cotización hasta tener uno válido. No es un error técnico.",
+    }
   }
   if (!Number.isFinite(userCount) || userCount < 1 || userCount > SCOPE_MAX_USUARIOS) {
     return { ok: false, error: `userCount=${userCount} fuera de rango 1-${SCOPE_MAX_USUARIOS}.` }
