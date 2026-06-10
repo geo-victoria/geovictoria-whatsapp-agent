@@ -232,7 +232,56 @@ async function processInBackground(
         .reverse()
         .find((m) => m.role === "assistant")
         ?.content?.trim()
-      if (ultimoAsistente === MULETILLA_DESCUENTO) {
+
+      // Recuperación: el modelo enunció un % sin invocar la tool de descuento
+      // (típico en la 2ª/3ª objeción: dice el siguiente tramo "de memoria"). Si
+      // todavía hay margen, en vez de stallear con la muletilla re-corremos el
+      // loop UNA vez forzando la llamada a la tool. Así se produce el % REAL ya
+      // comiteado (la tool recalcula precio y el agent-loop persiste el escalón).
+      let recuperado = false
+      if (committedRecPct < 40 && ultimoAsistente !== MULETILLA_DESCUENTO) {
+        const FORZAR_TOOL_DESCUENTO =
+          "\n\n# Instrucción de sistema (este turno)\n" +
+          "El cliente está pidiendo (más) descuento y aún estás negociando. DEBES llamar la tool de " +
+          "descuento que corresponda (consultar_descuento_referencial si AÚN NO existe cotización formal; " +
+          "consultar_siguiente_descuento si YA existe) ANTES de mencionar cualquier porcentaje o precio, y " +
+          "ofrecer EXACTAMENTE su mensajeParaProspecto. NUNCA digas el % de memoria. NO generes la " +
+          "cotización formal en este turno: solo ofrece el siguiente tramo de descuento."
+        const retry = await runAgentLoop({
+          systemPrompt: getSystemPromptV3(contact) + FORZAR_TOOL_DESCUENTO,
+          history,
+          userMessage: message,
+          apiKey,
+          contact,
+        }).catch((e) => {
+          console.error(`[v3-bg] Reintento forzado de descuento falló:`, e)
+          return null
+        })
+        if (retry) {
+          const retryReply = (retry.reply || "").trim()
+          const retryTools = (retry.toolCalls || []) as ToolCallRecord[]
+          const retryReal = retryTools.some(
+            (c) =>
+              (c.name === "consultar_descuento_referencial" ||
+                c.name === "consultar_siguiente_descuento" ||
+                c.name === "aplicar_siguiente_descuento" ||
+                c.name === "generar_link_cotizadora") &&
+              c.ok,
+          )
+          if (retryReal && retryReply) {
+            console.warn(
+              `[v3-bg] DESCUENTO_RECUPERADO contact=${contact}: el reintento forzó la tool.`,
+            )
+            reply = retryReply
+            result.toolCalls = retry.toolCalls
+            recuperado = true
+          }
+        }
+      }
+
+      if (recuperado) {
+        // ya tenemos un % real desde la tool; no aplicar muletilla.
+      } else if (ultimoAsistente === MULETILLA_DESCUENTO) {
         // (B2) Ya pedimos "procesar el descuento" el turno anterior: romper el
         // loop cerrando hacia una decisión o derivación.
         console.error(
