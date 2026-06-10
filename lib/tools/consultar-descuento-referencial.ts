@@ -138,7 +138,7 @@ async function crearOActualizarBorrador(
 export const consultarDescuentoReferencialSchema = {
   name: "consultar_descuento_referencial",
   description:
-    "Negociación de descuento EN EL PREFORM, antes de generar la cotización formal. Úsala cuando el prospecto objeta el precio del preform o pide rebaja. Devuelve el siguiente descuento y el precio recalculado (pago inicial y mensual) para ofrecerlo EN LA CONVERSACIÓN. NO genera PDF ni envía correo. Pasá los MISMOS parámetros de la cotización que ibas a usar en generar_link_cotizadora (userCount, modulos, hardware, puntosInstalacion) más `escalonActual` (0 la primera vez). Pasá TAMBIÉN los datos de identidad del preform (empresa, contacto, contactoEmail, rutEmpresa, sectorEmpresa y, si buscar_prospect_en_zoho dio match, accountId/contactId/leadId): con ellos la negociación registra/actualiza una cotización en estado Borrador en Zoho con el escalón ofrecido (un solo Borrador por cliente, sin PDF ni correo), que luego generar_link_cotizadora finaliza. NO recibe porcentaje: el servidor decide el escalón (instalación primero — RM antes que regiones —, luego plan mensual 10 → 20 → 30 → 35 → 40%). Copiá el `mensajeParaProspecto` TAL CUAL. Si el prospecto insiste en más rebaja, volvé a llamarla pasando el `escalonActual` que devolvió la consulta anterior. Cuando el prospecto ACEPTE, llamá generar_link_cotizadora con `escalonDescuento` = el `escalonActual` que devolvió la consulta aceptada (así la cotización nace con ese descuento). Si `topeAlcanzado=true`, es el último escalón posible.",
+    "Negociación de descuento EN EL PREFORM, antes de generar la cotización formal. Úsala cuando el prospecto objeta el precio del preform o pide rebaja. Devuelve el siguiente descuento y el precio recalculado (pago inicial y mensual) para ofrecerlo EN LA CONVERSACIÓN. NO genera PDF ni envía correo. Pasá los MISMOS parámetros de la opción que el cliente eligió (userCount, modulos, hardware, puntosInstalacion) más `escalonActual` (0 la primera vez). Es 100% READ-ONLY: NO crea ni toca ningún registro en Zoho (ni Borrador). El escalón y la opción se trackean solo internamente; la cotización formal se crea UNA sola vez con generar_link_cotizadora al aceptar. NO recibe porcentaje: el servidor decide el escalón (instalación primero — RM antes que regiones —, luego plan mensual 10 → 20 → 30 → 35 → 40%). Copiá el `mensajeParaProspecto` TAL CUAL. Si el prospecto insiste en más rebaja, volvé a llamarla pasando el `escalonActual` que devolvió la consulta anterior. Cuando el prospecto ACEPTE, llamá generar_link_cotizadora con `escalonDescuento` = el `escalonActual` que devolvió la consulta aceptada (así la cotización nace con ese descuento). Si `topeAlcanzado=true`, es el último escalón posible.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -351,14 +351,12 @@ export async function consultarDescuentoReferencial(
 
     const escalonActualFinal = Number(data.escalon_actual || escalonActual + 1)
 
-    // Registrar/actualizar el Borrador en Zoho con el escalón ofrecido
-    // (best-effort; no bloquea la respuesta de la negociación).
-    const draft = await crearOActualizarBorrador(
-      args,
-      construccion.items,
-      ufActual,
-      escalonActualFinal,
-    )
+    // NOTA: la negociación es 100% read-only. NO se crea ni actualiza ningún
+    // Borrador en Zoho durante la negociación (esa creación prematura, con
+    // identidad placeholder antes de tener los datos reales, era la causa raíz
+    // del bug "Pendiente"). El escalón y la opción se trackean solo en Supabase
+    // (pref_escalon/pref_params), y la cotización formal se crea UNA sola vez
+    // con generar_link_cotizadora al aceptar.
 
     return {
       ok: true,
@@ -374,7 +372,6 @@ export async function consultarDescuentoReferencial(
       escalonActual: escalonActualFinal,
       topeAlcanzado: Boolean(data.tope_alcanzado),
       mensajeParaProspecto: data.mensaje_para_prospecto,
-      ...(draft ? { draft } : {}),
     }
   } catch (err) {
     console.error("[consultar_descuento_referencial] excepción:", err)

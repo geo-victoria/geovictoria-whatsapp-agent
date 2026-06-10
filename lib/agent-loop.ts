@@ -257,13 +257,18 @@ export async function runAgentLoop(params: {
           }
         }
 
-        // Acotamiento de la negociación: con una cotización FORMAL vigente en
-        // la conversación, la negociación preform queda cerrada — todo descuento
-        // va post-formal sobre ese quote_id. Guarda determinista (no depende
-        // del prompt): un % negociado en preform con formal viva no aterriza en
-        // ninguna cotización y se pierde (bug real de los tests multi-opción).
+        // Acotamiento: con una cotización FORMAL ya generada en esta
+        // conversación, (a) NO se genera otra formal (anti-duplicado) y (b) la
+        // negociación preform queda cerrada — todo descuento adicional va
+        // post-formal sobre ese MISMO quote_id. Guarda determinista (no depende
+        // del prompt). Mata las cotizaciones/correos duplicados y el % que se
+        // perdía al negociar sin aterrizar.
         let formalVigente = ""
-        if (toolName === "consultar_descuento_referencial" && contact) {
+        if (
+          (toolName === "consultar_descuento_referencial" ||
+            toolName === "generar_link_cotizadora") &&
+          contact
+        ) {
           formalVigente = await getFormalQuote(contact).catch(() => "")
         }
 
@@ -279,7 +284,20 @@ export async function runAgentLoop(params: {
             error:
               "Límite: solo UNA cotización formal por mensaje (cada PDF es pesado). Ya generaste una en este turno. Entrega esa al cliente y, si quiere otra opción en PDF, ofrécele generarla en el PRÓXIMO mensaje, de a una.",
           } as Awaited<ReturnType<typeof dispatchTool>>
-        } else if (formalVigente) {
+        } else if (toolName === "generar_link_cotizadora" && formalVigente) {
+          // Anti-duplicado: ya existe una cotización formal → NO crear otra.
+          console.warn(
+            `[agent-loop] generar_link bloqueado: ya existe cotización formal ${formalVigente} (contacto ${contact}).`,
+          )
+          result = {
+            ok: false,
+            error:
+              `Ya existe una cotización formal en esta conversación (quote_id ${formalVigente}). NO generes otra cotización. ` +
+              "Si el cliente quiere más descuento, trabájalo sobre ESA con consultar_siguiente_descuento(quote_id) y, al aceptar, aplicar_siguiente_descuento(quote_id): regenera el MISMO documento (nueva versión, mismo número), nunca uno nuevo. " +
+              "Si ya está cerrado, entrégale el PDF que ya tiene; si insiste en algo que no puedes resolver, deriva con registrar_solicitud_callback.",
+          } as Awaited<ReturnType<typeof dispatchTool>>
+        } else if (toolName === "consultar_descuento_referencial" && formalVigente) {
+          // Con formal vigente, el preform queda cerrado: redirigir a post-formal.
           console.warn(
             `[agent-loop] consultar_descuento_referencial bloqueado: ya existe cotización formal ${formalVigente} (contacto ${contact}).`,
           )
@@ -287,7 +305,7 @@ export async function runAgentLoop(params: {
             ok: false,
             error:
               `Ya existe una cotización formal en esta conversación (quote_id ${formalVigente}); la negociación preform quedó cerrada. ` +
-              "Para ofrecer descuento usa consultar_siguiente_descuento(quote_id) sobre la cotización que el cliente eligió, y cuando acepte, comitea con aplicar_siguiente_descuento(quote_id). " +
+              "Para ofrecer descuento usa consultar_siguiente_descuento(quote_id) sobre esa cotización, y cuando acepte, comitea con aplicar_siguiente_descuento(quote_id). " +
               "Esto NO es un error técnico: no se lo menciones al cliente, simplemente continúa la negociación por el camino post-formal.",
           } as Awaited<ReturnType<typeof dispatchTool>>
         } else {
