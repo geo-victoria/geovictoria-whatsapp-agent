@@ -298,3 +298,58 @@ export async function clearPrefDraft(contact: string): Promise<void> {
     }),
   })
 }
+
+// ── Cotización formal vigente (acotamiento de la negociación) ────────────────
+//
+// Política: apenas existe una cotización FORMAL en la conversación, toda
+// negociación de descuento va por el camino post-formal sobre ese quote_id
+// (consultar_siguiente_descuento / aplicar_siguiente_descuento). La negociación
+// preform (consultar_descuento_referencial) queda BLOQUEADA mientras la formal
+// esté vigente — un % negociado en preform con formal viva no aterriza en
+// ninguna cotización y se pierde (bug real visto en los tests multi-opción).
+
+// Vigencia del bloqueo: alineada con la ventana de contratación más larga de
+// la escalera (24h). Pasado esto, el cliente probablemente arranca de cero.
+const FORMAL_QUOTE_TTL_MS = 24 * 60 * 60 * 1000
+
+type FormalQuoteRow = {
+  formal_quote_id: string | null
+  formal_quote_at: string | null
+}
+
+/**
+ * Registra la cotización formal vigente del contacto (al generarla, y se
+ * refresca cuando se le aplica un descuento post-formal). Best-effort.
+ */
+export async function setFormalQuote(contact: string, quoteId: string): Promise<void> {
+  if (!contact || !quoteId) return
+  const conversationId = await getOrCreateConversationId(contact)
+  if (!conversationId) return
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      formal_quote_id: quoteId,
+      formal_quote_at: new Date().toISOString(),
+    }),
+  })
+}
+
+/**
+ * Devuelve el quote_id de la cotización formal vigente del contacto, o "" si
+ * no hay, si expiró el TTL, o si Supabase no está disponible.
+ */
+export async function getFormalQuote(contact: string): Promise<string> {
+  if (!contact) return ""
+  const rows = await supabaseFetch<FormalQuoteRow[]>(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=formal_quote_id,formal_quote_at&limit=1`,
+  )
+  if (!rows || rows.length === 0) return ""
+  const row = rows[0]
+  if (!row.formal_quote_id) return ""
+  if (row.formal_quote_at) {
+    const age = Date.now() - Date.parse(row.formal_quote_at)
+    if (Number.isFinite(age) && age > FORMAL_QUOTE_TTL_MS) return ""
+  }
+  return row.formal_quote_id
+}

@@ -24,6 +24,8 @@ import {
   getPrefDraft,
   setPrefDraft,
   clearPrefDraft,
+  setFormalQuote,
+  getFormalQuote,
   type PrefParams,
 } from "./supabase-persistence-v3"
 
@@ -255,6 +257,16 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // Acotamiento de la negociación: con una cotización FORMAL vigente en
+        // la conversación, la negociación preform queda cerrada — todo descuento
+        // va post-formal sobre ese quote_id. Guarda determinista (no depende
+        // del prompt): un % negociado en preform con formal viva no aterriza en
+        // ninguna cotización y se pierde (bug real de los tests multi-opción).
+        let formalVigente = ""
+        if (toolName === "consultar_descuento_referencial" && contact) {
+          formalVigente = await getFormalQuote(contact).catch(() => "")
+        }
+
         let result: Awaited<ReturnType<typeof dispatchTool>>
         if (toolName === "generar_link_cotizadora" && generarLinkEnEsteTurno >= 1) {
           // Una sola cotización formal por turno (cada PDF es pesado; varias en
@@ -266,6 +278,17 @@ export async function runAgentLoop(params: {
             ok: false,
             error:
               "Límite: solo UNA cotización formal por mensaje (cada PDF es pesado). Ya generaste una en este turno. Entrega esa al cliente y, si quiere otra opción en PDF, ofrécele generarla en el PRÓXIMO mensaje, de a una.",
+          } as Awaited<ReturnType<typeof dispatchTool>>
+        } else if (formalVigente) {
+          console.warn(
+            `[agent-loop] consultar_descuento_referencial bloqueado: ya existe cotización formal ${formalVigente} (contacto ${contact}).`,
+          )
+          result = {
+            ok: false,
+            error:
+              `Ya existe una cotización formal en esta conversación (quote_id ${formalVigente}); la negociación preform quedó cerrada. ` +
+              "Para ofrecer descuento usa consultar_siguiente_descuento(quote_id) sobre la cotización que el cliente eligió, y cuando acepte, comitea con aplicar_siguiente_descuento(quote_id). " +
+              "Esto NO es un error técnico: no se lo menciones al cliente, simplemente continúa la negociación por el camino post-formal.",
           } as Awaited<ReturnType<typeof dispatchTool>>
         } else {
           if (toolName === "generar_link_cotizadora") generarLinkEnEsteTurno++
@@ -313,6 +336,18 @@ export async function runAgentLoop(params: {
           } else if (toolName === "generar_link_cotizadora") {
             // Cotización finalizada: la negociación del preform se consumió.
             await clearPrefDraft(contact).catch(() => {})
+            // Registrar la formal vigente: desde ahora la negociación preform
+            // queda bloqueada y todo descuento va post-formal sobre este quote.
+            const qid =
+              "quoteId" in result && typeof result.quoteId === "string"
+                ? result.quoteId
+                : ""
+            if (qid) await setFormalQuote(contact, qid).catch(() => {})
+          } else if (toolName === "aplicar_siguiente_descuento") {
+            // Refrescar la vigencia de la formal sobre la que se negocia.
+            const qid =
+              typeof toolInput.quote_id === "string" ? toolInput.quote_id : ""
+            if (qid) await setFormalQuote(contact, qid).catch(() => {})
           }
         }
 
