@@ -81,6 +81,8 @@ const VOSEO_MAP: [RegExp, string][] = [
   [/(?<!\p{L})fijate(?!\p{L})/giu, "fíjate"],
   [/(?<!\p{L})avisame(?!\p{L})/giu, "avísame"],
   [/(?<!\p{L})contame(?!\p{L})/giu, "cuéntame"],
+  [/(?<!\p{L})disculpá(?!\p{L})/giu, "disculpa"],
+  [/(?<!\p{L})dale(?!\p{L})/giu, "ya"],
 ]
 
 function sanitizarVoseo(texto: string): string {

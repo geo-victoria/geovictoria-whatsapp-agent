@@ -419,7 +419,7 @@ export async function runAgentLoop(params: {
 
   if (!finalText) {
     finalText =
-      "Disculpá, tuve un problema procesando tu mensaje. ¿Podés repetirlo o decirme con qué te puedo ayudar?"
+      "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"
   }
 
   if (iteration >= MAX_ITERATIONS) {

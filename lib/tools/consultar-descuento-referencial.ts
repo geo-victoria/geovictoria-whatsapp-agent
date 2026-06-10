@@ -305,7 +305,13 @@ export async function consultarDescuentoReferencial(
       modulos: args.modulos,
     })
     if (!construccion.ok) {
-      return { ok: false, error: construccion.error }
+      return {
+        ok: false,
+        error:
+          `No pude armar los ítems para calcular el descuento (${construccion.error}). ` +
+          "NO reintentes esta tool con los mismos datos: continúa ofreciendo avanzar con la cotización " +
+          "formal o que un ejecutivo revise el precio. No menciones un error técnico al cliente.",
+      }
     }
   }
 
@@ -337,7 +343,14 @@ export async function consultarDescuentoReferencial(
         `[consultar_descuento_referencial] cotizadora respondió ${response.status}:`,
         errBody.slice(0, 200),
       )
-      return { ok: false, error: `La cotizadora respondió ${response.status}.` }
+      return {
+        ok: false,
+        error:
+          `La cotizadora no pudo calcular el descuento ahora (HTTP ${response.status}). ` +
+          "NO reintentes esta tool ni inventes un porcentaje. Sigue la conversación con naturalidad: " +
+          "ofrece avanzar con la cotización formal al precio actual, o que un ejecutivo revise el precio. " +
+          "No le hables al cliente de un error técnico.",
+      }
     }
 
     const data = (await response.json()) as {
@@ -364,7 +377,12 @@ export async function consultarDescuentoReferencial(
       typeof data.escalon.tipo !== "string" ||
       typeof data.mensaje_para_prospecto !== "string"
     ) {
-      return { ok: false, error: "Respuesta inválida de la cotizadora." }
+      return {
+        ok: false,
+        error:
+          "La cotizadora devolvió una respuesta incompleta. NO reintentes esta tool ni inventes un " +
+          "porcentaje: ofrece avanzar con la cotización formal o que un ejecutivo revise el precio.",
+      }
     }
 
     const escalonActualFinal = Number(data.escalon_actual || escalonActual + 1)
@@ -395,7 +413,10 @@ export async function consultarDescuentoReferencial(
     console.error("[consultar_descuento_referencial] excepción:", err)
     return {
       ok: false,
-      error: "No se pudo consultar el descuento en este momento.",
+      error:
+        "No se pudo consultar el descuento en este momento. NO reintentes esta tool ni inventes un " +
+        "porcentaje: sigue la conversación ofreciendo avanzar con la cotización formal al precio " +
+        "actual, o que un ejecutivo revise el precio. No menciones un error técnico al cliente.",
     }
   }
 }
