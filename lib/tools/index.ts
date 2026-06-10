@@ -86,11 +86,13 @@ export const TOOL_SCHEMAS = [
   consultarDisponibilidadHorarioSchema,
   agendarReunionSchema,
   derivarASoporteSchema,
-  // consultar_descuento_referencial (preform) quedó FUERA DE USO: todo descuento
-  // se negocia post-formal (consultar/aplicar_siguiente_descuento) sobre una
-  // cotización formal ya generada. Se omite del set para que el modelo no pueda
-  // crear un Borrador con identidad placeholder (causa raíz del bug "Pendiente").
-  // Se mantiene el import y el case de dispatch como red de seguridad inerte.
+  // consultar_descuento_referencial (preform): negociación de descuento ANTES de
+  // la cotización formal (Modelo B). Es 100% read-only — NO crea ni toca ningún
+  // registro en Zoho (la creación del Borrador con identidad placeholder, vieja
+  // causa del bug "Pendiente", ya se eliminó). El prompt instruye usarla cuando el
+  // cliente pide rebaja sobre el preform, así que DEBE estar en el set: si se omite,
+  // el modelo no puede llamarla y la negociación preform se traba en loop.
+  consultarDescuentoReferencialSchema,
   consultarSiguienteDescuentoSchema,
   aplicarSiguienteDescuentoSchema,
   enviarCertificacionSchema,
