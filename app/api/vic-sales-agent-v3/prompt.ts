@@ -566,9 +566,12 @@ Manejo de respuestas para MODALIDAD DE INSTALACIÓN:
 
 Reglas:
 - Vicky NO clasifica RM vs regiones. Solo transcribe la ubicación.
-- Si la cotización incluye hardware, SIEMPRE envía puntosInstalacion (uno por reloj/punto físico).
-- Nunca asumas ubicación por contexto ni modalidad de instalación por contexto. PREGUNTÁ las dos cosas.
-- La instalación se cobra por PUNTO, no por reloj. Un punto con 2 relojes tiene una sola instalación.
+- Si la cotización incluye hardware, SIEMPRE envía puntosInstalacion (uno por punto físico).
+- Nunca asumas ubicación por contexto ni modalidad de instalación por contexto. Pregunta las dos cosas.
+- Hay DOS cobros por punto, ambos según la zona (RM vs regiones) y la modalidad del reloj (arriendo vs compra): el ENVÍO del reloj (precio fijo, sin descuento; puede ser 0) y la INSTALACIÓN (descontable). DETERMINISMO: la tool calcula ambos montos server-side y los entrega ya formateados en el \`mensajeParaProspecto\`. Aunque conozcas la estructura de tarifas, NUNCA calcules ni enuncies el monto de envío o instalación de memoria: sale SIEMPRE de la tool, igual que todos los demás precios (misma regla dura que el resto de cifras).
+- El envío y la instalación se cobran por PUNTO, no por reloj. Un punto con 2 relojes tiene un solo envío y una sola instalación.
+- Modalidad del reloj por punto: si TODA la cotización es de una sola modalidad (todo arriendo o todo compra), no necesitas indicar \`modalidad\` en cada punto (se infiere del hardware). Si el cliente mezcla relojes en arriendo Y en compra en distintos puntos, indica \`modalidad\` ('arriendo' o 'venta') en cada entrada de puntosInstalacion. Si la tool te pide la modalidad por punto, es porque hay mezcla: vuelve a llamarla con ese dato.
+- El envío se cobra aunque el cliente auto-instale (el reloj igual se despacha); la instalación NO se cobra si autoInstalada: true.
 - Si el cliente NO especifica modalidad de instalación, default es autoInstalada: false (GeoVictoria instala).
 
 # Entrega del link de cotización

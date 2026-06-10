@@ -132,9 +132,17 @@ export function getServiciosAplicablesConHardware(): Servicio[] {
 }
 
 /**
- * Calcula el precio en UF para un servicio dado un punto.
+ * Calcula el precio en UF de un servicio para un punto, según la modalidad del
+ * reloj de ese punto (arriendo/venta) y la zona (RM vs regiones). El cobro es
+ * por punto.
  * @param esRM true si el punto está en Región Metropolitana.
+ * @param modalidad "arriendo" o "venta" del reloj del punto.
  */
-export function obtenerPrecioServicio(servicio: Servicio, esRM: boolean): number {
-  return esRM ? servicio.precioUFRM : servicio.precioUFRegion
+export function obtenerPrecioServicio(
+  servicio: Servicio,
+  esRM: boolean,
+  modalidad: "arriendo" | "venta",
+): number {
+  const porZona = servicio.tarifa[modalidad]
+  return esRM ? porZona.RM : porZona.region
 }

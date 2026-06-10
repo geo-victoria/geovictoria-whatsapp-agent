@@ -122,13 +122,19 @@ export const generarLinkCotizadoraSchema = {
             autoInstalada: {
               type: "boolean" as const,
               description:
-                "true si el prospecto instalará por su cuenta (sin cobro, con advertencias). false si la realiza GeoVictoria.",
+                "true si el prospecto instalará por su cuenta (sin cobro de instalación, con advertencias; el envío se cobra igual). false si la realiza GeoVictoria.",
+            },
+            modalidad: {
+              type: "string" as const,
+              enum: ["arriendo", "venta"],
+              description:
+                "Modalidad del reloj de ESTE punto: 'arriendo' o 'venta' (compra). Determina la tarifa de envío e instalación del punto. Si toda la cotización es de una sola modalidad, puedes omitirlo (se infiere del hardware); si hay relojes en arriendo Y compra en distintos puntos, es OBLIGATORIO indicarlo por punto.",
             },
           },
           required: ["ubicacion", "autoInstalada"],
         },
         description:
-          "Lista de puntos físicos de instalación. OBLIGATORIO si la cotización incluye hardware. Una entrada por punto, no por reloj.",
+          "Lista de puntos físicos de instalación. OBLIGATORIO si la cotización incluye hardware. Una entrada por punto, no por reloj. El envío y la instalación se cobran por punto.",
       },
       accountId: {
         type: "string" as const,
@@ -159,6 +165,8 @@ export const generarLinkCotizadoraSchema = {
 export type PuntoInstalacionInput = {
   ubicacion: string
   autoInstalada: boolean
+  /** Modalidad del reloj del punto. Si se omite, se infiere del hardware. */
+  modalidad?: "arriendo" | "venta"
 }
 
 export type LinkCotizadoraInput = {
@@ -337,34 +345,51 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
       }
     }
 
+    // Modalidad uniforme del hardware (para inferir la modalidad de cada punto
+    // cuando la cotización es de una sola modalidad). Si hay arriendo Y venta a
+    // la vez, cada punto debe traer su `modalidad` explícita.
+    const modalidadesHw = new Set(
+      hardware.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"),
+    )
+    const modalidadUniforme: "arriendo" | "venta" | null =
+      modalidadesHw.size === 1 ? [...modalidadesHw][0] : null
+
     const serviciosAplicables = getServiciosAplicablesConHardware()
-    for (const servicio of serviciosAplicables) {
-      for (const punto of puntosInstalacion) {
-        const clasificacion = clasificarUbicacion(punto.ubicacion)
-        if (clasificacion.tipo === "no_clasificable") continue
+    for (const punto of puntosInstalacion) {
+      const clasificacion = clasificarUbicacion(punto.ubicacion)
+      if (clasificacion.tipo === "no_clasificable") continue
 
-        if (!clasificacion.reconocida) {
-          advertencias.push(
-            `Ubicación '${punto.ubicacion}' no reconocida en la lista oficial. ` +
-            `Se aplicó tarifa de regiones por defecto. El ejecutivo confirmará al revisar la cotización.`,
-          )
+      if (!clasificacion.reconocida) {
+        advertencias.push(
+          `Ubicación '${punto.ubicacion}' no reconocida en la lista oficial. ` +
+          `Se aplicó tarifa de regiones por defecto. El ejecutivo confirmará al revisar la cotización.`,
+        )
+      }
+
+      const modalidadPunto = punto.modalidad ?? modalidadUniforme
+      if (!modalidadPunto) {
+        return {
+          ok: false,
+          error:
+            "La cotización tiene relojes en arriendo Y en compra, así que necesito la modalidad de cada punto. " +
+            "Vuelve a llamar la tool indicando `modalidad` ('arriendo' o 'venta') en cada entrada de puntosInstalacion.",
         }
+      }
 
-        if (punto.autoInstalada) {
-          if (!servicio.permiteAutoInstalacion) {
-            return {
-              ok: false,
-              error: `El servicio '${servicio.nombre}' no permite auto-instalación.`,
-            }
-          }
+      const esRM = clasificacion.tipo === "RM"
+      for (const servicio of serviciosAplicables) {
+        // Instalación auto-gestionada por el cliente: no se cobra (solo el envío
+        // se mantiene). Se comunican las advertencias.
+        if (punto.autoInstalada && servicio.omitirSiAutoInstalada) {
           for (const adv of servicio.advertenciasAutoInstalacion) {
             advertencias.push(`Auto-instalación en ${punto.ubicacion}: ${adv}`)
           }
           continue
         }
-
-        const esRM = clasificacion.tipo === "RM"
-        const precioUF = obtenerPrecioServicio(servicio, esRM)
+        const precioUF = obtenerPrecioServicio(servicio, esRM, modalidadPunto)
+        // Servicio sin cobro para esta combinación (p. ej. envío arriendo RM = 0):
+        // no se agrega línea.
+        if (precioUF <= 0) continue
         items.push({
           tipo: "servicio",
           id: servicio.id,

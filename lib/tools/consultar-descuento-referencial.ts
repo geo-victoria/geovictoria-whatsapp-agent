@@ -173,10 +173,16 @@ export const consultarDescuentoReferencialSchema = {
           properties: {
             ubicacion: { type: "string" as const },
             autoInstalada: { type: "boolean" as const },
+            modalidad: {
+              type: "string" as const,
+              enum: ["arriendo", "venta"],
+              description:
+                "Modalidad del reloj del punto. Si se omite se infiere del hardware; obligatorio por punto si la cotización mezcla arriendo y compra.",
+            },
           },
           required: ["ubicacion", "autoInstalada"],
         },
-        description: "Puntos de instalación (igual que el preform). Obligatorio si hay hardware.",
+        description: "Puntos de instalación (igual que el preform). Obligatorio si hay hardware. Envío e instalación se cobran por punto.",
       },
       escalonActual: {
         type: "number" as const,

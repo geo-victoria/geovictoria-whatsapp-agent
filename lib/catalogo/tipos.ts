@@ -111,22 +111,43 @@ export type Accesorio = {
 }
 
 /**
+ * Tarifa de un servicio asociado (envío, instalación), por punto físico.
+ *
+ * Doble dimensión: modalidad del reloj del punto (arriendo/venta) × zona
+ * (RM / otras regiones). El cobro es POR PUNTO (no por reloj).
+ */
+export type TarifaServicioPunto = {
+  arriendo: { RM: number; region: number }
+  venta: { RM: number; region: number }
+}
+
+/**
  * Servicio asociado (envío, instalación).
  *
- * Modelo de precio binario: RM o "otras regiones", alineado con cómo se
- * estructuran las tarifas comerciales hoy. Si más adelante se necesita
- * granularidad por región específica, agregar de forma aditiva un campo
- * opcional `tarifasPorRegion?: Record<string, number>` sin romper este modelo.
+ * Precio por punto según modalidad × zona (ver TarifaServicioPunto). Si más
+ * adelante se necesita granularidad por región específica, agregar de forma
+ * aditiva sin romper este modelo.
  */
 export type Servicio = {
   id: string
   nombre: string
   descripcion: string
 
-  /** Precio en UF para Región Metropolitana (por unidad/punto). */
-  precioUFRM: number
-  /** Precio en UF para otras regiones (por unidad/punto). */
-  precioUFRegion: number
+  /** Tarifa por punto, según modalidad del reloj (arriendo/venta) y zona. */
+  tarifa: TarifaServicioPunto
+
+  /**
+   * Si es `true`, el servicio entra en el descuento negociable de instalación
+   * (RM 50% / regiones 25%). El envío es precio fijo, así que va en `false`.
+   */
+  descontable: boolean
+
+  /**
+   * Si es `true`, el servicio NO se cobra cuando el cliente auto-instala
+   * (la instalación). El envío se cobra igual (el reloj se despacha de todas
+   * formas), así que va en `false`.
+   */
+  omitirSiAutoInstalada: boolean
 
   /**
    * Cuán obligatoria es la oferta del servicio. "recomendada" significa que
