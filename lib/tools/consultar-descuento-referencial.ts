@@ -281,14 +281,32 @@ export async function consultarDescuentoReferencial(
   args: ConsultarDescuentoReferencialInput,
 ): Promise<ConsultarDescuentoReferencialResultado> {
   // Armar los ítems con el MISMO builder que usa generar_link_cotizadora.
-  const construccion = construirItemsCotizacion({
+  let construccion = construirItemsCotizacion({
     userCount: args.userCount,
     modulos: args.modulos,
     hardware: args.hardware,
     puntosInstalacion: args.puntosInstalacion,
   })
   if (!construccion.ok) {
-    return { ok: false, error: construccion.error }
+    // Fallback robusto: la causa típica es que el modelo no pasó
+    // `puntosInstalacion` al negociar (con hardware, el builder exige los puntos).
+    // En vez de devolver ok:false en silencio —lo que hacía que el modelo
+    // reintentara en loop hasta el fallback— negociamos sobre el PLAN (módulos)
+    // para no trabar la conversación. La cotización formal final SÍ exige los
+    // puntos completos (generar_link_cotizadora no usa este fallback).
+    console.warn(
+      `[consultar_descuento_referencial] build falló (${construccion.error}); ` +
+        `args={userCount:${args.userCount}, modulos:${JSON.stringify(args.modulos)}, ` +
+        `hardware:${JSON.stringify(args.hardware)}, puntos:${JSON.stringify(args.puntosInstalacion)}}. ` +
+        `Reintentando solo con módulos (negociación del plan).`,
+    )
+    construccion = construirItemsCotizacion({
+      userCount: args.userCount,
+      modulos: args.modulos,
+    })
+    if (!construccion.ok) {
+      return { ok: false, error: construccion.error }
+    }
   }
 
   const ufActual = await getUFActualSafe()
