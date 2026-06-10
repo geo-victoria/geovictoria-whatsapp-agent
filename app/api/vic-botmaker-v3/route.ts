@@ -192,8 +192,21 @@ async function processInBackground(
     //        hacia una decisión / derivación en vez de quedar pegados en loop.
     const MULETILLA_DESCUENTO =
       "Permíteme procesar el descuento en el sistema para confirmarte el porcentaje exacto que puedo aplicarte. ¿Te parece?"
-    const ofreceDescuento =
+    // (A) Forma clásica: "X% de descuento".
+    const ofrecePctDescuento =
       /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
+    // (A2) Rebaja SIN porcentaje: el modelo a veces ofrece una concesión hecha a
+    // mano ("te dejo la instalación sin costo", "te ahorro las 3 UF", "te la dejo
+    // gratis / en 0") calculando el monto él mismo, sin pasar por la tool. Eso es
+    // tan alucinación como un % inventado. Se detecta la INTENCIÓN de regalar/
+    // rebajar ("te ahorro/regalo/rebajo…", "te lo dejo gratis/sin costo/en 0"),
+    // que no aparece en menciones legítimas y descriptivas ("capacitación sin
+    // costo", "si lo instalas tú, sin costo").
+    const ofreceRebajaSinPct =
+      /\bte\s+(ahorro|regalo|bonifico|rebajo|descuento)\b|\bte\s+(?:la|lo|los|las)\s+(?:dejo|doy)\s+(?:gratis|sin\s+costo|sin\s+cargo|en\s+(?:0|cero))/i.test(
+        reply,
+      )
+    const ofreceDescuento = ofrecePctDescuento || ofreceRebajaSinPct
     // generar_link_cotizadora también es un commit legítimo: emite la cotización
     // formal CON el descuento ya aplicado (escalonDescuento), así que si fue
     // exitosa, el % que aparece en el reply NO es una alucinación aunque
