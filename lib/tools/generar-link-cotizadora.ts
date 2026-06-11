@@ -82,6 +82,18 @@ export const generarLinkCotizadoraSchema = {
       contactoEmail: { type: "string" as const, description: "Email del contacto", format: "email" },
       contactoTelefono: { type: "string" as const, description: "Teléfono con +código país" },
       rutEmpresa: { type: "string" as const, description: "RUT empresa o persona natural" },
+      direccionEmpresa: {
+        type: "string" as const,
+        description: "Dirección (calle y número) de la empresa, para emitir la cotización. Pregúntala al prospecto.",
+      },
+      comunaEmpresa: {
+        type: "string" as const,
+        description: "Comuna de la empresa, para emitir la cotización.",
+      },
+      regionEmpresa: {
+        type: "string" as const,
+        description: "Región de la empresa, para emitir la cotización.",
+      },
       userCount: {
         type: "number" as const, minimum: 1, maximum: SCOPE_MAX_USUARIOS,
         description: "Cantidad de trabajadores (1-50)",
@@ -175,6 +187,9 @@ export type LinkCotizadoraInput = {
   contactoEmail: string
   contactoTelefono?: string
   rutEmpresa: string
+  direccionEmpresa?: string
+  comunaEmpresa?: string
+  regionEmpresa?: string
   userCount: number
   sectorEmpresa: SectorValido | string
   modulos: string[]
@@ -416,7 +431,8 @@ export async function generarLinkCotizadora(
 ): Promise<LinkCotizadoraResultado> {
   const {
     empresa, contacto, contactoEmail, contactoTelefono,
-    rutEmpresa, userCount, sectorEmpresa, modulos = [], hardware = [],
+    rutEmpresa, direccionEmpresa, comunaEmpresa, regionEmpresa,
+    userCount, sectorEmpresa, modulos = [], hardware = [],
     puntosInstalacion = [],
     accountId, contactId, leadId, escalonDescuento,
     _draftQuoteId, _draftDealId, _draftAccountId, _draftContactId,
@@ -495,6 +511,9 @@ export async function generarLinkCotizadora(
           contactoEmail: contactoEmail.trim().toLowerCase(),
           contactoTelefono: contactoTelefono?.trim() || "",
           rutEmpresa: rutEmpresa.trim(),
+          direccionEmpresa: direccionEmpresa?.trim() || "",
+          comunaEmpresa: comunaEmpresa?.trim() || "",
+          regionEmpresa: regionEmpresa?.trim() || "",
           userCount,
           sectorEmpresa: sectorNormalizado,
         },
