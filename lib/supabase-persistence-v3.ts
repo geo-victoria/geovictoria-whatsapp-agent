@@ -353,3 +353,180 @@ export async function getFormalQuote(contact: string): Promise<string> {
   }
   return row.formal_quote_id
 }
+
+// ── Re-engagement (item 5): seguimiento por inactividad del cliente ─────────
+//
+// Estados de followup_status:
+//   null       → la conversación nunca mostró intención comercial.
+//   "activo"   → la pelota está en el cliente; los timers corren.
+//   "pausado"  → es comercial, pero el cliente respondió (o aún no respondemos):
+//                se re-arma cuando Vicky entrega su próxima respuesta real.
+//   "cerrado"  → ciclo terminado (respondió y cerró, opt-out, derivado, agotado).
+//
+// Cadencia (espejo de vic_v3_claim_followups en SQL): 2m, 5m, 15m, 1h, 3h, 6h,
+// 23h — todos dentro de la ventana de 24h de WhatsApp (texto libre, sin HSM).
+// `silence_anchor_at` = momento en que Vicky respondió y quedó esperando; los
+// toques de push NO lo mueven (si lo movieran, la cadencia nunca avanzaría).
+
+const FOLLOWUP_FIRST_OFFSET_MS = 2 * 60 * 1000 // primer toque: +2 min
+
+type FollowupStateRow = {
+  id: string
+  followup_status: string | null
+}
+
+/** Estado actual del followup del contacto (status o null si no hay fila). */
+export async function getFollowupStatus(contact: string): Promise<string | null> {
+  if (!contact) return null
+  const rows = await supabaseFetch<FollowupStateRow[]>(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id,followup_status&limit=1`,
+  )
+  if (!rows || rows.length === 0) return null
+  return rows[0].followup_status
+}
+
+/**
+ * Marca actividad del cliente: actualiza last_user_at y, si había un ciclo
+ * activo, lo pausa (el cliente respondió → se cancela la cadencia en curso;
+ * se re-armará cuando Vicky conteste). Best-effort.
+ */
+export async function markUserActivity(contact: string): Promise<void> {
+  if (!contact) return
+  const conversationId = await getOrCreateConversationId(contact)
+  if (!conversationId) return
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ last_user_at: new Date().toISOString() }),
+  })
+  // Pausar SOLO si estaba activo (no resucitar cerrados ni tocar null).
+  await supabaseFetch(
+    `vic_v3_conversations?id=eq.${conversationId}&followup_status=eq.activo`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        followup_status: "pausado",
+        followup_next_at: null,
+        followup_stage: 0,
+      }),
+    },
+  )
+}
+
+/**
+ * Arma (o re-arma) el ciclo de seguimiento: Vicky acaba de responder y la
+ * pelota queda en el cliente. Resetea la cadencia desde ahora. Best-effort.
+ */
+export async function armFollowup(contact: string): Promise<void> {
+  if (!contact) return
+  const conversationId = await getOrCreateConversationId(contact)
+  if (!conversationId) return
+  const now = new Date()
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      followup_status: "activo",
+      silence_anchor_at: now.toISOString(),
+      followup_stage: 0,
+      followup_attempts: 0,
+      followup_next_at: new Date(now.getTime() + FOLLOWUP_FIRST_OFFSET_MS).toISOString(),
+      followup_closed_reason: null,
+    }),
+  })
+}
+
+/** Cierra el ciclo definitivamente (opt_out, derivado, agotado, respondio). */
+export async function closeFollowup(contact: string, reason: string): Promise<void> {
+  if (!contact) return
+  const conversationId = await getOrCreateConversationId(contact)
+  if (!conversationId) return
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      followup_status: "cerrado",
+      followup_next_at: null,
+      followup_closed_reason: reason,
+    }),
+  })
+}
+
+/**
+ * Persiste un toque de re-engagement como mensaje del asistente (para que el
+ * próximo turno de Vicky tenga el contexto), SIN tocar silence_anchor_at ni
+ * last_user_at (el push no reinicia la cadencia).
+ */
+export async function appendAssistantV3(contact: string, content: string): Promise<void> {
+  if (!contact || !content) return
+  const conversationId = await getOrCreateConversationId(contact)
+  if (!conversationId) return
+  await supabaseFetch(`vic_v3_messages`, {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      role: "assistant",
+      content,
+      at: new Date().toISOString(),
+    }),
+  })
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ updated_at: new Date().toISOString() }),
+  })
+}
+
+// ── Lado del cron de re-engagement ───────────────────────────────────────────
+
+export type FollowupClaim = {
+  conversation_id: string
+  contact: string
+  stage: number
+}
+
+/**
+ * Reclama atómicamente (server-side, FOR UPDATE SKIP LOCKED) los seguimientos
+ * vencidos y avanza su estado. Solo el "ganador" de cada fila la recibe, así
+ * dos ticks solapados jamás duplican un envío.
+ */
+export async function claimFollowups(batch = 10): Promise<FollowupClaim[]> {
+  const rows = await supabaseFetch<FollowupClaim[]>(`rpc/vic_v3_claim_followups`, {
+    method: "POST",
+    body: JSON.stringify({ batch }),
+  })
+  return rows || []
+}
+
+/** Registra el resultado de un toque en la tabla de auditoría. Best-effort. */
+export async function logFollowup(entry: {
+  conversationId: string
+  contact: string
+  stage: number
+  content: string
+  ok: boolean
+  error?: string
+}): Promise<void> {
+  await supabaseFetch(`vic_v3_followup_log`, {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      conversation_id: entry.conversationId,
+      contact: entry.contact,
+      stage: entry.stage,
+      content: entry.content,
+      ok: entry.ok,
+      error: entry.error || null,
+    }),
+  })
+}
+
+/** Secret compartido del cron (vive en vic_kv; lo setea la migración). */
+export async function getFollowupCronSecret(): Promise<string> {
+  const rows = await supabaseFetch<{ value: string }[]>(
+    `vic_kv?key=eq.followup_cron_secret&select=value&limit=1`,
+  )
+  return rows && rows.length > 0 ? rows[0].value : ""
+}

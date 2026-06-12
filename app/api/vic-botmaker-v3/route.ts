@@ -31,6 +31,13 @@ import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
 import { fetchHistoryV3, appendTurnV3, getPrefEscalon } from "@/lib/supabase-persistence-v3"
 import { acquireLock, releaseLock, hashMessage } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
+import { sanitizarVoseo } from "@/lib/voseo-v3"
+import {
+  getFollowupStatus,
+  markUserActivity,
+  armFollowup,
+  closeFollowup,
+} from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -64,39 +71,29 @@ const GENERIC_ERROR_MSG =
 const ESCALADA_ERROR_MSG =
   "Disculpa, sigo teniendo un problema técnico. Ya le avisé a un ejecutivo para que se contacte contigo a la brevedad. 🙏"
 
-// Saneador anti-voseo (D): la regla del prompt ya pide español chileno (tuteo),
-// pero el modelo se escapa de forma intermitente ("Recordá", "Acá"). Esta capa
-// determinista normaliza los voseos/argentinismos más comunes en el reply de
-// salida, antes de persistir y enviar, preservando la mayúscula inicial. Usa
-// límites Unicode (\p{L}) porque \b no funciona junto a vocales acentuadas.
-const VOSEO_MAP: [RegExp, string][] = [
-  [/(?<!\p{L})record[aá](?!\p{L})/giu, "recuerda"],
-  [/(?<!\p{L})ac[aá](?!\p{L})/giu, "aquí"],
-  [/(?<!\p{L})pod[eé]s(?!\p{L})/giu, "puedes"],
-  [/(?<!\p{L})ten[eé]s(?!\p{L})/giu, "tienes"],
-  [/(?<!\p{L})quer[eé]s(?!\p{L})/giu, "quieres"],
-  [/(?<!\p{L})sab[eé]s(?!\p{L})/giu, "sabes"],
-  [/(?<!\p{L})hac[eé]s(?!\p{L})/giu, "haces"],
-  [/(?<!\p{L})mir[aá](?!\p{L})/giu, "mira"],
-  [/(?<!\p{L})fijate(?!\p{L})/giu, "fíjate"],
-  [/(?<!\p{L})avisame(?!\p{L})/giu, "avísame"],
-  [/(?<!\p{L})contame(?!\p{L})/giu, "cuéntame"],
-  [/(?<!\p{L})disculpá(?!\p{L})/giu, "disculpa"],
-  [/(?<!\p{L})dale(?!\p{L})/giu, "ya"],
-]
+// Saneador anti-voseo (D): vive en lib/voseo-v3.ts (compartido con el cron de
+// re-engagement, que también sanea sus nudges antes de enviar).
 
-function sanitizarVoseo(texto: string): string {
-  if (!texto) return texto
-  let out = texto
-  for (const [re, repl] of VOSEO_MAP) {
-    out = out.replace(re, (match) =>
-      match[0] === match[0].toUpperCase()
-        ? repl.charAt(0).toUpperCase() + repl.slice(1)
-        : repl,
-    )
-  }
-  return out
-}
+// ── Re-engagement (item 5) ────────────────────────────────────────────────
+// Tools cuyo uso exitoso marca INTENCIÓN COMERCIAL → se arma la cadencia de
+// seguimiento si el cliente se queda callado.
+const FOLLOWUP_ARMING_TOOLS = new Set([
+  "cotizar_referencial",
+  "generar_link_cotizadora",
+  "consultar_descuento_referencial",
+  "consultar_siguiente_descuento",
+  "aplicar_siguiente_descuento",
+])
+// Tools que CIERRAN el ciclo: la conversación quedó en manos de un humano
+// (reunión agendada, callback registrado, derivación) — no perseguimos más.
+const FOLLOWUP_CLOSING_TOOLS = new Set([
+  "agendar_reunion",
+  "registrar_solicitud_callback",
+  "derivar_a_soporte",
+])
+// Opt-out explícito del cliente → cerrar y no contactar más.
+const OPTOUT_RE =
+  /no\s+me\s+(escrib|contact|llam|molest)|dejen?\s+de\s+(escribir|contactar|molestar)|no\s+quiero\s+que\s+me\s+(escriban|contacten)|no\s+(me\s+)?interesa\s*(,|\.|!)?\s*(gracias)?\s*$|\bstop\b|b[aá]jenme/iu
 
 // ── Utilidades ────────────────────────────────────────────────────────
 function getEnv(name: string) {
@@ -144,6 +141,10 @@ async function processInBackground(
   apiKey: string,
 ): Promise<void> {
   try {
+    // 0. Re-engagement: el cliente habló → registrar actividad y pausar la
+    // cadencia en curso (si la había). Se re-arma al final del turno.
+    await markUserActivity(contact).catch(() => {})
+
     // 1. Cargar historial
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
 
@@ -338,6 +339,34 @@ async function processInBackground(
       }
     } else {
       console.warn(`[v3-bg] Reply vacío para ${contact}, no se envía push`)
+    }
+
+    // 5. Re-engagement: decidir el estado del ciclo según cómo terminó el turno.
+    //    - Opt-out explícito → cerrar (no contactar más).
+    //    - Tool de cierre (reunión/callback/derivación) → cerrar (quedó en humanos).
+    //    - Tool comercial este turno, o ciclo ya activo/pausado → (re)armar: la
+    //      pelota queda en el cliente y la cadencia parte de cero desde ahora.
+    try {
+      const finalToolCalls = (result.toolCalls || []) as ToolCallRecord[]
+      const usoCierre = finalToolCalls.some(
+        (c) => FOLLOWUP_CLOSING_TOOLS.has(c.name) && c.ok,
+      )
+      const usoComercial = finalToolCalls.some(
+        (c) => FOLLOWUP_ARMING_TOOLS.has(c.name) && c.ok,
+      )
+      if (OPTOUT_RE.test(message)) {
+        await closeFollowup(contact, "opt_out")
+        console.log(`[v3-followup] opt-out detectado, ciclo cerrado contact=${contact}`)
+      } else if (usoCierre) {
+        await closeFollowup(contact, "derivado")
+      } else if (reply) {
+        const estado = await getFollowupStatus(contact)
+        if (usoComercial || estado === "activo" || estado === "pausado") {
+          await armFollowup(contact)
+        }
+      }
+    } catch (err) {
+      console.error(`[v3-followup] Error actualizando seguimiento:`, err)
     }
 
     const pdfUrl = extractPdfUrl(result.toolCalls as ToolCallRecord[])
