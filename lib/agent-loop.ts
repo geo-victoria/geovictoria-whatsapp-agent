@@ -26,6 +26,7 @@ import {
   clearPrefDraft,
   setFormalQuote,
   getFormalQuote,
+  setQuotePointer,
   type PrefParams,
 } from "./supabase-persistence-v3"
 
@@ -361,6 +362,26 @@ export async function runAgentLoop(params: {
                 ? result.quoteId
                 : ""
             if (qid) await setFormalQuote(contact, qid).catch(() => {})
+            // Item B: puntero durable para retomar esta cotización más adelante
+            // (anti-amnesia). Sobrevive al borrado de historial y al TTL de 24h.
+            if (qid) {
+              const str = (k: string): string | undefined =>
+                k in result && typeof (result as Record<string, unknown>)[k] === "string"
+                  ? ((result as Record<string, unknown>)[k] as string)
+                  : undefined
+              const num = (k: string): number | undefined =>
+                k in result && typeof (result as Record<string, unknown>)[k] === "number"
+                  ? ((result as Record<string, unknown>)[k] as number)
+                  : undefined
+              await setQuotePointer(contact, {
+                quoteId: qid,
+                dealId: str("dealId"),
+                acceptanceUrl: str("acceptanceUrl"),
+                pdfUrl: str("pdfUrl"),
+                totalClp: num("totalCLP"),
+                totalUf: num("totalUF"),
+              }).catch(() => {})
+            }
           } else if (toolName === "aplicar_siguiente_descuento") {
             // Refrescar la vigencia de la formal sobre la que se negocia.
             const qid =

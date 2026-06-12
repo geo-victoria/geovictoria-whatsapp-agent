@@ -354,6 +354,90 @@ export async function getFormalQuote(contact: string): Promise<string> {
   return row.formal_quote_id
 }
 
+// ── Item B: puntero durable a la cotización existente (anti-amnesia) ────────
+//
+// Vive en vic_v3_quote_pointers, tabla SEPARADA de vic_v3_conversations, para
+// sobrevivir al borrado de historial. Permite que Vicky reconozca que el
+// contacto YA tiene una cotización formal y la retome (reenviar link, negociar
+// sobre ella) en vez de pedir datos de nuevo o generar otra — el bug de
+// amnesia de Rodrigo. A diferencia de getFormalQuote, NO tiene TTL: la
+// cotización vive su propia vigencia en Zoho / en el token de aceptación.
+
+export type QuotePointer = {
+  quoteId: string
+  dealId: string
+  acceptanceUrl: string
+  pdfUrl: string
+  totalClp: number | null
+  totalUf: number | null
+  updatedAt: string
+}
+
+type QuotePointerRow = {
+  quote_id: string | null
+  deal_id: string | null
+  acceptance_url: string | null
+  pdf_url: string | null
+  total_clp: number | null
+  total_uf: number | null
+  updated_at: string | null
+}
+
+/**
+ * Registra/actualiza el puntero durable a la última cotización formal del
+ * contacto. Best-effort (nunca rompe el flujo). Upsert por `contact` (PK).
+ */
+export async function setQuotePointer(
+  contact: string,
+  data: {
+    quoteId: string
+    dealId?: string
+    acceptanceUrl?: string
+    pdfUrl?: string
+    totalClp?: number
+    totalUf?: number
+  },
+): Promise<void> {
+  if (!contact || !data.quoteId) return
+  const body = {
+    contact,
+    quote_id: data.quoteId,
+    deal_id: data.dealId ?? null,
+    acceptance_url: data.acceptanceUrl ?? null,
+    pdf_url: data.pdfUrl ?? null,
+    total_clp: typeof data.totalClp === "number" ? data.totalClp : null,
+    total_uf: typeof data.totalUf === "number" ? data.totalUf : null,
+    updated_at: new Date().toISOString(),
+  }
+  await supabaseFetch(`vic_v3_quote_pointers?on_conflict=contact`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * Devuelve el puntero durable de la cotización del contacto, o null si no hay.
+ */
+export async function getQuotePointer(contact: string): Promise<QuotePointer | null> {
+  if (!contact) return null
+  const rows = await supabaseFetch<QuotePointerRow[]>(
+    `vic_v3_quote_pointers?contact=eq.${encodeURIComponent(contact)}&select=quote_id,deal_id,acceptance_url,pdf_url,total_clp,total_uf,updated_at&limit=1`,
+  )
+  if (!rows || rows.length === 0) return null
+  const r = rows[0]
+  if (!r.quote_id) return null
+  return {
+    quoteId: r.quote_id,
+    dealId: r.deal_id || "",
+    acceptanceUrl: r.acceptance_url || "",
+    pdfUrl: r.pdf_url || "",
+    totalClp: r.total_clp,
+    totalUf: r.total_uf,
+    updatedAt: r.updated_at || "",
+  }
+}
+
 // ── Re-engagement (item 5): seguimiento por inactividad del cliente ─────────
 //
 // Estados de followup_status:

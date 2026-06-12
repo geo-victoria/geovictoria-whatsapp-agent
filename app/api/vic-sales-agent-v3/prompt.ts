@@ -111,6 +111,43 @@ export function getSystemPromptV3(contact?: string): string {
 }
 
 /**
+ * Item B (retomar cotización existente / anti-amnesia). Bloque inyectable al
+ * inicio del prompt cuando el contacto YA tiene una cotización formal generada
+ * antes (puntero durable en vic_v3_quote_pointers). Sin este contexto, tras
+ * perder el historial (borrado o ventana de 40 msjs) Vicky "olvida" la
+ * cotización y vuelve a pedir datos para cotizar de cero (bug de Rodrigo).
+ */
+export function formatCotizacionExistenteParaPrompt(p?: {
+  quoteId?: string
+  acceptanceUrl?: string
+  totalUf?: number | null
+  totalClp?: number | null
+}): string {
+  if (!p || !p.quoteId) return ""
+  const montos: string[] = []
+  if (typeof p.totalUf === "number" && p.totalUf > 0) {
+    montos.push(`${p.totalUf} UF`)
+  }
+  if (typeof p.totalClp === "number" && p.totalClp > 0) {
+    montos.push(`aprox. $${Math.round(p.totalClp).toLocaleString("es-CL")} CLP`)
+  }
+  const montoLinea = montos.length ? ` (total ${montos.join(" / ")})` : ""
+  const linkLinea = p.acceptanceUrl
+    ? `\nLink de aceptación de esa cotización (úsalo si te lo piden o para retomar): ${p.acceptanceUrl}`
+    : ""
+  return (
+    `ESTADO DE ESTE CONTACTO — LÉELO ANTES DE ACTUAR:\n` +
+    `Este contacto YA tiene una cotización formal generada anteriormente${montoLinea}.${linkLinea}\n` +
+    `Por lo tanto NO partes de cero con este cliente:\n` +
+    `- NO le vuelvas a pedir datos que ya entregó (empresa, RUT, cantidad de trabajadores, módulos) ni rehagas el preform desde el principio.\n` +
+    `- NO generes otra cotización nueva. Si quiere ajustes o más descuento, trabaja SOBRE esa cotización (consultar_siguiente_descuento / aplicar_siguiente_descuento).\n` +
+    `- Si solo quiere el link otra vez, avanzar o aceptar, reenvíale el link de aceptación de arriba tal cual.\n` +
+    `- Solo si pide explícitamente algo DISTINTO (otra cantidad de usuarios, otros módulos, otra empresa) puedes cotizar de nuevo, y confírmalo con él antes.\n` +
+    `Si retoma sin contexto (ej. "hola", "sigo interesado"), salúdalo reconociendo que ya tiene su cotización y ofrécele retomarla, no arranques una venta desde cero.\n\n`
+  )
+}
+
+/**
  * Formatea el número del canal como bloque inyectable al inicio del prompt.
  * El número viene como dígitos puros del webhook (ej. "56944668823") y se
  * presenta a Vicky en formato E.164 con + delante.

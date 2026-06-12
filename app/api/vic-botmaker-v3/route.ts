@@ -27,8 +27,16 @@
 
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
-import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
-import { fetchHistoryV3, appendTurnV3, getPrefEscalon } from "@/lib/supabase-persistence-v3"
+import {
+  getSystemPromptV3,
+  formatCotizacionExistenteParaPrompt,
+} from "@/app/api/vic-sales-agent-v3/prompt"
+import {
+  fetchHistoryV3,
+  appendTurnV3,
+  getPrefEscalon,
+  getQuotePointer,
+} from "@/lib/supabase-persistence-v3"
 import { acquireLock, releaseLock, hashMessage } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo } from "@/lib/voseo-v3"
@@ -149,9 +157,24 @@ async function processInBackground(
     // 1. Cargar historial
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
 
+    // 1.5. Item B (anti-amnesia): si el contacto YA tiene una cotización formal
+    // (puntero durable), inyectamos ese estado al prompt para que Vicky la
+    // retome en vez de re-cotizar de cero — incluso si perdió el historial.
+    const quotePointer = await getQuotePointer(contact).catch(() => null)
+    const contextoCotizacion = formatCotizacionExistenteParaPrompt(
+      quotePointer
+        ? {
+            quoteId: quotePointer.quoteId,
+            acceptanceUrl: quotePointer.acceptanceUrl,
+            totalUf: quotePointer.totalUf,
+            totalClp: quotePointer.totalClp,
+          }
+        : undefined,
+    )
+
     // 2. Correr el agent
     const result = await runAgentLoop({
-      systemPrompt: getSystemPromptV3(contact),
+      systemPrompt: contextoCotizacion + getSystemPromptV3(contact),
       history,
       userMessage: message,
       apiKey,
@@ -176,7 +199,12 @@ async function processInBackground(
           c.name === "aplicar_siguiente_descuento") &&
         c.ok,
     )
-    if (hasCotizacionUrl && !realCotizacion) {
+    // Item B: reenviar el link de aceptación de la cotización YA existente (el
+    // del puntero durable, inyectado en el contexto) es legítimo, no una
+    // alucinación: lo dejamos pasar aunque no haya tool de cotización este turno.
+    const reenviaLinkConocido =
+      !!quotePointer?.acceptanceUrl && reply.includes(quotePointer.acceptanceUrl)
+    if (hasCotizacionUrl && !realCotizacion && !reenviaLinkConocido) {
       console.error(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
       )
@@ -264,7 +292,8 @@ async function processInBackground(
           "ofrecer EXACTAMENTE su mensajeParaProspecto. NUNCA digas el % de memoria. NO generes la " +
           "cotización formal en este turno: solo ofrece el siguiente tramo de descuento."
         const retry = await runAgentLoop({
-          systemPrompt: getSystemPromptV3(contact) + FORZAR_TOOL_DESCUENTO,
+          systemPrompt:
+            contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_DESCUENTO,
           history,
           userMessage: message,
           apiKey,
