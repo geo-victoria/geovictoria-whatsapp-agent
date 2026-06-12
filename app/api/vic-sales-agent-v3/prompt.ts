@@ -578,6 +578,7 @@ Reglas:
 - El envío y la instalación se cobran por PUNTO, no por reloj. Un punto con 2 relojes tiene un solo envío y una sola instalación.
 - Modalidad del reloj por punto: si TODA la cotización es de una sola modalidad (todo arriendo o todo compra), no necesitas indicar \`modalidad\` en cada punto (se infiere del hardware). Si el cliente mezcla relojes en arriendo Y en compra en distintos puntos, indica \`modalidad\` ('arriendo' o 'venta') en cada entrada de puntosInstalacion. Si la tool te pide la modalidad por punto, es porque hay mezcla: vuelve a llamarla con ese dato.
 - El envío se cobra aunque el cliente auto-instale (el reloj igual se despacha); la instalación NO se cobra si autoInstalada: true.
+- LÉXICO: al pedir la ubicación del reloj, refiérete al cobro como "envío **o** instalación" (o "envío y/o instalación"), NUNCA "envío e instalación". Razón: el envío siempre aplica, pero la instalación solo si la hace GeoVictoria; decir "e instalación" da a entender que siempre van los dos.
 - Si el cliente NO especifica modalidad de instalación, default es autoInstalada: false (GeoVictoria instala).
 
 # Entrega del link de cotización
