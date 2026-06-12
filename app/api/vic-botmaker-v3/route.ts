@@ -165,7 +165,8 @@ async function processInBackground(
     // invocación exitosa de generar_link_cotizadora en este turno, el
     // modelo construyó la URL desde su propio output (alucinación).
     // Sobrescribimos por un mensaje genérico y lo loggeamos para alertar.
-    const hasCotizacionUrl = /cotizacion\.geovictoria\.com\/pdf\//i.test(reply)
+    const hasCotizacionUrl =
+      /cotizacion\.geovictoria\.com\/(pdf\/|quote-acceptance\.html)/i.test(reply)
     const toolCalls = (result.toolCalls || []) as ToolCallRecord[]
     // Tanto generar_link_cotizadora como aplicar_siguiente_descuento (commit
     // del descuento) regeneran un PDF legítimo del cotizador.
