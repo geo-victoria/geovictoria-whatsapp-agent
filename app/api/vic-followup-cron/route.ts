@@ -73,6 +73,10 @@ function nudgeEsSeguro(texto: string): boolean {
   if (!texto) return false
   if (texto.length > 400) return false
   if (/\d+\s*%|\$\s?\d|\bUF\b|https?:\/\//i.test(texto)) return false
+  // El modelo a veces se dirige al cliente con un nombre inventado — incluso
+  // "Vicky" (el suyo propio, bug real visto en test). En un nudge de 2 frases
+  // Vicky nunca necesita decir su propio nombre: si aparece, va el fallback.
+  if (/\bvicky\b/i.test(texto)) return false
   return true
 }
 
@@ -94,7 +98,7 @@ async function generarNudge(
     "Si la conversación recién partía y casi no hay contexto (solo un saludo o una pregunta suelta), usa un toque breve y humano tipo '¿Todo bien? Te perdí 😅' o '¿Sigues ahí?' — NO inventes un tema que no existió. " +
     instruccionDeTono(stage) +
     " REGLAS DURAS: español chileno con tuteo (tú/tienes/puedes; JAMÁS vos/tenés/podés). " +
-    "PROHIBIDO: mencionar precios, montos, porcentajes, descuentos, UF o links; pedir datos (nombre, RUT, email); inventar información nueva; usar más de un emoji. " +
+    "PROHIBIDO: mencionar precios, montos, porcentajes, descuentos, UF o links; inventar información nueva; usar más de un emoji; dirigirte al cliente por un nombre que NO aparezca dicho por él en la conversación (y JAMÁS lo llames 'Vicky' — Vicky eres tú). SÍ puedes recordarle el paso que quedó pendiente (por ejemplo, los datos que faltaban para emitir la cotización). " +
     "Devuelve SOLO el texto del mensaje, sin comillas ni explicación."
 
   const response = await client.messages.create({
