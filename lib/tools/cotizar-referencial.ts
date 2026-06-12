@@ -497,7 +497,7 @@ export async function cotizarReferencial(args: {
       )} CLP: incluye el pago único (equipos e instalación) + el primer mes del plan por adelantado. A partir del segundo mes se factura solo el plan mensual de $${fmtNumCL(
         totalRecurrenteCLP,
         0,
-      )} CLP/mes (IVA incluido), de forma mensual y recurrente mientras mantengas el servicio activo. Ese valor mensual es referencial: se calcula según los usuarios activos, así que puede variar si esa cantidad cambia.`,
+      )} CLP/mes (IVA incluido), de forma mensual y recurrente mientras mantengas el servicio activo. Ese valor mensual es referencial: el plan se factura en UF y se convierte a pesos con la UF del día de cada factura, así que el monto en CLP puede variar mes a mes según la UF (y también según la cantidad de usuarios activos).`,
     )
   } else if (itemsRecurrentes.length > 0) {
     partes.push("")
@@ -508,7 +508,7 @@ export async function cotizarReferencial(args: {
       )} CLP. A partir del segundo mes se factura el mismo plan mensual de $${fmtNumCL(
         totalRecurrenteCLP,
         0,
-      )} CLP/mes (IVA incluido), de forma mensual y recurrente mientras mantengas el servicio activo. Ese valor mensual es referencial: se calcula según los usuarios activos, así que puede variar si esa cantidad cambia.`,
+      )} CLP/mes (IVA incluido), de forma mensual y recurrente mientras mantengas el servicio activo. Ese valor mensual es referencial: el plan se factura en UF y se convierte a pesos con la UF del día de cada factura, así que el monto en CLP puede variar mes a mes según la UF (y también según la cantidad de usuarios activos).`,
     )
   }
 
