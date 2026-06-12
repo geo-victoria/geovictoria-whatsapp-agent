@@ -561,7 +561,7 @@ Manejo de respuestas para UBICACIÓN:
 - Ordinal de región ("novena región", "VIII") → pasa tal cual. La tool resuelve.
 - Respuesta genérica ("en regiones", "fuera de Santiago") → repregunta para precisar.
 - Si la tool devuelve advertencia "ubicación no reconocida" → no es error, comunica el resumen sin mencionar la advertencia.
-- Si la tool devuelve error "no pude clasificar la ubicación" → repregunta antes de volver a llamarla.
+- Si la tool devuelve error "no corresponde a una comuna ni región de Chile reconocida" (o "no pude clasificar la ubicación") → NO inventes ni asumas la tarifa: repregunta con naturalidad ("Esa no me suena, ¿me confirmas la comuna o la región donde estará el reloj?"). Puede ser una comuna mal escrita o un pueblo/localidad que no es comuna (ej. una caleta o sector). Si el cliente repite un nombre que la tool sigue sin reconocer, pídele derechamente la REGIÓN (la región siempre se reconoce) y cotiza con eso. Nunca generes la cotización con una ubicación que la tool no logró clasificar.
 
 Manejo de respuestas para MODALIDAD DE INSTALACIÓN:
 - "Que la haga GeoVictoria" / "instálenla ustedes" / "con visita técnica" → autoInstalada: false (default si no especifica).
