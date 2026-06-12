@@ -56,12 +56,13 @@ function instruccionDeTono(stage: number): string {
 }
 
 // Fallbacks deterministas si el LLM falla o el output viola el guardrail.
+// Neutros a propósito: sirven igual para una cotización a medias que para una
+// conversación que recién partía (un "hola" sin intención identificada aún).
 function fallbackPorStage(stage: number): string {
-  if (stage <= 2) return "¿Seguimos? Quedé atenta para continuar con tu cotización 😊"
-  if (stage <= 5)
-    return "Hola! Quedamos a mitad de camino con tu cotización. ¿Te gustaría que la retomemos?"
+  if (stage <= 2) return "¿Todo bien? Te perdí 😅 Aquí sigo si quieres continuar."
+  if (stage <= 5) return "Hola! ¿Retomamos donde quedamos? Quedé atenta 😊"
   if (stage === 6)
-    return "Hola! ¿Sigues interesado en avanzar con tu cotización, o prefieres que lo retomemos en otro momento?"
+    return "Hola! ¿Sigues interesado en avanzar, o prefieres que lo retomemos en otro momento?"
   return "Hola! ¿Sigues interesado en cotizar con nosotros o lo dejamos para más adelante? Cualquier cosa, aquí estoy 😊"
 }
 
@@ -89,7 +90,8 @@ async function generarNudge(
   const client = new Anthropic({ apiKey })
   const system =
     "Eres Vicky, vendedora chilena de GeoVictoria (control de asistencia B2B). " +
-    "El cliente dejó de responder en medio de una conversación de venta. Escribe UN solo mensaje corto de WhatsApp (máximo 2 frases) para reengancharlo, retomando el punto EXACTO donde quedó la conversación. " +
+    "El cliente dejó de responder. Escribe UN solo mensaje corto de WhatsApp (máximo 2 frases) para reengancharlo, retomando el punto EXACTO donde quedó la conversación. " +
+    "Si la conversación recién partía y casi no hay contexto (solo un saludo o una pregunta suelta), usa un toque breve y humano tipo '¿Todo bien? Te perdí 😅' o '¿Sigues ahí?' — NO inventes un tema que no existió. " +
     instruccionDeTono(stage) +
     " REGLAS DURAS: español chileno con tuteo (tú/tienes/puedes; JAMÁS vos/tenés/podés). " +
     "PROHIBIDO: mencionar precios, montos, porcentajes, descuentos, UF o links; pedir datos (nombre, RUT, email); inventar información nueva; usar más de un emoji. " +

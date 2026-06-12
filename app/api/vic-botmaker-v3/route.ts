@@ -33,7 +33,6 @@ import { acquireLock, releaseLock, hashMessage } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo } from "@/lib/voseo-v3"
 import {
-  getFollowupStatus,
   markUserActivity,
   armFollowup,
   closeFollowup,
@@ -75,15 +74,12 @@ const ESCALADA_ERROR_MSG =
 // re-engagement, que también sanea sus nudges antes de enviar).
 
 // ── Re-engagement (item 5) ────────────────────────────────────────────────
-// Tools cuyo uso exitoso marca INTENCIÓN COMERCIAL → se arma la cadencia de
-// seguimiento si el cliente se queda callado.
-const FOLLOWUP_ARMING_TOOLS = new Set([
-  "cotizar_referencial",
-  "generar_link_cotizadora",
-  "consultar_descuento_referencial",
-  "consultar_siguiente_descuento",
-  "aplicar_siguiente_descuento",
-])
+// La cadencia se arma SIEMPRE que Vicky responde y la pelota queda en el
+// cliente — desde el primer "hola", con o sin intención identificada (si la
+// conversación recién parte, el nudge es un "¿todo bien? te perdí").
+// Excepciones: conversaciones de soporte (cliente existente con consulta
+// operativa) y despedidas naturales — ahí no se persigue.
+const FOLLOWUP_SUPPORT_TOOLS = new Set(["consultar_agente_soporte"])
 // Tools que CIERRAN el ciclo: la conversación quedó en manos de un humano
 // (reunión agendada, callback registrado, derivación) — no perseguimos más.
 const FOLLOWUP_CLOSING_TOOLS = new Set([
@@ -91,6 +87,11 @@ const FOLLOWUP_CLOSING_TOOLS = new Set([
   "registrar_solicitud_callback",
   "derivar_a_soporte",
 ])
+// Despedida corta y natural ("gracias!", "chao", "nos vemos") → la conversación
+// terminó bien; un "te perdí" después de un adiós sería torpe. Solo aplica a
+// mensajes cortos: "gracias, ¿y cuánto vale el reloj?" NO es despedida.
+const FAREWELL_RE =
+  /\b(gracias|chao|chau|nos vemos|hasta luego|adi[oó]s|que est[eé]s bien)\b/iu
 // Opt-out explícito del cliente → cerrar y no contactar más.
 const OPTOUT_RE =
   /no\s+me\s+(escrib|contact|llam|molest)|dejen?\s+de\s+(escribir|contactar|molestar)|no\s+quiero\s+que\s+me\s+(escriban|contacten)|no\s+(me\s+)?interesa\s*(,|\.|!)?\s*(gracias)?\s*$|\bstop\b|b[aá]jenme/iu
@@ -344,26 +345,26 @@ async function processInBackground(
     // 5. Re-engagement: decidir el estado del ciclo según cómo terminó el turno.
     //    - Opt-out explícito → cerrar (no contactar más).
     //    - Tool de cierre (reunión/callback/derivación) → cerrar (quedó en humanos).
-    //    - Tool comercial este turno, o ciclo ya activo/pausado → (re)armar: la
-    //      pelota queda en el cliente y la cadencia parte de cero desde ahora.
+    //    - En cualquier otro turno con respuesta real → (re)armar SIEMPRE, desde
+    //      el primer "hola" (intención identificada o no), salvo que el turno
+    //      haya sido de soporte o una despedida natural del cliente.
     try {
       const finalToolCalls = (result.toolCalls || []) as ToolCallRecord[]
       const usoCierre = finalToolCalls.some(
         (c) => FOLLOWUP_CLOSING_TOOLS.has(c.name) && c.ok,
       )
-      const usoComercial = finalToolCalls.some(
-        (c) => FOLLOWUP_ARMING_TOOLS.has(c.name) && c.ok,
+      const esSoporte = finalToolCalls.some(
+        (c) => FOLLOWUP_SUPPORT_TOOLS.has(c.name) && c.ok,
       )
+      const esDespedida =
+        message.trim().length <= 30 && FAREWELL_RE.test(message)
       if (OPTOUT_RE.test(message)) {
         await closeFollowup(contact, "opt_out")
         console.log(`[v3-followup] opt-out detectado, ciclo cerrado contact=${contact}`)
       } else if (usoCierre) {
         await closeFollowup(contact, "derivado")
-      } else if (reply) {
-        const estado = await getFollowupStatus(contact)
-        if (usoComercial || estado === "activo" || estado === "pausado") {
-          await armFollowup(contact)
-        }
+      } else if (reply && !esSoporte && !esDespedida) {
+        await armFollowup(contact)
       }
     } catch (err) {
       console.error(`[v3-followup] Error actualizando seguimiento:`, err)
