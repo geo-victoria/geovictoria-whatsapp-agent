@@ -138,3 +138,83 @@ export async function releaseLock(contact: string): Promise<void> {
     console.error(`[v3-lock] Error liberando lock ${contact}:`, err)
   }
 }
+
+// ── Buffer de entrada (ráfaga de mensajes) ──────────────────────────────────
+//
+// vic_v3_inbox acumula los mensajes entrantes por contacto. El procesador que
+// toma el lock DRENA todos los pendientes y los procesa como un solo turno, en
+// vez de descartar los que llegan durante el procesamiento (bug del caso
+// Rodrigo: rubro/nombre/dirección en 3 mensajes seguidos se perdían).
+
+export type InboxMessage = { message: string; created_at: string }
+
+/**
+ * Encola un mensaje entrante en el buffer del contacto. Best-effort.
+ * Dedup de reintentos de Botmaker vía índice único (contact, msg_hash):
+ * `resolution=ignore-duplicates` hace que un retry no se encole dos veces.
+ */
+export async function bufferInboundMessage(
+  contact: string,
+  message: string,
+  msgHash: string,
+): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_inbox`, {
+      method: "POST",
+      headers: { ...HEADERS, Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({ contact, message, msg_hash: msgHash }),
+      cache: "no-store",
+    })
+  } catch (err) {
+    console.error("[v3-inbox] Error encolando mensaje:", err)
+  }
+}
+
+/**
+ * Drena (borra y devuelve) TODOS los mensajes pendientes del contacto, en orden
+ * cronológico. El DELETE ... RETURNING es atómico: dos procesadores nunca
+ * obtienen la misma fila. Devuelve [] si no hay nada o si Supabase falla.
+ */
+export async function drainInbox(contact: string): Promise<InboxMessage[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return []
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_inbox?contact=eq.${encodeURIComponent(contact)}&select=message,created_at`,
+      {
+        method: "DELETE",
+        headers: { ...HEADERS, Prefer: "return=representation" },
+        cache: "no-store",
+      },
+    )
+    if (!res.ok) return []
+    const rows = (await res.json().catch(() => [])) as InboxMessage[]
+    if (!Array.isArray(rows)) return []
+    return rows.sort(
+      (a, b) => Date.parse(a.created_at || "") - Date.parse(b.created_at || ""),
+    )
+  } catch (err) {
+    console.error("[v3-inbox] Error drenando buffer:", err)
+    return []
+  }
+}
+
+/**
+ * ¿Hay mensajes pendientes en el buffer del contacto? (sin borrarlos).
+ * Se usa para cerrar la ventana de carrera entre el último drenaje vacío y la
+ * liberación del lock.
+ */
+export async function inboxHasPending(contact: string): Promise<boolean> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return false
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_inbox?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
+      { headers: HEADERS, cache: "no-store" },
+    )
+    if (!res.ok) return false
+    const rows = (await res.json().catch(() => [])) as unknown[]
+    return Array.isArray(rows) && rows.length > 0
+  } catch {
+    return false
+  }
+}

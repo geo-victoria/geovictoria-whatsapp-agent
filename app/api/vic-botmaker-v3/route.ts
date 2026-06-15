@@ -37,7 +37,14 @@ import {
   getPrefEscalon,
   getQuotePointer,
 } from "@/lib/supabase-persistence-v3"
-import { acquireLock, releaseLock, hashMessage } from "@/lib/processing-lock-v3"
+import {
+  acquireLock,
+  releaseLock,
+  hashMessage,
+  bufferInboundMessage,
+  drainInbox,
+  inboxHasPending,
+} from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo } from "@/lib/voseo-v3"
 import {
@@ -53,6 +60,19 @@ export const maxDuration = 60
 const MAX_INPUT_CHARS = 2000
 const INJECT_RE =
   /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
+
+// ── Ráfaga de mensajes (buffer + debounce + drenaje) ──────────────────────
+// Cada mensaje entrante se encola en vic_v3_inbox. El que toma el lock espera
+// una ventana corta de "silencio" para que la ráfaga aterrice, drena TODOS los
+// pendientes y los procesa como un solo turno combinado. Así no se descartan
+// los mensajes 2/3 de una ráfaga (caso Rodrigo) ni se fragmentan las respuestas.
+const BURST_DEBOUNCE_MS = Number(process.env.BURST_DEBOUNCE_MS || 1500)
+// Tope de turnos por sesión de ráfaga (anti-loop ante un flujo continuo).
+const MAX_BURST_TURNS = 10
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 // ── Tipos ─────────────────────────────────────────────────────────────
 type BotmakerRequest = { contact?: string; message?: string }
@@ -144,16 +164,12 @@ function extractPdfUrl(
  *   3. Enviar reply final vía push
  *   4. Liberar lock (siempre, incluso si hay error)
  */
-async function processInBackground(
+async function processOneTurn(
   contact: string,
   message: string,
   apiKey: string,
 ): Promise<void> {
   try {
-    // 0. Re-engagement: el cliente habló → registrar actividad y pausar la
-    // cadencia en curso (si la había). Se re-arma al final del turno.
-    await markUserActivity(contact).catch(() => {})
-
     // 1. Cargar historial
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
 
@@ -438,13 +454,68 @@ async function processInBackground(
     } catch {
       // No-op
     }
+  }
+}
+
+// ── Orquestador de la ráfaga ───────────────────────────────────────────
+/**
+ * Lo invoca (vía after()) la request que TOMÓ el lock. Espera un debounce para
+ * que la ráfaga aterrice, drena todos los mensajes pendientes del contacto y
+ * los procesa como un solo turno combinado; repite mientras lleguen más durante
+ * el procesamiento. Gestiona el lock y el indicador de "escribiendo".
+ *
+ * Carrera de cierre: si un mensaje entra entre el último drenaje vacío y la
+ * liberación del lock, se detecta con inboxHasPending y se re-toma el lock (o,
+ * si otra invocación ya lo tomó, esa se encarga). Así ningún mensaje queda
+ * varado en el buffer.
+ */
+async function processBurst(
+  contact: string,
+  apiKey: string,
+  seedMessage?: string,
+): Promise<void> {
+  let holdsLock = true
+  let turns = 0
+  let seed = seedMessage
+  try {
+    for (;;) {
+      await sleep(BURST_DEBOUNCE_MS)
+      let pending = await drainInbox(contact)
+
+      // Resiliencia: si el primer drenaje vino vacío pero teníamos el mensaje
+      // original (p. ej. Supabase falló al encolar), procesarlo para no perderlo.
+      if (pending.length === 0 && seed) {
+        pending = [{ message: seed, created_at: new Date().toISOString() }]
+      }
+      seed = undefined // el respaldo solo aplica al primer ciclo
+
+      if (pending.length === 0) {
+        // Tentativamente terminado: soltar el lock y cerrar la ventana de carrera.
+        await releaseLock(contact).catch(() => {})
+        holdsLock = false
+        if (!(await inboxHasPending(contact))) return
+        // Entró un mensaje justo en la ventana: intentar re-tomar el lock.
+        const re = await acquireLock(contact, "burst-recheck")
+        if (!re.acquired) return // otra invocación tomó el lock; ella procesa
+        holdsLock = true
+        continue
+      }
+
+      const combinado = pending
+        .map((p) => p.message)
+        .join("\n")
+        .slice(0, MAX_INPUT_CHARS)
+      await processOneTurn(contact, combinado, apiKey)
+
+      if (++turns >= MAX_BURST_TURNS) {
+        // Salvaguarda: liberar y dejar que el próximo mensaje continúe el drenaje.
+        console.warn(`[v3-burst] tope de turnos alcanzado contact=${contact}`)
+        return
+      }
+    }
   } finally {
-    // Apagar el "escribiendo..." al terminar: la respuesta de Vicky ya se
-    // entregó (o se envió el mensaje de error), así el indicador no queda
-    // colgado y no aparece después del mensaje de Vicky.
     sendTypingIndicator(contact, false).catch(() => {})
-    // 5. Siempre liberar el lock
-    await releaseLock(contact).catch(() => {})
+    if (holdsLock) await releaseLock(contact).catch(() => {})
   }
 }
 
@@ -490,35 +561,32 @@ export async function POST(request: Request): Promise<NextResponse> {
       })
     }
 
-    // 5. Adquirir lock distribuido (Supabase)
-    const messageHash = hashMessage(contact, message)
-    const lockResult = await acquireLock(contact, messageHash)
+    // 5. Re-engagement: el cliente habló → pausar la cadencia en curso (si la
+    //    había). Se hace por cada mensaje entrante, antes de bufferear.
+    await markUserActivity(contact).catch(() => {})
 
+    // 6. Encolar el mensaje en el buffer de ráfaga (dedup de retries por hash).
+    const messageHash = hashMessage(contact, message)
+    await bufferInboundMessage(contact, message, messageHash)
+
+    // 7. Tomar el lock. Solo UNA request por contacto procesa la ráfaga; las
+    //    demás dejan su mensaje en el buffer y el procesador activo lo drena.
+    const lockResult = await acquireLock(contact, messageHash)
     if (!lockResult.acquired) {
-      if (lockResult.existingHash === messageHash) {
-        console.log(
-          `[v3-botmaker] Retry duplicado para ${contact}, ignorando (mismo hash)`,
-        )
-      } else {
-        console.log(
-          `[v3-botmaker] Mensaje nuevo durante procesamiento para ${contact}, ignorando (el anterior está en curso)`,
-        )
-      }
-      // Respuesta vacía rápida. La primera request entrega vía push.
+      console.log(
+        `[v3-botmaker] ${contact}: mensaje encolado, ya hay un procesador activo`,
+      )
       return NextResponse.json({ reply: "" })
     }
 
-    // 6. Typing indicator (fire-and-forget, antes del response)
+    // 8. Typing indicator + procesamiento de la ráfaga en background.
     sendTypingIndicator(contact).catch(() => {})
-
-    // 7. Disparar procesamiento en background con after()
     console.log(
       `[v3-botmaker] IN contact=${contact} msg=${JSON.stringify(message.slice(0, 60))}`,
     )
-    after(processInBackground(contact, message, apiKey))
+    after(processBurst(contact, apiKey, message))
 
-    // 8. Responder INMEDIATO a Botmaker
-    // El reply real se entrega vía push cuando el background termina.
+    // 9. Responder INMEDIATO a Botmaker. El reply real se entrega vía push.
     return NextResponse.json({ reply: "" })
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err)
