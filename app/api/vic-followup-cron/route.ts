@@ -29,6 +29,7 @@ import {
   appendAssistantV3,
   logFollowup,
   getFollowupCronSecret,
+  closeFollowup,
 } from "@/lib/supabase-persistence-v3"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo } from "@/lib/voseo-v3"
@@ -69,6 +70,19 @@ function fallbackPorStage(stage: number): string {
 // Guardrail determinista del nudge: el toque NUNCA lleva precios, porcentajes
 // ni links (eso vive en las tools del agente, no en un push). Si el modelo se
 // escapó, usamos el fallback del tramo.
+// El modelo a veces, en lugar de un toque, devuelve una EXPLICACIÓN de por qué
+// no debería contactar (típico cuando el historial trae un opt-out que no se
+// cerró: "No puedo escribir un mensaje de reenganche porque el cliente pidió
+// que no le hables más… podría considerarse acoso…"). Ese meta-texto JAMÁS debe
+// enviarse: si aparece, se omite el envío y se cierra el ciclo (el modelo nos
+// está avisando que no hay que seguir contactando).
+function nudgeEsMetaORechazo(texto: string): boolean {
+  if (!texto) return false
+  return /no\s+puedo\s+(escribir|enviar|generar|mandar|contactar|seguir|hacer)|mensaje\s+de\s+reenganche|\breenganche\b|\bacoso\b|no\s+le\s+(hables|escribas|contactes)|respetar\s+(su|el|la)|estrategia\s+(correcta|adecuada)|violar[ií]a|considerarse|dejar\s+de\s+(enviar|contactar|escribir|molestar|mensajes)|el\s+cliente\s+(ha|solicit|pidi|no\s+quiere|dej)/i.test(
+    texto,
+  )
+}
+
 function nudgeEsSeguro(texto: string): boolean {
   if (!texto) return false
   if (texto.length > 400) return false
@@ -146,6 +160,24 @@ export async function POST(req: Request) {
     } catch (err) {
       errorMsg = `generación falló: ${err instanceof Error ? err.message : String(err)}`
       console.error(`[followup-cron] ${errorMsg} (contact=${claim.contact})`)
+    }
+    // Si el modelo devolvió una explicación de por qué NO contactar (meta /
+    // rechazo), no se envía NADA y se cierra el ciclo: nos está avisando que el
+    // cliente no quiere más mensajes (típicamente un opt-out no detectado).
+    if (nudgeEsMetaORechazo(nudge)) {
+      console.warn(
+        `[followup-cron] Nudge meta/rechazo detectado; se omite y cierra ciclo. contact=${claim.contact} nudge=${JSON.stringify(nudge.slice(0, 200))}`,
+      )
+      await closeFollowup(claim.contact, "modelo_declino").catch(() => {})
+      await logFollowup({
+        conversationId: claim.conversation_id,
+        contact: claim.contact,
+        stage: claim.stage,
+        content: nudge,
+        ok: false,
+        error: "nudge meta/rechazo: omitido, ciclo cerrado",
+      }).catch(() => {})
+      continue
     }
     if (!nudgeEsSeguro(nudge)) {
       if (nudge) {

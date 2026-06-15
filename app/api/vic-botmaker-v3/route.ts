@@ -122,7 +122,7 @@ const FAREWELL_RE =
   /\b(gracias|chao|chau|nos vemos|hasta luego|adi[oó]s|que est[eé]s bien)\b/iu
 // Opt-out explícito del cliente → cerrar y no contactar más.
 const OPTOUT_RE =
-  /no\s+me\s+(escrib|contact|llam|molest)|dejen?\s+de\s+(escribir|contactar|molestar)|no\s+quiero\s+que\s+me\s+(escriban|contacten)|no\s+(me\s+)?interesa\s*(,|\.|!)?\s*(gracias)?\s*$|\bstop\b|b[aá]jenme/iu
+  /no\s+me\s+(escrib|contact|llam|molest|habl|insist)|dej[ae]n?\s+de\s+(escribir|contactar|molestar|hablar|insistir)|d[eé]j[ae]n?me\s+en\s+paz|no\s+quiero\s+que\s+me\s+(escriban|contacten|hablen)|no\s+(me\s+)?interesa\s*(,|\.|!)?\s*(gracias)?\s*$|\bstop\b|b[aá]jenme/iu
 
 // ── Utilidades ────────────────────────────────────────────────────────
 function getEnv(name: string) {
