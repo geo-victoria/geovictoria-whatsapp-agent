@@ -120,9 +120,9 @@ const FOLLOWUP_CLOSING_TOOLS = new Set([
 // mensajes cortos: "gracias, ¿y cuánto vale el reloj?" NO es despedida.
 const FAREWELL_RE =
   /\b(gracias|chao|chau|nos vemos|hasta luego|adi[oó]s|que est[eé]s bien)\b/iu
-// Opt-out explícito del cliente → cerrar y no contactar más.
-const OPTOUT_RE =
-  /no\s+me\s+(escrib|contact|llam|molest|habl|insist)|dej[ae]n?\s+de\s+(escribir|contactar|molestar|hablar|insistir)|d[eé]j[ae]n?me\s+en\s+paz|no\s+quiero\s+que\s+me\s+(escriban|contacten|hablen)|no\s+(me\s+)?interesa\s*(,|\.|!)?\s*(gracias)?\s*$|\bstop\b|b[aá]jenme/iu
+// Opt-out: lo decide el MODELO vía la tool marcar_no_contactar (ver route abajo),
+// no un regex sobre el texto del usuario. (Antes había un OPTOUT_RE; se eliminó
+// porque siempre se le escapaba alguna redacción — p. ej. "no me hables más".)
 
 // ── Utilidades ────────────────────────────────────────────────────────
 function getEnv(name: string) {
@@ -396,6 +396,10 @@ async function processOneTurn(
     //      haya sido de soporte o una despedida natural del cliente.
     try {
       const finalToolCalls = (result.toolCalls || []) as ToolCallRecord[]
+      // Opt-out: lo DECIDE el modelo (tool marcar_no_contactar), no un regex.
+      const usoOptOut = finalToolCalls.some(
+        (c) => c.name === "marcar_no_contactar" && c.ok,
+      )
       const usoCierre = finalToolCalls.some(
         (c) => FOLLOWUP_CLOSING_TOOLS.has(c.name) && c.ok,
       )
@@ -404,9 +408,9 @@ async function processOneTurn(
       )
       const esDespedida =
         message.trim().length <= 30 && FAREWELL_RE.test(message)
-      if (OPTOUT_RE.test(message)) {
+      if (usoOptOut) {
         await closeFollowup(contact, "opt_out")
-        console.log(`[v3-followup] opt-out detectado, ciclo cerrado contact=${contact}`)
+        console.log(`[v3-followup] opt-out (tool) → ciclo cerrado contact=${contact}`)
       } else if (usoCierre) {
         await closeFollowup(contact, "derivado")
       } else if (reply && !esSoporte && !esDespedida) {

@@ -76,6 +76,11 @@ import {
   enviarCertificacion,
   type EnviarCertificacionResultado,
 } from "./enviar-certificacion"
+import {
+  marcarNoContactarSchema,
+  marcarNoContactar,
+  type MarcarNoContactarResultado,
+} from "./marcar-no-contactar"
 
 export const TOOL_SCHEMAS = [
   buscarProspectEnZohoSchema,
@@ -96,6 +101,7 @@ export const TOOL_SCHEMAS = [
   consultarSiguienteDescuentoSchema,
   aplicarSiguienteDescuentoSchema,
   enviarCertificacionSchema,
+  marcarNoContactarSchema,
 ] as const
 
 export type ToolResult =
@@ -111,6 +117,7 @@ export type ToolResult =
   | ConsultarSiguienteDescuentoResultado
   | AplicarSiguienteDescuentoResultado
   | EnviarCertificacionResultado
+  | MarcarNoContactarResultado
   | { ok: false; error: string }
 
 /**
@@ -155,6 +162,9 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "enviar_certificacion":
         return await enviarCertificacion()
+
+      case "marcar_no_contactar":
+        return marcarNoContactar(input as never)
 
       default:
         return {
