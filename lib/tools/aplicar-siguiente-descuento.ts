@@ -26,7 +26,7 @@ const VICKY_COTIZADORA_SECRET = process.env.VICKY_COTIZADORA_SECRET || ""
 export const aplicarSiguienteDescuentoSchema = {
   name: "aplicar_siguiente_descuento",
   description:
-    "Avanza la cotización al siguiente escalón de descuento y devuelve un PDF nuevo (mismo número, fecha/hora actualizada, versión incrementada) para reenviar al cliente. Úsala SOLO cuando el prospecto objeta el precio de forma EXPLÍCITA (dice que es 'muy caro', que 'está fuera de presupuesto', pide rebaja, insiste en bajar el precio después de conocerlo). NUNCA la ofrezcas tú de forma proactiva. NO recibe porcentaje ni tipo: el servidor decide qué escalón corresponde según el orden de negocio (descuento de instalación primero — RM antes que regiones —, luego descuentos sobre el plan mensual de 10 → 20 → 30 → 35 → 40%). Pasa el `quote_id` que devolvió generar_link_cotizadora en esta conversación. Comunica al prospecto SOLO el contenido textual del `mensajeParaProspecto` que devuelve esta tool — incluye el link al PDF nuevo y la condición discursiva si aplica. NUNCA enuncies precios ni totales con descuento. Si la respuesta trae `topeAlcanzado=true`, ya se aplicó el último escalón y no hay más rebajas por ofrecer.",
+    "Avanza la cotización al siguiente escalón de descuento y devuelve un PDF nuevo (mismo número, fecha/hora actualizada, versión incrementada) para reenviar al cliente. Úsala SOLO cuando el prospecto objeta el precio de forma EXPLÍCITA (dice que es 'muy caro', que 'está fuera de presupuesto', pide rebaja, insiste en bajar el precio después de conocerlo). NUNCA la ofrezcas tú de forma proactiva. El servidor decide qué escalón corresponde según el orden de negocio (descuento de instalación primero — RM antes que regiones —, luego descuentos sobre el plan mensual de 10 → 20 → 30 → 35 → 40%). Pasa el `quote_id` que devolvió generar_link_cotizadora en esta conversación. IMPORTANTE: pasa también `pct_ofrecido` = el porcentaje EXACTO sobre el plan mensual que la última tool de descuento te devolvió y que ya le comunicaste al cliente (por ejemplo 35 si le ofreciste 35%): así el servidor garantiza que lo que se aplica en el PDF coincide con lo que prometiste. Comunica al prospecto SOLO el contenido textual del `mensajeParaProspecto` que devuelve esta tool — incluye el link al PDF nuevo y la condición discursiva si aplica. NUNCA enuncies precios ni totales con descuento. Si la respuesta trae `topeAlcanzado=true`, ya se aplicó el último escalón y no hay más rebajas por ofrecer.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -37,6 +37,13 @@ export const aplicarSiguienteDescuentoSchema = {
         minLength: 1,
         maxLength: 80,
       },
+      pct_ofrecido: {
+        type: "number" as const,
+        description:
+          "Porcentaje EXACTO de descuento sobre el plan mensual que ya le ofreciste al cliente y que vino de una tool de descuento previa (ej. 35). NO lo inventes: debe ser el % de la última oferta que comunicaste. El servidor garantiza comitear al menos ese nivel, acotado por el tope (40%). Si no negociaste un % de plan, omítelo.",
+        minimum: 0,
+        maximum: 40,
+      },
     },
     required: ["quote_id"],
   },
@@ -44,6 +51,7 @@ export const aplicarSiguienteDescuentoSchema = {
 
 export type AplicarSiguienteDescuentoInput = {
   quote_id: string
+  pct_ofrecido?: number
 }
 
 export type AplicarSiguienteDescuentoResultado =
@@ -72,6 +80,13 @@ export async function aplicarSiguienteDescuento(
   if (!quoteId) {
     return { ok: false, error: "Falta quote_id." }
   }
+  // % que Vicky ya le comunicó al cliente; el servidor lo usa como piso para que
+  // lo aplicado nunca quede por debajo de lo ofrecido. Acotado a 0..40.
+  const pctOfrecidoNum = Number(args?.pct_ofrecido)
+  const pctOfrecido =
+    Number.isFinite(pctOfrecidoNum) && pctOfrecidoNum > 0
+      ? Math.min(40, pctOfrecidoNum)
+      : 0
 
   try {
     const response = await fetch(
@@ -84,7 +99,9 @@ export async function aplicarSiguienteDescuento(
             ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET }
             : {}),
         },
-        body: JSON.stringify({ quoteId }),
+        body: JSON.stringify(
+          pctOfrecido > 0 ? { quoteId, pctOfrecido } : { quoteId },
+        ),
         cache: "no-store",
       },
     )
