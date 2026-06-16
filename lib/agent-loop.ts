@@ -143,6 +143,21 @@ export async function runAgentLoop(params: {
     return sanitized
   }
 
+  // Prompt caching: el system prompt de Vicky es grande y se reenvía en CADA
+  // iteración (hasta MAX_ITERATIONS por turno) y en cada turno de la conversación.
+  // Marcando el bloque de system con cache_control, el prefijo estable
+  // (tools + system, que se renderizan antes que los mensajes) se sirve desde
+  // caché a ~0,1× del precio tras la primera llamada. No cambia el modelo ni la
+  // calidad; solo recorta el costo de input. Se construye UNA vez para que los
+  // bytes sean idénticos entre llamadas (cualquier cambio invalida la caché).
+  const systemBlocks: Anthropic.Messages.TextBlockParam[] = [
+    {
+      type: "text",
+      text: systemPrompt,
+      cache_control: { type: "ephemeral" },
+    },
+  ]
+
   // Tope de generación pesada por turno: generar varias cotizaciones formales
   // (generar_link → Zoho + PDF + correo) en un solo turno supera el maxDuration
   // (60s), deja el chat sin respuesta y los reintentos regeneran en loop
@@ -155,7 +170,7 @@ export async function runAgentLoop(params: {
     const response = await client.messages.create({
       model: effectiveModel,
       max_tokens: MAX_TOKENS,
-      system: systemPrompt,
+      system: systemBlocks,
       // Las tools se serializan con su schema completo.
       // El cast es necesario porque TOOL_SCHEMAS es `as const`.
       tools: TOOL_SCHEMAS as unknown as Anthropic.Messages.Tool[],
@@ -163,6 +178,13 @@ export async function runAgentLoop(params: {
     })
 
     const stopReason = response.stop_reason
+
+    // Verificación de prompt caching: si cache_read se mantiene en 0 entre
+    // llamadas con el mismo prefijo, algún invalidador silencioso está activo.
+    const u = response.usage
+    console.log(
+      `[agent-loop] usage iter=${iteration} model=${effectiveModel} in=${u.input_tokens} cache_write=${u.cache_creation_input_tokens ?? 0} cache_read=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens}`,
+    )
 
     // Agregar la respuesta del assistant al historial.
     messages.push({
