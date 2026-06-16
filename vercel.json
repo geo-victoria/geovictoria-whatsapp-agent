@@ -41,6 +41,9 @@
     },
     "app/api/reengagement/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/vic-meeting-reminders/route.ts": {
+      "maxDuration": 60
     }
   }
 }

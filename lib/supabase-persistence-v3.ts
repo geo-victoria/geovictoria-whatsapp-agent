@@ -647,6 +647,30 @@ export async function markMeetingReminded(bookingUid: string): Promise<void> {
   await updateMeetingByUid(bookingUid, { reminder_sent_at: new Date().toISOString() })
 }
 
+/**
+ * Claim ATÓMICO del recordatorio: setea reminder_sent_at SOLO si seguía en null.
+ * Devuelve true si ESTE llamado ganó el claim (debe enviar), false si otro tick
+ * ya lo tomó. Evita doble envío entre ticks solapados del cron sin un lock.
+ */
+export async function claimMeetingReminder(bookingUid: string): Promise<boolean> {
+  if (!bookingUid) return false
+  const now = new Date().toISOString()
+  const rows = await supabaseFetch<{ booking_uid: string }[]>(
+    `vic_v3_meetings?booking_uid=eq.${encodeURIComponent(bookingUid)}&reminder_sent_at=is.null`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ reminder_sent_at: now, updated_at: now }),
+    },
+  )
+  return Array.isArray(rows) && rows.length > 0
+}
+
+/** Revierte el claim (vuelve reminder_sent_at a null) si el envío falló. */
+export async function unclaimMeetingReminder(bookingUid: string): Promise<void> {
+  await updateMeetingByUid(bookingUid, { reminder_sent_at: null })
+}
+
 /** Marca la próxima reunión futura del contacto como confirmada por WhatsApp. */
 export async function confirmMeetingAttendance(contact: string): Promise<MeetingRow | null> {
   if (!contact) return null

@@ -24,6 +24,9 @@ const SEND_MESSAGES_URL =
   "https://api.botmaker.com/v2.0/chats-actions/send-messages"
 const TYPING_URL =
   "https://api.botmaker.com/v2.0/chats-actions/send-read-typing-feedback"
+// Plantillas HSM (mensajes proactivos FUERA de la ventana de 24h, ej.
+// recordatorios de reunión). Endpoint dedicado de Botmaker.
+const WA_TEMPLATES_URL = "https://api.botmaker.com/v2.0/waTemplates"
 
 /** Normaliza el contactId al formato que espera Botmaker (sin "+"). */
 function normalizeContactId(raw: string): string {
@@ -85,6 +88,65 @@ export async function sendBotmakerMessage(
     return true
   } catch (err) {
     console.error("[botmaker-push] Excepción al enviar mensaje:", err)
+    return false
+  }
+}
+
+/**
+ * Envía una plantilla HSM de WhatsApp (mensaje proactivo aprobado por Meta) a
+ * un contacto. Se usa para los recordatorios de reunión, que salen fuera de la
+ * ventana de 24h y por eso NO pueden ir como texto libre.
+ *
+ * NOTA: el shape exacto del body de /v2.0/waTemplates debe confirmarse contra
+ * tu cuenta Botmaker (el swagger no estaba accesible al construir esto). Campos
+ * candidatos: templateName/templateId, languageCode y los valores de variables
+ * (`params`, en orden {{1}}, {{2}}…). Los botones quick-reply de la plantilla
+ * son estáticos (definidos en la plantilla aprobada), así que normalmente NO se
+ * pasan al enviar. Ajustar si Botmaker espera otro nombre de campo.
+ *
+ * @param contactId Teléfono del cliente (con o sin "+").
+ * @param templateName Nombre de la plantilla aprobada en Botmaker/Meta.
+ * @param params Valores de las variables del cuerpo, en orden ({{1}}, {{2}}…).
+ * @param languageCode Código de idioma de la plantilla (default "es").
+ */
+export async function sendBotmakerTemplate(
+  contactId: string,
+  templateName: string,
+  params: string[],
+  languageCode = "es",
+): Promise<boolean> {
+  if (!BM_TOKEN || !BM_CHANNEL_V3) {
+    console.error("[botmaker-template] BOTMAKER_ACCESS_TOKEN o BOTMAKER_CHANNEL_V3 no configurados")
+    return false
+  }
+  if (!contactId || !templateName) {
+    console.error("[botmaker-template] contactId y templateName son requeridos")
+    return false
+  }
+  const cleanContact = normalizeContactId(contactId)
+  try {
+    const res = await fetch(WA_TEMPLATES_URL, {
+      method: "POST",
+      headers: BM_HEADERS,
+      body: JSON.stringify({
+        chat: { channelId: BM_CHANNEL_V3, contactId: cleanContact },
+        templateName,
+        languageCode,
+        params,
+      }),
+      cache: "no-store",
+    })
+    if (res.status !== 202 && res.status !== 200) {
+      const body = await res.text().catch(() => "")
+      console.error(
+        `[botmaker-template] waTemplates ${res.status} para ${cleanContact}:`,
+        body.slice(0, 300),
+      )
+      return false
+    }
+    return true
+  } catch (err) {
+    console.error("[botmaker-template] Excepción al enviar plantilla:", err)
     return false
   }
 }
