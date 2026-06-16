@@ -24,9 +24,10 @@ const SEND_MESSAGES_URL =
   "https://api.botmaker.com/v2.0/chats-actions/send-messages"
 const TYPING_URL =
   "https://api.botmaker.com/v2.0/chats-actions/send-read-typing-feedback"
-// Plantillas HSM (mensajes proactivos FUERA de la ventana de 24h, ej.
-// recordatorios de reunión). Endpoint dedicado de Botmaker.
-const WA_TEMPLATES_URL = "https://api.botmaker.com/v2.0/waTemplates"
+// Notificaciones / plantillas HSM (mensajes proactivos FUERA de la ventana de
+// 24h, ej. recordatorios de reunión). Endpoint de la API de Notificaciones de
+// Botmaker (host distinto: go.botmaker.com).
+const NOTIFICATIONS_URL = "https://go.botmaker.com/api/v1.0/intent/v2"
 
 /** Normaliza el contactId al formato que espera Botmaker (sin "+"). */
 function normalizeContactId(raw: string): string {
@@ -93,30 +94,35 @@ export async function sendBotmakerMessage(
 }
 
 /**
+ * Número de WhatsApp del canal (sin "+"), que la API de notificaciones pide
+ * como `chatChannelNumber`. Se setea explícito (BOTMAKER_CHANNEL_NUMBER) o se
+ * extrae del channelId (ej. "GeoVictoriaEspaol-whatsapp-56967308227" →
+ * "56967308227").
+ */
+function channelNumber(): string {
+  const explicit = (process.env.BOTMAKER_CHANNEL_NUMBER || "").replace(/\D/g, "")
+  if (explicit) return explicit
+  const m = BM_CHANNEL_V3.match(/(\d{6,})\s*$/)
+  return m ? m[1] : ""
+}
+
+/**
  * Envía una plantilla HSM de WhatsApp (mensaje proactivo aprobado por Meta) a
- * un contacto. Se usa para los recordatorios de reunión, que salen fuera de la
- * ventana de 24h y por eso NO pueden ir como texto libre.
- *
- * NOTA: el shape exacto del body de /v2.0/waTemplates debe confirmarse contra
- * tu cuenta Botmaker (el swagger no estaba accesible al construir esto). Campos
- * candidatos: templateName/templateId, languageCode y los valores de variables
- * (`params`, en orden {{1}}, {{2}}…). Los botones quick-reply de la plantilla
- * son estáticos (definidos en la plantilla aprobada), así que normalmente NO se
- * pasan al enviar. Ajustar si Botmaker espera otro nombre de campo.
+ * un contacto, vía la API de Notificaciones de Botmaker. Se usa para los
+ * recordatorios de reunión, que salen fuera de la ventana de 24h y por eso NO
+ * pueden ir como texto libre.
  *
  * @param contactId Teléfono del cliente (con o sin "+").
- * @param templateName Nombre de la plantilla aprobada en Botmaker/Meta.
- * @param params Valores de las variables del cuerpo, en orden ({{1}}, {{2}}…).
- * @param languageCode Código de idioma de la plantilla (default "es").
+ * @param templateName Nombre de la plantilla aprobada (ruleNameOrId).
+ * @param params Variables de la plantilla por NOMBRE (ej. { nombre, hora_reunion }).
  */
 export async function sendBotmakerTemplate(
   contactId: string,
   templateName: string,
-  params: string[],
-  languageCode = "es",
+  params: Record<string, string>,
 ): Promise<boolean> {
-  if (!BM_TOKEN || !BM_CHANNEL_V3) {
-    console.error("[botmaker-template] BOTMAKER_ACCESS_TOKEN o BOTMAKER_CHANNEL_V3 no configurados")
+  if (!BM_TOKEN) {
+    console.error("[botmaker-template] BOTMAKER_ACCESS_TOKEN no configurado")
     return false
   }
   if (!contactId || !templateName) {
@@ -124,14 +130,20 @@ export async function sendBotmakerTemplate(
     return false
   }
   const cleanContact = normalizeContactId(contactId)
+  const chatChannelNumber = channelNumber()
+  if (!chatChannelNumber) {
+    console.error("[botmaker-template] no se pudo determinar chatChannelNumber")
+    return false
+  }
   try {
-    const res = await fetch(WA_TEMPLATES_URL, {
+    const res = await fetch(NOTIFICATIONS_URL, {
       method: "POST",
       headers: BM_HEADERS,
       body: JSON.stringify({
-        chat: { channelId: BM_CHANNEL_V3, contactId: cleanContact },
-        templateName,
-        languageCode,
+        chatPlatform: "whatsapp",
+        chatChannelNumber,
+        platformContactId: cleanContact,
+        ruleNameOrId: templateName,
         params,
       }),
       cache: "no-store",
@@ -139,8 +151,8 @@ export async function sendBotmakerTemplate(
     if (res.status !== 202 && res.status !== 200) {
       const body = await res.text().catch(() => "")
       console.error(
-        `[botmaker-template] waTemplates ${res.status} para ${cleanContact}:`,
-        body.slice(0, 300),
+        `[botmaker-template] notification ${res.status} para ${cleanContact}:`,
+        body.slice(0, 400),
       )
       return false
     }

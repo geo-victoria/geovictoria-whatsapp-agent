@@ -31,9 +31,8 @@ import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-// Nombre/idioma de la plantilla aprobada en Botmaker/Meta.
+// Nombre de la plantilla aprobada en Botmaker/Meta (ruleNameOrId).
 const TEMPLATE_NAME = (process.env.MEETING_REMINDER_TEMPLATE_NAME || "recordatorio_reunion").trim()
-const TEMPLATE_LANG = (process.env.MEETING_REMINDER_TEMPLATE_LANG || "es").trim()
 const CLAIM_BATCH = 20
 
 export async function POST(req: Request) {
@@ -62,12 +61,10 @@ export async function POST(req: Request) {
       hour12: false,
     }).format(new Date(m.start_at))
 
-    const ok = await sendBotmakerTemplate(
-      m.contact,
-      TEMPLATE_NAME,
-      [nombre, hora],
-      TEMPLATE_LANG,
-    ).catch(() => false)
+    const ok = await sendBotmakerTemplate(m.contact, TEMPLATE_NAME, {
+      nombre,
+      hora_reunion: hora,
+    }).catch(() => false)
 
     if (ok) {
       sent++
