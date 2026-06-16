@@ -52,6 +52,7 @@ import {
   markUserActivity,
   armFollowup,
   closeFollowup,
+  confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -583,6 +584,47 @@ export async function POST(request: Request): Promise<NextResponse> {
         { reply: "Error: contact y message son requeridos." },
         { status: 400 },
       )
+    }
+
+    // 2.6. Botón "Confirmo asistencia" del recordatorio de reunión (plantilla
+    //      HSM). Se maneja de forma determinista: marca la asistencia en la BD
+    //      y responde, SIN gastar una llamada al modelo. "Quiero reagendar" NO
+    //      se intercepta: cae al flujo normal para que Vicky conduzca el
+    //      reagendamiento con sus tools de agenda.
+    const msgNorm = message
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+    if (msgNorm === "confirmo asistencia" || msgNorm === "confirmo mi asistencia") {
+      await markUserActivity(contact).catch(() => {})
+      const meeting = await confirmMeetingAttendance(contact).catch(() => null)
+      let reply: string
+      if (meeting) {
+        const tz = meeting.timezone || "America/Santiago"
+        const cuando = new Intl.DateTimeFormat("es-CL", {
+          timeZone: tz,
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(new Date(meeting.start_at))
+        const nombre = (meeting.prospect_name || "").trim().split(/\s+/)[0]
+        reply =
+          (nombre ? `¡Perfecto, ${nombre}! ` : "¡Perfecto! ") +
+          `Te esperamos el ${cuando} hrs 😊\n\n` +
+          "Recuerda conectarte desde tu computador; la invitación está en tu correo."
+      } else {
+        reply = "¡Gracias por confirmar! 😊 Te esperamos."
+      }
+      await sendBotmakerMessage(contact, reply).catch(() => {})
+      await appendTurnV3(contact, message, reply).catch(() => {})
+      console.log(
+        `[v3-botmaker] confirmacion asistencia contact=${contact} meeting=${meeting ? "si" : "no"}`,
+      )
+      return NextResponse.json({ reply: "" })
     }
 
     // 3. Guardrails de input (largo + prompt injection)
