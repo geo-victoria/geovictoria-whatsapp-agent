@@ -44,18 +44,22 @@ export async function transcribirAudio(audioUrl: string): Promise<string> {
       console.error(`[v3-audio] audio inválido (bytes=${buf.byteLength})`)
       return ""
     }
-    const contentType = audioRes.headers.get("content-type") || "audio/ogg"
-    const ext = contentType.includes("mpeg")
+    // Botmaker (botm.cc) a veces sirve la nota de voz con content-type
+    // "text/html" aunque los bytes sean audio. No confiamos en el header si no
+    // es audio/*: WhatsApp manda las notas de voz en ogg/opus.
+    const rawType = (audioRes.headers.get("content-type") || "").toLowerCase()
+    const ext = rawType.includes("mpeg")
       ? "mp3"
-      : contentType.includes("mp4") || contentType.includes("m4a")
+      : rawType.includes("mp4") || rawType.includes("m4a")
         ? "m4a"
-        : contentType.includes("wav")
+        : rawType.includes("wav")
           ? "wav"
           : "ogg"
+    const blobType = rawType.startsWith("audio/") ? rawType : "audio/ogg"
 
     // 2. Transcribir con Groq (formato compatible con OpenAI).
     const form = new FormData()
-    form.append("file", new Blob([buf], { type: contentType }), `audio.${ext}`)
+    form.append("file", new Blob([buf], { type: blobType }), `audio.${ext}`)
     form.append("model", TRANSCRIBE_MODEL)
     form.append("language", "es")
     form.append("response_format", "json")
