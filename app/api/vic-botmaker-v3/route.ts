@@ -47,6 +47,7 @@ import {
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo } from "@/lib/voseo-v3"
+import { transcribirAudio } from "@/lib/transcribe-audio"
 import {
   markUserActivity,
   armFollowup,
@@ -75,7 +76,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ── Tipos ─────────────────────────────────────────────────────────────
-type BotmakerRequest = { contact?: string; message?: string }
+type BotmakerRequest = {
+  contact?: string
+  message?: string
+  // Nota de voz: Botmaker entrega la URL del audio (variable `audioURL`). La
+  // acción de código la reenvía aquí; nosotros la descargamos y transcribimos.
+  audioUrl?: string
+  audioURL?: string
+}
 
 type ToolCallRecord = {
   name: string
@@ -539,7 +547,36 @@ export async function POST(request: Request): Promise<NextResponse> {
     // 2. Validar body
     const body = (await request.json()) as BotmakerRequest
     const contact = normalizeContact(body.contact || "")
-    const message = (body.message || "").trim()
+    let message = (body.message || "").trim()
+
+    // 2.5. Nota de voz: si vino la URL del audio y no hay texto útil, la
+    // transcribimos y seguimos como si el usuario lo hubiera escrito. Si la
+    // transcripción falla, o llegó un audio sin URL (la acción de código aún no
+    // la reenvía), pedimos el mensaje por texto y salimos — nunca procesamos el
+    // placeholder "__audio__" como si fuera el texto del usuario.
+    const audioUrl = (body.audioUrl || body.audioURL || "").trim()
+    if (audioUrl && (!message || message === "__audio__")) {
+      sendTypingIndicator(contact).catch(() => {})
+      const transcript = await transcribirAudio(audioUrl)
+      if (transcript) {
+        message = transcript
+        console.log(
+          `[v3-botmaker] audio transcrito contact=${contact} len=${transcript.length}`,
+        )
+      } else {
+        await sendBotmakerMessage(
+          contact,
+          "Uy, no pude escuchar bien tu nota de voz 🙈 ¿Me lo puedes escribir, por favor?",
+        ).catch(() => {})
+        return NextResponse.json({ reply: "" })
+      }
+    } else if (message === "__audio__") {
+      await sendBotmakerMessage(
+        contact,
+        "Por ahora no puedo escuchar notas de voz 🙈 ¿Me lo escribes, por favor?",
+      ).catch(() => {})
+      return NextResponse.json({ reply: "" })
+    }
 
     if (!contact || !message) {
       return NextResponse.json(
