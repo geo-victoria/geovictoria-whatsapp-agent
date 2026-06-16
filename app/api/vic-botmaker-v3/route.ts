@@ -133,6 +133,43 @@ const FAREWELL_RE =
 // no un regex sobre el texto del usuario. (Antes había un OPTOUT_RE; se eliminó
 // porque siempre se le escapaba alguna redacción — p. ej. "no me hables más".)
 
+// ── Ruteo de modelo por turno (híbrido costo/calidad) ─────────────────────
+// Sonnet SOLO en el flujo de cotización (precios/descuentos/cotización formal),
+// donde la calidad es crítica y Haiku falló (repetía tramos, alucinaba el link/
+// PDF). Haiku para todo lo demás (saludo, FAQ, soporte, agenda, opt-out), que es
+// alto volumen y simple. Sesgado a Sonnet ante la duda: el ahorro viene de los
+// turnos claramente NO comerciales.
+const MODELO_COTIZACION =
+  (process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || "claude-sonnet-4-5-20250929").trim()
+const MODELO_SIMPLE =
+  (process.env.ANTHROPIC_SALES_AGENT_MODEL_SIMPLE || "claude-haiku-4-5-20251001").trim()
+
+// El mensaje del cliente pinta cotización/precio/descuento o da cantidad.
+const COTIZ_MSG_RE =
+  /cotiz|precio|cu[aá]nto|cuesta|\bvale\b|\bvalor\b|\bcaro\b|barat|descuento|rebaj|presupuesto|\bUF\b|plan mensual|oferta|pago inicial|\d+\s*(trabajador|persona|emplead|colaborador|usuario)|somos\s+\d+/i
+// La ÚLTIMA respuesta de Vicky ya estaba en modo cotización (sigue el flujo
+// aunque el cliente solo conteste "ok"/"sí").
+const COTIZ_HIST_RE =
+  /cotiz|\bUF\b|\/mes|pago inicial|plan mensual|descuento|instalaci[oó]n|\bpunto|marca|reloj|cu[aá]nt[ao]s?\s+person|trabajador/i
+
+/** Decide si el turno pertenece al flujo de cotización (→ Sonnet). */
+function esFlujoCotizacion(
+  message: string,
+  history: ConversationMessage[],
+  prefEscalon: number,
+  tieneCotizacion: boolean,
+): boolean {
+  // Estado: cotización formal vigente o negociación de descuento en curso.
+  if (tieneCotizacion || prefEscalon > 0) return true
+  // El mensaje entrante pinta cotización/precio.
+  if (COTIZ_MSG_RE.test(message)) return true
+  // Mid-flujo: la última respuesta de Vicky ya estaba cotizando.
+  const lastAssistant =
+    [...history].reverse().find((m) => m.role === "assistant")?.content || ""
+  if (COTIZ_HIST_RE.test(lastAssistant)) return true
+  return false
+}
+
 // ── Utilidades ────────────────────────────────────────────────────────
 function getEnv(name: string) {
   return (process.env[name] || "").trim()
@@ -197,13 +234,23 @@ async function processOneTurn(
         : undefined,
     )
 
-    // 2. Correr el agent
+    // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
+    const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)
+    const modelo = esFlujoCotizacion(message, history, prefEscalonPre, !!quotePointer)
+      ? MODELO_COTIZACION
+      : MODELO_SIMPLE
+    console.log(
+      `[v3-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION}`,
+    )
+
+    // Correr el agent
     const result = await runAgentLoop({
       systemPrompt: contextoCotizacion + getSystemPromptV3(contact),
       history,
       userMessage: message,
       apiKey,
       contact,
+      model: modelo,
     })
 
     let reply = (result.reply || "").trim()
@@ -326,6 +373,7 @@ async function processOneTurn(
           userMessage: message,
           apiKey,
           contact,
+          model: MODELO_COTIZACION,
         }).catch((e) => {
           console.error(`[v3-bg] Reintento forzado de descuento falló:`, e)
           return null
