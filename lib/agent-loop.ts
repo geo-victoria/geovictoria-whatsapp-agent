@@ -35,10 +35,11 @@ import { getTimezone, computeMeetingReminderAt } from "./calendar"
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
 
-// Modelo por default: Haiku 4.5 (el más barato; baja el costo del agente).
-// Override con env var ANTHROPIC_SALES_AGENT_MODEL_V3 (ej. "claude-sonnet-4-5-20250929"
-// para volver a Sonnet si la calidad de cotización/negociación lo amerita).
-const DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+// Modelo por default: Sonnet 4.5. Se probó Haiku 4.5 por costo pero falló la
+// negociación de descuentos y alucinó cotizaciones (link/PDF inexistentes), así
+// que se vuelve a Sonnet. El prompt caching activo ya recorta fuerte el costo.
+// Override con env var ANTHROPIC_SALES_AGENT_MODEL_V3.
+const DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
 // Límite de tokens por respuesta. Generoso para que el modelo pueda razonar.
 const MAX_TOKENS = 1024

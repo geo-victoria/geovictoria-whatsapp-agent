@@ -208,13 +208,16 @@ async function processOneTurn(
 
     let reply = (result.reply || "").trim()
 
-    // 2.5. Guardrail anti-alucinación de URL del PDF.
-    // Si el reply contiene una URL del cotizador pero NO hubo una
-    // invocación exitosa de generar_link_cotizadora en este turno, el
-    // modelo construyó la URL desde su propio output (alucinación).
-    // Sobrescribimos por un mensaje genérico y lo loggeamos para alertar.
+    // 2.5. Guardrail anti-alucinación de URL del cotizador.
+    // Si el reply contiene CUALQUIER URL del cotizador (con path) pero NO hubo
+    // una invocación exitosa de generar_link_cotizadora/aplicar_siguiente_descuento
+    // en este turno (ni es el reenvío del link ya conocido), el modelo construyó
+    // la URL desde su propio output (alucinación). Caso real visto: Haiku inventó
+    // `cotizacion.geovictoria.com/accept/<uuid>` (ruta inexistente) diciendo que
+    // la cotización estaba lista sin haberla generado. Antes solo se vigilaba
+    // /pdf/ y /quote-acceptance.html, así que rutas inventadas se colaban.
     const hasCotizacionUrl =
-      /cotizacion\.geovictoria\.com\/(pdf\/|quote-acceptance\.html)/i.test(reply)
+      /cotizacion\.geovictoria\.com\/[^\s)]+/i.test(reply)
     const toolCalls = (result.toolCalls || []) as ToolCallRecord[]
     // Tanto generar_link_cotizadora como aplicar_siguiente_descuento (commit
     // del descuento) regeneran un PDF legítimo del cotizador.
