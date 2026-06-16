@@ -47,6 +47,64 @@ export function getTimezone(country: string): string {
   return COUNTRY_TIMEZONES[country] || "America/Santiago"
 }
 
+// Offset (en minutos) de una zona horaria en un instante dado. Positivo al este
+// de UTC, negativo al oeste (ej. America/Santiago en invierno → -240).
+function tzOffsetMinutes(timeZone: string, date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  const asUTC = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second),
+  )
+  return (asUTC - date.getTime()) / 60000
+}
+
+/**
+ * Calcula CUÁNDO enviar el recordatorio de una reunión.
+ *   - MEETING_REMINDER_MODE="morning" (default): a las HH:00 (MEETING_REMINDER_HOUR,
+ *     default 8) hora LOCAL del día de la reunión.
+ *   - MEETING_REMINDER_MODE="hours_before": N horas antes del inicio
+ *     (MEETING_REMINDER_LEAD_HOURS, default 3).
+ * Devuelve null si la fecha es inválida.
+ */
+export function computeMeetingReminderAt(startIso: string, timeZone: string): Date | null {
+  const start = new Date(startIso)
+  if (isNaN(start.getTime())) return null
+
+  const mode = (process.env.MEETING_REMINDER_MODE || "morning").trim()
+  if (mode === "hours_before") {
+    const lead = Number(process.env.MEETING_REMINDER_LEAD_HOURS || "3")
+    return new Date(start.getTime() - lead * 60 * 60 * 1000)
+  }
+
+  // "morning": HH:00 hora local del día de la reunión.
+  const hour = Number(process.env.MEETING_REMINDER_HOUR || "8")
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(start) // "YYYY-MM-DD"
+  // Wall time HH:00 de ese día tratada como UTC, corregida por el offset del tz.
+  const wallUTC = new Date(`${ymd}T${String(hour).padStart(2, "0")}:00:00Z`)
+  const offsetMin = tzOffsetMinutes(timeZone, wallUTC)
+  return new Date(wallUTC.getTime() - offsetMin * 60000)
+}
+
 async function getPublicHolidays(year: number, countryCode: string): Promise<string[]> {
   try {
     const res = await fetch(

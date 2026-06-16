@@ -563,6 +563,107 @@ export async function appendAssistantV3(contact: string, content: string): Promi
   })
 }
 
+// ── Reuniones agendadas (recordatorios por WhatsApp) ───────────────────────
+// Tabla vic_v3_meetings: fuente de verdad para el recordatorio (cron) y la
+// confirmación de asistencia. Se llena al agendar (agent-loop) y se mantiene
+// en sync con los webhooks de Cal.com (reschedule/cancel). Best-effort.
+
+export type MeetingRow = {
+  booking_uid: string
+  contact: string
+  prospect_name: string | null
+  start_at: string
+  timezone: string
+  meeting_url: string | null
+  organizer_email: string | null
+}
+
+/** Inserta (o actualiza por booking_uid) una reunión agendada. */
+export async function persistMeeting(m: {
+  bookingUid: string
+  contact: string
+  prospectName?: string
+  prospectEmail?: string
+  startIso: string
+  timezone: string
+  organizerEmail?: string
+  meetingUrl?: string
+  zohoLeadId?: string
+  zohoEventId?: string
+  reminderAt?: string | null
+}): Promise<void> {
+  if (!m.bookingUid || !m.contact) return
+  await supabaseFetch(`vic_v3_meetings?on_conflict=booking_uid`, {
+    method: "POST",
+    headers: { Prefer: "return=minimal,resolution=merge-duplicates" },
+    body: JSON.stringify({
+      booking_uid: m.bookingUid,
+      contact: m.contact,
+      prospect_name: m.prospectName || null,
+      prospect_email: m.prospectEmail || null,
+      start_at: m.startIso,
+      timezone: m.timezone,
+      organizer_email: m.organizerEmail || null,
+      meeting_url: m.meetingUrl || null,
+      zoho_lead_id: m.zohoLeadId || null,
+      zoho_event_id: m.zohoEventId || null,
+      status: "scheduled",
+      reminder_at: m.reminderAt || null,
+      updated_at: new Date().toISOString(),
+    }),
+  }).catch(() => {})
+}
+
+/** Actualiza campos de una reunión por su booking_uid (Cal.com). Best-effort. */
+export async function updateMeetingByUid(
+  bookingUid: string,
+  fields: Record<string, unknown>,
+): Promise<void> {
+  if (!bookingUid) return
+  await supabaseFetch(
+    `vic_v3_meetings?booking_uid=eq.${encodeURIComponent(bookingUid)}`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }),
+    },
+  ).catch(() => {})
+}
+
+/** Reuniones con recordatorio vencido y aún no enviado (para el cron). */
+export async function getDueMeetingReminders(limit = 20): Promise<MeetingRow[]> {
+  const nowIso = new Date().toISOString()
+  const rows = await supabaseFetch<MeetingRow[]>(
+    `vic_v3_meetings?status=eq.scheduled&reminder_sent_at=is.null` +
+      `&reminder_at=lte.${nowIso}&start_at=gt.${nowIso}` +
+      `&select=booking_uid,contact,prospect_name,start_at,timezone,meeting_url,organizer_email` +
+      `&order=reminder_at.asc&limit=${limit}`,
+  )
+  return rows || []
+}
+
+/** Marca el recordatorio como enviado. */
+export async function markMeetingReminded(bookingUid: string): Promise<void> {
+  await updateMeetingByUid(bookingUid, { reminder_sent_at: new Date().toISOString() })
+}
+
+/** Marca la próxima reunión futura del contacto como confirmada por WhatsApp. */
+export async function confirmMeetingAttendance(contact: string): Promise<MeetingRow | null> {
+  if (!contact) return null
+  const nowIso = new Date().toISOString()
+  const rows = await supabaseFetch<MeetingRow[]>(
+    `vic_v3_meetings?contact=eq.${encodeURIComponent(contact)}&status=eq.scheduled` +
+      `&start_at=gt.${nowIso}` +
+      `&select=booking_uid,contact,prospect_name,start_at,timezone,meeting_url,organizer_email` +
+      `&order=start_at.asc&limit=1`,
+  )
+  if (!rows || rows.length === 0) return null
+  await updateMeetingByUid(rows[0].booking_uid, {
+    attendance_confirmed_at: new Date().toISOString(),
+  })
+  return rows[0]
+}
+
 // ── Lado del cron de re-engagement ───────────────────────────────────────────
 
 export type FollowupClaim = {

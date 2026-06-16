@@ -27,8 +27,10 @@ import {
   setFormalQuote,
   getFormalQuote,
   setQuotePointer,
+  persistMeeting,
   type PrefParams,
 } from "./supabase-persistence-v3"
+import { getTimezone, computeMeetingReminderAt } from "./calendar"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -409,6 +411,34 @@ export async function runAgentLoop(params: {
             const qid =
               typeof toolInput.quote_id === "string" ? toolInput.quote_id : ""
             if (qid) await setFormalQuote(contact, qid).catch(() => {})
+          } else if (toolName === "agendar_reunion") {
+            // Persistir la reunión para el recordatorio por WhatsApp. Usa el
+            // `contact` real del canal (no el `telefono` que pasó el modelo).
+            const r = result as Record<string, unknown>
+            const bookingUid = typeof r.bookingId === "string" ? r.bookingId : ""
+            const startIso = typeof r.slotIso === "string" ? r.slotIso : ""
+            if (bookingUid && startIso) {
+              const country =
+                typeof toolInput.country === "string" ? toolInput.country : "Chile"
+              const timezone = getTimezone(country)
+              const reminderAt = computeMeetingReminderAt(startIso, timezone)
+              await persistMeeting({
+                bookingUid,
+                contact,
+                prospectName:
+                  typeof toolInput.prospectName === "string" ? toolInput.prospectName : undefined,
+                prospectEmail:
+                  typeof toolInput.prospectEmail === "string" ? toolInput.prospectEmail : undefined,
+                startIso,
+                timezone,
+                organizerEmail:
+                  typeof r.organizerEmail === "string" ? r.organizerEmail : undefined,
+                meetingUrl: typeof r.meetingUrl === "string" ? r.meetingUrl : undefined,
+                zohoLeadId: typeof r.leadId === "string" ? r.leadId : undefined,
+                zohoEventId: typeof r.eventId === "string" ? r.eventId : undefined,
+                reminderAt: reminderAt ? reminderAt.toISOString() : null,
+              }).catch(() => {})
+            }
           }
         }
 
