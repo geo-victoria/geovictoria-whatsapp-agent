@@ -102,7 +102,7 @@ export const generarLinkCotizadoraSchema = {
         type: "string" as const,
         enum: SECTORES_VALIDOS as unknown as string[],
         description:
-          "Rubro/sector de la empresa, deducido del nombre o preguntado al prospect. Debe ser exactamente uno de los valores del enum. Si no es claro, usa '19. Servicios'.",
+          "OPCIONAL — el rubro NO es requisito para cotizar y NO debe pedirse al prospecto. Dedúcelo del nombre SOLO si es obvio y debe ser exactamente uno de los valores del enum. Si no es claro, OMÍTELO: el sistema usa '19. Servicios' automáticamente.",
       },
       modulos: {
         type: "array" as const, items: { type: "string" as const },
@@ -170,7 +170,7 @@ export const generarLinkCotizadoraSchema = {
           "Descuento negociado en el preform. Si el cliente ACEPTÓ un descuento durante la negociación (consultar_descuento_referencial), pasá el `escalon_actual` que devolvió la consulta que el cliente aceptó: la cotización se generará YA con ese descuento (un solo PDF, con el precio acordado). Si no hubo descuento, omití este campo.",
       },
     },
-    required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "sectorEmpresa", "modulos"],
+    required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "modulos"],
   },
 }
 

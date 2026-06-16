@@ -447,12 +447,12 @@ export async function getQuotePointer(contact: string): Promise<QuotePointer | n
 //                se re-arma cuando Vicky entrega su próxima respuesta real.
 //   "cerrado"  → ciclo terminado (respondió y cerró, opt-out, derivado, agotado).
 //
-// Cadencia (espejo de vic_v3_claim_followups en SQL): 2m, 5m, 15m, 1h, 3h, 6h,
-// 23h — todos dentro de la ventana de 24h de WhatsApp (texto libre, sin HSM).
-// `silence_anchor_at` = momento en que Vicky respondió y quedó esperando; los
-// toques de push NO lo mueven (si lo movieran, la cadencia nunca avanzaría).
+// Cadencia (espejo de vic_v3_claim_followups en SQL): 3 toques a ~1h, ~1 día y
+// ~3 días. `silence_anchor_at` = momento en que Vicky respondió y quedó
+// esperando; los toques de push NO lo mueven (si lo movieran, la cadencia nunca
+// avanzaría).
 
-const FOLLOWUP_FIRST_OFFSET_MS = 2 * 60 * 1000 // primer toque: +2 min
+const FOLLOWUP_FIRST_OFFSET_MS = 60 * 60 * 1000 // primer toque: +1 h
 
 type FollowupStateRow = {
   id: string

@@ -16,8 +16,10 @@
  *   4. Persiste el toque como mensaje del asistente (contexto para el próximo
  *      turno) sin mover silence_anchor_at, y lo registra en el log.
  *
- * Cadencia (definida en la migración): 2m, 5m, 15m, 1h, 3h, 6h, 23h — todos
- * dentro de la ventana de 24h de WhatsApp, así que va texto libre (sin HSM).
+ * Cadencia (definida en la migración vic_v3_claim_followups): 3 toques a ~1h,
+ * ~1 día y ~3 días desde que Vicky respondió. El primer toque (1h) cae dentro
+ * de la ventana de 24h de WhatsApp; los toques de día 1 y día 3 pueden caer
+ * fuera, pero el envío sigue siendo texto libre vía push de Botmaker.
  * La cancelación vive en el webhook: si el cliente responde, el ciclo se pausa.
  */
 
@@ -45,14 +47,12 @@ const CLAIM_BATCH = 8
 // del agente principal.
 const NUDGE_MODEL = "claude-haiku-4-5-20251001"
 
-// Tono según el tramo de la cadencia (1-7).
+// Tono según el tramo de la cadencia (1-3): ~1h, ~1 día, ~3 días.
 function instruccionDeTono(stage: number): string {
-  if (stage <= 2)
-    return "Tono liviano y natural, como quien retoma una conversación que quedó al aire hace minutos. NO suenes a recordatorio formal."
-  if (stage <= 5)
+  if (stage <= 1)
+    return "Tono liviano y natural, como quien retoma una conversación que quedó al aire. NO suenes a recordatorio formal."
+  if (stage === 2)
     return "Tono cálido y servicial: retoma el punto exacto donde quedaron y ofrece continuar, sin presionar."
-  if (stage === 6)
-    return "Tono directo pero amable: pregunta si sigue interesado en avanzar o prefiere retomarlo en otro momento."
   return "Último toque: cierre cordial. Pregunta si sigue interesado en cotizar con nosotros o lo dejamos para más adelante, dejando la puerta abierta."
 }
 
@@ -60,10 +60,8 @@ function instruccionDeTono(stage: number): string {
 // Neutros a propósito: sirven igual para una cotización a medias que para una
 // conversación que recién partía (un "hola" sin intención identificada aún).
 function fallbackPorStage(stage: number): string {
-  if (stage <= 2) return "¿Todo bien? Te perdí 😅 Aquí sigo si quieres continuar."
-  if (stage <= 5) return "Hola! ¿Retomamos donde quedamos? Quedé atenta 😊"
-  if (stage === 6)
-    return "Hola! ¿Sigues interesado en avanzar, o prefieres que lo retomemos en otro momento?"
+  if (stage <= 1) return "¿Todo bien? Te perdí 😅 Aquí sigo si quieres continuar."
+  if (stage === 2) return "Hola! ¿Retomamos donde quedamos? Quedé atenta 😊"
   return "Hola! ¿Sigues interesado en cotizar con nosotros o lo dejamos para más adelante? Cualquier cosa, aquí estoy 😊"
 }
 
@@ -122,7 +120,7 @@ async function generarNudge(
     messages: [
       {
         role: "user",
-        content: `Conversación hasta ahora:\n${transcript}\n\nEscribe el mensaje de reenganche (toque ${stage} de 7).`,
+        content: `Conversación hasta ahora:\n${transcript}\n\nEscribe el mensaje de reenganche (toque ${stage} de 3).`,
       },
     ],
   })
@@ -205,7 +203,7 @@ export async function POST(req: Request) {
     }).catch(() => {})
 
     console.log(
-      `[followup-cron] toque=${claim.stage}/7 contact=${claim.contact} ok=${ok}`,
+      `[followup-cron] toque=${claim.stage}/3 contact=${claim.contact} ok=${ok}`,
     )
   }
 
