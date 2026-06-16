@@ -284,10 +284,10 @@ async function processOneTurn(
     const pctEnReply = pctMatch ? Number(pctMatch[1]) : null
     const prefEscalon = await getPrefEscalon(contact).catch(() => 0)
     // Escalera del plan mensual (espejo de DISCOUNT_LADDER del cotizador):
-    // 10 → 20 → 30 → 35 → 40. pref_escalon usa la forma "siguiente índice" (i+1);
+    // 10 → 20 → 30 → 40. pref_escalon usa la forma "siguiente índice" (i+1);
     // los dos primeros índices son instalación, así que el recurrente arranca en
     // pref_escalon=3 (=10%). recStep indexa la escalera del plan.
-    const REC_PCTS = [10, 20, 30, 35, 40]
+    const REC_PCTS = [10, 20, 30, 40]
     const recStep = prefEscalon - 3
     const committedRecPct =
       recStep < 0 ? 0 : REC_PCTS[Math.min(recStep, REC_PCTS.length - 1)]
