@@ -54,8 +54,8 @@ type ConvRow = {
   id: string
   contact: string
   updated_at: string | null
-  vic_v3_conversation_analysis: { analyzed_at: string }[]
 }
+type AnalRow = { conversation_id: string; analyzed_at: string }
 
 function authorized(req: Request, key: string): boolean {
   const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
@@ -77,20 +77,22 @@ export async function GET(req: Request): Promise<Response> {
   const forceAll = searchParams.get("all") === "1"
   const testSet = testContactSet()
 
-  // Conversaciones con su análisis embebido (FK), para saber cuáles re-analizar.
-  const convs = await sb<ConvRow[]>(
-    `vic_v3_conversations?select=id,contact,updated_at,vic_v3_conversation_analysis(analyzed_at)&order=updated_at.desc.nullslast`,
-  )
+  // Dos consultas simples (más robusto que el embed de PostgREST): conversaciones
+  // + análisis existentes, y se cruzan en JS para saber cuáles re-analizar.
+  const [convs, analyzed] = await Promise.all([
+    sb<ConvRow[]>(`vic_v3_conversations?select=id,contact,updated_at&order=updated_at.desc.nullslast`),
+    sb<AnalRow[]>(`vic_v3_conversation_analysis?select=conversation_id,analyzed_at`),
+  ])
+  const analyzedAt = new Map(analyzed.map((a) => [a.conversation_id, a.analyzed_at]))
 
   const pending = convs
     .filter((c) => !isTestContact(c.contact, testSet))
     .filter((c) => {
       if (forceAll) return true
-      const a = c.vic_v3_conversation_analysis?.[0]
-      if (!a) return true
+      const an = analyzedAt.get(c.id)
+      if (!an) return true
       const upd = c.updated_at ? Date.parse(c.updated_at) : 0
-      const an = a.analyzed_at ? Date.parse(a.analyzed_at) : 0
-      return upd > an
+      return upd > Date.parse(an)
     })
 
   const batch = pending.slice(0, limit)
