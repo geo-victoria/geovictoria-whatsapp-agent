@@ -24,6 +24,10 @@
     {
       "path": "/api/reengagement?mode=zoho-sync",
       "schedule": "0 20 * * 1-5"
+    },
+    {
+      "path": "/api/vic-funnel-cron",
+      "schedule": "0 * * * *"
     }
   ],
   "functions": {
@@ -44,6 +48,9 @@
     },
     "app/api/vic-meeting-reminders/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/vic-funnel-cron/route.ts": {
+      "maxDuration": 120
     }
   }
 }

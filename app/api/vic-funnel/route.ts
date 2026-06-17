@@ -1,16 +1,20 @@
 /**
  * Dashboard de embudo (Sankey) de las conversaciones de Vicky V3.
  *
- * GET /api/vic-funnel?key=<VIC_FUNNEL_KEY>[&days=N]
+ * GET /api/vic-funnel?key=<VIC_FUNNEL_KEY>
  *
- * Sirve una página HTML en vivo (Sankey con Plotly + KPIs + hallazgos) para
- * compartir con el equipo comercial. La data sale de la vista
- * `vic_v3_conversation_signals` (Supabase), que encapsula las heurísticas del
- * embudo. Se excluyen los contactos de prueba (env VIC_FUNNEL_TEST_CONTACTS).
+ * Página HTML en vivo (Sankey con Plotly + KPIs + hallazgos). Lee la tabla
+ * vic_v3_conversation_analysis, que puebla el cron /api/vic-funnel-cron cada
+ * hora con la clasificación semántica (Claude). Jerarquía:
  *
- * "Se actualiza diariamente" = la página consulta en vivo, así que cada vez que
- * se abre muestra la data actual. No requiere cron.
+ *   Conversaciones
+ *     → Intención comercial → { Crosselling, Callback, Reunión, Cotización }
+ *                                 Cotización → { Enviada, Fuga, Rechazo, Sin preform }
+ *     → Soporte
+ *     → No identificado
  */
+
+import { isTestContact } from "@/lib/funnel-analysis"
 
 export const dynamic = "force-dynamic"
 
@@ -18,22 +22,7 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
 
-// Números internos de prueba a excluir (configurable sin redeploy).
-const DEFAULT_TEST_CONTACTS = [
-  "56944668823", // Eduardo
-  "56978385048", // Rodrigo
-  "56962288575", // Kerim
-  "56982945030", // Andrea
-  "56966850332", // C. Fuentes
-]
-function testContacts(): Set<string> {
-  const raw = (process.env.VIC_FUNNEL_TEST_CONTACTS || "").trim()
-  const list = raw ? raw.split(",").map((s) => s.replace(/\D/g, "").trim()).filter(Boolean) : DEFAULT_TEST_CONTACTS
-  return new Set(list)
-}
-
-// Hallazgos curados (sección editable a mano — pídeme actualizarlos cuando
-// quieras). Se muestran junto a los auto-detectados.
+// Hallazgos cualitativos curados (editables a mano — pídeme actualizarlos).
 const CURATED_FINDINGS: Array<{ titulo: string; detalle: string }> = [
   {
     titulo: "Objeción al precio de compra del reloj se atacaba mal",
@@ -59,30 +48,23 @@ const CURATED_FINDINGS: Array<{ titulo: string; detalle: string }> = [
 
 type Row = {
   contact: string
-  started_at: string
-  intencion: boolean
-  inicio_cotizar: boolean
-  preform: boolean
-  cotizacion: boolean
-  reunion: boolean
-  lead: boolean
-  f_venta_proactiva: boolean
-  f_objecion_no_cierre: boolean
-  f_fuera_catalogo: boolean
-  f_pidio_humano: boolean
-  f_audio: boolean
+  grupo: string
+  sub_bucket: string | null
+  cotizacion_outcome: string | null
+  es_cliente_actual: boolean
+  resumen: string | null
+  hallazgos: Array<{ tipo: string; detalle: string }> | null
+  analyzed_at: string | null
 }
 
-async function fetchSignals(days: number | null): Promise<Row[]> {
-  let url = `${SUPABASE_URL}/rest/v1/vic_v3_conversation_signals?select=*`
-  if (days && days > 0) {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
-    url += `&started_at=gte.${since}`
-  }
-  const res = await fetch(url, {
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
-    cache: "no-store",
-  })
+async function fetchAnalysis(): Promise<Row[]> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=contact,grupo,sub_bucket,cotizacion_outcome,es_cliente_actual,resumen,hallazgos,analyzed_at`,
+    {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      cache: "no-store",
+    },
+  )
   if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 200)}`)
   return (await res.json()) as Row[]
 }
@@ -94,11 +76,9 @@ function page(html: string, status = 200): Response {
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
   const key = (searchParams.get("key") || "").trim()
-  const daysRaw = parseInt(searchParams.get("days") || "", 10)
-  const days = Number.isFinite(daysRaw) && daysRaw > 0 ? daysRaw : null
 
   if (!FUNNEL_KEY) {
-    return page("<h1>Falta configurar VIC_FUNNEL_KEY</h1><p>Define la variable de entorno VIC_FUNNEL_KEY en Vercel para proteger este dashboard.</p>", 503)
+    return page("<h1>Falta configurar VIC_FUNNEL_KEY</h1><p>Define la variable de entorno VIC_FUNNEL_KEY en Vercel.</p>", 503)
   }
   if (key !== FUNNEL_KEY) {
     return page("<h1>No autorizado</h1><p>Falta o es incorrecto el parámetro <code>?key=</code>.</p>", 401)
@@ -106,73 +86,80 @@ export async function GET(req: Request): Promise<Response> {
 
   let rows: Row[]
   try {
-    rows = await fetchSignals(days)
+    rows = (await fetchAnalysis()).filter((r) => !isTestContact(r.contact))
   } catch (e) {
     return page(`<h1>Error consultando datos</h1><pre>${String(e).slice(0, 300)}</pre>`, 500)
   }
 
-  const test = testContacts()
-  const reales = rows.filter((r) => !test.has((r.contact || "").replace(/\D/g, "")))
-
-  const n = (pred: (r: Row) => boolean) => reales.filter(pred).length
-  const total = reales.length
-  const intencion = n((r) => r.intencion)
-  const sinIntencion = total - intencion
-  const inicio = n((r) => r.intencion && r.inicio_cotizar)
-  const preform2 = (r: Row) => r.preform || r.cotizacion
-  const reunion = n((r) => r.intencion && !r.inicio_cotizar && r.reunion)
-  const lead = n((r) => r.intencion && !r.inicio_cotizar && !r.reunion && r.lead)
-  const soloConsulta = n((r) => r.intencion && !r.inicio_cotizar && !r.reunion && !r.lead)
-  const nPreform = n((r) => r.intencion && r.inicio_cotizar && preform2(r))
-  const inicioSinPreform = n((r) => r.intencion && r.inicio_cotizar && !preform2(r))
-  const cotizacion = n((r) => r.intencion && r.inicio_cotizar && preform2(r) && r.cotizacion)
-  const preformSinCotiz = n((r) => r.intencion && r.inicio_cotizar && preform2(r) && !r.cotizacion)
-
-  // Totales brutos (no exclusivos) para el strip de KPIs.
-  const kpi = {
-    total,
-    intencion,
-    inicio: n((r) => r.inicio_cotizar),
-    preform: n((r) => r.preform || r.cotizacion),
-    cotizacion: n((r) => r.cotizacion),
-    reunion: n((r) => r.reunion),
-    lead: n((r) => r.lead),
+  if (rows.length === 0) {
+    return page(
+      "<h1>Sin análisis todavía</h1><p>La tabla de análisis está vacía. Corre el cron una vez: <code>/api/vic-funnel-cron?key=&lt;VIC_FUNNEL_KEY&gt;&amp;all=1</code> (puede requerir varias llamadas para el histórico).</p>",
+    )
   }
 
-  const auto = {
-    venta_proactiva: n((r) => r.f_venta_proactiva),
-    objecion_no_cierre: n((r) => r.f_objecion_no_cierre),
-    fuera_catalogo: n((r) => r.f_fuera_catalogo),
-    pidio_humano: n((r) => r.f_pidio_humano),
-    audio: n((r) => r.f_audio),
+  const n = (pred: (r: Row) => boolean) => rows.filter(pred).length
+  const total = rows.length
+  const comercial = n((r) => r.grupo === "comercial")
+  const soporte = n((r) => r.grupo === "soporte")
+  const noId = n((r) => r.grupo === "no_identificado")
+
+  const crosselling = n((r) => r.grupo === "comercial" && r.sub_bucket === "crosselling")
+  const callback = n((r) => r.grupo === "comercial" && r.sub_bucket === "callback")
+  const reunion = n((r) => r.grupo === "comercial" && r.sub_bucket === "reunion")
+  const cotizacion = n((r) => r.grupo === "comercial" && r.sub_bucket === "cotizacion")
+
+  const cEnviada = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "enviada")
+  const cFuga = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "fuga")
+  const cRechazo = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "rechazo_explicito")
+  const cSinPreform = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "sin_preform")
+
+  // Hallazgos auto-detectados: agregados por tipo, con un ejemplo.
+  const byTipo = new Map<string, { count: number; ejemplo: string }>()
+  for (const r of rows) {
+    for (const h of r.hallazgos || []) {
+      if (!h || !h.tipo) continue
+      const cur = byTipo.get(h.tipo) || { count: 0, ejemplo: h.detalle || "" }
+      cur.count++
+      if (!cur.ejemplo && h.detalle) cur.ejemplo = h.detalle
+      byTipo.set(h.tipo, cur)
+    }
   }
+  const hallazgosAuto = [...byTipo.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 12)
 
-  // Nodos del Sankey
-  const labels = [
-    "Conversaciones", "Con intención", "Sin intención", "Inició cotización",
-    "Reunión agendada", "Lead / callback", "Solo consulta", "Preform enviada",
-    "Cotización enviada", "Abandonó (sin preform)", "No avanzó a cotización",
-  ]
-  const C = { base: "#2F5496", good: "#2E7D32", warn: "#9E9E9E", best: "#1B5E20" }
-  const nodeColor = [C.base, C.base, C.warn, C.base, C.good, "#F9A825", C.warn, C.good, C.best, C.warn, C.warn]
-  const link = (s: number, t: number, v: number) => ({ s, t, v })
-  const links = [
-    link(0, 1, intencion), link(0, 2, sinIntencion),
-    link(1, 3, inicio), link(1, 4, reunion), link(1, 5, lead), link(1, 6, soloConsulta),
-    link(3, 7, nPreform), link(3, 9, inicioSinPreform),
-    link(7, 8, cotizacion), link(7, 10, preformSinCotiz),
-  ].filter((l) => l.v > 0)
-
-  const rango = days ? `últimos ${days} días` : "todo el histórico"
-  const fechas = reales.length
-    ? `${reales.map((r) => r.started_at).sort()[0]?.slice(0, 10)} → ${reales.map((r) => r.started_at).sort().slice(-1)[0]?.slice(0, 10)}`
+  const lastUpdate = rows
+    .map((r) => r.analyzed_at || "")
+    .filter(Boolean)
+    .sort()
+    .slice(-1)[0]
+  const lastUpdateStr = lastUpdate
+    ? new Date(lastUpdate).toLocaleString("es-CL", { timeZone: "America/Santiago" })
     : "—"
 
-  const kpiCard = (label: string, value: number, color: string) =>
-    `<div class="kpi"><div class="kpi-v" style="color:${color}">${value}</div><div class="kpi-l">${label}</div></div>`
+  // ── Sankey ──────────────────────────────────────────────────────────────
+  const labels = [
+    "Conversaciones", "Intención comercial", "Soporte", "No identificado",
+    "Crosselling", "Callback (lead)", "Reunión agendada", "Cotización",
+    "Cotización enviada", "Fuga", "Rechazo explícito", "No alcanzó preform",
+  ]
+  const col = {
+    base: "#2F5496", com: "#1565C0", sop: "#00838F", noid: "#9E9E9E",
+    good: "#2E7D32", best: "#1B5E20", warn: "#F9A825", bad: "#C62828", grey: "#9E9E9E",
+  }
+  const nodeColor = [
+    col.base, col.com, col.sop, col.noid,
+    col.good, col.warn, col.good, col.com,
+    col.best, col.warn, col.bad, col.grey,
+  ]
+  const mk = (s: number, t: number, v: number) => ({ s, t, v })
+  const links = [
+    mk(0, 1, comercial), mk(0, 2, soporte), mk(0, 3, noId),
+    mk(1, 4, crosselling), mk(1, 5, callback), mk(1, 6, reunion), mk(1, 7, cotizacion),
+    mk(7, 8, cEnviada), mk(7, 9, cFuga), mk(7, 10, cRechazo), mk(7, 11, cSinPreform),
+  ].filter((l) => l.v > 0)
 
-  const findingRow = (t: string, c: number, d: string) =>
-    `<tr><td>${t}</td><td class="num">${c}</td><td>${d}</td></tr>`
+  const kpiCard = (label: string, value: number, color: string, sub?: string) =>
+    `<div class="kpi"><div class="kpi-v" style="color:${color}">${value}</div><div class="kpi-l">${label}${sub ? ` <span class="pct">${sub}</span>` : ""}</div></div>`
+  const pct = (x: number) => (total ? `${Math.round((x / total) * 100)}%` : "")
 
   const html = `<!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -185,39 +172,39 @@ export async function GET(req: Request): Promise<Response> {
   .kpis{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px}
   .kpi{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;min-width:120px;flex:1}
   .kpi-v{font-size:28px;font-weight:700} .kpi-l{font-size:12px;color:#6b7280;margin-top:2px}
+  .pct{color:#9ca3af} .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
   .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:18px}
   .card h2{font-size:16px;margin:0 0 12px}
-  #sankey{width:100%;height:460px}
+  #sankey{width:100%;height:480px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
   th{color:#6b7280;font-weight:600;font-size:12px}
   td.num{text-align:right;font-weight:700;width:64px;color:#9A6700}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px}
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
-  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Clientes reales (excluye pruebas internas) · ${rango} · ${fechas} · <span class="tag">en vivo</span></div>
+  <div class="sub">Clientes reales (excluye pruebas internas) · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr}</div>
 
   <div class="kpis">
-    ${kpiCard("Conversaciones", kpi.total, C.base)}
-    ${kpiCard("Con intención", kpi.intencion, C.base)}
-    ${kpiCard("Inició cotización", kpi.inicio, "#1565C0")}
-    ${kpiCard("Preform enviada", kpi.preform, C.good)}
-    ${kpiCard("Cotización enviada", kpi.cotizacion, C.best)}
-    ${kpiCard("Reunión agendada", kpi.reunion, C.good)}
-    ${kpiCard("Lead / callback", kpi.lead, "#F9A825")}
+    ${kpiCard("Conversaciones", total, col.base)}
+    ${kpiCard("Intención comercial", comercial, col.com, pct(comercial))}
+    ${kpiCard("Soporte", soporte, col.sop, pct(soporte))}
+    ${kpiCard("No identificado", noId, col.noid, pct(noId))}
+    ${kpiCard("Cotización", cotizacion, col.com)}
+    ${kpiCard("Cotización enviada", cEnviada, col.best)}
+    ${kpiCard("Reunión", reunion, col.good)}
+    ${kpiCard("Callback", callback, col.warn)}
   </div>
 
-  <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div></div>
+  <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div>
+    <div class="sub" style="margin:8px 0 0">Cotización: <b>${cEnviada}</b> enviada/aceptada · <b>${cFuga}</b> fuga · <b>${cRechazo}</b> rechazo explícito · <b>${cSinPreform}</b> no alcanzó preform.</div>
+  </div>
 
-  <div class="card"><h2>Hallazgos auto-detectados</h2>
-    <table><thead><tr><th>Patrón</th><th class="num">N°</th><th>Qué significa</th></tr></thead><tbody>
-      ${findingRow("Ofreció venta sin que la pidieran", auto.venta_proactiva, "Vicky mencionó compra/venta del reloj y el cliente nunca lo pidió.")}
-      ${findingRow("Objetó precio y no cerró", auto.objecion_no_cierre, "El cliente puso objeción de precio/descuento y no terminó en cotización.")}
-      ${findingRow("Pidió algo fuera de catálogo", auto.fuera_catalogo, "Pidió algo que Vicky no tiene (ej. marcaje por tarjeta) y derivó.")}
-      ${findingRow("Pidió hablar con un humano", auto.pidio_humano, "El cliente pidió ejecutivo/persona en vez del bot.")}
-      ${findingRow("Conversaciones con audio", auto.audio, "Incluyeron notas de voz (se transcriben con ElevenLabs).")}
-    </tbody></table>
+  <div class="card"><h2>Hallazgos auto-detectados (por el análisis)</h2>
+    ${hallazgosAuto.length === 0 ? "<p class='sub'>Sin hallazgos aún.</p>" : `<table><thead><tr><th>Patrón</th><th class="num">N°</th><th>Ejemplo</th></tr></thead><tbody>
+      ${hallazgosAuto.map(([tipo, v]) => `<tr><td>${tipo.replace(/_/g, " ")}</td><td class="num">${v.count}</td><td>${v.ejemplo}</td></tr>`).join("")}
+    </tbody></table>`}
   </div>
 
   <div class="card"><h2>Hallazgos cualitativos (curados)</h2>
@@ -226,7 +213,7 @@ export async function GET(req: Request): Promise<Response> {
     </tbody></table>
   </div>
 
-  <div class="foot">Generado en vivo desde Supabase · Vicky V3 · GeoVictoria</div>
+  <div class="foot">Clasificación semántica con Claude · datos en vivo desde Supabase · Vicky V3 · GeoVictoria</div>
 </div>
 <script>
   var labels = ${JSON.stringify(labels)};
@@ -234,10 +221,9 @@ export async function GET(req: Request): Promise<Response> {
   var L = ${JSON.stringify(links)};
   var data = [{
     type: "sankey", orientation: "h",
-    node: { label: labels, color: nodeColor, pad: 18, thickness: 18,
-      line: { color: "#fff", width: 1 } },
+    node: { label: labels, color: nodeColor, pad: 18, thickness: 18, line: { color: "#fff", width: 1 } },
     link: { source: L.map(function(x){return x.s}), target: L.map(function(x){return x.t}),
-      value: L.map(function(x){return x.v}), color: "rgba(47,84,150,0.18)" }
+      value: L.map(function(x){return x.v}), color: "rgba(47,84,150,0.16)" }
   }];
   Plotly.newPlot("sankey", data, { font: { size: 12 }, margin: { l: 0, r: 0, t: 8, b: 8 } }, { responsive: true, displayModeBar: false });
 </script>
