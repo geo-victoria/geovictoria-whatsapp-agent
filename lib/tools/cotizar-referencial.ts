@@ -459,6 +459,12 @@ export async function cotizarReferencial(args: {
   // las superficies que consuman esta tool.
   const partes: string[] = []
 
+  // Micro-plan: 1 trabajador que marca. El plan base cubre 2 usuarios (el que
+  // marca + 1 administrador). Se aclara en el mensaje para que el prospecto
+  // entienda el alcance de la tarifa especial.
+  const esMicroPlan =
+    userCount === 1 && items.some((i) => i.id === "asistencia" && i.modalidad === "Fijo")
+
   if (itemsRecurrentes.length > 0) {
     partes.push("Resumen mensual recurrente:")
     partes.push("")
@@ -470,6 +476,12 @@ export async function cotizarReferencial(args: {
     partes.push(
       `Equivalente: $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes (UF del día: $${fmtNumCL(ufActual, 2)})`,
     )
+    if (esMicroPlan) {
+      partes.push("")
+      partes.push(
+        "Este plan base cubre 2 usuarios: el trabajador que marca + 1 administrador para gestionar la plataforma.",
+      )
+    }
   }
 
   if (itemsUnicos.length > 0) {

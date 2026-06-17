@@ -21,7 +21,10 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     descripcion:
       "Marcaje de entrada y salida con app móvil, biometría o terminales físicos. La base del producto, incluida en toda cotización.",
     tiers: [
-      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.75 },
+      // Micro-plan: 1 trabajador que marca → tarifa especial. Cubre 2 usuarios
+      // (el que marca + 1 administrador). Desde 2 que marcan, tramo fijo normal.
+      { minUsuarios: 1, maxUsuarios: 1, modalidad: "fijo", precioUF: 0.25 },
+      { minUsuarios: 2, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.75 },
       { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.09 },
       { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.08 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.07 },
