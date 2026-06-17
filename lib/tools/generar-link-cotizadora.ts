@@ -27,7 +27,7 @@ import {
 } from "@/lib/catalogo"
 import { clasificarUbicacion } from "@/lib/geografia"
 import { getUFActual } from "@/lib/uf"
-import { rutValido } from "@/lib/rut"
+import { rutValido, formatearRut } from "@/lib/rut"
 
 const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -510,7 +510,7 @@ export async function generarLinkCotizadora(
           contacto: contacto.trim(),
           contactoEmail: contactoEmail.trim().toLowerCase(),
           contactoTelefono: contactoTelefono?.trim() || "",
-          rutEmpresa: rutEmpresa.trim(),
+          rutEmpresa: formatearRut(rutEmpresa),
           direccionEmpresa: direccionEmpresa?.trim() || "",
           comunaEmpresa: comunaEmpresa?.trim() || "",
           regionEmpresa: regionEmpresa?.trim() || "",
