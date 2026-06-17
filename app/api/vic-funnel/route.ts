@@ -47,6 +47,7 @@ const CURATED_FINDINGS: Array<{ titulo: string; detalle: string }> = [
 ]
 
 type Row = {
+  conversation_id: string
   contact: string
   grupo: string
   sub_bucket: string | null
@@ -60,7 +61,7 @@ type Row = {
 
 async function fetchAnalysis(): Promise<Row[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,hallazgos,analyzed_at`,
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=conversation_id,contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,hallazgos,analyzed_at`,
     {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       cache: "no-store",
@@ -96,6 +97,60 @@ function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
 
+const esc = (s: unknown) =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+
+// Vista de detalle de UNA conversación: transcript + ficha del análisis. Se
+// abre desde el listado de "Motivos de no-cierre".
+async function renderConversation(convId: string, key: string): Promise<Response> {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const g = async (path: string): Promise<Record<string, unknown>[]> => {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: h, cache: "no-store" })
+    return r.ok ? ((await r.json()) as Record<string, unknown>[]) : []
+  }
+  const [msgs, ana] = await Promise.all([
+    g(`vic_v3_messages?conversation_id=eq.${convId}&select=role,content,at&order=at.asc&limit=300`),
+    g(`vic_v3_conversation_analysis?conversation_id=eq.${convId}&select=contact,resumen,motivo_no_cierre,sub_bucket,cotizacion_outcome&limit=1`),
+  ])
+  const a = ana[0] || {}
+  const back = `/api/vic-funnel?key=${encodeURIComponent(key)}`
+  const bubbles = msgs
+    .map((m) => {
+      const user = m.role === "user"
+      return `<div class="msg ${user ? "u" : "a"}"><div class="who">${user ? "Cliente" : "Vicky"}</div><div class="txt">${esc(m.content)}</div></div>`
+    })
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Conversación — Vicky</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
+  .wrap{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+  a{color:#1565C0;text-decoration:none} a:hover{text-decoration:underline}
+  .hd{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .hd b{font-size:15px} .meta{color:#6b7280;font-size:13px;margin-top:4px}
+  .chip{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px;margin-right:6px}
+  .msg{margin:8px 0;display:flex;flex-direction:column}
+  .msg.u{align-items:flex-end} .msg.a{align-items:flex-start}
+  .who{font-size:11px;color:#9ca3af;margin:0 6px 2px}
+  .txt{max-width:78%;padding:9px 12px;border-radius:14px;font-size:14px;white-space:pre-wrap;word-wrap:break-word}
+  .msg.u .txt{background:#d1e7ff} .msg.a .txt{background:#fff;border:1px solid #e5e7eb}
+</style></head><body><div class="wrap">
+  <p><a href="${back}">← Volver al embudo</a></p>
+  <div class="hd">
+    <b>Conversación · ${esc(a.contact || "")}</b>
+    <div class="meta">
+      ${a.sub_bucket ? `<span class="chip">${esc(a.sub_bucket)}</span>` : ""}
+      ${a.cotizacion_outcome ? `<span class="chip">${esc(a.cotizacion_outcome)}</span>` : ""}
+      ${a.motivo_no_cierre ? `<span class="chip">motivo: ${esc(a.motivo_no_cierre)}</span>` : ""}
+    </div>
+    ${a.resumen ? `<div class="meta">${esc(a.resumen)}</div>` : ""}
+  </div>
+  ${bubbles || "<p class='meta'>Sin mensajes.</p>"}
+</div></body></html>`
+  return page(html)
+}
+
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
   const key = (searchParams.get("key") || "").trim()
@@ -106,6 +161,9 @@ export async function GET(req: Request): Promise<Response> {
   if (key !== FUNNEL_KEY) {
     return page("<h1>No autorizado</h1><p>Falta o es incorrecto el parámetro <code>?key=</code>.</p>", 401)
   }
+
+  const conv = (searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()
+  if (conv) return renderConversation(conv, key)
 
   let rows: Row[]
   try {
@@ -265,6 +323,7 @@ export async function GET(req: Request): Promise<Response> {
   th{color:#6b7280;font-weight:600;font-size:12px}
   td.num{text-align:right;font-weight:700;width:64px;color:#9A6700}
   code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px}
+  a{color:#1565C0;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
   .kgroup{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
   .bars{display:flex;flex-direction:column;gap:8px}
   .bar-row{display:grid;grid-template-columns:160px 1fr 40px;align-items:center;gap:10px;font-size:13px}
@@ -308,7 +367,19 @@ export async function GET(req: Request): Promise<Response> {
         const w = noCierre.length ? Math.round((c / motivosSorted[0][1]) * 100) : 0
         return `<div class="bar-row"><div>${m.replace(/_/g, " ")}</div><div class="bar-track"><div class="bar-fill" style="width:${w}%"></div></div><div class="bar-num">${c}</div></div>`
       }).join("")}
-    </div>`}
+    </div>
+    <div class="kgroup" style="margin-top:18px">Detalle (datos subyacentes)</div>
+    <table><thead><tr><th>Motivo</th><th>Etapa</th><th>Qué ocurrió y por qué no avanzó</th><th></th></tr></thead><tbody>
+      ${[...noCierre]
+        .sort((a, b) => (a.motivo_no_cierre || "~").localeCompare(b.motivo_no_cierre || "~"))
+        .map((r) => `<tr>
+          <td><b>${esc((r.motivo_no_cierre || "sin motivo").replace(/_/g, " "))}</b></td>
+          <td>${r.cotizacion_outcome === "preform_mostrado" ? "Preform" : "Abandonado"}</td>
+          <td>${esc(r.resumen || "—")}</td>
+          <td><a href="?key=${encodeURIComponent(key)}&conv=${esc(r.conversation_id)}">Ver →</a></td>
+        </tr>`)
+        .join("")}
+    </tbody></table>`}
   </div>
 
   <div class="card"><h2>Hallazgos auto-detectados (por el análisis)</h2>
@@ -331,9 +402,11 @@ export async function GET(req: Request): Promise<Response> {
   var L = ${JSON.stringify(links)};
   var data = [{
     type: "sankey", orientation: "h",
-    node: { label: labels, color: nodeColor, pad: 18, thickness: 18, line: { color: "#fff", width: 1 } },
+    node: { label: labels, color: nodeColor, pad: 18, thickness: 18, line: { color: "#fff", width: 1 },
+      hovertemplate: "%{label}: %{value}<extra></extra>" },
     link: { source: L.map(function(x){return x.s}), target: L.map(function(x){return x.t}),
-      value: L.map(function(x){return x.v}), color: "rgba(47,84,150,0.16)" }
+      value: L.map(function(x){return x.v}), color: "rgba(47,84,150,0.16)",
+      hovertemplate: "%{source.label} → %{target.label}: %{value}<extra></extra>" }
   }];
   Plotly.newPlot("sankey", data, { font: { size: 12 }, margin: { l: 0, r: 0, t: 8, b: 8 } }, { responsive: true, displayModeBar: false });
 </script>
