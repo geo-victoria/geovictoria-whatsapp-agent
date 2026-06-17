@@ -69,6 +69,28 @@ async function fetchAnalysis(): Promise<Row[]> {
   return (await res.json()) as Row[]
 }
 
+const digits = (c: string) => (c || "").replace(/\D/g, "")
+
+// Señales DETERMINISTAS (hechos en la base, no inferencia del LLM): contactos
+// con cotización formal enviada (quote_pointers / formal_quote_id) y contactos
+// con reunión agendada (vic_v3_meetings). Se imponen sobre la clasificación.
+async function fetchHardSignals(): Promise<{ quote: Set<string>; meeting: Set<string> }> {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const get = async (path: string): Promise<{ contact: string }[]> => {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: h, cache: "no-store" })
+    return r.ok ? ((await r.json()) as { contact: string }[]) : []
+  }
+  const [qp, fq, mt] = await Promise.all([
+    get("vic_v3_quote_pointers?select=contact"),
+    get("vic_v3_conversations?select=contact&formal_quote_id=not.is.null"),
+    get("vic_v3_meetings?select=contact"),
+  ])
+  return {
+    quote: new Set([...qp, ...fq].map((x) => digits(x.contact))),
+    meeting: new Set(mt.map((x) => digits(x.contact))),
+  }
+}
+
 function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
@@ -86,7 +108,22 @@ export async function GET(req: Request): Promise<Response> {
 
   let rows: Row[]
   try {
-    rows = (await fetchAnalysis()).filter((r) => !isTestContact(r.contact))
+    const [allRows, hard] = await Promise.all([fetchAnalysis(), fetchHardSignals()])
+    rows = allRows.filter((r) => !isTestContact(r.contact))
+    // Hechos deterministas mandan sobre el LLM: cotización formal enviada y
+    // reunión agendada se imponen aunque el modelo no las haya detectado.
+    for (const r of rows) {
+      const d = digits(r.contact)
+      if (hard.quote.has(d)) {
+        r.grupo = "comercial"
+        r.sub_bucket = "cotizacion"
+        r.cotizacion_outcome = "cotizacion_enviada"
+      } else if (hard.meeting.has(d)) {
+        r.grupo = "comercial"
+        r.sub_bucket = "reunion"
+        r.cotizacion_outcome = null
+      }
+    }
   } catch (e) {
     return page(`<h1>Error consultando datos</h1><pre>${String(e).slice(0, 300)}</pre>`, 500)
   }
@@ -136,30 +173,30 @@ export async function GET(req: Request): Promise<Response> {
     : "—"
 
   // ── Sankey ──────────────────────────────────────────────────────────────
-  // Primera capa = los 3 grupos (sin nodo raíz). Comercial se abre en 5
-  // sub-buckets; "Flujo cotización" se abre en 3 estados. Soporte y No
-  // identificado llevan un nodo terminal para que rendericen con su tamaño.
+  // Parte del total de conversaciones, que se abre en los 3 grupos. Comercial
+  // se abre en 5 sub-buckets; "Flujo cotización" se abre en 3 estados. Soporte y
+  // No identificado son sumideros (reciben flujo de la raíz → rinden su tamaño).
   const labels = [
-    /* 0 */ "Intención comercial", /* 1 */ "Soporte", /* 2 */ "No identificado",
-    /* 3 */ "Crosselling", /* 4 */ "Lead (callback)", /* 5 */ "Reunión", /* 6 */ "Flujo cotización", /* 7 */ "Solo dudas",
-    /* 8 */ "Preform mostrado", /* 9 */ "Cotización enviada", /* 10 */ "Abandonado",
-    /* 11 */ "Atendido / derivado", /* 12 */ "Sin avance",
+    /* 0 */ "Conversaciones",
+    /* 1 */ "Intención comercial", /* 2 */ "Soporte", /* 3 */ "No identificado",
+    /* 4 */ "Crosselling", /* 5 */ "Lead (callback)", /* 6 */ "Reunión", /* 7 */ "Flujo cotización", /* 8 */ "Solo dudas",
+    /* 9 */ "Preform mostrado", /* 10 */ "Cotización enviada", /* 11 */ "Abandonado",
   ]
   const col = {
     base: "#2F5496", com: "#1565C0", sop: "#00838F", noid: "#9E9E9E",
     good: "#2E7D32", best: "#1B5E20", warn: "#F9A825", bad: "#C62828", grey: "#9E9E9E",
   }
   const nodeColor = [
+    col.base,
     col.com, col.sop, col.noid,
     col.good, col.warn, col.good, col.com, col.grey,
     col.good, col.best, col.bad,
-    col.sop, col.noid,
   ]
   const mk = (s: number, t: number, v: number) => ({ s, t, v })
   const links = [
-    mk(0, 3, crosselling), mk(0, 4, lead), mk(0, 5, reunion), mk(0, 6, cotizacion), mk(0, 7, soloDudas),
-    mk(6, 8, cPreform), mk(6, 9, cEnviada), mk(6, 10, cAbandonado),
-    mk(1, 11, soporte), mk(2, 12, noId),
+    mk(0, 1, comercial), mk(0, 2, soporte), mk(0, 3, noId),
+    mk(1, 4, crosselling), mk(1, 5, lead), mk(1, 6, reunion), mk(1, 7, cotizacion), mk(1, 8, soloDudas),
+    mk(7, 9, cPreform), mk(7, 10, cEnviada), mk(7, 11, cAbandonado),
   ].filter((l) => l.v > 0)
 
   const kpiCard = (label: string, value: number, color: string, sub?: string) =>
