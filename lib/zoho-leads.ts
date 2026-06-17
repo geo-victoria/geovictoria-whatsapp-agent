@@ -125,6 +125,11 @@ export type CreateZohoLeadResult =
 
 const VICKY_DEFAULT_OWNER_EMAIL = "vicky@geovictoria.com"
 
+// Id de Vicky en Zoho. Los leads SIN reunión deben quedar SIEMPRE con este
+// owner (entran a tómbola). No se usa ZOHO_CRM_OWNER_ID para evitar que una
+// variable de entorno mal configurada los redirija a otra persona.
+const VICKY_OWNER_ID = "3525045000484500876"
+
 export async function createZohoLead(input: CreateZohoLeadInput): Promise<CreateZohoLeadResult> {
   try {
     const names = splitName(input.nombre)
@@ -134,11 +139,12 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
 
-    const vickyOwnerId = getEnv("ZOHO_CRM_OWNER_ID") || "3525045000484500876"
+    // Si hay reunión agendada → owner = host (ownerEmail resuelto).
+    // Si NO → owner = Vicky SIEMPRE (tómbola), ignorando ZOHO_CRM_OWNER_ID.
     const resolvedOwnerId = input.ownerEmail
       ? await resolveOwnerId(input.ownerEmail, accessToken, apiDomain)
       : null
-    const ownerId = resolvedOwnerId || vickyOwnerId
+    const ownerId = resolvedOwnerId || VICKY_OWNER_ID
     const entraATombola = !resolvedOwnerId
 
     const trabajadoresNum =
