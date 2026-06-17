@@ -62,6 +62,9 @@ export type ConversationAnalysis = {
   grupo: "comercial" | "soporte" | "no_identificado"
   sub_bucket: "crosselling" | "lead" | "reunion" | "cotizacion" | "solo_dudas" | null
   cotizacion_outcome: "preform_mostrado" | "cotizacion_enviada" | "abandonado" | null
+  // Etiqueta libre (snake_case) del motivo de no-cierre. Solo para flujo de
+  // cotización que NO terminó en cotización enviada. Null en otro caso.
+  motivo_no_cierre: string | null
   es_cliente_actual: boolean
   resumen: string
   confianza: "alta" | "media" | "baja"
@@ -91,16 +94,18 @@ Clasifica así:
    - "preform_mostrado": Vicky mostró un preform/estimación referencial de precio, pero NO llegó a enviar la cotización formal.
    - "abandonado": entró al flujo de cotización pero no se llegó a mostrar un preform ni a enviar cotización (el cliente se fue, rechazó, o quedó en datos incompletos).
 
-4) "es_cliente_actual" (boolean): true si el prospecto da señales de ser ya cliente de GeoVictoria (menciona que ya lo usa, que tiene el sistema, problema operativo de su cuenta, etc.).
+4) "motivo_no_cierre" (string o null): SOLO cuando sub_bucket="cotizacion" y cotizacion_outcome es "preform_mostrado" o "abandonado" (es decir, entró a cotizar pero NO se envió la cotización formal). Es el motivo por el que no avanzó/cerró, en una etiqueta corta en snake_case. Reutiliza estas cuando apliquen: "precio" (objeción de precio/presupuesto/pidió descuento y no cerró), "faltaron_datos" (no entregó datos que Vicky necesitaba: RUT, nº trabajadores, instalación), "silencio" (dejó de responder sin dar motivo), "evaluando" (lo va a pensar/consultar internamente), "fuera_de_scope" (>50 trabajadores o pidió algo no ofrecido; suele derivar a ejecutivo), "prefirio_humano" (quiso hablar con una persona), "competencia" (evalúa o eligió otra solución), "error_bot" (falla o fricción del bot cortó el flujo). Si ninguna calza, crea una etiqueta corta en snake_case. En cualquier otro caso (no es cotización, o sí se envió), usa null.
 
-5) "resumen" (string, máx 140 caracteres): una línea en español chileno (tuteo, nunca voseo) describiendo qué pasó.
+5) "es_cliente_actual" (boolean): true si el prospecto da señales de ser ya cliente de GeoVictoria (menciona que ya lo usa, que tiene el sistema, problema operativo de su cuenta, etc.).
 
-6) "confianza": "alta" | "media" | "baja" según qué tan clara es la clasificación.
+6) "resumen" (string, máx 140 caracteres): una línea en español chileno (tuteo, nunca voseo) describiendo qué pasó.
 
-7) "hallazgos": arreglo (puede ser vacío) de observaciones accionables para mejorar a Vicky o el proceso de venta. Cada una { "tipo": "<etiqueta_corta_snake_case>", "detalle": "<1 frase>" }. Detecta por ejemplo: objecion_precio_mal_manejada, ofrecio_venta_no_pedida, pidio_fuera_de_catalogo, pidio_humano, dimensionamiento_dudoso, demora_respuesta, confusion_producto, oportunidad_perdida. Solo incluye hallazgos REALES y relevantes de esta conversación.
+7) "confianza": "alta" | "media" | "baja" según qué tan clara es la clasificación.
+
+8) "hallazgos": arreglo (puede ser vacío) de observaciones accionables para mejorar a Vicky o el proceso de venta. Cada una { "tipo": "<etiqueta_corta_snake_case>", "detalle": "<1 frase>" }. Detecta por ejemplo: objecion_precio_mal_manejada, ofrecio_venta_no_pedida, pidio_fuera_de_catalogo, pidio_humano, dimensionamiento_dudoso, demora_respuesta, confusion_producto, oportunidad_perdida. Solo incluye hallazgos REALES y relevantes de esta conversación.
 
 Devuelve EXACTAMENTE este shape:
-{"grupo":"...","sub_bucket":null,"cotizacion_outcome":null,"es_cliente_actual":false,"resumen":"...","confianza":"...","hallazgos":[]}`
+{"grupo":"...","sub_bucket":null,"cotizacion_outcome":null,"motivo_no_cierre":null,"es_cliente_actual":false,"resumen":"...","confianza":"...","hallazgos":[]}`
 
 function buildTranscript(messages: TranscriptMessage[]): string {
   return messages
@@ -123,6 +128,14 @@ function coerce(raw: unknown): ConversationAnalysis {
       ? (o.cotizacion_outcome as ConversationAnalysis["cotizacion_outcome"])
       : null
   if (sub !== "cotizacion") outcome = null
+  // motivo_no_cierre: solo para cotización que no terminó en envío. Etiqueta
+  // libre normalizada a snake_case corto.
+  let motivo: string | null = null
+  if (sub === "cotizacion" && (outcome === "preform_mostrado" || outcome === "abandonado")) {
+    const raw = String(o.motivo_no_cierre || "").trim().toLowerCase()
+    const norm = raw.replace(/[^a-z0-9áéíóúñ]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 40)
+    motivo = norm || "sin_motivo"
+  }
   const hallazgos = Array.isArray(o.hallazgos)
     ? (o.hallazgos as unknown[])
         .map((h) => {
@@ -136,6 +149,7 @@ function coerce(raw: unknown): ConversationAnalysis {
     grupo,
     sub_bucket: sub,
     cotizacion_outcome: outcome,
+    motivo_no_cierre: motivo,
     es_cliente_actual: Boolean(o.es_cliente_actual),
     resumen: String(o.resumen || "").slice(0, 200),
     confianza: ["alta", "media", "baja"].includes(String(o.confianza))

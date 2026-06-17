@@ -125,6 +125,7 @@ export async function GET(req: Request): Promise<Response> {
               grupo: analysis.grupo,
               sub_bucket: analysis.sub_bucket,
               cotizacion_outcome: analysis.cotizacion_outcome,
+              motivo_no_cierre: analysis.motivo_no_cierre,
               es_cliente_actual: analysis.es_cliente_actual,
               resumen: analysis.resumen,
               confianza: analysis.confianza,

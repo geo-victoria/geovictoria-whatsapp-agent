@@ -51,6 +51,7 @@ type Row = {
   grupo: string
   sub_bucket: string | null
   cotizacion_outcome: string | null
+  motivo_no_cierre: string | null
   es_cliente_actual: boolean
   resumen: string | null
   hallazgos: Array<{ tipo: string; detalle: string }> | null
@@ -59,7 +60,7 @@ type Row = {
 
 async function fetchAnalysis(): Promise<Row[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=contact,grupo,sub_bucket,cotizacion_outcome,es_cliente_actual,resumen,hallazgos,analyzed_at`,
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,hallazgos,analyzed_at`,
     {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       cache: "no-store",
@@ -118,10 +119,12 @@ export async function GET(req: Request): Promise<Response> {
         r.grupo = "comercial"
         r.sub_bucket = "cotizacion"
         r.cotizacion_outcome = "cotizacion_enviada"
+        r.motivo_no_cierre = null
       } else if (hard.meeting.has(d)) {
         r.grupo = "comercial"
         r.sub_bucket = "reunion"
         r.cotizacion_outcome = null
+        r.motivo_no_cierre = null
       }
     }
   } catch (e) {
@@ -149,6 +152,22 @@ export async function GET(req: Request): Promise<Response> {
   const cPreform = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "preform_mostrado")
   const cEnviada = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "cotizacion_enviada")
   const cAbandonado = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "abandonado")
+
+  // ── Motivos de no-cierre (flujo cotización que no terminó en envío) ──────
+  const noCierre = rows.filter(
+    (r) => r.sub_bucket === "cotizacion" && (r.cotizacion_outcome === "preform_mostrado" || r.cotizacion_outcome === "abandonado"),
+  )
+  const motivoCount = new Map<string, number>()
+  for (const r of noCierre) {
+    const m = r.motivo_no_cierre || "sin_motivo"
+    motivoCount.set(m, (motivoCount.get(m) || 0) + 1)
+  }
+  // Orden por frecuencia; cap a 7 nodos + "otros" para mantener legible el Sankey.
+  const motivosSorted = [...motivoCount.entries()].sort((a, b) => b[1] - a[1])
+  const TOP_MOTIVOS = 7
+  const topMotivos = motivosSorted.slice(0, TOP_MOTIVOS).map(([m]) => m)
+  const hayOtros = motivosSorted.length > TOP_MOTIVOS
+  const motivoBucket = (m: string) => (topMotivos.includes(m) ? m : "otros")
 
   // Hallazgos auto-detectados: agregados por tipo, con un ejemplo.
   const byTipo = new Map<string, { count: number; ejemplo: string }>()
@@ -199,6 +218,29 @@ export async function GET(req: Request): Promise<Response> {
     mk(7, 9, cPreform), mk(7, 10, cEnviada), mk(7, 11, cAbandonado),
   ].filter((l) => l.v > 0)
 
+  // 3er nivel: Preform mostrado (9) y Abandonado (11) se abren por motivo de
+  // no-cierre. Los nodos de motivo se agregan dinámicamente tras los 12 base.
+  const motivoNodeNames = [...topMotivos, ...(hayOtros ? ["otros"] : [])]
+  const motivoNodeIndex = new Map<string, number>()
+  motivoNodeNames.forEach((m, i) => {
+    motivoNodeIndex.set(m, labels.length + i)
+    labels.push(m.replace(/_/g, " "))
+    nodeColor.push("#A1887F")
+  })
+  // Cuenta por (estado, motivo) y crea los links estado→motivo.
+  const pairCount = new Map<string, number>()
+  for (const r of noCierre) {
+    const stageNode = r.cotizacion_outcome === "preform_mostrado" ? 9 : 11
+    const mNode = motivoNodeIndex.get(motivoBucket(r.motivo_no_cierre || "sin_motivo"))
+    if (mNode === undefined) continue
+    const key = `${stageNode}|${mNode}`
+    pairCount.set(key, (pairCount.get(key) || 0) + 1)
+  }
+  for (const [key, v] of pairCount) {
+    const [s, t] = key.split("|").map(Number)
+    links.push(mk(s, t, v))
+  }
+
   const kpiCard = (label: string, value: number, color: string, sub?: string) =>
     `<div class="kpi"><div class="kpi-v" style="color:${color}">${value}</div><div class="kpi-l">${label}${sub ? ` <span class="pct">${sub}</span>` : ""}</div></div>`
   const pct = (x: number) => (total ? `${Math.round((x / total) * 100)}%` : "")
@@ -224,6 +266,11 @@ export async function GET(req: Request): Promise<Response> {
   td.num{text-align:right;font-weight:700;width:64px;color:#9A6700}
   code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px}
   .kgroup{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
+  .bars{display:flex;flex-direction:column;gap:8px}
+  .bar-row{display:grid;grid-template-columns:160px 1fr 40px;align-items:center;gap:10px;font-size:13px}
+  .bar-track{background:#f1f3f5;border-radius:6px;height:18px;overflow:hidden}
+  .bar-fill{background:#A1887F;height:100%;border-radius:6px}
+  .bar-num{text-align:right;font-weight:700;color:#6d4c41}
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
@@ -253,6 +300,15 @@ export async function GET(req: Request): Promise<Response> {
 
   <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div>
     <div class="sub" style="margin:8px 0 0">Flujo cotización (${cotizacion}): <b>${cPreform}</b> preform mostrado · <b>${cEnviada}</b> cotización enviada · <b>${cAbandonado}</b> abandonado.</div>
+  </div>
+
+  <div class="card"><h2>Motivos de no-cierre <span class="pct" style="font-weight:400">— cotizaciones que no terminaron en envío (${noCierre.length})</span></h2>
+    ${noCierre.length === 0 ? "<p class='sub'>Sin casos.</p>" : `<div class="bars">
+      ${motivosSorted.map(([m, c]) => {
+        const w = noCierre.length ? Math.round((c / motivosSorted[0][1]) * 100) : 0
+        return `<div class="bar-row"><div>${m.replace(/_/g, " ")}</div><div class="bar-track"><div class="bar-fill" style="width:${w}%"></div></div><div class="bar-num">${c}</div></div>`
+      }).join("")}
+    </div>`}
   </div>
 
   <div class="card"><h2>Hallazgos auto-detectados (por el análisis)</h2>
