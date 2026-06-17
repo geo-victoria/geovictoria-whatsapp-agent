@@ -181,20 +181,32 @@ export async function GET(req: Request): Promise<Response> {
   th{color:#6b7280;font-weight:600;font-size:12px}
   td.num{text-align:right;font-weight:700;width:64px;color:#9A6700}
   code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px}
+  .kgroup{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
   <div class="sub">Clientes reales (excluye pruebas internas) · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr}</div>
 
+  <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
     ${kpiCard("Conversaciones", total, col.base)}
     ${kpiCard("Intención comercial", comercial, col.com, pct(comercial))}
     ${kpiCard("Soporte", soporte, col.sop, pct(soporte))}
     ${kpiCard("No identificado", noId, col.noid, pct(noId))}
+  </div>
+  <div class="kgroup">Dentro de intención comercial (${comercial})</div>
+  <div class="kpis">
     ${kpiCard("Cotización", cotizacion, col.com)}
-    ${kpiCard("Cotización enviada", cEnviada, col.best)}
     ${kpiCard("Reunión", reunion, col.good)}
-    ${kpiCard("Callback", callback, col.warn)}
+    ${kpiCard("Callback (lead)", callback, col.warn)}
+    ${kpiCard("Crosselling", crosselling, col.good)}
+  </div>
+  <div class="kgroup">Resultado de las cotizaciones (${cotizacion})</div>
+  <div class="kpis">
+    ${kpiCard("Enviada / aceptada", cEnviada, col.best)}
+    ${kpiCard("Fuga", cFuga, col.warn)}
+    ${kpiCard("Rechazo explícito", cRechazo, col.bad)}
+    ${kpiCard("No alcanzó preform", cSinPreform, col.grey)}
   </div>
 
   <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div>
