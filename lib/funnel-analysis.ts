@@ -60,8 +60,8 @@ export type Hallazgo = { tipo: string; detalle: string }
 
 export type ConversationAnalysis = {
   grupo: "comercial" | "soporte" | "no_identificado"
-  sub_bucket: "crosselling" | "callback" | "reunion" | "cotizacion" | null
-  cotizacion_outcome: "enviada" | "fuga" | "rechazo_explicito" | "sin_preform" | null
+  sub_bucket: "crosselling" | "lead" | "reunion" | "cotizacion" | "solo_dudas" | null
+  cotizacion_outcome: "preform_mostrado" | "cotizacion_enviada" | "abandonado" | null
   es_cliente_actual: boolean
   resumen: string
   confianza: "alta" | "media" | "baja"
@@ -82,14 +82,14 @@ Clasifica así:
 2) "sub_bucket" (solo si grupo="comercial"; null en otro caso). Elige el estado MÁS avanzado alcanzado, en este orden de prioridad:
    - "cotizacion": entró al flujo de cotización (Vicky pidió datos para cotizar, mostró un precio/estimación, negoció descuento, o envió una cotización formal).
    - "reunion": se coordinó o el prospecto pidió una reunión con un ejecutivo comercial.
-   - "callback": el prospecto pidió que un ejecutivo lo contacte o lo llame de vuelta (lead), sin llegar a cotizar.
+   - "lead": el prospecto pidió que un ejecutivo lo contacte o lo llame de vuelta (callback), sin llegar a cotizar.
    - "crosselling": es un cliente ACTUAL de GeoVictoria que consulta por un producto o módulo ADICIONAL (venta cruzada / upsell).
+   - "solo_dudas": mostró interés comercial pero SOLO hizo preguntas (precios, funcionamiento, condiciones) sin avanzar a cotizar, agendar, pedir callback ni ser cliente actual por otro producto.
 
-3) "cotizacion_outcome" (solo si sub_bucket="cotizacion"; null en otro caso):
-   - "enviada": se mostró el preform/estimación o se envió la cotización formal y el cliente NO la rechazó (aceptó, mostró interés, o quedó evaluando con buena disposición).
-   - "fuga": se mostró preform/cotización pero el cliente dejó de responder o no avanzó, SIN rechazo explícito (silencio, "lo voy a pensar" y nada más).
-   - "rechazo_explicito": el cliente rechazó explícitamente (dijo que no le interesa, lo encontró caro y se cayó, eligió otra solución, "no gracias").
-   - "sin_preform": entró a cotizar pero abandonó ANTES de que Vicky mostrara un precio/estimación.
+3) "cotizacion_outcome" (solo si sub_bucket="cotizacion"; null en otro caso). Elige el estado MÁS avanzado del flujo de cotización:
+   - "cotizacion_enviada": se generó y envió la cotización formal (link de aceptación o PDF).
+   - "preform_mostrado": Vicky mostró un preform/estimación referencial de precio, pero NO llegó a enviar la cotización formal.
+   - "abandonado": entró al flujo de cotización pero no se llegó a mostrar un preform ni a enviar cotización (el cliente se fue, rechazó, o quedó en datos incompletos).
 
 4) "es_cliente_actual" (boolean): true si el prospecto da señales de ser ya cliente de GeoVictoria (menciona que ya lo usa, que tiene el sistema, problema operativo de su cuenta, etc.).
 
@@ -114,12 +114,12 @@ function coerce(raw: unknown): ConversationAnalysis {
   const grupo = ["comercial", "soporte", "no_identificado"].includes(String(o.grupo))
     ? (o.grupo as ConversationAnalysis["grupo"])
     : "no_identificado"
-  let sub = ["crosselling", "callback", "reunion", "cotizacion"].includes(String(o.sub_bucket))
+  let sub = ["crosselling", "lead", "reunion", "cotizacion", "solo_dudas"].includes(String(o.sub_bucket))
     ? (o.sub_bucket as ConversationAnalysis["sub_bucket"])
     : null
   if (grupo !== "comercial") sub = null
   let outcome =
-    ["enviada", "fuga", "rechazo_explicito", "sin_preform"].includes(String(o.cotizacion_outcome))
+    ["preform_mostrado", "cotizacion_enviada", "abandonado"].includes(String(o.cotizacion_outcome))
       ? (o.cotizacion_outcome as ConversationAnalysis["cotizacion_outcome"])
       : null
   if (sub !== "cotizacion") outcome = null

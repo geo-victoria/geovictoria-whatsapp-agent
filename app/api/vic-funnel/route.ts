@@ -104,14 +104,14 @@ export async function GET(req: Request): Promise<Response> {
   const noId = n((r) => r.grupo === "no_identificado")
 
   const crosselling = n((r) => r.grupo === "comercial" && r.sub_bucket === "crosselling")
-  const callback = n((r) => r.grupo === "comercial" && r.sub_bucket === "callback")
+  const lead = n((r) => r.grupo === "comercial" && r.sub_bucket === "lead")
   const reunion = n((r) => r.grupo === "comercial" && r.sub_bucket === "reunion")
   const cotizacion = n((r) => r.grupo === "comercial" && r.sub_bucket === "cotizacion")
+  const soloDudas = n((r) => r.grupo === "comercial" && r.sub_bucket === "solo_dudas")
 
-  const cEnviada = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "enviada")
-  const cFuga = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "fuga")
-  const cRechazo = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "rechazo_explicito")
-  const cSinPreform = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "sin_preform")
+  const cPreform = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "preform_mostrado")
+  const cEnviada = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "cotizacion_enviada")
+  const cAbandonado = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "abandonado")
 
   // Hallazgos auto-detectados: agregados por tipo, con un ejemplo.
   const byTipo = new Map<string, { count: number; ejemplo: string }>()
@@ -136,25 +136,30 @@ export async function GET(req: Request): Promise<Response> {
     : "—"
 
   // ── Sankey ──────────────────────────────────────────────────────────────
+  // Primera capa = los 3 grupos (sin nodo raíz). Comercial se abre en 5
+  // sub-buckets; "Flujo cotización" se abre en 3 estados. Soporte y No
+  // identificado llevan un nodo terminal para que rendericen con su tamaño.
   const labels = [
-    "Conversaciones", "Intención comercial", "Soporte", "No identificado",
-    "Crosselling", "Callback (lead)", "Reunión agendada", "Cotización",
-    "Cotización enviada", "Fuga", "Rechazo explícito", "No alcanzó preform",
+    /* 0 */ "Intención comercial", /* 1 */ "Soporte", /* 2 */ "No identificado",
+    /* 3 */ "Crosselling", /* 4 */ "Lead (callback)", /* 5 */ "Reunión", /* 6 */ "Flujo cotización", /* 7 */ "Solo dudas",
+    /* 8 */ "Preform mostrado", /* 9 */ "Cotización enviada", /* 10 */ "Abandonado",
+    /* 11 */ "Atendido / derivado", /* 12 */ "Sin avance",
   ]
   const col = {
     base: "#2F5496", com: "#1565C0", sop: "#00838F", noid: "#9E9E9E",
     good: "#2E7D32", best: "#1B5E20", warn: "#F9A825", bad: "#C62828", grey: "#9E9E9E",
   }
   const nodeColor = [
-    col.base, col.com, col.sop, col.noid,
-    col.good, col.warn, col.good, col.com,
-    col.best, col.warn, col.bad, col.grey,
+    col.com, col.sop, col.noid,
+    col.good, col.warn, col.good, col.com, col.grey,
+    col.good, col.best, col.bad,
+    col.sop, col.noid,
   ]
   const mk = (s: number, t: number, v: number) => ({ s, t, v })
   const links = [
-    mk(0, 1, comercial), mk(0, 2, soporte), mk(0, 3, noId),
-    mk(1, 4, crosselling), mk(1, 5, callback), mk(1, 6, reunion), mk(1, 7, cotizacion),
-    mk(7, 8, cEnviada), mk(7, 9, cFuga), mk(7, 10, cRechazo), mk(7, 11, cSinPreform),
+    mk(0, 3, crosselling), mk(0, 4, lead), mk(0, 5, reunion), mk(0, 6, cotizacion), mk(0, 7, soloDudas),
+    mk(6, 8, cPreform), mk(6, 9, cEnviada), mk(6, 10, cAbandonado),
+    mk(1, 11, soporte), mk(2, 12, noId),
   ].filter((l) => l.v > 0)
 
   const kpiCard = (label: string, value: number, color: string, sub?: string) =>
@@ -196,21 +201,21 @@ export async function GET(req: Request): Promise<Response> {
   </div>
   <div class="kgroup">Dentro de intención comercial (${comercial})</div>
   <div class="kpis">
-    ${kpiCard("Cotización", cotizacion, col.com)}
+    ${kpiCard("Flujo cotización", cotizacion, col.com)}
     ${kpiCard("Reunión", reunion, col.good)}
-    ${kpiCard("Callback (lead)", callback, col.warn)}
+    ${kpiCard("Lead (callback)", lead, col.warn)}
     ${kpiCard("Crosselling", crosselling, col.good)}
+    ${kpiCard("Solo dudas", soloDudas, col.grey)}
   </div>
-  <div class="kgroup">Resultado de las cotizaciones (${cotizacion})</div>
+  <div class="kgroup">Dentro de flujo cotización (${cotizacion})</div>
   <div class="kpis">
-    ${kpiCard("Enviada / aceptada", cEnviada, col.best)}
-    ${kpiCard("Fuga", cFuga, col.warn)}
-    ${kpiCard("Rechazo explícito", cRechazo, col.bad)}
-    ${kpiCard("No alcanzó preform", cSinPreform, col.grey)}
+    ${kpiCard("Preform mostrado", cPreform, col.good)}
+    ${kpiCard("Cotización enviada", cEnviada, col.best)}
+    ${kpiCard("Abandonado", cAbandonado, col.bad)}
   </div>
 
   <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div>
-    <div class="sub" style="margin:8px 0 0">Cotización: <b>${cEnviada}</b> enviada/aceptada · <b>${cFuga}</b> fuga · <b>${cRechazo}</b> rechazo explícito · <b>${cSinPreform}</b> no alcanzó preform.</div>
+    <div class="sub" style="margin:8px 0 0">Flujo cotización (${cotizacion}): <b>${cPreform}</b> preform mostrado · <b>${cEnviada}</b> cotización enviada · <b>${cAbandonado}</b> abandonado.</div>
   </div>
 
   <div class="card"><h2>Hallazgos auto-detectados (por el análisis)</h2>
