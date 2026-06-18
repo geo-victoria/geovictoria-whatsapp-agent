@@ -213,6 +213,12 @@ export async function runAgentLoop(params: {
         // a creación nueva en lugar de update sobre un ID alucinado.
         const toolInput = sanitizeIdsInToolInput(toolName, rawInput)
 
+        // reagendar_reunion necesita el contacto para ubicar el booking vigente;
+        // el modelo no lo conoce, así que se lo inyectamos del contexto del turno.
+        if (toolName === "reagendar_reunion" && contact) {
+          toolInput._contact = contact
+        }
+
         // Capa 3: Borrador de descuento del preform persistido por contacto.
         // La negociación (ofrecer el siguiente escalón) ocurre en un turno y la
         // aceptación en otro, pero entre turnos solo se persiste texto: el

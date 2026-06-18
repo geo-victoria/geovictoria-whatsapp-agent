@@ -423,6 +423,73 @@ export async function bookMeeting(params: {
   }
 }
 
+/**
+ * Reagenda un booking existente a un nuevo slot, MANTENIENDO el mismo host.
+ * Usa el endpoint dedicado de Cal.com (POST /bookings/{uid}/reschedule), que NO
+ * re-corre el Round Robin: conserva el ejecutivo asignado y cancela la reunión
+ * vieja automáticamente. (Para garantizar el mismo host en un event type Round
+ * Robin, este debe tener activado "reschedule with same round-robin host".)
+ */
+export async function rescheduleMeeting(params: {
+  bookingUid: string
+  newSlotIso: string
+  reason?: string
+}): Promise<
+  | { success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string; startIso: string }
+  | { success: false; error: string }
+> {
+  if (!CAL_API_KEY) return { success: false, error: "CAL_API_KEY no configurada en el entorno." }
+  const { bookingUid, newSlotIso, reason } = params
+
+  try {
+    const res = await fetch(`${CAL_BASE}/bookings/${encodeURIComponent(bookingUid)}/reschedule`, {
+      method: "POST",
+      headers: CAL_HEADERS,
+      body: JSON.stringify({
+        start: newSlotIso,
+        reschedulingReason: reason || "Reagendado por el cliente vía WhatsApp",
+      }),
+      cache: "no-store",
+    })
+
+    const data = (await res.json()) as {
+      status?: string
+      data?: {
+        uid?: string
+        id?: number
+        start?: string
+        status?: string
+        meetingUrl?: string
+        organizer?: { email?: string }
+        hosts?: Array<{ email?: string }>
+      }
+      message?: string
+      error?: unknown
+      statusCode?: number
+    }
+
+    const uid = data.data?.uid || data.data?.id
+    if (!res.ok || data.status === "error" || data.statusCode || !uid) {
+      const errMsg = data.message || JSON.stringify(data.error || data).slice(0, 300)
+      console.error("[calendar] reschedule failed:", res.status, errMsg)
+      return { success: false, error: errMsg }
+    }
+
+    console.log("[calendar] reschedule ok:", bookingUid, "→", uid, "start:", data.data?.start)
+    return {
+      success: true,
+      bookingId: String(uid),
+      meetingUrl: data.data?.meetingUrl,
+      organizerEmail: data.data?.organizer?.email || data.data?.hosts?.[0]?.email || undefined,
+      startIso: data.data?.start || newSlotIso,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "error de red contactando Cal.com"
+    console.error("[calendar] rescheduleMeeting exception:", e)
+    return { success: false, error: msg }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Addendum V3: checkSlotAvailability para flujo cliente-propone
 // ─────────────────────────────────────────────────────────────────────────────

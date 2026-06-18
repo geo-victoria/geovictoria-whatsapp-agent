@@ -57,6 +57,11 @@ import {
   type AgendarReunionResultado,
 } from "./agendar-reunion"
 import {
+  reagendarReunionSchema,
+  reagendarReunion,
+  type ReagendarReunionResultado,
+} from "./reagendar-reunion"
+import {
   consultarDescuentoReferencialSchema,
   consultarDescuentoReferencial,
   type ConsultarDescuentoReferencialResultado,
@@ -90,6 +95,7 @@ export const TOOL_SCHEMAS = [
   registrarSolicitudCallbackSchema,
   consultarDisponibilidadHorarioSchema,
   agendarReunionSchema,
+  reagendarReunionSchema,
   derivarASoporteSchema,
   // consultar_descuento_referencial (preform): negociación de descuento ANTES de
   // la cotización formal (Modelo B). Es 100% read-only — NO crea ni toca ningún
@@ -113,6 +119,7 @@ export type ToolResult =
   | RegistrarSolicitudCallbackResultado
   | ConsultarDisponibilidadHorarioResultado
   | AgendarReunionResultado
+  | ReagendarReunionResultado
   | ConsultarDescuentoReferencialResultado
   | ConsultarSiguienteDescuentoResultado
   | AplicarSiguienteDescuentoResultado
@@ -147,6 +154,9 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "agendar_reunion":
         return await agendarReunion(input as never)
+
+      case "reagendar_reunion":
+        return await reagendarReunion(input as never)
 
       case "derivar_a_soporte":
         return derivarASoporte(input as never)

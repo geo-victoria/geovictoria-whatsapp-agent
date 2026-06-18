@@ -671,6 +671,19 @@ export async function unclaimMeetingReminder(bookingUid: string): Promise<void> 
   await updateMeetingByUid(bookingUid, { reminder_sent_at: null })
 }
 
+/** Próxima reunión futura agendada del contacto (para reagendar/confirmar). */
+export async function getUpcomingMeeting(contact: string): Promise<MeetingRow | null> {
+  if (!contact) return null
+  const nowIso = new Date().toISOString()
+  const rows = await supabaseFetch<MeetingRow[]>(
+    `vic_v3_meetings?contact=eq.${encodeURIComponent(contact)}&status=eq.scheduled` +
+      `&start_at=gt.${nowIso}` +
+      `&select=booking_uid,contact,prospect_name,start_at,timezone,meeting_url,organizer_email` +
+      `&order=start_at.asc&limit=1`,
+  )
+  return rows && rows.length > 0 ? rows[0] : null
+}
+
 /** Marca la próxima reunión futura del contacto como confirmada por WhatsApp. */
 export async function confirmMeetingAttendance(contact: string): Promise<MeetingRow | null> {
   if (!contact) return null
