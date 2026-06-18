@@ -427,6 +427,64 @@ async function processOneTurn(
       }
     }
 
+    // 2.6b. Guardrail anti-alucinación de reunión agendada.
+    // Caso real (Eduardo): Vicky dijo "Tu reunión quedó agendada" SIN invocar
+    // agendar_reunion → no hubo booking en Cal.com, ni correo, ni fila en
+    // vic_v3_meetings. Misma clase de bug que la alucinación del link de
+    // cotización. Si el reply AFIRMA que la reunión quedó agendada/reagendada
+    // pero NO hubo un agendar_reunion/reagendar_reunion exitoso este turno,
+    // re-corremos forzando la tool; si aun así no se concreta, NO confirmamos.
+    const afirmaReunionLista =
+      /\breuni[oó]n\b[^.]{0,40}\b(qued[oó]|est[aá]|fue)\b[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(
+        reply,
+      ) ||
+      /\b(agend[eé]|reagend[eé])\b[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
+      /\bte\s+(la|lo)\s+(agend[eé]|reagend[eé])\b/i.test(reply)
+    const realAgenda = toolCalls.some(
+      (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
+    )
+    if (afirmaReunionLista && !realAgenda) {
+      let agendaRecuperada = false
+      const FORZAR_TOOL_AGENDA =
+        "\n\n# Instrucción de sistema (este turno)\n" +
+        "Estás por confirmar una reunión, pero NO puedes decir que quedó agendada sin antes EJECUTAR la tool. " +
+        "Si el cliente YA tiene una reunión y quiere cambiarla de día/hora, llama reagendar_reunion(newSlotIso). " +
+        "Si es una reunión NUEVA, llama agendar_reunion(slotIso, prospectName, prospectEmail, ...) con los datos que el cliente ya entregó en la conversación. " +
+        "Si tienes cualquier duda de disponibilidad del horario, llama primero consultar_disponibilidad_horario. " +
+        "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
+        "Si la tool falla o no hay disponibilidad, díselo con honestidad y ofrece otro horario — JAMÁS afirmes que la reunión quedó agendada si la tool no tuvo éxito."
+      const retry = await runAgentLoop({
+        systemPrompt: contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_AGENDA,
+        history,
+        userMessage: message,
+        apiKey,
+        contact,
+        model: MODELO_COTIZACION,
+      }).catch((e) => {
+        console.error(`[v3-bg] Reintento forzado de agenda falló:`, e)
+        return null
+      })
+      if (retry) {
+        const retryReply = (retry.reply || "").trim()
+        const retryReal = ((retry.toolCalls || []) as ToolCallRecord[]).some(
+          (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
+        )
+        if (retryReal && retryReply) {
+          console.warn(`[v3-bg] AGENDA_RECUPERADA contact=${contact}: el reintento forzó la tool.`)
+          reply = retryReply
+          result.toolCalls = retry.toolCalls
+          agendaRecuperada = true
+        }
+      }
+      if (!agendaRecuperada) {
+        console.error(
+          `[v3-bg] ALUCINACIÓN_AGENDA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+        )
+        reply =
+          "Disculpa, no alcancé a dejar la reunión agendada. ¿Me confirmas el día y la hora que prefieres y lo dejo listo al tiro?"
+      }
+    }
+
     // 2.7. Saneador anti-voseo determinista (por si el modelo se escapó del
     // tuteo chileno pese a la regla del prompt).
     reply = sanitizarVoseo(reply)
