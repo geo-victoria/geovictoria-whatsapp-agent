@@ -385,6 +385,59 @@ export async function runAgentLoop(params: {
               contactId: draftIds?.contactId,
               params,
             }).catch(() => {})
+          } else if (toolName === "cotizar_referencial") {
+            // Si ya hay un descuento ACORDADO (escalón negociado) y el cliente
+            // re-cotiza por un cambio de configuración (modalidad del reloj, N° de
+            // trabajadores, puntos), lo ACORDADO no se pierde:
+            //  (1) re-anclamos los params a la nueva config, para que la
+            //      finalización use la opción nueva (no revierta a la vieja), y
+            //  (2) recalculamos el preview CON el descuento acordado sobre la
+            //      config nueva y se lo inyectamos al modelo para que lo presente
+            //      con el descuento (no a precio full) y se lo confirme al cliente.
+            const draft = await getPrefDraft(contact).catch(() => null)
+            if (draft && draft.escalon > 0) {
+              const nuevosParams = {
+                userCount:
+                  typeof toolInput.userCount === "number" ? toolInput.userCount : undefined,
+                modulos: Array.isArray(toolInput.modulos)
+                  ? (toolInput.modulos as string[])
+                  : undefined,
+                hardware: Array.isArray(toolInput.hardware)
+                  ? (toolInput.hardware as PrefParams["hardware"])
+                  : undefined,
+                puntosInstalacion: Array.isArray(toolInput.puntosInstalacion)
+                  ? (toolInput.puntosInstalacion as PrefParams["puntosInstalacion"])
+                  : undefined,
+              }
+              // Re-anclar la opción nueva (determinista: la formal saldrá con esta
+              // config + el escalón ya acordado, no con la opción vieja).
+              await setPrefDraft(contact, { params: nuevosParams }).catch(() => {})
+              // Re-preview al MISMO nivel acordado (escalon-1 re-muestra el último
+              // escalón ofrecido, sin avanzar). dispatchTool directo para NO pasar
+              // por el anclaje de escalón (que forzaría el tope y daría error).
+              const reArgs = {
+                ...toolInput,
+                escalonActual: Math.max(0, draft.escalon - 1),
+              }
+              const reDesc = (await dispatchTool(
+                "consultar_descuento_referencial",
+                reArgs,
+              ).catch(() => null)) as Record<string, any> | null
+              if (reDesc && reDesc.ok && reDesc.preview && reDesc.escalon) {
+                ;(result as Record<string, unknown>)._descuentoAcordado = {
+                  pct: reDesc.escalon.pct,
+                  mensualClp: reDesc.preview.mensualClp,
+                  pagoInicialClp: reDesc.preview.pagoInicialClp,
+                  directiva:
+                    "Este cliente YA tiene un descuento ACORDADO sobre el plan de asistencia. " +
+                    "Acaba de cambiar la configuración de la cotización, así que NO presentes este " +
+                    "preform a precio full: preséntale ESTA misma opción nueva con su descuento ya " +
+                    `aplicado (plan mensual ${reDesc.preview.mensualClp} CLP/mes incluyendo el ${reDesc.escalon.pct}% ` +
+                    `sobre asistencia; pago inicial ${reDesc.preview.pagoInicialClp} CLP) y dile EXPLÍCITAMENTE ` +
+                    "que le mantienes su descuento sobre esta nueva opción. El descuento acordado no se pierde ante ningún cambio.",
+                }
+              }
+            }
           } else if (toolName === "generar_link_cotizadora") {
             // Cotización finalizada: la negociación del preform se consumió.
             await clearPrefDraft(contact).catch(() => {})
