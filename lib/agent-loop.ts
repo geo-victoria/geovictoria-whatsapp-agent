@@ -429,12 +429,15 @@ export async function runAgentLoop(params: {
                   mensualClp: reDesc.preview.mensualClp,
                   pagoInicialClp: reDesc.preview.pagoInicialClp,
                   directiva:
-                    "Este cliente YA tiene un descuento ACORDADO sobre el plan de asistencia. " +
-                    "Acaba de cambiar la configuración de la cotización, así que NO presentes este " +
-                    "preform a precio full: preséntale ESTA misma opción nueva con su descuento ya " +
-                    `aplicado (plan mensual ${reDesc.preview.mensualClp} CLP/mes incluyendo el ${reDesc.escalon.pct}% ` +
-                    `sobre asistencia; pago inicial ${reDesc.preview.pagoInicialClp} CLP) y dile EXPLÍCITAMENTE ` +
-                    "que le mantienes su descuento sobre esta nueva opción. El descuento acordado no se pierde ante ningún cambio.",
+                    "Este cliente YA tiene un descuento ACORDADO sobre el plan de asistencia y " +
+                    "acaba de cambiar la configuración. REGLA DE PRESENTACIÓN: NO copies ni muestres " +
+                    "el bloque de ítems a precio full ('Resumen mensual recurrente' / 'Pago único' / " +
+                    "subtotales) que trae el mensajeParaProspecto de esta tool — esos números NO llevan " +
+                    "el descuento y contradicen el total. En su lugar, presenta un resumen BREVE con el " +
+                    `descuento ya aplicado: dile que le mantienes su ${reDesc.escalon.pct}% sobre el plan ` +
+                    `de asistencia y dale el plan mensual ${reDesc.preview.mensualClp} CLP/mes (con ese ` +
+                    `${reDesc.escalon.pct}% los primeros 6 meses) y el pago inicial ${reDesc.preview.pagoInicialClp} CLP. ` +
+                    "Nunca muestres dos precios distintos para lo mismo. El descuento acordado no se pierde ante ningún cambio.",
                 }
               }
             }
