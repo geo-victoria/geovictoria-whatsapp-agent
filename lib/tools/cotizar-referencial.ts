@@ -203,6 +203,17 @@ function fmtUF(n: number): string {
   return s.replace(/0+$/, "").replace(/,$/, "")
 }
 
+// Precio UNITARIO: hasta 3 decimales para que "cantidad × unitario = subtotal"
+// calce a la vista. Los tramos de asistencia 0,055 / 0,065 se redondeaban a
+// 0,06 / 0,07 con fmtUF y la multiplicación no cuadraba con el subtotal real
+// (ej: 46 × 0,06 = 2,76 ≠ 2,53). Mismo formato chileno, sin ceros trailing.
+function fmtUFUnit(n: number): string {
+  const rounded = Math.round(n * 1000) / 1000
+  if (Number.isInteger(rounded)) return fmtNumCL(rounded, 0)
+  const s = fmtNumCL(rounded, 3)
+  return s.replace(/0+$/, "").replace(/,$/, "")
+}
+
 // ─── Clasificación de modalidad → sección del preform ────────────────────
 type Seccion = "recurrente" | "unico"
 
@@ -220,18 +231,18 @@ function formatItem(i: ItemCotizacion): string {
     return `- ${i.nombre}: ${fmtUF(i.subtotalUF)} UF/mes`
   }
   if (i.modalidad === "Por usuario") {
-    return `- ${i.nombre}: ${i.cantidad} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF/mes`
+    return `- ${i.nombre}: ${i.cantidad} × ${fmtUFUnit(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF/mes`
   }
   if (i.modalidad === "Arriendo mensual") {
-    return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF/mes`
+    return `- ${i.nombre}: ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUFUnit(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF/mes`
   }
   if (i.modalidad === "Venta única") {
-    return `- ${i.nombre} (compra): ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF`
+    return `- ${i.nombre} (compra): ${i.cantidad} unidad${i.cantidad > 1 ? "es" : ""} × ${fmtUFUnit(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF`
   }
   if (i.modalidad === "Cobro único") {
     return `- ${i.nombre}: ${fmtUF(i.subtotalUF)} UF`
   }
-  return `- ${i.nombre}: ${i.cantidad} × ${fmtUF(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF`
+  return `- ${i.nombre}: ${i.cantidad} × ${fmtUFUnit(i.precioUnitarioUF)} UF = ${fmtUF(i.subtotalUF)} UF`
 }
 
 // ─── Implementación ──────────────────────────────────────────────────────
