@@ -334,10 +334,10 @@ async function processOneTurn(
     const pctEnReply = pctMatch ? Number(pctMatch[1]) : null
     const prefEscalon = await getPrefEscalon(contact).catch(() => 0)
     // Escalera del plan mensual (espejo de DISCOUNT_LADDER del cotizador):
-    // 10 → 20 → 30 → 40. pref_escalon usa la forma "siguiente índice" (i+1);
+    // 10 → 20 (tope 20%). pref_escalon usa la forma "siguiente índice" (i+1);
     // los dos primeros índices son instalación, así que el recurrente arranca en
     // pref_escalon=3 (=10%). recStep indexa la escalera del plan.
-    const REC_PCTS = [10, 20, 30, 40]
+    const REC_PCTS = [10, 20]
     const recStep = prefEscalon - 3
     const committedRecPct =
       recStep < 0 ? 0 : REC_PCTS[Math.min(recStep, REC_PCTS.length - 1)]
@@ -358,7 +358,7 @@ async function processOneTurn(
       // loop UNA vez forzando la llamada a la tool. Así se produce el % REAL ya
       // comiteado (la tool recalcula precio y el agent-loop persiste el escalón).
       let recuperado = false
-      if (committedRecPct < 40 && ultimoAsistente !== MULETILLA_DESCUENTO) {
+      if (committedRecPct < 20 && ultimoAsistente !== MULETILLA_DESCUENTO) {
         const FORZAR_TOOL_DESCUENTO =
           "\n\n# Instrucción de sistema (este turno)\n" +
           "El cliente está pidiendo (más) descuento y aún estás negociando. DEBES llamar la tool de " +
@@ -410,7 +410,7 @@ async function processOneTurn(
         )
         reply =
           "Para no darte más vueltas con los números: te dejo el mejor precio que te ofrecí y te paso la cotización formal, o si prefieres te contacto con un ejecutivo para revisar el precio. Cómo prefieres?"
-      } else if (committedRecPct >= 40) {
+      } else if (committedRecPct >= 20) {
         // En el tope ya no hay margen y el prompt prohíbe volver a llamar la
         // tool: en vez de la muletilla "permíteme procesar el descuento" (paso
         // intermedio que sobra acá), declina firme en UNA sola frase.
@@ -418,7 +418,7 @@ async function processOneTurn(
           `[v3-bg] TOPE_DECLINE_LIMPIO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
         )
         reply =
-          "Ese es el mejor precio que te puedo ofrecer: 40% de descuento en el plan mensual. Lo tomas así, o prefieres que te contacte un ejecutivo para revisarlo?"
+          "Ese es el mejor precio que te puedo ofrecer: 20% de descuento en el plan mensual. Lo tomas así, o prefieres que te contacte un ejecutivo para revisarlo?"
       } else {
         console.error(
           `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,

@@ -23,7 +23,7 @@ export const CATALOGO_HARDWARE: Hardware[] = [
     modelo: "Senseface 2A",
     displayName: "Reloj control físico",
     conexion: "WiFi",
-    ventaUF: 8,
+    ventaUF: 6,
     arriendoUF: 0.35,
     descripcion:
       "Reloj control físico con biometría facial sin contacto, conexión WiFi. Recomendado para puntos de trabajo con más de 10 personas o cuando los empleados no cuentan con smartphone propio.",

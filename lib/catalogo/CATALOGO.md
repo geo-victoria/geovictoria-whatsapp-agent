@@ -25,16 +25,17 @@ lib/catalogo/
 
 ## Modelo de tiers de precio
 
-Los módulos pueden tener varios precios según el rango de usuarios. Por ejemplo, Asistencia para 1-10 personas es un precio fijo (0.75 UF total), pero para 11-50 cambia a precio por usuario en tres tramos (0.09, 0.08, 0.07 UF).
+Los módulos pueden tener varios precios según el rango de usuarios. Por ejemplo, Asistencia para 2-10 personas es un precio fijo (0.60 UF total), pero para 11-50 cambia a precio por usuario en tres tramos (0.07, 0.065, 0.055 UF). El tramo de 1 persona es un micro-plan fijo aparte (0.25 UF).
 
 Esto se modela con un array `tiers`:
 
 ```typescript
 tiers: [
-  { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.75 },
-  { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.09 },
-  { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.08 },
-  { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.07 },
+  { minUsuarios: 1, maxUsuarios: 1, modalidad: "fijo", precioUF: 0.25 },
+  { minUsuarios: 2, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.6 },
+  { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.07 },
+  { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.065 },
+  { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.055 },
 ]
 ```
 
