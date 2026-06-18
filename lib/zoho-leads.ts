@@ -92,6 +92,46 @@ async function resolveOwnerId(
   }
 }
 
+/**
+ * Actualiza el Owner de un Lead existente (al reagendar con cambio de host).
+ * Resuelve el user_id por email; si no lo encuentra, NO toca el owner (evita
+ * dejarlo en un id inválido). Best-effort: nunca rompe el flujo de reagendar.
+ */
+export async function updateZohoLeadOwner(
+  leadId: string,
+  ownerEmail: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!leadId || !ownerEmail) return { success: false, error: "leadId u ownerEmail faltante" }
+  try {
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+
+    const ownerId = await resolveOwnerId(ownerEmail, accessToken, apiDomain)
+    if (!ownerId) return { success: false, error: `No se resolvió user_id para ${ownerEmail}` }
+
+    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ Owner: { id: ownerId } }] }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ status?: string; code?: string; message?: string }>
+    }
+    const status = data?.data?.[0]?.status
+    if (!res.ok || status !== "success") {
+      return { success: false, error: `Zoho update owner: ${JSON.stringify(data).slice(0, 200)}` }
+    }
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "error actualizando owner del lead" }
+  }
+}
+
 export type CreateZohoLeadInput = {
   nombre?: string
   empresa?: string

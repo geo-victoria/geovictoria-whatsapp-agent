@@ -576,6 +576,7 @@ export type MeetingRow = {
   timezone: string
   meeting_url: string | null
   organizer_email: string | null
+  zoho_lead_id?: string | null
 }
 
 /** Inserta (o actualiza por booking_uid) una reunión agendada. */
@@ -678,7 +679,7 @@ export async function getUpcomingMeeting(contact: string): Promise<MeetingRow | 
   const rows = await supabaseFetch<MeetingRow[]>(
     `vic_v3_meetings?contact=eq.${encodeURIComponent(contact)}&status=eq.scheduled` +
       `&start_at=gt.${nowIso}` +
-      `&select=booking_uid,contact,prospect_name,start_at,timezone,meeting_url,organizer_email` +
+      `&select=booking_uid,contact,prospect_name,start_at,timezone,meeting_url,organizer_email,zoho_lead_id` +
       `&order=start_at.asc&limit=1`,
   )
   return rows && rows.length > 0 ? rows[0] : null

@@ -476,11 +476,28 @@ export async function rescheduleMeeting(params: {
     }
 
     console.log("[calendar] reschedule ok:", bookingUid, "→", uid, "start:", data.data?.start)
+
+    // El organizer de la respuesta del reschedule no es confiable (devuelve el
+    // host viejo). Re-consultamos el booking nuevo para obtener el host REAL
+    // asignado (Cal.com re-corre el round-robin al reagendar por API).
+    let organizerEmail = data.data?.organizer?.email || data.data?.hosts?.[0]?.email || undefined
+    try {
+      const fresh = await fetch(`${CAL_BASE}/bookings/${uid}`, { headers: CAL_HEADERS, cache: "no-store" })
+      if (fresh.ok) {
+        const fd = (await fresh.json()) as {
+          data?: { organizer?: { email?: string }; hosts?: Array<{ email?: string }> }
+        }
+        organizerEmail = fd.data?.organizer?.email || fd.data?.hosts?.[0]?.email || organizerEmail
+      }
+    } catch {
+      // si falla el re-fetch, queda el de la respuesta (mejor que nada)
+    }
+
     return {
       success: true,
       bookingId: String(uid),
       meetingUrl: data.data?.meetingUrl,
-      organizerEmail: data.data?.organizer?.email || data.data?.hosts?.[0]?.email || undefined,
+      organizerEmail,
       startIso: data.data?.start || newSlotIso,
     }
   } catch (e) {

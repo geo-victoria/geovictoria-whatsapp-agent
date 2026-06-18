@@ -12,6 +12,7 @@
 
 import { rescheduleMeeting, getTimezone, computeMeetingReminderAt } from "@/lib/calendar"
 import { getUpcomingMeeting, updateMeetingByUid } from "@/lib/supabase-persistence-v3"
+import { updateZohoLeadOwner } from "@/lib/zoho-leads"
 
 export const reagendarReunionSchema = {
   name: "reagendar_reunion",
@@ -75,12 +76,32 @@ export async function reagendarReunion(
     return { ok: false, error: `No se pudo reagendar la reunión: ${result.error}` }
   }
 
-  // Actualiza el registro local con la nueva fecha y reprograma el recordatorio.
+  // Cal.com re-corre el round-robin al reagendar por API: el ejecutivo PUEDE
+  // cambiar. Si cambió y existe el Lead en Zoho, actualizamos su Owner al nuevo
+  // host para que el ejecutivo que tomará la reunión sea el dueño real del lead.
+  const oldHost = (meeting.organizer_email || "").toLowerCase()
+  const newHost = (result.organizerEmail || "").toLowerCase()
+  if (newHost && newHost !== oldHost && meeting.zoho_lead_id) {
+    const upd = await updateZohoLeadOwner(meeting.zoho_lead_id, result.organizerEmail!).catch(
+      (e) => ({ success: false, error: String(e) }),
+    )
+    if (!upd.success) {
+      console.error(
+        `[reagendar_reunion] No se pudo actualizar Owner del lead ${meeting.zoho_lead_id} → ${newHost}: ${upd.error}`,
+      )
+    } else {
+      console.log(`[reagendar_reunion] Owner del lead ${meeting.zoho_lead_id} actualizado a ${newHost}`)
+    }
+  }
+
+  // Actualiza el registro local con la nueva fecha, el nuevo host y reprograma
+  // el recordatorio.
   const tz = meeting.timezone || getTimezone(country)
   const reminderAt = computeMeetingReminderAt(result.startIso, tz)
   await updateMeetingByUid(meeting.booking_uid, {
     booking_uid: result.bookingId,
     start_at: result.startIso,
+    organizer_email: result.organizerEmail || meeting.organizer_email,
     reminder_at: reminderAt ? reminderAt.toISOString() : null,
     reminder_sent_at: null,
     attendance_confirmed_at: null,
@@ -95,11 +116,10 @@ export async function reagendarReunion(
     minute: "2-digit",
     hour12: false,
   })
-  const host = result.organizerEmail || meeting.organizer_email || ""
   const mensajeParaProspecto =
-    `¡Listo! Reagendé tu reunión para el ${fechaLegible} hrs` +
-    (host ? `, con ${host.split("@")[0]}` : "") +
-    `. Te llegará la nueva invitación por correo. ¿Hay algo más en lo que pueda ayudarte?`
+    `¡Listo! Reagendé tu reunión para el ${fechaLegible} hrs. ` +
+    `Te llegará la nueva invitación por correo con los datos del ejecutivo. ` +
+    `¿Hay algo más en lo que pueda ayudarte?`
 
   return {
     ok: true,
