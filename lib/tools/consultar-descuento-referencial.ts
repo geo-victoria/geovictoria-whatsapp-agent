@@ -220,7 +220,7 @@ export const consultarDescuentoReferencialSchema = {
       },
       accountId: {
         type: "string" as const,
-        description: "ID de la Account existente en Zoho, solo si buscar_prospect_en_zoho dio match. Evita duplicados en el Borrador.",
+        description: "Opcional. No es necesario pasarlo: el backend deduplica por RUT. Déjalo vacío.",
       },
       contactId: {
         type: "string" as const,

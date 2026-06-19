@@ -32,11 +32,6 @@ import {
   type DerivarASoporteResultado,
 } from "./derivar-a-soporte"
 import {
-  buscarProspectEnZohoSchema,
-  buscarProspectEnZoho,
-  type BuscarProspectResultado,
-} from "./buscar-prospect-en-zoho"
-import {
   consultarAgenteSoporteSchema,
   consultarAgenteSoporte,
   type ConsultarAgenteSoporteResultado,
@@ -88,7 +83,6 @@ import {
 } from "./marcar-no-contactar"
 
 export const TOOL_SCHEMAS = [
-  buscarProspectEnZohoSchema,
   cotizarReferencialSchema,
   generarLinkCotizadoraSchema,
   consultarAgenteSoporteSchema,
@@ -114,7 +108,6 @@ export type ToolResult =
   | CotizacionResultado
   | LinkCotizadoraResultado
   | DerivarASoporteResultado
-  | BuscarProspectResultado
   | ConsultarAgenteSoporteResultado
   | RegistrarSolicitudCallbackResultado
   | ConsultarDisponibilidadHorarioResultado
@@ -134,9 +127,6 @@ export type ToolResult =
 export async function dispatchTool(name: string, input: Record<string, unknown>): Promise<ToolResult> {
   try {
     switch (name) {
-      case "buscar_prospect_en_zoho":
-        return await buscarProspectEnZoho(input as never)
-
       case "cotizar_referencial":
         return await cotizarReferencial(input as never)
 
@@ -179,7 +169,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: buscar_prospect_en_zoho, cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_descuento_referencial, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_descuento_referencial, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion.`,
         }
     }
   } catch (err: unknown) {
