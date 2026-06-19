@@ -19,7 +19,7 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     id: "asistencia",
     nombre: "Control de Asistencia",
     descripcion:
-      "Marcaje de entrada y salida con app móvil, biometría o terminales físicos. La base del producto, incluida en toda cotización.",
+      "Marcaje de entrada y salida por varios canales: web (logueado en la plataforma desde el navegador), app móvil (con biometría facial y georeferenciación) y call (llamada telefónica) — los tres GRATIS e incluidos —, además de reloj control físico/terminales biométricos (con costo). La base del producto, incluida en toda cotización.",
     tiers: [
       // Micro-plan: 1 trabajador que marca → tarifa especial. Cubre 2 usuarios
       // (el que marca + 1 administrador). Desde 2 que marcan, tramo fijo normal.
