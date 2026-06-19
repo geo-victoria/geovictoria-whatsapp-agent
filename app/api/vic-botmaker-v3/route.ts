@@ -515,7 +515,7 @@ async function processOneTurn(
           `[v3-bg] ALUCINACIÓN_AGENDA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
         reply =
-          "Disculpa, no alcancé a dejar la reunión agendada. ¿Me confirmas el día y la hora que prefieres y lo dejo listo al tiro?"
+          "Disculpa, no alcancé a dejar la reunión agendada. ¿Me confirmas el día y la hora que prefieres y lo dejo listo enseguida?"
       }
     }
 
@@ -588,7 +588,7 @@ async function processOneTurn(
           `[v3-bg] ALUCINACIÓN_CALLBACK contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
         reply =
-          "Disculpa, no alcancé a dejar registrada tu solicitud. ¿Me confirmas tu nombre, empresa y teléfono y la dejo lista al tiro para que un ejecutivo te contacte?"
+          "Disculpa, no alcancé a dejar registrada tu solicitud. ¿Me confirmas tu nombre, empresa y teléfono y la dejo lista enseguida para que un ejecutivo te contacte?"
       }
     }
 

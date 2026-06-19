@@ -20,6 +20,14 @@ const VOSEO_MAP: [RegExp, string][] = [
   [/(?<!\p{L})contame(?!\p{L})/giu, "cuéntame"],
   [/(?<!\p{L})disculpá(?!\p{L})/giu, "disculpa"],
   [/(?<!\p{L})dale(?!\p{L})/giu, "ya"],
+  // Modismos chilenos demasiado informales para el registro neutro-profesional
+  // (el prompt los prohíbe, pero el modelo se escapa: "claro po", "al tiro",
+  // "¿cachái?"). Se normalizan antes de enviar.
+  [/(?<!\p{L})al\s+tiro(?!\p{L})/giu, "de inmediato"],
+  [/(?<!\p{L})altiro(?!\p{L})/giu, "de inmediato"],
+  [/(?<!\p{L})cach[aá][iy](?!\p{L})/giu, "sabes"],
+  // "po" muletilla al final de frase ("listo po", "claro po,") → se elimina.
+  [/\s+po(?=[\s.,!?;:)¿¡]|$)/giu, ""],
 ]
 
 export function sanitizarVoseo(texto: string): string {
