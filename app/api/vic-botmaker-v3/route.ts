@@ -500,6 +500,79 @@ async function processOneTurn(
       }
     }
 
+    // 2.6c. Guardrail anti-alucinación de callback / lead registrado.
+    // Caso real (Rodrigo/Dixi): Vicky dijo "dejé registrados tus datos, un
+    // ejecutivo te contactará" SIN invocar registrar_solicitud_callback → no se
+    // creó el Lead en Zoho, no entró a la tómbola, nadie lo contactó. Misma clase
+    // de bug que la alucinación de reunión (2.6b): el modelo AFIRMA el cierre sin
+    // ejecutar la tool. Si el reply asegura que tomó/registró los datos o que un
+    // ejecutivo va a contactar, pero NO hubo un registrar_solicitud_callback (ni
+    // un agendar_reunion, que también crea el Lead) exitoso este turno,
+    // re-corremos forzando la tool; si aun así no se concreta, NO confirmamos.
+    const afirmaCallbackListo =
+      // "tomé/dejé/registré/guardé tus datos | tu solicitud | el callback"
+      /\b(tom[eé]|dej[eé]|guard[eé]|registr[eé]|anot[eé])\b[^.]{0,30}\b(tus\s+datos|tu\s+solicitud|tus\s+antecedentes|el\s+callback|tu\s+contacto)\b/i.test(
+        reply,
+      ) ||
+      // "quedaste/quedó registrado" / "te dejé registrado"
+      /\bqued(aste|[oó])\b[^.]{0,20}\bregistrad/i.test(reply) ||
+      /\bte\s+(dej[eé]|registr[eé])\b[^.]{0,15}\bregistrad/i.test(reply) ||
+      // Afirmación de contacto futuro por parte de un ejecutivo/equipo/Anderson.
+      // Solo formas ASERTIVAS (contactará / te va a contactar / llamará / se
+      // pondrá en contacto), NO la oferta en subjuntivo ("¿quieres que un
+      // ejecutivo te contacte?"), que es legítima sin tool.
+      /\b(un\s+ejecutivo|el\s+equipo|nuestro\s+ejecutivo|un\s+asesor|Anderson)\b[^.]{0,45}\b(te\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|contactar[aá])\s+en\s+contacto)/i.test(
+        reply,
+      )
+    const realCallback = toolCalls.some(
+      (c) =>
+        (c.name === "registrar_solicitud_callback" || c.name === "agendar_reunion") && c.ok,
+    )
+    if (afirmaCallbackListo && !realCallback) {
+      let callbackRecuperado = false
+      const FORZAR_TOOL_CALLBACK =
+        "\n\n# Instrucción de sistema (este turno)\n" +
+        "Estás por confirmarle al cliente que registraste su solicitud o que un ejecutivo lo va a contactar, " +
+        "pero NO puedes afirmarlo sin antes EJECUTAR la tool. " +
+        "Si el cliente pidió que lo llamen/contacten, llama registrar_solicitud_callback(nombre, empresa, telefono, ...) " +
+        "con los datos que ya entregó en la conversación. " +
+        "Si fue un fallback de cotización (tenía intención de cotizar pero faltaron datos para emitirla), pásale seguimientoCotizacion=true. " +
+        "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
+        "Si faltan datos obligatorios (nombre, empresa o teléfono), PÍDESELOS en vez de afirmar que ya quedó registrado. " +
+        "JAMÁS digas que tomaste sus datos o que un ejecutivo lo contactará si la tool no tuvo éxito."
+      const retry = await runAgentLoop({
+        systemPrompt: contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_CALLBACK,
+        history,
+        userMessage: message,
+        apiKey,
+        contact,
+        model: MODELO_COTIZACION,
+      }).catch((e) => {
+        console.error(`[v3-bg] Reintento forzado de callback falló:`, e)
+        return null
+      })
+      if (retry) {
+        const retryReply = (retry.reply || "").trim()
+        const retryReal = ((retry.toolCalls || []) as ToolCallRecord[]).some(
+          (c) =>
+            (c.name === "registrar_solicitud_callback" || c.name === "agendar_reunion") && c.ok,
+        )
+        if (retryReal && retryReply) {
+          console.warn(`[v3-bg] CALLBACK_RECUPERADO contact=${contact}: el reintento forzó la tool.`)
+          reply = retryReply
+          result.toolCalls = retry.toolCalls
+          callbackRecuperado = true
+        }
+      }
+      if (!callbackRecuperado) {
+        console.error(
+          `[v3-bg] ALUCINACIÓN_CALLBACK contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+        )
+        reply =
+          "Disculpa, no alcancé a dejar registrada tu solicitud. ¿Me confirmas tu nombre, empresa y teléfono y la dejo lista al tiro para que un ejecutivo te contacte?"
+      }
+    }
+
     // 2.7. Saneador anti-voseo determinista (por si el modelo se escapó del
     // tuteo chileno pese a la regla del prompt).
     reply = normalizarFormatoWhatsApp(sanitizarVoseo(reply))
