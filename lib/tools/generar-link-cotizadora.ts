@@ -567,13 +567,17 @@ export async function generarLinkCotizadora(
       detail?: string
     }
 
-    if (!data.ok || !data.pdfUrl || !data.acceptanceUrl) {
+    // El acceptanceUrl es lo crítico (el link que Vicky entrega). El pdfUrl
+    // puede venir vacío: ahora el cotizador responde apenas tiene el link y
+    // genera el PDF en segundo plano. El prompt entrega SOLO el acceptanceUrl,
+    // así que un pdfUrl vacío no afecta el mensaje al cliente.
+    if (!data.ok || !data.acceptanceUrl) {
       return { ok: false, error: data.error || data.detail || "Respuesta inválida de la cotizadora" }
     }
 
     return {
       ok: true,
-      pdfUrl: data.pdfUrl,
+      pdfUrl: data.pdfUrl || "",
       acceptanceUrl: data.acceptanceUrl,
       quoteId: data.quoteId || "",
       dealId: data.dealId || "",
