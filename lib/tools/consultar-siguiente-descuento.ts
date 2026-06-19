@@ -67,6 +67,7 @@ export type ConsultarSiguienteDescuentoResultado =
       ok: false
       error: string
       topeAlcanzado?: boolean
+      yaAceptada?: boolean
     }
 
 export async function consultarSiguienteDescuento(
@@ -114,6 +115,7 @@ export async function consultarSiguienteDescuento(
         mensual_clp?: number
       }
       tope_alcanzado?: boolean
+      ya_aceptada?: boolean
       mensaje_para_prospecto?: string
       error?: string
     }
@@ -123,6 +125,7 @@ export async function consultarSiguienteDescuento(
         ok: false,
         error: data.error || "No se pudo consultar el siguiente descuento.",
         topeAlcanzado: Boolean(data.tope_alcanzado),
+        yaAceptada: Boolean(data.ya_aceptada),
       }
     }
 

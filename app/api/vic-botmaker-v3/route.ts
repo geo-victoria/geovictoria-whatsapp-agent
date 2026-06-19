@@ -36,6 +36,7 @@ import {
   appendTurnV3,
   getPrefEscalon,
   getQuotePointer,
+  getFormalQuote,
 } from "@/lib/supabase-persistence-v3"
 import {
   acquireLock,
@@ -100,6 +101,18 @@ const ERROR_FALLBACK_MSG =
 
 const GENERIC_ERROR_MSG =
   "Tuve un problema técnico momentáneo. ¿Podrías repetir tu mensaje?"
+
+// Fallback que devuelve el agent-loop cuando el turno terminó SIN texto final
+// (ver lib/agent-loop.ts). Lo necesitamos acá para detectar ese caso y, en un
+// opt-out, reemplazarlo por una despedida limpia (guardrail 2.6d).
+const AGENT_LOOP_EMPTY_FALLBACK =
+  "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"
+
+// Despedida cordial cuando el cliente se da de baja (opt-out). El opt-out ya se
+// registró (cierra el seguimiento); esto solo evita que reciba un mensaje que
+// parece error en vez de una despedida.
+const OPTOUT_GOODBYE_MSG =
+  "Entendido, no te contactaremos más. Si en el futuro lo necesitas, aquí estaré. ¡Que te vaya muy bien! 🙌"
 
 // Circuit-breaker (C): tras varios errores seguidos en una misma conversación,
 // escalamos a humano UNA vez en lugar de repetir el fallback en loop (en
@@ -344,7 +357,13 @@ async function processOneTurn(
     // Si ya existe cotización formal, el descuento quedó comiteado en ella (y
     // pref_escalon se limpió al generarla). Reconfirmar/recapitular un % legítimo
     // (≤20% plan, o 25/50 instalación) NO es alucinación.
-    const tieneFormal = !!quotePointer
+    // Reconocemos la formal por DOS vías: el puntero durable (quotePointer) y el
+    // formal_quote_id de la conversación. Antes solo se miraba el puntero; cuando
+    // ese write quedaba rezagado/fallaba, una recapitulación benigna del % ya
+    // acordado (cliente que solo dice "gracias, lo pienso") gatillaba la muletilla
+    // "permíteme procesar el descuento" — fuera de lugar (caso real Rodrigo).
+    const formalQuoteId = await getFormalQuote(contact).catch(() => "")
+    const tieneFormal = !!quotePointer || !!formalQuoteId
     const pctYaNegociado =
       pctEnReply !== null &&
       ((prefEscalon > 0 &&
@@ -570,6 +589,30 @@ async function processOneTurn(
         )
         reply =
           "Disculpa, no alcancé a dejar registrada tu solicitud. ¿Me confirmas tu nombre, empresa y teléfono y la dejo lista al tiro para que un ejecutivo te contacte?"
+      }
+    }
+
+    // 2.6d. Opt-out → despedida limpia (no el fallback de "problema procesando").
+    // Caso real (Rodrigo): escribió "no me insistan" y, aunque el opt-out SÍ se
+    // registró (el ciclo de seguimiento quedó cerrado), el turno terminó sin texto
+    // final y se envió el fallback genérico de error — el cliente recibió un
+    // "tuve un problema procesando tu mensaje" en vez de una despedida. Si el
+    // modelo ejecutó marcar_no_contactar y el reply quedó vacío o cayó en un
+    // mensaje de error, lo reemplazamos por una despedida cordial.
+    const usoOptOut = toolCalls.some(
+      (c) => c.name === "marcar_no_contactar" && c.ok,
+    )
+    if (usoOptOut) {
+      const replyVacioOError =
+        !reply.trim() ||
+        reply === AGENT_LOOP_EMPTY_FALLBACK ||
+        reply === ERROR_FALLBACK_MSG ||
+        reply === GENERIC_ERROR_MSG
+      if (replyVacioOError) {
+        console.warn(
+          `[v3-bg] OPTOUT_DESPEDIDA contact=${contact}: opt-out con reply vacío/error; se usa despedida limpia.`,
+        )
+        reply = OPTOUT_GOODBYE_MSG
       }
     }
 
