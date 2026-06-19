@@ -46,7 +46,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
-import { sanitizarVoseo } from "@/lib/voseo-v3"
+import { sanitizarVoseo, normalizarFormatoWhatsApp } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import {
   markUserActivity,
@@ -341,10 +341,15 @@ async function processOneTurn(
     const recStep = prefEscalon - 3
     const committedRecPct =
       recStep < 0 ? 0 : REC_PCTS[Math.min(recStep, REC_PCTS.length - 1)]
+    // Si ya existe cotización formal, el descuento quedó comiteado en ella (y
+    // pref_escalon se limpió al generarla). Reconfirmar/recapitular un % legítimo
+    // (≤20% plan, o 25/50 instalación) NO es alucinación.
+    const tieneFormal = !!quotePointer
     const pctYaNegociado =
       pctEnReply !== null &&
-      prefEscalon > 0 &&
-      (pctEnReply <= committedRecPct || pctEnReply === 50 || pctEnReply === 25)
+      ((prefEscalon > 0 &&
+        (pctEnReply <= committedRecPct || pctEnReply === 50 || pctEnReply === 25)) ||
+        (tieneFormal && (pctEnReply <= 20 || pctEnReply === 25 || pctEnReply === 50)))
 
     if (ofreceDescuento && !realDescuento && !pctYaNegociado) {
       const ultimoAsistente = [...history]
@@ -358,7 +363,7 @@ async function processOneTurn(
       // loop UNA vez forzando la llamada a la tool. Así se produce el % REAL ya
       // comiteado (la tool recalcula precio y el agent-loop persiste el escalón).
       let recuperado = false
-      if (committedRecPct < 20 && ultimoAsistente !== MULETILLA_DESCUENTO) {
+      if (!tieneFormal && committedRecPct < 20 && ultimoAsistente !== MULETILLA_DESCUENTO) {
         const FORZAR_TOOL_DESCUENTO =
           "\n\n# Instrucción de sistema (este turno)\n" +
           "El cliente está pidiendo (más) descuento y aún estás negociando. DEBES llamar la tool de " +
@@ -419,6 +424,16 @@ async function processOneTurn(
         )
         reply =
           "Ese es el mejor precio que te puedo ofrecer: 20% de descuento en el plan mensual. Lo tomas así, o prefieres que te contacte un ejecutivo para revisarlo?"
+      } else if (tieneFormal) {
+        // Post-formal: el descuento ya está cerrado en la cotización. NO metas la
+        // muletilla "permíteme procesar el descuento" (paso intermedio que aquí
+        // sobra y confunde —p. ej. cuando el cliente solo se está despidiendo—):
+        // cierra suave hacia la decisión o la derivación.
+        console.error(
+          `[v3-bg] POST_FORMAL_NO_MULETILLA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+        )
+        reply =
+          "Tu cotización ya quedó con el mejor precio que te ofrecí. Si quieres revisarla o ajustar algo, te puedo contactar con un ejecutivo. ¿Cómo prefieres seguir?"
       } else {
         console.error(
           `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
@@ -487,7 +502,7 @@ async function processOneTurn(
 
     // 2.7. Saneador anti-voseo determinista (por si el modelo se escapó del
     // tuteo chileno pese a la regla del prompt).
-    reply = sanitizarVoseo(reply)
+    reply = normalizarFormatoWhatsApp(sanitizarVoseo(reply))
 
     // 3. Persistir turno en Supabase
     await appendTurnV3(contact, message, reply).catch((err) => {

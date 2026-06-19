@@ -34,3 +34,14 @@ export function sanitizarVoseo(texto: string): string {
   }
   return out
 }
+
+/**
+ * Normaliza el formato a la sintaxis de WhatsApp. El modelo a veces emite
+ * negritas en Markdown (`**texto**`, doble asterisco), pero WhatsApp usa un solo
+ * asterisco (`*texto*`); el resultado son asteriscos dobles a la vista. Aquí se
+ * convierte `**texto**` → `*texto*` y se colapsa cualquier `**` suelto a uno.
+ */
+export function normalizarFormatoWhatsApp(texto: string): string {
+  if (!texto) return texto
+  return texto.replace(/\*\*(.+?)\*\*/gs, "*$1*").replace(/\*\*+/g, "*")
+}
