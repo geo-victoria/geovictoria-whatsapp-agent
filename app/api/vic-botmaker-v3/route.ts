@@ -124,11 +124,10 @@ const ESCALADA_ERROR_MSG =
 // re-engagement, que también sanea sus nudges antes de enviar).
 
 // ── Re-engagement (item 5) ────────────────────────────────────────────────
-// La cadencia se arma SIEMPRE que Vicky responde y la pelota queda en el
-// cliente — desde el primer "hola", con o sin intención identificada (si la
-// conversación recién parte, el nudge es un "¿todo bien? te perdí").
-// Excepciones: conversaciones de soporte (cliente existente con consulta
-// operativa) y despedidas naturales — ahí no se persigue.
+// La cadencia se arma SOLO en conversaciones COMERCIALES (hubo un estimado,
+// cotización, negociación o agenda): ahí Vicky responde, la pelota queda en el
+// cliente y vale la pena perseguir. Las conversaciones NO comerciales (soporte,
+// FAQ, login) NO reciben nudges. Tampoco se persigue tras una despedida natural.
 const FOLLOWUP_SUPPORT_TOOLS = new Set(["consultar_agente_soporte"])
 // Tools que CIERRAN el ciclo: la conversación quedó en manos de un humano
 // (reunión agendada, callback registrado, derivación) — no perseguimos más.
@@ -136,6 +135,20 @@ const FOLLOWUP_CLOSING_TOOLS = new Set([
   "agendar_reunion",
   "registrar_solicitud_callback",
   "derivar_a_soporte",
+])
+// Tools que evidencian intención COMERCIAL (prospecto en el embudo de venta). El
+// seguimiento (re-engagement) se arma SOLO en conversaciones comerciales: las no
+// comerciales (soporte, FAQ, login) NO reciben nudges. agendar_reunion y
+// registrar_solicitud_callback NO van aquí porque ya CIERRAN el ciclo (quedó en
+// manos de un humano).
+const FOLLOWUP_COMMERCIAL_TOOLS = new Set([
+  "cotizar_referencial",
+  "consultar_descuento_referencial",
+  "consultar_siguiente_descuento",
+  "generar_link_cotizadora",
+  "aplicar_siguiente_descuento",
+  "consultar_disponibilidad_horario",
+  "enviar_certificacion",
 ])
 // Despedida corta y natural ("gracias!", "chao", "nos vemos") → la conversación
 // terminó bien; un "te perdí" después de un adiós sería torpe. Solo aplica a
@@ -638,11 +651,13 @@ async function processOneTurn(
     }
 
     // 5. Re-engagement: decidir el estado del ciclo según cómo terminó el turno.
+    //    El seguimiento se hace SOLO en conversaciones COMERCIALES; las no
+    //    comerciales (soporte, FAQ, login) NO reciben nudges.
     //    - Opt-out explícito → cerrar (no contactar más).
     //    - Tool de cierre (reunión/callback/derivación) → cerrar (quedó en humanos).
-    //    - En cualquier otro turno con respuesta real → (re)armar SIEMPRE, desde
-    //      el primer "hola" (intención identificada o no), salvo que el turno
-    //      haya sido de soporte o una despedida natural del cliente.
+    //    - Turno comercial con respuesta real → (re)armar.
+    //    - Soporte sin señal comercial → cerrar el ciclo.
+    //    - Cualquier otro (no comercial) → no armar (queda dormido).
     try {
       const finalToolCalls = (result.toolCalls || []) as ToolCallRecord[]
       // Opt-out: lo DECIDE el modelo (tool marcar_no_contactar), no un regex.
@@ -657,14 +672,32 @@ async function processOneTurn(
       )
       const esDespedida =
         message.trim().length <= 30 && FAREWELL_RE.test(message)
+      // Señal COMERCIAL: actividad comercial en este turno, o estado comercial
+      // persistente (cotización formal / negociación en curso), o un estimado/
+      // cotización ya mostrado antes en la conversación (para seguir armando en los
+      // turnos inline de una conversación que ya es comercial).
+      const comercialEsteTurno = finalToolCalls.some(
+        (c) => FOLLOWUP_COMMERCIAL_TOOLS.has(c.name) && c.ok,
+      )
+      const tieneEstadoComercial = !!quotePointer || prefEscalonPre > 0
+      const yaHuboEstimacion = history.some(
+        (m) =>
+          m.role === "assistant" &&
+          /\bUF\b|cotizaci[oó]n|\/mes|pago inicial/i.test(m.content || ""),
+      )
+      const esComercial = comercialEsteTurno || tieneEstadoComercial || yaHuboEstimacion
       if (usoOptOut) {
         await closeFollowup(contact, "opt_out")
         console.log(`[v3-followup] opt-out (tool) → ciclo cerrado contact=${contact}`)
       } else if (usoCierre) {
         await closeFollowup(contact, "derivado")
-      } else if (reply && !esSoporte && !esDespedida) {
+      } else if (reply && !esDespedida && esComercial) {
         await armFollowup(contact)
+      } else if (esSoporte && !esComercial) {
+        await closeFollowup(contact, "soporte")
+        console.log(`[v3-followup] soporte (no comercial) → ciclo cerrado contact=${contact}`)
       }
+      // else: conversación no comercial → no se arma (sin nudges).
     } catch (err) {
       console.error(`[v3-followup] Error actualizando seguimiento:`, err)
     }
