@@ -52,8 +52,8 @@ function instruccionDeTono(stage: number): string {
   if (stage <= 1)
     return "Tono liviano y natural, como quien retoma una conversación que quedó al aire. NO suenes a recordatorio formal."
   if (stage === 2)
-    return "Tono cálido y servicial: retoma el punto exacto donde quedaron y ofrece continuar, sin presionar."
-  return "Último toque: cierre cordial. Pregunta si sigue interesado en cotizar con nosotros o lo dejamos para más adelante, dejando la puerta abierta."
+    return "Tono cálido y servicial: retoma el punto exacto donde quedaron y ofrece continuar, sin presionar. Si en la conversación YA le mostraste un estimado o una cotización y no avanzó, pregúntale con tacto qué fue lo que no le terminó de calzar (precio, alcance, equipos…) para entender y poder ajustarlo."
+  return "Último toque: cierre cordial. Si hubo un estimado o cotización, pregúntale qué fue lo que no se ajustó a lo que necesitaba —para poder mejorarla— o si prefiere dejarlo para más adelante; si no hubo propuesta, pregunta si sigue interesado en cotizar. Deja la puerta abierta."
 }
 
 // Fallbacks deterministas si el LLM falla o el output viola el guardrail.
