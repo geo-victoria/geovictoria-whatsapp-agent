@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react"
 
 type Conv = {
+  id: string
   contact: string
   hora: string
   tipo: "lead" | "soporte" | "rebote"
@@ -35,25 +36,45 @@ function KPI({ label, value, color }: { label: string; value: number; color: str
   )
 }
 
+type Msg = { role: "user" | "assistant"; content: string; at: string }
+
+// Clave opcional (?key=...) de la URL del dashboard, para propagarla a la API.
+function urlKey(): string {
+  if (typeof window === "undefined") return ""
+  return new URLSearchParams(window.location.search).get("key") || ""
+}
+
 export default function Dashboard() {
   const [convs, setConvs] = useState<Conv[]>([])
   const [loading, setLoading] = useState(true)
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0])
   const [lastRefresh, setLastRefresh] = useState(new Date())
+  // Chat abierto (transcript completo).
+  const [openConv, setOpenConv] = useState<Conv | null>(null)
+  const [msgs, setMsgs] = useState<Msg[]>([])
+  const [loadingMsgs, setLoadingMsgs] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      // Propaga ?key=... de la URL del dashboard a la API (gate opcional para
-      // compartir el link sin dejarlo 100% abierto).
-      const key = typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("key") || ""
-        : ""
+      const key = urlKey()
       const r = await fetch(`/api/report?date=${date}${key ? `&key=${encodeURIComponent(key)}` : ""}`)
       const data = await r.json()
       setConvs(Array.isArray(data) ? data : [])
       setLastRefresh(new Date())
     } catch { /* silent */ } finally { setLoading(false) }
   }, [date])
+
+  const openChat = useCallback(async (c: Conv) => {
+    setOpenConv(c)
+    setMsgs([])
+    setLoadingMsgs(true)
+    try {
+      const key = urlKey()
+      const r = await fetch(`/api/report?conv=${encodeURIComponent(c.id)}${key ? `&key=${encodeURIComponent(key)}` : ""}`)
+      const data = await r.json()
+      setMsgs(Array.isArray(data?.messages) ? data.messages : [])
+    } catch { /* silent */ } finally { setLoadingMsgs(false) }
+  }, [])
 
   useEffect(() => { load(); const iv = setInterval(load, 60000); return () => clearInterval(iv) }, [load])
 
@@ -109,7 +130,8 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {convs.map((c, i) => (
-                <tr key={c.contact + c.hora} style={{ background: i % 2 === 0 ? "#fafafa" : "#fff", borderBottom: "1px solid #f0f0f0" }}>
+                <tr key={c.id} onClick={() => openChat(c)} title="Abrir conversación completa"
+                  style={{ background: i % 2 === 0 ? "#fafafa" : "#fff", borderBottom: "1px solid #f0f0f0", cursor: "pointer" }}>
                   <td style={{ padding: "10px 14px", fontWeight: 600, color: "#555" }}>{c.hora}</td>
                   <td style={{ padding: "10px 14px" }}>
                     <span style={{ background: COLORS[c.tipo] + "22", color: COLORS[c.tipo], borderRadius: 20, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>
@@ -139,18 +161,53 @@ export default function Dashboard() {
                   </td>
                   <td style={{ padding: "10px 14px" }}>
                     {c.zohoLeadId
-                      ? <a href={`https://crm.zoho.com/crm/org685875245/tab/Leads/${c.zohoLeadId}`} target="_blank" rel="noopener noreferrer" style={{ color: TEAL, fontWeight: 500 }}>Ver →</a>
+                      ? <a href={`https://crm.zoho.com/crm/org685875245/tab/Leads/${c.zohoLeadId}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ color: TEAL, fontWeight: 500 }}>Ver →</a>
                       : <span style={{ color: "#bbb" }}>—</span>}
                   </td>
                   <td style={{ padding: "10px 14px" }}>
                     {c.bmLink
-                      ? <a href={c.bmLink} target="_blank" rel="noopener noreferrer" style={{ color: TEAL, fontWeight: 500 }}>Ver →</a>
+                      ? <a href={c.bmLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ color: TEAL, fontWeight: 500 }}>Ver →</a>
                       : <span style={{ color: "#bbb" }}>—</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal: conversación completa */}
+      {openConv && (
+        <div onClick={() => setOpenConv(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 10px 40px rgba(0,0,0,.25)" }}>
+            <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", background: TEAL, color: "#fff" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{openConv.nombre || `+${openConv.contact}`}</div>
+                <div style={{ fontSize: 12, opacity: .85 }}>{LABELS[openConv.tipo]} · {openConv.hora}{openConv.empresa ? ` · ${openConv.empresa}` : ""}</div>
+              </div>
+              <button onClick={() => setOpenConv(null)} style={{ background: "transparent", border: "none", color: "#fff", fontSize: 22, cursor: "pointer", lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: "16px 18px", overflowY: "auto", background: "#f7f9fc", flex: 1 }}>
+              {loadingMsgs ? (
+                <p style={{ textAlign: "center", color: "#888", padding: 30 }}>Cargando conversación...</p>
+              ) : msgs.length === 0 ? (
+                <p style={{ textAlign: "center", color: "#888", padding: 30 }}>Sin mensajes.</p>
+              ) : msgs.map((m, idx) => {
+                const mine = m.role === "assistant"
+                return (
+                  <div key={idx} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
+                    <div style={{ maxWidth: "78%", background: mine ? "#dcf8c6" : "#fff", border: "1px solid #e6e6e6", borderRadius: 10, padding: "8px 11px", fontSize: 13, color: "#222", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      <div style={{ fontSize: 10, color: mine ? "#4a934a" : "#999", fontWeight: 600, marginBottom: 2 }}>{mine ? "Vicky" : "Cliente"}</div>
+                      {m.content}
+                      <div style={{ fontSize: 9, color: "#aaa", marginTop: 3, textAlign: "right" }}>
+                        {new Date(m.at).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>

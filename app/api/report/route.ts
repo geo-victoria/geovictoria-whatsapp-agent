@@ -51,6 +51,16 @@ export async function GET(request: Request) {
   const from = `${date}T00:00:00Z`
   const to = `${date}T23:59:59Z`
 
+  // Detalle: transcript completo de UNA conversación (?conv=<id>).
+  const convParam = (searchParams.get("conv") || "").trim()
+  if (convParam) {
+    const msgs = await supa(
+      `vic_v3_messages?conversation_id=eq.${encodeURIComponent(convParam)}` +
+      `&select=role,content,at&order=at.asc&limit=600`
+    ) as Array<{ role: string; content: string; at: string }> | null
+    return NextResponse.json({ messages: msgs || [] })
+  }
+
   // Conversaciones V3 del día.
   const rows = await supa(
     `vic_v3_conversations?started_at=gte.${from}&started_at=lte.${to}` +
@@ -126,6 +136,7 @@ export async function GET(request: Request) {
       (tieneFormal ? "Cotización formal emitida" : null)
 
     return {
+      id,
       contact,
       hora,
       tipo,
