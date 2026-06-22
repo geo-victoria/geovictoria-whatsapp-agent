@@ -53,6 +53,9 @@ export default function Dashboard() {
   const [openConv, setOpenConv] = useState<Conv | null>(null)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [loadingMsgs, setLoadingMsgs] = useState(false)
+  const [keyParam, setKeyParam] = useState("")
+  useEffect(() => setKeyParam(urlKey()), [])
+  const kq = keyParam ? `&key=${encodeURIComponent(keyParam)}` : ""
 
   const load = useCallback(async () => {
     try {
@@ -98,6 +101,12 @@ export default function Dashboard() {
           <input type="date" value={date} onChange={e => setDate(e.target.value)}
             style={{ border: "1px solid #ddd", borderRadius: 8, padding: "6px 12px", fontSize: 13, background: "#fff" }} />
           <button onClick={load} style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 13 }}>↻</button>
+          <a href={`/api/report?export=1&date=${date}${kq}`} download
+            title="Descargar las conversaciones de este día (JSON con transcripts)"
+            style={{ background: "#fff", border: "1px solid #ddd", borderRadius: 8, padding: "7px 12px", fontSize: 13, textDecoration: "none", color: "#333" }}>⬇ Día</a>
+          <a href={`/api/report?export=1${kq}`} download
+            title="Descargar TODAS las conversaciones (JSON con transcripts)"
+            style={{ background: TEAL, color: "#fff", borderRadius: 8, padding: "7px 12px", fontSize: 13, textDecoration: "none" }}>⬇ Todas</a>
         </div>
       </div>
 

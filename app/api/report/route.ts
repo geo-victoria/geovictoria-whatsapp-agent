@@ -47,6 +47,58 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  // Exportación: descarga un archivo JSON con las conversaciones COMPLETAS
+  // (todos los mensajes). ?export=1 = todas; &date=YYYY-MM-DD = solo ese día.
+  if (searchParams.get("export")) {
+    const scoped = (searchParams.get("date") || "").trim()
+    const filtro = scoped
+      ? `started_at=gte.${scoped}T00:00:00Z&started_at=lte.${scoped}T23:59:59Z&`
+      : ""
+    const convs = await supa(
+      `vic_v3_conversations?${filtro}select=id,contact,started_at,updated_at,` +
+      `formal_quote_id,followup_status,followup_closed_reason&order=started_at.asc&limit=3000`
+    ) as Array<Record<string, unknown>> | null
+    const list = convs || []
+    const ids = list.map(c => c.id as string).filter(Boolean)
+
+    const msgsByConv: Record<string, Array<{ role: string; content: string; at: string }>> = {}
+    for (let i = 0; i < ids.length; i += 80) {
+      const chunk = ids.slice(i, i + 80)
+      const ms = await supa(
+        `vic_v3_messages?conversation_id=in.(${chunk.join(",")})` +
+        `&select=conversation_id,role,content,at&order=at.asc&limit=50000`
+      ) as Array<{ conversation_id: string; role: string; content: string; at: string }> | null
+      for (const m of ms || []) {
+        if (!msgsByConv[m.conversation_id]) msgsByConv[m.conversation_id] = []
+        msgsByConv[m.conversation_id].push({ role: m.role, content: m.content, at: m.at })
+      }
+    }
+
+    const out = list.map(c => ({
+      contact: c.contact,
+      started_at: c.started_at,
+      updated_at: c.updated_at,
+      formal_quote_id: c.formal_quote_id || null,
+      followup_status: c.followup_status || null,
+      followup_closed_reason: c.followup_closed_reason || null,
+      messages: msgsByConv[c.id as string] || [],
+    }))
+
+    const stamp = scoped || "todas"
+    return new NextResponse(
+      JSON.stringify(
+        { exportedAt: new Date().toISOString(), date: scoped || null, total: out.length, conversations: out },
+        null, 2,
+      ),
+      {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="conversaciones-vicky-${stamp}.json"`,
+        },
+      },
+    )
+  }
+
   const date = searchParams.get("date") || new Date().toISOString().split("T")[0]
   const from = `${date}T00:00:00Z`
   const to = `${date}T23:59:59Z`
