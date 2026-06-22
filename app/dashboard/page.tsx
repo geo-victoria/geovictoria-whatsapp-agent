@@ -43,8 +43,14 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/report?date=${date}`)
-      setConvs(await r.json())
+      // Propaga ?key=... de la URL del dashboard a la API (gate opcional para
+      // compartir el link sin dejarlo 100% abierto).
+      const key = typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("key") || ""
+        : ""
+      const r = await fetch(`/api/report?date=${date}${key ? `&key=${encodeURIComponent(key)}` : ""}`)
+      const data = await r.json()
+      setConvs(Array.isArray(data) ? data : [])
       setLastRefresh(new Date())
     } catch { /* silent */ } finally { setLoading(false) }
   }, [date])
