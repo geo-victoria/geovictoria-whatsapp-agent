@@ -17,9 +17,10 @@
  *      turno) sin mover silence_anchor_at, y lo registra en el log.
  *
  * Cadencia (definida en la migración vic_v3_claim_followups): 3 toques a ~1h,
- * ~1 día y ~3 días desde que Vicky respondió. El primer toque (1h) cae dentro
- * de la ventana de 24h de WhatsApp; los toques de día 1 y día 3 pueden caer
- * fuera, pero el envío sigue siendo texto libre vía push de Botmaker.
+ * ~6h y ~18h desde que Vicky respondió. TODOS caen dentro de la ventana de 24h
+ * de WhatsApp, así que el envío puede ir como texto libre vía push de Botmaker
+ * sin fallar por re-engagement fuera de ventana (error 131047). Para alcance
+ * multi-día (día 2-3) haría falta una plantilla HSM aprobada (ver backlog H/A).
  * La cancelación vive en el webhook: si el cliente responde, el ciclo se pausa.
  */
 
