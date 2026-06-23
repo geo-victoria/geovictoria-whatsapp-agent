@@ -26,7 +26,7 @@ export const CATALOGO_HARDWARE: Hardware[] = [
     ventaUF: 6,
     arriendoUF: 0.35,
     descripcion:
-      "Reloj control físico con biometría facial sin contacto, conexión WiFi. Recomendado para puntos de trabajo con más de 10 personas o cuando los empleados no cuentan con smartphone propio.",
+      "Reloj control físico de marcaje en punto fijo, conexión WiFi. Según el modelo admite varios métodos de marcaje (clave numérica, reconocimiento facial, huella dactilar, tarjeta de proximidad, código QR y lector de cédula). Recomendado para puntos de trabajo con más de 10 personas o cuando los empleados no cuentan con smartphone propio.",
     modalidadesDisponibles: ["arriendo","venta"],
     cantidadSugerida: 1,
     disponibleParaVicky: true,
