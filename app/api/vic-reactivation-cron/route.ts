@@ -40,6 +40,14 @@ const MIN_GAP_H = Number(process.env.REACTIVATION_MIN_GAP_HOURS || 72)
 const BATCH = Number(process.env.REACTIVATION_BATCH || 25)
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 
+// Correo de reactivación (segmento "cotizacion"): se dispara en paralelo al HSM.
+// La cotizadora decide a quién enviar (filtra internos/prueba) y arma el correo
+// con CTA de aceptación online + PDF adjunto. Seguro por defecto: solo se llama
+// si REACTIVATION_EMAIL_ENABLED=true; la cotizadora además se auto-gatea.
+const COTIZADORA_API_BASE = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+const EMAIL_ENABLED = (process.env.REACTIVATION_EMAIL_ENABLED || "").trim().toLowerCase() === "true"
+
 type Row = {
   id: string
   contact: string
@@ -173,6 +181,29 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
+  // Correo de reactivación: best-effort, no bloquea ni afecta el conteo del HSM.
+  // La cotizadora self-gatea y filtra internos/prueba; aquí solo evitamos la
+  // llamada si el flag está apagado.
+  let correos = 0
+  async function dispararCorreo(quoteId: string | null): Promise<void> {
+    if (!EMAIL_ENABLED || !quoteId) return
+    try {
+      const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/send-reactivation-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+        },
+        body: JSON.stringify({ quoteId }),
+        cache: "no-store",
+      })
+      const data = await r.json().catch(() => null)
+      if (data?.sent) correos++
+    } catch (e) {
+      console.warn(`[reactivation] correo falló quote=${quoteId}:`, e)
+    }
+  }
+
   let enviados = 0
   async function enviar(list: Row[], template: string, segmento: string) {
     for (const r of list) {
@@ -189,6 +220,8 @@ export async function GET(req: Request): Promise<Response> {
       }).catch(() => {})
       enviados++
       console.log(`[reactivation] ${segmento} → ${r.contact}`)
+      // En "cotizacion" sumamos el correo (CTA aceptación online + PDF) al HSM.
+      if (segmento === "cotizacion") await dispararCorreo(r.formal_quote_id)
     }
   }
 
@@ -202,5 +235,6 @@ export async function GET(req: Request): Promise<Response> {
     segmento_cotizacion: segCot.length,
     segmento_preform: segPre.length,
     enviados,
+    correos,
   })
 }
