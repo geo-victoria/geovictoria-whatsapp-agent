@@ -110,3 +110,30 @@ checkbox que rechaza el valor numérico/booleano).
 (auth x-cron-secret) ejecuta `generar_link_cotizadora` con datos arbitrarios y
 devuelve pdfUrl+acceptanceUrl o el error real — sirve para rescatar cotizaciones
 fallidas a futuro UNA VEZ corregido este bug (hoy choca con el mismo problema).
+
+---
+
+## UX: etiqueta fija "Pago único (equipos, instalación, servicios)" confunde
+
+**Estado:** detectado en producción (cliente confundido, 25-jun).
+**Síntoma:** en la página de aceptación y el PDF, la línea del pago único dice
+SIEMPRE *"Pago único (equipos, instalación, servicios)"* — texto **fijo**. Un
+cliente cuya cotización **no incluía instalación** (solo envío de reloj) creyó que
+estaba pagando instalación. La palabra "instalación" aparece aunque no aplique.
+
+**Dónde:** `cotizador/api/_shared/proposal-html-builder.js` línea ~465
+(`<span>Pago único (equipos, instalación, servicios)</span>`). Mismo concepto en
+las T&C (líneas ~1308 y ~1430: "equipos, instalacion y servicios iniciales").
+
+**Soluciones propuestas:**
+- **(A, recomendada) Etiqueta dinámica:** construir el texto a partir de los ítems
+  NO recurrentes presentes en el pago único (compra de equipos / instalación /
+  envío / servicios iniciales), listando SOLO los que aplican. Así nunca aparece
+  "instalación" si la cotización no la tiene. Requiere inspeccionar
+  categoría/modalidad de los ítems one-shot al armar la fila.
+- **(B, rápida) Texto genérico** que no prometa instalación específica, ej.
+  "Pago único (equipos y cargos iniciales)" o "Cargos únicos según tu cotización".
+  Menos preciso pero elimina la confusión de inmediato.
+
+**Recomendación:** A (dinámica) para precisión; B como parche inmediato si urge.
+Alinear también el texto de las T&C para que no liste instalación cuando no aplica.
