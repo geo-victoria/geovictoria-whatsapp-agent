@@ -79,3 +79,34 @@ cotización formal que rebajar).
 **Por ahora (decidido):** NO se construye. El correo mantiene el filtro de "solo
 reenvía la cotización si ya está en el máximo"; para el resto, el descuento lo
 aplica Vicky en vivo por WhatsApp y recién ahí entrega el PDF nuevo.
+
+---
+
+## BUG (alta prioridad): create_quote falla en Zoho cuando la cotización nace con descuento
+
+**Estado:** detectado en producción (25-jun, caso Vanessa / DGC Maquinarias).
+**Síntoma:** al cerrar una venta donde el cliente aceptó un descuento en el
+preform, `generar_link_cotizadora` → `create-from-vicky` falla con:
+`stage='create_quote'` → `Zoho createRecord failed: invalid data`. Vicky entonces
+deriva a un ejecutivo ("un ejecutivo te contactará") en vez de entregar el link.
+
+**Diagnóstico:** las cotizaciones SIN descuento se crean bien; el fallo aparece
+solo con `escalonDescuento > 0`, o sea cuando `quoteFields` incluye
+`quoteDiscountFields` (create-from-vicky.js ~935): `Escalon_Descuento`,
+`Escalon_Negociacion`, `Descuento_Desbloqueado` (bool), `Descuento_Recurrente_Pct`,
+`Descuento_Instalacion_RM_Pct`, `Descuento_Instalacion_Region_Pct`. Hipótesis:
+uno de esos api_name no existe / tiene tipo distinto en el módulo
+`Cotizaciones_GeoVictoria` (ej. campo nuevo no creado en Zoho, o un picklist/
+checkbox que rechaza el valor numérico/booleano).
+
+**Próximos pasos para corregir:**
+1. Surface el detalle del error de Zoho en `zoho-crm.js` (incluir `details.api_name`
+   del INVALID_DATA en vez de solo "invalid data"), para saber el campo exacto.
+2. Verificar en Zoho (getFields del módulo) que los 6 campos de descuento existan
+   con el tipo correcto; crear/ajustar el que falte.
+3. Reintentar la generación con descuento y confirmar.
+
+**Workaround disponible:** endpoint admin `POST /api/vic-admin-genquote`
+(auth x-cron-secret) ejecuta `generar_link_cotizadora` con datos arbitrarios y
+devuelve pdfUrl+acceptanceUrl o el error real — sirve para rescatar cotizaciones
+fallidas a futuro UNA VEZ corregido este bug (hoy choca con el mismo problema).
