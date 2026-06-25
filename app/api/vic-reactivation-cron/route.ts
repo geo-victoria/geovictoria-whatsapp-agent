@@ -20,7 +20,7 @@
 
 import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { appendAssistantV3 } from "@/lib/supabase-persistence-v3"
+import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
@@ -82,7 +82,15 @@ async function supa(path: string, init?: RequestInit): Promise<Response> {
   })
 }
 
-function authorized(req: Request): boolean {
+async function authorized(req: Request): Promise<boolean> {
+  // (a) Secreto compartido en vic_kv (mismo que followup/meeting crons): permite
+  // que el pg_cron de Supabase gatille este endpoint con el header x-cron-secret.
+  const xcron = (req.headers.get("x-cron-secret") || "").trim()
+  if (xcron) {
+    const expected = await getFollowupCronSecret().catch(() => "")
+    if (expected && xcron === expected) return true
+  }
+  // (b) CRON_SECRET por env (Bearer o ?key=): para invocación manual/externa.
   if (!CRON_SECRET) return false
   const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
   if (bearer === CRON_SECRET) return true
@@ -135,7 +143,7 @@ async function quoteIdsNoAccionables(quoteIds: string[]): Promise<Set<string>> {
 }
 
 export async function GET(req: Request): Promise<Response> {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
   if (!TPL_PREFORM && !TPL_QUOTE) {
