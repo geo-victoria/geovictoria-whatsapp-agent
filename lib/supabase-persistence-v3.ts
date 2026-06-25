@@ -563,6 +563,29 @@ export async function appendAssistantV3(contact: string, content: string): Promi
   })
 }
 
+/**
+ * ¿Este contacto está respondiendo a un toque de reactivación? True cuando hay
+ * un `reactivation_at` posterior al último mensaje del cliente (`last_user_at`):
+ * o sea, lo reactivamos estando frío y esta es su PRIMERA respuesta al toque.
+ * Se auto-limpia: al persistir esa respuesta, appendTurnV3 actualiza
+ * last_user_at, por lo que en los turnos siguientes vuelve a ser false.
+ */
+export async function isReengaged(contact: string): Promise<boolean> {
+  if (!contact) return false
+  const rows = await supabaseFetch<
+    Array<{ reactivation_at: string | null; last_user_at: string | null }>
+  >(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(
+      contact,
+    )}&select=reactivation_at,last_user_at&limit=1`,
+  )
+  if (!rows || rows.length === 0) return false
+  const { reactivation_at, last_user_at } = rows[0]
+  if (!reactivation_at) return false
+  if (!last_user_at) return true
+  return Date.parse(reactivation_at) > Date.parse(last_user_at)
+}
+
 // ── Reuniones agendadas (recordatorios por WhatsApp) ───────────────────────
 // Tabla vic_v3_meetings: fuente de verdad para el recordatorio (cron) y la
 // confirmación de asistencia. Se llena al agendar (agent-loop) y se mantiene

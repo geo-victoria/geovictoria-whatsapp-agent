@@ -37,6 +37,7 @@ import {
   getPrefEscalon,
   getQuotePointer,
   getFormalQuote,
+  isReengaged,
 } from "@/lib/supabase-persistence-v3"
 import {
   acquireLock,
@@ -236,6 +237,19 @@ function extractPdfUrl(
  *   3. Enviar reply final vía push
  *   4. Liberar lock (siempre, incluso si hay error)
  */
+// Contexto que se antepone al prompt cuando el cliente responde por PRIMERA vez a
+// un toque de reactivación. Refuerza la excepción "REENGANCHE POR OFERTA" para que
+// Vicky retome con continuidad: ofrecer el máximo si no lo tenía / recordar el
+// plazo si ya estaba en el tope, siempre con sentido de caducidad.
+const CONTEXTO_REENGANCHE =
+  "[CONTEXTO — REENGANCHE ACTIVO] Tú (Vicky) reabriste esta conversación con un toque de " +
+  "reactivación: le ofreciste al cliente un precio especial por tiempo limitado, y este mensaje " +
+  "es su respuesta a ese toque. Aplica la regla 'REENGANCHE POR OFERTA': si el cliente todavía " +
+  "NO está en el descuento máximo del plan, ofrécele el máximo de forma proactiva con la tool de " +
+  "descuento que corresponda; si YA estaba en el máximo, recuérdale que ese precio caduca pronto. " +
+  "En todos los casos transmite urgencia (la oferta tiene caducidad). No inventes cifras: usa solo " +
+  "los textos que devuelven las tools.\n\n"
+
 async function processOneTurn(
   contact: string,
   message: string,
@@ -249,7 +263,7 @@ async function processOneTurn(
     // (puntero durable), inyectamos ese estado al prompt para que Vicky la
     // retome en vez de re-cotizar de cero — incluso si perdió el historial.
     const quotePointer = await getQuotePointer(contact).catch(() => null)
-    const contextoCotizacion = formatCotizacionExistenteParaPrompt(
+    const contextoCotizacionExistente = formatCotizacionExistenteParaPrompt(
       quotePointer
         ? {
             quoteId: quotePointer.quoteId,
@@ -259,6 +273,13 @@ async function processOneTurn(
           }
         : undefined,
     )
+    // Reenganche: si esta es la PRIMERA respuesta del cliente a un toque de
+    // reactivación, inyectamos contexto para que Vicky retome con la oferta flash
+    // (activa la excepción de descuento proactivo del prompt). Se auto-limpia al
+    // persistir la respuesta (last_user_at pasa a ser > reactivation_at).
+    const reengaged = await isReengaged(contact).catch(() => false)
+    const contextoCotizacion =
+      (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)

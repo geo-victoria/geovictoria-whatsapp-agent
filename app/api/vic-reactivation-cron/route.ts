@@ -20,6 +20,7 @@
 
 import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { appendAssistantV3 } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
@@ -47,6 +48,16 @@ const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria
 const COTIZADORA_API_BASE = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
 const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
 const EMAIL_ENABLED = (process.env.REACTIVATION_EMAIL_ENABLED || "").trim().toLowerCase() === "true"
+
+// Texto que se guarda en el historial como turno de Vicky cuando se envía el HSM,
+// para que al responder el cliente, Vicky sepa que ELLA reabrió con la oferta
+// flash y le dé continuidad. NO se reenvía al cliente: es contexto interno.
+const REACT_CONTEXT_MSG: Record<string, string> = {
+  cotizacion:
+    "Hola, soy Vicky 👋 Te escribí para retomar tu cotización, que quedó pendiente. Tengo un precio especial vigente por tiempo limitado para que puedas cerrar. ¿La revisamos antes de que caduque?",
+  preform:
+    "Hola, soy Vicky 👋 Te escribí para retomar tu cotización pendiente. Tengo un precio especial por tiempo limitado para ti. ¿Lo vemos antes de que caduque?",
+}
 
 type Row = {
   id: string
@@ -220,6 +231,12 @@ export async function GET(req: Request): Promise<Response> {
       }).catch(() => {})
       enviados++
       console.log(`[reactivation] ${segmento} → ${r.contact}`)
+      // Deja el toque como turno de Vicky en el historial: así, cuando el cliente
+      // responda, Vicky retoma con continuidad (excepción de reenganche del prompt).
+      await appendAssistantV3(
+        r.contact,
+        REACT_CONTEXT_MSG[segmento] ?? REACT_CONTEXT_MSG.preform,
+      ).catch(() => {})
       // En "cotizacion" sumamos el correo (CTA aceptación online + PDF) al HSM.
       if (segmento === "cotizacion") await dispararCorreo(r.formal_quote_id)
     }
