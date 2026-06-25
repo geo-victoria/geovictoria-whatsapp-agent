@@ -497,104 +497,122 @@ export async function generarLinkCotizadora(
   const ufActual = await getUFActualSafe()
   const totalCLP = Math.round(totalUF * ufActual)
 
-  try {
-    const response = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
-      },
-      body: JSON.stringify({
-        cliente: {
-          empresa: empresa.trim(),
-          contacto: contacto.trim(),
-          contactoEmail: contactoEmail.trim().toLowerCase(),
-          contactoTelefono: contactoTelefono?.trim() || "",
-          rutEmpresa: formatearRut(rutEmpresa),
-          direccionEmpresa: direccionEmpresa?.trim() || "",
-          comunaEmpresa: comunaEmpresa?.trim() || "",
-          regionEmpresa: regionEmpresa?.trim() || "",
-          userCount,
-          sectorEmpresa: sectorNormalizado,
-        },
-        // IDs existentes (opcionales): si se pasan, el endpoint reusa o convierte.
-        // Cuando hay Borrador negociado, también van dealId/quoteId para que el
-        // endpoint finalice esa misma cotización (no cree una nueva).
-        existing: {
-          accountId: effAccountId,
-          contactId: effContactId,
-          dealId: effDealId,
-          quoteId: effQuoteId,
-          leadId: effLeadId,
-        },
-        // Descuento negociado en el preform (si el cliente aceptó uno): la
-        // cotización nace ya con ese descuento, sin regenerar PDF después.
-        escalonDescuento:
-          typeof escalonDescuento === "number" && escalonDescuento > 0
-            ? escalonDescuento
-            : undefined,
-        cotizacion: {
-          items: itemsFinal,
-          subtotalUF: Number(subtotalUF.toFixed(3)),
-          ivaUF: Number(ivaUF.toFixed(3)),
-          totalUF: Number(totalUF.toFixed(3)),
-          ufActual: Number(ufActual.toFixed(2)),
-          totalCLP,
-        },
-      }),
-      cache: "no-store",
-    })
-
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => "")
-      return { ok: false, error: `Cotizadora respondió ${response.status}: ${errBody.slice(0, 200)}` }
-    }
-
-    const data = await response.json() as {
-      ok: boolean
-      pdfUrl?: string
-      acceptanceUrl?: string
-      quoteId?: string
-      dealId?: string
-      accountId?: string
-      contactId?: string
-      reuse?: {
-        accountReused?: boolean
-        contactReused?: boolean
-        leadConverted?: boolean
-      }
-      error?: string
-      detail?: string
-    }
-
-    // El acceptanceUrl es lo crítico (el link que Vicky entrega). El pdfUrl
-    // puede venir vacío: ahora el cotizador responde apenas tiene el link y
-    // genera el PDF en segundo plano. El prompt entrega SOLO el acceptanceUrl,
-    // así que un pdfUrl vacío no afecta el mensaje al cliente.
-    if (!data.ok || !data.acceptanceUrl) {
-      return { ok: false, error: data.error || data.detail || "Respuesta inválida de la cotizadora" }
-    }
-
-    return {
-      ok: true,
-      pdfUrl: data.pdfUrl || "",
-      acceptanceUrl: data.acceptanceUrl,
-      quoteId: data.quoteId || "",
-      dealId: data.dealId || "",
-      accountId: data.accountId || "",
-      contactId: data.contactId || "",
-      ejecutivoAsignado: EJECUTIVO_DEFAULT,
+  // Cuerpo de la request (constante entre reintentos).
+  const reqBody = JSON.stringify({
+    cliente: {
+      empresa: empresa.trim(),
+      contacto: contacto.trim(),
+      contactoEmail: contactoEmail.trim().toLowerCase(),
+      contactoTelefono: contactoTelefono?.trim() || "",
+      rutEmpresa: formatearRut(rutEmpresa),
+      direccionEmpresa: direccionEmpresa?.trim() || "",
+      comunaEmpresa: comunaEmpresa?.trim() || "",
+      regionEmpresa: regionEmpresa?.trim() || "",
+      userCount,
+      sectorEmpresa: sectorNormalizado,
+    },
+    // IDs existentes (opcionales): si se pasan, el endpoint reusa o convierte.
+    // Cuando hay Borrador negociado, también van dealId/quoteId para que el
+    // endpoint finalice esa misma cotización (no cree una nueva).
+    existing: {
+      accountId: effAccountId,
+      contactId: effContactId,
+      dealId: effDealId,
+      quoteId: effQuoteId,
+      leadId: effLeadId,
+    },
+    // Descuento negociado en el preform (si el cliente aceptó uno): la
+    // cotización nace ya con ese descuento, sin regenerar PDF después.
+    escalonDescuento:
+      typeof escalonDescuento === "number" && escalonDescuento > 0
+        ? escalonDescuento
+        : undefined,
+    cotizacion: {
+      items: itemsFinal,
+      subtotalUF: Number(subtotalUF.toFixed(3)),
+      ivaUF: Number(ivaUF.toFixed(3)),
       totalUF: Number(totalUF.toFixed(3)),
+      ufActual: Number(ufActual.toFixed(2)),
       totalCLP,
-      advertencias,
-      reuse: {
-        accountReused: data.reuse?.accountReused || false,
-        contactReused: data.reuse?.contactReused || false,
-        leadConverted: data.reuse?.leadConverted || false,
-      },
+    },
+  })
+
+  type CreateFromVickyResp = {
+    ok: boolean
+    pdfUrl?: string
+    acceptanceUrl?: string
+    quoteId?: string
+    dealId?: string
+    accountId?: string
+    contactId?: string
+    reuse?: { accountReused?: boolean; contactReused?: boolean; leadConverted?: boolean }
+    error?: string
+    detail?: string
+  }
+
+  // Reintento interno (silencioso): el create-from-vicky puede fallar de forma
+  // transitoria (latencia de Zoho) o por inconsistencias de dedup que se
+  // resuelven al reintentar (el endpoint termina creando registros consistentes
+  // en un 2º intento). Reintentamos hasta MAX_INTENTOS para que el cliente NUNCA
+  // vea el "tuve un problema" por una falla pasajera. El acceptanceUrl es lo
+  // crítico; el pdfUrl puede venir vacío (se genera en segundo plano).
+  const MAX_INTENTOS = 3
+  let data: CreateFromVickyResp | null = null
+  let lastError = "Respuesta inválida de la cotizadora"
+  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+    try {
+      const response = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+        },
+        body: reqBody,
+        cache: "no-store",
+      })
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => "")
+        lastError = `Cotizadora respondió ${response.status}: ${errBody.slice(0, 200)}`
+      } else {
+        const parsed = (await response.json()) as CreateFromVickyResp
+        if (parsed.ok && parsed.acceptanceUrl) {
+          data = parsed
+          break
+        }
+        lastError = parsed.error || parsed.detail || "Respuesta inválida de la cotizadora"
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      lastError = `No se pudo contactar la cotizadora: ${msg.slice(0, 200)}`
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: `No se pudo contactar la cotizadora: ${msg.slice(0, 200)}` }
+    if (intento < MAX_INTENTOS) {
+      console.warn(
+        `[generar_link_cotizadora] intento ${intento}/${MAX_INTENTOS} falló (${lastError.slice(0, 140)}); reintentando...`,
+      )
+      await new Promise((r) => setTimeout(r, 1200 * intento))
+    }
+  }
+
+  if (!data || !data.acceptanceUrl) {
+    return { ok: false, error: lastError }
+  }
+
+  return {
+    ok: true,
+    pdfUrl: data.pdfUrl || "",
+    acceptanceUrl: data.acceptanceUrl,
+    quoteId: data.quoteId || "",
+    dealId: data.dealId || "",
+    accountId: data.accountId || "",
+    contactId: data.contactId || "",
+    ejecutivoAsignado: EJECUTIVO_DEFAULT,
+    totalUF: Number(totalUF.toFixed(3)),
+    totalCLP,
+    advertencias,
+    reuse: {
+      accountReused: data.reuse?.accountReused || false,
+      contactReused: data.reuse?.contactReused || false,
+      leadConverted: data.reuse?.leadConverted || false,
+    },
   }
 }
