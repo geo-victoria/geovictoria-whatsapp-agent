@@ -21,6 +21,7 @@
 import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
@@ -167,9 +168,12 @@ export async function GET(req: Request): Promise<Response> {
     `&order=last_user_at.asc&limit=400`,
   )
   const rows = (res.ok ? await res.json() : []) as Row[]
+  // Números internos de prueba (mismos que excluye el embudo: VIC_FUNNEL_TEST_CONTACTS).
+  const testSet = testContactSet()
   const cand = rows.filter(
     (r) =>
       r.contact &&
+      !isTestContact(r.contact, testSet) &&
       r.followup_closed_reason !== "opt_out" &&
       r.followup_status !== "activo" &&
       (!r.reactivation_at || r.reactivation_at <= gapBefore),
