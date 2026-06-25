@@ -147,6 +147,31 @@ export async function GET(req: Request): Promise<Response> {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
+
+  // Hook de PRUEBA: ?to=<fono>[&seg=preform|quote] → envía la plantilla a ese
+  // número saltando candidatos/filtros (incluido el de prueba), para validar el
+  // flujo del botón end-to-end. Mismo auth. Marca reactivation_at para que el
+  // reenganche se active al responder.
+  const _u = new URL(req.url)
+  const testTo = (_u.searchParams.get("to") || "").replace(/\D/g, "")
+  if (testTo) {
+    const seg = _u.searchParams.get("seg") === "quote" ? "cotizacion" : "preform"
+    const tpl = seg === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
+    if (!tpl) {
+      return NextResponse.json({ ok: false, error: `plantilla ${seg} no configurada` }, { status: 400 })
+    }
+    const ok = await sendBotmakerTemplate(testTo, tpl, {}).catch(() => false)
+    if (ok) {
+      await appendAssistantV3(testTo, REACT_CONTEXT_MSG[seg] ?? REACT_CONTEXT_MSG.preform).catch(() => {})
+      await supa(`vic_v3_conversations?contact=eq.${testTo}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ reactivation_at: new Date().toISOString() }),
+      }).catch(() => {})
+    }
+    return NextResponse.json({ ok, test: true, to: testTo, seg, tpl })
+  }
+
   if (!TPL_PREFORM && !TPL_QUOTE) {
     return NextResponse.json({ ok: true, skipped: "sin plantillas configuradas (REACTIVATION_TEMPLATE_*)" })
   }
