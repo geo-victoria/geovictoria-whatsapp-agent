@@ -39,3 +39,43 @@ conocidos.
 - **Origen del dato cross-repo:** "preform abandonado" nace en `cotizador`,
   "cotización enviada" también; el envío vive en `whatsapp-agent`. Hay que
   acordar el contrato de datos entre ambos.
+
+---
+
+## Auto-descuento por clic en el correo (CTA "Activar mi precio especial")
+
+**Estado:** propuesto (para backlog)
+**Aplica a:** segmento **cotización** del reenganche (el preform no tiene
+cotización formal que rebajar).
+
+**Qué se quiere:**
+- Que el CTA del correo de reactivación (y, opcionalmente, el botón URL de la
+  plantilla HSM de cotización) apunte a un **endpoint con token firmado** que, al
+  hacer clic:
+  1. valide el token (quoteId + intención + expiración),
+  2. **aplique el descuento máximo** server-side (regenera el PDF, igual que
+     `aplicar_siguiente_descuento` con el tope),
+  3. **redirija a la página de aceptación** con el precio ya rebajado.
+
+**Por qué es atractivo:**
+- Elimina el problema del "PDF viejo": el descuento se aplica EN el clic, antes de
+  que el cliente vea el precio. Hoy el correo solo reenvía la cotización si ya está
+  en el máximo (`send-reactivation-email.js` filtra con `hayEscalonDespues`); con
+  esto el correo podría ir a TODOS los de cotización sin ese filtro.
+- Idempotente: si el cliente ya estaba en el tope, el clic no rompe nada.
+- Unifica canales: el mismo link serviría para el botón URL de WhatsApp.
+
+**Decisiones / consideraciones:**
+- **Política:** quien haga clic obtiene el tope (20%) al instante, sin pasar por
+  Vicky — el descuento deja de estar "gateado" por la conversación para los que
+  reciben el toque. Es el espíritu del flash offer, pero hay que aceptarlo
+  explícitamente (margen).
+- **Seguridad:** token firmado (mismo modelo "bearer link" que la página de
+  aceptación actual); aplicar dos veces es inofensivo (idempotente).
+- **Implementación:** endpoint nuevo en `cotizador` (GET con token →
+  aplica a tope → 302 a `quote-acceptance.html`). El cron debería pasar el link
+  firmado por cliente si se usa también en el botón URL de WhatsApp.
+
+**Por ahora (decidido):** NO se construye. El correo mantiene el filtro de "solo
+reenvía la cotización si ya está en el máximo"; para el resto, el descuento lo
+aplica Vicky en vivo por WhatsApp y recién ahí entrega el PDF nuevo.
