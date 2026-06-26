@@ -28,6 +28,28 @@ const VOSEO_MAP: [RegExp, string][] = [
   [/(?<!\p{L})cach[aá][iy](?!\p{L})/giu, "sabes"],
   // "po" muletilla al final de frase ("listo po", "claro po,") → se elimina.
   [/\s+po(?=[\s.,!?;:)¿¡]|$)/giu, ""],
+  // ── Voseo verbal chileno (terminaciones -ái / -ís / -oi) → tuteo. Lista
+  // CURADA por verbo a propósito: una regex genérica de "-ai"/"-is" rompería
+  // palabras legítimas (país, seis, crisis, análisis, Dubái, "tenis" el
+  // deporte). Por eso cada verbo va explícito y con límites Unicode \p{L}.
+  // (Caso real: "Me los pasai?" — sonaba demasiado informal para venta.)
+  [/(?<!\p{L})pas[aá]i(?!\p{L})/giu, "pasas"],
+  [/(?<!\p{L})tom[aá]i(?!\p{L})/giu, "tomas"],
+  [/(?<!\p{L})marc[aá]i(?!\p{L})/giu, "marcas"],
+  [/(?<!\p{L})and[aá]i(?!\p{L})/giu, "andas"],
+  [/(?<!\p{L})est[aá]i(?!\p{L})/giu, "estás"],
+  [/(?<!\p{L})necesit[aá]i(?!\p{L})/giu, "necesitas"],
+  [/(?<!\p{L})llam[aá]i(?!\p{L})/giu, "llamas"],
+  [/(?<!\p{L})v[aá]i(?!\p{L})/giu, "vas"],
+  [/(?<!\p{L})quer[ií]s(?!\p{L})/giu, "quieres"],
+  [/(?<!\p{L})pod[ií]s(?!\p{L})/giu, "puedes"],
+  [/(?<!\p{L})hac[ií]s(?!\p{L})/giu, "haces"],
+  [/(?<!\p{L})sab[ií]s(?!\p{L})/giu, "sabes"],
+  [/(?<!\p{L})dec[ií]s(?!\p{L})/giu, "dices"],
+  [/(?<!\p{L})tenís(?!\p{L})/giu, "tienes"], // solo acentuado: "tenis" es el deporte
+  [/(?<!\p{L})erís(?!\p{L})/giu, "eres"],
+  [/(?<!\p{L})soi(?!\p{L})/giu, "eres"],
+  [/(?<!\p{L})vení(?!\p{L})/giu, "ven"],
 ]
 
 export function sanitizarVoseo(texto: string): string {
@@ -44,12 +66,26 @@ export function sanitizarVoseo(texto: string): string {
 }
 
 /**
- * Normaliza el formato a la sintaxis de WhatsApp. El modelo a veces emite
- * negritas en Markdown (`**texto**`, doble asterisco), pero WhatsApp usa un solo
- * asterisco (`*texto*`); el resultado son asteriscos dobles a la vista. Aquí se
- * convierte `**texto**` → `*texto*` y se colapsa cualquier `**` suelto a uno.
+ * Normaliza el formato a la sintaxis de WhatsApp. Decisión de producto: Vicky
+ * NO usa negritas (se ve a bot / cargado). Por eso esta función ELIMINA las
+ * negritas en vez de convertirlas: quita los asteriscos de los pares `**texto**`
+ * y `*texto*`, dejando el texto plano. Los `*` sueltos (p. ej. una viñeta a
+ * inicio de línea) se conservan porque no forman par.
  */
 export function normalizarFormatoWhatsApp(texto: string): string {
   if (!texto) return texto
-  return texto.replace(/\*\*(.+?)\*\*/gs, "*$1*").replace(/\*\*+/g, "*")
+  let out = texto.replace(/\*\*(.+?)\*\*/gs, "$1") // **texto** → texto
+  out = out.replace(/\*([^*\n]+?)\*/g, "$1") // *texto* → texto
+  out = out.replace(/\*\*+/g, "") // restos de ** sueltos
+  return out
+}
+
+/**
+ * Quita los signos de APERTURA `¡` y `¿`. En WhatsApp chileno informal nadie
+ * abre con `¡`/`¿`; ponerlos delata al bot (feedback real). Se conservan los de
+ * cierre (`!`, `?`). Determinista, se aplica al texto de salida.
+ */
+export function quitarSignosApertura(texto: string): string {
+  if (!texto) return texto
+  return texto.replace(/[¡¿]/g, "")
 }

@@ -48,7 +48,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
-import { sanitizarVoseo, normalizarFormatoWhatsApp } from "@/lib/voseo-v3"
+import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import {
   markUserActivity,
@@ -650,9 +650,10 @@ async function processOneTurn(
       }
     }
 
-    // 2.7. Saneador anti-voseo determinista (por si el modelo se escapó del
-    // tuteo chileno pese a la regla del prompt).
-    reply = normalizarFormatoWhatsApp(sanitizarVoseo(reply))
+    // 2.7. Saneadores deterministas de tono (por si el modelo se escapó pese a
+    // las reglas del prompt): anti-voseo (incl. voseo chileno -ái/-ís), quitar
+    // negritas y quitar signos de apertura ¡/¿.
+    reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(reply)))
 
     // 3. Persistir turno en Supabase
     await appendTurnV3(contact, message, reply).catch((err) => {

@@ -35,7 +35,7 @@ import {
   closeFollowup,
 } from "@/lib/supabase-persistence-v3"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
-import { sanitizarVoseo } from "@/lib/voseo-v3"
+import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -186,7 +186,7 @@ export async function POST(req: Request) {
       }
       nudge = fallbackPorStage(claim.stage)
     }
-    nudge = sanitizarVoseo(nudge)
+    nudge = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(nudge)))
 
     const ok = await sendBotmakerMessage(claim.contact, nudge).catch(() => false)
     if (ok) {
