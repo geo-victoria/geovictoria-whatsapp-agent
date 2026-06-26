@@ -237,3 +237,38 @@ deterministas (negritas, "¡!") y latencia/typos en `vic-botmaker-v3/route.ts`
 **Quick wins (prompt, bajo riesgo):** 1 (acortar), 2 (sin negritas) y 3 (sin "¡!")
 son ajustes de prompt + saneador y se pueden hacer ya. 4 (latencia) y 5 (typos)
 requieren código y, el 5, una decisión de producto.
+
+---
+
+## Conocimiento incorrecto: validaciones de marcaje de la APP MÓVIL
+
+**Estado:** detectado en producción (Vicky dio info errónea/incompleta).
+
+**Síntoma (caso real):** ante *"¿qué otras validaciones tiene la App?"*, Vicky
+respondió: georeferenciación, biometría facial y **"usuario y contraseña"**.
+
+**Errores:**
+1. **"Usuario y contraseña" NO es una validación de marcaje** — eso es solo para
+   **loguearse** a la app, no para validar la marcación. No corresponde listarlo
+   como capa de seguridad del marcaje.
+2. **Faltan métodos de validación de marcaje:** **patrón**, **firma** y la opción
+   **sin validación**.
+
+**Lista correcta (validación de identidad al marcar en la app):**
+- **Biometría facial** (reconocimiento facial)
+- **Patrón**
+- **Firma**
+- **Sin validación** (marca directa, sin verificación de identidad)
+- (aparte) **Georeferenciación** = valida la **ubicación** (GPS) desde donde se
+  marca — es validación de *dónde*, complementaria a las de *quién*.
+
+> Usuario y contraseña = acceso/login a la app, NO validación de marcaje.
+
+**Causa:** el prompt no enumera las validaciones de la app; solo dice "app móvil
+con biometría facial y georeferenciación" (`prompt.ts` ~líneas 554 y 566), así que
+ante la pregunta el modelo improvisa y mete "usuario y contraseña".
+
+**Fix:** agregar al prompt el listado correcto de validaciones de marcaje de la
+app (facial, patrón, firma, sin validación + georeferenciación como capa de
+ubicación), y dejar claro que usuario/contraseña es solo login. Validar la lista
+final con el equipo de producto por si hay más métodos o matices por plan.
