@@ -447,10 +447,13 @@ export async function getQuotePointer(contact: string): Promise<QuotePointer | n
 //                se re-arma cuando Vicky entrega su próxima respuesta real.
 //   "cerrado"  → ciclo terminado (respondió y cerró, opt-out, derivado, agotado).
 //
-// Cadencia (espejo de vic_v3_claim_followups en SQL): 3 toques a ~1h, ~1 día y
-// ~3 días. `silence_anchor_at` = momento en que Vicky respondió y quedó
-// esperando; los toques de push NO lo mueven (si lo movieran, la cadencia nunca
-// avanzaría).
+// Cadencia (espejo de vic_v3_claim_followups en SQL): 2 toques de texto libre a
+// 1h y 23h (dentro de la ventana de 24h), gateados a horario hábil en la zona del
+// contacto (Lun-Sáb 9-19 local, sin feriado; ver vic_is_business_now). Los toques
+// largos (47h/7d/15d, fuera de 24h) van por plantilla HSM en vic-reactivation-cron.
+// Antes: 3 toques a ~1h/~6h/~18h SIN horario hábil (causaba toques de madrugada).
+// `silence_anchor_at` = momento en que Vicky respondió y quedó esperando; los
+// toques de push NO lo mueven (si lo movieran, la cadencia nunca avanzaría).
 
 const FOLLOWUP_FIRST_OFFSET_MS = 60 * 60 * 1000 // primer toque: +1 h
 
