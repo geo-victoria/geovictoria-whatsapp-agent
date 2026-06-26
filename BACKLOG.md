@@ -211,10 +211,12 @@ demasiada info para esa pregunta. Parece capacitación, no conversación.
 2. **Quitar negritas.** Nada de `*texto*`/markdown bold en los mensajes. Que el
    énfasis sea por redacción, no por formato.
 
-3. **Quitar signos de exclamación al inicio de frase.** Nada de "¡Hola!",
-   "¡Perfecto!", "¡Genial!" como apertura. Tono más sobrio y natural (chileno
-   neutro). Saneador determinista posible: strip de `¡` inicial + del `!` de
-   cierre en aperturas tipo saludo/afirmación.
+3. **Quitar signos de apertura `¡` y `¿` al inicio de frase.** Nada de "¡Hola!",
+   "¡Perfecto!", "¡Genial!" ni "¿Te sirve…?" abriendo con `¿`. En WhatsApp chileno
+   informal nadie abre con `¡`/`¿`; ponerlos delata al bot (feedback real: "como
+   agregaron el signo pregunta al ppio, parece BOT de nuevo"). Tono más sobrio y
+   natural. Saneador determinista posible: strip de `¡`/`¿` iniciales (y del `!`
+   de cierre) en aperturas tipo saludo/pregunta/afirmación.
 
 4. **Cadencia humana (latencia).** Introducir una demora antes de responder (y/o
    simular "escribiendo…") proporcional al largo del mensaje, para que no llegue
@@ -272,3 +274,55 @@ ante la pregunta el modelo improvisa y mete "usuario y contraseña".
 app (facial, patrón, firma, sin validación + georeferenciación como capa de
 ubicación), y dejar claro que usuario/contraseña es solo login. Validar la lista
 final con el equipo de producto por si hay más métodos o matices por plan.
+
+---
+
+## Seguimiento (re-engagement): cadencia nueva + horario hábil + calidad/anti-spam Meta
+
+**Estado:** ALTA PRIORIDAD — riesgo operativo (Meta puede bloquear envíos).
+Feedback comercial directo: *"Los seguimientos están muy insistentes. Y no puede
+escribir fuera de la hora laboral. Me escribió a las 3 AM."*
+
+**Problemas detectados:**
+
+1. **Escribe fuera de horario** (caso real: toque a las **3 AM**). El cron de
+   followup **no tiene lógica de horario hábil ni de feriados** (verificado: no
+   hay quiet hours en `lib/supabase-persistence-v3.ts` / cron). Debe respetar
+   horario laboral (America/Santiago) y NO enviar en feriados.
+
+2. **Demasiado insistente / cadencia mal espaciada.** Hoy son **3 toques a ~1h,
+   ~24h y ~72h** (`vic_v3_claim_followups` / `FOLLOWUP_FIRST_OFFSET_MS`, comentario
+   ~línea 450 de `supabase-persistence-v3.ts`).
+
+3. **Riesgo de calidad/spam de Meta (operativo, serio).** Cada número tiene un
+   **índice de calidad**; mientras más toques a más usuarios, más probable que
+   reporten spam → Meta **limita o bloquea** los envíos ("en cualquier momento
+   Meta nos mandará Spam y los mensajes no se enviarán"). Hay que **monitorear la
+   calidad del número** y espaciar/condicionar los toques.
+
+**Cadencia propuesta (comercial, efectiva sin hostigar):**
+
+| Toque | Offset desde el último mensaje | Nota |
+|---|---|---|
+| 1º | **1 hora** | dentro de la ventana de 24h (texto libre, sin costo) |
+| 2º | **23 horas** | aún dentro de 24h → **último envío gratis**; post-23h Meta cobra por envío |
+| 3º | **47 horas** | fuera de 24h → requiere plantilla HSM aprobada (pago) |
+| 4º | **7 días** | HSM |
+| 5º | **15 días** | HSM |
+
+- **Siempre en horario laboral y NO feriados.** Si el offset cae en horario no
+  hábil/feriado, correr el envío al próximo bloque hábil.
+- El corte a **23h** es clave de costos: es el último toque dentro de la ventana
+  gratuita de 24h de WhatsApp; del 3º en adelante (47h, 7d, 15d) se necesita
+  **HSM aprobada** (esto se cruza con el ítem "Reenganche multi-día hora 47/48" y
+  con las plantillas de reactivación ya creadas).
+
+**Consideraciones de implementación:**
+- Reescribir la cadencia en `vic_v3_claim_followups` (SQL) + `FOLLOWUP_*` en
+  `supabase-persistence-v3.ts` (de 3 toques a 5 con estos offsets).
+- Agregar **quiet hours** (horario hábil Santiago) y **calendario de feriados CL**
+  al cómputo de `followup_next_at` (diferir al próximo bloque hábil).
+- Toques 3-5 vía **plantilla HSM** (fuera de 24h), no texto libre (fallaría 131047).
+- **Monitoreo de calidad del número** en Meta/Botmaker (alerta si baja el índice;
+  pausar o reducir cadencia automáticamente).
+- Respetar opt-out y exclusión de cotizaciones ya aceptadas/pagadas (ya existe).
