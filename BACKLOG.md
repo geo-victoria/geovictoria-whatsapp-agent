@@ -327,6 +327,24 @@ escribir fuera de la hora laboral. Me escribió a las 3 AM."*
   pausar o reducir cadencia automáticamente).
 - Respetar opt-out y exclusión de cotizaciones ya aceptadas/pagadas (ya existe).
 
+**Mejora clave — seguimiento CONSENSUADO (preguntar cuándo retomar):**
+Para los casos donde el prospecto **no cierra al toque pero sigue interesado**
+(ej. "lo veo con mi jefe y te aviso", "déjame pensarlo", "esta semana ando
+ocupado"), Vicky debería **preguntar cuándo sería el mejor momento para
+retomar** ("¿te parece que te escriba el lunes?", "¿cuándo te acomoda que
+retome?") y **agendar el próximo seguimiento según esa respuesta**, en vez de
+seguir la cadencia fija a ciegas.
+- Beneficios: el toque llega cuando el cliente lo espera (no se siente
+  hostigamiento), sube la tasa de respuesta y baja el riesgo de reporte de spam.
+- Implementación: capturar la preferencia de fecha/hora que da el cliente
+  (parseo de "el lunes", "en 2 semanas", "después del 15") y setear
+  `followup_next_at` a ESE momento (siempre dentro de horario hábil), pisando el
+  offset por defecto de la cadencia. Si no da una fecha, cae a la cadencia
+  estándar (1h/23h/47h/7d/15d).
+- Se cruza con la señal "lo veo con mi jefe" (decisor involucrado): es justo el
+  caso donde conviene preguntar el momento y, si aplica, ofrecer un resumen para
+  pasarle al jefe.
+
 ---
 
 ## Operativo: cambiar la foto de perfil de WhatsApp de Vicky
