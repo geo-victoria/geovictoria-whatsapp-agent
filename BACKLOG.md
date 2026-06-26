@@ -183,3 +183,57 @@ sola no lo frena.
 cotización" (confirmación de datos del cliente), que es legítimo y NO debe
 gatillar el guard. El guard apunta solo al anuncio de *procesar/revisar el
 descuento*.
+
+---
+
+## Estilo / humanización: mensajes más cortos, sin negritas, sin "¡!" y con cadencia humana
+
+**Estado:** propuesto (feedback sobre el tono de Vicky).
+
+**Síntoma (caso real):** ante un simple *"Hola, quisiera un reloj control"*, Vicky
+responde con un párrafo explicativo + la **lista completa** de métodos de marcaje
+(clave, facial, huella, tarjeta, QR, cédula) + **dos preguntas a la vez**
+(cuántas personas y en cuántos puntos). Se siente largo, "educador" y es
+demasiada info para esa pregunta. Parece capacitación, no conversación.
+
+**Cambios pedidos:**
+
+1. **Respuestas más cortas, no "educadoras".** Responder a lo que se preguntó, sin
+   volcar todo lo que se sabe. Para "quiero un reloj", basta una frase + la
+   pregunta clave; NO listar los 6 métodos de marcaje salvo que lo pregunten.
+   - Tocar la regla del prompt que obliga a enumerar métodos
+     (`prompt.ts` ~línea 560, "REGLA DURA métodos del reloj"): hoy fuerza a NO
+     decir "solo facial", pero se interpreta como listar TODOS. Ajustar para que
+     los métodos se mencionen **solo si el cliente pregunta por el método**, no de
+     entrada.
+   - Evitar 2 preguntas en el mismo mensaje cuando una basta para avanzar.
+
+2. **Quitar negritas.** Nada de `*texto*`/markdown bold en los mensajes. Que el
+   énfasis sea por redacción, no por formato.
+
+3. **Quitar signos de exclamación al inicio de frase.** Nada de "¡Hola!",
+   "¡Perfecto!", "¡Genial!" como apertura. Tono más sobrio y natural (chileno
+   neutro). Saneador determinista posible: strip de `¡` inicial + del `!` de
+   cierre en aperturas tipo saludo/afirmación.
+
+4. **Cadencia humana (latencia).** Introducir una demora antes de responder (y/o
+   simular "escribiendo…") proporcional al largo del mensaje, para que no llegue
+   instantáneo. Hoy la respuesta sale en el mismo timestamp que el mensaje del
+   usuario (se ve robótico). Implementación: delay en el envío por Botmaker
+   (cuidando el lock/inbox y la ventana de 24h).
+
+5. **Faltas de ortografía aleatorias (humanización).** Introducir errores menores
+   ocasionales para que se vea humano.
+   - ⚠️ **Decisión de producto pendiente:** en venta B2B una marca con typos puede
+     leerse como poco profesional o descuidada. Si se hace, debe ser **muy
+     esporádico y leve** (nunca en cifras, %, links, RUT, email ni datos que se
+     persisten), nunca en el primer saludo, y jamás dentro de un bloque
+     `mensajeParaProspecto` de una tool. Evaluar A/B antes de dejarlo fijo.
+
+**Dónde:** estilo general en `app/api/vic-sales-agent-v3/prompt.ts`; saneadores
+deterministas (negritas, "¡!") y latencia/typos en `vic-botmaker-v3/route.ts`
+(donde ya viven `sanitizarVoseo` y `normalizarFormatoWhatsApp`).
+
+**Quick wins (prompt, bajo riesgo):** 1 (acortar), 2 (sin negritas) y 3 (sin "¡!")
+son ajustes de prompt + saneador y se pueden hacer ya. 4 (latencia) y 5 (typos)
+requieren código y, el 5, una decisión de producto.
