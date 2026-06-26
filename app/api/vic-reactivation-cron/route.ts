@@ -223,6 +223,7 @@ export async function GET(req: Request): Promise<Response> {
       !isTestContact(r.contact, testSet) &&
       r.followup_closed_reason !== "opt_out" &&
       r.followup_status !== "activo" &&
+      r.followup_status !== "consensuado" && // tiene su propio toque programado
       (!r.reactivation_at || r.reactivation_at <= gapBefore) &&
       tocaAhora(r),
   )
@@ -240,6 +241,34 @@ export async function GET(req: Request): Promise<Response> {
       .catch(() => [] as string[])
     const okSet = new Set(elegibles)
     cand = cand.filter((r) => okSet.has(r.contact))
+  }
+
+  // ── Seguimiento CONSENSUADO ────────────────────────────────────────────────
+  // Toques ÚNICOS programados a una fecha acordada con el cliente (tool
+  // programar_seguimiento). Se disparan por followup_next_at —no por la cadencia
+  // 47h/7d/15d— y, tras enviarse, cierran el ciclo (un solo toque). Mismo gate de
+  // horario hábil por zona.
+  let consensuado: Row[] = []
+  {
+    const cr = await supa(
+      `vic_v3_conversations?followup_status=eq.consensuado&followup_next_at=lte.${new Date(now).toISOString()}` +
+      `&select=id,contact,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
+      `&order=followup_next_at.asc&limit=100`,
+    )
+    const crows = (cr.ok ? ((await cr.json()) as Row[]) : []).filter(
+      (r) => r.contact && !isTestContact(r.contact, testSet),
+    )
+    if (crows.length) {
+      const elegibles = await supa(`rpc/vic_filter_business_now`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ p_contacts: crows.map((r) => r.contact) }),
+      })
+        .then((r) => (r.ok ? (r.json() as Promise<string[]>) : Promise.resolve([] as string[])))
+        .catch(() => [] as string[])
+      const okSet = new Set(elegibles)
+      consensuado = crows.filter((r) => okSet.has(r.contact))
+    }
   }
 
   // Segmento "cotizacion": tiene formal_quote_id y NO está aceptada/pagada.
@@ -317,7 +346,41 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
-  // Prioriza cotización (lead más caliente) y luego preform.
+  // Toque consensuado: UN solo envío a la fecha acordada. Elige la plantilla por
+  // segmento (tiene cotización formal → quote; si no → preform) y, tras enviar,
+  // CIERRA el ciclo (no se repite). El cliente ya engagueó, así que no exige el
+  // marcador de preform.
+  let enviadosConsensuado = 0
+  async function enviarConsensuadoLista(list: Row[]) {
+    for (const r of list) {
+      if (enviados >= BATCH) break
+      const segmento = r.formal_quote_id ? "cotizacion" : "preform"
+      const template = segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
+      if (!template) continue
+      const ok = await sendBotmakerTemplate(r.contact, template, {}).catch(() => false)
+      if (!ok) continue
+      await supa(`vic_v3_conversations?id=eq.${r.id}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          followup_status: "cerrado",
+          followup_next_at: null,
+          followup_closed_reason: "consensuado_enviado",
+        }),
+      }).catch(() => {})
+      enviados++
+      enviadosConsensuado++
+      console.log(`[reactivation] consensuado(${segmento}) → ${r.contact}`)
+      await appendAssistantV3(
+        r.contact,
+        REACT_CONTEXT_MSG[segmento] ?? REACT_CONTEXT_MSG.preform,
+      ).catch(() => {})
+      if (segmento === "cotizacion") await dispararCorreo(r.formal_quote_id)
+    }
+  }
+
+  // Primero los consensuados (cita acordada), luego la cadencia: cotización y preform.
+  await enviarConsensuadoLista(consensuado)
   if (TPL_QUOTE) await enviar(segCot, TPL_QUOTE, "cotizacion")
   if (TPL_PREFORM) await enviar(segPre, TPL_PREFORM, "preform")
 
@@ -326,7 +389,9 @@ export async function GET(req: Request): Promise<Response> {
     candidatos: cand.length,
     segmento_cotizacion: segCot.length,
     segmento_preform: segPre.length,
+    consensuado: consensuado.length,
     enviados,
+    enviados_consensuado: enviadosConsensuado,
     correos,
   })
 }

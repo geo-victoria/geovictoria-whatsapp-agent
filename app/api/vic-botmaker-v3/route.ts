@@ -54,6 +54,7 @@ import {
   markUserActivity,
   armFollowup,
   closeFollowup,
+  scheduleConsensualFollowup,
   confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
 
@@ -760,6 +761,12 @@ async function processOneTurn(
       const usoCierre = finalToolCalls.some(
         (c) => FOLLOWUP_CLOSING_TOOLS.has(c.name) && c.ok,
       )
+      // Seguimiento CONSENSUADO: el cliente dio una señal explícita de decisión
+      // diferida y acordó cuándo retomar (tool programar_seguimiento). Se apaga
+      // la cadencia automática y se deja UN toque a la fecha acordada.
+      const segConsensuado = finalToolCalls.find(
+        (c) => c.name === "programar_seguimiento" && c.ok,
+      )
       const esSoporte = finalToolCalls.some(
         (c) => FOLLOWUP_SUPPORT_TOOLS.has(c.name) && c.ok,
       )
@@ -782,6 +789,19 @@ async function processOneTurn(
       if (usoOptOut) {
         await closeFollowup(contact, "opt_out")
         console.log(`[v3-followup] opt-out (tool) → ciclo cerrado contact=${contact}`)
+      } else if (segConsensuado) {
+        const cuandoIso = (
+          segConsensuado.output as { cuandoIso?: string } | undefined
+        )?.cuandoIso
+        if (cuandoIso) {
+          await scheduleConsensualFollowup(contact, cuandoIso)
+          console.log(
+            `[v3-followup] consensuado → toque único programado contact=${contact} cuando=${cuandoIso}`,
+          )
+        } else {
+          // Sin fecha válida: no apagamos la cadencia (mejor cae al flujo normal).
+          await armFollowup(contact)
+        }
       } else if (usoCierre) {
         await closeFollowup(contact, "derivado")
       } else if (reply && !esDespedida && esComercial) {

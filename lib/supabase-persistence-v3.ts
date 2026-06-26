@@ -541,6 +541,34 @@ export async function closeFollowup(contact: string, reason: string): Promise<vo
 }
 
 /**
+ * Programa un seguimiento CONSENSUADO: el cliente dio una señal explícita de
+ * decisión diferida ("lo veo con mi jefe", "consúltame el lunes") y acordó un
+ * momento para retomar. Se apaga la cadencia automática (status 'consensuado',
+ * que ni el follow-up de 1h/23h ni la reactivación 47h/7d/15d tocan) y se deja
+ * UN solo toque programado a `cuandoIso`. El gate de horario hábil se aplica al
+ * enviarlo (en el cron de reactivación), así que no hace falta ajustarlo aquí.
+ */
+export async function scheduleConsensualFollowup(
+  contact: string,
+  cuandoIso: string,
+): Promise<void> {
+  if (!contact || !cuandoIso) return
+  const conversationId = await getOrCreateConversationId(contact)
+  if (!conversationId) return
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      followup_status: "consensuado",
+      followup_next_at: cuandoIso,
+      followup_stage: 0,
+      followup_attempts: 0,
+      followup_closed_reason: null,
+    }),
+  })
+}
+
+/**
  * Persiste un toque de re-engagement como mensaje del asistente (para que el
  * próximo turno de Vicky tenga el contexto), SIN tocar silence_anchor_at ni
  * last_user_at (el push no reinicia la cadencia).

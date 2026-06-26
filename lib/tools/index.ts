@@ -81,6 +81,11 @@ import {
   marcarNoContactar,
   type MarcarNoContactarResultado,
 } from "./marcar-no-contactar"
+import {
+  programarSeguimientoSchema,
+  programarSeguimiento,
+  type ProgramarSeguimientoResultado,
+} from "./programar-seguimiento"
 
 export const TOOL_SCHEMAS = [
   cotizarReferencialSchema,
@@ -102,6 +107,7 @@ export const TOOL_SCHEMAS = [
   aplicarSiguienteDescuentoSchema,
   enviarCertificacionSchema,
   marcarNoContactarSchema,
+  programarSeguimientoSchema,
 ] as const
 
 export type ToolResult =
@@ -118,6 +124,7 @@ export type ToolResult =
   | AplicarSiguienteDescuentoResultado
   | EnviarCertificacionResultado
   | MarcarNoContactarResultado
+  | ProgramarSeguimientoResultado
   | { ok: false; error: string }
 
 /**
@@ -165,6 +172,9 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "marcar_no_contactar":
         return marcarNoContactar(input as never)
+
+      case "programar_seguimiento":
+        return programarSeguimiento(input as never)
 
       default:
         return {
