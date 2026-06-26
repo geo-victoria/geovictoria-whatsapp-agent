@@ -326,3 +326,20 @@ escribir fuera de la hora laboral. Me escribió a las 3 AM."*
 - **Monitoreo de calidad del número** en Meta/Botmaker (alerta si baja el índice;
   pausar o reducir cadencia automáticamente).
 - Respetar opt-out y exclusión de cotizaciones ya aceptadas/pagadas (ya existe).
+
+---
+
+## Operativo: cambiar la foto de perfil de WhatsApp de Vicky
+
+**Estado:** pendiente (tarea de configuración, NO de código).
+
+**Qué:** actualizar la **foto de perfil** del número de WhatsApp de Vicky. El
+usuario (Lalo) ya tiene la imagen que se debe usar.
+
+**Dónde se hace (no es el repo):** la foto de perfil de un número WhatsApp
+Business API se cambia en **Botmaker** (configuración del canal) o vía la
+**WhatsApp Business API / Meta Business Manager** (endpoint de business profile).
+No vive en este código.
+
+**Acción:** quien tenga acceso admin a Botmaker/Meta sube la imagen. Requisitos
+típicos: imagen cuadrada (mín. ~640×640), formato JPG/PNG, peso moderado.
