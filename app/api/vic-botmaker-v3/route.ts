@@ -78,6 +78,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// ── Cadencia humana ──────────────────────────────────────────────────────
+// Vicky no responde al instante: antes de enviar el reply mostramos
+// "escribiendo…" y esperamos una demora proporcional al largo del mensaje (con
+// jitter), para que se sienta como una persona y no como un bot. Corre en el
+// procesamiento de fondo (no bloquea la respuesta HTTP). Apagable por env.
+const HUMAN_DELAY_ON =
+  (process.env.VICKY_HUMAN_DELAY || "on").trim().toLowerCase() !== "off"
+const HUMAN_DELAY_MIN_MS = Number(process.env.VICKY_HUMAN_DELAY_MIN_MS || 1200)
+const HUMAN_DELAY_MAX_MS = Number(process.env.VICKY_HUMAN_DELAY_MAX_MS || 6000)
+function humanDelayMs(text: string): number {
+  const raw = 800 + (text?.length || 0) * 25 // ~base + velocidad de tipeo
+  const jitter = 0.85 + Math.random() * 0.3 // ±15% para que no sea idéntico
+  return Math.round(
+    Math.min(HUMAN_DELAY_MAX_MS, Math.max(HUMAN_DELAY_MIN_MS, raw)) * jitter,
+  )
+}
+
 // ── Tipos ─────────────────────────────────────────────────────────────
 type BotmakerRequest = {
   contact?: string
@@ -710,6 +727,12 @@ async function processOneTurn(
 
     // 4. Enviar reply final vía push (solo si hay reply real)
     if (reply) {
+      // Cadencia humana: "escribiendo…" + demora proporcional al largo, para que
+      // no llegue al instante. Best-effort: si falla el typing, igual se envía.
+      if (HUMAN_DELAY_ON) {
+        await sendTypingIndicator(contact, true).catch(() => {})
+        await sleep(humanDelayMs(reply))
+      }
       const sent = await sendBotmakerMessage(contact, reply)
       if (!sent) {
         console.error(
