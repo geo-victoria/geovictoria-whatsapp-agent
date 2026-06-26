@@ -360,6 +360,20 @@ async function processOneTurn(
         reply,
       )
     const ofreceDescuento = ofrecePctDescuento || ofreceRebajaSinPct
+    // El modelo a veces manda SOLO el anuncio de proceso ("permíteme procesar el
+    // descuento…", "déjame confirmarte el porcentaje…", "voy a revisar en el
+    // sistema") SIN un %: ahí ofreceDescuento es false y el guard no entraba, así
+    // que la muletilla pasaba derecho (casos reales 18-jun y 25-jun). La
+    // detectamos en sí para que el guard igual fuerce la tool o cierre directo.
+    // OJO: NO confundir con "déjame confirmar los DATOS antes de generar la
+    // cotización" (confirmación de datos legítima) — por eso exige
+    // descuento/porcentaje/sistema, nunca "datos".
+    const pareceMuletillaDescuento =
+      /perm[ií]teme\s+procesar\s+el\s+descuento/i.test(reply) ||
+      /d[eé]jame\s+(confirmar(te)?|revisar|procesar|chequear)\b[^.]{0,40}\b(descuento|porcentaje|el\s+sistema)\b/i.test(
+        reply,
+      ) ||
+      /voy\s+a\s+revisar\b[^.]{0,30}\b(el\s+sistema|descuento)\b/i.test(reply)
     // generar_link_cotizadora también es un commit legítimo: emite la cotización
     // formal CON el descuento ya aplicado (escalonDescuento), así que si fue
     // exitosa, el % que aparece en el reply NO es una alucinación aunque
@@ -404,7 +418,7 @@ async function processOneTurn(
         (pctEnReply <= committedRecPct || pctEnReply === 50 || pctEnReply === 25)) ||
         (tieneFormal && (pctEnReply <= 20 || pctEnReply === 25 || pctEnReply === 50)))
 
-    if (ofreceDescuento && !realDescuento && !pctYaNegociado) {
+    if ((ofreceDescuento || pareceMuletillaDescuento) && !realDescuento && !pctYaNegociado) {
       const ultimoAsistente = [...history]
         .reverse()
         .find((m) => m.role === "assistant")
@@ -488,10 +502,17 @@ async function processOneTurn(
         reply =
           "Tu cotización ya quedó con el mejor precio que te ofrecí. Si quieres revisarla o ajustar algo, te puedo contactar con un ejecutivo. ¿Cómo prefieres seguir?"
       } else {
+        // Antes aquí se ENVIABA la muletilla ("permíteme procesar el descuento…
+        // ¿te parece?") como holding para el próximo turno. El usuario la marcó
+        // como robótica (suena a bot atascado y agrega una vuelta extra). Como el
+        // reintento forzado de la tool ya falló, NO podemos inventar el %, pero
+        // tampoco mandamos la muletilla: cerramos directo y cálido, sin "procesar
+        // en el sistema" ni "¿te parece?", invitando a seguir.
         console.error(
-          `[v3-bg] ALUCINACIÓN_DESCUENTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+          `[v3-bg] DESCUENTO_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
-        reply = MULETILLA_DESCUENTO
+        reply =
+          "Déjame dejarte el mejor precio posible y te lo confirmo enseguida. Me confirmas que seguimos con esta opción?"
       }
     }
 
@@ -647,6 +668,33 @@ async function processOneTurn(
           `[v3-bg] OPTOUT_DESPEDIDA contact=${contact}: opt-out con reply vacío/error; se usa despedida limpia.`,
         )
         reply = OPTOUT_GOODBYE_MSG
+      }
+    }
+
+    // 2.6e. Derivación EXITOSA + reply vacío/error → confirmación limpia.
+    // Caso real (Pedro, +56968503645): registrar_solicitud_callback SÍ creó el
+    // Lead en Zoho, pero el turno final terminó sin texto y se envió el fallback
+    // genérico de error en vez de confirmar; el cliente quedó pensando que falló
+    // (aunque su lead estaba guardado). Distinto de 2.6c/2.6b (esos cubren la
+    // ALUCINACIÓN: tool NO ejecutada). Aquí la tool SÍ corrió con ok: si el reply
+    // quedó vacío/error, lo reemplazamos por una confirmación clara.
+    const usoCallbackOk = toolCalls.some(
+      (c) => c.name === "registrar_solicitud_callback" && c.ok,
+    )
+    const usoAgendarOk = toolCalls.some((c) => c.name === "agendar_reunion" && c.ok)
+    if (usoCallbackOk || usoAgendarOk) {
+      const replyVacioOError =
+        !reply.trim() ||
+        reply === AGENT_LOOP_EMPTY_FALLBACK ||
+        reply === ERROR_FALLBACK_MSG ||
+        reply === GENERIC_ERROR_MSG
+      if (replyVacioOError) {
+        console.warn(
+          `[v3-bg] DERIVACION_CONFIRMA contact=${contact}: tool de derivación ok con reply vacío/error; confirmación limpia.`,
+        )
+        reply = usoAgendarOk
+          ? "Listo, tu reunión quedó agendada. Te llega la confirmación con el link por correo. Cualquier duda, aquí estoy."
+          : "Listo, dejé registrada tu solicitud. Un ejecutivo te contactará a la brevedad. Algo más en lo que te pueda ayudar mientras tanto?"
       }
     }
 
