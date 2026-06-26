@@ -361,3 +361,39 @@ No vive en este código.
 
 **Acción:** quien tenga acceso admin a Botmaker/Meta sube la imagen. Requisitos
 típicos: imagen cuadrada (mín. ~640×640), formato JPG/PNG, peso moderado.
+
+---
+
+## Tono: voseo verbal chileno (-ái/-ís) NO saneado — "me los pasai?"
+
+**Estado:** debió quedar resuelto con lo de "po"/"cachái", pero falta esta capa.
+
+**Síntoma (caso real):** Vicky escribió *"Me faltan algunos datos para cerrar la
+cotización del arriendo: nombre de la empresa, tu nombre, email, RUT y la comuna.
+**Me los pasai?**"* — *"pasai"* (= pasái) es voseo verbal chileno, demasiado
+informal para el registro de venta. El cliente lo notó ("ese 'me los pasai',
+me sonó raro").
+
+**Causa exacta:** el saneador `lib/voseo-v3.ts` (`sanitizarVoseo`, aplicado en
+`vic-botmaker-v3/route.ts` y `vic-followup-cron/route.ts`) cubre:
+- voseo **argentino**: tenés→tienes, podés→puedes, querés→quieres, sabés, hacés,
+  recordá, mirá, fijate, avisame, contame, disculpá, dale.
+- modismos: po, cachái, al tiro/altiro.
+
+PERO **NO cubre el voseo verbal chileno con terminación `-ái/-ís/-oi`**, que es
+productivo en casi cualquier verbo: pas**ái**, tom**ái**, est**ái**/est**ai**,
+v**ai**, ten**ís**, quer**ís**, pod**ís**, hac**ís**, dec**ís**, s**oi**, etc.
+Por eso "pasai" pasa derecho.
+
+**Fix:**
+1. Extender `VOSEO_MAP` con las formas chilenas más comunes mapeadas a tuteo
+   (pasái→pasas, tomái→tomas, estái→estás, vai→vas, tenís→tienes, querís→quieres,
+   podís→puedes, hacís→haces, decís→dices, soi→eres, andái→andas, marcái→marcas…).
+2. ⚠️ **Cuidado con falsos positivos:** una regex genérica `-ai$`/`-is$` rompería
+   palabras legítimas ("país", "seis", "análisis", "crisis", "vais" no aplica en
+   CL). Por eso va **lista curada de verbos** con límites Unicode (`\p{L}`), no un
+   patrón ciego.
+3. Reforzar en el prompt: tuteo verbal explícito, prohibir terminaciones -ái/-ís.
+
+**Nota:** es la misma capa donde ya viven "po"/"cachái"; es ampliar el mapa, no
+una arquitectura nueva. Bajo riesgo si se usa lista curada.
