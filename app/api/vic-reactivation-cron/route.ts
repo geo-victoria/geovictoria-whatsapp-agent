@@ -34,11 +34,23 @@ const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 // Plantillas HSM aprobadas (nombre/ruleNameOrId en Botmaker). Vacío = segmento off.
 const TPL_PREFORM = (process.env.REACTIVATION_TEMPLATE_PREFORM || "").trim()
 const TPL_QUOTE = (process.env.REACTIVATION_TEMPLATE_QUOTE || "").trim()
-// Parámetros de la ventana/tope (todo configurable por env).
-const COLD_AFTER_H = Number(process.env.REACTIVATION_COLD_AFTER_HOURS || 48)
-const MAX_AGE_D = Number(process.env.REACTIVATION_MAX_AGE_DAYS || 14)
-const MAX_REACT = Number(process.env.REACTIVATION_MAX || 2)
-const MIN_GAP_H = Number(process.env.REACTIVATION_MIN_GAP_HOURS || 72)
+// Cadencia de los toques largos (HSM), en HORAS desde el último mensaje del
+// cliente (silence anchor): 47h, 7 días (168h), 15 días (360h). El toque N se
+// envía cuando reactivation_count == N-1 y ya transcurrió OFFSETS_H[N-1].
+// Configurable por env (REACTIVATION_OFFSETS_H="47,168,360").
+const OFFSETS_H = (process.env.REACTIVATION_OFFSETS_H || "47,168,360")
+  .split(",")
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n) && n > 0)
+// Primer toque = primer offset; tope de toques = cantidad de offsets.
+const COLD_AFTER_H = OFFSETS_H[0] ?? 47
+const MAX_REACT = OFFSETS_H.length || 3
+// Ventana máxima: el último offset (en días) + 1 día de margen.
+const MAX_AGE_D = Number(
+  process.env.REACTIVATION_MAX_AGE_DAYS || Math.ceil((OFFSETS_H[OFFSETS_H.length - 1] || 360) / 24) + 1,
+)
+// Safety anti doble-envío (la cadencia real la marcan los offsets).
+const MIN_GAP_H = Number(process.env.REACTIVATION_MIN_GAP_HOURS || 24)
 const BATCH = Number(process.env.REACTIVATION_BATCH || 25)
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 
@@ -66,6 +78,7 @@ type Row = {
   formal_quote_id: string | null
   reactivation_count: number | null
   reactivation_at: string | null
+  last_user_at: string | null
   followup_closed_reason: string | null
   followup_status: string | null
 }
@@ -189,20 +202,45 @@ export async function GET(req: Request): Promise<Response> {
   const res = await supa(
     `vic_v3_conversations?last_user_at=lte.${coldBefore}&last_user_at=gte.${maxAgeAfter}` +
     `&reactivation_count=lt.${MAX_REACT}` +
-    `&select=id,contact,formal_quote_id,reactivation_count,reactivation_at,followup_closed_reason,followup_status` +
+    `&select=id,contact,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
     `&order=last_user_at.asc&limit=400`,
   )
   const rows = (res.ok ? await res.json() : []) as Row[]
   // Números internos de prueba (mismos que excluye el embudo: VIC_FUNNEL_TEST_CONTACTS).
   const testSet = testContactSet()
-  const cand = rows.filter(
+  // ¿Le toca un toque AHORA? El toque N (reactivation_count = N-1) recién aplica
+  // cuando ya pasaron OFFSETS_H[N-1] horas desde el último mensaje del cliente
+  // (47h → 7d → 15d). Así la cadencia se mide desde el silencio, no por gap plano.
+  const tocaAhora = (r: Row): boolean => {
+    const c = r.reactivation_count || 0
+    if (c >= OFFSETS_H.length || !r.last_user_at) return false
+    const hrs = (now - new Date(r.last_user_at).getTime()) / 3600e3
+    return hrs >= OFFSETS_H[c]
+  }
+  let cand = rows.filter(
     (r) =>
       r.contact &&
       !isTestContact(r.contact, testSet) &&
       r.followup_closed_reason !== "opt_out" &&
       r.followup_status !== "activo" &&
-      (!r.reactivation_at || r.reactivation_at <= gapBefore),
+      (!r.reactivation_at || r.reactivation_at <= gapBefore) &&
+      tocaAhora(r),
   )
+
+  // Gate de horario hábil en la ZONA DEL CONTACTO (mismo helper que el follow-up,
+  // vic_is_business_now: Lun-Sáb 9-19 local, sin feriado del país). Una sola
+  // llamada al RPC con todos los candidatos; deja solo los que están en horario.
+  if (cand.length) {
+    const elegibles = await supa(`rpc/vic_filter_business_now`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ p_contacts: cand.map((r) => r.contact) }),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<string[]>) : Promise.resolve([] as string[])))
+      .catch(() => [] as string[])
+    const okSet = new Set(elegibles)
+    cand = cand.filter((r) => okSet.has(r.contact))
+  }
 
   // Segmento "cotizacion": tiene formal_quote_id y NO está aceptada/pagada.
   let segCot: Row[] = []
