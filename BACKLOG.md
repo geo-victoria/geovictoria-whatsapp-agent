@@ -397,3 +397,44 @@ Por eso "pasai" pasa derecho.
 
 **Nota:** es la misma capa donde ya viven "po"/"cachái"; es ampliar el mapa, no
 una arquitectura nueva. Bajo riesgo si se usa lista curada.
+
+---
+
+## Dashboard: tasa de cierre Vicky vs ejecutivos (por tramo + revenue)
+
+**Estado:** propuesto (para backlog).
+
+**Qué se quiere:** un panel que compare el desempeño de cierre de **Vicky** contra
+los **ejecutivos humanos**, para medir el aporte real de Vicky y dónde gana/pierde:
+- **Tasa de cierre** (cotizaciones aceptadas / enviadas) de Vicky vs ejecutivos.
+- **Separado por tramo** de tamaño: 1-20, 21-50, y los tramos mayores que manejan
+  los ejecutivos (51-100, 100+).
+- **Revenue:** no solo conteo — también el monto cerrado (UF/CLP), recurrente y/o
+  total, por cada lado y tramo.
+
+**Fuentes de datos (Zoho, módulo `Cotizaciones_GeoVictoria`):**
+- **Quién creó la cotización:** `Created_By` = "Vicky GeoVictoria"
+  (id `3525045000484500876`) → Vicky; cualquier otro usuario → ejecutivo.
+- **Cierre:** `Estado_Cotizacion` = "Aceptada" (numerador) sobre el total enviado
+  (denominador a definir: Enviada+Aceptada, o incluir Rechazada/Expirada).
+- **Tramo (cantidad de usuarios):** vive en el Deal asociado
+  (`N_Empleados_que_marcan`), NO en la cabecera de la cotización → hay que cruzar
+  cada cotización con su Deal.
+- **Revenue:** `Total_Recurrente_UF` (mensual), `Total_No_Recurrente_UF` / 
+  `Total_Con_IVA_UF` (pago único / total). Definir qué reportar (ej. recurrente
+  anualizado vs total del primer pago).
+
+**Consideraciones:**
+- **Excluir pruebas/internas** (mismo criterio ya usado: emails `@geovictoria`,
+  números de prueba, "PRUEBA"/"Prueba" en el nombre). Idealmente apoyado en el tag
+  "Prueba/Interno" que también está en backlog.
+- **Atribución:** una cotización puede pasar de Vicky a un ejecutivo (derivación) —
+  definir a quién se adjudica el cierre (quién creó vs quién cerró).
+- **Período configurable** (semana/mes) y tendencia en el tiempo.
+- Puede vivir como página nueva del dashboard de Vicky (junto a `/dashboard`,
+  `/meetings`, `/support`) y/o alimentarse del endpoint de funnel ya existente
+  (`/api/vic-funnel`).
+
+**Por qué importa:** pone número al ROI de Vicky (¿cierra mejor o peor que un
+humano? ¿en qué tramos? ¿cuánto revenue mueve?) y ayuda a decidir dónde conviene
+que Vicky cotice sola vs derivar a un ejecutivo.
