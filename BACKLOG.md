@@ -137,3 +137,49 @@ las T&C (líneas ~1308 y ~1430: "equipos, instalacion y servicios iniciales").
 
 **Recomendación:** A (dinámica) para precisión; B como parche inmediato si urge.
 Alinear también el texto de las T&C para que no liste instalación cuando no aplica.
+
+---
+
+## UX: muletilla "déjame revisar en el sistema" ANTES de dar el siguiente descuento
+
+**Estado:** detectado en producción; la regla del prompt NO basta (el modelo la
+incumple igual).
+
+**Síntoma:** cuando el cliente pide avanzar al siguiente escalón de descuento,
+Vicky a veces manda un mensaje de relleno/anuncio ANTES de entregarlo, del estilo:
+*"Permíteme procesar el descuento en el sistema para confirmarte el porcentaje
+exacto que puedo aplicarte. ¿Te parece?"* — y recién en el turno siguiente da el
+número. Suena a robot atascado y, peor, el "¿Te parece?" obliga al cliente a
+confirmar dos veces, agregando una vuelta extra justo en el momento más sensible
+de la negociación (donde más se fuga).
+
+**Por qué importa:** la negociación de precio es el punto de conversión más
+delicado. Un anuncio de proceso + pregunta de confirmación rompe el ritmo, da
+sensación de demora y resta credibilidad ("¿por qué tiene que ir a revisar algo
+que debería saber al toque?").
+
+**Evidencia de que el prompt no alcanza:** ya existe una regla anti-muletilla en
+el prompt (`app/api/vic-sales-agent-v3/prompt.ts` ~línea 531, agregada el 17-jun
+en `9dbf84c`): *"PROHIBIDO decir cosas como 'permíteme procesar el descuento en
+el sistema'..."*. Pese a eso, el modelo emitió la frase **textual** varias veces
+DESPUÉS de esa fecha (18-jun ×4 y 25-jun en `vic_v3_messages`). La instrucción
+sola no lo frena.
+
+**Solución propuesta (guardrail determinista, no solo prompt):**
+- Post-procesar el `reply` en `vic-botmaker-v3/route.ts` (mismo patrón que los
+  guards de opt-out y de alucinación de callback): si el turno detecta un
+  **anuncio de proceso de descuento** (regex sobre frases tipo "permíteme
+  procesar el descuento", "déjame confirmarte el porcentaje", "voy a revisar en
+  el sistema", "¿te parece?") **sin** un `mensajeParaProspecto` real (la respuesta
+  no trae % ni montos de una tool llamada este turno), entonces **reintentar el
+  loop forzando** la tool de descuento que corresponda
+  (`consultar_descuento_referencial` / `consultar_siguiente_descuento`) y
+  responder DIRECTO con su `mensajeParaProspecto`, sin el preámbulo.
+- Alternativa más liviana: si la respuesta es solo el preámbulo (sin número),
+  **suprimirlo** y no enviar nada hasta tener el `mensajeParaProspecto` del mismo
+  turno.
+
+**Nota:** distinguir del "Déjame confirmar los datos antes de generar la
+cotización" (confirmación de datos del cliente), que es legítimo y NO debe
+gatillar el guard. El guard apunta solo al anuncio de *procesar/revisar el
+descuento*.
