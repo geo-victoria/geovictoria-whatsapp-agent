@@ -101,7 +101,7 @@ async function handle(req: Request): Promise<Response> {
     result = await send({ to, type: "text", text: { body: texto } })
   }
 
-  return NextResponse.json({ ok: result.ok, via, to, evento: estado, ...result }, { status: result.ok ? 200 : 502 })
+  return NextResponse.json({ via, to, evento: estado, ...result }, { status: result.ok ? 200 : 502 })
 }
 
 export async function GET(req: Request): Promise<Response> {
