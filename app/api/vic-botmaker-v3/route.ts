@@ -48,7 +48,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
-import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
+import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import {
   markUserActivity,
@@ -720,6 +720,14 @@ async function processOneTurn(
     // las reglas del prompt): anti-voseo (incl. voseo chileno -ái/-ís), quitar
     // negritas y quitar signos de apertura ¡/¿.
     reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(reply)))
+
+    // 2.8. Blindaje del contacto comercial: si Vicky filtró el WhatsApp de
+    // Anderson (ejecutivo COMERCIAL) en un caso que NO es traspaso de cotización
+    // (sin cotización formal ni link generado este turno), lo reemplaza por el
+    // WhatsApp REAL de soporte. Evita que clientes de soporte le escriban a
+    // Anderson (casuística real 27-jun).
+    const permitidoComercialAnderson = tieneFormal || realCotizacion
+    reply = blindarContactoComercial(reply, permitidoComercialAnderson)
 
     // 3. Persistir turno en Supabase
     await appendTurnV3(contact, message, reply).catch((err) => {

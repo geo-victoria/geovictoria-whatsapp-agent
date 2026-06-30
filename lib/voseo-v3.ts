@@ -89,3 +89,34 @@ export function quitarSignosApertura(texto: string): string {
   if (!texto) return texto
   return texto.replace(/[¡¿]/g, "")
 }
+
+/**
+ * Blinda el contacto del ejecutivo COMERCIAL (Anderson Díaz) para que NUNCA se
+ * filtre en casos de SOPORTE.
+ *
+ * Casuística real (2 casos, 27-jun): a clientes que pedían soporte ("no me abre
+ * la app", "no veo una de mis empresas"), Vicky entregó el WhatsApp de Anderson
+ * (+56 9 3937 2058) rotulado como "equipo de soporte". Razón: ese número vive en
+ * el prompt para el traspaso comercial post-cotización, y el modelo lo tomaba de
+ * memoria cuando el cliente insistía pidiendo un contacto — el número REAL de
+ * soporte NO está en el prompt, así que era el único teléfono que tenía a mano.
+ *
+ * Señal limpia: el número de Anderson SOLO es legítimo cuando hubo una cotización
+ * (es el cierre del flujo comercial). Si no hubo cotización, cualquier aparición
+ * es una fuga: la reemplazamos por el WhatsApp REAL de soporte, que es el canal
+ * correcto para esos casos. Determinista, se aplica al texto de salida.
+ */
+// Teléfono de Anderson en sus formatos típicos de salida (con/sin +56, con/sin
+// el 9). El núcleo distintivo es "3937 ... 2058".
+const ANDERSON_TEL_RE = /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3937[\s).-]*2058/gi
+// Fuente de verdad del canal de soporte: MENSAJE_ESCALAMIENTO_HUMANO en
+// lib/tools/consultar-agente-soporte.ts. Si cambia allá, actualizar aquí.
+const SOPORTE_WHATSAPP = "+56 9 4401 3873"
+
+export function blindarContactoComercial(
+  texto: string,
+  permitidoComercial: boolean,
+): string {
+  if (!texto || permitidoComercial) return texto
+  return texto.replace(ANDERSON_TEL_RE, SOPORTE_WHATSAPP)
+}
