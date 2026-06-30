@@ -438,3 +438,62 @@ los **ejecutivos humanos**, para medir el aporte real de Vicky y dónde gana/pie
 **Por qué importa:** pone número al ROI de Vicky (¿cierra mejor o peor que un
 humano? ¿en qué tramos? ¿cuánto revenue mueve?) y ayuda a decidir dónde conviene
 que Vicky cotice sola vs derivar a un ejecutivo.
+
+---
+
+## Automatizar el post-venta completo (hoy manual de Anderson) en Zoho
+
+**Estado:** propuesto (para backlog)
+**Aplica a:** toda cotización que se paga (tarjeta o transferencia).
+
+**Qué hace hoy Anderson a mano** (al confirmarse un pago):
+1. **Revisar el pago** — verificar que la plata efectivamente entró (tarjeta vía
+   MercadoPago, o transferencia con comprobante enviado al ejecutivo).
+2. **Crear la Nota de Venta** en Zoho.
+3. **Crear la Solicitud de Administración y Finanzas** en Zoho.
+4. **Crear el Ticket de Servicio Técnico** (para la instalación/implementación) en
+   Zoho.
+
+El objetivo es **eliminar todas esas manualidades**: que al confirmarse el pago se
+disparen los 4 pasos solos.
+
+**Punto de enganche (ya existe):**
+- El pago con **tarjeta** ya es automático: webhook MercadoPago → `post-payment-finalize`.
+  Ese mismo punto es donde hay que colgar la creación automática de los registros
+  de Zoho (idempotente, una sola vez por cotización pagada).
+- El pago por **transferencia** hoy NO se confirma solo (MercadoPago Chile no tiene
+  transferencia confirmada — ver ítem aparte). Para cubrir el 100% hace falta
+  primero resolver la **verificación automática de la transferencia**
+  (Fintoc/Khipu, o conciliación bancaria), de modo que también caiga en
+  `post-payment-finalize` y dispare el mismo post-venta.
+
+**Alcance técnico a definir (Zoho):**
+- **Nota de Venta:** ¿módulo nativo (Sales Orders / `Notas_de_Venta` custom?),
+  qué campos se copian desde la cotización (cliente, ítems, montos, IVA), y la
+  relación con el Deal/Cotización de origen.
+- **Solicitud de Administración y Finanzas:** identificar el módulo/proceso exacto
+  (¿Blueprint? ¿módulo custom? ¿asignación a un usuario/cola de Finanzas?) y qué
+  gatilla la facturación.
+- **Ticket de Servicio Técnico:** módulo de tickets (¿Zoho Desk o un custom en
+  CRM?), datos de la instalación (dirección, zona RM/regiones, N° de relojes,
+  tipo de validación), y a qué cola/técnico se asigna.
+- **Idempotencia:** clave por cotización pagada para no duplicar los 3 registros si
+  el webhook reintenta.
+- **Orquestación:** definir si se hace desde el backend del cotizador
+  (`post-payment-finalize` extendido) o con un **Workflow/Function de Zoho** que
+  escuche el cambio de la cotización a "Pagada"/"Aceptada+pagada". Probablemente
+  conviene un solo orquestador para no partir la lógica.
+
+**Bloqueantes / dependencias:**
+- Requiere mapear bien cada módulo de Zoho y sus campos obligatorios (relevamiento
+  con Anderson: qué llena hoy a mano en cada uno).
+- Depende de tener un **estado "Pagada" confiable** en la cotización — hoy el
+  picklist `Estado_Cotizacion` no tiene "Pagada" (Borrador/Enviada/Aceptada/
+  Rechazada/Expirada); hay que definir cómo se marca el pago confirmado (campo
+  nuevo, o un estado/tag adicional) para que sea el trigger.
+- Para transferencias, depende del ítem de **verificación automática de pago**.
+
+**Por qué importa:** elimina trabajo manual repetitivo y propenso a error en cada
+venta, acelera el inicio de la implementación (el ticket técnico nace solo) y deja
+trazabilidad completa pago → nota de venta → finanzas → servicio técnico sin pasos
+humanos intermedios.
