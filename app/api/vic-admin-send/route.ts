@@ -22,6 +22,28 @@ export const maxDuration = 30
 
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 
+// Envío por la Cloud API de Meta directo (línea WHATSAPP_PHONE_NUMBER_ID), para
+// la línea registrada directamente en Meta (distinta de la de Botmaker que usa
+// el agente conversacional). Mismo requisito de ventana de 24h para texto libre.
+async function sendCloudApi(
+  to: string,
+  text: string,
+): Promise<{ ok: boolean; status?: number; response?: unknown; error?: string }> {
+  const accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || "").trim()
+  const phoneNumberId = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim()
+  if (!accessToken || !phoneNumberId) {
+    return { ok: false, error: "WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID no configurados" }
+  }
+  const res = await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: text } }),
+    cache: "no-store",
+  })
+  const response = await res.json().catch(() => ({}))
+  return { ok: res.ok, status: res.status, response }
+}
+
 async function authorized(req: Request): Promise<boolean> {
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
   if (xcron) {
@@ -41,20 +63,26 @@ export async function POST(req: Request): Promise<Response> {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
-  let body: { contact?: string; text?: string } = {}
+  let body: { contact?: string; text?: string; via?: string } = {}
   try {
-    body = (await req.json()) as { contact?: string; text?: string }
+    body = (await req.json()) as { contact?: string; text?: string; via?: string }
   } catch {
     return NextResponse.json({ ok: false, error: "body JSON inválido" }, { status: 400 })
   }
   const contact = (body.contact || "").trim()
   const text = (body.text || "").trim()
+  // via=cloud → línea de Meta directa (Cloud API). Por defecto, Botmaker (agente).
+  const via = (body.via || new URL(req.url).searchParams.get("via") || "botmaker").trim().toLowerCase()
   if (!contact || !text) {
     return NextResponse.json({ ok: false, error: "contact y text requeridos" }, { status: 400 })
+  }
+  if (via === "cloud" || via === "meta") {
+    const result = await sendCloudApi(contact.replace(/\D/g, ""), text)
+    return NextResponse.json({ via: "cloud", contact, ...result }, { status: result.ok ? 200 : 502 })
   }
   const ok = await sendBotmakerMessage(contact, text).catch(() => false)
   if (ok) {
     await appendAssistantV3(contact, text).catch(() => {})
   }
-  return NextResponse.json({ ok, contact })
+  return NextResponse.json({ ok, via: "botmaker", contact })
 }
