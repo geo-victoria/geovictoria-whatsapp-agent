@@ -497,3 +497,73 @@ disparen los 4 pasos solos.
 venta, acelera el inicio de la implementación (el ticket técnico nace solo) y deja
 trazabilidad completa pago → nota de venta → finanzas → servicio técnico sin pasos
 humanos intermedios.
+
+---
+
+## Re-engagement por CORREO (canal complementario al WhatsApp)
+
+**Estado:** propuesto (para backlog)
+**Aplica a:** leads tibios fuera de la ventana de 24h de WhatsApp —
+  1. **Preform mostrado** (vio precio, no dejó datos / no avanzó).
+  2. **Cotización enviada** (recibió link + PDF, no aceptó/pagó).
+
+**Qué se quiere:**
+- Sumar el **correo** como canal de reactivación, en paralelo (o como respaldo)
+  al toque por WhatsApp. Ventaja clave: el correo **NO depende de plantilla HSM
+  ni de la ventana de 24h** — se puede enviar en cualquier momento, con el
+  **último precio** cotizado y un CTA para retomar/aceptar.
+- Idealmente encadenado a la misma cadencia de reactivación (47h / 7d / 15d) por
+  segmento, decidiendo por lead si va WhatsApp, correo, o ambos.
+
+**Infra que YA existe (aprovechar):**
+- Endpoint en el cotizador `api/quote-acceptance/send-reactivation-email` (arma
+  el correo con CTA de aceptación online + PDF adjunto; se auto-gatea y filtra
+  internos/prueba).
+- Flag `REACTIVATION_EMAIL_ENABLED` + `dispararCorreo()` en `vic-reactivation-cron`
+  (hoy solo se llama en el segmento "cotización"). Falta: extenderlo al segmento
+  "preform", y/o correr el correo aunque el WhatsApp HSM esté apagado.
+
+**A definir:**
+- Fuente del "último precio" para el preform (el estimado vive en la conversación,
+  no siempre en Zoho) vs. cotización formal (sí está en Zoho/cotizador).
+- Plantilla/copy del correo por segmento, y el CTA (link de aceptación con token,
+  ligado al ítem de "auto-descuento por clic" ya en backlog).
+- Frecuencia y tope para no spamear; opt-out.
+- Decisión de canal por lead (solo correo / solo WhatsApp / ambos).
+
+**Por qué importa:** el correo destraba el reenganche multi-día SIN depender de
+plantillas HSM aprobadas (el bloqueante actual del WhatsApp fuera de 24h). Es el
+camino más rápido para reactivar los ~63% de preforms que hoy se fugan.
+
+---
+
+## Reactivación por LLAMADA (voz) — evaluar Dapta o Botmaker
+
+**Estado:** exploración temprana (para backlog)
+**Aplica a:** leads de mayor valor o que no responden por texto (WhatsApp/correo):
+preforms tibios, cotizaciones enviadas sin avanzar, no-shows de reunión.
+
+**Qué se quiere:**
+- Sumar un **canal de voz** (llamada saliente automatizada con agente IA) para
+  reenganchar cuando el texto no funciona. Ej.: a la hora 48 tras un preform sin
+  respuesta, una llamada breve que retome el interés y ofrezca agendar/derivar.
+
+**Proveedores a evaluar:**
+- **Dapta** — agentes de voz IA; evaluar integración, idioma español chileno,
+  calidad de la voz, y conexión con el flujo de Vicky (pasar contexto del lead).
+- **Botmaker** — ya es el BSP de WhatsApp de Vicky (línea +56 9 6730 8227);
+  evaluar si su capacidad de voz/telefonía permite reusar la misma plataforma y
+  el mismo contexto de conversación (menos integración nueva).
+
+**A definir:**
+- Caso de uso concreto y disparador (¿hora 48 del preform? ¿no-show? ¿lead
+  caliente que pidió que lo llamen?).
+- Guion/objetivo de la llamada (retomar, agendar, derivar a ejecutivo) y traspaso
+  a humano si engancha.
+- Cumplimiento (horario hábil por zona, consentimiento, no molestar).
+- Costos por minuto/llamada y comparación Dapta vs. Botmaker vs. otros.
+- Cómo pasa el contexto del lead (empresa, precio cotizado, etapa) al agente de voz.
+
+**Por qué importa:** la voz tiene tasa de respuesta muy superior al texto para
+leads fríos y cierra el ciclo omnicanal (WhatsApp → correo → llamada) sin sumar
+carga manual al equipo comercial.
