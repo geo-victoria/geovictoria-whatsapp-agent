@@ -543,17 +543,34 @@ camino más rápido para reactivar los ~63% de preforms que hoy se fugan.
 **Aplica a:** leads de mayor valor o que no responden por texto (WhatsApp/correo):
 preforms tibios, cotizaciones enviadas sin avanzar, no-shows de reunión.
 
-**Qué se quiere:**
-- Sumar un **canal de voz** (llamada saliente automatizada con agente IA) para
-  reenganchar cuando el texto no funciona. Ej.: a la hora 48 tras un preform sin
-  respuesta, una llamada breve que retome el interés y ofrezca agendar/derivar.
+**Qué se quiere:** sumar un **canal de voz** (agente IA) para reenganchar cuando el
+texto no funciona. Dos variantes, no excluyentes:
+- **(A) Callback consentido:** Vicky ofrece en el chat "¿te llamo para verlo por
+  teléfono?"; el cliente dice que sí y ESO gatilla la llamada (cero fricción, con
+  consentimiento; sin problemas de horario/no-molestar). La más humana.
+- **(B) Llamada de reactivación proactiva:** toque de voz saliente a un lead que se
+  enfrió (ej. hora 48 del preform, cotización sin avanzar, no-show).
+
+**Guion / propósito de la llamada (consultivo, NO cobrador):**
+- Abrir destrabando: "¿hay algo que te falte para avanzar? ¿alguna duda por
+  resolver?".
+- Recordar que la cotización ya está lista: "tienes la cotización en tu WhatsApp y
+  la puedes aceptar cuando quieras".
+- Si aparece una objeción → resolverla, o derivar/agendar con un humano.
+- Es el MISMO enfoque consultivo que ya aplicamos al nudge de WhatsApp: la voz es
+  el mismo mensaje por otro canal.
 
 **Proveedores a evaluar:**
-- **Dapta** — agentes de voz IA; evaluar integración, idioma español chileno,
-  calidad de la voz, y conexión con el flujo de Vicky (pasar contexto del lead).
-- **Botmaker** — ya es el BSP de WhatsApp de Vicky (línea +56 9 6730 8227);
-  evaluar si su capacidad de voz/telefonía permite reusar la misma plataforma y
-  el mismo contexto de conversación (menos integración nueva).
+- **Botmaker** — ya es el BSP de WhatsApp de Vicky (línea +56 9 6730 8227). SÍ tiene
+  voz: producto **Callbots** (agentes de voz por teléfono y por **WhatsApp Calling**,
+  con soporte de llamada saliente / "Llamada saliente desde WhatsApp"). Ventaja:
+  reusar plataforma, token y contexto del lead. **BLOQUEANTE A CONFIRMAR:** si
+  Callbots expone un **endpoint/API para DISPARAR la llamada saliente** desde el
+  flujo de Vicky — no está documentado públicamente (probable que sea vía el
+  `intent` de `go.botmaker.com` que ya usamos para plantillas; confirmar con
+  soporte de Botmaker).
+- **Dapta** — agentes de voz IA; evaluar integración, español chileno, calidad de
+  voz y cómo pasar el contexto del lead. Alternativa si Botmaker no expone el disparo.
 
 **A definir:**
 - Caso de uso concreto y disparador (¿hora 48 del preform? ¿no-show? ¿lead
