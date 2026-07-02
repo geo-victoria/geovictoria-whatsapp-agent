@@ -111,7 +111,7 @@ async function generarNudge(
     "Si la conversación recién partía y casi no hay contexto (solo un saludo o una pregunta suelta), usa un toque breve y humano tipo '¿Todo bien? Te perdí 😅' o '¿Sigues ahí?' — NO inventes un tema que no existió. " +
     instruccionDeTono(stage) +
     " REGLAS DURAS: español chileno con tuteo (tú/tienes/puedes; JAMÁS vos/tenés/podés). " +
-    "PROHIBIDO: mencionar precios, montos, porcentajes, descuentos, UF o links; inventar información nueva; usar más de un emoji; dirigirte al cliente por un nombre que NO aparezca dicho por él en la conversación (y JAMÁS lo llames 'Vicky' — Vicky eres tú). SÍ puedes recordarle el paso que quedó pendiente (por ejemplo, los datos que faltaban para emitir la cotización). " +
+    "PROHIBIDO: mencionar precios, montos, porcentajes, descuentos, UF o links; inventar información nueva; usar más de un emoji; dirigirte al cliente por un nombre que NO aparezca dicho por él en la conversación (y JAMÁS lo llames 'Vicky' — Vicky eres tú). ENFOQUE CONSULTIVO, NO COBRADOR: en vez de EXIGIR los datos que faltaban, prioriza una pregunta de baja presión que invite al cliente a decir qué lo frena o qué duda tiene ('te quedó alguna duda?', 'hay algo que te falte para avanzar?'). Si en el historial YA le enviaste la cotización formal, además puedes recordarle suave que su cotización está en este mismo WhatsApp y que puede aceptarla cuando quiera —SIN repetir el link ni el monto—. Si solo hubo un estimado/preform (aún sin cotización formal), NO digas eso: solo la pregunta consultiva. El objetivo es que RESPONDA y saque su objeción, no presionarlo con el trámite. " +
     "Devuelve SOLO el texto del mensaje, sin comillas ni explicación."
 
   const response = await client.messages.create({
