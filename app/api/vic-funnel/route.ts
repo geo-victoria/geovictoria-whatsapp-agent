@@ -15,12 +15,41 @@
  */
 
 import { isTestContact } from "@/lib/funnel-analysis"
+import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
+const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+const VICKY_CREATOR_ID = (process.env.VICKY_ZOHO_CREATOR_ID || "3525045000484500876").trim()
+const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+
+// Cotizaciones formales creadas por Vicky en Zoho — fuente de verdad del CIERRE
+// (aceptadas/pagadas). Best-effort: si Zoho no responde, la página igual carga y
+// la sección de tasa de cierre indica que Zoho no está disponible. Se cuentan
+// client-side (son decenas, no miles) para no depender de count() de COQL.
+async function fetchCierreZoho(): Promise<{ total: number; aceptadas: number } | null> {
+  try {
+    const token = await getZohoAccessToken()
+    const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        select_query: `select id, Estado_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = (await res.json().catch(() => null)) as { data?: Array<{ Estado_Cotizacion?: string }> } | null
+    const quotes = data?.data || []
+    const aceptadas = quotes.filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")).length
+    return { total: quotes.length, aceptadas }
+  } catch {
+    return null
+  }
+}
 
 // Hallazgos cualitativos curados (editables a mano — pídeme actualizarlos).
 const CURATED_FINDINGS: Array<{ titulo: string; detalle: string }> = [
@@ -166,8 +195,10 @@ export async function GET(req: Request): Promise<Response> {
   if (conv) return renderConversation(conv, key)
 
   let rows: Row[]
+  let cierre: { total: number; aceptadas: number } | null = null
   try {
-    const [allRows, hard] = await Promise.all([fetchAnalysis(), fetchHardSignals()])
+    const [allRows, hard, cierreZoho] = await Promise.all([fetchAnalysis(), fetchHardSignals(), fetchCierreZoho()])
+    cierre = cierreZoho
     rows = allRows.filter((r) => !isTestContact(r.contact))
     // Hechos deterministas mandan sobre el LLM: cotización formal enviada y
     // reunión agendada se imponen aunque el modelo no las haya detectado.
@@ -356,6 +387,28 @@ export async function GET(req: Request): Promise<Response> {
     ${kpiCard("Cotización enviada", cEnviada, col.best)}
     ${kpiCard("Abandonado", cAbandonado, col.bad)}
   </div>
+
+  <div class="kgroup">Tasa de cierre — en vivo (preforms: análisis · cotizaciones/aceptadas: Zoho)</div>
+  ${(() => {
+    const vieronPrecio = cPreform + cEnviada
+    const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}%` : ""
+    if (!cierre) {
+      return `<div class="kpis">
+    ${kpiCard("Vieron precio", vieronPrecio, col.com)}
+    ${kpiCard("→ Cotización formal", cEnviada, col.best, pasoPreform)}
+  </div>
+  <div class="sub" style="margin:-2px 0 10px">Zoho no disponible en esta carga — recarga para ver aceptadas y cierre.</div>`
+    }
+    const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
+    const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
+    return `<div class="kpis">
+    ${kpiCard("Vieron precio", vieronPrecio, col.com)}
+    ${kpiCard("→ Cotización formal", cEnviada, col.best, pasoPreform)}
+    ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
+    ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
+    ${kpiCard("Cierre end-to-end (%)", endToEnd, col.best, "vio precio → venta")}
+  </div>`
+  })()}
 
   <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div>
     <div class="sub" style="margin:8px 0 0">Flujo cotización (${cotizacion}): <b>${cPreform}</b> preform mostrado · <b>${cEnviada}</b> cotización enviada · <b>${cAbandonado}</b> abandonado.</div>

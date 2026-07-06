@@ -44,6 +44,7 @@ const DEFAULT_TEST_CONTACTS = [
   "56962288575", // Kerim
   "56982945030", // Andrea
   "56966850332", // C. Fuentes
+  "56995077374", // Interno (pruebas)
 ]
 export function testContactSet(): Set<string> {
   const raw = (process.env.VIC_FUNNEL_TEST_CONTACTS || "").trim()
