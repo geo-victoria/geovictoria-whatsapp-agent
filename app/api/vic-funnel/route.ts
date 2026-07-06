@@ -342,7 +342,7 @@ export async function GET(req: Request): Promise<Response> {
     links.push(mk(s, t, v))
   }
 
-  const kpiCard = (label: string, value: number, color: string, sub?: string) =>
+  const kpiCard = (label: string, value: number | string, color: string, sub?: string) =>
     `<div class="kpi"><div class="kpi-v" style="color:${color}">${value}</div><div class="kpi-l">${label}${sub ? ` <span class="pct">${sub}</span>` : ""}</div></div>`
   const pct = (x: number) => (total ? `${Math.round((x / total) * 100)}%` : "")
 
@@ -411,7 +411,7 @@ export async function GET(req: Request): Promise<Response> {
     return `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
-    ${kpiCard("Cierre end-to-end (%)", endToEnd, col.best, "vio precio → venta")}
+    ${kpiCard("Cierre end-to-end", `${endToEnd}%`, col.best, "vio precio → venta")}
   </div>
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
   })()}
