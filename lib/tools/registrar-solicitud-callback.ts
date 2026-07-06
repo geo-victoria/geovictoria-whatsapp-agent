@@ -8,7 +8,7 @@
  *     de cotizaciones (Anderson) → asignado directo para que él lo siga.
  */
 
-import { createZohoLead } from "@/lib/zoho-leads"
+import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
 
 // Ejecutivo que sigue las cotizaciones de Vicky. Cuando Vicky tuvo intención de
 // cotizar pero no alcanzó a emitir la cotización, el lead queda a su nombre (no
@@ -75,6 +75,11 @@ export const registrarSolicitudCallbackSchema = {
         description:
           "true SOLO en el fallback de cotización: el prospecto tenía intención de cotizar y mostró interés, pero no se pudo emitir la cotización por falta de datos. Asigna el Lead al ejecutivo de cotizaciones (Anderson) en vez de la tómbola. Para callbacks normales, omítelo o false.",
       },
+      zohoLeadId: {
+        type: "string" as const,
+        description:
+          "ID del Lead que YA existe en Zoho (viene en el bloque '[Datos del formulario web: ... zohoLeadId ...]' cuando la conversación la inició Vicky). Si lo pasas, NO se crea un lead nuevo: se REASIGNA ese mismo lead al ejecutivo para que lo contacte (evita duplicados). Omítelo cuando el prospecto llegó solo por WhatsApp (sin lead previo).",
+      },
     },
     required: ["nombre", "empresa", "telefono"],
   },
@@ -92,6 +97,7 @@ export type RegistrarSolicitudCallbackInput = {
   ciudad?: string
   preferenciaHorario?: string
   seguimientoCotizacion?: boolean
+  zohoLeadId?: string
 }
 
 export type RegistrarSolicitudCallbackResultado =
@@ -112,6 +118,28 @@ export async function registrarSolicitudCallback(
 ): Promise<RegistrarSolicitudCallbackResultado> {
   // Fallback de cotización → asignar a Anderson (no tómbola).
   const ownerEmail = args.seguimientoCotizacion ? EJECUTIVO_COTIZACIONES_EMAIL : undefined
+
+  // Lead PRE-EXISTENTE en Zoho (outbound del formulario): NO crear duplicado.
+  // Se reasigna el MISMO lead al ejecutivo (la tómbola es una regla de creación
+  // y no re-corre en updates, así que el destino es siempre el ejecutivo).
+  const existingLeadId = (args.zohoLeadId || "").trim()
+  if (existingLeadId) {
+    const upd = await updateZohoLeadOwner(existingLeadId, EJECUTIVO_COTIZACIONES_EMAIL)
+    if (!upd.success) {
+      console.error("[registrar_solicitud_callback] reasignación falló:", upd.error)
+      return { ok: false, error: `No se pudo reasignar el lead existente: ${upd.error}` }
+    }
+    return {
+      ok: true,
+      leadId: existingLeadId,
+      entraATombola: false,
+      ownerEmail: EJECUTIVO_COTIZACIONES_EMAIL,
+      mensajeParaProspecto:
+        `¡Listo! Dejé registrado que prefieres que te contacten: nuestro ejecutivo te va a llamar al ${args.telefono}` +
+        (args.preferenciaHorario ? ` (en el horario que pediste: ${args.preferenciaHorario})` : "") +
+        `. ¿Hay algo más en lo que pueda ayudarte mientras tanto?`,
+    }
+  }
 
   const result = await createZohoLead({
     nombre: args.nombre,

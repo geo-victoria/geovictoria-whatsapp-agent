@@ -73,7 +73,7 @@ export async function getUFActualSafe(): Promise<number> {
 export const generarLinkCotizadoraSchema = {
   name: "generar_link_cotizadora",
   description:
-    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala SOLO después de haber presentado el preform de confirmación y que el prospect haya confirmado explícitamente los datos. NO la uses antes de confirmar. Si la cotización incluye hardware, requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un reloj). NO necesitas pasar IDs de Zoho (accountId, contactId, leadId): el backend deduplica solo por RUT — si la empresa ya existe asocia la cotización a su cuenta, y si no la crea.",
+    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala SOLO después de haber presentado el preform de confirmación y que el prospect haya confirmado explícitamente los datos. NO la uses antes de confirmar. Si la cotización incluye hardware, requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un reloj). Normalmente NO necesitas pasar IDs de Zoho: el backend deduplica por RUT — si la empresa ya existe asocia la cotización a su cuenta, y si no la crea. EXCEPCIÓN (conversaciones que iniciaste tú, con bloque '[Datos del formulario web: ... zohoLeadId ...]'): pasa `leadId` = ese zohoLeadId para que el lead original se CONVIERTA en cuenta+contacto+deal con la cotización asociada, sin duplicados.",
   input_schema: {
     type: "object" as const,
     properties: {

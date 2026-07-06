@@ -12,7 +12,7 @@
  */
 
 import { bookMeeting, getTimezone } from "@/lib/calendar"
-import { createZohoLead } from "@/lib/zoho-leads"
+import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
 import { createZohoEvent } from "@/lib/zoho-events"
 
 export const agendarReunionSchema = {
@@ -63,6 +63,11 @@ export const agendarReunionSchema = {
         type: "string" as const,
         description: "País del cliente. Default Chile.",
       },
+      zohoLeadId: {
+        type: "string" as const,
+        description:
+          "ID del Lead que YA existe en Zoho (viene en el bloque '[Datos del formulario web: ... zohoLeadId ...]' cuando la conversación la inició Vicky). Si lo pasas, NO se crea un lead nuevo: se REASIGNA ese mismo lead al KAM de la reunión y el evento se asocia a él (evita duplicados). Omítelo cuando el prospecto llegó solo por WhatsApp.",
+      },
     },
     required: ["slotIso", "prospectName", "prospectEmail"],
   },
@@ -78,6 +83,7 @@ export type AgendarReunionInput = {
   necesidad?: string
   cargo?: string
   country?: string
+  zohoLeadId?: string
 }
 
 export type AgendarReunionResultado =
@@ -125,39 +131,54 @@ export async function agendarReunion(
 
   const { bookingId, meetingUrl, organizerEmail } = booking
 
-  const leadResult = await createZohoLead({
-    nombre: prospectName,
-    empresa: empresa || "Prospecto WhatsApp",
-    email: prospectEmail,
-    telefono,
-    cargo,
-    pais: country,
-    trabajadores,
-    necesidad,
-    reunionAgendada: true,
-    preferenciaHorario: slotIso,
-    contactoWA: telefono,
-    ownerEmail: organizerEmail,
-  })
-
-  if (!leadResult.success) {
-    console.error("[agendar_reunion] createZohoLead falló:", leadResult.error)
-    return {
-      ok: false,
-      error:
-        `La reunión se agendó en el calendario (bookingId ${bookingId}) pero falló el ` +
-        `registro en el CRM: ${leadResult.error}. Avisa al cliente que la reunión está ` +
-        `confirmada y comunica internamente al equipo para registro manual.`,
-      reunionAgendada: true,
-      bookingId,
+  // Lead PRE-EXISTENTE en Zoho (outbound del formulario): reasignar el MISMO
+  // lead al KAM de la reunión en vez de crear un duplicado.
+  const existingLeadId = (args.zohoLeadId || "").trim()
+  let effectiveLeadId: string
+  if (existingLeadId) {
+    if (organizerEmail) {
+      const upd = await updateZohoLeadOwner(existingLeadId, organizerEmail)
+      if (!upd.success) {
+        console.error("[agendar_reunion] reasignación del lead existente falló:", upd.error)
+      }
     }
+    effectiveLeadId = existingLeadId
+  } else {
+    const leadResult = await createZohoLead({
+      nombre: prospectName,
+      empresa: empresa || "Prospecto WhatsApp",
+      email: prospectEmail,
+      telefono,
+      cargo,
+      pais: country,
+      trabajadores,
+      necesidad,
+      reunionAgendada: true,
+      preferenciaHorario: slotIso,
+      contactoWA: telefono,
+      ownerEmail: organizerEmail,
+    })
+
+    if (!leadResult.success) {
+      console.error("[agendar_reunion] createZohoLead falló:", leadResult.error)
+      return {
+        ok: false,
+        error:
+          `La reunión se agendó en el calendario (bookingId ${bookingId}) pero falló el ` +
+          `registro en el CRM: ${leadResult.error}. Avisa al cliente que la reunión está ` +
+          `confirmada y comunica internamente al equipo para registro manual.`,
+        reunionAgendada: true,
+        bookingId,
+      }
+    }
+    effectiveLeadId = leadResult.leadId
   }
 
   let eventId: string | undefined
   let warning: string | undefined
   if (organizerEmail) {
     const eventResult = await createZohoEvent({
-      leadId: leadResult.leadId,
+      leadId: effectiveLeadId,
       slotIso,
       meetingUrl,
       prospectName,
@@ -202,7 +223,7 @@ export async function agendarReunion(
     bookingId,
     meetingUrl,
     organizerEmail,
-    leadId: leadResult.leadId,
+    leadId: effectiveLeadId,
     eventId,
     slotIso,
     mensajeParaProspecto,
