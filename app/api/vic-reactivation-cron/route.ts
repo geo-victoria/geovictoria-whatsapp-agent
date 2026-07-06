@@ -465,3 +465,8 @@ export async function GET(req: Request): Promise<Response> {
     correos,
   })
 }
+
+// pg_cron invoca con net.http_post → aceptar POST además de GET (mismo handler).
+export async function POST(req: Request): Promise<Response> {
+  return GET(req)
+}
