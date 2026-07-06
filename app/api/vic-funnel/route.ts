@@ -300,7 +300,7 @@ export async function GET(req: Request): Promise<Response> {
     /* 0 */ "Conversaciones",
     /* 1 */ "Intención comercial", /* 2 */ "Soporte", /* 3 */ "No identificado",
     /* 4 */ "Crosselling", /* 5 */ "Lead (callback)", /* 6 */ "Reunión", /* 7 */ "Flujo cotización", /* 8 */ "Solo dudas",
-    /* 9 */ "Preform mostrado", /* 10 */ "Cotización enviada", /* 11 */ "Abandonado",
+    /* 9 */ "Vio precio, no avanzó", /* 10 */ "Cotización enviada", /* 11 */ "Se fue antes del precio",
   ]
   const col = {
     base: "#2F5496", com: "#1565C0", sop: "#00838F", noid: "#9E9E9E",
@@ -398,9 +398,9 @@ export async function GET(req: Request): Promise<Response> {
     const vieronPrecio = cPreform + cEnviada
     const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
     const base = `
-    ${kpiCard("Preform mostrado", cPreform, col.good)}
+    ${kpiCard("Vio precio y NO avanzó", cPreform, col.warn, "quedó en preform")}
     ${kpiCard("Cotización enviada", cEnviada, col.best, pasoPreform)}
-    ${kpiCard("Abandonado", cAbandonado, col.bad)}`
+    ${kpiCard("Se fue ANTES del precio", cAbandonado, col.bad, "sin preform")}`
     if (!cierre) {
       return `<div class="kpis">${base}
   </div>
@@ -431,7 +431,7 @@ export async function GET(req: Request): Promise<Response> {
         .sort((a, b) => (a.motivo_no_cierre || "~").localeCompare(b.motivo_no_cierre || "~"))
         .map((r) => `<tr>
           <td><b>${esc((r.motivo_no_cierre || "sin motivo").replace(/_/g, " "))}</b></td>
-          <td>${r.cotizacion_outcome === "preform_mostrado" ? "Preform" : "Abandonado"}</td>
+          <td>${r.cotizacion_outcome === "preform_mostrado" ? "Vio precio, no avanzó" : "Se fue antes del precio"}</td>
           <td>${esc(r.resumen || "—")}</td>
           <td><a href="?key=${encodeURIComponent(key)}&conv=${esc(r.conversation_id)}">Ver →</a></td>
         </tr>`)
