@@ -263,7 +263,16 @@ export async function GET(req: Request): Promise<Response> {
     const c = r.reactivation_count || 0
     if (c >= OFFSETS_H.length || !r.last_user_at) return false
     const hrs = (now - new Date(r.last_user_at).getTime()) / 3600e3
-    return hrs >= OFFSETS_H[c]
+    if (hrs < OFFSETS_H[c]) return false
+    // Espaciado real ENTRE toques: además del silencio, el toque N espera el
+    // delta de la cadencia desde el toque anterior (47h→7d→15d ⇒ ~5d y ~8d).
+    // Sin esto, un contacto de silencio antiguo recibiría los 3 toques en días
+    // consecutivos (solo limitado por el gap de 24h) — quema al lead.
+    if (c > 0 && r.reactivation_at) {
+      const desdeToque = (now - new Date(r.reactivation_at).getTime()) / 3600e3
+      if (desdeToque < OFFSETS_H[c] - OFFSETS_H[c - 1]) return false
+    }
+    return true
   }
   let cand = rows.filter(
     (r) =>
