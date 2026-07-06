@@ -82,17 +82,17 @@ reasigna al ejecutivo. Nunca lead duplicado ni huérfano.
 
 ## 4. Set de plantillas (una por toque)
 
-### WhatsApp (HSM, aprobar en Botmaker/Meta, utility, vars por nombre)
+### WhatsApp (HSM, aprobar en Botmaker/Meta, utility, sintaxis Botmaker ${variable})
 - **P1 `vicky_lead_apertura`** (T0 · vars nombre, empresa):
-  "Hola {{nombre}} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de
-  cotización para {{empresa}}. Te ayudo a armarla al tiro por acá — ¿avanzamos?"
+  "Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de
+  cotización para ${empresa}. Te ayudo a armarla al tiro por acá — ¿avanzamos?"
 - **P2 `vicky_lead_nudge`** (T2 · vars nombre, empresa):
-  "Hola {{nombre}}, soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud
-  para {{empresa}}. Armar tu cotización toma 2 minutos por acá. ¿Hay algo que te
+  "Hola ${nombre}, soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud
+  para ${empresa}. Armar tu cotización toma 2 minutos por acá. ¿Hay algo que te
   falte para avanzar o alguna duda que te pueda resolver?"
 - **P3 `vicky_lead_cierre`** (T4 · vars nombre, empresa):
-  "Hola {{nombre}}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu
-  cotización para {{empresa}} lista para retomarla cuando tú quieras — me
+  "Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu
+  cotización para ${empresa} lista para retomarla cuando tú quieras — me
   escribes por acá y la armamos al tiro. ¡Que te vaya súper! 👋"
 - **R1 `vicky_react_preform` / R2 `vicky_react_cotizacion`** (reactivación
   multi-día 47h/7d/15d, fase aparte — ver cron de reactivación): gancho de
@@ -102,7 +102,7 @@ reasigna al ejecutivo. Nunca lead duplicado ni huérfano.
 - **Correo 1** (T1, mismo día): asunto "Tu cotización GeoVictoria está a un
   mensaje de distancia" — recibimos tu solicitud + te escribí por WhatsApp +
   CTA wa.me + prueba social (DT, 6.000 empresas) + opción reunión.
-- **Correo 2** (T3, día 5): asunto "{{nombre}}, tu cotización sigue lista para
+- **Correo 2** (T3, día 5): asunto "${nombre}, tu cotización sigue lista para
   armar" — beneficios concretos (adiós planillas, reportes solos, normativa DT)
   + CTA wa.me + opción reunión.
 - **Correo 3** (T4, día 7-8): asunto "Dejamos tu cotización guardada" — breakup
@@ -110,8 +110,8 @@ reasigna al ejecutivo. Nunca lead duplicado ni huérfano.
 (Textos completos redactados — pegarlos en las plantillas de la Cadencia A.)
 
 ### Voz (T0.5, guion — no plantilla)
-"Hola {{nombre}}, soy Vicky de GeoVictoria — te acabo de escribir por WhatsApp
-por tu solicitud de cotización para {{empresa}}. ¿Te quedó alguna duda o te
+"Hola ${nombre}, soy Vicky de GeoVictoria — te acabo de escribir por WhatsApp
+por tu solicitud de cotización para ${empresa}. ¿Te quedó alguna duda o te
 ayudo a armarla ahora? … Te dejo todo listo por WhatsApp / ¿prefieres que
 coordinemos una reunión con un ejecutivo?"
 
