@@ -51,24 +51,36 @@ async function fetchCierreZoho(): Promise<{ total: number; aceptadas: number } |
   }
 }
 
-// Hallazgos cualitativos curados (editables a mano — pídeme actualizarlos).
-const CURATED_FINDINGS: Array<{ titulo: string; detalle: string }> = [
+// Mejoras aplicadas al agente (changelog curado, editable a mano — pídeme
+// actualizarlo). Cada entrada lleva fecha para que no se lea como hallazgo
+// vigente cuando ya fue resuelto.
+const CURATED_FINDINGS: Array<{ fecha: string; titulo: string; detalle: string }> = [
   {
+    fecha: "jul-2026",
+    titulo: "Menos es más + micro-cierre en la captura de datos",
+    detalle:
+      "La mayor fuga era precio → datos (5 datos de golpe con RUT incluido). Ahora Vicky capta nombre/empresa temprano, valida el precio con un micro-cierre ('¿te hace sentido avanzar?') y al cierre pide solo RUT + email; ante objeción, negocia descuento en vez de perder al cliente. En medición (corte 02-jul).",
+  },
+  {
+    fecha: "jun-2026",
     titulo: "Objeción al precio de compra del reloj se atacaba mal",
     detalle:
       "Cuando el cliente objetaba el reloj en venta, se descontaba el plan mensual (irrelevante al pago inicial). Resuelto: ahora Vicky pivotea a arriendo ante esa objeción.",
   },
   {
+    fecha: "jun-2026",
     titulo: "Vicky ofrecía la compra del reloj sin que se la pidieran",
     detalle:
       "Ante '¿cuánto vale el reloj?' daba el precio de compra (8 UF). Resuelto: ahora responde solo arriendo salvo que el cliente pida comprar.",
   },
   {
+    fecha: "jun-2026",
     titulo: "Dimensionamiento de relojes",
     detalle:
       "Se aceptaba 1 reloj para muchas personas con turnos (riesgo de fila). Resuelto: ahora pregunta por simultaneidad y sugiere 2.",
   },
   {
+    fecha: "jun-2026",
     titulo: "Micro-plan para 1 trabajador",
     detalle:
       "Se agregó tarifa especial 0,25 UF (1 que marca + admin), sin descuento recurrente, para no perder micro-clientes.",
@@ -381,38 +393,30 @@ export async function GET(req: Request): Promise<Response> {
     ${kpiCard("Crosselling", crosselling, col.good)}
     ${kpiCard("Solo dudas", soloDudas, col.grey)}
   </div>
-  <div class="kgroup">Dentro de flujo cotización (${cotizacion})</div>
-  <div class="kpis">
-    ${kpiCard("Preform mostrado", cPreform, col.good)}
-    ${kpiCard("Cotización enviada", cEnviada, col.best)}
-    ${kpiCard("Abandonado", cAbandonado, col.bad)}
-  </div>
-
-  <div class="kgroup">Tasa de cierre — en vivo (preforms: análisis · cotizaciones/aceptadas: Zoho)</div>
+  <div class="kgroup">Flujo cotización y tasa de cierre (${cotizacion} conversaciones · cierre en vivo desde Zoho)</div>
   ${(() => {
     const vieronPrecio = cPreform + cEnviada
-    const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}%` : ""
+    const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
+    const base = `
+    ${kpiCard("Preform mostrado", cPreform, col.good)}
+    ${kpiCard("Cotización enviada", cEnviada, col.best, pasoPreform)}
+    ${kpiCard("Abandonado", cAbandonado, col.bad)}`
     if (!cierre) {
-      return `<div class="kpis">
-    ${kpiCard("Vieron precio", vieronPrecio, col.com)}
-    ${kpiCard("→ Cotización formal", cEnviada, col.best, pasoPreform)}
+      return `<div class="kpis">${base}
   </div>
   <div class="sub" style="margin:-2px 0 10px">Zoho no disponible en esta carga — recarga para ver aceptadas y cierre.</div>`
     }
     const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
     const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
-    return `<div class="kpis">
-    ${kpiCard("Vieron precio", vieronPrecio, col.com)}
-    ${kpiCard("→ Cotización formal", cEnviada, col.best, pasoPreform)}
+    return `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
     ${kpiCard("Cierre end-to-end (%)", endToEnd, col.best, "vio precio → venta")}
-  </div>`
+  </div>
+  <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
   })()}
 
-  <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div>
-    <div class="sub" style="margin:8px 0 0">Flujo cotización (${cotizacion}): <b>${cPreform}</b> preform mostrado · <b>${cEnviada}</b> cotización enviada · <b>${cAbandonado}</b> abandonado.</div>
-  </div>
+  <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div></div>
 
   <div class="card"><h2>Motivos de no-cierre <span class="pct" style="font-weight:400">— cotizaciones que no terminaron en envío (${noCierre.length})</span></h2>
     ${noCierre.length === 0 ? "<p class='sub'>Sin casos.</p>" : `<div class="bars">
@@ -441,9 +445,9 @@ export async function GET(req: Request): Promise<Response> {
     </tbody></table>`}
   </div>
 
-  <div class="card"><h2>Hallazgos cualitativos (curados)</h2>
-    <table><thead><tr><th>Hallazgo</th><th>Detalle</th></tr></thead><tbody>
-      ${CURATED_FINDINGS.map((f) => `<tr><td style="width:34%"><b>${f.titulo}</b></td><td>${f.detalle}</td></tr>`).join("")}
+  <div class="card"><h2>Mejoras aplicadas al agente (changelog curado)</h2>
+    <table><thead><tr><th>Fecha</th><th>Mejora</th><th>Detalle</th></tr></thead><tbody>
+      ${CURATED_FINDINGS.map((f) => `<tr><td style="width:8%;white-space:nowrap">${f.fecha}</td><td style="width:30%"><b>${f.titulo}</b></td><td>${f.detalle}</td></tr>`).join("")}
     </tbody></table>
   </div>
 
