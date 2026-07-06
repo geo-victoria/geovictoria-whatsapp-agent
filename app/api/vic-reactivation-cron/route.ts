@@ -20,7 +20,7 @@
 
 import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { appendAssistantV3, fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
@@ -115,16 +115,19 @@ async function authorized(req: Request): Promise<boolean> {
 // Devuelve el set de quoteIds que NO se deben reactivar (ya aceptadas/pagadas/
 // cerradas/rechazadas). Conservador: si la consulta a Zoho falla, marca el chunk
 // completo como "no reactivar" para no escribirle a un cliente que ya cerró.
-async function quoteIdsNoAccionables(quoteIds: string[]): Promise<Set<string>> {
+async function quoteIdsNoAccionables(
+  quoteIds: string[],
+): Promise<{ skip: Set<string>; nombres: Map<string, string> }> {
   const skip = new Set<string>()
-  if (!quoteIds.length) return skip
+  const nombres = new Map<string, string>()
+  if (!quoteIds.length) return { skip, nombres }
   const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   let token = ""
   try {
     token = await getZohoAccessToken()
   } catch {
     for (const id of quoteIds) skip.add(id)
-    return skip
+    return { skip, nombres }
   }
   for (let i = 0; i < quoteIds.length; i += 50) {
     const chunk = quoteIds.slice(i, i + 50)
@@ -134,7 +137,7 @@ async function quoteIdsNoAccionables(quoteIds: string[]): Promise<Set<string>> {
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          select_query: `select id, Estado_Cotizacion from ${QUOTE_MODULE} where id in (${ids}) limit 200`,
+          select_query: `select id, Estado_Cotizacion, Contacto_Asociado from ${QUOTE_MODULE} where id in (${ids}) limit 200`,
         }),
         cache: "no-store",
       })
@@ -148,12 +151,56 @@ async function quoteIdsNoAccionables(quoteIds: string[]): Promise<Set<string>> {
         if (e.includes("acept") || e.includes("pagad") || e.includes("ganad") || e.includes("cerrad") || e.includes("rechaz")) {
           skip.add(String(r.id))
         }
+        // Primer nombre del contacto de la cotización (para el \${nombre} del HSM).
+        const full = String(r?.Contacto_Asociado?.name || "").trim()
+        if (full) nombres.set(String(r.id), full.split(/\s+/)[0])
       }
     } catch {
       for (const id of chunk) skip.add(id)
     }
   }
-  return skip
+  return { skip, nombres }
+}
+
+
+// Primer nombre del cliente extraído del historial (para el ${nombre} del HSM
+// cuando no hay cotización formal de la cual sacarlo). Best-effort con el
+// modelo chico; si no hay nombre claro devuelve null y el toque se OMITE (mejor
+// no enviar que enviar "Hola , cómo estás?").
+async function nombreDesdeHistorial(contact: string): Promise<string | null> {
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) return null
+  try {
+    const history = await fetchHistoryV3(contact, 30)
+    const transcript = history
+      .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${m.content}`)
+      .join("\n")
+      .slice(-3500)
+    if (!transcript) return null
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 20,
+        system:
+          "Extrae el PRIMER NOMBRE de pila del CLIENTE desde la conversación (el nombre con que se presentó o con que Vicky lo llama). Responde SOLO el nombre (una palabra, capitalizada). Si no hay un nombre claro del cliente, responde exactamente NO.",
+        messages: [{ role: "user", content: transcript }],
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> }
+    const out = (data.content?.find((b) => b.type === "text")?.text || "").trim()
+    if (!out || out.toUpperCase() === "NO" || out.split(/\s+/).length > 2 || out.length > 25) return null
+    return out.split(/\s+/)[0]
+  } catch {
+    return null
+  }
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -173,7 +220,8 @@ export async function GET(req: Request): Promise<Response> {
     if (!tpl) {
       return NextResponse.json({ ok: false, error: `plantilla ${seg} no configurada` }, { status: 400 })
     }
-    const ok = await sendBotmakerTemplate(testTo, tpl, {}).catch(() => false)
+    const testNombre = (_u.searchParams.get("nombre") || "Cliente").trim()
+    const ok = await sendBotmakerTemplate(testTo, tpl, { nombre: testNombre }).catch(() => false)
     if (ok) {
       await appendAssistantV3(testTo, REACT_CONTEXT_MSG[seg] ?? REACT_CONTEXT_MSG.preform).catch(() => {})
       await supa(`vic_v3_conversations?contact=eq.${testTo}`, {
@@ -273,10 +321,12 @@ export async function GET(req: Request): Promise<Response> {
 
   // Segmento "cotizacion": tiene formal_quote_id y NO está aceptada/pagada.
   let segCot: Row[] = []
+  let nombresPorQuote = new Map<string, string>()
   if (TPL_QUOTE) {
     const conQuote = cand.filter((r) => !!r.formal_quote_id)
-    const skip = await quoteIdsNoAccionables(conQuote.map((r) => r.formal_quote_id as string))
-    segCot = conQuote.filter((r) => !skip.has(String(r.formal_quote_id)))
+    const zoho = await quoteIdsNoAccionables(conQuote.map((r) => r.formal_quote_id as string))
+    nombresPorQuote = zoho.nombres
+    segCot = conQuote.filter((r) => !zoho.skip.has(String(r.formal_quote_id)))
   }
 
   // Segmento "preform": SIN cotización formal pero con un estimado mostrado
@@ -320,10 +370,23 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   let enviados = 0
+  let omitidosSinNombre = 0
   async function enviar(list: Row[], template: string, segmento: string) {
     for (const r of list) {
       if (enviados >= BATCH) break
-      const ok = await sendBotmakerTemplate(r.contact, template, {}).catch(() => false)
+      // Las plantillas v2 llevan \${nombre}: resolverlo (Zoho para cotización;
+      // historial como fallback). Sin nombre NO se envía (quedaría "Hola ,").
+      let nombre =
+        (segmento === "cotizacion" && r.formal_quote_id
+          ? nombresPorQuote.get(String(r.formal_quote_id))
+          : undefined) || null
+      if (!nombre) nombre = await nombreDesdeHistorial(r.contact)
+      if (!nombre) {
+        omitidosSinNombre++
+        console.warn(`[reactivation] sin nombre resoluble, omitido: ${r.contact} (${segmento})`)
+        continue
+      }
+      const ok = await sendBotmakerTemplate(r.contact, template, { nombre }).catch(() => false)
       if (!ok) continue
       await supa(`vic_v3_conversations?id=eq.${r.id}`, {
         method: "PATCH",
@@ -357,7 +420,13 @@ export async function GET(req: Request): Promise<Response> {
       const segmento = r.formal_quote_id ? "cotizacion" : "preform"
       const template = segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
       if (!template) continue
-      const ok = await sendBotmakerTemplate(r.contact, template, {}).catch(() => false)
+      const nombre = await nombreDesdeHistorial(r.contact)
+      if (!nombre) {
+        omitidosSinNombre++
+        console.warn(`[reactivation] consensuado sin nombre resoluble, omitido: ${r.contact}`)
+        continue
+      }
+      const ok = await sendBotmakerTemplate(r.contact, template, { nombre }).catch(() => false)
       if (!ok) continue
       await supa(`vic_v3_conversations?id=eq.${r.id}`, {
         method: "PATCH",
@@ -392,6 +461,7 @@ export async function GET(req: Request): Promise<Response> {
     consensuado: consensuado.length,
     enviados,
     enviados_consensuado: enviadosConsensuado,
+    omitidos_sin_nombre: omitidosSinNombre,
     correos,
   })
 }
