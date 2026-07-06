@@ -14,7 +14,7 @@
  */
 
 import { NextResponse } from "next/server"
-import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -63,14 +63,31 @@ export async function POST(req: Request): Promise<Response> {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
-  let body: { contact?: string; text?: string; via?: string } = {}
+  let body: {
+    contact?: string
+    text?: string
+    via?: string
+    template?: string
+    params?: Record<string, string>
+  } = {}
   try {
-    body = (await req.json()) as { contact?: string; text?: string; via?: string }
+    body = (await req.json()) as typeof body
   } catch {
     return NextResponse.json({ ok: false, error: "body JSON inválido" }, { status: 400 })
   }
   const contact = (body.contact || "").trim()
   const text = (body.text || "").trim()
+
+  // Modo PLANTILLA (HSM vía Botmaker): body = { via:"template", contact, template, params }.
+  // Para pruebas de plantillas aprobadas y rescates proactivos fuera de 24h.
+  if ((body.via || "").toLowerCase() === "template") {
+    const template = (body.template || "").trim()
+    if (!contact || !template) {
+      return NextResponse.json({ ok: false, error: "contact y template requeridos" }, { status: 400 })
+    }
+    const ok = await sendBotmakerTemplate(contact, template, body.params || {}).catch(() => false)
+    return NextResponse.json({ ok, via: "template", contact, template }, { status: ok ? 200 : 502 })
+  }
   // via=cloud → línea de Meta directa (Cloud API). Por defecto, Botmaker (agente).
   const via = (body.via || new URL(req.url).searchParams.get("via") || "botmaker").trim().toLowerCase()
   if (!contact || !text) {
