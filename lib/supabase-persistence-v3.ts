@@ -807,3 +807,20 @@ export async function getFollowupCronSecret(): Promise<string> {
   )
   return rows && rows.length > 0 ? rows[0].value : ""
 }
+
+/** KV genérico sobre vic_kv, para estado chico compartido entre invocaciones
+ * (ej. el turno del round-robin de reasignación a SDRs). Best-effort. */
+export async function getKvValue(key: string): Promise<string | null> {
+  const rows = await supabaseFetch<{ value: string }[]>(
+    `vic_kv?key=eq.${encodeURIComponent(key)}&select=value&limit=1`,
+  )
+  return rows && rows.length > 0 ? rows[0].value : null
+}
+
+export async function setKvValue(key: string, value: string): Promise<void> {
+  await supabaseFetch<unknown>(`vic_kv?on_conflict=key`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ key, value }),
+  })
+}

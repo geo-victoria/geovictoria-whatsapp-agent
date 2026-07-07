@@ -51,6 +51,7 @@ import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { marcarCotizacionRechazada } from "@/lib/zoho-quote-status"
+import { updateZohoLeadStatus } from "@/lib/zoho-leads"
 import {
   markUserActivity,
   armFollowup,
@@ -281,6 +282,19 @@ async function processOneTurn(
   try {
     // 1. Cargar historial
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
+
+    // 1.2. Diccionario Vicky (acuerdo con Marketing jul-2026): la PRIMERA
+    // respuesta de un lead outbound (conversación abierta por el toque 0, aún
+    // sin mensajes del cliente) pasa el lead a "3. Contactado". Best-effort.
+    if (!history.some((m) => m.role === "user")) {
+      const bloque = history.find(
+        (m) => m.role === "assistant" && m.content?.includes("[Datos del formulario web:"),
+      )
+      const zohoLeadId = bloque?.content?.match(/zohoLeadId (\d+)/)?.[1]
+      if (zohoLeadId) {
+        updateZohoLeadStatus(zohoLeadId, "3. Contactado").catch(() => {})
+      }
+    }
 
     // 1.5. Item B (anti-amnesia): si el contacto YA tiene una cotización formal
     // (puntero durable), inyectamos ese estado al prompt para que Vicky la

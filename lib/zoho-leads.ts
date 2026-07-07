@@ -132,6 +132,71 @@ export async function updateZohoLeadOwner(
   }
 }
 
+/**
+ * Actualiza el Lead_Status de un lead (diccionario acordado con Marketing
+ * jul-2026: envío de mensaje = "2. Intento de contacto"; respuesta del cliente
+ * = "3. Contactado"). Best-effort: nunca rompe el flujo.
+ */
+export async function updateZohoLeadStatus(
+  leadId: string,
+  status: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!leadId || !status) return { success: false, error: "leadId o status faltante" }
+  try {
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ Lead_Status: status }] }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ status?: string }>
+    }
+    if (!res.ok || data?.data?.[0]?.status !== "success") {
+      return { success: false, error: `Zoho update status ${res.status}` }
+    }
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "error actualizando status" }
+  }
+}
+
+// SDRs Inbound para la reasignación de lo que Vicky suelta (acuerdo con
+// Marketing jul-2026: si el WhatsApp no se entrega, el lead vuelve a un humano,
+// repartido equitativamente entre las dos).
+const SDR_INBOUND_EMAILS = (
+  process.env.VIC_SDR_INBOUND_EMAILS || "aaraque@geovictoria.com,asepulveda@geovictoria.com"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
+
+/**
+ * Reasigna un lead al siguiente SDR Inbound del round-robin (turno persistido
+ * en vic_kv → equitativo entre invocaciones serverless). Devuelve a quién quedó.
+ */
+export async function reasignarLeadSdrInbound(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; error?: string }> {
+  if (!leadId || SDR_INBOUND_EMAILS.length === 0) {
+    return { success: false, error: "leadId faltante o sin SDRs configuradas" }
+  }
+  const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+  const last = parseInt((await getKvValue("sdr_inbound_rr").catch(() => null)) || "-1")
+  const idx = (isNaN(last) ? 0 : last + 1) % SDR_INBOUND_EMAILS.length
+  const ownerEmail = SDR_INBOUND_EMAILS[idx]
+  const upd = await updateZohoLeadOwner(leadId, ownerEmail)
+  if (!upd.success) return { success: false, error: upd.error }
+  await setKvValue("sdr_inbound_rr", String(idx)).catch(() => {})
+  return { success: true, ownerEmail }
+}
+
 export type CreateZohoLeadInput = {
   nombre?: string
   empresa?: string
@@ -203,10 +268,17 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
 
     const email = (input.email || "").trim()
     if (email) record.Email = email
-    const phone = (input.telefono || "").trim()
-    if (phone) record.Phone = phone
-    const pais = sanitize(input.pais, 100)
+    // Teléfono: si el caller no lo pasó, cae al contacto de WhatsApp (siempre lo
+    // hay en Vicky). Regla del equipo (jul-2026): ningún lead de Vicky sin fono.
+    const phone = (input.telefono || "").trim() || (input.contactoWA || "").trim()
+    if (phone) record.Phone = phone.startsWith("+") ? phone : `+${phone.replace(/\D/g, "")}`
+    // País/Territorio: deducidos del fono si el caller no los dio. Regla del
+    // equipo (jul-2026): los leads deben llegar con territorio para que las
+    // assignment rules los repartan (los sin territorio quedaban huérfanos).
+    const digits = phone.replace(/\D/g, "")
+    const pais = sanitize(input.pais, 100) || (digits.startsWith("56") ? "Chile" : "")
     if (pais) record.Country = pais
+    if (digits.startsWith("56") || pais.toLowerCase() === "chile") record.Territorio = "Chile"
     const ciudad = sanitize(input.ciudad, 100)
     if (ciudad) record.City = ciudad
 

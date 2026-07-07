@@ -35,6 +35,7 @@ import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
+import { updateZohoLeadStatus, reasignarLeadSdrInbound } from "@/lib/zoho-leads"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -126,7 +127,23 @@ export async function POST(req: Request): Promise<Response> {
   // 1. Plantilla HSM de apertura (variables por nombre, como las define Botmaker).
   const sent = await sendBotmakerTemplate(contact, TPL_LEAD, { nombre, empresa }).catch(() => false)
   if (!sent) {
-    return NextResponse.json({ ok: false, error: "fallo el envío de la plantilla", contact }, { status: 502 })
+    // Acuerdo con Marketing (jul-2026): si el WhatsApp no se pudo enviar, el
+    // lead NO se queda con Vicky — vuelve a un humano (round-robin SDR Inbound).
+    let reasignado: string | undefined
+    if (zohoLeadId) {
+      const r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
+      reasignado = r?.ownerEmail
+      console.warn(`[outbound-lead] envío falló → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`)
+    }
+    return NextResponse.json(
+      { ok: false, error: "fallo el envío de la plantilla", contact, reasignado },
+      { status: 502 },
+    )
+  }
+  // Diccionario Vicky (acuerdo con Marketing): envío de mensaje = intento de
+  // contacto. Best-effort: no bloquea la respuesta al workflow.
+  if (zohoLeadId) {
+    await updateZohoLeadStatus(zohoLeadId, "2. Intento de contacto").catch(() => {})
   }
 
   // 2. Persistir la apertura + contexto del formulario. El bloque [Datos del
