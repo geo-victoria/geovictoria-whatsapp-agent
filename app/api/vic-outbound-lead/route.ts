@@ -95,6 +95,12 @@ export async function POST(req: Request): Promise<Response> {
   if (isTestContact(contact, testContactSet())) {
     return NextResponse.json({ ok: true, skipped: "contacto interno" })
   }
+  // Red de seguridad: prospección SOLO a Chile (+56). La calificación fina vive
+  // en las assignment rules de Zoho; esto protege contra asignaciones manuales
+  // equivocadas (la línea vende en CLP y el pago es MP Chile).
+  if (!contact.startsWith("56")) {
+    return NextResponse.json({ ok: true, skipped: "telefono no es +56", contact })
+  }
   if (!TPL_LEAD) {
     return NextResponse.json({ ok: true, skipped: "OUTBOUND_TEMPLATE_LEAD no configurada" })
   }
