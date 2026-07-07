@@ -278,7 +278,7 @@ export async function GET(req: Request): Promise<Response> {
     (r) =>
       r.contact &&
       !isTestContact(r.contact, testSet) &&
-      r.followup_closed_reason !== "opt_out" &&
+      !["opt_out", "perdido"].includes(r.followup_closed_reason || "") &&
       r.followup_status !== "activo" &&
       r.followup_status !== "consensuado" && // tiene su propio toque programado
       (!r.reactivation_at || r.reactivation_at <= gapBefore) &&

@@ -50,6 +50,7 @@ import {
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
+import { marcarCotizacionRechazada } from "@/lib/zoho-quote-status"
 import {
   markUserActivity,
   armFollowup,
@@ -763,9 +764,14 @@ async function processOneTurn(
     try {
       const finalToolCalls = (result.toolCalls || []) as ToolCallRecord[]
       // Opt-out: lo DECIDE el modelo (tool marcar_no_contactar), no un regex.
-      const usoOptOut = finalToolCalls.some(
+      const callNoContactar = finalToolCalls.find(
         (c) => c.name === "marcar_no_contactar" && c.ok,
       )
+      const usoOptOut = !!callNoContactar
+      const tipoNoContactar =
+        (callNoContactar?.output as { tipo?: string } | undefined)?.tipo === "perdido"
+          ? "perdido"
+          : "opt_out"
       const usoCierre = finalToolCalls.some(
         (c) => FOLLOWUP_CLOSING_TOOLS.has(c.name) && c.ok,
       )
@@ -795,8 +801,13 @@ async function processOneTurn(
       )
       const esComercial = comercialEsteTurno || tieneEstadoComercial || yaHuboEstimacion
       if (usoOptOut) {
-        await closeFollowup(contact, "opt_out")
-        console.log(`[v3-followup] opt-out (tool) → ciclo cerrado contact=${contact}`)
+        await closeFollowup(contact, tipoNoContactar)
+        console.log(`[v3-followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
+        // Pérdida declarada: la cotización pendiente se marca Rechazada en Zoho
+        // (limpia el pipeline y el guard de reactivación la excluye para siempre).
+        if (tipoNoContactar === "perdido" && quotePointer?.quoteId) {
+          await marcarCotizacionRechazada(quotePointer.quoteId).catch(() => {})
+        }
       } else if (segConsensuado) {
         const cuandoIso = (
           segConsensuado.output as { cuandoIso?: string } | undefined
