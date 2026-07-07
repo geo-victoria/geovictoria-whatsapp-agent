@@ -104,12 +104,27 @@ async function generarNudge(
     .join("\n")
     .slice(-4000)
 
+  // ¿El precio que vio llevaba reloj? (preform con marcador "recurrente" que
+  // menciona reloj). Si es así, el PRIMER toque no es un "¿sigues ahí?": es la
+  // oferta de una configuración más económica SIN el arriendo, con los marcajes
+  // gratis (app / cuadrilla). Decisión comercial de Rodrigo jul-2026: la fuga
+  // dominante es silencio justo tras ver un precio inflado con reloj.
+  const vioPrecioConReloj = history.some(
+    (m) =>
+      m.role === "assistant" && /recurrente/i.test(m.content || "") && /reloj/i.test(m.content || ""),
+  )
+  const anguloBarato =
+    stage <= 1 && vioPrecioConReloj
+      ? " ÁNGULO DE ESTE TOQUE (prioridad): el precio que vio llevaba reloj control (con costo de arriendo). Ofrécele en una frase que existe una alternativa más económica SIN el reloj, marcando gratis con la app —o con la app de cuadrilla, donde todo el equipo marca en una sola tablet o celular de la empresa— y pregúntale si quiere verla. SIN montos, SIN porcentajes y SIN links (eso viene después si responde). Ejemplo del espíritu: 'Oye, si el valor era el tema: hay una opción más económica sin el reloj, marcando gratis con la app (o todos en una sola tablet con la cuadrilla). ¿Te la muestro?'."
+      : ""
+
   const client = new Anthropic({ apiKey })
   const system =
     "Eres Vicky, vendedora chilena de GeoVictoria (control de asistencia B2B). " +
     "El cliente dejó de responder. Escribe UN solo mensaje corto de WhatsApp (máximo 2 frases) para reengancharlo, retomando el punto EXACTO donde quedó la conversación. " +
     "Si la conversación recién partía y casi no hay contexto (solo un saludo o una pregunta suelta), usa un toque breve y humano tipo '¿Todo bien? Te perdí 😅' o '¿Sigues ahí?' — NO inventes un tema que no existió. " +
     instruccionDeTono(stage) +
+    anguloBarato +
     " REGLAS DURAS: español chileno con tuteo (tú/tienes/puedes; JAMÁS vos/tenés/podés). " +
     "PROHIBIDO: mencionar precios, montos, porcentajes, descuentos, UF o links; inventar información nueva; usar más de un emoji; dirigirte al cliente por un nombre que NO aparezca dicho por él en la conversación (y JAMÁS lo llames 'Vicky' — Vicky eres tú). ENFOQUE CONSULTIVO, NO COBRADOR: en vez de EXIGIR los datos que faltaban, prioriza una pregunta de baja presión que invite al cliente a decir qué lo frena o qué duda tiene ('te quedó alguna duda?', 'hay algo que te falte para avanzar?'). Si en el historial YA le enviaste la cotización formal, además puedes recordarle suave que su cotización está en este mismo WhatsApp y que puede aceptarla cuando quiera —SIN repetir el link ni el monto—. Si solo hubo un estimado/preform (aún sin cotización formal), NO digas eso: solo la pregunta consultiva. El objetivo es que RESPONDA y saque su objeción, no presionarlo con el trámite. " +
     "Devuelve SOLO el texto del mensaje, sin comillas ni explicación."

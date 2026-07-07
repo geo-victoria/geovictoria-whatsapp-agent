@@ -266,6 +266,10 @@ const CONTEXTO_REENGANCHE =
   "es su respuesta a ese toque. Aplica la regla 'REENGANCHE POR OFERTA': si el cliente todavía " +
   "NO está en el descuento máximo del plan, ofrécele el máximo de forma proactiva con la tool de " +
   "descuento que corresponda; si YA estaba en el máximo, recuérdale que ese precio caduca pronto. " +
+  "ADEMÁS, si el precio que vio llevaba RELOJ control (arriendo), acompaña la oferta con la " +
+  "alternativa más económica sin reloj usando los marcajes gratis (app, o la app de cuadrilla " +
+  "donde todo el equipo marca en una sola tablet o celular de la empresa): cotízala con " +
+  "cotizar_referencial sin hardware y muestra ambos caminos para que elija. " +
   "En todos los casos transmite urgencia (la oferta tiene caducidad). No inventes cifras: usa solo " +
   "los textos que devuelven las tools.\n\n"
 
