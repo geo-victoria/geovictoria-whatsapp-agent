@@ -77,15 +77,17 @@ export async function POST(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as LeadBody
   const nombre = (body.nombre || "").trim()
   const apellido = (body.apellido || "").trim()
-  const empresa = (body.empresa || "").trim()
+  // Empresa es OPCIONAL (el formulario a veces llega sin Company): con fallback
+  // la plantilla lee natural ("...tu solicitud de cotización para tu empresa").
+  const empresa = (body.empresa || "").trim() || "tu empresa"
   const email = (body.email || "").trim()
   const rango = (body.empleadosRango || "").trim()
   const zohoLeadId = (body.zohoLeadId || "").trim()
   const contact = (body.telefono || "").replace(/\D/g, "")
 
-  if (!contact || !nombre || !empresa) {
+  if (!contact || !nombre) {
     return NextResponse.json(
-      { ok: false, error: "telefono, nombre y empresa son requeridos" },
+      { ok: false, error: "telefono y nombre son requeridos" },
       { status: 400 },
     )
   }
