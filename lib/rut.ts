@@ -44,15 +44,18 @@ export function rutValido(rutRaw: string): boolean {
 }
 
 /**
- * Devuelve el RUT en formato canónico chileno con puntos y guion
- * ("77.861.333-6"), sin importar cómo lo haya tecleado el cliente. Si no es un
- * RUT válido, devuelve el original recortado (la validación se hace aparte).
+ * Devuelve el RUT en el formato canónico del CRM: SIN puntos y CON guion
+ * ("77861333-6"), sin importar cómo lo haya tecleado el cliente. Es la
+ * convención del equipo comercial (pedido de Anderson, jul-2026): las SDR
+ * buscan los tratos por RUT y el formato con puntos no calza en la búsqueda.
+ * Si no es un RUT válido, devuelve el original recortado (la validación se
+ * hace aparte). El dedup del cotizador busca todas las variantes, así que el
+ * cambio no rompe el match con cuentas antiguas guardadas con puntos.
  */
 export function formatearRut(rutRaw: string): string {
   if (!rutValido(rutRaw)) return String(rutRaw || "").trim()
   const limpio = normalizarRut(rutRaw)
   const cuerpo = limpio.slice(0, -1)
   const dv = limpio.slice(-1)
-  const cuerpoConPuntos = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
-  return `${cuerpoConPuntos}-${dv}`
+  return `${cuerpo}-${dv}`
 }
