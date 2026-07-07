@@ -112,11 +112,23 @@ function buildReporte(opts: {
   etiqueta: string
   rows: Analisis[]
   cot: { enviadas: number; aceptadas: number } | null
+  nuevasSet: Set<string>
+  reactivados: number
 }): string {
-  const { etiqueta, rows, cot } = opts
+  const { etiqueta, rows, cot, nuevasSet, reactivados } = opts
   const total = rows.length
+  // Solo cuentan como "vieron precio AYER" las conversaciones NUEVAS del día;
+  // las viejas re-activadas (toque de reactivación / nudge) se reportan aparte
+  // para no inflar la lectura diaria (el funnel histórico las cuenta una vez).
+  const conPrecio = rows.filter((r) =>
+    r.cotizacion_outcome === "preform_mostrado" || r.cotizacion_outcome === "cotizacion_enviada",
+  )
+  const precioNuevas = conPrecio.filter((r) => nuevasSet.has(r.contact)).length
+  const precioViejas = conPrecio.length - precioNuevas
   const preforms = rows.filter((r) => r.cotizacion_outcome === "preform_mostrado").length
   const cotEnviadasConv = rows.filter((r) => r.cotizacion_outcome === "cotizacion_enviada").length
+  void preforms
+  void cotEnviadasConv
   const leads = rows.filter((r) => r.sub_bucket === "lead").length
   const soporte = rows.filter((r) => r.grupo === "soporte" || r.sub_bucket === "soporte").length
   const sinCierre = rows.filter((r) => r.motivo_no_cierre)
@@ -131,8 +143,10 @@ function buildReporte(opts: {
   const L: string[] = []
   L.push(`📊 Reporte Vicky — ${etiqueta}`)
   L.push("")
-  L.push(`Conversaciones: ${total}`)
-  L.push(`Preforms (vieron precio): ${preforms + cotEnviadasConv}`)
+  L.push(`Conversaciones activas: ${total}`)
+  L.push(`Vieron precio (nuevas del día): ${precioNuevas}`)
+  if (precioViejas > 0) L.push(`Conversaciones antiguas retomadas con precio: ${precioViejas}`)
+  L.push(`Reactivación: ${reactivados} toques enviados`)
   if (cot) {
     L.push(`Cotizaciones enviadas (Zoho): ${cot.enviadas}`)
     L.push(`Cotizaciones aceptadas (Zoho): ${cot.aceptadas}`)
@@ -177,8 +191,18 @@ async function handle(req: Request): Promise<Response> {
     `&select=contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre&limit=1000`,
   )) as Analisis[]
 
+  // Conversaciones NUEVAS del día (para no contar como "preform de ayer" a las
+  // viejas que un toque de reactivación resucitó) + toques de reactivación.
+  const nuevas = (await supaSelect(
+    `vic_v3_conversations?started_at=gte.${desde}&started_at=lt.${hasta}&select=contact&limit=1000`,
+  )) as Array<{ contact: string }>
+  const nuevasSet = new Set(nuevas.map((n) => n.contact))
+  const reactivadas = (await supaSelect(
+    `vic_v3_conversations?reactivation_at=gte.${desde}&reactivation_at=lt.${hasta}&select=contact&limit=1000`,
+  )) as Array<{ contact: string }>
+
   const cot = await cotizacionesZoho(desde, hasta)
-  const texto = buildReporte({ etiqueta, rows, cot })
+  const texto = buildReporte({ etiqueta, rows, cot, nuevasSet, reactivados: reactivadas.length })
   const envio = await enviarCloud(to, texto)
 
   return NextResponse.json({
