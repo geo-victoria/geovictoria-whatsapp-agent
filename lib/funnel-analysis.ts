@@ -48,6 +48,7 @@ const DEFAULT_TEST_CONTACTS = [
   "56939372058", // Anderson (ejecutivo comercial)
   "56966765498", // Línea Vicky — Meta Cloud API
   "56967308227", // Línea Vicky — Botmaker
+  "56965098843", // Interno (pruebas)
 ]
 export function testContactSet(): Set<string> {
   const raw = (process.env.VIC_FUNNEL_TEST_CONTACTS || "").trim()
