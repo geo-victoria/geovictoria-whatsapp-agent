@@ -584,3 +584,31 @@ texto no funciona. Dos variantes, no excluyentes:
 **Por qué importa:** la voz tiene tasa de respuesta muy superior al texto para
 leads fríos y cierra el ciclo omnicanal (WhatsApp → correo → llamada) sin sumar
 carga manual al equipo comercial.
+
+---
+
+## Mejoras del flujo post-venta / onboarding (sugerencias de Anderson, jul-2026)
+
+**1. Automatizar el envío del comprobante de pago al cliente**
+Hoy el comprobante de MercadoPago se comparte a mano desde el panel. Al confirmarse
+un pago (webhook), enviar automáticamente el comprobante/confirmación al correo del
+cliente (y opcionalmente por WhatsApp). Insumos: los datos del pago ya están en el
+webhook/finalize; el comprobante oficial vive en MP (evaluar si basta una
+confirmación propia con nº de operación o se adjunta el de MP).
+
+**2. Verificar el primer correo de Auto-Onboarding (reportado: "no está llegando")**
+Eduardo corrigió el filtro del workflow de Zoho que omitía el envío cuando el
+origen era la redirección web post-cotización — verificar end-to-end con el próximo
+pago real que el correo llegue (y revisar spam/remitente). Relacionado: buzón
+vicky@ en M365 (respuestas rebotan) y reputación del remitente.
+
+**3. Onboarding — turnos: opción de finalizar sin retroceder**
+En el paso de turnos del auto-onboarding, el usuario que ya terminó debe poder
+finalizar directamente sin tener que volver atrás por el wizard. Cambio de UX en
+onboarding-geovictoria.
+
+**4. Onboarding — creación y asignación de turnos con agente LLM**
+Reemplazar la configuración manual de turnos por un agente conversacional (LLM)
+que entienda "trabajamos L-V 9 a 18 con colación de 45 min" y genere/asigne los
+turnos. Feature mayor; definir alcance mínimo (crear turnos desde texto libre)
+antes de asignaciones complejas.
