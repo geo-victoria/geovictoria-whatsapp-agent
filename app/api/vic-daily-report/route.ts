@@ -82,27 +82,30 @@ type Analisis = {
   motivo_no_cierre: string | null
 }
 
-// Cotizaciones de Vicky enviadas/aceptadas en la ventana (best-effort).
+// Cotizaciones de Vicky enviadas/aceptadas en la ventana (best-effort). OJO con
+// COQL: exige paréntesis explícitos con 3+ condiciones y esta org no acepta
+// count() sin group by — por eso se traen las filas y se cuenta en código (el
+// aggregate fallaba en silencio y el reporte decía siempre 0).
 async function cotizacionesZoho(desde: string, hasta: string): Promise<{ enviadas: number; aceptadas: number } | null> {
   try {
     const token = await getZohoAccessToken()
-    const q = async (extra: string): Promise<number> => {
-      const select =
-        `select count(id) from ${QUOTE_MODULE} ` +
-        `where Created_By = ${VICKY_CREATOR_ID} and Modified_Time >= '${desde}' and Modified_Time < '${hasta}' ${extra}`
-      const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
-        method: "POST",
-        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ select_query: select }),
-        cache: "no-store",
-      })
-      if (!res.ok) return 0
-      const data = await res.json().catch(() => null)
-      return Number(data?.data?.[0]?.count || 0)
+    const select =
+      `select id, Estado_Cotizacion from ${QUOTE_MODULE} ` +
+      `where (Created_By = ${VICKY_CREATOR_ID} and Modified_Time >= '${desde}') and Modified_Time < '${hasta}' limit 200`
+    const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ select_query: select }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = (await res.json().catch(() => null)) as { data?: Array<{ Estado_Cotizacion?: string }> } | null
+    const rows = data?.data || []
+    const estado = (r: { Estado_Cotizacion?: string }) => String(r.Estado_Cotizacion || "").toLowerCase()
+    return {
+      enviadas: rows.filter((r) => estado(r).includes("envia")).length,
+      aceptadas: rows.filter((r) => estado(r).includes("acept")).length,
     }
-    const aceptadas = await q("and Estado_Cotizacion = 'Aceptada'")
-    const enviadas = await q("and Estado_Cotizacion = 'Enviada'")
-    return { enviadas, aceptadas }
   } catch {
     return null
   }
