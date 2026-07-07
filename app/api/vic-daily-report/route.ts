@@ -89,9 +89,12 @@ type Analisis = {
 async function cotizacionesZoho(desde: string, hasta: string): Promise<{ enviadas: number; aceptadas: number } | null> {
   try {
     const token = await getZohoAccessToken()
+    // COQL rechaza el ISO con milisegundos y 'Z' (p. ej. 2026-07-06T04:00:00.000Z);
+    // acepta el offset explícito: 2026-07-06T04:00:00+00:00.
+    const coqlDate = (iso: string) => iso.replace(/\.\d{3}Z$/, "+00:00").replace(/Z$/, "+00:00")
     const select =
       `select id, Estado_Cotizacion from ${QUOTE_MODULE} ` +
-      `where (Created_By = ${VICKY_CREATOR_ID} and Modified_Time >= '${desde}') and Modified_Time < '${hasta}' limit 200`
+      `where (Created_By = ${VICKY_CREATOR_ID} and Modified_Time >= '${coqlDate(desde)}') and Modified_Time < '${coqlDate(hasta)}' limit 200`
     const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
       method: "POST",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
