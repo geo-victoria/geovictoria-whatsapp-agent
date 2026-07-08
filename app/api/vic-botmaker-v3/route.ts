@@ -292,7 +292,15 @@ async function processOneTurn(
       )
       const zohoLeadId = bloque?.content?.match(/zohoLeadId (\d+)/)?.[1]
       if (zohoLeadId) {
-        updateZohoLeadStatus(zohoLeadId, "3. Contactado").catch(() => {})
+        // AWAIT obligatorio: sin await la lambda puede congelar la promesa y el
+        // hito se pierde en silencio (pasó en la prueba E2E del 08-jul).
+        const st = await updateZohoLeadStatus(zohoLeadId, "3. Contactado").catch((e) => ({
+          success: false,
+          error: e instanceof Error ? e.message : "excepción",
+        }))
+        console.log(
+          `[v3-bg] lead ${zohoLeadId} → "3. Contactado": ${st.success ? "ok" : `FALLÓ ${st.error || ""}`}`,
+        )
       }
     }
 
