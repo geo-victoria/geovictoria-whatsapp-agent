@@ -291,6 +291,38 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // Capa 3b — leadId del formulario web (Vicky proactiva). Regla comercial:
+        // al cotizar, el lead original se CONVIERTE en cuenta+contacto+deal —
+        // nunca un deal huérfano en paralelo al lead. El modelo a veces omite el
+        // leadId aunque el prompt lo exige (pasó en la prueba E2E del 08-jul),
+        // así que se inyecta determinístico desde el bloque
+        // "[Datos del formulario web: ... zohoLeadId N]" del historial.
+        if (
+          toolName === "generar_link_cotizadora" &&
+          !toolInput.leadId &&
+          !toolInput.accountId &&
+          !toolInput.contactId
+        ) {
+          const bloque = [...history]
+            .reverse()
+            .find(
+              (m) =>
+                m.role === "assistant" &&
+                typeof m.content === "string" &&
+                m.content.includes("[Datos del formulario web:"),
+            )
+          const zohoLeadId =
+            typeof bloque?.content === "string"
+              ? bloque.content.match(/zohoLeadId (\d+)/)?.[1]
+              : undefined
+          if (zohoLeadId) {
+            toolInput.leadId = zohoLeadId
+            console.log(
+              `[agent-loop] Capa 3b: leadId ${zohoLeadId} inyectado a generar_link_cotizadora (lead del formulario web).`,
+            )
+          }
+        }
+
         // Acotamiento: con una cotización FORMAL ya generada en esta
         // conversación, (a) NO se genera otra formal (anti-duplicado) y (b) la
         // negociación preform queda cerrada — todo descuento adicional va
