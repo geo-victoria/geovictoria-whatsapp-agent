@@ -171,6 +171,26 @@ export async function POST(req: Request): Promise<Response> {
   ].join("\n")
   await appendAssistantV3(contact, ctx).catch(() => {})
 
+  // 3. Arranca la CADENCIA multicanal (correos vía Zoho + HSM día 1/7): el cron
+  // vic-outbound-cadence-cron toma esta fila; cualquier respuesta la corta.
+  await fetch(`${SUPABASE_URL}/rest/v1/vic_outbound_cadence?on_conflict=contact`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({
+      contact,
+      zoho_lead_id: zohoLeadId || null,
+      email: email || null,
+      nombre,
+      empresa,
+    }),
+    cache: "no-store",
+  }).catch(() => {})
+
   console.log(`[outbound-lead] toque 0 → ${contact} (${empresa}${rango ? `, ${rango}` : ""})`)
-  return NextResponse.json({ ok: true, contact, empresa, template: TPL_LEAD })
+  return NextResponse.json({ ok: true, contact, empresa, template: TPL_LEAD, cadencia: "iniciada" })
 }
