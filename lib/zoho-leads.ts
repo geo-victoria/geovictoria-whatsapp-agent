@@ -77,16 +77,30 @@ async function resolveOwnerId(
   token: string,
   apiDomain: string,
 ): Promise<string | null> {
+  // OJO: el org tiene ~400 usuarios y la API pagina de a 200 — buscar solo la
+  // página 1 dejaba sin resolver a media organización (bug real: las SDR
+  // Inbound estaban en la página 2 y la reasignación fallaba en silencio).
   try {
-    const res = await fetch(`${apiDomain}/crm/v2/users?type=AllUsers`, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      cache: "no-store",
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as { users?: Array<{ id: string; email: string }> }
-    const users = data?.users || []
-    const match = users.find((u) => u.email?.toLowerCase() === email.toLowerCase())
-    return match?.id || null
+    for (let page = 1; page <= 5; page++) {
+      const res = await fetch(
+        `${apiDomain}/crm/v2/users?type=AllUsers&per_page=200&page=${page}`,
+        {
+          headers: { Authorization: `Zoho-oauthtoken ${token}` },
+          cache: "no-store",
+        },
+      )
+      if (!res.ok) return null
+      const data = (await res.json()) as {
+        users?: Array<{ id: string; email: string }>
+        info?: { more_records?: boolean }
+      }
+      const match = (data?.users || []).find(
+        (u) => u.email?.toLowerCase() === email.toLowerCase(),
+      )
+      if (match?.id) return match.id
+      if (!data?.info?.more_records) return null
+    }
+    return null
   } catch {
     return null
   }
