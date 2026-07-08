@@ -39,7 +39,8 @@ export const ANALYSIS_MODEL =
 // Números internos de prueba a excluir del embudo (configurable sin redeploy
 // vía VIC_FUNNEL_TEST_CONTACTS, coma-separados). Compartido por cron + dashboard.
 const DEFAULT_TEST_CONTACTS = [
-  "56944668823", // Eduardo
+  // Eduardo (56944668823) fuera de la lista a pedido (08-jul): prueba final del
+  // flujo formulario web → toque 0 en su teléfono. Re-agregar al terminar.
   "56978385048", // Rodrigo
   "56962288575", // Kerim
   "56982945030", // Andrea
