@@ -618,3 +618,39 @@ Reemplazar la configuración manual de turnos por un agente conversacional (LLM)
 que entienda "trabajamos L-V 9 a 18 con colación de 45 min" y genere/asigne los
 turnos. Feature mayor; definir alcance mínimo (crear turnos desde texto libre)
 antes de asignaciones complejas.
+
+---
+
+## Prompt: orden de presentación de los métodos de marcaje (App → Huellero → Reloj)
+
+**Estado:** propuesto (jul-2026, Lalo). Relacionado con el cambio "app-first"
+que quedó revertido a la espera del OK de Rodrigo.
+
+**Qué:** definir un ORDEN canónico al presentar las modalidades de marcaje:
+1. **App** (gratis, mejor precio)
+2. **Huellero**
+3. **Reloj control**
+
+Hoy el menú default ofrece "app y reloj" como las dos más usadas (web/call como
+nota al pie) sin un orden comercial deliberado. Al retomar el app-first, fijar
+esta jerarquía en el bloque de marcaje y en la pregunta de modalidad.
+
+---
+
+## Prompt: conocimiento de protección de datos (nueva ley) + encriptación
+
+**Estado:** propuesto (jul-2026, Lalo). Caso real: una prospecto (Siman Trio,
+08-jul) preguntó "¿con la nueva ley de protección de datos no hay problema con
+el marcaje?" y Vicky respondió genérico.
+
+**Qué darle a Vicky como conocimiento (bloque nuevo en el prompt):**
+- **El trabajador puede pedir marcar SIN entregar datos biométricos**: la app
+  permite marcaje con validación por **patrón** o **contraseña** (además de la
+  facial). Es la respuesta correcta ante dudas por la nueva ley de protección
+  de datos personales: nadie está obligado a la biometría.
+- **Los datos en GeoVictoria están encriptados** (mencionarlo como respaldo de
+  seguridad cuando pregunten por el tratamiento de los datos).
+
+**Cuidado al redactar:** que responda esto solo cuando pregunten (no proactivo),
+en 2-3 frases vendiendo tranquilidad, y sin hacer afirmaciones legales que no
+correspondan (no es asesoría legal; si piden detalle normativo fino, ejecutivo).
