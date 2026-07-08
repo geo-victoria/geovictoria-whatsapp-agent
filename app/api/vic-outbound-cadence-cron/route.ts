@@ -201,12 +201,22 @@ export async function GET(req: Request): Promise<Response> {
       // Cadencia agotada sin respuesta → el lead vuelve a un humano (acuerdo
       // con Marketing: round-robin SDR Inbound).
       let reasignado: string | undefined
+      let errorReasignacion: string | undefined
       if (p.row.zoho_lead_id) {
-        const rr = await reasignarLeadSdrInbound(p.row.zoho_lead_id).catch(() => null)
-        reasignado = rr?.ownerEmail
+        const rr = await reasignarLeadSdrInbound(p.row.zoho_lead_id).catch((e) => ({
+          success: false as const,
+          error: e instanceof Error ? e.message : "excepción",
+        }))
+        reasignado = rr && "ownerEmail" in rr ? rr.ownerEmail : undefined
+        errorReasignacion = rr?.error
       }
       await cerrar(p.row.contact, "agotada")
-      detalle.push({ contact: p.row.contact, accion: "agotar", reasignado: reasignado || null })
+      detalle.push({
+        contact: p.row.contact,
+        accion: "agotar",
+        reasignado: reasignado || null,
+        ...(errorReasignacion ? { error: errorReasignacion } : {}),
+      })
       continue
     }
 

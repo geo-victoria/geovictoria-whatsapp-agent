@@ -182,14 +182,19 @@ export async function updateZohoLeadStatus(
 }
 
 // SDRs Inbound para la reasignación de lo que Vicky suelta (acuerdo con
-// Marketing jul-2026: si el WhatsApp no se entrega, el lead vuelve a un humano,
-// repartido equitativamente entre las dos).
-const SDR_INBOUND_EMAILS = (
-  process.env.VIC_SDR_INBOUND_EMAILS || "aaraque@geovictoria.com,asepulveda@geovictoria.com"
+// Marketing jul-2026). Formato "email:zohoUserId" — con el id directo no
+// dependemos de la API de usuarios (400+ usuarios, paginada y con scope
+// propio). Si falta el id, se resuelve por email como fallback.
+const SDR_INBOUND = (
+  process.env.VIC_SDR_INBOUND ||
+  "aaraque@geovictoria.com:3525045000583802005,asepulveda@geovictoria.com:3525045000594735052"
 )
   .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean)
+  .map((s) => {
+    const [email, id] = s.split(":").map((x) => x.trim())
+    return { email, id: id || "" }
+  })
+  .filter((s) => s.email)
 
 /**
  * Reasigna un lead al siguiente SDR Inbound del round-robin (turno persistido
@@ -198,17 +203,44 @@ const SDR_INBOUND_EMAILS = (
 export async function reasignarLeadSdrInbound(
   leadId: string,
 ): Promise<{ success: boolean; ownerEmail?: string; error?: string }> {
-  if (!leadId || SDR_INBOUND_EMAILS.length === 0) {
+  if (!leadId || SDR_INBOUND.length === 0) {
     return { success: false, error: "leadId faltante o sin SDRs configuradas" }
   }
-  const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
-  const last = parseInt((await getKvValue("sdr_inbound_rr").catch(() => null)) || "-1")
-  const idx = (isNaN(last) ? 0 : last + 1) % SDR_INBOUND_EMAILS.length
-  const ownerEmail = SDR_INBOUND_EMAILS[idx]
-  const upd = await updateZohoLeadOwner(leadId, ownerEmail)
-  if (!upd.success) return { success: false, error: upd.error }
-  await setKvValue("sdr_inbound_rr", String(idx)).catch(() => {})
-  return { success: true, ownerEmail }
+  try {
+    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+    const last = parseInt((await getKvValue("sdr_inbound_rr").catch(() => null)) || "-1")
+    const idx = (isNaN(last) ? 0 : last + 1) % SDR_INBOUND.length
+    const sdr = SDR_INBOUND[idx]
+
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    const ownerId = sdr.id || (await resolveOwnerId(sdr.email, accessToken, apiDomain))
+    if (!ownerId) return { success: false, error: `sin user_id para ${sdr.email}` }
+
+    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ Owner: { id: ownerId } }] }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ status?: string; code?: string; message?: string }>
+    }
+    if (!res.ok || data?.data?.[0]?.status !== "success") {
+      return {
+        success: false,
+        error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}`,
+      }
+    }
+    await setKvValue("sdr_inbound_rr", String(idx)).catch(() => {})
+    return { success: true, ownerEmail: sdr.email }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
+  }
 }
 
 export type CreateZohoLeadInput = {
