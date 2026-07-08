@@ -682,3 +682,30 @@ encarece fuerte el pago inicial — ver fugas de Pto. Natales y zonas extremas):
 desplegada — esto la vuelve PREVENTIVA para regiones (recomendar antes de que
 aparezca la objeción), y se apoya en el orden App → Huellero → Reloj del ítem
 anterior del backlog.
+
+---
+
+## Prompt: quitar la advertencia de la auto-instalación
+
+**Estado:** propuesto (jul-2026, Lalo).
+
+**Qué:** eliminar la observación que Vicky hace cuando el cliente elige
+instalar el reloj por su cuenta ("ojo que si lo instalas por tu cuenta hay
+algunas consideraciones: sin garantía de funcionamiento en sitio, la visita
+de soporte se cobra aparte… ¿quieres seguir así?"). Hoy el prompt OBLIGA a
+comunicar esas advertencias antes del preform (sección "Instalación del reloj
+físico") y la tool las devuelve como warnings.
+
+**Por qué:** frena el cierre con fricción/letra chica en un momento de avance
+(el cliente ya decidió auto-instalar) y en la práctica genera dudas más que
+protección — mismo espíritu del cambio del anexo de la app (no anticipar letra
+chica; que viva en términos/onboarding).
+
+**Alcance al implementar:**
+- Prompt: quitar la instrucción de comunicar las advertencias y el re-check
+  ("¿quieres seguir así o instalación profesional?"). La elección del cliente
+  se acepta y se avanza.
+- Verificar dónde queda declarada la condición (los T&C del PDF ya mencionan
+  la garantía del arriendo) para que siga existiendo por escrito.
+- La tool puede seguir devolviendo los warnings (se ignoran en el chat) o
+  limpiarse después.
