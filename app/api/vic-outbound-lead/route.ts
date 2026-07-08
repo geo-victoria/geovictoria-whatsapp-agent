@@ -69,6 +69,10 @@ type LeadBody = {
   email?: string
   empleadosRango?: string
   zohoLeadId?: string
+  // Hook de PRUEBA (mismo patrón que el cron de reactivación): con test=true
+  // salta la exclusión de internos y el dedup para validar la plantilla en un
+  // número del equipo. NO persiste contexto ni toca el lead en Zoho.
+  test?: boolean
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -91,6 +95,15 @@ export async function POST(req: Request): Promise<Response> {
       { ok: false, error: "telefono y nombre son requeridos" },
       { status: 400 },
     )
+  }
+  // Hook de prueba: envía la plantilla real al número indicado (aunque sea
+  // interno) y termina — sin dedup, sin contexto persistido, sin tocar Zoho.
+  if (body.test === true) {
+    if (!TPL_LEAD) {
+      return NextResponse.json({ ok: false, test: true, error: "OUTBOUND_TEMPLATE_LEAD no configurada" })
+    }
+    const okTest = await sendBotmakerTemplate(contact, TPL_LEAD, { nombre, empresa }).catch(() => false)
+    return NextResponse.json({ ok: okTest, test: true, contact, template: TPL_LEAD })
   }
   // Los números internos no reciben prospección (mismo set que excluye el embudo).
   if (isTestContact(contact, testContactSet())) {
