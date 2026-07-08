@@ -220,13 +220,13 @@ export async function GET(req: Request): Promise<Response> {
         continue
       }
       const { subject, html } = buildCorreoCadencia(p.accion, p.row.nombre || "", empresa)
-      const ok = await sendLeadEmail(p.row.zoho_lead_id, p.row.email, subject, html)
-      if (ok) {
+      const envio = await sendLeadEmail(p.row.zoho_lead_id, p.row.email, subject, html)
+      if (envio.ok) {
         await marcarToque(p.row.contact, campo)
         enviados++
         detalle.push({ contact: p.row.contact, accion: p.accion, ok: true })
       } else {
-        detalle.push({ contact: p.row.contact, accion: p.accion, ok: false })
+        detalle.push({ contact: p.row.contact, accion: p.accion, ok: false, error: envio.error })
       }
       continue
     }

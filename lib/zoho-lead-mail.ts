@@ -70,15 +70,15 @@ ${botonWhatsApp("Retomar cuando quieras")}
 
 /**
  * Envía un correo al lead desde su registro en Zoho (from = vicky@). Devuelve
- * false si falta el email/leadId o Zoho rechaza — nunca lanza.
+ * { ok } y, si Zoho rechaza, el detalle del error — nunca lanza.
  */
 export async function sendLeadEmail(
   leadId: string,
   toEmail: string,
   subject: string,
   html: string,
-): Promise<boolean> {
-  if (!leadId || !toEmail) return false
+): Promise<{ ok: boolean; error?: string }> {
+  if (!leadId || !toEmail) return { ok: false, error: "leadId o email faltante" }
   try {
     const token = await getZohoAccessToken()
     const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -106,12 +106,12 @@ export async function sendLeadEmail(
     )
     if (!res.ok) {
       const body = await res.text().catch(() => "")
-      console.error(`[lead-mail] send_mail ${res.status} lead=${leadId}:`, body.slice(0, 200))
-      return false
+      console.error(`[lead-mail] send_mail ${res.status} lead=${leadId}:`, body.slice(0, 300))
+      return { ok: false, error: `${res.status}: ${body.slice(0, 250)}` }
     }
-    return true
+    return { ok: true }
   } catch (e) {
     console.error(`[lead-mail] excepción lead=${leadId}:`, e)
-    return false
+    return { ok: false, error: e instanceof Error ? e.message : "excepción" }
   }
 }
