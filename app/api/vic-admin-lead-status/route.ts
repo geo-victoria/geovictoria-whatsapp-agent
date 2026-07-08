@@ -33,6 +33,24 @@ async function authorized(req: Request): Promise<boolean> {
   return false
 }
 
+// GET ?leadId=<id> → lista las transiciones de blueprint disponibles (debug).
+export async function GET(req: Request): Promise<Response> {
+  if (!(await authorized(req))) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  }
+  const leadId = (new URL(req.url).searchParams.get("leadId") || "").trim()
+  if (!leadId) return NextResponse.json({ ok: false, error: "leadId requerido" }, { status: 400 })
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken()
+  const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const res = await fetch(`${apiDomain}/crm/v2/Leads/${leadId}/actions/blueprint`, {
+    headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    cache: "no-store",
+  })
+  const data = await res.json().catch(() => ({}))
+  return NextResponse.json({ ok: res.ok, data })
+}
+
 export async function POST(req: Request): Promise<Response> {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
