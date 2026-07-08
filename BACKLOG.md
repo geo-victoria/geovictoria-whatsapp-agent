@@ -354,6 +354,12 @@ seguir la cadencia fija a ciegas.
 **Qué:** actualizar la **foto de perfil** del número de WhatsApp de Vicky. El
 usuario (Lalo) ya tiene la imagen que se debe usar.
 
+**Replanteo de la imagen (jul-2026):** revisar el CONCEPTO de la foto actual —
+¿por qué Vicky aparece con chaleco altiplánico? Evaluar si esa estética
+representa la marca y al personaje (ejecutiva comercial chilena, cercana y
+profesional) o si conviene generar/elegir una imagen nueva alineada al branding
+de GeoVictoria antes de subirla. Definirlo con Marketing.
+
 **Dónde se hace (no es el repo):** la foto de perfil de un número WhatsApp
 Business API se cambia en **Botmaker** (configuración del canal) o vía la
 **WhatsApp Business API / Meta Business Manager** (endpoint de business profile).
