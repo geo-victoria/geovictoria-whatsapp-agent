@@ -170,14 +170,92 @@ export async function updateZohoLeadStatus(
       body: JSON.stringify({ data: [{ Lead_Status: status }] }),
     })
     const data = (await res.json().catch(() => ({}))) as {
-      data?: Array<{ status?: string }>
+      data?: Array<{ status?: string; code?: string }>
     }
     if (!res.ok || data?.data?.[0]?.status !== "success") {
+      // El Lead_Status del org vive dentro de un BLUEPRINT: el update directo
+      // devuelve RECORD_IN_BLUEPRINT y hay que ejecutar la TRANSICIÓN cuyo
+      // estado destino coincida con el pedido.
+      if (data?.data?.[0]?.code === "RECORD_IN_BLUEPRINT") {
+        return await ejecutarTransicionBlueprint(
+          apiDomain,
+          accessToken,
+          moduleName,
+          leadId,
+          status,
+        )
+      }
       return { success: false, error: `Zoho update status ${res.status}` }
     }
     return { success: true }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "error actualizando status" }
+  }
+}
+
+// Ejecuta la transición del blueprint del lead cuyo valor de destino calza con
+// el status pedido (match exacto o por inclusión, ej. "3. Contactado").
+async function ejecutarTransicionBlueprint(
+  apiDomain: string,
+  accessToken: string,
+  moduleName: string,
+  leadId: string,
+  status: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const headers = {
+      Authorization: `Zoho-oauthtoken ${accessToken}`,
+      "Content-Type": "application/json",
+    }
+    const bpRes = await fetch(
+      `${apiDomain}/crm/v2/${moduleName}/${leadId}/actions/blueprint`,
+      { headers, cache: "no-store" },
+    )
+    if (!bpRes.ok) return { success: false, error: `blueprint GET ${bpRes.status}` }
+    const bp = (await bpRes.json().catch(() => ({}))) as {
+      blueprint?: {
+        transitions?: Array<{ id: string; name?: string; next_field_value?: string }>
+      }
+    }
+    const transitions = bp?.blueprint?.transitions || []
+    const objetivo = status.toLowerCase()
+    const match = transitions.find((t) => {
+      const destino = (t.next_field_value || "").toLowerCase()
+      const nombre = (t.name || "").toLowerCase()
+      return destino === objetivo || destino.includes(objetivo) || objetivo.includes(destino) || nombre.includes(objetivo)
+    })
+    if (!match) {
+      return {
+        success: false,
+        error: `sin transición hacia "${status}" (disponibles: ${transitions
+          .map((t) => t.next_field_value || t.name)
+          .join(", ")
+          .slice(0, 150)})`,
+      }
+    }
+    const exec = await fetch(
+      `${apiDomain}/crm/v2/${moduleName}/${leadId}/actions/blueprint`,
+      {
+        method: "PUT",
+        headers,
+        cache: "no-store",
+        body: JSON.stringify({ blueprint: [{ transition_id: match.id, data: {} }] }),
+      },
+    )
+    const execData = (await exec.json().catch(() => ({}))) as {
+      code?: string
+      status?: string
+      message?: string
+    }
+    if (!exec.ok || (execData?.code && execData.code !== "SUCCESS")) {
+      return {
+        success: false,
+        error: `blueprint PUT ${exec.status}: ${JSON.stringify(execData).slice(0, 150)}`,
+      }
+    }
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "excepción blueprint" }
   }
 }
 
