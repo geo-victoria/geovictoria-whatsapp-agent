@@ -654,3 +654,31 @@ el marcaje?" y Vicky respondió genérico.
 **Cuidado al redactar:** que responda esto solo cuando pregunten (no proactivo),
 en 2-3 frases vendiendo tranquilidad, y sin hacer afirmaciones legales que no
 correspondan (no es asesoría legal; si piden detalle normativo fino, ejecutivo).
+
+---
+
+## Prompt: en REGIONES recomendar marcajes auto-asistidos (los más baratos)
+
+**Estado:** propuesto (jul-2026, Lalo).
+
+**Qué:** cuando el prospecto es de REGIÓN (fuera de la RM), Vicky debe
+recomendar proactivamente los métodos de marcaje **auto-asistidos y más
+baratos**, en vez de anclar con reloj + instalación/envío (que en regiones
+encarece fuerte el pago inicial — ver fugas de Pto. Natales y zonas extremas):
+
+1. **App** (gratis, cada uno en su celular)
+2. **Cuadrilla** (gratis, todo el equipo marca en una tablet/celular de la empresa)
+3. **USB** (método auto-asistido de bajo costo — definir alcance/precio exacto)
+
+**Pendiente de definición antes de implementar:**
+- Confirmar qué es exactamente el marcaje **USB** en el catálogo (no está hoy
+  en el conocimiento del prompt ni en el catálogo de la tool de precios) y su
+  tarifa, para no inventar un producto.
+- Decidir si el reloj se sigue OFRECIENDO en regiones cuando el cliente lo pide
+  (sí, con transparencia de costos de envío/instalación) o solo bajo fit
+  evidente.
+
+**Relación:** complementa la regla "barato-primero ante objeción de precio" ya
+desplegada — esto la vuelve PREVENTIVA para regiones (recomendar antes de que
+aparezca la objeción), y se apoya en el orden App → Huellero → Reloj del ítem
+anterior del backlog.
