@@ -193,6 +193,13 @@ export async function updateZohoLeadStatus(
   }
 }
 
+// Campos que las transiciones del blueprint exigen y su valor default para el
+// contexto de Vicky (el cliente respondió el WhatsApp y está en conversación).
+const BLUEPRINT_FIELD_DEFAULTS: Record<string, string> = {
+  // Picklist "Pendiente para calificado" de la transición a "3. Contactado".
+  Motivo_Calificado_no_convertido: "Falta información del cliente",
+}
+
 // Ejecuta la transición del blueprint del lead cuyo valor de destino calza con
 // el status pedido (match exacto o por inclusión, ej. "3. Contactado").
 async function ejecutarTransicionBlueprint(
@@ -214,7 +221,12 @@ async function ejecutarTransicionBlueprint(
     if (!bpRes.ok) return { success: false, error: `blueprint GET ${bpRes.status}` }
     const bp = (await bpRes.json().catch(() => ({}))) as {
       blueprint?: {
-        transitions?: Array<{ id: string; name?: string; next_field_value?: string }>
+        transitions?: Array<{
+          id: string
+          name?: string
+          next_field_value?: string
+          fields?: Array<{ api_name?: string }>
+        }>
       }
     }
     const transitions = bp?.blueprint?.transitions || []
@@ -233,13 +245,19 @@ async function ejecutarTransicionBlueprint(
           .slice(0, 150)})`,
       }
     }
+    // Completar los campos que la transición exige con los defaults conocidos.
+    const data: Record<string, string> = {}
+    for (const f of match.fields || []) {
+      const api = f?.api_name || ""
+      if (api && BLUEPRINT_FIELD_DEFAULTS[api]) data[api] = BLUEPRINT_FIELD_DEFAULTS[api]
+    }
     const exec = await fetch(
       `${apiDomain}/crm/v2/${moduleName}/${leadId}/actions/blueprint`,
       {
         method: "PUT",
         headers,
         cache: "no-store",
-        body: JSON.stringify({ blueprint: [{ transition_id: match.id, data: {} }] }),
+        body: JSON.stringify({ blueprint: [{ transition_id: match.id, data }] }),
       },
     )
     const execData = (await exec.json().catch(() => ({}))) as {
