@@ -709,3 +709,37 @@ chica; que viva en términos/onboarding).
   la garantía del arriendo) para que siga existiendo por escrito.
 - La tool puede seguir devolviendo los warnings (se ignoran en el chat) o
   limpiarse después.
+
+---
+
+## Cambio de PRECIOS: instalación de reloj por 3 zonas (sin distinción arriendo/compra)
+
+**Estado:** propuesto (jul-2026, Lalo). CAMBIO DE TARIFA OFICIAL.
+
+**Nueva tabla de instalación (cobro único por punto):**
+
+| Zona | Tarifa |
+|---|---|
+| Región Metropolitana | **1 UF** |
+| Regiones IV (Coquimbo), V (Valparaíso) y VI (O'Higgins) | **3 UF** |
+| Resto de las regiones | **5 UF** |
+
+**La misma tarifa aplica para reloj en arriendo Y en compra** (desaparece la
+distinción por modalidad que existe hoy: arriendo RM 1/región 3 · compra RM
+2/región 5 → ahora solo importa la zona).
+
+**Alcance técnico al implementar (no es solo editar un número):**
+- `lib/catalogo/servicios.ts` (agente): la estructura de tarifa hoy es
+  {arriendo:{RM,region}, venta:{RM,region}} → pasa a 3 zonas sin modalidad.
+- El clasificador de zona hoy distingue solo RM vs región → debe reconocer
+  además si la comuna/región cae en IV/V/VI (zona intermedia).
+- Cotizador (`quote-pricing.js` y motor de descuentos): los descuentos de
+  instalación hoy son instalacionRMPct (50%) / instalacionRegionPct (25%) —
+  definir qué % aplica a la zona intermedia (¿25% como regiones?).
+- PDF/preform: textos "instalación (RM/regiones)" siguen saliendo de la tool.
+
+**Preguntas abiertas antes de implementar:**
+1. ¿El ENVÍO mantiene su tabla actual (arriendo RM 0/región 0,5 · compra RM
+   0,5/región 0,7) o también se simplifica?
+2. ¿Tope de descuento para la zona IV-V-VI: 25% (como regiones) u otro?
+3. ¿Desde cuándo rige? (las cotizaciones ya emitidas conservan su precio).
