@@ -317,12 +317,12 @@ carga manual al equipo comercial.
 
 ## Mejoras del flujo post-venta / onboarding (sugerencias de Anderson, jul-2026)
 
-**1. Automatizar el envío del comprobante de pago al cliente**
-Hoy el comprobante de MercadoPago se comparte a mano desde el panel. Al confirmarse
-un pago (webhook), enviar automáticamente el comprobante/confirmación al correo del
-cliente (y opcionalmente por WhatsApp). Insumos: los datos del pago ya están en el
-webhook/finalize; el comprobante oficial vive en MP (evaluar si basta una
-confirmación propia con nº de operación o se adjunta el de MP).
+**1. ✅ Comprobante de pago para Anderson — RESUELTO (08-jul).** El dolor era la
+notificación interna: el correo "Cotización PAGADA" ahora incluye por cada pago
+aprobado el n° de operación, monto, fecha, método (últimos 4 dígitos), tipo, y
+el link al comprobante (directo, o al panel MP filtrado por la operación cuando
+MP no lo expone — tarjetas). Notificación de pago AL CLIENTE: descartada, no es
+un dolor (decisión 09-jul).
 
 **2. Verificar el primer correo de Auto-Onboarding (reportado: "no está llegando")**
 Eduardo corrigió el filtro del workflow de Zoho que omitía el envío cuando el
