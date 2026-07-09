@@ -16,11 +16,14 @@
  *   4. Persiste el toque como mensaje del asistente (contexto para el próximo
  *      turno) sin mover silence_anchor_at, y lo registra en el log.
  *
- * Cadencia (definida en la migración vic_v3_claim_followups): 3 toques a ~1h,
- * ~6h y ~18h desde que Vicky respondió. TODOS caen dentro de la ventana de 24h
- * de WhatsApp, así que el envío puede ir como texto libre vía push de Botmaker
- * sin fallar por re-engagement fuera de ventana (error 131047). Para alcance
- * multi-día (día 2-3) haría falta una plantilla HSM aprobada (ver backlog H/A).
+ * Cadencia (definida en la migración vic_v3_claim_followups): 2 toques a 1h y
+ * 23h desde que Vicky respondió, gateados a horario hábil en la zona del
+ * contacto (Lun-Sáb 9-19 local, sin feriados; vic_is_business_now). Ambos caen
+ * dentro de la ventana de 24h de WhatsApp, así que el envío va como texto libre
+ * vía push de Botmaker sin fallar por re-engagement fuera de ventana (131047).
+ * Los toques multi-día (47h/7d/15d) van por plantilla HSM en el cron de
+ * reactivación. El seguimiento CONSENSUADO ("te escribo el lunes") apaga esta
+ * cadencia y deja un único toque programado (ver programar-seguimiento).
  * La cancelación vive en el webhook: si el cliente responde, el ciclo se pausa.
  */
 

@@ -52,10 +52,10 @@ export const CATALOGO_SERVICIOS: Servicio[] = [
     omitirSiAutoInstalada: true,
     obligatoriedad: "recomendada",
     permiteAutoInstalacion: true,
-    advertenciasAutoInstalacion: [
-      "La instalación auto-gestionada por el cliente no incluye garantía de funcionamiento del equipo en sitio.",
-      "Si el reloj presenta fallas por instalación incorrecta, la visita técnica de soporte se cobra aparte.",
-    ],
+    // Vacío por decisión comercial (jul-2026): la elección de auto-instalar se
+    // acepta sin advertencias en el chat (no frenar el cierre con letra chica);
+    // las condiciones viven en los términos de la cotización.
+    advertenciasAutoInstalacion: [],
     aplicaConHardware: true,
     disponibleParaVicky: true,
   },
