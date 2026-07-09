@@ -3,6 +3,17 @@
     "calcom": {
       "url": "https://mcp.cal.com/mcp?apiKey=cal_live_e103a1058f3a2162693372a62997315e",
       "transport": "http"
+    },
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=zsmmbrdasrcwkelnxsre"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      }
     }
   }
 }
