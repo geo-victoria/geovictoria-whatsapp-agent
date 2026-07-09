@@ -361,7 +361,11 @@ esta jerarquía en el bloque de marcaje y en la pregunta de modalidad.
 
 ## Prompt: en REGIONES recomendar marcajes auto-asistidos (los más baratos)
 
-**Estado:** propuesto (jul-2026, Lalo).
+**Estado:** IMPLEMENTADO PARCIAL (09-jul): regla "doble valor en regiones" en el
+prompt — si algún punto del reloj queda fuera de la RM, Vicky muestra ambos
+valores (con reloj vs app/cuadrilla gratis, sin envío ni instalación) antes del
+preform, a cualquier tamaño; señal (d) de cuadrilla agregada. PENDIENTE solo la
+parte USB (abajo).
 
 **Qué:** cuando el prospecto es de REGIÓN (fuera de la RM), Vicky debe
 recomendar proactivamente los métodos de marcaje **auto-asistidos y más
