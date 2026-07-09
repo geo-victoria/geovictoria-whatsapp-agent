@@ -82,26 +82,21 @@ aplica Vicky en vivo por WhatsApp y recién ahí entrega el PDF nuevo.
 
 ---
 
-## Humanización: cadencia humana (latencia) y typos ocasionales
+## Humanización: typos ocasionales (decisión de producto pendiente)
 
-**Estado:** pendiente lo de abajo. Los otros cambios de estilo del feedback
-original YA están en producción: respuestas cortas sin enumerar métodos de
-entrada (regla en el prompt), sin negritas (`normalizarFormatoWhatsApp`) y sin
-`¡`/`¿` de apertura (`quitarSignosApertura`).
+**Estado:** pendiente SOLO la decisión de los typos. Todo lo demás del feedback
+de humanización YA está en producción: latencia humana (typing indicator +
+demora proporcional al largo, 1,2-6s con jitter — `humanDelayMs` en
+vic-botmaker-v3, apagable con VICKY_HUMAN_DELAY=off), respuestas cortas sin
+enumerar métodos, sin negritas y sin `¡`/`¿` de apertura.
 
-1. **Cadencia humana (latencia).** Introducir una demora antes de responder (y/o
-   simular "escribiendo…") proporcional al largo del mensaje, para que no llegue
-   instantáneo. Hoy la respuesta sale en el mismo timestamp que el mensaje del
-   usuario (se ve robótico). Implementación: delay en el envío por Botmaker
-   (cuidando el lock/inbox y la ventana de 24h).
-
-2. **Faltas de ortografía aleatorias (humanización).** Introducir errores menores
-   ocasionales para que se vea humano.
-   - ⚠️ **Decisión de producto pendiente:** en venta B2B una marca con typos puede
-     leerse como poco profesional o descuidada. Si se hace, debe ser **muy
-     esporádico y leve** (nunca en cifras, %, links, RUT, email ni datos que se
-     persisten), nunca en el primer saludo, y jamás dentro de un bloque
-     `mensajeParaProspecto` de una tool. Evaluar A/B antes de dejarlo fijo.
+**Faltas de ortografía aleatorias.** Introducir errores menores ocasionales
+para que se vea humano.
+- ⚠️ **Decisión de producto pendiente:** en venta B2B una marca con typos puede
+  leerse como poco profesional o descuidada. Si se hace, debe ser **muy
+  esporádico y leve** (nunca en cifras, %, links, RUT, email ni datos que se
+  persisten), nunca en el primer saludo, y jamás dentro de un bloque
+  `mensajeParaProspecto` de una tool. Evaluar A/B antes de dejarlo fijo.
 
 ---
 
