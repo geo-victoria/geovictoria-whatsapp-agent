@@ -111,20 +111,34 @@ export type Accesorio = {
 }
 
 /**
- * Tarifa de un servicio asociado (envío, instalación), por punto físico.
- *
- * Doble dimensión: modalidad del reloj del punto (arriendo/venta) × zona
- * (RM / otras regiones). El cobro es POR PUNTO (no por reloj).
+ * Tarifa por punto físico según modalidad del reloj (arriendo/venta) × zona
+ * (RM / otras regiones). El cobro es POR PUNTO (no por reloj). La usa el ENVÍO.
  */
-export type TarifaServicioPunto = {
+export type TarifaPorModalidadZona = {
+  modelo: "modalidad_zona"
   arriendo: { RM: number; region: number }
   venta: { RM: number; region: number }
 }
 
 /**
+ * Tarifa plana por punto físico según zona de instalación en 3 tramos
+ * (jul-2026), SIN distinción arriendo/compra. La usa la INSTALACIÓN:
+ * RM 1 UF · intermedia (IV Coquimbo, V Valparaíso, VI O'Higgins) 3 UF ·
+ * resto de las regiones 5 UF.
+ */
+export type TarifaPorZona = {
+  modelo: "zona"
+  RM: number
+  intermedia: number
+  resto: number
+}
+
+export type TarifaServicioPunto = TarifaPorModalidadZona | TarifaPorZona
+
+/**
  * Servicio asociado (envío, instalación).
  *
- * Precio por punto según modalidad × zona (ver TarifaServicioPunto). Si más
+ * Precio por punto según su modelo de tarifa (ver TarifaServicioPunto). Si más
  * adelante se necesita granularidad por región específica, agregar de forma
  * aditiva sin romper este modelo.
  */
@@ -133,12 +147,14 @@ export type Servicio = {
   nombre: string
   descripcion: string
 
-  /** Tarifa por punto, según modalidad del reloj (arriendo/venta) y zona. */
+  /** Tarifa por punto (envío: modalidad × zona · instalación: 3 zonas). */
   tarifa: TarifaServicioPunto
 
   /**
-   * Si es `true`, el servicio entra en el descuento negociable de instalación
-   * (RM 50% / regiones 25%). El envío es precio fijo, así que va en `false`.
+   * Si es `true`, el servicio entra en el descuento negociable. Desde el
+   * cambio de tarifas jul-2026 NINGÚN servicio es descontable (la instalación
+   * pasó a tarifa plana por zona y dejó de tener descuento; el envío nunca lo
+   * tuvo). El campo queda por si vuelve una política de descuento.
    */
   descontable: boolean
 

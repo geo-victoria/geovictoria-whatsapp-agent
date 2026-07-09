@@ -2,8 +2,10 @@
  * Clasificación geográfica de Chile para fines de cotización.
  *
  * Resuelve la ubicación que entrega un prospecto (comuna, región por
- * nombre, ordinal o número romano) y la clasifica en "RM" vs "regiones",
- * que es la única distinción que importa para el modelo de tarifa actual.
+ * nombre, ordinal o número romano) y la clasifica en "RM" vs "regiones"
+ * (dimensión del ENVÍO), más la zona de INSTALACIÓN en 3 tramos
+ * (tarifa jul-2026): RM / intermedia (IV Coquimbo, V Valparaíso,
+ * VI O'Higgins) / resto de las regiones.
  *
  * Vive en `lib/`, no en `lib/catalogo/`, porque es lógica transversal
  * reutilizable más allá del catálogo (asignación de KAM por región,
@@ -75,6 +77,45 @@ const ALIAS_REGIONES_FUERA_RM = [
 ] as const
 
 /**
+ * Comunas de las regiones de Coquimbo (IV), Valparaíso (V) y O'Higgins (VI):
+ * la "zona intermedia" de la tarifa de instalación (3 UF por punto; tarifa
+ * jul-2026). Se declaran aparte para poder clasificar la zona, y se integran
+ * al listado completo de comunas fuera de RM más abajo.
+ */
+const COMUNAS_ZONA_INTERMEDIA = [
+  // Coquimbo (IV)
+  "La Serena", "Coquimbo", "Andacollo", "La Higuera", "Paihuano", "Vicuña",
+  "Illapel", "Canela", "Los Vilos", "Salamanca", "Ovalle", "Combarbalá",
+  "Monte Patria", "Punitaqui", "Río Hurtado",
+  // Valparaíso (V)
+  "Valparaíso", "Casablanca", "Concón", "Juan Fernández", "Puchuncaví", "Quintero",
+  "Viña del Mar", "Isla de Pascua", "Los Andes", "Calle Larga", "Rinconada",
+  "San Esteban", "La Ligua", "Cabildo", "Papudo", "Petorca", "Zapallar", "Quillota",
+  "La Calera", "Hijuelas", "La Cruz", "Nogales", "San Antonio", "Algarrobo",
+  "Cartagena", "El Quisco", "El Tabo", "Santo Domingo", "San Felipe", "Catemu",
+  "Llay-Llay", "Panquehue", "Putaendo", "Santa María", "Quilpué", "Limache",
+  "Olmué", "Villa Alemana",
+  // O'Higgins (VI)
+  "Rancagua", "Codegua", "Coinco", "Coltauco", "Doñihue", "Graneros", "Las Cabras",
+  "Machalí", "Malloa", "Mostazal", "Olivar", "Peumo", "Pichidegua",
+  "Quinta de Tilcoco", "Rengo", "Requínoa", "San Vicente", "Pichilemu",
+  "La Estrella", "Litueche", "Marchigüe", "Navidad", "Paredones", "San Fernando",
+  "Chépica", "Chimbarongo", "Lolol", "Nancagua", "Palmilla", "Peralillo",
+  "Placilla", "Pumanque", "Santa Cruz",
+] as const
+
+/**
+ * Aliases de región/ciudad que caen en la zona intermedia (IV-V-VI).
+ * Subconjunto de ALIAS_REGIONES_FUERA_RM + los canónicos que produce
+ * la resolución de ordinales ("cuarta región" → "coquimbo", etc.).
+ */
+const ALIAS_ZONA_INTERMEDIA = [
+  "coquimbo", "la serena",
+  "valparaiso", "vina del mar", "vina",
+  "ohiggins", "o'higgins", "rancagua",
+] as const
+
+/**
  * Listado COMPLETO de las comunas de Chile fuera de la Región Metropolitana
  * (las 294 comunas restantes; las 52 de RM están en COMUNAS_RM). Todas tributan
  * tarifa "regiones". Fuente: división político-administrativa oficial de Chile
@@ -92,25 +133,9 @@ const COMUNAS_REGIONES_FUERA_RM = [
   // Atacama
   "Copiapó", "Caldera", "Tierra Amarilla", "Chañaral", "Diego de Almagro",
   "Vallenar", "Alto del Carmen", "Freirina", "Huasco",
-  // Coquimbo
-  "La Serena", "Coquimbo", "Andacollo", "La Higuera", "Paihuano", "Vicuña",
-  "Illapel", "Canela", "Los Vilos", "Salamanca", "Ovalle", "Combarbalá",
-  "Monte Patria", "Punitaqui", "Río Hurtado",
-  // Valparaíso
-  "Valparaíso", "Casablanca", "Concón", "Juan Fernández", "Puchuncaví", "Quintero",
-  "Viña del Mar", "Isla de Pascua", "Los Andes", "Calle Larga", "Rinconada",
-  "San Esteban", "La Ligua", "Cabildo", "Papudo", "Petorca", "Zapallar", "Quillota",
-  "La Calera", "Hijuelas", "La Cruz", "Nogales", "San Antonio", "Algarrobo",
-  "Cartagena", "El Quisco", "El Tabo", "Santo Domingo", "San Felipe", "Catemu",
-  "Llay-Llay", "Panquehue", "Putaendo", "Santa María", "Quilpué", "Limache",
-  "Olmué", "Villa Alemana",
-  // O'Higgins
-  "Rancagua", "Codegua", "Coinco", "Coltauco", "Doñihue", "Graneros", "Las Cabras",
-  "Machalí", "Malloa", "Mostazal", "Olivar", "Peumo", "Pichidegua",
-  "Quinta de Tilcoco", "Rengo", "Requínoa", "San Vicente", "Pichilemu",
-  "La Estrella", "Litueche", "Marchigüe", "Navidad", "Paredones", "San Fernando",
-  "Chépica", "Chimbarongo", "Lolol", "Nancagua", "Palmilla", "Peralillo",
-  "Placilla", "Pumanque", "Santa Cruz",
+  // Coquimbo (IV), Valparaíso (V) y O'Higgins (VI) — la "zona intermedia" de
+  // la tarifa de instalación — se definen aparte para reutilizarlas.
+  ...COMUNAS_ZONA_INTERMEDIA,
   // Maule
   "Talca", "Constitución", "Curepto", "Empedrado", "Maule", "Pelarco", "Pencahue",
   "Río Claro", "San Clemente", "San Rafael", "Cauquenes", "Chanco", "Pelluhue",
@@ -225,6 +250,10 @@ const COMUNAS_RM_NORM = new Set(COMUNAS_RM.map(normalizar))
 const ALIAS_RM_NORM = new Set(ALIAS_RM.map(normalizar))
 const ALIAS_REGIONES_NORM = new Set(ALIAS_REGIONES_FUERA_RM.map(normalizar))
 const COMUNAS_REGIONES_NORM = new Set(COMUNAS_REGIONES_FUERA_RM.map(normalizar))
+const ZONA_INTERMEDIA_NORM = new Set([
+  ...COMUNAS_ZONA_INTERMEDIA.map(normalizar),
+  ...ALIAS_ZONA_INTERMEDIA.map(normalizar),
+])
 
 // ─── Resolución de ordinales ──────────────────────────────────────────────
 
@@ -262,11 +291,25 @@ function resolverOrdinal(input: string): string | null {
 
 // ─── API pública ──────────────────────────────────────────────────────────
 
+/**
+ * Zona de la tarifa de INSTALACIÓN (jul-2026, 3 tramos por punto):
+ *   - "RM":         Región Metropolitana → 1 UF
+ *   - "intermedia": regiones IV (Coquimbo), V (Valparaíso), VI (O'Higgins) → 3 UF
+ *   - "resto":      todas las demás regiones → 5 UF
+ * El ENVÍO mantiene su dimensión clásica RM vs regiones (tipo de la clasificación).
+ */
+export type ZonaInstalacion = "RM" | "intermedia" | "resto"
+
 export type ClasificacionUbicacion =
-  | { tipo: "RM"; reconocida: true; canonico: string }
-  | { tipo: "regiones"; reconocida: true; canonico: string }
-  | { tipo: "regiones"; reconocida: false; canonico: string }
+  | { tipo: "RM"; reconocida: true; canonico: string; zonaInstalacion: "RM" }
+  | { tipo: "regiones"; reconocida: true; canonico: string; zonaInstalacion: "intermedia" | "resto" }
+  | { tipo: "regiones"; reconocida: false; canonico: string; zonaInstalacion: "intermedia" | "resto" }
   | { tipo: "no_clasificable"; razon: string }
+
+/** Zona de instalación para un nombre canónico ya normalizado fuera de RM. */
+function zonaFueraRM(canonico: string): "intermedia" | "resto" {
+  return ZONA_INTERMEDIA_NORM.has(canonico) ? "intermedia" : "resto"
+}
 
 /**
  * Clasifica una ubicación entregada por el prospecto en RM vs regiones.
@@ -325,12 +368,12 @@ export function clasificarUbicacion(input: string): ClasificacionUbicacion {
     ALIAS_RM_NORM.has(target) ||
     target === "metropolitana"
   ) {
-    return { tipo: "RM", reconocida: true, canonico: target }
+    return { tipo: "RM", reconocida: true, canonico: target, zonaInstalacion: "RM" }
   }
 
   // 4. Match en regiones/ciudades/comunas fuera de RM (listado completo)
   if (ALIAS_REGIONES_NORM.has(target) || COMUNAS_REGIONES_NORM.has(target)) {
-    return { tipo: "regiones", reconocida: true, canonico: target }
+    return { tipo: "regiones", reconocida: true, canonico: target, zonaInstalacion: zonaFueraRM(target) }
   }
 
   // 4.5. Input COMPUESTO (ej. "Providencia, Santiago", "Las Condes - RM"): si el
@@ -340,23 +383,23 @@ export function clasificarUbicacion(input: string): ClasificacionUbicacion {
   const acolchado = ` ${target} `
   for (const r of ALIAS_REGIONES_NORM) {
     if (acolchado.includes(` ${r} `)) {
-      return { tipo: "regiones", reconocida: true, canonico: r }
+      return { tipo: "regiones", reconocida: true, canonico: r, zonaInstalacion: zonaFueraRM(r) }
     }
   }
   for (const c of COMUNAS_RM_NORM) {
     if (acolchado.includes(` ${c} `)) {
-      return { tipo: "RM", reconocida: true, canonico: c }
+      return { tipo: "RM", reconocida: true, canonico: c, zonaInstalacion: "RM" }
     }
   }
   for (const a of ALIAS_RM_NORM) {
     if (acolchado.includes(` ${a} `)) {
-      return { tipo: "RM", reconocida: true, canonico: a }
+      return { tipo: "RM", reconocida: true, canonico: a, zonaInstalacion: "RM" }
     }
   }
   // Comuna fuera de RM como sub-frase (ej. "bodega en Quillota, V región")
   for (const c of COMUNAS_REGIONES_NORM) {
     if (acolchado.includes(` ${c} `)) {
-      return { tipo: "regiones", reconocida: true, canonico: c }
+      return { tipo: "regiones", reconocida: true, canonico: c, zonaInstalacion: zonaFueraRM(c) }
     }
   }
 

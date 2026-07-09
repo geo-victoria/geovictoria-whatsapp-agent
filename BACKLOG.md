@@ -712,9 +712,22 @@ chica; que viva en términos/onboarding).
 
 ---
 
-## Cambio de PRECIOS: instalación de reloj por 3 zonas (sin distinción arriendo/compra)
+## ✅ IMPLEMENTADO (09-jul-2026): instalación de reloj por 3 zonas (sin distinción arriendo/compra)
 
-**Estado:** propuesto (jul-2026, Lalo). CAMBIO DE TARIFA OFICIAL.
+**Estado:** DESPLEGADO. Decisiones cerradas por Lalo el 09-jul:
+- El ENVÍO mantiene su tabla actual (arriendo/compra × RM/regiones).
+- Los DESCUENTOS DE INSTALACIÓN desaparecen (RM 50% / regiones 25% eliminados
+  de la escalera): los reemplazan los precios nuevos. La escalera de
+  negociación queda SOLO sobre el plan mensual (10 → 20%). Las cotizaciones
+  antiguas con descuento de instalación ya comiteado LO CONSERVAN.
+- Rige desde el deploy; las cotizaciones ya emitidas conservan su precio.
+
+Implementación: catálogo con tarifa por zona (`servicios.ts`), clasificador de
+zona intermedia IV-V-VI (`geografia.ts`), escalera y motor de descuentos del
+cotizador (`proposal-constants.js`, `discount-engine.js` con compatibilidad de
+índices antiguos), prompt y descripciones de tools actualizadas.
+
+**Detalle original:**
 
 **Nueva tabla de instalación (cobro único por punto):**
 

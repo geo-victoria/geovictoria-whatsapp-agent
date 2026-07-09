@@ -392,6 +392,7 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
       }
 
       const esRM = clasificacion.tipo === "RM"
+      const zonaPunto = clasificacion.zonaInstalacion
       for (const servicio of serviciosAplicables) {
         // Instalación auto-gestionada por el cliente: no se cobra (solo el envío
         // se mantiene). Se comunican las advertencias.
@@ -401,7 +402,7 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
           }
           continue
         }
-        const precioUF = obtenerPrecioServicio(servicio, esRM, modalidadPunto)
+        const precioUF = obtenerPrecioServicio(servicio, zonaPunto, modalidadPunto)
         // Servicio sin cobro para esta combinación (p. ej. envío arriendo RM = 0):
         // no se agrega línea.
         if (precioUF <= 0) continue

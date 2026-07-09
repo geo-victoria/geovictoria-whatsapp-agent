@@ -412,7 +412,7 @@ export async function cotizarReferencial(args: {
         }
       }
 
-      const esRM = clasificacion.tipo === "RM"
+      const zonaPunto = clasificacion.zonaInstalacion
       for (const servicio of serviciosAplicables) {
         if (punto.autoInstalada && servicio.omitirSiAutoInstalada) {
           for (const adv of servicio.advertenciasAutoInstalacion) {
@@ -420,7 +420,7 @@ export async function cotizarReferencial(args: {
           }
           continue
         }
-        const precioUF = obtenerPrecioServicio(servicio, esRM, modalidadPunto)
+        const precioUF = obtenerPrecioServicio(servicio, zonaPunto, modalidadPunto)
         if (precioUF <= 0) continue
         items.push({
           tipo: "servicio",

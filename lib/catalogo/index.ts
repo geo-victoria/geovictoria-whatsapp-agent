@@ -14,6 +14,7 @@ import { CATALOGO_MODULOS } from "./modulos"
 import { CATALOGO_HARDWARE } from "./hardware"
 import { CATALOGO_SERVICIOS } from "./servicios"
 import type { ModuloSoftware, Hardware, Servicio, TierPrecio } from "./tipos"
+import type { ZonaInstalacion } from "../geografia"
 
 // ─── Re-exports ──────────────────────────────────────────────────────────
 export { CATALOGO_MODULOS } from "./modulos"
@@ -132,17 +133,24 @@ export function getServiciosAplicablesConHardware(): Servicio[] {
 }
 
 /**
- * Calcula el precio en UF de un servicio para un punto, según la modalidad del
- * reloj de ese punto (arriendo/venta) y la zona (RM vs regiones). El cobro es
- * por punto.
- * @param esRM true si el punto está en Región Metropolitana.
+ * Calcula el precio en UF de un servicio para un punto. El cobro es por punto.
+ *
+ * - Tarifa modelo "zona" (instalación): plana por zona en 3 tramos
+ *   (RM / intermedia IV-V-VI / resto), ignora la modalidad.
+ * - Tarifa modelo "modalidad_zona" (envío): según modalidad del reloj
+ *   (arriendo/venta) y zona RM vs regiones (intermedia y resto tributan
+ *   ambas como "región").
+ *
+ * @param zona zona de instalación del punto (clasificarUbicacion la entrega).
  * @param modalidad "arriendo" o "venta" del reloj del punto.
  */
 export function obtenerPrecioServicio(
   servicio: Servicio,
-  esRM: boolean,
+  zona: ZonaInstalacion,
   modalidad: "arriendo" | "venta",
 ): number {
-  const porZona = servicio.tarifa[modalidad]
-  return esRM ? porZona.RM : porZona.region
+  const tarifa = servicio.tarifa
+  if (tarifa.modelo === "zona") return tarifa[zona]
+  const porZona = tarifa[modalidad]
+  return zona === "RM" ? porZona.RM : porZona.region
 }
