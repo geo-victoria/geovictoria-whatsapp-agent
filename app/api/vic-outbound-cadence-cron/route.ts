@@ -47,7 +47,7 @@ const BATCH = Number(process.env.OUTBOUND_CADENCE_BATCH || 30)
 const CONTEXT_NUDGE = (nombre: string, empresa: string) =>
   `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu cotización toma 2 minutos por acá. ¿Hay algo que te falte para avanzar o alguna duda que te pueda resolver?`
 const CONTEXT_CIERRE = (nombre: string, empresa: string) =>
-  `Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu cotización para ${empresa} lista para retomarla cuando tú quieras — me escribes por acá y la armamos al tiro. ¡Que te vaya súper! 👋`
+  `Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu cotización para ${empresa} lista para retomarla cuando tú quieras — me escribes por acá y la armamos de inmediato. ¡Que te vaya súper! 👋`
 
 type Row = {
   contact: string

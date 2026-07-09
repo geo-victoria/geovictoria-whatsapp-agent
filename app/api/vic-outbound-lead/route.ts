@@ -163,7 +163,7 @@ export async function POST(req: Request): Promise<Response> {
   // formulario web: ...] es CONTEXTO INTERNO para Vicky (el prompt le enseña a
   // usarlo sin citarlo); el cliente solo recibió la plantilla.
   const ctx = [
-    `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla al tiro por acá. ¿Avanzamos?`,
+    `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla de inmediato por acá. ¿Avanzamos?`,
     ``,
     `[Datos del formulario web: nombre ${[nombre, apellido].filter(Boolean).join(" ")} · empresa ${empresa}` +
       `${rango ? ` · ${rango} empleados` : ""}${email ? ` · email ${email}` : ""}` +

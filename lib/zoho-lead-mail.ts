@@ -39,7 +39,7 @@ export function buildCorreoCadencia(
     return {
       subject: "Tu cotización GeoVictoria está a un mensaje de distancia",
       html: shell(`<p>Hola ${n},</p>
-<p>Recibimos tu solicitud de cotización para <b>${e}</b> — gracias por el interés 🙌. Te escribí también por WhatsApp para armarla al tiro: son 2 minutos y sales con el valor exacto para tu equipo.</p>
+<p>Recibimos tu solicitud de cotización para <b>${e}</b> — gracias por el interés 🙌. Te escribí también por WhatsApp para armarla de inmediato: son 2 minutos y sales con el valor exacto para tu equipo.</p>
 ${botonWhatsApp("Armar mi cotización por WhatsApp")}
 <p style="color:#4a5568;">Somos la plataforma de control de asistencia certificada por la Dirección del Trabajo que usan más de 6.000 empresas. Sin permanencia mínima.</p>`),
     }
@@ -62,7 +62,7 @@ ${botonWhatsApp("Retomar mi cotización")}`),
     subject: "Dejamos tu cotización guardada",
     html: shell(`<p>Hola ${n},</p>
 <p>No te quiero llenar la casilla: este es mi último correo por ahora 😊.</p>
-<p>Tu solicitud para <b>${e}</b> queda guardada — cuando el momento sea el correcto, me escribes por WhatsApp y la armamos al tiro, sin partir de cero.</p>
+<p>Tu solicitud para <b>${e}</b> queda guardada — cuando el momento sea el correcto, me escribes por WhatsApp y la armamos de inmediato, sin partir de cero.</p>
 ${botonWhatsApp("Retomar cuando quieras")}
 <p>¡Que te vaya muy bien!</p>`),
   }

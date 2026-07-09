@@ -85,7 +85,7 @@ reasigna al ejecutivo. Nunca lead duplicado ni huérfano.
 ### WhatsApp (HSM, aprobar en Botmaker/Meta, utility, sintaxis Botmaker ${variable})
 - **P1 `vicky_lead_apertura`** (T0 · vars nombre, empresa):
   "Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de
-  cotización para ${empresa}. Te ayudo a armarla al tiro por acá — ¿avanzamos?"
+  cotización para ${empresa}. Te ayudo a armarla de inmediato por acá — ¿avanzamos?"
 - **P2 `vicky_lead_nudge`** (T2 · vars nombre, empresa):
   "Hola ${nombre}, soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud
   para ${empresa}. Armar tu cotización toma 2 minutos por acá. ¿Hay algo que te
@@ -93,7 +93,7 @@ reasigna al ejecutivo. Nunca lead duplicado ni huérfano.
 - **P3 `vicky_lead_cierre`** (T4 · vars nombre, empresa):
   "Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu
   cotización para ${empresa} lista para retomarla cuando tú quieras — me
-  escribes por acá y la armamos al tiro. ¡Que te vaya súper! 👋"
+  escribes por acá y la armamos de inmediato. ¡Que te vaya súper! 👋"
 - **R1 `vicky_react_preform` / R2 `vicky_react_cotizacion`** (reactivación
   multi-día 47h/7d/15d, fase aparte — ver cron de reactivación): gancho de
   precio especial por tiempo limitado.
