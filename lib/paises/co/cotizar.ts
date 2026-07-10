@@ -52,6 +52,24 @@ export type LineaCO = {
   recurrente: boolean
 }
 
+/**
+ * Item en el contrato del endpoint create-from-vicky-co del cotizador
+ * (ver header de ese archivo). La Activación NO se envía: el endpoint la
+ * garantiza solo (= 1 mes del plan, +IVA).
+ */
+export type ItemCotizadorCO = {
+  tipo: "plan" | "hardware" | "servicio"
+  id: string
+  nombre: string
+  descripcion?: string
+  modalidad: "Por usuario" | "Fijo" | "Arriendo mensual" | "Venta única" | "Cobro único"
+  cantidad: number
+  precioUnitarioCOP: number
+  subtotalCOP: number
+  esRecurrente: boolean
+  afectoIva: boolean
+}
+
 const TARIFAS_CO = {
   relojArriendoMes: 86000,
   relojVenta: 620000,
@@ -80,6 +98,7 @@ export function precioPlanCO(userCount: number): number {
 
 export function cotizarCO(input: CotizacionCOInput): {
   lineas: LineaCO[]
+  itemsCotizador: ItemCotizadorCO[]
   mensualNetoPlan: number
   mensualArriendoNeto: number
   mensualArriendoIva: number
@@ -194,8 +213,85 @@ export function cotizarCO(input: CotizacionCOInput): {
     "El plan mensual del servicio está excluido de IVA (servicio de computación en la nube, art. 476 del Estatuto Tributario). La capacitación online, valorada en $95.000, va incluida con el 100% de descuento.",
   )
 
+  // ── Items para la cotización FORMAL (contrato create-from-vicky-co) ──
+  // Misma matemática que las líneas de arriba, en formato del endpoint. La
+  // Activación no va: la garantiza el endpoint (= 1 mes del plan, +IVA).
+  const itemsCotizador: ItemCotizadorCO[] = []
+  itemsCotizador.push({
+    tipo: "plan",
+    id: "plan_asistencia",
+    nombre: "Control de Asistencia",
+    descripcion:
+      "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
+    modalidad: userCount <= 10 ? "Fijo" : "Por usuario",
+    cantidad: userCount <= 10 ? 1 : userCount,
+    precioUnitarioCOP: userCount <= 10 ? plan : 13700,
+    subtotalCOP: plan,
+    esRecurrente: true,
+    afectoIva: false,
+  })
+  if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
+    itemsCotizador.push({
+      tipo: "hardware",
+      id: "reloj_arriendo",
+      nombre: "Arriendo de reloj control",
+      descripcion:
+        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío e instalación incluidos sin costo.",
+      modalidad: "Arriendo mensual",
+      cantidad: reloj.cantidad,
+      precioUnitarioCOP: TARIFAS_CO.relojArriendoMes,
+      subtotalCOP: arriendoNeto,
+      esRecurrente: true,
+      afectoIva: true,
+    })
+  }
+  if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
+    itemsCotizador.push({
+      tipo: "hardware",
+      id: "reloj_venta",
+      nombre: "Reloj control (compra)",
+      descripcion:
+        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
+      modalidad: "Venta única",
+      cantidad: reloj.cantidad,
+      precioUnitarioCOP: TARIFAS_CO.relojVenta,
+      subtotalCOP: TARIFAS_CO.relojVenta * reloj.cantidad,
+      esRecurrente: false,
+      afectoIva: true,
+    })
+    for (const punto of puntos) {
+      const envio = TARIFAS_CO.envioVenta[punto.zona]
+      itemsCotizador.push({
+        tipo: "servicio",
+        id: "envio_reloj",
+        nombre: `Envío de reloj (${punto.ubicacion})`,
+        modalidad: "Cobro único",
+        cantidad: 1,
+        precioUnitarioCOP: envio,
+        subtotalCOP: envio,
+        esRecurrente: false,
+        afectoIva: true,
+      })
+      if (!punto.autoInstalada) {
+        const inst = TARIFAS_CO.instalacionVenta[punto.zona]
+        itemsCotizador.push({
+          tipo: "servicio",
+          id: "instalacion_reloj",
+          nombre: `Instalación de reloj (${punto.ubicacion})`,
+          modalidad: "Cobro único",
+          cantidad: 1,
+          precioUnitarioCOP: inst,
+          subtotalCOP: inst,
+          esRecurrente: false,
+          afectoIva: true,
+        })
+      }
+    }
+  }
+
   return {
     lineas,
+    itemsCotizador,
     mensualNetoPlan: plan,
     mensualArriendoNeto: arriendoNeto,
     mensualArriendoIva,

@@ -10,10 +10,19 @@
  * cotización formal. La formal online llega con el cotizador CO (fase 2b).
  */
 
-import { cotizarCO, type PuntoInstalacionCO } from "./cotizar"
+import { cotizarCO, formatearCOP, type PuntoInstalacionCO } from "./cotizar"
 import { clasificarUbicacionCO } from "./geografia"
 import { nitValido, normalizarNit } from "./nit"
 import { createZohoLead } from "../../zoho-leads"
+
+const COTIZADORA_API_BASE = (
+  process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
+).trim()
+const SECRET_COTIZADORA_CO = (
+  process.env.VICKY_COTIZADORA_SECRET_CO ||
+  process.env.VICKY_COTIZADORA_SECRET ||
+  ""
+).trim()
 
 // Tómbola CO (SDRs observados en Zoho el 09-jul; emails por confirmar).
 const SDR_CO_IDS = [
@@ -73,6 +82,41 @@ export const TOOL_SCHEMAS_CO = [
         },
       },
       required: ["userCount"],
+    },
+  },
+  {
+    name: "generar_link_cotizadora",
+    description:
+      "Genera la COTIZACIÓN FORMAL de Colombia en el sistema (registro en el CRM + PDF + link de aceptación online donde el cliente revisa, acepta y paga con tarjeta). Úsala SOLO cuando el cliente ya vio el precio referencial, aceptó avanzar y te entregó los CUATRO datos: nombre completo, empresa, NIT (con dígito de verificación, ej. 900.123.456-7) y correo. Pasa la MISMA configuración con que cotizaste (userCount, reloj, puntosInstalacion). Devuelve `mensajeParaProspecto` con el link — cópialo TAL CUAL. Si el NIT es inválido devuelve error: pídele al cliente confirmarlo y vuelve a llamar. UNA sola cotización formal por conversación.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        empresa: { type: "string" as const, description: "Razón social de la empresa." },
+        contacto: { type: "string" as const, description: "Nombre completo de la persona." },
+        nit: { type: "string" as const, description: "NIT con dígito de verificación (ej. 900.123.456-7)." },
+        email: { type: "string" as const, description: "Correo del contacto." },
+        userCount: { type: "number" as const, minimum: 1, maximum: 50 },
+        reloj: {
+          type: "object" as const,
+          properties: {
+            modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+            cantidad: { type: "number" as const, minimum: 1, maximum: 50 },
+          },
+          required: ["modalidad", "cantidad"],
+        },
+        puntosInstalacion: {
+          type: "array" as const,
+          items: {
+            type: "object" as const,
+            properties: {
+              ubicacion: { type: "string" as const },
+              autoInstalada: { type: "boolean" as const },
+            },
+            required: ["ubicacion", "autoInstalada"],
+          },
+        },
+      },
+      required: ["empresa", "contacto", "nit", "email", "userCount"],
     },
   },
   {
@@ -159,6 +203,83 @@ export function buildDispatchCO(contact: string) {
           puntos,
         })
         return { ok: true, mensajeParaProspecto: r.mensajeParaProspecto, advertencias }
+      }
+
+      if (name === "generar_link_cotizadora") {
+        const i = (input || {}) as {
+          empresa?: string
+          contacto?: string
+          nit?: string
+          email?: string
+          userCount?: number
+          reloj?: { modalidad?: "arriendo" | "venta"; cantidad?: number }
+          puntosInstalacion?: Array<{ ubicacion?: string; autoInstalada?: boolean }>
+        }
+        if (!SECRET_COTIZADORA_CO) {
+          return { ok: false, error: "Cotizadora CO no configurada (secreto faltante). Deriva al ejecutivo." }
+        }
+        if (!i.nit || !nitValido(i.nit)) {
+          return {
+            ok: false,
+            error: `El NIT '${i.nit || ""}' no es válido (el dígito de verificación no cuadra). Pídele al cliente confirmar el NIT completo (ej. 900.123.456-7) y vuelve a llamar la tool.`,
+          }
+        }
+        if (!i.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
+          return { ok: false, error: `El correo '${i.email || ""}' no tiene formato válido. Pídelo de nuevo.` }
+        }
+        // Misma clasificación de puntos que la referencial (venta exige puntos).
+        let puntos: PuntoInstalacionCO[] = []
+        if (i.reloj?.modalidad === "venta") {
+          const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
+          if (entradas.length === 0) {
+            return { ok: false, error: "El reloj en VENTA requiere puntosInstalacion. Pregunta ciudad y quién instala." }
+          }
+          puntos = entradas.map((p) => ({
+            ubicacion: String(p?.ubicacion || ""),
+            zona: clasificarUbicacionCO(String(p?.ubicacion || "")).zona,
+            autoInstalada: p?.autoInstalada === true,
+          }))
+        }
+        const calculo = cotizarCO({
+          userCount: Number(i.userCount || 0),
+          reloj:
+            i.reloj && i.reloj.modalidad && Number(i.reloj.cantidad) > 0
+              ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
+              : undefined,
+          puntos,
+        })
+        const res = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky-co`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-vicky-secret": SECRET_COTIZADORA_CO },
+          body: JSON.stringify({
+            empresa: i.empresa,
+            contacto: i.contacto,
+            contactoEmail: i.email,
+            nit: normalizarNit(i.nit),
+            contactoTelefono: `+${contact}`,
+            userCount: Number(i.userCount || 0),
+            items: calculo.itemsCotizador,
+          }),
+          cache: "no-store",
+        })
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean
+          acceptanceUrl?: string
+          quoteId?: string
+          error?: string
+        }
+        if (!res.ok || !data.ok || !data.acceptanceUrl) {
+          console.error(`[co-tools] create-from-vicky-co falló contact=${contact}:`, JSON.stringify(data).slice(0, 300))
+          return {
+            ok: false,
+            error: `No se pudo generar la cotización formal (${data.error || res.status}). NO insistas: usa derivar_a_ejecutivo (motivo cotizacion_formal) con toda la configuración en el resumen.`,
+          }
+        }
+        return {
+          ok: true,
+          quoteId: data.quoteId,
+          mensajeParaProspecto: `Listo, su cotización formal quedó generada 🎉\n\nAquí la revisa, la acepta y elige cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} (IVA incluido) y su mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Cualquier duda me dice.`,
+        }
       }
 
       if (name === "derivar_a_ejecutivo") {
