@@ -1,20 +1,19 @@
 /**
  * Motor de cotización referencial de COLOMBIA.
  *
- * Reglas de negocio (cerradas con Lalo 09/10-jul, validadas contra 15
- * cotizaciones reales de Creator CO):
+ * Reglas de negocio (cerradas con Lalo 09/10-jul):
  *   - Plan asistencia: 1-10 → $315.000 fijo · 11-50 → $13.700 por usuario.
- *     SIN IVA (servicio de computación en la nube, excluido art. 476 E.T.).
  *   - Reloj: arriendo $86.000/mes por unidad · venta $620.000 por unidad.
- *     Equipos SIEMPRE con IVA 19% (arriendo y venta).
  *   - Envío e instalación (por punto): GRATIS en arriendo. En venta: envío
  *     $42.000 capital / $69.000 resto · instalación $67.000 capital /
- *     $92.000 resto (0 si auto-instala). Con IVA 19%.
- *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado como concepto
- *     aparte, CON IVA 19% (así lo factura GeoVictoria Colombia hoy). Es el
- *     equivalente del "pago inicial incluye el primer mes" chileno.
- *   - Pago inicial = activación + conceptos únicos (todo con su IVA).
- *   - Mensualidad (desde el mes siguiente) = plan (sin IVA) + arriendos (+IVA).
+ *     $92.000 resto (0 si auto-instala).
+ *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado (equivalente
+ *     del "pago inicial incluye el primer mes" chileno).
+ *   - PRECIOS FINALES (decisión 10-jul): el IVA NO existe en la experiencia
+ *     del cliente — ni en el chat, ni en la cotización, ni en el cobro. El
+ *     tratamiento tributario vive en la factura electrónica de GeoVictoria
+ *     Colombia. Por eso IVA=0 en todo este motor (el campo `iva` queda por
+ *     estructura, siempre 0).
  *
  * El mensajeParaProspecto va en REGISTRO DE USTED y formato COP. Es la única
  * fuente de precios que Vicky CO puede comunicar (misma regla dura de Chile).
@@ -22,7 +21,7 @@
 
 import { CATALOGO_MODULOS_CO } from "./catalogo"
 
-const IVA = 0.19
+const IVA = 0 // precios finales: sin IVA en la experiencia (decisión 10-jul)
 
 export type ZonaCO = "capital" | "resto"
 
@@ -123,7 +122,7 @@ export function cotizarCO(input: CotizacionCOInput): {
         ? `Plan mensual para hasta 10 usuarios (tarifa fija)`
         : `Plan mensual: ${userCount} usuarios × ${formatearCOP(13700)}`,
     neto: plan,
-    iva: 0, // Servicio cloud excluido de IVA (art. 476 E.T.)
+    iva: 0,
     recurrente: true,
   })
 
@@ -140,7 +139,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   }
 
   // ── Pago único ──
-  // Activación: primer mes del plan por adelantado, facturado con IVA.
+  // Activación: primer mes del plan por adelantado.
   lineas.push({
     concepto: "Activación",
     detalle: "Equivale al primer mes de servicio, cobrado por adelantado",
@@ -189,6 +188,9 @@ export function cotizarCO(input: CotizacionCOInput): {
   const mensualTotal = plan + arriendoNeto + mensualArriendoIva
 
   // ── Mensaje canónico (registro de usted, COP) ──
+  // Decisión de negocio (Lalo, 10-jul): en Colombia los precios son FINALES —
+  // el IVA no existe en la experiencia (ni en el chat, ni en la cotización,
+  // ni en el cobro). El tratamiento tributario vive en la factura electrónica.
   const filas: string[] = []
   filas.push("Le comparto el detalle de su cotización referencial:")
   filas.push("")
@@ -196,21 +198,19 @@ export function cotizarCO(input: CotizacionCOInput): {
   filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(plan)}/mes`)
   if (arriendoNeto > 0) {
     filas.push(
-      `- Arriendo de reloj control: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto * (1 + IVA))}/mes (envío e instalación incluidos)`,
+      `- Arriendo de reloj control: ${formatearCOP(arriendoNeto)}/mes (envío e instalación incluidos)`,
     )
   }
   filas.push(`Total mensual: ${formatearCOP(mensualTotal)}`)
   filas.push("")
   filas.push("Pago inicial (una sola vez):")
   for (const l of unicos) {
-    filas.push(
-      `- ${l.concepto}: ${formatearCOP(l.neto)}${l.iva > 0 ? ` + IVA = ${formatearCOP(l.neto + l.iva)}` : ""}`,
-    )
+    filas.push(`- ${l.concepto}: ${formatearCOP(l.neto)}`)
   }
-  filas.push(`Total pago inicial: ${formatearCOP(pagoInicialTotal)} (IVA incluido)`)
+  filas.push(`Total pago inicial: ${formatearCOP(pagoInicialTotal)}`)
   filas.push("")
   filas.push(
-    "El plan mensual del servicio está excluido de IVA (servicio de computación en la nube, art. 476 del Estatuto Tributario). La capacitación online, valorada en $95.000, va incluida con el 100% de descuento.",
+    "La capacitación online, valorada en $95.000, va incluida con el 100% de descuento.",
   )
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-co) ──
@@ -242,7 +242,7 @@ export function cotizarCO(input: CotizacionCOInput): {
       precioUnitarioCOP: TARIFAS_CO.relojArriendoMes,
       subtotalCOP: arriendoNeto,
       esRecurrente: true,
-      afectoIva: true,
+      afectoIva: false,
     })
   }
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
@@ -257,7 +257,7 @@ export function cotizarCO(input: CotizacionCOInput): {
       precioUnitarioCOP: TARIFAS_CO.relojVenta,
       subtotalCOP: TARIFAS_CO.relojVenta * reloj.cantidad,
       esRecurrente: false,
-      afectoIva: true,
+      afectoIva: false,
     })
     for (const punto of puntos) {
       const envio = TARIFAS_CO.envioVenta[punto.zona]
@@ -270,7 +270,7 @@ export function cotizarCO(input: CotizacionCOInput): {
         precioUnitarioCOP: envio,
         subtotalCOP: envio,
         esRecurrente: false,
-        afectoIva: true,
+        afectoIva: false,
       })
       if (!punto.autoInstalada) {
         const inst = TARIFAS_CO.instalacionVenta[punto.zona]
@@ -283,7 +283,7 @@ export function cotizarCO(input: CotizacionCOInput): {
           precioUnitarioCOP: inst,
           subtotalCOP: inst,
           esRecurrente: false,
-          afectoIva: true,
+          afectoIva: false,
         })
       }
     }
