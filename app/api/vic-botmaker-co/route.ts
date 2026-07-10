@@ -21,9 +21,11 @@
 
 import { NextResponse } from "next/server"
 import { runAgentLoop } from "@/lib/agent-loop"
+import { PERFIL_CO } from "@/lib/paises/co"
 import { SYSTEM_PROMPT_CO } from "@/lib/paises/co/prompt"
 import { TOOL_SCHEMAS_CO, buildDispatchCO } from "@/lib/paises/co/tools"
 import { fetchHistoryV3, appendTurnV3 } from "@/lib/supabase-persistence-v3"
+import { sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 
 export const dynamic = "force-dynamic"
@@ -80,6 +82,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
     if (!apiKey) {
       return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY no configurada" }, { status: 503 })
+    }
+
+    // Cadencia humana: "escribiendo…" mientras se procesa (el propio tiempo
+    // del loop hace de latencia natural; el envío del reply lo apaga solo).
+    if (!simulacion) {
+      sendTypingIndicator(contact, true, PERFIL_CO.canal.channelId).catch(() => {})
     }
 
     const history = simulacion ? [] : await fetchHistoryV3(contact)

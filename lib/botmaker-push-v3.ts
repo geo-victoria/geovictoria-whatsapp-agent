@@ -180,15 +180,18 @@ export async function sendBotmakerTemplate(
 export async function sendTypingIndicator(
   contactId: string,
   isTyping = true,
+  // Multi-país: canal de la línea (default: Chile).
+  channelId?: string,
 ): Promise<void> {
-  if (!BM_TOKEN || !BM_CHANNEL_V3 || !contactId) return
+  const canal = (channelId || BM_CHANNEL_V3).trim()
+  if (!BM_TOKEN || !canal || !contactId) return
   const cleanContact = normalizeContactId(contactId)
   try {
     await fetch(TYPING_URL, {
       method: "POST",
       headers: BM_HEADERS,
       body: JSON.stringify({
-        channelId: BM_CHANNEL_V3,
+        channelId: canal,
         contactId: cleanContact,
         typing: isTyping,
       }),
