@@ -28,11 +28,13 @@
  * IVA por línea: plan SIN IVA · activación/equipos/envío/instalación +19%.
  * Pago online: MercadoPago Colombia (cuenta creada; credenciales pendientes).
  *
+ * CAPACITACIÓN (definido por Lalo, 09-jul): igual que Chile — se muestra en la
+ * cotización valorizada en $95.000 COP con 100% de descuento (tachada, $0).
+ * Vive en el cotizador CO como línea fija de regalo, no como ítem cotizable.
+ *
  * TODO restantes:
  *   1. Cobertura exacta de "capital" (Creator usa departamento + zona capital).
- *   2. Capacitación $95.000: está en la planilla pero NO aparece en ninguna de
- *      las 15 cotizaciones reales — confirmar si se cobra.
- *   3. Escalera de descuentos CO (instalación 20%/20% + plan 10→20%): confirmar
+ *   2. Escalera de descuentos CO (instalación 20%/20% + plan 10→20%): confirmar
  *      con comercial CO antes de habilitar la negociación.
  */
 
