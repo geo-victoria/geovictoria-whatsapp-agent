@@ -63,6 +63,16 @@ export const PERFIL_CO: PerfilPais = {
       "Español neutro con cortesía colombiana: trato de 'usted' como forma segura por defecto (cambia a tuteo solo si el cliente tutea primero). Nada de chilenismos ni localismos de otros países.",
   },
 
+  // NIT verificado en registros públicos (informacolombia/RUES) y validado
+  // con el algoritmo DIAN de co/nit.ts. Las cotizaciones de Creator hoy NO
+  // imprimen el NIT propio; el formato de Vicky sí lo llevará.
+  entidadLegal: {
+    razonSocial: "Geovictoria Colombia SAS",
+    idTributario: "NIT: 901.367.959-1",
+    direccion: "Carrera 14 # 89-48, Oficina 201, Edificio Novanta",
+    ciudad: "Bogotá",
+  },
+
   canal: {
     channelId: (process.env.BOTMAKER_CHANNEL_CO || "").trim(), // TODO: setear al crear el canal en Botmaker
     numeroLinea: (process.env.BOTMAKER_CHANNEL_NUMBER_CO || "573181070737").trim(),

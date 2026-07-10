@@ -58,6 +58,13 @@ export const PERFIL_CL: PerfilPais = {
       "Español chileno cercano y profesional: tuteo simple, sin voseo verbal (-ái/-ís), sin 'po'/'cachái'/'al tiro', sin '¡' ni '¿' de apertura.",
   },
 
+  entidadLegal: {
+    razonSocial: "Victoria S.A",
+    idTributario: "R.U.T: 76.188.587-1",
+    direccion: "Avenida Los Leones 2061, Piso 4, Providencia",
+    ciudad: "Santiago",
+  },
+
   canal: {
     channelId: (process.env.BOTMAKER_CHANNEL_V3 || "").trim(),
     numeroLinea: (process.env.BOTMAKER_CHANNEL_NUMBER || "56967308227").trim(),

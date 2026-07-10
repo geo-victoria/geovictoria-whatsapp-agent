@@ -105,6 +105,15 @@ export type PerfilPais = {
     lenguaje: string
   }
 
+  /** Entidad legal local que emite las cotizaciones (encabezado del PDF). */
+  entidadLegal: {
+    razonSocial: string
+    /** Identificador tributario con su etiqueta local (ej. "R.U.T: 76.188.587-1", "NIT: 901.367.959-1"). */
+    idTributario: string
+    direccion: string
+    ciudad: string
+  }
+
   canal: CanalBotmaker
   equipo: EquipoComercial
 
