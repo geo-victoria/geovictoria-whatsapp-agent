@@ -9,11 +9,11 @@
  *     $92.000 resto (0 si auto-instala).
  *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado (equivalente
  *     del "pago inicial incluye el primer mes" chileno).
- *   - PRECIOS FINALES (decisión 10-jul): el IVA NO existe en la experiencia
- *     del cliente — ni en el chat, ni en la cotización, ni en el cobro. El
- *     tratamiento tributario vive en la factura electrónica de GeoVictoria
- *     Colombia. Por eso IVA=0 en todo este motor (el campo `iva` queda por
- *     estructura, siempre 0).
+ *   - IMPUESTOS (decisión 10-jul, refinada): los precios son FINALES en todo
+ *     EXCEPTO el hardware — el reloj (arriendo y venta) lleva IVA 19%, único
+ *     concepto donde el IVA existe y se muestra. Plan, activación, envío e
+ *     instalación van con precio final (iva=0); retenciones y artículos
+ *     tributarios no se mencionan jamás.
  *
  * El mensajeParaProspecto va en REGISTRO DE USTED y formato COP. Es la única
  * fuente de precios que Vicky CO puede comunicar (misma regla dura de Chile).
@@ -21,7 +21,10 @@
 
 import { CATALOGO_MODULOS_CO } from "./catalogo"
 
-const IVA = 0 // precios finales: sin IVA en la experiencia (decisión 10-jul)
+// Refinamiento 10-jul (Lalo): precios FINALES en todo, EXCEPTO el hardware
+// (reloj en arriendo y en venta), que lleva IVA 19% — único concepto donde se
+// menciona IVA, y solo como lo escribe este motor.
+const IVA_HARDWARE = 0.19
 
 export type ZonaCO = "capital" | "resto"
 
@@ -54,7 +57,7 @@ export type LineaCO = {
 /**
  * Item en el contrato del endpoint create-from-vicky-co del cotizador
  * (ver header de ese archivo). La Activación NO se envía: el endpoint la
- * garantiza solo (= 1 mes del plan, +IVA).
+ * garantiza solo (= 1 mes del plan, sin IVA).
  */
 export type ItemCotizadorCO = {
   tipo: "plan" | "hardware" | "servicio"
@@ -133,7 +136,7 @@ export function cotizarCO(input: CotizacionCOInput): {
       concepto: "Arriendo de reloj control",
       detalle: `${reloj.cantidad} × ${formatearCOP(TARIFAS_CO.relojArriendoMes)}/mes (envío e instalación incluidos sin costo)`,
       neto: arriendoNeto,
-      iva: arriendoNeto * IVA,
+      iva: arriendoNeto * IVA_HARDWARE,
       recurrente: true,
     })
   }
@@ -144,7 +147,7 @@ export function cotizarCO(input: CotizacionCOInput): {
     concepto: "Activación",
     detalle: "Equivale al primer mes de servicio, cobrado por adelantado",
     neto: plan,
-    iva: plan * IVA,
+    iva: 0,
     recurrente: false,
   })
 
@@ -154,7 +157,7 @@ export function cotizarCO(input: CotizacionCOInput): {
       concepto: "Reloj control (compra)",
       detalle: `${reloj.cantidad} × ${formatearCOP(TARIFAS_CO.relojVenta)}`,
       neto: ventaNeto,
-      iva: ventaNeto * IVA,
+      iva: ventaNeto * IVA_HARDWARE,
       recurrente: false,
     })
     for (const punto of puntos) {
@@ -163,7 +166,7 @@ export function cotizarCO(input: CotizacionCOInput): {
         concepto: `Envío de reloj (${punto.ubicacion})`,
         detalle: punto.zona === "capital" ? "Zona capital" : "Resto del país",
         neto: envio,
-        iva: envio * IVA,
+        iva: 0,
         recurrente: false,
       })
       if (!punto.autoInstalada) {
@@ -172,7 +175,7 @@ export function cotizarCO(input: CotizacionCOInput): {
           concepto: `Instalación de reloj (${punto.ubicacion})`,
           detalle: punto.zona === "capital" ? "Zona capital" : "Resto del país",
           neto: inst,
-          iva: inst * IVA,
+          iva: 0,
           recurrente: false,
         })
       }
@@ -184,13 +187,12 @@ export function cotizarCO(input: CotizacionCOInput): {
   const pagoInicialNeto = unicos.reduce((s, l) => s + l.neto, 0)
   const pagoInicialIva = unicos.reduce((s, l) => s + l.iva, 0)
   const pagoInicialTotal = pagoInicialNeto + pagoInicialIva
-  const mensualArriendoIva = arriendoNeto * IVA
+  const mensualArriendoIva = arriendoNeto * IVA_HARDWARE
   const mensualTotal = plan + arriendoNeto + mensualArriendoIva
 
   // ── Mensaje canónico (registro de usted, COP) ──
-  // Decisión de negocio (Lalo, 10-jul): en Colombia los precios son FINALES —
-  // el IVA no existe en la experiencia (ni en el chat, ni en la cotización,
-  // ni en el cobro). El tratamiento tributario vive en la factura electrónica.
+  // Solo el hardware muestra "+ IVA"; el resto va con precio final, sin
+  // mención de impuestos.
   const filas: string[] = []
   filas.push("Le comparto el detalle de su cotización referencial:")
   filas.push("")
@@ -198,14 +200,18 @@ export function cotizarCO(input: CotizacionCOInput): {
   filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(plan)}/mes`)
   if (arriendoNeto > 0) {
     filas.push(
-      `- Arriendo de reloj control: ${formatearCOP(arriendoNeto)}/mes (envío e instalación incluidos)`,
+      `- Arriendo de reloj control: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes (envío e instalación incluidos)`,
     )
   }
   filas.push(`Total mensual: ${formatearCOP(mensualTotal)}`)
   filas.push("")
   filas.push("Pago inicial (una sola vez):")
   for (const l of unicos) {
-    filas.push(`- ${l.concepto}: ${formatearCOP(l.neto)}`)
+    filas.push(
+      l.iva > 0
+        ? `- ${l.concepto}: ${formatearCOP(l.neto)} + IVA = ${formatearCOP(l.neto + l.iva)}`
+        : `- ${l.concepto}: ${formatearCOP(l.neto)}`,
+    )
   }
   filas.push(`Total pago inicial: ${formatearCOP(pagoInicialTotal)}`)
   filas.push("")
@@ -215,7 +221,7 @@ export function cotizarCO(input: CotizacionCOInput): {
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-co) ──
   // Misma matemática que las líneas de arriba, en formato del endpoint. La
-  // Activación no va: la garantiza el endpoint (= 1 mes del plan, +IVA).
+  // Activación no va: la garantiza el endpoint (= 1 mes del plan, sin IVA).
   const itemsCotizador: ItemCotizadorCO[] = []
   itemsCotizador.push({
     tipo: "plan",
@@ -242,7 +248,7 @@ export function cotizarCO(input: CotizacionCOInput): {
       precioUnitarioCOP: TARIFAS_CO.relojArriendoMes,
       subtotalCOP: arriendoNeto,
       esRecurrente: true,
-      afectoIva: false,
+      afectoIva: true,
     })
   }
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
@@ -257,7 +263,7 @@ export function cotizarCO(input: CotizacionCOInput): {
       precioUnitarioCOP: TARIFAS_CO.relojVenta,
       subtotalCOP: TARIFAS_CO.relojVenta * reloj.cantidad,
       esRecurrente: false,
-      afectoIva: false,
+      afectoIva: true,
     })
     for (const punto of puntos) {
       const envio = TARIFAS_CO.envioVenta[punto.zona]
