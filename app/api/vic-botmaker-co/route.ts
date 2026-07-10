@@ -114,10 +114,11 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       dispatch: buildDispatchCO(contact),
     },
   })
-  let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(result.reply || "")))
   // El fallback del agent-loop viene tuteado (Chile): en CO se trata como
-  // "turno sin texto" y se reemplaza por el genérico en usted.
-  if (reply === AGENT_LOOP_EMPTY_FALLBACK) reply = ""
+  // "turno sin texto". OJO: comparar ANTES de sanear — quitarSignosApertura
+  // le quita el '¿' y la igualdad ya no calzaría.
+  const rawReply = (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
+  let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(rawReply)))
 
   const toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
   // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
@@ -279,11 +280,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         contact,
         tools: { schemas: TOOL_SCHEMAS_CO as unknown as unknown[], dispatch: buildDispatchCO(contact) },
       })
-      let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(result.reply || "")))
       // Mismos guardrails de texto final del camino real (fallback tuteado del
       // loop → usted; opt-out sin texto → despedida) para que la simulación
-      // refleje lo que vería el cliente.
-      if (reply === AGENT_LOOP_EMPTY_FALLBACK) reply = ""
+      // refleje lo que vería el cliente. La comparación va ANTES de sanear.
+      const simRaw =
+        (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
+      let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(simRaw)))
       const simToolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
       if (
         simToolCalls.some((c) => c.name === "marcar_no_contactar" && c.ok) &&
