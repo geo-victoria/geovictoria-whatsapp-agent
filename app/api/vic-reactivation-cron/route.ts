@@ -247,9 +247,13 @@ export async function GET(req: Request): Promise<Response> {
 
   // Candidatos: enfriados (last_user_at en la ventana), bajo el tope, con datos
   // para clasificar. Los filtros finos (opt-out, ciclo activo, gap) se aplican en JS.
+  // Solo CHILE: las plantillas HSM configuradas son de la línea CL; una
+  // conversación de Colombia (country='co') jamás debe recibirlas ni por ese
+  // canal. Cuando existan HSM CO aprobadas, este cron se hace country-aware.
   const res = await supa(
     `vic_v3_conversations?last_user_at=lte.${coldBefore}&last_user_at=gte.${maxAgeAfter}` +
     `&reactivation_count=lt.${MAX_REACT}` +
+    `&or=(country.eq.cl,country.is.null)` +
     `&select=id,contact,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
     `&order=last_user_at.asc&limit=400`,
   )
@@ -307,8 +311,12 @@ export async function GET(req: Request): Promise<Response> {
   // horario hábil por zona.
   let consensuado: Row[] = []
   {
+    // Solo CHILE (mismo motivo que arriba). Los consensuados de Colombia quedan
+    // registrados (la cadencia automática igual se apaga), pero su toque único
+    // requiere HSM CO — pendiente de aprobación de Meta.
     const cr = await supa(
       `vic_v3_conversations?followup_status=eq.consensuado&followup_next_at=lte.${new Date(now).toISOString()}` +
+      `&or=(country.eq.cl,country.is.null)` +
       `&select=id,contact,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
       `&order=followup_next_at.asc&limit=100`,
     )

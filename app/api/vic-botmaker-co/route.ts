@@ -28,7 +28,14 @@ import { runAgentLoop } from "@/lib/agent-loop"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { SYSTEM_PROMPT_CO } from "@/lib/paises/co/prompt"
 import { TOOL_SCHEMAS_CO, buildDispatchCO } from "@/lib/paises/co/tools"
-import { fetchHistoryV3, appendTurnV3 } from "@/lib/supabase-persistence-v3"
+import {
+  fetchHistoryV3,
+  appendTurnV3,
+  markUserActivity,
+  armFollowup,
+  closeFollowup,
+  scheduleConsensualFollowup,
+} from "@/lib/supabase-persistence-v3"
 import {
   hashMessage,
   acquireLock,
@@ -56,6 +63,25 @@ const PIDE_TEXTO_CO =
   "Le pido disculpas: por ahora no puedo escuchar notas de voz. ¿Me lo puede escribir por texto, por favor?"
 const ERROR_GENERICO_CO =
   "Disculpe, tuve un inconveniente para procesar su mensaje. ¿Me lo puede repetir, por favor?"
+// Despedida limpia si el modelo registró un opt-out y el turno quedó sin texto
+// (herencia del guardrail 2.6d chileno — caso real de Rodrigo en CL).
+const OPTOUT_GOODBYE_CO =
+  "Entendido, no lo contactaremos más. Si en el futuro lo necesita, aquí estaré. ¡Que le vaya muy bien! 🙌"
+
+// ── Re-engagement CO (mismo modelo de estados que Chile) ────────────────────
+// La cadencia se arma SOLO en conversaciones COMERCIALES; soporte/FAQ no
+// reciben nudges; despedidas naturales tampoco.
+const FOLLOWUP_SUPPORT_TOOLS_CO = new Set(["consultar_agente_soporte"])
+// derivar_a_ejecutivo cierra el ciclo: la conversación quedó en manos humanas.
+const FOLLOWUP_CLOSING_TOOLS_CO = new Set(["derivar_a_ejecutivo"])
+const FOLLOWUP_COMMERCIAL_TOOLS_CO = new Set([
+  "cotizar_referencial",
+  "generar_link_cotizadora",
+])
+const FAREWELL_RE_CO =
+  /\b(gracias|chao|chau|nos vemos|hasta luego|adi[oó]s|que est[eé] bien|feliz d[ií]a)\b/iu
+
+type ToolCallRecordCO = { name: string; ok: boolean; output?: unknown }
 
 type BotmakerBody = {
   contact?: string
@@ -83,11 +109,61 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     },
   })
   let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(result.reply || "")))
+
+  const toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
+  // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
+  const callNoContactar = toolCalls.find((c) => c.name === "marcar_no_contactar" && c.ok)
+  if (callNoContactar && (!reply.trim() || reply === ERROR_GENERICO_CO)) {
+    reply = OPTOUT_GOODBYE_CO
+  }
   if (!reply.trim()) reply = ERROR_GENERICO_CO
 
   await appendTurnV3(contact, message, reply, "co").catch((e) =>
     console.error(`[vic-co] error persistiendo turno contact=${contact}:`, e),
   )
+
+  // Estado del ciclo de re-engagement según cómo terminó el turno (espejo del
+  // bloque 5 chileno, con el set de tools CO). Best-effort.
+  try {
+    const tipoNoContactar =
+      (callNoContactar?.output as { tipo?: string } | undefined)?.tipo === "perdido"
+        ? "perdido"
+        : "opt_out"
+    const segConsensuado = toolCalls.find((c) => c.name === "programar_seguimiento" && c.ok)
+    const usoCierre = toolCalls.some((c) => FOLLOWUP_CLOSING_TOOLS_CO.has(c.name) && c.ok)
+    const esSoporte = toolCalls.some((c) => FOLLOWUP_SUPPORT_TOOLS_CO.has(c.name) && c.ok)
+    const esDespedida = message.trim().length <= 30 && FAREWELL_RE_CO.test(message)
+    const comercialEsteTurno = toolCalls.some(
+      (c) => FOLLOWUP_COMMERCIAL_TOOLS_CO.has(c.name) && c.ok,
+    )
+    // Conversación ya comercial: hubo un estimado/cotización antes (marcadores
+    // del mensaje canónico CO: "/mes", "pago inicial", "cotización").
+    const yaHuboEstimacion = history.some(
+      (m) => m.role === "assistant" && /\/mes|pago inicial|cotizaci[oó]n/i.test(m.content || ""),
+    )
+    const esComercial = comercialEsteTurno || yaHuboEstimacion
+    if (callNoContactar) {
+      await closeFollowup(contact, tipoNoContactar, "co")
+      console.log(`[vic-co][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
+    } else if (segConsensuado) {
+      const cuandoIso = (segConsensuado.output as { cuandoIso?: string } | undefined)?.cuandoIso
+      if (cuandoIso) {
+        await scheduleConsensualFollowup(contact, cuandoIso, "co")
+        console.log(`[vic-co][followup] consensuado contact=${contact} cuando=${cuandoIso}`)
+      } else {
+        await armFollowup(contact, "co")
+      }
+    } else if (usoCierre) {
+      await closeFollowup(contact, "derivado", "co")
+    } else if (reply && !esDespedida && esComercial) {
+      await armFollowup(contact, "co")
+    } else if (esSoporte && !esComercial) {
+      await closeFollowup(contact, "soporte", "co")
+    }
+    // else: conversación no comercial → sin nudges.
+  } catch (err) {
+    console.error(`[vic-co][followup] error actualizando seguimiento contact=${contact}:`, err)
+  }
   const sent = await sendBotmakerMessage(contact, reply, CANAL_CO())
   console.log(
     `[vic-co] turno contact=${contact} iter=${result.iterations} tools=${result.toolCalls.map((t) => t.name).join(",") || "-"} sent=${sent}`,
@@ -199,6 +275,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     // ── Pipeline endurecido (herencia chilena) ──
+    // Re-engagement: el cliente habló → pausar la cadencia en curso (si la había).
+    await markUserActivity(contact, "co").catch(() => {})
+
     const msgHash = hashMessage(contact, message)
     await bufferInboundMessage(contact, message, msgHash)
 

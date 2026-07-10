@@ -36,8 +36,10 @@ import {
   logFollowup,
   getFollowupCronSecret,
   closeFollowup,
+  getConversationCountries,
 } from "@/lib/supabase-persistence-v3"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+import { PERFIL_CO } from "@/lib/paises/co"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 
 export const dynamic = "force-dynamic"
@@ -63,10 +65,31 @@ function instruccionDeTono(stage: number): string {
 // Fallbacks deterministas si el LLM falla o el output viola el guardrail.
 // Neutros a propósito: sirven igual para una cotización a medias que para una
 // conversación que recién partía (un "hola" sin intención identificada aún).
-function fallbackPorStage(stage: number): string {
+function fallbackPorStage(stage: number, country: string): string {
+  if (country === "co") {
+    if (stage <= 1) return "¿Sigue por ahí? Quedo atenta si desea continuar 😊"
+    if (stage === 2) return "Hola, ¿retomamos donde quedamos? Quedo atenta 😊"
+    return "Hola, ¿sigue interesado en cotizar con nosotros o lo dejamos para más adelante? Cualquier cosa, aquí estoy 😊"
+  }
   if (stage <= 1) return "¿Todo bien? Te perdí 😅 Aquí sigo si quieres continuar."
   if (stage === 2) return "Hola! ¿Retomamos donde quedamos? Quedé atenta 😊"
   return "Hola! ¿Sigues interesado en cotizar con nosotros o lo dejamos para más adelante? Cualquier cosa, aquí estoy 😊"
+}
+
+// Identidad y registro del nudge por país. Chile: tuteo chileno (histórico).
+// Colombia: registro de USTED y español neutro — mismas reglas duras del
+// prompt CO (nada de chilenismos ni tuteo).
+function identidadPorPais(country: string): string {
+  if (country === "co") {
+    return (
+      "Eres Vicky, ejecutiva comercial de GeoVictoria COLOMBIA (control de asistencia B2B). " +
+      "REGISTRO OBLIGATORIO: trata al cliente de USTED (le, su, '¿me confirma?'); JAMÁS tutees (nada de tú/tienes/puedes) y JAMÁS uses chilenismos ('al tiro', 'po', 'cachái') ni voseo. "
+    )
+  }
+  return (
+    "Eres Vicky, vendedora chilena de GeoVictoria (control de asistencia B2B). " +
+    "REGLAS DURAS: español chileno con tuteo (tú/tienes/puedes; JAMÁS vos/tenés/podés). "
+  )
 }
 
 // Guardrail determinista del nudge: el toque NUNCA lleva precios, porcentajes
@@ -100,6 +123,7 @@ async function generarNudge(
   apiKey: string,
   contact: string,
   stage: number,
+  country: string,
 ): Promise<string> {
   const history = await fetchHistoryV3(contact, 14).catch(() => [])
   const transcript = history
@@ -123,12 +147,12 @@ async function generarNudge(
 
   const client = new Anthropic({ apiKey })
   const system =
-    "Eres Vicky, vendedora chilena de GeoVictoria (control de asistencia B2B). " +
+    identidadPorPais(country) +
     "El cliente dejó de responder. Escribe UN solo mensaje corto de WhatsApp (máximo 2 frases) para reengancharlo, retomando el punto EXACTO donde quedó la conversación. " +
-    "Si la conversación recién partía y casi no hay contexto (solo un saludo o una pregunta suelta), usa un toque breve y humano tipo '¿Todo bien? Te perdí 😅' o '¿Sigues ahí?' — NO inventes un tema que no existió. " +
+    "Si la conversación recién partía y casi no hay contexto (solo un saludo o una pregunta suelta), usa un toque breve y humano tipo '¿Sigues ahí?' (o '¿sigue por ahí?' si tratas de usted) — NO inventes un tema que no existió. " +
     instruccionDeTono(stage) +
     anguloBarato +
-    " REGLAS DURAS: español chileno con tuteo (tú/tienes/puedes; JAMÁS vos/tenés/podés). " +
+    " " +
     "PROHIBIDO: mencionar precios, montos, porcentajes, descuentos, UF o links; inventar información nueva; usar más de un emoji; dirigirte al cliente por un nombre que NO aparezca dicho por él en la conversación (y JAMÁS lo llames 'Vicky' — Vicky eres tú). ENFOQUE CONSULTIVO, NO COBRADOR: en vez de EXIGIR los datos que faltaban, prioriza una pregunta de baja presión que invite al cliente a decir qué lo frena o qué duda tiene ('te quedó alguna duda?', 'hay algo que te falte para avanzar?'). Si en el historial YA le enviaste la cotización formal, además puedes recordarle suave que su cotización está en este mismo WhatsApp y que puede aceptarla cuando quiera —SIN repetir el link ni el monto—. Si solo hubo un estimado/preform (aún sin cotización formal), NO digas eso: solo la pregunta consultiva. El objetivo es que RESPONDA y saque su objeción, no presionarlo con el trámite. " +
     "Devuelve SOLO el texto del mensaje, sin comillas ni explicación."
 
@@ -167,13 +191,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, sent: 0 })
   }
 
+  // País por conversación: define el registro del nudge (CL tuteo / CO usted)
+  // y el canal de Botmaker por el que sale (la línea del país del contacto).
+  const paises = await getConversationCountries(claims.map((c) => c.conversation_id)).catch(
+    () => ({}) as Record<string, string>,
+  )
+
   // 3. Generar + enviar cada toque (secuencial: el lote es chico).
   let sent = 0
   for (const claim of claims) {
+    const country = paises[claim.conversation_id] || "cl"
+    const channelId = country === "co" ? PERFIL_CO.canal.channelId : undefined
     let nudge = ""
     let errorMsg = ""
     try {
-      nudge = await generarNudge(apiKey, claim.contact, claim.stage)
+      nudge = await generarNudge(apiKey, claim.contact, claim.stage, country)
     } catch (err) {
       errorMsg = `generación falló: ${err instanceof Error ? err.message : String(err)}`
       console.error(`[followup-cron] ${errorMsg} (contact=${claim.contact})`)
@@ -202,11 +234,11 @@ export async function POST(req: Request) {
           `[followup-cron] Nudge violó guardrail, usando fallback. contact=${claim.contact} nudge=${JSON.stringify(nudge.slice(0, 200))}`,
         )
       }
-      nudge = fallbackPorStage(claim.stage)
+      nudge = fallbackPorStage(claim.stage, country)
     }
     nudge = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(nudge)))
 
-    const ok = await sendBotmakerMessage(claim.contact, nudge).catch(() => false)
+    const ok = await sendBotmakerMessage(claim.contact, nudge, channelId).catch(() => false)
     if (ok) {
       sent++
       // Persistir como mensaje del asistente (NO mueve silence_anchor_at).

@@ -483,9 +483,9 @@ export async function getFollowupStatus(contact: string): Promise<string | null>
  * activo, lo pausa (el cliente respondió → se cancela la cadencia en curso;
  * se re-armará cuando Vicky conteste). Best-effort.
  */
-export async function markUserActivity(contact: string): Promise<void> {
+export async function markUserActivity(contact: string, country = "cl"): Promise<void> {
   if (!contact) return
-  const conversationId = await getOrCreateConversationId(contact)
+  const conversationId = await getOrCreateConversationId(contact, country)
   if (!conversationId) return
   await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
     method: "PATCH",
@@ -511,9 +511,9 @@ export async function markUserActivity(contact: string): Promise<void> {
  * Arma (o re-arma) el ciclo de seguimiento: Vicky acaba de responder y la
  * pelota queda en el cliente. Resetea la cadencia desde ahora. Best-effort.
  */
-export async function armFollowup(contact: string): Promise<void> {
+export async function armFollowup(contact: string, country = "cl"): Promise<void> {
   if (!contact) return
-  const conversationId = await getOrCreateConversationId(contact)
+  const conversationId = await getOrCreateConversationId(contact, country)
   if (!conversationId) return
   const now = new Date()
   await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
@@ -531,9 +531,13 @@ export async function armFollowup(contact: string): Promise<void> {
 }
 
 /** Cierra el ciclo definitivamente (opt_out, derivado, agotado, respondio). */
-export async function closeFollowup(contact: string, reason: string): Promise<void> {
+export async function closeFollowup(
+  contact: string,
+  reason: string,
+  country = "cl",
+): Promise<void> {
   if (!contact) return
-  const conversationId = await getOrCreateConversationId(contact)
+  const conversationId = await getOrCreateConversationId(contact, country)
   if (!conversationId) return
   await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
     method: "PATCH",
@@ -557,9 +561,10 @@ export async function closeFollowup(contact: string, reason: string): Promise<vo
 export async function scheduleConsensualFollowup(
   contact: string,
   cuandoIso: string,
+  country = "cl",
 ): Promise<void> {
   if (!contact || !cuandoIso) return
-  const conversationId = await getOrCreateConversationId(contact)
+  const conversationId = await getOrCreateConversationId(contact, country)
   if (!conversationId) return
   await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
     method: "PATCH",
@@ -781,6 +786,24 @@ export async function claimFollowups(batch = 10): Promise<FollowupClaim[]> {
     body: JSON.stringify({ batch }),
   })
   return rows || []
+}
+
+/**
+ * País de cada conversación (columna `country`), en un solo query. Usado por
+ * los crons para elegir idioma/registro del nudge y el canal de Botmaker
+ * (el RPC de claim no devuelve el país; esto evita tocar la migración).
+ */
+export async function getConversationCountries(
+  conversationIds: string[],
+): Promise<Record<string, string>> {
+  const ids = conversationIds.filter(Boolean)
+  if (ids.length === 0) return {}
+  const rows = await supabaseFetch<Array<{ id: string; country: string | null }>>(
+    `vic_v3_conversations?id=in.(${ids.map(encodeURIComponent).join(",")})&select=id,country`,
+  )
+  const map: Record<string, string> = {}
+  for (const r of rows || []) map[r.id] = (r.country || "cl").toLowerCase()
+  return map
 }
 
 /** Registra el resultado de un toque en la tabla de auditoría. Best-effort. */

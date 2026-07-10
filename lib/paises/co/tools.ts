@@ -1,19 +1,32 @@
 /**
- * Tools de Vicky COLOMBIA (v1: cotización referencial + derivación).
+ * Tools de Vicky COLOMBIA — paridad con Vicky Chile.
  *
  * Set independiente del chileno — se inyecta a runAgentLoop vía el parámetro
  * `tools` del loop. Los precios SIEMPRE salen de acá (regla dura heredada de
  * Chile: el modelo copia mensajeParaProspecto, jamás calcula).
  *
- * v1 SIN cotización formal: cuando el prospecto acepta el estimado, se captura
- * NIT + datos y se deriva al equipo comercial CO (round-robin) que emite la
- * cotización formal. La formal online llega con el cotizador CO (fase 2b).
+ * Capacidades: cotización referencial, cotización FORMAL online (link de
+ * aceptación + pago), derivación a ejecutivo (lead CO), soporte operativo
+ * (mismo agente Foundry de Chile, con escalamiento a canales CO),
+ * opt-out/perdido (marcar_no_contactar) y seguimiento consensuado
+ * (programar_seguimiento) — las dos últimas son SEÑALES que procesa el route.
+ * Pendientes de habilitación externa: agendar reuniones (falta calendario
+ * Cal.com del equipo CO) y descuentos (sin escalera CO por decisión v1).
  */
 
 import { cotizarCO, formatearCOP, type PuntoInstalacionCO } from "./cotizar"
 import { clasificarUbicacionCO } from "./geografia"
 import { nitValido, normalizarNit } from "./nit"
 import { createZohoLead } from "../../zoho-leads"
+import {
+  consultarAgenteSoporte,
+  consultarAgenteSoporteSchema,
+} from "../../tools/consultar-agente-soporte"
+import {
+  marcarNoContactar,
+  marcarNoContactarSchema,
+} from "../../tools/marcar-no-contactar"
+import { programarSeguimiento } from "../../tools/programar-seguimiento"
 
 const COTIZADORA_API_BASE = (
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -39,11 +52,44 @@ function ownerCoPara(contact: string): string {
   return SDR_CO_IDS[h % SDR_CO_IDS.length]
 }
 
+// Escalamiento de soporte CO: el mensaje chileno trae teléfonos de Chile; acá
+// van los canales válidos para Colombia (correo + horario). Cuando el equipo
+// CO confirme un WhatsApp/teléfono local de soporte, se agrega aquí.
+const MENSAJE_ESCALAMIENTO_SOPORTE_CO =
+  "Para esta consulta le recomiendo escribir directamente a nuestro equipo de soporte:\n" +
+  "📧 Email: *soporte@geovictoria.com*\n" +
+  "Atienden de lunes a viernes de 8:30 a 18:30 y le ayudarán a la brevedad."
+
+// programar_seguimiento con la zona horaria de Colombia como default (el
+// resto del schema chileno aplica igual).
+const programarSeguimientoSchemaCO = {
+  name: "programar_seguimiento",
+  description:
+    "Úsala SOLO cuando el cliente da una señal EXPLÍCITA de que la decisión depende de otra persona o de otro factor y hay que esperar (ej. 'lo tengo que revisar con mi jefe', 'lo consulto con mi socio', 'espero la aprobación', 'escríbame el lunes'), Y acordaron CUÁNDO retomar. ANTES de llamarla, pregúntele al cliente cuándo sería un buen momento para escribirle. Con esto se programa UN solo seguimiento a esa fecha y se apagan los recordatorios automáticos de esta conversación. NO la use si el cliente solo quedó en silencio o se despidió sin dar un motivo de espera.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      cuandoIso: {
+        type: "string" as const,
+        description:
+          "Fecha y hora acordada para retomar, en formato ISO 8601 con zona horaria (ej. '2026-07-14T10:00:00-05:00'). Interpreta lo que dijo el cliente ('el lunes', 'en dos semanas') en SU zona horaria (default Colombia/America/Bogota, UTC-5) y conviértelo a este formato. Debe ser una fecha futura.",
+      },
+      motivo: {
+        type: "string" as const,
+        description:
+          "Nota breve del factor de decisión (opcional), ej. 'lo consulta con su jefe', 'espera aprobación de presupuesto'.",
+        maxLength: 200,
+      },
+    },
+    required: ["cuandoIso"],
+  },
+}
+
 export const TOOL_SCHEMAS_CO = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula la cotización referencial de Colombia (1 a 50 usuarios) en pesos colombianos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad, el pago inicial (activación = primer mes + IVA, y equipos/envío/instalación si aplican) y las notas de IVA. NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/municipio tal como la dijo el cliente). En arriendo el envío y la instalación son GRATIS; en venta se cobran según zona (capital de departamento vs resto) — la tool clasifica la zona, tú solo transcribes la ubicación.",
+      "Calcula la cotización referencial de Colombia (1 a 50 usuarios) en pesos colombianos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (activación = primer mes por adelantado; equipos/envío/instalación si aplican; el IVA del reloj ya viene indicado donde corresponde). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/municipio tal como la dijo el cliente). En arriendo el envío y la instalación son GRATIS; en venta se cobran según zona (capital de departamento vs resto) — la tool clasifica la zona, tú solo transcribes la ubicación.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -144,6 +190,12 @@ export const TOOL_SCHEMAS_CO = [
       required: ["nombre", "motivo", "resumen"],
     },
   },
+  // Soporte operativo: mismo agente Foundry de Chile (conocimiento de la
+  // plataforma, país-agnóstico); el escalamiento humano usa canales CO.
+  consultarAgenteSoporteSchema,
+  // Señales de ciclo de contacto (mismas de Chile; las procesa el route CO).
+  marcarNoContactarSchema,
+  programarSeguimientoSchemaCO,
 ] as const
 
 type CotizarInput = {
@@ -278,7 +330,7 @@ export function buildDispatchCO(contact: string) {
         return {
           ok: true,
           quoteId: data.quoteId,
-          mensajeParaProspecto: `Listo, su cotización formal quedó generada 🎉\n\nAquí la revisa, la acepta y elige cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} (IVA incluido) y su mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Cualquier duda me dice.`,
+          mensajeParaProspecto: `Listo, su cotización formal quedó generada 🎉\n\nAquí la revisa, la acepta y elige cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y su mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Cualquier duda me dice.`,
         }
       }
 
@@ -313,6 +365,30 @@ export function buildDispatchCO(contact: string) {
           ok: true,
           mensajeParaProspecto:
             "Listo, quedó registrado. Una persona de nuestro equipo comercial en Colombia lo contactará muy pronto para continuar con su cotización.",
+        }
+      }
+
+      // Soporte operativo: misma implementación chilena (agente Foundry). El
+      // escalamiento humano reemplaza los canales chilenos por los de CO.
+      if (name === "consultar_agente_soporte") {
+        const r = await consultarAgenteSoporte(input as never)
+        if (r.ok && r.accion === "escalar_humano") {
+          return { ...r, mensajeParaProspecto: MENSAJE_ESCALAMIENTO_SOPORTE_CO }
+        }
+        return r
+      }
+
+      // Señales (sin efectos externos aquí): el route CO las procesa al ver el
+      // tool_call ok — cierra/pausa/programa el ciclo de seguimiento.
+      if (name === "marcar_no_contactar") return marcarNoContactar(input as never)
+      if (name === "programar_seguimiento") {
+        const r = programarSeguimiento(input as never)
+        if (!("ok" in r) || r.ok !== true) return r
+        // El mensaje chileno viene tuteado; acá va en registro de usted.
+        return {
+          ...r,
+          mensajeParaProspecto:
+            "Perfecto, lo dejamos así. Le escribo cuando acordamos para retomar, sin presionarle. Si necesita algo antes, aquí estoy 🙌",
         }
       }
 
