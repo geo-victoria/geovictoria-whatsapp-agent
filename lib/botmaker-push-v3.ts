@@ -50,10 +50,14 @@ function normalizeContactId(raw: string): string {
 export async function sendBotmakerMessage(
   contactId: string,
   text: string,
+  // Multi-país: channelId de la línea por la que responder. Default: línea
+  // Chile (BOTMAKER_CHANNEL_V3), compatible con todos los llamadores actuales.
+  channelId?: string,
 ): Promise<boolean> {
-  if (!BM_TOKEN || !BM_CHANNEL_V3) {
+  const canal = (channelId || BM_CHANNEL_V3).trim()
+  if (!BM_TOKEN || !canal) {
     console.error(
-      "[botmaker-push] BOTMAKER_ACCESS_TOKEN o BOTMAKER_CHANNEL_V3 no configurados",
+      "[botmaker-push] BOTMAKER_ACCESS_TOKEN o channelId no configurados",
     )
     return false
   }
@@ -69,7 +73,7 @@ export async function sendBotmakerMessage(
       method: "POST",
       headers: BM_HEADERS,
       body: JSON.stringify({
-        chat: { channelId: BM_CHANNEL_V3, contactId: cleanContact },
+        chat: { channelId: canal, contactId: cleanContact },
         messages: [{ text }],
       }),
       cache: "no-store",
@@ -99,7 +103,9 @@ export async function sendBotmakerMessage(
  * extrae del channelId (ej. "GeoVictoriaEspaol-whatsapp-56967308227" →
  * "56967308227").
  */
-function channelNumber(): string {
+function channelNumber(overrideNumero?: string): string {
+  const explicitOverride = (overrideNumero || "").replace(/\D/g, "")
+  if (explicitOverride) return explicitOverride
   const explicit = (process.env.BOTMAKER_CHANNEL_NUMBER || "").replace(/\D/g, "")
   if (explicit) return explicit
   const m = BM_CHANNEL_V3.match(/(\d{6,})\s*$/)

@@ -58,7 +58,7 @@ export const PERFIL_CO: PerfilPais = {
     geografia:
       "Para envío e instalación del reloj (solo en modalidad venta) la ubicación se clasifica en dos zonas: capital y resto del país.", // TODO: definir cobertura exacta de "capital".
     legal:
-      "", // TODO: normativa laboral colombiana aplicable (NO citar la Dirección del Trabajo de Chile ni la Resolución 38 — son chilenas y no aplican).
+      "El ente fiscalizador laboral en Colombia es el Ministerio del Trabajo (Dirección de Inspección, Vigilancia, Control y Gestión Territorial). NO existe un documento de certificación equivalente al chileno y NUNCA cites a la Dirección del Trabajo de Chile ni la Resolución 38 (son chilenas, no aplican). Permanencia: sin amarre; el cliente puede cortar avisando con 30 días.",
     lenguaje:
       "Español neutro con cortesía colombiana: trato de 'usted' como forma segura por defecto (cambia a tuteo solo si el cliente tutea primero). Nada de chilenismos ni localismos de otros países.",
   },
@@ -79,10 +79,13 @@ export const PERFIL_CO: PerfilPais = {
       { email: "", zohoUserId: "3525045000619732095" }, // Guerrero
       { email: "", zohoUserId: "3525045000639899035" }, // Quiroga Chia
     ],
+    // Tropicalización (líderes comerciales): ejecutiva de referencia CO.
+    // TODO: confirmar correo — la planilla dice lvargas@, las cotizaciones
+    // reales de Creator dicen lvargash@ (Laura Lucía Vargas Hernández).
     ejecutivo: {
-      nombre: "", // TODO: ejecutivo comercial CO
-      email: "",
-      telefono: "",
+      nombre: "Laura Vargas",
+      email: "lvargash@geovictoria.com",
+      telefono: "+57 310 609 5259",
     },
   },
 
