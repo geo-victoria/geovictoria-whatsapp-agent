@@ -69,8 +69,21 @@ export async function runAgentLoop(params: {
    * supabase-persistence-v3). Si no se entrega, la persistencia se omite.
    */
   contact?: string
+  /**
+   * Multi-país: set de tools a exponer al modelo y su despachador. Default:
+   * el set chileno (TOOL_SCHEMAS/dispatchTool). Los endurecimientos in-loop
+   * que aplican a tools chilenas específicas (generar_link_cotizadora,
+   * descuentos, pref_escalon) se activan por NOMBRE de tool, así que un set
+   * de otro país con nombres propios no los gatilla.
+   */
+  tools?: {
+    schemas: unknown[]
+    dispatch: (name: string, input: unknown) => Promise<unknown>
+  }
 }): Promise<AgentRunResult> {
-  const { systemPrompt, history, userMessage, apiKey, model, contact } = params
+  const { systemPrompt, history, userMessage, apiKey, model, contact, tools } = params
+  const toolSchemas = (tools?.schemas ?? TOOL_SCHEMAS) as unknown as Anthropic.Messages.Tool[]
+  const toolDispatch = (tools?.dispatch ?? dispatchTool) as typeof dispatchTool
 
   const client = new Anthropic({ apiKey })
   const effectiveModel = model || process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || DEFAULT_MODEL
@@ -178,7 +191,7 @@ export async function runAgentLoop(params: {
       system: systemBlocks,
       // Las tools se serializan con su schema completo.
       // El cast es necesario porque TOOL_SCHEMAS es `as const`.
-      tools: TOOL_SCHEMAS as unknown as Anthropic.Messages.Tool[],
+      tools: toolSchemas,
       messages,
     })
 
@@ -376,7 +389,7 @@ export async function runAgentLoop(params: {
           } as Awaited<ReturnType<typeof dispatchTool>>
         } else {
           if (toolName === "generar_link_cotizadora") generarLinkEnEsteTurno++
-          result = await dispatchTool(toolName, toolInput)
+          result = await toolDispatch(toolName, toolInput)
         }
 
         // Capa 3 (persistencia): registrar/limpiar el Borrador negociado.

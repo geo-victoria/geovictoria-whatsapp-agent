@@ -53,7 +53,12 @@ async function supabaseFetch<T>(
  * Obtiene o crea la conversación V3 del contacto. Si no existe, la crea.
  * Devuelve el UUID de la conversación.
  */
-async function getOrCreateConversationId(contact: string): Promise<string | null> {
+async function getOrCreateConversationId(
+  contact: string,
+  // Multi-país: país de la LÍNEA por la que llegó el primer mensaje. Solo se
+  // usa al CREAR la conversación (una existente nunca cambia de país).
+  country: string = "cl",
+): Promise<string | null> {
   const existing = await supabaseFetch<ConversationRow[]>(
     `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
   )
@@ -63,7 +68,7 @@ async function getOrCreateConversationId(contact: string): Promise<string | null
     `vic_v3_conversations`,
     {
       method: "POST",
-      body: JSON.stringify({ contact }),
+      body: JSON.stringify({ contact, country }),
     },
   )
   return created && created.length > 0 ? created[0].id : null
@@ -99,8 +104,9 @@ export async function appendTurnV3(
   contact: string,
   userMessage: string,
   assistantMessage: string,
+  country: string = "cl",
 ): Promise<void> {
-  const conversationId = await getOrCreateConversationId(contact)
+  const conversationId = await getOrCreateConversationId(contact, country)
   if (!conversationId) {
     console.error(`[v3-persist] No se pudo obtener/crear conversation_id para ${contact}`)
     return

@@ -355,6 +355,8 @@ export type CreateZohoLeadInput = {
   sistemaActual?: string
   contactoWA?: string
   ownerEmail?: string
+  /** Owner directo por Zoho user id (multi-país: SDRs CO). Gana sobre ownerEmail. */
+  ownerId?: string
   conversacion?: Array<{ role?: string; content?: string; at?: string }>
 }
 
@@ -388,9 +390,9 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
 
     // Si hay reunión agendada → owner = host (ownerEmail resuelto).
     // Si NO → owner = Vicky SIEMPRE (tómbola), ignorando ZOHO_CRM_OWNER_ID.
-    const resolvedOwnerId = input.ownerEmail
-      ? await resolveOwnerId(input.ownerEmail, accessToken, apiDomain)
-      : null
+    const resolvedOwnerId =
+      (input.ownerId || "").trim() ||
+      (input.ownerEmail ? await resolveOwnerId(input.ownerEmail, accessToken, apiDomain) : null)
     const ownerId = resolvedOwnerId || VICKY_OWNER_ID
     const entraATombola = !resolvedOwnerId
 
@@ -418,9 +420,12 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     // equipo (jul-2026): los leads deben llegar con territorio para que las
     // assignment rules los repartan (los sin territorio quedaban huérfanos).
     const digits = phone.replace(/\D/g, "")
-    const pais = sanitize(input.pais, 100) || (digits.startsWith("56") ? "Chile" : "")
+    const pais =
+      sanitize(input.pais, 100) ||
+      (digits.startsWith("56") ? "Chile" : digits.startsWith("57") ? "Colombia" : "")
     if (pais) record.Country = pais
     if (digits.startsWith("56") || pais.toLowerCase() === "chile") record.Territorio = "Chile"
+    else if (digits.startsWith("57") || pais.toLowerCase() === "colombia") record.Territorio = "Colombia"
     const ciudad = sanitize(input.ciudad, 100)
     if (ciudad) record.City = ciudad
 
