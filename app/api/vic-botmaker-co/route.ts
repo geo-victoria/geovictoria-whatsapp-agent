@@ -39,6 +39,7 @@ import {
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
+import { transcribirAudio } from "@/lib/transcribe-audio"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -148,7 +149,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const body = (await request.json().catch(() => ({}))) as BotmakerBody
     const contact = (body.contact || "").replace(/\D/g, "")
-    const message = (body.message || "").trim()
+    let message = (body.message || "").trim()
     const audioUrl = (body.audioUrl || body.audioURL || "").trim()
     const simulacion = body.simular === true
 
@@ -166,9 +167,20 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ ok: false, error: "ANTHROPIC_API_KEY no configurada" }, { status: 503 })
     }
 
-    // v1 sin transcripción: notas de voz piden texto (respuesta directa vía acción).
+    // Nota de voz: misma herencia chilena — transcribir y seguir como texto.
+    // Si la transcripción falla (o no hay ELEVENLABS_API_KEY), pedir texto en
+    // usted; NUNCA procesar el placeholder "__audio__" como mensaje real.
+    if (audioUrl && (!message || message === "__audio__")) {
+      sendTypingIndicator(contact, true, CANAL_CO()).catch(() => {})
+      const transcript = await transcribirAudio(audioUrl)
+      if (transcript) {
+        message = transcript
+        console.log(`[vic-co] audio transcrito contact=${contact} len=${transcript.length}`)
+      } else {
+        return NextResponse.json({ reply: PIDE_TEXTO_CO, pais: "co" })
+      }
+    }
     if (!message || message === "__audio__") {
-      if (audioUrl) return NextResponse.json({ reply: PIDE_TEXTO_CO, pais: "co" })
       return NextResponse.json({ ok: false, error: "message requerido" }, { status: 400 })
     }
 
