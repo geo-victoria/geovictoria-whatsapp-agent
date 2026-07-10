@@ -67,6 +67,12 @@ const ERROR_GENERICO_CO =
 // (herencia del guardrail 2.6d chileno — caso real de Rodrigo en CL).
 const OPTOUT_GOODBYE_CO =
   "Entendido, no lo contactaremos más. Si en el futuro lo necesita, aquí estaré. ¡Que le vaya muy bien! 🙌"
+// Fallback que emite lib/agent-loop.ts cuando el turno termina SIN texto final.
+// Está TUTEADO (herencia chilena): en CO hay que detectarlo y reemplazarlo por
+// el genérico en usted (visto en simulación: un opt-out sin texto final lo
+// habría enviado tal cual). Copia literal — mantener en sync con agent-loop.
+const AGENT_LOOP_EMPTY_FALLBACK =
+  "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"
 
 // ── Re-engagement CO (mismo modelo de estados que Chile) ────────────────────
 // La cadencia se arma SOLO en conversaciones COMERCIALES; soporte/FAQ no
@@ -109,6 +115,9 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     },
   })
   let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(result.reply || "")))
+  // El fallback del agent-loop viene tuteado (Chile): en CO se trata como
+  // "turno sin texto" y se reemplaza por el genérico en usted.
+  if (reply === AGENT_LOOP_EMPTY_FALLBACK) reply = ""
 
   const toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
   // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
@@ -270,7 +279,19 @@ export async function POST(request: Request): Promise<NextResponse> {
         contact,
         tools: { schemas: TOOL_SCHEMAS_CO as unknown as unknown[], dispatch: buildDispatchCO(contact) },
       })
-      const reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(result.reply || "")))
+      let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(result.reply || "")))
+      // Mismos guardrails de texto final del camino real (fallback tuteado del
+      // loop → usted; opt-out sin texto → despedida) para que la simulación
+      // refleje lo que vería el cliente.
+      if (reply === AGENT_LOOP_EMPTY_FALLBACK) reply = ""
+      const simToolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
+      if (
+        simToolCalls.some((c) => c.name === "marcar_no_contactar" && c.ok) &&
+        (!reply.trim() || reply === ERROR_GENERICO_CO)
+      ) {
+        reply = OPTOUT_GOODBYE_CO
+      }
+      if (!reply.trim()) reply = ERROR_GENERICO_CO
       return NextResponse.json({ reply, handoff: result.handoff, pais: "co", simulacion: true })
     }
 
