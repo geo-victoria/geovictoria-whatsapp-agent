@@ -8,19 +8,32 @@
  * en el perfil, no hay conversión). El nombre del campo es herencia del
  * catálogo chileno.
  *
- * Precios Colombia (COP):
+ * Precios Colombia (COP) — DEFINICIONES CERRADAS (Lalo, 09-jul):
  *   Asistencia 1-10:  $315.000/mes fijo (sin micro-plan de 1 persona)
- *   Asistencia 11-50: $13.700/usuario/mes (tarifa única, sin tramos)
+ *   Asistencia 11-50: $13.700/usuario/mes ("la más competitiva": el rango fijo
+ *                     corta en 10, NO en 20 como muestra Creator hoy)
  *   Reloj venta:      $620.000 pago único · arriendo $86.000/mes
  *   Envío:      arriendo $0/$0 · venta $42.000 (capital) / $69.000 (resto)
  *   Instalación: arriendo $0/$0 · venta $67.000 (capital) / $92.000 (resto)
  *   → El ARRIENDO va con envío e instalación GRATIS (argumento de venta CO).
  *
- * TODO (definiciones pendientes de Lalo/comercial CO):
- *   1. Qué cubre "capital" (¿solo Bogotá D.C. + área metropolitana?).
- *   2. Capacitación $95.000: ¿se cobra o va con 100% dcto como Chile?
- *   3. ¿Precios netos + IVA 19% o IVA incluido?
- *   4. Escalera de descuentos CO (instalación 20%/20% + plan 10→20%): confirmar.
+ * ACTIVACIÓN (pago inicial CO, patrón de las cotizaciones reales de Creator):
+ *   = 1 mes del plan cobrado por adelantado, facturado como concepto
+ *   "Activación" CON IVA 19% (el servicio mensual va SIN IVA — excluido
+ *   art. 476 E.T. como computación en la nube). Es la misma lógica del pago
+ *   inicial chileno. NO se replica el esquema "mes 2 con 30% dcto" visto en
+ *   2 cotizaciones (manual, no es política confirmada). No es un ítem de
+ *   catálogo: se deriva del plan en la lógica de cotización CO.
+ *
+ * IVA por línea: plan SIN IVA · activación/equipos/envío/instalación +19%.
+ * Pago online: MercadoPago Colombia (cuenta creada; credenciales pendientes).
+ *
+ * TODO restantes:
+ *   1. Cobertura exacta de "capital" (Creator usa departamento + zona capital).
+ *   2. Capacitación $95.000: está en la planilla pero NO aparece en ninguna de
+ *      las 15 cotizaciones reales — confirmar si se cobra.
+ *   3. Escalera de descuentos CO (instalación 20%/20% + plan 10→20%): confirmar
+ *      con comercial CO antes de habilitar la negociación.
  */
 
 import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos"
