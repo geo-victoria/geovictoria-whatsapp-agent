@@ -199,7 +199,7 @@ export async function runAgentLoop(params: {
       }
     } else if (Array.isArray(last.content) && last.content.length > 0) {
       const blocks = last.content.slice()
-      const lastBlock = blocks[blocks.length - 1] as Record<string, unknown>
+      const lastBlock = blocks[blocks.length - 1] as unknown as Record<string, unknown>
       blocks[blocks.length - 1] = { ...lastBlock, cache_control: cc } as never
       out[out.length - 1] = { ...last, content: blocks }
     }
