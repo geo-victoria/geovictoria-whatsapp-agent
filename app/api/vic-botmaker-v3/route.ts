@@ -149,6 +149,9 @@ const ESCALADA_ERROR_MSG =
 // cotización, negociación o agenda): ahí Vicky responde, la pelota queda en el
 // cliente y vale la pena perseguir. Las conversaciones NO comerciales (soporte,
 // FAQ, login) NO reciben nudges. Tampoco se persigue tras una despedida natural.
+// SOPORTE (decisión de costos 11-jul): un turno que usó el agente de soporte
+// CIERRA el ciclo SIEMPRE — cero seguimiento ni comunicación proactiva a quien
+// pide soporte, aunque la conversación tenga historial comercial.
 const FOLLOWUP_SUPPORT_TOOLS = new Set(["consultar_agente_soporte"])
 // Tools que CIERRAN el ciclo: la conversación quedó en manos de un humano
 // (reunión agendada, callback registrado, derivación) — no perseguimos más.
@@ -784,8 +787,9 @@ async function processOneTurn(
     //    comerciales (soporte, FAQ, login) NO reciben nudges.
     //    - Opt-out explícito → cerrar (no contactar más).
     //    - Tool de cierre (reunión/callback/derivación) → cerrar (quedó en humanos).
+    //    - Turno de SOPORTE → cerrar SIEMPRE (aunque sea comercial): cero
+    //      proactividad a quien pide soporte (decisión de costos 11-jul).
     //    - Turno comercial con respuesta real → (re)armar.
-    //    - Soporte sin señal comercial → cerrar el ciclo.
     //    - Cualquier otro (no comercial) → no armar (queda dormido).
     try {
       const finalToolCalls = (result.toolCalls || []) as ToolCallRecord[]
@@ -849,11 +853,17 @@ async function processOneTurn(
         }
       } else if (usoCierre) {
         await closeFollowup(contact, "derivado")
+      } else if (esSoporte) {
+        // Pidió soporte → CERO seguimiento/proactividad, aunque la conversación
+        // tenga historial comercial (decisión de costos 11-jul: antes esta rama
+        // solo aplicaba si NO era comercial, y bastaba un estimado viejo en el
+        // historial para que el turno de soporte re-armara la cadencia — de ahí
+        // los nudges "¿cómo le fue con su problema de…?"). El cierre con razón
+        // 'soporte' también lo excluye de la reactivación HSM.
+        await closeFollowup(contact, "soporte")
+        console.log(`[v3-followup] soporte → ciclo cerrado (sin proactividad) contact=${contact}`)
       } else if (reply && !esDespedida && esComercial) {
         await armFollowup(contact)
-      } else if (esSoporte && !esComercial) {
-        await closeFollowup(contact, "soporte")
-        console.log(`[v3-followup] soporte (no comercial) → ciclo cerrado contact=${contact}`)
       }
       // else: conversación no comercial → no se arma (sin nudges).
     } catch (err) {

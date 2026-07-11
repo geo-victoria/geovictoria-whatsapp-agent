@@ -165,10 +165,12 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       }
     } else if (usoCierre) {
       await closeFollowup(contact, "derivado", "co")
+    } else if (esSoporte) {
+      // Pidió soporte → cero seguimiento/proactividad aunque la conversación
+      // sea comercial (decisión de costos 11-jul, igual que Chile).
+      await closeFollowup(contact, "soporte", "co")
     } else if (reply && !esDespedida && esComercial) {
       await armFollowup(contact, "co")
-    } else if (esSoporte && !esComercial) {
-      await closeFollowup(contact, "soporte", "co")
     }
     // else: conversación no comercial → sin nudges.
   } catch (err) {
