@@ -89,6 +89,36 @@ const FAREWELL_RE_CO =
 
 type ToolCallRecordCO = { name: string; ok: boolean; output?: unknown }
 
+// ── Ruteo de modelo por turno (paridad con Chile, decisión de costos 11-jul) ──
+// Sonnet SOLO en el flujo de cotización (precios/configuración/cotización
+// formal), donde la calidad es crítica; Haiku para el resto (saludos, FAQ,
+// soporte) — 3× más barato en el mismo pipeline que Chile ya validó.
+const MODELO_COTIZACION_CO = (
+  process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || "claude-sonnet-4-5-20250929"
+).trim()
+const MODELO_SIMPLE_CO = (
+  process.env.ANTHROPIC_SALES_AGENT_MODEL_SIMPLE || "claude-haiku-4-5-20251001"
+).trim()
+
+// El mensaje entrante pinta cotización/precio (marcadores CO: COP, NIT,
+// mensualidad; sin UF ni chilenismos).
+const COTIZ_MSG_RE_CO =
+  /cotiz|precio|cu[aá]nto|cuesta|\bvale\b|\bvalor\b|\bcaro\b|barat|descuento|rebaj|presupuesto|plan|oferta|pago inicial|mensualidad|reloj|\bNIT\b|\d+\s*(trabajador|persona|emplead|colaborador|usuario)|somos\s+\d+/i
+// La ÚLTIMA respuesta de Vicky ya estaba cotizando (sigue el flujo aunque el
+// cliente solo conteste "sí"/"listo"/un dato suelto como el correo o el NIT).
+const COTIZ_HIST_RE_CO =
+  /cotiz|\/mes|pago inicial|mensualidad|activaci[oó]n|instalaci[oó]n|\bplan\b|\bpunto|marca|reloj|\bNIT\b|correo|cu[aá]nt[ao]s?\s+person|trabajador|usuario/i
+
+function esFlujoCotizacionCO(
+  message: string,
+  history: Array<{ role: string; content: string }>,
+): boolean {
+  if (COTIZ_MSG_RE_CO.test(message)) return true
+  const lastAssistant =
+    [...history].reverse().find((m) => m.role === "assistant")?.content || ""
+  return COTIZ_HIST_RE_CO.test(lastAssistant)
+}
+
 type BotmakerBody = {
   contact?: string
   message?: string
@@ -103,12 +133,19 @@ function sleep(ms: number): Promise<void> {
 
 async function processOneTurnCO(contact: string, message: string, apiKey: string): Promise<void> {
   const history = await fetchHistoryV3(contact)
+  const modelo = esFlujoCotizacionCO(message, history)
+    ? MODELO_COTIZACION_CO
+    : MODELO_SIMPLE_CO
+  console.log(
+    `[vic-co-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION_CO}`,
+  )
   const result = await runAgentLoop({
     systemPrompt: SYSTEM_PROMPT_CO,
     history,
     userMessage: message,
     apiKey,
     contact,
+    model: modelo,
     tools: {
       schemas: TOOL_SCHEMAS_CO as unknown as unknown[],
       dispatch: buildDispatchCO(contact),
@@ -274,12 +311,17 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     // Modo simulación (pruebas E2E): síncrono, sin lock, sin persistir.
     if (simulacion) {
+      // Mismo ruteo de modelo que el camino real (sin historia persistida).
+      const modeloSim = esFlujoCotizacionCO(message, [])
+        ? MODELO_COTIZACION_CO
+        : MODELO_SIMPLE_CO
       const result = await runAgentLoop({
         systemPrompt: SYSTEM_PROMPT_CO,
         history: [],
         userMessage: message,
         apiKey,
         contact,
+        model: modeloSim,
         tools: { schemas: TOOL_SCHEMAS_CO as unknown as unknown[], dispatch: buildDispatchCO(contact) },
       })
       // Mismos guardrails de texto final del camino real (fallback tuteado del
@@ -296,7 +338,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         reply = OPTOUT_GOODBYE_CO
       }
       if (!reply.trim()) reply = ERROR_GENERICO_CO
-      return NextResponse.json({ reply, handoff: result.handoff, pais: "co", simulacion: true })
+      return NextResponse.json({
+        reply,
+        handoff: result.handoff,
+        pais: "co",
+        simulacion: true,
+        modelo: modeloSim,
+      })
     }
 
     // ── Pipeline endurecido (herencia chilena) ──

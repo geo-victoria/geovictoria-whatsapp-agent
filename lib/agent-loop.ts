@@ -176,6 +176,36 @@ export async function runAgentLoop(params: {
     },
   ]
 
+  // Segundo breakpoint (11-jul, decisión de costos): también se cachea el
+  // HISTORIAL marcando el último bloque del último mensaje de cada request.
+  // Sin esto, los hasta 40 mensajes de historia se re-pagaban a precio
+  // completo en cada iteración del loop (2-3+ por turno con tools) y en cada
+  // turno de una conversación activa (< 5 min entre requests = hit garantizado
+  // dentro del TTL). El breakpoint es incremental: el prefijo crece turno a
+  // turno y las lecturas caen a ~0,1× del precio de input. Solo 2 breakpoints
+  // en total (system + último mensaje), lejos del máximo de 4.
+  function conCacheEnUltimoMensaje(
+    msgs: Anthropic.Messages.MessageParam[],
+  ): Anthropic.Messages.MessageParam[] {
+    if (msgs.length === 0) return msgs
+    const out = msgs.slice()
+    const last = out[out.length - 1]
+    const cc = { type: "ephemeral" as const }
+    if (typeof last.content === "string") {
+      if (!last.content.trim()) return msgs
+      out[out.length - 1] = {
+        ...last,
+        content: [{ type: "text", text: last.content, cache_control: cc }],
+      }
+    } else if (Array.isArray(last.content) && last.content.length > 0) {
+      const blocks = last.content.slice()
+      const lastBlock = blocks[blocks.length - 1] as Record<string, unknown>
+      blocks[blocks.length - 1] = { ...lastBlock, cache_control: cc } as never
+      out[out.length - 1] = { ...last, content: blocks }
+    }
+    return out
+  }
+
   // Tope de generación pesada por turno: generar varias cotizaciones formales
   // (generar_link → Zoho + PDF + correo) en un solo turno supera el maxDuration
   // (60s), deja el chat sin respuesta y los reintentos regeneran en loop
@@ -192,7 +222,9 @@ export async function runAgentLoop(params: {
       // Las tools se serializan con su schema completo.
       // El cast es necesario porque TOOL_SCHEMAS es `as const`.
       tools: toolSchemas,
-      messages,
+      // Copia con el breakpoint de caché en el último mensaje; `messages`
+      // queda limpio (el push de abajo no arrastra marcas viejas).
+      messages: conCacheEnUltimoMensaje(messages),
     })
 
     const stopReason = response.stop_reason
