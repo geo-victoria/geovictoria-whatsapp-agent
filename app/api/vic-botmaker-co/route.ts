@@ -26,7 +26,7 @@
 import { NextResponse, after } from "next/server"
 import { runAgentLoop } from "@/lib/agent-loop"
 import { PERFIL_CO } from "@/lib/paises/co"
-import { getSystemPromptCO } from "@/lib/paises/co/prompt"
+import { getSystemPromptCO, formatCotizacionExistenteCO } from "@/lib/paises/co/prompt"
 import { TOOL_SCHEMAS_CO, buildDispatchCO } from "@/lib/paises/co/tools"
 import {
   fetchHistoryV3,
@@ -35,6 +35,7 @@ import {
   armFollowup,
   closeFollowup,
   scheduleConsensualFollowup,
+  getQuotePointer,
 } from "@/lib/supabase-persistence-v3"
 import {
   hashMessage,
@@ -59,6 +60,11 @@ const BURST_DEBOUNCE_MS = Number(process.env.BURST_DEBOUNCE_MS || 1500)
 const MAX_BURST_TURNS = 10
 const MAX_INPUT_CHARS = 4000
 
+// Guardrail anti prompt-injection (espejo del chileno): mensajes que intentan
+// extraer el prompt o inyectar instrucciones no se procesan con el agente.
+const INJECT_RE =
+  /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
+
 const PIDE_TEXTO_CO =
   "Le pido disculpas: por ahora no puedo escuchar notas de voz. ¿Me lo puede escribir por texto, por favor?"
 const ERROR_GENERICO_CO =
@@ -67,6 +73,11 @@ const ERROR_GENERICO_CO =
 // (herencia del guardrail 2.6d chileno — caso real de Rodrigo en CL).
 const OPTOUT_GOODBYE_CO =
   "Entendido, no lo contactaremos más. Si en el futuro lo necesita, aquí estaré. ¡Que le vaya muy bien! 🙌"
+// Circuit-breaker (espejo del chileno): tras 2 errores seguidos en la misma
+// conversación, se escala a humano UNA vez y luego se silencia (en CL este
+// loop llegó a 60 mensajes idénticos en producción).
+const ESCALADA_ERROR_CO =
+  "Disculpe, sigo teniendo un problema técnico. Ya le avisé a un ejecutivo para que se comunique con usted a la brevedad. 🙏"
 // Fallback que emite lib/agent-loop.ts cuando el turno termina SIN texto final.
 // Está TUTEADO (herencia chilena): en CO hay que detectarlo y reemplazarlo por
 // el genérico en usted (visto en simulación: un opt-out sin texto final lo
@@ -134,14 +145,22 @@ function sleep(ms: number): Promise<void> {
 
 async function processOneTurnCO(contact: string, message: string, apiKey: string): Promise<void> {
   const history = await fetchHistoryV3(contact)
-  const modelo = esFlujoCotizacionCO(message, history)
-    ? MODELO_COTIZACION_CO
-    : MODELO_SIMPLE_CO
+  // Anti-amnesia (espejo CL): si ya existe una cotización formal, se inyecta
+  // su estado al prompt (no re-pedir datos, no regenerar, reenviar el link).
+  const quotePointer = await getQuotePointer(contact).catch(() => null)
+  const contextoCotizacion = formatCotizacionExistenteCO(quotePointer || undefined)
+  // Con formal vigente el turno ES de cotización aunque el mensaje no lo diga.
+  const modelo =
+    quotePointer || esFlujoCotizacionCO(message, history)
+      ? MODELO_COTIZACION_CO
+      : MODELO_SIMPLE_CO
   console.log(
-    `[vic-co-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION_CO}`,
+    `[vic-co-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION_CO} formal=${!!quotePointer}`,
   )
+  const systemPromptCO = contextoCotizacion + getSystemPromptCO(contact)
+  const dispatchCO = buildDispatchCO(contact)
   const result = await runAgentLoop({
-    systemPrompt: getSystemPromptCO(contact),
+    systemPrompt: systemPromptCO,
     history,
     userMessage: message,
     apiKey,
@@ -149,7 +168,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     model: modelo,
     tools: {
       schemas: TOOL_SCHEMAS_CO as unknown as unknown[],
-      dispatch: buildDispatchCO(contact),
+      dispatch: dispatchCO,
     },
   })
   // El fallback del agent-loop viene tuteado (Chile): en CO se trata como
@@ -158,7 +177,63 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   const rawReply = (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
   let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(rawReply)))
 
-  const toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
+  let toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
+
+  // ── Guardrails anti-alucinación (espejo de 2.6b/2.6c chilenos) ──
+  // Si el reply AFIRMA que una reunión quedó agendada o que el equipo lo va a
+  // contactar, pero NINGUNA tool lo respalda este turno, se re-corre el loop
+  // forzando la tool; si tampoco se concreta, NO se confirma en falso.
+  const afirmaReunionLista =
+    /\breuni[oó]n\b[^.]{0,40}\b(qued[oó]|est[aá]|fue)\b[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(reply) ||
+    /\b(agend[eé]|reagend[eé])\b[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
+    /\bse\s+l[ao]\s+(agend[eé]|reagend[eé])\b/i.test(reply)
+  const afirmaContactoListo =
+    /\b(un\s+ejecutiv[oa]|el\s+equipo|nuestro\s+equipo|un\s+asesor|Laura)\b[^.]{0,50}\b(l[oe]\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|comunicar[aá]|contactar[aá]))/i.test(reply)
+  const realAgenda = toolCalls.some(
+    (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
+  )
+  const realContacto = toolCalls.some(
+    (c) => (c.name === "derivar_a_ejecutivo" || c.name === "agendar_reunion") && c.ok,
+  )
+  const alucinacion =
+    (afirmaReunionLista && !realAgenda) || (!afirmaReunionLista && afirmaContactoListo && !realContacto)
+  if (alucinacion) {
+    const FORZAR_TOOL =
+      "\n\n# Instrucción de sistema (este turno)\n" +
+      "Estás por confirmarle al cliente una reunión agendada o que el equipo lo contactará, pero NO puedes afirmarlo sin EJECUTAR la tool correspondiente. " +
+      "Si confirmó un horario de reunión, llama agendar_reunion (o reagendar_reunion si ya tenía una). " +
+      "Si pidió que lo contacten, llama derivar_a_ejecutivo con los datos que ya entregó. " +
+      "SOLO después de que la tool devuelva ok confirma, usando su mensajeParaProspecto. " +
+      "Si faltan datos obligatorios, PÍDELOS en vez de afirmar que ya quedó listo."
+    const retry = await runAgentLoop({
+      systemPrompt: systemPromptCO + FORZAR_TOOL,
+      history,
+      userMessage: message,
+      apiKey,
+      contact,
+      model: MODELO_COTIZACION_CO,
+      tools: { schemas: TOOL_SCHEMAS_CO as unknown as unknown[], dispatch: dispatchCO },
+    }).catch(() => null)
+    const retryCalls = ((retry?.toolCalls || []) as ToolCallRecordCO[])
+    const retryOk = retryCalls.some(
+      (c) =>
+        (c.name === "agendar_reunion" || c.name === "reagendar_reunion" || c.name === "derivar_a_ejecutivo") &&
+        c.ok,
+    )
+    const retryReply = (retry?.reply || "").trim()
+    if (retryOk && retryReply && retryReply !== AGENT_LOOP_EMPTY_FALLBACK) {
+      console.warn(`[vic-co] ALUCINACION_RECUPERADA contact=${contact}: el reintento forzó la tool.`)
+      reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))
+      toolCalls = retryCalls
+    } else {
+      console.error(
+        `[vic-co] ALUCINACION_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+      )
+      reply = afirmaReunionLista
+        ? "Disculpe, aún no dejo agendada la reunión. ¿Me confirma el día y la hora que le acomodan, junto con su nombre completo, correo y empresa, y la agendo de inmediato?"
+        : "Disculpe, no alcancé a dejar registrada su solicitud. ¿Me confirma su nombre completo, su empresa y su correo, y la dejo lista para que el equipo lo contacte?"
+    }
+  }
   // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
   const callNoContactar = toolCalls.find((c) => c.name === "marcar_no_contactar" && c.ok)
   if (callNoContactar && (!reply.trim() || reply === ERROR_GENERICO_CO)) {
@@ -189,7 +264,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     const yaHuboEstimacion = history.some(
       (m) => m.role === "assistant" && /\/mes|pago inicial|cotizaci[oó]n/i.test(m.content || ""),
     )
-    const esComercial = comercialEsteTurno || yaHuboEstimacion
+    const esComercial = comercialEsteTurno || yaHuboEstimacion || !!quotePointer
     if (callNoContactar) {
       await closeFollowup(contact, tipoNoContactar, "co")
       console.log(`[vic-co][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
@@ -249,7 +324,27 @@ async function processBurstCO(contact: string, apiKey: string, seedMessage?: str
         await processOneTurnCO(contact, combinado, apiKey)
       } catch (err) {
         console.error(`[vic-co] error en turno contact=${contact}:`, err)
-        await sendBotmakerMessage(contact, ERROR_GENERICO_CO, CANAL_CO()).catch(() => {})
+        // Circuit-breaker (espejo CL): si los últimos turnos ya fueron errores,
+        // no repetir el fallback en loop — escalar UNA vez y luego silenciar.
+        // El mensaje de error SE PERSISTE para que el contador avance.
+        try {
+          const recientes = await fetchHistoryV3(contact, 6).catch(() => [])
+          const esError = (t?: string) => t === ERROR_GENERICO_CO || t === ESCALADA_ERROR_CO
+          const ultimos = recientes
+            .filter((m) => m.role === "assistant")
+            .slice(-2)
+            .map((m) => m.content?.trim())
+          const dosErroresSeguidos = ultimos.length >= 2 && ultimos.every(esError)
+          if (dosErroresSeguidos && ultimos[ultimos.length - 1] === ESCALADA_ERROR_CO) {
+            console.error(`[vic-co] CIRCUIT_BREAKER contact=${contact}: errores en loop, silenciando (ya se escaló).`)
+          } else {
+            const errReply = dosErroresSeguidos ? ESCALADA_ERROR_CO : ERROR_GENERICO_CO
+            await appendTurnV3(contact, combinado, errReply, "co").catch(() => {})
+            await sendBotmakerMessage(contact, errReply, CANAL_CO()).catch(() => {})
+          }
+        } catch {
+          await sendBotmakerMessage(contact, ERROR_GENERICO_CO, CANAL_CO()).catch(() => {})
+        }
       }
 
       if (++turns >= MAX_BURST_TURNS) {
@@ -308,6 +403,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
     if (!message || message === "__audio__") {
       return NextResponse.json({ ok: false, error: "message requerido" }, { status: 400 })
+    }
+
+    // Anti prompt-injection (espejo CL): no se procesa con el agente; se
+    // responde neutro en usted y se registra para revisión.
+    if (INJECT_RE.test(message)) {
+      console.warn(`[vic-co] INJECT bloqueado contact=${contact} msg=${JSON.stringify(message.slice(0, 150))}`)
+      const neutro = "¿Le puedo ayudar con información sobre nuestro servicio de control de asistencia?"
+      if (simulacion) return NextResponse.json({ reply: neutro, pais: "co", simulacion: true })
+      await sendBotmakerMessage(contact, neutro, CANAL_CO()).catch(() => {})
+      return NextResponse.json({ reply: "" })
     }
 
     // Modo simulación (pruebas E2E): síncrono, sin lock, sin persistir.

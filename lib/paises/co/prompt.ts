@@ -68,6 +68,35 @@ Cuando el cliente proponga un día relativo ("mañana", "el martes", "la próxim
 }
 
 /**
+ * Contexto de cotización formal VIGENTE (anti-amnesia, espejo del chileno):
+ * si el contacto ya tiene una formal generada, Vicky no parte de cero aunque
+ * el historial se haya acortado. Adaptado a CO: COP, usted, sin tools de
+ * descuento post-formal (ajustes → recotizar confirmando, o derivar).
+ */
+export function formatCotizacionExistenteCO(p?: {
+  quoteId?: string
+  acceptanceUrl?: string
+  totalClp?: number | null
+}): string {
+  if (!p || !p.quoteId) return ""
+  const monto =
+    typeof p.totalClp === "number" && p.totalClp > 0
+      ? ` (pago inicial aprox. $${Math.round(p.totalClp).toLocaleString("es-CO")} COP)`
+      : ""
+  const link = p.acceptanceUrl
+    ? `\nLink de aceptación de esa cotización (úsalo si se lo piden o para retomar): ${p.acceptanceUrl}`
+    : ""
+  return (
+    `ESTADO DE ESTE CONTACTO — LÉELO ANTES DE ACTUAR:\n` +
+    `Este contacto YA tiene una cotización formal generada${monto}.${link}\n` +
+    `Por lo tanto NO partes de cero:\n` +
+    `- NO le vuelvas a pedir datos que ya entregó (empresa, NIT, correo, cantidad de personas) ni rearmes la cotización desde el principio.\n` +
+    `- NO generes otra cotización formal. Si solo quiere el link, avanzar o aceptar, reenvíale el link de arriba tal cual.\n` +
+    `- Solo si pide explícitamente algo DISTINTO (otra cantidad de personas, otra configuración, otra empresa) puedes cotizar de nuevo, confirmándolo con él antes.\n\n---\n\n`
+  )
+}
+
+/**
  * System prompt CO con el anclaje temporal del momento y, si se conoce, el
  * teléfono del cliente inyectado (espejo del chileno: nunca se le pregunta
  * el número — escribe desde él). Usar en cada request.

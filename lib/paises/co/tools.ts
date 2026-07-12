@@ -414,6 +414,10 @@ export function buildDispatchCO(contact: string) {
         return {
           ok: true,
           quoteId: data.quoteId,
+          // Campos que el agent-loop persiste en el puntero durable de la
+          // cotización (anti-amnesia: retomar la formal en turnos futuros).
+          acceptanceUrl: data.acceptanceUrl,
+          totalCLP: calculo.pagoInicialTotal,
           mensajeParaProspecto: `Listo, su cotización formal quedó generada 🎉\n\nAquí la revisa, la acepta y elige cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y su mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Cualquier duda me dice.`,
         }
       }
