@@ -26,7 +26,7 @@
 import { NextResponse, after } from "next/server"
 import { runAgentLoop } from "@/lib/agent-loop"
 import { PERFIL_CO } from "@/lib/paises/co"
-import { SYSTEM_PROMPT_CO } from "@/lib/paises/co/prompt"
+import { getSystemPromptCO } from "@/lib/paises/co/prompt"
 import { TOOL_SCHEMAS_CO, buildDispatchCO } from "@/lib/paises/co/tools"
 import {
   fetchHistoryV3,
@@ -141,7 +141,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     `[vic-co-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION_CO}`,
   )
   const result = await runAgentLoop({
-    systemPrompt: SYSTEM_PROMPT_CO,
+    systemPrompt: getSystemPromptCO(),
     history,
     userMessage: message,
     apiKey,
@@ -317,7 +317,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         ? MODELO_COTIZACION_CO
         : MODELO_SIMPLE_CO
       const result = await runAgentLoop({
-        systemPrompt: SYSTEM_PROMPT_CO,
+        systemPrompt: getSystemPromptCO(),
         history: [],
         userMessage: message,
         apiKey,
