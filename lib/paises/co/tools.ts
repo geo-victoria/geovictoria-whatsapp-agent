@@ -457,13 +457,24 @@ export function buildDispatchCO(contact: string) {
       }
 
       // Soporte operativo: misma implementación chilena (agente Foundry). El
-      // escalamiento humano reemplaza los canales chilenos por los de CO.
+      // escalamiento humano reemplaza los canales chilenos por los de CO, y
+      // las respuestas intermedias se sanean por si el agente cuela un
+      // teléfono de soporte CHILENO en el texto (base de conocimiento CL).
       if (name === "consultar_agente_soporte") {
+        const sanearCanalesChilenos = (texto: string): string =>
+          texto
+            .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, "soporte@geovictoria.com")
+            .replace(/600[\s.\-]*914[\s.\-]*3819/g, "soporte@geovictoria.com")
         const r = await consultarAgenteSoporte(input as never)
-        if (r.ok && r.accion === "escalar_humano") {
-          return { ...r, mensajeParaProspecto: MENSAJE_ESCALAMIENTO_SOPORTE_CO }
+        if (!r.ok) return r
+        if (r.accion === "escalar_humano") {
+          return {
+            ...r,
+            respuestaAgente: sanearCanalesChilenos(r.respuestaAgente || ""),
+            mensajeParaProspecto: MENSAJE_ESCALAMIENTO_SOPORTE_CO,
+          }
         }
-        return r
+        return { ...r, respuestaAgente: sanearCanalesChilenos(r.respuestaAgente || "") }
       }
 
       // Agenda CO (Cal.com): mismas implementaciones chilenas con el event
