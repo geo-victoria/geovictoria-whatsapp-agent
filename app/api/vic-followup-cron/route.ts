@@ -67,9 +67,9 @@ function instruccionDeTono(stage: number): string {
 // conversación que recién partía (un "hola" sin intención identificada aún).
 function fallbackPorStage(stage: number, country: string): string {
   if (country === "co") {
-    if (stage <= 1) return "¿Sigue por ahí? Quedo atenta si desea continuar 😊"
-    if (stage === 2) return "Hola, ¿retomamos donde quedamos? Quedo atenta 😊"
-    return "Hola, ¿sigue interesado en cotizar con nosotros o lo dejamos para más adelante? Cualquier cosa, aquí estoy 😊"
+    if (stage <= 1) return "Sigues por ahí? 😊 Aquí quedo atenta si quieres continuar"
+    if (stage === 2) return "Hola!! Retomamos donde quedamos? Quedo atenta 😊"
+    return "Hola! Sigues interesado en cotizar con nosotros o lo dejamos para más adelante? Cualquier cosa, aquí estoy 🙌"
   }
   if (stage <= 1) return "¿Todo bien? Te perdí 😅 Aquí sigo si quieres continuar."
   if (stage === 2) return "Hola! ¿Retomamos donde quedamos? Quedé atenta 😊"
@@ -83,7 +83,7 @@ function identidadPorPais(country: string): string {
   if (country === "co") {
     return (
       "Eres Vicky, ejecutiva comercial de GeoVictoria COLOMBIA (control de asistencia B2B). " +
-      "REGISTRO OBLIGATORIO: trata al cliente de USTED (le, su, '¿me confirma?'); JAMÁS tutees (nada de tú/tienes/puedes) y JAMÁS uses chilenismos ('al tiro', 'po', 'cachái') ni voseo. "
+      "REGISTRO OBLIGATORIO (feedback equipo CO): TUTEO colombiano cálido y cercano (tú/tienes/puedes, 'te hace sentido?'); JAMÁS voseo (vos/tenés/podés) ni chilenismos ('al tiro', 'po', 'cachái'). Entusiasmo natural: puedes usar signos de admiración de cierre ('Genial!!') y 1 emoji. "
     )
   }
   return (

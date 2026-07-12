@@ -66,18 +66,18 @@ const INJECT_RE =
   /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
 
 const PIDE_TEXTO_CO =
-  "Le pido disculpas: por ahora no puedo escuchar notas de voz. ¿Me lo puede escribir por texto, por favor?"
+  "Uy, disculpa — por ahora no puedo escuchar notas de voz 🙏 Me lo escribes por texto porfa?"
 const ERROR_GENERICO_CO =
-  "Disculpe, tuve un inconveniente para procesar su mensaje. ¿Me lo puede repetir, por favor?"
+  "Disculpa, tuve un inconveniente para procesar tu mensaje. Me lo repites porfa? 🙏"
 // Despedida limpia si el modelo registró un opt-out y el turno quedó sin texto
 // (herencia del guardrail 2.6d chileno — caso real de Rodrigo en CL).
 const OPTOUT_GOODBYE_CO =
-  "Entendido, no lo contactaremos más. Si en el futuro lo necesita, aquí estaré. ¡Que le vaya muy bien! 🙌"
+  "Entendido, no te contactaremos más. Si en el futuro lo necesitas, aquí estaré. Que te vaya muy bien!! 🙌"
 // Circuit-breaker (espejo del chileno): tras 2 errores seguidos en la misma
 // conversación, se escala a humano UNA vez y luego se silencia (en CL este
 // loop llegó a 60 mensajes idénticos en producción).
 const ESCALADA_ERROR_CO =
-  "Disculpe, sigo teniendo un problema técnico. Ya le avisé a un ejecutivo para que se comunique con usted a la brevedad. 🙏"
+  "Disculpa, sigo teniendo un problema técnico. Ya le avisé a un ejecutivo para que se comunique contigo a la brevedad 🙏"
 // Fallback que emite lib/agent-loop.ts cuando el turno termina SIN texto final.
 // Está TUTEADO (herencia chilena): en CO hay que detectarlo y reemplazarlo por
 // el genérico en usted (visto en simulación: un opt-out sin texto final lo
@@ -230,8 +230,8 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
         `[vic-co] ALUCINACION_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
       )
       reply = afirmaReunionLista
-        ? "Disculpe, aún no dejo agendada la reunión. ¿Me confirma el día y la hora que le acomodan, junto con su nombre completo, correo y empresa, y la agendo de inmediato?"
-        : "Disculpe, no alcancé a dejar registrada su solicitud. ¿Me confirma su nombre completo, su empresa y su correo, y la dejo lista para que el equipo lo contacte?"
+        ? "Disculpa, aún no dejo agendada la reunión. Me confirmas el día y la hora que te acomodan, junto con tu nombre completo, correo y empresa, y la agendo de inmediato? 📅"
+        : "Disculpa, no alcancé a dejar registrada tu solicitud. Me confirmas tu nombre completo, tu empresa y tu correo, y la dejo lista para que el equipo te contacte? 😊"
     }
   }
   // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
@@ -409,7 +409,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // responde neutro en usted y se registra para revisión.
     if (INJECT_RE.test(message)) {
       console.warn(`[vic-co] INJECT bloqueado contact=${contact} msg=${JSON.stringify(message.slice(0, 150))}`)
-      const neutro = "¿Le puedo ayudar con información sobre nuestro servicio de control de asistencia?"
+      const neutro = "Te puedo ayudar con información sobre nuestro servicio de control de asistencia? 😊"
       if (simulacion) return NextResponse.json({ reply: neutro, pais: "co", simulacion: true })
       await sendBotmakerMessage(contact, neutro, CANAL_CO()).catch(() => {})
       return NextResponse.json({ reply: "" })

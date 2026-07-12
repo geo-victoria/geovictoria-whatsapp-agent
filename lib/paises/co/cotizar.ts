@@ -15,7 +15,7 @@
  *     instalación van con precio final (iva=0); retenciones y artículos
  *     tributarios no se mencionan jamás.
  *
- * El mensajeParaProspecto va en REGISTRO DE USTED y formato COP. Es la única
+ * El mensajeParaProspecto va en TUTEO cálido colombiano (feedback equipo CO 12-jul) y formato COP. Es la única
  * fuente de precios que Vicky CO puede comunicar (misma regla dura de Chile).
  */
 
@@ -194,7 +194,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   // Solo el hardware muestra "+ IVA"; el resto va con precio final, sin
   // mención de impuestos.
   const filas: string[] = []
-  filas.push("Le comparto el detalle de su cotización referencial:")
+  filas.push("Te comparto el detalle de tu cotización referencial:")
   filas.push("")
   filas.push("Mensualidad del servicio:")
   filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(plan)}/mes`)
@@ -216,7 +216,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   filas.push(`Total pago inicial: ${formatearCOP(pagoInicialTotal)}`)
   filas.push("")
   filas.push(
-    "La capacitación online, valorada en $95.000, va incluida con el 100% de descuento.",
+    "Y la capacitación online, valorada en $95.000, va incluida de regalo (100% de descuento) 🎁",
   )
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-co) ──

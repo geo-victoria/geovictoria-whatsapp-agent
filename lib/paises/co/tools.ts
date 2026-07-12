@@ -81,9 +81,9 @@ function fechaLegibleCO(slotIso: string): string {
 // van los canales válidos para Colombia (correo + horario). Cuando el equipo
 // CO confirme un WhatsApp/teléfono local de soporte, se agrega aquí.
 const MENSAJE_ESCALAMIENTO_SOPORTE_CO =
-  "Para esta consulta le recomiendo escribir directamente a nuestro equipo de soporte:\n" +
+  "Para esta consulta te recomiendo escribir directamente a nuestro equipo de soporte:\n" +
   "📧 Email: *soporte@geovictoria.com*\n" +
-  "Atienden de lunes a viernes de 8:30 a 18:30 y le ayudarán a la brevedad."
+  "Atienden de lunes a viernes de 8:30 a 18:30 y te ayudarán enseguida 🙌"
 
 // programar_seguimiento con la zona horaria de Colombia como default (el
 // resto del schema chileno aplica igual).
@@ -418,7 +418,7 @@ export function buildDispatchCO(contact: string) {
           // cotización (anti-amnesia: retomar la formal en turnos futuros).
           acceptanceUrl: data.acceptanceUrl,
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo, su cotización formal quedó generada 🎉\n\nAquí la revisa, la acepta y elige cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y su mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Cualquier duda me dice.`,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y eliges cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y tu mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Cualquier duda me cuentas 😊`,
         }
       }
 
@@ -446,13 +446,13 @@ export function buildDispatchCO(contact: string) {
             ok: false,
             error: "No se pudo registrar el lead. Igual confirma al cliente que el equipo lo contactará.",
             mensajeParaProspecto:
-              "Listo, dejé sus datos registrados. Una persona de nuestro equipo comercial en Colombia lo contactará muy pronto para continuar.",
+              "Listo, dejé tus datos registrados 😊 Una persona de nuestro equipo comercial en Colombia te contactará muy pronto para continuar.",
           }
         }
         return {
           ok: true,
           mensajeParaProspecto:
-            "Listo, quedó registrado. Una persona de nuestro equipo comercial en Colombia lo contactará muy pronto para continuar con su cotización.",
+            "Listo, quedaste registrado 🎉 Una persona de nuestro equipo comercial en Colombia te contactará muy pronto para continuar con tu cotización.",
         }
       }
 
@@ -467,7 +467,7 @@ export function buildDispatchCO(contact: string) {
       }
 
       // Agenda CO (Cal.com): mismas implementaciones chilenas con el event
-      // type de Colombia, timezone Bogotá y confirmaciones en usted.
+      // type de Colombia, timezone Bogotá y confirmaciones en tuteo cálido CO.
       if (name === "consultar_disponibilidad_horario") {
         if (!REUNIONES_CO_HABILITADAS) {
           return { ok: false, error: "La agenda de Colombia no está configurada. Usa derivar_a_ejecutivo (motivo pidio_persona) con la preferencia de horario en el resumen." }
@@ -494,8 +494,8 @@ export function buildDispatchCO(contact: string) {
           ...r,
           // La confirmación chilena viene tuteada; acá va en usted.
           mensajeParaProspecto:
-            `Listo, su reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia). ` +
-            `Le llegará la invitación con el link de la reunión a ${email}. ¿Le puedo ayudar en algo más?`,
+            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia) 🎉 ` +
+            `Te llegará la invitación con el link de la reunión a ${email}. Te puedo ayudar en algo más?`,
         }
       }
       if (name === "reagendar_reunion") {
@@ -507,8 +507,8 @@ export function buildDispatchCO(contact: string) {
         return {
           ...r,
           mensajeParaProspecto:
-            `Listo, su reunión quedó reagendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia). ` +
-            `Le llegará la nueva invitación por correo. ¿Le puedo ayudar en algo más?`,
+            `Listo!! Tu reunión quedó reagendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia) 📅 ` +
+            `Te llegará la nueva invitación por correo. Te puedo ayudar en algo más?`,
         }
       }
 
@@ -518,11 +518,11 @@ export function buildDispatchCO(contact: string) {
       if (name === "programar_seguimiento") {
         const r = programarSeguimiento(input as never)
         if (!("ok" in r) || r.ok !== true) return r
-        // El mensaje chileno viene tuteado; acá va en registro de usted.
+        // Confirmación en tuteo cálido colombiano (feedback equipo CO 12-jul).
         return {
           ...r,
           mensajeParaProspecto:
-            "Perfecto, lo dejamos así. Le escribo cuando acordamos para retomar, sin presionarle. Si necesita algo antes, aquí estoy 🙌",
+            "Perfecto, lo dejamos así 😊 Te escribo cuando quedamos para retomar, sin presión. Si necesitas algo antes, aquí estoy 🙌",
         }
       }
 
