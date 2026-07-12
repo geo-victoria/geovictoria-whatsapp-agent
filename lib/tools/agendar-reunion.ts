@@ -84,6 +84,8 @@ export type AgendarReunionInput = {
   cargo?: string
   country?: string
   zohoLeadId?: string
+  /** Event type de Cal.com (multi-país). Lo inyecta el dispatch, no el modelo. */
+  eventTypeId?: string
 }
 
 export type AgendarReunionResultado =
@@ -118,6 +120,7 @@ export async function agendarReunion(
 
   const booking = await bookMeeting({
     slotIso, prospectName, prospectEmail, timeZone, language: "es",
+    eventTypeId: args.eventTypeId,
   })
 
   if (!booking.success) {

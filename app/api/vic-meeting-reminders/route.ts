@@ -25,6 +25,7 @@ import {
   claimMeetingReminder,
   unclaimMeetingReminder,
   getFollowupCronSecret,
+  getContactCountry,
 } from "@/lib/supabase-persistence-v3"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 
@@ -49,6 +50,16 @@ export async function POST(req: Request) {
 
   let sent = 0
   for (const m of due) {
+    // Solo CHILE: la plantilla HSM configurada es de la línea CL. Reuniones
+    // de Colombia quedan sin recordatorio hasta tener HSM CO aprobada (la
+    // invitación de Cal.com por correo llega igual). Se marca como enviada
+    // para no reintentarla en cada tick.
+    const country = await getContactCountry(m.contact).catch(() => "cl")
+    if (country === "co") {
+      console.log(`[meeting-reminders] contacto CO ${m.contact}: recordatorio omitido (sin HSM CO)`)
+      await claimMeetingReminder(m.booking_uid).catch(() => {})
+      continue
+    }
     // Claim atómico: solo el primer tick que lo tome envía.
     const claimed = await claimMeetingReminder(m.booking_uid)
     if (!claimed) continue

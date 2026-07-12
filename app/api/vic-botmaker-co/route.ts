@@ -78,8 +78,9 @@ const AGENT_LOOP_EMPTY_FALLBACK =
 // La cadencia se arma SOLO en conversaciones COMERCIALES; soporte/FAQ no
 // reciben nudges; despedidas naturales tampoco.
 const FOLLOWUP_SUPPORT_TOOLS_CO = new Set(["consultar_agente_soporte"])
-// derivar_a_ejecutivo cierra el ciclo: la conversación quedó en manos humanas.
-const FOLLOWUP_CLOSING_TOOLS_CO = new Set(["derivar_a_ejecutivo"])
+// Cierran el ciclo: la conversación quedó en manos humanas (derivación o
+// reunión agendada con un ejecutivo).
+const FOLLOWUP_CLOSING_TOOLS_CO = new Set(["derivar_a_ejecutivo", "agendar_reunion"])
 const FOLLOWUP_COMMERCIAL_TOOLS_CO = new Set([
   "cotizar_referencial",
   "generar_link_cotizadora",

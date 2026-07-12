@@ -325,6 +325,8 @@ export async function bookMeeting(params: {
   prospectEmail: string
   language?: string
   timeZone?: string
+  /** Event type de Cal.com donde agendar (default: el chileno CAL_EVENT_TYPE_ID). */
+  eventTypeId?: string
 }): Promise<{ success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string } | { success: false; error: string }> {
   if (!CAL_API_KEY) {
     return { success: false, error: "CAL_API_KEY no configurada en el entorno." }
@@ -340,7 +342,7 @@ export async function bookMeeting(params: {
 
   const meetingGuest = (process.env.CAL_MEETING_GUEST_EMAIL || "egomez@geovictoria.com").trim()
   const body = {
-    eventTypeId: Number(CAL_EVENT_TYPE_ID),
+    eventTypeId: Number(params.eventTypeId || CAL_EVENT_TYPE_ID),
     start: slotIso,
     attendee: { name: prospectName, email: prospectEmail, timeZone, language },
     guests: meetingGuest && meetingGuest !== prospectEmail ? [meetingGuest] : [],
@@ -531,9 +533,10 @@ async function fetchSlotsRawV3(
   startTime: Date,
   endTime: Date,
   tz: string,
+  eventTypeId: string = CAL_EVENT_TYPE_ID,
 ): Promise<Record<string, Array<{ time: string }>>> {
   const url =
-    `${CAL_BASE}/slots/available?eventTypeId=${CAL_EVENT_TYPE_ID}` +
+    `${CAL_BASE}/slots/available?eventTypeId=${eventTypeId}` +
     `&startTime=${startTime.toISOString()}&endTime=${endTime.toISOString()}` +
     `&timeZone=${encodeURIComponent(tz)}`
   const res = await fetch(url, { headers: CAL_HEADERS, cache: "no-store" })
@@ -579,12 +582,14 @@ async function filterValidSlotsV3(
 export async function checkSlotAvailability(params: {
   slotIso: string
   country: string
+  /** Event type de Cal.com a consultar (default: el chileno CAL_EVENT_TYPE_ID). */
+  eventTypeId?: string
 }): Promise<CheckSlotResult> {
   if (!CAL_API_KEY) {
     return { ok: false, error: "CAL_API_KEY no configurada en el entorno." }
   }
 
-  const { slotIso, country } = params
+  const { slotIso, country, eventTypeId = CAL_EVENT_TYPE_ID } = params
   const propuesta = new Date(slotIso)
   if (isNaN(propuesta.getTime())) {
     return { ok: false, error: `slotIso no es una fecha ISO válida: ${slotIso}` }
@@ -610,7 +615,7 @@ export async function checkSlotAvailability(params: {
     const dayStart = new Date(propuestaLocalDay + "T00:00:00.000Z")
     const dayEnd = new Date(propuestaLocalDay + "T23:59:59.999Z")
 
-    const slotsByDay = await fetchSlotsRawV3(dayStart, dayEnd, tz)
+    const slotsByDay = await fetchSlotsRawV3(dayStart, dayEnd, tz, eventTypeId)
     const sameDaySlots = await filterValidSlotsV3(slotsByDay, country)
 
     const exact = sameDaySlots.find(
@@ -635,7 +640,7 @@ export async function checkSlotAvailability(params: {
       Math.max(now.getTime(), propuesta.getTime() - 1 * 24 * 60 * 60 * 1000),
     )
     const wideEnd = new Date(propuesta.getTime() + 5 * 24 * 60 * 60 * 1000)
-    const wideSlots = await fetchSlotsRawV3(wideStart, wideEnd, tz)
+    const wideSlots = await fetchSlotsRawV3(wideStart, wideEnd, tz, eventTypeId)
     const allWideSlots = await filterValidSlotsV3(wideSlots, country)
 
     if (allWideSlots.length > 0) {

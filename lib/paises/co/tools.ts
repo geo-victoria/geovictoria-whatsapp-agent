@@ -27,6 +27,9 @@ import {
   marcarNoContactarSchema,
 } from "../../tools/marcar-no-contactar"
 import { programarSeguimiento } from "../../tools/programar-seguimiento"
+import { agendarReunion } from "../../tools/agendar-reunion"
+import { reagendarReunion } from "../../tools/reagendar-reunion"
+import { checkSlotAvailability } from "../../calendar"
 
 const COTIZADORA_API_BASE = (
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -50,6 +53,28 @@ function ownerCoPara(contact: string): string {
   let h = 0
   for (const ch of contact) h = (h * 31 + ch.charCodeAt(0)) >>> 0
   return SDR_CO_IDS[h % SDR_CO_IDS.length]
+}
+
+// ── Reuniones CO (Cal.com) ──────────────────────────────────────────────────
+// Gated por env: CAL_EVENT_TYPE_ID_CO = event type de Cal.com del equipo
+// comercial de Colombia (calendario de Laura o round robin CO). Sin la env,
+// las tools de agenda NO se exponen al modelo y el prompt instruye derivar.
+// Cuando el equipo cree el event type, basta setear la env + redeploy.
+const CAL_EVENT_TYPE_ID_CO = (process.env.CAL_EVENT_TYPE_ID_CO || "").trim()
+export const REUNIONES_CO_HABILITADAS = Boolean(CAL_EVENT_TYPE_ID_CO)
+
+const TZ_CO = "America/Bogota"
+
+function fechaLegibleCO(slotIso: string): string {
+  return new Date(slotIso).toLocaleString("es-CO", {
+    timeZone: TZ_CO,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
 }
 
 // Escalamiento de soporte CO: el mensaje chileno trae teléfonos de Chile; acá
@@ -196,7 +221,66 @@ export const TOOL_SCHEMAS_CO = [
   // Señales de ciclo de contacto (mismas de Chile; las procesa el route CO).
   marcarNoContactarSchema,
   programarSeguimientoSchemaCO,
-] as const
+  // Agenda de reuniones (solo si el event type CO de Cal.com está configurado).
+  ...(REUNIONES_CO_HABILITADAS
+    ? [
+        {
+          name: "consultar_disponibilidad_horario",
+          description:
+            "Verifica si una fecha y hora propuesta POR EL CLIENTE está disponible en el calendario del equipo comercial de Colombia. Úsala cuando el cliente proponga un horario específico para una reunión (ej. 'el jueves a las 11'). Tú NUNCA propones horarios primero. Interpreta la propuesta en la zona horaria de Colombia (America/Bogota, UTC-5). Si hay un slot a menos de 15 min de la propuesta, devuelve 'disponible_exacto' (pasa ese slotIso a agendar_reunion). Si no, devuelve alternativas del mismo día o de días cercanos: preséntaselas en prosa natural y espera a que elija.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              fechaPropuesta: {
+                type: "string" as const,
+                description:
+                  "Fecha y hora propuesta por el cliente, en ISO 8601 con timezone (ej. '2026-07-15T15:00:00-05:00'), interpretada en America/Bogota.",
+              },
+            },
+            required: ["fechaPropuesta"],
+          },
+        },
+        {
+          name: "agendar_reunion",
+          description:
+            "Agenda una reunión con un ejecutivo del equipo comercial de Colombia. Crea la reunión en el calendario, registra el lead en el CRM a nombre del ejecutivo asignado y crea el evento. Llamar SOLO cuando el cliente confirmó explícitamente un horario específico (idealmente tras consultar_disponibilidad_horario con 'disponible_exacto', usando el slotIso que devolvió). Antes de invocarla capture nombre completo, correo y empresa — son obligatorios.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              slotIso: {
+                type: "string" as const,
+                description:
+                  "Slot ISO 8601 confirmado por el cliente (el slotIso de consultar_disponibilidad_horario si hubo match exacto).",
+              },
+              prospectName: { type: "string" as const, description: "Nombre completo del cliente." },
+              prospectEmail: { type: "string" as const, description: "Correo del cliente (recibe la invitación)." },
+              empresa: { type: "string" as const, description: "Empresa del cliente." },
+              telefono: { type: "string" as const, description: "Teléfono del cliente." },
+              trabajadores: { type: "string" as const, description: "Cantidad de personas, si la dio." },
+              necesidad: { type: "string" as const, description: "Qué busca el cliente." },
+              cargo: { type: "string" as const, description: "Cargo del contacto, si lo mencionó." },
+            },
+            required: ["slotIso", "prospectName", "prospectEmail"],
+          },
+        },
+        {
+          name: "reagendar_reunion",
+          description:
+            "Reagenda la reunión que el cliente YA tiene agendada a un nuevo horario. Úsala cuando un cliente con reunión existente pide cambiarla de día/hora. Llama SOLO con un slot confirmado por el cliente (idealmente tras consultar_disponibilidad_horario con 'disponible_exacto'). NO uses agendar_reunion para reagendar: esa crea una reunión nueva. No necesita identificador: ubica automáticamente la reunión futura del cliente.",
+          input_schema: {
+            type: "object" as const,
+            properties: {
+              newSlotIso: {
+                type: "string" as const,
+                description: "Nuevo slot ISO 8601 confirmado por el cliente.",
+              },
+            },
+            required: ["newSlotIso"],
+          },
+        },
+      ]
+    : []),
+]
 
 type CotizarInput = {
   userCount?: number
@@ -376,6 +460,52 @@ export function buildDispatchCO(contact: string) {
           return { ...r, mensajeParaProspecto: MENSAJE_ESCALAMIENTO_SOPORTE_CO }
         }
         return r
+      }
+
+      // Agenda CO (Cal.com): mismas implementaciones chilenas con el event
+      // type de Colombia, timezone Bogotá y confirmaciones en usted.
+      if (name === "consultar_disponibilidad_horario") {
+        if (!REUNIONES_CO_HABILITADAS) {
+          return { ok: false, error: "La agenda de Colombia no está configurada. Usa derivar_a_ejecutivo (motivo pidio_persona) con la preferencia de horario en el resumen." }
+        }
+        const i = (input || {}) as { fechaPropuesta?: string }
+        return await checkSlotAvailability({
+          slotIso: String(i.fechaPropuesta || ""),
+          country: "Colombia",
+          eventTypeId: CAL_EVENT_TYPE_ID_CO,
+        })
+      }
+      if (name === "agendar_reunion") {
+        if (!REUNIONES_CO_HABILITADAS) {
+          return { ok: false, error: "La agenda de Colombia no está configurada. Usa derivar_a_ejecutivo (motivo pidio_persona)." }
+        }
+        const r = await agendarReunion({
+          ...(input as object),
+          country: "Colombia",
+          eventTypeId: CAL_EVENT_TYPE_ID_CO,
+        } as never)
+        if (!r.ok) return r
+        const email = (input as { prospectEmail?: string })?.prospectEmail || "su correo"
+        return {
+          ...r,
+          // La confirmación chilena viene tuteada; acá va en usted.
+          mensajeParaProspecto:
+            `Listo, su reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia). ` +
+            `Le llegará la invitación con el link de la reunión a ${email}. ¿Le puedo ayudar en algo más?`,
+        }
+      }
+      if (name === "reagendar_reunion") {
+        if (!REUNIONES_CO_HABILITADAS) {
+          return { ok: false, error: "La agenda de Colombia no está configurada. Usa derivar_a_ejecutivo (motivo pidio_persona)." }
+        }
+        const r = await reagendarReunion({ ...(input as object), country: "Colombia" } as never)
+        if (!r.ok) return r
+        return {
+          ...r,
+          mensajeParaProspecto:
+            `Listo, su reunión quedó reagendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia). ` +
+            `Le llegará la nueva invitación por correo. ¿Le puedo ayudar en algo más?`,
+        }
       }
 
       // Señales (sin efectos externos aquí): el route CO las procesa al ver el

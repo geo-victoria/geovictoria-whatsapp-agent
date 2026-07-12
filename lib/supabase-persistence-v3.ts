@@ -788,6 +788,16 @@ export async function claimFollowups(batch = 10): Promise<FollowupClaim[]> {
   return rows || []
 }
 
+/** País de la conversación de un contacto ('cl' default). Para crons que
+ * deben decidir canal/plantilla por país a partir del contacto. */
+export async function getContactCountry(contact: string): Promise<string> {
+  if (!contact) return "cl"
+  const rows = await supabaseFetch<Array<{ country: string | null }>>(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=country&limit=1`,
+  )
+  return (rows?.[0]?.country || "cl").toLowerCase()
+}
+
 /**
  * País de cada conversación (columna `country`), en un solo query. Usado por
  * los crons para elegir idioma/registro del nudge y el canal de Botmaker
