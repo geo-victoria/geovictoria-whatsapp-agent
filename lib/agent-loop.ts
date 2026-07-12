@@ -562,7 +562,12 @@ export async function runAgentLoop(params: {
             if (bookingUid && startIso) {
               const country =
                 typeof toolInput.country === "string" ? toolInput.country : "Chile"
-              const timezone = getTimezone(country)
+              // Multi-país: si el dispatch del país devolvió su timezone en el
+              // resultado (ej. CO → America/Bogota), esa manda sobre el default
+              // por país del input (el modelo CO no envía `country` y caería a
+              // Chile, dejando el registro con la zona equivocada).
+              const timezone =
+                typeof r.timezone === "string" && r.timezone ? r.timezone : getTimezone(country)
               const reminderAt = computeMeetingReminderAt(startIso, timezone)
               await persistMeeting({
                 bookingUid,

@@ -489,9 +489,11 @@ export function buildDispatchCO(contact: string) {
           eventTypeId: CAL_EVENT_TYPE_ID_CO,
         } as never)
         if (!r.ok) return r
-        const email = (input as { prospectEmail?: string })?.prospectEmail || "su correo"
+        const email = (input as { prospectEmail?: string })?.prospectEmail || "tu correo"
         return {
           ...r,
+          // El agent-loop persiste la reunión con esta zona (recordatorios).
+          timezone: TZ_CO,
           // La confirmación chilena viene tuteada; acá va en usted.
           mensajeParaProspecto:
             `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia) 🎉 ` +
