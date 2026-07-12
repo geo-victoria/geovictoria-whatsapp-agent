@@ -42,6 +42,20 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "CAL_API_KEY no configurada" }, { status: 503 })
   }
 
+  // ?slotsFor=<eventTypeId>: disponibilidad de los próximos 7 días para ese
+  // event type (verificar que un event type nuevo tiene hosts/horario activos
+  // sin crear ningún booking).
+  const slotsFor = new URL(req.url).searchParams.get("slotsFor")
+  if (slotsFor) {
+    const start = new Date()
+    const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000)
+    const slots = await cal(
+      `/slots/available?eventTypeId=${encodeURIComponent(slotsFor)}` +
+        `&startTime=${start.toISOString()}&endTime=${end.toISOString()}&timeZone=America/Bogota`,
+    )
+    return NextResponse.json({ ok: true, slotsFor, slots })
+  }
+
   // Teams de la cuenta + memberships + event types de cada team. El endpoint
   // de event types de team usa la versión 2024-06-14 de la API.
   const teams = (await cal("/teams")) as { status: number; data?: { data?: Array<{ id: number; name: string }> } }
