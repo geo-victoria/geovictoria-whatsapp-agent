@@ -141,7 +141,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     `[vic-co-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION_CO}`,
   )
   const result = await runAgentLoop({
-    systemPrompt: getSystemPromptCO(),
+    systemPrompt: getSystemPromptCO(contact),
     history,
     userMessage: message,
     apiKey,
@@ -317,7 +317,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         ? MODELO_COTIZACION_CO
         : MODELO_SIMPLE_CO
       const result = await runAgentLoop({
-        systemPrompt: getSystemPromptCO(),
+        systemPrompt: getSystemPromptCO(contact),
         history: [],
         userMessage: message,
         apiKey,
