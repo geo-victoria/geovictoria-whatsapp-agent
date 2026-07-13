@@ -94,13 +94,23 @@ async function resolveOwnerId(
       )
       if (!res.ok) return null
       const data = (await res.json()) as {
-        users?: Array<{ id: string; email: string }>
+        users?: Array<{ id: string; email: string; status?: string }>
         info?: { more_records?: boolean }
       }
       const match = (data?.users || []).find(
         (u) => u.email?.toLowerCase() === email.toLowerCase(),
       )
-      if (match?.id) return match.id
+      if (match?.id) {
+        // Zoho no acepta usuarios desactivados como Owner: mejor caer al owner
+        // default (con log) que fallar el update con un error confuso.
+        if ((match.status || "").toLowerCase() !== "active") {
+          console.error(
+            `[zoho-leads] resolveOwnerId: ${email} existe en Zoho pero está "${match.status}" — no se puede asignar (reactivarlo o corregir el email del host en Cal.com)`,
+          )
+          return null
+        }
+        return match.id
+      }
       if (!data?.info?.more_records) break
     }
     console.error(`[zoho-leads] resolveOwnerId: email ${email} no encontrado entre los usuarios de Zoho`)
