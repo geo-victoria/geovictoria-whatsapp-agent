@@ -37,6 +37,32 @@ Solo aplica a Chile; Colombia mantiene sus plantillas propias.
 
 ---
 
+## Toque de las 24 horas → estilo "intenté llamarte + descuento del jefe" (pedido equipo comercial, 13-jul)
+
+**Estado:** propuesto (para backlog).
+**Qué se quiere:** un toque a las ~24 horas de silencio, para el segmento con
+COTIZACIÓN FORMAL enviada, con este estilo (texto de referencia del equipo):
+
+> "He intentado contactarte por teléfono para saber si falta algo o si tienes
+> dudas sobre la cotización que te envié, y aprovechar de contarte sobre un
+> descuento especial que conseguí con mi jefe."
+
+**Definiciones pendientes antes de implementar:**
+1. ¿Es un toque NUEVO a las 24h (cadencia pasaría a 24h → 47h → 7d → 15d, con
+   la de 47h en formato "3 razones") o REEMPLAZA al de 47h moviéndolo a 24h?
+2. "Intenté contactarte por teléfono": ¿los SDR van a llamar de verdad antes
+   del toque (lista de llamados), o se reformula para no afirmar en falso?
+3. El "descuento especial del jefe": ¿es la escalera de descuento existente o
+   una oferta nueva? Cuidado con la coherencia si el cliente responde y Vicky
+   debe honrar el descuento prometido (guardrail: Vicky no inventa descuentos).
+
+**Cómo se implementa cuando se defina (ya hay soporte):**
+- Nuevo offset en `REACTIVATION_OFFSETS_H` (ej. "24,47,168,360") — el toque N
+  usa la plantilla `REACTIVATION_TEMPLATE_QUOTE_N` vía `tplToque()`.
+- Crear la plantilla HSM en Botmaker (marketing, `${nombre}`) y setear la env.
+
+---
+
 ## Reenganche multi-día: toque hora 47 (WhatsApp + correo) + llamada hora 48
 
 **Estado:** propuesto (para backlog)
