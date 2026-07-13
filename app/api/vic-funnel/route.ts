@@ -30,24 +30,56 @@ const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.co
 // (aceptadas/pagadas). Best-effort: si Zoho no responde, la página igual carga y
 // la sección de tasa de cierre indica que Zoho no está disponible. Se cuentan
 // client-side (son decenas, no miles) para no depender de count() de COQL.
-async function fetchCierreZoho(): Promise<{ total: number; aceptadas: number } | null> {
+// Este dash es de Vicky CHILE: se excluyen las cotizaciones de conversaciones
+// de la línea CO (por id) y los registros de prueba (por nombre).
+async function fetchCierreZoho(excludeIds: Set<string>): Promise<{ total: number; aceptadas: number } | null> {
   try {
     const token = await getZohoAccessToken()
     const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
       method: "POST",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        select_query: `select id, Estado_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
+        select_query: `select id, Name, Estado_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
       }),
       cache: "no-store",
     })
     if (!res.ok) return null
-    const data = (await res.json().catch(() => null)) as { data?: Array<{ Estado_Cotizacion?: string }> } | null
-    const quotes = data?.data || []
+    const data = (await res.json().catch(() => null)) as {
+      data?: Array<{ id?: string; Name?: string; Estado_Cotizacion?: string }>
+    } | null
+    const quotes = (data?.data || []).filter((q) => {
+      if (excludeIds.has(String(q.id || ""))) return false
+      const nombre = String(q.Name || "").toLowerCase()
+      return !nombre.includes("prueba") && !nombre.includes("huellerocompany")
+    })
     const aceptadas = quotes.filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")).length
     return { total: quotes.length, aceptadas }
   } catch {
     return null
+  }
+}
+
+// Conversaciones de Vicky COLOMBIA (línea +57): este dash es solo Chile, así
+// que se excluyen del análisis, de las señales duras y del cierre en Zoho.
+async function fetchExclusionesCO(): Promise<{
+  convIds: Set<string>
+  contacts: Set<string>
+  quoteIds: Set<string>
+}> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,formal_quote_id&country=eq.co`,
+    {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      cache: "no-store",
+    },
+  )
+  const rows = res.ok
+    ? ((await res.json()) as Array<{ id: string; contact: string; formal_quote_id: string | null }>)
+    : []
+  return {
+    convIds: new Set(rows.map((r) => r.id)),
+    contacts: new Set(rows.map((r) => digits(r.contact))),
+    quoteIds: new Set(rows.map((r) => r.formal_quote_id || "").filter(Boolean)),
   }
 }
 
@@ -209,9 +241,19 @@ export async function GET(req: Request): Promise<Response> {
   let rows: Row[]
   let cierre: { total: number; aceptadas: number } | null = null
   try {
-    const [allRows, hard, cierreZoho] = await Promise.all([fetchAnalysis(), fetchHardSignals(), fetchCierreZoho()])
+    const co = await fetchExclusionesCO()
+    const [allRows, hard, cierreZoho] = await Promise.all([
+      fetchAnalysis(),
+      fetchHardSignals(),
+      fetchCierreZoho(co.quoteIds),
+    ])
     cierre = cierreZoho
-    rows = allRows.filter((r) => !isTestContact(r.contact))
+    rows = allRows.filter(
+      (r) =>
+        !isTestContact(r.contact) &&
+        !co.convIds.has(r.conversation_id) &&
+        !co.contacts.has(digits(r.contact)),
+    )
     // Hechos deterministas mandan sobre el LLM: cotización formal enviada y
     // reunión agendada se imponen aunque el modelo no las haya detectado.
     for (const r of rows) {
@@ -376,7 +418,7 @@ export async function GET(req: Request): Promise<Response> {
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Clientes reales (excluye pruebas internas) · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr}</div>
+  <div class="sub">Vicky CHILE — clientes reales (excluye pruebas internas y la línea de Colombia) · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr}</div>
 
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
