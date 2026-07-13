@@ -69,6 +69,8 @@ export async function POST(req: Request): Promise<Response> {
     via?: string
     template?: string
     params?: Record<string, string>
+    /** Línea por la que sale (channelId o número, ej. "573181070737"). Default: línea CL. */
+    channel?: string
   } = {}
   try {
     body = (await req.json()) as typeof body
@@ -85,8 +87,12 @@ export async function POST(req: Request): Promise<Response> {
     if (!contact || !template) {
       return NextResponse.json({ ok: false, error: "contact y template requeridos" }, { status: 400 })
     }
-    const ok = await sendBotmakerTemplate(contact, template, body.params || {}).catch(() => false)
-    return NextResponse.json({ ok, via: "template", contact, template }, { status: ok ? 200 : 502 })
+    const channel = (body.channel || "").trim() || undefined
+    const ok = await sendBotmakerTemplate(contact, template, body.params || {}, channel).catch(() => false)
+    return NextResponse.json(
+      { ok, via: "template", contact, template, channel: channel || "default(CL)" },
+      { status: ok ? 200 : 502 },
+    )
   }
   // via=cloud → línea de Meta directa (Cloud API). Por defecto, Botmaker (agente).
   const via = (body.via || new URL(req.url).searchParams.get("via") || "botmaker").trim().toLowerCase()

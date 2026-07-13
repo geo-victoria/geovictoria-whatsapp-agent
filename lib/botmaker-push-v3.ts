@@ -126,6 +126,9 @@ export async function sendBotmakerTemplate(
   contactId: string,
   templateName: string,
   params: Record<string, string>,
+  // Multi-país: channelId (ej. PERFIL_CO.canal.channelId) o número de la línea
+  // por la que debe salir la plantilla. Default: la línea chilena, como siempre.
+  channelId?: string,
 ): Promise<boolean> {
   if (!BM_TOKEN) {
     console.error("[botmaker-template] BOTMAKER_ACCESS_TOKEN no configurado")
@@ -136,7 +139,7 @@ export async function sendBotmakerTemplate(
     return false
   }
   const cleanContact = normalizeContactId(contactId)
-  const chatChannelNumber = channelNumber()
+  const chatChannelNumber = channelNumber(channelId)
   if (!chatChannelNumber) {
     console.error("[botmaker-template] no se pudo determinar chatChannelNumber")
     return false
