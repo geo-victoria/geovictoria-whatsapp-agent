@@ -496,6 +496,10 @@ export function buildDispatchCO(contact: string) {
         }
         const r = await agendarReunion({
           ...(input as object),
+          // Teléfono del canal si el modelo no lo pasó (igual que derivar_a_
+          // ejecutivo): sin él, el Lead en Zoho queda sin Phone.
+          telefono:
+            ((input as { telefono?: string })?.telefono || "").trim() || contact,
           country: "Colombia",
           eventTypeId: CAL_EVENT_TYPE_ID_CO,
         } as never)
@@ -505,7 +509,7 @@ export function buildDispatchCO(contact: string) {
           ...r,
           // El agent-loop persiste la reunión con esta zona (recordatorios).
           timezone: TZ_CO,
-          // La confirmación chilena viene tuteada; acá va en usted.
+          // Confirmación en tuteo cálido colombiano.
           mensajeParaProspecto:
             `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia) 🎉 ` +
             `Te llegará la invitación con el link de la reunión a ${email}. Te puedo ayudar en algo más?`,

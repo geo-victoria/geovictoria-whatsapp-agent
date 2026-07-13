@@ -42,6 +42,15 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "CAL_API_KEY no configurada" }, { status: 503 })
   }
 
+  // ?booking=<uid>: payload crudo de un booking (diagnóstico: ver si Cal.com
+  // devuelve organizer.email/hosts[].email para eventos de team round-robin —
+  // sin eso, agendar_reunion no puede asignar el lead al KAM).
+  const bookingUid = new URL(req.url).searchParams.get("booking")
+  if (bookingUid) {
+    const booking = await cal(`/bookings/${encodeURIComponent(bookingUid)}`)
+    return NextResponse.json({ ok: true, bookingUid, booking })
+  }
+
   // ?slotsFor=<eventTypeId>: disponibilidad de los próximos 7 días para ese
   // event type (verificar que un event type nuevo tiene hosts/horario activos
   // sin crear ningún booking).
