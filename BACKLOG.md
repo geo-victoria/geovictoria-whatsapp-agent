@@ -47,14 +47,22 @@ COTIZACIÓN FORMAL enviada, con este estilo (texto de referencia del equipo):
 > dudas sobre la cotización que te envié, y aprovechar de contarte sobre un
 > descuento especial que conseguí con mi jefe."
 
+**Contexto (aclaración de Lalo, 13-jul):** el texto es BORRADOR (falta
+mejorarlo). Este toque se apoya en dos piezas:
+- La plantilla de reactivación EXISTENTE que ya ofrece el descuento ("precio
+  especial vigente") — este mensaje es una evolución de ese ofrecimiento, no
+  una oferta nueva (Vicky lo honra con la escalera de descuentos actual).
+- La **automatización de la llamada telefónica** que se quiere construir (ver
+  ítem "Reenganche multi-día ... + llamada hora 48" más abajo): el "intenté
+  contactarte por teléfono" será verdad porque la llamada ocurre ANTES de este
+  mensaje. Este toque y esa automatización se diseñan juntos.
+
 **Definiciones pendientes antes de implementar:**
-1. ¿Es un toque NUEVO a las 24h (cadencia pasaría a 24h → 47h → 7d → 15d, con
-   la de 47h en formato "3 razones") o REEMPLAZA al de 47h moviéndolo a 24h?
-2. "Intenté contactarte por teléfono": ¿los SDR van a llamar de verdad antes
-   del toque (lista de llamados), o se reformula para no afirmar en falso?
-3. El "descuento especial del jefe": ¿es la escalera de descuento existente o
-   una oferta nueva? Cuidado con la coherencia si el cliente responde y Vicky
-   debe honrar el descuento prometido (guardrail: Vicky no inventa descuentos).
+1. ¿Toque NUEVO a las 24h (cadencia 24h → 47h → 7d → 15d, con 47h en formato
+   "3 razones") o reemplazo del de 47h movido a 24h?
+2. Diseño de la automatización de llamada (quién llama, cuándo, cómo se
+   registra el intento para gatillar este mensaje después).
+3. Redacción final del mensaje (mejorarla con el equipo).
 
 **Cómo se implementa cuando se defina (ya hay soporte):**
 - Nuevo offset en `REACTIVATION_OFFSETS_H` (ej. "24,47,168,360") — el toque N
