@@ -257,6 +257,27 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
         : "Disculpa, no alcancé a dejar registrada tu solicitud. Me confirmas tu nombre completo, tu empresa y tu correo, y la dejo lista para que el equipo te contacte? 😊"
     }
   }
+  // Telemetría de diagnóstico: si el turno tocó tools de agenda, dejar el
+  // detalle exacto (input/output de cada tool) legible desde Supabase
+  // (vic_kv.debug_last_co_tools) — los runtime logs de Vercel no siempre son
+  // accesibles y estos flujos han tenido éxitos falsos difíciles de rastrear.
+  if (toolCalls.some((c) => /reunion|disponibilidad/.test(c.name))) {
+    setKvValue(
+      "debug_last_co_tools",
+      JSON.stringify({
+        at: new Date().toISOString(),
+        contact,
+        reply: reply.slice(0, 200),
+        tools: toolCalls.map((c) => ({
+          name: c.name,
+          ok: c.ok,
+          input: (c as unknown as { input?: unknown }).input,
+          output: c.output,
+        })),
+      }).slice(0, 8000),
+    ).catch(() => {})
+  }
+
   // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
   const callNoContactar = toolCalls.find((c) => c.name === "marcar_no_contactar" && c.ok)
   if (callNoContactar && (!reply.trim() || reply === ERROR_GENERICO_CO)) {
