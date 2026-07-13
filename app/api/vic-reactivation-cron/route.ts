@@ -411,9 +411,12 @@ export async function GET(req: Request): Promise<Response> {
           : undefined) || null
       if (!nombre) nombre = await nombreDesdeHistorial(r.contact)
       if (!nombre) {
+        // Cliente que nunca se presentó (price-shopper): antes se omitía para
+        // SIEMPRE (bug: 5 preforms elegibles llevaban días sin recibir toque).
+        // Saludo neutro que calza en la posición del nombre: "Hola de nuevo!".
         omitidosSinNombre++
-        console.warn(`[reactivation] sin nombre resoluble, omitido: ${r.contact} (${segmento})`)
-        continue
+        nombre = "de nuevo"
+        console.warn(`[reactivation] sin nombre resoluble, va con saludo neutro: ${r.contact} (${segmento})`)
       }
       // País: plantilla y canal propios (CO sin promesa de descuento, línea +57).
       const tpl = esCO(r) ? (segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO) : template
@@ -452,11 +455,11 @@ export async function GET(req: Request): Promise<Response> {
         ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
         : segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
       if (!template) continue
-      const nombre = await nombreDesdeHistorial(r.contact)
+      let nombre = await nombreDesdeHistorial(r.contact)
       if (!nombre) {
         omitidosSinNombre++
-        console.warn(`[reactivation] consensuado sin nombre resoluble, omitido: ${r.contact}`)
-        continue
+        nombre = "de nuevo"
+        console.warn(`[reactivation] consensuado sin nombre resoluble, va con saludo neutro: ${r.contact}`)
       }
       const ok = await sendBotmakerTemplate(r.contact, template, { nombre }, canalDe(r)).catch(() => false)
       if (!ok) continue
@@ -490,7 +493,7 @@ export async function GET(req: Request): Promise<Response> {
     consensuado: consensuado.length,
     enviados,
     enviados_consensuado: enviadosConsensuado,
-    omitidos_sin_nombre: omitidosSinNombre,
+    sin_nombre_saludo_neutro: omitidosSinNombre,
     correos,
   })
 }
