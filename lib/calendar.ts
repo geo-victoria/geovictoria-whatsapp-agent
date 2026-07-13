@@ -319,6 +319,20 @@ export function parsePreferredTime(message: string): { date: Date; hour?: number
   return null
 }
 
+/** Persona (organizer u host) tal como viene en los payloads de bookings v2. */
+type CalPerson = { name?: string; email?: string; displayEmail?: string }
+
+/**
+ * Email del ejecutivo asignado a un booking. Prioriza hosts[0] (en eventos de
+ * team round-robin ES el host asignado; el organizer puede ser el dueño de la
+ * cuenta de la API) y acepta displayEmail como fallback de email (Cal.com no
+ * siempre manda ambos).
+ */
+function extractHostEmail(d?: { organizer?: CalPerson; hosts?: CalPerson[] }): string | undefined {
+  const h = d?.hosts?.[0]
+  return h?.email || h?.displayEmail || d?.organizer?.email || d?.organizer?.displayEmail || undefined
+}
+
 export async function bookMeeting(params: {
   slotIso: string
   prospectName: string
@@ -365,8 +379,8 @@ export async function bookMeeting(params: {
         id?: number
         start?: string
         status?: string
-        organizer?: { name?: string; email?: string }
-        hosts?: Array<{ name?: string; email?: string }>
+        organizer?: CalPerson
+        hosts?: CalPerson[]
       }
       error?: unknown
       message?: string
@@ -386,10 +400,14 @@ export async function bookMeeting(params: {
     }
     console.log("[calendar] booking created:", uid, "status:", bookingStatus)
 
-    let organizerEmail =
-      data.data?.organizer?.email || data.data?.hosts?.[0]?.email || undefined
+    let organizerEmail = extractHostEmail(data.data)
 
-    if (!organizerEmail && uid) {
+    // Refetch con reintento: en bookings de team round-robin la respuesta del
+    // POST puede venir sin el email del host (o solo con displayEmail), y el
+    // GET inmediato a veces llega antes de que el host quede materializado.
+    // Sin este email, el Lead en Zoho cae al owner default (bug prueba CO 13-jul).
+    for (let intento = 0; !organizerEmail && uid && intento < 2; intento++) {
+      if (intento > 0) await new Promise((r) => setTimeout(r, 2000))
       try {
         const bookingRes = await fetch(`${CAL_BASE}/bookings/${uid}`, {
           headers: CAL_HEADERS,
@@ -397,19 +415,19 @@ export async function bookMeeting(params: {
         })
         if (bookingRes.ok) {
           const bookingData = (await bookingRes.json()) as {
-            data?: {
-              organizer?: { email?: string }
-              hosts?: Array<{ email?: string }>
-            }
+            data?: { organizer?: CalPerson; hosts?: CalPerson[] }
           }
-          organizerEmail =
-            bookingData.data?.organizer?.email ||
-            bookingData.data?.hosts?.[0]?.email ||
-            undefined
+          organizerEmail = extractHostEmail(bookingData.data)
         }
       } catch {
         // Fallo silencioso — el Lead quedará con owner default
       }
+    }
+    if (!organizerEmail) {
+      console.error(
+        `[calendar] booking ${uid}: sin email de host — organizer/hosts:`,
+        JSON.stringify({ organizer: data.data?.organizer, hosts: data.data?.hosts }).slice(0, 400),
+      )
     }
 
     return {
@@ -462,8 +480,8 @@ export async function rescheduleMeeting(params: {
         start?: string
         status?: string
         meetingUrl?: string
-        organizer?: { email?: string }
-        hosts?: Array<{ email?: string }>
+        organizer?: CalPerson
+        hosts?: CalPerson[]
       }
       message?: string
       error?: unknown
@@ -482,14 +500,14 @@ export async function rescheduleMeeting(params: {
     // El organizer de la respuesta del reschedule no es confiable (devuelve el
     // host viejo). Re-consultamos el booking nuevo para obtener el host REAL
     // asignado (Cal.com re-corre el round-robin al reagendar por API).
-    let organizerEmail = data.data?.organizer?.email || data.data?.hosts?.[0]?.email || undefined
+    let organizerEmail = extractHostEmail(data.data)
     try {
       const fresh = await fetch(`${CAL_BASE}/bookings/${uid}`, { headers: CAL_HEADERS, cache: "no-store" })
       if (fresh.ok) {
         const fd = (await fresh.json()) as {
-          data?: { organizer?: { email?: string }; hosts?: Array<{ email?: string }> }
+          data?: { organizer?: CalPerson; hosts?: CalPerson[] }
         }
-        organizerEmail = fd.data?.organizer?.email || fd.data?.hosts?.[0]?.email || organizerEmail
+        organizerEmail = extractHostEmail(fd.data) || organizerEmail
       }
     } catch {
       // si falla el re-fetch, queda el de la respuesta (mejor que nada)
