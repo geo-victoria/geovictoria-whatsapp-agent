@@ -77,11 +77,14 @@ async function resolveOwnerId(
   token: string,
   apiDomain: string,
 ): Promise<string | null> {
-  // OJO: el org tiene ~400 usuarios y la API pagina de a 200 — buscar solo la
-  // página 1 dejaba sin resolver a media organización (bug real: las SDR
-  // Inbound estaban en la página 2 y la reasignación fallaba en silencio).
+  // OJO: la API pagina de a 200 y los usuarios van ordenados por antigüedad,
+  // así que las contrataciones recientes quedan en las ÚLTIMAS páginas. El
+  // tope anterior de 5 páginas dejaba sin resolver al equipo CO (Eddy y Diego
+  // están en la página 6 de +1200 usuarios) y el lead de la reunión caía al
+  // owner default en silencio (bug prueba CO 13-jul). Recorremos hasta agotar
+  // more_records, con tope de seguridad amplio.
   try {
-    for (let page = 1; page <= 5; page++) {
+    for (let page = 1; page <= 20; page++) {
       const res = await fetch(
         `${apiDomain}/crm/v2/users?type=AllUsers&per_page=200&page=${page}`,
         {
@@ -98,8 +101,9 @@ async function resolveOwnerId(
         (u) => u.email?.toLowerCase() === email.toLowerCase(),
       )
       if (match?.id) return match.id
-      if (!data?.info?.more_records) return null
+      if (!data?.info?.more_records) break
     }
+    console.error(`[zoho-leads] resolveOwnerId: email ${email} no encontrado entre los usuarios de Zoho`)
     return null
   } catch {
     return null
