@@ -51,6 +51,16 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, bookingUid, booking })
   }
 
+  // ?bookingsFor=<email>: todas las reservas de un asistente (diagnóstico de
+  // reagendamientos: ver la cadena real de bookings de un prospecto).
+  const attendee = new URL(req.url).searchParams.get("bookingsFor")
+  if (attendee) {
+    const bookings = await cal(
+      `/bookings?attendeeEmail=${encodeURIComponent(attendee)}&take=20&sortCreated=desc`,
+    )
+    return NextResponse.json({ ok: true, attendee, bookings })
+  }
+
   // ?slotsFor=<eventTypeId>: disponibilidad de los próximos 7 días para ese
   // event type (verificar que un event type nuevo tiene hosts/horario activos
   // sin crear ningún booking).
