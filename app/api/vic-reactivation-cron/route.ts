@@ -20,6 +20,7 @@
 
 import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { PERFIL_CO } from "@/lib/paises/co"
 import { appendAssistantV3, fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
@@ -72,9 +73,21 @@ const REACT_CONTEXT_MSG: Record<string, string> = {
     "Hola, soy Vicky 👋 Te escribí para retomar tu cotización pendiente. Tengo un precio especial por tiempo limitado para ti. ¿Lo vemos antes de que caduque?",
 }
 
+// Colombia (13-jul): plantillas propias SIN promesa de descuento (no existe
+// escalera CO) y contexto de historial en tuteo cálido. Salen por el canal CO.
+const TPL_QUOTE_CO = (process.env.REACTIVATION_TEMPLATE_QUOTE_CO || "vicky_co_react_cotizacion").trim()
+const TPL_PREFORM_CO = (process.env.REACTIVATION_TEMPLATE_PREFORM_CO || "vicky_co_react_preform").trim()
+const REACT_CONTEXT_MSG_CO: Record<string, string> = {
+  cotizacion:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización, que quedó pendiente y sigue vigente — la puedes revisar, aceptar y pagar en línea cuando quieras. La retomamos?",
+  preform:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización que quedó a mitad de camino — en 2 minutos la terminamos por acá. Seguimos? 😊",
+}
+
 type Row = {
   id: string
   contact: string
+  country?: string | null
   formal_quote_id: string | null
   reactivation_count: number | null
   reactivation_at: string | null
@@ -247,14 +260,10 @@ export async function GET(req: Request): Promise<Response> {
 
   // Candidatos: enfriados (last_user_at en la ventana), bajo el tope, con datos
   // para clasificar. Los filtros finos (opt-out, ciclo activo, gap) se aplican en JS.
-  // Solo CHILE: las plantillas HSM configuradas son de la línea CL; una
-  // conversación de Colombia (country='co') jamás debe recibirlas ni por ese
-  // canal. Cuando existan HSM CO aprobadas, este cron se hace country-aware.
   const res = await supa(
     `vic_v3_conversations?last_user_at=lte.${coldBefore}&last_user_at=gte.${maxAgeAfter}` +
     `&reactivation_count=lt.${MAX_REACT}` +
-    `&or=(country.eq.cl,country.is.null)` +
-    `&select=id,contact,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
+    `&select=id,contact,country,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
     `&order=last_user_at.asc&limit=400`,
   )
   const rows = (res.ok ? await res.json() : []) as Row[]
@@ -313,13 +322,9 @@ export async function GET(req: Request): Promise<Response> {
   // horario hábil por zona.
   let consensuado: Row[] = []
   {
-    // Solo CHILE (mismo motivo que arriba). Los consensuados de Colombia quedan
-    // registrados (la cadencia automática igual se apaga), pero su toque único
-    // requiere HSM CO — pendiente de aprobación de Meta.
     const cr = await supa(
       `vic_v3_conversations?followup_status=eq.consensuado&followup_next_at=lte.${new Date(now).toISOString()}` +
-      `&or=(country.eq.cl,country.is.null)` +
-      `&select=id,contact,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
+      `&select=id,contact,country,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
       `&order=followup_next_at.asc&limit=100`,
     )
     const crows = (cr.ok ? ((await cr.json()) as Row[]) : []).filter(
@@ -356,7 +361,7 @@ export async function GET(req: Request): Promise<Response> {
     if (sinQuote.length) {
       const ids = sinQuote.map((r) => r.id).join(",")
       const mr = await supa(
-        `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant&content=ilike.*recurrente*&select=conversation_id`,
+        `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant&or=(content.ilike.*recurrente*,content.ilike.*cotizaci%C3%B3n%20referencial*)&select=conversation_id`,
       )
       const conPreform = new Set(
         (mr.ok ? ((await mr.json()) as Array<{ conversation_id: string }>) : []).map((x) => x.conversation_id),
@@ -390,6 +395,11 @@ export async function GET(req: Request): Promise<Response> {
 
   let enviados = 0
   let omitidosSinNombre = 0
+  const esCO = (r: Row) => (r.country || "cl").toLowerCase() === "co"
+  const canalDe = (r: Row) => (esCO(r) ? PERFIL_CO.canal.channelId : undefined)
+  const contextoDe = (r: Row, segmento: string) =>
+    (esCO(r) ? REACT_CONTEXT_MSG_CO : REACT_CONTEXT_MSG)[segmento] ??
+    (esCO(r) ? REACT_CONTEXT_MSG_CO.preform : REACT_CONTEXT_MSG.preform)
   async function enviar(list: Row[], template: string, segmento: string) {
     for (const r of list) {
       if (enviados >= BATCH) break
@@ -405,7 +415,9 @@ export async function GET(req: Request): Promise<Response> {
         console.warn(`[reactivation] sin nombre resoluble, omitido: ${r.contact} (${segmento})`)
         continue
       }
-      const ok = await sendBotmakerTemplate(r.contact, template, { nombre }).catch(() => false)
+      // País: plantilla y canal propios (CO sin promesa de descuento, línea +57).
+      const tpl = esCO(r) ? (segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO) : template
+      const ok = await sendBotmakerTemplate(r.contact, tpl, { nombre }, canalDe(r)).catch(() => false)
       if (!ok) continue
       await supa(`vic_v3_conversations?id=eq.${r.id}`, {
         method: "PATCH",
@@ -416,15 +428,14 @@ export async function GET(req: Request): Promise<Response> {
         }),
       }).catch(() => {})
       enviados++
-      console.log(`[reactivation] ${segmento} → ${r.contact}`)
+      console.log(`[reactivation] ${segmento}${esCO(r) ? "(co)" : ""} → ${r.contact}`)
       // Deja el toque como turno de Vicky en el historial: así, cuando el cliente
       // responda, Vicky retoma con continuidad (excepción de reenganche del prompt).
-      await appendAssistantV3(
-        r.contact,
-        REACT_CONTEXT_MSG[segmento] ?? REACT_CONTEXT_MSG.preform,
-      ).catch(() => {})
+      await appendAssistantV3(r.contact, contextoDe(r, segmento)).catch(() => {})
       // En "cotizacion" sumamos el correo (CTA aceptación online + PDF) al HSM.
-      if (segmento === "cotizacion") await dispararCorreo(r.formal_quote_id)
+      // CO: sin correo de reactivación por ahora (el builder del correo es
+      // chileno — UF/tuteo CL); el HSM basta.
+      if (segmento === "cotizacion" && !esCO(r)) await dispararCorreo(r.formal_quote_id)
     }
   }
 
@@ -437,7 +448,9 @@ export async function GET(req: Request): Promise<Response> {
     for (const r of list) {
       if (enviados >= BATCH) break
       const segmento = r.formal_quote_id ? "cotizacion" : "preform"
-      const template = segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
+      const template = esCO(r)
+        ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
+        : segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
       if (!template) continue
       const nombre = await nombreDesdeHistorial(r.contact)
       if (!nombre) {
@@ -445,7 +458,7 @@ export async function GET(req: Request): Promise<Response> {
         console.warn(`[reactivation] consensuado sin nombre resoluble, omitido: ${r.contact}`)
         continue
       }
-      const ok = await sendBotmakerTemplate(r.contact, template, { nombre }).catch(() => false)
+      const ok = await sendBotmakerTemplate(r.contact, template, { nombre }, canalDe(r)).catch(() => false)
       if (!ok) continue
       await supa(`vic_v3_conversations?id=eq.${r.id}`, {
         method: "PATCH",
@@ -458,12 +471,9 @@ export async function GET(req: Request): Promise<Response> {
       }).catch(() => {})
       enviados++
       enviadosConsensuado++
-      console.log(`[reactivation] consensuado(${segmento}) → ${r.contact}`)
-      await appendAssistantV3(
-        r.contact,
-        REACT_CONTEXT_MSG[segmento] ?? REACT_CONTEXT_MSG.preform,
-      ).catch(() => {})
-      if (segmento === "cotizacion") await dispararCorreo(r.formal_quote_id)
+      console.log(`[reactivation] consensuado(${segmento})${esCO(r) ? "(co)" : ""} → ${r.contact}`)
+      await appendAssistantV3(r.contact, contextoDe(r, segmento)).catch(() => {})
+      if (segmento === "cotizacion" && !esCO(r)) await dispararCorreo(r.formal_quote_id)
     }
   }
 

@@ -28,12 +28,17 @@ import {
   getContactCountry,
 } from "@/lib/supabase-persistence-v3"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { PERFIL_CO } from "@/lib/paises/co"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
 // Nombre de la plantilla aprobada en Botmaker/Meta (ruleNameOrId).
 const TEMPLATE_NAME = (process.env.MEETING_REMINDER_TEMPLATE_NAME || "recordatorio_reunion").trim()
+// Colombia: por defecto REUTILIZA la plantilla chilena (WABA compartida,
+// verificado 13-jul) pero sale por el canal CO. Si el equipo CO crea la suya
+// (vicky_co_recordatorio_reunion), basta setear esta env.
+const TEMPLATE_NAME_CO = (process.env.MEETING_REMINDER_TEMPLATE_NAME_CO || TEMPLATE_NAME).trim()
 const CLAIM_BATCH = 20
 
 export async function POST(req: Request) {
@@ -50,16 +55,9 @@ export async function POST(req: Request) {
 
   let sent = 0
   for (const m of due) {
-    // Solo CHILE: la plantilla HSM configurada es de la línea CL. Reuniones
-    // de Colombia quedan sin recordatorio hasta tener HSM CO aprobada (la
-    // invitación de Cal.com por correo llega igual). Se marca como enviada
-    // para no reintentarla en cada tick.
+    // País del contacto: define plantilla y canal (CO → línea +57).
     const country = await getContactCountry(m.contact).catch(() => "cl")
-    if (country === "co") {
-      console.log(`[meeting-reminders] contacto CO ${m.contact}: recordatorio omitido (sin HSM CO)`)
-      await claimMeetingReminder(m.booking_uid).catch(() => {})
-      continue
-    }
+    const esCO = country === "co"
     // Claim atómico: solo el primer tick que lo tome envía.
     const claimed = await claimMeetingReminder(m.booking_uid)
     if (!claimed) continue
@@ -72,10 +70,12 @@ export async function POST(req: Request) {
       hour12: false,
     }).format(new Date(m.start_at))
 
-    const ok = await sendBotmakerTemplate(m.contact, TEMPLATE_NAME, {
-      nombre,
-      hora_reunion: hora,
-    }).catch(() => false)
+    const ok = await sendBotmakerTemplate(
+      m.contact,
+      esCO ? TEMPLATE_NAME_CO : TEMPLATE_NAME,
+      { nombre, hora_reunion: hora },
+      esCO ? PERFIL_CO.canal.channelId : undefined,
+    ).catch(() => false)
 
     if (ok) {
       sent++
