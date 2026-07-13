@@ -36,6 +36,7 @@ import {
   closeFollowup,
   scheduleConsensualFollowup,
   getQuotePointer,
+  setKvValue,
 } from "@/lib/supabase-persistence-v3"
 import {
   hashMessage,
@@ -150,6 +151,19 @@ type BotmakerBody = {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/** Guarda el último payload no procesable en vic_kv para diagnóstico (qué
+ * variables manda realmente la acción de Botmaker en audios/fotos/adjuntos). */
+async function capturarPayloadDebug(body: unknown): Promise<void> {
+  try {
+    await setKvValue(
+      "debug_last_co_payload",
+      JSON.stringify({ at: new Date().toISOString(), body }).slice(0, 4000),
+    )
+  } catch {
+    // best-effort
+  }
 }
 
 async function processOneTurnCO(contact: string, message: string, apiKey: string): Promise<void> {
@@ -407,8 +421,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         message = transcript
         console.log(`[vic-co] audio transcrito contact=${contact} len=${transcript.length}`)
       } else {
+        // Push + reply VACÍO: si además devolviéramos el texto en el JSON, la
+        // acción de Botmaker podría entregarlo de nuevo (mensaje duplicado).
         if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_CO, CANAL_CO()).catch(() => {})
-        return NextResponse.json({ reply: PIDE_TEXTO_CO, pais: "co" })
+        return NextResponse.json({ reply: simulacion ? PIDE_TEXTO_CO : "", pais: "co" })
       }
     }
 
@@ -425,17 +441,22 @@ export async function POST(request: Request): Promise<NextResponse> {
         message = caption ? `${caption}\n\n${bloque}` : bloque
         console.log(`[vic-co] imagen descrita contact=${contact} len=${descripcion.length}`)
       } else if (!caption) {
+        await capturarPayloadDebug(body)
         if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_IMAGEN_CO, CANAL_CO()).catch(() => {})
-        return NextResponse.json({ reply: PIDE_TEXTO_IMAGEN_CO, pais: "co" })
+        return NextResponse.json({ reply: simulacion ? PIDE_TEXTO_IMAGEN_CO : "", pais: "co" })
       } else {
         message = caption
       }
     } else if (IMG_PLACEHOLDERS.includes(message)) {
+      await capturarPayloadDebug(body)
       if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_IMAGEN_CO, CANAL_CO()).catch(() => {})
-      return NextResponse.json({ reply: PIDE_TEXTO_IMAGEN_CO, pais: "co" })
+      return NextResponse.json({ reply: simulacion ? PIDE_TEXTO_IMAGEN_CO : "", pais: "co" })
     }
 
     if (!message || message === "__audio__") {
+      // Payload sin texto utilizable (ej. adjunto que la acción de Botmaker no
+      // reenvía): capturarlo para diagnóstico en vez de perderlo en silencio.
+      await capturarPayloadDebug(body)
       return NextResponse.json({ ok: false, error: "message requerido" }, { status: 400 })
     }
 
