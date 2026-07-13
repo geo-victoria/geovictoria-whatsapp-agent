@@ -48,6 +48,7 @@ import {
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
+import { describirImagen } from "@/lib/describe-image"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -67,6 +68,8 @@ const INJECT_RE =
 
 const PIDE_TEXTO_CO =
   "Uy, disculpa — por ahora no puedo escuchar notas de voz 🙏 Me lo escribes por texto porfa?"
+const PIDE_TEXTO_IMAGEN_CO =
+  "Uy, no pude ver bien la imagen 🙈 Me lo cuentas por texto porfa?"
 const ERROR_GENERICO_CO =
   "Disculpa, tuve un inconveniente para procesar tu mensaje. Me lo repites porfa? 🙏"
 // Despedida limpia si el modelo registró un opt-out y el turno quedó sin texto
@@ -136,6 +139,12 @@ type BotmakerBody = {
   message?: string
   audioUrl?: string
   audioURL?: string
+  // Imagen/foto: URL del archivo que entrega Botmaker (la acción de código
+  // debe reenviarla, igual que audioURL).
+  imageUrl?: string
+  imageURL?: string
+  mediaUrl?: string
+  mediaURL?: string
   simular?: boolean
 }
 
@@ -398,9 +407,34 @@ export async function POST(request: Request): Promise<NextResponse> {
         message = transcript
         console.log(`[vic-co] audio transcrito contact=${contact} len=${transcript.length}`)
       } else {
+        if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_CO, CANAL_CO()).catch(() => {})
         return NextResponse.json({ reply: PIDE_TEXTO_CO, pais: "co" })
       }
     }
+
+    // Foto/imagen (paridad CL): se "lee" con visión y el texto sigue el flujo
+    // normal. Con caption, se conservan ambos. Placeholder sin URL → pedir texto.
+    const imageUrl = (body.imageUrl || body.imageURL || body.mediaUrl || body.mediaURL || "").trim()
+    const IMG_PLACEHOLDERS = ["__image__", "__media__", "__photo__"]
+    if (imageUrl) {
+      sendTypingIndicator(contact, true, CANAL_CO()).catch(() => {})
+      const descripcion = await describirImagen(imageUrl)
+      const caption = IMG_PLACEHOLDERS.includes(message) ? "" : message
+      if (descripcion) {
+        const bloque = `[El cliente envió una imagen por WhatsApp. Contenido de la imagen]: ${descripcion}`
+        message = caption ? `${caption}\n\n${bloque}` : bloque
+        console.log(`[vic-co] imagen descrita contact=${contact} len=${descripcion.length}`)
+      } else if (!caption) {
+        if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_IMAGEN_CO, CANAL_CO()).catch(() => {})
+        return NextResponse.json({ reply: PIDE_TEXTO_IMAGEN_CO, pais: "co" })
+      } else {
+        message = caption
+      }
+    } else if (IMG_PLACEHOLDERS.includes(message)) {
+      if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_IMAGEN_CO, CANAL_CO()).catch(() => {})
+      return NextResponse.json({ reply: PIDE_TEXTO_IMAGEN_CO, pais: "co" })
+    }
+
     if (!message || message === "__audio__") {
       return NextResponse.json({ ok: false, error: "message requerido" }, { status: 400 })
     }

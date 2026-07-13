@@ -50,6 +50,7 @@ import {
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
+import { describirImagen } from "@/lib/describe-image"
 import { marcarCotizacionRechazada } from "@/lib/zoho-quote-status"
 import { updateZohoLeadStatus } from "@/lib/zoho-leads"
 import {
@@ -106,6 +107,13 @@ type BotmakerRequest = {
   // acción de código la reenvía aquí; nosotros la descargamos y transcribimos.
   audioUrl?: string
   audioURL?: string
+  // Imagen/foto: URL del archivo que entrega Botmaker (la acción de código
+  // debe reenviarla, igual que audioURL). La describimos con visión y el
+  // texto sigue el flujo normal.
+  imageUrl?: string
+  imageURL?: string
+  mediaUrl?: string
+  mediaURL?: string
 }
 
 type ToolCallRecord = {
@@ -1016,6 +1024,36 @@ export async function POST(request: Request): Promise<NextResponse> {
       await sendBotmakerMessage(
         contact,
         "Por ahora no puedo escuchar notas de voz 🙈 ¿Me lo escribes, por favor?",
+      ).catch(() => {})
+      return NextResponse.json({ reply: "" })
+    }
+
+    // 2.6. Foto/imagen: si vino la URL, la "leemos" con visión y el texto sigue
+    // el flujo normal (mismo patrón que el audio). Si además venía un caption,
+    // se conserva. Placeholders sin URL → pedimos el mensaje por texto.
+    const imageUrl = (body.imageUrl || body.imageURL || body.mediaUrl || body.mediaURL || "").trim()
+    const IMG_PLACEHOLDERS = ["__image__", "__media__", "__photo__"]
+    if (imageUrl) {
+      sendTypingIndicator(contact).catch(() => {})
+      const descripcion = await describirImagen(imageUrl)
+      const caption = IMG_PLACEHOLDERS.includes(message) ? "" : message
+      if (descripcion) {
+        const bloque = `[El cliente envió una imagen por WhatsApp. Contenido de la imagen]: ${descripcion}`
+        message = caption ? `${caption}\n\n${bloque}` : bloque
+        console.log(`[v3-botmaker] imagen descrita contact=${contact} len=${descripcion.length}`)
+      } else if (!caption) {
+        await sendBotmakerMessage(
+          contact,
+          "Uy, no pude ver bien la imagen 🙈 ¿Me lo puedes contar por texto, por favor?",
+        ).catch(() => {})
+        return NextResponse.json({ reply: "" })
+      } else {
+        message = caption
+      }
+    } else if (IMG_PLACEHOLDERS.includes(message)) {
+      await sendBotmakerMessage(
+        contact,
+        "Uy, no pude ver bien la imagen 🙈 ¿Me lo puedes contar por texto, por favor?",
       ).catch(() => {})
       return NextResponse.json({ reply: "" })
     }
