@@ -66,6 +66,16 @@ const EMAIL_ENABLED = (process.env.REACTIVATION_EMAIL_ENABLED || "").trim().toLo
 // Texto que se guarda en el historial como turno de Vicky cuando se envía el HSM,
 // para que al responder el cliente, Vicky sepa que ELLA reabrió con la oferta
 // flash y le dé continuidad. NO se reenvía al cliente: es contexto interno.
+// Plantilla por TOQUE (opcional): REACTIVATION_TEMPLATE_PREFORM_1/_2/_3 (y
+// _QUOTE_N) sobreescriben la base para ese toque. Pedido de Rodrigo (13-jul):
+// el toque de la hora 47 pasa a ser el mensaje de "las 3 razones" — se activa
+// creando la plantilla en Botmaker y seteando la env _1, sin tocar código.
+function tplToque(segmento: string, toque: number): string {
+  const base = segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
+  const key = segmento === "cotizacion" ? "REACTIVATION_TEMPLATE_QUOTE" : "REACTIVATION_TEMPLATE_PREFORM"
+  return (process.env[`${key}_${toque}`] || "").trim() || base
+}
+
 const REACT_CONTEXT_MSG: Record<string, string> = {
   cotizacion:
     "Hola, soy Vicky 👋 Te escribí para retomar tu cotización, que quedó pendiente. Tengo un precio especial vigente por tiempo limitado para que puedas cerrar. ¿La revisamos antes de que caduque?",
@@ -400,7 +410,7 @@ export async function GET(req: Request): Promise<Response> {
   const contextoDe = (r: Row, segmento: string) =>
     (esCO(r) ? REACT_CONTEXT_MSG_CO : REACT_CONTEXT_MSG)[segmento] ??
     (esCO(r) ? REACT_CONTEXT_MSG_CO.preform : REACT_CONTEXT_MSG.preform)
-  async function enviar(list: Row[], template: string, segmento: string) {
+  async function enviar(list: Row[], segmento: string) {
     for (const r of list) {
       if (enviados >= BATCH) break
       // Las plantillas v2 llevan \${nombre}: resolverlo (Zoho para cotización;
@@ -419,7 +429,10 @@ export async function GET(req: Request): Promise<Response> {
         console.warn(`[reactivation] sin nombre resoluble, va con saludo neutro: ${r.contact} (${segmento})`)
       }
       // País: plantilla y canal propios (CO sin promesa de descuento, línea +57).
-      const tpl = esCO(r) ? (segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO) : template
+      // CL además puede tener plantilla específica por toque (tplToque).
+      const tpl = esCO(r)
+        ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
+        : tplToque(segmento, (r.reactivation_count || 0) + 1)
       const ok = await sendBotmakerTemplate(r.contact, tpl, { nombre }, canalDe(r)).catch(() => false)
       if (!ok) continue
       await supa(`vic_v3_conversations?id=eq.${r.id}`, {
@@ -482,8 +495,8 @@ export async function GET(req: Request): Promise<Response> {
 
   // Primero los consensuados (cita acordada), luego la cadencia: cotización y preform.
   await enviarConsensuadoLista(consensuado)
-  if (TPL_QUOTE) await enviar(segCot, TPL_QUOTE, "cotizacion")
-  if (TPL_PREFORM) await enviar(segPre, TPL_PREFORM, "preform")
+  if (TPL_QUOTE) await enviar(segCot, "cotizacion")
+  if (TPL_PREFORM) await enviar(segPre, "preform")
 
   return NextResponse.json({
     ok: true,

@@ -5,6 +5,38 @@ conocidos.
 
 ---
 
+## Toque hora 47 → mensaje "las 3 razones" (pedido de Rodrigo, 13-jul — HACER CUANTO ANTES)
+
+**Estado:** código listo y desplegado; falta crear la plantilla en Botmaker y setear la env.
+**Qué se quiere:** reemplazar el mensaje del PRIMER toque de reactivación (hora
+47) por el formato "breakup" de 3 razones que propuso Rodrigo Lewit:
+ocupados-pero-con-interés / ya trabajan con otro proveedor / desapareció el
+problema. Los toques de 7d y 15d siguen con la plantilla actual.
+
+**Cómo se activa (sin tocar código):**
+1. Crear en Botmaker la plantilla (nombre sugerido `vicky_react_47_razones`),
+   categoría marketing, variable `${nombre}`. Cuerpo propuesto (tuteo CL):
+
+   > Hola ${nombre}! Soy Vicky de GeoVictoria 👋 Ha pasado un tiempo y no he
+   > logrado retomar el contacto contigo. Me imagino que puede ser por alguna
+   > de estas razones:
+   >
+   > 1. Andan con otras prioridades, pero el interés sigue.
+   > 2. Ya estás trabajando con otro proveedor y por amabilidad no me lo has dicho.
+   > 3. Desapareció el problema de control de asistencia que tenían.
+   >
+   > Me cuentas si es alguna de estas o si es otra cosa? Así sé si te ayudo a
+   > retomar o dejo de escribirte 😊
+2. Con la plantilla APROBADA, setear en Vercel:
+   `REACTIVATION_TEMPLATE_PREFORM_1` y/o `REACTIVATION_TEMPLATE_QUOTE_1` =
+   nombre de la plantilla (el sufijo `_1` = toque de la hora 47; existen `_2`
+   y `_3` para 7d/15d si después se quieren diferenciar).
+
+**Soporte en código:** `tplToque()` en `vic-reactivation-cron` (deploy 13-jul).
+Solo aplica a Chile; Colombia mantiene sus plantillas propias.
+
+---
+
 ## Reenganche multi-día: toque hora 47 (WhatsApp + correo) + llamada hora 48
 
 **Estado:** propuesto (para backlog)
