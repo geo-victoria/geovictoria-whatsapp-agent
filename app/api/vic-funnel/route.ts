@@ -257,7 +257,13 @@ export async function GET(req: Request): Promise<Response> {
   if (conv) return renderConversation(conv, key)
 
   let rows: Row[]
-  let cierre: { total: number; aceptadas: number } | null = null
+  let cierre: {
+    total: number
+    aceptadas: number
+    autonomas: number
+    asistidas: number
+    sinClasificar: number
+  } | null = null
   try {
     const co = await fetchExclusionesCO()
     const [allRows, hard, cierreZoho] = await Promise.all([
