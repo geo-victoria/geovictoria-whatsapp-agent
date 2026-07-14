@@ -39,7 +39,7 @@ import {
   getConversationCountries,
   getQuotePointer,
 } from "@/lib/supabase-persistence-v3"
-import { scheduleCallback } from "@/lib/dapta-voice"
+import { hasRecentCallActivity, scheduleCallback } from "@/lib/dapta-voice"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
@@ -217,7 +217,12 @@ export async function POST(req: Request) {
     // respeta; silencio o un "sí" disparan la llamada.
     if (claim.stage === 2 && country === "cl") {
       const qp = await getQuotePointer(claim.contact).catch(() => null)
-      if (qp) {
+      // Anti-loop: el WhatsApp post-llamada re-arma la cadencia (cada respuesta
+      // de Vicky reinicia el reloj), y sin este guard el ciclo anunciaba y
+      // llamaba de nuevo al mismo contacto una y otra vez (visto en las pruebas
+      // del 14-jul). Máximo UNA llamada del canal de voz por contacto por día.
+      const yaLlamado = qp ? await hasRecentCallActivity(claim.contact, 24).catch(() => false) : false
+      if (qp && !yaLlamado) {
         const anuncio = "¿Te parece si te llamo a tu celular y conversamos? 😊"
         const okAnuncio = await sendBotmakerMessage(claim.contact, anuncio, channelId).catch(
           () => false,

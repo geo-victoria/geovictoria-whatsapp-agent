@@ -194,6 +194,23 @@ export async function clasificarConsentimiento(respuestas: string): Promise<"si"
   }
 }
 
+/**
+ * ¿Este contacto ya tuvo una llamada (o tiene una en camino) en las últimas
+ * `horas`? Corta el LOOP anuncio→llamada→WhatsApp post-llamada→cadencia
+ * re-armada→otro anuncio: una llamada del canal de voz por día es el máximo.
+ */
+export async function hasRecentCallActivity(contact: string, horas = 24): Promise<boolean> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return false
+  const desde = new Date(Date.now() - horas * 3600e3).toISOString()
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_scheduled_calls?contact=eq.${contact}` +
+      `&created_at=gte.${desde}&status=in.(pending,calling,done)&select=id&limit=1`,
+    { headers: HEADERS, cache: "no-store" },
+  )
+  if (!res.ok) return false
+  return (((await res.json().catch(() => [])) as unknown[]) || []).length > 0
+}
+
 /** Mensajes del CLIENTE posteriores a un instante (para el gate de consentimiento). */
 export async function fetchUserRepliesSince(contact: string, sinceIso: string): Promise<string[]> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return []
