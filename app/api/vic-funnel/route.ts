@@ -32,28 +32,46 @@ const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.co
 // client-side (son decenas, no miles) para no depender de count() de COQL.
 // Este dash es de Vicky CHILE: se excluyen las cotizaciones de conversaciones
 // de la línea CO (por id) y los registros de prueba (por nombre).
-async function fetchCierreZoho(excludeIds: Set<string>): Promise<{ total: number; aceptadas: number } | null> {
+async function fetchCierreZoho(excludeIds: Set<string>): Promise<{
+  total: number
+  aceptadas: number
+  // Desglose del campo "Intervención Humana" sobre las ACEPTADAS: cierres
+  // 100% conducidos por Vicky vs los que necesitaron un humano (lo marca el
+  // equipo comercial en Zoho, cotización por cotización).
+  autonomas: number
+  asistidas: number
+  sinClasificar: number
+} | null> {
   try {
     const token = await getZohoAccessToken()
     const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
       method: "POST",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        select_query: `select id, Name, Estado_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
+        select_query: `select id, Name, Estado_Cotizacion, Intervenci_n_Humana from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
       }),
       cache: "no-store",
     })
     if (!res.ok) return null
     const data = (await res.json().catch(() => null)) as {
-      data?: Array<{ id?: string; Name?: string; Estado_Cotizacion?: string }>
+      data?: Array<{ id?: string; Name?: string; Estado_Cotizacion?: string; Intervenci_n_Humana?: string | null }>
     } | null
     const quotes = (data?.data || []).filter((q) => {
       if (excludeIds.has(String(q.id || ""))) return false
       const nombre = String(q.Name || "").toLowerCase()
       return !nombre.includes("prueba") && !nombre.includes("huellerocompany")
     })
-    const aceptadas = quotes.filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")).length
-    return { total: quotes.length, aceptadas }
+    const aceptadasList = quotes.filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept"))
+    const marca = (q: { Intervenci_n_Humana?: string | null }) => String(q.Intervenci_n_Humana || "").toLowerCase()
+    const autonomas = aceptadasList.filter((q) => marca(q).includes("100%")).length
+    const asistidas = aceptadasList.filter((q) => marca(q).includes("intervenci")).length
+    return {
+      total: quotes.length,
+      aceptadas: aceptadasList.length,
+      autonomas,
+      asistidas,
+      sinClasificar: aceptadasList.length - autonomas - asistidas,
+    }
   } catch {
     return null
   }
@@ -450,11 +468,24 @@ export async function GET(req: Request): Promise<Response> {
     }
     const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
     const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
+    // Autonomía del cierre: solo sobre las aceptadas YA clasificadas con el
+    // campo "Intervención Humana" de Zoho (las sin clasificar se informan).
+    const clasificadas = cierre.autonomas + cierre.asistidas
+    const pctAuto = clasificadas ? `${Math.round((cierre.autonomas / clasificadas) * 100)}% de las clasificadas` : ""
+    const filaAutonomia = clasificadas
+      ? `
+    ${kpiCard("Cierre 100% Vicky", cierre.autonomas, col.best, pctAuto)}
+    ${kpiCard("Cierre asistido (humano)", cierre.asistidas, col.warn)}`
+      : ""
+    const notaSinClasificar = cierre.sinClasificar > 0
+      ? `<div class="sub" style="margin:-2px 0 10px">${cierre.sinClasificar} aceptada${cierre.sinClasificar === 1 ? "" : "s"} sin clasificar — marcar el campo <b>Intervención Humana</b> en la cotización (Zoho) para completar la autonomía del cierre.</div>`
+      : ""
     return `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
-    ${kpiCard("Cierre end-to-end", `${endToEnd}%`, col.best, "vio precio → venta")}
+    ${kpiCard("Cierre end-to-end", `${endToEnd}%`, col.best, "vio precio → venta")}${filaAutonomia}
   </div>
+  ${notaSinClasificar}
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
   })()}
 
