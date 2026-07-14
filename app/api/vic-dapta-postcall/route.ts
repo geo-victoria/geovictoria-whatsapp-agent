@@ -28,6 +28,15 @@ import {
   getKvValue,
   setKvValue,
 } from "@/lib/supabase-persistence-v3"
+import { parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
+
+// URL propia (mismo deployment) para reinyectar el evento al pipeline de la
+// Vicky de WhatsApp — mismo default que vic-outbound-poll.
+const SELF_BASE = (
+  process.env.OUTBOUND_SELF_URL ||
+  "https://geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app"
+).trim().replace(/\/+$/, "")
+const BOTMAKER_SECRET = (process.env.BOTMAKER_SECRET || "").trim()
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -102,5 +111,67 @@ export async function POST(req: Request): Promise<Response> {
     `[dapta-postcall] contact=${contact} estado=${estado || "?"} cambio=${cambio ? "sí" : "no"} dur=${duracionS}s`,
   )
 
-  return NextResponse.json({ ok: true, anotado: true, contact, estado: estado || null })
+  // ── Acción 1: cumplir la promesa "te la mando por WhatsApp" ───────────────
+  // Si el cliente pidió modificar la cotización, reinyectamos un EVENTO INTERNO
+  // al pipeline normal de la Vicky de WhatsApp (mismo webhook que Botmaker):
+  // así la cotización actualizada sale por el flujo real de cotización, con
+  // ruteo de modelo, tools y guardrails anti-alucinación incluidos.
+  let recotizacion = false
+  if ((cambio || estado === "pide_actualizar_cotizacion") && BOTMAKER_SECRET) {
+    const evento =
+      `[EVENTO INTERNO — LLAMADA TELEFÓNICA RECIÉN TERMINADA (esto NO lo escribió el cliente)] ` +
+      `Acabas de hablar por teléfono con este cliente y le PROMETISTE enviarle la cotización actualizada por WhatsApp. ` +
+      `Cambio que pidió: ${cambio || resumen || "ver registro de la llamada en el historial"}. ` +
+      `Actúa AHORA: salúdalo en una línea haciendo referencia a la llamada ("como te prometí por teléfono..."), ` +
+      `genera la cotización actualizada con tus herramientas y envíale el link. ` +
+      `No le vuelvas a preguntar lo que ya confirmó en la llamada; si falta un dato imprescindible para cotizar, pídelo directo y corto.`
+    const r = await fetch(`${SELF_BASE}/api/vic-botmaker-v3`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-secret": BOTMAKER_SECRET },
+      body: JSON.stringify({ contact, message: evento }),
+      cache: "no-store",
+    }).catch(() => null)
+    recotizacion = !!r?.ok
+    console.log(`[dapta-postcall] recotización reinyectada contact=${contact} ok=${recotizacion}`)
+  }
+
+  // ── Acción 2: agendar la llamada devuelta ──────────────────────────────────
+  // Si pidió que lo llamen en otro momento, interpretamos el "cuándo" y la
+  // dejamos en vic_scheduled_calls; vic-callback-cron la disparará a la hora.
+  let callbackAgendado: string | null = null
+  if (recontacto) {
+    const dueAt = await parseFechaRecontacto(recontacto, new Date())
+    if (dueAt) {
+      const vars = asDict(call.dynamic_variables)
+      const ok = await scheduleCallback(contact, dueAt, {
+        phone_number: toNumber,
+        customer_name: firstString(vars.customer_name),
+        company: firstString(vars.company),
+        monto_mensual: firstString(vars.monto_mensual),
+        dias_desde_envio: firstString(vars.dias_desde_envio),
+        quote_id: firstString(vars.quote_id),
+        id_zoho: firstString(vars.id_zoho),
+        motivo: `Llamada devuelta pedida por el cliente ("${recontacto}")`,
+      })
+      if (ok) {
+        callbackAgendado = dueAt
+        await appendAssistantV3(
+          contact,
+          `[REGISTRO INTERNO] Llamada devuelta agendada para ${new Date(dueAt).toLocaleString("es-CL", { timeZone: "America/Santiago" })} (pidió: "${recontacto}").`,
+        ).catch(() => {})
+      }
+      console.log(`[dapta-postcall] callback contact=${contact} due=${dueAt} ok=${ok}`)
+    } else {
+      console.warn(`[dapta-postcall] recontacto no interpretable: "${recontacto}"`)
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    anotado: true,
+    contact,
+    estado: estado || null,
+    recotizacion,
+    callback_agendado: callbackAgendado,
+  })
 }
