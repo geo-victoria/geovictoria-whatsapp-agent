@@ -90,6 +90,7 @@ export async function POST(req: Request): Promise<Response> {
   const custom = asDict(analysis.custom_analysis_data)
   const estado = firstString(custom.estado_seguimiento)
   const cambio = firstString(custom.cambio_cotizacion_solicitado)
+  const precioAcordado = Number(custom.precio_acordado || 0) || 0
   const objecion = firstString(custom.objecion_detalle)
   const recontacto = firstString(custom.mejor_momento_recontacto)
   const resumen = firstString(custom.resumen_llamada, analysis.call_summary)
@@ -99,6 +100,7 @@ export async function POST(req: Request): Promise<Response> {
   const lineas = [
     "[REGISTRO INTERNO — LLAMADA TELEFÓNICA DE VICKY (el cliente NO ve este mensaje; úsalo como contexto: tú misma hiciste esta llamada)]",
     estado ? `Estado: ${estado}` : "",
+    precioAcordado ? `Precio mensual ACORDADO en la llamada: $${precioAcordado}` : "",
     cambio ? `Cambio solicitado a la cotización: ${cambio}` : "",
     objecion ? `Objeción: ${objecion}` : "",
     recontacto ? `Mejor momento para recontactar: ${recontacto}` : "",
@@ -117,11 +119,21 @@ export async function POST(req: Request): Promise<Response> {
   // así la cotización actualizada sale por el flujo real de cotización, con
   // ruteo de modelo, tools y guardrails anti-alucinación incluidos.
   let recotizacion = false
-  if ((cambio || estado === "pide_actualizar_cotizacion") && BOTMAKER_SECRET) {
+  const debeRecotizar =
+    cambio || estado === "pide_actualizar_cotizacion" || estado === "descuento_acordado" || precioAcordado > 0
+  if (debeRecotizar && BOTMAKER_SECRET) {
+    const pedido = [
+      cambio ? `cambio pedido: ${cambio}` : "",
+      precioAcordado
+        ? `PRECIO MENSUAL ACORDADO EN LA LLAMADA: $${precioAcordado} (ya autorizado — está dentro del descuento máximo del 25%; aplica con tus herramientas el descuento necesario para llegar EXACTAMENTE a ese valor, no lo renegocies)`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("; ")
     const evento =
       `[EVENTO INTERNO — LLAMADA TELEFÓNICA RECIÉN TERMINADA (esto NO lo escribió el cliente)] ` +
       `Acabas de hablar por teléfono con este cliente y le PROMETISTE enviarle la cotización actualizada por WhatsApp. ` +
-      `Cambio que pidió: ${cambio || resumen || "ver registro de la llamada en el historial"}. ` +
+      `Lo comprometido: ${pedido || resumen || "ver registro de la llamada en el historial"}. ` +
       `Actúa AHORA: salúdalo en una línea haciendo referencia a la llamada ("como te prometí por teléfono..."), ` +
       `genera la cotización actualizada con tus herramientas y envíale el link. ` +
       `No le vuelvas a preguntar lo que ya confirmó en la llamada; si falta un dato imprescindible para cotizar, pídelo directo y corto.`
