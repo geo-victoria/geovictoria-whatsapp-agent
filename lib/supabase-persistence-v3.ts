@@ -462,6 +462,10 @@ export async function getQuotePointer(contact: string): Promise<QuotePointer | n
 // toques de push NO lo mueven (si lo movieran, la cadencia nunca avanzaría).
 
 const FOLLOWUP_FIRST_OFFSET_MS = 60 * 60 * 1000 // primer toque: +1 h
+// PRUEBAS 14-jul (Eduardo y Rodrigo): primer toque a los 2 min, igual que los
+// offsets acelerados de vic_v3_claim_followups. Quitar al terminar las pruebas.
+const FOLLOWUP_FIRST_OFFSET_TEST_MS = 2 * 60 * 1000
+const CONTACTOS_PRUEBA_RAPIDA = new Set(["56944668823", "56978385048"])
 
 type FollowupStateRow = {
   id: string
@@ -524,7 +528,12 @@ export async function armFollowup(contact: string, country = "cl"): Promise<void
       silence_anchor_at: now.toISOString(),
       followup_stage: 0,
       followup_attempts: 0,
-      followup_next_at: new Date(now.getTime() + FOLLOWUP_FIRST_OFFSET_MS).toISOString(),
+      followup_next_at: new Date(
+        now.getTime() +
+          (CONTACTOS_PRUEBA_RAPIDA.has(contact)
+            ? FOLLOWUP_FIRST_OFFSET_TEST_MS
+            : FOLLOWUP_FIRST_OFFSET_MS),
+      ).toISOString(),
       followup_closed_reason: null,
     }),
   })

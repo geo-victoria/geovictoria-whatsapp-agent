@@ -37,7 +37,9 @@ import {
   getFollowupCronSecret,
   closeFollowup,
   getConversationCountries,
+  getQuotePointer,
 } from "@/lib/supabase-persistence-v3"
+import { scheduleCallback } from "@/lib/dapta-voice"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
@@ -48,6 +50,11 @@ export const maxDuration = 60
 // Lote por tick: 8 nudges × ~2-3s de generación cabe holgado en maxDuration.
 // Al tráfico actual (~10-15 toques/hora peak) un tick rara vez trae más de 1-2.
 const CLAIM_BATCH = 8
+
+// Contactos internos con cadencia acelerada para probar el flujo completo
+// cotización → anuncio → llamada (Eduardo y Rodrigo, 14-jul). Al terminar las
+// pruebas: quitar de aquí Y revertir los offsets de vic_v3_claim_followups.
+const CONTACTOS_PRUEBA_RAPIDA = new Set(["56944668823", "56978385048"])
 
 // Modelo chico y rápido: el nudge es UNA frase corta, no necesita el modelo
 // del agente principal.
@@ -202,6 +209,61 @@ export async function POST(req: Request) {
   for (const claim of claims) {
     const country = paises[claim.conversation_id] || "cl"
     const channelId = country === "co" ? PERFIL_CO.canal.channelId : undefined
+
+    // Toque de las 22h50 para el segmento con COTIZACIÓN FORMAL (Chile): en
+    // vez del nudge LLM, Vicky ANUNCIA su llamada y la agenda para 10 minutos
+    // después (~23h), condicionada al consentimiento (diseño Lalo 14-jul):
+    // vic-callback-cron revisa la respuesta antes de discar — un "no" se
+    // respeta; silencio o un "sí" disparan la llamada.
+    if (claim.stage === 2 && country === "cl") {
+      const qp = await getQuotePointer(claim.contact).catch(() => null)
+      if (qp) {
+        const anuncio = "¿Te parece si te llamo a tu celular y conversamos? 😊"
+        const okAnuncio = await sendBotmakerMessage(claim.contact, anuncio, channelId).catch(
+          () => false,
+        )
+        // Anuncio (22h50) → llamada (~23h): 10 min de gap. Contactos de prueba
+        // internos: 3 min, para validar el flujo completo sin esperar (14-jul).
+        const gapMin = CONTACTOS_PRUEBA_RAPIDA.has(claim.contact) ? 3 : 10
+        let agendada = false
+        if (okAnuncio) {
+          sent++
+          await appendAssistantV3(claim.contact, anuncio).catch(() => {})
+          agendada = await scheduleCallback(
+            claim.contact,
+            new Date(Date.now() + gapMin * 60 * 1000).toISOString(),
+            {
+              tipo: "consent_call",
+              announced_at: new Date().toISOString(),
+              phone_number: `+${claim.contact}`,
+              customer_name: "",
+              company: "",
+              monto_mensual: qp.totalClp ? String(Math.round(qp.totalClp)) : "",
+              dias_desde_envio: "1",
+              quote_id: qp.quoteId || "",
+              motivo: "Llamada hora-23 (anunciada por WhatsApp a las 22h50)",
+            },
+          ).catch(() => false)
+        }
+        await logFollowup({
+          conversationId: claim.conversation_id,
+          contact: claim.contact,
+          stage: claim.stage,
+          content: anuncio,
+          ok: okAnuncio,
+          error: okAnuncio
+            ? agendada
+              ? undefined
+              : "anuncio enviado pero la llamada NO quedó agendada"
+            : "push del anuncio falló",
+        }).catch(() => {})
+        console.log(
+          `[followup-cron] anuncio de llamada contact=${claim.contact} anuncio=${okAnuncio} llamadaAgendada=${agendada}`,
+        )
+        continue
+      }
+    }
+
     let nudge = ""
     let errorMsg = ""
     try {

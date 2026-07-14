@@ -17,8 +17,13 @@
  */
 
 import { NextResponse } from "next/server"
-import { getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
-import { claimDueCallbacks, markCallbackDone } from "@/lib/dapta-voice"
+import { appendAssistantV3, getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
+import {
+  claimDueCallbacks,
+  clasificarConsentimiento,
+  fetchUserRepliesSince,
+  markCallbackDone,
+} from "@/lib/dapta-voice"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -59,15 +64,43 @@ export async function POST(req: Request): Promise<Response> {
   for (const cb of due) {
     const payload = cb.payload || {}
     const motivo = String(payload.motivo || "Llamada devuelta agendada")
+
+    // Gate de consentimiento (llamada hora-23): el anuncio "¿te parece si te
+    // llamo?" salió a las 22h50. Si el cliente respondió, un "sí" explícito
+    // dispara; un "no" se respeta SIEMPRE; cualquier otra respuesta también
+    // frena la llamada (la Vicky de texto ya está conversando con él — llamar
+    // encima sería invasivo). El silencio dispara.
+    if (payload.tipo === "consent_call" && payload.announced_at) {
+      const respuestas = await fetchUserRepliesSince(
+        cb.contact,
+        String(payload.announced_at),
+      ).catch(() => [] as string[])
+      if (respuestas.length > 0) {
+        const veredicto = await clasificarConsentimiento(respuestas.join("\n"))
+        if (veredicto !== "si") {
+          await markCallbackDone(cb.id, veredicto === "no" ? "declined" : "skipped")
+          if (veredicto === "no") {
+            await appendAssistantV3(
+              cb.contact,
+              "[REGISTRO INTERNO] El cliente pidió que NO lo llamaran (respuesta al anuncio de las 22h50). Llamada cancelada — respetar: no volver a ofrecer llamada salvo que él lo pida.",
+            ).catch(() => {})
+          }
+          detalle.push({ id: cb.id, contact: cb.contact, consentimiento: veredicto, ok: false })
+          console.log(`[callback-cron] ${cb.contact} consentimiento=${veredicto} → NO se llama`)
+          continue
+        }
+      }
+    }
+    // El encuadre de la apertura depende de POR QUÉ sale esta llamada.
+    const contexto =
+      payload.tipo === "consent_call"
+        ? `${motivo}. Hace unos minutos le enviaste por WhatsApp "¿te parece si te llamo a tu celular y conversamos?" y no se negó (aceptó o no alcanzó a responder). Usa tu apertura estándar con naturalidad.`
+        : `${motivo}. Esta llamada es la DEVOLUCIÓN comprometida: el cliente pidió que lo llamaras a esta hora, ` +
+          `así que abre reconociéndolo ("hola, soy Vicky de GeoVictoria, quedamos en que te llamaba ahora...") en vez del saludo estándar.`
     const res = await fetch(flowUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...payload,
-        contexto:
-          `${motivo}. Esta llamada es la DEVOLUCIÓN comprometida: el cliente pidió que lo llamaras a esta hora, ` +
-          `así que abre reconociéndolo ("hola, soy Vicky de GeoVictoria, quedamos en que te llamaba ahora...") en vez del saludo estándar.`,
-      }),
+      body: JSON.stringify({ ...payload, contexto }),
       cache: "no-store",
     }).catch(() => null)
     const ok = !!res?.ok

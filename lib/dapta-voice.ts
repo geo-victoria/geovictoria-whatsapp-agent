@@ -148,7 +148,74 @@ export async function claimDueCallbacks(limit = 5): Promise<ScheduledCall[]> {
   return claimed
 }
 
-export async function markCallbackDone(id: string, status: "done" | "failed"): Promise<void> {
+/**
+ * ¿El cliente aceptó la llamada anunciada? Clasifica su(s) respuesta(s) al
+ * mensaje "¿te parece si te llamo?".
+ *   "si"   → aceptó (llamar)
+ *   "no"   → la rechazó (respetar: NO llamar)
+ *   "otro" → respondió otra cosa (la Vicky de texto ya está conversando con
+ *            él: no interrumpir con una llamada no consentida)
+ */
+export async function clasificarConsentimiento(respuestas: string): Promise<"si" | "no" | "otro"> {
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey || !respuestas.trim()) return "otro"
+  try {
+    const res = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODELO_EXTRACCION,
+        max_tokens: 5,
+        messages: [
+          {
+            role: "user",
+            content:
+              `Le preguntamos a un cliente por WhatsApp: "¿te parece si te llamo a tu celular y conversamos?". ` +
+              `Respondió: "${respuestas.trim().slice(0, 500)}".\n` +
+              `¿Aceptó que lo llamemos? Responde SOLO una palabra: SI (aceptó), NO (rechazó o pidió no llamar), OTRO (respondió otra cosa / no se refiere a la llamada).`,
+          },
+        ],
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return "otro"
+    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> }
+    const out = (data.content?.find((c) => c.type === "text")?.text || "").trim().toUpperCase()
+    if (out.startsWith("SI")) return "si"
+    if (out.startsWith("NO")) return "no"
+    return "otro"
+  } catch {
+    return "otro"
+  }
+}
+
+/** Mensajes del CLIENTE posteriores a un instante (para el gate de consentimiento). */
+export async function fetchUserRepliesSince(contact: string, sinceIso: string): Promise<string[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return []
+  const conv = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
+    { headers: HEADERS, cache: "no-store" },
+  )
+  if (!conv.ok) return []
+  const rows = ((await conv.json()) as Array<{ id: string }>) || []
+  if (!rows.length) return []
+  const msgs = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_messages?conversation_id=eq.${rows[0].id}` +
+      `&role=eq.user&at=gt.${encodeURIComponent(sinceIso)}&select=content&order=at.asc&limit=10`,
+    { headers: HEADERS, cache: "no-store" },
+  )
+  if (!msgs.ok) return []
+  return (((await msgs.json()) as Array<{ content: string }>) || []).map((m) => m.content || "")
+}
+
+export async function markCallbackDone(
+  id: string,
+  status: "done" | "failed" | "declined" | "skipped",
+): Promise<void> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return
   await fetch(`${SUPABASE_URL}/rest/v1/vic_scheduled_calls?id=eq.${id}`, {
     method: "PATCH",
