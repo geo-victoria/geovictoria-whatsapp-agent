@@ -105,8 +105,16 @@ export async function POST(req: Request): Promise<Response> {
     const okTest = await sendBotmakerTemplate(contact, TPL_LEAD, { nombre, empresa }).catch(() => false)
     return NextResponse.json({ ok: okTest, test: true, contact, template: TPL_LEAD })
   }
-  // Los números internos no reciben prospección (mismo set que excluye el embudo).
-  if (isTestContact(contact, testContactSet())) {
+  // Los números internos no reciben prospección (mismo set que excluye el
+  // embudo). OUTBOUND_ALLOW_CONTACTS (coma-separado) permite excepciones
+  // puntuales para pruebas E2E del flujo completo con números del equipo.
+  const allowList = new Set(
+    (process.env.OUTBOUND_ALLOW_CONTACTS || "")
+      .split(",")
+      .map((s) => s.replace(/\D/g, ""))
+      .filter(Boolean),
+  )
+  if (!allowList.has(contact) && isTestContact(contact, testContactSet())) {
     return NextResponse.json({ ok: true, skipped: "contacto interno" })
   }
   // Red de seguridad: prospección SOLO a Chile (+56). La calificación fina vive
