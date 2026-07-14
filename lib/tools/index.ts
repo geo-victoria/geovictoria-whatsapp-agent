@@ -77,6 +77,11 @@ import {
   type EnviarCertificacionResultado,
 } from "./enviar-certificacion"
 import {
+  enviarFichaRelojSchema,
+  enviarFichaReloj,
+  type EnviarFichaRelojResultado,
+} from "./enviar-ficha-reloj"
+import {
   marcarNoContactarSchema,
   marcarNoContactar,
   type MarcarNoContactarResultado,
@@ -106,6 +111,7 @@ export const TOOL_SCHEMAS = [
   consultarSiguienteDescuentoSchema,
   aplicarSiguienteDescuentoSchema,
   enviarCertificacionSchema,
+  enviarFichaRelojSchema,
   marcarNoContactarSchema,
   programarSeguimientoSchema,
 ] as const
@@ -123,6 +129,7 @@ export type ToolResult =
   | ConsultarSiguienteDescuentoResultado
   | AplicarSiguienteDescuentoResultado
   | EnviarCertificacionResultado
+  | EnviarFichaRelojResultado
   | MarcarNoContactarResultado
   | ProgramarSeguimientoResultado
   | { ok: false; error: string }
@@ -169,6 +176,8 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "enviar_certificacion":
         return await enviarCertificacion()
+      case "enviar_ficha_reloj":
+        return await enviarFichaReloj()
 
       case "marcar_no_contactar":
         return marcarNoContactar(input as never)
@@ -179,7 +188,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_descuento_referencial, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_descuento_referencial, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion, enviar_ficha_reloj.`,
         }
     }
   } catch (err: unknown) {
