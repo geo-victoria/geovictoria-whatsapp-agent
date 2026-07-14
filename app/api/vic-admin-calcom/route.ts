@@ -61,6 +61,27 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, attendee, bookings })
   }
 
+  // ?cancelBooking=<uid>: cancela una reserva (limpieza de reuniones de
+  // prueba). Best-effort sobre el registro local: si existe en vic_v3_meetings
+  // se marca cancelada para que no dispare recordatorios.
+  const cancelUid = new URL(req.url).searchParams.get("cancelBooking")
+  if (cancelUid) {
+    const res2 = await fetch(`${CAL_BASE}/bookings/${encodeURIComponent(cancelUid)}/cancel`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${CAL_API_KEY}`,
+        "cal-api-version": "2024-08-13",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ cancellationReason: "Reserva de prueba interna — cancelada por administración" }),
+      cache: "no-store",
+    })
+    const data2 = await res2.json().catch(() => ({}))
+    const { updateMeetingByUid } = await import("@/lib/supabase-persistence-v3")
+    await updateMeetingByUid(cancelUid, { status: "cancelled" }).catch(() => {})
+    return NextResponse.json({ ok: res2.ok, cancelBooking: cancelUid, status: res2.status, data: data2 })
+  }
+
   // ?slotsFor=<eventTypeId>: disponibilidad de los próximos 7 días para ese
   // event type (verificar que un event type nuevo tiene hosts/horario activos
   // sin crear ningún booking).
