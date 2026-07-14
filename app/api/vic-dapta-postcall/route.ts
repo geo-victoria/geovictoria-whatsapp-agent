@@ -29,6 +29,12 @@ import {
   setKvValue,
 } from "@/lib/supabase-persistence-v3"
 import { parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
+import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+
+const COTIZADORA_API_BASE = (
+  process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
+).trim()
+const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
 
 // URL propia (mismo deployment) para reinyectar el evento al pipeline de la
 // Vicky de WhatsApp — mismo default que vic-outbound-poll.
@@ -118,9 +124,51 @@ export async function POST(req: Request): Promise<Response> {
   // al pipeline normal de la Vicky de WhatsApp (mismo webhook que Botmaker):
   // así la cotización actualizada sale por el flujo real de cotización, con
   // ruteo de modelo, tools y guardrails anti-alucinación incluidos.
+  // ── Acción 0 (determinista): descuento telefónico exacto ──────────────────
+  // Precio acordado en la llamada + cotización formal real → el descuento se
+  // comitea DIRECTO contra el cotizador (sin modelo de por medio): "lo acordado
+  // por teléfono = lo aplicado", siempre. El mensaje al cliente sale con el
+  // texto que devuelve el endpoint.
+  const vars = asDict(call.dynamic_variables)
+  const quoteId = firstString(vars.quote_id)
+  const montoOriginal = Number(String(vars.monto_mensual || "").replace(/[^\d]/g, "")) || 0
+  let descuentoAplicado = false
+  if (precioAcordado > 0 && montoOriginal > 0 && quoteId && !/^TEST-/i.test(quoteId)) {
+    // pct hacia ARRIBA con 1 decimal: el precio final nunca queda sobre lo prometido.
+    const pctExacto = Math.min(25, Math.ceil((1 - precioAcordado / montoOriginal) * 1000) / 10)
+    if (pctExacto > 0) {
+      const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/aplicar-descuento-telefonico`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+        },
+        body: JSON.stringify({ quoteId, pctExacto }),
+        cache: "no-store",
+      }).catch(() => null)
+      const data = (await r?.json().catch(() => null)) as {
+        ok?: boolean
+        mensaje_para_prospecto?: string
+      } | null
+      if (r?.ok && data?.ok && data.mensaje_para_prospecto) {
+        const enviado = await sendBotmakerMessage(contact, data.mensaje_para_prospecto).catch(
+          () => false,
+        )
+        if (enviado) {
+          descuentoAplicado = true
+          await appendAssistantV3(contact, data.mensaje_para_prospecto).catch(() => {})
+        }
+      }
+      console.log(
+        `[dapta-postcall] descuento telefónico contact=${contact} quote=${quoteId} pct=${pctExacto} ok=${descuentoAplicado}`,
+      )
+    }
+  }
+
   let recotizacion = false
   const debeRecotizar =
-    cambio || estado === "pide_actualizar_cotizacion" || estado === "descuento_acordado" || precioAcordado > 0
+    !descuentoAplicado &&
+    (cambio || estado === "pide_actualizar_cotizacion" || estado === "descuento_acordado" || precioAcordado > 0)
   if (debeRecotizar && BOTMAKER_SECRET) {
     const pedido = [
       cambio ? `cambio pedido: ${cambio}` : "",
@@ -154,7 +202,6 @@ export async function POST(req: Request): Promise<Response> {
   if (recontacto) {
     const dueAt = await parseFechaRecontacto(recontacto, new Date())
     if (dueAt) {
-      const vars = asDict(call.dynamic_variables)
       const ok = await scheduleCallback(contact, dueAt, {
         phone_number: toNumber,
         customer_name: firstString(vars.customer_name),

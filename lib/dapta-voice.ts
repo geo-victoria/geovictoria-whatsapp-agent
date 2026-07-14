@@ -59,8 +59,9 @@ export async function parseFechaRecontacto(
               `Responde SOLO con la fecha y hora concreta del recontacto en formato ` +
               `YYYY-MM-DD HH:MM (hora de Chile continental). Reglas: si dio solo el día sin hora, usa 10:00; ` +
               `"en la mañana"=10:00, "a mediodía"=12:00, "en la tarde"=16:00, "después"/"más tarde" sin día=suma 3 horas; ` +
+              `si pidió que lo llamen de vuelta SIN indicar cuándo ("llámame de vuelta", "no te escucho, llámame", "en un rato") = suma 15 minutos; ` +
               `si la hora resultante cae antes de las 09:00 o después de las 19:00, muévela al siguiente horario hábil (09:00-19:00, lunes a viernes). ` +
-              `Si el texto NO contiene ninguna referencia temporal interpretable, responde exactamente: NO`,
+              `Solo si el texto descarta explícitamente el recontacto o no dice nada sobre volver a llamar, responde exactamente: NO`,
           },
         ],
       }),
