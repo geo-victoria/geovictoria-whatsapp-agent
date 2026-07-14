@@ -474,14 +474,17 @@ export async function GET(req: Request): Promise<Response> {
     }
     const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
     const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
-    // Autonomía del cierre: solo sobre las aceptadas YA clasificadas con el
-    // campo "Intervención Humana" de Zoho (las sin clasificar se informan).
+    // Autonomía del cierre: dos TASAS diferenciadas sobre la misma base del
+    // cierre end-to-end (conversaciones que vieron precio → venta), según el
+    // campo "Intervención Humana" de Zoho. Las aceptadas sin clasificar no
+    // suman a ninguna de las dos (se informan aparte).
     const clasificadas = cierre.autonomas + cierre.asistidas
-    const pctAuto = clasificadas ? `${Math.round((cierre.autonomas / clasificadas) * 100)}% de las clasificadas` : ""
+    const tasaAuto = vieronPrecio ? Math.round((cierre.autonomas / vieronPrecio) * 100) : 0
+    const tasaAsis = vieronPrecio ? Math.round((cierre.asistidas / vieronPrecio) * 100) : 0
     const filaAutonomia = clasificadas
       ? `
-    ${kpiCard("Cierre 100% Vicky", cierre.autonomas, col.best, pctAuto)}
-    ${kpiCard("Cierre asistido (humano)", cierre.asistidas, col.warn)}`
+    ${kpiCard("Tasa de cierre 100% Vicky", `${tasaAuto}%`, col.best, `${cierre.autonomas} aceptada${cierre.autonomas === 1 ? "" : "s"} sin humano · vio precio → venta`)}
+    ${kpiCard("Tasa de cierre asistido", `${tasaAsis}%`, col.warn, `${cierre.asistidas} aceptada${cierre.asistidas === 1 ? "" : "s"} con intervención humana`)}`
       : ""
     const notaSinClasificar = cierre.sinClasificar > 0
       ? `<div class="sub" style="margin:-2px 0 10px">${cierre.sinClasificar} aceptada${cierre.sinClasificar === 1 ? "" : "s"} sin clasificar — marcar el campo <b>Intervención Humana</b> en la cotización (Zoho) para completar la autonomía del cierre.</div>`
