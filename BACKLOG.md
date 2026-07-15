@@ -484,3 +484,33 @@ arriesgar el bloqueo de envíos.
   (patrón/contraseña sin biometría; datos encriptados; no proactivo) — 09-jul.
 - **Advertencia de auto-instalación eliminada** (se acepta la elección y se
   avanza; condiciones quedan en los T&C) — 09-jul.
+
+---
+
+## Vicky CO — feedback reunión equipo Colombia (15-jul)
+
+**Ya implementado (deploy 15-jul):** NIT permisivo (dígitos sin puntos, DV
+opcional), ítems de reloj totalizados por ubicación, lista negra de
+chilenismos, tuteo consistente, una pregunta de consultoría por mensaje,
+cierre resolutivo con 2-3 horarios, seguimiento a leads >50 en captura
+(caso María Fernanda), "pago de iniciación" en vez de "por adelantado".
+
+**Pendiente de diseño/implementación:**
+
+1. **Calificación con 5 preguntas clave** (Juan Pablo) — horas extra,
+   recargos, ausentismo, permisos, impacto general (opciones cerradas, ver
+   Teams 15-jul). Una por mensaje. Idea: chatflows o botones de WhatsApp
+   (los botones in-session en Botmaker requieren investigación; los de
+   plantilla ya sabemos que funcionan vía "Bloque del bot"). Regla especial:
+   si "solo quiere equipos biométricos" → derivar a ejecutivo para persuasión.
+2. **Cotización Colombia propia** (con Carlos dev): términos y condiciones CO,
+   actividad económica y datos de facturación CO, quitar sección "servicios
+   adicionales" (mucho texto en móvil), botón flotante "Pagar" siempre
+   visible. Además: disponibilizar el modelo de cotización a los ejecutivos
+   comerciales CO (hoy usan Word/PPT) — módulo Cotizaciones GeoVictoria +
+   botón de regenerar ya existen.
+3. **Seguimiento agresivo del flujo completo CO**: cadencia 24-48h para todos
+   los flujos (agendamiento incluido), estilo María Fernanda ("la compra en
+   Colombia es emocional").
+4. **Alejo Gordillo** queda como el "Anderson de Colombia" (gestiones
+   internas, recotizaciones manuales con el botón de regenerar).

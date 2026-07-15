@@ -145,7 +145,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   // Activación: primer mes del plan por adelantado.
   lineas.push({
     concepto: "Activación",
-    detalle: "Equivale al primer mes de servicio, cobrado por adelantado",
+    detalle: "Pago de iniciación: equivale al primer mes de servicio",
     neto: plan,
     iva: 0,
     recurrente: false,
