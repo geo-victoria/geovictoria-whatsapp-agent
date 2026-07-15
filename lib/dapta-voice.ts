@@ -230,6 +230,20 @@ export async function fetchUserRepliesSince(contact: string, sinceIso: string): 
   return (((await msgs.json()) as Array<{ content: string }>) || []).map((m) => m.content || "")
 }
 
+/** Cancela toda llamada pendiente de un contacto (ej: su cotización ya se pagó). */
+export async function cancelPendingCallbacks(contact: string): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_KEY || !contact) return
+  await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_scheduled_calls?contact=eq.${contact}&status=eq.pending`,
+    {
+      method: "PATCH",
+      headers: { ...HEADERS, Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "superseded" }),
+      cache: "no-store",
+    },
+  ).catch(() => {})
+}
+
 export async function markCallbackDone(
   id: string,
   status: "done" | "failed" | "declined" | "skipped",

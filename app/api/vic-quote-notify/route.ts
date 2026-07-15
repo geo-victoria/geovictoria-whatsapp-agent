@@ -17,7 +17,12 @@
  */
 
 import { NextResponse } from "next/server"
-import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import {
+  closeFollowup,
+  findContactByQuoteId,
+  getFollowupCronSecret,
+} from "@/lib/supabase-persistence-v3"
+import { cancelPendingCallbacks } from "@/lib/dapta-voice"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 20
@@ -67,8 +72,31 @@ async function handle(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
   const url = new URL(req.url)
-  let p: { evento?: string; empresa?: string; numero?: string; monto?: string; to?: string } = {}
+  let p: {
+    evento?: string
+    empresa?: string
+    numero?: string
+    monto?: string
+    to?: string
+    quoteId?: string
+  } = {}
   if (req.method === "POST") p = (await req.json().catch(() => ({}))) as typeof p
+
+  // Cierre de cadencia: una cotización aceptada/pagada apaga TODO el
+  // seguimiento automático del contacto (nudges, anuncio de llamada y
+  // llamadas agendadas). Antes esto no existía y el ciclo seguía corriendo —
+  // con el canal de voz activo eso significaba LLAMAR a un cliente que ya
+  // pagó (visto con Transportes Viig, 15-jul). Best-effort: no bloquea la
+  // notificación al equipo.
+  const quoteId = (p.quoteId || new URL(req.url).searchParams.get("quoteId") || "").trim()
+  if (quoteId) {
+    const contact = await findContactByQuoteId(quoteId).catch(() => null)
+    if (contact) {
+      await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
+      await cancelPendingCallbacks(contact).catch(() => {})
+      console.log(`[quote-notify] cadencia cerrada contact=${contact} quote=${quoteId}`)
+    }
+  }
   const evento = (p.evento || url.searchParams.get("evento") || "aceptada").toLowerCase()
   const empresa = (p.empresa || url.searchParams.get("empresa") || "").trim() || "—"
   const numero = (p.numero || url.searchParams.get("numero") || "").trim() || "—"

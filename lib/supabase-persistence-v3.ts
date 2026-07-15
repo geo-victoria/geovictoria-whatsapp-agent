@@ -540,6 +540,19 @@ export async function armFollowup(contact: string, country = "cl"): Promise<void
 }
 
 /** Cierra el ciclo definitivamente (opt_out, derivado, agotado, respondio). */
+/**
+ * Lookup inverso: contacto dueño de una cotización formal (por su id de Zoho).
+ * Lo usa vic-quote-notify para cerrar la cadencia cuando la cotización se
+ * acepta o paga.
+ */
+export async function findContactByQuoteId(quoteId: string): Promise<string | null> {
+  if (!quoteId) return null
+  const rows = await supabaseFetch<Array<{ contact: string }>>(
+    `vic_v3_conversations?formal_quote_id=eq.${encodeURIComponent(quoteId)}&select=contact&limit=1`,
+  )
+  return rows?.[0]?.contact || null
+}
+
 export async function closeFollowup(
   contact: string,
   reason: string,
