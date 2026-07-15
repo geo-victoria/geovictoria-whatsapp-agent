@@ -160,21 +160,32 @@ export function cotizarCO(input: CotizacionCOInput): {
       iva: ventaNeto * IVA_HARDWARE,
       recurrente: false,
     })
+    // Feedback equipo CO (15-jul): con varios relojes, envío e instalación se
+    // TOTALIZAN por ubicación/zona con cantidad — nada de una fila por reloj.
+    const grupos = new Map<string, { ubicacion: string; zona: "capital" | "resto"; envios: number; instalaciones: number }>()
     for (const punto of puntos) {
-      const envio = TARIFAS_CO.envioVenta[punto.zona]
+      const key = `${punto.ubicacion}|${punto.zona}`
+      const g = grupos.get(key) || { ubicacion: punto.ubicacion, zona: punto.zona, envios: 0, instalaciones: 0 }
+      g.envios++
+      if (!punto.autoInstalada) g.instalaciones++
+      grupos.set(key, g)
+    }
+    for (const g of grupos.values()) {
+      const zonaTxt = g.zona === "capital" ? "Zona capital" : "Resto del país"
+      const envio = TARIFAS_CO.envioVenta[g.zona]
       lineas.push({
-        concepto: `Envío de reloj (${punto.ubicacion})`,
-        detalle: punto.zona === "capital" ? "Zona capital" : "Resto del país",
-        neto: envio,
+        concepto: `Envío de reloj (${g.ubicacion})${g.envios > 1 ? ` × ${g.envios}` : ""}`,
+        detalle: g.envios > 1 ? `${zonaTxt} — ${g.envios} × ${formatearCOP(envio)}` : zonaTxt,
+        neto: envio * g.envios,
         iva: 0,
         recurrente: false,
       })
-      if (!punto.autoInstalada) {
-        const inst = TARIFAS_CO.instalacionVenta[punto.zona]
+      if (g.instalaciones > 0) {
+        const inst = TARIFAS_CO.instalacionVenta[g.zona]
         lineas.push({
-          concepto: `Instalación de reloj (${punto.ubicacion})`,
-          detalle: punto.zona === "capital" ? "Zona capital" : "Resto del país",
-          neto: inst,
+          concepto: `Instalación de reloj (${g.ubicacion})${g.instalaciones > 1 ? ` × ${g.instalaciones}` : ""}`,
+          detalle: g.instalaciones > 1 ? `${zonaTxt} — ${g.instalaciones} × ${formatearCOP(inst)}` : zonaTxt,
+          neto: inst * g.instalaciones,
           iva: 0,
           recurrente: false,
         })
@@ -265,29 +276,38 @@ export function cotizarCO(input: CotizacionCOInput): {
       esRecurrente: false,
       afectoIva: true,
     })
+    // Misma totalización por ubicación/zona que en las líneas del mensaje.
+    const gruposItems = new Map<string, { ubicacion: string; zona: "capital" | "resto"; envios: number; instalaciones: number }>()
     for (const punto of puntos) {
-      const envio = TARIFAS_CO.envioVenta[punto.zona]
+      const key = `${punto.ubicacion}|${punto.zona}`
+      const g = gruposItems.get(key) || { ubicacion: punto.ubicacion, zona: punto.zona, envios: 0, instalaciones: 0 }
+      g.envios++
+      if (!punto.autoInstalada) g.instalaciones++
+      gruposItems.set(key, g)
+    }
+    for (const g of gruposItems.values()) {
+      const envio = TARIFAS_CO.envioVenta[g.zona]
       itemsCotizador.push({
         tipo: "servicio",
         id: "envio_reloj",
-        nombre: `Envío de reloj (${punto.ubicacion})`,
+        nombre: `Envío de reloj (${g.ubicacion})`,
         modalidad: "Cobro único",
-        cantidad: 1,
+        cantidad: g.envios,
         precioUnitarioCOP: envio,
-        subtotalCOP: envio,
+        subtotalCOP: envio * g.envios,
         esRecurrente: false,
         afectoIva: false,
       })
-      if (!punto.autoInstalada) {
-        const inst = TARIFAS_CO.instalacionVenta[punto.zona]
+      if (g.instalaciones > 0) {
+        const inst = TARIFAS_CO.instalacionVenta[g.zona]
         itemsCotizador.push({
           tipo: "servicio",
           id: "instalacion_reloj",
-          nombre: `Instalación de reloj (${punto.ubicacion})`,
+          nombre: `Instalación de reloj (${g.ubicacion})`,
           modalidad: "Cobro único",
-          cantidad: 1,
+          cantidad: g.instalaciones,
           precioUnitarioCOP: inst,
-          subtotalCOP: inst,
+          subtotalCOP: inst * g.instalaciones,
           esRecurrente: false,
           afectoIva: false,
         })

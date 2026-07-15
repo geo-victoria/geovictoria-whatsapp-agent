@@ -308,7 +308,20 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     const yaHuboEstimacion = history.some(
       (m) => m.role === "assistant" && /\/mes|pago inicial|cotizaci[oó]n/i.test(m.content || ""),
     )
-    const esComercial = comercialEsteTurno || yaHuboEstimacion || !!quotePointer
+    // Captura de lead EN CURSO (feedback CO 15-jul, caso María Fernanda):
+    // Vicky está pidiendo datos para derivar a ejecutivo (ej. >50 personas) y
+    // el cliente se queda en visto. Eso ES comercial — un lead enterprise sin
+    // seguimiento es la peor fuga. Marcador: Vicky pidió nombre/empresa/correo
+    // o mencionó al equipo comercial/ejecutivo en sus últimos mensajes.
+    const capturaLeadEnCurso = history.slice(-6).some(
+      (m) =>
+        m.role === "assistant" &&
+        /(correo|nombre de tu empresa|me confirmas tu nombre|equipo comercial|ejecutivo te contactar|consultor)/i.test(
+          m.content || "",
+        ),
+    )
+    const esComercial =
+      comercialEsteTurno || yaHuboEstimacion || !!quotePointer || capturaLeadEnCurso
     if (callNoContactar) {
       await closeFollowup(contact, tipoNoContactar, "co")
       console.log(`[vic-co][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
