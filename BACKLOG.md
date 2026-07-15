@@ -514,3 +514,15 @@ cierre resolutivo con 2-3 horarios, seguimiento a leads >50 en captura
    Colombia es emocional").
 4. **Alejo Gordillo** queda como el "Anderson de Colombia" (gestiones
    internas, recotizaciones manuales con el botón de regenerar).
+
+---
+
+## Voz oficial de Vicky (activo de identidad multicanal)
+
+- **ElevenLabs Voice ID: `YPh7OporwNAJ28F5IQrm`** ("Angie vendedora Colombiana"
+  en el catálogo de Dapta; id interno Dapta `custom_voice_b7f9d4e2175e188767738b4a1c`,
+  motor Eleven Turbo v2.5). Identificada el 16-jul; Rodrigo la está agregando
+  a su app.
+- Es la MISMA voz en todos los agentes telefónicos (calificación CL/CO,
+  seguimiento cotización, NPS, implementaciones) — usarla en cualquier canal
+  nuevo (notas de voz WhatsApp, videos, IVR) para mantener identidad.
