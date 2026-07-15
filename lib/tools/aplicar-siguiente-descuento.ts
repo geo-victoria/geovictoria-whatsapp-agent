@@ -59,6 +59,7 @@ export type AplicarSiguienteDescuentoResultado =
       ok: true
       version: number
       linkPdf: string
+      acceptanceUrl?: string
       ultimoEscalon: {
         tipo: string
         pct: number
@@ -119,6 +120,7 @@ export async function aplicarSiguienteDescuento(
       ok?: boolean
       version?: number
       link_pdf?: string
+      acceptance_url?: string
       ultimo_escalon?: {
         tipo?: string
         pct?: number
@@ -153,6 +155,7 @@ export async function aplicarSiguienteDescuento(
       ok: true,
       version: data.version,
       linkPdf: data.link_pdf,
+      acceptanceUrl: typeof data.acceptance_url === "string" ? data.acceptance_url : undefined,
       ultimoEscalon: {
         tipo: data.ultimo_escalon.tipo,
         pct: data.ultimo_escalon.pct,

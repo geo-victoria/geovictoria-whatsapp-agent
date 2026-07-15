@@ -26,6 +26,7 @@ import {
   clearPrefDraft,
   setFormalQuote,
   getFormalQuote,
+  getQuotePointer,
   setQuotePointer,
   persistMeeting,
   type PrefParams,
@@ -553,6 +554,24 @@ export async function runAgentLoop(params: {
             const qid =
               typeof toolInput.quote_id === "string" ? toolInput.quote_id : ""
             if (qid) await setFormalQuote(contact, qid).catch(() => {})
+            // Y el PUNTERO: el commit regenera PDF + link de aceptación (token
+            // nuevo). Sin esto, el guardrail anti-alucinación compara contra el
+            // link viejo y bloquea reenvíos legítimos del nuevo (caso Bioval,
+            // 15-jul: doble "tuve un problema generando tu cotización").
+            const r2 = result as Record<string, unknown>
+            if (qid && typeof r2.acceptanceUrl === "string" && r2.acceptanceUrl) {
+              // setQuotePointer es upsert completo: merge con lo existente para
+              // no pisar totales/dealId con null (la llamada de voz usa total_clp).
+              const prev = await getQuotePointer(contact).catch(() => null)
+              await setQuotePointer(contact, {
+                quoteId: qid,
+                dealId: prev?.dealId || undefined,
+                acceptanceUrl: r2.acceptanceUrl,
+                pdfUrl: typeof r2.linkPdf === "string" ? r2.linkPdf : prev?.pdfUrl || undefined,
+                totalClp: prev?.totalClp ?? undefined,
+                totalUf: prev?.totalUf ?? undefined,
+              }).catch(() => {})
+            }
           } else if (toolName === "agendar_reunion") {
             // Persistir la reunión para el recordatorio por WhatsApp. Usa el
             // `contact` real del canal (no el `telefono` que pasó el modelo).

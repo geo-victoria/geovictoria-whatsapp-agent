@@ -26,7 +26,9 @@ import { NextResponse } from "next/server"
 import {
   appendAssistantV3,
   getKvValue,
+  getQuotePointer,
   setKvValue,
+  setQuotePointer,
 } from "@/lib/supabase-persistence-v3"
 import { parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
@@ -149,7 +151,22 @@ export async function POST(req: Request): Promise<Response> {
       const data = (await r?.json().catch(() => null)) as {
         ok?: boolean
         mensaje_para_prospecto?: string
+        acceptance_url?: string
+        link_pdf?: string
       } | null
+      // Puntero al día con el link regenerado (mismo fix que en agent-loop:
+      // sin esto el guardrail bloquea reenvíos legítimos del link nuevo).
+      if (r?.ok && data?.ok && data.acceptance_url) {
+        const prev = await getQuotePointer(contact).catch(() => null)
+        await setQuotePointer(contact, {
+          quoteId,
+          dealId: prev?.dealId || undefined,
+          acceptanceUrl: data.acceptance_url,
+          pdfUrl: data.link_pdf || prev?.pdfUrl || undefined,
+          totalClp: precioAcordado || prev?.totalClp || undefined,
+          totalUf: prev?.totalUf ?? undefined,
+        }).catch(() => {})
+      }
       if (r?.ok && data?.ok && data.mensaje_para_prospecto) {
         const enviado = await sendBotmakerMessage(contact, data.mensaje_para_prospecto).catch(
           () => false,
