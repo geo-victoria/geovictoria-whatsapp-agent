@@ -57,6 +57,13 @@ const CLAIM_BATCH = 8
 // pruebas: quitar de aquí Y revertir los offsets de vic_v3_claim_followups.
 const CONTACTOS_PRUEBA_RAPIDA = new Set(["56944668823", "56978385048"])
 
+// COMPUERTA DE PRODUCCIÓN del canal de voz (pedido Lalo 15-jul tras el debut
+// no planificado con +56979057075): mientras sea true, el anuncio "¿te llamo?"
+// y la llamada de la hora 23 SOLO corren para los contactos de prueba. Poner
+// en false (o setear VOICE_CALLS_PRODUCTION=1 en Vercel) cuando el equipo dé
+// el visto bueno para clientes reales.
+const LLAMADAS_SOLO_PRUEBA = (process.env.VOICE_CALLS_PRODUCTION || "").trim() !== "1"
+
 // Modelo chico y rápido: el nudge es UNA frase corta, no necesita el modelo
 // del agente principal.
 const NUDGE_MODEL = "claude-haiku-4-5-20251001"
@@ -216,7 +223,9 @@ export async function POST(req: Request) {
     // después (~23h), condicionada al consentimiento (diseño Lalo 14-jul):
     // vic-callback-cron revisa la respuesta antes de discar — un "no" se
     // respeta; silencio o un "sí" disparan la llamada.
-    if (claim.stage === 2 && country === "cl") {
+    const habilitadoParaLlamada =
+      !LLAMADAS_SOLO_PRUEBA || CONTACTOS_PRUEBA_RAPIDA.has(claim.contact)
+    if (claim.stage === 2 && country === "cl" && habilitadoParaLlamada) {
       const qp = await getQuotePointer(claim.contact).catch(() => null)
       // Anti-loop: el WhatsApp post-llamada re-arma la cadencia (cada respuesta
       // de Vicky reinicia el reloj), y sin este guard el ciclo anunciaba y
