@@ -40,6 +40,7 @@ import {
   getQuotePointer,
 } from "@/lib/supabase-persistence-v3"
 import { hasRecentCallActivity, scheduleCallback } from "@/lib/dapta-voice"
+import { cotizacionAbiertaParaSeguimiento } from "@/lib/zoho-quote-status"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
@@ -222,7 +223,11 @@ export async function POST(req: Request) {
       // llamaba de nuevo al mismo contacto una y otra vez (visto en las pruebas
       // del 14-jul). Máximo UNA llamada del canal de voz por contacto por día.
       const yaLlamado = qp ? await hasRecentCallActivity(claim.contact, 24).catch(() => false) : false
-      if (qp && !yaLlamado) {
+      // Y la cotización debe seguir ABIERTA en Zoho: un cliente que ya aceptó/
+      // pagó puede re-armar su cadencia conversando post-venta (caso Carlos,
+      // 15-jul) — a él jamás se le anuncia una llamada de venta.
+      const abierta = qp && !yaLlamado ? await cotizacionAbiertaParaSeguimiento(qp.quoteId) : false
+      if (qp && !yaLlamado && abierta) {
         const anuncio = "¿Te parece si te llamo a tu celular y conversamos? 😊"
         const okAnuncio = await sendBotmakerMessage(claim.contact, anuncio, channelId).catch(
           () => false,
