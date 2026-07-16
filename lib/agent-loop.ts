@@ -27,6 +27,7 @@ import {
   setFormalQuote,
   getFormalQuote,
   getQuotePointer,
+  getQuotePointers,
   setQuotePointer,
   persistMeeting,
   type PrefParams,
@@ -376,12 +377,35 @@ export async function runAgentLoop(params: {
         // del prompt). Mata las cotizaciones/correos duplicados y el % que se
         // perdía al negociar sin aterrizar.
         let formalVigente = ""
+        // Multi-RUT (caso Génesis, 16-jul): el candado de "no crear otra formal"
+        // es POR RAZÓN SOCIAL, no por conversación. Si el cliente cotiza para un
+        // RUT distinto (otra empresa suya), generar_link se permite; solo se
+        // bloquea repetir la formal del MISMO RUT (para eso está
+        // actualizar_cotizacion / la escalera de descuento).
+        let formalMismoRut = ""
         if (
           (toolName === "consultar_descuento_referencial" ||
             toolName === "generar_link_cotizadora") &&
           contact
         ) {
           formalVigente = await getFormalQuote(contact).catch(() => "")
+          if (toolName === "generar_link_cotizadora") {
+            const punteros = await getQuotePointers(contact).catch(() => [])
+            const compactar = (v: unknown) =>
+              String(v || "").replace(/[.\s-]/g, "").toUpperCase()
+            const rutNuevo = compactar((toolInput as Record<string, unknown>).rutEmpresa)
+            const choque = punteros.find(
+              // Punteros antiguos sin rut registrado bloquean igual (conservador):
+              // no podemos garantizar que sea otra razón social.
+              (pt) => !pt.rut || (rutNuevo && compactar(pt.rut) === rutNuevo),
+            )
+            formalMismoRut = choque?.quoteId || ""
+            if (formalVigente && !formalMismoRut) {
+              console.log(
+                `[agent-loop] multi-RUT: se permite formal adicional para RUT nuevo (contacto ${contact}, ruts existentes: ${punteros.map((pt) => pt.rut || "?").join(",")}).`,
+              )
+            }
+          }
         }
 
         let result: Awaited<ReturnType<typeof dispatchTool>>
@@ -396,15 +420,16 @@ export async function runAgentLoop(params: {
             error:
               "Límite: solo UNA cotización formal por mensaje (cada PDF es pesado). Ya generaste una en este turno. Entrega esa al cliente y, si quiere otra opción en PDF, ofrécele generarla en el PRÓXIMO mensaje, de a una.",
           } as Awaited<ReturnType<typeof dispatchTool>>
-        } else if (toolName === "generar_link_cotizadora" && formalVigente) {
-          // Anti-duplicado: ya existe una cotización formal → NO crear otra.
+        } else if (toolName === "generar_link_cotizadora" && formalMismoRut) {
+          // Anti-duplicado POR RUT: ya existe formal para ESA razón social.
           console.warn(
-            `[agent-loop] generar_link bloqueado: ya existe cotización formal ${formalVigente} (contacto ${contact}).`,
+            `[agent-loop] generar_link bloqueado: ya existe cotización formal ${formalMismoRut} para ese RUT (contacto ${contact}).`,
           )
           result = {
             ok: false,
             error:
-              `Ya existe una cotización formal en esta conversación (quote_id ${formalVigente}). NO generes otra cotización. ` +
+              `Ya existe una cotización formal para ESA razón social (quote_id ${formalMismoRut}). NO generes otra para el mismo RUT. ` +
+              "Si el cliente quiere CAMBIAR la configuración de esa cotización, usa actualizar_cotizacion. " +
               "Si el cliente quiere más descuento, trabájalo sobre ESA con consultar_siguiente_descuento(quote_id) y, al aceptar, aplicar_siguiente_descuento(quote_id): regenera el MISMO documento (nueva versión, mismo número), nunca uno nuevo. " +
               "Si ya está cerrado, entrégale el PDF que ya tiene; si insiste en algo que no puedes resolver, deriva con registrar_solicitud_callback.",
           } as Awaited<ReturnType<typeof dispatchTool>>
@@ -547,6 +572,9 @@ export async function runAgentLoop(params: {
                 pdfUrl: str("pdfUrl"),
                 totalClp: num("totalCLP"),
                 totalUf: num("totalUF"),
+                // Multi-RUT: etiquetar el puntero con la razón social.
+                rut: typeof toolInput.rutEmpresa === "string" ? toolInput.rutEmpresa : undefined,
+                empresa: typeof toolInput.empresa === "string" ? toolInput.empresa : undefined,
               }).catch(() => {})
             }
           } else if (toolName === "aplicar_siguiente_descuento") {
@@ -562,7 +590,8 @@ export async function runAgentLoop(params: {
             if (qid && typeof r2.acceptanceUrl === "string" && r2.acceptanceUrl) {
               // setQuotePointer es upsert completo: merge con lo existente para
               // no pisar totales/dealId con null (la llamada de voz usa total_clp).
-              const prev = await getQuotePointer(contact).catch(() => null)
+              const prevs = await getQuotePointers(contact).catch(() => [])
+              const prev = prevs.find((pt) => pt.quoteId === qid) || prevs[0] || null
               await setQuotePointer(contact, {
                 quoteId: qid,
                 dealId: prev?.dealId || undefined,
@@ -570,6 +599,8 @@ export async function runAgentLoop(params: {
                 pdfUrl: typeof r2.linkPdf === "string" ? r2.linkPdf : prev?.pdfUrl || undefined,
                 totalClp: prev?.totalClp ?? undefined,
                 totalUf: prev?.totalUf ?? undefined,
+                rut: prev?.rut || undefined,
+                empresa: prev?.empresa || undefined,
               }).catch(() => {})
             }
           } else if (toolName === "actualizar_cotizacion") {
@@ -579,7 +610,8 @@ export async function runAgentLoop(params: {
             const qid3 = typeof toolInput.quote_id === "string" ? toolInput.quote_id : ""
             if (qid3 && r3.ok === true) {
               await setFormalQuote(contact, qid3).catch(() => {})
-              const prev = await getQuotePointer(contact).catch(() => null)
+              const prevs3 = await getQuotePointers(contact).catch(() => [])
+              const prev = prevs3.find((pt) => pt.quoteId === qid3) || null
               await setQuotePointer(contact, {
                 quoteId: qid3,
                 dealId: prev?.dealId || undefined,
@@ -590,6 +622,8 @@ export async function runAgentLoop(params: {
                 pdfUrl: prev?.pdfUrl || undefined,
                 totalClp: typeof r3.totalCLP === "number" ? r3.totalCLP : prev?.totalClp ?? undefined,
                 totalUf: typeof r3.totalUF === "number" ? r3.totalUF : prev?.totalUf ?? undefined,
+                rut: prev?.rut || undefined,
+                empresa: prev?.empresa || undefined,
               }).catch(() => {})
             }
           } else if (toolName === "agendar_reunion") {

@@ -370,6 +370,8 @@ export async function getFormalQuote(contact: string): Promise<string> {
 // cotización vive su propia vigencia en Zoho / en el token de aceptación.
 
 export type QuotePointer = {
+  rut?: string
+  empresa?: string
   quoteId: string
   dealId: string
   acceptanceUrl: string
@@ -387,6 +389,8 @@ type QuotePointerRow = {
   total_clp: number | null
   total_uf: number | null
   updated_at: string | null
+  rut?: string | null
+  empresa?: string | null
 }
 
 /**
@@ -402,6 +406,8 @@ export async function setQuotePointer(
     pdfUrl?: string
     totalClp?: number
     totalUf?: number
+    rut?: string
+    empresa?: string
   },
 ): Promise<void> {
   if (!contact || !data.quoteId) return
@@ -413,9 +419,12 @@ export async function setQuotePointer(
     pdf_url: data.pdfUrl ?? null,
     total_clp: typeof data.totalClp === "number" ? data.totalClp : null,
     total_uf: typeof data.totalUf === "number" ? data.totalUf : null,
+    // Multi-RUT: etiqueta de la razón social dueña de esta cotización.
+    rut: data.rut ? data.rut.replace(/[.\s-]/g, "").toUpperCase() : null,
+    empresa: data.empresa ?? null,
     updated_at: new Date().toISOString(),
   }
-  await supabaseFetch(`vic_v3_quote_pointers?on_conflict=contact`, {
+  await supabaseFetch(`vic_v3_quote_pointers?on_conflict=contact,quote_id`, {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
     body: JSON.stringify(body),
@@ -425,14 +434,7 @@ export async function setQuotePointer(
 /**
  * Devuelve el puntero durable de la cotización del contacto, o null si no hay.
  */
-export async function getQuotePointer(contact: string): Promise<QuotePointer | null> {
-  if (!contact) return null
-  const rows = await supabaseFetch<QuotePointerRow[]>(
-    `vic_v3_quote_pointers?contact=eq.${encodeURIComponent(contact)}&select=quote_id,deal_id,acceptance_url,pdf_url,total_clp,total_uf,updated_at&limit=1`,
-  )
-  if (!rows || rows.length === 0) return null
-  const r = rows[0]
-  if (!r.quote_id) return null
+function rowToPointer(r: QuotePointerRow): QuotePointer {
   return {
     quoteId: r.quote_id,
     dealId: r.deal_id || "",
@@ -441,7 +443,31 @@ export async function getQuotePointer(contact: string): Promise<QuotePointer | n
     totalClp: r.total_clp,
     totalUf: r.total_uf,
     updatedAt: r.updated_at || "",
+    rut: r.rut || "",
+    empresa: r.empresa || "",
   }
+}
+
+const POINTER_SELECT =
+  "quote_id,deal_id,acceptance_url,pdf_url,total_clp,total_uf,updated_at,rut,empresa"
+
+/** La cotización formal MÁS RECIENTE del contacto (compatibilidad single). */
+export async function getQuotePointer(contact: string): Promise<QuotePointer | null> {
+  if (!contact) return null
+  const rows = await supabaseFetch<QuotePointerRow[]>(
+    `vic_v3_quote_pointers?contact=eq.${encodeURIComponent(contact)}&select=${POINTER_SELECT}&order=updated_at.desc&limit=1`,
+  )
+  if (!rows || rows.length === 0 || !rows[0].quote_id) return null
+  return rowToPointer(rows[0])
+}
+
+/** TODAS las cotizaciones formales vivas del contacto (multi-RUT, más reciente primero). */
+export async function getQuotePointers(contact: string): Promise<QuotePointer[]> {
+  if (!contact) return []
+  const rows = await supabaseFetch<QuotePointerRow[]>(
+    `vic_v3_quote_pointers?contact=eq.${encodeURIComponent(contact)}&select=${POINTER_SELECT}&order=updated_at.desc&limit=10`,
+  )
+  return (rows || []).filter((r) => r.quote_id).map(rowToPointer)
 }
 
 // ── Re-engagement (item 5): seguimiento por inactividad del cliente ─────────

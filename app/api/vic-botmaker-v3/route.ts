@@ -30,12 +30,14 @@ import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import {
   getSystemPromptV3,
   formatCotizacionExistenteParaPrompt,
+  formatCotizacionesMultiplesParaPrompt,
 } from "@/app/api/vic-sales-agent-v3/prompt"
 import {
   fetchHistoryV3,
   appendTurnV3,
   getPrefEscalon,
   getQuotePointer,
+  getQuotePointers,
   getFormalQuote,
   isReengaged,
 } from "@/lib/supabase-persistence-v3"
@@ -318,17 +320,24 @@ async function processOneTurn(
     // 1.5. Item B (anti-amnesia): si el contacto YA tiene una cotización formal
     // (puntero durable), inyectamos ese estado al prompt para que Vicky la
     // retome en vez de re-cotizar de cero — incluso si perdió el historial.
-    const quotePointer = await getQuotePointer(contact).catch(() => null)
-    const contextoCotizacionExistente = formatCotizacionExistenteParaPrompt(
-      quotePointer
-        ? {
-            quoteId: quotePointer.quoteId,
-            acceptanceUrl: quotePointer.acceptanceUrl,
-            totalUf: quotePointer.totalUf,
-            totalClp: quotePointer.totalClp,
-          }
-        : undefined,
-    )
+    const quotePointers = await getQuotePointers(contact).catch(() => [])
+    const quotePointer = quotePointers[0] || null
+    // Multi-RUT (caso Génesis): con varias formales vivas, el contexto lista
+    // TODAS (empresa, RUT, total y link de cada una) para que Vicky no las
+    // mezcle ni pierda ninguna.
+    const contextoCotizacionExistente =
+      quotePointers.length > 1
+        ? formatCotizacionesMultiplesParaPrompt(quotePointers)
+        : formatCotizacionExistenteParaPrompt(
+            quotePointer
+              ? {
+                  quoteId: quotePointer.quoteId,
+                  acceptanceUrl: quotePointer.acceptanceUrl,
+                  totalUf: quotePointer.totalUf,
+                  totalClp: quotePointer.totalClp,
+                }
+              : undefined,
+          )
     // Reenganche: si esta es la PRIMERA respuesta del cliente a un toque de
     // reactivación, inyectamos contexto para que Vicky retome con la oferta flash
     // (activa la excepción de descuento proactivo del prompt). Se auto-limpia al
@@ -381,8 +390,9 @@ async function processOneTurn(
     // Item B: reenviar el link de aceptación de la cotización YA existente (el
     // del puntero durable, inyectado en el contexto) es legítimo, no una
     // alucinación: lo dejamos pasar aunque no haya tool de cotización este turno.
-    const reenviaLinkConocido =
-      !!quotePointer?.acceptanceUrl && reply.includes(quotePointer.acceptanceUrl)
+    const reenviaLinkConocido = quotePointers.some(
+      (qp) => !!qp.acceptanceUrl && reply.includes(qp.acceptanceUrl),
+    )
     if (hasCotizacionUrl && !realCotizacion && !reenviaLinkConocido) {
       console.error(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,

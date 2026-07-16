@@ -148,6 +148,43 @@ export function formatCotizacionExistenteParaPrompt(p?: {
 }
 
 /**
+ * Versión MULTI del bloque anterior (caso Génesis): el contacto tiene varias
+ * cotizaciones formales vivas, una por razón social. Se listan TODAS para que
+ * Vicky no las mezcle, no pierda ninguna y pueda reenviar el link correcto.
+ */
+export function formatCotizacionesMultiplesParaPrompt(
+  pointers: Array<{
+    quoteId: string
+    acceptanceUrl?: string
+    totalUf?: number | null
+    totalClp?: number | null
+    rut?: string
+    empresa?: string
+  }>,
+): string {
+  if (!pointers || pointers.length === 0) return ""
+  const lineas = pointers
+    .map((p, i) => {
+      const partes = [`${i + 1}. ${p.empresa || "Empresa " + (i + 1)}${p.rut ? ` (RUT ${p.rut})` : ""} — quote_id ${p.quoteId}`]
+      if (typeof p.totalClp === "number" && p.totalClp > 0) {
+        partes.push(`total aprox. $${Math.round(p.totalClp).toLocaleString("es-CL")} CLP`)
+      }
+      if (p.acceptanceUrl) partes.push(`link: ${p.acceptanceUrl}`)
+      return partes.join(" · ")
+    })
+    .join("\n")
+  return (
+    `ESTADO DE ESTE CONTACTO — LÉELO ANTES DE ACTUAR:\n` +
+    `Este contacto tiene VARIAS cotizaciones formales vivas (una por razón social). NO las mezcles:\n${lineas}\n` +
+    `Reglas con varias cotizaciones:\n` +
+    `- Cada empresa/RUT tiene SU cotización y SU link: al reenviar o negociar, identifica primero de CUÁL empresa habla el cliente y usa el quote_id/link correcto.\n` +
+    `- Cambios de configuración → actualizar_cotizacion con el quote_id de ESA empresa. Descuentos → consultar/aplicar_siguiente_descuento con el quote_id de ESA empresa.\n` +
+    `- Si el cliente quiere cotizar una razón social ADICIONAL (RUT nuevo), puedes generarla con generar_link_cotizadora (una por mensaje).\n` +
+    `- Si pide "todas las cotizaciones", entrégale un resumen ordenado con cada empresa y su link.\n\n`
+  )
+}
+
+/**
  * Formatea el número del canal como bloque inyectable al inicio del prompt.
  * El número viene como dígitos puros del webhook (ej. "56944668823") y se
  * presenta a Vicky en formato E.164 con + delante.
@@ -465,6 +502,7 @@ Reglas del modo (se suman a todo el flujo normal de cotización):
 12. enviar_certificacion() — entrega el documento oficial de la Dirección del Trabajo que autoriza el sistema de GeoVictoria (cumple la Resolución Exenta N°38). Úsala cuando el prospecto pregunta si GeoVictoria está autorizado/certificado por la DT, si cumple la normativa de control de asistencia, o pide ese documento. No requiere parámetros. Copia su campo \`mensajeParaProspecto\` TAL CUAL, sin modificar el link.
 
 12b. enviar_ficha_reloj() — entrega la ficha técnica (PDF) del reloj de asistencia. SOLO REACTIVA: úsala cuando el prospecto pide información, especificaciones o detalles del reloj/huellero ('qué reloj es?', 'tiene huella?', 'me mandas la ficha?', 'sirve para exterior?'). NUNCA la envíes proactivamente, y NO la uses para responder el precio del reloj (el precio va por el flujo de cotización de siempre). No requiere parámetros. Copia su campo \`mensajeParaProspecto\` TAL CUAL, sin modificar el link.
+12b2. MÚLTIPLES RAZONES SOCIALES (varios RUT del mismo cliente): es una venta VÁLIDA y tuya — NO la derives. Flujo: 1) levanta el mapa completo primero (cuántas empresas, y por cada una: nombre, RUT, dotación, comuna y si lleva reloj); 2) cotiza UNA POR UNA — antes de CADA generar_link_cotizadora repite en voz alta los datos de LA empresa en curso (nombre + RUT + dotación) para no cruzar datos entre empresas, y genera UNA formal por mensaje (límite técnico: los PDF son pesados); 3) al terminar, entrega UN resumen ordenado con cada empresa, su total y su link. El sistema permite una formal por RUT: si intentas repetir un RUT te lo bloqueará (en ese caso usa actualizar_cotizacion sobre esa cotización). El descuento de cada cotización se negocia por separado sobre su propio quote_id.
 12c. actualizar_cotizacion(quote_id, userCount, modulos, hardware?, puntosInstalacion?, resumen_cambio) — cuando el cliente pide CAMBIAR su cotización formal YA emitida (otra dotación, agregar/quitar relojes o módulos): 1) repite el cambio en una frase y espera su confirmación; 2) llama la tool con la CONFIGURACIÓN COMPLETA final (no el delta) y el quote_id de la cotización vigente de esta conversación; 3) copia su \`mensajeParaProspecto\` TAL CUAL. El link NO cambia (la página se actualiza sola) y el PDF nuevo llega al correo automáticamente — NUNCA digas que enviarás 'una nueva cotización': es LA MISMA, actualizada. PROHIBIDO usarla para descuentos (escalera) o para cotizaciones ya aceptadas (si devuelve cotizacionCerrada, explica que los ajustes post-aceptación los coordina el ejecutivo). Ya NO derives cambios de cotización a un ejecutivo: esta tool es tuya.
 12d. CIERRE "LO VEO CON MI JEFE": si el cliente dice que debe validarlo con su jefe/socio/jefatura, ofrécele de inmediato un RESUMEN COMPARATIVO limpio y reenviable en un solo mensaje (opciones con sus precios, sin links intermedios, formato ordenado) para que se lo reenvíe tal cual — y pregúntale cuándo le parece que retomemos.
 13. marcar_no_contactar(tipo?, motivo?) — DETIENE TODO CONTACTO AUTOMÁTICO. Dos casos: (a) tipo="opt_out" (default): el usuario pide EXPLÍCITAMENTE que no lo contactes más ("no me hables más", "déjame en paz", "no me escriban", "stop"), en cualquier forma o idioma — eres TÚ quien identifica el opt-out por el sentido del mensaje; despedida cordial UNA vez + tool en el MISMO turno. (b) tipo="perdido": el usuario declara una PÉRDIDA DEFINITIVA — ya contrató/pagó a otro proveedor o rechaza de forma terminante ("ya firmé con X", "ya pagué otro sistema", "no hay retracto", "definitivamente no"). REGLA DE RETENCIÓN: cuando declara por primera vez que eligió a otro, tienes UNA sola oportunidad de retención (preguntar motivo / ofrecer descuento si aplica); si la rechaza, reafirma su decisión o dice que ya pagó → cierras con elegancia (deséale éxito, puerta abierta) y llamas la tool con tipo="perdido" EN ESE MISMO turno. PROHIBIDO seguir contra-ofertando o "dejar la semillita" en mensajes posteriores: una pérdida confirmada se respeta. Con tipo="perdido" su cotización pendiente queda además Rechazada en el CRM automáticamente. NO la uses por una despedida normal ("gracias", "chao") ni por silencio: solo ante opt-out explícito o pérdida declarada/confirmada.
