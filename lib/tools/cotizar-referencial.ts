@@ -527,6 +527,30 @@ export async function cotizarReferencial(args: {
         0,
       )} CLP: incluye el pago único (equipos e instalación) + el primer mes del plan por adelantado.`,
     )
+
+    // CERRAR > TICKET (dirección comercial 16-jul): cuando la instalación pesa
+    // en el pago inicial (zonas intermedias/extremas o varios puntos), se
+    // muestran PROACTIVAMENTE los caminos más livianos — auto-instalación con
+    // el ahorro CUANTIFICADO, y el marcaje sin reloj — antes de que el monto
+    // enfríe al prospecto. Determinista (calculado aquí, no por el modelo).
+    const instalacionUF = itemsConsolidados
+      .filter((i) => i.tipo === "servicio" && /instalaci/i.test(i.nombre))
+      .reduce((sum, i) => sum + i.subtotalUF, 0)
+    if (instalacionUF >= 3) {
+      const ahorroConIvaUF = instalacionUF * (1 + IVA_RATE)
+      const ahorroCLP = Math.round(ahorroConIvaUF * ufActual)
+      const inicialLivianoCLP = totalUnicoCLP + totalRecurrenteCLP - ahorroCLP
+      partes.push("")
+      partes.push(
+        `💡 Para partir más liviano tienes dos alternativas:`,
+      )
+      partes.push(
+        `- Auto-instalación: ustedes montan los relojes (los guiamos paso a paso) y el pago inicial baja a $${fmtNumCL(inicialLivianoCLP, 0)} CLP — se ahorran $${fmtNumCL(ahorroCLP, 0)}.`,
+      )
+      partes.push(
+        `- Marcaje sin reloj: con la app incluida en el plan (biometría facial + GPS, o modo cuadrilla donde todo el equipo marca en un solo celular o tablet), sin equipos que comprar ni instalar. Pídeme esa opción y te la muestro.`,
+      )
+    }
   } else if (itemsRecurrentes.length > 0) {
     partes.push("")
     partes.push(
