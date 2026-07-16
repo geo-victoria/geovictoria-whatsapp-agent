@@ -249,7 +249,7 @@ export type LinkCotizadoraResultado =
 // unitario y zona) en una sola fila, sumando cantidad y subtotal. Evita que,
 // por ejemplo, 4 instalaciones idénticas (mismo punto) aparezcan como 4 filas
 // repetidas en la cotización y el PDF. No altera totales.
-function consolidarLineasIguales(items: ItemCotizacion[]): ItemCotizacion[] {
+export function consolidarLineasIguales(items: ItemCotizacion[]): ItemCotizacion[] {
   const porClave = new Map<string, ItemCotizacion>()
   const orden: string[] = []
   for (const it of items) {
