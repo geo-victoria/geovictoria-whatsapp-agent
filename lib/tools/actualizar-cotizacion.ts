@@ -1,0 +1,185 @@
+/**
+ * Tool: actualizar_cotizacion
+ *
+ * El cliente pide un CAMBIO a su cotización formal ya emitida (dotación,
+ * agregar/quitar reloj o módulos) y Vicky lo ejecuta sola — lo que antes se
+ * derivaba a Anderson. Reglas de oro:
+ *   - El LINK de aceptación NO cambia: la página lee los datos en vivo, así
+ *     que Vicky le dice al cliente "en el mismo link ya está actualizada".
+ *   - El PDF se regenera (v2, v3, ...) y se reenvía al correo en segundo plano.
+ *   - Recibe la CONFIGURACIÓN COMPLETA nueva (no el delta): mismos args de
+ *     construcción que generar_link_cotizadora, mismo builder de ítems
+ *     (construirItemsCotizacion) — cero drift de precios.
+ *   - Los descuentos comiteados sobreviven: viven como % en la cotización y
+ *     el checkout los aplica en runtime sobre los ítems nuevos.
+ *   - NUNCA para descuentos (eso va por la escalera) ni sobre cotizaciones
+ *     Aceptadas (el endpoint lo rechaza con COTIZACION_CERRADA).
+ */
+
+import {
+  construirItemsCotizacion,
+  getUFActualSafe,
+} from "./generar-link-cotizadora"
+
+const COTIZADORA_API_BASE = (
+  process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
+).trim()
+const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+const IVA_RATE = 0.19
+
+export const actualizarCotizacionSchema = {
+  name: "actualizar_cotizacion",
+  description:
+    "Actualiza una cotización FORMAL ya emitida cuando el cliente pide un cambio de configuración (cantidad de trabajadores, agregar/quitar relojes, módulos o puntos de instalación). Pasa la CONFIGURACIÓN COMPLETA nueva (no solo el cambio): userCount, modulos, hardware y puntosInstalacion finales. El link de aceptación NO cambia (dile al cliente que en el mismo link ya está actualizada) y el PDF nuevo se reenvía solo a su correo. ANTES de llamarla, repite el cambio al cliente y espera su confirmación. NO la uses para descuentos (usa la escalera de descuento), ni para cotizaciones ya Aceptadas/pagadas (deriva a ejecutivo), ni para crear cotizaciones nuevas (usa generar_link_cotizadora). Copia su campo mensajeParaProspecto TAL CUAL.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      quote_id: {
+        type: "string" as const,
+        description: "ID de la cotización formal vigente (el quoteId del contexto/puntero de esta conversación).",
+        minLength: 1,
+        maxLength: 80,
+      },
+      userCount: {
+        type: "integer" as const,
+        description: "Cantidad FINAL de trabajadores tras el cambio.",
+        minimum: 1,
+        maximum: 50,
+      },
+      modulos: {
+        type: "array" as const, items: { type: "string" as const },
+        description: "IDs de módulos FINALES (catálogo). Siempre incluir 'asistencia'.",
+        minItems: 1,
+      },
+      hardware: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            id: { type: "string" as const },
+            cantidad: { type: "integer" as const, minimum: 1 },
+            modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+          },
+          required: ["id", "cantidad"],
+        },
+        description: "Hardware FINAL tras el cambio (ej. relojes). Omitir si queda sin hardware.",
+      },
+      puntosInstalacion: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            ubicacion: { type: "string" as const },
+            autoInstalada: { type: "boolean" as const },
+          },
+          required: ["ubicacion"],
+        },
+        description: "Puntos de instalación FINALES de los relojes (comuna/ciudad por reloj).",
+      },
+      resumen_cambio: {
+        type: "string" as const,
+        description: "El cambio pedido en una frase corta, para auditoría y para el mensaje (ej. 'se agregó un segundo reloj en arriendo').",
+        minLength: 3,
+        maxLength: 200,
+      },
+    },
+    required: ["quote_id", "userCount", "modulos", "resumen_cambio"],
+  },
+}
+
+export type ActualizarCotizacionInput = {
+  quote_id: string
+  userCount: number
+  modulos: string[]
+  hardware?: Array<{ id: string; cantidad: number; modalidad?: string }>
+  puntosInstalacion?: Array<{ ubicacion: string; autoInstalada?: boolean }>
+  resumen_cambio: string
+}
+
+export type ActualizarCotizacionResultado =
+  | {
+      ok: true
+      version: number
+      acceptanceUrl: string
+      totalUF: number
+      totalCLP: number
+      mensajeParaProspecto: string
+    }
+  | { ok: false; error: string; cotizacionCerrada?: boolean }
+
+export async function actualizarCotizacion(
+  args: ActualizarCotizacionInput,
+): Promise<ActualizarCotizacionResultado> {
+  const quoteId = (args?.quote_id || "").trim()
+  if (!quoteId) return { ok: false, error: "Falta quote_id (usa el de la cotización vigente de esta conversación)." }
+
+  // Mismo builder que generar_link: catálogo, precios y validaciones idénticos.
+  const construccion = construirItemsCotizacion({
+    userCount: args.userCount,
+    modulos: args.modulos,
+    hardware: args.hardware,
+    puntosInstalacion: args.puntosInstalacion,
+  })
+  if (!construccion.ok) return { ok: false, error: construccion.error }
+  const items = construccion.items
+
+  const subtotalUF = items.reduce((s, i) => s + i.subtotalUF, 0)
+  const totalUF = subtotalUF * (1 + IVA_RATE)
+  const ufActual = await getUFActualSafe()
+  const totalCLP = Math.round(totalUF * ufActual)
+
+  try {
+    const response = await fetch(
+      `${COTIZADORA_API_BASE}/api/quote-acceptance/actualizar-cotizacion`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+        },
+        body: JSON.stringify({
+          quoteId,
+          resumenCambio: args.resumen_cambio,
+          cotizacion: {
+            items,
+            ufActual: Number(ufActual.toFixed(2)),
+            totalUF: Number(totalUF.toFixed(3)),
+            totalCLP,
+          },
+        }),
+        cache: "no-store",
+      },
+    )
+    const data = (await response.json().catch(() => ({}))) as {
+      ok?: boolean
+      version?: number
+      acceptance_url?: string
+      mensaje_para_prospecto?: string
+      error?: string
+      detail?: string
+    }
+    if (!response.ok || !data.ok) {
+      const err = data.error || data.detail || `Cotizadora respondió ${response.status}`
+      if (/COTIZACION_CERRADA/i.test(err)) {
+        return {
+          ok: false,
+          cotizacionCerrada: true,
+          error:
+            "La cotización ya está aceptada/cerrada: no se puede modificar. Explícale al cliente que los ajustes post-aceptación los coordina su ejecutivo y ofrece contactarlo.",
+        }
+      }
+      return { ok: false, error: err }
+    }
+    return {
+      ok: true,
+      version: Number(data.version || 0),
+      acceptanceUrl: data.acceptance_url || "",
+      totalUF: Number(totalUF.toFixed(3)),
+      totalCLP,
+      mensajeParaProspecto: data.mensaje_para_prospecto || "",
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: `No se pudo contactar la cotizadora: ${msg.slice(0, 200)}` }
+  }
+}

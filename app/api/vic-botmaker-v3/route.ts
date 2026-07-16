@@ -374,7 +374,8 @@ async function processOneTurn(
     const realCotizacion = toolCalls.some(
       (c) =>
         (c.name === "generar_link_cotizadora" ||
-          c.name === "aplicar_siguiente_descuento") &&
+          c.name === "aplicar_siguiente_descuento" ||
+          c.name === "actualizar_cotizacion") &&
         c.ok,
     )
     // Item B: reenviar el link de aceptación de la cotización YA existente (el

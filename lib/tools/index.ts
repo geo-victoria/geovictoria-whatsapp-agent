@@ -82,6 +82,12 @@ import {
   type EnviarFichaRelojResultado,
 } from "./enviar-ficha-reloj"
 import {
+  actualizarCotizacionSchema,
+  actualizarCotizacion,
+  type ActualizarCotizacionInput,
+  type ActualizarCotizacionResultado,
+} from "./actualizar-cotizacion"
+import {
   marcarNoContactarSchema,
   marcarNoContactar,
   type MarcarNoContactarResultado,
@@ -112,6 +118,7 @@ export const TOOL_SCHEMAS = [
   aplicarSiguienteDescuentoSchema,
   enviarCertificacionSchema,
   enviarFichaRelojSchema,
+  actualizarCotizacionSchema,
   marcarNoContactarSchema,
   programarSeguimientoSchema,
 ] as const
@@ -130,6 +137,7 @@ export type ToolResult =
   | AplicarSiguienteDescuentoResultado
   | EnviarCertificacionResultado
   | EnviarFichaRelojResultado
+  | ActualizarCotizacionResultado
   | MarcarNoContactarResultado
   | ProgramarSeguimientoResultado
   | { ok: false; error: string }
@@ -178,6 +186,8 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
         return await enviarCertificacion()
       case "enviar_ficha_reloj":
         return await enviarFichaReloj()
+      case "actualizar_cotizacion":
+        return await actualizarCotizacion(input as ActualizarCotizacionInput)
 
       case "marcar_no_contactar":
         return marcarNoContactar(input as never)
@@ -188,7 +198,7 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       default:
         return {
           ok: false,
-          error: `Tool '${name}' no reconocida. Tools disponibles: cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_descuento_referencial, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion, enviar_ficha_reloj.`,
+          error: `Tool '${name}' no reconocida. Tools disponibles: cotizar_referencial, generar_link_cotizadora, consultar_agente_soporte, registrar_solicitud_callback, consultar_disponibilidad_horario, agendar_reunion, derivar_a_soporte, consultar_descuento_referencial, consultar_siguiente_descuento, aplicar_siguiente_descuento, enviar_certificacion, enviar_ficha_reloj, actualizar_cotizacion.`,
         }
     }
   } catch (err: unknown) {

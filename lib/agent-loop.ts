@@ -572,6 +572,26 @@ export async function runAgentLoop(params: {
                 totalUf: prev?.totalUf ?? undefined,
               }).catch(() => {})
             }
+          } else if (toolName === "actualizar_cotizacion") {
+            // Puntero al día: mismos quoteId/link, totales nuevos (los usa la
+            // llamada de voz y el contexto anti-amnesia).
+            const r3 = result as Record<string, unknown>
+            const qid3 = typeof toolInput.quote_id === "string" ? toolInput.quote_id : ""
+            if (qid3 && r3.ok === true) {
+              await setFormalQuote(contact, qid3).catch(() => {})
+              const prev = await getQuotePointer(contact).catch(() => null)
+              await setQuotePointer(contact, {
+                quoteId: qid3,
+                dealId: prev?.dealId || undefined,
+                acceptanceUrl:
+                  (typeof r3.acceptanceUrl === "string" && r3.acceptanceUrl) ||
+                  prev?.acceptanceUrl ||
+                  undefined,
+                pdfUrl: prev?.pdfUrl || undefined,
+                totalClp: typeof r3.totalCLP === "number" ? r3.totalCLP : prev?.totalClp ?? undefined,
+                totalUf: typeof r3.totalUF === "number" ? r3.totalUF : prev?.totalUf ?? undefined,
+              }).catch(() => {})
+            }
           } else if (toolName === "agendar_reunion") {
             // Persistir la reunión para el recordatorio por WhatsApp. Usa el
             // `contact` real del canal (no el `telefono` que pasó el modelo).
