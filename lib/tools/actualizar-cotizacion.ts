@@ -118,7 +118,10 @@ export async function actualizarCotizacion(
     userCount: args.userCount,
     modulos: args.modulos,
     hardware: args.hardware,
-    puntosInstalacion: args.puntosInstalacion,
+    puntosInstalacion: (args.puntosInstalacion || []).map((p) => ({
+      ubicacion: p.ubicacion,
+      autoInstalada: p.autoInstalada === true,
+    })),
   })
   if (!construccion.ok) return { ok: false, error: construccion.error }
   const items = construccion.items
