@@ -88,8 +88,11 @@ async function handle(req: Request): Promise<Response> {
   // con el canal de voz activo eso significaba LLAMAR a un cliente que ya
   // pagó (visto con Transportes Viig, 15-jul). Best-effort: no bloquea la
   // notificación al equipo.
+  const eventoRaw = (p.evento || new URL(req.url).searchParams.get("evento") || "aceptada").toLowerCase()
   const quoteId = (p.quoteId || new URL(req.url).searchParams.get("quoteId") || "").trim()
-  if (quoteId) {
+  // Solo una venta cerrada (aceptada/pagada) apaga la cadencia — un aviso
+  // operativo (ej. crm_incompleto) NO debe silenciar el seguimiento comercial.
+  if (quoteId && (eventoRaw === "aceptada" || eventoRaw === "pagada")) {
     const contact = await findContactByQuoteId(quoteId).catch(() => null)
     if (contact) {
       await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
@@ -102,7 +105,8 @@ async function handle(req: Request): Promise<Response> {
   const numero = (p.numero || url.searchParams.get("numero") || "").trim() || "—"
   const monto = (p.monto || url.searchParams.get("monto") || "").trim() || "—"
   const to = (p.to || url.searchParams.get("to") || NOTIFY_TO).replace(/\D/g, "")
-  const estado = evento === "pagada" ? "PAGADA" : "ACEPTADA"
+  const estado =
+    evento === "pagada" ? "PAGADA" : evento === "crm_incompleto" ? "⚠️ ENTREGADA SIN CRM COMPLETO (reconciliador en camino)" : "ACEPTADA"
 
   let result
   let via: string
