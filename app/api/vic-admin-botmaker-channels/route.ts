@@ -31,14 +31,28 @@ export async function GET(req: Request): Promise<Response> {
   // historial aunque nuestra base se haya limpiado — auditoría de bugs CO).
   // ?chats=1: lista de chats recientes del workspace.
   const url = new URL(req.url)
-  const contacto = (url.searchParams.get("messages") || "").replace(/[^\d]/g, "")
+  const contacto = (url.searchParams.get("messages") || "").trim()
   if (contacto) {
-    const r = await fetch(
-      `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&chat-platform-id=${contacto}&limit=100`,
-      { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" },
+    // La API pagina por workspace; from/to (ISO) acotan la ventana. El filtro
+    // por contacto se hace del lado del cliente (la API no filtra confiable).
+    const desde = (url.searchParams.get("from") || "").trim()
+    const hasta = (url.searchParams.get("to") || "").trim()
+    const qs = new URLSearchParams({ "chat-platform": "whatsapp", limit: "250" })
+    if (desde) qs.set("from", desde)
+    if (hasta) qs.set("to", hasta)
+    const r = await fetch(`https://api.botmaker.com/v2.0/messages?${qs.toString()}`, {
+      headers: { "access-token": BM_TOKEN, Accept: "application/json" },
+      cache: "no-store",
+    })
+    const data = (await r.json().catch(() => ({}))) as {
+      items?: Array<{ chat?: { contactId?: string; channelId?: string } }>
+      nextPage?: string
+    }
+    // contacto="all" devuelve la página completa; si no, filtra por contactId.
+    const items = (data.items || []).filter(
+      (m) => contacto === "all" || (m.chat?.contactId || "") === contacto,
     )
-    const data = await r.json().catch(() => ({}))
-    return NextResponse.json({ ok: r.ok, status: r.status, contacto, data })
+    return NextResponse.json({ ok: r.ok, status: r.status, contacto, total_pagina: (data.items || []).length, items })
   }
   if (url.searchParams.get("chats")) {
     const r = await fetch("https://api.botmaker.com/v2.0/chats?limit=50", {
