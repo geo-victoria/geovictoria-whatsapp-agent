@@ -89,12 +89,13 @@ export const PERFIL_CO: PerfilPais = {
       { email: "", zohoUserId: "3525045000619732095" }, // Guerrero
       { email: "", zohoUserId: "3525045000639899035" }, // Quiroga Chia
     ],
-    // Tropicalización (líderes comerciales): ejecutiva de referencia CO.
-    // TODO: confirmar correo — la planilla dice lvargas@, las cotizaciones
-    // reales de Creator dicen lvargash@ (Laura Lucía Vargas Hernández).
+    // Ejecutivo que toma los deals y cotizaciones de Vicky CO (definición
+    // Lalo 16-jul; equivalente a Anderson Díaz en Chile). El teléfono es la
+    // línea comercial CO heredada — pendiente confirmar el WhatsApp directo
+    // de Alejandro.
     ejecutivo: {
-      nombre: "Laura Vargas",
-      email: "lvargash@geovictoria.com",
+      nombre: "Alejandro Gordillo",
+      email: "agordillo@geovictoria.com",
       telefono: "+57 310 609 5259",
     },
   },

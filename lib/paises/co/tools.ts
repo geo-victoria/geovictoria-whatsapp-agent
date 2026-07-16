@@ -57,7 +57,7 @@ function ownerCoPara(contact: string): string {
 
 // ── Reuniones CO (Cal.com) ──────────────────────────────────────────────────
 // Gated por env: CAL_EVENT_TYPE_ID_CO = event type de Cal.com del equipo
-// comercial de Colombia (calendario de Laura o round robin CO). Sin la env,
+// comercial de Colombia (event type 6292070, round robin CO). Sin la env,
 // las tools de agenda NO se exponen al modelo y el prompt instruye derivar.
 // Cuando el equipo cree el event type, basta setear la env + redeploy.
 const CAL_EVENT_TYPE_ID_CO = (process.env.CAL_EVENT_TYPE_ID_CO || "").trim()
