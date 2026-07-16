@@ -26,6 +26,29 @@ export async function GET(req: Request): Promise<Response> {
   if (!BM_TOKEN) {
     return NextResponse.json({ ok: false, error: "BOTMAKER_ACCESS_TOKEN no configurado" }, { status: 503 })
   }
+
+  // ?messages=<contacto>: mensajes recientes de un chat (Botmaker guarda el
+  // historial aunque nuestra base se haya limpiado — auditoría de bugs CO).
+  // ?chats=1: lista de chats recientes del workspace.
+  const url = new URL(req.url)
+  const contacto = (url.searchParams.get("messages") || "").replace(/[^\d]/g, "")
+  if (contacto) {
+    const r = await fetch(
+      `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&chat-platform-id=${contacto}&limit=100`,
+      { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" },
+    )
+    const data = await r.json().catch(() => ({}))
+    return NextResponse.json({ ok: r.ok, status: r.status, contacto, data })
+  }
+  if (url.searchParams.get("chats")) {
+    const r = await fetch("https://api.botmaker.com/v2.0/chats?limit=50", {
+      headers: { "access-token": BM_TOKEN, Accept: "application/json" },
+      cache: "no-store",
+    })
+    const data = await r.json().catch(() => ({}))
+    return NextResponse.json({ ok: r.ok, status: r.status, data })
+  }
+
   const res = await fetch("https://api.botmaker.com/v2.0/channels", {
     headers: { "access-token": BM_TOKEN, Accept: "application/json" },
     cache: "no-store",
