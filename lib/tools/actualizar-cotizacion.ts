@@ -91,7 +91,7 @@ export type ActualizarCotizacionInput = {
   quote_id: string
   userCount: number
   modulos: string[]
-  hardware?: Array<{ id: string; cantidad: number; modalidad?: string }>
+  hardware?: Array<{ id: string; cantidad: number; modalidad?: "arriendo" | "venta" }>
   puntosInstalacion?: Array<{ ubicacion: string; autoInstalada?: boolean }>
   resumen_cambio: string
 }
