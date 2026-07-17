@@ -339,7 +339,10 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       // Pidió soporte → cero seguimiento/proactividad aunque la conversación
       // sea comercial (decisión de costos 11-jul, igual que Chile).
       await closeFollowup(contact, "soporte", "co")
-    } else if (reply && !esDespedida && esComercial) {
+    } else if (reply && (!esDespedida || !!quotePointer) && esComercial) {
+      // Espejo del chileno (caso Constanza 17-jul): con cotización FORMAL
+      // vigente, la despedida corta ("muchas gracias") no frena la cadencia —
+      // es recibo cortés, no cierre.
       await armFollowup(contact, "co")
     }
     // else: conversación no comercial → sin nudges.

@@ -935,7 +935,12 @@ async function processOneTurn(
         // 'soporte' también lo excluye de la reactivación HSM.
         await closeFollowup(contact, "soporte")
         console.log(`[v3-followup] soporte → ciclo cerrado (sin proactividad) contact=${contact}`)
-      } else if (reply && !esDespedida && esComercial) {
+      } else if (reply && (!esDespedida || tieneEstadoComercial) && esComercial) {
+        // La COTIZACIÓN FORMAL manda sobre la despedida (caso Constanza,
+        // 17-jul): un "muchas gracias" tras recibir la formal es recibo
+        // cortés, no fin de conversación — sin este override el ciclo quedaba
+        // sin armar justo en el momento de mayor valor del funnel. La
+        // despedida sigue frenando nudges en conversaciones sin formal.
         await armFollowup(contact)
       }
       // else: conversación no comercial → no se arma (sin nudges).
