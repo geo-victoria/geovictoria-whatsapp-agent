@@ -533,11 +533,24 @@ async function processOneTurn(
     // "permíteme procesar el descuento" — fuera de lugar (caso real Rodrigo).
     const formalQuoteId = await getFormalQuote(contact).catch(() => "")
     const tieneFormal = !!quotePointer || !!formalQuoteId
+    // ¿El CLIENTE está pidiendo rebaja en ESTE turno? Regex estricto a
+    // peticiones inequívocas — si fuera amplio, el reintento forzado ofrecería
+    // el siguiente tramo sin que nadie lo pidiera (regalar descuento).
+    const pideRebaja =
+      /\b(descuento|rebaj\w+|m[aá]s\s+barat\w+|muy\s+caro|me\s+lo\s+dejar?[ií]?a?s\b|d[eé]jamelo\s+(a|en)\b|baj[ae]\w*\s+(el\s+)?precio)/i.test(
+        message,
+      )
     const pctYaNegociado =
       pctEnReply !== null &&
       ((prefEscalon > 0 &&
         (pctEnReply <= committedRecPct || pctEnReply === 50 || pctEnReply === 25)) ||
-        (tieneFormal && (pctEnReply <= 20 || pctEnReply === 25 || pctEnReply === 50)))
+        // Post-formal, la exención de "recapitulación benigna" aplica SOLO si el
+        // cliente NO está pidiendo rebaja. Si la está pidiendo, un % sin tool es
+        // una OFERTA NUEVA inventada (caso Rodrigo 17-jul: 10% y 20% alucinados
+        // pasaron por esta puerta porque su RUT tenía formal previa).
+        (tieneFormal &&
+          !pideRebaja &&
+          (pctEnReply <= 20 || pctEnReply === 25 || pctEnReply === 50)))
 
     if ((ofreceDescuento || pareceMuletillaDescuento) && !realDescuento && !pctYaNegociado) {
       const ultimoAsistente = [...history]
@@ -551,14 +564,23 @@ async function processOneTurn(
       // loop UNA vez forzando la llamada a la tool. Así se produce el % REAL ya
       // comiteado (la tool recalcula precio y el agent-loop persiste el escalón).
       let recuperado = false
-      if (!tieneFormal && committedRecPct < 20 && ultimoAsistente !== MULETILLA_DESCUENTO) {
+      // El reintento forzado corre en dos escenarios: (a) pre-formal con margen
+      // (comportamiento original); (b) post-formal cuando el cliente PIDE
+      // rebaja (caso Rodrigo 17-jul: antes este camino quedaba excluido y el %
+      // alucinado salía tal cual).
+      const elegibleRetry =
+        (!tieneFormal && committedRecPct < 20) || (tieneFormal && pideRebaja)
+      if (elegibleRetry && ultimoAsistente !== MULETILLA_DESCUENTO) {
         const FORZAR_TOOL_DESCUENTO =
           "\n\n# Instrucción de sistema (este turno)\n" +
           "El cliente está pidiendo (más) descuento y aún estás negociando. DEBES llamar la tool de " +
           "descuento que corresponda (consultar_descuento_referencial si AÚN NO existe cotización formal; " +
           "consultar_siguiente_descuento si YA existe) ANTES de mencionar cualquier porcentaje o precio, y " +
           "ofrecer EXACTAMENTE su mensajeParaProspecto. NUNCA digas el % de memoria. NO generes la " +
-          "cotización formal en este turno: solo ofrece el siguiente tramo de descuento."
+          "cotización formal en este turno: solo ofrece el siguiente tramo de descuento." +
+          (tieneFormal
+            ? ` YA existe una cotización formal en esta conversación (quote_id ${formalQuoteId || quotePointer?.quoteId || "vigente"}): usa consultar_siguiente_descuento sobre ELLA.`
+            : "")
         const retry = await runAgentLoop({
           systemPrompt:
             contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_DESCUENTO,
