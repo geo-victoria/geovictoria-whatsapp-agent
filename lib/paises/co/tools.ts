@@ -47,6 +47,13 @@ const SDR_CO_IDS = [
   "3525045000639899035", // Quiroga Chia
 ]
 
+// Ejecutivo comercial CO (Alejandro Gordillo) — paridad con Chile: los leads
+// que nacen de un fallo/fallback del flujo de COTIZACIÓN quedan a su nombre
+// (en CL van directo a Anderson, no a tómbola), porque él ya es dueño de las
+// cotizaciones formales CO (VICKY_CO_OWNER_ID del cotizador) y retoma con
+// todo el contexto.
+const EJECUTIVO_CO_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_CO_ID || "3525045000203758005").trim()
+
 // Reparto determinista sin estado: hash del teléfono → índice. Distribuye
 // parejo con volumen y evita depender de un contador compartido para el v1.
 function ownerCoPara(contact: string): string {
@@ -439,7 +446,9 @@ export function buildDispatchCO(contact: string) {
           ciudad: i.ciudad,
           trabajadores: i.trabajadores,
           necesidad: [i.resumen || "", nitInfo].filter(Boolean).join(" · "),
-          ownerId: ownerCoPara(contact),
+          // Fallback de cotización → Alejandro directo (paridad CL/Anderson);
+          // el resto (callback, fuera de alcance, >50) sigue en la tómbola SDR.
+          ownerId: i.motivo === "cotizacion_formal" ? EJECUTIVO_CO_ZOHO_ID : ownerCoPara(contact),
         })
         if (!res || (res as { ok?: boolean }).ok === false) {
           return {
