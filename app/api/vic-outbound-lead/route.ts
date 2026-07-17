@@ -247,11 +247,14 @@ export async function POST(req: Request): Promise<Response> {
   // usarlo sin citarlo); el cliente solo recibió la plantilla. El country
   // marca la conversación para que la respuesta corra el agente del país y
   // los toques salgan por su línea y en su zona horaria.
-  // CO: espejo 1:1 de la plantilla UTILITY vicky_co_solicitud_recibida (si se
-  // edita la plantilla en Botmaker, actualizar este literal en el mismo cambio).
+  // Espejos 1:1 de las plantillas reales (si se edita una plantilla en
+  // Botmaker, actualizar el literal en el mismo cambio):
+  // CO → UTILITY vicky_co_solicitud_recibida · CL → vicky_lead_apertura_v3
+  // (v3 pide de una la cantidad de personas: ahorra un turno y la respuesta
+  // ya es la calificación — decisión Lalo/Rodrigo 17-jul).
   const saludoApertura = esCO
     ? `Hola ${nombre}, te escribimos de GeoVictoria por la solicitud de cotización que registraste para ${empresa}. Puedes completarla por este medio: responde este mensaje y continuamos con el detalle.`
-    : `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla de inmediato por acá. ¿Avanzamos?`
+    : `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas marcarían asistencia? Con eso te la armo de inmediato.`
   const ctx = [
     saludoApertura,
     ``,
