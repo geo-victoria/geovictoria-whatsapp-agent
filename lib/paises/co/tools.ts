@@ -484,11 +484,24 @@ export function buildDispatchCO(contact: string) {
           return { ok: false, error: "La agenda de Colombia no está configurada. Usa derivar_a_ejecutivo (motivo pidio_persona) con la preferencia de horario en el resumen." }
         }
         const i = (input || {}) as { fechaPropuesta?: string }
-        return await checkSlotAvailability({
+        const disp = await checkSlotAvailability({
           slotIso: String(i.fechaPropuesta || ""),
           country: "Colombia",
           eventTypeId: CAL_EVENT_TYPE_ID_CO,
         })
+        // Etiquetas legibles pre-calculadas en hora de Bogotá (bug 17-jul: el
+        // modelo escribía mal el día de la semana y el cliente anotaba el día
+        // equivocado). Aditivo: shape original intacto.
+        if (disp.ok && disp.estado === "disponible_exacto") {
+          return { ...disp, etiqueta: fechaLegibleCO(disp.slotIso) }
+        }
+        if (
+          disp.ok &&
+          (disp.estado === "alternativas_mismo_dia" || disp.estado === "alternativas_dias_cercanos")
+        ) {
+          return { ...disp, etiquetas: disp.alternativas.map((s) => fechaLegibleCO(s)) }
+        }
+        return disp
       }
       if (name === "agendar_reunion") {
         if (!REUNIONES_CO_HABILITADAS) {

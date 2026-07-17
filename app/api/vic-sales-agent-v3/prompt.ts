@@ -15,6 +15,7 @@ import {
   getHardwareDisponiblesParaVicky,
 } from "@/lib/catalogo"
 import type { TierPrecio } from "@/lib/catalogo"
+import { calendarioProximosDias } from "@/lib/calendar"
 
 function formatTiersForPrompt(tiers: TierPrecio[]): string {
   return tiers
@@ -83,8 +84,9 @@ function formatFechaActualParaPrompt(): string {
 
 HOY ES: ${fechaLegible} (Chile)
 FECHA ISO UTC ACTUAL: ${isoUTC}
+CALENDARIO PRÓXIMOS DÍAS (día de la semana REAL de cada fecha — úsalo TAL CUAL, nunca calcules el día tú): ${calendarioProximosDias("America/Santiago")}
 
-Cuando el cliente proponga un día relativo ("mañana", "el jueves", "la próxima semana"), interprétalo en base a la fecha indicada arriba — NO en base a tu conocimiento de entrenamiento, que puede estar desactualizado. Antes de invocar consultar_disponibilidad_horario, calcula la fecha ISO 8601 correcta tomando como base el HOY indicado arriba y devuelve un ISO con el AÑO ACTUAL real (${now.getFullYear()}), no un año anterior.
+Cuando el cliente proponga un día relativo ("mañana", "el jueves", "la próxima semana"), interprétalo en base a la fecha indicada arriba — NO en base a tu conocimiento de entrenamiento, que puede estar desactualizado. Al mencionar una fecha al cliente (ofrecer horarios, confirmar reuniones o seguimientos), el día de la semana SIEMPRE sale del CALENDARIO de arriba o de la etiqueta que devuelva la tool — si dices "lunes" y era martes, el cliente llega el día equivocado. Antes de invocar consultar_disponibilidad_horario, calcula la fecha ISO 8601 correcta tomando como base el HOY indicado arriba y devuelve un ISO con el AÑO ACTUAL real (${now.getFullYear()}), no un año anterior.
 
 Cal.com tiene configurado su propio "minimum booking notice" (mínima anticipación) en el Event Type — si el cliente propone algo muy próximo en el tiempo, la tool devolverá alternativas o "sin disponibilidad" según lo que Cal.com permita. No filtres por tu cuenta — pasa la fecha tal cual el cliente la propuso (ajustada al año actual) y deja que la tool decida.
 

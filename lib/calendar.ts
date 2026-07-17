@@ -249,6 +249,33 @@ export function matchSlotFromMessage(message: string, pendingSlots: string[], tz
   return null
 }
 
+/** Etiqueta legible de un slot ("martes 21 de julio a las 09:00 hrs"). */
+export function etiquetaSlot(iso: string, country: string, language = "es"): string {
+  return formatSlotLabel(iso, country, language)
+}
+
+/**
+ * Calendario de los próximos N días ("vie 17-jul, sáb 18-jul, ...") para el
+ * anclaje temporal del prompt. Motivo (bug 17-jul, agenda CO): el modelo
+ * calcula MAL los días de la semana ("lunes 21" cuando el 21 es martes) y un
+ * cliente que anota el día errado no llega a su reunión. Con la tabla en el
+ * prompt no hay aritmética de calendario que hacer.
+ */
+export function calendarioProximosDias(timeZone: string, dias = 14): string {
+  const fmt = new Intl.DateTimeFormat("es-CL", {
+    timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  })
+  const out: string[] = []
+  for (let i = 0; i < dias; i++) {
+    const d = new Date(Date.now() + i * 24 * 60 * 60 * 1000)
+    out.push(fmt.format(d))
+  }
+  return out.join(" · ")
+}
+
 export function formatSlotsForProspect(slots: string[], country: string, language = "es"): string {
   if (slots.length === 0) return ""
   return slots.map((s, i) => `${i + 1}. ${formatSlotLabel(s, country, language)}`).join("\n")
