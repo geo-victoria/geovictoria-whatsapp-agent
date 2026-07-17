@@ -397,8 +397,62 @@ async function processOneTurn(
       console.error(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
       )
-      reply =
-        "Disculpa, tuve un problema generando tu cotización formal. ¿Me confirmas otra vez para procesarla?"
+      // Auto-recuperación (17-jul, caso Multirut): con historial lleno de links
+      // viejos el modelo imita el patrón "confirmación → link" sin llamar la
+      // tool, y la muletilla "¿me confirmas otra vez?" lo dejaba en loop
+      // infinito de disculpas (la cotización nunca salía). Mismo patrón de
+      // reintento forzado que descuento/agenda/callback: re-correr el loop UNA
+      // vez exigiendo la tool; la muletilla queda solo como último recurso.
+      const FORZAR_TOOL_COTIZACION =
+        "\n\n# Instrucción de sistema (este turno)\n" +
+        "Tu borrador anterior incluía un link del cotizador INVENTADO (no llamaste ninguna tool). " +
+        "PROHIBIDO escribir URLs del cotizador de memoria o copiarlas del historial: la ÚNICA fuente " +
+        "válida es el output de una tool de ESTE turno. Llama AHORA a la tool correcta " +
+        "(generar_link_cotizadora para una cotización formal nueva; actualizar_cotizacion para modificar " +
+        "la vigente; aplicar_siguiente_descuento para el descuento acordado) con los datos ya confirmados " +
+        "por el cliente, y entrega EXACTAMENTE su mensajeParaProspecto."
+      const retry = await runAgentLoop({
+        systemPrompt:
+          contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_COTIZACION,
+        history,
+        userMessage: message,
+        apiKey,
+        contact,
+        model: MODELO_COTIZACION,
+      }).catch((e) => {
+        console.error(`[v3-bg] Reintento forzado de cotización falló:`, e)
+        return null
+      })
+      let recuperadoUrl = false
+      if (retry) {
+        const retryReply = (retry.reply || "").trim()
+        const retryTools = (retry.toolCalls || []) as ToolCallRecord[]
+        const retryReal = retryTools.some(
+          (c) =>
+            (c.name === "generar_link_cotizadora" ||
+              c.name === "aplicar_siguiente_descuento" ||
+              c.name === "actualizar_cotizacion") &&
+            c.ok,
+        )
+        const retryLinkConocido = quotePointers.some(
+          (qp) => !!qp.acceptanceUrl && retryReply.includes(qp.acceptanceUrl),
+        )
+        const retryTieneUrl = /cotizacion\.geovictoria\.com\/[^\s)]+/i.test(retryReply)
+        // Aceptar el reintento solo si el link viene de una tool real (o de un
+        // puntero conocido), o si optó por responder sin link.
+        if (retryReply && (retryReal || retryLinkConocido || !retryTieneUrl)) {
+          console.warn(
+            `[v3-bg] URL_RECUPERADA contact=${contact}: reintento con tool real=${retryReal}.`,
+          )
+          reply = retryReply
+          result.toolCalls = retry.toolCalls
+          recuperadoUrl = true
+        }
+      }
+      if (!recuperadoUrl) {
+        reply =
+          "Disculpa, tuve un problema generando tu cotización formal. ¿Me confirmas otra vez para procesarla?"
+      }
     }
 
     // 2.6. Guardrail anti-alucinación de descuento.
