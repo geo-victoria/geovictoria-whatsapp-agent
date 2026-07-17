@@ -5,6 +5,53 @@ conocidos.
 
 ---
 
+## Vicky lee comprobantes de transferencia (pago sin fricción ni humanos)
+
+**Estado:** propuesto (pedido Lalo, 17-jul).
+**Qué se quiere:** cuando el cliente paga por transferencia y manda el
+comprobante por WhatsApp (imagen/PDF), Vicky lo lee (visión del modelo), lo
+valida contra su cotización vigente (monto inicial con IVA, cuenta destino,
+número de cotización), registra el pago (estado + notificación al equipo) y
+confirma al cliente al instante — sin "envíaselo a tu ejecutivo".
+**Piezas técnicas:** (1) recepción de imágenes/documentos en el webhook de
+Botmaker (hoy solo se maneja audioUrl — revisar qué entrega Botmaker para
+media); (2) validación multimodal con guardrails (ilegible/monto distinto/
+sospecha de adulteración → humano, nunca confirmar pago dudoso); (3) acción
+en Zoho/cotizador (marcar pagada, gatillar el flujo post-pago).
+**Relacionado:** hoy `pago.html` instruye "envía el comprobante a tu
+ejecutivo por WhatsApp" (wa.me del ejecutivo + correo adiazg@) — con esta
+capacidad, el botón pasa a apuntar al WhatsApp de Vicky. Ver ítem siguiente.
+
+---
+
+## El ejecutivo humano aparece SOLO después del pago (Anderson/Alejandro)
+
+**Estado:** propuesto (decisión Lalo, 17-jul).
+**Qué se quiere:** hasta que el pago esté hecho, Vicky es la ÚNICA cara
+comercial. Anderson (CL) / Alejandro (CO) no se mencionan en NINGUNA
+comunicación al cliente pre-pago: las dudas de la cotización las resuelve
+Vicky (ya tiene actualización, descuentos, agenda y soporte). El traspaso
+con nombre y contacto se hace DESPUÉS de pagar.
+**Inventario de dónde aparece hoy (todo esto habría que tocar):**
+- Prompt CL: regla "TRASPASO (obligatorio)" al entregar la formal + bloque
+  canónico "De aquí en adelante te acompaña Anderson Díaz 🤝" + reglas de
+  uso exclusivo del contacto.
+- `voseo-v3.ts` `blindarContactoComercial`: hoy PERMITE el contacto de
+  Anderson tras la cotización formal → pasaría a permitirlo solo tras pago.
+- Cotizador: pie del PDF (ejecutivo/email/teléfono — definir qué va en su
+  lugar: ¿"Vicky — equipo comercial GeoVictoria"?), correos de cotización
+  (enviada/actualizada/descuento) que lo presentan, y `pago.html`
+  (transferencia: wa.me del ejecutivo + correo adiazg@ → WhatsApp de Vicky).
+- CO espejo: Alejandro en prompt CO + PDF CO (misma regla).
+- Dónde SÍ aparece (post-pago): correo de confirmación de pago/bienvenida y
+  el traspaso formal en el chat.
+**Abierta:** el PDF es documento pre-pago — ¿va sin ejecutivo o con Vicky
+como contacto? Definir antes de implementar.
+**Dependencia:** el ítem del comprobante (anterior) elimina el último rol
+pre-pago que le quedaba a Anderson (recibir transferencias).
+
+---
+
 ## Callback de estado de entrega de Botmaker (fallo asíncrono del toque 0)
 
 **Estado:** propuesto (caso real Marcela 17-jul, error Meta 131049).
