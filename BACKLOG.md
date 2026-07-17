@@ -7,7 +7,7 @@ conocidos.
 
 ## Vicky lee comprobantes de transferencia (pago sin fricción ni humanos)
 
-**Estado:** propuesto (pedido Lalo, 17-jul).
+**Estado:** ✅ IMPLEMENTADO v1 (17-jul, commit 4fa0aa0): tool registrar_comprobante_transferencia — validar+notificar (nota en Zoho + aviso interno); confirmación de pago sigue en finanzas.
 **Qué se quiere:** cuando el cliente paga por transferencia y manda el
 comprobante por WhatsApp (imagen/PDF), Vicky lo lee (visión del modelo), lo
 valida contra su cotización vigente (monto inicial con IVA, cuenta destino,
@@ -26,7 +26,7 @@ capacidad, el botón pasa a apuntar al WhatsApp de Vicky. Ver ítem siguiente.
 
 ## El ejecutivo humano aparece SOLO después del pago (Anderson/Alejandro)
 
-**Estado:** propuesto (decisión Lalo, 17-jul).
+**Estado:** ✅ IMPLEMENTADO (17-jul, commits 41eb0c7 agente + 30b4a6e cotizador): Vicky única cara pre-pago (prompt, blindaje, PDF, correos, pago.html); traspaso automático post-pago vía vic-quote-notify. Pendiente menor: confirmar monitoreo de vicky@geovictoria.com.
 **Qué se quiere:** hasta que el pago esté hecho, Vicky es la ÚNICA cara
 comercial. Anderson (CL) / Alejandro (CO) no se mencionan en NINGUNA
 comunicación al cliente pre-pago: las dudas de la cotización las resuelve
@@ -54,7 +54,7 @@ pre-pago que le quedaba a Anderson (recibir transferencias).
 
 ## Mensaje de entrega de la cotización: versión mínima (pedido Rodrigo, 17-jul)
 
-**Estado:** propuesto (Rodrigo por Teams, con el texto final deseado).
+**Estado:** ✅ IMPLEMENTADO (17-jul, commit 41eb0c7): versión mínima obligatoria en prompt CL y CO + línea "cualquier duda la resuelvo yo" (pedido Lalo).
 **Qué se quiere:** el mensaje que entrega el link de la cotización (flujo de
 descuento post-formal y entrega en general) queda SOLO con lo esencial:
 
@@ -77,7 +77,7 @@ el cotizador + los bloques canónicos de entrega del prompt (CL y CO).
 
 ## Callback de estado de entrega de Botmaker (fallo asíncrono del toque 0)
 
-**Estado:** propuesto (caso real Marcela 17-jul, error Meta 131049).
+**Estado:** ✅ IMPLEMENTADO lado endpoint (17-jul): /api/vic-botmaker-status — fallo de entrega → correo e1 adelantado a inmediato + captura de payload en vic_kv. PENDIENTE: suscribir el webhook de estados en Botmaker apuntando a /api/vic-botmaker-status?key=<CRON_SECRET>.
 **Problema:** el toque 0 puede ser ACEPTADO por Botmaker y aun así no
 entregarse (ej. 131049 "healthy ecosystem engagement": cap de frecuencia de
 Meta sobre plantillas Marketing por usuario receptor). Hoy solo reaccionamos
