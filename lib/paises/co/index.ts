@@ -90,13 +90,13 @@ export const PERFIL_CO: PerfilPais = {
       { email: "", zohoUserId: "3525045000639899035" }, // Quiroga Chia
     ],
     // Ejecutivo que toma los deals y cotizaciones de Vicky CO (definición
-    // Lalo 16-jul; equivalente a Anderson Díaz en Chile). El teléfono es la
-    // línea comercial CO heredada — pendiente confirmar el WhatsApp directo
-    // de Alejandro.
+    // Lalo 16-jul; equivalente a Anderson Díaz en Chile). Teléfono: el de su
+    // ficha de usuario en Zoho (decisión Lalo 17-jul, provisorio hasta que
+    // Alejandro confirme o pida otro).
     ejecutivo: {
       nombre: "Alejandro Gordillo",
       email: "agordillo@geovictoria.com",
-      telefono: "+57 310 609 5259",
+      telefono: "+57 314 267 7765",
     },
   },
 
