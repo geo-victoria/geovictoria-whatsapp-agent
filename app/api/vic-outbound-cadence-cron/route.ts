@@ -29,8 +29,9 @@ import {
   getKvValue,
 } from "@/lib/supabase-persistence-v3"
 import { buildCorreoCadencia, sendLeadEmail } from "@/lib/zoho-lead-mail"
-import { reasignarLeadSdrInbound } from "@/lib/zoho-leads"
+import { reasignarLeadSdrInbound, reasignarLeadSdrInboundCO } from "@/lib/zoho-leads"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
+import { PERFIL_CO } from "@/lib/paises/co"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -40,6 +41,11 @@ const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const TPL_NUDGE = (process.env.OUTBOUND_TEMPLATE_NUDGE || "vicky_lead_nudge").trim()
 const TPL_CIERRE = (process.env.OUTBOUND_TEMPLATE_CIERRE || "vicky_lead_cierre").trim()
+// Colombia (17-jul, paridad de proactividad): plantillas propias por la línea
+// +57. SEGURO POR DEFECTO: vacías = el toque de WhatsApp se marca como hecho y
+// la cadencia sigue con los correos (deployable antes de aprobar en Meta).
+const TPL_NUDGE_CO = (process.env.OUTBOUND_TEMPLATE_NUDGE_CO || "").trim()
+const TPL_CIERRE_CO = (process.env.OUTBOUND_TEMPLATE_CIERRE_CO || "").trim()
 const BATCH = Number(process.env.OUTBOUND_CADENCE_BATCH || 30)
 
 // Texto que queda en el historial de la conversación por cada HSM (contexto
@@ -48,6 +54,11 @@ const CONTEXT_NUDGE = (nombre: string, empresa: string) =>
   `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu cotización toma 2 minutos por acá. ¿Hay algo que te falte para avanzar o alguna duda que te pueda resolver?`
 const CONTEXT_CIERRE = (nombre: string, empresa: string) =>
   `Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu cotización para ${empresa} lista para retomarla cuando tú quieras — me escribes por acá y la armamos de inmediato. ¡Que te vaya súper! 👋`
+// Versión CO: tuteo cálido colombiano, sin chilenismos (feedback equipo CO).
+const CONTEXT_NUDGE_CO = (nombre: string, empresa: string) =>
+  `Hola ${nombre}! Soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu cotización toma 2 minutos por acá. Hay algo que te falte para avanzar o alguna duda que te pueda resolver? 😊`
+const CONTEXT_CIERRE_CO = (nombre: string, empresa: string) =>
+  `Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu cotización para ${empresa} lista para retomarla cuando quieras — me escribes por acá y la armamos de una vez. Que te vaya muy bien! 👋`
 
 type Row = {
   contact: string
@@ -197,13 +208,19 @@ export async function GET(req: Request): Promise<Response> {
     const nombre = (p.row.nombre || "").trim() || "Hola"
     const empresa = (p.row.empresa || "").trim() || "tu empresa"
 
+    // País por prefijo: define línea de salida, plantillas, tono y SDRs.
+    const esCO = p.row.contact.startsWith("57")
+
     if (p.accion === "agotar") {
       // Cadencia agotada sin respuesta → el lead vuelve a un humano (acuerdo
-      // con Marketing: round-robin SDR Inbound).
+      // con Marketing: round-robin SDR Inbound del país).
       let reasignado: string | undefined
       let errorReasignacion: string | undefined
       if (p.row.zoho_lead_id) {
-        const rr = await reasignarLeadSdrInbound(p.row.zoho_lead_id).catch((e) => ({
+        const rr = await (esCO
+          ? reasignarLeadSdrInboundCO(p.row.zoho_lead_id)
+          : reasignarLeadSdrInbound(p.row.zoho_lead_id)
+        ).catch((e) => ({
           success: false as const,
           error: e instanceof Error ? e.message : "excepción",
         }))
@@ -229,7 +246,7 @@ export async function GET(req: Request): Promise<Response> {
         detalle.push({ contact: p.row.contact, accion: p.accion, skip: "sin email/lead" })
         continue
       }
-      const { subject, html } = buildCorreoCadencia(p.accion, p.row.nombre || "", empresa)
+      const { subject, html } = buildCorreoCadencia(p.accion, p.row.nombre || "", empresa, esCO ? "co" : "cl")
       const envio = await sendLeadEmail(p.row.zoho_lead_id, p.row.email, subject, html)
       if (envio.ok) {
         await marcarToque(p.row.contact, campo)
@@ -241,15 +258,34 @@ export async function GET(req: Request): Promise<Response> {
       continue
     }
 
-    // Toques de WhatsApp (HSM): nudge día 1 / breakup día 7.
+    // Toques de WhatsApp (HSM): nudge día 1 / breakup día 7, por la línea del país.
     const esNudge = p.accion === "waNudge"
-    const tpl = esNudge ? TPL_NUDGE : TPL_CIERRE
-    const ok = await sendBotmakerTemplate(p.row.contact, tpl, { nombre, empresa }).catch(() => false)
+    const tpl = esCO ? (esNudge ? TPL_NUDGE_CO : TPL_CIERRE_CO) : esNudge ? TPL_NUDGE : TPL_CIERRE
+    if (!tpl) {
+      // CO sin plantilla aprobada aún: el toque se marca para que la cadencia
+      // avance con los correos en vez de reintentar para siempre.
+      await marcarToque(p.row.contact, esNudge ? "wa_nudge_sent_at" : "wa_cierre_sent_at")
+      detalle.push({ contact: p.row.contact, accion: p.accion, skip: "sin plantilla del país" })
+      continue
+    }
+    const ok = await sendBotmakerTemplate(
+      p.row.contact,
+      tpl,
+      { nombre, empresa },
+      esCO ? PERFIL_CO.canal.channelId : undefined,
+    ).catch(() => false)
     if (ok) {
       await marcarToque(p.row.contact, esNudge ? "wa_nudge_sent_at" : "wa_cierre_sent_at")
       await appendAssistantV3(
         p.row.contact,
-        esNudge ? CONTEXT_NUDGE(nombre, empresa) : CONTEXT_CIERRE(nombre, empresa),
+        esCO
+          ? esNudge
+            ? CONTEXT_NUDGE_CO(nombre, empresa)
+            : CONTEXT_CIERRE_CO(nombre, empresa)
+          : esNudge
+            ? CONTEXT_NUDGE(nombre, empresa)
+            : CONTEXT_CIERRE(nombre, empresa),
+        esCO ? "co" : "cl",
       ).catch(() => {})
       enviados++
       detalle.push({ contact: p.row.contact, accion: p.accion, ok: true, tpl })

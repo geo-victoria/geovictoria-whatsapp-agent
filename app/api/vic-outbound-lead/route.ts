@@ -35,7 +35,12 @@ import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
-import { updateZohoLeadStatus, reasignarLeadSdrInbound } from "@/lib/zoho-leads"
+import {
+  updateZohoLeadStatus,
+  reasignarLeadSdrInbound,
+  reasignarLeadSdrInboundCO,
+} from "@/lib/zoho-leads"
+import { PERFIL_CO } from "@/lib/paises/co"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -45,6 +50,11 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 // Nombre de la plantilla HSM de apertura en Botmaker (variables: nombre, empresa).
 const TPL_LEAD = (process.env.OUTBOUND_TEMPLATE_LEAD || "").trim()
+// Colombia (17-jul, paridad de proactividad): plantilla de apertura propia que
+// sale por la línea +57. SEGURO POR DEFECTO: vacía = los leads CO se saltan
+// (deployable antes de aprobar la plantilla en Meta). Zona horaria/feriados CO
+// los resuelve la cadencia con vic_is_business_now (prefijo 57 → Bogotá).
+const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "").trim()
 
 async function authorized(req: Request): Promise<boolean> {
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
@@ -96,14 +106,24 @@ export async function POST(req: Request): Promise<Response> {
       { status: 400 },
     )
   }
+  // País por prefijo telefónico: define plantilla, línea de salida y tono.
+  const country = contact.startsWith("56") ? "cl" : contact.startsWith("57") ? "co" : null
+  const esCO = country === "co"
+  const tplPais = esCO ? TPL_LEAD_CO : TPL_LEAD
+  const channelId = esCO ? PERFIL_CO.canal.channelId : undefined
+
   // Hook de prueba: envía la plantilla real al número indicado (aunque sea
   // interno) y termina — sin dedup, sin contexto persistido, sin tocar Zoho.
   if (body.test === true) {
-    if (!TPL_LEAD) {
-      return NextResponse.json({ ok: false, test: true, error: "OUTBOUND_TEMPLATE_LEAD no configurada" })
+    if (!tplPais) {
+      return NextResponse.json({
+        ok: false,
+        test: true,
+        error: `OUTBOUND_TEMPLATE_LEAD${esCO ? "_CO" : ""} no configurada`,
+      })
     }
-    const okTest = await sendBotmakerTemplate(contact, TPL_LEAD, { nombre, empresa }).catch(() => false)
-    return NextResponse.json({ ok: okTest, test: true, contact, template: TPL_LEAD })
+    const okTest = await sendBotmakerTemplate(contact, tplPais, { nombre, empresa }, channelId).catch(() => false)
+    return NextResponse.json({ ok: okTest, test: true, contact, template: tplPais })
   }
   // Los números internos no reciben prospección (mismo set que excluye el
   // embudo). OUTBOUND_ALLOW_CONTACTS (coma-separado) permite excepciones
@@ -117,14 +137,17 @@ export async function POST(req: Request): Promise<Response> {
   if (!allowList.has(contact) && isTestContact(contact, testContactSet())) {
     return NextResponse.json({ ok: true, skipped: "contacto interno" })
   }
-  // Red de seguridad: prospección SOLO a Chile (+56). La calificación fina vive
-  // en las assignment rules de Zoho; esto protege contra asignaciones manuales
-  // equivocadas (la línea vende en CLP y el pago es MP Chile).
-  if (!contact.startsWith("56")) {
-    return NextResponse.json({ ok: true, skipped: "telefono no es +56", contact })
+  // Red de seguridad: prospección SOLO a países con línea y flujo propios
+  // (Chile +56, Colombia +57). La calificación fina vive en las assignment
+  // rules de Zoho; esto protege contra asignaciones manuales equivocadas.
+  if (!country) {
+    return NextResponse.json({ ok: true, skipped: "telefono no es +56 ni +57", contact })
   }
-  if (!TPL_LEAD) {
-    return NextResponse.json({ ok: true, skipped: "OUTBOUND_TEMPLATE_LEAD no configurada" })
+  if (!tplPais) {
+    return NextResponse.json({
+      ok: true,
+      skipped: `OUTBOUND_TEMPLATE_LEAD${esCO ? "_CO" : ""} no configurada`,
+    })
   }
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     return NextResponse.json({ ok: false, error: "Supabase no configurado" }, { status: 503 })
@@ -146,13 +169,17 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // 1. Plantilla HSM de apertura (variables por nombre, como las define Botmaker).
-  const sent = await sendBotmakerTemplate(contact, TPL_LEAD, { nombre, empresa }).catch(() => false)
+  const sent = await sendBotmakerTemplate(contact, tplPais, { nombre, empresa }, channelId).catch(() => false)
   if (!sent) {
     // Acuerdo con Marketing (jul-2026): si el WhatsApp no se pudo enviar, el
-    // lead NO se queda con Vicky — vuelve a un humano (round-robin SDR Inbound).
+    // lead NO se queda con Vicky — vuelve a un humano (round-robin SDR Inbound
+    // del país correspondiente).
     let reasignado: string | undefined
     if (zohoLeadId) {
-      const r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
+      const r = await (esCO
+        ? reasignarLeadSdrInboundCO(zohoLeadId)
+        : reasignarLeadSdrInbound(zohoLeadId)
+      ).catch(() => null)
       reasignado = r?.ownerEmail
       console.warn(`[outbound-lead] envío falló → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`)
     }
@@ -169,15 +196,20 @@ export async function POST(req: Request): Promise<Response> {
 
   // 2. Persistir la apertura + contexto del formulario. El bloque [Datos del
   // formulario web: ...] es CONTEXTO INTERNO para Vicky (el prompt le enseña a
-  // usarlo sin citarlo); el cliente solo recibió la plantilla.
+  // usarlo sin citarlo); el cliente solo recibió la plantilla. El country
+  // marca la conversación para que la respuesta corra el agente del país y
+  // los toques salgan por su línea y en su zona horaria.
+  const saludoApertura = esCO
+    ? `Hola ${nombre}! Soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla de una vez por acá. Avanzamos? 😊`
+    : `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla de inmediato por acá. ¿Avanzamos?`
   const ctx = [
-    `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla de inmediato por acá. ¿Avanzamos?`,
+    saludoApertura,
     ``,
     `[Datos del formulario web: nombre ${[nombre, apellido].filter(Boolean).join(" ")} · empresa ${empresa}` +
       `${rango ? ` · ${rango} empleados` : ""}${email ? ` · email ${email}` : ""}` +
       `${zohoLeadId ? ` · zohoLeadId ${zohoLeadId}` : ""}]`,
   ].join("\n")
-  await appendAssistantV3(contact, ctx).catch(() => {})
+  await appendAssistantV3(contact, ctx, country).catch(() => {})
 
   // 3. Arranca la CADENCIA multicanal (correos vía Zoho + HSM día 1/7): el cron
   // vic-outbound-cadence-cron toma esta fila; cualquier respuesta la corta.

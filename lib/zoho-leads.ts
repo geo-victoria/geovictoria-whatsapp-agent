@@ -353,6 +353,67 @@ export async function reasignarLeadSdrInbound(
   }
 }
 
+// SDRs de Colombia (tómbola inbound CO observada en Zoho, 09-jul): Galindo /
+// Guerrero / Quiroga. Mismo formato env "email_o_label:user_id" que Chile;
+// los ids bastan (el email es etiqueta para el log).
+const SDR_INBOUND_CO = (
+  process.env.VIC_SDR_INBOUND_CO ||
+  "egalindo@geovictoria.com:3525045000613817111,guerrero:3525045000619732095,quiroga:3525045000639899035"
+)
+  .split(",")
+  .map((s) => {
+    const [email, id] = s.split(":").map((x) => x.trim())
+    return { email, id: id || "" }
+  })
+  .filter((s) => s.email)
+
+/**
+ * Reasigna un lead CO al siguiente SDR colombiano del round-robin (espejo de
+ * reasignarLeadSdrInbound con turno propio en vic_kv `sdr_inbound_rr_co`).
+ */
+export async function reasignarLeadSdrInboundCO(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; error?: string }> {
+  if (!leadId || SDR_INBOUND_CO.length === 0) {
+    return { success: false, error: "leadId faltante o sin SDRs CO configuradas" }
+  }
+  try {
+    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+    const last = parseInt((await getKvValue("sdr_inbound_rr_co").catch(() => null)) || "-1")
+    const idx = (isNaN(last) ? 0 : last + 1) % SDR_INBOUND_CO.length
+    const sdr = SDR_INBOUND_CO[idx]
+
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    const ownerId = sdr.id || (await resolveOwnerId(sdr.email, accessToken, apiDomain))
+    if (!ownerId) return { success: false, error: `sin user_id para ${sdr.email}` }
+
+    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ Owner: { id: ownerId } }] }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ status?: string; code?: string; message?: string }>
+    }
+    if (!res.ok || data?.data?.[0]?.status !== "success") {
+      return {
+        success: false,
+        error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}`,
+      }
+    }
+    await setKvValue("sdr_inbound_rr_co", String(idx)).catch(() => {})
+    return { success: true, ownerEmail: sdr.email }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
+  }
+}
+
 export type CreateZohoLeadInput = {
   nombre?: string
   empresa?: string

@@ -632,9 +632,15 @@ export async function scheduleConsensualFollowup(
  * próximo turno de Vicky tenga el contexto), SIN tocar silence_anchor_at ni
  * last_user_at (el push no reinicia la cadencia).
  */
-export async function appendAssistantV3(contact: string, content: string): Promise<void> {
+export async function appendAssistantV3(
+  contact: string,
+  content: string,
+  // Multi-país (17-jul): marca el país al CREAR la conversación (outbound CO
+  // escribe primero). Default "cl" — todos los llamadores existentes intactos.
+  country: string = "cl",
+): Promise<void> {
   if (!contact || !content) return
-  const conversationId = await getOrCreateConversationId(contact)
+  const conversationId = await getOrCreateConversationId(contact, country)
   if (!conversationId) return
   await supabaseFetch(`vic_v3_messages`, {
     method: "POST",

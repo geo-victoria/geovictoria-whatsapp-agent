@@ -12,6 +12,8 @@ import { getZohoAccessToken } from "./zoho-token"
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
 // Línea conversacional de Vicky (Botmaker) — CTA de retorno de los correos.
 const WA_LINK = "https://wa.me/56967308227"
+// Línea CO (+57) para leads colombianos (paridad de proactividad, 17-jul).
+const WA_LINK_CO = `https://wa.me/${(process.env.BOTMAKER_CHANNEL_NUMBER_CO || "573181070737").trim()}`
 
 function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -24,17 +26,53 @@ ${cuerpo}
 </body></html>`
 }
 
-function botonWhatsApp(texto: string): string {
-  return `<p style="margin:18px 0;"><a href="${WA_LINK}" style="background:#25D366;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block;">${texto}</a></p>`
+function botonWhatsApp(texto: string, link: string = WA_LINK): string {
+  return `<p style="margin:18px 0;"><a href="${link}" style="background:#25D366;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block;">${texto}</a></p>`
 }
 
 export function buildCorreoCadencia(
   touch: "e1" | "e2" | "e3",
   nombre: string,
   empresa: string,
+  // Multi-país (17-jul): "co" usa la línea +57 y copy sin claims chilenos
+  // (Dirección del Trabajo / 6.000 empresas no aplican en Colombia).
+  country: string = "cl",
 ): { subject: string; html: string } {
   const n = esc(nombre || "")
   const e = esc(empresa || "tu empresa")
+  if (country === "co") {
+    if (touch === "e1") {
+      return {
+        subject: "Tu cotización GeoVictoria está a un mensaje de distancia",
+        html: shell(`<p>Hola ${n}!</p>
+<p>Recibimos tu solicitud de cotización para <b>${e}</b> — gracias por el interés 🙌. Te escribí también por WhatsApp para armarla de una vez: son 2 minutos y sales con el valor exacto para tu equipo.</p>
+${botonWhatsApp("Armar mi cotización por WhatsApp", WA_LINK_CO)}
+<p style="color:#4a5568;">Somos especialistas en control de asistencia, con presencia en toda Latinoamérica. Sin permanencia mínima y con capacitación incluida.</p>`),
+      }
+    }
+    if (touch === "e2") {
+      return {
+        subject: `${nombre ? `${nombre}, tu` : "Tu"} cotización sigue lista para armar`,
+        html: shell(`<p>Hola ${n}!</p>
+<p>Sigo teniendo pendiente tu cotización para <b>${e}</b>. Te cuento lo que resuelve GeoVictoria desde el día uno:</p>
+<ul style="padding-left:20px;">
+  <li><b>Adiós planillas</b>: la asistencia se registra sola (app con biometría facial, web o reloj).</li>
+  <li><b>Reportes que se arman solos</b>: llegadas tarde, horas extras y ausencias en un clic.</li>
+  <li><b>Datos seguros</b>: información encriptada y alojada en Azure.</li>
+</ul>
+<p>Armarla toma 2 minutos por WhatsApp:</p>
+${botonWhatsApp("Retomar mi cotización", WA_LINK_CO)}`),
+      }
+    }
+    return {
+      subject: "Dejamos tu cotización guardada",
+      html: shell(`<p>Hola ${n}!</p>
+<p>No te quiero llenar el correo: este es mi último mensaje por ahora 😊.</p>
+<p>Tu solicitud para <b>${e}</b> queda guardada — cuando el momento sea el correcto, me escribes por WhatsApp y la armamos de una vez, sin empezar de cero.</p>
+${botonWhatsApp("Retomar cuando quieras", WA_LINK_CO)}
+<p>Que te vaya muy bien!</p>`),
+    }
+  }
   if (touch === "e1") {
     return {
       subject: "Tu cotización GeoVictoria está a un mensaje de distancia",
