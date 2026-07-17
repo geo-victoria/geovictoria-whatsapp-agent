@@ -25,10 +25,17 @@ dispara **on-create, sin batch ni delays**.
 |---|---|---|---|---|---|
 | **0** | **min 0** (24/7) ⚡ | WhatsApp HSM | Workflow Zoho → `/api/vic-outbound-lead` | P1 apertura | ✅ construido |
 | **0.5** | min 10-15 · solo horario hábil · **A/B test** | **Voz IA** | por definir (Dapta/Callbots) | guion voz | ⏳ F3 |
-| 1 | +1-2 h (mismo día) | Email | **Zoho nativo** (Cadencia A) | Correo 1 | ⏳ config |
-| 2 | Día 1 | WhatsApp HSM | cron propio | P2 nudge | ⏳ F2 |
-| 3 | Día 5 | Email | **Zoho nativo** | Correo 2 | ⏳ config |
-| 4 | Día 7-8 | Email + WhatsApp HSM (cierre) | Zoho + cron | Correo 3 + P3 | ⏳ config/F2 |
+| 1 | +2 h | Email | `vic-outbound-cadence-cron` → Zoho send_mail | Correo 1 | ✅ construido |
+| 2 | Día 1 (+24h) | WhatsApp HSM | `vic-outbound-cadence-cron` | P2 nudge | ✅ construido |
+| 3 | Día 5 (+120h) | Email | cron → Zoho send_mail | Correo 2 | ✅ construido |
+| 4 | Día 7 (+168h) | WhatsApp HSM (cierre) | cron | P3 cierre | ✅ construido |
+| 5 | Día 8 (+192h) | Email (breakup) | cron → Zoho send_mail | Correo 3 | ✅ construido |
+
+Offsets en horas desde el toque 0, configurables en `vic_kv`
+`outbound_cadence_offsets_h` ("e1,waNudge,e2,waCierre,e3" — default
+`2,24,120,168,192`). +4h tras el correo 3 sin respuesta → cadencia **agotada**:
+el lead se reasigna round-robin a las SDR Inbound del país. Todos los toques
+respetan horario hábil de la zona del lead (`vic_filter_business_now`).
 
 Tras el toque 4 sin respuesta → lead marcado **no-responde** → nurture largo / humano.
 
@@ -115,6 +122,55 @@ por tu solicitud de cotización para ${empresa}. ¿Te quedó alguna duda o te
 ayudo a armarla ahora? … Te dejo todo listo por WhatsApp / ¿prefieres que
 coordinemos una reunión con un ejecutivo?"
 
+## 4.5 Colombia — paridad de proactividad (línea +57 318 107 0737)
+
+> Código desplegado (17-jul-2026), **seguro por defecto**: sin las envs de
+> plantilla CO, el toque 0 CO se salta y la cadencia avanza solo con correos.
+> El país se decide por el **prefijo del teléfono** (+56 CL / +57 CO); el
+> workflow de Zoho puede mandar `country`/`territorio` explícito ("Colombia")
+> para además normalizar teléfonos locales (`3XXXXXXXXX` → `57...`,
+> `9XXXXXXXX` → `56...`).
+
+Qué ya corre igual que Chile sin config extra:
+- Correos e1/e2/e3 con **copy colombiano** (sin claims DT ni "6.000 empresas",
+  botón a `wa.me/573181070737`), vía Zoho send_mail sobre el lead.
+- Horario hábil **America/Bogota 9-19** + los 19 feriados CO 2026 cargados en
+  `vic_holidays` (incluye lunes 20-jul).
+- Fallo de envío del toque 0 o cadencia agotada → reasignación round-robin a
+  las **SDR Inbound CO** (Galindo/Guerrero/Quiroga, turno en `vic_kv`).
+- Conversación marcada `country=co`: la respuesta del lead corre el agente CO
+  (precios COP, agenda CO con Alejandro Gordillo) por la línea +57.
+
+### Checklist de encendido (lo que falta — todo config, cero código)
+1. **Crear y aprobar en Botmaker/Meta (línea +57)** las 3 plantillas HSM
+   (utility, vars `${nombre}` y `${empresa}`). El texto debe calzar **1:1** con
+   el contexto que el código persiste en la conversación (si Meta exige
+   cambios, actualizar los literales `saludoApertura` en `vic-outbound-lead` y
+   `CONTEXT_NUDGE_CO`/`CONTEXT_CIERRE_CO` en el cron en el mismo cambio):
+   - **P1 `vicky_lead_apertura_co`** (T0): "Hola ${nombre}! Soy Vicky de
+     GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te
+     ayudo a armarla de una vez por acá. Avanzamos? 😊"
+   - **P2 `vicky_lead_nudge_co`** (día 1): "Hola ${nombre}! Soy Vicky de
+     GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu
+     cotización toma 2 minutos por acá. Hay algo que te falte para avanzar o
+     alguna duda que te pueda resolver? 😊"
+   - **P3 `vicky_lead_cierre_co`** (día 7): "Hola ${nombre}! Soy Vicky de
+     GeoVictoria. No te quiero molestar más: dejo tu cotización para
+     ${empresa} lista para retomarla cuando quieras — me escribes por acá y la
+     armamos de una vez. Que te vaya muy bien! 👋"
+2. **Envs en Vercel** (con los nombres reales que queden en Botmaker):
+   `OUTBOUND_TEMPLATE_LEAD_CO` · `OUTBOUND_TEMPLATE_NUDGE_CO` ·
+   `OUTBOUND_TEMPLATE_CIERRE_CO` (y verificar que `BOTMAKER_CHANNEL_CO` esté
+   seteada — la usa toda salida por la línea +57).
+3. **Workflow de Zoho** para leads CO (mismo filtro que CL: ≤49 empleados y
+   no-cliente) → POST `/api/vic-outbound-lead` con el JSON de siempre más
+   `"country": "Colombia"` (y opcional `paginaConversion` con la
+   Conversion/Landing Page del lead).
+4. **E2E con número del equipo CO**: primero `"test": true` en el body (envía
+   la plantilla real al número indicado, sin dedup ni tocar Zoho); después el
+   flujo completo agregando el número a `OUTBOUND_ALLOW_CONTACTS` y acelerando
+   los offsets vía `vic_kv outbound_cadence_offsets_h`.
+
 ## 5. Condiciones transversales
 - Cualquier respuesta corta la cadencia de su fase y pasa a conversación.
 - Voz/llamadas SOLO horario hábil de la zona del lead (Lun-Sáb 9-19, feriados);
@@ -130,10 +186,12 @@ instrumentar tasa de respuesta por toque cuando haya volumen. El A/B de T0.5
 
 ## Estado y pendientes
 - ✅ F1: endpoint toque 0 + modo prospección + hitos en Zoho (convertir/reasignar).
-- ⏳ Config: aprobar P1-P3 en Meta · setear `OUTBOUND_TEMPLATE_LEAD` · workflow
-  de Zoho (webhook on-create) · renovar los 3 correos de la Cadencia A · workflow
-  nativo "al cambiar owner → notificar".
-- ⏳ F2: cron del toque 2/4 de WhatsApp (P2/P3) para no-respondedores.
+- ✅ F2: `vic-outbound-cadence-cron` (cada 15 min): correos e1/e2/e3 vía Zoho
+  send_mail + HSM nudge/cierre + agotamiento con reasignación SDR — CL y CO.
+- ✅ Multi-país: toque 0 y cadencia CO (línea +57), copy y correos colombianos,
+  feriados/zona Bogotá, SDRs CO — ver sección 4.5.
+- ⏳ Config CO: aprobar P1-P3 CO en Meta · setear envs `*_CO` · workflow de
+  Zoho para leads CO (checklist en 4.5).
 - ⏳ F3: voz T0.5 — bloqueante: endpoint de disparo por API (Dapta vs Callbots).
 - ⏳ Etapas del lead (Lead_Status) en contactado/respondió/cotizando — definir
   valores del picklist.
