@@ -106,7 +106,12 @@ export async function POST(req: Request): Promise<Response> {
   const apellido = (body.apellido || "").trim()
   // Empresa es OPCIONAL (el formulario a veces llega sin Company): con fallback
   // la plantilla lee natural ("...tu solicitud de cotización para tu empresa").
-  const empresa = (body.empresa || "").trim() || "tu empresa"
+  // Un valor puramente numérico tampoco es un nombre — el formulario a veces
+  // trae la cédula/RUT en el campo empresa (caso Marcela "1128404362", 17-jul)
+  // y la plantilla quedaba "cotización para 1128404362". Se normaliza acá para
+  // que plantilla, contexto y correos de cadencia hereden el fallback.
+  const empresaRaw = (body.empresa || "").trim()
+  const empresa = /^[\d\s.\-]*$/.test(empresaRaw) ? "tu empresa" : empresaRaw
   const email = (body.email || "").trim()
   const rango = (body.empleadosRango || "").trim()
   const zohoLeadId = (body.zohoLeadId || "").trim()

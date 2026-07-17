@@ -208,7 +208,10 @@ export async function GET(req: Request): Promise<Response> {
     if (enviados >= BATCH) break
     if (!elegibles.has(p.row.contact)) continue
     const nombre = (p.row.nombre || "").trim() || "Hola"
-    const empresa = (p.row.empresa || "").trim() || "tu empresa"
+    // Mismo saneo que el toque 0: vacío O puramente numérico (cédula/RUT en el
+    // campo empresa del formulario) → "tu empresa", para plantillas y correos.
+    const empresaRow = (p.row.empresa || "").trim()
+    const empresa = /^[\d\s.\-]*$/.test(empresaRow) ? "tu empresa" : empresaRow
 
     // País por prefijo: define línea de salida, plantillas, tono y SDRs.
     const esCO = p.row.contact.startsWith("57")

@@ -5,6 +5,26 @@ conocidos.
 
 ---
 
+## Callback de estado de entrega de Botmaker (fallo asíncrono del toque 0)
+
+**Estado:** propuesto (caso real Marcela 17-jul, error Meta 131049).
+**Problema:** el toque 0 puede ser ACEPTADO por Botmaker y aun así no
+entregarse (ej. 131049 "healthy ecosystem engagement": cap de frecuencia de
+Meta sobre plantillas Marketing por usuario receptor). Hoy solo reaccionamos
+al fallo de ENVÍO (síncrono → reasignación SDR inmediata); el fallo de
+ENTREGA no lo vemos y el lead queda dependiendo de los correos de cadencia.
+**Qué se quiere:** suscribir el webhook de estados de notificación de
+Botmaker y, ante un toque 0 no entregado: adelantar el correo 1 a inmediato
+(en vez de +2h) o reasignar al SDR round-robin de una.
+**Mitigación ya aplicada mientras tanto:** la cadencia multicanal absorbe el
+caso (correo +2h con botón wa.me, nudge día 1 como reintento natural,
+reasignación a humano al agotarse). Y la medida de raíz es recrear la
+plantilla de APERTURA como categoría **Utility** (respuesta directa a la
+solicitud del formulario → sin cap 131049): crearla en Botmaker/Meta y
+apuntar `OUTBOUND_TEMPLATE_LEAD_CO` (y eventualmente la CL) al nombre nuevo.
+
+---
+
 ## Toque hora 47 → mensaje "las 3 razones" (pedido de Rodrigo, 13-jul — HACER CUANTO ANTES)
 
 **Estado:** código listo y desplegado; falta crear la plantilla en Botmaker y setear la env.
