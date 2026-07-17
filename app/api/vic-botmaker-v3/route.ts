@@ -919,7 +919,7 @@ async function processOneTurn(
       // vía marcar_no_contactar según la regla de retención del prompt.
       const esRechazo =
         message.trim().length <= 60 &&
-        /\b(no\s+gracias|no\s+me\s+interesa|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+insist\w+|deja\w*\s+de\s+(escribir|hablar|insistir)|no\s+me\s+escrib\w+)\b/i.test(
+        /\b(no\s+gracias|no\s+me\s+interesa|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+insist\w+|deja\w*\s+de\s+(escribir\w*|hablar\w*|insistir\w*)|no\s+me\s+escrib\w+)\b/i.test(
           message,
         )
       // Señal COMERCIAL: actividad comercial en este turno, o estado comercial

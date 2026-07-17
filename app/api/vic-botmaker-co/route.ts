@@ -303,7 +303,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     // Espejo del chileno (caso Rodrigo 17-jul): rechazo explícito → no re-armar.
     const esRechazo =
       message.trim().length <= 60 &&
-      /\b(no\s+gracias|no\s+me\s+interesa|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+insist\w+|deja\w*\s+de\s+(escribir|hablar|insistir)|no\s+me\s+escrib\w+)\b/i.test(
+      /\b(no\s+gracias|no\s+me\s+interesa|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+insist\w+|deja\w*\s+de\s+(escribir\w*|hablar\w*|insistir\w*)|no\s+me\s+escrib\w+)\b/i.test(
         message,
       )
     const comercialEsteTurno = toolCalls.some(
