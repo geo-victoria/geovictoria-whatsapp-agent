@@ -150,6 +150,21 @@ export async function claimDueCallbacks(limit = 5): Promise<ScheduledCall[]> {
 }
 
 /**
+ * Devuelve un callback reclamado a 'pending' SIN tocar due_at (multi-país:
+ * el cron lo reclama y descubre que el país del contacto está fuera de su
+ * horario hábil — se libera para el próximo tick dentro del horario).
+ */
+export async function unclaimCallback(id: string): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return
+  await fetch(`${SUPABASE_URL}/rest/v1/vic_scheduled_calls?id=eq.${id}&status=eq.calling`, {
+    method: "PATCH",
+    headers: { ...HEADERS, Prefer: "return=minimal" },
+    body: JSON.stringify({ status: "pending" }),
+    cache: "no-store",
+  }).catch(() => {})
+}
+
+/**
  * ¿El cliente aceptó la llamada anunciada? Clasifica su(s) respuesta(s) al
  * mensaje "¿te parece si te llamo?".
  *   "si"   → aceptó (llamar)

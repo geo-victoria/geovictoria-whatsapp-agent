@@ -23,15 +23,16 @@ import {
   clasificarConsentimiento,
   fetchUserRepliesSince,
   markCallbackDone,
+  unclaimCallback,
 } from "@/lib/dapta-voice"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
-function horaChile(): number {
+function horaEn(timeZone: string): number {
   return Number(
     new Intl.DateTimeFormat("es-CL", {
-      timeZone: "America/Santiago",
+      timeZone,
       hour: "numeric",
       hour12: false,
     }).format(new Date()),
@@ -45,12 +46,21 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
 
-  const hora = horaChile()
-  if (hora < 9 || hora >= 20) {
-    return NextResponse.json({ ok: true, disparadas: 0, motivo: "fuera de horario" })
+  // Horario hábil por PAÍS del contacto (multi-país, 17-jul): un +57 no se
+  // llama en horario chileno — Bogotá va 1-2h detrás de Santiago.
+  const horaCl = horaEn("America/Santiago")
+  const horaCo = horaEn("America/Bogota")
+  const clEnHorario = horaCl >= 9 && horaCl < 20
+  const coEnHorario = horaCo >= 9 && horaCo < 19
+  if (!clEnHorario && !coEnHorario) {
+    return NextResponse.json({ ok: true, disparadas: 0, motivo: "fuera de horario (CL y CO)" })
   }
 
   const flowUrl = ((await getKvValue("dapta_flow_seguimiento_webhook").catch(() => "")) || "").trim()
+  // Flujo CO propio (agente/línea +57 de Dapta). Opcional: sin él, los
+  // callbacks a +57 quedan pendientes con log — NUNCA salen por el flujo CL
+  // (saludo chileno + caller equivocado sería peor que esperar).
+  const flowUrlCo = ((await getKvValue("dapta_flow_seguimiento_webhook_co").catch(() => "")) || "").trim()
   if (!flowUrl) {
     return NextResponse.json(
       { ok: false, error: "vic_kv.dapta_flow_seguimiento_webhook no configurada" },
@@ -64,6 +74,22 @@ export async function POST(req: Request): Promise<Response> {
   for (const cb of due) {
     const payload = cb.payload || {}
     const motivo = String(payload.motivo || "Llamada devuelta agendada")
+
+    // País por prefijo: define flujo/agente/línea de salida y horario hábil.
+    const esCO = cb.contact.startsWith("57")
+    if ((esCO && !coEnHorario) || (!esCO && !clEnHorario)) {
+      await unclaimCallback(cb.id)
+      detalle.push({ id: cb.id, contact: cb.contact, esperando: "horario hábil del país" })
+      continue
+    }
+    if (esCO && !flowUrlCo) {
+      await unclaimCallback(cb.id)
+      console.warn(
+        `[callback-cron] ${cb.contact} es CO y vic_kv.dapta_flow_seguimiento_webhook_co no está configurada — queda pendiente (no se llama por el flujo CL).`,
+      )
+      detalle.push({ id: cb.id, contact: cb.contact, esperando: "flujo Dapta CO" })
+      continue
+    }
 
     // Gate de consentimiento (llamada hora-23): el anuncio "¿te parece si te
     // llamo?" salió a las 22h50. Si el cliente respondió, un "sí" explícito
@@ -97,7 +123,7 @@ export async function POST(req: Request): Promise<Response> {
         ? `${motivo}. Hace unos minutos le enviaste por WhatsApp "¿te parece si te llamo a tu celular y conversamos?" y no se negó (aceptó o no alcanzó a responder). Usa tu apertura estándar con naturalidad.`
         : `${motivo}. Esta llamada es la DEVOLUCIÓN comprometida: el cliente pidió que lo llamaras a esta hora, ` +
           `así que abre reconociéndolo ("hola, soy Vicky de GeoVictoria, quedamos en que te llamaba ahora...") en vez del saludo estándar.`
-    const res = await fetch(flowUrl, {
+    const res = await fetch(esCO ? flowUrlCo : flowUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...payload, contexto }),
