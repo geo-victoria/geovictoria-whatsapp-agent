@@ -85,6 +85,11 @@ type LeadBody = {
   // prefijo del teléfono decide, como siempre.
   country?: string
   territorio?: string
+  // Página donde convirtió el lead (Zoho Conversion/Landing Page, ej.
+  // "/es-cl/servicios/alertas/"). Va al contexto interno: Vicky abre sabiendo
+  // qué producto estaba mirando en vez de partir genérica.
+  paginaConversion?: string
+  landingPage?: string
   // Hook de PRUEBA (mismo patrón que el cron de reactivación): con test=true
   // salta la exclusión de internos y el dedup para validar la plantilla en un
   // número del equipo. NO persiste contexto ni toca el lead en Zoho.
@@ -104,6 +109,10 @@ export async function POST(req: Request): Promise<Response> {
   const email = (body.email || "").trim()
   const rango = (body.empleadosRango || "").trim()
   const zohoLeadId = (body.zohoLeadId || "").trim()
+  // Página de conversión/aterrizaje (pista de interés). Zoho a veces manda el
+  // literal "none" o "-" en estos campos de marketing: se tratan como vacío.
+  const paginaRaw = (body.paginaConversion || body.landingPage || "").trim()
+  const paginaInteres = /^(none|null|-|—)?$/i.test(paginaRaw) ? "" : paginaRaw.slice(0, 200)
   let contact = (body.telefono || "").replace(/\D/g, "")
 
   if (!contact || !nombre) {
@@ -240,6 +249,7 @@ export async function POST(req: Request): Promise<Response> {
     ``,
     `[Datos del formulario web: nombre ${[nombre, apellido].filter(Boolean).join(" ")} · empresa ${empresa}` +
       `${rango ? ` · ${rango} empleados` : ""}${email ? ` · email ${email}` : ""}` +
+      `${paginaInteres ? ` · convirtió en la página ${paginaInteres} (úsalo como pista de qué le interesa, sin citar la URL)` : ""}` +
       `${zohoLeadId ? ` · zohoLeadId ${zohoLeadId}` : ""}]`,
   ].join("\n")
   await appendAssistantV3(contact, ctx, esCO ? "co" : "cl").catch(() => {})
