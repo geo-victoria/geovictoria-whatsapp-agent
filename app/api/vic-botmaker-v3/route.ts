@@ -911,6 +911,17 @@ async function processOneTurn(
       )
       const esDespedida =
         message.trim().length <= 30 && FAREWELL_RE.test(message)
+      // RECHAZO explícito ("no gracias", "ya no lo quiero"): NUNCA re-armar la
+      // cadencia, ni siquiera con cotización formal vigente (caso Rodrigo
+      // 17-jul: tras dos 'no', el cron siguió nudgeando "una última cosa"
+      // porque el override formal-sobre-despedida re-armaba en cada turno).
+      // Capa determinista; el cierre formal (perdido) sigue siendo del modelo
+      // vía marcar_no_contactar según la regla de retención del prompt.
+      const esRechazo =
+        message.trim().length <= 60 &&
+        /\b(no\s+gracias|no\s+me\s+interesa|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+insist\w+|deja\w*\s+de\s+(escribir|hablar|insistir)|no\s+me\s+escrib\w+)\b/i.test(
+          message,
+        )
       // Señal COMERCIAL: actividad comercial en este turno, o estado comercial
       // persistente (cotización formal / negociación en curso), o un estimado/
       // cotización ya mostrado antes en la conversación (para seguir armando en los
@@ -957,7 +968,7 @@ async function processOneTurn(
         // 'soporte' también lo excluye de la reactivación HSM.
         await closeFollowup(contact, "soporte")
         console.log(`[v3-followup] soporte → ciclo cerrado (sin proactividad) contact=${contact}`)
-      } else if (reply && (!esDespedida || tieneEstadoComercial) && esComercial) {
+      } else if (reply && (!esDespedida || tieneEstadoComercial) && !esRechazo && esComercial) {
         // La COTIZACIÓN FORMAL manda sobre la despedida (caso Constanza,
         // 17-jul): un "muchas gracias" tras recibir la formal es recibo
         // cortés, no fin de conversación — sin este override el ciclo quedaba
