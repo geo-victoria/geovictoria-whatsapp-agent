@@ -42,6 +42,10 @@ import {
   type RegistrarSolicitudCallbackResultado,
 } from "./registrar-solicitud-callback"
 import {
+  registrarComprobanteTransferenciaSchema,
+  registrarComprobanteTransferencia,
+} from "./registrar-comprobante-transferencia"
+import {
   consultarDisponibilidadHorarioSchema,
   consultarDisponibilidadHorario,
   type ConsultarDisponibilidadHorarioResultado,
@@ -103,6 +107,7 @@ export const TOOL_SCHEMAS = [
   generarLinkCotizadoraSchema,
   consultarAgenteSoporteSchema,
   registrarSolicitudCallbackSchema,
+  registrarComprobanteTransferenciaSchema,
   consultarDisponibilidadHorarioSchema,
   agendarReunionSchema,
   reagendarReunionSchema,
@@ -140,6 +145,7 @@ export type ToolResult =
   | ActualizarCotizacionResultado
   | MarcarNoContactarResultado
   | ProgramarSeguimientoResultado
+  | Awaited<ReturnType<typeof registrarComprobanteTransferencia>>
   | { ok: false; error: string }
 
 /**
@@ -160,6 +166,13 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "registrar_solicitud_callback":
         return await registrarSolicitudCallback(input as never)
+
+      case "registrar_comprobante_transferencia":
+        // El contacto lo inyecta el agent-loop (_contact); el modelo no lo conoce.
+        return await registrarComprobanteTransferencia(
+          String((input as { _contact?: string })._contact || ""),
+          input as never,
+        )
 
       case "consultar_disponibilidad_horario":
         return await consultarDisponibilidadHorario(input as never)
