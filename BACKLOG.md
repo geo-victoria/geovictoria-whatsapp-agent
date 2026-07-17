@@ -52,6 +52,29 @@ pre-pago que le quedaba a Anderson (recibir transferencias).
 
 ---
 
+## Mensaje de entrega de la cotización: versión mínima (pedido Rodrigo, 17-jul)
+
+**Estado:** propuesto (Rodrigo por Teams, con el texto final deseado).
+**Qué se quiere:** el mensaje que entrega el link de la cotización (flujo de
+descuento post-formal y entrega en general) queda SOLO con lo esencial:
+
+> Listo! 🎉
+> Aquí revisas, aceptas y pagas tu cotización actualizada: {link}
+> En esa misma página eliges el medio de pago: tarjeta (pago online
+> inmediato) o transferencia bancaria.
+> También te llegó el PDF de respaldo a tu correo.
+
+**Se elimina:** (1) el párrafo de condiciones del descuento ("Puedo aplicarte
+un 10%... primeros 6 meses... si se paga dentro de 72 horas" — las
+condiciones ya viven en la página de aceptación y el PDF; en el chat solo
+frenan el click); (2) el bloque de traspaso a Anderson con teléfono y correo
+(cubierto por el ítem "ejecutivo solo después del pago" — al implementar
+aquel, este mensaje queda automáticamente sin ejecutivo).
+**Dónde tocar:** el mensajeParaProspecto del flujo de descuento/entrega en
+el cotizador + los bloques canónicos de entrega del prompt (CL y CO).
+
+---
+
 ## Callback de estado de entrega de Botmaker (fallo asíncrono del toque 0)
 
 **Estado:** propuesto (caso real Marcela 17-jul, error Meta 131049).
