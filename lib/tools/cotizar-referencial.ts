@@ -454,11 +454,11 @@ export async function cotizarReferencial(args: {
   const totalCLP = Math.round(totalUF * ufActual)
 
   // ── Totales separados por sección ──
-  const itemsRecurrentes = itemsConsolidados.filter((i) => seccionDe(i.modalidad) === "recurrente")
   // Consolidar líneas idénticas ANTES de mostrar (feedback 16-jul, caso Putre:
   // 4 relojes imprimían 8 líneas repetidas de envío/instalación). Mismo
   // consolidador que usa la cotización formal — cero drift.
   const itemsConsolidados = consolidarLineasIguales(items)
+  const itemsRecurrentes = itemsConsolidados.filter((i) => seccionDe(i.modalidad) === "recurrente")
   const itemsUnicos = itemsConsolidados.filter((i) => seccionDe(i.modalidad) === "unico")
 
   const subtotalRecurrenteUF = itemsRecurrentes.reduce((sum, i) => sum + i.subtotalUF, 0)

@@ -436,7 +436,7 @@ export async function setQuotePointer(
  */
 function rowToPointer(r: QuotePointerRow): QuotePointer {
   return {
-    quoteId: r.quote_id,
+    quoteId: r.quote_id || "",
     dealId: r.deal_id || "",
     acceptanceUrl: r.acceptance_url || "",
     pdfUrl: r.pdf_url || "",
