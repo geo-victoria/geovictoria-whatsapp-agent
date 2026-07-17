@@ -42,10 +42,12 @@ const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const TPL_NUDGE = (process.env.OUTBOUND_TEMPLATE_NUDGE || "vicky_lead_nudge").trim()
 const TPL_CIERRE = (process.env.OUTBOUND_TEMPLATE_CIERRE || "vicky_lead_cierre").trim()
 // Colombia (17-jul, paridad de proactividad): plantillas propias por la línea
-// +57. SEGURO POR DEFECTO: vacías = el toque de WhatsApp se marca como hecho y
-// la cadencia sigue con los correos (deployable antes de aprobar en Meta).
-const TPL_NUDGE_CO = (process.env.OUTBOUND_TEMPLATE_NUDGE_CO || "").trim()
-const TPL_CIERRE_CO = (process.env.OUTBOUND_TEMPLATE_CIERRE_CO || "").trim()
+// +57, aprobadas en Meta el 16-jul (misma convención que las de reactivación
+// CO); las envs quedan como override. Si una plantilla se despublica, setear
+// la env en vacío NO sirve (cae al default): usar un nombre inválido y el
+// envío fallará marcando el toque.
+const TPL_NUDGE_CO = (process.env.OUTBOUND_TEMPLATE_NUDGE_CO || "vicky_co_lead_nudge").trim()
+const TPL_CIERRE_CO = (process.env.OUTBOUND_TEMPLATE_CIERRE_CO || "vicky_co_lead_cierre").trim()
 const BATCH = Number(process.env.OUTBOUND_CADENCE_BATCH || 30)
 
 // Texto que queda en el historial de la conversación por cada HSM (contexto

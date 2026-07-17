@@ -51,10 +51,11 @@ const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 // Nombre de la plantilla HSM de apertura en Botmaker (variables: nombre, empresa).
 const TPL_LEAD = (process.env.OUTBOUND_TEMPLATE_LEAD || "").trim()
 // Colombia (17-jul, paridad de proactividad): plantilla de apertura propia que
-// sale por la línea +57. SEGURO POR DEFECTO: vacía = los leads CO se saltan
-// (deployable antes de aprobar la plantilla en Meta). Zona horaria/feriados CO
-// los resuelve la cadencia con vic_is_business_now (prefijo 57 → Bogotá).
-const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "").trim()
+// sale por la línea +57. Aprobada en Meta el 16-jul (misma convención de
+// nombres que las de reactivación CO); la env queda como override. Zona
+// horaria/feriados CO los resuelve la cadencia con vic_is_business_now
+// (prefijo 57 → Bogotá).
+const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "vicky_co_lead_apertura").trim()
 
 async function authorized(req: Request): Promise<boolean> {
   const xcron = (req.headers.get("x-cron-secret") || "").trim()

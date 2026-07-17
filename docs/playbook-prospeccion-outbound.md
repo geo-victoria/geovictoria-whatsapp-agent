@@ -141,27 +141,20 @@ Qué ya corre igual que Chile sin config extra:
 - Conversación marcada `country=co`: la respuesta del lead corre el agente CO
   (precios COP, agenda CO con Alejandro Gordillo) por la línea +57.
 
-### Checklist de encendido (lo que falta — todo config, cero código)
-1. **Crear y aprobar en Botmaker/Meta (línea +57)** las 3 plantillas HSM
-   (utility, vars `${nombre}` y `${empresa}`). El texto debe calzar **1:1** con
-   el contexto que el código persiste en la conversación (si Meta exige
-   cambios, actualizar los literales `saludoApertura` en `vic-outbound-lead` y
-   `CONTEXT_NUDGE_CO`/`CONTEXT_CIERRE_CO` en el cron en el mismo cambio):
-   - **P1 `vicky_lead_apertura_co`** (T0): "Hola ${nombre}! Soy Vicky de
-     GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te
-     ayudo a armarla de una vez por acá. Avanzamos? 😊"
-   - **P2 `vicky_lead_nudge_co`** (día 1): "Hola ${nombre}! Soy Vicky de
-     GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu
-     cotización toma 2 minutos por acá. Hay algo que te falte para avanzar o
-     alguna duda que te pueda resolver? 😊"
-   - **P3 `vicky_lead_cierre_co`** (día 7): "Hola ${nombre}! Soy Vicky de
-     GeoVictoria. No te quiero molestar más: dejo tu cotización para
-     ${empresa} lista para retomarla cuando quieras — me escribes por acá y la
-     armamos de una vez. Que te vaya muy bien! 👋"
-2. **Envs en Vercel** (con los nombres reales que queden en Botmaker):
-   `OUTBOUND_TEMPLATE_LEAD_CO` · `OUTBOUND_TEMPLATE_NUDGE_CO` ·
-   `OUTBOUND_TEMPLATE_CIERRE_CO` (y verificar que `BOTMAKER_CHANNEL_CO` esté
-   seteada — la usa toda salida por la línea +57).
+### Checklist de encendido
+1. ✅ **Plantillas HSM aprobadas en Botmaker/Meta** (16-jul-2026, línea +57,
+   categoría marketing, vars `${nombre}` y `${empresa}`), cableadas como
+   default en el código (las envs `OUTBOUND_TEMPLATE_*_CO` quedan de override):
+   - **P1 `vicky_co_lead_apertura`** (T0) · **P2 `vicky_co_lead_nudge`**
+     (día 1) · **P3 `vicky_co_lead_cierre`** (día 7).
+   - El texto de la plantilla debe calzar **1:1** con el contexto que el código
+     persiste en la conversación (`saludoApertura` en `vic-outbound-lead`,
+     `CONTEXT_NUDGE_CO`/`CONTEXT_CIERRE_CO` en el cron): si se edita una
+     plantilla, actualizar esos literales en el mismo cambio.
+   - Las de reactivación CO (`vicky_co_react_preform` / `vicky_co_react_cotizacion`,
+     12-jul) ya eran default del cron de reactivación.
+2. **Verificar `BOTMAKER_CHANNEL_CO` en Vercel** — la usa toda salida por la
+   línea +57 (plantillas y push).
 3. **Workflow de Zoho** para leads CO (mismo filtro que CL: ≤49 empleados y
    no-cliente) → POST `/api/vic-outbound-lead` con el JSON de siempre más
    `"country": "Colombia"` (y opcional `paginaConversion` con la
@@ -190,8 +183,8 @@ instrumentar tasa de respuesta por toque cuando haya volumen. El A/B de T0.5
   send_mail + HSM nudge/cierre + agotamiento con reasignación SDR — CL y CO.
 - ✅ Multi-país: toque 0 y cadencia CO (línea +57), copy y correos colombianos,
   feriados/zona Bogotá, SDRs CO — ver sección 4.5.
-- ⏳ Config CO: aprobar P1-P3 CO en Meta · setear envs `*_CO` · workflow de
-  Zoho para leads CO (checklist en 4.5).
+- ⏳ Config CO: workflow de Zoho para leads CO + verificar `BOTMAKER_CHANNEL_CO`
+  (plantillas ya aprobadas y cableadas — checklist en 4.5).
 - ⏳ F3: voz T0.5 — bloqueante: endpoint de disparo por API (Dapta vs Callbots).
 - ⏳ Etapas del lead (Lead_Status) en contactado/respondió/cotizando — definir
   valores del picklist.
