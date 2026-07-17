@@ -51,11 +51,11 @@ const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 // Nombre de la plantilla HSM de apertura en Botmaker (variables: nombre, empresa).
 const TPL_LEAD = (process.env.OUTBOUND_TEMPLATE_LEAD || "").trim()
 // Colombia (17-jul, paridad de proactividad): plantilla de apertura propia que
-// sale por la línea +57. Aprobada en Meta el 16-jul (misma convención de
-// nombres que las de reactivación CO); la env queda como override. Zona
-// horaria/feriados CO los resuelve la cadencia con vic_is_business_now
-// (prefijo 57 → Bogotá).
-const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "vicky_co_lead_apertura").trim()
+// sale por la línea +57. Categoría UTILITY (aprobada 17-jul con copy
+// transaccional): inmune al cap de frecuencia de Meta sobre Marketing
+// (131049, caso Marcela). La env queda como override. Zona horaria/feriados
+// CO los resuelve la cadencia con vic_is_business_now (prefijo 57 → Bogotá).
+const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "vicky_co_solicitud_recibida").trim()
 
 async function authorized(req: Request): Promise<boolean> {
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
@@ -247,8 +247,10 @@ export async function POST(req: Request): Promise<Response> {
   // usarlo sin citarlo); el cliente solo recibió la plantilla. El country
   // marca la conversación para que la respuesta corra el agente del país y
   // los toques salgan por su línea y en su zona horaria.
+  // CO: espejo 1:1 de la plantilla UTILITY vicky_co_solicitud_recibida (si se
+  // edita la plantilla en Botmaker, actualizar este literal en el mismo cambio).
   const saludoApertura = esCO
-    ? `Hola ${nombre}! Soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla de una vez por acá. Avanzamos? 😊`
+    ? `Hola ${nombre}, te escribimos de GeoVictoria por la solicitud de cotización que registraste para ${empresa}. Puedes completarla por este medio: responde este mensaje y continuamos con el detalle.`
     : `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. Te ayudo a armarla de inmediato por acá. ¿Avanzamos?`
   const ctx = [
     saludoApertura,
