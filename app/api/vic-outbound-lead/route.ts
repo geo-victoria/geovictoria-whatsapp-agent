@@ -79,6 +79,12 @@ type LeadBody = {
   email?: string
   empleadosRango?: string
   zohoLeadId?: string
+  // País/territorio explícito desde Zoho ("Chile"/"Colombia" o "cl"/"co").
+  // Manda sobre la inferencia por prefijo y permite NORMALIZAR teléfonos en
+  // formato local (formularios que llegan sin +57/+56). Opcional: sin él, el
+  // prefijo del teléfono decide, como siempre.
+  country?: string
+  territorio?: string
   // Hook de PRUEBA (mismo patrón que el cron de reactivación): con test=true
   // salta la exclusión de internos y el dedup para validar la plantilla en un
   // número del equipo. NO persiste contexto ni toca el lead en Zoho.
@@ -98,7 +104,7 @@ export async function POST(req: Request): Promise<Response> {
   const email = (body.email || "").trim()
   const rango = (body.empleadosRango || "").trim()
   const zohoLeadId = (body.zohoLeadId || "").trim()
-  const contact = (body.telefono || "").replace(/\D/g, "")
+  let contact = (body.telefono || "").replace(/\D/g, "")
 
   if (!contact || !nombre) {
     return NextResponse.json(
@@ -106,8 +112,30 @@ export async function POST(req: Request): Promise<Response> {
       { status: 400 },
     )
   }
-  // País por prefijo telefónico: define plantilla, línea de salida y tono.
-  const country = contact.startsWith("56") ? "cl" : contact.startsWith("57") ? "co" : null
+
+  // País: el territorio EXPLÍCITO de Zoho manda; el prefijo telefónico es el
+  // fallback. Con país conocido se normalizan teléfonos en formato local:
+  // CL móvil "9XXXXXXXX" (9 dígitos) → 56...; CO celular "3XXXXXXXXX" (10) → 57...
+  const territorioRaw = (body.country || body.territorio || "").trim().toLowerCase()
+  const territorio = /colombia|^co$/.test(territorioRaw)
+    ? "co"
+    : /chile|^cl$/.test(territorioRaw)
+      ? "cl"
+      : null
+  if (territorio === "cl" && contact.length === 9 && contact.startsWith("9")) {
+    contact = `56${contact}`
+  } else if (territorio === "co" && contact.length === 10 && contact.startsWith("3")) {
+    contact = `57${contact}`
+  }
+  const porPrefijo = contact.startsWith("56") ? "cl" : contact.startsWith("57") ? "co" : null
+  // El prefijo del teléfono manda (define la línea por la que se puede escribir);
+  // el territorio solo normaliza y deja traza si no calzan.
+  const country = porPrefijo || territorio
+  if (territorio && porPrefijo && territorio !== porPrefijo) {
+    console.warn(
+      `[outbound-lead] territorio=${territorio} no calza con prefijo del teléfono ${contact} — se usa el prefijo`,
+    )
+  }
   const esCO = country === "co"
   const tplPais = esCO ? TPL_LEAD_CO : TPL_LEAD
   const channelId = esCO ? PERFIL_CO.canal.channelId : undefined
@@ -138,10 +166,15 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, skipped: "contacto interno" })
   }
   // Red de seguridad: prospección SOLO a países con línea y flujo propios
-  // (Chile +56, Colombia +57). La calificación fina vive en las assignment
-  // rules de Zoho; esto protege contra asignaciones manuales equivocadas.
-  if (!country) {
-    return NextResponse.json({ ok: true, skipped: "telefono no es +56 ni +57", contact })
+  // (Chile +56, Colombia +57). WhatsApp necesita el número internacional: si
+  // tras normalizar no hay prefijo válido (ej. fijo local sin país), se salta.
+  // La calificación fina vive en las assignment rules de Zoho.
+  if (!porPrefijo) {
+    return NextResponse.json({
+      ok: true,
+      skipped: `telefono sin prefijo +56/+57 utilizable${territorio ? ` (territorio ${territorio})` : ""}`,
+      contact,
+    })
   }
   if (!tplPais) {
     return NextResponse.json({
@@ -209,7 +242,7 @@ export async function POST(req: Request): Promise<Response> {
       `${rango ? ` · ${rango} empleados` : ""}${email ? ` · email ${email}` : ""}` +
       `${zohoLeadId ? ` · zohoLeadId ${zohoLeadId}` : ""}]`,
   ].join("\n")
-  await appendAssistantV3(contact, ctx, country).catch(() => {})
+  await appendAssistantV3(contact, ctx, esCO ? "co" : "cl").catch(() => {})
 
   // 3. Arranca la CADENCIA multicanal (correos vía Zoho + HSM día 1/7): el cron
   // vic-outbound-cadence-cron toma esta fila; cualquier respuesta la corta.
