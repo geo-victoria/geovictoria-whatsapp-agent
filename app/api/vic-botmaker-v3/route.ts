@@ -846,13 +846,12 @@ async function processOneTurn(
     // negritas y quitar signos de apertura ¡/¿.
     reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(reply)))
 
-    // 2.8. Blindaje del contacto comercial: si Vicky filtró el WhatsApp de
-    // Anderson (ejecutivo COMERCIAL) en un caso que NO es traspaso de cotización
-    // (sin cotización formal ni link generado este turno), lo reemplaza por el
-    // WhatsApp REAL de soporte. Evita que clientes de soporte le escriban a
-    // Anderson (casuística real 27-jun).
-    const permitidoComercialAnderson = tieneFormal || realCotizacion
-    reply = blindarContactoComercial(reply, permitidoComercialAnderson)
+    // 2.8. Blindaje del contacto comercial: SIN EJECUTIVO ANTES DEL PAGO
+    // (decisión 17-jul). El número de Anderson NUNCA sale por el chat — ni
+    // siquiera tras la formal: el traspaso post-pago lo envía vic-quote-notify
+    // (evento 'pagada'), no el modelo. Si Vicky lo filtra, se reemplaza por el
+    // WhatsApp real de soporte.
+    reply = blindarContactoComercial(reply, false)
 
     // 3. Persistir turno en Supabase
     await appendTurnV3(contact, message, reply).catch((err) => {

@@ -75,7 +75,7 @@ export type DerivarASoporteResultado = {
 
 const MENSAJES_POR_MOTIVO: Record<DerivarASoporteInput["motivo"], string> = {
   fuera_de_rango_trabajadores:
-    "Para empresas de tu tamaño te conviene una propuesta personalizada con uno de nuestros ejecutivos, que considera descuentos por volumen y necesidades específicas. Te derivo con Anderson Díaz, que se va a contactar contigo en las próximas horas.",
+    "Para empresas de tu tamaño te conviene una propuesta personalizada con uno de nuestros ejecutivos, que considera descuentos por volumen y necesidades específicas. Te derivo con uno de nuestros ejecutivos, que se va a contactar contigo en las próximas horas.",
   cliente_existente_problema:
     "Veo que ya eres cliente. Para problemas operativos te conviene hablar directo con soporte. Te derivo para que te atiendan lo antes posible.",
   solicitud_explicita_persona:

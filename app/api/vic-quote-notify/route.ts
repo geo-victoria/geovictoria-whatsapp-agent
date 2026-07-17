@@ -18,11 +18,14 @@
 
 import { NextResponse } from "next/server"
 import {
+  appendAssistantV3,
   closeFollowup,
   findContactByQuoteId,
   getFollowupCronSecret,
 } from "@/lib/supabase-persistence-v3"
 import { cancelPendingCallbacks } from "@/lib/dapta-voice"
+import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+import { PERFIL_CO } from "@/lib/paises/co"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 20
@@ -98,6 +101,29 @@ async function handle(req: Request): Promise<Response> {
       await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
       await cancelPendingCallbacks(contact).catch(() => {})
       console.log(`[quote-notify] cadencia cerrada contact=${contact} quote=${quoteId}`)
+
+      // TRASPASO POST-PAGO (decisión 17-jul): el ejecutivo humano aparece
+      // recién AQUÍ — antes del pago, Vicky es el único contacto comercial
+      // (el prompt y blindarContactoComercial lo garantizan). Best-effort:
+      // si la ventana de 24h de WhatsApp está cerrada, el push falla sin
+      // bloquear (el cliente igual recibe el correo de confirmación).
+      if (eventoRaw === "pagada") {
+        const esCO = contact.startsWith("57")
+        const ejecutivo = esCO
+          ? PERFIL_CO.equipo.ejecutivo
+          : { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" }
+        const traspaso =
+          `¡Felicitaciones y bienvenido a GeoVictoria! 🎉 Tu pago quedó registrado.\n\n` +
+          `De aquí en adelante te acompaña *${ejecutivo.nombre}*, tu ejecutivo comercial, quien te contactará para coordinar la puesta en marcha:\n` +
+          `📱 ${ejecutivo.telefono}\n✉️ ${ejecutivo.email}`
+        const pushed = await sendBotmakerMessage(
+          contact,
+          traspaso,
+          esCO ? PERFIL_CO.canal.channelId : undefined,
+        ).catch(() => false)
+        if (pushed) await appendAssistantV3(contact, traspaso, esCO ? "co" : "cl").catch(() => {})
+        console.log(`[quote-notify] traspaso post-pago contact=${contact} → ${ejecutivo.nombre} (push=${pushed})`)
+      }
     }
   }
   const evento = (p.evento || url.searchParams.get("evento") || "aceptada").toLowerCase()

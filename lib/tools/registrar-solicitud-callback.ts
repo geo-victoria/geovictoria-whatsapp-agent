@@ -163,7 +163,7 @@ export async function registrarSolicitudCallback(
   }
 
   const mensajeParaProspecto = args.seguimientoCotizacion
-    ? `¡Listo! Dejé registrados tus datos y Anderson Díaz, nuestro ejecutivo, te va a contactar al ${args.telefono} para afinar la propuesta. ¿Hay algo más en lo que pueda ayudarte mientras tanto?`
+    ? `¡Listo! Dejé registrados tus datos y uno de nuestros ejecutivos te va a contactar al ${args.telefono} para afinar la propuesta. ¿Hay algo más en lo que pueda ayudarte mientras tanto?`
     : `¡Listo! Tomé tus datos y un ejecutivo del equipo te contactará al ${args.telefono}` +
       (args.preferenciaHorario ? ` (te llamaremos en el horario que pediste: ${args.preferenciaHorario})` : "") +
       `. ¿Hay algo más en lo que pueda ayudarte mientras tanto?`
