@@ -16,8 +16,10 @@ dispara **on-create, sin batch ni delays**.
 ## 0. Entrada y ruteo (vive en Zoho)
 - Fuente: formulario web (nombre, apellido, correo, empresa, teléfono, rango de
   empleados, ¿usa GeoVictoria?).
-- **Workflow de Zoho asigna a Vicky SOLO:** ≤49 empleados y no-cliente.
-- 50+ → ejecutivo enterprise · cliente actual → soporte.
+- **La tómbola de asignación mete a Vicky SOLO con 1-19 empleados** y
+  no-cliente (decisión 16-jul, CL y CO por igual; antes era ≤49). El workflow
+  dispara el webhook cuando el lead queda con Owner = Vicky.
+- 20+ → tómbola humana / ejecutivo enterprise · cliente actual → soporte.
 
 ## 1. Cadencia de toques (solo corre si NO responde; CUALQUIER respuesta la corta)
 
@@ -155,10 +157,12 @@ Qué ya corre igual que Chile sin config extra:
      12-jul) ya eran default del cron de reactivación.
 2. **Verificar `BOTMAKER_CHANNEL_CO` en Vercel** — la usa toda salida por la
    línea +57 (plantillas y push).
-3. **Workflow de Zoho** para leads CO (mismo filtro que CL: ≤49 empleados y
-   no-cliente) → POST `/api/vic-outbound-lead` con el JSON de siempre más
-   `"country": "Colombia"` (y opcional `paginaConversion` con la
-   Conversion/Landing Page del lead).
+3. ✅ **Zoho listo** (17-jul): el workflow "Vicky - Toque 0 WhatsApp lead" es
+   genérico (dispara con Owner = Vicky y ya manda `territorio` y
+   `paginaConversion`), y la tómbola de asignación incluye a Vicky para leads
+   Colombia 1-19 empleados. Mejora sugerida pendiente: la entrada CO de la
+   tómbola no filtra por Lead Source (la CL sí) — agregar el mismo filtro
+   inbound para que importaciones/partners no gatillen el toque 0.
 4. **E2E con número del equipo CO**: primero `"test": true` en el body (envía
    la plantilla real al número indicado, sin dedup ni tocar Zoho); después el
    flujo completo agregando el número a `OUTBOUND_ALLOW_CONTACTS` y acelerando
