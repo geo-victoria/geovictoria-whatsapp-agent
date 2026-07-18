@@ -218,14 +218,16 @@ export async function POST(req: Request) {
     const country = paises[claim.conversation_id] || "cl"
     const channelId = country === "co" ? PERFIL_CO.canal.channelId : undefined
 
-    // Toque de las 22h50 para el segmento con COTIZACIÓN FORMAL (Chile): en
+    // Toque de las 22h50 para el segmento con COTIZACIÓN FORMAL: en
     // vez del nudge LLM, Vicky ANUNCIA su llamada y la agenda para 10 minutos
     // después (~23h), condicionada al consentimiento (diseño Lalo 14-jul):
     // vic-callback-cron revisa la respuesta antes de discar — un "no" se
-    // respeta; silencio o un "sí" disparan la llamada.
+    // respeta; silencio o un "sí" disparan la llamada. Multi-país (19-jul):
+    // Colombia incluida — el callback-cron rutea +57 al flujo/agente/caller CO
+    // (gPvLR, línea +57 318 107 0737) con horario hábil de Bogotá.
     const habilitadoParaLlamada =
       !LLAMADAS_SOLO_PRUEBA || CONTACTOS_PRUEBA_RAPIDA.has(claim.contact)
-    if (claim.stage === 2 && country === "cl" && habilitadoParaLlamada) {
+    if (claim.stage === 2 && (country === "cl" || country === "co") && habilitadoParaLlamada) {
       const qp = await getQuotePointer(claim.contact).catch(() => null)
       // Anti-loop: el WhatsApp post-llamada re-arma la cadencia (cada respuesta
       // de Vicky reinicia el reloj), y sin este guard el ciclo anunciaba y

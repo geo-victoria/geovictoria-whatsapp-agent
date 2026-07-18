@@ -47,11 +47,16 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // Horario hábil por PAÍS del contacto (multi-país, 17-jul): un +57 no se
-  // llama en horario chileno — Bogotá va 1-2h detrás de Santiago.
+  // llama en horario chileno — Bogotá va 1-2h detrás de Santiago. Y solo
+  // días hábiles (19-jul, paridad con la regla Lunes-Viernes de los toques).
+  const diaHabilEn = (timeZone: string): boolean => {
+    const dia = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(new Date())
+    return dia !== "Sat" && dia !== "Sun"
+  }
   const horaCl = horaEn("America/Santiago")
   const horaCo = horaEn("America/Bogota")
-  const clEnHorario = horaCl >= 9 && horaCl < 20
-  const coEnHorario = horaCo >= 9 && horaCo < 19
+  const clEnHorario = diaHabilEn("America/Santiago") && horaCl >= 9 && horaCl < 20
+  const coEnHorario = diaHabilEn("America/Bogota") && horaCo >= 9 && horaCo < 19
   if (!clEnHorario && !coEnHorario) {
     return NextResponse.json({ ok: true, disparadas: 0, motivo: "fuera de horario (CL y CO)" })
   }
