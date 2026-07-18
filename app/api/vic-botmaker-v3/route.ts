@@ -466,6 +466,15 @@ async function processOneTurn(
     //        hacia una decisión / derivación en vez de quedar pegados en loop.
     const MULETILLA_DESCUENTO =
       "Permíteme procesar el descuento en el sistema para confirmarte el porcentaje exacto que puedo aplicarte. ¿Te parece?"
+    // El rompe-loop debe reconocer TODOS los textos de contención que este
+    // guardrail puede haber enviado en el turno anterior — comparar solo
+    // contra la muletilla antigua dejó un loop de 4 repeticiones con un
+    // cliente real (caso Jorge, 18-jul: "Déjame dejarte el mejor precio…"
+    // cuatro veces seguidas ante cuatro "sí").
+    const MULETILLAS_DESCUENTO = new Set([
+      MULETILLA_DESCUENTO,
+      "Déjame dejarte el mejor precio posible y te lo confirmo enseguida. Me confirmas que seguimos con esta opción?",
+    ])
     // (A) Forma clásica: "X% de descuento".
     const ofrecePctDescuento =
       /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
@@ -520,9 +529,20 @@ async function processOneTurn(
     // los dos primeros índices son instalación, así que el recurrente arranca en
     // pref_escalon=3 (=10%). recStep indexa la escalera del plan.
     const REC_PCTS = [10, 20]
-    const recStep = prefEscalon - 3
-    const committedRecPct =
-      recStep < 0 ? 0 : REC_PCTS[Math.min(recStep, REC_PCTS.length - 1)]
+    // Dos convenciones de escalón conviven en pref_escalon: la escalera del
+    // flujo FORMAL (los 2 primeros índices son instalación → recurrente parte
+    // en 3) y la del PREFORM (consultar_descuento_referencial: 1=10%, 2=20%).
+    // Interpretar solo la formal hacía que un recap LEGÍTIMO del % ya ofrecido
+    // en preform pareciera alucinación (caso Jorge 18-jul: escalón 2 → fórmula
+    // decía 0% comiteado → muletilla en loop). Se toma el MÁXIMO de ambas
+    // lecturas: exposición mínima (peor caso: dejar pasar el recap de un % que
+    // el cliente ya vio) contra el loop real que mataba ventas.
+    const recStepFormal = prefEscalon - 3
+    const pctFormal =
+      recStepFormal < 0 ? 0 : REC_PCTS[Math.min(recStepFormal, REC_PCTS.length - 1)]
+    const pctPreform =
+      prefEscalon >= 1 ? REC_PCTS[Math.min(prefEscalon, REC_PCTS.length) - 1] : 0
+    const committedRecPct = Math.max(pctFormal, pctPreform)
     // Si ya existe cotización formal, el descuento quedó comiteado en ella (y
     // pref_escalon se limpió al generarla). Reconfirmar/recapitular un % legítimo
     // (≤20% plan, o 25/50 instalación) NO es alucinación.
@@ -570,7 +590,7 @@ async function processOneTurn(
       // alucinado salía tal cual).
       const elegibleRetry =
         (!tieneFormal && committedRecPct < 20) || (tieneFormal && pideRebaja)
-      if (elegibleRetry && ultimoAsistente !== MULETILLA_DESCUENTO) {
+      if (elegibleRetry && !MULETILLAS_DESCUENTO.has(ultimoAsistente || "")) {
         const FORZAR_TOOL_DESCUENTO =
           "\n\n# Instrucción de sistema (este turno)\n" +
           "El cliente está pidiendo (más) descuento y aún estás negociando. DEBES llamar la tool de " +
@@ -617,7 +637,7 @@ async function processOneTurn(
 
       if (recuperado) {
         // ya tenemos un % real desde la tool; no aplicar muletilla.
-      } else if (ultimoAsistente === MULETILLA_DESCUENTO) {
+      } else if (MULETILLAS_DESCUENTO.has(ultimoAsistente || "")) {
         // (B2) Ya pedimos "procesar el descuento" el turno anterior: romper el
         // loop cerrando hacia una decisión o derivación.
         console.error(
