@@ -1121,6 +1121,31 @@ export async function POST(request: Request): Promise<NextResponse> {
     const contact = normalizeContact(body.contact || "")
     let message = (body.message || "").trim()
 
+    // 2.1. Ruteo multi-país (19-jul): la acción de código de Botmaker es UNA
+    // sola para las dos líneas y apunta acá, así que los mensajes colombianos
+    // (+57) entran por este webhook. Sin este reenvío los atendía el flujo
+    // chileno: prompt CL, precios en UF/CLP y respuestas por la línea +56
+    // (caso Mauricio/Dahi Cream). Se reenvía el body CRUDO al webhook CO
+    // (conserva audio/imagen) y se devuelve su respuesta tal cual.
+    if (contact.startsWith("57") && contact.length >= 12) {
+      const origin = new URL(request.url).origin
+      const r = await fetch(`${origin}/api/vic-botmaker-co`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-secret": getEnv("BOTMAKER_SECRET_CO"),
+        },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      }).catch(() => null)
+      if (r) {
+        const data = await r.json().catch(() => ({ reply: "" }))
+        console.log(`[v3-botmaker] contact=${contact} es CO → reenviado a vic-botmaker-co (${r.status})`)
+        return NextResponse.json(data, { status: r.status })
+      }
+      console.error(`[v3-botmaker] contact=${contact} es CO pero el reenvío a vic-botmaker-co falló — se atiende con flujo CL como fallback`)
+    }
+
     // 2.5. Nota de voz: si vino la URL del audio y no hay texto útil, la
     // transcribimos y seguimos como si el usuario lo hubiera escrito. Si la
     // transcripción falla, o llegó un audio sin URL (la acción de código aún no
