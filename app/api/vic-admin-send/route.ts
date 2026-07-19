@@ -103,9 +103,12 @@ export async function POST(req: Request): Promise<Response> {
     const result = await sendCloudApi(contact.replace(/\D/g, ""), text)
     return NextResponse.json({ via: "cloud", contact, ...result }, { status: result.ok ? 200 : 502 })
   }
-  const ok = await sendBotmakerMessage(contact, text).catch(() => false)
+  // Multi-país: channel = channelId de la línea de salida (ej. el de la línea
+  // +57). Sin él, sendBotmakerMessage usa la línea CL de siempre.
+  const channel = (body.channel || "").trim() || undefined
+  const ok = await sendBotmakerMessage(contact, text, channel).catch(() => false)
   if (ok) {
     await appendAssistantV3(contact, text).catch(() => {})
   }
-  return NextResponse.json({ ok, via: "botmaker", contact })
+  return NextResponse.json({ ok, via: "botmaker", contact, channel: channel || "default(CL)" })
 }
