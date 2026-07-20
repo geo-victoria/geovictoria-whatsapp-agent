@@ -74,7 +74,15 @@ export async function transicionarDealHacia(
     if (!bpRes.ok) return { dealId, desde: stageActual, resultado: "error", detalle: `blueprint GET ${bpRes.status}` }
     const bp = (await bpRes.json().catch(() => ({}))) as {
       blueprint?: {
-        transitions?: Array<{ id: string; name?: string; next_field_value?: string }>
+        transitions?: Array<{
+          id: string
+          name?: string
+          next_field_value?: string
+          // Zoho pre-llena el data esperado de la transición (ej. Contact_Name
+          // ya asociado); ejecutarla con {} da INVALID_DATA — hay que devolver
+          // ese mismo objeto.
+          data?: Record<string, unknown>
+        }>
       }
     }
     const transitions = bp?.blueprint?.transitions || []
@@ -102,7 +110,7 @@ export async function transicionarDealHacia(
       method: "PUT",
       headers,
       cache: "no-store",
-      body: JSON.stringify({ blueprint: [{ transition_id: match.id, data: {} }] }),
+      body: JSON.stringify({ blueprint: [{ transition_id: match.id, data: match.data || {} }] }),
     })
     const execData = (await exec.json().catch(() => ({}))) as { code?: string; message?: string }
     if (!exec.ok || (execData?.code && execData.code !== "SUCCESS")) {
