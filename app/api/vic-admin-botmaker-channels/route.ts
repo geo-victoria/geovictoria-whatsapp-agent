@@ -63,6 +63,22 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: r.ok, status: r.status, data })
   }
 
+  // ?get=/v2.0/<ruta>: passthrough de SOLO LECTURA a la API de Botmaker con el
+  // token del servidor (auditar plantillas/variables/intents sin exponer el
+  // token). Solo GET y solo rutas /v2.0/.
+  const pass = (url.searchParams.get("get") || "").trim()
+  if (pass) {
+    if (!pass.startsWith("/v2.0/")) {
+      return NextResponse.json({ ok: false, error: "solo rutas /v2.0/" }, { status: 400 })
+    }
+    const r = await fetch(`https://api.botmaker.com${pass}`, {
+      headers: { "access-token": BM_TOKEN, Accept: "application/json" },
+      cache: "no-store",
+    })
+    const data = await r.json().catch(() => ({}))
+    return NextResponse.json({ ok: r.ok, status: r.status, path: pass, data })
+  }
+
   const res = await fetch("https://api.botmaker.com/v2.0/channels", {
     headers: { "access-token": BM_TOKEN, Accept: "application/json" },
     cache: "no-store",
