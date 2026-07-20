@@ -25,6 +25,7 @@
 
 import { NextResponse, after } from "next/server"
 import { runAgentLoop } from "@/lib/agent-loop"
+import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { getSystemPromptCO, formatCotizacionExistenteCO } from "@/lib/paises/co/prompt"
 import { TOOL_SCHEMAS_CO, buildDispatchCO } from "@/lib/paises/co/tools"
@@ -168,6 +169,12 @@ async function capturarPayloadDebug(body: unknown): Promise<void> {
 
 async function processOneTurnCO(contact: string, message: string, apiKey: string): Promise<void> {
   const history = await fetchHistoryV3(contact)
+  // PROCESO ÚNICO (espejo CL, 20-jul): conversación nueva con ejecutivo ya
+  // trabajando al contacto → candado comercial + directiva.
+  if (history.length === 0) {
+    const proceso = await detectarProcesoHumano(contact, "co").catch(() => null)
+    if (proceso) history.push({ role: "assistant", content: directivaProcesoHumano(proceso) })
+  }
   // Anti-amnesia (espejo CL): si ya existe una cotización formal, se inyecta
   // su estado al prompt (no re-pedir datos, no regenerar, reenviar el link).
   const quotePointer = await getQuotePointer(contact).catch(() => null)

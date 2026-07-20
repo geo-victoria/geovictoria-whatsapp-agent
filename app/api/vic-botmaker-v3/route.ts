@@ -27,6 +27,7 @@
 
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
+import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import {
   getSystemPromptV3,
   formatCotizacionExistenteParaPrompt,
@@ -295,6 +296,16 @@ async function processOneTurn(
   try {
     // 1. Cargar historial
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
+
+    // 1.1. PROCESO ÚNICO (política Lalo 20-jul, caso Ingesub): conversación
+    // NUEVA → ¿el contacto ya está siendo trabajado por un ejecutivo? Si sí,
+    // se activa el candado comercial (el agent-loop retira las tools de
+    // venta) y la directiva entra al historial — también en memoria para que
+    // aplique desde ESTE primer turno.
+    if (history.length === 0) {
+      const proceso = await detectarProcesoHumano(contact, "cl").catch(() => null)
+      if (proceso) history.push({ role: "assistant", content: directivaProcesoHumano(proceso) })
+    }
 
     // 1.2. Diccionario Vicky (acuerdo con Marketing jul-2026): la PRIMERA
     // respuesta de un lead outbound (conversación abierta por el toque 0, aún
