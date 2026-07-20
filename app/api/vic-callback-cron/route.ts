@@ -17,7 +17,12 @@
  */
 
 import { NextResponse } from "next/server"
-import { appendAssistantV3, getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
+import {
+  appendAssistantV3,
+  fetchHistoryV3,
+  getFollowupCronSecret,
+  getKvValue,
+} from "@/lib/supabase-persistence-v3"
 import {
   claimDueCallbacks,
   clasificarConsentimiento,
@@ -123,11 +128,36 @@ export async function POST(req: Request): Promise<Response> {
       }
     }
     // El encuadre de la apertura depende de POR QUÉ sale esta llamada.
-    const contexto =
+    const base =
       payload.tipo === "consent_call"
         ? `${motivo}. Hace unos minutos le enviaste por WhatsApp "¿te parece si te llamo a tu celular y conversamos?" y no se negó (aceptó o no alcanzó a responder). Usa tu apertura estándar con naturalidad.`
         : `${motivo}. Esta llamada es la DEVOLUCIÓN comprometida: el cliente pidió que lo llamaras a esta hora, ` +
           `así que abre reconociéndolo ("hola, soy Vicky de GeoVictoria, quedamos en que te llamaba ahora...") en vez del saludo estándar.`
+
+    // Memoria de la ejecutiva (principio 20-jul): la Vicky de voz es LA MISMA
+    // ejecutiva que la de WhatsApp — un humano con memoria sana no cita el
+    // precio viejo ni olvida el descuento que ya dio, así que la llamada sale
+    // con el estado comercial y los últimos mensajes inyectados como DATO (no
+    // depende de que el modelo "recuerde").
+    let memoria = ""
+    const pctComiteado = Number(payload.pct_comiteado || 0) || 0
+    const precioVigente = String(payload.precio_vigente || "").trim()
+    if (pctComiteado > 0 && precioVigente) {
+      memoria +=
+        ` ESTADO COMERCIAL VIGENTE: este cliente YA tiene un ${pctComiteado}% de descuento acordado — ` +
+        `su precio vigente es ${precioVigente} pesos mensuales, IVA incluido. Cita SIEMPRE ese precio ` +
+        `vigente como el valor de su cotización (NUNCA el monto original sin descuento) y cualquier ` +
+        `negociación parte de ahí hacia abajo. Jamás le digas un precio mayor al vigente.`
+    }
+    const historial = await fetchHistoryV3(cb.contact, 12).catch(() => [])
+    if (historial.length > 0) {
+      const ultimos = historial
+        .slice(-10)
+        .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${String(m.content).replace(/\s+/g, " ").slice(0, 160)}`)
+        .join(" || ")
+      memoria += ` ÚLTIMOS MENSAJES DE LA CONVERSACIÓN DE WHATSAPP (tu propia memoria — úsala con naturalidad y no contradigas nada de lo ya acordado): ${ultimos}`
+    }
+    const contexto = base + memoria
     const res = await fetch(esCO ? flowUrlCo : flowUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

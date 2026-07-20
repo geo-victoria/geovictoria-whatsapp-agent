@@ -40,7 +40,7 @@ import {
   getQuotePointer,
 } from "@/lib/supabase-persistence-v3"
 import { hasRecentCallActivity, scheduleCallback } from "@/lib/dapta-voice"
-import { cotizacionAbiertaParaSeguimiento } from "@/lib/zoho-quote-status"
+import { estadoCotizacionParaSeguimiento } from "@/lib/zoho-quote-status"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
@@ -237,7 +237,11 @@ export async function POST(req: Request) {
       // Y la cotización debe seguir ABIERTA en Zoho: un cliente que ya aceptó/
       // pagó puede re-armar su cadencia conversando post-venta (caso Carlos,
       // 15-jul) — a él jamás se le anuncia una llamada de venta.
-      const abierta = qp && !yaLlamado ? await cotizacionAbiertaParaSeguimiento(qp.quoteId) : false
+      const estadoQ =
+        qp && !yaLlamado
+          ? await estadoCotizacionParaSeguimiento(qp.quoteId)
+          : { abierta: false, pctComiteado: 0 }
+      const abierta = estadoQ.abierta
       if (qp && !yaLlamado && abierta) {
         const anuncio = "¿Te parece si te llamo a tu celular y conversamos? 😊"
         const okAnuncio = await sendBotmakerMessage(claim.contact, anuncio, channelId).catch(
@@ -262,6 +266,15 @@ export async function POST(req: Request) {
               monto_mensual: qp.totalClp ? String(Math.round(qp.totalClp)) : "",
               dias_desde_envio: "1",
               quote_id: qp.quoteId || "",
+              // Descuento YA acordado (WhatsApp o llamada previa): la voz debe
+              // citar el precio VIGENTE, no el original. monto_mensual se
+              // mantiene pre-descuento a propósito (es la base del cálculo de
+              // % del post-llamada — no tocar su semántica).
+              pct_comiteado: estadoQ.pctComiteado > 0 ? String(estadoQ.pctComiteado) : "",
+              precio_vigente:
+                estadoQ.pctComiteado > 0 && qp.totalClp
+                  ? String(Math.round(qp.totalClp * (1 - estadoQ.pctComiteado / 100)))
+                  : "",
               motivo: "Llamada hora-23 (anunciada por WhatsApp a las 22h50)",
             },
           ).catch(() => false)

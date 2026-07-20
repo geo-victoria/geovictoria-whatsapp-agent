@@ -17,6 +17,38 @@ const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.co
  * (caso real: Carlos, 15-jul). Conservador: ante error devuelve false (mejor
  * no llamar que llamar a un cliente que ya pagó).
  */
+/**
+ * Estado + descuento comiteado de la cotización, en una sola consulta. Para la
+ * llamada de voz: si ya hay descuento acordado (por WhatsApp o una llamada
+ * anterior), la llamada debe citar el precio VIGENTE, no el original — el
+ * viernes 18 la voz citó $95.996 a un cliente cuya página ya mostraba $76.797
+ * con 20%, porque solo recibía el monto pre-descuento.
+ */
+export async function estadoCotizacionParaSeguimiento(
+  quoteId: string,
+): Promise<{ abierta: boolean; pctComiteado: number }> {
+  if (!quoteId) return { abierta: false, pctComiteado: 0 }
+  try {
+    const token = await getZohoAccessToken()
+    const res = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Estado_Cotizacion,Descuento_Recurrente_Pct`,
+      {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      },
+    )
+    if (!res.ok) return { abierta: false, pctComiteado: 0 }
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ Estado_Cotizacion?: string; Descuento_Recurrente_Pct?: number }>
+    }
+    const estado = (data?.data?.[0]?.Estado_Cotizacion || "").toLowerCase()
+    const pct = Number(data?.data?.[0]?.Descuento_Recurrente_Pct || 0) || 0
+    return { abierta: estado !== "aceptada" && estado !== "rechazada", pctComiteado: pct }
+  } catch {
+    return { abierta: false, pctComiteado: 0 }
+  }
+}
+
 export async function cotizacionAbiertaParaSeguimiento(quoteId: string): Promise<boolean> {
   if (!quoteId) return false
   try {
