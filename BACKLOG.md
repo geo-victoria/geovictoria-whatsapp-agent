@@ -1,5 +1,14 @@
 # Backlog — Vicky / Reactivación
 
+## Página amable para link corto /q inválido (detalle UX, 20-jul)
+
+Cuando el link corto del botón post-llamada apunta a una cotización eliminada o
+purgada, el cotizador responde "Not found" pelado. Cambiarlo por una página
+amable: "Esta cotización ya no está disponible — escríbenos por WhatsApp y te
+la reactivamos al instante" con link wa.me a la línea del país. Caso borde
+(las cotizaciones reales no se borran); 10 minutos en api/q.js del cotizador.
+
+
 Ítems pendientes priorizables. Cada uno indica contexto, alcance y bloqueantes
 conocidos.
 
