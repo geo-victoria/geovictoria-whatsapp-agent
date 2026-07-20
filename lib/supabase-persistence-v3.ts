@@ -492,6 +492,9 @@ const FOLLOWUP_FIRST_OFFSET_MS = 60 * 60 * 1000 // primer toque: +1 h
 // offsets acelerados de vic_v3_claim_followups. Quitar al terminar las pruebas.
 const FOLLOWUP_FIRST_OFFSET_TEST_MS = 2 * 60 * 1000
 const CONTACTOS_PRUEBA_RAPIDA = new Set(["56944668823", "56978385048"])
+// Con la voz en producción (20-jul), los números internos vuelven al ritmo
+// normal — nadie quiere nudges cada 2 minutos fuera del laboratorio.
+const VOICE_PROD = (process.env.VOICE_CALLS_PRODUCTION || "").trim()
 
 type FollowupStateRow = {
   id: string
@@ -572,7 +575,7 @@ export async function armFollowup(contact: string, country = "cl"): Promise<void
       followup_attempts: 0,
       followup_next_at: new Date(
         now.getTime() +
-          (CONTACTOS_PRUEBA_RAPIDA.has(contact)
+          (VOICE_PROD !== "1" && CONTACTOS_PRUEBA_RAPIDA.has(contact)
             ? FOLLOWUP_FIRST_OFFSET_TEST_MS
             : FOLLOWUP_FIRST_OFFSET_MS),
       ).toISOString(),

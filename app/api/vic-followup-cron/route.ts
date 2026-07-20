@@ -249,7 +249,7 @@ export async function POST(req: Request) {
         )
         // Anuncio (22h50) → llamada (~23h): 10 min de gap. Contactos de prueba
         // internos: 3 min, para validar el flujo completo sin esperar (14-jul).
-        const gapMin = CONTACTOS_PRUEBA_RAPIDA.has(claim.contact) ? 3 : 10
+        const gapMin = LLAMADAS_SOLO_PRUEBA && CONTACTOS_PRUEBA_RAPIDA.has(claim.contact) ? 3 : 10
         let agendada = false
         if (okAnuncio) {
           sent++
