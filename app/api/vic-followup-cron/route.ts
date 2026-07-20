@@ -39,6 +39,7 @@ import {
   getConversationCountries,
   getKvValue,
   getQuotePointer,
+  getFormalQuote,
 } from "@/lib/supabase-persistence-v3"
 import { hasRecentCallActivity, scheduleCallback } from "@/lib/dapta-voice"
 import { estadoCotizacionParaSeguimiento } from "@/lib/zoho-quote-status"
@@ -135,6 +136,38 @@ function nudgeEsSeguro(texto: string): boolean {
   return true
 }
 
+// Frase FIJA del toque de seguimiento post-cotización (definición Lalo 20-jul,
+// reemplaza al nudge libre del LLM cuando ya hay cotización formal enviada).
+// El nombre se extrae del historial (Haiku, solo el nombre); sin nombre, la
+// frase va igual sin él.
+function fraseSeguimientoCotizacion(nombre: string): string {
+  const saludo = nombre ? `Disculpa ${nombre}` : "Disculpa"
+  return `${saludo}, has tenido tiempo de revisar la cotización, hay algo que te frene para confirmarla?`
+}
+
+async function nombreClienteDesdeTranscript(
+  client: Anthropic,
+  transcript: string,
+): Promise<string> {
+  try {
+    const response = await client.messages.create({
+      model: NUDGE_MODEL,
+      max_tokens: 20,
+      system:
+        "De la conversación que te entregan, devuelve SOLO el primer nombre de pila del CLIENTE (la persona que habla con Vicky), tal como él mismo lo dijo o como Vicky lo saluda. Si el nombre no aparece en ninguna parte, devuelve exactamente NINGUNO. Sin explicación, sin puntuación.",
+      messages: [{ role: "user", content: transcript }],
+    })
+    const block = response.content.find((b) => b.type === "text")
+    const raw = block && block.type === "text" ? block.text.trim() : ""
+    // Solo un nombre de pila plausible: una palabra, letras, ni "NINGUNO" ni "Vicky".
+    if (!/^[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,20}$/.test(raw)) return ""
+    if (/^(ninguno|vicky)$/i.test(raw)) return ""
+    return raw
+  } catch {
+    return ""
+  }
+}
+
 async function generarNudge(
   apiKey: string,
   contact: string,
@@ -146,6 +179,16 @@ async function generarNudge(
     .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${m.content}`)
     .join("\n")
     .slice(-4000)
+
+  // Toque 1 con COTIZACIÓN FORMAL ya enviada → frase fija de seguimiento
+  // (determinística; el LLM solo aporta el nombre del cliente).
+  if (stage <= 1) {
+    const formal = await getFormalQuote(contact).catch(() => "")
+    if (formal) {
+      const nombre = await nombreClienteDesdeTranscript(new Anthropic({ apiKey }), transcript)
+      return fraseSeguimientoCotizacion(nombre)
+    }
+  }
 
   // ¿El precio que vio llevaba reloj? (preform con marcador "recurrente" que
   // menciona reloj). Si es así, el PRIMER toque no es un "¿sigues ahí?": es la
