@@ -272,7 +272,7 @@ function renderVentasCerradas(ventas: VentaCerrada[]): string {
 </div>`
 }
 
-async function fetchCierreZoho(excludeIds: Set<string>): Promise<{
+async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co"): Promise<{
   total: number
   aceptadas: number
   // Desglose del campo "Intervención Humana" sobre las ACEPTADAS: cierres
@@ -296,7 +296,8 @@ async function fetchCierreZoho(excludeIds: Set<string>): Promise<{
     if (!res.ok) return null
     const data = (await res.json().catch(() => null)) as { data?: RawAceptada[] } | null
     const quotes = (data?.data || []).filter((q) => {
-      if (excludeIds.has(String(q.id || ""))) return false
+      const esCO = coQuoteIds.has(String(q.id || ""))
+      if (pais === "cl" ? esCO : !esCO) return false
       const nombre = String(q.Name || "").toLowerCase()
       return !nombre.includes("prueba") && !nombre.includes("huellerocompany")
     })
@@ -506,23 +507,27 @@ export async function GET(req: Request): Promise<Response> {
     aceptadasList: RawAceptada[]
   } | null = null
   let ventasHtml = ""
+  // Filtro por PAÍS = canal/línea de Vicky (pedido Lalo 20-jul): cl (default)
+  // muestra la línea chilena; ?pais=co la colombiana. El país de una
+  // conversación viene de vic_v3_conversations.country (la línea por la que
+  // entró), y sus cotizaciones se asocian por formal_quote_id.
+  const pais: "cl" | "co" = searchParams.get("pais") === "co" ? "co" : "cl"
   try {
     const co = await fetchExclusionesCO()
     const [allRows, hard, cierreZoho] = await Promise.all([
       fetchAnalysis(),
       fetchHardSignals(),
-      fetchCierreZoho(co.quoteIds),
+      fetchCierreZoho(co.quoteIds, pais),
     ])
     cierre = cierreZoho
     if (cierre?.aceptadasList?.length) {
       ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList))
     }
-    rows = allRows.filter(
-      (r) =>
-        !isTestContact(r.contact) &&
-        !co.convIds.has(r.conversation_id) &&
-        !co.contacts.has(digits(r.contact)),
-    )
+    rows = allRows.filter((r) => {
+      if (isTestContact(r.contact)) return false
+      const esCO = co.convIds.has(r.conversation_id) || co.contacts.has(digits(r.contact))
+      return pais === "cl" ? !esCO : esCO
+    })
     // Hechos deterministas mandan sobre el LLM: cotización formal enviada y
     // reunión agendada se imponen aunque el modelo no las haya detectado.
     for (const r of rows) {
@@ -687,7 +692,7 @@ export async function GET(req: Request): Promise<Response> {
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Vicky CHILE — clientes reales (excluye pruebas internas y la línea de Colombia) · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr}</div>
+  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a></div>
 
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">

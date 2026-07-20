@@ -69,7 +69,26 @@ async function handler(req: Request): Promise<Response> {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
       cache: "no-store",
     })
-    const raw = await r.json().catch(() => ({}))
+    const raw = (await r.json().catch(() => ({}))) as {
+      blueprint?: { transitions?: Array<{ id: string; name?: string; data?: Record<string, unknown> }> }
+    }
+    // &ejecutar=<needle>: ejecuta la transición que calce y devuelve la
+    // respuesta CRUDA del PUT (diagnóstico de INVALID_DATA).
+    const ejecutar = (new URL(req.url).searchParams.get("ejecutar") || "").trim().toLowerCase()
+    if (ejecutar) {
+      const t = (raw?.blueprint?.transitions || []).find((x) =>
+        (x.name || "").toLowerCase().includes(ejecutar),
+      )
+      if (!t) return NextResponse.json({ ok: false, error: "transición no encontrada", raw })
+      const put = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Deals/${debugDeal}/actions/blueprint`, {
+        method: "PUT",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ blueprint: [{ transition_id: t.id, data: t.data || {} }] }),
+      })
+      const putBody = await put.text().catch(() => "")
+      return NextResponse.json({ ok: put.ok, putStatus: put.status, putBody: putBody.slice(0, 1500), enviado: t.data || {} })
+    }
     return NextResponse.json({ ok: r.ok, status: r.status, raw })
   }
 
