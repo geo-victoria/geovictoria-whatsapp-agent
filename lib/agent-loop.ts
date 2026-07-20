@@ -47,6 +47,7 @@ import {
   getQuotePointers,
   setQuotePointer,
   persistMeeting,
+  marcarConversacionSoporte,
   type PrefParams,
 } from "./supabase-persistence-v3"
 import { getTimezone, computeMeetingReminderAt } from "./calendar"
@@ -485,6 +486,26 @@ export async function runAgentLoop(params: {
         } else {
           if (toolName === "generar_link_cotizadora") generarLinkEnEsteTurno++
           result = await toolDispatch(toolName, toolInput)
+        }
+
+        // Marca SOPORTE determinística (Lalo 20-jul): si la conversación se
+        // redirige al agente de soporte de Foundry (consultar_agente_soporte) o
+        // se deriva a soporte operativo, queda marcada como soporte SÍ O SÍ —
+        // cierra la cadencia de seguimiento y candadea el re-armado de esta
+        // conversación (armFollowup lo respeta). Se marca por la INVOCACIÓN,
+        // no por el éxito de la tool: aunque Foundry falle, la conversación es
+        // de soporte. No depende del análisis LLM por hora ni del sweep de 15m.
+        const esRedireccionSoporte =
+          toolName === "consultar_agente_soporte" ||
+          (toolName === "derivar_a_soporte" &&
+            ["cliente_existente_problema", "transferir_soporte_operativo"].includes(
+              String(toolInput.motivo || ""),
+            ))
+        if (contact && esRedireccionSoporte) {
+          const paisContacto = contact.startsWith("57") ? "co" : "cl"
+          await marcarConversacionSoporte(contact, paisContacto).catch((e) =>
+            console.error(`[agent-loop] marcarConversacionSoporte falló (${contact}):`, e),
+          )
         }
 
         // Capa 3 (persistencia): registrar/limpiar el Borrador negociado.

@@ -564,6 +564,13 @@ export async function armFollowup(contact: string, country = "cl"): Promise<void
   if (!contact) return
   const conversationId = await getOrCreateConversationId(contact, country)
   if (!conversationId) return
+  // Candado SOPORTE (Lalo 20-jul): si esta MISMA conversación fue redirigida al
+  // agente de soporte de Foundry (consultar_agente_soporte) o derivada a soporte
+  // operativo, NO se re-arma seguimiento comercial — sí o sí queda como soporte,
+  // sin depender del análisis LLM por hora. El candado guarda el conversationId:
+  // una conversación NUEVA del mismo contacto lo deja obsoleto automáticamente.
+  const candadoSoporte = await getKvValue(`soporte_conv_${contact}`).catch(() => null)
+  if (candadoSoporte === conversationId) return
   const now = new Date()
   await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
     method: "PATCH",
@@ -626,6 +633,34 @@ export async function closeFollowup(
       body: JSON.stringify({ status: "declined" }),
     }).catch(() => {})
   }
+}
+
+/**
+ * Marca DETERMINÍSTICA de conversación de soporte (pedido Lalo 20-jul): apenas
+ * la conversación se redirige al agente de soporte de Foundry
+ * (consultar_agente_soporte) o se deriva a soporte operativo, queda marcada como
+ * soporte SÍ O SÍ — sin esperar el análisis LLM por hora ni el sweep de 15 min.
+ * Efectos: cierra el ciclo de followup con reason 'soporte' (que el cron de
+ * reactivación ya excluye) y deja el candado kv que armFollowup respeta para no
+ * re-armar la cadencia en esta misma conversación.
+ */
+export async function marcarConversacionSoporte(
+  contact: string,
+  country = "cl",
+): Promise<void> {
+  if (!contact) return
+  const conversationId = await getOrCreateConversationId(contact, country)
+  if (!conversationId) return
+  await setKvValue(`soporte_conv_${contact}`, conversationId).catch(() => {})
+  await supabaseFetch(`vic_v3_conversations?id=eq.${conversationId}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      followup_status: "cerrado",
+      followup_next_at: null,
+      followup_closed_reason: "soporte",
+    }),
+  })
 }
 
 /**
