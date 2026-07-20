@@ -37,6 +37,7 @@ import {
   getFollowupCronSecret,
   closeFollowup,
   getConversationCountries,
+  getKvValue,
   getQuotePointer,
 } from "@/lib/supabase-persistence-v3"
 import { hasRecentCallActivity, scheduleCallback } from "@/lib/dapta-voice"
@@ -242,7 +243,13 @@ export async function POST(req: Request) {
           ? await estadoCotizacionParaSeguimiento(qp.quoteId)
           : { abierta: false, pctComiteado: 0 }
       const abierta = estadoQ.abierta
-      if (qp && !yaLlamado && abierta) {
+      // REGLA DE ORO: con candado no-llamar no se anuncia ni se agenda llamada
+      // — el contacto sigue solo con toques de texto.
+      const candadoNoLlamar =
+        qp && abierta
+          ? ((await getKvValue(`voz_no_llamar_${claim.contact}`).catch(() => "")) || "").trim()
+          : ""
+      if (qp && !yaLlamado && abierta && !candadoNoLlamar) {
         const anuncio = "¿Te parece si te llamo a tu celular y conversamos? 😊"
         const okAnuncio = await sendBotmakerMessage(claim.contact, anuncio, channelId).catch(
           () => false,

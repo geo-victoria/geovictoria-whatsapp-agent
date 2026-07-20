@@ -615,6 +615,17 @@ export async function closeFollowup(
       followup_closed_reason: reason,
     }),
   })
+  // REGLA DE ORO (Lalo, 20-jul): un opt-out por WhatsApp también es "no me
+  // llamen" — candado de voz + cancelación de cualquier llamada ya agendada.
+  // Determinista, no depende del modelo.
+  if (reason === "opt_out") {
+    await setKvValue(`voz_no_llamar_${contact}`, new Date().toISOString()).catch(() => {})
+    await supabaseFetch(`vic_scheduled_calls?contact=eq.${contact}&status=eq.pending`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "declined" }),
+    }).catch(() => {})
+  }
 }
 
 /**

@@ -22,6 +22,7 @@ import {
   fetchHistoryV3,
   getFollowupCronSecret,
   getKvValue,
+  setKvValue,
 } from "@/lib/supabase-persistence-v3"
 import {
   claimDueCallbacks,
@@ -86,6 +87,17 @@ export async function POST(req: Request): Promise<Response> {
     const payload = cb.payload || {}
     const motivo = String(payload.motivo || "Llamada devuelta agendada")
 
+    // REGLA DE ORO: si el cliente pidió que no lo llamen más (candado
+    // voz_no_llamar), NINGUNA llamada agendada se dispara, venga de donde
+    // venga. Se marca declined y se respeta para siempre.
+    const candadoNoLlamar = ((await getKvValue(`voz_no_llamar_${cb.contact}`).catch(() => "")) || "").trim()
+    if (candadoNoLlamar) {
+      await markCallbackDone(cb.id, "declined")
+      detalle.push({ id: cb.id, contact: cb.contact, cancelada: "candado no-llamar" })
+      console.log(`[callback-cron] ${cb.contact} tiene candado no-llamar → llamada cancelada`)
+      continue
+    }
+
     // País por prefijo: define flujo/agente/línea de salida y horario hábil.
     const esCO = cb.contact.startsWith("57")
     if ((esCO && !coEnHorario) || (!esCO && !clEnHorario)) {
@@ -117,6 +129,8 @@ export async function POST(req: Request): Promise<Response> {
         if (veredicto !== "si") {
           await markCallbackDone(cb.id, veredicto === "no" ? "declined" : "skipped")
           if (veredicto === "no") {
+            // Candado durable: el "no" al anuncio también es "no me llamen".
+            await setKvValue(`voz_no_llamar_${cb.contact}`, new Date().toISOString()).catch(() => {})
             await appendAssistantV3(
               cb.contact,
               "[REGISTRO INTERNO] El cliente pidió que NO lo llamaran (respuesta al anuncio de las 22h50). Llamada cancelada — respetar: no volver a ofrecer llamada salvo que él lo pida.",

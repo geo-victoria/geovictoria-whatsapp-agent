@@ -32,7 +32,7 @@ import {
   setKvValue,
   setQuotePointer,
 } from "@/lib/supabase-persistence-v3"
-import { existeCallbackAutoReciente, parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
+import { cancelarCallbacksPendientes, existeCallbackAutoReciente, parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
 
@@ -177,6 +177,19 @@ export async function POST(req: Request): Promise<Response> {
   ].filter(Boolean)
 
   await appendAssistantV3(contact, lineas.join("\n"))
+
+  // REGLA DE ORO (Lalo, 20-jul): "no me llamen más" es sagrado en TODOS los
+  // canales. Candado determinista (no una nota para el modelo): flag durable
+  // en vic_kv + cancelación de toda llamada ya agendada. Solo se levanta si el
+  // cliente vuelve a pedir explícitamente que lo llamen.
+  if (estado === "pidio_no_llamar") {
+    await setKvValue(`voz_no_llamar_${contact}`, new Date().toISOString()).catch(() => {})
+    await cancelarCallbacksPendientes(contact).catch(() => {})
+    await appendAssistantV3(
+      contact,
+      "[REGISTRO INTERNO] El cliente pidió por teléfono que NO lo llamen más — candado activado: el sistema no volverá a llamarlo. Respetar SIEMPRE; WhatsApp sigue disponible solo si él escribe primero. El candado solo se levanta si él pide explícitamente una llamada.",
+    ).catch(() => {})
+  }
   console.log(
     `[dapta-postcall] contact=${contact} estado=${estado || "?"} cambio=${cambio ? "sí" : "no"} dur=${duracionS}s`,
   )

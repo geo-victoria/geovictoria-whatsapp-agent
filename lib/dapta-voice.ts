@@ -120,6 +120,23 @@ export async function scheduleCallback(
 }
 
 /**
+ * Cancela TODAS las llamadas pendientes de un contacto (regla de oro 20-jul:
+ * "no me llamen más" mata cualquier llamada ya agendada, venga de donde venga).
+ */
+export async function cancelarCallbacksPendientes(contact: string): Promise<void> {
+  if (!SUPABASE_URL || !SUPABASE_KEY || !contact) return
+  await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_scheduled_calls?contact=eq.${contact}&status=eq.pending`,
+    {
+      method: "PATCH",
+      headers: { ...HEADERS, Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "declined" }),
+      cache: "no-store",
+    },
+  ).catch(() => {})
+}
+
+/**
  * ¿Ya hubo un auto-agendamiento de este tipo para el contacto en los últimos
  * 7 días? Guarda anti-loop de las reglas de continuidad (20-jul): un cliente
  * que dice "después" en cada llamada, o que nunca contesta, recibe UNA
