@@ -105,12 +105,25 @@ export async function transicionarDealHacia(
       }
     }
 
-    // 3. Ejecutar.
+    // 3. Ejecutar. El data pre-llenado del GET trae solo los campos que el deal
+    // ya tiene; si falta un campo obligatorio DE LA TRANSICIÓN, Zoho responde
+    // code SUCCESS con "Fields are partially saved with in transition" y NO
+    // mueve el Stage (diagnóstico 20-jul). Para "Listo para Cierre" el faltante
+    // es el picklist "Método de carga de información" — Lalo definió "App de
+    // carga (cliente)" para los deals pagados de Vicky (el cliente se onboardea
+    // solo por la app, igual que en el auto-onboarding que ya corre).
+    const data: Record<string, unknown> = { ...(match.data || {}) }
+    const esListo = ((match.next_field_value || match.name || "") + "")
+      .toLowerCase()
+      .includes("listo para cierre")
+    if (esListo && !data.M_todo_de_carga_de_informaci_n) {
+      data.M_todo_de_carga_de_informaci_n = "App de carga (cliente)"
+    }
     const exec = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Deals/${dealId}/actions/blueprint`, {
       method: "PUT",
       headers,
       cache: "no-store",
-      body: JSON.stringify({ blueprint: [{ transition_id: match.id, data: match.data || {} }] }),
+      body: JSON.stringify({ blueprint: [{ transition_id: match.id, data }] }),
     })
     const execData = (await exec.json().catch(() => ({}))) as { code?: string; message?: string }
     if (!exec.ok || (execData?.code && execData.code !== "SUCCESS")) {
@@ -121,11 +134,27 @@ export async function transicionarDealHacia(
         detalle: `${execData?.code || exec.status}: ${String(execData?.message || "").slice(0, 120)}`,
       }
     }
+    // El code SUCCESS del PUT NO garantiza la transición ("partially saved"):
+    // la única verdad es el Stage re-leído.
+    const verRes = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}?fields=Stage`, {
+      headers,
+      cache: "no-store",
+    })
+    const ver = (await verRes.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }
+    const stageNuevo = String(ver?.data?.[0]?.Stage || "")
+    if (indiceEtapa(stageNuevo) <= idxActual) {
+      return {
+        dealId,
+        desde: stageActual,
+        resultado: "error",
+        detalle: `PUT ok pero Stage sigue "${stageNuevo}" — ${String(execData?.message || "").slice(0, 100)}`,
+      }
+    }
     return {
       dealId,
       desde: stageActual,
       resultado: "avanzado",
-      detalle: `→ ${match.next_field_value || match.name}`,
+      detalle: `→ ${stageNuevo}`,
     }
   } catch (e) {
     return { dealId, resultado: "error", detalle: e instanceof Error ? e.message.slice(0, 150) : "excepción" }
