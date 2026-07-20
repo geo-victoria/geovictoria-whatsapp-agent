@@ -37,6 +37,7 @@ import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persist
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import {
   updateZohoLeadStatus,
+  updateZohoLeadFields,
   reasignarLeadSdrInbound,
   reasignarLeadSdrInboundCO,
 } from "@/lib/zoho-leads"
@@ -146,10 +147,17 @@ export async function POST(req: Request): Promise<Response> {
   // El prefijo del teléfono manda (define la línea por la que se puede escribir);
   // el territorio solo normaliza y deja traza si no calzan.
   const country = porPrefijo || territorio
-  if (territorio && porPrefijo && territorio !== porPrefijo) {
+  if (porPrefijo && territorio !== porPrefijo) {
     console.warn(
-      `[outbound-lead] territorio=${territorio} no calza con prefijo del teléfono ${contact} — se usa el prefijo`,
+      `[outbound-lead] territorio=${territorio || "(vacío)"} no calza con prefijo del teléfono ${contact} — se usa el prefijo`,
     )
+    // El formulario trae el país malo (o vacío): se corrige en Zoho con la
+    // verdad del prefijo, para que reportes y futuras assignment rules no
+    // hereden el dato falso (20-jul, a raíz del caso Joys/Perú invertido).
+    if (zohoLeadId) {
+      const pais = porPrefijo === "co" ? "Colombia" : "Chile"
+      updateZohoLeadFields(zohoLeadId, { Country: pais, Territorio: pais }).catch(() => {})
+    }
   }
   const esCO = country === "co"
   const tplPais = esCO ? TPL_LEAD_CO : TPL_LEAD
@@ -192,10 +200,27 @@ export async function POST(req: Request): Promise<Response> {
     // (round-robin SDR Inbound) para que lo trabaje por otro canal.
     let reasignado: string | undefined
     if (zohoLeadId) {
+      // Antes de reasignar, corrige el país en Zoho según el prefijo real
+      // (así el SDR y los reportes ven la verdad, no el país del formulario).
+      // 3 dígitos primero (59x) para no confundir con los de 2.
+      const PREFIJO_PAIS: Array<[string, string]> = [
+        ["593", "Ecuador"], ["591", "Bolivia"], ["595", "Paraguay"], ["598", "Uruguay"],
+        ["507", "Panamá"], ["506", "Costa Rica"], ["502", "Guatemala"],
+        ["51", "Perú"], ["52", "México"], ["54", "Argentina"], ["55", "Brasil"],
+        ["58", "Venezuela"], ["34", "España"], ["1", "Estados Unidos"],
+      ]
+      const paisReal = PREFIJO_PAIS.find(([p]) => contact.startsWith(p))?.[1]
+      if (paisReal) {
+        // Territorio es picklist: solo se toca con valores conocidos del org.
+        await updateZohoLeadFields(zohoLeadId, {
+          Country: paisReal,
+          ...(paisReal === "Perú" ? { Territorio: "Perú" } : {}),
+        }).catch(() => {})
+      }
       const r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
       reasignado = r?.ownerEmail
       console.warn(
-        `[outbound-lead] telefono ${contact} sin prefijo +56/+57 → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`,
+        `[outbound-lead] telefono ${contact} sin prefijo +56/+57 (país real: ${paisReal || "desconocido"}) → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`,
       )
     }
     return NextResponse.json({

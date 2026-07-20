@@ -161,6 +161,45 @@ export async function updateZohoLeadOwner(
 }
 
 /**
+ * Actualiza campos arbitrarios de un lead (ej. Country/Territorio cuando el
+ * formulario trae el país que no calza con el prefijo telefónico — caso
+ * Joys/Perú 19-jul: Country "Chile" con teléfono +51). Best-effort: nunca
+ * rompe el flujo. No maneja blueprint (usar updateZohoLeadStatus para
+ * Lead_Status).
+ */
+export async function updateZohoLeadFields(
+  leadId: string,
+  fields: Record<string, string>,
+): Promise<{ success: boolean; error?: string }> {
+  if (!leadId || !fields || Object.keys(fields).length === 0) {
+    return { success: false, error: "leadId o fields faltante" }
+  }
+  try {
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ ...fields }] }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ status?: string; code?: string }>
+    }
+    if (!res.ok || data?.data?.[0]?.status !== "success") {
+      return { success: false, error: `Zoho update fields ${res.status} ${data?.data?.[0]?.code || ""}` }
+    }
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
  * Actualiza el Lead_Status de un lead (diccionario acordado con Marketing
  * jul-2026: envío de mensaje = "2. Intento de contacto"; respuesta del cliente
  * = "3. Contactado"). Best-effort: nunca rompe el flujo.
