@@ -190,8 +190,40 @@ function fmtDuracion(inicioIso: string, pagoIso: string): string {
   return dias === 0 ? `${horas}h` : `${dias}d ${horas}h`
 }
 
+function fmtDuracionMs(ms: number): string {
+  if (!(ms > 0)) return "—"
+  const horasTotales = Math.floor(ms / 3600000)
+  const dias = Math.floor(horasTotales / 24)
+  const horas = horasTotales % 24
+  if (dias === 0 && horas === 0) return `${Math.round(ms / 60000)} min`
+  return dias === 0 ? `${horas}h` : `${dias}d ${horas}h`
+}
+
 function renderVentasCerradas(ventas: VentaCerrada[]): string {
   if (!ventas.length) return ""
+  // Tarjetas de tiempos (pedido Lalo 20-jul): promedio y mediana del tiempo
+  // inicio de conversación → pago, sobre las ventas con ambas fechas válidas.
+  const duraciones = ventas
+    .map((v) => new Date(v.pagoIso).getTime() - new Date(v.inicioIso).getTime())
+    .filter((ms) => Number.isFinite(ms) && ms > 0)
+    .sort((a, b) => a - b)
+  let tarjetasTiempos = ""
+  if (duraciones.length) {
+    const promedio = duraciones.reduce((a, b) => a + b, 0) / duraciones.length
+    const mitad = Math.floor(duraciones.length / 2)
+    const mediana =
+      duraciones.length % 2 ? duraciones[mitad] : (duraciones[mitad - 1] + duraciones[mitad]) / 2
+    const masRapida = duraciones[0]
+    const masLenta = duraciones[duraciones.length - 1]
+    const card = (label: string, value: string, color: string, sub?: string) =>
+      `<div class="kpi"><div class="kpi-v" style="color:${color}">${value}</div><div class="kpi-l">${label}${sub ? ` <span class="pct">${sub}</span>` : ""}</div></div>`
+    tarjetasTiempos = `<div class="kpis" style="margin-bottom:12px">
+      ${card("Tiempo promedio a cierre", fmtDuracionMs(promedio), "#00838F", "inicio conversación → pago")}
+      ${card("Mediana", fmtDuracionMs(mediana), "#27ae60", "la mitad de las ventas cierra antes de esto")}
+      ${card("Más rápida", fmtDuracionMs(masRapida), "#8e44ad")}
+      ${card("Más lenta", fmtDuracionMs(masLenta), "#e67e22")}
+    </div>`
+  }
   const filas = ventas
     .map(
       (v) => `<tr>
@@ -205,6 +237,7 @@ function renderVentasCerradas(ventas: VentaCerrada[]): string {
     .join("")
   const totalMonto = ventas.reduce((a, v) => a + (v.montoClp || 0), 0)
   return `<div class="card"><h2>Ventas cerradas <span class="pct" style="font-weight:400">— ${ventas.length} pagadas · $${totalMonto.toLocaleString("es-CL")} en pagos iniciales</span></h2>
+  ${tarjetasTiempos}
   <div style="overflow-x:auto"><table class="tabla-ventas" style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;border-bottom:2px solid #e3e7ea">
       <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:right">Monto</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
