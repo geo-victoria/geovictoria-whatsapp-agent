@@ -48,6 +48,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
+import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
@@ -259,9 +260,15 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       console.error(
         `[vic-co] ALUCINACION_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
       )
+      // Auditoría 20-jul: el fallo técnico NO se le cobra al cliente
+      // re-pidiéndole datos que ya están en el historial — se avisa al
+      // equipo para completar el registro a mano.
       reply = afirmaReunionLista
-        ? "Disculpa, aún no dejo agendada la reunión. Me confirmas el día y la hora que te acomodan, junto con tu nombre completo, correo y empresa, y la agendo de inmediato? 📅"
-        : "Disculpa, no alcancé a dejar registrada tu solicitud. Me confirmas tu nombre completo, tu empresa y tu correo, y la dejo lista para que el equipo te contacte? 😊"
+        ? "Disculpa, tuve un problema técnico y tu reunión quedó pendiente de registro — ya avisé al equipo para dejarla agendada con lo que me indicaste. Te confirmo apenas esté lista, no necesitas reenviarme nada 🙌"
+        : "Disculpa, tuve un problema técnico registrando tu solicitud — ya avisé al equipo para que igual te contacten con los datos que me diste. No necesitas reenviarme nada 🙌"
+      await avisarEquipoInterno(
+        `⚠️ Registro de ${afirmaReunionLista ? "REUNIÓN" : "CALLBACK"} falló (tras reintento, línea CO) — contacto +${contact}. El cliente quedó con la promesa de contacto: revisar la conversación en Botmaker y completar a mano.`,
+      )
     }
   }
   // Telemetría de diagnóstico: si el turno tocó tools de agenda, dejar el

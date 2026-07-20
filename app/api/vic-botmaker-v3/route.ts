@@ -51,6 +51,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
+import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
@@ -743,8 +744,14 @@ async function processOneTurn(
         console.error(
           `[v3-bg] ALUCINACIÓN_AGENDA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
+        // Auditoría 20-jul: el fallo técnico NO se le cobra al cliente
+        // re-pidiéndole datos que ya están en el historial — se avisa al
+        // equipo para completar el registro a mano.
         reply =
-          "Disculpa, no alcancé a dejar la reunión agendada. ¿Me confirmas el día y la hora que prefieres y lo dejo listo enseguida?"
+          "Disculpa, tuve un problema técnico y tu reunión quedó pendiente de registro — ya le avisé al equipo para dejarla agendada con lo que me indicaste. Te confirmo apenas esté lista, no necesitas reenviarme nada 🙌"
+        await avisarEquipoInterno(
+          `⚠️ Registro de REUNIÓN falló (tras reintento) — contacto +${contact}. El cliente quedó con la promesa de agenda: revisar la conversación en Botmaker y agendar a mano.`,
+        )
       }
     }
 
@@ -816,8 +823,15 @@ async function processOneTurn(
         console.error(
           `[v3-bg] ALUCINACIÓN_CALLBACK contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
+        // Auditoría 20-jul (≥7 casos, un cliente urgido tipeó sus datos 3
+        // veces): el fallo técnico NO se le cobra al cliente re-pidiéndole
+        // nombre/empresa (ya están en el historial) ni el teléfono (escribe
+        // por WhatsApp) — se avisa al equipo para completar a mano.
         reply =
-          "Disculpa, no alcancé a dejar registrada tu solicitud. ¿Me confirmas tu nombre, empresa y teléfono y la dejo lista enseguida para que un ejecutivo te contacte?"
+          "Disculpa, tuve un problema técnico registrando tu solicitud — ya le avisé directamente al equipo para que igual te contacten con los datos que me diste. No necesitas reenviarme nada 🙌"
+        await avisarEquipoInterno(
+          `⚠️ Registro de CALLBACK falló (tras reintento) — contacto +${contact}. El cliente quedó con la promesa de contacto: revisar la conversación en Botmaker y registrar el lead a mano.`,
+        )
       }
     }
 
