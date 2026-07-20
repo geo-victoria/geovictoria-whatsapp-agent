@@ -137,7 +137,8 @@ export async function POST(req: Request): Promise<Response> {
   let descuentoAplicado = false
   if (precioAcordado > 0 && montoOriginal > 0 && quoteId && !/^TEST-/i.test(quoteId)) {
     // pct hacia ARRIBA con 1 decimal: el precio final nunca queda sobre lo prometido.
-    const pctExacto = Math.min(25, Math.ceil((1 - precioAcordado / montoOriginal) * 1000) / 10)
+    const pctCrudo = Math.ceil((1 - precioAcordado / montoOriginal) * 1000) / 10
+    const pctExacto = Math.min(25, pctCrudo)
     if (pctExacto > 0) {
       const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/aplicar-descuento-telefonico`, {
         method: "POST",
@@ -163,17 +164,31 @@ export async function POST(req: Request): Promise<Response> {
           dealId: prev?.dealId || undefined,
           acceptanceUrl: data.acceptance_url,
           pdfUrl: data.link_pdf || prev?.pdfUrl || undefined,
-          totalClp: precioAcordado || prev?.totalClp || undefined,
+          // totalClp es la BASE SIN DESCUENTO (monto_mensual de futuras
+          // llamadas y base del cálculo de %). Guardar aquí el precio
+          // prometido componía descuentos en la siguiente negociación
+          // (bug detectado en la prueba del 20-jul).
+          totalClp: prev?.totalClp || montoOriginal || undefined,
           totalUf: prev?.totalUf ?? undefined,
         }).catch(() => {})
       }
       if (r?.ok && data?.ok && data.mensaje_para_prospecto) {
-        const enviado = await sendBotmakerMessage(contact, data.mensaje_para_prospecto).catch(
-          () => false,
-        )
+        let msgProspecto = data.mensaje_para_prospecto
+        // La voz aceptó bajo el piso (pct crudo > tope): el sistema aplicó el
+        // tope y el precio final difiere de lo dicho en la llamada. Un buen
+        // vendedor lo aclara al tiro, con transparencia — no deja que el
+        // cliente lo descubra solo en la página.
+        if (pctCrudo > 25) {
+          const precioFinal = Math.round(montoOriginal * (1 - pctExacto / 100))
+          msgProspecto +=
+            `\n\nUn alcance de transparencia sobre lo que hablamos: el descuento máximo que tengo autorizado es ${pctExacto}%, ` +
+            `así que el valor final quedó en $${precioFinal.toLocaleString("es-CL")} mensual, IVA incluido — ` +
+            `levemente distinto del monto que alcanzamos a mencionar por teléfono. Si eso te cambia la decisión, me dices y lo conversamos 😊`
+        }
+        const enviado = await sendBotmakerMessage(contact, msgProspecto).catch(() => false)
         if (enviado) {
           descuentoAplicado = true
-          await appendAssistantV3(contact, data.mensaje_para_prospecto).catch(() => {})
+          await appendAssistantV3(contact, msgProspecto).catch(() => {})
         }
       }
       console.log(
