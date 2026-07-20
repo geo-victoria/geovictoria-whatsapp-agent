@@ -32,6 +32,189 @@ const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.co
 // client-side (son decenas, no miles) para no depender de count() de COQL.
 // Este dash es de Vicky CHILE: se excluyen las cotizaciones de conversaciones
 // de la línea CO (por id) y los registros de prueba (por nombre).
+
+// ── Ventas cerradas (pedido Lalo 20-jul): tabla con empresa, inicio de la
+// conversación, fecha de pago, monto y tiempo a cierre. El monto se calcula
+// desde los ítems congelados en Zoho (Subtotal_CLP del día de emisión):
+// pago inicial = (Σ recurrentes × (1−dcto) + Σ pago único) × 1.19 — validado
+// al peso contra Mercado Pago (COT233/COT242 = $29.163). Como una venta
+// pagada es inmutable, cada fila se cachea en vic_kv (venta_dash_v2_<id>).
+type RawAceptada = {
+  id?: string
+  Name?: string
+  Numero_Cotizacion?: string
+  Estado_Cotizacion?: string
+  Intervenci_n_Humana?: string | null
+  Fecha_Hora_Cotizacion?: string | null
+  Tel_fono_Contacto?: string | null
+  Created_Time?: string
+  Modified_Time?: string
+  Descuento_Recurrente_Pct?: number | null
+  "Cuenta_Asociada.Account_Name"?: string | null
+}
+
+type VentaCerrada = {
+  empresa: string
+  numero: string
+  inicioIso: string
+  inicioAprox: boolean
+  pagoIso: string
+  montoClp: number
+}
+
+async function kvGet(key: string): Promise<string> {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}&select=value&limit=1`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      cache: "no-store",
+    })
+    const rows = r.ok ? ((await r.json()) as Array<{ value?: string }>) : []
+    return rows[0]?.value || ""
+  } catch {
+    return ""
+  }
+}
+
+async function kvSet(key: string, value: string): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?on_conflict=key`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({ key, value }),
+    cache: "no-store",
+  }).catch(() => {})
+}
+
+async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaCerrada[]> {
+  const token = await getZohoAccessToken().catch(() => "")
+  const ventas: VentaCerrada[] = []
+  for (const q of aceptadas) {
+    const id = String(q.id || "")
+    if (!id) continue
+    const cacheKey = `venta_dash_v2_${id}`
+    const cached = await kvGet(cacheKey)
+    if (cached) {
+      try {
+        ventas.push(JSON.parse(cached) as VentaCerrada)
+        continue
+      } catch {
+        // caché corrupta → recomputar
+      }
+    }
+    // Monto: ítems del subform (getRecord completo, 1 sola vez por venta).
+    let montoClp = 0
+    if (token) {
+      try {
+        const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${id}`, {
+          headers: { Authorization: `Zoho-oauthtoken ${token}` },
+          cache: "no-store",
+        })
+        const body = (await r.json().catch(() => null)) as {
+          data?: Array<{
+            Descuento_Recurrente_Pct?: number
+            Detalle_Items_Cotizacion?: Array<{ Subtotal_CLP?: number; Es_Recurrente?: boolean }>
+          }>
+        } | null
+        const rec = body?.data?.[0]
+        const pct = Number(rec?.Descuento_Recurrente_Pct ?? q.Descuento_Recurrente_Pct ?? 0) || 0
+        const items = rec?.Detalle_Items_Cotizacion || []
+        const recurrente = items.filter((i) => i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0)
+        const unico = items.filter((i) => !i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0)
+        montoClp = Math.round((recurrente * (1 - pct / 100) + unico) * 1.19)
+      } catch {
+        montoClp = 0
+      }
+    }
+    // Inicio de conversación: started_at por teléfono; fallback: creación de la cotización.
+    const fono = digits(String(q.Tel_fono_Contacto || ""))
+    let inicioIso = ""
+    if (fono) {
+      try {
+        const r = await fetch(
+          `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${fono}&select=started_at&order=started_at.asc&limit=1`,
+          { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+        )
+        const rows = r.ok ? ((await r.json()) as Array<{ started_at?: string }>) : []
+        inicioIso = rows[0]?.started_at || ""
+      } catch {
+        inicioIso = ""
+      }
+    }
+    const inicioAprox = !inicioIso
+    if (!inicioIso) inicioIso = String(q.Created_Time || "")
+    const pagoIso = String(q.Fecha_Hora_Cotizacion || q.Modified_Time || "")
+    const empresa =
+      String(q["Cuenta_Asociada.Account_Name"] || "").trim() ||
+      String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim() ||
+      "(sin nombre)"
+    const venta: VentaCerrada = {
+      empresa,
+      numero: String(q.Numero_Cotizacion || ""),
+      inicioIso,
+      inicioAprox,
+      pagoIso,
+      montoClp,
+    }
+    ventas.push(venta)
+    if (montoClp > 0 && pagoIso) await kvSet(cacheKey, JSON.stringify(venta))
+  }
+  return ventas.sort((a, b) => (b.pagoIso || "").localeCompare(a.pagoIso || ""))
+}
+
+function fmtSantiago(iso: string): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleString("es-CL", {
+    timeZone: "America/Santiago",
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function fmtDuracion(inicioIso: string, pagoIso: string): string {
+  const a = new Date(inicioIso).getTime()
+  const b = new Date(pagoIso).getTime()
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return "—"
+  const horasTotales = Math.floor((b - a) / 3600000)
+  const dias = Math.floor(horasTotales / 24)
+  const horas = horasTotales % 24
+  if (dias === 0 && horas === 0) return `${Math.round((b - a) / 60000)} min`
+  return dias === 0 ? `${horas}h` : `${dias}d ${horas}h`
+}
+
+function renderVentasCerradas(ventas: VentaCerrada[]): string {
+  if (!ventas.length) return ""
+  const filas = ventas
+    .map(
+      (v) => `<tr>
+        <td>${v.empresa}${v.numero ? ` <span class="sub" style="display:inline">· ${v.numero}</span>` : ""}</td>
+        <td>${fmtSantiago(v.inicioIso)}${v.inicioAprox ? " *" : ""}</td>
+        <td>${fmtSantiago(v.pagoIso)}</td>
+        <td style="text-align:right">${v.montoClp > 0 ? `$${v.montoClp.toLocaleString("es-CL")}` : "—"}</td>
+        <td style="text-align:right"><b>${fmtDuracion(v.inicioIso, v.pagoIso)}</b></td>
+      </tr>`,
+    )
+    .join("")
+  const totalMonto = ventas.reduce((a, v) => a + (v.montoClp || 0), 0)
+  return `<div class="card"><h2>Ventas cerradas <span class="pct" style="font-weight:400">— ${ventas.length} pagadas · $${totalMonto.toLocaleString("es-CL")} en pagos iniciales</span></h2>
+  <div style="overflow-x:auto"><table class="tabla-ventas" style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="text-align:left;border-bottom:2px solid #e3e7ea">
+      <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:right">Monto</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
+    </tr></thead>
+    <tbody>${filas}</tbody>
+  </table></div>
+  <div class="sub" style="margin-top:8px">Monto = pago inicial (primer mes + pagos únicos, con descuento e IVA), calculado desde los ítems registrados en Zoho. Fechas en hora de Chile. * = sin conversación registrada: se usa la fecha de emisión de la cotización como inicio.</div>
+</div>`
+}
+
 async function fetchCierreZoho(excludeIds: Set<string>): Promise<{
   total: number
   aceptadas: number
@@ -41,6 +224,7 @@ async function fetchCierreZoho(excludeIds: Set<string>): Promise<{
   autonomas: number
   asistidas: number
   sinClasificar: number
+  aceptadasList: RawAceptada[]
 } | null> {
   try {
     const token = await getZohoAccessToken()
@@ -48,14 +232,12 @@ async function fetchCierreZoho(excludeIds: Set<string>): Promise<{
       method: "POST",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        select_query: `select id, Name, Estado_Cotizacion, Intervenci_n_Humana from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
+        select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
       }),
       cache: "no-store",
     })
     if (!res.ok) return null
-    const data = (await res.json().catch(() => null)) as {
-      data?: Array<{ id?: string; Name?: string; Estado_Cotizacion?: string; Intervenci_n_Humana?: string | null }>
-    } | null
+    const data = (await res.json().catch(() => null)) as { data?: RawAceptada[] } | null
     const quotes = (data?.data || []).filter((q) => {
       if (excludeIds.has(String(q.id || ""))) return false
       const nombre = String(q.Name || "").toLowerCase()
@@ -71,6 +253,7 @@ async function fetchCierreZoho(excludeIds: Set<string>): Promise<{
       autonomas,
       asistidas,
       sinClasificar: aceptadasList.length - autonomas - asistidas,
+      aceptadasList,
     }
   } catch {
     return null
@@ -263,7 +446,9 @@ export async function GET(req: Request): Promise<Response> {
     autonomas: number
     asistidas: number
     sinClasificar: number
+    aceptadasList: RawAceptada[]
   } | null = null
+  let ventasHtml = ""
   try {
     const co = await fetchExclusionesCO()
     const [allRows, hard, cierreZoho] = await Promise.all([
@@ -272,6 +457,9 @@ export async function GET(req: Request): Promise<Response> {
       fetchCierreZoho(co.quoteIds),
     ])
     cierre = cierreZoho
+    if (cierre?.aceptadasList?.length) {
+      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList))
+    }
     rows = allRows.filter(
       (r) =>
         !isTestContact(r.contact) &&
@@ -497,6 +685,8 @@ export async function GET(req: Request): Promise<Response> {
   ${notaSinClasificar}
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
   })()}
+
+  ${ventasHtml}
 
   <div class="card"><h2>Flujo del embudo</h2><div id="sankey"></div></div>
 

@@ -1,5 +1,16 @@
 # Backlog — Vicky / Reactivación
 
+## Deal de conversión a veces queda con owner Vicky en vez del ejecutivo (20-jul)
+
+Caso Electrocontrol (COT242, pagada): el deal creado vía conversión de lead
+quedó con Owner "Vicky GeoVictoria" en vez de Anderson — a diferencia de
+Constanza (mismo flujo, 17-jul) que sí quedó con Anderson. El paso
+post-conversión que reasigna el owner del deal parece best-effort y falló esa
+vez. Corregido a mano el 20-jul. Pendiente: revisar en
+create-from-vicky (cotizador) dónde se setea el Owner del deal tras convertir
+y hacerlo con reintento/log de error para que nunca quede en silencio.
+
+
 ## Página amable para link corto /q inválido (detalle UX, 20-jul)
 
 Cuando el link corto del botón post-llamada apunta a una cotización eliminada o
