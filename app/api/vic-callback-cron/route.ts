@@ -30,6 +30,7 @@ import {
   markCallbackDone,
   unclaimCallback,
 } from "@/lib/dapta-voice"
+import { estadoCotizacionParaSeguimiento } from "@/lib/zoho-quote-status"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -140,8 +141,20 @@ export async function POST(req: Request): Promise<Response> {
     // con el estado comercial y los últimos mensajes inyectados como DATO (no
     // depende de que el modelo "recuerde").
     let memoria = ""
-    const pctComiteado = Number(payload.pct_comiteado || 0) || 0
-    const precioVigente = String(payload.precio_vigente || "").trim()
+    // El estado se consulta FRESCO al momento de marcar (no el de cuando se
+    // agendó): entre el anuncio y una devolución de "llámame mañana" el
+    // cliente pudo negociar más descuento por WhatsApp. Fallback: lo agendado.
+    let pctComiteado = Number(payload.pct_comiteado || 0) || 0
+    let precioVigente = String(payload.precio_vigente || "").trim()
+    const quoteIdPayload = String(payload.quote_id || "").trim()
+    const montoOriginal = Number(String(payload.monto_mensual || "").replace(/[^\d]/g, "")) || 0
+    if (quoteIdPayload && montoOriginal > 0) {
+      const fresco = await estadoCotizacionParaSeguimiento(quoteIdPayload).catch(() => null)
+      if (fresco && fresco.pctComiteado > 0) {
+        pctComiteado = fresco.pctComiteado
+        precioVigente = String(Math.round(montoOriginal * (1 - fresco.pctComiteado / 100)))
+      }
+    }
     if (pctComiteado > 0 && precioVigente) {
       memoria +=
         ` ESTADO COMERCIAL VIGENTE: este cliente YA tiene un ${pctComiteado}% de descuento acordado — ` +
