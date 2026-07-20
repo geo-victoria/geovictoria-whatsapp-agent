@@ -119,6 +119,28 @@ export async function scheduleCallback(
   return res.ok
 }
 
+/**
+ * ¿Ya hubo un auto-agendamiento de este tipo para el contacto en los últimos
+ * 7 días? Guarda anti-loop de las reglas de continuidad (20-jul): un cliente
+ * que dice "después" en cada llamada, o que nunca contesta, recibe UNA
+ * devolución/reintento automático por semana — no una llamada diaria infinita.
+ */
+export async function existeCallbackAutoReciente(
+  contact: string,
+  tipo: string,
+): Promise<boolean> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return true
+  const desde = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_scheduled_calls?contact=eq.${contact}` +
+      `&payload->>tipo=eq.${encodeURIComponent(tipo)}&due_at=gte.${desde}&select=id&limit=1`,
+    { headers: HEADERS, cache: "no-store" },
+  )
+  if (!res.ok) return true
+  const rows = (await res.json().catch(() => [])) as unknown[]
+  return rows.length > 0
+}
+
 /** Reclama (atómicamente vía status swap) las llamadas vencidas. */
 export async function claimDueCallbacks(limit = 5): Promise<ScheduledCall[]> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return []

@@ -32,7 +32,7 @@ import {
   setKvValue,
   setQuotePointer,
 } from "@/lib/supabase-persistence-v3"
-import { parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
+import { existeCallbackAutoReciente, parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
 
@@ -344,6 +344,52 @@ export async function POST(req: Request): Promise<Response> {
       console.log(`[dapta-postcall] callback contact=${contact} due=${dueAt} ok=${ok}`)
     } else {
       console.warn(`[dapta-postcall] recontacto no interpretable: "${recontacto}"`)
+    }
+  }
+
+  // ── Reglas de continuidad (20-jul, debut de producción) ────────────────────
+  // Una llamada nunca termina en callejón sin salida:
+  //   - "pide_tiempo" sin hora parseable (caso Constanza: "después" y cortó) →
+  //     devolución al siguiente día hábil a las 10:00 locales. Lo pidió ella;
+  //     una ejecutiva con memoria la llama sin que se lo recuerden.
+  //   - "no_contesta" → UN reintento al siguiente día hábil a las 15:00, en
+  //     horario distinto al primer intento.
+  // Guarda anti-loop: máximo un auto-agendamiento de cada tipo por semana.
+  if (!callbackAgendado && (estado === "pide_tiempo" || estado === "no_contesta")) {
+    const esCO = contact.startsWith("57")
+    const tipoAuto = estado === "pide_tiempo" ? "devolucion_pide_tiempo" : "reintento_no_contesta"
+    // 10:00 / 15:00 locales → UTC (CL invierno -4; CO -5, sin DST).
+    const horaUtc = estado === "pide_tiempo" ? (esCO ? 15 : 14) : (esCO ? 20 : 19)
+    const yaHubo = await existeCallbackAutoReciente(contact, tipoAuto).catch(() => true)
+    if (!yaHubo) {
+      const due = new Date()
+      due.setUTCDate(due.getUTCDate() + 1)
+      due.setUTCHours(horaUtc, 0, 0, 0)
+      while ([0, 6].includes(due.getUTCDay())) due.setUTCDate(due.getUTCDate() + 1)
+      const motivoAuto =
+        estado === "pide_tiempo"
+          ? "El cliente pidió en la llamada anterior que lo llamaran después (sin dar hora) — devolución comprometida"
+          : "Reintento único: la llamada anterior no logró conexión efectiva"
+      const ok = await scheduleCallback(contact, due.toISOString(), {
+        tipo: tipoAuto,
+        phone_number: toNumber,
+        customer_name: firstString(vars.customer_name),
+        company: firstString(vars.company),
+        monto_mensual: firstString(vars.monto_mensual),
+        dias_desde_envio: firstString(vars.dias_desde_envio),
+        quote_id: firstString(vars.quote_id),
+        motivo: motivoAuto,
+      }).catch(() => false)
+      if (ok) {
+        callbackAgendado = due.toISOString()
+        await appendAssistantV3(
+          contact,
+          `[REGISTRO INTERNO] ${motivoAuto}. Llamada agendada para ${due.toLocaleString("es-CL", { timeZone: esCO ? "America/Bogota" : "America/Santiago" })}.`,
+        ).catch(() => {})
+      }
+      console.log(`[dapta-postcall] continuidad ${tipoAuto} contact=${contact} due=${due.toISOString()} ok=${ok}`)
+    } else {
+      console.log(`[dapta-postcall] continuidad ${tipoAuto} contact=${contact} omitida (ya hubo una esta semana)`)
     }
   }
 
