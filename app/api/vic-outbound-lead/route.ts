@@ -185,10 +185,24 @@ export async function POST(req: Request): Promise<Response> {
   // tras normalizar no hay prefijo válido (ej. fijo local sin país), se salta.
   // La calificación fina vive en las assignment rules de Zoho.
   if (!porPrefijo) {
+    // El lead NO se queda con Vicky (20-jul, caso Joys/Perú: la tómbola lo
+    // asignó con Country "Chile" pero el teléfono era +51 — quedó mudo 2 días).
+    // El país del formulario puede venir mal; el prefijo telefónico es la
+    // verdad. Mismo acuerdo que el envío fallido: vuelve a un humano
+    // (round-robin SDR Inbound) para que lo trabaje por otro canal.
+    let reasignado: string | undefined
+    if (zohoLeadId) {
+      const r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
+      reasignado = r?.ownerEmail
+      console.warn(
+        `[outbound-lead] telefono ${contact} sin prefijo +56/+57 → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`,
+      )
+    }
     return NextResponse.json({
       ok: true,
       skipped: `telefono sin prefijo +56/+57 utilizable${territorio ? ` (territorio ${territorio})` : ""}`,
       contact,
+      reasignado,
     })
   }
   if (!tplPais) {
