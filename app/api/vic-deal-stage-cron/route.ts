@@ -60,6 +60,19 @@ async function handler(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
 
+  // Modo debug: volcar las transiciones crudas del blueprint de un deal, para
+  // diagnosticar INVALID_DATA (campos obligatorios de la transición).
+  const debugDeal = (new URL(req.url).searchParams.get("debugDeal") || "").trim()
+  if (debugDeal) {
+    const token = await getZohoAccessToken()
+    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Deals/${debugDeal}/actions/blueprint`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    const raw = await r.json().catch(() => ({}))
+    return NextResponse.json({ ok: r.ok, status: r.status, raw })
+  }
+
   // 1. Objetivo "Listo para Cierre": cotizaciones pagadas de Vicky con deal.
   const pagadas = await coql<{
     id?: string
@@ -76,7 +89,7 @@ async function handler(req: Request): Promise<Response> {
     "Deal_asociado.id"?: string
     Estado_del_Onboarding?: string
   }>(
-    `select id, Name, Deal_asociado.id, Estado_del_Onboarding from Autoservicio_Onboarding where Estado_del_Onboarding = 'Completado' limit 200`,
+    `select id, Name, Deal_asociado.id, Estado_del_Onboarding from Autoservicio_Onboarding where Estado_del_Onboarding = 'Completado' and Created_By = 3525045000484500876 limit 200`,
   )
 
   // Consolidar: un deal con onboarding completo apunta a Implementando (gana

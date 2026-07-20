@@ -60,6 +60,8 @@ type VentaCerrada = {
   inicioAprox: boolean
   pagoIso: string
   montoClp: number
+  usuarios: string
+  descuentoPct: number
 }
 
 async function kvGet(key: string): Promise<string> {
@@ -95,7 +97,7 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
   for (const q of aceptadas) {
     const id = String(q.id || "")
     if (!id) continue
-    const cacheKey = `venta_dash_v2_${id}`
+    const cacheKey = `venta_dash_v3_${id}`
     const cached = await kvGet(cacheKey)
     if (cached) {
       try {
@@ -107,6 +109,8 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
     }
     // Monto: ítems del subform (getRecord completo, 1 sola vez por venta).
     let montoClp = 0
+    let usuarios = "—"
+    let descuentoPct = 0
     if (token) {
       try {
         const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${id}`, {
@@ -116,12 +120,28 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
         const body = (await r.json().catch(() => null)) as {
           data?: Array<{
             Descuento_Recurrente_Pct?: number
-            Detalle_Items_Cotizacion?: Array<{ Subtotal_CLP?: number; Es_Recurrente?: boolean }>
+            Detalle_Items_Cotizacion?: Array<{
+              Subtotal_CLP?: number
+              Es_Recurrente?: boolean
+              Codigo_Item?: string
+              Modalidad?: string
+              Cantidad?: number
+            }>
           }>
         } | null
         const rec = body?.data?.[0]
         const pct = Number(rec?.Descuento_Recurrente_Pct ?? q.Descuento_Recurrente_Pct ?? 0) || 0
+        descuentoPct = pct
         const items = rec?.Detalle_Items_Cotizacion || []
+        // Usuarios/tramo: del ítem de asistencia — "Por usuario" trae la
+        // cantidad real; "Fijo" es el plan de tarifa fija del tramo 1-10.
+        const asistencia = items.find((i) => (i.Codigo_Item || "") === "asistencia")
+        if (asistencia) {
+          usuarios =
+            String(asistencia.Modalidad || "").toLowerCase() === "fijo"
+              ? "1-10 (tarifa fija)"
+              : `${Number(asistencia.Cantidad) || 0}`
+        }
         const recurrente = items.filter((i) => i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0)
         const unico = items.filter((i) => !i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0)
         montoClp = Math.round((recurrente * (1 - pct / 100) + unico) * 1.19)
@@ -158,6 +178,8 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
       inicioAprox,
       pagoIso,
       montoClp,
+      usuarios,
+      descuentoPct,
     }
     ventas.push(venta)
     if (montoClp > 0 && pagoIso) await kvSet(cacheKey, JSON.stringify(venta))
@@ -230,6 +252,8 @@ function renderVentasCerradas(ventas: VentaCerrada[]): string {
         <td>${v.empresa}${v.numero ? ` <span class="sub" style="display:inline">· ${v.numero}</span>` : ""}</td>
         <td>${fmtSantiago(v.inicioIso)}${v.inicioAprox ? " *" : ""}</td>
         <td>${fmtSantiago(v.pagoIso)}</td>
+        <td style="text-align:center">${v.usuarios || "—"}</td>
+        <td style="text-align:center">${v.descuentoPct > 0 ? `${v.descuentoPct}%` : "—"}</td>
         <td style="text-align:right">${v.montoClp > 0 ? `$${v.montoClp.toLocaleString("es-CL")}` : "—"}</td>
         <td style="text-align:right"><b>${fmtDuracion(v.inicioIso, v.pagoIso)}</b></td>
       </tr>`,
@@ -240,7 +264,7 @@ function renderVentasCerradas(ventas: VentaCerrada[]): string {
   ${tarjetasTiempos}
   <div style="overflow-x:auto"><table class="tabla-ventas" style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;border-bottom:2px solid #e3e7ea">
-      <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:right">Monto</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
+      <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:center">Usuarios</th><th style="padding:6px 8px;text-align:center">Dcto.</th><th style="padding:6px 8px;text-align:right">Monto</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
     </tr></thead>
     <tbody>${filas}</tbody>
   </table></div>
