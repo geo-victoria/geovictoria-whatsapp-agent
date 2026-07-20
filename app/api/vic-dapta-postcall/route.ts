@@ -349,23 +349,27 @@ export async function POST(req: Request): Promise<Response> {
 
   // ── Reglas de continuidad (20-jul, debut de producción) ────────────────────
   // Una llamada nunca termina en callejón sin salida:
-  //   - "pide_tiempo" sin hora parseable (caso Constanza: "después" y cortó) →
-  //     devolución al siguiente día hábil a las 10:00 locales. Lo pidió ella;
-  //     una ejecutiva con memoria la llama sin que se lo recuerden.
+  //   - "pide_tiempo" sin hora parseable (caso Constanza: "después" y cortó
+  //     antes de dar hora) → volver a llamar UNA HORA después (decisión Lalo:
+  //     "después" significa más tarde hoy, no mañana). Si cae fuera de horario
+  //     hábil, el cron de llamadas la retiene solo hasta la próxima ventana.
   //   - "no_contesta" → UN reintento al siguiente día hábil a las 15:00, en
   //     horario distinto al primer intento.
   // Guarda anti-loop: máximo un auto-agendamiento de cada tipo por semana.
   if (!callbackAgendado && (estado === "pide_tiempo" || estado === "no_contesta")) {
     const esCO = contact.startsWith("57")
     const tipoAuto = estado === "pide_tiempo" ? "devolucion_pide_tiempo" : "reintento_no_contesta"
-    // 10:00 / 15:00 locales → UTC (CL invierno -4; CO -5, sin DST).
-    const horaUtc = estado === "pide_tiempo" ? (esCO ? 15 : 14) : (esCO ? 20 : 19)
     const yaHubo = await existeCallbackAutoReciente(contact, tipoAuto).catch(() => true)
     if (!yaHubo) {
       const due = new Date()
-      due.setUTCDate(due.getUTCDate() + 1)
-      due.setUTCHours(horaUtc, 0, 0, 0)
-      while ([0, 6].includes(due.getUTCDay())) due.setUTCDate(due.getUTCDate() + 1)
+      if (estado === "pide_tiempo") {
+        due.setTime(due.getTime() + 60 * 60 * 1000)
+      } else {
+        // 15:00 locales del siguiente día hábil → UTC (CL invierno -4; CO -5).
+        due.setUTCDate(due.getUTCDate() + 1)
+        due.setUTCHours(esCO ? 20 : 19, 0, 0, 0)
+        while ([0, 6].includes(due.getUTCDay())) due.setUTCDate(due.getUTCDate() + 1)
+      }
       const motivoAuto =
         estado === "pide_tiempo"
           ? "El cliente pidió en la llamada anterior que lo llamaran después (sin dar hora) — devolución comprometida"
