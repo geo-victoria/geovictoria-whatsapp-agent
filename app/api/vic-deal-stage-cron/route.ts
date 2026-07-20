@@ -20,6 +20,7 @@ import { NextResponse } from "next/server"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { transicionarDealHacia, type ResultadoTransicion } from "@/lib/zoho-deals"
+import { cerrarYTraspasarPostPago, type ResultadoTraspaso } from "@/lib/traspaso-postpago"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -97,9 +98,28 @@ async function handler(req: Request): Promise<Response> {
     id?: string
     Name?: string
     "Deal_Asociado.id"?: string
+    Fecha_Hora_Cotizacion?: string
   }>(
-    `select id, Name, Deal_Asociado.id from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} and Estado_Cotizacion = 'Aceptada' limit 200`,
+    `select id, Name, Deal_Asociado.id, Fecha_Hora_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} and Estado_Cotizacion = 'Aceptada' limit 200`,
   )
+
+  // Red de seguridad del TRASPASO post-pago (caso COT233, 20-jul): si el
+  // webhook del cotizador al agente no llegó (env faltante, caída, etc.), este
+  // barrido cierra la cadencia + llamadas agendadas y envía el traspaso al
+  // ejecutivo humano. Solo pagos RECIENTES (36h): el kv candado hace el envío
+  // idempotente, y no tocamos conversaciones nuevas de clientes antiguos.
+  const traspasos: Array<ResultadoTraspaso & { quoteId: string }> = []
+  const hace36h = Date.now() - 36 * 60 * 60 * 1000
+  for (const q of pagadas) {
+    const nombre = String(q.Name || "").toLowerCase()
+    const fecha = Date.parse(String(q.Fecha_Hora_Cotizacion || ""))
+    if (!q.id || nombre.includes("prueba") || !Number.isFinite(fecha) || fecha < hace36h) continue
+    const r = await cerrarYTraspasarPostPago(String(q.id))
+    traspasos.push({ ...r, quoteId: String(q.id) })
+    if (r.traspaso === "enviado") {
+      console.log(`[deal-stage-cron] traspaso post-pago de respaldo enviado quote=${q.id} contact=${r.contact}`)
+    }
+  }
 
   // 2. Objetivo "Implementando": onboardings completados con deal asociado.
   const completados = await coql<{
@@ -140,7 +160,7 @@ async function handler(req: Request): Promise<Response> {
   console.log(
     `[deal-stage-cron] deals=${objetivos.size} avanzados=${resumen.avanzados} errores=${resumen.errores}`,
   )
-  return NextResponse.json({ ok: true, deals: objetivos.size, resumen, resultados })
+  return NextResponse.json({ ok: true, deals: objetivos.size, resumen, resultados, traspasos })
 }
 
 export async function GET(req: Request): Promise<Response> {

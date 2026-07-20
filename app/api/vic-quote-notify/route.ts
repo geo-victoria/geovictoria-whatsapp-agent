@@ -17,15 +17,8 @@
  */
 
 import { NextResponse } from "next/server"
-import {
-  appendAssistantV3,
-  closeFollowup,
-  findContactByQuoteId,
-  getFollowupCronSecret,
-} from "@/lib/supabase-persistence-v3"
-import { cancelPendingCallbacks } from "@/lib/dapta-voice"
-import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
-import { PERFIL_CO } from "@/lib/paises/co"
+import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { cerrarYTraspasarPostPago } from "@/lib/traspaso-postpago"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 20
@@ -96,35 +89,16 @@ async function handle(req: Request): Promise<Response> {
   // Solo una venta cerrada (aceptada/pagada) apaga la cadencia — un aviso
   // operativo (ej. crm_incompleto) NO debe silenciar el seguimiento comercial.
   if (quoteId && (eventoRaw === "aceptada" || eventoRaw === "pagada")) {
-    const contact = await findContactByQuoteId(quoteId).catch(() => null)
-    if (contact) {
-      await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
-      await cancelPendingCallbacks(contact).catch(() => {})
-      console.log(`[quote-notify] cadencia cerrada contact=${contact} quote=${quoteId}`)
-
-      // TRASPASO POST-PAGO (decisión 17-jul): el ejecutivo humano aparece
-      // recién AQUÍ — antes del pago, Vicky es el único contacto comercial
-      // (el prompt y blindarContactoComercial lo garantizan). Best-effort:
-      // si la ventana de 24h de WhatsApp está cerrada, el push falla sin
-      // bloquear (el cliente igual recibe el correo de confirmación).
-      if (eventoRaw === "pagada") {
-        const esCO = contact.startsWith("57")
-        const ejecutivo = esCO
-          ? PERFIL_CO.equipo.ejecutivo
-          : { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" }
-        const traspaso =
-          `¡Felicitaciones y bienvenido a GeoVictoria! 🎉 Tu pago quedó registrado.\n\n` +
-          `De aquí en adelante te acompaña *${ejecutivo.nombre}*, tu ejecutivo comercial, quien te contactará para coordinar la puesta en marcha:\n` +
-          `📱 ${ejecutivo.telefono}\n✉️ ${ejecutivo.email}`
-        const pushed = await sendBotmakerMessage(
-          contact,
-          traspaso,
-          esCO ? PERFIL_CO.canal.channelId : undefined,
-        ).catch(() => false)
-        if (pushed) await appendAssistantV3(contact, traspaso, esCO ? "co" : "cl").catch(() => {})
-        console.log(`[quote-notify] traspaso post-pago contact=${contact} → ${ejecutivo.nombre} (push=${pushed})`)
-      }
-    }
+    // TRASPASO POST-PAGO (decisión 17-jul): el ejecutivo humano aparece recién
+    // al pagar — antes, Vicky es el único contacto comercial. La lógica vive en
+    // lib/traspaso-postpago (compartida con el barrido horario de respaldo en
+    // vic-deal-stage-cron) y es idempotente por cotización.
+    const r = await cerrarYTraspasarPostPago(quoteId, {
+      enviarTraspaso: eventoRaw === "pagada",
+    })
+    console.log(
+      `[quote-notify] cadencia cerrada contact=${r.contact || "?"} quote=${quoteId} traspaso=${r.traspaso}`,
+    )
   }
   const evento = (p.evento || url.searchParams.get("evento") || "aceptada").toLowerCase()
   const empresa = (p.empresa || url.searchParams.get("empresa") || "").trim() || "—"
