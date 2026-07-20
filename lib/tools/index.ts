@@ -101,6 +101,11 @@ import {
   programarSeguimiento,
   type ProgramarSeguimientoResultado,
 } from "./programar-seguimiento"
+import {
+  reenviarCotizacionCorreoSchema,
+  reenviarCotizacionCorreo,
+  type ReenviarCotizacionCorreoResultado,
+} from "./reenviar-cotizacion-correo"
 
 export const TOOL_SCHEMAS = [
   cotizarReferencialSchema,
@@ -126,6 +131,10 @@ export const TOOL_SCHEMAS = [
   actualizarCotizacionSchema,
   marcarNoContactarSchema,
   programarSeguimientoSchema,
+  // Reenvío de la cotización formal a un tercero designado por el cliente —
+  // SOLO por correo (regla Lalo 20-jul: no invadir por WhatsApp a quien no
+  // pidió ser contactado).
+  reenviarCotizacionCorreoSchema,
 ] as const
 
 export type ToolResult =
@@ -145,6 +154,7 @@ export type ToolResult =
   | ActualizarCotizacionResultado
   | MarcarNoContactarResultado
   | ProgramarSeguimientoResultado
+  | ReenviarCotizacionCorreoResultado
   | Awaited<ReturnType<typeof registrarComprobanteTransferencia>>
   | { ok: false; error: string }
 
@@ -207,6 +217,9 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "programar_seguimiento":
         return programarSeguimiento(input as never)
+
+      case "reenviar_cotizacion_correo":
+        return await reenviarCotizacionCorreo(input as never)
 
       default:
         return {

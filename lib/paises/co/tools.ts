@@ -27,6 +27,10 @@ import {
   marcarNoContactarSchema,
 } from "../../tools/marcar-no-contactar"
 import { programarSeguimiento } from "../../tools/programar-seguimiento"
+import {
+  reenviarCotizacionCorreo,
+  reenviarCotizacionCorreoSchema,
+} from "../../tools/reenviar-cotizacion-correo"
 import { agendarReunion } from "../../tools/agendar-reunion"
 import { reagendarReunion } from "../../tools/reagendar-reunion"
 import { checkSlotAvailability } from "../../calendar"
@@ -287,6 +291,9 @@ export const TOOL_SCHEMAS_CO = [
         },
       ]
     : []),
+  // Reenvío de la cotización formal a un tercero — SOLO por correo (regla
+  // Lalo 20-jul: no invadir por WhatsApp a quien no pidió contacto).
+  reenviarCotizacionCorreoSchema,
 ]
 
 type CotizarInput = {
@@ -563,6 +570,10 @@ export function buildDispatchCO(contact: string) {
           mensajeParaProspecto:
             "Perfecto, lo dejamos así 😊 Te escribo cuando quedamos para retomar, sin presión. Si necesitas algo antes, aquí estoy 🙌",
         }
+      }
+
+      if (name === "reenviar_cotizacion_correo") {
+        return await reenviarCotizacionCorreo(input as never)
       }
 
       return { ok: false, error: `Tool desconocida: ${name}` }

@@ -36,6 +36,7 @@ const TOOLS_BLOQUEADAS_PROCESO_HUMANO = new Set([
   "programar_seguimiento",
   "agendar_reunion",
   "reagendar_reunion",
+  "reenviar_cotizacion_correo",
 ])
 import {
   getPrefDraft,
