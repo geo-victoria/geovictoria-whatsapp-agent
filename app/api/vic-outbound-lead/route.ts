@@ -36,6 +36,8 @@ import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import {
+  agregarNotaLead,
+  buscarLeadAbiertoDeOtroDueno,
   updateZohoLeadStatus,
   updateZohoLeadFields,
   reasignarLeadSdrInbound,
@@ -238,6 +240,36 @@ export async function POST(req: Request): Promise<Response> {
   }
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     return NextResponse.json({ ok: false, error: "Supabase no configurado" }, { status: 503 })
+  }
+
+  // VISIBILIDAD INTER-CANAL (caso Ingesub, 20-jul): si el contacto ya tiene un
+  // lead ABIERTO trabajado por otro ejecutivo (formulario duplicado, doble
+  // canal), Vicky NO prospecta en paralelo — anota en ambos leads y el equipo
+  // decide quién sigue. Política Lalo: el humano ya está trabajando el caso.
+  const procesoHumano = await buscarLeadAbiertoDeOtroDueno(contact, email).catch(() => null)
+  if (procesoHumano && (!zohoLeadId || procesoHumano.id !== zohoLeadId)) {
+    const cuando = new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })
+    await agregarNotaLead(
+      procesoHumano.id,
+      "Lead duplicado llegó a Vicky — NO se prospectó",
+      `Aviso automático (${cuando}): llegó un lead de formulario duplicado de este contacto (${nombre} · +${contact}${email ? ` · ${email}` : ""}) asignado a Vicky${zohoLeadId ? ` (lead ${zohoLeadId})` : ""}. Para evitar venta en paralelo, Vicky NO lo contactó. Si prefieren que lo trabaje Vicky, reasignen el lead duplicado y reenvíen el webhook.`,
+    ).catch(() => {})
+    if (zohoLeadId) {
+      await agregarNotaLead(
+        zohoLeadId,
+        "Contacto ya trabajado por otro ejecutivo — Vicky no prospectó",
+        `Aviso automático (${cuando}): este contacto ya tiene un lead abierto de ${procesoHumano.ownerNombre} (${procesoHumano.ownerEmail}), estado "${procesoHumano.status}". Vicky no envió el toque 0 para no vender en paralelo.`,
+      ).catch(() => {})
+    }
+    console.warn(
+      `[outbound-lead] ${contact} ya está en proceso con ${procesoHumano.ownerNombre} → toque 0 omitido (visibilidad inter-canal)`,
+    )
+    return NextResponse.json({
+      ok: true,
+      skipped: "contacto con lead abierto de otro ejecutivo — no se prospecta en paralelo",
+      dueno: procesoHumano.ownerNombre,
+      contact,
+    })
   }
 
   // DEDUP: si ya existe conversación para el contacto, no tocarla (ya está

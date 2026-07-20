@@ -161,6 +161,87 @@ export async function updateZohoLeadOwner(
 }
 
 /**
+ * VISIBILIDAD INTER-CANAL (caso Ingesub, 20-jul): busca si el contacto tiene
+ * un lead ABIERTO (no convertido) trabajado por OTRO dueño (humano). Es la
+ * base del sistema anti-venta-paralela-a-ciegas: dos canales pueden atender
+ * al mismo cliente, pero jamás sin saberlo. Best-effort: null en error.
+ */
+const VICKY_OWNER_ID_PUBLIC = "3525045000484500876"
+
+export async function buscarLeadAbiertoDeOtroDueno(
+  telefono?: string,
+  email?: string,
+): Promise<{ id: string; ownerNombre: string; ownerEmail: string; empresa: string; status: string } | null> {
+  const fono = (telefono || "").replace(/\D/g, "")
+  const mail = (email || "").trim().toLowerCase()
+  if (!fono && !mail) return null
+  try {
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    const buscar = async (qs: string) => {
+      const res = await fetch(
+        `${apiDomain}/crm/v2/${moduleName}/search?${qs}&converted=false&per_page=10`,
+        { headers: { Authorization: `Zoho-oauthtoken ${accessToken}` }, cache: "no-store" },
+      )
+      if (!res.ok) return []
+      const data = (await res.json().catch(() => ({}))) as {
+        data?: Array<{
+          id?: string
+          Owner?: { id?: string; name?: string; email?: string }
+          Company?: string
+          Lead_Status?: string
+        }>
+      }
+      return data?.data || []
+    }
+    const candidatos = [
+      ...(fono ? await buscar(`phone=${encodeURIComponent(fono.slice(-9))}`) : []),
+      ...(mail ? await buscar(`email=${encodeURIComponent(mail)}`) : []),
+    ]
+    const ajeno = candidatos.find(
+      (l) => l?.Owner?.id && String(l.Owner.id) !== VICKY_OWNER_ID_PUBLIC,
+    )
+    if (!ajeno) return null
+    return {
+      id: String(ajeno.id),
+      ownerNombre: String(ajeno.Owner?.name || "(sin nombre)"),
+      ownerEmail: String(ajeno.Owner?.email || ""),
+      empresa: String(ajeno.Company || ""),
+      status: String(ajeno.Lead_Status || ""),
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Agrega una nota visible en la cronología de un lead. Best-effort. */
+export async function agregarNotaLead(
+  leadId: string,
+  titulo: string,
+  contenido: string,
+): Promise<boolean> {
+  if (!leadId || !contenido) return false
+  try {
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}/Notes`, {
+      method: "POST",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ Note_Title: titulo.slice(0, 120), Note_Content: contenido.slice(0, 30000) }] }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
  * Actualiza campos arbitrarios de un lead (ej. Country/Territorio cuando el
  * formulario trae el país que no calza con el prefijo telefónico — caso
  * Joys/Perú 19-jul: Country "Chile" con teléfono +51). Best-effort: nunca
@@ -612,6 +693,31 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         }),
         cache: "no-store",
       }).catch(() => {})
+    }
+
+    // VISIBILIDAD INTER-CANAL (caso Ingesub, 20-jul): si el contacto además
+    // tiene un lead abierto de un HUMANO (formulario en paralelo), Vicky sigue
+    // atendiendo (el cliente eligió el canal) pero TODOS quedan avisados desde
+    // el minuto uno — nota cruzada en ambos leads. Solo aplica a leads que
+    // entran a la tómbola (los de reunión ya van dirigidos a un humano).
+    if (entraATombola) {
+      const humano = await buscarLeadAbiertoDeOtroDueno(input.telefono, input.email).catch(() => null)
+      if (humano && humano.id !== leadId) {
+        const cuando = new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })
+        agregarNotaLead(
+          humano.id,
+          "Este contacto está conversando con Vicky por WhatsApp",
+          `Aviso automático (${cuando}): ${input.nombre || "el contacto"} (${input.telefono || ""}${input.email ? ` · ${input.email}` : ""}) inició una conversación comercial con Vicky por WhatsApp y ella lo está atendiendo. Lead de Vicky: ${leadId}. Coordinar para no vender en paralelo (caso Ingesub 20-jul).`,
+        ).catch(() => {})
+        agregarNotaLead(
+          leadId,
+          "Contacto con proceso humano paralelo",
+          `Aviso automático (${cuando}): este contacto ya tiene un lead abierto trabajado por ${humano.ownerNombre} (${humano.ownerEmail}), estado "${humano.status}". Vicky sigue atendiendo la conversación, pero el equipo debe coordinar quién cierra.`,
+        ).catch(() => {})
+        console.warn(
+          `[zoho-leads] VENTA PARALELA detectada: ${input.telefono || input.email} tiene lead abierto de ${humano.ownerNombre} — notas cruzadas creadas`,
+        )
+      }
     }
 
     return {
