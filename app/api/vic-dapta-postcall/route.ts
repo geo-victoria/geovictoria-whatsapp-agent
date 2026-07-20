@@ -22,6 +22,7 @@
  * x-api-key de los propios flujos de Dapta).
  */
 
+import crypto from "crypto"
 import { NextResponse } from "next/server"
 import {
   appendAssistantV3,
@@ -64,13 +65,36 @@ async function ventanaAbierta(contact: string): Promise<boolean> {
   return !!last && Date.now() - last.getTime() < VENTANA_SEGURA_MS
 }
 
-/** Envía la plantilla post-llamada por la línea del país del contacto. */
-async function enviarPlantillaPostcall(contact: string, nombre: string): Promise<boolean> {
+/**
+ * Envía la plantilla post-llamada por la línea del país del contacto. La
+ * plantilla ENTREGA la cotización directamente (botón de URL dinámica con el
+ * link corto firmado /q/<quoteId>-<hmac> del cotizador) — al cliente que ya
+ * pidió su cotización por teléfono no se le vuelve a preguntar si la quiere.
+ * Sin quoteId no hay botón posible → no se envía (el caso no existe en el
+ * circuito de voz actual: las llamadas siempre llevan cotización formal).
+ */
+function codigoLinkCorto(quoteId: string): string {
+  if (!quoteId || !VICKY_COTIZADORA_SECRET) return ""
+  const hmac = crypto
+    .createHmac("sha256", VICKY_COTIZADORA_SECRET)
+    .update(quoteId)
+    .digest("hex")
+    .slice(0, 10)
+  return `${quoteId}-${hmac}`
+}
+
+async function enviarPlantillaPostcall(
+  contact: string,
+  nombre: string,
+  quoteId: string,
+): Promise<boolean> {
+  const codigo = codigoLinkCorto(quoteId)
+  if (!codigo) return false
   const esCO = contact.startsWith("57")
   return sendBotmakerTemplate(
     contact,
     esCO ? TPL_POSTCALL_CO : TPL_POSTCALL,
-    { nombre: nombre || "de nuevo" },
+    { nombre: nombre || "de nuevo", codigo },
     esCO ? PERFIL_CO.canal.channelId : undefined,
   ).catch(() => false)
 }
@@ -224,7 +248,7 @@ export async function POST(req: Request): Promise<Response> {
           descuentoAplicado = true
           await appendAssistantV3(contact, msgProspecto).catch(() => {})
         } else {
-          const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name))
+          const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name), quoteId)
           if (porPlantilla) {
             descuentoAplicado = true
             await appendAssistantV3(
@@ -262,7 +286,7 @@ export async function POST(req: Request): Promise<Response> {
       // Ventana cerrada: el reply de la Vicky de texto moriría en el push.
       // Plantilla que invita a responder + nota interna con lo comprometido,
       // para que al responder el cliente ella actúe con todo el contexto.
-      const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name))
+      const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name), firstString(vars.quote_id))
       await appendAssistantV3(
         contact,
         `[REGISTRO INTERNO — no visible para el cliente] Llamada recién terminada y ventana de 24h CERRADA: se envió la plantilla post-llamada. ` +
