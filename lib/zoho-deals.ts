@@ -82,6 +82,7 @@ export async function transicionarDealHacia(
           // ya asociado); ejecutarla con {} da INVALID_DATA — hay que devolver
           // ese mismo objeto.
           data?: Record<string, unknown>
+          fields?: Array<{ api_name?: string; data_type?: string }>
         }>
       }
     }
@@ -112,12 +113,26 @@ export async function transicionarDealHacia(
     // es el picklist "Método de carga de información" — Lalo definió "App de
     // carga (cliente)" para los deals pagados de Vicky (el cliente se onboardea
     // solo por la app, igual que en el auto-onboarding que ya corre).
+    // OJO: cada deal puede tener una VARIANTE distinta de la transición (p.ej.
+    // Electrocontrol pide los campos de marcaje, no el de carga): solo se
+    // completa un campo si la transición efectivamente lo declara — mandar un
+    // campo ajeno da INVALID_DATA.
     const data: Record<string, unknown> = { ...(match.data || {}) }
-    const esListo = ((match.next_field_value || match.name || "") + "")
-      .toLowerCase()
-      .includes("listo para cierre")
-    if (esListo && !data.M_todo_de_carga_de_informaci_n) {
+    const camposTransicion = match.fields || []
+    const tieneCampo = (api: string) => camposTransicion.some((f) => f.api_name === api)
+    if (tieneCampo("M_todo_de_carga_de_informaci_n") && !data.M_todo_de_carga_de_informaci_n) {
       data.M_todo_de_carga_de_informaci_n = "App de carga (cliente)"
+    }
+    // Los multiselect llegan pre-llenados como string ("GeoVictoria APP") pero
+    // el PUT los exige como array.
+    for (const f of camposTransicion) {
+      const api = f.api_name || ""
+      if (f.data_type === "multiselectpicklist" && api && typeof data[api] === "string") {
+        data[api] = String(data[api])
+          .split(";")
+          .map((v) => v.trim())
+          .filter(Boolean)
+      }
     }
     const exec = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Deals/${dealId}/actions/blueprint`, {
       method: "PUT",
