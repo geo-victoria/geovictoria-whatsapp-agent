@@ -303,7 +303,9 @@ export async function GET(req: Request): Promise<Response> {
       !isTestContact(r.contact, testSet) &&
       // 'soporte': pidió soporte → cero proactividad (HSM y correo incluidos),
       // aunque tenga cotización o preform (decisión de costos 11-jul).
-      !["opt_out", "perdido", "soporte"].includes(r.followup_closed_reason || "") &&
+      // 'rechazo': dijo explícitamente que no le interesa (caso Marcela 19-jul)
+      // — se respeta igual que un opt-out.
+      !["opt_out", "perdido", "soporte", "rechazo"].includes(r.followup_closed_reason || "") &&
       r.followup_status !== "activo" &&
       r.followup_status !== "consensuado" && // tiene su propio toque programado
       (!r.reactivation_at || r.reactivation_at <= gapBefore) &&
