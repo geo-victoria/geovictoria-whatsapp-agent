@@ -66,12 +66,14 @@ async function ventanaAbierta(contact: string): Promise<boolean> {
 }
 
 /**
- * Envía la plantilla post-llamada por la línea del país del contacto. La
- * plantilla ENTREGA la cotización directamente (botón de URL dinámica con el
- * link corto firmado /q/<quoteId>-<hmac> del cotizador) — al cliente que ya
- * pidió su cotización por teléfono no se le vuelve a preguntar si la quiere.
- * Sin quoteId no hay botón posible → no se envía (el caso no existe en el
- * circuito de voz actual: las llamadas siempre llevan cotización formal).
+ * Envía la plantilla post-llamada por la línea del país del contacto. Diseño
+ * final (Lalo, 20-jul, optimizado a tasa de cierre): al cliente que acordó un
+ * precio por teléfono no se le pregunta nada ni se le hace buscar — la
+ * plantilla informa el PRECIO FINAL aplicado (gancho comercial visible sin
+ * abrir nada) y trae un botón de un tap a su cotización (URL dinámica de Meta
+ * con el link corto firmado /q/<quoteId>-<hmac>; el token completo no cabe y
+ * Meta prohíbe URLs por variable de cuerpo). Requiere precio APLICADO en el
+ * sistema y quoteId → solo se usa cuando el descuento quedó comiteado.
  */
 function codigoLinkCorto(quoteId: string): string {
   if (!quoteId || !VICKY_COTIZADORA_SECRET) return ""
@@ -87,14 +89,19 @@ async function enviarPlantillaPostcall(
   contact: string,
   nombre: string,
   quoteId: string,
+  precioFinalClp: number,
 ): Promise<boolean> {
   const codigo = codigoLinkCorto(quoteId)
-  if (!codigo) return false
+  if (!codigo || !(precioFinalClp > 0)) return false
   const esCO = contact.startsWith("57")
   return sendBotmakerTemplate(
     contact,
     esCO ? TPL_POSTCALL_CO : TPL_POSTCALL,
-    { nombre: nombre || "de nuevo", codigo },
+    {
+      nombre: nombre || "de nuevo",
+      precio: precioFinalClp.toLocaleString("es-CL"),
+      codigo,
+    },
     esCO ? PERFIL_CO.canal.channelId : undefined,
   ).catch(() => false)
 }
@@ -231,24 +238,23 @@ export async function POST(req: Request): Promise<Response> {
         // tope y el precio final difiere de lo dicho en la llamada. Un buen
         // vendedor lo aclara al tiro, con transparencia — no deja que el
         // cliente lo descubra solo en la página.
+        const precioFinalAplicado = Math.round(montoOriginal * (1 - pctExacto / 100))
         if (pctCrudo > 25) {
-          const precioFinal = Math.round(montoOriginal * (1 - pctExacto / 100))
           msgProspecto +=
             `\n\nUn alcance de transparencia sobre lo que hablamos: el descuento máximo que tengo autorizado es ${pctExacto}%, ` +
-            `así que el valor final quedó en $${precioFinal.toLocaleString("es-CL")} mensual, IVA incluido — ` +
+            `así que el valor final quedó en $${precioFinalAplicado.toLocaleString("es-CL")} mensual, IVA incluido — ` +
             `levemente distinto del monto que alcanzamos a mencionar por teléfono. Si eso te cambia la decisión, me dices y lo conversamos 😊`
         }
         // Ventana de 24h ABIERTA → texto libre con el link, como siempre.
-        // CERRADA (o el push falló igual) → plantilla Utility que invita a
-        // responder; la respuesta abre la ventana y la Vicky de texto reenvía
-        // el link con el contexto que dejamos anotado en el historial.
+        // CERRADA (o el push falló igual) → plantilla Utility que ENTREGA:
+        // precio final en el cuerpo + botón de un tap a su cotización.
         const abierta = await ventanaAbierta(contact)
         let enviado = abierta ? await sendBotmakerMessage(contact, msgProspecto).catch(() => false) : false
         if (enviado) {
           descuentoAplicado = true
           await appendAssistantV3(contact, msgProspecto).catch(() => {})
         } else {
-          const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name), quoteId)
+          const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name), quoteId, precioFinalAplicado)
           if (porPlantilla) {
             descuentoAplicado = true
             await appendAssistantV3(
@@ -283,17 +289,15 @@ export async function POST(req: Request): Promise<Response> {
       .join("; ")
     const abierta = await ventanaAbierta(contact)
     if (!abierta) {
-      // Ventana cerrada: el reply de la Vicky de texto moriría en el push.
-      // Plantilla que invita a responder + nota interna con lo comprometido,
-      // para que al responder el cliente ella actúe con todo el contexto.
-      const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name), firstString(vars.quote_id))
+      // Ventana cerrada y SIN precio aplicado en el sistema: no hay plantilla
+      // honesta que enviar (afirmaría una actualización no comiteada). Nota
+      // interna con lo comprometido; el próximo toque/respuesta lo retoma.
       await appendAssistantV3(
         contact,
-        `[REGISTRO INTERNO — no visible para el cliente] Llamada recién terminada y ventana de 24h CERRADA: se envió la plantilla post-llamada. ` +
-          `Cuando el cliente responda, cumple lo comprometido en la llamada SIN volver a preguntar lo ya confirmado: ${pedido || resumen || "ver registro de la llamada"}.`,
+        `[REGISTRO INTERNO — no visible para el cliente] Llamada recién terminada y ventana de 24h CERRADA (no se pudo enviar el WhatsApp). ` +
+          `En el PRÓXIMO contacto (respuesta del cliente o toque programado), cumple lo comprometido en la llamada SIN volver a preguntar lo ya confirmado: ${pedido || resumen || "ver registro de la llamada"}.`,
       ).catch(() => {})
-      recotizacion = porPlantilla
-      console.log(`[dapta-postcall] ventana cerrada contact=${contact} → plantilla=${porPlantilla}`)
+      console.log(`[dapta-postcall] ventana cerrada sin precio aplicado contact=${contact} → solo nota interna`)
     } else {
       const evento =
         `[EVENTO INTERNO — LLAMADA TELEFÓNICA RECIÉN TERMINADA (esto NO lo escribió el cliente)] ` +
