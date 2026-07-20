@@ -9,6 +9,7 @@
  * Auth: x-cron-secret == vic_kv.followup_cron_secret (mismo esquema admin).
  */
 
+import crypto from "crypto"
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
@@ -61,6 +62,19 @@ export async function GET(req: Request): Promise<Response> {
     })
     const data = await r.json().catch(() => ({}))
     return NextResponse.json({ ok: r.ok, status: r.status, data })
+  }
+
+  // ?shortcode=<quoteId>: devuelve el código firmado del link corto de
+  // aceptación (/q/<quoteId>-<hmac> del cotizador) — para probar la plantilla
+  // post-llamada sin exponer VICKY_COTIZADORA_SECRET.
+  const scQuoteId = (url.searchParams.get("shortcode") || "").trim()
+  if (scQuoteId) {
+    const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+    if (!secret) {
+      return NextResponse.json({ ok: false, error: "VICKY_COTIZADORA_SECRET no configurado" }, { status: 503 })
+    }
+    const hmac = crypto.createHmac("sha256", secret).update(scQuoteId).digest("hex").slice(0, 10)
+    return NextResponse.json({ ok: true, quoteId: scQuoteId, codigo: `${scQuoteId}-${hmac}` })
   }
 
   // ?get=/v2.0/<ruta>: passthrough de SOLO LECTURA a la API de Botmaker con el
