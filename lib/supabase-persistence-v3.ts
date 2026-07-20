@@ -509,6 +509,22 @@ export async function getFollowupStatus(contact: string): Promise<string | null>
 }
 
 /**
+ * Último mensaje del CLIENTE (para decidir si la ventana de 24h de WhatsApp
+ * está abierta antes de intentar un push de texto libre — fuera de ventana el
+ * push muere silenciosamente y hay que ir por plantilla HSM).
+ */
+export async function getLastUserAt(contact: string): Promise<Date | null> {
+  if (!contact) return null
+  const rows = await supabaseFetch<Array<{ last_user_at: string | null }>>(
+    `vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=last_user_at&limit=1`,
+  )
+  const raw = rows?.[0]?.last_user_at
+  if (!raw) return null
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/**
  * Marca actividad del cliente: actualiza last_user_at y, si había un ciclo
  * activo, lo pausa (el cliente respondió → se cancela la cadencia en curso;
  * se re-armará cuando Vicky conteste). Best-effort.

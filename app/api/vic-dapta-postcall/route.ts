@@ -26,12 +26,14 @@ import { NextResponse } from "next/server"
 import {
   appendAssistantV3,
   getKvValue,
+  getLastUserAt,
   getQuotePointer,
   setKvValue,
   setQuotePointer,
 } from "@/lib/supabase-persistence-v3"
 import { parseFechaRecontacto, scheduleCallback } from "@/lib/dapta-voice"
-import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { PERFIL_CO } from "@/lib/paises/co"
 
 const COTIZADORA_API_BASE = (
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -45,6 +47,33 @@ const SELF_BASE = (
   "https://geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app"
 ).trim().replace(/\/+$/, "")
 const BOTMAKER_SECRET = (process.env.BOTMAKER_SECRET || "").trim()
+
+// Plantillas Utility para entregar lo prometido en la llamada cuando la
+// ventana de 24h de WhatsApp está CERRADA (caso real 20-jul: el post-llamada
+// compuso el mensaje con el link y Botmaker lo descartó por ventana vencida).
+// Patrón Marcela: plantilla corta que invita a responder — la respuesta abre
+// la ventana y la Vicky de texto entrega el link con todo el contexto.
+const TPL_POSTCALL = (process.env.POSTCALL_TEMPLATE || "vicky_cotizacion_actualizada_llamada").trim()
+const TPL_POSTCALL_CO = (process.env.POSTCALL_TEMPLATE_CO || "vicky_co_cotizacion_actualizada_llamada").trim()
+// La ventana real es 24h desde el último mensaje del cliente; margen de 30
+// min para no apostar al borde.
+const VENTANA_SEGURA_MS = 23.5 * 60 * 60 * 1000
+
+async function ventanaAbierta(contact: string): Promise<boolean> {
+  const last = await getLastUserAt(contact).catch(() => null)
+  return !!last && Date.now() - last.getTime() < VENTANA_SEGURA_MS
+}
+
+/** Envía la plantilla post-llamada por la línea del país del contacto. */
+async function enviarPlantillaPostcall(contact: string, nombre: string): Promise<boolean> {
+  const esCO = contact.startsWith("57")
+  return sendBotmakerTemplate(
+    contact,
+    esCO ? TPL_POSTCALL_CO : TPL_POSTCALL,
+    { nombre: nombre || "de nuevo" },
+    esCO ? PERFIL_CO.canal.channelId : undefined,
+  ).catch(() => false)
+}
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -185,10 +214,28 @@ export async function POST(req: Request): Promise<Response> {
             `así que el valor final quedó en $${precioFinal.toLocaleString("es-CL")} mensual, IVA incluido — ` +
             `levemente distinto del monto que alcanzamos a mencionar por teléfono. Si eso te cambia la decisión, me dices y lo conversamos 😊`
         }
-        const enviado = await sendBotmakerMessage(contact, msgProspecto).catch(() => false)
+        // Ventana de 24h ABIERTA → texto libre con el link, como siempre.
+        // CERRADA (o el push falló igual) → plantilla Utility que invita a
+        // responder; la respuesta abre la ventana y la Vicky de texto reenvía
+        // el link con el contexto que dejamos anotado en el historial.
+        const abierta = await ventanaAbierta(contact)
+        let enviado = abierta ? await sendBotmakerMessage(contact, msgProspecto).catch(() => false) : false
         if (enviado) {
           descuentoAplicado = true
           await appendAssistantV3(contact, msgProspecto).catch(() => {})
+        } else {
+          const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name))
+          if (porPlantilla) {
+            descuentoAplicado = true
+            await appendAssistantV3(
+              contact,
+              `[REGISTRO INTERNO — no visible para el cliente] La ventana de 24h estaba cerrada: se le envió la plantilla post-llamada. ` +
+                `Cuando el cliente responda, entrégale ESTE mensaje (es lo prometido en la llamada, cópialo tal cual): ${msgProspecto}`,
+            ).catch(() => {})
+          }
+          console.log(
+            `[dapta-postcall] ventana ${abierta ? "abierta pero push falló" : "cerrada"} contact=${contact} → plantilla=${porPlantilla}`,
+          )
         }
       }
       console.log(
@@ -205,26 +252,41 @@ export async function POST(req: Request): Promise<Response> {
     const pedido = [
       cambio ? `cambio pedido: ${cambio}` : "",
       precioAcordado
-        ? `PRECIO MENSUAL ACORDADO EN LA LLAMADA: $${precioAcordado} (ya autorizado — está dentro del descuento máximo del 25%; aplica con tus herramientas el descuento necesario para llegar EXACTAMENTE a ese valor, no lo renegocies)`
+        ? `PRECIO MENSUAL ACORDADO EN LA LLAMADA: $${precioAcordado} (aplica con tus herramientas el descuento necesario para llegar a ese valor; si tus descuentos autorizados no alcanzan EXACTAMENTE ese monto, aplica el máximo y explícale con transparencia el valor final — nunca prometas un precio que el sistema no registró)`
         : "",
     ]
       .filter(Boolean)
       .join("; ")
-    const evento =
-      `[EVENTO INTERNO — LLAMADA TELEFÓNICA RECIÉN TERMINADA (esto NO lo escribió el cliente)] ` +
-      `Acabas de hablar por teléfono con este cliente y le PROMETISTE enviarle la cotización actualizada por WhatsApp. ` +
-      `Lo comprometido: ${pedido || resumen || "ver registro de la llamada en el historial"}. ` +
-      `Actúa AHORA: salúdalo en una línea haciendo referencia a la llamada ("como te prometí por teléfono..."), ` +
-      `genera la cotización actualizada con tus herramientas y envíale el link. ` +
-      `No le vuelvas a preguntar lo que ya confirmó en la llamada; si falta un dato imprescindible para cotizar, pídelo directo y corto.`
-    const r = await fetch(`${SELF_BASE}/api/vic-botmaker-v3`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-secret": BOTMAKER_SECRET },
-      body: JSON.stringify({ contact, message: evento }),
-      cache: "no-store",
-    }).catch(() => null)
-    recotizacion = !!r?.ok
-    console.log(`[dapta-postcall] recotización reinyectada contact=${contact} ok=${recotizacion}`)
+    const abierta = await ventanaAbierta(contact)
+    if (!abierta) {
+      // Ventana cerrada: el reply de la Vicky de texto moriría en el push.
+      // Plantilla que invita a responder + nota interna con lo comprometido,
+      // para que al responder el cliente ella actúe con todo el contexto.
+      const porPlantilla = await enviarPlantillaPostcall(contact, firstString(vars.customer_name))
+      await appendAssistantV3(
+        contact,
+        `[REGISTRO INTERNO — no visible para el cliente] Llamada recién terminada y ventana de 24h CERRADA: se envió la plantilla post-llamada. ` +
+          `Cuando el cliente responda, cumple lo comprometido en la llamada SIN volver a preguntar lo ya confirmado: ${pedido || resumen || "ver registro de la llamada"}.`,
+      ).catch(() => {})
+      recotizacion = porPlantilla
+      console.log(`[dapta-postcall] ventana cerrada contact=${contact} → plantilla=${porPlantilla}`)
+    } else {
+      const evento =
+        `[EVENTO INTERNO — LLAMADA TELEFÓNICA RECIÉN TERMINADA (esto NO lo escribió el cliente)] ` +
+        `Acabas de hablar por teléfono con este cliente y le PROMETISTE enviarle la cotización actualizada por WhatsApp. ` +
+        `Lo comprometido: ${pedido || resumen || "ver registro de la llamada en el historial"}. ` +
+        `Actúa AHORA: salúdalo en una línea haciendo referencia a la llamada ("como te prometí por teléfono..."), ` +
+        `genera la cotización actualizada con tus herramientas y envíale el link. ` +
+        `No le vuelvas a preguntar lo que ya confirmó en la llamada; si falta un dato imprescindible para cotizar, pídelo directo y corto.`
+      const r = await fetch(`${SELF_BASE}/api/vic-botmaker-v3`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-secret": BOTMAKER_SECRET },
+        body: JSON.stringify({ contact, message: evento }),
+        cache: "no-store",
+      }).catch(() => null)
+      recotizacion = !!r?.ok
+      console.log(`[dapta-postcall] recotización reinyectada contact=${contact} ok=${recotizacion}`)
+    }
   }
 
   // ── Acción 2: agendar la llamada devuelta ──────────────────────────────────
