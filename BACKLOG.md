@@ -636,3 +636,29 @@ cierre resolutivo con 2-3 horarios, seguimiento a leads >50 en captura
 - Es la MISMA voz en todos los agentes telefónicos (calificación CL/CO,
   seguimiento cotización, NPS, implementaciones) — usarla en cualquier canal
   nuevo (notas de voz WhatsApp, videos, IVR) para mantener identidad.
+
+---
+
+## Catálogo completo para Vicky — cerrar sin intervención humana (Lalo, 21-jul)
+
+**Principio rector (definición de Lalo):** si una reunión con ejecutivo fue
+NECESARIA para vender, ya no es venta de Vicky. Cada handoff "necesario" es el
+síntoma de una capacidad que le falta — la solución no es rutear mejor al
+humano, es eliminar la necesidad del humano. La tasa 100% Vicky se sube
+agregando capacidades, nunca maquillando la atribución.
+
+**Backlog concreto — ampliar el catálogo cotizable:**
+1. **Módulo Permisos y Vacaciones** (caso Daniel/notaría CBR Litueche, 21-jul:
+   estaba a un RUT de cerrar y el módulo lo desvió a reunión). Existe en el
+   onboarding como módulo estándar; falta tarifa + ítem en el cotizador.
+2. **Accesorios de reloj: impresora térmica de ticket** (caso Cynthia/
+   Ingredientes, 21-jul). Productos ya existen en Zoho: "013 - Impresora
+   Térmica (Fiscal)" 7 UF y "017 - Gabinete" 3 UF — falta exponerlos como
+   hardware opcional en el cotizador + regla de compatibilidad de reloj.
+3. **Otros módulos del onboarding aún no cotizables** (Dashboard BI, Gestor
+   Documental, Calendario Inteligente, Alertas): evaluar cuáles tienen tarifa
+   estándar y sumarlos de a uno.
+4. Mientras el catálogo no esté completo, rige la regla transitoria del
+   21-jul: la formal sale YA con lo cotizable y el ejecutivo agrega lo
+   faltante sobre la MISMA cotización (sin forzar) — y cada caso que caiga
+   ahí es un voto por subir ese ítem al catálogo.
