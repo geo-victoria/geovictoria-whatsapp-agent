@@ -40,9 +40,21 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     id: "vacaciones",
     nombre: "Vacaciones y Permisos",
     descripcion:
-      "Gestión de solicitudes y aprobaciones de vacaciones y permisos sin planillas Excel.",
-    tiers: [{ minUsuarios: 1, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.022 }],
-    disponibleParaVicky: false,
+      "Los trabajadores solicitan vacaciones, días administrativos, licencias y permisos desde la app/portal; el supervisor aprueba o rechaza en un clic y los saldos de días (acumulados, tomados, pendientes) se calculan y actualizan SOLOS según la normativa. Todo trazable y sin planillas Excel ni papeles. Se integra con el control de asistencia.",
+    // REGLA DE PRECIO (Lalo, 21-jul): vacaciones vale el 30% del precio de
+    // asistencia, POR CADA usuario de asistencia — por eso los tiers son el
+    // ESPEJO exacto de los de asistencia × 0,30 (misma modalidad por tramo,
+    // incluidos los tramos de tarifa fija). Si asistencia cambia sus tiers,
+    // actualizar estos en el mismo cambio. El descuento recurrente aplica
+    // sobre asistencia + módulos (bucket recurrente del cotizador).
+    tiers: [
+      { minUsuarios: 1, maxUsuarios: 1, modalidad: "fijo", precioUF: 0.075 },
+      { minUsuarios: 2, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.18 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.021 },
+      { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.0195 },
+      { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.0165 },
+    ],
+    disponibleParaVicky: true,
   },
   {
     id: "banco",
