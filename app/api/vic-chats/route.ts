@@ -59,6 +59,25 @@ type Conv = {
 }
 
 type Msg = { role: string; content: string; at: string }
+type Pointer = { quote_id: string; deal_id: string | null; acceptance_url: string | null }
+
+// Links útiles de la cotización asociada (pedido equipo CO, 21-jul): la página
+// de aceptación (lo que ve el cliente, con precio vivo) y el Deal en Zoho.
+async function punteroDe(contact: string, quoteId: string | null): Promise<Pointer | null> {
+  if (!quoteId) return null
+  const rows = await sb<Pointer[]>(
+    `vic_v3_quote_pointers?contact=eq.${contact}&quote_id=eq.${quoteId}&select=quote_id,deal_id,acceptance_url&limit=1`,
+  ).catch(() => [] as Pointer[])
+  return rows[0] || null
+}
+
+function linksCotizacion(p: Pointer | null): string {
+  if (!p) return ""
+  const partes: string[] = []
+  if (p.acceptance_url) partes.push(`<a href="${esc(p.acceptance_url)}" target="_blank">ver cotización</a>`)
+  if (p.deal_id) partes.push(`<a href="https://crm.zoho.com/crm/tab/Potentials/${esc(p.deal_id)}" target="_blank">deal en Zoho</a>`)
+  return partes.join(" · ")
+}
 
 async function sb<T>(path: string): Promise<T> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: HEADERS, cache: "no-store" })
@@ -114,10 +133,12 @@ export async function GET(req: Request): Promise<Response> {
           return `<div class="${clase}"><div class="who">${quien}</div>${esc(m.content)}<div class="hora">${fmt(m.at, tz)}</div></div>`
         })
         .join("")
+      const puntero = conv ? await punteroDe(contact, conv.formal_quote_id) : null
+      const links = linksCotizacion(puntero)
       const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="20"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chat +${esc(contact)}</title>${ESTILO}</head><body><div class="wrap">
         <div class="sub"><a href="${qs(`&pais=${pais}`)}">← Volver a la lista</a></div>
         <h1>+${esc(contact)} ${conv?.country === "co" ? "🇨🇴" : "🇨🇱"}</h1>
-        <div class="sub">${msgs.length} mensajes · ciclo: ${esc(conv?.followup_status || "—")} · ${conv?.formal_quote_id ? "con cotización formal" : "sin cotización formal"} · hora local ${pais.toUpperCase()} · se actualiza solo cada 20s</div>
+        <div class="sub">${msgs.length} mensajes · ciclo: ${esc(conv?.followup_status || "—")} · ${conv?.formal_quote_id ? `cotización formal${links ? " (" + links + ")" : ""}` : "sin cotización formal"} · hora local ${pais.toUpperCase()} · se actualiza solo cada 20s</div>
         ${burbujas || "<p class='sub'>Sin mensajes.</p>"}
       </div></body></html>`
       return new NextResponse(html, { headers: { "Content-Type": "text/html; charset=utf-8" } })
@@ -131,21 +152,29 @@ export async function GET(req: Request): Promise<Response> {
     // Preview del último mensaje de cada conversación (consultas chicas en lote).
     const previews = await Promise.all(
       convs.slice(0, 60).map(async (c) => {
-        const m = await sb<Msg[]>(
-          `vic_v3_messages?conversation_id=eq.${c.id}&select=role,content,at&order=at.desc&limit=1`,
-        ).catch(() => [] as Msg[])
-        return m[0]
+        const [m, p] = await Promise.all([
+          sb<Msg[]>(
+            `vic_v3_messages?conversation_id=eq.${c.id}&select=role,content,at&order=at.desc&limit=1`,
+          ).catch(() => [] as Msg[]),
+          punteroDe(c.contact, c.formal_quote_id),
+        ])
+        return { m: m[0], p }
       }),
     )
     const filas = convs
       .map((c, i) => {
-        const m = previews[i]
+        const { m, p } = previews[i]
         const prev = m ? `${m.role === "user" ? "Cliente" : "Vicky"}: ${m.content.slice(0, 90)}` : "—"
+        const tagCotizacion = c.formal_quote_id
+          ? p?.acceptance_url
+            ? `<a class="tag" href="${esc(p.acceptance_url)}" target="_blank">cotización ↗</a>`
+            : '<span class="tag">cotización</span>'
+          : ""
         return `<tr>
           <td><a href="${qs(`&pais=${pais}&contact=${c.contact}`)}"><b>+${esc(c.contact)}</b></a> ${c.country === "co" ? "🇨🇴" : "🇨🇱"}</td>
           <td><span class="prev">${esc(prev)}</span></td>
           <td>${fmt(m?.at || c.updated_at, tz)}</td>
-          <td>${c.formal_quote_id ? '<span class="tag">cotización</span>' : ""} ${esc(c.followup_status || "")}</td>
+          <td>${tagCotizacion} ${esc(c.followup_status || "")}</td>
         </tr>`
       })
       .join("")
