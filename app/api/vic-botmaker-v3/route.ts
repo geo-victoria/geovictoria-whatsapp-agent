@@ -41,6 +41,7 @@ import {
   getQuotePointers,
   getFormalQuote,
   isReengaged,
+  setKvValue,
 } from "@/lib/supabase-persistence-v3"
 import {
   acquireLock,
