@@ -51,7 +51,7 @@ import {
   drainInbox,
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
-import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -1183,6 +1183,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     // la línea que eligió el cliente). Best-effort.
     if (contact && (body.channelId || "").trim()) {
       setKvValue(`canal_origen_${contact}`, (body.channelId || "").trim()).catch(() => {})
+    } else if (contact.startsWith("57") && contact.length >= 12) {
+      // Fallback (caso +573172822429): un +57 escribiendo SIN channelId puede
+      // venir por la línea CHILENA — si respondemos por la línea CO, Meta
+      // rechaza (sin sesión) y el cliente no recibe NADA. Detectamos su canal
+      // real vía la API de Botmaker antes de procesar. Un lookup por mensaje,
+      // solo para +57 sin channelId; sobra cuando las acciones de código ya
+      // manden el canal.
+      await detectarCanalOrigen(contact).catch(() => "")
     }
 
     // 2.1. Ruteo multi-país (19-jul): la acción de código de Botmaker es UNA

@@ -465,6 +465,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     const audioUrl = (body.audioUrl || body.audioURL || "").trim()
     const simulacion = body.simular === true
 
+    // Canal de ORIGEN (espejo del webhook CL): si la acción de código CO manda
+    // channelId, se persiste — los pushes salen por la línea donde el cliente
+    // escribió, aunque el prefijo del número sea de otro país.
+    const canalBody = ((body as { channelId?: string }).channelId || "").trim()
+    if (contact && canalBody) {
+      setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
+    }
+
     if (!ENABLED && !simulacion) {
       console.log(
         `[vic-co][observacion] contact=${contact} msgLen=${message.length} audio=${audioUrl ? "sí" : "no"} texto="${message.slice(0, 120)}"`,

@@ -76,6 +76,56 @@ async function canalDeOrigen(contactId: string): Promise<string> {
  * @param text Mensaje a enviar (texto libre).
  * @returns true si Botmaker aceptó el envío (status 202), false en error.
  */
+/**
+ * Detección AUTOMÁTICA del canal de origen (fallback, caso +573172822429):
+ * mientras las acciones de código de Botmaker no envíen `channelId`, se
+ * consulta la API de mensajes por los últimos minutos y se busca el último
+ * mensaje DEL USUARIO de este contacto — su chat.channelId es la línea por la
+ * que escribió. Si se encuentra, se persiste en vic_kv (canal_origen_<c>) para
+ * que todos los pushes salgan por ahí. Best-effort: sin token o sin hallazgo,
+ * no hace nada.
+ */
+export async function detectarCanalOrigen(contactId: string): Promise<string> {
+  if (!BM_TOKEN || !SUPABASE_URL_KV || !SUPABASE_KEY_KV) return ""
+  const clean = normalizeContactId(contactId)
+  try {
+    const desde = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+    const r = await fetch(
+      `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desde)}`,
+      { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" },
+    )
+    const data = (await r.json().catch(() => ({}))) as {
+      items?: Array<{
+        from?: string
+        creationTime?: string
+        chat?: { contactId?: string; channelId?: string }
+      }>
+    }
+    const delContacto = (data.items || [])
+      .filter((m) => m.from === "user" && m.chat?.contactId === clean && m.chat?.channelId)
+      .sort((a, b) => String(b.creationTime || "").localeCompare(String(a.creationTime || "")))
+    const canal = delContacto[0]?.chat?.channelId || ""
+    if (canal) {
+      await fetch(`${SUPABASE_URL_KV}/rest/v1/vic_kv?on_conflict=key`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_KEY_KV,
+          Authorization: `Bearer ${SUPABASE_KEY_KV}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify({ key: `canal_origen_${clean}`, value: canal }),
+        cache: "no-store",
+      }).catch(() => {})
+      console.log(`[botmaker-push] canal de origen detectado para ${clean}: ${canal}`)
+    }
+    return canal
+  } catch (e) {
+    console.error("[botmaker-push] detectarCanalOrigen falló:", e)
+    return ""
+  }
+}
+
 export async function sendBotmakerMessage(
   contactId: string,
   text: string,
