@@ -208,6 +208,17 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   const rawReply = (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
   let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(rawReply)))
 
+  // Guardrail anti-link ALUCINADO de documentos (espejo del 2.4b chileno,
+  // caso Cynthia 21-jul): Vicky no tiene documentos en Drive/Dropbox — todo
+  // link a esos dominios es fabricado. En CO no existe la certificación DT,
+  // así que siempre se elimina el link.
+  const LINK_FABRICADO_CO =
+    /https?:\/\/(?:drive|docs)\.google\.com\/\S+|https?:\/\/(?:www\.)?(?:dropbox|wetransfer|mega)\.[a-z]+\/\S+/gi
+  if (LINK_FABRICADO_CO.test(reply)) {
+    console.error(`[vic-co] LINK_FABRICADO contact=${contact} reply=${JSON.stringify(reply.slice(0, 300))}`)
+    reply = reply.replace(LINK_FABRICADO_CO, "(te lo hago llegar enseguida)").trim()
+  }
+
   let toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
 
   // ── Guardrails anti-alucinación (espejo de 2.6b/2.6c chilenos) ──

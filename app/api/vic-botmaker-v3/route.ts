@@ -385,6 +385,31 @@ async function processOneTurn(
 
     let reply = (result.reply || "").trim()
 
+    // 2.4b. Guardrail anti-link ALUCINADO de documentos (caso Cynthia, 21-jul):
+    // el modelo "compartió" la certificación DT con un link de Google Drive
+    // INVENTADO (drive.google.com/file/d/1Cbga… → "no se pudo abrir el
+    // archivo") en vez de llamar enviar_certificacion. Vicky no tiene NINGÚN
+    // documento en Drive/Dropbox: cualquier link a esos dominios es fabricado.
+    // Determinista: si el contexto es la certificación DT, se sustituye por el
+    // documento oficial (mismo que entrega la tool); si no, se elimina el link
+    // y se deja la frase honesta de que el documento va enseguida.
+    const LINK_FABRICADO =
+      /https?:\/\/(?:drive|docs)\.google\.com\/\S+|https?:\/\/(?:www\.)?(?:dropbox|wetransfer|mega)\.[a-z]+\/\S+/gi
+    if (LINK_FABRICADO.test(reply)) {
+      console.error(
+        `[v3-bg] LINK_FABRICADO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+      )
+      const esContextoCert = /certificaci|direcci[oó]n del trabajo|\bDT\b|resoluci[oó]n/i.test(reply)
+      if (esContextoCert) {
+        reply = reply.replace(
+          LINK_FABRICADO,
+          "https://www.dt.gob.cl/legislacion/1624/articles-127208_recurso_1.pdf",
+        )
+      } else {
+        reply = reply.replace(LINK_FABRICADO, "(te lo hago llegar enseguida)").trim()
+      }
+    }
+
     // 2.5. Guardrail anti-alucinación de URL del cotizador.
     // Si el reply contiene CUALQUIER URL del cotizador (con path) pero NO hubo
     // una invocación exitosa de generar_link_cotizadora/aplicar_siguiente_descuento
