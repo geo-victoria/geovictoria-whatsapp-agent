@@ -12,6 +12,7 @@
 
 import { NextResponse } from "next/server"
 import { generarLinkCotizadora } from "@/lib/tools/generar-link-cotizadora"
+import { buildDispatchCO } from "@/lib/paises/co/tools"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -45,6 +46,16 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "body JSON inválido" }, { status: 400 })
   }
   try {
+    // pais=co: genera por el flujo COLOMBIANO (create-from-vicky-co, precios
+    // COP, NIT). `_contact` es el teléfono del cliente (lo usa el dispatch CO
+    // para los caminos de lead). Agregado 21-jul para la llamada de
+    // validación de voz CO (cotización de prueba de Alejandro).
+    if (String(body.pais || "") === "co") {
+      const contact = String(body._contact || "")
+      const dispatchCO = buildDispatchCO(contact)
+      const result = await dispatchCO("generar_link_cotizadora", body)
+      return NextResponse.json(result as Record<string, unknown>)
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await generarLinkCotizadora(body as any)
     return NextResponse.json(result)
