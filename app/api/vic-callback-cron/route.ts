@@ -32,6 +32,9 @@ import {
   unclaimCallback,
 } from "@/lib/dapta-voice"
 import { estadoCotizacionParaSeguimiento } from "@/lib/zoho-quote-status"
+import { llamadaExisteEnDapta } from "@/lib/dapta-verify"
+import { avisarEquipoInterno } from "@/lib/alerta-interna"
+import { fetchDoneCallbacksRecientes } from "@/lib/dapta-voice"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -78,6 +81,35 @@ export async function POST(req: Request): Promise<Response> {
       { ok: false, error: "vic_kv.dapta_flow_seguimiento_webhook no configurada" },
       { status: 503 },
     )
+  }
+
+  // VERIFICACIÓN ANTI-FALSO-POSITIVO (caso Alejandro, 21-jul): el flujo de
+  // Dapta responde 200 aunque la llamada nunca se cree (p. ej. agente sin
+  // número de voz asignado). Cada corrida revisa las llamadas marcadas "done"
+  // de las últimas 2h (con ≥10 min de gracia) contra la API de Dapta: si la
+  // llamada NO existe, alerta interna al equipo. Una sola vez por fila (kv).
+  const verificadas: Array<Record<string, unknown>> = []
+  try {
+    const recientes = await fetchDoneCallbacksRecientes(2)
+    for (const cb of recientes) {
+      const yaVerificada = await getKvValue(`llamada_verificada_${cb.id}`).catch(() => null)
+      if (yaVerificada) continue
+      const dueMs = Date.parse(cb.due_at)
+      if (!Number.isFinite(dueMs) || Date.now() - dueMs < 10 * 60 * 1000) continue
+      const phone = String((cb.payload || {}).phone_number || cb.contact || "")
+      const veredicto = await llamadaExisteEnDapta(phone, cb.due_at)
+      if (veredicto === "unknown") continue // sin PAT o API caída: reintenta la próxima corrida
+      await setKvValue(`llamada_verificada_${cb.id}`, veredicto).catch(() => {})
+      verificadas.push({ id: cb.id, contact: cb.contact, veredicto })
+      if (veredicto === "no_encontrada") {
+        console.error(`[callback-cron] llamada ${cb.id} (${cb.contact}) marcada disparada pero NO existe en Dapta`)
+        await avisarEquipoInterno(
+          `⚠️ Llamada de voz FANTASMA — el flujo de Dapta aceptó la llamada a +${cb.contact} (${cb.due_at}) pero nunca se creó. Revisar el agente/canal en Dapta (¿número de voz asignado?).`,
+        )
+      }
+    }
+  } catch (e) {
+    console.error("[callback-cron] verificación anti-falso-positivo falló:", e)
   }
 
   const due = await claimDueCallbacks(5)
@@ -198,5 +230,5 @@ export async function POST(req: Request): Promise<Response> {
     console.log(`[callback-cron] ${cb.contact} due=${cb.due_at} → ${ok ? "llamada disparada" : "FALLÓ"}`)
   }
 
-  return NextResponse.json({ ok: true, pendientes: due.length, disparadas, detalle })
+  return NextResponse.json({ ok: true, pendientes: due.length, disparadas, detalle, verificadas })
 }

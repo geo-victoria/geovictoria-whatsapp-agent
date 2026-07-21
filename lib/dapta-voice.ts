@@ -158,6 +158,22 @@ export async function existeCallbackAutoReciente(
   return rows.length > 0
 }
 
+/**
+ * Llamadas marcadas "done" (disparadas al flujo) en las últimas `horas` horas.
+ * Insumo de la verificación anti-falso-positivo del callback-cron (21-jul):
+ * el flujo de Dapta responde 200 aunque la llamada nunca se cree.
+ */
+export async function fetchDoneCallbacksRecientes(horas: number): Promise<ScheduledCall[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return []
+  const desde = new Date(Date.now() - horas * 60 * 60 * 1000).toISOString()
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_scheduled_calls?status=eq.done&due_at=gte.${desde}&select=id,contact,due_at,payload,status&order=due_at.desc&limit=20`,
+    { headers: HEADERS, cache: "no-store" },
+  )
+  if (!res.ok) return []
+  return ((await res.json().catch(() => [])) as ScheduledCall[]) || []
+}
+
 /** Reclama (atómicamente vía status swap) las llamadas vencidas. */
 export async function claimDueCallbacks(limit = 5): Promise<ScheduledCall[]> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return []
