@@ -34,6 +34,35 @@ function normalizeContactId(raw: string): string {
   return raw.replace(/^\+/, "").replace(/\D/g, "")
 }
 
+// ── Canal de ORIGEN por contacto (caso +573117482905, 21-jul) ───────────────
+// Un colombiano puede escribirle a la línea CHILENA (o viceversa): si le
+// respondemos por la línea "de su país" se abren DOS chats paralelos — él
+// escribe en uno y Vicky contesta desde otro número. Regla WhatsApp: se
+// responde por el MISMO canal donde el cliente escribió. El canal de origen
+// se persiste en vic_kv (canal_origen_<contacto>) — lo setea el webhook cuando
+// la acción de código manda `channelId`, o a mano para casos puntuales — y
+// tiene precedencia sobre el channelId que pase el llamador. Lectura inline
+// (sin importar supabase-persistence-v3, para no crear ciclo de imports).
+const SUPABASE_URL_KV = (process.env.SUPABASE_URL || "").trim()
+const SUPABASE_KEY_KV = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+
+async function canalDeOrigen(contactId: string): Promise<string> {
+  if (!SUPABASE_URL_KV || !SUPABASE_KEY_KV) return ""
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL_KV}/rest/v1/vic_kv?key=eq.canal_origen_${encodeURIComponent(contactId)}&select=value&limit=1`,
+      {
+        headers: { apikey: SUPABASE_KEY_KV, Authorization: `Bearer ${SUPABASE_KEY_KV}` },
+        cache: "no-store",
+      },
+    )
+    const rows = (await r.json().catch(() => [])) as Array<{ value?: string }>
+    return (rows?.[0]?.value || "").trim()
+  } catch {
+    return ""
+  }
+}
+
 /**
  * Envía un mensaje de texto a una conversación de WhatsApp vía Botmaker.
  *
@@ -54,19 +83,27 @@ export async function sendBotmakerMessage(
   // Chile (BOTMAKER_CHANNEL_V3), compatible con todos los llamadores actuales.
   channelId?: string,
 ): Promise<boolean> {
-  const canal = (channelId || BM_CHANNEL_V3).trim()
-  if (!BM_TOKEN || !canal) {
-    console.error(
-      "[botmaker-push] BOTMAKER_ACCESS_TOKEN o channelId no configurados",
-    )
-    return false
-  }
   if (!contactId || !text) {
     console.error("[botmaker-push] contactId y text son requeridos")
     return false
   }
 
   const cleanContact = normalizeContactId(contactId)
+  // El canal de ORIGEN del contacto (si está registrado) manda sobre el del
+  // llamador: se responde por donde el cliente escribió.
+  const origen = await canalDeOrigen(cleanContact)
+  const canal = (origen || channelId || BM_CHANNEL_V3).trim()
+  if (origen && origen !== (channelId || BM_CHANNEL_V3).trim()) {
+    console.log(
+      `[botmaker-push] contact=${cleanContact}: canal de origen ${origen} (override sobre ${channelId || "default"})`,
+    )
+  }
+  if (!BM_TOKEN || !canal) {
+    console.error(
+      "[botmaker-push] BOTMAKER_ACCESS_TOKEN o channelId no configurados",
+    )
+    return false
+  }
 
   try {
     const res = await fetch(SEND_MESSAGES_URL, {

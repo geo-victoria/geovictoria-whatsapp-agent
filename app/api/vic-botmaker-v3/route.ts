@@ -107,6 +107,11 @@ function humanDelayMs(text: string): number {
 type BotmakerRequest = {
   contact?: string
   message?: string
+  // Canal (línea) por el que ENTRÓ el mensaje. Lo manda la acción de código de
+  // Botmaker (agregar `channelId` a su payload); con él respondemos por el
+  // MISMO número al que el cliente escribió, aunque su prefijo sea de otro
+  // país (caso +573117482905 escribiendo a la línea chilena, 21-jul).
+  channelId?: string
   // Nota de voz: Botmaker entrega la URL del audio (variable `audioURL`). La
   // acción de código la reenvía aquí; nosotros la descargamos y transcribimos.
   audioUrl?: string
@@ -1145,6 +1150,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     const body = (await request.json()) as BotmakerRequest
     const contact = normalizeContact(body.contact || "")
     let message = (body.message || "").trim()
+
+    // Canal de ORIGEN: si la acción de código nos dice por qué línea entró el
+    // mensaje, lo persistimos — sendBotmakerMessage responde SIEMPRE por ese
+    // canal (evita chats paralelos cuando el prefijo del número no calza con
+    // la línea que eligió el cliente). Best-effort.
+    if (contact && (body.channelId || "").trim()) {
+      setKvValue(`canal_origen_${contact}`, (body.channelId || "").trim()).catch(() => {})
+    }
 
     // 2.1. Ruteo multi-país (19-jul): la acción de código de Botmaker es UNA
     // sola para las dos líneas y apunta acá, así que los mensajes colombianos

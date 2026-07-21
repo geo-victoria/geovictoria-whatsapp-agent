@@ -740,9 +740,26 @@ export async function GET(req: Request): Promise<Response> {
     const clasificadas = cierre.autonomas + cierre.asistidas
     const tasaAuto = vieronPrecio ? Math.round((cierre.autonomas / vieronPrecio) * 100) : 0
     const tasaAsis = vieronPrecio ? Math.round((cierre.asistidas / vieronPrecio) * 100) : 0
+    // Objetivo 25% también para la venta AUTÓNOMA (pedido Lalo 21-jul): mismo
+    // cálculo que el objetivo general, pero contando solo aceptadas 100% Vicky.
+    const metaAuto = (25 / 100) * vieronPrecio
+    const cumpleAuto = vieronPrecio > 0 && cierre.autonomas >= metaAuto
+    const faltanAutoEnviadas = Math.max(0, Math.ceil(metaAuto - cierre.autonomas))
+    const faltanAutoNuevas = Math.max(0, Math.ceil((metaAuto - cierre.autonomas) / 0.75))
+    const cardObjetivoAuto = vieronPrecio
+      ? kpiCard(
+          "Objetivo 25% · 100% Vicky",
+          `${tasaAuto}% / 25%`,
+          cumpleAuto ? col.best : col.warn,
+          cumpleAuto
+            ? "objetivo alcanzado 🎉"
+            : `faltan ${faltanAutoEnviadas} venta${faltanAutoEnviadas === 1 ? "" : "s"} autónoma${faltanAutoEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanAutoNuevas} con cotizaciones nuevas`,
+        )
+      : ""
     const filaAutonomia = clasificadas
       ? `
     ${kpiCard("Tasa de cierre 100% Vicky", `${tasaAuto}%`, col.best, `${cierre.autonomas} aceptada${cierre.autonomas === 1 ? "" : "s"} sin humano · vio precio → venta`)}
+    ${cardObjetivoAuto}
     ${kpiCard("Tasa de cierre asistido", `${tasaAsis}%`, col.warn, `${cierre.asistidas} aceptada${cierre.asistidas === 1 ? "" : "s"} con intervención humana`)}`
       : ""
     const notaSinClasificar = cierre.sinClasificar > 0
