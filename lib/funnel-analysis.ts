@@ -47,6 +47,7 @@ const DEFAULT_TEST_CONTACTS = [
   "56962492757", // Caro (pruebas)
   "56995077374", // Interno (pruebas)
   "56939372058", // Anderson (ejecutivo comercial)
+  "573142677765", // Alejandro Gordillo (validaciones canal voz CO)
   "56966765498", // Línea Vicky — Meta Cloud API
   "56967308227", // Línea Vicky — Botmaker
   "56965098843", // Interno (pruebas)
@@ -59,7 +60,12 @@ export function testContactSet(): Set<string> {
   return new Set(list)
 }
 export function isTestContact(contact: string, set = testContactSet()): boolean {
-  return set.has((contact || "").replace(/\D/g, ""))
+  // Solo los dígitos INICIALES: un contacto clonado con sufijo
+  // ("56978385048_pruebas_14jul") debe calzar con su número base — con
+  // replace(\D) los dígitos del sufijo se pegaban al número y el clon de
+  // prueba se colaba al análisis (bug cazado en la limpieza del 21-jul).
+  const base = ((contact || "").match(/^\d+/) || [""])[0]
+  return set.has(base)
 }
 
 export type Hallazgo = { tipo: string; detalle: string }
