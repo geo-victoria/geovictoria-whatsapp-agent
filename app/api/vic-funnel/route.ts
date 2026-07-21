@@ -405,6 +405,53 @@ async function fetchAnalysis(): Promise<Row[]> {
 
 const digits = (c: string) => (c || "").replace(/\D/g, "")
 
+// ── Funnel por ORIGEN (pedido Lalo 21-jul): outbound (leads asignados) vs
+// inbound (el cliente llegó solo). Señales:
+//   - vic_outbound_cadence: un registro por toque 0 enviado → contacto OUTBOUND.
+//   - Leads Zoho "1. No contactado" de Vicky: asignados aún sin toque.
+//   - vic_v3_conversations.last_user_at: el contacto RESPONDIÓ alguna vez.
+async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
+  toque0: Set<string>
+  sinContactar: number
+  respondio: Set<string>
+}> {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const delPais = (c: string) => (pais === "co" ? c.startsWith("57") : !c.startsWith("57"))
+  const [cadRes, convRes, leadsRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/vic_outbound_cadence?select=contact`, { headers: h, cache: "no-store" }),
+    fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=contact,last_user_at`, { headers: h, cache: "no-store" }),
+    (async () => {
+      try {
+        const token = await getZohoAccessToken()
+        return await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+          method: "POST",
+          headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            select_query: `select id, Phone from Leads where Owner.id = ${VICKY_CREATOR_ID} and Lead_Status = '1. No contactado' limit 200`,
+          }),
+          cache: "no-store",
+        })
+      } catch {
+        return null
+      }
+    })(),
+  ])
+  const cad = cadRes.ok ? ((await cadRes.json()) as Array<{ contact: string }>) : []
+  const convs = convRes.ok
+    ? ((await convRes.json()) as Array<{ contact: string; last_user_at: string | null }>)
+    : []
+  let sinContactar = 0
+  if (leadsRes && leadsRes.ok) {
+    const data = (await leadsRes.json().catch(() => ({}))) as { data?: Array<{ Phone?: string | null }> }
+    sinContactar = (data?.data || []).filter((l) => delPais(digits(String(l.Phone || "")))).length
+  }
+  return {
+    toque0: new Set(cad.map((c) => digits(c.contact)).filter((c) => c && delPais(c) && !isTestContact(c))),
+    sinContactar,
+    respondio: new Set(convs.filter((c) => c.last_user_at).map((c) => digits(c.contact))),
+  }
+}
+
 // Señales DETERMINISTAS (hechos en la base, no inferencia del LLM): contactos
 // con cotización formal enviada (quote_pointers / formal_quote_id) y contactos
 // con reunión agendada (vic_v3_meetings). Se imponen sobre la clasificación.
@@ -498,6 +545,11 @@ export async function GET(req: Request): Promise<Response> {
   if (conv) return renderConversation(conv, key)
 
   let rows: Row[]
+  let origen: { toque0: Set<string>; sinContactar: number; respondio: Set<string> } = {
+    toque0: new Set(),
+    sinContactar: 0,
+    respondio: new Set(),
+  }
   let cierre: {
     total: number
     aceptadas: number
@@ -514,11 +566,13 @@ export async function GET(req: Request): Promise<Response> {
   const pais: "cl" | "co" = searchParams.get("pais") === "co" ? "co" : "cl"
   try {
     const co = await fetchExclusionesCO()
-    const [allRows, hard, cierreZoho] = await Promise.all([
+    const [allRows, hard, cierreZoho, origenData] = await Promise.all([
       fetchAnalysis(),
       fetchHardSignals(),
       fetchCierreZoho(co.quoteIds, pais),
+      fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, respondio: new Set<string>() })),
     ])
+    origen = origenData
     cierre = cierreZoho
     if (cierre?.aceptadasList?.length) {
       ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList))
@@ -569,6 +623,51 @@ export async function GET(req: Request): Promise<Response> {
   const cPreform = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "preform_mostrado")
   const cEnviada = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "cotizacion_enviada")
   const cAbandonado = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "abandonado")
+
+  // ── Funnel por ORIGEN: outbound (leads asignados) vs inbound (llegó solo) ──
+  // Etapas alineadas desde "calificado" para comparar lado a lado. Pagadas se
+  // cruzan por el teléfono de la cotización; las sin teléfono van a inbound
+  // (nacen de conversaciones que el cliente inició).
+  const esOutbound = (c: string) => origen.toque0.has(digits(c))
+  const obRespondio = [...origen.toque0].filter((c) => origen.respondio.has(c)).length
+  const fOb = {
+    asignados: origen.toque0.size + origen.sinContactar,
+    toque0: origen.toque0.size,
+    respondio: obRespondio,
+    calificado: n((r) => esOutbound(r.contact) && r.sub_bucket === "cotizacion"),
+    precio: n((r) => esOutbound(r.contact) && (r.cotizacion_outcome === "preform_mostrado" || r.cotizacion_outcome === "cotizacion_enviada")),
+    formal: n((r) => esOutbound(r.contact) && r.cotizacion_outcome === "cotizacion_enviada"),
+    pagada: (cierre?.aceptadasList || []).filter((q) => esOutbound(String(q.Tel_fono_Contacto || ""))).length,
+  }
+  const fIn = {
+    origen: n((r) => !esOutbound(r.contact)),
+    calificado: n((r) => !esOutbound(r.contact) && r.sub_bucket === "cotizacion"),
+    precio: n((r) => !esOutbound(r.contact) && (r.cotizacion_outcome === "preform_mostrado" || r.cotizacion_outcome === "cotizacion_enviada")),
+    formal: n((r) => !esOutbound(r.contact) && r.cotizacion_outcome === "cotizacion_enviada"),
+    pagada: (cierre?.aceptadasList || []).filter((q) => !esOutbound(String(q.Tel_fono_Contacto || ""))).length,
+  }
+  const pct2 = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
+  const filaFunnel = (etapa: string, ob: number | null, obBase: number | null, inb: number | null, inBase: number | null) => `
+    <tr>
+      <td>${etapa}</td>
+      <td style="text-align:right"><b>${ob === null ? "—" : ob}</b></td>
+      <td style="color:#6b7280">${ob === null || obBase === null ? "" : pct2(ob, obBase)}</td>
+      <td style="text-align:right"><b>${inb === null ? "—" : inb}</b></td>
+      <td style="color:#6b7280">${inb === null || inBase === null ? "" : pct2(inb, inBase)}</td>
+    </tr>`
+  const funnelOrigenHtml = `
+  <div class="card"><h2>Funnel por origen <span class="pct" style="font-weight:400">— outbound (leads asignados a Vicky) vs inbound (el cliente llegó solo) · % sobre la etapa anterior</span></h2>
+    <table><thead><tr><th>Etapa</th><th style="text-align:right">Outbound</th><th></th><th style="text-align:right">Inbound</th><th></th></tr></thead><tbody>
+      ${filaFunnel("Leads asignados / Conversaciones iniciadas", fOb.asignados, null, fIn.origen, null)}
+      ${filaFunnel("Toque 0 entregado", fOb.toque0, fOb.asignados, null, null)}
+      ${filaFunnel("Respondió", fOb.respondio, fOb.toque0, null, null)}
+      ${filaFunnel("Calificado en flujo cotización", fOb.calificado, fOb.respondio, fIn.calificado, fIn.origen)}
+      ${filaFunnel("Vio precio", fOb.precio, fOb.calificado, fIn.precio, fIn.calificado)}
+      ${filaFunnel("Cotización formal enviada", fOb.formal, fOb.precio, fIn.formal, fIn.precio)}
+      ${filaFunnel("💰 Pagada", fOb.pagada, fOb.formal, fIn.pagada, fIn.formal)}
+    </tbody></table>
+    <div class="sub" style="margin-top:8px">Cierre punta a punta: outbound ${pct2(fOb.pagada, fOb.asignados)} de los leads asignados · inbound ${pct2(fIn.pagada, fIn.origen)} de las conversaciones. Las cotizaciones pagadas sin teléfono registrado se cuentan como inbound.</div>
+  </div>`
 
   // ── Motivos de no-cierre (flujo cotización que no terminó en envío) ──────
   const noCierre = rows.filter(
@@ -794,6 +893,8 @@ export async function GET(req: Request): Promise<Response> {
   ${notaSinClasificar}
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
   })()}
+
+  ${funnelOrigenHtml}
 
   ${ventasHtml}
 
