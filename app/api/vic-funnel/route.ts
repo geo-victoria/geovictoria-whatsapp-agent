@@ -692,7 +692,16 @@ export async function GET(req: Request): Promise<Response> {
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a></div>
+  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a> · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <script>
+    // Actualización manual: re-analiza conversaciones nuevas (mismo key del
+    // dash) y recarga con los datos de Zoho en vivo. Pedido Lalo 21-jul.
+    document.getElementById("btnRefresh").addEventListener("click", async function () {
+      this.disabled = true; this.textContent = "Actualizando…";
+      try { await fetch("/api/vic-funnel-cron?key=${encodeURIComponent(key)}&limit=25"); } catch (e) {}
+      var u = new URL(location.href); u.searchParams.set("r", Date.now()); location.href = u.toString();
+    });
+  </script>
 
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
@@ -739,10 +748,31 @@ export async function GET(req: Request): Promise<Response> {
     const notaSinClasificar = cierre.sinClasificar > 0
       ? `<div class="sub" style="margin:-2px 0 10px">${cierre.sinClasificar} aceptada${cierre.sinClasificar === 1 ? "" : "s"} sin clasificar — marcar el campo <b>Intervención Humana</b> en la cotización (Zoho) para completar la autonomía del cierre.</div>`
       : ""
+    // Objetivo de cierre (pedido Lalo 21-jul): tasa actual vs target 25% y
+    // cuántas ventas faltan, diferenciando el camino: cerrar cotizaciones YA
+    // enviadas (solo suma al numerador) vs ventas de cotizaciones NUEVAS (una
+    // conversación nueva que ve precio y compra suma a AMBOS lados, por eso
+    // se necesita más: n = (meta − actuales) / (1 − 0.25)).
+    const TARGET_PCT = 25
+    const metaExacta = (TARGET_PCT / 100) * vieronPrecio
+    const cumpleMeta = vieronPrecio > 0 && cierre.aceptadas >= metaExacta
+    const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - cierre.aceptadas))
+    const faltanNuevas = Math.max(0, Math.ceil((metaExacta - cierre.aceptadas) / (1 - TARGET_PCT / 100)))
+    const cardObjetivo = vieronPrecio
+      ? kpiCard(
+          `Objetivo ${TARGET_PCT}%`,
+          `${endToEnd}% / ${TARGET_PCT}%`,
+          cumpleMeta ? col.best : col.warn,
+          cumpleMeta
+            ? "objetivo alcanzado 🎉"
+            : `faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`,
+        )
+      : ""
     return `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
-    ${kpiCard("Cierre end-to-end", `${endToEnd}%`, col.best, "vio precio → venta")}${filaAutonomia}
+    ${kpiCard("Cierre end-to-end", `${endToEnd}%`, col.best, "vio precio → venta")}
+    ${cardObjetivo}${filaAutonomia}
   </div>
   ${notaSinClasificar}
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
