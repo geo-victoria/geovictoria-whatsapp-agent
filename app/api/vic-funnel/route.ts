@@ -586,9 +586,10 @@ export async function GET(req: Request): Promise<Response> {
   if (conv) return renderConversation(conv, key)
 
   let rows: Row[]
-  let origen: { toque0: Set<string>; sinContactar: number; respondio: Set<string> } = {
+  let origen: { toque0: Set<string>; sinContactar: number; asignadosTotal: number; respondio: Set<string> } = {
     toque0: new Set(),
     sinContactar: 0,
+    asignadosTotal: 0,
     respondio: new Set(),
   }
   let cierre: {
