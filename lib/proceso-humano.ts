@@ -2,9 +2,11 @@
  * PROCESO HUMANO ACTIVO — política "un solo proceso de venta" (Lalo, 20-jul,
  * caso Ingesub v2): si un cliente escribe a Vicky y YA tiene un lead abierto
  * trabajado por un ejecutivo, NO se abren dos ventas en paralelo. Vicky lo
- * saluda, le dice que su ejecutivo lo contactará (y le avisa al ejecutivo al
- * instante), y el candado duro impide cotizar/dar precios aunque el modelo
- * se confunda.
+ * atiende NORMAL (saludo, dudas, soporte) sin mencionar el proceso; SOLO si
+ * pide atención comercial (cotizar, precios, llamada, reunión) le dice que su
+ * ejecutivo lo acompaña (ajuste 22-jul, feedback Lalo: anunciarlo de entrada
+ * se sentía como un rechazo). El candado duro impide cotizar/dar precios
+ * aunque el modelo se confunda, y el ejecutivo recibe aviso al instante.
  *
  * Piezas:
  *   - detectarProcesoHumano(contact): corre al ABRIR una conversación nueva.
@@ -51,12 +53,18 @@ export async function procesoHumanoActivo(contact: string): Promise<ProcesoHuman
  * por un timeout).
  */
 export function directivaProcesoHumano(humano: { ownerNombre: string; ownerEmail: string }): string {
+  // Ajuste 22-jul (feedback Lalo, prueba MX): NO anunciar el proceso humano en
+  // el saludo — anunciarlo de entrada se siente como un rechazo y el cliente
+  // quizás solo quería soporte o resolver una duda. El proceso humano solo se
+  // menciona cuando el cliente PIDE atención comercial.
   return (
-    `[REGISTRO INTERNO — no visible para el cliente] PROCESO HUMANO ACTIVO: este cliente ya está siendo atendido por ` +
-    `${humano.ownerNombre} (${humano.ownerEmail}) — lead abierto en Zoho. POLÍTICA: un solo proceso de venta. NO cotices, ` +
-    `NO des precios ni descuentos, NO pidas datos de cotización. Salúdalo con calidez, dile que ${humano.ownerNombre} lo está ` +
-    `acompañando y que ya le avisamos que escribió — lo contactará a la brevedad. Puedes responder dudas generales del ` +
-    `producto (sin montos). Si insiste en precios, reitera que su ejecutivo le prepara todo.`
+    `[REGISTRO INTERNO — no visible para el cliente] PROCESO HUMANO ACTIVO (dato interno, NO lo anuncies): este cliente ` +
+    `ya está siendo atendido por ${humano.ownerNombre} (${humano.ownerEmail}) — lead abierto en Zoho. POLÍTICA: un solo ` +
+    `proceso de venta. Atiéndelo NORMAL: saluda, responde dudas del producto y de soporte como con cualquier cliente, sin ` +
+    `mencionar procesos, ejecutivos ni este registro. SOLO cuando pida atención comercial (cotización, precios, descuentos, ` +
+    `que lo llamen o agendar una reunión): ahí NO cotices ni des montos — dile con calidez que ${humano.ownerNombre} lo está ` +
+    `acompañando en su proceso, que ya le avisamos que escribió y lo contactará a la brevedad. Si solo pregunta o pide ayuda, ` +
+    `resuélvelo tú sin tocar el tema.`
   )
 }
 
@@ -83,14 +91,14 @@ export async function detectarProcesoHumano(
   agregarNotaLead(
     humano.id,
     "Tu cliente escribió al WhatsApp de Vicky",
-    `Aviso automático (${new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })}): el contacto +${contact} inició una conversación en el WhatsApp comercial. Vicky NO le está cotizando (política de proceso único): le indicó que tú lo contactarás a la brevedad. Escríbele o llámalo cuanto antes.`,
+    `Aviso automático (${new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })}): el contacto +${contact} inició una conversación en el WhatsApp comercial. Vicky lo atiende en dudas generales pero NO le cotizará (política de proceso único); si pide cotización, llamada o reunión, le dirá que tú lo estás acompañando. Escríbele o llámalo cuanto antes.`,
   ).catch(() => {})
 
   // Aviso interno inmediato por WhatsApp (best-effort, misma línea que los
   // avisos de comprobantes).
   sendBotmakerMessage(
     NOTIFY_TO,
-    `⚠️ Cliente de ${humano.ownerNombre} escribió al WhatsApp de Vicky (+${contact}). Vicky no cotizará (proceso único); se le avisó al ejecutivo por nota en Zoho. Si el equipo prefiere que Vicky lo tome, borrar la key vic_kv proceso_humano_${contact}.`,
+    `⚠️ Cliente de ${humano.ownerNombre} escribió al WhatsApp de Vicky (+${contact}). Vicky lo atiende en dudas generales sin cotizar (proceso único) y solo menciona al ejecutivo si pide cotización/llamada/reunión; ya se avisó por nota en Zoho. Si el equipo prefiere que Vicky lo tome completo, borrar la key vic_kv proceso_humano_${contact}.`,
   ).catch(() => {})
 
   console.warn(
@@ -105,7 +113,8 @@ export function bloqueoComercial(p: ProcesoHumano): { ok: false; error: string }
     ok: false,
     error:
       `BLOQUEADO — PROCESO HUMANO ACTIVO: este cliente ya está siendo atendido por ${p.ownerNombre}. ` +
-      `NO le des precios, cotizaciones ni descuentos. Dile con calidez que ${p.ownerNombre} lo está acompañando, ` +
-      `que ya le avisamos que escribió y lo contactará a la brevedad. Solo puedes ayudarlo con dudas generales del producto.`,
+      `NO le des precios, cotizaciones ni descuentos. Este es el momento de decírselo (pidió atención comercial): ` +
+      `con calidez, cuéntale que ${p.ownerNombre} lo está acompañando en su proceso, que ya le avisamos que escribió ` +
+      `y lo contactará a la brevedad. Sigue ayudándolo tú con cualquier duda general del producto.`,
   }
 }
