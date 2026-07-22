@@ -13,6 +13,7 @@
 import { NextResponse } from "next/server"
 import { generarLinkCotizadora } from "@/lib/tools/generar-link-cotizadora"
 import { buildDispatchCO } from "@/lib/paises/co/tools"
+import { buildDispatchMX } from "@/lib/paises/mx/tools"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -54,6 +55,12 @@ export async function POST(req: Request): Promise<Response> {
       const contact = String(body._contact || "")
       const dispatchCO = buildDispatchCO(contact)
       const result = await dispatchCO("generar_link_cotizadora", body)
+      return NextResponse.json(result as Record<string, unknown>)
+    }
+    if (String(body.pais || "") === "mx") {
+      const contact = String(body._contact || "")
+      const dispatchMX = buildDispatchMX(contact)
+      const result = await dispatchMX("generar_link_cotizadora", body)
       return NextResponse.json(result as Record<string, unknown>)
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
