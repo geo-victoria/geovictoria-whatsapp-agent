@@ -111,7 +111,7 @@ export const TOOL_SCHEMAS_MX = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula la cotización referencial de México (1 a 50 usuarios) en pesos mexicanos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (activación = primer mes por adelantado; capacitación online $600 SIEMPRE cobrada; equipos/envío/instalación si aplican; los totales ya incluyen el IVA 16%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/alcaldía/municipio tal como la dijo el cliente). En arriendo el envío es GRATIS en todo México y la instalación es GRATIS en CDMX/Zona Metropolitana; en venta el envío tiene tarifa única nacional y la instalación profesional solo se cotiza en CDMX/Zona Metropolitana (fuera de esa zona la cotiza el ejecutivo aparte, o el cliente auto-instala gratis) — la tool clasifica la zona, tú solo transcribes la ubicación.",
+      "Calcula la cotización referencial de México (1 a 50 usuarios) en pesos mexicanos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (activación = primer mes por adelantado; capacitación online $600 SIEMPRE cobrada; equipos/envío/instalación si aplican; los totales ya incluyen el IVA 16%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/alcaldía/municipio tal como la dijo el cliente). En renta el envío es GRATIS en todo México y la instalación es GRATIS en CDMX/Zona Metropolitana; en venta el envío tiene tarifa única nacional y la instalación profesional solo se cotiza en CDMX/Zona Metropolitana (fuera de esa zona la cotiza el ejecutivo aparte, o el cliente auto-instala gratis) — la tool clasifica la zona, tú solo transcribes la ubicación.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -128,7 +128,7 @@ export const TOOL_SCHEMAS_MX = [
             cantidad: { type: "number" as const, minimum: 1, maximum: 50 },
           },
           required: ["modalidad", "cantidad"],
-          description: "Solo si la configuración lleva reloj control físico.",
+          description: "Solo si la configuración lleva reloj checador físico.",
         },
         puntosInstalacion: {
           type: "array" as const,
@@ -148,7 +148,7 @@ export const TOOL_SCHEMAS_MX = [
             required: ["ubicacion", "autoInstalada"],
           },
           description:
-            "Un punto por cada lugar físico con reloj. Obligatorio si hay reloj en VENTA; en arriendo pásalo si conoces las ubicaciones (sirve para confirmar la instalación incluida).",
+            "Un punto por cada lugar físico con reloj. Obligatorio si hay reloj en VENTA; en renta pásalo si conoces las ubicaciones (sirve para confirmar la instalación incluida).",
         },
       },
       required: ["userCount"],
@@ -347,7 +347,7 @@ export function buildDispatchMX(contact: string) {
           }
           puntos = clasificarPuntosMX(entradas, advertencias)
         } else if (i.reloj && i.reloj.modalidad === "arriendo") {
-          // En arriendo los puntos son opcionales (todo va sin costo en zona
+          // En renta los puntos son opcionales (todo va sin costo en zona
           // cubierta); si vienen, se clasifican para la nota de instalación
           // fuera de CDMX/Zona Metropolitana.
           const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
@@ -387,7 +387,7 @@ export function buildDispatchMX(contact: string) {
           return { ok: false, error: `El correo '${i.email || ""}' no tiene formato válido. Pídelo de nuevo.` }
         }
         // Misma clasificación de puntos que la referencial (venta exige puntos;
-        // arriendo los acepta si vienen).
+        // renta los acepta si vienen).
         let puntos: PuntoInstalacionMX[] = []
         if (i.reloj?.modalidad === "venta") {
           const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []

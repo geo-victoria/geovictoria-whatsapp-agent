@@ -4,12 +4,12 @@
  * Reglas de negocio (documento oficial de tropicalización MX):
  *   - Plan asistencia: 1-10 → $1,000 fijo · 11-20 → $83/usuario ·
  *     21-30 → $79/usuario · 31-50 → $75/usuario.
- *   - Reloj: arriendo $350/mes por unidad · venta $2,100 por unidad.
+ *   - Reloj: renta $350/mes por unidad · venta $2,100 por unidad.
  *   - Envío (por punto, solo VENTA): $400, MISMA tarifa en todo México, no
- *     descontable. En arriendo $0.
+ *     descontable. En renta $0.
  *   - Instalación (por punto): $700 SOLO si el punto está en CDMX o Zona
- *     Metropolitana del Valle de México ("cdmx_metro"); en ARRIENDO dentro de
- *     esa zona es GRATIS (mismo trato que CO: arriendo = cero costos por
+ *     Metropolitana del Valle de México ("cdmx_metro"); en RENTA dentro de
+ *     esa zona es GRATIS (mismo trato que CO: renta = cero costos por
  *     punto en zona cubierta). FUERA de la zona la instalación profesional NO
  *     se cotiza acá: se deja NOTA de que el ejecutivo la cotiza aparte (o el
  *     cliente auto-instala gratis) — la venta nunca se frena.
@@ -70,7 +70,7 @@ export type ItemCotizadorMX = {
   id: string
   nombre: string
   descripcion?: string
-  modalidad: "Por usuario" | "Fijo" | "Arriendo mensual" | "Venta única" | "Cobro único"
+  modalidad: "Por usuario" | "Fijo" | "Renta mensual" | "Venta única" | "Cobro único"
   cantidad: number
   precioUnitarioMXN: number
   subtotalMXN: number
@@ -151,7 +151,7 @@ export function cotizarMX(input: CotizacionMXInput): {
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
     arriendoNeto = TARIFAS_MX.relojArriendoMes * reloj.cantidad
     lineas.push({
-      concepto: "Arriendo de reloj control",
+      concepto: "Renta de reloj checador",
       detalle: `${reloj.cantidad} × ${formatearMXN(TARIFAS_MX.relojArriendoMes)}/mes (envío incluido sin costo; instalación sin costo en CDMX y Zona Metropolitana)`,
       neto: arriendoNeto,
       iva: arriendoNeto * IVA_MX,
@@ -161,7 +161,7 @@ export function cotizarMX(input: CotizacionMXInput): {
 
   // ── Agrupación de puntos por ubicación/zona (feedback CO 15-jul heredado:
   // con varios relojes, envío e instalación se TOTALIZAN por ubicación con
-  // cantidad — nada de una fila por reloj). Sirve a venta y arriendo.
+  // cantidad — nada de una fila por reloj). Sirve a venta y renta.
   const grupos = new Map<
     string,
     { ubicacion: string; zona: ZonaMX; envios: number; instalaciones: number }
@@ -174,7 +174,7 @@ export function cotizarMX(input: CotizacionMXInput): {
     grupos.set(key, g)
   }
 
-  // Notas de instalación fuera de zona (venta o arriendo): la instalación
+  // Notas de instalación fuera de zona (venta o renta): la instalación
   // profesional NO se cotiza acá — la cotiza el ejecutivo aparte, o el
   // cliente auto-instala gratis. La venta nunca se frena por esto.
   const notasEjecutivo: string[] = []
@@ -210,7 +210,7 @@ export function cotizarMX(input: CotizacionMXInput): {
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
     const ventaNeto = TARIFAS_MX.relojVenta * reloj.cantidad
     lineas.push({
-      concepto: "Reloj control (compra)",
+      concepto: "Reloj checador (compra)",
       detalle: `${reloj.cantidad} × ${formatearMXN(TARIFAS_MX.relojVenta)}`,
       neto: ventaNeto,
       iva: ventaNeto * IVA_MX,
@@ -264,7 +264,7 @@ export function cotizarMX(input: CotizacionMXInput): {
   filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearMXN(plan)}/mes`)
   if (arriendoNeto > 0) {
     filas.push(
-      `- Arriendo de reloj control: ${formatearMXN(arriendoNeto)}/mes (envío incluido sin costo; instalación sin costo en CDMX y Zona Metropolitana)`,
+      `- Renta de reloj checador: ${formatearMXN(arriendoNeto)}/mes (envío incluido sin costo; instalación sin costo en CDMX y Zona Metropolitana)`,
     )
   }
   filas.push(`Total mensual: ${formatearMXN(mensualNeto)} + IVA (16%) = ${formatearMXN(mensualTotal)} MXN`)
@@ -303,10 +303,10 @@ export function cotizarMX(input: CotizacionMXInput): {
     itemsCotizador.push({
       tipo: "hardware",
       id: "reloj_arriendo",
-      nombre: "Arriendo de reloj control",
+      nombre: "Renta de reloj checador",
       descripcion:
         "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío incluido sin costo; instalación sin costo en CDMX y Zona Metropolitana.",
-      modalidad: "Arriendo mensual",
+      modalidad: "Renta mensual",
       cantidad: reloj.cantidad,
       precioUnitarioMXN: TARIFAS_MX.relojArriendoMes,
       subtotalMXN: arriendoNeto,
@@ -331,7 +331,7 @@ export function cotizarMX(input: CotizacionMXInput): {
     itemsCotizador.push({
       tipo: "hardware",
       id: "reloj_venta",
-      nombre: "Reloj control (compra)",
+      nombre: "Reloj checador (compra)",
       descripcion:
         "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
       modalidad: "Venta única",

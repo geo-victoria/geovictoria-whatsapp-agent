@@ -14,16 +14,16 @@
  *   Asistencia 11-20: $83/usuario/mes
  *   Asistencia 21-30: $79/usuario/mes
  *   Asistencia 31-50: $75/usuario/mes
- *   Reloj venta:      $2,100 pago único · arriendo $350/mes
- *   Envío:      arriendo $0 · venta $400 por punto (MISMA tarifa todo México,
+ *   Reloj venta:      $2,100 pago único · renta $350/mes
+ *   Envío:      renta $0 · venta $400 por punto (MISMA tarifa todo México,
  *               no descontable — el envío no depende de la zona)
  *   Instalación: $700 por punto SOLO en CDMX / Zona Metropolitana del Valle
- *               de México (gratis en arriendo dentro de esa zona). FUERA de
+ *               de México (gratis en renta dentro de esa zona). FUERA de
  *               la zona la instalación profesional NO la cotiza Vicky: la
  *               cotiza el ejecutivo aparte, o el cliente auto-instala gratis
  *               (la venta nunca se frena por esto).
- *   → El ARRIENDO va con envío gratis en todo México e instalación gratis en
- *     CDMX/Zona Metropolitana (mismo trato que CO: arriendo = cero costos por
+ *   → El RENTA va con envío gratis en todo México e instalación gratis en
+ *     CDMX/Zona Metropolitana (mismo trato que CO: renta = cero costos por
  *     punto en zona cubierta).
  *
  * ACTIVACIÓN (pago inicial MX, mismo patrón CL/CO): = 1 mes del plan cobrado
@@ -83,7 +83,7 @@ export const CATALOGO_HARDWARE_MX: Hardware[] = [
   {
     id: "reloj_mx",
     modelo: "reloj_mx",
-    displayName: "Reloj control físico",
+    displayName: "Reloj checador físico",
     conexion: "WiFi / Ethernet",
     ventaUF: 2100,
     arriendoUF: 350,
@@ -100,9 +100,9 @@ export const CATALOGO_SERVICIOS_MX: Servicio[] = [
     id: "envio_reloj",
     nombre: "Envío de reloj",
     descripcion:
-      "Despacho del reloj de control al punto del cliente. Cobro único por punto, misma tarifa en todo México. Gratis en modalidad arriendo.",
+      "Despacho del reloj de control al punto del cliente. Cobro único por punto, misma tarifa en todo México. Gratis en modalidad renta.",
     // RM ≡ "cdmx_metro" · region ≡ resto. El envío MX NO depende de la zona:
-    // $400 parejo en venta (por eso ambas celdas van iguales), $0 en arriendo.
+    // $400 parejo en venta (por eso ambas celdas van iguales), $0 en renta.
     tarifa: {
       modelo: "modalidad_zona",
       arriendo: { RM: 0, region: 0 },
@@ -120,7 +120,7 @@ export const CATALOGO_SERVICIOS_MX: Servicio[] = [
     id: "instalacion_reloj",
     nombre: "Instalación de reloj",
     descripcion:
-      "Visita técnica para instalación on-site del reloj de control. Cobro único por punto, disponible SOLO en CDMX y Zona Metropolitana del Valle de México. Gratis en modalidad arriendo dentro de esa zona.",
+      "Visita técnica para instalación on-site del reloj de control. Cobro único por punto, disponible SOLO en CDMX y Zona Metropolitana del Valle de México. Gratis en modalidad renta dentro de esa zona.",
     // region = 0 NO significa "gratis": fuera de CDMX/Zona Metropolitana la
     // instalación profesional NO la cotiza Vicky (la cotiza el ejecutivo
     // aparte, o el cliente auto-instala gratis). La lógica vive en
