@@ -51,13 +51,17 @@ export async function cerrarYTraspasarPostPago(
   if (ya) return { contact, traspaso: "ya_enviado" }
 
   const esCO = contact.startsWith("57")
-  const ejecutivo = esCO
-    ? PERFIL_CO.equipo.ejecutivo
-    : { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" }
+  const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
+  const ejecutivo = esMX
+    ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "" } // TODO: teléfono de Yahel
+    : esCO
+      ? PERFIL_CO.equipo.ejecutivo
+      : { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" }
   const traspaso =
     `¡Felicitaciones y bienvenido a GeoVictoria! 🎉 Tu pago quedó registrado.\n\n` +
     `De aquí en adelante te acompaña *${ejecutivo.nombre}*, tu ejecutivo comercial, quien te contactará para coordinar la puesta en marcha:\n` +
-    `📱 ${ejecutivo.telefono}\n✉️ ${ejecutivo.email}`
+    (ejecutivo.telefono ? `📱 ${ejecutivo.telefono}\n` : "") +
+    `✉️ ${ejecutivo.email}`
   const pushed = await sendBotmakerMessage(
     contact,
     traspaso,

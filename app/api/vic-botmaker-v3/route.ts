@@ -1218,6 +1218,29 @@ export async function POST(request: Request): Promise<NextResponse> {
       console.error(`[v3-botmaker] contact=${contact} es CO pero el reenvío a vic-botmaker-co falló — se atiende con flujo CL como fallback`)
     }
 
+    // MÉXICO (21-jul): números +52 (WhatsApp usa 521 + 10 dígitos, a veces 52
+    // pelado). Mismo patrón de reenvío que Colombia. Sin fallback al flujo CL:
+    // precios en UF a un mexicano es peor que un reintento.
+    if ((contact.startsWith("521") && contact.length >= 13) || (contact.startsWith("52") && !contact.startsWith("521") && contact.length === 12)) {
+      const origin = new URL(request.url).origin
+      const r = await fetch(`${origin}/api/vic-botmaker-mx`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-secret": getEnv("BOTMAKER_SECRET_MX"),
+        },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      }).catch(() => null)
+      if (r) {
+        const data = await r.json().catch(() => ({ reply: "" }))
+        console.log(`[v3-botmaker] contact=${contact} es MX → reenviado a vic-botmaker-mx (${r.status})`)
+        return NextResponse.json(data, { status: r.status })
+      }
+      console.error(`[v3-botmaker] contact=${contact} es MX y el reenvío a vic-botmaker-mx falló — NO se atiende con flujo CL (queda para reintento del cliente)`)
+      return NextResponse.json({ reply: "" })
+    }
+
     // 2.5. Nota de voz: si vino la URL del audio y no hay texto útil, la
     // transcribimos y seguimos como si el usuario lo hubiera escrito. Si la
     // transcripción falla, o llegó un audio sin URL (la acción de código aún no

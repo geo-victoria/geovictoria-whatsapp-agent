@@ -10,12 +10,14 @@
 import type { CodigoPais, PerfilPais } from "./tipos"
 import { PERFIL_CL } from "./cl"
 import { PERFIL_CO } from "./co"
+import { PERFIL_MX } from "./mx"
 
 export type { CodigoPais, PerfilPais } from "./tipos"
 
 const PERFILES: Record<string, PerfilPais> = {
   cl: PERFIL_CL,
   co: PERFIL_CO,
+  mx: PERFIL_MX,
 }
 
 /** Perfil por código. Lanza si el código no existe (error de configuración, no de datos). */

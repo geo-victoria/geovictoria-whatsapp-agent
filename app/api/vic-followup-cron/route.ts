@@ -45,6 +45,7 @@ import { hasRecentCallActivity, scheduleCallback } from "@/lib/dapta-voice"
 import { estadoCotizacionParaSeguimiento } from "@/lib/zoho-quote-status"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
+import { PERFIL_MX } from "@/lib/paises/mx"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 
 export const dynamic = "force-dynamic"
@@ -83,6 +84,11 @@ function instruccionDeTono(stage: number): string {
 // Neutros a propósito: sirven igual para una cotización a medias que para una
 // conversación que recién partía (un "hola" sin intención identificada aún).
 function fallbackPorStage(stage: number, country: string): string {
+  if (country === "mx") {
+    if (stage <= 1) return "Sigues por aquí? 😊 Cualquier duda me dices y continuamos"
+    if (stage === 2) return "Hola! Retomamos donde quedamos? Aquí sigo 😊"
+    return "Hola! Sigues interesado en cotizar con nosotros o lo dejamos para más adelante? Lo que decidas está bien 🙌"
+  }
   if (country === "co") {
     if (stage <= 1) return "Sigues por ahí? 😊 Aquí quedo atenta si quieres continuar"
     if (stage === 2) return "Hola!! Retomamos donde quedamos? Quedo atenta 😊"
@@ -97,6 +103,12 @@ function fallbackPorStage(stage: number, country: string): string {
 // Colombia: registro de USTED y español neutro — mismas reglas duras del
 // prompt CO (nada de chilenismos ni tuteo).
 function identidadPorPais(country: string): string {
+  if (country === "mx") {
+    return (
+      "Eres Vicky, ejecutiva comercial de GeoVictoria MÉXICO (control de asistencia B2B). " +
+      "REGISTRO OBLIGATORIO: tuteo mexicano cálido y profesional (tú/tienes/puedes); JAMÁS voseo (vos/tenés) ni chilenismos ('al tiro', 'po') ni colombianismos. Cercanía natural, máximo 1 emoji. "
+    )
+  }
   if (country === "co") {
     return (
       "Eres Vicky, ejecutiva comercial de GeoVictoria COLOMBIA (control de asistencia B2B). " +
@@ -260,7 +272,12 @@ export async function POST(req: Request) {
   let sent = 0
   for (const claim of claims) {
     const country = paises[claim.conversation_id] || "cl"
-    const channelId = country === "co" ? PERFIL_CO.canal.channelId : undefined
+    const channelId =
+      country === "co"
+        ? PERFIL_CO.canal.channelId
+        : country === "mx"
+          ? PERFIL_MX.canal.channelId
+          : undefined
 
     // Toque de las 22h50 para el segmento con COTIZACIÓN FORMAL: en
     // vez del nudge LLM, Vicky ANUNCIA su llamada y la agenda para 10 minutos

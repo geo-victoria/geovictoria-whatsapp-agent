@@ -131,7 +131,17 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     // País por prefijo: define flujo/agente/línea de salida y horario hábil.
+    // Solo CL (+56) y CO (+57) tienen canal de voz. Cualquier otro prefijo
+    // (México +52/521, Perú +51, etc.) queda pendiente con log — JAMÁS se
+    // disca por el flujo chileno a otro país.
+    const esCL = cb.contact.startsWith("56")
     const esCO = cb.contact.startsWith("57")
+    if (!esCL && !esCO) {
+      unclaimCallback(cb.id).catch(() => {})
+      console.warn(`[callback-cron] ${cb.contact}: sin canal de voz para su país — llamada pendiente (no se disca por flujo CL/CO).`)
+      detalle.push({ id: cb.id, contact: cb.contact, due_at: cb.due_at, ok: false, motivo: "sin_canal_voz_pais" })
+      continue
+    }
     if ((esCO && !coEnHorario) || (!esCO && !clEnHorario)) {
       await unclaimCallback(cb.id)
       detalle.push({ id: cb.id, contact: cb.contact, esperando: "horario hábil del país" })

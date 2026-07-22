@@ -415,6 +415,13 @@ export async function GET(req: Request): Promise<Response> {
   async function enviar(list: Row[], segmento: string) {
     for (const r of list) {
       if (enviados >= BATCH) break
+      // MÉXICO: sin plantillas HSM aprobadas aún — NUNCA enviar la plantilla
+      // chilena por la línea CL a un +52. Queda pendiente hasta configurar
+      // REACTIVATION_TEMPLATE_*_MX (las plantillas ya están propuestas).
+      if ((r.country || "cl").toLowerCase() === "mx") {
+        console.log(`[reactivation] ${r.contact} es MX — sin plantillas MX aprobadas, se omite.`)
+        continue
+      }
       // Las plantillas v2 llevan \${nombre}: resolverlo (Zoho para cotización;
       // historial como fallback). Sin nombre NO se envía (quedaría "Hola ,").
       let nombre =
