@@ -53,7 +53,7 @@ export async function cerrarYTraspasarPostPago(
   const esCO = contact.startsWith("57")
   const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
   const ejecutivo = esMX
-    ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "" } // TODO: teléfono de Yahel
+    ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "+52 55 3763 6604" }
     : esCO
       ? PERFIL_CO.equipo.ejecutivo
       : { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" }

@@ -59,6 +59,38 @@ type Input = {
   detalle?: string
 }
 
+// ── MÉXICO (22-jul, decisión Lalo): sin MercadoPago MX, el pago inicial va por
+// transferencia BANORTE. Al recibir el comprobante, Vicky NO solo confirma la
+// recepción: entrega DE INMEDIATO el acceso al auto-onboarding y presenta a
+// la ejecutiva (Yahel Segura). El pago sigue quedando EN VERIFICACIÓN con
+// finanzas — el link no confirma dinero; si el comprobante resultara falso,
+// el equipo corta el onboarding a mano.
+const COTIZADORA_API_BASE = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+const EJECUTIVA_MX = {
+  nombre: "Yahel Segura",
+  whatsapp: "+52 55 3763 6604",
+  email: "ysegura@geovictoria.com",
+}
+
+async function obtenerLinkOnboarding(quoteId: string): Promise<string> {
+  try {
+    const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/onboarding-link`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+      },
+      body: JSON.stringify({ quoteId }),
+      cache: "no-store",
+    })
+    const data = (await r.json().catch(() => ({}))) as { ok?: boolean; onboardingUrl?: string }
+    return r.ok && data.ok && data.onboardingUrl ? data.onboardingUrl : ""
+  } catch {
+    return ""
+  }
+}
+
 async function crearNotaEnCotizacion(quoteId: string, contenido: string): Promise<boolean> {
   try {
     const token = await getZohoAccessToken()
@@ -88,9 +120,17 @@ async function crearNotaEnCotizacion(quoteId: string, contenido: string): Promis
 export async function registrarComprobanteTransferencia(
   contact: string,
   input: Input,
+  // "mx": monto en MXN y, tras registrar, entrega el link de auto-onboarding y
+  // presenta a la ejecutiva (flujo transferencia BANORTE). Default: CL.
+  pais: "cl" | "mx" = "cl",
 ): Promise<{ ok: boolean; mensajeParaProspecto: string; notaCreada?: boolean; avisoInterno?: boolean }> {
   const monto = Math.max(0, Math.round(Number(input.montoDetectado) || 0))
-  const montoFmt = monto > 0 ? `$${monto.toLocaleString("es-CL")}` : "monto no legible"
+  const montoFmt =
+    monto > 0
+      ? pais === "mx"
+        ? `$${monto.toLocaleString("es-MX")} MXN`
+        : `$${monto.toLocaleString("es-CL")}`
+      : "monto no legible"
 
   const pointers = await getQuotePointers(contact).catch(() => [])
   const pointer = pointers[0] || null
@@ -121,7 +161,29 @@ export async function registrarComprobanteTransferencia(
     `[comprobante] contact=${contact} monto=${monto} quote=${pointer?.quoteId || "-"} nota=${notaCreada} aviso=${avisoInterno}`,
   )
 
-  // 3. Confirmación de RECEPCIÓN al cliente (nunca de pago).
+  // 3. Confirmación al cliente.
+  // MX: recepción + acceso INMEDIATO al auto-onboarding + presentación de la
+  // ejecutiva (decisión Lalo 22-jul: cero fricción tras el comprobante; la
+  // verificación del abono sigue corriendo por finanzas en paralelo).
+  if (pais === "mx" && pointer) {
+    const linkOnboarding = await obtenerLinkOnboarding(pointer.quoteId)
+    const mensajeParaProspecto = linkOnboarding
+      ? `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo.\n\n` +
+        `Para que no pierdas ni un día, aquí tienes tu acceso al auto-onboarding — ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos:\n${linkOnboarding}\n\n` +
+        `Y te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
+      : `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo.\n\n` +
+        `Te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante y te enviará el acceso a la configuración inicial.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda, me escribes por aquí 😊`
+    if (!linkOnboarding) {
+      // El equipo debe saber que el link no salió (para mandarlo a mano).
+      sendBotmakerMessage(
+        NOTIFY_TO,
+        `⚠️ Comprobante MX de +${contact}: no se pudo generar el link de auto-onboarding (quote ${pointer.quoteId}). Enviarlo a mano.`,
+      ).catch(() => {})
+    }
+    return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
+  }
+
+  // CL (v1): recepción confirmada, pago EN VERIFICACIÓN — nunca afirmar pago.
   const mensajeParaProspecto = pointer
     ? `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Ya quedó asociado a tu cotización y en verificación con nuestro equipo de finanzas. Te confirmo por aquí apenas el pago esté procesado — normalmente dentro del mismo día hábil. ¡Gracias!`
     : `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Lo dejé en manos del equipo para asociarlo a tu cotización y confirmarte. Te aviso por aquí apenas esté procesado. ¡Gracias!`

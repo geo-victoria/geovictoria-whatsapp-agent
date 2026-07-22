@@ -107,7 +107,35 @@ const programarSeguimientoSchemaMX = {
   },
 }
 
+// Comprobante de transferencia MX (22-jul): mientras no exista MercadoPago
+// México el pago inicial va por transferencia BANORTE; al recibir el
+// comprobante la tool entrega el acceso al auto-onboarding y presenta a la
+// ejecutiva. Espejo del schema chileno con montos en MXN.
+const registrarComprobanteMXSchema = {
+  name: "registrar_comprobante_transferencia",
+  description:
+    "Registra un comprobante de transferencia bancaria que el cliente envió por el chat (imagen o PDF descrito en el historial). Úsala SIEMPRE que el cliente mande un comprobante de pago de su cotización. Extrae del comprobante lo que se vea: monto transferido (MXN), banco y fecha. La tool asocia el comprobante a la cotización vigente, avisa al equipo y devuelve mensajeParaProspecto con la confirmación de recepción, el LINK del auto-onboarding y la presentación de la ejecutiva — copia el mensajeParaProspecto TAL CUAL, sin agregar ni quitar nada. El pago queda EN VERIFICACIÓN: nunca afirmes tú que el pago ya está confirmado.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      montoDetectado: {
+        type: "number" as const,
+        description:
+          "Monto en pesos mexicanos que muestra el comprobante (solo dígitos). Si la imagen no deja leer el monto, pasa 0.",
+      },
+      bancoOrigen: { type: "string" as const, description: "Banco emisor si se ve en el comprobante." },
+      fechaDetectada: { type: "string" as const, description: "Fecha de la transferencia si se ve." },
+      detalle: {
+        type: "string" as const,
+        description: "Resumen en una frase de lo que muestra el comprobante (destinatario, hora, clave de rastreo).",
+      },
+    },
+    required: ["montoDetectado"],
+  },
+}
+
 export const TOOL_SCHEMAS_MX = [
+  registrarComprobanteMXSchema,
   {
     name: "cotizar_referencial",
     description:
@@ -331,6 +359,17 @@ function clasificarPuntosMX(
 export function buildDispatchMX(contact: string) {
   return async function dispatchToolMX(name: string, input: unknown): Promise<unknown> {
     try {
+      if (name === "registrar_comprobante_transferencia") {
+        const { registrarComprobanteTransferencia } = await import(
+          "@/lib/tools/registrar-comprobante-transferencia"
+        )
+        return await registrarComprobanteTransferencia(
+          contact,
+          (input || {}) as Parameters<typeof registrarComprobanteTransferencia>[1],
+          "mx",
+        )
+      }
+
       if (name === "cotizar_referencial") {
         const i = (input || {}) as CotizarInput
         const userCount = Number(i.userCount || 0)
