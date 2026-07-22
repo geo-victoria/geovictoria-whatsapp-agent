@@ -61,9 +61,9 @@ export type LineaMX = {
 
 /**
  * Item en el contrato del endpoint create-from-vicky-mx del cotizador
- * (misma forma que el CO). La Activación NO se envía: el endpoint la
- * garantiza solo (= 1 mes del plan). La Capacitación SÍ se envía: en México
- * es un ítem cobrado, no una línea fija de regalo.
+ * (misma forma que el CO). En México NO existe la Activación (ni acá ni en
+ * el endpoint: la mensualidad se factura desde la activación del servicio).
+ * La Capacitación SÍ se envía: es un ítem cobrado, no una línea de regalo.
  */
 export type ItemCotizadorMX = {
   tipo: "plan" | "hardware" | "servicio"
@@ -189,14 +189,11 @@ export function cotizarMX(input: CotizacionMXInput): {
   }
 
   // ── Pago único ──
-  // Activación: primer mes del plan por adelantado.
-  lineas.push({
-    concepto: "Activación",
-    detalle: "Pago de iniciación: equivale al primer mes de servicio",
-    neto: plan,
-    iva: plan * IVA_MX,
-    recurrente: false,
-  })
+  // SIN Activación: en la tropicalización MX no existe el primer mes por
+  // adelantado (a diferencia de CL/CO) — el documento oficial no la lista y la
+  // cotización formal tampoco la cobra ("la mensualidad se factura desde la
+  // activación del servicio"). Detectado 22-jul: el preform del chat la
+  // cobraba y contradecía al PDF formal.
   // Capacitación online: ítem COBRADO en toda cotización (diferencia con
   // Chile/Colombia — acá nunca es de regalo).
   lineas.push({
@@ -282,9 +279,9 @@ export function cotizarMX(input: CotizacionMXInput): {
   }
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-mx) ──
-  // Misma matemática que las líneas de arriba, en formato del endpoint. La
-  // Activación no va (la garantiza el endpoint = 1 mes del plan); la
-  // Capacitación SÍ va (ítem cobrado). Todo afecto a IVA 16%.
+  // Misma matemática que las líneas de arriba, en formato del endpoint. Sin
+  // Activación (no existe en MX); la Capacitación SÍ va (ítem cobrado). Todo
+  // afecto a IVA 16%.
   const itemsCotizador: ItemCotizadorMX[] = []
   itemsCotizador.push({
     tipo: "plan",
