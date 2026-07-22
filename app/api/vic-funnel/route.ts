@@ -298,6 +298,10 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co"): Prom
     const quotes = (data?.data || []).filter((q) => {
       const esCO = coQuoteIds.has(String(q.id || ""))
       if (pais === "cl" ? esCO : !esCO) return false
+      // Universo Chile cerrado: fuera las cotizaciones mexicanas (teléfono +52).
+      const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
+      const esMX = tel.startsWith("521") || (tel.startsWith("52") && tel.length === 12)
+      if (pais === "cl" && esMX) return false
       const nombre = String(q.Name || "").toLowerCase()
       return !nombre.includes("prueba") && !nombre.includes("huellerocompany")
     })
@@ -417,7 +421,10 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
   respondio: Set<string>
 }> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  const delPais = (c: string) => (pais === "co" ? c.startsWith("57") : !c.startsWith("57"))
+  // Universo CERRADO por prefijo (22-jul): "cl" = SOLO +56. Antes era "todo lo
+  // no-colombiano", lo que desde el encendido de México metía a los +52 en el
+  // universo chileno y ensuciaba la tasa.
+  const delPais = (c: string) => (pais === "co" ? c.startsWith("57") : c.startsWith("56"))
   // Inicio del programa outbound actual (primer lead asignado a Vicky):
   // excluye los leads de la era telemarketing 2025 que también son de Vicky.
   const PROGRAMA_DESDE = "2026-07-16T00:00:00-04:00"
@@ -622,7 +629,10 @@ export async function GET(req: Request): Promise<Response> {
     rows = allRows.filter((r) => {
       if (isTestContact(r.contact)) return false
       const esCO = co.convIds.has(r.conversation_id) || co.contacts.has(digits(r.contact))
-      return pais === "cl" ? !esCO : esCO
+      // Universo Chile cerrado: las conversaciones mexicanas (+52) no entran.
+      const d = digits(r.contact)
+      const esMX = d.startsWith("521") || (d.startsWith("52") && d.length === 12)
+      return pais === "cl" ? !esCO && !esMX : esCO
     })
     // Hechos deterministas mandan sobre el LLM: cotización formal enviada y
     // reunión agendada se imponen aunque el modelo no las haya detectado.
