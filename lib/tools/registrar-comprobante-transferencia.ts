@@ -47,6 +47,11 @@ export const registrarComprobanteTransferenciaSchema = {
         type: "string" as const,
         description: "Resumen en una frase de lo que muestra el comprobante (destinatario, hora, nro de operación).",
       },
+      pagoDeclarado: {
+        type: "boolean" as const,
+        description:
+          "true cuando el cliente DECLARA que pagó ('el pago está listo', 'ya transferí') pero NO ha enviado el comprobante. Registra el aviso para que finanzas verifique el abono, sin afirmar confirmación.",
+      },
     },
     required: ["montoDetectado"],
   },
@@ -57,6 +62,7 @@ type Input = {
   bancoOrigen?: string
   fechaDetectada?: string
   detalle?: string
+  pagoDeclarado?: boolean
 }
 
 // ── MÉXICO (22-jul, decisión Lalo): sin MercadoPago MX, el pago inicial va por
@@ -135,8 +141,11 @@ export async function registrarComprobanteTransferencia(
   const pointers = await getQuotePointers(contact).catch(() => [])
   const pointer = pointers[0] || null
 
+  const declarado = input.pagoDeclarado === true
   const lineas = [
-    `Comprobante de transferencia recibido por WhatsApp (${new Date().toISOString()})`,
+    declarado
+      ? `Cliente DECLARÓ pago por WhatsApp — sin comprobante (${new Date().toISOString()})`
+      : `Comprobante de transferencia recibido por WhatsApp (${new Date().toISOString()})`,
     `Contacto: +${contact}`,
     pointer ? `Cotización vigente: quote_id ${pointer.quoteId} · ${pointer.empresa || "-"} · RUT ${pointer.rut || "-"}` : "SIN cotización formal vigente asociada al contacto",
     `Monto según comprobante: ${montoFmt}`,
@@ -160,6 +169,17 @@ export async function registrarComprobanteTransferencia(
   console.log(
     `[comprobante] contact=${contact} monto=${monto} quote=${pointer?.quoteId || "-"} nota=${notaCreada} aviso=${avisoInterno}`,
   )
+
+  // 3bis. Pago DECLARADO sin comprobante (caso Transportes Viig, 22-jul): el
+  // cliente dijo "el pago está listo" y Vicky afirmó una confirmación que no
+  // existía. Ahora: se registra el AVISO para que finanzas verifique, se le
+  // agradece y se le pide el comprobante para acelerar — sin afirmar nada.
+  if (declarado) {
+    const mensajeParaProspecto =
+      `¡Gracias por avisarme! 🙌 Dejé tu pago en verificación con nuestro equipo de finanzas — apenas confirmen el abono te escribo por aquí y coordinamos los siguientes pasos. ` +
+      `Si tienes el comprobante a mano, mándamelo por este mismo chat y aceleramos la confirmación 😊`
+    return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
+  }
 
   // 3. Confirmación al cliente.
   // MX: recepción + acceso INMEDIATO al auto-onboarding + presentación de la

@@ -410,6 +410,21 @@ async function processOneTurn(
       }
     }
 
+    // 2.4c. ALLOWLIST de dominios (caso Transportes Viig, 22-jul): el modelo
+    // inventó una "ficha técnica" en storage.googleapis.com — bucket
+    // inexistente. Enumerar dominios malos no escala: TODO link cuyo dominio
+    // no esté en la lista blanca de Vicky (sitios GeoVictoria, PDFs en
+    // Supabase, certificación DT, wa.me, agenda, MercadoPago, videos demo)
+    // se considera fabricado y se retira con la frase honesta.
+    const DOMINIOS_VICKY =
+      /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|dt\.gob\.cl|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
+    for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
+      if (!DOMINIOS_VICKY.test(u)) {
+        console.error(`[v3-bg] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
+        reply = reply.split(u).join("(te lo hago llegar enseguida)").trim()
+      }
+    }
+
     // 2.5. Guardrail anti-alucinación de URL del cotizador.
     // Si el reply contiene CUALQUIER URL del cotizador (con path) pero NO hubo
     // una invocación exitosa de generar_link_cotizadora/aplicar_siguiente_descuento
