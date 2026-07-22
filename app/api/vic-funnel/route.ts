@@ -413,24 +413,45 @@ const digits = (c: string) => (c || "").replace(/\D/g, "")
 async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
   toque0: Set<string>
   sinContactar: number
+  asignadosTotal: number
   respondio: Set<string>
 }> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   const delPais = (c: string) => (pais === "co" ? c.startsWith("57") : !c.startsWith("57"))
-  const [cadRes, convRes, leadsRes] = await Promise.all([
+  // Inicio del programa outbound actual (primer lead asignado a Vicky):
+  // excluye los leads de la era telemarketing 2025 que también son de Vicky.
+  const PROGRAMA_DESDE = "2026-07-16T00:00:00-04:00"
+  const [cadRes, convRes, leadsRes, convertedRes] = await Promise.all([
     fetch(`${SUPABASE_URL}/rest/v1/vic_outbound_cadence?select=contact`, { headers: h, cache: "no-store" }),
     fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=contact,last_user_at`, { headers: h, cache: "no-store" }),
     (async () => {
       try {
         const token = await getZohoAccessToken()
+        // TODOS los leads vivos de Vicky (cualquier estado): el conteo por
+        // estado '1. No contactado' subcontaba los asignados (fix 22-jul).
         return await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
           method: "POST",
           headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            select_query: `select id, Phone from Leads where Owner.id = ${VICKY_CREATOR_ID} and Lead_Status = '1. No contactado' limit 200`,
+            select_query: `select id, Phone from Leads where Owner.id = ${VICKY_CREATOR_ID} and Created_Time > '${PROGRAMA_DESDE}' limit 200`,
           }),
           cache: "no-store",
         })
+      } catch {
+        return null
+      }
+    })(),
+    (async () => {
+      try {
+        // Leads CONVERTIDOS a deal (les mandamos cotización): desaparecen de
+        // las consultas normales de Leads pero SON leads asignados (fix
+        // 22-jul, pedido Lalo: "considera también los convertidos").
+        const token = await getZohoAccessToken()
+        const criteria = encodeURIComponent(`(Owner.id:equals:${VICKY_CREATOR_ID})`)
+        return await fetch(
+          `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${criteria}&converted=true&fields=id,Phone,Created_Time&per_page=200`,
+          { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+        )
       } catch {
         return null
       }
@@ -440,14 +461,34 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
   const convs = convRes.ok
     ? ((await convRes.json()) as Array<{ contact: string; last_user_at: string | null }>)
     : []
+  const toque0 = new Set(cad.map((c) => digits(c.contact)).filter((c) => c && delPais(c) && !isTestContact(c)))
+  // Unión por teléfono: cadencia + leads vivos + convertidos (sin duplicar).
+  const asignados = new Set<string>(toque0)
   let sinContactar = 0
   if (leadsRes && leadsRes.ok) {
-    const data = (await leadsRes.json().catch(() => ({}))) as { data?: Array<{ Phone?: string | null }> }
+    const data = (await leadsRes.json().catch(() => ({}))) as {
+      data?: Array<{ Phone?: string | null }>
+    }
+    for (const l of data?.data || []) {
+      const tel = digits(String(l.Phone || ""))
+      if (tel && delPais(tel) && !isTestContact(tel)) asignados.add(tel)
+    }
     sinContactar = (data?.data || []).filter((l) => delPais(digits(String(l.Phone || "")))).length
   }
+  if (convertedRes && convertedRes.ok) {
+    const data = (await convertedRes.json().catch(() => ({}))) as {
+      data?: Array<{ Phone?: string | null; Created_Time?: string }>
+    }
+    for (const l of data?.data || []) {
+      if (String(l.Created_Time || "") < "2026-07-16") continue
+      const tel = digits(String(l.Phone || ""))
+      if (tel && delPais(tel) && !isTestContact(tel)) asignados.add(tel)
+    }
+  }
   return {
-    toque0: new Set(cad.map((c) => digits(c.contact)).filter((c) => c && delPais(c) && !isTestContact(c))),
+    toque0,
     sinContactar,
+    asignadosTotal: asignados.size,
     respondio: new Set(convs.filter((c) => c.last_user_at).map((c) => digits(c.contact))),
   }
 }
@@ -570,7 +611,7 @@ export async function GET(req: Request): Promise<Response> {
       fetchAnalysis(),
       fetchHardSignals(),
       fetchCierreZoho(co.quoteIds, pais),
-      fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, respondio: new Set<string>() })),
+      fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, respondio: new Set<string>() })),
     ])
     origen = origenData
     cierre = cierreZoho
@@ -631,7 +672,7 @@ export async function GET(req: Request): Promise<Response> {
   const esOutbound = (c: string) => origen.toque0.has(digits(c))
   const obRespondio = [...origen.toque0].filter((c) => origen.respondio.has(c)).length
   const fOb = {
-    asignados: origen.toque0.size + origen.sinContactar,
+    asignados: origen.asignadosTotal || origen.toque0.size + origen.sinContactar,
     toque0: origen.toque0.size,
     respondio: obRespondio,
     calificado: n((r) => esOutbound(r.contact) && r.sub_bucket === "cotizacion"),
