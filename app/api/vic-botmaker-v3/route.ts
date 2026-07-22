@@ -745,11 +745,11 @@ async function processOneTurn(
     // pero NO hubo un agendar_reunion/reagendar_reunion exitoso este turno,
     // re-corremos forzando la tool; si aun así no se concreta, NO confirmamos.
     const afirmaReunionLista =
-      /\breuni[oó]n\b[^.]{0,40}\b(qued[oó]|est[aá]|fue)\b[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(
+      /\breuni[oó]n\b[^.]{0,40}(qued[oó]|est[aá]|fue)[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(
         reply,
       ) ||
-      /\b(agend[eé]|reagend[eé])\b[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
-      /\bte\s+(la|lo)\s+(agend[eé]|reagend[eé])\b/i.test(reply)
+      /\b(agend[eé]|reagend[eé])[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
+      /\bte\s+(la|lo)\s+(agend[eé]|reagend[eé])/i.test(reply)
     const realAgenda = toolCalls.some(
       (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
     )
@@ -812,12 +812,12 @@ async function processOneTurn(
     // re-corremos forzando la tool; si aun así no se concreta, NO confirmamos.
     const afirmaCallbackListo =
       // "tomé/dejé/registré/guardé tus datos | tu solicitud | el callback"
-      /\b(tom[eé]|dej[eé]|guard[eé]|registr[eé]|anot[eé])\b[^.]{0,30}\b(tus\s+datos|tu\s+solicitud|tus\s+antecedentes|el\s+callback|tu\s+contacto)\b/i.test(
+      /\b(tom[eé]|dej[eé]|guard[eé]|registr[eé]|anot[eé])[^.]{0,30}\b(tus\s+datos|tu\s+solicitud|tus\s+antecedentes|el\s+callback|tu\s+contacto)\b/i.test(
         reply,
       ) ||
       // "quedaste/quedó registrado" / "te dejé registrado"
       /\bqued(aste|[oó])\b[^.]{0,20}\bregistrad/i.test(reply) ||
-      /\bte\s+(dej[eé]|registr[eé])\b[^.]{0,15}\bregistrad/i.test(reply) ||
+      /\bte\s+(dej[eé]|registr[eé])[^.]{0,15}\bregistrad/i.test(reply) ||
       // Afirmación de contacto futuro por parte de un ejecutivo/equipo/Anderson.
       // Solo formas ASERTIVAS (contactará / te va a contactar / llamará / se
       // pondrá en contacto), NO la oferta en subjuntivo ("¿quieres que un
