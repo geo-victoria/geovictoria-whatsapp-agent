@@ -140,8 +140,18 @@ export async function sendBotmakerMessage(
 
   const cleanContact = normalizeContactId(contactId)
   // El canal de ORIGEN del contacto (si está registrado) manda sobre el del
-  // llamador: se responde por donde el cliente escribió.
-  const origen = await canalDeOrigen(cleanContact)
+  // llamador: se responde por donde el cliente escribió. EXCEPCIÓN (22-jul):
+  // los números INTERNOS de aviso (QUOTE_NOTIFY_TO / VICKY_REPORT_PHONE) no
+  // siguen el canal de origen — si un miembro del equipo prueba una línea
+  // nueva como cliente, su canal_origen queda apuntando ahí y los avisos
+  // internos empezarían a saltar de línea (pasó con la línea MX). Los avisos
+  // del equipo van SIEMPRE por el canal que pida el llamador (o la línea CL).
+  const internos = new Set(
+    [process.env.QUOTE_NOTIFY_TO, process.env.VICKY_REPORT_PHONE]
+      .map((n) => (n || "").trim().replace(/\D/g, ""))
+      .filter(Boolean),
+  )
+  const origen = internos.has(cleanContact) ? "" : await canalDeOrigen(cleanContact)
   const canal = (origen || channelId || BM_CHANNEL_V3).trim()
   if (origen && origen !== (channelId || BM_CHANNEL_V3).trim()) {
     console.log(
