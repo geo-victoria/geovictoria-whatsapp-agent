@@ -61,6 +61,26 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, attendee, bookings })
   }
 
+  // ?addGuestTo=<uid>&guest=<email>: agrega un invitado a una reserva
+  // existente (Cal.com reenvía la invitación con el link al nuevo guest).
+  // Creado 22-jul para sumar al ejecutivo a la reunión SIMPRO.
+  const addGuest = new URL(req.url).searchParams.get("guest")
+  const guestBooking = new URL(req.url).searchParams.get("addGuestTo")
+  if (addGuest && guestBooking) {
+    const resG = await fetch(`${CAL_BASE}/bookings/${encodeURIComponent(guestBooking)}/guests`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${CAL_API_KEY}`,
+        "cal-api-version": "2024-08-13",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ guests: [addGuest] }),
+      cache: "no-store",
+    })
+    const dataG = await resG.json().catch(() => ({}))
+    return NextResponse.json({ ok: resG.ok, booking: guestBooking, addGuest, status: resG.status, data: dataG })
+  }
+
   // ?cancelBooking=<uid>: cancela una reserva (limpieza de reuniones de
   // prueba). Best-effort sobre el registro local: si existe en vic_v3_meetings
   // se marca cancelada para que no dispare recordatorios.
