@@ -21,6 +21,7 @@
 import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
+import { PERFIL_MX } from "@/lib/paises/mx"
 import { appendAssistantV3, fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
@@ -94,6 +95,20 @@ const REACT_CONTEXT_MSG_CO: Record<string, string> = {
     "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización que quedó a mitad de camino — en 2 minutos la terminamos por acá. Seguimos? 😊",
 }
 
+// México (22-jul): plantillas aprobadas por Meta con ${nombre} Y ${empresa}
+// (a diferencia de CL/CO, que solo llevan ${nombre}) — el envío MX resuelve
+// ambas variables. La "final" (breakup) reemplaza a la corta en el último
+// toque de la cadencia. Salen por la línea +52.
+const TPL_QUOTE_MX = (process.env.REACTIVATION_TEMPLATE_QUOTE_MX || "vicky_mx_react_corta").trim()
+const TPL_PREFORM_MX = (process.env.REACTIVATION_TEMPLATE_PREFORM_MX || "vicky_mx_react_corta").trim()
+const TPL_FINAL_MX = (process.env.REACTIVATION_TEMPLATE_FINAL_MX || "vicky_mx_react_final").trim()
+const REACT_CONTEXT_MSG_MX: Record<string, string> = {
+  cotizacion:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización, que quedó a medio camino — en 2 minutos la terminamos por aquí. ¿Seguimos? 😊",
+  preform:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización, que quedó a medio camino — en 2 minutos la terminamos por aquí. ¿Seguimos? 😊",
+}
+
 type Row = {
   id: string
   contact: string
@@ -140,17 +155,18 @@ async function authorized(req: Request): Promise<boolean> {
 // completo como "no reactivar" para no escribirle a un cliente que ya cerró.
 async function quoteIdsNoAccionables(
   quoteIds: string[],
-): Promise<{ skip: Set<string>; nombres: Map<string, string> }> {
+): Promise<{ skip: Set<string>; nombres: Map<string, string>; empresas: Map<string, string> }> {
   const skip = new Set<string>()
   const nombres = new Map<string, string>()
-  if (!quoteIds.length) return { skip, nombres }
+  const empresas = new Map<string, string>()
+  if (!quoteIds.length) return { skip, nombres, empresas }
   const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   let token = ""
   try {
     token = await getZohoAccessToken()
   } catch {
     for (const id of quoteIds) skip.add(id)
-    return { skip, nombres }
+    return { skip, nombres, empresas }
   }
   for (let i = 0; i < quoteIds.length; i += 50) {
     const chunk = quoteIds.slice(i, i + 50)
@@ -160,7 +176,7 @@ async function quoteIdsNoAccionables(
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          select_query: `select id, Estado_Cotizacion, Contacto_Asociado from ${QUOTE_MODULE} where id in (${ids}) limit 200`,
+          select_query: `select id, Estado_Cotizacion, Contacto_Asociado, Name from ${QUOTE_MODULE} where id in (${ids}) limit 200`,
         }),
         cache: "no-store",
       })
@@ -177,12 +193,17 @@ async function quoteIdsNoAccionables(
         // Primer nombre del contacto de la cotización (para el \${nombre} del HSM).
         const full = String(r?.Contacto_Asociado?.name || "").trim()
         if (full) nombres.set(String(r.id), full.split(/\s+/)[0])
+        // Empresa (para el \${empresa} de las plantillas MX): el Name de la
+        // cotización se crea como "Cotización {empresa} - {fecha}" en los tres
+        // países — se parsea de ahí (cero llamadas extra).
+        const m = String(r?.Name || "").match(/^Cotizaci[oó]n\s+(.+?)\s+-\s+\d{4}-\d{2}-\d{2}$/)
+        if (m) empresas.set(String(r.id), m[1])
       }
     } catch {
       for (const id of chunk) skip.add(id)
     }
   }
-  return { skip, nombres }
+  return { skip, nombres, empresas }
 }
 
 
@@ -221,6 +242,46 @@ async function nombreDesdeHistorial(contact: string): Promise<string | null> {
     const out = (data.content?.find((b) => b.type === "text")?.text || "").trim()
     if (!out || out.toUpperCase() === "NO" || out.split(/\s+/).length > 2 || out.length > 25) return null
     return out.split(/\s+/)[0]
+  } catch {
+    return null
+  }
+}
+
+// Nombre de la EMPRESA extraído del historial (para el ${empresa} de las
+// plantillas MX cuando no hay cotización formal de la cual parsearlo). Mismo
+// patrón best-effort que nombreDesdeHistorial; si no hay empresa clara
+// devuelve null y el envío usa el neutro "tu empresa".
+async function empresaDesdeHistorial(contact: string): Promise<string | null> {
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) return null
+  try {
+    const history = await fetchHistoryV3(contact, 30)
+    const transcript = history
+      .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${m.content}`)
+      .join("\n")
+      .slice(-3500)
+    if (!transcript) return null
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 30,
+        system:
+          "Extrae el NOMBRE DE LA EMPRESA del CLIENTE desde la conversación (la empresa para la que pide la cotización). Responde SOLO el nombre de la empresa, tal como la nombró el cliente. Si no hay una empresa clara, responde exactamente NO.",
+        messages: [{ role: "user", content: transcript }],
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> }
+    const out = (data.content?.find((b) => b.type === "text")?.text || "").trim()
+    if (!out || out.toUpperCase() === "NO" || out.length > 60) return null
+    return out
   } catch {
     return null
   }
@@ -358,10 +419,12 @@ export async function GET(req: Request): Promise<Response> {
   // Segmento "cotizacion": tiene formal_quote_id y NO está aceptada/pagada.
   let segCot: Row[] = []
   let nombresPorQuote = new Map<string, string>()
+  let empresasPorQuote = new Map<string, string>()
   if (TPL_QUOTE) {
     const conQuote = cand.filter((r) => !!r.formal_quote_id)
     const zoho = await quoteIdsNoAccionables(conQuote.map((r) => r.formal_quote_id as string))
     nombresPorQuote = zoho.nombres
+    empresasPorQuote = zoho.empresas
     segCot = conQuote.filter((r) => !zoho.skip.has(String(r.formal_quote_id)))
   }
 
@@ -408,20 +471,28 @@ export async function GET(req: Request): Promise<Response> {
   let enviados = 0
   let omitidosSinNombre = 0
   const esCO = (r: Row) => (r.country || "cl").toLowerCase() === "co"
-  const canalDe = (r: Row) => (esCO(r) ? PERFIL_CO.canal.channelId : undefined)
-  const contextoDe = (r: Row, segmento: string) =>
-    (esCO(r) ? REACT_CONTEXT_MSG_CO : REACT_CONTEXT_MSG)[segmento] ??
-    (esCO(r) ? REACT_CONTEXT_MSG_CO.preform : REACT_CONTEXT_MSG.preform)
+  const esMX = (r: Row) => (r.country || "cl").toLowerCase() === "mx"
+  const tagPais = (r: Row) => (esMX(r) ? "(mx)" : esCO(r) ? "(co)" : "")
+  const canalDe = (r: Row) =>
+    esMX(r) ? PERFIL_MX.canal.channelId : esCO(r) ? PERFIL_CO.canal.channelId : undefined
+  const contextoDe = (r: Row, segmento: string) => {
+    const msgs = esMX(r) ? REACT_CONTEXT_MSG_MX : esCO(r) ? REACT_CONTEXT_MSG_CO : REACT_CONTEXT_MSG
+    return msgs[segmento] ?? msgs.preform
+  }
+  // Variables del HSM: CL/CO llevan solo ${nombre}; las plantillas MX llevan
+  // además ${empresa} (Zoho vía el Name de la cotización; historial como
+  // fallback; neutro "tu empresa" si nada resuelve — Meta exige la variable).
+  const paramsDe = async (r: Row, nombre: string): Promise<Record<string, string>> => {
+    if (!esMX(r)) return { nombre }
+    const empresa =
+      (r.formal_quote_id ? empresasPorQuote.get(String(r.formal_quote_id)) : undefined) ||
+      (await empresaDesdeHistorial(r.contact)) ||
+      "tu empresa"
+    return { nombre, empresa }
+  }
   async function enviar(list: Row[], segmento: string) {
     for (const r of list) {
       if (enviados >= BATCH) break
-      // MÉXICO: sin plantillas HSM aprobadas aún — NUNCA enviar la plantilla
-      // chilena por la línea CL a un +52. Queda pendiente hasta configurar
-      // REACTIVATION_TEMPLATE_*_MX (las plantillas ya están propuestas).
-      if ((r.country || "cl").toLowerCase() === "mx") {
-        console.log(`[reactivation] ${r.contact} es MX — sin plantillas MX aprobadas, se omite.`)
-        continue
-      }
       // Las plantillas v2 llevan \${nombre}: resolverlo (Zoho para cotización;
       // historial como fallback). Sin nombre NO se envía (quedaría "Hola ,").
       let nombre =
@@ -437,12 +508,18 @@ export async function GET(req: Request): Promise<Response> {
         nombre = "de nuevo"
         console.warn(`[reactivation] sin nombre resoluble, va con saludo neutro: ${r.contact} (${segmento})`)
       }
-      // País: plantilla y canal propios (CO sin promesa de descuento, línea +57).
+      // País: plantilla y canal propios (CO sin promesa de descuento, línea +57;
+      // MX con corta en toques 1..N-1 y breakup "final" en el último toque).
       // CL además puede tener plantilla específica por toque (tplToque).
-      const tpl = esCO(r)
-        ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
-        : tplToque(segmento, (r.reactivation_count || 0) + 1)
-      const ok = await sendBotmakerTemplate(r.contact, tpl, { nombre }, canalDe(r)).catch(() => false)
+      const toque = (r.reactivation_count || 0) + 1
+      const tpl = esMX(r)
+        ? toque >= MAX_REACT
+          ? TPL_FINAL_MX
+          : segmento === "cotizacion" ? TPL_QUOTE_MX : TPL_PREFORM_MX
+        : esCO(r)
+          ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
+          : tplToque(segmento, toque)
+      const ok = await sendBotmakerTemplate(r.contact, tpl, await paramsDe(r, nombre), canalDe(r)).catch(() => false)
       if (!ok) continue
       await supa(`vic_v3_conversations?id=eq.${r.id}`, {
         method: "PATCH",
@@ -453,14 +530,14 @@ export async function GET(req: Request): Promise<Response> {
         }),
       }).catch(() => {})
       enviados++
-      console.log(`[reactivation] ${segmento}${esCO(r) ? "(co)" : ""} → ${r.contact}`)
+      console.log(`[reactivation] ${segmento}${tagPais(r)} → ${r.contact}`)
       // Deja el toque como turno de Vicky en el historial: así, cuando el cliente
       // responda, Vicky retoma con continuidad (excepción de reenganche del prompt).
       await appendAssistantV3(r.contact, contextoDe(r, segmento)).catch(() => {})
       // En "cotizacion" sumamos el correo (CTA aceptación online + PDF) al HSM.
-      // CO: sin correo de reactivación por ahora (el builder del correo es
+      // CO/MX: sin correo de reactivación por ahora (el builder del correo es
       // chileno — UF/tuteo CL); el HSM basta.
-      if (segmento === "cotizacion" && !esCO(r)) await dispararCorreo(r.formal_quote_id)
+      if (segmento === "cotizacion" && !esCO(r) && !esMX(r)) await dispararCorreo(r.formal_quote_id)
     }
   }
 
@@ -473,9 +550,11 @@ export async function GET(req: Request): Promise<Response> {
     for (const r of list) {
       if (enviados >= BATCH) break
       const segmento = r.formal_quote_id ? "cotizacion" : "preform"
-      const template = esCO(r)
-        ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
-        : segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
+      const template = esMX(r)
+        ? segmento === "cotizacion" ? TPL_QUOTE_MX : TPL_PREFORM_MX
+        : esCO(r)
+          ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
+          : segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
       if (!template) continue
       let nombre = await nombreDesdeHistorial(r.contact)
       if (!nombre) {
@@ -483,7 +562,7 @@ export async function GET(req: Request): Promise<Response> {
         nombre = "de nuevo"
         console.warn(`[reactivation] consensuado sin nombre resoluble, va con saludo neutro: ${r.contact}`)
       }
-      const ok = await sendBotmakerTemplate(r.contact, template, { nombre }, canalDe(r)).catch(() => false)
+      const ok = await sendBotmakerTemplate(r.contact, template, await paramsDe(r, nombre), canalDe(r)).catch(() => false)
       if (!ok) continue
       await supa(`vic_v3_conversations?id=eq.${r.id}`, {
         method: "PATCH",
@@ -496,9 +575,9 @@ export async function GET(req: Request): Promise<Response> {
       }).catch(() => {})
       enviados++
       enviadosConsensuado++
-      console.log(`[reactivation] consensuado(${segmento})${esCO(r) ? "(co)" : ""} → ${r.contact}`)
+      console.log(`[reactivation] consensuado(${segmento})${tagPais(r)} → ${r.contact}`)
       await appendAssistantV3(r.contact, contextoDe(r, segmento)).catch(() => {})
-      if (segmento === "cotizacion" && !esCO(r)) await dispararCorreo(r.formal_quote_id)
+      if (segmento === "cotizacion" && !esCO(r) && !esMX(r)) await dispararCorreo(r.formal_quote_id)
     }
   }
 

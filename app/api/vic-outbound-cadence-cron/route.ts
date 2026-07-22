@@ -29,9 +29,15 @@ import {
   getKvValue,
 } from "@/lib/supabase-persistence-v3"
 import { buildCorreoCadencia, sendLeadEmail } from "@/lib/zoho-lead-mail"
-import { reasignarLeadSdrInbound, reasignarLeadSdrInboundCO } from "@/lib/zoho-leads"
+import {
+  agregarNotaLead,
+  reasignarLeadSdrInbound,
+  reasignarLeadSdrInboundCO,
+  updateZohoLeadOwner,
+} from "@/lib/zoho-leads"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { PERFIL_CO } from "@/lib/paises/co"
+import { PERFIL_MX } from "@/lib/paises/mx"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -48,6 +54,13 @@ const TPL_CIERRE = (process.env.OUTBOUND_TEMPLATE_CIERRE || "vicky_lead_cierre")
 // envío fallará marcando el toque.
 const TPL_NUDGE_CO = (process.env.OUTBOUND_TEMPLATE_NUDGE_CO || "vicky_co_lead_nudge").trim()
 const TPL_CIERRE_CO = (process.env.OUTBOUND_TEMPLATE_CIERRE_CO || "vicky_co_lead_cierre").trim()
+// México (22-jul): sin plantillas de nudge/cierre propias todavía — se reusan
+// las de reactivación (aprobadas, UTILITY, con ${nombre} y ${empresa}): la
+// corta calza como nudge ("tu cotización quedó a medio camino") y la final
+// como breakup. Cuando existan plantillas de cadencia MX dedicadas, basta
+// setear las envs.
+const TPL_NUDGE_MX = (process.env.OUTBOUND_TEMPLATE_NUDGE_MX || "vicky_mx_react_corta").trim()
+const TPL_CIERRE_MX = (process.env.OUTBOUND_TEMPLATE_CIERRE_MX || "vicky_mx_react_final").trim()
 const BATCH = Number(process.env.OUTBOUND_CADENCE_BATCH || 30)
 
 // Texto que queda en el historial de la conversación por cada HSM (contexto
@@ -61,6 +74,12 @@ const CONTEXT_NUDGE_CO = (nombre: string, empresa: string) =>
   `Hola ${nombre}! Soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu cotización toma 2 minutos por acá. Hay algo que te falte para avanzar o alguna duda que te pueda resolver? 😊`
 const CONTEXT_CIERRE_CO = (nombre: string, empresa: string) =>
   `Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu cotización para ${empresa} lista para retomarla cuando quieras — me escribes por acá y la armamos de una vez. Que te vaya muy bien! 👋`
+// Versión MX: espejo 1:1 de las plantillas de reactivación reusadas como
+// nudge/cierre (si cambian las envs TPL_*_MX, actualizar estos literales).
+const CONTEXT_NUDGE_MX = (nombre: string, empresa: string) =>
+  `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Te escribo para retomar tu cotización de ${empresa}, que quedó a medio camino — en 2 minutos la terminamos por aquí. ¿Seguimos? 😊`
+const CONTEXT_CIERRE_MX = (nombre: string, empresa: string) =>
+  `Hola ${nombre}! Soy Vicky de GeoVictoria. ¿Sigues interesado en resolver el control de asistencia de ${empresa}, o lo dejamos para más adelante? Cualquiera de las dos me sirve — solo dime y no te molesto más 🙌`
 
 type Row = {
   contact: string
@@ -215,22 +234,37 @@ export async function GET(req: Request): Promise<Response> {
 
     // País por prefijo: define línea de salida, plantillas, tono y SDRs.
     const esCO = p.row.contact.startsWith("57")
+    const esMX =
+      p.row.contact.startsWith("521") || (p.row.contact.startsWith("52") && p.row.contact.length === 12)
 
     if (p.accion === "agotar") {
       // Cadencia agotada sin respuesta → el lead vuelve a un humano (acuerdo
-      // con Marketing: round-robin SDR Inbound del país).
+      // con Marketing: round-robin SDR Inbound del país; MX v1 sin SDRs → va
+      // directo al ejecutivo MX, Yahel Segura).
       let reasignado: string | undefined
       let errorReasignacion: string | undefined
       if (p.row.zoho_lead_id) {
-        const rr = await (esCO
-          ? reasignarLeadSdrInboundCO(p.row.zoho_lead_id)
-          : reasignarLeadSdrInbound(p.row.zoho_lead_id)
-        ).catch((e) => ({
-          success: false as const,
-          error: e instanceof Error ? e.message : "excepción",
-        }))
-        reasignado = rr && "ownerEmail" in rr ? rr.ownerEmail : undefined
-        errorReasignacion = rr?.error
+        if (esMX) {
+          const yahel = "ysegura@geovictoria.com"
+          const rr = await updateZohoLeadOwner(p.row.zoho_lead_id, yahel).catch(() => null)
+          reasignado = rr?.success ? yahel : undefined
+          errorReasignacion = rr?.success ? undefined : rr?.error || "reasignación MX falló"
+          await agregarNotaLead(
+            p.row.zoho_lead_id,
+            "Vicky: cadencia agotada",
+            "El lead no respondió la cadencia outbound (WhatsApp + correos). Requiere contacto manual.",
+          ).catch(() => {})
+        } else {
+          const rr = await (esCO
+            ? reasignarLeadSdrInboundCO(p.row.zoho_lead_id)
+            : reasignarLeadSdrInbound(p.row.zoho_lead_id)
+          ).catch((e) => ({
+            success: false as const,
+            error: e instanceof Error ? e.message : "excepción",
+          }))
+          reasignado = rr && "ownerEmail" in rr ? rr.ownerEmail : undefined
+          errorReasignacion = rr?.error
+        }
       }
       await cerrar(p.row.contact, "agotada")
       detalle.push({
@@ -251,7 +285,12 @@ export async function GET(req: Request): Promise<Response> {
         detalle.push({ contact: p.row.contact, accion: p.accion, skip: "sin email/lead" })
         continue
       }
-      const { subject, html } = buildCorreoCadencia(p.accion, p.row.nombre || "", empresa, esCO ? "co" : "cl")
+      const { subject, html } = buildCorreoCadencia(
+        p.accion,
+        p.row.nombre || "",
+        empresa,
+        esMX ? "mx" : esCO ? "co" : "cl",
+      )
       const envio = await sendLeadEmail(p.row.zoho_lead_id, p.row.email, subject, html)
       if (envio.ok) {
         await marcarToque(p.row.contact, campo)
@@ -265,7 +304,11 @@ export async function GET(req: Request): Promise<Response> {
 
     // Toques de WhatsApp (HSM): nudge día 1 / breakup día 7, por la línea del país.
     const esNudge = p.accion === "waNudge"
-    const tpl = esCO ? (esNudge ? TPL_NUDGE_CO : TPL_CIERRE_CO) : esNudge ? TPL_NUDGE : TPL_CIERRE
+    const tpl = esMX
+      ? esNudge ? TPL_NUDGE_MX : TPL_CIERRE_MX
+      : esCO
+        ? esNudge ? TPL_NUDGE_CO : TPL_CIERRE_CO
+        : esNudge ? TPL_NUDGE : TPL_CIERRE
     if (!tpl) {
       // CO sin plantilla aprobada aún: el toque se marca para que la cadencia
       // avance con los correos en vez de reintentar para siempre.
@@ -277,20 +320,24 @@ export async function GET(req: Request): Promise<Response> {
       p.row.contact,
       tpl,
       { nombre, empresa },
-      esCO ? PERFIL_CO.canal.channelId : undefined,
+      esMX ? PERFIL_MX.canal.channelId : esCO ? PERFIL_CO.canal.channelId : undefined,
     ).catch(() => false)
     if (ok) {
       await marcarToque(p.row.contact, esNudge ? "wa_nudge_sent_at" : "wa_cierre_sent_at")
       await appendAssistantV3(
         p.row.contact,
-        esCO
+        esMX
           ? esNudge
-            ? CONTEXT_NUDGE_CO(nombre, empresa)
-            : CONTEXT_CIERRE_CO(nombre, empresa)
-          : esNudge
-            ? CONTEXT_NUDGE(nombre, empresa)
-            : CONTEXT_CIERRE(nombre, empresa),
-        esCO ? "co" : "cl",
+            ? CONTEXT_NUDGE_MX(nombre, empresa)
+            : CONTEXT_CIERRE_MX(nombre, empresa)
+          : esCO
+            ? esNudge
+              ? CONTEXT_NUDGE_CO(nombre, empresa)
+              : CONTEXT_CIERRE_CO(nombre, empresa)
+            : esNudge
+              ? CONTEXT_NUDGE(nombre, empresa)
+              : CONTEXT_CIERRE(nombre, empresa),
+        esMX ? "mx" : esCO ? "co" : "cl",
       ).catch(() => {})
       enviados++
       detalle.push({ contact: p.row.contact, accion: p.accion, ok: true, tpl })

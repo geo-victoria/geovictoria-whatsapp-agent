@@ -42,8 +42,10 @@ import {
   updateZohoLeadFields,
   reasignarLeadSdrInbound,
   reasignarLeadSdrInboundCO,
+  updateZohoLeadOwner,
 } from "@/lib/zoho-leads"
 import { PERFIL_CO } from "@/lib/paises/co"
+import { PERFIL_MX } from "@/lib/paises/mx"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -59,6 +61,8 @@ const TPL_LEAD = (process.env.OUTBOUND_TEMPLATE_LEAD || "").trim()
 // (131049, caso Marcela). La env queda como override. Zona horaria/feriados
 // CO los resuelve la cadencia con vic_is_business_now (prefijo 57 → Bogotá).
 const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "vicky_co_solicitud_recibida").trim()
+// México (21-jul): plantilla de apertura propia por la línea +52 1 56 5977 8486.
+const TPL_LEAD_MX = (process.env.OUTBOUND_TEMPLATE_LEAD_MX || "vicky_mx_lead_apertura").trim()
 
 async function authorized(req: Request): Promise<boolean> {
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
@@ -137,15 +141,26 @@ export async function POST(req: Request): Promise<Response> {
   const territorioRaw = (body.country || body.territorio || "").trim().toLowerCase()
   const territorio = /colombia|^co$/.test(territorioRaw)
     ? "co"
-    : /chile|^cl$/.test(territorioRaw)
-      ? "cl"
-      : null
+    : /m[eé]xico|^mx$/.test(territorioRaw)
+      ? "mx"
+      : /chile|^cl$/.test(territorioRaw)
+        ? "cl"
+        : null
   if (territorio === "cl" && contact.length === 9 && contact.startsWith("9")) {
     contact = `56${contact}`
   } else if (territorio === "co" && contact.length === 10 && contact.startsWith("3")) {
     contact = `57${contact}`
+  } else if (territorio === "mx" && contact.length === 10) {
+    // Celulares mexicanos: 10 dígitos locales → WhatsApp usa 52 + 1 + número.
+    contact = `521${contact}`
   }
-  const porPrefijo = contact.startsWith("56") ? "cl" : contact.startsWith("57") ? "co" : null
+  const porPrefijo = contact.startsWith("56")
+    ? "cl"
+    : contact.startsWith("57")
+      ? "co"
+      : contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
+        ? "mx"
+        : null
   // El prefijo del teléfono manda (define la línea por la que se puede escribir);
   // el territorio solo normaliza y deja traza si no calzan.
   const country = porPrefijo || territorio
@@ -157,13 +172,18 @@ export async function POST(req: Request): Promise<Response> {
     // verdad del prefijo, para que reportes y futuras assignment rules no
     // hereden el dato falso (20-jul, a raíz del caso Joys/Perú invertido).
     if (zohoLeadId) {
-      const pais = porPrefijo === "co" ? "Colombia" : "Chile"
+      const pais = porPrefijo === "mx" ? "México" : porPrefijo === "co" ? "Colombia" : "Chile"
       updateZohoLeadFields(zohoLeadId, { Country: pais, Territorio: pais }).catch(() => {})
     }
   }
   const esCO = country === "co"
-  const tplPais = esCO ? TPL_LEAD_CO : TPL_LEAD
-  const channelId = esCO ? PERFIL_CO.canal.channelId : undefined
+  const esMX = country === "mx"
+  const tplPais = esMX ? TPL_LEAD_MX : esCO ? TPL_LEAD_CO : TPL_LEAD
+  const channelId = esMX
+    ? PERFIL_MX.canal.channelId
+    : esCO
+      ? PERFIL_CO.canal.channelId
+      : undefined
 
   // Hook de prueba: envía la plantilla real al número indicado (aunque sea
   // interno) y termina — sin dedup, sin contexto persistido, sin tocar Zoho.
@@ -172,7 +192,7 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json({
         ok: false,
         test: true,
-        error: `OUTBOUND_TEMPLATE_LEAD${esCO ? "_CO" : ""} no configurada`,
+        error: `OUTBOUND_TEMPLATE_LEAD${esMX ? "_MX" : esCO ? "_CO" : ""} no configurada`,
       })
     }
     const okTest = await sendBotmakerTemplate(contact, tplPais, { nombre, empresa }, channelId).catch(() => false)
@@ -295,11 +315,24 @@ export async function POST(req: Request): Promise<Response> {
     // del país correspondiente).
     let reasignado: string | undefined
     if (zohoLeadId) {
-      const r = await (esCO
-        ? reasignarLeadSdrInboundCO(zohoLeadId)
-        : reasignarLeadSdrInbound(zohoLeadId)
-      ).catch(() => null)
-      reasignado = r?.ownerEmail
+      if (esMX) {
+        // México v1: sin round-robin SDR — el lead va directo al ejecutivo MX
+        // (Yahel Segura) para contacto manual.
+        const yahel = "ysegura@geovictoria.com"
+        const r = await updateZohoLeadOwner(zohoLeadId, yahel).catch(() => null)
+        reasignado = r?.success ? yahel : undefined
+        await agregarNotaLead(
+          zohoLeadId,
+          "Vicky: WhatsApp de apertura falló",
+          "No se pudo enviar la plantilla de apertura por la línea MX. El lead requiere contacto manual.",
+        ).catch(() => {})
+      } else {
+        const r = await (esCO
+          ? reasignarLeadSdrInboundCO(zohoLeadId)
+          : reasignarLeadSdrInbound(zohoLeadId)
+        ).catch(() => null)
+        reasignado = r?.ownerEmail
+      }
       console.warn(`[outbound-lead] envío falló → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`)
     }
     return NextResponse.json(
@@ -322,10 +355,14 @@ export async function POST(req: Request): Promise<Response> {
   // Botmaker, actualizar el literal en el mismo cambio):
   // CO → UTILITY vicky_co_solicitud_recibida · CL → vicky_lead_apertura_v3
   // (v3 pide de una la cantidad de personas: ahorra un turno y la respuesta
-  // ya es la calificación — decisión Lalo/Rodrigo 17-jul).
-  const saludoApertura = esCO
-    ? `Hola ${nombre}, te escribimos de GeoVictoria por la solicitud de cotización que registraste para ${empresa}. Puedes completarla por este medio: responde este mensaje y continuamos con el detalle.`
-    : `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas marcarían asistencia? Con eso te la armo de inmediato.`
+  // ya es la calificación — decisión Lalo/Rodrigo 17-jul) · MX → UTILITY
+  // vicky_mx_lead_apertura (21-jul, vocabulario es-mx: "registrarían su
+  // asistencia").
+  const saludoApertura = esMX
+    ? `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas registrarían su asistencia? Con ese dato te armo el valor de inmediato.`
+    : esCO
+      ? `Hola ${nombre}, te escribimos de GeoVictoria por la solicitud de cotización que registraste para ${empresa}. Puedes completarla por este medio: responde este mensaje y continuamos con el detalle.`
+      : `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas marcarían asistencia? Con eso te la armo de inmediato.`
   const ctx = [
     saludoApertura,
     ``,
@@ -334,7 +371,7 @@ export async function POST(req: Request): Promise<Response> {
       `${paginaInteres ? ` · convirtió en la página ${paginaInteres} (úsalo como pista de qué le interesa, sin citar la URL)` : ""}` +
       `${zohoLeadId ? ` · zohoLeadId ${zohoLeadId}` : ""}]`,
   ].join("\n")
-  await appendAssistantV3(contact, ctx, esCO ? "co" : "cl").catch(() => {})
+  await appendAssistantV3(contact, ctx, esMX ? "mx" : esCO ? "co" : "cl").catch(() => {})
 
   // 3. Arranca la CADENCIA multicanal (correos vía Zoho + HSM día 1/7): el cron
   // vic-outbound-cadence-cron toma esta fila; cualquier respuesta la corta.
@@ -357,5 +394,5 @@ export async function POST(req: Request): Promise<Response> {
   }).catch(() => {})
 
   console.log(`[outbound-lead] toque 0 → ${contact} (${empresa}${rango ? `, ${rango}` : ""})`)
-  return NextResponse.json({ ok: true, contact, empresa, template: TPL_LEAD, cadencia: "iniciada" })
+  return NextResponse.json({ ok: true, contact, empresa, template: tplPais, cadencia: "iniciada" })
 }
