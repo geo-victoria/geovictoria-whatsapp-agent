@@ -110,7 +110,8 @@ export async function GET(req: Request): Promise<Response> {
   }
   const pais = (url.searchParams.get("pais") || "co").toLowerCase()
   const contact = (url.searchParams.get("contact") || "").replace(/\D/g, "")
-  const tz = pais === "cl" ? "America/Santiago" : "America/Bogota"
+  const tz = pais === "cl" ? "America/Santiago" : pais === "mx" ? "America/Mexico_City" : "America/Bogota"
+  const bandera = (c?: string | null) => (c === "co" ? "🇨🇴" : c === "mx" ? "🇲🇽" : "🇨🇱")
   const qs = (extra: string) => `?key=${encodeURIComponent(key)}${extra}`
 
   try {
@@ -137,7 +138,7 @@ export async function GET(req: Request): Promise<Response> {
       const links = linksCotizacion(puntero)
       const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="20"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chat +${esc(contact)}</title>${ESTILO}</head><body><div class="wrap">
         <div class="sub"><a href="${qs(`&pais=${pais}`)}">← Volver a la lista</a></div>
-        <h1>+${esc(contact)} ${conv?.country === "co" ? "🇨🇴" : "🇨🇱"}</h1>
+        <h1>+${esc(contact)} ${bandera(conv?.country)}</h1>
         <div class="sub">${msgs.length} mensajes · ciclo: ${esc(conv?.followup_status || "—")} · ${conv?.formal_quote_id ? `cotización formal${links ? " (" + links + ")" : ""}` : "sin cotización formal"} · hora local ${pais.toUpperCase()} · se actualiza solo cada 20s</div>
         ${burbujas || "<p class='sub'>Sin mensajes.</p>"}
       </div></body></html>`
@@ -145,7 +146,7 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     // ── Lista de conversaciones ──
-    const filtro = pais === "all" ? "" : `&country=eq.${pais === "cl" ? "cl" : "co"}`
+    const filtro = pais === "all" ? "" : `&country=eq.${pais === "cl" ? "cl" : pais === "mx" ? "mx" : "co"}`
     const convs = await sb<Conv[]>(
       `vic_v3_conversations?select=id,contact,country,started_at,updated_at,last_user_at,followup_status,formal_quote_id${filtro}&order=updated_at.desc.nullslast&limit=60`,
     )
@@ -171,7 +172,7 @@ export async function GET(req: Request): Promise<Response> {
             : '<span class="tag">cotización</span>'
           : ""
         return `<tr>
-          <td><a href="${qs(`&pais=${pais}&contact=${c.contact}`)}"><b>+${esc(c.contact)}</b></a> ${c.country === "co" ? "🇨🇴" : "🇨🇱"}</td>
+          <td><a href="${qs(`&pais=${pais}&contact=${c.contact}`)}"><b>+${esc(c.contact)}</b></a> ${bandera(c.country)}</td>
           <td><span class="prev">${esc(prev)}</span></td>
           <td>${fmt(m?.at || c.updated_at, tz)}</td>
           <td>${tagCotizacion} ${esc(c.followup_status || "")}</td>
@@ -179,10 +180,11 @@ export async function GET(req: Request): Promise<Response> {
       })
       .join("")
     const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="20"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Conversaciones Vicky</title>${ESTILO}</head><body><div class="wrap">
-      <h1>Conversaciones Vicky — ${pais === "all" ? "todas" : pais === "cl" ? "Chile 🇨🇱" : "Colombia 🇨🇴"}</h1>
-      <div class="sub">${convs.length} conversaciones · hora local ${pais === "cl" ? "Santiago" : "Bogotá"} · se actualiza sola cada 20s ·
+      <h1>Conversaciones Vicky — ${pais === "all" ? "todas" : pais === "cl" ? "Chile 🇨🇱" : pais === "mx" ? "México 🇲🇽" : "Colombia 🇨🇴"}</h1>
+      <div class="sub">${convs.length} conversaciones · hora local ${pais === "cl" ? "Santiago" : pais === "mx" ? "Ciudad de México" : "Bogotá"} · se actualiza sola cada 20s ·
         <a href="${qs("&pais=co")}" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a> |
         <a href="${qs("&pais=cl")}" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> |
+        <a href="${qs("&pais=mx")}" style="font-weight:${pais === "mx" ? 700 : 400}">México</a> |
         <a href="${qs("&pais=all")}" style="font-weight:${pais === "all" ? 700 : 400}">Todas</a></div>
       <table><thead><tr><th>Contacto</th><th>Último mensaje</th><th>Hora</th><th>Estado</th></tr></thead><tbody>${filas}</tbody></table>
     </div></body></html>`
