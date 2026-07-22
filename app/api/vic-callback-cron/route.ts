@@ -65,10 +65,12 @@ export async function POST(req: Request): Promise<Response> {
   }
   const horaCl = horaEn("America/Santiago")
   const horaCo = horaEn("America/Bogota")
+  const horaMx = horaEn("America/Mexico_City")
   const clEnHorario = diaHabilEn("America/Santiago") && horaCl >= 9 && horaCl < 20
   const coEnHorario = diaHabilEn("America/Bogota") && horaCo >= 9 && horaCo < 19
-  if (!clEnHorario && !coEnHorario) {
-    return NextResponse.json({ ok: true, disparadas: 0, motivo: "fuera de horario (CL y CO)" })
+  const mxEnHorario = diaHabilEn("America/Mexico_City") && horaMx >= 9 && horaMx < 19
+  if (!clEnHorario && !coEnHorario && !mxEnHorario) {
+    return NextResponse.json({ ok: true, disparadas: 0, motivo: "fuera de horario (CL, CO y MX)" })
   }
 
   const flowUrl = ((await getKvValue("dapta_flow_seguimiento_webhook").catch(() => "")) || "").trim()
@@ -76,6 +78,11 @@ export async function POST(req: Request): Promise<Response> {
   // callbacks a +57 quedan pendientes con log — NUNCA salen por el flujo CL
   // (saludo chileno + caller equivocado sería peor que esperar).
   const flowUrlCo = ((await getKvValue("dapta_flow_seguimiento_webhook_co").catch(() => "")) || "").trim()
+  // Flujo MX (22-jul, agente eac2e39b "Victoria - Seguimiento - México" con la
+  // voz Lupe): se activa SOLO seteando vic_kv.dapta_flow_seguimiento_webhook_mx
+  // cuando exista el número +52 en Dapta — sin deploy. Mientras esté vacía,
+  // los +52 siguen quedando pendientes con aviso (jamás salen por CL/CO).
+  const flowUrlMx = ((await getKvValue("dapta_flow_seguimiento_webhook_mx").catch(() => "")) || "").trim()
   if (!flowUrl) {
     return NextResponse.json(
       { ok: false, error: "vic_kv.dapta_flow_seguimiento_webhook no configurada" },
@@ -131,18 +138,20 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     // País por prefijo: define flujo/agente/línea de salida y horario hábil.
-    // Solo CL (+56) y CO (+57) tienen canal de voz. Cualquier otro prefijo
-    // (México +52/521, Perú +51, etc.) queda pendiente con log — JAMÁS se
-    // disca por el flujo chileno a otro país.
+    // CL (+56) y CO (+57) tienen canal de voz; MX (+52) lo tiene cuando el
+    // flujo MX esté configurado en vic_kv. Cualquier otro prefijo queda
+    // pendiente con log — JAMÁS se disca por el flujo de otro país.
     const esCL = cb.contact.startsWith("56")
     const esCO = cb.contact.startsWith("57")
-    if (!esCL && !esCO) {
+    const esMX =
+      cb.contact.startsWith("521") || (cb.contact.startsWith("52") && cb.contact.length === 12)
+    if (!esCL && !esCO && !esMX) {
       unclaimCallback(cb.id).catch(() => {})
-      console.warn(`[callback-cron] ${cb.contact}: sin canal de voz para su país — llamada pendiente (no se disca por flujo CL/CO).`)
+      console.warn(`[callback-cron] ${cb.contact}: sin canal de voz para su país — llamada pendiente (no se disca por flujo CL/CO/MX).`)
       detalle.push({ id: cb.id, contact: cb.contact, due_at: cb.due_at, ok: false, motivo: "sin_canal_voz_pais" })
       continue
     }
-    if ((esCO && !coEnHorario) || (!esCO && !clEnHorario)) {
+    if ((esCO && !coEnHorario) || (esMX && !mxEnHorario) || (esCL && !clEnHorario)) {
       await unclaimCallback(cb.id)
       detalle.push({ id: cb.id, contact: cb.contact, esperando: "horario hábil del país" })
       continue
@@ -153,6 +162,14 @@ export async function POST(req: Request): Promise<Response> {
         `[callback-cron] ${cb.contact} es CO y vic_kv.dapta_flow_seguimiento_webhook_co no está configurada — queda pendiente (no se llama por el flujo CL).`,
       )
       detalle.push({ id: cb.id, contact: cb.contact, esperando: "flujo Dapta CO" })
+      continue
+    }
+    if (esMX && !flowUrlMx) {
+      await unclaimCallback(cb.id)
+      console.warn(
+        `[callback-cron] ${cb.contact} es MX y vic_kv.dapta_flow_seguimiento_webhook_mx no está configurada — queda pendiente (falta el número +52 en Dapta).`,
+      )
+      detalle.push({ id: cb.id, contact: cb.contact, esperando: "flujo Dapta MX" })
       continue
     }
 
@@ -227,7 +244,7 @@ export async function POST(req: Request): Promise<Response> {
       memoria += ` ÚLTIMOS MENSAJES DE LA CONVERSACIÓN DE WHATSAPP (tu propia memoria — úsala con naturalidad y no contradigas nada de lo ya acordado): ${ultimos}`
     }
     const contexto = base + memoria
-    const res = await fetch(esCO ? flowUrlCo : flowUrl, {
+    const res = await fetch(esMX ? flowUrlMx : esCO ? flowUrlCo : flowUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...payload, contexto }),
