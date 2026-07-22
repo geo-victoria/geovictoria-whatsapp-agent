@@ -74,7 +74,9 @@ export async function GET(req: Request): Promise<Response> {
         "cal-api-version": "2024-08-13",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ guests: [addGuest] }),
+      // Cal.com espera objetos, no strings ("each value in nested property
+      // guests must be either object or array").
+      body: JSON.stringify({ guests: [{ email: addGuest }] }),
       cache: "no-store",
     })
     const dataG = await resG.json().catch(() => ({}))
