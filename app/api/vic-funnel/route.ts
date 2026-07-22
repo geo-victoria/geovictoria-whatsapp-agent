@@ -418,6 +418,7 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
   toque0: Set<string>
   sinContactar: number
   asignadosTotal: number
+  convertidos: Set<string>
   respondio: Set<string>
 }> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
@@ -482,6 +483,9 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
     }
     sinContactar = (data?.data || []).filter((l) => delPais(digits(String(l.Phone || "")))).length
   }
+  // Set aparte de CONVERTIDOS (hecho duro de Zoho: el lead pasó a deal porque
+  // se le envió cotización) — etapa propia del funnel desde el 22-jul.
+  const convertidos = new Set<string>()
   if (convertedRes && convertedRes.ok) {
     const data = (await convertedRes.json().catch(() => ({}))) as {
       data?: Array<{ Phone?: string | null; Created_Time?: string }>
@@ -489,13 +493,17 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
     for (const l of data?.data || []) {
       if (String(l.Created_Time || "") < "2026-07-16") continue
       const tel = digits(String(l.Phone || ""))
-      if (tel && delPais(tel) && !isTestContact(tel)) asignados.add(tel)
+      if (tel && delPais(tel) && !isTestContact(tel)) {
+        asignados.add(tel)
+        convertidos.add(tel)
+      }
     }
   }
   return {
     toque0,
     sinContactar,
     asignadosTotal: asignados.size,
+    convertidos,
     respondio: new Set(convs.filter((c) => c.last_user_at).map((c) => digits(c.contact))),
   }
 }
@@ -593,10 +601,17 @@ export async function GET(req: Request): Promise<Response> {
   if (conv) return renderConversation(conv, key)
 
   let rows: Row[]
-  let origen: { toque0: Set<string>; sinContactar: number; asignadosTotal: number; respondio: Set<string> } = {
+  let origen: {
+    toque0: Set<string>
+    sinContactar: number
+    asignadosTotal: number
+    convertidos: Set<string>
+    respondio: Set<string>
+  } = {
     toque0: new Set(),
     sinContactar: 0,
     asignadosTotal: 0,
+    convertidos: new Set(),
     respondio: new Set(),
   }
   let cierre: {
@@ -619,7 +634,7 @@ export async function GET(req: Request): Promise<Response> {
       fetchAnalysis(),
       fetchHardSignals(),
       fetchCierreZoho(co.quoteIds, pais),
-      fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, respondio: new Set<string>() })),
+      fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, convertidos: new Set<string>(), respondio: new Set<string>() })),
     ])
     origen = origenData
     cierre = cierreZoho
@@ -689,6 +704,8 @@ export async function GET(req: Request): Promise<Response> {
     calificado: n((r) => esOutbound(r.contact) && r.sub_bucket === "cotizacion"),
     precio: n((r) => esOutbound(r.contact) && (r.cotizacion_outcome === "preform_mostrado" || r.cotizacion_outcome === "cotizacion_enviada")),
     formal: n((r) => esOutbound(r.contact) && r.cotizacion_outcome === "cotizacion_enviada"),
+    // Hecho duro de Zoho: leads convertidos a DEAL (se les envió cotización).
+    convertido: [...origen.convertidos].filter((c) => esOutbound(c)).length,
     pagada: (cierre?.aceptadasList || []).filter((q) => esOutbound(String(q.Tel_fono_Contacto || ""))).length,
   }
   const fIn = {
@@ -696,6 +713,8 @@ export async function GET(req: Request): Promise<Response> {
     calificado: n((r) => !esOutbound(r.contact) && r.sub_bucket === "cotizacion"),
     precio: n((r) => !esOutbound(r.contact) && (r.cotizacion_outcome === "preform_mostrado" || r.cotizacion_outcome === "cotizacion_enviada")),
     formal: n((r) => !esOutbound(r.contact) && r.cotizacion_outcome === "cotizacion_enviada"),
+    // Leads inbound (formulario) convertidos a deal — mismo hecho duro Zoho.
+    convertido: [...origen.convertidos].filter((c) => !esOutbound(c)).length,
     pagada: (cierre?.aceptadasList || []).filter((q) => !esOutbound(String(q.Tel_fono_Contacto || ""))).length,
   }
   const pct2 = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
@@ -716,7 +735,8 @@ export async function GET(req: Request): Promise<Response> {
       ${filaFunnel("Calificado en flujo cotización", fOb.calificado, fOb.respondio, fIn.calificado, fIn.origen)}
       ${filaFunnel("Vio precio", fOb.precio, fOb.calificado, fIn.precio, fIn.calificado)}
       ${filaFunnel("Cotización formal enviada", fOb.formal, fOb.precio, fIn.formal, fIn.precio)}
-      ${filaFunnel("💰 Pagada", fOb.pagada, fOb.formal, fIn.pagada, fIn.formal)}
+      ${filaFunnel("Convertido a deal (Zoho)", fOb.convertido, fOb.formal, fIn.convertido, fIn.formal)}
+      ${filaFunnel("💰 Pagada", fOb.pagada, fOb.convertido, fIn.pagada, fIn.formal)}
     </tbody></table>
     <div class="sub" style="margin-top:8px">Cierre punta a punta: outbound ${pct2(fOb.pagada, fOb.asignados)} de los leads asignados · inbound ${pct2(fIn.pagada, fIn.origen)} de las conversaciones. Las cotizaciones pagadas sin teléfono registrado se cuentan como inbound.</div>
   </div>`
