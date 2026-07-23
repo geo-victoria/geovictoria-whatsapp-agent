@@ -49,6 +49,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
+import { resetLoop } from "@/lib/loop-v2"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -606,6 +607,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     // ── Pipeline endurecido (herencia chilena) ──
     // Re-engagement: el cliente habló → pausar la cadencia en curso (si la había).
     await markUserActivity(contact, "co").catch(() => {})
+    // Loop v2 (flag LOOP_V2_ENABLED, no-op apagado): el mensaje entrante
+    // re-ancla el loop del contacto (t0 = ahora, toque 1). Best-effort.
+    resetLoop(contact).catch(() => {})
 
     const msgHash = hashMessage(contact, message)
     await bufferInboundMessage(contact, message, msgHash)

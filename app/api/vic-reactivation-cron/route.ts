@@ -24,6 +24,7 @@ import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
 import { appendAssistantV3, fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
+import { contactosEnLoop } from "@/lib/loop-v2"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
@@ -340,6 +341,11 @@ export async function GET(req: Request): Promise<Response> {
   const rows = (res.ok ? await res.json() : []) as Row[]
   // Números internos de prueba (mismos que excluye el embudo: VIC_FUNNEL_TEST_CONTACTS).
   const testSet = testContactSet()
+  // Loop v2 (flag LOOP_V2_ENABLED): los contactos migrados al motor nuevo NO se
+  // reactivan por acá — un solo fetch batch por lista (con el flag apagado el
+  // helper devuelve set vacío sin tocar la red: comportamiento idéntico a hoy).
+  const enLoopV2 = await contactosEnLoop(rows.map((r) => r.contact)).catch(() => new Set<string>())
+  let saltadosLoopV2 = 0
   // ¿Le toca un toque AHORA? El toque N (reactivation_count = N-1) recién aplica
   // cuando ya pasaron OFFSETS_H[N-1] horas desde el último mensaje del cliente
   // (47h → 7d → 15d). Así la cadencia se mide desde el silencio, no por gap plano.
@@ -358,9 +364,12 @@ export async function GET(req: Request): Promise<Response> {
     }
     return true
   }
+  // Migrados al Loop v2 → este motor no los toca (el loop es el dueño del ciclo).
+  saltadosLoopV2 += rows.filter((r) => enLoopV2.has(r.contact)).length
   let cand = rows.filter(
     (r) =>
       r.contact &&
+      !enLoopV2.has(r.contact) &&
       !isTestContact(r.contact, testSet) &&
       // 'soporte': pidió soporte → cero proactividad (HSM y correo incluidos),
       // aunque tenga cotización o preform (decisión de costos 11-jul).
@@ -400,9 +409,14 @@ export async function GET(req: Request): Promise<Response> {
       `&select=id,contact,country,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
       `&order=followup_next_at.asc&limit=100`,
     )
-    const crows = (cr.ok ? ((await cr.json()) as Row[]) : []).filter(
+    let crows = (cr.ok ? ((await cr.json()) as Row[]) : []).filter(
       (r) => r.contact && !isTestContact(r.contact, testSet),
     )
+    // Migrados al Loop v2: tampoco reciben el toque consensuado viejo (batch propio,
+    // los consensuados vienen de otra query que la cadencia 47h/7d/15d).
+    const enLoopCons = await contactosEnLoop(crows.map((r) => r.contact)).catch(() => new Set<string>())
+    saltadosLoopV2 += crows.filter((r) => enLoopCons.has(r.contact)).length
+    crows = crows.filter((r) => !enLoopCons.has(r.contact))
     if (crows.length) {
       const elegibles = await supa(`rpc/vic_filter_business_now`, {
         method: "POST",
@@ -595,6 +609,7 @@ export async function GET(req: Request): Promise<Response> {
     enviados,
     enviados_consensuado: enviadosConsensuado,
     sin_nombre_saludo_neutro: omitidosSinNombre,
+    saltados_loop_v2: saltadosLoopV2,
     correos,
   })
 }

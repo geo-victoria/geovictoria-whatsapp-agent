@@ -36,6 +36,7 @@ import {
   updateZohoLeadOwner,
 } from "@/lib/zoho-leads"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
+import { contactosEnLoop } from "@/lib/loop-v2"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
 
@@ -168,6 +169,12 @@ export async function GET(req: Request): Promise<Response> {
   )
   if (rows.length === 0) return NextResponse.json({ ok: true, activos: 0 })
 
+  // Loop v2 (flag LOOP_V2_ENABLED): los contactos migrados al motor nuevo NO
+  // reciben la cadencia vieja — un solo fetch batch (con el flag apagado el
+  // helper devuelve set vacío sin tocar la red: comportamiento idéntico a hoy).
+  const enLoopV2 = await contactosEnLoop(rows.map((r) => r.contact)).catch(() => new Set<string>())
+  let saltadosLoopV2 = 0
+
   // Estado conversacional de todos los contactos en una sola query.
   const contactsIn = rows.map((r) => `"${r.contact}"`).join(",")
   const convRes = await supa(
@@ -188,6 +195,11 @@ export async function GET(req: Request): Promise<Response> {
   const pendientes: Array<{ row: Row; accion: "e1" | "waNudge" | "e2" | "waCierre" | "e3" | "agotar" }> = []
 
   for (const r of rows) {
+    // Migrado al Loop v2 → este motor no lo toca (el loop es el dueño del ciclo).
+    if (enLoopV2.has(r.contact)) {
+      saltadosLoopV2++
+      continue
+    }
     const conv = convs.get(r.contact)
     // CUALQUIER respuesta del cliente desde el toque 0 corta la cadencia.
     if (conv?.last_user_at && new Date(conv.last_user_at).getTime() >= new Date(r.started_at).getTime()) {
@@ -351,6 +363,7 @@ export async function GET(req: Request): Promise<Response> {
     activos: rows.length,
     cerrados_respondio: cerradosRespondio,
     cerrados_optout: cerradosOptout,
+    saltados_loop_v2: saltadosLoopV2,
     enviados,
     detalle,
   })

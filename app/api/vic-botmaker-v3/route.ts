@@ -66,6 +66,7 @@ import {
   scheduleConsensualFollowup,
   confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
+import { resetLoop } from "@/lib/loop-v2"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -1344,6 +1345,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       .trim()
     if (msgNorm === "confirmo asistencia" || msgNorm === "confirmo mi asistencia") {
       await markUserActivity(contact).catch(() => {})
+      // Loop v2 (flag LOOP_V2_ENABLED): el mensaje del cliente re-ancla su loop.
+      resetLoop(contact).catch(() => {})
       const meeting = await confirmMeetingAttendance(contact).catch(() => null)
       let reply: string
       if (meeting) {
@@ -1393,6 +1396,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     // 5. Re-engagement: el cliente habló → pausar la cadencia en curso (si la
     //    había). Se hace por cada mensaje entrante, antes de bufferear.
     await markUserActivity(contact).catch(() => {})
+    // Loop v2 (flag LOOP_V2_ENABLED, no-op apagado): el mensaje entrante
+    // re-ancla el loop del contacto (t0 = ahora, toque 1). Best-effort.
+    resetLoop(contact).catch(() => {})
 
     // 6. Encolar el mensaje en el buffer de ráfaga (dedup de retries por hash).
     const messageHash = hashMessage(contact, message)
