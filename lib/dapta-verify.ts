@@ -42,8 +42,10 @@ export async function llamadaExisteEnDapta(
       cache: "no-store",
     })
     const raw = await res.text()
-    // La respuesta viene como SSE ("data: {...}") o JSON directo.
-    const jsonLine = raw.startsWith("data:")
+    // La respuesta viene como SSE o JSON directo. OJO: los frames SSE pueden
+    // traer "event: message" ANTES de la línea "data:" (cambio de Dapta,
+    // 23-jul) — se detecta por contenido, no solo por el inicio del texto.
+    const jsonLine = raw.includes("data:")
       ? raw
           .split("\n")
           .filter((l) => l.startsWith("data:"))
