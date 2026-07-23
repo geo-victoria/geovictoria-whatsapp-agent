@@ -38,6 +38,7 @@ import {
   scheduleConsensualFollowup,
   getQuotePointer,
   setKvValue,
+  getKvValue,
 } from "@/lib/supabase-persistence-v3"
 import {
   hashMessage,
@@ -47,7 +48,7 @@ import {
   drainInbox,
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
-import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -480,7 +481,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     // escribió, aunque el prefijo del número sea de otro país.
     const canalBody = ((body as { channelId?: string }).channelId || "").trim()
     if (contact && canalBody) {
-      setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
+      if (canalCoherenteConContacto(contact, canalBody)) {
+        setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
+      } else {
+        // Canal de OTRO país para este contacto: probable misroute del master
+        // bot (caso María 23-jul). No pisar el origen; si no lo conocemos,
+        // resolverlo contra la API de Botmaker.
+        const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
+        if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
+      }
     }
 
     if (!ENABLED && !simulacion) {

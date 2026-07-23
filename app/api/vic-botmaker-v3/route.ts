@@ -42,6 +42,7 @@ import {
   getFormalQuote,
   isReengaged,
   setKvValue,
+  getKvValue,
 } from "@/lib/supabase-persistence-v3"
 import {
   acquireLock,
@@ -51,7 +52,7 @@ import {
   drainInbox,
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
-import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -1196,8 +1197,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     // mensaje, lo persistimos — sendBotmakerMessage responde SIEMPRE por ese
     // canal (evita chats paralelos cuando el prefijo del número no calza con
     // la línea que eligió el cliente). Best-effort.
-    if (contact && (body.channelId || "").trim()) {
-      setKvValue(`canal_origen_${contact}`, (body.channelId || "").trim()).catch(() => {})
+    const canalBody = (body.channelId || "").trim()
+    if (contact && canalBody && canalCoherenteConContacto(contact, canalBody)) {
+      setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
+    } else if (contact && canalBody) {
+      // El body trae el canal de OTRO país (ej. contacto +57 con la línea +56):
+      // el master bot de Botmaker ruteó el mensaje al bot equivocado (caso
+      // María 23-jul, respuestas por la línea CL a una clienta de la línea CO).
+      // No pisamos el origen; si aún no lo conocemos, lo resolvemos contra la
+      // API de Botmaker (cubre también al +57 que legítimamente escribe al +56).
+      const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
+      if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
     } else if (contact.startsWith("57") && contact.length >= 12) {
       // Fallback (caso +573172822429): un +57 escribiendo SIN channelId puede
       // venir por la línea CHILENA — si respondemos por la línea CO, Meta

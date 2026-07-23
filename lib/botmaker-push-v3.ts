@@ -85,6 +85,31 @@ async function canalDeOrigen(contactId: string): Promise<string> {
  * que todos los pushes salgan por ahí. Best-effort: sin token o sin hallazgo,
  * no hace nada.
  */
+/** País por prefijo de un número WhatsApp (sin "+"): cl | co | mx | otro. */
+function paisDeNumero(num: string): "cl" | "co" | "mx" | "otro" {
+  if (num.startsWith("56")) return "cl"
+  if (num.startsWith("57")) return "co"
+  if (num.startsWith("52")) return "mx"
+  return "otro"
+}
+
+/**
+ * ¿El channelId que reporta la acción de código es coherente con el país del
+ * contacto? El channelId termina en el número de la línea (ej.
+ * "GeoVictoriaEspaol-whatsapp-56967308227"). Un contacto +57 con canal de la
+ * línea +56 casi siempre es el master bot ruteando mal (caso María 23-jul):
+ * ese canal NO debe persistirse como origen. Contactos de países sin línea
+ * propia (Perú, EEUU...) escriben por cualquier línea, así que para ellos
+ * cualquier canal es coherente.
+ */
+export function canalCoherenteConContacto(contactId: string, canal: string): boolean {
+  const numCanal = (canal.match(/(\d+)\s*$/) || [])[1] || ""
+  if (!numCanal) return true
+  const paisContacto = paisDeNumero(normalizeContactId(contactId))
+  if (paisContacto === "otro") return true
+  return paisDeNumero(numCanal) === paisContacto
+}
+
 export async function detectarCanalOrigen(contactId: string): Promise<string> {
   if (!BM_TOKEN || !SUPABASE_URL_KV || !SUPABASE_KEY_KV) return ""
   const clean = normalizeContactId(contactId)
