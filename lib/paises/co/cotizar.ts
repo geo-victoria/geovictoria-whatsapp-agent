@@ -160,31 +160,35 @@ export function cotizarCO(input: CotizacionCOInput): {
       iva: ventaNeto * IVA_HARDWARE,
       recurrente: false,
     })
-    // Feedback equipo CO (15-jul): con varios relojes, envío e instalación se
-    // TOTALIZAN por ubicación/zona con cantidad — nada de una fila por reloj.
-    const grupos = new Map<string, { ubicacion: string; zona: "capital" | "resto"; envios: number; instalaciones: number }>()
+    // Feedback Lalo (23-jul, caso 12 sedes): en el MENSAJE los envíos e
+    // instalaciones se agrupan por ZONA TARIFARIA (lo único que cambia el
+    // precio), no por ubicación — 12 sedes generaban 24 filas repetidas.
+    // Con un solo punto se conserva la ubicación en el rótulo (más claro).
+    const zonas = new Map<"capital" | "resto", { envios: number; instalaciones: number }>()
     for (const punto of puntos) {
-      const key = `${punto.ubicacion}|${punto.zona}`
-      const g = grupos.get(key) || { ubicacion: punto.ubicacion, zona: punto.zona, envios: 0, instalaciones: 0 }
+      const g = zonas.get(punto.zona) || { envios: 0, instalaciones: 0 }
       g.envios++
       if (!punto.autoInstalada) g.instalaciones++
-      grupos.set(key, g)
+      zonas.set(punto.zona, g)
     }
-    for (const g of grupos.values()) {
-      const zonaTxt = g.zona === "capital" ? "Zona capital" : "Resto del país"
-      const envio = TARIFAS_CO.envioVenta[g.zona]
+    const unSoloPunto = puntos.length === 1 ? puntos[0] : null
+    for (const [zona, g] of zonas.entries()) {
+      const zonaTxt = zona === "capital" ? "Zona capital" : "Resto del país"
+      const rotulo = unSoloPunto ? ` (${unSoloPunto.ubicacion})` : ` (${g.envios} sede${g.envios === 1 ? "" : "s"}, ${zonaTxt.toLowerCase()})`
+      const envio = TARIFAS_CO.envioVenta[zona]
       lineas.push({
-        concepto: `Envío de reloj (${g.ubicacion})${g.envios > 1 ? ` × ${g.envios}` : ""}`,
-        detalle: g.envios > 1 ? `${zonaTxt} — ${g.envios} × ${formatearCOP(envio)}` : zonaTxt,
+        concepto: `Envío de reloj${g.envios > 1 ? "es" : ""}${rotulo}`,
+        detalle: g.envios > 1 ? `${g.envios} × ${formatearCOP(envio)}` : zonaTxt,
         neto: envio * g.envios,
         iva: 0,
         recurrente: false,
       })
       if (g.instalaciones > 0) {
-        const inst = TARIFAS_CO.instalacionVenta[g.zona]
+        const inst = TARIFAS_CO.instalacionVenta[zona]
+        const rotuloInst = unSoloPunto ? ` (${unSoloPunto.ubicacion})` : ` (${g.instalaciones} sede${g.instalaciones === 1 ? "" : "s"}, ${zonaTxt.toLowerCase()})`
         lineas.push({
-          concepto: `Instalación de reloj (${g.ubicacion})${g.instalaciones > 1 ? ` × ${g.instalaciones}` : ""}`,
-          detalle: g.instalaciones > 1 ? `${zonaTxt} — ${g.instalaciones} × ${formatearCOP(inst)}` : zonaTxt,
+          concepto: `Instalación de reloj${g.instalaciones > 1 ? "es" : ""}${rotuloInst}`,
+          detalle: g.instalaciones > 1 ? `${g.instalaciones} × ${formatearCOP(inst)}` : zonaTxt,
           neto: inst * g.instalaciones,
           iva: 0,
           recurrente: false,

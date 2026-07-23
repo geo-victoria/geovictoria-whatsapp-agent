@@ -78,7 +78,7 @@ export async function GET(request: Request) {
       // Enviar mensaje de cierre al usuario (solo si tiene email = conversación real)
       if (lead.email || lead.correo) {
         const name = lead.nombre?.split(" ")[0] || ""
-        const closing = `${name ? `Oye ${name}, n` : "N"}o te preocupes si no pudiste elegir un horario, no es necesario agendar una reunión para que te ayudemos 😊 Ya tenemos tus datos y un ejecutivo te contactará cuanto antes. ¡Hasta pronto!`
+        const closing = `${name ? `${name}, n` : "N"}o te preocupes si no pudiste elegir un horario, no es necesario agendar una reunión para que te ayudemos 😊 Ya tenemos tus datos y un ejecutivo te contactará cuanto antes. ¡Hasta pronto!`
         await sendWhatsApp(contact, closing)
         messaged++
       }

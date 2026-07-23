@@ -213,7 +213,7 @@ async function generarNudge(
   )
   const anguloBarato =
     stage <= 1 && vioPrecioConReloj
-      ? " ÁNGULO DE ESTE TOQUE (prioridad): el precio que vio llevaba reloj control (con costo de arriendo). Ofrécele en una frase que existe una alternativa más económica SIN el reloj, marcando gratis con la app —o con la app de cuadrilla, donde todo el equipo marca en una sola tablet o celular de la empresa— y pregúntale si quiere verla. SIN montos, SIN porcentajes y SIN links (eso viene después si responde). Ejemplo del espíritu: 'Oye, si el valor era el tema: hay una opción más económica sin el reloj, marcando gratis con la app (o todos en una sola tablet con la cuadrilla). ¿Te la muestro?'."
+      ? " ÁNGULO DE ESTE TOQUE (prioridad): el precio que vio llevaba reloj control (con costo de arriendo). Ofrécele en una frase que existe una alternativa más económica SIN el reloj, marcando gratis con la app —o con la app de cuadrilla, donde todo el equipo marca en una sola tablet o celular de la empresa— y pregúntale si quiere verla. SIN montos, SIN porcentajes y SIN links (eso viene después si responde). Ejemplo del espíritu: '{Nombre}, si el valor era el tema: hay una opción más económica sin el reloj, marcando gratis con la app (o todos en una sola tablet con la cuadrilla). ¿Te la muestro?'. NUNCA abras con 'Oye' (regla de Eduardo)."
       : ""
 
   const client = new Anthropic({ apiKey })
