@@ -24,7 +24,6 @@
 import { buscarLeadAbiertoDeOtroDueno, agregarNotaLead } from "./zoho-leads"
 import { appendAssistantV3, getKvValue, setKvValue } from "./supabase-persistence-v3"
 import { sendBotmakerMessage } from "./botmaker-push-v3"
-import { isTestContact } from "./funnel-analysis"
 
 const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
   .replace(/\D/g, "")
@@ -74,11 +73,6 @@ export async function detectarProcesoHumano(
   country = "cl",
 ): Promise<ProcesoHumano | null> {
   if (!contact) return null
-  // Números del EQUIPO (pruebas internas): jamás bloquear — sus teléfonos
-  // acumulan leads de prueba de distintos dueños en Zoho y el candado les
-  // cortaba los tests a mitad de cotización (caso Rodrigo / Victoria Luna,
-  // 24-jul).
-  if (isTestContact(contact)) return null
   const humano = await buscarLeadAbiertoDeOtroDueno(contact).catch(() => null)
   if (!humano) return null
 
