@@ -50,6 +50,7 @@ import {
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
+import { clasificarSenalEspera } from "@/lib/loop-v2"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
@@ -364,6 +365,19 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     )
     const esComercial =
       comercialEsteTurno || yaHuboEstimacion || !!quotePointer || capturaLeadEnCurso
+    // Señal de espera implícita ("lo veo con mi jefe", "la próxima semana"…):
+    // en vez del nudge ciego de +1h, UN toque único en el plazo inferido.
+    const armarSegunSenal = async () => {
+      const senal = clasificarSenalEspera(message, "mx", contact)
+      if (senal) {
+        await scheduleConsensualFollowup(contact, senal.cuando.toISOString(), "mx")
+        console.log(
+          `[vic-mx][followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
+        )
+      } else {
+        await armFollowup(contact, "mx")
+      }
+    }
     if (callNoContactar) {
       await closeFollowup(contact, tipoNoContactar, "mx")
       console.log(`[vic-mx][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
@@ -373,7 +387,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
         await scheduleConsensualFollowup(contact, cuandoIso, "mx")
         console.log(`[vic-mx][followup] consensuado contact=${contact} cuando=${cuandoIso}`)
       } else {
-        await armFollowup(contact, "mx")
+        await armarSegunSenal()
       }
     } else if (usoCierre) {
       await closeFollowup(contact, "derivado", "mx")
@@ -385,7 +399,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       // Espejo del chileno (caso Constanza 17-jul): con cotización FORMAL
       // vigente, la despedida corta ("muchas gracias") no frena la cadencia —
       // es recibo cortés, no cierre.
-      await armFollowup(contact, "mx")
+      await armarSegunSenal()
     }
     // else: conversación no comercial → sin nudges.
   } catch (err) {

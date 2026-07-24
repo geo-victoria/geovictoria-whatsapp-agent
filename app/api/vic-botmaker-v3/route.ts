@@ -66,7 +66,7 @@ import {
   scheduleConsensualFollowup,
   confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
-import { resetLoop } from "@/lib/loop-v2"
+import { resetLoop, clasificarSenalEspera } from "@/lib/loop-v2"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -1045,6 +1045,20 @@ async function processOneTurn(
           /\bUF\b|cotizaci[oó]n|\/mes|pago inicial/i.test(m.content || ""),
       )
       const esComercial = comercialEsteTurno || tieneEstadoComercial || yaHuboEstimacion
+      // Señal de espera implícita ("lo veo con mi jefe y te aviso", "la
+      // próxima semana"…): en vez del nudge ciego de +1h, UN toque único en
+      // el plazo inferido (misma vía que el seguimiento consensuado).
+      const armarSegunSenal = async () => {
+        const senal = clasificarSenalEspera(message, "cl", contact)
+        if (senal) {
+          await scheduleConsensualFollowup(contact, senal.cuando.toISOString())
+          console.log(
+            `[v3-followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
+          )
+        } else {
+          await armFollowup(contact)
+        }
+      }
       if (usoOptOut) {
         await closeFollowup(contact, tipoNoContactar)
         console.log(`[v3-followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
@@ -1064,7 +1078,7 @@ async function processOneTurn(
           )
         } else {
           // Sin fecha válida: no apagamos la cadencia (mejor cae al flujo normal).
-          await armFollowup(contact)
+          await armarSegunSenal()
         }
       } else if (usoCierre) {
         await closeFollowup(contact, "derivado")
@@ -1083,7 +1097,7 @@ async function processOneTurn(
         // cortés, no fin de conversación — sin este override el ciclo quedaba
         // sin armar justo en el momento de mayor valor del funnel. La
         // despedida sigue frenando nudges en conversaciones sin formal.
-        await armFollowup(contact)
+        await armarSegunSenal()
       }
       // else: conversación no comercial → no se arma (sin nudges).
     } catch (err) {
@@ -1423,8 +1437,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     //    había). Se hace por cada mensaje entrante, antes de bufferear.
     await markUserActivity(contact).catch(() => {})
     // Loop v2 (flag LOOP_V2_ENABLED, no-op apagado): el mensaje entrante
-    // re-ancla el loop del contacto (t0 = ahora, toque 1). Best-effort.
-    resetLoop(contact).catch(() => {})
+    // re-ancla el loop del contacto (t0 = ahora, toque 1; con señal de
+    // espera, t0 se corre al plazo inferido). Best-effort.
+    resetLoop(contact, message).catch(() => {})
 
     // 6. Encolar el mensaje en el buffer de ráfaga (dedup de retries por hash).
     const messageHash = hashMessage(contact, message)

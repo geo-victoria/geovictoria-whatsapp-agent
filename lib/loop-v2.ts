@@ -77,9 +77,10 @@ function supa(path: string, init: RequestInit = {}): Promise<Response> {
 
 /** Zona horaria del país del loop (misma dupla que vic-callback-cron). */
 export function tzDePais(country?: string | null): string {
-  return (country || "cl").trim().toLowerCase() === "co"
-    ? "America/Bogota"
-    : "America/Santiago"
+  const c = (country || "cl").trim().toLowerCase()
+  if (c === "co") return "America/Bogota"
+  if (c === "mx") return "America/Mexico_City"
+  return "America/Santiago"
 }
 
 type PartesLocales = { y: number; m: number; d: number; hh: number; mm: number; weekday: number }
@@ -223,16 +224,109 @@ export function calcularProximoToque(
   return ajustarAHabil(objetivo, tz, contact)
 }
 
+// ── Clasificador de señal de espera ─────────────────────────────────────────
+//
+// Detecta en el mensaje del cliente señales IMPLÍCITAS de "no me hables
+// todavía" que no llegan a activar programar_seguimiento (no traen fecha
+// explícita) ni marcar_no_contactar: "lo veo con mi jefe y te aviso", "la
+// próxima semana", "mañana te cuento"… Sin esto, la escalera arma el nudge
+// ciego de +1h y quema al usuario (auditoría 24-jul: 11 casos). Función PURA
+// (sin red, sin flag): los webhooks la usan HOY para diferir la cadencia
+// vieja vía scheduleConsensualFollowup, y resetLoop la usa para anclar el
+// loop v2 cuando se encienda. Un falso positivo solo espacia el seguimiento
+// (dirección conservadora); un falso negativo cae al flujo normal.
+
+export type SenalEspera = {
+  tipo: "proxima_semana" | "fin_de_semana" | "manana" | "largo_plazo" | "espera_tercero"
+  cuando: Date
+}
+
+// Los regex corren sobre texto en minúsculas y SIN acentos (NFD + strip de
+// combinantes: "próxima"→"proxima", "mañana"→"manana", "dueño"→"dueno").
+const RE_PROX_SEMANA = /\b(proxima|siguiente|otra) semana\b|\bsemana (que viene|entrante|siguiente)\b/
+const RE_FINDE = /\bfin de semana\b|\bfinde\b/
+const RE_PASADO_MANANA = /\bpasado manana\b/
+// "mañana" a secas es el día siguiente; "la/de/esta mañana" es la franja
+// horaria (matinal) y NO difiere nada.
+const RE_MANANA = /(?<!\b(?:la|de|esta) )\bmanana\b/
+const RE_HOY_DEFINE =
+  /\b(reunion|junta|lo reviso|lo veo|lo converso|lo evaluo|te aviso|te cuento|te confirmo|te escribo|en la tarde)\b/
+const RE_LARGO =
+  /\bmas (adelante|para adelante)\b|\ben unos meses\b|\ben un mes( mas)?\b|\bel (proximo|otro) mes\b|\ba fin(es)? de mes\b|\bcuando (parta|partamos|empiece|empecemos|inicie|iniciemos|arranque|comience)\b/
+// El cliente promete volver él ("te aviso", "me comunico", "apenas sepa").
+const RE_AVISO_PROPIO =
+  /\b(te|les?|los) (aviso|avisare|avisamos|escribo|escribire|contacto|contactare|llamo|llamare|confirmo|confirmare|cuento|contare|comento|comentare|digo|dire)\b|\bme comunico\b|\bnos comunicamos\b|\byo (me comunico|los? contacto|te contacto|te busco)\b|\bestamos en contacto\b|\bcuando tenga (novedades|respuesta|noticias|el ok)\b|\bapenas (sepa|tenga)\b/
+// La decisión está en manos de un tercero (jefe, gerencia, socio…).
+const RE_TERCERO =
+  /\b(mi|el|la|nuestro|nuestra) (jefe|jefa|jefatura|gerente|dueno|duena|socio|socia|patron|senora|marido|esposo|esposa)\b|\bgerencia\b|\bdirectorio\b|\blos socios\b|\brecursos humanos\b|\ben manos de\b|\bno depende de mi\b|\bdepende de (el|ella|ellos|otra)\b/
+// El cliente pidió tiempo para evaluar/revisar (sin fecha).
+const RE_EVALUANDO =
+  /\b(lo|la|los) (voy|vamos) a (evaluar|revisar|analizar|conversar|presentar|estudiar|ver)\b|\b(lo|la) (tengo|tenemos) que (ver|revisar|evaluar|consultar|conversar|presentar)\b|\besta(mos|re)? evaluando\b|\bestoy evaluando\b|\bdejame (revisar|ver|evaluar)\w*\b|\b(lo|la) estoy (viendo|evaluando|revisando|analizando)\b|\btengo que (verlo|revisarlo|evaluarlo|consultarlo|conversarlo)\b/
+// Promesa INMEDIATA ("te confirmo enseguida") → no es señal de espera; solo
+// suprime la categoría espera_tercero (las de fecha concreta ganan igual).
+const RE_INMEDIATO =
+  /\b(enseguida|de inmediato|ahora mismo|al ?tiro|en un rat(it)?o|en unos minutos|en breve|en un momento)\b/
+
+/**
+ * Clasifica el mensaje del cliente y devuelve cuándo corresponde el próximo
+ * toque (ya corrido a horario hábil 9:00 + jitter del contacto), o null si no
+ * hay señal (→ cadencia normal). Precedencia: fecha más concreta primero.
+ */
+export function clasificarSenalEspera(
+  mensaje: string,
+  country?: string | null,
+  contact = "",
+  ahora: Date = new Date(),
+): SenalEspera | null {
+  const texto = ` ${(mensaje || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")} `
+  if (!texto.trim()) return null
+  const tz = tzDePais(country)
+
+  // "Día D a las 9:00 locales + jitter", corrido a hábil si cae en finde.
+  const alas9En = (diasCorridos: number): Date => {
+    const p = partesEn(new Date(ahora.getTime() + diasCorridos * 24 * 3600e3), tz)
+    const alas9 = utcDesdeLocal(p.y, p.m, p.d, 9, 0, tz)
+    return ajustarAHabil(new Date(alas9.getTime() + jitterMs(contact)), tz, contact)
+  }
+  const hoy = partesEn(ahora, tz)
+  const hastaLunes = (8 - hoy.weekday) % 7 || 7
+
+  if (RE_PROX_SEMANA.test(texto))
+    return { tipo: "proxima_semana", cuando: alas9En(hastaLunes + 1) } // martes
+  if (RE_FINDE.test(texto)) return { tipo: "fin_de_semana", cuando: alas9En(hastaLunes) }
+  if (RE_PASADO_MANANA.test(texto)) return { tipo: "manana", cuando: alas9En(2) }
+  if (RE_MANANA.test(texto) || (/\bhoy\b/.test(texto) && RE_HOY_DEFINE.test(texto)))
+    return { tipo: "manana", cuando: alas9En(1) }
+  if (RE_LARGO.test(texto)) return { tipo: "largo_plazo", cuando: alas9En(7) }
+  if (
+    !RE_INMEDIATO.test(texto) &&
+    (RE_AVISO_PROPIO.test(texto) || RE_TERCERO.test(texto) || RE_EVALUANDO.test(texto))
+  ) {
+    return {
+      tipo: "espera_tercero",
+      cuando: ajustarAHabil(sumarDiasHabiles(ahora, 2, tz), tz, contact),
+    }
+  }
+  return null
+}
+
 // ── Estado del loop por contacto ────────────────────────────────────────────
 
 /**
  * Re-ancla el loop al hablar el cliente (regla del re-anclaje): T0 = ahora,
  * la cuenta vuelve al toque 1 (+1h corrido a hábil) y cualquier compromiso
- * pendiente se limpia (el cliente ya volvió solo). Solo aplica a loops en
+ * pendiente se limpia (el cliente ya volvió solo). Si el mensaje trae una
+ * señal de espera ("lo veo con mi jefe", "la próxima semana"…), T0 se ancla
+ * a plazoInferido − 1h: el toque 1 cae justo en el plazo y los toques 2+ se
+ * espacian desde ahí hacia adelante — el loop respeta lo que pidió el
+ * cliente sin salirse de su cadencia. Solo aplica a loops en
  * activo/pausado_compromiso/finalizado — un loop 'cerrado' (opt-out, pagado…)
  * NUNCA revive solo. Best-effort: los webhooks la llaman con .catch(()=>{}).
  */
-export async function resetLoop(contact: string): Promise<void> {
+export async function resetLoop(contact: string, mensaje?: string): Promise<void> {
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
   const res = await supa(
     `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado&limit=1`,
@@ -241,7 +335,9 @@ export async function resetLoop(contact: string): Promise<void> {
   const row = rows[0]
   if (!row) return
   if (!["activo", "pausado_compromiso", "finalizado"].includes(row.estado || "")) return
-  const t0 = new Date()
+  const ahora = new Date()
+  const senal = mensaje ? clasificarSenalEspera(mensaje, row.country, contact, ahora) : null
+  const t0 = senal ? new Date(senal.cuando.getTime() - 3600e3) : ahora
   await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
@@ -251,9 +347,14 @@ export async function resetLoop(contact: string): Promise<void> {
       next_touch_at: calcularProximoToque(t0, 1, row.country, contact).toISOString(),
       estado: "activo",
       compromiso_at: null,
-      updated_at: t0.toISOString(),
+      updated_at: ahora.toISOString(),
     }),
   })
+  if (senal) {
+    console.log(
+      `[loop-v2] señal de espera '${senal.tipo}' → t0 anclado a ${t0.toISOString()} contact=${contact}`,
+    )
+  }
 }
 
 /**

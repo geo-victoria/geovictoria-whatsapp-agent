@@ -49,7 +49,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
-import { resetLoop } from "@/lib/loop-v2"
+import { resetLoop, clasificarSenalEspera } from "@/lib/loop-v2"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -365,6 +365,19 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     )
     const esComercial =
       comercialEsteTurno || yaHuboEstimacion || !!quotePointer || capturaLeadEnCurso
+    // Señal de espera implícita ("lo veo con mi jefe", "la próxima semana"…):
+    // en vez del nudge ciego de +1h, UN toque único en el plazo inferido.
+    const armarSegunSenal = async () => {
+      const senal = clasificarSenalEspera(message, "co", contact)
+      if (senal) {
+        await scheduleConsensualFollowup(contact, senal.cuando.toISOString(), "co")
+        console.log(
+          `[vic-co][followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
+        )
+      } else {
+        await armFollowup(contact, "co")
+      }
+    }
     if (callNoContactar) {
       await closeFollowup(contact, tipoNoContactar, "co")
       console.log(`[vic-co][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
@@ -374,7 +387,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
         await scheduleConsensualFollowup(contact, cuandoIso, "co")
         console.log(`[vic-co][followup] consensuado contact=${contact} cuando=${cuandoIso}`)
       } else {
-        await armFollowup(contact, "co")
+        await armarSegunSenal()
       }
     } else if (usoCierre) {
       await closeFollowup(contact, "derivado", "co")
@@ -386,7 +399,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       // Espejo del chileno (caso Constanza 17-jul): con cotización FORMAL
       // vigente, la despedida corta ("muchas gracias") no frena la cadencia —
       // es recibo cortés, no cierre.
-      await armFollowup(contact, "co")
+      await armarSegunSenal()
     }
     // else: conversación no comercial → sin nudges.
   } catch (err) {
@@ -617,8 +630,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Re-engagement: el cliente habló → pausar la cadencia en curso (si la había).
     await markUserActivity(contact, "co").catch(() => {})
     // Loop v2 (flag LOOP_V2_ENABLED, no-op apagado): el mensaje entrante
-    // re-ancla el loop del contacto (t0 = ahora, toque 1). Best-effort.
-    resetLoop(contact).catch(() => {})
+    // re-ancla el loop del contacto (t0 = ahora, toque 1; con señal de
+    // espera, t0 se corre al plazo inferido). Best-effort.
+    resetLoop(contact, message).catch(() => {})
 
     const msgHash = hashMessage(contact, message)
     await bufferInboundMessage(contact, message, msgHash)
