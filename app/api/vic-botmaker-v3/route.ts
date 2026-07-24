@@ -947,9 +947,10 @@ async function processOneTurn(
     reply = blindarContactoComercial(reply, false)
 
     // 3. Persistir turno en Supabase
-    // En el historial el turno queda como UN texto (el marcador [---] de
-    // multi-mensaje se convierte en salto de párrafo).
-    await appendTurnV3(contact, message, reply.replace(/\s*\[---\]\s*/g, "\n\n")).catch((err) => {
+    // En el historial el turno queda como UN texto (el marcador de
+    // multi-mensaje — [---] o una línea de solo guiones — se convierte en
+    // salto de párrafo).
+    await appendTurnV3(contact, message, reply.replace(/\n\s*\[?-{3,}\]?\s*(?:\n|$)/g, "\n\n")).catch((err) => {
       console.error("[v3-bg] Error persistiendo turno:", err)
     })
 
@@ -959,8 +960,13 @@ async function processOneTurn(
       // varios mensajes de WhatsApp con el marcador [---] (caso precio + "me
       // falta RUT y email" como burbujas distintas). Se envían en orden, con
       // typing entre medio para cadencia humana.
+      // Split tolerante: el marcador canónico es [---], pero el modelo a veces
+      // lo "normaliza" a una raya markdown (---) en línea propia (caso Rodrigo
+      // 24-jul: preform + petición de datos salieron como UN mensaje con una
+      // raya al medio). Cualquier línea que sea solo guiones (con o sin
+      // corchetes) corta el mensaje.
       const partes = reply
-        .split("[---]")
+        .split(/\n\s*\[?-{3,}\]?\s*(?:\n|$)/)
         .map((p) => p.trim())
         .filter(Boolean)
       for (const [i, parte] of partes.entries()) {
