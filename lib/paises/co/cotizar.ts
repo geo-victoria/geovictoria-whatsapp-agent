@@ -133,7 +133,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
     arriendoNeto = TARIFAS_CO.relojArriendoMes * reloj.cantidad
     lineas.push({
-      concepto: "Arriendo de reloj control",
+      concepto: "Alquiler de equipo biométrico",
       detalle: `${reloj.cantidad} × ${formatearCOP(TARIFAS_CO.relojArriendoMes)}/mes (envío e instalación incluidos sin costo)`,
       neto: arriendoNeto,
       iva: arriendoNeto * IVA_HARDWARE,
@@ -154,7 +154,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
     const ventaNeto = TARIFAS_CO.relojVenta * reloj.cantidad
     lineas.push({
-      concepto: "Reloj control (compra)",
+      concepto: "Equipo biométrico (compra)",
       detalle: `${reloj.cantidad} × ${formatearCOP(TARIFAS_CO.relojVenta)}`,
       neto: ventaNeto,
       iva: ventaNeto * IVA_HARDWARE,
@@ -177,7 +177,7 @@ export function cotizarCO(input: CotizacionCOInput): {
       const rotulo = unSoloPunto ? ` (${unSoloPunto.ubicacion})` : ` (${g.envios} sede${g.envios === 1 ? "" : "s"}, ${zonaTxt.toLowerCase()})`
       const envio = TARIFAS_CO.envioVenta[zona]
       lineas.push({
-        concepto: `Envío de reloj${g.envios > 1 ? "es" : ""}${rotulo}`,
+        concepto: `Envío de equipo${g.envios > 1 ? "s" : ""} biométrico${g.envios > 1 ? "s" : ""}${rotulo}`,
         detalle: g.envios > 1 ? `${g.envios} × ${formatearCOP(envio)}` : zonaTxt,
         neto: envio * g.envios,
         iva: 0,
@@ -187,7 +187,7 @@ export function cotizarCO(input: CotizacionCOInput): {
         const inst = TARIFAS_CO.instalacionVenta[zona]
         const rotuloInst = unSoloPunto ? ` (${unSoloPunto.ubicacion})` : ` (${g.instalaciones} sede${g.instalaciones === 1 ? "" : "s"}, ${zonaTxt.toLowerCase()})`
         lineas.push({
-          concepto: `Instalación de reloj${g.instalaciones > 1 ? "es" : ""}${rotuloInst}`,
+          concepto: `Instalación de equipo${g.instalaciones > 1 ? "s" : ""} biométrico${g.instalaciones > 1 ? "s" : ""}${rotuloInst}`,
           detalle: g.instalaciones > 1 ? `${g.instalaciones} × ${formatearCOP(inst)}` : zonaTxt,
           neto: inst * g.instalaciones,
           iva: 0,
@@ -215,7 +215,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(plan)}/mes`)
   if (arriendoNeto > 0) {
     filas.push(
-      `- Arriendo de reloj control: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes (envío e instalación incluidos)`,
+      `- Alquiler de equipo biométrico: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes (envío e instalación incluidos)`,
     )
   }
   filas.push(`Total mensual: ${formatearCOP(mensualTotal)}`)
@@ -255,9 +255,9 @@ export function cotizarCO(input: CotizacionCOInput): {
     itemsCotizador.push({
       tipo: "hardware",
       id: "reloj_arriendo",
-      nombre: "Arriendo de reloj control",
+      nombre: "Alquiler de equipo biométrico",
       descripcion:
-        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío e instalación incluidos sin costo.",
+        "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío e instalación incluidos sin costo.",
       modalidad: "Arriendo mensual",
       cantidad: reloj.cantidad,
       precioUnitarioCOP: TARIFAS_CO.relojArriendoMes,
@@ -270,9 +270,9 @@ export function cotizarCO(input: CotizacionCOInput): {
     itemsCotizador.push({
       tipo: "hardware",
       id: "reloj_venta",
-      nombre: "Reloj control (compra)",
+      nombre: "Equipo biométrico (compra)",
       descripcion:
-        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
+        "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
       modalidad: "Venta única",
       cantidad: reloj.cantidad,
       precioUnitarioCOP: TARIFAS_CO.relojVenta,

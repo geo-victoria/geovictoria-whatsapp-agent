@@ -142,7 +142,7 @@ export const TOOL_SCHEMAS_CO = [
             cantidad: { type: "number" as const, minimum: 1, maximum: 50 },
           },
           required: ["modalidad", "cantidad"],
-          description: "Solo si la configuración lleva reloj control físico.",
+          description: "Solo si la configuración lleva equipo biométrico físico.",
         },
         puntosInstalacion: {
           type: "array" as const,
