@@ -280,9 +280,19 @@ function resolverOrdinal(input: string): string | null {
   if (ORDINAL_A_REGION[limpio]) return ORDINAL_A_REGION[limpio]
 
   // Si el input tiene varias palabras, probar también solo la primera
-  // (ej. "novena del biobio" → "novena")
-  const primeraPalabra = limpio.split(" ")[0]
-  if (primeraPalabra && ORDINAL_A_REGION[primeraPalabra]) {
+  // (ej. "novena del biobio" → "novena"). PERO solo cuando lo que sigue es un
+  // conector de región ("de", "del", "la", "region"): un sustantivo real tras
+  // el ordinal significa que NO es una región (bug 24-jul: "Quinta Normal"
+  // —comuna de Santiago— se resolvía como "quinta" = V Región de Valparaíso y
+  // la cotización salía con tarifa de regiones).
+  const palabras = limpio.split(" ")
+  const primeraPalabra = palabras[0]
+  const CONECTORES_REGION = new Set(["de", "del", "la", "region"])
+  if (
+    primeraPalabra &&
+    ORDINAL_A_REGION[primeraPalabra] &&
+    (palabras.length === 1 || CONECTORES_REGION.has(palabras[1]))
+  ) {
     return ORDINAL_A_REGION[primeraPalabra]
   }
 
@@ -352,6 +362,20 @@ export function clasificarUbicacion(input: string): ClasificacionUbicacion {
     return {
       tipo: "no_clasificable",
       razon: `entrada genérica '${input}', se requiere comuna o región específica`,
+    }
+  }
+
+  // 1.5. Una COMUNA real escrita tal cual gana SIEMPRE sobre cualquier otra
+  // interpretación (bug 24-jul: "Quinta Normal" caía al resolvedor de
+  // ordinales como "quinta región"). Se prueba el nombre normalizado exacto
+  // contra las listas oficiales antes de intentar ordinales.
+  const exacto = normalizarConPrefijos(input) || norm
+  for (const candidato of new Set([norm, exacto])) {
+    if (COMUNAS_RM_NORM.has(candidato)) {
+      return { tipo: "RM", reconocida: true, canonico: candidato, zonaInstalacion: "RM" }
+    }
+    if (COMUNAS_REGIONES_NORM.has(candidato)) {
+      return { tipo: "regiones", reconocida: true, canonico: candidato, zonaInstalacion: zonaFueraRM(candidato) }
     }
   }
 
