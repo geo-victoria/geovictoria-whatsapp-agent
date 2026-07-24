@@ -23,6 +23,7 @@ import { cancelPendingCallbacks } from "./dapta-voice"
 import { sendBotmakerMessage } from "./botmaker-push-v3"
 import { PERFIL_CO } from "./paises/co"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
+import { pagoCierraLoop } from "./loop-v2"
 
 export type ResultadoTraspaso = {
   contact?: string
@@ -44,6 +45,9 @@ export async function cerrarYTraspasarPostPago(
 
   await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
   await cancelPendingCallbacks(contact).catch(() => {})
+  // Regla de oro del Loop v2: el PAGO corta el loop de toques para siempre
+  // (best-effort; con el flag apagado o sin fila en vic_loop es un no-op).
+  await pagoCierraLoop(contact).catch(() => {})
 
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
 
