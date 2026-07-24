@@ -947,23 +947,34 @@ async function processOneTurn(
     reply = blindarContactoComercial(reply, false)
 
     // 3. Persistir turno en Supabase
-    await appendTurnV3(contact, message, reply).catch((err) => {
+    // En el historial el turno queda como UN texto (el marcador [---] de
+    // multi-mensaje se convierte en salto de párrafo).
+    await appendTurnV3(contact, message, reply.replace(/\s*\[---\]\s*/g, "\n\n")).catch((err) => {
       console.error("[v3-bg] Error persistiendo turno:", err)
     })
 
     // 4. Enviar reply final vía push (solo si hay reply real)
     if (reply) {
-      // Cadencia humana: "escribiendo…" + demora proporcional al largo, para que
-      // no llegue al instante. Best-effort: si falla el typing, igual se envía.
-      if (HUMAN_DELAY_ON) {
-        await sendTypingIndicator(contact, true).catch(() => {})
-        await sleep(humanDelayMs(reply))
-      }
-      const sent = await sendBotmakerMessage(contact, reply)
-      if (!sent) {
-        console.error(
-          `[v3-bg] No se pudo enviar reply final a Botmaker para ${contact}`,
-        )
+      // MULTI-MENSAJE (Lalo 24-jul): el modelo puede separar su respuesta en
+      // varios mensajes de WhatsApp con el marcador [---] (caso precio + "me
+      // falta RUT y email" como burbujas distintas). Se envían en orden, con
+      // typing entre medio para cadencia humana.
+      const partes = reply
+        .split("[---]")
+        .map((p) => p.trim())
+        .filter(Boolean)
+      for (const [i, parte] of partes.entries()) {
+        if (HUMAN_DELAY_ON) {
+          await sendTypingIndicator(contact, true).catch(() => {})
+          await sleep(i === 0 ? humanDelayMs(parte) : Math.min(humanDelayMs(parte), 2500))
+        }
+        const sent = await sendBotmakerMessage(contact, parte)
+        if (!sent) {
+          console.error(
+            `[v3-bg] No se pudo enviar reply final (parte ${i + 1}/${partes.length}) a Botmaker para ${contact}`,
+          )
+          break
+        }
       }
     } else {
       console.warn(`[v3-bg] Reply vacío para ${contact}, no se envía push`)
