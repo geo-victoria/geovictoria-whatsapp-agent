@@ -20,24 +20,6 @@
 
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
-import { procesoHumanoActivo } from "./proceso-humano"
-
-// Tools que abren/avanzan una VENTA — vedadas cuando otro ejecutivo ya
-// trabaja al cliente (se mantienen soporte, certificación, no-contactar y
-// derivar, que no compiten con el proceso humano).
-const TOOLS_BLOQUEADAS_PROCESO_HUMANO = new Set([
-  "cotizar_referencial",
-  "consultar_descuento_referencial",
-  "generar_link_cotizadora",
-  "consultar_siguiente_descuento",
-  "aplicar_siguiente_descuento",
-  "actualizar_cotizacion",
-  "registrar_solicitud_callback",
-  "programar_seguimiento",
-  "agendar_reunion",
-  "reagendar_reunion",
-  "reenviar_cotizacion_correo",
-])
 import {
   getPrefDraft,
   setPrefDraft,
@@ -107,22 +89,11 @@ export async function runAgentLoop(params: {
   let toolSchemas = (tools?.schemas ?? TOOL_SCHEMAS) as unknown as Anthropic.Messages.Tool[]
   const toolDispatch = (tools?.dispatch ?? dispatchTool) as typeof dispatchTool
 
-  // CANDADO PROCESO HUMANO (política proceso único, 20-jul): si el cliente ya
-  // está siendo atendido por un ejecutivo, se RETIRAN las tools comerciales
-  // del turno — sin tool de precio no hay forma de cotizar (la regla dura del
-  // prompt prohíbe números que no vengan de una tool). Determinista: no
-  // depende de que el modelo obedezca la directiva del historial.
-  if (contact) {
-    const proceso = await procesoHumanoActivo(contact).catch(() => null)
-    if (proceso) {
-      toolSchemas = toolSchemas.filter(
-        (t) => !TOOLS_BLOQUEADAS_PROCESO_HUMANO.has((t as { name?: string }).name || ""),
-      )
-      console.log(
-        `[agent-loop] contact=${contact} con proceso humano activo (${proceso.ownerNombre}) → tools comerciales retiradas del turno`,
-      )
-    }
-  }
+  // POLÍTICA 24-jul (Lalo): si el cliente quiere cotizar, se le cotiza — SIN
+  // barreras, aunque exista un lead o deal de otro ejecutivo en Zoho. El
+  // antiguo candado de "proceso humano" retiraba acá las tools comerciales;
+  // hoy la detección solo genera avisos de coordinación (nota al ejecutivo y
+  // alerta interna), nunca un bloqueo al cliente.
 
   const client = new Anthropic({ apiKey })
   const effectiveModel = model || process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || DEFAULT_MODEL
