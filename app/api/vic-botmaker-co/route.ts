@@ -527,6 +527,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Foto/imagen (paridad CL): se "lee" con visión y el texto sigue el flujo
     // normal. Con caption, se conservan ambos. Placeholder sin URL → pedir texto.
     const imageUrl = (body.imageUrl || body.imageURL || body.mediaUrl || body.mediaURL || "").trim()
+        // Archivo adjunto NO visualizable (PDF u otro; caso Jessica/JEANSCO 24-jul):
+    // Botmaker entrega solo un placeholder. NUNCA responder "no puedo
+    // visualizarlo" — se convierte en contexto accionable para el modelo.
+    const FILE_PLACEHOLDERS = ["__file__", "__document__", "__doc__", "__pdf__"]
+    if (FILE_PLACEHOLDERS.includes(message.trim())) {
+      message =
+        "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de pagar o habló de transferencia/comprobante), lo más probable es que sea su comprobante: agradécele el envío, dile que quedó recibido y que el equipo de finanzas lo verificará — sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
+    }
+
     const IMG_PLACEHOLDERS = ["__image__", "__media__", "__photo__"]
     if (imageUrl) {
       sendTypingIndicator(contact, true, CANAL_CO()).catch(() => {})

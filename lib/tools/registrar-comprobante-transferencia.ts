@@ -79,7 +79,7 @@ const EJECUTIVA_MX = {
   email: "ysegura@geovictoria.com",
 }
 
-async function obtenerLinkOnboarding(quoteId: string): Promise<string> {
+export async function obtenerLinkOnboarding(quoteId: string): Promise<string> {
   try {
     const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/onboarding-link`, {
       method: "POST",

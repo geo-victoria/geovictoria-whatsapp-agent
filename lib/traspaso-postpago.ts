@@ -22,6 +22,7 @@ import {
 import { cancelPendingCallbacks } from "./dapta-voice"
 import { sendBotmakerMessage } from "./botmaker-push-v3"
 import { PERFIL_CO } from "./paises/co"
+import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 
 export type ResultadoTraspaso = {
   contact?: string
@@ -57,8 +58,15 @@ export async function cerrarYTraspasarPostPago(
     : esCO
       ? PERFIL_CO.equipo.ejecutivo
       : { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" }
+  // Caso Jessica/JEANSCO (24-jul): el mensaje de bienvenida DEBE traer el link
+  // del auto-onboarding — antes solo presentaba al ejecutivo y el cliente
+  // tenía que encontrar el wizard por su cuenta. El endpoint es idempotente.
+  const linkOnboarding = await obtenerLinkOnboarding(quoteId).catch(() => "")
   const traspaso =
     `¡Felicitaciones y bienvenido a GeoVictoria! 🎉 Tu pago quedó registrado.\n\n` +
+    (linkOnboarding
+      ? `Para dejar tu empresa configurada y lista para operar, completa tu auto-onboarding aquí (toma ~10 minutos):\n👉 ${linkOnboarding}\n\n`
+      : "") +
     `De aquí en adelante te acompaña *${ejecutivo.nombre}*, tu ejecutivo comercial, quien te contactará para coordinar la puesta en marcha:\n` +
     (ejecutivo.telefono ? `📱 ${ejecutivo.telefono}\n` : "") +
     `✉️ ${ejecutivo.email}`
