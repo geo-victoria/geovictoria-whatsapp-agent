@@ -1,12 +1,14 @@
 /**
- * Lectura de imágenes de WhatsApp (fotos, pantallazos, documentos fotografiados).
+ * Lectura de imágenes Y PDFs de WhatsApp (fotos, pantallazos, comprobantes).
  *
- * Botmaker NO interpreta imágenes; sí entrega la URL del archivo. Acá la
- * descargamos y la "transcribimos" con visión (Claude Haiku): descripción
- * fiel + texto legible extraído. El caller inserta ese texto en el flujo
- * normal como si el cliente lo hubiera escrito (mismo patrón que las notas
- * de voz en transcribe-audio.ts). Devuelve "" si algo falla (el caller decide
- * el fallback: pedir el mensaje por texto).
+ * Botmaker NO interpreta archivos; sí entrega la URL. Acá lo descargamos y lo
+ * "transcribimos" con visión (Claude Haiku): descripción fiel + texto legible
+ * extraído. Los PDF van como bloque `document` de la API (decisión Lalo
+ * 25-jul: todo comprobante va a Vicky y debe poder leer imagen y PDF — antes
+ * el PDF se descartaba y solo quedaba un placeholder ciego). El caller
+ * inserta ese texto en el flujo normal como si el cliente lo hubiera escrito
+ * (mismo patrón que las notas de voz). Devuelve "" si algo falla (el caller
+ * decide el fallback).
  */
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
@@ -18,6 +20,9 @@ const VISION_MODEL = (
 ).trim()
 // Límite defensivo (WhatsApp comprime fotos; el tope de la API es 5MB/imagen).
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+// PDFs (comprobantes, cotizaciones): el tope de request de la API es 32MB;
+// 10MB en crudo (~13MB en base64) deja margen holgado.
+const MAX_PDF_BYTES = 10 * 1024 * 1024
 
 type ImageMime = "image/jpeg" | "image/png" | "image/gif" | "image/webp"
 
@@ -50,6 +55,13 @@ const PROMPT_VISION =
   "(2) TRANSCRIBE textualmente todo texto legible relevante (pantallazos, cotizaciones, documentos, errores en pantalla, datos de contacto). " +
   "No inventes nada: si algo no se distingue, dilo. Máximo ~150 palabras. Responde SOLO con la descripción, sin preámbulos."
 
+const PROMPT_VISION_PDF =
+  "Eres los ojos de Vicky, ejecutiva comercial de GeoVictoria (plataforma de control de asistencia laboral) en WhatsApp. " +
+  "Un prospecto o cliente envió este documento PDF en la conversación. Descríbelo en español, breve y FIEL, para que Vicky pueda responder: " +
+  "(1) qué tipo de documento es y qué parece querer comunicar (si es un comprobante de transferencia: monto, banco, fecha, destinatario y nro de operación); " +
+  "(2) TRANSCRIBE textualmente todo dato relevante (montos, RUT/NIT, correos, fechas, nombres). " +
+  "No inventes nada: si algo no se distingue, dilo. Máximo ~150 palabras. Responde SOLO con la descripción, sin preámbulos."
+
 /**
  * Descarga la imagen de `imageUrl` y devuelve una descripción textual fiel
  * (con el texto visible transcrito). Best-effort: nunca lanza, devuelve ""
@@ -71,14 +83,18 @@ export async function describirImagen(imageUrl: string): Promise<string> {
       return ""
     }
     const buf = await imgRes.arrayBuffer()
-    if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) {
-      console.error(`[v3-imagen] imagen inválida (bytes=${buf.byteLength})`)
-      return ""
-    }
     const rawType = (imgRes.headers.get("content-type") || "").toLowerCase()
     const bytes = new Uint8Array(buf)
-    const mime = pickImageMime(bytes, rawType)
-    if (!mime) {
+    // PDF por bytes mágicos (%PDF) — el content-type de Botmaker no es fiable.
+    const esPdf =
+      (bytes.length > 3 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) ||
+      rawType.includes("pdf")
+    if (buf.byteLength === 0 || buf.byteLength > (esPdf ? MAX_PDF_BYTES : MAX_IMAGE_BYTES)) {
+      console.error(`[v3-imagen] archivo inválido (bytes=${buf.byteLength}, pdf=${esPdf})`)
+      return ""
+    }
+    const mime = esPdf ? null : pickImageMime(bytes, rawType)
+    if (!esPdf && !mime) {
       console.warn(`[v3-imagen] tipo no soportado como imagen: ${rawType}`)
       return ""
     }
@@ -99,8 +115,10 @@ export async function describirImagen(imageUrl: string): Promise<string> {
           {
             role: "user",
             content: [
-              { type: "image", source: { type: "base64", media_type: mime, data: b64 } },
-              { type: "text", text: PROMPT_VISION },
+              esPdf
+                ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+                : { type: "image", source: { type: "base64", media_type: mime, data: b64 } },
+              { type: "text", text: esPdf ? PROMPT_VISION_PDF : PROMPT_VISION },
             ],
           },
         ],

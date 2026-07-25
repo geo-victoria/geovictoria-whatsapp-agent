@@ -483,7 +483,7 @@ export function buildDispatchMX(contact: string) {
           // total MXN del pago inicial.
           acceptanceUrl: data.acceptanceUrl,
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y eliges cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearMXN(calculo.pagoInicialTotal)} MXN (IVA incluido) y tu mensualidad de ${formatearMXN(calculo.mensualTotal)} MXN (IVA incluido) desde el mes siguiente. Cualquier duda me dices y con gusto la resolvemos 😊`,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas y la aceptas en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearMXN(calculo.pagoInicialTotal)} MXN (IVA incluido) y tu mensualidad de ${formatearMXN(calculo.mensualTotal)} MXN (IVA incluido) desde el mes siguiente. El pago es por transferencia bancaria y se verifica en máximo 24 horas hábiles; con el pago confirmado, yo misma te acompaño con la puesta en marcha de tu cuenta. Cualquier duda me dices y con gusto la resolvemos 😊`,
         }
       }
 

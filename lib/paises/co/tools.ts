@@ -432,7 +432,7 @@ export function buildDispatchCO(contact: string) {
           // cotización (anti-amnesia: retomar la formal en turnos futuros).
           acceptanceUrl: data.acceptanceUrl,
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y eliges cómo pagar, todo en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y tu mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Cualquier duda me cuentas 😊`,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas en línea con tarjeta vía Mercado Pago (se confirma al instante): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y tu mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Con el pago confirmado, yo misma te acompaño con la puesta en marcha de tu cuenta. Cualquier duda me cuentas 😊`,
         }
       }
 

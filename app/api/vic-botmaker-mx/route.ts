@@ -150,6 +150,11 @@ type BotmakerBody = {
   imageURL?: string
   mediaUrl?: string
   mediaURL?: string
+  // Documento adjunto (PDF, ej. comprobantes): URL si la acción la reenvía.
+  fileUrl?: string
+  fileURL?: string
+  documentUrl?: string
+  documentURL?: string
   simular?: boolean
 }
 
@@ -537,27 +542,30 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    // Foto/imagen (paridad CL): se "lee" con visión y el texto sigue el flujo
-    // normal. Con caption, se conservan ambos. Placeholder sin URL → pedir texto.
+    // Foto/imagen o DOCUMENTO PDF (paridad CL, 25-jul: todo comprobante va a
+    // Vicky y debe poder leer imagen y PDF): se "lee" con visión y el texto
+    // sigue el flujo normal. Con caption, se conservan ambos. Placeholder sin
+    // URL → contexto accionable (documento) o pedir texto (imagen).
     const imageUrl = (body.imageUrl || body.imageURL || body.mediaUrl || body.mediaURL || "").trim()
-        // Archivo adjunto NO visualizable (PDF u otro; caso Jessica/JEANSCO 24-jul):
-    // Botmaker entrega solo un placeholder. NUNCA responder "no puedo
-    // visualizarlo" — se convierte en contexto accionable para el modelo.
+    const fileUrl = (body.fileUrl || body.fileURL || body.documentUrl || body.documentURL || "").trim()
     const FILE_PLACEHOLDERS = ["__file__", "__document__", "__doc__", "__pdf__"]
-    if (FILE_PLACEHOLDERS.includes(message.trim())) {
-      message =
-        "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de pagar, habló de transferencia o comprobante), lo más probable es que sea su comprobante: agradécele el envío, llama registrar_comprobante_transferencia con montoDetectado 0 y detalle 'comprobante enviado como archivo adjunto', y sigue el flujo normal sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
-    }
-
     const IMG_PLACEHOLDERS = ["__image__", "__media__", "__photo__"]
-    if (imageUrl) {
+    const esArchivoAdjunto = FILE_PLACEHOLDERS.includes(message.trim())
+    const CONTEXTO_DOC_ILEGIBLE_MX =
+      "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de pagar, habló de transferencia o comprobante), lo más probable es que sea su comprobante: agradécele el envío, llama registrar_comprobante_transferencia con montoDetectado 0 y detalle 'comprobante enviado como archivo adjunto', y sigue el flujo normal sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
+    const mediaUrlEntrante = imageUrl || fileUrl
+    if (mediaUrlEntrante) {
       sendTypingIndicator(contact, true, CANAL_CO()).catch(() => {})
-      const descripcion = await describirImagen(imageUrl)
-      const caption = IMG_PLACEHOLDERS.includes(message) ? "" : message
+      const descripcion = await describirImagen(mediaUrlEntrante)
+      const caption = IMG_PLACEHOLDERS.includes(message) || esArchivoAdjunto ? "" : message
       if (descripcion) {
-        const bloque = `[El cliente envió una imagen por WhatsApp. Contenido de la imagen]: ${descripcion}`
+        const bloque = esArchivoAdjunto || (!imageUrl && fileUrl)
+          ? `[El cliente envió un DOCUMENTO (PDF) por WhatsApp. Contenido del documento]: ${descripcion}`
+          : `[El cliente envió una imagen por WhatsApp. Contenido de la imagen]: ${descripcion}`
         message = caption ? `${caption}\n\n${bloque}` : bloque
-        console.log(`[vic-mx] imagen descrita contact=${contact} len=${descripcion.length}`)
+        console.log(`[vic-mx] adjunto descrito contact=${contact} len=${descripcion.length}`)
+      } else if (esArchivoAdjunto) {
+        message = CONTEXTO_DOC_ILEGIBLE_MX
       } else if (!caption) {
         await capturarPayloadDebug(body)
         if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_IMAGEN_CO, CANAL_CO()).catch(() => {})
@@ -565,6 +573,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       } else {
         message = caption
       }
+    } else if (esArchivoAdjunto) {
+      message = CONTEXTO_DOC_ILEGIBLE_MX
     } else if (IMG_PLACEHOLDERS.includes(message)) {
       await capturarPayloadDebug(body)
       if (!simulacion) await sendBotmakerMessage(contact, PIDE_TEXTO_IMAGEN_CO, CANAL_CO()).catch(() => {})
