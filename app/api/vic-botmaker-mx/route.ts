@@ -244,7 +244,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   // forzando la tool; si tampoco se concreta, NO se confirma en falso.
   const afirmaReunionLista =
     /\breuni[oó]n\b[^.]{0,40}(qued[oó]|est[aá]|fue)[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(reply) ||
-    /\b(agend[eé]|reagend[eé])[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
+    /\b(agend[eé]|reagend[eé])(?![a-záéíóúñ])[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
     /\bse\s+l[ao]\s+(agend[eé]|reagend[eé])/i.test(reply)
   const afirmaContactoListo =
     /\b(un\s+ejecutiv[oa]|el\s+equipo|nuestro\s+equipo|un\s+asesor|Yahel)\b[^.]{0,50}\b(l[oe]\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|comunicar[aá]|contactar[aá]))/i.test(reply)

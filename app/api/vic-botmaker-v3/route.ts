@@ -755,7 +755,7 @@ async function processOneTurn(
       /\breuni[oó]n\b[^.]{0,40}(qued[oó]|est[aá]|fue)[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(
         reply,
       ) ||
-      /\b(agend[eé]|reagend[eé])[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
+      /\b(agend[eé]|reagend[eé])(?![a-záéíóúñ])[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
       /\bte\s+(la|lo)\s+(agend[eé]|reagend[eé])/i.test(reply)
     const realAgenda = toolCalls.some(
       (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
