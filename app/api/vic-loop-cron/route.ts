@@ -122,6 +122,8 @@ type ConvRow = {
   contact: string
   last_user_at: string | null
   followup_closed_reason: string | null
+  followup_status: string | null
+  followup_next_at: string | null
   formal_quote_id: string | null
   pref_escalon: number | null
   pref_params: unknown | null
@@ -264,7 +266,7 @@ export async function GET(req: Request): Promise<Response> {
   // patrón batch que la cadencia outbound).
   const contactsIn = rows.map((r) => `"${r.contact}"`).join(",")
   const convRes = await supa(
-    `vic_v3_conversations?contact=in.(${contactsIn})&select=contact,last_user_at,followup_closed_reason,formal_quote_id,pref_escalon,pref_params`,
+    `vic_v3_conversations?contact=in.(${contactsIn})&select=contact,last_user_at,followup_closed_reason,followup_status,followup_next_at,formal_quote_id,pref_escalon,pref_params`,
   )
   const convs = new Map<string, ConvRow>()
   for (const c of (convRes.ok ? await convRes.json() : []) as ConvRow[]) convs.set(c.contact, c)
@@ -303,6 +305,37 @@ export async function GET(req: Request): Promise<Response> {
       await patchLoop(r.contact, { estado: "cerrado", motivo_cierre: reason })
       cerrados++
       detalle.push({ contact: r.contact, accion: "cerrado", motivo: reason })
+      continue
+    }
+
+    // (c-bis) GATE DE HORARIO HÁBIL AL EJECUTAR (fix 25-jul, encendido): una
+    // fila con next_touch_at vencido (migración vieja, cron detenido) NO puede
+    // disparar un toque a las 23:00 de un viernes — si AHORA no es L-V 9-19 en
+    // la zona del país, el toque se pospone al próximo bloque hábil.
+    // ajustarAHabil devuelve el mismo instante cuando ya estamos en hábil.
+    const ahoraHabil = ajustarAHabil(new Date(now), tzDePais(country), r.contact)
+    if (ahoraHabil.getTime() > now + 60_000) {
+      await patchLoop(r.contact, { next_touch_at: ahoraHabil.toISOString() })
+      pospuestos++
+      detalle.push({ contact: r.contact, accion: "pospuesto_horario", hasta: ahoraHabil.toISOString() })
+      continue
+    }
+
+    // (c-ter) SEGUIMIENTO CONSENSUADO (fix 25-jul, caso Tamara): si el cliente
+    // acordó con Vicky un momento para retomar (followup_status 'consensuado'
+    // con fecha futura), el loop NO lo pisa — el toque se pospone a esa fecha.
+    const consensuadoMs =
+      conv?.followup_status === "consensuado" && conv?.followup_next_at
+        ? new Date(conv.followup_next_at).getTime()
+        : 0
+    if (consensuadoMs > now) {
+      await patchLoop(r.contact, { next_touch_at: new Date(consensuadoMs).toISOString() })
+      pospuestos++
+      detalle.push({
+        contact: r.contact,
+        accion: "pospuesto_consensuado",
+        hasta: new Date(consensuadoMs).toISOString(),
+      })
       continue
     }
 
