@@ -205,8 +205,15 @@ export async function POST(req: Request): Promise<Response> {
     const base =
       payload.tipo === "consent_call"
         ? `${motivo}. Hace unos minutos le enviaste por WhatsApp "¿te parece si te llamo a tu celular y conversamos?" y no se negó (aceptó o no alcanzó a responder). Usa tu apertura estándar con naturalidad.`
-        : `${motivo}. Esta llamada es la DEVOLUCIÓN comprometida: el cliente pidió que lo llamaras a esta hora, ` +
-          `así que abre reconociéndolo ("hola, soy Vicky de GeoVictoria, quedamos en que te llamaba ahora...") en vez del saludo estándar.`
+        : payload.tipo === "loop_v2"
+          ? // Toque de llamada del loop (25-jul): PROACTIVA — el cliente NO
+            // pidió esta llamada; JAMÁS decir "quedamos en que te llamaba".
+            `${motivo}. Esta llamada es PROACTIVA: el cliente dejó una solicitud de cotización y quedó a medio camino — ` +
+            `NUNCA digas que él pidió esta llamada. Apertura corta y natural: "hola, soy Vicky de GeoVictoria, ¿tienes 2 minutos?", ` +
+            `y retoma su cotización buscando el siguiente paso según la conversación (datos que faltan, el RUT para la formal, o ayudarle con el pago). ` +
+            `Si dice que no puede ahora, agradece y despídete corta — sin insistir.`
+          : `${motivo}. Esta llamada es la DEVOLUCIÓN comprometida: el cliente pidió que lo llamaras a esta hora, ` +
+            `así que abre reconociéndolo ("hola, soy Vicky de GeoVictoria, quedamos en que te llamaba ahora...") en vez del saludo estándar.`
 
     // Memoria de la ejecutiva (principio 20-jul): la Vicky de voz es LA MISMA
     // ejecutiva que la de WhatsApp — un humano con memoria sana no cita el
