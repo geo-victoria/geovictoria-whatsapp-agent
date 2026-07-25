@@ -321,6 +321,37 @@ async function processOneTurn(
       if (proceso) history.push({ role: "assistant", content: directivaProcesoHumano(proceso) })
     }
 
+    // 1.1-bis. CANDADO DE MONOTONÍA DEL DESCUENTO (caso Pablo/Ayres 25-jul):
+    // Vicky ofreció 20% cuatro veces sin que la tool lo comiteara (pref_escalon
+    // quedó null y la cotización en Zoho con 0%); cuando el cliente por fin
+    // pidió rebaja, el guardrail forzó la tool, la tool partió del escalón 0 y
+    // devolvió 10% — le SUBIÓ el precio a un cliente que ya tenía 20% en la
+    // mano. Un vendedor jamás retrocede una oferta. Se escanea el máximo % de
+    // descuento que Vicky YA mencionó en el historial y se inyecta como piso
+    // duro del turno; el modelo lo usa para no ofrecer menos y para pasar el
+    // escalonActual correcto a la tool.
+    const pctsOfrecidos = history
+      .filter((m) => m.role === "assistant")
+      .flatMap((m) => [...String(m.content || "").matchAll(/(\d{1,2})\s*%\s*(?:de\s+)?desc/gi)])
+      .map((mm) => Number(mm[1]))
+      .filter((n) => n >= 5 && n <= 50)
+    const pisoDescuento = pctsOfrecidos.length ? Math.max(...pctsOfrecidos) : 0
+    if (pisoDescuento > 0) {
+      history.push({
+        role: "assistant",
+        content:
+          `[ESTADO INTERNO DE LA NEGOCIACIÓN — no lo cites al cliente]\n` +
+          `Ya le ofreciste a este cliente un ${pisoDescuento}% de descuento en el plan mensual. ` +
+          `REGLA DURA: ese ${pisoDescuento}% es un PISO, nunca un techo — JAMÁS le ofrezcas un porcentaje menor ` +
+          `ni un precio mayor al que ya tiene en la mano (subirle el precio a un cliente que está negociando ` +
+          `es la peor falla posible de un vendedor). Si pide más rebaja: llama la tool de descuento pasando ` +
+          `escalonActual = el escalón que corresponde a ese ${pisoDescuento}% (10%→1, 20%→2), NUNCA 0. ` +
+          `Si la tool indica que ya estás en el tope, mantén el ${pisoDescuento}% y dilo con seguridad: ` +
+          `"ese es el máximo que puedo hacer". Si el resultado fuera menor al ${pisoDescuento}%, IGNÓRALO y ` +
+          `mantén el ${pisoDescuento}%.`,
+      })
+    }
+
     // 1.2. Diccionario Vicky (acuerdo con Marketing jul-2026): la PRIMERA
     // respuesta de un lead outbound (conversación abierta por el toque 0, aún
     // sin mensajes del cliente) pasa el lead a "3. Contactado". Best-effort.
