@@ -227,7 +227,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   // ALLOWLIST de dominios (caso Transportes Viig CL, 22-jul): todo link cuyo
   // dominio no esté en la lista blanca se considera fabricado y se retira.
   const DOMINIOS_VICKY_CO =
-    /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
+    /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|geovictoria-demo-agent\.vercel\.app|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
   for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
     if (!DOMINIOS_VICKY_CO.test(u)) {
       console.error(`[vic-co] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
