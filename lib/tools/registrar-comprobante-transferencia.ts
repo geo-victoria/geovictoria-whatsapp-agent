@@ -188,10 +188,10 @@ export async function registrarComprobanteTransferencia(
   if (pais === "mx" && pointer) {
     const linkOnboarding = await obtenerLinkOnboarding(pointer.quoteId)
     const mensajeParaProspecto = linkOnboarding
-      ? `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo.\n\n` +
+      ? `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo (toma máximo 24 horas hábiles).\n\n` +
         `Para que no pierdas ni un día, aquí tienes tu acceso al auto-onboarding — ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos:\n${linkOnboarding}\n\n` +
         `Y te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
-      : `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo.\n\n` +
+      : `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo (toma máximo 24 horas hábiles).\n\n` +
         `Te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante y te enviará el acceso a la configuración inicial.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda, me escribes por aquí 😊`
     if (!linkOnboarding) {
       // El equipo debe saber que el link no salió (para mandarlo a mano).
@@ -203,10 +203,12 @@ export async function registrarComprobanteTransferencia(
     return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
   }
 
-  // CL (v1): recepción confirmada, pago EN VERIFICACIÓN — nunca afirmar pago.
+  // CL/CO (v1): recepción confirmada, pago EN VERIFICACIÓN — nunca afirmar
+  // pago. Plazo TRANSPARENTE (decisión Lalo 25-jul): la verificación toma
+  // máximo 24 horas hábiles y recién confirmada parte el onboarding.
   const mensajeParaProspecto = pointer
-    ? `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Ya quedó asociado a tu cotización y en verificación con nuestro equipo de finanzas. Te confirmo por aquí apenas el pago esté procesado — normalmente dentro del mismo día hábil. ¡Gracias!`
-    : `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Lo dejé en manos del equipo para asociarlo a tu cotización y confirmarte. Te aviso por aquí apenas esté procesado. ¡Gracias!`
+    ? `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Ya quedó asociado a tu cotización y en verificación con nuestro equipo de finanzas — ese proceso toma máximo 24 horas hábiles. Apenas se confirme te escribo por aquí para partir con la configuración de tu cuenta. ¡Gracias!`
+    : `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Lo dejé en manos del equipo para asociarlo a tu cotización — la verificación toma máximo 24 horas hábiles. Apenas se confirme te escribo por aquí para partir con la configuración de tu cuenta. ¡Gracias!`
 
   return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
 }
