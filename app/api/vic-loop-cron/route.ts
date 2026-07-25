@@ -17,10 +17,11 @@
  *      la hora de inactividad.
  *
  * Toques 1,4,5,6,7 = WhatsApp (texto libre si la ventana de 24h de Meta está
- * abierta; plantilla HSM por stage y país si no — sin env de plantilla
- * configurada NO se envía nada, patrón del repo). Toques 2,3 = llamada: se
- * inserta en vic_scheduled_calls y el vic-callback-cron existente la dispara
- * (NUNCA se llama a Dapta directo desde acá).
+ * abierta; plantilla HSM por TOQUE × ETAPA si no — matriz LOOP_TPL_MATRIZ con
+ * los nombres reales de Botmaker como default CL y override por env; celda
+ * vacía NO envía nada, patrón del repo). Toques 2,3 = llamada: se inserta en
+ * vic_scheduled_calls y el vic-callback-cron existente la dispara (NUNCA se
+ * llama a Dapta directo desde acá).
  *
  * Auth: x-cron-secret == vic_kv.followup_cron_secret (o Bearer/?key=CRON_SECRET),
  * mismo esquema que vic-outbound-cadence-cron.
@@ -49,22 +50,40 @@ const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 const BATCH = 20
 
-// Plantillas HSM por stage (fuera de la ventana de 24h). Vacío = ese stage no
-// envía plantilla (seguro por defecto, mismo patrón que REACTIVATION_TEMPLATE_*).
-// Sufijo _CO para la línea colombiana.
-const LOOP_TPL: Record<LoopStage, { cl: string; co: string }> = {
-  sin_precio: {
-    cl: (process.env.LOOP_TPL_SIN_PRECIO || "").trim(),
-    co: (process.env.LOOP_TPL_SIN_PRECIO_CO || "").trim(),
+// Plantillas HSM (fuera de la ventana de 24h) por TOQUE × ETAPA — la matriz
+// del Excel cerrado con Rodrigo/Lalo (24-jul); Lalo creó estas plantillas en
+// Botmaker con variables ${nombre}/${empresa}. Los defaults de Chile son los
+// nombres reales; cada celda es sobreescribible por env (LOOP_TPL_T<toque>_
+// <ETAPA>). Colombia parte VACÍA (gemelas _co pendientes de crear): sin
+// nombre configurado NO se envía plantilla (seguro por defecto) — al crearlas
+// se setean los envs *_CO o se agregan defaults acá.
+// Toques 6 y 7 son genéricos: una sola plantilla para las tres etapas.
+function tplCelda(envName: string, defaultCl: string): { cl: string; co: string } {
+  return {
+    cl: (process.env[envName] || defaultCl).trim(),
+    co: (process.env[`${envName}_CO`] || "").trim(),
+  }
+}
+const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2")
+const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida")
+const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string }>> = {
+  1: {
+    sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_lead_nudge"),
+    con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio"),
+    formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago"),
   },
-  con_precio: {
-    cl: (process.env.LOOP_TPL_CON_PRECIO || "").trim(),
-    co: (process.env.LOOP_TPL_CON_PRECIO_CO || "").trim(),
+  4: {
+    sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio"),
+    con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio"),
+    formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago"),
   },
-  formal: {
-    cl: (process.env.LOOP_TPL_FORMAL || "").trim(),
-    co: (process.env.LOOP_TPL_FORMAL_CO || "").trim(),
+  5: {
+    sin_precio: tplCelda("LOOP_TPL_T5_SIN_PRECIO", "vicky_loop_retoma"),
+    con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut"),
+    formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago"),
   },
+  6: { sin_precio: LOOP_TPL_T6, con_precio: LOOP_TPL_T6, formal: LOOP_TPL_T6 },
+  7: { sin_precio: LOOP_TPL_T7, con_precio: LOOP_TPL_T7, formal: LOOP_TPL_T7 },
 }
 
 // Texto libre por stage y país (ventana de 24h abierta). Cortos, sin inventar
@@ -95,6 +114,9 @@ type ConvRow = {
   contact: string
   last_user_at: string | null
   followup_closed_reason: string | null
+  formal_quote_id: string | null
+  pref_escalon: number | null
+  pref_params: unknown | null
 }
 
 function supa(path: string, init: RequestInit = {}): Promise<Response> {
@@ -234,7 +256,7 @@ export async function GET(req: Request): Promise<Response> {
   // patrón batch que la cadencia outbound).
   const contactsIn = rows.map((r) => `"${r.contact}"`).join(",")
   const convRes = await supa(
-    `vic_v3_conversations?contact=in.(${contactsIn})&select=contact,last_user_at,followup_closed_reason`,
+    `vic_v3_conversations?contact=in.(${contactsIn})&select=contact,last_user_at,followup_closed_reason,formal_quote_id,pref_escalon,pref_params`,
   )
   const convs = new Map<string, ConvRow>()
   for (const c of (convRes.ok ? await convRes.json() : []) as ConvRow[]) convs.set(c.contact, c)
@@ -317,7 +339,17 @@ export async function GET(req: Request): Promise<Response> {
 
     // ── Ejecutar el toque ──────────────────────────────────────────────────
     const canal = esCO ? PERFIL_CO.canal.channelId : undefined
-    const stage: LoopStage = (r.stage as LoopStage) || "sin_precio"
+    // Etapa DERIVADA del estado real de la conversación (nadie escribe stage
+    // en vic_loop de forma confiable): cotización formal emitida → 'formal';
+    // precio/preform ya mostrado (puntero pref_*) → 'con_precio'; si no, lo
+    // guardado o 'sin_precio'. Así el toque siempre pide el paso correcto.
+    const stage: LoopStage = conv?.formal_quote_id
+      ? "formal"
+      : conv?.pref_escalon !== null && conv?.pref_escalon !== undefined
+        ? "con_precio"
+        : conv?.pref_params
+          ? "con_precio"
+          : (r.stage as LoopStage) || "sin_precio"
     let ejecutado = false
 
     if (touch === 2 || touch === 3) {
@@ -356,12 +388,12 @@ export async function GET(req: Request): Promise<Response> {
           detalle.push({ contact: r.contact, accion: "texto", touch, ok: false })
         }
       } else {
-        const tpl = LOOP_TPL[stage][esCO ? "co" : "cl"]
+        const tpl = (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][esCO ? "co" : "cl"]
         if (!tpl) {
           // Sin plantilla configurada NO se envía nada (patrón del repo). El
           // toque igual avanza para no reintentar el mismo skip en cada tick.
           console.warn(
-            `[loop-cron] ${r.contact}: sin plantilla ${stage}${esCO ? " (CO)" : ""} — toque ${touch} omitido`,
+            `[loop-cron] ${r.contact}: sin plantilla toque ${touch}/${stage}${esCO ? " (CO)" : ""} — omitido`,
           )
           ejecutado = true
           detalle.push({ contact: r.contact, accion: "plantilla", touch, skip: "sin plantilla" })

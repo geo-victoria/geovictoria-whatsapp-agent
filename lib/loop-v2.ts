@@ -358,6 +358,42 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
 }
 
 /**
+ * Enrola un contacto NUEVO al loop (llamada desde el T0 outbound de
+ * vic-outbound-lead, 25-jul: los leads nuevos entran al loop desde el
+ * encendido). Si ya existe fila: 'cerrado' NUNCA revive; cualquier otro
+ * estado se re-ancla vía resetLoop (un T0 repetido = el lead volvió a
+ * convertir). Best-effort: el llamador usa .catch(()=>{}).
+ */
+export async function enrolarEnLoop(contact: string, country: string): Promise<void> {
+  if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
+  const res = await supa(
+    `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,estado&limit=1`,
+  )
+  const rows = res.ok ? (((await res.json().catch(() => [])) as LoopRow[]) || []) : []
+  if (rows[0]) {
+    if (rows[0].estado === "cerrado") return
+    await resetLoop(contact)
+    return
+  }
+  const t0 = new Date()
+  await supa(`vic_loop`, {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      contact,
+      country: (country || "cl").trim().toLowerCase(),
+      stage: "sin_precio",
+      t0: t0.toISOString(),
+      next_touch: 1,
+      next_touch_at: calcularProximoToque(t0, 1, country, contact).toISOString(),
+      estado: "activo",
+      updated_at: t0.toISOString(),
+    }),
+  })
+  console.log(`[loop-v2] enrolado contact=${contact} country=${country}`)
+}
+
+/**
  * El contacto PAGÓ → el loop muere definitivamente (motivo 'pagado'). Exportada
  * para el flujo de pago futuro; todavía no se conecta a ningún llamador.
  */

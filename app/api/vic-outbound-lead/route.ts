@@ -46,6 +46,7 @@ import {
 } from "@/lib/zoho-leads"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
+import { enrolarEnLoop } from "@/lib/loop-v2"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -392,6 +393,14 @@ export async function POST(req: Request): Promise<Response> {
     }),
     cache: "no-store",
   }).catch(() => {})
+
+  // 4. Loop v2 (flag LOOP_V2_ENABLED, no-op apagado): el lead nuevo queda
+  // enrolado en el loop de toques — la cadencia del paso 3 lo salta mientras
+  // tenga fila en vic_loop (contactosEnLoop), así no hay doble toque. MX
+  // queda FUERA por ahora (sin canal de voz Dapta para los toques 2-3).
+  if (!esMX) {
+    await enrolarEnLoop(contact, esCO ? "co" : "cl").catch(() => {})
+  }
 
   console.log(`[outbound-lead] toque 0 → ${contact} (${empresa}${rango ? `, ${rango}` : ""})`)
   return NextResponse.json({ ok: true, contact, empresa, template: tplPais, cadencia: "iniciada" })
