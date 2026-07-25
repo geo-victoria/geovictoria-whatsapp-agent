@@ -58,11 +58,12 @@ const BATCH = 20
 // nombre configurado NO se envía plantilla (seguro por defecto) — al crearlas
 // se setean los envs *_CO o se agregan defaults acá.
 // Toques 6 y 7 son genéricos: una sola plantilla para las tres etapas.
-// CO reutiliza las plantillas colombianas EXISTENTES donde calzan (decisión
-// 25-jul: solo se tropicaliza lo imprescindible): react_preform cubre
-// sin_precio (y el toque VI genérico), react_cotizacion cubre formal. Las
-// celdas con_precio (pide NIT) y despedida quedan vacías hasta que Lalo cree
-// vicky_loop_con_precio_co / vicky_loop_despedida_co — vacía = se omite.
+// CO (decisión 25-jul: solo se tropicaliza lo imprescindible). Las plantillas
+// del workspace sirven en TODAS las líneas (verificado por API), así que CO
+// reutiliza: react_preform (sin_precio + toque VI, tono colombiano),
+// vicky_loop_pago ("¿te ayudo con el pago?", neutra) para formal, y
+// vicky_loop_despedida (neutra) para el VII. La única gemela de contenido es
+// vicky_loop_con_precio_co (NIT en vez de RUT), creada por API el 25-jul.
 function tplCelda(envName: string, defaultCl: string, defaultCo = ""): { cl: string; co: string } {
   return {
     cl: (process.env[envName] || defaultCl).trim(),
@@ -70,24 +71,24 @@ function tplCelda(envName: string, defaultCl: string, defaultCo = ""): { cl: str
   }
 }
 const CO_PREFORM = "vicky_co_react_preform"
-const CO_COTIZACION = "vicky_co_react_cotizacion"
+const CO_CON_PRECIO = "vicky_loop_con_precio_co"
 const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREFORM)
-const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida")
+const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida", "vicky_loop_despedida")
 const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string }>> = {
   1: {
     sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_lead_nudge", CO_PREFORM),
-    con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio"),
-    formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", CO_COTIZACION),
+    con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago"),
   },
   4: {
     sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM),
-    con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio"),
-    formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago", CO_COTIZACION),
+    con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago", "vicky_loop_pago"),
   },
   5: {
     sin_precio: tplCelda("LOOP_TPL_T5_SIN_PRECIO", "vicky_loop_retoma", CO_PREFORM),
-    con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut"),
-    formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago", CO_COTIZACION),
+    con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut", CO_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago", "vicky_loop_pago"),
   },
   6: { sin_precio: LOOP_TPL_T6, con_precio: LOOP_TPL_T6, formal: LOOP_TPL_T6 },
   7: { sin_precio: LOOP_TPL_T7, con_precio: LOOP_TPL_T7, formal: LOOP_TPL_T7 },

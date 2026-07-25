@@ -69,7 +69,9 @@ const TPL_LEAD_MX = (process.env.OUTBOUND_TEMPLATE_LEAD_MX || "vicky_mx_lead_ape
 // (plantilla vicky_t0_finde, creada por Lalo el 24-jul). Sin gemela del país
 // (CO/MX aún) cae a la apertura normal — un lead JAMÁS se queda sin T0.
 const TPL_LEAD_FINDE = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE || "vicky_t0_finde").trim()
-const TPL_LEAD_FINDE_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE_CO || "").trim()
+// El texto de vicky_t0_finde es neutro (sin chilenismos) y las plantillas del
+// workspace sirven en todas las líneas → CO la reutiliza tal cual (25-jul).
+const TPL_LEAD_FINDE_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE_CO || "vicky_t0_finde").trim()
 
 function esFinDeSemana(country: string): boolean {
   const tz =

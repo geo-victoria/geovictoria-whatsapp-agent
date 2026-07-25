@@ -100,3 +100,35 @@ export async function GET(req: Request): Promise<Response> {
   const data = await res.json().catch(() => ({}))
   return NextResponse.json({ ok: res.ok, status: res.status, data })
 }
+
+/**
+ * POST — creación de plantillas de WhatsApp vía la API de Botmaker (25-jul,
+ * gemelas del loop). ÚNICA ruta permitida: /v2.0/whatsapp/templates; el body
+ * se reenvía tal cual con el token del servidor. Mismo auth admin del GET.
+ */
+export async function POST(req: Request): Promise<Response> {
+  const xcron = (req.headers.get("x-cron-secret") || "").trim()
+  const expected = await getFollowupCronSecret().catch(() => "")
+  if (!expected || xcron !== expected) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  }
+  if (!BM_TOKEN) {
+    return NextResponse.json({ ok: false, error: "BOTMAKER_ACCESS_TOKEN no configurado" }, { status: 503 })
+  }
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
+  if (!body || typeof body.name !== "string" || !body.body) {
+    return NextResponse.json({ ok: false, error: "body de plantilla inválido (name y body requeridos)" }, { status: 400 })
+  }
+  const r = await fetch("https://api.botmaker.com/v2.0/whatsapp/templates", {
+    method: "POST",
+    headers: {
+      "access-token": BM_TOKEN,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  })
+  const data = await r.json().catch(() => ({}))
+  return NextResponse.json({ ok: r.ok, status: r.status, data })
+}
