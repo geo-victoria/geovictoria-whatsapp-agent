@@ -50,7 +50,7 @@ import {
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
-import { clasificarSenalEspera } from "@/lib/loop-v2"
+import { clasificarSenalEspera, resetLoop, enrolarEnLoop } from "@/lib/loop-v2"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
@@ -380,7 +380,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
           `[vic-mx][followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
         )
       } else {
-        await armFollowup(contact, "mx")
+        await enrolarEnLoop(contact, "mx").catch(() => {})
       }
     }
     if (callNoContactar) {
@@ -639,6 +639,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     // ── Pipeline endurecido (herencia chilena) ──
     // Re-engagement: el cliente habló → pausar la cadencia en curso (si la había).
     await markUserActivity(contact, "mx").catch(() => {})
+    // Loop v2 (25-jul, MX con voz Dapta): el mensaje entrante re-ancla el loop
+    // (con señal de espera, t0 se corre al plazo inferido). Best-effort.
+    resetLoop(contact, message).catch(() => {})
 
     const msgHash = hashMessage(contact, message)
     await bufferInboundMessage(contact, message, msgHash)

@@ -421,10 +421,8 @@ export async function POST(req: Request): Promise<Response> {
   // 4. Loop v2 (flag LOOP_V2_ENABLED, no-op apagado): el lead nuevo queda
   // enrolado en el loop de toques — la cadencia del paso 3 lo salta mientras
   // tenga fila en vic_loop (contactosEnLoop), así no hay doble toque. MX
-  // queda FUERA por ahora (sin canal de voz Dapta para los toques 2-3).
-  if (!esMX) {
-    await enrolarEnLoop(contact, esCO ? "co" : "cl").catch(() => {})
-  }
+  // entra desde el 25-jul (número +52 conectado y flujo de voz creado).
+  await enrolarEnLoop(contact, esMX ? "mx" : esCO ? "co" : "cl").catch(() => {})
 
   console.log(`[outbound-lead] toque 0 → ${contact} (${empresa}${rango ? `, ${rango}` : ""})`)
   return NextResponse.json({ ok: true, contact, empresa, template: tplPais, cadencia: "iniciada" })

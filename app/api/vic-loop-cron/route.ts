@@ -40,6 +40,7 @@ import {
 } from "@/lib/loop-v2"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { PERFIL_CO } from "@/lib/paises/co"
+import { PERFIL_MX } from "@/lib/paises/mx"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -64,31 +65,42 @@ const BATCH = 20
 // vicky_loop_pago ("¿te ayudo con el pago?", neutra) para formal, y
 // vicky_loop_despedida (neutra) para el VII. La única gemela de contenido es
 // vicky_loop_con_precio_co (NIT en vez de RUT), creada por API el 25-jul.
-function tplCelda(envName: string, defaultCl: string, defaultCo = ""): { cl: string; co: string } {
+function tplCelda(
+  envName: string,
+  defaultCl: string,
+  defaultCo = "",
+  defaultMx = "",
+): { cl: string; co: string; mx: string } {
   return {
     cl: (process.env[envName] || defaultCl).trim(),
     co: (process.env[`${envName}_CO`] || defaultCo).trim(),
+    mx: (process.env[`${envName}_MX`] || defaultMx).trim(),
   }
 }
 const CO_PREFORM = "vicky_co_react_preform"
 const CO_CON_PRECIO = "vicky_loop_con_precio_co"
-const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREFORM)
-const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida", "vicky_loop_despedida")
-const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string }>> = {
+// MX (25-jul, número +52 conectado en Dapta): reutiliza las neutras
+// multi-línea; con_precio pide RFC (vicky_loop_con_precio_mx, creada por
+// API); toque VI usa la corta mexicana existente.
+const MX_SIN_PRECIO = "vicky_loop_sin_precio"
+const MX_CON_PRECIO = "vicky_loop_con_precio_mx"
+const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREFORM, "vicky_mx_react_corta")
+const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida", "vicky_loop_despedida", "vicky_loop_despedida")
+const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string; mx: string }>> = {
   1: {
-    sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_lead_nudge", CO_PREFORM),
-    con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO),
-    formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago"),
+    sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_lead_nudge", CO_PREFORM, "vicky_lead_nudge"),
+    con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
   },
   4: {
-    sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM),
-    con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO),
-    formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago", "vicky_loop_pago"),
+    sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO),
+    con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
   },
   5: {
-    sin_precio: tplCelda("LOOP_TPL_T5_SIN_PRECIO", "vicky_loop_retoma", CO_PREFORM),
-    con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut", CO_CON_PRECIO),
-    formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago", "vicky_loop_pago"),
+    sin_precio: tplCelda("LOOP_TPL_T5_SIN_PRECIO", "vicky_loop_retoma", CO_PREFORM, "vicky_loop_retoma"),
+    con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut", CO_CON_PRECIO, MX_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
   },
   6: { sin_precio: LOOP_TPL_T6, con_precio: LOOP_TPL_T6, formal: LOOP_TPL_T6 },
   7: { sin_precio: LOOP_TPL_T7, con_precio: LOOP_TPL_T7, formal: LOOP_TPL_T7 },
@@ -97,24 +109,30 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
 // Texto libre por stage y país (ventana de 24h abierta). Cortos, sin inventar
 // precios ni links: solo empujan el siguiente paso del embudo. CL en tono
 // chileno cálido; CO en tuteo colombiano ("de una", "te cuento").
-const TEXTOS: Record<LoopStage, { cl: string; co: string }> = {
+const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
   sin_precio: {
     cl:
       "Hola! Soy Vicky de GeoVictoria 😊 Para armarte el valor al tiro solo me falta saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
     co:
       "Hola! Soy Vicky de GeoVictoria 😊 Te cuento: para armarte el valor de una solo necesito saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\nMe cuentas y lo dejamos listo?",
+    mx:
+      "Hola! Soy Vicky de GeoVictoria 😊 Para armarte el valor de inmediato solo me falta saber cuántas personas registrarían su asistencia y cómo les gustaría checar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
   },
   con_precio: {
     cl:
       "Hola! Soy Vicky de GeoVictoria 😊 Tu valor ya está listo — solo me falta el RUT (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
     co:
       "Hola! Soy Vicky de GeoVictoria 😊 Te cuento que tu valor ya está listo — solo me falta el NIT (o tu ok) para dejarte la cotización formal.\nLa armamos de una?",
+    mx:
+      "Hola! Soy Vicky de GeoVictoria 😊 Tu valor ya está listo — solo me falta el RFC (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
   },
   formal: {
     cl:
       "Hola! Soy Vicky de GeoVictoria 😊 Tu cotización sigue vigente y la puedes aceptar y pagar en línea cuando quieras.\nSi te quedó alguna duda, la vemos al tiro por acá.",
     co:
       "Hola! Soy Vicky de GeoVictoria 😊 Te cuento que tu cotización sigue vigente y la puedes aceptar y pagar en línea cuando quieras.\nSi te queda alguna duda, la resolvemos de una por acá.",
+    mx:
+      "Hola! Soy Vicky de GeoVictoria 😊 Tu cotización sigue vigente y la puedes aceptar cuando gustes.\nSi te quedó alguna duda, la resolvemos por aquí.",
   },
 }
 
@@ -379,7 +397,9 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     // ── Ejecutar el toque ──────────────────────────────────────────────────
-    const canal = esCO ? PERFIL_CO.canal.channelId : undefined
+    const esMX = country === "mx"
+    const paisKey: "cl" | "co" | "mx" = esMX ? "mx" : esCO ? "co" : "cl"
+    const canal = esMX ? PERFIL_MX.canal.channelId : esCO ? PERFIL_CO.canal.channelId : undefined
     // Etapa DERIVADA del estado real de la conversación (nadie escribe stage
     // en vic_loop de forma confiable): cotización formal emitida → 'formal';
     // precio/preform ya mostrado (puntero pref_*) → 'con_precio'; si no, lo
@@ -417,7 +437,7 @@ export async function GET(req: Request): Promise<Response> {
     } else {
       // WhatsApp: la ventana de 24h de Meta decide texto libre vs plantilla.
       const ventanaAbierta = lastUserMs > 0 && now - lastUserMs < 24 * 3600e3
-      const texto = TEXTOS[stage][esCO ? "co" : "cl"]
+      const texto = TEXTOS[stage][paisKey]
       if (ventanaAbierta) {
         const ok = await sendBotmakerMessage(r.contact, texto, canal).catch(() => false)
         if (ok) {
@@ -429,7 +449,7 @@ export async function GET(req: Request): Promise<Response> {
           detalle.push({ contact: r.contact, accion: "texto", touch, ok: false })
         }
       } else {
-        const tpl = (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][esCO ? "co" : "cl"]
+        const tpl = (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][paisKey]
         if (!tpl) {
           // Sin plantilla configurada NO se envía nada (patrón del repo). El
           // toque igual avanza para no reintentar el mismo skip en cada tick.
