@@ -648,6 +648,26 @@ export async function POST(request: Request): Promise<NextResponse> {
     const msgHash = hashMessage(contact, message)
     await bufferInboundMessage(contact, message, msgHash)
 
+    // 6-bis. ANTI-DUPLICADO TARDÍO (caso Iván Darío/Intelex 25-jul): el dedup
+    // del buffer solo protege mientras la fila existe — drainInbox la BORRA, así
+    // que un reintento de Botmaker 45 s después entra como mensaje nuevo y el
+    // turno se procesa dos o tres veces (respuestas contradictorias y, si uno
+    // falla, un "disculpa, tuve un inconveniente" encima de una conversación ya
+    // respondida). Ventana de 2 min por hash, y SOLO para mensajes largos: un
+    // "sí"/"ok"/"gracias" repetido es legítimo y debe pasar siempre.
+    if (message.trim().length > 12) {
+      const visto = await getKvValue(`msgseen_${msgHash}`).catch(() => null)
+      const edadMs = visto ? Date.now() - Number(visto) : Infinity
+      if (Number.isFinite(edadMs) && edadMs < 120_000) {
+        console.warn(
+          `[vic-co] duplicado descartado contact=${contact} hash=${msgHash} edad=${Math.round(edadMs / 1000)}s`,
+        )
+        return NextResponse.json({ reply: "", pais: "co" })
+      }
+      await setKvValue(`msgseen_${msgHash}`, String(Date.now())).catch(() => {})
+    }
+
+
     const lockResult = await acquireLock(contact, msgHash)
     if (!lockResult.acquired) {
       console.log(`[vic-co] ${contact}: mensaje encolado, ya hay un procesador activo`)

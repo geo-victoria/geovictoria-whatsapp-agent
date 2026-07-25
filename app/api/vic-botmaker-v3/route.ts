@@ -687,6 +687,12 @@ async function processOneTurn(
       const elegibleRetry =
         (!tieneFormal && committedRecPct < 20) || (tieneFormal && pideRebaja)
       if (elegibleRetry && !MULETILLAS_DESCUENTO.has(ultimoAsistente || "")) {
+        // El escalón que YA está en la mano del cliente (por texto del
+        // historial o por lo comiteado): el reintento debe partir de ahí, no
+        // de 0 — si no, la tool devuelve su primer tramo y le SUBE el precio
+        // (caso Pablo/Ayres 25-jul: 20% ofrecido → tool devolvió 10%).
+        const pisoPct = Math.max(pisoDescuento, committedRecPct)
+        const escalonPiso = pisoPct >= 20 ? 2 : pisoPct >= 10 ? 1 : 0
         const FORZAR_TOOL_DESCUENTO =
           "\n\n# Instrucción de sistema (este turno)\n" +
           "El cliente está pidiendo (más) descuento y aún estás negociando. DEBES llamar la tool de " +
@@ -694,6 +700,11 @@ async function processOneTurn(
           "consultar_siguiente_descuento si YA existe) ANTES de mencionar cualquier porcentaje o precio, y " +
           "ofrecer EXACTAMENTE su mensajeParaProspecto. NUNCA digas el % de memoria. NO generes la " +
           "cotización formal en este turno: solo ofrece el siguiente tramo de descuento." +
+          (pisoPct > 0
+            ? ` PISO OBLIGATORIO: a este cliente YA le ofreciste ${pisoPct}% — pasa escalonActual=${escalonPiso} ` +
+              `(NUNCA 0) y jamás le ofrezcas menos de ${pisoPct}%. Si la tool devuelve un tramo menor o ya estás ` +
+              `en el tope, mantén el ${pisoPct}% y dilo con seguridad ("ese es el máximo que puedo hacer").`
+            : "") +
           (tieneFormal
             ? ` YA existe una cotización formal en esta conversación (quote_id ${formalQuoteId || quotePointer?.quoteId || "vigente"}): usa consultar_siguiente_descuento sobre ELLA.`
             : "")
@@ -1491,6 +1502,26 @@ export async function POST(request: Request): Promise<NextResponse> {
     // 6. Encolar el mensaje en el buffer de ráfaga (dedup de retries por hash).
     const messageHash = hashMessage(contact, message)
     await bufferInboundMessage(contact, message, messageHash)
+
+    // 6-bis. ANTI-DUPLICADO TARDÍO (caso Iván Darío/Intelex 25-jul): el dedup
+    // del buffer solo protege mientras la fila existe — drainInbox la BORRA, así
+    // que un reintento de Botmaker 45 s después entra como mensaje nuevo y el
+    // turno se procesa dos o tres veces (respuestas contradictorias y, si uno
+    // falla, un "disculpa, tuve un inconveniente" encima de una conversación ya
+    // respondida). Ventana de 2 min por hash, y SOLO para mensajes largos: un
+    // "sí"/"ok"/"gracias" repetido es legítimo y debe pasar siempre.
+    if (message.trim().length > 12) {
+      const visto = await getKvValue(`msgseen_${messageHash}`).catch(() => null)
+      const edadMs = visto ? Date.now() - Number(visto) : Infinity
+      if (Number.isFinite(edadMs) && edadMs < 120_000) {
+        console.warn(
+          `[v3-botmaker] duplicado descartado contact=${contact} hash=${messageHash} edad=${Math.round(edadMs / 1000)}s`,
+        )
+        return NextResponse.json({ reply: "" })
+      }
+      await setKvValue(`msgseen_${messageHash}`, String(Date.now())).catch(() => {})
+    }
+
 
     // 7. Tomar el lock. Solo UNA request por contacto procesa la ráfaga; las
     //    demás dejan su mensaje en el buffer y el procesador activo lo drena.
