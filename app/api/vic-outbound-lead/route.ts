@@ -64,6 +64,19 @@ const TPL_LEAD = (process.env.OUTBOUND_TEMPLATE_LEAD || "").trim()
 const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "vicky_co_solicitud_recibida").trim()
 // México (21-jul): plantilla de apertura propia por la línea +52 1 56 5977 8486.
 const TPL_LEAD_MX = (process.env.OUTBOUND_TEMPLATE_LEAD_MX || "vicky_mx_lead_apertura").trim()
+// T0 de FIN DE SEMANA (regla Rodrigo/Lalo 24-jul, parte del loop v2): sábado y
+// domingo la apertura pregunta "¿conversamos ahora o prefieres el lunes?"
+// (plantilla vicky_t0_finde, creada por Lalo el 24-jul). Sin gemela del país
+// (CO/MX aún) cae a la apertura normal — un lead JAMÁS se queda sin T0.
+const TPL_LEAD_FINDE = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE || "vicky_t0_finde").trim()
+const TPL_LEAD_FINDE_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE_CO || "").trim()
+
+function esFinDeSemana(country: string): boolean {
+  const tz =
+    country === "co" ? "America/Bogota" : country === "mx" ? "America/Mexico_City" : "America/Santiago"
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(new Date())
+  return wd === "Sat" || wd === "Sun"
+}
 
 async function authorized(req: Request): Promise<boolean> {
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
@@ -179,7 +192,12 @@ export async function POST(req: Request): Promise<Response> {
   }
   const esCO = country === "co"
   const esMX = country === "mx"
-  const tplPais = esMX ? TPL_LEAD_MX : esCO ? TPL_LEAD_CO : TPL_LEAD
+  const finde = esFinDeSemana(country || "cl")
+  const tplPais = esMX
+    ? TPL_LEAD_MX
+    : esCO
+      ? (finde && TPL_LEAD_FINDE_CO) || TPL_LEAD_CO
+      : (finde && TPL_LEAD_FINDE) || TPL_LEAD
   const channelId = esMX
     ? PERFIL_MX.canal.channelId
     : esCO
@@ -359,11 +377,15 @@ export async function POST(req: Request): Promise<Response> {
   // ya es la calificación — decisión Lalo/Rodrigo 17-jul) · MX → UTILITY
   // vicky_mx_lead_apertura (21-jul, vocabulario es-mx: "registrarían su
   // asistencia").
-  const saludoApertura = esMX
-    ? `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas registrarían su asistencia? Con ese dato te armo el valor de inmediato.`
-    : esCO
-      ? `Hola ${nombre}, te escribimos de GeoVictoria por la solicitud de cotización que registraste para ${empresa}. Puedes completarla por este medio: responde este mensaje y continuamos con el detalle.`
-      : `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas marcarían asistencia? Con eso te la armo de inmediato.`
+  // CL finde → espejo de vicky_t0_finde ("¿ahora o el lunes?").
+  const saludoApertura =
+    !esMX && !esCO && finde
+      ? `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. ¿Quieres conversar ahora o prefieres que te contacte el lunes?`
+      : esMX
+        ? `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas registrarían su asistencia? Con ese dato te armo el valor de inmediato.`
+        : esCO
+          ? `Hola ${nombre}, te escribimos de GeoVictoria por la solicitud de cotización que registraste para ${empresa}. Puedes completarla por este medio: responde este mensaje y continuamos con el detalle.`
+          : `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas marcarían asistencia? Con eso te la armo de inmediato.`
   const ctx = [
     saludoApertura,
     ``,
