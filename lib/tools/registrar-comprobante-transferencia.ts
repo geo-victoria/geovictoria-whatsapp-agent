@@ -100,25 +100,36 @@ export async function obtenerLinkOnboarding(quoteId: string): Promise<string> {
 async function crearNotaEnCotizacion(quoteId: string, contenido: string): Promise<boolean> {
   try {
     const token = await getZohoAccessToken()
-    const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Notes`, {
-      method: "POST",
-      headers: {
-        Authorization: `Zoho-oauthtoken ${token}`,
-        "Content-Type": "application/json",
+    // Endpoint de related records (25-jul): POST /{módulo}/{id}/Notes. El
+    // formato anterior (POST /Notes con Parent_Id objeto) fallaba SIEMPRE en
+    // silencio con el módulo custom — ninguna cotización tenía la nota del
+    // comprobante (verificado en JEANSCO/COT265).
+    const res = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${encodeURIComponent(quoteId)}/Notes`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Zoho-oauthtoken ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          data: [
+            {
+              Note_Title: "Comprobante de transferencia recibido por WhatsApp",
+              Note_Content: contenido,
+            },
+          ],
+        }),
+        cache: "no-store",
       },
-      body: JSON.stringify({
-        data: [
-          {
-            Note_Title: "Comprobante de transferencia recibido por WhatsApp",
-            Note_Content: contenido,
-            Parent_Id: { module: { api_name: QUOTE_MODULE }, id: quoteId },
-          },
-        ],
-      }),
-      cache: "no-store",
-    })
+    )
+    if (!res.ok) {
+      const detalle = await res.text().catch(() => "")
+      console.error(`[comprobante] nota Zoho falló ${res.status}: ${detalle.slice(0, 300)}`)
+    }
     return res.ok
-  } catch {
+  } catch (err) {
+    console.error("[comprobante] nota Zoho excepción:", err)
     return false
   }
 }
