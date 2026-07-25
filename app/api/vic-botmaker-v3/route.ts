@@ -61,12 +61,11 @@ import { marcarCotizacionRechazada } from "@/lib/zoho-quote-status"
 import { updateZohoLeadStatus } from "@/lib/zoho-leads"
 import {
   markUserActivity,
-  armFollowup,
   closeFollowup,
   scheduleConsensualFollowup,
   confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
-import { resetLoop, clasificarSenalEspera } from "@/lib/loop-v2"
+import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -1052,8 +1051,11 @@ async function processOneTurn(
       )
       const esComercial = comercialEsteTurno || tieneEstadoComercial || yaHuboEstimacion
       // Señal de espera implícita ("lo veo con mi jefe y te aviso", "la
-      // próxima semana"…): en vez del nudge ciego de +1h, UN toque único en
-      // el plazo inferido (misma vía que el seguimiento consensuado).
+      // próxima semana"…): UN toque único en el plazo inferido (misma vía que
+      // el seguimiento consensuado). Sin señal: la conversación comercial se
+      // ENROLA AL LOOP V2 (decisión Lalo 25-jul: el loop reemplaza TODOS los
+      // toques anteriores — la escalera armFollowup queda muerta; con el flag
+      // apagado, enrolarEnLoop es no-op y no se arma nada).
       const armarSegunSenal = async () => {
         const senal = clasificarSenalEspera(message, "cl", contact)
         if (senal) {
@@ -1062,7 +1064,7 @@ async function processOneTurn(
             `[v3-followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
           )
         } else {
-          await armFollowup(contact)
+          await enrolarEnLoop(contact, "cl").catch(() => {})
         }
       }
       if (usoOptOut) {

@@ -382,6 +382,15 @@ export async function GET(req: Request): Promise<Response> {
       tocaAhora(r),
   )
 
+  // ── APAGADO (decisión Lalo 25-jul, encendido del Loop v2) ──────────────────
+  // El loop REEMPLAZA la reactivación 47h/7d/15d y sus ofertas de descuento
+  // proactivas: estos segmentos quedan MUERTOS salvo reactivación explícita por
+  // env. El toque CONSENSUADO (promesa acordada con el cliente) NO es
+  // proactividad vieja y sigue vivo más abajo.
+  if ((process.env.REACTIVATION_OLD_ENABLED || "off").trim().toLowerCase() !== "on") {
+    cand = []
+  }
+
   // Gate de horario hábil en la ZONA DEL CONTACTO (mismo helper que el follow-up,
   // vic_is_business_now: Lun-Sáb 9-19 local, sin feriado del país). Una sola
   // llamada al RPC con todos los candidatos; deja solo los que están en horario.

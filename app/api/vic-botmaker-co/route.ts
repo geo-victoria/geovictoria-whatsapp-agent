@@ -33,7 +33,6 @@ import {
   fetchHistoryV3,
   appendTurnV3,
   markUserActivity,
-  armFollowup,
   closeFollowup,
   scheduleConsensualFollowup,
   getQuotePointer,
@@ -49,7 +48,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
-import { resetLoop, clasificarSenalEspera } from "@/lib/loop-v2"
+import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -371,7 +370,9 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     const esComercial =
       comercialEsteTurno || yaHuboEstimacion || !!quotePointer || capturaLeadEnCurso
     // Señal de espera implícita ("lo veo con mi jefe", "la próxima semana"…):
-    // en vez del nudge ciego de +1h, UN toque único en el plazo inferido.
+    // UN toque único en el plazo inferido. Sin señal: la conversación
+    // comercial se ENROLA AL LOOP V2 (decisión Lalo 25-jul: el loop reemplaza
+    // TODOS los toques anteriores — la escalera armFollowup queda muerta).
     const armarSegunSenal = async () => {
       const senal = clasificarSenalEspera(message, "co", contact)
       if (senal) {
@@ -380,7 +381,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
           `[vic-co][followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
         )
       } else {
-        await armFollowup(contact, "co")
+        await enrolarEnLoop(contact, "co").catch(() => {})
       }
     }
     if (callNoContactar) {
