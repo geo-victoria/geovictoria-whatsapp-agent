@@ -244,6 +244,70 @@ function channelNumber(overrideNumero?: string): string {
  * @param templateName Nombre de la plantilla aprobada (ruleNameOrId).
  * @param params Variables de la plantilla por NOMBRE (ej. { nombre, hora_reunion }).
  */
+/**
+ * Envía un ARCHIVO (PDF) por WhatsApp. Mismo ruteo de canal que
+ * sendBotmakerMessage — se responde por donde el cliente escribió.
+ *
+ * POR QUÉ EXISTE (26-jul): el correo con la cotización sí se entrega, pero cae
+ * en Promociones/Otros y el cliente reporta "no me llegó" (10 contactos entre
+ * junio y julio). WhatsApp es el canal donde el cliente YA está hablando: darle
+ * el PDF ahí evita la dependencia del correo por completo.
+ *
+ * El esquema `media` es el del OpenAPI oficial de Botmaker
+ * (api.botmaker.com/v2.0/openapi.json): { filename, mimeType, url }, con
+ * "application/pdf" dentro del enum de mimeTypes soportados.
+ */
+export async function sendBotmakerMedia(
+  contactId: string,
+  url: string,
+  opts: { filename?: string; mimeType?: string; caption?: string; channelId?: string } = {},
+): Promise<boolean> {
+  if (!contactId || !url) {
+    console.error("[botmaker-push] contactId y url son requeridos para media")
+    return false
+  }
+  const cleanContact = normalizeContactId(contactId)
+  const origen = await canalDeOrigen(cleanContact)
+  const canal = (origen || opts.channelId || BM_CHANNEL_V3).trim()
+  if (!BM_TOKEN || !canal) {
+    console.error("[botmaker-push] BOTMAKER_ACCESS_TOKEN o channelId no configurados")
+    return false
+  }
+
+  // El caption va como mensaje de texto aparte: el objeto `media` del esquema
+  // no lo lleva, y mandarlo dentro haría que el archivo saliera sin contexto.
+  const messages: Array<Record<string, unknown>> = []
+  if (opts.caption) messages.push({ text: opts.caption })
+  messages.push({
+    media: {
+      filename: opts.filename || "documento.pdf",
+      mimeType: opts.mimeType || "application/pdf",
+      url,
+    },
+  })
+
+  try {
+    const res = await fetch(SEND_MESSAGES_URL, {
+      method: "POST",
+      headers: BM_HEADERS,
+      body: JSON.stringify({ chat: { channelId: canal, contactId: cleanContact }, messages }),
+      cache: "no-store",
+    })
+    if (res.status !== 202 && res.status !== 200) {
+      const body = await res.text().catch(() => "")
+      console.error(
+        `[botmaker-push] media ${res.status} para ${cleanContact}:`,
+        body.slice(0, 300),
+      )
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error("[botmaker-push] error enviando media:", e)
+    return false
+  }
+}
+
 export async function sendBotmakerTemplate(
   contactId: string,
   templateName: string,

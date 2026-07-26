@@ -39,6 +39,7 @@ Cubierto hoy:
 | `onboarding-borrador.test.ts` | El alta es irreversible: validar y confirmar antes de crear |
 | `onboarding-fase.test.ts` | Pago → fase onboarding; el borrador sobrevive entre mensajes |
 | `onboarding-frontera.test.ts` | La frontera del cerebro (decisión de arquitectura, 26-jul) |
+| `honestidad-entrega.test.ts` | Vicky afirmó que el correo llegó sin poder saberlo (26-jul) |
 
 ## Lo que falta y por qué
 

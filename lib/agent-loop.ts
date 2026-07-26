@@ -271,7 +271,10 @@ export async function runAgentLoop(params: {
         // reagendar_reunion necesita el contacto para ubicar el booking vigente;
         // el modelo no lo conoce, así que se lo inyectamos del contexto del turno.
         if (
-          (toolName === "reagendar_reunion" || toolName === "registrar_comprobante_transferencia") &&
+          (toolName === "reagendar_reunion" ||
+            toolName === "registrar_comprobante_transferencia" ||
+            // enviar_cotizacion_whatsapp manda el PDF al contacto del turno.
+            toolName === "enviar_cotizacion_whatsapp") &&
           contact
         ) {
           toolInput._contact = contact

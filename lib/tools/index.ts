@@ -106,6 +106,11 @@ import {
   reenviarCotizacionCorreo,
   type ReenviarCotizacionCorreoResultado,
 } from "./reenviar-cotizacion-correo"
+import {
+  enviarCotizacionWhatsappSchema,
+  enviarCotizacionWhatsapp,
+  type EnviarCotizacionWhatsappResult,
+} from "./enviar-cotizacion-whatsapp"
 
 export const TOOL_SCHEMAS = [
   cotizarReferencialSchema,
@@ -135,6 +140,9 @@ export const TOOL_SCHEMAS = [
   // SOLO por correo (regla Lalo 20-jul: no invadir por WhatsApp a quien no
   // pidió ser contactado).
   reenviarCotizacionCorreoSchema,
+  // El PDF por el MISMO WhatsApp: el correo se entrega pero cae en
+  // Promociones/Otros y el cliente reporta "no me llegó" (26-jul).
+  enviarCotizacionWhatsappSchema,
 ] as const
 
 export type ToolResult =
@@ -155,6 +163,7 @@ export type ToolResult =
   | MarcarNoContactarResultado
   | ProgramarSeguimientoResultado
   | ReenviarCotizacionCorreoResultado
+  | EnviarCotizacionWhatsappResult
   | Awaited<ReturnType<typeof registrarComprobanteTransferencia>>
   | { ok: false; error: string }
 
@@ -220,6 +229,10 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "reenviar_cotizacion_correo":
         return await reenviarCotizacionCorreo(input as never)
+
+      case "enviar_cotizacion_whatsapp":
+        // El contacto lo inyecta el agent-loop (_contact); el modelo no lo conoce.
+        return await enviarCotizacionWhatsapp(input as never)
 
       default:
         return {

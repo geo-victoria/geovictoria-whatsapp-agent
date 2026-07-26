@@ -29,6 +29,7 @@ import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { faseDelContacto, armarOnboarding } from "@/lib/onboarding-canal"
+import { honestarMencionesDeCorreo } from "@/lib/honestidad-entrega"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import {
   getSystemPromptV3,
@@ -1030,6 +1031,16 @@ async function processOneTurn(
     // las reglas del prompt): anti-voseo (incl. voseo chileno -ái/-ís), quitar
     // negritas y quitar signos de apertura ¡/¿.
     reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(reply)))
+
+    // 2.7b. HONESTIDAD DE ENTREGA DE CORREO (26-jul). Casos +56983757162 y
+    // +56922041679: Vicky afirmó que la cotización "ya te llegó al correo"
+    // mientras el cliente decía lo contrario. No podía saberlo: el registro de
+    // Zoho solo guarda status "sent" — verificado con 5 envíos de prueba, no
+    // existe "delivered" ni "bounced". Se degrada la afirmación de RECEPCIÓN a
+    // una de ENVÍO (verdadera y comprobable) y se completa el consejo de
+    // búsqueda: el correo pasa SPF/DMARC, así que no cae en spam sino en
+    // Promociones (Gmail) u Otros (Outlook), que es donde el cliente no mira.
+    reply = honestarMencionesDeCorreo(reply)
 
     // 2.8. Blindaje del contacto comercial: SIN EJECUTIVO ANTES DEL PAGO
     // (decisión 17-jul). El número de Anderson NUNCA sale por el chat — ni
