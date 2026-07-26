@@ -47,55 +47,20 @@ function valorDe(b: Borrador, campo: Campo): string | undefined {
  * pedirle de nuevo el RUT a quien acaba de pagar con ese RUT es hacerle
  * repetir el trámite.
  */
-export function mensajeKickoffCL(borrador?: Borrador): string {
-  return (
-    "Felicitaciones, ya eres parte de GeoVictoria 🎉 Tu pago quedó registrado.\n\n" +
-    cuerpoKickoffCL(borrador)
-  )
-}
-
 /**
- * Kickoff de la vía TRANSFERENCIA. Mismo cuerpo, otra cabecera — y con una
- * regla dura que no se puede romper: NUNCA afirmar que el pago quedó
- * confirmado. Se confirma la RECEPCIÓN del comprobante; la verificación del
- * abono la hace finanzas en paralelo (validación blanda, 26-jul).
+ * Acuse de recibo del COMPROBANTE. Solo el acuse: el arranque del onboarding
+ * lo da la plantilla única (lib/onboarding/plantilla.ts), igual que en la vía
+ * del pago online.
+ *
+ * REGLA DURA: nunca afirma que el pago quedó confirmado. Se confirma la
+ * RECEPCIÓN del comprobante; el abono lo verifica finanzas en paralelo
+ * (validación blanda, 26-jul).
  */
-export function mensajeKickoffComprobanteCL(montoFmt: string, borrador?: Borrador): string {
+export function acuseComprobanteCL(montoFmt: string): string {
   return (
     `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y no tienes que esperar nada.\n\n` +
-    cuerpoKickoffCL(borrador)
+    "Te escribo en seguida para dejar tu cuenta creada."
   )
-}
-
-/**
- * Cuerpo compartido: abre el alta por chat y, si el borrador viene SEMBRADO
- * desde la venta (la cotización ya trae razón social y RUT), CONFIRMA esos
- * datos en vez de volver a pedirlos — pedirle de nuevo el RUT a quien acaba de
- * pagar con ese RUT es hacerle repetir el trámite.
- *
- * Sin links: desde el 26-jul el alta NO se deriva al wizard web, la conduce
- * Vicky acá mismo.
- */
-function cuerpoKickoffCL(borrador?: Borrador): string {
-  const cabecera = "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n"
-
-  const nombre = borrador?.empresa.nombre?.trim()
-  const rutCrudo = borrador?.empresa.identificador?.trim()
-  const rut =
-    rutCrudo && identificadorValido(rutCrudo, "cl")
-      ? normalizarIdentificador(rutCrudo, "cl")
-      : rutCrudo
-  if (nombre || rut) {
-    return (
-      cabecera +
-      "De tu cotización ya tengo estos datos de la empresa:\n" +
-      (nombre ? `Empresa: ${nombre}\n` : "") +
-      (rut ? `RUT: ${rut}\n` : "") +
-      "\nLos usamos tal cual? Si hay que cambiar algo, me dices. " +
-      "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, RUT y correo."
-    )
-  }
-  return cabecera + "Son solo 6 datos. Partamos por la empresa: me das la razón social y el RUT?"
 }
 
 /**

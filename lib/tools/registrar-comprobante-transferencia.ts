@@ -35,7 +35,8 @@
 import { getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persistence-v3"
 import { onboardingEnabled, claveFase, claveBorrador } from "@/lib/onboarding/fase"
 import { parsearBorrador, sembrarBorrador } from "@/lib/onboarding/borrador"
-import { mensajeKickoffComprobanteCL } from "@/lib/onboarding/prompt"
+import { acuseComprobanteCL } from "@/lib/onboarding/prompt"
+import { entregarKickoffOnboarding } from "@/lib/onboarding-envio"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 
@@ -268,9 +269,17 @@ export async function registrarComprobanteTransferencia(
       } catch (e) {
         console.error("[comprobante] no se pudo enrolar en onboarding:", e)
       }
+      // Vicky acusa recibo en su respuesta; el arranque del onboarding lo
+      // despacha entregarKickoffOnboarding con la MISMA plantilla que usa el
+      // pago online. Va después del acuse para que el orden sea el natural.
+      entregarKickoffOnboarding(
+        contact,
+        sembrado?.empresa.nombre,
+        sembrado?.empresa.identificador,
+      ).catch((e) => console.error("[comprobante] kickoff onboarding falló:", e))
       return {
         ok: true,
-        mensajeParaProspecto: mensajeKickoffComprobanteCL(montoFmt, sembrado ?? undefined),
+        mensajeParaProspecto: acuseComprobanteCL(montoFmt),
         notaCreada,
         avisoInterno,
       }

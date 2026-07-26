@@ -26,8 +26,7 @@ import { PERFIL_CO } from "./paises/co"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 import { pagoCierraLoop } from "./loop-v2"
 import { onboardingEnabled, claveFase, claveBorrador } from "./onboarding/fase"
-import { mensajeKickoffCL } from "./onboarding/prompt"
-import { entregarKickoffOnboarding } from "./onboarding-canal"
+import { entregarKickoffOnboarding } from "./onboarding-envio"
 import { parsearBorrador, sembrarBorrador, type Borrador } from "./onboarding/borrador"
 
 export type ResultadoTraspaso = {
@@ -93,20 +92,20 @@ export async function cerrarYTraspasarPostPago(
   // por chat, y el gate del webhook atiende las respuestas con el agente de
   // onboarding. Reemplaza al bloque del ejecutivo, no lo suma.
   if (onboardingEnabled() && esCL) {
-    const kickoff = mensajeKickoffCL(borradorSembrado ?? undefined)
-    // Fuera de la ventana de 24 h el texto libre muere en silencio (el cliente
-    // pudo pagar un domingo tras dos días callado). Ahí va la plantilla HSM,
-    // que reabre la ventana; el agente retoma cuando el cliente responde.
-    const via = await entregarKickoffOnboarding(
+    // UN solo mensaje de arranque para las dos vías de pago y para dentro y
+    // fuera de la ventana. Fuera de ventana el texto libre moriría en silencio
+    // (el cliente pudo pagar un domingo tras dos días callado), así que ahí va
+    // la plantilla HSM — con el MISMO texto.
+    const { via, texto } = await entregarKickoffOnboarding(
       contact,
-      kickoff,
       borradorSembrado?.empresa.nombre,
+      borradorSembrado?.empresa.identificador,
     )
     if (via === "fallo") return { contact, traspaso: "push_fallo" }
     await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
-    // Solo el texto libre es un mensaje de Vicky: la plantilla es un disparador
-    // y meterla al historial le daría al modelo un turno que no dijo.
-    if (via === "texto") await appendAssistantV3(contact, kickoff, "cl").catch(() => {})
+    // Solo el texto libre entra al historial: la plantilla la despacha Botmaker
+    // y meterla le daría al modelo un turno que no dijo.
+    if (via === "texto") await appendAssistantV3(contact, texto, "cl").catch(() => {})
     return { contact, traspaso: "enviado" }
   }
 

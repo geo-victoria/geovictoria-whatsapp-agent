@@ -10,11 +10,7 @@
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import {
-  promptOnboardingCL,
-  mensajeKickoffCL,
-  mensajeKickoffComprobanteCL,
-} from "../lib/onboarding/prompt.ts"
+import { promptOnboardingCL, acuseComprobanteCL } from "../lib/onboarding/prompt.ts"
 import {
   TOOL_GUARDAR_DATOS_ONBOARDING,
   TOOL_CONFIRMAR_ALTA_EMPRESA,
@@ -22,6 +18,7 @@ import {
 import {
   PLANTILLA_ONBOARDING_CL,
   paramsPlantillaOnboarding,
+  renderPlantillaOnboarding,
 } from "../lib/onboarding/plantilla.ts"
 import {
   borradorVacio,
@@ -44,23 +41,6 @@ const COMPLETO: Borrador = aplicarDatos(borradorVacio("cl"), {
 // La autonomía, en regex: nada de personas del equipo ni sus datos de contacto.
 const FUGA_EJECUTIVO =
   /anderson|yahel|adiazg|ysegura|ejecutivo te|tu ejecutivo|te contactará|te llamará|\+56 9 ?39|\+52 55/i
-
-describe("kickoff post-pago (reemplaza la presentación del ejecutivo)", () => {
-  test("abre el alta por chat, sin presentar a nadie", () => {
-    const k = mensajeKickoffCL()
-    assert.ok(!FUGA_EJECUTIVO.test(k), "el kickoff no puede presentar ejecutivos")
-    assert.match(k, /razón social/i)
-    assert.match(k, /RUT/)
-    assert.ok(!/https?:\/\//.test(k), "sin links: el alta parte en el chat, no en un wizard")
-  })
-
-  test("respeta el estilo de Vicky", () => {
-    const k = mensajeKickoffCL()
-    assert.ok(!/\bOye\b/.test(k))
-    assert.ok(!/[¿¡]/.test(k), "sin signos de apertura")
-    assert.ok(!/\*/.test(k), "sin negritas")
-  })
-})
 
 describe("no re-preguntar lo que el cliente ya dio (regla Eduardo, 26-jul)", () => {
   const SEMILLA_VENTA = {
@@ -88,29 +68,13 @@ describe("no re-preguntar lo que el cliente ya dio (regla Eduardo, 26-jul)", () 
     assert.equal(b.admin.nombre, "Pablo")
   })
 
-  test("kickoff sembrado: CONFIRMA los datos de la venta en vez de pedirlos", () => {
-    const k = mensajeKickoffCL(sembrarBorrador(null, SEMILLA_VENTA, "cl"))
-    assert.match(k, /De tu cotización ya tengo/)
+  test("el arranque CONFIRMA los datos de la venta en vez de pedirlos", () => {
+    const k = renderPlantillaOnboarding(paramsPlantillaOnboarding("Transportes Viig SpA", "77861333-6"))
     assert.match(k, /Transportes Viig SpA/)
-    assert.match(k, /77861333-6/, "el RUT se muestra normalizado")
-    assert.match(k, /Los usamos tal cual\?/)
+    assert.match(k, /77861333-6/)
+    assert.match(k, /Lo usamos tal cual\?/)
     assert.ok(!/me das la razón social/.test(k), "no puede pedir lo que ya tiene")
     assert.match(k, /quién va a administrar/, "pasa directo a lo que SÍ falta")
-  })
-
-  test("kickoff sembrado respeta estilo y autonomía igual que el vacío", () => {
-    const k = mensajeKickoffCL(sembrarBorrador(null, SEMILLA_VENTA, "cl"))
-    assert.ok(!FUGA_EJECUTIVO.test(k))
-    assert.ok(!/\bOye\b/.test(k))
-    assert.ok(!/[¿¡*]/.test(k))
-    assert.ok(!/https?:\/\//.test(k))
-  })
-
-  test("una semilla con RUT raro no revienta el kickoff (se muestra crudo)", () => {
-    const k = mensajeKickoffCL(
-      sembrarBorrador(null, { empresa: { nombre: "Viig SpA", identificador: "77-B" } }, "cl"),
-    )
-    assert.match(k, /77-B/)
   })
 
   test("el prompt lleva la regla de no re-preguntar", () => {
@@ -123,101 +87,96 @@ describe("no re-preguntar lo que el cliente ya dio (regla Eduardo, 26-jul)", () 
   })
 })
 
-describe("las DOS puertas al post-pago llegan al mismo lugar", () => {
-  // Decisión 26-jul: el alta ya no se deriva al wizard web por ninguna vía.
-  // Pago online → cerrarYTraspasarPostPago → mensajeKickoffCL
-  // Comprobante  → registrarComprobante      → mensajeKickoffComprobanteCL
-  const SEMILLA = { empresa: { nombre: "Transportes Viig SpA", identificador: "77.861.333-6" } }
-  const b = sembrarBorrador(null, SEMILLA, "cl")
+describe("EL mensaje de arranque: uno solo para todos los casos", () => {
+  // Decisión Eduardo 26-jul: la misma plantilla para las dos vías de pago y
+  // para dentro y fuera de la ventana de 24 h. Fuera de ventana el texto libre
+  // muere en silencio — el que acaba de pagar no recibe nada.
+  const RENDER = renderPlantillaOnboarding(
+    paramsPlantillaOnboarding("BluePay Chile SPA", "78387633-7"),
+  )
 
-  test("NINGUNA de las dos manda link del wizard", () => {
-    for (const [via, msg] of [
-      ["pago online", mensajeKickoffCL(b)],
-      ["comprobante", mensajeKickoffComprobanteCL("$890.000", b)],
-    ] as const) {
-      assert.ok(!/https?:\/\//.test(msg), `${via} sigue mandando un link`)
-      assert.ok(!/onboarding-geovictoria|auto-onboarding/i.test(msg), `${via} menciona el wizard`)
-    }
+  test("una sola fuente de verdad: el texto libre SE RENDERIZA del body", () => {
+    // Si alguien edita una de las dos redacciones, esto falla. No pueden
+    // separarse con el tiempo porque no hay dos redacciones.
+    const esperado = PLANTILLA_ONBOARDING_CL.body
+      .replace("${empresa}", "BluePay Chile SPA")
+      .replace("${rut_empresa}", "78387633-7")
+    assert.equal(RENDER, esperado)
+    assert.ok(!/\$\{/.test(RENDER), `quedó una variable sin resolver: ${RENDER}`)
   })
 
-  test("las dos abren el alta por chat con los datos ya sembrados", () => {
-    for (const [via, msg] of [
-      ["pago online", mensajeKickoffCL(b)],
-      ["comprobante", mensajeKickoffComprobanteCL("$890.000", b)],
-    ] as const) {
-      assert.match(msg, /por este mismo chat/, `${via} no abre el alta en el chat`)
-      assert.match(msg, /Transportes Viig SpA/, `${via} no confirma la empresa`)
-      assert.match(msg, /77861333-6/, `${via} no confirma el RUT normalizado`)
-      assert.match(msg, /quién va a administrar/, `${via} no pide el administrador`)
-      assert.ok(!FUGA_EJECUTIVO.test(msg), `${via} filtra un ejecutivo`)
-    }
-  })
-
-  test("el comprobante NUNCA afirma que el pago quedó confirmado", () => {
-    // Regla dura: se confirma la RECEPCIÓN, no el dinero. La verificación del
-    // abono corre en paralelo (validación blanda).
-    const msg = mensajeKickoffComprobanteCL("$890.000", b)
-    assert.match(msg, /Recibí tu comprobante por \$890\.000/)
-    assert.ok(
-      !/pago (fue )?(confirmad|verificad|acreditad|procesad)/i.test(msg),
-      `afirma confirmación del pago: ${msg}`,
-    )
-    assert.ok(!/\bpago quedó registrado\b/.test(msg), "esa frase es de la vía del pago online")
-  })
-
-  test("la vía del pago online sí puede afirmar el pago", () => {
-    // Ahí el cobro es firme, así que la afirmación es cierta.
-    assert.match(mensajeKickoffCL(b), /pago quedó registrado/)
-  })
-
-  test("ambas respetan el estilo de Vicky", () => {
-    for (const msg of [mensajeKickoffCL(b), mensajeKickoffComprobanteCL("$890.000", b)]) {
-      assert.ok(!/\bOye\b/.test(msg))
-      assert.ok(!/[¿¡]/.test(msg), "sin signos de apertura")
-      assert.ok(!/\*/.test(msg), "sin negritas")
-    }
-  })
-})
-
-describe("plantilla HSM para pagos fuera de la ventana de 24 h", () => {
-  // El cliente puede recibir la cotización un viernes y pagar el domingo tras
-  // dos días callado. Ahí el texto libre muere en silencio y el que acaba de
-  // pagar no recibe nada.
   test("no afirma el pago: sirve para las DOS vías", () => {
-    // Con comprobante está PROHIBIDO decir que el pago quedó confirmado. Una
-    // plantilla neutra evita aprobar dos y evita la afirmación insostenible.
+    // Con comprobante está PROHIBIDO decir que el pago quedó confirmado.
     const b = PLANTILLA_ONBOARDING_CL.body
     assert.ok(!/pago|comprobante|transferencia|abonad|acreditad/i.test(b), `menciona el pago: ${b}`)
   })
 
-  test("invita a responder — su único trabajo es reabrir la ventana", () => {
-    assert.match(PLANTILLA_ONBOARDING_CL.body, /respóndeme/i)
-    assert.ok(!/https?:\/\//.test(PLANTILLA_ONBOARDING_CL.body), "sin links")
+  test("confirma empresa y RUT, y pide solo lo que falta", () => {
+    assert.match(RENDER, /BluePay Chile SPA/)
+    assert.match(RENDER, /78387633-7/)
+    assert.match(RENDER, /Lo usamos tal cual\?/)
+    assert.match(RENDER, /quién va a administrar/)
+    assert.ok(!/https?:\/\//.test(RENDER), "sin links: el alta no va al wizard")
   })
 
-  test("un solo parámetro, y es el que siempre tenemos", () => {
-    const vars = PLANTILLA_ONBOARDING_CL.body.match(/\{\{\d+\}\}/g) || []
-    assert.deepEqual(vars, ["{{1}}"], "más parámetros = más fricción de aprobación")
-    assert.deepEqual(paramsPlantillaOnboarding("BluePay Chile SPA"), { "1": "BluePay Chile SPA" })
+  test("usa la sintaxis de Botmaker, NO la de Meta", () => {
+    // Botmaker usa ${variable} con nombre; los {{1}} posicionales de Meta NO
+    // se resuelven — saldrían literales al cliente. Verificado contra las 28
+    // plantillas vicky_* aprobadas en la cuenta.
+    const b = PLANTILLA_ONBOARDING_CL.body
+    assert.ok(!/\{\{\d+\}\}/.test(b), `usa la sintaxis de Meta: ${b}`)
+    assert.match(b, /\$\{empresa\}/)
+    assert.match(b, /\$\{rut_empresa\}/)
   })
 
-  test("sin empresa no queda un hueco raro en el texto", () => {
-    assert.deepEqual(paramsPlantillaOnboarding(""), { "1": "tu empresa" })
-    assert.deepEqual(paramsPlantillaOnboarding(undefined), { "1": "tu empresa" })
+  test("los params calzan EXACTO con las variables del body", () => {
+    const vars = [...PLANTILLA_ONBOARDING_CL.body.matchAll(/\$\{(\w+)\}/g)].map((m) => m[1])
+    assert.deepEqual(vars.sort(), ["empresa", "rut_empresa"])
+    assert.deepEqual(Object.keys(paramsPlantillaOnboarding("X", "Y")).sort(), vars.sort())
+  })
+
+  test("sin datos no quedan huecos raros en el texto", () => {
+    const vacio = renderPlantillaOnboarding(paramsPlantillaOnboarding("", ""))
+    assert.ok(!/\$\{/.test(vacio))
+    assert.match(vacio, /tu empresa/)
+    assert.match(vacio, /el de tu cotización/)
   })
 
   test("categoría UTILITY, no MARKETING", () => {
-    // Es post-transacción sobre una cuenta recién contratada. MARKETING tendría
+    // Post-transacción sobre una cuenta recién contratada. MARKETING tendría
     // peor aprobación y quedaría sujeta a los límites promocionales.
     assert.equal(PLANTILLA_ONBOARDING_CL.category, "UTILITY")
   })
 
   test("respeta el estilo de Vicky y cabe en el límite de WhatsApp", () => {
-    const b = PLANTILLA_ONBOARDING_CL.body
-    assert.ok(!/\bOye\b/.test(b))
-    assert.ok(!/[¿¡*]/.test(b), "sin signos de apertura ni negritas")
-    assert.ok(!FUGA_EJECUTIVO.test(b))
-    assert.ok(b.length <= 1024, `body de ${b.length} chars, el máximo es 1024`)
+    for (const t of [PLANTILLA_ONBOARDING_CL.body, RENDER]) {
+      assert.ok(!/\bOye\b/.test(t))
+      assert.ok(!/[¿¡*]/.test(t), "sin signos de apertura ni negritas")
+      assert.ok(!FUGA_EJECUTIVO.test(t))
+      assert.ok(t.length <= 1024, `body de ${t.length} chars, el máximo es 1024`)
+    }
+  })
+})
+
+describe("acuse del comprobante (va aparte del arranque)", () => {
+  test("confirma la RECEPCIÓN, nunca el pago", () => {
+    const a = acuseComprobanteCL("$890.000")
+    assert.match(a, /Recibí tu comprobante por \$890\.000/)
+    assert.ok(
+      !/pago (fue )?(confirmad|verificad|acreditad|procesad)|pago quedó registrado/i.test(a),
+      `afirma el pago: ${a}`,
+    )
+  })
+
+  test("anuncia el arranque que viene enseguida", () => {
+    assert.match(acuseComprobanteCL("$1.000"), /en seguida/i)
+  })
+
+  test("respeta el estilo de Vicky", () => {
+    const a = acuseComprobanteCL("$890.000")
+    assert.ok(!/\bOye\b/.test(a))
+    assert.ok(!/[¿¡*]/.test(a))
+    assert.ok(!/https?:\/\//.test(a), "sin links")
   })
 })
 
