@@ -17,6 +17,7 @@ import {
   closeFollowup,
   findContactByQuoteId,
   getKvValue,
+  getQuotePointers,
   setKvValue,
 } from "./supabase-persistence-v3"
 import { cancelPendingCallbacks } from "./dapta-voice"
@@ -24,8 +25,9 @@ import { sendBotmakerMessage } from "./botmaker-push-v3"
 import { PERFIL_CO } from "./paises/co"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 import { pagoCierraLoop } from "./loop-v2"
-import { onboardingEnabled, claveFase } from "./onboarding/fase"
+import { onboardingEnabled, claveFase, claveBorrador } from "./onboarding/fase"
 import { mensajeKickoffCL } from "./onboarding/prompt"
+import { parsearBorrador, sembrarBorrador, type Borrador } from "./onboarding/borrador"
 
 export type ResultadoTraspaso = {
   contact?: string
@@ -57,8 +59,26 @@ export async function cerrarYTraspasarPostPago(
   // Vicky onboarding — CHILE PRIMERO (decisión 26-jul): el pago es la ÚNICA
   // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
   // traspaso a ejecutivo humano hasta que la fase se abra para ellos.
+  let borradorSembrado: Borrador | null = null
   if (onboardingEnabled() && esCL) {
     await setKvValue(claveFase(contact), "onboarding").catch(() => {})
+    // Sembrar el borrador con lo que la VENTA ya sabe (regla de Eduardo,
+    // 26-jul: no volver a preguntar lo que el cliente ya dio — confirmarlo o
+    // actualizarlo). La cotización PAGADA trae razón social y RUT; si el
+    // contacto ya dijo algo en la fase, eso queda por encima de la semilla.
+    try {
+      const pointers = await getQuotePointers(contact)
+      const pagada = pointers.find((p) => p.quoteId === quoteId) || pointers[0]
+      const previo = parsearBorrador(await getKvValue(claveBorrador(contact)).catch(() => null))
+      borradorSembrado = sembrarBorrador(
+        previo,
+        { empresa: { nombre: pagada?.empresa, identificador: pagada?.rut } },
+        "cl",
+      )
+      await setKvValue(claveBorrador(contact), JSON.stringify(borradorSembrado))
+    } catch {
+      borradorSembrado = null
+    }
   }
 
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
@@ -72,7 +92,7 @@ export async function cerrarYTraspasarPostPago(
   // por chat, y el gate del webhook atiende las respuestas con el agente de
   // onboarding. Reemplaza al bloque del ejecutivo, no lo suma.
   if (onboardingEnabled() && esCL) {
-    const kickoff = mensajeKickoffCL()
+    const kickoff = mensajeKickoffCL(borradorSembrado ?? undefined)
     const pushedKickoff = await sendBotmakerMessage(contact, kickoff).catch(() => false)
     if (!pushedKickoff) return { contact, traspaso: "push_fallo" }
     await setKvValue(kvKey, new Date().toISOString()).catch(() => {})

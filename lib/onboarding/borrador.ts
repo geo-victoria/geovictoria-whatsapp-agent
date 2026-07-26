@@ -217,6 +217,23 @@ export function parsearBorrador(json: string | null | undefined): Borrador | nul
   }
 }
 
+/**
+ * Borrador inicial de la fase: la SEMILLA con lo que la venta ya sabe (razón
+ * social y RUT de la cotización pagada) por debajo, y lo que el cliente haya
+ * dicho en la propia fase (`previo`) POR ENCIMA — el cliente siempre gana.
+ * Regla de Eduardo (26-jul): no volver a preguntar lo que el cliente ya dio;
+ * solo confirmarlo, actualizarlo o cambiarlo si él quiere usar otros datos.
+ */
+export function sembrarBorrador(
+  previo: Borrador | null,
+  semilla: DatosParciales,
+  pais: PaisOnboarding,
+): Borrador {
+  const base = aplicarDatos(borradorVacio(pais), semilla)
+  if (!previo) return base
+  return aplicarDatos(base, { empresa: previo.empresa, admin: previo.admin })
+}
+
 // ── Confirmación con el cliente ─────────────────────────────────────────────
 
 /**

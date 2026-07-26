@@ -15,7 +15,13 @@ import {
   TOOL_GUARDAR_DATOS_ONBOARDING,
   TOOL_CONFIRMAR_ALTA_EMPRESA,
 } from "../lib/onboarding/tools.ts"
-import { borradorVacio, aplicarDatos, type Borrador } from "../lib/onboarding/borrador.ts"
+import {
+  borradorVacio,
+  aplicarDatos,
+  sembrarBorrador,
+  camposPendientes,
+  type Borrador,
+} from "../lib/onboarding/borrador.ts"
 
 const COMPLETO: Borrador = aplicarDatos(borradorVacio("cl"), {
   empresa: { nombre: "Transportes Viig SpA", identificador: "77.861.333-6" },
@@ -45,6 +51,67 @@ describe("kickoff post-pago (reemplaza la presentación del ejecutivo)", () => {
     assert.ok(!/\bOye\b/.test(k))
     assert.ok(!/[¿¡]/.test(k), "sin signos de apertura")
     assert.ok(!/\*/.test(k), "sin negritas")
+  })
+})
+
+describe("no re-preguntar lo que el cliente ya dio (regla Eduardo, 26-jul)", () => {
+  const SEMILLA_VENTA = {
+    empresa: { nombre: "Transportes Viig SpA", identificador: "77.861.333-6" },
+  }
+
+  test("la cotización pagada siembra el borrador: empresa deja de estar pendiente", () => {
+    const b = sembrarBorrador(null, SEMILLA_VENTA, "cl")
+    const pendientes = camposPendientes(b)
+    assert.ok(!pendientes.includes("empresa.nombre"))
+    assert.ok(!pendientes.includes("empresa.identificador"))
+    assert.ok(pendientes.includes("admin.email"), "lo del admin sí sigue pendiente")
+  })
+
+  test("lo que el cliente dijo EN LA FASE le gana a la semilla de la venta", () => {
+    // El cliente pudo haber corregido la razón social antes de que llegara el
+    // pago (webhook y cron corren en paralelo): su versión no se pisa.
+    const previo = aplicarDatos(borradorVacio("cl"), {
+      empresa: { nombre: "Viig Logística SpA" },
+      admin: { nombre: "Pablo" },
+    })
+    const b = sembrarBorrador(previo, SEMILLA_VENTA, "cl")
+    assert.equal(b.empresa.nombre, "Viig Logística SpA")
+    assert.equal(b.empresa.identificador, "77.861.333-6", "lo no dicho sí se siembra")
+    assert.equal(b.admin.nombre, "Pablo")
+  })
+
+  test("kickoff sembrado: CONFIRMA los datos de la venta en vez de pedirlos", () => {
+    const k = mensajeKickoffCL(sembrarBorrador(null, SEMILLA_VENTA, "cl"))
+    assert.match(k, /De tu cotización ya tengo/)
+    assert.match(k, /Transportes Viig SpA/)
+    assert.match(k, /77861333-6/, "el RUT se muestra normalizado")
+    assert.match(k, /Los usamos tal cual\?/)
+    assert.ok(!/me das la razón social/.test(k), "no puede pedir lo que ya tiene")
+    assert.match(k, /quién va a administrar/, "pasa directo a lo que SÍ falta")
+  })
+
+  test("kickoff sembrado respeta estilo y autonomía igual que el vacío", () => {
+    const k = mensajeKickoffCL(sembrarBorrador(null, SEMILLA_VENTA, "cl"))
+    assert.ok(!FUGA_EJECUTIVO.test(k))
+    assert.ok(!/\bOye\b/.test(k))
+    assert.ok(!/[¿¡*]/.test(k))
+    assert.ok(!/https?:\/\//.test(k))
+  })
+
+  test("una semilla con RUT raro no revienta el kickoff (se muestra crudo)", () => {
+    const k = mensajeKickoffCL(
+      sembrarBorrador(null, { empresa: { nombre: "Viig SpA", identificador: "77-B" } }, "cl"),
+    )
+    assert.match(k, /77-B/)
+  })
+
+  test("el prompt lleva la regla de no re-preguntar", () => {
+    const p = promptOnboardingCL(borradorVacio("cl"), { altaSolicitada: false })
+    assert.match(p, /NUNCA vuelvas a preguntar un dato que ya figure como guardado/)
+    const conDatos = promptOnboardingCL(sembrarBorrador(null, SEMILLA_VENTA, "cl"), {
+      altaSolicitada: false,
+    })
+    assert.match(conDatos, /NO se vuelven a preguntar; solo confirmar o actualizar/)
   })
 })
 
@@ -87,7 +154,7 @@ describe("prompt de la fase: el estado inyectado manda", () => {
       empresa: { nombre: "Transportes Viig SpA", identificador: "77.861.333-6" },
     })
     const p = promptOnboardingCL(b, { altaSolicitada: false })
-    assert.match(p, /Datos ya guardados:/)
+    assert.match(p, /Datos ya guardados \(NO se vuelven a preguntar/)
     assert.match(p, /Transportes Viig SpA/)
     const pendientes = p.slice(p.indexOf("Datos pendientes:"))
     assert.ok(!pendientes.includes("razón social"), "la razón social ya no puede estar pendiente")

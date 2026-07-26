@@ -18,6 +18,8 @@ import {
   problemas,
   borradorCompleto,
   resumenParaConfirmar,
+  identificadorValido,
+  normalizarIdentificador,
 } from "./borrador.ts"
 
 /** Etiquetas para hablarle al cliente chileno (el genérico dice "identificador"). */
@@ -39,13 +41,34 @@ function valorDe(b: Borrador, campo: Campo): string | undefined {
  * Primer mensaje de la fase, enviado por el traspaso post-pago en vez de la
  * presentación del ejecutivo. Sin nombres de personas, sin links: el alta
  * parte aquí mismo, en el chat.
+ *
+ * Si el borrador viene SEMBRADO desde la venta (la cotización pagada ya trae
+ * razón social y RUT), esos datos se CONFIRMAN, no se vuelven a preguntar —
+ * pedirle de nuevo el RUT a quien acaba de pagar con ese RUT es hacerle
+ * repetir el trámite.
  */
-export function mensajeKickoffCL(): string {
-  return (
+export function mensajeKickoffCL(borrador?: Borrador): string {
+  const cabecera =
     "Felicitaciones, ya eres parte de GeoVictoria 🎉 Tu pago quedó registrado.\n\n" +
-    "Ahora te creo la cuenta por este mismo chat, son solo 6 datos y toma un par de minutos.\n\n" +
-    "Partamos por la empresa: me das la razón social y el RUT?"
-  )
+    "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n"
+
+  const nombre = borrador?.empresa.nombre?.trim()
+  const rutCrudo = borrador?.empresa.identificador?.trim()
+  const rut =
+    rutCrudo && identificadorValido(rutCrudo, "cl")
+      ? normalizarIdentificador(rutCrudo, "cl")
+      : rutCrudo
+  if (nombre || rut) {
+    return (
+      cabecera +
+      "De tu cotización ya tengo estos datos de la empresa:\n" +
+      (nombre ? `Empresa: ${nombre}\n` : "") +
+      (rut ? `RUT: ${rut}\n` : "") +
+      "\nLos usamos tal cual? Si hay que cambiar algo, me dices. " +
+      "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, RUT y correo."
+    )
+  }
+  return cabecera + "Son solo 6 datos. Partamos por la empresa: me das la razón social y el RUT?"
 }
 
 /**
@@ -79,6 +102,11 @@ export function promptOnboardingCL(
     "por mensaje. Conversación natural, no interrogatorio.\n" +
     "- Si la tool marca un dato inválido (un RUT que no cuadra, un correo mal escrito), dilo con " +
     "simpleza y pide de nuevo SOLO ese dato.\n" +
+    "- NUNCA vuelvas a preguntar un dato que ya figure como guardado — incluidos los que vienen " +
+    "de la cotización de la venta. Si necesitas certeza, confírmalo de pasada (la cuenta va a " +
+    "nombre de la misma empresa de la cotización, cierto?); y si el cliente quiere usar OTRO " +
+    "dato (otra razón social, otro correo), guarda el nuevo con guardar_datos_onboarding y el " +
+    "anterior queda pisado.\n" +
     "- El estado del alta es el que devuelve la tool, nunca tu memoria.\n\n" +
     "# Confirmación y alta (paso irreversible)\n" +
     "- Cuando el borrador esté COMPLETO, muestra al cliente el resumen EXACTO que te entrega la " +
@@ -123,7 +151,9 @@ export function promptOnboardingCL(
 
   return (
     base +
-    (guardados.length ? `Datos ya guardados:\n${guardados.join("\n")}\n` : "Aún no hay datos guardados.\n") +
+    (guardados.length
+      ? `Datos ya guardados (NO se vuelven a preguntar; solo confirmar o actualizar):\n${guardados.join("\n")}\n`
+      : "Aún no hay datos guardados.\n") +
     (invalidos.length ? `Datos que vinieron inválidos (re-pedir):\n${invalidos.join("\n")}\n` : "") +
     `Datos pendientes: ${pendientes.map((c) => ETIQUETA_CL[c]).join(", ")}.`
   )
