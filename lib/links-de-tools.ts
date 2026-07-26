@@ -22,7 +22,7 @@
  * pasarela) llega al cliente sin tener que acordarse de tocar el regex.
  */
 
-type ToolCallLike = { ok?: boolean; output?: unknown }
+type ToolCallLike = { name?: string; ok?: boolean; output?: unknown }
 
 const URL_RE = /https?:\/\/[^\s"'<>)\]}\\]+/gi
 

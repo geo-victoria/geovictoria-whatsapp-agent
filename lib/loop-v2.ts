@@ -237,7 +237,13 @@ export function calcularProximoToque(
 // (dirección conservadora); un falso negativo cae al flujo normal.
 
 export type SenalEspera = {
-  tipo: "proxima_semana" | "fin_de_semana" | "manana" | "largo_plazo" | "espera_tercero"
+  tipo:
+    | "proxima_semana"
+    | "fin_de_semana"
+    | "manana"
+    | "dia_nombrado"
+    | "largo_plazo"
+    | "espera_tercero"
   cuando: Date
 }
 
@@ -266,6 +272,22 @@ const RE_EVALUANDO =
 // suprime la categoría espera_tercero (las de fecha concreta ganan igual).
 const RE_INMEDIATO =
   /\b(enseguida|de inmediato|ahora mismo|al ?tiro|en un rat(it)?o|en unos minutos|en breve|en un momento)\b/
+// DÍA DE LA SEMANA NOMBRADO — el hueco del caso Tamara (+56966432322, 24-jul):
+// pidió que no la contactaran "hasta el martes" y el clasificador devolvía null,
+// así que el loop la trataba con cadencia normal. Ninguna de las categorías
+// anteriores mira un día concreto: "próxima semana" sí, "mañana" sí, "el martes"
+// no. Se detecta el día nombrado y se agenda a su PRÓXIMA ocurrencia.
+const RE_DIA_SEMANA =
+  /\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/
+const DIAS_SEMANA: Record<string, number> = {
+  domingo: 0,
+  lunes: 1,
+  martes: 2,
+  miercoles: 3,
+  jueves: 4,
+  viernes: 5,
+  sabado: 6,
+}
 
 /**
  * Clasifica el mensaje del cliente y devuelve cuándo corresponde el próximo
@@ -298,6 +320,16 @@ export function clasificarSenalEspera(
     return { tipo: "proxima_semana", cuando: alas9En(hastaLunes + 1) } // martes
   if (RE_FINDE.test(texto)) return { tipo: "fin_de_semana", cuando: alas9En(hastaLunes) }
   if (RE_PASADO_MANANA.test(texto)) return { tipo: "manana", cuando: alas9En(2) }
+  // Día nombrado ("el martes", "hasta el jueves"): próxima ocurrencia, 1..7 días
+  // adelante. Si el cliente nombra el día de HOY se entiende la semana siguiente
+  // — quien dice "hablamos el martes" un martes no habla del rato que viene.
+  // Un finde nombrado lo corre ajustarAHabil al lunes, como todo lo demás.
+  const diaNombrado = texto.match(RE_DIA_SEMANA)?.[1]
+  if (diaNombrado) {
+    const objetivo = DIAS_SEMANA[diaNombrado]
+    const faltan = (objetivo - hoy.weekday + 7) % 7 || 7
+    return { tipo: "dia_nombrado", cuando: alas9En(faltan) }
+  }
   if (RE_MANANA.test(texto) || (/\bhoy\b/.test(texto) && RE_HOY_DEFINE.test(texto)))
     return { tipo: "manana", cuando: alas9En(1) }
   if (RE_LARGO.test(texto)) return { tipo: "largo_plazo", cuando: alas9En(7) }
