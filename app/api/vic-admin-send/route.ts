@@ -14,7 +14,7 @@
  */
 
 import { NextResponse } from "next/server"
-import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendBotmakerTemplate, sendBotmakerMedia } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -71,6 +71,10 @@ export async function POST(req: Request): Promise<Response> {
     params?: Record<string, string>
     /** Línea por la que sale (channelId o número, ej. "573181070737"). Default: línea CL. */
     channel?: string
+    /** via="media": URL pública del archivo a enviar (debe ser descargable por Botmaker). */
+    url?: string
+    filename?: string
+    mimeType?: string
   } = {}
   try {
     body = (await req.json()) as typeof body
@@ -94,10 +98,36 @@ export async function POST(req: Request): Promise<Response> {
       { status: ok ? 200 : 502 },
     )
   }
+  // Modo ARCHIVO (26-jul): body = { via:"media", contact, url, filename?, text? }.
+  // Manda un PDF por WhatsApp en vez de un link — el caso que motivó
+  // enviar_cotizacion_whatsapp. Sirve además para rescates manuales y para
+  // verificar el envío de media sin depender del flujo conversacional.
+  // Requiere ventana de 24h abierta, igual que cualquier mensaje libre.
+  if ((body.via || "").toLowerCase() === "media") {
+    const url = (body.url || "").trim()
+    if (!contact || !url) {
+      return NextResponse.json({ ok: false, error: "contact y url requeridos" }, { status: 400 })
+    }
+    const channel = (body.channel || "").trim() || undefined
+    const ok = await sendBotmakerMedia(contact, url, {
+      filename: (body.filename || "").trim() || undefined,
+      mimeType: (body.mimeType || "").trim() || undefined,
+      caption: text || undefined,
+      channelId: channel,
+    }).catch(() => false)
+    if (ok && text) await appendAssistantV3(contact, text).catch(() => {})
+    return NextResponse.json(
+      { ok, via: "media", contact, url, channel: channel || "default(CL)" },
+      { status: ok ? 200 : 502 },
+    )
+  }
   // via=cloud → línea de Meta directa (Cloud API). Por defecto, Botmaker (agente).
   const via = (body.via || new URL(req.url).searchParams.get("via") || "botmaker").trim().toLowerCase()
   if (!contact || !text) {
-    return NextResponse.json({ ok: false, error: "contact y text requeridos" }, { status: 400 })
+    return NextResponse.json(
+      { ok: false, error: "contact y text requeridos (para archivos: via='media' + url)" },
+      { status: 400 },
+    )
   }
   if (via === "cloud" || via === "meta") {
     const result = await sendCloudApi(contact.replace(/\D/g, ""), text)
