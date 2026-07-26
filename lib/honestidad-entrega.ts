@@ -37,21 +37,34 @@
 const L = "\\p{L}"
 const re = (patron: string) => new RegExp(`(?<!${L})(?:${patron})(?!${L})`, "giu")
 
+/**
+ * Todos los reemplazos usan "salió" y NUNCA un pronombre de objeto ("te la
+ * envié"). Motivo, encontrado el 26-jul antes de que llegara a producción: el
+ * mensaje de entrega más frecuente del sistema dice "También te llegó el PDF
+ * de respaldo a tu correo" — con el objeto DESPUÉS del verbo. Reemplazarlo por
+ * "te la envié" producía "También te la envié el PDF", con la concordancia
+ * rota. "Salió" convierte la cosa enviada en sujeto, así que funciona con el
+ * objeto antes o después y sin género:
+ *
+ *   "La cotización ya te llegó al correo"  → "La cotización ya salió al correo"
+ *   "También te llegó el PDF a tu correo"  → "También salió el PDF a tu correo"
+ *
+ * Una frase rota daña más la credibilidad que la sobreafirmación que corrige:
+ * ante la duda, el reemplazo tiene que ser gramatical SIEMPRE.
+ */
 const AFIRMACIONES: Array<[RegExp, string]> = [
-  // "ya está en tu correo" — antes que las de "estar", que son más laxas.
   [re("ya\\s+est[aá]\\s+en\\s+tu\\s+(?:bandeja|correo|casilla)"), "ya salió a tu correo"],
-  // "ya te llegó (al correo)" / "ya le llegó"
-  [re("ya\\s+(?:te|le|les)\\s+lleg[oó]"), "ya te la envié"],
-  [re("(?:te|le|les)\\s+lleg[oó]"), "te la envié"],
-  // "ya la recibiste" / "ya lo recibió"
-  [re("ya\\s+l[oa]s?\\s+recib(?:iste|i[oó]|ieron)"), "ya te la envié"],
-  // "debe(ría) estar en tu bandeja"
   [
     re("(?:deber[ií]a|debe)\\s+estar\\s+en\\s+tu\\s+(?:bandeja|correo|casilla)"),
     "salió a tu correo",
   ],
   // "el correo llegó" / "la cotización llegó" — NO toca "el reloj llegó".
   [re("(?:el\\s+correo|la\\s+cotizaci[oó]n|el\\s+mail)\\s+(?:ya\\s+)?lleg[oó]"), "eso salió"],
+  // "ya te llegó" / "te llegó" — el sujeto sigue siendo lo enviado.
+  [re("ya\\s+(?:te|le|les)\\s+lleg[oó]"), "ya salió"],
+  [re("(?:te|le|les)\\s+lleg[oó]"), "salió"],
+  // "ya la recibiste" / "ya lo recibió"
+  [re("ya\\s+l[oa]s?\\s+recib(?:iste|i[oó]|ieron)"), "ya salió"],
 ]
 
 /** Consejo de búsqueda incompleto: solo spam. */

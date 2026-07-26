@@ -52,14 +52,42 @@ test("el detector de afirmaciones realmente detecta", () => {
   }
 })
 
+describe("el mensaje de entrega de producción (el más frecuente del sistema)", () => {
+  // Bug encontrado el 26-jul ANTES de producción: la plantilla obligatoria de
+  // entrega dice "También te llegó el PDF de respaldo a tu correo" — con el
+  // objeto DESPUÉS del verbo. El reemplazo original ("te la envié") producía
+  // "También te la envié el PDF", con la concordancia rota, en CADA entrega de
+  // cotización formal.
+  const ENTREGA =
+    "Listo! 🎉\n" +
+    "Aquí revisas, aceptas y pagas tu cotización: https://cotizacion.geovictoria.com/quote-acceptance.html?token=abc\n" +
+    "También te llegó el PDF de respaldo a tu correo.\n" +
+    "Con el pago confirmado, yo misma te acompaño con la puesta en marcha 😊"
+
+  test("no deja frases rotas: el objeto puede ir DESPUÉS del verbo", () => {
+    const out = honestarEntregaCorreo(ENTREGA)
+    assert.ok(!/te\s+l[oa]s?\s+envié\s+(?:el|la|los|las)\s/.test(out), `concordancia rota: ${out}`)
+    assert.match(out, /También salió el PDF de respaldo a tu correo/)
+  })
+
+  test("y con el objeto ANTES del verbo también queda bien", () => {
+    const out = honestarEntregaCorreo("La cotización ya te llegó al correo pablo@viig.cl.")
+    assert.match(out, /La cotización ya salió al correo pablo@viig\.cl/)
+  })
+
+  test("el link de aceptación no se toca", () => {
+    assert.ok(honestarEntregaCorreo(ENTREGA).includes("quote-acceptance.html?token=abc"))
+  })
+})
+
 describe("los dos casos reales", () => {
   test("caso +56922041679: 'ya te llegó al correo' se degrada a envío", () => {
     const original =
       "Hola Wili! La cotización ya te llegó al correo gfuentes@wgservicios.cl cuando la generé."
     const out = honestarEntregaCorreo(original)
     assert.ok(!AFIRMA_RECEPCION.test(out), `sigue afirmando recepción: ${out}`)
-    assert.match(out, /envié/)
-    // El dato verdadero (a qué dirección salió) se conserva.
+    // Dice ENVÍO, no recepción. Y conserva el dato verdadero: a qué dirección salió.
+    assert.match(out, /salió/)
     assert.match(out, /gfuentes@wgservicios\.cl/)
   })
 
@@ -88,7 +116,7 @@ describe("afirmaciones de recepción, en todas sus formas", () => {
   })
 
   test("conserva la mayúscula cuando la afirmación abre la frase", () => {
-    assert.match(honestarEntregaCorreo("Te llegó la cotización."), /^Te la envié/)
+    assert.match(honestarEntregaCorreo("Te llegó la cotización."), /^Salió la cotización/)
   })
 
   test("es idempotente: aplicarla dos veces no deforma el texto", () => {
@@ -154,7 +182,7 @@ describe("las dos correcciones juntas (lo que corre en la ruta)", () => {
       "Si no la encuentras, revisa tu carpeta de spam."
     const out = honestarMencionesDeCorreo(original)
     assert.ok(!AFIRMA_RECEPCION.test(out), `sigue afirmando recepción: ${out}`)
-    assert.match(out, /envié/)
+    assert.match(out, /salió/)
     assert.match(out, /Promociones/)
     assert.match(out, /Otros/)
   })
