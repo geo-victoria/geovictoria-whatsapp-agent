@@ -2,7 +2,14 @@
  * Webhook de la línea de WhatsApp de COLOMBIA (+57 318 107 0737).
  *
  * Ruta delgada por país: la acción de código de la línea CO apunta ACÁ; la
- * chilena sigue en /api/vic-botmaker-v3. Imposible cruzar países por config.
+ * chilena sigue en /api/vic-botmaker-v3.
+ *
+ * OJO — el Master Bot de Botmaker rutea por ID DEL CANAL (la línea a la que el
+ * cliente escribió), no por el prefijo del número. Un +56 que escriba al número
+ * colombiano aterriza acá. Por eso este webhook REENVÍA al de su país todo lo
+ * que no sea +57 (ver lib/ruteo-pais.ts): el prefijo decide QUÉ Vicky atiende
+ * (prompt, moneda, NIT/RUT/RFC); el canal de origen decide POR QUÉ LÍNEA se
+ * responde. Antes de abrir las líneas CO/MX esto sí era imposible por config.
  *
  * HEREDA EL ESQUELETO ENDURECIDO DE CHILE (mismas piezas, misma razón):
  *   - ASÍNCRONO: responde {reply:""} de inmediato y procesa con after();
@@ -25,6 +32,7 @@
 
 import { NextResponse, after } from "next/server"
 import { runAgentLoop } from "@/lib/agent-loop"
+import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { getSystemPromptCO, formatCotizacionExistenteCO } from "@/lib/paises/co/prompt"
@@ -48,6 +56,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
+import { reenviarSiNoEsDeEstePais } from "@/lib/ruteo-pais"
 import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
@@ -226,13 +235,20 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   }
   // ALLOWLIST de dominios (caso Transportes Viig CL, 22-jul): todo link cuyo
   // dominio no esté en la lista blanca se considera fabricado y se retira.
+  // PROCEDENCIA ANTES QUE DOMINIO (26-jul, espejo del webhook CL): una URL que
+  // salió textual de una tool OK de este turno la produjo nuestro backend — se
+  // respeta aunque su dominio no esté enumerado.
+  const urlsDeToolsCo = urlsDeToolsDelTurno(result.toolCalls)
   const DOMINIOS_VICKY_CO =
     /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|geovictoria-demo-agent\.vercel\.app|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
   for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
-    if (!DOMINIOS_VICKY_CO.test(u)) {
-      console.error(`[vic-co] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
-      reply = reply.split(u).join("(te lo hago llegar enseguida)").trim()
+    if (DOMINIOS_VICKY_CO.test(u)) continue
+    if (vieneDeUnaTool(u, urlsDeToolsCo)) {
+      console.log(`[vic-co] LINK_DE_TOOL_RESCATADO contact=${contact} url=${u.slice(0, 140)}`)
+      continue
     }
+    console.error(`[vic-co] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
+    reply = reply.split(u).join("(te lo hago llegar enseguida)").trim()
   }
 
   let toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
@@ -509,6 +525,26 @@ export async function POST(request: Request): Promise<NextResponse> {
         // resolverlo contra la API de Botmaker.
         const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
         if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
+      }
+    }
+
+    // Ruteo de retorno (26-jul): el Master Bot rutea por ID DEL CANAL, así que
+    // un +56 o un +52 que escriba a la LÍNEA colombiana aterriza acá. Sin esto
+    // recibía prompt colombiano, precios en COP y la pregunta por el NIT. Se
+    // reenvía al webhook de su país (el body crudo conserva audio/imagen/PDF) y
+    // se devuelve su respuesta tal cual. Va ANTES del gate de observación: el
+    // país del contacto manda sobre el modo de esta línea.
+    if (contact && !simulacion) {
+      const ruteo = await reenviarSiNoEsDeEstePais({
+        contact,
+        paisLocal: "co",
+        requestUrl: request.url,
+        body,
+        etiquetaLog: "[vic-co][ruteo]",
+      })
+      if (ruteo.reenviado) {
+        if ("fallo" in ruteo) return NextResponse.json({ reply: "" })
+        return NextResponse.json(ruteo.data, { status: ruteo.status })
       }
     }
 

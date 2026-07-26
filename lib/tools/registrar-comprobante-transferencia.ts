@@ -9,13 +9,27 @@
  * transferencia y quedaron INVISIBLES para el sistema (Supermercado Sur,
  * ELEAM) — esta tool cierra ese hoyo de visibilidad.
  *
+ * v2 VALIDACIÓN BLANDA (decisión Lalo 26-jul, MVP/piloto de revenue): la
+ * verificación bancaria deja de BLOQUEAR al cliente. Si Vicky pudo leer el
+ * comprobante, el acceso al onboarding sale en ese mismo turno; finanzas sigue
+ * verificando en paralelo, ahora como auditoría. Si el abono no aparece, el
+ * equipo corta el onboarding a mano. Antes el cliente ya había pagado y quedaba
+ * esperando hasta 24 horas hábiles — justo el punto donde la inmediatez (la
+ * ventaja central de Vicky) se caía.
+ *
+ * Aplica a CL y MX. Colombia no entra: paga solo con tarjeta vía MercadoPago y
+ * su set de tools no expone esta función.
+ *
  * Qué hace:
  *   1. Asocia el comprobante a la cotización formal VIGENTE del contacto
  *      (puntero multi-RUT más reciente).
  *   2. Deja una NOTA en la cotización de Zoho con el detalle detectado.
- *   3. Avisa al equipo por WhatsApp (best-effort, ventana de 24h mediante).
- *   4. Devuelve mensajeParaProspecto: recepción confirmada, pago EN
- *      VERIFICACIÓN — sin afirmar jamás que el pago quedó confirmado.
+ *   3. Avisa al equipo por WhatsApp (best-effort, ventana de 24h mediante),
+ *      marcando si hubo habilitación blanda para que finanzas sepa que el
+ *      cliente ya está adentro.
+ *   4. Devuelve mensajeParaProspecto: recepción confirmada + acceso al
+ *      onboarding si el comprobante era legible. Sin afirmar JAMÁS que el pago
+ *      quedó confirmado — se confirma la recepción, no el dinero.
  */
 
 import { getQuotePointers } from "@/lib/supabase-persistence-v3"
@@ -32,7 +46,7 @@ const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE
 export const registrarComprobanteTransferenciaSchema = {
   name: "registrar_comprobante_transferencia",
   description:
-    "Registra un comprobante de transferencia bancaria que el cliente envió por el chat (imagen o PDF descrito en el historial). Úsala SIEMPRE que el cliente mande un comprobante de pago de su cotización. Extrae del comprobante lo que se vea: monto transferido, banco y fecha. La tool asocia el comprobante a la cotización vigente, avisa al equipo de finanzas y devuelve mensajeParaProspecto para confirmar la RECEPCIÓN (el pago queda EN VERIFICACIÓN — nunca afirmes tú que el pago ya está confirmado). Copia el mensajeParaProspecto TAL CUAL.",
+    "Registra un comprobante de transferencia bancaria que el cliente envió por el chat (imagen o PDF descrito en el historial). Úsala SIEMPRE que el cliente mande un comprobante de pago de su cotización. Extrae del comprobante lo que se vea: monto transferido, banco y fecha. La tool asocia el comprobante a la cotización vigente, avisa al equipo de finanzas y devuelve el mensajeParaProspecto: si el comprobante era legible, ese mensaje YA incluye el acceso al onboarding para que el cliente configure su cuenta de inmediato. Copia el mensajeParaProspecto TAL CUAL, con el link incluido. IMPORTANTE sobre montoDetectado: es lo que decide si el cliente queda habilitado al toque o tiene que esperar la revisión del equipo — pásalo solo si lo LEÍSTE en el comprobante; si no se alcanza a leer, pasa 0 (nunca lo inventes ni lo deduzcas del precio de la cotización). Y nunca afirmes tú que el pago quedó confirmado: se confirma la recepción, no el dinero.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -153,6 +167,30 @@ export async function registrarComprobanteTransferencia(
   const pointer = pointers[0] || null
 
   const declarado = input.pagoDeclarado === true
+
+  // ── VALIDACIÓN BLANDA (decisión Lalo 26-jul, MVP/piloto de revenue) ──
+  //
+  // Antes: el cliente mandaba el comprobante y esperaba hasta 24 horas hábiles a
+  // que finanzas verificara el abono en el banco ANTES de poder configurar nada.
+  // Ese bloqueo humano contradice el posicionamiento central de Vicky (la
+  // inmediatez es su ventaja frente a un vendedor humano) y es justo el punto
+  // donde el cliente ya pagó y se queda esperando.
+  //
+  // Ahora: si Vicky pudo LEER el comprobante, se le entrega el acceso al
+  // onboarding de inmediato. La verificación bancaria sigue corriendo en
+  // paralelo, pero como AUDITORÍA — no como bloqueo. Si el abono no aparece, el
+  // equipo corta el onboarding a mano (mismo patrón que MX desde el 22-jul).
+  //
+  // El único criterio duro: el comprobante tiene que ser LEGIBLE (monto > 0).
+  // Si el monto no se pudo leer — imagen borrosa, PDF que el visor no abrió, o
+  // pago solo DECLARADO sin comprobante — NO se habilita: ahí no hay nada que
+  // validar, ni siquiera blandamente, y se mantiene el mensaje de verificación.
+  //
+  // Lo que NO cambia: la cotización nunca se marca como pagada desde acá, y
+  // Vicky jamás afirma que el pago quedó confirmado.
+  const comprobanteLegible = !declarado && monto > 0
+  const habilitaBlanda = comprobanteLegible && !!pointer
+
   const lineas = [
     declarado
       ? `Cliente DECLARÓ pago por WhatsApp — sin comprobante (${new Date().toISOString()})`
@@ -164,6 +202,9 @@ export async function registrarComprobanteTransferencia(
     input.bancoOrigen ? `Banco origen: ${input.bancoOrigen}` : "",
     input.fechaDetectada ? `Fecha transferencia: ${input.fechaDetectada}` : "",
     input.detalle ? `Detalle: ${input.detalle}` : "",
+    habilitaBlanda
+      ? "⚠️ VALIDACIÓN BLANDA: el comprobante era legible, así que al cliente YA se le entregó el acceso al onboarding sin esperar la verificación bancaria. Si el abono NO aparece, hay que cortar el onboarding a mano."
+      : "",
     "ACCIÓN: verificar el abono en el banco y confirmar el pago (la cotización NO fue marcada como pagada automáticamente).",
   ].filter(Boolean)
   const contenidoNota = lineas.join("\n")
@@ -193,32 +234,47 @@ export async function registrarComprobanteTransferencia(
   }
 
   // 3. Confirmación al cliente.
-  // MX: recepción + acceso INMEDIATO al auto-onboarding + presentación de la
-  // ejecutiva (decisión Lalo 22-jul: cero fricción tras el comprobante; la
-  // verificación del abono sigue corriendo por finanzas en paralelo).
-  if (pais === "mx" && pointer) {
+  //
+  // VALIDACIÓN BLANDA: con el comprobante legible, el acceso al onboarding sale
+  // AHORA. No se le pide al cliente que espere la verificación bancaria — esa
+  // corre en paralelo como auditoría. Nunca se afirma que el pago está
+  // confirmado: se confirma la RECEPCIÓN y se le habilita la configuración.
+  if (habilitaBlanda && pointer) {
     const linkOnboarding = await obtenerLinkOnboarding(pointer.quoteId)
-    const mensajeParaProspecto = linkOnboarding
-      ? `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo (toma máximo 24 horas hábiles).\n\n` +
-        `Para que no pierdas ni un día, aquí tienes tu acceso al auto-onboarding — ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos:\n${linkOnboarding}\n\n` +
-        `Y te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
-      : `¡Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""}! 🙌 Quedó asociado a tu cotización y en verificación con nuestro equipo (toma máximo 24 horas hábiles).\n\n` +
-        `Te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante y te enviará el acceso a la configuración inicial.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda, me escribes por aquí 😊`
     if (!linkOnboarding) {
-      // El equipo debe saber que el link no salió (para mandarlo a mano).
+      // Sin link no hay habilitación posible: el equipo debe mandarlo a mano.
       sendBotmakerMessage(
         NOTIFY_TO,
-        `⚠️ Comprobante MX de +${contact}: no se pudo generar el link de auto-onboarding (quote ${pointer.quoteId}). Enviarlo a mano.`,
+        `⚠️ Comprobante ${pais.toUpperCase()} de +${contact}: no se pudo generar el link de auto-onboarding (quote ${pointer.quoteId}). Enviarlo a mano.`,
       ).catch(() => {})
     }
+
+    if (pais === "mx") {
+      // MX suma la presentación de la ejecutiva (única excepción a "sin
+      // ejecutivo antes del pago": acá el cliente ya pagó).
+      const mensajeParaProspecto = linkOnboarding
+        ? `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
+          `Aquí tienes tu acceso al auto-onboarding: ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos.\n${linkOnboarding}\n\n` +
+          `Y te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
+        : `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
+          `Te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda, me escribes por aquí 😊`
+      return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
+    }
+
+    // CL: recepción + habilitación inmediata, acompañada por Vicky.
+    const mensajeParaProspecto = linkOnboarding
+      ? `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
+        `Aquí tienes tu acceso: en unos 15 minutos dejas configurada tu empresa y cargados a tus trabajadores.\n${linkOnboarding}\n\n` +
+        `Cualquier duda mientras lo llenas, me escribes por acá y lo vemos juntos 😊`
+      : `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por acá en unos minutos. Cualquier duda, me escribes 😊`
     return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
   }
 
-  // CL/CO (v1): recepción confirmada, pago EN VERIFICACIÓN — nunca afirmar
-  // pago. Plazo TRANSPARENTE (decisión Lalo 25-jul): la verificación toma
-  // máximo 24 horas hábiles y recién confirmada parte el onboarding.
+  // Sin habilitación blanda: comprobante ilegible, o sin cotización formal
+  // asociada al contacto. Acá NO hay nada que validar, así que se mantiene el
+  // mensaje de verificación con el plazo transparente (decisión Lalo 25-jul).
   const mensajeParaProspecto = pointer
-    ? `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Ya quedó asociado a tu cotización y en verificación con nuestro equipo de finanzas — ese proceso toma máximo 24 horas hábiles. Apenas se confirme te escribo por aquí para partir con la configuración de tu cuenta. ¡Gracias!`
+    ? `Recibí tu comprobante 🙌 Ya quedó asociado a tu cotización — no alcancé a leer el monto, así que lo está revisando nuestro equipo (toma máximo 24 horas hábiles). Apenas quede confirmado te escribo por aquí para partir con la configuración de tu cuenta. Si quieres acelerarlo, mándame el comprobante de nuevo con la imagen más nítida 😊`
     : `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Lo dejé en manos del equipo para asociarlo a tu cotización — la verificación toma máximo 24 horas hábiles. Apenas se confirme te escribo por aquí para partir con la configuración de tu cuenta. ¡Gracias!`
 
   return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }

@@ -27,6 +27,7 @@
 
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
+import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import {
   getSystemPromptV3,
@@ -454,13 +455,23 @@ async function processOneTurn(
     // no esté en la lista blanca de Vicky (sitios GeoVictoria, PDFs en
     // Supabase, certificación DT, wa.me, agenda, MercadoPago, videos demo)
     // se considera fabricado y se retira con la frase honesta.
+    // PROCEDENCIA ANTES QUE DOMINIO (26-jul): si la URL salió textual de una
+    // tool que corrió OK en este turno, la produjo nuestro backend y se respeta
+    // aunque su dominio no esté enumerado. Solo rescata links legítimos: una URL
+    // alucinada nunca está en un tool_result. Evita repetir el bug del link de
+    // la demo cada vez que el backend estrena un dominio (p. ej. el acceso al
+    // onboarding, que vive en NEXT_PUBLIC_BASE_URL de la app de onboarding).
+    const urlsDeTools = urlsDeToolsDelTurno(result.toolCalls)
     const DOMINIOS_VICKY =
       /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|geovictoria-demo-agent\.vercel\.app|supabase\.co|dt\.gob\.cl|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
     for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
-      if (!DOMINIOS_VICKY.test(u)) {
-        console.error(`[v3-bg] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
-        reply = reply.split(u).join("(te lo hago llegar enseguida)").trim()
+      if (DOMINIOS_VICKY.test(u)) continue
+      if (vieneDeUnaTool(u, urlsDeTools)) {
+        console.log(`[v3-bg] LINK_DE_TOOL_RESCATADO contact=${contact} url=${u.slice(0, 140)}`)
+        continue
       }
+      console.error(`[v3-bg] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
+      reply = reply.split(u).join("(te lo hago llegar enseguida)").trim()
     }
 
     // 2.5. Guardrail anti-alucinación de URL del cotizador.
