@@ -154,6 +154,69 @@ export function borradorCompleto(b: Borrador): boolean {
   return problemas(b).length === 0
 }
 
+// ── Actualización desde las tools ───────────────────────────────────────────
+
+export type DatosParciales = {
+  empresa?: Partial<Borrador["empresa"]>
+  admin?: Partial<Borrador["admin"]>
+}
+
+/**
+ * Merge de lo que la tool extrajo del mensaje del cliente. Inmutable (devuelve
+ * un borrador nuevo). Reglas:
+ *  - un string con contenido SIEMPRE pisa el valor anterior (el cliente
+ *    corrige: "no, el RUT es otro")
+ *  - vacío, espacios o cualquier cosa que no sea string se IGNORA — un
+ *    descuido del modelo no puede borrar un dato ya juntado
+ */
+// Allowlist de campos EN RUNTIME: Partial<T> no restringe nada una vez
+// compilado, y el patch puede venir de JSON ajeno (vic_kv, la tool del modelo).
+// Sin esto, una llave desconocida con valor string se colaría al borrador.
+const CAMPOS_EMPRESA = ["nombre", "identificador"] as const
+const CAMPOS_ADMIN = ["nombre", "apellido", "identificador", "email", "idInterno"] as const
+
+export function aplicarDatos(b: Borrador, datos: DatosParciales): Borrador {
+  const merge = <T extends Record<string, string | undefined>>(
+    base: T,
+    campos: readonly (keyof T)[],
+    patch?: Partial<T>,
+  ): T => {
+    const out = { ...base }
+    for (const k of campos) {
+      const v = (patch as Record<string, unknown> | undefined)?.[k as string]
+      if (typeof v === "string" && v.trim()) out[k] = v.trim() as T[keyof T]
+    }
+    return out
+  }
+  return {
+    pais: b.pais,
+    empresa: merge(b.empresa, CAMPOS_EMPRESA, datos.empresa),
+    admin: merge(b.admin, CAMPOS_ADMIN, datos.admin),
+  }
+}
+
+/**
+ * Rehidrata un borrador guardado en vic_kv. Ante CUALQUIER cosa que no sea un
+ * borrador bien formado (JSON roto, país desconocido, campos con tipos raros)
+ * devuelve null y el canal arranca uno nuevo — un kv corrupto no puede tumbar
+ * el webhook ni colar datos basura al alta. Pasa por aplicarDatos, así que
+ * solo sobreviven los campos conocidos, como strings recortados.
+ */
+export function parsearBorrador(json: string | null | undefined): Borrador | null {
+  if (!json) return null
+  try {
+    const raw = JSON.parse(json) as { pais?: unknown; empresa?: unknown; admin?: unknown }
+    if (!raw || typeof raw !== "object") return null
+    if (raw.pais !== "cl" && raw.pais !== "co" && raw.pais !== "mx") return null
+    return aplicarDatos(borradorVacio(raw.pais), {
+      empresa: (raw.empresa || {}) as DatosParciales["empresa"],
+      admin: (raw.admin || {}) as DatosParciales["admin"],
+    })
+  } catch {
+    return null
+  }
+}
+
 // ── Confirmación con el cliente ─────────────────────────────────────────────
 
 /**

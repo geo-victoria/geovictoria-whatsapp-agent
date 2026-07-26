@@ -35,6 +35,10 @@ Cubierto hoy:
 | `horario-habil.test.ts` | 12 mensajes a las 23:20 en Chile (24-jul) |
 | `senal-espera.test.ts` | Tamara pidió no ser contactada hasta el martes (24-jul) |
 | `estilo-vicky.test.ts` | Reglas de CLAUDE.md: nada de "Oye", nada de voseo |
+| `identificadores.test.ts` | RUT/NIT/RFC = el Identifier del alta de empresa (26-jul) |
+| `onboarding-borrador.test.ts` | El alta es irreversible: validar y confirmar antes de crear |
+| `onboarding-fase.test.ts` | Pago → fase onboarding; el borrador sobrevive entre mensajes |
+| `onboarding-frontera.test.ts` | La frontera del cerebro (decisión de arquitectura, 26-jul) |
 
 ## Lo que falta y por qué
 

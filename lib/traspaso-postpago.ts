@@ -24,6 +24,7 @@ import { sendBotmakerMessage } from "./botmaker-push-v3"
 import { PERFIL_CO } from "./paises/co"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 import { pagoCierraLoop } from "./loop-v2"
+import { onboardingEnabled, claveFase } from "./onboarding/fase"
 
 export type ResultadoTraspaso = {
   contact?: string
@@ -48,6 +49,12 @@ export async function cerrarYTraspasarPostPago(
   // Regla de oro del Loop v2: el PAGO corta el loop de toques para siempre
   // (best-effort; con el flag apagado o sin fila en vic_loop es un no-op).
   await pagoCierraLoop(contact).catch(() => {})
+  // Vicky onboarding (flag apagado por defecto): el pago es la ÚNICA puerta
+  // que mueve al contacto de la fase venta a onboarding. Solo se marca la
+  // fase; el gate del webhook la lee al cablear el prompt de la fase.
+  if (onboardingEnabled()) {
+    await setKvValue(claveFase(contact), "onboarding").catch(() => {})
+  }
 
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
 
