@@ -112,7 +112,7 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
 const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
   sin_precio: {
     cl:
-      "Hola! Soy Vicky de GeoVictoria 😊 Para armarte el valor al tiro solo me falta saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
+      "Hola! Soy Vicky de GeoVictoria 😊 Para armarte el valor de inmediato solo me falta saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
     co:
       "Hola! Soy Vicky de GeoVictoria 😊 Te cuento: para armarte el valor de una solo necesito saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\nMe cuentas y lo dejamos listo?",
     mx:
@@ -128,7 +128,7 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
   },
   formal: {
     cl:
-      "Hola! Soy Vicky de GeoVictoria 😊 Tu cotización sigue vigente y la puedes aceptar y pagar en línea cuando quieras.\nSi te quedó alguna duda, la vemos al tiro por acá.",
+      "Hola! Soy Vicky de GeoVictoria 😊 Tu cotización sigue vigente y la puedes aceptar y pagar en línea cuando quieras.\nSi te quedó alguna duda, la vemos enseguida por acá.",
     co:
       "Hola! Soy Vicky de GeoVictoria 😊 Te cuento que tu cotización sigue vigente y la puedes aceptar y pagar en línea cuando quieras.\nSi te queda alguna duda, la resolvemos de una por acá.",
     mx:

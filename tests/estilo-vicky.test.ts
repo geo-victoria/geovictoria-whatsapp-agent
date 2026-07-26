@@ -54,6 +54,40 @@ describe("prohibido 'Oye' (CLAUDE.md, 23-jul)", () => {
   })
 })
 
+describe("nada de jerga chilena en texto de cliente", () => {
+  test("no aparecen chilenismos en prompts ni mensajes", () => {
+    // El prompt YA prohibía la jerga ("al tiro" → "de inmediato"), pero "al
+    // toque" se coló igual y llegó a la plantilla obligatoria de entrega de
+    // cotización — el mensaje más frecuente del sistema (Eduardo, 26-jul).
+    // Una regla escrita en prosa no se hace cumplir sola.
+    const JERGA = /(?<!\p{L})(?:al ?tiro|al toque(?!\s*\d)|cach[aá]i|fome|la raja|bacán|po)(?!\p{L})/giu
+    const infractores: string[] = []
+    for (const f of archivosDeTexto()) {
+      // Exclusiones a propósito:
+      //  - loop-v2 / persistence: "toque" es vocabulario del dominio (toque 1,
+      //    toque 2…), no jerga.
+      //  - voseo-v3: es el sanitizador; contener estas palabras ES su trabajo.
+      if (/loop-v2|supabase-persistence|voseo-v3/.test(f)) continue
+      for (const linea of readFileSync(f, "utf8").split("\n")) {
+        // Las líneas que ENUNCIAN la prohibición son legítimas: lo que se busca
+        // es jerga en lo que Vicky DICE, no en lo que define que no debe decir.
+        if (
+          /PROHIBIDO|jam[aá]s|NUNCA|no uses|→ di|reemplaza|sin voseo|sin jerga|prohíbe|se escapa|normaliza|chilenismo|localismo|y similares/i.test(
+            linea,
+          )
+        )
+          continue
+        // Comentarios de código: no son texto que Vicky diga.
+        if (/^\s*(?:\/\/|\*|\/\*)/.test(linea)) continue
+        for (const m of linea.matchAll(JERGA)) {
+          infractores.push(`${f.replace(RAIZ, "")}: "${m[0]}" en ${linea.trim().slice(0, 80)}`)
+        }
+      }
+    }
+    assert.deepEqual(infractores, [], `jerga encontrada:\n${infractores.join("\n")}`)
+  })
+})
+
 describe("anti-voseo chileno", () => {
   test("convierte el voseo verbal a tuteo neutro", () => {
     for (const [entrada, esperado] of [
