@@ -72,7 +72,7 @@ describe("no re-preguntar lo que el cliente ya dio (regla Eduardo, 26-jul)", () 
     const k = renderPlantillaOnboarding(paramsPlantillaOnboarding("Transportes Viig SpA", "77861333-6"))
     assert.match(k, /Transportes Viig SpA/)
     assert.match(k, /77861333-6/)
-    assert.match(k, /Lo usamos tal cual\?/)
+    assert.match(k, /Los usamos tal cual\?/)
     assert.ok(!/me das la razón social/.test(k), "no puede pedir lo que ya tiene")
     assert.match(k, /quién va a administrar/, "pasa directo a lo que SÍ falta")
   })
@@ -111,12 +111,25 @@ describe("EL mensaje de arranque: uno solo para todos los casos", () => {
     assert.ok(!/pago|comprobante|transferencia|abonad|acreditad/i.test(b), `menciona el pago: ${b}`)
   })
 
-  test("confirma empresa y RUT, y pide solo lo que falta", () => {
-    assert.match(RENDER, /BluePay Chile SPA/)
-    assert.match(RENDER, /78387633-7/)
-    assert.match(RENDER, /Lo usamos tal cual\?/)
+  test("confirma empresa y RUT tabulados, y pide solo lo que falta", () => {
+    assert.match(RENDER, /Empresa: BluePay Chile SPA/)
+    assert.match(RENDER, /RUT: 78387633-7/)
+    assert.match(RENDER, /Los usamos tal cual\?/)
+    assert.match(RENDER, /Si hay que cambiar algo, me dices/, "permiso explícito de corregir")
     assert.match(RENDER, /quién va a administrar/)
     assert.ok(!/https?:\/\//.test(RENDER), "sin links: el alta no va al wizard")
+  })
+
+  test("da la bienvenida SIN afirmar que el pago quedó registrado", () => {
+    // El texto elegido traía "Tu pago quedó registrado": cierto con tarjeta,
+    // FALSO con transferencia (ahí solo se recibió el comprobante; el abono lo
+    // verifica finanzas). Como el mensaje es uno solo para las dos vías, la
+    // afirmación sale y la bienvenida carga el sentido.
+    assert.match(RENDER, /ya eres parte de GeoVictoria/)
+    assert.ok(
+      !/pago quedó (registrado|confirmado)|recibimos tu pago/i.test(RENDER),
+      `afirma algo sobre el pago: ${RENDER}`,
+    )
   })
 
   test("usa la sintaxis de Botmaker, NO la de Meta", () => {
@@ -168,8 +181,13 @@ describe("acuse del comprobante (va aparte del arranque)", () => {
     )
   })
 
-  test("anuncia el arranque que viene enseguida", () => {
-    assert.match(acuseComprobanteCL("$1.000"), /en seguida/i)
+  test("NO anuncia un mensaje futuro: el cliente no espera nada", () => {
+    // Decisión Eduardo 26-jul: la lectura del comprobante con IA es la única
+    // medida; el cliente no espera. El acuse va pegado al arranque en UN solo
+    // mensaje, así que prometer "te escribo en seguida" sería hacerlo esperar
+    // por algo que ya está en la misma pantalla.
+    const a = acuseComprobanteCL("$1.000")
+    assert.ok(!/en seguida|enseguida|te escribo|más tarde|en unos minutos/i.test(a), a)
   })
 
   test("respeta el estilo de Vicky", () => {

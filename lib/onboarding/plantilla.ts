@@ -11,10 +11,13 @@
  * texto ya renderizado como mensaje libre. Nunca dos redacciones que puedan
  * separarse con el tiempo — hay un eval que lo verifica.
  *
- * POR QUÉ NO MENCIONA EL PAGO: sirve para las dos vías, y con comprobante está
- * prohibido afirmar que el pago quedó confirmado (solo se confirma la
- * recepción). El acuse del comprobante lo da Vicky por separado, en su
- * respuesta al cliente.
+ * POR QUÉ NO DICE "TU PAGO QUEDÓ REGISTRADO": el texto que eligió Eduardo lo
+ * traía, y con TARJETA sería cierto — pero con TRANSFERENCIA no. Ahí solo se
+ * recibió el comprobante; el abono lo verifica finanzas en paralelo (regla
+ * Lalo 17-jul, con eval que la protege). Como el mensaje es uno solo para las
+ * dos vías, la afirmación sale y "ya eres parte de GeoVictoria" carga el
+ * sentido: es una bienvenida, no un dato sobre el dinero. El acuse del monto
+ * lo da Vicky aparte, en la vía donde sí corresponde.
  *
  * SINTAXIS: Botmaker usa ${variable} con nombre, NO los {{1}} posicionales de
  * Meta. `empresa` y `rut_empresa` son variables de contacto de scope "user" que
@@ -38,15 +41,18 @@
 
 export const PLANTILLA_ONBOARDING_CL = {
   /** ruleNameOrId que espera la API de notificaciones de Botmaker. */
-  name: "vicky_onboarding_alta_cl",
+  name: "vicky_alta_cuenta_cl",
   category: "UTILITY" as const,
   locale: "es",
   botName: "Vicky Chile",
   body:
-    "Hola! Soy Vicky de GeoVictoria 🎉\n\n" +
-    "Ya podemos crear la cuenta de ${empresa} y dejarte entrando a la plataforma en minutos.\n\n" +
-    "De tu cotización tengo el RUT ${rut_empresa}. Lo usamos tal cual?\n\n" +
-    "Solo me falta saber quién va a administrar la cuenta: su nombre, apellido, RUT y correo.",
+    "Felicitaciones, ya eres parte de GeoVictoria 🎉\n\n" +
+    "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n" +
+    "De tu cotización ya tengo estos datos de la empresa:\n" +
+    "Empresa: ${empresa}\n" +
+    "RUT: ${rut_empresa}\n\n" +
+    "Los usamos tal cual? Si hay que cambiar algo, me dices. " +
+    "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, RUT y correo.",
 } as const
 
 export type ParamsOnboarding = { empresa: string; rut_empresa: string }

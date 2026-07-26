@@ -36,7 +36,10 @@ import { getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persist
 import { onboardingEnabled, claveFase, claveBorrador } from "@/lib/onboarding/fase"
 import { parsearBorrador, sembrarBorrador } from "@/lib/onboarding/borrador"
 import { acuseComprobanteCL } from "@/lib/onboarding/prompt"
-import { entregarKickoffOnboarding } from "@/lib/onboarding-envio"
+import {
+  paramsPlantillaOnboarding,
+  renderPlantillaOnboarding,
+} from "@/lib/onboarding/plantilla"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 
@@ -269,17 +272,19 @@ export async function registrarComprobanteTransferencia(
       } catch (e) {
         console.error("[comprobante] no se pudo enrolar en onboarding:", e)
       }
-      // Vicky acusa recibo en su respuesta; el arranque del onboarding lo
-      // despacha entregarKickoffOnboarding con la MISMA plantilla que usa el
-      // pago online. Va después del acuse para que el orden sea el natural.
-      entregarKickoffOnboarding(
-        contact,
-        sembrado?.empresa.nombre,
-        sembrado?.empresa.identificador,
-      ).catch((e) => console.error("[comprobante] kickoff onboarding falló:", e))
+      // UN SOLO MENSAJE: acuse + arranque, sin push aparte (Eduardo, 26-jul:
+      // el cliente no espera nada). Antes el arranque salía por
+      // entregarKickoffOnboarding en paralelo, así que podía llegar ANTES que
+      // el acuse — y el acuse anunciaba "te escribo en seguida", que es
+      // justamente hacerlo esperar. Acá la ventana está abierta por definición
+      // (el cliente acaba de mandar la imagen), así que el texto va directo,
+      // renderizado del MISMO cuerpo que usa la plantilla del pago online.
+      const arranque = renderPlantillaOnboarding(
+        paramsPlantillaOnboarding(sembrado?.empresa.nombre, sembrado?.empresa.identificador),
+      )
       return {
         ok: true,
-        mensajeParaProspecto: acuseComprobanteCL(montoFmt),
+        mensajeParaProspecto: `${acuseComprobanteCL(montoFmt)}\n\n${arranque}`,
         notaCreada,
         avisoInterno,
       }

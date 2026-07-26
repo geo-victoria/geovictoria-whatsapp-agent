@@ -48,19 +48,21 @@ function valorDe(b: Borrador, campo: Campo): string | undefined {
  * repetir el trámite.
  */
 /**
- * Acuse de recibo del COMPROBANTE. Solo el acuse: el arranque del onboarding
- * lo da la plantilla única (lib/onboarding/plantilla.ts), igual que en la vía
- * del pago online.
+ * Acuse de recibo del COMPROBANTE. Va PEGADO al arranque en un solo mensaje —
+ * no anuncia que escribirá después.
  *
- * REGLA DURA: nunca afirma que el pago quedó confirmado. Se confirma la
- * RECEPCIÓN del comprobante; el abono lo verifica finanzas en paralelo
- * (validación blanda, 26-jul).
+ * POR QUÉ (Eduardo, 26-jul): la lectura del comprobante con IA es la única
+ * medida por ahora; si resultara falso se da de baja la cuenta después. El
+ * cliente NO espera nada. Una versión anterior decía "te escribo en seguida
+ * para dejar tu cuenta creada" — eso es justamente hacerlo esperar, y además
+ * el arranque salía por push aparte, así que podía llegar desordenado.
+ *
+ * REGLA DURA que sí se mantiene: nunca afirma que el pago quedó confirmado. Se
+ * confirma la RECEPCIÓN del comprobante; el abono lo audita finanzas en
+ * paralelo, sin bloquear al cliente.
  */
 export function acuseComprobanteCL(montoFmt: string): string {
-  return (
-    `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y no tienes que esperar nada.\n\n` +
-    "Te escribo en seguida para dejar tu cuenta creada."
-  )
+  return `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización.`
 }
 
 /**
