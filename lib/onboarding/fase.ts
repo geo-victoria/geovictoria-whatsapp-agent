@@ -27,6 +27,8 @@ export function onboardingEnabled(): boolean {
  */
 export const claveFase = (contact: string) => `fase_vicky_${contact}`
 export const claveBorrador = (contact: string) => `onboarding_borrador_${contact}`
+/** Timestamp ISO de cuándo se solicitó el alta (candado anti doble-solicitud). */
+export const claveAltaSolicitada = (contact: string) => `onboarding_alta_solicitada_${contact}`
 
 /**
  * Transiciones permitidas. Deliberadamente pocas:

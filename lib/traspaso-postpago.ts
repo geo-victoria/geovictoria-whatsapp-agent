@@ -25,6 +25,7 @@ import { PERFIL_CO } from "./paises/co"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 import { pagoCierraLoop } from "./loop-v2"
 import { onboardingEnabled, claveFase } from "./onboarding/fase"
+import { mensajeKickoffCL } from "./onboarding/prompt"
 
 export type ResultadoTraspaso = {
   contact?: string
@@ -49,10 +50,14 @@ export async function cerrarYTraspasarPostPago(
   // Regla de oro del Loop v2: el PAGO corta el loop de toques para siempre
   // (best-effort; con el flag apagado o sin fila en vic_loop es un no-op).
   await pagoCierraLoop(contact).catch(() => {})
-  // Vicky onboarding (flag apagado por defecto): el pago es la ÚNICA puerta
-  // que mueve al contacto de la fase venta a onboarding. Solo se marca la
-  // fase; el gate del webhook la lee al cablear el prompt de la fase.
-  if (onboardingEnabled()) {
+
+  const esCO = contact.startsWith("57")
+  const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
+  const esCL = !esCO && !esMX
+  // Vicky onboarding — CHILE PRIMERO (decisión 26-jul): el pago es la ÚNICA
+  // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
+  // traspaso a ejecutivo humano hasta que la fase se abra para ellos.
+  if (onboardingEnabled() && esCL) {
     await setKvValue(claveFase(contact), "onboarding").catch(() => {})
   }
 
@@ -62,8 +67,19 @@ export async function cerrarYTraspasarPostPago(
   const ya = await getKvValue(kvKey).catch(() => null)
   if (ya) return { contact, traspaso: "ya_enviado" }
 
-  const esCO = contact.startsWith("57")
-  const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
+  // Vicky AUTÓNOMA en CL (decisión 26-jul): con el flag encendido NO se
+  // presenta a ningún ejecutivo — el mismo mensaje de bienvenida abre el alta
+  // por chat, y el gate del webhook atiende las respuestas con el agente de
+  // onboarding. Reemplaza al bloque del ejecutivo, no lo suma.
+  if (onboardingEnabled() && esCL) {
+    const kickoff = mensajeKickoffCL()
+    const pushedKickoff = await sendBotmakerMessage(contact, kickoff).catch(() => false)
+    if (!pushedKickoff) return { contact, traspaso: "push_fallo" }
+    await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+    await appendAssistantV3(contact, kickoff, "cl").catch(() => {})
+    return { contact, traspaso: "enviado" }
+  }
+
   const ejecutivo = esMX
     ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "+52 55 3763 6604" }
     : esCO

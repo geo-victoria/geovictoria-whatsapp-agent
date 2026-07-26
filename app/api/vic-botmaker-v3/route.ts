@@ -28,6 +28,7 @@
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
+import { faseDelContacto, armarOnboarding } from "@/lib/onboarding-canal"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import {
   getSystemPromptV3,
@@ -412,14 +413,27 @@ async function processOneTurn(
       `[v3-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION}`,
     )
 
+    // Fase onboarding (CL, VICKY_ONBOARDING_ENABLED apagado por defecto): tras
+    // el pago el contacto pasa al agente de onboarding — prompt y toolset
+    // propios, MISMO pipeline de salida (sanitizadores, allowlist, persistencia).
+    // Con el flag off, faseDelContacto devuelve "venta" sin tocar el kv y todo
+    // este bloque es inerte.
+    const enOnboarding = (await faseDelContacto(contact)) === "onboarding"
+    const onboarding = enOnboarding ? await armarOnboarding(contact) : null
+
     // Correr el agent
     const result = await runAgentLoop({
-      systemPrompt: contextoCotizacion + getSystemPromptV3(contact),
+      systemPrompt: onboarding
+        ? onboarding.systemPrompt
+        : contextoCotizacion + getSystemPromptV3(contact),
       history,
       userMessage: message,
       apiKey,
       contact,
-      model: modelo,
+      // Onboarding siempre con el modelo grande: recopila datos de un alta
+      // irreversible, no es un turno "simple".
+      model: onboarding ? MODELO_COTIZACION : modelo,
+      ...(onboarding ? { tools: onboarding.tools } : {}),
     })
 
     let reply = (result.reply || "").trim()
@@ -500,7 +514,9 @@ async function processOneTurn(
     const reenviaLinkConocido = quotePointers.some(
       (qp) => !!qp.acceptanceUrl && reply.includes(qp.acceptanceUrl),
     )
-    if (hasCotizacionUrl && !realCotizacion && !reenviaLinkConocido) {
+    // (los reintentos forzados son del flujo de VENTA: re-corren el loop con el
+    // prompt y las tools de venta, así que en fase onboarding no deben disparar)
+    if (!enOnboarding && hasCotizacionUrl && !realCotizacion && !reenviaLinkConocido) {
       console.error(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
       )
@@ -697,7 +713,7 @@ async function processOneTurn(
           !pideRebaja &&
           (pctEnReply <= 20 || pctEnReply === 25 || pctEnReply === 50)))
 
-    if ((ofreceDescuento || pareceMuletillaDescuento) && !realDescuento && !pctYaNegociado) {
+    if (!enOnboarding && (ofreceDescuento || pareceMuletillaDescuento) && !realDescuento && !pctYaNegociado) {
       const ultimoAsistente = [...history]
         .reverse()
         .find((m) => m.role === "assistant")
@@ -831,7 +847,7 @@ async function processOneTurn(
     const realAgenda = toolCalls.some(
       (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
     )
-    if (afirmaReunionLista && !realAgenda) {
+    if (!enOnboarding && afirmaReunionLista && !realAgenda) {
       let agendaRecuperada = false
       const FORZAR_TOOL_AGENDA =
         "\n\n# Instrucción de sistema (este turno)\n" +
@@ -907,7 +923,7 @@ async function processOneTurn(
       (c) =>
         (c.name === "registrar_solicitud_callback" || c.name === "agendar_reunion") && c.ok,
     )
-    if (afirmaCallbackListo && !realCallback) {
+    if (!enOnboarding && afirmaCallbackListo && !realCallback) {
       let callbackRecuperado = false
       const FORZAR_TOOL_CALLBACK =
         "\n\n# Instrucción de sistema (este turno)\n" +
