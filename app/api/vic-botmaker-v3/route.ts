@@ -571,16 +571,35 @@ async function processOneTurn(
       MULETILLA_DESCUENTO,
       "Déjame dejarte el mejor precio posible y te lo confirmo enseguida. Me confirmas que seguimos con esta opción?",
     ])
-    // (A) Forma clásica: "X% de descuento".
-    const ofrecePctDescuento =
-      /\d+\s*%\s*de\s+descuento|descuento\s+del?\s+\d+\s*%/i.test(reply)
-    // (A2) Rebaja SIN porcentaje: el modelo a veces ofrece una concesión hecha a
-    // mano ("te dejo la instalación sin costo", "te ahorro las 3 UF", "te la dejo
-    // gratis / en 0") calculando el monto él mismo, sin pasar por la tool. Eso es
-    // tan alucinación como un % inventado. Se detecta la INTENCIÓN de regalar/
-    // rebajar ("te ahorro/regalo/rebajo…", "te lo dejo gratis/sin costo/en 0"),
-    // que no aparece en menciones legítimas y descriptivas ("capacitación sin
-    // costo", "si lo instalas tú, sin costo").
+    // BENEFICIOS FIJOS DEL CATÁLOGO — no son descuento negociado (auditoría
+    // 25-jul). El pitch estándar dice "la capacitación online, valorizada en
+    // 1 UF, va incluida de regalo (100% de descuento)" y el prompt manda
+    // repetirlo cuando preguntan "¿viene capacitación?". Sin esta exclusión
+    // ese texto activaba el guardrail y pasaba una de dos cosas, ambas malas:
+    // la respuesta buena se reemplazaba por la muletilla ("Déjame dejarte el
+    // mejor precio posible…"), o se forzaba un reintento que ofrecía un tramo
+    // de descuento que el cliente NUNCA pidió — regalando margen y quemando
+    // la escalera. De los 18 disparos históricos de muletilla, varios siguen a
+    // preguntas inocentes: "esto viene incluido con alguna capacitacion?",
+    // "Qué valor?", "como es esa configuracion".
+    // Se evalúa CADA mención de "% de descuento" con su contexto inmediato: la
+    // que viene precedida de capacitación/regalo/incluida se ignora; cualquier
+    // otra sigue contando como oferta (un mensaje con AMBAS se detecta igual).
+    const PCT_DESCUENTO_RE = /(\d{1,3})\s*%\s*de\s+descuento|descuento\s+del?\s+(\d{1,3})\s*%/gi
+    let ofrecePctDescuento = false
+    let pctNegociado: number | null = null
+    let finMencionPrevia = 0
+    for (const m of reply.matchAll(PCT_DESCUENTO_RE)) {
+      const idx = m.index ?? 0
+      // El contexto arranca DESPUÉS de la mención anterior (no una ventana
+      // fija): así "capacitación de regalo (100% dcto) y además te dejo un 20%
+      // de descuento" detecta el 20% real en vez de heredar la exención.
+      const contexto = reply.slice(Math.max(finMencionPrevia, idx - 60), idx)
+      finMencionPrevia = idx + m[0].length
+      if (/capacitaci|de\s+regalo|incluida\s+de/i.test(contexto)) continue
+      ofrecePctDescuento = true
+      if (pctNegociado === null) pctNegociado = Number(m[1] ?? m[2])
+    }
     const ofreceRebajaSinPct =
       /\bte\s+(ahorro|regalo|bonifico|rebajo|descuento)\b|\bte\s+(?:la|lo|los|las)\s+(?:dejo|doy)\s+(?:gratis|sin\s+costo|sin\s+cargo|en\s+(?:0|cero))/i.test(
         reply,
@@ -617,8 +636,7 @@ async function processOneTurn(
     // pref_escalon es el "siguiente índice" (idx+1); el % recurrente comiteado
     // queda determinado por él. Reconfirmar ese % (o uno menor, o el de
     // instalación) es legítimo; reclamar uno MAYOR sin tool no lo es.
-    const pctMatch = reply.match(/(\d+)\s*%/)
-    const pctEnReply = pctMatch ? Number(pctMatch[1]) : null
+    const pctEnReply = pctNegociado
     const prefEscalon = await getPrefEscalon(contact).catch(() => 0)
     // Escalera del plan mensual (espejo de DISCOUNT_LADDER del cotizador):
     // 10 → 20 (tope 20%). pref_escalon usa la forma "siguiente índice" (i+1);
