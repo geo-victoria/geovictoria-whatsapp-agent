@@ -23,11 +23,22 @@
  * estar vacía o vieja.
  *
  * Creada en Botmaker el 26-jul: UTILITY, locale es, bot "Vicky Chile".
+ *
+ * OJO CON EL NOMBRE — no se puede reciclar. Meta bloquea el nombre de una
+ * plantilla por 4 SEMANAS después de borrarla: un intento anterior se llamaba
+ * vicky_onboarding_inicio_cl, se borró para corregir el cuerpo, y al volver a
+ * crearla con el mismo nombre Meta la rechazó ("You can't change the category
+ * for this message template while the existing Spanish content is being
+ * deleted. Try again in 4 weeks or use MARKETING as the category"). La salida
+ * NO es bajar a MARKETING —esto es post-transaccional y MARKETING queda sujeto
+ * a los límites promocionales— sino usar un nombre nuevo. Si hay que cambiar
+ * el texto otra vez, se crea con OTRO nombre y se cambia esta constante; nunca
+ * borrar y recrear con el mismo.
  */
 
 export const PLANTILLA_ONBOARDING_CL = {
   /** ruleNameOrId que espera la API de notificaciones de Botmaker. */
-  name: "vicky_onboarding_inicio_cl",
+  name: "vicky_onboarding_alta_cl",
   category: "UTILITY" as const,
   locale: "es",
   botName: "Vicky Chile",
