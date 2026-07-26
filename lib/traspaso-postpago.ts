@@ -27,6 +27,7 @@ import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferenc
 import { pagoCierraLoop } from "./loop-v2"
 import { onboardingEnabled, claveFase, claveBorrador } from "./onboarding/fase"
 import { mensajeKickoffCL } from "./onboarding/prompt"
+import { entregarKickoffOnboarding } from "./onboarding-canal"
 import { parsearBorrador, sembrarBorrador, type Borrador } from "./onboarding/borrador"
 
 export type ResultadoTraspaso = {
@@ -93,10 +94,19 @@ export async function cerrarYTraspasarPostPago(
   // onboarding. Reemplaza al bloque del ejecutivo, no lo suma.
   if (onboardingEnabled() && esCL) {
     const kickoff = mensajeKickoffCL(borradorSembrado ?? undefined)
-    const pushedKickoff = await sendBotmakerMessage(contact, kickoff).catch(() => false)
-    if (!pushedKickoff) return { contact, traspaso: "push_fallo" }
+    // Fuera de la ventana de 24 h el texto libre muere en silencio (el cliente
+    // pudo pagar un domingo tras dos días callado). Ahí va la plantilla HSM,
+    // que reabre la ventana; el agente retoma cuando el cliente responde.
+    const via = await entregarKickoffOnboarding(
+      contact,
+      kickoff,
+      borradorSembrado?.empresa.nombre,
+    )
+    if (via === "fallo") return { contact, traspaso: "push_fallo" }
     await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
-    await appendAssistantV3(contact, kickoff, "cl").catch(() => {})
+    // Solo el texto libre es un mensaje de Vicky: la plantilla es un disparador
+    // y meterla al historial le daría al modelo un turno que no dijo.
+    if (via === "texto") await appendAssistantV3(contact, kickoff, "cl").catch(() => {})
     return { contact, traspaso: "enviado" }
   }
 

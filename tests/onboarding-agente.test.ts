@@ -20,6 +20,10 @@ import {
   TOOL_CONFIRMAR_ALTA_EMPRESA,
 } from "../lib/onboarding/tools.ts"
 import {
+  PLANTILLA_ONBOARDING_CL,
+  paramsPlantillaOnboarding,
+} from "../lib/onboarding/plantilla.ts"
+import {
   borradorVacio,
   aplicarDatos,
   sembrarBorrador,
@@ -172,6 +176,48 @@ describe("las DOS puertas al post-pago llegan al mismo lugar", () => {
       assert.ok(!/[¿¡]/.test(msg), "sin signos de apertura")
       assert.ok(!/\*/.test(msg), "sin negritas")
     }
+  })
+})
+
+describe("plantilla HSM para pagos fuera de la ventana de 24 h", () => {
+  // El cliente puede recibir la cotización un viernes y pagar el domingo tras
+  // dos días callado. Ahí el texto libre muere en silencio y el que acaba de
+  // pagar no recibe nada.
+  test("no afirma el pago: sirve para las DOS vías", () => {
+    // Con comprobante está PROHIBIDO decir que el pago quedó confirmado. Una
+    // plantilla neutra evita aprobar dos y evita la afirmación insostenible.
+    const b = PLANTILLA_ONBOARDING_CL.body
+    assert.ok(!/pago|comprobante|transferencia|abonad|acreditad/i.test(b), `menciona el pago: ${b}`)
+  })
+
+  test("invita a responder — su único trabajo es reabrir la ventana", () => {
+    assert.match(PLANTILLA_ONBOARDING_CL.body, /respóndeme/i)
+    assert.ok(!/https?:\/\//.test(PLANTILLA_ONBOARDING_CL.body), "sin links")
+  })
+
+  test("un solo parámetro, y es el que siempre tenemos", () => {
+    const vars = PLANTILLA_ONBOARDING_CL.body.match(/\{\{\d+\}\}/g) || []
+    assert.deepEqual(vars, ["{{1}}"], "más parámetros = más fricción de aprobación")
+    assert.deepEqual(paramsPlantillaOnboarding("BluePay Chile SPA"), { "1": "BluePay Chile SPA" })
+  })
+
+  test("sin empresa no queda un hueco raro en el texto", () => {
+    assert.deepEqual(paramsPlantillaOnboarding(""), { "1": "tu empresa" })
+    assert.deepEqual(paramsPlantillaOnboarding(undefined), { "1": "tu empresa" })
+  })
+
+  test("categoría UTILITY, no MARKETING", () => {
+    // Es post-transacción sobre una cuenta recién contratada. MARKETING tendría
+    // peor aprobación y quedaría sujeta a los límites promocionales.
+    assert.equal(PLANTILLA_ONBOARDING_CL.category, "UTILITY")
+  })
+
+  test("respeta el estilo de Vicky y cabe en el límite de WhatsApp", () => {
+    const b = PLANTILLA_ONBOARDING_CL.body
+    assert.ok(!/\bOye\b/.test(b))
+    assert.ok(!/[¿¡*]/.test(b), "sin signos de apertura ni negritas")
+    assert.ok(!FUGA_EJECUTIVO.test(b))
+    assert.ok(b.length <= 1024, `body de ${b.length} chars, el máximo es 1024`)
   })
 })
 

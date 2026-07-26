@@ -10,8 +10,10 @@
  * consultar-antes-de-crear como candado — sin tocar prompt ni conversación.
  */
 
-import { getKvValue, setKvValue } from "./supabase-persistence-v3"
+import { getKvValue, setKvValue, getLastUserAt } from "./supabase-persistence-v3"
+import { sendBotmakerMessage, sendBotmakerTemplate } from "./botmaker-push-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
+import { PLANTILLA_ONBOARDING_CL, paramsPlantillaOnboarding } from "./onboarding/plantilla"
 import { dispatchTool } from "./tools"
 import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
 import {
@@ -41,6 +43,38 @@ import {
 } from "./onboarding/tools"
 
 export { mensajeKickoffCL }
+
+/**
+ * Entrega el kickoff del onboarding respetando la ventana de 24 h de WhatsApp.
+ *
+ * Dentro de ventana: texto libre, con el mensaje completo.
+ * Fuera de ventana: el texto libre moriría en silencio, así que va la plantilla
+ * HSM — que no lleva el alta, solo reabre la ventana. Cuando el cliente
+ * responde, el webhook lo encuentra en fase onboarding y el agente sigue.
+ *
+ * Devuelve cómo salió, para que el llamador lo registre en el historial solo
+ * cuando corresponda (la plantilla no es el mensaje de Vicky).
+ */
+export async function entregarKickoffOnboarding(
+  contact: string,
+  texto: string,
+  empresa?: string,
+): Promise<"texto" | "plantilla" | "fallo"> {
+  const ultimo = await getLastUserAt(contact).catch(() => null)
+  const abierta = !!ultimo && Date.now() - ultimo.getTime() < 24 * 3600e3
+  if (abierta) {
+    const ok = await sendBotmakerMessage(contact, texto).catch(() => false)
+    if (ok) return "texto"
+    // La ventana pudo cerrarse entre la consulta y el envío: se reintenta por
+    // plantilla antes de darlo por perdido.
+  }
+  const ok = await sendBotmakerTemplate(
+    contact,
+    PLANTILLA_ONBOARDING_CL.name,
+    paramsPlantillaOnboarding(empresa),
+  ).catch(() => false)
+  return ok ? "plantilla" : "fallo"
+}
 
 /**
  * Fase del contacto para el gate del webhook. Con el flag apagado devuelve

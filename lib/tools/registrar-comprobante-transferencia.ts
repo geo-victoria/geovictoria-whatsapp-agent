@@ -250,6 +250,10 @@ export async function registrarComprobanteTransferencia(
     // pago online); las dos tienen que enrolar o el que transfiere se queda
     // fuera. El borrador se siembra con la empresa y el RUT de la cotización
     // para no volver a preguntarlos.
+    //
+    // Acá NO hace falta el fallback a plantilla HSM que sí lleva la vía del
+    // pago online: el cliente ACABA de mandar el comprobante, así que la
+    // ventana de 24 h está abierta por definición.
     if (onboardingEnabled() && pais === "cl") {
       let sembrado = null
       try {
