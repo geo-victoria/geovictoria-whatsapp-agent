@@ -48,9 +48,36 @@ function valorDe(b: Borrador, campo: Campo): string | undefined {
  * repetir el trámite.
  */
 export function mensajeKickoffCL(borrador?: Borrador): string {
-  const cabecera =
+  return (
     "Felicitaciones, ya eres parte de GeoVictoria 🎉 Tu pago quedó registrado.\n\n" +
-    "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n"
+    cuerpoKickoffCL(borrador)
+  )
+}
+
+/**
+ * Kickoff de la vía TRANSFERENCIA. Mismo cuerpo, otra cabecera — y con una
+ * regla dura que no se puede romper: NUNCA afirmar que el pago quedó
+ * confirmado. Se confirma la RECEPCIÓN del comprobante; la verificación del
+ * abono la hace finanzas en paralelo (validación blanda, 26-jul).
+ */
+export function mensajeKickoffComprobanteCL(montoFmt: string, borrador?: Borrador): string {
+  return (
+    `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y no tienes que esperar nada.\n\n` +
+    cuerpoKickoffCL(borrador)
+  )
+}
+
+/**
+ * Cuerpo compartido: abre el alta por chat y, si el borrador viene SEMBRADO
+ * desde la venta (la cotización ya trae razón social y RUT), CONFIRMA esos
+ * datos en vez de volver a pedirlos — pedirle de nuevo el RUT a quien acaba de
+ * pagar con ese RUT es hacerle repetir el trámite.
+ *
+ * Sin links: desde el 26-jul el alta NO se deriva al wizard web, la conduce
+ * Vicky acá mismo.
+ */
+function cuerpoKickoffCL(borrador?: Borrador): string {
+  const cabecera = "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n"
 
   const nombre = borrador?.empresa.nombre?.trim()
   const rutCrudo = borrador?.empresa.identificador?.trim()

@@ -32,7 +32,10 @@
  *      quedó confirmado — se confirma la recepción, no el dinero.
  */
 
-import { getQuotePointers } from "@/lib/supabase-persistence-v3"
+import { getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persistence-v3"
+import { onboardingEnabled, claveFase, claveBorrador } from "@/lib/onboarding/fase"
+import { parsearBorrador, sembrarBorrador } from "@/lib/onboarding/borrador"
+import { mensajeKickoffComprobanteCL } from "@/lib/onboarding/prompt"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 
@@ -240,6 +243,35 @@ export async function registrarComprobanteTransferencia(
   // corre en paralelo como auditoría. Nunca se afirma que el pago está
   // confirmado: se confirma la RECEPCIÓN y se le habilita la configuración.
   if (habilitaBlanda && pointer) {
+    // VICKY ONBOARDING (CL, decisión 26-jul): con el flag encendido, el
+    // comprobante legible ya NO deriva al wizard web — mueve al contacto a la
+    // fase onboarding y Vicky conduce el alta por este mismo chat. Es la
+    // SEGUNDA puerta al post-pago (la otra es cerrarYTraspasarPostPago con el
+    // pago online); las dos tienen que enrolar o el que transfiere se queda
+    // fuera. El borrador se siembra con la empresa y el RUT de la cotización
+    // para no volver a preguntarlos.
+    if (onboardingEnabled() && pais === "cl") {
+      let sembrado = null
+      try {
+        const previo = parsearBorrador(await getKvValue(claveBorrador(contact)).catch(() => null))
+        sembrado = sembrarBorrador(
+          previo,
+          { empresa: { nombre: pointer.empresa, identificador: pointer.rut } },
+          "cl",
+        )
+        await setKvValue(claveBorrador(contact), JSON.stringify(sembrado))
+        await setKvValue(claveFase(contact), "onboarding")
+      } catch (e) {
+        console.error("[comprobante] no se pudo enrolar en onboarding:", e)
+      }
+      return {
+        ok: true,
+        mensajeParaProspecto: mensajeKickoffComprobanteCL(montoFmt, sembrado ?? undefined),
+        notaCreada,
+        avisoInterno,
+      }
+    }
+
     const linkOnboarding = await obtenerLinkOnboarding(pointer.quoteId)
     if (!linkOnboarding) {
       // Sin link no hay habilitación posible: el equipo debe mandarlo a mano.

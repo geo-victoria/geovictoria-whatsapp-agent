@@ -10,7 +10,11 @@
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import { promptOnboardingCL, mensajeKickoffCL } from "../lib/onboarding/prompt.ts"
+import {
+  promptOnboardingCL,
+  mensajeKickoffCL,
+  mensajeKickoffComprobanteCL,
+} from "../lib/onboarding/prompt.ts"
 import {
   TOOL_GUARDAR_DATOS_ONBOARDING,
   TOOL_CONFIRMAR_ALTA_EMPRESA,
@@ -112,6 +116,62 @@ describe("no re-preguntar lo que el cliente ya dio (regla Eduardo, 26-jul)", () 
       altaSolicitada: false,
     })
     assert.match(conDatos, /NO se vuelven a preguntar; solo confirmar o actualizar/)
+  })
+})
+
+describe("las DOS puertas al post-pago llegan al mismo lugar", () => {
+  // Decisión 26-jul: el alta ya no se deriva al wizard web por ninguna vía.
+  // Pago online → cerrarYTraspasarPostPago → mensajeKickoffCL
+  // Comprobante  → registrarComprobante      → mensajeKickoffComprobanteCL
+  const SEMILLA = { empresa: { nombre: "Transportes Viig SpA", identificador: "77.861.333-6" } }
+  const b = sembrarBorrador(null, SEMILLA, "cl")
+
+  test("NINGUNA de las dos manda link del wizard", () => {
+    for (const [via, msg] of [
+      ["pago online", mensajeKickoffCL(b)],
+      ["comprobante", mensajeKickoffComprobanteCL("$890.000", b)],
+    ] as const) {
+      assert.ok(!/https?:\/\//.test(msg), `${via} sigue mandando un link`)
+      assert.ok(!/onboarding-geovictoria|auto-onboarding/i.test(msg), `${via} menciona el wizard`)
+    }
+  })
+
+  test("las dos abren el alta por chat con los datos ya sembrados", () => {
+    for (const [via, msg] of [
+      ["pago online", mensajeKickoffCL(b)],
+      ["comprobante", mensajeKickoffComprobanteCL("$890.000", b)],
+    ] as const) {
+      assert.match(msg, /por este mismo chat/, `${via} no abre el alta en el chat`)
+      assert.match(msg, /Transportes Viig SpA/, `${via} no confirma la empresa`)
+      assert.match(msg, /77861333-6/, `${via} no confirma el RUT normalizado`)
+      assert.match(msg, /quién va a administrar/, `${via} no pide el administrador`)
+      assert.ok(!FUGA_EJECUTIVO.test(msg), `${via} filtra un ejecutivo`)
+    }
+  })
+
+  test("el comprobante NUNCA afirma que el pago quedó confirmado", () => {
+    // Regla dura: se confirma la RECEPCIÓN, no el dinero. La verificación del
+    // abono corre en paralelo (validación blanda).
+    const msg = mensajeKickoffComprobanteCL("$890.000", b)
+    assert.match(msg, /Recibí tu comprobante por \$890\.000/)
+    assert.ok(
+      !/pago (fue )?(confirmad|verificad|acreditad|procesad)/i.test(msg),
+      `afirma confirmación del pago: ${msg}`,
+    )
+    assert.ok(!/\bpago quedó registrado\b/.test(msg), "esa frase es de la vía del pago online")
+  })
+
+  test("la vía del pago online sí puede afirmar el pago", () => {
+    // Ahí el cobro es firme, así que la afirmación es cierta.
+    assert.match(mensajeKickoffCL(b), /pago quedó registrado/)
+  })
+
+  test("ambas respetan el estilo de Vicky", () => {
+    for (const msg of [mensajeKickoffCL(b), mensajeKickoffComprobanteCL("$890.000", b)]) {
+      assert.ok(!/\bOye\b/.test(msg))
+      assert.ok(!/[¿¡]/.test(msg), "sin signos de apertura")
+      assert.ok(!/\*/.test(msg), "sin negritas")
+    }
   })
 })
 

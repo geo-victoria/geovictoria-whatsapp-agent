@@ -10,7 +10,8 @@
 ## Arquitectura Vicky onboarding (decisión 26-jul-2026)
 - Es un SEGUNDO AGENTE (prompt, tools y estado propios) en el MISMO repo y deploy. Agente = unidad de diseño; repo/deploy = unidad de operación — no acoplar los ejes.
 - Cerebro PURO en `lib/onboarding/` (sin Supabase/Botmaker/Foundry/red); la frontera la vigila `tests/onboarding-frontera.test.ts`. Trigger de extracción a servicio propio: segundo consumidor real (chat in-app con fecha comprometida) o cambio de equipo dueño.
-- Flag `VICKY_ONBOARDING_ENABLED` (apagado por defecto). Enrolamiento: el PAGO mueve venta→onboarding en `cerrarYTraspasarPostPago`; empresa creada → completado; sin vueltas atrás.
+- Flag `VICKY_ONBOARDING_ENABLED` (apagado por defecto). Enrolamiento por DOS puertas, las dos obligatorias: pago online (`cerrarYTraspasarPostPago`) y comprobante legible (`registrarComprobanteTransferencia`). Empresa creada → completado; sin vueltas atrás.
+- Con el flag ON en CL, Vicky NO manda el link del wizard: conduce el alta por chat. El wizard queda para CONFIGURACIÓN (turnos, planificaciones, carga masiva), no para el alta. CO y MX siguen con wizard + ejecutivo.
 - Alcance del alta por chat: empresa + UN admin (6 campos). Turnos/planificaciones/trabajadores = configuración, van al wizard web, NO al chat.
 
 ## Entrega de correo (diagnóstico 26-jul-2026)
