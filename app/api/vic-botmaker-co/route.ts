@@ -262,12 +262,16 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   // Si el reply AFIRMA que una reunión quedó agendada o que el equipo lo va a
   // contactar, pero NINGUNA tool lo respalda este turno, se re-corre el loop
   // forzando la tool; si tampoco se concreta, NO se confirma en falso.
-  const afirmaReunionLista =
-    /\breuni[oó]n\b[^.]{0,40}(qued[oó]|est[aá]|fue)[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(reply) ||
-    /\b(agend[eé]|reagend[eé])(?![a-záéíóúñ])[^.]{0,25}\breuni[oó]n\b/i.test(reply) ||
-    /\bse\s+l[ao]\s+(agend[eé]|reagend[eé])/i.test(reply)
-  const afirmaContactoListo =
-    /\b(un\s+ejecutiv[oa]|el\s+equipo|nuestro\s+equipo|un\s+asesor|Laura)\b[^.]{0,50}\b(l[oe]\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|comunicar[aá]|contactar[aá]))/i.test(reply)
+  // Como FUNCIONES de texto: se evalúan sobre el reply original Y sobre el del
+  // reintento — si el reintento ya no afirma nada, ESA es la respuesta buena.
+  const afirmaReunionListaEn = (t: string) =>
+    /\breuni[oó]n\b[^.]{0,40}(qued[oó]|est[aá]|fue)[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(t) ||
+    /\b(agend[eé]|reagend[eé])(?![a-záéíóúñ])[^.]{0,25}\breuni[oó]n\b/i.test(t) ||
+    /\bse\s+l[ao]\s+(agend[eé]|reagend[eé])/i.test(t)
+  const afirmaContactoListoEn = (t: string) =>
+    /\b(un\s+ejecutiv[oa]|el\s+equipo|nuestro\s+equipo|un\s+asesor|Laura)\b[^.]{0,50}\b(l[oe]\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|comunicar[aá]|contactar[aá]))/i.test(t)
+  const afirmaReunionLista = afirmaReunionListaEn(reply)
+  const afirmaContactoListo = afirmaContactoListoEn(reply)
   const realAgenda = toolCalls.some(
     (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
   )
@@ -302,6 +306,24 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     const retryReply = (retry?.reply || "").trim()
     if (retryOk && retryReply && retryReply !== AGENT_LOOP_EMPTY_FALLBACK) {
       console.warn(`[vic-co] ALUCINACION_RECUPERADA contact=${contact}: el reintento forzó la tool.`)
+      reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))
+      toolCalls = retryCalls
+    } else if (
+      retryReply &&
+      retryReply !== AGENT_LOOP_EMPTY_FALLBACK &&
+      !afirmaReunionListaEn(retryReply) &&
+      !afirmaContactoListoEn(retryReply)
+    ) {
+      // El reintento corrigió SIN tool: la afirmación original era ESPURIA —
+      // no había ninguna reunión ni contacto en juego. Caso Juan Angel
+      // (+573138157184, 24-jul): preguntó "Anual?" por el precio, el modelo
+      // alucinó un contacto, y el enlatado de abajo le inventó una reunión
+      // ("tu reunión quedó pendiente de registro") — respuesta del cliente:
+      // "Cual reunión". El reintento que responde SIN agendar nada es el
+      // resultado correcto, no un fallo.
+      console.warn(
+        `[vic-co] ALUCINACION_CORREGIDA_SIN_TOOL contact=${contact}: la afirmación era espuria; va la respuesta del reintento.`,
+      )
       reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))
       toolCalls = retryCalls
     } else {

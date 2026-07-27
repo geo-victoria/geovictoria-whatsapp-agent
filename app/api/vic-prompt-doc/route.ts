@@ -35,8 +35,8 @@ hacia el 30%, aceptando sacrificar ticket promedio si es necesario.</p>
 <li><b>Transparencia de costo</b>: deja claro qué marcajes son gratis (app, web, call, cuadrilla) y cuál tiene costo (reloj). Equipos ≤10 con reloj ven ambos valores.</li>
 <li><b>Micro-cierre</b>: tras mostrar precio valida interés antes de pedir datos.</li>
 <li><b>Negociación por escalones del servidor</b>: ante objeción con reloj, primero la alternativa gratis; después la escalera de descuento, tramo a tramo.</li>
-<li><b>La cotización se emite siempre que hay interés real</b>; si faltan datos, el lead queda registrado para Anderson.</li>
-<li><b>Traspaso con nombre</b>: toda cotización cierra presentando a Anderson Díaz.</li>
+<li><b>La cotización se emite siempre que hay interés real</b>; si faltan datos, el lead queda registrado para Eddyluz Mujica (relevo 27-jul; los deals anteriores siguen con Anderson).</li>
+<li><b>Traspaso con nombre</b>: el pago cierra presentando al DUEÑO real del deal (Eddyluz en las cotizaciones nuevas; Anderson en las anteriores al 27-jul).</li>
 <li><b>Respeto absoluto al no</b>: opt-out inmediato; pérdida declarada = una retención y cierre elegante.</li>
 </ol>
 <p><b>Lo que NO está en este manual</b> (vive en el motor, no en el prompt): las escaleras

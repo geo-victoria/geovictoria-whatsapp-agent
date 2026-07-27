@@ -91,7 +91,7 @@ export function quitarSignosApertura(texto: string): string {
 }
 
 /**
- * Blinda el contacto del ejecutivo COMERCIAL (Anderson Díaz) para que NUNCA se
+ * Blinda los contactos COMERCIALES (Eddyluz Mujica y Anderson Díaz) para que NUNCA se
  * filtre en casos de SOPORTE.
  *
  * Casuística real (2 casos, 27-jun): a clientes que pedían soporte ("no me abre
@@ -106,9 +106,13 @@ export function quitarSignosApertura(texto: string): string {
  * es una fuga: la reemplazamos por el WhatsApp REAL de soporte, que es el canal
  * correcto para esos casos. Determinista, se aplica al texto de salida.
  */
-// Teléfono de Anderson en sus formatos típicos de salida (con/sin +56, con/sin
-// el 9). El núcleo distintivo es "3937 ... 2058".
+// Teléfonos comerciales en sus formatos típicos de salida (con/sin +56,
+// con/sin el 9). Núcleos distintivos: "3937 ... 2058" (Anderson, deals
+// anteriores al relevo del 27-jul) y "3932 ... 1687" (Eddyluz, deals nuevos).
+// El relevo NO retira el blindaje viejo: el número de Anderson sigue vivo en
+// historiales y el modelo puede repetirlo desde ahí.
 const ANDERSON_TEL_RE = /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3937[\s).-]*2058/gi
+const EDDYLUZ_TEL_RE = /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3932[\s).-]*1687/gi
 // Fuente de verdad del canal de soporte: MENSAJE_ESCALAMIENTO_HUMANO en
 // lib/tools/consultar-agente-soporte.ts. Si cambia allá, actualizar aquí.
 const SOPORTE_WHATSAPP = "+56 9 4401 3873"
@@ -118,5 +122,5 @@ export function blindarContactoComercial(
   permitidoComercial: boolean,
 ): string {
   if (!texto || permitidoComercial) return texto
-  return texto.replace(ANDERSON_TEL_RE, SOPORTE_WHATSAPP)
+  return texto.replace(ANDERSON_TEL_RE, SOPORTE_WHATSAPP).replace(EDDYLUZ_TEL_RE, SOPORTE_WHATSAPP)
 }

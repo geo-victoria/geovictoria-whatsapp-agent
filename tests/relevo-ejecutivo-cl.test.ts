@@ -71,6 +71,32 @@ describe("lo ya asignado queda con Anderson: el traspaso resuelve al dueño real
   })
 })
 
+describe("la comunicación al cliente nombra a Eddyluz", () => {
+  const PROMPT = leer("app/api/vic-sales-agent-v3/prompt.ts")
+  const VOSEO = leer("lib/voseo-v3.ts")
+
+  test("el prompt CL atribuye lo nuevo a Eddyluz", () => {
+    assert.match(PROMPT, /a nombre de Eddyluz Mujica, la ejecutiva que da seguimiento/)
+    assert.match(PROMPT, /el Lead queda a nombre de Eddyluz para que ella lo retome/)
+    assert.doesNotMatch(PROMPT, /a nombre de Anderson/)
+  })
+
+  test("las únicas menciones a Anderson que quedan son protectoras", () => {
+    // Regla anti-fuga (no mencionarlo pre-pago / no dar su número como
+    // soporte): esas DEBEN conservarlo — su número sigue vivo en historiales.
+    const menciones = [...PROMPT.matchAll(/Anderson/g)]
+    assert.equal(menciones.length, 2, `hay ${menciones.length} menciones; deben ser solo las 2 protectoras`)
+    assert.match(PROMPT, /NUNCA menciones a Eddyluz Mujica, a Anderson Díaz ni a ningún ejecutivo/)
+    assert.match(PROMPT, /JAMÁS entregues el número o correo de Eddyluz Mujica/)
+  })
+
+  test("el blindaje anti-fuga cubre los teléfonos de los DOS ejecutivos", () => {
+    assert.match(VOSEO, /3937\[\\s\)\.\-\]\*2058/)
+    assert.match(VOSEO, /3932\[\\s\)\.\-\]\*1687/)
+    assert.match(VOSEO, /replace\(ANDERSON_TEL_RE, SOPORTE_WHATSAPP\)\.replace\(EDDYLUZ_TEL_RE, SOPORTE_WHATSAPP\)/)
+  })
+})
+
 describe("los textos que hablaban de Anderson dejaron de prometerlo", () => {
   test("agent-loop no promete un nombre en la reunión post-cotización", () => {
     // Durante la transición, prometer a Anderson (o a Eddyluz) por nombre es

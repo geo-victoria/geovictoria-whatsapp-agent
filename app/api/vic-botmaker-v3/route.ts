@@ -923,21 +923,22 @@ async function processOneTurn(
     // ejecutivo va a contactar, pero NO hubo un registrar_solicitud_callback (ni
     // un agendar_reunion, que también crea el Lead) exitoso este turno,
     // re-corremos forzando la tool; si aun así no se concreta, NO confirmamos.
-    const afirmaCallbackListo =
+    const afirmaCallbackListoEn = (t: string) =>
       // "tomé/dejé/registré/guardé tus datos | tu solicitud | el callback"
       /\b(tom[eé]|dej[eé]|guard[eé]|registr[eé]|anot[eé])[^.]{0,30}\b(tus\s+datos|tu\s+solicitud|tus\s+antecedentes|el\s+callback|tu\s+contacto)\b/i.test(
-        reply,
+        t,
       ) ||
       // "quedaste/quedó registrado" / "te dejé registrado"
-      /\bqued(aste|[oó])\b[^.]{0,20}\bregistrad/i.test(reply) ||
-      /\bte\s+(dej[eé]|registr[eé])[^.]{0,15}\bregistrad/i.test(reply) ||
+      /\bqued(aste|[oó])\b[^.]{0,20}\bregistrad/i.test(t) ||
+      /\bte\s+(dej[eé]|registr[eé])[^.]{0,15}\bregistrad/i.test(t) ||
       // Afirmación de contacto futuro por parte de un ejecutivo/equipo/Anderson.
       // Solo formas ASERTIVAS (contactará / te va a contactar / llamará / se
       // pondrá en contacto), NO la oferta en subjuntivo ("¿quieres que un
       // ejecutivo te contacte?"), que es legítima sin tool.
       /\b(un\s+ejecutivo|el\s+equipo|nuestro\s+ejecutivo|un\s+asesor|Anderson)\b[^.]{0,45}\b(te\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|contactar[aá])\s+en\s+contacto)/i.test(
-        reply,
+        t,
       )
+    const afirmaCallbackListo = afirmaCallbackListoEn(reply)
     const realCallback = toolCalls.some(
       (c) =>
         (c.name === "registrar_solicitud_callback" || c.name === "agendar_reunion") && c.ok,
@@ -973,6 +974,17 @@ async function processOneTurn(
         )
         if (retryReal && retryReply) {
           console.warn(`[v3-bg] CALLBACK_RECUPERADO contact=${contact}: el reintento forzó la tool.`)
+          reply = retryReply
+          result.toolCalls = retry.toolCalls
+          callbackRecuperado = true
+        } else if (retryReply && !afirmaCallbackListoEn(retryReply)) {
+          // La afirmación original era espuria: el reintento respondió sin
+          // prometer ningún contacto y sin necesitar la tool. Esa respuesta
+          // es la buena — el enlatado de abajo le inventaría al cliente una
+          // solicitud que nunca hizo (espejo del caso Juan Angel en CO).
+          console.warn(
+            `[v3-bg] CALLBACK_CORREGIDO_SIN_TOOL contact=${contact}: la afirmación era espuria; va la respuesta del reintento.`,
+          )
           reply = retryReply
           result.toolCalls = retry.toolCalls
           callbackRecuperado = true
