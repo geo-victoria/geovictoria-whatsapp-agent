@@ -6,14 +6,24 @@
  *   2. createZohoLead con ownerEmail = organizerEmail → Lead asignado directo al KAM (NO tómbola)
  *   3. createZohoEvent asociado al Lead, con Owner = KAM
  *
- * Si Cal.com falla → ok: false (no se crea nada en Zoho).
- * Si Cal.com OK pero Lead falla → ok: false con bookingId para registro manual.
- * Si Cal.com + Lead OK pero Event falla → ok: true con warning (el booking ya existe).
+ * REGLA: si el booking de Cal.com existe, la tool devuelve ok:true. Siempre.
+ * Lo que le importa al cliente es la reunión; el Lead y el Event son papeleo
+ * nuestro. Un fallo del CRM no puede reportarse como que no hay reunión.
+ *
+ * Si Cal.com falla → ok: false (no se crea nada en Zoho, no hay reunión).
+ * Si Cal.com OK pero Lead falla → ok: true con crmPendiente + aviso al equipo.
+ * Si Cal.com + Lead OK pero Event falla → ok: true con warning.
  */
 
 import { bookMeeting, getTimezone } from "@/lib/calendar"
 import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
 import { createZohoEvent } from "@/lib/zoho-events"
+import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+
+// Mismo destinatario interno que el resto de los avisos operativos.
+const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
+  .trim()
+  .replace(/\D/g, "")
 
 export const agendarReunionSchema = {
   name: "agendar_reunion",
@@ -99,6 +109,8 @@ export type AgendarReunionResultado =
       slotIso: string
       mensajeParaProspecto: string
       warning?: string
+      /** true si la reunión existe pero NO quedó registrada en el CRM. */
+      crmPendiente?: boolean
     }
   | {
       ok: false
@@ -137,7 +149,11 @@ export async function agendarReunion(
   // Lead PRE-EXISTENTE en Zoho (outbound del formulario): reasignar el MISMO
   // lead al KAM de la reunión en vez de crear un duplicado.
   const existingLeadId = (args.zohoLeadId || "").trim()
-  let effectiveLeadId: string
+  let effectiveLeadId: string | undefined
+  // El CRM puede quedar atrás sin que eso invalide la reunión. Ver el bloque
+  // de createZohoLead más abajo.
+  let crmPendiente = false
+  let warningCrm: string | undefined
   if (existingLeadId) {
     if (organizerEmail) {
       const upd = await updateZohoLeadOwner(existingLeadId, organizerEmail)
@@ -163,23 +179,48 @@ export async function agendarReunion(
     })
 
     if (!leadResult.success) {
+      // NO se devuelve ok:false. El paso que le importa al cliente —el booking
+      // en Cal.com— ya está hecho: la reunión EXISTE y le va a llegar la
+      // invitación. Lo que falló es papeleo nuestro en el CRM.
+      //
+      // CASO QUE ORIGINA ESTE CAMBIO (27-jul, Andirent +573112895086): el
+      // booking se creó (nUt9coHsuFkyxVU5gg7ETV, accepted), createZohoLead
+      // devolvió 401, la tool devolvía ok:false, y el guardrail
+      // anti-alucinación —que solo mira ese flag— pisaba la respuesta correcta
+      // de Vicky ("tu reunión está confirmada para mañana a las 10:00") con un
+      // "tuve un problema técnico y tu reunión quedó pendiente de registro".
+      // El cliente quedó creyendo que no tenía reunión. Es la mentira más cara
+      // posible: no se conecta, y el KAM se queda esperando.
+      //
+      // La ironía es que el propio texto del error decía "Avisa al cliente que
+      // la reunión está confirmada" — la instrucción correcta se perdía porque
+      // nadie más que el flag `ok` llegaba al guardrail.
       console.error("[agendar_reunion] createZohoLead falló:", leadResult.error)
-      return {
-        ok: false,
-        error:
-          `La reunión se agendó en el calendario (bookingId ${bookingId}) pero falló el ` +
-          `registro en el CRM: ${leadResult.error}. Avisa al cliente que la reunión está ` +
-          `confirmada y comunica internamente al equipo para registro manual.`,
-        reunionAgendada: true,
-        bookingId,
-      }
+      crmPendiente = true
+      warningCrm =
+        `La reunión quedó agendada en el calendario (bookingId ${bookingId}) pero NO se ` +
+        `registró en el CRM: ${leadResult.error}. Confirma la reunión al cliente con ` +
+        `normalidad — ya está hecha. El registro en Zoho lo hace el equipo a mano.`
+      await sendBotmakerMessage(
+        NOTIFY_TO,
+        `⚠️ Reunión agendada SIN registro en el CRM\n` +
+          `Booking: ${bookingId}\n` +
+          `Cliente: ${prospectName} — ${empresa || "sin empresa"}\n` +
+          `Email: ${prospectEmail}\n` +
+          `Cuándo: ${slotIso}\n` +
+          `KAM: ${organizerEmail || "sin asignar"}\n` +
+          `Motivo: ${leadResult.error}\n` +
+          `La reunión EXISTE y el cliente ya fue confirmado. Falta crear el Lead a mano.`,
+      ).catch(() => false)
+    } else {
+      effectiveLeadId = leadResult.leadId
     }
-    effectiveLeadId = leadResult.leadId
   }
 
   let eventId: string | undefined
   let warning: string | undefined
-  if (organizerEmail) {
+  // Sin Lead no hay a qué asociar el Event: se salta y queda en el warning.
+  if (organizerEmail && effectiveLeadId) {
     const eventResult = await createZohoEvent({
       leadId: effectiveLeadId,
       slotIso,
@@ -230,6 +271,7 @@ export async function agendarReunion(
     eventId,
     slotIso,
     mensajeParaProspecto,
-    warning,
+    warning: warningCrm || warning,
+    crmPendiente,
   }
 }
