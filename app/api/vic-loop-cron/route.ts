@@ -192,6 +192,7 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
 }
 
 type ConvRow = {
+  id: string | null
   contact: string
   last_user_at: string | null
   followup_closed_reason: string | null
@@ -219,6 +220,55 @@ async function empresaDeCotizacion(contact: string): Promise<string> {
     return (rows?.[0]?.empresa || "").trim()
   } catch {
     return ""
+  }
+}
+
+/**
+ * Contactos a los que Vicky YA les mostró un precio, leído del historial real.
+ *
+ * CASO QUE ORIGINA ESTA FUNCIÓN (27-jul, Ignacia de Tierra del Carmen): a las
+ * 12:31 recibió el valor completo — $46.011/mes más $48.433 de instalación —,
+ * a las 12:33 Vicky le pidió el RUT, y a las 13:35 el loop le escribió "solo
+ * me falta saber cuántas personas marcarían asistencia y cómo les gustaría
+ * marcar". Le preguntó dos datos que ella había entregado una hora antes.
+ *
+ * El motivo: la etapa se derivaba de `pref_escalon` / `pref_params`, que solo
+ * se escriben cuando hubo NEGOCIACIÓN DE DESCUENTO. `cotizar_referencial` —el
+ * camino normal, el que usa la enorme mayoría— no toca ninguno de los dos. Un
+ * lead con precio pero sin descuento negociado quedaba en `sin_precio` para
+ * siempre.
+ *
+ * No es un caso aislado: de 110 conversaciones que recibieron precio, 100 eran
+ * invisibles para el loop.
+ *
+ * La señal correcta es el mensaje mismo. "Total mensual" aparece en el
+ * resumen de precio de los tres países (CL "Total mensual con IVA", CO "Total
+ * mensual: $…", MX "Total mensual: … + IVA (16%)"), y en ningún otro texto de
+ * Vicky. Una query por batch, no por contacto.
+ */
+async function contactosQueVieronPrecio(convs: Map<string, ConvRow>): Promise<Set<string>> {
+  const porId = new Map<string, string>()
+  for (const [contact, c] of convs) if (c.id) porId.set(c.id, contact)
+  if (porId.size === 0) return new Set()
+  try {
+    const ids = [...porId.keys()].map((id) => `"${id}"`).join(",")
+    const res = await supa(
+      `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant` +
+        `&content=like.*Total mensual*&select=conversation_id`,
+    )
+    if (!res.ok) return new Set()
+    const filas = (await res.json().catch(() => [])) as Array<{ conversation_id?: string }>
+    const out = new Set<string>()
+    for (const f of filas) {
+      const contacto = f.conversation_id ? porId.get(f.conversation_id) : undefined
+      if (contacto) out.add(contacto)
+    }
+    return out
+  } catch (e) {
+    // Ante la duda NO se asume precio: se cae al comportamiento anterior, que
+    // pregunta de más pero no inventa que ya cotizamos.
+    console.error("[loop-cron] contactosQueVieronPrecio falló:", e)
+    return new Set()
   }
 }
 
@@ -359,10 +409,12 @@ export async function GET(req: Request): Promise<Response> {
   // patrón batch que la cadencia outbound).
   const contactsIn = rows.map((r) => `"${r.contact}"`).join(",")
   const convRes = await supa(
-    `vic_v3_conversations?contact=in.(${contactsIn})&select=contact,last_user_at,followup_closed_reason,followup_status,followup_next_at,formal_quote_id,pref_escalon,pref_params`,
+    `vic_v3_conversations?contact=in.(${contactsIn})&select=id,contact,last_user_at,followup_closed_reason,followup_status,followup_next_at,formal_quote_id,pref_escalon,pref_params`,
   )
   const convs = new Map<string, ConvRow>()
   for (const c of (convRes.ok ? await convRes.json() : []) as ConvRow[]) convs.set(c.contact, c)
+
+  const yaVieronPrecio = await contactosQueVieronPrecio(convs)
 
   // Señal de humano por Botmaker: UNA página del workspace para todo el batch.
   const conOperador = await contactosConOperador(new Set(rows.map((r) => r.contact)))
@@ -493,7 +545,12 @@ export async function GET(req: Request): Promise<Response> {
         ? "con_precio"
         : conv?.pref_params
           ? "con_precio"
-          : (r.stage as LoopStage) || "sin_precio"
+          : // El historial manda sobre los punteros: si Vicky ya mostró un
+            // precio, preguntar de nuevo cuántas personas marcarían es
+            // insultante. Ver contactosQueVieronPrecio (caso Ignacia).
+            yaVieronPrecio.has(r.contact)
+            ? "con_precio"
+            : (r.stage as LoopStage) || "sin_precio"
     let ejecutado = false
 
     if ((touch === 2 || touch === 3) && !llamadasDaptaHabilitadas()) {

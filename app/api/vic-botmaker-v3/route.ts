@@ -35,6 +35,7 @@ import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { faseDelContacto, armarOnboarding } from "@/lib/onboarding-canal"
 import { honestarMencionesDeCorreo } from "@/lib/honestidad-entrega"
+import { corregirPedidoDeTelefono } from "@/lib/no-pedir-telefono"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import {
   getSystemPromptV3,
@@ -1046,6 +1047,10 @@ async function processOneTurn(
     // búsqueda: el correo pasa SPF/DMARC, así que no cae en spam sino en
     // Promociones (Gmail) u Otros (Outlook), que es donde el cliente no mira.
     reply = honestarMencionesDeCorreo(reply)
+    // El cliente escribe DESDE su teléfono: pedírselo es pedirle un dato
+    // que ya tenemos. La regla está en el prompt dos veces y falló igual
+    // (caso Victor Bravo, 27-jul). Ver lib/no-pedir-telefono.ts.
+    reply = corregirPedidoDeTelefono(reply)
 
     // 2.8. Blindaje del contacto comercial: SIN EJECUTIVO ANTES DEL PAGO
     // (decisión 17-jul). El número de Anderson NUNCA sale por el chat — ni
