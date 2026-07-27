@@ -52,11 +52,13 @@ const SECRET_COTIZADORA_MX = (
 const EJECUTIVO_MX_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_MX_ID || "3525045000308323003").trim()
 
 // ── Reuniones MX (Cal.com) ──────────────────────────────────────────────────
-// Gated por env: CAL_EVENT_TYPE_ID_MX = event type de Cal.com del equipo
-// comercial de México. Sin la env, las tools de agenda NO se exponen al
-// modelo y el prompt instruye derivar. Cuando el equipo cree el event type,
-// basta setear la env + redeploy.
-const CAL_EVENT_TYPE_ID_MX = (process.env.CAL_EVENT_TYPE_ID_MX || "").trim()
+// Event type 6101466 (Lalo, 27-jul): agendamiento SIN cotización — la llamada
+// exploratoria del equipo MX (espejo del 3188650 chileno). Default en código
+// con override por env, mismo patrón que CAL_EVENT_TYPE_ID en lib/calendar.
+// El Lead queda a nombre del ejecutivo que Cal.com asigne en ese event type
+// (hoy: Yahel). Vaciar CAL_EVENT_TYPE_ID_MX="" en Vercel apaga la agenda y
+// vuelve al fallback de derivar_a_ejecutivo.
+const CAL_EVENT_TYPE_ID_MX = (process.env.CAL_EVENT_TYPE_ID_MX ?? "6101466").trim()
 export const REUNIONES_MX_HABILITADAS = Boolean(CAL_EVENT_TYPE_ID_MX)
 
 const TZ_MX = "America/Mexico_City"
