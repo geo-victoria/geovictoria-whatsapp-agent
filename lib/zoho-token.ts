@@ -5,17 +5,28 @@ function getEnv(name: string) {
   return (process.env[name] || "").trim()
 }
 
-async function readTokenFromSupabase(): Promise<string | null> {
+/**
+ * Devuelve el token cacheado JUNTO CON SU VENCIMIENTO REAL.
+ *
+ * Antes devolvía solo el string, y quien lo llamaba le inventaba 50 minutos de
+ * vida contados desde ese instante. Ver getZohoAccessToken para el destrozo
+ * que eso causaba.
+ */
+async function readTokenFromSupabase(): Promise<{ token: string; expiresAt: number } | null> {
   const url = getEnv("SUPABASE_URL")
   const key = getEnv("SUPABASE_SERVICE_ROLE_KEY")
   if (!url || !key) return null
   try {
     const res = await fetch(
-      `${url}/rest/v1/vic_kv?key=eq.zoho_access_token&expires_at=gt.${new Date().toISOString()}&select=value&limit=1`,
+      `${url}/rest/v1/vic_kv?key=eq.zoho_access_token&expires_at=gt.${new Date().toISOString()}&select=value,expires_at&limit=1`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" }
     )
-    const rows = await res.json() as Array<{ value: string }>
-    return rows?.[0]?.value || null
+    const rows = await res.json() as Array<{ value: string; expires_at: string }>
+    const row = rows?.[0]
+    if (!row?.value) return null
+    const expiresAt = Date.parse(row.expires_at)
+    if (!Number.isFinite(expiresAt)) return null
+    return { token: row.value, expiresAt }
   } catch { return null }
 }
 
@@ -46,12 +57,30 @@ export async function getZohoAccessToken(): Promise<string> {
     return _cache.token
   }
 
-  // 2. Cache persistente en Supabase (entre instancias)
+  // 2. Cache persistente en Supabase (entre instancias).
+  //
+  // CASO REAL (27-jul 14:19, Andirent +573112895086): la reunión se creó en
+  // Cal.com y crear el Lead en Zoho devolvió 401 INVALID_TOKEN. Siete minutos
+  // antes, otra función del mismo deploy había hecho un update de Lead sin
+  // problema con el MISMO token. No era el refresh token: era este caché.
+  //
+  // El bug: se tomaba el token de Supabase y se le estampaba `now + 50 min`
+  // de vida en el caché de proceso, sin mirar cuánto le quedaba de verdad. La
+  // query filtra `expires_at > now()`, así que puede devolver un token con 10
+  // segundos de vida — y la instancia lo daba por bueno durante 50 minutos
+  // más. Como cada función serverless (vic-botmaker-v3, vic-botmaker-co, los
+  // crons) tiene su propio caché en memoria y sus propias instancias
+  // calientes, el resultado era intermitente y sin patrón: una función con
+  // token fresco funcionando al lado de otra sirviendo uno muerto. De ahí que
+  // pareciera "un problema de Colombia" cuando no tenía nada de colombiano.
+  //
+  // Ahora se respeta el vencimiento REAL. Si le quedan menos de 2 minutos, se
+  // ignora y se renueva.
   const cached = await readTokenFromSupabase()
-  if (cached) {
-    _cache.token = cached
-    _cache.expiresAt = now + 50 * 60 * 1000
-    return cached
+  if (cached && cached.expiresAt - now > 2 * 60 * 1000) {
+    _cache.token = cached.token
+    _cache.expiresAt = cached.expiresAt
+    return cached.token
   }
 
   // 3. Renovar token
