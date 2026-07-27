@@ -77,7 +77,19 @@ import {
 import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 60
+// 300s, igual que los webhooks CO y MX. Estaba en 60 desde el 22-jun, cuando
+// el turno era mucho más corto: hoy un turno de cotización encadena varias
+// iteraciones del modelo más generar_link_cotizadora (que crea la cuenta en
+// Zoho, arma el PDF y manda el correo) y pasa de 60 segundos sin problema.
+//
+// CASO QUE ORIGINA EL CAMBIO (27-jul, Jackelin de Kláza SpA): escribió a las
+// 13:30 y la función murió con "Vercel Runtime Timeout Error: Task timed out
+// after 60 seconds". El turno alcanzó a escribir last_user_at y murió antes de
+// persistir el mensaje y de responder — la clienta quedó esperando en silencio
+// con la cotización ya emitida. Dos veces en 40 minutos, en dos contactos
+// distintos. La línea chilena atiende el 92% del tráfico y era la única con el
+// presupuesto recortado.
+export const maxDuration = 300
 
 // ── Guardrails de seguridad ───────────────────────────────────────────
 const MAX_INPUT_CHARS = 2000
