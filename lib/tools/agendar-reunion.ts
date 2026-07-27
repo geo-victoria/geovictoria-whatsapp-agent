@@ -64,6 +64,27 @@ async function duenoCotizacionVigente(
   }
 }
 
+/**
+ * Directorio del equipo comercial CL por email (Zoho, verificado 27-jul).
+ *
+ * Observación de Rodrigo (27-jul): al confirmar una reunión, Vicky decía
+ * "con asepulveda" — el PREFIJO DEL EMAIL crudo. La confirmación debe dar el
+ * NOMBRE de la persona y su WhatsApp, para que el cliente sepa con quién se
+ * junta y tenga cómo escribirle. Un email fuera del directorio cae a
+ * "un ejecutivo de nuestro equipo": nunca más un prefijo de correo.
+ */
+const DIRECTORIO: Record<string, { nombre: string; whatsapp?: string }> = {
+  "asepulveda@geovictoria.com": { nombre: "Aracelli Sepúlveda", whatsapp: "+56 9 3212 5672" },
+  "aaraque@geovictoria.com": { nombre: "Aleydis Araque", whatsapp: "+56 9 8291 6868" },
+  "emujica@geovictoria.com": { nombre: "Eddyluz Mujica", whatsapp: "+56 9 3932 1687" },
+  "adiazg@geovictoria.com": { nombre: "Anderson Díaz", whatsapp: "+56 9 3937 2058" },
+  // Símiles por país (Lalo 27-jul): Gordillo toma los deals de Colombia y
+  // Yahel los de México — sus reuniones con cotización se confirman con
+  // nombre y WhatsApp igual que en Chile.
+  "agordillo@geovictoria.com": { nombre: "Alejandro Gordillo", whatsapp: "+57 314 267 7765" },
+  "ysegura@geovictoria.com": { nombre: "Yahel Segura", whatsapp: "+52 55 3763 6604" },
+}
+
 // Mismo destinatario interno que el resto de los avisos operativos.
 const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
   .trim()
@@ -155,6 +176,8 @@ export type AgendarReunionResultado =
       warning?: string
       /** true si la reunión existe pero NO quedó registrada en el CRM. */
       crmPendiente?: boolean
+      /** Quién atiende, con nombre real (y WhatsApp si está en el directorio). */
+      atiende?: { nombre: string; whatsapp?: string }
     }
   | {
       ok: false
@@ -317,11 +340,18 @@ export async function agendarReunion(
     minute: "2-digit",
   })
 
+  // La persona que atiende: el dueño de la cotización si existe; si no, el
+  // organizador de Cal — SIEMPRE con nombre real desde el directorio, jamás
+  // el prefijo del email (observación de Rodrigo, 27-jul).
+  const atiende = dueno
+    ? DIRECTORIO[dueno.email] || { nombre: dueno.nombre }
+    : (organizerEmail && DIRECTORIO[organizerEmail]) || undefined
   const mensajeParaProspecto =
     `¡Listo! Tu reunión quedó agendada para el ${fechaLegible}` +
-    (dueno ? `, con ${dueno.nombre.split(" ")[0]}` : organizerEmail ? `, con ${organizerEmail.split("@")[0]}` : "") +
+    (atiende ? `, con ${atiende.nombre}` : organizerEmail ? `, con un ejecutivo de nuestro equipo` : "") +
     (meetingUrl ? `. Te llegará el link de la reunión por email a ${prospectEmail}` : ` (te enviaremos el link por email)`) +
-    `. ¿Hay algo más en lo que pueda ayudarte?`
+    (atiende?.whatsapp ? `\n\nSi necesitas algo antes de la reunión, el WhatsApp de ${atiende.nombre.split(" ")[0]} es ${atiende.whatsapp}.` : "") +
+    ` ¿Hay algo más en lo que pueda ayudarte?`
 
   return {
     ok: true,
@@ -334,5 +364,6 @@ export async function agendarReunion(
     mensajeParaProspecto,
     warning: warningCrm || warning,
     crmPendiente,
+    atiende,
   }
 }

@@ -540,8 +540,10 @@ export function buildDispatchCO(contact: string) {
           timezone: TZ_CO,
           // Confirmación en tuteo cálido colombiano.
           mensajeParaProspecto:
-            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia) 🎉 ` +
-            `Te llegará la invitación con el link de la reunión a ${email}. Te puedo ayudar en algo más?`,
+            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia)${r.atiende ? `, con ${r.atiende.nombre}` : ""} 🎉 ` +
+            `Te llegará la invitación con el link de la reunión a ${email}.` +
+            (r.atiende?.whatsapp ? ` Si necesitas algo antes, su WhatsApp es ${r.atiende.whatsapp}.` : "") +
+            ` Te puedo ayudar en algo más?`,
         }
       }
       if (name === "reagendar_reunion") {

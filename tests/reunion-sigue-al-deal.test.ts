@@ -52,7 +52,10 @@ describe("dirección A: reunión cuando ya hay cotización", () => {
   })
 
   test("el cliente escucha el nombre de quien VA a atenderlo", () => {
-    assert.match(AGENDAR, /dueno \? `, con \$\{dueno\.nombre\.split\(" "\)\[0\]\}`/)
+    // Desde la observación de Rodrigo (27-jul), el nombre sale del DIRECTORIO
+    // con el dueño de la cotización como primera fuente.
+    assert.match(AGENDAR, /const atiende = dueno\s*\n\s*\? DIRECTORIO\[dueno\.email\]/)
+    assert.match(AGENDAR, /atiende \? `, con \$\{atiende\.nombre\}`/)
   })
 
   test("best-effort: sin cotización o con Zoho caído, el flujo es el de siempre", () => {

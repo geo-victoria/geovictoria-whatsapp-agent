@@ -161,6 +161,30 @@ function paramsParaPlantilla(
   return out
 }
 
+// ── Toque de PRESENTACIÓN DE LA EJECUTIVA (Rodrigo, 27-jul) ─────────────────
+// A las 2 HORAS de inactividad tras un preform o cotización (stages
+// con_precio/formal), el toque 1 deja de ser un nudge genérico: presenta a la
+// ejecutiva del país con su correo y WhatsApp, para que el cliente tenga un
+// humano con nombre desde ese momento. Es la ÚNICA presentación de ejecutivo
+// pre-pago permitida (excepción explícita a la regla del 17-jul) y la manda
+// el SISTEMA, no el modelo. Nota consciente: las cotizaciones viejas de
+// Anderson ya pasaron su toque 1 hace días, así que este texto solo alcanza a
+// las nuevas — no hace falta resolver el Owner por fila.
+const EJECUTIVA_LOOP: Record<"cl" | "co" | "mx", { nombre: string; email: string; whatsapp: string; trato: string }> = {
+  cl: { nombre: "Eddyluz Mujica", email: "emujica@geovictoria.com", whatsapp: "+56 9 3932 1687", trato: "ella" },
+  co: { nombre: "Alejandro Gordillo", email: "agordillo@geovictoria.com", whatsapp: "+57 314 267 7765", trato: "él" },
+  mx: { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", whatsapp: "+52 55 3763 6604", trato: "ella" },
+}
+function textoPresentacion(pais: "cl" | "co" | "mx"): string {
+  const e = EJECUTIVA_LOOP[pais]
+  return (
+    `Te presento a ${e.nombre}, quien te ayudará con el resto del proceso 😊\n` +
+    `✉️ ${e.email}\n` +
+    `📱 WhatsApp: ${e.whatsapp}\n\n` +
+    `Tu cotización sigue vigente — cualquier duda la resolvemos ${e.trato} o yo por aquí.`
+  )
+}
+
 // Texto libre por stage y país (ventana de 24h abierta). Cortos, sin inventar
 // precios ni links: solo empujan el siguiente paso del embudo. CL en tono
 // chileno cálido; CO en tuteo colombiano ("de una", "te cuento").
@@ -553,6 +577,20 @@ export async function GET(req: Request): Promise<Response> {
             : (r.stage as LoopStage) || "sin_precio"
     let ejecutado = false
 
+    // Rodrigo 27-jul: la presentación sale a las 2 HORAS de inactividad, no a
+    // la 1h del toque 1 genérico. Un toque 1 con precio que llegó antes se
+    // pospone al minuto 120 (ajustado a hábil) y sale en un tick posterior.
+    if (touch === 1 && (stage === "con_precio" || stage === "formal")) {
+      const dosHoras = new Date(new Date(t0).getTime() + 2 * 3600e3)
+      if (now < dosHoras.getTime()) {
+        const habil = ajustarAHabil(dosHoras, tzDePais(country), r.contact)
+        await patchLoop(r.contact, { next_touch_at: habil.toISOString() })
+        pospuestos++
+        detalle.push({ contact: r.contact, accion: "pospuesto_presentacion_2h", hasta: habil.toISOString() })
+        continue
+      }
+    }
+
     if ((touch === 2 || touch === 3) && !llamadasDaptaHabilitadas()) {
       // Llamadas Dapta apagadas (27-jul): el toque NO se agenda, pero SÍ se
       // marca ejecutado para que la cadencia avance al siguiente toque de
@@ -584,7 +622,13 @@ export async function GET(req: Request): Promise<Response> {
     } else {
       // WhatsApp: la ventana de 24h de Meta decide texto libre vs plantilla.
       const ventanaAbierta = lastUserMs > 0 && now - lastUserMs < 24 * 3600e3
-      const texto = TEXTOS[stage][paisKey]
+      // Toque 1 con precio = presentación de la ejecutiva (Rodrigo 27-jul).
+      // Fuera de ventana cae a la plantilla del stage, como siempre — a las
+      // 2h de una cotización la ventana está prácticamente siempre abierta.
+      const texto =
+        touch === 1 && (stage === "con_precio" || stage === "formal")
+          ? textoPresentacion(paisKey)
+          : TEXTOS[stage][paisKey]
       if (ventanaAbierta) {
         const ok = await sendBotmakerMessage(r.contact, texto, canal).catch(() => false)
         if (ok) {

@@ -597,8 +597,10 @@ export function buildDispatchMX(contact: string) {
           timezone: TZ_MX,
           // Confirmación en tuteo mexicano cálido.
           mensajeParaProspecto:
-            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleMX(r.slotIso)} (hora de Ciudad de México) 🎉 ` +
-            `Te llegará la invitación con el link de la reunión a ${email}. Te puedo ayudar en algo más?`,
+            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleMX(r.slotIso)} (hora de Ciudad de México)${r.atiende ? `, con ${r.atiende.nombre}` : ""} 🎉 ` +
+            `Te llegará la invitación con el link de la reunión a ${email}.` +
+            (r.atiende?.whatsapp ? ` Si necesitas algo antes, su WhatsApp es ${r.atiende.whatsapp}.` : "") +
+            ` Te puedo ayudar en algo más?`,
         }
       }
       if (name === "reagendar_reunion") {

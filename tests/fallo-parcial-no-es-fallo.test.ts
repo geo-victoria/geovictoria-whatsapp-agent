@@ -60,7 +60,7 @@ describe("agendar_reunion: el booking manda", () => {
 
   test("el resultado expone crmPendiente para quien quiera actuar", () => {
     assert.match(TOOL, /crmPendiente\?: boolean/)
-    assert.match(TOOL, /crmPendiente,\s*\n\s*\}/)
+    assert.match(TOOL, /crmPendiente,\s*\n\s*atiende,\s*\n\s*\}/)
   })
 
   test("el Event se salta si no hay Lead al que asociarlo", () => {
