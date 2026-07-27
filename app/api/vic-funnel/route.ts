@@ -272,7 +272,49 @@ function renderVentasCerradas(ventas: VentaCerrada[]): string {
 </div>`
 }
 
-async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co"): Promise<{
+// ── Filtro Desde–Hasta (pedido Lalo 27-jul) ─────────────────────────────────
+// El rango se interpreta en hora de CHILE (UTC-4): desde las 00:00 del "desde"
+// hasta las 23:59:59 del "hasta". Aplica sobre la fecha de INICIO de la
+// conversación (Sankey y KPIs) y la fecha de CREACIÓN de la cotización (cierre
+// y ventas cerradas). La sección "Funnel por origen" queda fuera del filtro a
+// propósito: sus conjuntos (toque 0, asignados) son acumulados del programa y
+// partirlos por fecha con precisión requiere datos que ese fetch no trae.
+type RangoFechas = { desdeMs: number; hastaMs: number; desdeStr: string; hastaStr: string; etiqueta: string }
+
+function parseRango(searchParams: URLSearchParams): RangoFechas | null {
+  const fecha = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()) ? v.trim() : "")
+  const desde = fecha(searchParams.get("desde"))
+  const hasta = fecha(searchParams.get("hasta"))
+  if (!desde && !hasta) return null
+  const desdeMs = desde ? Date.parse(`${desde}T00:00:00-04:00`) : 0
+  const hastaMs = hasta ? Date.parse(`${hasta}T23:59:59.999-04:00`) : Number.MAX_SAFE_INTEGER
+  if (Number.isNaN(desdeMs) || Number.isNaN(hastaMs) || desdeMs > hastaMs) return null
+  const etiqueta = desde && hasta ? `${desde} → ${hasta}` : desde ? `desde ${desde}` : `hasta ${hasta}`
+  return { desdeMs, hastaMs, desdeStr: desde, hastaStr: hasta, etiqueta }
+}
+
+const enRango = (iso: string | null | undefined, r: RangoFechas): boolean => {
+  const t = Date.parse(String(iso || ""))
+  return Number.isFinite(t) && t >= r.desdeMs && t <= r.hastaMs
+}
+
+/** id de conversación → started_at, para filtrar el análisis por fecha. */
+async function fetchFechasConversaciones(): Promise<Map<string, string>> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,started_at&limit=10000`,
+    {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      cache: "no-store",
+    },
+  )
+  const out = new Map<string, string>()
+  if (!res.ok) return out
+  const rows = (await res.json().catch(() => [])) as Array<{ id?: string; started_at?: string }>
+  for (const r of rows) if (r.id) out.set(r.id, r.started_at || "")
+  return out
+}
+
+async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango: RangoFechas | null): Promise<{
   total: number
   aceptadas: number
   // Desglose del campo "Intervención Humana" sobre las ACEPTADAS: cierres
@@ -303,7 +345,9 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co"): Prom
       const esMX = tel.startsWith("521") || (tel.startsWith("52") && tel.length === 12)
       if (pais === "cl" && esMX) return false
       const nombre = String(q.Name || "").toLowerCase()
-      return !nombre.includes("prueba") && !nombre.includes("huellerocompany")
+      if (nombre.includes("prueba") || nombre.includes("huellerocompany")) return false
+      // Filtro Desde–Hasta sobre la fecha de creación de la cotización.
+      return !rango || enRango(q.Created_Time, rango)
     })
     const aceptadasList = quotes.filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept"))
     const marca = (q: { Intervenci_n_Humana?: string | null }) => String(q.Intervenci_n_Humana || "").toLowerCase()
@@ -628,13 +672,16 @@ export async function GET(req: Request): Promise<Response> {
   // conversación viene de vic_v3_conversations.country (la línea por la que
   // entró), y sus cotizaciones se asocian por formal_quote_id.
   const pais: "cl" | "co" = searchParams.get("pais") === "co" ? "co" : "cl"
+  const rango = parseRango(searchParams)
   try {
     const co = await fetchExclusionesCO()
-    const [allRows, hard, cierreZoho, origenData] = await Promise.all([
+    const [allRows, hard, cierreZoho, origenData, fechasConv] = await Promise.all([
       fetchAnalysis(),
       fetchHardSignals(),
-      fetchCierreZoho(co.quoteIds, pais),
+      fetchCierreZoho(co.quoteIds, pais, rango),
       fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, convertidos: new Set<string>(), respondio: new Set<string>() })),
+      // Las fechas de inicio solo hacen falta con el filtro activo.
+      rango ? fetchFechasConversaciones() : Promise.resolve(new Map<string, string>()),
     ])
     origen = origenData
     cierre = cierreZoho
@@ -647,7 +694,11 @@ export async function GET(req: Request): Promise<Response> {
       // Universo Chile cerrado: las conversaciones mexicanas (+52) no entran.
       const d = digits(r.contact)
       const esMX = d.startsWith("521") || (d.startsWith("52") && d.length === 12)
-      return pais === "cl" ? !esCO && !esMX : esCO
+      if (pais === "cl" ? esCO || esMX : !esCO) return false
+      // Filtro Desde–Hasta sobre el inicio de la conversación. Una conversación
+      // sin fecha conocida se EXCLUYE cuando el filtro está activo: un filtro
+      // de fechas no puede mostrar filas de fecha desconocida.
+      return !rango || enRango(fechasConv.get(r.conversation_id), rango)
     })
     // Hechos deterministas mandan sobre el LLM: cotización formal enviada y
     // reunión agendada se imponen aunque el modelo no las haya detectado.
@@ -863,7 +914,18 @@ export async function GET(req: Request): Promise<Response> {
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a> · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a> · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <div class="sub" style="margin-top:6px">
+    <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <input type="hidden" name="key" value="${esc(key)}">
+      <input type="hidden" name="pais" value="${pais}">
+      <label style="font-size:12px">Desde <input type="date" name="desde" value="${rango ? rango.desdeStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
+      <label style="font-size:12px">Hasta <input type="date" name="hasta" value="${rango ? rango.hastaStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
+      <button type="submit" style="background:#455a64;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
+      ${rango ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtro</a>` : ""}
+      ${rango ? `<span style="font-size:11px;color:#9ca3af">· filtra conversaciones (por inicio) y cotizaciones (por emisión); "Funnel por origen" muestra el programa completo</span>` : ""}
+    </form>
+  </div>
   <script>
     // Actualización manual: re-analiza conversaciones nuevas (mismo key del
     // dash) y recarga con los datos de Zoho en vivo. Pedido Lalo 21-jul.
