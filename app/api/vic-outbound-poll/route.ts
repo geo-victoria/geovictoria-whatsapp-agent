@@ -11,7 +11,7 @@
  * en Zoho los leads RECIENTES con owner Vicky que siguen "1. No contactado" y
  * sin marca de omisión, y por cada uno dispara /api/vic-outbound-lead (mismo
  * contrato que usaría el webhook). Ese endpoint ya trae todas las protecciones:
- * dedup por conversación, solo +56, exclusión de internos, reasignación a SDR
+ * dedup por conversación, ruteo multi-país (CL/CO/MX), exclusión de internos, reasignación a SDR
  * si el envío falla, y actualización del Lead_Status a "2. Intento de contacto".
  *
  * Para no re-procesar leads que el endpoint omitió (dedup/interno/no +56), el
@@ -48,6 +48,8 @@ type ZLead = {
   Email?: string | null
   Phone?: string | null
   Rango_de_Empleados?: string | null
+  Country?: string | null
+  Territorio?: string | null
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -65,7 +67,7 @@ export async function POST(req: Request): Promise<Response> {
   // Leads recientes de Vicky aún no contactados ni marcados como omitidos.
   const desde = new Date(Date.now() - LOOKBACK_H * 3600e3).toISOString().replace(/\.\d{3}Z$/, "-00:00")
   const query =
-    `select id, First_Name, Last_Name, Company, Email, Phone, Rango_de_Empleados from Leads ` +
+    `select id, First_Name, Last_Name, Company, Email, Phone, Rango_de_Empleados, Country, Territorio from Leads ` +
     `where (((Owner = ${VICKY_OWNER_ID} and Created_Time >= '${desde}') ` +
     `and Lead_Status = '1. No contactado') and Comentario_Vicky is null) ` +
     `order by Created_Time asc limit ${BATCH}`
@@ -99,6 +101,11 @@ export async function POST(req: Request): Promise<Response> {
         telefono: (lead.Phone || "").trim(),
         email: (lead.Email || "").trim(),
         empleadosRango: (lead.Rango_de_Empleados || "").trim(),
+        // País del lead (tómbola MX, 27-jul): sin esto, un teléfono mexicano
+        // en formato local (10 dígitos, sin +52) no se puede normalizar a
+        // 521... y el lead rebota a un SDR humano en vez de recibir su toque
+        // 0. El endpoint prioriza Country y usa el prefijo como verdad final.
+        country: ((lead.Country || lead.Territorio || "") as string).trim(),
         zohoLeadId: lead.id,
       }),
       cache: "no-store",
