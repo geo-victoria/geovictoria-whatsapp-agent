@@ -58,6 +58,23 @@ describe("el filtro llega a las tres capas", () => {
   })
 })
 
+describe("el objetivo de cierre es por país", () => {
+  // Lalo 27-jul: Chile 25%, Colombia 10%. Un solo TARGET_PCT rige el objetivo
+  // general Y el de venta autónoma — si se separan, los dos cards del dash
+  // muestran metas distintas para la misma base.
+  test("Chile 25, Colombia 10, declarado una sola vez", () => {
+    const declaraciones = [...SRC.matchAll(/const TARGET_PCT = /g)]
+    assert.equal(declaraciones.length, 1, "TARGET_PCT se declaró más de una vez")
+    assert.match(SRC, /const TARGET_PCT = pais === "co" \? 10 : 25/)
+  })
+
+  test("no queda ningún 25 embebido en los cálculos de meta", () => {
+    assert.doesNotMatch(SRC, /\(25 \/ 100\) \* vieronPrecio/)
+    assert.doesNotMatch(SRC, /\/ 0\.75\)/)
+    assert.doesNotMatch(SRC, /"Objetivo 25%/)
+  })
+})
+
 describe("la UI declara lo que el filtro cubre y lo que no", () => {
   test("hay formulario con desde/hasta que conserva key y país", () => {
     assert.match(SRC, /name="desde"/)

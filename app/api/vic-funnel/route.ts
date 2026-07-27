@@ -973,16 +973,18 @@ export async function GET(req: Request): Promise<Response> {
     const clasificadas = cierre.autonomas + cierre.asistidas
     const tasaAuto = vieronPrecio ? Math.round((cierre.autonomas / vieronPrecio) * 100) : 0
     const tasaAsis = vieronPrecio ? Math.round((cierre.asistidas / vieronPrecio) * 100) : 0
-    // Objetivo 25% también para la venta AUTÓNOMA (pedido Lalo 21-jul): mismo
-    // cálculo que el objetivo general, pero contando solo aceptadas 100% Vicky.
-    const metaAuto = (25 / 100) * vieronPrecio
+    // Objetivo de cierre POR PAÍS (Lalo 27-jul): Chile 25%, Colombia 10% — el
+    // programa CO recién parte y su embudo outbound madura distinto. El mismo
+    // target rige el objetivo general y el de venta AUTÓNOMA (pedido 21-jul).
+    const TARGET_PCT = pais === "co" ? 10 : 25
+    const metaAuto = (TARGET_PCT / 100) * vieronPrecio
     const cumpleAuto = vieronPrecio > 0 && cierre.autonomas >= metaAuto
     const faltanAutoEnviadas = Math.max(0, Math.ceil(metaAuto - cierre.autonomas))
-    const faltanAutoNuevas = Math.max(0, Math.ceil((metaAuto - cierre.autonomas) / 0.75))
+    const faltanAutoNuevas = Math.max(0, Math.ceil((metaAuto - cierre.autonomas) / (1 - TARGET_PCT / 100)))
     const cardObjetivoAuto = vieronPrecio
       ? kpiCard(
-          "Objetivo 25% · 100% Vicky",
-          `${tasaAuto}% / 25%`,
+          `Objetivo ${TARGET_PCT}% · 100% Vicky`,
+          `${tasaAuto}% / ${TARGET_PCT}%`,
           cumpleAuto ? col.best : col.warn,
           cumpleAuto
             ? "objetivo alcanzado 🎉"
@@ -998,12 +1000,11 @@ export async function GET(req: Request): Promise<Response> {
     const notaSinClasificar = cierre.sinClasificar > 0
       ? `<div class="sub" style="margin:-2px 0 10px">${cierre.sinClasificar} aceptada${cierre.sinClasificar === 1 ? "" : "s"} sin clasificar — marcar el campo <b>Intervención Humana</b> en la cotización (Zoho) para completar la autonomía del cierre.</div>`
       : ""
-    // Objetivo de cierre (pedido Lalo 21-jul): tasa actual vs target 25% y
-    // cuántas ventas faltan, diferenciando el camino: cerrar cotizaciones YA
-    // enviadas (solo suma al numerador) vs ventas de cotizaciones NUEVAS (una
-    // conversación nueva que ve precio y compra suma a AMBOS lados, por eso
-    // se necesita más: n = (meta − actuales) / (1 − 0.25)).
-    const TARGET_PCT = 25
+    // Objetivo de cierre (pedido Lalo 21-jul): tasa actual vs el target del
+    // país y cuántas ventas faltan, diferenciando el camino: cerrar
+    // cotizaciones YA enviadas (solo suma al numerador) vs ventas de
+    // cotizaciones NUEVAS (una conversación nueva que ve precio y compra suma
+    // a AMBOS lados, por eso se necesita más: n = (meta − actuales) / (1 − t)).
     const metaExacta = (TARGET_PCT / 100) * vieronPrecio
     const cumpleMeta = vieronPrecio > 0 && cierre.aceptadas >= metaExacta
     const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - cierre.aceptadas))
