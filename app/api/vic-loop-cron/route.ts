@@ -147,6 +147,26 @@ type ConvRow = {
   pref_params: unknown | null
 }
 
+/**
+ * Razón social REAL del contacto, desde el puntero de su cotización formal.
+ * "" si no la tenemos — y en ese caso NO se manda el param: es preferible que
+ * Botmaker resuelva ${empresa} con la variable que ya guardó del mensaje de
+ * apertura, antes que pisarla con un relleno.
+ */
+async function empresaDeCotizacion(contact: string): Promise<string> {
+  try {
+    const res = await supa(
+      `vic_v3_quote_pointers?contact=eq.${encodeURIComponent(contact)}` +
+        `&select=empresa&order=updated_at.desc&limit=1`,
+    )
+    if (!res.ok) return ""
+    const rows = (await res.json().catch(() => [])) as Array<{ empresa?: string | null }>
+    return (rows?.[0]?.empresa || "").trim()
+  } catch {
+    return ""
+  }
+}
+
 function supa(path: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
@@ -459,14 +479,21 @@ export async function GET(req: Request): Promise<Response> {
           ejecutado = true
           detalle.push({ contact: r.contact, accion: "plantilla", touch, skip: "sin plantilla" })
         } else {
-          // vic_v3_conversations no guarda nombre/empresa: van los neutros que
-          // el repo ya usa para plantillas ("Hola de nuevo" / "tu empresa").
-          const ok = await sendBotmakerTemplate(
-            r.contact,
-            tpl,
-            { nombre: "de nuevo", empresa: "tu empresa" },
-            canal,
-          ).catch(() => false)
+          // NUNCA mandar neutros de relleno. Botmaker no solo sustituye los
+          // params en el texto: los ESCRIBE en las variables del contacto. Los
+          // "de nuevo" / "tu empresa" que iban acá destruían el dato real —
+          // caso verificado el 27-jul: ${nombre} pasó de "alejandro" a "de
+          // nuevo" y ${empresa} de "Bar & Restaurant" a "tu empresa", de forma
+          // irreversible y para todas las plantillas futuras de ese contacto.
+          //
+          // Solo se manda lo que sabemos de verdad. Lo que se omite lo resuelve
+          // Botmaker con la variable que ya tiene guardada del mensaje de
+          // apertura, que es justamente el valor real.
+          const params: Record<string, string> = {}
+          const empresaReal = (await empresaDeCotizacion(r.contact)) || ""
+          if (empresaReal) params.empresa = empresaReal
+
+          const ok = await sendBotmakerTemplate(r.contact, tpl, params, canal).catch(() => false)
           if (ok) {
             // El toque queda en el historial como turno de Vicky para que
             // retome con continuidad cuando el cliente responda.
