@@ -75,14 +75,15 @@ function fechaLegibleMX(slotIso: string): string {
   })
 }
 
-// Escalamiento de soporte MX: el mensaje chileno trae teléfonos de Chile; acá
-// van los canales válidos para México (correo + horario). El soporte MX lo
-// atienden Pablo Rodríguez y Miguel Guzmán; cuando el equipo confirme un
-// WhatsApp/teléfono local de soporte, se agrega aquí.
+// Mesa de Ayuda GeoVictoria MÉXICO (tarjeta oficial, Lalo 27-jul): correo
+// PROPIO soportemx@ con horario continuado, teléfono local de oficina L-V
+// 9:00-18:00, y la política de la mesa: los colaboradores se atienden con el
+// administrador de su empresa.
 const MENSAJE_ESCALAMIENTO_SOPORTE_MX =
-  "Para esta consulta te recomiendo escribir directamente a nuestro equipo de soporte:\n" +
-  "📧 Email: *soporte@geovictoria.com*\n" +
-  "Atienden de lunes a viernes de 8:30 a 18:30 y te ayudarán enseguida 🙌"
+  "Para esta consulta te recomiendo contactar directamente a nuestra Mesa de Ayuda de México:\n" +
+  "📧 Email: *soportemx@geovictoria.com* (horario continuado)\n" +
+  "📞 Teléfono: *+52 33 4160 5435* (lunes a viernes de 9:00 a 18:00)\n\n" +
+  "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria 🙌"
 
 // programar_seguimiento con la zona horaria de México como default (el resto
 // del schema chileno aplica igual).

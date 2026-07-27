@@ -72,12 +72,18 @@ export type ConsultarAgenteSoporteResultado =
       error: string
     }
 
+// Mesa de Ayuda GeoVictoria CHILE (tarjeta oficial, Lalo 27-jul): canal
+// exclusivo para ADMINISTRADORES de la plataforma; L-V 08:30-18:00; fuera de
+// horario, el correo retoma el caso a primera hora del día hábil siguiente.
+// OJO: el WhatsApp de acá es la fuente de verdad del reemplazo anti-fuga de
+// lib/voseo-v3.ts (SOPORTE_WHATSAPP) — si cambia, actualizar allá también.
 const MENSAJE_ESCALAMIENTO_HUMANO =
-  "Para esta consulta puedes contactar directamente a nuestro equipo de soporte:\n" +
+  "Para esta consulta puedes contactar directamente a nuestra Mesa de Ayuda:\n" +
   "📲 WhatsApp: *+56 9 4401 3873*\n" +
-  "📧 Email: *soporte@geovictoria.com*\n" +
   "📞 Teléfono: *600 914 3819*\n" +
-  "¡Ellos te ayudarán de inmediato! 🙌"
+  "📧 Email: *soporte@geovictoria.com*\n" +
+  "Atienden de lunes a viernes de 08:30 a 18:00 — y fuera de horario les escribes al correo y retoman tu caso a primera hora del día hábil siguiente 🙌\n\n" +
+  "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria."
 
 export async function consultarAgenteSoporte(
   args: ConsultarAgenteSoporteInput,

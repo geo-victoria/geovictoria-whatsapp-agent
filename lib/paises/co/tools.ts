@@ -91,10 +91,16 @@ function fechaLegibleCO(slotIso: string): string {
 // Escalamiento de soporte CO: el mensaje chileno trae teléfonos de Chile; acá
 // van los canales válidos para Colombia (correo + horario). Cuando el equipo
 // CO confirme un WhatsApp/teléfono local de soporte, se agrega aquí.
+// Mesa de Ayuda GeoVictoria COLOMBIA (datos oficiales, Lalo 27-jul):
+// correo propio soporte.co@ con horario continuado, teléfono local de
+// oficina L-V 7:30-18:30, y la política de la mesa: los COLABORADORES se
+// atienden con el administrador de su empresa — solo los administradores
+// tienen soporte directo de GeoVictoria.
 const MENSAJE_ESCALAMIENTO_SOPORTE_CO =
-  "Para esta consulta te recomiendo escribir directamente a nuestro equipo de soporte:\n" +
-  "📧 Email: *soporte@geovictoria.com*\n" +
-  "Atienden de lunes a viernes de 8:30 a 18:30 y te ayudarán enseguida 🙌"
+  "Para esta consulta te recomiendo contactar directamente a nuestra Mesa de Ayuda de Colombia:\n" +
+  "📧 Email: *soporte.co@geovictoria.com* (horario continuado)\n" +
+  "📞 Teléfono: *+57 601 508 8941* (lunes a viernes de 7:30 a 18:30)\n\n" +
+  "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria 🙌"
 
 // programar_seguimiento con la zona horaria de Colombia como default (el
 // resto del schema chileno aplica igual).
@@ -479,8 +485,8 @@ export function buildDispatchCO(contact: string) {
       if (name === "consultar_agente_soporte") {
         const sanearCanalesChilenos = (texto: string): string =>
           texto
-            .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, "soporte@geovictoria.com")
-            .replace(/600[\s.\-]*914[\s.\-]*3819/g, "soporte@geovictoria.com")
+            .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, "soporte.co@geovictoria.com")
+            .replace(/600[\s.\-]*914[\s.\-]*3819/g, "soporte.co@geovictoria.com")
         const r = await consultarAgenteSoporte(input as never)
         if (!r.ok) return r
         if (r.accion === "escalar_humano") {
