@@ -425,9 +425,9 @@ export async function runAgentLoop(params: {
         let result: Awaited<ReturnType<typeof dispatchTool>>
         // REUNIÓN POST-FORMAL = del dueño del deal, no del Round Robin (Lalo,
         // 21-jul, caso notaría): con cotización formal vigente, el deal ya es
-        // de Anderson — agendar por Cal.com asignaría un KAM aleatorio y
+        // del ejecutivo dueño del deal — agendar por Cal.com asignaría un KAM aleatorio y
         // nacería un doble dueño (la enfermedad Ingesub). Determinista: se
-        // avisa al equipo con el horario pedido y Anderson envía la invitación.
+        // avisa al equipo con el horario pedido y el dueño envía la invitación.
         let reunionPostFormal = false
         if (toolName === "agendar_reunion" && contact) {
           const formalReunion = await getFormalQuote(contact).catch(() => "")
@@ -437,12 +437,12 @@ export async function runAgentLoop(params: {
           const slot = String((toolInput as Record<string, unknown>).slotIso || "")
           const nombreCli = String((toolInput as Record<string, unknown>).prospectName || "")
           await avisarEquipoInterno(
-            `📅 Reunión pedida POST-cotización — contacto +${contact} (${nombreCli}). Horario pedido: ${slot || "sin hora exacta"}. El deal es de Anderson: enviar la invitación él mismo (no se agendó por Cal.com para no asignar otro KAM).`,
+            `📅 Reunión pedida POST-cotización — contacto +${contact} (${nombreCli}). Horario pedido: ${slot || "sin hora exacta"}. La invitación la envía el DUEÑO del deal (revisar Owner de la cotización en Zoho — relevo 27-jul: nuevas de Eddyluz, anteriores de Anderson); no se agendó por Cal.com para no asignar otro KAM.`,
           ).catch(() => {})
           result = {
             ok: true,
             mensajeParaProspecto:
-              "Listo! Le pasé tu horario a Anderson Díaz, el ejecutivo a cargo de tu cotización — él te enviará la invitación de la reunión para confirmarla 😊",
+              "Listo! Le pasé tu horario al ejecutivo a cargo de tu cotización — te va a enviar la invitación de la reunión para confirmarla 😊",
           } as unknown as Awaited<ReturnType<typeof dispatchTool>>
         } else if (toolName === "generar_link_cotizadora" && generarLinkEnEsteTurno >= 1) {
           // Una sola cotización formal por turno (cada PDF es pesado; varias en

@@ -107,7 +107,8 @@ const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
 const VICKY_COTIZADORA_SECRET = process.env.VICKY_COTIZADORA_SECRET || ""
 const SCOPE_MAX_USUARIOS = 50
-const EJECUTIVO_DEFAULT = "Anderson Díaz"
+// Relevo 27-jul: las cotizaciones nuevas son de Eddyluz.
+const EJECUTIVO_DEFAULT = "Eddyluz Mujica"
 const IVA_RATE = 0.19
 
 // Sectores válidos (espejo del prompt y de la picklist de Zoho).

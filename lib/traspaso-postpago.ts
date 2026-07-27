@@ -23,6 +23,7 @@ import {
 import { cancelPendingCallbacks } from "./dapta-voice"
 import { sendBotmakerMessage } from "./botmaker-push-v3"
 import { PERFIL_CO } from "./paises/co"
+import { ownerDeCotizacion } from "./zoho-quote-owner"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 import { pagoCierraLoop } from "./loop-v2"
 import { onboardingEnabled, claveFase, claveBorrador } from "./onboarding/fase"
@@ -109,11 +110,22 @@ export async function cerrarYTraspasarPostPago(
     return { contact, traspaso: "enviado" }
   }
 
+  // CL: se presenta al DUEÑO REAL del deal pagado, no a un nombre fijo.
+  // Relevo 27-jul: las cotizaciones nuevas son de Eddyluz y las anteriores
+  // siguen siendo de Anderson — presentar al equivocado en el mensaje de
+  // bienvenida es exactamente la incoherencia del caso "yo misma te
+  // acompaño" (tests/coherencia-post-pago), ahora entre dos humanos.
+  const EJECUTIVOS_CL: Record<string, { nombre: string; email: string; telefono: string }> = {
+    "emujica@geovictoria.com": { nombre: "Eddyluz Mujica", email: "emujica@geovictoria.com", telefono: "+56 9 3932 1687" },
+    "adiazg@geovictoria.com": { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" },
+  }
+  const duenoCL = !esMX && !esCO ? await ownerDeCotizacion(quoteId).catch(() => null) : null
   const ejecutivo = esMX
     ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "+52 55 3763 6604" }
     : esCO
       ? PERFIL_CO.equipo.ejecutivo
-      : { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" }
+      : (duenoCL && EJECUTIVOS_CL[duenoCL.email]) ||
+        (duenoCL ? { nombre: duenoCL.nombre, email: duenoCL.email, telefono: "" } : EJECUTIVOS_CL["emujica@geovictoria.com"])
   // Caso Jessica/JEANSCO (24-jul): el mensaje de bienvenida DEBE traer el link
   // del auto-onboarding — antes solo presentaba al ejecutivo y el cliente
   // tenía que encontrar el wizard por su cuenta. El endpoint es idempotente.

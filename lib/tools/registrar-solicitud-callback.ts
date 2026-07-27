@@ -5,7 +5,7 @@
  *   - Callback explícito del prospecto (default) → SIN ownerEmail → Owner =
  *     vicky default → entra a TÓMBOLA del equipo comercial.
  *   - Fallback de cotización (seguimientoCotizacion=true) → Owner = ejecutivo
- *     de cotizaciones (Anderson) → asignado directo para que él lo siga.
+ *     de cotizaciones (Eddyluz desde el 27-jul; antes Anderson) → asignado directo.
  */
 
 import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
@@ -14,13 +14,14 @@ import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
 // cotizar pero no alcanzó a emitir la cotización, el lead queda a su nombre (no
 // a tómbola), para que él retome al prospecto.
 const EJECUTIVO_COTIZACIONES_EMAIL = (
-  process.env.ZOHO_EJECUTIVO_COTIZACIONES_EMAIL || "adiazg@geovictoria.com"
+  // Relevo 27-jul: lo nuevo va a Eddyluz (antes Anderson).
+  process.env.ZOHO_EJECUTIVO_COTIZACIONES_EMAIL || "emujica@geovictoria.com"
 ).trim()
 
 export const registrarSolicitudCallbackSchema = {
   name: "registrar_solicitud_callback",
   description:
-    "Registra un Lead en Zoho CRM. Dos usos: (1) callback explícito — el prospecto pide que lo llamen ('que me llamen', 'prefiero que me contacten', 'mejor por teléfono') → déjalo SIN seguimientoCotizacion: el Lead entra a la tómbola del equipo comercial. (2) Fallback de cotización — el prospecto tenía intención de cotizar y mostró interés real, pero NO alcanzaste a reunir los datos para emitir la cotización formal (le falta RUT, dirección o email y no los entrega) → pasa seguimientoCotizacion=true: el Lead queda a nombre del ejecutivo de cotizaciones (Anderson) para que él lo retome. NO usar para reuniones agendadas (para eso existe agendar_reunion). Antes de invocarla, captura nombre, empresa y teléfono como mínimo. Email, necesidad, cantidad de trabajadores y preferencia de horario son recomendados.",
+    "Registra un Lead en Zoho CRM. Dos usos: (1) callback explícito — el prospecto pide que lo llamen ('que me llamen', 'prefiero que me contacten', 'mejor por teléfono') → déjalo SIN seguimientoCotizacion: el Lead entra a la tómbola del equipo comercial. (2) Fallback de cotización — el prospecto tenía intención de cotizar y mostró interés real, pero NO alcanzaste a reunir los datos para emitir la cotización formal (le falta RUT, dirección o email y no los entrega) → pasa seguimientoCotizacion=true: el Lead queda a nombre de la ejecutiva de cotizaciones (Eddyluz) para que ella lo retome. NO usar para reuniones agendadas (para eso existe agendar_reunion). Antes de invocarla, captura nombre, empresa y teléfono como mínimo. Email, necesidad, cantidad de trabajadores y preferencia de horario son recomendados.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -73,7 +74,7 @@ export const registrarSolicitudCallbackSchema = {
       seguimientoCotizacion: {
         type: "boolean" as const,
         description:
-          "true SOLO en el fallback de cotización: el prospecto tenía intención de cotizar y mostró interés, pero no se pudo emitir la cotización por falta de datos. Asigna el Lead al ejecutivo de cotizaciones (Anderson) en vez de la tómbola. Para callbacks normales, omítelo o false.",
+          "true SOLO en el fallback de cotización: el prospecto tenía intención de cotizar y mostró interés, pero no se pudo emitir la cotización por falta de datos. Asigna el Lead a la ejecutiva de cotizaciones (Eddyluz) en vez de la tómbola. Para callbacks normales, omítelo o false.",
       },
       zohoLeadId: {
         type: "string" as const,
@@ -116,7 +117,7 @@ export type RegistrarSolicitudCallbackResultado =
 export async function registrarSolicitudCallback(
   args: RegistrarSolicitudCallbackInput,
 ): Promise<RegistrarSolicitudCallbackResultado> {
-  // Fallback de cotización → asignar a Anderson (no tómbola).
+  // Fallback de cotización → asignar a la ejecutiva de cotizaciones (no tómbola).
   const ownerEmail = args.seguimientoCotizacion ? EJECUTIVO_COTIZACIONES_EMAIL : undefined
 
   // Lead PRE-EXISTENTE en Zoho (outbound del formulario): NO crear duplicado.

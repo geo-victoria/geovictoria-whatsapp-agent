@@ -47,6 +47,7 @@ const DEFAULT_TEST_CONTACTS = [
   "56962492757", // Caro (pruebas)
   "56995077374", // Interno (pruebas)
   "56939372058", // Anderson (ejecutivo comercial)
+  "56939321687", // Eddyluz (ejecutiva de cotizaciones desde el 27-jul)
   "573142677765", // Alejandro Gordillo (validaciones canal voz CO)
   "56966765498", // Línea Vicky — Meta Cloud API
   "56967308227", // Línea Vicky — Botmaker
