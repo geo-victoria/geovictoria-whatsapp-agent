@@ -25,6 +25,11 @@
  * Botmaker — solo derivan a este endpoint los contactos en whitelist.
  */
 
+import {
+  cierrePorBoton,
+  esTextoDeBotonDeCierre,
+  normalizarMensajeEntrante,
+} from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
@@ -1129,11 +1134,15 @@ async function processOneTurn(
       // porque el override formal-sobre-despedida re-armaba en cada turno).
       // Capa determinista; el cierre formal (perdido) sigue siendo del modelo
       // vía marcar_no_contactar según la regla de retención del prompt.
+      // Un botón de cierre ("Elegimos otro proveedor" / "Ya no lo
+      // necesitamos") ES un rechazo, aunque su texto no tenga ninguna de
+      // las palabras del patrón. Ver lib/respuesta-boton.ts.
       const esRechazo =
-        message.trim().length <= 60 &&
+        esTextoDeBotonDeCierre(message) ||
+        (message.trim().length <= 60 &&
         /\b(no\s+gracias|no\s+(me|nos)\s+interesa|no\s+estoy\s+interesad\w+|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+necesito\s+(nada|informaci[oó]\w*|cotiz\w+|el\s+servicio)|no\s+insist\w+|dej\w+\s+de\s+(escribir\w*|hablar\w*|insistir\w*)|no\s+me\s+escrib\w+)\b/i.test(
           message,
-        )
+        ))
       // Señal COMERCIAL: actividad comercial en este turno, o estado comercial
       // persistente (cotización formal / negociación en curso), o un estimado/
       // cotización ya mostrado antes en la conversación (para seguir armando en los
@@ -1165,7 +1174,21 @@ async function processOneTurn(
           await enrolarEnLoop(contact, "cl").catch(() => {})
         }
       }
-      if (usoOptOut) {
+      const perdidaPorBoton = cierrePorBoton(message) === "perdido"
+      if (perdidaPorBoton) {
+        // El cliente tocó "Elegimos otro proveedor" / "Ya no lo necesitamos"
+        // en la plantilla de reactivación. Es la declaración de pérdida más
+        // explícita que existe — más que cualquier texto libre— y hasta hoy no
+        // cerraba NADA: el ciclo se apagaba solo por agotamiento ('agotado'),
+        // que el Loop v2 no considera motivo de cierre. Resultado real
+        // (56992047070): tocó el botón el 25-jul y el loop le escribió el
+        // 27-jul preguntándole cuántas personas marcarían asistencia.
+        await closeFollowup(contact, "perdido")
+        if (quotePointer?.quoteId) {
+          await marcarCotizacionRechazada(quotePointer.quoteId).catch(() => {})
+        }
+        console.log(`[v3-followup] botón de pérdida → ciclo cerrado contact=${contact}`)
+      } else if (usoOptOut) {
         await closeFollowup(contact, tipoNoContactar)
         console.log(`[v3-followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
         // Pérdida declarada: la cotización pendiente se marca Rechazada en Zoho
@@ -1330,6 +1353,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     const body = (await request.json()) as BotmakerRequest
     const contact = normalizeContact(body.contact || "")
     let message = (body.message || "").trim()
+
+    // Respuesta por BOTÓN: Botmaker no manda el texto sino el payload del
+    // intent ({"button":"…","entities":"…","intent":"…"}). Se normaliza acá,
+    // en la entrada, para que TODO lo de abajo —clasificador de rechazo,
+    // modelo, historial— vea "Elegimos otro proveedor" y no el JSON crudo.
+    // Ver lib/respuesta-boton.ts (caso 56992047070).
+    const cierreBoton = cierrePorBoton(message)
+    message = normalizarMensajeEntrante(message)
 
     // Canal de ORIGEN: si la acción de código nos dice por qué línea entró el
     // mensaje, lo persistimos — sendBotmakerMessage responde SIEMPRE por ese

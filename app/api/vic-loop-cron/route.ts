@@ -393,8 +393,16 @@ export async function GET(req: Request): Promise<Response> {
     // loop muere con el mismo motivo (paridad con la reactivación, que excluye
     // exactamente estas razones). Va antes que la señal de humano: un opt-out
     // no se "pospone", se respeta.
+    //
+    // 'derivado' se sumó el 27-jul. Es el motivo que pone el webhook cuando la
+    // conversación pasó a un HUMANO (ejecutivo o Foundry). El loop lo ignoraba
+    // y seguía escribiendo en paralelo: de los 7 toques por plantilla desde el
+    // encendido, 3 fueron a contactos 'derivado' — uno de ellos había cerrado
+    // con "Gracias, espero contacto el próximo lunes". Es exactamente la venta
+    // paralela a ciegas que el commit f4fc0b7 (caso Ingesub) vino a matar, y
+    // el loop la reabrió por la puerta de atrás.
     const reason = conv?.followup_closed_reason || ""
-    if (["opt_out", "perdido", "soporte", "rechazo"].includes(reason)) {
+    if (["opt_out", "perdido", "soporte", "rechazo", "derivado"].includes(reason)) {
       await patchLoop(r.contact, { estado: "cerrado", motivo_cierre: reason })
       cerrados++
       detalle.push({ contact: r.contact, accion: "cerrado", motivo: reason })

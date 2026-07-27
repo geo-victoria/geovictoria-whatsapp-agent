@@ -30,6 +30,11 @@
  * Auth: header x-secret == BOTMAKER_SECRET_MX.
  */
 
+import {
+  cierrePorBoton,
+  esTextoDeBotonDeCierre,
+  normalizarMensajeEntrante,
+} from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
 import { runAgentLoop } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
@@ -360,11 +365,15 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     const esSoporte = toolCalls.some((c) => FOLLOWUP_SUPPORT_TOOLS_CO.has(c.name) && c.ok)
     const esDespedida = message.trim().length <= 30 && FAREWELL_RE_CO.test(message)
     // Espejo del chileno (caso Rodrigo 17-jul): rechazo explícito → no re-armar.
+    // Un botón de cierre ("Elegimos otro proveedor" / "Ya no lo
+    // necesitamos") ES un rechazo, aunque su texto no tenga ninguna de
+    // las palabras del patrón. Ver lib/respuesta-boton.ts.
     const esRechazo =
-      message.trim().length <= 60 &&
+      esTextoDeBotonDeCierre(message) ||
+      (message.trim().length <= 60 &&
       /\b(no\s+gracias|no\s+(me|nos)\s+interesa|no\s+estoy\s+interesad\w+|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+necesito\s+(nada|informaci[oó]\w*|cotiz\w+|el\s+servicio)|no\s+insist\w+|dej\w+\s+de\s+(escribir\w*|hablar\w*|insistir\w*)|no\s+me\s+escrib\w+)\b/i.test(
         message,
-      )
+      ))
     const comercialEsteTurno = toolCalls.some(
       (c) => FOLLOWUP_COMMERCIAL_TOOLS_CO.has(c.name) && c.ok,
     )
@@ -509,6 +518,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     const body = (await request.json().catch(() => ({}))) as BotmakerBody
     const contact = (body.contact || "").replace(/\D/g, "")
     let message = (body.message || "").trim()
+
+    // Respuesta por BOTÓN: Botmaker no manda el texto sino el payload del
+    // intent ({"button":"…","entities":"…","intent":"…"}). Se normaliza acá,
+    // en la entrada, para que TODO lo de abajo —clasificador de rechazo,
+    // modelo, historial— vea "Elegimos otro proveedor" y no el JSON crudo.
+    // Ver lib/respuesta-boton.ts (caso 56992047070).
+    const cierreBoton = cierrePorBoton(message)
+    message = normalizarMensajeEntrante(message)
     const audioUrl = (body.audioUrl || body.audioURL || "").trim()
     const simulacion = body.simular === true
 
