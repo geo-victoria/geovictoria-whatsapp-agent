@@ -91,7 +91,14 @@ const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREF
 const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida", "vicky_loop_despedida", "vicky_loop_despedida")
 const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string; mx: string }>> = {
   1: {
-    sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_lead_nudge", CO_PREFORM, "vicky_lead_nudge"),
+    // NO usar vicky_lead_nudge acá: es la única plantilla de la matriz que NO
+    // pertenece a la familia vicky_loop_*, y está DESINCRONIZADA con Meta —
+    // Botmaker guarda el texto largo con ${nombre}/${empresa} y Meta tiene
+    // otro, corto y sin variables ("¿Todo ok? ¿Quieres que te cotice?"). Manda
+    // el de Meta, y como los conteos de parámetros no calzan sale el #132000.
+    // Métricas de Meta del 27-jul: 2 enviadas, 2 entregadas, 100% leídas, 0
+    // respuestas. Ver el bloque VARS_PLANTILLA para el detalle.
+    sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO),
     con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
     formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
   },
@@ -107,6 +114,51 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
   },
   6: { sin_precio: LOOP_TPL_T6, con_precio: LOOP_TPL_T6, formal: LOOP_TPL_T6 },
   7: { sin_precio: LOOP_TPL_T7, con_precio: LOOP_TPL_T7, formal: LOOP_TPL_T7 },
+}
+
+// Variables que cada plantilla DECLARA en su cuerpo, leídas de la API de
+// Botmaker el 27-jul (GET /v2.0/whatsapp/templates?phoneLineNumber=...).
+//
+// Existe porque mandar un param que la plantilla NO declara no es inocuo:
+// Botmaker ESCRIBE cada param en las variables del contacto antes de
+// renderizar. Le estábamos mandando `empresa` a plantillas cuyo cuerpo ni
+// siquiera la menciona — un write sin ningún efecto en el texto. De toda la
+// matriz solo vicky_mx_react_corta usa ${empresa}; el resto usa ${nombre} o
+// nada.
+//
+// Celda vacía = plantilla sin variables: no se le manda NADA. Plantilla que
+// no esté en este mapa tampoco recibe params (default conservador): antes de
+// agregarla, mirar su cuerpo real en Botmaker.
+const VARS_PLANTILLA: Record<string, readonly string[]> = {
+  vicky_loop_sin_precio: [],
+  vicky_loop_con_precio: [],
+  vicky_loop_con_precio_co: [],
+  vicky_loop_con_precio_mx: [],
+  vicky_loop_pago: ["nombre"],
+  vicky_loop_retoma: ["nombre"],
+  vicky_loop_retoma_rut: ["nombre"],
+  vicky_loop_despedida: ["nombre"],
+  vicky_react_47_razones_v2: ["nombre"],
+  vicky_co_react_preform: ["nombre"],
+  vicky_mx_react_corta: ["nombre", "empresa"],
+}
+
+/**
+ * Params a mandar para `tpl`: solo las variables que la plantilla declara Y
+ * de las que tenemos el valor REAL. Lo que se omite lo resuelve Botmaker con
+ * la variable que ya guardó del mensaje de apertura, que es el dato bueno.
+ */
+function paramsParaPlantilla(
+  tpl: string,
+  disponibles: Record<string, string>,
+): Record<string, string> {
+  const declaradas = VARS_PLANTILLA[tpl] || []
+  const out: Record<string, string> = {}
+  for (const v of declaradas) {
+    const valor = (disponibles[v] || "").trim()
+    if (valor) out[v] = valor
+  }
+  return out
 }
 
 // Texto libre por stage y país (ventana de 24h abierta). Cortos, sin inventar
@@ -499,9 +551,11 @@ export async function GET(req: Request): Promise<Response> {
           // Solo se manda lo que sabemos de verdad. Lo que se omite lo resuelve
           // Botmaker con la variable que ya tiene guardada del mensaje de
           // apertura, que es justamente el valor real.
-          const params: Record<string, string> = {}
+          // Y solo se manda lo que la plantilla DECLARA: un param que su
+          // cuerpo no menciona no cambia el texto, pero igual pisa la variable
+          // del contacto. Ver VARS_PLANTILLA.
           const empresaReal = (await empresaDeCotizacion(r.contact)) || ""
-          if (empresaReal) params.empresa = empresaReal
+          const params = paramsParaPlantilla(tpl, { empresa: empresaReal })
 
           const ok = await sendBotmakerTemplate(r.contact, tpl, params, canal).catch(() => false)
           if (ok) {
