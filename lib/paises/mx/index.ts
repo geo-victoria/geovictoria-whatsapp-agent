@@ -95,7 +95,7 @@ export const PERFIL_MX: PerfilPais = {
     ejecutivo: {
       nombre: "Yahel Segura",
       email: "ysegura@geovictoria.com",
-      telefono: "", // TODO: teléfono de Yahel pendiente de confirmación.
+      telefono: "+52 55 3763 6604", // Ficha de usuario en Zoho, verificada 27-jul.
     },
   },
 
