@@ -391,7 +391,14 @@ export async function POST(req: Request): Promise<Response> {
   const ctx = [
     saludoApertura,
     ``,
-    `[Datos del formulario web: nombre ${[nombre, apellido].filter(Boolean).join(" ")} · empresa ${empresa}` +
+    // OJO con la empresa: el fallback "tu empresa" existe para que la PLANTILLA
+    // lea natural ("...cotización para tu empresa"), pero acá adentro NO puede
+    // presentarse como si fuera la razón social — Vicky se lo creía y emitió
+    // cotizaciones formales a nombre de "tu empresa" (3 casos reales, 21–24 jul:
+    // Notaría Almendras $334.188 entre ellos). Si el formulario no la trajo, el
+    // contexto lo dice explícito para que Vicky la PREGUNTE antes de cotizar.
+    `[Datos del formulario web: nombre ${[nombre, apellido].filter(Boolean).join(" ")}` +
+      ` · empresa ${empresa === "tu empresa" ? "NO INDICADA (el formulario vino sin razón social: pregúntala antes de la cotización formal)" : empresa}` +
       `${rango ? ` · ${rango} empleados` : ""}${email ? ` · email ${email}` : ""}` +
       `${paginaInteres ? ` · convirtió en la página ${paginaInteres} (úsalo como pista de qué le interesa, sin citar la URL)` : ""}` +
       `${zohoLeadId ? ` · zohoLeadId ${zohoLeadId}` : ""}]`,
