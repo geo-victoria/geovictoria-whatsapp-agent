@@ -95,11 +95,37 @@ export type ScheduledCall = {
  * Agenda una llamada devuelta. Cancela cualquier otra pendiente del mismo
  * contacto (la petición más reciente manda).
  */
+/**
+ * INTERRUPTOR GLOBAL de las llamadas automáticas (Dapta), todos los países.
+ *
+ * APAGADO POR DEFECTO desde el 27-jul (decisión Eduardo). Motivo: las llamadas
+ * se marcaban `done` en nuestra base y NO existían en Dapta. El propio
+ * callback-cron lo venía registrando:
+ *
+ *   [callback-cron] llamada … marcada disparada pero NO existe en Dapta
+ *
+ * 6 de 6 llamadas del 27-jul cayeron así. Peor que no llamar: en el
+ * seguimiento comercial quedaban anotadas como "no contesta", indistinguibles
+ * de un rechazo real del cliente — y con eso se le bajaba la prioridad a gente
+ * a la que nunca se llamó (3 de los 12 "no contesta" del Excel de Anderson).
+ *
+ * La ausencia de la variable APAGA: no hace falta tocar Vercel para detenerlo,
+ * y para reactivarlo basta DAPTA_ENABLED=on cuando el circuito esté verificado
+ * de punta a punta.
+ *
+ * NO afecta a `registrar_solicitud_callback`: esa tool crea un Lead en Zoho
+ * para que llame una PERSONA, no tiene nada que ver con Dapta y sigue viva.
+ */
+export function llamadasDaptaHabilitadas(): boolean {
+  return (process.env.DAPTA_ENABLED || "").trim().toLowerCase() === "on"
+}
+
 export async function scheduleCallback(
   contact: string,
   dueAtIso: string,
   payload: Record<string, unknown>,
 ): Promise<boolean> {
+  if (!llamadasDaptaHabilitadas()) return false
   if (!SUPABASE_URL || !SUPABASE_KEY) return false
   await fetch(
     `${SUPABASE_URL}/rest/v1/vic_scheduled_calls?contact=eq.${contact}&status=eq.pending`,
@@ -176,6 +202,9 @@ export async function fetchDoneCallbacksRecientes(horas: number): Promise<Schedu
 
 /** Reclama (atómicamente vía status swap) las llamadas vencidas. */
 export async function claimDueCallbacks(limit = 5): Promise<ScheduledCall[]> {
+  // Segundo candado: aunque quedaran filas viejas en cola, con el interruptor
+  // apagado NINGUNA se dispara.
+  if (!llamadasDaptaHabilitadas()) return []
   if (!SUPABASE_URL || !SUPABASE_KEY) return []
   const now = new Date().toISOString()
   const res = await fetch(

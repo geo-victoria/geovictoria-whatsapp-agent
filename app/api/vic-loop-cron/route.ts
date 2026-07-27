@@ -19,9 +19,11 @@
  * Toques 1,4,5,6,7 = WhatsApp (texto libre si la ventana de 24h de Meta está
  * abierta; plantilla HSM por TOQUE × ETAPA si no — matriz LOOP_TPL_MATRIZ con
  * los nombres reales de Botmaker como default CL y override por env; celda
- * vacía NO envía nada, patrón del repo). Toques 2,3 = llamada: se inserta en
- * vic_scheduled_calls y el vic-callback-cron existente la dispara (NUNCA se
- * llama a Dapta directo desde acá).
+ * vacía NO envía nada, patrón del repo).
+ *
+ * Toques 2,3 eran LLAMADA (Dapta). APAGADOS desde el 27-jul: con
+ * DAPTA_ENABLED ausente el toque se salta y la cadencia avanza al siguiente
+ * toque de WhatsApp. Ver lib/dapta-voice.ts para el motivo.
  *
  * Auth: x-cron-secret == vic_kv.followup_cron_secret (o Bearer/?key=CRON_SECRET),
  * mismo esquema que vic-outbound-cadence-cron.
@@ -39,6 +41,7 @@ import {
   type LoopStage,
 } from "@/lib/loop-v2"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
+import { llamadasDaptaHabilitadas } from "@/lib/dapta-voice"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
 
@@ -433,7 +436,14 @@ export async function GET(req: Request): Promise<Response> {
           : (r.stage as LoopStage) || "sin_precio"
     let ejecutado = false
 
-    if (touch === 2 || touch === 3) {
+    if ((touch === 2 || touch === 3) && !llamadasDaptaHabilitadas()) {
+      // Llamadas Dapta apagadas (27-jul): el toque NO se agenda, pero SÍ se
+      // marca ejecutado para que la cadencia avance al siguiente toque de
+      // WhatsApp en vez de quedarse trabada reintentando una llamada que no
+      // va a ocurrir.
+      ejecutado = true
+      detalle.push({ contact: r.contact, accion: "llamada", touch, skip: "dapta apagado" })
+    } else if (touch === 2 || touch === 3) {
       // Llamada: se agenda en vic_scheduled_calls y la dispara el
       // vic-callback-cron existente (con todos sus candados: no-llamar,
       // horario del país, flujo por línea). NUNCA Dapta directo desde acá.
