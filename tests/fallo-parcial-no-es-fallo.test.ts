@@ -64,7 +64,9 @@ describe("agendar_reunion: el booking manda", () => {
   })
 
   test("el Event se salta si no hay Lead al que asociarlo", () => {
-    assert.match(TOOL, /if \(organizerEmail && effectiveLeadId\)/)
+    // Desde la regla de asignación (27-jul) el gate usa responsableEmail (el
+    // dueño de la cotización si existe; el organizador de Cal si no).
+    assert.match(TOOL, /if \(responsableEmail && effectiveLeadId\)/)
   })
 
   test("y el equipo se entera para registrarlo a mano", () => {

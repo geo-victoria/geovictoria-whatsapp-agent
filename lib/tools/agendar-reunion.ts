@@ -19,6 +19,50 @@ import { bookMeeting, getTimezone } from "@/lib/calendar"
 import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
 import { createZohoEvent } from "@/lib/zoho-events"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+import { avisarEquipoInterno } from "@/lib/alerta-interna"
+import { getQuotePointers } from "@/lib/supabase-persistence-v3"
+import { getZohoAccessToken } from "@/lib/zoho-token"
+
+const ZOHO_API_DOMAIN_REU = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+const QUOTE_MODULE_REU = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+
+/**
+ * Dueño (Owner) de la cotización formal VIGENTE del contacto, si existe.
+ *
+ * REGLA DE ASIGNACIÓN (Lalo, 27-jul): si el cliente ya tiene cotización, la
+ * reunión es del dueño del deal/cotización; solo sin cotización asigna el
+ * round-robin de Cal.com. Antes cada tool asignaba por su lado y un mismo
+ * cliente terminaba repartido entre 2-4 personas (casos Siman Trio, SIMPRO,
+ * Litueche, 27-jul). Best-effort: cualquier fallo devuelve null y el flujo
+ * sigue con el organizador de Cal, como siempre.
+ */
+async function duenoCotizacionVigente(
+  telefono: string,
+): Promise<{ email: string; nombre: string; quoteId: string } | null> {
+  try {
+    const contact = (telefono || "").replace(/\D/g, "")
+    if (!contact) return null
+    const pointers = await getQuotePointers(contact)
+    const quoteId = pointers[0]?.quoteId
+    if (!quoteId) return null
+    const token = await getZohoAccessToken()
+    const res = await fetch(`${ZOHO_API_DOMAIN_REU}/crm/v3/coql`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        select_query: `select Owner.email, Owner.full_name from ${QUOTE_MODULE_REU} where id = '${quoteId}'`,
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const rows = ((await res.json().catch(() => null))?.data || []) as Array<Record<string, string>>
+    const email = (rows[0]?.["Owner.email"] || "").trim()
+    if (!email) return null
+    return { email, nombre: (rows[0]?.["Owner.full_name"] || email.split("@")[0]).trim(), quoteId }
+  } catch {
+    return null
+  }
+}
 
 // Mismo destinatario interno que el resto de los avisos operativos.
 const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
@@ -146,6 +190,23 @@ export async function agendarReunion(
 
   const { bookingId, meetingUrl, organizerEmail } = booking
 
+  // REGLA (Lalo 27-jul): con cotización vigente, el lead y el evento van al
+  // DUEÑO del deal, no al KAM del round-robin. Cal.com no permite mover el
+  // host por API, así que la invitación nace con el KAM y el aviso interno
+  // pide traspasarla — pero el CRM queda coherente desde el primer segundo.
+  const dueno = await duenoCotizacionVigente(telefono || "")
+  const responsableEmail = dueno?.email || organizerEmail
+  if (dueno && organizerEmail && dueno.email !== organizerEmail) {
+    await avisarEquipoInterno(
+      `\u26a0\ufe0f Reunión de un cliente CON COTIZACIÓN vigente\n` +
+        `Cliente: ${prospectName}${empresa ? ` — ${empresa}` : ""}\n` +
+        `Cuándo: ${slotIso}\n` +
+        `Cal.com la asignó a: ${organizerEmail}\n` +
+        `Dueño de la cotización: ${dueno.nombre} (${dueno.email}) — quote ${dueno.quoteId}\n` +
+        `El lead y el evento quedaron a nombre de ${dueno.nombre}. Falta mover la invitación en Cal.com (o acordar quién la toma).`,
+    ).catch(() => false)
+  }
+
   // Lead PRE-EXISTENTE en Zoho (outbound del formulario): reasignar el MISMO
   // lead al KAM de la reunión en vez de crear un duplicado.
   const existingLeadId = (args.zohoLeadId || "").trim()
@@ -155,8 +216,8 @@ export async function agendarReunion(
   let crmPendiente = false
   let warningCrm: string | undefined
   if (existingLeadId) {
-    if (organizerEmail) {
-      const upd = await updateZohoLeadOwner(existingLeadId, organizerEmail)
+    if (responsableEmail) {
+      const upd = await updateZohoLeadOwner(existingLeadId, responsableEmail)
       if (!upd.success) {
         console.error("[agendar_reunion] reasignación del lead existente falló:", upd.error)
       }
@@ -175,7 +236,7 @@ export async function agendarReunion(
       reunionAgendada: true,
       preferenciaHorario: slotIso,
       contactoWA: telefono,
-      ownerEmail: organizerEmail,
+      ownerEmail: responsableEmail,
     })
 
     if (!leadResult.success) {
@@ -220,7 +281,7 @@ export async function agendarReunion(
   let eventId: string | undefined
   let warning: string | undefined
   // Sin Lead no hay a qué asociar el Event: se salta y queda en el warning.
-  if (organizerEmail && effectiveLeadId) {
+  if (responsableEmail && effectiveLeadId) {
     const eventResult = await createZohoEvent({
       leadId: effectiveLeadId,
       slotIso,
@@ -228,7 +289,7 @@ export async function agendarReunion(
       prospectName,
       prospectEmail,
       prospectTimezone: timeZone,
-      hostEmail: organizerEmail,
+      hostEmail: responsableEmail,
       empresa,
       trabajadores,
       necesidad,
@@ -258,7 +319,7 @@ export async function agendarReunion(
 
   const mensajeParaProspecto =
     `¡Listo! Tu reunión quedó agendada para el ${fechaLegible}` +
-    (organizerEmail ? `, con ${organizerEmail.split("@")[0]}` : "") +
+    (dueno ? `, con ${dueno.nombre.split(" ")[0]}` : organizerEmail ? `, con ${organizerEmail.split("@")[0]}` : "") +
     (meetingUrl ? `. Te llegará el link de la reunión por email a ${prospectEmail}` : ` (te enviaremos el link por email)`) +
     `. ¿Hay algo más en lo que pueda ayudarte?`
 

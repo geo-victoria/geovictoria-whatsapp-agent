@@ -28,6 +28,80 @@ import {
 import { clasificarUbicacion } from "@/lib/geografia"
 import { getUFActual } from "@/lib/uf"
 import { rutValido, formatearRut } from "@/lib/rut"
+import { avisarEquipoInterno } from "@/lib/alerta-interna"
+import { updateZohoLeadOwner } from "@/lib/zoho-leads"
+import { getZohoAccessToken } from "@/lib/zoho-token"
+
+const SUPABASE_URL_GLC = (process.env.SUPABASE_URL || "").trim()
+const SUPABASE_KEY_GLC = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+const ZOHO_API_DOMAIN_GLC = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+const QUOTE_MODULE_GLC = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+
+/**
+ * REGLA DE ASIGNACIÓN (Lalo, 27-jul): la reunión de un cliente con cotización
+ * es del DUEÑO del deal. Esta es la dirección "cotización después de la
+ * reunión": si el contacto ya tiene una reunión FUTURA agendada con un KAM del
+ * round-robin, al emitirse la cotización el lead de esa reunión se reasigna al
+ * dueño de la cotización y el equipo recibe el aviso para mover la invitación
+ * de Cal.com (el host no se puede mover por API). Best-effort: nunca afecta la
+ * emisión de la cotización.
+ */
+async function alinearReunionExistente(telefono: string, quoteId: string): Promise<void> {
+  try {
+    if (!SUPABASE_URL_GLC || !SUPABASE_KEY_GLC || !quoteId) return
+    const contact = (telefono || "").replace(/\D/g, "")
+    if (!contact) return
+    const res = await fetch(
+      `${SUPABASE_URL_GLC}/rest/v1/vic_v3_meetings?contact=eq.${contact}&status=eq.scheduled` +
+        `&start_at=gt.${new Date().toISOString()}&select=booking_uid,start_at,organizer_email,zoho_lead_id,prospect_name` +
+        `&order=start_at.asc&limit=1`,
+      {
+        headers: { apikey: SUPABASE_KEY_GLC, Authorization: `Bearer ${SUPABASE_KEY_GLC}` },
+        cache: "no-store",
+      },
+    )
+    if (!res.ok) return
+    const reunion = ((await res.json().catch(() => [])) as Array<{
+      booking_uid: string
+      start_at: string
+      organizer_email: string | null
+      zoho_lead_id: string | null
+      prospect_name: string | null
+    }>)[0]
+    if (!reunion) return
+
+    const token = await getZohoAccessToken()
+    const coql = await fetch(`${ZOHO_API_DOMAIN_GLC}/crm/v3/coql`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        select_query: `select Owner.email, Owner.full_name from ${QUOTE_MODULE_GLC} where id = '${quoteId}'`,
+      }),
+      cache: "no-store",
+    })
+    if (!coql.ok) return
+    const rows = ((await coql.json().catch(() => null))?.data || []) as Array<Record<string, string>>
+    const duenoEmail = (rows[0]?.["Owner.email"] || "").trim()
+    const duenoNombre = (rows[0]?.["Owner.full_name"] || duenoEmail.split("@")[0]).trim()
+    if (!duenoEmail || duenoEmail === (reunion.organizer_email || "").trim()) return
+
+    let leadReasignado = false
+    if (reunion.zoho_lead_id) {
+      const upd = await updateZohoLeadOwner(reunion.zoho_lead_id, duenoEmail).catch(() => ({ success: false }))
+      leadReasignado = !!upd.success
+    }
+    await avisarEquipoInterno(
+      `\u26a0\ufe0f Cotización emitida para un cliente con REUNIÓN ya agendada\n` +
+        `Cliente: ${reunion.prospect_name || contact}\n` +
+        `Reunión: ${reunion.start_at} — asignada por Cal.com a ${reunion.organizer_email || "(sin organizador)"}\n` +
+        `Dueño de la cotización: ${duenoNombre} (${duenoEmail}) — quote ${quoteId}\n` +
+        `Lead de la reunión ${leadReasignado ? `reasignado a ${duenoNombre}` : "NO se pudo reasignar (revisar a mano)"}. ` +
+        `Falta mover la invitación en Cal.com (booking ${reunion.booking_uid}).`,
+    )
+  } catch (e) {
+    console.warn("[generar_link_cotizadora] alinearReunionExistente falló:", e)
+  }
+}
 
 const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
@@ -597,6 +671,9 @@ export async function generarLinkCotizadora(
   if (!data || !data.acceptanceUrl) {
     return { ok: false, error: lastError }
   }
+
+  // Regla de asignación reunión↔cotización (dirección inversa). Best-effort.
+  await alinearReunionExistente(contactoTelefono || "", data.quoteId || "")
 
   return {
     ok: true,
