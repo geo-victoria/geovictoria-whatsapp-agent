@@ -36,7 +36,7 @@ describe("event type de reuniones MX", () => {
   test("consultar y agendar usan el event type MX, no el chileno", () => {
     // Desde el 28-jul el default MX convive con el evento del DUEÑO de la
     // cotización (inyectado por el agent-loop), que tiene precedencia.
-    const usos = [...TOOLS.matchAll(/\|\| CAL_EVENT_TYPE_ID_MX/g)]
+    const usos = [...TOOLS.matchAll(/\|\|\s*\n?\s*CAL_EVENT_TYPE_ID_MX/g)]
     assert.ok(usos.length >= 2, `se esperaban ≥2 usos (consultar + agendar), hay ${usos.length}`)
   })
 
