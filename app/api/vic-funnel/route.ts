@@ -895,6 +895,7 @@ export async function GET(req: Request): Promise<Response> {
   .kpis{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px}
   .kpi{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;min-width:120px;flex:1}
   .kpi-v{font-size:28px;font-weight:700} .kpi-l{font-size:12px;color:#6b7280;margin-top:2px}
+  .kpi.hero{flex-basis:100%;text-align:center;padding:20px 18px} .kpi.hero .kpi-v{font-size:42px}
   .pct{color:#9ca3af} .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
   .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:18px}
   .card h2{font-size:16px;margin:0 0 12px}
@@ -982,21 +983,20 @@ export async function GET(req: Request): Promise<Response> {
     const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - cierre.aceptadas))
     const faltanNuevas = Math.max(0, Math.ceil((metaExacta - cierre.aceptadas) / (1 - TARGET_PCT / 100)))
     // 28-jul (Lalo): la tarjeta "Cierre end-to-end" era redundante con esta —
-    // mismo 19% dos veces. Queda SOLO la del objetivo, y hereda la leyenda
-    // "vio precio → venta" para que se entienda qué mide la tasa.
+    // mismo 19% dos veces. Queda SOLO la del objetivo, sola en su propia fila
+    // con el número al centro (clase .hero), y hereda la leyenda "vio precio
+    // → venta" para que se entienda qué mide la tasa.
+    const leyendaObjetivo = cumpleMeta
+      ? "vio precio → venta · objetivo alcanzado 🎉"
+      : `vio precio → venta · faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`
     const cardObjetivo = vieronPrecio
-      ? kpiCard(
-          `Objetivo ${TARGET_PCT}%`,
-          `${endToEnd}% / ${TARGET_PCT}%`,
-          cumpleMeta ? col.best : col.warn,
-          cumpleMeta
-            ? "vio precio → venta · objetivo alcanzado 🎉"
-            : `vio precio → venta · faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`,
-        )
+      ? `<div class="kpi hero"><div class="kpi-v" style="color:${cumpleMeta ? col.best : col.warn}">${endToEnd}% / ${TARGET_PCT}%</div><div class="kpi-l">Objetivo ${TARGET_PCT}% <span class="pct">${leyendaObjetivo}</span></div></div>`
       : ""
     return `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
+  </div>
+  <div class="kpis">
     ${cardObjetivo}
   </div>
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
