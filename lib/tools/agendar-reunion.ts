@@ -197,27 +197,19 @@ export async function agendarReunion(
 
   const timeZone = getTimezone(country)
 
-  // REGLA (Lalo 27-jul, reforzada 28-jul): con cotización vigente, la reunión
-  // ES del dueño del deal — ya no solo en el CRM: el booking de Cal intenta
-  // nacer con él como HOST (teamMemberEmail, API 2024-08-13). Si su agenda no
-  // acepta el slot o no es host del event type, se cae al round-robin de
-  // siempre y el aviso interno pide mover la invitación.
+  // REGLA (Lalo 27-jul): con cotización vigente, la reunión es del DUEÑO del
+  // deal en el CRM, y el aviso interno pide traspasar la invitación de Cal.
+  // NO se puede forzar el host por API en el evento round-robin: probado
+  // 28-jul con la key real — `teamMemberEmail` de primer nivel devuelve 400
+  // "property teamMemberEmail should not exist". El plan para que el booking
+  // NAZCA con el dueño es agendar en su event type personal/managed
+  // (pendiente de que existan esos eventos en Cal).
   const dueno = await duenoCotizacionVigente(telefono || "")
 
-  let booking = await bookMeeting({
+  const booking = await bookMeeting({
     slotIso, prospectName, prospectEmail, timeZone, language: "es",
     eventTypeId: args.eventTypeId,
-    teamMemberEmail: dueno?.email,
   })
-  if (!booking.success && dueno) {
-    console.warn(
-      `[agendar_reunion] booking con host forzado (${dueno.email}) falló: ${booking.error} — reintentando por round-robin`,
-    )
-    booking = await bookMeeting({
-      slotIso, prospectName, prospectEmail, timeZone, language: "es",
-      eventTypeId: args.eventTypeId,
-    })
-  }
 
   if (!booking.success) {
     console.error("[agendar_reunion] bookMeeting falló:", booking.error)

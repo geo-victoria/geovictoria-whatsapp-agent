@@ -58,20 +58,23 @@ describe("dirección A: reunión cuando ya hay cotización", () => {
     assert.match(AGENDAR, /atiende \? `, con \$\{atiende\.nombre\}`/)
   })
 
-  test("el booking intenta nacer con el dueño como HOST, con fallback a round-robin", () => {
-    // Lalo 28-jul: teamMemberEmail (Cal API 2024-08-13) fuerza el host del
-    // round-robin al dueño de la cotización. Si Cal lo rechaza (sin
-    // disponibilidad o no es host del event type), se reintenta sin forzar.
-    assert.match(AGENDAR, /teamMemberEmail: dueno\?\.email/)
-    assert.match(AGENDAR, /if \(!booking\.success && dueno\) \{/)
-    assert.match(AGENDAR, /reintentando por round-robin/)
-    // El dueño se consulta ANTES de agendar — si no, no hay a quién forzar.
-    const iDueno = AGENDAR.indexOf("const dueno = await duenoCotizacionVigente")
-    const iBooking = AGENDAR.indexOf("let booking = await bookMeeting")
-    assert.ok(iDueno > 0 && iBooking > iDueno, "duenoCotizacionVigente debe resolverse antes del booking")
-    // Y calendar.ts solo incluye el campo cuando viene (spread condicional).
+  test("NO se manda teamMemberEmail: la API lo rechaza (probado 28-jul con la key real)", () => {
+    // Evidencia: POST /v2/bookings (cal-api-version 2024-08-13) con
+    // teamMemberEmail de primer nivel → 400 "property teamMemberEmail should
+    // not exist". Solo existe dentro de `routing` (formularios de ruteo, que
+    // no usamos). Mandarlo costaba un 400 + reintento en CADA reunión con
+    // cotización. El forzado real vendrá por event types personales/managed.
     const CAL = readFileSync(join(RAIZ, "lib/calendar.ts"), "utf8")
-    assert.match(CAL, /\.\.\.\(params\.teamMemberEmail \? \{ teamMemberEmail: params\.teamMemberEmail \} : \{\}\)/)
+    // Como CLAVE de payload (con dos puntos) no puede aparecer — en los
+    // comentarios que documentan la evidencia sí.
+    assert.doesNotMatch(AGENDAR, /teamMemberEmail:/)
+    assert.doesNotMatch(CAL, /teamMemberEmail:/)
+    assert.match(CAL, /property\s*\n?\s*\* teamMemberEmail should not exist|teamMemberEmail should not exist/)
+    // El dueño se consulta ANTES de agendar — mantiene el CRM coherente y
+    // deja lista la estructura para el booking en el evento del dueño.
+    const iDueno = AGENDAR.indexOf("const dueno = await duenoCotizacionVigente")
+    const iBooking = AGENDAR.indexOf("const booking = await bookMeeting")
+    assert.ok(iDueno > 0 && iBooking > iDueno, "duenoCotizacionVigente debe resolverse antes del booking")
   })
 
   test("best-effort: sin cotización o con Zoho caído, el flujo es el de siempre", () => {
