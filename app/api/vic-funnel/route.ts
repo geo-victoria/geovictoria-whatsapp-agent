@@ -896,6 +896,9 @@ export async function GET(req: Request): Promise<Response> {
   .kpi{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;min-width:120px;flex:1}
   .kpi-v{font-size:28px;font-weight:700} .kpi-l{font-size:12px;color:#6b7280;margin-top:2px}
   .kpi.hero{flex-basis:100%;text-align:center;padding:20px 18px} .kpi.hero .kpi-v{font-size:42px}
+  .hero-meta{font-size:17px;font-weight:600;color:#9ca3af}
+  .hero-bar{height:9px;background:#e5e7eb;border-radius:5px;max-width:440px;margin:10px auto 6px;overflow:hidden}
+  .hero-bar>div{height:100%;border-radius:5px}
   .pct{color:#9ca3af} .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
   .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:18px}
   .card h2{font-size:16px;margin:0 0 12px}
@@ -989,8 +992,17 @@ export async function GET(req: Request): Promise<Response> {
     const leyendaObjetivo = cumpleMeta
       ? "vio precio → venta · objetivo alcanzado 🎉"
       : `vio precio → venta · faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`
+    // Real vs meta sin ambigüedad (Lalo 28-jul): el número grande y con color
+    // es la tasa REAL; la meta va como texto secundario gris, y la barra de
+    // progreso muestra cuánto del camino al objetivo está recorrido.
+    const colorObjetivo = cumpleMeta ? col.best : col.warn
+    const avanceMeta = Math.min(100, Math.round((endToEnd / TARGET_PCT) * 100))
     const cardObjetivo = vieronPrecio
-      ? `<div class="kpi hero"><div class="kpi-v" style="color:${cumpleMeta ? col.best : col.warn}">${endToEnd}% / ${TARGET_PCT}%</div><div class="kpi-l">Objetivo ${TARGET_PCT}% <span class="pct">${leyendaObjetivo}</span></div></div>`
+      ? `<div class="kpi hero">
+        <div class="kpi-v"><span style="color:${colorObjetivo}">${endToEnd}%</span> <span class="hero-meta">de cierre real · objetivo ${TARGET_PCT}%</span></div>
+        <div class="hero-bar"><div style="width:${avanceMeta}%;background:${colorObjetivo}"></div></div>
+        <div class="kpi-l">${avanceMeta}% del camino al objetivo <span class="pct">${leyendaObjetivo}</span></div>
+      </div>`
       : ""
     return `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
