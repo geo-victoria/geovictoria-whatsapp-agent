@@ -981,20 +981,22 @@ export async function GET(req: Request): Promise<Response> {
     const cumpleMeta = vieronPrecio > 0 && cierre.aceptadas >= metaExacta
     const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - cierre.aceptadas))
     const faltanNuevas = Math.max(0, Math.ceil((metaExacta - cierre.aceptadas) / (1 - TARGET_PCT / 100)))
+    // 28-jul (Lalo): la tarjeta "Cierre end-to-end" era redundante con esta —
+    // mismo 19% dos veces. Queda SOLO la del objetivo, y hereda la leyenda
+    // "vio precio → venta" para que se entienda qué mide la tasa.
     const cardObjetivo = vieronPrecio
       ? kpiCard(
           `Objetivo ${TARGET_PCT}%`,
           `${endToEnd}% / ${TARGET_PCT}%`,
           cumpleMeta ? col.best : col.warn,
           cumpleMeta
-            ? "objetivo alcanzado 🎉"
-            : `faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`,
+            ? "vio precio → venta · objetivo alcanzado 🎉"
+            : `vio precio → venta · faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`,
         )
       : ""
     return `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
-    ${kpiCard("Cierre end-to-end", `${endToEnd}%`, col.best, "vio precio → venta")}
     ${cardObjetivo}
   </div>
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
