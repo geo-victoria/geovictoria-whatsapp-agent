@@ -959,8 +959,11 @@ export async function GET(req: Request): Promise<Response> {
   ${(() => {
     const vieronPrecio = cPreform + cEnviada
     const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
+    // Tasa de abandono post-preform (Lalo 28-jul): el complemento del paso a
+    // formal — de los que vieron precio, cuántos se quedaron ahí.
+    const abandonoPreform = vieronPrecio ? `${Math.round((cPreform / vieronPrecio) * 100)}% de abandono tras ver precio` : ""
     const base = `
-    ${kpiCard("Vio precio y NO avanzó", cPreform, col.warn, "quedó en preform")}
+    ${kpiCard("Vio precio y NO avanzó", cPreform, col.warn, abandonoPreform || "quedó en preform")}
     ${kpiCard("Cotización enviada", cEnviada, col.best, pasoPreform)}
     ${kpiCard("Se fue ANTES del precio", cAbandonado, col.bad, "sin preform")}`
     if (!cierre) {
