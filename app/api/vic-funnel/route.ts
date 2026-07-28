@@ -966,40 +966,12 @@ export async function GET(req: Request): Promise<Response> {
     }
     const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
     const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
-    // Autonomía del cierre: dos TASAS diferenciadas sobre la misma base del
-    // cierre end-to-end (conversaciones que vieron precio → venta), según el
-    // campo "Intervención Humana" de Zoho. Las aceptadas sin clasificar no
-    // suman a ninguna de las dos (se informan aparte).
-    const clasificadas = cierre.autonomas + cierre.asistidas
-    const tasaAuto = vieronPrecio ? Math.round((cierre.autonomas / vieronPrecio) * 100) : 0
-    const tasaAsis = vieronPrecio ? Math.round((cierre.asistidas / vieronPrecio) * 100) : 0
     // Objetivo de cierre POR PAÍS (Lalo 27-jul): Chile 25%, Colombia 10% — el
-    // programa CO recién parte y su embudo outbound madura distinto. El mismo
-    // target rige el objetivo general y el de venta AUTÓNOMA (pedido 21-jul).
+    // programa CO recién parte y su embudo outbound madura distinto.
+    // (28-jul: las tarjetas de AUTONOMÍA — "Tasa de cierre 100% Vicky",
+    // "Objetivo · 100% Vicky" y "Tasa de cierre asistido" — se eliminaron del
+    // dash a pedido de Lalo.)
     const TARGET_PCT = pais === "co" ? 10 : 25
-    const metaAuto = (TARGET_PCT / 100) * vieronPrecio
-    const cumpleAuto = vieronPrecio > 0 && cierre.autonomas >= metaAuto
-    const faltanAutoEnviadas = Math.max(0, Math.ceil(metaAuto - cierre.autonomas))
-    const faltanAutoNuevas = Math.max(0, Math.ceil((metaAuto - cierre.autonomas) / (1 - TARGET_PCT / 100)))
-    const cardObjetivoAuto = vieronPrecio
-      ? kpiCard(
-          `Objetivo ${TARGET_PCT}% · 100% Vicky`,
-          `${tasaAuto}% / ${TARGET_PCT}%`,
-          cumpleAuto ? col.best : col.warn,
-          cumpleAuto
-            ? "objetivo alcanzado 🎉"
-            : `faltan ${faltanAutoEnviadas} venta${faltanAutoEnviadas === 1 ? "" : "s"} autónoma${faltanAutoEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanAutoNuevas} con cotizaciones nuevas`,
-        )
-      : ""
-    const filaAutonomia = clasificadas
-      ? `
-    ${kpiCard("Tasa de cierre 100% Vicky", `${tasaAuto}%`, col.best, `${cierre.autonomas} aceptada${cierre.autonomas === 1 ? "" : "s"} sin humano · vio precio → venta`)}
-    ${cardObjetivoAuto}
-    ${kpiCard("Tasa de cierre asistido", `${tasaAsis}%`, col.warn, `${cierre.asistidas} aceptada${cierre.asistidas === 1 ? "" : "s"} con intervención humana`)}`
-      : ""
-    const notaSinClasificar = cierre.sinClasificar > 0
-      ? `<div class="sub" style="margin:-2px 0 10px">${cierre.sinClasificar} aceptada${cierre.sinClasificar === 1 ? "" : "s"} sin clasificar — marcar el campo <b>Intervención Humana</b> en la cotización (Zoho) para completar la autonomía del cierre.</div>`
-      : ""
     // Objetivo de cierre (pedido Lalo 21-jul): tasa actual vs el target del
     // país y cuántas ventas faltan, diferenciando el camino: cerrar
     // cotizaciones YA enviadas (solo suma al numerador) vs ventas de
@@ -1023,9 +995,8 @@ export async function GET(req: Request): Promise<Response> {
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
     ${kpiCard("Cierre end-to-end", `${endToEnd}%`, col.best, "vio precio → venta")}
-    ${cardObjetivo}${filaAutonomia}
+    ${cardObjetivo}
   </div>
-  ${notaSinClasificar}
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
   })()}
 
