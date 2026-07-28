@@ -59,19 +59,19 @@ describe("el filtro llega a las tres capas", () => {
 })
 
 describe("el objetivo de cierre es por país", () => {
-  // Lalo 27-jul: Chile 25%, Colombia 10%. Un solo TARGET_PCT rige el objetivo
-  // general Y el de venta autónoma — si se separan, los dos cards del dash
-  // muestran metas distintas para la misma base.
-  test("Chile 25, Colombia 10, declarado una sola vez", () => {
+  // Lalo 28-jul: Chile 30%, Colombia 10%. Un solo TARGET_PCT — si se declara
+  // más de una vez, distintas partes del dash pueden mostrar metas distintas
+  // para la misma base.
+  test("Chile 30, Colombia 10, declarado una sola vez", () => {
     const declaraciones = [...SRC.matchAll(/const TARGET_PCT = /g)]
     assert.equal(declaraciones.length, 1, "TARGET_PCT se declaró más de una vez")
-    assert.match(SRC, /const TARGET_PCT = pais === "co" \? 10 : 25/)
+    assert.match(SRC, /const TARGET_PCT = pais === "co" \? 10 : 30/)
   })
 
-  test("no queda ningún 25 embebido en los cálculos de meta", () => {
-    assert.doesNotMatch(SRC, /\(25 \/ 100\) \* vieronPrecio/)
-    assert.doesNotMatch(SRC, /\/ 0\.75\)/)
-    assert.doesNotMatch(SRC, /"Objetivo 25%/)
+  test("no queda ninguna meta embebida en los cálculos", () => {
+    assert.doesNotMatch(SRC, /\((25|30) \/ 100\) \* vieronPrecio/)
+    assert.doesNotMatch(SRC, /\/ 0\.7[05]\)/)
+    assert.doesNotMatch(SRC, /"Objetivo (25|30)%/)
   })
 })
 

@@ -970,12 +970,12 @@ export async function GET(req: Request): Promise<Response> {
     }
     const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
     const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
-    // Objetivo de cierre POR PAÍS (Lalo 27-jul): Chile 25%, Colombia 10% — el
+    // Objetivo de cierre POR PAÍS (Lalo 28-jul): Chile 30%, Colombia 10% — el
     // programa CO recién parte y su embudo outbound madura distinto.
     // (28-jul: las tarjetas de AUTONOMÍA — "Tasa de cierre 100% Vicky",
     // "Objetivo · 100% Vicky" y "Tasa de cierre asistido" — se eliminaron del
     // dash a pedido de Lalo.)
-    const TARGET_PCT = pais === "co" ? 10 : 25
+    const TARGET_PCT = pais === "co" ? 10 : 30
     // Objetivo de cierre (pedido Lalo 21-jul): tasa actual vs el target del
     // país y cuántas ventas faltan, diferenciando el camino: cerrar
     // cotizaciones YA enviadas (solo suma al numerador) vs ventas de
