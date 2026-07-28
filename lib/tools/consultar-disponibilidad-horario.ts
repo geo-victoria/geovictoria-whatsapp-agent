@@ -37,6 +37,13 @@ export const consultarDisponibilidadHorarioSchema = {
 export type ConsultarDisponibilidadHorarioInput = {
   fechaPropuesta: string
   country?: string
+  /**
+   * Event type de Cal.com a consultar. NO viene del modelo: lo inyecta el
+   * agent-loop cuando el contacto tiene cotización formal y su dueño tiene
+   * evento de seguimiento propio — así las alternativas ofrecidas son la
+   * disponibilidad REAL de quien va a atender, no la del equipo completo.
+   */
+  eventTypeId?: string
 }
 
 export type ConsultarDisponibilidadHorarioResultado =
@@ -51,7 +58,11 @@ export async function consultarDisponibilidadHorario(
 ): Promise<ConsultarDisponibilidadHorarioResultado> {
   const { fechaPropuesta, country = "Chile" } = args
 
-  const result = await checkSlotAvailability({ slotIso: fechaPropuesta, country })
+  const result = await checkSlotAvailability({
+    slotIso: fechaPropuesta,
+    country,
+    eventTypeId: args.eventTypeId,
+  })
 
   if (!result.ok) {
     console.error("[consultar_disponibilidad_horario] checkSlotAvailability falló:", result.error)

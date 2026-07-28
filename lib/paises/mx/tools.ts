@@ -557,11 +557,14 @@ export function buildDispatchMX(contact: string) {
         if (!REUNIONES_MX_HABILITADAS) {
           return { ok: false, error: "La agenda de México no está configurada. Usa derivar_a_ejecutivo (motivo pidio_persona) con la preferencia de horario en el resumen." }
         }
-        const i = (input || {}) as { fechaPropuesta?: string }
+        const i = (input || {}) as { fechaPropuesta?: string; eventTypeId?: string }
         const disp = await checkSlotAvailability({
           slotIso: String(i.fechaPropuesta || ""),
           country: "México",
-          eventTypeId: CAL_EVENT_TYPE_ID_MX,
+          // El agent-loop inyecta el evento del DUEÑO de la cotización
+          // (seguimiento-cotizacion-mx) cuando hay formal vigente; sin eso,
+          // el evento MX del equipo.
+          eventTypeId: (i.eventTypeId || "").trim() || CAL_EVENT_TYPE_ID_MX,
         })
         // Etiquetas legibles pre-calculadas en hora de Ciudad de México (bug
         // 17-jul heredado: el modelo escribía mal el día de la semana y el
@@ -588,7 +591,11 @@ export function buildDispatchMX(contact: string) {
           telefono:
             ((input as { telefono?: string })?.telefono || "").trim() || contact,
           country: "México",
-          eventTypeId: CAL_EVENT_TYPE_ID_MX,
+          // Mismo criterio que consultar_disponibilidad: el evento del dueño
+          // (inyectado) manda; si no viene, el evento MX del equipo.
+          eventTypeId:
+            ((input as { eventTypeId?: string })?.eventTypeId || "").trim() ||
+            CAL_EVENT_TYPE_ID_MX,
         } as never)
         if (!r.ok) return r
         const email = (input as { prospectEmail?: string })?.prospectEmail || "tu correo"

@@ -505,11 +505,14 @@ export function buildDispatchCO(contact: string) {
         if (!REUNIONES_CO_HABILITADAS) {
           return { ok: false, error: "La agenda de Colombia no está configurada. Usa derivar_a_ejecutivo (motivo pidio_persona) con la preferencia de horario en el resumen." }
         }
-        const i = (input || {}) as { fechaPropuesta?: string }
+        const i = (input || {}) as { fechaPropuesta?: string; eventTypeId?: string }
         const disp = await checkSlotAvailability({
           slotIso: String(i.fechaPropuesta || ""),
           country: "Colombia",
-          eventTypeId: CAL_EVENT_TYPE_ID_CO,
+          // El agent-loop inyecta el evento del DUEÑO de la cotización
+          // (seguimiento-cotizacion-co) cuando hay formal vigente; sin eso,
+          // el round-robin del equipo CO de siempre.
+          eventTypeId: (i.eventTypeId || "").trim() || CAL_EVENT_TYPE_ID_CO,
         })
         // Etiquetas legibles pre-calculadas en hora de Bogotá (bug 17-jul: el
         // modelo escribía mal el día de la semana y el cliente anotaba el día
@@ -536,7 +539,11 @@ export function buildDispatchCO(contact: string) {
           telefono:
             ((input as { telefono?: string })?.telefono || "").trim() || contact,
           country: "Colombia",
-          eventTypeId: CAL_EVENT_TYPE_ID_CO,
+          // Mismo criterio que consultar_disponibilidad: el evento del dueño
+          // (inyectado) manda; si no viene, el round-robin CO.
+          eventTypeId:
+            ((input as { eventTypeId?: string })?.eventTypeId || "").trim() ||
+            CAL_EVENT_TYPE_ID_CO,
         } as never)
         if (!r.ok) return r
         const email = (input as { prospectEmail?: string })?.prospectEmail || "tu correo"

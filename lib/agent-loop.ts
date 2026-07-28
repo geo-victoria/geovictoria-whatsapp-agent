@@ -35,6 +35,8 @@ import {
 } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { getTimezone, computeMeetingReminderAt } from "./calendar"
+import { duenoCotizacionVigente } from "./tools/agendar-reunion"
+import { EVENTO_SEGUIMIENTO_POR_DUENO } from "./eventos-seguimiento"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -424,14 +426,28 @@ export async function runAgentLoop(params: {
 
         let result: Awaited<ReturnType<typeof dispatchTool>>
         // REUNIÓN POST-FORMAL = del dueño del deal, no del Round Robin (Lalo,
-        // 21-jul, caso notaría): con cotización formal vigente, el deal ya es
-        // del ejecutivo dueño del deal — agendar por Cal.com asignaría un KAM aleatorio y
-        // nacería un doble dueño (la enfermedad Ingesub). Determinista: se
-        // avisa al equipo con el horario pedido y el dueño envía la invitación.
+        // 21-jul, caso notaría). Desde el 28-jul existe la forma de AGENDARLA
+        // de verdad: los eventos "Seguimiento cotización" (uno por ejecutivo,
+        // host único). Si el dueño de la cotización tiene su evento, se
+        // inyecta ese eventTypeId — disponibilidad Y booking corren contra SU
+        // agenda, y la reunión nace asignada a él. Solo los dueños legacy sin
+        // evento (Anderson) conservan el camino determinista: aviso al equipo
+        // y el dueño envía la invitación.
         let reunionPostFormal = false
-        if (toolName === "agendar_reunion" && contact) {
+        if (
+          (toolName === "agendar_reunion" || toolName === "consultar_disponibilidad_horario") &&
+          contact
+        ) {
           const formalReunion = await getFormalQuote(contact).catch(() => "")
-          reunionPostFormal = !!formalReunion
+          if (formalReunion) {
+            const dueno = await duenoCotizacionVigente(contact).catch(() => null)
+            const eventoDelDueno = dueno ? EVENTO_SEGUIMIENTO_POR_DUENO[dueno.email] : undefined
+            if (eventoDelDueno) {
+              ;(toolInput as Record<string, unknown>).eventTypeId = eventoDelDueno
+            } else if (toolName === "agendar_reunion") {
+              reunionPostFormal = true
+            }
+          }
         }
         if (reunionPostFormal) {
           const slot = String((toolInput as Record<string, unknown>).slotIso || "")

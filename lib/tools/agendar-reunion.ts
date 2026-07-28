@@ -36,7 +36,7 @@ const QUOTE_MODULE_REU = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVict
  * Litueche, 27-jul). Best-effort: cualquier fallo devuelve null y el flujo
  * sigue con el organizador de Cal, como siempre.
  */
-async function duenoCotizacionVigente(
+export async function duenoCotizacionVigente(
   telefono: string,
 ): Promise<{ email: string; nombre: string; quoteId: string } | null> {
   try {
