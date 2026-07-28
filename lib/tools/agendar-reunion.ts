@@ -176,8 +176,8 @@ export type AgendarReunionResultado =
       warning?: string
       /** true si la reunión existe pero NO quedó registrada en el CRM. */
       crmPendiente?: boolean
-      /** Quién atiende, con nombre real (y WhatsApp si está en el directorio). */
-      atiende?: { nombre: string; whatsapp?: string }
+      /** Quién atiende: nombre real + correo (y WhatsApp si está en el directorio). */
+      atiende?: { nombre: string; email?: string; whatsapp?: string }
     }
   | {
       ok: false
@@ -197,10 +197,27 @@ export async function agendarReunion(
 
   const timeZone = getTimezone(country)
 
-  const booking = await bookMeeting({
+  // REGLA (Lalo 27-jul, reforzada 28-jul): con cotización vigente, la reunión
+  // ES del dueño del deal — ya no solo en el CRM: el booking de Cal intenta
+  // nacer con él como HOST (teamMemberEmail, API 2024-08-13). Si su agenda no
+  // acepta el slot o no es host del event type, se cae al round-robin de
+  // siempre y el aviso interno pide mover la invitación.
+  const dueno = await duenoCotizacionVigente(telefono || "")
+
+  let booking = await bookMeeting({
     slotIso, prospectName, prospectEmail, timeZone, language: "es",
     eventTypeId: args.eventTypeId,
+    teamMemberEmail: dueno?.email,
   })
+  if (!booking.success && dueno) {
+    console.warn(
+      `[agendar_reunion] booking con host forzado (${dueno.email}) falló: ${booking.error} — reintentando por round-robin`,
+    )
+    booking = await bookMeeting({
+      slotIso, prospectName, prospectEmail, timeZone, language: "es",
+      eventTypeId: args.eventTypeId,
+    })
+  }
 
   if (!booking.success) {
     console.error("[agendar_reunion] bookMeeting falló:", booking.error)
@@ -213,11 +230,6 @@ export async function agendarReunion(
 
   const { bookingId, meetingUrl, organizerEmail } = booking
 
-  // REGLA (Lalo 27-jul): con cotización vigente, el lead y el evento van al
-  // DUEÑO del deal, no al KAM del round-robin. Cal.com no permite mover el
-  // host por API, así que la invitación nace con el KAM y el aviso interno
-  // pide traspasarla — pero el CRM queda coherente desde el primer segundo.
-  const dueno = await duenoCotizacionVigente(telefono || "")
   const responsableEmail = dueno?.email || organizerEmail
   if (dueno && organizerEmail && dueno.email !== organizerEmail) {
     await avisarEquipoInterno(
@@ -342,16 +354,25 @@ export async function agendarReunion(
 
   // La persona que atiende: el dueño de la cotización si existe; si no, el
   // organizador de Cal — SIEMPRE con nombre real desde el directorio, jamás
-  // el prefijo del email (observación de Rodrigo, 27-jul).
+  // el prefijo del email (observación de Rodrigo, 27-jul). Y desde el 28-jul
+  // (Lalo) la confirmación comparte sus TRES datos —nombre, correo y
+  // teléfono— tanto en round-robin como con dueño directo.
   const atiende = dueno
-    ? DIRECTORIO[dueno.email] || { nombre: dueno.nombre }
-    : (organizerEmail && DIRECTORIO[organizerEmail]) || undefined
+    ? { ...(DIRECTORIO[dueno.email] || { nombre: dueno.nombre }), email: dueno.email }
+    : organizerEmail && DIRECTORIO[organizerEmail]
+      ? { ...DIRECTORIO[organizerEmail], email: organizerEmail }
+      : undefined
+  const datosAtiende = atiende
+    ? `\n\nSi necesitas algo antes de la reunión, puedes escribirle a ${atiende.nombre.split(" ")[0]}: 📧 ${atiende.email}${atiende.whatsapp ? ` · 📱 ${atiende.whatsapp}` : ""}`
+    : organizerEmail
+      ? `\n\nSi necesitas algo antes de la reunión, puedes escribir a 📧 ${organizerEmail}`
+      : ""
   const mensajeParaProspecto =
     `¡Listo! Tu reunión quedó agendada para el ${fechaLegible}` +
     (atiende ? `, con ${atiende.nombre}` : organizerEmail ? `, con un ejecutivo de nuestro equipo` : "") +
     (meetingUrl ? `. Te llegará el link de la reunión por email a ${prospectEmail}` : ` (te enviaremos el link por email)`) +
-    (atiende?.whatsapp ? `\n\nSi necesitas algo antes de la reunión, el WhatsApp de ${atiende.nombre.split(" ")[0]} es ${atiende.whatsapp}.` : "") +
-    ` ¿Hay algo más en lo que pueda ayudarte?`
+    datosAtiende +
+    `. ¿Hay algo más en lo que pueda ayudarte?`
 
   return {
     ok: true,

@@ -548,7 +548,9 @@ export function buildDispatchCO(contact: string) {
           mensajeParaProspecto:
             `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia)${r.atiende ? `, con ${r.atiende.nombre}` : ""} 🎉 ` +
             `Te llegará la invitación con el link de la reunión a ${email}.` +
-            (r.atiende?.whatsapp ? ` Si necesitas algo antes, su WhatsApp es ${r.atiende.whatsapp}.` : "") +
+            // Datos de quien atiende (Lalo 28-jul): correo y WhatsApp, venga
+            // del round-robin o del dueño de la cotización.
+            (r.atiende?.email ? ` Si necesitas algo antes, le escribes a 📧 ${r.atiende.email}${r.atiende.whatsapp ? ` o al 📱 ${r.atiende.whatsapp}` : ""}.` : "") +
             ` Te puedo ayudar en algo más?`,
         }
       }

@@ -368,6 +368,13 @@ export async function bookMeeting(params: {
   timeZone?: string
   /** Event type de Cal.com donde agendar (default: el chileno CAL_EVENT_TYPE_ID). */
   eventTypeId?: string
+  /**
+   * Fuerza el host del booking en eventos round-robin (API 2024-08-13):
+   * el dueño de la cotización atiende su propia reunión. Cal lo respeta solo
+   * si esa persona es host del event type Y tiene el slot libre; si no, el
+   * booking FALLA — el caller debe reintentar sin este campo.
+   */
+  teamMemberEmail?: string
 }): Promise<{ success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string } | { success: false; error: string }> {
   if (!CAL_API_KEY) {
     return { success: false, error: "CAL_API_KEY no configurada en el entorno." }
@@ -388,6 +395,7 @@ export async function bookMeeting(params: {
     attendee: { name: prospectName, email: prospectEmail, timeZone, language },
     guests: meetingGuest && meetingGuest !== prospectEmail ? [meetingGuest] : [],
     metadata: { source: "whatsapp_vicky_v3" },
+    ...(params.teamMemberEmail ? { teamMemberEmail: params.teamMemberEmail } : {}),
   }
 
   try {

@@ -54,8 +54,24 @@ describe("dirección A: reunión cuando ya hay cotización", () => {
   test("el cliente escucha el nombre de quien VA a atenderlo", () => {
     // Desde la observación de Rodrigo (27-jul), el nombre sale del DIRECTORIO
     // con el dueño de la cotización como primera fuente.
-    assert.match(AGENDAR, /const atiende = dueno\s*\n\s*\? DIRECTORIO\[dueno\.email\]/)
+    assert.match(AGENDAR, /const atiende = dueno\s*\n\s*\? \{ \.\.\.\(DIRECTORIO\[dueno\.email\] \|\| \{ nombre: dueno\.nombre \}\), email: dueno\.email \}/)
     assert.match(AGENDAR, /atiende \? `, con \$\{atiende\.nombre\}`/)
+  })
+
+  test("el booking intenta nacer con el dueño como HOST, con fallback a round-robin", () => {
+    // Lalo 28-jul: teamMemberEmail (Cal API 2024-08-13) fuerza el host del
+    // round-robin al dueño de la cotización. Si Cal lo rechaza (sin
+    // disponibilidad o no es host del event type), se reintenta sin forzar.
+    assert.match(AGENDAR, /teamMemberEmail: dueno\?\.email/)
+    assert.match(AGENDAR, /if \(!booking\.success && dueno\) \{/)
+    assert.match(AGENDAR, /reintentando por round-robin/)
+    // El dueño se consulta ANTES de agendar — si no, no hay a quién forzar.
+    const iDueno = AGENDAR.indexOf("const dueno = await duenoCotizacionVigente")
+    const iBooking = AGENDAR.indexOf("let booking = await bookMeeting")
+    assert.ok(iDueno > 0 && iBooking > iDueno, "duenoCotizacionVigente debe resolverse antes del booking")
+    // Y calendar.ts solo incluye el campo cuando viene (spread condicional).
+    const CAL = readFileSync(join(RAIZ, "lib/calendar.ts"), "utf8")
+    assert.match(CAL, /\.\.\.\(params\.teamMemberEmail \? \{ teamMemberEmail: params\.teamMemberEmail \} : \{\}\)/)
   })
 
   test("best-effort: sin cotización o con Zoho caído, el flujo es el de siempre", () => {

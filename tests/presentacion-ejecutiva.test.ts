@@ -80,15 +80,20 @@ describe("la confirmación de reunión da nombre y WhatsApp, nunca un prefijo de
     assert.doesNotMatch(AGENDAR, /organizerEmail\.split\("@"\)\[0\]/)
   })
 
-  test("incluye el WhatsApp de quien atiende cuando lo tenemos", () => {
-    assert.match(AGENDAR, /el WhatsApp de \$\{atiende\.nombre\.split\(" "\)\[0\]\} es \$\{atiende\.whatsapp\}/)
+  test("incluye correo y WhatsApp de quien atiende (Lalo 28-jul: los 3 datos)", () => {
+    assert.match(AGENDAR, /📧 \$\{atiende\.email\}/)
+    assert.match(AGENDAR, /📱 \$\{atiende\.whatsapp\}/)
+    // Incluso sin directorio, el correo del organizador se comparte igual.
+    assert.match(AGENDAR, /puedes escribir a 📧 \$\{organizerEmail\}/)
   })
 
-  test("el resultado expone `atiende` y CO/MX lo usan en sus confirmaciones", () => {
-    assert.match(AGENDAR, /atiende\?: \{ nombre: string; whatsapp\?: string \}/)
+  test("el resultado expone `atiende` (con email) y CO/MX lo usan en sus confirmaciones", () => {
+    assert.match(AGENDAR, /atiende\?: \{ nombre: string; email\?: string; whatsapp\?: string \}/)
     assert.match(CO_TOOLS, /, con \$\{r\.atiende\.nombre\}/)
-    assert.match(CO_TOOLS, /su WhatsApp es \$\{r\.atiende\.whatsapp\}/)
+    assert.match(CO_TOOLS, /le escribes a 📧 \$\{r\.atiende\.email\}/)
+    assert.match(CO_TOOLS, /📱 \$\{r\.atiende\.whatsapp\}/)
     assert.match(MX_TOOLS, /, con \$\{r\.atiende\.nombre\}/)
-    assert.match(MX_TOOLS, /su WhatsApp es \$\{r\.atiende\.whatsapp\}/)
+    assert.match(MX_TOOLS, /le escribes a 📧 \$\{r\.atiende\.email\}/)
+    assert.match(MX_TOOLS, /📱 \$\{r\.atiende\.whatsapp\}/)
   })
 })
