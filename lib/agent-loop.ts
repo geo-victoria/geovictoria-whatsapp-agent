@@ -37,6 +37,7 @@ import { avisarEquipoInterno } from "./alerta-interna"
 import { getTimezone, computeMeetingReminderAt } from "./calendar"
 import { duenoCotizacionVigente } from "./tools/agendar-reunion"
 import { EVENTO_SEGUIMIENTO_POR_DUENO } from "./eventos-seguimiento"
+import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -499,6 +500,19 @@ export async function runAgentLoop(params: {
         } else {
           if (toolName === "generar_link_cotizadora") generarLinkEnEsteTurno++
           result = await toolDispatch(toolName, toolInput)
+        }
+
+        // Tag comercial por país en Botmaker (Lalo 28-jul): el ÉXITO de una
+        // tool de venta marca el chat (comercial_cl/co/mx) para que cada
+        // ejecutivo filtre su bandeja por tag. Determinista: soporte no pasa
+        // por estas tools, así que jamás se taguea. Best-effort, nunca
+        // bloquea el turno.
+        if (
+          contact &&
+          TOOLS_SENAL_COMERCIAL.has(toolName) &&
+          (result as { ok?: boolean } | null)?.ok !== false
+        ) {
+          void tagearChatComercial(contact).catch(() => false)
         }
 
         // Marca SOPORTE determinística (Lalo 20-jul): si la conversación se
