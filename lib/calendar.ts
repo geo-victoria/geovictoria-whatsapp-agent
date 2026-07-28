@@ -182,6 +182,58 @@ const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July
 const DAYS_PT = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"]
 const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
 
+/** Offset (en minutos) de una zona horaria en un instante dado. */
+function offsetEnMinutos(tz: string, d: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(d)
+  const name = parts.find((p) => p.type === "timeZoneName")?.value || "GMT+0"
+  const m = name.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/)
+  if (!m) return 0
+  const hh = parseInt(m[1], 10)
+  const mm = m[2] ? parseInt(m[2], 10) : 0
+  return hh * 60 + (hh < 0 ? -mm : mm)
+}
+
+/**
+ * Normaliza un slot ISO escrito por el MODELO: la HORA DE PARED manda.
+ *
+ * CASO QUE ORIGINA ESTO (Valeska / Tri-Stone, 28-jul): la tool ofreció slots
+ * correctos (15:00/15:20/15:40 de Chile), la clienta eligió "15:40" y el
+ * modelo construyó el slotIso A MANO como 2026-07-31T15:40:00-03:00 —
+ * asumiendo el offset de VERANO de Chile. En julio Chile es -04, así que ese
+ * string es el instante 14:40 local: el slot de las 14:40 también estaba
+ * libre, la verificación dio "disponible_exacto" y la reunión nació una hora
+ * antes de lo que la clienta confirmó.
+ *
+ * Regla: si el string declara un offset distinto al REAL de la zona en esa
+ * fecha, la hora escrita (lo que el cliente leyó y confirmó) se reinterpreta
+ * en la zona correcta. Los ISO en Z o sin offset (vienen de la tool de
+ * slots, son instantes confiables) y los de offset correcto pasan intactos.
+ */
+export function normalizarSlotIso(iso: string, tz: string): string {
+  const m = String(iso || "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})$/)
+  if (!m) return iso
+  const [, y, mo, d, h, mi, s, off] = m
+  if (off === "Z") return iso
+  const declarado = new Date(iso)
+  if (isNaN(declarado.getTime())) return iso
+  const offM = off.match(/([+-])(\d{2}):?(\d{2})/)
+  const offDeclarado = offM ? (offM[1] === "-" ? -1 : 1) * (+offM[2] * 60 + +offM[3]) : 0
+  const offReal = offsetEnMinutos(tz, declarado)
+  if (offDeclarado === offReal) return iso
+  const wallUtc = Date.UTC(+y, +mo - 1, +d, +h, +mi, +(s || 0))
+  let instante = wallUtc - offReal * 60000
+  // Segunda pasada por si la fecha cae justo en un cambio de horario.
+  const offReal2 = offsetEnMinutos(tz, new Date(instante))
+  if (offReal2 !== offReal) instante = wallUtc - offReal2 * 60000
+  const normalizado = new Date(instante).toISOString()
+  console.warn(
+    `[calendar] slotIso con offset ${off} ≠ ${tz} (real ${offReal / -60 >= 0 ? "-" : "+"}${Math.abs(offReal / 60)}): ${iso} → ${normalizado} (la hora de pared manda)`,
+  )
+  return normalizado
+}
+
 function formatSlotLabel(iso: string, country: string, language = "es"): string {
   const tz = getTimezone(country)
   const d = new Date(iso)
@@ -381,12 +433,13 @@ export async function bookMeeting(params: {
   }
 
   const {
-    slotIso,
     prospectName,
     prospectEmail,
     language = "es",
     timeZone = "America/Santiago",
   } = params
+  // La hora de pared manda: corrige offsets inventados por el modelo.
+  const slotIso = normalizarSlotIso(params.slotIso, timeZone)
 
   const meetingGuest = (process.env.CAL_MEETING_GUEST_EMAIL || "egomez@geovictoria.com").trim()
   const body = {
@@ -642,13 +695,16 @@ export async function checkSlotAvailability(params: {
     return { ok: false, error: "CAL_API_KEY no configurada en el entorno." }
   }
 
-  const { slotIso, country, eventTypeId = CAL_EVENT_TYPE_ID } = params
+  const { country, eventTypeId = CAL_EVENT_TYPE_ID } = params
+  const tz = getTimezone(country)
+  // La hora de pared manda: corrige offsets inventados por el modelo, para
+  // que la verificación y el booking hablen del MISMO instante que el
+  // cliente confirmó.
+  const slotIso = normalizarSlotIso(params.slotIso, tz)
   const propuesta = new Date(slotIso)
   if (isNaN(propuesta.getTime())) {
     return { ok: false, error: `slotIso no es una fecha ISO válida: ${slotIso}` }
   }
-
-  const tz = getTimezone(country)
   const now = new Date()
 
   if (propuesta.getTime() < now.getTime()) {
