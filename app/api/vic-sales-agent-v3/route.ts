@@ -31,6 +31,7 @@ import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
 import { fetchHistoryV3, appendTurnV3 } from "@/lib/supabase-persistence-v3"
 import { acquireLock, releaseLock, hashMessage } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator } from "@/lib/botmaker-push-v3"
+import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -133,7 +134,13 @@ async function processInBackground(
           c.name === "aplicar_siguiente_descuento") &&
         c.ok,
     )
-    if (hasCotizacionUrl && !realCotizacion) {
+    // Procedencia (29-jul, caso ficha del reloj): una URL del cotizador que
+    // salió de una tool de este turno la produjo el backend — no es alucinación.
+    const urlsPdfReply = reply.match(/https?:\/\/cotizacion\.geovictoria\.com\/pdf\/[^\s)]+/gi) || []
+    const urlsToolsTurno = urlsDeToolsDelTurno(toolCalls)
+    const urlsVienenDeTools =
+      urlsPdfReply.length > 0 && urlsPdfReply.every((u) => vieneDeUnaTool(u, urlsToolsTurno))
+    if (hasCotizacionUrl && !realCotizacion && !urlsVienenDeTools) {
       console.error(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
       )

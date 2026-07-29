@@ -533,9 +533,27 @@ async function processOneTurn(
     const reenviaLinkConocido = quotePointers.some(
       (qp) => !!qp.acceptanceUrl && reply.includes(qp.acceptanceUrl),
     )
+    // Item C (29-jul, caso +56958112916): una URL del cotizador que salió de
+    // una TOOL de este turno no es alucinación — la produjo nuestro backend.
+    // La ficha técnica del reloj (enviar_ficha_reloj) vive en
+    // cotizacion.geovictoria.com y este guardrail la fusilaba: el cliente
+    // pidió las características del huellero, la tool corrió OK, y la
+    // respuesta correcta se reemplazó DOS veces por la muletilla de
+    // cotización. Misma regla de procedencia que el allowlist de dominios.
+    const urlsCotizadorReply = reply.match(/https?:\/\/cotizacion\.geovictoria\.com\/[^\s)]+/gi) || []
+    const urlsToolsTurno = urlsDeToolsDelTurno(toolCalls)
+    const urlsVienenDeTools =
+      urlsCotizadorReply.length > 0 &&
+      urlsCotizadorReply.every((u) => vieneDeUnaTool(u, urlsToolsTurno))
     // (los reintentos forzados son del flujo de VENTA: re-corren el loop con el
     // prompt y las tools de venta, así que en fase onboarding no deben disparar)
-    if (!enOnboarding && hasCotizacionUrl && !realCotizacion && !reenviaLinkConocido) {
+    if (
+      !enOnboarding &&
+      hasCotizacionUrl &&
+      !realCotizacion &&
+      !reenviaLinkConocido &&
+      !urlsVienenDeTools
+    ) {
       console.error(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
       )
@@ -580,9 +598,16 @@ async function processOneTurn(
           (qp) => !!qp.acceptanceUrl && retryReply.includes(qp.acceptanceUrl),
         )
         const retryTieneUrl = /cotizacion\.geovictoria\.com\/[^\s)]+/i.test(retryReply)
+        // Procedencia también en el reintento: si sus URLs salieron de una
+        // tool del retry (p. ej. enviar_ficha_reloj de nuevo), son legítimas.
+        const retryUrls = retryReply.match(/https?:\/\/cotizacion\.geovictoria\.com\/[^\s)]+/gi) || []
+        const retryUrlsDeTools = urlsDeToolsDelTurno(retryTools)
+        const retryVieneDeTools =
+          retryUrls.length > 0 && retryUrls.every((u) => vieneDeUnaTool(u, retryUrlsDeTools))
         // Aceptar el reintento solo si el link viene de una tool real (o de un
-        // puntero conocido), o si optó por responder sin link.
-        if (retryReply && (retryReal || retryLinkConocido || !retryTieneUrl)) {
+        // puntero conocido, o de cualquier tool del retry), o si optó por
+        // responder sin link.
+        if (retryReply && (retryReal || retryLinkConocido || retryVieneDeTools || !retryTieneUrl)) {
           console.warn(
             `[v3-bg] URL_RECUPERADA contact=${contact}: reintento con tool real=${retryReal}.`,
           )
