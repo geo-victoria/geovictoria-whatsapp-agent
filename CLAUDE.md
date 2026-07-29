@@ -20,6 +20,11 @@
 - Zoho `send_mail` solo registra `status: "sent"` — no existe delivered ni bounced. NADIE puede afirmar que un correo llegó; `lib/honestidad-entrega.ts` degrada esas afirmaciones.
 - PENDIENTE: DMARC sin `rua=` — nadie recibe reportes. Una línea de DNS, riesgo cero, es el único instrumento para el problema grande (137 contactos sin correo de clave, sistema de la PLATAFORMA, fuera de estos repos).
 
+## Reglas de negocio CRM (29-jul-2026, petición de marketing vía Lalo)
+- **NUNCA crear Deals directamente en Zoho**: todo deal nace de un LEAD CONVERTIDO (puede ser instantáneo — crear lead y convertir en el mismo acto), con el lead asociado al deal. Sin esa cadena, la tasa de conversión Lead→Deal queda incalculable. Aplica a create-from-vicky (CL/CO/MX), al preform/Borrador y a cualquier flujo nuevo.
+- Un deal demuestra intención comercial del usuario; etapas: intención→"1. Trato Creado", discovery/preform→"3. En Levantamiento", reunión realizada→"2. Primera Reunion Realizada" (sin tilde), formal→"4. Propuesta Enviada / En Negociación", aceptada→"6. Listo para Cierre", onboarding listo→"7. Implementando"; a Facturando lo mueve el ejecutivo. Stage está bajo Blueprint: los deals NACEN en su etapa; updates de stage solo vía transiciones.
+- Dedup antes de crear leads (teléfono y email); leads existentes se enriquecen solo en campos VACÍOS y su status solo sube (nunca pisar gestión de SDR).
+
 ## Convenciones operativas
 - Deploy agente: push a `vicky-v3` (+ espejo `claude/trusting-ritchie-EVZIT` con --force-with-lease). Producción real = alias `geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app` (la rama "production" de Vercel es master viejo — no usar).
 - Siempre `npx tsc --noEmit && git commit && git push` encadenado con && (gate estricto).
