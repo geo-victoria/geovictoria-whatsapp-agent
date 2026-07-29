@@ -69,6 +69,38 @@ describe("el cron del loop no pisa las variables del contacto", () => {
  * plantillas de la matriz, 4 no tienen variables, 6 solo ${nombre} y 1 sola
  * —vicky_mx_react_corta— usa ${empresa}.
  */
+describe("fallback de TRES niveles cuando falta una variable (28-jul)", () => {
+  // Aviso real de Botmaker (28-jul): vicky_loop_pago rebotó con "Parameter of
+  // type text is missing text value" para un contacto SIN ${nombre} guardado.
+  // El fallback solo puede entrar cuando NADIE tiene el dato: mandarlo a
+  // ciegas pisa la variable real del contacto (la regla de este archivo).
+  test("consulta las variables del CHAT antes de decidir el fallback", () => {
+    assert.match(LOOP, /async function completarParamsConChat/)
+    assert.match(LOOP, /api\.botmaker\.com\/v2\.0\/chats\//)
+    assert.match(LOOP, /varsChat\[v\] \|\| ""/)
+  })
+
+  test("con la variable en el chat se OMITE (Botmaker resuelve el valor real)", () => {
+    const fn = LOOP.slice(
+      LOOP.indexOf("async function completarParamsConChat"),
+      LOOP.indexOf("// ── Toque de PRESENTACIÓN"),
+    )
+    assert.match(fn, /if \(!\(varsChat\[v\] \|\| ""\)\.trim\(\)\) \{/)
+  })
+
+  test("si el GET falla, NO se arriesga el pisotón: params quedan como están", () => {
+    assert.match(LOOP, /params quedan como están/)
+  })
+
+  test("el fallback de empresa no es el literal vetado", () => {
+    assert.match(LOOP, /empresa: "tu negocio"/)
+  })
+
+  test("el envío del cron pasa por el tercer nivel", () => {
+    assert.match(LOOP, /await completarParamsConChat\(/)
+  })
+})
+
 describe("los params se limitan a las variables que la plantilla declara", () => {
   test("existe el mapa de variables por plantilla y la función que filtra", () => {
     assert.match(LOOP, /const VARS_PLANTILLA: Record<string, readonly string\[\]>/)

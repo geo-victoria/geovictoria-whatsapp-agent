@@ -161,6 +161,58 @@ function paramsParaPlantilla(
   return out
 }
 
+// ── Fallback SOLO cuando ni nosotros ni Botmaker tienen la variable ─────────
+// Meta EXIGE valor para todo parámetro declarado: si nadie lo aporta, la
+// plantilla completa rebota con "Parameter of type text is missing text
+// value" (aviso de Botmaker 28-jul: vicky_loop_pago a un contacto sin
+// ${nombre} guardado). Pero mandar un relleno A CIEGAS pisa la variable real
+// del contacto (desastre del 27-jul). El orden correcto es de tres niveles:
+//   1. valor local real → se manda;
+//   2. la variable existe en el CHAT de Botmaker → se omite y resuelve él;
+//   3. no existe en ningún lado → fallback inofensivo (no hay dato que pisar).
+// Si el GET del chat falla, se omite como siempre (mejor un rebote raro que
+// arriesgar un pisotón de datos).
+const FALLBACK_VAR: Record<string, string> = {
+  nombre: "👋",
+  empresa: "tu negocio",
+}
+
+async function completarParamsConChat(
+  contact: string,
+  canal: string | undefined,
+  tpl: string,
+  params: Record<string, string>,
+): Promise<Record<string, string>> {
+  const declaradas = VARS_PLANTILLA[tpl] || []
+  const faltantes = declaradas.filter((v) => !(params[v] || "").trim())
+  if (faltantes.length === 0) return params
+  try {
+    const token = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
+    // Sin token o sin canal no hay cómo consultar el chat: se omite como
+    // siempre (conservador).
+    if (!token || !canal) return params
+    const ref = `${canal}:${contact}`
+    const res = await fetch(`https://api.botmaker.com/v2.0/chats/${encodeURIComponent(ref)}`, {
+      headers: { "access-token": token, Accept: "application/json" },
+      cache: "no-store",
+    })
+    if (!res.ok) {
+      console.warn(`[loop-cron] GET chat ${contact} → ${res.status}: params quedan como están`)
+      return params
+    }
+    const varsChat = ((await res.json())?.variables || {}) as Record<string, string>
+    for (const v of faltantes) {
+      if (!(varsChat[v] || "").trim()) {
+        params[v] = FALLBACK_VAR[v] || "-"
+        console.warn(`[loop-cron] ${contact}: sin ${v} local ni en Botmaker — fallback "${params[v]}" (${tpl})`)
+      }
+    }
+  } catch (e) {
+    console.warn(`[loop-cron] completarParamsConChat falló para ${contact}:`, e)
+  }
+  return params
+}
+
 // ── Toque de PRESENTACIÓN DE LA EJECUTIVA (Rodrigo, 27-jul) ─────────────────
 // A las 2 HORAS de inactividad tras un preform o cotización (stages
 // con_precio/formal), el toque 1 deja de ser un nudge genérico: presenta a la
@@ -664,7 +716,15 @@ export async function GET(req: Request): Promise<Response> {
           // cuerpo no menciona no cambia el texto, pero igual pisa la variable
           // del contacto. Ver VARS_PLANTILLA.
           const empresaReal = (await empresaDeCotizacion(r.contact)) || ""
-          const params = paramsParaPlantilla(tpl, { empresa: empresaReal })
+          // Tercer nivel (28-jul): si una variable declarada no está ni acá ni
+          // en el chat de Botmaker, va el fallback — sin él, Meta rebota la
+          // plantilla entera ("missing text value") y el toque se pierde.
+          const params = await completarParamsConChat(
+            r.contact,
+            canal,
+            tpl,
+            paramsParaPlantilla(tpl, { empresa: empresaReal }),
+          )
 
           const ok = await sendBotmakerTemplate(r.contact, tpl, params, canal).catch(() => false)
           if (ok) {
