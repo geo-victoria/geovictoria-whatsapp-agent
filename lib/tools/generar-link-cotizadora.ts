@@ -284,6 +284,24 @@ export type LinkCotizadoraInput = {
   _draftContactId?: string
 }
 
+/**
+ * Tramo de la escalera de precios de un módulo, tal como viaja a la cotizadora.
+ *
+ * La NDV de Creator imprime la escalera COMPLETA y resalta el tramo que aplica
+ * (ver las notas de venta de referencia): sin ella el PDF muestra una sola fila
+ * y Creator no puede redactar la descripción del ítem. El catálogo vive acá, así
+ * que la escalera se manda desde acá — la cotizadora no tiene una copia que se
+ * pueda desincronizar. OJO: los precios de Vicky NO son los de la plantilla
+ * "Asistencia" de Creator (Vicky vende más barato), así que la tabla se manda
+ * inline y jamás por plantilla.
+ */
+export type TramoEscalera = {
+  desde: number
+  hasta: number
+  modalidad: "fijo" | "por_usuario"
+  precioUF: number
+}
+
 type ItemCotizacion = {
   tipo: "modulo" | "hardware" | "servicio"
   id: string
@@ -293,6 +311,8 @@ type ItemCotizacion = {
   precioUnitarioUF: number
   subtotalUF: number
   tierAplicado?: string
+  /** Escalera completa del módulo. Solo para tipo "modulo". */
+  escalera?: TramoEscalera[]
   // Solo para tipo "servicio" de instalación: indica si la tarifa aplicada
   // corresponde a Región Metropolitana o regiones. La cotizadora lo persiste
   // y lo usa para decidir descuentos de instalación.
@@ -389,6 +409,12 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
       precioUnitarioUF: tier.precioUF,
       subtotalUF: Number(subtotalUF.toFixed(3)),
       tierAplicado: `${tier.minUsuarios}-${tier.maxUsuarios} usuarios`,
+      escalera: modulo.tiers.map((t) => ({
+        desde: t.minUsuarios,
+        hasta: t.maxUsuarios,
+        modalidad: t.modalidad,
+        precioUF: t.precioUF,
+      })),
     })
   }
 
