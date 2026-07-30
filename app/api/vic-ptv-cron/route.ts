@@ -199,6 +199,14 @@ export async function GET(req: Request) {
         await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ presentado_al_prospecto: true }) })
       }
     }
+    // El traspaso APAGA la cadencia automática de esta conversación: con un
+    // vendedor encima, Vicky no sigue mandando toques (el único contacto
+    // proactivo posterior es el chequeo de calidad de las 9 h hábiles).
+    // Vicky sigue respondiendo REACTIVAMENTE si el cliente escribe.
+    await supa(`vic_loop?contact=eq.${encodeURIComponent(c.contact)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ estado: "cerrado", motivo_cierre: "ptv_traspasado" }),
+    })
     await asignarEnZoho(c.contact, vendedor.zohoId)
     await avisarEquipoInterno(
       `📞 PTV: traspaso a ${vendedor.email} — contacto +${c.contact} (TTV ${decision.ttv} min vencido, ${decision.motivo}). LLAMAR EN MENOS DE 5 MINUTOS. La conversación completa está en las notas del registro en Zoho; si hay link de pago vigente, empujar el mismo link.`,
