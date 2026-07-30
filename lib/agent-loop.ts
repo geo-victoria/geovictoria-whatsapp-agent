@@ -38,6 +38,7 @@ import { getTimezone, computeMeetingReminderAt } from "./calendar"
 import { duenoCotizacionVigente } from "./tools/agendar-reunion"
 import { EVENTO_SEGUIMIENTO_POR_DUENO } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
+import { sincronizarHitoCrm, HITO_POR_TOOL } from "./crm-hitos"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -513,6 +514,19 @@ export async function runAgentLoop(params: {
           (result as { ok?: boolean } | null)?.ok !== false
         ) {
           void tagearChatComercial(contact).catch(() => false)
+        }
+
+        // Sincronización CRM por hitos (Lalo 30-jul): el ÉXITO de una tool
+        // implica un hito del diccionario (preform, intención, aceptada) y el
+        // CRM se actualiza solo — lead creado/convertido según origen del
+        // dato (entrante vs asignado en el CRM) y deal subiendo de etapa como
+        // PISO, nunca hacia atrás. Detrás de flag; best-effort siempre.
+        if (
+          contact &&
+          HITO_POR_TOOL[toolName] &&
+          (result as { ok?: boolean } | null)?.ok !== false
+        ) {
+          void sincronizarHitoCrm(contact, HITO_POR_TOOL[toolName]).catch(() => undefined)
         }
 
         // Marca SOPORTE determinística (Lalo 20-jul): si la conversación se
