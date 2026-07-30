@@ -25,7 +25,7 @@ describe("el RFC no bloquea la derivación (prompt MX)", () => {
   })
 
   test("derivar exige la tool en el mismo turno — sin promesas vacías", () => {
-    assert.match(PROMPT_MX, /derivar_a_ejecutivo EN ESE MISMO TURNO/)
+    assert.match(PROMPT_MX, /\(derivar_a_ejecutivo o agendar_reunion\) EN ESE MISMO TURNO/)
     assert.match(PROMPT_MX, /promesa vacía PROHIBIDA/)
   })
 
