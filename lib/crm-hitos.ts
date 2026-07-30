@@ -225,6 +225,7 @@ type LeadEncontrado = {
   email: string
   lastName: string
   rut: string
+  ultimaActividad: string
   convertido: boolean
   dealId: string | null
   contactId: string | null
@@ -250,7 +251,7 @@ async function resolverPorTelefono(contact: string): Promise<
     const idCandado = (await getKvValue(`zoho_lead_${fono}`)) || ""
     if (idCandado) {
       const rDirecto = await fetch(
-        `${api}/crm/v3/Leads/${idCandado}?fields=Owner,Lead_Status,Company,N_Empleados_que_marcan,Email,Last_Name,RUT_Empresa,Converted_Deal,Converted_Contact,Converted_Account`,
+        `${api}/crm/v3/Leads/${idCandado}?fields=Owner,Lead_Status,Company,N_Empleados_que_marcan,Email,Last_Name,RUT_Empresa,Last_Activity_Time,Converted_Deal,Converted_Contact,Converted_Account`,
         { headers: h, cache: "no-store" },
       )
       if (rDirecto.ok) {
@@ -268,6 +269,7 @@ async function resolverPorTelefono(contact: string): Promise<
               email: String(l.Email || ""),
               lastName: String(l.Last_Name || ""),
               rut: String(l.RUT_Empresa || ""),
+              ultimaActividad: String(l.Last_Activity_Time || ""),
               convertido: Boolean(g("Converted_Account") || g("Converted_Contact") || g("Converted_Deal")),
               dealId: g("Converted_Deal") ? String(g("Converted_Deal")) : null,
               contactId: g("Converted_Contact") ? String(g("Converted_Contact")) : null,
@@ -292,6 +294,7 @@ async function resolverPorTelefono(contact: string): Promise<
         Email?: string
         Last_Name?: string
         RUT_Empresa?: string
+        Last_Activity_Time?: string
         Converted_Deal?: { id?: string } | null
         Converted_Contact?: { id?: string } | null
         Converted_Account?: { id?: string } | null
@@ -311,6 +314,7 @@ async function resolverPorTelefono(contact: string): Promise<
           email: String(l.Email || ""),
           lastName: String(l.Last_Name || ""),
           rut: String(l.RUT_Empresa || ""),
+          ultimaActividad: String(l.Last_Activity_Time || ""),
           convertido,
           dealId: l.Converted_Deal?.id ? String(l.Converted_Deal.id) : null,
           contactId: l.Converted_Contact?.id ? String(l.Converted_Contact.id) : null,
@@ -711,6 +715,7 @@ export async function sincronizarHitoCrm(
         email: datos.email || "",
         lastName: datos.nombre || "",
         rut: "",
+        ultimaActividad: "",
         convertido: false,
         dealId: null,
         contactId: null,
@@ -726,6 +731,43 @@ export async function sincronizarHitoCrm(
     // aditivo: cualquier dato nuevo de la conversación entra a campos vacíos.
     const lead = await enriquecerLead(res.lead, datos)
     const esDeVicky = !lead.ownerId || lead.ownerId === VICKY_OWNER_ID
+
+    // ── Reglas de re-contacto (doc David 30-jul) — detrás de sub-flag ──
+    // Reglas 2/5: registro activo → RE-NOTIFICAR al dueño, sin crear nada.
+    // Regla 3: "No Calificado" <3 meses → se re-trabaja el mismo lead;
+    //          >3 meses → lead NUEVO en etapa 1 (excepción legítima al dedup).
+    // Todo por el canal trasero: jamás toca la conversación.
+    if (getEnv("VICKY_REGLAS_RECONTACTO_ENABLED") === "on") {
+      if (!lead.convertido && !esDeVicky) {
+        if (/no calificado/i.test(lead.status)) {
+          const tresMeses = 90 * 864e5
+          const viejo = lead.ultimaActividad && Date.now() - Date.parse(lead.ultimaActividad) > tresMeses
+          if (viejo) {
+            // >3 meses: renace como lead nuevo (regla 3b). Se libera el
+            // candado para que la creación proceda.
+            const { setKvValue } = await import("./supabase-persistence-v3")
+            await setKvValue(`zoho_lead_${clean}`, "").catch(() => {})
+            const { createZohoLead } = await import("./zoho-leads")
+            const nuevo = await createZohoLead({
+              contactoWA: clean, telefono: clean, nombre: datos.nombre,
+              empresa: datos.empresa, email: datos.email, trabajadores: datos.empleados,
+            })
+            if (nuevo.success) console.log(`[crm-hitos] ${clean}: lead renacido ${nuevo.leadId} (No Calificado >3 meses, regla 3b)`)
+            return
+          }
+          // <3 meses (regla 3a): se re-trabaja el mismo lead — sigue el flujo
+          // normal de status/nota más abajo.
+        }
+        // Regla 2: lead activo de dueño humano → re-notificar (nota; el flujo
+        // de abajo ya evita convertir leads ajenos).
+        const { agregarNotaLead } = await import("./zoho-leads")
+        await agregarNotaLead(
+          lead.id,
+          "El cliente volvió a escribirle a Vicky",
+          `Re-contacto por WhatsApp (hito: ${hito}). El cliente retomó la conversación con Vicky; este lead es tuyo y no se creó ninguno nuevo. Revisa la transcripción en las notas para el contexto.`,
+        ).catch(() => false)
+      }
+    }
 
     if (!lead.convertido) {
       await subirLeadStatus(lead, hito)
@@ -749,6 +791,40 @@ export async function sincronizarHitoCrm(
     if (!dealId && lead.contactId) {
       const deal = await dealVivoDelContacto(lead.contactId)
       dealId = deal?.id || null
+    }
+    // Reglas 4/6 (doc David): deal en Cierre Perdido o en 8. Facturando →
+    // el re-contacto RENACE como lead nuevo en etapa 1 (nueva oportunidad).
+    if (getEnv("VICKY_REGLAS_RECONTACTO_ENABLED") === "on") {
+      const { h, api } = await zohoHeaders()
+      const idParaEstado = dealId || lead.dealId
+      let stageActual = ""
+      if (idParaEstado) {
+        const rEstado = await fetch(`${api}/crm/v3/Deals/${idParaEstado}?fields=Stage,Owner`, { headers: h, cache: "no-store" })
+        const dEstado = ((await rEstado.json().catch(() => ({}))) as { data?: Array<{ Stage?: string; Owner?: { id?: string } }> }).data?.[0]
+        stageActual = String(dEstado?.Stage || "")
+        if (stageActual === "Cierre Perdido" || stageActual === "8. Facturando") {
+          const { setKvValue } = await import("./supabase-persistence-v3")
+          await setKvValue(`zoho_lead_${clean}`, "").catch(() => {})
+          const { createZohoLead } = await import("./zoho-leads")
+          const nuevo = await createZohoLead({
+            contactoWA: clean, telefono: clean, nombre: datos.nombre,
+            empresa: datos.empresa, email: datos.email, trabajadores: datos.empleados,
+          })
+          if (nuevo.success) console.log(`[crm-hitos] ${clean}: lead renacido ${nuevo.leadId} (deal en "${stageActual}", reglas 4/6)`)
+          return
+        }
+        // Regla 5: deal ACTIVO → re-notificar al dueño del deal, sin crear nada.
+        const { agregarNotaLead } = await import("./zoho-leads")
+        await fetch(`${api}/crm/v3/Notes`, {
+          method: "POST", headers: h, cache: "no-store",
+          body: JSON.stringify({ data: [{
+            Note_Title: "El cliente volvió a escribirle a Vicky",
+            Note_Content: `Re-contacto por WhatsApp (hito: ${hito}). El cliente retomó la conversación; este deal es tuyo y no se creó ninguno nuevo. Transcripción actualizada en las notas.`,
+            Parent_Id: idParaEstado, $se_module: "Deals",
+          }] }),
+        }).catch(() => null)
+        void agregarNotaLead
+      }
     }
     if (!dealId) {
       console.log(`[crm-hitos] ${clean}: lead ${lead.id} convertido sin deal vivo — hito "${hito}" sin destino`)
