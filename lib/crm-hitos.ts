@@ -443,7 +443,15 @@ async function convertirConDeal(
     Tipo_de_Cobro: empleados <= 10 ? "Mensual fijo" : "Por usuario",
     N_Empleados_que_marcan: empleados,
     Closing_Date: HOY_MAS_30(),
-    Owner: { id: lead.ownerId || VICKY_OWNER_ID },
+    // Dueño humano del lead → lo hereda el deal. Lead del usuario Vicky (o
+    // sin dueño) → dueño interino por país: un deal de Vicky-user queda en la
+    // bandeja de nadie (caso Artespectaculo 30-jul).
+    Owner: {
+      id:
+        lead.ownerId && lead.ownerId !== VICKY_OWNER_ID
+          ? lead.ownerId
+          : ({ Chile: "3525045000000211283", Colombia: "3525045000203758005", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+    },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
   const convertir = async (accountId?: string) => {
