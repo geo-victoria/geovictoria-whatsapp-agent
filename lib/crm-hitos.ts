@@ -411,6 +411,70 @@ async function avanzarDealHasta(dealId: string, piso: string): Promise<void> {
   }
 }
 
+const TITULO_NOTA_TRANSCRIPCION = "Transcripción WhatsApp Vicky"
+
+/**
+ * NOTA VIVA de transcripción en el deal (pedido Lalo 30-jul): una sola nota
+ * por deal, que se ACTUALIZA con la conversación completa en cada hito — no
+ * se acumulan copias. (El PDF adjunto queda para el barrido batch: en
+ * serverless no hay renderer.) Best-effort.
+ */
+async function actualizarNotaTranscripcion(dealId: string, contact: string): Promise<void> {
+  try {
+    const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
+    const historia = await fetchHistoryV3(contact, 200)
+    if (!historia.length) return
+    const transcript = historia
+      .map((m) => {
+        const rol = m.role === "assistant" ? "Vicky" : "Cliente"
+        const at = (m as { at?: string }).at || ""
+        return `${at} | ${rol}: ${m.content || ""}`
+      })
+      .join("\n")
+      .slice(0, 30000)
+    const { h, api } = await zohoHeaders()
+    const res = await fetch(
+      `${api}/crm/v3/Deals/${dealId}/Notes?fields=Note_Title&per_page=50`,
+      { headers: h, cache: "no-store" },
+    )
+    let notaId: string | null = null
+    if (res.ok && res.status !== 204) {
+      const data = (await res.json().catch(() => ({}))) as {
+        data?: Array<{ id?: string; Note_Title?: string }>
+      }
+      notaId =
+        data?.data?.find((n) => (n.Note_Title || "").startsWith(TITULO_NOTA_TRANSCRIPCION))?.id ||
+        null
+    }
+    if (notaId) {
+      await fetch(`${api}/crm/v3/Notes/${notaId}`, {
+        method: "PUT",
+        headers: h,
+        cache: "no-store",
+        body: JSON.stringify({ data: [{ Note_Content: transcript }] }),
+      })
+    } else {
+      await fetch(`${api}/crm/v3/Notes`, {
+        method: "POST",
+        headers: h,
+        cache: "no-store",
+        body: JSON.stringify({
+          data: [
+            {
+              Note_Title: TITULO_NOTA_TRANSCRIPCION,
+              Note_Content: transcript,
+              Parent_Id: dealId,
+              $se_module: "Deals",
+            },
+          ],
+        }),
+      })
+    }
+  } catch (e) {
+    console.warn(`[crm-hitos] nota transcripción deal ${dealId} falló:`, e instanceof Error ? e.message : e)
+  }
+}
+
 // Guard por instancia: el mismo (contacto, hito) no se re-procesa en el mismo
 // proceso serverless. Zoho igual queda consistente si se repite (todo es
 // idempotente hacia arriba), esto solo ahorra llamadas.
@@ -461,6 +525,7 @@ export async function sincronizarHitoCrm(contact: string, hito: Hito): Promise<v
       await subirLeadStatus(lead, hito)
       const dealId = await convertirConDeal(lead, clean, piso)
       if (!dealId) console.warn(`[crm-hitos] ${clean}: lead ${creado.leadId} quedó sin convertir`)
+      else await actualizarNotaTranscripcion(dealId, clean)
       return
     }
 
@@ -480,7 +545,8 @@ export async function sincronizarHitoCrm(contact: string, hito: Hito): Promise<v
         ).catch(() => false)
         return
       }
-      await convertirConDeal(lead, clean, piso)
+      const dealNuevo = await convertirConDeal(lead, clean, piso)
+      if (dealNuevo) await actualizarNotaTranscripcion(dealNuevo, clean)
       return
     }
 
@@ -495,6 +561,7 @@ export async function sincronizarHitoCrm(contact: string, hito: Hito): Promise<v
       return
     }
     await avanzarDealHasta(dealId, piso)
+    await actualizarNotaTranscripcion(dealId, clean)
   } catch (e) {
     console.warn("[crm-hitos] excepción:", e instanceof Error ? e.message : e)
   }

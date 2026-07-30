@@ -42,6 +42,10 @@
     {
       "path": "/api/vic-deal-stage-cron",
       "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/vic-crm-hitos-cron",
+      "schedule": "15 * * * *"
     }
   ],
   "functions": {

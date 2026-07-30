@@ -99,3 +99,40 @@ describe("cableado en el agent-loop", () => {
     assert.match(LOOP, /void sincronizarHitoCrm\(contact, HITO_POR_TOOL\[toolName\]\)\.catch/)
   })
 })
+
+describe("nota viva de transcripción en el deal", () => {
+  test("una sola nota que se actualiza — busca por título antes de crear", () => {
+    assert.match(HITOS, /TITULO_NOTA_TRANSCRIPCION = "Transcripción WhatsApp Vicky"/)
+    assert.match(HITOS, /startsWith\(TITULO_NOTA_TRANSCRIPCION\)/)
+  })
+
+  test("se cablea en los tres caminos con deal (nuevo, convertido y avanzado)", () => {
+    const llamadas = HITOS.match(/actualizarNotaTranscripcion\(deal\w*, clean\)/g) || []
+    assert.ok(llamadas.length >= 3, `esperaba ≥3 llamadas, hay ${llamadas.length}`)
+  })
+})
+
+describe("cron de reconciliación (la otra mitad: lo que el trigger no ve)", () => {
+  const CRON = readFileSync(join(RAIZ, "app/api/vic-crm-hitos-cron/route.ts"), "utf8")
+  const VERCEL = readFileSync(join(RAIZ, "vercel.json"), "utf8")
+
+  test("está agendado en Vercel (minuto 15, sin chocar con los otros crons)", () => {
+    assert.match(VERCEL, /"\/api\/vic-crm-hitos-cron"/)
+    assert.match(VERCEL, /"15 \* \* \* \*"/)
+  })
+
+  test("mismo flag que el trigger y con auth de cron", () => {
+    assert.match(CRON, /VICKY_CRM_HITOS_ENABLED/)
+    assert.match(CRON, /getFollowupCronSecret|CRON_SECRET/)
+  })
+
+  test("detecta preform por señales persistidas y reunión REALIZADA por start_at pasado", () => {
+    assert.match(CRON, /pref_escalon|formal_quote_id/)
+    assert.match(CRON, /reunion_realizada/)
+    assert.match(CRON, /start_at=lte\./)
+  })
+
+  test("reusa la MISMA función idempotente del trigger", () => {
+    assert.match(CRON, /sincronizarHitoCrm\(contact, hito\)/)
+  })
+})
