@@ -242,6 +242,41 @@ async function resolverPorTelefono(contact: string): Promise<
 > {
   const { h, api } = await zohoHeaders()
   const fono = contact.replace(/\D/g, "")
+  // Candado vic_kv primero: el search de Zoho tarda ~2 min en indexar leads
+  // nuevos y esa ventana producía duplicados (caso SYDA 28-jul). El candado
+  // apunta directo al id, con GET inmediato y sin lag.
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const idCandado = (await getKvValue(`zoho_lead_${fono}`)) || ""
+    if (idCandado) {
+      const rDirecto = await fetch(
+        `${api}/crm/v3/Leads/${idCandado}?fields=Owner,Lead_Status,Company,N_Empleados_que_marcan,Email,Last_Name,RUT_Empresa,Converted_Deal,Converted_Contact,Converted_Account`,
+        { headers: h, cache: "no-store" },
+      )
+      if (rDirecto.ok) {
+        const l = ((await rDirecto.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data?.[0]
+        if (l?.id) {
+          const g = (k: string) => (l[k] as { id?: string } | null)?.id
+          return {
+            tipo: "lead",
+            lead: {
+              id: String(l.id),
+              ownerId: String((l.Owner as { id?: string })?.id || ""),
+              status: String(l.Lead_Status || ""),
+              company: String(l.Company || ""),
+              empleados: Number(l.N_Empleados_que_marcan) || 0,
+              email: String(l.Email || ""),
+              lastName: String(l.Last_Name || ""),
+              rut: String(l.RUT_Empresa || ""),
+              convertido: Boolean(g("Converted_Account") || g("Converted_Contact") || g("Converted_Deal")),
+              dealId: g("Converted_Deal") ? String(g("Converted_Deal")) : null,
+              contactId: g("Converted_Contact") ? String(g("Converted_Contact")) : null,
+            },
+          }
+        }
+      }
+    }
+  } catch { /* sin candado, sigue el search normal */ }
   const res = await fetch(
     `${api}/crm/v3/Leads/search?phone=${encodeURIComponent(fono)}&converted=both&per_page=5`,
     { headers: h, cache: "no-store" },
@@ -599,10 +634,23 @@ const procesados = new Set<string>()
  * Punto de entrada: sincroniza el CRM con un hito detectado en la
  * conversación. Best-effort — loguea y nunca lanza.
  */
+/**
+ * Tools que YA crean su propio lead adentro (agendar/callback): el hook jamás
+ * debe crear otro — si el resolver no lo encuentra (lag de indexación), se
+ * espera al cron. Los duplicados Catalina/Mayra del 30-jul nacieron de esta
+ * carrera.
+ */
+export const TOOLS_QUE_CREAN_SU_LEAD = new Set([
+  "agendar_reunion",
+  "reagendar_reunion",
+  "registrar_solicitud_callback",
+])
+
 export async function sincronizarHitoCrm(
   contact: string,
   hito: Hito,
   datos: DatosConversacion = {},
+  opts: { noCrear?: boolean } = {},
 ): Promise<void> {
   try {
     if (!habilitado()) return
@@ -624,6 +672,10 @@ export async function sincronizarHitoCrm(
     }
 
     if (res.tipo === "nada") {
+      if (opts.noCrear) {
+        console.log(`[crm-hitos] ${clean}: la tool crea su propio lead — no se duplica (se reconcilia en el próximo barrido)`)
+        return
+      }
       // ENTRANTE puro: el dato nace en la conversación → lead nuevo por el
       // camino existente (tómbola u owner según el flujo que ya rige) y
       // conversión inmediata con deal en el piso del hito.

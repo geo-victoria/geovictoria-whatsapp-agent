@@ -170,3 +170,31 @@ describe("cron de reconciliación (la otra mitad: lo que el trigger no ve)", () 
     assert.match(CRON, /sincronizarHitoCrm\(contact, hito, datos\)/)
   })
 })
+
+describe("anti-duplicados (casos SYDA/Vélez/Catalina/Mayra, 28-30 jul)", () => {
+  const ZLEADS = readFileSync(join(RAIZ, "lib/zoho-leads.ts"), "utf8")
+
+  test("createZohoLead tiene candado en vic_kv: reutiliza antes de crear", () => {
+    assert.match(ZLEADS, /zoho_lead_\$\{fonoCandado\}/)
+    assert.match(ZLEADS, /se reutiliza, no se duplica/)
+  })
+
+  test("el candado se cierra apenas existe el lead", () => {
+    assert.match(ZLEADS, /setKvValue\(kvKeyLead, leadId\)/)
+  })
+
+  test("los +52 quedan con territorio México, nunca Chile", () => {
+    assert.match(ZLEADS, /startsWith\("52"\)/)
+    assert.match(ZLEADS, /Territorio = "México"/)
+  })
+
+  test("las tools que crean su propio lead no dejan que el hook duplique", () => {
+    assert.match(HITOS, /TOOLS_QUE_CREAN_SU_LEAD/)
+    assert.match(HITOS, /opts\.noCrear/)
+    assert.match(LOOP, /noCrear: TOOLS_QUE_CREAN_SU_LEAD\.has\(toolName\)/)
+  })
+
+  test("el resolver consulta el candado ANTES del search (que tiene lag)", () => {
+    assert.match(HITOS, /getKvValue\(`zoho_lead_\$\{fono\}`\)/)
+  })
+})

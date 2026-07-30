@@ -576,6 +576,23 @@ const VICKY_OWNER_ID = "3525045000484500876"
 
 export async function createZohoLead(input: CreateZohoLeadInput): Promise<CreateZohoLeadResult> {
   try {
+    // CANDADO ANTI-DUPLICADOS (casos SYDA/Vélez/Catalina/Mayra, 28-30 jul):
+    // el search de Zoho tarda ~2 min en indexar un lead nuevo, así que un
+    // reintento o un segundo flujo dentro de esa ventana creaba otro lead
+    // idéntico. El candado vive en vic_kv (consistencia inmediata): si este
+    // teléfono ya creó un lead, se REUTILIZA en vez de duplicar.
+    const fonoCandado = ((input.telefono || "").trim() || (input.contactoWA || "").trim()).replace(/\D/g, "")
+    const kvKeyLead = fonoCandado ? `zoho_lead_${fonoCandado}` : ""
+    if (kvKeyLead) {
+      try {
+        const { getKvValue } = await import("./supabase-persistence-v3")
+        const existente = (await getKvValue(kvKeyLead)) || ""
+        if (existente) {
+          console.log(`[zoho-leads] candado: ${fonoCandado} ya tiene lead ${existente} — se reutiliza, no se duplica`)
+          return { success: true, leadId: existente, entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+        }
+      } catch { /* sin candado no se bloquea la creación */ }
+    }
     const names = splitName(input.nombre)
     const transcript = buildTranscript(input.conversacion)
 
@@ -621,6 +638,12 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     if (pais) record.Country = pais
     if (digits.startsWith("56") || pais.toLowerCase() === "chile") record.Territorio = "Chile"
     else if (digits.startsWith("57") || pais.toLowerCase() === "colombia") record.Territorio = "Colombia"
+    // México quedaba sin territorio y un default lo dejaba en "Chile" (caso
+    // SYDA/Isauro): los +52 son México, siempre.
+    else if (digits.startsWith("52") || pais.toLowerCase() === "méxico" || pais.toLowerCase() === "mexico") {
+      record.Territorio = "México"
+      if (!record.Country) record.Country = "México"
+    }
     const ciudad = sanitize(input.ciudad, 100)
     if (ciudad) record.City = ciudad
 
@@ -672,6 +695,14 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         `Zoho devolvió status ${createResponse.status}`
       console.error("[zoho-leads] Error creando Lead:", JSON.stringify(createBody).slice(0, 500))
       return { success: false, error: errMsg }
+    }
+
+    // Cerrar el candado apenas existe el lead (antes de las notas: lo que
+    // importa es que un segundo intento inmediato ya lo encuentre).
+    if (kvKeyLead) {
+      import("./supabase-persistence-v3")
+        .then(({ setKvValue }) => setKvValue(kvKeyLead, leadId))
+        .catch(() => {})
     }
 
     if (transcript) {

@@ -38,7 +38,7 @@ import { getTimezone, computeMeetingReminderAt } from "./calendar"
 import { duenoCotizacionVigente } from "./tools/agendar-reunion"
 import { EVENTO_SEGUIMIENTO_POR_DUENO } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
-import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL } from "./crm-hitos"
+import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD } from "./crm-hitos"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -530,6 +530,7 @@ export async function runAgentLoop(params: {
             contact,
             HITO_POR_TOOL[toolName],
             datosDeToolInput(toolName, toolInput),
+            { noCrear: TOOLS_QUE_CREAN_SU_LEAD.has(toolName) },
           ).catch(() => undefined)
         }
 
