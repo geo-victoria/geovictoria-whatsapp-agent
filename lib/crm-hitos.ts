@@ -99,6 +99,65 @@ export const HITO_POR_TOOL: Record<string, Hito> = {
   registrar_comprobante_transferencia: "aceptada",
 }
 
+/**
+ * Datos frescos que la conversación entrega en el MISMO acto del hito (Lalo
+ * 30-jul: "si aparece la empresa, actualizarla; si aparece un correo,
+ * actualizarlo"). La fuente es el INPUT de la tool: cuando Vicky llama
+ * generar_link_cotizadora ya extrajo empresa/RUT/correo del chat — no hay que
+ * re-minarlos. Se aplican SOLO sobre campos vacíos o placeholder (regla
+ * anti-pisoteo: jamás sobreescribir gestión humana).
+ */
+export type DatosConversacion = {
+  nombre?: string
+  empresa?: string
+  email?: string
+  rut?: string
+  empleados?: number
+}
+
+export function datosDeToolInput(toolName: string, input: unknown): DatosConversacion {
+  const i = (input || {}) as Record<string, unknown>
+  const txt = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined)
+  const num = (v: unknown) => {
+    const n = Number(v)
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined
+  }
+  switch (toolName) {
+    case "cotizar_referencial":
+      return { empleados: num(i.userCount) }
+    case "generar_link_cotizadora":
+    case "actualizar_cotizacion":
+      return {
+        empresa: txt(i.empresa),
+        email: txt(i.contactoEmail),
+        rut: txt(i.rutEmpresa),
+        nombre: txt(i.contactoNombre) || txt(i.contacto),
+      }
+    case "agendar_reunion":
+    case "reagendar_reunion":
+      return {
+        nombre: txt(i.prospectName),
+        email: txt(i.prospectEmail),
+        empresa: txt(i.empresa),
+        empleados: num(i.trabajadores),
+      }
+    case "registrar_solicitud_callback":
+      return {
+        nombre: txt(i.nombre),
+        empresa: txt(i.empresa),
+        email: txt(i.email),
+        empleados: num(i.trabajadores),
+      }
+    default:
+      return {}
+  }
+}
+
+/** Company/nombre de relleno que cuentan como "vacío" para el enriquecimiento. */
+function esPlaceholder(valor: string): boolean {
+  return !valor || /por identificar|prospecto whatsapp|no identificado|sin empresa|tu empresa/i.test(valor)
+}
+
 /** Orden de Lead_Status para subir sin pisar (nunca hacia abajo). */
 const ORDEN_LEAD_STATUS: Record<string, number> = {
   "1. No contactado": 1,
@@ -163,6 +222,9 @@ type LeadEncontrado = {
   status: string
   company: string
   empleados: number
+  email: string
+  lastName: string
+  rut: string
   convertido: boolean
   dealId: string | null
   contactId: string | null
@@ -192,6 +254,9 @@ async function resolverPorTelefono(contact: string): Promise<
         Lead_Status?: string
         Company?: string
         N_Empleados_que_marcan?: number
+        Email?: string
+        Last_Name?: string
+        RUT_Empresa?: string
         Converted_Deal?: { id?: string } | null
         Converted_Contact?: { id?: string } | null
         Converted_Account?: { id?: string } | null
@@ -208,6 +273,9 @@ async function resolverPorTelefono(contact: string): Promise<
           status: String(l.Lead_Status || ""),
           company: String(l.Company || ""),
           empleados: Number(l.N_Empleados_que_marcan) || 0,
+          email: String(l.Email || ""),
+          lastName: String(l.Last_Name || ""),
+          rut: String(l.RUT_Empresa || ""),
           convertido,
           dealId: l.Converted_Deal?.id ? String(l.Converted_Deal.id) : null,
           contactId: l.Converted_Contact?.id ? String(l.Converted_Contact.id) : null,
@@ -246,6 +314,53 @@ async function dealVivoDelContacto(contactId: string): Promise<{ id: string; sta
   } catch {
     return null
   }
+}
+
+/**
+ * Enriquecimiento ADITIVO del lead con los datos frescos de la conversación:
+ * solo campos vacíos o placeholder — jamás pisa un dato existente (gestión de
+ * SDR incluida). Devuelve el lead con los valores efectivos post-update para
+ * que la conversión use la empresa/empleados reales.
+ */
+async function enriquecerLead(lead: LeadEncontrado, datos: DatosConversacion): Promise<LeadEncontrado> {
+  const campos: Record<string, unknown> = {}
+  if (datos.empresa && esPlaceholder(lead.company)) campos.Company = datos.empresa.slice(0, 200)
+  if (datos.email && !lead.email) campos.Email = datos.email
+  if (datos.rut && !lead.rut) campos.RUT_Empresa = datos.rut
+  if (datos.empleados && !lead.empleados) campos.N_Empleados_que_marcan = datos.empleados
+  if (datos.nombre && esPlaceholder(lead.lastName)) {
+    const partes = datos.nombre.trim().split(/\s+/)
+    campos.Last_Name = partes.length > 1 ? partes.slice(-1)[0] : partes[0]
+    if (partes.length > 1) campos.First_Name = partes.slice(0, -1).join(" ")
+  }
+  if (!Object.keys(campos).length) return lead
+  try {
+    const { h, api } = await zohoHeaders()
+    const r = await fetch(`${api}/crm/v3/Leads`, {
+      method: "PUT",
+      headers: h,
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ id: lead.id, ...campos }],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    })
+    const d = (await r.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
+    if (d?.data?.[0]?.code === "SUCCESS") {
+      console.log(`[crm-hitos] lead ${lead.id} enriquecido: ${Object.keys(campos).join(", ")}`)
+      return {
+        ...lead,
+        company: (campos.Company as string) || lead.company,
+        email: (campos.Email as string) || lead.email,
+        rut: (campos.RUT_Empresa as string) || lead.rut,
+        empleados: (campos.N_Empleados_que_marcan as number) || lead.empleados,
+        lastName: (campos.Last_Name as string) || lead.lastName,
+      }
+    }
+  } catch (e) {
+    console.warn(`[crm-hitos] enriquecer ${lead.id} falló:`, e instanceof Error ? e.message : e)
+  }
+  return lead
 }
 
 /**
@@ -484,12 +599,18 @@ const procesados = new Set<string>()
  * Punto de entrada: sincroniza el CRM con un hito detectado en la
  * conversación. Best-effort — loguea y nunca lanza.
  */
-export async function sincronizarHitoCrm(contact: string, hito: Hito): Promise<void> {
+export async function sincronizarHitoCrm(
+  contact: string,
+  hito: Hito,
+  datos: DatosConversacion = {},
+): Promise<void> {
   try {
     if (!habilitado()) return
     const clean = (contact || "").replace(/\D/g, "")
     if (!clean || esTelefonoDePrueba(clean)) return
-    const key = `${clean}:${hito}`
+    // La clave del guard incluye los datos: el mismo hito con información
+    // NUEVA (apareció la empresa, llegó el correo) sí se re-procesa.
+    const key = `${clean}:${hito}:${JSON.stringify(datos)}`
     if (procesados.has(key)) return
     procesados.add(key)
 
@@ -507,7 +628,14 @@ export async function sincronizarHitoCrm(contact: string, hito: Hito): Promise<v
       // camino existente (tómbola u owner según el flujo que ya rige) y
       // conversión inmediata con deal en el piso del hito.
       const { createZohoLead } = await import("./zoho-leads")
-      const creado = await createZohoLead({ contactoWA: clean, telefono: clean })
+      const creado = await createZohoLead({
+        contactoWA: clean,
+        telefono: clean,
+        nombre: datos.nombre,
+        empresa: datos.empresa,
+        email: datos.email,
+        trabajadores: datos.empleados,
+      })
       if (!creado.success) {
         console.warn(`[crm-hitos] ${clean}: no se pudo crear lead (${creado.error})`)
         return
@@ -516,8 +644,11 @@ export async function sincronizarHitoCrm(contact: string, hito: Hito): Promise<v
         id: creado.leadId,
         ownerId: "",
         status: "",
-        company: "",
-        empleados: 0,
+        company: datos.empresa || "",
+        empleados: datos.empleados || 0,
+        email: datos.email || "",
+        lastName: datos.nombre || "",
+        rut: "",
         convertido: false,
         dealId: null,
         contactId: null,
@@ -529,8 +660,9 @@ export async function sincronizarHitoCrm(contact: string, hito: Hito): Promise<v
       return
     }
 
-    // Hay lead (caso SALIENTE o entrante repetido).
-    const lead = res.lead
+    // Hay lead (caso SALIENTE o entrante repetido). Primero el enriquecimiento
+    // aditivo: cualquier dato nuevo de la conversación entra a campos vacíos.
+    const lead = await enriquecerLead(res.lead, datos)
     const esDeVicky = !lead.ownerId || lead.ownerId === VICKY_OWNER_ID
 
     if (!lead.convertido) {

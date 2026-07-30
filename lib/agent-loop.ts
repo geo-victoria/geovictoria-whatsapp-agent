@@ -38,7 +38,7 @@ import { getTimezone, computeMeetingReminderAt } from "./calendar"
 import { duenoCotizacionVigente } from "./tools/agendar-reunion"
 import { EVENTO_SEGUIMIENTO_POR_DUENO } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
-import { sincronizarHitoCrm, HITO_POR_TOOL } from "./crm-hitos"
+import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL } from "./crm-hitos"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -526,7 +526,11 @@ export async function runAgentLoop(params: {
           HITO_POR_TOOL[toolName] &&
           (result as { ok?: boolean } | null)?.ok !== false
         ) {
-          void sincronizarHitoCrm(contact, HITO_POR_TOOL[toolName]).catch(() => undefined)
+          void sincronizarHitoCrm(
+            contact,
+            HITO_POR_TOOL[toolName],
+            datosDeToolInput(toolName, toolInput),
+          ).catch(() => undefined)
         }
 
         // Marca SOPORTE determinística (Lalo 20-jul): si la conversación se

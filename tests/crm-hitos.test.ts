@@ -14,7 +14,7 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { PISO_POR_HITO, HITO_POR_TOOL, etapaObjetivo } from "../lib/crm-hitos.ts"
+import { PISO_POR_HITO, HITO_POR_TOOL, etapaObjetivo, datosDeToolInput } from "../lib/crm-hitos.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const LOOP = readFileSync(join(RAIZ, "lib/agent-loop.ts"), "utf8")
@@ -93,10 +93,44 @@ describe("reglas duras del módulo", () => {
   })
 })
 
+describe("enriquecimiento aditivo con los datos de la conversación (Lalo 30-jul)", () => {
+  test("cada tool aporta lo que sabe: empresa, correo, RUT, nombre, empleados", () => {
+    assert.deepEqual(datosDeToolInput("cotizar_referencial", { userCount: 12 }), { empleados: 12 })
+    assert.deepEqual(
+      datosDeToolInput("generar_link_cotizadora", {
+        empresa: "AROM SPA",
+        contactoEmail: "ana@arom.cl",
+        rutEmpresa: "76.123.456-7",
+      }),
+      { empresa: "AROM SPA", email: "ana@arom.cl", rut: "76.123.456-7", nombre: undefined },
+    )
+    assert.deepEqual(
+      datosDeToolInput("agendar_reunion", { prospectName: "Ana Soto", prospectEmail: "a@b.cl" }),
+      { nombre: "Ana Soto", email: "a@b.cl", empresa: undefined, empleados: undefined },
+    )
+  })
+
+  test("tools sin datos personales no aportan nada (y no rompen)", () => {
+    assert.deepEqual(datosDeToolInput("derivar_a_soporte", { motivo: "x" }), {})
+    assert.deepEqual(datosDeToolInput("cotizar_referencial", {}), { empleados: undefined })
+  })
+
+  test("solo campos vacíos o placeholder — jamás pisar datos existentes", () => {
+    assert.match(HITOS, /esPlaceholder\(lead\.company\)/)
+    assert.match(HITOS, /datos\.email && !lead\.email/)
+    assert.match(HITOS, /por identificar|prospecto whatsapp/i)
+  })
+
+  test("el hook del loop pasa el input de la tool y el guard admite datos nuevos", () => {
+    assert.match(LOOP, /datosDeToolInput\(toolName, toolInput\)/)
+    assert.match(HITOS, /JSON\.stringify\(datos\)/)
+  })
+})
+
 describe("cableado en el agent-loop", () => {
   test("el hook corre tras el éxito de la tool, best-effort", () => {
     assert.match(LOOP, /HITO_POR_TOOL\[toolName\]/)
-    assert.match(LOOP, /void sincronizarHitoCrm\(contact, HITO_POR_TOOL\[toolName\]\)\.catch/)
+    assert.match(LOOP, /void sincronizarHitoCrm\(\s*\n\s*contact,\s*\n\s*HITO_POR_TOOL\[toolName\],/)
   })
 })
 
@@ -133,6 +167,6 @@ describe("cron de reconciliación (la otra mitad: lo que el trigger no ve)", () 
   })
 
   test("reusa la MISMA función idempotente del trigger", () => {
-    assert.match(CRON, /sincronizarHitoCrm\(contact, hito\)/)
+    assert.match(CRON, /sincronizarHitoCrm\(contact, hito, datos\)/)
   })
 })

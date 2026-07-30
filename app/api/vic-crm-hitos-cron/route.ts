@@ -26,7 +26,7 @@
  */
 
 import { NextResponse } from "next/server"
-import { sincronizarHitoCrm, type Hito } from "@/lib/crm-hitos"
+import { sincronizarHitoCrm, type Hito, type DatosConversacion } from "@/lib/crm-hitos"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -95,20 +95,27 @@ export async function GET(req: Request) {
   )
 
   // Un hito por contacto: el MAYOR piso detectado (los pisos son acumulativos).
-  const hitoPorContacto = new Map<string, Hito>()
+  // Los pref_params del preform traen datos frescos (userCount) que la
+  // sincronización usa para el enriquecimiento aditivo del lead.
+  const hitoPorContacto = new Map<string, { hito: Hito; datos: DatosConversacion }>()
   for (const r of reuniones) {
-    if (r.contact) hitoPorContacto.set(r.contact, "reunion_realizada")
+    if (r.contact) hitoPorContacto.set(r.contact, { hito: "reunion_realizada", datos: {} })
   }
   for (const c of conversaciones) {
     const vioPreform = Boolean(
       c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id || c.pref_params,
     )
-    if (vioPreform && c.contact) hitoPorContacto.set(c.contact, "preform")
+    if (!vioPreform || !c.contact) continue
+    const userCount = Number((c.pref_params as { userCount?: unknown } | null)?.userCount)
+    hitoPorContacto.set(c.contact, {
+      hito: "preform",
+      datos: Number.isFinite(userCount) && userCount > 0 ? { empleados: Math.round(userCount) } : {},
+    })
   }
 
   const resultados: Array<{ contact: string; hito: Hito }> = []
-  for (const [contact, hito] of hitoPorContacto) {
-    await sincronizarHitoCrm(contact, hito)
+  for (const [contact, { hito, datos }] of hitoPorContacto) {
+    await sincronizarHitoCrm(contact, hito, datos)
     resultados.push({ contact, hito })
   }
 
