@@ -31,7 +31,14 @@ const NOTIFICATIONS_URL = "https://go.botmaker.com/api/v1.0/intent/v2"
 
 /** Normaliza el contactId al formato que espera Botmaker (sin "+"). */
 function normalizeContactId(raw: string): string {
-  return raw.replace(/^\+/, "").replace(/\D/g, "")
+  const sinMas = (raw || "").trim().replace(/^\+/, "")
+  // IDs anónimos de WhatsApp (números ocultos de Meta / contactos sin fono):
+  // llegan como "CO.1025995573684934" y NO son teléfonos — son el contactId
+  // real de Botmaker. Si les quitamos el prefijo, Botmaker abre un chat
+  // FANTASMA con puros dígitos y el cliente nunca recibe la respuesta (caso
+  // CIMA Ingenieros, 30-jul). Se pasan CRUDOS.
+  if (/[^\d]/.test(sinMas)) return sinMas
+  return sinMas
 }
 
 // ── Canal de ORIGEN por contacto (caso +573117482905, 21-jul) ───────────────

@@ -272,7 +272,14 @@ function getEnv(name: string) {
 }
 
 function normalizeContact(raw: string): string {
-  return raw.replace(/\D/g, "")
+  const sinMas = (raw || "").trim().replace(/^\+/, "")
+  // Contactos SIN teléfono (números ocultos de Meta): llegan como
+  // "CO.1025995573684934". Ese ID COMPLETO es la identidad del chat en
+  // Botmaker — si lo reducimos a dígitos, la respuesta se va a un chat
+  // fantasma y el cliente queda sin contestar (caso CIMA, 30-jul). Se
+  // conserva crudo como clave de conversación y de respuesta.
+  if (/[^\d]/.test(sinMas)) return sinMas
+  return sinMas
 }
 
 /**
@@ -1431,7 +1438,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       // API de Botmaker (cubre también al +57 que legítimamente escribe al +56).
       const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
       if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
-    } else if (contact.startsWith("57") && contact.length >= 12) {
+    } else if ((contact.startsWith("57") && contact.length >= 12) || contact.startsWith("CO.")) {
       // Fallback (caso +573172822429): un +57 escribiendo SIN channelId puede
       // venir por la línea CHILENA — si respondemos por la línea CO, Meta
       // rechaza (sin sesión) y el cliente no recibe NADA. Detectamos su canal
@@ -1447,7 +1454,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // chileno: prompt CL, precios en UF/CLP y respuestas por la línea +56
     // (caso Mauricio/Dahi Cream). Se reenvía el body CRUDO al webhook CO
     // (conserva audio/imagen) y se devuelve su respuesta tal cual.
-    if (contact.startsWith("57") && contact.length >= 12) {
+    if ((contact.startsWith("57") && contact.length >= 12) || contact.startsWith("CO.")) {
       const origin = new URL(request.url).origin
       const r = await fetch(`${origin}/api/vic-botmaker-co`, {
         method: "POST",
@@ -1469,7 +1476,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // MÉXICO (21-jul): números +52 (WhatsApp usa 521 + 10 dígitos, a veces 52
     // pelado). Mismo patrón de reenvío que Colombia. Sin fallback al flujo CL:
     // precios en UF a un mexicano es peor que un reintento.
-    if ((contact.startsWith("521") && contact.length >= 13) || (contact.startsWith("52") && !contact.startsWith("521") && contact.length === 12)) {
+    if ((contact.startsWith("521") && contact.length >= 13) || (contact.startsWith("52") && !contact.startsWith("521") && contact.length === 12) || contact.startsWith("MX.")) {
       const origin = new URL(request.url).origin
       const r = await fetch(`${origin}/api/vic-botmaker-mx`, {
         method: "POST",
