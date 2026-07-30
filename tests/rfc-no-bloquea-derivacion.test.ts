@@ -18,8 +18,9 @@ const RAIZ = new URL("..", import.meta.url).pathname
 const PROMPT_MX = readFileSync(join(RAIZ, "lib/paises/mx/prompt.ts"), "utf8")
 
 describe("el RFC no bloquea la derivación (prompt MX)", () => {
-  test("la regla existe y nombra la única función real del RFC", () => {
-    assert.match(PROMPT_MX, /EL RFC NUNCA ES REQUISITO PARA DERIVAR/)
+  test("la regla existe, cubre derivación Y reunión, y nombra la única función real del RFC", () => {
+    assert.match(PROMPT_MX, /EL RFC NUNCA ES REQUISITO PARA DERIVAR NI PARA AGENDAR REUNIÓN/)
+    assert.match(PROMPT_MX, /agendar_reunion no lleva RFC/)
     assert.match(PROMPT_MX, /generar la cotización formal en PDF/)
   })
 
