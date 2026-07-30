@@ -22,7 +22,7 @@
 
 ## Reglas de negocio CRM (29-jul-2026, petición de marketing vía Lalo)
 - **NUNCA crear Deals directamente en Zoho**: todo deal nace de un LEAD CONVERTIDO (puede ser instantáneo — crear lead y convertir en el mismo acto), con el lead asociado al deal. Sin esa cadena, la tasa de conversión Lead→Deal queda incalculable. Aplica a create-from-vicky (CL/CO/MX), al preform/Borrador y a cualquier flujo nuevo.
-- Un deal demuestra intención comercial del usuario; etapas: intención→"1. Trato Creado", discovery/preform→"3. En Levantamiento", reunión realizada→"2. Primera Reunion Realizada" (sin tilde), formal→"4. Propuesta Enviada / En Negociación", aceptada→"6. Listo para Cierre", onboarding listo→"7. Implementando"; a Facturando lo mueve el ejecutivo. Stage está bajo Blueprint: los deals NACEN en su etapa; updates de stage solo vía transiciones.
+- Un deal demuestra intención comercial del usuario; etapas: intención→"1. Trato Creado", discovery SIN llegar al preform→"3. En Levantamiento", reunión realizada→"2. Primera Reunion Realizada" (sin tilde), **preform visto EN ADELANTE (incluida la formal)**→"4. Propuesta Enviada / En Negociación" (confirmado por Lalo 30-jul), aceptada→"6. Listo para Cierre", onboarding listo→"7. Implementando"; a Facturando lo mueve el ejecutivo. Stage está bajo Blueprint: los deals NACEN en su etapa; updates de stage solo vía transiciones (los campos mandatorios de la transición van DENTRO del `data` del PUT, y cada deal tiene SU blueprint — GET sus transitions primero).
 - Dedup antes de crear leads (teléfono y email); leads existentes se enriquecen solo en campos VACÍOS y su status solo sube (nunca pisar gestión de SDR).
 
 ## Convenciones operativas
