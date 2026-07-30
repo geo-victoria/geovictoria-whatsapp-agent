@@ -46,6 +46,10 @@
     {
       "path": "/api/vic-crm-hitos-cron",
       "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/vic-ptv-cron",
+      "schedule": "*/10 * * * *"
     }
   ],
   "functions": {
