@@ -676,9 +676,18 @@ export async function sincronizarHitoCrm(
         console.log(`[crm-hitos] ${clean}: la tool crea su propio lead — no se duplica (se reconcilia en el próximo barrido)`)
         return
       }
-      // ENTRANTE puro: el dato nace en la conversación → lead nuevo por el
-      // camino existente (tómbola u owner según el flujo que ya rige) y
-      // conversión inmediata con deal en el piso del hito.
+      // ENTRANTE puro (hito sin tool de derivación): lead nuevo con DUEÑO
+      // INTERINO POR PAÍS (Lalo 30-jul) — la tómbola de Zoho no corre en
+      // creaciones por API y la tómbola definitiva de Victoria aún no existe;
+      // sin esto quedaban a nombre del usuario Vicky, en la bandeja de nadie.
+      // Los callbacks y reuniones NO pasan por acá: el callback entra a la
+      // tómbola de Zoho y la reunión hereda el owner que define Cal.com.
+      const territorio = territorioDeContacto(clean)
+      const OWNER_INTERINO: Record<string, string> = {
+        Chile: "3525045000000211283", // Eddyluz Mujica
+        Colombia: "3525045000203758005", // Alejandro Gordillo
+        "México": "3525045000308323003", // Yahel Segura
+      }
       const { createZohoLead } = await import("./zoho-leads")
       const creado = await createZohoLead({
         contactoWA: clean,
@@ -687,6 +696,7 @@ export async function sincronizarHitoCrm(
         empresa: datos.empresa,
         email: datos.email,
         trabajadores: datos.empleados,
+        ownerId: territorio ? OWNER_INTERINO[territorio] : undefined,
       })
       if (!creado.success) {
         console.warn(`[crm-hitos] ${clean}: no se pudo crear lead (${creado.error})`)
