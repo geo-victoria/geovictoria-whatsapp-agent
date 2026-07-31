@@ -3,8 +3,13 @@
  *
  * 1. TOQUE DE LAS 2 HORAS: tras enviar un preform o cotización, si el cliente
  *    lleva 2 horas inactivo, el toque 1 del loop deja de ser un nudge
- *    genérico y PRESENTA a la ejecutiva del país con correo y WhatsApp.
+ *    genérico y PRESENTA a un ejecutivo con correo y WhatsApp. Desde el
+ *    31-jul (tómbola de deals) en CL se presenta al DUEÑO REAL del
+ *    deal/cotización si existe; el directorio fijo queda como fallback.
  *    CL: Eddyluz Mujica · CO: Alejandro Gordillo · MX: Yahel Segura.
+ *    Y si el contacto ya fue traspasado a un vendedor (vic_ptv activo), el
+ *    loop NO presenta a nadie: se cierra con motivo ptv_traspasado (caso
+ *    Alan/vaitiare 31-jul: Ana Paula a las 11:21, Eddyluz a las 18:00).
  *
  * 2. CONFIRMACIÓN DE REUNIÓN CON NOMBRE Y WHATSAPP: la reunión de Rodrigo
  *    (prueba interna, 27-jul) se confirmó "con asepulveda" — el prefijo del
@@ -43,9 +48,30 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
   })
 
   test("y su texto ES la presentación, no el nudge genérico", () => {
-    assert.match(LOOP, /\? textoPresentacion\(paisKey\)\s*\n\s*: TEXTOS\[stage\]\[paisKey\]/)
+    assert.match(LOOP, /\? textoPresentacion\(paisKey, duenoReal\)\s*\n\s*: TEXTOS\[stage\]\[paisKey\]/)
     assert.match(LOOP, /Te presento a \$\{e\.nombre\}, quien te ayudará con el resto del proceso/)
     assert.match(LOOP, /Tu cotización sigue vigente/)
+  })
+
+  test("en CL presenta al DUEÑO REAL del deal/cotización; el símil fijo es fallback", () => {
+    // Caso Alan/vaitiare (31-jul): PTV presentó a Ana Paula a las 11:21 y el
+    // loop presentó a Eddyluz (fija) a las 18:00 — dos nombres al mismo
+    // prospecto. El toque ahora resuelve el dueño vigente antes de hablar.
+    assert.match(LOOP, /duenoDealVigente\(r\.contact\)/)
+    assert.match(LOOP, /duenoCotizacionVigente\(r\.contact\)/)
+    assert.match(LOOP, /esPresentacion && paisKey === "cl"/)
+    assert.match(LOOP, /duenoReal\?\.nombre && duenoReal\?\.email/)
+    // Sin teléfono conocido, la línea de WhatsApp se omite — jamás el de otro.
+    assert.match(LOOP, /e\.whatsapp \? `📱 WhatsApp: \$\{e\.whatsapp\}\\n` : ""/)
+  })
+
+  test("contacto con PTV activo: el loop se cierra sin presentar a nadie", () => {
+    // El cron del PTV cierra el loop al traspasar, pero los traspasos que no
+    // pasan por él (presentacion_manual) dejaban la fila viva. El loop ahora
+    // chequea vic_ptv activo por sí mismo, ANTES de cualquier toque.
+    assert.match(LOOP, /vic_ptv\?estado=eq\.activo&select=contact/)
+    assert.match(LOOP, /ptvActivos\.has\(r\.contact\)/)
+    assert.match(LOOP, /motivo_cierre: "ptv_traspasado"/)
   })
 
   test("sin_precio no cambia: el nudge de siempre a la hora de siempre", () => {
@@ -55,7 +81,7 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
   })
 
   test("los tres prompts declaran la excepción para que el modelo no la contradiga", () => {
-    assert.match(leer("app/api/vic-sales-agent-v3/prompt.ts"), /el sistema presenta automáticamente a Eddyluz Mujica/)
+    assert.match(leer("app/api/vic-sales-agent-v3/prompt.ts"), /el sistema presenta automáticamente al ejecutivo a cargo del registro/)
     assert.match(leer("lib/paises/co/prompt.ts"), /el sistema presenta automáticamente a \$\{PERFIL_CO\.equipo\.ejecutivo\.nombre\}/)
     assert.match(leer("lib/paises/mx/prompt.ts"), /la presentación automática de \$\{PERFIL_MX\.equipo\.ejecutivo\.nombre\}/)
   })

@@ -42,6 +42,7 @@ import {
 } from "@/lib/loop-v2"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { ptvHabilitado, debeTraspasar } from "@/lib/ptv"
+import { duenoDealVigente, duenoCotizacionVigente } from "@/lib/tools/agendar-reunion"
 import { llamadasDaptaHabilitadas } from "@/lib/dapta-voice"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
@@ -228,13 +229,47 @@ const EJECUTIVA_LOOP: Record<"cl" | "co" | "mx", { nombre: string; email: string
   co: { nombre: "Alejandro Gordillo", email: "agordillo@geovictoria.com", whatsapp: "+57 314 267 7765", trato: "él" },
   mx: { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", whatsapp: "+52 55 3763 6604", trato: "ella" },
 }
-function textoPresentacion(pais: "cl" | "co" | "mx"): string {
-  const e = EJECUTIVA_LOOP[pais]
+// Teléfonos de los vendedores de la tómbola (extensible sin deploy por env
+// VICKY_TELEFONOS_EJECUTIVOS="email:+56 9 ...,email:+56 9 ..."). Si no
+// conocemos el teléfono, la línea de WhatsApp se OMITE — jamás el de otro.
+const TEL_EJECUTIVO: Record<string, string> = {
+  "emujica@geovictoria.com": "+56 9 3932 1687",
+  "adiazg@geovictoria.com": "+56 9 3937 2058",
+  "tmartinezq@geovictoria.com": "+56 9 3452 9937",
+  "alopez@geovictoria.com": "+56 9 6647 4270",
+}
+function telefonoDeEjecutivo(email: string): string {
+  for (const par of (process.env.VICKY_TELEFONOS_EJECUTIVOS || "").split(",")) {
+    const idx = par.indexOf(":")
+    if (idx > 0 && par.slice(0, idx).trim().toLowerCase() === email.toLowerCase()) {
+      return par.slice(idx + 1).trim()
+    }
+  }
+  return TEL_EJECUTIVO[email.toLowerCase()] || ""
+}
+
+function textoPresentacion(
+  pais: "cl" | "co" | "mx",
+  duenoReal?: { nombre: string; email: string } | null,
+): string {
+  // El dueño REAL del deal/cotización (tómbola, 31-jul) manda sobre el símil
+  // fijo del país: presentar a Eddyluz cuando el registro es de Ana Paula le
+  // pone DOS nombres al mismo prospecto (caso Alan/vaitiare). El directorio
+  // fijo queda solo como fallback cuando aún no hay dueño humano.
+  const e =
+    duenoReal?.nombre && duenoReal?.email
+      ? {
+          nombre: duenoReal.nombre,
+          email: duenoReal.email,
+          whatsapp: telefonoDeEjecutivo(duenoReal.email),
+          trato: duenoReal.nombre.split(" ")[0],
+        }
+      : EJECUTIVA_LOOP[pais]
   return (
     `Te presento a ${e.nombre}, quien te ayudará con el resto del proceso 😊\n` +
     `✉️ ${e.email}\n` +
-    `📱 WhatsApp: ${e.whatsapp}\n\n` +
-    `Tu cotización sigue vigente — cualquier duda la resolvemos ${e.trato} o yo por aquí.`
+    (e.whatsapp ? `📱 WhatsApp: ${e.whatsapp}\n` : "") +
+    `\nTu cotización sigue vigente — cualquier duda la resolvemos ${e.trato} o yo por aquí.`
   )
 }
 
@@ -496,6 +531,17 @@ export async function GET(req: Request): Promise<Response> {
   // Señal de humano por Botmaker: UNA página del workspace para todo el batch.
   const conOperador = await contactosConOperador(new Set(rows.map((r) => r.contact)))
 
+  // Contactos con PTV ACTIVO (un vendedor ya está encima). El cron del PTV
+  // cierra el loop al traspasar, pero los traspasos que NO pasan por él (p.
+  // ej. los `presentacion_manual` del 31-jul) dejaban la fila viva y el toque
+  // de presentación salía con la ejecutiva FIJA del país: el prospecto
+  // recibía DOS nombres distintos (caso Alan/vaitiare: Ana Paula 11:21,
+  // Eddyluz 18:00). Con vendedor asignado, Vicky no manda toques.
+  const ptvRes = await supa(`vic_ptv?estado=eq.activo&select=contact&limit=1000`)
+  const ptvActivos = new Set<string>(
+    ((ptvRes.ok ? await ptvRes.json().catch(() => []) : []) as Array<{ contact: string }>).map((p) => p.contact),
+  )
+
   for (const r of rows) {
     procesados++
     const now = Date.now()
@@ -504,6 +550,16 @@ export async function GET(req: Request): Promise<Response> {
     const conv = convs.get(r.contact)
     let t0 = r.t0 || nowIso
     let touch = Math.min(Math.max(r.next_touch || 1, 1), 7)
+
+    // (a-0) Traspasado a vendedor: el loop muere con el mismo motivo que pone
+    // el cron del PTV. Va antes que todo — con un humano a cargo, ni
+    // compromisos ni toques: solo el chequeo de calidad de las 9 h (del PTV).
+    if (ptvActivos.has(r.contact)) {
+      await patchLoop(r.contact, { estado: "cerrado", motivo_cierre: "ptv_traspasado" })
+      cerrados++
+      detalle.push({ contact: r.contact, accion: "cerrado", motivo: "ptv_traspasado" })
+      continue
+    }
 
     // (a) Ventana de compromiso: el cliente acordó retomar en una fecha — se
     // respeta a rajatabla, ningún toque antes de esa fecha.
@@ -703,10 +759,17 @@ export async function GET(req: Request): Promise<Response> {
       // Toque 1 con precio = presentación de la ejecutiva (Rodrigo 27-jul).
       // Fuera de ventana cae a la plantilla del stage, como siempre — a las
       // 2h de una cotización la ventana está prácticamente siempre abierta.
-      const texto =
-        touch === 1 && (stage === "con_precio" || stage === "formal")
-          ? textoPresentacion(paisKey)
-          : TEXTOS[stage][paisKey]
+      // En CL se presenta al DUEÑO REAL del deal/cotización si existe
+      // (tómbola 31-jul); CO/MX conservan su símil fijo (reglas antiguas).
+      const esPresentacion = touch === 1 && (stage === "con_precio" || stage === "formal")
+      const duenoReal =
+        esPresentacion && paisKey === "cl"
+          ? (await duenoDealVigente(r.contact).catch(() => null)) ||
+            (await duenoCotizacionVigente(r.contact).catch(() => null))
+          : null
+      const texto = esPresentacion
+        ? textoPresentacion(paisKey, duenoReal)
+        : TEXTOS[stage][paisKey]
       if (ventanaAbierta) {
         const ok = await sendBotmakerMessage(r.contact, texto, canal).catch(() => false)
         if (ok) {
