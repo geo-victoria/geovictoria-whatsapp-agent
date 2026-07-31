@@ -177,6 +177,13 @@ describe("cableado del cron", () => {
     assert.match(CRON, /\^\(56\|57\|52\)/)
   })
 
+  test("deals CERRADOS no se reasignan; sin lead se crea uno a nombre del vendedor", () => {
+    // Aprendizaje 31-jul: el primer barrido reasignó Cierre Perdido ajenos.
+    assert.match(CRON, /Cierre Perdido\|8\\\. Facturando/)
+    assert.match(CRON, /no se reasigna/)
+    assert.match(CRON, /createZohoLead/)
+  })
+
   test("el deal traspasado pasa por la regla de tómbola de Zoho y se presenta al dueño real", () => {
     assert.match(CRON, /TOMBOLA_DEALS_RULE/)
     assert.match(CRON, /lar_id/)

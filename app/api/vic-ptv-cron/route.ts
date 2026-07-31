@@ -142,11 +142,47 @@ async function asignarEnZoho(
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const fono = contact.replace(/\D/g, "")
     const res = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
-    if (!res.ok || res.status === 204) return porDefecto
-    const lead = ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null }> }).data?.[0]
-    if (!lead?.id) return porDefecto
+    const lead = res.ok && res.status !== 204
+      ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null }> }).data?.[0]
+      : undefined
+    if (!lead?.id) {
+      // Sin lead en Zoho no hay registro que asignar: se CREA (regla 1 del
+      // Proceso de Gestión de Leads: primer contacto → lead automático) ya a
+      // nombre del vendedor del traspaso. createZohoLead trae candado y
+      // dedup por búsqueda — jamás duplica. Hallazgo de la auditoría 31-jul:
+      // 12 de los 36 traspasos del primer día no tenían lead y la asignación
+      // quedaba solo en vic_ptv.
+      const { createZohoLead } = await import("@/lib/zoho-leads")
+      const paisNombre = pais === "co" ? "Colombia" : pais === "mx" ? "México" : "Chile"
+      const creado = await createZohoLead({
+        nombre: "Prospecto WhatsApp",
+        empresa: `Por identificar (WhatsApp +${fono})`,
+        telefono: fono,
+        contactoWA: fono,
+        pais: paisNombre,
+        necesidad: "Traspaso PTV: conversación activa con Vicky sin registro previo en el CRM — lead creado al asignar vendedor.",
+        ownerEmail: interno.email,
+        ownerId: interno.zohoId,
+      }).catch(() => null)
+      if (!creado || !creado.success) {
+        console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
+      }
+      return porDefecto
+    }
     if (lead.Converted_Deal?.id) {
       const dealId = lead.Converted_Deal.id
+      // Deal CERRADO = OTRA negociación (Lalo 31-jul): no se toca — el primer
+      // barrido le quitó a Grey Meléndez un Cierre Perdido de 2023 y pisó
+      // otro de Admin. La dedup/asignación es de procesos ABIERTOS; el
+      // registro nuevo de esta conversación lo abre crm-hitos (reglas 4 y 6).
+      const gStage = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage`, { headers: H, cache: "no-store" })
+      const stage = gStage.ok
+        ? String(((await gStage.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }).data?.[0]?.Stage || "")
+        : ""
+      if (/Cierre Perdido|8\. Facturando/.test(stage)) {
+        console.warn(`[ptv] ${fono}: su deal ${dealId} está cerrado (${stage}) — no se reasigna; vendedor solo en vic_ptv`)
+        return porDefecto
+      }
       const regla = TOMBOLA_DEALS_RULE[pais] || ""
       if (regla) {
         const put = await fetch(`${api}/crm/v3/Deals`, {
