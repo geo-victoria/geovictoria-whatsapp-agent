@@ -171,4 +171,12 @@ describe("cableado del cron", () => {
     assert.match(CRON, /referenciaRelojAt: ultimoCliente/)
     assert.match(CRON, /if \(!c\.last_user_at\) continue/)
   })
+
+  test("el deal traspasado pasa por la regla de tómbola de Zoho y se presenta al dueño real", () => {
+    assert.match(CRON, /TOMBOLA_DEALS_RULE/)
+    assert.match(CRON, /lar_id/)
+    // La asignación resuelve el vendedor ANTES de la presentación: al
+    // prospecto jamás se le nombra a alguien distinto del dueño en Zoho.
+    assert.match(CRON, /mensajePresentacion\(pais, vendedor\.nombre\)/)
+  })
 })

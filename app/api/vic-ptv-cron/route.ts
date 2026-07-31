@@ -96,9 +96,44 @@ async function siguienteVendedor(pais: "cl" | "co" | "mx") {
   return lista[idx]
 }
 
-/** Asigna en Zoho el lead (o su deal si ya convirtió) al vendedor. Best-effort. */
-async function asignarEnZoho(contact: string, zohoId: string): Promise<void> {
-  if (!zohoId) return
+/** Regla de tómbola de Deals en ZOHO por país (Lalo, 31-jul): cuando el PTV
+ * entrega un DEAL, el dueño lo decide la regla de asignación de Zoho — la
+ * misma tómbola que usa el equipo ("Tómbola Deals 2026 Chile") — y no la
+ * rotación interna. La rotación interna queda para leads sin deal, para
+ * países sin regla configurada y como fallback si la regla falla. */
+const TOMBOLA_DEALS_RULE: Record<string, string> = {
+  cl: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
+  co: (process.env.VICKY_PTV_TOMBOLA_DEALS_CO || "").trim(),
+  mx: (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
+}
+
+/** Nombre real para la presentación al prospecto (la tómbola interna solo
+ * conoce el email; a un cliente jamás se le dice "emujica"). */
+const NOMBRE_VENDEDOR: Record<string, string> = {
+  "emujica@geovictoria.com": "Eddyluz Mujica",
+  "agordillo@geovictoria.com": "Alejandro Gordillo",
+  "ysegura@geovictoria.com": "Yahel Segura",
+}
+
+type VendedorFinal = { email: string; zohoId: string; nombre: string; via: "tombola_zoho" | "tombola_interna" }
+
+/**
+ * Asigna en Zoho el lead (o su deal si ya convirtió) y devuelve el vendedor
+ * FINAL — que puede diferir de la tómbola interna: si hay deal y el país
+ * tiene regla de tómbola en Zoho, el PUT dispara la regla (lar_id) y el
+ * dueño que Zoho sortee es quien se presenta al prospecto y recibe la
+ * alerta. Best-effort: ante cualquier falla se cae al vendedor interno.
+ */
+async function asignarEnZoho(
+  contact: string,
+  pais: string,
+  interno: { email: string; zohoId: string },
+): Promise<VendedorFinal> {
+  const porDefecto: VendedorFinal = {
+    ...interno,
+    nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+    via: "tombola_interna",
+  }
   try {
     const { getZohoAccessToken } = await import("@/lib/zoho-token")
     const token = await getZohoAccessToken()
@@ -106,16 +141,35 @@ async function asignarEnZoho(contact: string, zohoId: string): Promise<void> {
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const fono = contact.replace(/\D/g, "")
     const res = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
-    if (!res.ok || res.status === 204) return
+    if (!res.ok || res.status === 204) return porDefecto
     const lead = ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null }> }).data?.[0]
-    if (!lead?.id) return
+    if (!lead?.id) return porDefecto
     if (lead.Converted_Deal?.id) {
-      await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.Converted_Deal.id, Owner: { id: zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
+      const dealId = lead.Converted_Deal.id
+      const regla = TOMBOLA_DEALS_RULE[pais] || ""
+      if (regla) {
+        const put = await fetch(`${api}/crm/v3/Deals`, {
+          method: "PUT", headers: H, cache: "no-store",
+          body: JSON.stringify({ data: [{ id: dealId }], lar_id: regla }),
+        })
+        if (put.ok) {
+          const get = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: H, cache: "no-store" })
+          const owner = ((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner
+          if (owner?.id && owner?.email) {
+            return { email: owner.email, zohoId: owner.id, nombre: owner.name || owner.email.split("@")[0], via: "tombola_zoho" }
+          }
+        } else {
+          console.warn(`[ptv] regla de tómbola Zoho falló (${put.status}) para deal ${dealId} — fallback a tómbola interna`)
+        }
+      }
+      await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: dealId, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
     } else {
-      await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
+      await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
     }
+    return porDefecto
   } catch (e) {
     console.warn("[ptv] asignarEnZoho falló:", e instanceof Error ? e.message : e)
+    return porDefecto
   }
 }
 
@@ -177,9 +231,8 @@ export async function GET(req: Request) {
     })
     if (!decision.traspasar) continue
 
-    const vendedor = await siguienteVendedor(pais)
-    if (!vendedor) continue
-    const nombre = vendedor.email.split("@")[0]
+    const interno = await siguienteVendedor(pais)
+    if (!interno) continue
     // Registro PRIMERO (candado UNIQUE evita carrera de doble traspaso).
     const fila = await supa<{ id: string }>(`vic_ptv`, {
       method: "POST",
@@ -188,16 +241,27 @@ export async function GET(req: Request) {
         motivo: decision.motivo,
         ttv_minutos: decision.ttv,
         precio_mostrado: Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
-        vendedor_email: vendedor.email,
-        vendedor_zoho_id: vendedor.zohoId,
+        vendedor_email: interno.email,
+        vendedor_zoho_id: interno.zohoId,
+        vendedor_nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
         chequeo_at: sumarHorasHabiles(ahora, 9, pais, feriados).toISOString(),
       }),
     })
     if (!fila.length) continue // candado: ya había traspaso activo
+    // Asignación en Zoho ANTES de presentar: si el deal pasa por la regla de
+    // tómbola de Zoho, el dueño que Zoho sorteó es quien se presenta al
+    // prospecto y quien recibe la alerta — nunca un nombre distinto al dueño.
+    const vendedor = await asignarEnZoho(c.contact, pais, interno)
+    if (vendedor.email !== interno.email) {
+      await supa(`vic_ptv?id=eq.${fila[0].id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ vendedor_email: vendedor.email, vendedor_zoho_id: vendedor.zohoId, vendedor_nombre: vendedor.nombre }),
+      })
+    }
     // Presentación al prospecto (solo con ventana Meta abierta).
     const ventanaAbierta = Boolean(c.last_user_at && ahora.getTime() - new Date(c.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
-      const texto = mensajePresentacion(pais, nombre)
+      const texto = mensajePresentacion(pais, vendedor.nombre)
       const enviado = await sendBotmakerMessage(c.contact, texto).catch(() => false)
       if (enviado) {
         await appendAssistantV3(c.contact, texto).catch(() => {})
@@ -212,7 +276,6 @@ export async function GET(req: Request) {
       method: "PATCH",
       body: JSON.stringify({ estado: "cerrado", motivo_cierre: "ptv_traspasado" }),
     })
-    await asignarEnZoho(c.contact, vendedor.zohoId)
     await avisarEquipoInterno(
       `📞 PTV: traspaso a ${vendedor.email} — contacto +${c.contact} (TTV ${decision.ttv} min vencido, ${decision.motivo}). LLAMAR EN MENOS DE 5 MINUTOS. La conversación completa está en las notas del registro en Zoho; si hay link de pago vigente, empujar el mismo link.`,
     ).catch(() => {})
@@ -220,8 +283,8 @@ export async function GET(req: Request) {
   }
 
   // 3. Chequeos de calidad vencidos.
-  const chequeos = await supa<{ id: string; contact: string; vendedor_email: string }>(
-    `vic_ptv?estado=eq.activo&chequeo_hecho_at=is.null&chequeo_at=lte.${encodeURIComponent(ahora.toISOString())}&select=id,contact,vendedor_email&limit=20`,
+  const chequeos = await supa<{ id: string; contact: string; vendedor_email: string; vendedor_nombre: string | null }>(
+    `vic_ptv?estado=eq.activo&chequeo_hecho_at=is.null&chequeo_at=lte.${encodeURIComponent(ahora.toISOString())}&select=id,contact,vendedor_email,vendedor_nombre&limit=20`,
   )
   let chequeosEnviados = 0
   for (const ch of chequeos) {
@@ -229,7 +292,7 @@ export async function GET(req: Request) {
     const pais = (paisDeContacto(ch.contact) || "cl") as "cl" | "co" | "mx"
     const ventanaAbierta = Boolean(conv?.last_user_at && ahora.getTime() - new Date(conv.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
-      const texto = mensajeChequeo(pais, ch.vendedor_email.split("@")[0])
+      const texto = mensajeChequeo(pais, ch.vendedor_nombre || NOMBRE_VENDEDOR[ch.vendedor_email] || ch.vendedor_email.split("@")[0])
       const enviado = await sendBotmakerMessage(ch.contact, texto).catch(() => false)
       if (enviado) {
         await appendAssistantV3(ch.contact, texto).catch(() => {})
