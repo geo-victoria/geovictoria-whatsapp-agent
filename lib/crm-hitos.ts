@@ -671,7 +671,7 @@ const TITULO_NOTA_TRANSCRIPCION = "Transcripción WhatsApp Vicky"
  * se acumulan copias. (El PDF adjunto queda para el barrido batch: en
  * serverless no hay renderer.) Best-effort.
  */
-async function actualizarNotaTranscripcion(dealId: string, contact: string): Promise<void> {
+export async function actualizarNotaTranscripcion(dealId: string, contact: string): Promise<void> {
   try {
     const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
     const historia = await fetchHistoryV3(contact, 200)

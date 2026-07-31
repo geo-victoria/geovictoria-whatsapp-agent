@@ -38,7 +38,7 @@ import { getTimezone, computeMeetingReminderAt } from "./calendar"
 import { duenoCotizacionVigente, type DuenoReunion } from "./tools/agendar-reunion"
 import { eventoSeguimientoDe } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
-import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD } from "./crm-hitos"
+import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD, actualizarNotaTranscripcion } from "./crm-hitos"
 import { mas50CierraLoop } from "./loop-v2"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
@@ -538,6 +538,21 @@ export async function runAgentLoop(params: {
             datosDeToolInput(toolName, toolInput),
             { noCrear: TOOLS_QUE_CREAN_SU_LEAD.has(toolName) },
           ).catch(() => undefined)
+        }
+
+        // Transcripción INMEDIATA al deal de la cotización formal (Lalo,
+        // 31-jul): el cotizador devuelve el dealId del deal que creó/reusó —
+        // pegarla directo evita el lag del buscador de Zoho, que hoy dejó
+        // tres deals sin historial y a los vendedores sorteados reclamando a
+        // ciegas (Tamara, Grey, Paola). Best-effort, jamás bloquea el turno.
+        if (contact && toolName === "generar_link_cotizadora") {
+          const dealDeCotizacion =
+            "dealId" in result && typeof (result as { dealId?: unknown }).dealId === "string"
+              ? (result as { dealId: string }).dealId
+              : ""
+          if (dealDeCotizacion) {
+            void actualizarNotaTranscripcion(dealDeCotizacion, contact).catch(() => undefined)
+          }
         }
 
         // Marca SOPORTE determinística (Lalo 20-jul): si la conversación se
