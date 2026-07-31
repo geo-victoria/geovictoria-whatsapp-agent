@@ -118,14 +118,35 @@ export async function cerrarYTraspasarPostPago(
   const EJECUTIVOS_CL: Record<string, { nombre: string; email: string; telefono: string }> = {
     "emujica@geovictoria.com": { nombre: "Eddyluz Mujica", email: "emujica@geovictoria.com", telefono: "+56 9 3932 1687" },
     "adiazg@geovictoria.com": { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" },
+    // Vendedores de la tómbola de deals (31-jul). Extensible sin deploy por
+    // env VICKY_TELEFONOS_EJECUTIVOS="email:+56 9 ...,email:+56 9 ...".
+    "tmartinezq@geovictoria.com": { nombre: "Tamara Martínez", email: "tmartinezq@geovictoria.com", telefono: "+56 9 3452 9937" },
+    "alopez@geovictoria.com": { nombre: "Ana Paula López", email: "alopez@geovictoria.com", telefono: "+56 9 6647 4270" },
+  }
+  for (const par of (process.env.VICKY_TELEFONOS_EJECUTIVOS || "").split(",")) {
+    const idx = par.indexOf(":")
+    if (idx > 0) {
+      const email = par.slice(0, idx).trim().toLowerCase()
+      const telefono = par.slice(idx + 1).trim()
+      if (email && telefono) {
+        EJECUTIVOS_CL[email] = { nombre: EJECUTIVOS_CL[email]?.nombre || email.split("@")[0], email, telefono }
+      }
+    }
   }
   const duenoCL = !esMX && !esCO ? await ownerDeCotizacion(quoteId).catch(() => null) : null
   const ejecutivo = esMX
     ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "+52 55 3763 6604" }
     : esCO
       ? PERFIL_CO.equipo.ejecutivo
-      : (duenoCL && EJECUTIVOS_CL[duenoCL.email]) ||
-        (duenoCL ? { nombre: duenoCL.nombre, email: duenoCL.email, telefono: "" } : EJECUTIVOS_CL["emujica@geovictoria.com"])
+      : duenoCL
+        ? {
+            // Nombre real desde Zoho (jamás un prefijo de correo); el teléfono
+            // sale del directorio si lo conocemos.
+            nombre: duenoCL.nombre || EJECUTIVOS_CL[duenoCL.email]?.nombre || "",
+            email: duenoCL.email,
+            telefono: EJECUTIVOS_CL[duenoCL.email.toLowerCase()]?.telefono || "",
+          }
+        : EJECUTIVOS_CL["emujica@geovictoria.com"]
   // Caso Jessica/JEANSCO (24-jul): el mensaje de bienvenida DEBE traer el link
   // del auto-onboarding — antes solo presentaba al ejecutivo y el cliente
   // tenía que encontrar el wizard por su cuenta. El endpoint es idempotente.
