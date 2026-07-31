@@ -138,12 +138,23 @@ export function debeTraspasar(params: {
   return { traspasar: true, motivo: "ttv_sin_respuesta", ttv }
 }
 
-/** Presentación del vendedor al prospecto, por país (reglas de estilo de Vicky). */
-export function mensajePresentacion(pais: "cl" | "co" | "mx", nombreVendedor: string): string {
+/** Presentación del vendedor al prospecto, por país (reglas de estilo de
+ * Vicky). SIEMPRE con los datos de contacto del vendedor cuando se conocen
+ * (Lalo 31-jul): el cliente debe poder escribirle o llamarlo directo. */
+export function mensajePresentacion(
+  pais: "cl" | "co" | "mx",
+  nombreVendedor: string,
+  contacto?: { email?: string; whatsapp?: string },
+): string {
   const base = `Te cuento: para acompañarte mejor con tu cotización, desde ahora te atiende ${nombreVendedor} de nuestro equipo comercial — te va a llamar muy pronto para resolverlo todo de una. Ya tiene el detalle completo de nuestra conversación, así que no tendrás que repetir nada`
-  if (pais === "co") return `¡Hola! ${base}. Cualquier cosa igual me puedes escribir por aquí 🙌`
-  if (pais === "mx") return `¡Hola! ${base}. Por aquí sigo atenta a lo que necesites 🙌`
-  return `¡Hola! ${base}. Cualquier cosa me escribes por aquí 🙌`
+  const lineas = [
+    contacto?.email ? `✉️ ${contacto.email}` : "",
+    contacto?.whatsapp ? `📱 WhatsApp: ${contacto.whatsapp}` : "",
+  ].filter(Boolean)
+  const datos = lineas.length ? `.\n\n${lineas.join("\n")}\n\n` : ". "
+  if (pais === "co") return `¡Hola! ${base}${datos}Cualquier cosa igual me puedes escribir por aquí 🙌`
+  if (pais === "mx") return `¡Hola! ${base}${datos}Por aquí sigo atenta a lo que necesites 🙌`
+  return `¡Hola! ${base}${datos}Cualquier cosa me escribes por aquí 🙌`
 }
 
 /** Pregunta del chequeo de calidad (9 h hábiles post-traspaso). */

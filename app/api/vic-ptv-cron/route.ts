@@ -116,7 +116,33 @@ const NOMBRE_VENDEDOR: Record<string, string> = {
   "ysegura@geovictoria.com": "Yahel Segura",
 }
 
-type VendedorFinal = { email: string; zohoId: string; nombre: string; via: "tombola_zoho" | "tombola_interna" }
+/** WhatsApp de los interinos (directorio verificado 27-jul). Los vendedores
+ * sorteados por Zoho traen su teléfono desde su ficha de usuario. */
+const WHATSAPP_VENDEDOR: Record<string, string> = {
+  "emujica@geovictoria.com": "+56 9 3932 1687",
+  "agordillo@geovictoria.com": "+57 314 267 7765",
+  "ysegura@geovictoria.com": "+52 55 3763 6604",
+}
+
+type VendedorFinal = {
+  email: string
+  zohoId: string
+  nombre: string
+  telefono?: string
+  via: "tombola_zoho" | "tombola_interna" | "dueno_deal"
+}
+
+/** Teléfono del vendedor desde su ficha de usuario en Zoho (best-effort). */
+async function telefonoDeUsuario(userId: string, H: Record<string, string>, api: string): Promise<string> {
+  try {
+    const r = await fetch(`${api}/crm/v3/users/${userId}`, { headers: H, cache: "no-store" })
+    if (!r.ok) return ""
+    const u = ((await r.json().catch(() => ({}))) as { users?: Array<{ phone?: string; mobile?: string }> }).users?.[0]
+    return (u?.phone || u?.mobile || "").trim()
+  } catch {
+    return ""
+  }
+}
 
 /**
  * Asigna en Zoho el lead (o su deal si ya convirtió) y devuelve el vendedor
@@ -133,6 +159,7 @@ async function asignarEnZoho(
   const porDefecto: VendedorFinal = {
     ...interno,
     nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+    telefono: WHATSAPP_VENDEDOR[interno.email] || "",
     via: "tombola_interna",
   }
   try {
@@ -175,13 +202,29 @@ async function asignarEnZoho(
       // barrido le quitó a Grey Meléndez un Cierre Perdido de 2023 y pisó
       // otro de Admin. La dedup/asignación es de procesos ABIERTOS; el
       // registro nuevo de esta conversación lo abre crm-hitos (reglas 4 y 6).
-      const gStage = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage`, { headers: H, cache: "no-store" })
-      const stage = gStage.ok
-        ? String(((await gStage.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }).data?.[0]?.Stage || "")
-        : ""
+      const gDeal = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage,Owner`, { headers: H, cache: "no-store" })
+      const filaDeal = gDeal.ok
+        ? ((await gDeal.json().catch(() => ({}))) as { data?: Array<{ Stage?: string; Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]
+        : undefined
+      const stage = String(filaDeal?.Stage || "")
       if (/Cierre Perdido|8\. Facturando/.test(stage)) {
         console.warn(`[ptv] ${fono}: su deal ${dealId} está cerrado (${stage}) — no se reasigna; vendedor solo en vic_ptv`)
         return porDefecto
+      }
+      // Deal con dueño HUMANO vigente (la tómbola ya corrió al crearlo, o lo
+      // gestiona un ejecutivo): NO se re-sortea — se presenta a ESE dueño.
+      // Re-sortear acá cambiaría el dueño después de que el cliente pudo
+      // haber escuchado otro nombre (caso Tosun/vaitiare/Sasval, 31-jul).
+      const ownerActual = filaDeal?.Owner
+      if (ownerActual?.id && ownerActual?.email && ownerActual.email.toLowerCase() !== "vicky@geovictoria.com") {
+        const tel = await telefonoDeUsuario(ownerActual.id, H, api)
+        return {
+          email: ownerActual.email,
+          zohoId: ownerActual.id,
+          nombre: ownerActual.name || ownerActual.email.split("@")[0],
+          telefono: tel || WHATSAPP_VENDEDOR[ownerActual.email.toLowerCase()] || "",
+          via: "dueno_deal",
+        }
       }
       const regla = TOMBOLA_DEALS_RULE[pais] || ""
       if (regla) {
@@ -193,7 +236,8 @@ async function asignarEnZoho(
           const get = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: H, cache: "no-store" })
           const owner = ((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner
           if (owner?.id && owner?.email) {
-            return { email: owner.email, zohoId: owner.id, nombre: owner.name || owner.email.split("@")[0], via: "tombola_zoho" }
+            const tel = await telefonoDeUsuario(owner.id, H, api)
+            return { email: owner.email, zohoId: owner.id, nombre: owner.name || owner.email.split("@")[0], telefono: tel, via: "tombola_zoho" }
           }
         } else {
           console.warn(`[ptv] regla de tómbola Zoho falló (${put.status}) para deal ${dealId} — fallback a tómbola interna`)
@@ -307,7 +351,7 @@ export async function GET(req: Request) {
     // Presentación al prospecto (solo con ventana Meta abierta).
     const ventanaAbierta = Boolean(c.last_user_at && ahora.getTime() - new Date(c.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
-      const texto = mensajePresentacion(pais, vendedor.nombre)
+      const texto = mensajePresentacion(pais, vendedor.nombre, { email: vendedor.email, whatsapp: vendedor.telefono })
       const enviado = await sendBotmakerMessage(c.contact, texto).catch(() => false)
       if (enviado) {
         await appendAssistantV3(c.contact, texto).catch(() => {})

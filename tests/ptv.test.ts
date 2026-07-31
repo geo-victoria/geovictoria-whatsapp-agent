@@ -146,6 +146,15 @@ describe("chequeo de calidad y presentación", () => {
       assert.match(m, /no tendrás que repetir nada/)
     }
   })
+
+  test("la presentación incluye los datos de contacto del vendedor (Lalo 31-jul)", () => {
+    const m = mensajePresentacion("cl", "Tamara Martínez", {
+      email: "tmartinezq@geovictoria.com",
+      whatsapp: "+56 9 3452 9937",
+    })
+    assert.match(m, /✉️ tmartinezq@geovictoria\.com/)
+    assert.match(m, /📱 WhatsApp: \+56 9 3452 9937/)
+  })
 })
 
 describe("cableado del cron", () => {
@@ -188,7 +197,10 @@ describe("cableado del cron", () => {
     assert.match(CRON, /TOMBOLA_DEALS_RULE/)
     assert.match(CRON, /lar_id/)
     // La asignación resuelve el vendedor ANTES de la presentación: al
-    // prospecto jamás se le nombra a alguien distinto del dueño en Zoho.
-    assert.match(CRON, /mensajePresentacion\(pais, vendedor\.nombre\)/)
+    // prospecto jamás se le nombra a alguien distinto del dueño en Zoho, y
+    // la presentación lleva sus datos de contacto.
+    assert.match(CRON, /mensajePresentacion\(pais, vendedor\.nombre, \{ email: vendedor\.email, whatsapp: vendedor\.telefono \}\)/)
+    // Deal con dueño humano vigente → se presenta a ESE dueño, sin re-sorteo.
+    assert.match(CRON, /via: "dueno_deal"/)
   })
 })
