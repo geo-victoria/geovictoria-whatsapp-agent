@@ -36,6 +36,64 @@ export type ResultadoTraspaso = {
 }
 
 /**
+ * VENTA 100% VICKY (Lalo, 31-jul, caso D'amore): si el cliente PAGÓ sin que
+ * ningún humano interviniera en la venta (sin traspaso PTV activo), el deal
+ * y la cotización se asignan a VICTORIA LUNA — no a la tómbola: el mérito es
+ * del canal autónomo y Victoria decide la bajada a su equipo. Devuelve true
+ * si la venta fue autónoma (el mensaje post-pago entonces NO presenta a
+ * ningún ejecutivo). Best-effort: cualquier falla deja todo como estaba.
+ */
+const OWNER_VENTA_AUTONOMA = (process.env.VICKY_OWNER_VENTA_AUTONOMA || "3525045000640682899").trim()
+
+async function asignarVentaAutonoma(contact: string, quoteId: string): Promise<boolean> {
+  try {
+    if (!OWNER_VENTA_AUTONOMA) return false
+    // ¿Intervino un humano? Un traspaso PTV activo significa que un vendedor
+    // fue presentado y estaba encima de la venta → esa venta es suya, no
+    // autónoma, y su asignación no se toca.
+    const url = (process.env.SUPABASE_URL || "").trim()
+    const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    if (url && key) {
+      const r = await fetch(
+        `${url}/rest/v1/vic_ptv?contact=eq.${encodeURIComponent(contact)}&estado=eq.activo&select=id&limit=1`,
+        { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
+      )
+      const filas = r.ok ? ((await r.json().catch(() => [])) as unknown[]) : []
+      if (Array.isArray(filas) && filas.length > 0) return false
+    }
+    const { getZohoAccessToken } = await import("./zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    await fetch(`${api}/crm/v3/${quoteModule}`, {
+      method: "PUT",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ id: quoteId, Owner: { id: OWNER_VENTA_AUTONOMA } }] }),
+    }).catch(() => {})
+    const fono = contact.replace(/\D/g, "")
+    const s = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
+    const dealId = s.ok && s.status !== 204
+      ? ((await s.json().catch(() => ({}))) as { data?: Array<{ Converted_Deal?: { id?: string } | null }> }).data?.find((l) => l.Converted_Deal?.id)?.Converted_Deal?.id
+      : undefined
+    if (dealId) {
+      await fetch(`${api}/crm/v3/Deals`, {
+        method: "PUT",
+        headers: H,
+        cache: "no-store",
+        body: JSON.stringify({ data: [{ id: String(dealId), Owner: { id: OWNER_VENTA_AUTONOMA } }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+      }).catch(() => {})
+    }
+    console.log(`[postpago] venta 100% Vicky: cotización ${quoteId} y deal ${dealId || "-"} asignados a Victoria Luna`)
+    return true
+  } catch (e) {
+    console.warn("[postpago] asignarVentaAutonoma falló:", e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
+/**
  * Cierra toda la proactividad del contacto dueño de la cotización (nudges,
  * anuncios y llamadas agendadas) y, si `enviarTraspaso`, le presenta a su
  * ejecutivo humano. Best-effort en cada paso; nunca lanza.
@@ -53,6 +111,9 @@ export async function cerrarYTraspasarPostPago(
   // Regla de oro del Loop v2: el PAGO corta el loop de toques para siempre
   // (best-effort; con el flag apagado o sin fila en vic_loop es un no-op).
   await pagoCierraLoop(contact).catch(() => {})
+  // Venta 100% Vicky → deal y cotización a Victoria Luna, y la bienvenida no
+  // presenta ejecutivo (nadie intervino en la venta; Victoria hace la bajada).
+  const ventaAutonoma = await asignarVentaAutonoma(contact, quoteId)
 
   const esCO = contact.startsWith("57")
   const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
@@ -151,14 +212,20 @@ export async function cerrarYTraspasarPostPago(
   // del auto-onboarding — antes solo presentaba al ejecutivo y el cliente
   // tenía que encontrar el wizard por su cuenta. El endpoint es idempotente.
   const linkOnboarding = await obtenerLinkOnboarding(quoteId).catch(() => "")
-  const traspaso =
+  const encabezado =
     `¡Felicitaciones y bienvenido a GeoVictoria! 🎉 Tu pago quedó registrado.\n\n` +
     (linkOnboarding
       ? `Para dejar tu empresa configurada y lista para operar, completa tu auto-onboarding aquí (toma ~10 minutos):\n👉 ${linkOnboarding}\n\n`
-      : "") +
-    `De aquí en adelante te acompaña *${ejecutivo.nombre}*, tu ejecutivo comercial, quien te contactará para coordinar la puesta en marcha:\n` +
-    (ejecutivo.telefono ? `📱 ${ejecutivo.telefono}\n` : "") +
-    `✉️ ${ejecutivo.email}`
+      : "")
+  // Venta autónoma: sin presentación de ejecutivo — nadie intervino en la
+  // venta y la bajada la decide Victoria; presentar un nombre acá obligaría
+  // a corregirlo después (lección D'amore: al cliente le llegaron dos).
+  const traspaso = ventaAutonoma
+    ? encabezado + `Nuestro equipo te contactará muy pronto para acompañarte en la puesta en marcha. Cualquier duda me escribes por aquí 😊`
+    : encabezado +
+      `De aquí en adelante te acompaña *${ejecutivo.nombre}*, tu ejecutivo comercial, quien te contactará para coordinar la puesta en marcha:\n` +
+      (ejecutivo.telefono ? `📱 ${ejecutivo.telefono}\n` : "") +
+      `✉️ ${ejecutivo.email}`
   const pushed = await sendBotmakerMessage(
     contact,
     traspaso,
