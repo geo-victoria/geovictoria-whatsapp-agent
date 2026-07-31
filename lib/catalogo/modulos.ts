@@ -21,10 +21,10 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     descripcion:
       "Marcaje de entrada y salida por varios canales: web (logueado en la plataforma desde el navegador), app móvil (con biometría facial y georeferenciación) y call (llamada telefónica) — los tres GRATIS e incluidos —, además de reloj control físico/terminales biométricos (con costo). La base del producto, incluida en toda cotización.",
     tiers: [
-      // Micro-plan: 1 trabajador que marca → tarifa especial. Cubre 2 usuarios
-      // (el que marca + 1 administrador). Desde 2 que marcan, tramo fijo normal.
-      { minUsuarios: 1, maxUsuarios: 1, modalidad: "fijo", precioUF: 0.25 },
-      { minUsuarios: 2, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.6 },
+      // Micro-plan: 1-2 trabajadores que marcan → tarifa especial. Desde 3
+      // que marcan, tramo fijo normal (ajuste de tramos, Lalo 31-jul-2026).
+      { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 0.25 },
+      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.6 },
       { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.07 },
       { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.065 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.055 },
@@ -48,8 +48,8 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     // actualizar estos en el mismo cambio. El descuento recurrente aplica
     // sobre asistencia + módulos (bucket recurrente del cotizador).
     tiers: [
-      { minUsuarios: 1, maxUsuarios: 1, modalidad: "fijo", precioUF: 0.075 },
-      { minUsuarios: 2, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.18 },
+      { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 0.075 },
+      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.18 },
       { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.021 },
       { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.0195 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.0165 },

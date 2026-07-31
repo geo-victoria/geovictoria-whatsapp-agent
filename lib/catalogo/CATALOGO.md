@@ -25,7 +25,7 @@ lib/catalogo/
 
 ## Modelo de tiers de precio
 
-Los módulos pueden tener varios precios según el rango de usuarios. Por ejemplo, Asistencia para 2-10 personas es un precio fijo (0.60 UF total), pero para 11-50 cambia a precio por usuario en tres tramos (0.07, 0.065, 0.055 UF). El tramo de 1 persona es un micro-plan fijo aparte (0.25 UF).
+Los módulos pueden tener varios precios según el rango de usuarios. Por ejemplo, Asistencia para 3-10 personas es un precio fijo (0.60 UF total), pero para 11-50 cambia a precio por usuario en tres tramos (0.07, 0.065, 0.055 UF). El tramo de 1-2 personas es un micro-plan fijo aparte (0.25 UF) — ajuste de tramos del 31-jul-2026.
 
 Esto se modela con un array `tiers`:
 
