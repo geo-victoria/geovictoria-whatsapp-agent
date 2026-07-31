@@ -251,13 +251,19 @@ export async function agendarReunion(
   // "property teamMemberEmail should not exist". El plan para que el booking
   // NAZCA con el dueño es agendar en su event type personal/managed
   // (pendiente de que existan esos eventos en Cal).
-  // Prioridad (Lalo 31-jul): el dueño del DEAL manda; la cotización queda de
-  // fallback para contactos que aún no convierten.
-  const dueno = (await duenoDealVigente(telefono || "")) || (await duenoCotizacionVigente(telefono || ""))
+  const dueno = await duenoCotizacionVigente(telefono || "")
+
+  // DECISIÓN FINAL (Lalo 31-jul, reemplaza el redirect de agenda del mismo
+  // día): la reunión se agenda COMO SIEMPRE (round-robin SDR inbound / evento
+  // del dueño de cotización si aplica), pero si el contacto tiene DEAL con
+  // dueño humano, ese propietario entra como ASISTENTE invitado del booking
+  // de Cal y se le notifica. El deal NO cambia de dueño por la reunión.
+  const duenoDeal = await duenoDealVigente(telefono || "")
 
   const booking = await bookMeeting({
     slotIso, prospectName, prospectEmail, timeZone, language: "es",
     eventTypeId: args.eventTypeId,
+    guestEmails: duenoDeal ? [duenoDeal.email] : [],
   })
 
   if (!booking.success) {
@@ -272,6 +278,21 @@ export async function agendarReunion(
   const { bookingId, meetingUrl, organizerEmail } = booking
 
   const responsableEmail = dueno?.email || organizerEmail
+
+  // Notificación al PROPIETARIO del deal (Lalo 31-jul): quedó invitado como
+  // asistente en Cal; se le avisa también por el canal interno. La reunión
+  // sigue siendo del SDR que la tomó — el deal no cambia de dueño.
+  if (duenoDeal && (organizerEmail || "").trim().toLowerCase() !== duenoDeal.email) {
+    await avisarEquipoInterno(
+      `📅 Reunión agendada con un cliente que tiene DEAL asignado\n` +
+        `Cliente: ${prospectName}${empresa ? ` — ${empresa}` : ""}\n` +
+        `Cuándo: ${slotIso}\n` +
+        `La toma (round-robin): ${organizerEmail || "por confirmar"}\n` +
+        `Propietario del deal: ${duenoDeal.nombre} (${duenoDeal.email}) — deal ${duenoDeal.dealId}\n` +
+        `El propietario quedó como ASISTENTE invitado en Cal (invitación en su correo). El deal NO cambia de dueño.`,
+    ).catch(() => false)
+  }
+
   if (dueno && organizerEmail && dueno.email !== organizerEmail) {
     await avisarEquipoInterno(
       `\u26a0\ufe0f Reunión de un cliente CON COTIZACIÓN vigente\n` +

@@ -172,6 +172,11 @@ describe("cableado del cron", () => {
     assert.match(CRON, /if \(!c\.last_user_at\) continue/)
   })
 
+  test("ni contactos de prueba ni IDs sin teléfono discable entran al PTV", () => {
+    assert.match(CRON, /isTestContact\(c\.contact, contactosPrueba\)/)
+    assert.match(CRON, /\^\(56\|57\|52\)/)
+  })
+
   test("el deal traspasado pasa por la regla de tómbola de Zoho y se presenta al dueño real", () => {
     assert.match(CRON, /TOMBOLA_DEALS_RULE/)
     assert.match(CRON, /lar_id/)

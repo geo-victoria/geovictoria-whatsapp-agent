@@ -35,7 +35,7 @@ import {
 } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { getTimezone, computeMeetingReminderAt } from "./calendar"
-import { duenoCotizacionVigente, duenoDealVigente, type DuenoReunion } from "./tools/agendar-reunion"
+import { duenoCotizacionVigente, type DuenoReunion } from "./tools/agendar-reunion"
 import { eventoSeguimientoDe } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
 import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD } from "./crm-hitos"
@@ -441,23 +441,18 @@ export async function runAgentLoop(params: {
           (toolName === "agendar_reunion" || toolName === "consultar_disponibilidad_horario") &&
           contact
         ) {
-          // Regla de asignación (Lalo, 31-jul): el dueño del DEAL manda — con
-          // la tómbola de Zoho asignando deals, la disponibilidad y el booking
-          // corren contra la agenda de ESE ejecutivo. El dueño de la
-          // cotización formal queda de fallback (reglas del 21/27-jul) para
-          // contactos sin deal convertido. Dueño sin evento de host único en
-          // Cal (sumar por env VICKY_CAL_EVENTO_POR_DUENO) → camino
-          // determinista: aviso interno y el dueño envía la invitación.
-          let dueno: DuenoReunion | null = await duenoDealVigente(contact).catch(() => null)
-          if (!dueno) {
-            const formalReunion = await getFormalQuote(contact).catch(() => "")
-            if (formalReunion) dueno = await duenoCotizacionVigente(contact).catch(() => null)
-          }
-          if (dueno) {
-            const eventoDelDueno = eventoSeguimientoDe(dueno.email)
+          // DECISIÓN FINAL (Lalo, 31-jul): la reunión se queda con el
+          // round-robin SDR inbound tal como está — el dueño del DEAL no
+          // redirige la agenda; entra como ASISTENTE invitado del booking
+          // (ver agendar-reunion.ts). Lo único que redirige agenda sigue
+          // siendo la cotización FORMAL vigente (reglas del 21/27-jul).
+          const formalReunion = await getFormalQuote(contact).catch(() => "")
+          if (formalReunion) {
+            const dueno: DuenoReunion | null = await duenoCotizacionVigente(contact).catch(() => null)
+            const eventoDelDueno = dueno ? eventoSeguimientoDe(dueno.email) : undefined
             if (eventoDelDueno) {
               ;(toolInput as Record<string, unknown>).eventTypeId = eventoDelDueno
-            } else if (toolName === "agendar_reunion") {
+            } else if (dueno && toolName === "agendar_reunion") {
               reunionPostFormal = true
             }
           }

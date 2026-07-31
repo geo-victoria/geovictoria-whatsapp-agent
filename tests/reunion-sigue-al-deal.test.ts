@@ -28,15 +28,17 @@ const AGENDAR = readFileSync(join(RAIZ, "lib/tools/agendar-reunion.ts"), "utf8")
 const COTIZAR = readFileSync(join(RAIZ, "lib/tools/generar-link-cotizadora.ts"), "utf8")
 
 describe("dirección A: reunión cuando ya hay cotización", () => {
-  test("se consulta el dueño (deal primero, cotización de fallback) antes de asignar", () => {
-    assert.match(AGENDAR, /async function duenoDealVigente/)
+  test("se consulta el dueño de la cotización vigente antes de asignar", () => {
     assert.match(AGENDAR, /async function duenoCotizacionVigente/)
-    // Regla de Lalo (31-jul): el Owner del deal — asignado por la tómbola de
-    // Zoho — manda sobre el dueño de la cotización.
-    assert.match(
-      AGENDAR,
-      /const dueno = \(await duenoDealVigente\(telefono \|\| ""\)\) \|\| \(await duenoCotizacionVigente\(telefono \|\| ""\)\)/,
-    )
+    assert.match(AGENDAR, /const dueno = await duenoCotizacionVigente\(telefono \|\| ""\)/)
+  })
+
+  test("el propietario del DEAL entra como ASISTENTE invitado del booking (Lalo 31-jul)", () => {
+    assert.match(AGENDAR, /async function duenoDealVigente/)
+    assert.match(AGENDAR, /const duenoDeal = await duenoDealVigente\(telefono \|\| ""\)/)
+    assert.match(AGENDAR, /guestEmails: duenoDeal \? \[duenoDeal\.email\] : \[\]/)
+    // Y se le notifica; el deal no cambia de dueño.
+    assert.match(AGENDAR, /El deal NO cambia de dueño/)
   })
 
   test("el responsable es el dueño del deal; Cal solo si no hay cotización", () => {
@@ -78,7 +80,7 @@ describe("dirección A: reunión cuando ya hay cotización", () => {
     assert.match(CAL, /property\s*\n?\s*\* teamMemberEmail should not exist|teamMemberEmail should not exist/)
     // El dueño se consulta ANTES de agendar — mantiene el CRM coherente y
     // deja lista la estructura para el booking en el evento del dueño.
-    const iDueno = AGENDAR.indexOf("const dueno = (await duenoDealVigente")
+    const iDueno = AGENDAR.indexOf("const dueno = await duenoCotizacionVigente")
     const iBooking = AGENDAR.indexOf("const booking = await bookMeeting")
     assert.ok(iDueno > 0 && iBooking > iDueno, "el dueño debe resolverse antes del booking")
   })

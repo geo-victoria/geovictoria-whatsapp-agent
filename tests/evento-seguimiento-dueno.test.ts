@@ -58,14 +58,15 @@ describe("el agent-loop inyecta el evento del dueño", () => {
     assert.match(LOOP, /\.eventTypeId = eventoDelDueno/)
   })
 
-  test("el dueño del DEAL manda; la cotización formal es fallback (Lalo 31-jul)", () => {
-    assert.match(LOOP, /await duenoDealVigente\(contact\)\.catch\(\(\) => null\)/)
-    // La cotización solo se consulta cuando NO hay dueño de deal.
-    assert.match(LOOP, /if \(!dueno\) \{\s*\n\s*const formalReunion/)
+  test("el dueño del DEAL no redirige la agenda: entra como ASISTENTE (Lalo 31-jul)", () => {
+    // Decisión final del 31-jul: la reunión queda con el round-robin SDR
+    // inbound; solo la cotización FORMAL redirige agenda (reglas 21/27-jul).
+    assert.match(LOOP, /const formalReunion = await getFormalQuote\(contact\)\.catch/)
+    assert.doesNotMatch(LOOP, /duenoDealVigente/)
   })
 
   test("el aviso determinista queda SOLO para dueños sin evento", () => {
-    assert.match(LOOP, /else if \(toolName === "agendar_reunion"\) \{\s*\n\s*reunionPostFormal = true/)
+    assert.match(LOOP, /else if \(dueno && toolName === "agendar_reunion"\) \{\s*\n\s*reunionPostFormal = true/)
     // El texto del camino legacy sigue existiendo (lo protege también
     // relevo-ejecutivo-cl.test.ts).
     assert.match(LOOP, /al ejecutivo a cargo de tu cotización/)

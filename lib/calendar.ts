@@ -430,6 +430,10 @@ export async function bookMeeting(params: {
    * pasando su eventTypeId aquí.
    */
   eventTypeId?: string
+  /** Invitados adicionales (guests de Cal): p. ej. el PROPIETARIO del deal
+   * (Lalo 31-jul — la reunión queda con el SDR del round-robin y el dueño
+   * del deal asiste como invitado). Se dedupe contra el prospecto. */
+  guestEmails?: string[]
 }): Promise<{ success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string } | { success: false; error: string }> {
   if (!CAL_API_KEY) {
     return { success: false, error: "CAL_API_KEY no configurada en el entorno." }
@@ -445,11 +449,18 @@ export async function bookMeeting(params: {
   const slotIso = normalizarSlotIso(params.slotIso, timeZone)
 
   const meetingGuest = (process.env.CAL_MEETING_GUEST_EMAIL || "egomez@geovictoria.com").trim()
+  const guests = [
+    ...new Set(
+      [meetingGuest, ...(params.guestEmails || [])]
+        .map((g) => (g || "").trim().toLowerCase())
+        .filter((g) => g && g !== prospectEmail.trim().toLowerCase()),
+    ),
+  ]
   const body = {
     eventTypeId: Number(params.eventTypeId || CAL_EVENT_TYPE_ID),
     start: slotIso,
     attendee: { name: prospectName, email: prospectEmail, timeZone, language },
-    guests: meetingGuest && meetingGuest !== prospectEmail ? [meetingGuest] : [],
+    guests,
     metadata: { source: "whatsapp_vicky_v3" },
   }
 

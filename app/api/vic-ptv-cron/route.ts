@@ -31,6 +31,7 @@ import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
+import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -205,8 +206,17 @@ export async function GET(req: Request) {
   const compromisoPor = new Map(pausas.map((p) => [p.contact, p.compromiso_at]))
 
   const traspasados: Array<{ contact: string; vendedor: string; ttv: number }> = []
+  const contactosPrueba = testContactSet()
   for (const c of convs) {
     if (traspasados.length >= MAX_TRASPASOS_POR_TICK) break
+    // Elegibilidad (fix 31-jul, cazado en el primer día encendido):
+    //  - contactos internos de prueba NUNCA se traspasan (el tester terminó
+    //    en la bandeja de Eddyluz con orden de llamarlo en 5 minutos);
+    //  - solo teléfonos DISCABLES (56/57/52...): el PTV exige que el vendedor
+    //    LLAME — los IDs anónimos de Meta (CIMA "CO.10259...") no tienen
+    //    número y esa conversación se queda con Vicky por chat.
+    if (isTestContact(c.contact, contactosPrueba)) continue
+    if (!/^(56|57|52)\d{8,12}$/.test(c.contact)) continue
     const pais = (paisDeContacto(c.contact) || (c.country as "cl" | "co" | "mx" | null))
     if (!pais) continue
     // opt-out/soporte/perdido: el loop ya cerró esta conversación — no traspasar.
