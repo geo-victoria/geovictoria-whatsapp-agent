@@ -63,7 +63,10 @@ describe("lo ya asignado queda con Anderson: el traspaso resuelve al dueño real
   })
 
   test("un dueño fuera del mapa igual se presenta, con su nombre de Zoho", () => {
-    assert.match(TRASPASO, /duenoCL \? \{ nombre: duenoCL\.nombre, email: duenoCL\.email, telefono: "" \}/)
+    // Desde el 31-jul (tómbola): nombre real de Zoho siempre, y el teléfono
+    // sale del directorio cuando lo conocemos ("" si no).
+    assert.match(TRASPASO, /nombre: duenoCL\.nombre \|\| EJECUTIVOS_CL\[duenoCL\.email\]\?\.nombre \|\| ""/)
+    assert.match(TRASPASO, /telefono: EJECUTIVOS_CL\[duenoCL\.email\.toLowerCase\(\)\]\?\.telefono \|\| ""/)
   })
 
   test("la premisa de coherencia post-pago sigue en pie (presenta al ejecutivo)", () => {
