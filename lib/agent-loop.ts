@@ -35,8 +35,8 @@ import {
 } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { getTimezone, computeMeetingReminderAt } from "./calendar"
-import { duenoCotizacionVigente } from "./tools/agendar-reunion"
-import { EVENTO_SEGUIMIENTO_POR_DUENO } from "./eventos-seguimiento"
+import { duenoCotizacionVigente, duenoDealVigente, type DuenoReunion } from "./tools/agendar-reunion"
+import { eventoSeguimientoDe } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
 import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD } from "./crm-hitos"
 import { mas50CierraLoop } from "./loop-v2"
@@ -441,10 +441,20 @@ export async function runAgentLoop(params: {
           (toolName === "agendar_reunion" || toolName === "consultar_disponibilidad_horario") &&
           contact
         ) {
-          const formalReunion = await getFormalQuote(contact).catch(() => "")
-          if (formalReunion) {
-            const dueno = await duenoCotizacionVigente(contact).catch(() => null)
-            const eventoDelDueno = dueno ? EVENTO_SEGUIMIENTO_POR_DUENO[dueno.email] : undefined
+          // Regla de asignación (Lalo, 31-jul): el dueño del DEAL manda — con
+          // la tómbola de Zoho asignando deals, la disponibilidad y el booking
+          // corren contra la agenda de ESE ejecutivo. El dueño de la
+          // cotización formal queda de fallback (reglas del 21/27-jul) para
+          // contactos sin deal convertido. Dueño sin evento de host único en
+          // Cal (sumar por env VICKY_CAL_EVENTO_POR_DUENO) → camino
+          // determinista: aviso interno y el dueño envía la invitación.
+          let dueno: DuenoReunion | null = await duenoDealVigente(contact).catch(() => null)
+          if (!dueno) {
+            const formalReunion = await getFormalQuote(contact).catch(() => "")
+            if (formalReunion) dueno = await duenoCotizacionVigente(contact).catch(() => null)
+          }
+          if (dueno) {
+            const eventoDelDueno = eventoSeguimientoDe(dueno.email)
             if (eventoDelDueno) {
               ;(toolInput as Record<string, unknown>).eventTypeId = eventoDelDueno
             } else if (toolName === "agendar_reunion") {

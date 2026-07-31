@@ -26,6 +26,53 @@ import { getZohoAccessToken } from "@/lib/zoho-token"
 const ZOHO_API_DOMAIN_REU = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const QUOTE_MODULE_REU = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 
+/** Dueño resuelto para una reunión: del deal (prioridad) o de la cotización. */
+export type DuenoReunion = { email: string; nombre: string; quoteId?: string; dealId?: string }
+
+const VICKY_ROBOT_EMAIL = "vicky@geovictoria.com"
+
+/**
+ * Dueño (Owner) del DEAL del contacto en Zoho, si existe y es humano.
+ *
+ * REGLA DE ASIGNACIÓN (Lalo, 31-jul): con la regla de tómbola de Zoho
+ * ("Tómbola Deals 2026 Chile") asignando los deals que Vicky entrega, el
+ * Owner del deal es LA verdad de asignación: cuando se pide reunión, la
+ * disponibilidad se busca en la agenda de ESE ejecutivo y el lead/evento
+ * quedan a su nombre. Best-effort: cualquier fallo devuelve null y el flujo
+ * cae al dueño de la cotización o al round-robin, como siempre.
+ */
+export async function duenoDealVigente(telefono: string): Promise<DuenoReunion | null> {
+  try {
+    const contact = (telefono || "").replace(/\D/g, "")
+    if (!contact) return null
+    const token = await getZohoAccessToken()
+    const H = { Authorization: `Zoho-oauthtoken ${token}` }
+    const res = await fetch(
+      `${ZOHO_API_DOMAIN_REU}/crm/v3/Leads/search?phone=${contact}&converted=both&per_page=3`,
+      { headers: H, cache: "no-store" },
+    )
+    if (!res.ok || res.status === 204) return null
+    const leads = ((await res.json().catch(() => ({}))) as {
+      data?: Array<{ Converted_Deal?: { id?: string } | null }>
+    }).data
+    const dealId = leads?.find((l) => l.Converted_Deal?.id)?.Converted_Deal?.id
+    if (!dealId) return null
+    const get = await fetch(`${ZOHO_API_DOMAIN_REU}/crm/v3/Deals/${dealId}?fields=Owner`, {
+      headers: H,
+      cache: "no-store",
+    })
+    if (!get.ok) return null
+    const owner = ((await get.json().catch(() => ({}))) as {
+      data?: Array<{ Owner?: { name?: string; email?: string } }>
+    }).data?.[0]?.Owner
+    const email = (owner?.email || "").trim().toLowerCase()
+    if (!email || email === VICKY_ROBOT_EMAIL) return null
+    return { email, nombre: (owner?.name || email.split("@")[0]).trim(), dealId }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Dueño (Owner) de la cotización formal VIGENTE del contacto, si existe.
  *
@@ -38,7 +85,7 @@ const QUOTE_MODULE_REU = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVict
  */
 export async function duenoCotizacionVigente(
   telefono: string,
-): Promise<{ email: string; nombre: string; quoteId: string } | null> {
+): Promise<DuenoReunion | null> {
   try {
     const contact = (telefono || "").replace(/\D/g, "")
     if (!contact) return null
@@ -204,7 +251,9 @@ export async function agendarReunion(
   // "property teamMemberEmail should not exist". El plan para que el booking
   // NAZCA con el dueño es agendar en su event type personal/managed
   // (pendiente de que existan esos eventos en Cal).
-  const dueno = await duenoCotizacionVigente(telefono || "")
+  // Prioridad (Lalo 31-jul): el dueño del DEAL manda; la cotización queda de
+  // fallback para contactos que aún no convierten.
+  const dueno = (await duenoDealVigente(telefono || "")) || (await duenoCotizacionVigente(telefono || ""))
 
   const booking = await bookMeeting({
     slotIso, prospectName, prospectEmail, timeZone, language: "es",
@@ -229,7 +278,7 @@ export async function agendarReunion(
         `Cliente: ${prospectName}${empresa ? ` — ${empresa}` : ""}\n` +
         `Cuándo: ${slotIso}\n` +
         `Cal.com la asignó a: ${organizerEmail}\n` +
-        `Dueño de la cotización: ${dueno.nombre} (${dueno.email}) — quote ${dueno.quoteId}\n` +
+        `Dueño asignado: ${dueno.nombre} (${dueno.email}) — ${dueno.dealId ? `deal ${dueno.dealId}` : `quote ${dueno.quoteId}`}\n` +
         `El lead y el evento quedaron a nombre de ${dueno.nombre}. Falta mover la invitación en Cal.com (o acordar quién la toma).`,
     ).catch(() => false)
   }

@@ -16,7 +16,7 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { EVENTO_SEGUIMIENTO_POR_DUENO } from "../lib/eventos-seguimiento.ts"
+import { EVENTO_SEGUIMIENTO_POR_DUENO, eventoSeguimientoDe } from "../lib/eventos-seguimiento.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const leer = (p: string) => readFileSync(join(RAIZ, p), "utf8")
@@ -37,6 +37,15 @@ describe("el mapa dueño → evento de seguimiento", () => {
   test("Anderson NO está en el mapa: su cartera legacy usa el camino determinista", () => {
     assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["adiazg@geovictoria.com"], undefined)
   })
+
+  test("se extiende por env para los vendedores de la tómbola de Zoho (sin deploy)", () => {
+    process.env.VICKY_CAL_EVENTO_POR_DUENO = "ileiva@geovictoria.com:7000001"
+    assert.equal(eventoSeguimientoDe("ileiva@geovictoria.com"), "7000001")
+    // El mapa fijo sigue funcionando con el env presente.
+    assert.equal(eventoSeguimientoDe("emujica@geovictoria.com"), "6484386")
+    delete process.env.VICKY_CAL_EVENTO_POR_DUENO
+    assert.equal(eventoSeguimientoDe("ileiva@geovictoria.com"), undefined)
+  })
 })
 
 describe("el agent-loop inyecta el evento del dueño", () => {
@@ -45,8 +54,14 @@ describe("el agent-loop inyecta el evento del dueño", () => {
       LOOP,
       /\(toolName === "agendar_reunion" \|\| toolName === "consultar_disponibilidad_horario"\)/,
     )
-    assert.match(LOOP, /EVENTO_SEGUIMIENTO_POR_DUENO\[dueno\.email\]/)
+    assert.match(LOOP, /eventoSeguimientoDe\(dueno\.email\)/)
     assert.match(LOOP, /\.eventTypeId = eventoDelDueno/)
+  })
+
+  test("el dueño del DEAL manda; la cotización formal es fallback (Lalo 31-jul)", () => {
+    assert.match(LOOP, /await duenoDealVigente\(contact\)\.catch\(\(\) => null\)/)
+    // La cotización solo se consulta cuando NO hay dueño de deal.
+    assert.match(LOOP, /if \(!dueno\) \{\s*\n\s*const formalReunion/)
   })
 
   test("el aviso determinista queda SOLO para dueños sin evento", () => {

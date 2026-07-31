@@ -28,9 +28,15 @@ const AGENDAR = readFileSync(join(RAIZ, "lib/tools/agendar-reunion.ts"), "utf8")
 const COTIZAR = readFileSync(join(RAIZ, "lib/tools/generar-link-cotizadora.ts"), "utf8")
 
 describe("dirección A: reunión cuando ya hay cotización", () => {
-  test("se consulta el dueño de la cotización vigente antes de asignar", () => {
+  test("se consulta el dueño (deal primero, cotización de fallback) antes de asignar", () => {
+    assert.match(AGENDAR, /async function duenoDealVigente/)
     assert.match(AGENDAR, /async function duenoCotizacionVigente/)
-    assert.match(AGENDAR, /const dueno = await duenoCotizacionVigente\(telefono \|\| ""\)/)
+    // Regla de Lalo (31-jul): el Owner del deal — asignado por la tómbola de
+    // Zoho — manda sobre el dueño de la cotización.
+    assert.match(
+      AGENDAR,
+      /const dueno = \(await duenoDealVigente\(telefono \|\| ""\)\) \|\| \(await duenoCotizacionVigente\(telefono \|\| ""\)\)/,
+    )
   })
 
   test("el responsable es el dueño del deal; Cal solo si no hay cotización", () => {
@@ -72,9 +78,9 @@ describe("dirección A: reunión cuando ya hay cotización", () => {
     assert.match(CAL, /property\s*\n?\s*\* teamMemberEmail should not exist|teamMemberEmail should not exist/)
     // El dueño se consulta ANTES de agendar — mantiene el CRM coherente y
     // deja lista la estructura para el booking en el evento del dueño.
-    const iDueno = AGENDAR.indexOf("const dueno = await duenoCotizacionVigente")
+    const iDueno = AGENDAR.indexOf("const dueno = (await duenoDealVigente")
     const iBooking = AGENDAR.indexOf("const booking = await bookMeeting")
-    assert.ok(iDueno > 0 && iBooking > iDueno, "duenoCotizacionVigente debe resolverse antes del booking")
+    assert.ok(iDueno > 0 && iBooking > iDueno, "el dueño debe resolverse antes del booking")
   })
 
   test("best-effort: sin cotización o con Zoho caído, el flujo es el de siempre", () => {
