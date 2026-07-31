@@ -453,12 +453,16 @@ const CC_TRASPASO_DEAL = (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.co
 export async function notificarTraspasoDeal(dealId: string): Promise<void> {
   try {
     const { h, api } = await zohoHeaders()
-    const g = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: h, cache: "no-store" })
+    const g = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner,Territorio`, { headers: h, cache: "no-store" })
     if (!g.ok) return
-    const owner = ((await g.json().catch(() => ({}))) as {
-      data?: Array<{ Owner?: { email?: string } }>
-    }).data?.[0]?.Owner
+    const fila = ((await g.json().catch(() => ({}))) as {
+      data?: Array<{ Owner?: { email?: string }; Territorio?: string }>
+    }).data?.[0]
+    const owner = fila?.Owner
     if (!owner?.email) return
+    // La copia a Victoria Luna es SOLO CHILE (Lalo 31-jul): CO y MX siguen
+    // con sus reglas antiguas — el dueño recibe su aviso, sin CC.
+    const esChile = /chile/i.test(String(fila?.Territorio || "")) || !fila?.Territorio
     await fetch(`${api}/crm/v3/Deals/${dealId}/actions/send_mail`, {
       method: "POST",
       headers: h,
@@ -467,7 +471,7 @@ export async function notificarTraspasoDeal(dealId: string): Promise<void> {
         data: [{
           from: { email: "vicky@geovictoria.com" },
           to: [{ email: owner.email }],
-          ...(CC_TRASPASO_DEAL ? { cc: [{ email: CC_TRASPASO_DEAL }] } : {}),
+          ...(esChile && CC_TRASPASO_DEAL ? { cc: [{ email: CC_TRASPASO_DEAL }] } : {}),
           template: { id: TPL_TRASPASO_DEAL },
         }],
       }),

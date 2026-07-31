@@ -48,6 +48,9 @@ const OWNER_VENTA_AUTONOMA = (process.env.VICKY_OWNER_VENTA_AUTONOMA || "3525045
 async function asignarVentaAutonoma(contact: string, quoteId: string): Promise<boolean> {
   try {
     if (!OWNER_VENTA_AUTONOMA) return false
+    // SOLO CHILE (Lalo 31-jul): CO y MX siguen con sus reglas antiguas — el
+    // post-pago presenta al ejecutivo del país, sin reasignar a Victoria.
+    if (!contact.startsWith("56")) return false
     // ¿Intervino un humano? Un traspaso PTV activo significa que un vendedor
     // fue presentado y estaba encima de la venta → esa venta es suya, no
     // autónoma, y su asignación no se toca.

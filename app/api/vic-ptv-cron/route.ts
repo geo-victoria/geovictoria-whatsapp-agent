@@ -135,7 +135,8 @@ type VendedorFinal = {
 /** Aviso por correo al vendedor de un traspaso sobre un LEAD (los deals van
  * con el template oficial vía notificarTraspasoDeal). Hallazgo Anáhuac
  * (31-jul): la alerta central no le llega al vendedor asignado — el correo
- * directo SÍ. Best-effort, CC a Victoria. */
+ * directo SÍ. La copia a Victoria Luna es SOLO CHILE (Lalo 31-jul): CO y MX
+ * siguen con sus reglas antiguas. Best-effort. */
 async function notificarTraspasoLeadEmail(
   leadId: string,
   vendedorEmail: string,
@@ -144,6 +145,7 @@ async function notificarTraspasoLeadEmail(
   api: string,
 ): Promise<void> {
   try {
+    const esChile = fono.startsWith("56")
     await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
       method: "POST",
       headers: H,
@@ -152,7 +154,7 @@ async function notificarTraspasoLeadEmail(
         data: [{
           from: { email: "vicky@geovictoria.com" },
           to: [{ email: vendedorEmail }],
-          cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }],
+          ...(esChile ? { cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }] } : {}),
           subject: `Traspaso PTV: llamar YA a +${fono}`,
           content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Vicky te traspasó esta conversación de WhatsApp: el cliente dejó de responder y venció su tiempo de espera. <b>Llámalo en menos de 5 minutos</b> — la conversación completa está en las notas del lead, precio incluido si se le mostró.</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p></body></html>`,
           mail_format: "html",
