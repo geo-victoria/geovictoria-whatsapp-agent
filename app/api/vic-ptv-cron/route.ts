@@ -237,6 +237,10 @@ async function asignarEnZoho(
           const owner = ((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner
           if (owner?.id && owner?.email) {
             const tel = await telefonoDeUsuario(owner.id, H, api)
+            // Notificación de traspaso al dueño sorteado + CC Victoria
+            // (template oficial, Lalo 31-jul). Best-effort.
+            const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
+            await notificarTraspasoDeal(dealId).catch(() => {})
             return { email: owner.email, zohoId: owner.id, nombre: owner.name || owner.email.split("@")[0], telefono: tel, via: "tombola_zoho" }
           }
         } else {

@@ -428,6 +428,40 @@ const TOMBOLA_DEALS_POR_TERRITORIO: Record<string, string> = {
   "México": (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
 }
 
+/** Notificación de traspaso (Lalo 31-jul): tras el sorteo, el template
+ * "Traspaso Deal Global 2024" sale al dueño sorteado con copia a Victoria
+ * Luna — la misma alerta del workflow de Zoho, gatillada por API porque el
+ * sorteo ocurre DESPUÉS del create (el workflow on-create no la ve). */
+const TPL_TRASPASO_DEAL = (process.env.VICKY_TPL_TRASPASO_DEAL || "3525045000389574614").trim()
+const CC_TRASPASO_DEAL = (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim()
+
+export async function notificarTraspasoDeal(dealId: string): Promise<void> {
+  try {
+    const { h, api } = await zohoHeaders()
+    const g = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: h, cache: "no-store" })
+    if (!g.ok) return
+    const owner = ((await g.json().catch(() => ({}))) as {
+      data?: Array<{ Owner?: { email?: string } }>
+    }).data?.[0]?.Owner
+    if (!owner?.email) return
+    await fetch(`${api}/crm/v3/Deals/${dealId}/actions/send_mail`, {
+      method: "POST",
+      headers: h,
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{
+          from: { email: "vicky@geovictoria.com" },
+          to: [{ email: owner.email }],
+          ...(CC_TRASPASO_DEAL ? { cc: [{ email: CC_TRASPASO_DEAL }] } : {}),
+          template: { id: TPL_TRASPASO_DEAL },
+        }],
+      }),
+    })
+  } catch (e) {
+    console.warn(`[crm-hitos] notificarTraspasoDeal falló:`, e instanceof Error ? e.message : e)
+  }
+}
+
 async function aplicarTombolaDeals(dealId: string, territorio: string): Promise<void> {
   const regla = TOMBOLA_DEALS_POR_TERRITORIO[territorio] || ""
   if (!regla) return
@@ -441,7 +475,10 @@ async function aplicarTombolaDeals(dealId: string, territorio: string): Promise<
     })
     if (!res.ok) {
       console.warn(`[crm-hitos] tómbola de deals falló (${res.status}) para ${dealId} — conserva el interino`)
+      return
     }
+    // El dueño sorteado se entera al instante (con copia a Victoria).
+    await notificarTraspasoDeal(dealId)
   } catch (e) {
     console.warn(`[crm-hitos] tómbola de deals lanzó:`, e instanceof Error ? e.message : e)
   }
