@@ -132,6 +132,36 @@ type VendedorFinal = {
   via: "tombola_zoho" | "tombola_interna" | "dueno_deal"
 }
 
+/** Aviso por correo al vendedor de un traspaso sobre un LEAD (los deals van
+ * con el template oficial vía notificarTraspasoDeal). Hallazgo Anáhuac
+ * (31-jul): la alerta central no le llega al vendedor asignado — el correo
+ * directo SÍ. Best-effort, CC a Victoria. */
+async function notificarTraspasoLeadEmail(
+  leadId: string,
+  vendedorEmail: string,
+  fono: string,
+  H: Record<string, string>,
+  api: string,
+): Promise<void> {
+  try {
+    await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{
+          from: { email: "vicky@geovictoria.com" },
+          to: [{ email: vendedorEmail }],
+          cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }],
+          subject: `Traspaso PTV: llamar YA a +${fono}`,
+          content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Vicky te traspasó esta conversación de WhatsApp: el cliente dejó de responder y venció su tiempo de espera. <b>Llámalo en menos de 5 minutos</b> — la conversación completa está en las notas del lead, precio incluido si se le mostró.</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p></body></html>`,
+          mail_format: "html",
+        }],
+      }),
+    })
+  } catch { /* best-effort */ }
+}
+
 /** Teléfono del vendedor desde su ficha de usuario en Zoho (best-effort). */
 async function telefonoDeUsuario(userId: string, H: Record<string, string>, api: string): Promise<string> {
   try {
@@ -193,6 +223,8 @@ async function asignarEnZoho(
       }).catch(() => null)
       if (!creado || !creado.success) {
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
+      } else {
+        await notificarTraspasoLeadEmail(creado.leadId, interno.email, fono, H, api)
       }
       return porDefecto
     }
@@ -218,6 +250,10 @@ async function asignarEnZoho(
       const ownerActual = filaDeal?.Owner
       if (ownerActual?.id && ownerActual?.email && ownerActual.email.toLowerCase() !== "vicky@geovictoria.com") {
         const tel = await telefonoDeUsuario(ownerActual.id, H, api)
+        // El dueño vigente recibe su aviso de traspaso (hallazgo Anáhuac:
+        // la alerta central no le llega al asignado — el correo directo sí).
+        const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
+        await notificarTraspasoDeal(dealId).catch(() => {})
         return {
           email: ownerActual.email,
           zohoId: ownerActual.id,
@@ -248,8 +284,11 @@ async function asignarEnZoho(
         }
       }
       await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: dealId, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
+      const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
+      await notificarTraspasoDeal(dealId).catch(() => {})
     } else {
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
+      await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
     }
     return porDefecto
   } catch (e) {

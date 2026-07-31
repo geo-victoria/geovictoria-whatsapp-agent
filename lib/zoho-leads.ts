@@ -619,9 +619,49 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
           { headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}` }, cache: "no-store" },
         )
         if (resDedup.ok && resDedup.status !== 204) {
-          const dataDedup = (await resDedup.json().catch(() => ({}))) as { data?: Array<{ id?: string }> }
-          const leadExistente = dataDedup?.data?.[0]?.id
-          if (leadExistente) {
+          const dataDedup = (await resDedup.json().catch(() => ({}))) as {
+            data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null; Owner?: { email?: string; name?: string } }>
+          }
+          const leadDedup = dataDedup?.data?.[0]
+          const leadExistente = leadDedup?.id
+          const dealConvertido = leadDedup?.Converted_Deal?.id
+          // La dedup es de PROCESOS ABIERTOS (caso Aldo/Marfull, 31-jul): un
+          // lead CONVERTIDO cuyo deal quedó en Cierre Perdido o Facturando es
+          // OTRA negociación — NO se reutiliza, la creación sigue y el
+          // re-contacto renace como lead nuevo (reglas 4 y 6). Con deal
+          // ACTIVO sí se reutiliza, y se RE-NOTIFICA al dueño con una nota en
+          // su deal (regla 5): el cliente volvió a pedir contacto y antes
+          // nadie se enteraba.
+          let reusar = Boolean(leadExistente)
+          if (leadExistente && dealConvertido) {
+            try {
+              const gS = await fetch(`${apiDedup}/crm/v3/Deals/${dealConvertido}?fields=Stage`, {
+                headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}` },
+                cache: "no-store",
+              })
+              const stageDedup = gS.ok
+                ? String(((await gS.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }).data?.[0]?.Stage || "")
+                : ""
+              if (/Cierre Perdido|8\. Facturando/.test(stageDedup)) {
+                reusar = false
+                console.log(`[zoho-leads] dedup: lead ${leadExistente} convertido con deal CERRADO (${stageDedup}) — renace lead nuevo (reglas 4/6)`)
+              } else {
+                await fetch(`${apiDedup}/crm/v3/Notes`, {
+                  method: "POST",
+                  headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}`, "Content-Type": "application/json" },
+                  cache: "no-store",
+                  body: JSON.stringify({
+                    data: [{
+                      Note_Title: "El cliente volvió a pedir contacto por WhatsApp",
+                      Note_Content: `Vicky recibió una nueva solicitud de este cliente (+${fonoCandado}): ${(input.necesidad || "retomó la conversación").slice(0, 400)}. El deal es tuyo y no se creó ninguno nuevo (regla 5). Contactarlo a la brevedad.`,
+                      Parent_Id: { module: { api_name: "Deals" }, id: dealConvertido },
+                    }],
+                  }),
+                }).catch(() => {})
+              }
+            } catch { /* ante la duda, se reutiliza como antes */ }
+          }
+          if (leadExistente && reusar) {
             const { setKvValue } = await import("./supabase-persistence-v3")
             await setKvValue(kvKeyLead, String(leadExistente)).catch(() => {})
             console.log(`[zoho-leads] dedup por búsqueda: ${fonoCandado} ya tiene lead ${leadExistente} — se reutiliza y se cierra el candado`)
