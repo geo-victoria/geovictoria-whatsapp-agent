@@ -6,7 +6,9 @@
  *     extremos: desde las 00:00 del "desde" hasta las 23:59:59.999 del
  *     "hasta". Un evento de las 20:00 hora Chile del día "hasta" (que en UTC
  *     ya es el día siguiente) DEBE caer dentro.
- *   - Aplica a conversaciones (por inicio) y a cotizaciones (por emisión).
+ *   - Aplica a conversaciones (por inicio), a cotizaciones (por emisión) y a
+ *     los PAGOS por su fecha de pago (pedido Lalo 31-jul: una cotización
+ *     emitida antes del rango pero pagada dentro cuenta como pago del rango).
  *     El "Funnel por origen" queda fuera a propósito y la UI lo dice.
  *   - Con el filtro activo, una conversación sin fecha conocida se excluye.
  *   - Entradas malformadas o rango invertido → sin filtro, nunca un error.
@@ -45,8 +47,15 @@ describe("el filtro llega a las tres capas", () => {
     assert.match(SRC, /return !rango \|\| enRango\(fechasConv\.get\(r\.conversation_id\), rango\)/)
   })
 
-  test("cotizaciones de Zoho: por fecha de creación", () => {
-    assert.match(SRC, /return !rango \|\| enRango\(q\.Created_Time, rango\)/)
+  test("cotizaciones de Zoho: las emitidas por fecha de emisión", () => {
+    assert.match(SRC, /universo\.filter\(\(q\) => !rango \|\| enRango\(q\.Created_Time, rango\)\)/)
+  })
+
+  test("aceptadas/pagadas: por fecha de PAGO, no de emisión", () => {
+    // La lista de aceptadas nace del universo SIN filtro de emisión y se
+    // filtra por Fecha_Hora_Cotizacion (respaldo Modified_Time), la misma
+    // fecha que la columna "Pago" de la tabla de ventas cerradas.
+    assert.match(SRC, /enRango\(q\.Fecha_Hora_Cotizacion \|\| q\.Modified_Time, rango\)/)
   })
 
   test("las ventas cerradas heredan el filtro (nacen de aceptadasList ya filtrada)", () => {

@@ -337,7 +337,7 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
     })
     if (!res.ok) return null
     const data = (await res.json().catch(() => null)) as { data?: RawAceptada[] } | null
-    const quotes = (data?.data || []).filter((q) => {
+    const universo = (data?.data || []).filter((q) => {
       const esCO = coQuoteIds.has(String(q.id || ""))
       if (pais === "cl" ? esCO : !esCO) return false
       // Universo Chile cerrado: fuera las cotizaciones mexicanas (teléfono +52).
@@ -346,10 +346,18 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
       if (pais === "cl" && esMX) return false
       const nombre = String(q.Name || "").toLowerCase()
       if (nombre.includes("prueba") || nombre.includes("huellerocompany")) return false
-      // Filtro Desde–Hasta sobre la fecha de creación de la cotización.
-      return !rango || enRango(q.Created_Time, rango)
+      return true
     })
-    const aceptadasList = quotes.filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept"))
+    // Filtro Desde–Hasta con DOS relojes (pedido Lalo 31-jul): las emitidas
+    // filtran por fecha de EMISIÓN (Created_Time); las aceptadas/pagadas por
+    // fecha de PAGO (Fecha_Hora_Cotizacion, con Modified_Time de respaldo —
+    // la misma fecha que muestra la columna "Pago" de la tabla de ventas).
+    // Una cotización emitida un día anterior pero pagada dentro del rango
+    // CUENTA como pago del rango (caso Ayres/Cofradía del 31-jul).
+    const quotes = universo.filter((q) => !rango || enRango(q.Created_Time, rango))
+    const aceptadasList = universo
+      .filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept"))
+      .filter((q) => !rango || enRango(q.Fecha_Hora_Cotizacion || q.Modified_Time, rango))
     const marca = (q: { Intervenci_n_Humana?: string | null }) => String(q.Intervenci_n_Humana || "").toLowerCase()
     const autonomas = aceptadasList.filter((q) => marca(q).includes("100%")).length
     const asistidas = aceptadasList.filter((q) => marca(q).includes("intervenci")).length
@@ -927,7 +935,7 @@ export async function GET(req: Request): Promise<Response> {
       <label style="font-size:12px">Hasta <input type="date" name="hasta" value="${rango ? rango.hastaStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <button type="submit" style="background:#455a64;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
       ${rango ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtro</a>` : ""}
-      ${rango ? `<span style="font-size:11px;color:#9ca3af">· filtra conversaciones (por inicio) y cotizaciones (por emisión); "Funnel por origen" muestra el programa completo</span>` : ""}
+      ${rango ? `<span style="font-size:11px;color:#9ca3af">· filtra conversaciones (por inicio), cotizaciones (por emisión) y pagos (por fecha de pago); "Funnel por origen" muestra el programa completo</span>` : ""}
     </form>
   </div>
   <script>
