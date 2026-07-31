@@ -587,9 +587,26 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
       try {
         const { getKvValue } = await import("./supabase-persistence-v3")
         const existente = (await getKvValue(kvKeyLead)) || ""
-        if (existente) {
+        if (existente && !existente.startsWith("creando:")) {
           console.log(`[zoho-leads] candado: ${fonoCandado} ya tiene lead ${existente} — se reutiliza, no se duplica`)
           return { success: true, leadId: existente, entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+        }
+        // CREACIÓN EN VUELO (anti-carrera, caso gemelos 56963008969 31-jul:
+        // dos hitos crearon dos leads con 2 segundos de diferencia). Si otro
+        // proceso marcó "creando:" hace <2 min, se espera a que cierre el
+        // candado con el id real y se reutiliza; si no aparece, se sigue.
+        if (existente.startsWith("creando:")) {
+          const desde = Number(existente.slice(8)) || 0
+          if (Date.now() - desde < 120_000) {
+            for (let i = 0; i < 5; i++) {
+              await new Promise((r) => setTimeout(r, 1200))
+              const ahora = (await getKvValue(kvKeyLead).catch(() => "")) || ""
+              if (ahora && !ahora.startsWith("creando:")) {
+                console.log(`[zoho-leads] anti-carrera: otro proceso creó el lead ${ahora} para ${fonoCandado} — se reutiliza`)
+                return { success: true, leadId: ahora, entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+              }
+            }
+          }
         }
         // Candado vacío ≠ lead inexistente: los teléfonos anteriores al
         // candado no tienen entrada en vic_kv (re-duplicados SYDA/Catalina,
@@ -611,6 +628,10 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
             return { success: true, leadId: String(leadExistente), entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
           }
         }
+        // Reservar el candado ANTES de crear: la ventana de carrera baja de
+        // varios segundos (lo que tarda el POST) a milisegundos.
+        const { setKvValue } = await import("./supabase-persistence-v3")
+        await setKvValue(kvKeyLead, `creando:${Date.now()}`).catch(() => {})
       } catch { /* sin candado no se bloquea la creación */ }
     }
     const names = splitName(input.nombre)

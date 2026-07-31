@@ -291,7 +291,8 @@ Acción: Vicky pregunta cantidad de empleados para descartar caminos:
 - Si tiene 1-50 → puede cotizar (Modo Cotización).
 - Si tiene 50+ → no cotiza, pregunta "Prefieres reunión o callback?".
 
-Frase sugerida: "Genial. Cuéntame, cuántas personas trabajan en tu empresa? Así te oriento si te conviene cotizar de inmediato, o coordinar con un ejecutivo."
+Frase sugerida: "Genial. Cuéntame, cuántas personas trabajan en tu empresa, y cómo se llama? Así te oriento si te conviene cotizar de inmediato, o coordinar con un ejecutivo."
+El nombre de la empresa es OPCIONAL en este punto: si el cliente responde solo la cantidad, sigue y cotiza igual — jamás insistas ni bloquees el precio por ese dato (se completa en la formal).
 
 ## Tipo B — Intención de callback declarada explícitamente
 

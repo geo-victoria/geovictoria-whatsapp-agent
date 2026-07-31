@@ -249,7 +249,8 @@ async function resolverPorTelefono(contact: string): Promise<
   try {
     const { getKvValue } = await import("./supabase-persistence-v3")
     const idCandado = (await getKvValue(`zoho_lead_${fono}`)) || ""
-    if (idCandado) {
+    // "creando:<ts>" = reserva anti-carrera de createZohoLead, no un id.
+    if (idCandado && !idCandado.startsWith("creando:")) {
       const rDirecto = await fetch(
         `${api}/crm/v3/Leads/${idCandado}?fields=Owner,Lead_Status,Company,N_Empleados_que_marcan,Email,Last_Name,RUT_Empresa,Last_Activity_Time,Converted_Deal,Converted_Contact,Converted_Account`,
         { headers: h, cache: "no-store" },
@@ -415,6 +416,20 @@ async function subirLeadStatus(lead: LeadEncontrado, hito: Hito): Promise<void> 
   const { updateZohoLeadStatus } = await import("./zoho-leads")
   const r = await updateZohoLeadStatus(lead.id, objetivo)
   if (!r.success) console.warn(`[crm-hitos] lead ${lead.id} status→${objetivo} falló: ${r.error}`)
+}
+
+/**
+ * IDENTIDAD COMERCIAL mínima para crear DEAL y CUENTA (exigencia del equipo
+ * comercial, Lalo 31-jul): nombre de empresa real o RUT. Sin identidad, el
+ * hito queda registrado en el LEAD (status + nota + transcripción) y la
+ * conversión espera al dato — que suele llegar uno o dos mensajes después
+ * (el prompt ahora pregunta la empresa en la calificación). Mata de raíz los
+ * deals "Prospecto WhatsApp" y la cuenta compartida donde convergían todos
+ * los anónimos (7 deals de 6 empresas distintas bajo una misma cuenta).
+ */
+function tieneIdentidadComercial(lead: LeadEncontrado, datos: DatosConversacion): boolean {
+  const empresa = [datos.empresa, lead.company].find((v) => v && !esPlaceholder(v))
+  return Boolean(empresa || datos.rut || lead.rut)
 }
 
 /** Regla de asignación de Deals en Zoho (Lalo, 31-jul): TODO deal que Vicky
@@ -800,6 +815,10 @@ export async function sincronizarHitoCrm(
         contactId: null,
       }
       await subirLeadStatus(lead, hito)
+      if (!tieneIdentidadComercial(lead, datos)) {
+        console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${creado.leadId} espera identidad para convertir (deal pendiente)`)
+        return
+      }
       const dealId = await convertirConDeal(lead, clean, piso)
       if (!dealId) console.warn(`[crm-hitos] ${clean}: lead ${creado.leadId} quedó sin convertir`)
       else await actualizarNotaTranscripcion(dealId, clean)
@@ -858,6 +877,10 @@ export async function sincronizarHitoCrm(
           `Vicky: hito "${hito}" en WhatsApp`,
           `Vicky detectó el hito "${hito}" conversando con este lead por WhatsApp. Según el diccionario correspondería un deal en "${piso}"; no se creó automáticamente porque el lead tiene dueño humano.`,
         ).catch(() => false)
+        return
+      }
+      if (!tieneIdentidadComercial(lead, datos)) {
+        console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${lead.id} espera identidad para convertir (deal pendiente)`)
         return
       }
       const dealNuevo = await convertirConDeal(lead, clean, piso)
