@@ -417,10 +417,41 @@ async function subirLeadStatus(lead: LeadEncontrado, hito: Hito): Promise<void> 
   if (!r.success) console.warn(`[crm-hitos] lead ${lead.id} status→${objetivo} falló: ${r.error}`)
 }
 
+/** Regla de asignación de Deals en Zoho (Lalo, 31-jul): TODO deal que Vicky
+ * crea sin dueño humano heredado pasa por la tómbola del equipo — la regla
+ * "Tómbola Deals 2026 Chile" (lar_id en el PUT). CO/MX aún sin regla (se
+ * suman por env). Si la regla falla, el deal conserva el interino del país:
+ * jamás queda en la bandeja de nadie. */
+const TOMBOLA_DEALS_POR_TERRITORIO: Record<string, string> = {
+  Chile: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
+  Colombia: (process.env.VICKY_PTV_TOMBOLA_DEALS_CO || "").trim(),
+  "México": (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
+}
+
+async function aplicarTombolaDeals(dealId: string, territorio: string): Promise<void> {
+  const regla = TOMBOLA_DEALS_POR_TERRITORIO[territorio] || ""
+  if (!regla) return
+  try {
+    const { h, api } = await zohoHeaders()
+    const res = await fetch(`${api}/crm/v3/Deals`, {
+      method: "PUT",
+      headers: h,
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ id: dealId }], lar_id: regla }),
+    })
+    if (!res.ok) {
+      console.warn(`[crm-hitos] tómbola de deals falló (${res.status}) para ${dealId} — conserva el interino`)
+    }
+  } catch (e) {
+    console.warn(`[crm-hitos] tómbola de deals lanzó:`, e instanceof Error ? e.message : e)
+  }
+}
+
 /**
  * Convierte el lead con deal naciendo en la etapa del piso (regla de
- * marketing: el deal SIEMPRE nace de la conversión). Owner del deal = owner
- * del lead — en el caso saliente respeta la asignación hecha en el CRM.
+ * marketing: el deal SIEMPRE nace de la conversión). Owner del deal: dueño
+ * humano del lead lo hereda (gestión intocable); sin dueño humano, el deal
+ * nace con el interino del país y pasa por la TÓMBOLA de Zoho (Lalo 31-jul).
  * Maneja cuenta duplicada reconvirtiendo con Accounts:{id}.
  */
 async function convertirConDeal(
@@ -492,6 +523,9 @@ async function convertirConDeal(
   }
   if (fila?.code === "SUCCESS" && fila?.Deals?.id) {
     console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${fila.Deals.id} en "${piso}"`)
+    // Sin dueño humano heredado, el sorteo de Zoho decide el dueño final.
+    const heredaDuenoHumano = Boolean(lead.ownerId && lead.ownerId !== VICKY_OWNER_ID)
+    if (!heredaDuenoHumano) await aplicarTombolaDeals(String(fila.Deals.id), territorio)
     return String(fila.Deals.id)
   }
   console.warn(`[crm-hitos] convert de ${lead.id} falló: ${JSON.stringify(r).slice(0, 250)}`)
