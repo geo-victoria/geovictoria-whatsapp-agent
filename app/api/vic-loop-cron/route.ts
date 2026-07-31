@@ -41,6 +41,7 @@ import {
   type LoopStage,
 } from "@/lib/loop-v2"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
+import { ptvHabilitado, debeTraspasar } from "@/lib/ptv"
 import { llamadasDaptaHabilitadas } from "@/lib/dapta-voice"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
@@ -627,6 +628,31 @@ export async function GET(req: Request): Promise<Response> {
             yaVieronPrecio.has(r.contact)
             ? "con_precio"
             : (r.stage as LoopStage) || "sin_precio"
+
+    // (e) ANTI-EMPALME con el PTV (doc "Vicky paso a paso", 30-jul): si el
+    // traspaso a vendedor está a menos de 1 h de dispararse para este
+    // contacto, el toque se pospone 1 h — un toque seguido de la presentación
+    // del vendedor son dos mensajes de Vicky casi juntos, y el vendedor va a
+    // retomar con todo el contexto de todos modos. Proyección con el MISMO
+    // motor de decisión del cron PTV, evaluado a ahora+1h.
+    if (ptvHabilitado() && lastUserMs > 0) {
+      const proyeccion = debeTraspasar({
+        referenciaRelojAt: new Date(lastUserMs),
+        clienteRespondioDespues: false,
+        precioMostrado: stage !== "sin_precio",
+        pais: paisKey,
+        ahora: new Date(now + 3600e3),
+        compromisoAt: r.compromiso_at ? new Date(r.compromiso_at) : null,
+        traspasoActivo: false,
+      })
+      if (proyeccion.traspasar) {
+        await patchLoop(r.contact, { next_touch_at: new Date(now + 3600e3).toISOString() })
+        pospuestos++
+        detalle.push({ contact: r.contact, accion: "pospuesto_ptv_cercano", touch })
+        continue
+      }
+    }
+
     let ejecutado = false
 
     // Rodrigo 27-jul: la presentación sale a las 2 HORAS de inactividad, no a

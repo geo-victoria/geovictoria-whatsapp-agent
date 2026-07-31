@@ -104,13 +104,17 @@ export function ttvMinutos(precioMostrado: boolean): number {
 /**
  * Decide si corresponde gatillar el PTV para una conversación:
  *   - el último mensaje es de Vicky (el cliente no ha respondido),
- *   - pasaron TTV minutos desde ese mensaje,
+ *   - pasaron TTV minutos desde el último mensaje del CLIENTE (los toques
+ *     del Loop actualizan la conversación pero NO reinician este reloj),
  *   - estamos en horario hábil del país (el doc: fuera de hábil se espera),
  *   - no hay pausa anunciada vigente (compromisoAt futuro suspende),
  *   - no hay un traspaso activo previo.
  */
 export function debeTraspasar(params: {
-  ultimoMensajeVickyAt: Date
+  /** Referencia del reloj TTV: el silencio se mide desde el último mensaje
+   * del CLIENTE (si Vicky ya respondió) — los toques del Loop NO reinician
+   * el TTV (brecha detectada 30-jul: cada toque empujaba el traspaso). */
+  referenciaRelojAt: Date
   clienteRespondioDespues: boolean
   precioMostrado: boolean
   pais: "cl" | "co" | "mx"
@@ -119,16 +123,16 @@ export function debeTraspasar(params: {
   compromisoAt?: Date | null
   traspasoActivo: boolean
 }): { traspasar: boolean; motivo?: string; ttv?: number } {
-  const { ultimoMensajeVickyAt, clienteRespondioDespues, precioMostrado, pais, ahora, feriados, compromisoAt, traspasoActivo } = params
+  const { referenciaRelojAt, clienteRespondioDespues, precioMostrado, pais, ahora, feriados, compromisoAt, traspasoActivo } = params
   if (traspasoActivo) return { traspasar: false }
   if (clienteRespondioDespues) return { traspasar: false }
   if (compromisoAt && compromisoAt.getTime() > ahora.getTime()) return { traspasar: false }
   if (!esHorarioHabil(pais, ahora, feriados)) return { traspasar: false }
   const ttv = ttvMinutos(precioMostrado)
   // Si hubo pausa anunciada ya vencida, el TTV corre desde su vencimiento.
-  const desde = compromisoAt && compromisoAt.getTime() > ultimoMensajeVickyAt.getTime()
+  const desde = compromisoAt && compromisoAt.getTime() > referenciaRelojAt.getTime()
     ? compromisoAt
-    : ultimoMensajeVickyAt
+    : referenciaRelojAt
   const minutos = (ahora.getTime() - desde.getTime()) / 60000
   if (minutos < ttv) return { traspasar: false }
   return { traspasar: true, motivo: "ttv_sin_respuesta", ttv }

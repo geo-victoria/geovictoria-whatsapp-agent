@@ -591,6 +591,26 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
           console.log(`[zoho-leads] candado: ${fonoCandado} ya tiene lead ${existente} — se reutiliza, no se duplica`)
           return { success: true, leadId: existente, entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
         }
+        // Candado vacío ≠ lead inexistente: los teléfonos anteriores al
+        // candado no tienen entrada en vic_kv (re-duplicados SYDA/Catalina,
+        // noche del 30-31 jul). Fallback: buscar en Zoho y, si el lead ya
+        // existe, reutilizarlo y cerrar el candado hacia adelante.
+        const accessTokenDedup = await getZohoAccessToken()
+        const apiDedup = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+        const resDedup = await fetch(
+          `${apiDedup}/crm/v3/Leads/search?phone=${encodeURIComponent(fonoCandado)}&converted=both&per_page=3`,
+          { headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}` }, cache: "no-store" },
+        )
+        if (resDedup.ok && resDedup.status !== 204) {
+          const dataDedup = (await resDedup.json().catch(() => ({}))) as { data?: Array<{ id?: string }> }
+          const leadExistente = dataDedup?.data?.[0]?.id
+          if (leadExistente) {
+            const { setKvValue } = await import("./supabase-persistence-v3")
+            await setKvValue(kvKeyLead, String(leadExistente)).catch(() => {})
+            console.log(`[zoho-leads] dedup por búsqueda: ${fonoCandado} ya tiene lead ${leadExistente} — se reutiliza y se cierra el candado`)
+            return { success: true, leadId: String(leadExistente), entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+          }
+        }
       } catch { /* sin candado no se bloquea la creación */ }
     }
     const names = splitName(input.nombre)

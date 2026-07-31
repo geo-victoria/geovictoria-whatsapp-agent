@@ -39,6 +39,7 @@ import { duenoCotizacionVigente } from "./tools/agendar-reunion"
 import { EVENTO_SEGUIMIENTO_POR_DUENO } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
 import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD } from "./crm-hitos"
+import { mas50CierraLoop } from "./loop-v2"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
 const MAX_ITERATIONS = 8
@@ -541,6 +542,19 @@ export async function runAgentLoop(params: {
         // conversación (armFollowup lo respeta). Se marca por la INVOCACIÓN,
         // no por el éxito de la tool: aunque Foundry falle, la conversación es
         // de soporte. No depende del análisis LLM por hora ni del sweep de 15m.
+        // Brecha 2 del doc "Vicky paso a paso" (30-jul): el prospecto de MÁS
+        // de 50 trabajadores sale del Loop — el ejecutivo lo llama al toque en
+        // hábil y Vicky no le manda más toques (sí responde si él escribe).
+        // Se marca por la INVOCACIÓN, igual que soporte: aunque la derivación
+        // falle, el prospecto sigue siendo >50. Best-effort, nunca bloquea.
+        const esDerivacionMas50 =
+          (toolName === "derivar_a_soporte" &&
+            String(toolInput.motivo || "") === "fuera_de_rango_trabajadores") ||
+          (toolName === "derivar_a_ejecutivo" && String(toolInput.motivo || "") === "mas_de_50")
+        if (contact && esDerivacionMas50) {
+          void mas50CierraLoop(contact).catch(() => undefined)
+        }
+
         const esRedireccionSoporte =
           toolName === "consultar_agente_soporte" ||
           (toolName === "derivar_a_soporte" &&

@@ -443,6 +443,26 @@ export async function pagoCierraLoop(contact: string): Promise<void> {
 }
 
 /**
+ * Prospecto de MÁS de 50 trabajadores → el Loop se cierra (doc "Vicky paso a
+ * paso", 30-jul: los >50 quedan FUERA del seguimiento automático — el
+ * ejecutivo llama al toque en hábil y Vicky no manda toques; solo responde
+ * REACTIVAMENTE si el cliente escribe). Motivo 'mas_de_50' terminal: un loop
+ * cerrado nunca revive solo.
+ */
+export async function mas50CierraLoop(contact: string): Promise<void> {
+  if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
+  await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      estado: "cerrado",
+      motivo_cierre: "mas_de_50",
+      updated_at: new Date().toISOString(),
+    }),
+  })
+}
+
+/**
  * El cliente acordó un momento concreto para retomar ("hablemos el lunes"):
  * el loop se pausa hasta esa fecha y el próximo toque se agenda exactamente
  * ahí. Exportada para uso futuro; todavía sin llamadores.

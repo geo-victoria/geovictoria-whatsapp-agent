@@ -157,11 +157,16 @@ export async function GET(req: Request) {
     if (!pais) continue
     // opt-out/soporte/perdido: el loop ya cerró esta conversación — no traspasar.
     if (c.followup_closed_reason) continue
-    const ultimo = new Date(c.updated_at)
-    const clienteRespondioDespues = Boolean(c.last_user_at && new Date(c.last_user_at) >= ultimo)
+    // Reloj TTV: el silencio se mide desde el último mensaje del CLIENTE.
+    // updated_at se mueve con cada toque del Loop, y usarlo de referencia
+    // reiniciaba el TTV en cada toque (brecha 1, 30-jul). Sin mensaje del
+    // cliente no hay TTV que medir: esa conversación la gobierna el Loop.
+    if (!c.last_user_at) continue
+    const ultimoCliente = new Date(c.last_user_at)
+    const clienteRespondioDespues = ultimoCliente >= new Date(c.updated_at)
     const feriados = await feriadosDePais(pais)
     const decision = debeTraspasar({
-      ultimoMensajeVickyAt: ultimo,
+      referenciaRelojAt: ultimoCliente,
       clienteRespondioDespues,
       precioMostrado: Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
       pais,

@@ -65,7 +65,7 @@ describe("decisión de traspaso", () => {
     const d = debeTraspasar({
       ...base,
       precioMostrado: true,
-      ultimoMensajeVickyAt: new Date(MIERCOLES_HABIL.getTime() - 20 * 60000),
+      referenciaRelojAt: new Date(MIERCOLES_HABIL.getTime() - 20 * 60000),
     })
     assert.equal(d.traspasar, true)
     assert.equal(d.ttv, 15)
@@ -75,7 +75,7 @@ describe("decisión de traspaso", () => {
     const d = debeTraspasar({
       ...base,
       precioMostrado: false,
-      ultimoMensajeVickyAt: new Date(MIERCOLES_HABIL.getTime() - 20 * 60000),
+      referenciaRelojAt: new Date(MIERCOLES_HABIL.getTime() - 20 * 60000),
     })
     assert.equal(d.traspasar, false)
   })
@@ -85,7 +85,7 @@ describe("decisión de traspaso", () => {
       ...base,
       clienteRespondioDespues: true,
       precioMostrado: true,
-      ultimoMensajeVickyAt: new Date(MIERCOLES_HABIL.getTime() - 60 * 60000),
+      referenciaRelojAt: new Date(MIERCOLES_HABIL.getTime() - 60 * 60000),
     })
     assert.equal(d.traspasar, false)
   })
@@ -94,7 +94,7 @@ describe("decisión de traspaso", () => {
     const d = debeTraspasar({
       ...base,
       precioMostrado: true,
-      ultimoMensajeVickyAt: new Date(MIERCOLES_HABIL.getTime() - 60 * 60000),
+      referenciaRelojAt: new Date(MIERCOLES_HABIL.getTime() - 60 * 60000),
       compromisoAt: new Date(MIERCOLES_HABIL.getTime() + 60 * 60000),
     })
     assert.equal(d.traspasar, false)
@@ -104,7 +104,7 @@ describe("decisión de traspaso", () => {
     const d = debeTraspasar({
       ...base,
       precioMostrado: true,
-      ultimoMensajeVickyAt: new Date(MIERCOLES_HABIL.getTime() - 300 * 60000),
+      referenciaRelojAt: new Date(MIERCOLES_HABIL.getTime() - 300 * 60000),
       compromisoAt: new Date(MIERCOLES_HABIL.getTime() - 5 * 60000), // venció hace 5 min < TTV 15
     })
     assert.equal(d.traspasar, false)
@@ -115,7 +115,7 @@ describe("decisión de traspaso", () => {
       ...base,
       traspasoActivo: true,
       precioMostrado: true,
-      ultimoMensajeVickyAt: new Date(MIERCOLES_HABIL.getTime() - 600 * 60000),
+      referenciaRelojAt: new Date(MIERCOLES_HABIL.getTime() - 600 * 60000),
     })
     assert.equal(d.traspasar, false)
   })
@@ -125,7 +125,7 @@ describe("decisión de traspaso", () => {
       ...base,
       ahora: DOMINGO,
       precioMostrado: true,
-      ultimoMensajeVickyAt: new Date(DOMINGO.getTime() - 600 * 60000),
+      referenciaRelojAt: new Date(DOMINGO.getTime() - 600 * 60000),
     })
     assert.equal(d.traspasar, false)
   })
@@ -165,5 +165,10 @@ describe("cableado del cron", () => {
   test("alerta interna exige llamar en <5 minutos y menciona el link de pago", () => {
     assert.match(CRON, /LLAMAR EN MENOS DE 5 MINUTOS/)
     assert.match(CRON, /empujar el mismo link/)
+  })
+
+  test("el reloj TTV mide desde el último mensaje del CLIENTE (los toques del Loop no lo reinician)", () => {
+    assert.match(CRON, /referenciaRelojAt: ultimoCliente/)
+    assert.match(CRON, /if \(!c\.last_user_at\) continue/)
   })
 })
