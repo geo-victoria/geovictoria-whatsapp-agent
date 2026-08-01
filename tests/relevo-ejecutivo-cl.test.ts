@@ -1,12 +1,13 @@
 /**
- * RELEVO DE EJECUTIVO CL (Lalo, 27-jul): todo lo NUEVO va a Eddyluz Mujica;
- * lo ya asignado queda con Anderson Díaz. Cero cambios retroactivos.
+ * EJECUTIVO CL: del relevo fijo a la TÓMBOLA (auditoría 31-jul).
  *
- * La consecuencia sutil que estos tests fijan: "el ejecutivo de Chile" dejó
- * de ser un nombre — es una función de CADA cotización. Cualquier código que
- * presente un ejecutivo al cliente por una cotización existente debe resolver
- * el Owner real (lib/zoho-quote-owner.ts) y no asumir un hardcode, porque
- * durante la transición conviven deals de los dos.
+ * Historia: el 27-jul "todo lo nuevo va a Eddyluz, lo asignado queda con
+ * Anderson" (relevo). El 31-jul la tómbola de deals de Zoho pasó a decidir el
+ * dueño de cada deal nuevo, y el relevo quedó solo como FALLBACK (Zoho caído
+ * o deals anteriores). La consecuencia que estos tests fijan: "el ejecutivo
+ * de Chile" NO es un nombre — es una función de CADA cotización/deal, y
+ * cualquier código que presente un ejecutivo debe resolver el Owner real; los
+ * nombres fijos solo pueden aparecer como fallback o como regla protectora.
  */
 
 import { test, describe } from "node:test"
@@ -24,38 +25,49 @@ const LOOP = leer("lib/agent-loop.ts")
 const GENERAR = leer("lib/tools/generar-link-cotizadora.ts")
 const FUNNEL = leer("lib/funnel-analysis.ts")
 
-describe("lo nuevo va a Eddyluz", () => {
-  test("el perfil CL presenta a Eddyluz con sus datos reales", () => {
+describe("los caminos de asignación pasan por la tómbola, no por un nombre fijo", () => {
+  test("el callback (ambos modos) sortea con la MISMA rotación del PTV", () => {
+    assert.match(CALLBACK, /vendedoresDePais/)
+    assert.match(CALLBACK, /ptv_rr_\$\{pais\}/)
+    // El residuo del relevo murió: nada de Eddyluz por defecto.
+    assert.doesNotMatch(CALLBACK, /emujica@geovictoria\.com/)
+    assert.doesNotMatch(CALLBACK, /adiazg@geovictoria\.com/)
+  })
+
+  test("el fallback de cotización también entra a la tómbola (mismo owner sorteado)", () => {
+    assert.match(CALLBACK, /const ownerEmail = await vendedorPorTombola\(pais\)/)
+  })
+
+  test("la tool de cotización muestra al dueño REAL que devolvió el cotizador", () => {
+    assert.match(GENERAR, /data\.ejecutivo && data\.ejecutivo\.nombre/)
+    // Eddyluz queda SOLO como último fallback (lectura de owner caída).
+    assert.match(GENERAR, /const EJECUTIVO_DEFAULT = "Eddyluz Mujica"/)
+  })
+
+  test("el perfil CL conserva a Eddyluz como símil de fallback con datos reales", () => {
     assert.match(PERFIL, /nombre: "Eddyluz Mujica"/)
     assert.match(PERFIL, /email: "emujica@geovictoria\.com"/)
     assert.match(PERFIL, /telefono: "\+56 9 3932 1687"/)
     assert.doesNotMatch(PERFIL, /Anderson Díaz"/)
   })
 
-  test("el fallback de cotización del callback asigna a Eddyluz", () => {
-    assert.match(CALLBACK, /\|\| "emujica@geovictoria\.com"/)
-    assert.doesNotMatch(CALLBACK, /adiazg@geovictoria\.com/)
-  })
-
-  test("el display de la tool de cotización nombra a Eddyluz", () => {
-    assert.match(GENERAR, /const EJECUTIVO_DEFAULT = "Eddyluz Mujica"/)
-  })
-
-  test("el teléfono de Eddyluz queda como contacto interno del funnel", () => {
+  test("los teléfonos de Eddyluz y Anderson siguen como contactos internos del funnel", () => {
     assert.match(FUNNEL, /"56939321687"/)
     // El de Anderson NO se borra: sus deals viejos siguen vivos.
     assert.match(FUNNEL, /"56939372058"/)
   })
 })
 
-describe("lo ya asignado queda con Anderson: el traspaso resuelve al dueño real", () => {
+describe("el traspaso post-pago resuelve al dueño real", () => {
   test("consulta el Owner de la cotización pagada en vez de asumir un nombre", () => {
     assert.match(TRASPASO, /await ownerDeCotizacion\(quoteId\)/)
   })
 
-  test("conoce a los dos ejecutivos de la transición", () => {
+  test("el directorio conoce a los ejecutivos de la transición Y a los de la tómbola", () => {
     assert.match(TRASPASO, /"emujica@geovictoria\.com": \{ nombre: "Eddyluz Mujica"/)
     assert.match(TRASPASO, /"adiazg@geovictoria\.com": \{ nombre: "Anderson Díaz"/)
+    assert.match(TRASPASO, /"tmartinezq@geovictoria\.com": \{ nombre: "Tamara Martínez"/)
+    assert.match(TRASPASO, /"alopez@geovictoria\.com": \{ nombre: "Ana Paula López"/)
   })
 
   test("el default —Zoho caído o sin owner— es Eddyluz, la del presente", () => {
@@ -74,13 +86,14 @@ describe("lo ya asignado queda con Anderson: el traspaso resuelve al dueño real
   })
 })
 
-describe("la comunicación al cliente nombra a Eddyluz", () => {
+describe("la comunicación al cliente no promete nombres fijos", () => {
   const PROMPT = leer("app/api/vic-sales-agent-v3/prompt.ts")
   const VOSEO = leer("lib/voseo-v3.ts")
 
-  test("el prompt CL atribuye lo nuevo a Eddyluz", () => {
-    assert.match(PROMPT, /a nombre de Eddyluz Mujica, la ejecutiva que da seguimiento/)
-    assert.match(PROMPT, /el Lead queda a nombre de Eddyluz para que ella lo retome/)
+  test("el prompt CL atribuye la asignación a la tómbola, no a Eddyluz", () => {
+    assert.match(PROMPT, /el ejecutivo que sortee la tómbola de deals de Zoho/)
+    assert.match(PROMPT, /el Lead entra a la tómbola de vendedores/)
+    assert.doesNotMatch(PROMPT, /quedan SIEMPRE a nombre de Eddyluz/)
     assert.doesNotMatch(PROMPT, /a nombre de Anderson/)
   })
 
@@ -93,20 +106,20 @@ describe("la comunicación al cliente nombra a Eddyluz", () => {
     assert.match(PROMPT, /JAMÁS entregues el número o correo de Eddyluz Mujica/)
   })
 
-  test("el blindaje anti-fuga cubre los teléfonos de los DOS ejecutivos", () => {
-    assert.match(VOSEO, /3937\[\\s\)\.\-\]\*2058/)
-    assert.match(VOSEO, /3932\[\\s\)\.\-\]\*1687/)
-    assert.match(VOSEO, /replace\(ANDERSON_TEL_RE, SOPORTE_WHATSAPP\)\.replace\(EDDYLUZ_TEL_RE, SOPORTE_WHATSAPP\)/)
+  test("el blindaje anti-fuga cubre los teléfonos de los CUATRO comerciales", () => {
+    assert.match(VOSEO, /3937\[\\s\)\.\-\]\*2058/) // Anderson
+    assert.match(VOSEO, /3932\[\\s\)\.\-\]\*1687/) // Eddyluz
+    assert.match(VOSEO, /3452\[\\s\)\.\-\]\*9937/) // Tamara (tómbola 31-jul)
+    assert.match(VOSEO, /6647\[\\s\)\.\-\]\*4270/) // Ana Paula (tómbola 31-jul)
+    assert.match(VOSEO, /TELS_COMERCIALES_RE\.reduce/)
   })
 })
 
-describe("los textos que hablaban de Anderson dejaron de prometerlo", () => {
+describe("los textos que hablaban de un ejecutivo fijo dejaron de prometerlo", () => {
   test("agent-loop no promete un nombre en la reunión post-cotización", () => {
-    // Durante la transición, prometer a Anderson (o a Eddyluz) por nombre es
-    // mentir en la mitad de los casos: el mensaje va sin nombre y el aviso
-    // interno manda a mirar el Owner del deal.
     assert.match(LOOP, /al ejecutivo a cargo de tu cotización/)
     assert.doesNotMatch(LOOP, /Anderson Díaz/)
     assert.match(LOOP, /revisar Owner de la cotización en Zoho/)
+    assert.match(LOOP, /asignado por la tómbola de deals/)
   })
 })

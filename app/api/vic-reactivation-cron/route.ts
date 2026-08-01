@@ -24,7 +24,7 @@ import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
 import { appendAssistantV3, fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
-import { contactosEnLoop } from "@/lib/loop-v2"
+import { contactosEnLoop, contactosTraspasados } from "@/lib/loop-v2"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
@@ -346,6 +346,12 @@ export async function GET(req: Request): Promise<Response> {
   // helper devuelve set vacío sin tocar la red: comportamiento idéntico a hoy).
   const enLoopV2 = await contactosEnLoop(rows.map((r) => r.contact)).catch(() => new Set<string>())
   let saltadosLoopV2 = 0
+  // PTV (doc Rodrigo): un contacto TRASPASADO a vendedor no recibe reactivación
+  // — regla explícita, no el efecto secundario de la exclusión por vic_loop
+  // (los traspasados sin fila de loop quedaban expuestos; auditoría 31-jul).
+  const traspasados = await contactosTraspasados(rows.map((r) => r.contact)).catch(() => new Set<string>())
+  let saltadosPtv = 0
+  saltadosPtv += rows.filter((r) => traspasados.has(r.contact)).length
   // ¿Le toca un toque AHORA? El toque N (reactivation_count = N-1) recién aplica
   // cuando ya pasaron OFFSETS_H[N-1] horas desde el último mensaje del cliente
   // (47h → 7d → 15d). Así la cadencia se mide desde el silencio, no por gap plano.
@@ -370,6 +376,7 @@ export async function GET(req: Request): Promise<Response> {
     (r) =>
       r.contact &&
       !enLoopV2.has(r.contact) &&
+      !traspasados.has(r.contact) &&
       !isTestContact(r.contact, testSet) &&
       // 'soporte': pidió soporte → cero proactividad (HSM y correo incluidos),
       // aunque tenga cotización o preform (decisión de costos 11-jul).
@@ -426,6 +433,11 @@ export async function GET(req: Request): Promise<Response> {
     const enLoopCons = await contactosEnLoop(crows.map((r) => r.contact)).catch(() => new Set<string>())
     saltadosLoopV2 += crows.filter((r) => enLoopCons.has(r.contact)).length
     crows = crows.filter((r) => !enLoopCons.has(r.contact))
+    // Traspasados a vendedor: el toque consensuado lo hace el VENDEDOR, no
+    // Vicky (mismo criterio que el batch de arriba).
+    const trasCons = await contactosTraspasados(crows.map((r) => r.contact)).catch(() => new Set<string>())
+    saltadosPtv += crows.filter((r) => trasCons.has(r.contact)).length
+    crows = crows.filter((r) => !trasCons.has(r.contact))
     if (crows.length) {
       const elegibles = await supa(`rpc/vic_filter_business_now`, {
         method: "POST",
@@ -619,6 +631,7 @@ export async function GET(req: Request): Promise<Response> {
     enviados_consensuado: enviadosConsensuado,
     sin_nombre_saludo_neutro: omitidosSinNombre,
     saltados_loop_v2: saltadosLoopV2,
+    saltados_ptv: saltadosPtv,
     correos,
   })
 }

@@ -1,27 +1,47 @@
 /**
  * Tool: registrar_solicitud_callback
  *
- * Crea Lead en Zoho. Dos modos:
- *   - Callback explícito del prospecto (default) → SIN ownerEmail → Owner =
- *     vicky default → entra a TÓMBOLA del equipo comercial.
- *   - Fallback de cotización (seguimientoCotizacion=true) → Owner = ejecutivo
- *     de cotizaciones (Eddyluz desde el 27-jul; antes Anderson) → asignado directo.
+ * Crea Lead en Zoho. Dos modos (callback explícito y fallback de cotización),
+ * AMBOS con dueño por la tómbola interina del PTV (auditoría 31-jul: antes el
+ * fallback iba a Eddyluz fija y el callback quedaba con owner Vicky, en la
+ * bandeja de nadie — la regla de leads de Zoho no dispara por API).
  */
 
 import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
+import { vendedoresDePais } from "@/lib/ptv"
 
-// Ejecutivo que sigue las cotizaciones de Vicky. Cuando Vicky tuvo intención de
-// cotizar pero no alcanzó a emitir la cotización, el lead queda a su nombre (no
-// a tómbola), para que él retome al prospecto.
-const EJECUTIVO_COTIZACIONES_EMAIL = (
-  // Relevo 27-jul: lo nuevo va a Eddyluz (antes Anderson).
-  process.env.ZOHO_EJECUTIVO_COTIZACIONES_EMAIL || "emujica@geovictoria.com"
-).trim()
+// Residuo del relevo 27-jul eliminado (auditoría 31-jul): los callbacks y los
+// fallbacks de cotización ya NO van a Eddyluz fija — el dueño sale de la
+// MISMA tómbola interina del PTV (vendedoresDePais + round-robin persistido
+// en vic_kv con la MISMA llave ptv_rr_<pais>, para que la rotación sea una
+// sola entre el cron y esta tool). La lista se extiende sin deploy por env
+// VICKY_PTV_VENDEDORES_<CC>.
+function paisDeTelefono(tel: string): "cl" | "co" | "mx" {
+  const d = (tel || "").replace(/\D/g, "")
+  if (d.startsWith("57")) return "co"
+  if (d.startsWith("521") || (d.startsWith("52") && d.length === 12)) return "mx"
+  return "cl"
+}
+
+async function vendedorPorTombola(pais: "cl" | "co" | "mx"): Promise<string | undefined> {
+  const lista = vendedoresDePais(pais)
+  if (!lista.length) return undefined
+  try {
+    const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+    const key = `ptv_rr_${pais}`
+    const last = parseInt((await getKvValue(key).catch(() => null)) || "-1")
+    const idx = (isNaN(last) ? 0 : last + 1) % lista.length
+    await setKvValue(key, String(idx)).catch(() => {})
+    return lista[idx].email
+  } catch {
+    return lista[0].email
+  }
+}
 
 export const registrarSolicitudCallbackSchema = {
   name: "registrar_solicitud_callback",
   description:
-    "Registra un Lead en Zoho CRM. Dos usos: (1) callback explícito — el prospecto pide que lo llamen ('que me llamen', 'prefiero que me contacten', 'mejor por teléfono') → déjalo SIN seguimientoCotizacion: el Lead entra a la tómbola del equipo comercial. (2) Fallback de cotización — el prospecto tenía intención de cotizar y mostró interés real, pero NO alcanzaste a reunir los datos para emitir la cotización formal (le falta RUT, dirección o email y no los entrega) → pasa seguimientoCotizacion=true: el Lead queda a nombre de la ejecutiva de cotizaciones (Eddyluz) para que ella lo retome. NO usar para reuniones agendadas (para eso existe agendar_reunion). Antes de invocarla, captura nombre, empresa y teléfono como mínimo. Email, necesidad, cantidad de trabajadores y preferencia de horario son recomendados.",
+    "Registra un Lead en Zoho CRM. Dos usos: (1) callback explícito — el prospecto pide que lo llamen ('que me llamen', 'prefiero que me contacten', 'mejor por teléfono') → déjalo SIN seguimientoCotizacion: el Lead entra a la tómbola del equipo comercial. (2) Fallback de cotización — el prospecto tenía intención de cotizar y mostró interés real, pero NO alcanzaste a reunir los datos para emitir la cotización formal (le falta RUT, dirección o email y no los entrega) → pasa seguimientoCotizacion=true: el Lead entra igual a la tómbola y el vendedor sorteado lo retoma con ese contexto. NO usar para reuniones agendadas (para eso existe agendar_reunion). Antes de invocarla, captura nombre, empresa y teléfono como mínimo. Email, necesidad, cantidad de trabajadores y preferencia de horario son recomendados.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -74,7 +94,7 @@ export const registrarSolicitudCallbackSchema = {
       seguimientoCotizacion: {
         type: "boolean" as const,
         description:
-          "true SOLO en el fallback de cotización: el prospecto tenía intención de cotizar y mostró interés, pero no se pudo emitir la cotización por falta de datos. Asigna el Lead a la ejecutiva de cotizaciones (Eddyluz) en vez de la tómbola. Para callbacks normales, omítelo o false.",
+          "true SOLO en el fallback de cotización: el prospecto tenía intención de cotizar y mostró interés, pero no se pudo emitir la cotización por falta de datos. Marca el contexto para el vendedor que salga sorteado en la tómbola. Para callbacks normales, omítelo o false.",
       },
       zohoLeadId: {
         type: "string" as const,
@@ -117,15 +137,18 @@ export type RegistrarSolicitudCallbackResultado =
 export async function registrarSolicitudCallback(
   args: RegistrarSolicitudCallbackInput,
 ): Promise<RegistrarSolicitudCallbackResultado> {
-  // Fallback de cotización → asignar a la ejecutiva de cotizaciones (no tómbola).
-  const ownerEmail = args.seguimientoCotizacion ? EJECUTIVO_COTIZACIONES_EMAIL : undefined
+  // Dueño por tómbola en AMBOS modos (callback explícito y fallback de
+  // cotización): la regla de leads de Zoho no dispara para creaciones por API
+  // y un lead con owner Vicky queda en la bandeja de nadie.
+  const pais = paisDeTelefono(args.telefono)
+  const ownerEmail = await vendedorPorTombola(pais)
 
   // Lead PRE-EXISTENTE en Zoho (outbound del formulario): NO crear duplicado.
-  // Se reasigna el MISMO lead al ejecutivo (la tómbola es una regla de creación
-  // y no re-corre en updates, así que el destino es siempre el ejecutivo).
+  // Se reasigna el MISMO lead al vendedor sorteado (la tómbola de Zoho es una
+  // regla de creación y no re-corre en updates).
   const existingLeadId = (args.zohoLeadId || "").trim()
-  if (existingLeadId) {
-    const upd = await updateZohoLeadOwner(existingLeadId, EJECUTIVO_COTIZACIONES_EMAIL)
+  if (existingLeadId && ownerEmail) {
+    const upd = await updateZohoLeadOwner(existingLeadId, ownerEmail)
     if (!upd.success) {
       console.error("[registrar_solicitud_callback] reasignación falló:", upd.error)
       return { ok: false, error: `No se pudo reasignar el lead existente: ${upd.error}` }
@@ -133,8 +156,8 @@ export async function registrarSolicitudCallback(
     return {
       ok: true,
       leadId: existingLeadId,
-      entraATombola: false,
-      ownerEmail: EJECUTIVO_COTIZACIONES_EMAIL,
+      entraATombola: true,
+      ownerEmail,
       mensajeParaProspecto:
         `¡Listo! Dejé registrado que prefieres que te contacten: nuestro ejecutivo te va a llamar al ${args.telefono}` +
         (args.preferenciaHorario ? ` (en el horario que pediste: ${args.preferenciaHorario})` : "") +

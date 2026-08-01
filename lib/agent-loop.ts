@@ -461,7 +461,7 @@ export async function runAgentLoop(params: {
           const slot = String((toolInput as Record<string, unknown>).slotIso || "")
           const nombreCli = String((toolInput as Record<string, unknown>).prospectName || "")
           await avisarEquipoInterno(
-            `📅 Reunión pedida POST-cotización — contacto +${contact} (${nombreCli}). Horario pedido: ${slot || "sin hora exacta"}. La invitación la envía el DUEÑO del deal (revisar Owner de la cotización en Zoho — relevo 27-jul: nuevas de Eddyluz, anteriores de Anderson); no se agendó por Cal.com para no asignar otro KAM.`,
+            `📅 Reunión pedida POST-cotización — contacto +${contact} (${nombreCli}). Horario pedido: ${slot || "sin hora exacta"}. La invitación la envía el DUEÑO del deal (revisar Owner de la cotización en Zoho — asignado por la tómbola de deals; Eddyluz/Anderson solo en deals anteriores); no se agendó por Cal.com para no asignar otro KAM.`,
           ).catch(() => {})
           result = {
             ok: true,

@@ -107,12 +107,17 @@ export function quitarSignosApertura(texto: string): string {
  * correcto para esos casos. Determinista, se aplica al texto de salida.
  */
 // Teléfonos comerciales en sus formatos típicos de salida (con/sin +56,
-// con/sin el 9). Núcleos distintivos: "3937 ... 2058" (Anderson, deals
-// anteriores al relevo del 27-jul) y "3932 ... 1687" (Eddyluz, deals nuevos).
-// El relevo NO retira el blindaje viejo: el número de Anderson sigue vivo en
-// historiales y el modelo puede repetirlo desde ahí.
-const ANDERSON_TEL_RE = /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3937[\s).-]*2058/gi
-const EDDYLUZ_TEL_RE = /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3932[\s).-]*1687/gi
+// con/sin el 9). Núcleos distintivos: "3937 ... 2058" (Anderson), "3932 ...
+// 1687" (Eddyluz) y, desde la tómbola de deals del 31-jul, "3452 ... 9937"
+// (Tamara Martínez) y "6647 ... 4270" (Ana Paula López) — sus números ahora
+// circulan en presentaciones del sistema y quedan en historiales, así que el
+// modelo puede repetirlos igual que los antiguos. Ningún blindaje se retira.
+const TELS_COMERCIALES_RE = [
+  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3937[\s).-]*2058/gi, // Anderson Díaz
+  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3932[\s).-]*1687/gi, // Eddyluz Mujica
+  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3452[\s).-]*9937/gi, // Tamara Martínez
+  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?6647[\s).-]*4270/gi, // Ana Paula López
+]
 // Fuente de verdad del canal de soporte: MENSAJE_ESCALAMIENTO_HUMANO en
 // lib/tools/consultar-agente-soporte.ts. Si cambia allá, actualizar aquí.
 const SOPORTE_WHATSAPP = "+56 9 4401 3873"
@@ -122,5 +127,5 @@ export function blindarContactoComercial(
   permitidoComercial: boolean,
 ): string {
   if (!texto || permitidoComercial) return texto
-  return texto.replace(ANDERSON_TEL_RE, SOPORTE_WHATSAPP).replace(EDDYLUZ_TEL_RE, SOPORTE_WHATSAPP)
+  return TELS_COMERCIALES_RE.reduce((t, re) => t.replace(re, SOPORTE_WHATSAPP), texto)
 }

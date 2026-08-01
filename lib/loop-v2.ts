@@ -482,6 +482,25 @@ export async function compromisoLoop(contact: string, fechaIso: string): Promise
 }
 
 /**
+ * Contactos (de la lista dada) con traspaso a vendedor ACTIVO (vic_ptv).
+ * Un traspasado no recibe NINGUNA proactividad de Vicky (doc "Vicky paso a
+ * paso"): el vendedor está encima y el único contacto posterior es el chequeo
+ * de calidad del propio PTV. Regla explícita — antes la protección era un
+ * efecto secundario de la exclusión por vic_loop, y los traspasados sin fila
+ * de loop quedaban expuestos (auditoría 31-jul).
+ */
+export async function contactosTraspasados(contacts: string[]): Promise<Set<string>> {
+  const out = new Set<string>()
+  if (!contacts.length || !SUPABASE_URL || !SUPABASE_KEY) return out
+  const lista = contacts.map((c) => `"${c}"`).join(",")
+  const res = await supa(`vic_ptv?contact=in.(${lista})&estado=eq.activo&select=contact`).catch(() => null)
+  if (!res || !res.ok) return out
+  const rows = ((await res.json().catch(() => [])) as Array<{ contact: string }>) || []
+  for (const r of rows) if (r.contact) out.add(r.contact)
+  return out
+}
+
+/**
  * Contactos (de la lista dada) que tienen fila en vic_loop — UN solo fetch
  * batch, para que los crons viejos los salten sin caer en N+1. Con el flag
  * apagado devuelve set vacío SIN tocar la red: cero cambio de comportamiento.

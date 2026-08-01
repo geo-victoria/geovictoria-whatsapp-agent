@@ -107,7 +107,9 @@ const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
 const VICKY_COTIZADORA_SECRET = process.env.VICKY_COTIZADORA_SECRET || ""
 const SCOPE_MAX_USUARIOS = 50
-// Relevo 27-jul: las cotizaciones nuevas son de Eddyluz.
+// Desde la tómbola de deals (31-jul) el dueño real viene en la respuesta del
+// cotizador (data.ejecutivo); este default queda solo para cuando esa lectura
+// falla (Zoho caído a mitad del request).
 const EJECUTIVO_DEFAULT = "Eddyluz Mujica"
 const IVA_RATE = 0.19
 
@@ -648,6 +650,7 @@ export async function generarLinkCotizadora(
     accountId?: string
     contactId?: string
     reuse?: { accountReused?: boolean; contactReused?: boolean; leadConverted?: boolean }
+    ejecutivo?: { nombre?: string; email?: string }
     error?: string
     detail?: string
   }
@@ -710,7 +713,7 @@ export async function generarLinkCotizadora(
     dealId: data.dealId || "",
     accountId: data.accountId || "",
     contactId: data.contactId || "",
-    ejecutivoAsignado: EJECUTIVO_DEFAULT,
+    ejecutivoAsignado: (data.ejecutivo && data.ejecutivo.nombre) || EJECUTIVO_DEFAULT,
     totalUF: Number(totalUF.toFixed(3)),
     totalCLP,
     advertencias,

@@ -427,7 +427,10 @@ export async function GET(req: Request) {
     const pais = (paisDeContacto(ch.contact) || "cl") as "cl" | "co" | "mx"
     const ventanaAbierta = Boolean(conv?.last_user_at && ahora.getTime() - new Date(conv.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
-      const texto = mensajeChequeo(pais, ch.vendedor_nombre || NOMBRE_VENDEDOR[ch.vendedor_email] || ch.vendedor_email.split("@")[0])
+      // Jamás un prefijo de correo en la cara del cliente: si no conocemos el
+      // nombre, el chequeo pregunta por "nuestro ejecutivo" (filas viejas de
+      // vic_ptv sin vendedor_nombre — auditoría 31-jul).
+      const texto = mensajeChequeo(pais, ch.vendedor_nombre || NOMBRE_VENDEDOR[ch.vendedor_email] || "nuestro ejecutivo")
       const enviado = await sendBotmakerMessage(ch.contact, texto).catch(() => false)
       if (enviado) {
         await appendAssistantV3(ch.contact, texto).catch(() => {})
