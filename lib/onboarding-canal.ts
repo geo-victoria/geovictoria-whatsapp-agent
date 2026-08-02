@@ -15,6 +15,10 @@
 import { getKvValue, setKvValue } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-empresa"
+
+// URL de inicio de sesión de la plataforma para el instructivo post-alta.
+// Sin env, el copy dice "la plataforma GeoVictoria" sin link (jamás inventar).
+const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "").trim()
 export { entregarKickoffOnboarding } from "./onboarding-envio"
 import { dispatchTool } from "./tools"
 import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
@@ -172,16 +176,27 @@ export async function armarOnboarding(contact: string): Promise<{
               JSON.stringify({ at: new Date().toISOString(), companyId: alta.companyId, via: "api" }),
             ).catch(() => {})
             await avisarEquipoInterno(
-              `✅ ALTA ONBOARDING CL creada POR API (companyId ${alta.companyId}, acceso ${alta.loginUserCreated ? "enviado" : "PENDIENTE"}) — contacto +${contact}.\n${fichaAlta}`,
+              `✅ ALTA ONBOARDING CL creada POR API (companyId ${alta.companyId}) — contacto +${contact}.\n${fichaAlta}`,
             ).catch(() => {})
+            // Copy en TERCERA persona sobre el admin (Lalo 02-ago): quien
+            // chatea puede ser el admin o el comprador que nombró a otra
+            // persona — hablar del admin por nombre y correo sirve en ambos
+            // casos. La contraseña temporal viaja SOLO por el correo de la
+            // plataforma: Vicky nunca la conoce ni la menciona.
+            const dondeEntrar = LOGIN_URL
+              ? `Iniciar sesión en ${LOGIN_URL} con ese correo y la contraseña temporal`
+              : `Iniciar sesión en la plataforma GeoVictoria con ese correo y la contraseña temporal`
             return {
               ok: true,
-              mensajeParaProspecto: alta.loginUserCreated
-                ? `¡Tu cuenta quedó creada! 🎉 Te enviamos el correo de acceso a ${alta.workEmail} — si no ` +
-                  `lo ves en unos minutos, revisa Promociones o Spam. Entra, cambia tu clave y me cuentas ` +
-                  `cualquier duda de los primeros pasos por aquí mismo.`
-                : `¡Tu cuenta quedó creada! 🎉 El acceso para ${alta.workEmail} te llega dentro de las ` +
-                  `próximas horas — te aviso por aquí. Cualquier duda mientras tanto, aquí estoy.`,
+              mensajeParaProspecto:
+                `¡${b.empresa.nombre} ya tiene su cuenta creada en GeoVictoria! 🎉\n\n` +
+                `El acceso quedó a nombre de ${b.admin.nombre} ${b.admin.apellido}: la plataforma le envió un correo a ${alta.workEmail} con su contraseña temporal.\n\n` +
+                `Para partir son 3 pasos:\n` +
+                `1. Abrir el correo de no-reply@geovictoria.com (si no aparece en unos minutos, revisar Promociones o Spam)\n` +
+                `2. ${dondeEntrar}\n` +
+                `3. Cambiar la contraseña — y la cuenta queda operativa\n\n` +
+                `Si el administrador es otra persona, avísale que su acceso ya le llegó 😉\n\n` +
+                `Cualquier duda con los primeros pasos me escribes por aquí — y si el correo no llega, dime y lo vemos.`,
             }
           }
           // Creación falló → cae al alta manual (jamás perder un alta).

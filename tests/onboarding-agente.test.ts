@@ -260,12 +260,22 @@ describe("prompt de la fase: el estado inyectado manda", () => {
     assert.match(p, /NO llames confirmar_alta_empresa/)
   })
 
-  test("alta ya solicitada: prohíbe re-pedir datos y re-confirmar", () => {
+  test("alta ya procesada: prohíbe re-pedir datos y re-confirmar", () => {
     const p = promptOnboardingCL(COMPLETO, { altaSolicitada: true })
-    assert.match(p, /YA FUE SOLICITADA/)
+    assert.match(p, /YA FUE PROCESADA/)
     assert.match(p, /NO vuelvas a pedir datos/)
-    assert.match(p, /24 horas\s+hábiles/)
+    // Con el alta por API la cuenta puede quedar creada AL INSTANTE: el prompt
+    // ya no promete "24 horas hábiles" — remite a lo que se le informó.
+    assert.match(p, /recuérdale lo que ya se le informó/)
     assert.ok(!p.includes("Datos pendientes"), "no puede volver a listar pendientes")
+  })
+
+  test("la pedida de datos explica el ROL del admin y que puede ser otra persona", () => {
+    const p = promptOnboardingCL(borradorVacio("cl"), { altaSolicitada: false })
+    assert.match(p, /quien compra no siempre administra/)
+    assert.match(p, /acceso total/)
+    assert.match(p, /el administrador serás tú, u otra persona/)
+    assert.match(p, /a ESE correo llegará el acceso/)
   })
 })
 

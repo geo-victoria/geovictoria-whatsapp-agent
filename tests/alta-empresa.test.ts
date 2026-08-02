@@ -90,10 +90,24 @@ describe("el canal del onboarding usa el adaptador con candado", () => {
   })
 
   test("el mensaje al cliente respeta la honestidad de entrega del correo", () => {
-    // La plataforma envía el acceso por correo: se dice "te enviamos" y se
+    // La plataforma envía el acceso por correo: se dice "le envió" y se
     // sugiere revisar Promociones/Spam — jamás se afirma que "llegó".
-    assert.match(CANAL, /Te enviamos el correo de acceso/)
+    assert.match(CANAL, /le envió un correo a \$\{alta\.workEmail\}/)
     assert.match(CANAL, /Promociones o Spam/)
     assert.doesNotMatch(CANAL, /ya te llegó el correo/i)
+  })
+
+  test("la confirmación habla del ADMIN en tercera persona (comprador ≠ admin)", () => {
+    // Quien chatea puede ser el admin o el comprador que nombró a otro: el
+    // copy nombra al admin y su correo, y sirve para ambos casos.
+    assert.match(CANAL, /El acceso quedó a nombre de \$\{b\.admin\.nombre\} \$\{b\.admin\.apellido\}/)
+    assert.match(CANAL, /Si el administrador es otra persona/)
+    // La contraseña temporal viaja SOLO por el correo de la plataforma.
+    assert.match(CANAL, /Vicky nunca la conoce/)
+  })
+
+  test("el link de login sale de env, jamás inventado", () => {
+    assert.match(CANAL, /VICKY_PLATAFORMA_LOGIN_URL/)
+    assert.match(CANAL, /la plataforma GeoVictoria con ese correo/)
   })
 })
