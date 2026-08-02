@@ -126,26 +126,30 @@ export async function armarOnboarding(contact: string): Promise<{
         `Correo admin: ${b.admin.email}` +
         (b.admin.idInterno ? `\nCódigo interno: ${b.admin.idInterno}` : "")
 
+      // Empresa YA registrada en la plataforma: no se crea encima (caso
+      // Cofradía — cliente actual que compra un upgrade). La activación del
+      // plan nuevo la hace el equipo sobre la cuenta existente. Se usa tanto
+      // cuando lo dice exists como cuando lo atrapa el 409 del propio
+      // servicio (carrera entre el exists y el create).
+      const responderYaExiste = async (nombreExistente: string | null) => {
+        await avisarEquipoInterno(
+          `🏢 ALTA ONBOARDING CL: la empresa YA EXISTE en la plataforma (${nombreExistente || "sin nombre"}). ` +
+            `Posible cliente actual con plan nuevo — activar sobre la cuenta existente, NO crear otra. ` +
+            `Contacto +${contact}.\n${fichaAlta}`,
+        )
+        await setKvValue(claveAltaSolicitada(contact), new Date().toISOString()).catch(() => {})
+        return {
+          ok: true,
+          mensajeParaProspecto:
+            "¡Buenas noticias! Tu empresa ya tiene una cuenta creada en GeoVictoria 🙌 Para dejar tu " +
+            "nuevo plan activo sobre esa misma cuenta, nuestro equipo lo habilita directamente — te " +
+            "confirmo por este chat dentro de 24 horas hábiles. Cualquier duda mientras tanto, aquí estoy.",
+        }
+      }
+
       if (altaApiConfigurada()) {
         const existe = await existeEmpresa(b.empresa.identificador!, "cl")
-        if (existe?.exists) {
-          // Empresa YA registrada en la plataforma: no se crea encima (caso
-          // Cofradía — cliente actual que compra un upgrade). La activación
-          // del plan nuevo la hace el equipo sobre la cuenta existente.
-          await avisarEquipoInterno(
-            `🏢 ALTA ONBOARDING CL: la empresa YA EXISTE en la plataforma (${existe.name || "sin nombre"}). ` +
-              `Posible cliente actual con plan nuevo — activar sobre la cuenta existente, NO crear otra. ` +
-              `Contacto +${contact}.\n${fichaAlta}`,
-          )
-          await setKvValue(claveAltaSolicitada(contact), new Date().toISOString()).catch(() => {})
-          return {
-            ok: true,
-            mensajeParaProspecto:
-              "¡Buenas noticias! Tu empresa ya tiene una cuenta creada en GeoVictoria 🙌 Para dejar tu " +
-              "nuevo plan activo sobre esa misma cuenta, nuestro equipo lo habilita directamente — te " +
-              "confirmo por este chat dentro de 24 horas hábiles. Cualquier duda mientras tanto, aquí estoy.",
-          }
-        }
+        if (existe?.exists) return await responderYaExiste(existe.name)
         if (existe && !existe.exists) {
           const alta = await crearEmpresaConAdmin({
             pais: "cl",
@@ -158,6 +162,10 @@ export async function armarOnboarding(contact: string): Promise<{
               idInterno: b.admin.idInterno,
             },
           })
+          // Carrera entre el exists y el create: el 409 del propio servicio
+          // (company_already_exists, verificado 02-ago) la atrapa — mismo
+          // camino que exists=true, jamás alta manual duplicada.
+          if (!alta.ok && alta.yaExiste) return await responderYaExiste(null)
           if (alta.ok) {
             await setKvValue(
               claveAltaSolicitada(contact),

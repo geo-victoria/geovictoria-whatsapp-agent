@@ -91,7 +91,7 @@ export type AltaEmpresaResultado =
       loginUserCreated: boolean
       workEmail: string
     }
-  | { ok: false; error: string }
+  | { ok: false; error: string; yaExiste?: boolean }
 
 /** Crea la empresa + su primer administrador. NO consulta exists: ese candado
  * es responsabilidad del caller (consultar-antes-de-crear). */
@@ -116,7 +116,11 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
     const texto = await res.text().catch(() => "")
     if (!res.ok) {
       console.warn(`[alta-empresa] company → ${res.status}: ${texto.slice(0, 200)}`)
-      return { ok: false, error: `El servicio de alta devolvió ${res.status}` }
+      // 409 company_already_exists: el servicio tiene su PROPIO candado
+      // anti-duplicados (verificado 02-ago). Se distingue para que el canal
+      // responda como "ya existe" (activación al equipo), no como falla.
+      const yaExiste = res.status === 409 || /company_already_exists/.test(texto)
+      return { ok: false, error: `El servicio de alta devolvió ${res.status}`, ...(yaExiste ? { yaExiste: true } : {}) }
     }
     const data = JSON.parse(texto || "{}") as {
       company?: { companyId?: string | number }

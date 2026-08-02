@@ -63,6 +63,14 @@ describe("el canal del onboarding usa el adaptador con candado", () => {
     assert.match(CANAL, /NO crear otra/)
   })
 
+  test("el 409 del servicio (carrera exists→create) también termina en 'ya existe'", () => {
+    // Verificado en vivo 02-ago: crear con RUT existente → 409
+    // company_already_exists. El adaptador lo distingue y el canal lo trata
+    // igual que exists=true — nunca como falla que dispare alta manual.
+    assert.match(ADAPTADOR, /res\.status === 409 \|\| \/company_already_exists\//)
+    assert.match(CANAL, /alta\.yaExiste\) return await responderYaExiste/)
+  })
+
   test("la creación solo corre con exists === false explícito", () => {
     assert.match(CANAL, /if \(existe && !existe\.exists\)/)
   })
