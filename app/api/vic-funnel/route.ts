@@ -1622,8 +1622,6 @@ export async function GET(req: Request): Promise<Response> {
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
   })()}
 
-  ${funnelOrigenHtml}
-
   ${listadoHtml}
 
   ${ventasHtml}
@@ -1662,6 +1660,8 @@ export async function GET(req: Request): Promise<Response> {
       ${CURATED_FINDINGS.map((f) => `<tr><td style="width:8%;white-space:nowrap">${f.fecha}</td><td style="width:30%"><b>${f.titulo}</b></td><td>${f.detalle}</td></tr>`).join("")}
     </tbody></table>
   </div>
+
+  ${funnelOrigenHtml}
 
   <div class="foot">Clasificación semántica con Claude · datos en vivo desde Supabase · Vicky V3 · GeoVictoria</div>
 </div>
