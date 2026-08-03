@@ -193,7 +193,12 @@ export const generarLinkCotizadoraSchema = {
           properties: {
             id: { type: "string" as const },
             cantidad: { type: "number" as const, minimum: 1 },
-            modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+            modalidad: {
+              type: "string" as const,
+              enum: ["arriendo", "venta"],
+              description:
+                "POR DEFECTO 'arriendo'. El reloj se cotiza SIEMPRE arrendado; usa 'venta' ÚNICAMENTE si el cliente pidió COMPRARLO de forma explícita en la conversación. Nunca elijas 'venta' por tu cuenta, ni para comparar, ni porque el cliente pregunte cuánto vale el reloj. Ante la duda, omite el campo.",
+            },
           },
           required: ["id"],
         },
@@ -435,6 +440,16 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
     const modalidadElegida: "arriendo" | "venta" = hw.modalidad ?? "arriendo"
     if (!dispositivo.modalidadesDisponibles.includes(modalidadElegida)) {
       return { ok: false, error: `${dispositivo.displayName} no disponible en modalidad '${modalidadElegida}'` }
+    }
+    if (modalidadElegida === "venta") {
+      // Vicky NUNCA propone venta por su cuenta: solo si el cliente pidió
+      // comprar. Si esto aparece sin que el cliente lo haya pedido, el modelo
+      // se saltó la regla — y la diferencia de precio es enorme (6 UF de una vez
+      // contra 0,35 al mes), así que conviene que quede a la vista.
+      console.warn(
+        `[generar_link_cotizadora] reloj ${dispositivo.id} cotizado en VENTA (${dispositivo.ventaUF} UF). ` +
+          "Solo debería ocurrir si el cliente pidió comprarlo explícitamente.",
+      )
     }
     const precioUnitario = modalidadElegida === "arriendo" ? dispositivo.arriendoUF : dispositivo.ventaUF
     if (precioUnitario === 0) return { ok: false, error: `${dispositivo.displayName} sin precio en modalidad '${modalidadElegida}'` }

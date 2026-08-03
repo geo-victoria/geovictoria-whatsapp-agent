@@ -91,7 +91,7 @@ export const cotizarReferencialSchema = {
               type: "string" as const,
               enum: ["arriendo", "venta"],
               description:
-                "Modalidad. Si el hardware no tiene precio de venta (ej. SF2A tiene venta=0), solo 'arriendo' aplica.",
+                "POR DEFECTO 'arriendo'. El reloj se cotiza SIEMPRE arrendado; usa 'venta' ÚNICAMENTE si el cliente pidió COMPRARLO de forma explícita en la conversación. Nunca elijas 'venta' por tu cuenta, ni para comparar, ni porque el cliente pregunte cuánto vale el reloj. Ante la duda, omite el campo.",
             },
           },
           required: ["id"],
