@@ -57,6 +57,7 @@ export async function mediaEntranteRecienteDebug(
   delContacto: number
   conMedia: number
   kesMuestra?: string[]
+  muestra?: string[]
 }> {
   const vacio = { top: null, totalItems: 0, delContacto: 0, conMedia: 0 }
   if (!BM_TOKEN) return vacio
@@ -87,6 +88,7 @@ export async function mediaEntranteRecienteDebug(
       delContacto: propios.length,
       conMedia: conMedia.length,
       kesMuestra: propios[0] ? Object.keys(propios[0]) : undefined,
+      muestra: propios.slice(0, 3).map((m) => JSON.stringify(m).slice(0, 600)),
     }
   } catch (e) {
     console.error("[comprobante-adjunto] mediaEntranteReciente falló:", e)

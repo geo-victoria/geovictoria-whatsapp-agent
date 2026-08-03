@@ -80,6 +80,7 @@ export async function POST(req: Request): Promise<Response> {
             delContacto: bm.delContacto,
             conMedia: bm.conMedia,
             kesMuestra: bm.kesMuestra,
+            muestra: bm.muestra,
           },
         },
         { status: 404 },
