@@ -391,6 +391,13 @@ async function traspasarATelemarketing(
       : undefined
     if (lead?.Converted_Deal?.id) {
       await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ estado: "cerrado" }) })
+      // Con DEAL convertido la conversación NO es "sin calificar": se cierra
+      // también su fila del loop para que no vuelva a candidatearse en cada
+      // tick (primer barrido 03-ago: dos contactos reintentaban infinito).
+      await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ estado: "cerrado", motivo_cierre: "tm_no_aplica_deal" }),
+      })
       return { ok: false, detalle: "tiene deal — no es sin-calificar" }
     }
 
