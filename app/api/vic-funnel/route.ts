@@ -648,6 +648,11 @@ type FilaListado = {
   accionable: string
   /** Resumen del análisis, como tooltip del accionable. */
   resumen: string
+  /** Última respuesta del cliente y último mensaje de la conversación — junto
+   * con fechaIso y primerContactoIso definen la "actividad" del caso para el
+   * filtro global Desde–Hasta. */
+  lastUserIso: string
+  updatedIso: string
 }
 
 /** Respaldo determinístico del accionable cuando el análisis aún no corre. */
@@ -670,11 +675,11 @@ function accionableFallback(estado: string, motivo: string | null): string {
   }
 }
 
-type ConvListado = { id: string; contact: string; started_at: string | null; last_user_at: string | null }
+type ConvListado = { id: string; contact: string; started_at: string | null; last_user_at: string | null; updated_at: string | null }
 
 async function fetchConvsListado(): Promise<ConvListado[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,started_at,last_user_at&order=started_at.desc&limit=2000`,
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,started_at,last_user_at,updated_at&order=started_at.desc&limit=2000`,
     { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
   )
   return res.ok ? ((await res.json().catch(() => [])) as ConvListado[]) : []
@@ -868,6 +873,8 @@ function construirListadoComercial(params: {
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback(estado, ana?.motivo_no_cierre || null),
       resumen: String(ana?.resumen || ""),
+      lastUserIso: String(conv?.last_user_at || ""),
+      updatedIso: String(conv?.updated_at || ""),
     })
   }
 
@@ -891,6 +898,8 @@ function construirListadoComercial(params: {
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback("Preform enviado", ana?.motivo_no_cierre || null),
       resumen: String(ana?.resumen || ""),
+      lastUserIso: String(conv?.last_user_at || ""),
+      updatedIso: String(conv?.updated_at || ""),
     })
   }
 
@@ -920,6 +929,8 @@ function construirListadoComercial(params: {
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback(estadoLead, ana?.motivo_no_cierre || null),
       resumen: String(ana?.resumen || ""),
+      lastUserIso: String(conv?.last_user_at || ""),
+      updatedIso: String(conv?.updated_at || ""),
     })
   }
 
@@ -929,8 +940,15 @@ function construirListadoComercial(params: {
 /** Escalera de estados del listado — también alimenta el filtro global. */
 const ESTADOS_LISTADO = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada"]
 
-function renderListadoComercial(filas: FilaListado[], key: string): string {
-  if (!filas.length) return ""
+function renderListadoComercial(filas: FilaListado[], key: string, periodo: string, conRango: boolean): string {
+  if (!filas.length) {
+    // Con rango activo la sección no desaparece: se explica que no hubo actividad.
+    if (conRango) {
+      return `<div class="card"><h2>Listado comercial vivo <span class="pct" style="font-weight:400">— 0 casos ${periodo}</span></h2>
+  <p class="sub" style="margin:0">Sin casos con actividad en el período seleccionado.</p></div>`
+    }
+    return ""
+  }
   const filasHtml = filas
     .map(
       (f) => `<tr data-estado="${esc(f.estado)}" data-prop="${esc(f.propietario)}" data-fecha="${esc(f.fechaIso.slice(0, 10))}">
@@ -944,12 +962,12 @@ function renderListadoComercial(filas: FilaListado[], key: string): string {
       </tr>`,
     )
     .join("")
-  return `<div class="card"><h2>Listado comercial vivo <span class="pct" style="font-weight:400">— ${filas.length} casos (últimos 30 días)</span></h2>
+  return `<div class="card"><h2>Listado comercial vivo <span class="pct" style="font-weight:400">— ${filas.length} casos (${periodo})</span></h2>
   <div style="overflow-x:auto"><table id="lcTabla">
     <thead><tr><th>Empresa / contacto</th><th>Primer contacto</th><th>Estado</th><th>Fecha último estado</th><th>Estado en Zoho (deal/lead)</th><th>Propietario</th><th>Accionable (Claude)</th></tr></thead>
     <tbody>${filasHtml}</tbody>
   </table></div>
-  <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). El accionable lo escribe el análisis de Claude por conversación (pasa el mouse para ver el resumen; si aún no fue analizada, sale una sugerencia por estado). Fechas en hora de Chile. Para filtrar, usa los filtros globales de arriba (aplican a toda la página, incluida esta tabla).</div>
+  <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). El accionable lo escribe el análisis de Claude por conversación (pasa el mouse para ver el resumen; si aún no fue analizada, sale una sugerencia por estado). Fechas en hora de Chile. Para filtrar, usa los filtros globales de arriba (aplican a toda la página, incluida esta tabla). Con un rango de fechas activo se muestran solo los casos con actividad en el período: inicio de conversación, última respuesta del cliente, último mensaje o el evento del estado, cualquiera dentro del rango.</div>
 </div>`
 }
 
@@ -1106,8 +1124,20 @@ export async function GET(req: Request): Promise<Response> {
       estadoF || propF
         ? new Set(filasListado.filter(coincide).map((f) => digits(f.contacto)).filter(Boolean))
         : null
-    const filasVisibles = permitidos ? filasListado.filter(coincide) : filasListado
-    listadoHtml = renderListadoComercial(filasVisibles, key)
+    // Filtro Desde–Hasta sobre el listado (pedido Lalo 04-ago): con rango
+    // activo se muestran solo los casos con ACTIVIDAD en el período — inicio
+    // de conversación, última respuesta del cliente, último mensaje o el
+    // evento que definió su estado actual, cualquiera dentro del rango.
+    const tuvoActividad = (f: FilaListado) =>
+      !rango ||
+      [f.primerContactoIso, f.fechaIso, f.lastUserIso, f.updatedIso].some((iso) => iso && enRango(iso, rango))
+    const filasVisibles = filasListado.filter((f) => coincide(f) && tuvoActividad(f))
+    listadoHtml = renderListadoComercial(
+      filasVisibles,
+      key,
+      rango ? `con actividad en ${rango.etiqueta}` : "últimos 30 días",
+      Boolean(rango),
+    )
     // El filtro global re-corta el cierre de Zoho (por teléfono de la
     // cotización) y el funnel por origen (por teléfono del lead/toque).
     if (permitidos && cierre) {
