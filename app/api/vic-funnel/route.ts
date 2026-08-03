@@ -83,7 +83,7 @@ async function kvGet(key: string): Promise<string> {
   }
 }
 
-async function kvSet(key: string, value: string): Promise<void> {
+async function kvSet(key: string, value: string, expiresAt?: string): Promise<void> {
   await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?on_conflict=key`, {
     method: "POST",
     headers: {
@@ -92,7 +92,7 @@ async function kvSet(key: string, value: string): Promise<void> {
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates,return=minimal",
     },
-    body: JSON.stringify({ key, value }),
+    body: JSON.stringify(expiresAt ? { key, value, expires_at: expiresAt } : { key, value }),
     cache: "no-store",
   }).catch(() => {})
 }
@@ -963,6 +963,143 @@ function construirListadoComercial(params: {
 /** Escalera de estados del listado — también alimenta el filtro global. */
 const ESTADOS_LISTADO = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada"]
 
+// ── COLA DE GESTIÓN (pedido Lalo 04-ago): la vista principal del dash es una
+// lista de trabajo — a quién llamar/contactar AHORA, segmentado por tipo de
+// accionable (derivado por regla desde la escalera) y por horario.
+type TipoAccion = { id: string; label: string; emoji: string; prioridad: number }
+const TIPOS_ACCION: TipoAccion[] = [
+  { id: "cerrar_pago", label: "Cerrar pago", emoji: "💰", prioridad: 7 },
+  { id: "completar_datos", label: "Completar datos", emoji: "📋", prioridad: 6 },
+  { id: "empujar_cotizacion", label: "Empujar cotización", emoji: "📄", prioridad: 5 },
+  { id: "destrabar_precio", label: "Destrabar precio", emoji: "🔓", prioridad: 4 },
+  { id: "primer_contacto", label: "Primer contacto", emoji: "📞", prioridad: 3 },
+  { id: "retomar", label: "Retomar interés", emoji: "🔄", prioridad: 2 },
+  { id: "bienvenida", label: "Bienvenida post-venta", emoji: "🎉", prioridad: 1 },
+]
+
+/** Tipo de acción por regla determinística (estado + señales del accionable). */
+function tipoAccionDe(f: FilaListado): TipoAccion | null {
+  const texto = `${f.accionable} ${f.resumen}`.toLowerCase()
+  const faltanDatos = /\brut\b|correo|email|completar datos|faltan? dato/.test(texto)
+  const t = (id: string) => TIPOS_ACCION.find((x) => x.id === id) || null
+  switch (f.estado) {
+    case "Aceptada":
+      return t("cerrar_pago")
+    case "Pagada": {
+      // Bienvenida solo la primera semana; después sale de la cola.
+      const dias = (Date.now() - Date.parse(f.fechaIso || "")) / 864e5
+      return Number.isFinite(dias) && dias <= 7 ? t("bienvenida") : null
+    }
+    case "Formal enviada":
+      return faltanDatos ? t("completar_datos") : t("empujar_cotizacion")
+    case "Preform enviado":
+      return faltanDatos ? t("completar_datos") : t("destrabar_precio")
+    case "Sin contactar":
+      return t("primer_contacto")
+    case "Contactado":
+    case "En levantamiento":
+      return t("retomar")
+    default:
+      return null
+  }
+}
+
+const TZ_OFFSET: Record<Pais, number> = { cl: -4, co: -5, pe: -5, mx: -6 }
+
+/** Hora local del cliente (por prefijo del teléfono) y si es llamable ahora
+ * (L-V, 8-18 h local; los feriados por país quedan para vic_holidays). */
+function horaLocalCliente(tel: string, paisDash: Pais): { hora: string; llamable: boolean } {
+  const p = paisDeTelefono(tel) || paisDash
+  const d = new Date(Date.now() + TZ_OFFSET[p] * 3600e3)
+  const h = d.getUTCHours()
+  const dow = d.getUTCDay()
+  return {
+    hora: `${String(h).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`,
+    llamable: dow >= 1 && dow <= 5 && h >= 8 && h < 18,
+  }
+}
+
+function renderColaGestion(params: {
+  filas: FilaListado[]
+  gestionados: Map<string, string>
+  montos: Map<string, { uf: number | null; clp: number | null }>
+  key: string
+  pais: Pais
+}): string {
+  const { filas, gestionados, montos, key, pais } = params
+  const casos = filas
+    .map((f) => ({ f, tipo: tipoAccionDe(f) }))
+    .filter((x): x is { f: FilaListado; tipo: TipoAccion } => x.tipo !== null)
+  const activos = casos.filter((x) => !gestionados.has(digits(x.f.contacto)))
+  const nGestionados = casos.length - activos.length
+
+  const diasSin = (f: FilaListado) => {
+    const t = Date.parse(f.updatedIso || f.fechaIso || "")
+    return Number.isFinite(t) ? (Date.now() - t) / 864e5 : 99
+  }
+  const urgencia = (f: FilaListado, tipo: TipoAccion): { label: string; color: string } => {
+    const d = diasSin(f)
+    const limite = tipo.prioridad >= 5 ? 1 : 2 // los calientes vencen antes
+    if (d > limite * 2) return { label: "Vencido", color: "#C62828" }
+    if (d > limite) return { label: "Hoy", color: "#F9A825" }
+    return { label: "Al día", color: "#2E7D32" }
+  }
+  const montoDe = (f: FilaListado): { txt: string; uf: number } => {
+    const m = montos.get(digits(f.contacto))
+    if (m?.uf) return { txt: `UF ${m.uf}`, uf: m.uf }
+    if (m?.clp) return { txt: `$${Math.round(m.clp).toLocaleString("es-CL")}`, uf: m.clp / 40000 }
+    return { txt: "—", uf: 0 }
+  }
+  const score = (f: FilaListado, tipo: TipoAccion) =>
+    tipo.prioridad * 100 + Math.min(montoDe(f).uf, 50) * 2 + Math.min(diasSin(f), 14)
+
+  const secciones = TIPOS_ACCION.map((tipo) => {
+    const grupo = activos
+      .filter((x) => x.tipo.id === tipo.id)
+      .sort((a, b) => score(b.f, b.tipo) - score(a.f, a.tipo))
+    if (!grupo.length) return ""
+    const filasHtml = grupo
+      .map(({ f, tipo: tp }) => {
+        const d = digits(f.contacto)
+        const hl = horaLocalCliente(d, pais)
+        const u = urgencia(f, tp)
+        const m = montoDe(f)
+        const dias = diasSin(f)
+        return `<tr data-contact="${esc(d)}">
+          <td>${esc(f.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(d)} · ${esc(f.propietario)}</div></td>
+          <td style="white-space:nowrap"><span title="hora local del cliente">${hl.llamable ? "🟢" : "🌙"} ${hl.hora}</span></td>
+          <td style="white-space:nowrap"><span class="tag" style="background:${u.color}22;color:${u.color}">${u.label}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
+          <td style="white-space:nowrap;text-align:right">${m.txt}</td>
+          <td style="max-width:300px">${esc(f.accionable)}${f.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(f.resumen)}</div>` : ""}</td>
+          <td style="white-space:nowrap"><a href="tel:+${esc(d)}" title="Llamar">📞</a> <a href="https://wa.me/${esc(d)}" target="_blank" title="WhatsApp">💬</a> ${f.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(f.convId)}" title="Ver conversación">📄</a>` : ""} <button class="btnGest" data-contact="${esc(d)}" title="Marcar gestionado (sale de la cola por 24 h)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button></td>
+        </tr>`
+      })
+      .join("")
+    return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Empresa / contacto · ejecutivo</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th>Acciones</th></tr></thead>
+      <tbody>${filasHtml}</tbody>
+    </table></div>`
+  }).join("")
+
+  return `<div class="card"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas (ocultas 24 h)` : ""}</span></h2>
+  ${activos.length ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
+  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. 🟢 = horario hábil del cliente (L-V 8-18 h local, según prefijo del teléfono) · 🌙 = fuera de horario. ✔ marca el caso como gestionado y lo oculta de la cola por 24 horas (para todos los usuarios del dash).</div>
+  <script>
+    document.querySelectorAll(".btnGest").forEach(function (b) {
+      b.addEventListener("click", async function () {
+        this.disabled = true; this.textContent = "…";
+        try {
+          await fetch("?key=${encodeURIComponent(key)}&accion=gestionar&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
+          var tr = this.closest("tr"); tr.style.transition = "opacity .4s"; tr.style.opacity = "0.25";
+          this.textContent = "✔ listo";
+        } catch (e) { this.disabled = false; this.textContent = "✔"; }
+      });
+    });
+  </script>
+</div>`
+}
+
 function renderListadoComercial(filas: FilaListado[], key: string, periodo: string, conRango: boolean): string {
   if (!filas.length) {
     // Con rango activo la sección no desaparece: se explica que no hubo actividad.
@@ -1131,6 +1268,24 @@ async function renderConversation(convId: string, key: string): Promise<Response
   return page(html)
 }
 
+// Marca un caso como GESTIONADO (botón ✔ de la cola): se guarda en vic_kv con
+// expiración a 24 h y el caso sale de la cola para todos los usuarios del dash.
+export async function POST(req: Request): Promise<Response> {
+  const { searchParams } = new URL(req.url)
+  const key = (searchParams.get("key") || "").trim()
+  if (!FUNNEL_KEY || key !== FUNNEL_KEY) {
+    return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "content-type": "application/json" } })
+  }
+  const accion = (searchParams.get("accion") || "").trim()
+  const contact = digits(searchParams.get("contact") || "")
+  if (accion === "gestionar" && contact) {
+    const expira = new Date(Date.now() + 24 * 3600e3).toISOString()
+    await kvSet(`gestion_${contact}`, JSON.stringify({ at: new Date().toISOString() }), expira)
+    return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } })
+  }
+  return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { "content-type": "application/json" } })
+}
+
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
   const key = (searchParams.get("key") || "").trim()
@@ -1184,6 +1339,9 @@ export async function GET(req: Request): Promise<Response> {
   const estadoRaw = (searchParams.get("estado") || "").trim()
   const estadoF = ESTADOS_LISTADO.includes(estadoRaw) ? estadoRaw : ""
   const propF = (searchParams.get("prop") || "").trim()
+  // Vista: "gestion" (default, la cola de trabajo) o "analisis" (KPIs, Sankey
+  // y el resto del embudo) — pestaña arriba a la derecha (pedido Lalo 04-ago).
+  const vista: "gestion" | "analisis" = searchParams.get("vista") === "analisis" ? "analisis" : "gestion"
   // Drill-down de un KPI: ?lista=<bucket> abre el detalle de esas conversaciones.
   const listaParam = (searchParams.get("lista") || "").trim()
   // Query string con los filtros vigentes (para los links de los KPIs y el
@@ -1194,6 +1352,7 @@ export async function GET(req: Request): Promise<Response> {
     if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
     if (estadoF) p.set("estado", estadoF)
     if (propF) p.set("prop", propF)
+    if (vista === "analisis") p.set("vista", "analisis")
     return p
   }
   const hrefLista = (bucket: string) => {
@@ -1209,6 +1368,10 @@ export async function GET(req: Request): Promise<Response> {
   // (empresa, estado, ejecutivo a cargo, accionable).
   let filasListado: FilaListado[] = []
   let listadoHtml = ""
+  // Cola de gestión (vista principal) y sus insumos.
+  let colaHtml = ""
+  let gestionados = new Map<string, string>()
+  let montosPorContacto = new Map<string, { uf: number | null; clp: number | null }>()
   try {
     const paisesConv = await fetchPaisesConversaciones()
     const [allRows, hard, cierreZoho, origenData, fechasConv, convsListado] = await Promise.all([
@@ -1230,10 +1393,24 @@ export async function GET(req: Request): Promise<Response> {
     // resto porque su escalera de estados alimenta los filtros globales.
     try {
       const contactosConocidos = new Set(convsListado.map((c) => digits(c.contact)))
-      const [preformAt, zohoListado] = await Promise.all([
+      const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+      const [preformAt, zohoListado, gestionadosKv, punteros] = await Promise.all([
         fetchPreformAts(convsListado),
         fetchZohoListado(contactosConocidos),
+        fetch(
+          `${SUPABASE_URL}/rest/v1/vic_kv?key=like.gestion_%25&select=key,value&expires_at=gt.${new Date().toISOString()}&limit=1000`,
+          { headers: hSb, cache: "no-store" },
+        ).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ key: string; value: string }>>,
+        fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,total_uf,total_clp&limit=1000`, {
+          headers: hSb,
+          cache: "no-store",
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null }>>,
       ])
+      gestionados = new Map(gestionadosKv.map((g) => [String(g.key).replace(/^gestion_/, ""), String(g.value || "")]))
+      for (const p of punteros) {
+        const d = digits(p.contact)
+        if (d && !montosPorContacto.has(d)) montosPorContacto.set(d, { uf: p.total_uf, clp: p.total_clp })
+      }
       filasListado = construirListadoComercial({
         quotes: cierre?.todasList || [],
         leads: zohoListado.leads,
@@ -1267,6 +1444,7 @@ export async function GET(req: Request): Promise<Response> {
       rango ? `con actividad en ${rango.etiqueta}` : "últimos 30 días",
       Boolean(rango),
     )
+    colaHtml = renderColaGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, key, pais })
     // El filtro global re-corta el cierre de Zoho (por teléfono de la
     // cotización) y el funnel por origen (por teléfono del lead/toque).
     if (permitidos && cierre) {
@@ -1524,6 +1702,54 @@ export async function GET(req: Request): Promise<Response> {
 
   const kpiCard = (label: string, value: number | string, color: string, sub?: string, bucket?: string) =>
     `<div class="kpi">${bucket ? `<a href="${hrefLista(bucket)}" title="Ver el detalle" style="text-decoration:none">` : ""}<div class="kpi-v" style="color:${color}${bucket ? ";cursor:pointer" : ""}">${value}</div>${bucket ? "</a>" : ""}<div class="kpi-l">${label}${sub ? ` <span class="pct">${sub}</span>` : ""}</div></div>`
+
+  // ── Flujo cotización y tasa de cierre: se computa una vez y alimenta ambas
+  // vistas — el bloque completo va en Análisis; la tarjeta hero de tasa de
+  // cierre es lo ÚNICO de KPIs que queda visible en Gestión (Lalo 04-ago).
+  let flujoCotizHtml = ""
+  let tasaCierreHtml = ""
+  {
+    const vieronPrecio = cPreform + cEnviada
+    const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
+    const abandonoPreform = vieronPrecio ? `${Math.round((cPreform / vieronPrecio) * 100)}% de abandono tras ver precio` : ""
+    const base = `
+    ${kpiCard("Vio precio y NO avanzó", cPreform, col.warn, abandonoPreform || "quedó en preform", "preform")}
+    ${kpiCard("Cotización enviada", cEnviada, col.best, pasoPreform, "enviada")}
+    ${kpiCard("Se fue ANTES del precio", cAbandonado, col.bad, "sin preform", "abandonado")}`
+    if (!cierre) {
+      flujoCotizHtml = `<div class="kpis">${base}
+  </div>
+  <div class="sub" style="margin:-2px 0 10px">Zoho no disponible en esta carga — recarga para ver aceptadas y cierre.</div>`
+    } else {
+      const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
+      const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
+      // Objetivo de cierre POR PAÍS (Lalo 28-jul): Chile 30%; Colombia, Perú y
+      // México 10% — los programas nuevos maduran distinto.
+      const TARGET_PCT = pais === "cl" ? 30 : 10
+      const metaExacta = (TARGET_PCT / 100) * vieronPrecio
+      const cumpleMeta = vieronPrecio > 0 && cierre.aceptadas >= metaExacta
+      const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - cierre.aceptadas))
+      const faltanNuevas = Math.max(0, Math.ceil((metaExacta - cierre.aceptadas) / (1 - TARGET_PCT / 100)))
+      const leyendaObjetivo = cumpleMeta
+        ? "vio precio → venta · objetivo alcanzado 🎉"
+        : `vio precio → venta · faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`
+      const colorObjetivo = cumpleMeta ? col.best : col.warn
+      const avanceMeta = Math.min(100, Math.round((endToEnd / TARGET_PCT) * 100))
+      tasaCierreHtml = vieronPrecio
+        ? `<div class="kpis"><div class="kpi hero">
+        <div class="kpi-v"><span style="color:${colorObjetivo}">${endToEnd}%</span> <span class="hero-meta">de cierre real · objetivo ${TARGET_PCT}%</span></div>
+        <div class="hero-bar"><div style="width:${avanceMeta}%;background:${colorObjetivo}"></div></div>
+        <div class="kpi-l">${avanceMeta}% del camino al objetivo <span class="pct">${leyendaObjetivo}</span></div>
+      </div></div>`
+        : ""
+      flujoCotizHtml = `<div class="kpis">${base}
+    ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
+    ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
+  </div>
+  ${tasaCierreHtml}
+  <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
+    }
+  }
   const pct = (x: number) => (total ? `${Math.round((x / total) * 100)}%` : "")
 
   const html = `<!doctype html><html lang="es"><head>
@@ -1559,12 +1785,16 @@ export async function GET(req: Request): Promise<Response> {
   .bar-num{text-align:right;font-weight:700;color:#6d4c41}
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
-  <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Vicky ${PAISES[pais].nombre} ${PAISES[pais].bandera} (línea +${PAISES[pais].prefijo}) — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · ${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")} · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <h1>${vista === "gestion" ? "Gestión comercial — Vicky V3" : "Análisis y KPIs — Vicky V3"}</h1>
+    <a href="?${(() => { const p = filtrosQS(); if (vista === "gestion") { p.set("vista", "analisis") } else { p.delete("vista") } return p.toString() })()}" style="font-size:14px;white-space:nowrap">${vista === "gestion" ? "📊 Análisis y KPIs →" : "← 📞 Gestión"}</a>
+  </div>
+  <div class="sub">Vicky ${PAISES[pais].nombre} ${PAISES[pais].bandera} (línea +${PAISES[pais].prefijo}) — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · ${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")} · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
   <div class="sub" style="margin-top:6px">
     <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
       <input type="hidden" name="pais" value="${pais}">
+      ${vista === "analisis" ? `<input type="hidden" name="vista" value="analisis">` : ""}
       <label style="font-size:12px">Desde <input type="date" name="desde" value="${rango ? rango.desdeStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <label style="font-size:12px">Hasta <input type="date" name="hasta" value="${rango ? rango.hastaStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <label style="font-size:12px">Estado <select name="estado" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px">
@@ -1590,6 +1820,13 @@ export async function GET(req: Request): Promise<Response> {
     });
   </script>
 
+  ${vista === "gestion" ? `
+  ${tasaCierreHtml}
+
+  ${colaHtml}
+
+  ${listadoHtml}
+  ` : `
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
     ${kpiCard("Conversaciones", total, col.base, undefined, "total")}
@@ -1606,68 +1843,7 @@ export async function GET(req: Request): Promise<Response> {
     ${kpiCard("Solo dudas", soloDudas, col.grey, undefined, "solo_dudas")}
   </div>
   <div class="kgroup">Flujo cotización y tasa de cierre (${cotizacion} conversaciones · cierre en vivo desde Zoho)</div>
-  ${(() => {
-    const vieronPrecio = cPreform + cEnviada
-    const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
-    // Tasa de abandono post-preform (Lalo 28-jul): el complemento del paso a
-    // formal — de los que vieron precio, cuántos se quedaron ahí.
-    const abandonoPreform = vieronPrecio ? `${Math.round((cPreform / vieronPrecio) * 100)}% de abandono tras ver precio` : ""
-    const base = `
-    ${kpiCard("Vio precio y NO avanzó", cPreform, col.warn, abandonoPreform || "quedó en preform", "preform")}
-    ${kpiCard("Cotización enviada", cEnviada, col.best, pasoPreform, "enviada")}
-    ${kpiCard("Se fue ANTES del precio", cAbandonado, col.bad, "sin preform", "abandonado")}`
-    if (!cierre) {
-      return `<div class="kpis">${base}
-  </div>
-  <div class="sub" style="margin:-2px 0 10px">Zoho no disponible en esta carga — recarga para ver aceptadas y cierre.</div>`
-    }
-    const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
-    const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
-    // Objetivo de cierre POR PAÍS (Lalo 28-jul): Chile 30%; Colombia, Perú y
-    // México 10% — los programas nuevos maduran distinto.
-    // (28-jul: las tarjetas de AUTONOMÍA — "Tasa de cierre 100% Vicky",
-    // "Objetivo · 100% Vicky" y "Tasa de cierre asistido" — se eliminaron del
-    // dash a pedido de Lalo.)
-    const TARGET_PCT = pais === "cl" ? 30 : 10
-    // Objetivo de cierre (pedido Lalo 21-jul): tasa actual vs el target del
-    // país y cuántas ventas faltan, diferenciando el camino: cerrar
-    // cotizaciones YA enviadas (solo suma al numerador) vs ventas de
-    // cotizaciones NUEVAS (una conversación nueva que ve precio y compra suma
-    // a AMBOS lados, por eso se necesita más: n = (meta − actuales) / (1 − t)).
-    const metaExacta = (TARGET_PCT / 100) * vieronPrecio
-    const cumpleMeta = vieronPrecio > 0 && cierre.aceptadas >= metaExacta
-    const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - cierre.aceptadas))
-    const faltanNuevas = Math.max(0, Math.ceil((metaExacta - cierre.aceptadas) / (1 - TARGET_PCT / 100)))
-    // 28-jul (Lalo): la tarjeta "Cierre end-to-end" era redundante con esta —
-    // mismo 19% dos veces. Queda SOLO la del objetivo, sola en su propia fila
-    // con el número al centro (clase .hero), y hereda la leyenda "vio precio
-    // → venta" para que se entienda qué mide la tasa.
-    const leyendaObjetivo = cumpleMeta
-      ? "vio precio → venta · objetivo alcanzado 🎉"
-      : `vio precio → venta · faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`
-    // Real vs meta sin ambigüedad (Lalo 28-jul): el número grande y con color
-    // es la tasa REAL; la meta va como texto secundario gris, y la barra de
-    // progreso muestra cuánto del camino al objetivo está recorrido.
-    const colorObjetivo = cumpleMeta ? col.best : col.warn
-    const avanceMeta = Math.min(100, Math.round((endToEnd / TARGET_PCT) * 100))
-    const cardObjetivo = vieronPrecio
-      ? `<div class="kpi hero">
-        <div class="kpi-v"><span style="color:${colorObjetivo}">${endToEnd}%</span> <span class="hero-meta">de cierre real · objetivo ${TARGET_PCT}%</span></div>
-        <div class="hero-bar"><div style="width:${avanceMeta}%;background:${colorObjetivo}"></div></div>
-        <div class="kpi-l">${avanceMeta}% del camino al objetivo <span class="pct">${leyendaObjetivo}</span></div>
-      </div>`
-      : ""
-    return `<div class="kpis">${base}
-    ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
-    ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
-  </div>
-  <div class="kpis">
-    ${cardObjetivo}
-  </div>
-  <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
-  })()}
-
-  ${listadoHtml}
+  ${flujoCotizHtml}
 
   ${ventasHtml}
 
@@ -1707,22 +1883,26 @@ export async function GET(req: Request): Promise<Response> {
   </div>
 
   ${funnelOrigenHtml}
+  `}
 
   <div class="foot">Clasificación semántica con Claude · datos en vivo desde Supabase · Vicky V3 · GeoVictoria</div>
 </div>
 <script>
-  var labels = ${JSON.stringify(labels)};
-  var nodeColor = ${JSON.stringify(nodeColor)};
-  var L = ${JSON.stringify(links)};
-  var data = [{
-    type: "sankey", orientation: "h",
-    node: { label: labels, color: nodeColor, pad: 18, thickness: 18, line: { color: "#fff", width: 1 },
-      hovertemplate: "%{label}: %{value}<extra></extra>" },
-    link: { source: L.map(function(x){return x.s}), target: L.map(function(x){return x.t}),
-      value: L.map(function(x){return x.v}), color: "rgba(47,84,150,0.16)",
-      hovertemplate: "%{source.label} → %{target.label}: %{value}<extra></extra>" }
-  }];
-  Plotly.newPlot("sankey", data, { font: { size: 12 }, margin: { l: 0, r: 0, t: 8, b: 8 } }, { responsive: true, displayModeBar: false });
+  var sankeyDiv = document.getElementById("sankey");
+  if (sankeyDiv) {
+    var labels = ${JSON.stringify(labels)};
+    var nodeColor = ${JSON.stringify(nodeColor)};
+    var L = ${JSON.stringify(links)};
+    var data = [{
+      type: "sankey", orientation: "h",
+      node: { label: labels, color: nodeColor, pad: 18, thickness: 18, line: { color: "#fff", width: 1 },
+        hovertemplate: "%{label}: %{value}<extra></extra>" },
+      link: { source: L.map(function(x){return x.s}), target: L.map(function(x){return x.t}),
+        value: L.map(function(x){return x.v}), color: "rgba(47,84,150,0.16)",
+        hovertemplate: "%{source.label} → %{target.label}: %{value}<extra></extra>" }
+    }];
+    Plotly.newPlot("sankey", data, { font: { size: 12 }, margin: { l: 0, r: 0, t: 8, b: 8 } }, { responsive: true, displayModeBar: false });
+  }
 </script>
 </body></html>`
 
