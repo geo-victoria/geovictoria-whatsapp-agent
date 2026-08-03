@@ -1022,27 +1022,35 @@ function renderListaKpi(
   key: string,
   volverQS: string,
   ultimoContactoPorConv: Map<string, string>,
+  filaPorContacto: Map<string, FilaListado>,
 ): Response {
   const ultimo = (r: Row) => ultimoContactoPorConv.get(r.conversation_id) || ""
   // Más reciente primero: el detalle es una lista de trabajo, no un archivo.
   rowsBucket = [...rowsBucket].sort((a, b) => ultimo(b).localeCompare(ultimo(a)))
-  const chips = (r: Row) =>
-    [
-      r.sub_bucket ? `<span class="tag">${esc(r.sub_bucket)}</span>` : "",
-      r.cotizacion_outcome ? `<span class="tag">${esc(r.cotizacion_outcome.replace(/_/g, " "))}</span>` : "",
-      r.motivo_no_cierre ? `<span class="tag" style="background:#fdecea;color:#8a1f11">motivo: ${esc(r.motivo_no_cierre.replace(/_/g, " "))}</span>` : "",
-      r.es_cliente_actual ? `<span class="tag" style="background:#e8f5e9;color:#1b5e20">cliente actual</span>` : "",
-    ].filter(Boolean).join(" ")
   const filas = rowsBucket
-    .map(
-      (r) => `<tr>
-        <td style="white-space:nowrap">+${esc(digits(r.contact))}</td>
+    .map((r) => {
+      // Ficha del listado comercial (empresa, escalera, dueño, accionable con
+      // respaldo determinístico); si el caso no está en ese universo (p. ej.
+      // soporte), se muestra lo que aporta el análisis de la conversación.
+      const d = digits(r.contact)
+      const f = filaPorContacto.get(d)
+      const chips = [
+        r.motivo_no_cierre ? `<span class="tag" style="background:#fdecea;color:#8a1f11">motivo: ${esc(r.motivo_no_cierre.replace(/_/g, " "))}</span>` : "",
+        r.es_cliente_actual ? `<span class="tag" style="background:#e8f5e9;color:#1b5e20">cliente actual</span>` : "",
+      ].filter(Boolean).join(" ")
+      const estadoHtml = f
+        ? `<span class="tag">${esc(f.estado)}</span><div class="sub" style="margin:3px 0 0;font-size:12px">${esc(f.estadoZoho)}</div>`
+        : `<span class="tag">${esc((r.cotizacion_outcome || r.sub_bucket || r.grupo || "—").replace(/_/g, " "))}</span>`
+      const accionable = (f?.accionable || r.accionable || "").trim() || "—"
+      const resumen = (f?.resumen || r.resumen || "").trim()
+      return `<tr>
+        <td>${esc(f?.empresa || "(por identificar)")}<div class="sub" style="margin:0;font-size:12px">+${esc(d)}</div></td>
         <td style="white-space:nowrap">${fmtSantiago(ultimo(r))}</td>
-        <td>${chips(r)}</td>
-        <td>${esc(r.resumen || "—")}</td>
-        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&conv=${esc(r.conversation_id)}">ver conversación →</a></td>
-      </tr>`,
-    )
+        <td>${estadoHtml}${chips ? `<div style="margin-top:3px">${chips}</div>` : ""}</td>
+        <td>${esc(f?.propietario || "—")}</td>
+        <td style="max-width:300px">${esc(accionable)}${resumen ? `<div class="sub" style="margin:3px 0 0;font-size:12px">${esc(resumen)}</div>` : ""}<div style="margin-top:4px"><a href="?key=${encodeURIComponent(key)}&conv=${esc(r.conversation_id)}">ver conversación →</a></div></td>
+      </tr>`
+    })
     .join("")
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} — Vicky</title>
@@ -1062,7 +1070,7 @@ function renderListaKpi(
   <div class="sub">${rowsBucket.length} conversación${rowsBucket.length === 1 ? "" : "es"} · respeta los filtros activos del embudo (país, fechas, estado, propietario)</div>
   <div class="card">${
     rowsBucket.length
-      ? `<div style="overflow-x:auto"><table><thead><tr><th>Contacto</th><th>Último contacto</th><th>Clasificación</th><th>Resumen (Claude)</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Último contacto</th><th>Estado</th><th>Ejecutivo a cargo</th><th>Accionable (Claude)</th></tr></thead><tbody>${filas}</tbody></table></div>`
       : `<p class="sub" style="margin:0">Sin conversaciones en esta categoría con los filtros actuales.</p>`
   }</div>
 </div></body></html>`
@@ -1197,6 +1205,9 @@ export async function GET(req: Request): Promise<Response> {
   // conversación → fecha del último mensaje (columna "Último contacto" del
   // detalle de KPIs).
   let ultimoMsgPorConv = new Map<string, string>()
+  // Escalera del listado comercial: también enriquece el detalle de KPIs
+  // (empresa, estado, ejecutivo a cargo, accionable).
+  let filasListado: FilaListado[] = []
   let listadoHtml = ""
   try {
     const paisesConv = await fetchPaisesConversaciones()
@@ -1217,7 +1228,6 @@ export async function GET(req: Request): Promise<Response> {
     // Listado comercial vivo (best-effort: si una pata falla, la sección se
     // arma con lo que haya; jamás bota la página). Se construye ANTES que el
     // resto porque su escalera de estados alimenta los filtros globales.
-    let filasListado: FilaListado[] = []
     try {
       const contactosConocidos = new Set(convsListado.map((c) => digits(c.contact)))
       const [preformAt, zohoListado] = await Promise.all([
@@ -1334,7 +1344,14 @@ export async function GET(req: Request): Promise<Response> {
   // fechas, estado y propietario, más el predicado del bucket.
   if (listaParam && KPI_BUCKETS[listaParam]) {
     const b = KPI_BUCKETS[listaParam]
-    return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`, ultimoMsgPorConv)
+    // Ficha más reciente por contacto (filasListado viene ordenado por fecha
+    // de último estado, descendente).
+    const filaPorContacto = new Map<string, FilaListado>()
+    for (const f of filasListado) {
+      const d = digits(f.contacto)
+      if (d && !filaPorContacto.has(d)) filaPorContacto.set(d, f)
+    }
+    return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`, ultimoMsgPorConv, filaPorContacto)
   }
 
   if (rows.length === 0) {
