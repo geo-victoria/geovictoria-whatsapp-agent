@@ -2104,7 +2104,7 @@ export async function GET(req: Request): Promise<Response> {
     <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Telemarketing" : "Análisis y KPIs — Vicky V3"}</h1></div>
     <a href="?${(() => { const p = filtrosQS(); if (vista === "gestion") { p.set("vista", "analisis") } else { p.delete("vista") } return p.toString() })()}" style="font-size:14px;white-space:nowrap">${vista === "gestion" ? "📊 Análisis y KPIs →" : "← 📞 Gestión"}</a>
   </div>
-  <div class="sub">Vicky ${PAISES[pais].nombre} ${PAISES[pais].bandera} (línea +${PAISES[pais].prefijo}) — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · ${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")} · <button id="btnRefresh" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <div class="sub">Vicky ${PAISES[pais].nombre} ${PAISES[pais].bandera} (línea +${PAISES[pais].prefijo}) — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · ${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}</div>
   <div class="sub" style="margin-top:6px">
     <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
@@ -2125,15 +2125,6 @@ export async function GET(req: Request): Promise<Response> {
       ${rango || estadoF || propF ? `<span style="font-size:11px;color:#9ca3af">· fechas: conversaciones por inicio, cotizaciones por emisión, pagos por fecha de pago${estadoF || propF ? " · Estado y Propietario aplican a TODAS las secciones (según la escalera del listado comercial, últimos 30 días)" : ` · "Funnel por origen" muestra el programa completo`}</span>` : ""}
     </form>
   </div>
-  <script>
-    // Actualización manual: re-analiza conversaciones nuevas (mismo key del
-    // dash) y recarga con los datos de Zoho en vivo. Pedido Lalo 21-jul.
-    document.getElementById("btnRefresh").addEventListener("click", async function () {
-      this.disabled = true; this.textContent = "Actualizando…";
-      try { await fetch("/api/vic-funnel-cron?key=${encodeURIComponent(key)}&limit=25"); } catch (e) {}
-      var u = new URL(location.href); u.searchParams.set("r", Date.now()); location.href = u.toString();
-    });
-  </script>
 
   ${vista === "gestion" ? `
   ${colaHtml}
