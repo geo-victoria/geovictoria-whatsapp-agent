@@ -22,13 +22,17 @@ import { NextResponse } from "next/server"
 import {
   ptvHabilitado,
   debeTraspasar,
+  debeTraspasarEtapa,
+  traspasoV2Habilitado,
+  CALIFICACION_24H_MIN,
+  minutosHabilesEntre,
   vendedoresDePais,
   mensajePresentacion,
   mensajeChequeo,
   sumarHorasHabiles,
 } from "@/lib/ptv"
-import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
-import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { appendAssistantV3, getFollowupCronSecret, getQuotePointers } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
@@ -299,6 +303,182 @@ async function asignarEnZoho(
   }
 }
 
+/** ¿La cotización formal vigente del contacto ya está Aceptada en Zoho?
+ * Solo se consulta para CANDIDATOS a traspaso v2 (barato). Best-effort:
+ * ante cualquier duda devuelve false (el traspaso procede). */
+async function cotizacionAceptada(contact: string): Promise<boolean> {
+  try {
+    const pointers = await getQuotePointers(contact).catch(() => [])
+    const quoteId = pointers[0]?.quoteId
+    if (!quoteId) return false
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const modulo = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const r = await fetch(`${api}/crm/v3/${modulo}/${quoteId}?fields=Estado_Cotizacion`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    if (!r.ok) return false
+    const estado = String(
+      ((await r.json().catch(() => ({}))) as { data?: Array<{ Estado_Cotizacion?: string }> }).data?.[0]
+        ?.Estado_Cotizacion || "",
+    )
+    return /aceptada|pagada/i.test(estado)
+  } catch {
+    return false
+  }
+}
+
+// ── Reloj de calificación 24 h hábiles → tómbola de RE-ASIGNACIÓN (Lalo
+// 03-ago, solo CL). Conversación sin intención comercial detectable en 24 h
+// hábiles → el lead (se crea si no existe) se re-asigna por la regla de Zoho
+// "Re-asignación de Vicky" a un ejecutivo de telemarketing, que hereda la
+// calificación. La notificación al ejecutivo la da Zoho (regla); Vicky
+// presenta al ejecutivo por la plantilla HSM (la ventana está cerrada por
+// definición: el cliente no responde hace 24 h hábiles). ────────────────────
+const TM_REGLA_CL = (process.env.VICKY_TM_REASIGNACION_RULE_CL || "3525045000649066001").trim()
+const TM_TEMPLATE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION || "vicky_traspaso_ejecutivo").trim()
+const MAX_TM_POR_TICK = 10
+/** Teléfonos de los telemarketers ("email:+56...,email:+56..."). Fallback:
+ * campo Phone/Mobile de su ficha de usuario en Zoho. */
+function telefonoTmPorEmail(email: string): string {
+  const raw = (process.env.VICKY_TM_TELEFONOS || "").trim()
+  for (const par of raw.split(",")) {
+    const [e, tel] = par.split(":").map((x) => (x || "").trim())
+    if (e && tel && e.toLowerCase() === email.toLowerCase()) return tel
+  }
+  return ""
+}
+
+type CandidatoTM = { contact: string; origen: "outbound" | "inbound" }
+
+async function traspasarATelemarketing(
+  contact: string,
+  origen: string,
+  ahora: Date,
+  feriados: Set<string>,
+): Promise<{ ok: boolean; vendedor?: string; detalle?: string }> {
+  // Candado primero (UNIQUE contact+activo evita dobles).
+  const fila = await supa<{ id: string }>(`vic_ptv`, {
+    method: "POST",
+    body: JSON.stringify({
+      contact,
+      motivo: `sin_calificar_24h_${origen}`,
+      ttv_minutos: CALIFICACION_24H_MIN,
+      precio_mostrado: false,
+      vendedor_email: "",
+      vendedor_zoho_id: "",
+      vendedor_nombre: "",
+      chequeo_at: sumarHorasHabiles(ahora, 9, "cl", feriados).toISOString(),
+    }),
+  })
+  if (!fila.length) return { ok: false, detalle: "candado" }
+
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const fono = contact.replace(/\D/g, "")
+
+    // 1. Lead: buscar; con deal convertido NO es un sin-calificar (fuera).
+    const s = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
+    const lead = s.ok && s.status !== 204
+      ? ((await s.json().catch(() => ({}))) as {
+          data?: Array<{ id?: string; First_Name?: string; Converted_Deal?: { id?: string } | null; Owner?: { id?: string; email?: string; name?: string } }>
+        }).data?.[0]
+      : undefined
+    if (lead?.Converted_Deal?.id) {
+      await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ estado: "cerrado" }) })
+      return { ok: false, detalle: "tiene deal — no es sin-calificar" }
+    }
+
+    let leadId = lead?.id || ""
+    const ownerActual = (lead?.Owner?.email || "").toLowerCase()
+    const ownerBot = !ownerActual || /vicky@|info@geovictoria/.test(ownerActual)
+    if (!leadId) {
+      // Sin lead → se crea (regla 1 del Proceso de Gestión de Leads) y la
+      // regla de re-asignación decide el dueño en el paso siguiente.
+      const { createZohoLead } = await import("@/lib/zoho-leads")
+      const creado = await createZohoLead({
+        nombre: "Prospecto WhatsApp",
+        empresa: `Por identificar (WhatsApp +${fono})`,
+        telefono: fono,
+        contactoWA: fono,
+        pais: "Chile",
+        necesidad: `Traspaso a telemarketing: ${origen === "outbound" ? "outbound sin respuesta" : "inbound sin responder la primera pregunta"} en 24 horas hábiles — el ejecutivo califica.`,
+      }).catch(() => null)
+      if (!creado || !creado.success) {
+        await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ estado: "cerrado" }) })
+        return { ok: false, detalle: "no se pudo crear el lead" }
+      }
+      leadId = creado.leadId
+    }
+
+    // 2. Dueño: si el lead ya es de un HUMANO, no se pisa su gestión (regla
+    // marketing 30-jul) — ese humano es el ejecutivo que se presenta. Si es
+    // del bot, la regla de re-asignación de Zoho sortea al telemarketer.
+    let owner = lead?.Owner && !ownerBot ? lead.Owner : undefined
+    if (!owner?.id) {
+      const put = await fetch(`${api}/crm/v3/Leads`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({ data: [{ id: leadId }], lar_id: TM_REGLA_CL }),
+      })
+      if (!put.ok) console.warn(`[tm-24h] regla de re-asignación falló (${put.status}) lead=${leadId}`)
+      const g = await fetch(`${api}/crm/v3/Leads/${leadId}?fields=Owner,First_Name`, { headers: H, cache: "no-store" })
+      owner = ((await g.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; email?: string; name?: string } }> }).data?.[0]?.Owner
+    }
+    if (!owner?.id || !owner.email) {
+      await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ estado: "cerrado" }) })
+      return { ok: false, detalle: "sin dueño tras la regla" }
+    }
+
+    // 3. Registro final del traspaso.
+    await supa(`vic_ptv?id=eq.${fila[0].id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        vendedor_email: owner.email,
+        vendedor_zoho_id: owner.id,
+        vendedor_nombre: owner.name || owner.email.split("@")[0],
+      }),
+    })
+
+    // 4. Presentación por PLANTILLA (regla dura: ejecutivo, teléfono y correo
+    // son obligatorios — sin teléfono no sale, antes que presentar a medias).
+    const telefono = telefonoTmPorEmail(owner.email) || (await telefonoDeUsuario(owner.id, H, api))
+    if (telefono) {
+      const params: Record<string, string> = {
+        nombre: (lead?.First_Name || "").trim() || "👋",
+        ejecutivo_smb: owner.name || owner.email.split("@")[0],
+        telefono_ejecutivo: telefono,
+        correoElectronico: owner.email,
+      }
+      const enviado = await sendBotmakerTemplate(contact, TM_TEMPLATE, params).catch(() => false)
+      if (enviado) {
+        await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ presentado_al_prospecto: true }) })
+        await appendAssistantV3(
+          contact,
+          `[Plantilla ${TM_TEMPLATE}]: presenté a ${params.ejecutivo_smb} (${telefono} · ${owner.email}) como tu ejecutivo de acompañamiento.`,
+        ).catch(() => {})
+      }
+    } else {
+      console.warn(`[tm-24h] ${contact}: sin teléfono para ${owner.email} — traspaso sin presentación (el ejecutivo llama directo)`)
+    }
+
+    // 5. El traspaso apaga la cadencia del loop para este contacto.
+    await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ estado: "cerrado", motivo_cierre: "tm_traspasado" }),
+    })
+    console.log(`[tm-24h] ${contact} → ${owner.email} (${origen})`)
+    return { ok: true, vendedor: owner.email }
+  } catch (e) {
+    console.warn(`[tm-24h] ${contact} falló:`, e instanceof Error ? e.message : e)
+    return { ok: false, detalle: "excepción" }
+  }
+}
+
 export async function GET(req: Request) {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
@@ -316,12 +496,16 @@ export async function GET(req: Request) {
     last_user_at: string | null
     updated_at: string
     pref_escalon: number | null
+    pref_escalon_at: string | null
     pref_quote_id: string | null
     formal_quote_id: string | null
+    formal_quote_at: string | null
     followup_closed_reason: string | null
+    first_user_at: string | null
+    user_msg_count: number | null
   }>(
     `vic_v3_conversations?updated_at=gte.${encodeURIComponent(desde)}` +
-      `&select=contact,country,last_user_at,updated_at,pref_escalon,pref_quote_id,formal_quote_id,followup_closed_reason&limit=200`,
+      `&select=contact,country,last_user_at,updated_at,pref_escalon,pref_escalon_at,pref_quote_id,formal_quote_id,formal_quote_at,followup_closed_reason,first_user_at,user_msg_count&limit=200`,
   )
   const activos = await supa<{ contact: string }>(`vic_ptv?estado=eq.activo&select=contact&limit=1000`)
   const conTraspaso = new Set(activos.map((a) => a.contact))
@@ -354,17 +538,40 @@ export async function GET(req: Request) {
     const ultimoCliente = new Date(c.last_user_at)
     const clienteRespondioDespues = ultimoCliente >= new Date(c.updated_at)
     const feriados = await feriadosDePais(pais)
-    const decision = debeTraspasar({
-      referenciaRelojAt: ultimoCliente,
-      clienteRespondioDespues,
-      precioMostrado: Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
-      pais,
-      ahora,
-      feriados,
-      compromisoAt: compromisoPor.get(c.contact) ? new Date(String(compromisoPor.get(c.contact))) : null,
-      traspasoActivo: conTraspaso.has(c.contact),
-    })
+    const compromisoAt = compromisoPor.get(c.contact) ? new Date(String(compromisoPor.get(c.contact))) : null
+    // TRASPASO v2 (solo CL, flag): relojes de DURACIÓN DE ETAPA en minutos
+    // hábiles reemplazan a los TTV de silencio — corren aunque el cliente
+    // converse. CO/MX (o flag apagado) siguen con el TTV de siempre.
+    const usaV2 = traspasoV2Habilitado() && pais === "cl"
+    const decision = usaV2
+      ? debeTraspasarEtapa({
+          firstUserAt: c.first_user_at ? new Date(c.first_user_at) : null,
+          userMsgCount: Number(c.user_msg_count || 0),
+          precioAt: c.pref_escalon_at ? new Date(c.pref_escalon_at) : null,
+          formalAt: c.formal_quote_at ? new Date(c.formal_quote_at) : null,
+          aceptada: false, // se verifica en Zoho SOLO si la decisión es traspasar
+          pais,
+          ahora,
+          feriados,
+          compromisoAt,
+          traspasoActivo: conTraspaso.has(c.contact),
+        })
+      : debeTraspasar({
+          referenciaRelojAt: ultimoCliente,
+          clienteRespondioDespues,
+          precioMostrado: Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
+          pais,
+          ahora,
+          feriados,
+          compromisoAt,
+          traspasoActivo: conTraspaso.has(c.contact),
+        })
     if (!decision.traspasar) continue
+    // v2, etapas con cotización de por medio: si la vigente ya está ACEPTADA
+    // en Zoho, no hay demora que castigar — el cliente está en el pago.
+    if (usaV2 && decision.motivo !== "etapa_sin_preform") {
+      if (await cotizacionAceptada(c.contact)) continue
+    }
 
     const interno = await siguienteVendedor(pais)
     if (!interno) continue
@@ -417,6 +624,63 @@ export async function GET(req: Request) {
     traspasados.push({ contact: c.contact, vendedor: vendedor.email, ttv: decision.ttv || 0 })
   }
 
+  // 2bis. Reloj de calificación 24 h hábiles → telemarketing (v2, solo CL).
+  // Solo en horario hábil: a nadie se le entrega un lead a las 3 AM.
+  const tmTraspasados: Array<{ contact: string; vendedor?: string; origen: string }> = []
+  if (traspasoV2Habilitado()) {
+    const feriadosCl = await feriadosDePais("cl")
+    const { esHorarioHabil } = await import("@/lib/ptv")
+    if (esHorarioHabil("cl", ahora, feriadosCl)) {
+      const candidatos: CandidatoTM[] = []
+      // Outbound: enrolado en el loop, sin respuesta (estado activo) y con el
+      // toque 0 hace ≥24 h hábiles. La pausa anunciada suspende.
+      const enLoop = await supa<{ contact: string; t0: string; compromiso_at: string | null }>(
+        `vic_loop?estado=eq.activo&country=eq.cl&select=contact,t0,compromiso_at&limit=300`,
+      )
+      for (const r of enLoop) {
+        if (candidatos.length >= MAX_TM_POR_TICK) break
+        if (!/^56\d{8,10}$/.test(r.contact)) continue
+        if (conTraspaso.has(r.contact)) continue
+        if (isTestContact(r.contact, contactosPrueba)) continue
+        if (r.compromiso_at && new Date(r.compromiso_at) > ahora) continue
+        if (minutosHabilesEntre(new Date(r.t0), ahora, "cl", feriadosCl) < CALIFICACION_24H_MIN) continue
+        candidatos.push({ contact: r.contact, origen: "outbound" })
+      }
+      // Inbound: escribió UNA vez, no respondió la primera pregunta y no hay
+      // hito comercial. Ventana de 14 días para no revivir fósiles.
+      const desdeInbound = new Date(ahora.getTime() - 14 * 24 * 3600_000).toISOString()
+      const corte24hCalendario = new Date(ahora.getTime() - 24 * 3600_000).toISOString()
+      const inbound = await supa<{ contact: string; first_user_at: string | null; followup_closed_reason: string | null }>(
+        `vic_v3_conversations?user_msg_count=eq.1&country=eq.cl&pref_quote_id=is.null&formal_quote_id=is.null` +
+          `&followup_closed_reason=is.null&first_user_at=gte.${encodeURIComponent(desdeInbound)}` +
+          `&first_user_at=lte.${encodeURIComponent(corte24hCalendario)}&select=contact,first_user_at,followup_closed_reason&limit=200`,
+      )
+      for (const r of inbound) {
+        if (candidatos.length >= MAX_TM_POR_TICK) break
+        if (!r.first_user_at) continue
+        if (!/^56\d{8,10}$/.test(r.contact)) continue
+        if (conTraspaso.has(r.contact)) continue
+        if (isTestContact(r.contact, contactosPrueba)) continue
+        if (compromisoPor.get(r.contact) && new Date(String(compromisoPor.get(r.contact))) > ahora) continue
+        if (minutosHabilesEntre(new Date(r.first_user_at), ahora, "cl", feriadosCl) < CALIFICACION_24H_MIN) continue
+        // Hitos fuera de la conversación: reunión agendada o llamada pedida =
+        // intención comercial → NO va a telemarketing por esta vía.
+        const reuniones = await supa<{ id: string }>(`vic_v3_meetings?contact=eq.${encodeURIComponent(r.contact)}&select=id&limit=1`)
+        if (reuniones.length) continue
+        const llamadas = await supa<{ id: string }>(`vic_scheduled_calls?contact=eq.${encodeURIComponent(r.contact)}&select=id&limit=1`)
+        if (llamadas.length) continue
+        candidatos.push({ contact: r.contact, origen: "inbound" })
+      }
+      for (const cand of candidatos) {
+        const r = await traspasarATelemarketing(cand.contact, cand.origen, ahora, feriadosCl)
+        if (r.ok) {
+          conTraspaso.add(cand.contact)
+          tmTraspasados.push({ contact: cand.contact, vendedor: r.vendedor, origen: cand.origen })
+        }
+      }
+    }
+  }
+
   // 3. Chequeos de calidad vencidos.
   const chequeos = await supa<{ id: string; contact: string; vendedor_email: string; vendedor_nombre: string | null }>(
     `vic_ptv?estado=eq.activo&chequeo_hecho_at=is.null&chequeo_at=lte.${encodeURIComponent(ahora.toISOString())}&select=id,contact,vendedor_email,vendedor_nombre&limit=20`,
@@ -446,6 +710,7 @@ export async function GET(req: Request) {
     ok: true,
     conversaciones_revisadas: convs.length,
     traspasados,
+    tm_traspasados: tmTraspasados,
     chequeos_procesados: chequeos.length,
     chequeos_enviados: chequeosEnviados,
   })

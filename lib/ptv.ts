@@ -164,6 +164,108 @@ export function mensajeChequeo(pais: "cl" | "co" | "mx", nombreVendedor: string)
   return `¡Hola! Soy Vicky de nuevo 😊 ¿Cómo te fue con ${nombreVendedor}? ¿Alcanzaron a hablar y resolver tus dudas?`
 }
 
+// ── TRASPASO v2 (acuerdo Lalo 03-ago, SOLO CHILE) ───────────────────────────
+//
+// Con VICKY_TRASPASO_V2_ENABLED=on y país CL, los TTV de silencio mueren y
+// entran topes de DURACIÓN DE ETAPA que corren aunque el cliente converse:
+//   inicio de conversación → preform:      120 minutos hábiles
+//   precio dado → formal aceptada:          15 minutos hábiles
+//   formal entregada → aceptada:            10 minutos hábiles
+// Los relojes solo corren en horario hábil (fuera de L-V 8-18 se congelan) y
+// la pausa anunciada por el cliente los suspende. Solo aplican a
+// conversaciones VIVAS (el cliente respondió la primera pregunta —
+// user_msg_count >= 2); si no respondió, gobierna el reloj de calificación de
+// 24 h hábiles hacia telemarketing (regla 1 del acuerdo). CO/MX siguen con
+// los TTV de silencio de siempre.
+
+export const ETAPA_INICIO_PREFORM_MIN = 120
+export const ETAPA_PRECIO_ACEPTACION_MIN = 15
+export const ETAPA_FORMAL_ACEPTACION_MIN = 10
+/** Reloj de calificación: 24 horas HÁBILES = 1440 minutos hábiles. */
+export const CALIFICACION_24H_MIN = 24 * 60
+
+export function traspasoV2Habilitado(): boolean {
+  return (process.env.VICKY_TRASPASO_V2_ENABLED || "").trim() === "on"
+}
+
+/**
+ * Minutos HÁBILES (L-V 8-18 del país, sin feriados) entre dos instantes.
+ * Camina por bloques de hora (los offsets de CL/CO/MX son horas enteras, así
+ * que la pertenencia a horario hábil no cambia dentro de un bloque) y suma
+ * las fracciones de los bordes. Tope de guardia: 60 días.
+ */
+export function minutosHabilesEntre(
+  desde: Date,
+  hasta: Date,
+  pais: string,
+  feriados: Set<string> = new Set(),
+): number {
+  if (hasta.getTime() <= desde.getTime()) return 0
+  let total = 0
+  const cursor = new Date(desde)
+  cursor.setMinutes(0, 0, 0)
+  let guardia = 0
+  while (cursor.getTime() < hasta.getTime() && guardia < 24 * 60) {
+    const finHora = cursor.getTime() + 3600_000
+    if (esHorarioHabil(pais, new Date(cursor.getTime() + 1), feriados)) {
+      const ini = Math.max(cursor.getTime(), desde.getTime())
+      const fin = Math.min(finHora, hasta.getTime())
+      if (fin > ini) total += (fin - ini) / 60000
+    }
+    cursor.setTime(finHora)
+    guardia++
+  }
+  return total
+}
+
+/**
+ * Decisión de traspaso por ETAPA (v2). El caller aporta el estado de la
+ * conversación; acá solo se decide. `aceptada` = la cotización vigente ya
+ * está Aceptada en Zoho (el caller la consulta solo para los candidatos).
+ */
+export function debeTraspasarEtapa(params: {
+  firstUserAt: Date | null
+  userMsgCount: number
+  precioAt: Date | null
+  formalAt: Date | null
+  aceptada: boolean
+  pais: "cl" | "co" | "mx"
+  ahora: Date
+  feriados?: Set<string>
+  compromisoAt?: Date | null
+  traspasoActivo: boolean
+}): { traspasar: boolean; motivo?: string; ttv?: number } {
+  const { firstUserAt, userMsgCount, precioAt, formalAt, aceptada, pais, ahora, feriados, compromisoAt, traspasoActivo } = params
+  if (traspasoActivo) return { traspasar: false }
+  if (aceptada) return { traspasar: false }
+  if (compromisoAt && compromisoAt.getTime() > ahora.getTime()) return { traspasar: false }
+  if (!esHorarioHabil(pais, ahora, feriados)) return { traspasar: false }
+  // Conversación VIVA: respondió la primera pregunta. Si no, este reloj no
+  // aplica (gobierna el de calificación de 24 h → telemarketing).
+  if (!firstUserAt || userMsgCount < 2) return { traspasar: false }
+
+  // Etapa más avanzada primero; una pausa anunciada ya vencida corre el
+  // inicio del reloj hasta su vencimiento (la pausa no cuenta como demora).
+  const inicioEtapa = (base: Date): Date =>
+    compromisoAt && compromisoAt.getTime() > base.getTime() ? compromisoAt : base
+  if (formalAt) {
+    const min = minutosHabilesEntre(inicioEtapa(formalAt), ahora, pais, feriados)
+    return min >= ETAPA_FORMAL_ACEPTACION_MIN
+      ? { traspasar: true, motivo: "etapa_formal_sin_aceptar", ttv: ETAPA_FORMAL_ACEPTACION_MIN }
+      : { traspasar: false }
+  }
+  if (precioAt) {
+    const min = minutosHabilesEntre(inicioEtapa(precioAt), ahora, pais, feriados)
+    return min >= ETAPA_PRECIO_ACEPTACION_MIN
+      ? { traspasar: true, motivo: "etapa_precio_sin_aceptar", ttv: ETAPA_PRECIO_ACEPTACION_MIN }
+      : { traspasar: false }
+  }
+  const min = minutosHabilesEntre(inicioEtapa(firstUserAt), ahora, pais, feriados)
+  return min >= ETAPA_INICIO_PREFORM_MIN
+    ? { traspasar: true, motivo: "etapa_sin_preform", ttv: ETAPA_INICIO_PREFORM_MIN }
+    : { traspasar: false }
+}
+
 /** Suma 9 horas hábiles (bloques de 8-18, L-V) a un instante — el "un día
  * hábil después" del doc para el chequeo. Aproximación por horas enteras. */
 export function sumarHorasHabiles(desde: Date, horas: number, pais: string, feriados: Set<string> = new Set()): Date {
