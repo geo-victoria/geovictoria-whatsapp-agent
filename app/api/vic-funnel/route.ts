@@ -993,7 +993,16 @@ const KPI_BUCKETS: Record<string, { titulo: string; pred: (r: Row) => boolean }>
   abandonado: { titulo: "Se fue ANTES del precio", pred: (r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "abandonado" },
 }
 
-function renderListaKpi(rowsBucket: Row[], titulo: string, key: string, volverQS: string): Response {
+function renderListaKpi(
+  rowsBucket: Row[],
+  titulo: string,
+  key: string,
+  volverQS: string,
+  ultimoContactoPorConv: Map<string, string>,
+): Response {
+  const ultimo = (r: Row) => ultimoContactoPorConv.get(r.conversation_id) || ""
+  // Más reciente primero: el detalle es una lista de trabajo, no un archivo.
+  rowsBucket = [...rowsBucket].sort((a, b) => ultimo(b).localeCompare(ultimo(a)))
   const chips = (r: Row) =>
     [
       r.sub_bucket ? `<span class="tag">${esc(r.sub_bucket)}</span>` : "",
@@ -1005,6 +1014,7 @@ function renderListaKpi(rowsBucket: Row[], titulo: string, key: string, volverQS
     .map(
       (r) => `<tr>
         <td style="white-space:nowrap">+${esc(digits(r.contact))}</td>
+        <td style="white-space:nowrap">${fmtSantiago(ultimo(r))}</td>
         <td>${chips(r)}</td>
         <td>${esc(r.resumen || "—")}</td>
         <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&conv=${esc(r.conversation_id)}">ver conversación →</a></td>
@@ -1029,7 +1039,7 @@ function renderListaKpi(rowsBucket: Row[], titulo: string, key: string, volverQS
   <div class="sub">${rowsBucket.length} conversación${rowsBucket.length === 1 ? "" : "es"} · respeta los filtros activos del embudo (país, fechas, estado, propietario)</div>
   <div class="card">${
     rowsBucket.length
-      ? `<div style="overflow-x:auto"><table><thead><tr><th>Contacto</th><th>Clasificación</th><th>Resumen (Claude)</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Contacto</th><th>Último contacto</th><th>Clasificación</th><th>Resumen (Claude)</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`
       : `<p class="sub" style="margin:0">Sin conversaciones en esta categoría con los filtros actuales.</p>`
   }</div>
 </div></body></html>`
@@ -1159,6 +1169,9 @@ export async function GET(req: Request): Promise<Response> {
     return `?${p.toString()}`
   }
   let propietariosAll: string[] = []
+  // conversación → fecha del último mensaje (columna "Último contacto" del
+  // detalle de KPIs).
+  let ultimoMsgPorConv = new Map<string, string>()
   let listadoHtml = ""
   try {
     const co = await fetchExclusionesCO()
@@ -1173,6 +1186,9 @@ export async function GET(req: Request): Promise<Response> {
     ])
     origen = origenData
     cierre = cierreZoho
+    ultimoMsgPorConv = new Map(
+      convsListado.map((c) => [c.id, String(c.updated_at || c.last_user_at || c.started_at || "")]),
+    )
     // Listado comercial vivo (best-effort: si una pata falla, la sección se
     // arma con lo que haya; jamás bota la página). Se construye ANTES que el
     // resto porque su escalera de estados alimenta los filtros globales.
@@ -1290,7 +1306,7 @@ export async function GET(req: Request): Promise<Response> {
   // fechas, estado y propietario, más el predicado del bucket.
   if (listaParam && KPI_BUCKETS[listaParam]) {
     const b = KPI_BUCKETS[listaParam]
-    return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`)
+    return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`, ultimoMsgPorConv)
   }
 
   if (rows.length === 0) {
