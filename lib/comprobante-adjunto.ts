@@ -20,11 +20,19 @@ const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 
-/** Claves de un mensaje de Botmaker que suelen traer la URL de la media. */
+/**
+ * Claves de un mensaje de Botmaker que suelen traer la URL de la media.
+ * Forma real (verificada 03-ago con COT307): content.type="image" y la URL en
+ * content.media.url — por eso también se acepta la clave pelada `url`/`href`.
+ */
 function urlsDeMedia(obj: unknown, encontradas: string[] = []): string[] {
   if (!obj || typeof obj !== "object") return encontradas
   for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-    if (typeof v === "string" && /^https?:\/\//i.test(v) && /media|image|file|attachment|document/i.test(k)) {
+    if (
+      typeof v === "string" &&
+      /^https?:\/\//i.test(v) &&
+      /^(url|href)$|media|image|file|attachment|document/i.test(k)
+    ) {
       encontradas.push(v)
     } else if (v && typeof v === "object") {
       urlsDeMedia(v, encontradas)
