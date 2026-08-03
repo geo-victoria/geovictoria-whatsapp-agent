@@ -1113,7 +1113,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
       .map((c) => {
         const dias = c.diasSinContacto
         return `<tr data-contact="${esc(c.contacto)}">
-          <td>${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div></td>
+          <td>${esc(c.empresa)}${c.convId ? ` <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" title="Ver conversación" style="font-weight:400">📄</a>` : ""}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div></td>
           <td style="white-space:nowrap">${c.primerContactoIso ? fmtSantiago(c.primerContactoIso) : "—"}</td>
           <td><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
           <td>${esc(c.estadoZoho)}</td>
@@ -1121,7 +1121,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
           <td style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td style="white-space:nowrap"><a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="WhatsApp">💬</a> ${c.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" title="Ver conversación">📄</a>` : ""} <button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (sale de la cola por 24 h)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button></td>
+          <td style="white-space:nowrap"><a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="WhatsApp">💬</a> <button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (sale de la cola por 24 h)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button></td>
         </tr>`
       })
       .join("")
