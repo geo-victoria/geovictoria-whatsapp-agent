@@ -66,6 +66,8 @@ type VentaCerrada = {
   montoClp: number
   usuarios: string
   descuentoPct: number
+  /** id de la conversación de WhatsApp, para el link "ver conversación". */
+  convId: string
 }
 
 async function kvGet(key: string): Promise<string> {
@@ -105,7 +107,23 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
     const cached = await kvGet(cacheKey)
     if (cached) {
       try {
-        ventas.push(JSON.parse(cached) as VentaCerrada)
+        const venta = JSON.parse(cached) as VentaCerrada
+        // Ventas cacheadas antes de que existiera el link a la conversación:
+        // se les completa el convId una vez y se re-cachean.
+        if (!venta.convId) {
+          venta.convId = ""
+          const fonoCache = digits(String(q.Tel_fono_Contacto || ""))
+          if (fonoCache) {
+            const r = await fetch(
+              `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${fonoCache}&select=id&order=started_at.asc&limit=1`,
+              { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+            ).catch(() => null)
+            const rows = r?.ok ? ((await r.json().catch(() => [])) as Array<{ id?: string }>) : []
+            venta.convId = String(rows[0]?.id || "")
+            if (venta.convId) await kvSet(cacheKey, JSON.stringify(venta))
+          }
+        }
+        ventas.push(venta)
         continue
       } catch {
         // caché corrupta → recomputar
@@ -153,17 +171,20 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
         montoClp = 0
       }
     }
-    // Inicio de conversación: started_at por teléfono; fallback: creación de la cotización.
+    // Inicio de conversación: started_at por teléfono; fallback: creación de
+    // la cotización. El id de esa conversación alimenta el link "ver conversación".
     const fono = digits(String(q.Tel_fono_Contacto || ""))
     let inicioIso = ""
+    let convId = ""
     if (fono) {
       try {
         const r = await fetch(
-          `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${fono}&select=started_at&order=started_at.asc&limit=1`,
+          `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${fono}&select=id,started_at&order=started_at.asc&limit=1`,
           { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
         )
-        const rows = r.ok ? ((await r.json()) as Array<{ started_at?: string }>) : []
+        const rows = r.ok ? ((await r.json()) as Array<{ id?: string; started_at?: string }>) : []
         inicioIso = rows[0]?.started_at || ""
+        convId = String(rows[0]?.id || "")
       } catch {
         inicioIso = ""
       }
@@ -184,6 +205,7 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
       montoClp,
       usuarios,
       descuentoPct,
+      convId,
     }
     ventas.push(venta)
     if (montoClp > 0 && pagoIso) await kvSet(cacheKey, JSON.stringify(venta))
@@ -225,7 +247,7 @@ function fmtDuracionMs(ms: number): string {
   return dias === 0 ? `${horas}h` : `${dias}d ${horas}h`
 }
 
-function renderVentasCerradas(ventas: VentaCerrada[]): string {
+function renderVentasCerradas(ventas: VentaCerrada[], key: string): string {
   if (!ventas.length) return ""
   // Tarjetas de tiempos (pedido Lalo 20-jul): promedio y mediana del tiempo
   // inicio de conversación → pago, sobre las ventas con ambas fechas válidas.
@@ -253,7 +275,7 @@ function renderVentasCerradas(ventas: VentaCerrada[]): string {
   const filas = ventas
     .map(
       (v) => `<tr>
-        <td>${v.empresa}${v.numero ? ` <span class="sub" style="display:inline">· ${v.numero}</span>` : ""}</td>
+        <td>${v.empresa}${v.numero ? ` <span class="sub" style="display:inline">· ${v.numero}</span>` : ""}${v.convId ? `<div style="margin-top:2px"><a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(v.convId)}" style="font-size:12px;font-weight:400">ver conversación →</a></div>` : ""}</td>
         <td>${fmtSantiago(v.inicioIso)}${v.inicioAprox ? " *" : ""}</td>
         <td>${fmtSantiago(v.pagoIso)}</td>
         <td style="text-align:center">${v.usuarios || "—"}</td>
@@ -1120,7 +1142,7 @@ export async function GET(req: Request): Promise<Response> {
       }
     }
     if (cierre?.aceptadasList?.length) {
-      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList))
+      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList), key)
     }
     rows = allRows.filter((r) => {
       if (isTestContact(r.contact)) return false
