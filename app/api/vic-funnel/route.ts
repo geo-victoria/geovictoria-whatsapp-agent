@@ -603,6 +603,10 @@ type FilaListado = {
   fechaIso: string
   estadoZoho: string
   propietario: string
+  /** Inicio de la conversación (o creación del lead si nunca conversó). */
+  primerContactoIso: string
+  /** id de la conversación para el link al chat (vista ?conv= del embudo). */
+  convId: string
 }
 
 type ConvListado = { id: string; contact: string; started_at: string | null; last_user_at: string | null }
@@ -748,6 +752,7 @@ function construirListadoComercial(params: {
     const fechaIso = pagada || aceptada
       ? String(q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time || "")
       : String(q.Created_Time || "")
+    const conv = tel ? convPorContacto.get(tel) : undefined
     filas.push({
       empresa: empresaDeQuote(q),
       contacto: tel ? `+${tel}` : "—",
@@ -755,6 +760,8 @@ function construirListadoComercial(params: {
       fechaIso,
       estadoZoho: String(q["Deal_Asociado.Stage"] || "").trim() || "—",
       propietario: `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—",
+      primerContactoIso: String(conv?.started_at || ""),
+      convId: String(conv?.id || ""),
     })
   }
 
@@ -765,6 +772,7 @@ function construirListadoComercial(params: {
     cubiertos.add(tel)
     const lead = leads.find((l) => digits(String(l.Phone || "")) === tel)
     const deal = lead?.Converted_Deal?.id ? dealsPorId.get(String(lead.Converted_Deal.id)) : undefined
+    const conv = convPorContacto.get(tel)
     filas.push({
       empresa: String(lead?.Company || "").trim() || "(por identificar)",
       contacto: `+${tel}`,
@@ -772,6 +780,8 @@ function construirListadoComercial(params: {
       fechaIso: at,
       estadoZoho: deal?.stage || String(lead?.Lead_Status || "").trim() || "—",
       propietario: deal?.owner || `${lead?.["Owner.first_name"] || ""} ${lead?.["Owner.last_name"] || ""}`.trim() || "—",
+      primerContactoIso: String(conv?.started_at || lead?.Created_Time || ""),
+      convId: String(conv?.id || ""),
     })
   }
 
@@ -791,20 +801,23 @@ function construirListadoComercial(params: {
       fechaIso: respondio ? String(conv?.last_user_at || "") : String(l.Created_Time || ""),
       estadoZoho: String(l.Lead_Status || "").trim() || "—",
       propietario: `${l["Owner.first_name"] || ""} ${l["Owner.last_name"] || ""}`.trim() || "—",
+      primerContactoIso: String(conv?.started_at || l.Created_Time || ""),
+      convId: String(conv?.id || ""),
     })
   }
 
   return filas.sort((a, b) => b.fechaIso.localeCompare(a.fechaIso))
 }
 
-function renderListadoComercial(filas: FilaListado[]): string {
+function renderListadoComercial(filas: FilaListado[], key: string): string {
   if (!filas.length) return ""
   const propietarios = [...new Set(filas.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
   const ESTADOS = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada"]
   const filasHtml = filas
     .map(
       (f) => `<tr data-estado="${esc(f.estado)}" data-prop="${esc(f.propietario)}" data-fecha="${esc(f.fechaIso.slice(0, 10))}">
-        <td>${esc(f.empresa)}<div class="sub" style="margin:0">${esc(f.contacto)}</div></td>
+        <td>${esc(f.empresa)}<div class="sub" style="margin:0">${esc(f.contacto)}${f.convId ? ` · <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(f.convId)}">ver chat</a>` : ""}</div></td>
+        <td>${f.primerContactoIso ? fmtSantiago(f.primerContactoIso) : "—"}</td>
         <td><span class="tag">${esc(f.estado)}</span></td>
         <td>${fmtSantiago(f.fechaIso)}</td>
         <td>${esc(f.estadoZoho)}</td>
@@ -821,7 +834,7 @@ function renderListadoComercial(filas: FilaListado[]): string {
     <a href="#" id="lcLimpiar" style="font-size:12px">✕ Limpiar</a>
   </div>
   <div style="overflow-x:auto"><table id="lcTabla">
-    <thead><tr><th>Empresa / contacto</th><th>Estado</th><th>Fecha último estado</th><th>Estado en Zoho (deal/lead)</th><th>Propietario</th></tr></thead>
+    <thead><tr><th>Empresa / contacto</th><th>Primer contacto</th><th>Estado</th><th>Fecha último estado</th><th>Estado en Zoho (deal/lead)</th><th>Propietario</th></tr></thead>
     <tbody>${filasHtml}</tbody>
   </table></div>
   <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). Fechas en hora de Chile.</div>
@@ -986,6 +999,7 @@ export async function GET(req: Request): Promise<Response> {
           analysisRows: allRows,
           pais,
         }),
+        key,
       )
     } catch (e) {
       console.warn("[vic-funnel] listado comercial falló:", e instanceof Error ? e.message : e)
