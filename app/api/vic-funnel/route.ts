@@ -503,6 +503,19 @@ async function fetchAnalysis(): Promise<Row[]> {
 
 const digits = (c: string) => (c || "").replace(/\D/g, "")
 
+// ── Branding GeoVictoria (skill geovictoria-design, 04-ago) ─────────────────
+// BR Sonoma para títulos, Nunito para UI; paleta oficial: #ffbb00 (CTA),
+// #00aff2 (links/data), #646464 (SOLO tipografía), blanco de fondo. Assets
+// servidos desde /public/gv/.
+const GV_FONT_CSS = `
+  @font-face{font-family:"BR Sonoma";src:url("/gv/fonts/BRSonoma-SemiBold.otf") format("opentype");font-weight:600;font-display:swap}
+  @font-face{font-family:"BR Sonoma";src:url("/gv/fonts/BRSonoma-Bold.otf") format("opentype");font-weight:700;font-display:swap}
+  @font-face{font-family:"Nunito";src:url("/gv/fonts/Nunito-Regular.ttf") format("truetype");font-weight:400;font-display:swap}
+  @font-face{font-family:"Nunito";src:url("/gv/fonts/Nunito-SemiBold.ttf") format("truetype");font-weight:600;font-display:swap}
+  @font-face{font-family:"Nunito";src:url("/gv/fonts/Nunito-Bold.ttf") format("truetype");font-weight:700;font-display:swap}`
+const GV_BODY_FONT = `"Nunito",-apple-system,Segoe UI,Roboto,Arial,sans-serif`
+const GV_TITLE_FONT = `"BR Sonoma","Nunito",-apple-system,Segoe UI,Roboto,Arial,sans-serif`
+
 // ── Países soportados por el dashboard (pedido Lalo 04-ago: sumar PE y MX) ──
 type Pais = "cl" | "co" | "pe" | "mx"
 const PAISES: Record<Pais, { nombre: string; label: string; bandera: string; prefijo: string }> = {
@@ -1160,7 +1173,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
         '<textarea id="popNota" rows="3" style="width:100%;box-sizing:border-box;font-size:13px;padding:6px;border:1px solid #d0d5db;border-radius:6px;resize:vertical"></textarea>' +
         '<div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end">' +
         '<button id="popCancelar" style="background:#f3f4f6;color:#374151;border:1px solid #d0d5db;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Cancelar</button>' +
-        '<button id="popGuardar" style="background:#1b5e20;color:#fff;border:0;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">Guardar ✔</button></div>';
+        '<button id="popGuardar" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">Guardar ✔</button></div>';
       document.body.appendChild(pop);
       var nota = pop.querySelector("#popNota");
       var btnActual = null;
@@ -1323,15 +1336,16 @@ function renderListaKpi(
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} — Vicky</title>
 <style>
-  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
   .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
-  h1{font-size:20px;margin:0 0 4px} .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:20px;margin:0 0 4px;color:#4e4e4e} .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
   .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
   th{color:#6b7280;font-weight:600;font-size:12px}
   .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
-  a{color:#1565C0;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
 </style></head><body><div class="wrap">
   <p><a href="${volverQS}">← Volver al embudo</a></p>
   <h1>${esc(titulo)}</h1>
@@ -1372,9 +1386,10 @@ async function renderConversation(convId: string, key: string): Promise<Response
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Conversación — Vicky</title>
 <style>
-  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
   .wrap{max-width:760px;margin:0 auto;padding:20px 16px 60px}
-  a{color:#1565C0;text-decoration:none} a:hover{text-decoration:underline}
+  a{color:#00aff2;text-decoration:none} a:hover{text-decoration:underline}
   .hd{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-bottom:14px}
   .hd b{font-size:15px} .meta{color:#6b7280;font-size:13px;margin-top:4px}
   .chip{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px;margin-right:6px}
@@ -1521,15 +1536,16 @@ function renderListaCotizaciones(
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} — Vicky</title>
 <style>
-  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
   .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
-  h1{font-size:20px;margin:0 0 4px} .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:20px;margin:0 0 4px;color:#4e4e4e} .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
   .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
   th{color:#6b7280;font-weight:600;font-size:12px}
   .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
-  a{color:#1565C0;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
 </style></head><body><div class="wrap">
   <p><a href="${volverQS}">← Volver</a></p>
   <h1>${esc(titulo)}</h1>
@@ -1958,8 +1974,8 @@ export async function GET(req: Request): Promise<Response> {
     /* 9 */ "Vio precio, no avanzó", /* 10 */ "Cotización enviada", /* 11 */ "Se fue antes del precio",
   ]
   const col = {
-    base: "#2F5496", com: "#1565C0", sop: "#00838F", noid: "#9E9E9E",
-    good: "#2E7D32", best: "#1B5E20", warn: "#F9A825", bad: "#C62828", grey: "#9E9E9E",
+    base: "#4e4e4e", com: "#00aff2", sop: "#00838F", noid: "#9aa0a8",
+    good: "#2E7D32", best: "#1B5E20", warn: "#F9A825", bad: "#C62828", grey: "#9aa0a8",
   }
   const nodeColor = [
     col.base,
@@ -2054,39 +2070,41 @@ export async function GET(req: Request): Promise<Response> {
 <title>Embudo de conversaciones — Vicky</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
-  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
   .wrap{max-width:1440px;margin:0 auto;padding:24px 20px 60px}
-  h1{font-size:22px;margin:0 0 4px} .sub{color:#6b7280;font-size:13px;margin-bottom:20px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:22px;margin:0 0 4px;color:#4e4e4e}
+  .sub{color:#646464;font-size:13px;margin-bottom:20px}
   .kpis{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px}
-  .kpi{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;min-width:120px;flex:1}
-  .kpi-v{font-size:28px;font-weight:700} .kpi-l{font-size:12px;color:#6b7280;margin-top:2px}
+  .kpi{background:#fff;border:1px solid #dfe2e7;border-radius:10px;padding:14px 18px;min-width:120px;flex:1}
+  .kpi-v{font-family:${GV_TITLE_FONT};font-size:28px;font-weight:700} .kpi-l{font-size:12px;color:#646464;margin-top:2px}
   .kpi.hero{flex-basis:100%;text-align:center;padding:20px 18px} .kpi.hero .kpi-v{font-size:42px}
-  .hero-meta{font-size:17px;font-weight:600;color:#9ca3af}
-  .hero-bar{height:9px;background:#e5e7eb;border-radius:5px;max-width:440px;margin:10px auto 6px;overflow:hidden}
+  .hero-meta{font-size:17px;font-weight:600;color:#9aa0a8}
+  .hero-bar{height:9px;background:#eef0f3;border-radius:5px;max-width:440px;margin:10px auto 6px;overflow:hidden}
   .hero-bar>div{height:100%;border-radius:5px}
-  .pct{color:#9ca3af} .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
-  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:18px}
-  .card h2{font-size:16px;margin:0 0 12px}
+  .pct{color:#9aa0a8} .tag{display:inline-block;background:#e6f8fe;color:#4e4e4e;font-size:11px;padding:2px 8px;border-radius:99px}
+  .card{background:#fff;border:1px solid #dfe2e7;border-radius:12px;padding:18px;margin-top:18px}
+  .card h2{font-family:${GV_TITLE_FONT};font-weight:600;font-size:16px;margin:0 0 12px;color:#4e4e4e}
   #sankey{width:100%;height:480px}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
-  th{color:#6b7280;font-weight:600;font-size:12px}
-  td.num{text-align:right;font-weight:700;width:64px;color:#9A6700}
-  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:12px}
-  a{color:#1565C0;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
-  .kgroup{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f3;vertical-align:top}
+  th{color:#646464;font-weight:700;font-size:12px}
+  td.num{text-align:right;font-weight:700;width:64px;color:#646464}
+  code{background:#eef0f3;padding:1px 5px;border-radius:4px;font-size:12px}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  .kgroup{font-family:${GV_TITLE_FONT};font-size:11px;font-weight:700;color:#646464;text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
   .bars{display:flex;flex-direction:column;gap:8px}
   .bar-row{display:grid;grid-template-columns:160px 1fr 40px;align-items:center;gap:10px;font-size:13px}
-  .bar-track{background:#f1f3f5;border-radius:6px;height:18px;overflow:hidden}
-  .bar-fill{background:#A1887F;height:100%;border-radius:6px}
-  .bar-num{text-align:right;font-weight:700;color:#6d4c41}
-  .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
+  .bar-track{background:#eef0f3;border-radius:6px;height:18px;overflow:hidden}
+  .bar-fill{background:#ffbb00;height:100%;border-radius:6px}
+  .bar-num{text-align:right;font-weight:700;color:#646464}
+  .foot{color:#9aa0a8;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
-    <h1>${vista === "gestion" ? "Telemarketing" : "Análisis y KPIs — Vicky V3"}</h1>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Telemarketing" : "Análisis y KPIs — Vicky V3"}</h1></div>
     <a href="?${(() => { const p = filtrosQS(); if (vista === "gestion") { p.set("vista", "analisis") } else { p.delete("vista") } return p.toString() })()}" style="font-size:14px;white-space:nowrap">${vista === "gestion" ? "📊 Análisis y KPIs →" : "← 📞 Gestión"}</a>
   </div>
-  <div class="sub">Vicky ${PAISES[pais].nombre} ${PAISES[pais].bandera} (línea +${PAISES[pais].prefijo}) — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · ${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")} · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <div class="sub">Vicky ${PAISES[pais].nombre} ${PAISES[pais].bandera} (línea +${PAISES[pais].prefijo}) — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · ${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")} · <button id="btnRefresh" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
   <div class="sub" style="margin-top:6px">
     <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
@@ -2102,7 +2120,7 @@ export async function GET(req: Request): Promise<Response> {
         <option value="">Todos</option>
         ${propietariosAll.map((p) => `<option value="${esc(p)}"${propF === p ? " selected" : ""}>${esc(p)}</option>`).join("")}
       </select></label>
-      <button type="submit" style="background:#455a64;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
+      <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
       ${rango || estadoF || propF ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtros</a>` : ""}
       ${rango || estadoF || propF ? `<span style="font-size:11px;color:#9ca3af">· fechas: conversaciones por inicio, cotizaciones por emisión, pagos por fecha de pago${estadoF || propF ? " · Estado y Propietario aplican a TODAS las secciones (según la escalera del listado comercial, últimos 30 días)" : ` · "Funnel por origen" muestra el programa completo`}</span>` : ""}
     </form>
