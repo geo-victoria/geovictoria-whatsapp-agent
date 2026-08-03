@@ -673,7 +673,17 @@ type LeadListado = {
   Created_Time?: string
   "Owner.first_name"?: string | null
   "Owner.last_name"?: string | null
+  /** Shape del search API (los convertidos vienen por search, no por COQL). */
+  Owner?: { name?: string } | null
   Converted_Deal?: { id?: string } | null
+}
+
+function propietarioDeLead(l: LeadListado): string {
+  return (
+    `${l["Owner.first_name"] || ""} ${l["Owner.last_name"] || ""}`.trim() ||
+    String(l.Owner?.name || "").trim() ||
+    "—"
+  )
 }
 
 /** Leads del flujo de Vicky (vivos + convertidos) de los últimos 30 días, y
@@ -700,7 +710,7 @@ async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
       // Convertidos: la búsqueda por criterio trae TODOS los de la org; se
       // filtran después por los contactos que conocemos de las conversaciones.
       fetch(
-        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Created_Time:greater_equal:${desde}T00:00:00-04:00)`)}&converted=true&fields=id,Full_Name,Company,Phone,Lead_Status,Created_Time,Converted_Deal&per_page=200`,
+        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Created_Time:greater_equal:${desde}T00:00:00-04:00)`)}&converted=true&fields=id,Full_Name,Company,Phone,Lead_Status,Created_Time,Converted_Deal,Owner&per_page=200`,
         { headers: H, cache: "no-store" },
       ),
       fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
@@ -729,6 +739,38 @@ async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
           stage: String(dl.Stage || ""),
           owner: `${dl["Owner.first_name"] || ""} ${dl["Owner.last_name"] || ""}`.trim(),
         })
+      }
+    }
+    // Deals de leads convertidos que NO creó Vicky (caso Chanares 03-ago: la
+    // SDR convirtió el lead a mano y el deal quedó fuera del COQL por
+    // Created_By) — se completan por id para que el listado muestre SIEMPRE
+    // la etapa y el dueño del deal cuando el lead ya es deal.
+    const faltantes = [
+      ...new Set(
+        leads
+          .map((l) => String(l.Converted_Deal?.id || ""))
+          .filter((id) => id && !dealsPorId.has(id)),
+      ),
+    ].slice(0, 50)
+    if (faltantes.length) {
+      const rExtra = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${await getZohoAccessToken()}`, "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          select_query: `select id, Stage, Owner.first_name, Owner.last_name from Deals where id in (${faltantes.join(",")}) limit ${faltantes.length}`,
+        }),
+      })
+      if (rExtra.ok && rExtra.status !== 204) {
+        const d = (await rExtra.json().catch(() => ({}))) as {
+          data?: Array<{ id: string; Stage?: string; "Owner.first_name"?: string; "Owner.last_name"?: string }>
+        }
+        for (const dl of d?.data || []) {
+          dealsPorId.set(String(dl.id), {
+            stage: String(dl.Stage || ""),
+            owner: `${dl["Owner.first_name"] || ""} ${dl["Owner.last_name"] || ""}`.trim(),
+          })
+        }
       }
     }
   } catch (e) {
@@ -809,7 +851,7 @@ function construirListadoComercial(params: {
       estado: "Preform enviado",
       fechaIso: at,
       estadoZoho: deal?.stage || String(lead?.Lead_Status || "").trim() || "—",
-      propietario: deal?.owner || `${lead?.["Owner.first_name"] || ""} ${lead?.["Owner.last_name"] || ""}`.trim() || "—",
+      propietario: deal?.owner || (lead ? propietarioDeLead(lead) : "—"),
       primerContactoIso: String(conv?.started_at || lead?.Created_Time || ""),
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback("Preform enviado", ana?.motivo_no_cierre || null),
@@ -828,13 +870,17 @@ function construirListadoComercial(params: {
     const respondio = Boolean(conv?.last_user_at)
     const enLevantamiento = respondio && ana?.sub_bucket === "cotizacion"
     const estadoLead = !respondio ? "Sin contactar" : enLevantamiento ? "En levantamiento" : "Contactado"
+    // Lead ya CONVERTIDO a deal (p. ej. por una SDR): el estado en Zoho y el
+    // propietario son los del DEAL, no los del lead congelado (caso Chanares:
+    // el dash decía "4. Calificado / —" mientras el deal era de Grey).
+    const deal = l.Converted_Deal?.id ? dealsPorId.get(String(l.Converted_Deal.id)) : undefined
     filas.push({
       empresa: String(l.Company || "").trim() || String(l.Full_Name || "").trim() || "(por identificar)",
       contacto: `+${tel}`,
       estado: estadoLead,
       fechaIso: respondio ? String(conv?.last_user_at || "") : String(l.Created_Time || ""),
-      estadoZoho: String(l.Lead_Status || "").trim() || "—",
-      propietario: `${l["Owner.first_name"] || ""} ${l["Owner.last_name"] || ""}`.trim() || "—",
+      estadoZoho: deal?.stage || String(l.Lead_Status || "").trim() || "—",
+      propietario: deal?.owner || propietarioDeLead(l),
       primerContactoIso: String(conv?.started_at || l.Created_Time || ""),
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback(estadoLead, ana?.motivo_no_cierre || null),
