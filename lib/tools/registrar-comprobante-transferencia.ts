@@ -73,6 +73,11 @@ export const registrarComprobanteTransferenciaSchema = {
         description:
           "true cuando el cliente DECLARA que pagó ('el pago está listo', 'ya transferí') pero NO ha enviado el comprobante. Registra el aviso para que finanzas verifique el abono, sin afirmar confirmación.",
       },
+      numeroCotizacion: {
+        type: "string" as const,
+        description:
+          "Número de la cotización si el cliente lo menciona o aparece en el comprobante (ej. 'COT307' o '307'). Pásalo SIEMPRE que esté visible: permite asociar el pago aunque el cliente escriba desde un número de WhatsApp distinto al que recibió la cotización (caso real: paga el dueño desde su celular y la cotización la pidió otra persona de la empresa).",
+      },
     },
     required: ["montoDetectado"],
   },
@@ -84,6 +89,7 @@ type Input = {
   fechaDetectada?: string
   detalle?: string
   pagoDeclarado?: boolean
+  numeroCotizacion?: string
 }
 
 // ── MÉXICO (22-jul, decisión Lalo): sin MercadoPago MX, el pago inicial va por
@@ -115,6 +121,52 @@ export async function obtenerLinkOnboarding(quoteId: string): Promise<string> {
     return r.ok && data.ok && data.onboardingUrl ? data.onboardingUrl : ""
   } catch {
     return ""
+  }
+}
+
+// ── Fallback por número de cotización (caso Grupo Dog Delivery, 03-ago) ──
+//
+// El puntero de cotización vigente es POR CONTACTO, así que si el comprobante
+// llega desde un número de WhatsApp distinto al que recibió la cotización
+// (pagó el dueño desde su celular), getQuotePointers no encuentra nada y el
+// cliente quedaba sin habilitación aunque dijera "pagué la COT307" en el chat.
+// Acá se resuelve ese número contra Zoho para asociar el pago igual.
+async function buscarCotizacionPorNumero(
+  numero: string,
+): Promise<import("@/lib/supabase-persistence-v3").QuotePointer | null> {
+  const digitos = (numero || "").replace(/\D/g, "")
+  if (!digitos) return null
+  try {
+    const token = await getZohoAccessToken()
+    const res = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/search?criteria=${encodeURIComponent(
+        `(Numero_Cotizacion:equals:COT${digitos})`,
+      )}&fields=${encodeURIComponent("id,Numero_Cotizacion,Cuenta_Asociada,RUT_Cliente")}`,
+      {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      },
+    )
+    if (!res.ok) return null
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ id?: string; Cuenta_Asociada?: { name?: string }; RUT_Cliente?: string }>
+    }
+    const row = data.data?.[0]
+    if (!row?.id) return null
+    return {
+      quoteId: String(row.id),
+      empresa: String(row.Cuenta_Asociada?.name || ""),
+      rut: String(row.RUT_Cliente || ""),
+      dealId: "",
+      acceptanceUrl: "",
+      pdfUrl: "",
+      totalClp: null,
+      totalUf: null,
+      updatedAt: new Date().toISOString(),
+    }
+  } catch (err) {
+    console.error("[comprobante] búsqueda por número de cotización falló:", err)
+    return null
   }
 }
 
@@ -171,7 +223,19 @@ export async function registrarComprobanteTransferencia(
       : "monto no legible"
 
   const pointers = await getQuotePointers(contact).catch(() => [])
-  const pointer = pointers[0] || null
+  let pointer = pointers[0] || null
+
+  // Sin puntero para ESTE número: si el cliente mencionó el número de la
+  // cotización (chat o comprobante), se resuelve contra Zoho. La nota interna
+  // marca la asociación cruzada para que finanzas mire con más atención.
+  let asociadoPorNumero = false
+  if (!pointer && input.numeroCotizacion) {
+    const porNumero = await buscarCotizacionPorNumero(input.numeroCotizacion)
+    if (porNumero) {
+      pointer = porNumero
+      asociadoPorNumero = true
+    }
+  }
 
   const declarado = input.pagoDeclarado === true
 
@@ -204,6 +268,9 @@ export async function registrarComprobanteTransferencia(
       : `Comprobante de transferencia recibido por WhatsApp (${new Date().toISOString()})`,
     `Contacto: +${contact}`,
     pointer ? `Cotización vigente: quote_id ${pointer.quoteId} · ${pointer.empresa || "-"} · RUT ${pointer.rut || "-"}` : "SIN cotización formal vigente asociada al contacto",
+    asociadoPorNumero
+      ? `⚠️ ASOCIACIÓN POR NÚMERO: el comprobante llegó desde un número de WhatsApp DISTINTO al de la cotización; se asoció por el número de cotización que mencionó el cliente (${(input.numeroCotizacion || "").trim()}). Verificar con más atención.`
+      : "",
     `Monto según comprobante: ${montoFmt}`,
     pointer?.totalClp ? `Total registrado en la cotización: $${Math.round(pointer.totalClp).toLocaleString("es-CL")} (referencial — verificar pago inicial exacto)` : "",
     input.bancoOrigen ? `Banco origen: ${input.bancoOrigen}` : "",
