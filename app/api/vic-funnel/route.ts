@@ -1039,6 +1039,11 @@ type CasoGestion = {
   accionable: string
   resumen: string
   score: number
+  /** Columnas heredadas del listado comercial (fusión 04-ago). */
+  primerContactoIso: string
+  estado: string
+  fechaEstadoIso: string
+  estadoZoho: string
 }
 
 function construirCasosGestion(params: {
@@ -1089,6 +1094,10 @@ function construirCasosGestion(params: {
       accionable: f.accionable,
       resumen: f.resumen,
       score: tipo.prioridad * 100 + Math.min(montoUF, 50) * 2 + Math.min(dias, 14),
+      primerContactoIso: f.primerContactoIso,
+      estado: f.estado,
+      fechaEstadoIso: f.fechaIso,
+      estadoZoho: f.estadoZoho,
     }
   })
   casos.sort((a, b) => b.prioridad - a.prioridad || b.score - a.score)
@@ -1105,6 +1114,9 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
         const dias = c.diasSinContacto
         return `<tr data-contact="${esc(c.contacto)}">
           <td>${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div></td>
+          <td style="white-space:nowrap">${c.primerContactoIso ? fmtSantiago(c.primerContactoIso) : "—"}</td>
+          <td><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
+          <td>${esc(c.estadoZoho)}</td>
           <td style="white-space:nowrap"><span title="hora local del cliente">${c.llamable ? "🟢" : "🌙"} ${c.horaLocal}</span></td>
           <td style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
           <td style="white-space:nowrap;text-align:right">${c.monto}</td>
@@ -1115,7 +1127,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
       .join("")
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>Empresa / contacto · ejecutivo</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th>Acciones</th></tr></thead>
       <tbody>${filasHtml}</tbody>
     </table></div>`
   }).join("")
@@ -1892,8 +1904,6 @@ export async function GET(req: Request): Promise<Response> {
 
   ${vista === "gestion" ? `
   ${colaHtml}
-
-  ${listadoHtml}
   ` : `
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
@@ -1912,6 +1922,8 @@ export async function GET(req: Request): Promise<Response> {
   </div>
   <div class="kgroup">Flujo cotización y tasa de cierre (${cotizacion} conversaciones · cierre en vivo desde Zoho)</div>
   ${flujoCotizHtml}
+
+  ${listadoHtml}
 
   ${ventasHtml}
 
