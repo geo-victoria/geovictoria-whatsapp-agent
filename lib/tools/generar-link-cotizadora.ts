@@ -284,6 +284,11 @@ export type LinkCotizadoraInput = {
   _draftDealId?: string
   _draftAccountId?: string
   _draftContactId?: string
+  // Asignación MANUAL del deal (solo flujos admin, jamás el modelo): id de
+  // usuario Zoho que queda como dueño SIN pasar por la tómbola. Para el caso
+  // "el ejecutivo ya atendió al cliente por otro canal y pide la cotización a
+  // su nombre" — el correo y el PDF lo presentan a él.
+  _ownerOverrideId?: string
 }
 
 /**
@@ -540,6 +545,7 @@ export async function generarLinkCotizadora(
     puntosInstalacion = [],
     accountId, contactId, leadId, escalonDescuento,
     _draftQuoteId, _draftDealId, _draftAccountId, _draftContactId,
+    _ownerOverrideId,
   } = args
 
   if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
@@ -624,6 +630,7 @@ export async function generarLinkCotizadora(
       dealId: effDealId,
       quoteId: effQuoteId,
       leadId: effLeadId,
+      ownerId: _ownerOverrideId?.trim() || undefined,
     },
     // Descuento negociado en el preform (si el cliente aceptó uno): la
     // cotización nace ya con ese descuento, sin regenerar PDF después.
