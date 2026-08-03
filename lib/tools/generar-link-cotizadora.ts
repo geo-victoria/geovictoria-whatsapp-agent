@@ -261,7 +261,9 @@ export type PuntoInstalacionInput = {
 export type LinkCotizadoraInput = {
   empresa: string
   contacto: string
-  contactoEmail: string
+  /** Opcional (Lalo 03-ago): sin correo la formal se emite igual y la entrega
+   *  corre por WhatsApp (PDF + link); el cotizador omite el envío de email. */
+  contactoEmail?: string
   contactoTelefono?: string
   rutEmpresa: string
   direccionEmpresa?: string
@@ -548,10 +550,10 @@ export async function generarLinkCotizadora(
     _ownerOverrideId,
   } = args
 
-  if (!empresa?.trim() || !contacto?.trim() || !contactoEmail?.trim() || !rutEmpresa?.trim()) {
-    return { ok: false, error: "Faltan campos obligatorios: empresa, contacto, contactoEmail, rutEmpresa." }
+  if (!empresa?.trim() || !contacto?.trim() || !rutEmpresa?.trim()) {
+    return { ok: false, error: "Faltan campos obligatorios: empresa, contacto, rutEmpresa." }
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactoEmail)) {
+  if (contactoEmail?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactoEmail)) {
     return { ok: false, error: `El email '${contactoEmail}' no tiene formato válido.` }
   }
   // Validación del RUT/RUN chileno (módulo 11). Si no pasa, NO generamos la
@@ -612,7 +614,7 @@ export async function generarLinkCotizadora(
     cliente: {
       empresa: empresa.trim(),
       contacto: contacto.trim(),
-      contactoEmail: contactoEmail.trim().toLowerCase(),
+      contactoEmail: contactoEmail?.trim() ? contactoEmail.trim().toLowerCase() : undefined,
       contactoTelefono: contactoTelefono?.trim() || "",
       rutEmpresa: formatearRut(rutEmpresa),
       direccionEmpresa: direccionEmpresa?.trim() || "",
