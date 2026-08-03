@@ -579,8 +579,18 @@ async function convertirConDeal(
   }
   if (fila?.code === "SUCCESS" && fila?.Deals?.id) {
     console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${fila.Deals.id} en "${piso}"`)
-    // Sin dueño humano heredado, el sorteo de Zoho decide el dueño final.
-    const heredaDuenoHumano = Boolean(lead.ownerId && lead.ownerId !== VICKY_OWNER_ID)
+    // Sin dueño humano REAL heredado, el sorteo de Zoho decide el dueño
+    // final. Los INTERINOS por país (Eddyluz/Gordillo/Yahel) son un marcador
+    // de "sin dueño aún", no gestión — heredarlos dejaba el deal fuera de la
+    // tómbola y el PTV presentaba a Eddyluz en vez del sorteado (fix gemelos
+    // 03-ago: casos Consistorial/Contadores/COLCOM).
+    const INTERINOS = new Set([
+      VICKY_OWNER_ID,
+      "3525045000000211283", // Eddyluz (interina CL)
+      "3525045000203758005", // Gordillo (interino CO)
+      "3525045000308323003", // Yahel (interina MX)
+    ])
+    const heredaDuenoHumano = Boolean(lead.ownerId && !INTERINOS.has(lead.ownerId))
     if (!heredaDuenoHumano) await aplicarTombolaDeals(String(fila.Deals.id), territorio)
     return String(fila.Deals.id)
   }
