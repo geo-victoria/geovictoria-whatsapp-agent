@@ -191,6 +191,7 @@ export async function buscarLeadAbiertoDeOtroDueno(
           Owner?: { id?: string; name?: string; email?: string }
           Company?: string
           Lead_Status?: string
+          Modified_Time?: string
         }>
       }
       return data?.data || []
@@ -199,8 +200,17 @@ export async function buscarLeadAbiertoDeOtroDueno(
       ...(fono ? await buscar(`phone=${encodeURIComponent(fono.slice(-9))}`) : []),
       ...(mail ? await buscar(`email=${encodeURIComponent(mail)}`) : []),
     ]
+    // CADUCIDAD (regla del doc de Gestión de Leads, aplicada por Lalo 03-ago
+    // — caso Karina): un lead ajeno solo BLOQUEA la prospección de Vicky si
+    // tuvo actividad en los últimos 3 meses. Un lead zombi (16 meses parado
+    // en "Calificado") no puede vetar al canal 24/7 para siempre — el dueño
+    // igual recibe su nota/aviso por el camino del que detecta el duplicado.
+    const CADUCIDAD_MS = 90 * 24 * 3600e3
     const ajeno = candidatos.find(
-      (l) => l?.Owner?.id && String(l.Owner.id) !== VICKY_OWNER_ID_PUBLIC,
+      (l) =>
+        l?.Owner?.id &&
+        String(l.Owner.id) !== VICKY_OWNER_ID_PUBLIC &&
+        Date.now() - Date.parse(String(l.Modified_Time || "")) < CADUCIDAD_MS,
     )
     if (!ajeno) return null
     return {

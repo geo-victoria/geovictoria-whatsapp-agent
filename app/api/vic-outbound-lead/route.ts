@@ -302,8 +302,33 @@ export async function POST(req: Request): Promise<Response> {
         `Aviso automático (${cuando}): este contacto ya tiene un lead abierto de ${procesoHumano.ownerNombre} (${procesoHumano.ownerEmail}), estado "${procesoHumano.status}". Vicky no envió el toque 0 para no vender en paralelo.`,
       ).catch(() => {})
     }
+    // RE-NOTIFICACIÓN AL DUEÑO (regla 2 del doc de Gestión de Leads,
+    // implementada 03-ago — caso Karina): además de la nota, el dueño recibe
+    // un CORREO. La nota sola no funcionó: Eddyluz nunca se enteró de que su
+    // lead volvió a llenar el formulario y el prospecto quedó mudo.
+    if (procesoHumano.ownerEmail) {
+      try {
+        const { getZohoAccessToken } = await import("@/lib/zoho-token")
+        const token = await getZohoAccessToken()
+        const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+        await fetch(`${api}/crm/v3/Leads/${procesoHumano.id}/actions/send_mail`, {
+          method: "POST",
+          headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            data: [{
+              from: { email: "vicky@geovictoria.com" },
+              to: [{ email: procesoHumano.ownerEmail }],
+              subject: `Tu lead volvió a contactarnos: ${nombre || `+${contact}`} — retómalo hoy`,
+              content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Tu lead <b>${nombre || ""} (+${contact})</b> acaba de llegar de nuevo por el formulario web — interés fresco. Como el lead sigue abierto a tu nombre, Vicky NO lo contactó para no vender en paralelo: <b>el seguimiento es tuyo</b>.</p><p>Si prefieres que lo trabaje Vicky, reasigna tu lead o avisa a Lalo.</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${procesoHumano.id}">Ver tu Lead en Zoho</a></p></body></html>`,
+              mail_format: "html",
+            }],
+          }),
+        })
+      } catch { /* best-effort: la nota ya quedó */ }
+    }
     console.warn(
-      `[outbound-lead] ${contact} ya está en proceso con ${procesoHumano.ownerNombre} → toque 0 omitido (visibilidad inter-canal)`,
+      `[outbound-lead] ${contact} ya está en proceso con ${procesoHumano.ownerNombre} → toque 0 omitido, dueño notificado por correo`,
     )
     return NextResponse.json({
       ok: true,
