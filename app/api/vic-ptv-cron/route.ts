@@ -32,7 +32,7 @@ import {
   sumarHorasHabiles,
 } from "@/lib/ptv"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { appendAssistantV3, getFollowupCronSecret, getQuotePointers } from "@/lib/supabase-persistence-v3"
+import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
@@ -488,6 +488,11 @@ export async function GET(req: Request) {
   }
   const ahora = new Date()
   const desde = new Date(ahora.getTime() - VENTANA_BARRIDO_MS).toISOString()
+  // Flag del traspaso v2: env O vic_kv (traspaso_v2_enabled=on) — la clave kv
+  // permite encender/apagar al instante sin tocar el env de Vercel.
+  const v2Activo =
+    traspasoV2Habilitado() ||
+    ((await getKvValue("traspaso_v2_enabled").catch(() => null)) || "").trim() === "on"
 
   // 1. Conversaciones con actividad reciente + su compromiso de pausa (vic_loop).
   const convs = await supa<{
@@ -542,7 +547,7 @@ export async function GET(req: Request) {
     // TRASPASO v2 (solo CL, flag): relojes de DURACIÓN DE ETAPA en minutos
     // hábiles reemplazan a los TTV de silencio — corren aunque el cliente
     // converse. CO/MX (o flag apagado) siguen con el TTV de siempre.
-    const usaV2 = traspasoV2Habilitado() && pais === "cl"
+    const usaV2 = v2Activo && pais === "cl"
     const decision = usaV2
       ? debeTraspasarEtapa({
           firstUserAt: c.first_user_at ? new Date(c.first_user_at) : null,
@@ -627,7 +632,7 @@ export async function GET(req: Request) {
   // 2bis. Reloj de calificación 24 h hábiles → telemarketing (v2, solo CL).
   // Solo en horario hábil: a nadie se le entrega un lead a las 3 AM.
   const tmTraspasados: Array<{ contact: string; vendedor?: string; origen: string }> = []
-  if (traspasoV2Habilitado()) {
+  if (v2Activo) {
     const feriadosCl = await feriadosDePais("cl")
     const { esHorarioHabil } = await import("@/lib/ptv")
     if (esHorarioHabil("cl", ahora, feriadosCl)) {
