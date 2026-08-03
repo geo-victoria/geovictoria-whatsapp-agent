@@ -43,6 +43,7 @@ import {
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { enviarCorreoCobranza } from "@/lib/correo-cobranza"
+import { adjuntarComprobanteACotizacion, mediaEntranteReciente } from "@/lib/comprobante-adjunto"
 
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -323,6 +324,21 @@ export async function registrarComprobanteTransferencia(
       }
     } catch {
       /* sin link — el correo sale igual */
+    }
+    // Fallback: si vic_kv no alcanzó a guardar la media (deploy en medio,
+    // KV caído), se busca el último archivo entrante en la API de Botmaker.
+    if (!comprobanteUrl && !declarado) {
+      const bm = await mediaEntranteReciente(contact, 2).catch(() => null)
+      if (bm?.url) comprobanteUrl = bm.url
+    }
+    // La imagen ORIGINAL queda adjunta en la cotización (Lalo 03-ago: "sirve
+    // para gestión interna") — la nota transcribe, el attachment respalda.
+    if (comprobanteUrl && !declarado) {
+      await adjuntarComprobanteACotizacion(
+        pointer.quoteId,
+        comprobanteUrl,
+        `comprobante-transferencia-${contact}`,
+      ).catch(() => ({ ok: false }))
     }
     await enviarCorreoCobranza({
       quoteId: pointer.quoteId,
