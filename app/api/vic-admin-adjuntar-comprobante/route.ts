@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from "next/server"
-import { adjuntarComprobanteACotizacion, mediaEntranteReciente } from "@/lib/comprobante-adjunto"
+import { adjuntarComprobanteACotizacion, mediaEntranteRecienteDebug } from "@/lib/comprobante-adjunto"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -42,7 +42,14 @@ export async function POST(req: Request): Promise<Response> {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
-  let body: { quoteId?: string; mediaUrl?: string; contact?: string; horas?: number } = {}
+  let body: {
+    quoteId?: string
+    mediaUrl?: string
+    contact?: string
+    horas?: number
+    desdeIso?: string
+    hastaIso?: string
+  } = {}
   try {
     body = (await req.json()) as typeof body
   } catch {
@@ -59,15 +66,27 @@ export async function POST(req: Request): Promise<Response> {
     if (!contact) {
       return NextResponse.json({ ok: false, error: "mediaUrl o contact requerido" }, { status: 400 })
     }
-    const bm = await mediaEntranteReciente(contact, Number(body.horas) || 6)
-    if (!bm?.url) {
+    const bm = await mediaEntranteRecienteDebug(contact, Number(body.horas) || 6, {
+      desdeIso: (body.desdeIso || "").trim() || undefined,
+      hastaIso: (body.hastaIso || "").trim() || undefined,
+    })
+    if (!bm.top?.url) {
       return NextResponse.json(
-        { ok: false, error: "no se encontró media entrante del contacto en Botmaker (ventana agotada?)" },
+        {
+          ok: false,
+          error: "no se encontró media entrante del contacto en Botmaker",
+          diagnostico: {
+            totalItems: bm.totalItems,
+            delContacto: bm.delContacto,
+            conMedia: bm.conMedia,
+            kesMuestra: bm.kesMuestra,
+          },
+        },
         { status: 404 },
       )
     }
-    mediaUrl = bm.url
-    creationTime = bm.creationTime
+    mediaUrl = bm.top.url
+    creationTime = bm.top.creationTime
   }
   const resultado = await adjuntarComprobanteACotizacion(
     quoteId,

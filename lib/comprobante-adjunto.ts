@@ -36,29 +36,61 @@ function urlsDeMedia(obj: unknown, encontradas: string[] = []): string[] {
 export async function mediaEntranteReciente(
   contact: string,
   horas = 6,
+  opts?: { desdeIso?: string; hastaIso?: string },
 ): Promise<{ url: string; creationTime: string } | null> {
-  if (!BM_TOKEN) return null
+  const res = await mediaEntranteRecienteDebug(contact, horas, opts)
+  return res.top
+}
+
+/**
+ * Variante con diagnóstico (la usa el endpoint admin): además del hallazgo,
+ * cuenta cuántos mensajes devolvió la API y cuántos eran del contacto — para
+ * distinguir "link vencido" de "la ventana/limit no alcanzó al mensaje".
+ */
+export async function mediaEntranteRecienteDebug(
+  contact: string,
+  horas = 6,
+  opts?: { desdeIso?: string; hastaIso?: string },
+): Promise<{
+  top: { url: string; creationTime: string } | null
+  totalItems: number
+  delContacto: number
+  conMedia: number
+  kesMuestra?: string[]
+}> {
+  const vacio = { top: null, totalItems: 0, delContacto: 0, conMedia: 0 }
+  if (!BM_TOKEN) return vacio
   const clean = contact.replace(/\D/g, "")
   try {
-    const desde = new Date(Date.now() - horas * 60 * 60 * 1000).toISOString()
+    const desde = opts?.desdeIso || new Date(Date.now() - horas * 60 * 60 * 1000).toISOString()
+    const hasta = opts?.hastaIso || ""
     const r = await fetch(
-      `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desde)}`,
+      `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desde)}${hasta ? `&to=${encodeURIComponent(hasta)}` : ""}`,
       { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" },
     )
-    if (!r.ok) return null
+    if (!r.ok) return vacio
     const data = (await r.json().catch(() => ({}))) as {
       items?: Array<{ from?: string; creationTime?: string; chat?: { contactId?: string } } & Record<string, unknown>>
     }
-    const conMedia = (data.items || [])
-      .filter((m) => m.from === "user" && (m.chat?.contactId || "").replace(/\D/g, "") === clean)
+    const items = data.items || []
+    const propios = items.filter(
+      (m) => m.from === "user" && (m.chat?.contactId || "").replace(/\D/g, "") === clean,
+    )
+    const conMedia = propios
       .map((m) => ({ creationTime: String(m.creationTime || ""), urls: urlsDeMedia(m) }))
       .filter((m) => m.urls.length > 0)
       .sort((a, b) => b.creationTime.localeCompare(a.creationTime))
     const top = conMedia[0]
-    return top ? { url: top.urls[0], creationTime: top.creationTime } : null
+    return {
+      top: top ? { url: top.urls[0], creationTime: top.creationTime } : null,
+      totalItems: items.length,
+      delContacto: propios.length,
+      conMedia: conMedia.length,
+      kesMuestra: propios[0] ? Object.keys(propios[0]) : undefined,
+    }
   } catch (e) {
     console.error("[comprobante-adjunto] mediaEntranteReciente falló:", e)
-    return null
+    return vacio
   }
 }
 
