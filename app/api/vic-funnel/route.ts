@@ -909,8 +909,6 @@ const ESTADOS_LISTADO = ["Sin contactar", "Contactado", "En levantamiento", "Pre
 
 function renderListadoComercial(filas: FilaListado[], key: string): string {
   if (!filas.length) return ""
-  const propietarios = [...new Set(filas.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
-  const ESTADOS = ESTADOS_LISTADO
   const filasHtml = filas
     .map(
       (f) => `<tr data-estado="${esc(f.estado)}" data-prop="${esc(f.propietario)}" data-fecha="${esc(f.fechaIso.slice(0, 10))}">
@@ -924,40 +922,12 @@ function renderListadoComercial(filas: FilaListado[], key: string): string {
       </tr>`,
     )
     .join("")
-  return `<div class="card"><h2>Listado comercial vivo <span class="pct" style="font-weight:400">— ${filas.length} casos (últimos 30 días) · <span id="lcCount"></span></span></h2>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px">
-    <label>Desde <input type="date" id="lcDesde" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
-    <label>Hasta <input type="date" id="lcHasta" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
-    <label>Estado <select id="lcEstado" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"><option value="">Todos</option>${ESTADOS.map((e) => `<option>${e}</option>`).join("")}</select></label>
-    <label>Propietario <select id="lcProp" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"><option value="">Todos</option>${propietarios.map((p) => `<option>${esc(p)}</option>`).join("")}</select></label>
-    <a href="#" id="lcLimpiar" style="font-size:12px">✕ Limpiar</a>
-  </div>
+  return `<div class="card"><h2>Listado comercial vivo <span class="pct" style="font-weight:400">— ${filas.length} casos (últimos 30 días)</span></h2>
   <div style="overflow-x:auto"><table id="lcTabla">
     <thead><tr><th>Empresa / contacto</th><th>Primer contacto</th><th>Estado</th><th>Fecha último estado</th><th>Estado en Zoho (deal/lead)</th><th>Propietario</th><th>Accionable (Claude)</th></tr></thead>
     <tbody>${filasHtml}</tbody>
   </table></div>
-  <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). El accionable lo escribe el análisis de Claude por conversación (pasa el mouse para ver el resumen; si aún no fue analizada, sale una sugerencia por estado). Fechas en hora de Chile.</div>
-  <script>
-    (function(){
-      var d=document.getElementById("lcDesde"),h=document.getElementById("lcHasta"),e=document.getElementById("lcEstado"),p=document.getElementById("lcProp"),c=document.getElementById("lcCount");
-      var filas=[].slice.call(document.querySelectorAll("#lcTabla tbody tr"));
-      function aplica(){
-        var n=0;
-        filas.forEach(function(tr){
-          var ok=true,f=tr.getAttribute("data-fecha");
-          if(d.value&&f<d.value)ok=false;
-          if(h.value&&f>h.value)ok=false;
-          if(e.value&&tr.getAttribute("data-estado")!==e.value)ok=false;
-          if(p.value&&tr.getAttribute("data-prop")!==p.value)ok=false;
-          tr.style.display=ok?"":"none"; if(ok)n++;
-        });
-        c.textContent=n+" visibles";
-      }
-      [d,h,e,p].forEach(function(x){x.addEventListener("change",aplica)});
-      document.getElementById("lcLimpiar").addEventListener("click",function(ev){ev.preventDefault();d.value="";h.value="";e.value="";p.value="";aplica();});
-      aplica();
-    })();
-  </script>
+  <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). El accionable lo escribe el análisis de Claude por conversación (pasa el mouse para ver el resumen; si aún no fue analizada, sale una sugerencia por estado). Fechas en hora de Chile. Para filtrar, usa los filtros globales de arriba (aplican a toda la página, incluida esta tabla).</div>
 </div>`
 }
 
