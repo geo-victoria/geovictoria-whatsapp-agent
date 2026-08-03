@@ -1152,6 +1152,54 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
   <script>
     (function () {
       var KEYQ = "?key=${encodeURIComponent(key)}";
+      // Viñeta flotante para el registro de gestión (en vez del prompt nativo).
+      var pop = document.createElement("div");
+      pop.style.cssText = "position:absolute;z-index:50;display:none;background:#fff;border:1px solid #d0d5db;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px;width:300px";
+      pop.innerHTML = '<div style="font-size:13px;font-weight:600;margin-bottom:6px">Registro de la gestión <span style="color:#c62828">*</span></div>' +
+        '<div style="font-size:12px;color:#6b7280;margin-bottom:6px">¿Qué hiciste o qué acordaste con el cliente? Se guarda como nota en Zoho.</div>' +
+        '<textarea id="popNota" rows="3" style="width:100%;box-sizing:border-box;font-size:13px;padding:6px;border:1px solid #d0d5db;border-radius:6px;resize:vertical"></textarea>' +
+        '<div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end">' +
+        '<button id="popCancelar" style="background:#f3f4f6;color:#374151;border:1px solid #d0d5db;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer">Cancelar</button>' +
+        '<button id="popGuardar" style="background:#1b5e20;color:#fff;border:0;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">Guardar ✔</button></div>';
+      document.body.appendChild(pop);
+      var nota = pop.querySelector("#popNota");
+      var btnActual = null;
+      function cerrar() { pop.style.display = "none"; nota.value = ""; nota.style.borderColor = "#d0d5db"; btnActual = null; }
+      function abrir(b) {
+        btnActual = b;
+        var r = b.getBoundingClientRect();
+        pop.style.display = "block";
+        var left = r.right + window.scrollX + 10;
+        if (left + 310 > window.scrollX + document.documentElement.clientWidth) left = r.left + window.scrollX;
+        pop.style.left = left + "px";
+        pop.style.top = (r.top + window.scrollY - 8) + "px";
+        nota.focus();
+      }
+      pop.querySelector("#popCancelar").addEventListener("click", cerrar);
+      document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") cerrar(); });
+      document.addEventListener("click", function (ev) {
+        if (pop.style.display !== "none" && !pop.contains(ev.target) && !(btnActual && btnActual.contains(ev.target))) cerrar();
+      });
+      pop.querySelector("#popGuardar").addEventListener("click", async function () {
+        var texto = (nota.value || "").trim();
+        if (!texto) { nota.style.borderColor = "#c62828"; nota.focus(); return; }
+        var b = btnActual;
+        if (!b) return;
+        var tr = b.closest("tr");
+        this.disabled = true; this.textContent = "Guardando…";
+        try {
+          await fetch(KEYQ + "&accion=gestionar&contact=" + encodeURIComponent(b.dataset.contact), {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: "nota=" + encodeURIComponent(texto),
+          });
+          tr.style.transition = "opacity .4s"; tr.style.opacity = "0.4";
+          b.dataset.estado = "gestionado"; b.textContent = "↩"; b.title = "Deshacer: volver a la cola";
+          b.style.background = "#fff3e0"; b.style.color = "#7a4b00"; b.style.borderColor = "#ffcc80";
+          cerrar();
+        } catch (e) {}
+        this.disabled = false; this.textContent = "Guardar ✔";
+      });
       function wire(b) {
         b.addEventListener("click", async function () {
           var tr = this.closest("tr");
@@ -1166,20 +1214,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
             this.disabled = false;
             return;
           }
-          var nota = prompt("Registro de la gestión (obligatorio):\\n¿Qué hiciste o qué acordaste con el cliente? Se guardará como nota en Zoho.");
-          if (!nota || !nota.trim()) return;
-          this.disabled = true; this.textContent = "…";
-          try {
-            await fetch(KEYQ + "&accion=gestionar&contact=" + encodeURIComponent(this.dataset.contact), {
-              method: "POST",
-              headers: { "content-type": "application/x-www-form-urlencoded" },
-              body: "nota=" + encodeURIComponent(nota.trim()),
-            });
-            tr.style.transition = "opacity .4s"; tr.style.opacity = "0.4";
-            this.dataset.estado = "gestionado"; this.textContent = "↩"; this.title = "Deshacer: volver a la cola";
-            this.style.background = "#fff3e0"; this.style.color = "#7a4b00"; this.style.borderColor = "#ffcc80";
-          } catch (e) { this.textContent = "✔"; }
-          this.disabled = false;
+          abrir(this);
         });
       }
       document.querySelectorAll(".btnGest").forEach(wire);
