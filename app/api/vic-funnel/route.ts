@@ -1114,19 +1114,24 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     const btn = c.gestionado
       ? `<button class="btnGest" data-contact="${esc(c.contacto)}" data-estado="gestionado" title="Deshacer: volver a la cola" style="background:#fff3e0;color:#7a4b00;border:1px solid #ffcc80;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">↩</button>`
       : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (pide registro y guarda nota en Zoho)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">✔</button>`
-    // WhatsApp en grande, reconocible, solo al final de la fila.
-    const btnWa = `<a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="Abrir chat de WhatsApp" style="background:#25D366;color:#ffffff;text-decoration:none;padding:9px 14px;border-radius:8px;font-weight:700;font-size:13px;display:inline-block;white-space:nowrap">💬 WhatsApp</a>`
+    // WhatsApp reconocible pero compacto (solo el ícono, en verde oficial).
+    const btnWa = `<a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="Abrir chat de WhatsApp" style="background:#25D366;color:#ffffff;text-decoration:none;padding:8px 11px;border-radius:8px;font-size:16px;display:inline-block;white-space:nowrap">💬</a>`
+    // Fecha compacta apilada (fecha arriba, hora abajo) — usa la mitad de ancho.
+    const fechaCompacta = (iso: string) => {
+      const [fp, ...hp] = fmtSantiago(iso).split(", ")
+      return `${fp}<div class="sub" style="margin:0;font-size:11px">${hp.join(", ")}</div>`
+    }
     return `<tr data-contact="${esc(c.contacto)}"${c.gestionado ? ` class="filaGest" style="opacity:.4;display:none"` : ""}>
           <td style="white-space:nowrap;vertical-align:middle">${btn}</td>
           <td>${esc(c.empresa)}${c.convId ? ` <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" title="Ver conversación" style="font-weight:400">📄</a>` : ""}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div></td>
-          <td style="white-space:nowrap">${c.primerContactoIso ? fmtSantiago(c.primerContactoIso) : "—"}</td>
+          <td style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
           <td><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
           <td>${esc(c.estadoZoho)}</td>
           <td style="white-space:nowrap"><span title="hora local del cliente">${c.llamable ? "🟢" : "🌙"} ${c.horaLocal}</span></td>
           <td style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
           <td style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td style="white-space:nowrap;vertical-align:middle;padding-left:18px">${btnWa}</td>
+          <td style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
         </tr>`
   }
   const secciones = TIPOS_ACCION.map((tipo) => {
@@ -1135,12 +1140,13 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>Listo</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th style="padding-left:18px">WhatsApp</th></tr></thead>
+      <thead><tr><th>Listo</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
 
-  return `<div class="card"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span></h2>
+  return `<style>.colaGest table th,.colaGest table td{padding:7px 6px;font-size:12.5px}</style>
+  <div class="card colaGest"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span></h2>
   ${activos.length || nGestionados ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
   <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. 🟢 = horario hábil del cliente (L-V 8-18 h local, según prefijo del teléfono) · 🌙 = fuera de horario. ✔ pide un registro de la gestión (obligatorio), lo guarda como nota en el registro de Zoho del cliente y saca el caso de la cola por 24 horas; con ↩ (en "mostrar" gestionadas) se deshace al instante.</div>
   <script>
@@ -2014,7 +2020,7 @@ export async function GET(req: Request): Promise<Response> {
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
-  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  .wrap{max-width:1440px;margin:0 auto;padding:24px 20px 60px}
   h1{font-size:22px;margin:0 0 4px} .sub{color:#6b7280;font-size:13px;margin-bottom:20px}
   .kpis{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px}
   .kpi{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px;min-width:120px;flex:1}
