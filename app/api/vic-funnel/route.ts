@@ -14,7 +14,7 @@
  *     → No identificado
  */
 
-import { isTestContact } from "@/lib/funnel-analysis"
+import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
@@ -51,6 +51,10 @@ type RawAceptada = {
   Modified_Time?: string
   Descuento_Recurrente_Pct?: number | null
   "Cuenta_Asociada.Account_Name"?: string | null
+  Onboarding_Link?: string | null
+  "Owner.first_name"?: string | null
+  "Owner.last_name"?: string | null
+  "Deal_Asociado.Stage"?: string | null
 }
 
 type VentaCerrada = {
@@ -324,6 +328,7 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
   asistidas: number
   sinClasificar: number
   aceptadasList: RawAceptada[]
+  todasList: RawAceptada[]
 } | null> {
   try {
     const token = await getZohoAccessToken()
@@ -331,7 +336,7 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
       method: "POST",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
+        select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
       }),
       cache: "no-store",
     })
@@ -368,6 +373,9 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
       asistidas,
       sinClasificar: aceptadasList.length - autonomas - asistidas,
       aceptadasList,
+      // Universo completo SIN filtro de fechas: lo consume el Listado
+      // comercial (esa sección filtra en el navegador).
+      todasList: universo,
     }
   } catch {
     return null
@@ -580,6 +588,267 @@ async function fetchHardSignals(): Promise<{ quote: Set<string>; meeting: Set<st
   }
 }
 
+// ── LISTADO COMERCIAL VIVO (pedido Lalo 03-ago) ─────────────────────────────
+// Una fila por caso comercial con su estado más avanzado, la fecha/hora de ESE
+// estado, el estado del registro en Zoho y el propietario. Filtros de fecha,
+// estado y propietario en el navegador (la sección trae los últimos 30 días).
+// Escalera de estados (cada uno pisa al anterior):
+//   Sin contactar → Contactado → En levantamiento → Preform enviado →
+//   Formal enviada → Aceptada → Pagada
+
+type FilaListado = {
+  empresa: string
+  contacto: string
+  estado: string
+  fechaIso: string
+  estadoZoho: string
+  propietario: string
+}
+
+type ConvListado = { id: string; contact: string; started_at: string | null; last_user_at: string | null }
+
+async function fetchConvsListado(): Promise<ConvListado[]> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,started_at,last_user_at&order=started_at.desc&limit=2000`,
+    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+  )
+  return res.ok ? ((await res.json().catch(() => [])) as ConvListado[]) : []
+}
+
+/** Último mensaje de PRECIO por contacto (el preform del chat), con timestamp
+ * real desde vic_v3_messages — misma señal que usa el conteo de preforms. */
+async function fetchPreformAts(convs: ConvListado[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const porConvId = new Map(convs.map((c) => [c.id, c.contact]))
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_messages?role=eq.assistant&or=(content.ilike.*Resumen%20mensual*,content.ilike.*Total%20mensual%20con%20IVA*)&select=conversation_id,at&order=at.desc&limit=1000`,
+    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+  )
+  if (!res.ok) return out
+  const rows = (await res.json().catch(() => [])) as Array<{ conversation_id: string; at: string }>
+  for (const r of rows) {
+    const contact = porConvId.get(r.conversation_id)
+    // order=at.desc: la primera aparición por contacto es su último preform.
+    if (contact && !out.has(digits(contact))) out.set(digits(contact), r.at)
+  }
+  return out
+}
+
+type LeadListado = {
+  id?: string
+  Full_Name?: string
+  Company?: string | null
+  Phone?: string | null
+  Lead_Status?: string | null
+  Created_Time?: string
+  "Owner.first_name"?: string | null
+  "Owner.last_name"?: string | null
+  Converted_Deal?: { id?: string } | null
+}
+
+/** Leads del flujo de Vicky (vivos + convertidos) de los últimos 30 días, y
+ * los deals creados por Vicky (para etapa/dueño de los preform sin quote). */
+async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
+  leads: LeadListado[]
+  dealsPorId: Map<string, { stage: string; owner: string }>
+}> {
+  const leads: LeadListado[] = []
+  const dealsPorId = new Map<string, { stage: string; owner: string }>()
+  try {
+    const token = await getZohoAccessToken()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    // split("T")[0] y no slice: el guard de funnel-filtro-fechas prohíbe el
+    // patrón del bug de inputs; acá es un literal para COQL, no un value de UI.
+    const desde = new Date(Date.now() - 30 * 24 * 3600e3).toISOString().split("T")[0]
+    const [vivosRes, convertidosRes, dealsRes] = await Promise.all([
+      fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({
+          select_query: `select id, Full_Name, Company, Phone, Lead_Status, Created_Time, Owner.first_name, Owner.last_name from Leads where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
+        }),
+      }),
+      // Convertidos: la búsqueda por criterio trae TODOS los de la org; se
+      // filtran después por los contactos que conocemos de las conversaciones.
+      fetch(
+        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Created_Time:greater_equal:${desde}T00:00:00-04:00)`)}&converted=true&fields=id,Full_Name,Company,Phone,Lead_Status,Created_Time,Converted_Deal&per_page=200`,
+        { headers: H, cache: "no-store" },
+      ),
+      fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({
+          select_query: `select id, Stage, Owner.first_name, Owner.last_name from Deals where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
+        }),
+      }),
+    ])
+    if (vivosRes.ok && vivosRes.status !== 204) {
+      const d = (await vivosRes.json().catch(() => ({}))) as { data?: LeadListado[] }
+      leads.push(...(d?.data || []))
+    }
+    if (convertidosRes.ok && convertidosRes.status !== 204) {
+      const d = (await convertidosRes.json().catch(() => ({}))) as { data?: LeadListado[] }
+      for (const l of d?.data || []) {
+        if (contactosConocidos.has(digits(String(l.Phone || "")))) leads.push(l)
+      }
+    }
+    if (dealsRes.ok && dealsRes.status !== 204) {
+      const d = (await dealsRes.json().catch(() => ({}))) as {
+        data?: Array<{ id: string; Stage?: string; "Owner.first_name"?: string; "Owner.last_name"?: string }>
+      }
+      for (const dl of d?.data || []) {
+        dealsPorId.set(String(dl.id), {
+          stage: String(dl.Stage || ""),
+          owner: `${dl["Owner.first_name"] || ""} ${dl["Owner.last_name"] || ""}`.trim(),
+        })
+      }
+    }
+  } catch (e) {
+    console.warn("[vic-funnel] listado Zoho falló:", e instanceof Error ? e.message : e)
+  }
+  return { leads, dealsPorId }
+}
+
+function empresaDeQuote(q: RawAceptada): string {
+  return (
+    String(q["Cuenta_Asociada.Account_Name"] || "").trim() ||
+    String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim() ||
+    "(sin nombre)"
+  )
+}
+
+function construirListadoComercial(params: {
+  quotes: RawAceptada[]
+  leads: LeadListado[]
+  dealsPorId: Map<string, { stage: string; owner: string }>
+  convs: ConvListado[]
+  preformAt: Map<string, string>
+  analysisRows: Row[]
+  pais: "cl" | "co"
+}): FilaListado[] {
+  const { quotes, leads, dealsPorId, convs, preformAt, analysisRows, pais } = params
+  const delPais = (c: string) => (pais === "co" ? c.startsWith("57") : c.startsWith("56"))
+  const testSet = testContactSet()
+  const convPorContacto = new Map(convs.map((c) => [digits(c.contact), c]))
+  const analisisPorContacto = new Map(analysisRows.map((r) => [digits(r.contact), r]))
+  const corte30d = Date.now() - 30 * 24 * 3600e3
+  const filas: FilaListado[] = []
+  const cubiertos = new Set<string>()
+
+  // 1. Cotizaciones (formal en adelante). ÚLTIMA quote por contacto; las sin
+  //    teléfono van como fila propia.
+  const quotesOrdenadas = [...quotes].sort((a, b) => String(b.Created_Time || "").localeCompare(String(a.Created_Time || "")))
+  for (const q of quotesOrdenadas) {
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    if (tel && (!delPais(tel) || isTestContact(tel, testSet))) continue
+    if (tel && cubiertos.has(tel)) continue
+    if (Date.parse(String(q.Created_Time || "")) < corte30d) continue
+    if (tel) cubiertos.add(tel)
+    const pagada = Boolean(String(q.Onboarding_Link || "").trim())
+    const aceptada = String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
+    const estado = pagada ? "Pagada" : aceptada ? "Aceptada" : "Formal enviada"
+    const fechaIso = pagada || aceptada
+      ? String(q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time || "")
+      : String(q.Created_Time || "")
+    filas.push({
+      empresa: empresaDeQuote(q),
+      contacto: tel ? `+${tel}` : "—",
+      estado,
+      fechaIso,
+      estadoZoho: String(q["Deal_Asociado.Stage"] || "").trim() || "—",
+      propietario: `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—",
+    })
+  }
+
+  // 2. Preform sin formal: el precio se mostró en el chat y no hay quote.
+  for (const [tel, at] of preformAt) {
+    if (cubiertos.has(tel) || !delPais(tel) || isTestContact(tel, testSet)) continue
+    if (Date.parse(at) < corte30d) continue
+    cubiertos.add(tel)
+    const lead = leads.find((l) => digits(String(l.Phone || "")) === tel)
+    const deal = lead?.Converted_Deal?.id ? dealsPorId.get(String(lead.Converted_Deal.id)) : undefined
+    filas.push({
+      empresa: String(lead?.Company || "").trim() || "(por identificar)",
+      contacto: `+${tel}`,
+      estado: "Preform enviado",
+      fechaIso: at,
+      estadoZoho: deal?.stage || String(lead?.Lead_Status || "").trim() || "—",
+      propietario: deal?.owner || `${lead?.["Owner.first_name"] || ""} ${lead?.["Owner.last_name"] || ""}`.trim() || "—",
+    })
+  }
+
+  // 3. Leads sin precio aún: Sin contactar / Contactado / En levantamiento.
+  for (const l of leads) {
+    const tel = digits(String(l.Phone || ""))
+    if (!tel || cubiertos.has(tel) || !delPais(tel) || isTestContact(tel, testSet)) continue
+    if (Date.parse(String(l.Created_Time || "")) < corte30d) continue
+    cubiertos.add(tel)
+    const conv = convPorContacto.get(tel)
+    const respondio = Boolean(conv?.last_user_at)
+    const enLevantamiento = respondio && analisisPorContacto.get(tel)?.sub_bucket === "cotizacion"
+    filas.push({
+      empresa: String(l.Company || "").trim() || String(l.Full_Name || "").trim() || "(por identificar)",
+      contacto: `+${tel}`,
+      estado: !respondio ? "Sin contactar" : enLevantamiento ? "En levantamiento" : "Contactado",
+      fechaIso: respondio ? String(conv?.last_user_at || "") : String(l.Created_Time || ""),
+      estadoZoho: String(l.Lead_Status || "").trim() || "—",
+      propietario: `${l["Owner.first_name"] || ""} ${l["Owner.last_name"] || ""}`.trim() || "—",
+    })
+  }
+
+  return filas.sort((a, b) => b.fechaIso.localeCompare(a.fechaIso))
+}
+
+function renderListadoComercial(filas: FilaListado[]): string {
+  if (!filas.length) return ""
+  const propietarios = [...new Set(filas.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
+  const ESTADOS = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada"]
+  const filasHtml = filas
+    .map(
+      (f) => `<tr data-estado="${esc(f.estado)}" data-prop="${esc(f.propietario)}" data-fecha="${esc(f.fechaIso.slice(0, 10))}">
+        <td>${esc(f.empresa)}<div class="sub" style="margin:0">${esc(f.contacto)}</div></td>
+        <td><span class="tag">${esc(f.estado)}</span></td>
+        <td>${fmtSantiago(f.fechaIso)}</td>
+        <td>${esc(f.estadoZoho)}</td>
+        <td>${esc(f.propietario)}</td>
+      </tr>`,
+    )
+    .join("")
+  return `<div class="card"><h2>Listado comercial vivo <span class="pct" style="font-weight:400">— ${filas.length} casos (últimos 30 días) · <span id="lcCount"></span></span></h2>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px">
+    <label>Desde <input type="date" id="lcDesde" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
+    <label>Hasta <input type="date" id="lcHasta" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
+    <label>Estado <select id="lcEstado" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"><option value="">Todos</option>${ESTADOS.map((e) => `<option>${e}</option>`).join("")}</select></label>
+    <label>Propietario <select id="lcProp" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"><option value="">Todos</option>${propietarios.map((p) => `<option>${esc(p)}</option>`).join("")}</select></label>
+    <a href="#" id="lcLimpiar" style="font-size:12px">✕ Limpiar</a>
+  </div>
+  <div style="overflow-x:auto"><table id="lcTabla">
+    <thead><tr><th>Empresa / contacto</th><th>Estado</th><th>Fecha último estado</th><th>Estado en Zoho (deal/lead)</th><th>Propietario</th></tr></thead>
+    <tbody>${filasHtml}</tbody>
+  </table></div>
+  <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). Fechas en hora de Chile.</div>
+  <script>
+    (function(){
+      var d=document.getElementById("lcDesde"),h=document.getElementById("lcHasta"),e=document.getElementById("lcEstado"),p=document.getElementById("lcProp"),c=document.getElementById("lcCount");
+      var filas=[].slice.call(document.querySelectorAll("#lcTabla tbody tr"));
+      function aplica(){
+        var n=0;
+        filas.forEach(function(tr){
+          var ok=true,f=tr.getAttribute("data-fecha");
+          if(d.value&&f<d.value)ok=false;
+          if(h.value&&f>h.value)ok=false;
+          if(e.value&&tr.getAttribute("data-estado")!==e.value)ok=false;
+          if(p.value&&tr.getAttribute("data-prop")!==p.value)ok=false;
+          tr.style.display=ok?"":"none"; if(ok)n++;
+        });
+        c.textContent=n+" visibles";
+      }
+      [d,h,e,p].forEach(function(x){x.addEventListener("change",aplica)});
+      document.getElementById("lcLimpiar").addEventListener("click",function(ev){ev.preventDefault();d.value="";h.value="";e.value="";p.value="";aplica();});
+      aplica();
+    })();
+  </script>
+</div>`
+}
+
 function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
@@ -673,6 +942,7 @@ export async function GET(req: Request): Promise<Response> {
     asistidas: number
     sinClasificar: number
     aceptadasList: RawAceptada[]
+    todasList: RawAceptada[]
   } | null = null
   let ventasHtml = ""
   // Filtro por PAÍS = canal/línea de Vicky (pedido Lalo 20-jul): cl (default)
@@ -681,20 +951,44 @@ export async function GET(req: Request): Promise<Response> {
   // entró), y sus cotizaciones se asocian por formal_quote_id.
   const pais: "cl" | "co" = searchParams.get("pais") === "co" ? "co" : "cl"
   const rango = parseRango(searchParams)
+  let listadoHtml = ""
   try {
     const co = await fetchExclusionesCO()
-    const [allRows, hard, cierreZoho, origenData, fechasConv] = await Promise.all([
+    const [allRows, hard, cierreZoho, origenData, fechasConv, convsListado] = await Promise.all([
       fetchAnalysis(),
       fetchHardSignals(),
       fetchCierreZoho(co.quoteIds, pais, rango),
       fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, convertidos: new Set<string>(), respondio: new Set<string>() })),
       // Las fechas de inicio solo hacen falta con el filtro activo.
       rango ? fetchFechasConversaciones() : Promise.resolve(new Map<string, string>()),
+      fetchConvsListado().catch(() => [] as ConvListado[]),
     ])
     origen = origenData
     cierre = cierreZoho
     if (cierre?.aceptadasList?.length) {
       ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList))
+    }
+    // Listado comercial vivo (best-effort: si una pata falla, la sección se
+    // arma con lo que haya; jamás bota la página).
+    try {
+      const contactosConocidos = new Set(convsListado.map((c) => digits(c.contact)))
+      const [preformAt, zohoListado] = await Promise.all([
+        fetchPreformAts(convsListado),
+        fetchZohoListado(contactosConocidos),
+      ])
+      listadoHtml = renderListadoComercial(
+        construirListadoComercial({
+          quotes: cierre?.todasList || [],
+          leads: zohoListado.leads,
+          dealsPorId: zohoListado.dealsPorId,
+          convs: convsListado,
+          preformAt,
+          analysisRows: allRows,
+          pais,
+        }),
+      )
+    } catch (e) {
+      console.warn("[vic-funnel] listado comercial falló:", e instanceof Error ? e.message : e)
     }
     rows = allRows.filter((r) => {
       if (isTestContact(r.contact)) return false
@@ -1026,6 +1320,8 @@ export async function GET(req: Request): Promise<Response> {
   })()}
 
   ${funnelOrigenHtml}
+
+  ${listadoHtml}
 
   ${ventasHtml}
 
