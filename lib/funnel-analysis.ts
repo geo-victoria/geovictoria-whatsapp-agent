@@ -80,6 +80,9 @@ export type ConversationAnalysis = {
   motivo_no_cierre: string | null
   es_cliente_actual: boolean
   resumen: string
+  /** Próxima acción concreta para el EJECUTIVO que tome el caso ("" si no
+   * requiere acción humana). Se muestra en el Listado comercial del dash. */
+  accionable: string
   confianza: "alta" | "media" | "baja"
   hallazgos: Hallazgo[]
 }
@@ -115,10 +118,12 @@ Clasifica así:
 
 7) "confianza": "alta" | "media" | "baja" según qué tan clara es la clasificación.
 
+6-bis) "accionable" (string, máx 160 caracteres): la PRÓXIMA ACCIÓN concreta para el EJECUTIVO HUMANO que tome este caso, en imperativo y específica a lo que pasó ("Llámala hoy: vio el precio de 34 usuarios y preguntó por pago anual — cerrar con esa palanca", "No insistir: eligió a la competencia"). Si la conversación no requiere acción humana (soporte resuelto, spam, prueba interna), usa "".
+
 8) "hallazgos": arreglo (puede ser vacío) de observaciones accionables para mejorar a Vicky o el proceso de venta. Cada una { "tipo": "<etiqueta_corta_snake_case>", "detalle": "<1 frase>" }. Detecta por ejemplo: objecion_precio_mal_manejada, ofrecio_venta_no_pedida, pidio_fuera_de_catalogo, pidio_humano, dimensionamiento_dudoso, demora_respuesta, confusion_producto, oportunidad_perdida. Solo incluye hallazgos REALES y relevantes de esta conversación.
 
 Devuelve EXACTAMENTE este shape:
-{"grupo":"...","sub_bucket":null,"cotizacion_outcome":null,"motivo_no_cierre":null,"es_cliente_actual":false,"resumen":"...","confianza":"...","hallazgos":[]}`
+{"grupo":"...","sub_bucket":null,"cotizacion_outcome":null,"motivo_no_cierre":null,"es_cliente_actual":false,"resumen":"...","accionable":"...","confianza":"...","hallazgos":[]}`
 
 function buildTranscript(messages: TranscriptMessage[]): string {
   return messages
@@ -165,6 +170,7 @@ function coerce(raw: unknown): ConversationAnalysis {
     motivo_no_cierre: motivo,
     es_cliente_actual: Boolean(o.es_cliente_actual),
     resumen: String(o.resumen || "").slice(0, 200),
+    accionable: String(o.accionable || "").slice(0, 200),
     confianza: ["alta", "media", "baja"].includes(String(o.confianza))
       ? (o.confianza as ConversationAnalysis["confianza"])
       : "media",

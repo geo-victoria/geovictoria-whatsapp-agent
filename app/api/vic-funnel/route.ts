@@ -451,13 +451,14 @@ type Row = {
   motivo_no_cierre: string | null
   es_cliente_actual: boolean
   resumen: string | null
+  accionable: string | null
   hallazgos: Array<{ tipo: string; detalle: string }> | null
   analyzed_at: string | null
 }
 
 async function fetchAnalysis(): Promise<Row[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=conversation_id,contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,hallazgos,analyzed_at`,
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=conversation_id,contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,accionable,hallazgos,analyzed_at`,
     {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       cache: "no-store",
@@ -607,6 +608,31 @@ type FilaListado = {
   primerContactoIso: string
   /** id de la conversación para el link al chat (vista ?conv= del embudo). */
   convId: string
+  /** Próxima acción para el ejecutivo: la del análisis LLM, o un respaldo
+   * determinístico por estado si la conversación aún no fue analizada. */
+  accionable: string
+  /** Resumen del análisis, como tooltip del accionable. */
+  resumen: string
+}
+
+/** Respaldo determinístico del accionable cuando el análisis aún no corre. */
+function accionableFallback(estado: string, motivo: string | null): string {
+  switch (estado) {
+    case "Pagada":
+      return "Venta cerrada: llamar para dar la bienvenida y acompañar el onboarding."
+    case "Aceptada":
+      return "Aceptó la cotización: contactar para ayudarle a completar el pago."
+    case "Formal enviada":
+      return "Cotización en su correo: llamar para resolver dudas y empujar el cierre."
+    case "Preform enviado":
+      return `Vio el precio y no pidió la formal${motivo ? ` (motivo: ${motivo.replace(/_/g, " ")})` : ""}: llamar para destrabar.`
+    case "En levantamiento":
+      return "Conversación activa con Vicky: intervenir solo si se estanca."
+    case "Contactado":
+      return "Respondió sin entrar a cotizar: retomar el interés con una llamada."
+    default:
+      return "No respondió el toque inicial: intentar una llamada directa."
+  }
 }
 
 type ConvListado = { id: string; contact: string; started_at: string | null; last_user_at: string | null }
@@ -753,6 +779,7 @@ function construirListadoComercial(params: {
       ? String(q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time || "")
       : String(q.Created_Time || "")
     const conv = tel ? convPorContacto.get(tel) : undefined
+    const ana = tel ? analisisPorContacto.get(tel) : undefined
     filas.push({
       empresa: empresaDeQuote(q),
       contacto: tel ? `+${tel}` : "—",
@@ -762,6 +789,8 @@ function construirListadoComercial(params: {
       propietario: `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—",
       primerContactoIso: String(conv?.started_at || ""),
       convId: String(conv?.id || ""),
+      accionable: String(ana?.accionable || "").trim() || accionableFallback(estado, ana?.motivo_no_cierre || null),
+      resumen: String(ana?.resumen || ""),
     })
   }
 
@@ -773,6 +802,7 @@ function construirListadoComercial(params: {
     const lead = leads.find((l) => digits(String(l.Phone || "")) === tel)
     const deal = lead?.Converted_Deal?.id ? dealsPorId.get(String(lead.Converted_Deal.id)) : undefined
     const conv = convPorContacto.get(tel)
+    const ana = analisisPorContacto.get(tel)
     filas.push({
       empresa: String(lead?.Company || "").trim() || "(por identificar)",
       contacto: `+${tel}`,
@@ -782,6 +812,8 @@ function construirListadoComercial(params: {
       propietario: deal?.owner || `${lead?.["Owner.first_name"] || ""} ${lead?.["Owner.last_name"] || ""}`.trim() || "—",
       primerContactoIso: String(conv?.started_at || lead?.Created_Time || ""),
       convId: String(conv?.id || ""),
+      accionable: String(ana?.accionable || "").trim() || accionableFallback("Preform enviado", ana?.motivo_no_cierre || null),
+      resumen: String(ana?.resumen || ""),
     })
   }
 
@@ -792,17 +824,21 @@ function construirListadoComercial(params: {
     if (Date.parse(String(l.Created_Time || "")) < corte30d) continue
     cubiertos.add(tel)
     const conv = convPorContacto.get(tel)
+    const ana = analisisPorContacto.get(tel)
     const respondio = Boolean(conv?.last_user_at)
-    const enLevantamiento = respondio && analisisPorContacto.get(tel)?.sub_bucket === "cotizacion"
+    const enLevantamiento = respondio && ana?.sub_bucket === "cotizacion"
+    const estadoLead = !respondio ? "Sin contactar" : enLevantamiento ? "En levantamiento" : "Contactado"
     filas.push({
       empresa: String(l.Company || "").trim() || String(l.Full_Name || "").trim() || "(por identificar)",
       contacto: `+${tel}`,
-      estado: !respondio ? "Sin contactar" : enLevantamiento ? "En levantamiento" : "Contactado",
+      estado: estadoLead,
       fechaIso: respondio ? String(conv?.last_user_at || "") : String(l.Created_Time || ""),
       estadoZoho: String(l.Lead_Status || "").trim() || "—",
       propietario: `${l["Owner.first_name"] || ""} ${l["Owner.last_name"] || ""}`.trim() || "—",
       primerContactoIso: String(conv?.started_at || l.Created_Time || ""),
       convId: String(conv?.id || ""),
+      accionable: String(ana?.accionable || "").trim() || accionableFallback(estadoLead, ana?.motivo_no_cierre || null),
+      resumen: String(ana?.resumen || ""),
     })
   }
 
@@ -816,12 +852,13 @@ function renderListadoComercial(filas: FilaListado[], key: string): string {
   const filasHtml = filas
     .map(
       (f) => `<tr data-estado="${esc(f.estado)}" data-prop="${esc(f.propietario)}" data-fecha="${esc(f.fechaIso.slice(0, 10))}">
-        <td>${esc(f.empresa)}<div class="sub" style="margin:0">${esc(f.contacto)}${f.convId ? ` · <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(f.convId)}">ver chat</a>` : ""}</div></td>
+        <td>${esc(f.empresa)}<div class="sub" style="margin:0">${esc(f.contacto)}</div></td>
         <td>${f.primerContactoIso ? fmtSantiago(f.primerContactoIso) : "—"}</td>
         <td><span class="tag">${esc(f.estado)}</span></td>
         <td>${fmtSantiago(f.fechaIso)}</td>
         <td>${esc(f.estadoZoho)}</td>
         <td>${esc(f.propietario)}</td>
+        <td style="max-width:260px" title="${esc(f.resumen)}">${esc(f.accionable)}${f.convId ? `<div style="margin-top:4px"><a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(f.convId)}">ver conversación completa →</a></div>` : ""}</td>
       </tr>`,
     )
     .join("")
@@ -834,10 +871,10 @@ function renderListadoComercial(filas: FilaListado[], key: string): string {
     <a href="#" id="lcLimpiar" style="font-size:12px">✕ Limpiar</a>
   </div>
   <div style="overflow-x:auto"><table id="lcTabla">
-    <thead><tr><th>Empresa / contacto</th><th>Primer contacto</th><th>Estado</th><th>Fecha último estado</th><th>Estado en Zoho (deal/lead)</th><th>Propietario</th></tr></thead>
+    <thead><tr><th>Empresa / contacto</th><th>Primer contacto</th><th>Estado</th><th>Fecha último estado</th><th>Estado en Zoho (deal/lead)</th><th>Propietario</th><th>Accionable (Claude)</th></tr></thead>
     <tbody>${filasHtml}</tbody>
   </table></div>
-  <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). Fechas en hora de Chile.</div>
+  <div class="sub" style="margin-top:8px">El estado es el más avanzado alcanzado por el caso; su fecha es la del evento que lo definió (pago, aceptación, emisión de la formal, precio mostrado en el chat, última respuesta del cliente o creación del lead). "Estado en Zoho" muestra la etapa del deal (o el status del lead si aún no hay deal). El accionable lo escribe el análisis de Claude por conversación (pasa el mouse para ver el resumen; si aún no fue analizada, sale una sugerencia por estado). Fechas en hora de Chile.</div>
   <script>
     (function(){
       var d=document.getElementById("lcDesde"),h=document.getElementById("lcHasta"),e=document.getElementById("lcEstado"),p=document.getElementById("lcProp"),c=document.getElementById("lcCount");

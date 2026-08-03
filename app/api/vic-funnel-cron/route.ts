@@ -128,6 +128,7 @@ export async function GET(req: Request): Promise<Response> {
               motivo_no_cierre: analysis.motivo_no_cierre,
               es_cliente_actual: analysis.es_cliente_actual,
               resumen: analysis.resumen,
+              accionable: analysis.accionable,
               confianza: analysis.confianza,
               hallazgos: analysis.hallazgos,
               msg_count: msgs.length,
