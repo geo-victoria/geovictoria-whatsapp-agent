@@ -975,6 +975,67 @@ function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
 
+// ── Drill-down de KPIs (pedido Lalo 04-ago): cada número de las tarjetas es
+// clickeable y abre la lista de SUS conversaciones (?lista=<bucket>), con los
+// mismos filtros globales activos.
+const KPI_BUCKETS: Record<string, { titulo: string; pred: (r: Row) => boolean }> = {
+  total: { titulo: "Todas las conversaciones", pred: () => true },
+  comercial: { titulo: "Intención comercial", pred: (r) => r.grupo === "comercial" },
+  soporte: { titulo: "Soporte", pred: (r) => r.grupo === "soporte" },
+  no_identificado: { titulo: "No identificado", pred: (r) => r.grupo === "no_identificado" },
+  cotizacion: { titulo: "Flujo cotización", pred: (r) => r.grupo === "comercial" && r.sub_bucket === "cotizacion" },
+  reunion: { titulo: "Reunión", pred: (r) => r.grupo === "comercial" && r.sub_bucket === "reunion" },
+  lead: { titulo: "Lead (callback)", pred: (r) => r.grupo === "comercial" && r.sub_bucket === "lead" },
+  crosselling: { titulo: "Crosselling", pred: (r) => r.grupo === "comercial" && r.sub_bucket === "crosselling" },
+  solo_dudas: { titulo: "Solo dudas", pred: (r) => r.grupo === "comercial" && r.sub_bucket === "solo_dudas" },
+  preform: { titulo: "Vio precio y NO avanzó", pred: (r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "preform_mostrado" },
+  enviada: { titulo: "Cotización enviada", pred: (r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "cotizacion_enviada" },
+  abandonado: { titulo: "Se fue ANTES del precio", pred: (r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "abandonado" },
+}
+
+function renderListaKpi(rowsBucket: Row[], titulo: string, key: string, volverQS: string): Response {
+  const chips = (r: Row) =>
+    [
+      r.sub_bucket ? `<span class="tag">${esc(r.sub_bucket)}</span>` : "",
+      r.cotizacion_outcome ? `<span class="tag">${esc(r.cotizacion_outcome.replace(/_/g, " "))}</span>` : "",
+      r.motivo_no_cierre ? `<span class="tag" style="background:#fdecea;color:#8a1f11">motivo: ${esc(r.motivo_no_cierre.replace(/_/g, " "))}</span>` : "",
+      r.es_cliente_actual ? `<span class="tag" style="background:#e8f5e9;color:#1b5e20">cliente actual</span>` : "",
+    ].filter(Boolean).join(" ")
+  const filas = rowsBucket
+    .map(
+      (r) => `<tr>
+        <td style="white-space:nowrap">+${esc(digits(r.contact))}</td>
+        <td>${chips(r)}</td>
+        <td>${esc(r.resumen || "—")}</td>
+        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&conv=${esc(r.conversation_id)}">ver conversación →</a></td>
+      </tr>`,
+    )
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} — Vicky</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-size:20px;margin:0 0 4px} .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  th{color:#6b7280;font-weight:600;font-size:12px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  a{color:#1565C0;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+</style></head><body><div class="wrap">
+  <p><a href="${volverQS}">← Volver al embudo</a></p>
+  <h1>${esc(titulo)}</h1>
+  <div class="sub">${rowsBucket.length} conversación${rowsBucket.length === 1 ? "" : "es"} · respeta los filtros activos del embudo (país, fechas, estado, propietario)</div>
+  <div class="card">${
+    rowsBucket.length
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Contacto</th><th>Clasificación</th><th>Resumen (Claude)</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>`
+      : `<p class="sub" style="margin:0">Sin conversaciones en esta categoría con los filtros actuales.</p>`
+  }</div>
+</div></body></html>`
+  return page(html)
+}
+
 const esc = (s: unknown) =>
   String(s ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
@@ -1080,6 +1141,23 @@ export async function GET(req: Request): Promise<Response> {
   const estadoRaw = (searchParams.get("estado") || "").trim()
   const estadoF = ESTADOS_LISTADO.includes(estadoRaw) ? estadoRaw : ""
   const propF = (searchParams.get("prop") || "").trim()
+  // Drill-down de un KPI: ?lista=<bucket> abre el detalle de esas conversaciones.
+  const listaParam = (searchParams.get("lista") || "").trim()
+  // Query string con los filtros vigentes (para los links de los KPIs y el
+  // "volver" del detalle, que deben conservar país/fechas/estado/propietario).
+  const filtrosQS = (): URLSearchParams => {
+    const p = new URLSearchParams({ key, pais })
+    if (rango?.desdeStr) p.set("desde", rango.desdeStr)
+    if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
+    if (estadoF) p.set("estado", estadoF)
+    if (propF) p.set("prop", propF)
+    return p
+  }
+  const hrefLista = (bucket: string) => {
+    const p = filtrosQS()
+    p.set("lista", bucket)
+    return `?${p.toString()}`
+  }
   let propietariosAll: string[] = []
   let listadoHtml = ""
   try {
@@ -1206,6 +1284,13 @@ export async function GET(req: Request): Promise<Response> {
     }
   } catch (e) {
     return page(`<h1>Error consultando datos</h1><pre>${String(e).slice(0, 300)}</pre>`, 500)
+  }
+
+  // Vista de detalle de un KPI: usa las MISMAS rows ya filtradas por país,
+  // fechas, estado y propietario, más el predicado del bucket.
+  if (listaParam && KPI_BUCKETS[listaParam]) {
+    const b = KPI_BUCKETS[listaParam]
+    return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`)
   }
 
   if (rows.length === 0) {
@@ -1376,8 +1461,8 @@ export async function GET(req: Request): Promise<Response> {
     links.push(mk(s, t, v))
   }
 
-  const kpiCard = (label: string, value: number | string, color: string, sub?: string) =>
-    `<div class="kpi"><div class="kpi-v" style="color:${color}">${value}</div><div class="kpi-l">${label}${sub ? ` <span class="pct">${sub}</span>` : ""}</div></div>`
+  const kpiCard = (label: string, value: number | string, color: string, sub?: string, bucket?: string) =>
+    `<div class="kpi">${bucket ? `<a href="${hrefLista(bucket)}" title="Ver el detalle" style="text-decoration:none">` : ""}<div class="kpi-v" style="color:${color}${bucket ? ";cursor:pointer" : ""}">${value}</div>${bucket ? "</a>" : ""}<div class="kpi-l">${label}${sub ? ` <span class="pct">${sub}</span>` : ""}</div></div>`
   const pct = (x: number) => (total ? `${Math.round((x / total) * 100)}%` : "")
 
   const html = `<!doctype html><html lang="es"><head>
@@ -1446,18 +1531,18 @@ export async function GET(req: Request): Promise<Response> {
 
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
-    ${kpiCard("Conversaciones", total, col.base)}
-    ${kpiCard("Intención comercial", comercial, col.com, pct(comercial))}
-    ${kpiCard("Soporte", soporte, col.sop, pct(soporte))}
-    ${kpiCard("No identificado", noId, col.noid, pct(noId))}
+    ${kpiCard("Conversaciones", total, col.base, undefined, "total")}
+    ${kpiCard("Intención comercial", comercial, col.com, pct(comercial), "comercial")}
+    ${kpiCard("Soporte", soporte, col.sop, pct(soporte), "soporte")}
+    ${kpiCard("No identificado", noId, col.noid, pct(noId), "no_identificado")}
   </div>
   <div class="kgroup">Dentro de intención comercial (${comercial})</div>
   <div class="kpis">
-    ${kpiCard("Flujo cotización", cotizacion, col.com)}
-    ${kpiCard("Reunión", reunion, col.good)}
-    ${kpiCard("Lead (callback)", lead, col.warn)}
-    ${kpiCard("Crosselling", crosselling, col.good)}
-    ${kpiCard("Solo dudas", soloDudas, col.grey)}
+    ${kpiCard("Flujo cotización", cotizacion, col.com, undefined, "cotizacion")}
+    ${kpiCard("Reunión", reunion, col.good, undefined, "reunion")}
+    ${kpiCard("Lead (callback)", lead, col.warn, undefined, "lead")}
+    ${kpiCard("Crosselling", crosselling, col.good, undefined, "crosselling")}
+    ${kpiCard("Solo dudas", soloDudas, col.grey, undefined, "solo_dudas")}
   </div>
   <div class="kgroup">Flujo cotización y tasa de cierre (${cotizacion} conversaciones · cierre en vivo desde Zoho)</div>
   ${(() => {
@@ -1467,9 +1552,9 @@ export async function GET(req: Request): Promise<Response> {
     // formal — de los que vieron precio, cuántos se quedaron ahí.
     const abandonoPreform = vieronPrecio ? `${Math.round((cPreform / vieronPrecio) * 100)}% de abandono tras ver precio` : ""
     const base = `
-    ${kpiCard("Vio precio y NO avanzó", cPreform, col.warn, abandonoPreform || "quedó en preform")}
-    ${kpiCard("Cotización enviada", cEnviada, col.best, pasoPreform)}
-    ${kpiCard("Se fue ANTES del precio", cAbandonado, col.bad, "sin preform")}`
+    ${kpiCard("Vio precio y NO avanzó", cPreform, col.warn, abandonoPreform || "quedó en preform", "preform")}
+    ${kpiCard("Cotización enviada", cEnviada, col.best, pasoPreform, "enviada")}
+    ${kpiCard("Se fue ANTES del precio", cAbandonado, col.bad, "sin preform", "abandonado")}`
     if (!cierre) {
       return `<div class="kpis">${base}
   </div>
