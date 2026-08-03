@@ -340,7 +340,7 @@ async function fetchFechasConversaciones(): Promise<Map<string, string>> {
   return out
 }
 
-async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango: RangoFechas | null): Promise<{
+async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rango: RangoFechas | null): Promise<{
   total: number
   aceptadas: number
   // Desglose del campo "Intervención Humana" sobre las ACEPTADAS: cierres
@@ -368,12 +368,11 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
     if (!res.ok) return null
     const data = (await res.json().catch(() => null)) as { data?: RawAceptada[] } | null
     const universo = (data?.data || []).filter((q) => {
-      const esCO = coQuoteIds.has(String(q.id || ""))
-      if (pais === "cl" ? esCO : !esCO) return false
-      // Universo Chile cerrado: fuera las cotizaciones mexicanas (teléfono +52).
+      // País de la cotización: el de su conversación de origen; si no está
+      // ligada, por prefijo del teléfono (histórico: Chile por defecto).
       const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
-      const esMX = tel.startsWith("521") || (tel.startsWith("52") && tel.length === 12)
-      if (pais === "cl" && esMX) return false
+      const paisQuote: Pais = paisPorQuote.get(String(q.id || "")) || paisDeTelefono(tel) || "cl"
+      if (paisQuote !== pais) return false
       const nombre = String(q.Name || "").toLowerCase()
       if (nombre.includes("prueba") || nombre.includes("huellerocompany")) return false
       return true
@@ -408,28 +407,36 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
   }
 }
 
-// Conversaciones de Vicky COLOMBIA (línea +57): este dash es solo Chile, así
-// que se excluyen del análisis, de las señales duras y del cierre en Zoho.
-async function fetchExclusionesCO(): Promise<{
-  convIds: Set<string>
-  contacts: Set<string>
-  quoteIds: Set<string>
+// País de cada conversación/contacto/cotización, para partir el dashboard por
+// línea de Vicky (CL/CO/PE/MX). El país viene de vic_v3_conversations.country;
+// si falta, se resuelve por prefijo telefónico (y Chile como último recurso,
+// que es el comportamiento histórico del dash).
+async function fetchPaisesConversaciones(): Promise<{
+  paisPorConv: Map<string, Pais>
+  paisPorContacto: Map<string, Pais>
+  paisPorQuote: Map<string, Pais>
 }> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,formal_quote_id&country=eq.co`,
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,country,formal_quote_id&limit=10000`,
     {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       cache: "no-store",
     },
   )
   const rows = res.ok
-    ? ((await res.json()) as Array<{ id: string; contact: string; formal_quote_id: string | null }>)
+    ? ((await res.json()) as Array<{ id: string; contact: string; country: string | null; formal_quote_id: string | null }>)
     : []
-  return {
-    convIds: new Set(rows.map((r) => r.id)),
-    contacts: new Set(rows.map((r) => digits(r.contact))),
-    quoteIds: new Set(rows.map((r) => r.formal_quote_id || "").filter(Boolean)),
+  const paisPorConv = new Map<string, Pais>()
+  const paisPorContacto = new Map<string, Pais>()
+  const paisPorQuote = new Map<string, Pais>()
+  for (const r of rows) {
+    const declarado = String(r.country || "").toLowerCase()
+    const p: Pais = (declarado in PAISES ? declarado : paisDeTelefono(digits(r.contact)) || "cl") as Pais
+    paisPorConv.set(r.id, p)
+    paisPorContacto.set(digits(r.contact), p)
+    if (r.formal_quote_id) paisPorQuote.set(r.formal_quote_id, p)
   }
+  return { paisPorConv, paisPorContacto, paisPorQuote }
 }
 
 // Mejoras aplicadas al agente (changelog curado, editable a mano — pídeme
@@ -496,12 +503,29 @@ async function fetchAnalysis(): Promise<Row[]> {
 
 const digits = (c: string) => (c || "").replace(/\D/g, "")
 
+// ── Países soportados por el dashboard (pedido Lalo 04-ago: sumar PE y MX) ──
+type Pais = "cl" | "co" | "pe" | "mx"
+const PAISES: Record<Pais, { nombre: string; label: string; bandera: string; prefijo: string }> = {
+  cl: { nombre: "CHILE", label: "Chile", bandera: "🇨🇱", prefijo: "56" },
+  co: { nombre: "COLOMBIA", label: "Colombia", bandera: "🇨🇴", prefijo: "57" },
+  pe: { nombre: "PERÚ", label: "Perú", bandera: "🇵🇪", prefijo: "51" },
+  mx: { nombre: "MÉXICO", label: "México", bandera: "🇲🇽", prefijo: "52" },
+}
+/** País por prefijo telefónico ("" si no calza con ninguno soportado). */
+const paisDeTelefono = (tel: string): Pais | "" => {
+  if (tel.startsWith("56")) return "cl"
+  if (tel.startsWith("57")) return "co"
+  if (tel.startsWith("521") || (tel.startsWith("52") && tel.length === 12)) return "mx"
+  if (tel.startsWith("51")) return "pe"
+  return ""
+}
+
 // ── Funnel por ORIGEN (pedido Lalo 21-jul): outbound (leads asignados) vs
 // inbound (el cliente llegó solo). Señales:
 //   - vic_outbound_cadence: un registro por toque 0 enviado → contacto OUTBOUND.
 //   - Leads Zoho "1. No contactado" de Vicky: asignados aún sin toque.
 //   - vic_v3_conversations.last_user_at: el contacto RESPONDIÓ alguna vez.
-async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
+async function fetchOrigenFunnel(pais: Pais): Promise<{
   toque0: Set<string>
   sinContactar: number
   asignadosTotal: number
@@ -514,10 +538,9 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
   sinContactarTels: Set<string>
 }> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  // Universo CERRADO por prefijo (22-jul): "cl" = SOLO +56. Antes era "todo lo
-  // no-colombiano", lo que desde el encendido de México metía a los +52 en el
-  // universo chileno y ensuciaba la tasa.
-  const delPais = (c: string) => (pais === "co" ? c.startsWith("57") : c.startsWith("56"))
+  // Universo CERRADO por prefijo (22-jul): cada país cuenta SOLO su prefijo
+  // (+56 CL, +57 CO, +51 PE, +52 MX).
+  const delPais = (c: string) => paisDeTelefono(c) === pais
   // Inicio del programa outbound actual (primer lead asignado a Vicky):
   // excluye los leads de la era telemarketing 2025 que también son de Vicky.
   const PROGRAMA_DESDE = "2026-07-16T00:00:00-04:00"
@@ -834,10 +857,10 @@ function construirListadoComercial(params: {
   convs: ConvListado[]
   preformAt: Map<string, string>
   analysisRows: Row[]
-  pais: "cl" | "co"
+  pais: Pais
 }): FilaListado[] {
   const { quotes, leads, dealsPorId, convs, preformAt, analysisRows, pais } = params
-  const delPais = (c: string) => (pais === "co" ? c.startsWith("57") : c.startsWith("56"))
+  const delPais = (c: string) => paisDeTelefono(c) === pais
   const testSet = testContactSet()
   const convPorContacto = new Map(convs.map((c) => [digits(c.contact), c]))
   const analisisPorContacto = new Map(analysisRows.map((r) => [digits(r.contact), r]))
@@ -1139,11 +1162,13 @@ export async function GET(req: Request): Promise<Response> {
     quotesList: RawAceptada[]
   } | null = null
   let ventasHtml = ""
-  // Filtro por PAÍS = canal/línea de Vicky (pedido Lalo 20-jul): cl (default)
-  // muestra la línea chilena; ?pais=co la colombiana. El país de una
-  // conversación viene de vic_v3_conversations.country (la línea por la que
-  // entró), y sus cotizaciones se asocian por formal_quote_id.
-  const pais: "cl" | "co" = searchParams.get("pais") === "co" ? "co" : "cl"
+  // Filtro por PAÍS = canal/línea de Vicky (pedido Lalo 20-jul; PE y MX
+  // sumados el 04-ago): cl (default), co, pe o mx. El país de una conversación
+  // viene de vic_v3_conversations.country (la línea por la que entró), con
+  // respaldo por prefijo telefónico; sus cotizaciones se asocian por
+  // formal_quote_id.
+  const paisRaw = (searchParams.get("pais") || "cl").toLowerCase()
+  const pais: Pais = (paisRaw in PAISES ? paisRaw : "cl") as Pais
   const rango = parseRango(searchParams)
   // Filtros globales de ESTADO y PROPIETARIO (pedido Lalo 03-ago): aplican a
   // TODAS las secciones. El estado/propietario de cada contacto sale de la
@@ -1174,11 +1199,11 @@ export async function GET(req: Request): Promise<Response> {
   let ultimoMsgPorConv = new Map<string, string>()
   let listadoHtml = ""
   try {
-    const co = await fetchExclusionesCO()
+    const paisesConv = await fetchPaisesConversaciones()
     const [allRows, hard, cierreZoho, origenData, fechasConv, convsListado] = await Promise.all([
       fetchAnalysis(),
       fetchHardSignals(),
-      fetchCierreZoho(co.quoteIds, pais, rango),
+      fetchCierreZoho(paisesConv.paisPorQuote, pais, rango),
       fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, convertidos: new Set<string>(), respondio: new Set<string>(), asignados: new Set<string>(), sinContactarTels: new Set<string>() })),
       // Las fechas de inicio solo hacen falta con el filtro activo.
       rango ? fetchFechasConversaciones() : Promise.resolve(new Map<string, string>()),
@@ -1270,11 +1295,14 @@ export async function GET(req: Request): Promise<Response> {
     }
     rows = allRows.filter((r) => {
       if (isTestContact(r.contact)) return false
-      const esCO = co.convIds.has(r.conversation_id) || co.contacts.has(digits(r.contact))
-      // Universo Chile cerrado: las conversaciones mexicanas (+52) no entran.
+      // Cada línea de Vicky (CL/CO/PE/MX) muestra SOLO sus conversaciones.
       const d = digits(r.contact)
-      const esMX = d.startsWith("521") || (d.startsWith("52") && d.length === 12)
-      if (pais === "cl" ? esCO || esMX : !esCO) return false
+      const paisRow: Pais =
+        paisesConv.paisPorConv.get(r.conversation_id) ||
+        paisesConv.paisPorContacto.get(d) ||
+        paisDeTelefono(d) ||
+        "cl"
+      if (paisRow !== pais) return false
       // Filtro global Estado/Propietario: solo contactos del conjunto.
       if (permitidos && !permitidos.has(d)) return false
       // Filtro Desde–Hasta sobre el inicio de la conversación. Una conversación
@@ -1515,7 +1543,7 @@ export async function GET(req: Request): Promise<Response> {
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a> · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <div class="sub">Vicky ${PAISES[pais].nombre} ${PAISES[pais].bandera} (línea +${PAISES[pais].prefijo}) — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · ${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")} · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
   <div class="sub" style="margin-top:6px">
     <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
@@ -1578,12 +1606,12 @@ export async function GET(req: Request): Promise<Response> {
     }
     const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
     const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
-    // Objetivo de cierre POR PAÍS (Lalo 28-jul): Chile 30%, Colombia 10% — el
-    // programa CO recién parte y su embudo outbound madura distinto.
+    // Objetivo de cierre POR PAÍS (Lalo 28-jul): Chile 30%; Colombia, Perú y
+    // México 10% — los programas nuevos maduran distinto.
     // (28-jul: las tarjetas de AUTONOMÍA — "Tasa de cierre 100% Vicky",
     // "Objetivo · 100% Vicky" y "Tasa de cierre asistido" — se eliminaron del
     // dash a pedido de Lalo.)
-    const TARGET_PCT = pais === "co" ? 10 : 30
+    const TARGET_PCT = pais === "cl" ? 30 : 10
     // Objetivo de cierre (pedido Lalo 21-jul): tasa actual vs el target del
     // país y cuántas ventas faltan, diferenciando el camino: cerrar
     // cotizaciones YA enviadas (solo suma al numerador) vs ventas de
