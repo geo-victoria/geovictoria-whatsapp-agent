@@ -1044,6 +1044,8 @@ type CasoGestion = {
   estado: string
   fechaEstadoIso: string
   estadoZoho: string
+  /** Ya marcada como gestionada (se muestra atenuada, con deshacer). */
+  gestionado: boolean
 }
 
 function construirCasosGestion(params: {
@@ -1056,14 +1058,13 @@ function construirCasosGestion(params: {
   const conTipo = filas
     .map((f) => ({ f, tipo: tipoAccionDe(f) }))
     .filter((x): x is { f: FilaListado; tipo: TipoAccion } => x.tipo !== null)
-  const activos = conTipo.filter((x) => !gestionados.has(digits(x.f.contacto)))
-  const nGestionados = conTipo.length - activos.length
+  const nGestionados = conTipo.filter((x) => gestionados.has(digits(x.f.contacto))).length
 
   const diasSin = (f: FilaListado) => {
     const t = Date.parse(f.updatedIso || f.fechaIso || "")
     return Number.isFinite(t) ? (Date.now() - t) / 864e5 : 99
   }
-  const casos = activos.map(({ f, tipo }) => {
+  const casos = conTipo.map(({ f, tipo }) => {
     const d = digits(f.contacto)
     const dias = diasSin(f)
     const limite = tipo.prioridad >= 5 ? 1 : 2 // los calientes vencen antes
@@ -1098,6 +1099,7 @@ function construirCasosGestion(params: {
       estado: f.estado,
       fechaEstadoIso: f.fechaIso,
       estadoZoho: f.estadoZoho,
+      gestionado: gestionados.has(d),
     }
   })
   casos.sort((a, b) => b.prioridad - a.prioridad || b.score - a.score)
@@ -1105,14 +1107,13 @@ function construirCasosGestion(params: {
 }
 
 function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string): string {
-  const activos = casos
-  const secciones = TIPOS_ACCION.map((tipo) => {
-    const grupo = activos.filter((c) => c.tipoId === tipo.id)
-    if (!grupo.length) return ""
-    const filasHtml = grupo
-      .map((c) => {
-        const dias = c.diasSinContacto
-        return `<tr data-contact="${esc(c.contacto)}">
+  const activos = casos.filter((c) => !c.gestionado)
+  const fila = (c: CasoGestion): string => {
+    const dias = c.diasSinContacto
+    const btn = c.gestionado
+      ? `<button class="btnGest" data-contact="${esc(c.contacto)}" data-estado="gestionado" title="Deshacer: volver a la cola" style="background:#fff3e0;color:#7a4b00;border:1px solid #ffcc80;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">↩</button>`
+      : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (pide registro y guarda nota en Zoho)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button>`
+    return `<tr data-contact="${esc(c.contacto)}"${c.gestionado ? ` class="filaGest" style="opacity:.4;display:none"` : ""}>
           <td>${esc(c.empresa)}${c.convId ? ` <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" title="Ver conversación" style="font-weight:400">📄</a>` : ""}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div></td>
           <td style="white-space:nowrap">${c.primerContactoIso ? fmtSantiago(c.primerContactoIso) : "—"}</td>
           <td><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
@@ -1121,31 +1122,66 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
           <td style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td style="white-space:nowrap"><a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="WhatsApp">💬</a> <button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (sale de la cola por 24 h)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button></td>
+          <td style="white-space:nowrap"><a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="WhatsApp">💬</a> ${btn}</td>
         </tr>`
-      })
-      .join("")
+  }
+  const secciones = TIPOS_ACCION.map((tipo) => {
+    const grupo = activos.filter((c) => c.tipoId === tipo.id)
+    const grupoGest = casos.filter((c) => c.gestionado && c.tipoId === tipo.id)
+    if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
       <thead><tr><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th>Acciones</th></tr></thead>
-      <tbody>${filasHtml}</tbody>
+      <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
 
-  return `<div class="card"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas (ocultas 24 h)` : ""}</span></h2>
-  ${activos.length ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
-  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. 🟢 = horario hábil del cliente (L-V 8-18 h local, según prefijo del teléfono) · 🌙 = fuera de horario. ✔ marca el caso como gestionado y lo oculta de la cola por 24 horas (para todos los usuarios del dash).</div>
+  return `<div class="card"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span></h2>
+  ${activos.length || nGestionados ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
+  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. 🟢 = horario hábil del cliente (L-V 8-18 h local, según prefijo del teléfono) · 🌙 = fuera de horario. ✔ pide un registro de la gestión (obligatorio), lo guarda como nota en el registro de Zoho del cliente y saca el caso de la cola por 24 horas; con ↩ (en "mostrar" gestionadas) se deshace al instante.</div>
   <script>
-    document.querySelectorAll(".btnGest").forEach(function (b) {
-      b.addEventListener("click", async function () {
-        this.disabled = true; this.textContent = "…";
-        try {
-          await fetch("?key=${encodeURIComponent(key)}&accion=gestionar&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
-          var tr = this.closest("tr"); tr.style.transition = "opacity .4s"; tr.style.opacity = "0.25";
-          this.textContent = "✔ listo";
-        } catch (e) { this.disabled = false; this.textContent = "✔"; }
+    (function () {
+      var KEYQ = "?key=${encodeURIComponent(key)}";
+      function wire(b) {
+        b.addEventListener("click", async function () {
+          var tr = this.closest("tr");
+          if (this.dataset.estado === "gestionado") {
+            this.disabled = true; this.textContent = "…";
+            try {
+              await fetch(KEYQ + "&accion=desgestionar&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
+              tr.style.opacity = "1"; tr.classList.remove("filaGest");
+              this.dataset.estado = ""; this.textContent = "✔"; this.title = "Marcar gestionado (pide registro y guarda nota en Zoho)";
+              this.style.background = "#e8f5e9"; this.style.color = "#1b5e20"; this.style.borderColor = "#a5d6a7";
+            } catch (e) { this.textContent = "↩"; }
+            this.disabled = false;
+            return;
+          }
+          var nota = prompt("Registro de la gestión (obligatorio):\\n¿Qué hiciste o qué acordaste con el cliente? Se guardará como nota en Zoho.");
+          if (!nota || !nota.trim()) return;
+          this.disabled = true; this.textContent = "…";
+          try {
+            await fetch(KEYQ + "&accion=gestionar&contact=" + encodeURIComponent(this.dataset.contact), {
+              method: "POST",
+              headers: { "content-type": "application/x-www-form-urlencoded" },
+              body: "nota=" + encodeURIComponent(nota.trim()),
+            });
+            tr.style.transition = "opacity .4s"; tr.style.opacity = "0.4";
+            this.dataset.estado = "gestionado"; this.textContent = "↩"; this.title = "Deshacer: volver a la cola";
+            this.style.background = "#fff3e0"; this.style.color = "#7a4b00"; this.style.borderColor = "#ffcc80";
+          } catch (e) { this.textContent = "✔"; }
+          this.disabled = false;
+        });
+      }
+      document.querySelectorAll(".btnGest").forEach(wire);
+      var lnk = document.getElementById("lnkVerGest");
+      if (lnk) lnk.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        var filas = document.querySelectorAll("tr.filaGest");
+        var ocultas = filas.length && filas[0].style.display === "none";
+        filas.forEach(function (f) { f.style.display = ocultas ? "" : "none"; });
+        this.textContent = ocultas ? "ocultar" : "mostrar";
       });
-    });
+    })();
   </script>
 </div>`
 }
@@ -1318,8 +1354,67 @@ async function renderConversation(convId: string, key: string): Promise<Response
   return page(html)
 }
 
-// Marca un caso como GESTIONADO (botón ✔ de la cola): se guarda en vic_kv con
-// expiración a 24 h y el caso sale de la cola para todos los usuarios del dash.
+async function kvDel(key: string): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    cache: "no-store",
+  }).catch(() => {})
+}
+
+/** Nota de gestión en el registro Zoho del contacto: primero el DEAL del
+ * puntero de cotización (o la cotización si no hay deal), y como respaldo el
+ * LEAD por teléfono. Best-effort: la gestión queda registrada en el dash
+ * aunque Zoho falle. */
+async function notaZohoGestion(contact: string, nota: string): Promise<boolean> {
+  try {
+    const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?contact=like.*${contact.slice(-8)}&select=deal_id,quote_id&order=created_at.desc&limit=1`,
+      { headers: h, cache: "no-store" },
+    )
+    const rows = r.ok ? ((await r.json().catch(() => [])) as Array<{ deal_id?: string | null; quote_id?: string | null }>) : []
+    const token = await getZohoAccessToken()
+    let parentId = String(rows[0]?.deal_id || "")
+    let moduleName = "Deals"
+    if (!parentId && rows[0]?.quote_id) {
+      parentId = String(rows[0].quote_id)
+      moduleName = QUOTE_MODULE
+    }
+    if (!parentId) {
+      const s = await fetch(
+        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Phone:equals:+${contact})`)}&fields=id&per_page=1`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+      )
+      const sd = s.ok && s.status !== 204 ? ((await s.json().catch(() => ({}))) as { data?: Array<{ id?: string }> }) : {}
+      parentId = String(sd?.data?.[0]?.id || "")
+      moduleName = "Leads"
+    }
+    if (!parentId) return false
+    const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Notes`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [
+          {
+            Note_Title: "Gestión telemarketing (dashboard Vicky)",
+            Note_Content: nota,
+            Parent_Id: parentId,
+            "$se_module": moduleName,
+          },
+        ],
+      }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+// Acciones de la cola (botón ✔/↩): gestionar exige un registro de texto, lo
+// guarda en vic_kv (expira en 24 h) y lo deja como NOTA en el registro Zoho
+// del contacto; desgestionar borra la marca al instante (deshacer).
 export async function POST(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
   const key = (searchParams.get("key") || "").trim()
@@ -1328,12 +1423,79 @@ export async function POST(req: Request): Promise<Response> {
   }
   const accion = (searchParams.get("accion") || "").trim()
   const contact = digits(searchParams.get("contact") || "")
-  if (accion === "gestionar" && contact) {
+  if (!contact) {
+    return new Response(JSON.stringify({ ok: false, error: "contact faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+  }
+  if (accion === "gestionar") {
+    const body = await req.text().catch(() => "")
+    const nota = (new URLSearchParams(body).get("nota") || searchParams.get("nota") || "").trim()
+    if (!nota) {
+      return new Response(JSON.stringify({ ok: false, error: "nota obligatoria" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
     const expira = new Date(Date.now() + 24 * 3600e3).toISOString()
-    await kvSet(`gestion_${contact}`, JSON.stringify({ at: new Date().toISOString() }), expira)
+    await kvSet(`gestion_${contact}`, JSON.stringify({ at: new Date().toISOString(), nota: nota.slice(0, 2000) }), expira)
+    const notaOk = await notaZohoGestion(contact, nota)
+    return new Response(JSON.stringify({ ok: true, notaZoho: notaOk }), { headers: { "content-type": "application/json" } })
+  }
+  if (accion === "desgestionar") {
+    await kvDel(`gestion_${contact}`)
     return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } })
   }
   return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { "content-type": "application/json" } })
+}
+
+/** Detalle de los KPIs de COTIZACIONES (Cotizaciones en Zoho / Aceptadas):
+ * lista de cotizaciones con estado, fechas, ejecutivo y link al chat. */
+function renderListaCotizaciones(
+  quotes: RawAceptada[],
+  titulo: string,
+  key: string,
+  volverQS: string,
+  convPorContacto: Map<string, string>,
+): Response {
+  const qs = [...quotes].sort((a, b) => String(b.Created_Time || "").localeCompare(String(a.Created_Time || "")))
+  const filas = qs
+    .map((q) => {
+      const tel = digits(String(q.Tel_fono_Contacto || ""))
+      const aceptada = String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
+      const pagada = Boolean(String(q.Onboarding_Link || "").trim())
+      const estado = pagada ? "Pagada" : String(q.Estado_Cotizacion || "—")
+      const fechaPago = aceptada || pagada ? String(q.Fecha_Hora_Cotizacion || q.Modified_Time || "") : ""
+      const owner = `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—"
+      const convId = tel ? convPorContacto.get(tel) || "" : ""
+      return `<tr>
+        <td>${esc(String(q.Numero_Cotizacion || ""))} · <b>${esc(empresaDeQuote(q))}</b>${convId ? ` <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(convId)}" title="Ver conversación" style="font-weight:400">📄</a>` : ""}<div class="sub" style="margin:0;font-size:12px">${tel ? `+${esc(tel)}` : "sin teléfono"}</div></td>
+        <td><span class="tag">${esc(estado)}</span></td>
+        <td style="white-space:nowrap">${fmtSantiago(String(q.Created_Time || ""))}</td>
+        <td style="white-space:nowrap">${fechaPago ? fmtSantiago(fechaPago) : "—"}</td>
+        <td>${esc(owner)}</td>
+        <td>${esc(String(q["Deal_Asociado.Stage"] || "—"))}</td>
+      </tr>`
+    })
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} — Vicky</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1f2733}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-size:20px;margin:0 0 4px} .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  th{color:#6b7280;font-weight:600;font-size:12px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  a{color:#1565C0;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+</style></head><body><div class="wrap">
+  <p><a href="${volverQS}">← Volver</a></p>
+  <h1>${esc(titulo)}</h1>
+  <div class="sub">${qs.length} cotizacion${qs.length === 1 ? "" : "es"} · respeta los filtros activos (país, fechas, estado, propietario)</div>
+  <div class="card">${
+    qs.length
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Cotización / contacto</th><th>Estado</th><th>Emisión</th><th>Aceptación/pago</th><th>Ejecutivo</th><th>Etapa deal</th></tr></thead><tbody>${filas}</tbody></table></div>`
+      : `<p class="sub" style="margin:0">Sin cotizaciones con los filtros actuales.</p>`
+  }</div>
+</div></body></html>`
+  return page(html)
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -1575,6 +1737,18 @@ export async function GET(req: Request): Promise<Response> {
 
   // Vista de detalle de un KPI: usa las MISMAS rows ya filtradas por país,
   // fechas, estado y propietario, más el predicado del bucket.
+  // Detalle de los KPIs de cotizaciones (cuentan quotes, no conversaciones).
+  if (listaParam === "zoho_cotizaciones" || listaParam === "zoho_aceptadas") {
+    const quotes = listaParam === "zoho_aceptadas" ? cierre?.aceptadasList || [] : cierre?.quotesList || []
+    const titulo = listaParam === "zoho_aceptadas" ? "Aceptadas / pagadas" : "Cotizaciones en Zoho"
+    const convPorContacto = new Map<string, string>()
+    for (const f of filasListado) {
+      const d = digits(f.contacto)
+      if (d && f.convId && !convPorContacto.has(d)) convPorContacto.set(d, f.convId)
+    }
+    return renderListaCotizaciones(quotes, titulo, key, `?${filtrosQS().toString()}`, convPorContacto)
+  }
+
   if (listaParam && KPI_BUCKETS[listaParam]) {
     const b = KPI_BUCKETS[listaParam]
     // Ficha más reciente por contacto (filasListado viene ordenado por fecha
@@ -1629,7 +1803,7 @@ export async function GET(req: Request): Promise<Response> {
         conversaciones: total,
         comercial,
         flujoCotizacion: cotizacion,
-        colaPendiente: casosGestion.length,
+        colaPendiente: casosGestion.filter((c) => !c.gestionado).length,
         gestionados24h: nGestionadosCola,
       },
       cierre: cierre
@@ -1640,7 +1814,7 @@ export async function GET(req: Request): Promise<Response> {
             objetivo: pais === "cl" ? 30 : 10,
           }
         : null,
-      casos: casosGestion,
+      casos: casosGestion.filter((c) => !c.gestionado),
     })
   }
 
@@ -1825,8 +1999,8 @@ export async function GET(req: Request): Promise<Response> {
       </div></div>`
         : ""
       flujoCotizHtml = `<div class="kpis">${base}
-    ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com)}
-    ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept)}
+    ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com, undefined, "zoho_cotizaciones")}
+    ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept, "zoho_aceptadas")}
   </div>
   ${tasaCierreHtml}
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
