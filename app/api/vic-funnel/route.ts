@@ -1579,7 +1579,6 @@ export async function GET(req: Request): Promise<Response> {
   // Escalera del listado comercial: también enriquece el detalle de KPIs
   // (empresa, estado, ejecutivo a cargo, accionable).
   let filasListado: FilaListado[] = []
-  let listadoHtml = ""
   // Cola de gestión (vista principal) y sus insumos.
   let colaHtml = ""
   let casosGestion: CasoGestion[] = []
@@ -1651,13 +1650,10 @@ export async function GET(req: Request): Promise<Response> {
     const tuvoActividad = (f: FilaListado) =>
       !rango ||
       [f.primerContactoIso, f.fechaIso, f.lastUserIso, f.updatedIso].some((iso) => iso && enRango(iso, rango))
+    // (04-ago: el "Listado comercial vivo" salió de la página — la cola de
+    // gestión lo reemplazó con la misma data; renderListadoComercial queda
+    // disponible por si se quiere reponer.)
     const filasVisibles = filasListado.filter((f) => coincide(f) && tuvoActividad(f))
-    listadoHtml = renderListadoComercial(
-      filasVisibles,
-      key,
-      rango ? `con actividad en ${rango.etiqueta}` : "últimos 30 días",
-      Boolean(rango),
-    )
     const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais })
     casosGestion = cola.casos
     nGestionadosCola = cola.nGestionados
@@ -2096,8 +2092,6 @@ export async function GET(req: Request): Promise<Response> {
   </div>
   <div class="kgroup">Flujo cotización y tasa de cierre (${cotizacion} conversaciones · cierre en vivo desde Zoho)</div>
   ${flujoCotizHtml}
-
-  ${listadoHtml}
 
   ${ventasHtml}
 
