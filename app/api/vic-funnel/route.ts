@@ -329,6 +329,9 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
   sinClasificar: number
   aceptadasList: RawAceptada[]
   todasList: RawAceptada[]
+  /** Emitidas del rango (base del KPI "Cotizaciones en Zoho") — se expone la
+   * lista para poder re-filtrar por Estado/Propietario globales. */
+  quotesList: RawAceptada[]
 } | null> {
   try {
     const token = await getZohoAccessToken()
@@ -376,6 +379,7 @@ async function fetchCierreZoho(coQuoteIds: Set<string>, pais: "cl" | "co", rango
       // Universo completo SIN filtro de fechas: lo consume el Listado
       // comercial (esa sección filtra en el navegador).
       todasList: universo,
+      quotesList: quotes,
     }
   } catch {
     return null
@@ -481,6 +485,11 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
   asignadosTotal: number
   convertidos: Set<string>
   respondio: Set<string>
+  /** Teléfonos detrás de los contadores, para poder intersectarlos con los
+   * filtros globales de Estado/Propietario (los números de arriba se mantienen
+   * como fuente de verdad cuando no hay filtro). */
+  asignados: Set<string>
+  sinContactarTels: Set<string>
 }> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   // Universo CERRADO por prefijo (22-jul): "cl" = SOLO +56. Antes era "todo lo
@@ -533,6 +542,7 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
   const toque0 = new Set(cad.map((c) => digits(c.contact)).filter((c) => c && delPais(c) && !isTestContact(c)))
   // Unión por teléfono: cadencia + leads vivos + convertidos (sin duplicar).
   const asignados = new Set<string>(toque0)
+  const sinContactarTels = new Set<string>()
   let sinContactar = 0
   if (leadsRes && leadsRes.ok) {
     const data = (await leadsRes.json().catch(() => ({}))) as {
@@ -541,6 +551,7 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
     for (const l of data?.data || []) {
       const tel = digits(String(l.Phone || ""))
       if (tel && delPais(tel) && !isTestContact(tel)) asignados.add(tel)
+      if (tel && delPais(tel)) sinContactarTels.add(tel)
     }
     sinContactar = (data?.data || []).filter((l) => delPais(digits(String(l.Phone || "")))).length
   }
@@ -566,6 +577,8 @@ async function fetchOrigenFunnel(pais: "cl" | "co"): Promise<{
     asignadosTotal: asignados.size,
     convertidos,
     respondio: new Set(convs.filter((c) => c.last_user_at).map((c) => digits(c.contact))),
+    asignados,
+    sinContactarTels,
   }
 }
 
@@ -891,10 +904,13 @@ function construirListadoComercial(params: {
   return filas.sort((a, b) => b.fechaIso.localeCompare(a.fechaIso))
 }
 
+/** Escalera de estados del listado — también alimenta el filtro global. */
+const ESTADOS_LISTADO = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada"]
+
 function renderListadoComercial(filas: FilaListado[], key: string): string {
   if (!filas.length) return ""
   const propietarios = [...new Set(filas.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
-  const ESTADOS = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada"]
+  const ESTADOS = ESTADOS_LISTADO
   const filasHtml = filas
     .map(
       (f) => `<tr data-estado="${esc(f.estado)}" data-prop="${esc(f.propietario)}" data-fecha="${esc(f.fechaIso.slice(0, 10))}">
@@ -1039,6 +1055,7 @@ export async function GET(req: Request): Promise<Response> {
     sinClasificar: number
     aceptadasList: RawAceptada[]
     todasList: RawAceptada[]
+    quotesList: RawAceptada[]
   } | null = null
   let ventasHtml = ""
   // Filtro por PAÍS = canal/línea de Vicky (pedido Lalo 20-jul): cl (default)
@@ -1047,6 +1064,13 @@ export async function GET(req: Request): Promise<Response> {
   // entró), y sus cotizaciones se asocian por formal_quote_id.
   const pais: "cl" | "co" = searchParams.get("pais") === "co" ? "co" : "cl"
   const rango = parseRango(searchParams)
+  // Filtros globales de ESTADO y PROPIETARIO (pedido Lalo 03-ago): aplican a
+  // TODAS las secciones. El estado/propietario de cada contacto sale de la
+  // escalera del listado comercial (universo: últimos 30 días).
+  const estadoRaw = (searchParams.get("estado") || "").trim()
+  const estadoF = ESTADOS_LISTADO.includes(estadoRaw) ? estadoRaw : ""
+  const propF = (searchParams.get("prop") || "").trim()
+  let propietariosAll: string[] = []
   let listadoHtml = ""
   try {
     const co = await fetchExclusionesCO()
@@ -1054,38 +1078,79 @@ export async function GET(req: Request): Promise<Response> {
       fetchAnalysis(),
       fetchHardSignals(),
       fetchCierreZoho(co.quoteIds, pais, rango),
-      fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, convertidos: new Set<string>(), respondio: new Set<string>() })),
+      fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, convertidos: new Set<string>(), respondio: new Set<string>(), asignados: new Set<string>(), sinContactarTels: new Set<string>() })),
       // Las fechas de inicio solo hacen falta con el filtro activo.
       rango ? fetchFechasConversaciones() : Promise.resolve(new Map<string, string>()),
       fetchConvsListado().catch(() => [] as ConvListado[]),
     ])
     origen = origenData
     cierre = cierreZoho
-    if (cierre?.aceptadasList?.length) {
-      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList))
-    }
     // Listado comercial vivo (best-effort: si una pata falla, la sección se
-    // arma con lo que haya; jamás bota la página).
+    // arma con lo que haya; jamás bota la página). Se construye ANTES que el
+    // resto porque su escalera de estados alimenta los filtros globales.
+    let filasListado: FilaListado[] = []
     try {
       const contactosConocidos = new Set(convsListado.map((c) => digits(c.contact)))
       const [preformAt, zohoListado] = await Promise.all([
         fetchPreformAts(convsListado),
         fetchZohoListado(contactosConocidos),
       ])
-      listadoHtml = renderListadoComercial(
-        construirListadoComercial({
-          quotes: cierre?.todasList || [],
-          leads: zohoListado.leads,
-          dealsPorId: zohoListado.dealsPorId,
-          convs: convsListado,
-          preformAt,
-          analysisRows: allRows,
-          pais,
-        }),
-        key,
-      )
+      filasListado = construirListadoComercial({
+        quotes: cierre?.todasList || [],
+        leads: zohoListado.leads,
+        dealsPorId: zohoListado.dealsPorId,
+        convs: convsListado,
+        preformAt,
+        analysisRows: allRows,
+        pais,
+      })
     } catch (e) {
       console.warn("[vic-funnel] listado comercial falló:", e instanceof Error ? e.message : e)
+    }
+    propietariosAll = [...new Set(filasListado.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
+    // Contactos que pasan el filtro Estado/Propietario (null = sin filtro).
+    const coincide = (f: FilaListado) => (!estadoF || f.estado === estadoF) && (!propF || f.propietario === propF)
+    const permitidos: Set<string> | null =
+      estadoF || propF
+        ? new Set(filasListado.filter(coincide).map((f) => digits(f.contacto)).filter(Boolean))
+        : null
+    const filasVisibles = permitidos ? filasListado.filter(coincide) : filasListado
+    listadoHtml = renderListadoComercial(filasVisibles, key)
+    // El filtro global re-corta el cierre de Zoho (por teléfono de la
+    // cotización) y el funnel por origen (por teléfono del lead/toque).
+    if (permitidos && cierre) {
+      const enP = (q: RawAceptada) => {
+        const t = digits(String(q.Tel_fono_Contacto || ""))
+        return Boolean(t) && permitidos.has(t)
+      }
+      const aceptadasList = cierre.aceptadasList.filter(enP)
+      const marca = (q: { Intervenci_n_Humana?: string | null }) => String(q.Intervenci_n_Humana || "").toLowerCase()
+      const autonomas = aceptadasList.filter((q) => marca(q).includes("100%")).length
+      const asistidas = aceptadasList.filter((q) => marca(q).includes("intervenci")).length
+      cierre = {
+        total: cierre.quotesList.filter(enP).length,
+        aceptadas: aceptadasList.length,
+        autonomas,
+        asistidas,
+        sinClasificar: aceptadasList.length - autonomas - asistidas,
+        aceptadasList,
+        todasList: cierre.todasList.filter(enP),
+        quotesList: cierre.quotesList.filter(enP),
+      }
+    }
+    if (permitidos) {
+      const inter = (s: Set<string>) => new Set([...s].filter((x) => permitidos.has(x)))
+      const asignadosF = inter(origenData.asignados)
+      origen = {
+        toque0: inter(origenData.toque0),
+        convertidos: inter(origenData.convertidos),
+        respondio: inter(origenData.respondio),
+        asignadosTotal: asignadosF.size,
+        sinContactar: inter(origenData.sinContactarTels).size,
+      }
+    }
+    if (cierre?.aceptadasList?.length) {
+      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList))
     }
     rows = allRows.filter((r) => {
       if (isTestContact(r.contact)) return false
@@ -1094,6 +1159,8 @@ export async function GET(req: Request): Promise<Response> {
       const d = digits(r.contact)
       const esMX = d.startsWith("521") || (d.startsWith("52") && d.length === 12)
       if (pais === "cl" ? esCO || esMX : !esCO) return false
+      // Filtro global Estado/Propietario: solo contactos del conjunto.
+      if (permitidos && !permitidos.has(d)) return false
       // Filtro Desde–Hasta sobre el inicio de la conversación. Una conversación
       // sin fecha conocida se EXCLUYE cuando el filtro está activo: un filtro
       // de fechas no puede mostrar filas de fecha desconocida.
@@ -1120,6 +1187,14 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   if (rows.length === 0) {
+    if (estadoF || propF) {
+      return page(
+        `<h1>Sin conversaciones para este filtro</h1><p>No hay casos con ${[
+          estadoF ? `estado <b>${esc(estadoF)}</b>` : "",
+          propF ? `propietario <b>${esc(propF)}</b>` : "",
+        ].filter(Boolean).join(" y ")} en el período. <a href="?key=${encodeURIComponent(key)}&pais=${pais}">← Quitar filtros</a></p>`,
+      )
+    }
     return page(
       "<h1>Sin análisis todavía</h1><p>La tabla de análisis está vacía. Corre el cron una vez: <code>/api/vic-funnel-cron?key=&lt;VIC_FUNNEL_KEY&gt;&amp;all=1</code> (puede requerir varias llamadas para el histórico).</p>",
     )
@@ -1317,16 +1392,24 @@ export async function GET(req: Request): Promise<Response> {
   .foot{color:#9ca3af;font-size:11px;margin-top:24px;text-align:center}
 </style></head><body><div class="wrap">
   <h1>Embudo de conversaciones — Vicky V3</h1>
-  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a> · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
+  <div class="sub">Vicky ${pais === "co" ? "COLOMBIA 🇨🇴 (línea +57)" : "CHILE 🇨🇱 (línea +56)"} — clientes reales, sin pruebas internas · ${total} conversaciones${rango ? ` · <span class="tag" style="background:#fff3cd;color:#7a5c00">📅 ${rango.etiqueta}</span>` : ""}${estadoF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Estado: ${esc(estadoF)}</span>` : ""}${propF ? ` · <span class="tag" style="background:#e8f5e9;color:#1b5e20">Propietario: ${esc(propF)}</span>` : ""} · <span class="tag">actualizado por hora</span> · última actualización: ${lastUpdateStr} · <a href="?key=${encodeURIComponent(key)}&pais=cl" style="font-weight:${pais === "cl" ? 700 : 400}">Chile</a> | <a href="?key=${encodeURIComponent(key)}&pais=co" style="font-weight:${pais === "co" ? 700 : 400}">Colombia</a> · <button id="btnRefresh" style="background:#1a73e8;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer">🔄 Actualizar</button></div>
   <div class="sub" style="margin-top:6px">
     <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
       <input type="hidden" name="pais" value="${pais}">
       <label style="font-size:12px">Desde <input type="date" name="desde" value="${rango ? rango.desdeStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <label style="font-size:12px">Hasta <input type="date" name="hasta" value="${rango ? rango.hastaStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
+      <label style="font-size:12px">Estado <select name="estado" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px">
+        <option value="">Todos</option>
+        ${ESTADOS_LISTADO.map((e) => `<option${estadoF === e ? " selected" : ""}>${e}</option>`).join("")}
+      </select></label>
+      <label style="font-size:12px">Propietario <select name="prop" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px">
+        <option value="">Todos</option>
+        ${propietariosAll.map((p) => `<option value="${esc(p)}"${propF === p ? " selected" : ""}>${esc(p)}</option>`).join("")}
+      </select></label>
       <button type="submit" style="background:#455a64;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
-      ${rango ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtro</a>` : ""}
-      ${rango ? `<span style="font-size:11px;color:#9ca3af">· filtra conversaciones (por inicio), cotizaciones (por emisión) y pagos (por fecha de pago); "Funnel por origen" muestra el programa completo</span>` : ""}
+      ${rango || estadoF || propF ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtros</a>` : ""}
+      ${rango || estadoF || propF ? `<span style="font-size:11px;color:#9ca3af">· fechas: conversaciones por inicio, cotizaciones por emisión, pagos por fecha de pago${estadoF || propF ? " · Estado y Propietario aplican a TODAS las secciones (según la escalera del listado comercial, últimos 30 días)" : ` · "Funnel por origen" muestra el programa completo`}</span>` : ""}
     </form>
   </div>
   <script>
