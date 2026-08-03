@@ -1140,7 +1140,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>Listo</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
+      <thead><tr><th>¿Listo?</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
