@@ -1542,6 +1542,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de pagar, habló de transferencia o comprobante), lo más probable es que sea su comprobante: agradécele el envío, llama registrar_comprobante_transferencia con montoDetectado 0 y detalle 'comprobante enviado como archivo adjunto', y sigue el flujo normal sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
     const mediaUrlEntrante = imageUrl || fileUrl
     if (mediaUrlEntrante) {
+      // Última URL de media del contacto (best-effort): la lee
+      // registrar_comprobante_transferencia para adjuntar el link del
+      // comprobante al correo de cobranza (petición Lalo 03-ago).
+      setKvValue(
+        `media_reciente_${contact}`,
+        JSON.stringify({ url: mediaUrlEntrante, at: new Date().toISOString() }),
+      ).catch(() => {})
       sendTypingIndicator(contact).catch(() => {})
       const descripcion = await describirImagen(mediaUrlEntrante)
       const caption = IMG_PLACEHOLDERS.includes(message) || esArchivoAdjunto ? "" : message

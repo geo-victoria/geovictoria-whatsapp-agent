@@ -42,6 +42,7 @@ import {
 } from "@/lib/onboarding/plantilla"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+import { enviarCorreoCobranza } from "@/lib/correo-cobranza"
 
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -305,6 +306,39 @@ export async function registrarComprobanteTransferencia(
       `¡Gracias por avisarme! 🙌 Dejé tu pago en verificación con nuestro equipo de finanzas — apenas confirmen el abono te escribo por aquí y coordinamos los siguientes pasos. ` +
       `Si tienes el comprobante a mano, mándamelo por este mismo chat y aceleramos la confirmación 😊`
     return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
+  }
+
+  // 2bis. Correo a cobranza (petición Lalo 03-ago): con cotización asociada,
+  // el pago va también por correo — no solo nota + WhatsApp interno. Incluye
+  // el link del comprobante si el webhook guardó la media reciente del
+  // contacto. Best-effort: su falla jamás toca la respuesta al cliente.
+  if (pointer) {
+    let comprobanteUrl = ""
+    try {
+      const kv = await getKvValue(`media_reciente_${contact}`)
+      if (kv) {
+        const parsed = JSON.parse(kv) as { url?: string; at?: string }
+        const edadMs = parsed.at ? Date.now() - new Date(parsed.at).getTime() : Number.POSITIVE_INFINITY
+        if (parsed.url && edadMs < 2 * 60 * 60 * 1000) comprobanteUrl = parsed.url
+      }
+    } catch {
+      /* sin link — el correo sale igual */
+    }
+    await enviarCorreoCobranza({
+      quoteId: pointer.quoteId,
+      numeroCotizacion: (input.numeroCotizacion || "").trim() || undefined,
+      empresa: pointer.empresa,
+      rut: pointer.rut,
+      telefono: contact,
+      monto: montoFmt,
+      banco: input.bancoOrigen,
+      fecha: input.fechaDetectada,
+      detalle: input.detalle,
+      comprobanteUrl,
+      advertencia: asociadoPorNumero
+        ? "El comprobante llegó desde un número de WhatsApp DISTINTO al de la cotización (se asoció por el número que mencionó el cliente). Verificar con más atención."
+        : undefined,
+    }).catch(() => {})
   }
 
   // 3. Confirmación al cliente.
