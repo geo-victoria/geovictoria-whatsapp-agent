@@ -389,6 +389,25 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // Capa 3c — contacto ya TRASPASADO a un ejecutivo (vic_ptv activo): la
+        // formal nace con ESE dueño, sin re-sorteo de tómbola, para que el
+        // correo con el PDF salga sí o sí con el ejecutivo asignado en copia y
+        // presentándolo (Lalo 03-ago). Determinístico y best-effort: si la
+        // consulta falla, la emisión sigue con el sorteo normal.
+        if (contact && toolName === "generar_link_cotizadora") {
+          // El campo es EXCLUSIVO de flujos admin/deterministas: si el modelo
+          // lo trajo (hallucinación), se descarta siempre.
+          delete toolInput._ownerOverrideId
+          const { vendedorTraspasado } = await import("./loop-v2")
+          const vendedor = await vendedorTraspasado(contact).catch(() => null)
+          if (vendedor?.zohoId) {
+            toolInput._ownerOverrideId = vendedor.zohoId
+            console.log(
+              `[agent-loop] Capa 3c: formal hereda al ejecutivo traspasado ${vendedor.email || vendedor.zohoId} (contacto ${contact}).`,
+            )
+          }
+        }
+
         // Acotamiento: con una cotización FORMAL ya generada en esta
         // conversación, (a) NO se genera otra formal (anti-duplicado) y (b) la
         // negociación preform queda cerrada — todo descuento adicional va

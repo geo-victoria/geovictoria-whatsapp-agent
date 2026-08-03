@@ -501,6 +501,36 @@ export async function contactosTraspasados(contacts: string[]): Promise<Set<stri
 }
 
 /**
+ * Vendedor del traspaso ACTIVO de un contacto (vic_ptv), o null si no hay.
+ * Lo usa el agent-loop para que la cotización formal de un contacto ya
+ * traspasado NAZCA con ese ejecutivo como dueño (sin re-sorteo de tómbola):
+ * el correo con el PDF debe salir sí o sí con el ejecutivo asignado en copia
+ * y presentándolo (Lalo 03-ago).
+ */
+export async function vendedorTraspasado(
+  contact: string,
+): Promise<{ zohoId: string; email: string; nombre: string } | null> {
+  if (!contact || !SUPABASE_URL || !SUPABASE_KEY) return null
+  const res = await supa(
+    `vic_ptv?contact=eq.${encodeURIComponent(contact)}&estado=eq.activo&select=vendedor_zoho_id,vendedor_email,vendedor_nombre&limit=1`,
+  ).catch(() => null)
+  if (!res || !res.ok) return null
+  const rows =
+    ((await res.json().catch(() => [])) as Array<{
+      vendedor_zoho_id?: string
+      vendedor_email?: string
+      vendedor_nombre?: string
+    }>) || []
+  const row = rows[0]
+  if (!row?.vendedor_zoho_id) return null
+  return {
+    zohoId: row.vendedor_zoho_id,
+    email: row.vendedor_email || "",
+    nombre: row.vendedor_nombre || "",
+  }
+}
+
+/**
  * Contactos (de la lista dada) que tienen fila en vic_loop — UN solo fetch
  * batch, para que los crons viejos los salten sin caer en N+1. Con el flag
  * apagado devuelve set vacío SIN tocar la red: cero cambio de comportamiento.
