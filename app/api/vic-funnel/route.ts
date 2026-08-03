@@ -1110,10 +1110,14 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
   const activos = casos.filter((c) => !c.gestionado)
   const fila = (c: CasoGestion): string => {
     const dias = c.diasSinContacto
+    // "Listo" (✔/↩) en grande, primera columna de la fila.
     const btn = c.gestionado
-      ? `<button class="btnGest" data-contact="${esc(c.contacto)}" data-estado="gestionado" title="Deshacer: volver a la cola" style="background:#fff3e0;color:#7a4b00;border:1px solid #ffcc80;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">↩</button>`
-      : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (pide registro y guarda nota en Zoho)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button>`
+      ? `<button class="btnGest" data-contact="${esc(c.contacto)}" data-estado="gestionado" title="Deshacer: volver a la cola" style="background:#fff3e0;color:#7a4b00;border:1px solid #ffcc80;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">↩</button>`
+      : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (pide registro y guarda nota en Zoho)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">✔</button>`
+    // WhatsApp en grande, reconocible, solo al final de la fila.
+    const btnWa = `<a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="Abrir chat de WhatsApp" style="background:#25D366;color:#ffffff;text-decoration:none;padding:9px 14px;border-radius:8px;font-weight:700;font-size:13px;display:inline-block;white-space:nowrap">💬 WhatsApp</a>`
     return `<tr data-contact="${esc(c.contacto)}"${c.gestionado ? ` class="filaGest" style="opacity:.4;display:none"` : ""}>
+          <td style="white-space:nowrap;vertical-align:middle">${btn}</td>
           <td>${esc(c.empresa)}${c.convId ? ` <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" title="Ver conversación" style="font-weight:400">📄</a>` : ""}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div></td>
           <td style="white-space:nowrap">${c.primerContactoIso ? fmtSantiago(c.primerContactoIso) : "—"}</td>
           <td><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
@@ -1122,7 +1126,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
           <td style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td style="white-space:nowrap"><a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="WhatsApp">💬</a> ${btn}</td>
+          <td style="white-space:nowrap;vertical-align:middle;padding-left:18px">${btnWa}</td>
         </tr>`
   }
   const secciones = TIPOS_ACCION.map((tipo) => {
@@ -1131,7 +1135,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th>Acciones</th></tr></thead>
+      <thead><tr><th>Listo</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th style="padding-left:18px">WhatsApp</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
