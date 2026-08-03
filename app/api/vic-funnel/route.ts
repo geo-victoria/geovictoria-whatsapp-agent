@@ -14,6 +14,8 @@
  *     → No identificado
  */
 
+import { createHash } from "node:crypto"
+
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
@@ -22,6 +24,15 @@ export const dynamic = "force-dynamic"
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
+// Clave de acceso humano al dashboard (pedido Lalo 04-ago). El ?key= sigue
+// vigente para consumidores máquina (cron del resumen, links del correo).
+const DASH_CLAVE = (process.env.VIC_DASH_CLAVE || "GeoVictoria2026!").trim()
+const authToken = () => createHash("sha256").update(`${DASH_CLAVE}|${FUNNEL_KEY}|vic-dash`).digest("hex")
+const cookieDe = (req: Request, nombre: string): string => {
+  const jar = req.headers.get("cookie") || ""
+  const m = jar.match(new RegExp(`(?:^|;\\s*)${nombre}=([^;]+)`))
+  return m ? m[1] : ""
+}
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const VICKY_CREATOR_ID = (process.env.VICKY_ZOHO_CREATOR_ID || "3525045000484500876").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -1475,13 +1486,54 @@ async function notaZohoGestion(contact: string, nota: string): Promise<boolean> 
 // Acciones de la cola (botón ✔/↩): gestionar exige un registro de texto, lo
 // guarda en vic_kv (expira en 24 h) y lo deja como NOTA en el registro Zoho
 // del contacto; desgestionar borra la marca al instante (deshacer).
+/** Portada de acceso con la clave del equipo (sin ?key= en la URL). */
+function renderLogin(error?: string): Response {
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Telemarketing — Vicky</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:36px 32px;width:min(92vw,380px);text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06)}
+  .card img{height:34px;margin-bottom:18px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:22px;margin:0 0 6px;color:#4e4e4e}
+  p.sub{color:#6b7280;font-size:13px;margin:0 0 20px}
+  input[type=password]{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #d1d5db;border-radius:10px;font-family:${GV_BODY_FONT};font-size:15px;margin-bottom:12px;outline-color:#00aff2}
+  button{width:100%;padding:12px;border:0;border-radius:10px;background:#ffbb00;color:#fff;font-family:${GV_TITLE_FONT};font-weight:700;font-size:15px;cursor:pointer}
+  button:hover{filter:brightness(.96)}
+  .err{color:#b91c1c;font-size:13px;margin:0 0 12px}
+</style></head><body>
+  <form class="card" method="POST" action="?accion=login">
+    <img src="/gv/logo-full-color.svg" alt="GeoVictoria">
+    <h1>Telemarketing</h1>
+    <p class="sub">Ingresa la clave del equipo para ver los registros.</p>
+    ${error ? `<p class="err">${esc(error)}</p>` : ""}
+    <input type="password" name="clave" placeholder="Clave" autofocus autocomplete="current-password">
+    <button type="submit">Entrar</button>
+  </form>
+</body></html>`
+  return page(html, error ? 401 : 200)
+}
+
 export async function POST(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
   const key = (searchParams.get("key") || "").trim()
+  const accionPre = (searchParams.get("accion") || "").trim()
+  if (accionPre === "login") {
+    const body = await req.text().catch(() => "")
+    const clave = (new URLSearchParams(body).get("clave") || "").trim()
+    if (!DASH_CLAVE || clave !== DASH_CLAVE) return renderLogin("Clave incorrecta. Inténtalo de nuevo.")
+    return new Response(null, {
+      status: 303,
+      headers: {
+        location: "/api/vic-funnel",
+        "set-cookie": `vic_auth=${authToken()}; Path=/api/vic-funnel; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`,
+      },
+    })
+  }
   if (!FUNNEL_KEY || key !== FUNNEL_KEY) {
     return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "content-type": "application/json" } })
   }
-  const accion = (searchParams.get("accion") || "").trim()
+  const accion = accionPre
   const contact = digits(searchParams.get("contact") || "")
   if (!contact) {
     return new Response(JSON.stringify({ ok: false, error: "contact faltante" }), { status: 400, headers: { "content-type": "application/json" } })
@@ -1561,13 +1613,16 @@ function renderListaCotizaciones(
 
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
-  const key = (searchParams.get("key") || "").trim()
+  let key = (searchParams.get("key") || "").trim()
 
   if (!FUNNEL_KEY) {
     return page("<h1>Falta configurar VIC_FUNNEL_KEY</h1><p>Define la variable de entorno VIC_FUNNEL_KEY en Vercel.</p>", 503)
   }
   if (key !== FUNNEL_KEY) {
-    return page("<h1>No autorizado</h1><p>Falta o es incorrecto el parámetro <code>?key=</code>.</p>", 401)
+    // Acceso humano: sesión por cookie (clave GeoVictoria). El ?key= queda
+    // para consumidores máquina (cron del resumen diario, links del correo).
+    if (cookieDe(req, "vic_auth") === authToken()) key = FUNNEL_KEY
+    else return renderLogin()
   }
 
   const conv = (searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()
