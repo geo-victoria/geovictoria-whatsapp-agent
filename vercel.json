@@ -50,6 +50,10 @@
     {
       "path": "/api/vic-ptv-cron",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/vic-resumen-diario",
+      "schedule": "0 12 * * 1-5"
     }
   ],
   "functions": {
@@ -72,6 +76,9 @@
       "maxDuration": 60
     },
     "app/api/vic-funnel-cron/route.ts": {
+      "maxDuration": 120
+    },
+    "app/api/vic-resumen-diario/route.ts": {
       "maxDuration": 120
     }
   }

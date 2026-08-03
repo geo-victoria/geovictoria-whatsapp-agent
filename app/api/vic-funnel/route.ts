@@ -1019,59 +1019,97 @@ function horaLocalCliente(tel: string, paisDash: Pais): { hora: string; llamable
   }
 }
 
-function renderColaGestion(params: {
+/** Caso listo para gestionar — lo consumen la vista HTML, el modo JSON del
+ * dash y el resumen diario por correo. */
+type CasoGestion = {
+  empresa: string
+  contacto: string
+  propietario: string
+  convId: string
+  tipoId: string
+  tipoLabel: string
+  tipoEmoji: string
+  prioridad: number
+  urgencia: string
+  urgenciaColor: string
+  horaLocal: string
+  llamable: boolean
+  monto: string
+  diasSinContacto: number
+  accionable: string
+  resumen: string
+  score: number
+}
+
+function construirCasosGestion(params: {
   filas: FilaListado[]
   gestionados: Map<string, string>
   montos: Map<string, { uf: number | null; clp: number | null }>
-  key: string
   pais: Pais
-}): string {
-  const { filas, gestionados, montos, key, pais } = params
-  const casos = filas
+}): { casos: CasoGestion[]; nGestionados: number } {
+  const { filas, gestionados, montos, pais } = params
+  const conTipo = filas
     .map((f) => ({ f, tipo: tipoAccionDe(f) }))
     .filter((x): x is { f: FilaListado; tipo: TipoAccion } => x.tipo !== null)
-  const activos = casos.filter((x) => !gestionados.has(digits(x.f.contacto)))
-  const nGestionados = casos.length - activos.length
+  const activos = conTipo.filter((x) => !gestionados.has(digits(x.f.contacto)))
+  const nGestionados = conTipo.length - activos.length
 
   const diasSin = (f: FilaListado) => {
     const t = Date.parse(f.updatedIso || f.fechaIso || "")
     return Number.isFinite(t) ? (Date.now() - t) / 864e5 : 99
   }
-  const urgencia = (f: FilaListado, tipo: TipoAccion): { label: string; color: string } => {
-    const d = diasSin(f)
+  const casos = activos.map(({ f, tipo }) => {
+    const d = digits(f.contacto)
+    const dias = diasSin(f)
     const limite = tipo.prioridad >= 5 ? 1 : 2 // los calientes vencen antes
-    if (d > limite * 2) return { label: "Vencido", color: "#C62828" }
-    if (d > limite) return { label: "Hoy", color: "#F9A825" }
-    return { label: "Al día", color: "#2E7D32" }
-  }
-  const montoDe = (f: FilaListado): { txt: string; uf: number } => {
-    const m = montos.get(digits(f.contacto))
-    if (m?.uf) return { txt: `UF ${m.uf}`, uf: m.uf }
-    if (m?.clp) return { txt: `$${Math.round(m.clp).toLocaleString("es-CL")}`, uf: m.clp / 40000 }
-    return { txt: "—", uf: 0 }
-  }
-  const score = (f: FilaListado, tipo: TipoAccion) =>
-    tipo.prioridad * 100 + Math.min(montoDe(f).uf, 50) * 2 + Math.min(diasSin(f), 14)
+    const urg = dias > limite * 2 ? { label: "Vencido", color: "#C62828" } : dias > limite ? { label: "Hoy", color: "#F9A825" } : { label: "Al día", color: "#2E7D32" }
+    const m = montos.get(d)
+    const montoTxt = m?.uf
+      ? `UF ${m.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
+      : m?.clp
+        ? `$${Math.round(m.clp).toLocaleString("es-CL")}`
+        : "—"
+    const montoUF = m?.uf || (m?.clp ? m.clp / 40000 : 0)
+    const hl = horaLocalCliente(d, pais)
+    return {
+      empresa: f.empresa,
+      contacto: d,
+      propietario: f.propietario,
+      convId: f.convId,
+      tipoId: tipo.id,
+      tipoLabel: tipo.label,
+      tipoEmoji: tipo.emoji,
+      prioridad: tipo.prioridad,
+      urgencia: urg.label,
+      urgenciaColor: urg.color,
+      horaLocal: hl.hora,
+      llamable: hl.llamable,
+      monto: montoTxt,
+      diasSinContacto: Math.round(dias * 10) / 10,
+      accionable: f.accionable,
+      resumen: f.resumen,
+      score: tipo.prioridad * 100 + Math.min(montoUF, 50) * 2 + Math.min(dias, 14),
+    }
+  })
+  casos.sort((a, b) => b.prioridad - a.prioridad || b.score - a.score)
+  return { casos, nGestionados }
+}
 
+function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string): string {
+  const activos = casos
   const secciones = TIPOS_ACCION.map((tipo) => {
-    const grupo = activos
-      .filter((x) => x.tipo.id === tipo.id)
-      .sort((a, b) => score(b.f, b.tipo) - score(a.f, a.tipo))
+    const grupo = activos.filter((c) => c.tipoId === tipo.id)
     if (!grupo.length) return ""
     const filasHtml = grupo
-      .map(({ f, tipo: tp }) => {
-        const d = digits(f.contacto)
-        const hl = horaLocalCliente(d, pais)
-        const u = urgencia(f, tp)
-        const m = montoDe(f)
-        const dias = diasSin(f)
-        return `<tr data-contact="${esc(d)}">
-          <td>${esc(f.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(d)} · ${esc(f.propietario)}</div></td>
-          <td style="white-space:nowrap"><span title="hora local del cliente">${hl.llamable ? "🟢" : "🌙"} ${hl.hora}</span></td>
-          <td style="white-space:nowrap"><span class="tag" style="background:${u.color}22;color:${u.color}">${u.label}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
-          <td style="white-space:nowrap;text-align:right">${m.txt}</td>
-          <td style="max-width:300px">${esc(f.accionable)}${f.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(f.resumen)}</div>` : ""}</td>
-          <td style="white-space:nowrap"><a href="tel:+${esc(d)}" title="Llamar">📞</a> <a href="https://wa.me/${esc(d)}" target="_blank" title="WhatsApp">💬</a> ${f.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(f.convId)}" title="Ver conversación">📄</a>` : ""} <button class="btnGest" data-contact="${esc(d)}" title="Marcar gestionado (sale de la cola por 24 h)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button></td>
+      .map((c) => {
+        const dias = c.diasSinContacto
+        return `<tr data-contact="${esc(c.contacto)}">
+          <td>${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div></td>
+          <td style="white-space:nowrap"><span title="hora local del cliente">${c.llamable ? "🟢" : "🌙"} ${c.horaLocal}</span></td>
+          <td style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
+          <td style="white-space:nowrap;text-align:right">${c.monto}</td>
+          <td style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
+          <td style="white-space:nowrap"><a href="tel:+${esc(c.contacto)}" title="Llamar">📞</a> <a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="WhatsApp">💬</a> ${c.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" title="Ver conversación">📄</a>` : ""} <button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (sale de la cola por 24 h)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">✔</button></td>
         </tr>`
       })
       .join("")
@@ -1370,6 +1408,8 @@ export async function GET(req: Request): Promise<Response> {
   let listadoHtml = ""
   // Cola de gestión (vista principal) y sus insumos.
   let colaHtml = ""
+  let casosGestion: CasoGestion[] = []
+  let nGestionadosCola = 0
   let gestionados = new Map<string, string>()
   let montosPorContacto = new Map<string, { uf: number | null; clp: number | null }>()
   try {
@@ -1444,7 +1484,10 @@ export async function GET(req: Request): Promise<Response> {
       rango ? `con actividad en ${rango.etiqueta}` : "últimos 30 días",
       Boolean(rango),
     )
-    colaHtml = renderColaGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, key, pais })
+    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais })
+    casosGestion = cola.casos
+    nGestionadosCola = cola.nGestionados
+    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key)
     // El filtro global re-corta el cierre de Zoho (por teléfono de la
     // cotización) y el funnel por origen (por teléfono del lead/toque).
     if (permitidos && cierre) {
@@ -1561,6 +1604,33 @@ export async function GET(req: Request): Promise<Response> {
   const cPreform = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "preform_mostrado")
   const cEnviada = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "cotizacion_enviada")
   const cAbandonado = n((r) => r.sub_bucket === "cotizacion" && r.cotizacion_outcome === "abandonado")
+
+  // Modo JSON (?formato=json): expone la cola de gestión y los números clave
+  // para consumidores programáticos — hoy, el resumen diario por correo
+  // (/api/vic-resumen-diario). Respeta todos los filtros de la URL.
+  if ((searchParams.get("formato") || "") === "json") {
+    const vieronPrecio = cPreform + cEnviada
+    return Response.json({
+      pais,
+      generado: new Date().toISOString(),
+      totales: {
+        conversaciones: total,
+        comercial,
+        flujoCotizacion: cotizacion,
+        colaPendiente: casosGestion.length,
+        gestionados24h: nGestionadosCola,
+      },
+      cierre: cierre
+        ? {
+            cotizaciones: cierre.total,
+            aceptadas: cierre.aceptadas,
+            tasaEndToEnd: vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0,
+            objetivo: pais === "cl" ? 30 : 10,
+          }
+        : null,
+      casos: casosGestion,
+    })
+  }
 
   // ── Funnel por ORIGEN: outbound (leads asignados) vs inbound (llegó solo) ──
   // Etapas alineadas desde "calificado" para comparar lado a lado. Pagadas se
@@ -1821,8 +1891,6 @@ export async function GET(req: Request): Promise<Response> {
   </script>
 
   ${vista === "gestion" ? `
-  ${tasaCierreHtml}
-
   ${colaHtml}
 
   ${listadoHtml}
