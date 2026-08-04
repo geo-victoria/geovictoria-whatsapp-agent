@@ -1184,7 +1184,6 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td data-l="Primer contacto" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
           <td data-l="Estado"><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
           <td data-l="Zoho">${esc(c.estadoZoho)}</td>
-          <td data-l="Hora cliente" style="white-space:nowrap"><span title="hora local del cliente">${c.llamable ? "🟢" : "🌙"} ${c.horaLocal}</span></td>
           <td data-l="Urgencia" style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
           <td data-l="Monto/mes" style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td data-l="Accionable" style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
@@ -1197,7 +1196,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>¿Listo?</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Hora cliente</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
+      <thead><tr><th>¿Listo?</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th>Estado en Zoho</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th>Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
@@ -1217,7 +1216,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
   }</style>
   <div class="card colaGest"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span></h2>
   ${activos.length || nGestionados ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
-  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. 🟢 = horario hábil del cliente (L-V 8-18 h local, según prefijo del teléfono) · 🌙 = fuera de horario. ⏳ = pendiente de gestionar: al hacer clic pide un registro de la gestión (obligatorio), lo guarda como nota en el registro de Zoho del cliente y saca el caso de la cola por 24 horas; con ↩ (en "mostrar" gestionadas) se deshace al instante.</div>
+  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. ⏳ = pendiente de gestionar: al hacer clic pide un registro de la gestión (obligatorio), lo guarda como nota en el registro de Zoho del cliente y saca el caso de la cola por 24 horas; con ↩ (en "mostrar" gestionadas) se deshace al instante.</div>
   <script>
     (function () {
       var KEYQ = "?key=${encodeURIComponent(key)}";
