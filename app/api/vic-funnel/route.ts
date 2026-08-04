@@ -2249,7 +2249,6 @@ export async function GET(req: Request): Promise<Response> {
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com, undefined, "zoho_cotizaciones")}
     ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept, "zoho_aceptadas")}
   </div>
-  ${tasaCierreHtml}
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
     }
   }
@@ -2332,6 +2331,7 @@ export async function GET(req: Request): Promise<Response> {
   ${vista === "gestion" ? `
   ${colaHtml}
   ` : `
+  ${tasaCierreHtml}
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
     ${kpiCard("Conversaciones", total, col.base, undefined, "total")}
