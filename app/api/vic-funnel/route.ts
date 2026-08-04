@@ -1461,7 +1461,9 @@ function renderEvolucionDiaria(params: {
   const DIA_MS = 864e5
   const finMs = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
   const inicioMs = rango && rango.desdeMs > 0 ? rango.desdeMs : finMs - 29 * DIA_MS
-  const nDias = Math.min(366, Math.max(1, Math.round((finMs - inicioMs) / DIA_MS) + 1))
+  // floor y no round: el rango va de las 00:00 del desde a las 23:59 del
+  // hasta — round sumaba un día fantasma al inicio (31-07 en un rango 01-08).
+  const nDias = Math.min(366, Math.max(1, Math.floor((finMs - inicioMs) / DIA_MS) + 1))
   const dias: string[] = []
   for (let i = nDias - 1; i >= 0; i--) {
     const d = diaDe(new Date(finMs - i * DIA_MS).toISOString())
