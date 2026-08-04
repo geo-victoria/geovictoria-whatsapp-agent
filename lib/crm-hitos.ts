@@ -184,6 +184,25 @@ const INTERINOS = new Set([
   "3525045000203758005", // Gordillo (interino CO)
   "3525045000308323003", // Yahel (interina MX)
 ])
+
+// SDRs Inbound de Colombia (acuerdo equipo CO 04-ago: Gordillo/Valeria): en CO
+// el LEAD sin cotización lo posee el SDR (Galindo y cía), y al emitir la formal
+// el DEAL pasa al EJECUTIVO (Gordillo). Por eso un lead de un SDR CO NO se
+// hereda al deal: es un handoff SDR→ejecutivo, no gestión que preservar.
+const SDR_CO_IDS = new Set([
+  "3525045000613817111", // Eddy Galindo
+  "3525045000619732095", // Guerrero
+  "3525045000639899035", // Quiroga
+])
+
+/** ¿El dueño del lead es un HUMANO REAL cuya gestión se hereda al deal? No lo
+ * son los interinos ni —en Colombia— los SDR (esos entregan el deal al
+ * ejecutivo al cotizar). */
+function heredaGestionAlDeal(ownerId: string, territorio: string): boolean {
+  if (!ownerId || INTERINOS.has(ownerId)) return false
+  if (territorio === "Colombia" && SDR_CO_IDS.has(ownerId)) return false
+  return true
+}
 const HOY_MAS_30 = () => new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
 
 function getEnv(name: string): string {
@@ -604,12 +623,11 @@ async function convertirConDeal(
     // - Territorio SIN regla (CO/MX): interino del país como siempre — ahí el
     //   interino ES el dueño real y Vicky-user sería la bandeja de nadie.
     Owner: {
-      id:
-        lead.ownerId && !INTERINOS.has(lead.ownerId)
-          ? lead.ownerId
-          : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
-            ? VICKY_OWNER_ID
-            : ({ Colombia: "3525045000203758005", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+      id: heredaGestionAlDeal(lead.ownerId, territorio)
+        ? lead.ownerId
+        : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
+          ? VICKY_OWNER_ID
+          : ({ Colombia: "3525045000203758005", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -657,7 +675,7 @@ async function convertirConDeal(
   const dealCreado = fila?.Deals?.id || fila?.details?.Deals?.id
   if (fila?.code === "SUCCESS" && dealCreado) {
     console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${piso}"`)
-    const heredaDuenoHumano = Boolean(lead.ownerId && !INTERINOS.has(lead.ownerId))
+    const heredaDuenoHumano = heredaGestionAlDeal(lead.ownerId, territorio)
     // TRASPASO VIGENTE MANDA (caso Ana/Daniela 04-ago): si el contacto tiene
     // vic_ptv activo, al cliente YA se le presentó ese ejecutivo (con nombre,
     // correo y WhatsApp) — sortear el deal a otra persona rompe la promesa.
@@ -906,9 +924,10 @@ export async function sincronizarHitoCrm(
       // Los callbacks y reuniones NO pasan por acá: el callback entra a la
       // tómbola de Zoho y la reunión hereda el owner que define Cal.com.
       const territorio = territorioDeContacto(clean)
+      const esCO = territorio === "Colombia"
       const OWNER_INTERINO: Record<string, string> = {
         Chile: "3525045000000211283", // Eddyluz Mujica
-        Colombia: "3525045000203758005", // Alejandro Gordillo
+        Colombia: "3525045000203758005", // Alejandro Gordillo (solo fallback)
         "México": "3525045000308323003", // Yahel Segura
       }
       const { createZohoLead } = await import("./zoho-leads")
@@ -919,11 +938,18 @@ export async function sincronizarHitoCrm(
         empresa: datos.empresa,
         email: datos.email,
         trabajadores: datos.empleados,
-        ownerId: territorio ? OWNER_INTERINO[territorio] : undefined,
+        // CO: el lead SIN cotización lo posee el SDR Inbound (acuerdo equipo CO
+        // 04-ago: Gordillo/Valeria) — se asigna abajo por round-robin, no acá.
+        // Si más tarde emite formal, el deal pasa al ejecutivo (heredaGestion).
+        ownerId: esCO ? undefined : territorio ? OWNER_INTERINO[territorio] : undefined,
       })
       if (!creado.success) {
         console.warn(`[crm-hitos] ${clean}: no se pudo crear lead (${creado.error})`)
         return
+      }
+      if (esCO) {
+        const { reasignarLeadSdrInboundCO } = await import("./zoho-leads")
+        await reasignarLeadSdrInboundCO(creado.leadId).catch(() => {})
       }
       const lead: LeadEncontrado = {
         id: creado.leadId,

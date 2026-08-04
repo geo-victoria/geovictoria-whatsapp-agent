@@ -228,6 +228,9 @@ async function asignarEnZoho(
       // quedaba solo en vic_ptv.
       const { createZohoLead } = await import("@/lib/zoho-leads")
       const paisNombre = pais === "co" ? "Colombia" : pais === "mx" ? "México" : "Chile"
+      // CO: el lead sin cotización lo posee el SDR Inbound (acuerdo equipo CO
+      // 04-ago) — se crea sin dueño y se asigna por round-robin SDR abajo.
+      const esCO = pais === "co"
       const creado = await createZohoLead({
         nombre: "Prospecto WhatsApp",
         empresa: `Por identificar (WhatsApp +${fono})`,
@@ -235,11 +238,15 @@ async function asignarEnZoho(
         contactoWA: fono,
         pais: paisNombre,
         necesidad: "Traspaso PTV: conversación activa con Vicky sin registro previo en el CRM — lead creado al asignar vendedor.",
-        ownerEmail: interno.email,
-        ownerId: interno.zohoId,
+        ownerEmail: esCO ? undefined : interno.email,
+        ownerId: esCO ? undefined : interno.zohoId,
       }).catch(() => null)
       if (!creado || !creado.success) {
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
+      } else if (esCO) {
+        const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
+        const r = await reasignarLeadSdrInboundCO(creado.leadId).catch(() => null)
+        await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
       } else {
         await notificarTraspasoLeadEmail(creado.leadId, interno.email, fono, H, api)
       }
@@ -303,6 +310,11 @@ async function asignarEnZoho(
       await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: dealId, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
       await notificarTraspasoDeal(dealId).catch(() => {})
+    } else if (pais === "co") {
+      // CO: lead sin cotización → SDR Inbound (round-robin), no el ejecutivo.
+      const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
+      const r = await reasignarLeadSdrInboundCO(lead.id).catch(() => null)
+      await notificarTraspasoLeadEmail(lead.id, r?.ownerEmail || interno.email, fono, H, api)
     } else {
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
