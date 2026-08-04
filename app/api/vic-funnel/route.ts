@@ -1285,7 +1285,6 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
   }</style>
   <div class="card colaGest"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span></h2>
   ${activos.length || nGestionados ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
-  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. ⏳ = pendiente de gestionar: al hacer clic pide un registro de la gestión (obligatorio), lo guarda como nota en el registro de Zoho del cliente y saca el caso de la cola por 24 horas; con ↩ (en "mostrar" gestionadas) se deshace al instante.</div>
   <script>
     (function () {
       var KEYQ = "?key=${encodeURIComponent(key)}";
