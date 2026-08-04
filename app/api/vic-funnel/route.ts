@@ -1189,11 +1189,21 @@ function construirCasosGestion(params: {
     const limite = tipo.prioridad >= 5 ? 1 : 2 // los calientes vencen antes
     const urg = dias > limite * 2 ? { label: "Vencido", color: "#C62828" } : dias > limite ? { label: "Hoy", color: "#F9A825" } : { label: "Al día", color: "#2E7D32" }
     const m = montos.get(d)
-    const montoTxt = m?.uf
-      ? `UF ${m.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
-      : m?.clp
-        ? `$${Math.round(m.clp).toLocaleString("es-CL")}`
-        : "—"
+    // La UF existe solo en Chile (pedido Lalo 04-ago): en CO/PE/MX el monto es
+    // moneda local y se muestra con $ — venga en el campo que venga (los
+    // punteros de esos países guardan el monto local en uf o en clp).
+    const montoTxt =
+      pais === "cl"
+        ? m?.uf
+          ? `UF ${m.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
+          : m?.clp
+            ? `$${Math.round(m.clp).toLocaleString("es-CL")}`
+            : "—"
+        : m?.clp
+          ? `$${Math.round(m.clp).toLocaleString("es-CL")}`
+          : m?.uf
+            ? `$${Math.round(m.uf).toLocaleString("es-CL")}`
+            : "—"
     const montoUF = m?.uf || (m?.clp ? m.clp / 40000 : 0)
     const hl = horaLocalCliente(d, pais)
     return {
