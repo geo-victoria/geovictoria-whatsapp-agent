@@ -39,11 +39,19 @@ const HEADERS = {
   "Content-Type": "application/json",
 }
 
+// Token que Botmaker manda en el header 'auth-bm-token' del webhook de
+// estados (configurado en la consola 04-ago). Override por env.
+const BM_STATUS_TOKEN = (
+  process.env.BOTMAKER_STATUS_TOKEN || "B3CADA7756B4561C5F97D065A52F0E98010C3633"
+).trim()
+
 async function authorized(req: Request): Promise<boolean> {
+  // Botmaker: token propio en el header 'auth-bm-token'.
+  const bmToken = (req.headers.get("auth-bm-token") || "").trim()
+  if (BM_STATUS_TOKEN && bmToken && bmToken === BM_STATUS_TOKEN) return true
   const key = (new URL(req.url).searchParams.get("key") || "").trim()
   if (CRON_SECRET && key === CRON_SECRET) return true
-  // Botmaker no permite headers custom: el secret de vic_kv también vale por
-  // query param (04-ago, para poder suscribir el webhook sin conocer el env).
+  // El secret de vic_kv también vale por query param (para pruebas manuales).
   if (key) {
     const expected = await getFollowupCronSecret().catch(() => "")
     if (expected && key === expected) return true
@@ -72,6 +80,11 @@ function pick(obj: unknown, keys: string[]): string {
     }
   }
   return ""
+}
+
+// Botmaker hace un GET de validación al guardar el webhook: responder 200.
+export async function GET(): Promise<Response> {
+  return NextResponse.json({ ok: true, webhook: "vic-botmaker-status" })
 }
 
 export async function POST(req: Request): Promise<Response> {
