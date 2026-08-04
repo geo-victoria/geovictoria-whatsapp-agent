@@ -518,6 +518,8 @@ export async function notificarTraspasoDeal(dealId: string): Promise<void> {
     // La copia a Victoria Luna es SOLO CHILE (Lalo 31-jul): CO y MX siguen
     // con sus reglas antiguas — el dueño recibe su aviso, sin CC.
     const esChile = /chile/i.test(String(fila?.Territorio || "")) || !fila?.Territorio
+    const { correoEntregable } = await import("./correo-alias")
+    const destino = await correoEntregable(owner.email)
     await fetch(`${api}/crm/v3/Deals/${dealId}/actions/send_mail`, {
       method: "POST",
       headers: h,
@@ -525,7 +527,7 @@ export async function notificarTraspasoDeal(dealId: string): Promise<void> {
       body: JSON.stringify({
         data: [{
           from: { email: "vicky@geovictoria.com" },
-          to: [{ email: owner.email }],
+          to: [{ email: destino }],
           ...(esChile && CC_TRASPASO_DEAL ? { cc: [{ email: CC_TRASPASO_DEAL }] } : {}),
           template: { id: TPL_TRASPASO_DEAL },
         }],

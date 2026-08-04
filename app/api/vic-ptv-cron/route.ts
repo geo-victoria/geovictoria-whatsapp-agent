@@ -159,6 +159,8 @@ async function notificarTraspasoLeadEmail(
     const cuerpo =
       motivoHtml ||
       "el cliente dejó de responder y venció su tiempo de espera. <b>Llámalo en menos de 5 minutos</b> — la conversación completa está en las notas del lead, precio incluido si se le mostró."
+    const { correoEntregable } = await import("@/lib/correo-alias")
+    const destino = await correoEntregable(vendedorEmail)
     await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
       method: "POST",
       headers: H,
@@ -166,7 +168,7 @@ async function notificarTraspasoLeadEmail(
       body: JSON.stringify({
         data: [{
           from: { email: "vicky@geovictoria.com" },
-          to: [{ email: vendedorEmail }],
+          to: [{ email: destino }],
           ...(esChile ? { cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }] } : {}),
           subject: `Traspaso PTV: llamar YA a +${fono}`,
           content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Vicky te traspasó esta conversación de WhatsApp: ${cuerpo}</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p></body></html>`,
