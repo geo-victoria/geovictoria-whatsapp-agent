@@ -2327,7 +2327,6 @@ export async function GET(req: Request): Promise<Response> {
       </select></label>
       <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
       ${rango || estadoF || propF ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtros</a>` : ""}
-      ${rango || estadoF || propF ? `<span style="font-size:11px;color:#9ca3af">· fechas: conversaciones por inicio, cotizaciones por emisión, pagos por fecha de pago${estadoF || propF ? " · Estado y Propietario aplican a TODAS las secciones (según la escalera del listado comercial, últimos 30 días)" : ` · "Funnel por origen" muestra el programa completo`}</span>` : ""}
     </form>
   </div>
 
