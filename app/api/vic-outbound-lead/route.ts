@@ -372,11 +372,14 @@ export async function POST(req: Request): Promise<Response> {
           "Vicky: WhatsApp de apertura falló",
           "No se pudo enviar la plantilla de apertura por la línea MX. El lead requiere contacto manual.",
         ).catch(() => {})
+      } else if (esCO) {
+        const r = await reasignarLeadSdrInboundCO(zohoLeadId).catch(() => null)
+        reasignado = r?.ownerEmail
       } else {
-        const r = await (esCO
-          ? reasignarLeadSdrInboundCO(zohoLeadId)
-          : reasignarLeadSdrInbound(zohoLeadId)
-        ).catch(() => null)
+        // CL: telemarketing por la regla de Zoho (Lalo 04-ago); SDR de fallback.
+        const { reasignarLeadTelemarketingCL } = await import("@/lib/zoho-leads")
+        let r = await reasignarLeadTelemarketingCL(zohoLeadId).catch(() => null)
+        if (!r?.success) r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
         reasignado = r?.ownerEmail
       }
       console.warn(`[outbound-lead] envío falló → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`)

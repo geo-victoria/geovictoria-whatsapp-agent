@@ -488,6 +488,42 @@ export async function reasignarLeadSdrInbound(
   }
 }
 
+/**
+ * TELEMARKETING CL (Lalo 04-ago): un lead que Vicky NO puede atender (número
+ * sin WhatsApp, cadencia agotada, sin calificar) se re-asigna con la REGLA de
+ * Zoho "Re-asignación de Vicky" (lar_id) — NO con la rotación SDR interna.
+ * Misma filosofía que la tómbola de deals y los callbacks: la regla decide.
+ * Devuelve el email del dueño sorteado, o undefined si la regla no asignó.
+ */
+const TM_TOMBOLA_LEADS_CL = (process.env.VICKY_TM_TOMBOLA_LEADS_CL || "3525045000649066001").trim()
+
+export async function reasignarLeadTelemarketingCL(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; error?: string }> {
+  if (!leadId || !TM_TOMBOLA_LEADS_CL) return { success: false, error: "leadId o regla faltante" }
+  try {
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const H = { Authorization: `Zoho-oauthtoken ${accessToken}`, "Content-Type": "application/json" }
+    const put = await fetch(`${apiDomain}/crm/v3/Leads`, {
+      method: "PUT",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ id: leadId }], lar_id: TM_TOMBOLA_LEADS_CL }),
+    })
+    if (!put.ok) return { success: false, error: `regla PUT ${put.status}` }
+    const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
+    const owner = g.ok
+      ? ((await g.json().catch(() => ({}))) as { data?: Array<{ Owner?: { email?: string } }> }).data?.[0]?.Owner
+      : undefined
+    const email = (owner?.email || "").toLowerCase()
+    if (!email || /vicky@|info@geovictoria/.test(email)) return { success: false, error: "la regla no asignó dueño" }
+    return { success: true, ownerEmail: owner?.email }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "excepción" }
+  }
+}
+
 // SDRs de Colombia (tómbola inbound CO observada en Zoho, 09-jul): Galindo /
 // Guerrero / Quiroga. Mismo formato env "email_o_label:user_id" que Chile;
 // los ids bastan (el email es etiqueta para el log).

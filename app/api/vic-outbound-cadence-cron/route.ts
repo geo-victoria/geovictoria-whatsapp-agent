@@ -266,16 +266,26 @@ export async function GET(req: Request): Promise<Response> {
             "Vicky: cadencia agotada",
             "El lead no respondió la cadencia outbound (WhatsApp + correos). Requiere contacto manual.",
           ).catch(() => {})
-        } else {
-          const rr = await (esCO
-            ? reasignarLeadSdrInboundCO(p.row.zoho_lead_id)
-            : reasignarLeadSdrInbound(p.row.zoho_lead_id)
-          ).catch((e) => ({
+        } else if (esCO) {
+          const rr = await reasignarLeadSdrInboundCO(p.row.zoho_lead_id).catch((e) => ({
             success: false as const,
             error: e instanceof Error ? e.message : "excepción",
           }))
           reasignado = rr && "ownerEmail" in rr ? rr.ownerEmail : undefined
           errorReasignacion = rr?.error
+        } else {
+          // CL: cadencia agotada → telemarketing por la regla de Zoho (Lalo
+          // 04-ago); SDR de fallback si la regla no asigna.
+          const { reasignarLeadTelemarketingCL } = await import("@/lib/zoho-leads")
+          let rr = await reasignarLeadTelemarketingCL(p.row.zoho_lead_id).catch(() => ({ success: false as const }))
+          if (!rr.success) {
+            rr = await reasignarLeadSdrInbound(p.row.zoho_lead_id).catch((e) => ({
+              success: false as const,
+              error: e instanceof Error ? e.message : "excepción",
+            }))
+          }
+          reasignado = rr && "ownerEmail" in rr ? rr.ownerEmail : undefined
+          errorReasignacion = "error" in rr ? rr.error : undefined
         }
       }
       await cerrar(p.row.contact, "agotada")
