@@ -1423,6 +1423,32 @@ function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
 
+/** Página de aviso/error con branding GeoVictoria (pedido Lalo 04-ago): la
+ * misma tarjeta centrada de la portada de acceso. El cuerpo llega como HTML
+ * ya escapado por el llamador. */
+function paginaAviso(titulo: string, cuerpoHtml: string, status = 200): Response {
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} — Vicky</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:36px 32px;width:min(92vw,460px);text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06);box-sizing:border-box}
+  .card img{height:34px;margin-bottom:18px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:20px;margin:0 0 10px;color:#4e4e4e}
+  p{color:#646464;font-size:14px;line-height:1.5;margin:0 0 6px}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  pre{text-align:left;background:#f7f8fa;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:12px;overflow-x:auto;color:#646464}
+  code{background:#f0f1f3;padding:1px 5px;border-radius:4px;font-size:12.5px}
+</style></head><body>
+  <div class="card">
+    <img src="/gv/logo-full-color.svg" alt="GeoVictoria">
+    <h1>${esc(titulo)}</h1>
+    ${cuerpoHtml}
+  </div>
+</body></html>`
+  return page(html, status)
+}
+
 // ── Drill-down de KPIs (pedido Lalo 04-ago): cada número de las tarjetas es
 // clickeable y abre la lista de SUS conversaciones (?lista=<bucket>), con los
 // mismos filtros globales activos.
@@ -1749,7 +1775,7 @@ export async function GET(req: Request): Promise<Response> {
   let key = (searchParams.get("key") || "").trim()
 
   if (!FUNNEL_KEY) {
-    return page("<h1>Falta configurar VIC_FUNNEL_KEY</h1><p>Define la variable de entorno VIC_FUNNEL_KEY en Vercel.</p>", 503)
+    return paginaAviso("Falta configurar VIC_FUNNEL_KEY", "<p>Define la variable de entorno <code>VIC_FUNNEL_KEY</code> en Vercel.</p>", 503)
   }
   if (key !== FUNNEL_KEY) {
     // Acceso humano: sesión por cookie (clave GeoVictoria). El ?key= queda
@@ -1990,7 +2016,11 @@ export async function GET(req: Request): Promise<Response> {
       }
     }
   } catch (e) {
-    return page(`<h1>Error consultando datos</h1><pre>${String(e).slice(0, 300)}</pre>`, 500)
+    return paginaAviso(
+      "Error consultando datos",
+      `<p>Vuelve a intentarlo en unos segundos.</p><pre>${esc(String(e).slice(0, 300))}</pre>`,
+      500,
+    )
   }
 
   // Vista de detalle de un KPI: usa las MISMAS rows ya filtradas por país,
@@ -2021,15 +2051,17 @@ export async function GET(req: Request): Promise<Response> {
 
   if (rows.length === 0) {
     if (estadoF || propF) {
-      return page(
-        `<h1>Sin conversaciones para este filtro</h1><p>No hay casos con ${[
+      return paginaAviso(
+        "Sin conversaciones para este filtro",
+        `<p>No hay casos con ${[
           estadoF ? `estado <b>${esc(estadoF)}</b>` : "",
           propF ? `propietario <b>${esc(propF)}</b>` : "",
-        ].filter(Boolean).join(" y ")} en el período. <a href="?key=${encodeURIComponent(key)}&pais=${pais}">← Quitar filtros</a></p>`,
+        ].filter(Boolean).join(" y ")} en el período.</p><p><a href="?key=${encodeURIComponent(key)}&pais=${pais}">← Quitar filtros</a></p>`,
       )
     }
-    return page(
-      "<h1>Sin análisis todavía</h1><p>La tabla de análisis está vacía. Corre el cron una vez: <code>/api/vic-funnel-cron?key=&lt;VIC_FUNNEL_KEY&gt;&amp;all=1</code> (puede requerir varias llamadas para el histórico).</p>",
+    return paginaAviso(
+      "Sin análisis todavía",
+      "<p>La tabla de análisis está vacía. Corre el cron una vez: <code>/api/vic-funnel-cron?key=&lt;VIC_FUNNEL_KEY&gt;&amp;all=1</code> (puede requerir varias llamadas para el histórico).</p>",
     )
   }
 
