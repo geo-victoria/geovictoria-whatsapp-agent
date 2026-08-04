@@ -65,6 +65,7 @@ const TZ_POR_PAIS: Record<string, string> = {
   cl: "America/Santiago",
   co: "America/Bogota",
   mx: "America/Mexico_City",
+  pe: "America/Lima",
 }
 
 /** Hora local (0-23) y día de semana (0=domingo) del país. */

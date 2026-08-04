@@ -1496,6 +1496,33 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ reply: "" })
     }
 
+    // PERÚ (04-ago): números +51 (51 + 9 dígitos = 11). Mismo patrón de
+    // reenvío que MX; el webhook PE parte en CONTENCIÓN (registra, avisa al
+    // equipo y saluda 1 vez/24h) hasta que Vicky PE esté construida. Sin
+    // fallback al flujo CL: precios en UF a un peruano no ayudan a nadie.
+    if ((contact.startsWith("51") && contact.length >= 11 && !contact.startsWith("56")) || contact.startsWith("PE.")) {
+      const origin = new URL(request.url).origin
+      const secretPe =
+        getEnv("BOTMAKER_SECRET_PE") ||
+        ((await getKvValue("botmaker_secret_pe").catch(() => null)) || "")
+      const r = await fetch(`${origin}/api/vic-botmaker-pe`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-secret": secretPe,
+        },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      }).catch(() => null)
+      if (r) {
+        const data = await r.json().catch(() => ({ reply: "" }))
+        console.log(`[v3-botmaker] contact=${contact} es PE → reenviado a vic-botmaker-pe (${r.status})`)
+        return NextResponse.json(data, { status: r.status })
+      }
+      console.error(`[v3-botmaker] contact=${contact} es PE y el reenvío a vic-botmaker-pe falló — NO se atiende con flujo CL`)
+      return NextResponse.json({ reply: "" })
+    }
+
     // 2.5. Nota de voz: si vino la URL del audio y no hay texto útil, la
     // transcribimos y seguimos como si el usuario lo hubiera escrito. Si la
     // transcripción falla, o llegó un audio sin URL (la acción de código aún no

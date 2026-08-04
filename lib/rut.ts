@@ -59,3 +59,28 @@ export function formatearRut(rutRaw: string): string {
   const dv = limpio.slice(-1)
   return `${cuerpo}-${dv}`
 }
+
+// ── PERÚ: RUC (Registro Único de Contribuyentes) ────────────────────────────
+//
+// 11 dígitos: los dos primeros indican el tipo (10 = persona natural con
+// negocio, 20 = persona jurídica, 15/16/17 legados), los ocho siguientes son
+// el número y el último es el dígito verificador por módulo 11 con pesos
+// 5,4,3,2,7,6,5,4,3,2. Igual que el RUT chileno: si no valida, Vicky pide el
+// dato de nuevo en vez de emitir una cotización con RUC malo.
+
+export function rucValido(rucRaw: string): boolean {
+  const ruc = String(rucRaw || "").replace(/\D/g, "")
+  if (!/^\d{11}$/.test(ruc)) return false
+  if (!/^(10|15|16|17|20)/.test(ruc)) return false
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+  const suma = pesos.reduce((acc, p, i) => acc + p * Number(ruc[i]), 0)
+  const resto = 11 - (suma % 11)
+  const dv = resto === 10 ? 0 : resto === 11 ? 1 : resto
+  return dv === Number(ruc[10])
+}
+
+/** RUC en formato canónico: solo los 11 dígitos, sin separadores. */
+export function formatearRuc(rucRaw: string): string {
+  const ruc = String(rucRaw || "").replace(/\D/g, "")
+  return rucValido(ruc) ? ruc : String(rucRaw || "").trim()
+}
