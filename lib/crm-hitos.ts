@@ -658,12 +658,39 @@ async function convertirConDeal(
   if (fila?.code === "SUCCESS" && dealCreado) {
     console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${piso}"`)
     const heredaDuenoHumano = Boolean(lead.ownerId && !INTERINOS.has(lead.ownerId))
-    if (!heredaDuenoHumano) await aplicarTombolaDeals(String(dealCreado), territorio)
-    else {
-      // Dueño humano heredado (caso Paola/Agrícola Vaticano 04-ago): sin
-      // tómbola no salía NINGUNA notificación y el deal nacía en silencio —
-      // el dueño se enteraba por casualidad. El correo directo va igual.
-      await notificarTraspasoDeal(String(dealCreado)).catch(() => {})
+    // TRASPASO VIGENTE MANDA (caso Ana/Daniela 04-ago): si el contacto tiene
+    // vic_ptv activo, al cliente YA se le presentó ese ejecutivo (con nombre,
+    // correo y WhatsApp) — sortear el deal a otra persona rompe la promesa.
+    // El deal se asigna directo al ejecutivo del traspaso, sin tómbola.
+    let asignadoPorTraspaso = false
+    if (!heredaDuenoHumano) {
+      try {
+        const { vendedorTraspasado } = await import("./loop-v2")
+        const v = await vendedorTraspasado(contact.replace(/\D/g, ""))
+        if (v?.zohoId) {
+          await fetch(`${api}/crm/v3/Deals`, {
+            method: "PUT",
+            headers: h,
+            cache: "no-store",
+            body: JSON.stringify({
+              data: [{ id: String(dealCreado), Owner: { id: v.zohoId } }],
+              skip_feature_execution: [{ name: "assignment_rules" }],
+            }),
+          })
+          asignadoPorTraspaso = true
+          console.log(`[crm-hitos] deal ${dealCreado} asignado al ejecutivo del traspaso vigente (${v.email})`)
+          await notificarTraspasoDeal(String(dealCreado)).catch(() => {})
+        }
+      } catch { /* sin traspaso vigente, sigue el flujo normal */ }
+    }
+    if (!asignadoPorTraspaso) {
+      if (!heredaDuenoHumano) await aplicarTombolaDeals(String(dealCreado), territorio)
+      else {
+        // Dueño humano heredado (caso Paola/Agrícola Vaticano 04-ago): sin
+        // tómbola no salía NINGUNA notificación y el deal nacía en silencio —
+        // el dueño se enteraba por casualidad. El correo directo va igual.
+        await notificarTraspasoDeal(String(dealCreado)).catch(() => {})
+      }
     }
     await registrarDealEnKv(contact.replace(/\D/g, ""), String(dealCreado), "hito")
     return String(dealCreado)
