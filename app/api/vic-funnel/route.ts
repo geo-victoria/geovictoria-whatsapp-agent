@@ -66,6 +66,7 @@ type RawAceptada = {
   "Owner.first_name"?: string | null
   "Owner.last_name"?: string | null
   "Deal_Asociado.Stage"?: string | null
+  "Deal_Asociado.id"?: string | null
 }
 
 type VentaCerrada = {
@@ -372,7 +373,7 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
       method: "POST",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
+        select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage, Deal_Asociado.id from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
       }),
       cache: "no-store",
     })
@@ -700,6 +701,17 @@ type FilaListado = {
    * filtro global Desde–Hasta. */
   lastUserIso: string
   updatedIso: string
+  /** Link directo al registro en Zoho: deal → lead → cotización. */
+  zohoUrl: string
+}
+
+// El org es el mismo que usan los correos del PTV y el dashboard viejo.
+const ZOHO_CRM_URL = "https://crm.zoho.com/crm/org685875245"
+function zohoUrlDe(dealId?: string | null, leadId?: string | null, quoteId?: string | null): string {
+  if (dealId) return `${ZOHO_CRM_URL}/tab/Potentials/${dealId}`
+  if (leadId) return `${ZOHO_CRM_URL}/tab/Leads/${leadId}`
+  if (quoteId) return `${ZOHO_CRM_URL}/tab/${QUOTE_MODULE}/${quoteId}`
+  return ""
 }
 
 /** Respaldo determinístico del accionable cuando el análisis aún no corre. */
@@ -891,6 +903,11 @@ function construirListadoComercial(params: {
   const corte30d = Date.now() - 30 * 24 * 3600e3
   const filas: FilaListado[] = []
   const cubiertos = new Set<string>()
+  const leadPorTel = new Map<string, LeadListado>()
+  for (const l of leads) {
+    const t = digits(String(l.Phone || ""))
+    if (t && !leadPorTel.has(t)) leadPorTel.set(t, l)
+  }
 
   // 1. Cotizaciones (formal en adelante). ÚLTIMA quote por contacto; las sin
   //    teléfono van como fila propia.
@@ -922,6 +939,11 @@ function construirListadoComercial(params: {
       resumen: String(ana?.resumen || ""),
       lastUserIso: String(conv?.last_user_at || ""),
       updatedIso: String(conv?.updated_at || ""),
+      zohoUrl: zohoUrlDe(
+        String(q["Deal_Asociado.id"] || "") || String((tel && leadPorTel.get(tel)?.Converted_Deal?.id) || ""),
+        String((tel && leadPorTel.get(tel)?.id) || ""),
+        String(q.id || ""),
+      ),
     })
   }
 
@@ -947,6 +969,7 @@ function construirListadoComercial(params: {
       resumen: String(ana?.resumen || ""),
       lastUserIso: String(conv?.last_user_at || ""),
       updatedIso: String(conv?.updated_at || ""),
+      zohoUrl: zohoUrlDe(String(lead?.Converted_Deal?.id || ""), String(lead?.id || ""), null),
     })
   }
 
@@ -978,6 +1001,7 @@ function construirListadoComercial(params: {
       resumen: String(ana?.resumen || ""),
       lastUserIso: String(conv?.last_user_at || ""),
       updatedIso: String(conv?.updated_at || ""),
+      zohoUrl: zohoUrlDe(String(l.Converted_Deal?.id || ""), String(l.id || ""), null),
     })
   }
 
@@ -1068,6 +1092,8 @@ type CasoGestion = {
   estado: string
   fechaEstadoIso: string
   estadoZoho: string
+  /** Link directo al registro en Zoho (deal → lead → cotización). */
+  zohoUrl: string
   /** Ya marcada como gestionada (se muestra atenuada, con deshacer). */
   gestionado: boolean
 }
@@ -1123,6 +1149,7 @@ function construirCasosGestion(params: {
       estado: f.estado,
       fechaEstadoIso: f.fechaIso,
       estadoZoho: f.estadoZoho,
+      zohoUrl: f.zohoUrl,
       gestionado: gestionados.has(d),
     }
   })
@@ -1137,7 +1164,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     // "Listo" (✔/↩) en grande, primera columna de la fila.
     const btn = c.gestionado
       ? `<button class="btnGest" data-contact="${esc(c.contacto)}" data-estado="gestionado" title="Deshacer: volver a la cola" style="background:#fff3e0;color:#7a4b00;border:1px solid #ffcc80;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">↩</button>`
-      : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Marcar gestionado (pide registro y guarda nota en Zoho)" style="background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">✔</button>`
+      : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Pendiente — al gestionarlo márcalo acá (pide registro y guarda nota en Zoho)" style="background:#fffdf5;color:#92700c;border:1px dashed #d4b106;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">⏳</button>`
     // WhatsApp reconocible pero compacto (solo el ícono, en verde oficial).
     const btnWa = `<a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="Abrir chat de WhatsApp" style="background:#25D366;color:#ffffff;text-decoration:none;padding:8px 11px;border-radius:8px;font-size:16px;display:inline-block;white-space:nowrap">💬</a>`
     // Fecha compacta apilada (fecha arriba, hora abajo) — usa la mitad de ancho.
@@ -1146,16 +1173,22 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
       return `${fp}<div class="sub" style="margin:0;font-size:11px">${hp.join(", ")}</div>`
     }
     return `<tr data-contact="${esc(c.contacto)}"${c.gestionado ? ` class="filaGest" style="opacity:.4;display:none"` : ""}>
-          <td style="white-space:nowrap;vertical-align:middle">${btn}</td>
-          <td>${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div>${c.convId ? `<div style="margin-top:3px"><a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" style="font-size:13px">📄 ver chat</a></div>` : ""}</td>
-          <td style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
-          <td><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
-          <td>${esc(c.estadoZoho)}</td>
-          <td style="white-space:nowrap"><span title="hora local del cliente">${c.llamable ? "🟢" : "🌙"} ${c.horaLocal}</span></td>
-          <td style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
-          <td style="white-space:nowrap;text-align:right">${c.monto}</td>
-          <td style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
+          <td class="tdBtn" style="white-space:nowrap;vertical-align:middle">${btn}</td>
+          <td class="tdEmp">${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div>${(() => {
+            const links = [
+              c.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" style="font-size:13px">📄 ver chat</a>` : "",
+              c.zohoUrl ? `<a href="${esc(c.zohoUrl)}" target="_blank" rel="noopener" title="Abrir el registro en Zoho CRM" style="font-size:13px">🔗 Zoho</a>` : "",
+            ].filter(Boolean).join(" · ")
+            return links ? `<div style="margin-top:3px">${links}</div>` : ""
+          })()}</td>
+          <td data-l="Primer contacto" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
+          <td data-l="Estado"><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
+          <td data-l="Zoho">${esc(c.estadoZoho)}</td>
+          <td data-l="Hora cliente" style="white-space:nowrap"><span title="hora local del cliente">${c.llamable ? "🟢" : "🌙"} ${c.horaLocal}</span></td>
+          <td data-l="Urgencia" style="white-space:nowrap"><span class="tag" style="background:${c.urgenciaColor}22;color:${c.urgenciaColor}">${c.urgencia}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</div></td>
+          <td data-l="Monto/mes" style="white-space:nowrap;text-align:right">${c.monto}</td>
+          <td data-l="Accionable" style="max-width:300px">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
+          <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
         </tr>`
   }
   const secciones = TIPOS_ACCION.map((tipo) => {
@@ -1169,16 +1202,28 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     </table></div>`
   }).join("")
 
-  return `<style>.colaGest table th,.colaGest table td{padding:7px 6px;font-size:12.5px}</style>
+  return `<style>.colaGest table th,.colaGest table td{padding:7px 6px;font-size:12.5px}
+  /* Celular: cada fila de la cola se vuelve una tarjeta apilada. */
+  @media (max-width:640px){
+    .colaGest thead{display:none}
+    .colaGest table,.colaGest tbody{display:block;width:100%}
+    .colaGest tr{display:block;box-sizing:border-box;border:1px solid #dfe2e7;border-radius:12px;margin:0 0 10px;padding:10px 12px;background:#fff;position:relative}
+    .colaGest table td{display:block;border:0;padding:2px 0;font-size:13px;white-space:normal !important;text-align:left !important;max-width:none !important}
+    .colaGest td[data-l]::before{content:attr(data-l) ": ";font-size:11px;font-weight:700;color:#9aa0a8}
+    .colaGest td.tdBtn{position:absolute;top:10px;right:12px;width:auto;padding:0}
+    .colaGest td.tdWa{position:absolute;top:60px;right:12px;width:auto;padding:0 !important}
+    .colaGest td.tdEmp{padding-right:70px;font-weight:700;min-height:44px}
+    .colaGest td.tdEmp .sub{font-weight:400}
+  }</style>
   <div class="card colaGest"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span></h2>
   ${activos.length || nGestionados ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
-  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. 🟢 = horario hábil del cliente (L-V 8-18 h local, según prefijo del teléfono) · 🌙 = fuera de horario. ✔ pide un registro de la gestión (obligatorio), lo guarda como nota en el registro de Zoho del cliente y saca el caso de la cola por 24 horas; con ↩ (en "mostrar" gestionadas) se deshace al instante.</div>
+  <div class="sub" style="margin-top:10px">Prioridad = cercanía al cierre × monto ÷ días sin contacto. 🟢 = horario hábil del cliente (L-V 8-18 h local, según prefijo del teléfono) · 🌙 = fuera de horario. ⏳ = pendiente de gestionar: al hacer clic pide un registro de la gestión (obligatorio), lo guarda como nota en el registro de Zoho del cliente y saca el caso de la cola por 24 horas; con ↩ (en "mostrar" gestionadas) se deshace al instante.</div>
   <script>
     (function () {
       var KEYQ = "?key=${encodeURIComponent(key)}";
       // Viñeta flotante para el registro de gestión (en vez del prompt nativo).
       var pop = document.createElement("div");
-      pop.style.cssText = "position:absolute;z-index:50;display:none;background:#fff;border:1px solid #d0d5db;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px;width:300px";
+      pop.style.cssText = "position:absolute;z-index:50;display:none;background:#fff;border:1px solid #d0d5db;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:12px;width:300px;max-width:calc(100vw - 16px);box-sizing:border-box";
       pop.innerHTML = '<div style="font-size:13px;font-weight:600;margin-bottom:6px">Registro de la gestión <span style="color:#c62828">*</span></div>' +
         '<div style="font-size:12px;color:#6b7280;margin-bottom:6px">¿Qué hiciste o qué acordaste con el cliente? Se guarda como nota en Zoho.</div>' +
         '<textarea id="popNota" rows="3" style="width:100%;box-sizing:border-box;font-size:13px;padding:6px;border:1px solid #d0d5db;border-radius:6px;resize:vertical"></textarea>' +
@@ -1194,7 +1239,8 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
         var r = b.getBoundingClientRect();
         pop.style.display = "block";
         var left = r.right + window.scrollX + 10;
-        if (left + 310 > window.scrollX + document.documentElement.clientWidth) left = r.left + window.scrollX;
+        var maxLeft = window.scrollX + document.documentElement.clientWidth - 310;
+        if (left > maxLeft) left = Math.max(window.scrollX + 8, Math.min(r.left + window.scrollX, maxLeft));
         pop.style.left = left + "px";
         pop.style.top = (r.top + window.scrollY - 8) + "px";
         nota.focus();
@@ -1219,7 +1265,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           });
           tr.style.transition = "opacity .4s"; tr.style.opacity = "0.4";
           b.dataset.estado = "gestionado"; b.textContent = "↩"; b.title = "Deshacer: volver a la cola";
-          b.style.background = "#fff3e0"; b.style.color = "#7a4b00"; b.style.borderColor = "#ffcc80";
+          b.style.background = "#fff3e0"; b.style.color = "#7a4b00"; b.style.border = "1px solid #ffcc80";
           cerrar();
         } catch (e) {}
         this.disabled = false; this.textContent = "Guardar ✔";
@@ -1232,8 +1278,8 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
             try {
               await fetch(KEYQ + "&accion=desgestionar&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
               tr.style.opacity = "1"; tr.classList.remove("filaGest");
-              this.dataset.estado = ""; this.textContent = "✔"; this.title = "Marcar gestionado (pide registro y guarda nota en Zoho)";
-              this.style.background = "#e8f5e9"; this.style.color = "#1b5e20"; this.style.borderColor = "#a5d6a7";
+              this.dataset.estado = ""; this.textContent = "⏳"; this.title = "Pendiente — al gestionarlo márcalo acá (pide registro y guarda nota en Zoho)";
+              this.style.background = "#fffdf5"; this.style.color = "#92700c"; this.style.border = "1px dashed #d4b106";
             } catch (e) { this.textContent = "↩"; }
             this.disabled = false;
             return;
@@ -2154,6 +2200,20 @@ export async function GET(req: Request): Promise<Response> {
   .bar-fill{background:#ffbb00;height:100%;border-radius:6px}
   .bar-num{text-align:right;font-weight:700;color:#646464}
   .foot{color:#9aa0a8;font-size:11px;margin-top:24px;text-align:center}
+  /* Celular: menos padding, tipografía contenida, tablas con scroll propio e
+   * inputs de 16px (evita el zoom automático de iOS al enfocar). */
+  @media (max-width:640px){
+    .wrap{padding:14px 12px 44px}
+    h1{font-size:18px}
+    .card{padding:12px;overflow-x:auto}
+    .kpi{padding:10px 12px;min-width:100px}
+    .kpi-v{font-size:22px}
+    .kpi.hero .kpi-v{font-size:30px}
+    #sankey{height:340px}
+    .bar-row{grid-template-columns:110px 1fr 36px}
+    form input[type=date],form select{font-size:16px !important;padding:6px 8px !important}
+    form button[type=submit]{font-size:14px !important;padding:8px 16px !important}
+  }
 </style></head><body><div class="wrap">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
     <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Telemarketing" : "Análisis y KPIs — Vicky V3"}</h1></div>
