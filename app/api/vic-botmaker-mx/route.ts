@@ -247,7 +247,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   // auto-onboarding que entrega el comprobante vive en un dominio propio.
   const urlsDeToolsMx = urlsDeToolsDelTurno(result.toolCalls)
   const DOMINIOS_VICKY_MX =
-    /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|geovictoria-demo-agent\.vercel\.app|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
+    /^https?:\/\/(?:(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)|geovictoria-demo-agent\.vercel\.app\/?$)/i
   for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
     if (DOMINIOS_VICKY_MX.test(u)) continue
     if (vieneDeUnaTool(u, urlsDeToolsMx)) {

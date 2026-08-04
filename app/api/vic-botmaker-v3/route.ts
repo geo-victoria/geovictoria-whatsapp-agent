@@ -503,7 +503,7 @@ async function processOneTurn(
     // onboarding, que vive en NEXT_PUBLIC_BASE_URL de la app de onboarding).
     const urlsDeTools = urlsDeToolsDelTurno(result.toolCalls)
     const DOMINIOS_VICKY =
-      /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|geovictoria-demo-agent\.vercel\.app|supabase\.co|dt\.gob\.cl|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
+      /^https?:\/\/(?:(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|dt\.gob\.cl|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)|geovictoria-demo-agent\.vercel\.app\/?$)/i
     for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
       if (DOMINIOS_VICKY.test(u)) continue
       if (vieneDeUnaTool(u, urlsDeTools)) {

@@ -244,8 +244,12 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   // salió textual de una tool OK de este turno la produjo nuestro backend — se
   // respeta aunque su dominio no esté enumerado.
   const urlsDeToolsCo = urlsDeToolsDelTurno(result.toolCalls)
+  // El dominio de la DEMO solo vale en su raíz (caso VMW Ingeniería 04-ago:
+  // el modelo fabricó /checkout?quote=... sobre el dominio legítimo de la
+  // demo y pasó el allowlist). Cualquier path/query en ese dominio que no
+  // venga de una tool es fabricado.
   const DOMINIOS_VICKY_CO =
-    /^https?:\/\/(?:[a-z0-9-]+\.)*(?:geovictoria\.com|geovictoria-demo-agent\.vercel\.app|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)/i
+    /^https?:\/\/(?:(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)|geovictoria-demo-agent\.vercel\.app\/?$)/i
   for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
     if (DOMINIOS_VICKY_CO.test(u)) continue
     if (vieneDeUnaTool(u, urlsDeToolsCo)) {
@@ -270,22 +274,35 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     /\bse\s+l[ao]\s+(agend[eé]|reagend[eé])/i.test(t)
   const afirmaContactoListoEn = (t: string) =>
     /\b(un\s+ejecutiv[oa]|el\s+equipo|nuestro\s+equipo|un\s+asesor|Laura)\b[^.]{0,50}\b(l[oe]\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|comunicar[aá]|contactar[aá]))/i.test(t)
+  // Caso VMW Ingeniería (04-ago): el modelo afirmó "aquí pagas tu cotización"
+  // + "te llegó el PDF a tu correo" con un link FABRICADO, sin llamar la tool.
+  const afirmaCotizacionListaEn = (t: string) =>
+    /\bcotizaci[oó]n\b[^.]{0,60}\b(formal|en\s+pdf)\b[^.]{0,50}\b(list[ao]|generad[ao]|enviad[ao]|qued[oó])/i.test(t) ||
+    /\b(aqu[ií]|en\s+este\s+(link|enlace))\b[^.]{0,60}\b(pagas?|aceptas?)\b[^.]{0,40}\bcotizaci[oó]n\b/i.test(t) ||
+    /\b(te\s+(lleg[oó]|envi[eé]|mand[eé])|ya\s+(te\s+)?(lleg[oó]|sali[oó]))\b[^.]{0,40}\b(pdf|cotizaci[oó]n)\b/i.test(t)
   const afirmaReunionLista = afirmaReunionListaEn(reply)
   const afirmaContactoListo = afirmaContactoListoEn(reply)
+  const afirmaCotizacionLista = afirmaCotizacionListaEn(reply)
   const realAgenda = toolCalls.some(
     (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
   )
   const realContacto = toolCalls.some(
     (c) => (c.name === "derivar_a_ejecutivo" || c.name === "agendar_reunion") && c.ok,
   )
+  const realFormal = toolCalls.some(
+    (c) => (c.name === "generar_link_cotizadora" || c.name === "actualizar_cotizacion") && c.ok,
+  )
   const alucinacion =
-    (afirmaReunionLista && !realAgenda) || (!afirmaReunionLista && afirmaContactoListo && !realContacto)
+    (afirmaReunionLista && !realAgenda) ||
+    (!afirmaReunionLista && afirmaContactoListo && !realContacto) ||
+    (afirmaCotizacionLista && !realFormal)
   if (alucinacion) {
     const FORZAR_TOOL =
       "\n\n# Instrucción de sistema (este turno)\n" +
-      "Estás por confirmarle al cliente una reunión agendada o que el equipo lo contactará, pero NO puedes afirmarlo sin EJECUTAR la tool correspondiente. " +
+      "Estás por confirmarle al cliente algo que NO puedes afirmar sin EJECUTAR la tool correspondiente. " +
       "Si confirmó un horario de reunión, llama agendar_reunion (o reagendar_reunion si ya tenía una). " +
       "Si pidió que lo contacten, llama derivar_a_ejecutivo con los datos que ya entregó. " +
+      "Si le estás entregando la cotización formal o un link de pago, llama generar_link_cotizadora con los datos que ya te dio — JAMÁS escribas un link de memoria: el único link válido es el que devuelve la tool. " +
       "SOLO después de que la tool devuelva ok confirma, usando su mensajeParaProspecto. " +
       "Si faltan datos obligatorios, PÍDELOS en vez de afirmar que ya quedó listo."
     const retry = await runAgentLoop({
@@ -300,7 +317,11 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     const retryCalls = ((retry?.toolCalls || []) as ToolCallRecordCO[])
     const retryOk = retryCalls.some(
       (c) =>
-        (c.name === "agendar_reunion" || c.name === "reagendar_reunion" || c.name === "derivar_a_ejecutivo") &&
+        (c.name === "agendar_reunion" ||
+          c.name === "reagendar_reunion" ||
+          c.name === "derivar_a_ejecutivo" ||
+          c.name === "generar_link_cotizadora" ||
+          c.name === "actualizar_cotizacion") &&
         c.ok,
     )
     const retryReply = (retry?.reply || "").trim()
@@ -312,7 +333,8 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       retryReply &&
       retryReply !== AGENT_LOOP_EMPTY_FALLBACK &&
       !afirmaReunionListaEn(retryReply) &&
-      !afirmaContactoListoEn(retryReply)
+      !afirmaContactoListoEn(retryReply) &&
+      !afirmaCotizacionListaEn(retryReply)
     ) {
       // El reintento corrigió SIN tool: la afirmación original era ESPURIA —
       // no había ninguna reunión ni contacto en juego. Caso Juan Angel
@@ -335,9 +357,11 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       // equipo para completar el registro a mano.
       reply = afirmaReunionLista
         ? "Disculpa, tuve un problema técnico y tu reunión quedó pendiente de registro — ya avisé al equipo para dejarla agendada con lo que me indicaste. Te confirmo apenas esté lista, no necesitas reenviarme nada 🙌"
-        : "Disculpa, tuve un problema técnico registrando tu solicitud — ya avisé al equipo para que igual te contacten con los datos que me diste. No necesitas reenviarme nada 🙌"
+        : afirmaCotizacionLista
+          ? "Disculpa, tu cotización formal quedó pendiente por un problema técnico — la estoy preparando con los datos que ya me diste y te la envío por aquí apenas esté lista. No necesitas reenviarme nada 🙌"
+          : "Disculpa, tuve un problema técnico registrando tu solicitud — ya avisé al equipo para que igual te contacten con los datos que me diste. No necesitas reenviarme nada 🙌"
       await avisarEquipoInterno(
-        `⚠️ Registro de ${afirmaReunionLista ? "REUNIÓN" : "CALLBACK"} falló (tras reintento, línea CO) — contacto +${contact}. El cliente quedó con la promesa de contacto: revisar la conversación en Botmaker y completar a mano.`,
+        `⚠️ Registro de ${afirmaReunionLista ? "REUNIÓN" : afirmaCotizacionLista ? "COTIZACIÓN FORMAL" : "CALLBACK"} falló (tras reintento, línea CO) — contacto +${contact}. El cliente quedó con la promesa: revisar la conversación en Botmaker y completar a mano.`,
       )
     }
   }
