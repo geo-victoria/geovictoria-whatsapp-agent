@@ -225,6 +225,75 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
   return ventas.sort((a, b) => (b.pagoIso || "").localeCompare(a.pagoIso || ""))
 }
 
+/** Fee mensual RECURRENTE por contacto (pedido Lalo 04-ago): suma de los ítems
+ * Es_Recurrente del subform de la cotización, con descuento y con IVA — deja
+ * fuera compra/envío/instalación del reloj. Caché por quote en vic_kv (48 h);
+ * los que falten se completan de a poco en cargas siguientes (tope por carga
+ * para no reventar el tiempo de la función). */
+async function fetchFeesMensuales(
+  pares: Array<{ contact: string; quoteId: string }>,
+): Promise<Map<string, { uf: number | null; clp: number | null }>> {
+  const out = new Map<string, { uf: number | null; clp: number | null }>()
+  if (!pares.length) return out
+  const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const cache = new Map<string, { uf: number | null; clp: number | null }>()
+  const ids = [...new Set(pares.map((p) => p.quoteId))]
+  for (let i = 0; i < ids.length; i += 80) {
+    const keys = ids.slice(i, i + 80).map((id) => `"fee_mes_v1_${id}"`).join(",")
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_kv?key=in.(${keys})&expires_at=gt.${new Date().toISOString()}&select=key,value`,
+      { headers: hSb, cache: "no-store" },
+    ).catch(() => null)
+    const rows = r?.ok ? ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) : []
+    for (const row of rows) {
+      try {
+        cache.set(String(row.key).replace(/^fee_mes_v1_/, ""), JSON.parse(row.value) as { uf: number | null; clp: number | null })
+      } catch {}
+    }
+  }
+  const faltantes = ids.filter((id) => !cache.has(id)).slice(0, 36)
+  if (faltantes.length) {
+    const token = await getZohoAccessToken().catch(() => "")
+    if (token) {
+      for (let i = 0; i < faltantes.length; i += 6) {
+        await Promise.all(
+          faltantes.slice(i, i + 6).map(async (id) => {
+            try {
+              const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${id}`, {
+                headers: { Authorization: `Zoho-oauthtoken ${token}` },
+                cache: "no-store",
+              })
+              const body = (await r.json().catch(() => null)) as {
+                data?: Array<{
+                  Descuento_Recurrente_Pct?: number
+                  Detalle_Items_Cotizacion?: Array<{ Subtotal_UF?: number; Subtotal_CLP?: number; Es_Recurrente?: boolean }>
+                }>
+              } | null
+              const rec = body?.data?.[0]
+              if (!rec) return
+              const pct = Number(rec.Descuento_Recurrente_Pct ?? 0) || 0
+              const recurrentes = (rec.Detalle_Items_Cotizacion || []).filter((it) => it.Es_Recurrente)
+              const uf = recurrentes.reduce((a, it) => a + (Number(it.Subtotal_UF) || 0), 0)
+              const clp = recurrentes.reduce((a, it) => a + (Number(it.Subtotal_CLP) || 0), 0)
+              const fee = {
+                uf: uf ? Number((uf * (1 - pct / 100) * 1.19).toFixed(2)) : null,
+                clp: clp ? Math.round(clp * (1 - pct / 100) * 1.19) : null,
+              }
+              cache.set(id, fee)
+              await kvSet(`fee_mes_v1_${id}`, JSON.stringify(fee), new Date(Date.now() + 48 * 3600e3).toISOString())
+            } catch {}
+          }),
+        )
+      }
+    }
+  }
+  for (const p of pares) {
+    const fee = cache.get(p.quoteId)
+    if (fee && (fee.uf || fee.clp) && !out.has(p.contact)) out.set(p.contact, fee)
+  }
+  return out
+}
+
 function fmtSantiago(iso: string): string {
   if (!iso) return "—"
   const d = new Date(iso)
@@ -1775,15 +1844,28 @@ export async function GET(req: Request): Promise<Response> {
           `${SUPABASE_URL}/rest/v1/vic_kv?key=like.gestion_%25&select=key,value&expires_at=gt.${new Date().toISOString()}&limit=1000`,
           { headers: hSb, cache: "no-store" },
         ).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ key: string; value: string }>>,
-        fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,total_uf,total_clp&limit=1000`, {
+        fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,total_uf,total_clp,quote_id&order=updated_at.desc&limit=1000`, {
           headers: hSb,
           cache: "no-store",
-        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null }>>,
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null; quote_id: string | null }>>,
       ])
       gestionados = new Map(gestionadosKv.map((g) => [String(g.key).replace(/^gestion_/, ""), String(g.value || "")]))
       for (const p of punteros) {
         const d = digits(p.contact)
         if (d && !montosPorContacto.has(d)) montosPorContacto.set(d, { uf: p.total_uf, clp: p.total_clp })
+      }
+      // Monto/mes = fee RECURRENTE (pedido Lalo 04-ago): cuando el subform de
+      // la cotización está disponible, pisa el total del puntero (que mezcla
+      // el fee con compra/envío/instalación del reloj).
+      try {
+        const fees = await fetchFeesMensuales(
+          punteros
+            .filter((p) => p.quote_id)
+            .map((p) => ({ contact: digits(p.contact), quoteId: String(p.quote_id) })),
+        )
+        for (const [c, fee] of fees) montosPorContacto.set(c, fee)
+      } catch (e) {
+        console.warn("[vic-funnel] fees mensuales fallaron:", e instanceof Error ? e.message : e)
       }
       filasListado = construirListadoComercial({
         quotes: cierre?.todasList || [],
