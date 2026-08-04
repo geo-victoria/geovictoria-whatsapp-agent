@@ -175,6 +175,15 @@ const STATUS_POR_HITO: Partial<Record<Hito, string>> = {
 }
 
 const VICKY_OWNER_ID = "3525045000484500876"
+// Dueños "del bot": el usuario Vicky y los interinos por país. Ninguno cuenta
+// como gestión humana — son marcadores de "sin dueño real" (fix gemelos
+// 03-ago: heredarlos dejaba el deal fuera de la tómbola).
+const INTERINOS = new Set([
+  VICKY_OWNER_ID,
+  "3525045000000211283", // Eddyluz (ex-interina CL)
+  "3525045000203758005", // Gordillo (interino CO)
+  "3525045000308323003", // Yahel (interina MX)
+])
 const HOY_MAS_30 = () => new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
 
 function getEnv(name: string): string {
@@ -587,14 +596,20 @@ async function convertirConDeal(
     Tipo_de_Cobro: empleados <= 10 ? "Mensual fijo" : "Por usuario",
     N_Empleados_que_marcan: empleados,
     Closing_Date: HOY_MAS_30(),
-    // Dueño humano del lead → lo hereda el deal. Lead del usuario Vicky (o
-    // sin dueño) → dueño interino por país: un deal de Vicky-user queda en la
-    // bandeja de nadie (caso Artespectaculo 30-jul).
+    // Dueño humano del lead → lo hereda el deal. Sin dueño humano:
+    // - Territorio CON regla de tómbola (Chile): el deal nace a nombre del
+    //   USUARIO VICKY y la tómbola lo sortea al instante. Si el sorteo falla,
+    //   queda visiblemente en Vicky (Lalo 04-ago: con Eddyluz-interina era
+    //   imposible distinguir "sorteo cayó en Eddy" de "sorteo nunca corrió").
+    // - Territorio SIN regla (CO/MX): interino del país como siempre — ahí el
+    //   interino ES el dueño real y Vicky-user sería la bandeja de nadie.
     Owner: {
       id:
-        lead.ownerId && lead.ownerId !== VICKY_OWNER_ID
+        lead.ownerId && !INTERINOS.has(lead.ownerId)
           ? lead.ownerId
-          : ({ Chile: "3525045000000211283", Colombia: "3525045000203758005", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
+            ? VICKY_OWNER_ID
+            : ({ Colombia: "3525045000203758005", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -642,17 +657,6 @@ async function convertirConDeal(
   const dealCreado = fila?.Deals?.id || fila?.details?.Deals?.id
   if (fila?.code === "SUCCESS" && dealCreado) {
     console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${piso}"`)
-    // Sin dueño humano REAL heredado, el sorteo de Zoho decide el dueño
-    // final. Los INTERINOS por país (Eddyluz/Gordillo/Yahel) son un marcador
-    // de "sin dueño aún", no gestión — heredarlos dejaba el deal fuera de la
-    // tómbola y el PTV presentaba a Eddyluz en vez del sorteado (fix gemelos
-    // 03-ago: casos Consistorial/Contadores/COLCOM).
-    const INTERINOS = new Set([
-      VICKY_OWNER_ID,
-      "3525045000000211283", // Eddyluz (interina CL)
-      "3525045000203758005", // Gordillo (interino CO)
-      "3525045000308323003", // Yahel (interina MX)
-    ])
     const heredaDuenoHumano = Boolean(lead.ownerId && !INTERINOS.has(lead.ownerId))
     if (!heredaDuenoHumano) await aplicarTombolaDeals(String(dealCreado), territorio)
     else {
