@@ -2305,7 +2305,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 </style></head><body><div class="wrap">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : "Análisis y KPIs — Vicky V3"}</h1></div>
+    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : "Análisis y KPIs"}</h1></div>
     <a href="?${(() => { const p = filtrosQS(); if (vista === "gestion") { p.set("vista", "analisis") } else { p.delete("vista") } return p.toString() })()}" style="font-size:14px;white-space:nowrap">${vista === "gestion" ? "📊 Análisis y KPIs →" : "← 📞 Gestión"}</a>
   </div>
   <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}</div>
