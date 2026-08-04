@@ -417,7 +417,7 @@ async function ejecutarTransicionBlueprint(
     if (!exec.ok || (execData?.code && execData.code !== "SUCCESS")) {
       return {
         success: false,
-        error: `blueprint PUT ${exec.status}: ${JSON.stringify(execData).slice(0, 150)}`,
+        error: `blueprint PUT ${exec.status}: ${JSON.stringify(execData).slice(0, 600)}`,
       }
     }
     return { success: true }

@@ -926,7 +926,10 @@ export async function sincronizarHitoCrm(
     // Hay lead (caso SALIENTE o entrante repetido). Primero el enriquecimiento
     // aditivo: cualquier dato nuevo de la conversación entra a campos vacíos.
     const lead = await enriquecerLead(res.lead, datos)
-    const esDeVicky = !lead.ownerId || lead.ownerId === VICKY_OWNER_ID
+    // "De Vicky" = usuario Vicky O interinos por país (04-ago): la interina es
+    // marcador de "sin dueño real", no gestión — tratarla como humana dejaba
+    // sus leads sin convertir (backfill de los 14 forzados a Eddyluz).
+    const esDeVicky = !lead.ownerId || INTERINOS.has(lead.ownerId)
 
     // ── Reglas de re-contacto (doc David 30-jul) — detrás de sub-flag ──
     // Reglas 2/5: registro activo → RE-NOTIFICAR al dueño, sin crear nada.
