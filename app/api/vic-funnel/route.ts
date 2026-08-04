@@ -1292,7 +1292,7 @@ function construirCasosGestion(params: {
   return { casos, nGestionados }
 }
 
-function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string): string {
+function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string, descargaQS = ""): string {
   const activos = casos.filter((c) => !c.gestionado)
   const fila = (c: CasoGestion): string => {
     const dias = c.diasSinContacto
@@ -1349,7 +1349,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     .colaGest td.tdEmp{padding-right:70px;font-weight:700;min-height:44px}
     .colaGest td.tdEmp .sub{font-weight:400}
   }</style>
-  <div class="card colaGest"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span></h2>
+  <div class="card colaGest"><h2>📞 Para gestionar hoy <span class="pct" style="font-weight:400">— ${activos.length} oportunidades con acción pendiente${nGestionados ? ` · ${nGestionados} gestionadas · <a href="#" id="lnkVerGest" style="font-size:13px">mostrar</a>` : ""}</span>${descargaQS ? `<span style="float:right;font-weight:400;font-size:13px"><a href="?${descargaQS}&formato=csv" title="Descargar la cola completa en Excel (CSV)">⬇️ Excel</a> · <a href="?${descargaQS}&formato=impresion" target="_blank" title="Vista de impresión para guardar como PDF">🖨️ PDF</a></span>` : ""}</h2>
   ${activos.length || nGestionados ? secciones : `<p class="sub" style="margin:0">Nada pendiente con los filtros actuales. 🎉</p>`}
   <script>
     (function () {
@@ -2142,7 +2142,15 @@ export async function GET(req: Request): Promise<Response> {
     const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais })
     casosGestion = cola.casos
     nGestionadosCola = cola.nGestionados
-    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key)
+    const qsDescarga = (() => {
+      const p = new URLSearchParams({ key, pais })
+      if (rango?.desdeStr) p.set("desde", rango.desdeStr)
+      if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
+      if (estadoF) p.set("estado", estadoF)
+      if (propF) p.set("prop", propF)
+      return p.toString()
+    })()
+    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga)
     // El filtro global re-corta el cierre de Zoho (por teléfono de la
     // cotización) y el funnel por origen (por teléfono del lead/toque).
     if (permitidos && cierre) {
@@ -2303,6 +2311,80 @@ export async function GET(req: Request): Promise<Response> {
         : null,
       casos: casosGestion.filter((c) => !c.gestionado),
     })
+  }
+
+  // Descarga de la cola (pedido Lalo 04-ago): ?formato=csv baja un archivo que
+  // abre directo en Excel (BOM UTF-8, separador ';' — convención es-CL);
+  // ?formato=impresion abre una vista limpia que lanza el diálogo de
+  // imprimir/guardar como PDF. Ambas respetan los filtros activos.
+  if ((searchParams.get("formato") || "") === "csv") {
+    const origin = new URL(req.url).origin
+    const celda = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`
+    const encabezado = [
+      "Tipo de acción", "Empresa", "Teléfono", "Ejecutivo", "Primer contacto", "Estado",
+      "Fecha del estado", "Último contacto", "Estado en Zoho", "Días sin contacto",
+      "Urgencia", "Monto/mes", "Accionable", "Resumen", "Gestionado", "Link chat", "Link Zoho",
+    ].join(";")
+    const filasCsv = casosGestion.map((c) =>
+      [
+        c.tipoLabel, c.empresa, `+${c.contacto}`, c.propietario,
+        fmtSantiago(c.primerContactoIso), c.estado, fmtSantiago(c.fechaEstadoIso),
+        fmtSantiago(c.ultimoContactoIso), c.estadoZoho, String(c.diasSinContacto),
+        c.urgencia, c.monto, c.accionable, c.resumen, c.gestionado ? "sí" : "no",
+        c.convId ? `${origin}/api/vic-funnel?conv=${encodeURIComponent(c.convId)}` : "",
+        c.zohoUrl,
+      ].map(celda).join(";"),
+    )
+    const hoyStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(new Date())
+    return new Response(`${"\ufeff"}${encabezado}\n${filasCsv.join("\n")}`, {
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="gestion_vicky_${pais}_${hoyStr}.csv"`,
+      },
+    })
+  }
+  if ((searchParams.get("formato") || "") === "impresion") {
+    const filtroTxt = [
+      `Vicky ${PAISES[pais].nombre}`,
+      rango ? `📅 ${rango.etiqueta}` : "últimos 30 días de actividad",
+      estadoF ? `Estado: ${estadoF}` : "",
+      propF ? `Propietario: ${propF}` : "",
+      `generado ${fmtSantiago(new Date().toISOString())}`,
+    ].filter(Boolean).join(" · ")
+    const filasImp = casosGestion.map((c) => `<tr>
+      <td>${esc(c.tipoLabel)}</td>
+      <td><b>${esc(c.empresa)}</b><br>+${esc(c.contacto)}</td>
+      <td>${esc(c.propietario)}</td>
+      <td>${fmtSantiago(c.primerContactoIso)}</td>
+      <td>${esc(c.estado)}</td>
+      <td>${fmtSantiago(c.ultimoContactoIso || c.fechaEstadoIso)}</td>
+      <td>${esc(c.estadoZoho)}</td>
+      <td>${esc(c.urgencia)} · ${c.diasSinContacto} d</td>
+      <td style="text-align:right;white-space:nowrap">${c.monto}</td>
+      <td>${esc(c.accionable)}${c.resumen ? `<br><span class="mini">${esc(c.resumen)}</span>` : ""}${c.gestionado ? `<br><span class="mini">✔ gestionado en las últimas 24 h</span>` : ""}</td>
+    </tr>`).join("")
+    const htmlImp = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Gestión de oportunidades — Vicky</title>
+<style>
+  ${GV_FONT_CSS}
+  @page{size:landscape;margin:10mm}
+  body{font-family:${GV_BODY_FONT};margin:16px;color:#4e4e4e}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:18px;margin:0 0 2px}
+  .sub{color:#646464;font-size:11px;margin-bottom:10px}
+  img{height:24px;vertical-align:middle;margin-right:10px}
+  table{width:100%;border-collapse:collapse;font-size:10.5px}
+  th,td{text-align:left;padding:4px 6px;border-bottom:1px solid #dfe2e7;vertical-align:top}
+  th{color:#646464;font-size:10px;border-bottom:2px solid #c9ced4}
+  tr{page-break-inside:avoid}
+  .mini{color:#8a9099;font-size:9.5px}
+</style></head><body>
+  <h1><img src="/gv/logo-full-color.svg" alt="GeoVictoria">Gestión de oportunidades — ${casosGestion.length} casos</h1>
+  <div class="sub">${esc(filtroTxt)}</div>
+  <table><thead><tr><th>Tipo</th><th>Empresa / contacto</th><th>Ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Último contacto</th><th>Zoho</th><th>Urgencia</th><th>Monto/mes</th><th>Accionable</th></tr></thead>
+  <tbody>${filasImp}</tbody></table>
+  <script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 300); });</script>
+</body></html>`
+    return page(htmlImp)
   }
 
   // ── Funnel por ORIGEN: outbound (leads asignados) vs inbound (llegó solo) ──
