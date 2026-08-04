@@ -1326,16 +1326,21 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
         var tr = b.closest("tr");
         this.disabled = true; this.textContent = "Guardando…";
         try {
-          await fetch(KEYQ + "&accion=gestionar&contact=" + encodeURIComponent(b.dataset.contact), {
+          var res = await fetch(KEYQ + "&accion=gestionar&contact=" + encodeURIComponent(b.dataset.contact), {
             method: "POST",
             headers: { "content-type": "application/x-www-form-urlencoded" },
             body: "nota=" + encodeURIComponent(texto),
           });
+          // Sin ok del servidor el botón NO cambia (antes quedaba "gestionada"
+          // en pantalla aunque el guardado hubiera fallado).
+          if (!res.ok) throw new Error("HTTP " + res.status);
           tr.style.transition = "opacity .4s"; tr.style.opacity = "0.4";
           b.dataset.estado = "gestionado"; b.textContent = "↩"; b.title = "Deshacer: volver a la cola";
           b.style.background = "#fff3e0"; b.style.color = "#7a4b00"; b.style.border = "1px solid #ffcc80";
           cerrar();
-        } catch (e) {}
+        } catch (e) {
+          alert("No se pudo guardar la gestión (el caso sigue pendiente). Revisa tu conexión e inténtalo de nuevo.");
+        }
         this.disabled = false; this.textContent = "Guardar ✔";
       });
       function wire(b) {
@@ -1344,11 +1349,15 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           if (this.dataset.estado === "gestionado") {
             this.disabled = true; this.textContent = "…";
             try {
-              await fetch(KEYQ + "&accion=desgestionar&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
+              var resU = await fetch(KEYQ + "&accion=desgestionar&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
+              if (!resU.ok) throw new Error("HTTP " + resU.status);
               tr.style.opacity = "1"; tr.classList.remove("filaGest");
               this.dataset.estado = ""; this.textContent = "⏳"; this.title = "Pendiente — al gestionarlo márcalo acá (pide registro y guarda nota en Zoho)";
               this.style.background = "#fffdf5"; this.style.color = "#92700c"; this.style.border = "1px dashed #d4b106";
-            } catch (e) { this.textContent = "↩"; }
+            } catch (e) {
+              this.textContent = "↩";
+              alert("No se pudo deshacer la gestión. Revisa tu conexión e inténtalo de nuevo.");
+            }
             this.disabled = false;
             return;
           }
