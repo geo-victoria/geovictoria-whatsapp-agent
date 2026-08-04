@@ -678,6 +678,48 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
             return { success: true, leadId: String(leadExistente), entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
           }
         }
+        // DEDUP POR EMAIL (regla marketing: teléfono Y email; escenario Lalo
+        // 04-ago "el cliente también llenó formulario"): el lead del
+        // formulario web trae su correo pero puede tener OTRO teléfono (o en
+        // otro formato) — el dedup por fono no lo ve y nacía un doble. Si hay
+        // lead SIN convertir con este email, se reutiliza, se cierra el
+        // candado del fono hacia él y se le completa el teléfono si venía
+        // vacío (aditivo — jamás pisa uno existente).
+        const emailDedup = (input.email || "").trim()
+        if (emailDedup) {
+          const resEmail = await fetch(
+            `${apiDedup}/crm/v3/Leads/search?email=${encodeURIComponent(emailDedup)}&converted=both&per_page=3`,
+            { headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}` }, cache: "no-store" },
+          )
+          if (resEmail.ok && resEmail.status !== 204) {
+            const dataEmail = (await resEmail.json().catch(() => ({}))) as {
+              data?: Array<{
+                id?: string
+                Phone?: string
+                Converted_Deal?: { id?: string } | null
+                Converted_Account?: { id?: string } | null
+                Converted_Contact?: { id?: string } | null
+              }>
+            }
+            const leadEmail = (dataEmail?.data || []).find(
+              (l) => !(l?.Converted_Deal?.id || l?.Converted_Account?.id || l?.Converted_Contact?.id),
+            )
+            if (leadEmail?.id) {
+              const { setKvValue } = await import("./supabase-persistence-v3")
+              await setKvValue(kvKeyLead, String(leadEmail.id)).catch(() => {})
+              if (!String(leadEmail.Phone || "").trim()) {
+                await fetch(`${apiDedup}/crm/v3/Leads`, {
+                  method: "PUT",
+                  headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}`, "Content-Type": "application/json" },
+                  cache: "no-store",
+                  body: JSON.stringify({ data: [{ id: leadEmail.id, Phone: `+${fonoCandado}` }] }),
+                }).catch(() => {})
+              }
+              console.log(`[zoho-leads] dedup por email: ${emailDedup} ya tiene lead ${leadEmail.id} (formulario/otro fono) — se reutiliza`)
+              return { success: true, leadId: String(leadEmail.id), entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+            }
+          }
+        }
         // Reservar el candado ANTES de crear: la ventana de carrera baja de
         // varios segundos (lo que tarda el POST) a milisegundos.
         const { setKvValue } = await import("./supabase-persistence-v3")
