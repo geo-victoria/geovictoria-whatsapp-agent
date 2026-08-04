@@ -1611,7 +1611,7 @@ async function notaZohoGestion(contact: string, nota: string): Promise<boolean> 
 /** Portada de acceso con la clave del equipo (sin ?key= en la URL). */
 function renderLogin(error?: string): Response {
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Telemarketing — Vicky</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Gestión de oportunidades — Vicky</title>
 <style>
   ${GV_FONT_CSS}
   body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e;display:flex;align-items:center;justify-content:center;min-height:100vh}
@@ -1626,7 +1626,7 @@ function renderLogin(error?: string): Response {
 </style></head><body>
   <form class="card" method="POST" action="?accion=login">
     <img src="/gv/logo-full-color.svg" alt="GeoVictoria">
-    <h1>Telemarketing</h1>
+    <h1>Gestión de oportunidades</h1>
     <p class="sub">Ingresa la clave del equipo para ver los registros.</p>
     ${error ? `<p class="err">${esc(error)}</p>` : ""}
     <input type="password" name="clave" placeholder="Clave" autofocus autocomplete="current-password">
@@ -2305,7 +2305,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 </style></head><body><div class="wrap">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Telemarketing" : "Análisis y KPIs — Vicky V3"}</h1></div>
+    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : "Análisis y KPIs — Vicky V3"}</h1></div>
     <a href="?${(() => { const p = filtrosQS(); if (vista === "gestion") { p.set("vista", "analisis") } else { p.delete("vista") } return p.toString() })()}" style="font-size:14px;white-space:nowrap">${vista === "gestion" ? "📊 Análisis y KPIs →" : "← 📞 Gestión"}</a>
   </div>
   <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}</div>
