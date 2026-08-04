@@ -788,8 +788,27 @@ type FilaListado = {
    * filtro global Desde–Hasta. */
   lastUserIso: string
   updatedIso: string
+  /** Último contacto real con el cliente: lo más reciente entre el chat de
+   * WhatsApp y la actividad registrada en Zoho (lead/deal/cotización). */
+  ultimoContactoIso: string
   /** Link directo al registro en Zoho: deal → lead → cotización. */
   zohoUrl: string
+}
+
+/** Máximo de fechas ISO comparando por instante real (los formatos mezclan
+ * offsets de Supabase y Zoho — la comparación lexicográfica miente). */
+function maxIso(...vals: Array<string | null | undefined>): string {
+  let best = ""
+  let bestT = -Infinity
+  for (const v of vals) {
+    const s = String(v || "")
+    const t = Date.parse(s)
+    if (Number.isFinite(t) && t > bestT) {
+      bestT = t
+      best = s
+    }
+  }
+  return best
 }
 
 // El org es el mismo que usan los correos del PTV y el dashboard viejo.
@@ -857,6 +876,7 @@ type LeadListado = {
   Phone?: string | null
   Lead_Status?: string | null
   Created_Time?: string
+  Last_Activity_Time?: string | null
   "Owner.first_name"?: string | null
   "Owner.last_name"?: string | null
   /** Shape del search API (los convertidos vienen por search, no por COQL). */
@@ -876,10 +896,10 @@ function propietarioDeLead(l: LeadListado): string {
  * los deals creados por Vicky (para etapa/dueño de los preform sin quote). */
 async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
   leads: LeadListado[]
-  dealsPorId: Map<string, { stage: string; owner: string }>
+  dealsPorId: Map<string, { stage: string; owner: string; lastActivity: string }>
 }> {
   const leads: LeadListado[] = []
-  const dealsPorId = new Map<string, { stage: string; owner: string }>()
+  const dealsPorId = new Map<string, { stage: string; owner: string; lastActivity: string }>()
   try {
     const token = await getZohoAccessToken()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
@@ -890,19 +910,19 @@ async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
       fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
         method: "POST", headers: H, cache: "no-store",
         body: JSON.stringify({
-          select_query: `select id, Full_Name, Company, Phone, Lead_Status, Created_Time, Owner.first_name, Owner.last_name from Leads where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
+          select_query: `select id, Full_Name, Company, Phone, Lead_Status, Created_Time, Last_Activity_Time, Owner.first_name, Owner.last_name from Leads where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
         }),
       }),
       // Convertidos: la búsqueda por criterio trae TODOS los de la org; se
       // filtran después por los contactos que conocemos de las conversaciones.
       fetch(
-        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Created_Time:greater_equal:${desde}T00:00:00-04:00)`)}&converted=true&fields=id,Full_Name,Company,Phone,Lead_Status,Created_Time,Converted_Deal,Owner&per_page=200`,
+        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Created_Time:greater_equal:${desde}T00:00:00-04:00)`)}&converted=true&fields=id,Full_Name,Company,Phone,Lead_Status,Created_Time,Last_Activity_Time,Converted_Deal,Owner&per_page=200`,
         { headers: H, cache: "no-store" },
       ),
       fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
         method: "POST", headers: H, cache: "no-store",
         body: JSON.stringify({
-          select_query: `select id, Stage, Owner.first_name, Owner.last_name from Deals where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
+          select_query: `select id, Stage, Last_Activity_Time, Owner.first_name, Owner.last_name from Deals where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
         }),
       }),
     ])
@@ -918,12 +938,13 @@ async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
     }
     if (dealsRes.ok && dealsRes.status !== 204) {
       const d = (await dealsRes.json().catch(() => ({}))) as {
-        data?: Array<{ id: string; Stage?: string; "Owner.first_name"?: string; "Owner.last_name"?: string }>
+        data?: Array<{ id: string; Stage?: string; Last_Activity_Time?: string; "Owner.first_name"?: string; "Owner.last_name"?: string }>
       }
       for (const dl of d?.data || []) {
         dealsPorId.set(String(dl.id), {
           stage: String(dl.Stage || ""),
           owner: `${dl["Owner.first_name"] || ""} ${dl["Owner.last_name"] || ""}`.trim(),
+          lastActivity: String(dl.Last_Activity_Time || ""),
         })
       }
     }
@@ -944,17 +965,18 @@ async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
         headers: { Authorization: `Zoho-oauthtoken ${await getZohoAccessToken()}`, "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({
-          select_query: `select id, Stage, Owner.first_name, Owner.last_name from Deals where id in (${faltantes.join(",")}) limit ${faltantes.length}`,
+          select_query: `select id, Stage, Last_Activity_Time, Owner.first_name, Owner.last_name from Deals where id in (${faltantes.join(",")}) limit ${faltantes.length}`,
         }),
       })
       if (rExtra.ok && rExtra.status !== 204) {
         const d = (await rExtra.json().catch(() => ({}))) as {
-          data?: Array<{ id: string; Stage?: string; "Owner.first_name"?: string; "Owner.last_name"?: string }>
+          data?: Array<{ id: string; Stage?: string; Last_Activity_Time?: string; "Owner.first_name"?: string; "Owner.last_name"?: string }>
         }
         for (const dl of d?.data || []) {
           dealsPorId.set(String(dl.id), {
             stage: String(dl.Stage || ""),
             owner: `${dl["Owner.first_name"] || ""} ${dl["Owner.last_name"] || ""}`.trim(),
+            lastActivity: String(dl.Last_Activity_Time || ""),
           })
         }
       }
@@ -976,7 +998,7 @@ function empresaDeQuote(q: RawAceptada): string {
 function construirListadoComercial(params: {
   quotes: RawAceptada[]
   leads: LeadListado[]
-  dealsPorId: Map<string, { stage: string; owner: string }>
+  dealsPorId: Map<string, { stage: string; owner: string; lastActivity: string }>
   convs: ConvListado[]
   preformAt: Map<string, string>
   analysisRows: Row[]
@@ -1026,6 +1048,15 @@ function construirListadoComercial(params: {
       resumen: String(ana?.resumen || ""),
       lastUserIso: String(conv?.last_user_at || ""),
       updatedIso: String(conv?.updated_at || ""),
+      ultimoContactoIso: maxIso(
+        conv?.updated_at,
+        q.Modified_Time,
+        tel ? leadPorTel.get(tel)?.Last_Activity_Time : "",
+        (() => {
+          const dealId = String(q["Deal_Asociado.id"] || "") || String((tel && leadPorTel.get(tel)?.Converted_Deal?.id) || "")
+          return dealId ? dealsPorId.get(dealId)?.lastActivity : ""
+        })(),
+      ),
       zohoUrl: zohoUrlDe(
         String(q["Deal_Asociado.id"] || "") || String((tel && leadPorTel.get(tel)?.Converted_Deal?.id) || ""),
         String((tel && leadPorTel.get(tel)?.id) || ""),
@@ -1056,6 +1087,7 @@ function construirListadoComercial(params: {
       resumen: String(ana?.resumen || ""),
       lastUserIso: String(conv?.last_user_at || ""),
       updatedIso: String(conv?.updated_at || ""),
+      ultimoContactoIso: maxIso(conv?.updated_at, lead?.Last_Activity_Time, deal?.lastActivity),
       zohoUrl: zohoUrlDe(String(lead?.Converted_Deal?.id || ""), String(lead?.id || ""), null),
     })
   }
@@ -1088,6 +1120,7 @@ function construirListadoComercial(params: {
       resumen: String(ana?.resumen || ""),
       lastUserIso: String(conv?.last_user_at || ""),
       updatedIso: String(conv?.updated_at || ""),
+      ultimoContactoIso: maxIso(conv?.updated_at, l.Last_Activity_Time, deal?.lastActivity),
       zohoUrl: zohoUrlDe(String(l.Converted_Deal?.id || ""), String(l.id || ""), null),
     })
   }
@@ -1178,6 +1211,9 @@ type CasoGestion = {
   primerContactoIso: string
   estado: string
   fechaEstadoIso: string
+  /** Último contacto real (chat o actividad en Zoho) — manda en la columna
+   * Estado y en el contador de días sin contacto. */
+  ultimoContactoIso: string
   estadoZoho: string
   /** Link directo al registro en Zoho (deal → lead → cotización). */
   zohoUrl: string
@@ -1198,7 +1234,7 @@ function construirCasosGestion(params: {
   const nGestionados = conTipo.filter((x) => gestionados.has(digits(x.f.contacto))).length
 
   const diasSin = (f: FilaListado) => {
-    const t = Date.parse(f.updatedIso || f.fechaIso || "")
+    const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
     return Number.isFinite(t) ? (Date.now() - t) / 864e5 : 99
   }
   const casos = conTipo.map(({ f, tipo }) => {
@@ -1246,6 +1282,7 @@ function construirCasosGestion(params: {
       primerContactoIso: f.primerContactoIso,
       estado: f.estado,
       fechaEstadoIso: f.fechaIso,
+      ultimoContactoIso: f.ultimoContactoIso,
       estadoZoho: f.estadoZoho,
       zohoUrl: f.zohoUrl,
       gestionado: gestionados.has(d),
@@ -1280,7 +1317,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
             return links ? `<div style="margin-top:3px">${links}</div>` : ""
           })()}</td>
           <td data-l="Primer contacto" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
-          <td data-l="Estado"><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.fechaEstadoIso)}</div></td>
+          <td data-l="Estado"><span class="tag">${esc(c.estado)}</span><div class="sub" style="margin:2px 0 0;font-size:11px" title="último contacto (chat o Zoho)">${fmtSantiago(c.ultimoContactoIso || c.fechaEstadoIso)}</div></td>
           <td data-l="Zoho">${esc(c.estadoZoho)}</td>
           <td data-l="Urgencia" style="white-space:nowrap">${dias < 1 ? `${Math.round(dias * 24)}h` : `${Math.round(dias)}d`} sin contacto</td>
           <td data-l="Monto/mes" style="white-space:nowrap;text-align:right">${c.monto}</td>
@@ -1294,7 +1331,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>¿Listo?</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · fecha</th><th style="width:100px">Estado en Zoho</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th style="width:38%">Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
+      <thead><tr><th>¿Listo?</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado · último contacto</th><th style="width:100px">Estado en Zoho</th><th>Urgencia</th><th style="text-align:right">Monto/mes</th><th style="width:38%">Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
