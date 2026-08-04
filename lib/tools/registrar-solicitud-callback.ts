@@ -23,6 +23,38 @@ function paisDeTelefono(tel: string): "cl" | "co" | "mx" {
   return "cl"
 }
 
+/** CL: la asignación de leads la decide la REGLA DE ZOHO "Re-asignación de
+ * Vicky" (Lalo 04-ago) — misma filosofía que la tómbola de deals: ninguna
+ * rotación interna decide dueños. Se aplica por lar_id sobre el lead ya
+ * creado (las reglas no corren solas en creates por API) y se lee el dueño
+ * sorteado. undefined = la regla no asignó (fallback: rotación interna). */
+const TM_TOMBOLA_LEADS_CL = (process.env.VICKY_TM_TOMBOLA_LEADS_CL || "3525045000649066001").trim()
+
+async function asignarLeadPorReglaCL(leadId: string): Promise<string | undefined> {
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const put = await fetch(`${api}/crm/v3/Leads`, {
+      method: "PUT",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ id: leadId }], lar_id: TM_TOMBOLA_LEADS_CL }),
+    })
+    if (!put.ok) return undefined
+    const g = await fetch(`${api}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
+    if (!g.ok) return undefined
+    const owner = ((await g.json().catch(() => ({}))) as { data?: Array<{ Owner?: { email?: string } }> })
+      .data?.[0]?.Owner
+    const email = (owner?.email || "").toLowerCase()
+    if (!email || /vicky@|info@geovictoria/.test(email)) return undefined
+    return owner?.email
+  } catch {
+    return undefined
+  }
+}
+
 async function vendedorPorTombola(pais: "cl" | "co" | "mx"): Promise<string | undefined> {
   const lista = vendedoresDePais(pais)
   if (!lista.length) return undefined
@@ -137,21 +169,32 @@ export type RegistrarSolicitudCallbackResultado =
 export async function registrarSolicitudCallback(
   args: RegistrarSolicitudCallbackInput,
 ): Promise<RegistrarSolicitudCallbackResultado> {
-  // Dueño por tómbola en AMBOS modos (callback explícito y fallback de
-  // cotización): la regla de leads de Zoho no dispara para creaciones por API
-  // y un lead con owner Vicky queda en la bandeja de nadie.
+  // Dueño en AMBOS modos (callback explícito y fallback de cotización):
+  // - CL: la REGLA DE ZOHO "Re-asignación de Vicky" sortea (Lalo 04-ago —
+  //   antes esto usaba la rotación interna cuyo roster era SOLO Eddyluz y le
+  //   forzó 20+ leads; caso Javier Vidal). Fallback si la regla no asigna:
+  //   la rotación interna de siempre.
+  // - CO/MX: rotación interna (el "roster" es el dueño real del país).
   const pais = paisDeTelefono(args.telefono)
-  const ownerEmail = await vendedorPorTombola(pais)
+  const usaReglaCL = pais === "cl"
+  const ownerRotacion = await vendedorPorTombola(pais)
 
   // Lead PRE-EXISTENTE en Zoho (outbound del formulario): NO crear duplicado.
-  // Se reasigna el MISMO lead al vendedor sorteado (la tómbola de Zoho es una
-  // regla de creación y no re-corre en updates).
+  // Se reasigna el MISMO lead (la regla no re-corre sola en updates: se
+  // dispara por lar_id).
   const existingLeadId = (args.zohoLeadId || "").trim()
-  if (existingLeadId && ownerEmail) {
-    const upd = await updateZohoLeadOwner(existingLeadId, ownerEmail)
-    if (!upd.success) {
-      console.error("[registrar_solicitud_callback] reasignación falló:", upd.error)
-      return { ok: false, error: `No se pudo reasignar el lead existente: ${upd.error}` }
+  if (existingLeadId && (usaReglaCL || ownerRotacion)) {
+    let ownerEmail = usaReglaCL ? await asignarLeadPorReglaCL(existingLeadId) : undefined
+    if (!ownerEmail && ownerRotacion) {
+      const upd = await updateZohoLeadOwner(existingLeadId, ownerRotacion)
+      if (!upd.success) {
+        console.error("[registrar_solicitud_callback] reasignación falló:", upd.error)
+        return { ok: false, error: `No se pudo reasignar el lead existente: ${upd.error}` }
+      }
+      ownerEmail = ownerRotacion
+    }
+    if (!ownerEmail) {
+      return { ok: false, error: "No se pudo asignar dueño al lead existente (regla y rotación fallaron)" }
     }
     return {
       ok: true,
@@ -178,12 +221,26 @@ export async function registrarSolicitudCallback(
     reunionAgendada: false,
     preferenciaHorario: args.preferenciaHorario,
     contactoWA: args.telefono,
-    ownerEmail,
+    // CL: el lead nace sin dueño explícito (usuario Vicky) y la regla de
+    // Zoho lo sortea justo después. CO/MX: rotación interna como siempre.
+    ownerEmail: usaReglaCL ? undefined : ownerRotacion,
   })
 
   if (!result.success) {
     console.error("[registrar_solicitud_callback] createZohoLead falló:", result.error)
     return { ok: false, error: result.error }
+  }
+
+  // CL: aplicar la regla SOLO a leads recién creados sin dueño (entraATombola)
+  // — un lead REUSADO por el dedup puede traer gestión humana y no se pisa.
+  let ownerFinal = result.ownerEmail
+  if (usaReglaCL && result.entraATombola) {
+    const porRegla = await asignarLeadPorReglaCL(result.leadId)
+    if (porRegla) ownerFinal = porRegla
+    else if (ownerRotacion) {
+      const upd = await updateZohoLeadOwner(result.leadId, ownerRotacion).catch(() => ({ success: false as const }))
+      if (upd.success) ownerFinal = ownerRotacion
+    }
   }
 
   const mensajeParaProspecto = args.seguimientoCotizacion
@@ -196,7 +253,7 @@ export async function registrarSolicitudCallback(
     ok: true,
     leadId: result.leadId,
     entraATombola: result.entraATombola,
-    ownerEmail: result.ownerEmail,
+    ownerEmail: ownerFinal,
     mensajeParaProspecto,
   }
 }
