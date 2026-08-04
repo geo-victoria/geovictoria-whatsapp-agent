@@ -620,7 +620,7 @@ async function convertirConDeal(
       data?: Array<{
         code?: string
         Deals?: { id?: string }
-        details?: { duplicate_record?: { id?: string } }
+        details?: { duplicate_record?: { id?: string }; Deals?: { id?: string } }
         duplicate_record?: { id?: string }
       }>
     }
@@ -634,8 +634,14 @@ async function convertirConDeal(
       fila = r?.data?.[0]
     }
   }
-  if (fila?.code === "SUCCESS" && fila?.Deals?.id) {
-    console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${fila.Deals.id} en "${piso}"`)
+  // BUG CAZADO 04-ago (el origen del sesgo de Eddyluz que reportó Victoria):
+  // Zoho devuelve los IDs de la conversión DENTRO de details ({code:"SUCCESS",
+  // details:{Deals:{id},Contacts:{id},Accounts:{id}}}), y este código los
+  // buscaba en la raíz — todo convert exitoso caía al camino de "falló", el
+  // deal quedaba creado con la interina y la tómbola JAMÁS corría.
+  const dealCreado = fila?.Deals?.id || fila?.details?.Deals?.id
+  if (fila?.code === "SUCCESS" && dealCreado) {
+    console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${piso}"`)
     // Sin dueño humano REAL heredado, el sorteo de Zoho decide el dueño
     // final. Los INTERINOS por país (Eddyluz/Gordillo/Yahel) son un marcador
     // de "sin dueño aún", no gestión — heredarlos dejaba el deal fuera de la
@@ -648,15 +654,15 @@ async function convertirConDeal(
       "3525045000308323003", // Yahel (interina MX)
     ])
     const heredaDuenoHumano = Boolean(lead.ownerId && !INTERINOS.has(lead.ownerId))
-    if (!heredaDuenoHumano) await aplicarTombolaDeals(String(fila.Deals.id), territorio)
+    if (!heredaDuenoHumano) await aplicarTombolaDeals(String(dealCreado), territorio)
     else {
       // Dueño humano heredado (caso Paola/Agrícola Vaticano 04-ago): sin
       // tómbola no salía NINGUNA notificación y el deal nacía en silencio —
       // el dueño se enteraba por casualidad. El correo directo va igual.
-      await notificarTraspasoDeal(String(fila.Deals.id)).catch(() => {})
+      await notificarTraspasoDeal(String(dealCreado)).catch(() => {})
     }
-    await registrarDealEnKv(contact.replace(/\D/g, ""), String(fila.Deals.id), "hito")
-    return String(fila.Deals.id)
+    await registrarDealEnKv(contact.replace(/\D/g, ""), String(dealCreado), "hito")
+    return String(dealCreado)
   }
   console.warn(`[crm-hitos] convert de ${lead.id} falló: ${JSON.stringify(r).slice(0, 250)}`)
   return null

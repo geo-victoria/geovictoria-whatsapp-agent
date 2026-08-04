@@ -342,6 +342,11 @@ export async function updateZohoLeadStatus(
 const BLUEPRINT_FIELD_DEFAULTS: Record<string, string> = {
   // Picklist "Pendiente para calificado" de la transición a "3. Contactado".
   Motivo_Calificado_no_convertido: "Falta información del cliente",
+  // La transición a "4. Calificado" exige además estos dos (hallazgo 04-ago
+  // en logs: PUT 400 "Tombola/Producto_Soluci_n mandatory param missing" —
+  // ningún lead de Vicky llegaba a Calificado por blueprint).
+  Tombola: "Mantener propietario",
+  Producto_Soluci_n: "Control de Asistencia",
 }
 
 // Ejecuta la transición del blueprint del lead cuyo valor de destino calza con
