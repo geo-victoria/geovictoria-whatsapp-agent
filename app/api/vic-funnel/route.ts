@@ -1437,6 +1437,95 @@ function renderListadoComercial(filas: FilaListado[], key: string, periodo: stri
 </div>`
 }
 
+/** Evolución diaria (pedido Lalo 04-ago): serie de los últimos 30 días con
+ * conversaciones, intención comercial, precios mostrados (preform), formales
+ * emitidas, aceptadas y pagadas. Días en hora de Chile; las cotizaciones van
+ * por su fecha en Zoho (emisión para formales, pago para aceptadas/pagadas). */
+function renderEvolucionDiaria(params: {
+  convs: ConvListado[]
+  analysisRows: Row[]
+  preformAt: Map<string, string>
+  quotes: RawAceptada[]
+  pais: Pais
+}): string {
+  const { convs, analysisRows, preformAt, quotes, pais } = params
+  const testSet = testContactSet()
+  const diaDe = (iso: string | null | undefined): string => {
+    const t = Date.parse(String(iso || ""))
+    if (!Number.isFinite(t)) return ""
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t))
+  }
+  // Últimos 30 días, todos presentes (cero cuando no hubo actividad).
+  const dias: string[] = []
+  for (let i = 29; i >= 0; i--) dias.push(diaDe(new Date(Date.now() - i * 864e5).toISOString()))
+  const idx = new Map(dias.map((d, i) => [d, i]))
+  const serie = () => new Array<number>(dias.length).fill(0)
+  const suma = (arr: number[], iso: string | null | undefined) => {
+    const i = idx.get(diaDe(iso))
+    if (i !== undefined) arr[i]++
+  }
+  const sConv = serie(), sCom = serie(), sPreform = serie(), sFormal = serie(), sAcept = serie(), sPag = serie()
+
+  const delPais = (tel: string) => paisDeTelefono(tel) === pais && !isTestContact(tel, testSet)
+  const inicioPorContacto = new Map<string, string>()
+  for (const c of convs) {
+    const tel = digits(c.contact)
+    if (!tel || !delPais(tel)) continue
+    if (!inicioPorContacto.has(tel)) inicioPorContacto.set(tel, String(c.started_at || ""))
+    suma(sConv, c.started_at)
+  }
+  for (const r of analysisRows) {
+    if (r.grupo !== "comercial") continue
+    const tel = digits(r.contact)
+    if (!tel || !delPais(tel)) continue
+    suma(sCom, inicioPorContacto.get(tel))
+  }
+  for (const [tel, at] of preformAt) {
+    if (delPais(tel)) suma(sPreform, at)
+  }
+  for (const q of quotes) {
+    suma(sFormal, q.Created_Time)
+    const pagada = Boolean(String(q.Onboarding_Link || "").trim())
+    const aceptada = pagada || String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
+    const fechaPago = q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time
+    if (aceptada) suma(sAcept, fechaPago)
+    if (pagada) suma(sPag, fechaPago)
+  }
+
+  const etiquetas = dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`)
+  const trazas = [
+    { nombre: "Conversaciones", datos: sConv, color: "#9aa0a8" },
+    { nombre: "Intención comercial", datos: sCom, color: "#00aff2" },
+    { nombre: "Precio mostrado (preform)", datos: sPreform, color: "#ffbb00" },
+    { nombre: "Formal enviada", datos: sFormal, color: "#e67e22" },
+    { nombre: "Aceptada", datos: sAcept, color: "#27ae60" },
+    { nombre: "Pagada", datos: sPag, color: "#1b5e20" },
+  ]
+  const data = trazas.map((t) => ({
+    x: etiquetas,
+    y: t.datos,
+    name: t.nombre,
+    type: "scatter",
+    mode: "lines+markers",
+    line: { color: t.color, width: 2 },
+    marker: { size: 5 },
+  }))
+  return `<div class="card"><h2>📈 Evolución diaria <span class="pct" style="font-weight:400">— últimos 30 días</span></h2>
+  <div id="evoDiaria" style="height:340px"></div>
+  <div class="sub" style="margin:6px 0 0">Conversaciones e intención comercial por día de inicio del chat; preform por el día en que se mostró el precio; formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Clic en la leyenda para ocultar/mostrar series.</div>
+  <script>
+    Plotly.newPlot("evoDiaria", ${JSON.stringify(data)}, {
+      margin: { l: 34, r: 12, t: 10, b: 46 },
+      legend: { orientation: "h", y: 1.18 },
+      font: { family: "Nunito, 'Segoe UI', sans-serif", size: 12, color: "#4e4e4e" },
+      xaxis: { tickangle: -45, fixedrange: true },
+      yaxis: { rangemode: "tozero", gridcolor: "#eef0f3", fixedrange: true },
+      plot_bgcolor: "#ffffff", paper_bgcolor: "#ffffff", hovermode: "x unified"
+    }, { displayModeBar: false, responsive: true });
+  </script>
+</div>`
+}
+
 function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
@@ -1874,6 +1963,7 @@ export async function GET(req: Request): Promise<Response> {
   let filasListado: FilaListado[] = []
   // Cola de gestión (vista principal) y sus insumos.
   let colaHtml = ""
+  let evolucionHtml = ""
   let casosGestion: CasoGestion[] = []
   let nGestionadosCola = 0
   let gestionados = new Map<string, string>()
@@ -1937,6 +2027,13 @@ export async function GET(req: Request): Promise<Response> {
         convs: convsListado,
         preformAt,
         analysisRows: allRows,
+        pais,
+      })
+      evolucionHtml = renderEvolucionDiaria({
+        convs: convsListado,
+        analysisRows: allRows,
+        preformAt,
+        quotes: cierre?.todasList || [],
         pais,
       })
     } catch (e) {
@@ -2390,6 +2487,7 @@ export async function GET(req: Request): Promise<Response> {
   </div>
 
   ${vista === "gestion" ? `
+  ${evolucionHtml}
   ${colaHtml}
   ` : `
   ${tasaCierreHtml}
