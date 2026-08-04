@@ -357,6 +357,22 @@ async function dealVivoDelContacto(contactId: string): Promise<{ id: string; sta
 }
 
 /**
+ * Reglas de re-contacto de Dave (doc Proceso de Gestión de Leads, 30-jul):
+ * encendible por env VICKY_REGLAS_RECONTACTO_ENABLED=on o por vic_kv
+ * `reglas_recontacto_enabled`=on (encendido/apagado al instante sin deploy,
+ * mismo patrón que traspaso_v2_enabled).
+ */
+async function reglasRecontactoActivas(): Promise<boolean> {
+  if (getEnv("VICKY_REGLAS_RECONTACTO_ENABLED") === "on") return true
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    return ((await getKvValue("reglas_recontacto_enabled")) || "").trim() === "on"
+  } catch {
+    return false
+  }
+}
+
+/**
  * Candado CRUZADO hito↔cotización (fix duplicados 04-ago: Lotus Pet, CYE
  * Clima, Spacio Creativo, Distribuidora MV, Artespectáculo). Hay DOS puertas
  * que crean deals para el mismo teléfono — este módulo (por hito de
@@ -899,7 +915,7 @@ export async function sincronizarHitoCrm(
     // Regla 3: "No Calificado" <3 meses → se re-trabaja el mismo lead;
     //          >3 meses → lead NUEVO en etapa 1 (excepción legítima al dedup).
     // Todo por el canal trasero: jamás toca la conversación.
-    if (getEnv("VICKY_REGLAS_RECONTACTO_ENABLED") === "on") {
+    if (await reglasRecontactoActivas()) {
       if (!lead.convertido && !esDeVicky) {
         if (/no calificado/i.test(lead.status)) {
           const tresMeses = 90 * 864e5
@@ -970,7 +986,7 @@ export async function sincronizarHitoCrm(
     }
     // Reglas 4/6 (doc David): deal en Cierre Perdido o en 8. Facturando →
     // el re-contacto RENACE como lead nuevo en etapa 1 (nueva oportunidad).
-    if (getEnv("VICKY_REGLAS_RECONTACTO_ENABLED") === "on") {
+    if (await reglasRecontactoActivas()) {
       const { h, api } = await zohoHeaders()
       const idParaEstado = dealId || lead.dealId
       let stageActual = ""
