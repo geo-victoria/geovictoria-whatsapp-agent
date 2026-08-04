@@ -152,9 +152,13 @@ async function notificarTraspasoLeadEmail(
   fono: string,
   H: Record<string, string>,
   api: string,
+  motivoHtml?: string,
 ): Promise<void> {
   try {
     const esChile = fono.startsWith("56")
+    const cuerpo =
+      motivoHtml ||
+      "el cliente dejó de responder y venció su tiempo de espera. <b>Llámalo en menos de 5 minutos</b> — la conversación completa está en las notas del lead, precio incluido si se le mostró."
     await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
       method: "POST",
       headers: H,
@@ -165,7 +169,7 @@ async function notificarTraspasoLeadEmail(
           to: [{ email: vendedorEmail }],
           ...(esChile ? { cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }] } : {}),
           subject: `Traspaso PTV: llamar YA a +${fono}`,
-          content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Vicky te traspasó esta conversación de WhatsApp: el cliente dejó de responder y venció su tiempo de espera. <b>Llámalo en menos de 5 minutos</b> — la conversación completa está en las notas del lead, precio incluido si se le mostró.</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p></body></html>`,
+          content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Vicky te traspasó esta conversación de WhatsApp: ${cuerpo}</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p></body></html>`,
           mail_format: "html",
         }],
       }),
@@ -481,6 +485,19 @@ async function traspasarATelemarketing(
         vendedor_nombre: owner.name || owner.email.split("@")[0],
       }),
     })
+
+    // 3b. Correo DIRECTO al vendedor (caso Paola Díaz 04-ago: la asignación
+    // por regla de Zoho no le avisa de forma visible al asignado — mismo
+    // hallazgo Anáhuac del 31-jul en los traspasos de nivel lead. Sin este
+    // correo, el ejecutivo no se entera de que Vicky le entregó el lead).
+    await notificarTraspasoLeadEmail(
+      leadId,
+      owner.email,
+      contact,
+      H,
+      api,
+      `no logró calificarla en 24 horas hábiles (${origen === "sin_calificar_24h_inbound" ? "el cliente escribió y no respondió la primera pregunta" : "outbound sin respuesta desde el primer toque"}). <b>El lead ahora es tuyo</b> — la transcripción está en sus notas.`,
+    ).catch(() => {})
 
     // 4. Presentación por PLANTILLA (regla dura: ejecutivo, teléfono y correo
     // son obligatorios — sin teléfono no sale, antes que presentar a medias).
