@@ -23,12 +23,13 @@ const LINEA_POR_PAIS: Record<string, string> = {
   mx: (process.env.BOTMAKER_CHANNEL_NUMBER_MX || "5215659778486").replace(/\D/g, ""),
 }
 
-/** País del contacto por prefijo telefónico; null si no es CL/CO/MX. */
-export function paisDeContacto(contact: string): "cl" | "co" | "mx" | null {
+/** País del contacto por prefijo telefónico; null si no es CL/CO/MX/PE. */
+export function paisDeContacto(contact: string): "cl" | "co" | "mx" | "pe" | null {
   const c = (contact || "").replace(/\D/g, "")
   if (c.startsWith("56")) return "cl"
   if (c.startsWith("57")) return "co"
   if (c.startsWith("52")) return "mx"
+  if (c.startsWith("51")) return "pe"
   return null
 }
 

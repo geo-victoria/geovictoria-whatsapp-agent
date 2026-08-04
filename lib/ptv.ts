@@ -42,13 +42,15 @@ const VENDEDORES_DEFAULT: Record<string, string> = {
   cl: "emujica@geovictoria.com:3525045000000211283",
   co: "agordillo@geovictoria.com:3525045000203758005",
   mx: "ysegura@geovictoria.com:3525045000308323003",
+  // Perú (04-ago): Mónica Mendoza, única ejecutiva — sin tómbola.
+  pe: "mmendozav@geovictoria.com:3525045000323383015",
 }
 
 export function ptvHabilitado(): boolean {
   return (process.env[FLAG] || "").trim() === "on"
 }
 
-export function vendedoresDePais(pais: "cl" | "co" | "mx"): Array<{ email: string; zohoId: string }> {
+export function vendedoresDePais(pais: "cl" | "co" | "mx" | "pe"): Array<{ email: string; zohoId: string }> {
   const raw =
     (process.env[`VICKY_PTV_VENDEDORES_${pais.toUpperCase()}`] || "").trim() ||
     VENDEDORES_DEFAULT[pais]
@@ -118,7 +120,7 @@ export function debeTraspasar(params: {
   referenciaRelojAt: Date
   clienteRespondioDespues: boolean
   precioMostrado: boolean
-  pais: "cl" | "co" | "mx"
+  pais: "cl" | "co" | "mx" | "pe"
   ahora: Date
   feriados?: Set<string>
   compromisoAt?: Date | null
@@ -143,7 +145,7 @@ export function debeTraspasar(params: {
  * Vicky). SIEMPRE con los datos de contacto del vendedor cuando se conocen
  * (Lalo 31-jul): el cliente debe poder escribirle o llamarlo directo. */
 export function mensajePresentacion(
-  pais: "cl" | "co" | "mx",
+  pais: "cl" | "co" | "mx" | "pe",
   nombreVendedor: string,
   contacto?: { email?: string; whatsapp?: string },
 ): string {
@@ -155,13 +157,15 @@ export function mensajePresentacion(
   const datos = lineas.length ? `.\n\n${lineas.join("\n")}\n\n` : ". "
   if (pais === "co") return `¡Hola! ${base}${datos}Cualquier cosa igual me puedes escribir por aquí 🙌`
   if (pais === "mx") return `¡Hola! ${base}${datos}Por aquí sigo atenta a lo que necesites 🙌`
+  if (pais === "pe") return `¡Hola! ${base}${datos}Cualquier consulta me puedes escribir por aquí 🙌`
   return `¡Hola! ${base}${datos}Cualquier cosa me escribes por aquí 🙌`
 }
 
 /** Pregunta del chequeo de calidad (9 h hábiles post-traspaso). */
-export function mensajeChequeo(pais: "cl" | "co" | "mx", nombreVendedor: string): string {
+export function mensajeChequeo(pais: "cl" | "co" | "mx" | "pe", nombreVendedor: string): string {
   if (pais === "co") return `¡Hola! Soy Vicky otra vez 😊 ¿Cómo te fue con ${nombreVendedor}? ¿Pudieron hablar y resolver tus dudas?`
   if (pais === "mx") return `¡Hola! Soy Vicky de nuevo 😊 ¿Cómo te fue con ${nombreVendedor}? ¿Ya pudieron platicar y resolver tus dudas?`
+  if (pais === "pe") return `¡Hola! Soy Vicky de nuevo 😊 ¿Cómo te fue con ${nombreVendedor}? ¿Pudieron conversar y resolver tus dudas?`
   return `¡Hola! Soy Vicky de nuevo 😊 ¿Cómo te fue con ${nombreVendedor}? ¿Alcanzaron a hablar y resolver tus dudas?`
 }
 
@@ -230,7 +234,7 @@ export function debeTraspasarEtapa(params: {
   precioAt: Date | null
   formalAt: Date | null
   aceptada: boolean
-  pais: "cl" | "co" | "mx"
+  pais: "cl" | "co" | "mx" | "pe"
   ahora: Date
   feriados?: Set<string>
   compromisoAt?: Date | null
