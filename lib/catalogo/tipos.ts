@@ -92,6 +92,15 @@ export type Hardware = {
   modalidadesDisponibles: ModalidadHardware[]
   /** Cantidad sugerida por defecto para empresas chicas. */
   cantidadSugerida: number
+  /**
+   * Si es `false`, el dispositivo NO requiere visita técnica de instalación
+   * on-site (ej. un huellero USB que el cliente conecta a su PC — plug and
+   * play). En ese caso la cotización NO cobra el servicio `instalacion_reloj`
+   * (el envío sí se mantiene: el equipo se despacha igual). Si se omite o es
+   * `true`, el dispositivo requiere instalación on-site (comportamiento del
+   * reloj de pared), y la instalación se cobra salvo que el cliente auto-instale.
+   */
+  requiereInstalacionOnsite?: boolean
   /** Si es `true`, Vicky puede ofrecerlo. */
   disponibleParaVicky: boolean
 }

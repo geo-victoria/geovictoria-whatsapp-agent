@@ -494,6 +494,14 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
     const modalidadUniforme: "arriendo" | "venta" | null =
       modalidadesHw.size === 1 ? [...modalidadesHw][0] : null
 
+    // Hardware plug-and-play (huellero USB): no requiere visita técnica de
+    // instalación on-site. Si TODO el hardware de la cotización es de este tipo,
+    // el servicio de instalación no se cobra (el envío sí se mantiene). Mismo
+    // criterio que cotizar_referencial — cero drift entre estimado y formal.
+    const soloHardwareSinInstalacion =
+      hardware.length > 0 &&
+      hardware.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
+
     const serviciosAplicables = getServiciosAplicablesConHardware()
     for (const punto of puntosInstalacion) {
       const clasificacion = clasificarUbicacion(punto.ubicacion)
@@ -519,11 +527,13 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
       const esRM = clasificacion.tipo === "RM"
       const zonaPunto = clasificacion.zonaInstalacion
       for (const servicio of serviciosAplicables) {
-        // Instalación auto-gestionada por el cliente: no se cobra (solo el envío
-        // se mantiene). Se comunican las advertencias.
-        if (punto.autoInstalada && servicio.omitirSiAutoInstalada) {
-          for (const adv of servicio.advertenciasAutoInstalacion) {
-            advertencias.push(`Auto-instalación en ${punto.ubicacion}: ${adv}`)
+        // Instalación auto-gestionada por el cliente, o hardware plug-and-play
+        // (huellero USB): no se cobra la instalación (solo el envío se mantiene).
+        if ((punto.autoInstalada || soloHardwareSinInstalacion) && servicio.omitirSiAutoInstalada) {
+          if (punto.autoInstalada) {
+            for (const adv of servicio.advertenciasAutoInstalacion) {
+              advertencias.push(`Auto-instalación en ${punto.ubicacion}: ${adv}`)
+            }
           }
           continue
         }

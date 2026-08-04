@@ -394,6 +394,14 @@ export async function cotizarReferencial(args: {
     const modalidadUniforme: "arriendo" | "venta" | null =
       modalidadesHw.size === 1 ? [...modalidadesHw][0] : null
 
+    // Hardware plug-and-play (huellero USB): no requiere visita técnica de
+    // instalación on-site. Si TODO el hardware de la cotización es de este tipo,
+    // el servicio de instalación no se cobra (el envío sí se mantiene: el equipo
+    // se despacha igual). Un reloj de pared mezclado reactiva la instalación.
+    const soloHardwareSinInstalacion =
+      hardware.length > 0 &&
+      hardware.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
+
     const serviciosAplicables = getServiciosAplicablesConHardware()
     for (const punto of puntosInstalacion) {
       const clasificacion = clasificarUbicacion(punto.ubicacion)
@@ -418,9 +426,11 @@ export async function cotizarReferencial(args: {
 
       const zonaPunto = clasificacion.zonaInstalacion
       for (const servicio of serviciosAplicables) {
-        if (punto.autoInstalada && servicio.omitirSiAutoInstalada) {
-          for (const adv of servicio.advertenciasAutoInstalacion) {
-            advertencias.push(`Auto-instalación en ${punto.ubicacion}: ${adv}`)
+        if ((punto.autoInstalada || soloHardwareSinInstalacion) && servicio.omitirSiAutoInstalada) {
+          if (punto.autoInstalada) {
+            for (const adv of servicio.advertenciasAutoInstalacion) {
+              advertencias.push(`Auto-instalación en ${punto.ubicacion}: ${adv}`)
+            }
           }
           continue
         }
