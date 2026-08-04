@@ -1447,17 +1447,26 @@ function renderEvolucionDiaria(params: {
   preformAt: Map<string, string>
   quotes: RawAceptada[]
   pais: Pais
+  rango: RangoFechas | null
 }): string {
-  const { convs, analysisRows, preformAt, quotes, pais } = params
+  const { convs, analysisRows, preformAt, quotes, pais, rango } = params
   const testSet = testContactSet()
   const diaDe = (iso: string | null | undefined): string => {
     const t = Date.parse(String(iso || ""))
     if (!Number.isFinite(t)) return ""
     return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t))
   }
-  // Últimos 30 días, todos presentes (cero cuando no hubo actividad).
+  // El gráfico sigue el filtro Desde–Hasta; sin filtro, últimos 30 días.
+  // Todos los días del rango presentes (cero cuando no hubo actividad).
+  const DIA_MS = 864e5
+  const finMs = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
+  const inicioMs = rango && rango.desdeMs > 0 ? rango.desdeMs : finMs - 29 * DIA_MS
+  const nDias = Math.min(366, Math.max(1, Math.round((finMs - inicioMs) / DIA_MS) + 1))
   const dias: string[] = []
-  for (let i = 29; i >= 0; i--) dias.push(diaDe(new Date(Date.now() - i * 864e5).toISOString()))
+  for (let i = nDias - 1; i >= 0; i--) {
+    const d = diaDe(new Date(finMs - i * DIA_MS).toISOString())
+    if (d && dias[dias.length - 1] !== d) dias.push(d)
+  }
   const idx = new Map(dias.map((d, i) => [d, i]))
   const serie = () => new Array<number>(dias.length).fill(0)
   const suma = (arr: number[], iso: string | null | undefined) => {
@@ -1510,15 +1519,15 @@ function renderEvolucionDiaria(params: {
     line: { color: t.color, width: 2 },
     marker: { size: 5 },
   }))
-  return `<div class="card"><h2>📈 Evolución diaria <span class="pct" style="font-weight:400">— últimos 30 días</span></h2>
+  return `<div class="card"><h2>📈 Evolución diaria <span class="pct" style="font-weight:400">— ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span></h2>
   <div id="evoDiaria" style="height:340px"></div>
-  <div class="sub" style="margin:6px 0 0">Conversaciones e intención comercial por día de inicio del chat; preform por el día en que se mostró el precio; formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Clic en la leyenda para ocultar/mostrar series.</div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). Conversaciones e intención comercial por día de inicio del chat; preform por el día en que se mostró el precio; formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Clic en la leyenda para ocultar/mostrar series.</div>
   <script>
     Plotly.newPlot("evoDiaria", ${JSON.stringify(data)}, {
       margin: { l: 34, r: 12, t: 10, b: 46 },
       legend: { orientation: "h", y: 1.18 },
       font: { family: "Nunito, 'Segoe UI', sans-serif", size: 12, color: "#4e4e4e" },
-      xaxis: { tickangle: -45, fixedrange: true },
+      xaxis: { type: "category", tickangle: -45, fixedrange: true },
       yaxis: { rangemode: "tozero", gridcolor: "#eef0f3", fixedrange: true },
       plot_bgcolor: "#ffffff", paper_bgcolor: "#ffffff", hovermode: "x unified"
     }, { displayModeBar: false, responsive: true });
@@ -2035,6 +2044,7 @@ export async function GET(req: Request): Promise<Response> {
         preformAt,
         quotes: cierre?.todasList || [],
         pais,
+        rango,
       })
     } catch (e) {
       console.warn("[vic-funnel] listado comercial falló:", e instanceof Error ? e.message : e)
