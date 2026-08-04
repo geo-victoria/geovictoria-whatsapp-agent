@@ -357,6 +357,45 @@ async function dealVivoDelContacto(contactId: string): Promise<{ id: string; sta
 }
 
 /**
+ * Candado CRUZADO hito↔cotización (fix duplicados 04-ago: Lotus Pet, CYE
+ * Clima, Spacio Creativo, Distribuidora MV, Artespectáculo). Hay DOS puertas
+ * que crean deals para el mismo teléfono — este módulo (por hito de
+ * conversación) y create-from-vicky en el cotizador (por emisión de la
+ * formal) — y no se veían entre sí: el índice de búsqueda de Zoho tarda en
+ * reflejar registros de hace segundos, así que cada puerta creaba su propio
+ * deal (11 segundos de diferencia en Lotus Pet). Ambas escriben en vic_kv
+ * `deal_fono_<fono>` APENAS su deal existe y consultan ANTES de crear: la
+ * que llega segunda REUSA ese deal (le sube el piso) en vez de duplicarlo.
+ * TTL 6 h — pasada la ventana, la búsqueda normal de Zoho ya ve todo.
+ */
+const DEAL_KV_TTL_MS = 6 * 60 * 60 * 1000
+
+async function dealActivoEnKv(fono: string): Promise<string | null> {
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const raw = await getKvValue(`deal_fono_${fono}`)
+    if (!raw) return null
+    const v = JSON.parse(raw) as { at?: string; dealId?: string }
+    if (!v?.dealId || !v.at || Date.now() - Date.parse(v.at) > DEAL_KV_TTL_MS) return null
+    return String(v.dealId)
+  } catch {
+    return null
+  }
+}
+
+async function registrarDealEnKv(fono: string, dealId: string, origen: string): Promise<void> {
+  try {
+    const { setKvValue } = await import("./supabase-persistence-v3")
+    await setKvValue(
+      `deal_fono_${fono}`,
+      JSON.stringify({ at: new Date().toISOString(), dealId, origen }),
+    )
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
  * Enriquecimiento ADITIVO del lead con los datos frescos de la conversación:
  * solo campos vacíos o placeholder — jamás pisa un dato existente (gestión de
  * SDR incluida). Devuelve el lead con los valores efectivos post-update para
@@ -592,6 +631,7 @@ async function convertirConDeal(
     ])
     const heredaDuenoHumano = Boolean(lead.ownerId && !INTERINOS.has(lead.ownerId))
     if (!heredaDuenoHumano) await aplicarTombolaDeals(String(fila.Deals.id), territorio)
+    await registrarDealEnKv(contact.replace(/\D/g, ""), String(fila.Deals.id), "hito")
     return String(fila.Deals.id)
   }
   console.warn(`[crm-hitos] convert de ${lead.id} falló: ${JSON.stringify(r).slice(0, 250)}`)
@@ -784,6 +824,16 @@ export async function sincronizarHitoCrm(
     }
 
     if (res.tipo === "nada") {
+      // Candado cruzado: si la OTRA puerta (emisión de la formal) acaba de
+      // crear lead+deal para este fono, la búsqueda de Zoho aún no los ve —
+      // crear acá duplicaba lead Y deal. Se reusa el deal y solo sube el piso.
+      const dealCruzado = await dealActivoEnKv(clean)
+      if (dealCruzado) {
+        console.log(`[crm-hitos] ${clean}: deal ${dealCruzado} recién creado por la otra puerta (candado kv) — hito "${hito}" solo sube el piso, sin lead ni deal nuevos`)
+        await avanzarDealHasta(dealCruzado, piso)
+        await actualizarNotaTranscripcion(dealCruzado, clean)
+        return
+      }
       if (opts.noCrear) {
         console.log(`[crm-hitos] ${clean}: la tool crea su propio lead — no se duplica (se reconcilia en el próximo barrido)`)
         return
@@ -895,6 +945,16 @@ export async function sincronizarHitoCrm(
       }
       if (!tieneIdentidadComercial(lead, datos)) {
         console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${lead.id} espera identidad para convertir (deal pendiente)`)
+        return
+      }
+      // Candado cruzado: la emisión pudo haber creado SU deal hace segundos
+      // (con OTRO lead convertido). Convertir este lead con un deal propio
+      // duplicaba — se reusa el existente y este lead queda solo con status.
+      const dealCruzado = await dealActivoEnKv(clean)
+      if (dealCruzado) {
+        console.log(`[crm-hitos] ${clean}: deal ${dealCruzado} recién creado por la otra puerta (candado kv) — hito "${hito}" sube el piso, lead ${lead.id} no convierte deal propio`)
+        await avanzarDealHasta(dealCruzado, piso)
+        await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
       const dealNuevo = await convertirConDeal(lead, clean, piso)
