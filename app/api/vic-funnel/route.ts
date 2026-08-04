@@ -76,6 +76,10 @@ type VentaCerrada = {
   inicioAprox: boolean
   pagoIso: string
   montoClp: number
+  /** Desglose del pago inicial (pedido Lalo 04-ago): fee que queda como
+   * recurrencia mensual vs pagos por una sola vez (reloj/envío/instalación). */
+  recurrenteClp: number
+  unicoClp: number
   usuarios: string
   descuentoPct: number
   /** id de la conversación de WhatsApp, para el link "ver conversación". */
@@ -120,29 +124,35 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
     if (cached) {
       try {
         const venta = JSON.parse(cached) as VentaCerrada
-        // Ventas cacheadas antes de que existiera el link a la conversación:
-        // se les completa el convId una vez y se re-cachean.
-        if (!venta.convId) {
-          venta.convId = ""
-          const fonoCache = digits(String(q.Tel_fono_Contacto || ""))
-          if (fonoCache) {
-            const r = await fetch(
-              `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${fonoCache}&select=id&order=started_at.asc&limit=1`,
-              { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
-            ).catch(() => null)
-            const rows = r?.ok ? ((await r.json().catch(() => [])) as Array<{ id?: string }>) : []
-            venta.convId = String(rows[0]?.id || "")
-            if (venta.convId) await kvSet(cacheKey, JSON.stringify(venta))
+        // Caché de antes del desglose único/recurrente (04-ago): se salta el
+        // push para recomputarla una vez con los campos nuevos.
+        if (typeof venta.recurrenteClp === "number" && typeof venta.unicoClp === "number") {
+          // Ventas cacheadas antes de que existiera el link a la conversación:
+          // se les completa el convId una vez y se re-cachean.
+          if (!venta.convId) {
+            venta.convId = ""
+            const fonoCache = digits(String(q.Tel_fono_Contacto || ""))
+            if (fonoCache) {
+              const r = await fetch(
+                `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${fonoCache}&select=id&order=started_at.asc&limit=1`,
+                { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+              ).catch(() => null)
+              const rows = r?.ok ? ((await r.json().catch(() => [])) as Array<{ id?: string }>) : []
+              venta.convId = String(rows[0]?.id || "")
+              if (venta.convId) await kvSet(cacheKey, JSON.stringify(venta))
+            }
           }
+          ventas.push(venta)
+          continue
         }
-        ventas.push(venta)
-        continue
       } catch {
         // caché corrupta → recomputar
       }
     }
     // Monto: ítems del subform (getRecord completo, 1 sola vez por venta).
     let montoClp = 0
+    let recurrenteClp = 0
+    let unicoClp = 0
     let usuarios = "—"
     let descuentoPct = 0
     if (token) {
@@ -178,9 +188,13 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
         }
         const recurrente = items.filter((i) => i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0)
         const unico = items.filter((i) => !i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0)
-        montoClp = Math.round((recurrente * (1 - pct / 100) + unico) * 1.19)
+        recurrenteClp = Math.round(recurrente * (1 - pct / 100) * 1.19)
+        unicoClp = Math.round(unico * 1.19)
+        montoClp = recurrenteClp + unicoClp
       } catch {
         montoClp = 0
+        recurrenteClp = 0
+        unicoClp = 0
       }
     }
     // Inicio de conversación: started_at por teléfono; fallback: creación de
@@ -215,6 +229,8 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
       inicioAprox,
       pagoIso,
       montoClp,
+      recurrenteClp,
+      unicoClp,
       usuarios,
       descuentoPct,
       convId,
@@ -361,21 +377,23 @@ function renderVentasCerradas(ventas: VentaCerrada[], key: string): string {
         <td>${fmtSantiago(v.pagoIso)}</td>
         <td style="text-align:center">${v.usuarios || "—"}</td>
         <td style="text-align:center">${v.descuentoPct > 0 ? `${v.descuentoPct}%` : "—"}</td>
-        <td style="text-align:right">${v.montoClp > 0 ? `$${v.montoClp.toLocaleString("es-CL")}` : "—"}</td>
+        <td style="text-align:right">${v.unicoClp > 0 ? `$${v.unicoClp.toLocaleString("es-CL")}` : "—"}</td>
+        <td style="text-align:right">${v.recurrenteClp > 0 ? `$${v.recurrenteClp.toLocaleString("es-CL")}/mes` : "—"}</td>
         <td style="text-align:right"><b>${fmtDuracion(v.inicioIso, v.pagoIso)}</b></td>
       </tr>`,
     )
     .join("")
-  const totalMonto = ventas.reduce((a, v) => a + (v.montoClp || 0), 0)
-  return `<div class="card"><h2>Ventas cerradas <span class="pct" style="font-weight:400">— ${ventas.length} pagadas · $${totalMonto.toLocaleString("es-CL")} en pagos iniciales</span></h2>
+  const totalUnico = ventas.reduce((a, v) => a + (v.unicoClp || 0), 0)
+  const totalRecurrente = ventas.reduce((a, v) => a + (v.recurrenteClp || 0), 0)
+  return `<div class="card"><h2>Ventas cerradas <span class="pct" style="font-weight:400">— ${ventas.length} pagadas · $${totalUnico.toLocaleString("es-CL")} en pagos únicos · $${totalRecurrente.toLocaleString("es-CL")}/mes de recurrencia</span></h2>
   ${tarjetasTiempos}
   <div style="overflow-x:auto"><table class="tabla-ventas" style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;border-bottom:2px solid #e3e7ea">
-      <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:center">Usuarios</th><th style="padding:6px 8px;text-align:center">Dcto.</th><th style="padding:6px 8px;text-align:right">Monto</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
+      <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:center">Usuarios</th><th style="padding:6px 8px;text-align:center">Dcto.</th><th style="padding:6px 8px;text-align:right">Pago único</th><th style="padding:6px 8px;text-align:right">Recurrencia</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
     </tr></thead>
     <tbody>${filas}</tbody>
   </table></div>
-  <div class="sub" style="margin-top:8px">Monto = pago inicial (primer mes + pagos únicos, con descuento e IVA), calculado desde los ítems registrados en Zoho. Fechas en hora de Chile. * = sin conversación registrada: se usa la fecha de emisión de la cotización como inicio.</div>
+  <div class="sub" style="margin-top:8px">Pago único = compra/envío/instalación del reloj (con IVA), se paga una sola vez. Recurrencia = fee mensual de módulos y arriendos (con descuento e IVA); el pago inicial del cliente suma ambos. Calculado desde los ítems registrados en Zoho. Fechas en hora de Chile. * = sin conversación registrada: se usa la fecha de emisión de la cotización como inicio.</div>
 </div>`
 }
 
