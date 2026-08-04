@@ -1501,7 +1501,6 @@ function renderEvolucionDiaria(params: {
     if (pagada) suma(sPag, fechaPago)
   }
 
-  const etiquetas = dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`)
   const trazas = [
     { nombre: "Conversaciones", datos: sConv, color: "#9aa0a8" },
     { nombre: "Intención comercial", datos: sCom, color: "#00aff2" },
@@ -1510,27 +1509,61 @@ function renderEvolucionDiaria(params: {
     { nombre: "Aceptada", datos: sAcept, color: "#27ae60" },
     { nombre: "Pagada", datos: sPag, color: "#1b5e20" },
   ]
-  const data = trazas.map((t) => ({
-    x: etiquetas,
-    y: t.datos,
-    name: t.nombre,
-    type: "scatter",
-    mode: "lines+markers",
-    line: { color: t.color, width: 2 },
-    marker: { size: 5 },
-  }))
-  return `<div class="card"><h2>📈 Evolución diaria <span class="pct" style="font-weight:400">— ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span></h2>
+  // Agrupación según el largo del rango (pedido Lalo 04-ago): >1 semana
+  // ofrece Día/Semana; ≥2 meses suma la opción Mes. La agregación corre en el
+  // navegador sobre la serie diaria ya embebida.
+  const btnCss = "border:1px solid #d0d5db;border-radius:6px;padding:3px 10px;margin-left:4px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;background:#fff;color:#4e4e4e"
+  const selector = dias.length > 7
+    ? `<span style="float:right;font-weight:400"><button class="evoBtn" data-modo="dia" style="${btnCss}">Día</button><button class="evoBtn" data-modo="semana" style="${btnCss}">Semana</button>${dias.length >= 60 ? `<button class="evoBtn" data-modo="mes" style="${btnCss}">Mes</button>` : ""}</span>`
+    : ""
+  return `<div class="card"><h2>📈 Evolución <span class="pct" style="font-weight:400">— ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span>${selector}</h2>
   <div id="evoDiaria" style="height:340px"></div>
-  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). Conversaciones e intención comercial por día de inicio del chat; preform por el día en que se mostró el precio; formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Clic en la leyenda para ocultar/mostrar series.</div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). Conversaciones e intención comercial por día de inicio del chat; preform por el día en que se mostró el precio; formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
   <script>
-    Plotly.newPlot("evoDiaria", ${JSON.stringify(data)}, {
-      margin: { l: 34, r: 12, t: 10, b: 46 },
-      legend: { orientation: "h", y: 1.18 },
-      font: { family: "Nunito, 'Segoe UI', sans-serif", size: 12, color: "#4e4e4e" },
-      xaxis: { type: "category", tickangle: -45, fixedrange: true },
-      yaxis: { rangemode: "tozero", gridcolor: "#eef0f3", fixedrange: true },
-      plot_bgcolor: "#ffffff", paper_bgcolor: "#ffffff", hovermode: "x unified"
-    }, { displayModeBar: false, responsive: true });
+    (function () {
+      var DIAS = ${JSON.stringify(dias)};
+      var SERIES = ${JSON.stringify(trazas.map((t) => ({ n: t.nombre, c: t.color, y: t.datos })))};
+      var MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+      var LAYOUT = {
+        margin: { l: 34, r: 12, t: 10, b: 46 },
+        legend: { orientation: "h", y: 1.18 },
+        font: { family: "Nunito, 'Segoe UI', sans-serif", size: 12, color: "#4e4e4e" },
+        xaxis: { type: "category", tickangle: -45, fixedrange: true },
+        yaxis: { rangemode: "tozero", gridcolor: "#eef0f3", fixedrange: true },
+        plot_bgcolor: "#ffffff", paper_bgcolor: "#ffffff", hovermode: "x unified"
+      };
+      var CONFIG = { displayModeBar: false, responsive: true };
+      function claveDe(d, modo) {
+        if (modo === "mes") return MESES[parseInt(d.slice(5, 7), 10) - 1] + " " + d.slice(2, 4);
+        if (modo === "semana") {
+          var t = new Date(d + "T00:00:00Z");
+          t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+          var i = t.toISOString();
+          return "sem " + i.slice(8, 10) + "-" + i.slice(5, 7);
+        }
+        return d.slice(8, 10) + "-" + d.slice(5, 7);
+      }
+      function pintar(modo) {
+        var x = [], pos = {};
+        DIAS.forEach(function (d) { var k = claveDe(d, modo); if (!(k in pos)) { pos[k] = x.length; x.push(k); } });
+        var data = SERIES.map(function (s) {
+          var y = x.map(function () { return 0; });
+          DIAS.forEach(function (d, i) { y[pos[claveDe(d, modo)]] += s.y[i]; });
+          return { x: x, y: y, name: s.n, type: "scatter", mode: "lines+markers", line: { color: s.c, width: 2 }, marker: { size: 5 } };
+        });
+        Plotly.react("evoDiaria", data, LAYOUT, CONFIG);
+        document.querySelectorAll(".evoBtn").forEach(function (b) {
+          var act = b.dataset.modo === modo;
+          b.style.background = act ? "#ffbb00" : "#fff";
+          b.style.color = act ? "#fff" : "#4e4e4e";
+          b.style.borderColor = act ? "#ffbb00" : "#d0d5db";
+        });
+      }
+      document.querySelectorAll(".evoBtn").forEach(function (b) {
+        b.addEventListener("click", function () { pintar(this.dataset.modo); });
+      });
+      pintar("dia");
+    })();
   </script>
 </div>`
 }
