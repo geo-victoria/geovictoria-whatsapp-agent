@@ -172,6 +172,34 @@ async function buscarCotizacionPorNumero(
   }
 }
 
+/** Comprobante recibido → la cotización pasa a "Pagada" (decisión Lalo
+ * 04-ago, opción 1): el estado dispara los workflows de Zoho amarrados a
+ * "Pagada". Riesgo asumido y documentado en la nota: es pago DECLARADO — si
+ * el abono no aparece en el banco, cobranza revierte el estado a mano. */
+async function marcarCotizacionPagada(quoteId: string): Promise<boolean> {
+  try {
+    const token = await getZohoAccessToken()
+    const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${token}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ id: quoteId, Estado_Cotizacion: "Pagada" }] }),
+    })
+    if (!res.ok) {
+      console.warn(`[comprobante] Estado→Pagada falló (${res.status}) quote=${quoteId}`)
+      return false
+    }
+    console.log(`[comprobante] quote=${quoteId} Estado_Cotizacion → Pagada`)
+    return true
+  } catch (e) {
+    console.warn("[comprobante] Estado→Pagada lanzó:", e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
 async function crearNotaEnCotizacion(quoteId: string, contenido: string): Promise<boolean> {
   try {
     const token = await getZohoAccessToken()
@@ -281,7 +309,9 @@ export async function registrarComprobanteTransferencia(
     habilitaBlanda
       ? "⚠️ VALIDACIÓN BLANDA: el comprobante era legible, así que al cliente YA se le entregó el acceso al onboarding sin esperar la verificación bancaria. Si el abono NO aparece, hay que cortar el onboarding a mano."
       : "",
-    "ACCIÓN: verificar el abono en el banco y confirmar el pago (la cotización NO fue marcada como pagada automáticamente).",
+    declarado
+      ? "ACCIÓN: verificar el abono en el banco y confirmar el pago (pago DECLARADO sin comprobante — el estado de la cotización NO fue modificado)."
+      : "La cotización fue marcada como PAGADA automáticamente al recibir el comprobante (decisión Lalo 04-ago). ACCIÓN: verificar el abono en el banco; si NO aparece, revertir el estado a mano.",
   ].filter(Boolean)
   const contenidoNota = lineas.join("\n")
 
@@ -355,6 +385,9 @@ export async function registrarComprobanteTransferencia(
         ? "El comprobante llegó desde un número de WhatsApp DISTINTO al de la cotización (se asoció por el número que mencionó el cliente). Verificar con más atención."
         : undefined,
     }).catch(() => {})
+    // Comprobante real recibido → Estado_Cotizacion "Pagada" (opción 1, Lalo
+    // 04-ago): dispara los workflows de Zoho amarrados al estado. Best-effort.
+    await marcarCotizacionPagada(pointer.quoteId).catch(() => false)
   }
 
   // 3. Confirmación al cliente.
