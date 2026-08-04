@@ -82,7 +82,9 @@ async function feriadosDePais(pais: string): Promise<Set<string>> {
   const filas = await supa<Record<string, unknown>>(`vic_holidays?select=*&limit=500`)
   const set = new Set<string>()
   for (const f of filas) {
-    const fecha = String(f.date || f.fecha || f.holiday_date || "").slice(0, 10)
+    // La columna real de vic_holidays es `d` (hallazgo 04-ago: con los otros
+    // nombres el set salía vacío y los feriados JAMÁS se aplicaban).
+    const fecha = String(f.d || f.date || f.fecha || f.holiday_date || "").slice(0, 10)
     const p = String(f.country || f.pais || "").toLowerCase()
     if (fecha && (!p || p === pais)) set.add(fecha)
   }
