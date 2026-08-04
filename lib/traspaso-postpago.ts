@@ -36,21 +36,62 @@ export type ResultadoTraspaso = {
 }
 
 /**
- * VENTA 100% VICKY (Lalo, 31-jul, caso D'amore): si el cliente PAGÓ sin que
- * ningún humano interviniera en la venta (sin traspaso PTV activo), el deal
- * y la cotización se asignan a VICTORIA LUNA — no a la tómbola: el mérito es
- * del canal autónomo y Victoria decide la bajada a su equipo. Devuelve true
- * si la venta fue autónoma (el mensaje post-pago entonces NO presenta a
- * ningún ejecutivo). Best-effort: cualquier falla deja todo como estaba.
+ * VENTA 100% VICKY (Lalo 31-jul, caso D'amore; destino actualizado 04-ago):
+ * si el cliente PAGÓ sin que ningún humano interviniera en la venta (sin
+ * traspaso PTV activo), TODOS los registros — cotización, deal, cuenta y
+ * contacto — se asignan al dueño de ventas autónomas: hoy ALEYDIS ARAQUE,
+ * configurable por vic_kv `owner_venta_autonoma` (gana sobre el env). El
+ * mensaje post-pago ahora SÍ la presenta (decisión Lalo 04-ago — ella hace
+ * la gestión post-venta). Best-effort: cualquier falla deja todo como estaba.
  */
-const OWNER_VENTA_AUTONOMA = (process.env.VICKY_OWNER_VENTA_AUTONOMA || "3525045000640682899").trim()
+const OWNER_VENTA_AUTONOMA_DEFAULT = "3525045000583802005" // Aleydis Araque
 
-async function asignarVentaAutonoma(contact: string, quoteId: string): Promise<boolean> {
+async function ownerVentaAutonoma(): Promise<string> {
+  const kv = (await getKvValue("owner_venta_autonoma").catch(() => null)) || ""
+  return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT
+}
+
+export type EjecutivoAutonoma = { nombre: string; email: string; telefono: string }
+
+/** Nombre/correo/teléfono del dueño de ventas autónomas desde su ficha de
+ * usuario en Zoho — si cambia el dueño en vic_kv, la presentación se adapta
+ * sola. Fallback: Aleydis con sus datos verificados (04-ago). */
+async function datosOwnerAutonoma(
+  ownerId: string,
+  H: Record<string, string>,
+  api: string,
+): Promise<EjecutivoAutonoma> {
+  const fallback: EjecutivoAutonoma = {
+    nombre: "Aleydis Araque",
+    email: "aaraque@geovictoria.com",
+    telefono: "+56 9 8291 6868",
+  }
   try {
-    if (!OWNER_VENTA_AUTONOMA) return false
-    // SOLO CHILE (Lalo 31-jul): CO y MX siguen con sus reglas antiguas — el
-    // post-pago presenta al ejecutivo del país, sin reasignar a Victoria.
-    if (!contact.startsWith("56")) return false
+    const r = await fetch(`${api}/crm/v3/users/${ownerId}`, { headers: H, cache: "no-store" })
+    if (!r.ok) return fallback
+    const u = ((await r.json().catch(() => ({}))) as {
+      users?: Array<{ full_name?: string; email?: string; phone?: string; mobile?: string }>
+    }).users?.[0]
+    if (!u?.email) return fallback
+    return {
+      nombre: (u.full_name || "").trim() || u.email.split("@")[0],
+      email: u.email,
+      telefono: (u.phone || u.mobile || "").trim(),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+async function asignarVentaAutonoma(
+  contact: string,
+  quoteId: string,
+): Promise<{ autonoma: boolean; ejecutivo?: EjecutivoAutonoma }> {
+  try {
+    const owner = await ownerVentaAutonoma()
+    if (!owner) return { autonoma: false }
+    // SOLO CHILE (Lalo 31-jul): CO y MX siguen con sus reglas antiguas.
+    if (!contact.startsWith("56")) return { autonoma: false }
     // ¿Intervino un humano? Un traspaso PTV activo significa que un vendedor
     // fue presentado y estaba encima de la venta → esa venta es suya, no
     // autónoma, y su asignación no se toca.
@@ -62,19 +103,44 @@ async function asignarVentaAutonoma(contact: string, quoteId: string): Promise<b
         { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
       )
       const filas = r.ok ? ((await r.json().catch(() => [])) as unknown[]) : []
-      if (Array.isArray(filas) && filas.length > 0) return false
+      if (Array.isArray(filas) && filas.length > 0) return { autonoma: false }
     }
     const { getZohoAccessToken } = await import("./zoho-token")
     const token = await getZohoAccessToken()
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    // La cotización, y de ella la cuenta y el contacto asociados ("todos los
+    // registros", Lalo 04-ago). El lead convertido no se toca: Zoho no
+    // permite editar leads ya convertidos.
+    const gQuote = await fetch(
+      `${api}/crm/v3/${quoteModule}/${quoteId}?fields=Cuenta_Asociada,Contacto_Asociado`,
+      { headers: H, cache: "no-store" },
+    )
+    const filaQuote = gQuote.ok
+      ? ((await gQuote.json().catch(() => ({}))) as {
+          data?: Array<{ Cuenta_Asociada?: { id?: string } | null; Contacto_Asociado?: { id?: string } | null }>
+        }).data?.[0]
+      : undefined
     await fetch(`${api}/crm/v3/${quoteModule}`, {
       method: "PUT",
       headers: H,
       cache: "no-store",
-      body: JSON.stringify({ data: [{ id: quoteId, Owner: { id: OWNER_VENTA_AUTONOMA } }] }),
+      body: JSON.stringify({ data: [{ id: quoteId, Owner: { id: owner } }] }),
     }).catch(() => {})
+    const skip = { skip_feature_execution: [{ name: "assignment_rules" }] }
+    if (filaQuote?.Cuenta_Asociada?.id) {
+      await fetch(`${api}/crm/v3/Accounts`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({ data: [{ id: filaQuote.Cuenta_Asociada.id, Owner: { id: owner } }], ...skip }),
+      }).catch(() => {})
+    }
+    if (filaQuote?.Contacto_Asociado?.id) {
+      await fetch(`${api}/crm/v3/Contacts`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({ data: [{ id: filaQuote.Contacto_Asociado.id, Owner: { id: owner } }], ...skip }),
+      }).catch(() => {})
+    }
     const fono = contact.replace(/\D/g, "")
     const s = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
     const dealId = s.ok && s.status !== 204
@@ -85,14 +151,17 @@ async function asignarVentaAutonoma(contact: string, quoteId: string): Promise<b
         method: "PUT",
         headers: H,
         cache: "no-store",
-        body: JSON.stringify({ data: [{ id: String(dealId), Owner: { id: OWNER_VENTA_AUTONOMA } }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+        body: JSON.stringify({ data: [{ id: String(dealId), Owner: { id: owner } }], ...skip }),
       }).catch(() => {})
     }
-    console.log(`[postpago] venta 100% Vicky: cotización ${quoteId} y deal ${dealId || "-"} asignados a Victoria Luna`)
-    return true
+    const ejecutivo = await datosOwnerAutonoma(owner, H, api)
+    console.log(
+      `[postpago] venta 100% Vicky: cotización ${quoteId}, deal ${dealId || "-"}, cuenta y contacto asignados a ${ejecutivo.email}`,
+    )
+    return { autonoma: true, ejecutivo }
   } catch (e) {
     console.warn("[postpago] asignarVentaAutonoma falló:", e instanceof Error ? e.message : e)
-    return false
+    return { autonoma: false }
   }
 }
 
@@ -114,8 +183,9 @@ export async function cerrarYTraspasarPostPago(
   // Regla de oro del Loop v2: el PAGO corta el loop de toques para siempre
   // (best-effort; con el flag apagado o sin fila en vic_loop es un no-op).
   await pagoCierraLoop(contact).catch(() => {})
-  // Venta 100% Vicky → deal y cotización a Victoria Luna, y la bienvenida no
-  // presenta ejecutivo (nadie intervino en la venta; Victoria hace la bajada).
+  // Venta 100% Vicky → todos los registros al dueño de ventas autónomas
+  // (Aleydis, vic_kv owner_venta_autonoma) y la bienvenida LA presenta
+  // (decisión Lalo 04-ago: ella hace la gestión post-venta).
   const ventaAutonoma = await asignarVentaAutonoma(contact, quoteId)
 
   const esCO = contact.startsWith("57")
@@ -220,15 +290,15 @@ export async function cerrarYTraspasarPostPago(
     (linkOnboarding
       ? `Para dejar tu empresa configurada y lista para operar, completa tu auto-onboarding aquí (toma ~10 minutos):\n👉 ${linkOnboarding}\n\n`
       : "")
-  // Venta autónoma: sin presentación de ejecutivo — nadie intervino en la
-  // venta y la bajada la decide Victoria; presentar un nombre acá obligaría
-  // a corregirlo después (lección D'amore: al cliente le llegaron dos).
-  const traspaso = ventaAutonoma
-    ? encabezado + `Nuestro equipo te contactará muy pronto para acompañarte en la puesta en marcha. Cualquier duda me escribes por aquí 😊`
-    : encabezado +
-      `De aquí en adelante te acompaña *${ejecutivo.nombre}*, tu ejecutivo comercial, quien te contactará para coordinar la puesta en marcha:\n` +
-      (ejecutivo.telefono ? `📱 ${ejecutivo.telefono}\n` : "") +
-      `✉️ ${ejecutivo.email}`
+  // Venta autónoma: se presenta al dueño de ventas autónomas (Aleydis) — es
+  // quien hace la gestión post-venta (Lalo 04-ago; antes no se presentaba a
+  // nadie y "nuestro equipo te contactará" quedaba sin cara).
+  const quienPresenta = ventaAutonoma.autonoma && ventaAutonoma.ejecutivo ? ventaAutonoma.ejecutivo : ejecutivo
+  const traspaso =
+    encabezado +
+    `De aquí en adelante te acompaña *${quienPresenta.nombre}*, ${ventaAutonoma.autonoma ? "de nuestro equipo" : "tu ejecutivo comercial"}, quien te contactará para coordinar la puesta en marcha:\n` +
+    (quienPresenta.telefono ? `📱 ${quienPresenta.telefono}\n` : "") +
+    `✉️ ${quienPresenta.email}`
   const pushed = await sendBotmakerMessage(
     contact,
     traspaso,
