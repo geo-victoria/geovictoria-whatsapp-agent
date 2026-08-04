@@ -647,6 +647,12 @@ async function convertirConDeal(
     ])
     const heredaDuenoHumano = Boolean(lead.ownerId && !INTERINOS.has(lead.ownerId))
     if (!heredaDuenoHumano) await aplicarTombolaDeals(String(fila.Deals.id), territorio)
+    else {
+      // Dueño humano heredado (caso Paola/Agrícola Vaticano 04-ago): sin
+      // tómbola no salía NINGUNA notificación y el deal nacía en silencio —
+      // el dueño se enteraba por casualidad. El correo directo va igual.
+      await notificarTraspasoDeal(String(fila.Deals.id)).catch(() => {})
+    }
     await registrarDealEnKv(contact.replace(/\D/g, ""), String(fila.Deals.id), "hito")
     return String(fila.Deals.id)
   }
