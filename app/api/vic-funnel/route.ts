@@ -2532,10 +2532,10 @@ export async function GET(req: Request): Promise<Response> {
   </div>
 
   ${vista === "gestion" ? `
-  ${evolucionHtml}
   ${colaHtml}
   ` : `
   ${tasaCierreHtml}
+  ${evolucionHtml}
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
     ${kpiCard("Conversaciones", total, col.base, undefined, "total")}
