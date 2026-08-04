@@ -42,6 +42,12 @@ const HEADERS = {
 async function authorized(req: Request): Promise<boolean> {
   const key = (new URL(req.url).searchParams.get("key") || "").trim()
   if (CRON_SECRET && key === CRON_SECRET) return true
+  // Botmaker no permite headers custom: el secret de vic_kv también vale por
+  // query param (04-ago, para poder suscribir el webhook sin conocer el env).
+  if (key) {
+    const expected = await getFollowupCronSecret().catch(() => "")
+    if (expected && key === expected) return true
+  }
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
   if (xcron) {
     const expected = await getFollowupCronSecret().catch(() => "")
@@ -95,6 +101,47 @@ export async function POST(req: Request): Promise<Response> {
 
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     return NextResponse.json({ ok: false, error: "Supabase no configurado" }, { status: 503 })
+  }
+
+  // NÚMERO SIN WHATSAPP (131026 undeliverable — caso BE WISE 04-ago): no es
+  // un cap temporal como el 131049, ese contacto JAMÁS recibirá WhatsApps.
+  // Acuerdo con Marketing: el lead no se queda con Vicky — vuelve a un humano
+  // (round-robin SDR) con nota, y el loop se cierra. El adelanto del correo
+  // e1 (más abajo) corre igual: el email pasa a ser el único canal.
+  const noEntregable =
+    /undeliver/.test(`${status} ${reason.toLowerCase()}`) || /\b131026(\.0)?\b/.test(JSON.stringify(body))
+  if (noEntregable) {
+    try {
+      const { getZohoAccessToken } = await import("@/lib/zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const s = await fetch(`${api}/crm/v3/Leads/search?phone=${contact}&converted=both&per_page=2`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      const lead = s.ok && s.status !== 204
+        ? ((await s.json().catch(() => ({}))) as {
+            data?: Array<{ id?: string; Owner?: { email?: string }; Converted_Deal?: { id?: string } | null }>
+          }).data?.[0]
+        : undefined
+      const ownerBot = /vicky@|info@geovictoria/.test((lead?.Owner?.email || "").toLowerCase())
+      if (lead?.id && !lead.Converted_Deal?.id && ownerBot) {
+        const { reasignarLeadSdrInbound, agregarNotaLead } = await import("@/lib/zoho-leads")
+        const r = await reasignarLeadSdrInbound(String(lead.id)).catch(() => null)
+        await agregarNotaLead(
+          String(lead.id),
+          "Vicky: el número NO recibe WhatsApp",
+          `Meta reportó "message undeliverable" (131026) para +${contact}: el número no tiene WhatsApp o no puede recibir mensajes. Vicky no puede atenderlo — contactar por teléfono o por el correo del lead.`,
+        ).catch(() => false)
+        console.warn(`[botmaker-status] ${contact} SIN WHATSAPP → lead ${lead.id} reasignado a ${r?.ownerEmail || "(falló)"} + loop cerrado`)
+      }
+    } catch { /* best-effort */ }
+    await fetch(`${SUPABASE_URL}/rest/v1/vic_loop?contact=eq.${contact}&estado=eq.activo`, {
+      method: "PATCH",
+      headers: { ...HEADERS, Prefer: "return=minimal" },
+      body: JSON.stringify({ estado: "cerrado", motivo_cierre: "wsp_no_entregable" }),
+      cache: "no-store",
+    }).catch(() => null)
   }
 
   // Cadencia outbound activa con e1 pendiente → adelantar el correo (started_at
