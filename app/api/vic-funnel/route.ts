@@ -2390,7 +2390,6 @@ export async function GET(req: Request): Promise<Response> {
   ${funnelOrigenHtml}
   `}
 
-  <div class="foot">Clasificación semántica con Claude · datos en vivo desde Supabase · Vicky V3 · GeoVictoria</div>
 </div>
 <script>
   var sankeyDiv = document.getElementById("sankey");
