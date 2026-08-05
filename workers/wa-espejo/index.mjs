@@ -1,22 +1,26 @@
 /**
- * wa-espejo — espejo SOLO LECTURA del WhatsApp Business de un ejecutivo.
+ * wa-espejo — espejo SOLO LECTURA del WhatsApp Business de ejecutivos.
  *
  * Corre como proceso persistente (Railway/Fly/VPS — NO Vercel: necesita un
- * WebSocket vivo). Se vincula al número corporativo como "dispositivo
+ * WebSocket vivo). Se vincula a cada número corporativo como "dispositivo
  * vinculado" (mismo mecanismo que WhatsApp Web): el ejecutivo escanea UN QR
  * y sigue usando su celular como siempre. Todo mensaje entrante/saliente se
  * replica a Supabase (vic_wa_espejo_mensajes) como fuente de seguimiento.
+ *
+ * MULTI-SESIÓN: un solo proceso atiende varios números a la vez —
+ * WA_SESSION_IDS="emujica,tmartinezq,alopez" (o WA_SESSION_ID para una sola).
+ * Cada sesión tiene su propio socket, sus credenciales (vic_wa_espejo_estado,
+ * particionadas por session_id) y su QR (vic_kv wa_espejo_qr_<session>).
  *
  * REGLAS INQUEBRANTABLES:
  *  - JAMÁS se envía un mensaje: no existe ninguna llamada a sendMessage en
  *    este proceso, y no debe agregarse nunca. El espejo es pasivo.
  *  - markOnlineOnConnect: false — si el espejo se marcara "en línea", el
  *    celular del ejecutivo dejaría de recibir notificaciones push.
- *  - Credenciales de la sesión viven en Supabase (vic_wa_espejo_estado):
- *    el proceso puede morir y renacer en otra máquina sin re-escanear.
  *
  * Env requeridas:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, WA_SESSION_ID (ej: "emujica")
+ *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+ *   WA_SESSION_IDS (coma-separado) o WA_SESSION_ID
  */
 
 import makeWASocket, {
@@ -31,10 +35,13 @@ import QRCode from "qrcode"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim().replace(/\/$/, "")
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
-const SESSION_ID = (process.env.WA_SESSION_ID || "").trim()
+const SESIONES = (process.env.WA_SESSION_IDS || process.env.WA_SESSION_ID || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean)
 
-if (!SUPABASE_URL || !SUPABASE_KEY || !SESSION_ID) {
-  console.error("Faltan env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, WA_SESSION_ID")
+if (!SUPABASE_URL || !SUPABASE_KEY || !SESIONES.length) {
+  console.error("Faltan env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, WA_SESSION_IDS")
   process.exit(1)
 }
 
@@ -71,19 +78,19 @@ async function kvSet(key, value, ttlMinutos) {
 // vic_wa_espejo_estado serializada con BufferJSON (los Buffers no sobreviven
 // JSON.stringify plano).
 
-async function estadoGet(categoria, clave) {
+async function estadoGet(sessionId, categoria, clave) {
   const res = await sb(
-    `vic_wa_espejo_estado?session_id=eq.${encodeURIComponent(SESSION_ID)}&categoria=eq.${encodeURIComponent(categoria)}&clave=eq.${encodeURIComponent(clave)}&select=valor`,
+    `vic_wa_espejo_estado?session_id=eq.${encodeURIComponent(sessionId)}&categoria=eq.${encodeURIComponent(categoria)}&clave=eq.${encodeURIComponent(clave)}&select=valor`,
   )
   const rows = await res.json()
   if (!rows.length || rows[0].valor == null) return null
   return JSON.parse(JSON.stringify(rows[0].valor), BufferJSON.reviver)
 }
 
-async function estadoSet(categoria, clave, valor) {
+async function estadoSet(sessionId, categoria, clave, valor) {
   if (valor == null) {
     await sb(
-      `vic_wa_espejo_estado?session_id=eq.${encodeURIComponent(SESSION_ID)}&categoria=eq.${encodeURIComponent(categoria)}&clave=eq.${encodeURIComponent(clave)}`,
+      `vic_wa_espejo_estado?session_id=eq.${encodeURIComponent(sessionId)}&categoria=eq.${encodeURIComponent(categoria)}&clave=eq.${encodeURIComponent(clave)}`,
       { method: "DELETE" },
     )
     return
@@ -93,7 +100,7 @@ async function estadoSet(categoria, clave, valor) {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({
-      session_id: SESSION_ID,
+      session_id: sessionId,
       categoria,
       clave,
       valor: serializado,
@@ -102,8 +109,8 @@ async function estadoSet(categoria, clave, valor) {
   })
 }
 
-async function cargarAuthState() {
-  const credsGuardadas = await estadoGet("creds", "creds").catch(() => null)
+async function cargarAuthState(sessionId) {
+  const credsGuardadas = await estadoGet(sessionId, "creds", "creds").catch(() => null)
   const creds = credsGuardadas || initAuthCreds()
   return {
     state: {
@@ -112,7 +119,7 @@ async function cargarAuthState() {
         get: async (type, ids) => {
           const data = {}
           for (const id of ids) {
-            let valor = await estadoGet(`keys:${type}`, id).catch(() => null)
+            let valor = await estadoGet(sessionId, `keys:${type}`, id).catch(() => null)
             if (type === "app-state-sync-key" && valor) {
               valor = proto.Message.AppStateSyncKeyData.fromObject(valor)
             }
@@ -123,8 +130,8 @@ async function cargarAuthState() {
         set: async (data) => {
           for (const type of Object.keys(data)) {
             for (const id of Object.keys(data[type])) {
-              await estadoSet(`keys:${type}`, id, data[type][id]).catch((e) =>
-                console.error("[estado.set]", e.message),
+              await estadoSet(sessionId, `keys:${type}`, id, data[type][id]).catch((e) =>
+                console.error(`[${sessionId}] estado.set`, e.message),
               )
             }
           }
@@ -132,7 +139,7 @@ async function cargarAuthState() {
       },
     },
     saveCreds: async () => {
-      await estadoSet("creds", "creds", creds).catch((e) => console.error("[creds]", e.message))
+      await estadoSet(sessionId, "creds", "creds", creds).catch((e) => console.error(`[${sessionId}] creds`, e.message))
     },
   }
 }
@@ -158,20 +165,24 @@ function extraerTexto(message) {
   return { tipo, texto: "" }
 }
 
-async function guardarMensaje(m) {
+// Artefactos de protocolo que no son conversación (el sync inicial los
+// dispara a montones — caso piloto 05-ago: filas "desconocido" vacías).
+const TIPOS_RUIDO = new Set(["reaccion", "protocolMessage", "senderKeyDistributionMessage", "messageContextInfo"])
+
+async function guardarMensaje(sessionId, m) {
   const jid = m.key?.remoteJid || ""
   // status@broadcast = estados; newsletter = canales. No son conversaciones.
   if (!jid || jid === "status@broadcast" || jid.endsWith("@newsletter")) return
   const esGrupo = jid.endsWith("@g.us")
   const { tipo, texto } = extraerTexto(m.message)
-  // Reacciones y protocolos no aportan al seguimiento.
-  if (tipo === "reaccion" || tipo === "protocolMessage" || tipo === "senderKeyDistributionMessage") return
+  if (TIPOS_RUIDO.has(tipo)) return
+  if (tipo === "desconocido" && !texto) return
   const telefonoChat = esGrupo ? null : jid.replace(/@.*$/, "").replace(/\D/g, "") || null
   const enviadoAt = m.messageTimestamp
     ? new Date(Number(m.messageTimestamp) * 1000).toISOString()
     : new Date().toISOString()
   const fila = {
-    session_id: SESSION_ID,
+    session_id: sessionId,
     chat_jid: jid,
     msg_id: m.key?.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     from_me: Boolean(m.key?.fromMe),
@@ -187,15 +198,15 @@ async function guardarMensaje(m) {
     method: "POST",
     headers: { Prefer: "resolution=ignore-duplicates" },
     body: JSON.stringify(fila),
-  }).catch((e) => console.error("[mensaje]", e.message))
+  }).catch((e) => console.error(`[${sessionId}] mensaje`, e.message))
 }
 
-// ── Conexión ────────────────────────────────────────────────────────────────
+// ── Conexión por sesión ─────────────────────────────────────────────────────
 
-let reinicios = 0
+const reiniciosPorSesion = new Map()
 
-async function conectar() {
-  const { state, saveCreds } = await cargarAuthState()
+async function conectar(sessionId) {
+  const { state, saveCreds } = await cargarAuthState(sessionId)
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }))
 
   const sock = makeWASocket({
@@ -205,7 +216,7 @@ async function conectar() {
     // CRÍTICO: en línea lo está el CELULAR del ejecutivo, no el espejo. Si el
     // espejo se marca online, el teléfono deja de recibir notificaciones push.
     markOnlineOnConnect: false,
-    // v1: espeja desde la vinculación en adelante (sin historial completo).
+    // Espeja desde la vinculación en adelante (sin historial completo).
     syncFullHistory: false,
     printQRInTerminal: false,
   })
@@ -217,37 +228,40 @@ async function conectar() {
     if (qr) {
       // El QR rota cada ~60s: se publica en vic_kv y la página admin lo pinta.
       const dataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 360 }).catch(() => "")
-      await kvSet(`wa_espejo_qr_${SESSION_ID}`, dataUrl, 5)
-      await kvSet(`wa_espejo_status_${SESSION_ID}`, JSON.stringify({ estado: "esperando_qr", at: new Date().toISOString() }))
-      console.log(`[${SESSION_ID}] QR publicado — escanear desde la página admin`)
+      await kvSet(`wa_espejo_qr_${sessionId}`, dataUrl, 5)
+      await kvSet(`wa_espejo_status_${sessionId}`, JSON.stringify({ estado: "esperando_qr", at: new Date().toISOString() }))
+      console.log(`[${sessionId}] QR publicado — escanear desde la página admin`)
     }
     if (connection === "open") {
-      reinicios = 0
-      await kvSet(`wa_espejo_qr_${SESSION_ID}`, "", 1)
+      reiniciosPorSesion.set(sessionId, 0)
+      await kvSet(`wa_espejo_qr_${sessionId}`, "", 1)
       await kvSet(
-        `wa_espejo_status_${SESSION_ID}`,
+        `wa_espejo_status_${sessionId}`,
         JSON.stringify({ estado: "conectado", numero: sock.user?.id || "", at: new Date().toISOString() }),
       )
-      console.log(`[${SESSION_ID}] Conectado como ${sock.user?.id || "?"} (solo lectura)`)
+      console.log(`[${sessionId}] Conectado como ${sock.user?.id || "?"} (solo lectura)`)
     }
     if (connection === "close") {
       const codigo = lastDisconnect?.error?.output?.statusCode
       const cerroSesion = codigo === DisconnectReason.loggedOut
       await kvSet(
-        `wa_espejo_status_${SESSION_ID}`,
+        `wa_espejo_status_${sessionId}`,
         JSON.stringify({ estado: cerroSesion ? "sesion_cerrada" : "reconectando", codigo, at: new Date().toISOString() }),
       )
       if (cerroSesion) {
-        // El ejecutivo desvinculó el dispositivo desde su celular: se limpia el
-        // estado para que el próximo arranque pida QR de nuevo.
-        console.error(`[${SESSION_ID}] Sesión cerrada desde el teléfono. Limpiando credenciales.`)
-        await sb(`vic_wa_espejo_estado?session_id=eq.${encodeURIComponent(SESSION_ID)}`, { method: "DELETE" }).catch(() => {})
-        process.exit(0) // el orquestador (Railway/Fly) lo reinicia y pide QR
+        // El ejecutivo desvinculó el dispositivo desde su celular: se limpian
+        // las credenciales y se vuelve a pedir QR (sin matar a las demás
+        // sesiones del proceso).
+        console.error(`[${sessionId}] Sesión cerrada desde el teléfono. Limpiando credenciales; se pedirá QR de nuevo.`)
+        await sb(`vic_wa_espejo_estado?session_id=eq.${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => {})
+        setTimeout(() => conectar(sessionId), 3_000)
+        return
       }
-      reinicios += 1
+      const reinicios = (reiniciosPorSesion.get(sessionId) || 0) + 1
+      reiniciosPorSesion.set(sessionId, reinicios)
       const espera = Math.min(60_000, 2_000 * 2 ** Math.min(reinicios, 5))
-      console.error(`[${SESSION_ID}] Conexión cerrada (código ${codigo}). Reintento en ${espera / 1000}s`)
-      setTimeout(conectar, espera)
+      console.error(`[${sessionId}] Conexión cerrada (código ${codigo}). Reintento en ${espera / 1000}s`)
+      setTimeout(() => conectar(sessionId), espera)
     }
   })
 
@@ -255,13 +269,14 @@ async function conectar() {
     // "notify" = mensajes nuevos en vivo; "append" = recuperados al reconectar.
     if (type !== "notify" && type !== "append") return
     for (const m of messages) {
-      await guardarMensaje(m).catch((e) => console.error("[upsert]", e.message))
+      await guardarMensaje(sessionId, m).catch((e) => console.error(`[${sessionId}] upsert`, e.message))
     }
   })
 }
 
-console.log(`wa-espejo — sesión "${SESSION_ID}" — SOLO LECTURA`)
-conectar().catch((e) => {
-  console.error("Fallo fatal al conectar:", e)
-  process.exit(1)
-})
+console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — SOLO LECTURA`)
+for (const sessionId of SESIONES) {
+  conectar(sessionId).catch((e) => {
+    console.error(`[${sessionId}] Fallo fatal al conectar:`, e)
+  })
+}
