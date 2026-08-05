@@ -80,7 +80,9 @@ export const PERFIL_PE: PerfilPais = {
   },
 
   canal: {
-    channelId: (process.env.BOTMAKER_CHANNEL_PE || "").trim(),
+    channelId: (
+      process.env.BOTMAKER_CHANNEL_PE || "GeoVictoriaEspaol-whatsapp-51922067167"
+    ).trim(),
     numeroLinea: (process.env.BOTMAKER_CHANNEL_NUMBER_PE || "51922067167").trim(),
     templates: {
       // TODO Fase 3: crear y aprobar plantillas de la línea PE en Meta.
