@@ -82,12 +82,15 @@ export const PERFIL_CO: PerfilPais = {
   },
 
   equipo: {
-    // Tómbola SDR Colombia observada en Zoho (leads +57, 09-jul-2026).
-    // TODO: confirmar emails.
+    // REGLA EQUIPO CO (Lalo 05-ago): SIN round-robin — todo hito no-formal va
+    // FIJO a Eddy Galindo (primera entrada); Guerrero/Quiroga quedan listados
+    // solo como referencia (sus leads históricos siguen siendo adoptables).
+    // Este array es informativo: la asignación real vive en zoho-leads
+    // (reasignarLeadSdrInboundCO) y en co/tools.ts (SDR_HITOS_CO_ID).
     sdrInbound: [
-      { email: "", zohoUserId: "3525045000613817111" }, // Galindo
-      { email: "", zohoUserId: "3525045000619732095" }, // Guerrero
-      { email: "", zohoUserId: "3525045000639899035" }, // Quiroga Chia
+      { email: "egalindo@geovictoria.com", zohoUserId: "3525045000613817111" }, // Galindo (FIJO)
+      { email: "", zohoUserId: "3525045000619732095" }, // Guerrero (referencia)
+      { email: "", zohoUserId: "3525045000639899035" }, // Quiroga Chia (referencia)
     ],
     // Ejecutivo que toma los deals y cotizaciones de Vicky CO (definición
     // Lalo 16-jul; equivalente a Anderson Díaz en Chile). Teléfono: el de su

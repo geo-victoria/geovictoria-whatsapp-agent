@@ -524,12 +524,14 @@ export async function reasignarLeadTelemarketingCL(
   }
 }
 
-// SDRs de Colombia (tómbola inbound CO observada en Zoho, 09-jul): Galindo /
-// Guerrero / Quiroga. Mismo formato env "email_o_label:user_id" que Chile;
-// los ids bastan (el email es etiqueta para el log).
+// SDR de Colombia — REGLA EQUIPO CO (Lalo 05-ago: "para colombia no hay round
+// robin por el momento, son fijos"): TODO hito que no sea la cotización formal
+// va a Eddy Galindo, fijo. Se conserva el formato env "email_o_label:user_id"
+// (VIC_SDR_INBOUND_CO) por si vuelve una rotación: HOY solo se usa la PRIMERA
+// entrada; las demás se ignoran.
 const SDR_INBOUND_CO = (
   process.env.VIC_SDR_INBOUND_CO ||
-  "egalindo@geovictoria.com:3525045000613817111,guerrero:3525045000619732095,quiroga:3525045000639899035"
+  "egalindo@geovictoria.com:3525045000613817111"
 )
   .split(",")
   .map((s) => {
@@ -539,8 +541,8 @@ const SDR_INBOUND_CO = (
   .filter((s) => s.email)
 
 /**
- * Reasigna un lead CO al siguiente SDR colombiano del round-robin (espejo de
- * reasignarLeadSdrInbound con turno propio en vic_kv `sdr_inbound_rr_co`).
+ * Reasigna un lead CO al SDR colombiano FIJO (Eddy Galindo — regla equipo CO
+ * 05-ago, sin round-robin). El turno vic_kv `sdr_inbound_rr_co` quedó sin uso.
  */
 export async function reasignarLeadSdrInboundCO(
   leadId: string,
@@ -549,10 +551,7 @@ export async function reasignarLeadSdrInboundCO(
     return { success: false, error: "leadId faltante o sin SDRs CO configuradas" }
   }
   try {
-    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
-    const last = parseInt((await getKvValue("sdr_inbound_rr_co").catch(() => null)) || "-1")
-    const idx = (isNaN(last) ? 0 : last + 1) % SDR_INBOUND_CO.length
-    const sdr = SDR_INBOUND_CO[idx]
+    const sdr = SDR_INBOUND_CO[0] // fijo: primera entrada (Galindo)
 
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
@@ -578,7 +577,6 @@ export async function reasignarLeadSdrInboundCO(
         error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}`,
       }
     }
-    await setKvValue("sdr_inbound_rr_co", String(idx)).catch(() => {})
     return { success: true, ownerEmail: sdr.email }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }

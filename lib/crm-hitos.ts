@@ -622,12 +622,16 @@ async function convertirConDeal(
     //   imposible distinguir "sorteo cayó en Eddy" de "sorteo nunca corrió").
     // - Territorio SIN regla (CO/MX): interino del país como siempre — ahí el
     //   interino ES el dueño real y Vicky-user sería la bandeja de nadie.
+    // CO — REGLA EQUIPO (Lalo 05-ago): el deal de un hito NO-formal (preform,
+    // reunión, discovery) nace con Eddy Galindo (SDR fijo); SOLO la cotización
+    // FORMAL (emitida por el cotizador) es de Gordillo — la emisión traspasa
+    // a Gordillo el deal reusado del hito.
     Owner: {
       id: heredaGestionAlDeal(lead.ownerId, territorio)
         ? lead.ownerId
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
-          : ({ Colombia: "3525045000203758005", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          : ({ Colombia: "3525045000613817111", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }

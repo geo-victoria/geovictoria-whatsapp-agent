@@ -44,27 +44,16 @@ const SECRET_COTIZADORA_CO = (
   ""
 ).trim()
 
-// Tómbola CO (SDRs observados en Zoho el 09-jul; emails por confirmar).
-const SDR_CO_IDS = [
-  "3525045000613817111", // Galindo
-  "3525045000619732095", // Guerrero
-  "3525045000639899035", // Quiroga Chia
-]
+// REGLA EQUIPO CO (Lalo 05-ago, "son fijos, sin round robin por el momento"):
+// cualquier hito que NO sea la cotización formal → Eddy Galindo (SDR fijo);
+// SOLO la cotización formal (y todos sus registros) → Alejandro Gordillo.
+const SDR_HITOS_CO_ID = (process.env.VICKY_CO_SDR_ID || "3525045000613817111").trim() // Eddy Galindo
 
-// Ejecutivo comercial CO (Alejandro Gordillo) — paridad con Chile: los leads
-// que nacen de un fallo/fallback del flujo de COTIZACIÓN quedan a su nombre
-// (en CL van directo a Anderson, no a tómbola), porque él ya es dueño de las
-// cotizaciones formales CO (VICKY_CO_OWNER_ID del cotizador) y retoma con
-// todo el contexto.
+// Ejecutivo comercial CO (Alejandro Gordillo): dueño de la COTIZACIÓN FORMAL y
+// de todos sus registros (deal, cotización, cuenta, contacto). Los leads que
+// nacen de un fallo/fallback del flujo de cotización formal también quedan a
+// su nombre (retoma con todo el contexto).
 const EJECUTIVO_CO_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_CO_ID || "3525045000203758005").trim()
-
-// Reparto determinista sin estado: hash del teléfono → índice. Distribuye
-// parejo con volumen y evita depender de un contador compartido para el v1.
-function ownerCoPara(contact: string): string {
-  let h = 0
-  for (const ch of contact) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return SDR_CO_IDS[h % SDR_CO_IDS.length]
-}
 
 // ── Reuniones CO (Cal.com) ──────────────────────────────────────────────────
 // Gated por env: CAL_EVENT_TYPE_ID_CO = event type de Cal.com del equipo
@@ -459,9 +448,9 @@ export function buildDispatchCO(contact: string) {
           ciudad: i.ciudad,
           trabajadores: i.trabajadores,
           necesidad: [i.resumen || "", nitInfo].filter(Boolean).join(" · "),
-          // Fallback de cotización → Alejandro directo (paridad CL/Anderson);
-          // el resto (callback, fuera de alcance, >50) sigue en la tómbola SDR.
-          ownerId: i.motivo === "cotizacion_formal" ? EJECUTIVO_CO_ZOHO_ID : ownerCoPara(contact),
+          // Regla equipo CO (05-ago): fallback de cotización FORMAL → Gordillo;
+          // cualquier otro motivo (callback, fuera de alcance, >50) → Galindo fijo.
+          ownerId: i.motivo === "cotizacion_formal" ? EJECUTIVO_CO_ZOHO_ID : SDR_HITOS_CO_ID,
         })
         if (!res || (res as { ok?: boolean }).ok === false) {
           return {
