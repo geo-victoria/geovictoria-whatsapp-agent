@@ -1522,14 +1522,30 @@ function renderEvolucionDiaria(params: {
     if (!inicioPorContacto.has(tel)) inicioPorContacto.set(tel, String(c.started_at || ""))
     suma(sConv, c.started_at)
   }
+  // FUNNEL MONOTÓNICO (reporte Rodrigo 05-ago: "precio mostrado salía MAYOR
+  // que intención comercial"). Dos causas: (1) intención venía SOLO del
+  // análisis batch de Claude — las conversaciones del día aún sin analizar
+  // no contaban, aunque ya habían visto precio; (2) intención se fechaba por
+  // inicio del chat pero el precio por el día en que se mostró — un chat de
+  // ayer que ve precio hoy sumaba precio sin intención. Fix: (a) membresía
+  // acumulativa — ver precio o tener formal IMPLICA intención comercial;
+  // (b) intención y precio se fechan ambos por el día de INICIO del chat
+  // (cohorte). Formal/aceptada/pagada siguen por su fecha en Zoho.
+  const comercialSet = new Set<string>()
   for (const r of analysisRows) {
-    if (r.grupo !== "comercial") continue
-    const tel = digits(r.contact)
+    if (r.grupo === "comercial") comercialSet.add(digits(r.contact))
+  }
+  for (const tel of preformAt.keys()) comercialSet.add(tel)
+  for (const q of quotes) {
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    if (tel) comercialSet.add(tel)
+  }
+  for (const tel of comercialSet) {
     if (!tel || !delPais(tel)) continue
     suma(sCom, inicioPorContacto.get(tel))
   }
   for (const [tel, at] of preformAt) {
-    if (delPais(tel)) suma(sPreform, at)
+    if (delPais(tel)) suma(sPreform, inicioPorContacto.get(tel) || at)
   }
   for (const q of quotes) {
     suma(sFormal, q.Created_Time)
@@ -1557,7 +1573,7 @@ function renderEvolucionDiaria(params: {
     : ""
   return `<div class="card"><h2>📈 Evolución <span class="pct" style="font-weight:400">— ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span>${selector}</h2>
   <div id="evoDiaria" style="height:340px"></div>
-  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). Conversaciones e intención comercial por día de inicio del chat; preform por el día en que se mostró el precio; formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). Conversaciones, intención comercial y precio mostrado se fechan por el día de INICIO del chat (cohorte — así el embudo nunca se cruza: ver precio implica intención); formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias)};
