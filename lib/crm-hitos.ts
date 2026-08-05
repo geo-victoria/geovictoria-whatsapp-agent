@@ -623,9 +623,9 @@ async function convertirConDeal(
     // - Territorio SIN regla (CO/MX): interino del país como siempre — ahí el
     //   interino ES el dueño real y Vicky-user sería la bandeja de nadie.
     // CO — REGLA EQUIPO (Lalo 05-ago): el deal de un hito NO-formal (preform,
-    // reunión, discovery) nace con Eddy Galindo (SDR fijo); SOLO la cotización
-    // FORMAL (emitida por el cotizador) es de Gordillo — la emisión traspasa
-    // a Gordillo el deal reusado del hito.
+    // reunión, discovery) nace con Eddy Galindo (SDR fijo) y SE QUEDA con él
+    // hasta el final (sin cambios de propietario — la formal NO lo traspasa).
+    // Solo los registros que la formal CREA nacen con Gordillo.
     Owner: {
       id: heredaGestionAlDeal(lead.ownerId, territorio)
         ? lead.ownerId
