@@ -1563,6 +1563,9 @@ function renderEvolucionDiaria(params: {
   }
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
+    // Cotizaciones de contactos de PRUEBA fuera de la curva (hallazgo Lalo
+    // 05-ago: las HuelleroCompany inflaban la serie de formales).
+    if (tel && isTestContact(tel, testSet)) continue
     const inicio = (tel && inicioPorContacto.get(tel)) || ""
     suma(sFormal, inicio || q.Created_Time)
     const pagada = Boolean(String(q.Onboarding_Link || "").trim())
