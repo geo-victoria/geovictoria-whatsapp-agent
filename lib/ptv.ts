@@ -169,7 +169,7 @@ export function mensajeChequeo(pais: "cl" | "co" | "mx" | "pe", nombreVendedor: 
   return `¡Hola! Soy Vicky de nuevo 😊 ¿Cómo te fue con ${nombreVendedor}? ¿Alcanzaron a hablar y resolver tus dudas?`
 }
 
-// ── TRASPASO v2 (acuerdo Lalo 03-ago, SOLO CHILE) ───────────────────────────
+// ── TRASPASO v2 (acuerdo Lalo 03-ago; CL + PE + CO desde 05-ago) ────────────
 //
 // Con VICKY_TRASPASO_V2_ENABLED=on y país CL, los TTV de silencio mueren y
 // entran topes de DURACIÓN DE ETAPA que corren aunque el cliente converse:
@@ -180,8 +180,10 @@ export function mensajeChequeo(pais: "cl" | "co" | "mx" | "pe", nombreVendedor: 
 // la pausa anunciada por el cliente los suspende. Solo aplican a
 // conversaciones VIVAS (el cliente respondió la primera pregunta —
 // user_msg_count >= 2); si no respondió, gobierna el reloj de calificación de
-// 24 h hábiles hacia telemarketing (regla 1 del acuerdo). CO/MX siguen con
-// los TTV de silencio de siempre.
+// 24 h hábiles hacia telemarketing (regla 1 del acuerdo, solo CL/PE). MX
+// sigue con los TTV de silencio de siempre. En CO (desde 05-ago) los relojes
+// corren igual que en Chile, pero el traspaso AVISA y presenta al dueño
+// vigente sin cambiar propietarios (regla equipo CO: el primero se lo queda).
 
 export const ETAPA_INICIO_PREFORM_MIN = 120
 export const ETAPA_PRECIO_ACEPTACION_MIN = 15

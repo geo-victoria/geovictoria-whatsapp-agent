@@ -646,6 +646,14 @@ export async function runAgentLoop(params: {
               params,
             }).catch(() => {})
           } else if (toolName === "cotizar_referencial") {
+            // CO — reloj v2 de 15' (05-ago): Colombia no tiene tools de
+            // negociación (las que estampan pref_escalon_at en CL), así que
+            // el "precio dado" CO ES el referencial exitoso. Se estampa SOLO
+            // el timestamp (escalón sigue null — no altera la lógica CL de
+            // descuentos) para que el cron arme el reloj precio→aceptación.
+            if (/^57\d{8,12}$/.test(contact.replace(/\D/g, "")) && (result as { ok?: boolean }).ok === true) {
+              await setPrefDraft(contact, {}).catch(() => {})
+            }
             // Si ya hay un descuento ACORDADO (escalón negociado) y el cliente
             // re-cotiza por un cambio de configuración (modalidad del reloj, N° de
             // trabajadores, puntos), lo ACORDADO no se pierde:

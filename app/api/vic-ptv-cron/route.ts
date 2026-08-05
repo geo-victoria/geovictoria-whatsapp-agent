@@ -119,6 +119,7 @@ const TOMBOLA_DEALS_RULE: Record<string, string> = {
 const NOMBRE_VENDEDOR: Record<string, string> = {
   "emujica@geovictoria.com": "Eddyluz Mujica",
   "agordillo@geovictoria.com": "Alejandro Gordillo",
+  "egalindo@geovictoria.com": "Eddy Galindo",
   "ysegura@geovictoria.com": "Yahel Segura",
   "mmendozav@geovictoria.com": "Mónica Mendoza",
 }
@@ -138,7 +139,7 @@ type VendedorFinal = {
   zohoId: string
   nombre: string
   telefono?: string
-  via: "tombola_zoho" | "tombola_interna" | "dueno_deal"
+  via: "tombola_zoho" | "tombola_interna" | "dueno_deal" | "dueno_lead_sdr"
 }
 
 /** Aviso por correo al vendedor de un traspaso sobre un LEAD (los deals van
@@ -247,6 +248,18 @@ async function asignarEnZoho(
         const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
         const r = await reasignarLeadSdrInboundCO(creado.leadId).catch(() => null)
         await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
+        // Regla equipo CO (05-ago): al prospecto se le presenta el DUEÑO del
+        // lead (el SDR, Galindo) — jamás un nombre distinto al dueño.
+        if (r?.ownerEmail && r?.ownerId) {
+          const tel = await telefonoDeUsuario(r.ownerId, H, api)
+          return {
+            email: r.ownerEmail,
+            zohoId: r.ownerId,
+            nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+            telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+            via: "dueno_lead_sdr",
+          }
+        }
       } else {
         await notificarTraspasoLeadEmail(creado.leadId, interno.email, fono, H, api)
       }
@@ -311,10 +324,22 @@ async function asignarEnZoho(
       const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
       await notificarTraspasoDeal(dealId).catch(() => {})
     } else if (pais === "co") {
-      // CO: lead sin cotización → SDR Inbound (round-robin), no el ejecutivo.
+      // CO: lead sin cotización → SDR fijo (Galindo, regla equipo 05-ago).
+      // Sin cambios de propietario reales: si ya es de Galindo el PUT es
+      // no-op; el prospecto conoce al DUEÑO del lead, no al roster.
       const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
       const r = await reasignarLeadSdrInboundCO(lead.id).catch(() => null)
       await notificarTraspasoLeadEmail(lead.id, r?.ownerEmail || interno.email, fono, H, api)
+      if (r?.ownerEmail && r?.ownerId) {
+        const tel = await telefonoDeUsuario(r.ownerId, H, api)
+        return {
+          email: r.ownerEmail,
+          zohoId: r.ownerId,
+          nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+          telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+          via: "dueno_lead_sdr",
+        }
+      }
     } else {
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
@@ -613,11 +638,15 @@ export async function GET(req: Request) {
     const clienteRespondioDespues = ultimoCliente >= new Date(c.updated_at)
     const feriados = await feriadosDePais(pais)
     const compromisoAt = compromisoPor.get(c.contact) ? new Date(String(compromisoPor.get(c.contact))) : null
-    // TRASPASO v2 (CL desde 03-ago; PE desde el día uno — Lalo 04-ago):
-    // relojes de DURACIÓN DE ETAPA en minutos hábiles reemplazan a los TTV
-    // de silencio — corren aunque el cliente converse. CO/MX (o flag
-    // apagado) siguen con el TTV de siempre.
-    const usaV2 = v2Activo && (pais === "cl" || pais === "pe")
+    // TRASPASO v2 (CL desde 03-ago; PE desde el día uno — Lalo 04-ago; CO
+    // desde 05-ago — mismo flujo de relojes que Chile, ok de Lalo): relojes
+    // de DURACIÓN DE ETAPA en minutos hábiles reemplazan a los TTV de
+    // silencio — corren aunque el cliente converse. En CO el traspaso AVISA
+    // y presenta al dueño vigente, JAMÁS cambia propietarios (regla equipo
+    // CO: el primero se lo queda hasta el final — asignarEnZoho ya respeta
+    // dueños humanos, y todos los registros CO nacen con Galindo/Gordillo).
+    // MX (o flag apagado) sigue con el TTV de siempre.
+    const usaV2 = v2Activo && (pais === "cl" || pais === "pe" || pais === "co")
     const decision = usaV2
       ? debeTraspasarEtapa({
           firstUserAt: c.first_user_at ? new Date(c.first_user_at) : null,

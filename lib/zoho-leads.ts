@@ -546,7 +546,7 @@ const SDR_INBOUND_CO = (
  */
 export async function reasignarLeadSdrInboundCO(
   leadId: string,
-): Promise<{ success: boolean; ownerEmail?: string; error?: string }> {
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
   if (!leadId || SDR_INBOUND_CO.length === 0) {
     return { success: false, error: "leadId faltante o sin SDRs CO configuradas" }
   }
@@ -577,7 +577,7 @@ export async function reasignarLeadSdrInboundCO(
         error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}`,
       }
     }
-    return { success: true, ownerEmail: sdr.email }
+    return { success: true, ownerEmail: sdr.email, ownerId }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
   }
