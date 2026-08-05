@@ -816,6 +816,13 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
       record.Territorio = "México"
       if (!record.Country) record.Country = "México"
     }
+    // Perú (Fase 1b, 05-ago): los +51 llevan Territorio "Perú" (picklist de
+    // Zoho verificado — el valor existe). Sin esto, los leads de Vicky PE
+    // quedaban sin territorio, invisibles para los filtros por país.
+    else if (digits.startsWith("51") || pais.toLowerCase() === "perú" || pais.toLowerCase() === "peru") {
+      record.Territorio = "Perú"
+      if (!record.Country) record.Country = "Perú"
+    }
     const ciudad = sanitize(input.ciudad, 100)
     if (ciudad) record.City = ciudad
 

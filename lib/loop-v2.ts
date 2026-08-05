@@ -80,6 +80,9 @@ export function tzDePais(country?: string | null): string {
   const c = (country || "cl").trim().toLowerCase()
   if (c === "co") return "America/Bogota"
   if (c === "mx") return "America/Mexico_City"
+  // Perú (Fase 1b, 05-ago): sin este caso, una conversación "pe" calculaba
+  // sus ventanas hábiles con la hora de Santiago (1-2 h de desfase por DST).
+  if (c === "pe") return "America/Lima"
   return "America/Santiago"
 }
 

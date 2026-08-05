@@ -223,11 +223,14 @@ function esTelefonoDePrueba(contact: string): boolean {
   return lista.includes(clean)
 }
 
-function territorioDeContacto(contact: string): "Chile" | "Colombia" | "México" | null {
+function territorioDeContacto(contact: string): "Chile" | "Colombia" | "México" | "Perú" | null {
   const c = (contact || "").replace(/\D/g, "")
   if (c.startsWith("56")) return "Chile"
   if (c.startsWith("57")) return "Colombia"
   if (c.startsWith("52")) return "México"
+  // Perú (Fase 1b, 05-ago): sin este caso, un +51 caía al default "Chile" en
+  // la creación del deal (Territorio y moneda equivocados).
+  if (c.startsWith("51")) return "Perú"
   return null
 }
 
@@ -610,7 +613,10 @@ async function convertirConDeal(
     Territorio: territorio,
     Tombola: "Mantener propietario",
     Sector: "19. Servicios",
-    Monda_del_trato: territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : "UF",
+    // Moneda por territorio. OJO Perú: el picklist de Zoho usa "SOL" (no
+    // "PEN") — verificado contra el metadata del campo el 05-ago.
+    Monda_del_trato:
+      territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : territorio === "Perú" ? "SOL" : "UF",
     Producto_Soluci_n: "Control de Asistencia",
     Tipo_de_Cobro: empleados <= 10 ? "Mensual fijo" : "Por usuario",
     N_Empleados_que_marcan: empleados,
@@ -631,7 +637,7 @@ async function convertirConDeal(
         ? lead.ownerId
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
-          : ({ Colombia: "3525045000613817111", "México": "3525045000308323003" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          : ({ Colombia: "3525045000613817111", "México": "3525045000308323003", "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -936,6 +942,10 @@ export async function sincronizarHitoCrm(
         Chile: "3525045000000211283", // Eddyluz Mujica
         Colombia: "3525045000203758005", // Alejandro Gordillo (solo fallback)
         "México": "3525045000308323003", // Yahel Segura
+        // Perú: Mónica Mendoza — NO es interina sino la ejecutiva única real
+        // (sin tómbola), por eso NO está en INTERINOS: su gestión SÍ se
+        // hereda al deal.
+        "Perú": "3525045000323383015",
       }
       const { createZohoLead } = await import("./zoho-leads")
       const creado = await createZohoLead({

@@ -16,10 +16,14 @@ import { vendedoresDePais } from "@/lib/ptv"
 // en vic_kv con la MISMA llave ptv_rr_<pais>, para que la rotación sea una
 // sola entre el cron y esta tool). La lista se extiende sin deploy por env
 // VICKY_PTV_VENDEDORES_<CC>.
-function paisDeTelefono(tel: string): "cl" | "co" | "mx" {
+function paisDeTelefono(tel: string): "cl" | "co" | "mx" | "pe" {
   const d = (tel || "").replace(/\D/g, "")
   if (d.startsWith("57")) return "co"
   if (d.startsWith("521") || (d.startsWith("52") && d.length === 12)) return "mx"
+  // Perú (Fase 1b, 05-ago): sin este caso, un +51 caía a "cl" y su lead
+  // entraba a la regla de re-asignación CHILENA. El roster pe de lib/ptv.ts
+  // es la ejecutiva única (Mónica Mendoza).
+  if (d.startsWith("51") && d.length >= 11) return "pe"
   return "cl"
 }
 
@@ -55,7 +59,7 @@ async function asignarLeadPorReglaCL(leadId: string): Promise<string | undefined
   }
 }
 
-async function vendedorPorTombola(pais: "cl" | "co" | "mx"): Promise<string | undefined> {
+async function vendedorPorTombola(pais: "cl" | "co" | "mx" | "pe"): Promise<string | undefined> {
   const lista = vendedoresDePais(pais)
   if (!lista.length) return undefined
   try {
