@@ -45,14 +45,16 @@ test("anomalía del excel aprobada: 21 usuarios pagan MENOS que 20", () => {
   assert.equal(precioPlanPE(5), 100) // tramo 1-10 fijo
 })
 
-test("instalación fuera de Lima: nota + aviso al servicio técnico, sin línea de cobro", () => {
+test("provincia: envío por cuenta del cliente + instalación aparte, sin líneas de cobro", () => {
   const r = cotizarPE({
     userCount: 10,
     reloj: { modalidad: "venta", cantidad: 1 },
     puntos: [{ ubicacion: "Arequipa", zona: "provincias", autoInstalada: false }],
   })
   assert.equal(r.avisoSsttPeru, true)
-  assert.ok(r.mensajeParaProspecto.includes("se coordina") || r.mensajeParaProspecto.includes("servicio técnico"))
+  // VB Diego 05-ago: el envío a provincia lo asume el CLIENTE — se informa.
+  assert.ok(r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
+  assert.ok(r.mensajeParaProspecto.includes("servicio técnico"))
   // Pago único = solo el reloj (525) + primer mes (100): sin envío ni instalación.
   assert.equal(r.pagoInicialNeto, 625)
   // Ningún ítem de envío ni instalación viaja al cotizador.

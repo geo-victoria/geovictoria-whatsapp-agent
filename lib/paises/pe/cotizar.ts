@@ -6,7 +6,8 @@
  *     21-50 → S/5/usuario. (Anomalía 21+ documentada en pe/catalogo.ts:
  *     literal del excel, aprobada.)
  *   - Reloj: arriendo S/70/mes por unidad · venta S/525 por unidad.
- *   - Envío: S/0 SIEMPRE (todo Perú, ambas modalidades) — no se emite línea.
+ *   - Envío: S/0 en LIMA METROPOLITANA. A PROVINCIA lo ASUME EL CLIENTE
+ *     (VB Diego 05-ago): sin línea de cobro; se informa en nota.
  *   - Instalación: LIMA sin costo (incluida). FUERA de Lima NO se cotiza:
  *     "se coordina con servicio técnico, se cotiza aparte" — nota al
  *     prospecto + flag para que la capa de tools avise a
@@ -157,7 +158,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     arriendoNeto = TARIFAS_PE.relojArriendoMes * reloj.cantidad
     lineas.push({
       concepto: "Arriendo de reloj de control",
-      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes (envío sin costo; instalación sin costo en Lima)`,
+      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes (envío e instalación sin costo en Lima Metropolitana)`,
       neto: arriendoNeto,
       igv: arriendoNeto * IGV_PE,
       recurrente: true,
@@ -182,17 +183,25 @@ export function cotizarPE(input: CotizacionPEInput): {
   let avisoSsttPeru = false
   if (reloj && reloj.cantidad > 0) {
     for (const g of grupos.values()) {
-      if (g.zona === "provincias" && g.instalaciones > 0) {
-        avisoSsttPeru = true
+      if (g.zona === "provincias") {
+        // Envío a provincia: lo asume el CLIENTE (VB Diego 05-ago) — sin
+        // línea de cobro, pero SIEMPRE se informa.
         notasEjecutivo.push(
-          `La instalación en ${g.ubicacion} se coordina con nuestro servicio técnico y se cotiza aparte (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
+          `El envío del reloj a ${g.ubicacion} corre por cuenta del cliente (coordinamos contigo el retiro/despacho desde Lima).`,
         )
+        if (g.instalaciones > 0) {
+          avisoSsttPeru = true
+          notasEjecutivo.push(
+            `La instalación en ${g.ubicacion} se coordina con nuestro servicio técnico y se cotiza aparte (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
+          )
+        }
       }
     }
   }
 
   // ── Pago único ──
-  // Envío: S/0 siempre → sin línea. Instalación Lima: S/0 (incluida) → sin
+  // Envío: sin línea de cobro (Lima Metropolitana gratis; provincia lo asume
+  // el cliente — queda en nota). Instalación Lima: S/0 (incluida) → sin
   // línea. Capacitación: no existe en Perú. Solo el reloj en VENTA genera
   // pago único de catálogo; la ACTIVACIÓN (primer mes adelantado) se suma
   // como concepto del pago inicial (patrón CL/CO).
@@ -201,7 +210,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     ventaNeto = TARIFAS_PE.relojVenta * reloj.cantidad
     lineas.push({
       concepto: "Reloj de control (compra)",
-      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojVenta)} (envío sin costo; instalación sin costo en Lima)`,
+      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojVenta)} (envío e instalación sin costo en Lima Metropolitana)`,
       neto: ventaNeto,
       igv: ventaNeto * IGV_PE,
       recurrente: false,
@@ -236,7 +245,7 @@ export function cotizarPE(input: CotizacionPEInput): {
   )
   if (arriendoNeto > 0) {
     filas.push(
-      `- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes (envío sin costo; instalación sin costo en Lima)`,
+      `- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes (envío e instalación sin costo en Lima Metropolitana)`,
     )
   }
   filas.push(

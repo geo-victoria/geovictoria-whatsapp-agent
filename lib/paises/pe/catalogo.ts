@@ -15,8 +15,11 @@
  *   21 usuarios pagan S/105 (21×5), MENOS que los S/200 fijos del tramo
  *   11-20. Es literal del excel — no "corregir" sin orden expresa.
  *   Reloj venta:    S/525 pago único · arriendo S/70/mes
- *   Envío:          S/0 SIEMPRE (todo Perú, ambas modalidades — sin línea)
- *   Instalación:    Lima S/0 (incluida) · FUERA de Lima NO se cotiza:
+ *   Envío:          S/0 en LIMA METROPOLITANA (ambas modalidades). A
+ *                   PROVINCIA lo ASUME EL CLIENTE (VB Diego 05-ago): nosotros
+ *                   no lo cobramos ni lo cotizamos — se informa que corre por
+ *                   su cuenta. Sin línea de cobro en ningún caso.
+ *   Instalación:    Lima Metropolitana S/0 (incluida) · FUERA NO se cotiza:
  *                   "se coordina con servicio técnico, se cotiza aparte" +
  *                   aviso interno a ssttperu@geovictoria.pro. La venta
  *                   nunca se frena por esto.
@@ -71,7 +74,9 @@ export const CATALOGO_MODULOS_PE: ModuloSoftware[] = [
 export const CATALOGO_HARDWARE_PE: Hardware[] = [
   {
     id: "reloj_pe",
-    modelo: "reloj_pe",
+    // Modelo real (VB Diego 05-ago): ZKTECO Senseface 2A — interno, JAMÁS se
+    // le dice al cliente (regla de no mencionar marcas/modelos).
+    modelo: "Senseface 2A",
     displayName: "Reloj de control físico",
     conexion: "WiFi / Ethernet",
     ventaUF: 525,
@@ -89,9 +94,11 @@ export const CATALOGO_SERVICIOS_PE: Servicio[] = [
     id: "envio_reloj",
     nombre: "Envío de reloj",
     descripcion:
-      "Despacho del reloj al punto del cliente. Sin costo en todo el Perú, en ambas modalidades.",
-    // RM ≡ "lima" · region ≡ provincias. Envío S/0 SIEMPRE: las cuatro
-    // celdas van en 0 y el motor no emite línea de envío.
+      "Despacho del reloj. Sin costo en Lima Metropolitana (ambas modalidades); a provincia el envío corre por cuenta del cliente.",
+    // RM ≡ "lima" (Metropolitana) · region ≡ provincias. Celdas en 0 porque
+    // GeoVictoria nunca cobra el envío: en Lima Metropolitana es gratis y a
+    // provincia lo asume el CLIENTE (VB Diego 05-ago) — el motor lo informa
+    // como nota, sin línea de cobro.
     tarifa: {
       modelo: "modalidad_zona",
       arriendo: { RM: 0, region: 0 },
@@ -109,7 +116,7 @@ export const CATALOGO_SERVICIOS_PE: Servicio[] = [
     id: "instalacion_reloj",
     nombre: "Instalación de reloj",
     descripcion:
-      "Instalación del reloj de control. Sin costo en Lima. Fuera de Lima se coordina con servicio técnico y se cotiza aparte.",
+      "Instalación del reloj de control. Sin costo en Lima Metropolitana. Fuera de Lima se coordina con servicio técnico y se cotiza aparte.",
     // Lima (RM) = 0 → incluida sin costo. Provincias (region) = 0 NO
     // significa gratis: fuera de Lima la instalación NO la cotiza Vicky —
     // "se coordina con servicio técnico, se cotiza aparte" + aviso interno a
