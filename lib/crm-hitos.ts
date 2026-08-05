@@ -609,7 +609,7 @@ async function convertirConDeal(
     Pipeline: "Standard (Standard)",
     Territorio: territorio,
     Tombola: "Mantener propietario",
-    Sector: "20. Servicios",
+    Sector: "19. Servicios",
     Monda_del_trato: territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : "UF",
     Producto_Soluci_n: "Control de Asistencia",
     Tipo_de_Cobro: empleados <= 10 ? "Mensual fijo" : "Por usuario",
@@ -982,7 +982,14 @@ export async function sincronizarHitoCrm(
     // "De Vicky" = usuario Vicky O interinos por país (04-ago): la interina es
     // marcador de "sin dueño real", no gestión — tratarla como humana dejaba
     // sus leads sin convertir (backfill de los 14 forzados a Eddyluz).
-    const esDeVicky = !lead.ownerId || INTERINOS.has(lead.ownerId)
+    // Y en COLOMBIA también los SDR Inbound (fix 05-ago): el lead sin
+    // cotización vive con el SDR POR DISEÑO, y el hito de cotización ES el
+    // handoff SDR→ejecutivo — el lead debe convertirse (el deal no hereda al
+    // SDR: heredaGestionAlDeal lo excluye y el dueño sale del mapa CO).
+    // Tratarlo como "dueño humano" dejaba los leads SDR CO sin convertir nunca.
+    const esSdrCO =
+      territorioDeContacto(clean) === "Colombia" && SDR_CO_IDS.has(lead.ownerId)
+    const esDeVicky = !lead.ownerId || INTERINOS.has(lead.ownerId) || esSdrCO
 
     // ── Reglas de re-contacto (doc David 30-jul) — detrás de sub-flag ──
     // Reglas 2/5: registro activo → RE-NOTIFICAR al dueño, sin crear nada.
