@@ -1229,6 +1229,9 @@ function construirCasosGestion(params: {
 }): { casos: CasoGestion[]; nGestionados: number } {
   const { filas, gestionados, montos, pais } = params
   const conTipo = filas
+    // Deal en "Cierre Perdido" en Zoho → fuera de la cola de gestión (pedido
+    // Lalo 05-ago): la oportunidad ya se dio por perdida, no hay acción.
+    .filter((f) => !/perdido/i.test(f.estadoZoho))
     .map((f) => ({ f, tipo: tipoAccionDe(f) }))
     .filter((x): x is { f: FilaListado; tipo: TipoAccion } => x.tipo !== null)
   const nGestionados = conTipo.filter((x) => gestionados.has(digits(x.f.contacto))).length
