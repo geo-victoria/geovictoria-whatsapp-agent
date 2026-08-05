@@ -1319,7 +1319,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td data-l="Primer contacto" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
           <td data-l="Estado"><span class="tag">${esc(c.estado)}</span></td>
           <td data-l="Últ. actividad" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">hace ${dias < 1 ? `${Math.round(dias * 24)} h` : `${Math.round(dias)} d`}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
-          <td data-l="Monto/mes" style="white-space:nowrap;text-align:right">${c.monto}</td>
+          <td data-l="Recurrente" style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td data-l="Accionable">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
           <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
         </tr>`
@@ -1330,7 +1330,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>¿Listo?</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Última actividad en Zoho</th><th style="text-align:right">Monto/mes</th><th style="width:38%">Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
+      <thead><tr><th>¿Listo?</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Última actividad en Zoho</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
