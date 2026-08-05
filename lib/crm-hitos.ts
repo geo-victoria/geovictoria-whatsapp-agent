@@ -684,8 +684,11 @@ async function convertirConDeal(
     // vic_ptv activo, al cliente YA se le presentó ese ejecutivo (con nombre,
     // correo y WhatsApp) — sortear el deal a otra persona rompe la promesa.
     // El deal se asigna directo al ejecutivo del traspaso, sin tómbola.
+    // EXCEPTO COLOMBIA (regla equipo 05-ago, caso Jotapartes): el deal de un
+    // hito no-formal nace y SE QUEDA con Galindo — un vic_ptv del TTV viejo
+    // (Gordillo, muchas veces ni siquiera presentado al cliente) no lo pisa.
     let asignadoPorTraspaso = false
-    if (!heredaDuenoHumano) {
+    if (!heredaDuenoHumano && territorio !== "Colombia") {
       try {
         const { vendedorTraspasado } = await import("./loop-v2")
         const v = await vendedorTraspasado(contact.replace(/\D/g, ""))
