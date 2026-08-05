@@ -1,0 +1,19 @@
+{
+  "name": "wa-espejo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Espejo SOLO LECTURA del WhatsApp Business de un ejecutivo (dispositivo vinculado) hacia Supabase. Jamás envía mensajes.",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4"
+  }
+}
