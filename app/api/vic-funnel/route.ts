@@ -1544,16 +1544,32 @@ function renderEvolucionDiaria(params: {
     if (!tel || !delPais(tel)) continue
     suma(sCom, inicioPorContacto.get(tel))
   }
-  for (const [tel, at] of preformAt) {
-    if (delPais(tel)) suma(sPreform, inicioPorContacto.get(tel) || at)
+  // COHORTE COMPLETA (Lalo 05-ago: "ningún hito posterior puede contabilizar
+  // más que un hito previo"). TODAS las series se fechan por el día de INICIO
+  // del chat: cada día muestra cuántas de las conversaciones iniciadas ese
+  // día llegaron a cada etapa. Tener formal implica haber visto precio (la
+  // serie de precio incluye a los contactos con formal aunque el tracking
+  // del preform no los tenga). Cotización sin conversación conocida →
+  // fallback a su fecha de emisión (residual: toda cotización de Vicky nace
+  // de una conversación).
+  const precioTels = new Set(preformAt.keys())
+  for (const q of quotes) {
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    if (tel) precioTels.add(tel)
+  }
+  for (const tel of precioTels) {
+    if (!delPais(tel)) continue
+    suma(sPreform, inicioPorContacto.get(tel) || preformAt.get(tel) || "")
   }
   for (const q of quotes) {
-    suma(sFormal, q.Created_Time)
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    const inicio = (tel && inicioPorContacto.get(tel)) || ""
+    suma(sFormal, inicio || q.Created_Time)
     const pagada = Boolean(String(q.Onboarding_Link || "").trim())
     const aceptada = pagada || String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
     const fechaPago = q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time
-    if (aceptada) suma(sAcept, fechaPago)
-    if (pagada) suma(sPag, fechaPago)
+    if (aceptada) suma(sAcept, inicio || fechaPago)
+    if (pagada) suma(sPag, inicio || fechaPago)
   }
 
   const trazas = [
@@ -1573,7 +1589,7 @@ function renderEvolucionDiaria(params: {
     : ""
   return `<div class="card"><h2>📈 Evolución <span class="pct" style="font-weight:400">— ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span>${selector}</h2>
   <div id="evoDiaria" style="height:340px"></div>
-  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). Conversaciones, intención comercial y precio mostrado se fechan por el día de INICIO del chat (cohorte — así el embudo nunca se cruza: ver precio implica intención); formales por emisión en Zoho; aceptadas y pagadas por su fecha de aceptación/pago. Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). TODAS las series se fechan por el día de INICIO del chat (cohorte): cada día muestra cuántas de las conversaciones iniciadas ese día llegaron a cada etapa — por eso el embudo nunca se cruza, y un día reciente puede subir después (sus formales/pagos llegan con rezago). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias)};
