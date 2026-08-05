@@ -38,11 +38,14 @@ async function kvGet(key: string): Promise<string> {
 
 async function authorized(req: Request): Promise<boolean> {
   const url = new URL(req.url)
-  if (CRON_SECRET && (url.searchParams.get("key") || "").trim() === CRON_SECRET) return true
+  const key = (url.searchParams.get("key") || "").trim()
+  if (CRON_SECRET && key === CRON_SECRET) return true
+  // La página se abre en un navegador para mostrarle el QR al ejecutivo:
+  // se acepta el secreto operativo también por ?key= (no solo por header).
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
-  if (xcron) {
+  if (xcron || key) {
     const expected = await getFollowupCronSecret().catch(() => "")
-    if (expected && xcron === expected) return true
+    if (expected && (xcron === expected || key === expected)) return true
   }
   return false
 }
