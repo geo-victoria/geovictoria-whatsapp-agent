@@ -812,6 +812,30 @@ type FilaListado = {
   zohoUrl: string
 }
 
+/** Horas desde el último contacto real de la fila (chat o Zoho). */
+function horasDesdeFila(f: FilaListado): number {
+  const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
+  return Number.isFinite(t) ? (Date.now() - t) / 3600e3 : 9999
+}
+
+/** Días hábiles COMPLETOS (L-V) transcurridos desde el último contacto. */
+function diasHabilesDesdeFila(f: FilaListado): number {
+  const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
+  if (!Number.isFinite(t)) return 99
+  const cur = new Date(t)
+  cur.setHours(0, 0, 0, 0)
+  cur.setDate(cur.getDate() + 1)
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  let n = 0
+  while (cur <= hoy) {
+    const dw = cur.getDay()
+    if (dw !== 0 && dw !== 6) n++
+    cur.setDate(cur.getDate() + 1)
+  }
+  return n
+}
+
 /** Máximo de fechas ISO comparando por instante real (los formatos mezclan
  * offsets de Supabase y Zoho — la comparación lexicográfica miente). */
 function maxIso(...vals: Array<string | null | undefined>): string {
@@ -1684,8 +1708,10 @@ function renderTrabajoEjecutivos(params: {
   usuarios: Map<string, number>
   rango: RangoFechas | null
   pais: Pais
+  /** Query string base para los links de detalle de cada número. */
+  qsPanel?: string
 }): string {
-  const { filas, quotes, feesPorQuote, usuarios, rango, pais } = params
+  const { filas, quotes, feesPorQuote, usuarios, rango, pais, qsPanel = "" } = params
   const ahora = Date.now()
   const vivas = filas.filter((f) => !/perdido/i.test(f.estadoZoho))
   const nombreDe = (p: string) => (p && p !== "—" ? p : "(sin ejecutivo)")
@@ -1728,27 +1754,8 @@ function renderTrabajoEjecutivos(params: {
     return `<b>${monto}</b><div class="sub" style="margin:0;font-size:11px">${v.n} venta${v.n === 1 ? "" : "s"}/mes</div>`
   }
 
-  const horasDesde = (f: FilaListado): number => {
-    const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
-    return Number.isFinite(t) ? (ahora - t) / 3600e3 : 9999
-  }
-  // Días hábiles COMPLETOS transcurridos desde el último contacto (L-V).
-  const diasHabilesDesde = (f: FilaListado): number => {
-    const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
-    if (!Number.isFinite(t)) return 99
-    const cur = new Date(t)
-    cur.setHours(0, 0, 0, 0)
-    cur.setDate(cur.getDate() + 1)
-    const hoy = new Date(ahora)
-    hoy.setHours(0, 0, 0, 0)
-    let n = 0
-    while (cur <= hoy) {
-      const dw = cur.getDay()
-      if (dw !== 0 && dw !== 6) n++
-      cur.setDate(cur.getDate() + 1)
-    }
-    return n
-  }
+  const horasDesde = horasDesdeFila
+  const diasHabilesDesde = diasHabilesDesdeFila
 
   const nombres = [...new Set([...porEjecutivo.keys(), ...ventas.keys()])]
   const filasTabla = nombres
@@ -1782,18 +1789,24 @@ function renderTrabajoEjecutivos(params: {
     tot.venta.clp += v.clp
     tot.venta.n += v.n
   }
+  // Cada número es clickeable (pedido Lalo 06-ago): abre el detalle de esas
+  // empresas (?ejdet=<dimensión>&ejec=<ejecutivo>).
+  const lnk = (ejec: string, dim: string, contenido: string, n: number) =>
+    qsPanel && n > 0
+      ? `<a href="?${qsPanel}&ejdet=${encodeURIComponent(dim)}&ejec=${encodeURIComponent(ejec)}" style="text-decoration:none" title="Ver el detalle de estas empresas">${contenido}</a>`
+      : contenido
   const alerta = (n: number) => (n > 0 ? `<span style="color:#C62828;font-weight:700">${n}</span>` : `<span style="color:#9aa0a8">0</span>`)
   const filaHtml = (r: (typeof filasTabla)[number], esTotal = false) => `<tr${esTotal ? ` style="border-top:2px solid #c9ced4;font-weight:700"` : ""}>
       <td>${esc(r.e)}</td>
-      <td style="text-align:center"><b>${r.ops}</b></td>
-      <td style="text-align:center">${r.asignadas}</td>
-      ${r.porSegmento.map((n) => `<td style="text-align:center;background:#fbfcfd">${n || `<span style="color:#c9ced4">·</span>`}</td>`).join("")}
-      ${r.porEtapa.map((n) => `<td style="text-align:center">${n || `<span style="color:#c9ced4">·</span>`}</td>`).join("")}
+      <td style="text-align:center">${lnk(r.e, "manejando", `<b>${r.ops}</b>`, r.ops)}</td>
+      <td style="text-align:center">${lnk(r.e, "asignadas", String(r.asignadas), r.asignadas)}</td>
+      ${r.porSegmento.map((n, i) => `<td style="text-align:center;background:#fbfcfd">${n ? lnk(r.e, `seg:${SEGMENTOS_DOTACION[i]}`, String(n), n) : `<span style="color:#c9ced4">·</span>`}</td>`).join("")}
+      ${r.porEtapa.map((n, i) => `<td style="text-align:center">${n ? lnk(r.e, `etapa:${ESTADOS_LISTADO[i]}`, String(n), n) : `<span style="color:#c9ced4">·</span>`}</td>`).join("")}
       <td style="text-align:right">${fmtVenta(r.venta)}</td>
-      <td style="text-align:center">${alerta(r.s2)}</td>
-      <td style="text-align:center">${alerta(r.s5)}</td>
-      <td style="text-align:center">${alerta(r.s24)}</td>
-      <td style="text-align:center">${alerta(r.s2d)}</td>
+      <td style="text-align:center">${lnk(r.e, "s2", alerta(r.s2), r.s2)}</td>
+      <td style="text-align:center">${lnk(r.e, "s5", alerta(r.s5), r.s5)}</td>
+      <td style="text-align:center">${lnk(r.e, "s24", alerta(r.s24), r.s24)}</td>
+      <td style="text-align:center">${lnk(r.e, "s2d", alerta(r.s2d), r.s2d)}</td>
     </tr>`
   return `<div class="card"><h2>👥 Trabajo por ejecutivo <span class="pct" style="font-weight:400">— oportunidades vivas de los últimos 30 días · ${rango ? `período ${esc(rango.etiqueta)}` : "período: últimos 30 días"}</span></h2>
   <div style="overflow-x:auto"><table style="font-size:12.5px">
@@ -1813,6 +1826,76 @@ function renderTrabajoEjecutivos(params: {
   </table></div>
   <div class="sub" style="margin-top:8px">"Manejando" = oportunidades vivas de los últimos 30 días a nombre del ejecutivo (excluye Cierre Perdido). "Asignadas período" cuenta por fecha de primer contacto. Los tramos (1-10 a &gt;50) reparten las empresas según la dotación cotizada (subform de la cotización o preform del chat; s/d = sin dato). "Vendido recurrente" suma el fee mensual de las cotizaciones pagadas en el período (dueño de la cotización). Las columnas de antigüedad usan el último contacto real (chat o actividad en Zoho) y son acumulativas.</div>
 </div>`
+}
+
+/** Detalle de un número del panel por ejecutivo (pedido Lalo 06-ago): la
+ * lista de empresas detrás de la celda clickeada. */
+function renderDetalleEjecutivo(params: {
+  filas: FilaListado[]
+  titulo: string
+  key: string
+  volverQS: string
+  montos: Map<string, { uf: number | null; clp: number | null }>
+  usuarios: Map<string, number>
+  wspSet: Set<string>
+  pais: Pais
+}): Response {
+  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais } = params
+  const simbolo = pais === "pe" ? "S/ " : "$"
+  const montoTxt = (tel: string): string => {
+    const m = montos.get(tel)
+    if (!m) return "—"
+    if (pais === "cl" && m.uf) return `UF ${m.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
+    if (m.clp) return `${simbolo}${Math.round(m.clp).toLocaleString("es-CL")}`
+    if (m.uf) return `${simbolo}${Math.round(m.uf).toLocaleString("es-CL")}`
+    return "—"
+  }
+  const filasHtml = [...filas]
+    .sort((a, b) => horasDesdeFila(b) - horasDesdeFila(a))
+    .map((f) => {
+      const tel = digits(f.contacto)
+      const h = horasDesdeFila(f)
+      const links = [
+        f.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(f.convId)}" style="font-size:12px">📄 ver chat</a>` : "",
+        f.zohoUrl ? `<a href="${esc(f.zohoUrl)}" target="_blank" rel="noopener" style="font-size:12px">🔗 Zoho</a>` : "",
+        wspSet.has(tel) ? `<a href="?key=${encodeURIComponent(key)}&wsp=${encodeURIComponent(tel)}" target="_blank" style="font-size:12px">📱 wsp</a>` : "",
+      ].filter(Boolean).join(" · ")
+      return `<tr>
+        <td><b>${esc(f.empresa)}</b><div class="sub" style="margin:0;font-size:12px">+${esc(tel)}</div>${links ? `<div style="margin-top:2px">${links}</div>` : ""}</td>
+        <td>${esc(f.propietario)}</td>
+        <td><span class="tag">${esc(f.estado)}</span></td>
+        <td style="text-align:center">${usuarios.get(tel) || "s/d"}</td>
+        <td style="white-space:nowrap">hace ${h < 24 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`}<div class="sub" style="margin:0;font-size:11px">${fmtSantiago(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}</div></td>
+        <td style="text-align:right;white-space:nowrap">${montoTxt(tel)}</td>
+        <td style="max-width:320px">${esc(f.accionable)}</td>
+      </tr>`
+    })
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titulo)} — Vicky</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:20px;margin:0 0 4px;color:#4e4e4e}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:16px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  th{color:#6b7280;font-weight:600;font-size:12px}
+  .tag{display:inline-block;background:#e6f8fe;color:#4e4e4e;font-size:11px;padding:2px 8px;border-radius:99px}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+</style></head><body><div class="wrap">
+  <p><a href="${volverQS}">← Volver al análisis</a></p>
+  <h1>${esc(titulo)}</h1>
+  <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto</div>
+  <div class="card">${
+    filas.length
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th style="text-align:center">Dotación</th><th>Última actividad</th><th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
+      : `<p class="sub" style="margin:0">Sin empresas para este corte.</p>`
+  }</div>
+</div></body></html>`
+  return page(html)
 }
 
 /** Resumen de EMPRESAS ingresadas en el período (pedido Lalo 05-ago): cuántas
@@ -2347,6 +2430,7 @@ export async function GET(req: Request): Promise<Response> {
   let ejecutivosHtml = ""
   let empresasHtml = ""
   let wspVendedorSet = new Set<string>()
+  let usuariosPorContacto = new Map<string, number>()
   let casosGestion: CasoGestion[] = []
   let nGestionadosCola = 0
   let gestionados = new Map<string, string>()
@@ -2398,7 +2482,7 @@ export async function GET(req: Request): Promise<Response> {
       wspVendedorSet = new Set(espejoTels.map((x) => digits(String(x.telefono_chat || ""))).filter(Boolean))
       // Dotación por contacto: parseo del preform como base; el subform de la
       // cotización (fees) la pisa después porque es la fuente autoritativa.
-      const usuariosPorContacto = new Map<string, number>(preformData.usuarios)
+      usuariosPorContacto = new Map<string, number>(preformData.usuarios)
       gestionados = new Map(gestionadosKv.map((g) => [String(g.key).replace(/^gestion_/, ""), String(g.value || "")]))
       for (const p of punteros) {
         const d = digits(p.contact)
@@ -2442,6 +2526,14 @@ export async function GET(req: Request): Promise<Response> {
       try {
         const pagadas = (cierre?.todasList || []).filter((q) => q.id && String(q.Onboarding_Link || "").trim())
         const feesPorQuote = await fetchFeesMensuales(pagadas.map((q) => ({ contact: String(q.id), quoteId: String(q.id) })))
+        const qsPanel = (() => {
+          const p = new URLSearchParams({ key, pais })
+          if (rango?.desdeStr) p.set("desde", rango.desdeStr)
+          if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
+          if (estadoF) p.set("estado", estadoF)
+          if (propF) p.set("prop", propF)
+          return p.toString()
+        })()
         ejecutivosHtml = renderTrabajoEjecutivos({
           filas: filasListado,
           quotes: cierre?.todasList || [],
@@ -2449,6 +2541,7 @@ export async function GET(req: Request): Promise<Response> {
           usuarios: usuariosPorContacto,
           rango,
           pais,
+          qsPanel,
         })
         empresasHtml = renderEmpresasPeriodo({ filas: filasListado, usuarios: usuariosPorContacto, rango })
       } catch (e) {
@@ -2456,6 +2549,58 @@ export async function GET(req: Request): Promise<Response> {
       }
     } catch (e) {
       console.warn("[vic-funnel] listado comercial falló:", e instanceof Error ? e.message : e)
+    }
+    // Detalle de una celda del panel por ejecutivo (?ejdet=<dim>&ejec=<nombre>).
+    const ejdet = (searchParams.get("ejdet") || "").trim()
+    if (ejdet) {
+      const ejecQ = (searchParams.get("ejec") || "").trim()
+      const enPeriodoEj = (iso: string) => (rango ? enRango(iso, rango) : Date.parse(iso) >= Date.now() - 30 * 864e5)
+      const nombreDe = (p: string) => (p && p !== "—" ? p : "(sin ejecutivo)")
+      let sub = filasListado.filter((f) => !/perdido/i.test(f.estadoZoho))
+      if (ejecQ && ejecQ !== "TOTAL") sub = sub.filter((f) => nombreDe(f.propietario) === ejecQ)
+      let dimTxt = "oportunidades vivas"
+      if (ejdet === "asignadas") {
+        sub = sub.filter((f) => f.primerContactoIso && enPeriodoEj(f.primerContactoIso))
+        dimTxt = "asignadas en el período"
+      } else if (ejdet.startsWith("seg:")) {
+        const s = ejdet.slice(4)
+        sub = sub.filter((f) => segmentoDotacion(usuariosPorContacto.get(digits(f.contacto))) === s)
+        dimTxt = s === "s/d" ? "empresas sin dato de tamaño" : `empresas de ${s} personas`
+      } else if (ejdet.startsWith("etapa:")) {
+        const e = ejdet.slice(6)
+        sub = sub.filter((f) => f.estado === e)
+        dimTxt = `en etapa "${e}"`
+      } else if (ejdet === "s2") {
+        sub = sub.filter((f) => horasDesdeFila(f) > 2)
+        dimTxt = "sin contacto hace más de 2 horas"
+      } else if (ejdet === "s5") {
+        sub = sub.filter((f) => horasDesdeFila(f) > 5)
+        dimTxt = "sin contacto hace más de 5 horas"
+      } else if (ejdet === "s24") {
+        sub = sub.filter((f) => horasDesdeFila(f) > 24)
+        dimTxt = "sin contacto hace más de 1 día"
+      } else if (ejdet === "s2d") {
+        sub = sub.filter((f) => diasHabilesDesdeFila(f) >= 2)
+        dimTxt = "sin contacto hace 2 o más días hábiles"
+      }
+      const volver = (() => {
+        const p = new URLSearchParams({ key, pais, vista: "analisis" })
+        if (rango?.desdeStr) p.set("desde", rango.desdeStr)
+        if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
+        if (estadoF) p.set("estado", estadoF)
+        if (propF) p.set("prop", propF)
+        return `?${p.toString()}`
+      })()
+      return renderDetalleEjecutivo({
+        filas: sub,
+        titulo: `${ejecQ && ejecQ !== "TOTAL" ? ejecQ : "Todos los ejecutivos"} — ${dimTxt}`,
+        key,
+        volverQS: volver,
+        montos: montosPorContacto,
+        usuarios: usuariosPorContacto,
+        wspSet: wspVendedorSet,
+        pais,
+      })
     }
     propietariosAll = [...new Set(filasListado.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
     // Contactos que pasan el filtro Estado/Propietario (null = sin filtro).
