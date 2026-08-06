@@ -812,6 +812,18 @@ type FilaListado = {
   zohoUrl: string
 }
 
+/** "hace 23 min" / "hace 3 h 12 min" / "hace 2 d 5 h" desde una fecha ISO. */
+function haceTexto(iso: string): string {
+  const t = Date.parse(iso || "")
+  if (!Number.isFinite(t)) return "—"
+  const min = Math.max(0, Math.round((Date.now() - t) / 60000))
+  if (min < 60) return `hace ${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `hace ${h} h ${min % 60} min`
+  const d = Math.floor(h / 24)
+  return `hace ${d} d ${h % 24} h`
+}
+
 /** Horas desde el último contacto real de la fila (chat o Zoho). */
 function horasDesdeFila(f: FilaListado): number {
   const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
@@ -1272,6 +1284,8 @@ type CasoGestion = {
   horaLocal: string
   llamable: boolean
   monto: string
+  /** Valor numérico del recurrente para ordenar (UF, o CLP normalizado). */
+  montoOrden: number
   diasSinContacto: number
   accionable: string
   resumen: string
@@ -1347,6 +1361,7 @@ function construirCasosGestion(params: {
       horaLocal: hl.hora,
       llamable: hl.llamable,
       monto: montoTxt,
+      montoOrden: montoUF,
       diasSinContacto: Math.round(dias * 10) / 10,
       accionable: f.accionable,
       resumen: f.resumen,
@@ -1381,7 +1396,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     }
     return `<tr data-contact="${esc(c.contacto)}"${c.gestionado ? ` class="filaGest" style="opacity:.4;display:none"` : ""}>
           <td class="tdBtn" style="white-space:nowrap;vertical-align:middle">${btn}</td>
-          <td class="tdEmp">${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div>${(() => {
+          <td class="tdEmp" data-sort="${esc(c.empresa.toLowerCase())}">${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div>${(() => {
             const links = [
               c.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" style="font-size:13px">📄 ver chat</a>` : "",
               c.zohoUrl ? `<a href="${esc(c.zohoUrl)}" target="_blank" rel="noopener" title="Abrir el registro en Zoho CRM" style="font-size:13px">🔗 Zoho</a>` : "",
@@ -1389,11 +1404,11 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
             ].filter(Boolean).join(" · ")
             return links ? `<div style="margin-top:3px">${links}</div>` : ""
           })()}</td>
-          <td data-l="Primer contacto" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
-          <td data-l="Estado"><span class="tag">${esc(c.estado)}</span></td>
-          <td data-l="Últ. actividad" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">hace ${dias < 1 ? `${Math.round(dias * 24)} h` : `${Math.round(dias)} d`}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
-          <td data-l="Recurrente" style="white-space:nowrap;text-align:right">${c.monto}</td>
-          <td data-l="Accionable">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
+          <td data-l="Primer contacto" data-sort="${Date.parse(c.primerContactoIso || "") || 0}" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
+          <td data-l="Estado" data-sort="${esc(c.estado.toLowerCase())}"><span class="tag">${esc(c.estado)}</span></td>
+          <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
+          <td data-l="Recurrente" data-sort="${c.montoOrden || 0}" style="white-space:nowrap;text-align:right">${c.monto}</td>
+          <td data-l="Accionable" data-sort="${esc(c.accionable.toLowerCase().slice(0, 80))}">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
           <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
         </tr>`
   }
@@ -1403,7 +1418,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th>Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Última actividad en Zoho</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th style="padding-left:10px">WA</th></tr></thead>
+      <thead><tr><th class="noSort">Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Última actividad en Zoho</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th class="noSort" style="padding-left:10px">WA</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
@@ -1509,6 +1524,41 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
         var ocultas = filas.length && filas[0].style.display === "none";
         filas.forEach(function (f) { f.style.display = ocultas ? "" : "none"; });
         this.textContent = ocultas ? "ocultar" : "mostrar";
+      });
+      // Orden por columnas (pedido Lalo 06-ago): clic en un encabezado ordena
+      // esa sección asc/desc — números por valor, textos A-Z / Z-A.
+      document.querySelectorAll(".colaGest table").forEach(function (tabla) {
+        var ths = tabla.querySelectorAll("thead th");
+        ths.forEach(function (th, idx) {
+          if (th.classList.contains("noSort")) return;
+          th.style.cursor = "pointer";
+          th.title = "Ordenar por esta columna";
+          th.addEventListener("click", function () {
+            var asc = th.dataset.dir !== "asc";
+            ths.forEach(function (o) {
+              delete o.dataset.dir;
+              o.textContent = o.textContent.replace(/ [▲▼]$/, "");
+            });
+            th.dataset.dir = asc ? "asc" : "desc";
+            th.textContent = th.textContent + (asc ? " ▲" : " ▼");
+            var tbody = tabla.querySelector("tbody");
+            var filas = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+            var valor = function (tr) {
+              var td = tr.children[idx];
+              if (!td) return "";
+              return td.dataset.sort !== undefined ? td.dataset.sort : td.textContent.trim().toLowerCase();
+            };
+            var numerico = filas.every(function (tr) { var v = valor(tr); return v === "" || !isNaN(parseFloat(v)); });
+            filas.sort(function (a, b) {
+              var va = valor(a), vb = valor(b);
+              var r = numerico
+                ? (parseFloat(va) || 0) - (parseFloat(vb) || 0)
+                : String(va).localeCompare(String(vb), "es");
+              return asc ? r : -r;
+            });
+            filas.forEach(function (tr) { tbody.appendChild(tr); });
+          });
+        });
       });
     })();
   </script>
@@ -1865,7 +1915,7 @@ function renderDetalleEjecutivo(params: {
         <td>${esc(f.propietario)}</td>
         <td><span class="tag">${esc(f.estado)}</span></td>
         <td style="text-align:center">${usuarios.get(tel) || "s/d"}</td>
-        <td style="white-space:nowrap">hace ${h < 24 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`}<div class="sub" style="margin:0;font-size:11px">${fmtSantiago(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}</div></td>
+        <td style="white-space:nowrap">${haceTexto(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}<div class="sub" style="margin:0;font-size:11px">${fmtSantiago(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}</div></td>
         <td style="text-align:right;white-space:nowrap">${montoTxt(tel)}</td>
         <td style="max-width:320px">${esc(f.accionable)}</td>
       </tr>`
@@ -2393,9 +2443,9 @@ export async function GET(req: Request): Promise<Response> {
   // Filtros globales de ESTADO y PROPIETARIO (pedido Lalo 03-ago): aplican a
   // TODAS las secciones. El estado/propietario de cada contacto sale de la
   // escalera del listado comercial (universo: últimos 30 días).
-  const estadoRaw = (searchParams.get("estado") || "").trim()
-  const estadoF = ESTADOS_LISTADO.includes(estadoRaw) ? estadoRaw : ""
-  const propF = (searchParams.get("prop") || "").trim()
+  // Multi-selección (pedido Lalo 06-ago): ?estado= y ?prop= pueden repetirse.
+  const estadoF = searchParams.getAll("estado").map((s) => s.trim()).filter((s) => ESTADOS_LISTADO.includes(s))
+  const propF = searchParams.getAll("prop").map((s) => s.trim()).filter(Boolean)
   // Vista: "gestion" (default, la cola de trabajo) o "analisis" (KPIs, Sankey
   // y el resto del embudo) — pestaña arriba a la derecha (pedido Lalo 04-ago).
   const vista: "gestion" | "analisis" = searchParams.get("vista") === "analisis" ? "analisis" : "gestion"
@@ -2407,8 +2457,8 @@ export async function GET(req: Request): Promise<Response> {
     const p = new URLSearchParams({ key, pais })
     if (rango?.desdeStr) p.set("desde", rango.desdeStr)
     if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
-    if (estadoF) p.set("estado", estadoF)
-    if (propF) p.set("prop", propF)
+    for (const e of estadoF) p.append("estado", e)
+    for (const pr of propF) p.append("prop", pr)
     if (vista === "analisis") p.set("vista", "analisis")
     return p
   }
@@ -2545,8 +2595,8 @@ export async function GET(req: Request): Promise<Response> {
           const p = new URLSearchParams({ key, pais })
           if (rango?.desdeStr) p.set("desde", rango.desdeStr)
           if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
-          if (estadoF) p.set("estado", estadoF)
-          if (propF) p.set("prop", propF)
+          for (const e of estadoF) p.append("estado", e)
+          for (const pr of propF) p.append("prop", pr)
           return p.toString()
         })()
         ejecutivosHtml = renderTrabajoEjecutivos({
@@ -2602,8 +2652,8 @@ export async function GET(req: Request): Promise<Response> {
         const p = new URLSearchParams({ key, pais, vista: "analisis" })
         if (rango?.desdeStr) p.set("desde", rango.desdeStr)
         if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
-        if (estadoF) p.set("estado", estadoF)
-        if (propF) p.set("prop", propF)
+        for (const e of estadoF) p.append("estado", e)
+        for (const pr of propF) p.append("prop", pr)
         return `?${p.toString()}`
       })()
       return renderDetalleEjecutivo({
@@ -2619,9 +2669,9 @@ export async function GET(req: Request): Promise<Response> {
     }
     propietariosAll = [...new Set(filasListado.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
     // Contactos que pasan el filtro Estado/Propietario (null = sin filtro).
-    const coincide = (f: FilaListado) => (!estadoF || f.estado === estadoF) && (!propF || f.propietario === propF)
+    const coincide = (f: FilaListado) => (!estadoF.length || estadoF.includes(f.estado)) && (!propF.length || propF.includes(f.propietario))
     const permitidos: Set<string> | null =
-      estadoF || propF
+      estadoF.length || propF.length
         ? new Set(filasListado.filter(coincide).map((f) => digits(f.contacto)).filter(Boolean))
         : null
     // Filtro Desde–Hasta sobre el listado (pedido Lalo 04-ago): con rango
@@ -2644,8 +2694,8 @@ export async function GET(req: Request): Promise<Response> {
       const p = new URLSearchParams({ key, pais })
       if (rango?.desdeStr) p.set("desde", rango.desdeStr)
       if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
-      if (estadoF) p.set("estado", estadoF)
-      if (propF) p.set("prop", propF)
+      for (const e of estadoF) p.append("estado", e)
+      for (const pr of propF) p.append("prop", pr)
       return p.toString()
     })()
     colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga, wspVendedorSet)
@@ -2756,12 +2806,12 @@ export async function GET(req: Request): Promise<Response> {
   // casos (p. ej. un trato asignado hoy cuya conversación partió antes): en la
   // vista de gestión se sigue de largo y se muestra la cola (06-ago).
   if (rows.length === 0 && !(vista === "gestion" && casosGestion.length > 0)) {
-    if (estadoF || propF) {
+    if (estadoF.length || propF.length) {
       return paginaAviso(
         "Sin conversaciones para este filtro",
         `<p>No hay casos con ${[
-          estadoF ? `estado <b>${esc(estadoF)}</b>` : "",
-          propF ? `propietario <b>${esc(propF)}</b>` : "",
+          estadoF.length ? `estado <b>${esc(estadoF.join(", "))}</b>` : "",
+          propF.length ? `propietario <b>${esc(propF.join(", "))}</b>` : "",
         ].filter(Boolean).join(" y ")} en el período.</p><p><a href="?key=${encodeURIComponent(key)}&pais=${pais}">← Quitar filtros</a></p>`,
       )
     }
@@ -2848,8 +2898,8 @@ export async function GET(req: Request): Promise<Response> {
     const filtroTxt = [
       `Vicky ${PAISES[pais].nombre}`,
       rango ? `📅 ${rango.etiqueta}` : "últimos 30 días de actividad",
-      estadoF ? `Estado: ${estadoF}` : "",
-      propF ? `Propietario: ${propF}` : "",
+      estadoF.length ? `Estado: ${estadoF.join(", ")}` : "",
+      propF.length ? `Propietario: ${propF.join(", ")}` : "",
       `generado ${fmtSantiago(new Date().toISOString())}`,
     ].filter(Boolean).join(" · ")
     const filasImp = casosGestion.map((c) => `<tr>
@@ -3138,16 +3188,14 @@ export async function GET(req: Request): Promise<Response> {
       ${vista === "analisis" ? `<input type="hidden" name="vista" value="analisis">` : ""}
       <label style="font-size:12px">Desde <input type="date" name="desde" value="${rango ? rango.desdeStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <label style="font-size:12px">Hasta <input type="date" name="hasta" value="${rango ? rango.hastaStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
-      <label style="font-size:12px">Estado <select name="estado" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px">
-        <option value="">Todos</option>
-        ${ESTADOS_LISTADO.map((e) => `<option${estadoF === e ? " selected" : ""}>${e}</option>`).join("")}
+      <label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varias; sin selección = todos">Estado<br><select name="estado" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:130px">
+        ${ESTADOS_LISTADO.map((e) => `<option${estadoF.includes(e) ? " selected" : ""}>${e}</option>`).join("")}
       </select></label>
-      <label style="font-size:12px">Propietario <select name="prop" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px">
-        <option value="">Todos</option>
-        ${propietariosAll.map((p) => `<option value="${esc(p)}"${propF === p ? " selected" : ""}>${esc(p)}</option>`).join("")}
+      <label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varios; sin selección = todos">Propietario<br><select name="prop" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:150px">
+        ${propietariosAll.map((p) => `<option value="${esc(p)}"${propF.includes(p) ? " selected" : ""}>${esc(p)}</option>`).join("")}
       </select></label>
       <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
-      ${rango || estadoF || propF ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtros</a>` : ""}
+      ${rango || estadoF.length || propF.length ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtros</a>` : ""}
     </form>
   </div>
 
