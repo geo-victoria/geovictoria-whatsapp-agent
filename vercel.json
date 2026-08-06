@@ -28,7 +28,7 @@
       "schedule": "0 20 * * 1-5"
     },
     {
-      "path": "/api/vic-funnel-cron",
+      "path": "/api/vic-funnel-cron?limit=60",
       "schedule": "0 * * * *"
     },
     {
