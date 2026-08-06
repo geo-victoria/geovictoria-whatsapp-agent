@@ -39,9 +39,9 @@ export async function POST(req: Request): Promise<Response> {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
-  let body: { quoteId?: string; token?: string } = {}
+  let body: { quoteId?: string; token?: string; ufOverride?: number } = {}
   try {
-    body = (await req.json()) as { quoteId?: string; token?: string }
+    body = (await req.json()) as { quoteId?: string; token?: string; ufOverride?: number }
   } catch {
     return NextResponse.json({ ok: false, error: "body JSON inválido" }, { status: 400 })
   }
@@ -57,7 +57,11 @@ export async function POST(req: Request): Promise<Response> {
         "Content-Type": "application/json",
         ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
       },
-      body: JSON.stringify(quoteId ? { quoteId } : { token }),
+      body: JSON.stringify({
+        ...(quoteId ? { quoteId } : { token }),
+        // UF explícita para regenerar con la UF original de la cotización.
+        ...(Number(body.ufOverride) > 0 ? { ufOverride: Number(body.ufOverride) } : {}),
+      }),
       cache: "no-store",
     })
     const data = await r.json().catch(() => null)
