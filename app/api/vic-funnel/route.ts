@@ -2118,7 +2118,8 @@ async function renderConversation(convId: string, key: string): Promise<Response
   const bubbles = msgs
     .map((m) => {
       const user = m.role === "user"
-      return `<div class="msg ${user ? "u" : "a"}"><div class="who">${user ? "Cliente" : "Vicky"}</div><div class="txt">${esc(m.content)}</div></div>`
+      const cuando = m.at ? ` · ${fmtSantiago(String(m.at))}` : ""
+      return `<div class="msg ${user ? "u" : "a"}"><div class="who">${user ? "Cliente" : "Vicky"}${cuando}</div><div class="txt">${esc(m.content)}</div></div>`
     })
     .join("")
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
