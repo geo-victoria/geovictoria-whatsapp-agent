@@ -54,6 +54,10 @@
     {
       "path": "/api/vic-resumen-diario",
       "schedule": "0 12 * * 1-5"
+    },
+    {
+      "path": "/api/vic-espejo-notas-cron",
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {

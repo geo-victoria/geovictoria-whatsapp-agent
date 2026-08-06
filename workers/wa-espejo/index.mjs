@@ -181,6 +181,9 @@ function extraerTexto(message) {
 
 // Artefactos de protocolo que no son conversación (el sync inicial los
 // dispara a montones — caso piloto 05-ago: filas "desconocido" vacías).
+// Teléfono real por chat @lid, aprendido de los senderPn entrantes.
+const lidAFono = new Map()
+
 const TIPOS_RUIDO = new Set(["reaccion", "protocolMessage", "senderKeyDistributionMessage", "messageContextInfo"])
 
 // ── LID → número real (06-ago) ──────────────────────────────────────────────
