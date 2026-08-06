@@ -27,7 +27,10 @@ type DatosCotizacion = {
 
 export async function datosDeCotizacion(quoteId: string): Promise<DatosCotizacion | null> {
   const token = await getZohoAccessToken()
-  const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}`, {
+  // v3 exige `fields` en el GET de registro único (sin él responde 400).
+  const campos =
+    "Tel_fono_Contacto,PDF_URL,URL_Aceptacion_Web,Numero_Cotizacion,Name,Cuenta_Asociada,Contacto_Asociado"
+  const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=${campos}`, {
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
     cache: "no-store",
   })
