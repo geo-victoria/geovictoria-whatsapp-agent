@@ -40,8 +40,11 @@ describe("los caminos de asignación pasan por la tómbola, no por un nombre fij
 
   test("la tool de cotización muestra al dueño REAL que devolvió el cotizador", () => {
     assert.match(GENERAR, /data\.ejecutivo && data\.ejecutivo\.nombre/)
-    // Eddyluz queda SOLO como último fallback (lectura de owner caída).
-    assert.match(GENERAR, /const EJECUTIVO_DEFAULT = "Eddyluz Mujica"/)
+    // MODELO 06-ago (Lalo): sin dueño humano real el deal ESPERA en Vicky —
+    // el default ya NO es una ejecutiva fija sino la instrucción explícita al
+    // modelo de no presentar a nadie hasta el traspaso.
+    assert.doesNotMatch(GENERAR, /EJECUTIVO_DEFAULT = "Eddyluz/)
+    assert.match(GENERAR, /const EJECUTIVO_DEFAULT = "Vicky \(sin ejecutivo asignado/)
   })
 
   test("el perfil CL conserva a Eddyluz como símil de fallback con datos reales", () => {

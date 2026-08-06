@@ -107,10 +107,11 @@ const COTIZADORA_API_BASE =
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
 const VICKY_COTIZADORA_SECRET = process.env.VICKY_COTIZADORA_SECRET || ""
 const SCOPE_MAX_USUARIOS = 50
-// Desde la tómbola de deals (31-jul) el dueño real viene en la respuesta del
-// cotizador (data.ejecutivo); este default queda solo para cuando esa lectura
-// falla (Zoho caído a mitad del request).
-const EJECUTIVO_DEFAULT = "Eddyluz Mujica"
+// MODELO 06-ago (Lalo): la emisión ya NO sortea — si el cotizador no trae un
+// dueño humano real (herencia/ptv/manual), el deal está ESPERANDO en Vicky y
+// nadie debe ser presentado al cliente: Vicky sigue a cargo hasta que los
+// relojes de traspaso asignen. Este texto se lo dice al modelo tal cual.
+const EJECUTIVO_DEFAULT = "Vicky (sin ejecutivo asignado aún — tú sigues a cargo; no presentes a nadie)"
 const IVA_RATE = 0.19
 
 // Sectores válidos (espejo del prompt y de la picklist de Zoho).

@@ -799,8 +799,23 @@ async function convertirConDeal(
       } catch { /* sin traspaso vigente, sigue el flujo normal */ }
     }
     if (!asignadoPorTraspaso) {
-      if (!heredaDuenoHumano) await aplicarTombolaDeals(String(dealCreado), territorio)
-      else {
+      if (!heredaDuenoHumano) {
+        // MODELO 06-ago (Lalo): en Chile el deal ≤50 nace y ESPERA en el
+        // usuario Vicky (la interina oficial) — SIN sorteo y SIN notificación.
+        // La asignación al vendedor va de la mano con los relojes de traspaso
+        // (120/15/10 min hábiles): asignarEnZoho del cron sortea el deal con
+        // la regla de Zoho recién cuando la conversación se traspasa (caso
+        // Rodrigo/Neumasport: el sorteo en caliente lo alertaba apenas el
+        // cliente veía el precio). Los >50 SÍ se sortean al nacer (doc
+        // Rodrigo 30-jul: deal + tómbola en el acto — no tienen relojes).
+        if (territorio === "Chile" && empleados > 0 && empleados <= 50) {
+          console.log(
+            `[crm-hitos] deal ${dealCreado} (${empleados} empleados) queda en Vicky — sorteo y notificación al traspaso, no en caliente`,
+          )
+        } else {
+          await aplicarTombolaDeals(String(dealCreado), territorio)
+        }
+      } else {
         // Dueño humano heredado (caso Paola/Agrícola Vaticano 04-ago): sin
         // tómbola no salía NINGUNA notificación y el deal nacía en silencio —
         // el dueño se enteraba por casualidad. El correo directo va igual.
