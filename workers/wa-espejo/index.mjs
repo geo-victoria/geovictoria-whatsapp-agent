@@ -183,6 +183,47 @@ function extraerTexto(message) {
 // dispara a montones — caso piloto 05-ago: filas "desconocido" vacías).
 const TIPOS_RUIDO = new Set(["reaccion", "protocolMessage", "senderKeyDistributionMessage", "messageContextInfo"])
 
+// ── LID → número real (06-ago) ──────────────────────────────────────────────
+// WhatsApp enruta muchos chats por su id de privacidad (@lid) y el teléfono
+// real solo viaja aparte (key.senderPn en los mensajes entrantes, y el evento
+// chats.phoneNumberShare). Sin esto, telefono_chat quedaba con los dígitos
+// del LID y el dashboard no podía cruzar el chat con el cliente. El mapa se
+// comparte entre sesiones vía vic_kv wa_lid_pn y cada aprendizaje rellena
+// retroactivamente lo ya espejado de ese chat.
+const lidPn = new Map()
+let lidPnSucio = false
+
+const soloDigitos = (jid) => String(jid || "").replace(/@.*$/, "").replace(/\D/g, "")
+
+async function cargarLidPn() {
+  try {
+    const crudo = await kvGet("wa_lid_pn")
+    for (const [lid, pn] of Object.entries(JSON.parse(crudo || "{}"))) lidPn.set(lid, pn)
+    if (lidPn.size) console.log(`[lid] ${lidPn.size} mapeos LID→número cargados`)
+  } catch {}
+}
+
+function aprenderLid(lidJid, pnJid) {
+  const lid = soloDigitos(lidJid)
+  const pn = soloDigitos(pnJid)
+  if (!lid || !pn || lid === pn || lidPn.get(lid) === pn) return
+  lidPn.set(lid, pn)
+  lidPnSucio = true
+  console.log(`[lid] aprendido ${lid}@lid → +${pn}`)
+  // Backfill: los mensajes ya espejados de ese chat quedan cruzables.
+  sb(`vic_wa_espejo_mensajes?chat_jid=eq.${encodeURIComponent(`${lid}@lid`)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ telefono_chat: pn }),
+  }).catch((e) => console.error("[lid] backfill", e.message))
+}
+
+setInterval(() => {
+  if (!lidPnSucio) return
+  lidPnSucio = false
+  kvSet("wa_lid_pn", JSON.stringify(Object.fromEntries(lidPn)))
+}, 30_000)
+
 async function guardarMensaje(sessionId, m) {
   const jid = m.key?.remoteJid || ""
   // status@broadcast = estados; newsletter = canales. No son conversaciones.
@@ -191,7 +232,14 @@ async function guardarMensaje(sessionId, m) {
   const { tipo, texto } = extraerTexto(m.message)
   if (TIPOS_RUIDO.has(tipo)) return
   if (tipo === "desconocido" && !texto) return
-  const telefonoChat = esGrupo ? null : jid.replace(/@.*$/, "").replace(/\D/g, "") || null
+  const esLid = jid.endsWith("@lid")
+  // En chats @lid el número real viaja en senderPn (mensajes del cliente).
+  if (esLid && !m.key?.fromMe && m.key?.senderPn) aprenderLid(jid, m.key.senderPn)
+  const telefonoChat = esGrupo
+    ? null
+    : esLid
+      ? lidPn.get(soloDigitos(jid)) || null
+      : soloDigitos(jid) || null
   const enviadoAt = m.messageTimestamp
     ? new Date(Number(m.messageTimestamp) * 1000).toISOString()
     : new Date().toISOString()
@@ -333,9 +381,13 @@ async function conectar(sessionId) {
       await guardarMensaje(sessionId, m).catch((e) => console.error(`[${sessionId}] upsert`, e.message))
     }
   })
+
+  // WhatsApp comparte explícitamente el número detrás de un LID.
+  sock.ev.on("chats.phoneNumberShare", ({ lid, jid }) => aprenderLid(lid, jid))
 }
 
 console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — SOLO LECTURA`)
+await cargarLidPn()
 for (const sessionId of SESIONES) {
   tieneCredenciales(sessionId)
     .then((vinculada) => (vinculada ? conectar(sessionId) : esperarActivacion(sessionId)))
