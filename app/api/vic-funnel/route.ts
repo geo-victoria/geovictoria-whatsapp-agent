@@ -2472,14 +2472,22 @@ export async function GET(req: Request): Promise<Response> {
           cache: "no-store",
         }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null; quote_id: string | null }>>,
         // Contactos con chat espejado del WhatsApp de algún vendedor (worker
-        // wa-espejo) — habilita el link "wsp vendedor" en la cola.
-        fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=telefono_chat&telefono_chat=not.is.null&es_grupo=eq.false&limit=20000`, {
+        // wa-espejo) — habilita el link "wsp vendedor" y su último mensaje
+        // cuenta como actividad del caso.
+        fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=telefono_chat,enviado_at&telefono_chat=not.is.null&es_grupo=eq.false&limit=20000`, {
           headers: hSb,
           cache: "no-store",
-        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ telefono_chat: string }>>,
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ telefono_chat: string; enviado_at: string }>>,
       ])
       const preformAt = preformData.at
       wspVendedorSet = new Set(espejoTels.map((x) => digits(String(x.telefono_chat || ""))).filter(Boolean))
+      const wspUltimoAt = new Map<string, string>()
+      for (const x of espejoTels) {
+        const t = digits(String(x.telefono_chat || ""))
+        if (!t || !x.enviado_at) continue
+        const prev = wspUltimoAt.get(t)
+        if (!prev || Date.parse(String(x.enviado_at)) > Date.parse(prev)) wspUltimoAt.set(t, String(x.enviado_at))
+      }
       // Dotación por contacto: parseo del preform como base; el subform de la
       // cotización (fees) la pisa después porque es la fuente autoritativa.
       usuariosPorContacto = new Map<string, number>(preformData.usuarios)
@@ -2513,6 +2521,13 @@ export async function GET(req: Request): Promise<Response> {
         analysisRows: allRows,
         pais,
       })
+      // El WhatsApp del vendedor también es actividad (pedido Lalo 06-ago):
+      // el último mensaje espejado con el cliente actualiza el último
+      // contacto — y con él la urgencia y el filtro Desde–Hasta.
+      for (const f of filasListado) {
+        const at = wspUltimoAt.get(digits(f.contacto))
+        if (at) f.ultimoContactoIso = maxIso(f.ultimoContactoIso, at)
+      }
       evolucionHtml = renderEvolucionDiaria({
         convs: convsListado,
         analysisRows: allRows,
