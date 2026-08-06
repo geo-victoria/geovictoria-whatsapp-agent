@@ -482,14 +482,14 @@ async function traspasarATelemarketing(
 
     // 2. Dueño: si el lead ya es de un HUMANO, no se pisa su gestión (regla
     // marketing 30-jul) — ese humano es el ejecutivo que se presenta. Si es
-    // del bot: CL va a la TÓMBOLA DE LEADS DE CALIFICACIÓN — Aracelli y
-    // Aleydis en round-robin (orden de Lalo 06-ago: "lo que no ha podido
-    // calificar vuelve a Aleydis y Aracelli") — y PE (sin tómbola) asigna
-    // directo a la ejecutiva del país (Mónica). Si algún día la tómbola de
-    // ellas existe como regla en Zoho: env VICKY_TM_CALIFICACION_RULE_ID la
-    // conecta sin deploy (reemplaza al round-robin por el camino lar_id).
+    // del bot: CL va a la TÓMBOLA DE LEADS DE CALIFICACIÓN — la regla de Zoho
+    // "Asignación Leads Vicky TLMK" cuyo roster Lalo dejó en Araceli y Aleydis
+    // (06-ago: "lo que no ha podido calificar vuelve a Aleydis y Aracelli";
+    // reasignarLeadCalificacionCL dispara la regla y solo si no asigna cae al
+    // round-robin interno de ellas dos) — y PE (sin tómbola) asigna directo a
+    // la ejecutiva del país (Mónica).
     let owner = lead?.Owner && !ownerBot ? lead.Owner : undefined
-    if (!owner?.id && pais === "cl" && !(process.env.VICKY_TM_CALIFICACION_RULE_ID || "").trim()) {
+    if (!owner?.id && pais === "cl") {
       const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
       const r = await reasignarLeadCalificacionCL(leadId)
       if (r.success && r.ownerId && r.ownerEmail) {

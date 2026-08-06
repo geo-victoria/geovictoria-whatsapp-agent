@@ -528,10 +528,12 @@ export async function reasignarLeadTelemarketingCL(
  * TÓMBOLA DE LEADS NO CALIFICADOS — Aleydis y Aracelli (orden de Lalo 06-ago):
  * lo que Vicky NO pudo calificar (sin número de trabajadores → no es
  * oportunidad calificada; y el reloj de 24 h hábiles sin calificar) vuelve a
- * ellas dos en round-robin, con intención comercial de por medio. Asignación
- * DIRECTA con skip assignment_rules (no pasa por la regla de Zoho, que siguen
- * usando los callbacks). Editable sin deploy: VICKY_TM_CALIFICACION_DESTINOS
- * con formato "email:user_id:Nombre,email:user_id:Nombre".
+ * ellas dos. Lalo confirmó (06-ago) que esa tómbola ES la regla de Zoho
+ * "Asignación Leads Vicky TLMK" (3525045000649066001, roster recortado por él
+ * a ellas dos) — el camino primario es disparar la REGLA (lar_id) y que Zoho
+ * sortee; el round-robin interno de abajo queda SOLO de fallback si la regla
+ * no asigna. Overrides sin deploy: VICKY_TM_CALIFICACION_RULE_ID (regla) y
+ * VICKY_TM_CALIFICACION_DESTINOS ("email:user_id:Nombre,..." del fallback).
  */
 const DESTINOS_CALIFICACION_CL = (
   process.env.VICKY_TM_CALIFICACION_DESTINOS ||
@@ -548,8 +550,37 @@ const DESTINOS_CALIFICACION_CL = (
 export async function reasignarLeadCalificacionCL(
   leadId: string,
 ): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string }> {
-  if (!leadId || DESTINOS_CALIFICACION_CL.length === 0) {
-    return { success: false, error: "leadId faltante o sin destinos configurados" }
+  if (!leadId) return { success: false, error: "leadId faltante" }
+  // Camino primario: la REGLA de Zoho (la tómbola real de Araceli/Aleydis).
+  const regla = (process.env.VICKY_TM_CALIFICACION_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+  if (regla) {
+    try {
+      const accessToken = await getZohoAccessToken()
+      const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+      const H = { Authorization: `Zoho-oauthtoken ${accessToken}`, "Content-Type": "application/json" }
+      const put = await fetch(`${apiDomain}/crm/v3/Leads`, {
+        method: "PUT",
+        headers: H,
+        cache: "no-store",
+        body: JSON.stringify({ data: [{ id: leadId }], lar_id: regla }),
+      })
+      if (put.ok) {
+        const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
+        const owner = g.ok
+          ? ((await g.json().catch(() => ({}))) as {
+              data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }>
+            }).data?.[0]?.Owner
+          : undefined
+        const email = (owner?.email || "").toLowerCase()
+        if (email && !/vicky@|info@geovictoria/.test(email)) {
+          return { success: true, ownerEmail: owner?.email, ownerId: owner?.id, ownerNombre: owner?.name }
+        }
+      }
+      console.warn(`[zoho-leads] regla de calificación ${regla} no asignó lead ${leadId} — fallback RR interno`)
+    } catch { /* fallback RR abajo */ }
+  }
+  if (DESTINOS_CALIFICACION_CL.length === 0) {
+    return { success: false, error: "regla no asignó y sin destinos de fallback" }
   }
   try {
     const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
