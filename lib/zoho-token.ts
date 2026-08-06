@@ -49,6 +49,19 @@ async function saveTokenToSupabase(token: string): Promise<void> {
   } catch { /* ignorar */ }
 }
 
+/**
+ * Renovación FORZADA: ignora ambos cachés y acuña un token nuevo contra Zoho.
+ * Para el camino de recuperación tras un 401 INVALID_TOKEN — Zoho revoca los
+ * access tokens más viejos cuando conviven más de 10 vivos por refresh token
+ * (agente + cotizador + conectores acuñan del mismo), así que un token del
+ * caché puede morir ANTES de su expires_at.
+ */
+export async function renovarZohoAccessToken(): Promise<string> {
+  _cache.token = undefined
+  _cache.expiresAt = undefined
+  return refrescarToken(Date.now())
+}
+
 export async function getZohoAccessToken(): Promise<string> {
   const now = Date.now()
 
@@ -84,6 +97,10 @@ export async function getZohoAccessToken(): Promise<string> {
   }
 
   // 3. Renovar token
+  return refrescarToken(now)
+}
+
+async function refrescarToken(now: number): Promise<string> {
   const domain = getEnv("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
   const res = await fetch(`${domain}/oauth/v2/token`, {
     method: "POST",

@@ -11,7 +11,7 @@
 
 import { sendBotmakerMessage, sendBotmakerMedia, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { appendAssistantV3, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
-import { getZohoAccessToken } from "@/lib/zoho-token"
+import { getZohoAccessToken, renovarZohoAccessToken } from "@/lib/zoho-token"
 
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
@@ -30,10 +30,19 @@ export async function datosDeCotizacion(quoteId: string): Promise<DatosCotizacio
   // v3 exige `fields` en el GET de registro único (sin él responde 400).
   const campos =
     "Tel_fono_Contacto,PDF_URL,URL_Aceptacion_Web,Numero_Cotizacion,Name,Cuenta_Asociada,Contacto_Asociado"
-  const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=${campos}`, {
+  const url = `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=${campos}`
+  let res = await fetch(url, {
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
     cache: "no-store",
   })
+  if (res.status === 401) {
+    // Token del caché revocado antes de su vencimiento → acuñar uno nuevo.
+    const fresco = await renovarZohoAccessToken()
+    res = await fetch(url, {
+      headers: { Authorization: `Zoho-oauthtoken ${fresco}` },
+      cache: "no-store",
+    })
+  }
   const cuerpo = await res.text().catch(() => "")
   let quote: Record<string, unknown> | undefined
   try {
