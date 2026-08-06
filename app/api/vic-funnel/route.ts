@@ -18,8 +18,12 @@ import { createHash } from "node:crypto"
 
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
+import { estadoCotizacion, chatVickyCotizaciones, type EstadoCotizacion } from "@/lib/cotizaciones-editor"
 
 export const dynamic = "force-dynamic"
+// El chat de Vicky Cotizaciones corre un loop de tool use contra la cotizadora
+// y Zoho: necesita más que los 10 s por defecto.
+export const maxDuration = 120
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
@@ -1302,6 +1306,10 @@ type CasoGestion = {
   zohoUrl: string
   /** Ya marcada como gestionada (se muestra atenuada, con deshacer). */
   gestionado: boolean
+  /** Cotización formal vigente: link para VERLA (PDF o página de aceptación)
+   * y flag para EDITARLA con Vicky Cotizaciones (pedido Lalo 06-ago). */
+  cotVer: string
+  cotQuoteId: string
 }
 
 function construirCasosGestion(params: {
@@ -1309,8 +1317,9 @@ function construirCasosGestion(params: {
   gestionados: Map<string, string>
   montos: Map<string, { uf: number | null; clp: number | null }>
   pais: Pais
+  cots?: Map<string, { quoteId: string; ver: string }>
 }): { casos: CasoGestion[]; nGestionados: number } {
-  const { filas, gestionados, montos, pais } = params
+  const { filas, gestionados, montos, pais, cots = new Map() } = params
   const conTipo = filas
     // Deal en "Cierre Perdido" en Zoho → fuera de la cola de gestión (pedido
     // Lalo 05-ago): la oportunidad ya se dio por perdida, no hay acción.
@@ -1373,6 +1382,8 @@ function construirCasosGestion(params: {
       estadoZoho: f.estadoZoho,
       zohoUrl: f.zohoUrl,
       gestionado: gestionados.has(d),
+      cotVer: cots.get(d)?.ver || "",
+      cotQuoteId: cots.get(d)?.quoteId || "",
     }
   })
   casos.sort((a, b) => b.prioridad - a.prioridad || b.score - a.score)
@@ -1401,6 +1412,8 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
               c.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" style="font-size:13px">📄 ver chat</a>` : "",
               c.zohoUrl ? `<a href="${esc(c.zohoUrl)}" target="_blank" rel="noopener" title="Abrir el registro en Zoho CRM" style="font-size:13px">🔗 Zoho</a>` : "",
               wspSet.has(c.contacto) ? `<a href="?key=${encodeURIComponent(key)}&wsp=${encodeURIComponent(c.contacto)}" target="_blank" title="WhatsApp del vendedor con este cliente (se abre listo para guardar como PDF)" style="font-size:13px">📱 wsp vendedor</a>` : "",
+              c.cotVer ? `<a href="${esc(c.cotVer)}" target="_blank" rel="noopener" title="Ver la cotización formal vigente" style="font-size:13px">🧾 cotización</a>` : "",
+              c.cotQuoteId ? `<a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(c.contacto)}" title="Editar la cotización conversando con Vicky Cotizaciones y enviarla al cliente" style="font-size:13px">✏️ editar</a>` : "",
             ].filter(Boolean).join(" · ")
             return links ? `<div style="margin-top:3px">${links}</div>` : ""
           })()}</td>
@@ -2040,6 +2053,165 @@ async function renderWspVendedor(contact: string): Promise<Response> {
   return page(html)
 }
 
+/** Tarjeta con el estado VIVO de la cotización (Vicky Cotizaciones). Se
+ * renderiza server-side y el chat la reemplaza tras cada turno con tools. */
+function panelCotizacionHtml(e: EstadoCotizacion): string {
+  const p = e.puntero
+  const filas = e.items
+    .map(
+      (i) => `<tr>
+      <td>${esc(i.nombre)}${i.codigo && i.codigo !== i.nombre ? `<div class="sub" style="margin:0;font-size:11px">${esc(i.codigo)}${i.modalidad ? ` · ${esc(i.modalidad)}` : ""}</div>` : i.modalidad ? `<div class="sub" style="margin:0;font-size:11px">${esc(i.modalidad)}</div>` : ""}</td>
+      <td style="text-align:center">${i.cantidad}</td>
+      <td style="white-space:nowrap">${i.recurrente ? "mensual" : "pago único"}</td>
+      <td style="text-align:right;white-space:nowrap">UF ${i.subtotalUF.toLocaleString("es-CL", { maximumFractionDigits: 2 })}</td>
+    </tr>`,
+    )
+    .join("")
+  const links = [
+    p.pdfUrl ? `<a href="${esc(p.pdfUrl)}" target="_blank" rel="noopener">🧾 PDF</a>` : "",
+    p.acceptanceUrl ? `<a href="${esc(p.acceptanceUrl)}" target="_blank" rel="noopener">✅ Link de aceptación</a>` : "",
+    p.quoteId ? `<a href="${ZOHO_CRM_URL}/tab/${QUOTE_MODULE}/${esc(p.quoteId)}" target="_blank" rel="noopener">🔗 Zoho</a>` : "",
+  ].filter(Boolean).join(" · ")
+  return `<h2 style="margin:0 0 2px;font-size:15px">${esc(p.empresa || "Empresa sin nombre")}</h2>
+  <div class="sub" style="margin:0 0 10px">${e.numero ? `${esc(e.numero)} · ` : ""}${p.rut ? `RUT ${esc(p.rut)} · ` : ""}<span class="tag">${esc(e.estadoZoho || "estado desconocido")}</span>${e.descuentoPct ? ` · dcto. recurrente ${e.descuentoPct}%` : ""}</div>
+  ${e.items.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th>Tipo</th><th style="text-align:right">Neto</th></tr></thead><tbody>${filas}</tbody></table></div>` : `<p class="sub" style="margin:0 0 8px">Detalle de ítems no disponible desde Zoho en este momento.</p>`}
+  <div style="margin-top:10px;font-size:14px"><b>Total con IVA:</b> ${p.totalUf ? `UF ${p.totalUf.toLocaleString("es-CL", { maximumFractionDigits: 2 })}` : "—"}${p.totalClp ? ` <span class="sub" style="font-size:12px">(~$${Math.round(p.totalClp).toLocaleString("es-CL")})</span>` : ""}</div>
+  ${links ? `<div style="margin-top:8px;font-size:13px">${links}</div>` : ""}`
+}
+
+/** Página del editor conversacional "Vicky Cotizaciones" (pedido Lalo 06-ago):
+ * chat interno para el vendedor + panel con el estado vivo de la cotización.
+ * Los cambios se aplican con la MISMA tool actualizar_cotizacion que usa Vicky
+ * con clientes (PDF regenerado, mismo link) y el envío al cliente sale por el
+ * WhatsApp de Vicky recién con el OK del vendedor. */
+async function renderVickyCotizaciones(contact: string, key: string): Promise<Response> {
+  const est = await estadoCotizacion(contact).catch(() => null)
+  if (!est) {
+    return paginaAviso(
+      "Sin cotización formal",
+      `<p>El contacto <b>+${esc(contact)}</b> no tiene una cotización formal registrada, así que no hay nada que editar. Genera la cotización primero (Vicky la emite en la conversación con el cliente).</p>`,
+    )
+  }
+  const empresa = est.puntero.empresa || `+${contact}`
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Vicky Cotizaciones — ${esc(empresa)}</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px 16px 30px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:19px;margin:0 0 2px;color:#4e4e4e}
+  .sub{color:#646464;font-size:12px}
+  .cols{display:flex;gap:16px;align-items:flex-start;margin-top:14px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
+  #panelCot{width:360px;flex:none;position:sticky;top:12px}
+  #panelCot table{width:100%;border-collapse:collapse;font-size:12.5px}
+  #panelCot th,#panelCot td{text-align:left;padding:5px 6px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  #panelCot th{color:#6b7280;font-weight:600;font-size:11px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  .chatCol{flex:1;min-width:0;display:flex;flex-direction:column}
+  #chatBox{min-height:340px;max-height:60vh;overflow-y:auto;padding:4px 2px}
+  .bub{display:flex;margin:6px 0}
+  .bub>div{max-width:78%;padding:9px 13px;border-radius:12px;font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+  .bubU{justify-content:flex-end}.bubU>div{background:#FFF8E1;border:1px solid #f3dc9a}
+  .bubA>div{background:#ffffff;border:1px solid #e5e7eb}
+  .bubE>div{background:#fdecea;border:1px solid #f5c6c0;color:#8a1f11}
+  .chip{display:inline-block;margin:4px 0;padding:4px 10px;border-radius:99px;font-size:12px;background:#e8f5e9;color:#1b5e20;border:1px solid #c8e6c9}
+  .chipErr{background:#fdecea;color:#8a1f11;border-color:#f5c6c0}
+  .fila{display:flex;gap:8px;margin-top:10px}
+  #msg{flex:1;padding:10px 12px;border:1px solid #d0d5db;border-radius:10px;font-size:14px;font-family:inherit;resize:none}
+  #btnSend{background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:0 20px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer}
+  #btnSend:disabled{opacity:.5;cursor:default}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  img.logo{height:26px;vertical-align:middle;margin-right:10px}
+  @media (max-width:760px){.cols{flex-direction:column}#panelCot{width:auto;position:static}}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}">← Volver a la cola de gestión</a></p>
+  <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones</h1>
+  <div class="sub">Editor interno de la cotización de <b>${esc(empresa)}</b> (+${esc(contact)}). Describe el cambio y se aplica al tiro con los precios oficiales — el link de aceptación no cambia y el PDF se regenera. La cotización se le envía al cliente <b>solo cuando tú des el OK</b>.</div>
+  <div class="cols">
+    <div class="chatCol card">
+      <div id="chatBox">
+        <div class="bub bubA"><div>Hola, soy Vicky Cotizaciones 👋 Dime qué cambio necesita la cotización de ${esc(empresa)} —dotación, relojes, módulos o puntos de instalación— y lo aplico de inmediato. Cuando quede lista y me des el OK, se la envío al cliente por WhatsApp con el PDF nuevo.</div></div>
+      </div>
+      <div class="fila">
+        <textarea id="msg" rows="2" placeholder="Ej: súbela a 25 trabajadores y agrégale un segundo reloj en arriendo…"></textarea>
+        <button id="btnSend">Enviar</button>
+      </div>
+    </div>
+    <div id="panelCot" class="card">${panelCotizacionHtml(est)}</div>
+  </div>
+  <script>
+    (function () {
+      var KEYQ = "?key=${encodeURIComponent(key)}";
+      var CONTACT = ${JSON.stringify(contact)};
+      var HIST = [];
+      var box = document.getElementById("chatBox");
+      var input = document.getElementById("msg");
+      var btn = document.getElementById("btnSend");
+      function burbuja(clase, texto) {
+        var w = document.createElement("div");
+        w.className = "bub " + clase;
+        var d = document.createElement("div");
+        d.textContent = texto;
+        w.appendChild(d);
+        box.appendChild(w);
+        box.scrollTop = box.scrollHeight;
+        return w;
+      }
+      function chip(texto, ok) {
+        var c = document.createElement("div");
+        var s = document.createElement("span");
+        s.className = "chip" + (ok ? "" : " chipErr");
+        s.textContent = (ok ? "🔧 " : "⚠️ ") + texto;
+        c.appendChild(s);
+        box.appendChild(c);
+        box.scrollTop = box.scrollHeight;
+      }
+      async function enviar() {
+        var t = input.value.trim();
+        if (!t || btn.disabled) return;
+        input.value = "";
+        burbuja("bubU", t);
+        var esperando = burbuja("bubA", "Vicky está trabajando en la cotización…");
+        btn.disabled = true;
+        try {
+          var res = await fetch(KEYQ + "&accion=coted_chat&contact=" + encodeURIComponent(CONTACT), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ historial: HIST, mensaje: t }),
+          });
+          var j = null;
+          try { j = await res.json(); } catch (e) {}
+          esperando.remove();
+          if (!res.ok || !j || !j.ok) {
+            burbuja("bubE", (j && j.error) ? j.error : "Error " + res.status + " — intenta de nuevo.");
+            return;
+          }
+          (j.eventos || []).forEach(function (e) { chip(e.resumen, e.ok); });
+          burbuja("bubA", j.reply);
+          HIST.push({ role: "user", content: t });
+          HIST.push({ role: "assistant", content: j.reply });
+          if (HIST.length > 30) HIST = HIST.slice(-30);
+          if (j.panelHtml) document.getElementById("panelCot").innerHTML = j.panelHtml;
+        } catch (e) {
+          esperando.remove();
+          burbuja("bubE", "No se pudo enviar: " + e);
+        } finally {
+          btn.disabled = false;
+          input.focus();
+        }
+      }
+      btn.addEventListener("click", enviar);
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(); }
+      });
+      input.focus();
+    })();
+  </script>
+</div></body></html>`
+  return page(html)
+}
+
 /** Página de aviso/error con branding GeoVictoria (pedido Lalo 04-ago): la
  * misma tarjeta centrada de la portada de acceso. El cuerpo llega como HTML
  * ya escapado por el llamador. */
@@ -2330,6 +2502,44 @@ export async function POST(req: Request): Promise<Response> {
     await kvDel(`gestion_${contact}`)
     return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } })
   }
+  // Un turno del chat de Vicky Cotizaciones (pedido Lalo 06-ago). El historial
+  // viaja del navegador en cada turno (stateless server-side, como el resto
+  // del dashboard); la respuesta trae los eventos de tools y el panel de la
+  // cotización re-renderizado para refrescarlo en vivo.
+  if (accion === "coted_chat") {
+    const body = (await req.json().catch(() => null)) as {
+      historial?: Array<{ role?: string; content?: string }>
+      mensaje?: string
+    } | null
+    const mensaje = String(body?.mensaje || "").trim().slice(0, 4000)
+    if (!mensaje) {
+      return new Response(JSON.stringify({ ok: false, error: "mensaje faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const historial = (Array.isArray(body?.historial) ? body.historial : [])
+      .map((m) => ({
+        role: m?.role === "assistant" ? ("assistant" as const) : ("user" as const),
+        content: String(m?.content || ""),
+      }))
+      .filter((m) => m.content.trim())
+      .slice(-30)
+    try {
+      const r = await chatVickyCotizaciones({ contact, historial, mensaje })
+      const est = await estadoCotizacion(contact).catch(() => null)
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          reply: r.reply,
+          eventos: r.eventos,
+          enviado: r.enviadoAlCliente,
+          panelHtml: est ? panelCotizacionHtml(est) : "",
+        }),
+        { headers: { "content-type": "application/json" } },
+      )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
   return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { "content-type": "application/json" } })
 }
 
@@ -2406,6 +2616,11 @@ export async function GET(req: Request): Promise<Response> {
   if (conv) return renderConversation(conv, key)
   const wsp = (searchParams.get("wsp") || "").replace(/\D/g, "").trim()
   if (wsp) return renderWspVendedor(wsp)
+  // Editor conversacional de cotizaciones (pedido Lalo 06-ago): el vendedor
+  // describe el cambio, Vicky Cotizaciones lo aplica con las tools reales y,
+  // con el OK del vendedor, se la manda al cliente por WhatsApp.
+  const coted = (searchParams.get("coted") || "").replace(/\D/g, "").trim()
+  if (coted) return renderVickyCotizaciones(coted, key)
 
   let rows: Row[]
   let origen: {
@@ -2480,6 +2695,9 @@ export async function GET(req: Request): Promise<Response> {
   let ejecutivosHtml = ""
   let empresasHtml = ""
   let wspVendedorSet = new Set<string>()
+  // Cotización formal vigente por contacto: link para verla y quote_id para
+  // editarla con Vicky Cotizaciones (pedido Lalo 06-ago).
+  let cotPorContacto = new Map<string, { quoteId: string; ver: string }>()
   let usuariosPorContacto = new Map<string, number>()
   let casosGestion: CasoGestion[] = []
   let nGestionadosCola = 0
@@ -2517,10 +2735,10 @@ export async function GET(req: Request): Promise<Response> {
           `${SUPABASE_URL}/rest/v1/vic_kv?key=like.gestion_%25&select=key,value&expires_at=gt.${new Date().toISOString()}&limit=1000`,
           { headers: hSb, cache: "no-store" },
         ).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ key: string; value: string }>>,
-        fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,total_uf,total_clp,quote_id&order=updated_at.desc&limit=1000`, {
+        fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,total_uf,total_clp,quote_id,pdf_url,acceptance_url&order=updated_at.desc&limit=1000`, {
           headers: hSb,
           cache: "no-store",
-        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null; quote_id: string | null }>>,
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null; quote_id: string | null; pdf_url: string | null; acceptance_url: string | null }>>,
         // Contactos con chat espejado del WhatsApp de algún vendedor (worker
         // wa-espejo) — habilita el link "wsp vendedor" y su último mensaje
         // cuenta como actividad del caso.
@@ -2545,6 +2763,10 @@ export async function GET(req: Request): Promise<Response> {
       for (const p of punteros) {
         const d = digits(p.contact)
         if (d && !montosPorContacto.has(d)) montosPorContacto.set(d, { uf: p.total_uf, clp: p.total_clp })
+        // Primer puntero por contacto = el más reciente (vienen ordenados).
+        if (d && p.quote_id && !cotPorContacto.has(d)) {
+          cotPorContacto.set(d, { quoteId: String(p.quote_id), ver: String(p.pdf_url || p.acceptance_url || "") })
+        }
       }
       // Monto/mes = fee RECURRENTE (pedido Lalo 04-ago): cuando el subform de
       // la cotización está disponible, pisa el total del puntero (que mezcla
@@ -2687,7 +2909,7 @@ export async function GET(req: Request): Promise<Response> {
     // gestión lo reemplazó con la misma data; renderListadoComercial queda
     // disponible por si se quiere reponer.)
     const filasVisibles = filasListado.filter((f) => coincide(f) && tuvoActividad(f))
-    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais })
+    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, cots: cotPorContacto })
     casosGestion = cola.casos
     nGestionadosCola = cola.nGestionados
     const qsDescarga = (() => {
