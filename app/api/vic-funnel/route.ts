@@ -930,8 +930,11 @@ function propietarioDeLead(l: LeadListado): string {
 }
 
 /** Leads del flujo de Vicky (vivos + convertidos) de los últimos 30 días, y
- * los deals creados por Vicky (para etapa/dueño de los preform sin quote). */
-async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
+ * los deals creados por Vicky (para etapa/dueño de los preform sin quote).
+ * extraDealIds: deals asociados a cotizaciones (Deal_Asociado) para conocer
+ * su dueño VIGENTE — apenas se asigna el trato a un ejecutivo, el dashboard
+ * lo muestra (pedido Lalo 06-ago). */
+async function fetchZohoListado(contactosConocidos: Set<string>, extraDealIds: string[] = []): Promise<{
   leads: LeadListado[]
   dealsPorId: Map<string, { stage: string; owner: string; lastActivity: string }>
 }> {
@@ -991,8 +994,7 @@ async function fetchZohoListado(contactosConocidos: Set<string>): Promise<{
     // la etapa y el dueño del deal cuando el lead ya es deal.
     const faltantes = [
       ...new Set(
-        leads
-          .map((l) => String(l.Converted_Deal?.id || ""))
+        [...leads.map((l) => String(l.Converted_Deal?.id || "")), ...extraDealIds]
           .filter((id) => id && !dealsPorId.has(id)),
       ),
     ].slice(0, 50)
@@ -1072,13 +1074,19 @@ function construirListadoComercial(params: {
       : String(q.Created_Time || "")
     const conv = tel ? convPorContacto.get(tel) : undefined
     const ana = tel ? analisisPorContacto.get(tel) : undefined
+    // Dueño VIGENTE: el del DEAL (apenas se asigna el trato a un ejecutivo,
+    // el dashboard lo refleja — pedido Lalo 06-ago); la cotización respalda.
+    const dealDeQuote = (() => {
+      const id = String(q["Deal_Asociado.id"] || "") || String((tel && leadPorTel.get(tel)?.Converted_Deal?.id) || "")
+      return id ? dealsPorId.get(id) : undefined
+    })()
     filas.push({
       empresa: empresaDeQuote(q),
       contacto: tel ? `+${tel}` : "—",
       estado,
       fechaIso,
-      estadoZoho: String(q["Deal_Asociado.Stage"] || "").trim() || "—",
-      propietario: `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—",
+      estadoZoho: dealDeQuote?.stage || String(q["Deal_Asociado.Stage"] || "").trim() || "—",
+      propietario: dealDeQuote?.owner || `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—",
       primerContactoIso: String(conv?.started_at || ""),
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback(estado, ana?.motivo_no_cierre || null),
@@ -2367,7 +2375,10 @@ export async function GET(req: Request): Promise<Response> {
       const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
       const [preformData, zohoListado, gestionadosKv, punteros, espejoTels] = await Promise.all([
         fetchPreformAts(convsListado),
-        fetchZohoListado(contactosConocidos),
+        fetchZohoListado(
+          contactosConocidos,
+          (cierre?.todasList || []).map((q) => String(q["Deal_Asociado.id"] || "")).filter(Boolean),
+        ),
         fetch(
           `${SUPABASE_URL}/rest/v1/vic_kv?key=like.gestion_%25&select=key,value&expires_at=gt.${new Date().toISOString()}&limit=1000`,
           { headers: hSb, cache: "no-store" },
