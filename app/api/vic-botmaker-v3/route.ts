@@ -63,6 +63,7 @@ import {
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
+import { consumirCotizacionPendiente } from "@/lib/enviar-cotizacion-wa"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
@@ -1522,6 +1523,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       console.error(`[v3-botmaker] contact=${contact} es PE y el reenvío a vic-botmaker-pe falló — NO se atiende con flujo CL`)
       return NextResponse.json({ reply: "" })
     }
+
+    // Envío de cotización PENDIENTE del botón de Zoho (ventana cerrada →
+    // plantilla → el cliente respondió AHORA): el paquete PDF+link sale solo.
+    // Fire-and-forget: jamás bloquea ni retrasa la respuesta de Vicky.
+    consumirCotizacionPendiente(contact).catch(() => {})
 
     // 2.5. Nota de voz: si vino la URL del audio y no hay texto útil, la
     // transcribimos y seguimos como si el usuario lo hubiera escrito. Si la
