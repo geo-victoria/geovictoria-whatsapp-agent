@@ -229,7 +229,10 @@ const reiniciosPorSesion = new Map()
 
 async function tieneCredenciales(sessionId) {
   const creds = await estadoGet(sessionId, "creds", "creds").catch(() => null)
-  return Boolean(creds && creds.registered)
+  // `registered` no siempre queda true en sesiones de dispositivo vinculado
+  // (caso Grey/Daniela 06-ago: vinculadas, reinicio del worker las estacionó
+  // como "sin vincular"). Una sesión con identidad (`me.id`) está vinculada.
+  return Boolean(creds && (creds.registered || creds.me?.id))
 }
 
 async function paginaAbierta(sessionId) {
