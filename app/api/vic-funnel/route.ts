@@ -1861,7 +1861,13 @@ async function renderWspVendedor(contact: string): Promise<Response> {
       `<p>Aún no hay mensajes espejados del WhatsApp de un vendedor con <b>+${esc(contact)}</b>. El espejo captura desde la vinculación del dispositivo del ejecutivo en adelante.</p>`,
     )
   }
-  const vendedores = [...new Set(msgs.map((m) => m.session_id))]
+  // Nombres reales de las sesiones (vic_kv wa_espejo_labels, best-effort).
+  let etiquetas: Record<string, string> = {}
+  try {
+    etiquetas = JSON.parse((await kvGet("wa_espejo_labels")) || "{}") as Record<string, string>
+  } catch {}
+  const nombreSesion = (s: string) => etiquetas[s] || s
+  const vendedores = [...new Set(msgs.map((m) => nombreSesion(m.session_id)))]
   const burbujas = msgs
     .map((m) => {
       const mio = m.from_me
@@ -1869,7 +1875,7 @@ async function renderWspVendedor(contact: string): Promise<Response> {
       return `<div style="display:flex;justify-content:${mio ? "flex-end" : "flex-start"};margin:4px 0">
       <div style="max-width:72%;padding:8px 12px;border-radius:12px;border:1px solid ${mio ? "#f3dc9a" : "#e5e7eb"};background:${mio ? "#FFF8E1" : "#ffffff"}">
         <div style="white-space:pre-wrap;font-size:13.5px;word-break:break-word">${esc(cuerpo)}</div>
-        <div style="margin:3px 0 0;font-size:10.5px;color:#9aa0a8;text-align:right">${mio ? esc(m.session_id) : "cliente"} · ${fmtSantiago(m.enviado_at)}</div>
+        <div style="margin:3px 0 0;font-size:10.5px;color:#9aa0a8;text-align:right">${mio ? esc(nombreSesion(m.session_id)) : "cliente"} · ${fmtSantiago(m.enviado_at)}</div>
       </div></div>`
     })
     .join("")
