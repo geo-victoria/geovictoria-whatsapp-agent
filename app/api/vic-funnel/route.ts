@@ -1627,6 +1627,141 @@ function renderEvolucionDiaria(params: {
 </div>`
 }
 
+/** Panel de trabajo por EJECUTIVO (pedido Lalo 05-ago): oportunidades activas
+ * que maneja cada uno, asignadas en el período, desglose por etapa, venta
+ * recurrente del período y antigüedad del último contacto (2 h / 5 h / 1 día /
+ * 2 días hábiles). Días hábiles = L-V, sin feriados. */
+function renderTrabajoEjecutivos(params: {
+  filas: FilaListado[]
+  quotes: RawAceptada[]
+  feesPorQuote: Map<string, { uf: number | null; clp: number | null }>
+  rango: RangoFechas | null
+  pais: Pais
+}): string {
+  const { filas, quotes, feesPorQuote, rango, pais } = params
+  const ahora = Date.now()
+  const vivas = filas.filter((f) => !/perdido/i.test(f.estadoZoho))
+  const nombreDe = (p: string) => (p && p !== "—" ? p : "(sin ejecutivo)")
+
+  const porEjecutivo = new Map<string, FilaListado[]>()
+  for (const f of vivas) {
+    const e = nombreDe(f.propietario)
+    if (!porEjecutivo.has(e)) porEjecutivo.set(e, [])
+    porEjecutivo.get(e)!.push(f)
+  }
+
+  // Venta RECURRENTE del período por dueño de la cotización pagada (fecha de
+  // pago dentro del rango; sin filtro, últimos 30 días).
+  const enPeriodo = (iso: string) =>
+    rango ? enRango(iso, rango) : Date.parse(iso) >= ahora - 30 * 864e5
+  const ventas = new Map<string, { uf: number; clp: number; n: number }>()
+  for (const q of quotes) {
+    if (!String(q.Onboarding_Link || "").trim()) continue
+    const fechaPago = String(q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time || "")
+    if (!fechaPago || !enPeriodo(fechaPago)) continue
+    const dueno = nombreDe(`${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim())
+    const fee = feesPorQuote.get(String(q.id || ""))
+    const cur = ventas.get(dueno) || { uf: 0, clp: 0, n: 0 }
+    cur.uf += fee?.uf || 0
+    cur.clp += fee?.clp || 0
+    cur.n++
+    ventas.set(dueno, cur)
+  }
+  const fmtVenta = (v: { uf: number; clp: number; n: number } | undefined): string => {
+    if (!v || !v.n) return "—"
+    const simbolo = pais === "pe" ? "S/ " : "$"
+    const monto =
+      pais === "cl" && v.uf
+        ? `UF ${v.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
+        : v.clp
+          ? `${simbolo}${Math.round(v.clp).toLocaleString("es-CL")}`
+          : v.uf
+            ? `${simbolo}${Math.round(v.uf).toLocaleString("es-CL")}`
+            : "—"
+    return `<b>${monto}</b><div class="sub" style="margin:0;font-size:11px">${v.n} venta${v.n === 1 ? "" : "s"}/mes</div>`
+  }
+
+  const horasDesde = (f: FilaListado): number => {
+    const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
+    return Number.isFinite(t) ? (ahora - t) / 3600e3 : 9999
+  }
+  // Días hábiles COMPLETOS transcurridos desde el último contacto (L-V).
+  const diasHabilesDesde = (f: FilaListado): number => {
+    const t = Date.parse(f.ultimoContactoIso || f.updatedIso || f.fechaIso || "")
+    if (!Number.isFinite(t)) return 99
+    const cur = new Date(t)
+    cur.setHours(0, 0, 0, 0)
+    cur.setDate(cur.getDate() + 1)
+    const hoy = new Date(ahora)
+    hoy.setHours(0, 0, 0, 0)
+    let n = 0
+    while (cur <= hoy) {
+      const dw = cur.getDay()
+      if (dw !== 0 && dw !== 6) n++
+      cur.setDate(cur.getDate() + 1)
+    }
+    return n
+  }
+
+  const nombres = [...new Set([...porEjecutivo.keys(), ...ventas.keys()])]
+  const filasTabla = nombres
+    .map((e) => {
+      const ops = porEjecutivo.get(e) || []
+      const asignadas = ops.filter((f) => f.primerContactoIso && enPeriodo(f.primerContactoIso)).length
+      const porEtapa = ESTADOS_LISTADO.map((est) => ops.filter((f) => f.estado === est).length)
+      const sinContacto = (h: number) => ops.filter((f) => horasDesde(f) > h).length
+      const sin2dHabiles = ops.filter((f) => diasHabilesDesde(f) >= 2).length
+      return { e, ops: ops.length, asignadas, porEtapa, s2: sinContacto(2), s5: sinContacto(5), s24: sinContacto(24), s2d: sin2dHabiles, venta: ventas.get(e) }
+    })
+    .sort((a, b) => b.ops - a.ops || (b.venta?.n || 0) - (a.venta?.n || 0))
+
+  if (!filasTabla.length) return ""
+  const tot = {
+    ops: filasTabla.reduce((a, r) => a + r.ops, 0),
+    asignadas: filasTabla.reduce((a, r) => a + r.asignadas, 0),
+    porEtapa: ESTADOS_LISTADO.map((_, i) => filasTabla.reduce((a, r) => a + r.porEtapa[i], 0)),
+    s2: filasTabla.reduce((a, r) => a + r.s2, 0),
+    s5: filasTabla.reduce((a, r) => a + r.s5, 0),
+    s24: filasTabla.reduce((a, r) => a + r.s24, 0),
+    s2d: filasTabla.reduce((a, r) => a + r.s2d, 0),
+    venta: { uf: 0, clp: 0, n: 0 },
+  }
+  for (const v of ventas.values()) {
+    tot.venta.uf += v.uf
+    tot.venta.clp += v.clp
+    tot.venta.n += v.n
+  }
+  const alerta = (n: number) => (n > 0 ? `<span style="color:#C62828;font-weight:700">${n}</span>` : `<span style="color:#9aa0a8">0</span>`)
+  const filaHtml = (r: (typeof filasTabla)[number], esTotal = false) => `<tr${esTotal ? ` style="border-top:2px solid #c9ced4;font-weight:700"` : ""}>
+      <td>${esc(r.e)}</td>
+      <td style="text-align:center"><b>${r.ops}</b></td>
+      <td style="text-align:center">${r.asignadas}</td>
+      ${r.porEtapa.map((n) => `<td style="text-align:center">${n || `<span style="color:#c9ced4">·</span>`}</td>`).join("")}
+      <td style="text-align:right">${fmtVenta(r.venta)}</td>
+      <td style="text-align:center">${alerta(r.s2)}</td>
+      <td style="text-align:center">${alerta(r.s5)}</td>
+      <td style="text-align:center">${alerta(r.s24)}</td>
+      <td style="text-align:center">${alerta(r.s2d)}</td>
+    </tr>`
+  return `<div class="card"><h2>👥 Trabajo por ejecutivo <span class="pct" style="font-weight:400">— oportunidades vivas de los últimos 30 días · ${rango ? `período ${esc(rango.etiqueta)}` : "período: últimos 30 días"}</span></h2>
+  <div style="overflow-x:auto"><table style="font-size:12.5px">
+    <thead><tr>
+      <th>Ejecutivo</th>
+      <th style="text-align:center" title="Oportunidades vivas a su nombre (excluye Cierre Perdido)">Manejando</th>
+      <th style="text-align:center" title="Oportunidades cuyo primer contacto cae en el período seleccionado">Asignadas<br>período</th>
+      ${ESTADOS_LISTADO.map((e) => `<th style="text-align:center">${esc(e).replace(" ", "<br>")}</th>`).join("")}
+      <th style="text-align:right" title="Fee mensual recurrente de las cotizaciones PAGADAS en el período, por dueño de la cotización">Vendido<br>recurrente</th>
+      <th style="text-align:center" title="Oportunidades sin contacto (chat o Zoho) hace más de 2 horas">&gt;2 h</th>
+      <th style="text-align:center" title="…hace más de 5 horas">&gt;5 h</th>
+      <th style="text-align:center" title="…hace más de 1 día">&gt;1 día</th>
+      <th style="text-align:center" title="…hace 2 o más días hábiles (L-V)">&gt;2 d háb.</th>
+    </tr></thead>
+    <tbody>${filasTabla.map((r) => filaHtml(r)).join("")}${filaHtml({ e: "TOTAL", ...tot } as (typeof filasTabla)[number], true)}</tbody>
+  </table></div>
+  <div class="sub" style="margin-top:8px">"Manejando" = oportunidades vivas de los últimos 30 días a nombre del ejecutivo (excluye Cierre Perdido). "Asignadas período" cuenta por fecha de primer contacto. "Vendido recurrente" suma el fee mensual de las cotizaciones pagadas en el período (dueño de la cotización). Las columnas de antigüedad usan el último contacto real (chat o actividad en Zoho) y son acumulativas.</div>
+</div>`
+}
+
 function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
@@ -2065,6 +2200,7 @@ export async function GET(req: Request): Promise<Response> {
   // Cola de gestión (vista principal) y sus insumos.
   let colaHtml = ""
   let evolucionHtml = ""
+  let ejecutivosHtml = ""
   let casosGestion: CasoGestion[] = []
   let nGestionadosCola = 0
   let gestionados = new Map<string, string>()
@@ -2138,6 +2274,21 @@ export async function GET(req: Request): Promise<Response> {
         pais,
         rango,
       })
+      // Panel por ejecutivo: fee recurrente POR COTIZACIÓN pagada (la caché
+      // fee_mes_v1_<id> se indexa pasando el id como "contact").
+      try {
+        const pagadas = (cierre?.todasList || []).filter((q) => q.id && String(q.Onboarding_Link || "").trim())
+        const feesPorQuote = await fetchFeesMensuales(pagadas.map((q) => ({ contact: String(q.id), quoteId: String(q.id) })))
+        ejecutivosHtml = renderTrabajoEjecutivos({
+          filas: filasListado,
+          quotes: cierre?.todasList || [],
+          feesPorQuote,
+          rango,
+          pais,
+        })
+      } catch (e) {
+        console.warn("[vic-funnel] panel ejecutivos falló:", e instanceof Error ? e.message : e)
+      }
     } catch (e) {
       console.warn("[vic-funnel] listado comercial falló:", e instanceof Error ? e.message : e)
     }
@@ -2675,6 +2826,7 @@ export async function GET(req: Request): Promise<Response> {
   ` : `
   ${tasaCierreHtml}
   ${evolucionHtml}
+  ${ejecutivosHtml}
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
     ${kpiCard("Conversaciones", total, col.base, undefined, "total")}
