@@ -24,6 +24,7 @@
  */
 
 import makeWASocket, {
+  Browsers,
   initAuthCreds,
   BufferJSON,
   proto,
@@ -61,6 +62,19 @@ async function sb(path, init) {
     throw new Error(`Supabase ${res.status} en ${path.split("?")[0]}: ${cuerpo.slice(0, 200)}`)
   }
   return res
+}
+
+async function kvGet(key) {
+  try {
+    const res = await sb(`vic_kv?key=eq.${encodeURIComponent(key)}&select=value,expires_at&limit=1`)
+    const rows = await res.json()
+    const row = rows[0]
+    if (!row) return ""
+    if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return ""
+    return String(row.value || "")
+  } catch {
+    return ""
+  }
 }
 
 async function kvSet(key, value, ttlMinutos) {
@@ -202,8 +216,40 @@ async function guardarMensaje(sessionId, m) {
 }
 
 // ── Conexión por sesión ─────────────────────────────────────────────────────
+//
+// QR BAJO DEMANDA (06-ago): dejar 6 sesiones sin vincular pidiendo QR en loop
+// toda la noche = cientos de intentos de pareo desde una misma IP — Meta lo
+// castiga ("No se pudo vincular el dispositivo", caso Grey; y el corte del
+// piloto). Una sesión SIN credenciales solo abre socket cuando la página del
+// QR está abierta (la página estampa vic_kv wa_espejo_wake_<session>); si
+// nadie mira, la sesión queda estacionada sin generar tráfico. Las sesiones
+// YA vinculadas se conectan siempre y se reconectan solas.
 
 const reiniciosPorSesion = new Map()
+
+async function tieneCredenciales(sessionId) {
+  const creds = await estadoGet(sessionId, "creds", "creds").catch(() => null)
+  return Boolean(creds && creds.registered)
+}
+
+async function paginaAbierta(sessionId) {
+  return Boolean(await kvGet(`wa_espejo_wake_${sessionId}`))
+}
+
+async function esperarActivacion(sessionId) {
+  await kvSet(
+    `wa_espejo_status_${sessionId}`,
+    JSON.stringify({ estado: "en_pausa_sin_vincular", at: new Date().toISOString() }),
+  )
+  console.log(`[${sessionId}] Sin vincular: estacionada hasta que abran su página de QR`)
+  const timer = setInterval(async () => {
+    if (await paginaAbierta(sessionId)) {
+      clearInterval(timer)
+      console.log(`[${sessionId}] Página de QR abierta — iniciando pareo`)
+      conectar(sessionId).catch((e) => console.error(`[${sessionId}] conectar:`, e.message))
+    }
+  }, 15_000)
+}
 
 async function conectar(sessionId) {
   const { state, saveCreds } = await cargarAuthState(sessionId)
@@ -213,6 +259,7 @@ async function conectar(sessionId) {
     version,
     auth: state,
     logger,
+    browser: Browsers.macOS("Chrome"),
     // CRÍTICO: en línea lo está el CELULAR del ejecutivo, no el espejo. Si el
     // espejo se marca online, el teléfono deja de recibir notificaciones push.
     markOnlineOnConnect: false,
@@ -244,24 +291,35 @@ async function conectar(sessionId) {
     if (connection === "close") {
       const codigo = lastDisconnect?.error?.output?.statusCode
       const cerroSesion = codigo === DisconnectReason.loggedOut
-      await kvSet(
-        `wa_espejo_status_${sessionId}`,
-        JSON.stringify({ estado: cerroSesion ? "sesion_cerrada" : "reconectando", codigo, at: new Date().toISOString() }),
-      )
       if (cerroSesion) {
-        // El ejecutivo desvinculó el dispositivo desde su celular: se limpian
-        // las credenciales y se vuelve a pedir QR (sin matar a las demás
-        // sesiones del proceso).
-        console.error(`[${sessionId}] Sesión cerrada desde el teléfono. Limpiando credenciales; se pedirá QR de nuevo.`)
+        // Desvinculado desde el teléfono (o por WhatsApp): credenciales fuera
+        // y la sesión vuelve al estacionamiento — pedirá QR cuando alguien
+        // abra su página, sin loops.
+        console.error(`[${sessionId}] Sesión cerrada por WhatsApp/teléfono. Limpiando credenciales.`)
         await sb(`vic_wa_espejo_estado?session_id=eq.${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => {})
-        setTimeout(() => conectar(sessionId), 3_000)
+        await kvSet(
+          `wa_espejo_status_${sessionId}`,
+          JSON.stringify({ estado: "sesion_cerrada", codigo, at: new Date().toISOString() }),
+        )
+        esperarActivacion(sessionId)
+        return
+      }
+      // Sesión sin vincular y ya nadie mira la página → estacionar, no loopear.
+      const vinculada = Boolean(state.creds?.registered)
+      if (!vinculada && !(await paginaAbierta(sessionId))) {
+        await kvSet(`wa_espejo_qr_${sessionId}`, "", 1)
+        esperarActivacion(sessionId)
         return
       }
       const reinicios = (reiniciosPorSesion.get(sessionId) || 0) + 1
       reiniciosPorSesion.set(sessionId, reinicios)
       const espera = Math.min(60_000, 2_000 * 2 ** Math.min(reinicios, 5))
+      await kvSet(
+        `wa_espejo_status_${sessionId}`,
+        JSON.stringify({ estado: "reconectando", codigo, at: new Date().toISOString() }),
+      )
       console.error(`[${sessionId}] Conexión cerrada (código ${codigo}). Reintento en ${espera / 1000}s`)
-      setTimeout(() => conectar(sessionId), espera)
+      setTimeout(() => conectar(sessionId).catch((e) => console.error(`[${sessionId}]`, e.message)), espera)
     }
   })
 
@@ -276,7 +334,7 @@ async function conectar(sessionId) {
 
 console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — SOLO LECTURA`)
 for (const sessionId of SESIONES) {
-  conectar(sessionId).catch((e) => {
-    console.error(`[${sessionId}] Fallo fatal al conectar:`, e)
-  })
+  tieneCredenciales(sessionId)
+    .then((vinculada) => (vinculada ? conectar(sessionId) : esperarActivacion(sessionId)))
+    .catch((e) => console.error(`[${sessionId}] arranque:`, e.message))
 }

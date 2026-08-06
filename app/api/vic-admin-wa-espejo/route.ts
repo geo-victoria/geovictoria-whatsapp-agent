@@ -36,6 +36,23 @@ async function kvGet(key: string): Promise<string> {
   }
 }
 
+// Señal "alguien está mirando la página del QR": el worker solo abre socket de
+// pareo para sesiones sin vincular mientras esta llave esté fresca (QR bajo
+// demanda, 06-ago — los loops de QR eternos gatillaban rechazos de Meta).
+async function kvSet(key: string, value: string, ttlMinutos: number): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?on_conflict=key`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates",
+    },
+    body: JSON.stringify({ key, value, expires_at: new Date(Date.now() + ttlMinutos * 60_000).toISOString() }),
+    cache: "no-store",
+  }).catch(() => {})
+}
+
 async function authorized(req: Request): Promise<boolean> {
   const url = new URL(req.url)
   const key = (url.searchParams.get("key") || "").trim()
@@ -70,6 +87,10 @@ export async function GET(req: Request): Promise<Response> {
   const [qr, statusRaw] = await Promise.all([
     kvGet(`wa_espejo_qr_${session}`),
     kvGet(`wa_espejo_status_${session}`),
+    // Despierta el pareo de esta sesión mientras la página esté abierta (el
+    // auto-refresh de 5s renueva la señal; TTL corto para que al cerrar la
+    // página el worker se estacione solo).
+    kvSet(`wa_espejo_wake_${session}`, new Date().toISOString(), 2),
   ])
   let estado = "sin señal del worker"
   let detalle = ""
