@@ -2466,11 +2466,13 @@ export async function GET(req: Request): Promise<Response> {
         : null
     // Filtro Desde–Hasta sobre el listado (pedido Lalo 04-ago): con rango
     // activo se muestran solo los casos con ACTIVIDAD en el período — inicio
-    // de conversación, última respuesta del cliente, último mensaje o el
-    // evento que definió su estado actual, cualquiera dentro del rango.
+    // de conversación, última respuesta del cliente, último mensaje, el
+    // evento que definió su estado actual o la última actividad en Zoho
+    // (06-ago: una ASIGNACIÓN de trato también es actividad — sin esto, el
+    // caso recién asignado a un ejecutivo no aparecía al filtrar por hoy).
     const tuvoActividad = (f: FilaListado) =>
       !rango ||
-      [f.primerContactoIso, f.fechaIso, f.lastUserIso, f.updatedIso].some((iso) => iso && enRango(iso, rango))
+      [f.primerContactoIso, f.fechaIso, f.lastUserIso, f.updatedIso, f.ultimoContactoIso].some((iso) => iso && enRango(iso, rango))
     // (04-ago: el "Listado comercial vivo" salió de la página — la cola de
     // gestión lo reemplazó con la misma data; renderListadoComercial queda
     // disponible por si se quiere reponer.)
@@ -2590,7 +2592,10 @@ export async function GET(req: Request): Promise<Response> {
     return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`, ultimoMsgPorConv, filaPorContacto)
   }
 
-  if (rows.length === 0) {
+  // Sin conversaciones ANALIZADAS para el filtro, pero la COLA sí puede tener
+  // casos (p. ej. un trato asignado hoy cuya conversación partió antes): en la
+  // vista de gestión se sigue de largo y se muestra la cola (06-ago).
+  if (rows.length === 0 && !(vista === "gestion" && casosGestion.length > 0)) {
     if (estadoF || propF) {
       return paginaAviso(
         "Sin conversaciones para este filtro",
