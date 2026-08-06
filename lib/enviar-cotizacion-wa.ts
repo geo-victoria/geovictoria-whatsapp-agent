@@ -34,9 +34,17 @@ export async function datosDeCotizacion(quoteId: string): Promise<DatosCotizacio
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
     cache: "no-store",
   })
-  const quote = ((await res.json().catch(() => null)) as { data?: Array<Record<string, unknown>> } | null)
-    ?.data?.[0]
-  if (!quote) return null
+  const cuerpo = await res.text().catch(() => "")
+  let quote: Record<string, unknown> | undefined
+  try {
+    quote = (JSON.parse(cuerpo) as { data?: Array<Record<string, unknown>> })?.data?.[0]
+  } catch {
+    quote = undefined
+  }
+  if (!quote) {
+    console.error(`[cot-wa] Zoho ${res.status} para quote ${quoteId}: ${cuerpo.slice(0, 300)}`)
+    return null
+  }
   return {
     telefono: String(quote.Tel_fono_Contacto || "").replace(/\D/g, ""),
     pdfUrl: String(quote.PDF_URL || "").trim(),
