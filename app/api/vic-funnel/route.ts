@@ -1332,7 +1332,7 @@ function construirCasosGestion(params: {
   return { casos, nGestionados }
 }
 
-function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string, descargaQS = ""): string {
+function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string, descargaQS = "", wspSet: Set<string> = new Set()): string {
   const activos = casos.filter((c) => !c.gestionado)
   const fila = (c: CasoGestion): string => {
     const dias = c.diasSinContacto
@@ -1353,6 +1353,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
             const links = [
               c.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" style="font-size:13px">📄 ver chat</a>` : "",
               c.zohoUrl ? `<a href="${esc(c.zohoUrl)}" target="_blank" rel="noopener" title="Abrir el registro en Zoho CRM" style="font-size:13px">🔗 Zoho</a>` : "",
+              wspSet.has(c.contacto) ? `<a href="?key=${encodeURIComponent(key)}&wsp=${encodeURIComponent(c.contacto)}" target="_blank" title="WhatsApp del vendedor con este cliente (se abre listo para guardar como PDF)" style="font-size:13px">📱 wsp vendedor</a>` : "",
             ].filter(Boolean).join(" · ")
             return links ? `<div style="margin-top:3px">${links}</div>` : ""
           })()}</td>
@@ -1841,6 +1842,58 @@ function page(html: string, status = 200): Response {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
 }
 
+/** Chat espejado del WHATSAPP DEL VENDEDOR con el cliente (pedido Lalo
+ * 06-ago): burbujas estilo chat, imprimible a PDF. Fuente:
+ * vic_wa_espejo_mensajes (worker wa-espejo — una sesión por ejecutivo,
+ * solo lectura; espeja desde la vinculación del dispositivo en adelante). */
+async function renderWspVendedor(contact: string): Promise<Response> {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=eq.${contact}&es_grupo=eq.false&select=session_id,from_me,tipo,texto,enviado_at&order=enviado_at.asc&limit=3000`,
+    { headers: h, cache: "no-store" },
+  ).catch(() => null)
+  const msgs = r?.ok
+    ? ((await r.json().catch(() => [])) as Array<{ session_id: string; from_me: boolean; tipo: string; texto: string | null; enviado_at: string }>)
+    : []
+  if (!msgs.length) {
+    return paginaAviso(
+      "Sin chat del vendedor",
+      `<p>Aún no hay mensajes espejados del WhatsApp de un vendedor con <b>+${esc(contact)}</b>. El espejo captura desde la vinculación del dispositivo del ejecutivo en adelante.</p>`,
+    )
+  }
+  const vendedores = [...new Set(msgs.map((m) => m.session_id))]
+  const burbujas = msgs
+    .map((m) => {
+      const mio = m.from_me
+      const cuerpo = (m.texto || "").trim() || `[${m.tipo}]`
+      return `<div style="display:flex;justify-content:${mio ? "flex-end" : "flex-start"};margin:4px 0">
+      <div style="max-width:72%;padding:8px 12px;border-radius:12px;border:1px solid ${mio ? "#f3dc9a" : "#e5e7eb"};background:${mio ? "#FFF8E1" : "#ffffff"}">
+        <div style="white-space:pre-wrap;font-size:13.5px;word-break:break-word">${esc(cuerpo)}</div>
+        <div style="margin:3px 0 0;font-size:10.5px;color:#9aa0a8;text-align:right">${mio ? esc(m.session_id) : "cliente"} · ${fmtSantiago(m.enviado_at)}</div>
+      </div></div>`
+    })
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>WhatsApp del vendedor — +${esc(contact)}</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:760px;margin:0 auto;padding:20px 16px 50px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:18px;margin:0 0 2px;color:#4e4e4e}
+  .sub{color:#646464;font-size:12px;margin-bottom:14px}
+  .btnPrint{background:#ffbb00;color:#fff;border:0;border-radius:8px;padding:8px 16px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:13px;cursor:pointer;float:right}
+  img.logo{height:26px;vertical-align:middle;margin-right:10px}
+  @media print{.btnPrint{display:none}body{background:#fff}.wrap{max-width:none;padding:0}}
+</style></head><body><div class="wrap">
+  <button class="btnPrint" onclick="window.print()">🖨️ Guardar como PDF</button>
+  <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">WhatsApp del vendedor · +${esc(contact)}</h1>
+  <div class="sub">${msgs.length} mensajes · vendedor${vendedores.length === 1 ? "" : "es"}: ${vendedores.map(esc).join(", ")} · espejo solo-lectura del celular del ejecutivo · hora de Chile</div>
+  ${burbujas}
+  <script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 400); });</script>
+</div></body></html>`
+  return page(html)
+}
+
 /** Página de aviso/error con branding GeoVictoria (pedido Lalo 04-ago): la
  * misma tarjeta centrada de la portada de acceso. El cuerpo llega como HTML
  * ya escapado por el llamador. */
@@ -2204,6 +2257,8 @@ export async function GET(req: Request): Promise<Response> {
 
   const conv = (searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()
   if (conv) return renderConversation(conv, key)
+  const wsp = (searchParams.get("wsp") || "").replace(/\D/g, "").trim()
+  if (wsp) return renderWspVendedor(wsp)
 
   let rows: Row[]
   let origen: {
@@ -2277,6 +2332,7 @@ export async function GET(req: Request): Promise<Response> {
   let evolucionHtml = ""
   let ejecutivosHtml = ""
   let empresasHtml = ""
+  let wspVendedorSet = new Set<string>()
   let casosGestion: CasoGestion[] = []
   let nGestionadosCola = 0
   let gestionados = new Map<string, string>()
@@ -2303,7 +2359,7 @@ export async function GET(req: Request): Promise<Response> {
     try {
       const contactosConocidos = new Set(convsListado.map((c) => digits(c.contact)))
       const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-      const [preformData, zohoListado, gestionadosKv, punteros] = await Promise.all([
+      const [preformData, zohoListado, gestionadosKv, punteros, espejoTels] = await Promise.all([
         fetchPreformAts(convsListado),
         fetchZohoListado(contactosConocidos),
         fetch(
@@ -2314,8 +2370,15 @@ export async function GET(req: Request): Promise<Response> {
           headers: hSb,
           cache: "no-store",
         }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null; quote_id: string | null }>>,
+        // Contactos con chat espejado del WhatsApp de algún vendedor (worker
+        // wa-espejo) — habilita el link "wsp vendedor" en la cola.
+        fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=telefono_chat&telefono_chat=not.is.null&es_grupo=eq.false&limit=20000`, {
+          headers: hSb,
+          cache: "no-store",
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ telefono_chat: string }>>,
       ])
       const preformAt = preformData.at
+      wspVendedorSet = new Set(espejoTels.map((x) => digits(String(x.telefono_chat || ""))).filter(Boolean))
       // Dotación por contacto: parseo del preform como base; el subform de la
       // cotización (fees) la pisa después porque es la fuente autoritativa.
       const usuariosPorContacto = new Map<string, number>(preformData.usuarios)
@@ -2406,7 +2469,7 @@ export async function GET(req: Request): Promise<Response> {
       if (propF) p.set("prop", propF)
       return p.toString()
     })()
-    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga)
+    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga, wspVendedorSet)
     // El filtro global re-corta el cierre de Zoho (por teléfono de la
     // cotización) y el funnel por origen (por teléfono del lead/toque).
     if (permitidos && cierre) {
