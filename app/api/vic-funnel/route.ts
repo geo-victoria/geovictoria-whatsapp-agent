@@ -1986,7 +1986,6 @@ async function renderWspVendedor(contact: string): Promise<Response> {
   <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">WhatsApp del vendedor · +${esc(contact)}</h1>
   <div class="sub">${msgs.length} mensajes · vendedor${vendedores.length === 1 ? "" : "es"}: ${vendedores.map(esc).join(", ")} · espejo solo-lectura del celular del ejecutivo · hora de Chile</div>
   ${burbujas}
-  <script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 400); });</script>
 </div></body></html>`
   return page(html)
 }
