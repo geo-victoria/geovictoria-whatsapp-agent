@@ -248,14 +248,15 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
  * para no reventar el tiempo de la función). */
 async function fetchFeesMensuales(
   pares: Array<{ contact: string; quoteId: string }>,
-): Promise<Map<string, { uf: number | null; clp: number | null }>> {
-  const out = new Map<string, { uf: number | null; clp: number | null }>()
+): Promise<Map<string, { uf: number | null; clp: number | null; usuarios: number | null }>> {
+  const out = new Map<string, { uf: number | null; clp: number | null; usuarios: number | null }>()
   if (!pares.length) return out
   const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  const cache = new Map<string, { uf: number | null; clp: number | null }>()
+  const cache = new Map<string, { uf: number | null; clp: number | null; usuarios: number | null }>()
   const ids = [...new Set(pares.map((p) => p.quoteId))]
   for (let i = 0; i < ids.length; i += 80) {
-    const keys = ids.slice(i, i + 80).map((id) => `"fee_mes_v1_${id}"`).join(",")
+    // v2: la caché v1 no traía la dotación (usuarios) — clave nueva.
+    const keys = ids.slice(i, i + 80).map((id) => `"fee_mes_v2_${id}"`).join(",")
     const r = await fetch(
       `${SUPABASE_URL}/rest/v1/vic_kv?key=in.(${keys})&expires_at=gt.${new Date().toISOString()}&select=key,value`,
       { headers: hSb, cache: "no-store" },
@@ -263,7 +264,7 @@ async function fetchFeesMensuales(
     const rows = r?.ok ? ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) : []
     for (const row of rows) {
       try {
-        cache.set(String(row.key).replace(/^fee_mes_v1_/, ""), JSON.parse(row.value) as { uf: number | null; clp: number | null })
+        cache.set(String(row.key).replace(/^fee_mes_v2_/, ""), JSON.parse(row.value) as { uf: number | null; clp: number | null; usuarios: number | null })
       } catch {}
     }
   }
@@ -282,21 +283,37 @@ async function fetchFeesMensuales(
               const body = (await r.json().catch(() => null)) as {
                 data?: Array<{
                   Descuento_Recurrente_Pct?: number
-                  Detalle_Items_Cotizacion?: Array<{ Subtotal_UF?: number; Subtotal_CLP?: number; Es_Recurrente?: boolean }>
+                  Detalle_Items_Cotizacion?: Array<{
+                    Subtotal_UF?: number
+                    Subtotal_CLP?: number
+                    Es_Recurrente?: boolean
+                    Codigo_Item?: string
+                    Modalidad?: string
+                    Cantidad?: number
+                  }>
                 }>
               } | null
               const rec = body?.data?.[0]
               if (!rec) return
               const pct = Number(rec.Descuento_Recurrente_Pct ?? 0) || 0
-              const recurrentes = (rec.Detalle_Items_Cotizacion || []).filter((it) => it.Es_Recurrente)
+              const items = rec.Detalle_Items_Cotizacion || []
+              const recurrentes = items.filter((it) => it.Es_Recurrente)
               const uf = recurrentes.reduce((a, it) => a + (Number(it.Subtotal_UF) || 0), 0)
               const clp = recurrentes.reduce((a, it) => a + (Number(it.Subtotal_CLP) || 0), 0)
+              // Dotación cotizada: ítem de asistencia («Fijo» = plan 1-10).
+              const asistencia = items.find((it) => String(it.Codigo_Item || "") === "asistencia")
+              const usuarios = asistencia
+                ? String(asistencia.Modalidad || "").toLowerCase() === "fijo"
+                  ? 10
+                  : Number(asistencia.Cantidad) || null
+                : null
               const fee = {
                 uf: uf ? Number((uf * (1 - pct / 100) * 1.19).toFixed(2)) : null,
                 clp: clp ? Math.round(clp * (1 - pct / 100) * 1.19) : null,
+                usuarios,
               }
               cache.set(id, fee)
-              await kvSet(`fee_mes_v1_${id}`, JSON.stringify(fee), new Date(Date.now() + 48 * 3600e3).toISOString())
+              await kvSet(`fee_mes_v2_${id}`, JSON.stringify(fee), new Date(Date.now() + 48 * 3600e3).toISOString())
             } catch {}
           }),
         )
@@ -851,22 +868,42 @@ async function fetchConvsListado(): Promise<ConvListado[]> {
 }
 
 /** Último mensaje de PRECIO por contacto (el preform del chat), con timestamp
- * real desde vic_v3_messages — misma señal que usa el conteo de preforms. */
-async function fetchPreformAts(convs: ConvListado[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+ * real desde vic_v3_messages — misma señal que usa el conteo de preforms.
+ * Además parsea la DOTACIÓN cotizada del texto («Asistencia: 40 × 0,055 UF»;
+ * plan de tarifa fija sin multiplicador = tramo 1-10). */
+async function fetchPreformAts(convs: ConvListado[]): Promise<{ at: Map<string, string>; usuarios: Map<string, number> }> {
+  const at = new Map<string, string>()
+  const usuarios = new Map<string, number>()
   const porConvId = new Map(convs.map((c) => [c.id, c.contact]))
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_messages?role=eq.assistant&or=(content.ilike.*Resumen%20mensual*,content.ilike.*Total%20mensual%20con%20IVA*)&select=conversation_id,at&order=at.desc&limit=1000`,
+    `${SUPABASE_URL}/rest/v1/vic_v3_messages?role=eq.assistant&or=(content.ilike.*Resumen%20mensual*,content.ilike.*Total%20mensual%20con%20IVA*)&select=conversation_id,at,content&order=at.desc&limit=1000`,
     { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
   )
-  if (!res.ok) return out
-  const rows = (await res.json().catch(() => [])) as Array<{ conversation_id: string; at: string }>
+  if (!res.ok) return { at, usuarios }
+  const rows = (await res.json().catch(() => [])) as Array<{ conversation_id: string; at: string; content?: string }>
   for (const r of rows) {
     const contact = porConvId.get(r.conversation_id)
+    if (!contact) continue
+    const tel = digits(contact)
     // order=at.desc: la primera aparición por contacto es su último preform.
-    if (contact && !out.has(digits(contact))) out.set(digits(contact), r.at)
+    if (at.has(tel)) continue
+    at.set(tel, r.at)
+    const c = String(r.content || "")
+    const m = c.match(/Asistencia:?\s*(\d{1,4})\s*[×x]/i)
+    if (m) usuarios.set(tel, parseInt(m[1], 10))
+    else if (/Asistencia:\s*[\d.,]+\s*UF/i.test(c)) usuarios.set(tel, 10)
   }
-  return out
+  return { at, usuarios }
+}
+
+/** Tramos de dotación para los paneles de gestión (pedido Lalo 05-ago). */
+const SEGMENTOS_DOTACION = ["1-10", "11-20", "21-50", ">50", "s/d"] as const
+function segmentoDotacion(u: number | null | undefined): (typeof SEGMENTOS_DOTACION)[number] {
+  if (!u || u <= 0) return "s/d"
+  if (u <= 10) return "1-10"
+  if (u <= 20) return "11-20"
+  if (u <= 50) return "21-50"
+  return ">50"
 }
 
 type LeadListado = {
@@ -1635,10 +1672,11 @@ function renderTrabajoEjecutivos(params: {
   filas: FilaListado[]
   quotes: RawAceptada[]
   feesPorQuote: Map<string, { uf: number | null; clp: number | null }>
+  usuarios: Map<string, number>
   rango: RangoFechas | null
   pais: Pais
 }): string {
-  const { filas, quotes, feesPorQuote, rango, pais } = params
+  const { filas, quotes, feesPorQuote, usuarios, rango, pais } = params
   const ahora = Date.now()
   const vivas = filas.filter((f) => !/perdido/i.test(f.estadoZoho))
   const nombreDe = (p: string) => (p && p !== "—" ? p : "(sin ejecutivo)")
@@ -1709,9 +1747,12 @@ function renderTrabajoEjecutivos(params: {
       const ops = porEjecutivo.get(e) || []
       const asignadas = ops.filter((f) => f.primerContactoIso && enPeriodo(f.primerContactoIso)).length
       const porEtapa = ESTADOS_LISTADO.map((est) => ops.filter((f) => f.estado === est).length)
+      const porSegmento = SEGMENTOS_DOTACION.map(
+        (s) => ops.filter((f) => segmentoDotacion(usuarios.get(digits(f.contacto))) === s).length,
+      )
       const sinContacto = (h: number) => ops.filter((f) => horasDesde(f) > h).length
       const sin2dHabiles = ops.filter((f) => diasHabilesDesde(f) >= 2).length
-      return { e, ops: ops.length, asignadas, porEtapa, s2: sinContacto(2), s5: sinContacto(5), s24: sinContacto(24), s2d: sin2dHabiles, venta: ventas.get(e) }
+      return { e, ops: ops.length, asignadas, porEtapa, porSegmento, s2: sinContacto(2), s5: sinContacto(5), s24: sinContacto(24), s2d: sin2dHabiles, venta: ventas.get(e) }
     })
     .sort((a, b) => b.ops - a.ops || (b.venta?.n || 0) - (a.venta?.n || 0))
 
@@ -1720,6 +1761,7 @@ function renderTrabajoEjecutivos(params: {
     ops: filasTabla.reduce((a, r) => a + r.ops, 0),
     asignadas: filasTabla.reduce((a, r) => a + r.asignadas, 0),
     porEtapa: ESTADOS_LISTADO.map((_, i) => filasTabla.reduce((a, r) => a + r.porEtapa[i], 0)),
+    porSegmento: SEGMENTOS_DOTACION.map((_, i) => filasTabla.reduce((a, r) => a + r.porSegmento[i], 0)),
     s2: filasTabla.reduce((a, r) => a + r.s2, 0),
     s5: filasTabla.reduce((a, r) => a + r.s5, 0),
     s24: filasTabla.reduce((a, r) => a + r.s24, 0),
@@ -1736,6 +1778,7 @@ function renderTrabajoEjecutivos(params: {
       <td>${esc(r.e)}</td>
       <td style="text-align:center"><b>${r.ops}</b></td>
       <td style="text-align:center">${r.asignadas}</td>
+      ${r.porSegmento.map((n) => `<td style="text-align:center;background:#fbfcfd">${n || `<span style="color:#c9ced4">·</span>`}</td>`).join("")}
       ${r.porEtapa.map((n) => `<td style="text-align:center">${n || `<span style="color:#c9ced4">·</span>`}</td>`).join("")}
       <td style="text-align:right">${fmtVenta(r.venta)}</td>
       <td style="text-align:center">${alerta(r.s2)}</td>
@@ -1749,6 +1792,7 @@ function renderTrabajoEjecutivos(params: {
       <th>Ejecutivo</th>
       <th style="text-align:center" title="Oportunidades vivas a su nombre (excluye Cierre Perdido)">Manejando</th>
       <th style="text-align:center" title="Oportunidades cuyo primer contacto cae en el período seleccionado">Asignadas<br>período</th>
+      ${SEGMENTOS_DOTACION.map((s) => `<th style="text-align:center;background:#f2f6f9" title="Empresas por dotación cotizada (${s === "s/d" ? "sin dato de tamaño" : `${s} personas`})">${esc(s)}</th>`).join("")}
       ${ESTADOS_LISTADO.map((e) => `<th style="text-align:center">${esc(e).replace(" ", "<br>")}</th>`).join("")}
       <th style="text-align:right" title="Fee mensual recurrente de las cotizaciones PAGADAS en el período, por dueño de la cotización">Vendido<br>recurrente</th>
       <th style="text-align:center" title="Oportunidades sin contacto (chat o Zoho) hace más de 2 horas">&gt;2 h</th>
@@ -1758,7 +1802,38 @@ function renderTrabajoEjecutivos(params: {
     </tr></thead>
     <tbody>${filasTabla.map((r) => filaHtml(r)).join("")}${filaHtml({ e: "TOTAL", ...tot } as (typeof filasTabla)[number], true)}</tbody>
   </table></div>
-  <div class="sub" style="margin-top:8px">"Manejando" = oportunidades vivas de los últimos 30 días a nombre del ejecutivo (excluye Cierre Perdido). "Asignadas período" cuenta por fecha de primer contacto. "Vendido recurrente" suma el fee mensual de las cotizaciones pagadas en el período (dueño de la cotización). Las columnas de antigüedad usan el último contacto real (chat o actividad en Zoho) y son acumulativas.</div>
+  <div class="sub" style="margin-top:8px">"Manejando" = oportunidades vivas de los últimos 30 días a nombre del ejecutivo (excluye Cierre Perdido). "Asignadas período" cuenta por fecha de primer contacto. Los tramos (1-10 a &gt;50) reparten las empresas según la dotación cotizada (subform de la cotización o preform del chat; s/d = sin dato). "Vendido recurrente" suma el fee mensual de las cotizaciones pagadas en el período (dueño de la cotización). Las columnas de antigüedad usan el último contacto real (chat o actividad en Zoho) y son acumulativas.</div>
+</div>`
+}
+
+/** Resumen de EMPRESAS ingresadas en el período (pedido Lalo 05-ago): cuántas
+ * entraron, en qué etapa va cada una y su tramo de dotación — cruzado. */
+function renderEmpresasPeriodo(params: {
+  filas: FilaListado[]
+  usuarios: Map<string, number>
+  rango: RangoFechas | null
+}): string {
+  const { filas, usuarios, rango } = params
+  const ahora = Date.now()
+  const enPeriodo = (iso: string) => (rango ? enRango(iso, rango) : Date.parse(iso) >= ahora - 30 * 864e5)
+  const entrantes = filas.filter((f) => f.primerContactoIso && enPeriodo(f.primerContactoIso))
+  if (!entrantes.length) return ""
+  const seg = (f: FilaListado) => segmentoDotacion(usuarios.get(digits(f.contacto)))
+  const filasTabla = ESTADOS_LISTADO.map((est) => {
+    const grupo = entrantes.filter((f) => f.estado === est)
+    return { est, total: grupo.length, porSeg: SEGMENTOS_DOTACION.map((s) => grupo.filter((f) => seg(f) === s).length) }
+  }).filter((r) => r.total > 0)
+  const tot = { total: entrantes.length, porSeg: SEGMENTOS_DOTACION.map((s) => entrantes.filter((f) => seg(f) === s).length) }
+  const celda = (n: number) => `<td style="text-align:center">${n || `<span style="color:#c9ced4">·</span>`}</td>`
+  return `<div class="card"><h2>🏢 Empresas ingresadas en el período <span class="pct" style="font-weight:400">— ${entrantes.length} empresas · ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span></h2>
+  <div style="overflow-x:auto"><table style="font-size:12.5px;max-width:720px">
+    <thead><tr><th>Etapa actual</th><th style="text-align:center">Empresas</th>${SEGMENTOS_DOTACION.map((s) => `<th style="text-align:center" title="${s === "s/d" ? "sin dato de tamaño" : `${s} personas`}">${esc(s)}</th>`).join("")}</tr></thead>
+    <tbody>
+      ${filasTabla.map((r) => `<tr><td><span class="tag">${esc(r.est)}</span></td><td style="text-align:center"><b>${r.total}</b></td>${r.porSeg.map(celda).join("")}</tr>`).join("")}
+      <tr style="border-top:2px solid #c9ced4;font-weight:700"><td>TOTAL</td><td style="text-align:center">${tot.total}</td>${tot.porSeg.map(celda).join("")}</tr>
+    </tbody>
+  </table></div>
+  <div class="sub" style="margin-top:8px">Empresas cuyo PRIMER contacto cae en el período (filtro Desde–Hasta; sin filtro, últimos 30 días), con su etapa actual y su tramo de dotación cotizada (subform de la cotización o preform del chat; s/d = aún sin dato de tamaño).</div>
 </div>`
 }
 
@@ -2201,6 +2276,7 @@ export async function GET(req: Request): Promise<Response> {
   let colaHtml = ""
   let evolucionHtml = ""
   let ejecutivosHtml = ""
+  let empresasHtml = ""
   let casosGestion: CasoGestion[] = []
   let nGestionadosCola = 0
   let gestionados = new Map<string, string>()
@@ -2227,7 +2303,7 @@ export async function GET(req: Request): Promise<Response> {
     try {
       const contactosConocidos = new Set(convsListado.map((c) => digits(c.contact)))
       const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-      const [preformAt, zohoListado, gestionadosKv, punteros] = await Promise.all([
+      const [preformData, zohoListado, gestionadosKv, punteros] = await Promise.all([
         fetchPreformAts(convsListado),
         fetchZohoListado(contactosConocidos),
         fetch(
@@ -2239,6 +2315,10 @@ export async function GET(req: Request): Promise<Response> {
           cache: "no-store",
         }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ contact: string; total_uf: number | null; total_clp: number | null; quote_id: string | null }>>,
       ])
+      const preformAt = preformData.at
+      // Dotación por contacto: parseo del preform como base; el subform de la
+      // cotización (fees) la pisa después porque es la fuente autoritativa.
+      const usuariosPorContacto = new Map<string, number>(preformData.usuarios)
       gestionados = new Map(gestionadosKv.map((g) => [String(g.key).replace(/^gestion_/, ""), String(g.value || "")]))
       for (const p of punteros) {
         const d = digits(p.contact)
@@ -2253,7 +2333,10 @@ export async function GET(req: Request): Promise<Response> {
             .filter((p) => p.quote_id)
             .map((p) => ({ contact: digits(p.contact), quoteId: String(p.quote_id) })),
         )
-        for (const [c, fee] of fees) montosPorContacto.set(c, fee)
+        for (const [c, fee] of fees) {
+          montosPorContacto.set(c, fee)
+          if (fee.usuarios) usuariosPorContacto.set(c, fee.usuarios)
+        }
       } catch (e) {
         console.warn("[vic-funnel] fees mensuales fallaron:", e instanceof Error ? e.message : e)
       }
@@ -2283,9 +2366,11 @@ export async function GET(req: Request): Promise<Response> {
           filas: filasListado,
           quotes: cierre?.todasList || [],
           feesPorQuote,
+          usuarios: usuariosPorContacto,
           rango,
           pais,
         })
+        empresasHtml = renderEmpresasPeriodo({ filas: filasListado, usuarios: usuariosPorContacto, rango })
       } catch (e) {
         console.warn("[vic-funnel] panel ejecutivos falló:", e instanceof Error ? e.message : e)
       }
@@ -2827,6 +2912,7 @@ export async function GET(req: Request): Promise<Response> {
   ${tasaCierreHtml}
   ${evolucionHtml}
   ${ejecutivosHtml}
+  ${empresasHtml}
   <div class="kgroup">Por grupo · suman el total (${total})</div>
   <div class="kpis">
     ${kpiCard("Conversaciones", total, col.base, undefined, "total")}
