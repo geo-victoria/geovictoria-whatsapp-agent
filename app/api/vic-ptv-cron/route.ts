@@ -218,7 +218,7 @@ async function asignarEnZoho(
     const fono = contact.replace(/\D/g, "")
     const res = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
     const lead = res.ok && res.status !== 204
-      ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null }> }).data?.[0]
+      ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null; Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]
       : undefined
     if (!lead?.id) {
       // Sin lead en Zoho no hay registro que asignar: se CREA (regla 1 del
@@ -232,6 +232,10 @@ async function asignarEnZoho(
       // CO: el lead sin cotización lo posee el SDR Inbound (acuerdo equipo CO
       // 04-ago) — se crea sin dueño y se asigna por round-robin SDR abajo.
       const esCO = pais === "co"
+      // CL (Lalo 06-ago): el lead nuevo de un traspaso NO nace con la
+      // rotación interna (roster de una sola persona = todo a Eddyluz) —
+      // nace sin dueño y lo sortea la regla de calificación (Araceli/Aleydis).
+      const esCL = pais === "cl"
       const creado = await createZohoLead({
         nombre: "Prospecto WhatsApp",
         empresa: `Por identificar (WhatsApp +${fono})`,
@@ -239,11 +243,25 @@ async function asignarEnZoho(
         contactoWA: fono,
         pais: paisNombre,
         necesidad: "Traspaso PTV: conversación activa con Vicky sin registro previo en el CRM — lead creado al asignar vendedor.",
-        ownerEmail: esCO ? undefined : interno.email,
-        ownerId: esCO ? undefined : interno.zohoId,
+        ownerEmail: esCO || esCL ? undefined : interno.email,
+        ownerId: esCO || esCL ? undefined : interno.zohoId,
       }).catch(() => null)
       if (!creado || !creado.success) {
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
+      } else if (esCL) {
+        const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
+        const r = await reasignarLeadCalificacionCL(creado.leadId).catch(() => null)
+        await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
+        if (r?.success && r.ownerEmail && r.ownerId) {
+          const tel = await telefonoDeUsuario(r.ownerId, H, api)
+          return {
+            email: r.ownerEmail,
+            zohoId: r.ownerId,
+            nombre: r.ownerNombre || NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+            telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+            via: "tombola_zoho",
+          }
+        }
       } else if (esCO) {
         const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
         const r = await reasignarLeadSdrInboundCO(creado.leadId).catch(() => null)
@@ -340,6 +358,42 @@ async function asignarEnZoho(
           via: "dueno_lead_sdr",
         }
       }
+    } else if (pais === "cl") {
+      // Lead vivo SIN deal alcanzado por un reloj = Vicky no logró calificarlo
+      // a tiempo (Lalo 06-ago): va a la tómbola de leads de calificación
+      // (regla Araceli/Aleydis), NO a la rotación interna — el roster interno
+      // CL es una sola persona y le llovía todo a Eddyluz (caso Veltis).
+      // Dueño humano real no se pisa: se presenta ÉL. Eddyluz cuenta como
+      // interina (marcador de "sin dueño real"), igual que Vicky.
+      const ownerLead = (lead.Owner?.email || "").toLowerCase()
+      const esInterina = !ownerLead || /vicky@|info@geovictoria|emujica@/.test(ownerLead)
+      if (!esInterina && lead.Owner?.id) {
+        await notificarTraspasoLeadEmail(lead.id, ownerLead, fono, H, api)
+        const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
+        return {
+          email: ownerLead,
+          zohoId: lead.Owner.id,
+          nombre: lead.Owner.name || NOMBRE_VENDEDOR[ownerLead] || ownerLead.split("@")[0],
+          telefono: tel || WHATSAPP_VENDEDOR[ownerLead] || "",
+          via: "dueno_lead_sdr",
+        }
+      }
+      const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
+      const r = await reasignarLeadCalificacionCL(lead.id).catch(() => null)
+      if (r?.success && r.ownerEmail && r.ownerId) {
+        await notificarTraspasoLeadEmail(lead.id, r.ownerEmail, fono, H, api)
+        const tel = await telefonoDeUsuario(r.ownerId, H, api)
+        return {
+          email: r.ownerEmail,
+          zohoId: r.ownerId,
+          nombre: r.ownerNombre || NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+          telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+          via: "tombola_zoho",
+        }
+      }
+      // Fallback (regla y RR fallaron): rotación interna como siempre.
+      await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
+      await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
     } else {
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
