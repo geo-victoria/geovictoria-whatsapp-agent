@@ -227,6 +227,44 @@ setInterval(() => {
   kvSet("wa_lid_pn", JSON.stringify(Object.fromEntries(lidPn)))
 }, 30_000)
 
+// ── Resolución PROACTIVA número→LID (06-ago) ────────────────────────────────
+// El LID de un chat que INICIA el vendedor recién se conoce cuando el cliente
+// responde (caso Leyla/Neumasport: Rodrigo escribió y el chat quedó sin
+// cruzar). Para no esperar, las sesiones conectadas consultan por USync
+// (onWhatsApp — consulta pasiva de directorio, no envía nada ni notifica al
+// cliente) los teléfonos de los contactos comerciales de Vicky que aún no
+// tienen mapeo, y aprenden su LID al tiro.
+let resolutorActivo = false
+const resolutorTimers = new Map()
+
+async function resolverContactosVicky(sock) {
+  if (resolutorActivo) return
+  resolutorActivo = true
+  try {
+    const res = await sb("vic_v3_conversations?select=contact&order=started_at.desc&limit=400")
+    const contactos = (await res.json()).map((c) => soloDigitos(c.contact)).filter(Boolean)
+    const mapeados = new Set(lidPn.values())
+    const pendientes = [...new Set(contactos)].filter((t) => !mapeados.has(t)).slice(0, 200)
+    let aprendidos = 0
+    for (let i = 0; i < pendientes.length; i += 50) {
+      const lote = pendientes.slice(i, i + 50).map((t) => `${t}@s.whatsapp.net`)
+      const rs = await sock.onWhatsApp(...lote).catch(() => null)
+      for (const r of rs || []) {
+        if (r?.exists && r.lid) {
+          aprenderLid(r.lid, r.jid)
+          aprendidos++
+        }
+      }
+      await new Promise((ok) => setTimeout(ok, 1500))
+    }
+    if (aprendidos) console.log(`[lid] resolutor proactivo: ${aprendidos} contactos mapeados`)
+  } catch (e) {
+    console.error("[lid] resolutor", e.message)
+  } finally {
+    resolutorActivo = false
+  }
+}
+
 async function guardarMensaje(sessionId, m) {
   const jid = m.key?.remoteJid || ""
   // status@broadcast = estados; newsletter = canales. No son conversaciones.
@@ -387,6 +425,12 @@ async function conectar(sessionId) {
 
   // WhatsApp comparte explícitamente el número detrás de un LID.
   sock.ev.on("chats.phoneNumberShare", ({ lid, jid }) => aprenderLid(lid, jid))
+
+  // Resolutor proactivo: 30 s tras conectar y luego cada 5 min (el candado
+  // resolutorActivo evita que varias sesiones consulten a la vez).
+  clearInterval(resolutorTimers.get(sessionId))
+  resolutorTimers.set(sessionId, setInterval(() => resolverContactosVicky(sock).catch(() => {}), 5 * 60_000))
+  setTimeout(() => resolverContactosVicky(sock).catch(() => {}), 30_000)
 }
 
 console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — SOLO LECTURA`)
