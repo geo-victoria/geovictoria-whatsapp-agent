@@ -482,11 +482,24 @@ async function traspasarATelemarketing(
 
     // 2. Dueño: si el lead ya es de un HUMANO, no se pisa su gestión (regla
     // marketing 30-jul) — ese humano es el ejecutivo que se presenta. Si es
-    // del bot: CL sortea con la regla de re-asignación de Zoho; PE (sin
-    // tómbola) asigna directo a la ejecutiva del país (Mónica).
+    // del bot: CL va a la TÓMBOLA DE LEADS DE CALIFICACIÓN — Aracelli y
+    // Aleydis en round-robin (orden de Lalo 06-ago: "lo que no ha podido
+    // calificar vuelve a Aleydis y Aracelli") — y PE (sin tómbola) asigna
+    // directo a la ejecutiva del país (Mónica). Si algún día la tómbola de
+    // ellas existe como regla en Zoho: env VICKY_TM_CALIFICACION_RULE_ID la
+    // conecta sin deploy (reemplaza al round-robin por el camino lar_id).
     let owner = lead?.Owner && !ownerBot ? lead.Owner : undefined
+    if (!owner?.id && pais === "cl" && !(process.env.VICKY_TM_CALIFICACION_RULE_ID || "").trim()) {
+      const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
+      const r = await reasignarLeadCalificacionCL(leadId)
+      if (r.success && r.ownerId && r.ownerEmail) {
+        owner = { id: r.ownerId, email: r.ownerEmail, name: r.ownerNombre }
+      } else {
+        console.warn(`[tm-24h] tómbola de calificación falló lead=${leadId}: ${r.error || "sin detalle"}`)
+      }
+    }
     if (!owner?.id) {
-      const regla = TM_REGLA[pais] || ""
+      const regla = (pais === "cl" ? (process.env.VICKY_TM_CALIFICACION_RULE_ID || "").trim() : "") || TM_REGLA[pais] || ""
       if (regla) {
         const put = await fetch(`${api}/crm/v3/Leads`, {
           method: "PUT", headers: H, cache: "no-store",
@@ -608,6 +621,14 @@ export async function GET(req: Request) {
   )
   const activos = await supa<{ contact: string }>(`vic_ptv?estado=eq.activo&select=contact&limit=1000`)
   const conTraspaso = new Set(activos.map((a) => a.contact))
+  // >50 detectados (Lalo 06-ago): "no pasa por el proceso de traspaso" — su
+  // camino es tómbola de deals (calificado), tómbola de leads de calificación
+  // (sin número) u host de reunión. El reloj de etapa NO les corre (caso
+  // Veltis: derivado >50 a las 13:00 y el reloj de 120' lo traspasó igual).
+  const mas50 = await supa<{ contact: string }>(
+    `vic_loop?motivo_cierre=eq.mas_de_50&select=contact&limit=1000`,
+  )
+  const contactosMas50 = new Set(mas50.map((m) => m.contact))
   const pausas = await supa<{ contact: string; compromiso_at: string | null }>(
     `vic_loop?select=contact,compromiso_at&compromiso_at=not.is.null&limit=500`,
   )
@@ -629,6 +650,8 @@ export async function GET(req: Request) {
     if (!pais) continue
     // opt-out/soporte/perdido: el loop ya cerró esta conversación — no traspasar.
     if (c.followup_closed_reason) continue
+    // >50: fuera del proceso de traspaso (Lalo 06-ago).
+    if (contactosMas50.has(c.contact)) continue
     // Reloj TTV: el silencio se mide desde el último mensaje del CLIENTE.
     // updated_at se mueve con cada toque del Loop, y usarlo de referencia
     // reiniciaba el TTV en cada toque (brecha 1, 30-jul). Sin mensaje del

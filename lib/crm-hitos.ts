@@ -115,16 +115,35 @@ export type DatosConversacion = {
   empleados?: number
 }
 
+/**
+ * Número de empleados desde lo que DIJO el cliente o trajo el formulario: los
+ * >50 llegan casi siempre como texto ("entre 200 y 400", "200 - 499
+ * empleados", "300 aprox", "más de 100") y el Number() estricto los
+ * descartaba — el deal nacía con N=1 y la tómbola de deals lo sorteaba en el
+ * tramo SMB (casos VDZ/Bodegas San Francisco/VITAPRO, orden de Lalo 06-ago:
+ * los >50 deben caer SÍ O SÍ en su tramo real de la regla). Regla: se toma el
+ * PISO del rango (primer número); "más de X" cuenta como X+1.
+ */
+export function parseEmpleados(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return Math.round(v)
+  const s = String(v ?? "").trim()
+  if (!s) return undefined
+  const m = s.match(/\d[\d.]*/)
+  if (!m) return undefined
+  const n = Math.round(Number(m[0].replace(/\.(?=\d{3}\b)/g, "")))
+  if (!Number.isFinite(n) || n <= 0 || n > 100000) return undefined
+  const masDe = /(m[áa]s\s+de|sobre|arriba\s+de|\+\s*$|superior(?:es)?\s+a)/i.test(
+    s.slice(0, (m.index || 0) + m[0].length + 2),
+  )
+  return masDe ? n + 1 : n
+}
+
 export function datosDeToolInput(toolName: string, input: unknown): DatosConversacion {
   const i = (input || {}) as Record<string, unknown>
   const txt = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined)
-  const num = (v: unknown) => {
-    const n = Number(v)
-    return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined
-  }
   switch (toolName) {
     case "cotizar_referencial":
-      return { empleados: num(i.userCount) }
+      return { empleados: parseEmpleados(i.userCount) }
     case "generar_link_cotizadora":
     case "actualizar_cotizacion":
       return {
@@ -139,14 +158,23 @@ export function datosDeToolInput(toolName: string, input: unknown): DatosConvers
         nombre: txt(i.prospectName),
         email: txt(i.prospectEmail),
         empresa: txt(i.empresa),
-        empleados: num(i.trabajadores),
+        empleados: parseEmpleados(i.trabajadores),
       }
     case "registrar_solicitud_callback":
       return {
         nombre: txt(i.nombre),
         empresa: txt(i.empresa),
         email: txt(i.email),
-        empleados: num(i.trabajadores),
+        empleados: parseEmpleados(i.trabajadores),
+      }
+    // Derivación >50 (Lalo 06-ago): el lead/deal debe nacer con TODOS los
+    // datos para caer en el tramo correcto de la tómbola de deals.
+    case "derivar_a_soporte":
+      return {
+        nombre: txt(i.nombre),
+        empresa: txt(i.empresa),
+        email: txt(i.email),
+        empleados: parseEmpleados(i.trabajadores),
       }
     default:
       return {}
@@ -602,10 +630,49 @@ async function convertirConDeal(
   lead: LeadEncontrado,
   contact: string,
   piso: string,
+  // Reunión agendada (Lalo 06-ago): el owner se FUERZA al host de la reunión
+  // — mata la carrera lead-reasignado-vs-hito que mandó el deal de VDZ a la
+  // tómbola mientras el cliente conocía a Aleydis.
+  ownerForzadoId?: string,
 ): Promise<string | null> {
   const { h, api } = await zohoHeaders()
   const territorio = territorioDeContacto(contact) || "Chile"
-  const empleados = lead.empleados || 1
+  // Sin dato real, el N NO se inventa (Lalo 06-ago): el default 1 mandaba
+  // empresas de 500 al tramo SMB de la tómbola de deals (casos VDZ/Bodegas
+  // San Francisco/VITAPRO).
+  const empleados = lead.empleados || 0
+  // CHILE SIN NÚMERO = oportunidad NO calificada (Lalo 06-ago): no nace deal.
+  // Con reunión agendada, el LEAD se fuerza al host (él califica en la
+  // reunión); sin reunión, vuelve a la tómbola de leads de Aracelli/Aleydis,
+  // que califican y ahí recién el deal nace en su tramo real. Dueño humano
+  // previo no se pisa: esa gestión ya tiene responsable.
+  if (territorio === "Chile" && empleados <= 0) {
+    if (ownerForzadoId) {
+      await fetch(`${api}/crm/v3/Leads`, {
+        method: "PUT",
+        headers: h,
+        cache: "no-store",
+        body: JSON.stringify({
+          data: [{ id: lead.id, Owner: { id: ownerForzadoId } }],
+          skip_feature_execution: [{ name: "assignment_rules" }],
+        }),
+      }).catch(() => {})
+      console.log(
+        `[crm-hitos] +${contact}: hito sin N° de trabajadores CON reunión — deal NO creado; lead ${lead.id} forzado al host de la reunión`,
+      )
+    } else if (!heredaGestionAlDeal(lead.ownerId, territorio)) {
+      const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
+      const r = await reasignarLeadCalificacionCL(lead.id).catch(() => null)
+      console.log(
+        `[crm-hitos] +${contact}: hito sin N° de trabajadores — deal NO creado; lead ${lead.id} → tómbola de calificación (${r?.ownerEmail || "sin asignar"})`,
+      )
+    } else {
+      console.log(
+        `[crm-hitos] +${contact}: hito sin N° de trabajadores — deal NO creado; lead ${lead.id} sigue con su dueño humano`,
+      )
+    }
+    return null
+  }
   const deal = {
     Deal_Name: `${lead.company || "Prospecto WhatsApp"} (Control de Asistencia)`,
     Stage: piso,
@@ -618,8 +685,8 @@ async function convertirConDeal(
     Monda_del_trato:
       territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : territorio === "Perú" ? "SOL" : "UF",
     Producto_Soluci_n: "Control de Asistencia",
-    Tipo_de_Cobro: empleados <= 10 ? "Mensual fijo" : "Por usuario",
-    N_Empleados_que_marcan: empleados,
+    Tipo_de_Cobro: empleados > 0 && empleados <= 10 ? "Mensual fijo" : "Por usuario",
+    ...(empleados > 0 ? { N_Empleados_que_marcan: empleados } : {}),
     Closing_Date: HOY_MAS_30(),
     // Dueño humano del lead → lo hereda el deal. Sin dueño humano:
     // - Territorio CON regla de tómbola (Chile): el deal nace a nombre del
@@ -685,6 +752,23 @@ async function convertirConDeal(
   const dealCreado = fila?.Deals?.id || fila?.details?.Deals?.id
   if (fila?.code === "SUCCESS" && dealCreado) {
     console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${piso}"`)
+    // REUNIÓN MANDA (Lalo 06-ago): con reunión agendada el deal se fuerza al
+    // HOST — una sola cara ante el cliente. Gana sobre tómbola y traspaso.
+    if (ownerForzadoId) {
+      await fetch(`${api}/crm/v3/Deals`, {
+        method: "PUT",
+        headers: h,
+        cache: "no-store",
+        body: JSON.stringify({
+          data: [{ id: String(dealCreado), Owner: { id: ownerForzadoId } }],
+          skip_feature_execution: [{ name: "assignment_rules" }],
+        }),
+      }).catch(() => {})
+      console.log(`[crm-hitos] deal ${dealCreado} forzado al host de la reunión (${ownerForzadoId})`)
+      await notificarTraspasoDeal(String(dealCreado)).catch(() => {})
+      await registrarDealEnKv(contact.replace(/\D/g, ""), String(dealCreado), "hito")
+      return String(dealCreado)
+    }
     const heredaDuenoHumano = heredaGestionAlDeal(lead.ownerId, territorio)
     // TRASPASO VIGENTE MANDA (caso Ana/Daniela 04-ago): si el contacto tiene
     // vic_ptv activo, al cliente YA se le presentó ese ejecutivo (con nombre,
@@ -894,12 +978,25 @@ export async function sincronizarHitoCrm(
   contact: string,
   hito: Hito,
   datos: DatosConversacion = {},
-  opts: { noCrear?: boolean } = {},
+  opts: { noCrear?: boolean; ownerForzadoEmail?: string } = {},
 ): Promise<void> {
   try {
     if (!habilitado()) return
     const clean = (contact || "").replace(/\D/g, "")
     if (!clean || esTelefonoDePrueba(clean)) return
+    // Host de reunión → id de usuario Zoho (Lalo 06-ago: con reunión, el
+    // owner del deal/lead se fuerza al host). Resolución best-effort.
+    let ownerForzadoId = ""
+    if (opts.ownerForzadoEmail) {
+      const { resolveOwnerId } = await import("./zoho-leads")
+      const { getZohoAccessToken } = await import("./zoho-token")
+      ownerForzadoId =
+        (await resolveOwnerId(
+          opts.ownerForzadoEmail,
+          await getZohoAccessToken(),
+          getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com",
+        ).catch(() => "")) || ""
+    }
     // La clave del guard incluye los datos: el mismo hito con información
     // NUEVA (apareció la empresa, llegó el correo) sí se re-procesa.
     const key = `${clean}:${hito}:${JSON.stringify(datos)}`
@@ -987,7 +1084,7 @@ export async function sincronizarHitoCrm(
         console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${creado.leadId} espera identidad para convertir (deal pendiente)`)
         return
       }
-      const dealId = await convertirConDeal(lead, clean, piso)
+      const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined)
       if (!dealId) console.warn(`[crm-hitos] ${clean}: lead ${creado.leadId} quedó sin convertir`)
       else await actualizarNotaTranscripcion(dealId, clean)
       return
@@ -1071,7 +1168,7 @@ export async function sincronizarHitoCrm(
         await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
-      const dealNuevo = await convertirConDeal(lead, clean, piso)
+      const dealNuevo = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined)
       if (dealNuevo) await actualizarNotaTranscripcion(dealNuevo, clean)
       return
     }

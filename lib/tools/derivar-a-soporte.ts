@@ -48,6 +48,26 @@ export const derivarASoporteSchema = {
         minLength: 5,
         maxLength: 300,
       },
+      nombre: {
+        type: "string" as const,
+        description:
+          "Nombre completo del contacto. OBLIGATORIO para motivo fuera_de_rango_trabajadores (captúralo ANTES de derivar).",
+      },
+      email: {
+        type: "string" as const,
+        description:
+          "Email del contacto. OBLIGATORIO para motivo fuera_de_rango_trabajadores (captúralo ANTES de derivar).",
+      },
+      empresa: {
+        type: "string" as const,
+        description:
+          "Nombre de la empresa. OBLIGATORIO para motivo fuera_de_rango_trabajadores (captúralo ANTES de derivar).",
+      },
+      trabajadores: {
+        type: "string" as const,
+        description:
+          "Cantidad de trabajadores TAL CUAL la dijo el cliente o la trajo el formulario ('300', 'entre 200 y 400', '200 - 499'). OBLIGATORIO para motivo fuera_de_rango_trabajadores: con este dato el deal cae en el tramo correcto de la tómbola.",
+      },
     },
     required: ["motivo", "contexto"],
   },
@@ -64,6 +84,12 @@ export type DerivarASoporteInput = {
     | "callback"
     | "transferir_soporte_operativo"
   contexto: string
+  /** Datos del lead (obligatorios en fuera_de_rango_trabajadores): con ellos
+   * el hito crea lead + deal y la tómbola de deals sortea el tramo correcto. */
+  nombre?: string
+  email?: string
+  empresa?: string
+  trabajadores?: string
 }
 
 export type DerivarASoporteResultado = {

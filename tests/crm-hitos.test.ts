@@ -111,8 +111,32 @@ describe("enriquecimiento aditivo con los datos de la conversación (Lalo 30-jul
   })
 
   test("tools sin datos personales no aportan nada (y no rompen)", () => {
-    assert.deepEqual(datosDeToolInput("derivar_a_soporte", { motivo: "x" }), {})
+    assert.deepEqual(datosDeToolInput("derivar_a_soporte", { motivo: "x" }), {
+      nombre: undefined,
+      empresa: undefined,
+      email: undefined,
+      empleados: undefined,
+    })
     assert.deepEqual(datosDeToolInput("cotizar_referencial", {}), { empleados: undefined })
+  })
+
+  test("los >50 llegan como TEXTO: el parser toma el piso del rango (Lalo 06-ago)", () => {
+    // Caso Veltis: "somos en corporativo 300 aprox" se perdía y el deal nacía N=1.
+    assert.deepEqual(
+      datosDeToolInput("derivar_a_soporte", {
+        motivo: "fuera_de_rango_trabajadores",
+        nombre: "Fermin Morales",
+        email: "fermin.morales@veltislatam.com",
+        empresa: "Veltis",
+        trabajadores: "somos en corporativo 300 aprox",
+      }),
+      { nombre: "Fermin Morales", email: "fermin.morales@veltislatam.com", empresa: "Veltis", empleados: 300 },
+    )
+    // Caso VDZ: "entre 200 y 400" (chat) y "200 - 499" (formulario) → piso.
+    assert.equal(datosDeToolInput("agendar_reunion", { trabajadores: "entre 200 y 400" }).empleados, 200)
+    assert.equal(datosDeToolInput("agendar_reunion", { trabajadores: "200 - 499 empleados" }).empleados, 200)
+    assert.equal(datosDeToolInput("registrar_solicitud_callback", { trabajadores: "más de 100" }).empleados, 101)
+    assert.equal(datosDeToolInput("agendar_reunion", { trabajadores: "no sé" }).empleados, undefined)
   })
 
   test("solo campos vacíos o placeholder — jamás pisar datos existentes", () => {

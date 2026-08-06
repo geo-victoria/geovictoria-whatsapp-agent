@@ -72,7 +72,7 @@ function buildTranscript(
     .slice(0, 32000)
 }
 
-async function resolveOwnerId(
+export async function resolveOwnerId(
   email: string,
   token: string,
   apiDomain: string,
@@ -521,6 +521,63 @@ export async function reasignarLeadTelemarketingCL(
     return { success: true, ownerEmail: owner?.email }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción" }
+  }
+}
+
+/**
+ * TÓMBOLA DE LEADS NO CALIFICADOS — Aleydis y Aracelli (orden de Lalo 06-ago):
+ * lo que Vicky NO pudo calificar (sin número de trabajadores → no es
+ * oportunidad calificada; y el reloj de 24 h hábiles sin calificar) vuelve a
+ * ellas dos en round-robin, con intención comercial de por medio. Asignación
+ * DIRECTA con skip assignment_rules (no pasa por la regla de Zoho, que siguen
+ * usando los callbacks). Editable sin deploy: VICKY_TM_CALIFICACION_DESTINOS
+ * con formato "email:user_id:Nombre,email:user_id:Nombre".
+ */
+const DESTINOS_CALIFICACION_CL = (
+  process.env.VICKY_TM_CALIFICACION_DESTINOS ||
+  "aaraque@geovictoria.com:3525045000583802005:Aleydis Araque," +
+    "asepulveda@geovictoria.com:3525045000594735052:Aracelli Sepúlveda"
+)
+  .split(",")
+  .map((par) => {
+    const [email, id, nombre] = par.split(":").map((x) => (x || "").trim())
+    return { email: (email || "").toLowerCase(), id: id || "", nombre: nombre || (email || "").split("@")[0] }
+  })
+  .filter((d) => d.email && d.id)
+
+export async function reasignarLeadCalificacionCL(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string }> {
+  if (!leadId || DESTINOS_CALIFICACION_CL.length === 0) {
+    return { success: false, error: "leadId faltante o sin destinos configurados" }
+  }
+  try {
+    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+    const last = parseInt((await getKvValue("tm_calif_rr_cl").catch(() => null)) || "-1")
+    const idx = (isNaN(last) ? 0 : last + 1) % DESTINOS_CALIFICACION_CL.length
+    const destino = DESTINOS_CALIFICACION_CL[idx]
+
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const res = await fetch(`${apiDomain}/crm/v3/Leads`, {
+      method: "PUT",
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ id: leadId, Owner: { id: destino.id } }],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ status?: string; message?: string }>
+    }
+    if (!res.ok || data?.data?.[0]?.status !== "success") {
+      return { success: false, error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}` }
+    }
+    await setKvValue("tm_calif_rr_cl", String(idx)).catch(() => {})
+    return { success: true, ownerEmail: destino.email, ownerId: destino.id, ownerNombre: destino.nombre }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
   }
 }
 

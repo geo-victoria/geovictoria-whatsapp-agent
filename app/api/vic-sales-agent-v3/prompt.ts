@@ -541,7 +541,7 @@ Reglas del modo (se suman a todo el flujo normal de cotización):
 7. agendar_reunion(slotIso, prospectName, prospectEmail, empresa?, ...) — agenda la reunión en Cal.com, crea el Lead en Zoho con Owner = KAM del Round Robin, y crea el Event en Zoho. Úsala SOLO cuando el cliente confirmó un horario específico. Solo pasa parámetros opcionales si el cliente los mencionó.
 7b. reagendar_reunion(newSlotIso, country?) — reagenda la reunión que el cliente YA tiene a un nuevo horario, MANTENIENDO el mismo ejecutivo. Úsala (en vez de agendar_reunion) cuando un cliente con reunión existente quiere cambiar día/hora. Ubica sola la reunión vigente del cliente; no necesita id.
 
-8. derivar_a_soporte(motivo, contexto) — red de seguridad para handoff. Motivos: "fuera_de_scope", "tool_fallo", "solicitud_explicita_persona". NO uses esta tool para callback (usa registrar_solicitud_callback), agendar (usa agendar_reunion), o consulta operativa (usa consultar_agente_soporte).
+8. derivar_a_soporte(motivo, contexto, nombre?, email?, empresa?, trabajadores?) — red de seguridad para handoff. Motivos: "fuera_de_scope", "tool_fallo", "solicitud_explicita_persona", "fuera_de_rango_trabajadores". Para "fuera_de_rango_trabajadores" (50+) pasa SIEMPRE nombre, email, empresa y trabajadores (el número tal cual lo dijo el cliente, sirve un rango): con ellos el trato entra automático a la tómbola del equipo comercial. NO uses esta tool para callback (usa registrar_solicitud_callback), agendar (usa agendar_reunion), o consulta operativa (usa consultar_agente_soporte).
 
 9. consultar_descuento_referencial(userCount, modulos, hardware?, puntosInstalacion?, escalonActual) — NEGOCIACIÓN ANTES de la cotización formal (solo lectura, NO crea NADA en Zoho). Úsala cuando el cliente pide rebaja apenas ve los precios, sobre la opción que eligió. Pasa los MISMOS parámetros de esa opción (userCount, modulos, hardware, puntosInstalacion) + \`escalonActual\` (0 la primera vez). El servidor decide el escalón y devuelve un \`mensajeParaProspecto\` con el precio recalculado para ofrecer EN LA CONVERSACIÓN, sin crear cotización ni PDF. Copia el \`mensajeParaProspecto\` TAL CUAL: ya viene con el % y los montos exactos y con el cierre. No lo parafrasees ni le cambies los números. Si insiste en más rebaja, vuelve a llamarla pasando el \`escalonActual\` que devolvió (avanza un tramo). Cuando ACEPTE, pide los datos que falten y llama generar_link_cotizadora con \`escalonDescuento\` = el \`escalonActual\` aceptado: la cotización formal nace YA con ese descuento, UNA sola vez. Si \`topeAlcanzado=true\`, es el último escalón. NO la uses si ya existe una cotización formal (ahí va el camino post-formal, tools 10 y 11).
 
@@ -880,6 +880,7 @@ Datos a capturar (siempre los mismos):
 - Nombre del contacto (obligatorio)
 - Email (obligatorio)
 - Empresa (obligatorio)
+- N° de trabajadores (obligatorio en casos 50+): el número que diga el cliente, aunque sea aproximado o un rango ("300 aprox", "entre 200 y 400"). Con ese dato el trato cae directo con el equipo correcto; sin él, queda pendiente de calificación. Si el formulario ya trae un rango, confírmalo o afínalo con UNA pregunta.
 - Teléfono → usa AUTOMÁTICAMENTE el del canal de WhatsApp (ver sección "Teléfono del cliente"). NO lo preguntes.
 
 Pídelos en orden natural conversacional, en 1-2 mensajes. NO como lista numerada:
@@ -897,7 +898,7 @@ Si el prospecto cuenta contexto espontáneamente ("tenemos lío con planilla"), 
 Tools según el caso:
 - Callback → registrar_solicitud_callback.
 - Agendar reunión → ver sección dedicada.
-- 50+ trabajadores → pregunta: "Prefieres una reunión por videollamada con un ejecutivo, o que te llamen por teléfono?". Según respuesta usas agendar_reunion o registrar_solicitud_callback. Si tras preguntar sigue sin decidir, default callback.
+- 50+ trabajadores → PRIMERO captura los datos del lead (nombre, email, empresa y N° de trabajadores — ver arriba) y RECIÉN AHÍ pregunta: "Prefieres una reunión por videollamada con un ejecutivo, o que te llamen por teléfono?". Según respuesta usas agendar_reunion (pasa trabajadores tal cual lo dijo) o registrar_solicitud_callback (idem). Si tras preguntar sigue sin decidir o no responde el canal, usa derivar_a_soporte motivo "fuera_de_rango_trabajadores" PASANDO nombre, email, empresa y trabajadores en la tool — con esos campos el trato entra automático a la tómbola del equipo; sin ellos el lead queda en calificación. NUNCA digas "un ejecutivo te contactará" sin haber invocado una de estas tres tools en el mismo turno.
 
 Mensaje de cierre tras invocar la tool:
 

@@ -551,11 +551,25 @@ export async function runAgentLoop(params: {
           HITO_POR_TOOL[toolName] &&
           (result as { ok?: boolean } | null)?.ok !== false
         ) {
+          // Con reunión agendada, el owner del deal/lead se FUERZA al host
+          // que sorteó Cal (Lalo 06-ago) — el hito lo recibe explícito para
+          // matar la carrera con la reasignación del lead (caso VDZ: cliente
+          // conoció a Aleydis y el deal se sorteó a Tamara).
+          const hostReunion =
+            (toolName === "agendar_reunion" || toolName === "reagendar_reunion") &&
+            result &&
+            typeof result === "object" &&
+            "organizerEmail" in result
+              ? String((result as { organizerEmail?: unknown }).organizerEmail || "").trim()
+              : ""
           void sincronizarHitoCrm(
             contact,
             HITO_POR_TOOL[toolName],
             datosDeToolInput(toolName, toolInput),
-            { noCrear: TOOLS_QUE_CREAN_SU_LEAD.has(toolName) },
+            {
+              noCrear: TOOLS_QUE_CREAN_SU_LEAD.has(toolName),
+              ...(hostReunion ? { ownerForzadoEmail: hostReunion } : {}),
+            },
           ).catch(() => undefined)
         }
 
@@ -592,6 +606,26 @@ export async function runAgentLoop(params: {
           (toolName === "derivar_a_ejecutivo" && String(toolInput.motivo || "") === "mas_de_50")
         if (contact && esDerivacionMas50) {
           void mas50CierraLoop(contact).catch(() => undefined)
+        }
+        // ORDEN LALO 06-ago: el >50 que Vicky no puede cotizar pasa SÍ O SÍ a
+        // la tómbola de deals con sus datos (N° empleados incluido, para caer
+        // en el tramo correcto de la regla). Antes derivar_a_soporte era un
+        // no-op de CRM: "un ejecutivo te contactará" sin lead ni deal (casos
+        // Grupo Euskadi/Veltis/Safran — nadie los recibió). El hito
+        // "intencion" crea el lead si falta, lo convierte con deal y aplica
+        // la tómbola. Solo CL (CO/MX/PE derivan con derivar_a_ejecutivo y
+        // dueños fijos de país). Best-effort: jamás toca la conversación.
+        if (
+          contact &&
+          contact.replace(/\D/g, "").startsWith("56") &&
+          toolName === "derivar_a_soporte" &&
+          String(toolInput.motivo || "") === "fuera_de_rango_trabajadores"
+        ) {
+          void sincronizarHitoCrm(
+            contact,
+            "intencion",
+            datosDeToolInput(toolName, toolInput),
+          ).catch(() => undefined)
         }
 
         const esRedireccionSoporte =
