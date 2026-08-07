@@ -2584,7 +2584,10 @@ async function renderConversation(convId: string, key: string): Promise<Response
     g(`vic_v3_conversation_analysis?conversation_id=eq.${convId}&select=contact,resumen,motivo_no_cierre,sub_bucket,cotizacion_outcome&limit=1`),
   ])
   const a = ana[0] || {}
-  const back = `/api/vic-funnel?key=${encodeURIComponent(key)}`
+  // Relativo a la ruta actual: el dash también se sirve proxeado como
+  // cotizacion.geovictoria.com/telemarketing (rewrite en el cotizador,
+  // Lalo 07-ago) — un path absoluto /api/vic-funnel rompería el volver ahí.
+  const back = `?key=${encodeURIComponent(key)}`
   const bubbles = msgs
     .map((m) => {
       const user = m.role === "user"
