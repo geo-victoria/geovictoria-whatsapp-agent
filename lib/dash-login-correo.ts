@@ -71,7 +71,12 @@ export async function usuarioZohoActivoPorEmail(email: string): Promise<{ nombre
 /** Genera y envía el código. Devuelve error legible si algo no calza. */
 export async function pedirCodigoDash(email: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const correo = norm(email)
-  const usuario = await usuarioZohoActivoPorEmail(correo)
+  // Los ADMINS entran aunque no sean usuarios de Zoho CRM (caso Lalo 07-ago:
+  // egomez@ administra por la cuenta Admin y su correo personal no es usuario
+  // del CRM — la validación lo bloqueaba a él mismo).
+  const usuario = esAdminCorreo(correo)
+    ? { nombre: "Administrador" }
+    : await usuarioZohoActivoPorEmail(correo)
   if (!usuario) {
     return { ok: false, error: "Ese correo no corresponde a un usuario activo de GeoVictoria. Usa tu correo corporativo." }
   }
@@ -92,7 +97,7 @@ export async function pedirCodigoDash(email: string): Promise<{ ok: true } | { o
   )
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#2d3748;line-height:1.5">
 <h2 style="color:#1a202c;margin:0 0 12px">Acceso a Gestión de oportunidades</h2>
-<p>${usuario.nombre ? `${usuario.nombre.split(" ")[0]}, tu` : "Tu"} código de acceso es:</p>
+<p>${usuario.nombre && usuario.nombre !== "Administrador" ? `${usuario.nombre.split(" ")[0]}, tu` : "Tu"} código de acceso es:</p>
 <p style="font-size:30px;font-weight:700;letter-spacing:4px;color:#0284c7;margin:8px 0 16px">${code}</p>
 <p>Vence en ${TTL_MIN} minutos. Si no lo pediste tú, ignora este correo.</p>
 <p style="margin:24px 0 0;color:#718096">Vicky · GeoVictoria</p>
