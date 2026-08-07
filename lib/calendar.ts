@@ -119,6 +119,30 @@ async function getPublicHolidays(year: number, countryCode: string): Promise<str
   }
 }
 
+/**
+ * Segunda fuente de feriados: la tabla vic_holidays (la misma que congela los
+ * relojes de traspaso). Nager.Date es best-effort — si se cae, devolvía [] en
+ * silencio y un feriado se colaba como día agendable (revisión Lalo 07-ago,
+ * Batalla de Boyacá CO). Las dos fuentes se UNEN: basta que una conozca el
+ * feriado para bloquear el día.
+ */
+async function feriadosDeTabla(countryCode: string): Promise<string[]> {
+  try {
+    const url = (process.env.SUPABASE_URL || "").trim()
+    const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    if (!url || !key) return []
+    const r = await fetch(`${url}/rest/v1/vic_holidays?country=eq.${countryCode}&select=d`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      cache: "no-store",
+    })
+    if (!r.ok) return []
+    const rows = (await r.json().catch(() => [])) as Array<{ d?: string }>
+    return rows.map((x) => String(x.d || "").slice(0, 10)).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 function isWeekend(date: Date): boolean {
   const day = date.getDay()
   return day === 0 || day === 6
@@ -130,11 +154,12 @@ export async function getAvailableSlots(country: string): Promise<string[]> {
   const tz = getTimezone(country)
   const countryCode = COUNTRY_CODES[country] || "CL"
   const year = new Date().getFullYear()
-  const [holidays, holidaysNext] = await Promise.all([
+  const [holidays, holidaysNext, holidaysTabla] = await Promise.all([
     getPublicHolidays(year, countryCode),
     getPublicHolidays(year + 1, countryCode),
+    feriadosDeTabla(countryCode),
   ])
-  const allHolidays = new Set([...holidays, ...holidaysNext])
+  const allHolidays = new Set([...holidays, ...holidaysNext, ...holidaysTabla])
 
   // Cal.com decide el "minimum booking notice" por su Event Type — no aplicamos
   // buffer manual aquí. Pedimos slots desde ahora; Cal.com filtra los inválidos.
@@ -343,11 +368,12 @@ export async function getSlotsByPreference(
   const tz = getTimezone(country)
   const countryCode = COUNTRY_CODES[country] || "CL"
   const year = new Date().getFullYear()
-  const [holidays, holidaysNext] = await Promise.all([
+  const [holidays, holidaysNext, holidaysTabla] = await Promise.all([
     getPublicHolidays(year, countryCode),
     getPublicHolidays(year + 1, countryCode),
+    feriadosDeTabla(countryCode),
   ])
-  const allHolidays = new Set([...holidays, ...holidaysNext])
+  const allHolidays = new Set([...holidays, ...holidaysNext, ...holidaysTabla])
 
   // Cal.com decide el "minimum booking notice" — no aplicamos buffer manual.
   const now = new Date()
@@ -673,11 +699,12 @@ async function filterValidSlotsV3(
 ): Promise<string[]> {
   const countryCode = COUNTRY_CODES[country] || "CL"
   const year = new Date().getFullYear()
-  const [holidays, holidaysNext] = await Promise.all([
+  const [holidays, holidaysNext, holidaysTabla] = await Promise.all([
     getPublicHolidays(year, countryCode),
     getPublicHolidays(year + 1, countryCode),
+    feriadosDeTabla(countryCode),
   ])
-  const allHolidays = new Set([...holidays, ...holidaysNext])
+  const allHolidays = new Set([...holidays, ...holidaysNext, ...holidaysTabla])
 
   const result: string[] = []
   for (const day of Object.keys(slotsByDay).sort()) {
