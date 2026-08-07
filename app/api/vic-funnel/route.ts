@@ -2794,7 +2794,21 @@ async function notaZohoGestion(contact: string, nota: string): Promise<boolean> 
 // guarda en vic_kv (expira en 24 h) y lo deja como NOTA en el registro Zoho
 // del contacto; desgestionar borra la marca al instante (deshacer).
 /** Portada de acceso con la clave del equipo (sin ?key= en la URL). */
-function renderLogin(error?: string): Response {
+async function renderLogin(error?: string): Promise<Response> {
+  // Identidad (pedido Lalo 07-ago): además de la clave se elige QUIÉN entra.
+  // La lista de propietarios se cachea en vic_kv en cada render del dashboard
+  // (dash_propietarios); "Administrador" va SIEMPRE al final y ve todo.
+  let propietarios: string[] = []
+  try {
+    propietarios = (JSON.parse((await kvGet("dash_propietarios")) || "[]") as string[]).filter(
+      (p) => typeof p === "string" && p.trim() && p !== "Administrador",
+    )
+  } catch {}
+  const opciones = [
+    `<option value="" disabled selected>¿Quién eres?</option>`,
+    ...propietarios.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`),
+    `<option value="Administrador">Administrador (ve todo)</option>`,
+  ].join("")
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Gestión de oportunidades — Vicky</title>
 <style>
@@ -2804,7 +2818,7 @@ function renderLogin(error?: string): Response {
   .card img{height:34px;margin-bottom:18px}
   h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:22px;margin:0 0 6px;color:#4e4e4e}
   p.sub{color:#6b7280;font-size:13px;margin:0 0 20px}
-  input[type=password]{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #d1d5db;border-radius:10px;font-family:${GV_BODY_FONT};font-size:15px;margin-bottom:12px;outline-color:#00aff2}
+  input[type=password],select{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #d1d5db;border-radius:10px;font-family:${GV_BODY_FONT};font-size:15px;margin-bottom:12px;outline-color:#00aff2;background:#fff;color:#4e4e4e}
   button{width:100%;padding:12px;border:0;border-radius:10px;background:#ffbb00;color:#fff;font-family:${GV_TITLE_FONT};font-weight:700;font-size:15px;cursor:pointer}
   button:hover{filter:brightness(.96)}
   .err{color:#b91c1c;font-size:13px;margin:0 0 12px}
@@ -2812,9 +2826,10 @@ function renderLogin(error?: string): Response {
   <form class="card" method="POST" action="?accion=login">
     <img src="/gv/logo-full-color.svg" alt="GeoVictoria">
     <h1>Gestión de oportunidades</h1>
-    <p class="sub">Ingresa la clave del equipo para ver los registros.</p>
+    <p class="sub">Elige quién eres e ingresa la clave del equipo.</p>
     ${error ? `<p class="err">${esc(error)}</p>` : ""}
-    <input type="password" name="clave" placeholder="Clave" autofocus autocomplete="current-password">
+    <select name="quien" required>${opciones}</select>
+    <input type="password" name="clave" placeholder="Clave" autocomplete="current-password">
     <button type="submit">Entrar</button>
   </form>
 </body></html>`
@@ -2827,23 +2842,24 @@ export async function POST(req: Request): Promise<Response> {
   const accionPre = (searchParams.get("accion") || "").trim()
   if (accionPre === "login") {
     const body = await req.text().catch(() => "")
-    const clave = (new URLSearchParams(body).get("clave") || "").trim()
+    const form = new URLSearchParams(body)
+    const clave = (form.get("clave") || "").trim()
+    const quien = (form.get("quien") || "").trim().slice(0, 80)
     if (!DASH_CLAVE || clave !== DASH_CLAVE) return renderLogin("Clave incorrecta. Inténtalo de nuevo.")
-    // Redirect resuelto en el NAVEGADOR y cookie con Path=/ (07-ago): el dash
+    if (!quien) return renderLogin("Elige quién eres para entrar.")
+    // Redirect resuelto en el NAVEGADOR y cookies con Path=/ (07-ago): el dash
     // también se sirve proxeado como cotizacion.geovictoria.com/telemarketing,
     // donde el server solo ve su propio path /api/vic-funnel — un location
     // absoluto y una cookie con Path=/api/vic-funnel dejaban el login del
     // dominio nuevo apuntando a un 404 y sin sesión. location.pathname del
-    // browser da el path correcto en ambos dominios.
+    // browser da el path correcto en ambos dominios. La identidad (quién
+    // entró) viaja en vic_quien, misma vida que vic_auth.
+    const h = new Headers({ "content-type": "text/html; charset=utf-8" })
+    h.append("set-cookie", `vic_auth=${authToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
+    h.append("set-cookie", `vic_quien=${encodeURIComponent(quien)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
     return new Response(
       `<!doctype html><meta charset="utf-8"><script>location.href = location.pathname</script>`,
-      {
-        status: 200,
-        headers: {
-          "content-type": "text/html; charset=utf-8",
-          "set-cookie": `vic_auth=${authToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`,
-        },
-      },
+      { status: 200, headers: h },
     )
   }
   if (!FUNNEL_KEY || key !== FUNNEL_KEY) {
@@ -3041,11 +3057,35 @@ export async function GET(req: Request): Promise<Response> {
   if (!FUNNEL_KEY) {
     return paginaAviso("Falta configurar VIC_FUNNEL_KEY", "<p>Define la variable de entorno <code>VIC_FUNNEL_KEY</code> en Vercel.</p>", 503)
   }
+  // Cerrar sesión: limpia las cookies (Path=/ actual y el Path viejo, por si
+  // queda una sesión anterior) y recarga por el navegador — mismo patrón
+  // proxy-safe del login (el dash también vive en /telemarketing).
+  if (searchParams.get("salir")) {
+    const h = new Headers({ "content-type": "text/html; charset=utf-8" })
+    h.append("set-cookie", "vic_auth=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0")
+    h.append("set-cookie", "vic_quien=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0")
+    h.append("set-cookie", "vic_auth=; Path=/api/vic-funnel; HttpOnly; Secure; SameSite=Lax; Max-Age=0")
+    h.append("set-cookie", "vic_quien=; Path=/api/vic-funnel; HttpOnly; Secure; SameSite=Lax; Max-Age=0")
+    return new Response(
+      `<!doctype html><meta charset="utf-8"><script>location.href = location.pathname</script>`,
+      { status: 200, headers: h },
+    )
+  }
+  // Identidad de la sesión (pedido Lalo 07-ago): quién entró por el login.
+  // Vendedor → ve SU cartera; "Administrador" → todo. El acceso máquina por
+  // ?key= (crons, links de correos) no tiene identidad y ve todo.
+  let quien = ""
   if (key !== FUNNEL_KEY) {
-    // Acceso humano: sesión por cookie (clave GeoVictoria). El ?key= queda
-    // para consumidores máquina (cron del resumen diario, links del correo).
-    if (cookieDe(req, "vic_auth") === authToken()) key = FUNNEL_KEY
-    else return renderLogin()
+    // Acceso humano: sesión por cookie (clave GeoVictoria + identidad). El
+    // ?key= queda para consumidores máquina (cron del resumen, links).
+    let quienCookie = ""
+    try {
+      quienCookie = decodeURIComponent(cookieDe(req, "vic_quien") || "")
+    } catch {}
+    if (cookieDe(req, "vic_auth") === authToken() && quienCookie) {
+      key = FUNNEL_KEY
+      quien = quienCookie
+    } else return renderLogin()
   }
 
   const conv = (searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()
@@ -3121,6 +3161,13 @@ export async function GET(req: Request): Promise<Response> {
   // Multi-selección (pedido Lalo 06-ago): ?estado= y ?prop= pueden repetirse.
   const estadoF = searchParams.getAll("estado").map((s) => s.trim()).filter((s) => ESTADOS_LISTADO.includes(s))
   const propF = searchParams.getAll("prop").map((s) => s.trim()).filter(Boolean)
+  // Identidad: un vendedor queda FORZADO a su propia cartera (el select de
+  // Propietario ni se muestra); Administrador y acceso máquina ven todo.
+  const esAdmin = !quien || quien === "Administrador"
+  if (!esAdmin) {
+    propF.length = 0
+    propF.push(quien)
+  }
   // Vista: "gestion" (default, la cola de trabajo) o "analisis" (KPIs, Sankey
   // y el resto del embudo) — pestaña arriba a la derecha (pedido Lalo 04-ago).
   const vista: "gestion" | "analisis" = searchParams.get("vista") === "analisis" ? "analisis" : "gestion"
@@ -3354,6 +3401,11 @@ export async function GET(req: Request): Promise<Response> {
       })
     }
     propietariosAll = [...new Set(filasListado.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
+    // Cache para el login ("¿Quién eres?"): mejor esfuerzo, se refresca en
+    // cada render con la cartera completa.
+    if (propietariosAll.length) {
+      void kvSet("dash_propietarios", JSON.stringify(propietariosAll), new Date(Date.now() + 7 * 24 * 3600e3).toISOString())
+    }
     // Contactos que pasan el filtro Estado/Propietario (null = sin filtro).
     const coincide = (f: FilaListado) => (!estadoF.length || estadoF.includes(f.estado)) && (!propF.length || propF.includes(f.propietario))
     const permitidos: Set<string> | null =
@@ -3870,7 +3922,7 @@ export async function GET(req: Request): Promise<Response> {
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>
   </div>
-  <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}</div>
+  <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}${quien ? ` &nbsp;·&nbsp; 👤 <b>${esc(quien)}</b> <a href="?salir=1" style="font-weight:400">(salir)</a>` : ""}</div>
   <div class="sub" style="margin-top:6px">
     <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
@@ -3881,9 +3933,9 @@ export async function GET(req: Request): Promise<Response> {
       <label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varias; sin selección = todos">Estado<br><select name="estado" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:130px">
         ${ESTADOS_LISTADO.map((e) => `<option${estadoF.includes(e) ? " selected" : ""}>${e}</option>`).join("")}
       </select></label>
-      <label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varios; sin selección = todos">Propietario<br><select name="prop" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:150px">
+      ${esAdmin ? `<label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varios; sin selección = todos">Propietario<br><select name="prop" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:150px">
         ${propietariosAll.map((p) => `<option value="${esc(p)}"${propF.includes(p) ? " selected" : ""}>${esc(p)}</option>`).join("")}
-      </select></label>
+      </select></label>` : ""}
       <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
       ${rango || estadoF.length || propF.length ? `<a href="?key=${encodeURIComponent(key)}&pais=${pais}" style="font-size:12px">✕ Quitar filtros</a>` : ""}
     </form>
