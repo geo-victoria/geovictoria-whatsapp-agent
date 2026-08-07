@@ -15,7 +15,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 
 import { getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
-import { infoDeal, type InfoDeal } from "@/lib/cotizaciones-editor"
+import { infoDeal, estadoCotizacion, type EstadoCotizacion } from "@/lib/cotizaciones-editor"
 
 const DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 const MAX_ITERATIONS = 4
@@ -118,7 +118,9 @@ export function renderPropuestaHtml(p: PropuestaGuardada): string {
        <tbody>${d.precios.map((r) => `<tr><td class="svc">${esc(r.item)}</td><td>${esc(r.detalle || "")}</td><td class="num u">${esc(r.valor)}</td></tr>`).join("")}</tbody></table>
        ${d.precioNota ? `<p class="note">${esc(d.precioNota)}</p>` : ""}`
     : ""
-  const docmeta = p.numero ? `Propuesta N.º ${esc(p.numero)} · <span class="v">v${p.version || 1}</span>` : ""
+  const docmeta = p.numero
+    ? `${/^COT/i.test(p.numero) ? `Cotización N.º ${esc(p.numero)}` : `Propuesta N.º ${esc(p.numero)}`} · <span class="v">v${p.version || 1}</span>`
+    : ""
   return `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Propuesta GeoVictoria — ${esc(d.empresa)}</title>
 <style>
@@ -299,6 +301,22 @@ export async function chatVickyPropuestas(params: {
   const info = await infoDeal(dealId)
   if (!info) throw new Error("No se pudo leer la oportunidad en Zoho.")
   const previa = await propuestaGuardada(dealId)
+  // ÚLTIMA COTIZACIÓN presentada al cliente (pedido Lalo 07-ago): la
+  // propuesta se basa en ella — mismo número, mismos ítems y valores.
+  const cot: EstadoCotizacion | null = info.telefono
+    ? await estadoCotizacion(info.telefono).catch(() => null)
+    : null
+  const bloqueCot = cot
+    ? [
+        `COTIZACIÓN VIGENTE del cliente — ${cot.numero || cot.puntero.quoteId} (la última presentada):`,
+        ...cot.items.map(
+          (i) =>
+            `- ${i.nombre}${i.cantidad > 1 ? ` × ${i.cantidad}` : ""} · ${i.recurrente ? "mensual" : "pago único"} · UF ${i.subtotalUF} neto`,
+        ),
+        `Total con IVA: ${cot.puntero.totalUf ? `UF ${cot.puntero.totalUf}` : "?"}${cot.puntero.totalClp ? ` (~$${Math.round(cot.puntero.totalClp).toLocaleString("es-CL")})` : ""}${cot.descuentoPct ? ` · incluye ${cot.descuentoPct}% dcto. recurrente` : ""}`,
+        `REGLA DURA: la sección Inversión se basa EN ESTA cotización — mismos ítems y mismos valores (puedes mejorar la redacción del detalle, jamás los montos). El N.º de la propuesta será el de esta cotización automáticamente. Si el vendedor quiere OTROS precios, dile que primero edite la cotización en el editor de cotizaciones y luego regenere la propuesta.`,
+      ].join("\n")
+    : `El cliente NO tiene cotización formal registrada: incluye precios solo si el vendedor los entrega textualmente.`
 
   const system = [
     `Eres "Vicky Propuestas", herramienta interna de GeoVictoria con la que un VENDEDOR arma una propuesta comercial con branding oficial para una empresa de su cartera. Hablas con el vendedor (no con el cliente): tono directo de colega, español de Chile. Jamás uses la palabra prohibida de saludo informal chileno de dos letras y media para dirigirte a nadie.`,
@@ -307,6 +325,8 @@ export async function chatVickyPropuestas(params: {
     `- Deal: ${info.nombre || "(sin nombre)"} · etapa: ${info.stage || "?"} · dueño: ${info.ownerNombre || "?"}`,
     `- Cuenta: ${info.accountNombre || "(sin cuenta)"} · Contacto: ${info.contactoNombre || "?"}${info.email ? ` · ${info.email}` : ""}`,
     previa ? `- Ya EXISTE una propuesta (${previa.datos.titulo}); las ediciones la reemplazan completa.` : `- Aún no hay propuesta para este deal.`,
+    ``,
+    bloqueCot,
     ``,
     `CÓMO TRABAJAS:`,
     `1. EL VENDEDOR MANDA. Pídele solo lo que falte para una buena propuesta: qué se le ofrece, dotación/precios si quiere incluirlos, y si tiene el GUION O MINUTA de la reunión que lo pegue en el chat — de ahí sacas las necesidades reales y personalizas todo. Con lo mínimo listo, genera de inmediato; los detalles se pulen en iteraciones.`,
@@ -353,14 +373,37 @@ export async function chatVickyPropuestas(params: {
           telefono: undefined,
           ...(datos.vendedor || {}),
         }
+        // FIDELIDAD A LA COTIZACIÓN (pedido Lalo 07-ago): con cotización
+        // vigente, la Inversión son SUS ítems y valores — si el modelo no los
+        // pasó (o pasó otros por error), se reconstruyen desde la cotización.
+        if (cot?.items?.length) {
+          datos.precios = cot.items.map((it) => ({
+            item: it.nombre,
+            detalle: [it.cantidad > 1 ? `${it.cantidad} unidades` : "", it.recurrente ? "cargo mensual" : "pago único"]
+              .filter(Boolean)
+              .join(" · "),
+            valor: `UF ${it.subtotalUF.toLocaleString("es-CL", { maximumFractionDigits: 2 })}${it.recurrente ? "/mes" : ""} + IVA`,
+          }))
+          if (!datos.precioNota) {
+            const totalTxt = [
+              cot.puntero.totalUf ? `UF ${cot.puntero.totalUf.toLocaleString("es-CL", { maximumFractionDigits: 2 })}` : "",
+              cot.puntero.totalClp ? `(~$${Math.round(cot.puntero.totalClp).toLocaleString("es-CL")})` : "",
+            ].filter(Boolean).join(" ")
+            datos.precioNota =
+              `Valores netos según cotización ${cot.numero || ""}`.trim() +
+              `${cot.descuentoPct ? `, incluyen ${cot.descuentoPct}% de descuento recurrente` : ""}.` +
+              (totalTxt ? ` Total con IVA: ${totalTxt}.` : "")
+          }
+        }
         const guardada: PropuestaGuardada = {
           datos,
           dealId,
           actualizadaAt: new Date().toISOString(),
           actualizadaPor: quien || undefined,
-          // N.º estable de 6 dígitos (derivado del deal) y versión que sube
-          // con cada regeneración — portada y control de vigencia del skill.
-          numero: previa?.numero || String((Number(dealId.slice(-9)) % 900000) + 100000),
+          // El N.º de la propuesta ES el de la última cotización presentada
+          // (pedido Lalo 07-ago); sin cotización, un N.º estable de 6 dígitos.
+          // La versión sube con cada regeneración.
+          numero: cot?.numero || previa?.numero || String((Number(dealId.slice(-9)) % 900000) + 100000),
           version: (previa?.version || 0) + 1,
         }
         await setKvValue(clavePropuesta(dealId), JSON.stringify(guardada))
