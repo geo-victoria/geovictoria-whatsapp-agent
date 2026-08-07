@@ -1534,7 +1534,7 @@ function construirCasosGestion(params: {
   return { casos, nGestionados }
 }
 
-function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string, descargaQS = "", wspSet: Set<string> = new Set()): string {
+function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string, descargaQS = "", wspSet: Set<string> = new Set(), quienSesion = ""): string {
   const activos = casos.filter((c) => !c.gestionado)
   const fila = (c: CasoGestion): string => {
     const dias = c.diasSinContacto
@@ -1556,7 +1556,11 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     }
     return `<tr data-contact="${esc(c.contacto)}"${c.gestionado ? ` class="filaGest" style="opacity:.4;display:none"` : ""}>
           <td class="tdBtn" style="white-space:nowrap;vertical-align:middle">${btn}</td>
-          <td class="tdEmp" data-sort="${esc(c.empresa.toLowerCase())}">${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${esc(c.propietario)}</div>${(() => {
+          <td class="tdEmp" data-sort="${esc(c.empresa.toLowerCase())}">${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${
+              quienSesion && c.propietario !== quienSesion && c.propietario !== "—"
+                ? `<span title="Esta oportunidad te aparece porque tienes un registro asociado (lead o cotización), pero el responsable principal es otro — coordina antes de contactar al cliente" style="background:#fff7e0;color:#92700c;border:1px solid #ffd875;border-radius:6px;padding:1px 6px;font-weight:600">responsable: ${esc(c.propietario)}</span>`
+                : esc(c.propietario)
+            }</div>${(() => {
             const links = [
               c.convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(c.convId)}" style="font-size:13px">📄 ver chat</a>` : "",
               c.zohoUrl ? `<a href="${esc(c.zohoUrl)}" target="_blank" rel="noopener" title="Abrir el registro en Zoho CRM" style="font-size:13px">🔗 Zoho</a>` : "",
@@ -3805,7 +3809,7 @@ export async function GET(req: Request): Promise<Response> {
       for (const pr of propF) p.append("prop", pr)
       return p.toString()
     })()
-    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga, wspVendedorSet)
+    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga, wspVendedorSet, esAdmin ? "" : quien)
     // El filtro global re-corta el cierre de Zoho (por teléfono de la
     // cotización) y el funnel por origen (por teléfono del lead/toque).
     if (permitidos && cierre) {
