@@ -18,7 +18,7 @@ import { createHash } from "node:crypto"
 
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
-import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
+import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
 
 export const dynamic = "force-dynamic"
@@ -1579,7 +1579,11 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
               c.zohoUrl ? `<a href="${esc(c.zohoUrl)}" target="_blank" rel="noopener" title="Abrir el registro en Zoho CRM" style="font-size:13px">🔗 Zoho</a>` : "",
               wspSet.has(c.contacto) ? `<a href="?key=${encodeURIComponent(key)}&wsp=${encodeURIComponent(c.contacto)}" target="_blank" title="WhatsApp del vendedor con este cliente (se abre listo para guardar como PDF)" style="font-size:13px">📱 wsp vendedor</a>` : "",
               c.cotVer ? `<a href="${esc(c.cotVer)}" target="_blank" rel="noopener" title="Ver la cotización formal vigente" style="font-size:13px">🧾 cotización</a>` : "",
-              c.cotQuoteId ? `<a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(c.contacto)}" title="Editar la cotización conversando con Vicky Cotizaciones y enviarla al cliente" style="font-size:13px">✏️ editar</a>` : "",
+              c.cotQuoteId
+                ? `<a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(c.contacto)}" title="Editar la cotización conversando con Vicky Cotizaciones y enviarla al cliente" style="font-size:13px">✏️ editar</a>`
+                : c.convId && c.origen !== "zoho"
+                  ? `<a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(c.contacto)}" title="Emitir la cotización formal con el contexto de la conversación (preform incluido)" style="font-size:13px">➕ formal</a>`
+                  : "",
             ].filter(Boolean).join(" · ")
             return links ? `<div style="margin-top:3px">${links}</div>` : ""
           })()}</td>
@@ -2261,9 +2265,16 @@ function panelCotizacionHtml(e: EstadoCotizacion): string {
 async function renderVickyCotizaciones(contact: string, key: string, quoteId = ""): Promise<Response> {
   const est = await estadoCotizacion(contact, quoteId || undefined).catch(() => null)
   if (!est) {
+    // MODO PREFORM (Lalo 07-ago): sin formal pero CON conversación → el
+    // editor abre con el contexto del preform para emitir la formal directo.
+    const conv = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&limit=1`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+    ).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Array<{ id: string }>
+    if (conv[0]?.id) return renderVickyCotizacionesPreform(contact, key)
     return paginaAviso(
       "Sin cotización formal",
-      `<p>El contacto <b>+${esc(contact)}</b> no tiene una cotización formal registrada, así que no hay nada que editar. Genera la cotización primero (Vicky la emite en la conversación con el cliente).</p><p><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>`,
+      `<p>El contacto <b>+${esc(contact)}</b> no tiene una cotización formal registrada ni conversación con Vicky, así que no hay nada que editar.</p><p><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>`,
     )
   }
   const empresa = est.puntero.empresa || `+${contact}`
@@ -2331,7 +2342,7 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
   <p style="margin:0 0 10px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><a href="?key=${encodeURIComponent(key)}">← Volver a la cola de gestión</a>
     <form method="GET" style="display:inline-flex;gap:6px;align-items:center">
       <input type="hidden" name="key" value="${esc(key)}">
-      <input type="text" name="buscarcot" placeholder="Otra cotización (ej: COT400)" style="padding:6px 10px;border:1px solid #d0d5db;border-radius:8px;font-size:13px;font-family:inherit;width:190px">
+      <input type="text" name="buscarcot" placeholder="Otra cotización o teléfono" style="padding:6px 10px;border:1px solid #d0d5db;border-radius:8px;font-size:13px;font-family:inherit;width:190px">
       <button type="submit" style="background:#00aff2;color:#fff;border:0;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer">🔍 Buscar</button>
     </form></p>
   <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones</h1>
@@ -2570,6 +2581,34 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
     })
     .join("")
 
+  // PREFORMS SIN FORMAL (Lalo 07-ago): conversaciones que vieron precio
+  // referencial y no tienen puntero — mismo listado, para emitir la formal
+  // directo desde el contexto del chat.
+  const conPuntero = new Set(vivos.map((p) => digits(p.contact)))
+  const preforms = (await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?pref_escalon_at=not.is.null&select=contact,pref_escalon_at,last_user_at&order=pref_escalon_at.desc&limit=60`,
+    { headers: hSb, cache: "no-store" },
+  )
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])) as Array<{ contact: string; pref_escalon_at: string | null; last_user_at: string | null }>
+  const filasPreform = preforms
+    .filter((c) => {
+      const d = digits(c.contact)
+      return d && !conPuntero.has(d) && !isTestContact(d)
+    })
+    .slice(0, 25)
+    .map((c) => {
+      const d = digits(c.contact)
+      return `<tr>
+        <td style="white-space:nowrap"><span class="tag" style="background:#fff7e0;color:#92700c">Preform</span></td>
+        <td>+${esc(d)}</td>
+        <td style="white-space:nowrap">${fmtSantiago(String(c.pref_escalon_at || ""))}</td>
+        <td style="white-space:nowrap">${fmtSantiago(String(c.last_user_at || ""))}</td>
+        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(d)}">➕ emitir formal</a></td>
+      </tr>`
+    })
+    .join("")
+
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Editor de cotizaciones — Vicky</title>
 <style>
@@ -2600,7 +2639,7 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
     <h2>🔍 Buscar por número</h2>
     <form method="GET" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <input type="hidden" name="key" value="${esc(key)}">
-      <input type="text" name="buscarcot" placeholder="Ej: COT400" required style="padding:9px 12px;border:1px solid #d0d5db;border-radius:8px;font-size:14px;font-family:inherit;width:220px">
+      <input type="text" name="buscarcot" placeholder="Ej: COT400 o +56 9 1234 5678" required style="padding:9px 12px;border:1px solid #d0d5db;border-radius:8px;font-size:14px;font-family:inherit;width:220px">
       <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:8px;padding:9px 18px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer">Buscar y abrir</button>
       <a href="?key=${encodeURIComponent(key)}&cotnueva=1" title="Crear una cotización nueva asignada a una oportunidad de Zoho" style="background:#00aff2;color:#fff;border-radius:8px;padding:9px 18px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;text-decoration:none">➕ Crear cotización</a>
     </form>
@@ -2609,6 +2648,125 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
     <h2>Cotizaciones recientes — ${vivos.length}</h2>
     ${vivos.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Cotización</th><th>Empresa / contacto</th><th style="text-align:right">Total c/IVA</th><th>Actualizada</th><th>Acciones</th></tr></thead><tbody>${filas}</tbody></table></div>` : `<p class="sub" style="margin:0">Sin cotizaciones registradas.</p>`}
   </div>
+  <div class="card">
+    <h2>Preforms sin formal — ${filasPreform ? filasPreform.split("<tr>").length - 1 : 0}</h2>
+    <div class="sub" style="margin:0 0 8px">Clientes que vieron un precio referencial con Vicky y aún no tienen cotización formal. "Emitir formal" abre el chat con todo el contexto de la conversación.</div>
+    ${filasPreform ? `<div style="overflow-x:auto"><table><thead><tr><th></th><th>Contacto</th><th>Precio visto</th><th>Últ. respuesta</th><th>Acciones</th></tr></thead><tbody>${filasPreform}</tbody></table></div>` : `<p class="sub" style="margin:0">Sin preforms pendientes.</p>`}
+  </div>
+</div></body></html>`
+  return page(html)
+}
+
+/** MODO PREFORM (Lalo 07-ago): el contacto vio precio referencial con Vicky
+ * pero no tiene formal — el chat abre YA con ese contexto para ajustar y
+ * emitir la formal directo. */
+async function renderVickyCotizacionesPreform(contact: string, key: string): Promise<Response> {
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Formal desde preform — +${esc(contact)}</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:900px;margin:0 auto;padding:18px 16px 30px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:19px;margin:0 0 2px;color:#4e4e4e}
+  .sub{color:#646464;font-size:12px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-top:14px}
+  #chatBox{min-height:340px;max-height:62vh;overflow-y:auto;padding:4px 2px}
+  .bub{display:flex;margin:6px 0}
+  .bub>div{max-width:78%;padding:9px 13px;border-radius:12px;font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+  .bubU{justify-content:flex-end}.bubU>div{background:#FFF8E1;border:1px solid #f3dc9a}
+  .bubA>div{background:#ffffff;border:1px solid #e5e7eb}
+  .bubE>div{background:#fdecea;border:1px solid #f5c6c0;color:#8a1f11}
+  .chip{display:inline-block;margin:4px 0;padding:4px 10px;border-radius:99px;font-size:12px;background:#e8f5e9;color:#1b5e20;border:1px solid #c8e6c9}
+  .chipErr{background:#fdecea;color:#8a1f11;border-color:#f5c6c0}
+  .fila{display:flex;gap:8px;margin-top:10px}
+  #msg{flex:1;padding:10px 12px;border:1px solid #d0d5db;border-radius:10px;font-size:14px;font-family:inherit;resize:none}
+  #btnSend{background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:0 16px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap}
+  #btnSend:disabled{opacity:.5;cursor:default}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  img.logo{height:26px;vertical-align:middle;margin-right:10px}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>
+  <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones — formal desde el preform</h1>
+  <div class="sub">El cliente <b>+${esc(contact)}</b> vio un precio referencial con Vicky pero aún no tiene cotización formal. El agente parte con el contexto completo de esa conversación: puedes ajustar lo que quieras y emitir la formal de inmediato.</div>
+  <div class="card">
+    <div id="chatBox">
+      <div class="bub bubA"><div>Hola 👋 Este cliente conversó con Vicky y vio un precio referencial, pero no tiene formal todavía. Escribe "resume" y te muestro la configuración que reconstruí del chat y lo que falta para emitir — o dime directamente qué cambiar y emito con eso.</div></div>
+    </div>
+    <div class="fila">
+      <textarea id="msg" rows="2" placeholder='Ej: "resume", o "súbela a 30 y emítela con RUT 76.123.456-7"…'></textarea>
+      <button id="btnSend" title="Le entrega tu mensaje al agente — al cliente no le llega nada">Enviar mensaje</button>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var KEYQ = "?key=${encodeURIComponent(key)}";
+      var CONTACT = ${JSON.stringify(contact)};
+      var HIST = [];
+      var box = document.getElementById("chatBox");
+      var input = document.getElementById("msg");
+      var btn = document.getElementById("btnSend");
+      function burbuja(clase, texto) {
+        var w = document.createElement("div");
+        w.className = "bub " + clase;
+        var d = document.createElement("div");
+        d.textContent = texto;
+        w.appendChild(d);
+        box.appendChild(w);
+        box.scrollTop = box.scrollHeight;
+        return w;
+      }
+      function chip(texto, ok) {
+        var c = document.createElement("div");
+        var sp = document.createElement("span");
+        sp.className = "chip" + (ok ? "" : " chipErr");
+        sp.textContent = (ok ? "🔧 " : "⚠️ ") + texto;
+        c.appendChild(sp);
+        box.appendChild(c);
+        box.scrollTop = box.scrollHeight;
+      }
+      async function enviar() {
+        var t = input.value.trim();
+        if (!t || btn.disabled) return;
+        input.value = "";
+        burbuja("bubU", t);
+        var esperando = burbuja("bubA", "Vicky está trabajando…");
+        btn.disabled = true;
+        try {
+          var res = await fetch(KEYQ + "&accion=cotpreform_chat&contact=" + encodeURIComponent(CONTACT), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ historial: HIST, mensaje: t }),
+          });
+          var j = null;
+          try { j = await res.json(); } catch (e) {}
+          esperando.remove();
+          if (!res.ok || !j || !j.ok) {
+            burbuja("bubE", (j && j.error) ? j.error : "Error " + res.status + " — intenta de nuevo.");
+            return;
+          }
+          (j.eventos || []).forEach(function (e) { chip(e.resumen, e.ok); });
+          burbuja("bubA", j.reply);
+          HIST.push({ role: "user", content: t });
+          HIST.push({ role: "assistant", content: j.reply });
+          if (HIST.length > 30) HIST = HIST.slice(-30);
+          if (j.redirigirA) {
+            chip("Formal emitida — abriendo su editor…", true);
+            setTimeout(function () { window.location.href = j.redirigirA; }, 1800);
+          }
+        } catch (e2) {
+          esperando.remove();
+          burbuja("bubE", "No se pudo enviar: " + e2);
+        } finally {
+          btn.disabled = false;
+          input.focus();
+        }
+      }
+      btn.addEventListener("click", enviar);
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); }
+      });
+    })();
+  </script>
 </div></body></html>`
   return page(html)
 }
@@ -3396,6 +3554,40 @@ export async function POST(req: Request): Promise<Response> {
   const accion = accionPre
   // Creación de cotización sobre un deal (no requiere contact: el teléfono
   // sale de la ficha del deal en Zoho).
+  if (accion === "cotpreform_chat") {
+    // MODO PREFORM (Lalo 07-ago): formal directa desde la conversación.
+    const contactP = (searchParams.get("contact") || "").replace(/\D/g, "").trim()
+    if (!contactP) {
+      return new Response(JSON.stringify({ ok: false, error: "contact faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const bodyP = (await req.json().catch(() => null)) as {
+      historial?: Array<{ role?: string; content?: string }>
+      mensaje?: string
+    } | null
+    const mensajeP = String(bodyP?.mensaje || "").trim().slice(0, 4000)
+    if (!mensajeP) {
+      return new Response(JSON.stringify({ ok: false, error: "mensaje faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const historialP = (Array.isArray(bodyP?.historial) ? bodyP.historial : [])
+      .map((m) => ({
+        role: m?.role === "assistant" ? ("assistant" as const) : ("user" as const),
+        content: String(m?.content || ""),
+      }))
+      .filter((m) => m.content.trim())
+      .slice(-30)
+    try {
+      const r = await chatVickyCotizacionesPreform({ contact: contactP, historial: historialP, mensaje: mensajeP })
+      const redirigirA = r.creado
+        ? `?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(r.creado.contact)}&cot=${encodeURIComponent(r.creado.quoteId)}`
+        : undefined
+      return new Response(JSON.stringify({ ok: true, reply: r.reply, eventos: r.eventos, redirigirA }), {
+        headers: { "content-type": "application/json" },
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
   if (accion === "cotcrear_chat") {
     const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
     if (!dealId) {
@@ -3713,6 +3905,13 @@ export async function GET(req: Request): Promise<Response> {
   // Búsqueda por número de cotización (pedido Lalo 07-ago): COT### → editor.
   const buscarcot = (searchParams.get("buscarcot") || "").trim()
   if (buscarcot) {
+    // TELÉFONO (Lalo 07-ago): 9+ dígitos → abrir por contacto (el editor
+    // decide solo: formal si hay puntero, modo preform si solo hay chat).
+    const soloDigitos = buscarcot.replace(/\D/g, "")
+    if (soloDigitos.length >= 9 && !/cot/i.test(buscarcot)) {
+      const fonoB = soloDigitos.length === 9 && soloDigitos.startsWith("9") ? `56${soloDigitos}` : soloDigitos
+      return new Response(null, { status: 302, headers: { location: `?${new URLSearchParams({ key, coted: fonoB }).toString()}` } })
+    }
     try {
       const hallada = await buscarCotizacionPorNumero(buscarcot)
       if (!hallada) {

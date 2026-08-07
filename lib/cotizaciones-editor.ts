@@ -428,6 +428,162 @@ export async function chatVickyCotizacionesCrear(params: {
   return { reply: reply || "No tengo respuesta — intenta de nuevo.", eventos, creado }
 }
 
+// ── MODO PREFORM (pedido Lalo 07-ago): formal directa desde la conversación ──
+// El contacto vio un precio referencial en el chat pero NO tiene cotización
+// formal. El editor abre YA con ese contexto (transcripción + lead de Zoho)
+// para que el vendedor ajuste lo que quiera y emita la formal de inmediato.
+
+async function transcripcionPreform(contact: string): Promise<string> {
+  try {
+    const conv = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}&select=id&order=started_at.desc&limit=1`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+    ).then((r) => (r.ok ? r.json() : [])) as Array<{ id: string }>
+    if (!conv[0]?.id) return ""
+    const msgs = (await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_messages?conversation_id=eq.${conv[0].id}&select=role,content&order=at.desc&limit=30`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+    ).then((r) => (r.ok ? r.json() : []))) as Array<{ role: string; content: string }>
+    return msgs
+      .reverse()
+      .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${String(m.content || "").slice(0, 320)}`)
+      .join("\n")
+  } catch {
+    return ""
+  }
+}
+
+async function leadPorFono(contact: string): Promise<{ nombre: string; empresa: string; email: string } | null> {
+  try {
+    const token = await getZohoAccessToken()
+    const r = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?phone=${encodeURIComponent(contact)}&converted=both&per_page=1&fields=Full_Name,Company,Email`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+    )
+    if (!r.ok || r.status === 204) return null
+    const l = ((await r.json().catch(() => ({}))) as { data?: Array<{ Full_Name?: string; Company?: string; Email?: string }> }).data?.[0]
+    if (!l) return null
+    return { nombre: String(l.Full_Name || "").trim(), empresa: String(l.Company || "").trim(), email: String(l.Email || "").trim() }
+  } catch {
+    return null
+  }
+}
+
+export async function chatVickyCotizacionesPreform(params: {
+  contact: string
+  historial: Array<{ role: "user" | "assistant"; content: string }>
+  mensaje: string
+}): Promise<ChatCrearResultado> {
+  const { contact, historial, mensaje } = params
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY no configurada")
+  const [transcripcion, lead] = await Promise.all([transcripcionPreform(contact), leadPorFono(contact)])
+  if (!transcripcion) throw new Error("Este contacto no tiene conversación registrada con Vicky.")
+
+  const system = [
+    `Eres "Vicky Cotizaciones" en modo PREFORM: el cliente conversó con Vicky por WhatsApp y vio un precio referencial, pero AÚN NO tiene cotización formal. Un VENDEDOR va a emitirla ahora contigo. Hablas con el vendedor, no con el cliente: tono directo de colega, español de Chile.`,
+    ``,
+    `DATOS DEL CLIENTE (+${contact}):`,
+    `- Nombre: ${lead?.nombre || "(ver transcripción)"} · Empresa: ${lead?.empresa || "(ver transcripción)"} · Email: ${lead?.email || "(no registrado)"}`,
+    ``,
+    `TRANSCRIPCIÓN DE LA CONVERSACIÓN CON VICKY (la fuente de la configuración — dotación, módulos, reloj, comuna, y datos que el cliente ya entregó):`,
+    transcripcion.slice(0, 7000),
+    ``,
+    catalogoParaModelo(),
+    ``,
+    `CÓMO TRABAJAS:`,
+    `1. PARTE TÚ: en tu primer mensaje resume la configuración que reconstruiste de la transcripción (dotación, marcaje, puntos/comuna, precio referencial mostrado) y di exactamente qué falta para emitir (típicamente RUT y/o email). No re-preguntes lo que la transcripción ya responde.`,
+    `2. EL VENDEDOR MANDA: puede cambiar cualquier cosa de la configuración antes de emitir. Pide lo que falte JUNTO, en un solo mensaje corto.`,
+    `3. Con los datos completos llama crear_cotizacion de inmediato — sin confirmaciones extra. La emisión adopta el lead vivo del teléfono (cero duplicados) y sigue las reglas vigentes de asignación.`,
+    `4. Tras crear, informa número/total/links en 2-3 líneas y avisa que se abrirá el editor para ajustes o envío. Si falló, muestra el error textual y reintenta una vez si fue genérico.`,
+    ``,
+    `LÍMITES: solo línea Chile (UF), 1-50 trabajadores, precios del catálogo (ajustes finos después en el editor). El RUT se pasa TAL CUAL a la tool — tú no lo validas.`,
+  ].join("\n")
+
+  const client = new Anthropic({ apiKey })
+  const model = (process.env.ANTHROPIC_COTED_MODEL || process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || DEFAULT_MODEL).trim()
+  const messages: Anthropic.Messages.MessageParam[] = [
+    ...historial
+      .filter((m) => (m.role === "user" || m.role === "assistant") && String(m.content || "").trim())
+      .slice(-30)
+      .map((m) => ({ role: m.role, content: String(m.content).slice(0, 6000) })),
+    { role: "user" as const, content: mensaje },
+  ]
+
+  const eventos: EventoCoted[] = []
+  let creado: ChatCrearResultado["creado"]
+  let reply = ""
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const res = await client.messages.create({
+      model,
+      max_tokens: MAX_TOKENS,
+      system,
+      messages,
+      tools: [crearCotizacionSchema] as unknown as Anthropic.Messages.Tool[],
+    })
+    const textos = res.content.filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
+    if (textos.length) reply = textos.map((b) => b.text).join("\n").trim()
+    const toolUses = res.content.filter((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use")
+    if (!toolUses.length || res.stop_reason !== "tool_use") break
+    messages.push({ role: "assistant", content: res.content })
+    const results: Anthropic.Messages.ToolResultBlockParam[] = []
+    for (const tu of toolUses) {
+      let output: unknown
+      try {
+        const input = tu.input as {
+          empresa?: string
+          contacto?: string
+          contactoEmail?: string
+          rutEmpresa?: string
+          userCount: number
+          modulos: string[]
+          hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+          puntosInstalacion?: Array<{ ubicacion: string; autoInstalada?: boolean }>
+          direccionEmpresa?: string
+          comunaEmpresa?: string
+          regionEmpresa?: string
+        }
+        const r = await generarLinkCotizadora({
+          empresa: (input.empresa || lead?.empresa || "").trim(),
+          contacto: (input.contacto || lead?.nombre || "Contacto").trim(),
+          contactoEmail: (input.contactoEmail || lead?.email || "").trim() || undefined,
+          contactoTelefono: contact,
+          rutEmpresa: (input.rutEmpresa || "").trim(),
+          direccionEmpresa: input.direccionEmpresa,
+          comunaEmpresa: input.comunaEmpresa,
+          regionEmpresa: input.regionEmpresa,
+          userCount: input.userCount,
+          sectorEmpresa: "",
+          modulos: input.modulos,
+          hardware: input.hardware,
+          puntosInstalacion: (input.puntosInstalacion || []).map((p) => ({
+            ubicacion: p.ubicacion,
+            autoInstalada: p.autoInstalada === true,
+          })),
+        })
+        output = r
+        if (r.ok) {
+          eventos.push({
+            tool: tu.name,
+            ok: true,
+            resumen: `Cotización formal emitida · total UF ${r.totalUF} (~$${r.totalCLP.toLocaleString("es-CL")})`,
+          })
+          creado = { quoteId: r.quoteId, contact }
+        } else {
+          eventos.push({ tool: tu.name, ok: false, resumen: `No se pudo emitir: ${r.error.slice(0, 160)}` })
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        output = { ok: false, error: msg.slice(0, 300) }
+        eventos.push({ tool: tu.name, ok: false, resumen: `Error: ${msg.slice(0, 160)}` })
+      }
+      results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(output).slice(0, 8000) })
+    }
+    messages.push({ role: "user", content: results })
+  }
+  return { reply: reply || "No tengo respuesta — intenta de nuevo.", eventos, creado }
+}
+
 export type CotizacionEncontrada = {
   quoteId: string
   /** Teléfono (solo dígitos) del contacto de la cotización. */
