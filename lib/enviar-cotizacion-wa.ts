@@ -68,11 +68,44 @@ export async function datosDeCotizacion(quoteId: string): Promise<DatosCotizacio
   }
 }
 
+/**
+ * PDF FRESCO ANTES DE ENVIAR (caso Grey 07-ago): la edición regenera el PDF
+ * EN SEGUNDO PLANO, así que el PDF_URL de Zoho puede apuntar a la versión
+ * vieja cuando alguien aprieta "enviar" segundos después (o para siempre, si
+ * la regeneración de fondo falló en silencio). Antes de mandar, se regenera
+ * sincrónicamente en el cotizador y se usa ESA url; si la regeneración falla,
+ * se envía la última conocida (mejor viejo que nada).
+ */
+export async function regenerarPdfFresco(quoteId: string): Promise<string> {
+  try {
+    const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+    const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+    if (!secret) return ""
+    const r = await fetch(`${base}/api/quote-acceptance/regenerate-pdf`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-vicky-secret": secret },
+      cache: "no-store",
+      body: JSON.stringify({ quoteId }),
+    })
+    if (!r.ok) {
+      console.warn(`[cot-wa] regenerate-pdf ${r.status} quote=${quoteId} — se envía el PDF previo`)
+      return ""
+    }
+    const data = (await r.json().catch(() => ({}))) as { ok?: boolean; link_pdf?: string }
+    return data.ok && data.link_pdf ? String(data.link_pdf) : ""
+  } catch (e) {
+    console.warn("[cot-wa] regenerate-pdf lanzó:", e instanceof Error ? e.message : e)
+    return ""
+  }
+}
+
 /** Envía el paquete (texto con link + PDF adjunto). Requiere ventana abierta. */
 export async function enviarPaqueteCotizacion(
   d: DatosCotizacion,
   quoteId: string,
 ): Promise<{ ok: boolean; textoEnviado: boolean; pdfEnviado: boolean }> {
+  const fresco = await regenerarPdfFresco(quoteId)
+  if (fresco) d = { ...d, pdfUrl: fresco }
   const texto =
     `${d.nombreContacto ? `${d.nombreContacto}, te` : "Te"} comparto tu cotización ${d.numero ? `${d.numero} ` : ""}de GeoVictoria` +
     `${d.empresa ? ` para ${d.empresa}` : ""} 🙌\n\n` +

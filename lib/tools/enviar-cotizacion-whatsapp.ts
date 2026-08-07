@@ -14,6 +14,7 @@
  */
 
 import { getQuotePointers } from "@/lib/supabase-persistence-v3"
+import { regenerarPdfFresco } from "@/lib/enviar-cotizacion-wa"
 import { sendBotmakerMedia } from "@/lib/botmaker-push-v3"
 
 export const enviarCotizacionWhatsappSchema = {
@@ -75,7 +76,12 @@ export async function enviarCotizacionWhatsapp(input: {
     ? `Cotizacion GeoVictoria - ${empresa}.pdf`.slice(0, 100)
     : "Cotizacion GeoVictoria.pdf"
 
-  const enviado = await sendBotmakerMedia(contact, puntero.pdfUrl, {
+  // PDF FRESCO (caso Grey 07-ago): el puntero y el PDF_URL de Zoho pueden
+  // apuntar a una versión vieja si hubo una edición reciente (la regeneración
+  // corre en segundo plano). Se regenera sincrónico antes de mandar;
+  // best-effort: si falla, va la última versión conocida.
+  const pdfFresco = await regenerarPdfFresco(puntero.quoteId).catch(() => "")
+  const enviado = await sendBotmakerMedia(contact, pdfFresco || puntero.pdfUrl, {
     filename,
     mimeType: "application/pdf",
   })
