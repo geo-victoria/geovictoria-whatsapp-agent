@@ -32,6 +32,9 @@ const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
 // Clave de acceso humano al dashboard (pedido Lalo 04-ago). El ?key= sigue
 // vigente para consumidores máquina (cron del resumen, links del correo).
 const DASH_CLAVE = (process.env.VIC_DASH_CLAVE || "Vicky").trim()
+// Entrada directa como ADMINISTRADOR con clave (Lalo 07-ago) — alternativa al
+// código por correo, para admins. Rotable por env sin deploy.
+const ADMIN_CLAVE = (process.env.VIC_DASH_ADMIN_CLAVE || "Atcom2061*").trim()
 const authToken = () => createHash("sha256").update(`${DASH_CLAVE}|${FUNNEL_KEY}|vic-dash`).digest("hex")
 const cookieDe = (req: Request, nombre: string): string => {
   const jar = req.headers.get("cookie") || ""
@@ -3274,49 +3277,6 @@ async function notaZohoGestion(contact: string, nota: string): Promise<boolean> 
 // Acciones de la cola (botón ✔/↩): gestionar exige un registro de texto, lo
 // guarda en vic_kv (expira en 24 h) y lo deja como NOTA en el registro Zoho
 // del contacto; desgestionar borra la marca al instante (deshacer).
-/** Portada de acceso con la clave del equipo (sin ?key= en la URL). */
-async function renderLogin(error?: string): Promise<Response> {
-  // Identidad (pedido Lalo 07-ago): además de la clave se elige QUIÉN entra.
-  // La lista de propietarios se cachea en vic_kv en cada render del dashboard
-  // (dash_propietarios); "Administrador" va SIEMPRE al final y ve todo.
-  let propietarios: string[] = []
-  try {
-    propietarios = (JSON.parse((await kvGet("dash_propietarios")) || "[]") as string[]).filter(
-      (p) => typeof p === "string" && p.trim() && p !== "Administrador",
-    )
-  } catch {}
-  const opciones = [
-    `<option value="" disabled selected>¿Quién eres?</option>`,
-    ...propietarios.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`),
-    `<option value="Administrador">Administrador (ve todo)</option>`,
-  ].join("")
-  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Gestión de oportunidades — Vicky</title>
-<style>
-  ${GV_FONT_CSS}
-  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e;display:flex;align-items:center;justify-content:center;min-height:100vh}
-  .card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:36px 32px;width:min(92vw,380px);text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06)}
-  .card img{height:34px;margin-bottom:18px}
-  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:22px;margin:0 0 6px;color:#4e4e4e}
-  p.sub{color:#6b7280;font-size:13px;margin:0 0 20px}
-  input[type=password],select{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #d1d5db;border-radius:10px;font-family:${GV_BODY_FONT};font-size:15px;margin-bottom:12px;outline-color:#00aff2;background:#fff;color:#4e4e4e}
-  button{width:100%;padding:12px;border:0;border-radius:10px;background:#ffbb00;color:#fff;font-family:${GV_TITLE_FONT};font-weight:700;font-size:15px;cursor:pointer}
-  button:hover{filter:brightness(.96)}
-  .err{color:#b91c1c;font-size:13px;margin:0 0 12px}
-</style></head><body>
-  <form class="card" method="POST" action="?accion=login">
-    <img src="/gv/logo-full-color.svg" alt="GeoVictoria">
-    <h1>Gestión de oportunidades</h1>
-    <p class="sub">Elige quién eres e ingresa la clave del equipo.</p>
-    ${error ? `<p class="err">${esc(error)}</p>` : ""}
-    <select name="quien" required>${opciones}</select>
-    <input type="password" name="clave" placeholder="Clave" autocomplete="current-password">
-    <button type="submit">Entrar</button>
-  </form>
-</body></html>`
-  return page(html, error ? 401 : 200)
-}
-
 /** Login por correo + código (piloto /oportunidades2, Lalo 07-ago): paso 1
  * pide el correo corporativo; paso 2 el código de 6 dígitos que llegó por
  * email. La identidad queda amarrada a la ficha de usuario de Zoho. */
@@ -3325,8 +3285,13 @@ function renderLoginCorreo(paso: "correo" | "codigo", correo = "", error?: strin
     paso === "correo"
       ? `<p class="sub">Ingresa tu correo corporativo y te enviaremos un código de acceso.</p>
     ${error ? `<p class="err">${esc(error)}</p>` : ""}
-    <input type="email" name="correo" placeholder="tu.correo@geovictoria.com" value="${esc(correo)}" autofocus required autocomplete="email">
-    <button type="submit" formaction="?accion=dash_pedir_codigo">Enviarme el código</button>`
+    <input type="email" name="correo" placeholder="tu.correo@geovictoria.com" value="${esc(correo)}" autofocus autocomplete="email">
+    <button type="submit" formaction="?accion=dash_pedir_codigo">Enviarme el código</button>
+    <details style="margin-top:16px;text-align:left">
+      <summary style="font-size:12px;color:#9ca3af;cursor:pointer;text-align:center">Entrar como administrador</summary>
+      <input type="password" name="clave" placeholder="Clave de administrador" style="margin-top:10px" autocomplete="off">
+      <button type="submit" formaction="?accion=dash_admin" style="background:#4e4e4e">Entrar como admin</button>
+    </details>`
       : `<p class="sub">Te enviamos un código de 6 dígitos a <b>${esc(correo)}</b> (revisa spam si no llega). Vence en 10 minutos.</p>
     ${error ? `<p class="err">${esc(error)}</p>` : ""}
     <input type="hidden" name="correo" value="${esc(correo)}">
@@ -3384,23 +3349,18 @@ export async function POST(req: Request): Promise<Response> {
       { status: 200, headers: h },
     )
   }
-  if (accionPre === "login") {
-    const body = await req.text().catch(() => "")
-    const form = new URLSearchParams(body)
+  if (accionPre === "dash_admin") {
+    // Entrada de ADMINISTRADOR con clave (sin código por correo). Reemplaza
+    // al login legacy de clave compartida + selector de identidad, que quedó
+    // sin UI pero seguía vivo como backdoor débil.
+    const form = new URLSearchParams(await req.text().catch(() => ""))
     const clave = (form.get("clave") || "").trim()
-    const quien = (form.get("quien") || "").trim().slice(0, 80)
-    if (!DASH_CLAVE || clave !== DASH_CLAVE) return renderLogin("Clave incorrecta. Inténtalo de nuevo.")
-    if (!quien) return renderLogin("Elige quién eres para entrar.")
-    // Redirect resuelto en el NAVEGADOR y cookies con Path=/ (07-ago): el dash
-    // también se sirve proxeado como cotizacion.geovictoria.com/telemarketing,
-    // donde el server solo ve su propio path /api/vic-funnel — un location
-    // absoluto y una cookie con Path=/api/vic-funnel dejaban el login del
-    // dominio nuevo apuntando a un 404 y sin sesión. location.pathname del
-    // browser da el path correcto en ambos dominios. La identidad (quién
-    // entró) viaja en vic_quien, misma vida que vic_auth.
+    if (!ADMIN_CLAVE || clave !== ADMIN_CLAVE) {
+      return renderLoginCorreo("correo", "", "Clave de administrador incorrecta.")
+    }
     const h = new Headers({ "content-type": "text/html; charset=utf-8" })
     h.append("set-cookie", `vic_auth=${authToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
-    h.append("set-cookie", `vic_quien=${encodeURIComponent(quien)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
+    h.append("set-cookie", `vic_quien=${encodeURIComponent("Administrador")}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
     return new Response(
       `<!doctype html><meta charset="utf-8"><script>location.href = location.pathname</script>`,
       { status: 200, headers: h },
