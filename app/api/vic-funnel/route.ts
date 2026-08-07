@@ -31,7 +31,10 @@ const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
 // Clave de acceso humano al dashboard (pedido Lalo 04-ago). El ?key= sigue
 // vigente para consumidores máquina (cron del resumen, links del correo).
-const DASH_CLAVE = (process.env.VIC_DASH_CLAVE || "Vicky").trim()
+// Semilla del token de sesión (ya no es clave de login): rotarla desloguea a
+// TODOS al instante (hecho 07-ago a pedido de Lalo, para estrenar el login
+// por correo con todo el mundo re-autenticado).
+const DASH_CLAVE = (process.env.VIC_DASH_CLAVE || "vic-dash-v2-2026-08-07").trim()
 // Entrada directa como ADMINISTRADOR con clave (Lalo 07-ago) — alternativa al
 // código por correo, para admins. Rotable por env sin deploy.
 const ADMIN_CLAVE = (process.env.VIC_DASH_ADMIN_CLAVE || "Atcom2061*").trim()
