@@ -127,7 +127,7 @@ export async function GET(req: Request): Promise<Response> {
   )
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes` +
-      `?media_path=not.is.null&media_texto=is.null&select=id,tipo,media_path,session_id,telefono_chat,from_me` +
+      `?media_path=not.is.null&media_texto=is.null&es_grupo=eq.false&select=id,tipo,media_path,session_id,telefono_chat,from_me` +
       `&order=enviado_at.desc&limit=${limit}`,
     { headers: H, cache: "no-store" },
   )

@@ -345,7 +345,10 @@ async function guardarMensaje(sessionId, m) {
     : new Date().toISOString()
   // Comprobantes y notas de voz: el archivo se sube a Storage y el cron
   // vic-wa-espejo-lector del agente lo convierte a texto (media_texto).
-  const media = await subirMedia(sessionId, m, tipo)
+  // SOLO chats 1-a-1 (privacidad + costo, 07-ago): los audios de grupos
+  // personales del ejecutivo no se descargan ni se transcriben — la primera
+  // corrida real transcribió un grupo de apoderados de colegio.
+  const media = esGrupo ? null : await subirMedia(sessionId, m, tipo)
   const fila = {
     session_id: sessionId,
     chat_jid: jid,
