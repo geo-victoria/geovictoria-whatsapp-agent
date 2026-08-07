@@ -68,6 +68,32 @@ export async function datosDeCotizacion(quoteId: string): Promise<DatosCotizacio
   }
 }
 
+/** ¿El PDF vigente es más nuevo que la última modificación de la cotización?
+ * La fecha del PDF viaja en el nombre del archivo (…_2026-08-07T21-30-03.pdf).
+ * Margen de 3 min: el propio guardado del PDF_URL modifica la cotización unos
+ * segundos después de generarse. Ante cualquier duda → false (se regenera). */
+async function pdfAlDia(quoteId: string): Promise<boolean> {
+  try {
+    const token = await getZohoAccessToken()
+    const r = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Modified_Time`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+    )
+    if (!r.ok) return false
+    const q = ((await r.json().catch(() => ({}))) as { data?: Array<{ PDF_URL?: string; Modified_Time?: string }> }).data?.[0]
+    const pdf = String(q?.PDF_URL || "")
+    const mod = Date.parse(String(q?.Modified_Time || ""))
+    if (!pdf || !Number.isFinite(mod)) return false
+    const m = pdf.match(/(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/)
+    if (!m) return false
+    const pdfAt = Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`)
+    if (!Number.isFinite(pdfAt)) return false
+    return mod <= pdfAt + 3 * 60_000
+  } catch {
+    return false
+  }
+}
+
 /**
  * PDF FRESCO ANTES DE ENVIAR (caso Grey 07-ago): la edición regenera el PDF
  * EN SEGUNDO PLANO, así que el PDF_URL de Zoho puede apuntar a la versión
@@ -81,10 +107,13 @@ export async function regenerarPdfFresco(quoteId: string): Promise<string> {
     // Flujo confirmar-una-vez (Lalo 07-ago): si NO hay cambios sin versionar
     // (marca pdf_dirty ausente), el PDF vigente ES la última versión
     // confirmada — se envía tal cual, sin regenerar (evita el churn de
-    // versiones en cada envío). Solo se regenera cuando hay ediciones
-    // pendientes de confirmar o si la marca no se pudo leer.
+    // versiones en cada envío). PERO la marca vive en el cotizador y su
+    // escritura falló en silencio (07-ago, caso COT341: el cotizador apuntaba
+    // a OTRO proyecto de Supabase) — así que la ausencia de marca NO basta:
+    // cinturón de FRESCURA REAL comparando la fecha del PDF (viaja en el
+    // nombre del archivo) contra la última modificación de la cotización.
     const dirty = await getKvValue(`pdf_dirty_${quoteId}`).catch(() => "1")
-    if (!dirty) return ""
+    if (!dirty && (await pdfAlDia(quoteId))) return ""
 
     const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
     const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
