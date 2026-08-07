@@ -2829,13 +2829,22 @@ export async function POST(req: Request): Promise<Response> {
     const body = await req.text().catch(() => "")
     const clave = (new URLSearchParams(body).get("clave") || "").trim()
     if (!DASH_CLAVE || clave !== DASH_CLAVE) return renderLogin("Clave incorrecta. Inténtalo de nuevo.")
-    return new Response(null, {
-      status: 303,
-      headers: {
-        location: "/api/vic-funnel",
-        "set-cookie": `vic_auth=${authToken()}; Path=/api/vic-funnel; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`,
+    // Redirect resuelto en el NAVEGADOR y cookie con Path=/ (07-ago): el dash
+    // también se sirve proxeado como cotizacion.geovictoria.com/telemarketing,
+    // donde el server solo ve su propio path /api/vic-funnel — un location
+    // absoluto y una cookie con Path=/api/vic-funnel dejaban el login del
+    // dominio nuevo apuntando a un 404 y sin sesión. location.pathname del
+    // browser da el path correcto en ambos dominios.
+    return new Response(
+      `<!doctype html><meta charset="utf-8"><script>location.href = location.pathname</script>`,
+      {
+        status: 200,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "set-cookie": `vic_auth=${authToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`,
+        },
       },
-    })
+    )
   }
   if (!FUNNEL_KEY || key !== FUNNEL_KEY) {
     return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "content-type": "application/json" } })
