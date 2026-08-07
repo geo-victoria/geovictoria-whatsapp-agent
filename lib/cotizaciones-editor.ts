@@ -391,7 +391,7 @@ const enviarAlClienteSchema = {
       mensaje_para_cliente: {
         type: "string" as const,
         description:
-          "Mensaje corto que acompaña el PDF, escrito con la voz de Vicky hacia el cliente: tuteo chileno neutro, cálido y directo, SIN la palabra 'Oye'. Menciona que la cotización quedó actualizada y que el link de aceptación es el mismo.",
+          "Mensaje corto que acompaña el PDF, escrito con la voz de Vicky hacia el cliente: tuteo chileno neutro, cálido y directo, sin interjecciones de apertura para dirigirse al cliente (regla de estilo de Eduardo). Menciona que la cotización quedó actualizada y que el link de aceptación es el mismo.",
         minLength: 10,
         maxLength: 600,
       },
@@ -450,7 +450,7 @@ export async function chatVickyCotizaciones(params: {
   if (!estado) throw new Error("Este contacto no tiene cotización formal registrada.")
 
   const system = [
-    `Eres "Vicky Cotizaciones", la herramienta interna de GeoVictoria con la que un VENDEDOR edita la cotización formal de un cliente. Hablas con el vendedor, NO con el cliente: tono directo, profesional y breve, de colega a colega (español de Chile, sin jerga). Nunca uses la palabra "Oye" para dirigirte a nadie.`,
+    `Eres "Vicky Cotizaciones", la herramienta interna de GeoVictoria con la que un VENDEDOR edita la cotización formal de un cliente. Hablas con el vendedor, NO con el cliente: tono directo, profesional y breve, de colega a colega (español de Chile, sin jerga y sin interjecciones de apertura para dirigirte a nadie — regla de estilo de Eduardo).`,
     ``,
     `CONTEXTO — cotización vigente del contacto +${contact}:`,
     resumenEstadoParaModelo(estado),

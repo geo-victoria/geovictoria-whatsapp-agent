@@ -487,6 +487,37 @@ async function conectar(sessionId) {
   // WhatsApp comparte explícitamente el número detrás de un LID.
   sock.ev.on("chats.phoneNumberShare", ({ lid, jid }) => aprenderLid(lid, jid))
 
+  // LLAMADAS de WhatsApp (07-ago, pedido Lalo: registrar los llamados de los
+  // ejecutivos e identificar las llamadas con clientes con proceso). El
+  // dispositivo vinculado recibe los eventos de llamada del número: se
+  // registra cada transición (offer → accept/reject/timeout) con su call_id.
+  // Solo llamadas de WHATSAPP — las de red celular no pasan por aquí.
+  sock.ev.on("call", async (calls) => {
+    for (const c of calls || []) {
+      try {
+        const jid = c.chatId || c.from || ""
+        if (!jid || c.isGroup) continue
+        const esLid = jid.endsWith("@lid")
+        const telefono = esLid ? lidPn.get(soloDigitos(jid)) || null : soloDigitos(jid) || null
+        await sb("vic_wa_espejo_llamadas?on_conflict=session_id,call_id,estado", {
+          method: "POST",
+          headers: { Prefer: "resolution=ignore-duplicates" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            call_id: c.id || `${Date.now()}`,
+            chat_jid: jid,
+            telefono,
+            video: Boolean(c.isVideo),
+            estado: c.status || "offer",
+            at: c.date ? new Date(c.date).toISOString() : new Date().toISOString(),
+          }),
+        })
+      } catch (e) {
+        console.error(`[${sessionId}] llamada`, e.message)
+      }
+    }
+  })
+
   // Resolutor proactivo: 30 s tras conectar y luego cada 5 min (el candado
   // resolutorActivo evita que varias sesiones consulten a la vez).
   clearInterval(resolutorTimers.get(sessionId))

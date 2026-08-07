@@ -2156,7 +2156,7 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
       <button type="submit" style="background:#00aff2;color:#fff;border:0;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer">🔍 Buscar</button>
     </form></p>
   <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones</h1>
-  <div class="sub">Editor interno de la cotización de <b>${esc(empresa)}</b> (+${esc(contact)}). Describe el cambio y se aplica al tiro con los precios oficiales — el link de aceptación no cambia y el PDF se regenera. La cotización se le envía al cliente <b>solo cuando tú des el OK</b>.</div>
+  <div class="sub">Editor interno de la cotización de <b>${esc(empresa)}</b> (+${esc(contact)}). Describe el cambio y se aplica de inmediato con los precios oficiales — el link de aceptación no cambia y el PDF se regenera. La cotización se le envía al cliente <b>solo cuando tú des el OK</b>.</div>
   <div class="cols">
     <div class="chatCol card">
       <div id="chatBox">
