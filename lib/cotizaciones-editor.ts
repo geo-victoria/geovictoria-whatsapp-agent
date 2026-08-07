@@ -243,7 +243,7 @@ function resumenEstadoParaModelo(e: EstadoCotizacion): string {
         .join("\n")
     : "(detalle de ítems no disponible — usa ver_cotizacion o pregunta al vendedor)"
   return [
-    `Cotización ${e.numero || e.puntero.quoteId} de ${e.puntero.empresa || "empresa sin nombre"}${e.puntero.rut ? ` (RUT ${e.puntero.rut})` : ""}`,
+    `Cotización ${e.numero || e.puntero.quoteId} de ${e.puntero.empresa || "empresa sin nombre"}${e.puntero.rut ? ` (RUT ${e.puntero.rut})` : ""} — quote_id interno Zoho: ${e.puntero.quoteId} (las tools operan siempre sobre esta cotización)`,
     `Estado en Zoho: ${e.estadoZoho || "desconocido"}${e.descuentoPct ? ` · descuento recurrente comiteado: ${e.descuentoPct}%` : ""}`,
     `Total con IVA: ${e.puntero.totalUf ? `UF ${e.puntero.totalUf}` : ""}${e.puntero.totalClp ? ` (~$${Math.round(e.puntero.totalClp).toLocaleString("es-CL")})` : ""}`,
     `Ítems actuales:`,
@@ -440,7 +440,10 @@ export async function chatVickyCotizaciones(params: {
           eventos.push({ tool: tu.name, ok: !!e, resumen: "Estado de la cotización consultado en Zoho" })
         } else if (tu.name === "actualizar_cotizacion") {
           const input = tu.input as ActualizarCotizacionInput
-          const qid = input.quote_id || estado.puntero.quoteId
+          // El editor está fijado a UNA cotización: el quote_id que proponga el
+          // modelo se IGNORA (bug 07-ago: pasó el NÚMERO "COT403" en vez del id
+          // interno de Zoho y la cotizadora no encontraba el registro).
+          const qid = estado.puntero.quoteId
           const r = await actualizarCotizacion({ ...input, quote_id: qid })
           output = r
           eventos.push({
