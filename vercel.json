@@ -36,6 +36,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/vic-zoho-calls-sync",
+      "schedule": "30 * * * *"
+    },
+    {
       "path": "/api/vic-reactivation-cron",
       "schedule": "0 14 * * 1-5"
     },
