@@ -32,7 +32,8 @@
  *      quedó confirmado — se confirma la recepción, no el dinero.
  */
 
-import { getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persistence-v3"
+import { getKvValue, getQuotePointers, setKvValue, type QuotePointer } from "@/lib/supabase-persistence-v3"
+import { transicionarDealHacia } from "@/lib/zoho-deals"
 import { onboardingEnabled, claveFase, claveBorrador } from "@/lib/onboarding/fase"
 import { parsearBorrador, sembrarBorrador } from "@/lib/onboarding/borrador"
 import { acuseComprobanteCL } from "@/lib/onboarding/prompt"
@@ -197,6 +198,42 @@ async function marcarCotizacionPagada(quoteId: string): Promise<boolean> {
   } catch (e) {
     console.warn("[comprobante] Estado→Pagada lanzó:", e instanceof Error ? e.message : e)
     return false
+  }
+}
+
+/** Foto del pago → deal GANADO (pedido Lalo 07-ago): junto con marcar la
+ * cotización Pagada, el deal avanza por blueprint hacia "7. Implementando" —
+ * la etapa ganada que el dashboard espeja como "Ganada". Forward-only (jamás
+ * retrocede ni toca Cierre Perdido/Congelado); si el blueprint solo ofrece el
+ * paso intermedio "6. Listo para Cierre", se avanza y se reintenta el tramo
+ * final de inmediato. Best-effort: nunca toca la respuesta al cliente. */
+async function avanzarDealAGanado(pointer: QuotePointer): Promise<void> {
+  try {
+    let dealId = (pointer.dealId || "").trim()
+    if (!dealId) {
+      const token = await getZohoAccessToken()
+      const r = await fetch(
+        `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${pointer.quoteId}?fields=Deal_Asociado`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+      )
+      const data = (await r.json().catch(() => null)) as {
+        data?: Array<{ Deal_Asociado?: { id?: string } }>
+      } | null
+      dealId = String(data?.data?.[0]?.Deal_Asociado?.id || "")
+    }
+    if (!dealId) {
+      console.warn(`[comprobante] quote=${pointer.quoteId} sin deal asociado — no se pudo marcar ganado`)
+      return
+    }
+    let r1 = await transicionarDealHacia(dealId, "implementando")
+    if (r1.resultado === "avanzado" && !/implement/i.test(r1.detalle || "")) {
+      r1 = await transicionarDealHacia(dealId, "implementando")
+    }
+    console.log(
+      `[comprobante] deal=${dealId} → ganado: ${r1.resultado}${r1.detalle ? ` (${r1.detalle})` : ""}`,
+    )
+  } catch (e) {
+    console.warn("[comprobante] avanzarDealAGanado falló:", e instanceof Error ? e.message : e)
   }
 }
 
@@ -388,6 +425,9 @@ export async function registrarComprobanteTransferencia(
     // Comprobante real recibido → Estado_Cotizacion "Pagada" (opción 1, Lalo
     // 04-ago): dispara los workflows de Zoho amarrados al estado. Best-effort.
     await marcarCotizacionPagada(pointer.quoteId).catch(() => false)
+    // Y el DEAL avanza a ganado (Lalo 07-ago): misma política que "Pagada" —
+    // si el abono no aparece en el banco, cobranza revierte a mano.
+    await avanzarDealAGanado(pointer).catch(() => {})
   }
 
   // 3. Confirmación al cliente.
