@@ -99,6 +99,26 @@ export type ActualizarCotizacionInput = {
    * schema que ve Vicky con clientes NO lo expone — el cliente no negocia
    * el valor de la UF. */
   ufValor?: number
+  /** Líneas MANUALES fuera del catálogo/tarifa (ej. "instalación por 2 UF",
+   * un cargo especial, un ajuste). SOLO las pasa el editor interno de
+   * vendedores — el schema de Vicky con clientes no las expone. montoUF es
+   * NETO unitario; recurrente true = mensual, false/omitido = pago único. */
+  itemsExtra?: Array<{
+    nombre: string
+    montoUF: number
+    cantidad?: number
+    recurrente?: boolean
+    codigo?: string
+  }>
+  /** Override del precio unitario UF de ítems del catálogo (ej. "sube el
+   * arriendo del reloj a 0.43 UF"). SOLO lo pasa el editor interno de
+   * vendedores. El subtotal del ítem pasa a ser precio × cantidad. */
+  preciosOverride?: Array<{
+    id: string
+    precioUnitUF: number
+    /** Filtro opcional cuando el mismo id aparece en más de una modalidad. */
+    modalidad?: string
+  }>
 }
 
 export type ActualizarCotizacionResultado =
@@ -129,7 +149,40 @@ export async function actualizarCotizacion(
     })),
   })
   if (!construccion.ok) return { ok: false, error: construccion.error }
-  const items = construccion.items
+  // Líneas manuales del editor de vendedores: viajan como ítems de servicio
+  // con el monto tal cual lo pidió el vendedor (la cotizadora las persiste y
+  // las pinta en el PDF igual que cualquier línea). Modalidad → Es_Recurrente:
+  // "venta" = pago único, "por usuario" = recurrente mensual.
+  const extras = (args.itemsExtra || [])
+    .filter((e) => e && typeof e.nombre === "string" && e.nombre.trim() && Number.isFinite(Number(e.montoUF)))
+    .map((e) => {
+      const cantidad = Math.max(1, Math.round(Number(e.cantidad) || 1))
+      const unit = Number(Number(e.montoUF).toFixed(3))
+      return {
+        tipo: "servicio" as const,
+        id: (String(e.codigo || "ajuste_manual").toLowerCase().replace(/[^a-z0-9_]+/g, "_").slice(0, 40)) || "ajuste_manual",
+        nombre: e.nombre.trim().slice(0, 120),
+        modalidad: e.recurrente === true ? "por usuario" : "venta",
+        cantidad,
+        precioUnitarioUF: unit,
+        subtotalUF: Number((unit * cantidad).toFixed(3)),
+      }
+    })
+  const items = [...construccion.items, ...extras]
+
+  // Overrides de precio del editor de vendedores: pisan el precio unitario
+  // del catálogo para el ítem indicado y recomputan su subtotal.
+  for (const ov of args.preciosOverride || []) {
+    const unit = Number(ov?.precioUnitUF)
+    if (!ov?.id || !Number.isFinite(unit) || unit < 0) continue
+    const filtroMod = String(ov.modalidad || "").toLowerCase().trim()
+    for (const it of items) {
+      if (it.id !== ov.id) continue
+      if (filtroMod && !String(it.modalidad || "").toLowerCase().includes(filtroMod)) continue
+      it.precioUnitarioUF = Number(unit.toFixed(3))
+      it.subtotalUF = Number((it.precioUnitarioUF * (it.cantidad || 1)).toFixed(3))
+    }
+  }
 
   const subtotalUF = items.reduce((s, i) => s + i.subtotalUF, 0)
   const totalUF = subtotalUF * (1 + IVA_RATE)

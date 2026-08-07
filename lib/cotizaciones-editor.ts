@@ -330,6 +330,35 @@ const actualizarSchemaEditor = {
         minimum: 20000,
         maximum: 80000,
       },
+      items_extra: {
+        type: "array" as const,
+        description:
+          "Líneas MANUALES fuera del catálogo/tarifa que pida el vendedor (ej. 'instalación por 2 UF', un cargo especial, un ajuste a favor del cliente con monto negativo). monto_uf es NETO unitario en UF; recurrente true = mensual, omitido/false = pago único. Para REEMPLAZAR un cobro de tarifa por uno manual (ej. instalación a precio especial), anula el de tarifa (autoInstalada true en el punto) y agrega acá la línea manual. En ediciones posteriores estas líneas deben volver a pasarse (la configuración es completa).",
+        items: {
+          type: "object" as const,
+          properties: {
+            nombre: { type: "string" as const, description: "Nombre visible de la línea (ej. 'Instalación de reloj')." },
+            monto_uf: { type: "number" as const, description: "Monto NETO unitario en UF (negativo = ajuste a favor).", minimum: -100, maximum: 500 },
+            cantidad: { type: "integer" as const, minimum: 1, maximum: 100 },
+            recurrente: { type: "boolean" as const, description: "true = cargo mensual; omitido/false = pago único." },
+          },
+          required: ["nombre", "monto_uf"],
+        },
+      },
+      precios_override: {
+        type: "array" as const,
+        description:
+          "Cambia el PRECIO UNITARIO de ítems del catálogo cuando el vendedor lo pida (ej. 'sube el arriendo del reloj a 0.43 UF' → {id:'senseface_2a', precio_unit_uf:0.43}). El subtotal del ítem pasa a ser precio × cantidad. id = código del ítem tal como aparece en el contexto (senseface_2a, asistencia, …); modalidad solo si el mismo id existe en más de una (arriendo/venta). En ediciones posteriores los overrides vigentes deben volver a pasarse.",
+        items: {
+          type: "object" as const,
+          properties: {
+            id: { type: "string" as const, description: "Código del ítem del catálogo a repreciar." },
+            precio_unit_uf: { type: "number" as const, description: "Nuevo precio unitario NETO en UF.", minimum: 0, maximum: 500 },
+            modalidad: { type: "string" as const, description: "Opcional: arriendo/venta/por usuario/fijo, si hay ambigüedad." },
+          },
+          required: ["id", "precio_unit_uf"],
+        },
+      },
     },
   },
 }
@@ -429,7 +458,8 @@ export async function chatVickyCotizaciones(params: {
     catalogoParaModelo(),
     ``,
     `CÓMO TRABAJAS:`,
-    `1. El vendedor te pide cambios (dotación, agregar/quitar reloj, módulos, puntos de instalación). Aplícalos DE INMEDIATO con actualizar_cotizacion — sin pedir confirmación extra al vendedor (él ya es la confirmación). Pasa SIEMPRE la configuración COMPLETA final: parte de los ítems actuales del contexto y aplica el cambio pedido encima. AGREGAR o QUITAR cualquier ítem (módulos, relojes, instalación) SIEMPRE es posible por esta vía — jamás digas que "no hay soporte" para modificar un ítem ni derives a Zoho por eso. Si la cotizadora devuelve un error genérico, REINTENTA una vez con la misma configuración; si persiste, muestra al vendedor el error textual y sugiere reintentar en unos minutos (a Zoho manual solo si la cotización está Aceptada).`,
+    `0. EL VENDEDOR MANDA — obedécele (orden de Lalo 07-ago). Si pide agregar, quitar o CAMBIAR cualquier cosa (ítems, montos, precios unitarios, cargos fuera de tarifa), se hace en el acto: precios_override cambia el precio de un ítem del catálogo (ej. "sube el arriendo del reloj a 0.43 UF" → {id:"senseface_2a", precio_unit_uf:0.43}); items_extra agrega líneas manuales con el monto que él diga (ej. "instalación por 2 UF" → punto con autoInstalada true para anular la tarifa + línea manual "Instalación de reloj" por 2 UF pago único). PROHIBIDO responder "no es posible", "los precios son fijos" o derivar a Zoho para un cambio de precio. A lo más UNA pregunta aclaratoria y solo si es imprescindible (ej. ¿mensual o pago único?); si el contexto lo sugiere, asume lo razonable y decláralo en tu resumen.`,
+    `1. El vendedor te pide cambios (dotación, agregar/quitar reloj, módulos, puntos de instalación). Aplícalos DE INMEDIATO con actualizar_cotizacion — sin pedir confirmación extra al vendedor (él ya es la confirmación). Pasa SIEMPRE la configuración COMPLETA final: parte de los ítems actuales del contexto y aplica el cambio pedido encima — incluidos los overrides de precio y las líneas manuales vigentes (códigos ajuste_* o precios distintos al catálogo en el contexto: vuelve a pasarlos en precios_override/items_extra o se pierden). AGREGAR o QUITAR cualquier ítem (módulos, relojes, instalación) SIEMPRE es posible por esta vía — jamás digas que "no hay soporte" para modificar un ítem ni derives a Zoho por eso. Si la cotizadora devuelve un error genérico, REINTENTA una vez con la misma configuración; si persiste, muestra al vendedor el error textual y sugiere reintentar en unos minutos (a Zoho manual solo si la cotización está Aceptada).`,
     `2. Reconstrucción de la configuración: los ítems con código de módulo (asistencia, vacaciones, …) van en "modulos"; los ítems con código de hardware van en "hardware" (respeta su modalidad arriendo/venta y cantidad actuales salvo que el vendedor pida cambiarlas); la dotación (userCount) es la Cantidad del ítem asistencia — si su modalidad es "Fijo" es el plan fijo (1-10): usa la dotación que te diga el vendedor o, si no la menciona y no la puedes deducir, pregúntasela. Los ítems de envío/instalación NO se pasan: se derivan de "puntosInstalacion" (uno por punto físico; si la cotización tiene reloj y no conoces la comuna del punto, pregúntala al vendedor antes de actualizar).`,
     `3. INSTALACIÓN DEL RELOJ — sentido EXACTO, no lo inviertas (error real del 07-ago): "el cliente lo instala él mismo / lo va a instalar el cliente / auto-instalación / sin visita técnica" → autoInstalada: true → NO se cobra instalación (el envío SÍ se cobra igual, el equipo se despacha de todas formas). "lo instala GeoVictoria / que vayan a instalarlo / con instalación" → autoInstalada: false → la instalación se cobra según zona. Después de CUALQUIER cambio de instalación o hardware, llama ver_cotizacion y verifica en los ítems que la línea de instalación quedó o desapareció según corresponde ANTES de responderle al vendedor; si quedó mal, corrige de inmediato con otra actualización.`,
     `4. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó: dotación, ítems y total nuevo (UF y pesos aprox). El link de aceptación NO cambia y el PDF se regenera solo.`,
@@ -495,7 +525,11 @@ export async function chatVickyCotizaciones(params: {
             : { ok: false, error: "Sin cotización registrada para este contacto." }
           eventos.push({ tool: tu.name, ok: !!e, resumen: "Estado de la cotización consultado en Zoho" })
         } else if (tu.name === "actualizar_cotizacion") {
-          const input = tu.input as ActualizarCotizacionInput & { valor_uf?: number }
+          const input = tu.input as ActualizarCotizacionInput & {
+            valor_uf?: number
+            items_extra?: Array<{ nombre: string; monto_uf: number; cantidad?: number; recurrente?: boolean }>
+            precios_override?: Array<{ id: string; precio_unit_uf: number; modalidad?: string }>
+          }
           // El editor está fijado a UNA cotización: el quote_id que proponga el
           // modelo se IGNORA (bug 07-ago: pasó el NÚMERO "COT403" en vez del id
           // interno de Zoho y la cotizadora no encontraba el registro).
@@ -504,6 +538,21 @@ export async function chatVickyCotizaciones(params: {
             ...input,
             quote_id: qid,
             ufValor: typeof input.valor_uf === "number" && input.valor_uf > 0 ? input.valor_uf : undefined,
+            itemsExtra: Array.isArray(input.items_extra)
+              ? input.items_extra.map((e) => ({
+                  nombre: String(e?.nombre || ""),
+                  montoUF: Number(e?.monto_uf),
+                  cantidad: e?.cantidad,
+                  recurrente: e?.recurrente,
+                }))
+              : undefined,
+            preciosOverride: Array.isArray(input.precios_override)
+              ? input.precios_override.map((o) => ({
+                  id: String(o?.id || ""),
+                  precioUnitUF: Number(o?.precio_unit_uf),
+                  modalidad: o?.modalidad,
+                }))
+              : undefined,
           })
           output = r
           eventos.push({
