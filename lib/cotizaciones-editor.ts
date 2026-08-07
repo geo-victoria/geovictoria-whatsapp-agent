@@ -279,6 +279,26 @@ const verCotizacionSchema = {
   input_schema: { type: "object" as const, properties: {} },
 }
 
+// Versión del schema de actualizar_cotizacion SOLO para el editor interno:
+// agrega valor_uf (override del valor de la UF para los totales), que el
+// schema de Vicky con clientes jamás expone.
+const actualizarSchemaEditor = {
+  ...actualizarCotizacionSchema,
+  input_schema: {
+    ...actualizarCotizacionSchema.input_schema,
+    properties: {
+      ...actualizarCotizacionSchema.input_schema.properties,
+      valor_uf: {
+        type: "number" as const,
+        description:
+          "OPCIONAL — valor en PESOS de 1 UF a usar para calcular el total en CLP (ej. 39500). Pásalo SOLO si el vendedor pide fijar un valor de UF distinto al del día; si no lo pasas, se usa la UF vigente automáticamente.",
+        minimum: 20000,
+        maximum: 80000,
+      },
+    },
+  },
+}
+
 const aplicarDescuentoSchema = {
   name: "aplicar_descuento",
   description:
@@ -379,7 +399,8 @@ export async function chatVickyCotizaciones(params: {
     `3. INSTALACIÓN DEL RELOJ — sentido EXACTO, no lo inviertas (error real del 07-ago): "el cliente lo instala él mismo / lo va a instalar el cliente / auto-instalación / sin visita técnica" → autoInstalada: true → NO se cobra instalación (el envío SÍ se cobra igual, el equipo se despacha de todas formas). "lo instala GeoVictoria / que vayan a instalarlo / con instalación" → autoInstalada: false → la instalación se cobra según zona. Después de CUALQUIER cambio de instalación o hardware, llama ver_cotizacion y verifica en los ítems que la línea de instalación quedó o desapareció según corresponde ANTES de responderle al vendedor; si quedó mal, corrige de inmediato con otra actualización.`,
     `4. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó: dotación, ítems y total nuevo (UF y pesos aprox). El link de aceptación NO cambia y el PDF se regenera solo.`,
     `4. Descuentos (el vendedor SÍ puede pedirlos): usa aplicar_descuento con pct_objetivo = el % que pidió. La escalera oficial comitea escalones de 10% y 20% sobre el plan mensual, TOPE 20% (instalación y envío no tienen descuento); el servidor aplica el escalón que garantiza al menos lo pedido, acotado al tope. Informa SIEMPRE el % real comiteado y, si difiere de lo pedido, dilo sin vueltas. El descuento comiteado sobrevive a ediciones de configuración posteriores y la escalera no baja descuentos ya comiteados.`,
-    `5. Enviar al cliente: SOLO cuando el vendedor dé el OK explícito, usa enviar_cotizacion_al_cliente. Antes de eso, el cliente no se entera de nada.`,
+    `5. Valor de la UF: por defecto los totales en pesos usan la UF del día automáticamente. Si el vendedor pide fijar otro valor ("usa la UF a $39.500"), pásalo en valor_uf de actualizar_cotizacion y menciona en tu resumen qué valor de UF se usó. OJO: una edición posterior sin valor_uf recalcula con la UF del día — si el vendedor quiere mantener el valor fijado, vuelve a pasarlo en cada edición.`,
+    `6. Enviar al cliente: SOLO cuando el vendedor dé el OK explícito, usa enviar_cotizacion_al_cliente. Antes de eso, el cliente no se entera de nada.`,
     ``,
     `LÍMITES (sé transparente con el vendedor):`,
     `- Descuentos: solo por la escalera oficial (tope 20% sobre el plan mensual). Un % fuera de escalera o sobre el tope requiere gestión del ejecutivo en Zoho.`,
@@ -393,7 +414,7 @@ export async function chatVickyCotizaciones(params: {
 
   const tools = [
     verCotizacionSchema,
-    actualizarCotizacionSchema,
+    actualizarSchemaEditor,
     aplicarDescuentoSchema,
     enviarAlClienteSchema,
   ] as unknown as Anthropic.Messages.Tool[]
@@ -439,12 +460,16 @@ export async function chatVickyCotizaciones(params: {
             : { ok: false, error: "Sin cotización registrada para este contacto." }
           eventos.push({ tool: tu.name, ok: !!e, resumen: "Estado de la cotización consultado en Zoho" })
         } else if (tu.name === "actualizar_cotizacion") {
-          const input = tu.input as ActualizarCotizacionInput
+          const input = tu.input as ActualizarCotizacionInput & { valor_uf?: number }
           // El editor está fijado a UNA cotización: el quote_id que proponga el
           // modelo se IGNORA (bug 07-ago: pasó el NÚMERO "COT403" en vez del id
           // interno de Zoho y la cotizadora no encontraba el registro).
           const qid = estado.puntero.quoteId
-          const r = await actualizarCotizacion({ ...input, quote_id: qid })
+          const r = await actualizarCotizacion({
+            ...input,
+            quote_id: qid,
+            ufValor: typeof input.valor_uf === "number" && input.valor_uf > 0 ? input.valor_uf : undefined,
+          })
           output = r
           eventos.push({
             tool: tu.name,

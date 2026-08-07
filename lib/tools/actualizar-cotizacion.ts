@@ -94,6 +94,11 @@ export type ActualizarCotizacionInput = {
   hardware?: Array<{ id: string; cantidad: number; modalidad?: "arriendo" | "venta" }>
   puntosInstalacion?: Array<{ ubicacion: string; autoInstalada?: boolean }>
   resumen_cambio: string
+  /** Valor CLP de 1 UF a usar para los totales, en vez de la UF del día.
+   * SOLO lo pasa el editor interno de vendedores (Vicky Cotizaciones); el
+   * schema que ve Vicky con clientes NO lo expone — el cliente no negocia
+   * el valor de la UF. */
+  ufValor?: number
 }
 
 export type ActualizarCotizacionResultado =
@@ -128,7 +133,11 @@ export async function actualizarCotizacion(
 
   const subtotalUF = items.reduce((s, i) => s + i.subtotalUF, 0)
   const totalUF = subtotalUF * (1 + IVA_RATE)
-  const ufActual = await getUFActualSafe()
+  const ufValorOverride = Number(args.ufValor)
+  const ufActual =
+    Number.isFinite(ufValorOverride) && ufValorOverride > 0
+      ? ufValorOverride
+      : await getUFActualSafe()
   const totalCLP = Math.round(totalUF * ufActual)
 
   try {
