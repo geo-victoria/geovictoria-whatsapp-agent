@@ -3088,7 +3088,15 @@ export async function POST(req: Request): Promise<Response> {
     )
   }
   if (!FUNNEL_KEY || key !== FUNNEL_KEY) {
-    return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "content-type": "application/json" } })
+    // Sesión humana por cookie (fuga 07-ago: las páginas de vendedores ya no
+    // embeben la llave máquina, así que sus fetch llegan sin ?key=).
+    let quienCookie = ""
+    try {
+      quienCookie = decodeURIComponent(cookieDe(req, "vic_quien") || "")
+    } catch {}
+    if (!(cookieDe(req, "vic_auth") === authToken() && quienCookie)) {
+      return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "content-type": "application/json" } })
+    }
   }
   const accion = accionPre
   // Creación de cotización sobre un deal (no requiere contact: el teléfono
@@ -3333,19 +3341,27 @@ export async function GET(req: Request): Promise<Response> {
   }
   // Identidad de la sesión (pedido Lalo 07-ago): quién entró por el login.
   // Vendedor → ve SU cartera; "Administrador" → todo. El acceso máquina por
-  // ?key= (crons, links de correos) no tiene identidad y ve todo.
+  // ?key= sin cookie (crons, links de correos) no tiene identidad y ve todo.
   let quien = ""
+  let quienCookie = ""
+  try {
+    quienCookie = decodeURIComponent(cookieDe(req, "vic_quien") || "")
+  } catch {}
+  const sesionHumana = cookieDe(req, "vic_auth") === authToken() && Boolean(quienCookie)
   if (key !== FUNNEL_KEY) {
-    // Acceso humano: sesión por cookie (clave GeoVictoria + identidad). El
-    // ?key= queda para consumidores máquina (cron del resumen, links).
-    let quienCookie = ""
-    try {
-      quienCookie = decodeURIComponent(cookieDe(req, "vic_quien") || "")
-    } catch {}
-    if (cookieDe(req, "vic_auth") === authToken() && quienCookie) {
-      key = FUNNEL_KEY
-      quien = quienCookie
-    } else return renderLogin()
+    if (sesionHumana) key = FUNNEL_KEY
+    else return renderLogin()
+  }
+  // LA COOKIE MANDA SIEMPRE (fuga 07-ago): los links internos llevaban la
+  // llave máquina en ?key= y bastaba seguir uno ("Quitar filtros") para que
+  // un vendedor perdiera su identidad y viera TODO. Si el navegador tiene
+  // sesión humana, la identidad aplica aunque la URL traiga la llave.
+  if (sesionHumana) {
+    quien = quienCookie
+    // Y las páginas de una sesión humana NO exponen la llave máquina en sus
+    // links: la cookie autentica cada request (GET y POST). Solo el acceso
+    // máquina real (sin cookie) conserva la llave en los links que genera.
+    key = ""
   }
 
   const conv = (searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()
