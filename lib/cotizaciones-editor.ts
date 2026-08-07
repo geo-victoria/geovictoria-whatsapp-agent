@@ -71,11 +71,12 @@ export type EstadoCotizacion = {
  */
 export async function estadoCotizacion(contact: string, quoteId?: string): Promise<EstadoCotizacion | null> {
   const punteros = await getQuotePointers(contact).catch(() => [])
-  const puntero =
+  const base =
     (quoteId ? punteros.find((p) => p.quoteId === quoteId) : undefined) ??
     punteros[0] ??
     (await punteroPorSufijo(contact))
-  if (!puntero) return null
+  if (!base) return null
+  const puntero: QuotePointer = { ...base }
 
   let numero = ""
   let estadoZoho = ""
@@ -92,6 +93,8 @@ export async function estadoCotizacion(contact: string, quoteId?: string): Promi
         Numero_Cotizacion?: string
         Estado_Cotizacion?: string
         Descuento_Recurrente_Pct?: number
+        PDF_URL?: string
+        URL_Aceptacion_Web?: string
         Detalle_Items_Cotizacion?: Array<{
           Codigo_Item?: string
           Nombre_Item?: string
@@ -109,6 +112,19 @@ export async function estadoCotizacion(contact: string, quoteId?: string): Promi
       numero = String(rec.Numero_Cotizacion || "")
       estadoZoho = String(rec.Estado_Cotizacion || "")
       descuentoPct = Number(rec.Descuento_Recurrente_Pct ?? 0) || 0
+      // Los LINKS de Zoho mandan sobre el puntero: el PDF se regenera en
+      // segundo plano tras cada edición y el puntero queda apuntando a la
+      // versión vieja (caso UF 41.000, 07-ago: el panel mostraba el v4).
+      const pdfZoho = String(rec.PDF_URL || "")
+      const accZoho = String(rec.URL_Aceptacion_Web || "")
+      if ((pdfZoho && pdfZoho !== puntero.pdfUrl) || (accZoho && accZoho !== puntero.acceptanceUrl)) {
+        if (pdfZoho) puntero.pdfUrl = pdfZoho
+        if (accZoho) puntero.acceptanceUrl = accZoho
+        await refrescarPuntero(contact, puntero.quoteId, {
+          pdfUrl: pdfZoho || undefined,
+          acceptanceUrl: accZoho || undefined,
+        })
+      }
       items = (rec.Detalle_Items_Cotizacion || []).map((it) => ({
         codigo: String(it.Codigo_Item || ""),
         nombre: String(it.Nombre_Item || it.Descripcion || it.Codigo_Item || "ítem"),
@@ -123,6 +139,25 @@ export async function estadoCotizacion(contact: string, quoteId?: string): Promi
     // best-effort: el puntero solo ya sirve para conversar
   }
   return { puntero, numero, estadoZoho, descuentoPct, items }
+}
+
+/**
+ * Envío directo al cliente (botón del panel, sin pasar por el chat): PDF
+ * vigente por el WhatsApp de Vicky + mensaje corto con su voz.
+ */
+export async function enviarCotizacionAlClienteDirecto(
+  contact: string,
+  quoteId?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const estado = await estadoCotizacion(contact, quoteId)
+  if (!estado) return { ok: false, error: "Este contacto no tiene cotización formal registrada." }
+  const envio = await enviarCotizacionWhatsapp({ quote_id: estado.puntero.quoteId, _contact: contact })
+  if (!envio.ok) return { ok: false, error: envio.error }
+  await sendBotmakerMessage(
+    contact,
+    "Te comparto la cotización actualizada en PDF 📄 El link de aceptación es el mismo de siempre — ahí ya aparece todo al día para revisarla y aceptarla. Cualquier duda, aquí estoy.",
+  ).catch(() => {})
+  return { ok: true }
 }
 
 export type CotizacionEncontrada = {

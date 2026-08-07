@@ -18,7 +18,7 @@ import { createHash } from "node:crypto"
 
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
-import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, type EstadoCotizacion } from "@/lib/cotizaciones-editor"
+import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, type EstadoCotizacion } from "@/lib/cotizaciones-editor"
 
 export const dynamic = "force-dynamic"
 // El chat de Vicky Cotizaciones corre un loop de tool use contra la cotizadora
@@ -1993,7 +1993,12 @@ function renderEmpresasPeriodo(params: {
 }
 
 function page(html: string, status = 200): Response {
-  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } })
+  // no-store: dashboard vivo — sin esto el navegador reusa respuestas por
+  // heurística y las pestañas parecen "no navegar" (caso Gestión↔Editor 07-ago).
+  return new Response(html, {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+  })
 }
 
 /** Chat espejado del WHATSAPP DEL VENDEDOR con el cliente (pedido Lalo
@@ -2069,14 +2074,17 @@ function panelCotizacionHtml(e: EstadoCotizacion): string {
     .join("")
   const links = [
     p.pdfUrl ? `<a href="${esc(p.pdfUrl)}" target="_blank" rel="noopener">🧾 PDF</a>` : "",
-    p.acceptanceUrl ? `<a href="${esc(p.acceptanceUrl)}" target="_blank" rel="noopener">✅ Link de aceptación</a>` : "",
     p.quoteId ? `<a href="${ZOHO_CRM_URL}/tab/${QUOTE_MODULE}/${esc(p.quoteId)}" target="_blank" rel="noopener">🔗 Zoho</a>` : "",
   ].filter(Boolean).join(" · ")
+  // Botón de envío directo (reemplaza el link de aceptación — pedido Lalo
+  // 07-ago): manda al cliente el PDF vigente por el WhatsApp de Vicky. El
+  // handler enviarCotCliente vive en la página del editor (?coted=).
+  const btnEnviar = `<div style="margin-top:12px"><button onclick="enviarCotCliente(this)" title="Vicky le manda al cliente el PDF vigente por WhatsApp, con un mensaje corto" style="background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;width:100%">📤 Enviar a cliente por WhatsApp de Vicky</button></div>`
   return `<h2 style="margin:0 0 2px;font-size:15px">${esc(p.empresa || "Empresa sin nombre")}</h2>
   <div class="sub" style="margin:0 0 10px">${e.numero ? `${esc(e.numero)} · ` : ""}${p.rut ? `RUT ${esc(p.rut)} · ` : ""}<span class="tag">${esc(e.estadoZoho || "estado desconocido")}</span>${e.descuentoPct ? ` · dcto. recurrente ${e.descuentoPct}%` : ""}</div>
   ${e.items.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th>Tipo</th><th style="text-align:right">Neto</th></tr></thead><tbody>${filas}</tbody></table></div>` : `<p class="sub" style="margin:0 0 8px">Detalle de ítems no disponible desde Zoho en este momento.</p>`}
   <div style="margin-top:10px;font-size:14px"><b>Total con IVA:</b> ${p.totalUf ? `UF ${p.totalUf.toLocaleString("es-CL", { maximumFractionDigits: 2 })}` : "—"}${p.totalClp ? ` <span class="sub" style="font-size:12px">(~$${Math.round(p.totalClp).toLocaleString("es-CL")})</span>` : ""}</div>
-  ${links ? `<div style="margin-top:8px;font-size:13px">${links}</div>` : ""}`
+  ${links ? `<div style="margin-top:8px;font-size:13px">${links}</div>` : ""}${btnEnviar}`
 }
 
 /** Página del editor conversacional "Vicky Cotizaciones" (pedido Lalo 06-ago):
@@ -2211,6 +2219,32 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
       input.addEventListener("keydown", function (ev) {
         if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(); }
       });
+      // Botón del panel: envío directo del PDF vigente al cliente por el
+      // WhatsApp de Vicky (el panel se re-inyecta por innerHTML, por eso el
+      // handler es global y va por onclick).
+      window.enviarCotCliente = async function (b) {
+        if (!confirm("¿Enviarle al cliente la cotización vigente por el WhatsApp de Vicky?")) return;
+        b.disabled = true;
+        var orig = b.textContent;
+        b.textContent = "Enviando…";
+        try {
+          var res = await fetch(KEYQ + "&accion=coted_enviar&contact=" + encodeURIComponent(CONTACT) + (COT ? "&cot=" + encodeURIComponent(COT) : ""), { method: "POST" });
+          var j = null;
+          try { j = await res.json(); } catch (e2) {}
+          if (res.ok && j && j.ok) {
+            b.textContent = "✅ Enviada al cliente";
+            chip("Cotización enviada al cliente por WhatsApp 📤", true);
+          } else {
+            chip("Envío falló: " + ((j && j.error) || ("error " + res.status)), false);
+            b.disabled = false;
+            b.textContent = orig;
+          }
+        } catch (e3) {
+          chip("Envío falló: " + e3, false);
+          b.disabled = false;
+          b.textContent = orig;
+        }
+      };
       input.focus();
     })();
   </script>
@@ -2647,6 +2681,21 @@ export async function POST(req: Request): Promise<Response> {
         }),
         { headers: { "content-type": "application/json" } },
       )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
+  // Botón "Enviar a cliente por WhatsApp de Vicky" del panel del editor
+  // (pedido Lalo 07-ago): manda el PDF vigente + mensaje corto, sin chat.
+  if (accion === "coted_enviar") {
+    const quoteIdSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim() || undefined
+    try {
+      const r = await enviarCotizacionAlClienteDirecto(contact, quoteIdSel)
+      return new Response(JSON.stringify(r), {
+        status: r.ok ? 200 : 500,
+        headers: { "content-type": "application/json" },
+      })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
