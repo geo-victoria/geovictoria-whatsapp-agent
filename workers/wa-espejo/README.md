@@ -40,8 +40,13 @@ segundo ejecutivo se duplica el servicio en Railway cambiando esa variable.
 ## Datos
 
 - `vic_wa_espejo_mensajes`: session_id, chat (jid y teléfono limpio), from_me,
-  autor, tipo (texto/imagen/audio/...), texto, timestamps. Media: solo tipo y
-  caption (v1 no descarga archivos).
+  autor, tipo (texto/imagen/audio/...), texto, timestamps. Media (07-ago,
+  pedido Lalo — leer comprobantes de pago): imágenes, audios y documentos se
+  DESCARGAN y suben al bucket privado `wa-espejo` de Supabase Storage
+  (media_path/media_mime); el cron `vic-wa-espejo-lector` del agente (Vercel,
+  cada 5 min) los convierte a texto — visión Claude para imagen/PDF,
+  ElevenLabs para notas de voz — y lo deja en media_texto. El worker solo
+  acarrea bytes: las claves de IA nunca viven en Railway.
 - `vic_wa_espejo_estado`: credenciales de la sesión (el proceso puede morir y
   renacer en otra máquina sin re-escanear).
 

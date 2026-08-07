@@ -32,6 +32,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/vic-wa-espejo-lector",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/vic-reactivation-cron",
       "schedule": "0 14 * * 1-5"
     },

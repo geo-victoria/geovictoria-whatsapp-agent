@@ -177,7 +177,7 @@ async function buscarCotizacionPorNumero(
  * 04-ago, opción 1): el estado dispara los workflows de Zoho amarrados a
  * "Pagada". Riesgo asumido y documentado en la nota: es pago DECLARADO — si
  * el abono no aparece en el banco, cobranza revierte el estado a mano. */
-async function marcarCotizacionPagada(quoteId: string): Promise<boolean> {
+export async function marcarCotizacionPagada(quoteId: string): Promise<boolean> {
   try {
     const token = await getZohoAccessToken()
     const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}`, {

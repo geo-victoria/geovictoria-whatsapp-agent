@@ -30,6 +30,7 @@ import makeWASocket, {
   proto,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } from "@whiskeysockets/baileys"
 import pino from "pino"
 import QRCode from "qrcode"
@@ -265,6 +266,61 @@ async function resolverContactosVicky(sock) {
   }
 }
 
+// ── Media (07-ago, pedido Lalo: leer comprobantes de pago) ──────────────────
+// Imágenes, audios y documentos (PDF) se DESCARGAN y suben a Supabase Storage
+// (bucket privado `wa-espejo`); un cron del agente en Vercel los lee (visión
+// Claude / transcripción) y deja el texto en media_texto. El worker solo
+// acarrea bytes — sin claves de IA acá. Best-effort: si la descarga falla, la
+// fila se guarda igual (como antes, solo tipo + caption).
+const MEDIA_TIPOS = new Set(["imagen", "audio", "documento"])
+const MAX_MEDIA_BYTES = 12 * 1024 * 1024
+
+function mediaInfo(message) {
+  const im = message?.imageMessage
+  const au = message?.audioMessage
+  const doc = message?.documentMessage
+  const mime = (im?.mimetype || au?.mimetype || doc?.mimetype || "").split(";")[0].trim()
+  let ext = "bin"
+  if (mime.includes("jpeg")) ext = "jpg"
+  else if (mime.includes("png")) ext = "png"
+  else if (mime.includes("webp")) ext = "webp"
+  else if (mime.includes("pdf")) ext = "pdf"
+  else if (mime.includes("ogg") || mime.includes("opus")) ext = "ogg"
+  else if (mime.includes("aac")) ext = "aac"
+  else if (mime.includes("mp4")) ext = "m4a"
+  else if (mime.includes("mpeg")) ext = "mp3"
+  return { mime: mime || "application/octet-stream", ext }
+}
+
+async function subirMedia(sessionId, m, tipo) {
+  if (!MEDIA_TIPOS.has(tipo)) return null
+  try {
+    const buffer = await downloadMediaMessage(m, "buffer", {})
+    if (!buffer || !buffer.length || buffer.length > MAX_MEDIA_BYTES) return null
+    const { mime, ext } = mediaInfo(m.message)
+    const msgIdSafe = String(m.key?.id || Date.now()).replace(/[^A-Za-z0-9_-]/g, "")
+    const path = `${sessionId}/${msgIdSafe}.${ext}`
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/wa-espejo/${path}`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": mime,
+        "x-upsert": "true",
+      },
+      body: buffer,
+    })
+    if (!res.ok) {
+      console.error(`[${sessionId}] storage ${res.status}`, (await res.text().catch(() => "")).slice(0, 120))
+      return null
+    }
+    return { path, mime }
+  } catch (e) {
+    console.error(`[${sessionId}] media`, e.message)
+    return null
+  }
+}
+
 async function guardarMensaje(sessionId, m) {
   const jid = m.key?.remoteJid || ""
   // status@broadcast = estados; newsletter = canales. No son conversaciones.
@@ -284,6 +340,9 @@ async function guardarMensaje(sessionId, m) {
   const enviadoAt = m.messageTimestamp
     ? new Date(Number(m.messageTimestamp) * 1000).toISOString()
     : new Date().toISOString()
+  // Comprobantes y notas de voz: el archivo se sube a Storage y el cron
+  // vic-wa-espejo-lector del agente lo convierte a texto (media_texto).
+  const media = await subirMedia(sessionId, m, tipo)
   const fila = {
     session_id: sessionId,
     chat_jid: jid,
@@ -294,6 +353,8 @@ async function guardarMensaje(sessionId, m) {
     es_grupo: esGrupo,
     tipo,
     texto: (texto || "").slice(0, 8000),
+    media_path: media?.path || null,
+    media_mime: media?.mime || null,
     enviado_at: enviadoAt,
     raw: JSON.parse(JSON.stringify({ key: m.key, pushName: m.pushName, messageTimestamp: m.messageTimestamp })),
   }
