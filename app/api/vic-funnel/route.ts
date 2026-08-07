@@ -3749,7 +3749,17 @@ export async function POST(req: Request): Promise<Response> {
     }
     const quoteIdSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim() || undefined
     const est = await estadoCotizacion(contact, quoteIdSel).catch(() => null)
-    if (!est?.puntero.pdfUrl) {
+    if (!est) {
+      return new Response(JSON.stringify({ ok: false, error: "Este contacto no tiene cotización formal registrada." }), { status: 409, headers: { "content-type": "application/json" } })
+    }
+    // MISMO cinturón de frescura que los envíos por Vicky (Lalo 07-ago: "se
+    // debe asegurar de que se envíe la última versión confirmada"): si hay
+    // cambios sin versionar o el PDF quedó atrás de la cotización, se
+    // regenera sincrónico ANTES de encolar; el job viaja con la URL fresca.
+    const { regenerarPdfFresco } = await import("@/lib/enviar-cotizacion-wa")
+    const pdfFrescoVend = await regenerarPdfFresco(est.puntero.quoteId).catch(() => "")
+    const pdfJob = pdfFrescoVend || est.puntero.pdfUrl
+    if (!pdfJob) {
       return new Response(JSON.stringify({ ok: false, error: "La cotización no tiene PDF disponible todavía." }), { status: 409, headers: { "content-type": "application/json" } })
     }
     const empresaJob = (est.puntero.empresa || "").trim().replace(/[^\p{L}\p{N} .-]/gu, "")
@@ -3758,7 +3768,7 @@ export async function POST(req: Request): Promise<Response> {
       jobId,
       JSON.stringify({
         to: contact,
-        pdf_url: est.puntero.pdfUrl,
+        pdf_url: pdfJob,
         filename: empresaJob ? `Cotizacion GeoVictoria - ${empresaJob}.pdf`.slice(0, 100) : "Cotizacion GeoVictoria.pdf",
         caption: "Hola, te comparto la cotización actualizada de GeoVictoria 📄 Cualquier duda me dices.",
         status: "pendiente",
