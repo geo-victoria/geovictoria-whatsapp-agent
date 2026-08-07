@@ -2249,12 +2249,16 @@ function panelCotizacionHtml(e: EstadoCotizacion): string {
   // Botón de envío directo (reemplaza el link de aceptación — pedido Lalo
   // 07-ago): manda al cliente el PDF vigente por el WhatsApp de Vicky. El
   // handler enviarCotCliente vive en la página del editor (?coted=).
-  const btnEnviar = `<div style="margin-top:12px"><button onclick="enviarCotCliente(this)" title="Vicky le manda al cliente el PDF vigente por WhatsApp, con un mensaje corto" style="background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;width:100%">📤 Enviar a cliente por WhatsApp de Vicky</button></div>`
+  // Vista previa (pedido Grey 07-ago, ok Lalo): genera y abre el PDF con los
+  // últimos cambios SIN enviarle nada al cliente — para verificar antes del
+  // envío. Lo que muestra es exactamente lo que saldría al apretar enviar.
+  const btnPreview = `<div style="margin-top:12px"><button onclick="previewCotPdf(this)" title="Genera y abre el PDF con los últimos cambios. NO le envía nada al cliente — es para revisar antes de enviar." style="background:#fff;color:#333;border:1px solid #d9d9d9;border-radius:10px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;width:100%">👁 Vista previa del PDF (no envía nada)</button></div>`
+  const btnEnviar = `<div style="margin-top:8px"><button onclick="enviarCotCliente(this)" title="Vicky le manda al cliente el PDF vigente por WhatsApp, con un mensaje corto" style="background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;width:100%">📤 Enviar a cliente por WhatsApp de Vicky</button></div>`
   return `<h2 style="margin:0 0 2px;font-size:15px">${esc(p.empresa || "Empresa sin nombre")}</h2>
   <div class="sub" style="margin:0 0 10px">${e.numero ? `${esc(e.numero)} · ` : ""}${p.rut ? `RUT ${esc(p.rut)} · ` : ""}<span class="tag">${esc(e.estadoZoho || "estado desconocido")}</span>${e.descuentoPct ? ` · dcto. recurrente ${e.descuentoPct}%` : ""}</div>
   ${e.items.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th>Tipo</th><th style="text-align:right">Neto</th></tr></thead><tbody>${filas}</tbody></table></div>` : `<p class="sub" style="margin:0 0 8px">Detalle de ítems no disponible desde Zoho en este momento.</p>`}
   <div style="margin-top:10px;font-size:14px"><b>Total con IVA:</b> ${p.totalUf ? `UF ${p.totalUf.toLocaleString("es-CL", { maximumFractionDigits: 2 })}` : "—"}${p.totalClp ? ` <span class="sub" style="font-size:12px">(~$${Math.round(p.totalClp).toLocaleString("es-CL")})</span>` : ""}</div>
-  ${links ? `<div style="margin-top:8px;font-size:13px">${links}</div>` : ""}${btnEnviar}`
+  ${links ? `<div style="margin-top:8px;font-size:13px">${links}</div>` : ""}${btnPreview}${btnEnviar}`
 }
 
 /** Página del editor conversacional "Vicky Cotizaciones" (pedido Lalo 06-ago):
@@ -2442,6 +2446,33 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
       // Botón del panel: envío directo del PDF vigente al cliente por el
       // WhatsApp de Vicky (el panel se re-inyecta por innerHTML, por eso el
       // handler es global y va por onclick).
+      // Vista previa del PDF (pedido Grey 07-ago): regenera si hay cambios y
+      // abre el resultado en otra pestaña. NO envía nada al cliente. La
+      // pestaña se abre ANTES del fetch (síncrono) para esquivar el bloqueador
+      // de popups; si falla, se cierra.
+      window.previewCotPdf = async function (b) {
+        b.disabled = true;
+        var orig = b.textContent;
+        b.textContent = "Generando vista previa…";
+        var w = window.open("", "_blank");
+        try {
+          var res = await fetch(KEYQ + "&accion=coted_preview&contact=" + encodeURIComponent(CONTACT) + (COT ? "&cot=" + encodeURIComponent(COT) : ""), { method: "POST" });
+          var j = null;
+          try { j = await res.json(); } catch (e2) {}
+          if (res.ok && j && j.ok && j.pdf_url) {
+            if (w) { w.location = j.pdf_url; } else { window.open(j.pdf_url, "_blank"); }
+            chip(j.regenerado ? "PDF regenerado con los últimos cambios — revísalo antes de enviar 👁" : "El PDF ya estaba al día — eso es lo que se enviaría 👁", true);
+          } else {
+            if (w) w.close();
+            chip("Vista previa falló: " + ((j && j.error) || ("error " + res.status)), false);
+          }
+        } catch (e3) {
+          if (w) w.close();
+          chip("Vista previa falló: " + e3, false);
+        }
+        b.disabled = false;
+        b.textContent = orig;
+      };
       window.enviarCotCliente = async function (b) {
         if (!confirm("¿Enviarle al cliente la cotización vigente por el WhatsApp de Vicky?")) return;
         b.disabled = true;
@@ -3711,6 +3742,34 @@ export async function POST(req: Request): Promise<Response> {
         }),
         { headers: { "content-type": "application/json" } },
       )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
+  // Vista previa del PDF (pedido Grey 07-ago, ok Lalo): regenera si hay
+  // cambios sin versionar o el PDF quedó atrás de la cotización, y devuelve
+  // la URL fresca SIN enviar nada al cliente. Lo que abre esta acción es
+  // EXACTAMENTE lo que saldría al apretar cualquiera de los botones de envío
+  // (mismo regenerarPdfFresco); un envío posterior sin nuevas ediciones no
+  // genera otra versión.
+  if (accion === "coted_preview") {
+    const quoteIdSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim() || undefined
+    try {
+      const est = await estadoCotizacion(contact, quoteIdSel).catch(() => null)
+      if (!est) {
+        return new Response(JSON.stringify({ ok: false, error: "Este contacto no tiene cotización formal registrada." }), { status: 409, headers: { "content-type": "application/json" } })
+      }
+      const { regenerarPdfFresco, datosDeCotizacion } = await import("@/lib/enviar-cotizacion-wa")
+      const fresco = await regenerarPdfFresco(est.puntero.quoteId).catch(() => "")
+      // Sin regeneración (PDF al día): la URL autoritativa es la de Zoho — el
+      // puntero local puede quedar atrás si una escritura best-effort falló.
+      const zoho = fresco ? null : await datosDeCotizacion(est.puntero.quoteId).catch(() => null)
+      const pdf = fresco || zoho?.pdfUrl || est.puntero.pdfUrl
+      if (!pdf) {
+        return new Response(JSON.stringify({ ok: false, error: "La cotización aún no tiene PDF." }), { status: 409, headers: { "content-type": "application/json" } })
+      }
+      return new Response(JSON.stringify({ ok: true, pdf_url: pdf, regenerado: Boolean(fresco) }), { headers: { "content-type": "application/json" } })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
