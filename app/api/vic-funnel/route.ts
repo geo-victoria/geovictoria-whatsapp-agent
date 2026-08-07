@@ -4281,7 +4281,8 @@ export async function GET(req: Request): Promise<Response> {
       <label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varias; sin selección = todos">Estado<br><select name="estado" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:130px">
         ${ESTADOS_LISTADO.map((e) => `<option${estadoF.includes(e) ? " selected" : ""}>${e}</option>`).join("")}
       </select></label>
-      ${esAdmin ? `<label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varios; sin selección = todos">Propietario<br><select name="prop" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:150px">
+      ${esAdmin ? `<label style="font-size:12px">Propietario <select name="prop" style="font-size:12px;padding:3px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:150px;background:#fff">
+        <option value="">Todos</option>
         ${propietariosAll.map((p) => `<option value="${esc(p)}"${propF.includes(p) ? " selected" : ""}>${esc(p)}</option>`).join("")}
       </select></label>` : ""}
       <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:6px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer">Filtrar</button>
