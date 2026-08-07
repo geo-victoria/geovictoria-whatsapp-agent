@@ -1413,7 +1413,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     // "Listo" (✔/↩) en grande, primera columna de la fila.
     const btn = c.gestionado
       ? `<button class="btnGest" data-contact="${esc(c.contacto)}" data-estado="gestionado" title="Deshacer: volver a la cola" style="background:#fff3e0;color:#7a4b00;border:1px solid #ffcc80;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">↩</button>`
-      : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Pendiente — al gestionarlo márcalo acá (pide registro y guarda nota en Zoho)" style="background:#fffdf5;color:#92700c;border:1px dashed #d4b106;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">⏳</button>`
+      : `<button class="btnGest" data-contact="${esc(c.contacto)}" title="Pendiente — al gestionarlo márcalo acá (pide registro y guarda nota en Zoho)" style="background:#fffdf5;color:#92700c;border:1px dashed #d4b106;border-radius:8px;padding:8px 12px;font-size:17px;cursor:pointer">💬</button>`
     // WhatsApp reconocible pero compacto (solo el ícono, en verde oficial).
     const btnWa = `<a href="https://wa.me/${esc(c.contacto)}" target="_blank" title="Abrir chat de WhatsApp" style="background:#25D366;color:#ffffff;text-decoration:none;padding:8px 11px;border-radius:8px;font-size:16px;display:inline-block;white-space:nowrap">💬</a>`
     // Fecha compacta apilada (fecha arriba, hora abajo) — usa la mitad de ancho.
