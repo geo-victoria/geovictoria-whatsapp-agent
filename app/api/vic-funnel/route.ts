@@ -1098,7 +1098,10 @@ async function fetchDealsEquipo(): Promise<DealEquipo[]> {
             `select id, Deal_Name, Stage, Created_Time, Last_Activity_Time, Owner.first_name, Owner.last_name, ` +
             `Contact_Name.Phone, Contact_Name.Mobile, Account_Name.Account_Name from Deals ` +
             `where ((Last_Activity_Time >= '${desde}T00:00:00-04:00' or Created_Time >= '${desde}T00:00:00-04:00') ` +
-            `and Stage not in ('Cierre Perdido', 'Congelado', 'Facturación congelada', '8. Facturando')) limit ${offset}, 200`,
+            `and Stage not in ('Cierre Perdido', 'Congelado', 'Facturación congelada', '8. Facturando')) ` +
+            // Hay más de 1000 deals activos (tope de la paginación): el orden
+            // por actividad reciente deja fuera solo lo más frío.
+            `order by Last_Activity_Time desc limit ${offset}, 200`,
         }),
       })
       if (!r.ok || r.status === 204) break
