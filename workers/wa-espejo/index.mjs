@@ -1,5 +1,5 @@
 /**
- * wa-espejo — espejo SOLO LECTURA del WhatsApp Business de ejecutivos.
+ * wa-espejo — espejo del WhatsApp Business de ejecutivos (lectura + envíos encolados).
  *
  * Corre como proceso persistente (Railway/Fly/VPS — NO Vercel: necesita un
  * WebSocket vivo). Se vincula a cada número corporativo como "dispositivo
@@ -12,9 +12,12 @@
  * Cada sesión tiene su propio socket, sus credenciales (vic_wa_espejo_estado,
  * particionadas por session_id) y su QR (vic_kv wa_espejo_qr_<session>).
  *
- * REGLAS INQUEBRANTABLES:
- *  - JAMÁS se envía un mensaje: no existe ninguna llamada a sendMessage en
- *    este proceso, y no debe agregarse nunca. El espejo es pasivo.
+ * REGLAS:
+ *  - El espejo es pasivo: no responde chats ni interviene conversaciones.
+ *    ÚNICA escritura permitida (orden de Lalo 07-ago): despachar los envíos
+ *    de cotización que el EDITOR del dashboard encola en vic_kv
+ *    (wa_envio_<session>_*) — el vendedor aprieta el botón, su sesión manda
+ *    el PDF. Ningún otro sendMessage debe existir ni agregarse.
  *  - markOnlineOnConnect: false — si el espejo se marcara "en línea", el
  *    celular del ejecutivo dejaría de recibir notificaciones push.
  *
@@ -502,7 +505,7 @@ async function conectar(sessionId) {
         `wa_espejo_status_${sessionId}`,
         JSON.stringify({ estado: "conectado", numero: sock.user?.id || "", at: new Date().toISOString() }),
       )
-      console.log(`[${sessionId}] Conectado como ${sock.user?.id || "?"} (solo lectura)`)
+      console.log(`[${sessionId}] Conectado como ${sock.user?.id || "?"} (pasivo + cola de envíos)`)
     }
     if (connection === "close") {
       const codigo = lastDisconnect?.error?.output?.statusCode
@@ -593,7 +596,7 @@ async function conectar(sessionId) {
   enviosTimers.set(sessionId, setInterval(() => procesarEnviosPendientes(sessionId, sock).catch(() => {}), 15_000))
 }
 
-console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — SOLO LECTURA`)
+console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — pasivo + cola de envíos del editor`)
 await cargarLidPn()
 for (const sessionId of SESIONES) {
   tieneCredenciales(sessionId)
