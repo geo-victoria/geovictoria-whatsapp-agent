@@ -19,6 +19,7 @@ import { createHash } from "node:crypto"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
+import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
 
 export const dynamic = "force-dynamic"
 // El chat de Vicky Cotizaciones corre un loop de tool use contra la cotizadora
@@ -2578,6 +2579,7 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
     <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       <a href="?key=${encodeURIComponent(key)}">📞 Gestión</a>
       <b>🧾 Editor de cotizaciones</b>
+      <a href="?key=${encodeURIComponent(key)}&propnueva=1">📑 Crear propuestas</a>
       <a href="?key=${encodeURIComponent(key)}&vista=analisis">📊 Análisis y KPIs</a>
     </div>
   </div>
@@ -2813,6 +2815,231 @@ function panelDealHtml(info: InfoDeal): string {
     <div><b>RUT ficha:</b> ${esc(info.rut || "no registrado — pídelo al vendedor")}</div>
   </div>
   <div style="margin-top:10px;font-size:12px"><a href="${ZOHO_CRM_URL}/tab/Potentials/${esc(info.dealId)}" target="_blank" rel="noopener">🔗 Ver el deal en Zoho</a></div>`
+}
+
+/** Selector de EMPRESA para crear una propuesta (pedido Lalo 07-ago): los
+ * deals de la cartera del vendedor logueado (Administrador ve todos), con
+ * búsqueda en vivo. */
+async function renderSelectorPropuesta(key: string, quien: string): Promise<Response> {
+  const esAdminSel = !quien || quien === "Administrador"
+  const deals = (await fetchDealsEquipo().catch(() => [])) as DealEquipo[]
+  const filas = deals
+    .filter((d) => !/congelad|perdido/i.test(String(d.Stage || "")))
+    .filter((d) => esAdminSel || `${d["Owner.first_name"] || ""} ${d["Owner.last_name"] || ""}`.trim() === quien)
+    .sort((a, b) => String(a["Account_Name.Account_Name"] || a.Deal_Name || "").localeCompare(String(b["Account_Name.Account_Name"] || b.Deal_Name || ""), "es"))
+    .map((d) => {
+      const empresa = String(d["Account_Name.Account_Name"] || "").trim() || String(d.Deal_Name || "").trim() || "(sin nombre)"
+      const dueno = `${d["Owner.first_name"] || ""} ${d["Owner.last_name"] || ""}`.trim() || "—"
+      return `<tr class="filaDeal">
+        <td><b>${esc(empresa)}</b><div class="sub" style="margin:0;font-size:12px">${esc(String(d.Deal_Name || ""))}</div></td>
+        <td><span class="tag">${esc(String(d.Stage || "—"))}</span></td>
+        <td>${esc(dueno)}</td>
+        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&propcrear=${encodeURIComponent(String(d.id))}">elegir →</a></td>
+      </tr>`
+    })
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Nueva propuesta — elegir empresa</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:20px;margin:0;color:#4e4e4e}
+  .sub{color:#646464;font-size:13px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  th{color:#6b7280;font-weight:600;font-size:12px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  #buscar{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #d0d5db;border-radius:10px;font-size:15px;font-family:inherit}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}">← Volver a gestión</a></p>
+  <h1><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:28px;vertical-align:middle;margin-right:10px">Nueva propuesta — ¿para qué empresa?</h1>
+  <div class="sub" style="margin-top:4px">${esAdminSel ? "Todas las oportunidades activas." : `Solo tu cartera (${esc(quien)}).`} Escribe para acortar la lista.</div>
+  <div class="card">
+    <input id="buscar" type="text" placeholder="Busca por empresa, deal o etapa…" autofocus>
+    <div style="overflow-x:auto;margin-top:12px"><table>
+      <thead><tr><th>Empresa / deal</th><th>Etapa</th><th>Dueño</th><th></th></tr></thead>
+      <tbody id="cuerpoDeals">${filas || ""}</tbody>
+    </table></div>
+    <p class="sub" id="sinResultados" style="display:none;margin:12px 0 0">Ninguna empresa calza con la búsqueda.</p>
+    ${filas ? "" : `<p class="sub" style="margin:12px 0 0">No hay oportunidades activas${esAdminSel ? "" : " en tu cartera"}.</p>`}
+  </div>
+  <script>
+    (function () {
+      var input = document.getElementById("buscar");
+      var filas = Array.prototype.slice.call(document.querySelectorAll("#cuerpoDeals tr"));
+      var aviso = document.getElementById("sinResultados");
+      input.addEventListener("input", function () {
+        var q = input.value.trim().toLowerCase();
+        var visibles = 0;
+        filas.forEach(function (tr) {
+          var ok = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+          tr.style.display = ok ? "" : "none";
+          if (ok) visibles++;
+        });
+        aviso.style.display = visibles ? "none" : "block";
+      });
+    })();
+  </script>
+</div></body></html>`
+  return page(html)
+}
+
+/** Chat de creación de PROPUESTA sobre la empresa elegida (pedido Lalo
+ * 07-ago): el vendedor entrega la información — y el guion de la reunión si
+ * lo tiene (pegado o adjunto .txt) — y la propuesta con branding GV queda en
+ * un link estable, imprimible como PDF. */
+async function renderVickyPropuestasCrear(dealId: string, key: string): Promise<Response> {
+  const [info, previa] = await Promise.all([infoDeal(dealId), propuestaGuardada(dealId)])
+  if (!info) {
+    return paginaAviso(
+      "Oportunidad no encontrada",
+      `<p>No pude leer el deal <b>${esc(dealId)}</b> en Zoho.</p><p><a href="?key=${encodeURIComponent(key)}&propnueva=1">← Volver a elegir empresa</a></p>`,
+    )
+  }
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Vicky Propuestas — ${esc(info.accountNombre || info.nombre)}</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px 16px 30px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:19px;margin:0 0 2px;color:#4e4e4e}
+  .sub{color:#646464;font-size:12px}
+  .cols{display:flex;gap:16px;align-items:flex-start;margin-top:14px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
+  .lado{width:360px;flex:none;position:sticky;top:12px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  .chatCol{flex:1;min-width:0;display:flex;flex-direction:column}
+  #chatBox{min-height:340px;max-height:60vh;overflow-y:auto;padding:4px 2px}
+  .bub{display:flex;margin:6px 0}
+  .bub>div{max-width:78%;padding:9px 13px;border-radius:12px;font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+  .bubU{justify-content:flex-end}.bubU>div{background:#FFF8E1;border:1px solid #f3dc9a}
+  .bubA>div{background:#ffffff;border:1px solid #e5e7eb}
+  .bubE>div{background:#fdecea;border:1px solid #f5c6c0;color:#8a1f11}
+  .chip{display:inline-block;margin:4px 0;padding:4px 10px;border-radius:99px;font-size:12px;background:#e8f5e9;color:#1b5e20;border:1px solid #c8e6c9}
+  .chipErr{background:#fdecea;color:#8a1f11;border-color:#f5c6c0}
+  .fila{display:flex;gap:8px;margin-top:10px;align-items:flex-end}
+  #msg{flex:1;padding:10px 12px;border:1px solid #d0d5db;border-radius:10px;font-size:14px;font-family:inherit;resize:vertical;min-height:44px}
+  #btnSend{background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:12px 16px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap}
+  #btnSend:disabled{opacity:.5;cursor:default}
+  .adjunto{font-size:12px;color:#00aff2;cursor:pointer;font-weight:600}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  img.logo{height:26px;vertical-align:middle;margin-right:10px}
+  @media (max-width:760px){.cols{flex-direction:column}.lado{width:auto;position:static}}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&propnueva=1">← Elegir otra empresa</a></p>
+  <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Propuestas — ${esc(info.accountNombre || info.nombre)}</h1>
+  <div class="sub">Cuéntale al agente qué va en la propuesta. Si tienes el guion o la minuta de la reunión, pégalo en el chat (o adjúntalo en .txt) y personaliza con eso. El link de la propuesta es estable: cada versión nueva lo actualiza.</div>
+  <div class="cols">
+    <div class="chatCol card">
+      <div id="chatBox">
+        <div class="bub bubA"><div>Hola 👋 Armemos la propuesta para ${esc(info.accountNombre || info.nombre)}. Cuéntame qué le vamos a ofrecer (módulos, marcaje, dotación, precios si van) y, si tienes el guion de la reunión, pégalo aquí — de ahí saco lo que el cliente realmente necesita. Genero la primera versión al tiro y la pulimos juntas.</div></div>
+      </div>
+      <div class="fila">
+        <textarea id="msg" rows="2" placeholder="Ej: ofréceles asistencia con app para 35 personas… (puedes pegar el guion completo de la reunión)"></textarea>
+        <button id="btnSend" title="Le entrega tu mensaje al agente">Enviar mensaje</button>
+      </div>
+      <div style="margin-top:6px"><label class="adjunto">📎 Adjuntar guion (.txt)<input id="adjunto" type="file" accept=".txt,text/plain" style="display:none"></label> <span class="sub">— para Word: copia y pega el texto en el chat.</span></div>
+    </div>
+    <div class="lado">
+      <div class="card">
+        <h2 style="margin:0 0 2px;font-size:15px">${esc(info.accountNombre || info.nombre)}</h2>
+        <div class="sub" style="margin:0 0 10px"><span class="tag">${esc(info.stage || "etapa ?")}</span></div>
+        <div style="font-size:13px;line-height:1.7">
+          <div><b>Deal:</b> ${esc(info.nombre || "—")}</div>
+          <div><b>Dueño:</b> ${esc(info.ownerNombre || "—")}</div>
+          <div><b>Contacto:</b> ${esc(info.contactoNombre || "—")}${info.email ? ` · ${esc(info.email)}` : ""}</div>
+        </div>
+        <div id="linkProp" style="margin-top:12px;font-size:13px${previa ? "" : ";display:none"}"><a href="?key=${encodeURIComponent(key)}&prop_ver=${encodeURIComponent(dealId)}" target="_blank">📄 Ver la propuesta actual</a></div>
+        <div style="margin-top:8px;font-size:12px"><a href="${ZOHO_CRM_URL}/tab/Potentials/${esc(dealId)}" target="_blank" rel="noopener">🔗 Ver el deal en Zoho</a></div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var KEYQ = "?key=${encodeURIComponent(key)}";
+      var DEAL = ${JSON.stringify(dealId)};
+      var HIST = [];
+      var box = document.getElementById("chatBox");
+      var input = document.getElementById("msg");
+      var btn = document.getElementById("btnSend");
+      function burbuja(clase, texto) {
+        var w = document.createElement("div");
+        w.className = "bub " + clase;
+        var d = document.createElement("div");
+        d.textContent = texto;
+        w.appendChild(d);
+        box.appendChild(w);
+        box.scrollTop = box.scrollHeight;
+        return w;
+      }
+      function chip(texto, ok) {
+        var c = document.createElement("div");
+        var s = document.createElement("span");
+        s.className = "chip" + (ok ? "" : " chipErr");
+        s.textContent = (ok ? "📑 " : "⚠️ ") + texto;
+        c.appendChild(s);
+        box.appendChild(c);
+        box.scrollTop = box.scrollHeight;
+      }
+      document.getElementById("adjunto").addEventListener("change", function (ev) {
+        var f = ev.target.files && ev.target.files[0];
+        if (!f) return;
+        var r = new FileReader();
+        r.onload = function () {
+          input.value = (input.value ? input.value + "\\n\\n" : "") + "GUION DE LA REUNIÓN:\\n" + String(r.result || "").slice(0, 25000);
+          input.focus();
+        };
+        r.readAsText(f);
+      });
+      async function enviar() {
+        var t = input.value.trim();
+        if (!t || btn.disabled) return;
+        input.value = "";
+        burbuja("bubU", t.length > 600 ? t.slice(0, 600) + " […guion adjunto completo]" : t);
+        var esperando = burbuja("bubA", "Vicky está armando la propuesta…");
+        btn.disabled = true;
+        try {
+          var res = await fetch(KEYQ + "&accion=propcrear_chat&deal=" + encodeURIComponent(DEAL), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ historial: HIST, mensaje: t }),
+          });
+          var j = null;
+          try { j = await res.json(); } catch (e) {}
+          esperando.remove();
+          if (!res.ok || !j || !j.ok) {
+            burbuja("bubE", (j && j.error) ? j.error : "Error " + res.status + " — intenta de nuevo.");
+            return;
+          }
+          (j.eventos || []).forEach(function (e) { chip(e.resumen, e.ok); });
+          burbuja("bubA", j.reply);
+          HIST.push({ role: "user", content: t });
+          HIST.push({ role: "assistant", content: j.reply });
+          if (HIST.length > 30) HIST = HIST.slice(-30);
+          if (j.propuestaUrl) {
+            document.getElementById("linkProp").style.display = "";
+            chip("Lista — ábrela con '📄 Ver la propuesta actual' (se abre en otra pestaña).", true);
+          }
+        } catch (e2) {
+          esperando.remove();
+          burbuja("bubE", "No se pudo enviar: " + e2);
+        } finally {
+          btn.disabled = false;
+          input.focus();
+        }
+      }
+      btn.addEventListener("click", enviar);
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(); }
+      });
+      input.focus();
+    })();
+  </script>
+</div></body></html>`
+  return page(html)
 }
 
 /** Página de aviso/error con branding GeoVictoria (pedido Lalo 04-ago): la
@@ -3220,6 +3447,43 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
     }
   }
+  // Chat de PROPUESTAS (pedido Lalo 07-ago): tampoco requiere contact. El
+  // mensaje admite guiones de reunión largos (35k).
+  if (accion === "propcrear_chat") {
+    const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
+    if (!dealId) {
+      return new Response(JSON.stringify({ ok: false, error: "deal faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const body = (await req.json().catch(() => null)) as {
+      historial?: Array<{ role?: string; content?: string }>
+      mensaje?: string
+    } | null
+    const mensaje = String(body?.mensaje || "").trim().slice(0, 35000)
+    if (!mensaje) {
+      return new Response(JSON.stringify({ ok: false, error: "mensaje faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const historial = (Array.isArray(body?.historial) ? body.historial : [])
+      .map((m) => ({
+        role: m?.role === "assistant" ? ("assistant" as const) : ("user" as const),
+        content: String(m?.content || ""),
+      }))
+      .filter((m) => m.content.trim())
+      .slice(-30)
+    let quienPost = ""
+    try {
+      quienPost = decodeURIComponent(cookieDe(req, "vic_quien") || "")
+    } catch {}
+    try {
+      const r = await chatVickyPropuestas({ dealId, historial, mensaje, quien: quienPost || undefined })
+      const propuestaUrl = r.propuestaUrl ? `?key=${encodeURIComponent(key)}&prop_ver=${encodeURIComponent(dealId)}` : undefined
+      return new Response(JSON.stringify({ ok: true, reply: r.reply, eventos: r.eventos, propuestaUrl }), {
+        headers: { "content-type": "application/json" },
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
   const contact = digits(searchParams.get("contact") || "")
   if (!contact) {
     return new Response(JSON.stringify({ ok: false, error: "contact faltante" }), { status: 400, headers: { "content-type": "application/json" } })
@@ -3492,6 +3756,23 @@ export async function GET(req: Request): Promise<Response> {
   if (searchParams.get("cotnueva")) return renderSelectorDeal(key)
   const cotcrear = (searchParams.get("cotcrear") || "").replace(/\D/g, "").trim()
   if (cotcrear) return renderVickyCotizacionesCrear(cotcrear, key)
+  // Crear PROPUESTAS (pedido Lalo 07-ago): misma estructura que crear
+  // cotizaciones — elegir la empresa (cartera del vendedor logueado) y
+  // conversar con el agente; el guion de una reunión se pega o adjunta.
+  if (searchParams.get("propnueva")) return renderSelectorPropuesta(key, quien)
+  const propcrear = (searchParams.get("propcrear") || "").replace(/\D/g, "").trim()
+  if (propcrear) return renderVickyPropuestasCrear(propcrear, key)
+  const propVer = (searchParams.get("prop_ver") || "").replace(/\D/g, "").trim()
+  if (propVer) {
+    const p = await propuestaGuardada(propVer)
+    if (!p) {
+      return paginaAviso(
+        "Propuesta no encontrada",
+        `<p>Este deal aún no tiene propuesta generada.</p><p><a href="?key=${encodeURIComponent(key)}&propcrear=${encodeURIComponent(propVer)}">➕ Crearla con Vicky Propuestas</a></p>`,
+      )
+    }
+    return page(renderPropuestaHtml(p))
+  }
 
   let rows: Row[]
   let origen: {
@@ -4292,6 +4573,7 @@ export async function GET(req: Request): Promise<Response> {
     <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
+      <a href="?key=${encodeURIComponent(key)}&propnueva=1">📑 Crear propuestas</a>
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>
   </div>
