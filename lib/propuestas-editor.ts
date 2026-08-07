@@ -32,6 +32,7 @@ const F_CUERPO = `"Nunito",-apple-system,Segoe UI,Roboto,Arial,sans-serif`
 
 export type PropuestaDatos = {
   titulo: string
+  subtitulo?: string
   empresa: string
   preparadaPara?: string
   resumen: string
@@ -49,6 +50,10 @@ type PropuestaGuardada = {
   dealId: string
   actualizadaAt: string
   actualizadaPor?: string
+  /** N.º de propuesta de 6 dígitos (estable por deal) y versión incremental,
+   * como manda el skill gv-propuestas (portada y condiciones). */
+  numero?: string
+  version?: number
 }
 
 export const clavePropuesta = (dealId: string) => `propuesta_deal_${dealId}`
@@ -68,8 +73,13 @@ const esc = (s: unknown) =>
   String(s ?? "")
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 
-/** Render de la propuesta con el branding GV — página imprimible (el botón
- * "Guardar como PDF" usa la impresión del navegador). */
+/** Render de la propuesta — DISEÑO DEL SKILL gv-propuestas (pedido Lalo
+ * 07-ago: "la de la plataforma no es tan linda como la del skill"): portada
+ * blanca con chevrón azul, doble barra azul/amarilla, badges azules, tabla
+ * con encabezado azul y total amarillo, callout de recomendación, barra de
+ * contacto y #YoTeAyudo. Imprimible como PDF con el botón (impresión del
+ * navegador; la portada es blanca, así que los márgenes de impresión no la
+ * rompen). */
 export function renderPropuestaHtml(p: PropuestaGuardada): string {
   const d = p.datos
   const fecha = new Date(p.actualizadaAt || Date.now()).toLocaleDateString("es-CL", {
@@ -78,80 +88,149 @@ export function renderPropuestaHtml(p: PropuestaGuardada): string {
     month: "long",
     year: "numeric",
   })
+  const v = d.vendedor || {}
   const lista = (items: string[] | undefined) =>
-    items?.length ? `<ul>${items.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""
+    items?.length ? `<ul class="ul">${items.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""
   let nSeccion = 0
-  const seccion = (titulo: string, cuerpo: string) => {
+  const seccion = (titulo: string, cuerpo: string, lead = "") => {
     if (!cuerpo) return ""
     nSeccion++
-    return `<section>
-      <h2><span class="badge">${nSeccion}</span>${esc(titulo)}</h2>
+    return `<section class="blockSec">
+      <h2 class="sec"><span class="num">${nSeccion}</span>${esc(titulo)}</h2>
+      ${lead ? `<p class="sec-lead">${esc(lead)}</p>` : ""}
       ${cuerpo}
     </section>`
   }
+  // Solución en tarjetas (2 por fila, bordes superiores alternando azul/amarillo).
   const solucionHtml = d.solucion?.length
-    ? d.solucion.map((s) => `<div class="bloque"><h3>${esc(s.titulo)}</h3><p>${esc(s.detalle)}</p></div>`).join("")
+    ? (() => {
+        const cards = d.solucion.map(
+          (s, i) =>
+            `<div class="card ${i % 2 === 0 ? "top-b" : "top-y"}"><div class="cap">${esc(s.titulo)}</div><p>${esc(s.detalle)}</p></div>`,
+        )
+        const filasC: string[] = []
+        for (let i = 0; i < cards.length; i += 2) filasC.push(`<div class="cards">${cards.slice(i, i + 2).join("")}</div>`)
+        return filasC.join("")
+      })()
     : ""
   const preciosHtml = d.precios?.length
-    ? `<table><thead><tr><th>Ítem</th><th>Detalle</th><th style="text-align:right">Valor</th></tr></thead>
-       <tbody>${d.precios.map((r) => `<tr><td><b>${esc(r.item)}</b></td><td>${esc(r.detalle || "")}</td><td style="text-align:right;white-space:nowrap">${esc(r.valor)}</td></tr>`).join("")}</tbody></table>
-       ${d.precioNota ? `<p class="nota">${esc(d.precioNota)}</p>` : ""}`
+    ? `<table class="gv"><thead><tr><th>Ítem</th><th>Detalle</th><th class="num">Valor</th></tr></thead>
+       <tbody>${d.precios.map((r) => `<tr><td class="svc">${esc(r.item)}</td><td>${esc(r.detalle || "")}</td><td class="num u">${esc(r.valor)}</td></tr>`).join("")}</tbody></table>
+       ${d.precioNota ? `<p class="note">${esc(d.precioNota)}</p>` : ""}`
     : ""
-  const v = d.vendedor || {}
+  const docmeta = p.numero ? `Propuesta N.º ${esc(p.numero)} · <span class="v">v${p.version || 1}</span>` : ""
   return `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Propuesta GeoVictoria — ${esc(d.empresa)}</title>
 <style>
   ${GV_FONT_CSS}
+  :root{--blue:#00aff2;--yellow:#ffbb00;--gray:#646464;--gray6:#4e4e4e;--blue50:#e6f8fe;--yellow50:#fffaeb;--g50:#f7f8fa;--g100:#eef0f3;--g200:#dfe2e7}
   *{box-sizing:border-box}
-  body{font-family:${F_CUERPO};margin:0;background:#f7f8fa;color:#4e4e4e}
-  .hoja{max-width:860px;margin:0 auto;background:#fff;padding:0 0 40px}
-  .portada{background:#ffbb00;padding:56px 56px 40px;color:#fff}
-  .portada img{height:34px;margin-bottom:34px}
-  .portada .tipo{font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;opacity:.85}
-  .portada h1{font-family:${F_TITULO};font-weight:700;font-size:34px;margin:6px 0 4px;line-height:1.15}
-  .portada .para{font-size:16px;font-weight:600}
-  .portada .fecha{font-size:13px;margin-top:18px;opacity:.9}
-  main{padding:36px 56px}
-  section{margin:0 0 30px}
-  h2{font-family:${F_TITULO};font-weight:700;font-size:19px;color:#4e4e4e;margin:0 0 12px;display:flex;align-items:center;gap:10px}
-  .badge{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#ffbb00;color:#fff;font-size:14px;flex:none}
-  h3{font-family:${F_TITULO};font-weight:600;font-size:14.5px;margin:0 0 4px;color:#4e4e4e}
-  p{font-size:14px;line-height:1.65;margin:0 0 10px}
-  ul{margin:0;padding-left:20px}
-  li{font-size:14px;line-height:1.7}
-  .bloque{border-left:3px solid #00aff2;padding:2px 0 2px 14px;margin:0 0 14px}
-  table{width:100%;border-collapse:collapse;font-size:13.5px}
-  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
-  th{color:#6b7280;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-  .nota{font-size:12px;color:#6b7280;margin-top:8px}
-  .cierre{margin:38px 56px 0;background:#f7f8fa;border-radius:14px;padding:22px 26px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}
-  .cierre .quien{font-size:13.5px;line-height:1.6}
-  .cierre .marca{font-family:${F_TITULO};font-weight:700;font-size:15px}
-  .marca .a{color:#646464}.marca .b{color:#00aff2}.marca .c{color:#ffbb00}
-  .btnPrint{position:fixed;top:14px;right:14px;background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:10px 16px;font-family:${F_TITULO};font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.15)}
-  @media print{.btnPrint{display:none}body{background:#fff}.hoja{max-width:none}.portada{-webkit-print-color-adjust:exact;print-color-adjust:exact}.badge{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  body{font-family:${F_CUERPO};margin:0;background:#e9ebee;color:var(--gray6);font-size:14px;line-height:1.55}
+  .hoja{max-width:880px;margin:0 auto;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.08)}
+  /* ── Portada (skill gv-propuestas: blanca, chevrón azul, doble barra) ── */
+  .cover{position:relative;min-height:920px;overflow:hidden;background:#fff}
+  .cover .bluechev{position:absolute;right:-40px;top:-50px;width:420px;height:320px}
+  .cover .inner{position:absolute;left:64px;right:64px;top:70px}
+  .cover .logo{width:190px;display:block}
+  .cover .overline{margin-top:110px;color:var(--blue);font-weight:800;letter-spacing:3px;font-size:14px;text-transform:uppercase}
+  .cover h1{font-family:${F_TITULO};font-weight:700;color:var(--gray6);font-size:40px;line-height:1.1;margin:14px 0 0;letter-spacing:-.5px;max-width:600px}
+  .cover .sub{color:var(--gray);font-size:17px;margin-top:14px;max-width:560px}
+  .prepared{position:absolute;left:64px;right:64px;bottom:170px;display:flex;align-items:center;gap:30px}
+  .prepared .plabel{font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#9aa0a8;font-size:11px}
+  .prepared .clientbox{border-left:3px solid var(--yellow);padding-left:20px}
+  .prepared .client{font-family:${F_TITULO};font-weight:700;font-size:24px;color:var(--gray6)}
+  .prepared .date{margin-top:7px;color:var(--gray);font-size:13.5px}
+  .prepared .docmeta{margin-top:5px;color:var(--gray6);font-size:12.5px;font-weight:800;letter-spacing:.3px}
+  .prepared .docmeta .v{color:var(--blue)}
+  .barwrap{position:absolute;left:0;right:0;bottom:66px}
+  .bar-blue{height:8px;background:var(--blue)}
+  .bar-yellow{height:20px;background:var(--yellow)}
+  .cover .contact{position:absolute;left:64px;right:64px;bottom:24px;display:flex;justify-content:space-between;align-items:center;color:var(--gray);font-size:12.5px;gap:12px;flex-wrap:wrap}
+  .yta{font-weight:800;font-size:15px}
+  .yta .y{color:var(--gray)}.yta .t{color:var(--blue)}.yta .a{color:var(--yellow)}
+  /* ── Cuerpo ── */
+  main{padding:48px 64px 40px}
+  .blockSec{margin:0 0 36px}
+  h2.sec{display:flex;align-items:center;gap:14px;font-family:${F_TITULO};font-weight:700;color:var(--blue);font-size:22px;margin:0 0 8px}
+  h2.sec .num{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--blue);color:#fff;font-family:${F_CUERPO};font-weight:800;font-size:16px;flex:none}
+  .sec-lead{color:var(--gray);font-size:14px;margin:0 0 14px}
+  p{margin:0 0 10px}
+  .ul{margin:0;padding-left:22px}
+  .ul li{margin:5px 0;color:var(--gray)}
+  .ul li::marker{color:var(--blue)}
+  .callout{background:var(--yellow50);border-left:4px solid var(--yellow);padding:14px 18px;border-radius:0 8px 8px 0;color:var(--gray6);margin:12px 0}
+  .cards{display:flex;gap:14px;margin:12px 0}
+  .card{flex:1;border:1px solid var(--g200);border-radius:10px;padding:16px;background:#fff}
+  .card .cap{font-weight:800;color:var(--blue);font-size:15px;margin:0 0 6px}
+  .card p{margin:0;font-size:13px;color:var(--gray)}
+  .card.top-y{border-top:3px solid var(--yellow)}
+  .card.top-b{border-top:3px solid var(--blue)}
+  table.gv{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0 4px}
+  table.gv thead th{background:var(--blue);color:#fff;font-weight:700;text-align:left;padding:10px 12px;font-size:12.5px}
+  table.gv thead th.num{text-align:right}
+  table.gv tbody td{padding:10px 12px;border-bottom:1px solid var(--g200);vertical-align:middle}
+  table.gv tbody tr:nth-child(even){background:var(--g50)}
+  table.gv td.svc{font-weight:700;color:var(--gray6)}
+  table.gv td.num{text-align:right;white-space:nowrap}
+  table.gv td.u{color:var(--blue);font-weight:800}
+  .note{font-size:11.5px;color:#9aa0a8;margin:6px 0 0;line-height:1.45}
+  .contactbar{margin:44px 64px 0;background:var(--blue);color:#fff;border-radius:12px;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+  .contactbar .who{font-family:${F_TITULO};font-weight:700;font-size:17px}
+  .contactbar .det{font-size:13px;opacity:.95;margin-top:4px}
+  .contactbar .yta{font-size:16px}
+  .contactbar .yta .y{color:#fff}.contactbar .yta .t{color:#fff}.contactbar .yta .a{color:var(--yellow)}
+  .piefin{height:36px}
+  .btnPrint{position:fixed;top:14px;right:14px;background:var(--yellow);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-family:${F_TITULO};font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.15);z-index:9}
+  @media (max-width:700px){.cover .inner,.prepared,.cover .contact{left:24px;right:24px}main{padding:32px 24px}.contactbar{margin:32px 24px 0}.cards{flex-direction:column}.cover h1{font-size:30px}}
+  @media print{
+    .btnPrint{display:none}
+    body{background:#fff}
+    .hoja{max-width:none;box-shadow:none}
+    .cover{min-height:96vh;page-break-after:always}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .blockSec{page-break-inside:avoid}
+    .contactbar{page-break-inside:avoid}
+  }
 </style></head><body>
 <button class="btnPrint" onclick="window.print()">🖨️ Guardar como PDF</button>
 <div class="hoja">
-  <div class="portada">
-    <img src="/gv/logo-full-white.svg" alt="GeoVictoria" onerror="this.style.display='none'">
-    <div class="tipo">Propuesta comercial</div>
-    <h1>${esc(d.titulo || `Propuesta para ${d.empresa}`)}</h1>
-    <div class="para">${esc(d.empresa)}${d.preparadaPara ? ` · Preparada para ${esc(d.preparadaPara)}` : ""}</div>
-    <div class="fecha">${esc(fecha)}</div>
+  <div class="cover">
+    <svg class="bluechev" viewBox="0 0 120 90" xmlns="http://www.w3.org/2000/svg"><path d="M20 0 L70 0 L120 55 L120 90 L70 40 L20 90 L20 55 L55 20 Z" fill="#00aff2" opacity="0.9"/></svg>
+    <div class="inner">
+      <img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria" onerror="this.style.display='none'">
+      <div class="overline">Propuesta comercial</div>
+      <h1>${esc(d.titulo || `Propuesta para ${d.empresa}`)}</h1>
+      ${d.subtitulo ? `<div class="sub">${esc(d.subtitulo)}</div>` : ""}
+    </div>
+    <div class="prepared">
+      <div><div class="plabel">Preparado para</div></div>
+      <div class="clientbox">
+        <div class="client">${esc(d.empresa)}</div>
+        ${d.preparadaPara ? `<div class="date">${esc(d.preparadaPara)}</div>` : ""}
+        <div class="date">Santiago de Chile · ${esc(fecha)}</div>
+        ${docmeta ? `<div class="docmeta">${docmeta}</div>` : ""}
+      </div>
+    </div>
+    <div class="barwrap"><div class="bar-blue"></div><div class="bar-yellow"></div></div>
+    <div class="contact">
+      <div>${esc([v.nombre, "GeoVictoria", v.email, v.telefono].filter(Boolean).join(" · "))}</div>
+      <div class="yta"><span class="y">#Yo</span><span class="t">Te</span><span class="a">Ayudo</span></div>
+    </div>
   </div>
   <main>
-    ${seccion("Resumen", d.resumen ? `<p>${esc(d.resumen)}</p>` : "")}
-    ${seccion("Lo que nos contaron", lista(d.necesidades))}
+    ${seccion("Resumen y recomendación", d.resumen ? `<div class="callout">${esc(d.resumen)}</div>` : "")}
+    ${seccion("Lo que nos contaron", lista(d.necesidades), d.necesidades?.length ? "Las necesidades que levantamos con tu equipo." : "")}
     ${seccion("Nuestra propuesta", solucionHtml)}
     ${seccion("Inversión", preciosHtml)}
     ${seccion("Por qué GeoVictoria", lista(d.diferenciales))}
     ${seccion("Próximos pasos", lista(d.proximosPasos))}
   </main>
-  <div class="cierre">
-    <div class="quien">${v.nombre ? `<b>${esc(v.nombre)}</b><br>` : ""}${v.email ? `✉️ ${esc(v.email)}<br>` : ""}${v.telefono ? `📱 ${esc(v.telefono)}` : ""}</div>
-    <div class="marca"><span class="a">#Yo</span><span class="b">Te</span><span class="c">Ayudo</span></div>
-  </div>
+  ${
+    v.nombre || v.email || v.telefono
+      ? `<div class="contactbar"><div><div class="who">${esc(v.nombre || "Tu ejecutivo GeoVictoria")}</div><div class="det">${esc([v.email, v.telefono].filter(Boolean).join(" · "))}</div></div><div class="yta"><span class="y">#Yo</span><span class="t">Te</span><span class="a">Ayudo</span></div></div>`
+      : `<div class="contactbar"><div class="who">GeoVictoria</div><div class="yta"><span class="y">#Yo</span><span class="t">Te</span><span class="a">Ayudo</span></div></div>`
+  }
+  <div class="piefin"></div>
 </div>
 </body></html>`
 }
@@ -164,6 +243,7 @@ const generarPropuestaSchema = {
     type: "object" as const,
     properties: {
       titulo: { type: "string" as const, description: "Título de la portada (ej. 'Control de asistencia para Transportes VIIG')." },
+      subtitulo: { type: "string" as const, description: "Bajada de una línea para la portada (opcional)." },
       empresa: { type: "string" as const },
       preparadaPara: { type: "string" as const, description: "Nombre de la persona que la recibirá." },
       resumen: { type: "string" as const, description: "Párrafo ejecutivo: el problema del cliente y qué proponemos. 3-5 frases." },
@@ -278,6 +358,10 @@ export async function chatVickyPropuestas(params: {
           dealId,
           actualizadaAt: new Date().toISOString(),
           actualizadaPor: quien || undefined,
+          // N.º estable de 6 dígitos (derivado del deal) y versión que sube
+          // con cada regeneración — portada y control de vigencia del skill.
+          numero: previa?.numero || String((Number(dealId.slice(-9)) % 900000) + 100000),
+          version: (previa?.version || 0) + 1,
         }
         await setKvValue(clavePropuesta(dealId), JSON.stringify(guardada))
         propuestaUrl = `?prop_ver=${encodeURIComponent(dealId)}`
