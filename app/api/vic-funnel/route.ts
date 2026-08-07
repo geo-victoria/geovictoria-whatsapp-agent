@@ -3061,10 +3061,73 @@ async function renderLogin(error?: string): Promise<Response> {
   return page(html, error ? 401 : 200)
 }
 
+/** Login por correo + código (piloto /oportunidades2, Lalo 07-ago): paso 1
+ * pide el correo corporativo; paso 2 el código de 6 dígitos que llegó por
+ * email. La identidad queda amarrada a la ficha de usuario de Zoho. */
+function renderLoginCorreo(paso: "correo" | "codigo", correo = "", error?: string): Response {
+  const cuerpo =
+    paso === "correo"
+      ? `<p class="sub">Ingresa tu correo corporativo y te enviaremos un código de acceso.</p>
+    ${error ? `<p class="err">${esc(error)}</p>` : ""}
+    <input type="email" name="correo" placeholder="tu.correo@geovictoria.com" value="${esc(correo)}" autofocus required autocomplete="email">
+    <button type="submit" formaction="?accion=dash_pedir_codigo">Enviarme el código</button>`
+      : `<p class="sub">Te enviamos un código de 6 dígitos a <b>${esc(correo)}</b> (revisa spam si no llega). Vence en 10 minutos.</p>
+    ${error ? `<p class="err">${esc(error)}</p>` : ""}
+    <input type="hidden" name="correo" value="${esc(correo)}">
+    <input type="text" name="codigo" placeholder="123456" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autofocus required autocomplete="one-time-code" style="text-align:center;font-size:22px;letter-spacing:6px">
+    <button type="submit" formaction="?accion=dash_entrar">Entrar</button>
+    <p style="margin:14px 0 0"><button type="submit" formaction="?accion=dash_pedir_codigo" style="background:none;border:none;color:#00aff2;font-size:13px;cursor:pointer;width:auto;padding:0">Reenviar código</button></p>`
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Gestión de oportunidades — Vicky</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:36px 32px;width:min(92vw,380px);text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06)}
+  .card img{height:34px;margin-bottom:18px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:22px;margin:0 0 6px;color:#4e4e4e}
+  p.sub{color:#6b7280;font-size:13px;margin:0 0 20px}
+  input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #d1d5db;border-radius:10px;font-family:${GV_BODY_FONT};font-size:15px;margin-bottom:12px;outline-color:#00aff2;background:#fff;color:#4e4e4e}
+  button{width:100%;padding:12px;border:0;border-radius:10px;background:#ffbb00;color:#fff;font-family:${GV_TITLE_FONT};font-weight:700;font-size:15px;cursor:pointer}
+  button:hover{filter:brightness(.96)}
+  .err{color:#b91c1c;font-size:13px;margin:0 0 12px}
+</style></head><body>
+  <form class="card" method="POST">
+    <img src="/gv/logo-full-color.svg" alt="GeoVictoria">
+    <h1>Gestión de oportunidades</h1>
+    ${cuerpo}
+  </form>
+</body></html>`
+  return page(html, error ? 401 : 200)
+}
+
 export async function POST(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
   const key = (searchParams.get("key") || "").trim()
   const accionPre = (searchParams.get("accion") || "").trim()
+  // ── Login por correo + código (piloto /oportunidades2, Lalo 07-ago) ──────
+  if (accionPre === "dash_pedir_codigo") {
+    const form = new URLSearchParams(await req.text().catch(() => ""))
+    const correo = (form.get("correo") || "").trim().toLowerCase().slice(0, 120)
+    const { pedirCodigoDash } = await import("@/lib/dash-login-correo")
+    const r = await pedirCodigoDash(correo)
+    if (!r.ok) return renderLoginCorreo("correo", correo, r.error)
+    return renderLoginCorreo("codigo", correo)
+  }
+  if (accionPre === "dash_entrar") {
+    const form = new URLSearchParams(await req.text().catch(() => ""))
+    const correo = (form.get("correo") || "").trim().toLowerCase().slice(0, 120)
+    const codigo = (form.get("codigo") || "").trim().slice(0, 10)
+    const { verificarCodigoDash } = await import("@/lib/dash-login-correo")
+    const r = await verificarCodigoDash(correo, codigo)
+    if (!r.ok) return renderLoginCorreo("codigo", correo, r.error)
+    const h = new Headers({ "content-type": "text/html; charset=utf-8" })
+    h.append("set-cookie", `vic_auth=${authToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
+    h.append("set-cookie", `vic_quien=${encodeURIComponent(r.quien)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
+    return new Response(
+      `<!doctype html><meta charset="utf-8"><script>location.href = location.pathname</script>`,
+      { status: 200, headers: h },
+    )
+  }
   if (accionPre === "login") {
     const body = await req.text().catch(() => "")
     const form = new URLSearchParams(body)
@@ -3350,6 +3413,9 @@ export async function GET(req: Request): Promise<Response> {
   const sesionHumana = cookieDe(req, "vic_auth") === authToken() && Boolean(quienCookie)
   if (key !== FUNNEL_KEY) {
     if (sesionHumana) key = FUNNEL_KEY
+    // Piloto /oportunidades2 (Lalo 07-ago): el proxy trae ?portal=correo y el
+    // login es por correo corporativo + código, sin clave compartida.
+    else if (searchParams.get("portal") === "correo") return renderLoginCorreo("correo")
     else return renderLogin()
   }
   // LA COOKIE MANDA SIEMPRE (fuga 07-ago): los links internos llevaban la
