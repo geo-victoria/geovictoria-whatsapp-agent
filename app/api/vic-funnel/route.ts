@@ -2119,7 +2119,7 @@ async function renderVickyCotizaciones(contact: string, key: string): Promise<Re
   .chipErr{background:#fdecea;color:#8a1f11;border-color:#f5c6c0}
   .fila{display:flex;gap:8px;margin-top:10px}
   #msg{flex:1;padding:10px 12px;border:1px solid #d0d5db;border-radius:10px;font-size:14px;font-family:inherit;resize:none}
-  #btnSend{background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:0 20px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer}
+  #btnSend{background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:0 16px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap}
   #btnSend:disabled{opacity:.5;cursor:default}
   a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
   img.logo{height:26px;vertical-align:middle;margin-right:10px}
@@ -2135,7 +2135,7 @@ async function renderVickyCotizaciones(contact: string, key: string): Promise<Re
       </div>
       <div class="fila">
         <textarea id="msg" rows="2" placeholder="Ej: súbela a 25 trabajadores y agrégale un segundo reloj en arriendo…"></textarea>
-        <button id="btnSend">Enviar</button>
+        <button id="btnSend" title="Le pide la modificación a Vicky Cotizaciones — al cliente NO le llega nada con este botón">Haz modificación</button>
       </div>
     </div>
     <div id="panelCot" class="card">${panelCotizacionHtml(est)}</div>
