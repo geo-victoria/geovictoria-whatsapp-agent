@@ -2689,7 +2689,7 @@ async function renderVickyCotizacionesCrear(dealId: string, key: string): Promis
 </style></head><body><div class="wrap">
   <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&cotnueva=1">← Elegir otra oportunidad</a></p>
   <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones — nueva cotización</h1>
-  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). Cuéntale al agente qué necesita la cotización y la emite al tiro; después te lleva al editor para ajustes o envío.</div>
+  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). Cuéntale al agente qué necesita la cotización y la emite de inmediato; después te lleva al editor para ajustes o envío.</div>
   <div class="cols">
     <div class="chatCol card">
       <div id="chatBox">
