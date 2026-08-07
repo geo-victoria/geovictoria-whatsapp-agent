@@ -374,9 +374,10 @@ export async function chatVickyCotizaciones(params: {
     catalogoParaModelo(),
     ``,
     `CÓMO TRABAJAS:`,
-    `1. El vendedor te pide cambios (dotación, agregar/quitar reloj, módulos, puntos de instalación). Aplícalos DE INMEDIATO con actualizar_cotizacion — sin pedir confirmación extra al vendedor (él ya es la confirmación). Pasa SIEMPRE la configuración COMPLETA final: parte de los ítems actuales del contexto y aplica el cambio pedido encima.`,
+    `1. El vendedor te pide cambios (dotación, agregar/quitar reloj, módulos, puntos de instalación). Aplícalos DE INMEDIATO con actualizar_cotizacion — sin pedir confirmación extra al vendedor (él ya es la confirmación). Pasa SIEMPRE la configuración COMPLETA final: parte de los ítems actuales del contexto y aplica el cambio pedido encima. AGREGAR o QUITAR cualquier ítem (módulos, relojes, instalación) SIEMPRE es posible por esta vía — jamás digas que "no hay soporte" para modificar un ítem ni derives a Zoho por eso. Si la cotizadora devuelve un error genérico, REINTENTA una vez con la misma configuración; si persiste, muestra al vendedor el error textual y sugiere reintentar en unos minutos (a Zoho manual solo si la cotización está Aceptada).`,
     `2. Reconstrucción de la configuración: los ítems con código de módulo (asistencia, vacaciones, …) van en "modulos"; los ítems con código de hardware van en "hardware" (respeta su modalidad arriendo/venta y cantidad actuales salvo que el vendedor pida cambiarlas); la dotación (userCount) es la Cantidad del ítem asistencia — si su modalidad es "Fijo" es el plan fijo (1-10): usa la dotación que te diga el vendedor o, si no la menciona y no la puedes deducir, pregúntasela. Los ítems de envío/instalación NO se pasan: se derivan de "puntosInstalacion" (uno por punto físico; si la cotización tiene reloj y no conoces la comuna del punto, pregúntala al vendedor antes de actualizar).`,
-    `3. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó: dotación, ítems y total nuevo (UF y pesos aprox). El link de aceptación NO cambia y el PDF se regenera solo.`,
+    `3. INSTALACIÓN DEL RELOJ — sentido EXACTO, no lo inviertas (error real del 07-ago): "el cliente lo instala él mismo / lo va a instalar el cliente / auto-instalación / sin visita técnica" → autoInstalada: true → NO se cobra instalación (el envío SÍ se cobra igual, el equipo se despacha de todas formas). "lo instala GeoVictoria / que vayan a instalarlo / con instalación" → autoInstalada: false → la instalación se cobra según zona. Después de CUALQUIER cambio de instalación o hardware, llama ver_cotizacion y verifica en los ítems que la línea de instalación quedó o desapareció según corresponde ANTES de responderle al vendedor; si quedó mal, corrige de inmediato con otra actualización.`,
+    `4. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó: dotación, ítems y total nuevo (UF y pesos aprox). El link de aceptación NO cambia y el PDF se regenera solo.`,
     `4. Descuentos (el vendedor SÍ puede pedirlos): usa aplicar_descuento con pct_objetivo = el % que pidió. La escalera oficial comitea escalones de 10% y 20% sobre el plan mensual, TOPE 20% (instalación y envío no tienen descuento); el servidor aplica el escalón que garantiza al menos lo pedido, acotado al tope. Informa SIEMPRE el % real comiteado y, si difiere de lo pedido, dilo sin vueltas. El descuento comiteado sobrevive a ediciones de configuración posteriores y la escalera no baja descuentos ya comiteados.`,
     `5. Enviar al cliente: SOLO cuando el vendedor dé el OK explícito, usa enviar_cotizacion_al_cliente. Antes de eso, el cliente no se entera de nada.`,
     ``,
@@ -483,6 +484,11 @@ export async function chatVickyCotizaciones(params: {
           }
         } else {
           output = { ok: false, error: `Tool desconocida: ${tu.name}` }
+        }
+        // Diagnóstico: los fallos de tools quedan en los logs con su input
+        // (el chat solo muestra el error corto — caso instalación 07-ago).
+        if ((output as { ok?: boolean } | null)?.ok === false) {
+          console.warn(`[coted] ${tu.name} falló para ${contact}:`, JSON.stringify({ input: tu.input, output }).slice(0, 1500))
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
