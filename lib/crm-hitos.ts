@@ -208,6 +208,10 @@ const VICKY_OWNER_ID = "3525045000484500876"
 // 03-ago: heredarlos dejaba el deal fuera de la tómbola).
 const INTERINOS = new Set([
   VICKY_OWNER_ID,
+  "3525045000000200013", // GeoVictoria Admin (info@) — dueño default de los
+  // leads del formulario web: heredarlo dejaba deals con dueño fantasma que
+  // nadie atiende y fuera de Vicky-interina/tómbola (hallazgo Lalo 07-ago:
+  // 4 deals del Admin, 2 nacidos ese mismo día).
   "3525045000000211283", // Eddyluz (ex-interina CL)
   "3525045000203758005", // Gordillo (interino CO)
   "3525045000308323003", // Yahel (interina MX)
