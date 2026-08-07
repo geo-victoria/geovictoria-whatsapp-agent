@@ -18,7 +18,7 @@ import { createHash } from "node:crypto"
 
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
-import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, type EstadoCotizacion } from "@/lib/cotizaciones-editor"
+import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 
 export const dynamic = "force-dynamic"
 // El chat de Vicky Cotizaciones corre un loop de tool use contra la cotizadora
@@ -2553,10 +2553,11 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
   <div class="sub" style="margin-top:4px">Busca una cotización por su número o toma una de las recientes, y edítala conversando con Vicky Cotizaciones: cambia dotación, relojes o módulos con los precios oficiales, o aplica descuento (escalera oficial, tope 20%). El PDF se regenera, el link de aceptación no cambia y al cliente se le envía solo con tu OK.</div>
   <div class="card">
     <h2>🔍 Buscar por número</h2>
-    <form method="GET" style="display:flex;gap:8px;flex-wrap:wrap">
+    <form method="GET" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <input type="hidden" name="key" value="${esc(key)}">
       <input type="text" name="buscarcot" placeholder="Ej: COT400" required style="padding:9px 12px;border:1px solid #d0d5db;border-radius:8px;font-size:14px;font-family:inherit;width:220px">
       <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:8px;padding:9px 18px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer">Buscar y abrir</button>
+      <a href="?key=${encodeURIComponent(key)}&cotnueva=1" title="Crear una cotización nueva asignada a una oportunidad de Zoho" style="background:#00aff2;color:#fff;border-radius:8px;padding:9px 18px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;text-decoration:none">➕ Crear cotización</a>
     </form>
   </div>
   <div class="card">
@@ -2565,6 +2566,222 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
   </div>
 </div></body></html>`
   return page(html)
+}
+
+/** Selector de OPORTUNIDAD para crear una cotización (pedido Lalo 07-ago):
+ * lista los deals activos de Zoho con búsqueda en vivo — escribes el nombre y
+ * la lista se acorta; eliges uno y se abre el chat de creación. */
+async function renderSelectorDeal(key: string): Promise<Response> {
+  const deals = (await fetchDealsEquipo().catch(() => [])) as DealEquipo[]
+  const filas = deals
+    .filter((d) => !/congelad|perdido/i.test(String(d.Stage || "")))
+    .sort((a, b) => String(a["Account_Name.Account_Name"] || a.Deal_Name || "").localeCompare(String(b["Account_Name.Account_Name"] || b.Deal_Name || ""), "es"))
+    .map((d) => {
+      const tel = digits(String(d["Contact_Name.Mobile"] || d["Contact_Name.Phone"] || ""))
+      const empresa = String(d["Account_Name.Account_Name"] || "").trim() || String(d.Deal_Name || "").trim() || "(sin nombre)"
+      const dueno = `${d["Owner.first_name"] || ""} ${d["Owner.last_name"] || ""}`.trim() || "—"
+      return `<tr class="filaDeal">
+        <td><b>${esc(empresa)}</b><div class="sub" style="margin:0;font-size:12px">${esc(String(d.Deal_Name || ""))}</div></td>
+        <td><span class="tag">${esc(String(d.Stage || "—"))}</span></td>
+        <td>${esc(dueno)}</td>
+        <td style="white-space:nowrap">${tel ? `+${esc(tel)}` : `<span class="sub">sin teléfono</span>`}</td>
+        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(String(d.id))}">elegir →</a></td>
+      </tr>`
+    })
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Nueva cotización — elegir oportunidad</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:20px;margin:0;color:#4e4e4e}
+  .sub{color:#646464;font-size:13px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  th{color:#6b7280;font-weight:600;font-size:12px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  #buscar{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #d0d5db;border-radius:10px;font-size:15px;font-family:inherit}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>
+  <h1><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:28px;vertical-align:middle;margin-right:10px">Nueva cotización — ¿a qué oportunidad se asigna?</h1>
+  <div class="sub" style="margin-top:4px">La cotización nace amarrada al deal que elijas (misma cuenta, mismo contacto, mismo dueño — sin duplicar registros). Escribe para acortar la lista.</div>
+  <div class="card">
+    <input id="buscar" type="text" placeholder="Busca por empresa, deal, dueño o etapa…" autofocus>
+    <div style="overflow-x:auto;margin-top:12px"><table>
+      <thead><tr><th>Empresa / deal</th><th>Etapa</th><th>Dueño</th><th>Contacto</th><th></th></tr></thead>
+      <tbody id="cuerpoDeals">${filas || ""}</tbody>
+    </table></div>
+    <p class="sub" id="sinResultados" style="display:none;margin:12px 0 0">Ninguna oportunidad calza con la búsqueda.</p>
+    ${filas ? "" : `<p class="sub" style="margin:12px 0 0">No hay oportunidades activas en Zoho.</p>`}
+  </div>
+  <script>
+    (function () {
+      var input = document.getElementById("buscar");
+      var filas = Array.prototype.slice.call(document.querySelectorAll("#cuerpoDeals tr"));
+      var aviso = document.getElementById("sinResultados");
+      input.addEventListener("input", function () {
+        var q = input.value.trim().toLowerCase();
+        var visibles = 0;
+        filas.forEach(function (tr) {
+          var ok = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+          tr.style.display = ok ? "" : "none";
+          if (ok) visibles++;
+        });
+        aviso.style.display = visibles ? "none" : "block";
+      });
+    })();
+  </script>
+</div></body></html>`
+  return page(html)
+}
+
+/** Chat de CREACIÓN de cotización sobre el deal elegido (pedido Lalo 07-ago):
+ * el vendedor entrega los datos mínimos conversando y la formal nace amarrada
+ * al deal; al terminar, redirige al editor de esa cotización. */
+async function renderVickyCotizacionesCrear(dealId: string, key: string): Promise<Response> {
+  const info = await infoDeal(dealId)
+  if (!info) {
+    return paginaAviso(
+      "Oportunidad no encontrada",
+      `<p>No pude leer el deal <b>${esc(dealId)}</b> en Zoho.</p><p><a href="?key=${encodeURIComponent(key)}&cotnueva=1">← Volver a elegir oportunidad</a></p>`,
+    )
+  }
+  const fichaHtml = panelDealHtml(info)
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Nueva cotización — ${esc(info.accountNombre || info.nombre)}</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px 16px 30px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:19px;margin:0 0 2px;color:#4e4e4e}
+  .sub{color:#646464;font-size:12px}
+  .cols{display:flex;gap:16px;align-items:flex-start;margin-top:14px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
+  .lado{width:360px;flex:none;position:sticky;top:12px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  .chatCol{flex:1;min-width:0;display:flex;flex-direction:column}
+  #chatBox{min-height:340px;max-height:60vh;overflow-y:auto;padding:4px 2px}
+  .bub{display:flex;margin:6px 0}
+  .bub>div{max-width:78%;padding:9px 13px;border-radius:12px;font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+  .bubU{justify-content:flex-end}.bubU>div{background:#FFF8E1;border:1px solid #f3dc9a}
+  .bubA>div{background:#ffffff;border:1px solid #e5e7eb}
+  .bubE>div{background:#fdecea;border:1px solid #f5c6c0;color:#8a1f11}
+  .chip{display:inline-block;margin:4px 0;padding:4px 10px;border-radius:99px;font-size:12px;background:#e8f5e9;color:#1b5e20;border:1px solid #c8e6c9}
+  .chipErr{background:#fdecea;color:#8a1f11;border-color:#f5c6c0}
+  .fila{display:flex;gap:8px;margin-top:10px}
+  #msg{flex:1;padding:10px 12px;border:1px solid #d0d5db;border-radius:10px;font-size:14px;font-family:inherit;resize:none}
+  #btnSend{background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:0 16px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap}
+  #btnSend:disabled{opacity:.5;cursor:default}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  img.logo{height:26px;vertical-align:middle;margin-right:10px}
+  @media (max-width:760px){.cols{flex-direction:column}.lado{width:auto;position:static}}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&cotnueva=1">← Elegir otra oportunidad</a></p>
+  <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones — nueva cotización</h1>
+  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). Cuéntale al agente qué necesita la cotización y la emite al tiro; después te lleva al editor para ajustes o envío.</div>
+  <div class="cols">
+    <div class="chatCol card">
+      <div id="chatBox">
+        <div class="bub bubA"><div>Hola 👋 Vamos a crear la cotización para ${esc(info.accountNombre || info.nombre)}. Dime la dotación (cuántos trabajadores), si lleva reloj de marcaje (y en qué comuna se instalaría), y ${info.rut ? "confirmo el RUT de la ficha" : "el RUT de la empresa"}. Con eso la emito de inmediato, amarrada a esta oportunidad.</div></div>
+      </div>
+      <div class="fila">
+        <textarea id="msg" rows="2" placeholder="Ej: 15 trabajadores, solo app, RUT 76.123.456-7…"></textarea>
+        <button id="btnSend" title="Le entrega tu mensaje al agente — al cliente no le llega nada">Enviar mensaje</button>
+      </div>
+    </div>
+    <div class="lado"><div class="card">${fichaHtml}</div></div>
+  </div>
+  <script>
+    (function () {
+      var KEYQ = "?key=${encodeURIComponent(key)}";
+      var DEAL = ${JSON.stringify(dealId)};
+      var HIST = [];
+      var box = document.getElementById("chatBox");
+      var input = document.getElementById("msg");
+      var btn = document.getElementById("btnSend");
+      function burbuja(clase, texto) {
+        var w = document.createElement("div");
+        w.className = "bub " + clase;
+        var d = document.createElement("div");
+        d.textContent = texto;
+        w.appendChild(d);
+        box.appendChild(w);
+        box.scrollTop = box.scrollHeight;
+        return w;
+      }
+      function chip(texto, ok) {
+        var c = document.createElement("div");
+        var s = document.createElement("span");
+        s.className = "chip" + (ok ? "" : " chipErr");
+        s.textContent = (ok ? "🔧 " : "⚠️ ") + texto;
+        c.appendChild(s);
+        box.appendChild(c);
+        box.scrollTop = box.scrollHeight;
+      }
+      async function enviar() {
+        var t = input.value.trim();
+        if (!t || btn.disabled) return;
+        input.value = "";
+        burbuja("bubU", t);
+        var esperando = burbuja("bubA", "Vicky está trabajando…");
+        btn.disabled = true;
+        try {
+          var res = await fetch(KEYQ + "&accion=cotcrear_chat&deal=" + encodeURIComponent(DEAL), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ historial: HIST, mensaje: t }),
+          });
+          var j = null;
+          try { j = await res.json(); } catch (e) {}
+          esperando.remove();
+          if (!res.ok || !j || !j.ok) {
+            burbuja("bubE", (j && j.error) ? j.error : "Error " + res.status + " — intenta de nuevo.");
+            return;
+          }
+          (j.eventos || []).forEach(function (e) { chip(e.resumen, e.ok); });
+          burbuja("bubA", j.reply);
+          HIST.push({ role: "user", content: t });
+          HIST.push({ role: "assistant", content: j.reply });
+          if (HIST.length > 30) HIST = HIST.slice(-30);
+          if (j.redirigirA) {
+            chip("Abriendo el editor de la cotización nueva…", true);
+            setTimeout(function () { window.location.href = j.redirigirA; }, 1800);
+          }
+        } catch (e2) {
+          esperando.remove();
+          burbuja("bubE", "No se pudo enviar: " + e2);
+        } finally {
+          btn.disabled = false;
+          input.focus();
+        }
+      }
+      btn.addEventListener("click", enviar);
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); enviar(); }
+      });
+      input.focus();
+    })();
+  </script>
+</div></body></html>`
+  return page(html)
+}
+
+/** Ficha de la oportunidad elegida (panel del chat de creación). */
+function panelDealHtml(info: InfoDeal): string {
+  return `<h2 style="margin:0 0 2px;font-size:15px">${esc(info.accountNombre || info.nombre || "Oportunidad")}</h2>
+  <div class="sub" style="margin:0 0 10px"><span class="tag">${esc(info.stage || "etapa ?")}</span></div>
+  <div style="font-size:13px;line-height:1.7">
+    <div><b>Deal:</b> ${esc(info.nombre || "—")}</div>
+    <div><b>Dueño:</b> ${esc(info.ownerNombre || "—")}</div>
+    <div><b>Contacto:</b> ${esc(info.contactoNombre || "—")}</div>
+    <div><b>Teléfono:</b> ${info.telefono ? `+${esc(info.telefono)}` : "sin teléfono (la cotización se emite igual, pero no quedará editable por chat)"}</div>
+    <div><b>Email:</b> ${esc(info.email || "—")}</div>
+    <div><b>RUT ficha:</b> ${esc(info.rut || "no registrado — pídelo al vendedor")}</div>
+  </div>
+  <div style="margin-top:10px;font-size:12px"><a href="${ZOHO_CRM_URL}/tab/Potentials/${esc(info.dealId)}" target="_blank" rel="noopener">🔗 Ver el deal en Zoho</a></div>`
 }
 
 /** Página de aviso/error con branding GeoVictoria (pedido Lalo 04-ago): la
@@ -2866,6 +3083,41 @@ export async function POST(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { "content-type": "application/json" } })
   }
   const accion = accionPre
+  // Creación de cotización sobre un deal (no requiere contact: el teléfono
+  // sale de la ficha del deal en Zoho).
+  if (accion === "cotcrear_chat") {
+    const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
+    if (!dealId) {
+      return new Response(JSON.stringify({ ok: false, error: "deal faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const body = (await req.json().catch(() => null)) as {
+      historial?: Array<{ role?: string; content?: string }>
+      mensaje?: string
+    } | null
+    const mensaje = String(body?.mensaje || "").trim().slice(0, 4000)
+    if (!mensaje) {
+      return new Response(JSON.stringify({ ok: false, error: "mensaje faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const historial = (Array.isArray(body?.historial) ? body.historial : [])
+      .map((m) => ({
+        role: m?.role === "assistant" ? ("assistant" as const) : ("user" as const),
+        content: String(m?.content || ""),
+      }))
+      .filter((m) => m.content.trim())
+      .slice(-30)
+    try {
+      const r = await chatVickyCotizacionesCrear({ dealId, historial, mensaje })
+      const redirigirA = r.creado
+        ? `?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(r.creado.contact)}&cot=${encodeURIComponent(r.creado.quoteId)}`
+        : undefined
+      return new Response(JSON.stringify({ ok: true, reply: r.reply, eventos: r.eventos, redirigirA }), {
+        headers: { "content-type": "application/json" },
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
   const contact = digits(searchParams.get("contact") || "")
   if (!contact) {
     return new Response(JSON.stringify({ ok: false, error: "contact faltante" }), { status: 400, headers: { "content-type": "application/json" } })
@@ -3121,6 +3373,12 @@ export async function GET(req: Request): Promise<Response> {
   // Pestaña "Editor de cotizaciones" (pedido Lalo 07-ago): buscador por número
   // + cotizaciones recientes. Rama temprana: no necesita el pipeline pesado.
   if (searchParams.get("vista") === "editor") return renderEditorCotizaciones(key)
+  // Crear cotización (pedido Lalo 07-ago): primero se elige a qué oportunidad
+  // de Zoho se asigna (lista de deals activos con búsqueda), y luego el chat
+  // de creación emite la formal amarrada a ese deal.
+  if (searchParams.get("cotnueva")) return renderSelectorDeal(key)
+  const cotcrear = (searchParams.get("cotcrear") || "").replace(/\D/g, "").trim()
+  if (cotcrear) return renderVickyCotizacionesCrear(cotcrear, key)
 
   let rows: Row[]
   let origen: {

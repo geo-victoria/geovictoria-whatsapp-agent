@@ -26,6 +26,7 @@ import {
 } from "@/lib/tools/actualizar-cotizacion"
 import { enviarCotizacionWhatsapp } from "@/lib/tools/enviar-cotizacion-whatsapp"
 import { aplicarSiguienteDescuento } from "@/lib/tools/aplicar-siguiente-descuento"
+import { generarLinkCotizadora } from "@/lib/tools/generar-link-cotizadora"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import {
   getModulosDisponiblesParaVicky,
@@ -158,6 +159,273 @@ export async function enviarCotizacionAlClienteDirecto(
     "Te comparto la cotización actualizada en PDF 📄 El link de aceptación es el mismo de siempre — ahí ya aparece todo al día para revisarla y aceptarla. Cualquier duda, aquí estoy.",
   ).catch(() => {})
   return { ok: true }
+}
+
+// ── MODO CREACIÓN (pedido Lalo 07-ago): cotización nueva sobre un deal ──────
+
+export type InfoDeal = {
+  dealId: string
+  nombre: string
+  stage: string
+  ownerId: string
+  ownerNombre: string
+  accountId: string
+  accountNombre: string
+  contactId: string
+  contactoNombre: string
+  /** Teléfono del contacto en dígitos (con 56 normalizado); "" si no hay. */
+  telefono: string
+  email: string
+  rut: string
+}
+
+/** Ficha del deal elegido + su cuenta y contacto (teléfono/email/RUT), para
+ * sembrar la creación sin duplicar registros. */
+export async function infoDeal(dealId: string): Promise<InfoDeal | null> {
+  try {
+    const token = await getZohoAccessToken()
+    const h = { Authorization: `Zoho-oauthtoken ${token}` }
+    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}`, { headers: h, cache: "no-store" })
+    const rec = ((await r.json().catch(() => null)) as { data?: Array<Record<string, unknown>> } | null)?.data?.[0]
+    if (!rec) return null
+    const look = (v: unknown): { id: string; name: string } => {
+      const o = (v || {}) as { id?: string; name?: string }
+      return { id: String(o.id || ""), name: String(o.name || "") }
+    }
+    const cuenta = look(rec.Account_Name)
+    const contacto = look(rec.Contact_Name)
+    const owner = look(rec.Owner)
+    let telefono = ""
+    let email = ""
+    if (contacto.id) {
+      const rc = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Contacts/${contacto.id}?fields=Phone,Mobile,Email`, {
+        headers: h,
+        cache: "no-store",
+      })
+      const c = ((await rc.json().catch(() => null)) as {
+        data?: Array<{ Phone?: string; Mobile?: string; Email?: string }>
+      } | null)?.data?.[0]
+      telefono = String(c?.Mobile || c?.Phone || "").replace(/\D/g, "")
+      if (telefono.length === 9 && telefono.startsWith("9")) telefono = `56${telefono}`
+      email = String(c?.Email || "")
+    }
+    // RUT de la cuenta: el nombre exacto del campo varía entre layouts — se
+    // toma la primera clave que parezca RUT con valor string no vacío.
+    let rut = ""
+    if (cuenta.id) {
+      const ra = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Accounts/${cuenta.id}`, { headers: h, cache: "no-store" })
+      const a = ((await ra.json().catch(() => null)) as { data?: Array<Record<string, unknown>> } | null)?.data?.[0]
+      if (a) {
+        for (const k of Object.keys(a)) {
+          if (/rut/i.test(k) && typeof a[k] === "string" && String(a[k]).trim()) {
+            rut = String(a[k]).trim()
+            break
+          }
+        }
+      }
+    }
+    return {
+      dealId,
+      nombre: String(rec.Deal_Name || ""),
+      stage: String(rec.Stage || ""),
+      ownerId: owner.id,
+      ownerNombre: owner.name,
+      accountId: cuenta.id,
+      accountNombre: cuenta.name,
+      contactId: contacto.id,
+      contactoNombre: contacto.name,
+      telefono,
+      email,
+      rut,
+    }
+  } catch {
+    return null
+  }
+}
+
+const crearCotizacionSchema = {
+  name: "crear_cotizacion",
+  description:
+    "Emite la cotización formal NUEVA amarrada a la oportunidad (deal) del contexto: reusa su cuenta y su contacto en Zoho (cero duplicados), el dueño queda el del deal, se genera el PDF y el link de aceptación, y si el contacto tiene correo se le envía automáticamente. Pasa la configuración COMPLETA. Llámala apenas tengas los datos mínimos: RUT válido, dotación (1-50) y módulos (asistencia siempre); hardware y puntos de instalación solo si el vendedor quiere reloj.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      empresa: { type: "string" as const, description: "Razón social. Omítela para usar el nombre de la cuenta del deal." },
+      contacto: { type: "string" as const, description: "Nombre de la persona de contacto. Omítelo para usar el del deal." },
+      contactoEmail: { type: "string" as const, description: "Email del contacto. Omítelo para usar el de la ficha." },
+      rutEmpresa: { type: "string" as const, description: "RUT de la empresa (con dígito verificador). Omítelo solo si la ficha ya trae RUT." },
+      userCount: { type: "integer" as const, minimum: 1, maximum: 50, description: "Dotación (1-50)." },
+      modulos: { type: "array" as const, items: { type: "string" as const }, minItems: 1, description: "IDs de módulos. Siempre incluir 'asistencia'." },
+      hardware: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            id: { type: "string" as const },
+            cantidad: { type: "integer" as const, minimum: 1 },
+            modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+          },
+          required: ["id"],
+        },
+      },
+      puntosInstalacion: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            ubicacion: { type: "string" as const },
+            autoInstalada: { type: "boolean" as const },
+          },
+          required: ["ubicacion"],
+        },
+        description: "Obligatorio si hay hardware: un punto por lugar físico (comuna/ciudad).",
+      },
+      direccionEmpresa: { type: "string" as const },
+      comunaEmpresa: { type: "string" as const },
+      regionEmpresa: { type: "string" as const },
+    },
+    required: ["userCount", "modulos"],
+  },
+}
+
+export type ChatCrearResultado = {
+  reply: string
+  eventos: EventoCoted[]
+  creado?: { quoteId: string; contact: string }
+}
+
+/** Un turno del chat de CREACIÓN de cotización sobre un deal elegido. */
+export async function chatVickyCotizacionesCrear(params: {
+  dealId: string
+  historial: Array<{ role: "user" | "assistant"; content: string }>
+  mensaje: string
+}): Promise<ChatCrearResultado> {
+  const { dealId, historial, mensaje } = params
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY no configurada")
+  const info = await infoDeal(dealId)
+  if (!info) throw new Error("No se pudo leer la oportunidad en Zoho.")
+
+  const system = [
+    `Eres "Vicky Cotizaciones" en modo CREACIÓN: un VENDEDOR de GeoVictoria va a emitir una cotización formal nueva sobre una oportunidad ya existente en Zoho. Hablas con el vendedor, no con el cliente: tono directo de colega, español de Chile.`,
+    ``,
+    `OPORTUNIDAD ELEGIDA (deal Zoho ${info.dealId}):`,
+    `- Deal: ${info.nombre || "(sin nombre)"} · etapa: ${info.stage || "?"} · dueño: ${info.ownerNombre || "?"}`,
+    `- Cuenta: ${info.accountNombre || "(sin cuenta)"}${info.rut ? ` · RUT ficha: ${info.rut}` : " · RUT: no está en la ficha"}`,
+    `- Contacto: ${info.contactoNombre || "(sin contacto)"}${info.telefono ? ` · +${info.telefono}` : " · SIN teléfono"}${info.email ? ` · ${info.email}` : " · sin email"}`,
+    ``,
+    catalogoParaModelo(),
+    ``,
+    `CÓMO TRABAJAS:`,
+    `1. EL VENDEDOR MANDA. Reúne SOLO lo mínimo que falte para emitir: RUT válido (si la ficha no trae), dotación (1-50) y módulos (asistencia es la base; agrega otros solo si los pide); reloj y puntos de instalación (comuna + quién instala) solo si quiere hardware. Pide todo lo que falte JUNTO, en un solo mensaje corto.`,
+    `2. Con los datos listos llama crear_cotizacion de inmediato — sin confirmaciones extra. La cotización nace amarrada a ESTE deal, su cuenta y su contacto (cero duplicados) y con el dueño del deal.`,
+    `3. Tras crear, informa número interno/total/links en 2-3 líneas y avisa que se abrirá el editor de esa cotización para ajustes o envío. Si falló, muestra el error textual y reintenta una vez si fue un error genérico.`,
+    ``,
+    `LÍMITES: solo línea Chile (UF), 1-50 trabajadores, precios del catálogo (los ajustes finos se hacen después en el editor). No inventes RUT ni datos: lo que falte se pregunta.`,
+  ].join("\n")
+
+  const client = new Anthropic({ apiKey })
+  const model = (process.env.ANTHROPIC_COTED_MODEL || process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || DEFAULT_MODEL).trim()
+  const messages: Anthropic.Messages.MessageParam[] = [
+    ...historial
+      .filter((m) => (m.role === "user" || m.role === "assistant") && String(m.content || "").trim())
+      .slice(-30)
+      .map((m) => ({ role: m.role, content: String(m.content).slice(0, 6000) })),
+    { role: "user" as const, content: mensaje },
+  ]
+
+  const eventos: EventoCoted[] = []
+  let creado: ChatCrearResultado["creado"]
+  let reply = ""
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const res = await client.messages.create({
+      model,
+      max_tokens: MAX_TOKENS,
+      system,
+      messages,
+      tools: [crearCotizacionSchema] as unknown as Anthropic.Messages.Tool[],
+    })
+    const textos = res.content.filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
+    if (textos.length) reply = textos.map((b) => b.text).join("\n").trim()
+    const toolUses = res.content.filter((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use")
+    if (!toolUses.length || res.stop_reason !== "tool_use") break
+    messages.push({ role: "assistant", content: res.content })
+    const results: Anthropic.Messages.ToolResultBlockParam[] = []
+    for (const tu of toolUses) {
+      let output: unknown
+      try {
+        const input = tu.input as {
+          empresa?: string
+          contacto?: string
+          contactoEmail?: string
+          rutEmpresa?: string
+          userCount: number
+          modulos: string[]
+          hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+          puntosInstalacion?: Array<{ ubicacion: string; autoInstalada?: boolean }>
+          direccionEmpresa?: string
+          comunaEmpresa?: string
+          regionEmpresa?: string
+        }
+        const r = await generarLinkCotizadora({
+          empresa: (input.empresa || info.accountNombre || info.nombre || "").trim(),
+          contacto: (input.contacto || info.contactoNombre || "Contacto").trim(),
+          contactoEmail: (input.contactoEmail || info.email || "").trim() || undefined,
+          contactoTelefono: info.telefono,
+          rutEmpresa: (input.rutEmpresa || info.rut || "").trim(),
+          direccionEmpresa: input.direccionEmpresa,
+          comunaEmpresa: input.comunaEmpresa,
+          regionEmpresa: input.regionEmpresa,
+          userCount: input.userCount,
+          sectorEmpresa: "",
+          modulos: input.modulos,
+          hardware: input.hardware,
+          puntosInstalacion: (input.puntosInstalacion || []).map((p) => ({
+            ubicacion: p.ubicacion,
+            autoInstalada: p.autoInstalada === true,
+          })),
+          // Amarre a la oportunidad elegida: mismo deal, cuenta y contacto.
+          _draftDealId: info.dealId,
+          _draftAccountId: info.accountId || undefined,
+          _draftContactId: info.contactId || undefined,
+          _ownerOverrideId: info.ownerId || undefined,
+        })
+        output = r
+        if (r.ok) {
+          eventos.push({
+            tool: tu.name,
+            ok: true,
+            resumen: `Cotización creada · total UF ${r.totalUF} (~$${r.totalCLP.toLocaleString("es-CL")}) · asociada al deal`,
+          })
+          if (info.telefono) {
+            await setQuotePointer(info.telefono, {
+              quoteId: r.quoteId,
+              dealId: r.dealId || info.dealId,
+              acceptanceUrl: r.acceptanceUrl,
+              pdfUrl: r.pdfUrl,
+              totalClp: r.totalCLP,
+              totalUf: r.totalUF,
+              rut: (tu.input as { rutEmpresa?: string }).rutEmpresa || info.rut || undefined,
+              empresa: (tu.input as { empresa?: string }).empresa || info.accountNombre || undefined,
+            }).catch(() => {})
+            creado = { quoteId: r.quoteId, contact: info.telefono }
+          }
+        } else {
+          eventos.push({ tool: tu.name, ok: false, resumen: `No se pudo crear: ${r.error.slice(0, 160)}` })
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        output = { ok: false, error: msg.slice(0, 300) }
+        eventos.push({ tool: tu.name, ok: false, resumen: `Error: ${msg.slice(0, 160)}` })
+      }
+      if ((output as { ok?: boolean } | null)?.ok === false) {
+        console.warn(`[coted-crear] ${tu.name} falló para deal ${dealId}:`, JSON.stringify({ input: tu.input, output }).slice(0, 1500))
+      }
+      results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(output).slice(0, 8000) })
+    }
+    messages.push({ role: "user", content: results })
+  }
+  return { reply: reply || "No tengo respuesta — intenta de nuevo.", eventos, creado }
 }
 
 export type CotizacionEncontrada = {
