@@ -30,7 +30,7 @@ const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
 // Clave de acceso humano al dashboard (pedido Lalo 04-ago). El ?key= sigue
 // vigente para consumidores máquina (cron del resumen, links del correo).
-const DASH_CLAVE = (process.env.VIC_DASH_CLAVE || "GeoVictoria2026!").trim()
+const DASH_CLAVE = (process.env.VIC_DASH_CLAVE || "Vicky").trim()
 const authToken = () => createHash("sha256").update(`${DASH_CLAVE}|${FUNNEL_KEY}|vic-dash`).digest("hex")
 const cookieDe = (req: Request, nombre: string): string => {
   const jar = req.headers.get("cookie") || ""
