@@ -795,6 +795,10 @@ type FilaListado = {
   fechaIso: string
   estadoZoho: string
   propietario: string
+  /** TODOS los dueños asociados (deal + cotización + lead): el filtro por
+   * identidad matchea cualquiera — que el deal sea de A y la cotización de B
+   * no le esconde la oportunidad a ninguno de los dos (borde Lalo 07-ago). */
+  propietarios?: string[]
   /** Inicio de la conversación (o creación del lead si nunca conversó). */
   primerContactoIso: string
   /** id de la conversación para el link al chat (vista ?conv= del embudo). */
@@ -1194,7 +1198,20 @@ function construirListadoComercial(params: {
       estado,
       fechaIso,
       estadoZoho: dealDeQuote?.stage || String(q["Deal_Asociado.Stage"] || "").trim() || "—",
-      propietario: dealDeQuote?.owner || `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—",
+      propietario: (() => {
+        const dueDeal = (dealDeQuote?.owner || "").trim()
+        const dueQuote = `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim()
+        // El deal manda, PERO si su dueño es la interina (Vicky) y la
+        // cotización tiene dueño humano real, se muestra el humano.
+        if (dueDeal && !/vicky geovictoria|geovictoria admin/i.test(dueDeal)) return dueDeal
+        if (dueQuote && !/vicky geovictoria|geovictoria admin/i.test(dueQuote)) return dueQuote
+        return dueDeal || dueQuote || "—"
+      })(),
+      propietarios: [
+        (dealDeQuote?.owner || "").trim(),
+        `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim(),
+        (tel && leadPorTel.get(tel) ? propietarioDeLead(leadPorTel.get(tel)!) : ""),
+      ].filter(Boolean),
       primerContactoIso: String(conv?.started_at || ""),
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback(estado, ana?.motivo_no_cierre || null),
@@ -1235,6 +1252,7 @@ function construirListadoComercial(params: {
       fechaIso: at,
       estadoZoho: deal?.stage || String(lead?.Lead_Status || "").trim() || "—",
       propietario: deal?.owner || (lead ? propietarioDeLead(lead) : "—"),
+      propietarios: [(deal?.owner || "").trim(), lead ? propietarioDeLead(lead) : ""].filter(Boolean),
       primerContactoIso: String(conv?.started_at || lead?.Created_Time || ""),
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback("Preform enviado", ana?.motivo_no_cierre || null),
@@ -1269,6 +1287,7 @@ function construirListadoComercial(params: {
       fechaIso: respondio ? String(conv?.last_user_at || "") : String(l.Created_Time || ""),
       estadoZoho: deal?.stage || String(l.Lead_Status || "").trim() || "—",
       propietario: deal?.owner || propietarioDeLead(l),
+      propietarios: [(deal?.owner || "").trim(), propietarioDeLead(l)].filter(Boolean),
       primerContactoIso: String(conv?.started_at || l.Created_Time || ""),
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || accionableFallback(estadoLead, ana?.motivo_no_cierre || null),
@@ -3755,7 +3774,9 @@ export async function GET(req: Request): Promise<Response> {
       void kvSet("dash_propietarios", JSON.stringify(propietariosAll), new Date(Date.now() + 7 * 24 * 3600e3).toISOString())
     }
     // Contactos que pasan el filtro Estado/Propietario (null = sin filtro).
-    const coincide = (f: FilaListado) => (!estadoF.length || estadoF.includes(f.estado)) && (!propF.length || propF.includes(f.propietario))
+    const coincide = (f: FilaListado) =>
+      (!estadoF.length || estadoF.includes(f.estado)) &&
+      (!propF.length || propF.includes(f.propietario) || (f.propietarios || []).some((p) => propF.includes(p)))
     const permitidos: Set<string> | null =
       estadoF.length || propF.length
         ? new Set(filasListado.filter(coincide).map((f) => digits(f.contacto)).filter(Boolean))
