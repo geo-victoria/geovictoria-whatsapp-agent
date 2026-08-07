@@ -3332,7 +3332,20 @@ export async function POST(req: Request): Promise<Response> {
   if (accionPre === "dash_pedir_codigo") {
     const form = new URLSearchParams(await req.text().catch(() => ""))
     const correo = (form.get("correo") || "").trim().toLowerCase().slice(0, 120)
-    const { pedirCodigoDash } = await import("@/lib/dash-login-correo")
+    const { pedirCodigoDash, entradaSinCodigo } = await import("@/lib/dash-login-correo")
+    // Excepción operativa (Lalo 07-ago): casillas a las que Zoho no puede
+    // mandarles el código (lista de rebotados) entran directo con su
+    // identidad — sesión normal, sin verificación.
+    const directo = entradaSinCodigo(correo)
+    if (directo) {
+      const h = new Headers({ "content-type": "text/html; charset=utf-8" })
+      h.append("set-cookie", `vic_auth=${authToken()}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
+      h.append("set-cookie", `vic_quien=${encodeURIComponent(directo)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
+      return new Response(
+        `<!doctype html><meta charset="utf-8"><script>location.href = location.pathname</script>`,
+        { status: 200, headers: h },
+      )
+    }
     const r = await pedirCodigoDash(correo)
     if (!r.ok) return renderLoginCorreo("correo", correo, r.error)
     return renderLoginCorreo("codigo", correo)

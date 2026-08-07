@@ -31,6 +31,26 @@ const ADMINS = (process.env.VIC_DASH_ADMINS || "egomez@geovictoria.com,rlewit@ge
   .map((s) => s.trim())
   .filter(Boolean)
 
+// ENTRADA DIRECTA SIN CÓDIGO (excepción operativa, Lalo 07-ago): correos a
+// los que Zoho no puede enviarles el código porque están en su lista de
+// REBOTADOS (caso pdiaz@: un bounce '5.1.8 UTF-8' de mayo quedó cacheado y
+// Zoho rechaza todo envío a esa casilla). Entran con su identidad al tiro,
+// sin verificación — sacar de esta lista apenas se limpie el rebote en Zoho
+// (Configuración → Correo → direcciones rebotadas). Formato "email:Nombre".
+const SIN_CODIGO = new Map(
+  (process.env.VIC_DASH_SIN_CODIGO || "pdiaz@geovictoria.com:Paola Diaz")
+    .split(",")
+    .map((par) => {
+      const [email, nombre] = par.split(":").map((x) => (x || "").trim())
+      return [email.toLowerCase(), nombre || email] as [string, string]
+    })
+    .filter(([e]) => e),
+)
+
+export function entradaSinCodigo(email: string): string | null {
+  return SIN_CODIGO.get(norm(email)) || null
+}
+
 const TTL_MIN = 10
 const MAX_INTENTOS = 5
 
