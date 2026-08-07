@@ -2136,7 +2136,7 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
   <div class="cols">
     <div class="chatCol card">
       <div id="chatBox">
-        <div class="bub bubA"><div>Hola, soy Vicky Cotizaciones 👋 Dime qué cambio necesita la cotización de ${esc(empresa)} —dotación, relojes, módulos o puntos de instalación— y lo aplico de inmediato. Cuando quede lista y me des el OK, se la envío al cliente por WhatsApp con el PDF nuevo.</div></div>
+        <div class="bub bubA"><div>Hola, soy Vicky Cotizaciones 👋 Dime qué cambio necesita la cotización de ${esc(empresa)} —dotación, relojes, módulos, puntos de instalación o descuento (escalera oficial, tope 20%)— y lo aplico de inmediato. Cuando quede lista y me des el OK, se la envío al cliente por WhatsApp con el PDF nuevo.</div></div>
       </div>
       <div class="fila">
         <textarea id="msg" rows="2" placeholder="Ej: súbela a 25 trabajadores y agrégale un segundo reloj en arriendo…"></textarea>
@@ -2306,7 +2306,7 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
       <a href="?key=${encodeURIComponent(key)}&vista=analisis">📊 Análisis y KPIs</a>
     </div>
   </div>
-  <div class="sub" style="margin-top:4px">Busca una cotización por su número o toma una de las recientes, y edítala conversando con Vicky Cotizaciones: cambia dotación, relojes o módulos con los precios oficiales. El PDF se regenera, el link de aceptación no cambia y al cliente se le envía solo con tu OK.</div>
+  <div class="sub" style="margin-top:4px">Busca una cotización por su número o toma una de las recientes, y edítala conversando con Vicky Cotizaciones: cambia dotación, relojes o módulos con los precios oficiales, o aplica descuento (escalera oficial, tope 20%). El PDF se regenera, el link de aceptación no cambia y al cliente se le envía solo con tu OK.</div>
   <div class="card">
     <h2>🔍 Buscar por número</h2>
     <form method="GET" style="display:flex;gap:8px;flex-wrap:wrap">

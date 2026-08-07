@@ -17,7 +17,7 @@
 
 import Anthropic from "@anthropic-ai/sdk"
 
-import { getQuotePointers, type QuotePointer } from "@/lib/supabase-persistence-v3"
+import { getQuotePointers, setQuotePointer, type QuotePointer } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import {
   actualizarCotizacion,
@@ -25,6 +25,7 @@ import {
   type ActualizarCotizacionInput,
 } from "@/lib/tools/actualizar-cotizacion"
 import { enviarCotizacionWhatsapp } from "@/lib/tools/enviar-cotizacion-whatsapp"
+import { aplicarSiguienteDescuento } from "@/lib/tools/aplicar-siguiente-descuento"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import {
   getModulosDisponiblesParaVicky,
@@ -278,6 +279,24 @@ const verCotizacionSchema = {
   input_schema: { type: "object" as const, properties: {} },
 }
 
+const aplicarDescuentoSchema = {
+  name: "aplicar_descuento",
+  description:
+    "Aplica o avanza el DESCUENTO de la cotización con la escalera oficial de la cotizadora: escalones de 10% y 20% sobre el plan mensual, TOPE 20% (la instalación y el envío no tienen descuento). Pasa pct_objetivo = el % que pidió el vendedor: el servidor comitea el escalón que garantiza AL MENOS ese nivel, acotado al tope. El PDF se regenera (misma numeración, versión nueva) y el link de aceptación sigue vigente. El resultado trae el % REAL comiteado (ultimoEscalon.pct): informa SIEMPRE ese número al vendedor, y si difiere de lo pedido (ej. pidió 15% y quedó 20%, o pidió 30% y el tope es 20%) díselo sin vueltas. No sirve para REBAJAR un descuento ya comiteado (la escalera solo sube).",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      pct_objetivo: {
+        type: "number" as const,
+        description:
+          "Porcentaje de descuento sobre el plan mensual que pidió el vendedor (ej. 20). Omítelo para avanzar simplemente al siguiente escalón.",
+        minimum: 0,
+        maximum: 40,
+      },
+    },
+  },
+}
+
 const enviarAlClienteSchema = {
   name: "enviar_cotizacion_al_cliente",
   description:
@@ -295,6 +314,28 @@ const enviarAlClienteSchema = {
     },
     required: ["mensaje_para_cliente"],
   },
+}
+
+/** Refresco del puntero tras una tool que regenera PDF/links/totales — mismo
+ * merge que hace el agent-loop (setQuotePointer es upsert completo: sin el
+ * merge, los campos no pasados se pisan con null). */
+async function refrescarPuntero(
+  contact: string,
+  quoteId: string,
+  cambios: { acceptanceUrl?: string; pdfUrl?: string; totalClp?: number; totalUf?: number },
+): Promise<void> {
+  const prevs = await getQuotePointers(contact).catch(() => [])
+  const prev = prevs.find((p) => p.quoteId === quoteId) || null
+  await setQuotePointer(contact, {
+    quoteId,
+    dealId: prev?.dealId || undefined,
+    acceptanceUrl: cambios.acceptanceUrl || prev?.acceptanceUrl || undefined,
+    pdfUrl: cambios.pdfUrl || prev?.pdfUrl || undefined,
+    totalClp: cambios.totalClp ?? prev?.totalClp ?? undefined,
+    totalUf: cambios.totalUf ?? prev?.totalUf ?? undefined,
+    rut: prev?.rut || undefined,
+    empresa: prev?.empresa || undefined,
+  }).catch(() => {})
 }
 
 export type EventoCoted = { tool: string; ok: boolean; resumen: string }
@@ -336,10 +377,11 @@ export async function chatVickyCotizaciones(params: {
     `1. El vendedor te pide cambios (dotación, agregar/quitar reloj, módulos, puntos de instalación). Aplícalos DE INMEDIATO con actualizar_cotizacion — sin pedir confirmación extra al vendedor (él ya es la confirmación). Pasa SIEMPRE la configuración COMPLETA final: parte de los ítems actuales del contexto y aplica el cambio pedido encima.`,
     `2. Reconstrucción de la configuración: los ítems con código de módulo (asistencia, vacaciones, …) van en "modulos"; los ítems con código de hardware van en "hardware" (respeta su modalidad arriendo/venta y cantidad actuales salvo que el vendedor pida cambiarlas); la dotación (userCount) es la Cantidad del ítem asistencia — si su modalidad es "Fijo" es el plan fijo (1-10): usa la dotación que te diga el vendedor o, si no la menciona y no la puedes deducir, pregúntasela. Los ítems de envío/instalación NO se pasan: se derivan de "puntosInstalacion" (uno por punto físico; si la cotización tiene reloj y no conoces la comuna del punto, pregúntala al vendedor antes de actualizar).`,
     `3. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó: dotación, ítems y total nuevo (UF y pesos aprox). El link de aceptación NO cambia y el PDF se regenera solo.`,
-    `4. Enviar al cliente: SOLO cuando el vendedor dé el OK explícito, usa enviar_cotizacion_al_cliente. Antes de eso, el cliente no se entera de nada.`,
+    `4. Descuentos (el vendedor SÍ puede pedirlos): usa aplicar_descuento con pct_objetivo = el % que pidió. La escalera oficial comitea escalones de 10% y 20% sobre el plan mensual, TOPE 20% (instalación y envío no tienen descuento); el servidor aplica el escalón que garantiza al menos lo pedido, acotado al tope. Informa SIEMPRE el % real comiteado y, si difiere de lo pedido, dilo sin vueltas. El descuento comiteado sobrevive a ediciones de configuración posteriores y la escalera no baja descuentos ya comiteados.`,
+    `5. Enviar al cliente: SOLO cuando el vendedor dé el OK explícito, usa enviar_cotizacion_al_cliente. Antes de eso, el cliente no se entera de nada.`,
     ``,
     `LÍMITES (sé transparente con el vendedor):`,
-    `- Descuentos: esta herramienta NO cambia descuentos. El % comiteado sobrevive a la edición; un descuento nuevo va por la escalera de Vicky con el cliente o lo gestiona el ejecutivo en Zoho.`,
+    `- Descuentos: solo por la escalera oficial (tope 20% sobre el plan mensual). Un % fuera de escalera o sobre el tope requiere gestión del ejecutivo en Zoho.`,
     `- Cotizaciones Aceptadas/pagadas: no se pueden editar (la tool lo rechazará); los ajustes post-aceptación los coordina el ejecutivo.`,
     `- Solo cotizaciones de la línea Chile (catálogo en UF). Máximo 50 trabajadores.`,
     `- No inventes precios ni totales: todo número sale de las tools o del contexto.`,
@@ -351,6 +393,7 @@ export async function chatVickyCotizaciones(params: {
   const tools = [
     verCotizacionSchema,
     actualizarCotizacionSchema,
+    aplicarDescuentoSchema,
     enviarAlClienteSchema,
   ] as unknown as Anthropic.Messages.Tool[]
 
@@ -396,7 +439,8 @@ export async function chatVickyCotizaciones(params: {
           eventos.push({ tool: tu.name, ok: !!e, resumen: "Estado de la cotización consultado en Zoho" })
         } else if (tu.name === "actualizar_cotizacion") {
           const input = tu.input as ActualizarCotizacionInput
-          const r = await actualizarCotizacion({ ...input, quote_id: input.quote_id || estado.puntero.quoteId })
+          const qid = input.quote_id || estado.puntero.quoteId
+          const r = await actualizarCotizacion({ ...input, quote_id: qid })
           output = r
           eventos.push({
             tool: tu.name,
@@ -405,6 +449,24 @@ export async function chatVickyCotizaciones(params: {
               ? `Cotización actualizada (v${r.version}) · total UF ${r.totalUF} (~$${r.totalCLP.toLocaleString("es-CL")})`
               : `No se pudo actualizar: ${r.error.slice(0, 160)}`,
           })
+          if (r.ok) await refrescarPuntero(contact, qid, { acceptanceUrl: r.acceptanceUrl, totalClp: r.totalCLP, totalUf: r.totalUF })
+        } else if (tu.name === "aplicar_descuento") {
+          const input = tu.input as { pct_objetivo?: number }
+          const r = await aplicarSiguienteDescuento({
+            quote_id: estado.puntero.quoteId,
+            pct_ofrecido: typeof input?.pct_objetivo === "number" && input.pct_objetivo > 0 ? input.pct_objetivo : undefined,
+          })
+          output = r
+          if (r.ok) {
+            eventos.push({
+              tool: tu.name,
+              ok: true,
+              resumen: `Descuento comiteado: ${r.ultimoEscalon.pct}% sobre el plan mensual${r.topeAlcanzado ? " (tope alcanzado)" : ""} · PDF v${r.version}`,
+            })
+            await refrescarPuntero(contact, estado.puntero.quoteId, { acceptanceUrl: r.acceptanceUrl, pdfUrl: r.linkPdf })
+          } else {
+            eventos.push({ tool: tu.name, ok: false, resumen: `No se pudo aplicar el descuento: ${r.error.slice(0, 160)}` })
+          }
         } else if (tu.name === "enviar_cotizacion_al_cliente") {
           const input = tu.input as { mensaje_para_cliente: string }
           // Se envía la cotización EN EDICIÓN, no la más reciente del contacto.
