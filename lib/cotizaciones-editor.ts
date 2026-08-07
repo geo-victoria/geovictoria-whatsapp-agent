@@ -62,13 +62,18 @@ export type EstadoCotizacion = {
 }
 
 /**
- * Estado actual de la cotización más reciente del contacto: puntero durable
- * (links, totales, empresa) + detalle de ítems desde Zoho (best-effort — si
- * Zoho no responde, se devuelve el puntero con items vacíos).
+ * Estado actual de la cotización del contacto: puntero durable (links,
+ * totales, empresa) + detalle de ítems desde Zoho (best-effort — si Zoho no
+ * responde, se devuelve el puntero con items vacíos). Con `quoteId` se elige
+ * ESA cotización entre los punteros del contacto (multi-RUT / búsqueda por
+ * número); sin él, la más reciente.
  */
-export async function estadoCotizacion(contact: string): Promise<EstadoCotizacion | null> {
+export async function estadoCotizacion(contact: string, quoteId?: string): Promise<EstadoCotizacion | null> {
   const punteros = await getQuotePointers(contact).catch(() => [])
-  const puntero = punteros[0] ?? (await punteroPorSufijo(contact))
+  const puntero =
+    (quoteId ? punteros.find((p) => p.quoteId === quoteId) : undefined) ??
+    punteros[0] ??
+    (await punteroPorSufijo(contact))
   if (!puntero) return null
 
   let numero = ""
@@ -117,6 +122,70 @@ export async function estadoCotizacion(contact: string): Promise<EstadoCotizacio
     // best-effort: el puntero solo ya sirve para conversar
   }
   return { puntero, numero, estadoZoho, descuentoPct, items }
+}
+
+export type CotizacionEncontrada = {
+  quoteId: string
+  /** Teléfono (solo dígitos) del contacto de la cotización. */
+  contact: string
+  numero: string
+  empresa: string
+  /** true si existe puntero de Vicky para esta cotización exacta (editable acá). */
+  conPuntero: boolean
+}
+
+/**
+ * Busca una cotización por su NÚMERO (ej. "COT400", "cot 400" o "400") en
+ * Zoho y resuelve el contacto para abrirla en el editor. Prefiere el contact
+ * del puntero de Vicky (formato canónico) cuando existe.
+ */
+export async function buscarCotizacionPorNumero(numeroRaw: string): Promise<CotizacionEncontrada | null> {
+  const limpio = (numeroRaw || "").toUpperCase().replace(/\s+/g, "").replace(/[^A-Z0-9-]/g, "").slice(0, 20)
+  if (!limpio) return null
+  const candidatos = [...new Set([limpio, /^\d+$/.test(limpio) ? `COT${limpio}` : ""])].filter(Boolean)
+
+  const token = await getZohoAccessToken()
+  const enLista = candidatos.map((c) => `'${c}'`).join(",")
+  const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+    method: "POST",
+    headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      select_query: `select id, Numero_Cotizacion, Tel_fono_Contacto, Cuenta_Asociada.Account_Name from ${QUOTE_MODULE} where Numero_Cotizacion in (${enLista}) limit 1`,
+    }),
+    cache: "no-store",
+  })
+  const rows = r.ok
+    ? (((await r.json().catch(() => null)) as { data?: Array<Record<string, string>> } | null)?.data ?? [])
+    : []
+  const row = rows[0]
+  if (!row?.id) return null
+
+  const quoteId = String(row.id)
+  let contact = String(row.Tel_fono_Contacto || "").replace(/\D/g, "")
+  let conPuntero = false
+  // El puntero de Vicky manda sobre el teléfono de Zoho (formato canónico del
+  // chat) y confirma que la cotización es editable desde acá.
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    try {
+      const pr = await fetch(
+        `${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?quote_id=eq.${encodeURIComponent(quoteId)}&select=contact&limit=1`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+      )
+      const prows = pr.ok ? ((await pr.json().catch(() => [])) as Array<{ contact: string }>) : []
+      if (prows[0]?.contact) {
+        contact = String(prows[0].contact).replace(/\D/g, "")
+        conPuntero = true
+      }
+    } catch {}
+  }
+  if (!contact) return null
+  return {
+    quoteId,
+    contact,
+    numero: String(row.Numero_Cotizacion || limpio),
+    empresa: String(row["Cuenta_Asociada.Account_Name"] || ""),
+    conPuntero,
+  }
 }
 
 /** Fallback para punteros con formato de contacto histórico (+56…, espacios):
@@ -245,12 +314,14 @@ export async function chatVickyCotizaciones(params: {
   contact: string
   historial: Array<{ role: "user" | "assistant"; content: string }>
   mensaje: string
+  /** Cotización específica a editar (búsqueda por número). Default: la más reciente. */
+  quoteId?: string
 }): Promise<ChatCotedResultado> {
-  const { contact, historial, mensaje } = params
+  const { contact, historial, mensaje, quoteId } = params
   const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY no configurada")
 
-  const estado = await estadoCotizacion(contact)
+  const estado = await estadoCotizacion(contact, quoteId)
   if (!estado) throw new Error("Este contacto no tiene cotización formal registrada.")
 
   const system = [
@@ -318,7 +389,7 @@ export async function chatVickyCotizaciones(params: {
       let output: unknown
       try {
         if (tu.name === "ver_cotizacion") {
-          const e = await estadoCotizacion(contact)
+          const e = await estadoCotizacion(contact, estado.puntero.quoteId)
           output = e
             ? { ok: true, resumen: resumenEstadoParaModelo(e), pdfUrl: e.puntero.pdfUrl, acceptanceUrl: e.puntero.acceptanceUrl }
             : { ok: false, error: "Sin cotización registrada para este contacto." }
@@ -336,7 +407,8 @@ export async function chatVickyCotizaciones(params: {
           })
         } else if (tu.name === "enviar_cotizacion_al_cliente") {
           const input = tu.input as { mensaje_para_cliente: string }
-          const envio = await enviarCotizacionWhatsapp({ _contact: contact })
+          // Se envía la cotización EN EDICIÓN, no la más reciente del contacto.
+          const envio = await enviarCotizacionWhatsapp({ quote_id: estado.puntero.quoteId, _contact: contact })
           if (envio.ok) {
             const texto = String(input.mensaje_para_cliente || "").trim()
             if (texto) await sendBotmakerMessage(contact, texto)

@@ -18,7 +18,7 @@ import { createHash } from "node:crypto"
 
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
-import { estadoCotizacion, chatVickyCotizaciones, type EstadoCotizacion } from "@/lib/cotizaciones-editor"
+import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, type EstadoCotizacion } from "@/lib/cotizaciones-editor"
 
 export const dynamic = "force-dynamic"
 // El chat de Vicky Cotizaciones corre un loop de tool use contra la cotizadora
@@ -2084,12 +2084,12 @@ function panelCotizacionHtml(e: EstadoCotizacion): string {
  * Los cambios se aplican con la MISMA tool actualizar_cotizacion que usa Vicky
  * con clientes (PDF regenerado, mismo link) y el envío al cliente sale por el
  * WhatsApp de Vicky recién con el OK del vendedor. */
-async function renderVickyCotizaciones(contact: string, key: string): Promise<Response> {
-  const est = await estadoCotizacion(contact).catch(() => null)
+async function renderVickyCotizaciones(contact: string, key: string, quoteId = ""): Promise<Response> {
+  const est = await estadoCotizacion(contact, quoteId || undefined).catch(() => null)
   if (!est) {
     return paginaAviso(
       "Sin cotización formal",
-      `<p>El contacto <b>+${esc(contact)}</b> no tiene una cotización formal registrada, así que no hay nada que editar. Genera la cotización primero (Vicky la emite en la conversación con el cliente).</p>`,
+      `<p>El contacto <b>+${esc(contact)}</b> no tiene una cotización formal registrada, así que no hay nada que editar. Genera la cotización primero (Vicky la emite en la conversación con el cliente).</p><p><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>`,
     )
   }
   const empresa = est.puntero.empresa || `+${contact}`
@@ -2125,7 +2125,12 @@ async function renderVickyCotizaciones(contact: string, key: string): Promise<Re
   img.logo{height:26px;vertical-align:middle;margin-right:10px}
   @media (max-width:760px){.cols{flex-direction:column}#panelCot{width:auto;position:static}}
 </style></head><body><div class="wrap">
-  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}">← Volver a la cola de gestión</a></p>
+  <p style="margin:0 0 10px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><a href="?key=${encodeURIComponent(key)}">← Volver a la cola de gestión</a>
+    <form method="GET" style="display:inline-flex;gap:6px;align-items:center">
+      <input type="hidden" name="key" value="${esc(key)}">
+      <input type="text" name="buscarcot" placeholder="Otra cotización (ej: COT400)" style="padding:6px 10px;border:1px solid #d0d5db;border-radius:8px;font-size:13px;font-family:inherit;width:190px">
+      <button type="submit" style="background:#00aff2;color:#fff;border:0;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer">🔍 Buscar</button>
+    </form></p>
   <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones</h1>
   <div class="sub">Editor interno de la cotización de <b>${esc(empresa)}</b> (+${esc(contact)}). Describe el cambio y se aplica al tiro con los precios oficiales — el link de aceptación no cambia y el PDF se regenera. La cotización se le envía al cliente <b>solo cuando tú des el OK</b>.</div>
   <div class="cols">
@@ -2144,6 +2149,7 @@ async function renderVickyCotizaciones(contact: string, key: string): Promise<Re
     (function () {
       var KEYQ = "?key=${encodeURIComponent(key)}";
       var CONTACT = ${JSON.stringify(contact)};
+      var COT = ${JSON.stringify(est.puntero.quoteId || "")};
       var HIST = [];
       var box = document.getElementById("chatBox");
       var input = document.getElementById("msg");
@@ -2175,7 +2181,7 @@ async function renderVickyCotizaciones(contact: string, key: string): Promise<Re
         var esperando = burbuja("bubA", "Vicky está trabajando en la cotización…");
         btn.disabled = true;
         try {
-          var res = await fetch(KEYQ + "&accion=coted_chat&contact=" + encodeURIComponent(CONTACT), {
+          var res = await fetch(KEYQ + "&accion=coted_chat&contact=" + encodeURIComponent(CONTACT) + (COT ? "&cot=" + encodeURIComponent(COT) : ""), {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ historial: HIST, mensaje: t }),
@@ -2208,6 +2214,111 @@ async function renderVickyCotizaciones(contact: string, key: string): Promise<Re
       input.focus();
     })();
   </script>
+</div></body></html>`
+  return page(html)
+}
+
+/** Pestaña "Editor de cotizaciones" (pedido Lalo 07-ago): buscador por número
+ * (COT###) + cotizaciones recientes con link para verlas y editarlas con
+ * Vicky Cotizaciones. Rama liviana: solo quote_pointers + un COQL best-effort
+ * para número/estado. */
+async function renderEditorCotizaciones(key: string): Promise<Response> {
+  const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const punteros = (await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,quote_id,empresa,rut,total_uf,total_clp,updated_at,pdf_url,acceptance_url&order=updated_at.desc&limit=60`,
+    { headers: hSb, cache: "no-store" },
+  )
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])) as Array<{
+    contact: string
+    quote_id: string | null
+    empresa: string | null
+    rut: string | null
+    total_uf: number | null
+    total_clp: number | null
+    updated_at: string | null
+    pdf_url: string | null
+    acceptance_url: string | null
+  }>
+  const vivos = punteros.filter((p) => p.quote_id && !isTestContact(digits(p.contact)))
+
+  // Número y estado desde Zoho (best-effort: sin esto la lista igual sirve).
+  const zoho = new Map<string, { numero: string; estado: string }>()
+  try {
+    const token = await getZohoAccessToken()
+    const ids = vivos.map((p) => String(p.quote_id))
+    for (let i = 0; i < ids.length; i += 50) {
+      const lista = ids.slice(i, i + 50).map((id) => `'${id}'`).join(",")
+      const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          select_query: `select id, Numero_Cotizacion, Estado_Cotizacion from ${QUOTE_MODULE} where id in (${lista}) limit 50`,
+        }),
+        cache: "no-store",
+      })
+      const rows = r.ok ? (((await r.json().catch(() => null)) as { data?: Array<Record<string, string>> } | null)?.data ?? []) : []
+      for (const row of rows) zoho.set(String(row.id), { numero: String(row.Numero_Cotizacion || ""), estado: String(row.Estado_Cotizacion || "") })
+    }
+  } catch {}
+
+  const filas = vivos
+    .map((p) => {
+      const d = digits(p.contact)
+      const z = zoho.get(String(p.quote_id))
+      const ver = String(p.pdf_url || p.acceptance_url || "")
+      const total = p.total_uf
+        ? `UF ${p.total_uf.toLocaleString("es-CL", { maximumFractionDigits: 2 })}`
+        : p.total_clp
+          ? `$${Math.round(p.total_clp).toLocaleString("es-CL")}`
+          : "—"
+      return `<tr>
+        <td style="white-space:nowrap"><b>${esc(z?.numero || "—")}</b>${z?.estado ? `<div style="margin-top:2px"><span class="tag">${esc(z.estado)}</span></div>` : ""}</td>
+        <td>${esc(p.empresa || "—")}<div class="sub" style="margin:0;font-size:12px">+${esc(d)}${p.rut ? ` · RUT ${esc(p.rut)}` : ""}</div></td>
+        <td style="white-space:nowrap;text-align:right">${total}</td>
+        <td style="white-space:nowrap">${fmtSantiago(String(p.updated_at || ""))}</td>
+        <td style="white-space:nowrap">${ver ? `<a href="${esc(ver)}" target="_blank" rel="noopener">🧾 ver</a> · ` : ""}<a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(d)}&cot=${encodeURIComponent(String(p.quote_id))}">✏️ editar</a></td>
+      </tr>`
+    })
+    .join("")
+
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Editor de cotizaciones — Vicky</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:22px;margin:0;color:#4e4e4e}
+  h2{font-family:${GV_TITLE_FONT};font-weight:700;font-size:15px;margin:0 0 10px;color:#4e4e4e}
+  .sub{color:#646464;font-size:13px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:16px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  th{color:#6b7280;font-weight:600;font-size:12px}
+  .tag{display:inline-block;background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 8px;border-radius:99px}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+</style></head><body><div class="wrap">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1>Editor de cotizaciones</h1></div>
+    <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
+      <a href="?key=${encodeURIComponent(key)}">📞 Gestión</a>
+      <b>🧾 Editor de cotizaciones</b>
+      <a href="?key=${encodeURIComponent(key)}&vista=analisis">📊 Análisis y KPIs</a>
+    </div>
+  </div>
+  <div class="sub" style="margin-top:4px">Busca una cotización por su número o toma una de las recientes, y edítala conversando con Vicky Cotizaciones: cambia dotación, relojes o módulos con los precios oficiales. El PDF se regenera, el link de aceptación no cambia y al cliente se le envía solo con tu OK.</div>
+  <div class="card">
+    <h2>🔍 Buscar por número</h2>
+    <form method="GET" style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="hidden" name="key" value="${esc(key)}">
+      <input type="text" name="buscarcot" placeholder="Ej: COT400" required style="padding:9px 12px;border:1px solid #d0d5db;border-radius:8px;font-size:14px;font-family:inherit;width:220px">
+      <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:8px;padding:9px 18px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer">Buscar y abrir</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Cotizaciones recientes — ${vivos.length}</h2>
+    ${vivos.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Cotización</th><th>Empresa / contacto</th><th style="text-align:right">Total c/IVA</th><th>Actualizada</th><th>Acciones</th></tr></thead><tbody>${filas}</tbody></table></div>` : `<p class="sub" style="margin:0">Sin cotizaciones registradas.</p>`}
+  </div>
 </div></body></html>`
   return page(html)
 }
@@ -2522,9 +2633,10 @@ export async function POST(req: Request): Promise<Response> {
       }))
       .filter((m) => m.content.trim())
       .slice(-30)
+    const quoteIdSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim() || undefined
     try {
-      const r = await chatVickyCotizaciones({ contact, historial, mensaje })
-      const est = await estadoCotizacion(contact).catch(() => null)
+      const r = await chatVickyCotizaciones({ contact, historial, mensaje, quoteId: quoteIdSel })
+      const est = await estadoCotizacion(contact, quoteIdSel).catch(() => null)
       return new Response(
         JSON.stringify({
           ok: true,
@@ -2618,9 +2730,33 @@ export async function GET(req: Request): Promise<Response> {
   if (wsp) return renderWspVendedor(wsp)
   // Editor conversacional de cotizaciones (pedido Lalo 06-ago): el vendedor
   // describe el cambio, Vicky Cotizaciones lo aplica con las tools reales y,
-  // con el OK del vendedor, se la manda al cliente por WhatsApp.
+  // con el OK del vendedor, se la manda al cliente por WhatsApp. `cot` fija
+  // QUÉ cotización del contacto se edita (búsqueda por número / multi-RUT).
   const coted = (searchParams.get("coted") || "").replace(/\D/g, "").trim()
-  if (coted) return renderVickyCotizaciones(coted, key)
+  const cotSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim()
+  if (coted) return renderVickyCotizaciones(coted, key, cotSel)
+  // Búsqueda por número de cotización (pedido Lalo 07-ago): COT### → editor.
+  const buscarcot = (searchParams.get("buscarcot") || "").trim()
+  if (buscarcot) {
+    try {
+      const hallada = await buscarCotizacionPorNumero(buscarcot)
+      if (!hallada) {
+        return paginaAviso(
+          "Cotización no encontrada",
+          `<p>No encontré ninguna cotización con el número <b>${esc(buscarcot)}</b> en Zoho. Revisa el número (ej: <code>COT400</code>) e inténtalo de nuevo.</p><p><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>`,
+        )
+      }
+      const p = new URLSearchParams({ key, coted: hallada.contact })
+      if (hallada.conPuntero) p.set("cot", hallada.quoteId)
+      return new Response(null, { status: 302, headers: { location: `?${p.toString()}` } })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return paginaAviso("Error buscando la cotización", `<p>${esc(msg.slice(0, 200))}</p><p><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>`, 500)
+    }
+  }
+  // Pestaña "Editor de cotizaciones" (pedido Lalo 07-ago): buscador por número
+  // + cotizaciones recientes. Rama temprana: no necesita el pipeline pesado.
+  if (searchParams.get("vista") === "editor") return renderEditorCotizaciones(key)
 
   let rows: Row[]
   let origen: {
@@ -3400,7 +3536,11 @@ export async function GET(req: Request): Promise<Response> {
 </style></head><body><div class="wrap">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
     <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : "Análisis y KPIs"}</h1></div>
-    <a href="?${(() => { const p = filtrosQS(); if (vista === "gestion") { p.set("vista", "analisis") } else { p.delete("vista") } return p.toString() })()}" style="font-size:14px;white-space:nowrap">${vista === "gestion" ? "📊 Análisis y KPIs →" : "← 📞 Gestión"}</a>
+    <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
+      ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
+      <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
+      ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
+    </div>
   </div>
   <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}</div>
   <div class="sub" style="margin-top:6px">
