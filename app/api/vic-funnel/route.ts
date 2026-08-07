@@ -800,6 +800,9 @@ type FilaListado = {
    * identidad matchea cualquiera — que el deal sea de A y la cotización de B
    * no le esconde la oportunidad a ninguno de los dos (borde Lalo 07-ago). */
   propietarios?: string[]
+  /** Origen de la fila: "vicky" (huella en el canal: conversación/lead/preform/
+   * cotización de Vicky) o "zoho" (deal del equipo sin huella en Vicky). */
+  origen?: "vicky" | "zoho"
   /** Inicio de la conversación (o creación del lead si nunca conversó). */
   primerContactoIso: string
   /** id de la conversación para el link al chat (vista ?conv= del embudo). */
@@ -1328,6 +1331,7 @@ function construirListadoComercial(params: {
       fechaIso: String(dl.Created_Time || ""),
       estadoZoho: stageDl || "—",
       propietario: `${dl["Owner.first_name"] || ""} ${dl["Owner.last_name"] || ""}`.trim() || "—",
+      origen: conv?.id ? "vicky" : "zoho",
       primerContactoIso: String(conv?.started_at || dl.Created_Time || ""),
       convId: String(conv?.id || ""),
       accionable: String(ana?.accionable || "").trim() || "Trato del ejecutivo en Zoho — revisar y avanzar la etapa.",
@@ -1423,6 +1427,7 @@ type CasoGestion = {
   empresa: string
   contacto: string
   propietario: string
+  origen: "vicky" | "zoho"
   convId: string
   tipoId: string
   tipoLabel: string
@@ -1505,6 +1510,7 @@ function construirCasosGestion(params: {
       empresa: f.empresa,
       contacto: d,
       propietario: f.propietario,
+      origen: f.origen || "vicky",
       convId: f.convId,
       tipoId: tipo.id,
       tipoLabel: tipo.label,
@@ -1557,7 +1563,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     }
     return `<tr data-contact="${esc(c.contacto)}"${c.gestionado ? ` class="filaGest" style="opacity:.4;display:none"` : ""}>
           <td class="tdBtn" style="white-space:nowrap;vertical-align:middle">${btn}</td>
-          <td class="tdEmp" data-sort="${esc(c.empresa.toLowerCase())}">${esc(c.empresa)}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${
+          <td class="tdEmp" data-sort="${esc(c.empresa.toLowerCase())}">${esc(c.empresa)}${c.origen === "zoho" ? ` <span title="Trato del pipeline de Zoho — no ha pasado por Vicky" style="background:#eef2ff;color:#4c51bf;border:1px solid #c3dafe;border-radius:6px;padding:0 5px;font-size:11px;font-weight:600;vertical-align:middle">🗂 Zoho</span>` : ""}<div class="sub" style="margin:0;font-size:12px">+${esc(c.contacto)} · ${
               quienSesion && c.propietario !== quienSesion && c.propietario !== "—"
                 ? `<span title="Esta oportunidad te aparece porque tienes un registro asociado (lead o cotización), pero el responsable principal es otro — coordina antes de contactar al cliente" style="background:#fff7e0;color:#92700c;border:1px solid #ffd875;border-radius:6px;padding:1px 6px;font-weight:600">responsable: ${esc(c.propietario)}</span>`
                 : esc(c.propietario)
@@ -2935,7 +2941,7 @@ async function renderVickyPropuestasCrear(dealId: string, key: string): Promise<
   <div class="cols">
     <div class="chatCol card">
       <div id="chatBox">
-        <div class="bub bubA"><div>Hola 👋 Armemos la propuesta para ${esc(info.accountNombre || info.nombre)}. Cuéntame qué le vamos a ofrecer (módulos, marcaje, dotación, precios si van) y, si tienes el guion de la reunión, pégalo aquí — de ahí saco lo que el cliente realmente necesita. Genero la primera versión al tiro y la pulimos juntas.</div></div>
+        <div class="bub bubA"><div>Hola 👋 Armemos la propuesta para ${esc(info.accountNombre || info.nombre)}. Cuéntame qué le vamos a ofrecer (módulos, marcaje, dotación, precios si van) y, si tienes el guion de la reunión, pégalo aquí — de ahí saco lo que el cliente realmente necesita. Genero la primera versión de inmediato y la pulimos juntas.</div></div>
       </div>
       <div class="fila">
         <textarea id="msg" rows="2" placeholder="Ej: ofréceles asistencia con app para 35 personas… (puedes pegar el guion completo de la reunión)"></textarea>
@@ -3700,10 +3706,10 @@ export async function GET(req: Request): Promise<Response> {
   const sesionHumana = cookieDe(req, "vic_auth") === authToken() && Boolean(quienCookie)
   if (key !== FUNNEL_KEY) {
     if (sesionHumana) key = FUNNEL_KEY
-    // Piloto /oportunidades2 (Lalo 07-ago): el proxy trae ?portal=correo y el
-    // login es por correo corporativo + código, sin clave compartida.
-    else if (searchParams.get("portal") === "correo") return renderLoginCorreo("correo")
-    else return renderLogin()
+    // LOGIN OFICIAL (Lalo 07-ago, piloto aprobado): correo corporativo +
+    // código por email, en todas las URLs. La pantalla de clave compartida
+    // murió; su POST sigue vivo solo como rescate operativo sin UI.
+    else return renderLoginCorreo("correo")
   }
   // LA COOKIE MANDA SIEMPRE (fuga 07-ago): los links internos llevaban la
   // llave máquina en ?key= y bastaba seguir uno ("Quitar filtros") para que
@@ -3823,6 +3829,10 @@ export async function GET(req: Request): Promise<Response> {
   // Vista: "gestion" (default, la cola de trabajo) o "analisis" (KPIs, Sankey
   // y el resto del embudo) — pestaña arriba a la derecha (pedido Lalo 04-ago).
   const vista: "gestion" | "analisis" = searchParams.get("vista") === "analisis" ? "analisis" : "gestion"
+  // Filtro de ORIGEN de la cola (Lalo 07-ago): "vicky" (default — lo que está
+  // pasando AHORA por WhatsApp) · "zoho" (cartera clásica del equipo) · "todo".
+  const origenParam = (searchParams.get("origen") || "").trim()
+  const origenF: "vicky" | "zoho" | "todo" = origenParam === "zoho" || origenParam === "todo" ? origenParam : "vicky"
   // Drill-down de un KPI: ?lista=<bucket> abre el detalle de esas conversaciones.
   const listaParam = (searchParams.get("lista") || "").trim()
   // Query string con los filtros vigentes (para los links de los KPIs y el
@@ -3833,6 +3843,7 @@ export async function GET(req: Request): Promise<Response> {
     if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
     for (const e of estadoF) p.append("estado", e)
     for (const pr of propF) p.append("prop", pr)
+    if (origenF !== "vicky") p.set("origen", origenF)
     if (vista === "analisis") p.set("vista", "analisis")
     return p
   }
@@ -4078,7 +4089,9 @@ export async function GET(req: Request): Promise<Response> {
     // (04-ago: el "Listado comercial vivo" salió de la página — la cola de
     // gestión lo reemplazó con la misma data; renderListadoComercial queda
     // disponible por si se quiere reponer.)
-    const filasVisibles = filasListado.filter((f) => coincide(f) && tuvoActividad(f))
+    const filasVisibles = filasListado.filter(
+      (f) => coincide(f) && tuvoActividad(f) && (origenF === "todo" || (f.origen || "vicky") === origenF),
+    )
     const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, cots: cotPorContacto })
     casosGestion = cola.casos
     nGestionadosCola = cola.nGestionados
@@ -4088,6 +4101,7 @@ export async function GET(req: Request): Promise<Response> {
       if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
       for (const e of estadoF) p.append("estado", e)
       for (const pr of propF) p.append("prop", pr)
+      if (origenF !== "vicky") p.set("origen", origenF)
       return p.toString()
     })()
     colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga, wspVendedorSet, esAdmin ? "" : quien)
@@ -4585,6 +4599,11 @@ export async function GET(req: Request): Promise<Response> {
       ${vista === "analisis" ? `<input type="hidden" name="vista" value="analisis">` : ""}
       <label style="font-size:12px">Desde <input type="date" name="desde" value="${rango ? rango.desdeStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <label style="font-size:12px">Hasta <input type="date" name="hasta" value="${rango ? rango.hastaStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
+      <label style="font-size:12px;vertical-align:top" title="Vicky: casos con conversación de WhatsApp (lo accionable ahora). Cartera Zoho: tratos del pipeline que no han pasado por Vicky.">Origen<br><select name="origen" style="font-size:12px;padding:3px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:120px;background:#fff">
+        <option value="vicky"${origenF === "vicky" ? " selected" : ""}>🤖 Vicky</option>
+        <option value="zoho"${origenF === "zoho" ? " selected" : ""}>🗂 Cartera Zoho</option>
+        <option value="todo"${origenF === "todo" ? " selected" : ""}>Todo</option>
+      </select></label>
       <label style="font-size:12px;vertical-align:top" title="Ctrl/Cmd + clic para elegir varias; sin selección = todos">Estado<br><select name="estado" multiple size="4" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:130px">
         ${ESTADOS_LISTADO.map((e) => `<option${estadoF.includes(e) ? " selected" : ""}>${e}</option>`).join("")}
       </select></label>
