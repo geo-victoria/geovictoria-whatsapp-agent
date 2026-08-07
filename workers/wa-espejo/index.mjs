@@ -377,6 +377,69 @@ async function guardarMensaje(sessionId, m) {
 
 const reiniciosPorSesion = new Map()
 
+// ── Envío desde el WhatsApp del VENDEDOR (pedido Lalo 07-ago) ───────────────
+//
+// El editor de cotizaciones encola en vic_kv un trabajo con clave
+// wa_envio_<session>_<ts> y la sesión CONECTADA de ese vendedor lo despacha:
+// descarga el PDF vigente y lo manda como documento desde su propio número,
+// con un mensaje corto. Es el ÚNICO caso en que el espejo escribe en WhatsApp
+// — todo lo demás sigue siendo solo lectura. Estados del job (en el value):
+// pendiente → enviando → enviado | error. El dashboard los sondea para dar
+// feedback al vendedor.
+
+const enviosTimers = new Map()
+const enviosEnCurso = new Set()
+
+async function procesarEnviosPendientes(sessionId, sock) {
+  let rows = []
+  try {
+    const res = await sb(
+      `vic_kv?key=like.wa_envio_${encodeURIComponent(sessionId)}_%25&select=key,value&limit=5`,
+    )
+    rows = await res.json()
+  } catch {
+    return
+  }
+  for (const row of rows) {
+    const key = String(row.key)
+    if (enviosEnCurso.has(key)) continue
+    let job
+    try {
+      job = JSON.parse(String(row.value || ""))
+    } catch {
+      continue
+    }
+    if (!job || job.status !== "pendiente") continue
+    enviosEnCurso.add(key)
+    try {
+      job.status = "enviando"
+      await kvSet(key, JSON.stringify(job), 24 * 60)
+      const telefono = String(job.to || "").replace(/\D/g, "")
+      if (!telefono || !job.pdf_url) throw new Error("trabajo incompleto (to/pdf_url)")
+      const pdfRes = await fetch(job.pdf_url)
+      if (!pdfRes.ok) throw new Error(`descarga PDF ${pdfRes.status}`)
+      const buf = Buffer.from(await pdfRes.arrayBuffer())
+      await sock.sendMessage(`${telefono}@s.whatsapp.net`, {
+        document: buf,
+        mimetype: "application/pdf",
+        fileName: job.filename || "Cotizacion GeoVictoria.pdf",
+        caption: job.caption || "",
+      })
+      job.status = "enviado"
+      job.sent_at = new Date().toISOString()
+      await kvSet(key, JSON.stringify(job), 24 * 60)
+      console.log(`[${sessionId}] cotización enviada a +${telefono} desde el WhatsApp del vendedor`)
+    } catch (e) {
+      job.status = "error"
+      job.error = String(e?.message || e).slice(0, 200)
+      await kvSet(key, JSON.stringify(job), 24 * 60)
+      console.error(`[${sessionId}] envío de cotización falló:`, job.error)
+    } finally {
+      enviosEnCurso.delete(key)
+    }
+  }
+}
+
 async function tieneCredenciales(sessionId) {
   const creds = await estadoGet(sessionId, "creds", "creds").catch(() => null)
   // `registered` no siempre queda true en sesiones de dispositivo vinculado
@@ -523,6 +586,11 @@ async function conectar(sessionId) {
   clearInterval(resolutorTimers.get(sessionId))
   resolutorTimers.set(sessionId, setInterval(() => resolverContactosVicky(sock).catch(() => {}), 5 * 60_000))
   setTimeout(() => resolverContactosVicky(sock).catch(() => {}), 30_000)
+
+  // Cola de envíos del vendedor: cada 15 s se despachan los trabajos
+  // pendientes de ESTA sesión (reconectar rearma el timer con el sock nuevo).
+  clearInterval(enviosTimers.get(sessionId))
+  enviosTimers.set(sessionId, setInterval(() => procesarEnviosPendientes(sessionId, sock).catch(() => {}), 15_000))
 }
 
 console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — SOLO LECTURA`)

@@ -2117,6 +2117,35 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
     )
   }
   const empresa = est.puntero.empresa || `+${contact}`
+  // Sesiones del espejo CONECTADAS: habilitan el envío del PDF desde el
+  // WhatsApp personal del vendedor (pedido Lalo 07-ago).
+  let sesionesWsp: Array<{ id: string; nombre: string }> = []
+  try {
+    const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    const [stRows, labelsRaw] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.wa_espejo_status_%25&select=key,value&limit=100`, {
+        headers: hSb,
+        cache: "no-store",
+      }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ key: string; value: string }>>,
+      kvGet("wa_espejo_labels"),
+    ])
+    let etiquetas: Record<string, string> = {}
+    try {
+      etiquetas = JSON.parse(labelsRaw || "{}") as Record<string, string>
+    } catch {}
+    sesionesWsp = stRows
+      .map((r) => {
+        const id = String(r.key).replace(/^wa_espejo_status_/, "")
+        let estadoS = ""
+        try {
+          estadoS = String((JSON.parse(String(r.value || "")) as { estado?: string }).estado || "")
+        } catch {}
+        return { id, estadoS }
+      })
+      .filter((s) => s.estadoS === "conectado")
+      .map((s) => ({ id: s.id, nombre: etiquetas[s.id] || s.id }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+  } catch {}
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Vicky Cotizaciones — ${esc(empresa)}</title>
 <style>
@@ -2127,7 +2156,7 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
   .sub{color:#646464;font-size:12px}
   .cols{display:flex;gap:16px;align-items:flex-start;margin-top:14px}
   .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px}
-  #panelCot{width:360px;flex:none;position:sticky;top:12px}
+  .lado{width:360px;flex:none;position:sticky;top:12px}
   #panelCot table{width:100%;border-collapse:collapse;font-size:12.5px}
   #panelCot th,#panelCot td{text-align:left;padding:5px 6px;border-bottom:1px solid #eef0f2;vertical-align:top}
   #panelCot th{color:#6b7280;font-weight:600;font-size:11px}
@@ -2147,7 +2176,7 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
   #btnSend:disabled{opacity:.5;cursor:default}
   a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
   img.logo{height:26px;vertical-align:middle;margin-right:10px}
-  @media (max-width:760px){.cols{flex-direction:column}#panelCot{width:auto;position:static}}
+  @media (max-width:760px){.cols{flex-direction:column}.lado{width:auto;position:static}}
 </style></head><body><div class="wrap">
   <p style="margin:0 0 10px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><a href="?key=${encodeURIComponent(key)}">← Volver a la cola de gestión</a>
     <form method="GET" style="display:inline-flex;gap:6px;align-items:center">
@@ -2167,7 +2196,21 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
         <button id="btnSend" title="Le pide la modificación a Vicky Cotizaciones — al cliente NO le llega nada con este botón">Haz modificación</button>
       </div>
     </div>
-    <div id="panelCot" class="card">${panelCotizacionHtml(est)}</div>
+    <div class="lado">
+      <div id="panelCot" class="card">${panelCotizacionHtml(est)}</div>
+      <div class="card" style="margin-top:12px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">📲 Enviar desde el WhatsApp del vendedor</div>
+        ${
+          sesionesWsp.length
+            ? `<div style="display:flex;gap:6px;flex-wrap:wrap">
+          <select id="selSesionWsp" style="flex:1;min-width:140px;padding:8px;border:1px solid #d0d5db;border-radius:8px;font-size:13px;font-family:inherit">${sesionesWsp.map((s) => `<option value="${esc(s.id)}">${esc(s.nombre)}</option>`).join("")}</select>
+          <button onclick="enviarCotVendedor(this)" style="background:#25D366;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer">Enviar</button>
+        </div>
+        <div class="sub" style="margin-top:6px;font-size:11.5px">El PDF vigente sale del WhatsApp personal del vendedor elegido, con un mensaje corto. El botón amarillo del panel envía por el WhatsApp de Vicky.</div>`
+            : `<div class="sub" style="margin:0">Ningún WhatsApp de vendedor conectado al espejo (falta escanear el QR).</div>`
+        }
+      </div>
+    </div>
   </div>
   <script>
     (function () {
@@ -2259,6 +2302,51 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
           chip("Envío falló: " + e3, false);
           b.disabled = false;
           b.textContent = orig;
+        }
+      };
+      // Envío desde el WhatsApp del VENDEDOR: encola el trabajo y sondea su
+      // estado (el worker del espejo lo despacha en ~15 s).
+      window.enviarCotVendedor = async function (b) {
+        var sel = document.getElementById("selSesionWsp");
+        if (!sel || !sel.value) return;
+        var nombre = sel.options[sel.selectedIndex].textContent;
+        if (!confirm("¿Enviarle al cliente la cotización vigente desde el WhatsApp de " + nombre + "?")) return;
+        b.disabled = true;
+        try {
+          var res = await fetch(KEYQ + "&accion=coted_enviar_vendedor&contact=" + encodeURIComponent(CONTACT) + (COT ? "&cot=" + encodeURIComponent(COT) : ""), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sesion: sel.value }),
+          });
+          var j = null;
+          try { j = await res.json(); } catch (e2) {}
+          if (!res.ok || !j || !j.ok) {
+            chip("No se pudo encolar el envío: " + ((j && j.error) || ("error " + res.status)), false);
+            b.disabled = false;
+            return;
+          }
+          chip("En cola: se enviará desde el WhatsApp de " + nombre + " en unos segundos…", true);
+          var jobId = j.jobId;
+          var intentos = 0;
+          var t = setInterval(async function () {
+            intentos++;
+            var s = null;
+            try {
+              var r2 = await fetch(KEYQ + "&accion=coted_envio_estado&contact=" + encodeURIComponent(CONTACT), {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ jobId: jobId }),
+              });
+              s = await r2.json();
+            } catch (e3) {}
+            var st = s && s.status;
+            if (st === "enviado") { clearInterval(t); chip("Cotización enviada desde el WhatsApp de " + nombre + " ✅", true); b.disabled = false; }
+            else if (st === "error") { clearInterval(t); chip("El envío falló: " + ((s && s.error) || "error"), false); b.disabled = false; }
+            else if (intentos >= 8) { clearInterval(t); chip("El envío sigue en cola — revisa el chat espejado en un momento.", false); b.disabled = false; }
+          }, 8000);
+        } catch (e4) {
+          chip("No se pudo encolar el envío: " + e4, false);
+          b.disabled = false;
         }
       };
       input.focus();
@@ -2716,6 +2804,59 @@ export async function POST(req: Request): Promise<Response> {
       const msg = e instanceof Error ? e.message : String(e)
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
     }
+  }
+  // Envío desde el WhatsApp del VENDEDOR (pedido Lalo 07-ago): se encola en
+  // vic_kv y el worker wa-espejo de esa sesión lo despacha desde el número
+  // personal del vendedor. Estados del job: pendiente→enviando→enviado|error.
+  if (accion === "coted_enviar_vendedor") {
+    const body = (await req.json().catch(() => null)) as { sesion?: string } | null
+    const sesion = String(body?.sesion || "").trim()
+    if (!/^[a-zA-Z0-9_.-]{1,60}$/.test(sesion)) {
+      return new Response(JSON.stringify({ ok: false, error: "sesión inválida" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    let conectado = false
+    try {
+      conectado = (JSON.parse(await kvGet(`wa_espejo_status_${sesion}`)) as { estado?: string }).estado === "conectado"
+    } catch {}
+    if (!conectado) {
+      return new Response(JSON.stringify({ ok: false, error: "Esa sesión de WhatsApp no está conectada al espejo." }), { status: 409, headers: { "content-type": "application/json" } })
+    }
+    const quoteIdSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim() || undefined
+    const est = await estadoCotizacion(contact, quoteIdSel).catch(() => null)
+    if (!est?.puntero.pdfUrl) {
+      return new Response(JSON.stringify({ ok: false, error: "La cotización no tiene PDF disponible todavía." }), { status: 409, headers: { "content-type": "application/json" } })
+    }
+    const empresaJob = (est.puntero.empresa || "").trim().replace(/[^\p{L}\p{N} .-]/gu, "")
+    const jobId = `wa_envio_${sesion}_${Date.now()}`
+    await kvSet(
+      jobId,
+      JSON.stringify({
+        to: contact,
+        pdf_url: est.puntero.pdfUrl,
+        filename: empresaJob ? `Cotizacion GeoVictoria - ${empresaJob}.pdf`.slice(0, 100) : "Cotizacion GeoVictoria.pdf",
+        caption: "Hola, te comparto la cotización actualizada de GeoVictoria 📄 Cualquier duda me dices.",
+        status: "pendiente",
+        quote_id: est.puntero.quoteId,
+        at: new Date().toISOString(),
+      }),
+      new Date(Date.now() + 24 * 3600e3).toISOString(),
+    )
+    return new Response(JSON.stringify({ ok: true, jobId }), { headers: { "content-type": "application/json" } })
+  }
+  if (accion === "coted_envio_estado") {
+    const body = (await req.json().catch(() => null)) as { jobId?: string } | null
+    const jobId = String(body?.jobId || "").trim()
+    if (!/^wa_envio_[a-zA-Z0-9_.-]{1,60}_\d+$/.test(jobId)) {
+      return new Response(JSON.stringify({ ok: false, error: "jobId inválido" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    let status = ""
+    let error = ""
+    try {
+      const p = JSON.parse(await kvGet(jobId)) as { status?: string; error?: string }
+      status = String(p.status || "")
+      error = String(p.error || "")
+    } catch {}
+    return new Response(JSON.stringify({ ok: true, status, error }), { headers: { "content-type": "application/json" } })
   }
   return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { "content-type": "application/json" } })
 }
