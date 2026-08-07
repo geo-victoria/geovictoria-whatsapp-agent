@@ -1066,6 +1066,65 @@ async function fetchZohoListado(contactosConocidos: Set<string>, extraDealIds: s
   return { leads, dealsPorId }
 }
 
+type DealEquipo = {
+  id: string
+  Deal_Name?: string
+  Stage?: string
+  Created_Time?: string
+  Last_Activity_Time?: string
+  "Owner.first_name"?: string
+  "Owner.last_name"?: string
+  "Contact_Name.Phone"?: string
+  "Contact_Name.Mobile"?: string
+  "Account_Name.Account_Name"?: string
+}
+
+/** TODOS los deals ACTIVOS del pipeline en Zoho — la cartera completa que
+ * manejan los vendedores, haya pasado o no por Vicky (pedido Lalo 07-ago).
+ * Activo = etapa no terminal (fuera Cierre Perdido/Congelado/Facturando) con
+ * actividad o creación en los últimos 60 días. */
+async function fetchDealsEquipo(): Promise<DealEquipo[]> {
+  const out: DealEquipo[] = []
+  try {
+    const token = await getZohoAccessToken()
+    const desde = new Date(Date.now() - 60 * 24 * 3600e3).toISOString().split("T")[0]
+    for (let offset = 0; offset < 1000; offset += 200) {
+      const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          select_query:
+            `select id, Deal_Name, Stage, Created_Time, Last_Activity_Time, Owner.first_name, Owner.last_name, ` +
+            `Contact_Name.Phone, Contact_Name.Mobile, Account_Name.Account_Name from Deals ` +
+            `where ((Last_Activity_Time >= '${desde}T00:00:00-04:00' or Created_Time >= '${desde}T00:00:00-04:00') ` +
+            `and Stage not in ('Cierre Perdido', 'Congelado', 'Facturación congelada', '8. Facturando')) limit ${offset}, 200`,
+        }),
+      })
+      if (!r.ok || r.status === 204) break
+      const d = (await r.json().catch(() => ({}))) as { data?: DealEquipo[] }
+      const rows = d?.data || []
+      out.push(...rows)
+      if (rows.length < 200) break
+    }
+  } catch (e) {
+    console.warn("[vic-funnel] deals del equipo fallaron:", e instanceof Error ? e.message : e)
+  }
+  return out
+}
+
+/** Estado del dashboard para un deal que NO pasó por la escalera de Vicky:
+ * se mapea desde la etapa del pipeline de Zoho. */
+function estadoDesdeStage(stage: string): string {
+  const s = (stage || "").toLowerCase()
+  if (/implement|facturando|ganado/.test(s)) return "Ganada"
+  if (/perdido/.test(s)) return "Perdida"
+  if (/listo para cierre/.test(s)) return "Aceptada"
+  if (/propuesta|negociaci|piloto/.test(s)) return "Formal enviada"
+  if (/levantamiento/.test(s)) return "En levantamiento"
+  return "Contactado"
+}
+
 function empresaDeQuote(q: RawAceptada): string {
   return (
     String(q["Cuenta_Asociada.Account_Name"] || "").trim() ||
@@ -1082,8 +1141,13 @@ function construirListadoComercial(params: {
   preformAt: Map<string, string>
   analysisRows: Row[]
   pais: Pais
+  /** Cartera completa del equipo (deals activos de Zoho, pedido Lalo 07-ago). */
+  dealsEquipo?: DealEquipo[]
 }): FilaListado[] {
-  const { quotes, leads, dealsPorId, convs, preformAt, analysisRows, pais } = params
+  const { quotes, leads, dealsPorId, convs, preformAt, analysisRows, pais, dealsEquipo = [] } = params
+  // Deals ya representados por una fila de Vicky (cotización o lead
+  // convertido): la pasada 4 no los duplica.
+  const dealsUsados = new Set<string>()
   const delPais = (c: string) => paisDeTelefono(c) === pais
   const testSet = testContactSet()
   const convPorContacto = new Map(convs.map((c) => [digits(c.contact), c]))
@@ -1118,6 +1182,7 @@ function construirListadoComercial(params: {
     // el dashboard lo refleja — pedido Lalo 06-ago); la cotización respalda.
     const dealDeQuote = (() => {
       const id = String(q["Deal_Asociado.id"] || "") || String((tel && leadPorTel.get(tel)?.Converted_Deal?.id) || "")
+      if (id) dealsUsados.add(id)
       return id ? dealsPorId.get(id) : undefined
     })()
     filas.push({
@@ -1156,6 +1221,7 @@ function construirListadoComercial(params: {
     if (Date.parse(at) < corte30d) continue
     cubiertos.add(tel)
     const lead = leads.find((l) => digits(String(l.Phone || "")) === tel)
+    if (lead?.Converted_Deal?.id) dealsUsados.add(String(lead.Converted_Deal.id))
     const deal = lead?.Converted_Deal?.id ? dealsPorId.get(String(lead.Converted_Deal.id)) : undefined
     const conv = convPorContacto.get(tel)
     const ana = analisisPorContacto.get(tel)
@@ -1191,6 +1257,7 @@ function construirListadoComercial(params: {
     // Lead ya CONVERTIDO a deal (p. ej. por una SDR): el estado en Zoho y el
     // propietario son los del DEAL, no los del lead congelado (caso Chanares:
     // el dash decía "4. Calificado / —" mientras el deal era de Grey).
+    if (l.Converted_Deal?.id) dealsUsados.add(String(l.Converted_Deal.id))
     const deal = l.Converted_Deal?.id ? dealsPorId.get(String(l.Converted_Deal.id)) : undefined
     filas.push({
       empresa: String(l.Company || "").trim() || String(l.Full_Name || "").trim() || "(por identificar)",
@@ -1207,6 +1274,45 @@ function construirListadoComercial(params: {
       updatedIso: String(conv?.updated_at || ""),
       ultimoContactoIso: maxIso(conv?.updated_at, l.Last_Activity_Time, deal?.lastActivity),
       zohoUrl: zohoUrlDe(String(l.Converted_Deal?.id || ""), String(l.id || ""), null),
+    })
+  }
+
+  // 4. CARTERA COMPLETA del equipo (pedido Lalo 07-ago): deals activos de
+  //    Zoho que NO nacieron de Vicky ni están cubiertos por contacto o por
+  //    deal. Su estado se mapea desde la etapa del pipeline; el accionable
+  //    usa el análisis de la conversación cuando el contacto también habló
+  //    con Vicky.
+  for (const dl of dealsEquipo) {
+    const id = String(dl.id || "")
+    if (!id || dealsUsados.has(id)) continue
+    const stageDl = String(dl.Stage || "")
+    // Cinturón además del COQL: congelados/perdidos no son cartera activa.
+    if (/congelad|perdido/i.test(stageDl)) continue
+    let tel = digits(String(dl["Contact_Name.Mobile"] || dl["Contact_Name.Phone"] || ""))
+    // Celulares chilenos guardados sin el +56 ("955371823"): normalizar para
+    // que el filtro por país y el cruce con conversaciones funcionen.
+    if (tel.length === 9 && tel.startsWith("9")) tel = `56${tel}`
+    if (tel && (cubiertos.has(tel) || isTestContact(tel, testSet))) continue
+    // Sin teléfono no hay país que validar: esos deals van solo a la vista CL.
+    if (tel ? !delPais(tel) : pais !== "cl") continue
+    if (tel) cubiertos.add(tel)
+    const conv = tel ? convPorContacto.get(tel) : undefined
+    const ana = tel ? analisisPorContacto.get(tel) : undefined
+    filas.push({
+      empresa: String(dl["Account_Name.Account_Name"] || "").trim() || String(dl.Deal_Name || "").trim() || "(sin nombre)",
+      contacto: tel ? `+${tel}` : "—",
+      estado: estadoDesdeStage(stageDl),
+      fechaIso: String(dl.Created_Time || ""),
+      estadoZoho: stageDl || "—",
+      propietario: `${dl["Owner.first_name"] || ""} ${dl["Owner.last_name"] || ""}`.trim() || "—",
+      primerContactoIso: String(conv?.started_at || dl.Created_Time || ""),
+      convId: String(conv?.id || ""),
+      accionable: String(ana?.accionable || "").trim() || "Trato del ejecutivo en Zoho — revisar y avanzar la etapa.",
+      resumen: String(ana?.resumen || ""),
+      lastUserIso: String(conv?.last_user_at || ""),
+      updatedIso: String(conv?.updated_at || ""),
+      ultimoContactoIso: maxIso(conv?.updated_at, dl.Last_Activity_Time),
+      zohoUrl: zohoUrlDe(id, null, null),
     })
   }
 
@@ -3070,7 +3176,7 @@ export async function GET(req: Request): Promise<Response> {
     try {
       const contactosConocidos = new Set(convsListado.map((c) => digits(c.contact)))
       const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-      const [preformData, zohoListado, gestionadosKv, punteros, espejoTels] = await Promise.all([
+      const [preformData, zohoListado, gestionadosKv, punteros, espejoTels, dealsEquipo] = await Promise.all([
         fetchPreformAts(convsListado),
         fetchZohoListado(
           contactosConocidos,
@@ -3091,6 +3197,9 @@ export async function GET(req: Request): Promise<Response> {
           headers: hSb,
           cache: "no-store",
         }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ telefono_chat: string; enviado_at: string }>>,
+        // Cartera completa del equipo (pedido Lalo 07-ago): todos los deals
+        // activos de Zoho, hayan pasado o no por Vicky.
+        fetchDealsEquipo().catch(() => [] as DealEquipo[]),
       ])
       const preformAt = preformData.at
       wspVendedorSet = new Set(espejoTels.map((x) => digits(String(x.telefono_chat || ""))).filter(Boolean))
@@ -3137,6 +3246,7 @@ export async function GET(req: Request): Promise<Response> {
         preformAt,
         analysisRows: allRows,
         pais,
+        dealsEquipo,
       })
       // El WhatsApp del vendedor también es actividad (pedido Lalo 06-ago):
       // el último mensaje espejado con el cliente actualiza el último
