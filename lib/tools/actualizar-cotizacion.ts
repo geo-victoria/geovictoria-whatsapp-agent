@@ -88,6 +88,9 @@ export const actualizarCotizacionSchema = {
 }
 
 export type ActualizarCotizacionInput = {
+  /** SOLO editor interno (flujo confirmar-una-vez): false = no generar
+   * versión/PDF en esta edición; la confirmación versiona una sola vez. */
+  _regenerarPdf?: boolean
   quote_id: string
   userCount: number
   modulos: string[]
@@ -205,6 +208,11 @@ export async function actualizarCotizacion(
         body: JSON.stringify({
           quoteId,
           resumenCambio: args.resumen_cambio,
+          // Flujo confirmar-una-vez del editor interno (Lalo 07-ago): el
+          // editor pasa _regenerarPdf:false en cada cambio y la versión/PDF
+          // se generan UNA vez con la confirmación. Vicky con clientes no
+          // manda el flag → regeneración por edición, como siempre.
+          ...((args as { _regenerarPdf?: boolean })._regenerarPdf === false ? { regenerarPdf: false } : {}),
           cotizacion: {
             items,
             ufActual: Number(ufActual.toFixed(2)),

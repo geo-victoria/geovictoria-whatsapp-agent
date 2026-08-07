@@ -78,6 +78,14 @@ export async function datosDeCotizacion(quoteId: string): Promise<DatosCotizacio
  */
 export async function regenerarPdfFresco(quoteId: string): Promise<string> {
   try {
+    // Flujo confirmar-una-vez (Lalo 07-ago): si NO hay cambios sin versionar
+    // (marca pdf_dirty ausente), el PDF vigente ES la última versión
+    // confirmada — se envía tal cual, sin regenerar (evita el churn de
+    // versiones en cada envío). Solo se regenera cuando hay ediciones
+    // pendientes de confirmar o si la marca no se pudo leer.
+    const dirty = await getKvValue(`pdf_dirty_${quoteId}`).catch(() => "1")
+    if (!dirty) return ""
+
     const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
     const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
     if (!secret) return ""

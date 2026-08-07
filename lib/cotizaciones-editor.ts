@@ -649,6 +649,13 @@ const aplicarDescuentoSchema = {
   },
 }
 
+const confirmarVersionSchema = {
+  name: "confirmar_version",
+  description:
+    "Genera LA versión definitiva del PDF con todos los cambios aplicados en esta sesión (una sola versión, no una por cambio) y actualiza el link en todos lados (Zoho, panel, WhatsApp). Úsala cuando el vendedor confirme que NO hay más cambios que hacer — pregúntale SIEMPRE '¿algo más que modificar?' después de aplicar cambios, y solo con su confirmación llama esta tool. Si responde que ya estaba al día, no había cambios pendientes.",
+  input_schema: { type: "object" as const, properties: {} },
+}
+
 const enviarAlClienteSchema = {
   name: "enviar_cotizacion_al_cliente",
   description:
@@ -730,7 +737,7 @@ export async function chatVickyCotizaciones(params: {
     `1. El vendedor te pide cambios (dotación, agregar/quitar reloj, módulos, puntos de instalación). Aplícalos DE INMEDIATO con actualizar_cotizacion — sin pedir confirmación extra al vendedor (él ya es la confirmación). Pasa SIEMPRE la configuración COMPLETA final: parte de los ítems actuales del contexto y aplica el cambio pedido encima — incluidos los overrides de precio y las líneas manuales vigentes (códigos ajuste_* o precios distintos al catálogo en el contexto: vuelve a pasarlos en precios_override/items_extra o se pierden). AGREGAR o QUITAR cualquier ítem (módulos, relojes, instalación) SIEMPRE es posible por esta vía — jamás digas que "no hay soporte" para modificar un ítem ni derives a Zoho por eso. Si la cotizadora devuelve un error genérico, REINTENTA una vez con la misma configuración; si persiste, muestra al vendedor el error textual y sugiere reintentar en unos minutos (a Zoho manual solo si la cotización está Aceptada).`,
     `2. Reconstrucción de la configuración: los ítems con código de módulo (asistencia, vacaciones, …) van en "modulos"; los ítems con código de hardware van en "hardware" (respeta su modalidad arriendo/venta y cantidad actuales salvo que el vendedor pida cambiarlas); la dotación (userCount) es la Cantidad del ítem asistencia — si su modalidad es "Fijo" es el plan fijo (1-10): usa la dotación que te diga el vendedor o, si no la menciona y no la puedes deducir, pregúntasela. Los ítems de envío/instalación NO se pasan: se derivan de "puntosInstalacion" (uno por punto físico; si la cotización tiene reloj y no conoces la comuna del punto, pregúntala al vendedor antes de actualizar).`,
     `3. INSTALACIÓN DEL RELOJ — sentido EXACTO, no lo inviertas (error real del 07-ago): "el cliente lo instala él mismo / lo va a instalar el cliente / auto-instalación / sin visita técnica" → autoInstalada: true → NO se cobra instalación (el envío SÍ se cobra igual, el equipo se despacha de todas formas). "lo instala GeoVictoria / que vayan a instalarlo / con instalación" → autoInstalada: false → la instalación se cobra según zona. Después de CUALQUIER cambio de instalación o hardware, llama ver_cotizacion y verifica en los ítems que la línea de instalación quedó o desapareció según corresponde ANTES de responderle al vendedor; si quedó mal, corrige de inmediato con otra actualización.`,
-    `4. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó: dotación, ítems y total nuevo (UF y pesos aprox). El link de aceptación NO cambia y el PDF se regenera solo.`,
+    `4. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó (dotación, ítems, total nuevo en UF y pesos aprox) y PREGUNTA SIEMPRE: "¿algo más que modificar?". Las ediciones NO generan versión de PDF — cuando el vendedor confirme que no hay más cambios, llama confirmar_version: ahí se genera LA versión definitiva (una sola por sesión de cambios) y el link queda actualizado en todos lados. El link de aceptación NO cambia nunca. NO envíes al cliente sin haber confirmado la versión primero.`,
     `4. Descuentos (el vendedor SÍ puede pedirlos): usa aplicar_descuento con pct_objetivo = el % que pidió. La escalera oficial comitea escalones de 10% y 20% sobre el plan mensual, TOPE 20% (instalación y envío no tienen descuento); el servidor aplica el escalón que garantiza al menos lo pedido, acotado al tope. Informa SIEMPRE el % real comiteado y, si difiere de lo pedido, dilo sin vueltas. El descuento comiteado sobrevive a ediciones de configuración posteriores y la escalera no baja descuentos ya comiteados.`,
     `5. Valor de la UF: por defecto los totales en pesos usan la UF del día automáticamente. Si el vendedor pide fijar otro valor ("usa la UF a $39.500"), pásalo en valor_uf de actualizar_cotizacion y menciona en tu resumen qué valor de UF se usó. OJO: una edición posterior sin valor_uf recalcula con la UF del día — si el vendedor quiere mantener el valor fijado, vuelve a pasarlo en cada edición.`,
     `6. Enviar al cliente: SOLO cuando el vendedor dé el OK explícito, usa enviar_cotizacion_al_cliente. Antes de eso, el cliente no se entera de nada.`,
@@ -748,6 +755,7 @@ export async function chatVickyCotizaciones(params: {
   const tools = [
     verCotizacionSchema,
     actualizarSchemaEditor,
+    confirmarVersionSchema,
     aplicarDescuentoSchema,
     enviarAlClienteSchema,
   ] as unknown as Anthropic.Messages.Tool[]
@@ -792,6 +800,16 @@ export async function chatVickyCotizaciones(params: {
             ? { ok: true, resumen: resumenEstadoParaModelo(e), pdfUrl: e.puntero.pdfUrl, acceptanceUrl: e.puntero.acceptanceUrl }
             : { ok: false, error: "Sin cotización registrada para este contacto." }
           eventos.push({ tool: tu.name, ok: !!e, resumen: "Estado de la cotización consultado en Zoho" })
+        } else if (tu.name === "confirmar_version") {
+          const { regenerarPdfFresco } = await import("@/lib/enviar-cotizacion-wa")
+          const url = await regenerarPdfFresco(estado.puntero.quoteId)
+          if (url) {
+            eventos.push({ tool: tu.name, ok: true, resumen: "Versión definitiva del PDF generada y propagada 📄" })
+            output = { ok: true, pdfUrl: url, detalle: "Versión nueva generada con todos los cambios; el link quedó actualizado en todos lados (Zoho, panel, WhatsApp)." }
+          } else {
+            eventos.push({ tool: tu.name, ok: true, resumen: "Sin cambios pendientes — el PDF vigente ya era la última versión" })
+            output = { ok: true, detalle: "No había cambios sin versionar: el PDF vigente ya es la versión confirmada." }
+          }
         } else if (tu.name === "actualizar_cotizacion") {
           const input = tu.input as ActualizarCotizacionInput & {
             valor_uf?: number
@@ -805,6 +823,10 @@ export async function chatVickyCotizaciones(params: {
           const r = await actualizarCotizacion({
             ...input,
             quote_id: qid,
+            // Flujo confirmar-una-vez (Lalo 07-ago): las ediciones del chat
+            // NO generan versión/PDF — eso lo hace confirmar_version cuando
+            // el vendedor dice que no hay más cambios.
+            _regenerarPdf: false,
             ufValor: typeof input.valor_uf === "number" && input.valor_uf > 0 ? input.valor_uf : undefined,
             itemsExtra: Array.isArray(input.items_extra)
               ? input.items_extra.map((e) => ({
