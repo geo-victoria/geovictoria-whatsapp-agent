@@ -732,6 +732,11 @@ export async function GET(req: Request) {
           precioAt: c.pref_escalon_at ? new Date(c.pref_escalon_at) : null,
           formalAt: c.formal_quote_at ? new Date(c.formal_quote_at) : null,
           aceptada: false, // se verifica en Zoho SOLO si la decisión es traspasar
+          // Relojes con-precio de SILENCIO (08-ago): misma referencia que el
+          // TTV clásico — el último mensaje del CLIENTE, que los toques del
+          // Loop no mueven; cliente activo (nos debe respuesta Vicky) = no corre.
+          ultimoClienteAt: ultimoCliente,
+          clienteRespondioDespues,
           pais,
           ahora,
           feriados,

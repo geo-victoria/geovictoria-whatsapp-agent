@@ -440,12 +440,15 @@ async function processOneTurn(
       : ""
     const contextoCotizacion =
       contextoUmbral + (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente
-    // Directiva de turno (determinista): si el MENSAJE declara una dotación
-    // sobre el umbral ("30 trabajadores"), se ordena derivar en esta misma
-    // respuesta, al FINAL del prompt (recencia) — la E2E mostró que el guion
-    // de venta le gana a las reglas del preámbulo.
+    // Directiva determinista (umbral 08-ago): si la CONVERSACIÓN declaró una
+    // dotación sobre el umbral ("30 trabajadores" — en este mensaje o en
+    // cualquiera anterior del cliente), la directiva va al FINAL del prompt
+    // (recencia) y persiste todos los turnos: derivar si falta, y acompañar
+    // sin precios siempre — la E2E mostró que el guion de venta le gana a
+    // las reglas del preámbulo.
+    const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
     const dotacionDetectada = umbralInfo
-      ? dotacionSobreUmbral(message, umbralInfo.umbral)
+      ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral)
       : null
     const directivaUmbral = dotacionDetectada && umbralInfo
       ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral)

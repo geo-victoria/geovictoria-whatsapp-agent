@@ -171,11 +171,16 @@ export function mensajeChequeo(pais: "cl" | "co" | "mx" | "pe", nombreVendedor: 
 
 // ── TRASPASO v2 (acuerdo Lalo 03-ago; CL + PE + CO desde 05-ago) ────────────
 //
-// Con VICKY_TRASPASO_V2_ENABLED=on y país CL, los TTV de silencio mueren y
-// entran topes de DURACIÓN DE ETAPA que corren aunque el cliente converse:
-//   inicio de conversación → preform:      120 minutos hábiles
-//   precio dado → formal aceptada:          15 minutos hábiles
-//   formal entregada → aceptada:            10 minutos hábiles
+// Con VICKY_TRASPASO_V2_ENABLED=on y país CL/PE/CO corren estos relojes,
+// AJUSTADOS el 08-ago por orden de Lalo (diagnóstico de la caída de ventas:
+// los relojes de DURACIÓN DE ETAPA con precio caían en plena compra — la
+// mediana histórica emisión→pago es 36 min y el reloj cortaba a los 10-15):
+//   inicio de conversación → preform:      120 minutos hábiles DE ETAPA
+//                                          (corre aunque el cliente converse)
+//   precio dado / formal entregada:         15 minutos hábiles DE SILENCIO
+//                                          (desde el último mensaje del
+//                                          CLIENTE; un cliente conversando
+//                                          activamente JAMÁS se traspasa)
 // Los relojes solo corren en horario hábil (fuera de L-V 8-18 se congelan) y
 // la pausa anunciada por el cliente los suspende. Solo aplican a
 // conversaciones VIVAS (el cliente respondió la primera pregunta —
@@ -186,8 +191,10 @@ export function mensajeChequeo(pais: "cl" | "co" | "mx" | "pe", nombreVendedor: 
 // vigente sin cambiar propietarios (regla equipo CO: el primero se lo queda).
 
 export const ETAPA_INICIO_PREFORM_MIN = 120
-export const ETAPA_PRECIO_ACEPTACION_MIN = 15
-export const ETAPA_FORMAL_ACEPTACION_MIN = 10
+/** Con precio (referencial o formal): minutos hábiles de SILENCIO del
+ * cliente que gatillan el traspaso (08-ago — vuelve la semántica del TTV
+ * original del doc: 15 con precio, pero medida en minutos hábiles). */
+export const SILENCIO_CON_PRECIO_MIN = TTV_CON_PRECIO_MIN
 /** Reloj de calificación: 24 horas HÁBILES = 1440 minutos hábiles. */
 export const CALIFICACION_24H_MIN = 24 * 60
 
@@ -236,13 +243,20 @@ export function debeTraspasarEtapa(params: {
   precioAt: Date | null
   formalAt: Date | null
   aceptada: boolean
+  /** Último mensaje del CLIENTE — referencia de los relojes de silencio
+   * con-precio (08-ago). Los toques del Loop no lo mueven. */
+  ultimoClienteAt: Date | null
+  /** true si el cliente escribió DESPUÉS del último movimiento de la
+   * conversación (Vicky le debe respuesta): con el cliente activo los
+   * relojes con-precio no corren. */
+  clienteRespondioDespues: boolean
   pais: "cl" | "co" | "mx" | "pe"
   ahora: Date
   feriados?: Set<string>
   compromisoAt?: Date | null
   traspasoActivo: boolean
 }): { traspasar: boolean; motivo?: string; ttv?: number } {
-  const { firstUserAt, userMsgCount, precioAt, formalAt, aceptada, pais, ahora, feriados, compromisoAt, traspasoActivo } = params
+  const { firstUserAt, userMsgCount, precioAt, formalAt, aceptada, ultimoClienteAt, clienteRespondioDespues, pais, ahora, feriados, compromisoAt, traspasoActivo } = params
   if (traspasoActivo) return { traspasar: false }
   if (aceptada) return { traspasar: false }
   if (compromisoAt && compromisoAt.getTime() > ahora.getTime()) return { traspasar: false }
@@ -251,23 +265,31 @@ export function debeTraspasarEtapa(params: {
   // aplica (gobierna el de calificación de 24 h → telemarketing).
   if (!firstUserAt || userMsgCount < 2) return { traspasar: false }
 
-  // Etapa más avanzada primero; una pausa anunciada ya vencida corre el
-  // inicio del reloj hasta su vencimiento (la pausa no cuenta como demora).
-  const inicioEtapa = (base: Date): Date =>
+  // Una pausa anunciada ya vencida corre el inicio del reloj hasta su
+  // vencimiento (la pausa no cuenta como demora).
+  const desdeConPausa = (base: Date): Date =>
     compromisoAt && compromisoAt.getTime() > base.getTime() ? compromisoAt : base
-  if (formalAt) {
-    const min = minutosHabilesEntre(inicioEtapa(formalAt), ahora, pais, feriados)
-    return min >= ETAPA_FORMAL_ACEPTACION_MIN
-      ? { traspasar: true, motivo: "etapa_formal_sin_aceptar", ttv: ETAPA_FORMAL_ACEPTACION_MIN }
+
+  // CON PRECIO (referencial o formal) — reloj de SILENCIO (08-ago, orden de
+  // Lalo tras la caída de ventas): el cliente conversando activamente no se
+  // interrumpe; el que se calla 15 min hábiles después de ver el precio se
+  // entrega al vendedor. El silencio parte en el evento MÁS RECIENTE entre
+  // su último mensaje y la entrega del precio/formal.
+  const conPrecioAt = formalAt || precioAt
+  if (conPrecioAt) {
+    if (clienteRespondioDespues) return { traspasar: false }
+    if (!ultimoClienteAt) return { traspasar: false }
+    const base = ultimoClienteAt.getTime() > conPrecioAt.getTime() ? ultimoClienteAt : conPrecioAt
+    const min = minutosHabilesEntre(desdeConPausa(base), ahora, pais, feriados)
+    return min >= SILENCIO_CON_PRECIO_MIN
+      ? {
+          traspasar: true,
+          motivo: formalAt ? "formal_sin_respuesta" : "precio_sin_respuesta",
+          ttv: SILENCIO_CON_PRECIO_MIN,
+        }
       : { traspasar: false }
   }
-  if (precioAt) {
-    const min = minutosHabilesEntre(inicioEtapa(precioAt), ahora, pais, feriados)
-    return min >= ETAPA_PRECIO_ACEPTACION_MIN
-      ? { traspasar: true, motivo: "etapa_precio_sin_aceptar", ttv: ETAPA_PRECIO_ACEPTACION_MIN }
-      : { traspasar: false }
-  }
-  const min = minutosHabilesEntre(inicioEtapa(firstUserAt), ahora, pais, feriados)
+  const min = minutosHabilesEntre(desdeConPausa(firstUserAt), ahora, pais, feriados)
   return min >= ETAPA_INICIO_PREFORM_MIN
     ? { traspasar: true, motivo: "etapa_sin_preform", ttv: ETAPA_INICIO_PREFORM_MIN }
     : { traspasar: false }

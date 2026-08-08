@@ -111,15 +111,18 @@ export function dotacionSobreUmbral(mensaje: string, umbral: number): number | n
 }
 
 /**
- * Directiva de turno cuando el mensaje declara dotación sobre el umbral.
- * Va AL FINAL del system prompt: la instrucción más cercana a la respuesta.
+ * Directiva cuando la CONVERSACIÓN declaró dotación sobre el umbral (se
+ * escanea el mensaje actual + los mensajes previos del cliente, así la
+ * directiva persiste todos los turnos siguientes). Va AL FINAL del system
+ * prompt: la instrucción más cercana a la respuesta. Es idempotente: ordena
+ * derivar solo si aún no se ha derivado en la conversación.
  */
 export function formatDirectivaSobreUmbral(n: number, umbral: number): string {
   return (
-    `\n\nATENCIÓN PARA ESTE TURNO (detección automática): el cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). ` +
-    `En ESTA respuesta NO sigas el flujo de cotización (nada de preguntar marcaje, puntos ni módulos) y NO des ni prometas precios. ` +
-    `Aplica la regla UMBRAL DE PRECIOS: si ya tienes nombre, email y empresa, llama derivar_a_soporte motivo "fuera_de_rango_trabajadores" AHORA (pasando nombre, email, empresa y trabajadores) y responde acompañando (dudas, reunión con agendar_reunion, siguiente paso). ` +
-    `Si te falta alguno de esos tres datos, pídelos TODOS en una sola pregunta y deriva apenas lleguen.\n`
+    `\n\nATENCIÓN (detección automática): este cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). Reglas OBLIGATORIAS de aquí en adelante:\n` +
+    `- NO sigas el flujo de cotización (nada de preguntar marcaje, puntos ni módulos) y NO des ni prometas precios en ninguna respuesta.\n` +
+    `- Si AÚN no derivaste en esta conversación: con nombre, email y empresa llama derivar_a_soporte motivo "fuera_de_rango_trabajadores" AHORA MISMO, pasando nombre, email, empresa y trabajadores. NO necesitas el RUT para derivar (el RUT lo captura el ejecutivo) — no lo pidas antes de derivar. Si falta alguno de los TRES datos (nombre, email, empresa), pídelos todos en una sola pregunta y deriva apenas lleguen.\n` +
+    `- Si YA derivaste (revisa el historial: ya anunciaste que un ejecutivo entregará el valor): NO vuelvas a derivar ni a repetir el anuncio. Solo acompaña: responde dudas de producto/implementación, ofrece agendar reunión con agendar_reunion y empuja el siguiente paso, siempre sin precios.\n`
   )
 }
 

@@ -82,7 +82,8 @@ export async function POST(req: Request): Promise<Response> {
   const contextoUmbral = umbralInfo
     ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen)
     : ""
-  const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(message, umbralInfo.umbral) : null
+  const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
+  const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral) : null
   const directivaUmbral =
     dotacionDetectada && umbralInfo
       ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral)

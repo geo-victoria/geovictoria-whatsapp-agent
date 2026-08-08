@@ -204,3 +204,84 @@ describe("cableado del cron", () => {
     assert.match(CRON, /via: "dueno_deal"/)
   })
 })
+
+describe("relojes v2 con-precio son de SILENCIO (orden Lalo 08-ago)", () => {
+  // El diagnóstico de la caída de ventas: el reloj de etapa con precio caía
+  // en plena compra (mediana histórica emisión→pago = 36 min; el reloj
+  // cortaba a los 10-15). Con precio dado, el traspaso vuelve a medir
+  // SILENCIO del cliente: quien conversa jamás se interrumpe.
+  const min = (n: number) => new Date(MIERCOLES_HABIL.getTime() - n * 60000)
+  const base = {
+    pais: "cl" as const,
+    ahora: MIERCOLES_HABIL,
+    traspasoActivo: false,
+    compromisoAt: null,
+    aceptada: false,
+    firstUserAt: min(300),
+    userMsgCount: 5,
+  }
+
+  test("cliente ACTIVO con formal de hace 30 min → NO se traspasa", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      precioAt: min(40),
+      formalAt: min(30),
+      ultimoClienteAt: min(2),
+      clienteRespondioDespues: true,
+    })
+    assert.equal(d.traspasar, false)
+  })
+
+  test("cliente recién respondió (silencio 2 min) tras la formal → NO se traspasa", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      precioAt: min(40),
+      formalAt: min(30),
+      ultimoClienteAt: min(2),
+      clienteRespondioDespues: false,
+    })
+    assert.equal(d.traspasar, false)
+  })
+
+  test("silencio de 20 min tras ver el precio → traspasa (15 de silencio)", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      precioAt: min(25),
+      formalAt: null,
+      ultimoClienteAt: min(20),
+      clienteRespondioDespues: false,
+    })
+    assert.equal(d.traspasar, true)
+    assert.equal(d.motivo, "precio_sin_respuesta")
+    assert.equal(d.ttv, 15)
+  })
+
+  test("formal recién emitida a cliente callado hace 1h: el silencio parte en la FORMAL", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      precioAt: min(70),
+      formalAt: min(5),
+      ultimoClienteAt: min(60),
+      clienteRespondioDespues: false,
+    })
+    assert.equal(d.traspasar, false)
+  })
+
+  test("sin precio, el reloj de etapa 120' sigue corriendo aunque converse", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      firstUserAt: min(130),
+      precioAt: null,
+      formalAt: null,
+      ultimoClienteAt: min(3),
+      clienteRespondioDespues: false,
+    })
+    assert.equal(d.traspasar, true)
+    assert.equal(d.motivo, "etapa_sin_preform")
+  })
+})
