@@ -15,6 +15,7 @@
  */
 
 import { NextResponse } from "next/server"
+import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -70,8 +71,14 @@ export async function GET(req: Request): Promise<Response> {
   const sp = new URL(req.url).searchParams
   const key = (sp.get("key") || "").trim()
   const headerSecret = (req.headers.get("x-vicky-secret") || "").trim()
-  const ok =
+  let ok =
     (CRON_SECRET && key === CRON_SECRET) || (VICKY_SECRET && headerSecret === VICKY_SECRET)
+  if (!ok && key) {
+    // Mismo esquema que vic-botmaker-status: el secreto operativo de vic_kv
+    // también vale (el CRON_SECRET de env no siempre está a mano).
+    const kvSecret = await getFollowupCronSecret().catch(() => "")
+    ok = Boolean(kvSecret && key === kvSecret)
+  }
   if (!ok) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   if (!BM_TOKEN) return NextResponse.json({ ok: false, error: "BOTMAKER_ACCESS_TOKEN no configurado" }, { status: 500 })
 
