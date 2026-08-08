@@ -485,21 +485,78 @@ export async function compromisoLoop(contact: string, fechaIso: string): Promise
 }
 
 /**
- * Contactos (de la lista dada) con traspaso a vendedor ACTIVO (vic_ptv).
- * Un traspasado no recibe NINGUNA proactividad de Vicky (doc "Vicky paso a
- * paso"): el vendedor está encima y el único contacto posterior es el chequeo
- * de calidad del propio PTV. Regla explícita — antes la protección era un
- * efecto secundario de la exclusión por vic_loop, y los traspasados sin fila
- * de loop quedaban expuestos (auditoría 31-jul).
+ * Contactos ATENDIDOS por su vendedor tras el traspaso: hay evidencia de
+ * contacto humano real POSTERIOR a traspasado_at — un mensaje del vendedor
+ * desde su WhatsApp espejado (from_me) o una llamada de WhatsApp contestada
+ * (estado accept en vic_wa_espejo_llamadas). Margen de 5 min hacia atrás por
+ * desfases de reloj. Best-effort: si el espejo no responde, set vacío.
+ */
+export async function contactosAtendidosPorVendedor(
+  pares: Array<{ contact: string; desdeIso: string }>,
+): Promise<Set<string>> {
+  const out = new Set<string>()
+  if (!pares.length || !SUPABASE_URL || !SUPABASE_KEY) return out
+  const desdePor = new Map(pares.map((p) => [p.contact, Date.parse(p.desdeIso || "") - 5 * 60_000]))
+  const lista = pares.map((p) => `"${p.contact}"`).join(",")
+  const [msjRes, llamRes] = await Promise.all([
+    supa(
+      `vic_wa_espejo_mensajes?telefono_chat=in.(${lista})&from_me=eq.true&es_grupo=eq.false&select=telefono_chat,enviado_at&limit=5000`,
+    ).catch(() => null),
+    supa(`vic_wa_espejo_llamadas?telefono=in.(${lista})&estado=eq.accept&select=telefono,at&limit=2000`).catch(
+      () => null,
+    ),
+  ])
+  const marcar = (tel: string | null | undefined, atIso: string | null | undefined) => {
+    const t = String(tel || "")
+    const desde = desdePor.get(t)
+    if (desde === undefined || !atIso) return
+    const at = Date.parse(String(atIso))
+    if (Number.isFinite(at) && at >= desde) out.add(t)
+  }
+  if (msjRes?.ok) {
+    const rows = ((await msjRes.json().catch(() => [])) as Array<{ telefono_chat: string; enviado_at: string }>) || []
+    for (const r of rows) marcar(r.telefono_chat, r.enviado_at)
+  }
+  if (llamRes?.ok) {
+    const rows = ((await llamRes.json().catch(() => [])) as Array<{ telefono: string; at: string }>) || []
+    for (const r of rows) marcar(r.telefono, r.at)
+  }
+  return out
+}
+
+/**
+ * Contactos (de la lista dada) cuyo traspaso a vendedor SILENCIA a Vicky.
+ *
+ * CANDADO v3 (Lalo 07-ago, "haz la 2"): el traspaso por sí solo YA NO calla a
+ * Vicky. Diagnóstico del 07-ago: desde el encendido del traspaso v2 (03-ago
+ * 17:30) las formales se traspasaban a los 10-15 min, el candado silenciaba
+ * los seguimientos de cierre de Vicky y el vendedor convertía ~0 (0/57
+ * outbound) — 68 formales emitidas del 04 al 07 con CERO aceptadas. Ahora el
+ * contacto queda mudo para Vicky SOLO cuando su vendedor hizo contacto real
+ * (mensaje desde su WhatsApp espejado o llamada contestada, posterior al
+ * traspaso): hasta entonces la venta sigue siendo de Vicky, y el vendedor
+ * puede sumarse cuando llame. Env VICKY_PTV_CANDADO_CLASICO=1 restaura el
+ * comportamiento anterior (traspasado ⇒ mudo) como rollback sin deploy.
  */
 export async function contactosTraspasados(contacts: string[]): Promise<Set<string>> {
   const out = new Set<string>()
   if (!contacts.length || !SUPABASE_URL || !SUPABASE_KEY) return out
   const lista = contacts.map((c) => `"${c}"`).join(",")
-  const res = await supa(`vic_ptv?contact=in.(${lista})&estado=eq.activo&select=contact`).catch(() => null)
+  const res = await supa(
+    `vic_ptv?contact=in.(${lista})&estado=eq.activo&select=contact,traspasado_at`,
+  ).catch(() => null)
   if (!res || !res.ok) return out
-  const rows = ((await res.json().catch(() => [])) as Array<{ contact: string }>) || []
-  for (const r of rows) if (r.contact) out.add(r.contact)
+  const rows =
+    ((await res.json().catch(() => [])) as Array<{ contact: string; traspasado_at?: string }>) || []
+  if (!rows.length) return out
+  if ((process.env.VICKY_PTV_CANDADO_CLASICO || "").trim() === "1") {
+    for (const r of rows) if (r.contact) out.add(r.contact)
+    return out
+  }
+  const atendidos = await contactosAtendidosPorVendedor(
+    rows.map((r) => ({ contact: r.contact, desdeIso: r.traspasado_at || "" })),
+  ).catch(() => new Set<string>())
+  for (const r of rows) if (r.contact && atendidos.has(r.contact)) out.add(r.contact)
   return out
 }
 

@@ -32,6 +32,7 @@ import {
   sumarHorasHabiles,
 } from "@/lib/ptv"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { contactosAtendidosPorVendedor } from "@/lib/loop-v2"
 import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
@@ -896,6 +897,14 @@ export async function GET(req: Request) {
     }
   }
 
+  // 4. CANDADO v3 (Lalo 07-ago, "haz la 2"): el traspaso ya no silencia a
+  // Vicky hasta que el vendedor haga contacto REAL. Esta reconciliación
+  // mantiene el vic_loop en sincronía con esa regla, en ambas direcciones.
+  const reconciliacion = await reconciliarSilencioTraspasos().catch((e) => {
+    console.warn("[ptv-cron] reconciliación de silencio falló:", e instanceof Error ? e.message : e)
+    return { reabiertos: 0, recerrados: 0 }
+  })
+
   return NextResponse.json({
     ok: true,
     conversaciones_revisadas: convs.length,
@@ -903,5 +912,76 @@ export async function GET(req: Request) {
     tm_traspasados: tmTraspasados,
     chequeos_procesados: chequeos.length,
     chequeos_enviados: chequeosEnviados,
+    loops_reabiertos_sin_atencion: reconciliacion.reabiertos,
+    loops_recerrados_por_atencion: reconciliacion.recerrados,
   })
+}
+
+/**
+ * Reconciliación del silencio post-traspaso (candado v3, Lalo 07-ago).
+ *
+ * Diagnóstico del 07-ago: el traspaso v2 cerraba el vic_loop al minuto 10-15
+ * de la etapa y el candado silenciaba TODA proactividad — 68 formales
+ * emitidas del 04 al 07-ago con CERO aceptadas, mientras el vendedor
+ * convertía ~0. La regla nueva: Vicky sigue con sus seguimientos de cierre
+ * hasta que haya contacto humano REAL (mensaje del vendedor por su WhatsApp
+ * espejado o llamada contestada, después del traspaso).
+ *
+ *  - REABRE loops cerrados por ptv_traspasado/tm_traspasado (últimos 7 días)
+ *    cuyo vendedor aún no contacta al cliente: toques escalonados para no
+ *    disparar una ráfaga.
+ *  - RE-CIERRA los reabiertos cuando la atención del vendedor aparece (el
+ *    humano tomó la conversación; Vicky vuelve a callar como siempre).
+ *
+ * Con VICKY_PTV_CANDADO_CLASICO=1 no reabre nada (rollback sin deploy).
+ */
+async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; recerrados: number }> {
+  if ((process.env.VICKY_PTV_CANDADO_CLASICO || "").trim() === "1") return { reabiertos: 0, recerrados: 0 }
+  const desde = new Date(Date.now() - 7 * 24 * 3600e3).toISOString()
+  const ptvRows = await supa<{ contact: string; traspasado_at?: string }>(
+    `vic_ptv?estado=eq.activo&traspasado_at=gte.${encodeURIComponent(desde)}&select=contact,traspasado_at&limit=500`,
+  ).catch(() => [])
+  if (!ptvRows.length) return { reabiertos: 0, recerrados: 0 }
+  const testSet = testContactSet()
+  const vivos = ptvRows.filter((r) => r.contact && !isTestContact(r.contact, testSet))
+  const atendidos = await contactosAtendidosPorVendedor(
+    vivos.map((r) => ({ contact: r.contact, desdeIso: r.traspasado_at || "" })),
+  ).catch(() => new Set<string>())
+
+  const lista = vivos.map((r) => `"${r.contact}"`).join(",")
+  const loops = await supa<{ contact: string; estado: string; motivo_cierre: string | null }>(
+    `vic_loop?contact=in.(${lista})&select=contact,estado,motivo_cierre&limit=500`,
+  ).catch(() => [])
+
+  let reabiertos = 0
+  let recerrados = 0
+  const ahoraMs = Date.now()
+  for (const l of loops) {
+    const atendido = atendidos.has(l.contact)
+    if (!atendido && l.estado === "cerrado" && (l.motivo_cierre === "ptv_traspasado" || l.motivo_cierre === "tm_traspasado")) {
+      if (reabiertos >= 40) continue
+      // Escalonado: 20 min + 7 min por loop reabierto en este tick.
+      const proximoToque = new Date(ahoraMs + 20 * 60_000 + reabiertos * 7 * 60_000).toISOString()
+      await supa(`vic_loop?contact=eq.${encodeURIComponent(l.contact)}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          estado: "activo",
+          motivo_cierre: null,
+          next_touch_at: proximoToque,
+          updated_at: new Date().toISOString(),
+        }),
+      }).catch(() => {})
+      reabiertos++
+    } else if (atendido && l.estado === "activo") {
+      await supa(`vic_loop?contact=eq.${encodeURIComponent(l.contact)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ estado: "cerrado", motivo_cierre: "ptv_traspasado", updated_at: new Date().toISOString() }),
+      }).catch(() => {})
+      recerrados++
+    }
+  }
+  if (reabiertos || recerrados) {
+    console.log(`[ptv-cron] candado v3: ${reabiertos} loops reabiertos (vendedor sin contactar), ${recerrados} re-cerrados (vendedor atendió)`)
+  }
+  return { reabiertos, recerrados }
 }
