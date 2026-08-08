@@ -638,6 +638,8 @@ async function convertirConDeal(
   // — mata la carrera lead-reasignado-vs-hito que mandó el deal de VDZ a la
   // tómbola mientras el cliente conocía a Aleydis.
   ownerForzadoId?: string,
+  // Umbral 08-ago: derivación con promesa de ejecutivo → sorteo al nacer.
+  sorteoInmediato?: boolean,
 ): Promise<string | null> {
   const { h, api } = await zohoHeaders()
   const territorio = territorioDeContacto(contact) || "Chile"
@@ -812,7 +814,10 @@ async function convertirConDeal(
         // Rodrigo/Neumasport: el sorteo en caliente lo alertaba apenas el
         // cliente veía el precio). Los >50 SÍ se sortean al nacer (doc
         // Rodrigo 30-jul: deal + tómbola en el acto — no tienen relojes).
-        if (territorio === "Chile" && empleados > 0 && empleados <= 50) {
+        // Umbral 08-ago: sorteoInmediato (derivación sobre-umbral) también
+        // sortea al nacer, con cualquier N — al cliente ya se le prometió
+        // que un ejecutivo le entrega el precio.
+        if (!sorteoInmediato && territorio === "Chile" && empleados > 0 && empleados <= 50) {
           console.log(
             `[crm-hitos] deal ${dealCreado} (${empleados} empleados) queda en Vicky — sorteo y notificación al traspaso, no en caliente`,
           )
@@ -997,7 +1002,10 @@ export async function sincronizarHitoCrm(
   contact: string,
   hito: Hito,
   datos: DatosConversacion = {},
-  opts: { noCrear?: boolean; ownerForzadoEmail?: string } = {},
+  // sorteoInmediato (umbral 08-ago): el hito viene de una derivación donde al
+  // cliente se le prometió ejecutivo — el deal CL ≤50 NO espera en Vicky: la
+  // tómbola sortea y notifica al nacer, igual que los >50.
+  opts: { noCrear?: boolean; ownerForzadoEmail?: string; sorteoInmediato?: boolean } = {},
 ): Promise<void> {
   try {
     if (!habilitado()) return
@@ -1103,7 +1111,7 @@ export async function sincronizarHitoCrm(
         console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${creado.leadId} espera identidad para convertir (deal pendiente)`)
         return
       }
-      const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined)
+      const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato)
       if (!dealId) console.warn(`[crm-hitos] ${clean}: lead ${creado.leadId} quedó sin convertir`)
       else await actualizarNotaTranscripcion(dealId, clean)
       return
@@ -1187,7 +1195,7 @@ export async function sincronizarHitoCrm(
         await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
-      const dealNuevo = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined)
+      const dealNuevo = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato)
       if (dealNuevo) await actualizarNotaTranscripcion(dealNuevo, clean)
       return
     }
@@ -1238,6 +1246,23 @@ export async function sincronizarHitoCrm(
     }
     await avanzarDealHasta(dealId, piso)
     await actualizarNotaTranscripcion(dealId, clean)
+    // Umbral 08-ago: si el deal EXISTENTE seguía esperando con Vicky (u otro
+    // interino) y este hito promete ejecutivo (sorteoInmediato), la tómbola
+    // corre ahora — el caso "cotizó con 15, hoy dice que son 30" no puede
+    // quedar esperando el reloj de 120'. Dueño humano real jamás se pisa.
+    if (opts.sorteoInmediato) {
+      try {
+        const { h, api } = await zohoHeaders()
+        const rOwner = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: h, cache: "no-store" })
+        const ownerId = String(
+          ((await rOwner.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string } }> }).data?.[0]?.Owner?.id || "",
+        )
+        if (ownerId && INTERINOS.has(ownerId)) {
+          await aplicarTombolaDeals(String(dealId), territorioDeContacto(clean) || "Chile")
+          console.log(`[crm-hitos] ${clean}: deal ${dealId} esperaba en interino — sorteado por derivación sobre-umbral`)
+        }
+      } catch { /* best-effort: el reloj de traspaso sigue de respaldo */ }
+    }
   } catch (e) {
     console.warn("[crm-hitos] excepción:", e instanceof Error ? e.message : e)
   }

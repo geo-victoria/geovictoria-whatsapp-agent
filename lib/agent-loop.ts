@@ -38,7 +38,8 @@ import { getTimezone, computeMeetingReminderAt } from "./calendar"
 import { duenoCotizacionVigente, type DuenoReunion } from "./tools/agendar-reunion"
 import { eventoSeguimientoDe } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
-import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD, actualizarNotaTranscripcion } from "./crm-hitos"
+import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD, actualizarNotaTranscripcion, parseEmpleados } from "./crm-hitos"
+import { umbralPrecios, SCOPE_MAX_SISTEMA } from "./umbral-autonomia"
 import { mas50CierraLoop } from "./loop-v2"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
@@ -446,6 +447,38 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // UMBRAL DE VENTA AUTÓNOMA (Lalo 08-ago): inbound 20 / outbound 10 —
+        // sobre el umbral (y hasta 50) Vicky NO da precios: deriva (deal +
+        // tómbola en el acto) y ACOMPAÑA sin precio. Guarda DETERMINISTA:
+        // el prompt lleva la misma regla, pero si el modelo intenta cotizar
+        // igual, la tool se bloquea con guía. Solo CL; rollback por env
+        // VICKY_UMBRAL_CLASICO=1 (umbralPrecios devuelve 50 y nada se activa).
+        let bloqueoUmbral = ""
+        if (
+          contact &&
+          contact.replace(/\D/g, "").startsWith("56") &&
+          (toolName === "cotizar_referencial" ||
+            toolName === "consultar_descuento_referencial" ||
+            toolName === "generar_link_cotizadora") &&
+          typeof (toolInput as Record<string, unknown>).userCount === "number"
+        ) {
+          const uc = (toolInput as { userCount: number }).userCount
+          const { umbral, origen } = await umbralPrecios(contact).catch(() => ({
+            umbral: SCOPE_MAX_SISTEMA,
+            origen: "inbound" as const,
+          }))
+          if (uc > umbral) {
+            bloqueoUmbral =
+              `REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): esta conversación es ${origen} y tu umbral para DAR PRECIOS es ${umbral} trabajadores; con ${uc} el precio lo entrega un ejecutivo. ` +
+              `NO des precios ni estimados (tampoco de memoria del catálogo). Haz esto AHORA: (1) si te falta nombre, email o empresa, captúralos primero; ` +
+              `(2) deriva con derivar_a_soporte motivo "fuera_de_rango_trabajadores" pasando nombre, email, empresa y trabajadores — el trato entra AL ACTO a la tómbola y un ejecutivo lo toma con el precio; ` +
+              `(3) NO te despidas: sigue acompañando al cliente — responde todas sus dudas (producto, implementación, hardware, prueba), ofrece agendar una reunión con agendar_reunion y empuja el cierre EN EQUIPO con el ejecutivo.`
+            console.warn(
+              `[agent-loop] umbral autonomía: ${toolName} bloqueado (${uc} > ${umbral} ${origen}) contacto ${contact}.`,
+            )
+          }
+        }
+
         let result: Awaited<ReturnType<typeof dispatchTool>>
         // REUNIÓN POST-FORMAL = del dueño del deal, no del Round Robin (Lalo,
         // 21-jul, caso notaría). Desde el 28-jul existe la forma de AGENDARLA
@@ -487,6 +520,11 @@ export async function runAgentLoop(params: {
             mensajeParaProspecto:
               "Listo! Le pasé tu horario al ejecutivo a cargo de tu cotización — te va a enviar la invitación de la reunión para confirmarla 😊",
           } as unknown as Awaited<ReturnType<typeof dispatchTool>>
+        } else if (bloqueoUmbral) {
+          result = {
+            ok: false,
+            error: bloqueoUmbral,
+          } as Awaited<ReturnType<typeof dispatchTool>>
         } else if (toolName === "generar_link_cotizadora" && generarLinkEnEsteTurno >= 1) {
           // Una sola cotización formal por turno (cada PDF es pesado; varias en
           // un turno revientan el timeout de 60s y dejan el chat sin respuesta).
@@ -605,7 +643,26 @@ export async function runAgentLoop(params: {
             String(toolInput.motivo || "") === "fuera_de_rango_trabajadores") ||
           (toolName === "derivar_a_ejecutivo" && String(toolInput.motivo || "") === "mas_de_50")
         if (contact && esDerivacionMas50) {
-          void mas50CierraLoop(contact).catch(() => undefined)
+          // UMBRAL 08-ago: la banda sobre-umbral pero ≤50 NO cierra el loop —
+          // Vicky acompaña la venta (seguimientos sin precio, candado v3 hasta
+          // contacto real del vendedor). Solo el >50 genuino (o sin N legible,
+          // conservador) sale del seguimiento como siempre.
+          const nDerivado =
+            toolName === "derivar_a_soporte"
+              ? parseEmpleados((toolInput as Record<string, unknown>).trabajadores)
+              : undefined
+          const acompanar =
+            toolName === "derivar_a_soporte" &&
+            typeof nDerivado === "number" &&
+            nDerivado >= 1 &&
+            nDerivado <= SCOPE_MAX_SISTEMA
+          if (acompanar) {
+            console.log(
+              `[agent-loop] derivación sobre-umbral (${nDerivado} trabajadores ≤${SCOPE_MAX_SISTEMA}): loop sigue vivo — Vicky acompaña (contacto ${contact}).`,
+            )
+          } else {
+            void mas50CierraLoop(contact).catch(() => undefined)
+          }
         }
         // ORDEN LALO 06-ago: el >50 que Vicky no puede cotizar pasa SÍ O SÍ a
         // la tómbola de deals con sus datos (N° empleados incluido, para caer
@@ -621,10 +678,15 @@ export async function runAgentLoop(params: {
           toolName === "derivar_a_soporte" &&
           String(toolInput.motivo || "") === "fuera_de_rango_trabajadores"
         ) {
+          // sorteoInmediato (umbral 08-ago): al cliente se le acaba de decir
+          // "un ejecutivo te entrega el precio" — el deal NO puede quedar
+          // esperando en Vicky hasta el reloj de 120': la tómbola sortea y
+          // notifica al nacer, para cualquier N (los >50 ya funcionaban así).
           void sincronizarHitoCrm(
             contact,
             "intencion",
             datosDeToolInput(toolName, toolInput),
+            { sorteoInmediato: true },
           ).catch(() => undefined)
         }
 

@@ -2,7 +2,9 @@
  * Tool: derivar_a_soporte
  *
  * Vicky la invoca cuando detecta uno de los siguientes casos:
- *   - El prospecto tiene MÁS de 50 trabajadores (fuera del scope V3).
+ *   - El prospecto supera el límite hasta el cual Vicky puede DAR PRECIOS
+ *     (el umbral de la conversación — inbound 20 / outbound 10 desde el
+ *     08-ago — o el tope duro de 50 del sistema).
  *   - El prospecto es cliente existente con problema operativo.
  *   - El prospecto pide explícitamente hablar con un humano.
  *   - Una tool falló y no se puede continuar.
@@ -23,7 +25,7 @@
 export const derivarASoporteSchema = {
   name: "derivar_a_soporte",
   description:
-    "Deriva la conversación a un humano (ejecutivo comercial o soporte). Úsala cuando: (a) el prospecto tiene más de 50 trabajadores, (b) es cliente existente con problema operativo, (c) pide hablar con persona, (d) una tool falló y no se puede continuar, (e) pide un producto fuera del catálogo, (f) el prospecto quiere agendar una reunión, (g) el prospecto prefiere que lo llamen de vuelta, o (h) la consulta es operativa y debe ir al equipo de soporte.",
+    "Deriva la conversación a un humano (ejecutivo comercial o soporte). Úsala cuando: (a) la empresa supera el límite hasta el cual puedes DAR PRECIOS en esta conversación (el umbral del prompt, o más de 50 trabajadores), (b) es cliente existente con problema operativo, (c) pide hablar con persona, (d) una tool falló y no se puede continuar, (e) pide un producto fuera del catálogo, (f) el prospecto quiere agendar una reunión, (g) el prospecto prefiere que lo llamen de vuelta, o (h) la consulta es operativa y debe ir al equipo de soporte.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -101,7 +103,7 @@ export type DerivarASoporteResultado = {
 
 const MENSAJES_POR_MOTIVO: Record<DerivarASoporteInput["motivo"], string> = {
   fuera_de_rango_trabajadores:
-    "Para empresas de tu tamaño te conviene una propuesta personalizada con uno de nuestros ejecutivos, que considera descuentos por volumen y necesidades específicas. Te derivo con uno de nuestros ejecutivos, que se va a contactar contigo en las próximas horas.",
+    "Para empresas de tu tamaño el valor lo arma directo uno de nuestros ejecutivos — considera descuentos por volumen y necesidades específicas. Ya le pasé tus datos y se contactará contigo a la brevedad. Mientras tanto sigo aquí contigo: puedo resolverte cualquier duda de la plataforma, mostrarte cómo funciona o dejarte agendada una reunión. ¿Qué te acomoda?",
   cliente_existente_problema:
     "Veo que ya eres cliente. Para problemas operativos te conviene hablar directo con soporte. Te derivo para que te atiendan lo antes posible.",
   solicitud_explicita_persona:

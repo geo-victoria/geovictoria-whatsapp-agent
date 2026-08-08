@@ -76,6 +76,7 @@ import {
   confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
 import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
+import { umbralPrecios, formatUmbralParaPrompt } from "@/lib/umbral-autonomia"
 
 export const dynamic = "force-dynamic"
 // 300s, igual que los webhooks CO y MX. Estaba en 60 desde el 22-jun, cuando
@@ -428,8 +429,17 @@ async function processOneTurn(
     // (activa la excepción de descuento proactivo del prompt). Se auto-limpia al
     // persistir la respuesta (last_user_at pasa a ser > reactivation_at).
     const reengaged = await isReengaged(contact).catch(() => false)
+    // Umbral de venta autónoma (Lalo 08-ago): el prompt CL recibe el umbral
+    // de PRECIOS de esta conversación (inbound 20 / outbound 10). En modo
+    // clásico (VICKY_UMBRAL_CLASICO=1) el bloque es vacío y nada cambia.
+    const umbralInfo = contact.replace(/\D/g, "").startsWith("56")
+      ? await umbralPrecios(contact).catch(() => null)
+      : null
+    const contextoUmbral = umbralInfo
+      ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen)
+      : ""
     const contextoCotizacion =
-      (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente
+      contextoUmbral + (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)
