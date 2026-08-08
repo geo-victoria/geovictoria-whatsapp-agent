@@ -429,6 +429,29 @@ export async function enrolarEnLoop(contact: string, country: string): Promise<v
 }
 
 /**
+ * PUNTO 4 (Lalo 08-ago): al emitir la cotización FORMAL, el primer toque del
+ * loop se adelanta a 35 minutos (la mediana histórica emisión→pago es 36 min;
+ * el "¿te ayudo con el pago?" debe caer dentro de la ventana real de compra).
+ * Solo toca loops activos que van en el toque 1 — una cadencia avanzada no se
+ * reinicia. Best-effort: el llamador usa .catch(()=>{}).
+ */
+export async function adelantarPrimerToqueFormal(contact: string, country?: string | null): Promise<void> {
+  if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
+  const d = contact.replace(/\D/g, "")
+  const pais =
+    country || (d.startsWith("57") ? "co" : d.startsWith("52") ? "mx" : d.startsWith("51") ? "pe" : "cl")
+  const objetivo = ajustarAHabil(new Date(Date.now() + 35 * 60_000), tzDePais(pais), contact)
+  await supa(
+    `vic_loop?contact=eq.${encodeURIComponent(contact)}&estado=eq.activo&next_touch=eq.1`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ next_touch_at: objetivo.toISOString(), updated_at: new Date().toISOString() }),
+    },
+  )
+}
+
+/**
  * El contacto PAGÓ → el loop muere definitivamente (motivo 'pagado'). Exportada
  * para el flujo de pago futuro; todavía no se conecta a ningún llamador.
  */
@@ -498,13 +521,19 @@ export async function contactosAtendidosPorVendedor(
   if (!pares.length || !SUPABASE_URL || !SUPABASE_KEY) return out
   const desdePor = new Map(pares.map((p) => [p.contact, Date.parse(p.desdeIso || "") - 5 * 60_000]))
   const lista = pares.map((p) => `"${p.contact}"`).join(",")
-  const [msjRes, llamRes] = await Promise.all([
+  // Atención MANUAL (punto 5, Lalo 08-ago): vendedores sin WhatsApp espejado
+  // (CO/MX/PE y CL sin vincular) marcan "ya lo contacté" en el dashboard →
+  // vic_kv atencion_manual_<fono> con timestamp ISO. Cuenta igual que un
+  // mensaje espejado o una llamada contestada.
+  const listaKv = pares.map((p) => `"atencion_manual_${p.contact}"`).join(",")
+  const [msjRes, llamRes, kvRes] = await Promise.all([
     supa(
       `vic_wa_espejo_mensajes?telefono_chat=in.(${lista})&from_me=eq.true&es_grupo=eq.false&select=telefono_chat,enviado_at&limit=5000`,
     ).catch(() => null),
     supa(`vic_wa_espejo_llamadas?telefono=in.(${lista})&estado=eq.accept&select=telefono,at&limit=2000`).catch(
       () => null,
     ),
+    supa(`vic_kv?key=in.(${listaKv})&select=key,value&limit=1000`).catch(() => null),
   ])
   const marcar = (tel: string | null | undefined, atIso: string | null | undefined) => {
     const t = String(tel || "")
@@ -520,6 +549,10 @@ export async function contactosAtendidosPorVendedor(
   if (llamRes?.ok) {
     const rows = ((await llamRes.json().catch(() => [])) as Array<{ telefono: string; at: string }>) || []
     for (const r of rows) marcar(r.telefono, r.at)
+  }
+  if (kvRes?.ok) {
+    const rows = ((await kvRes.json().catch(() => [])) as Array<{ key: string; value: string }>) || []
+    for (const r of rows) marcar(String(r.key).replace("atencion_manual_", ""), r.value)
   }
   return out
 }

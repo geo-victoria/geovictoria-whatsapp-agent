@@ -711,16 +711,20 @@ export async function GET(req: Request): Promise<Response> {
 
     let ejecutado = false
 
-    // Rodrigo 27-jul: la presentación sale a las 2 HORAS de inactividad, no a
-    // la 1h del toque 1 genérico. Un toque 1 con precio que llegó antes se
-    // pospone al minuto 120 (ajustado a hábil) y sale en un tick posterior.
+    // Rodrigo 27-jul: la presentación con precio sale a las 2 HORAS de
+    // inactividad, no a la 1h del toque 1 genérico. EXCEPCIÓN 08-ago (punto 4
+    // de Lalo): con cotización FORMAL emitida el primer toque sale a los 35
+    // MINUTOS — la mediana histórica emisión→pago es 36 min, y el empujón
+    // ("¿te ayudo con el pago?") debe caer DENTRO de la ventana real de
+    // compra, no cuando el cliente ya se enfrió.
     if (touch === 1 && (stage === "con_precio" || stage === "formal")) {
-      const dosHoras = new Date(new Date(t0).getTime() + 2 * 3600e3)
-      if (now < dosHoras.getTime()) {
-        const habil = ajustarAHabil(dosHoras, tzDePais(country), r.contact)
+      const espera = stage === "formal" ? 35 * 60e3 : 2 * 3600e3
+      const objetivo = new Date(new Date(t0).getTime() + espera)
+      if (now < objetivo.getTime()) {
+        const habil = ajustarAHabil(objetivo, tzDePais(country), r.contact)
         await patchLoop(r.contact, { next_touch_at: habil.toISOString() })
         pospuestos++
-        detalle.push({ contact: r.contact, accion: "pospuesto_presentacion_2h", hasta: habil.toISOString() })
+        detalle.push({ contact: r.contact, accion: stage === "formal" ? "pospuesto_formal_35m" : "pospuesto_presentacion_2h", hasta: habil.toISOString() })
         continue
       }
     }

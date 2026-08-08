@@ -97,6 +97,83 @@ type VentaCerrada = {
   convId: string
 }
 
+/** PANEL SLA DE LLAMADA POST-TRASPASO (punto 1, Lalo 08-ago): el proceso
+ * asume que el vendedor llama en <5 minutos y nadie lo medía. Por vendedor,
+ * últimos 7 días: traspasos, contactados (WhatsApp espejado, llamada
+ * contestada o marca manual 🤝), mediana de minutos al primer contacto y %
+ * dentro de 5/60 min. La escalada automática avisa a los 60 min hábiles. */
+async function renderPanelSla(): Promise<string> {
+  const desde = new Date(Date.now() - 7 * 24 * 3600e3).toISOString()
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const q = async <T,>(path: string): Promise<T[]> => {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: h, cache: "no-store" })
+      return r.ok ? ((await r.json()) as T[]) : []
+    } catch { return [] }
+  }
+  const ptv = await q<{ contact: string; vendedor_email: string | null; vendedor_nombre: string | null; traspasado_at: string }>(
+    `vic_ptv?traspasado_at=gte.${encodeURIComponent(desde)}&select=contact,vendedor_email,vendedor_nombre,traspasado_at&order=traspasado_at.desc&limit=400`,
+  )
+  if (!ptv.length) return ""
+  // Última fila por contacto (vienen ordenadas desc) y tope de URL.
+  const porContacto = new Map<string, (typeof ptv)[number]>()
+  for (const r of ptv) if (!porContacto.has(r.contact)) porContacto.set(r.contact, r)
+  const contactos = [...porContacto.keys()].slice(0, 150)
+  const lista = contactos.map((c) => `"${c}"`).join(",")
+  const listaKv = contactos.map((c) => `"atencion_manual_${c}"`).join(",")
+  const [msjs, llams, kvs] = await Promise.all([
+    q<{ telefono_chat: string; enviado_at: string }>(`vic_wa_espejo_mensajes?telefono_chat=in.(${lista})&from_me=eq.true&es_grupo=eq.false&select=telefono_chat,enviado_at&limit=5000`),
+    q<{ telefono: string; at: string }>(`vic_wa_espejo_llamadas?telefono=in.(${lista})&estado=eq.accept&select=telefono,at&limit=2000`),
+    q<{ key: string; value: string }>(`vic_kv?key=in.(${listaKv})&select=key,value&limit=500`),
+  ])
+  const eventos = new Map<string, number[]>()
+  const evt = (tel: string, iso: string) => {
+    const t = Date.parse(iso)
+    if (!Number.isFinite(t)) return
+    const arr = eventos.get(tel) || []
+    arr.push(t)
+    eventos.set(tel, arr)
+  }
+  for (const m of msjs) evt(m.telefono_chat, m.enviado_at)
+  for (const l of llams) evt(l.telefono, l.at)
+  for (const k of kvs) evt(String(k.key).replace("atencion_manual_", ""), k.value)
+  type Agg = { n: number; atendidos: number; minutos: number[]; d5: number; d60: number }
+  const porVendedor = new Map<string, Agg>()
+  for (const c of contactos) {
+    const r = porContacto.get(c)!
+    const key = r.vendedor_nombre || r.vendedor_email || "(sin vendedor)"
+    const a = porVendedor.get(key) || { n: 0, atendidos: 0, minutos: [], d5: 0, d60: 0 }
+    a.n++
+    const t0 = Date.parse(r.traspasado_at) - 5 * 60_000
+    const primero = (eventos.get(c) || []).filter((t) => t >= t0).sort((x, y) => x - y)[0]
+    if (primero !== undefined) {
+      a.atendidos++
+      const min = Math.max(0, (primero - Date.parse(r.traspasado_at)) / 60_000)
+      a.minutos.push(min)
+      if (min <= 5) a.d5++
+      if (min <= 60) a.d60++
+    }
+    porVendedor.set(key, a)
+  }
+  const filas = [...porVendedor.entries()]
+    .sort((x, y) => y[1].n - x[1].n)
+    .map(([nombre, a]) => {
+      const med = a.minutos.length
+        ? Math.round([...a.minutos].sort((x, y) => x - y)[Math.floor(a.minutos.length / 2)])
+        : null
+      const sin = a.n - a.atendidos
+      const pct = (v: number) => (a.n ? `${Math.round((v / a.n) * 100)}%` : "—")
+      return `<tr><td>${nombre}</td><td style="text-align:center">${a.n}</td><td style="text-align:center">${a.atendidos}</td><td style="text-align:center;font-weight:600;color:${sin ? "#b91c1c" : "#166534"}">${sin}</td><td style="text-align:center">${med === null ? "—" : `${med} min`}</td><td style="text-align:center">${pct(a.d5)}</td><td style="text-align:center">${pct(a.d60)}</td></tr>`
+    })
+    .join("")
+  return `
+  <div class="kgroup">SLA de llamada post-traspaso · últimos 7 días <span class="pct" title="Contacto = mensaje desde el WhatsApp espejado del vendedor, llamada de WhatsApp contestada, o marca manual 🤝 del dashboard. La escalada automática alerta a los 60 min hábiles sin contacto.">¿cómo se mide?</span></div>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="text-align:left"><th>Vendedor</th><th style="text-align:center">Traspasos</th><th style="text-align:center">Contactados</th><th style="text-align:center">Sin contacto</th><th style="text-align:center">Mediana 1er contacto</th><th style="text-align:center">≤ 5 min</th><th style="text-align:center">≤ 60 min</th></tr></thead>
+    <tbody>${filas}</tbody>
+  </table></div>`
+}
+
 async function kvGet(key: string): Promise<string> {
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}&select=value&limit=1`, {
@@ -1592,7 +1669,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
           <td data-l="Recurrente" data-sort="${c.montoOrden || 0}" style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td data-l="Accionable" data-sort="${esc(c.accionable.toLowerCase().slice(0, 80))}">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
+          <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa} <button class="btnAtendido" data-contact="${esc(c.contacto)}" title="Ya lo contacté — registra tu contacto con este cliente (silencia los seguimientos de Vicky y alimenta el panel de SLA)" style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:8px;padding:8px 10px;font-size:15px;cursor:pointer">🤝</button></td>
         </tr>`
   }
   const secciones = TIPOS_ACCION.map((tipo) => {
@@ -1700,6 +1777,22 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
         });
       }
       document.querySelectorAll(".btnGest").forEach(wire);
+      document.querySelectorAll(".btnAtendido").forEach(function (b) {
+        b.addEventListener("click", async function () {
+          if (!confirm("¿Registrar que YA contactaste a este cliente? Vicky deja de mandarle seguimientos automáticos.")) return;
+          this.disabled = true;
+          try {
+            var r = await fetch(KEYQ + "&accion=atendido&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
+            var j = await r.json();
+            if (!j.ok) throw new Error(j.error || "error");
+            this.textContent = "✓"; this.title = "Contacto registrado";
+            this.style.background = "#dcfce7"; this.style.color = "#166534"; this.style.border = "1px solid #86efac";
+          } catch (e) {
+            this.disabled = false;
+            alert("No se pudo registrar el contacto. Inténtalo de nuevo.");
+          }
+        });
+      });
       var lnk = document.getElementById("lnkVerGest");
       if (lnk) lnk.addEventListener("click", function (ev) {
         ev.preventDefault();
@@ -3708,6 +3801,21 @@ export async function POST(req: Request): Promise<Response> {
     await kvDel(`gestion_${contact}`)
     return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } })
   }
+  // Punto 5 (Lalo 08-ago): "ya lo contacté" — registra atención MANUAL del
+  // vendedor. Cuenta como contacto real para el candado v3 (silencia los
+  // seguimientos de Vicky), el panel de SLA y la válvula de precio. Pensado
+  // para vendedores sin WhatsApp espejado (CO/MX/PE y CL sin vincular).
+  if (accion === "atendido") {
+    if (!contact) {
+      return new Response(JSON.stringify({ ok: false, error: "contact requerido" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const quienBody = (() => {
+      try { return decodeURIComponent(cookieDe(req, "vic_quien") || "") } catch { return "" }
+    })()
+    await kvSet(`atencion_manual_${contact}`, new Date().toISOString())
+    await notaZohoGestion(contact, `Contacto manual registrado desde el dashboard${quienBody ? ` por ${quienBody}` : ""}: el vendedor declaró haber atendido a este cliente (los seguimientos automáticos de Vicky quedan en silencio).`).catch(() => false)
+    return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } })
+  }
   // Un turno del chat de Vicky Cotizaciones (pedido Lalo 06-ago). El historial
   // viaja del navegador en cada turno (stateless server-side, como el resto
   // del dashboard); la respuesta trae los eventos de tools y el panel de la
@@ -4734,6 +4842,8 @@ export async function GET(req: Request): Promise<Response> {
   // cierre es lo ÚNICO de KPIs que queda visible en Gestión (Lalo 04-ago).
   let flujoCotizHtml = ""
   let tasaCierreHtml = ""
+  // Panel SLA (punto 1, Lalo 08-ago) — solo en la vista de análisis.
+  const slaHtml = vista === "analisis" ? await renderPanelSla().catch(() => "") : ""
   {
     const vieronPrecio = cPreform + cEnviada
     const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
@@ -4866,6 +4976,7 @@ export async function GET(req: Request): Promise<Response> {
   ` : `
   ${tasaCierreHtml}
   ${evolucionHtml}
+  ${slaHtml}
   ${ejecutivosHtml}
   ${empresasHtml}
   <div class="kgroup">Por grupo · suman el total (${total})</div>

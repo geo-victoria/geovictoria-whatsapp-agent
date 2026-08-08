@@ -658,6 +658,15 @@ export async function runAgentLoop(params: {
             console.log(
               `[agent-loop] derivación sobre-umbral (${nDerivado} trabajadores ≤${SCOPE_MAX_SISTEMA}): loop sigue vivo — Vicky acompaña (contacto ${contact}).`,
             )
+            // Punto de partida de la VÁLVULA de precio y del SLA (Lalo 08-ago):
+            // queda estampado cuándo se le prometió ejecutivo a este cliente.
+            void (async () => {
+              const { setKvValue } = await import("./supabase-persistence-v3")
+              await setKvValue(
+                `sobre_umbral_${contact.replace(/\D/g, "")}`,
+                JSON.stringify({ n: nDerivado, at: new Date().toISOString() }),
+              )
+            })().catch(() => undefined)
           } else {
             void mas50CierraLoop(contact).catch(() => undefined)
           }
@@ -813,6 +822,13 @@ export async function runAgentLoop(params: {
                 ? result.quoteId
                 : ""
             if (qid) await setFormalQuote(contact, qid).catch(() => {})
+            // Punto 4 (Lalo 08-ago): el primer toque post-formal sale a los
+            // 35 minutos, dentro de la ventana real de compra (mediana de
+            // pago histórica: 36 min). Best-effort.
+            void (async () => {
+              const { adelantarPrimerToqueFormal } = await import("./loop-v2")
+              await adelantarPrimerToqueFormal(contact)
+            })().catch(() => undefined)
             // Item B: puntero durable para retomar esta cotización más adelante
             // (anti-amnesia). Sobrevive al borrado de historial y al TTL de 24h.
             if (qid) {

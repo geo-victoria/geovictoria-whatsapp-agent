@@ -110,15 +110,53 @@ async function origenDeContacto(contact: string): Promise<OrigenConversacion> {
   }
 }
 
+/** VÁLVULA DE ESCAPE (punto 2, Lalo 08-ago): si el vendedor no contactó al
+ * cliente sobre-umbral en VICKY_VALVULA_HORAS horas hábiles (default 4), el
+ * cron abre vic_kv `valvula_precio_<fono>` y Vicky RECUPERA la autonomía de
+ * precio para ese caso — la inmediatez (el principio central) manda sobre la
+ * espera de un vendedor que no llegó. VICKY_VALVULA_OFF=1 la desactiva. */
+export function valvulaActiva(): boolean {
+  return (process.env.VICKY_VALVULA_OFF || "").trim() !== "1"
+}
+
+export function valvulaHoras(): number {
+  const v = Number((process.env.VICKY_VALVULA_HORAS || "").trim())
+  return Number.isFinite(v) && v >= 1 && v <= 48 ? v : 4
+}
+
+async function valvulaAbierta(clean: string): Promise<boolean> {
+  if (!valvulaActiva()) return false
+  const url = (process.env.SUPABASE_URL || "").replace(/\/$/, "")
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+  if (!url || !key) return false
+  try {
+    const res = await fetch(
+      `${url}/rest/v1/vic_kv?key=eq.${encodeURIComponent(`valvula_precio_${clean}`)}&select=value,expires_at&limit=1`,
+      { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
+    )
+    if (!res.ok) return false
+    const rows = (await res.json().catch(() => [])) as Array<{ value?: string; expires_at?: string }>
+    const row = rows[0]
+    if (!row) return false
+    if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return false
+    return Boolean(row.value)
+  } catch {
+    return false
+  }
+}
+
 /**
- * Umbral de precios vigente para un contacto (CL). Fail-open a inbound: un
+ * Umbral de precios vigente para un contacto. Fail-open a inbound: un
  * error de red jamás bloquea más de lo que la regla nueva ya bloquea.
+ * Con la válvula abierta, el umbral vuelve al tope del sistema (50).
  */
 export async function umbralPrecios(
   contact: string,
-): Promise<{ umbral: number; origen: OrigenConversacion }> {
+): Promise<{ umbral: number; origen: OrigenConversacion; valvula?: boolean }> {
   if (modoClasico()) return { umbral: SCOPE_MAX_SISTEMA, origen: "inbound" }
-  const origen = await origenDeContacto(contact)
+  const clean = (contact || "").replace(/\D/g, "")
+  const [origen, abierta] = await Promise.all([origenDeContacto(contact), valvulaAbierta(clean)])
+  if (abierta) return { umbral: SCOPE_MAX_SISTEMA, origen, valvula: true }
   return { umbral: origen === "outbound" ? umbralOutbound() : umbralInbound(), origen }
 }
 
