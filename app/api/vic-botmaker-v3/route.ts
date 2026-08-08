@@ -462,7 +462,7 @@ async function processOneTurn(
     const result = await runAgentLoop({
       systemPrompt: onboarding
         ? onboarding.systemPrompt
-        : contextoCotizacion + getSystemPromptV3(contact),
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral),
       history,
       userMessage: message,
       apiKey,
@@ -591,7 +591,7 @@ async function processOneTurn(
         "por el cliente, y entrega EXACTAMENTE su mensajeParaProspecto."
       const retry = await runAgentLoop({
         systemPrompt:
-          contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_COTIZACION,
+          contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + FORZAR_TOOL_COTIZACION,
         history,
         userMessage: message,
         apiKey,
@@ -817,7 +817,7 @@ async function processOneTurn(
             : "")
         const retry = await runAgentLoop({
           systemPrompt:
-            contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_DESCUENTO,
+            contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + FORZAR_TOOL_DESCUENTO,
           history,
           userMessage: message,
           apiKey,
@@ -920,7 +920,7 @@ async function processOneTurn(
         "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
         "Si la tool falla o no hay disponibilidad, díselo con honestidad y ofrece otro horario — JAMÁS afirmes que la reunión quedó agendada si la tool no tuvo éxito."
       const retry = await runAgentLoop({
-        systemPrompt: contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_AGENDA,
+        systemPrompt: contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + FORZAR_TOOL_AGENDA,
         history,
         userMessage: message,
         apiKey,
@@ -999,7 +999,7 @@ async function processOneTurn(
         "Si faltan datos obligatorios (nombre, empresa o teléfono), PÍDESELOS en vez de afirmar que ya quedó registrado. " +
         "JAMÁS digas que tomaste sus datos o que un ejecutivo lo contactará si la tool no tuvo éxito."
       const retry = await runAgentLoop({
-        systemPrompt: contextoCotizacion + getSystemPromptV3(contact) + FORZAR_TOOL_CALLBACK,
+        systemPrompt: contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + FORZAR_TOOL_CALLBACK,
         history,
         userMessage: message,
         apiKey,

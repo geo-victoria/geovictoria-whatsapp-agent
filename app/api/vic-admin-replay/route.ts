@@ -83,7 +83,7 @@ export async function POST(req: Request): Promise<Response> {
     ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen)
     : ""
   const result = await runAgentLoop({
-    systemPrompt: contextoUmbral + getSystemPromptV3(contact || undefined),
+    systemPrompt: contextoUmbral + getSystemPromptV3(contact || undefined, umbralInfo?.umbral),
     history,
     userMessage: message,
     apiKey,

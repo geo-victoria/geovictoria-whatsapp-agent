@@ -8,6 +8,7 @@
 
 import { test, describe, beforeEach } from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 
 import {
   SCOPE_MAX_SISTEMA,
@@ -71,5 +72,41 @@ describe("bloque de prompt", () => {
     const bloque = formatUmbralParaPrompt(10, "outbound")
     assert.match(bloque, /SOLO hasta 10 trabajadores/)
     assert.match(bloque, /OUTBOUND/)
+  })
+})
+
+describe("puntos de decisión del prompt CL reescritos con el umbral", () => {
+  // getSystemPromptV3(contact, umbral) reescribe las líneas del FLUJO por
+  // .replace() de cadenas EXACTAS (la E2E del 08-ago mostró que el modelo
+  // obedece el flujo por sobre el preámbulo). El prompt usa el alias "@/lib"
+  // (no importable desde el runner de node), así que se ancla por CONTENIDO:
+  // si alguien edita esas líneas del prompt sin actualizar los replace, el
+  // replace deja de matchear en silencio — este test lo hace reventar.
+  const fuente = readFileSync(
+    new URL("../app/api/vic-sales-agent-v3/prompt.ts", import.meta.url),
+    "utf8",
+  )
+
+  test("las cuatro cadenas objetivo del replace siguen en el prompt", () => {
+    for (const objetivo of [
+      "- Si tiene 1-50 → puede cotizar (Modo Cotización).",
+      '- Si tiene 50+ → no cotiza, pregunta "Prefieres reunión o callback?".',
+      "Aplica cuando: el usuario pidió cotizar Y tiene entre 1 y 50 trabajadores.",
+      "Cuando el camino es cotizar (1-50 trabajadores), sigue este orden:",
+    ]) {
+      // Aparecen DOS veces: en el template del prompt y en el .replace().
+      const veces = fuente.split(objetivo).length - 1
+      assert.ok(
+        veces >= 2,
+        `la cadena ancla "${objetivo.slice(0, 40)}…" aparece ${veces} vez/veces — el replace de getSystemPromptV3 quedó desincronizado del prompt`,
+      )
+    }
+  })
+
+  test("los reemplazos dinámicos usan el umbral", () => {
+    assert.match(fuente, /Si tiene 1-\$\{u\} → puede cotizar/)
+    assert.match(fuente, /Si tiene MÁS de \$\{u\} y hasta 50/)
+    assert.match(fuente, /entre 1 y \$\{u\} trabajadores/)
+    assert.match(fuente, /Cuando el camino es cotizar \(1-\$\{u\} trabajadores\)/)
   })
 })

@@ -104,11 +104,40 @@ Cal.com tiene configurado su propio "minimum booking notice" (mínima anticipaci
  * @param contact - Número del cliente normalizado a dígitos (ej. "56944668823").
  *                  Vendrá del campo `contact` del webhook de Botmaker.
  */
-export function getSystemPromptV3(contact?: string): string {
+export function getSystemPromptV3(contact?: string, umbralPreciosCL?: number): string {
+  let base = SYSTEM_PROMPT_V3
+  // Umbral de venta autónoma (Lalo 08-ago): con umbral < 50 los PUNTOS DE
+  // DECISIÓN del flujo se reescriben con el umbral real — la prueba E2E
+  // mostró que el modelo obedece el flujo "Modo Cotización (1-50)" del
+  // cuerpo por sobre una regla en el preámbulo, así que el flujo mismo debe
+  // decir 20/10. Los replace son de cadenas exactas: si alguien edita esas
+  // líneas del prompt sin actualizar esto, el replace no matchea y queda
+  // solo la regla del preámbulo (degradación suave, el guard determinista
+  // del agent-loop sigue firme). tests/umbral-autonomia.test.ts los ancla.
+  if (umbralPreciosCL && umbralPreciosCL < 50) {
+    const u = String(umbralPreciosCL)
+    base = base
+      .replace(
+        "- Si tiene 1-50 → puede cotizar (Modo Cotización).",
+        `- Si tiene 1-${u} → puede cotizar (Modo Cotización).`,
+      )
+      .replace(
+        '- Si tiene 50+ → no cotiza, pregunta "Prefieres reunión o callback?".',
+        `- Si tiene MÁS de ${u} y hasta 50 → NO entra a cotizar ni promete "armarte el valor": aplica la regla "UMBRAL DE PRECIOS" del inicio (capturar nombre/email/empresa, derivar con derivar_a_soporte y ACOMPAÑAR sin precios).\n- Si tiene 50+ → no cotiza, pregunta "Prefieres reunión o callback?".`,
+      )
+      .replace(
+        "Aplica cuando: el usuario pidió cotizar Y tiene entre 1 y 50 trabajadores.",
+        `Aplica cuando: el usuario pidió cotizar Y tiene entre 1 y ${u} trabajadores. Con MÁS de ${u} NO entres a este modo (ni a su checklist): aplica la regla "UMBRAL DE PRECIOS" del inicio — deriva y acompaña sin precios.`,
+      )
+      .replace(
+        "Cuando el camino es cotizar (1-50 trabajadores), sigue este orden:",
+        `Cuando el camino es cotizar (1-${u} trabajadores), sigue este orden:`,
+      )
+  }
   return (
     formatFechaActualParaPrompt() +
     formatTelefonoCanalParaPrompt(contact) +
-    SYSTEM_PROMPT_V3
+    base
   )
 }
 
