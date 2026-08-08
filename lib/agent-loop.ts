@@ -113,6 +113,7 @@ export async function runAgentLoop(params: {
 
   const toolCalls: AgentRunResult["toolCalls"] = []
   let handoff = false
+  let mensajeHandoffRespaldo = ""
   let finalText = ""
   let iteration = 0
 
@@ -938,6 +939,15 @@ export async function runAgentLoop(params: {
 
         if ("ok" in result && result.ok && "handoff" in result && result.handoff) {
           handoff = true
+          // Respaldo determinista (umbral 08-ago): tras un handoff exitoso el
+          // modelo a veces devuelve el turno VACÍO (visto sistemático en la
+          // E2E de derivaciones sobre-umbral) — si eso pasa, la respuesta al
+          // cliente es el mensaje sugerido de la tool, no la disculpa genérica.
+          const sugerido =
+            "mensajeSugeridoUsuario" in result && typeof (result as Record<string, unknown>).mensajeSugeridoUsuario === "string"
+              ? String((result as Record<string, unknown>).mensajeSugeridoUsuario)
+              : ""
+          if (sugerido) mensajeHandoffRespaldo = sugerido
         }
 
         toolResults.push({
@@ -973,6 +983,7 @@ export async function runAgentLoop(params: {
 
   if (!finalText) {
     finalText =
+      mensajeHandoffRespaldo ||
       "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"
   }
 
