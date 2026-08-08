@@ -539,11 +539,14 @@ async function processBurstCO(contact: string, apiKey: string, seedMessage?: str
 
 export async function POST(request: Request): Promise<NextResponse> {
   try {
-    const secret = request.headers.get("x-secret") || ""
-    if (!SECRET_CO) {
+    // Patrón dual de PE: header x-secret == env O vic_kv (botmaker_secret_mx) — la kv
+    // permite rotar/probar (modo simulación E2E) sin deploy.
+    const secret = (request.headers.get("x-secret") || "").trim()
+    const kvSecret = ((await getKvValue("botmaker_secret_mx").catch(() => null)) || "").trim()
+    if (!SECRET_CO && !kvSecret) {
       return NextResponse.json({ ok: false, error: "BOTMAKER_SECRET_MX no configurado" }, { status: 503 })
     }
-    if (secret !== SECRET_CO) {
+    if (!(SECRET_CO && secret === SECRET_CO) && !(kvSecret && secret === kvSecret)) {
       return NextResponse.json({ reply: "Unauthorized" }, { status: 401 })
     }
 
