@@ -38,6 +38,13 @@ const DESTINOS = (process.env.VICKY_MUDOS_ALERTA_TO || "egomez@geovictoria.com,r
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean)
+// Solo las líneas que VICKY atiende: en las demás (p. ej. soporte 56927526890)
+// responden humanos y un "sin respuesta de Vicky" no significa nada. El primer
+// tick real (08-ago) alertó justo un caso de la línea de soporte — ruido.
+const CANALES_VICKY = (process.env.VICKY_MUDOS_CANALES || "56967308227,573181070737,5215659778486,51922067167")
+  .split(",")
+  .map((s) => s.trim().replace(/\D/g, ""))
+  .filter(Boolean)
 
 const BM_HEADERS = { "access-token": BM_TOKEN, Accept: "application/json" }
 const SB_HEADERS = {
@@ -287,6 +294,8 @@ export async function GET(req: Request): Promise<Response> {
   const candidatos: Array<Omit<Mudo, "tomadoPor">> = []
   for (const it of feed) {
     if (String(it.from || "").toLowerCase() !== "user") continue
+    const canalNum = String(it.chat?.channelId || "").replace(/\D/g, "")
+    if (!CANALES_VICKY.some((c) => canalNum.endsWith(c))) continue
     const cid = String(it.chat?.contactId || "").trim()
     if (!cid || /[^\d]/.test(cid)) continue
     const tipo = String(it.content?.type || "")
