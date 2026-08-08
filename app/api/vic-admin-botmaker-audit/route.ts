@@ -54,19 +54,26 @@ async function autorizado(req: Request, key: string): Promise<boolean> {
   return false
 }
 
-/** User messages nuestros desde una fecha, agrupados por contacto. */
+/** User messages nuestros desde una fecha, agrupados por contacto.
+ * OJO PostgREST: el servidor CAPA cada respuesta a 1000 filas aunque el limit
+ * pida más (bug del primer barrido 08-ago: solo entraban los primeros 1000
+ * mensajes y todo lo posterior aparecía como "faltante"). Se pagina de a 1000
+ * hasta página corta. */
 async function nuestrosPorContacto(fromIso: string): Promise<Map<string, string[]>> {
-  const convs = (await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact&limit=5000`,
-    { headers: SB_HEADERS, cache: "no-store" },
-  ).then((r) => (r.ok ? r.json() : [])).catch(() => [])) as Array<{ id: string; contact: string }>
-  const porConvId = new Map(convs.map((c) => [c.id, c.contact]))
+  const porConvId = new Map<string, string>()
+  for (let page = 0; page < 10; page++) {
+    const convs = (await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact&order=id.asc&limit=1000&offset=${page * 1000}`,
+      { headers: SB_HEADERS, cache: "no-store" },
+    ).then((r) => (r.ok ? r.json() : [])).catch(() => [])) as Array<{ id: string; contact: string }>
+    for (const c of convs) porConvId.set(c.id, c.contact)
+    if (convs.length < 1000) break
+  }
 
   const out = new Map<string, string[]>()
-  // Paginado grueso: hasta 3 x 10000 filas (suficiente para semanas de tráfico).
-  for (let page = 0; page < 3; page++) {
+  for (let page = 0; page < 40; page++) {
     const rows = (await fetch(
-      `${SUPABASE_URL}/rest/v1/vic_v3_messages?role=eq.user&at=gte.${encodeURIComponent(fromIso)}&select=conversation_id,content&order=at.asc&limit=10000&offset=${page * 10000}`,
+      `${SUPABASE_URL}/rest/v1/vic_v3_messages?role=eq.user&at=gte.${encodeURIComponent(fromIso)}&select=conversation_id,content&order=at.asc&limit=1000&offset=${page * 1000}`,
       { headers: SB_HEADERS, cache: "no-store" },
     ).then((r) => (r.ok ? r.json() : [])).catch(() => [])) as Array<{ conversation_id: string; content: string }>
     for (const r of rows) {
@@ -76,7 +83,7 @@ async function nuestrosPorContacto(fromIso: string): Promise<Map<string, string[
       arr.push(norm(String(r.content || "")))
       out.set(contact, arr)
     }
-    if (rows.length < 10000) break
+    if (rows.length < 1000) break
   }
   return out
 }
