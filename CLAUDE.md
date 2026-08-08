@@ -44,6 +44,10 @@
 
 - **PERÚ (Fase 1 lista 05-ago, VB de Diego Bendezú CUMPLIDO con sus 3 ajustes)**: lib/paises/pe/ — PEN directo, IGV 18% en todo, RUC (rucValido, entidad 20605842055). Precios: asistencia 1-10 S/100 fijo · 11-20 S/200 fijo · 21-50 S/5/usuario (anomalía 21+ literal del excel, APROBADA); reloj ZKTECO Senseface 2A (modelo interno) arriendo S/70 / venta S/525; envío gratis SOLO Lima Metropolitana, a provincia lo ASUME EL CLIENTE (sin línea de cobro, se informa); instalación gratis Lima Metropolitana, fuera "se coordina con servicio técnico, se cotiza aparte" + aviso ssttperu@geovictoria.pro; SIN capacitación. Descuento ÚNICO: 20% en las 4 primeras facturas, solo como CIERRE (en PE Vicky SÍ puede ofrecerlo en chat). Pago inicial MP = únicos + primer mes adelantado; luego facturación por usuarios activos. Ejecutiva única Mónica Mendoza (sin tómbola). Entidad GEOVICTORIA PERU S.A.C., Av. Juan de Aliaga 425 Int. 612, Magdalena del Mar, Lima. Línea +51 922 067 167 (webhook vic-botmaker-pe aún en CONTENCIÓN). Pendiente: Fase 1b (prompt+tools+webhook real), Fase 2 (create-from-vicky-pe + MP, credenciales ya en vic_kv mp_pe_*), Fase 3 encendido.
 
+## Dapta (llamadas de voz) — NO reencender (decisión de Lalo 08-ago)
+- El despachador quedó fuera de servicio el 24-jul y los toques 2-3 del loop se saltan limpio (la cadencia avanza). ESO ESTÁ BIEN ASÍ: Lalo observó que en el período con Dapta activo las ventas bajaron, y la mejor semana histórica (28-jul→03-ago, 11 pagos) ocurrió completa con Dapta apagado. Mecanismo plausible: la llamada robótica interrumpe/quema confianza/genera opt-outs.
+- NO recomendar ni reparar Dapta. Si algún día se evalúa voz de nuevo: solo A/B chico y medido (instrumentación tqlog) y con VB explícito de Lalo.
+
 ## Convenciones operativas
 - Deploy agente: push a `vicky-v3` (+ espejo `claude/trusting-ritchie-EVZIT` con --force-with-lease). Producción real = alias `geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app` (la rama "production" de Vercel es master viejo — no usar).
 - Siempre `npx tsc --noEmit && git commit && git push` encadenado con && (gate estricto).
