@@ -174,6 +174,74 @@ async function renderPanelSla(): Promise<string> {
   </table></div>`
 }
 
+/** PANEL RESPUESTA POR PLANTILLA (punto 4 de la segunda tanda, Lalo 08-ago):
+ * cada toque del loop queda registrado (vic_kv tqlog_*, 15 días) y acá se
+ * mide cuáles generan respuesta del cliente en 24 h y cuáles queman
+ * contactos — con esto se reescriben las plantillas débiles con datos.
+ * Precedente: vicky_lead_nudge tenía 100% lectura y 0% respuesta. */
+async function renderPanelPlantillas(): Promise<string> {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const q = async <T,>(path: string): Promise<T[]> => {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: h, cache: "no-store" })
+      return r.ok ? ((await r.json()) as T[]) : []
+    } catch { return [] }
+  }
+  const filasKv = await q<{ key: string; value: string }>(`vic_kv?key=like.tqlog_%25&select=key,value&limit=2000`)
+  const titulo = `<div class="kgroup">Respuesta por plantilla del loop · últimos 15 días <span class="pct" title="Un toque cuenta como respondido si el cliente escribió dentro de las 24 horas siguientes. El registro partió el 08-ago.">¿cómo se mide?</span></div>`
+  const eventos: Array<{ c: string; tpl: string; at: number }> = []
+  for (const f of filasKv) {
+    try {
+      const v = JSON.parse(f.value) as { c?: string; tpl?: string; at?: string }
+      const at = Date.parse(String(v.at || ""))
+      if (v.c && v.tpl && Number.isFinite(at)) eventos.push({ c: v.c, tpl: v.tpl, at })
+    } catch { /* fila ilegible */ }
+  }
+  if (!eventos.length) {
+    return `${titulo}<div class="sub" style="margin:4px 0 12px">Sin datos aún — el registro de toques partió el 08-ago en la noche; esta tabla se llena sola con la operación.</div>`
+  }
+  const contactos = [...new Set(eventos.map((e) => e.c))].slice(0, 120)
+  const convs = await q<{ id: string; contact: string }>(
+    `vic_v3_conversations?contact=in.(${contactos.map((c) => `"${c}"`).join(",")})&select=id,contact&limit=300`,
+  )
+  const contactoPorConv = new Map(convs.map((c) => [c.id, c.contact]))
+  const minAt = new Date(Math.min(...eventos.map((e) => e.at))).toISOString()
+  const msjs = await q<{ conversation_id: string; at: string }>(
+    `vic_v3_messages?role=eq.user&conversation_id=in.(${convs.map((c) => `"${c.id}"`).join(",")})&at=gte.${encodeURIComponent(minAt)}&select=conversation_id,at&limit=5000`,
+  )
+  const userTs = new Map<string, number[]>()
+  for (const m of msjs) {
+    const c = contactoPorConv.get(m.conversation_id)
+    if (!c) continue
+    const t = Date.parse(m.at)
+    if (!Number.isFinite(t)) continue
+    const arr = userTs.get(c) || []
+    arr.push(t)
+    userTs.set(c, arr)
+  }
+  type Agg = { n: number; resp: number }
+  const porTpl = new Map<string, Agg>()
+  for (const e of eventos) {
+    const a = porTpl.get(e.tpl) || { n: 0, resp: 0 }
+    a.n++
+    if ((userTs.get(e.c) || []).some((t) => t > e.at && t <= e.at + 24 * 3600e3)) a.resp++
+    porTpl.set(e.tpl, a)
+  }
+  const filas = [...porTpl.entries()]
+    .sort((x, y) => y[1].n - x[1].n)
+    .map(([tpl, a]) => {
+      const pct = a.n ? Math.round((a.resp / a.n) * 100) : 0
+      const color = pct >= 15 ? "#166534" : pct >= 5 ? "#92700c" : "#b91c1c"
+      return `<tr><td style="font-family:monospace;font-size:12px">${tpl}</td><td style="text-align:center">${a.n}</td><td style="text-align:center">${a.resp}</td><td style="text-align:center;font-weight:700;color:${color}">${pct}%</td></tr>`
+    })
+    .join("")
+  return `${titulo}
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="text-align:left"><th>Plantilla / toque</th><th style="text-align:center">Enviados</th><th style="text-align:center">Respondieron en 24h</th><th style="text-align:center">% respuesta</th></tr></thead>
+    <tbody>${filas}</tbody>
+  </table></div>`
+}
+
 async function kvGet(key: string): Promise<string> {
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}&select=value&limit=1`, {
@@ -4844,6 +4912,7 @@ export async function GET(req: Request): Promise<Response> {
   let tasaCierreHtml = ""
   // Panel SLA (punto 1, Lalo 08-ago) — solo en la vista de análisis.
   const slaHtml = vista === "analisis" ? await renderPanelSla().catch(() => "") : ""
+  const plantillasHtml = vista === "analisis" ? await renderPanelPlantillas().catch(() => "") : ""
   {
     const vieronPrecio = cPreform + cEnviada
     const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
@@ -4977,6 +5046,7 @@ export async function GET(req: Request): Promise<Response> {
   ${tasaCierreHtml}
   ${evolucionHtml}
   ${slaHtml}
+  ${plantillasHtml}
   ${ejecutivosHtml}
   ${empresasHtml}
   <div class="kgroup">Por grupo · suman el total (${total})</div>

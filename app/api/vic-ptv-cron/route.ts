@@ -924,6 +924,14 @@ export async function GET(req: Request) {
     return 0
   })
 
+  // 7. COBRO ASISTIDO (punto 2 de la segunda tanda, Lalo 08-ago): cotización
+  // ACEPTADA hace 30+ minutos sin señal de pago → un empujón de pago único.
+  // El cliente que aceptó es el más caliente de todo el embudo.
+  const cobros = await cobroAsistido(ahora).catch((e) => {
+    console.warn("[ptv-cron] cobro asistido falló:", e instanceof Error ? e.message : e)
+    return { enviados: 0, pendientes: 0 }
+  })
+
   return NextResponse.json({
     ok: true,
     conversaciones_revisadas: convs.length,
@@ -935,7 +943,78 @@ export async function GET(req: Request) {
     loops_recerrados_por_atencion: reconciliacion.recerrados,
     sla_alertas_60min: slaAlertas,
     valvulas_precio_abiertas: valvulas,
+    cobros_asistidos: cobros.enviados,
+    aceptadas_sin_pago: cobros.pendientes,
   })
+}
+
+/**
+ * COBRO ASISTIDO (punto 2 de la segunda tanda, Lalo 08-ago): mide el gap
+ * aceptada→pago y lo ataca. Barre cotizaciones en estado "Aceptada"
+ * modificadas en las últimas 6 horas; si a los 30+ minutos no hay señal de
+ * pago (loop cerrado por pagado, estado Pagada, o nota de venta emitida), se
+ * envía UN mensaje de ayuda al pago (ventana de Meta abierta) — una sola vez
+ * por cotización (kv cobro_asistido_<quoteId>).
+ */
+async function cobroAsistido(ahora: Date): Promise<{ enviados: number; pendientes: number }> {
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken().catch(() => "")
+  if (!token) return { enviados: 0, pendientes: 0 }
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const desde = new Date(ahora.getTime() - 6 * 3600_000)
+  const fmt = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "+00:00")
+  const q =
+    `select id, Numero_Cotizacion, Telefono_Cliente, Tel_fono_Contacto, Modified_Time, ID_SO ` +
+    `from Cotizaciones_GeoVictoria where Estado_Cotizacion = 'Aceptada' and Modified_Time >= '${fmt(desde)}' ` +
+    `order by Modified_Time desc limit 0, 50`
+  const res = await fetch(`${api}/crm/v3/coql`, {
+    method: "POST",
+    headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ select_query: q }),
+  }).catch(() => null)
+  const data = res && res.ok ? (((await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || []) : []
+  if (!data.length) return { enviados: 0, pendientes: 0 }
+  const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+  const pruebas = testContactSet()
+  let enviados = 0
+  let pendientes = 0
+  for (const cot of data) {
+    const fono = String(cot.Telefono_Cliente || cot.Tel_fono_Contacto || "").replace(/\D/g, "")
+    if (!/^(56|57|52|51)\d{8,12}$/.test(fono) || isTestContact(fono, pruebas)) continue
+    // Señales de pago: nota de venta emitida, o loop cerrado por pagado.
+    if (cot.ID_SO) continue
+    const loopPagado = await supa<{ contact: string }>(
+      `vic_loop?contact=eq.${encodeURIComponent(fono)}&motivo_cierre=eq.pagado&select=contact&limit=1`,
+    )
+    if (loopPagado.length) continue
+    // 30 minutos de gracia para pagar solo; Modified_Time es el proxy del
+    // momento de aceptación (el clic en aceptar la modifica).
+    const modMs = Date.parse(String(cot.Modified_Time || ""))
+    if (!Number.isFinite(modMs) || ahora.getTime() - modMs < 30 * 60_000) continue
+    pendientes++
+    if (enviados >= 10) continue
+    const marca = `cobro_asistido_${String(cot.id)}`
+    if (await getKvValue(marca).catch(() => null)) continue
+    // Solo con ventana de Meta abierta (el que aceptó estuvo activo hace poco).
+    const conv = await supa<{ last_user_at: string | null }>(
+      `vic_v3_conversations?contact=eq.${encodeURIComponent(fono)}&select=last_user_at&limit=1`,
+    )
+    const lastUser = conv[0]?.last_user_at ? Date.parse(conv[0].last_user_at) : 0
+    if (!lastUser || ahora.getTime() - lastUser >= VENTANA_META_MS) {
+      await setKvValue(marca, "ventana_cerrada").catch(() => {})
+      continue
+    }
+    const texto =
+      "Vi que aceptaste tu cotización 🎉 ¿Te ayudo a completar el pago? Puedes pagar en línea desde el mismo link, y si prefieres transferencia me avisas: te paso los datos y con el comprobante por aquí lo dejamos listo."
+    const okEnvio = await sendBotmakerMessage(fono, texto).catch(() => false)
+    if (okEnvio) {
+      await appendAssistantV3(fono, texto).catch(() => {})
+      await setKvValue(marca, ahora.toISOString()).catch(() => {})
+      enviados++
+    }
+  }
+  return { enviados, pendientes }
 }
 
 /**
