@@ -32,7 +32,7 @@ import {
 } from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
-import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
+import { urlsDeToolsDelTurno, vieneDeUnaTool, curarPlaceholdersDeLink } from "@/lib/links-de-tools"
 import { faseDelContacto, armarOnboarding } from "@/lib/onboarding-canal"
 import { honestarMencionesDeCorreo } from "@/lib/honestidad-entrega"
 import { corregirPedidoDeTelefono } from "@/lib/no-pedir-telefono"
@@ -1140,6 +1140,27 @@ async function processOneTurn(
     // que ya tenemos. La regla está en el prompt dos veces y falló igual
     // (caso Victor Bravo, 27-jul). Ver lib/no-pedir-telefono.ts.
     reply = corregirPedidoDeTelefono(reply)
+
+    // 2.7c. PLACEHOLDER de link (08-ago, caso +56994457210): el molde
+    // "[acceptanceUrl]" del prompt salió LITERAL en el mensaje de entrega — a
+    // una clienta lista para pagar le llegó el texto entre corchetes en vez del
+    // link. Cura determinista en el punto único de salida: se sustituye por el
+    // link real (tool de este turno o puntero durable); sin link real, la línea
+    // se elimina entera. Corre al final a propósito: cubre también los replies
+    // de los reintentos forzados de los guardrails anteriores.
+    {
+      const cura = curarPlaceholdersDeLink(
+        reply,
+        result.toolCalls,
+        quotePointers.find((qp) => !!qp.acceptanceUrl)?.acceptanceUrl,
+      )
+      if (cura.curado) {
+        console.error(
+          `[v3-bg] PLACEHOLDER_LINK contact=${contact} sinReemplazo=${cura.sinReemplazo} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+        )
+        reply = cura.texto
+      }
+    }
 
     // 2.8. Blindaje del contacto comercial: SIN EJECUTIVO ANTES DEL PAGO
     // (decisión 17-jul). El número de Anderson NUNCA sale por el chat — ni

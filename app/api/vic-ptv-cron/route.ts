@@ -648,7 +648,7 @@ export async function GET(req: Request) {
   if (!ptvHabilitado()) {
     {
       const { estamparLatido } = await import("@/lib/latido")
-      void estamparLatido("ptv").catch(() => undefined)
+      await estamparLatido("ptv").catch(() => undefined)
     }
     return NextResponse.json({ ok: true, skipped: "VICKY_PTV_ENABLED off" })
   }
@@ -939,8 +939,8 @@ export async function GET(req: Request) {
   // Latido (Lalo 08-ago): tick exitoso queda estampado; este cron vigila a los demás.
   {
     const { estamparLatido, vigilarLatidos } = await import("@/lib/latido")
-    void estamparLatido("ptv").catch(() => undefined)
-    void vigilarLatidos("ptv").catch(() => undefined)
+    await estamparLatido("ptv").catch(() => undefined)
+    await vigilarLatidos("ptv").catch(() => undefined)
   }
   return NextResponse.json({
     ok: true,

@@ -73,3 +73,57 @@ export function vieneDeUnaTool(url: string, urlsDeTools: Set<string>): boolean {
   }
   return false
 }
+
+/**
+ * Cura de PLACEHOLDERS de link (08-ago, caso +56994457210): el prompt enseña el
+ * mensaje de entrega con "[acceptanceUrl]" como molde y el modelo lo copió
+ * LITERAL — a una clienta lista para pagar le llegó "Aquí revisas, aceptas y
+ * pagas tu cotización: [acceptanceUrl]", sin link. El guardrail anti-alucinación
+ * no lo ve porque en el reply no hay ninguna URL que vigilar.
+ *
+ * Regla determinista: un placeholder de link entre corchetes/llaves/ángulos
+ * ([acceptanceUrl], {acceptance_url}, <pdfUrl>, [link de pago], [URL], …) se
+ * reemplaza por el acceptanceUrl REAL — primero el que devolvió una tool
+ * exitosa de ESTE turno, si no el del puntero durable de la cotización vigente
+ * (pdfUrl jamás: al chat va solo el link de aceptación). Sin link real que
+ * poner, la LÍNEA completa del placeholder se elimina: mejor un mensaje sin esa
+ * línea que un molde roto delante del cliente.
+ *
+ * El (?!\() final protege los links markdown legítimos: en "[texto](url)" el
+ * corchete va seguido de paréntesis y NO es placeholder.
+ */
+const PLACEHOLDER_LINK_RE =
+  /[[{<]\s*(?:acceptance[\s_-]?url|pdf[\s_-]?url|link(?:[\s_-]+de[\s_-]+(?:pago|aceptaci[oó]n|cotizaci[oó]n))?|url)\s*[\]}>](?!\()/gi
+
+export function curarPlaceholdersDeLink(
+  texto: string,
+  toolCalls: ToolCallLike[] | undefined,
+  linkConocido?: string,
+): { texto: string; curado: boolean; sinReemplazo: boolean } {
+  PLACEHOLDER_LINK_RE.lastIndex = 0
+  if (!PLACEHOLDER_LINK_RE.test(texto)) return { texto, curado: false, sinReemplazo: false }
+  // Fuente más fresca primero: el acceptanceUrl de una tool exitosa del turno.
+  let real = ""
+  for (const call of toolCalls || []) {
+    if (!call || call.ok !== true || call.output == null || typeof call.output !== "object") continue
+    const acc = (call.output as { acceptanceUrl?: unknown }).acceptanceUrl
+    if (typeof acc === "string" && acc.startsWith("http")) real = acc
+  }
+  if (!real && typeof linkConocido === "string" && linkConocido.startsWith("http")) {
+    real = linkConocido
+  }
+  if (real) {
+    PLACEHOLDER_LINK_RE.lastIndex = 0
+    return { texto: texto.replace(PLACEHOLDER_LINK_RE, real), curado: true, sinReemplazo: false }
+  }
+  const limpio = texto
+    .split("\n")
+    .filter((linea) => {
+      PLACEHOLDER_LINK_RE.lastIndex = 0
+      return !PLACEHOLDER_LINK_RE.test(linea)
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+  return { texto: limpio, curado: true, sinReemplazo: true }
+}

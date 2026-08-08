@@ -16,7 +16,7 @@
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import { urlsDeToolsDelTurno, vieneDeUnaTool } from "../lib/links-de-tools.ts"
+import { urlsDeToolsDelTurno, vieneDeUnaTool, curarPlaceholdersDeLink } from "../lib/links-de-tools.ts"
 
 const LINK_ONBOARDING = "https://onboarding-geovictoria.vercel.app?token=abc-123-def"
 const LINK_ACEPTACION = "https://cotizacion.geovictoria.com/quote-acceptance.html?t=xyz789"
@@ -100,5 +100,62 @@ describe("no deja pasar alucinaciones", () => {
     assert.doesNotThrow(() =>
       urlsDeToolsDelTurno([{ name: "x", ok: true, output: circular }]),
     )
+  })
+})
+
+describe("cura de placeholders de link (caso +56994457210, 08-ago)", () => {
+  const MOLDE = "Listo! 🎉\nAquí revisas, aceptas y pagas tu cotización: [acceptanceUrl]\nTambién te mandé el PDF a tu correo."
+
+  test("el caso real: placeholder literal se sustituye por el link de la tool del turno", () => {
+    const r = curarPlaceholdersDeLink(MOLDE, [
+      { name: "generar_link_cotizadora", ok: true, output: { ok: true, acceptanceUrl: LINK_ACEPTACION } },
+    ])
+    assert.ok(r.curado)
+    assert.ok(r.texto.includes(`cotización: ${LINK_ACEPTACION}`))
+    assert.ok(!r.texto.includes("[acceptanceUrl]"))
+  })
+
+  test("sin tool en el turno, usa el link conocido del puntero durable", () => {
+    const r = curarPlaceholdersDeLink(MOLDE, [], LINK_ACEPTACION)
+    assert.ok(r.curado)
+    assert.ok(r.texto.includes(LINK_ACEPTACION))
+  })
+
+  test("variantes de placeholder también se curan", () => {
+    for (const ph of ["{acceptance_url}", "<acceptanceUrl>", "[link de pago]", "[URL]", "[pdfUrl]"]) {
+      const r = curarPlaceholdersDeLink(`Tu cotización: ${ph}`, [], LINK_ACEPTACION)
+      assert.ok(r.curado, `no detectó ${ph}`)
+      assert.ok(r.texto.includes(LINK_ACEPTACION), `no sustituyó ${ph}`)
+    }
+  })
+
+  test("sin NINGÚN link real, la línea del placeholder se elimina entera", () => {
+    const r = curarPlaceholdersDeLink(MOLDE, [])
+    assert.ok(r.curado)
+    assert.ok(r.sinReemplazo)
+    assert.ok(!r.texto.includes("[acceptanceUrl]"))
+    assert.ok(!r.texto.includes("Aquí revisas"))
+    assert.ok(r.texto.includes("Listo!"))
+  })
+
+  test("una tool FALLIDA no aporta link para la cura", () => {
+    const r = curarPlaceholdersDeLink(MOLDE, [
+      { name: "generar_link_cotizadora", ok: false, output: { ok: false, acceptanceUrl: LINK_ACEPTACION } },
+    ])
+    assert.ok(r.sinReemplazo)
+    assert.ok(!r.texto.includes(LINK_ACEPTACION))
+  })
+
+  test("no toca mensajes sanos ni links markdown", () => {
+    for (const sano of [
+      `Aquí tienes tu cotización: ${LINK_ACEPTACION}`,
+      "Revisa [la guía](https://geovictoria.com/guia) cuando quieras",
+      "Te va a llegar un [---] separador de mensajes",
+      "Hola, ¿cómo estás?",
+    ]) {
+      const r = curarPlaceholdersDeLink(sano, [], LINK_ACEPTACION)
+      assert.equal(r.curado, false, `tocó un mensaje sano: ${sano}`)
+      assert.equal(r.texto, sano)
+    }
   })
 })

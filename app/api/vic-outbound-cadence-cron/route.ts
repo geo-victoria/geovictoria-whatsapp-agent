@@ -169,7 +169,7 @@ export async function GET(req: Request): Promise<Response> {
   )
   if (rows.length === 0) {
     const { estamparLatido } = await import("@/lib/latido")
-    void estamparLatido("outbound").catch(() => undefined)
+    await estamparLatido("outbound").catch(() => undefined)
     return NextResponse.json({ ok: true, activos: 0 })
   }
 
@@ -375,7 +375,7 @@ export async function GET(req: Request): Promise<Response> {
   // Latido (Lalo 08-ago): tick exitoso queda estampado.
   {
     const { estamparLatido } = await import("@/lib/latido")
-    void estamparLatido("outbound").catch(() => undefined)
+    await estamparLatido("outbound").catch(() => undefined)
 
   }
   return NextResponse.json({
