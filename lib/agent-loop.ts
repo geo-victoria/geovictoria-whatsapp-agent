@@ -39,7 +39,7 @@ import { duenoCotizacionVigente, type DuenoReunion } from "./tools/agendar-reuni
 import { eventoSeguimientoDe } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
 import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD, actualizarNotaTranscripcion, parseEmpleados } from "./crm-hitos"
-import { umbralPrecios, SCOPE_MAX_SISTEMA } from "./umbral-autonomia"
+import { umbralPrecios, SCOPE_MAX_SISTEMA, paisConUmbral, derivacionDePais } from "./umbral-autonomia"
 import { mas50CierraLoop } from "./loop-v2"
 
 // Límite duro para evitar loops infinitos por bugs del modelo.
@@ -457,7 +457,7 @@ export async function runAgentLoop(params: {
         let bloqueoUmbral = ""
         if (
           contact &&
-          contact.replace(/\D/g, "").startsWith("56") &&
+          paisConUmbral(contact) &&
           (toolName === "cotizar_referencial" ||
             toolName === "consultar_descuento_referencial" ||
             toolName === "generar_link_cotizadora") &&
@@ -469,11 +469,12 @@ export async function runAgentLoop(params: {
             origen: "inbound" as const,
           }))
           if (uc > umbral) {
+            const dp = derivacionDePais(contact)
             bloqueoUmbral =
               `REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): esta conversación es ${origen} y tu umbral para DAR PRECIOS es ${umbral} trabajadores; con ${uc} el precio lo entrega un ejecutivo. ` +
               `NO des precios ni estimados (tampoco de memoria del catálogo). Haz esto AHORA: (1) si te falta nombre, email o empresa, captúralos primero; ` +
-              `(2) deriva con derivar_a_soporte motivo "fuera_de_rango_trabajadores" pasando nombre, email, empresa y trabajadores — el trato entra AL ACTO a la tómbola y un ejecutivo lo toma con el precio; ` +
-              `(3) NO te despidas: sigue acompañando al cliente — responde todas sus dudas (producto, implementación, hardware, prueba), ofrece agendar una reunión con agendar_reunion y empuja el cierre EN EQUIPO con el ejecutivo.`
+              `(2) deriva con ${dp.tool} motivo "${dp.motivo}" pasando nombre, email, empresa y trabajadores — el registro pasa AL ACTO al equipo comercial y un ejecutivo lo toma con el precio; ` +
+              `(3) NO te despidas: sigue acompañando al cliente — responde todas sus dudas (producto, implementación, hardware, prueba), ${dp.agenda} y empuja el cierre EN EQUIPO con el ejecutivo.`
             console.warn(
               `[agent-loop] umbral autonomía: ${toolName} bloqueado (${uc} > ${umbral} ${origen}) contacto ${contact}.`,
             )
@@ -648,12 +649,8 @@ export async function runAgentLoop(params: {
           // Vicky acompaña la venta (seguimientos sin precio, candado v3 hasta
           // contacto real del vendedor). Solo el >50 genuino (o sin N legible,
           // conservador) sale del seguimiento como siempre.
-          const nDerivado =
-            toolName === "derivar_a_soporte"
-              ? parseEmpleados((toolInput as Record<string, unknown>).trabajadores)
-              : undefined
+          const nDerivado = parseEmpleados((toolInput as Record<string, unknown>).trabajadores)
           const acompanar =
-            toolName === "derivar_a_soporte" &&
             typeof nDerivado === "number" &&
             nDerivado >= 1 &&
             nDerivado <= SCOPE_MAX_SISTEMA
@@ -748,7 +745,7 @@ export async function runAgentLoop(params: {
             // el "precio dado" CO ES el referencial exitoso. Se estampa SOLO
             // el timestamp (escalón sigue null — no altera la lógica CL de
             // descuentos) para que el cron arme el reloj precio→aceptación.
-            if (/^57\d{8,12}$/.test(contact.replace(/\D/g, "")) && (result as { ok?: boolean }).ok === true) {
+            if (/^(57|52|51)\d{8,12}$/.test(contact.replace(/\D/g, "")) && (result as { ok?: boolean }).ok === true) {
               await setPrefDraft(contact, {}).catch(() => {})
             }
             // Si ya hay un descuento ACORDADO (escalón negociado) y el cliente
@@ -937,16 +934,20 @@ export async function runAgentLoop(params: {
           output: result,
         })
 
-        if ("ok" in result && result.ok && "handoff" in result && result.handoff) {
+        if (
+          "ok" in result && result.ok &&
+          (("handoff" in result && result.handoff) || toolName === "derivar_a_ejecutivo")
+        ) {
           handoff = true
           // Respaldo determinista (umbral 08-ago): tras un handoff exitoso el
           // modelo a veces devuelve el turno VACÍO (visto sistemático en la
           // E2E de derivaciones sobre-umbral) — si eso pasa, la respuesta al
           // cliente es el mensaje sugerido de la tool, no la disculpa genérica.
+          const r = result as Record<string, unknown>
           const sugerido =
-            "mensajeSugeridoUsuario" in result && typeof (result as Record<string, unknown>).mensajeSugeridoUsuario === "string"
-              ? String((result as Record<string, unknown>).mensajeSugeridoUsuario)
-              : ""
+            (typeof r.mensajeSugeridoUsuario === "string" && r.mensajeSugeridoUsuario) ||
+            (typeof r.mensajeParaProspecto === "string" && r.mensajeParaProspecto) ||
+            ""
           if (sugerido) mensajeHandoffRespaldo = sugerido
         }
 

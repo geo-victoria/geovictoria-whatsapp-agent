@@ -15,6 +15,9 @@ import {
   umbralInbound,
   umbralOutbound,
   formatUmbralParaPrompt,
+  formatDirectivaSobreUmbral,
+  paisConUmbral,
+  derivacionDePais,
 } from "../lib/umbral-autonomia.ts"
 
 beforeEach(() => {
@@ -130,5 +133,65 @@ describe("detección determinista de dotación sobre el umbral", () => {
     assert.equal(dotacionSobreUmbral("somos 15 trabajadores", 20), null)
     assert.equal(dotacionSobreUmbral("tenemos 30 sucursales", 20), null)
     assert.equal(dotacionSobreUmbral("hola, quiero cotizar", 20), null)
+  })
+})
+
+describe("multi-país (réplica del 08-ago PM, orden de Lalo)", () => {
+  test("paisConUmbral cubre CL/CO/MX/PE y rechaza el resto", () => {
+    assert.equal(paisConUmbral("56911223344"), true)
+    assert.equal(paisConUmbral("573001112233"), true)
+    assert.equal(paisConUmbral("5215511112222"), true)
+    assert.equal(paisConUmbral("51922067167"), true)
+    assert.equal(paisConUmbral("13055551234"), false)
+    assert.equal(paisConUmbral(""), false)
+  })
+
+  test("derivacionDePais nombra la tool, el motivo y el documento correctos", () => {
+    const cl = derivacionDePais("56911223344")
+    assert.equal(cl.tool, "derivar_a_soporte")
+    assert.equal(cl.motivo, "fuera_de_rango_trabajadores")
+    assert.equal(cl.docId, "RUT")
+    const co = derivacionDePais("573001112233")
+    assert.equal(co.tool, "derivar_a_ejecutivo")
+    assert.equal(co.motivo, "mas_de_50")
+    assert.equal(co.docId, "NIT")
+    assert.equal(derivacionDePais("5215511112222").docId, "RFC")
+    assert.equal(derivacionDePais("51922067167").docId, "RUC")
+  })
+
+  test("los formatters hablan la tool del país", () => {
+    const bloqueCO = formatUmbralParaPrompt(20, "inbound", derivacionDePais("573001112233"))
+    assert.match(bloqueCO, /derivar_a_ejecutivo/)
+    assert.match(bloqueCO, /mas_de_50/)
+    assert.ok(!/derivar_a_soporte/.test(bloqueCO))
+    const dirMX = formatDirectivaSobreUmbral(30, 20, derivacionDePais("5215511112222"))
+    assert.match(dirMX, /derivar_a_ejecutivo/)
+    assert.match(dirMX, /RFC/)
+    // CL por default sigue intacto
+    assert.match(formatUmbralParaPrompt(20, "inbound"), /derivar_a_soporte/)
+  })
+
+  test("las cadenas ancla de los replace siguen en los prompts CO/MX/PE", () => {
+    const comunes = [
+      "1 a 50 → cotizas tú (Modo Cotización); más de 50 → NO cotizas",
+      "- MODO COTIZACIÓN (1-50 personas):",
+      "El ÚNICO tope es la cantidad de PERSONAS (1-50):",
+      "- MODO LEAD (contacto pedido, reunión, o >50):",
+    ]
+    const porPais: Record<string, string[]> = {
+      "co": [...comunes, "- Cotizas para empresas de 1 a 50 personas que operan en COLOMBIA."],
+      "mx": [...comunes, "- Cotizas para empresas de 1 a 50 personas que operan en MÉXICO."],
+      "pe": [...comunes, "- Cotizas para empresas de 1 a 50 personas que operan en PERÚ."],
+    }
+    for (const [pais, objetivos] of Object.entries(porPais)) {
+      const fuente = readFileSync(new URL(`../lib/paises/${pais}/prompt.ts`, import.meta.url), "utf8")
+      for (const objetivo of objetivos) {
+        const veces = fuente.split(objetivo).length - 1
+        assert.ok(
+          veces >= 2,
+          `${pais}: la ancla "${objetivo.slice(0, 40)}…" aparece ${veces} vez/veces — replace desincronizado`,
+        )
+      }
+    }
   })
 })

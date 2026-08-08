@@ -723,8 +723,8 @@ export async function GET(req: Request) {
     // y presenta al dueño vigente, JAMÁS cambia propietarios (regla equipo
     // CO: el primero se lo queda hasta el final — asignarEnZoho ya respeta
     // dueños humanos, y todos los registros CO nacen con Galindo/Gordillo).
-    // MX (o flag apagado) sigue con el TTV de siempre.
-    const usaV2 = v2Activo && (pais === "cl" || pais === "pe" || pais === "co")
+    // MX en v2 desde el 08-ago (réplica ordenada por Lalo); con flag apagado, todos vuelven al TTV clásico.
+    const usaV2 = v2Activo && (pais === "cl" || pais === "pe" || pais === "co" || pais === "mx")
     const decision = usaV2
       ? debeTraspasarEtapa({
           firstUserAt: c.first_user_at ? new Date(c.first_user_at) : null,

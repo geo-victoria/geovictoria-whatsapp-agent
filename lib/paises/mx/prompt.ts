@@ -108,7 +108,26 @@ export function formatCotizacionExistenteMX(p?: {
  * teléfono del cliente inyectado (espejo del chileno/colombiano: nunca se le
  * pregunta el número — escribe desde él). Usar en cada request.
  */
-export function getSystemPromptMX(contact?: string): string {
+export function getSystemPromptMX(contact?: string, umbralPrecios?: number): string {
+  // Umbral de venta autónoma (Lalo 08-ago, replicado de CL): con umbral < 50
+  // los puntos de decisión del flujo se reescriben con el umbral real. Las
+  // cadenas son exactas (ancladas por tests/umbral-autonomia.test.ts): si el
+  // prompt cambia sin actualizar esto, el replace no matchea y quedan la
+  // regla inyectada del webhook + el guard determinista del agent-loop.
+  let base = SYSTEM_PROMPT_MX
+  if (umbralPrecios && umbralPrecios < 50) {
+    const u = String(umbralPrecios)
+    base = base
+      .replace('1 a 50 → cotizas tú (Modo Cotización); más de 50 → NO cotizas', `1 a ${u} → cotizas tú (Modo Cotización); más de ${u} → NO cotizas`)
+      .replace('- MODO COTIZACIÓN (1-50 personas):', `- MODO COTIZACIÓN (1-${u} personas):`)
+      .replace('El ÚNICO tope es la cantidad de PERSONAS (1-50):', `El ÚNICO tope es la cantidad de PERSONAS (1-${u} en esta conversación — regla UMBRAL DE PRECIOS del inicio):`)
+      .replace('- MODO LEAD (contacto pedido, reunión, o >50):', `- MODO LEAD (contacto pedido, reunión, o más de ${u}):`)
+      .replace('(43 personas en 20 sucursales se cotiza igual que en 1 oficina)', `(${u} personas en 20 sucursales se cotiza igual que en 1 oficina)`)
+      .replace('si el total está entre 1 y 50, cotiza normal', `si el total está entre 1 y ${u}, cotiza normal`)
+      .replace('Solo si el total supera 50 va el camino de mas_de_50.', `Si el total supera ${u} va el camino de mas_de_50.`)
+      .replace('- Cotizas para empresas de 1 a 50 personas que operan en MÉXICO.', `- Cotizas para empresas de 1 a ${u} personas que operan en MÉXICO (tu UMBRAL DE PRECIOS en esta conversación; sobre ${u}, el precio lo entrega un ejecutivo).`)
+  }
+
   const telefono = (contact || "").trim()
   const bloqueTelefono = telefono
     ? `# Teléfono del cliente — ya lo conoces, NO lo preguntes
@@ -119,7 +138,7 @@ El cliente escribe por WhatsApp desde el +${telefono}. Ese ES su teléfono de co
 
 `
     : ""
-  return anclajeTemporalMX() + bloqueTelefono + SYSTEM_PROMPT_MX
+  return anclajeTemporalMX() + bloqueTelefono + base
 }
 
 export const SYSTEM_PROMPT_MX = `Eres Vicky, ejecutiva comercial de GeoVictoria MÉXICO (${PERFIL_MX.entidadLegal.razonSocial}, Ciudad de México). Atiendes por WhatsApp a empresas que operan en México, con TUTEO mexicano cálido y profesional (tú/tienes/puedes) — se debe sentir una persona real del equipo, no una IA. Ayudas a resolver su control de asistencia laboral: calificas al prospecto, le muestras el valor y el precio, y cierras con la cotización formal en línea o lo dejas en manos del equipo comercial de México.

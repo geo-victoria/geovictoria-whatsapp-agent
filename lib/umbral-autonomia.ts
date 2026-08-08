@@ -19,8 +19,12 @@
  * Si Supabase no responde se asume INBOUND (el umbral más amplio de los dos
  * nuevos): la verificación jamás degrada la conversación (principio 24-jul).
  *
- * Solo CHILE: CO/MX/PE mantienen sus reglas de país (los llamadores filtran
- * por prefijo 56 antes de consultar).
+ * TODOS LOS PAÍSES (CL desde el 08-ago AM; CO/MX/PE replicados el 08-ago PM
+ * por orden de Lalo): mismo umbral 20 inbound / 10 outbound. La derivación
+ * usa la tool de cada país (CL: derivar_a_soporte fuera_de_rango_trabajadores;
+ * CO/MX/PE: derivar_a_ejecutivo mas_de_50) y el registro sigue las reglas de
+ * dueños de cada país (CL tómbola · CO fijos Galindo/Gordillo · MX interina ·
+ * PE Mónica).
  *
  * Envs: VICKY_UMBRAL_INBOUND / VICKY_UMBRAL_OUTBOUND (overrides numéricos) ·
  * VICKY_UMBRAL_CLASICO=1 → rollback total al comportamiento previo (50/50).
@@ -30,6 +34,34 @@
 export const SCOPE_MAX_SISTEMA = 50
 
 export type OrigenConversacion = "inbound" | "outbound"
+
+/** Países donde rige el umbral (todos los de Vicky, por prefijo discable). */
+export function paisConUmbral(contact: string): boolean {
+  return /^(56|57|52|51)\d{8,12}$/.test((contact || "").replace(/\D/g, ""))
+}
+
+/** Cómo se deriva sobre el umbral en el país del contacto (tool + motivo +
+ * documento tributario que NO se exige antes de derivar). */
+export type DerivacionPais = { tool: string; motivo: string; docId: string; agenda: string }
+
+export function derivacionDePais(contact: string): DerivacionPais {
+  const d = (contact || "").replace(/\D/g, "")
+  if (d.startsWith("56")) {
+    return {
+      tool: "derivar_a_soporte",
+      motivo: "fuera_de_rango_trabajadores",
+      docId: "RUT",
+      agenda: "ofrece agendar una reunión con agendar_reunion",
+    }
+  }
+  const docId = d.startsWith("57") ? "NIT" : d.startsWith("52") ? "RFC" : "RUC"
+  return {
+    tool: "derivar_a_ejecutivo",
+    motivo: "mas_de_50",
+    docId,
+    agenda: "ofrece coordinar una reunión o llamada con el equipo",
+  }
+}
 
 function envNum(name: string, fallback: number): number {
   const v = Number((process.env[name] || "").trim())
@@ -117,12 +149,16 @@ export function dotacionSobreUmbral(mensaje: string, umbral: number): number | n
  * prompt: la instrucción más cercana a la respuesta. Es idempotente: ordena
  * derivar solo si aún no se ha derivado en la conversación.
  */
-export function formatDirectivaSobreUmbral(n: number, umbral: number): string {
+export function formatDirectivaSobreUmbral(
+  n: number,
+  umbral: number,
+  d: DerivacionPais = derivacionDePais("56"),
+): string {
   return (
     `\n\nATENCIÓN (detección automática): este cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). Reglas OBLIGATORIAS de aquí en adelante:\n` +
     `- NO sigas el flujo de cotización (nada de preguntar marcaje, puntos ni módulos) y NO des ni prometas precios en ninguna respuesta.\n` +
-    `- Si AÚN no has derivado en esta conversación: con nombre, email y empresa llama derivar_a_soporte motivo "fuera_de_rango_trabajadores" AHORA MISMO, pasando nombre, email, empresa y trabajadores. NO necesitas el RUT para derivar (el RUT lo captura el ejecutivo) — no lo pidas antes de derivar. Si falta alguno de los TRES datos (nombre, email, empresa), pídelos todos en una sola pregunta y deriva apenas lleguen; los datos que el cliente YA entregó se usan tal cual, SIN pedirle que los confirme. Después de llamar la tool, en ese MISMO turno SIEMPRE respóndele al cliente: copia el mensajeSugeridoUsuario de la tool (o parafrasea el anuncio del ejecutivo) y ofrece el siguiente paso — JAMÁS dejes la respuesta vacía.\n` +
-    `- Si la derivación ya venía hecha de un turno ANTERIOR (el anuncio del ejecutivo ya aparece en mensajes previos del historial): NO vuelvas a llamar derivar_a_soporte ni repitas el anuncio. Solo acompaña: responde dudas de producto/implementación, ofrece agendar reunión con agendar_reunion y empuja el siguiente paso, siempre sin precios.\n`
+    `- Si AÚN no has derivado en esta conversación: con nombre, email y empresa llama ${d.tool} motivo "${d.motivo}" AHORA MISMO, pasando nombre, email, empresa y trabajadores. NO necesitas el ${d.docId} para derivar (lo captura el ejecutivo) — no lo pidas antes de derivar. Si falta alguno de los TRES datos (nombre, email, empresa), pídelos todos en una sola pregunta y deriva apenas lleguen; los datos que el cliente YA entregó se usan tal cual, SIN pedirle que los confirme. Después de llamar la tool, en ese MISMO turno SIEMPRE respóndele al cliente: copia el mensaje sugerido que devuelve la tool (o parafrasea el anuncio del ejecutivo) y ofrece el siguiente paso — JAMÁS dejes la respuesta vacía.\n` +
+    `- Si la derivación ya venía hecha de un turno ANTERIOR (el anuncio del ejecutivo ya aparece en mensajes previos del historial): NO vuelvas a llamar ${d.tool} ni repitas el anuncio. Solo acompaña: responde dudas de producto/implementación, ${d.agenda} y empuja el siguiente paso, siempre sin precios.\n`
   )
 }
 
@@ -130,14 +166,18 @@ export function formatDirectivaSobreUmbral(n: number, umbral: number): string {
  * Bloque inyectable al inicio del system prompt CL. Vacío en modo clásico
  * (umbral = 50): el prompt base ya dice 1-50 y no hay nada que acotar.
  */
-export function formatUmbralParaPrompt(umbral: number, origen: OrigenConversacion): string {
+export function formatUmbralParaPrompt(
+  umbral: number,
+  origen: OrigenConversacion,
+  d: DerivacionPais = derivacionDePais("56"),
+): string {
   if (umbral >= SCOPE_MAX_SISTEMA) return ""
   return (
     `UMBRAL DE PRECIOS DE ESTA CONVERSACIÓN (proceso 08-ago — esta regla GANA sobre cualquier mención de "1 a 50" más abajo):\n` +
     `- Esta conversación es ${origen.toUpperCase()}. Puedes DAR PRECIOS (estimados, referenciales, descuentos, cotización formal) SOLO hasta ${umbral} trabajadores.\n` +
     `- APENAS sepas que son MÁS de ${umbral} trabajadores (aunque sean 50 o menos): DETÉN el flujo de cotización en ese mismo turno — NO preguntes cómo marcan, ni puntos, ni módulos, y NO prometas "armarte el valor", porque el precio NO lo entregas tú. Tampoco des precios de memoria ni del catálogo de este prompt.\n` +
-    `- En su lugar: pide SOLO lo que te falte de nombre, email y empresa (una sola pregunta), y con los datos completos deriva EN ESE MISMO TURNO con derivar_a_soporte motivo "fuera_de_rango_trabajadores" pasando nombre, email, empresa y trabajadores — el trato entra AL ACTO a la tómbola del equipo y un ejecutivo entrega el precio a la brevedad. Si ya tienes los cuatro datos (por ejemplo del formulario o del primer mensaje), deriva DE INMEDIATO, sin ninguna pregunta previa.\n` +
-    `- Después de derivar NO te despidas ni desaparezcas: ACOMPAÑA la venta. Responde todas las dudas (producto, funcionalidades, implementación, hardware, prueba), ofrece agendar una reunión con agendar_reunion, y empuja el cierre EN EQUIPO con el ejecutivo. Lo ÚNICO que pasa al ejecutivo es el precio — todo lo demás sigue contigo.\n` +
+    `- En su lugar: pide SOLO lo que te falte de nombre, email y empresa (una sola pregunta), y con los datos completos deriva EN ESE MISMO TURNO con ${d.tool} motivo "${d.motivo}" pasando nombre, email, empresa y trabajadores — el registro pasa AL ACTO al equipo comercial y un ejecutivo entrega el precio a la brevedad. Si ya tienes los cuatro datos (por ejemplo del formulario o del primer mensaje), deriva DE INMEDIATO, sin ninguna pregunta previa.\n` +
+    `- Después de derivar NO te despidas ni desaparezcas: ACOMPAÑA la venta. Responde todas las dudas (producto, funcionalidades, implementación, hardware, prueba), ${d.agenda}, y empuja el cierre EN EQUIPO con el ejecutivo. Lo ÚNICO que pasa al ejecutivo es el precio — todo lo demás sigue contigo.\n` +
     `- El flujo de MÁS de 50 trabajadores no cambia (Modo Lead de siempre).\n\n`
   )
 }

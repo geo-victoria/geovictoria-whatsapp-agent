@@ -57,7 +57,23 @@ Cuando el cliente proponga un día relativo ("mañana", "el martes", "la próxim
  * teléfono del cliente inyectado (espejo del resto de países: nunca se le
  * pregunta el número — escribe desde él). Usar en cada request.
  */
-export function getSystemPromptPE(contact?: string): string {
+export function getSystemPromptPE(contact?: string, umbralPrecios?: number): string {
+  // Umbral de venta autónoma (Lalo 08-ago, replicado de CL): con umbral < 50
+  // los puntos de decisión del flujo se reescriben con el umbral real. Las
+  // cadenas son exactas (ancladas por tests/umbral-autonomia.test.ts): si el
+  // prompt cambia sin actualizar esto, el replace no matchea y quedan la
+  // regla inyectada del webhook + el guard determinista del agent-loop.
+  let base = SYSTEM_PROMPT_PE
+  if (umbralPrecios && umbralPrecios < 50) {
+    const u = String(umbralPrecios)
+    base = base
+      .replace('1 a 50 → cotizas tú (Modo Cotización); más de 50 → NO cotizas', `1 a ${u} → cotizas tú (Modo Cotización); más de ${u} → NO cotizas`)
+      .replace('- MODO COTIZACIÓN (1-50 personas):', `- MODO COTIZACIÓN (1-${u} personas):`)
+      .replace('El ÚNICO tope es la cantidad de PERSONAS (1-50):', `El ÚNICO tope es la cantidad de PERSONAS (1-${u} en esta conversación — regla UMBRAL DE PRECIOS del inicio):`)
+      .replace('- MODO LEAD (contacto pedido, reunión, o >50):', `- MODO LEAD (contacto pedido, reunión, o más de ${u}):`)
+      .replace('- Cotizas para empresas de 1 a 50 personas que operan en PERÚ.', `- Cotizas para empresas de 1 a ${u} personas que operan en PERÚ (tu UMBRAL DE PRECIOS en esta conversación; sobre ${u}, el precio lo entrega la ejecutiva).`)
+  }
+
   const telefono = (contact || "").trim()
   const bloqueTelefono = telefono
     ? `# Teléfono del cliente — ya lo conoces, NO lo preguntes
@@ -68,7 +84,7 @@ El cliente escribe por WhatsApp desde el +${telefono}. Ese ES su teléfono de co
 
 `
     : ""
-  return anclajeTemporalPE() + bloqueTelefono + SYSTEM_PROMPT_PE
+  return anclajeTemporalPE() + bloqueTelefono + base
 }
 
 export const SYSTEM_PROMPT_PE = `${PERFIL_PE.promptBlocks.identidad} Atiendes por WhatsApp desde ${PERFIL_PE.entidadLegal.razonSocial} (Lima), con trato peruano neutro, cordial y profesional — se debe sentir una persona real del equipo, no una IA. Ayudas a resolver el control de asistencia laboral de la empresa del cliente: calificas al prospecto, le muestras el valor y el precio, y cuando quiere avanzar lo dejas en manos de nuestra ejecutiva comercial en Perú, que finaliza la contratación con él.

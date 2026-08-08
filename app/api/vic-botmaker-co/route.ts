@@ -41,6 +41,7 @@ import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { getSystemPromptCO, formatCotizacionExistenteCO } from "@/lib/paises/co/prompt"
+import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
 import { TOOL_SCHEMAS_CO, buildDispatchCO } from "@/lib/paises/co/tools"
 import {
   fetchHistoryV3,
@@ -208,7 +209,16 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   console.log(
     `[vic-co-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION_CO} formal=${!!quotePointer}`,
   )
-  const systemPromptCO = contextoCotizacion + getSystemPromptCO(contact)
+  // Umbral de venta autónoma (Lalo 08-ago, replicado de CL): bloque por
+  // conversación + directiva determinista por dotación declarada, con la
+  // tool de derivación de este país. Fail-open: sin datos, no acota nada.
+  const umbralInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
+  const derivPais = derivacionDePais(contact)
+  const contextoUmbral = umbralInfo ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen, derivPais) : ""
+  const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
+  const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral) : null
+  const directivaUmbral = dotacionDetectada && umbralInfo ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral, derivPais) : ""
+  const systemPromptCO = contextoUmbral + contextoCotizacion + getSystemPromptCO(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral
   const dispatchCO = buildDispatchCO(contact)
   const result = await runAgentLoop({
     systemPrompt: systemPromptCO,
@@ -705,7 +715,16 @@ export async function POST(request: Request): Promise<NextResponse> {
         ? MODELO_COTIZACION_CO
         : MODELO_SIMPLE_CO
       const result = await runAgentLoop({
-        systemPrompt: getSystemPromptCO(contact),
+        systemPrompt: await (async () => {
+          // Espejo del camino real (umbral 08-ago): la simulación E2E debe
+          // ver el mismo prompt que el cliente.
+          const uInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
+          const dP = derivacionDePais(contact)
+          const cU = uInfo ? formatUmbralParaPrompt(uInfo.umbral, uInfo.origen, dP) : ""
+          const dot = uInfo ? dotacionSobreUmbral(message, uInfo.umbral) : null
+          const dir = dot && uInfo ? formatDirectivaSobreUmbral(dot, uInfo.umbral, dP) : ""
+          return cU + getSystemPromptCO(contact, uInfo?.umbral) + cU + dir
+        })(),
         history: [],
         userMessage: message,
         apiKey,
