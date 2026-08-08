@@ -116,3 +116,19 @@ describe("puntos de decisión del prompt CL reescritos con el umbral", () => {
     assert.match(fuente, /Cuando el camino es cotizar \(1-\$\{u\} trabajadores\)/)
   })
 })
+
+describe("detección determinista de dotación sobre el umbral", () => {
+  test("detecta la dotación en frases reales", async () => {
+    const { dotacionSobreUmbral } = await import("../lib/umbral-autonomia.ts")
+    assert.equal(dotacionSobreUmbral("Somos Transportes Andina, 30 trabajadores.", 20), 30)
+    assert.equal(dotacionSobreUmbral("somos 15 trabajadores en la empresa", 10), 15)
+    assert.equal(dotacionSobreUmbral("tenemos 45 personas y 3 sucursales", 20), 45)
+    assert.equal(dotacionSobreUmbral("120 empleados aprox", 20), 120)
+  })
+  test("bajo el umbral (o sin señal) no dispara", async () => {
+    const { dotacionSobreUmbral } = await import("../lib/umbral-autonomia.ts")
+    assert.equal(dotacionSobreUmbral("somos 15 trabajadores", 20), null)
+    assert.equal(dotacionSobreUmbral("tenemos 30 sucursales", 20), null)
+    assert.equal(dotacionSobreUmbral("hola, quiero cotizar", 20), null)
+  })
+})

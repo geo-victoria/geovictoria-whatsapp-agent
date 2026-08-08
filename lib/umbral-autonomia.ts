@@ -91,6 +91,39 @@ export async function umbralPrecios(
 }
 
 /**
+ * Detección DETERMINISTA de dotación sobre el umbral en el mensaje entrante
+ * ("30 trabajadores", "somos 25 personas", "45 empleados"). La E2E del 08-ago
+ * mostró que el guion de venta le gana a las reglas del prompt: con el número
+ * detectado por código se inyecta una directiva imperativa AL FINAL del
+ * prompt (recencia) para ese turno. Toma el número MAYOR mencionado junto a
+ * una palabra de dotación; si nada supera el umbral devuelve null (el guard
+ * de tools del agent-loop sigue de red de fondo).
+ */
+export function dotacionSobreUmbral(mensaje: string, umbral: number): number | null {
+  const texto = String(mensaje || "").toLowerCase()
+  const re = /(\d{1,4})\s*(?:trabajador|trabajadores|personas?\b|empleados?\b|colaborador(?:es)?|funcionarios?\b)/g
+  let mayor = 0
+  for (const m of texto.matchAll(re)) {
+    const n = Number(m[1])
+    if (Number.isFinite(n) && n > mayor) mayor = n
+  }
+  return mayor > umbral ? mayor : null
+}
+
+/**
+ * Directiva de turno cuando el mensaje declara dotación sobre el umbral.
+ * Va AL FINAL del system prompt: la instrucción más cercana a la respuesta.
+ */
+export function formatDirectivaSobreUmbral(n: number, umbral: number): string {
+  return (
+    `\n\nATENCIÓN PARA ESTE TURNO (detección automática): el cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). ` +
+    `En ESTA respuesta NO sigas el flujo de cotización (nada de preguntar marcaje, puntos ni módulos) y NO des ni prometas precios. ` +
+    `Aplica la regla UMBRAL DE PRECIOS: si ya tienes nombre, email y empresa, llama derivar_a_soporte motivo "fuera_de_rango_trabajadores" AHORA (pasando nombre, email, empresa y trabajadores) y responde acompañando (dudas, reunión con agendar_reunion, siguiente paso). ` +
+    `Si te falta alguno de esos tres datos, pídelos TODOS en una sola pregunta y deriva apenas lleguen.\n`
+  )
+}
+
+/**
  * Bloque inyectable al inicio del system prompt CL. Vacío en modo clásico
  * (umbral = 50): el prompt base ya dice 1-50 y no hay nada que acotar.
  */
