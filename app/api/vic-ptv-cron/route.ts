@@ -946,7 +946,12 @@ export async function GET(req: Request) {
  * apellido. El panel de SLA del dashboard muestra la foto completa.
  */
 async function escaladaSla(ahora: Date): Promise<number> {
-  const desde = new Date(ahora.getTime() - 48 * 3600_000).toISOString()
+  // Piso de encendido: solo traspasos POSTERIORES al despliegue del SLA —
+  // los de antes ya los maneja el candado v3 (Vicky reabierta) y alertarlos
+  // en lote el primer tick era puro ruido para el equipo.
+  const piso = "2026-08-09T00:00:00Z"
+  const ventana = new Date(ahora.getTime() - 48 * 3600_000).toISOString()
+  const desde = ventana > piso ? ventana : piso
   const activos = await supa<{ id: string; contact: string; vendedor_email: string | null; vendedor_nombre: string | null; traspasado_at: string }>(
     `vic_ptv?estado=eq.activo&traspasado_at=gte.${encodeURIComponent(desde)}&select=id,contact,vendedor_email,vendedor_nombre,traspasado_at&limit=200`,
   )
