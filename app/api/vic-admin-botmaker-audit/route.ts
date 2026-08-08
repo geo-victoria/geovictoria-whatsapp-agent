@@ -98,6 +98,17 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "BOTMAKER_ACCESS_TOKEN no configurado" }, { status: 500 })
   }
 
+  // ── Proxy de SOLO LECTURA a la API de Botmaker (exploración de endpoints:
+  // bots/intents/agentes/colas). GET únicamente, host fijo — jamás muta nada.
+  const bmpath = (sp.get("bmpath") || "").trim()
+  if (bmpath) {
+    if (!/^\/v[0-9.]+\/[a-zA-Z0-9/_?&=%.-]*$/.test(bmpath)) {
+      return NextResponse.json({ ok: false, error: "bmpath inválido" }, { status: 400 })
+    }
+    const r = await fetch(`https://api.botmaker.com${bmpath}`, { headers: BM_HEADERS, cache: "no-store" })
+    return NextResponse.json({ ok: true, bmpath, status: r.status, body: (await r.text()).slice(0, 8000) })
+  }
+
   // ── Modo diagnóstico crudo (se mantiene para futuros ajustes de shape) ──
   const contact = (sp.get("contact") || "").trim().replace(/^\+/, "")
   if (contact && sp.get("raw")) {
