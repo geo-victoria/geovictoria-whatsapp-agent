@@ -93,6 +93,12 @@ describe("puntos de decisión del prompt CL reescritos con el umbral", () => {
       '- Si tiene 50+ → no cotiza, pregunta "Prefieres reunión o callback?".',
       "Aplica cuando: el usuario pidió cotizar Y tiene entre 1 y 50 trabajadores.",
       "Cuando el camino es cotizar (1-50 trabajadores), sigue este orden:",
+      "2. Cotizar — generar una cotización formal con PDF. Solo para empresas de 1 a 50 trabajadores.",
+      "El ÚNICO tope de scope es la cantidad de TRABAJADORES (1 a 50).",
+      "Una empresa de 43 trabajadores en 50 sucursales se cotiza igual que una en 1 oficina",
+      "si las personas están dentro de 1-50, cotizas, tenga los puntos que tenga.",
+      "Si el total sumado está entre 1 y 50, cotiza normal:",
+      "— calcula un estimado mensual. Solo funciona para 1-50 trabajadores.",
     ]) {
       // Aparecen DOS veces: en el template del prompt y en el .replace().
       const veces = fuente.split(objetivo).length - 1
