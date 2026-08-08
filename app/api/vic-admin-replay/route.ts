@@ -22,6 +22,7 @@ import { NextResponse } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
+import { umbralPrecios, formatUmbralParaPrompt } from "@/lib/umbral-autonomia"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -73,8 +74,16 @@ export async function POST(req: Request): Promise<Response> {
   } else if (body.useStoredHistory && contact) {
     history = await fetchHistoryV3(contact, 40)
   }
+  // Espejo del prompt productivo (umbral 08-ago): el replay audita lo que el
+  // cliente vería, así que lleva el mismo bloque de umbral que vic-botmaker-v3.
+  const umbralInfo = contact.replace(/\D/g, "").startsWith("56")
+    ? await umbralPrecios(contact).catch(() => null)
+    : null
+  const contextoUmbral = umbralInfo
+    ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen)
+    : ""
   const result = await runAgentLoop({
-    systemPrompt: getSystemPromptV3(contact || undefined),
+    systemPrompt: contextoUmbral + getSystemPromptV3(contact || undefined),
     history,
     userMessage: message,
     apiKey,
