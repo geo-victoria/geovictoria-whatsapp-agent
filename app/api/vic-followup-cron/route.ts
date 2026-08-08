@@ -259,6 +259,10 @@ export async function POST(req: Request) {
   // 2. Claim atómico de los seguimientos vencidos.
   const claims = await claimFollowups(CLAIM_BATCH)
   if (claims.length === 0) {
+    {
+      const { estamparLatido } = await import("@/lib/latido")
+      void estamparLatido("followup").catch(() => undefined)
+    }
     return NextResponse.json({ ok: true, sent: 0 })
   }
 
@@ -421,5 +425,11 @@ export async function POST(req: Request) {
     )
   }
 
+  // Latido (Lalo 08-ago): tick exitoso queda estampado.
+  {
+    const { estamparLatido } = await import("@/lib/latido")
+    void estamparLatido("followup").catch(() => undefined)
+
+  }
   return NextResponse.json({ ok: true, claimed: claims.length, sent })
 }

@@ -646,6 +646,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
   if (!ptvHabilitado()) {
+    {
+      const { estamparLatido } = await import("@/lib/latido")
+      void estamparLatido("ptv").catch(() => undefined)
+    }
     return NextResponse.json({ ok: true, skipped: "VICKY_PTV_ENABLED off" })
   }
   const ahora = new Date()
@@ -932,6 +936,12 @@ export async function GET(req: Request) {
     return { enviados: 0, pendientes: 0 }
   })
 
+  // Latido (Lalo 08-ago): tick exitoso queda estampado; este cron vigila a los demás.
+  {
+    const { estamparLatido, vigilarLatidos } = await import("@/lib/latido")
+    void estamparLatido("ptv").catch(() => undefined)
+    void vigilarLatidos("ptv").catch(() => undefined)
+  }
   return NextResponse.json({
     ok: true,
     conversaciones_revisadas: convs.length,

@@ -497,6 +497,10 @@ export async function GET(req: Request): Promise<Response> {
   }
   // Flag maestro: apagado = no-op total (deploy seguro antes del switch-on).
   if (!loopV2Enabled()) {
+    {
+      const { estamparLatido } = await import("@/lib/latido")
+      void estamparLatido("loop").catch(() => undefined)
+    }
     return NextResponse.json({ ok: true, skipped: "flag off" })
   }
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -522,6 +526,8 @@ export async function GET(req: Request): Promise<Response> {
   const detalle: Array<Record<string, unknown>> = []
 
   if (rows.length === 0) {
+    const { estamparLatido } = await import("@/lib/latido")
+    void estamparLatido("loop").catch(() => undefined)
     return NextResponse.json({
       ok: true,
       procesados,
@@ -878,6 +884,12 @@ export async function GET(req: Request): Promise<Response> {
     console.warn("[loop-cron] toque sabatino falló:", e instanceof Error ? e.message : e)
   }
 
+  // Latido (Lalo 08-ago): tick exitoso queda estampado; este cron vigila a los demás.
+  {
+    const { estamparLatido, vigilarLatidos } = await import("@/lib/latido")
+    void estamparLatido("loop").catch(() => undefined)
+    void vigilarLatidos("loop").catch(() => undefined)
+  }
   return NextResponse.json({
     ok: true,
     procesados,

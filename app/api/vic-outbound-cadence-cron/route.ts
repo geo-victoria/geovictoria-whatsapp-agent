@@ -167,7 +167,11 @@ export async function GET(req: Request): Promise<Response> {
   const rows = (res.ok ? ((await res.json()) as Row[]) : []).filter(
     (r) => r.contact && !isTestContact(r.contact, testContactSet()),
   )
-  if (rows.length === 0) return NextResponse.json({ ok: true, activos: 0 })
+  if (rows.length === 0) {
+    const { estamparLatido } = await import("@/lib/latido")
+    void estamparLatido("outbound").catch(() => undefined)
+    return NextResponse.json({ ok: true, activos: 0 })
+  }
 
   // Loop v2 (flag LOOP_V2_ENABLED): los contactos migrados al motor nuevo NO
   // reciben la cadencia vieja — un solo fetch batch (con el flag apagado el
@@ -368,6 +372,12 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
+  // Latido (Lalo 08-ago): tick exitoso queda estampado.
+  {
+    const { estamparLatido } = await import("@/lib/latido")
+    void estamparLatido("outbound").catch(() => undefined)
+
+  }
   return NextResponse.json({
     ok: true,
     activos: rows.length,
