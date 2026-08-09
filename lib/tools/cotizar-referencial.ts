@@ -550,6 +550,12 @@ export async function cotizarReferencial(args: {
       const ahorroConIvaUF = instalacionUF * (1 + IVA_RATE)
       const ahorroCLP = Math.round(ahorroConIvaUF * ufActual)
       const inicialLivianoCLP = totalUnicoCLP + totalRecurrenteCLP - ahorroCLP
+      // Burbuja aparte (Rodrigo 09-ago, "este mensaje es demasiado largo"):
+      // el marcador [---] corta el WhatsApp en dos — el resumen con el pago
+      // inicial primero, las alternativas livianas como mensaje propio. El
+      // pipeline de salida ya lo convierte en mensajes separados con cadencia.
+      partes.push("")
+      partes.push("[---]")
       partes.push("")
       partes.push(
         `💡 Para partir más liviano tienes dos alternativas:`,
