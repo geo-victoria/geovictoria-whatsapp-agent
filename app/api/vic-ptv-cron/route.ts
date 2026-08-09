@@ -966,12 +966,27 @@ export async function GET(req: Request) {
  * envía UN mensaje de ayuda al pago (ventana de Meta abierta) — una sola vez
  * por cotización (kv cobro_asistido_<quoteId>).
  */
+/** Ventana de contacto proactivo al cliente (Rodrigo 09-ago): todos los días
+ * 9:00-21:00 hora local del contacto — ningún mensaje proactivo fuera de ella.
+ * (Las alertas INTERNAS al equipo no se gatean: esas corren a toda hora.) */
+function enVentanaProactiva(fono: string, ahora: Date): boolean {
+  const pais = paisDeContacto(fono) || "cl"
+  const tz =
+    pais === "co" ? "America/Bogota" : pais === "mx" ? "America/Mexico_City" : pais === "pe" ? "America/Lima" : "America/Santiago"
+  const hora =
+    Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(ahora)) % 24
+  return hora >= 9 && hora < 21
+}
+
 async function cobroAsistido(ahora: Date): Promise<{ enviados: number; pendientes: number }> {
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
   const token = await getZohoAccessToken().catch(() => "")
   if (!token) return { enviados: 0, pendientes: 0 }
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-  const desde = new Date(ahora.getTime() - 6 * 3600_000)
+  // 20h de lookback (no 6): una aceptada a las 22:00 queda gateada por la
+  // ventana 9-21 y debe seguir apareciendo en la consulta a la mañana
+  // siguiente. La marca kv por cotización evita dobles envíos.
+  const desde = new Date(ahora.getTime() - 20 * 3600_000)
   const fmt = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const q =
     `select id, Numero_Cotizacion, Telefono_Cliente, Tel_fono_Contacto, Modified_Time, ID_SO ` +
@@ -1015,6 +1030,7 @@ async function cobroAsistido(ahora: Date): Promise<{ enviados: number; pendiente
       await setKvValue(marca, "ventana_cerrada").catch(() => {})
       continue
     }
+    if (!enVentanaProactiva(fono, ahora)) continue // fuera de 9-21: próximo tick en ventana
     const texto =
       "Vi que aceptaste tu cotización 🎉 ¿Te ayudo a completar el pago? Puedes pagar en línea desde el mismo link, y si prefieres transferencia me avisas: te paso los datos y con el comprobante por aquí lo dejamos listo."
     const okEnvio = await sendBotmakerMessage(fono, texto).catch(() => false)
@@ -1114,7 +1130,7 @@ async function abrirValvulasDePrecio(ahora: Date): Promise<number> {
       `vic_v3_conversations?contact=eq.${encodeURIComponent(fono)}&select=last_user_at&limit=1`,
     )
     const lastUser = conv[0]?.last_user_at ? Date.parse(conv[0].last_user_at) : 0
-    if (lastUser && ahora.getTime() - lastUser < VENTANA_META_MS) {
+    if (lastUser && ahora.getTime() - lastUser < VENTANA_META_MS && enVentanaProactiva(fono, ahora)) {
       const texto =
         "Te cuento: para no dejarte esperando más, retomo yo misma tu cotización y te armo el valor de inmediato si quieres 😊 ¿Seguimos?"
       const enviado = await sendBotmakerMessage(fono, texto).catch(() => false)

@@ -64,10 +64,12 @@ describe("día de la semana nombrado (caso Tamara)", () => {
     assert.equal(partes(r.cuando).fecha, "03-08")
   })
 
-  test("un finde nombrado se corre al lunes hábil", () => {
+  test("un finde nombrado cae en el finde mismo (ventana 9-21 todos los días, 09-ago)", () => {
+    // Antes se corría al lunes; desde el 09-ago el seguimiento corre también
+    // el fin de semana — quien dice "el sábado" recibe el toque el sábado.
     const r = clasificar("el sábado lo reviso")
     assert.ok(r)
-    assert.equal(partes(r.cuando).dia, "Mon")
+    assert.equal(partes(r.cuando).dia, "Sat")
   })
 
   test("'la próxima semana' gana sobre el día nombrado", () => {
@@ -121,8 +123,8 @@ describe("mensajes sin señal — no deben frenar la cadencia", () => {
   })
 })
 
-describe("todo toque cae en horario hábil", () => {
-  test("ninguna señal agenda fuera de 9:00-19:00 ni en finde", () => {
+describe("todo toque cae en la ventana de seguimiento", () => {
+  test("ninguna señal agenda fuera de 9:00-21:00 (el finde SÍ se toca desde el 09-ago)", () => {
     const mensajes = [
       "no me escribas hasta el martes",
       "hablemos la próxima semana",
@@ -140,12 +142,8 @@ describe("todo toque cae en horario hábil", () => {
         if (!r) continue
         const p = partes(r.cuando)
         assert.ok(
-          p.hora >= 9 && p.hora < 19,
+          p.hora >= 9 && p.hora < 21,
           `${JSON.stringify(m)} (offset ${offset}) agendó a las ${p.hora}h`,
-        )
-        assert.ok(
-          !["Sat", "Sun"].includes(p.dia),
-          `${JSON.stringify(m)} (offset ${offset}) agendó un ${p.dia}`,
         )
       }
     }

@@ -1197,12 +1197,21 @@ async function processOneTurn(
         }).catch(() => null)
         const retryReply = (retryEco?.reply || "").trim()
         if (retryReply && normEco(retryReply) !== normEco(reply)) {
-          reply = blindarContactoComercial(
+          let curado = blindarContactoComercial(
             corregirPedidoDeTelefono(
               honestarMencionesDeCorreo(quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))),
             ),
             false,
           )
+          // El reintento corre DESPUÉS de 2.7c: la cura de placeholders se
+          // aplica de nuevo aquí para que no se la salte.
+          const curaEco = curarPlaceholdersDeLink(
+            curado,
+            retryEco?.toolCalls,
+            quotePointers.find((qp) => !!qp.acceptanceUrl)?.acceptanceUrl,
+          )
+          if (curaEco.curado) curado = curaEco.texto
+          reply = curado
         }
       }
     }
