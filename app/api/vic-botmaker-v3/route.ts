@@ -76,7 +76,7 @@ import {
   confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
 import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
-import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, dotacionDeclarada, formatDirectivaPrecioInmediato } from "@/lib/umbral-autonomia"
+import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral } from "@/lib/umbral-autonomia"
 
 export const dynamic = "force-dynamic"
 // 300s, igual que los webhooks CO y MX. Estaba en 60 desde el 22-jun, cuando
@@ -453,15 +453,6 @@ async function processOneTurn(
     const directivaUmbral = dotacionDetectada && umbralInfo
       ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral)
       : ""
-    // PRECIO INMEDIATO (segunda tanda, punto 5): dotación declarada EN ESTE
-    // MENSAJE, dentro del umbral, y sin precio previo en la conversación →
-    // este turno sale con el valor base (la E2E mostró que sin la directiva
-    // el guion vuelve a preguntar marcaje antes del precio).
-    const dotacionTurno = umbralInfo && !dotacionDetectada ? dotacionDeclarada(message) : null
-    const directivaPrecioYa =
-      dotacionTurno && umbralInfo && dotacionTurno <= umbralInfo.umbral && !quotePointer
-        ? formatDirectivaPrecioInmediato(dotacionTurno)
-        : ""
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)
@@ -484,7 +475,7 @@ async function processOneTurn(
     const result = await runAgentLoop({
       systemPrompt: onboarding
         ? onboarding.systemPrompt
-        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaPrecioYa,
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral,
       history,
       userMessage: message,
       apiKey,
@@ -613,7 +604,7 @@ async function processOneTurn(
         "por el cliente, y entrega EXACTAMENTE su mensajeParaProspecto."
       const retry = await runAgentLoop({
         systemPrompt:
-          contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaPrecioYa + FORZAR_TOOL_COTIZACION,
+          contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_COTIZACION,
         history,
         userMessage: message,
         apiKey,
@@ -839,7 +830,7 @@ async function processOneTurn(
             : "")
         const retry = await runAgentLoop({
           systemPrompt:
-            contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaPrecioYa + FORZAR_TOOL_DESCUENTO,
+            contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_DESCUENTO,
           history,
           userMessage: message,
           apiKey,
@@ -942,7 +933,7 @@ async function processOneTurn(
         "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
         "Si la tool falla o no hay disponibilidad, díselo con honestidad y ofrece otro horario — JAMÁS afirmes que la reunión quedó agendada si la tool no tuvo éxito."
       const retry = await runAgentLoop({
-        systemPrompt: contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaPrecioYa + FORZAR_TOOL_AGENDA,
+        systemPrompt: contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_AGENDA,
         history,
         userMessage: message,
         apiKey,
@@ -1021,7 +1012,7 @@ async function processOneTurn(
         "Si faltan datos obligatorios (nombre, empresa o teléfono), PÍDESELOS en vez de afirmar que ya quedó registrado. " +
         "JAMÁS digas que tomaste sus datos o que un ejecutivo lo contactará si la tool no tuvo éxito."
       const retry = await runAgentLoop({
-        systemPrompt: contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaPrecioYa + FORZAR_TOOL_CALLBACK,
+        systemPrompt: contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_CALLBACK,
         history,
         userMessage: message,
         apiKey,

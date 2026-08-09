@@ -180,30 +180,10 @@ export function dotacionSobreUmbral(mensaje: string, umbral: number): number | n
   return mayor > umbral ? mayor : null
 }
 
-/** Dotación declarada en un texto (1-50), sin comparar contra el umbral —
- * insumo del PRECIO INMEDIATO (segunda tanda, punto 5): si el cliente acaba
- * de decir cuántos son y está DENTRO del umbral, el turno debe salir con el
- * valor base. Reusa el mismo patrón de detección que dotacionSobreUmbral. */
-export function dotacionDeclarada(mensaje: string): number | null {
-  const texto = String(mensaje || "").toLowerCase()
-  const re = /(\d{1,4})\s*(?:trabajador|trabajadores|personas?\b|empleados?\b|colaborador(?:es)?|funcionarios?\b)/g
-  let mayor = 0
-  for (const m of texto.matchAll(re)) {
-    const n = Number(m[1])
-    if (Number.isFinite(n) && n > mayor) mayor = n
-  }
-  return mayor >= 1 ? mayor : null
-}
-
-/** Directiva de turno del PRECIO INMEDIATO: el cliente declaró N personas
- * dentro del umbral y aún no ha visto precio — este turno sale con el valor
- * base con app (gratis), y el refinamiento (marcaje/puntos/reloj) va en el
- * MISMO mensaje, nunca antes del precio. */
-export function formatDirectivaPrecioInmediato(n: number): string {
-  return (
-    `\n\nPRECIO INMEDIATO ESTE TURNO (detección automática): el cliente declaró ${n} personas — dentro de tu umbral — y todavía no ha visto ningún precio. Si el contexto es de venta, en ESTA respuesta llama cotizar_referencial con el módulo asistencia y SIN hardware, y entrega el valor base con la app del celular (gratis). En el MISMO mensaje pregunta cómo prefieren marcar (app, reloj físico, web) y — si son 11 o más — en cuántos puntos están, aclarando que con reloj le sumas ese detalle al valor. NO hagas la pregunta de marcaje SIN el precio: primero el valor, la pregunta lo acompaña.\n`
-  )
-}
+// (El "PRECIO INMEDIATO" de la segunda tanda del 08-ago se RETIRÓ el 09-ago
+// por orden de Rodrigo tras su prueba en terreno: daba el valor base con app
+// ANTES de preguntar el método de marcaje, y si el cliente quiere reloj los
+// costos cambian — el precio debe salir DESPUÉS del marcaje, como siempre.)
 
 /**
  * Directiva cuando la CONVERSACIÓN declaró dotación sobre el umbral (se

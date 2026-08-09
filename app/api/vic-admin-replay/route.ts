@@ -22,7 +22,7 @@ import { NextResponse } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
-import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, dotacionDeclarada, formatDirectivaPrecioInmediato } from "@/lib/umbral-autonomia"
+import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral } from "@/lib/umbral-autonomia"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -88,18 +88,12 @@ export async function POST(req: Request): Promise<Response> {
     dotacionDetectada && umbralInfo
       ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral)
       : ""
-  const dotacionTurno = umbralInfo && !dotacionDetectada ? dotacionDeclarada(message) : null
-  const directivaPrecioYa =
-    dotacionTurno && umbralInfo && dotacionTurno <= umbralInfo.umbral
-      ? formatDirectivaPrecioInmediato(dotacionTurno)
-      : ""
   const result = await runAgentLoop({
     systemPrompt:
       contextoUmbral +
       getSystemPromptV3(contact || undefined, umbralInfo?.umbral) +
       contextoUmbral +
-      directivaUmbral +
-      directivaPrecioYa,
+      directivaUmbral,
     history,
     userMessage: message,
     apiKey,
