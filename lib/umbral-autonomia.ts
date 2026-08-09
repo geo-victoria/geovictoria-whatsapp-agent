@@ -1,9 +1,7 @@
 /**
  * Umbral de venta autónoma (orden de Lalo 08-ago — cambio del doc "Vicky paso
- * a paso 3.0"; UNIFICADO EN 20/20 el 09-ago por orden de Lalo: "hasta 20 la
- * Vicky vende y da precios", llegue por WhatsApp o por formulario): Vicky DA
- * PRECIOS solo hasta N trabajadores según el ORIGEN de
- * la conversación — inbound 20, outbound 20. Sobre el umbral (y hasta 50, el
+ * a paso 3.0"): Vicky DA PRECIOS solo hasta N trabajadores según el ORIGEN de
+ * la conversación — inbound 20, outbound 10. Sobre el umbral (y hasta 50, el
  * tope del sistema) el precio lo entrega un ejecutivo: la derivación
  * derivar_a_soporte(fuera_de_rango_trabajadores) crea lead + deal y la
  * tómbola de deals sortea EN EL ACTO; Vicky no se despide — ACOMPAÑA la venta
@@ -22,7 +20,7 @@
  * nuevos): la verificación jamás degrada la conversación (principio 24-jul).
  *
  * TODOS LOS PAÍSES (CL desde el 08-ago AM; CO/MX/PE replicados el 08-ago PM
- * por orden de Lalo): mismo umbral 20 inbound / 20 outbound. La derivación
+ * por orden de Lalo): mismo umbral 20 inbound / 10 outbound. La derivación
  * usa la tool de cada país (CL: derivar_a_soporte fuera_de_rango_trabajadores;
  * CO/MX/PE: derivar_a_ejecutivo mas_de_50) y el registro sigue las reglas de
  * dueños de cada país (CL tómbola · CO fijos Galindo/Gordillo · MX interina ·
@@ -79,7 +77,7 @@ export function umbralInbound(): number {
 }
 
 export function umbralOutbound(): number {
-  return modoClasico() ? SCOPE_MAX_SISTEMA : envNum("VICKY_UMBRAL_OUTBOUND", 20)
+  return modoClasico() ? SCOPE_MAX_SISTEMA : envNum("VICKY_UMBRAL_OUTBOUND", 10)
 }
 
 // Cache por instancia (origen inmutable). Cap defensivo para lambdas vivas.

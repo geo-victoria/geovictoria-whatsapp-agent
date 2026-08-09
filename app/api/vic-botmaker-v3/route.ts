@@ -430,7 +430,7 @@ async function processOneTurn(
     // persistir la respuesta (last_user_at pasa a ser > reactivation_at).
     const reengaged = await isReengaged(contact).catch(() => false)
     // Umbral de venta autónoma (Lalo 08-ago): el prompt CL recibe el umbral
-    // de PRECIOS de esta conversación (inbound 20 / outbound 20). En modo
+    // de PRECIOS de esta conversación (inbound 20 / outbound 10). En modo
     // clásico (VICKY_UMBRAL_CLASICO=1) el bloque es vacío y nada cambia.
     const umbralInfo = contact.replace(/\D/g, "").startsWith("56")
       ? await umbralPrecios(contact).catch(() => null)
