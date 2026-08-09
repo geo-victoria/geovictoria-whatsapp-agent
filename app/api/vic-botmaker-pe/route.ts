@@ -418,7 +418,9 @@ async function processBurstPE(contact: string, apiKey: string, seedMessage?: str
 /** CONTENCIÓN (gate apagado) — comportamiento EXACTO del handler del 04-ago:
  * saludo honesto 1 vez por 24 h + persistir + aviso interno. */
 async function responderContencion(body: BotmakerBody): Promise<NextResponse> {
-  const contact = (body.contact || "").replace(/\D/g, "")
+  // IDs anónimos de Meta ("CO.…"): conservar CRUDOS o la respuesta se va a un
+  // chat fantasma (caso CIMA 30-jul; reincidencia CO 08-ago). Igual que CL.
+  const contact = (body.contact || "").trim().replace(/^\+/, "")
   const message = (body.message || "").toString().slice(0, 2000)
   if (!contact) return NextResponse.json({ reply: "" })
 
@@ -458,7 +460,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       return responderContencion(body)
     }
 
-    const contact = (body.contact || "").replace(/\D/g, "")
+    // IDs anónimos de Meta ("CO.…"): conservar CRUDOS o la respuesta se va a un
+  // chat fantasma (caso CIMA 30-jul; reincidencia CO 08-ago). Igual que CL.
+  const contact = (body.contact || "").trim().replace(/^\+/, "")
     let message = (body.message || "").trim()
 
     // Respuesta por BOTÓN: Botmaker manda el payload del intent, no el texto.

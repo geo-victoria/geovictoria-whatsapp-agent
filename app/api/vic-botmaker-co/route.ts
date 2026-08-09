@@ -575,7 +575,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const body = (await request.json().catch(() => ({}))) as BotmakerBody
-    const contact = (body.contact || "").replace(/\D/g, "")
+    // Contactos SIN teléfono (números ocultos de Meta): llegan como
+    // "CO.1945724922773240" y ese ID COMPLETO es la identidad del chat en
+    // Botmaker — reducirlo a dígitos manda la respuesta a un chat FANTASMA
+    // que el cliente jamás ve (caso CIMA 30-jul en CL; reincidencia CO
+    // 08-ago con CO.1945724922773240). Mismo normalizado que el webhook CL.
+    const contact = (body.contact || "").trim().replace(/^\+/, "")
     let message = (body.message || "").trim()
 
     // Respuesta por BOTÓN: Botmaker no manda el texto sino el payload del

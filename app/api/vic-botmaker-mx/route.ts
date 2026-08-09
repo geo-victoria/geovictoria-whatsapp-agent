@@ -551,7 +551,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     const body = (await request.json().catch(() => ({}))) as BotmakerBody
-    const contact = (body.contact || "").replace(/\D/g, "")
+    // IDs anónimos de Meta ("CO.…"): conservar CRUDOS o la respuesta se va a
+    // un chat fantasma (caso CIMA 30-jul; reincidencia CO 08-ago). Mismo
+    // normalizado que el webhook CL.
+    const contact = (body.contact || "").trim().replace(/^\+/, "")
     let message = (body.message || "").trim()
 
     // Respuesta por BOTÓN: Botmaker no manda el texto sino el payload del
