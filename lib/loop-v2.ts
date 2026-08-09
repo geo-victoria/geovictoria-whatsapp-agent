@@ -147,25 +147,25 @@ function jitterMs(contact: string): number {
 }
 
 /**
- * Corre un instante a horario hábil (L-V 9:00-19:00 de la zona): si ya cae
- * dentro, queda igual; si cae antes de las 9 de un día hábil, va a ese mismo
- * día 9:00 + jitter; si cae después de las 19, en finde o feriado de hora, va
- * al PRÓXIMO día hábil 9:00 + jitter.
+ * Corre un instante a la VENTANA DE SEGUIMIENTO: TODOS los días, 9:00-21:00
+ * de la zona (Rodrigo 09-ago: "si nos cotiza el fin de semana, está bien que
+ * le hagamos seguimiento durante el fin de semana, entre 9 am y 9 pm" — antes
+ * era L-V 9-19 y una formal emitida el domingo esperaba hasta el lunes). Las
+ * pausas anunciadas por el cliente y el opt-out se respetan igual que siempre.
+ * Si ya cae dentro, queda igual; antes de las 9 → hoy mismo 9:00 + jitter;
+ * después de las 21 → MAÑANA 9:00 + jitter.
+ *
+ * El nombre se conserva por historia (todos los agendamientos del loop pasan
+ * por aquí); la ventana ya no distingue día hábil de finde.
  */
 export function ajustarAHabil(date: Date, timeZone: string, contact = ""): Date {
   const p = partesEn(date, timeZone)
-  const esHabil = p.weekday >= 1 && p.weekday <= 5
-  if (esHabil && p.hh >= 9 && p.hh < 19) return date
+  if (p.hh >= 9 && p.hh < 21) return date
 
-  let cursor = new Date(date.getTime())
   let pp = p
-  // Antes de las 9 de un día hábil → hoy mismo a las 9; cualquier otro caso →
-  // avanzar de a 24h hasta caer en día hábil.
-  if (!(esHabil && p.hh < 9)) {
-    do {
-      cursor = new Date(cursor.getTime() + 24 * 3600e3)
-      pp = partesEn(cursor, timeZone)
-    } while (pp.weekday === 0 || pp.weekday === 6)
+  // Después de las 21 → avanzar al día siguiente; antes de las 9 → hoy mismo.
+  if (p.hh >= 21) {
+    pp = partesEn(new Date(date.getTime() + 24 * 3600e3), timeZone)
   }
   const alas9 = utcDesdeLocal(pp.y, pp.m, pp.d, 9, 0, timeZone)
   return new Date(alas9.getTime() + jitterMs(contact))
@@ -326,7 +326,8 @@ export function clasificarSenalEspera(
   // Día nombrado ("el martes", "hasta el jueves"): próxima ocurrencia, 1..7 días
   // adelante. Si el cliente nombra el día de HOY se entiende la semana siguiente
   // — quien dice "hablamos el martes" un martes no habla del rato que viene.
-  // Un finde nombrado lo corre ajustarAHabil al lunes, como todo lo demás.
+  // Desde el 09-ago la ventana de seguimiento incluye el finde (9-21 todos los
+  // días): "el sábado" cae el sábado mismo, ya no se corre al lunes.
   const diaNombrado = texto.match(RE_DIA_SEMANA)?.[1]
   if (diaNombrado) {
     const objetivo = DIAS_SEMANA[diaNombrado]

@@ -616,11 +616,12 @@ export async function GET(req: Request): Promise<Response> {
       continue
     }
 
-    // (c-bis) GATE DE HORARIO HÁBIL AL EJECUTAR (fix 25-jul, encendido): una
-    // fila con next_touch_at vencido (migración vieja, cron detenido) NO puede
-    // disparar un toque a las 23:00 de un viernes — si AHORA no es L-V 9-19 en
-    // la zona del país, el toque se pospone al próximo bloque hábil.
-    // ajustarAHabil devuelve el mismo instante cuando ya estamos en hábil.
+    // (c-bis) GATE DE VENTANA AL EJECUTAR (fix 25-jul; ventana ampliada 09-ago
+    // a TODOS los días 9-21, Rodrigo: el finde también se hace seguimiento):
+    // una fila con next_touch_at vencido (migración vieja, cron detenido) NO
+    // puede disparar un toque a las 23:00 — si AHORA está fuera de la ventana,
+    // el toque se pospone al próximo bloque. ajustarAHabil devuelve el mismo
+    // instante cuando ya estamos dentro.
     const ahoraHabil = ajustarAHabil(new Date(now), tzDePais(country), r.contact)
     if (ahoraHabil.getTime() > now + 60_000) {
       await patchLoop(r.contact, { next_touch_at: ahoraHabil.toISOString() })
@@ -879,7 +880,11 @@ export async function GET(req: Request): Promise<Response> {
   // calendario del lunes queda intacto). Un solo envío por contacto/sábado.
   let sabatinos = 0
   try {
-    sabatinos = await toqueSabatino(Date.now())
+    // Toque sabatino RETIRADO (09-ago): con la ventana de seguimiento ampliada
+    // a todos los días 9-21, la cadencia normal ya toca el fin de semana — el
+    // toque especial del sábado duplicaría mensajes. La función queda abajo
+    // por si algún día vuelve una ventana solo-hábil.
+    sabatinos = 0
   } catch (e) {
     console.warn("[loop-cron] toque sabatino falló:", e instanceof Error ? e.message : e)
   }
