@@ -3,7 +3,7 @@
  *
  * Vicky la invoca cuando detecta uno de los siguientes casos:
  *   - El prospecto supera el límite hasta el cual Vicky puede DAR PRECIOS
- *     (el umbral de la conversación — inbound 20 / outbound 10 desde el
+ *     (el umbral de la conversación — inbound 20 / outbound 20 desde el
  *     08-ago — o el tope duro de 50 del sistema).
  *   - El prospecto es cliente existente con problema operativo.
  *   - El prospecto pide explícitamente hablar con un humano.

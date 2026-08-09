@@ -110,7 +110,7 @@ export function getSystemPromptV3(contact?: string, umbralPreciosCL?: number): s
   // DECISIÓN del flujo se reescriben con el umbral real — la prueba E2E
   // mostró que el modelo obedece el flujo "Modo Cotización (1-50)" del
   // cuerpo por sobre una regla en el preámbulo, así que el flujo mismo debe
-  // decir 20/10. Los replace son de cadenas exactas: si alguien edita esas
+  // decir 20/20. Los replace son de cadenas exactas: si alguien edita esas
   // líneas del prompt sin actualizar esto, el replace no matchea y queda
   // solo la regla del preámbulo (degradación suave, el guard determinista
   // del agent-loop sigue firme). tests/umbral-autonomia.test.ts los ancla.

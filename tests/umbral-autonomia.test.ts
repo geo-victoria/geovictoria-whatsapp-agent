@@ -1,5 +1,5 @@
 /**
- * Umbral de venta autónoma (Lalo 08-ago): inbound 20 / outbound 10.
+ * Umbral de venta autónoma (Lalo 08-ago, unificado 20/20 el 09-ago): inbound 20 / outbound 20.
  *
  * Estas reglas son de proceso comercial, no cosméticas: si alguien cambia un
  * default o rompe el rollback clásico sin darse cuenta, Vicky vuelve a vender
@@ -27,9 +27,9 @@ beforeEach(() => {
 })
 
 describe("umbrales por defecto (doc 08-ago)", () => {
-  test("inbound 20 / outbound 10, dentro del tope del sistema (50)", () => {
+  test("inbound 20 / outbound 20, dentro del tope del sistema (50)", () => {
     assert.equal(umbralInbound(), 20)
-    assert.equal(umbralOutbound(), 10)
+    assert.equal(umbralOutbound(), 20)
     assert.equal(SCOPE_MAX_SISTEMA, 50)
   })
 
@@ -42,7 +42,7 @@ describe("umbrales por defecto (doc 08-ago)", () => {
     process.env.VICKY_UMBRAL_INBOUND = "0"
     process.env.VICKY_UMBRAL_OUTBOUND = "99"
     assert.equal(umbralInbound(), 20)
-    assert.equal(umbralOutbound(), 10)
+    assert.equal(umbralOutbound(), 20)
   })
 
   test("rollback clásico: VICKY_UMBRAL_CLASICO=1 vuelve al 50/50", () => {

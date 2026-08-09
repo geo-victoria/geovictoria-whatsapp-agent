@@ -448,7 +448,7 @@ export async function runAgentLoop(params: {
           }
         }
 
-        // UMBRAL DE VENTA AUTÓNOMA (Lalo 08-ago): inbound 20 / outbound 10 —
+        // UMBRAL DE VENTA AUTÓNOMA (Lalo 08-ago, unificado 20/20 el 09-ago): inbound 20 / outbound 20 —
         // sobre el umbral (y hasta 50) Vicky NO da precios: deriva (deal +
         // tómbola en el acto) y ACOMPAÑA sin precio. Guarda DETERMINISTA:
         // el prompt lleva la misma regla, pero si el modelo intenta cotizar
