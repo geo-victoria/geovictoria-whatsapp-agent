@@ -1161,6 +1161,52 @@ async function processOneTurn(
     // WhatsApp real de soporte.
     reply = blindarContactoComercial(reply, false)
 
+    // 2.9. ANTI-ECO (caso Atcomo 09-ago): el cliente confirmó un supuesto ya
+    // cotizado ("la instalan ustedes") y el modelo re-cotizó con los mismos
+    // parámetros pegando el resumen IDÉNTICO — al cliente le llegó el mismo
+    // texto dos veces ("error", dijo Rodrigo). Si el reply es una copia del
+    // último mensaje del asistente, se fuerza UN reintento exigiendo responder
+    // a lo que el cliente dijo; si el reintento también repite, se envía igual
+    // (mejor repetir que callar).
+    {
+      const normEco = (s: string) =>
+        String(s || "")
+          .replace(/\n\s*\[?-{3,}\]?\s*(?:\n|$)/g, "\n")
+          .replace(/\s+/g, " ")
+          .trim()
+      const ultimoAsistente = [...history].reverse().find((m) => m.role === "assistant")
+      if (
+        reply &&
+        ultimoAsistente &&
+        normEco(String(ultimoAsistente.content || "")) === normEco(reply) &&
+        normEco(reply).length > 40
+      ) {
+        console.error(`[v3-bg] ECO_DETECTADO contact=${contact}: reply idéntico al turno anterior, reintentando.`)
+        const FORZAR_NO_ECO =
+          "\n\n# Instrucción de sistema (este turno)\n" +
+          "Tu borrador REPITE EXACTAMENTE tu mensaje anterior. El cliente acaba de decirte algo nuevo: respóndele a ESO, corto y natural. " +
+          "Si confirmó un supuesto que tu cotización vigente ya incluía, dilo en una frase (los números no cambian, NO vuelvas a pegar el resumen) y avanza al paso siguiente."
+        const retryEco = await runAgentLoop({
+          systemPrompt:
+            contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_NO_ECO,
+          history,
+          userMessage: message,
+          apiKey,
+          contact,
+          model: MODELO_COTIZACION,
+        }).catch(() => null)
+        const retryReply = (retryEco?.reply || "").trim()
+        if (retryReply && normEco(retryReply) !== normEco(reply)) {
+          reply = blindarContactoComercial(
+            corregirPedidoDeTelefono(
+              honestarMencionesDeCorreo(quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))),
+            ),
+            false,
+          )
+        }
+      }
+    }
+
     // 3. Persistir turno en Supabase
     // En el historial el turno queda como UN texto (el marcador de
     // multi-mensaje — [---] o una línea de solo guiones — se convierte en
