@@ -33,6 +33,7 @@ import {
 import { NextResponse, after } from "next/server"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool, curarPlaceholdersDeLink } from "@/lib/links-de-tools"
+import { partirEnBurbujas } from "@/lib/burbujas"
 import { faseDelContacto, armarOnboarding } from "@/lib/onboarding-canal"
 import { honestarMencionesDeCorreo } from "@/lib/honestidad-entrega"
 import { corregirPedidoDeTelefono } from "@/lib/no-pedir-telefono"
@@ -1170,19 +1171,12 @@ async function processOneTurn(
 
     // 4. Enviar reply final vía push (solo si hay reply real)
     if (reply) {
-      // MULTI-MENSAJE (Lalo 24-jul): el modelo puede separar su respuesta en
-      // varios mensajes de WhatsApp con el marcador [---] (caso precio + "me
-      // falta RUT y email" como burbujas distintas). Se envían en orden, con
-      // typing entre medio para cadencia humana.
-      // Split tolerante: el marcador canónico es [---], pero el modelo a veces
-      // lo "normaliza" a una raya markdown (---) en línea propia (caso Rodrigo
-      // 24-jul: preform + petición de datos salieron como UN mensaje con una
-      // raya al medio). Cualquier línea que sea solo guiones (con o sin
-      // corchetes) corta el mensaje.
-      const partes = reply
-        .split(/\n\s*\[?-{3,}\]?\s*(?:\n|$)/)
-        .map((p) => p.trim())
-        .filter(Boolean)
+      // MULTI-MENSAJE (Lalo 24-jul; ampliado Rodrigo 09-ago): además del
+      // marcador [---] (corte duro), CADA PUNTO APARTE es una burbuja — "así
+      // se ve más natural y el mensaje es menos largo". Los bloques
+      // estructurados (resumen de precios con listas y totales) no se
+      // fragmentan. Ver lib/burbujas.ts.
+      const partes = partirEnBurbujas(reply)
       for (const [i, parte] of partes.entries()) {
         if (HUMAN_DELAY_ON) {
           await sendTypingIndicator(contact, true).catch(() => {})

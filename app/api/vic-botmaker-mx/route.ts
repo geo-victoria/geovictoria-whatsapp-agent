@@ -63,6 +63,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
+import { partirEnBurbujas } from "@/lib/burbujas"
 import { reenviarSiNoEsDeEstePais } from "@/lib/ruteo-pais"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { clasificarSenalEspera, resetLoop, enrolarEnLoop } from "@/lib/loop-v2"
@@ -468,7 +469,14 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   } catch (err) {
     console.error(`[vic-mx][followup] error actualizando seguimiento contact=${contact}:`, err)
   }
-  const sent = await sendBotmakerMessage(contact, reply, CANAL_CO())
+  // Burbujas por punto aparte (Rodrigo 09-ago, paridad CL): cada párrafo
+  // es un mensaje; los bloques estructurados no se fragmentan.
+  let sent = true
+  for (const [bi, burbuja] of partirEnBurbujas(reply).entries()) {
+    if (bi > 0) await sendTypingIndicator(contact, true).catch(() => {})
+    sent = await sendBotmakerMessage(contact, burbuja, CANAL_CO())
+    if (!sent) break
+  }
   console.log(
     `[vic-mx] turno contact=${contact} iter=${result.iterations} tools=${result.toolCalls.map((t) => t.name).join(",") || "-"} sent=${sent}`,
   )

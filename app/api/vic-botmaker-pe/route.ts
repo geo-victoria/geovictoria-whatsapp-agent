@@ -56,6 +56,7 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
+import { partirEnBurbujas } from "@/lib/burbujas"
 import { paisDeContacto, WEBHOOK_POR_PAIS, SECRET_ENV_POR_PAIS } from "@/lib/ruteo-pais"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
@@ -347,7 +348,14 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
   } catch (err) {
     console.error(`[vic-pe][followup] error actualizando seguimiento contact=${contact}:`, err)
   }
-  const sent = await sendBotmakerMessage(contact, reply, CANAL_PE())
+  // Burbujas por punto aparte (Rodrigo 09-ago, paridad CL): cada párrafo
+  // es un mensaje; los bloques estructurados no se fragmentan.
+  let sent = true
+  for (const [bi, burbuja] of partirEnBurbujas(reply).entries()) {
+    if (bi > 0) await sendTypingIndicator(contact, true).catch(() => {})
+    sent = await sendBotmakerMessage(contact, burbuja, CANAL_PE())
+    if (!sent) break
+  }
   console.log(
     `[vic-pe] turno contact=${contact} iter=${result.iterations} tools=${result.toolCalls.map((t) => t.name).join(",") || "-"} sent=${sent}`,
   )
