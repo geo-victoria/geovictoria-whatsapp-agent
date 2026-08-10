@@ -448,12 +448,33 @@ async function processOneTurn(
     // sin precios siempre — la E2E mostró que el guion de venta le gana a
     // las reglas del preámbulo.
     const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
+    // PRELLENADO SII (Lalo 10-ago: "el cliente dio el RUT — la base del SII
+    // llena todo lo que viene después"): si en lo que el cliente ha escrito
+    // hay un RUT válido, la ficha oficial (razón social, giro, dirección,
+    // comuna) entra al prompt como dato PRELLENADO y Vicky deja de
+    // preguntarlo. Best-effort y solo CL: sin base, bloque vacío y nada cambia.
+    let contextoSii = ""
+    if (contact.replace(/\D/g, "").startsWith("56")) {
+      try {
+        const { rutEnTexto, fichaEmpresaSii, formatBloqueSii } = await import("@/lib/empresas-sii")
+        const rutDetectado = rutEnTexto(textoCliente)
+        if (rutDetectado) {
+          contextoSii = formatBloqueSii(await fichaEmpresaSii(rutDetectado), rutDetectado)
+        }
+      } catch {
+        /* fail-open */
+      }
+    }
     const dotacionDetectada = umbralInfo
       ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral)
       : null
-    const directivaUmbral = dotacionDetectada && umbralInfo
-      ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral)
-      : ""
+    // El bloque SII viaja pegado a la directiva de umbral: las 6 variantes de
+    // systemPrompt lo ponen al FINAL (recencia) — el prellenado manda sobre
+    // cualquier guion del preámbulo.
+    const directivaUmbral =
+      (dotacionDetectada && umbralInfo
+        ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral)
+        : "") + contextoSii
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)
