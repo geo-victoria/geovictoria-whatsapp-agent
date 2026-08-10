@@ -645,8 +645,16 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
       const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
       const paisQuote: Pais = paisPorQuote.get(String(q.id || "")) || paisDeTelefono(tel) || "cl"
       if (paisQuote !== pais) return false
+      // Cotizaciones INTERNAS fuera de los KPIs y de "Aceptadas / pagadas"
+      // (Rodrigo 10-ago): el filtro de abajo solo cazaba nombres con
+      // "prueba", así que COT420/COT281 —emitidas a los teléfonos de Rodrigo
+      // y Lalo, a nombre de "GeoVictoria SPA"— se contaban como ventas.
+      if (tel && isTestContact(tel)) return false
       const nombre = String(q.Name || "").toLowerCase()
       if (nombre.includes("prueba") || nombre.includes("huellerocompany")) return false
+      // Nadie le vende a GeoVictoria: una cotización a nombre de la propia
+      // empresa es interna (cinturón por si el teléfono no está en la lista).
+      if (/\bgeo\s*victoria\b/.test(nombre)) return false
       return true
     })
     // Filtro Desde–Hasta con DOS relojes (pedido Lalo 31-jul): las emitidas
