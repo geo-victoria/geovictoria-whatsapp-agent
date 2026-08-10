@@ -41,10 +41,18 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
     assert.match(LOOP, /mx: \{ nombre: "Yahel Segura", email: "ysegura@geovictoria\.com", whatsapp: "\+52 55 3763 6604"/)
   })
 
-  test("el toque 1 con precio se pospone hasta cumplir las 2 horas", () => {
+  test("el toque 1 con precio sale a los 10 minutos y el formal a los 35", () => {
+    // Rodrigo 10-ago: "la Vicky debería haberle dado seguimiento después de
+    // 10 minutos sin actividad" — reemplaza las 2 horas del 27-jul.
     assert.match(LOOP, /touch === 1 && \(stage === "con_precio" \|\| stage === "formal"\)/)
-    assert.match(LOOP, /2 \* 3600e3/)
-    assert.match(LOOP, /pospuesto_presentacion_2h/)
+    assert.match(LOOP, /10 \* 60e3/)
+    assert.match(LOOP, /pospuesto_precio_10m/)
+  })
+
+  test("a los 10 minutos NO se presenta a nadie: eso lo hace el traspaso de los 15", () => {
+    // Si el toque de los 10' presentara un ejecutivo, el traspaso de los 15'
+    // presentaría OTRO (tómbola) — dos nombres en 5 minutos (bug Alan/vaitiare).
+    assert.match(LOOP, /const esPresentacion = touch === 1 && stage === "formal"/)
   })
 
   test("y su texto ES la presentación, no el nudge genérico", () => {

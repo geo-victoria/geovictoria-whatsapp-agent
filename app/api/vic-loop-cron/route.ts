@@ -789,7 +789,14 @@ export async function GET(req: Request): Promise<Response> {
       // 2h de una cotización la ventana está prácticamente siempre abierta.
       // En CL se presenta al DUEÑO REAL del deal/cotización si existe
       // (tómbola 31-jul); CO/MX conservan su símil fijo (reglas antiguas).
-      const esPresentacion = touch === 1 && (stage === "con_precio" || stage === "formal")
+      // Presentación SOLO en la formal (ajuste 10-ago): el toque con_precio
+      // ahora sale a los 10 minutos — ANTES del traspaso de los 15' que
+      // presenta al vendedor de la tómbola. Si este toque presentara a
+      // alguien, el prospecto recibiría DOS nombres en 5 minutos (el bug
+      // Alan/vaitiare). A los 10' va el empujón genérico; los nombres los
+      // pone el traspaso (o el toque formal de los 35', que resuelve al
+      // dueño real ya asignado).
+      const esPresentacion = touch === 1 && stage === "formal"
       const duenoReal =
         esPresentacion && paisKey === "cl"
           ? (await duenoDealVigente(r.contact).catch(() => null)) ||
