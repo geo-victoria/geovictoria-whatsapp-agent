@@ -453,20 +453,44 @@ export async function adelantarPrimerToqueFormal(contact: string, country?: stri
 }
 
 /**
- * El contacto PAGÓ → el loop muere definitivamente (motivo 'pagado'). Exportada
- * para el flujo de pago futuro; todavía no se conecta a ningún llamador.
+ * Venta cerrada → el loop muere. MOTIVO DIFERENCIADO (fix 10-ago): la
+ * ACEPTACIÓN cerraba con motivo 'pagado' igual que el pago real, y eso dejó
+ * ciego al cobro asistido (que existe justo para las aceptadas SIN pagar) y
+ * contaminó toda métrica de pagos. Desde hoy: 'aceptada' para el evento de
+ * aceptación, 'pagado' solo con pago confirmado. Ambos dejan el loop cerrado
+ * (cero toques); la diferencia es solo el registro.
  */
-export async function pagoCierraLoop(contact: string): Promise<void> {
+export async function pagoCierraLoop(
+  contact: string,
+  motivo: "pagado" | "aceptada" = "pagado",
+): Promise<void> {
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
   await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
       estado: "cerrado",
-      motivo_cierre: "pagado",
+      motivo_cierre: motivo,
       updated_at: new Date().toISOString(),
     }),
   })
+}
+
+/** ¿El loop de este contacto quedó cerrado por PAGO REAL? (con la distinción
+ * del 10-ago; filas históricas de aceptaciones viejas pueden decir 'pagado',
+ * cohorte que envejece en horas). Conservador: ante error devuelve false. */
+export async function loopCerradoPorPagoReal(contact: string): Promise<boolean> {
+  if (!contact || !SUPABASE_URL || !SUPABASE_KEY) return false
+  try {
+    const res = await supa(
+      `vic_loop?contact=eq.${encodeURIComponent(contact)}&motivo_cierre=eq.pagado&select=contact&limit=1`,
+    )
+    if (!res.ok) return false
+    const rows = (await res.json().catch(() => [])) as unknown[]
+    return rows.length > 0
+  } catch {
+    return false
+  }
 }
 
 /**

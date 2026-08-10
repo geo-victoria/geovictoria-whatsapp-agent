@@ -762,13 +762,22 @@ export async function runAgentLoop(params: {
               params,
             }).catch(() => {})
           } else if (toolName === "cotizar_referencial") {
-            // CO — reloj v2 de 15' (05-ago): Colombia no tiene tools de
-            // negociación (las que estampan pref_escalon_at en CL), así que
-            // el "precio dado" CO ES el referencial exitoso. Se estampa SOLO
-            // el timestamp (escalón sigue null — no altera la lógica CL de
-            // descuentos) para que el cron arme el reloj precio→aceptación.
-            if (/^(57|52|51)\d{8,12}$/.test(contact.replace(/\D/g, "")) && (result as { ok?: boolean }).ok === true) {
-              await setPrefDraft(contact, {}).catch(() => {})
+            // Reloj v2 de 15' — "precio dado" ES el referencial exitoso.
+            // CO/MX/PE desde el 05/08-ago (sin tools de negociación, estampan
+            // siempre). CL desde el 10-ago (caso Rodrigo 11:15: vio precio,
+            // nunca negoció, y quedó como "sin_precio" — invisible para el
+            // reloj de silencio y el toque temprano). En CL solo se estampa si
+            // NO hay draft: una negociación previa ya estampó y trae un
+            // escalón acordado que no se puede pisar.
+            {
+              const digits = contact.replace(/\D/g, "")
+              const okRef = (result as { ok?: boolean }).ok === true
+              if (/^(57|52|51)\d{8,12}$/.test(digits) && okRef) {
+                await setPrefDraft(contact, {}).catch(() => {})
+              } else if (/^56\d{8,12}$/.test(digits) && okRef) {
+                const draftCL = await getPrefDraft(contact).catch(() => null)
+                if (!draftCL) await setPrefDraft(contact, {}).catch(() => {})
+              }
             }
             // Si ya hay un descuento ACORDADO (escalón negociado) y el cliente
             // re-cotiza por un cambio de configuración (modalidad del reloj, N° de
@@ -863,8 +872,15 @@ export async function runAgentLoop(params: {
                   return !rutPrev || !rutNuevo || rutPrev === rutNuevo
                 })
                 if (superada?.quoteId) {
-                  const { rechazarAceptadaSuperada } = await import("./zoho-quote-status")
-                  await rechazarAceptadaSuperada(superada.quoteId)
+                  // Guarda de pago REAL (10-ago): un contacto que ya pagó por
+                  // MP puede tener la cotización aún "Aceptada" en Zoho — esa
+                  // jamás se marca perdida.
+                  const { loopCerradoPorPagoReal } = await import("./loop-v2")
+                  const yaPago = await loopCerradoPorPagoReal(contact).catch(() => false)
+                  if (!yaPago) {
+                    const { rechazarAceptadaSuperada } = await import("./zoho-quote-status")
+                    await rechazarAceptadaSuperada(superada.quoteId)
+                  }
                 }
               })().catch(() => undefined)
             }

@@ -95,6 +95,9 @@ async function handle(req: Request): Promise<Response> {
     // vic-deal-stage-cron) y es idempotente por cotización.
     const r = await cerrarYTraspasarPostPago(quoteId, {
       enviarTraspaso: eventoRaw === "pagada",
+      // Fix 10-ago: la aceptación cerraba el loop con motivo "pagado" y el
+      // cobro asistido (que existe PARA las aceptadas sin pagar) quedaba ciego.
+      motivoCierre: eventoRaw === "pagada" ? "pagado" : "aceptada",
     })
     console.log(
       `[quote-notify] cadencia cerrada contact=${r.contact || "?"} quote=${quoteId} traspaso=${r.traspaso}`,

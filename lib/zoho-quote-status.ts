@@ -84,16 +84,19 @@ export async function rechazarAceptadaSuperada(quoteId: string): Promise<boolean
   try {
     const token = await getZohoAccessToken()
     const res = await fetch(
-      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Estado_Cotizacion,ID_SO`,
+      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Estado_Cotizacion`,
       { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
     )
     if (!res.ok) return false
     const data = (await res.json().catch(() => ({}))) as {
-      data?: Array<{ Estado_Cotizacion?: string; ID_SO?: unknown }>
+      data?: Array<{ Estado_Cotizacion?: string }>
     }
     const rec = data?.data?.[0]
     const estado = String(rec?.Estado_Cotizacion || "").toLowerCase()
-    if (estado !== "aceptada" || rec?.ID_SO) return false
+    // Solo estado "Aceptada" exacto (una Pagada queda excluida aquí). OJO:
+    // ID_SO ya no discrimina pago (viene lleno desde la emisión) — la guarda
+    // contra pago real por MP la pone el LLAMADOR con loopCerradoPorPagoReal.
+    if (estado !== "aceptada") return false
     const ok = await marcarCotizacionRechazada(quoteId)
     if (ok) console.log(`[zoho-quote] aceptada superada → Rechazada quoteId=${quoteId}`)
     return ok

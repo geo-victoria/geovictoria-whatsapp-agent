@@ -1007,8 +1007,9 @@ async function cobroAsistido(ahora: Date): Promise<{ enviados: number; pendiente
   for (const cot of data) {
     const fono = String(cot.Telefono_Cliente || cot.Tel_fono_Contacto || "").replace(/\D/g, "")
     if (!/^(56|57|52|51)\d{8,12}$/.test(fono) || isTestContact(fono, pruebas)) continue
-    // Señales de pago: nota de venta emitida, o loop cerrado por pagado.
-    if (cot.ID_SO) continue
+    // Señal de pago: loop cerrado por PAGO REAL (motivo diferenciado 10-ago).
+    // OJO: ID_SO ya NO sirve — desde que la cotización nace en Creator al
+    // emitirse, ese campo viene lleno SIEMPRE (dejaba al cobro asistido ciego).
     const loopPagado = await supa<{ contact: string }>(
       `vic_loop?contact=eq.${encodeURIComponent(fono)}&motivo_cierre=eq.pagado&select=contact&limit=1`,
     )

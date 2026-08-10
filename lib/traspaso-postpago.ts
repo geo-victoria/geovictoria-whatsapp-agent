@@ -172,7 +172,7 @@ async function asignarVentaAutonoma(
  */
 export async function cerrarYTraspasarPostPago(
   quoteId: string,
-  opts: { enviarTraspaso?: boolean } = {},
+  opts: { enviarTraspaso?: boolean; motivoCierre?: "pagado" | "aceptada" } = {},
 ): Promise<ResultadoTraspaso> {
   const enviarTraspaso = opts.enviarTraspaso !== false
   const contact = await findContactByQuoteId(quoteId).catch(() => null)
@@ -180,9 +180,10 @@ export async function cerrarYTraspasarPostPago(
 
   await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
   await cancelPendingCallbacks(contact).catch(() => {})
-  // Regla de oro del Loop v2: el PAGO corta el loop de toques para siempre
-  // (best-effort; con el flag apagado o sin fila en vic_loop es un no-op).
-  await pagoCierraLoop(contact).catch(() => {})
+  // Regla de oro del Loop v2: la venta cerrada corta el loop de toques para
+  // siempre (best-effort). El motivo distingue pago real de aceptación (fix
+  // 10-ago) — el cobro asistido depende de esa diferencia.
+  await pagoCierraLoop(contact, opts.motivoCierre || "pagado").catch(() => {})
   // Venta 100% Vicky → todos los registros al dueño de ventas autónomas
   // (Aleydis, vic_kv owner_venta_autonoma) y la bienvenida LA presenta
   // (decisión Lalo 04-ago: ella hace la gestión post-venta).

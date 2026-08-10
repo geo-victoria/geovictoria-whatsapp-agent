@@ -734,20 +734,21 @@ export async function GET(req: Request): Promise<Response> {
 
     let ejecutado = false
 
-    // Rodrigo 27-jul: la presentación con precio sale a las 2 HORAS de
-    // inactividad, no a la 1h del toque 1 genérico. EXCEPCIÓN 08-ago (punto 4
-    // de Lalo): con cotización FORMAL emitida el primer toque sale a los 35
-    // MINUTOS — la mediana histórica emisión→pago es 36 min, y el empujón
-    // ("¿te ayudo con el pago?") debe caer DENTRO de la ventana real de
-    // compra, no cuando el cliente ya se enfrió.
+    // Primer toque por etapa: FORMAL a los 35 min (punto 4 de Lalo 08-ago —
+    // la mediana histórica emisión→pago es 36 min y el "¿te ayudo con el
+    // pago?" debe caer dentro de la ventana real de compra); CON PRECIO
+    // referencial a los 10 MINUTOS de inactividad (Rodrigo 10-ago: "la Vicky
+    // debería haberle dado seguimiento después de 10 minutos sin actividad" —
+    // reemplaza las 2 horas del 27-jul: el cliente que acaba de ver precio
+    // está caliente AHORA).
     if (touch === 1 && (stage === "con_precio" || stage === "formal")) {
-      const espera = stage === "formal" ? 35 * 60e3 : 2 * 3600e3
+      const espera = stage === "formal" ? 35 * 60e3 : 10 * 60e3
       const objetivo = new Date(new Date(t0).getTime() + espera)
       if (now < objetivo.getTime()) {
         const habil = ajustarAHabil(objetivo, tzDePais(country), r.contact)
         await patchLoop(r.contact, { next_touch_at: habil.toISOString() })
         pospuestos++
-        detalle.push({ contact: r.contact, accion: stage === "formal" ? "pospuesto_formal_35m" : "pospuesto_presentacion_2h", hasta: habil.toISOString() })
+        detalle.push({ contact: r.contact, accion: stage === "formal" ? "pospuesto_formal_35m" : "pospuesto_precio_10m", hasta: habil.toISOString() })
         continue
       }
     }
