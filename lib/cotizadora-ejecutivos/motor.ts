@@ -60,7 +60,7 @@ export type ConfigPropuesta = {
     modalidad: "venta" | "arriendo"
     cantidad: number
     descuentoPct?: number
-    /** Override de precio unitario UF (UI de Nacho lo permite). Piso: lista × 0,75. */
+    /** Override de precio unitario UF — LIBRE como el input de la UI de Nacho (>0); bajo lista×0,75 deja advertencia informativa. */
     precioUF?: number
   }>
   accesorios?: Array<{ id: string; modalidad: "venta" | "arriendo"; cantidad: number; descuentoPct?: number; precioUF?: number }>
@@ -104,14 +104,17 @@ function clampDescuento(pct: number | undefined, etiqueta: string, advertencias:
   return p
 }
 
-/** Piso de override para equipos/accesorios: lista × (1 - tope de descuento).
- * Supuesto alineado con el tope 25% de la UI — validar con Nacho. */
+/** Override de precio en equipos/accesorios: LIBRE, como el input de la
+ * calculadora de Nacho (decisión de Lalo 10-ago: "la UI literal"). Cualquier
+ * valor > 0 se acepta; si queda bajo el equivalente al descuento máximo
+ * (lista × 0,75) se deja ADVERTENCIA informativa — visibilidad, no bloqueo. */
 function validarOverride(lista: number, override: number | undefined, etiqueta: string, advertencias: string[]): number {
-  if (override === undefined || !Number.isFinite(override)) return lista
-  const piso = r3(lista * (1 - MAX_DESCUENTO_PCT / 100))
-  if (override < piso) {
-    advertencias.push(`Precio ${override} UF en ${etiqueta} bajo el piso ${piso} UF (lista ${lista} × 75%) — se usó el piso.`)
-    return piso
+  if (override === undefined || !Number.isFinite(override) || override <= 0) return lista
+  const referencia = r3(lista * (1 - MAX_DESCUENTO_PCT / 100))
+  if (override < referencia) {
+    advertencias.push(
+      `Precio ${override} UF en ${etiqueta} queda bajo el equivalente al descuento máximo (${referencia} UF = lista ${lista} × 75%) — permitido, pero revísalo.`,
+    )
   }
   return r3(override)
 }

@@ -140,6 +140,29 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
     assert.strictEqual(r.totalPagoUnicoUF, 27)
   })
 
+  test("override de equipo es LIBRE (UI literal) y avisa bajo el 75% de lista", () => {
+    const r = cotizarPropuesta({
+      usuarios: 80,
+      equipos: [{ id: "senseface_2a", modalidad: "arriendo", cantidad: 5, precioUF: 0.3 }],
+      envioExcluido: true,
+      instalacionPorCliente: true,
+      firmante: "Anderson Diaz",
+    })
+    // Anderson: 5 × 0,3 = 1,5 (permitido; 0,3 > 0,2625 → sin advertencia) + asistencia 5,2 = 6,7
+    assert.strictEqual(r.totalMensualUF, 6.7)
+    assert.strictEqual(r.advertencias.length, 0)
+
+    const regalado = cotizarPropuesta({
+      usuarios: 80,
+      equipos: [{ id: "s922", modalidad: "venta", cantidad: 1, precioUF: 5 }], // lista 20, 75% = 15
+      envioExcluido: true,
+      instalacionPorCliente: true,
+      firmante: "x",
+    })
+    assert.strictEqual(regalado.totalPagoUnicoUF, 5) // se acepta (UI literal)
+    assert.ok(regalado.advertencias.some((a) => a.includes("permitido, pero revísalo")))
+  })
+
   test("frontera: el motor es PURO (sin red, sin Supabase, sin imports externos)", () => {
     for (const f of ["lib/cotizadora-ejecutivos/motor.ts", "lib/cotizadora-ejecutivos/catalogo.ts"]) {
       const src = readFileSync(f, "utf-8")
