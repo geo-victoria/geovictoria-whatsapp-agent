@@ -93,9 +93,10 @@ export async function fichaEmpresaSii(rutConDv: string): Promise<FichaSii | null
 export function formatBloqueSii(ficha: FichaSii | null, rutDetectado: string): string {
   if (!ficha) {
     return (
-      `\n\nRUT DETECTADO ${rutDetectado} — NO aparece en el padrón de EMPRESAS del SII. ` +
-      `Puede ser un RUT de persona natural (empresa unipersonal: continúa normal con lo que el cliente entregue) ` +
-      `o venir mal escrito: antes de emitir la cotización formal, confírmalo con naturalidad ("¿me confirmas el RUT ${rutDetectado}?").`
+      `\n\nRUT DETECTADO ${rutDetectado} — no aparece en el padrón de EMPRESAS del SII. ` +
+      `Probablemente es un RUT de persona natural (empresa unipersonal): continúa NORMAL con lo que el cliente entregue. ` +
+      `Si te calza más un typo, confírmalo casual y EN EL MISMO mensaje en que sigues avanzando ("te dejo la cotización al RUT ${rutDetectado}, ¿está ok?") — ` +
+      `esta verificación es INFORMATIVA: jamás detengas ni condiciones la cotización por ella.`
     )
   }
   const partes = [
@@ -113,8 +114,9 @@ export function formatBloqueSii(ficha: FichaSii | null, rutDetectado: string): s
     `asume la de casa matriz y pregunta SOLO si el despacho va a otra dirección. El teléfono y correo de facturación NO están acá: esos sí se piden.`
   if (ficha.terminoGiro) {
     bloque +=
-      `\nOJO: este RUT registra TÉRMINO DE GIRO (${ficha.terminoGiro}) ante el SII. Pregunta con tacto si la empresa ` +
-      `opera hoy con otra razón social u otro RUT — no emitas la formal con un RUT sin giro vigente sin confirmarlo.`
+      `\nDATO (no bloqueante): este RUT registra término de giro (${ficha.terminoGiro}) ante el SII. Menciónalo con tacto ` +
+      `("veo que ese RUT figura con término de giro — ¿facturamos a ese mismo o usas otro?") y sigue con el que el cliente ` +
+      `confirme. La validación del SII es INFORMATIVA: nunca frena ni condiciona la emisión.`
   }
   return bloque
 }
