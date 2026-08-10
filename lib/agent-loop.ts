@@ -35,7 +35,7 @@ import {
 } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { getTimezone, computeMeetingReminderAt } from "./calendar"
-import { duenoCotizacionVigente, type DuenoReunion } from "./tools/agendar-reunion"
+import { duenoCotizacionVigente, duenoDealVigente, type DuenoReunion } from "./tools/agendar-reunion"
 import { eventoSeguimientoDe } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
 import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD, actualizarNotaTranscripcion, parseEmpleados } from "./crm-hitos"
@@ -495,19 +495,32 @@ export async function runAgentLoop(params: {
           (toolName === "agendar_reunion" || toolName === "consultar_disponibilidad_horario") &&
           contact
         ) {
-          // DECISIÓN FINAL (Lalo, 31-jul): la reunión se queda con el
-          // round-robin SDR inbound tal como está — el dueño del DEAL no
-          // redirige la agenda; entra como ASISTENTE invitado del booking
-          // (ver agendar-reunion.ts). Lo único que redirige agenda sigue
-          // siendo la cotización FORMAL vigente (reglas del 21/27-jul).
-          const formalReunion = await getFormalQuote(contact).catch(() => "")
-          if (formalReunion) {
-            const dueno: DuenoReunion | null = await duenoCotizacionVigente(contact).catch(() => null)
-            const eventoDelDueno = dueno ? eventoSeguimientoDe(dueno.email) : undefined
-            if (eventoDelDueno) {
-              ;(toolInput as Record<string, unknown>).eventTypeId = eventoDelDueno
-            } else if (dueno && toolName === "agendar_reunion") {
-              reunionPostFormal = true
+          // REGLA NUEVA (Lalo 10-ago): "si se traspasa una conversación a un
+          // ejecutivo, la reunión se queda a nombre de él". Manda el dueño
+          // del DEAL (el que sorteó la tómbola al traspasar) y la cotización
+          // formal queda de respaldo — antes (31-jul) solo la formal
+          // redirigía la agenda y el dueño del deal entraba como invitado.
+          //
+          // Cal.com NO permite dirigir un evento multi-host a una persona
+          // (re-verificado 10-ago: teamMemberEmail/username → 400), así que
+          // esto SOLO funciona con el evento de host único del ejecutivo. Sin
+          // ese evento configurado, el comportamiento es el de siempre: se
+          // agenda por el round-robin y el dueño entra como asistente — un
+          // ejecutivo sin calendario jamás rompe la reunión del cliente.
+          const duenoDeal: DuenoReunion | null = await duenoDealVigente(contact).catch(() => null)
+          const eventoDeal = duenoDeal ? eventoSeguimientoDe(duenoDeal.email) : undefined
+          if (eventoDeal) {
+            ;(toolInput as Record<string, unknown>).eventTypeId = eventoDeal
+          } else {
+            const formalReunion = await getFormalQuote(contact).catch(() => "")
+            if (formalReunion) {
+              const dueno: DuenoReunion | null = await duenoCotizacionVigente(contact).catch(() => null)
+              const eventoDelDueno = dueno ? eventoSeguimientoDe(dueno.email) : undefined
+              if (eventoDelDueno) {
+                ;(toolInput as Record<string, unknown>).eventTypeId = eventoDelDueno
+              } else if (dueno && toolName === "agendar_reunion") {
+                reunionPostFormal = true
+              }
             }
           }
         }
