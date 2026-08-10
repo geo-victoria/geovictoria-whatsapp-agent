@@ -734,7 +734,15 @@ export async function GET(req: Request) {
     // cliente no hay TTV que medir: esa conversación la gobierna el Loop.
     if (!c.last_user_at) continue
     const ultimoCliente = new Date(c.last_user_at)
-    const clienteRespondioDespues = ultimoCliente >= new Date(c.updated_at)
+    // ESTRICTO, no >= (caso Fundación Amigos de Jesús, 10-ago): cuando el
+    // mensaje del cliente y la respuesta de Vicky quedan grabados en el
+    // MISMO milisegundo, el empate hacía "cliente activo" verdadero para
+    // siempre y esa conversación nunca más era traspasable. El empate
+    // significa que Vicky YA respondió (los appends van en orden); el único
+    // instante genuinamente ambiguo — cliente recién escribió y Vicky aún no
+    // contesta — es inofensivo con >, porque ese mismo mensaje acaba de
+    // reiniciar el reloj de silencio a cero.
+    const clienteRespondioDespues = ultimoCliente.getTime() > new Date(c.updated_at).getTime()
     const feriados = await feriadosDePais(pais)
     const compromisoAt = compromisoPor.get(c.contact) ? new Date(String(compromisoPor.get(c.contact))) : null
     // TRASPASO v2 (CL desde 03-ago; PE desde el día uno — Lalo 04-ago; CO
