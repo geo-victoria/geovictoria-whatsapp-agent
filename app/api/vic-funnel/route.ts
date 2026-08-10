@@ -4090,6 +4090,7 @@ function renderListaCotizaciones(
   key: string,
   volverQS: string,
   convPorContacto: Map<string, string>,
+  wspSet: Set<string> = new Set(),
 ): Response {
   const qs = [...quotes].sort((a, b) => String(b.Created_Time || "").localeCompare(String(a.Created_Time || "")))
   const filas = qs
@@ -4101,8 +4102,21 @@ function renderListaCotizaciones(
       const fechaPago = aceptada || pagada ? String(q.Fecha_Hora_Cotizacion || q.Modified_Time || "") : ""
       const owner = `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—"
       const convId = tel ? convPorContacto.get(tel) || "" : ""
+      // Links de contexto por empresa (pedido Lalo 10-ago): registro en Zoho
+      // (deal si existe, si no la cotización), WhatsApp espejado del vendedor
+      // con el cliente y conversación de Vicky con el cliente.
+      const zohoUrl = zohoUrlDe(String(q["Deal_Asociado.id"] || "") || null, null, String(q.id || "") || null)
+      const links = [
+        zohoUrl ? `<a href="${esc(zohoUrl)}" target="_blank" rel="noopener" title="Abrir el registro en Zoho CRM">🔗 Zoho</a>` : "",
+        tel && wspSet.has(tel)
+          ? `<a href="?key=${encodeURIComponent(key)}&wsp=${encodeURIComponent(tel)}" target="_blank" title="WhatsApp del vendedor con este cliente">📱 wsp vendedor</a>`
+          : "",
+        convId ? `<a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(convId)}" title="Conversación de Vicky con este cliente">📄 chat Vicky</a>` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
       return `<tr>
-        <td>${esc(String(q.Numero_Cotizacion || ""))} · <b>${esc(empresaDeQuote(q))}</b>${convId ? ` <a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(convId)}" title="Ver conversación" style="font-weight:400">📄</a>` : ""}<div class="sub" style="margin:0;font-size:12px">${tel ? `+${esc(tel)}` : "sin teléfono"}</div></td>
+        <td>${esc(String(q.Numero_Cotizacion || ""))} · <b>${esc(empresaDeQuote(q))}</b><div class="sub" style="margin:0;font-size:12px">${tel ? `+${esc(tel)}` : "sin teléfono"}</div>${links ? `<div style="margin-top:2px;font-size:12px;white-space:nowrap">${links}</div>` : ""}</td>
         <td><span class="tag">${esc(estado)}</span></td>
         <td style="white-space:nowrap">${fmtSantiago(String(q.Created_Time || ""))}</td>
         <td style="white-space:nowrap">${fechaPago ? fmtSantiago(fechaPago) : "—"}</td>
@@ -4326,6 +4340,10 @@ export async function GET(req: Request): Promise<Response> {
   // conversación → fecha del último mensaje (columna "Último contacto" del
   // detalle de KPIs).
   let ultimoMsgPorConv = new Map<string, string>()
+  // Conversación más reciente por contacto (todas las conversaciones, no solo
+  // el listado comercial vivo): habilita el link "chat Vicky" en los detalles
+  // de cotizaciones aunque la conversación ya haya salido del listado.
+  let convIdPorContacto = new Map<string, string>()
   // Escalera del listado comercial: también enriquece el detalle de KPIs
   // (empresa, estado, ejecutivo a cargo, accionable).
   let filasListado: FilaListado[] = []
@@ -4359,6 +4377,12 @@ export async function GET(req: Request): Promise<Response> {
     ultimoMsgPorConv = new Map(
       convsListado.map((c) => [c.id, String(c.updated_at || c.last_user_at || c.started_at || "")]),
     )
+    // Viene ordenado por started_at desc: la primera aparición es la
+    // conversación más reciente del contacto.
+    for (const c of convsListado) {
+      const d = digits(c.contact)
+      if (d && !convIdPorContacto.has(d)) convIdPorContacto.set(d, c.id)
+    }
     // Listado comercial vivo (best-effort: si una pata falla, la sección se
     // arma con lo que haya; jamás bota la página). Se construye ANTES que el
     // resto porque su escalera de estados alimenta los filtros globales.
@@ -4676,7 +4700,10 @@ export async function GET(req: Request): Promise<Response> {
       const d = digits(f.contacto)
       if (d && f.convId && !convPorContacto.has(d)) convPorContacto.set(d, f.convId)
     }
-    return renderListaCotizaciones(quotes, titulo, key, `?${filtrosQS().toString()}`, convPorContacto)
+    // Contactos fuera del listado comercial vivo (cotizaciones viejas): la
+    // conversación sale del mapa global de conversaciones.
+    for (const [d, id] of convIdPorContacto) if (!convPorContacto.has(d)) convPorContacto.set(d, id)
+    return renderListaCotizaciones(quotes, titulo, key, `?${filtrosQS().toString()}`, convPorContacto, wspVendedorSet)
   }
 
   if (listaParam && KPI_BUCKETS[listaParam]) {
