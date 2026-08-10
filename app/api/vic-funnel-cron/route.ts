@@ -20,7 +20,7 @@
 import {
   analyzeConversation,
   isTestContact,
-  testContactSet,
+  metricsContactSet,
   type TranscriptMessage,
 } from "@/lib/funnel-analysis"
 
@@ -75,7 +75,7 @@ export async function GET(req: Request): Promise<Response> {
 
   const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "25", 10) || 25, 1), 200)
   const forceAll = searchParams.get("all") === "1"
-  const testSet = testContactSet()
+  const testSet = metricsContactSet()
 
   // Dos consultas simples (más robusto que el embed de PostgREST): conversaciones
   // + análisis existentes, y se cruzan en JS para saber cuáles re-analizar.

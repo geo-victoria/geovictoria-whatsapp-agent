@@ -70,7 +70,34 @@ export function testContactSet(): Set<string> {
     : []
   return new Set([...DEFAULT_TEST_CONTACTS, ...extra])
 }
-export function isTestContact(contact: string, set = testContactSet()): boolean {
+// ── DOS LISTAS, DOS PREGUNTAS (Lalo 10-ago, "elimina geovictoria spa del
+// dash") ─────────────────────────────────────────────────────────────────
+// La lista OPERATIVA (testContactSet) responde "¿a quién no le habla la
+// maquinaria proactiva?". Esta responde otra pregunta: "¿a quién no cuenta
+// el dash?". Lalo y Rodrigo salieron de la operativa para poder probar el
+// flujo real con sus teléfonos — pero sus pruebas ("GeoVictoria SPA",
+// "Atcomo"…) no son ventas y no pueden sumar métricas. El dash usa ESTE
+// set; los crones siguen con testContactSet.
+const SOLO_METRICAS = [
+  "56944668823", // Eduardo (Lalo)
+  "56978385048", // Rodrigo
+]
+
+export function metricsContactSet(): Set<string> {
+  const set = testContactSet()
+  for (const c of SOLO_METRICAS) set.add(c)
+  const extra = (process.env.VIC_FUNNEL_METRICS_ONLY || "").split(",")
+  for (const c of extra) {
+    const d = c.trim().replace(/\D/g, "")
+    if (d) set.add(d)
+  }
+  return set
+}
+
+// El DEFAULT del set es el de MÉTRICAS a propósito: los únicos llamadores
+// sin set explícito son los paneles del dash (vic-funnel). Todo cron
+// operativo pasa testContactSet()/su propio set explícitamente.
+export function isTestContact(contact: string, set = metricsContactSet()): boolean {
   // Solo los dígitos INICIALES: un contacto clonado con sufijo
   // ("56978385048_pruebas_14jul") debe calzar con su número base — con
   // replace(\D) los dígitos del sufijo se pegaban al número y el clon de

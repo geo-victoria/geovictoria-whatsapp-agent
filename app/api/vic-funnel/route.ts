@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto"
 
-import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
+import { isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
@@ -1319,7 +1319,7 @@ function construirListadoComercial(params: {
   // convertido): la pasada 4 no los duplica.
   const dealsUsados = new Set<string>()
   const delPais = (c: string) => paisDeTelefono(c) === pais
-  const testSet = testContactSet()
+  const testSet = metricsContactSet()
   const convPorContacto = new Map(convs.map((c) => [digits(c.contact), c]))
   const analisisPorContacto = new Map(analysisRows.map((r) => [digits(r.contact), r]))
   const corte30d = Date.now() - 30 * 24 * 3600e3
@@ -1976,7 +1976,7 @@ function renderEvolucionDiaria(params: {
   rango: RangoFechas | null
 }): string {
   const { convs, analysisRows, preformAt, quotes, pais, rango } = params
-  const testSet = testContactSet()
+  const testSet = metricsContactSet()
   const diaDe = (iso: string | null | undefined): string => {
     const t = Date.parse(String(iso || ""))
     if (!Number.isFinite(t)) return ""
