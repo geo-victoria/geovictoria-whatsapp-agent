@@ -26,12 +26,29 @@ const CO = leer("lib/paises/co/tools.ts")
 const MX = leer("lib/paises/mx/tools.ts")
 
 describe("el mapa dueño → evento de seguimiento", () => {
-  test("cubre a los tres ejecutivos de Vicky con los IDs verificados", () => {
-    // IDs leídos de las páginas públicas de los eventos el 28-jul, cada una
-    // mostrando al host correcto (Eddyluz / Gordillo / Yahel).
-    assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["emujica@geovictoria.com"], "6484386")
+  test("cubre a los ejecutivos con evento propio, con los IDs verificados", () => {
+    // CL: eventos creados el 10-ago y verificados contra la API el mismo día
+    // (200 y disponibilidad distinta entre sí — cada uno mira SU agenda).
+    assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["emujica@geovictoria.com"], "6616710")
+    assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["pdiaz@geovictoria.com"], "6616712")
+    assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["gmelendez@geovictoria.com"], "6616718")
+    assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["alopez@geovictoria.com"], "6616741")
+    // CO/MX: IDs del 28-jul, sin cambios.
     assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["agordillo@geovictoria.com"], "6484393")
     assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["ysegura@geovictoria.com"], "6484399")
+  })
+
+  test("quien AÚN no tiene evento propio no está en el mapa (cae al round-robin)", () => {
+    // Tamara sigue fuera a propósito: sin calendario conectado, Cal la
+    // mostraría 100% libre y Vicky agendaría sobre sus reuniones reales.
+    for (const email of [
+      "tmartinezq@geovictoria.com",
+      "dgalvez@geovictoria.com",
+      "asepulveda@geovictoria.com",
+      "aaraque@geovictoria.com",
+    ]) {
+      assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO[email], undefined)
+    }
   })
 
   test("Anderson NO está en el mapa: su cartera legacy usa el camino determinista", () => {
@@ -42,7 +59,7 @@ describe("el mapa dueño → evento de seguimiento", () => {
     process.env.VICKY_CAL_EVENTO_POR_DUENO = "ileiva@geovictoria.com:7000001"
     assert.equal(eventoSeguimientoDe("ileiva@geovictoria.com"), "7000001")
     // El mapa fijo sigue funcionando con el env presente.
-    assert.equal(eventoSeguimientoDe("emujica@geovictoria.com"), "6484386")
+    assert.equal(eventoSeguimientoDe("emujica@geovictoria.com"), "6616710")
     delete process.env.VICKY_CAL_EVENTO_POR_DUENO
     assert.equal(eventoSeguimientoDe("ileiva@geovictoria.com"), undefined)
   })
