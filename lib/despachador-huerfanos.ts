@@ -31,8 +31,13 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   { nombre: "mudos", path: "/api/vic-mudos-cron", cadaMin: 30 },
 ]
 
-/** Margen para que una cadencia de 15' no se salte un turno por 20 segundos. */
-const TOLERANCIA_MS = 90_000
+/**
+ * Margen = medio tick del cron que despacha (ptv corre cada 10'). Sin él, una
+ * cadencia de 15' solo se cumpliría en el tick de los 20' (el de los 10' aún
+ * no llega al umbral) y las notas quedarían el doble de viejas. Con 5' de
+ * margen, un job de 15' se dispara en el tick de los 10'.
+ */
+const TOLERANCIA_MS = 5 * 60_000
 
 function h(): Record<string, string> {
   return {
