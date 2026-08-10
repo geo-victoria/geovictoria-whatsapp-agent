@@ -433,6 +433,15 @@ export async function POST(req: Request): Promise<Response> {
   ].join("\n")
   await appendAssistantV3(contact, ctx, esMX ? "mx" : esCO ? "co" : "cl").catch(() => {})
 
+  // Primera respuesta del lead OUTBOUND = el toque 0 (regla Lalo 10-ago): la
+  // métrica del equipo mide desde que salió la primera plantilla, no desde
+  // que un humano abre el lead después. Best-effort, jamás frena el flujo.
+  if (zohoLeadId) {
+    updateZohoLeadFields(zohoLeadId, {
+      Fecha_de_Primera_revision_Lead: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+    }).catch(() => {})
+  }
+
   // 3. Arranca la CADENCIA multicanal (correos vía Zoho + HSM día 1/7): el cron
   // vic-outbound-cadence-cron toma esta fila; cualquier respuesta la corta.
   await fetch(`${SUPABASE_URL}/rest/v1/vic_outbound_cadence?on_conflict=contact`, {

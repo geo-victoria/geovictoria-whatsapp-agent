@@ -880,6 +880,12 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
       Canal: "WhatsApp",
       Lead_Source: getEnv("ZOHO_DEFAULT_LEAD_SOURCE") || "SEO",
       Owner: { id: ownerId },
+      // Primera revisión = la atención de Vicky (regla Lalo 10-ago): un lead
+      // inbound nace porque Vicky YA respondió la primera pregunta — el
+      // tiempo de respuesta del equipo parte en 0, no cuando un humano abre
+      // el lead días después (caso Ana María, cierre de julio: 4 leads con
+      // miles de horas por esta brecha).
+      Fecha_de_Primera_revision_Lead: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
     }
 
     const email = (input.email || "").trim()
