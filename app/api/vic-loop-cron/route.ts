@@ -797,6 +797,15 @@ export async function GET(req: Request): Promise<Response> {
     // posible. Ahí manda el candado v3: 20 minutos de ventana para que el
     // vendedor contacte y después el toque FLUYE — si el vendedor atendió,
     // este loop ni llega acá (el paso a-0 lo cerró por atención real).
+    //
+    // Y el TOQUE 1 quedó EXENTO de la proyección (orden de Lalo 10-ago:
+    // "resucita el toque a los 10 minutos en horario hábil"): antes el
+    // anti-empalme lo posponía SIEMPRE en hábil (con precio dado, la
+    // proyección a +1h da "traspasar" sin excepción) y el primer contacto
+    // era la presentación de los 15'. Hoy el toque 1 no presenta a nadie
+    // (esPresentacion=false desde la mañana), así que puede convivir con la
+    // presentación 5 minutos después sin revivir el bug de los dos nombres
+    // (Alan/vaitiare). El anti-empalme sigue vivo para los toques 2+.
     const traspasadoMs = traspasadoAtDe.get(r.contact)
     if (traspasadoMs) {
       const ventanaVendedor = traspasadoMs + 20 * 60e3
@@ -807,7 +816,7 @@ export async function GET(req: Request): Promise<Response> {
         continue
       }
       // ≥20 min traspasado y sin atención: el toque sale (candado v3).
-    } else if (ptvHabilitado() && lastUserMs > 0) {
+    } else if (ptvHabilitado() && lastUserMs > 0 && touch !== 1) {
       const proyeccion = debeTraspasar({
         referenciaRelojAt: new Date(lastUserMs),
         clienteRespondioDespues: false,

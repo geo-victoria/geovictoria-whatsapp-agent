@@ -109,8 +109,12 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
     assert.match(LOOP, /const traspasadoMs = traspasadoAtDe\.get\(r\.contact\)/)
     assert.match(LOOP, /traspasadoMs \+ 20 \* 60e3/)
     assert.match(LOOP, /pospuesto_ventana_vendedor/)
-    // La proyección a futuro queda SOLO para contactos sin traspaso activo.
-    assert.match(LOOP, /\} else if \(ptvHabilitado\(\) && lastUserMs > 0\) \{/)
+    // La proyección a futuro queda SOLO para contactos sin traspaso activo,
+    // y desde el 10-ago PM además EXIME al toque 1 (orden de Lalo: "resucita
+    // el toque a los 10 minutos en horario hábil") — el t1 ya no presenta a
+    // nadie, así que convive con la presentación del traspaso sin el bug de
+    // los dos nombres. El anti-empalme solo pospone toques 2+.
+    assert.match(LOOP, /\} else if \(ptvHabilitado\(\) && lastUserMs > 0 && touch !== 1\) \{/)
   })
 
   test("sin_precio no cambia: el nudge de siempre a la hora de siempre", () => {
