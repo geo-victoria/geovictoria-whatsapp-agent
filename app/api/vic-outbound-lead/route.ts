@@ -353,6 +353,42 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, skipped: "conversación ya existe", contact })
   }
 
+  // CANDADO NÚMERO FIJO (caso Karla/Transportes Mobility, 10-ago): un fijo
+  // (CL sin 569…, CO sin 573…) casi nunca tiene WhatsApp, y Meta NO emite
+  // "undeliverable" para esos envíos — el mensaje queda en "sent" para
+  // siempre, el candado 131026 del webhook de estados jamás se entera y el
+  // lead muere en silencio con Vicky. Sin intento de WhatsApp: directo a un
+  // humano con nota de LLAMAR. (MX queda fuera: su numeración móvil no es
+  // distinguible por prefijo.)
+  const esFijo =
+    (contact.startsWith("56") && !contact.startsWith("569")) ||
+    (contact.startsWith("57") && !contact.startsWith("573"))
+  if (esFijo) {
+    let reasignado: string | undefined
+    if (zohoLeadId) {
+      await agregarNotaLead(
+        zohoLeadId,
+        "Vicky: número FIJO — contactar por LLAMADA",
+        `El teléfono del formulario (+${contact}) es un número fijo: no recibe WhatsApp, así que Vicky no envió la plantilla. Contactar por llamada telefónica${email ? ` o al correo ${email}` : ""}.`,
+      ).catch(() => {})
+      if (esMX) {
+        const yahel = "ysegura@geovictoria.com"
+        const r = await updateZohoLeadOwner(zohoLeadId, yahel).catch(() => null)
+        reasignado = r?.success ? yahel : undefined
+      } else if (esCO) {
+        const r = await reasignarLeadSdrInboundCO(zohoLeadId).catch(() => null)
+        reasignado = r?.ownerEmail
+      } else {
+        const { reasignarLeadTelemarketingCL } = await import("@/lib/zoho-leads")
+        let r = await reasignarLeadTelemarketingCL(zohoLeadId).catch(() => null)
+        if (!r?.success) r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
+        reasignado = r?.ownerEmail
+      }
+    }
+    console.warn(`[outbound-lead] número fijo +${contact} → sin WhatsApp; lead ${zohoLeadId || "(sin id)"} a ${reasignado || "humano (reasignación falló)"}`)
+    return NextResponse.json({ ok: true, envio: "omitido_numero_fijo", contact, reasignado })
+  }
+
   // 1. Plantilla HSM de apertura (variables por nombre, como las define Botmaker).
   const sent = await sendBotmakerTemplate(contact, tplPais, { nombre, empresa }, channelId).catch(() => false)
   if (!sent) {

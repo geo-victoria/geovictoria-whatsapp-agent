@@ -2822,7 +2822,6 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
     <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       <a href="?key=${encodeURIComponent(key)}">📞 Gestión</a>
       <b>🧾 Editor de cotizaciones</b>
-      <a href="?key=${encodeURIComponent(key)}&propnueva=1">📑 Crear propuestas</a>
       <a href="?key=${encodeURIComponent(key)}&vista=analisis">📊 Análisis y KPIs</a>
     </div>
   </div>
@@ -5010,7 +5009,6 @@ export async function GET(req: Request): Promise<Response> {
     <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
-      <a href="?key=${encodeURIComponent(key)}&propnueva=1">📑 Crear propuestas</a>
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>
   </div>
