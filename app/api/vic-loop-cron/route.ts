@@ -614,6 +614,23 @@ export async function GET(req: Request): Promise<Response> {
     () => new Set<string>(),
   )
 
+  // Mapa RAW de traspasos ACTIVOS (contact → traspasado_at). Distinto del set
+  // de arriba: aquel es "traspasado Y atendido" (cierra el loop); este es
+  // "traspasado a secas", y lo necesita el anti-empalme de abajo — un
+  // traspaso que YA ocurrió no puede seguir posponiendo toques (hallazgo
+  // 10-ago, prueba de Lalo: la proyección post-formal da "traspasar" para
+  // SIEMPRE con el cliente en silencio, así que el toque se corría de hora
+  // en hora y el acompañamiento del candado v3 nunca partía).
+  const traspasoRes = await supa(`vic_ptv?estado=eq.activo&select=contact,traspasado_at&limit=1000`)
+  const traspasadoAtDe = new Map<string, number>()
+  for (const p of (traspasoRes.ok ? await traspasoRes.json().catch(() => []) : []) as Array<{
+    contact: string
+    traspasado_at?: string
+  }>) {
+    const ms = Date.parse(p.traspasado_at || "")
+    if (p.contact && Number.isFinite(ms)) traspasadoAtDe.set(p.contact, ms)
+  }
+
   for (const r of rows) {
     procesados++
     const now = Date.now()
@@ -764,7 +781,23 @@ export async function GET(req: Request): Promise<Response> {
     // del vendedor son dos mensajes de Vicky casi juntos, y el vendedor va a
     // retomar con todo el contexto de todos modos. Proyección con el MISMO
     // motor de decisión del cron PTV, evaluado a ahora+1h.
-    if (ptvHabilitado() && lastUserMs > 0) {
+    //
+    // PERO solo aplica a traspasos FUTUROS (corrección 10-ago): con el
+    // traspaso YA disparado, la presentación ya salió y no hay empalme
+    // posible. Ahí manda el candado v3: 20 minutos de ventana para que el
+    // vendedor contacte y después el toque FLUYE — si el vendedor atendió,
+    // este loop ni llega acá (el paso a-0 lo cerró por atención real).
+    const traspasadoMs = traspasadoAtDe.get(r.contact)
+    if (traspasadoMs) {
+      const ventanaVendedor = traspasadoMs + 20 * 60e3
+      if (now < ventanaVendedor) {
+        await patchLoop(r.contact, { next_touch_at: new Date(ventanaVendedor + 60e3).toISOString() })
+        pospuestos++
+        detalle.push({ contact: r.contact, accion: "pospuesto_ventana_vendedor", touch })
+        continue
+      }
+      // ≥20 min traspasado y sin atención: el toque sale (candado v3).
+    } else if (ptvHabilitado() && lastUserMs > 0) {
       const proyeccion = debeTraspasar({
         referenciaRelojAt: new Date(lastUserMs),
         clienteRespondioDespues: false,

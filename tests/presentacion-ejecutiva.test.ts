@@ -93,9 +93,24 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
     // silencio solo con contacto humano REAL — y respeta el rollback
     // VICKY_PTV_CANDADO_CLASICO=1.
     assert.match(LOOP, /contactosTraspasados\(rows\.map\(\(r\) => r\.contact\)\)/)
-    assert.doesNotMatch(LOOP, /vic_ptv\?estado=eq\.activo&select=contact/)
     assert.match(LOOP, /ptvActivos\.has\(r\.contact\)/)
     assert.match(LOOP, /motivo_cierre: "ptv_traspasado"/)
+  })
+
+  test("traspaso YA disparado: el anti-empalme no pospone — ventana de 20 min y el toque fluye", () => {
+    // Hallazgo 10-ago (prueba de Lalo): la proyección del anti-empalme da
+    // "traspasar" PARA SIEMPRE en una conversación con precio y cliente en
+    // silencio — también después de ocurrido el traspaso. El toque se corría
+    // de hora en hora y el acompañamiento del candado v3 nunca partía. El
+    // fetch RAW de vic_ptv (contact,traspasado_at) existe solo para esto:
+    // separar el traspaso futuro (proyección, se pospone) del ya ocurrido
+    // (ventana del vendedor de 20 min y a tocar).
+    assert.match(LOOP, /vic_ptv\?estado=eq\.activo&select=contact,traspasado_at/)
+    assert.match(LOOP, /const traspasadoMs = traspasadoAtDe\.get\(r\.contact\)/)
+    assert.match(LOOP, /traspasadoMs \+ 20 \* 60e3/)
+    assert.match(LOOP, /pospuesto_ventana_vendedor/)
+    // La proyección a futuro queda SOLO para contactos sin traspaso activo.
+    assert.match(LOOP, /\} else if \(ptvHabilitado\(\) && lastUserMs > 0\) \{/)
   })
 
   test("sin_precio no cambia: el nudge de siempre a la hora de siempre", () => {
