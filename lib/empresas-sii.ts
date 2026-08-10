@@ -7,13 +7,12 @@
  *   - vic_empresas_cl_domicilio  (dirección vigente de casa matriz, comuna, región)
  *   - vic_empresas_cl_giro       (actividad económica más reciente + cuántas tiene)
  *
- * El webhook CL detecta un RUT en lo que el cliente ha escrito, arma la ficha
- * y se la inyecta al modelo como DATOS PRELLENADOS: razón social, giro,
- * dirección y comuna dejan de preguntarse — se confirman. El teléfono y el
- * correo de facturación no existen en el SII: siguen saliendo del chat.
- *
- * Todo best-effort: si la base no responde, el bloque va vacío y la
- * conversación sigue exactamente como antes (fail-open, principio del repo).
+ * REGLA ABSOLUTA (Lalo 10-ago, tercera iteración): NADA de esto toca la
+ * conversación. Ni bloque en el prompt, ni confirmaciones, ni menciones —
+ * Vicky no sabe que el padrón existe. El ÚNICO consumidor es el formulario
+ * de facturación de la página de aceptación (vía vic-sii-ficha): se
+ * prellena o no se prellena, y eso es todo. Fail-open: sin base, el
+ * formulario queda como siempre (vacío) y nadie lo nota.
  */
 
 import { rutValido } from "./rut"
@@ -88,35 +87,3 @@ export async function fichaEmpresaSii(rutConDv: string): Promise<FichaSii | null
   }
 }
 
-/** Bloque para el prompt: los datos oficiales como PRELLENADO con órdenes de
- * uso. Vacío solo si no se pudo ni consultar. */
-export function formatBloqueSii(ficha: FichaSii | null, rutDetectado: string): string {
-  if (!ficha) {
-    return (
-      `\n\nRUT DETECTADO ${rutDetectado} — no aparece en el padrón de EMPRESAS del SII. ` +
-      `Probablemente es un RUT de persona natural (empresa unipersonal): continúa NORMAL con lo que el cliente entregue. ` +
-      `Si te calza más un typo, confírmalo casual y EN EL MISMO mensaje en que sigues avanzando ("te dejo la cotización al RUT ${rutDetectado}, ¿está ok?") — ` +
-      `esta verificación es INFORMATIVA: jamás detengas ni condiciones la cotización por ella.`
-    )
-  }
-  const partes = [
-    `Razón social oficial: ${ficha.razonSocial}`,
-    ficha.giro ? `Giro: ${ficha.giro}${(ficha.nActividades || 1) > 1 ? ` (+${(ficha.nActividades || 1) - 1} actividades más)` : ""}` : "",
-    ficha.direccion ? `Dirección casa matriz: ${ficha.direccion}` : "",
-    ficha.comuna ? `Comuna: ${ficha.comuna} (${ficha.region || ""})` : "",
-    ficha.inicioGiro ? `Inicio de actividades: ${ficha.inicioGiro}` : "",
-  ].filter(Boolean)
-  let bloque =
-    `\n\nDATOS OFICIALES SII para el RUT ${ficha.rut} (PRELLENADOS — úsalos, NO se los preguntes al cliente):\n- ` +
-    partes.join("\n- ") +
-    `\nUso: la cotización formal va con esta razón social y este RUT (si el cliente usa un nombre de fantasía distinto, ` +
-    `menciónalo tú: "te la dejo a nombre de ${ficha.razonSocial}, ¿cierto?"). La comuna sirve para envío/instalación de reloj — ` +
-    `asume la de casa matriz y pregunta SOLO si el despacho va a otra dirección. El teléfono y correo de facturación NO están acá: esos sí se piden.`
-  if (ficha.terminoGiro) {
-    bloque +=
-      `\nNota interna (NO la menciones ni cambies NADA por ella): este RUT registra término de giro (${ficha.terminoGiro}) ` +
-      `ante el SII. La conversación sigue EXACTAMENTE igual que con cualquier RUT — cotizas, emites y cierras normal; ` +
-      `si el dato importa, lo ve el equipo en el CRM. El SII acá solo PRELLENA, jamás altera el flujo.`
-  }
-  return bloque
-}
