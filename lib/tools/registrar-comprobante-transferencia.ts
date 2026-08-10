@@ -194,10 +194,36 @@ export async function marcarCotizacionPagada(quoteId: string): Promise<boolean> 
       return false
     }
     console.log(`[comprobante] quote=${quoteId} Estado_Cotizacion → Pagada`)
+    // Correo interno de PAGADA (hoyo detectado 10-ago, caso Fernando/COT408):
+    // ese correo vive en el COTIZADOR (notifyQuoteEvent — destinatarios por
+    // país + Owner, filtro anti-pruebas, WhatsApp interno) y solo lo
+    // gatillaban los pagos por MercadoPago. La transferencia entra por acá,
+    // así que acá se dispara. Best-effort: su falla no toca ni el estado ni
+    // la conversación.
+    await notificarPagadaAlCotizador(quoteId)
     return true
   } catch (e) {
     console.warn("[comprobante] Estado→Pagada lanzó:", e instanceof Error ? e.message : e)
     return false
+  }
+}
+
+/** Dispara en el cotizador la notificación interna de "Cotización PAGADA"
+ * (correo al equipo + WhatsApp interno). Única puerta para pagos SIN
+ * MercadoPago. Nunca lanza. */
+async function notificarPagadaAlCotizador(quoteId: string): Promise<void> {
+  try {
+    const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+    const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+    if (!secret) return
+    const r = await fetch(`${base}/api/payments/notify-paid?quoteId=${encodeURIComponent(quoteId)}`, {
+      method: "POST",
+      headers: { "x-vicky-secret": secret },
+      cache: "no-store",
+    })
+    console.log(`[comprobante] notify-paid ${r.ok ? "ok" : `falló (${r.status})`} quote=${quoteId}`)
+  } catch (e) {
+    console.warn("[comprobante] notify-paid lanzó:", e instanceof Error ? e.message : e)
   }
 }
 
