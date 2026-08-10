@@ -1692,7 +1692,7 @@ function construirCasosGestion(params: {
   return { casos, nGestionados }
 }
 
-function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string, descargaQS = "", wspSet: Set<string> = new Set(), quienSesion = ""): string {
+function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: string, descargaQS = "", wspSet: Set<string> = new Set(), quienSesion = "", atendidosSet: Set<string> = new Set()): string {
   const activos = casos.filter((c) => !c.gestionado)
   const fila = (c: CasoGestion): string => {
     const dias = c.diasSinContacto
@@ -1737,7 +1737,11 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
           <td data-l="Recurrente" data-sort="${c.montoOrden || 0}" style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td data-l="Accionable" data-sort="${esc(c.accionable.toLowerCase().slice(0, 80))}">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa} <button class="btnAtendido" data-contact="${esc(c.contacto)}" title="Ya lo contacté — registra tu contacto con este cliente (silencia los seguimientos de Vicky y alimenta el panel de SLA)" style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:8px;padding:8px 10px;font-size:15px;cursor:pointer">🤝</button></td>
+          <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa} ${
+            atendidosSet.has(c.contacto)
+              ? `<button class="btnAtendido" data-contact="${esc(c.contacto)}" data-estado="atendido" title="Contacto registrado — clic para DESHACER (Vicky vuelve a hacerle seguimiento)" style="background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:8px;padding:8px 10px;font-size:15px;cursor:pointer">✓</button>`
+              : `<button class="btnAtendido" data-contact="${esc(c.contacto)}" title="Ya lo contacté — registra tu contacto con este cliente (silencia los seguimientos de Vicky y alimenta el panel de SLA)" style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:8px;padding:8px 10px;font-size:15px;cursor:pointer">🤝</button>`
+          }</td>
         </tr>`
   }
   const secciones = TIPOS_ACCION.map((tipo) => {
@@ -1847,18 +1851,29 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
       document.querySelectorAll(".btnGest").forEach(wire);
       document.querySelectorAll(".btnAtendido").forEach(function (b) {
         b.addEventListener("click", async function () {
-          if (!confirm("¿Registrar que YA contactaste a este cliente? Vicky deja de mandarle seguimientos automáticos.")) return;
+          var marcado = this.dataset.estado === "atendido";
+          var msg = marcado
+            ? "¿Deshacer el registro de contacto? Vicky volverá a hacerle seguimiento a este cliente."
+            : "¿Registrar que YA contactaste a este cliente? Vicky deja de mandarle seguimientos automáticos.";
+          if (!confirm(msg)) return;
           this.disabled = true;
           try {
-            var r = await fetch(KEYQ + "&accion=atendido&contact=" + encodeURIComponent(this.dataset.contact), { method: "POST" });
+            var r = await fetch(KEYQ + "&accion=atendido&contact=" + encodeURIComponent(this.dataset.contact) + (marcado ? "&deshacer=1" : ""), { method: "POST" });
             var j = await r.json();
             if (!j.ok) throw new Error(j.error || "error");
-            this.textContent = "✓"; this.title = "Contacto registrado";
-            this.style.background = "#dcfce7"; this.style.color = "#166534"; this.style.border = "1px solid #86efac";
+            if (marcado) {
+              this.dataset.estado = ""; this.textContent = "🤝";
+              this.title = "Ya lo contacté — registra tu contacto con este cliente";
+              this.style.background = "#f0f9ff"; this.style.color = "#0369a1"; this.style.border = "1px solid #bae6fd";
+            } else {
+              this.dataset.estado = "atendido"; this.textContent = "✓";
+              this.title = "Contacto registrado — clic para DESHACER (Vicky vuelve a hacerle seguimiento)";
+              this.style.background = "#dcfce7"; this.style.color = "#166534"; this.style.border = "1px solid #86efac";
+            }
           } catch (e) {
-            this.disabled = false;
-            alert("No se pudo registrar el contacto. Inténtalo de nuevo.");
+            alert("No se pudo actualizar el registro. Inténtalo de nuevo.");
           }
+          this.disabled = false;
         });
       });
       var lnk = document.getElementById("lnkVerGest");
@@ -3879,6 +3894,16 @@ export async function POST(req: Request): Promise<Response> {
     const quienBody = (() => {
       try { return decodeURIComponent(cookieDe(req, "vic_quien") || "") } catch { return "" }
     })()
+    // Deshacer (Lalo 10-ago): la marca es reversible — se borra y Vicky
+    // vuelve a hacerle seguimiento a ese contacto.
+    if (searchParams.get("deshacer")) {
+      await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(`atencion_manual_${contact}`)}`, {
+        method: "DELETE",
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      }).catch(() => {})
+      await notaZohoGestion(contact, `Registro de contacto DESHECHO desde el dashboard${quienBody ? ` por ${quienBody}` : ""}: Vicky vuelve a hacerle seguimiento automático a este cliente.`).catch(() => false)
+      return new Response(JSON.stringify({ ok: true, deshecho: true }), { headers: { "content-type": "application/json" } })
+    }
     await kvSet(`atencion_manual_${contact}`, new Date().toISOString())
     await notaZohoGestion(contact, `Contacto manual registrado desde el dashboard${quienBody ? ` por ${quienBody}` : ""}: el vendedor declaró haber atendido a este cliente (los seguimientos automáticos de Vicky quedan en silencio).`).catch(() => false)
     return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } })
@@ -4523,7 +4548,20 @@ export async function GET(req: Request): Promise<Response> {
       if (origenF !== "vicky") p.set("origen", origenF)
       return p.toString()
     })()
-    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga, wspVendedorSet, esAdmin ? "" : quien)
+    // Marcas "ya lo contacté" vigentes: el botón nace en su estado real y
+    // permite DESHACER (Lalo 10-ago).
+    const atendidosSet = new Set<string>()
+    try {
+      const claves = casosGestion.slice(0, 300).map((c) => `"atencion_manual_${c.contacto}"`).join(",")
+      if (claves) {
+        const rows = (await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=in.(${claves})&select=key&limit=300`, {
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+          cache: "no-store",
+        }).then((r) => (r.ok ? r.json() : [])).catch(() => [])) as Array<{ key: string }>
+        for (const r of rows) atendidosSet.add(String(r.key).replace("atencion_manual_", ""))
+      }
+    } catch { /* best-effort: sin marcas el botón sale en su estado por defecto */ }
+    colaHtml = renderColaGestion(casosGestion, nGestionadosCola, key, qsDescarga, wspVendedorSet, esAdmin ? "" : quien, atendidosSet)
     // El filtro global re-corta el cierre de Zoho (por teléfono de la
     // cotización) y el funnel por origen (por teléfono del lead/toque).
     if (permitidos && cierre) {
