@@ -249,7 +249,27 @@ export async function POST(req: Request) {
   if (!expected || provided !== expected) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
+  return tick()
+}
 
+/**
+ * GET para el cron de Vercel (10-ago): el agendador EXTERNO que disparaba este
+ * endpoint por POST murió en silencio — el latido lo acusó ("CRON MUDO" desde
+ * el sábado) y desde hoy el cron vive en vercel.json. Vercel invoca con GET y
+ * manda Authorization: Bearer CRON_SECRET automáticamente; el POST con
+ * x-cron-secret queda por compatibilidad con cualquier disparo manual.
+ */
+export async function GET(req: Request) {
+  const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
+  const xcron = (req.headers.get("x-cron-secret") || "").trim()
+  const cronSecret = (process.env.CRON_SECRET || "").trim()
+  const kvSecret = await getFollowupCronSecret().catch(() => "")
+  const ok = (cronSecret && bearer === cronSecret) || (kvSecret && xcron === kvSecret)
+  if (!ok) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  return tick()
+}
+
+async function tick(): Promise<Response> {
   const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
   if (!apiKey) {
     console.error("[followup-cron] ANTHROPIC_API_KEY no configurada")

@@ -70,6 +70,14 @@
     {
       "path": "/api/vic-mudos-cron",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/vic-followup-cron",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/vic-outbound-cadence-cron",
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {
