@@ -973,6 +973,44 @@ export async function GET(req: Request): Promise<Response> {
     console.warn("[loop-cron] toque sabatino falló:", e instanceof Error ? e.message : e)
   }
 
+  // VIGÍA DE CERO TRASPASOS (10-ago, autopsia del viernes 08-ago): el PTV
+  // corrió TODO ese día hábil respondiendo 200 y no traspasó a NADIE (¿flag
+  // apagado?), y nadie se enteró hasta el lunes — la Fundación Amigos de
+  // Jesús y Residencia San Sebastián se perdieron ahí. Este cron es
+  // independiente del flag del PTV, así que puede acusarlo: día hábil CL
+  // pasado el mediodía y ni UN traspaso en vic_ptv hoy → alerta interna,
+  // una sola vez por día (marca vic_kv).
+  try {
+    const tz = "America/Santiago"
+    const ahoraCl = new Date()
+    const diaCl = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(ahoraCl)
+    const horaCl =
+      Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(ahoraCl)) % 24
+    if (diaCl !== "Sat" && diaCl !== "Sun" && horaCl >= 12 && horaCl < 18) {
+      const fechaCl = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(ahoraCl)
+      const marca = `alerta_cero_traspasos_${fechaCl}`
+      const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+      if (!(await getKvValue(marca).catch(() => "ya"))) {
+        const desdeHoy = new Date(`${fechaCl}T04:00:00Z`).toISOString()
+        const res = await supa(
+          `vic_ptv?traspasado_at=gte.${encodeURIComponent(desdeHoy)}&select=id&limit=1`,
+        )
+        const filas = res.ok ? ((await res.json().catch(() => [])) as unknown[]) : ["asumo-ok"]
+        if (!filas.length) {
+          const { avisarEquipoInterno } = await import("@/lib/alerta-interna")
+          await avisarEquipoInterno(
+            `⚠️ CERO traspasos hoy siendo día hábil (van ${horaCl}:00 en Chile). ` +
+              `El viernes 08-ago pasó exactamente esto y se perdió el día completo. ` +
+              `Revisar VICKY_PTV_ENABLED, vic_kv traspaso_v2_enabled y los logs de vic-ptv-cron.`,
+          ).catch(() => false)
+          await setKvValue(marca, new Date().toISOString()).catch(() => {})
+        }
+      }
+    }
+  } catch {
+    /* vigía best-effort: jamás tumba el tick */
+  }
+
   // Latido (Lalo 08-ago): tick exitoso queda estampado; este cron vigila a los demás.
   {
     const { estamparLatido, vigilarLatidos } = await import("@/lib/latido")

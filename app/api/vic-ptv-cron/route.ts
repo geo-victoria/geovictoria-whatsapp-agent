@@ -45,7 +45,14 @@ export const maxDuration = 120
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
-const VENTANA_BARRIDO_MS = 48 * 3600_000
+// 7 días, no 48 h (caso Fundación Amigos de Jesús / Residencia San Sebastián,
+// 10-ago): sus relojes vencieron el viernes 08-ago — día en que el PTV no
+// traspasó a NADIE — y el fin de semana las sacó de la ventana de 48 h, así
+// que el lunes el motor sano ya no las veía. Un reloj vencido no puede
+// prescribir por un feriado largo o una caída: 7 días cubre cualquier hoyo
+// de viernes a lunes con margen. El candado UNIQUE de vic_ptv hace inocuo
+// re-mirar conversaciones viejas ya traspasadas.
+const VENTANA_BARRIDO_MS = 7 * 24 * 3600_000
 const VENTANA_META_MS = 24 * 3600_000
 const MAX_TRASPASOS_POR_TICK = 15
 
@@ -686,7 +693,7 @@ export async function GET(req: Request) {
     user_msg_count: number | null
   }>(
     `vic_v3_conversations?updated_at=gte.${encodeURIComponent(desde)}` +
-      `&select=contact,country,last_user_at,updated_at,pref_escalon,pref_escalon_at,pref_quote_id,formal_quote_id,formal_quote_at,followup_closed_reason,first_user_at,user_msg_count&limit=200`,
+      `&select=contact,country,last_user_at,updated_at,pref_escalon,pref_escalon_at,pref_quote_id,formal_quote_id,formal_quote_at,followup_closed_reason,first_user_at,user_msg_count&order=updated_at.desc&limit=1000`,
   )
   const activos = await supa<{ contact: string }>(`vic_ptv?estado=eq.activo&select=contact&limit=1000`)
   const conTraspaso = new Set(activos.map((a) => a.contact))
