@@ -260,7 +260,7 @@ export async function infoDeal(dealId: string): Promise<InfoDeal | null> {
 const crearCotizacionSchema = {
   name: "crear_cotizacion",
   description:
-    "Emite la cotización formal NUEVA amarrada a la oportunidad (deal) del contexto: reusa su cuenta y su contacto en Zoho (cero duplicados), el dueño queda el del deal, se genera el PDF y el link de aceptación, y si el contacto tiene correo se le envía automáticamente. Pasa la configuración COMPLETA. Llámala apenas tengas los datos mínimos: RUT válido, dotación (1-50) y módulos (asistencia siempre); hardware y puntos de instalación solo si el vendedor quiere reloj.",
+    "Emite la cotización formal NUEVA amarrada a la oportunidad (deal) del contexto: reusa su cuenta y su contacto en Zoho (cero duplicados), el dueño queda el del deal, se genera el PDF y el link de aceptación, y si el contacto tiene correo se le envía automáticamente. Pasa la configuración COMPLETA. Llámala apenas tengas los datos mínimos: RUT válido, dotación (1-8000) y módulos (asistencia siempre); hardware y puntos de instalación solo si el vendedor quiere reloj.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -268,7 +268,7 @@ const crearCotizacionSchema = {
       contacto: { type: "string" as const, description: "Nombre de la persona de contacto. Omítelo para usar el del deal." },
       contactoEmail: { type: "string" as const, description: "Email del contacto. Omítelo para usar el de la ficha." },
       rutEmpresa: { type: "string" as const, description: "RUT de la empresa (con dígito verificador). Omítelo solo si la ficha ya trae RUT." },
-      userCount: { type: "integer" as const, minimum: 1, maximum: 50, description: "Dotación (1-50)." },
+      userCount: { type: "integer" as const, minimum: 1, maximum: 8000, description: "Dotación (1-8000, tramos del catálogo comercial)." },
       modulos: { type: "array" as const, items: { type: "string" as const }, minItems: 1, description: "IDs de módulos. Siempre incluir 'asistencia'." },
       hardware: {
         type: "array" as const,
@@ -331,11 +331,11 @@ export async function chatVickyCotizacionesCrear(params: {
     catalogoParaModelo(),
     ``,
     `CÓMO TRABAJAS:`,
-    `1. EL VENDEDOR MANDA. Reúne SOLO lo mínimo que falte para emitir: RUT válido (si la ficha no trae), dotación (1-50) y módulos (asistencia es la base; agrega otros solo si los pide); reloj y puntos de instalación (comuna + quién instala) solo si quiere hardware. Pide todo lo que falte JUNTO, en un solo mensaje corto.`,
+    `1. EL VENDEDOR MANDA. Reúne SOLO lo mínimo que falte para emitir: RUT válido (si la ficha no trae), dotación (1-8000) y módulos (asistencia es la base; agrega otros solo si los pide); reloj y puntos de instalación (comuna + quién instala) solo si quiere hardware. Pide todo lo que falte JUNTO, en un solo mensaje corto.`,
     `2. Con los datos listos llama crear_cotizacion de inmediato — sin confirmaciones extra. La cotización nace amarrada a ESTE deal, su cuenta y su contacto (cero duplicados) y con el dueño del deal.`,
     `3. Tras crear, informa número interno/total/links en 2-3 líneas y avisa que se abrirá el editor de esa cotización para ajustes o envío. Si falló, muestra el error textual y reintenta una vez si fue un error genérico.`,
     ``,
-    `LÍMITES: solo línea Chile (UF), 1-50 trabajadores, precios del catálogo (los ajustes finos se hacen después en el editor). No inventes RUT ni datos: lo que falte se pregunta.`,
+    `LÍMITES: solo línea Chile (UF), 1-8000 trabajadores (sobre 50 rigen los tramos del catálogo comercial; algunos módulos como vacaciones aún no tienen precio sobre 50 — la tool avisa con advertencias), precios del catálogo (los ajustes finos se hacen después en el editor). No inventes RUT ni datos: lo que falte se pregunta.`,
   ].join("\n")
 
   const client = new Anthropic({ apiKey })
@@ -391,6 +391,9 @@ export async function chatVickyCotizacionesCrear(params: {
           comunaEmpresa: input.comunaEmpresa,
           regionEmpresa: input.regionEmpresa,
           userCount: input.userCount,
+          // Canal ejecutivo: el editor cotiza el rango completo de la
+          // calculadora de Nacho (Lalo 10-ago) — Vicky chat sigue en 50.
+          _maxUsuariosOverride: 8000,
           sectorEmpresa: "",
           modulos: input.modulos,
           hardware: input.hardware,
@@ -511,7 +514,7 @@ export async function chatVickyCotizacionesPreform(params: {
     `3. Con los datos completos llama crear_cotizacion de inmediato — sin confirmaciones extra. La emisión adopta el lead vivo del teléfono (cero duplicados) y sigue las reglas vigentes de asignación.`,
     `4. Tras crear, informa número/total/links en 2-3 líneas y avisa que se abrirá el editor para ajustes o envío. Si falló, muestra el error textual y reintenta una vez si fue genérico.`,
     ``,
-    `LÍMITES: solo línea Chile (UF), 1-50 trabajadores, precios del catálogo (ajustes finos después en el editor). El RUT se pasa TAL CUAL a la tool — tú no lo validas.`,
+    `LÍMITES: solo línea Chile (UF), 1-8000 trabajadores (sobre 50, tramos del catálogo comercial), precios del catálogo (ajustes finos después en el editor). El RUT se pasa TAL CUAL a la tool — tú no lo validas.`,
   ].join("\n")
 
   const client = new Anthropic({ apiKey })
@@ -567,6 +570,9 @@ export async function chatVickyCotizacionesPreform(params: {
           comunaEmpresa: input.comunaEmpresa,
           regionEmpresa: input.regionEmpresa,
           userCount: input.userCount,
+          // Canal ejecutivo: el editor cotiza el rango completo de la
+          // calculadora de Nacho (Lalo 10-ago) — Vicky chat sigue en 50.
+          _maxUsuariosOverride: 8000,
           sectorEmpresa: "",
           modulos: input.modulos,
           hardware: input.hardware,

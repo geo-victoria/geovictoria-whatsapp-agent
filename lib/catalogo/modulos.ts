@@ -28,6 +28,18 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
       { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.07 },
       { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.065 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.055 },
+      // ── TRAMOS 51+ = CANAL EJECUTIVO (calculadora de Nacho, 10-ago) ──
+      // Vicky WhatsApp NUNCA llega acá: sus guardas (umbral 20/50 y el tope de
+      // sus tools) viven aguas arriba. Solo el agente del editor (dash) pasa
+      // el cap alto vía _maxUsuariosOverride. Fuente: pricingTiers de
+      // gv-cotizador (valores tabla oficiales del canal comercial).
+      { minUsuarios: 51, maxUsuarios: 100, modalidad: "por_usuario", precioUF: 0.065 },
+      { minUsuarios: 101, maxUsuarios: 200, modalidad: "por_usuario", precioUF: 0.06 },
+      { minUsuarios: 201, maxUsuarios: 500, modalidad: "por_usuario", precioUF: 0.055 },
+      { minUsuarios: 501, maxUsuarios: 1000, modalidad: "por_usuario", precioUF: 0.05 },
+      { minUsuarios: 1001, maxUsuarios: 3000, modalidad: "por_usuario", precioUF: 0.045 },
+      { minUsuarios: 3001, maxUsuarios: 5000, modalidad: "por_usuario", precioUF: 0.04 },
+      { minUsuarios: 5001, maxUsuarios: 8000, modalidad: "por_usuario", precioUF: 0.035 },
     ],
     disponibleParaVicky: true,
   },
@@ -62,7 +74,7 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     nombre: "Banco de Horas",
     descripcion:
       "Gestión de horas extras, compensaciones y saldos por trabajador. Útil para empresas con jornadas variables.",
-    tiers: [{ minUsuarios: 1, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.05 }],
+    tiers: [{ minUsuarios: 1, maxUsuarios: 8000, modalidad: "por_usuario", precioUF: 0.05 }],
     disponibleParaVicky: false,
   },
   {
@@ -70,7 +82,7 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     nombre: "Alertas",
     descripcion:
       "Notificaciones automáticas a supervisores ante atrasos, ausencias o anomalías de marcaje.",
-    tiers: [{ minUsuarios: 1, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.019 }],
+    tiers: [{ minUsuarios: 1, maxUsuarios: 8000, modalidad: "por_usuario", precioUF: 0.019 }],
     disponibleParaVicky: false,
   },
   {
@@ -78,7 +90,7 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     nombre: "Planificador Inteligente",
     descripcion:
       "Planificación de turnos y horarios variables. Útil para empresas con personal rotativo.",
-    tiers: [{ minUsuarios: 1, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.014 }],
+    tiers: [{ minUsuarios: 1, maxUsuarios: 8000, modalidad: "por_usuario", precioUF: 0.014 }],
     disponibleParaVicky: false,
   },
   {
@@ -86,7 +98,7 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     nombre: "Gestión Documental",
     descripcion:
       "Repositorio centralizado de contratos, anexos y documentos del personal con firma electrónica.",
-    tiers: [{ minUsuarios: 1, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.012 }],
+    tiers: [{ minUsuarios: 1, maxUsuarios: 8000, modalidad: "por_usuario", precioUF: 0.012 }],
     disponibleParaVicky: false,
   },
 ]

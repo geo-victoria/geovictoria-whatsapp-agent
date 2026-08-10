@@ -288,6 +288,9 @@ export type LinkCotizadoraInput = {
   // la persistencia por contacto (no los pasa el modelo). Si vienen, el endpoint
   // reusa ese Borrador y lo finaliza (PDF + correo + "Enviada") en vez de crear
   // una cotización nueva.
+  /** Cap de dotación por CANAL (interno, no está en el input_schema): el
+   * agente del editor pasa 8000 (rango calculadora de Nacho). */
+  _maxUsuariosOverride?: number
   _draftQuoteId?: string
   _draftDealId?: string
   _draftAccountId?: string
@@ -592,8 +595,16 @@ export async function generarLinkCotizadora(
         "Pídele al cliente que te confirme su RUT (empresa o persona natural) con el dígito verificador correcto, y NO generes la cotización hasta tener uno válido. No es un error técnico.",
     }
   }
-  if (!Number.isFinite(userCount) || userCount < 1 || userCount > SCOPE_MAX_USUARIOS) {
-    return { ok: false, error: `userCount=${userCount} fuera de rango 1-${SCOPE_MAX_USUARIOS}.` }
+  // Cap por CANAL: Vicky (tool del chat) sigue en 50; el agente del editor
+  // (canal ejecutivo) pasa _maxUsuariosOverride=8000 — el rango de la
+  // calculadora de Nacho. El override es un campo interno que el modelo no
+  // conoce (no está en el input_schema): solo lo pasan llamadores de código.
+  const capUsuarios = Math.min(
+    Number((args as { _maxUsuariosOverride?: number })._maxUsuariosOverride || SCOPE_MAX_USUARIOS),
+    8000,
+  )
+  if (!Number.isFinite(userCount) || userCount < 1 || userCount > capUsuarios) {
+    return { ok: false, error: `userCount=${userCount} fuera de rango 1-${capUsuarios}.` }
   }
   if (!Array.isArray(modulos) || modulos.length === 0) {
     return { ok: false, error: "modulos requerido (mínimo 1)" }
