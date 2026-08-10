@@ -14,9 +14,23 @@
  * cal.com/team/onboardinggv/seguimiento-cotizacion-{cl,co,mx}
  */
 export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
-  "emujica@geovictoria.com": "6484386", // CL — Eddyluz Mujica
+  // ── Ejecutivos de la TÓMBOLA CL (eventos creados por Lalo el 10-ago) ──
+  // Verificados el mismo día contra la API: los cuatro responden 200 y cada
+  // uno devuelve una disponibilidad DISTINTA (73 / 88 / 76 / 59 slots en la
+  // misma ventana), o sea cada evento mira la agenda de SU host. Los cuatro
+  // tienen Outlook conectado (confirmado por Lalo en la consola de Cal).
+  "emujica@geovictoria.com": "6616710", // CL — Eddyluz Mujica (antes 6484386)
+  "pdiaz@geovictoria.com": "6616712", // CL — Paola Díaz
+  "gmelendez@geovictoria.com": "6616718", // CL — Grey Meléndez
+  "alopez@geovictoria.com": "6616741", // CL — Ana Paula López
+  // ── Resto de países ──
   "agordillo@geovictoria.com": "6484393", // CO — Alejandro Gordillo
   "ysegura@geovictoria.com": "6484399", // MX — Yahel Segura
+  // PENDIENTES de evento propio (siguen cayendo al round-robin, sin romper
+  // nada): Anderson Díaz, Daniela Gálvez, Aracelli Sepúlveda, Aleydis Araque
+  // y Eddy Galindo (CO). Tamara Martínez espera a conectar su calendario —
+  // sin conectarlo Cal la mostraría 100% libre y Vicky agendaría encima de
+  // sus reuniones reales.
 }
 
 /**
