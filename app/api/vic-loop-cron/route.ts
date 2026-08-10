@@ -1064,7 +1064,7 @@ async function toqueSabatino(now: number): Promise<number> {
     if (dia !== "Sat" || hora < 10 || hora >= 14) continue
     const loop = loopPor.get(c.contact)
     if (loop && loop.estado !== "activo") continue
-    if (loop && ["pagado", "optout", "soporte", "perdido", "mas_de_50"].includes(loop.motivo_cierre || "")) continue
+    if (loop && ["pagado", "optout", "soporte", "perdido", "mas_de_50", "sobre_umbral"].includes(loop.motivo_cierre || "")) continue
     if (silenciados.has(c.contact)) continue
     // Cliente que respondió DESPUÉS de la formal no está frío: se respeta.
     const lastUser = c.last_user_at ? Date.parse(c.last_user_at) : 0

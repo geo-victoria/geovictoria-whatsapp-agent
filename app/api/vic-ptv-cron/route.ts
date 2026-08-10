@@ -702,7 +702,7 @@ export async function GET(req: Request) {
   // (sin número) u host de reunión. El reloj de etapa NO les corre (caso
   // Veltis: derivado >50 a las 13:00 y el reloj de 120' lo traspasó igual).
   const mas50 = await supa<{ contact: string }>(
-    `vic_loop?motivo_cierre=eq.mas_de_50&select=contact&limit=1000`,
+    `vic_loop?motivo_cierre=in.(mas_de_50,sobre_umbral)&select=contact&limit=1000`,
   )
   const contactosMas50 = new Set(mas50.map((m) => m.contact))
   const pausas = await supa<{ contact: string; compromiso_at: string | null }>(

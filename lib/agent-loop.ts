@@ -474,7 +474,7 @@ export async function runAgentLoop(params: {
               `REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): esta conversación es ${origen} y tu umbral para DAR PRECIOS es ${umbral} trabajadores; con ${uc} el precio lo entrega un ejecutivo. ` +
               `NO des precios ni estimados (tampoco de memoria del catálogo). Haz esto AHORA: (1) si te falta nombre, email o empresa, captúralos primero; ` +
               `(2) deriva con ${dp.tool} motivo "${dp.motivo}" pasando nombre, email, empresa y trabajadores — el registro pasa AL ACTO al equipo comercial y un ejecutivo lo toma con el precio; ` +
-              `(3) NO te despidas: sigue acompañando al cliente — responde todas sus dudas (producto, implementación, hardware, prueba), ${dp.agenda} y empuja el cierre EN EQUIPO con el ejecutivo.`
+              `(3) NO te despidas: responde todas las dudas que el cliente traiga (producto, implementación, hardware, prueba) y ${dp.agenda} — pero la VENTA es del ejecutivo: no prometas seguimientos tuyos ni retomes el precio después.`
             console.warn(
               `[agent-loop] umbral autonomía: ${toolName} bloqueado (${uc} > ${umbral} ${origen}) contacto ${contact}.`,
             )
@@ -687,31 +687,25 @@ export async function runAgentLoop(params: {
             String(toolInput.motivo || "") === "fuera_de_rango_trabajadores") ||
           (toolName === "derivar_a_ejecutivo" && String(toolInput.motivo || "") === "mas_de_50")
         if (contact && esDerivacionMas50) {
-          // UMBRAL 08-ago: la banda sobre-umbral pero ≤50 NO cierra el loop —
-          // Vicky acompaña la venta (seguimientos sin precio, candado v3 hasta
-          // contacto real del vendedor). Solo el >50 genuino (o sin N legible,
-          // conservador) sale del seguimiento como siempre.
+          // ORDEN LALO 10-ago PM (supersede el "acompañamiento" del 08-ago):
+          // "Vicky solo vende hasta 20; si es más, crea el lead en Zoho y YA
+          // NO hace comunicación proactiva — esos leads no se le asignan a
+          // ella". Toda derivación sobre el umbral cierra el loop: el lead y
+          // el deal quedan creados (sorteoInmediato abajo sigue intacto), el
+          // equipo humano es el dueño, y Vicky solo responde REACTIVAMENTE
+          // si el cliente escribe. Motivo diferenciado para el reporting:
+          // 'sobre_umbral' (21-50 con N legible) vs 'mas_de_50' (>50 o sin
+          // N). La válvula de precio muere con esto: sin marca sobre_umbral_
+          // no hay válvula que armar — Vicky no retoma ventas que no son
+          // suyas.
           const nDerivado = parseEmpleados((toolInput as Record<string, unknown>).trabajadores)
-          const acompanar =
+          const esBandaMedia =
             typeof nDerivado === "number" &&
             nDerivado >= 1 &&
             nDerivado <= SCOPE_MAX_SISTEMA
-          if (acompanar) {
-            console.log(
-              `[agent-loop] derivación sobre-umbral (${nDerivado} trabajadores ≤${SCOPE_MAX_SISTEMA}): loop sigue vivo — Vicky acompaña (contacto ${contact}).`,
-            )
-            // Punto de partida de la VÁLVULA de precio y del SLA (Lalo 08-ago):
-            // queda estampado cuándo se le prometió ejecutivo a este cliente.
-            void (async () => {
-              const { setKvValue } = await import("./supabase-persistence-v3")
-              await setKvValue(
-                `sobre_umbral_${contact.replace(/\D/g, "")}`,
-                JSON.stringify({ n: nDerivado, at: new Date().toISOString() }),
-              )
-            })().catch(() => undefined)
-          } else {
-            void mas50CierraLoop(contact).catch(() => undefined)
-          }
+          void mas50CierraLoop(contact, esBandaMedia ? "sobre_umbral" : "mas_de_50").catch(
+            () => undefined,
+          )
         }
         // ORDEN LALO 06-ago: el >50 que Vicky no puede cotizar pasa SÍ O SÍ a
         // la tómbola de deals con sus datos (N° empleados incluido, para caer

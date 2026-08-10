@@ -504,14 +504,14 @@ export async function loopCerradoPorPagoReal(contact: string): Promise<boolean> 
  * REACTIVAMENTE si el cliente escribe). Motivo 'mas_de_50' terminal: un loop
  * cerrado nunca revive solo.
  */
-export async function mas50CierraLoop(contact: string): Promise<void> {
+export async function mas50CierraLoop(contact: string, motivo = "mas_de_50"): Promise<void> {
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
   await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
       estado: "cerrado",
-      motivo_cierre: "mas_de_50",
+      motivo_cierre: motivo,
       updated_at: new Date().toISOString(),
     }),
   })
