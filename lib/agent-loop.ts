@@ -508,6 +508,13 @@ export async function runAgentLoop(params: {
           // agenda por el round-robin y el dueño entra como asistente — un
           // ejecutivo sin calendario jamás rompe la reunión del cliente.
           let duenoDeal: DuenoReunion | null = await duenoDealVigente(contact).catch(() => null)
+          // Deal en un INTERINO = deal sin dueño real para efectos de agenda
+          // (Lalo 10-ago: "si hay deal pero es de Vicky aún, se pasa a
+          // tómbola"). duenoDealVigente ya descarta a Vicky; acá se agrega el
+          // Admin (info@), dueño fantasma de los leads del formulario web que
+          // nadie atiende. Eddyluz/Gordillo/Yahel NO entran: hoy son dueños
+          // reales con agenda propia.
+          if (duenoDeal && /^info@geovictoria\.com$/i.test(duenoDeal.email)) duenoDeal = null
           // TÓMBOLA ÚNICA (Lalo 10-ago): "la tómbola es la de deals de Zoho",
           // Cal no debe sortear a nadie. Si el cliente pide reunión y todavía
           // no hay deal (77% de los casos, medido el 10-ago), se dispara el
