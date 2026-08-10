@@ -80,11 +80,22 @@ describe("el agent-loop inyecta el evento del dueño", () => {
     // conversación a un ejecutivo, la reunión se queda a nombre de él" — el
     // dueño que sorteó la tómbola dirige la agenda. La cotización formal
     // sigue como respaldo cuando el deal no tiene dueño con evento.
-    assert.match(LOOP, /const duenoDeal: DuenoReunion \| null = await duenoDealVigente\(contact\)/)
+    assert.match(LOOP, /let duenoDeal: DuenoReunion \| null = await duenoDealVigente\(contact\)/)
     assert.match(LOOP, /const eventoDeal = duenoDeal \? eventoSeguimientoDe\(duenoDeal\.email\) : undefined/)
     assert.match(LOOP, /if \(eventoDeal\) \{\s*\n\s*;\(toolInput as Record<string, unknown>\)\.eventTypeId = eventoDeal/)
     // Respaldo intacto: sin evento del dueño del deal, se mira la formal.
     assert.match(LOOP, /const formalReunion = await getFormalQuote\(contact\)\.catch/)
+  })
+
+  test("sin deal, la tómbola de ZOHO sortea antes de mirar agenda (Lalo 10-ago)", () => {
+    // "La tómbola es la de deals de Zoho": Cal no elige a nadie. Sin deal se
+    // dispara el hito (lead convertido + candados anti-duplicado) con
+    // sorteoInmediato, y recién con ese dueño se busca disponibilidad.
+    assert.match(LOOP, /if \(!duenoDeal\) \{[\s\S]{0,400}sincronizarHitoCrm\(contact, "intencion"/)
+    assert.match(LOOP, /sorteoInmediato: true/)
+    // Y con timeout: Zoho lento no puede dejar al cliente sin su reunión.
+    assert.match(LOOP, /setTimeout\(r, 8000\)/)
+    assert.match(LOOP, /duenoDeal = await duenoDealVigente\(contact\)\.catch/)
   })
 
   test("un ejecutivo SIN evento de host único nunca rompe la reunión", () => {

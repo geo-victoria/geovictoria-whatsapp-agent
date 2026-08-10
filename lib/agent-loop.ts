@@ -507,7 +507,29 @@ export async function runAgentLoop(params: {
           // ese evento configurado, el comportamiento es el de siempre: se
           // agenda por el round-robin y el dueño entra como asistente — un
           // ejecutivo sin calendario jamás rompe la reunión del cliente.
-          const duenoDeal: DuenoReunion | null = await duenoDealVigente(contact).catch(() => null)
+          let duenoDeal: DuenoReunion | null = await duenoDealVigente(contact).catch(() => null)
+          // TÓMBOLA ÚNICA (Lalo 10-ago): "la tómbola es la de deals de Zoho",
+          // Cal no debe sortear a nadie. Si el cliente pide reunión y todavía
+          // no hay deal (77% de los casos, medido el 10-ago), se dispara el
+          // hito AHORA y de forma SÍNCRONA: nace el deal por la vía de
+          // siempre —lead convertido, candado deal_fono_<fono> anti-duplicado
+          // y candado de lead por teléfono— y la tómbola de Zoho sortea al
+          // ejecutivo con sorteoInmediato. Recién con ese dueño se busca
+          // agenda, así el cliente ve las horas de quien lo va a atender.
+          //
+          // Sin número de trabajadores el deal NO nace (regla CL del 06-ago:
+          // esa oportunidad no está calificada) — ahí se cae al camino de
+          // siempre, que sigue ofreciendo agenda. Timeout de 8 s: si Zoho se
+          // demora, el cliente NO se queda esperando su reunión.
+          if (!duenoDeal) {
+            await Promise.race([
+              sincronizarHitoCrm(contact, "intencion", datosDeToolInput(toolName, toolInput), {
+                sorteoInmediato: true,
+              }),
+              new Promise((r) => setTimeout(r, 8000)),
+            ]).catch(() => undefined)
+            duenoDeal = await duenoDealVigente(contact).catch(() => null)
+          }
           const eventoDeal = duenoDeal ? eventoSeguimientoDe(duenoDeal.email) : undefined
           if (eventoDeal) {
             ;(toolInput as Record<string, unknown>).eventTypeId = eventoDeal
