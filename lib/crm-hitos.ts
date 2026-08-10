@@ -681,6 +681,11 @@ async function convertirConDeal(
   }
   const deal = {
     Deal_Name: `${lead.company || "Prospecto WhatsApp"} (Control de Asistencia)`,
+    // RUT en el DEAL, no solo en la cuenta (Lalo 10-ago, caso Embajada de
+    // Bélgica): el equipo comercial lo necesita en ambos registros. Si el
+    // lead aún no lo tiene (hito temprano), la emisión formal lo completa
+    // después (create-from-vicky rellena Rut_ID_Account del deal reusado).
+    ...(lead.rut ? { Rut_ID_Account: lead.rut } : {}),
     Stage: piso,
     Pipeline: "Standard (Standard)",
     Territorio: territorio,
