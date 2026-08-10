@@ -56,6 +56,19 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
 
+  // BARRIDO ACELERADO (Lalo 10-ago): este cron es el de mayor frecuencia del
+  // scheduler externo (~cada 2 min), así que además de lo suyo despacha los
+  // jobs del despachador de huérfanos — incluidos loop y ptv con cadencia de
+  // 2 minutos, para que toques y traspasos salgan pegados a su reloj y no
+  // hasta 10 minutos tarde. ANTES del gate horario a propósito: los toques
+  // del loop corren 9-21 TODOS los días (finde incluido) y las cadencias de
+  // los huérfanos las gobierna cada cron, no este. Best-effort con timeout
+  // interno: jamás atrasa ni tumba los callbacks.
+  {
+    const { despacharHuerfanos } = await import("@/lib/despachador-huerfanos")
+    await despacharHuerfanos().catch(() => undefined)
+  }
+
   // Horario hábil por PAÍS del contacto (multi-país, 17-jul): un +57 no se
   // llama en horario chileno — Bogotá va 1-2h detrás de Santiago. Y solo
   // días hábiles (19-jul, paridad con la regla Lunes-Viernes de los toques).

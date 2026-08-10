@@ -653,6 +653,15 @@ export async function GET(req: Request) {
     }
     return NextResponse.json({ ok: true, skipped: "VICKY_PTV_ENABLED off" })
   }
+  // Candado de turno (barrido acelerado 10-ago): agenda externa + despacho
+  // cada 2 min desde vic-callback-cron. Dos ticks solapados traspasarían al
+  // mismo contacto dos veces (dos presentaciones). Uno solo tiene el turno.
+  const { reclamarTurno, liberarTurno } = await import("@/lib/cron-lock")
+  if (!(await reclamarTurno("ptv"))) {
+    return NextResponse.json({ ok: true, skipped: "otro tick en curso" })
+  }
+  try {
+
   const ahora = new Date()
   const desde = new Date(ahora.getTime() - VENTANA_BARRIDO_MS).toISOString()
   // Flag del traspaso v2: env O vic_kv (traspaso_v2_enabled=on) — la clave kv
@@ -965,6 +974,9 @@ export async function GET(req: Request) {
     cobros_asistidos: cobros.enviados,
     aceptadas_sin_pago: cobros.pendientes,
   })
+  } finally {
+    await liberarTurno("ptv").catch(() => undefined)
+  }
 }
 
 /**

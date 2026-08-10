@@ -34,6 +34,14 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // POST-only y ganó un GET con Bearer CRON_SECRET justamente para esto.
   { nombre: "followup", path: "/api/vic-followup-cron", cadaMin: 10 },
   { nombre: "outbound", path: "/api/vic-outbound-cadence-cron", cadaMin: 15 },
+  // BARRIDO ACELERADO (Lalo 10-ago, "necesito que sea más instantáneo"): los
+  // relojes de toques y traspasos son exactos, pero la entrega esperaba el
+  // tick externo (loop cada 5', ptv cada 10') — un traspaso de 15' llegaba al
+  // minuto 15-25. Ahora vic-callback-cron (cada ~2') también los despacha,
+  // con cadencia propia de 2 minutos; el solape con la agenda externa lo
+  // resuelve el candado de turno (lib/cron-lock) dentro de cada cron.
+  { nombre: "loop_rapido", path: "/api/vic-loop-cron", cadaMin: 2 },
+  { nombre: "ptv_rapido", path: "/api/vic-ptv-cron", cadaMin: 2 },
 ]
 
 /**
@@ -43,6 +51,12 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
  * margen, un job de 15' se dispara en el tick de los 10'.
  */
 const TOLERANCIA_MS = 5 * 60_000
+
+/** La tolerancia jamás puede superar media cadencia: con jobs de 2-3 minutos,
+ * los 5' fijos los harían dispararse en TODOS los ticks. */
+function toleranciaDe(cadaMin: number): number {
+  return Math.min(TOLERANCIA_MS, (cadaMin * 60_000) / 2)
+}
 
 function h(): Record<string, string> {
   return {
@@ -100,7 +114,7 @@ export async function despacharHuerfanos(): Promise<string[]> {
   for (const job of JOBS_HUERFANOS) {
     try {
       const ultima = await ultimaCorrida(job.nombre)
-      if (ultima && ahora - ultima < job.cadaMin * 60_000 - TOLERANCIA_MS) continue
+      if (ultima && ahora - ultima < job.cadaMin * 60_000 - toleranciaDe(job.cadaMin)) continue
       // Marcar ANTES de disparar: si el disparo se pierde, se reintenta en el
       // siguiente ciclo; si se marcara después, dos ticks solapados lo
       // mandarían dos veces (notas duplicadas, correos duplicados).

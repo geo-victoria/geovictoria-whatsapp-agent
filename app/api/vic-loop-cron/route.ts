@@ -546,6 +546,16 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "Supabase no configurado" }, { status: 503 })
   }
 
+  // Candado de turno (barrido acelerado 10-ago): este cron ahora lo disparan
+  // DOS agendas (la externa de siempre + vic-callback-cron cada 2 min). Dos
+  // ticks solapados leerían las mismas filas vencidas y el cliente recibiría
+  // el MISMO toque dos veces. El que no toma el candado se retira limpio.
+  const { reclamarTurno, liberarTurno } = await import("@/lib/cron-lock")
+  if (!(await reclamarTurno("loop"))) {
+    return NextResponse.json({ ok: true, skipped: "otro tick en curso" })
+  }
+  try {
+
   const nowIso = new Date().toISOString()
   const res = await supa(
     `vic_loop?estado=eq.activo&next_touch_at=lte.${nowIso}` +
@@ -971,6 +981,9 @@ export async function GET(req: Request): Promise<Response> {
     toques_sabatinos: sabatinos,
     detalle,
   })
+  } finally {
+    await liberarTurno("loop").catch(() => undefined)
+  }
 }
 
 /** Sábado 10:00-13:59 del país: formales de las últimas 40 h sin respuesta
