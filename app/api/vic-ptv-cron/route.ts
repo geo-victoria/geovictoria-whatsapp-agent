@@ -37,6 +37,7 @@ import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers 
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
+import { despacharHuerfanos } from "@/lib/despachador-huerfanos"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -942,8 +943,16 @@ export async function GET(req: Request) {
     await estamparLatido("ptv").catch(() => undefined)
     await vigilarLatidos("ptv").catch(() => undefined)
   }
+
+  // 8. CRONES HUÉRFANOS (Lalo 10-ago, "arréglalo"): vic-espejo-notas-cron y
+  // vic-mudos-cron están declarados en vercel.json pero el scheduler real
+  // nunca los dispara (el cron de Vercel corre contra el deployment de master
+  // viejo). Este cron SÍ corre cada 10 minutos, así que los despacha él.
+  const huerfanos = await despacharHuerfanos().catch(() => [] as string[])
+
   return NextResponse.json({
     ok: true,
+    crones_huerfanos_despachados: huerfanos,
     conversaciones_revisadas: convs.length,
     traspasados,
     tm_traspasados: tmTraspasados,
