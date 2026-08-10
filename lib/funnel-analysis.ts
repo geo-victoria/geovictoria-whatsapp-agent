@@ -39,8 +39,14 @@ export const ANALYSIS_MODEL =
 // Números internos de prueba a excluir del embudo (configurable sin redeploy
 // vía VIC_FUNNEL_TEST_CONTACTS, coma-separados). Compartido por cron + dashboard.
 const DEFAULT_TEST_CONTACTS = [
-  "56944668823", // Eduardo
-  "56978385048", // Rodrigo
+  // Eduardo (56944668823) y Rodrigo (56978385048) SALIERON de la lista el
+  // 10-ago por orden de Lalo: con el número acá, toda la maquinaria proactiva
+  // los salta (el cron del loop filtra por isTestContact ANTES de mirar el
+  // toque vencido) y no podían probar el flujo real con su propio teléfono.
+  // Contrapartida asumida: sus cotizaciones de prueba vuelven a contar en el
+  // dash, así que el cinturón por NOMBRE ("prueba", "geo victoria",
+  // "huellerocompany") es ahora la única red — y sus registros históricos se
+  // borraron en la misma pasada.
   "56962288575", // Kerim
   "56982945030", // Andrea
   "56966850332", // C. Fuentes
