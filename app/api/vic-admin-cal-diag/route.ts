@@ -64,8 +64,12 @@ export async function GET(req: Request): Promise<Response> {
   const email = (sp.get("slots") || "").trim()
   if (email) {
     const evento = (sp.get("event") || CAL_EVENT_TYPE_ID).trim()
-    const desde = new Date(Date.now() + 24 * 3600e3).toISOString().slice(0, 10)
-    const hasta = new Date(Date.now() + 6 * 24 * 3600e3).toISOString().slice(0, 10)
+    // Ventana configurable (?dias=30): un evento sin horario asignado da 0
+    // slots SIEMPRE; uno con "notice period" largo recién aparece más lejos.
+    const dias = Math.min(60, Math.max(2, Number(sp.get("dias") || 6)))
+    const desdeDias = Math.min(dias - 1, Number(sp.get("desde") || 1))
+    const desde = new Date(Date.now() + desdeDias * 24 * 3600e3).toISOString().slice(0, 10)
+    const hasta = new Date(Date.now() + dias * 24 * 3600e3).toISOString().slice(0, 10)
     const qs = `eventTypeId=${encodeURIComponent(evento)}&start=${desde}&end=${hasta}&timeZone=America/Santiago`
     const [sinFiltro, conMiembro, conUsername] = await Promise.all([
       get(`/slots?${qs}`, "2024-09-04"),
