@@ -41,22 +41,28 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
     assert.match(LOOP, /mx: \{ nombre: "Yahel Segura", email: "ysegura@geovictoria\.com", whatsapp: "\+52 55 3763 6604"/)
   })
 
-  test("el toque 1 con precio sale a los 10 minutos y el formal a los 35", () => {
-    // Rodrigo 10-ago: "la Vicky debería haberle dado seguimiento después de
-    // 10 minutos sin actividad" — reemplaza las 2 horas del 27-jul.
+  test("el toque 1 sale SIEMPRE a los 10 minutos, en cualquier etapa", () => {
+    // Cadencia Rodrigo 10-ago: 10 min / +60 min / +22 h, independiente de la
+    // etapa (reemplaza el 35' de la formal y las 2 horas del 27-jul).
     assert.match(LOOP, /touch === 1 && \(stage === "con_precio" \|\| stage === "formal"\)/)
-    assert.match(LOOP, /10 \* 60e3/)
-    assert.match(LOOP, /pospuesto_precio_10m/)
+    assert.match(LOOP, /const espera = 10 \* 60e3/)
+    assert.match(LOOP, /pospuesto_10m/)
   })
 
-  test("a los 10 minutos NO se presenta a nadie: eso lo hace el traspaso de los 15", () => {
-    // Si el toque de los 10' presentara un ejecutivo, el traspaso de los 15'
-    // presentaría OTRO (tómbola) — dos nombres en 5 minutos (bug Alan/vaitiare).
-    assert.match(LOOP, /const esPresentacion = touch === 1 && stage === "formal"/)
+  test("el loop NO presenta a nadie: los nombres los pone el traspaso de los 15", () => {
+    // Si un toque presentara un ejecutivo, el traspaso presentaría OTRO
+    // (tómbola) — dos nombres en minutos (bug Alan/vaitiare).
+    assert.match(LOOP, /const esPresentacion = false/)
   })
 
-  test("y su texto ES la presentación, no el nudge genérico", () => {
-    assert.match(LOOP, /\? textoPresentacion\(paisKey, duenoReal\)\s*\n\s*: TEXTOS\[stage\]\[paisKey\]/)
+  test("los toques 2 y 3 son WhatsApp con textos propios (las llamadas Dapta murieron)", () => {
+    assert.match(LOOP, /TEXTOS_T2\[stage\]\[paisKey\]/)
+    assert.match(LOOP, /TEXTOS_T3\[stage\]\[paisKey\]/)
+    assert.doesNotMatch(LOOP, /Toque de llamada del loop/)
+  })
+
+  test("la maquinaria de presentación queda dormida pero íntegra (por si vuelve)", () => {
+    assert.match(LOOP, /\? textoPresentacion\(paisKey, duenoReal\)/)
     assert.match(LOOP, /Te presento a \$\{e\.nombre\}, quien te ayudará con el resto del proceso/)
     assert.match(LOOP, /Tu cotización sigue vigente/)
   })

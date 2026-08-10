@@ -26,9 +26,13 @@
  *   );
  *   create index if not exists vic_loop_due_idx on vic_loop (estado, next_touch_at);
  *
- * Cadencia de toques (offsets desde T0; 5-7 se miden desde el toque 4):
- *   1: +1h  WhatsApp   ·  2: +3h  llamada  ·  3: +48h llamada  ·  4: +72h WhatsApp
- *   5: toque4 + 3 días hábiles (WhatsApp) · 6: toque4 + 5 dh · 7: toque4 + 7 dh
+ * Cadencia de toques (offsets desde T0; 5-7 se miden desde el toque 4).
+ * NUEVA del 10-ago (Rodrigo): "el primer toque deben ser siempre 10 minutos,
+ * independiente de la etapa. El segundo, 60 minutos después. El tercero,
+ * 22 horas después." Los toques 2-3 dejaron de ser llamadas (Dapta muerto,
+ * decisión 08-ago) y son WhatsApp con textos propios:
+ *   1: +10 min · 2: +70 min · 3: +23h10m · 4: +72h (todos WhatsApp)
+ *   5: toque4 + 3 días hábiles · 6: toque4 + 5 dh · 7: toque4 + 7 dh
  * Todos corridos a horario hábil L-V 9:00-19:00 en la zona del país (CL:
  * America/Santiago, CO: America/Bogota — misma regla que vic-callback-cron),
  * con jitter determinista 0-45 min por contacto para no disparar todo a las
@@ -202,13 +206,13 @@ export function calcularProximoToque(
   let objetivo: Date
   switch (touchIdx) {
     case 1:
-      objetivo = new Date(base.getTime() + 1 * h)
+      objetivo = new Date(base.getTime() + 10 * 60_000)
       break
     case 2:
-      objetivo = new Date(base.getTime() + 3 * h)
+      objetivo = new Date(base.getTime() + 70 * 60_000) // 10' + 60'
       break
     case 3:
-      objetivo = new Date(base.getTime() + 48 * h)
+      objetivo = new Date(base.getTime() + 70 * 60_000 + 22 * h) // toque 2 + 22h
       break
     case 4:
       objetivo = base4
@@ -441,7 +445,7 @@ export async function adelantarPrimerToqueFormal(contact: string, country?: stri
   const d = contact.replace(/\D/g, "")
   const pais =
     country || (d.startsWith("57") ? "co" : d.startsWith("52") ? "mx" : d.startsWith("51") ? "pe" : "cl")
-  const objetivo = ajustarAHabil(new Date(Date.now() + 35 * 60_000), tzDePais(pais), contact)
+  const objetivo = ajustarAHabil(new Date(Date.now() + 10 * 60_000), tzDePais(pais), contact)
   await supa(
     `vic_loop?contact=eq.${encodeURIComponent(contact)}&estado=eq.activo&next_touch=eq.1`,
     {

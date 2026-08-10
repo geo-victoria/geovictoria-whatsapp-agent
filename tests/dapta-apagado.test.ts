@@ -58,11 +58,13 @@ describe("los tres puntos donde nacía o se disparaba una llamada", () => {
     )
   })
 
-  test("el loop salta el toque de llamada y AVANZA la cadencia", () => {
-    // Sin marcar ejecutado, el loop se quedaría trabado reintentando el mismo
-    // toque en cada tick y el cliente no recibiría nunca el siguiente WhatsApp.
-    assert.match(LOOP, /touch === 2 \|\| touch === 3\) && !llamadasDaptaHabilitadas\(\)/)
-    assert.match(LOOP, /skip: "dapta apagado"/)
+  test("el loop ya no tiene toques de llamada: los 2-3 son WhatsApp (10-ago)", () => {
+    // Con la cadencia 10'/+60'/+22h de Rodrigo, los toques 2-3 dejaron de ser
+    // llamadas (Dapta muerto, decisión 08-ago) y envían WhatsApp con textos
+    // propios — el loop no agenda ni salta llamadas porque ya no existen.
+    assert.match(LOOP, /TEXTOS_T2\[stage\]\[paisKey\]/)
+    assert.match(LOOP, /TEXTOS_T3\[stage\]\[paisKey\]/)
+    assert.doesNotMatch(LOOP, /vic_scheduled_calls/)
   })
 })
 

@@ -276,6 +276,44 @@ function textoPresentacion(
 // Texto libre por stage y país (ventana de 24h abierta). Cortos, sin inventar
 // precios ni links: solo empujan el siguiente paso del embudo. CL en tono
 // chileno cálido; CO en tuteo colombiano ("de una", "te cuento").
+// Textos de los toques 2 (+60 min) y 3 (+22 h) — cadencia Rodrigo 10-ago.
+// Distintos del toque 1 a propósito: tres toques en 24 horas con el MISMO
+// texto se leen como robot (regla anti-repetición del 09-ago).
+const TEXTOS_T2: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+  sin_precio: {
+    cl: "¿Retomamos tu cotización? Me faltaba solo un dato para dejarte el valor — me lo confirmas y te lo mando enseguida 😊",
+    co: "Retomamos tu cotización? Me faltaba solo un dato para dejarte el valor — me lo confirmas y te lo mando de una 😊",
+    mx: "¿Retomamos tu cotización? Me faltaba solo un dato para dejarte el valor — me lo confirmas y te lo mando enseguida 😊",
+  },
+  con_precio: {
+    cl: "¿Qué te pareció el valor que te pasé? Si te acomoda, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
+    co: "Qué te pareció el valor que te pasé? Si te sirve, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
+    mx: "¿Qué te pareció el valor que te pasé? Si te acomoda, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
+  },
+  formal: {
+    cl: "¿Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
+    co: "Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
+    mx: "¿Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
+  },
+}
+const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+  sin_precio: {
+    cl: "Ayer quedamos a mitad de camino con tu cotización — ¿la retomamos? Con un par de datos te dejo el valor de inmediato 😊",
+    co: "Ayer quedamos a mitad de camino con tu cotización — la retomamos? Con un par de datos te dejo el valor de una 😊",
+    mx: "Ayer quedamos a mitad de camino con tu cotización — ¿la retomamos? Con un par de datos te dejo el valor de inmediato 😊",
+  },
+  con_precio: {
+    cl: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. ¿Avanzamos con la cotización formal o prefieres ajustar algo primero?",
+    co: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. Avanzamos con la cotización formal o prefieres ajustar algo primero?",
+    mx: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. ¿Avanzamos con la cotización formal o prefieres ajustar algo primero?",
+  },
+  formal: {
+    cl: "Tu cotización sigue vigente 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
+    co: "Tu cotización sigue vigente 😊 Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
+    mx: "Tu cotización sigue vigente 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
+  },
+}
+
 const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
   sin_precio: {
     cl:
@@ -734,54 +772,26 @@ export async function GET(req: Request): Promise<Response> {
 
     let ejecutado = false
 
-    // Primer toque por etapa: FORMAL a los 35 min (punto 4 de Lalo 08-ago —
-    // la mediana histórica emisión→pago es 36 min y el "¿te ayudo con el
-    // pago?" debe caer dentro de la ventana real de compra); CON PRECIO
-    // referencial a los 10 MINUTOS de inactividad (Rodrigo 10-ago: "la Vicky
-    // debería haberle dado seguimiento después de 10 minutos sin actividad" —
-    // reemplaza las 2 horas del 27-jul: el cliente que acaba de ver precio
-    // está caliente AHORA).
+    // Primer toque SIEMPRE a los 10 minutos, independiente de la etapa
+    // (Rodrigo 10-ago — reemplaza el 35' de la formal y las 2h antiguas):
+    // el cliente que acaba de conversar está caliente AHORA.
     if (touch === 1 && (stage === "con_precio" || stage === "formal")) {
-      const espera = stage === "formal" ? 35 * 60e3 : 10 * 60e3
+      const espera = 10 * 60e3
       const objetivo = new Date(new Date(t0).getTime() + espera)
       if (now < objetivo.getTime()) {
         const habil = ajustarAHabil(objetivo, tzDePais(country), r.contact)
         await patchLoop(r.contact, { next_touch_at: habil.toISOString() })
         pospuestos++
-        detalle.push({ contact: r.contact, accion: stage === "formal" ? "pospuesto_formal_35m" : "pospuesto_precio_10m", hasta: habil.toISOString() })
+        detalle.push({ contact: r.contact, accion: "pospuesto_10m", hasta: habil.toISOString() })
         continue
       }
     }
 
-    if ((touch === 2 || touch === 3) && !llamadasDaptaHabilitadas()) {
-      // Llamadas Dapta apagadas (27-jul): el toque NO se agenda, pero SÍ se
-      // marca ejecutado para que la cadencia avance al siguiente toque de
-      // WhatsApp en vez de quedarse trabada reintentando una llamada que no
-      // va a ocurrir.
-      ejecutado = true
-      detalle.push({ contact: r.contact, accion: "llamada", touch, skip: "dapta apagado" })
-    } else if (touch === 2 || touch === 3) {
-      // Llamada: se agenda en vic_scheduled_calls y la dispara el
-      // vic-callback-cron existente (con todos sus candados: no-llamar,
-      // horario del país, flujo por línea). NUNCA Dapta directo desde acá.
-      const ins = await supa(`vic_scheduled_calls`, {
-        method: "POST",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({
-          contact: r.contact,
-          due_at: new Date().toISOString(),
-          payload: { tipo: "loop_v2", motivo: "Toque de llamada del loop", touch },
-          status: "pending",
-        }),
-      }).catch(() => null)
-      if (ins && ins.ok) {
-        llamadas++
-        ejecutado = true
-        detalle.push({ contact: r.contact, accion: "llamada", touch })
-      } else {
-        detalle.push({ contact: r.contact, accion: "llamada", touch, ok: false })
-      }
-    } else {
+    // Toques 2-3: eran LLAMADAS (Dapta, muerto por decisión del 08-ago y sin
+    // volver). Desde el 10-ago son WhatsApp con textos propios — la cadencia
+    // nueva de Rodrigo (10' / +60' / +22h) necesita que el cliente RECIBA
+    // algo en cada toque, no un hueco mudo.
+    {
       // WhatsApp: la ventana de 24h de Meta decide texto libre vs plantilla.
       const ventanaAbierta = lastUserMs > 0 && now - lastUserMs < 24 * 3600e3
       // Toque 1 con precio = presentación de la ejecutiva (Rodrigo 27-jul).
@@ -789,14 +799,12 @@ export async function GET(req: Request): Promise<Response> {
       // 2h de una cotización la ventana está prácticamente siempre abierta.
       // En CL se presenta al DUEÑO REAL del deal/cotización si existe
       // (tómbola 31-jul); CO/MX conservan su símil fijo (reglas antiguas).
-      // Presentación SOLO en la formal (ajuste 10-ago): el toque con_precio
-      // ahora sale a los 10 minutos — ANTES del traspaso de los 15' que
-      // presenta al vendedor de la tómbola. Si este toque presentara a
-      // alguien, el prospecto recibiría DOS nombres en 5 minutos (el bug
-      // Alan/vaitiare). A los 10' va el empujón genérico; los nombres los
-      // pone el traspaso (o el toque formal de los 35', que resuelve al
-      // dueño real ya asignado).
-      const esPresentacion = touch === 1 && stage === "formal"
+      // Presentación del loop APAGADA (10-ago): con el primer toque a los 10
+      // minutos en TODAS las etapas, cualquier presentación aquí chocaría con
+      // la del traspaso de los 15' (dos nombres en 5 minutos — bug
+      // Alan/vaitiare). Los nombres los pone SOLO el traspaso. La maquinaria
+      // (textoPresentacion/dueño real) queda dormida por si vuelve.
+      const esPresentacion = false as boolean
       const duenoReal =
         esPresentacion && paisKey === "cl"
           ? (await duenoDealVigente(r.contact).catch(() => null)) ||
@@ -804,7 +812,11 @@ export async function GET(req: Request): Promise<Response> {
           : null
       const texto = esPresentacion
         ? textoPresentacion(paisKey, duenoReal)
-        : TEXTOS[stage][paisKey]
+        : touch === 2
+          ? TEXTOS_T2[stage][paisKey]
+          : touch === 3
+            ? TEXTOS_T3[stage][paisKey]
+            : TEXTOS[stage][paisKey]
       if (ventanaAbierta) {
         const ok = await sendBotmakerMessage(r.contact, texto, canal).catch(() => false)
         if (ok) {
