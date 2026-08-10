@@ -29,6 +29,11 @@ const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: number }> = [
   { nombre: "espejo_notas", path: "/api/vic-espejo-notas-cron", cadaMin: 15 },
   { nombre: "mudos", path: "/api/vic-mudos-cron", cadaMin: 30 },
+  // 10-ago PM: el latido acusó a estos dos MUDOS desde el sábado — el
+  // scheduler externo perdió (¿o nunca tuvo?) sus entradas. El followup era
+  // POST-only y ganó un GET con Bearer CRON_SECRET justamente para esto.
+  { nombre: "followup", path: "/api/vic-followup-cron", cadaMin: 10 },
+  { nombre: "outbound", path: "/api/vic-outbound-cadence-cron", cadaMin: 15 },
 ]
 
 /**
