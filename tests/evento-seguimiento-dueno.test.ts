@@ -58,11 +58,23 @@ describe("el agent-loop inyecta el evento del dueño", () => {
     assert.match(LOOP, /\.eventTypeId = eventoDelDueno/)
   })
 
-  test("el dueño del DEAL no redirige la agenda: entra como ASISTENTE (Lalo 31-jul)", () => {
-    // Decisión final del 31-jul: la reunión queda con el round-robin SDR
-    // inbound; solo la cotización FORMAL redirige agenda (reglas 21/27-jul).
+  test("manda el dueño del DEAL; la formal queda de respaldo (Lalo 10-ago)", () => {
+    // Regla nueva (10-ago, supersede la del 31-jul): "si se traspasa una
+    // conversación a un ejecutivo, la reunión se queda a nombre de él" — el
+    // dueño que sorteó la tómbola dirige la agenda. La cotización formal
+    // sigue como respaldo cuando el deal no tiene dueño con evento.
+    assert.match(LOOP, /const duenoDeal: DuenoReunion \| null = await duenoDealVigente\(contact\)/)
+    assert.match(LOOP, /const eventoDeal = duenoDeal \? eventoSeguimientoDe\(duenoDeal\.email\) : undefined/)
+    assert.match(LOOP, /if \(eventoDeal\) \{\s*\n\s*;\(toolInput as Record<string, unknown>\)\.eventTypeId = eventoDeal/)
+    // Respaldo intacto: sin evento del dueño del deal, se mira la formal.
     assert.match(LOOP, /const formalReunion = await getFormalQuote\(contact\)\.catch/)
-    assert.doesNotMatch(LOOP, /duenoDealVigente/)
+  })
+
+  test("un ejecutivo SIN evento de host único nunca rompe la reunión", () => {
+    // Cal no permite dirigir un evento multi-host a una persona (400 en
+    // teamMemberEmail/username, re-verificado 10-ago): sin evento propio se
+    // cae al camino de siempre, jamás a un error para el cliente.
+    assert.match(LOOP, /Sin\s*\n?\s*\/\/ ese evento configurado, el comportamiento es el de siempre/)
   })
 
   test("el aviso determinista queda SOLO para dueños sin evento", () => {
