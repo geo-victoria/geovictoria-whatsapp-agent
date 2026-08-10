@@ -629,17 +629,35 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
 } | null> {
   try {
     const token = await getZohoAccessToken()
-    const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
-      method: "POST",
-      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage, Deal_Asociado.id from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} limit 200`,
-      }),
-      cache: "no-store",
-    })
-    if (!res.ok) return null
-    const data = (await res.json().catch(() => null)) as { data?: RawAceptada[] } | null
-    const universo = (data?.data || []).filter((q) => {
+    // PAGINADO y ORDENADO (bug cazado 10-ago, pago de Fernando/Empresa
+    // Natural "no aparece en el dash"): el `limit 200` original, SIN order
+    // by, dejaba que Zoho devolviera las 200 filas MÁS VIEJAS de un universo
+    // que ya pasa de 400 — el dash quedó ciego a todo lo emitido después de
+    // ~COT426 y el hoyo crecía con cada emisión. Ahora: Created_Time desc
+    // (lo nuevo primero) y páginas de 200 hasta agotar (tope 3000 — si algún
+    // día se supera, lo que se trunca es la prehistoria, no el presente).
+    const filas: RawAceptada[] = []
+    for (let offset = 0; offset < 3000; offset += 200) {
+      const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage, Deal_Asociado.id from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} order by Created_Time desc limit ${offset}, 200`,
+        }),
+        cache: "no-store",
+      })
+      if (!res.ok) {
+        if (offset === 0) return null
+        break // páginas posteriores fallan → se sirve lo acumulado
+      }
+      const pagina = (await res.json().catch(() => null)) as {
+        data?: RawAceptada[]
+        info?: { more_records?: boolean }
+      } | null
+      filas.push(...(pagina?.data || []))
+      if (!pagina?.info?.more_records) break
+    }
+    const universo = filas.filter((q) => {
       // País de la cotización: el de su conversación de origen; si no está
       // ligada, por prefijo del teléfono (histórico: Chile por defecto).
       const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
