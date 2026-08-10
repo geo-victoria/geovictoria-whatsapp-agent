@@ -97,6 +97,40 @@ export async function GET(req: Request): Promise<Response> {
     })
   }
 
+  // ── Detalle de un event type: QUIÉNES son sus hosts (Lalo 10-ago, para
+  // sacar a las SDR Inbound del round-robin de agendamiento) ──
+  const detalle = (sp.get("detalle") || "").trim()
+  if (detalle) {
+    const [v2, v1] = await Promise.all([
+      get(`/event-types/${encodeURIComponent(detalle)}`, "2024-06-14"),
+      get(`/event-types/${encodeURIComponent(detalle)}`),
+    ])
+    const resumir = (b: unknown) => {
+      try {
+        const e = ((b as { data?: Record<string, unknown> })?.data || {}) as Record<string, unknown>
+        return {
+          id: e.id,
+          slug: e.slug,
+          title: e.title,
+          schedulingType: e.schedulingType,
+          assignAllTeamMembers: e.assignAllTeamMembers,
+          hosts: e.hosts,
+          users: Array.isArray(e.users)
+            ? (e.users as Array<Record<string, unknown>>).map((u) => ({ id: u.id, email: u.email, username: u.username, name: u.name }))
+            : undefined,
+        }
+      } catch {
+        return b
+      }
+    }
+    return NextResponse.json({
+      ok: true,
+      detalle,
+      v2024_06_14: { status: v2.status, evento: resumir(v2.body) },
+      sin_version: { status: v1.status, evento: resumir(v1.body) },
+    })
+  }
+
   // ── ¿Quién tiene CALENDARIO CONECTADO? (pregunta de Lalo 10-ago) ──
   // Sin calendario conectado, Cal cree que la persona está 100% libre y
   // Vicky ofrece horas ya ocupadas. Se consultan las vías conocidas de la
