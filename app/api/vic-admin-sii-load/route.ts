@@ -44,25 +44,40 @@ export async function POST(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => null)) as { tabla?: string; filas?: string[][] } | null
   const tabla = body?.tabla
   const filas = Array.isArray(body?.filas) ? body!.filas! : []
-  if ((tabla !== "dom" && tabla !== "giro") || !filas.length || filas.length > MAX_FILAS) {
-    return NextResponse.json({ ok: false, error: "tabla dom|giro y 1..8000 filas" }, { status: 400 })
+  if ((tabla !== "dom" && tabla !== "giro" && tabla !== "base") || !filas.length || filas.length > MAX_FILAS) {
+    return NextResponse.json({ ok: false, error: "tabla dom|giro|base y 1..8000 filas" }, { status: 400 })
   }
-  const destino = tabla === "dom" ? "vic_empresas_cl_domicilio" : "vic_empresas_cl_giro"
+  const destino =
+    tabla === "dom"
+      ? "vic_empresas_cl_domicilio"
+      : tabla === "giro"
+        ? "vic_empresas_cl_giro"
+        : "vic_empresas_cl"
+  const conRut = filas.filter((f) => /^\d{6,9}$/.test(String(f[0] || "")))
   const payload =
     tabla === "dom"
-      ? filas
-          .filter((f) => /^\d{6,9}$/.test(String(f[0] || "")))
-          .map((f) => ({ rut: Number(f[0]), direccion: f[1] || null, comuna: f[2] || null, region: f[3] || null, ciudad: f[4] || null }))
-      : filas
-          .filter((f) => /^\d{6,9}$/.test(String(f[0] || "")))
-          .map((f) => ({ rut: Number(f[0]), codigo: f[1] || null, giro: f[2] || null, n_actividades: Number(f[3] || 1) }))
+      ? conRut.map((f) => ({ rut: Number(f[0]), direccion: f[1] || null, comuna: f[2] || null, region: f[3] || null, ciudad: f[4] || null }))
+      : tabla === "giro"
+        ? conRut.map((f) => ({ rut: Number(f[0]), codigo: f[1] || null, giro: f[2] || null, n_actividades: Number(f[3] || 1) }))
+        : // base = vic_empresas_cl (re-carga UTF-8 limpia de la razón social;
+          // la carga original venía con mojibake latin-1: "COMPAÃIA")
+          conRut.map((f) => ({
+            rut: Number(f[0]),
+            dv: f[1] || null,
+            razon_social: f[2] || null,
+            subtipo: f[3] ? Number(f[3]) : null,
+            inicio_giro: f[4] || null,
+            termino_giro: f[5] || null,
+          }))
+  // merge-duplicates: el conflicto por rut ACTUALIZA la fila — así la
+  // re-carga corrige en el lugar (la pasada con mojibake queda pisada).
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${destino}?on_conflict=rut`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_KEY,
       Authorization: `Bearer ${SUPABASE_KEY}`,
       "Content-Type": "application/json",
-      Prefer: "resolution=ignore-duplicates,return=minimal",
+      Prefer: "resolution=merge-duplicates,return=minimal",
     },
     body: JSON.stringify(payload),
     cache: "no-store",
