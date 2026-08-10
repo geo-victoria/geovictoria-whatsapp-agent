@@ -210,8 +210,9 @@ export async function marcarCotizacionPagada(quoteId: string): Promise<boolean> 
 
 /** Dispara en el cotizador la notificación interna de "Cotización PAGADA"
  * (correo al equipo + WhatsApp interno). Única puerta para pagos SIN
- * MercadoPago. Nunca lanza. */
-async function notificarPagadaAlCotizador(quoteId: string): Promise<void> {
+ * MercadoPago. Nunca lanza. Exportada para el reenvío manual
+ * (vic-admin-notify-paid). */
+export async function notificarPagadaAlCotizador(quoteId: string): Promise<void> {
   try {
     const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
     const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
