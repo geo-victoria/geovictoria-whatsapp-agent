@@ -829,6 +829,32 @@ export async function runAgentLoop(params: {
               const { adelantarPrimerToqueFormal } = await import("./loop-v2")
               await adelantarPrimerToqueFormal(contact)
             })().catch(() => undefined)
+            // ARREPENTIMIENTO POST-ACEPTACIÓN (Rodrigo 10-ago): si el contacto
+            // tenía OTRA cotización y esa quedó Aceptada sin pagar, esta
+            // emisión nueva la reemplaza — la anterior pasa a Rechazada
+            // (perdida) por detrás, sin tocar la conversación. Emitidas en
+            // comparación o pagadas no se tocan (el helper lo verifica).
+            if (qid) {
+              const rutNuevo =
+                typeof toolInput.rutEmpresa === "string"
+                  ? toolInput.rutEmpresa.replace(/[^0-9kK]/g, "").toLowerCase()
+                  : ""
+              void (async () => {
+                const anteriores = await getQuotePointers(contact).catch(() => [])
+                // Multi-RUT: solo se supera la cotización de la MISMA empresa
+                // (o sin RUT etiquetado) — la aceptada de otra razón social
+                // del mismo contacto no se toca.
+                const superada = anteriores.find((p) => {
+                  if (!p.quoteId || p.quoteId === qid) return false
+                  const rutPrev = (p.rut || "").replace(/[^0-9kK]/g, "").toLowerCase()
+                  return !rutPrev || !rutNuevo || rutPrev === rutNuevo
+                })
+                if (superada?.quoteId) {
+                  const { rechazarAceptadaSuperada } = await import("./zoho-quote-status")
+                  await rechazarAceptadaSuperada(superada.quoteId)
+                }
+              })().catch(() => undefined)
+            }
             // Item B: puntero durable para retomar esta cotización más adelante
             // (anti-amnesia). Sobrevive al borrado de historial y al TTL de 24h.
             if (qid) {

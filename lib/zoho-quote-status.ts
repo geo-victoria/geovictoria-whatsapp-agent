@@ -71,6 +71,37 @@ export async function cotizacionAbiertaParaSeguimiento(quoteId: string): Promise
   }
 }
 
+/**
+ * ARREPENTIMIENTO POST-ACEPTACIÓN (Rodrigo 10-ago): el cliente aceptó, se
+ * arrepintió y pidió cambios. La aceptada no se reabre (blueprint/NDV ya
+ * corrieron), así que la emisión NUEVA la reemplaza y la anterior queda
+ * Rechazada (el dashboard la muestra como perdida) — SOLO si estaba Aceptada
+ * y SIN pago (ID_SO vacío). Una Emitida en comparación o una pagada jamás se
+ * tocan. Best-effort: nunca rompe el flujo del turno.
+ */
+export async function rechazarAceptadaSuperada(quoteId: string): Promise<boolean> {
+  if (!quoteId) return false
+  try {
+    const token = await getZohoAccessToken()
+    const res = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Estado_Cotizacion,ID_SO`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+    )
+    if (!res.ok) return false
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ Estado_Cotizacion?: string; ID_SO?: unknown }>
+    }
+    const rec = data?.data?.[0]
+    const estado = String(rec?.Estado_Cotizacion || "").toLowerCase()
+    if (estado !== "aceptada" || rec?.ID_SO) return false
+    const ok = await marcarCotizacionRechazada(quoteId)
+    if (ok) console.log(`[zoho-quote] aceptada superada → Rechazada quoteId=${quoteId}`)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 export async function marcarCotizacionRechazada(quoteId: string): Promise<boolean> {
   if (!quoteId) return false
   try {

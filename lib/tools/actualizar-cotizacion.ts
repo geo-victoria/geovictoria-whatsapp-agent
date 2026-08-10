@@ -30,7 +30,7 @@ const IVA_RATE = 0.19
 export const actualizarCotizacionSchema = {
   name: "actualizar_cotizacion",
   description:
-    "Actualiza una cotización FORMAL ya emitida cuando el cliente pide un cambio de configuración (cantidad de trabajadores, agregar/quitar relojes, módulos o puntos de instalación). Pasa la CONFIGURACIÓN COMPLETA nueva (no solo el cambio): userCount, modulos, hardware y puntosInstalacion finales. El link de aceptación NO cambia (dile al cliente que en el mismo link ya está actualizada) y el PDF nuevo se reenvía solo a su correo. ANTES de llamarla, repite el cambio al cliente y espera su confirmación. NO la uses para descuentos (usa la escalera de descuento), ni para cotizaciones ya Aceptadas/pagadas (deriva a ejecutivo), ni para crear cotizaciones nuevas (usa generar_link_cotizadora). Copia su campo mensajeParaProspecto TAL CUAL.",
+    "Actualiza una cotización FORMAL ya emitida cuando el cliente pide un cambio de configuración (cantidad de trabajadores, agregar/quitar relojes, módulos o puntos de instalación). Pasa la CONFIGURACIÓN COMPLETA nueva (no solo el cambio): userCount, modulos, hardware y puntosInstalacion finales. El link de aceptación NO cambia (dile al cliente que en el mismo link ya está actualizada) y el PDF nuevo se reenvía solo a su correo. ANTES de llamarla, repite el cambio al cliente y espera su confirmación. NO la uses para descuentos (usa la escalera de descuento) ni para crear cotizaciones nuevas (usa generar_link_cotizadora). Si la cotización ya está ACEPTADA y el cliente quiere cambios, NO derives a ejecutivo: genera una cotización NUEVA con generar_link_cotizadora reutilizando los datos que ya tienes (el sistema deja la aceptada anterior como perdida por detrás). Copia su campo mensajeParaProspecto TAL CUAL.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -238,7 +238,7 @@ export async function actualizarCotizacion(
           ok: false,
           cotizacionCerrada: true,
           error:
-            "La cotización ya está aceptada/cerrada: no se puede modificar. Explícale al cliente que los ajustes post-aceptación los coordina su ejecutivo y ofrece contactarlo.",
+            "La cotización ya está aceptada y no se puede reabrir. NO derives a ejecutivo: genera AHORA una cotización NUEVA con generar_link_cotizadora usando la configuración nueva y los datos que YA tienes (empresa, RUT, email — no los re-preguntes; pregunta solo lo que falte). El sistema dejará la aceptada anterior como perdida automáticamente.",
         }
       }
       return { ok: false, error: err }
