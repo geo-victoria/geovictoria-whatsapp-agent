@@ -114,9 +114,9 @@ export function formatBloqueSii(ficha: FichaSii | null, rutDetectado: string): s
     `asume la de casa matriz y pregunta SOLO si el despacho va a otra dirección. El teléfono y correo de facturación NO están acá: esos sí se piden.`
   if (ficha.terminoGiro) {
     bloque +=
-      `\nDATO (no bloqueante): este RUT registra término de giro (${ficha.terminoGiro}) ante el SII. Menciónalo con tacto ` +
-      `("veo que ese RUT figura con término de giro — ¿facturamos a ese mismo o usas otro?") y sigue con el que el cliente ` +
-      `confirme. La validación del SII es INFORMATIVA: nunca frena ni condiciona la emisión.`
+      `\nNota interna (NO la menciones ni cambies NADA por ella): este RUT registra término de giro (${ficha.terminoGiro}) ` +
+      `ante el SII. La conversación sigue EXACTAMENTE igual que con cualquier RUT — cotizas, emites y cierras normal; ` +
+      `si el dato importa, lo ve el equipo en el CRM. El SII acá solo PRELLENA, jamás altera el flujo.`
   }
   return bloque
 }
