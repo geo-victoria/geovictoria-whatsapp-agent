@@ -17,7 +17,7 @@
 
 import Anthropic from "@anthropic-ai/sdk"
 
-import { getQuotePointers, setQuotePointer, type QuotePointer } from "@/lib/supabase-persistence-v3"
+import { getKvValue, getQuotePointers, setQuotePointer, type QuotePointer } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import {
   actualizarCotizacion,
@@ -25,7 +25,7 @@ import {
   type ActualizarCotizacionInput,
 } from "@/lib/tools/actualizar-cotizacion"
 import { enviarCotizacionWhatsapp } from "@/lib/tools/enviar-cotizacion-whatsapp"
-import { aplicarSiguienteDescuento } from "@/lib/tools/aplicar-siguiente-descuento"
+import { definirDescuentoEjecutivo } from "@/lib/tools/definir-descuento-ejecutivo"
 import { generarLinkCotizadora } from "@/lib/tools/generar-link-cotizadora"
 import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import {
@@ -60,6 +60,8 @@ export type EstadoCotizacion = {
   numero: string
   estadoZoho: string
   descuentoPct: number
+  /** Vigencia del descuento del plan: null = política por defecto (6 meses), 0 = indefinido. */
+  descuentoMeses: number | null
   items: ItemCotizacion[]
 }
 
@@ -83,6 +85,11 @@ export async function estadoCotizacion(contact: string, quoteId?: string): Promi
   let estadoZoho = ""
   let descuentoPct = 0
   let items: ItemCotizacion[] = []
+  // Vigencia del descuento de ESTA cotización (Lalo 10-ago). Vive en vic_kv
+  // porque el cotizador no tiene credenciales de este Supabase; acá se lee
+  // directo. null = política por defecto.
+  const mesesCrudo = await getKvValue(`descuento_meses_${puntero.quoteId}`).catch(() => "")
+  const descuentoMeses = mesesCrudo === "" || mesesCrudo === null ? null : Number(mesesCrudo)
   try {
     const token = await getZohoAccessToken()
     const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${puntero.quoteId}`, {
@@ -139,7 +146,14 @@ export async function estadoCotizacion(contact: string, quoteId?: string): Promi
   } catch {
     // best-effort: el puntero solo ya sirve para conversar
   }
-  return { puntero, numero, estadoZoho, descuentoPct, items }
+  return {
+    puntero,
+    numero,
+    estadoZoho,
+    descuentoPct,
+    descuentoMeses: Number.isFinite(descuentoMeses as number) ? (descuentoMeses as number) : null,
+    items,
+  }
 }
 
 /**
@@ -703,7 +717,15 @@ function resumenEstadoParaModelo(e: EstadoCotizacion): string {
     : "(detalle de ítems no disponible — usa ver_cotizacion o pregunta al vendedor)"
   return [
     `Cotización ${e.numero || e.puntero.quoteId} de ${e.puntero.empresa || "empresa sin nombre"}${e.puntero.rut ? ` (RUT ${e.puntero.rut})` : ""} — quote_id interno Zoho: ${e.puntero.quoteId} (las tools operan siempre sobre esta cotización)`,
-    `Estado en Zoho: ${e.estadoZoho || "desconocido"}${e.descuentoPct ? ` · descuento recurrente comiteado: ${e.descuentoPct}%` : ""}`,
+    `Estado en Zoho: ${e.estadoZoho || "desconocido"}${
+      e.descuentoPct
+        ? ` · descuento recurrente comiteado: ${e.descuentoPct}% · vigencia: ${
+            e.descuentoMeses === 0
+              ? "INDEFINIDA (sin vencimiento)"
+              : `${e.descuentoMeses ?? 6} meses${e.descuentoMeses === null ? " (por defecto)" : ""}`
+          }`
+        : ""
+    }`,
     `Total con IVA: ${e.puntero.totalUf ? `UF ${e.puntero.totalUf}` : ""}${e.puntero.totalClp ? ` (~$${Math.round(e.puntero.totalClp).toLocaleString("es-CL")})` : ""}`,
     `Ítems actuales:`,
     items,
@@ -790,16 +812,23 @@ const actualizarSchemaEditor = {
 const aplicarDescuentoSchema = {
   name: "aplicar_descuento",
   description:
-    "Aplica o avanza el DESCUENTO de la cotización con la escalera oficial de la cotizadora: escalones de 10% y 20% sobre el plan mensual, TOPE 20% (la instalación y el envío no tienen descuento). Pasa pct_objetivo = el % que pidió el vendedor: el servidor comitea el escalón que garantiza AL MENOS ese nivel, acotado al tope. El PDF se regenera (misma numeración, versión nueva) y el link de aceptación sigue vigente. El resultado trae el % REAL comiteado (ultimoEscalon.pct): informa SIEMPRE ese número al vendedor, y si difiere de lo pedido (ej. pidió 15% y quedó 20%, o pidió 30% y el tope es 20%) díselo sin vueltas. No sirve para REBAJAR un descuento ya comiteado (la escalera solo sube).",
+    "Fija el DESCUENTO de la cotización EXACTAMENTE como lo pide el vendedor: el porcentaje que él diga sobre el plan mensual (se puede SUBIR, BAJAR o dejar en 0 para quitarlo) y la VIGENCIA en meses que él defina (1, 3, 6, los que quiera, o indefinido). Acá no hay escalera de escalones: lo que pide el vendedor es lo que se aplica, acotado solo por el tope interno (40%). Pasa pct y/o meses — lo que no pases, no se toca. El descuento y su vigencia sobreviven a ediciones de configuración posteriores. Informa SIEMPRE al vendedor el % y la vigencia que quedaron.",
   input_schema: {
     type: "object" as const,
     properties: {
-      pct_objetivo: {
+      pct: {
         type: "number" as const,
         description:
-          "Porcentaje de descuento sobre el plan mensual que pidió el vendedor (ej. 20). Omítelo para avanzar simplemente al siguiente escalón.",
+          "Porcentaje EXACTO de descuento sobre el plan mensual que pidió el vendedor (ej. 10). 0 quita el descuento. Omítelo si el vendedor solo quiere cambiar la vigencia.",
         minimum: 0,
         maximum: 40,
+      },
+      meses: {
+        type: "number" as const,
+        description:
+          "Meses de vigencia del descuento sobre el plan mensual: 1..24 los meses que pida el vendedor, o 0 para dejarlo INDEFINIDO (sin vencimiento). Omítelo si el vendedor no habló de plazo — se conserva la vigencia actual (por defecto 6 meses).",
+        minimum: 0,
+        maximum: 24,
       },
     },
   },
@@ -894,12 +923,12 @@ export async function chatVickyCotizaciones(params: {
     `2. Reconstrucción de la configuración: los ítems con código de módulo (asistencia, vacaciones, …) van en "modulos"; los ítems con código de hardware van en "hardware" (respeta su modalidad arriendo/venta y cantidad actuales salvo que el vendedor pida cambiarlas); la dotación (userCount) es la Cantidad del ítem asistencia — si su modalidad es "Fijo" es el plan fijo (1-10): usa la dotación que te diga el vendedor o, si no la menciona y no la puedes deducir, pregúntasela. Los ítems de envío/instalación NO se pasan: se derivan de "puntosInstalacion" (uno por punto físico; si la cotización tiene reloj y no conoces la comuna del punto, pregúntala al vendedor antes de actualizar).`,
     `3. INSTALACIÓN DEL RELOJ — sentido EXACTO, no lo inviertas (error real del 07-ago): "el cliente lo instala él mismo / lo va a instalar el cliente / auto-instalación / sin visita técnica" → autoInstalada: true → NO se cobra instalación (el envío SÍ se cobra igual, el equipo se despacha de todas formas). "lo instala GeoVictoria / que vayan a instalarlo / con instalación" → autoInstalada: false → la instalación se cobra según zona. Después de CUALQUIER cambio de instalación o hardware, llama ver_cotizacion y verifica en los ítems que la línea de instalación quedó o desapareció según corresponde ANTES de responderle al vendedor; si quedó mal, corrige de inmediato con otra actualización.`,
     `4. Después de cada actualización exitosa, resume al vendedor en 2-3 líneas qué quedó (dotación, ítems, total nuevo en UF y pesos aprox) y PREGUNTA SIEMPRE: "¿algo más que modificar?". Las ediciones NO generan versión de PDF — cuando el vendedor confirme que no hay más cambios, llama confirmar_version: ahí se genera LA versión definitiva (una sola por sesión de cambios) y el link queda actualizado en todos lados. El link de aceptación NO cambia nunca. NO envíes al cliente sin haber confirmado la versión primero.`,
-    `4. Descuentos (el vendedor SÍ puede pedirlos): usa aplicar_descuento con pct_objetivo = el % que pidió. La escalera oficial comitea escalones de 10% y 20% sobre el plan mensual, TOPE 20% (instalación y envío no tienen descuento); el servidor aplica el escalón que garantiza al menos lo pedido, acotado al tope. Informa SIEMPRE el % real comiteado y, si difiere de lo pedido, dilo sin vueltas. El descuento comiteado sobrevive a ediciones de configuración posteriores y la escalera no baja descuentos ya comiteados.`,
+    `4. Descuentos — ACÁ MANDA EL VENDEDOR, NO LA ESCALERA (Lalo 10-ago): usa aplicar_descuento con pct = el porcentaje EXACTO que pidió (10 es 10, no 20) y meses = la vigencia que defina. Se puede SUBIR, BAJAR o dejar en 0 para quitarlo; la vigencia puede ser 1, 3, 6 o los meses que él diga, y 0 significa INDEFINIDO (sin vencimiento). Si solo pide el %, no pases meses (se conserva la vigencia actual, por defecto 6 meses); si solo pide cambiar el plazo, pasa meses y omite pct. Único límite: el tope interno de 40%. Confirma siempre al vendedor cómo quedó (% y vigencia). El descuento y su vigencia sobreviven a ediciones de configuración posteriores. La escalera de escalones 10→20 es de cara al CLIENTE (la usa Vicky en el chat), no acá.`,
     `5. Valor de la UF: por defecto los totales en pesos usan la UF del día automáticamente. Si el vendedor pide fijar otro valor ("usa la UF a $39.500"), pásalo en valor_uf de actualizar_cotizacion y menciona en tu resumen qué valor de UF se usó. OJO: una edición posterior sin valor_uf recalcula con la UF del día — si el vendedor quiere mantener el valor fijado, vuelve a pasarlo en cada edición.`,
     `6. Enviar al cliente: SOLO cuando el vendedor dé el OK explícito, usa enviar_cotizacion_al_cliente. Antes de eso, el cliente no se entera de nada. Si el vendedor quiere verificar cómo quedó antes de enviar, indícale el botón "Vista previa del PDF" del panel (abre el PDF con los últimos cambios sin enviarle nada al cliente).`,
     ``,
     `LÍMITES (sé transparente con el vendedor):`,
-    `- Descuentos: solo por la escalera oficial (tope 20% sobre el plan mensual). Un % fuera de escalera o sobre el tope requiere gestión del ejecutivo en Zoho.`,
+    `- Descuentos: cualquier % entre 0 y 40 y cualquier vigencia (incluida indefinida). Sobre 40% sí requiere gestión del ejecutivo directamente en Zoho.`,
     `- Cotizaciones Aceptadas/pagadas: no se pueden editar (la tool lo rechazará); los ajustes post-aceptación los coordina el ejecutivo.`,
     `- Solo cotizaciones de la línea Chile (catálogo en UF). Máximo 50 trabajadores.`,
     `- No inventes precios ni totales: todo número sale de las tools o del contexto.`,
@@ -1010,17 +1039,21 @@ export async function chatVickyCotizaciones(params: {
           })
           if (r.ok) await refrescarPuntero(contact, qid, { acceptanceUrl: r.acceptanceUrl, totalClp: r.totalCLP, totalUf: r.totalUF })
         } else if (tu.name === "aplicar_descuento") {
-          const input = tu.input as { pct_objetivo?: number }
-          const r = await aplicarSiguienteDescuento({
+          // Canal INTERNO (Lalo 10-ago): sin escalera. El % y la vigencia son
+          // los que pide el vendedor — puede bajar el descuento y puede dejar
+          // la vigencia en los meses que quiera o indefinida.
+          const input = tu.input as { pct?: number; meses?: number }
+          const r = await definirDescuentoEjecutivo({
             quote_id: estado.puntero.quoteId,
-            pct_ofrecido: typeof input?.pct_objetivo === "number" && input.pct_objetivo > 0 ? input.pct_objetivo : undefined,
+            pct: typeof input?.pct === "number" ? input.pct : undefined,
+            ...(typeof input?.meses === "number" ? { meses: input.meses } : {}),
           })
           output = r
           if (r.ok) {
             eventos.push({
               tool: tu.name,
               ok: true,
-              resumen: `Descuento comiteado: ${r.ultimoEscalon.pct}% sobre el plan mensual${r.topeAlcanzado ? " (tope alcanzado)" : ""} · PDF v${r.version}`,
+              resumen: `Descuento: ${r.pct}% sobre el plan mensual · ${r.indefinido ? "sin vencimiento" : `${r.meses} ${r.meses === 1 ? "mes" : "meses"}`} · PDF v${r.version}`,
             })
             await refrescarPuntero(contact, estado.puntero.quoteId, { acceptanceUrl: r.acceptanceUrl, pdfUrl: r.linkPdf })
           } else {

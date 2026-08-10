@@ -31,13 +31,50 @@ export async function POST(req: Request): Promise<Response> {
   if (!SECRET || (req.headers.get("x-vicky-secret") || "").trim() !== SECRET) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
-  const body = (await req.json().catch(() => ({}))) as { quoteId?: string; accion?: string; pdfUrl?: string }
+  const body = (await req.json().catch(() => ({}))) as {
+    quoteId?: string
+    accion?: string
+    pdfUrl?: string
+    meses?: number | null
+  }
   const quoteId = (body.quoteId || "").trim()
   const accion = (body.accion || "").trim()
-  if (!quoteId || !["pdf", "marcar", "limpiar"].includes(accion)) {
+  if (!quoteId || !["pdf", "marcar", "limpiar", "meses_get", "meses_set"].includes(accion)) {
     return NextResponse.json({ ok: false, error: "quoteId/accion inválidos" }, { status: 400 })
   }
   try {
+    // VIGENCIA DEL DESCUENTO (Lalo 10-ago): el cotizador no tiene credenciales
+    // de este Supabase, así que su "cuántos meses dura el descuento de esta
+    // cotización" pasa por acá. null = sin marca (política por defecto, 6
+    // meses) · 0 = indefinido · N = N meses.
+    if (accion === "meses_get") {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(`descuento_meses_${quoteId}`)}&select=value&limit=1`,
+        { headers: H, cache: "no-store" },
+      )
+      if (!r.ok) return NextResponse.json({ ok: false, meses: null }, { status: 502 })
+      const filas = (await r.json().catch(() => [])) as Array<{ value?: string }>
+      const crudo = filas[0]?.value
+      const n = crudo === undefined || crudo === null || crudo === "" ? null : Number(crudo)
+      return NextResponse.json({ ok: true, meses: Number.isFinite(n as number) ? n : null })
+    }
+    if (accion === "meses_set") {
+      const key = `descuento_meses_${quoteId}`
+      if (body.meses === null || body.meses === undefined) {
+        await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}`, {
+          method: "DELETE",
+          headers: H,
+        }).catch(() => {})
+        return NextResponse.json({ ok: true, meses: null })
+      }
+      const n = Math.min(120, Math.max(0, Math.trunc(Number(body.meses) || 0)))
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?on_conflict=key`, {
+        method: "POST",
+        headers: { ...H, Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ key, value: String(n) }),
+      })
+      return NextResponse.json({ ok: r.ok, meses: n })
+    }
     if (accion === "pdf") {
       const pdfUrl = (body.pdfUrl || "").trim()
       if (!pdfUrl) return NextResponse.json({ ok: false, error: "pdfUrl faltante" }, { status: 400 })
