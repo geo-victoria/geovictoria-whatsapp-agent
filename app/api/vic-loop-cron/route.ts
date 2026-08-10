@@ -35,6 +35,7 @@ import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persist
 import {
   ajustarAHabil,
   calcularProximoToque,
+  contactosTraspasados,
   loopV2Enabled,
   tzDePais,
   type LoopRow,
@@ -591,15 +592,26 @@ export async function GET(req: Request): Promise<Response> {
   // Señal de humano por Botmaker: UNA página del workspace para todo el batch.
   const conOperador = await contactosConOperador(new Set(rows.map((r) => r.contact)))
 
-  // Contactos con PTV ACTIVO (un vendedor ya está encima). El cron del PTV
-  // cierra el loop al traspasar, pero los traspasos que NO pasan por él (p.
-  // ej. los `presentacion_manual` del 31-jul) dejaban la fila viva y el toque
-  // de presentación salía con la ejecutiva FIJA del país: el prospecto
-  // recibía DOS nombres distintos (caso Alan/vaitiare: Ana Paula 11:21,
-  // Eddyluz 18:00). Con vendedor asignado, Vicky no manda toques.
-  const ptvRes = await supa(`vic_ptv?estado=eq.activo&select=contact&limit=1000`)
-  const ptvActivos = new Set<string>(
-    ((ptvRes.ok ? await ptvRes.json().catch(() => []) : []) as Array<{ contact: string }>).map((p) => p.contact),
+  // Contactos traspasados Y ATENDIDOS DE VERDAD por el vendedor (candado v3,
+  // Lalo 07-ago). El cron del PTV cierra el loop al traspasar, pero los
+  // traspasos que NO pasan por él (p. ej. los `presentacion_manual` del
+  // 31-jul) dejaban la fila viva y el toque de presentación salía con la
+  // ejecutiva FIJA del país: el prospecto recibía DOS nombres distintos (caso
+  // Alan/vaitiare: Ana Paula 11:21, Eddyluz 18:00).
+  //
+  // OJO — bug encontrado el 10-ago (auditoría de toques 27-jul→10-ago): acá se
+  // leía `vic_ptv?estado=eq.activo` CRUDO, o sea el candado CLÁSICO: bastaba
+  // el traspaso para callar a Vicky. Eso peleaba con la reconciliación del
+  // candado v3 (`reconciliarSilencioTraspasos`, cada 10' en vic-ptv-cron): ella
+  // reabría el loop del cliente que el vendedor nunca contactó y este cron lo
+  // volvía a cerrar minutos después. Resultado neto: 56 conversaciones
+  // traspasadas sin UN solo toque, 35 de ellas con cotización formal viva.
+  // `contactosTraspasados()` aplica la regla correcta: silencio solo con
+  // contacto humano REAL (mensaje del vendedor por su WhatsApp espejado o
+  // llamada contestada) posterior al traspaso — y respeta el rollback
+  // VICKY_PTV_CANDADO_CLASICO=1.
+  const ptvActivos = await contactosTraspasados(rows.map((r) => r.contact)).catch(
+    () => new Set<string>(),
   )
 
   for (const r of rows) {
@@ -944,7 +956,6 @@ async function toqueSabatino(now: number): Promise<number> {
   const loopsRes = await supa(`vic_loop?contact=in.(${lista})&select=contact,estado,motivo_cierre`)
   const loops = loopsRes.ok ? (((await loopsRes.json().catch(() => [])) as Array<{ contact: string; estado: string | null; motivo_cierre: string | null }>) || []) : []
   const loopPor = new Map(loops.map((l) => [l.contact, l]))
-  const { contactosTraspasados } = await import("@/lib/loop-v2")
   const silenciados = await contactosTraspasados(convs.map((c) => c.contact)).catch(() => new Set<string>())
   const pruebas = testContactSet()
   let enviados = 0

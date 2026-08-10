@@ -79,11 +79,21 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
     assert.match(LOOP, /e\.whatsapp \? `📱 WhatsApp: \$\{e\.whatsapp\}\\n` : ""/)
   })
 
-  test("contacto con PTV activo: el loop se cierra sin presentar a nadie", () => {
+  test("traspasado Y ATENDIDO: el loop se cierra sin presentar a nadie", () => {
     // El cron del PTV cierra el loop al traspasar, pero los traspasos que no
-    // pasan por él (presentacion_manual) dejaban la fila viva. El loop ahora
-    // chequea vic_ptv activo por sí mismo, ANTES de cualquier toque.
-    assert.match(LOOP, /vic_ptv\?estado=eq\.activo&select=contact/)
+    // pasan por él (presentacion_manual) dejaban la fila viva. El loop chequea
+    // el traspaso por sí mismo, ANTES de cualquier toque.
+    //
+    // Regla v3 (Lalo 07-ago, bug cazado el 10-ago en la auditoría de toques):
+    // acá se leía `vic_ptv?estado=eq.activo` CRUDO — el candado clásico —, así
+    // que bastaba el traspaso para callar a Vicky. Eso peleaba cada 10 minutos
+    // con reconciliarSilencioTraspasos, que reabría el loop del cliente al que
+    // el vendedor nunca contactó: 56 conversaciones traspasadas terminaron sin
+    // UN solo toque. `contactosTraspasados()` aplica la regla correcta —
+    // silencio solo con contacto humano REAL — y respeta el rollback
+    // VICKY_PTV_CANDADO_CLASICO=1.
+    assert.match(LOOP, /contactosTraspasados\(rows\.map\(\(r\) => r\.contact\)\)/)
+    assert.doesNotMatch(LOOP, /vic_ptv\?estado=eq\.activo&select=contact/)
     assert.match(LOOP, /ptvActivos\.has\(r\.contact\)/)
     assert.match(LOOP, /motivo_cierre: "ptv_traspasado"/)
   })
