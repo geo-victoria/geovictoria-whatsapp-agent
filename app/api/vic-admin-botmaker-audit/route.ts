@@ -102,7 +102,7 @@ export async function GET(req: Request): Promise<Response> {
   // bots/intents/agentes/colas). GET únicamente, host fijo — jamás muta nada.
   const bmpath = (sp.get("bmpath") || "").trim()
   if (bmpath) {
-    if (!/^\/v[0-9.]+\/[a-zA-Z0-9/_?&=%.-]*$/.test(bmpath)) {
+    if (!/^\/v[0-9.]+\/[a-zA-Z0-9/_?&=%.:+-]*$/.test(bmpath)) {
       return NextResponse.json({ ok: false, error: "bmpath inválido" }, { status: 400 })
     }
     const r = await fetch(`https://api.botmaker.com${bmpath}`, { headers: BM_HEADERS, cache: "no-store" })
