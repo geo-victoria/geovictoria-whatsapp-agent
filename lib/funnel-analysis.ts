@@ -54,11 +54,15 @@ const DEFAULT_TEST_CONTACTS = [
   "56965098843", // Interno (pruebas)
 ]
 export function testContactSet(): Set<string> {
+  // El env SUMA, no reemplaza (Lalo 10-ago): antes una lista en
+  // VIC_FUNNEL_TEST_CONTACTS anulaba la interna y los teléfonos de Lalo y
+  // Rodrigo volvían a aparecer en la cola de gestión y en los KPIs. Los
+  // contactos internos quedan excluidos SIEMPRE, con o sin env.
   const raw = (process.env.VIC_FUNNEL_TEST_CONTACTS || "").trim()
-  const list = raw
+  const extra = raw
     ? raw.split(",").map((s) => s.replace(/\D/g, "").trim()).filter(Boolean)
-    : DEFAULT_TEST_CONTACTS
-  return new Set(list)
+    : []
+  return new Set([...DEFAULT_TEST_CONTACTS, ...extra])
 }
 export function isTestContact(contact: string, set = testContactSet()): boolean {
   // Solo los dígitos INICIALES: un contacto clonado con sufijo

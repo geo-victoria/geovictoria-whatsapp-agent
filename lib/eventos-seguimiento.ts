@@ -23,14 +23,18 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   "pdiaz@geovictoria.com": "6616712", // CL — Paola Díaz
   "gmelendez@geovictoria.com": "6616718", // CL — Grey Meléndez
   "alopez@geovictoria.com": "6616741", // CL — Ana Paula López
+  "tmartinezq@geovictoria.com": "6616775", // CL — Tamara Martínez
   // ── Resto de países ──
   "agordillo@geovictoria.com": "6484393", // CO — Alejandro Gordillo
   "ysegura@geovictoria.com": "6484399", // MX — Yahel Segura
-  // PENDIENTES de evento propio (siguen cayendo al round-robin, sin romper
-  // nada): Anderson Díaz, Daniela Gálvez, Aracelli Sepúlveda, Aleydis Araque
-  // y Eddy Galindo (CO). Tamara Martínez espera a conectar su calendario —
-  // sin conectarlo Cal la mostraría 100% libre y Vicky agendaría encima de
-  // sus reuniones reales.
+  // ANDERSON (6616830) NO se cablea: su evento devuelve 0 slots en 14, 30 y
+  // 60 días — está sin horario/host utilizable. Cablearlo dejaría a sus
+  // clientes sin ninguna hora que elegir; hasta arreglarlo cae al
+  // round-robin, que sí ofrece agenda. Medición 10-ago en la MISMA ventana
+  // de 14 días: Paola 226 · Grey 203 · Eddyluz 193 · Tamara 175 · Ana Paula
+  // 127 · Anderson 0.
+  // SIN evento propio todavía (caen al round-robin): Daniela Gálvez,
+  // Aracelli Sepúlveda, Aleydis Araque, Eddy Galindo (CO), Mónica Mendoza (PE).
 }
 
 /**

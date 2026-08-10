@@ -38,11 +38,11 @@ describe("el mapa dueño → evento de seguimiento", () => {
     assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["ysegura@geovictoria.com"], "6484399")
   })
 
-  test("quien AÚN no tiene evento propio no está en el mapa (cae al round-robin)", () => {
-    // Tamara sigue fuera a propósito: sin calendario conectado, Cal la
-    // mostraría 100% libre y Vicky agendaría sobre sus reuniones reales.
+  test("quien AÚN no tiene agenda utilizable no está en el mapa (cae al round-robin)", () => {
     for (const email of [
-      "tmartinezq@geovictoria.com",
+      // Anderson tiene evento creado (6616830) pero devuelve 0 slots: se
+      // deja FUERA a propósito hasta que su agenda ofrezca horas.
+      "adiazg@geovictoria.com",
       "dgalvez@geovictoria.com",
       "asepulveda@geovictoria.com",
       "aaraque@geovictoria.com",
@@ -51,8 +51,8 @@ describe("el mapa dueño → evento de seguimiento", () => {
     }
   })
 
-  test("Anderson NO está en el mapa: su cartera legacy usa el camino determinista", () => {
-    assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["adiazg@geovictoria.com"], undefined)
+  test("Tamara SÍ tiene evento (6616775, verificado con slots reales)", () => {
+    assert.equal(EVENTO_SEGUIMIENTO_POR_DUENO["tmartinezq@geovictoria.com"], "6616775")
   })
 
   test("se extiende por env para los vendedores de la tómbola de Zoho (sin deploy)", () => {
