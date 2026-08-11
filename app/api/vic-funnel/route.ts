@@ -1282,11 +1282,33 @@ type DealEquipo = {
  * manejan los vendedores, haya pasado o no por Vicky (pedido Lalo 07-ago).
  * Activo = etapa no terminal (fuera Cierre Perdido/Congelado/Facturando) con
  * actividad o creación en los últimos 60 días. */
-async function fetchDealsEquipo(): Promise<DealEquipo[]> {
+// Roster de TELEMARKETING para el selector de cotizaciones (Lalo 11-ago):
+// las ejecutivas/os del canal + Vicky (interina de los deals que esperan).
+// Override sin deploy: env VICKY_COTIZADORA_ROSTER_EMAILS (coma-separado).
+const ROSTER_TELEMARKETING_EMAILS = (
+  process.env.VICKY_COTIZADORA_ROSTER_EMAILS ||
+  "emujica@geovictoria.com,pdiaz@geovictoria.com,gmelendez@geovictoria.com,alopez@geovictoria.com," +
+    "tmartinezq@geovictoria.com,dgalvez@geovictoria.com,adiazg@geovictoria.com," +
+    "asepulveda@geovictoria.com,aaraque@geovictoria.com,vicky@geovictoria.com"
+)
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean)
+
+async function fetchDealsEquipo(soloTelemarketing = false): Promise<DealEquipo[]> {
   const out: DealEquipo[] = []
   try {
     const token = await getZohoAccessToken()
     const desde = new Date(Date.now() - 60 * 24 * 3600e3).toISOString().split("T")[0]
+    // Selector de cotizaciones (Lalo 11-ago, "que no sea tanta carga"): solo
+    // deals del roster de telemarketing en etapas 1→4 (~900 hoy, medido) —
+    // sin ventana de actividad, así ninguno se cae por "frío" (caso FRIOSAN).
+    const whereTm =
+      `where (Owner.email in (${ROSTER_TELEMARKETING_EMAILS.map((e) => `'${e}'`).join(",")}) ` +
+      `and Stage in ('1. Trato Creado', '2. Primera Reunion Realizada', '3. En Levantamiento', '4. Propuesta Enviada / En Negociación')) `
+    const whereGeneral =
+      `where ((Last_Activity_Time >= '${desde}T00:00:00-04:00' or Created_Time >= '${desde}T00:00:00-04:00') ` +
+      `and Stage not in ('Cierre Perdido', 'Congelado', 'Facturación congelada', '8. Facturando')) `
     for (let offset = 0; offset < 2000; offset += 200) {
       const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
         method: "POST",
@@ -1296,8 +1318,7 @@ async function fetchDealsEquipo(): Promise<DealEquipo[]> {
           select_query:
             `select id, Deal_Name, Stage, Created_Time, Last_Activity_Time, Owner.first_name, Owner.last_name, ` +
             `Contact_Name.Phone, Contact_Name.Mobile, Account_Name.Account_Name from Deals ` +
-            `where ((Last_Activity_Time >= '${desde}T00:00:00-04:00' or Created_Time >= '${desde}T00:00:00-04:00') ` +
-            `and Stage not in ('Cierre Perdido', 'Congelado', 'Facturación congelada', '8. Facturando')) ` +
+            (soloTelemarketing ? whereTm : whereGeneral) +
             // Hay más de 1000 deals activos (tope de la paginación): el orden
             // por actividad reciente deja fuera solo lo más frío.
             `order by Last_Activity_Time desc limit ${offset}, 200`,
@@ -3021,7 +3042,7 @@ async function renderVickyCotizacionesPreform(contact: string, key: string): Pro
  * lista los deals activos de Zoho con búsqueda en vivo — escribes el nombre y
  * la lista se acorta; eliges uno y se abre el chat de creación. */
 async function renderSelectorDeal(key: string): Promise<Response> {
-  const deals = (await fetchDealsEquipo().catch(() => [])) as DealEquipo[]
+  const deals = (await fetchDealsEquipo(true).catch(() => [])) as DealEquipo[]
   const filas = deals
     .filter((d) => !/congelad|perdido/i.test(String(d.Stage || "")))
     .sort((a, b) => String(a["Account_Name.Account_Name"] || a.Deal_Name || "").localeCompare(String(b["Account_Name.Account_Name"] || b.Deal_Name || ""), "es"))
