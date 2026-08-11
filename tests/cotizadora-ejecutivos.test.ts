@@ -255,10 +255,12 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
       const envio = r.items.find((i) => /Env/i.test(i.nombre))
       assert.strictEqual(envio?.modalidad, "Cobro único")
       assert.strictEqual(envio?.zonaTarifa, "RM")
-      // Asistencia con descuento: unitario NETO × cantidad = subtotal.
+      // Asistencia con descuento: el SUBTOTAL viaja exacto (es lo que se
+      // cobra); el unitario va redondeado a 3 decimales porque el campo
+      // Precio_Unitario_UF de Zoho no acepta más (caso VADIBA 11-ago).
       const asist = r.items.find((i) => /Asistencia/.test(i.nombre))
       assert.strictEqual(asist?.subtotalUF, 3.64)
-      assert.strictEqual(Number((Number(asist?.precioUnitarioUF) * 80).toFixed(2)), 3.64)
+      assert.strictEqual(asist?.precioUnitarioUF, Number((3.64 / 80).toFixed(3)))
     }
 
     // Integridad: si los totales del snapshot no calzan, la emisión se niega.

@@ -44,10 +44,13 @@ export type SnapshotCalculadora = {
   ufValue?: number
 }
 
+// TODO A 3 DECIMALES: los campos double del subform de Zoho
+// (Precio_Unitario_UF / Subtotal_UF) aceptan máximo 3 decimales — un cuarto
+// decimal hace fallar el createRecord completo con INVALID_DATA (caso VADIBA
+// 11-ago: 0,090 UF con 25% dcto = 0,0675). El cobro real siempre usa el
+// SUBTOTAL exacto de la calculadora; el unitario redondeado es cosmético,
+// igual que en la UI de Nacho (muestra 0,068/u y cobra 1,282).
 const r3 = (v: number) => Number(v.toFixed(3))
-// Unitarios con 4 decimales: las tarifas por usuario con descuento (0,065 ×
-// 0,7 = 0,0455) mueren en 3 decimales y desalinean cantidad × unitario.
-const r4 = (v: number) => Number(v.toFixed(4))
 
 function slug(nombre: string): string {
   return nombre
@@ -92,9 +95,9 @@ export function itemsDesdeSnapshot(data: SnapshotCalculadora): ResultadoSnapshot
       nombre,
       modalidad: esFijo ? "Fijo" : "Por usuario",
       cantidad,
-      // Precio NETO efectivo (con el descuento de la calculadora aplicado):
-      // cantidad × unitario = subtotal, siempre.
-      precioUnitarioUF: r4(subtotal / cantidad),
+      // Precio NETO efectivo (con el descuento de la calculadora aplicado),
+      // redondeado a la precisión que Zoho acepta; el subtotal viaja exacto.
+      precioUnitarioUF: r3(subtotal / cantidad),
       subtotalUF: r3(subtotal),
       tierAplicado: [s.rango ? `${s.rango} usuarios` : "", s.descuento ? `${s.descuento}% dcto` : ""]
         .filter(Boolean)
