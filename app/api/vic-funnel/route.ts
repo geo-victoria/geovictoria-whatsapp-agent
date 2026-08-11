@@ -2374,8 +2374,9 @@ function renderEmpresasPeriodo(params: {
   filas: FilaListado[]
   usuarios: Map<string, number>
   rango: RangoFechas | null
+  qsPanel: string
 }): string {
-  const { filas, usuarios, rango } = params
+  const { filas, usuarios, rango, qsPanel } = params
   const ahora = Date.now()
   const enPeriodo = (iso: string) => (rango ? enRango(iso, rango) : Date.parse(iso) >= ahora - 30 * 864e5)
   const entrantes = filas.filter((f) => f.primerContactoIso && enPeriodo(f.primerContactoIso))
@@ -2386,13 +2387,22 @@ function renderEmpresasPeriodo(params: {
     return { est, total: grupo.length, porSeg: SEGMENTOS_DOTACION.map((s) => grupo.filter((f) => seg(f) === s).length) }
   }).filter((r) => r.total > 0)
   const tot = { total: entrantes.length, porSeg: SEGMENTOS_DOTACION.map((s) => entrantes.filter((f) => seg(f) === s).length) }
-  const celda = (n: number) => `<td style="text-align:center">${n || `<span style="color:#c9ced4">·</span>`}</td>`
+  // Cada número es un link al detalle de las empresas detrás de la celda
+  // (pedido Lalo 11-ago): etapa × tramo; los totales filtran solo su eje.
+  const linkDe = (etapa?: string, tramo?: string) =>
+    `?${qsPanel}&empdet=1${etapa ? `&empEtapa=${encodeURIComponent(etapa)}` : ""}${tramo ? `&empTramo=${encodeURIComponent(tramo)}` : ""}`
+  const celda = (n: number, etapa?: string, tramo?: string, negrita = false) =>
+    `<td style="text-align:center">${
+      n
+        ? `<a href="${linkDe(etapa, tramo)}" title="Ver el detalle de estas empresas" style="font-weight:${negrita ? 700 : 400}">${n}</a>`
+        : `<span style="color:#c9ced4">·</span>`
+    }</td>`
   return `<div class="card"><h2>🏢 Empresas ingresadas en el período <span class="pct" style="font-weight:400">— ${entrantes.length} empresas · ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span></h2>
   <div style="overflow-x:auto"><table style="font-size:12.5px;max-width:720px">
     <thead><tr><th>Etapa actual</th><th style="text-align:center">Empresas</th>${SEGMENTOS_DOTACION.map((s) => `<th style="text-align:center" title="${s === "s/d" ? "sin dato de tamaño" : `${s} personas`}">${esc(s)}</th>`).join("")}</tr></thead>
     <tbody>
-      ${filasTabla.map((r) => `<tr><td><span class="tag">${esc(r.est)}</span></td><td style="text-align:center"><b>${r.total}</b></td>${r.porSeg.map(celda).join("")}</tr>`).join("")}
-      <tr style="border-top:2px solid #c9ced4;font-weight:700"><td>TOTAL</td><td style="text-align:center">${tot.total}</td>${tot.porSeg.map(celda).join("")}</tr>
+      ${filasTabla.map((r) => `<tr><td><span class="tag">${esc(r.est)}</span></td>${celda(r.total, r.est, undefined, true)}${r.porSeg.map((n, i) => celda(n, r.est, SEGMENTOS_DOTACION[i])).join("")}</tr>`).join("")}
+      <tr style="border-top:2px solid #c9ced4;font-weight:700"><td>TOTAL</td>${celda(tot.total, undefined, undefined, true)}${tot.porSeg.map((n, i) => celda(n, undefined, SEGMENTOS_DOTACION[i], true)).join("")}</tr>
     </tbody>
   </table></div>
   <div class="sub" style="margin-top:8px">Empresas cuyo PRIMER contacto cae en el período (filtro Desde–Hasta; sin filtro, últimos 30 días), con su etapa actual y su tramo de dotación cotizada (subform de la cotización o preform del chat; s/d = aún sin dato de tamaño).</div>
@@ -4784,7 +4794,7 @@ export async function GET(req: Request): Promise<Response> {
           pais,
           qsPanel,
         })
-        empresasHtml = renderEmpresasPeriodo({ filas: filasListado, usuarios: usuariosPorContacto, rango })
+        empresasHtml = renderEmpresasPeriodo({ filas: filasListado, usuarios: usuariosPorContacto, rango, qsPanel })
       } catch (e) {
         console.warn("[vic-funnel] panel ejecutivos falló:", e instanceof Error ? e.message : e)
       }
@@ -4835,6 +4845,37 @@ export async function GET(req: Request): Promise<Response> {
       return renderDetalleEjecutivo({
         filas: sub,
         titulo: `${ejecQ && ejecQ !== "TOTAL" ? ejecQ : "Todos los ejecutivos"} — ${dimTxt}`,
+        key,
+        volverQS: volver,
+        montos: montosPorContacto,
+        usuarios: usuariosPorContacto,
+        wspSet: wspVendedorSet,
+        pais,
+      })
+    }
+    // Detalle de una celda de "Empresas ingresadas en el período"
+    // (?empdet=1&empEtapa=<etapa>&empTramo=<tramo>): mismo universo que la
+    // tabla (primer contacto en el período, sin excluir perdidos).
+    if ((searchParams.get("empdet") || "").trim()) {
+      const etapaQ = (searchParams.get("empEtapa") || "").trim()
+      const tramoQ = (searchParams.get("empTramo") || "").trim()
+      const enPeriodoEmp = (iso: string) => (rango ? enRango(iso, rango) : Date.parse(iso) >= Date.now() - 30 * 864e5)
+      let sub = filasListado.filter((f) => f.primerContactoIso && enPeriodoEmp(f.primerContactoIso))
+      if (etapaQ) sub = sub.filter((f) => f.estado === etapaQ)
+      if (tramoQ) sub = sub.filter((f) => segmentoDotacion(usuariosPorContacto.get(digits(f.contacto))) === tramoQ)
+      const volver = (() => {
+        const p = new URLSearchParams({ key, pais, vista: "analisis" })
+        if (rango?.desdeStr) p.set("desde", rango.desdeStr)
+        if (rango?.hastaStr) p.set("hasta", rango.hastaStr)
+        for (const e of estadoF) p.append("estado", e)
+        for (const pr of propF) p.append("prop", pr)
+        return `?${p.toString()}`
+      })()
+      const tramoTxt = tramoQ ? (tramoQ === "s/d" ? "sin dato de tamaño" : `${tramoQ} personas`) : ""
+      const titulo = `Empresas ingresadas en el período — ${[etapaQ || "todas las etapas", tramoTxt].filter(Boolean).join(" · ")}`
+      return renderDetalleEjecutivo({
+        filas: sub,
+        titulo,
         key,
         volverQS: volver,
         montos: montosPorContacto,
