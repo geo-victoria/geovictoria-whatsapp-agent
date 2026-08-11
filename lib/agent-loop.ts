@@ -491,9 +491,38 @@ export async function runAgentLoop(params: {
         // evento (Anderson) conservan el camino determinista: aviso al equipo
         // y el dueño envía la invitación.
         let reunionPostFormal = false
+        // REUNIÓN SOBRE EL UMBRAL — SOLO CHILE (Lalo 11-ago): la conversación
+        // derivada por sobre-umbral (21+ trabajadores) agenda con las SDR
+        // INBOUND (Araceli/Aleydis), reutilizando el agendamiento existente:
+        // sin override de evento, la reunión cae al round-robin por defecto
+        // (CAL_EVENT_TYPE_ID), que es el evento donde están ellas. Si algún
+        // día Lalo crea un evento SDR dedicado, se apunta por env
+        // VICKY_CAL_EVENTO_SDR_INBOUND sin deploy. El dueño del deal (tómbola
+        // de vendedores) NO redirige estas agendas — el hito de la reunión ya
+        // respeta a los dueños existentes y solo fuerza al host en deals
+        // nuevos (regla 06-ago).
+        let reunionSobreUmbral = false
         if (
           (toolName === "agendar_reunion" || toolName === "consultar_disponibilidad_horario") &&
-          contact
+          contact &&
+          contact.replace(/\D/g, "").startsWith("56")
+        ) {
+          const { loopCerradoSobreUmbral } = await import("./loop-v2")
+          reunionSobreUmbral = await loopCerradoSobreUmbral(contact).catch(() => false)
+          if (reunionSobreUmbral) {
+            const eventoSdr = (process.env.VICKY_CAL_EVENTO_SDR_INBOUND || "").trim()
+            if (eventoSdr) {
+              ;(toolInput as Record<string, unknown>).eventTypeId = eventoSdr
+            }
+            console.log(
+              `[agent-loop] reunión sobre-umbral ${contact}: agenda SDR inbound (${eventoSdr || "round-robin default"}).`,
+            )
+          }
+        }
+        if (
+          (toolName === "agendar_reunion" || toolName === "consultar_disponibilidad_horario") &&
+          contact &&
+          !reunionSobreUmbral
         ) {
           // REGLA NUEVA (Lalo 10-ago): "si se traspasa una conversación a un
           // ejecutivo, la reunión se queda a nombre de él". Manda el dueño

@@ -498,6 +498,27 @@ export async function loopCerradoPorPagoReal(contact: string): Promise<boolean> 
 }
 
 /**
+ * ¿La conversación quedó derivada por SOBRE-UMBRAL? (motivo 'sobre_umbral'
+ * 21-50 con N, o 'mas_de_50'). Lo usa la selección de agenda (Lalo 11-ago,
+ * solo CL): estas reuniones van al evento de las SDR INBOUND, no a la
+ * agenda del vendedor del deal. Fail-safe: ante cualquier duda, false
+ * (comportamiento de siempre).
+ */
+export async function loopCerradoSobreUmbral(contact: string): Promise<boolean> {
+  if (!contact || !SUPABASE_URL || !SUPABASE_KEY) return false
+  try {
+    const res = await supa(
+      `vic_loop?contact=eq.${encodeURIComponent(contact)}&motivo_cierre=in.(sobre_umbral,mas_de_50)&select=contact&limit=1`,
+    )
+    if (!res.ok) return false
+    const rows = (await res.json().catch(() => [])) as unknown[]
+    return rows.length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
  * Prospecto de MÁS de 50 trabajadores → el Loop se cierra (doc "Vicky paso a
  * paso", 30-jul: los >50 quedan FUERA del seguimiento automático — el
  * ejecutivo llama al toque en hábil y Vicky no manda toques; solo responde
