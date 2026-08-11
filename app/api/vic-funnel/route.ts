@@ -3076,7 +3076,7 @@ async function renderSelectorDeal(key: string): Promise<Response> {
 /** Chat de CREACIÓN de cotización sobre el deal elegido (pedido Lalo 07-ago):
  * el vendedor entrega los datos mínimos conversando y la formal nace amarrada
  * al deal; al terminar, redirige al editor de esa cotización. */
-async function renderVickyCotizacionesCrear(dealId: string, key: string): Promise<Response> {
+async function renderVickyCotizacionesCrear(dealId: string, key: string, motorEjec = false): Promise<Response> {
   const info = await infoDeal(dealId)
   if (!info) {
     return paginaAviso(
@@ -3115,8 +3115,8 @@ async function renderVickyCotizacionesCrear(dealId: string, key: string): Promis
   @media (max-width:760px){.cols{flex-direction:column}.lado{width:auto;position:static}}
 </style></head><body><div class="wrap">
   <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&cotnueva=1">← Elegir otra oportunidad</a></p>
-  <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">Vicky Cotizaciones — nueva cotización</h1>
-  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). Cuéntale al agente qué necesita la cotización y la emite de inmediato; después te lleva al editor para ajustes o envío.</div>
+  <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">${motorEjec ? "Cotizadora de Ejecutivos — catálogo comercial" : "Vicky Cotizaciones — nueva cotización"}</h1>
+  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). ${motorEjec ? "Catálogo comercial COMPLETO (1-8.000 usuarios, equipos, casino, BI, promos — precios del canal ejecutivo). El agente no envía nada al cliente: eso es con los botones del editor." : "Cuéntale al agente qué necesita la cotización y la emite de inmediato; después te lleva al editor para ajustes o envío."} · <a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(dealId)}${motorEjec ? "" : "&motor=ejecutivo"}">${motorEjec ? "← usar Vicky clásico (catálogo SMB)" : "usar catálogo comercial completo →"}</a></div>
   <div class="cols">
     <div class="chatCol card">
       <div id="chatBox">
@@ -3164,7 +3164,7 @@ async function renderVickyCotizacionesCrear(dealId: string, key: string): Promis
         var esperando = burbuja("bubA", "Vicky está trabajando…");
         btn.disabled = true;
         try {
-          var res = await fetch(KEYQ + "&accion=cotcrear_chat&deal=" + encodeURIComponent(DEAL), {
+          var res = await fetch(KEYQ + "&accion=${motorEjec ? "cotejec_chat" : "cotcrear_chat"}&deal=" + encodeURIComponent(DEAL), {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ historial: HIST, mensaje: t }),
@@ -3820,6 +3820,40 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
     }
   }
+  if (accion === "cotejec_chat") {
+    const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
+    if (!dealId) {
+      return new Response(JSON.stringify({ ok: false, error: "deal faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const body = (await req.json().catch(() => null)) as {
+      historial?: Array<{ role?: string; content?: string }>
+      mensaje?: string
+    } | null
+    const mensaje = String(body?.mensaje || "").trim().slice(0, 4000)
+    if (!mensaje) {
+      return new Response(JSON.stringify({ ok: false, error: "mensaje faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const historial = (Array.isArray(body?.historial) ? body.historial : [])
+      .map((m) => ({
+        role: m?.role === "assistant" ? ("assistant" as const) : ("user" as const),
+        content: String(m?.content || ""),
+      }))
+      .filter((m) => m.content.trim())
+      .slice(-30)
+    try {
+      const { chatCotizadoraEjecutivos } = await import("@/lib/cotizadora-ejecutivos/agente")
+      const r = await chatCotizadoraEjecutivos({ dealId, historial, mensaje })
+      const redirigirA = r.creado
+        ? `?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(r.creado.contact)}&cot=${encodeURIComponent(r.creado.quoteId)}`
+        : undefined
+      return new Response(JSON.stringify({ ok: true, reply: r.reply, eventos: r.eventos, redirigirA }), {
+        headers: { "content-type": "application/json" },
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
   if (accion === "cotcrear_chat") {
     const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
     if (!dealId) {
@@ -4245,7 +4279,7 @@ export async function GET(req: Request): Promise<Response> {
   // de creación emite la formal amarrada a ese deal.
   if (searchParams.get("cotnueva")) return renderSelectorDeal(key)
   const cotcrear = (searchParams.get("cotcrear") || "").replace(/\D/g, "").trim()
-  if (cotcrear) return renderVickyCotizacionesCrear(cotcrear, key)
+  if (cotcrear) return renderVickyCotizacionesCrear(cotcrear, key, searchParams.get("motor") === "ejecutivo")
   // Crear PROPUESTAS (pedido Lalo 07-ago): misma estructura que crear
   // cotizaciones — elegir la empresa (cartera del vendedor logueado) y
   // conversar con el agente; el guion de una reunión se pega o adjunta.
