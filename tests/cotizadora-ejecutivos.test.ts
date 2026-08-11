@@ -11,6 +11,7 @@ import { test, describe } from "node:test"
 import assert from "node:assert"
 import { readFileSync } from "node:fs"
 import { cotizarPropuesta, validarPropuesta, topePromoSf2a } from "../lib/cotizadora-ejecutivos/motor.ts"
+import { payloadDesdePropuesta } from "../lib/cotizadora-ejecutivos/emitir.ts"
 
 describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
   test("caso Anderson: 80 usuarios + 5 SF2A arriendo + envío", () => {
@@ -163,8 +164,38 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
     assert.ok(regalado.advertencias.some((a) => a.includes("permitido, pero revísalo")))
   })
 
+  test("adaptador de emisión: las líneas del motor calzan el contrato de create-from-vicky", () => {
+    const r = cotizarPropuesta({
+      usuarios: 80,
+      addons: [{ id: "banco" }],
+      otrosServicios: [{ id: "casino" }],
+      equipos: [{ id: "senseface_2a", modalidad: "arriendo", cantidad: 2 }],
+      serviciosAsociados: [{ id: "envio", zona: "rm", modalidad: "arriendo" }],
+      instalacionPorCliente: true,
+      firmante: "x",
+    })
+    const p = payloadDesdePropuesta(r, 40000)
+    const asistencia = p.items.find((i) => i.id === "asistencia")
+    assert.strictEqual(asistencia?.tipo, "modulo")
+    assert.strictEqual(asistencia?.modalidad, "Por usuario")
+    assert.ok((asistencia?.escalera?.length || 0) >= 11, "asistencia lleva la escalera de Nacho para Creator/PDF")
+    const casino = p.items.find((i) => i.id === "casino")
+    assert.strictEqual(casino?.modalidad, "Fijo")
+    const sf2a = p.items.find((i) => i.id === "senseface_2a")
+    assert.strictEqual(sf2a?.tipo, "hardware")
+    assert.strictEqual(sf2a?.modalidad, "Arriendo mensual")
+    const envio = p.items.find((i) => i.id === "envio")
+    assert.strictEqual(envio?.tipo, "servicio")
+    assert.strictEqual(envio?.zonaTarifa, "RM")
+    // Totales: subtotal = suma de líneas; IVA 19%; CLP congelado con la UF dada
+    const sub = Number(p.items.reduce((a, i) => a + i.subtotalUF, 0).toFixed(3))
+    assert.strictEqual(p.subtotalUF, sub)
+    assert.strictEqual(p.totalUF, Number((sub * 1.19).toFixed(3)))
+    assert.strictEqual(p.totalCLP, Math.round(p.totalUF * 40000))
+  })
+
   test("frontera: el motor es PURO (sin red, sin Supabase, sin imports externos)", () => {
-    for (const f of ["lib/cotizadora-ejecutivos/motor.ts", "lib/cotizadora-ejecutivos/catalogo.ts"]) {
+    for (const f of ["lib/cotizadora-ejecutivos/motor.ts", "lib/cotizadora-ejecutivos/catalogo.ts", "lib/cotizadora-ejecutivos/emitir.ts"]) {
       const src = readFileSync(f, "utf-8")
       assert.doesNotMatch(src, /fetch\(/, `${f} no debe hacer red`)
       assert.doesNotMatch(src, /SUPABASE|process\.env/, `${f} no debe leer env ni Supabase`)
