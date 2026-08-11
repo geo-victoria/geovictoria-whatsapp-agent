@@ -16,11 +16,13 @@
  * create-from-vicky-pe (PEN + IGV 18%, RUC, PDF, aceptación web y pago con
  * MercadoPago Perú). La derivación sigue disponible como respaldo.
  *
+ * SOPORTE (11-ago, orden de Lalo — caso Falabella): consultar_agente_soporte
+ * EXPUESTA — el agente Foundry atiende a los usuarios existentes (patrón
+ * CO/MX: canales chilenos saneados, escalamiento con canal PE).
+ *
  * FUERA a propósito (no exponer):
  *   - agendar_reunion / consultar_disponibilidad: sin event type de Cal.com
  *     del equipo PE — las reuniones se coordinan con la ejecutiva (derivar).
- *   - consultar_agente_soporte: la base de conocimiento y los canales de
- *     escalamiento son chilenos; en PE el soporte se deriva a la ejecutiva.
  *
  * IMPORTABLE POR TESTS PUROS (node --test --experimental-strip-types): los
  * imports top-level son solo módulos sin dependencias transitivas
@@ -44,6 +46,17 @@ const EJECUTIVA_PE_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_PE_ID || "3525045000323
 
 // Cotizadora (Fase 2): endpoint formal PE + secreto (dedicado con fallback al
 // compartido — mismo esquema que CO).
+// Escalamiento de soporte PE (11-ago, orden de Lalo — caso Falabella
+// dvalverde@: un usuario existente pidiendo recuperar su acceso recibió una
+// presentación de VENTA en vez de soporte): Vicky PE atiende con el agente
+// Foundry y, si él escala, entrega el canal humano. Perú no tiene mesa de
+// ayuda propia: el canal es el correo global de soporte (override por env).
+const CORREO_SOPORTE_PE = (process.env.VICKY_SOPORTE_EMAIL_PE || "soporte@geovictoria.com").trim()
+const MENSAJE_ESCALAMIENTO_SOPORTE_PE =
+  "Para esta consulta te recomiendo contactar directamente a nuestro equipo de soporte:\n" +
+  `📧 Email: *${CORREO_SOPORTE_PE}*\n\n` +
+  "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria 🙌"
+
 const COTIZADORA_API_BASE = (
   process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
 ).trim()
@@ -203,6 +216,33 @@ export const TOOL_SCHEMAS_PE = [
         },
       },
       required: ["nombre", "motivo", "resumen"],
+    },
+  },
+  // Soporte operativo con el agente Foundry (11-ago). Schema LOCAL (copia
+  // del chileno, país-neutro): importar el módulo de la tool en el top-level
+  // rompería la pureza de este archivo para los tests (su cadena trae
+  // "@/lib/foundry"); la implementación va por import dinámico en dispatch.
+  {
+    name: "consultar_agente_soporte",
+    description:
+      "Consulta al agente IA especializado en soporte operativo de la plataforma GeoVictoria. Úsala SOLO cuando quien escribe YA ES USUARIO de la plataforma y tiene una duda o problema funcional (recuperar acceso, credenciales, configurar usuarios, generar reportes, problemas técnicos, errores de la app). NO la uses para consultas comerciales (precios, productos, condiciones), callback ni reuniones. El agente puede preguntar el rol del usuario (administrador o colaborador) antes de responder — si lo hace, comunica la pregunta al prospecto literal y espera la respuesta para volver a invocar la tool. Si la conversación continúa con el mismo tema, vuelve a invocarla pasando previousResponseId para mantener contexto. Devuelve uno de tres estados: 'continuar' (pega la respuesta y sigue disponible), 'escalar_humano' (pega mensajeParaProspecto con el canal de soporte), 'cerrar' (pega la respuesta y despide).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        mensajeProspecto: {
+          type: "string" as const,
+          description:
+            "El mensaje literal del cliente con su consulta operativa. Pásalo tal cual lo escribió, sin reformular ni resumir.",
+          minLength: 1,
+          maxLength: 2000,
+        },
+        previousResponseId: {
+          type: "string" as const,
+          description:
+            "ID de la respuesta anterior del agente, devuelto en una invocación previa. Pásalo cuando el cliente sigue con el mismo tema; omítelo en un tema nuevo.",
+        },
+      },
+      required: ["mensajeProspecto"],
     },
   },
   // Señales de ciclo de contacto (mismas de Chile; las procesa el route PE).
@@ -452,6 +492,29 @@ export function buildDispatchPE(contact: string) {
           mensajeParaProspecto:
             "Listo, quedaste registrado 🎉 Nuestra ejecutiva comercial en Perú te contactará muy pronto para finalizar tu cotización y resolver cualquier duda.",
         }
+      }
+
+      // Soporte operativo: misma implementación chilena (agente Foundry). El
+      // escalamiento humano reemplaza los canales chilenos por el de PE, y
+      // las respuestas intermedias se sanean por si el agente cuela un
+      // teléfono de soporte CHILENO (base de conocimiento CL). Import
+      // dinámico: mantiene este módulo importable por los tests puros.
+      if (name === "consultar_agente_soporte") {
+        const { consultarAgenteSoporte } = await import("../../tools/consultar-agente-soporte.ts")
+        const sanearCanalesChilenos = (texto: string): string =>
+          texto
+            .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, CORREO_SOPORTE_PE)
+            .replace(/600[\s.\-]*914[\s.\-]*3819/g, CORREO_SOPORTE_PE)
+        const r = await consultarAgenteSoporte(input as never)
+        if (!r.ok) return r
+        if (r.accion === "escalar_humano") {
+          return {
+            ...r,
+            respuestaAgente: sanearCanalesChilenos(r.respuestaAgente || ""),
+            mensajeParaProspecto: MENSAJE_ESCALAMIENTO_SOPORTE_PE,
+          }
+        }
+        return { ...r, respuestaAgente: sanearCanalesChilenos(r.respuestaAgente || "") }
       }
 
       // Señales (sin efectos externos aquí): el route PE las procesa al ver el

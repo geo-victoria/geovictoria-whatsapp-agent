@@ -769,7 +769,13 @@ export async function runAgentLoop(params: {
               String(toolInput.motivo || ""),
             ))
         if (contact && esRedireccionSoporte) {
-          const paisContacto = contact.startsWith("57") ? "co" : "cl"
+          const paisContacto = contact.startsWith("57")
+            ? "co"
+            : contact.startsWith("52")
+              ? "mx"
+              : contact.startsWith("51")
+                ? "pe"
+                : "cl"
           await marcarConversacionSoporte(contact, paisContacto).catch((e) =>
             console.error(`[agent-loop] marcarConversacionSoporte falló (${contact}):`, e),
           )

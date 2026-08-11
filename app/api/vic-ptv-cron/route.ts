@@ -456,6 +456,21 @@ const TM_REGLA: Record<string, string> = {
   pe: (process.env.VICKY_TM_REASIGNACION_RULE_PE || "").trim(),
 }
 const TM_PAIS_NOMBRE: Record<string, string> = { cl: "Chile", pe: "Perú" }
+// VICKY PE AUTÓNOMA (orden de Lalo 11-ago, pre-encendido): en Perú NO se
+// presenta a nadie por ahora — sin traspasos de etapa ni de calificación
+// mientras Vicky PE sea autónoma (Mónica igual recibe los LEADS por los
+// caminos de registro; lo que se apaga es el traspaso de la CONVERSACIÓN y
+// la presentación al prospecto). Reencender sin deploy: vic_kv
+// pe_presentacion=on (o env VICKY_PE_PRESENTACION=on).
+async function pePresentaHabilitado(): Promise<boolean> {
+  if ((process.env.VICKY_PE_PRESENTACION || "").trim().toLowerCase() === "on") return true
+  try {
+    const { getKvValue } = await import("@/lib/supabase-persistence-v3")
+    return ((await getKvValue("pe_presentacion")) || "").trim().toLowerCase() === "on"
+  } catch {
+    return false
+  }
+}
 const TM_FONO_REGEX: Record<string, RegExp> = { cl: /^56\d{8,10}$/, pe: /^51\d{8,10}$/ }
 const TM_TEMPLATE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION || "vicky_traspaso_ejecutivo").trim()
 const MAX_TM_POR_TICK = 10
@@ -753,6 +768,9 @@ export async function GET(req: Request) {
     // CO: el primero se lo queda hasta el final — asignarEnZoho ya respeta
     // dueños humanos, y todos los registros CO nacen con Galindo/Gordillo).
     // MX en v2 desde el 08-ago (réplica ordenada por Lalo); con flag apagado, todos vuelven al TTV clásico.
+    // PE autónoma (Lalo 11-ago): sin presentación, la conversación peruana
+    // no se traspasa por relojes — Vicky la sigue atendiendo.
+    if (pais === "pe" && !(await pePresentaHabilitado())) continue
     const usaV2 = v2Activo && (pais === "cl" || pais === "pe" || pais === "co" || pais === "mx")
     const decision = usaV2
       ? debeTraspasarEtapa({
@@ -851,7 +869,10 @@ export async function GET(req: Request) {
     // Perú nace con el traspaso v2 — la contención ya persiste sus
     // conversaciones, así que los leads peruanos llegan a la ejecutiva
     // ANTES de que Vicky PE venda).
-    for (const paisTm of ["cl", "pe"] as const) {
+    // PE autónoma (Lalo 11-ago): el reloj de calificación PE también queda
+    // en pausa — sin presentaciones en Perú hasta nueva orden.
+    const paisesTm: Array<"cl" | "pe"> = (await pePresentaHabilitado()) ? ["cl", "pe"] : ["cl"]
+    for (const paisTm of paisesTm) {
       const feriados = await feriadosDePais(paisTm)
       feriadosPorPais[paisTm] = feriados
       // Solo en horario hábil del país: a nadie se le entrega un lead a las 3 AM.
