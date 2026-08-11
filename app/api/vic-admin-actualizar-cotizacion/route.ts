@@ -67,6 +67,7 @@ export async function POST(req: Request): Promise<Response> {
     preciosOverride: body.preciosOverride,
     ufValor: body.ufValor,
     _regenerarPdf: body._regenerarPdf,
+    _sinCorreoCliente: body._sinCorreoCliente,
     // Canal interno de ejecutivos: "RM"/"Región" a secas vale como zona.
     _zonaGenericaOk: true,
   })

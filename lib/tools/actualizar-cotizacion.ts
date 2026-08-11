@@ -94,6 +94,9 @@ export type ActualizarCotizacionInput = {
   /** SOLO canal ejecutivo: "RM"/"Región" a secas vale como ubicación de un
    * punto (tarifa resto con advertencia). Vicky con clientes NO lo pasa. */
   _zonaGenericaOk?: boolean
+  /** SOLO canal ejecutivo/admin: la regeneración NO envía el correo al
+   * cliente (Lalo 11-ago). Vicky con clientes no lo pasa. */
+  _sinCorreoCliente?: boolean
   quote_id: string
   userCount: number
   modulos: string[]
@@ -170,7 +173,9 @@ export async function actualizarCotizacion(
       const cantidad = Math.max(1, Math.round(Number(e.cantidad) || 1))
       const unit = Number(Number(e.montoUF).toFixed(3))
       return {
-        tipo: "servicio" as const,
+        // arriendo=true → HARDWARE: cae al bucket de equipos del PDF
+        // ("Pago mensual", descripcion de equipo) y no al de servicios.
+        tipo: (e.arriendo === true ? "hardware" : "servicio") as "hardware" | "servicio",
         id: (String(e.codigo || "ajuste_manual").toLowerCase().replace(/[^a-z0-9_]+/g, "_").slice(0, 40)) || "ajuste_manual",
         nombre: e.nombre.trim().slice(0, 120),
         modalidad: e.arriendo === true ? "arriendo" : e.recurrente === true ? "por usuario" : "venta",
@@ -221,6 +226,7 @@ export async function actualizarCotizacion(
           // se generan UNA vez con la confirmación. Vicky con clientes no
           // manda el flag → regeneración por edición, como siempre.
           ...((args as { _regenerarPdf?: boolean })._regenerarPdf === false ? { regenerarPdf: false } : {}),
+          ...((args as { _sinCorreoCliente?: boolean })._sinCorreoCliente === true ? { sinCorreoCliente: true } : {}),
           cotizacion: {
             items,
             ufActual: Number(ufActual.toFixed(2)),

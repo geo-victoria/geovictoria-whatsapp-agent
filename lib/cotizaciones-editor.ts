@@ -1043,6 +1043,7 @@ export async function chatVickyCotizaciones(params: {
             // el vendedor dice que no hay más cambios.
             _regenerarPdf: false,
             _zonaGenericaOk: true,
+            _sinCorreoCliente: true,
             ufValor: typeof input.valor_uf === "number" && input.valor_uf > 0 ? input.valor_uf : undefined,
             itemsExtra: Array.isArray(input.items_extra)
               ? input.items_extra.map((e) => ({
