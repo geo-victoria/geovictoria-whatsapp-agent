@@ -278,6 +278,10 @@ const crearCotizacionSchema = {
             id: { type: "string" as const },
             cantidad: { type: "integer" as const, minimum: 1 },
             modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+            precio_unit_uf: {
+              type: "number" as const,
+              description: "Precio unitario UF dictado por el vendedor (ej. reloj a 0.3). Solo si lo pide explícito; sin esto rige el precio de lista.",
+            },
           },
           required: ["id"],
         },
@@ -335,7 +339,7 @@ export async function chatVickyCotizacionesCrear(params: {
     `2. Con los datos listos llama crear_cotizacion de inmediato — sin confirmaciones extra. La cotización nace amarrada a ESTE deal, su cuenta y su contacto (cero duplicados) y con el dueño del deal.`,
     `3. Tras crear, informa número interno/total/links en 2-3 líneas y avisa que se abrirá el editor de esa cotización para ajustes o envío. Si falló, muestra el error textual y reintenta una vez si fue un error genérico.`,
     ``,
-    `LÍMITES: solo línea Chile (UF), 1-8000 trabajadores (sobre 50 rigen los tramos del catálogo comercial; algunos módulos como vacaciones aún no tienen precio sobre 50 — la tool avisa con advertencias), precios del catálogo (los ajustes finos se hacen después en el editor). No inventes RUT ni datos: lo que falte se pregunta.`,
+    `LÍMITES: solo línea Chile (UF), 1-8000 trabajadores (sobre 50 rigen los tramos del catálogo comercial; algunos módulos como vacaciones aún no tienen precio sobre 50 — la tool avisa con advertencias), precios del catálogo. EXCEPCIÓN — precio de HARDWARE dictado por el vendedor ("los relojes a 0,3 UF"): pásalo en precio_unit_uf del ítem de hardware; se acepta cualquier valor > 0 (bajo el 75% de lista sale con advertencia visible). Jamás inventes un precio tú: sin instrucción explícita rige la lista. No inventes RUT ni datos: lo que falte se pregunta.`,
   ].join("\n")
 
   const client = new Anthropic({ apiKey })
@@ -375,7 +379,7 @@ export async function chatVickyCotizacionesCrear(params: {
           rutEmpresa?: string
           userCount: number
           modulos: string[]
-          hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+          hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta"; precio_unit_uf?: number }>
           puntosInstalacion?: Array<{ ubicacion: string; autoInstalada?: boolean }>
           direccionEmpresa?: string
           comunaEmpresa?: string
@@ -395,9 +399,17 @@ export async function chatVickyCotizacionesCrear(params: {
           // calculadora de Nacho (Lalo 10-ago) — Vicky chat sigue en 50.
           _maxUsuariosOverride: 8000,
           _zonaGenericaOk: true,
+          _preciosOverrideOk: true,
           sectorEmpresa: "",
           modulos: input.modulos,
-          hardware: input.hardware,
+          hardware: (input.hardware || []).map((h) => ({
+            id: h.id,
+            cantidad: h.cantidad,
+            modalidad: h.modalidad,
+            // Override del vendedor (Lalo 11-ago: "los relojes a 0,3 UF") —
+            // libre >0, con advertencia visible bajo lista×0,75.
+            precioUnitUF: typeof h.precio_unit_uf === "number" && h.precio_unit_uf > 0 ? h.precio_unit_uf : undefined,
+          })),
           puntosInstalacion: (input.puntosInstalacion || []).map((p) => ({
             ubicacion: p.ubicacion,
             autoInstalada: p.autoInstalada === true,
@@ -555,7 +567,7 @@ export async function chatVickyCotizacionesPreform(params: {
           rutEmpresa?: string
           userCount: number
           modulos: string[]
-          hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+          hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta"; precio_unit_uf?: number }>
           puntosInstalacion?: Array<{ ubicacion: string; autoInstalada?: boolean }>
           direccionEmpresa?: string
           comunaEmpresa?: string
@@ -575,9 +587,17 @@ export async function chatVickyCotizacionesPreform(params: {
           // calculadora de Nacho (Lalo 10-ago) — Vicky chat sigue en 50.
           _maxUsuariosOverride: 8000,
           _zonaGenericaOk: true,
+          _preciosOverrideOk: true,
           sectorEmpresa: "",
           modulos: input.modulos,
-          hardware: input.hardware,
+          hardware: (input.hardware || []).map((h) => ({
+            id: h.id,
+            cantidad: h.cantidad,
+            modalidad: h.modalidad,
+            // Override del vendedor (Lalo 11-ago: "los relojes a 0,3 UF") —
+            // libre >0, con advertencia visible bajo lista×0,75.
+            precioUnitUF: typeof h.precio_unit_uf === "number" && h.precio_unit_uf > 0 ? h.precio_unit_uf : undefined,
+          })),
           puntosInstalacion: (input.puntosInstalacion || []).map((p) => ({
             ubicacion: p.ubicacion,
             autoInstalada: p.autoInstalada === true,

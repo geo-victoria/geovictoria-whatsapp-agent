@@ -295,6 +295,9 @@ export type LinkCotizadoraInput = {
    * un punto — como la calculadora de Nacho (Eddyluz 12-ago). El genérico
    * "Región" cobra la tarifa de resto de regiones con advertencia visible. */
   _zonaGenericaOk?: boolean
+  /** Canal EJECUTIVO (interno): honra precioUnitUF por ítem de hardware
+   * (override del vendedor, ej. reloj a 0,3 UF). */
+  _preciosOverrideOk?: boolean
   _draftQuoteId?: string
   _draftDealId?: string
   _draftAccountId?: string
@@ -395,7 +398,12 @@ export type ConstruirItemsArgs = {
   modulos: string[]
   /** Canal ejecutivo: "Región" a secas vale como ubicación (tarifa resto). */
   zonaGenericaOk?: boolean
-  hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
+  /** Canal ejecutivo: honra `precioUnitUF` por ítem de hardware (override
+   * libre >0 con advertencia bajo lista×0,75 — paridad con la Cotizadora de
+   * Ejecutivos, pedido Lalo 11-ago: "los relojes a 0,3 UF"). Sin el flag,
+   * los overrides se IGNORAN (Vicky con clientes jamás repreciar). */
+  preciosOverrideOk?: boolean
+  hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta"; precioUnitUF?: number }>
   puntosInstalacion?: PuntoInstalacionInput[]
 }
 
@@ -461,7 +469,21 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
           "Solo debería ocurrir si el cliente pidió comprarlo explícitamente.",
       )
     }
-    const precioUnitario = modalidadElegida === "arriendo" ? dispositivo.arriendoUF : dispositivo.ventaUF
+    const precioLista = modalidadElegida === "arriendo" ? dispositivo.arriendoUF : dispositivo.ventaUF
+    let precioUnitario = precioLista
+    // Override del canal ejecutivo (Lalo 11-ago): precio dictado por el
+    // vendedor (ej. reloj a 0,3 UF). Libre sobre 0 — bajo lista×0,75 se
+    // acepta igual con ADVERTENCIA visible (mismo criterio que la Cotizadora
+    // de Ejecutivos: visibilidad sin bloqueo).
+    const override = Number(hw.precioUnitUF)
+    if (args.preciosOverrideOk === true && Number.isFinite(override) && override > 0) {
+      precioUnitario = Number(override.toFixed(3))
+      if (precioLista > 0 && precioUnitario < precioLista * 0.75) {
+        advertencias.push(
+          `${dispositivo.displayName} (${modalidadElegida}) a ${precioUnitario} UF — bajo el 75% de la lista (${precioLista} UF): permitido, pero revísalo.`,
+        )
+      }
+    }
     if (precioUnitario === 0) return { ok: false, error: `${dispositivo.displayName} sin precio en modalidad '${modalidadElegida}'` }
     items.push({
       tipo: "hardware", id: dispositivo.id, nombre: dispositivo.displayName,
@@ -647,6 +669,7 @@ export async function generarLinkCotizadora(
   const construccion = construirItemsCotizacion({
     userCount, modulos, hardware, puntosInstalacion,
     zonaGenericaOk: args._zonaGenericaOk === true,
+    preciosOverrideOk: (args as { _preciosOverrideOk?: boolean })._preciosOverrideOk === true,
   })
   if (!construccion.ok) return { ok: false, error: construccion.error }
   const itemsFinal = construccion.items
