@@ -1287,7 +1287,7 @@ async function fetchDealsEquipo(): Promise<DealEquipo[]> {
   try {
     const token = await getZohoAccessToken()
     const desde = new Date(Date.now() - 60 * 24 * 3600e3).toISOString().split("T")[0]
-    for (let offset = 0; offset < 1000; offset += 200) {
+    for (let offset = 0; offset < 2000; offset += 200) {
       const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
@@ -3069,17 +3069,61 @@ async function renderSelectorDeal(key: string): Promise<Response> {
   <script>
     (function () {
       var input = document.getElementById("buscar");
-      var filas = Array.prototype.slice.call(document.querySelectorAll("#cuerpoDeals tr"));
+      var cuerpo = document.getElementById("cuerpoDeals");
       var aviso = document.getElementById("sinResultados");
-      input.addEventListener("input", function () {
+      var KEY = ${JSON.stringify(key)};
+      var timer = null;
+      var idsEnTabla = {};
+      function filasActuales() { return Array.prototype.slice.call(cuerpo.querySelectorAll("tr")); }
+      filasActuales().forEach(function (tr) {
+        var a = tr.querySelector("a[href]");
+        var m = a && a.getAttribute("href").match(/deal=(\\d+)/);
+        if (m) idsEnTabla[m[1]] = true;
+      });
+      function esc(s) { var d = document.createElement("div"); d.textContent = String(s == null ? "" : s); return d.innerHTML; }
+      function filtrar() {
         var q = input.value.trim().toLowerCase();
         var visibles = 0;
-        filas.forEach(function (tr) {
+        filasActuales().forEach(function (tr) {
           var ok = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
           tr.style.display = ok ? "" : "none";
           if (ok) visibles++;
         });
         aviso.style.display = visibles ? "none" : "block";
+        return visibles;
+      }
+      // El listado precargado es una VENTANA (deals con actividad reciente).
+      // Lo que no aparece localmente se busca directo en Zoho y se agrega.
+      function buscarEnZoho(q) {
+        fetch("?key=" + encodeURIComponent(KEY) + "&accion=cotdeals_buscar&q=" + encodeURIComponent(q), { method: "POST" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            ((d && d.deals) || []).forEach(function (x) {
+              if (!x.id || idsEnTabla[x.id]) return;
+              idsEnTabla[x.id] = true;
+              var tr = document.createElement("tr");
+              tr.className = "filaDeal";
+              tr.innerHTML = "<td><b>" + esc(x.empresa) + "</b><div class=\\"sub\\" style=\\"margin:0;font-size:12px\\">" + esc(x.deal) + "</div></td>" +
+                "<td><span class=\\"tag\\">" + esc(x.etapa) + "</span></td>" +
+                "<td>" + esc(x.dueno) + "</td>" +
+                "<td style=\\"white-space:nowrap\\">" + (x.telefono ? "+" + esc(x.telefono) : "<span class=\\"sub\\">sin tel\u00e9fono</span>") + "</td>" +
+                "<td style=\\"white-space:nowrap\\"><a href=\\"/calculadora-comercial.html?deal=" + encodeURIComponent(x.id) + "&key=" + encodeURIComponent(KEY) + "\\">elegir \u2192</a></td>";
+              cuerpo.appendChild(tr);
+            });
+            var visibles = filtrar();
+            aviso.textContent = visibles ? "" : "Ninguna oportunidad calza con la b\u00fasqueda (tampoco en Zoho).";
+            aviso.style.display = visibles ? "none" : "block";
+          })
+          .catch(function () {});
+      }
+      input.addEventListener("input", function () {
+        filtrar();
+        var q = input.value.trim();
+        if (timer) clearTimeout(timer);
+        if (q.length >= 3) {
+          aviso.textContent = "Buscando tambi\u00e9n en Zoho\u2026";
+          timer = setTimeout(function () { buscarEnZoho(q); }, 450);
+        }
       });
     })();
   </script>
@@ -3834,6 +3878,46 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
     }
   }
+  // Búsqueda de deals EN VIVO para el selector (caso FRIOSAN 11-ago: el
+  // listado precargado trae los deals con actividad más reciente y el org
+  // tiene miles — lo que no está en la ventana se encuentra tecleando: esta
+  // acción consulta Zoho directo por nombre de deal o de cuenta).
+  if (accion === "cotdeals_buscar") {
+    const q = (searchParams.get("q") || "").trim().slice(0, 60)
+    if (q.length < 3) {
+      return new Response(JSON.stringify({ ok: true, deals: [] }), { headers: { "content-type": "application/json" } })
+    }
+    try {
+      const token = await getZohoAccessToken()
+      const esc2 = q.replace(/'/g, "''")
+      const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          select_query:
+            `select id, Deal_Name, Stage, Owner.first_name, Owner.last_name, ` +
+            `Contact_Name.Phone, Contact_Name.Mobile, Account_Name.Account_Name from Deals ` +
+            `where ((Deal_Name like '%${esc2}%' or Account_Name.Account_Name like '%${esc2}%') ` +
+            `and Stage not in ('Cierre Perdido', 'Congelado', 'Facturación congelada')) ` +
+            `order by Modified_Time desc limit 30`,
+        }),
+      })
+      const rows = r.ok && r.status !== 204 ? (((await r.json().catch(() => ({}))) as { data?: DealEquipo[] }).data || []) : []
+      const deals = rows.map((d) => ({
+        id: String(d.id || ""),
+        empresa: String(d["Account_Name.Account_Name"] || "").trim() || String(d.Deal_Name || "").trim() || "(sin nombre)",
+        deal: String(d.Deal_Name || ""),
+        etapa: String(d.Stage || "—"),
+        dueno: `${d["Owner.first_name"] || ""} ${d["Owner.last_name"] || ""}`.trim() || "—",
+        telefono: String(d["Contact_Name.Mobile"] || d["Contact_Name.Phone"] || "").replace(/\D/g, ""),
+      }))
+      return new Response(JSON.stringify({ ok: true, deals }), { headers: { "content-type": "application/json" } })
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
+    }
+  }
+
   // ── CALCULADORA COMERCIAL (copia de gv-cotizador en public/, 11-ago) ──
   // Info del deal para el banner de la página.
   if (accion === "cotcalc_info") {
