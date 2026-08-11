@@ -2942,7 +2942,8 @@
         var banner = document.createElement('div');
         banner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#0b3a53;color:#fff;padding:10px 16px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap';
         banner.innerHTML = '<span id="gvDealInfo">Cargando oportunidad…</span>' +
-          '<span style="opacity:.8;font-size:12px">El botón "Descargar Propuesta" emite en Zoho (amarrada a este deal) y baja el PDF oficial · nada se envía al cliente</span>';
+          '<span style="opacity:.8;font-size:12px">El botón "Descargar Propuesta" emite en Zoho (amarrada a este deal) y baja el PDF oficial · nada se envía al cliente · ' +
+          '<a href="/api/vic-funnel?key=' + encodeURIComponent(KEY) + '&cotcrear=' + DEAL + '" style="color:#9fd6ff">¿prefieres el chat? →</a></span>';
         document.body.prepend(banner);
 
         fetch(API + '&accion=cotcalc_info&deal=' + DEAL, { method: 'POST' })

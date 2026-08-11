@@ -3034,7 +3034,7 @@ async function renderSelectorDeal(key: string): Promise<Response> {
         <td><span class="tag">${esc(String(d.Stage || "—"))}</span></td>
         <td>${esc(dueno)}</td>
         <td style="white-space:nowrap">${tel ? `+${esc(tel)}` : `<span class="sub">sin teléfono</span>`}</td>
-        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(String(d.id))}">elegir →</a></td>
+        <td style="white-space:nowrap"><a href="/calculadora-comercial.html?deal=${encodeURIComponent(String(d.id))}&key=${encodeURIComponent(key)}">elegir →</a></td>
       </tr>`
     })
     .join("")
