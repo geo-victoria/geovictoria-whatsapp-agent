@@ -61,6 +61,12 @@ export async function POST(req: Request): Promise<Response> {
     hardware: body.hardware,
     puntosInstalacion: body.puntosInstalacion,
     resumen_cambio: body.resumen_cambio,
+    // Edición RICA del canal admin (réplica COT453, 11-ago): líneas manuales,
+    // overrides de precio y UF fijada viajan tal cual al motor del editor.
+    itemsExtra: body.itemsExtra,
+    preciosOverride: body.preciosOverride,
+    ufValor: body.ufValor,
+    _regenerarPdf: body._regenerarPdf,
     // Canal interno de ejecutivos: "RM"/"Región" a secas vale como zona.
     _zonaGenericaOk: true,
   })

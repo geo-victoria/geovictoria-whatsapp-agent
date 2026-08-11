@@ -114,6 +114,10 @@ export type ActualizarCotizacionInput = {
     montoUF: number
     cantidad?: number
     recurrente?: boolean
+    /** true = arriendo mensual de hardware: recurrente PERO excluido del
+     * descuento del plan (réplica COT453, 11-ago — un reloj a precio
+     * dictado no debe recibir además el % del plan). */
+    arriendo?: boolean
     codigo?: string
   }>
   /** Override del precio unitario UF de ítems del catálogo (ej. "sube el
@@ -169,7 +173,7 @@ export async function actualizarCotizacion(
         tipo: "servicio" as const,
         id: (String(e.codigo || "ajuste_manual").toLowerCase().replace(/[^a-z0-9_]+/g, "_").slice(0, 40)) || "ajuste_manual",
         nombre: e.nombre.trim().slice(0, 120),
-        modalidad: e.recurrente === true ? "por usuario" : "venta",
+        modalidad: e.arriendo === true ? "arriendo" : e.recurrente === true ? "por usuario" : "venta",
         cantidad,
         precioUnitarioUF: unit,
         subtotalUF: Number((unit * cantidad).toFixed(3)),
