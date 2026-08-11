@@ -91,6 +91,9 @@ export type ActualizarCotizacionInput = {
   /** SOLO editor interno (flujo confirmar-una-vez): false = no generar
    * versión/PDF en esta edición; la confirmación versiona una sola vez. */
   _regenerarPdf?: boolean
+  /** SOLO canal ejecutivo: "RM"/"Región" a secas vale como ubicación de un
+   * punto (tarifa resto con advertencia). Vicky con clientes NO lo pasa. */
+  _zonaGenericaOk?: boolean
   quote_id: string
   userCount: number
   modulos: string[]
@@ -146,6 +149,7 @@ export async function actualizarCotizacion(
     userCount: args.userCount,
     modulos: args.modulos,
     hardware: args.hardware,
+    zonaGenericaOk: args._zonaGenericaOk === true,
     puntosInstalacion: (args.puntosInstalacion || []).map((p) => ({
       ubicacion: p.ubicacion,
       autoInstalada: p.autoInstalada === true,

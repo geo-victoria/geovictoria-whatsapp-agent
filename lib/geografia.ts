@@ -338,12 +338,32 @@ function zonaFueraRM(canonico: string): "intermedia" | "resto" {
  * ordinales ("novena región"), números romanos ("IX"), números arábigos
  * ("región 9") y aliases ("RM", "Metropolitana", "Santiago").
  */
-export function clasificarUbicacion(input: string): ClasificacionUbicacion {
+export function clasificarUbicacion(
+  input: string,
+  opts?: {
+    /** Canal EJECUTIVO (editor de cotizaciones): "Región" a secas basta, como
+     * en la calculadora de Nacho (Eddyluz 12-ago). Se asume la zona "resto"
+     * (tarifa más alta) — el ejecutivo ve la línea y la ajusta si corresponde.
+     * El flujo de cara al CLIENTE (Vicky WhatsApp) NO usa esta opción: ahí la
+     * comuna sí se pregunta porque la tarifa intermedia/resto la necesita. */
+    zonaGenericaOk?: boolean
+  },
+): ClasificacionUbicacion {
   if (!input || !input.trim()) {
     return { tipo: "no_clasificable", razon: "entrada vacía" }
   }
 
   const norm = normalizar(input)
+
+  if (opts?.zonaGenericaOk) {
+    const GENERICOS_REGION = new Set([
+      "region", "regiones", "en region", "en regiones",
+      "fuera de rm", "fuera de santiago", "provincia", "provincias",
+    ])
+    if (GENERICOS_REGION.has(norm)) {
+      return { tipo: "regiones", reconocida: false, canonico: "regiones", zonaInstalacion: "resto" }
+    }
+  }
 
   // 1. Términos genéricos que no permiten clasificar (matching por substring)
   const GENERICOS = [

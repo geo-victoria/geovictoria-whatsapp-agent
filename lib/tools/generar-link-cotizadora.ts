@@ -291,6 +291,10 @@ export type LinkCotizadoraInput = {
   /** Cap de dotación por CANAL (interno, no está en el input_schema): el
    * agente del editor pasa 8000 (rango calculadora de Nacho). */
   _maxUsuariosOverride?: number
+  /** Canal EJECUTIVO (interno): acepta "RM"/"Región" a secas como ubicación de
+   * un punto — como la calculadora de Nacho (Eddyluz 12-ago). El genérico
+   * "Región" cobra la tarifa de resto de regiones con advertencia visible. */
+  _zonaGenericaOk?: boolean
   _draftQuoteId?: string
   _draftDealId?: string
   _draftAccountId?: string
@@ -389,6 +393,8 @@ export function consolidarLineasIguales(items: ItemCotizacion[]): ItemCotizacion
 export type ConstruirItemsArgs = {
   userCount: number
   modulos: string[]
+  /** Canal ejecutivo: "Región" a secas vale como ubicación (tarifa resto). */
+  zonaGenericaOk?: boolean
   hardware?: Array<{ id: string; cantidad?: number; modalidad?: "arriendo" | "venta" }>
   puntosInstalacion?: PuntoInstalacionInput[]
 }
@@ -478,7 +484,7 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
     }
 
     for (const punto of puntosInstalacion) {
-      const c = clasificarUbicacion(punto.ubicacion)
+      const c = clasificarUbicacion(punto.ubicacion, { zonaGenericaOk: args.zonaGenericaOk })
       if (c.tipo === "no_clasificable") {
         return {
           ok: false,
@@ -508,13 +514,16 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
 
     const serviciosAplicables = getServiciosAplicablesConHardware()
     for (const punto of puntosInstalacion) {
-      const clasificacion = clasificarUbicacion(punto.ubicacion)
+      const clasificacion = clasificarUbicacion(punto.ubicacion, { zonaGenericaOk: args.zonaGenericaOk })
       if (clasificacion.tipo === "no_clasificable") continue
 
       if (!clasificacion.reconocida) {
         advertencias.push(
-          `Ubicación '${punto.ubicacion}' no reconocida en la lista oficial. ` +
-          `Se aplicó tarifa de regiones por defecto. El ejecutivo confirmará al revisar la cotización.`,
+          clasificacion.canonico === "regiones"
+            ? `Punto '${punto.ubicacion}' con zona genérica: se aplicó la tarifa de resto de regiones ` +
+              `(instalación 5 UF). Si el punto está en IV, V o VI región la tarifa es 3 UF — ajusta con la comuna real.`
+            : `Ubicación '${punto.ubicacion}' no reconocida en la lista oficial. ` +
+              `Se aplicó tarifa de regiones por defecto. El ejecutivo confirmará al revisar la cotización.`,
         )
       }
 
@@ -635,7 +644,10 @@ export async function generarLinkCotizadora(
       : "19. Servicios"
 
   // ── Calcular items (mismo builder que usa la negociación referencial) ──
-  const construccion = construirItemsCotizacion({ userCount, modulos, hardware, puntosInstalacion })
+  const construccion = construirItemsCotizacion({
+    userCount, modulos, hardware, puntosInstalacion,
+    zonaGenericaOk: args._zonaGenericaOk === true,
+  })
   if (!construccion.ok) return { ok: false, error: construccion.error }
   const itemsFinal = construccion.items
   const advertencias = construccion.advertencias

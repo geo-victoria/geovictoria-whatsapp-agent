@@ -61,6 +61,8 @@ export async function POST(req: Request): Promise<Response> {
     hardware: body.hardware,
     puntosInstalacion: body.puntosInstalacion,
     resumen_cambio: body.resumen_cambio,
+    // Canal interno de ejecutivos: "RM"/"Región" a secas vale como zona.
+    _zonaGenericaOk: true,
   })
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 })

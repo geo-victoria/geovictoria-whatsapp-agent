@@ -292,7 +292,7 @@ const crearCotizacionSchema = {
           },
           required: ["ubicacion"],
         },
-        description: "Obligatorio si hay hardware: un punto por lugar físico (comuna/ciudad).",
+        description: "Obligatorio si hay hardware: un punto por lugar físico. Basta 'RM' o 'Región' como ubicación (como la calculadora comercial) — NO exijas comuna; si el vendedor da la comuna, mejor (afina la tarifa de instalación).",
       },
       direccionEmpresa: { type: "string" as const },
       comunaEmpresa: { type: "string" as const },
@@ -331,7 +331,7 @@ export async function chatVickyCotizacionesCrear(params: {
     catalogoParaModelo(),
     ``,
     `CÓMO TRABAJAS:`,
-    `1. EL VENDEDOR MANDA. Reúne SOLO lo mínimo que falte para emitir: RUT válido (si la ficha no trae), dotación (1-8000) y módulos (asistencia es la base; agrega otros solo si los pide); reloj y puntos de instalación (comuna + quién instala) solo si quiere hardware. Pide todo lo que falte JUNTO, en un solo mensaje corto.`,
+    `1. EL VENDEDOR MANDA. Reúne SOLO lo mínimo que falte para emitir: RUT válido (si la ficha no trae), dotación (1-8000) y módulos (asistencia es la base; agrega otros solo si los pide); reloj y puntos de instalación solo si quiere hardware. Para la zona de un punto BASTA "RM" o "Región" (no exijas comuna ni dirección — si el vendedor la da, afina la tarifa). Pide todo lo que falte JUNTO, en un solo mensaje corto.`,
     `2. Con los datos listos llama crear_cotizacion de inmediato — sin confirmaciones extra. La cotización nace amarrada a ESTE deal, su cuenta y su contacto (cero duplicados) y con el dueño del deal.`,
     `3. Tras crear, informa número interno/total/links en 2-3 líneas y avisa que se abrirá el editor de esa cotización para ajustes o envío. Si falló, muestra el error textual y reintenta una vez si fue un error genérico.`,
     ``,
@@ -394,6 +394,7 @@ export async function chatVickyCotizacionesCrear(params: {
           // Canal ejecutivo: el editor cotiza el rango completo de la
           // calculadora de Nacho (Lalo 10-ago) — Vicky chat sigue en 50.
           _maxUsuariosOverride: 8000,
+          _zonaGenericaOk: true,
           sectorEmpresa: "",
           modulos: input.modulos,
           hardware: input.hardware,
@@ -573,6 +574,7 @@ export async function chatVickyCotizacionesPreform(params: {
           // Canal ejecutivo: el editor cotiza el rango completo de la
           // calculadora de Nacho (Lalo 10-ago) — Vicky chat sigue en 50.
           _maxUsuariosOverride: 8000,
+          _zonaGenericaOk: true,
           sectorEmpresa: "",
           modulos: input.modulos,
           hardware: input.hardware,
@@ -1018,6 +1020,7 @@ export async function chatVickyCotizaciones(params: {
             // NO generan versión/PDF — eso lo hace confirmar_version cuando
             // el vendedor dice que no hay más cambios.
             _regenerarPdf: false,
+            _zonaGenericaOk: true,
             ufValor: typeof input.valor_uf === "number" && input.valor_uf > 0 ? input.valor_uf : undefined,
             itemsExtra: Array.isArray(input.items_extra)
               ? input.items_extra.map((e) => ({
