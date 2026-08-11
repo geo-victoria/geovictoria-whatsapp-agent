@@ -260,7 +260,7 @@ export async function infoDeal(dealId: string): Promise<InfoDeal | null> {
 const crearCotizacionSchema = {
   name: "crear_cotizacion",
   description:
-    "Emite la cotización formal NUEVA amarrada a la oportunidad (deal) del contexto: reusa su cuenta y su contacto en Zoho (cero duplicados), el dueño queda el del deal, se genera el PDF y el link de aceptación, y si el contacto tiene correo se le envía automáticamente. Pasa la configuración COMPLETA. Llámala apenas tengas los datos mínimos: RUT válido, dotación (1-8000) y módulos (asistencia siempre); hardware y puntos de instalación solo si el vendedor quiere reloj.",
+    "Emite la cotización formal NUEVA amarrada a la oportunidad (deal) del contexto: reusa su cuenta y su contacto en Zoho (cero duplicados), el dueño queda el del deal y se genera el PDF y el link de aceptación. NADA se envía al cliente automáticamente: la entrega es siempre con los botones del editor (WhatsApp del ejecutivo, Vicky o correo), con tu OK. Pasa la configuración COMPLETA. Llámala apenas tengas los datos mínimos: RUT válido, dotación (1-8000) y módulos (asistencia siempre); hardware y puntos de instalación solo si el vendedor quiere reloj.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -400,6 +400,7 @@ export async function chatVickyCotizacionesCrear(params: {
           _maxUsuariosOverride: 8000,
           _zonaGenericaOk: true,
           _preciosOverrideOk: true,
+          _sinCorreoCliente: true,
           sectorEmpresa: "",
           modulos: input.modulos,
           hardware: (input.hardware || []).map((h) => ({
@@ -588,6 +589,7 @@ export async function chatVickyCotizacionesPreform(params: {
           _maxUsuariosOverride: 8000,
           _zonaGenericaOk: true,
           _preciosOverrideOk: true,
+          _sinCorreoCliente: true,
           sectorEmpresa: "",
           modulos: input.modulos,
           hardware: (input.hardware || []).map((h) => ({

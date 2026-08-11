@@ -298,6 +298,10 @@ export type LinkCotizadoraInput = {
   /** Canal EJECUTIVO (interno): honra precioUnitUF por ítem de hardware
    * (override del vendedor, ej. reloj a 0,3 UF). */
   _preciosOverrideOk?: boolean
+  /** Canal EJECUTIVO (interno): la emisión NO envía el correo al cliente —
+   * la entrega es siempre un botón humano (principio 4; Lalo 11-ago: "deja
+   * de enviar cotizaciones automáticamente desde la cotizadora"). */
+  _sinCorreoCliente?: boolean
   _draftQuoteId?: string
   _draftDealId?: string
   _draftAccountId?: string
@@ -683,6 +687,10 @@ export async function generarLinkCotizadora(
 
   // Cuerpo de la request (constante entre reintentos).
   const reqBody = JSON.stringify({
+    // Canal ejecutivo: la emisión NO manda el correo al cliente (la entrega
+    // es un botón humano del editor). Vicky con clientes no pasa el flag y
+    // su correo automático sigue igual.
+    sinCorreoCliente: (args as { _sinCorreoCliente?: boolean })._sinCorreoCliente === true || undefined,
     cliente: {
       empresa: empresa.trim(),
       contacto: contacto.trim(),
