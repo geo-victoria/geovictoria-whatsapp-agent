@@ -12,9 +12,11 @@
  * seguimiento consensuado (programar_seguimiento, default America/Lima) —
  * las señales las procesa el route.
  *
+ * FASE 2 (11-ago): generar_link_cotizadora YA EXISTE — cotización formal por
+ * create-from-vicky-pe (PEN + IGV 18%, RUC, PDF, aceptación web y pago con
+ * MercadoPago Perú). La derivación sigue disponible como respaldo.
+ *
  * FUERA a propósito (no exponer):
- *   - generar_link_cotizadora: la cotización FORMAL de Perú llega en Fase 2
- *     (create-from-vicky-pe + MercadoPago PE). Hoy el cierre ES la derivación.
  *   - agendar_reunion / consultar_disponibilidad: sin event type de Cal.com
  *     del equipo PE — las reuniones se coordinan con la ejecutiva (derivar).
  *   - consultar_agente_soporte: la base de conocimiento y los canales de
@@ -26,7 +28,7 @@
  * dinámico dentro del dispatch — mismo truco que lib/crm-hitos.ts.
  */
 
-import { cotizarPE, type PuntoInstalacionPE, type ZonaPE } from "./cotizar.ts"
+import { cotizarPE, formatearPEN, type PuntoInstalacionPE, type ZonaPE } from "./cotizar.ts"
 import { CORREO_SSTT_PE } from "./catalogo.ts"
 import { rucValido, formatearRuc } from "../../rut.ts"
 import {
@@ -39,6 +41,17 @@ import { programarSeguimiento } from "../../tools/programar-seguimiento.ts"
 // derivados (excel de tropicalización: Perú sin tómbola ni SDRs). Override por
 // env para el día en que el equipo PE crezca.
 const EJECUTIVA_PE_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_PE_ID || "3525045000323383015").trim()
+
+// Cotizadora (Fase 2): endpoint formal PE + secreto (dedicado con fallback al
+// compartido — mismo esquema que CO).
+const COTIZADORA_API_BASE = (
+  process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
+).trim()
+const SECRET_COTIZADORA_PE = (
+  process.env.VICKY_COTIZADORA_SECRET_PE ||
+  process.env.VICKY_COTIZADORA_SECRET ||
+  ""
+).trim()
 
 // programar_seguimiento con la zona horaria de Perú como default (el resto
 // del schema chileno aplica igual).
@@ -124,9 +137,49 @@ export const TOOL_SCHEMAS_PE = [
     },
   },
   {
+    name: "generar_link_cotizadora",
+    description:
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles con IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga en línea con tarjeta vía Mercado Pago. Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, email, RUC válido (11 dígitos) y la configuración (userCount; reloj y puntos si lleva). `conDescuentoCierre=true` SOLO si el cliente aceptó el 20% de las 4 primeras facturas como cierre — el pago inicial sale con ese descuento aplicado. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        empresa: { type: "string" as const, description: "Razón social o nombre de la empresa." },
+        contacto: { type: "string" as const, description: "Nombre completo de la persona de contacto." },
+        email: { type: "string" as const, description: "Email del contacto (ahí llega la cotización)." },
+        ruc: { type: "string" as const, description: "RUC de la empresa (11 dígitos)." },
+        userCount: { type: "number" as const, minimum: 1, maximum: 50 },
+        reloj: {
+          type: "object" as const,
+          properties: {
+            modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+            cantidad: { type: "number" as const, minimum: 1, maximum: 50 },
+          },
+          required: ["modalidad", "cantidad"],
+        },
+        puntosInstalacion: {
+          type: "array" as const,
+          items: {
+            type: "object" as const,
+            properties: {
+              ubicacion: { type: "string" as const },
+              zona: { type: "string" as const, enum: ["lima", "provincias"] },
+              autoInstalada: { type: "boolean" as const },
+            },
+            required: ["ubicacion", "zona", "autoInstalada"],
+          },
+        },
+        conDescuentoCierre: {
+          type: "boolean" as const,
+          description: "true SOLO si el cliente aceptó el 20% de cierre en las 4 primeras facturas.",
+        },
+      },
+      required: ["empresa", "contacto", "email", "ruc", "userCount"],
+    },
+  },
+  {
     name: "derivar_a_ejecutivo",
     description:
-      "Registra al prospecto como lead en el CRM (territorio Perú) y lo deja en manos de nuestra ejecutiva comercial de GeoVictoria Perú, que lo contactará para continuar (cotización formal, callback pedido, más de 50 usuarios, preguntas fuera de alcance, o solicitud explícita de hablar con una persona). En Perú este ES el cierre de la venta: la cotización formal con pago en línea aún no existe, así que la ejecutiva finaliza la contratación. Pasa TODO lo que sepas del prospecto; si ya acordó una configuración y precios con cotizar_referencial, inclúyelos en `resumen` (con el RUC si lo dio y si aceptó el 20% de cierre) para que la ejecutiva formalice sin re-preguntar. Devuelve `mensajeParaProspecto` para confirmarle al cliente.",
+      "Registra al prospecto como lead en el CRM (territorio Perú) y lo deja en manos de nuestra ejecutiva comercial de GeoVictoria Perú, que lo contactará para continuar (callback pedido, más de 50 usuarios, preguntas fuera de alcance, solicitud explícita de hablar con una persona, o si generar_link_cotizadora falló). Pasa TODO lo que sepas del prospecto; si ya acordó una configuración y precios con cotizar_referencial, inclúyelos en `resumen` (con el RUC si lo dio y si aceptó el 20% de cierre) para que la ejecutiva formalice sin re-preguntar. Devuelve `mensajeParaProspecto` para confirmarle al cliente.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -243,6 +296,122 @@ export function buildDispatchPE(contact: string) {
           }
         }
         return { ok: true, mensajeParaProspecto: r.mensajeParaProspecto }
+      }
+
+      if (name === "generar_link_cotizadora") {
+        const i = (input || {}) as CotizarInputPE & {
+          empresa?: string
+          contacto?: string
+          email?: string
+          ruc?: string
+        }
+        if (!i.ruc || !rucValido(i.ruc)) {
+          return {
+            ok: false,
+            error: `El RUC '${i.ruc || ""}' no es válido (11 dígitos con dígito verificador SUNAT). Pídele al cliente confirmarlo y vuelve a llamar la tool.`,
+          }
+        }
+        if (!i.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
+          return { ok: false, error: `El correo '${i.email || ""}' no tiene formato válido. Pídelo de nuevo.` }
+        }
+        // Misma regla que la referencial: reloj en VENTA exige puntos.
+        let puntos: PuntoInstalacionPE[] = []
+        if (i.reloj?.modalidad === "venta") {
+          const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
+          if (entradas.length === 0) {
+            return { ok: false, error: "El reloj en VENTA requiere puntosInstalacion (ciudad, zona y autoInstalada). Pregúntalos y vuelve a llamar la tool." }
+          }
+          puntos = normalizarPuntosPE(entradas)
+        } else if (i.reloj?.modalidad === "arriendo") {
+          puntos = normalizarPuntosPE(Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : [])
+        }
+        // El secreto se chequea DESPUÉS de validar inputs: los errores de
+        // datos le llegan precisos al modelo aunque falte la config.
+        if (!SECRET_COTIZADORA_PE) {
+          return { ok: false, error: "Cotizadora PE no configurada (secreto faltante). Usa derivar_a_ejecutivo (motivo cotizacion_formal)." }
+        }
+        const conDescuento = i.conDescuentoCierre === true
+        const calculo = cotizarPE({
+          userCount: Number(i.userCount || 0),
+          reloj:
+            i.reloj && i.reloj.modalidad && Number(i.reloj.cantidad) > 0
+              ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
+              : undefined,
+          puntos,
+          conDescuentoCierre: conDescuento,
+        })
+        // ACTIVACIÓN explícita = primer mes por adelantado con la MISMA
+        // matemática del motor (incluye el 20% de cierre si aplica): el
+        // endpoint respeta la fila del agente; su fallback es a precio de
+        // lista. primerMes = pagoInicialNeto − pagos únicos de catálogo.
+        const r2 = (v: number) => Math.round(v * 100) / 100
+        const ventaNeto = calculo.itemsCotizador
+          .filter((it) => !it.esRecurrente)
+          .reduce((a, it) => a + it.subtotalPEN, 0)
+        const primerMesNeto = r2(calculo.pagoInicialNeto - ventaNeto)
+        const items = [
+          ...calculo.itemsCotizador,
+          {
+            tipo: "activacion",
+            id: "activacion",
+            nombre: "Activación",
+            descripcion: conDescuento
+              ? "Habilitación del servicio: primer mes del plan por adelantado, con el 20% de descuento de tus 4 primeras facturas."
+              : undefined,
+            modalidad: "Cobro único",
+            cantidad: 1,
+            precioUnitarioPEN: primerMesNeto,
+            subtotalPEN: primerMesNeto,
+            esRecurrente: false,
+            afectoIgv: true,
+          },
+        ]
+        const res = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky-pe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-vicky-secret": SECRET_COTIZADORA_PE },
+          body: JSON.stringify({
+            empresa: i.empresa,
+            contacto: i.contacto,
+            contactoEmail: i.email,
+            ruc: formatearRuc(i.ruc),
+            contactoTelefono: `+${contact}`,
+            userCount: Number(i.userCount || 0),
+            items,
+          }),
+          cache: "no-store",
+        })
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean
+          acceptanceUrl?: string
+          quoteId?: string
+          error?: string
+        }
+        if (!res.ok || !data.ok || !data.acceptanceUrl) {
+          console.error(`[pe-tools] create-from-vicky-pe falló contact=${contact}:`, JSON.stringify(data).slice(0, 300))
+          return {
+            ok: false,
+            error: `No se pudo generar la cotización formal (${data.error || res.status}). NO insistas: usa derivar_a_ejecutivo (motivo cotizacion_formal) con toda la configuración en el resumen.`,
+          }
+        }
+        // Aviso a servicio técnico si hay instalación fuera de Lima (mismo
+        // criterio que la referencial). Best-effort.
+        if (calculo.avisoSsttPeru) {
+          try {
+            const { avisarEquipoInterno } = await import("../../alerta-interna.ts")
+            await avisarEquipoInterno(
+              `🇵🇪 SERVICIO TÉCNICO PERÚ — reenviar a ${CORREO_SSTT_PE}: cotización FORMAL con instalación fuera de Lima para +${contact} (${i.empresa}). Coordinar instalación aparte.`,
+            ).catch(() => {})
+          } catch { /* jamás bloquea */ }
+        }
+        return {
+          ok: true,
+          quoteId: data.quoteId,
+          // El agent-loop persiste estos campos en el puntero durable de la
+          // cotización (anti-amnesia: retomar la formal en turnos futuros).
+          acceptanceUrl: data.acceptanceUrl,
+          totalCLP: calculo.pagoInicialTotal,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas en línea con tarjeta vía Mercado Pago (se confirma al instante): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialTotal)} (incluye tu primer mes por adelantado${conDescuento ? ", ya con el 20% de descuento" : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualTotalConDescuento : calculo.mensualTotal)}${conDescuento ? ` las primeras 4 facturas (luego ${formatearPEN(calculo.mensualTotal)})` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
+        }
       }
 
       if (name === "derivar_a_ejecutivo") {

@@ -8,8 +8,8 @@
  *     (Res. 38 / Dirección del Trabajo) en boca de Vicky PE.
  *   - El 20% x 4 primeras facturas existe SOLO como cierre.
  *   - Sin "Oye" como vocativo (orden de Eduardo, 23-jul).
- *   - Sin cotización formal en Fase 1b: buildDispatchPE NO expone
- *     generar_link_cotizadora (llega en Fase 2).
+ *   - Fase 2 (11-ago): generar_link_cotizadora expuesta — se validan RUC,
+ *     correo y puntos ANTES de tocar la red (errores accionables al modelo).
  *   - El webhook se despliega OSCURO: gate VICKY_PE_ENABLED / vic_kv, y con
  *     el gate apagado sobrevive la contención del 04-ago.
  */
@@ -100,17 +100,50 @@ describe("tools PE — superficie Fase 1b", () => {
     assert.ok(nombres.includes("derivar_a_ejecutivo"))
   })
 
-  test("NO expone generar_link_cotizadora (formal = Fase 2) ni agenda", () => {
-    assert.ok(!nombres.includes("generar_link_cotizadora"))
+  test("Fase 2: expone generar_link_cotizadora (formal PE); agenda sigue fuera", () => {
+    assert.ok(nombres.includes("generar_link_cotizadora"))
     assert.ok(!nombres.includes("agendar_reunion"))
     assert.ok(!nombres.includes("consultar_disponibilidad_horario"))
   })
 
-  test("el dispatch tampoco la atiende por la puerta de atrás", async () => {
+  test("generar_link_cotizadora: RUC inválido → error accionable ANTES de la red", async () => {
     const dispatch = buildDispatchPE("51999999999")
-    const r = (await dispatch("generar_link_cotizadora", {})) as { ok: boolean; error?: string }
+    const r = (await dispatch("generar_link_cotizadora", {
+      empresa: "Prueba SAC",
+      contacto: "Juan Pérez",
+      email: "juan@prueba.pe",
+      ruc: "12345678901", // prefijo 12 no existe en SUNAT
+      userCount: 10,
+    })) as { ok: boolean; error?: string }
     assert.equal(r.ok, false)
-    assert.match(r.error || "", /desconocida/i)
+    assert.match(r.error || "", /RUC/)
+  })
+
+  test("generar_link_cotizadora: correo inválido → error accionable", async () => {
+    const dispatch = buildDispatchPE("51999999999")
+    const r = (await dispatch("generar_link_cotizadora", {
+      empresa: "Prueba SAC",
+      contacto: "Juan Pérez",
+      email: "no-es-correo",
+      ruc: "20605842055", // RUC real de la entidad (checksum válido)
+      userCount: 10,
+    })) as { ok: boolean; error?: string }
+    assert.equal(r.ok, false)
+    assert.match(r.error || "", /correo/i)
+  })
+
+  test("generar_link_cotizadora: reloj en VENTA sin puntos → error accionable", async () => {
+    const dispatch = buildDispatchPE("51999999999")
+    const r = (await dispatch("generar_link_cotizadora", {
+      empresa: "Prueba SAC",
+      contacto: "Juan Pérez",
+      email: "juan@prueba.pe",
+      ruc: "20605842055",
+      userCount: 10,
+      reloj: { modalidad: "venta", cantidad: 1 },
+    })) as { ok: boolean; error?: string }
+    assert.equal(r.ok, false)
+    assert.match(r.error || "", /puntosInstalacion|secreto/i)
   })
 
   test("cotizar_referencial: ejemplo confirmado (15p + reloj arriendo) vía dispatch", async () => {
