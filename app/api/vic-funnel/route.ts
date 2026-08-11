@@ -3853,6 +3853,28 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  // PDF de una cotización recién emitida (el puente de la calculadora hace
+  // polling hasta que el render en segundo plano termina, y ahí lo descarga).
+  if (accion === "cotcalc_pdf") {
+    const quoteId = (searchParams.get("quote") || "").replace(/\D/g, "").trim()
+    if (!quoteId) {
+      return new Response(JSON.stringify({ ok: false, error: "quote faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    try {
+      const { getZohoAccessToken } = await import("@/lib/zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const r = await fetch(`${api}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Numero_Cotizacion`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      const rec = ((await r.json().catch(() => ({}))) as { data?: Array<{ PDF_URL?: string; Numero_Cotizacion?: string }> }).data?.[0]
+      return new Response(JSON.stringify({ ok: true, pdfUrl: String(rec?.PDF_URL || ""), numero: String(rec?.Numero_Cotizacion || "") }), { headers: { "content-type": "application/json" } })
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
+    }
+  }
+
   // Emisión desde la calculadora: snapshot de gatherProposalData() → ítems
   // (con verificación de integridad de totales) → create-from-vicky anclado
   // al deal, SIN correo al cliente. La entrega es siempre del ejecutivo.

@@ -2922,13 +2922,12 @@
     </script>
 
     <!-- ══════════════════════════════════════════════════════════════════
-         PUENTE GEOVICTORIA (11-ago-2026) — emisión con aceptación online.
-         La calculadora de arriba es COPIA LITERAL de gv-cotizador (la UI es
-         la especificación). Este bloque solo agrega: banner del deal, botón
-         "Emitir" que manda el snapshot de gatherProposalData() a vic-funnel
-         (cotcalc_emitir) y muestra el link de aceptación. Sin deal/key en la
-         URL, la página se comporta exactamente como la original.
-         NADA se envía al cliente: la entrega es siempre del ejecutivo.
+         PUENTE GEOVICTORIA v2 (11-ago-2026) — el botón NATIVO "Descargar
+         Propuesta (.pdf)" ahora EMITE por la tubería de la casa (Zoho +
+         aceptación online, sin correo al cliente) y descarga NUESTRO PDF.
+         La calculadora de arriba sigue siendo copia literal de gv-cotizador.
+         Sin ?deal&key en la URL, el botón conserva su comportamiento
+         original (jsPDF de Nacho). El botón en inglés no se toca.
          ══════════════════════════════════════════════════════════════════ -->
     <script>
     (function () {
@@ -2937,48 +2936,53 @@
       var KEY = qs.get('key') || '';
       if (!DEAL || !KEY) return;
       var API = '/api/vic-funnel?key=' + encodeURIComponent(KEY);
+      var INFO = {};
 
       document.addEventListener('DOMContentLoaded', function () {
         var banner = document.createElement('div');
         banner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#0b3a53;color:#fff;padding:10px 16px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap';
         banner.innerHTML = '<span id="gvDealInfo">Cargando oportunidad…</span>' +
-          '<span style="opacity:.8;font-size:12px">Emisión amarrada a este deal · nada se envía al cliente</span>';
+          '<span style="opacity:.8;font-size:12px">El botón "Descargar Propuesta" emite en Zoho (amarrada a este deal) y baja el PDF oficial · nada se envía al cliente</span>';
         document.body.prepend(banner);
 
         fetch(API + '&accion=cotcalc_info&deal=' + DEAL, { method: 'POST' })
           .then(function (r) { return r.json(); })
           .then(function (d) {
-            var i = (d && d.info) || {};
-            var txt = d && d.ok
-              ? 'Emitiendo para: ' + (i.accountNombre || i.nombre || ('deal ' + DEAL)) +
-                (i.rut ? ' · RUT ' + i.rut : ' · SIN RUT en la ficha') +
-                (i.contactoNombre ? ' · ' + i.contactoNombre : '')
+            INFO = (d && d.info) || {};
+            document.getElementById('gvDealInfo').textContent = d && d.ok
+              ? 'Emitiendo para: ' + (INFO.accountNombre || INFO.nombre || ('deal ' + DEAL)) +
+                (INFO.rut ? ' · RUT ' + INFO.rut : ' · SIN RUT en la ficha (se pedirá al emitir)') +
+                (INFO.contactoNombre ? ' · ' + INFO.contactoNombre : '')
               : 'No pude cargar el deal ' + DEAL + ' — revisa el link.';
-            document.getElementById('gvDealInfo').textContent = txt;
-            var rutIn = document.getElementById('gvRut');
-            if (rutIn && i.rut) rutIn.value = i.rut;
           })
           .catch(function () {});
 
-        var box = document.createElement('div');
-        box.style.cssText = 'max-width:960px;margin:24px auto 48px;padding:18px;border:2px solid #0b3a53;border-radius:12px;background:#f4f9fc;font:14px -apple-system,BlinkMacSystemFont,sans-serif';
-        box.innerHTML =
-          '<div style="font-weight:700;font-size:16px;margin-bottom:6px">Emitir con aceptación online (GeoVictoria)</div>' +
-          '<div style="color:#456;margin-bottom:12px">Crea la cotización en Zoho amarrada al deal (misma cuenta, contacto y dueño), genera el PDF de la casa y el link donde el cliente acepta y paga en línea. <b>No se envía nada al cliente</b>: el link y el PDF los entregas tú.</div>' +
-          '<div style="margin-bottom:10px"><label style="font-size:12px;color:#456">RUT empresa (obligatorio para emitir): </label>' +
-          '<input id="gvRut" placeholder="76.123.456-7" style="padding:8px;border:1px solid #bcd;border-radius:6px;width:180px"></div>' +
-          '<button id="gvEmitirBtn" style="background:#0b3a53;color:#fff;border:none;border-radius:8px;padding:12px 22px;font-size:15px;font-weight:600;cursor:pointer">Emitir cotización</button>' +
-          '<div id="gvEmitirOut" style="margin-top:12px;line-height:1.7;word-break:break-all"></div>';
-        var host = document.querySelector('.container') || document.body;
-        host.appendChild(box);
+        var btn = document.getElementById('downloadProposalBtn');
+        if (!btn) return;
+        var status = document.createElement('div');
+        status.id = 'gvStatus';
+        status.style.cssText = 'margin-top:10px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;color:#456;line-height:1.6;word-break:break-all';
+        btn.parentNode.appendChild(status);
 
-        document.getElementById('gvEmitirBtn').addEventListener('click', function () {
-          var out = document.getElementById('gvEmitirOut');
-          var btn = document.getElementById('gvEmitirBtn');
+        function setStatus(html) { status.innerHTML = html; }
+
+        // Captura ANTES que el handler original de Nacho: con deal+key el
+        // botón emite y descarga el PDF de la casa; el jsPDF original no corre.
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
           var data;
-          try { data = gatherProposalData(); } catch (e) { out.textContent = 'No pude leer la propuesta: ' + (e && e.message); return; }
-          data.rutEmpresa = (document.getElementById('gvRut').value || '').trim();
-          btn.disabled = true; btn.textContent = 'Emitiendo…'; out.textContent = '';
+          try { data = gatherProposalData(); } catch (err) { setStatus('⚠️ No pude leer la propuesta: ' + (err && err.message)); return; }
+          var rut = (INFO.rut || '').trim();
+          if (!rut) {
+            rut = (prompt('RUT de la empresa (obligatorio para emitir):', '') || '').trim();
+            if (!rut) { setStatus('⚠️ Emisión cancelada: falta el RUT.'); return; }
+          }
+          data.rutEmpresa = rut;
+          btn.disabled = true;
+          var label = btn.textContent;
+          btn.textContent = 'Emitiendo cotización…';
+          setStatus('Creando la cotización en Zoho (amarrada al deal, sin correo al cliente)…');
           fetch(API + '&accion=cotcalc_emitir&deal=' + DEAL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2986,23 +2990,45 @@
           })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-              btn.disabled = false; btn.textContent = 'Emitir cotización';
-              if (!d || !d.ok) {
-                out.innerHTML = '<span style="color:#b00020">⚠️ ' + ((d && d.error) || 'Error al emitir') + '</span>';
-                return;
-              }
-              out.innerHTML =
-                '✅ Cotización <b>' + (d.numero || d.quoteId) + '</b> emitida · total <b>' + d.totalUF + ' UF</b> (~$' + Number(d.totalCLP || 0).toLocaleString('es-CL') + ' con IVA)' +
-                '<br>🔗 Aceptación online: <a href="' + d.acceptanceUrl + '" target="_blank">' + d.acceptanceUrl + '</a> ' +
-                '<button onclick="navigator.clipboard.writeText(\'' + d.acceptanceUrl + '\')" style="font-size:12px;padding:2px 8px;cursor:pointer">copiar</button>' +
-                '<br>📄 PDF: generándose — queda en la ficha de Zoho en ~1 minuto.' +
-                '<br><span style="color:#456">Nada fue enviado al cliente: entrégale el link tú, o desde el editor con tu OK.</span>';
+              if (!d || !d.ok) throw new Error((d && d.error) || 'la emisión falló');
+              var quoteId = d.quoteId;
+              var accUrl = d.acceptanceUrl || '';
+              btn.textContent = 'Generando PDF…';
+              setStatus('✅ Cotización emitida (' + d.totalUF + ' UF · ~$' + Number(d.totalCLP || 0).toLocaleString('es-CL') + ' con IVA). Generando el PDF oficial…');
+              var intentos = 0;
+              (function poll() {
+                intentos++;
+                if (intentos > 30) {
+                  btn.disabled = false; btn.textContent = label;
+                  setStatus('✅ Emitida, pero el PDF sigue generándose — en ~1 min queda en la ficha de Zoho. ' + linkAcc(accUrl));
+                  return;
+                }
+                fetch(API + '&accion=cotcalc_pdf&quote=' + encodeURIComponent(quoteId), { method: 'POST' })
+                  .then(function (r) { return r.json(); })
+                  .then(function (p) {
+                    if (p && p.ok && p.pdfUrl) {
+                      btn.disabled = false; btn.textContent = label;
+                      window.open(p.pdfUrl, '_blank');
+                      setStatus('✅ <b>' + (p.numero || 'Cotización') + '</b> emitida y PDF descargado. ' + linkAcc(accUrl) +
+                        '<br><span style="color:#789">Nada fue enviado al cliente: el PDF y el link los entregas tú.</span>');
+                    } else {
+                      setTimeout(poll, 4000);
+                    }
+                  })
+                  .catch(function () { setTimeout(poll, 4000); });
+              })();
             })
-            .catch(function (e) {
-              btn.disabled = false; btn.textContent = 'Emitir cotización';
-              out.textContent = 'Error de red: ' + (e && e.message);
+            .catch(function (err) {
+              btn.disabled = false; btn.textContent = label;
+              setStatus('⚠️ ' + (err && err.message ? err.message : 'Error al emitir') + ' — corrige y reintenta.');
             });
-        });
+        }, true);
+
+        function linkAcc(u) {
+          if (!u) return '';
+          return 'Link de aceptación y pago: <a href="' + u + '" target="_blank">abrir</a> · ' +
+            '<a href="#" onclick="navigator.clipboard.writeText(\'' + u + '\');this.textContent=\'copiado ✓\';return false">copiar</a>';
+        }
       });
     })();
     </script>
