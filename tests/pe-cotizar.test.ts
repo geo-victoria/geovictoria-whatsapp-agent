@@ -12,18 +12,59 @@ import { cotizarPE, precioPlanPE, formatearPEN } from "../lib/paises/pe/cotizar.
 import { rucValido } from "../lib/rut.ts"
 import { PERFIL_PE } from "../lib/paises/pe/index.ts"
 
-test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima", () => {
+test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima (zona azul)", () => {
   const r = cotizarPE({
     userCount: 15,
     reloj: { modalidad: "arriendo", cantidad: 1 },
-    puntos: [{ ubicacion: "Lima", zona: "lima", autoInstalada: false }],
+    // Miraflores = zona azul del tarifario 11-ago: instalación sin costo.
+    puntos: [{ ubicacion: "Miraflores", zona: "lima", autoInstalada: false }],
   })
   assert.equal(r.mensualNeto, 270) // 200 fijo (11-20) + 70 arriendo
   assert.equal(Math.round(r.mensualTotal * 100) / 100, 318.6) // +IGV 18%
   assert.ok(r.mensajeParaProspecto.includes("S/318.60"))
-  assert.equal(r.avisoSsttPeru, false) // Lima: instalación incluida, sin aviso
+  assert.equal(r.avisoSsttPeru, false) // zona azul: instalación incluida, sin aviso
   // Sin descuento, el pago inicial es el primer mes por adelantado (sin únicos).
   assert.equal(Math.round(r.pagoInicialTotal * 100) / 100, 318.6)
+})
+
+test("tarifario Lima 11-ago: distrito tarifado → nota US$ + IGV y aviso a sstt, sin línea de cobro", () => {
+  const r = cotizarPE({
+    userCount: 10,
+    reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntos: [{ ubicacion: "Comas", zona: "lima", autoInstalada: false }],
+  })
+  assert.equal(r.avisoSsttPeru, true)
+  assert.ok(r.mensajeParaProspecto.includes("US$50 + IGV"))
+  assert.ok(r.mensajeParaProspecto.includes("factura aparte"))
+  // La tarifa de la visita JAMÁS entra al checkout: pago inicial = primer mes.
+  assert.equal(r.pagoInicialNeto, 170) // plan 100 + arriendo 70
+  assert.ok(!r.itemsCotizador.some((i) => /instalacion|visita/i.test(i.id)))
+
+  // Breña (con ñ, zona aguamarina): la normalización NFD debe calzar.
+  const b = cotizarPE({
+    userCount: 10,
+    reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntos: [{ ubicacion: "Breña", zona: "lima", autoInstalada: false }],
+  })
+  assert.ok(b.mensajeParaProspecto.includes("US$30 + IGV"))
+})
+
+test("tarifario Lima: distrito no reconocido → sstt confirma (sin prometer gratis); autoinstalación sin nota", () => {
+  const generico = cotizarPE({
+    userCount: 10,
+    reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntos: [{ ubicacion: "Lima", zona: "lima", autoInstalada: false }],
+  })
+  assert.equal(generico.avisoSsttPeru, true)
+  assert.ok(generico.mensajeParaProspecto.includes("te confirmará si tiene costo"))
+
+  const auto = cotizarPE({
+    userCount: 10,
+    reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntos: [{ ubicacion: "Comas", zona: "lima", autoInstalada: true }],
+  })
+  assert.equal(auto.avisoSsttPeru, false)
+  assert.ok(!auto.mensajeParaProspecto.includes("US$"))
 })
 
 test("descuento de cierre: 20% en las 4 primeras facturas (S/254.88)", () => {

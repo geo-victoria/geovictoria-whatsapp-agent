@@ -8,10 +8,13 @@
  *   - Reloj: arriendo S/70/mes por unidad · venta S/525 por unidad.
  *   - Envío: S/0 en LIMA METROPOLITANA. A PROVINCIA lo ASUME EL CLIENTE
  *     (VB Diego 05-ago): sin línea de cobro; se informa en nota.
- *   - Instalación: LIMA sin costo (incluida). FUERA de Lima NO se cotiza:
- *     "se coordina con servicio técnico, se cotiza aparte" — nota al
- *     prospecto + flag para que la capa de tools avise a
- *     ssttperu@geovictoria.pro. La venta nunca se frena.
+ *   - Instalación (doc "Políticas de cobro visitas e instalaciones",
+ *     11-ago — supersede el "Lima gratis" del excel): en Lima rige el
+ *     TARIFARIO POR DISTRITO (zona azul S/0; resto US$20-50 + IGV, lo
+ *     coordina y factura servicio técnico APARTE — sin línea de checkout).
+ *     FUERA de Lima no se cotiza: se coordina con servicio técnico. La
+ *     auto-instalación es gratis siempre. Aviso a ssttperu@geovictoria.pro
+ *     en todo punto con visita técnica. La venta nunca se frena.
  *   - Capacitación: NO existe en Perú (ni cobrada ni de regalo).
  *   - PAGO INICIAL (patrón CL/CO): pagos únicos (reloj en venta) + PRIMER
  *     MES del plan por adelantado, todo neto + IGV. Luego facturación
@@ -29,7 +32,7 @@
  * S/270 neto → S/318.60/mes con IGV; con descuento S/254.88 las primeras 4.
  */
 
-import { CATALOGO_MODULOS_PE, ESCALERA_DESCUENTO_PE } from "./catalogo.ts"
+import { CATALOGO_MODULOS_PE, ESCALERA_DESCUENTO_PE, tarifaVisitaLimaPE } from "./catalogo.ts"
 
 // IGV peruano: 18% parejo en todos los conceptos. Solo lo escribe este motor.
 const IGV_PE = 0.18
@@ -66,8 +69,9 @@ export type LineaPE = {
 
 /**
  * Item en el contrato del endpoint create-from-vicky-pe del cotizador
- * (misma forma que CO/MX). El envío nunca viaja (S/0); la instalación solo
- * viaja como nota cuando el punto está fuera de Lima (sin ítem). La fila de
+ * (misma forma que CO/MX). El envío nunca viaja (S/0); la instalación
+ * JAMÁS viaja como ítem — su tarifa (US$ + IGV por distrito) la factura
+ * servicio técnico aparte y en la cotización va como nota. La fila de
  * ACTIVACIÓN (primer mes por adelantado) la agrega el endpoint, patrón CO.
  */
 export type ItemCotizadorPE = {
@@ -128,8 +132,9 @@ export function cotizarPE(input: CotizacionPEInput): {
   pagoInicialNeto: number
   pagoInicialIgv: number
   pagoInicialTotal: number
-  /** true si algún punto quedó fuera de Lima con instalación pedida:
-   *  la capa de tools debe avisar a ssttperu@geovictoria.pro. */
+  /** true si algún punto necesita visita técnica coordinada por servicio
+   *  técnico (Lima con tarifa, Lima no reconocido, o provincia): la capa de
+   *  tools avisa a ssttperu@geovictoria.pro. */
   avisoSsttPeru: boolean
   mensajeParaProspecto: string
 } {
@@ -158,7 +163,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     arriendoNeto = TARIFAS_PE.relojArriendoMes * reloj.cantidad
     lineas.push({
       concepto: "Arriendo de reloj de control",
-      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes (envío e instalación sin costo en Lima Metropolitana)`,
+      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes (envío sin costo en Lima Metropolitana)`,
       neto: arriendoNeto,
       igv: arriendoNeto * IGV_PE,
       recurrente: true,
@@ -177,22 +182,43 @@ export function cotizarPE(input: CotizacionPEInput): {
     grupos.set(key, g)
   }
 
-  // Instalación fuera de Lima: NO se cotiza — texto oficial del excel + aviso
-  // interno al servicio técnico (lo dispara la capa de tools con este flag).
+  // Instalación: en LIMA rige el tarifario por distrito de servicio técnico
+  // (doc "Políticas de cobro visitas e instalaciones", 11-ago — solo la zona
+  // azul es sin costo; el resto US$ + IGV, se coordina y factura APARTE con
+  // servicio técnico, jamás como línea del checkout en soles). FUERA de Lima
+  // no se cotiza: se coordina con servicio técnico. La auto-instalación es
+  // gratis siempre. Aviso interno a sstt en todo punto con visita técnica
+  // que ellos deban coordinar (Lima con tarifa, Lima no reconocido, o
+  // provincia).
   const notasEjecutivo: string[] = []
   let avisoSsttPeru = false
   if (reloj && reloj.cantidad > 0) {
     for (const g of grupos.values()) {
       if (g.zona === "provincias") {
-        // Envío a provincia: lo asume el CLIENTE (VB Diego 05-ago) — sin
-        // línea de cobro, pero SIEMPRE se informa.
+        // Envío a provincia: lo asume el CLIENTE (VB Diego 05-ago; Lalo
+        // 11-ago: "normalmente se los entregan en Lima y ellos los llevan").
         notasEjecutivo.push(
-          `El envío del reloj a ${g.ubicacion} corre por cuenta del cliente (coordinamos contigo el retiro/despacho desde Lima).`,
+          `El envío del reloj a ${g.ubicacion} corre por cuenta del cliente (lo usual: te lo entregamos en Lima y tú lo llevas — también coordinamos el despacho si lo prefieres).`,
         )
         if (g.instalaciones > 0) {
           avisoSsttPeru = true
           notasEjecutivo.push(
             `La instalación en ${g.ubicacion} se coordina con nuestro servicio técnico y se cotiza aparte (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
+          )
+        }
+      } else if (g.instalaciones > 0) {
+        const tarifa = tarifaVisitaLimaPE(g.ubicacion)
+        if (tarifa.reconocido && tarifa.usd === 0) {
+          // Zona azul: instalación incluida — no necesita nota ni aviso.
+        } else if (tarifa.reconocido) {
+          avisoSsttPeru = true
+          notasEjecutivo.push(
+            `La instalación con visita técnica en ${g.ubicacion} tiene un costo de US$${tarifa.usd} + IGV según el tarifario oficial de servicio técnico — se coordina y factura aparte con ellos (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
+          )
+        } else {
+          avisoSsttPeru = true
+          notasEjecutivo.push(
+            `La instalación en ${g.ubicacion} la coordina nuestro servicio técnico, que te confirmará si tiene costo según el distrito. También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
           )
         }
       }
@@ -210,7 +236,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     ventaNeto = TARIFAS_PE.relojVenta * reloj.cantidad
     lineas.push({
       concepto: "Reloj de control (compra)",
-      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojVenta)} (envío e instalación sin costo en Lima Metropolitana)`,
+      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojVenta)} (envío sin costo en Lima Metropolitana)`,
       neto: ventaNeto,
       igv: ventaNeto * IGV_PE,
       recurrente: false,
@@ -245,7 +271,7 @@ export function cotizarPE(input: CotizacionPEInput): {
   )
   if (arriendoNeto > 0) {
     filas.push(
-      `- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes (envío e instalación sin costo en Lima Metropolitana)`,
+      `- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes (envío sin costo en Lima Metropolitana)`,
     )
   }
   filas.push(
@@ -292,7 +318,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "reloj_arriendo",
       nombre: "Arriendo de reloj de control",
       descripcion:
-        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo; instalación sin costo en Lima.",
+        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana.",
       modalidad: "Arriendo mensual",
       cantidad: reloj.cantidad,
       precioUnitarioPEN: TARIFAS_PE.relojArriendoMes,
@@ -307,7 +333,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "reloj_venta",
       nombre: "Reloj de control (compra)",
       descripcion:
-        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo; instalación sin costo en Lima.",
+        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana.",
       modalidad: "Venta única",
       cantidad: reloj.cantidad,
       precioUnitarioPEN: TARIFAS_PE.relojVenta,

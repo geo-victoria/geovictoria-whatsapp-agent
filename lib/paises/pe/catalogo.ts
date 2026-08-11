@@ -140,3 +140,83 @@ export const CATALOGO_SERVICIOS_PE: Servicio[] = [
 /** Correo del servicio técnico PE: recibe el aviso interno cuando un punto
  * queda fuera de Lima (instalación se cotiza aparte). */
 export const CORREO_SSTT_PE = "ssttperu@geovictoria.pro"
+
+/**
+ * TARIFARIO DE VISITAS TÉCNICAS E INSTALACIONES — LIMA METROPOLITANA
+ * (doc "Políticas de cobro visitas e instalaciones", vía Lalo 11-ago-2026).
+ *
+ * Supersede el "instalación gratis en toda Lima" del excel de tropicalización:
+ * solo la ZONA AZUL es sin costo; el resto tiene tarifa POR DISTRITO en
+ * DÓLARES + IGV. La tarifa es del ÁREA DE SERVICIO TÉCNICO: se INFORMA en la
+ * cotización y se coordina/factura aparte con ellos (no viaja como línea de
+ * cobro en soles — no hay tipo de cambio definido para meterla al checkout).
+ * La auto-instalación sigue siendo gratis siempre. Exoneraciones: solo líder
+ * de área + VB del country manager (fuera del alcance de Vicky).
+ */
+export const ZONAS_VISITA_LIMA_PE: ReadonlyArray<{ usd: number; distritos: readonly string[] }> = [
+  {
+    usd: 0, // ZONA AZUL — sin costo
+    distritos: ["santiago de surco", "surco", "san borja", "surquillo", "miraflores", "san isidro"],
+  },
+  {
+    usd: 20, // ZONA LILA
+    distritos: ["el agustino", "santa anita", "la molina"],
+  },
+  {
+    usd: 30, // ZONA AGUAMARINA (centro)
+    distritos: [
+      "rimac", "cercado de lima", "cercado", "lima cercado", "breña", "san luis",
+      "la victoria", "lince", "jesus maria", "pueblo libre", "san miguel", "magdalena del mar", "magdalena",
+    ],
+  },
+  {
+    usd: 40, // ZONA NARANJA (cono sur cercano)
+    distritos: [
+      "barranco", "chorrillos", "san juan de miraflores", "villa maria del triunfo",
+      "villa el salvador", "pachacamac",
+    ],
+  },
+  {
+    usd: 50, // ZONA AMARILLA (conos + Callao)
+    distritos: [
+      "lurin", "punta hermosa", "punta negra", "san bartolo", "santa maria del mar", "pucusana",
+      "ancon", "santa rosa", "puente piedra", "carabayllo", "comas", "independencia",
+      "los olivos", "san martin de porres",
+      "callao", "mi peru", "ventanilla", "la perla", "carmen de la legua reynoso", "carmen de la legua",
+      "san juan de lurigancho", "lurigancho", "chaclacayo", "ate", "cieneguilla", "ate vitarte",
+    ],
+  },
+]
+
+function normalizarDistrito(input: string): string {
+  return String(input || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zñ\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/**
+ * Tarifa de visita/instalación para un punto en Lima Metropolitana.
+ * Devuelve { usd, reconocido }: usd 0 = zona azul (sin costo); usd > 0 =
+ * tarifa en dólares + IGV; reconocido=false = distrito no está en el mapa
+ * (servicio técnico confirma el costo — trato conservador, sin prometer).
+ */
+export function tarifaVisitaLimaPE(ubicacion: string): { usd: number; reconocido: boolean } {
+  const norm = normalizarDistrito(ubicacion)
+  if (!norm) return { usd: 0, reconocido: false }
+  for (const zona of ZONAS_VISITA_LIMA_PE) {
+    for (const d of zona.distritos) {
+      // Las entradas también se normalizan ("Breña" → "brena") y el match de
+      // sub-frase exige BORDES de palabra: sin eso, "ate" calzaba dentro de
+      // cualquier palabra que lo contuviera.
+      const dn = normalizarDistrito(d)
+      if (norm === dn || new RegExp(`(^| )${dn}( |$)`).test(norm)) {
+        return { usd: zona.usd, reconocido: true }
+      }
+    }
+  }
+  return { usd: 0, reconocido: false }
+}
