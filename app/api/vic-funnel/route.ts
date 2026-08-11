@@ -3847,7 +3847,7 @@ export async function POST(req: Request): Promise<Response> {
       if (!info) {
         return new Response(JSON.stringify({ ok: false, error: "deal no encontrado" }), { status: 404, headers: { "content-type": "application/json" } })
       }
-      return new Response(JSON.stringify({ ok: true, info: { nombre: info.nombre, accountNombre: info.accountNombre, rut: info.rut, contactoNombre: info.contactoNombre } }), { headers: { "content-type": "application/json" } })
+      return new Response(JSON.stringify({ ok: true, info: { nombre: info.nombre, accountNombre: info.accountNombre, rut: info.rut, contactoNombre: info.contactoNombre, ownerNombre: info.ownerNombre } }), { headers: { "content-type": "application/json" } })
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
     }

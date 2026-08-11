@@ -2950,6 +2950,31 @@
           .then(function (r) { return r.json(); })
           .then(function (d) {
             INFO = (d && d.info) || {};
+            // Prellenado desde el DEAL (Lalo 11-ago): empresa, contacto y
+            // ejecutivo/a llegan solos — el vendedor no tipea lo que la ficha
+            // ya sabe. Solo se rellenan campos VACÍOS (lo tipeado gana), y el
+            // selector de ejecutivo se calza por nombre normalizado con el
+            // dueño del deal (esos campos alimentan el PDF original de Nacho;
+            // la emisión de la casa usa la ficha del deal directamente).
+            try {
+              var norm = function (s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim(); };
+              var empIn = document.getElementById('propEmpresa');
+              if (empIn && !empIn.value.trim() && INFO.accountNombre) empIn.value = INFO.accountNombre;
+              var conIn = document.getElementById('propContacto');
+              if (conIn && !conIn.value.trim() && INFO.contactoNombre) conIn.value = INFO.contactoNombre;
+              var ejSel = document.getElementById('propEjecutivo');
+              if (ejSel && !ejSel.value && INFO.ownerNombre) {
+                var objetivo = norm(INFO.ownerNombre);
+                for (var oi = 0; oi < ejSel.options.length; oi++) {
+                  var opt = norm(ejSel.options[oi].value || ejSel.options[oi].text);
+                  if (opt && (opt === objetivo || objetivo.indexOf(opt.split(' ')[0]) >= 0 && objetivo.indexOf(opt.split(' ')[1] || '') >= 0)) {
+                    ejSel.selectedIndex = oi;
+                    ejSel.dispatchEvent(new Event('change'));
+                    break;
+                  }
+                }
+              }
+            } catch (e) {}
             document.getElementById('gvDealInfo').textContent = d && d.ok
               ? 'Emitiendo para: ' + (INFO.accountNombre || INFO.nombre || ('deal ' + DEAL)) +
                 (INFO.rut ? ' · RUT ' + INFO.rut : ' · SIN RUT en la ficha (se pedirá al emitir)') +
