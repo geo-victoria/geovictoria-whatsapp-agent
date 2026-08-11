@@ -93,12 +93,12 @@ const CONFIG_PROPS = {
       type: "object",
       properties: {
         id: { type: "string", enum: ["envio", "instalacion", "homologacion"] },
-        zona: { type: "string", enum: ["rm", "region"] },
+        zona: { type: "string", enum: ["rm", "region"], description: "SOLO la instalación con técnico la necesita (cambia la tarifa). Para envío/homologación se omite." },
         modalidad: { type: "string", enum: ["venta", "arriendo"] },
         cantidad: { type: "integer", minimum: 1 },
-        precioUF: { type: "number", description: "Override UF, validado contra el mínimo de tabla." },
+        precioUF: { type: "number", description: "Override UF. En envío es LIBRE (≥0, lo define el ejecutivo); en instalación se valida contra el mínimo de tabla." },
       },
-      required: ["id", "zona", "modalidad"],
+      required: ["id", "modalidad"],
     },
   },
   envioExcluido: { type: "boolean", description: "true = el envío queda EXPLÍCITAMENTE fuera (el cliente retira / lo asume)." },
@@ -148,7 +148,7 @@ function catalogoResumen(): string {
     `- Otros servicios: ${otros} (tramos propios en el motor)`,
     `- Equipos (Venta/Arriendo UF): ${equipos}`,
     `- Accesorios: ${ACCESORIOS.map((a) => a.id).join(", ")} (precios en el motor)`,
-    `- Servicios asociados (SIEMPRE pago único): envío (V 0,7 / A 0,5; arriendo puede rebajarse hasta 0) · instalación (V: RM 2 / reg 5 · A: RM 1 / reg 4, no baja de tabla) · homologación 0,3`,
+    `- Servicios asociados (SIEMPRE pago único): envío (referencia V 0,7 / A 0,5, pero el COSTO LO DEFINE EL EJECUTIVO libre desde 0 y NO se pregunta lugar/comuna de envío) · instalación con técnico (V: RM 2 / reg 5 · A: RM 1 / reg 4, no baja de tabla — esta SÍ necesita zona) · homologación 0,3. ENVÍO = AUTO-INSTALACIÓN: con envío cotizado la instalación queda resuelta (instala el cliente), no preguntes quién instala.`,
     `- Promos (solo si el motor las declara elegibles): Asistencia+Addon = 1 UF (1-10 usuarios, NUNCA banco) · SF2A arriendo 0,30 capado por tramo · Kit QR 1,8 UF/mes · Bundle IN01 4G/LAN 27 V / 3,4 A`,
   ].join("\n")
 }
@@ -209,6 +209,7 @@ export async function chatCotizadoraEjecutivos(params: {
     `1. EL VENDEDOR MANDA. Traduce lo que pida a configuración y llama previsualizar_propuesta para mostrarle el resumen (líneas + total mensual + pago único + advertencias). Cambia algo → previsualiza de nuevo.`,
     `2. Los PRECIOS los pone el motor, jamás tú: descuentos sobre 25% se recortan solos, overrides bajo mínimos se ajustan o quedan con advertencia — muestra las advertencias tal cual.`,
     `3. Para emitir llama emitir_propuesta. Si devuelve PENDIENTES (envío/instalación sin resolver, modalidad faltante, firmante, etc.), pregúntalos TODOS JUNTOS en un mensaje corto y reintenta. La cotización nace amarrada a ESTE deal con su dueño.`,
+    `3b. ENVÍO (reglas Anderson): el costo lo dicta el ejecutivo (precioUF libre, puede ser 0) y JAMÁS preguntes comuna/lugar de envío. Envío cotizado ⇒ auto-instalación resuelta: no preguntes quién instala. Solo si piden instalación CON TÉCNICO pregunta RM o región (cambia la tarifa).`,
     `4. Tras emitir: número/total/links en 2-3 líneas. NADA se envía al cliente desde este chat — el envío es con los botones del editor (WhatsApp del ejecutivo, Vicky o correo); dilo si el vendedor te pide "mándasela".`,
     ``,
     `LÍMITES: catálogo comercial Chile en UF. No inventes RUT ni datos. Si piden algo fuera del catálogo (producto inexistente, descuento imposible), dilo sin rodeos.`,

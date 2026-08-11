@@ -116,6 +116,36 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
     assert.strictEqual(validarPropuesta({ ...base, envioExcluido: true, instalacionPorCliente: true }).length, 0)
   })
 
+  test("reglas Anderson 11-ago: envío = auto-instalación, costo libre y sin zona", () => {
+    // Hardware + envío SIN zona, SIN declarar quién instala → cero pendientes:
+    // el envío resuelve la instalación por defecto y no se pregunta el lugar.
+    const config = {
+      usuarios: 80,
+      equipos: [{ id: "senseface_2a", modalidad: "arriendo" as const, cantidad: 5 }],
+      serviciosAsociados: [{ id: "envio" as const, modalidad: "venta" as const, precioUF: 0.15 }],
+      firmante: "Anderson Diaz",
+    }
+    assert.strictEqual(validarPropuesta(config).length, 0)
+
+    const r = cotizarPropuesta(config)
+    const envio = r.lineas.find((l) => l.id === "envio")
+    // Costo libre del ejecutivo (mínimo 0 en AMBAS modalidades) y sin
+    // advertencia; el nombre va limpio, sin "(RM)" inventado.
+    assert.strictEqual(envio?.subtotalUF, 0.15)
+    assert.strictEqual(envio?.nombre, "Envío")
+    assert.strictEqual(r.advertencias.length, 0)
+    const p = payloadDesdePropuesta(r, 40000)
+    assert.strictEqual(p.items.find((i) => i.id === "envio")?.zonaTarifa, undefined)
+
+    // La instalación CON TÉCNICO sí exige zona (RM 2/1 vs región 5/4).
+    const conTecnico = validarPropuesta({
+      ...config,
+      serviciosAsociados: [{ id: "instalacion" as const, modalidad: "arriendo" as const }],
+      envioExcluido: true,
+    })
+    assert.ok(conTecnico.some((p2) => p2.includes("sin zona")))
+  })
+
   test("SF2A en venta es imposible (solo arriendo)", () => {
     const pendientes = validarPropuesta({
       usuarios: 10,

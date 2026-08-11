@@ -171,7 +171,11 @@ export const SERVICIOS_ASOCIADOS: Record<
   envio: {
     nombre: "Envío",
     def: { venta: { rm: 0.7, region: 0.7 }, arriendo: { rm: 0.5, region: 0.5 } },
-    min: { venta: { rm: 0.7, region: 0.7 }, arriendo: { rm: 0, region: 0 } },
+    // Mínimo 0 en AMBAS modalidades (regla Anderson 11-ago: "libertad para
+    // nosotros definir el costo de envío") — el ejecutivo pone el valor
+    // directo; la zona no se pregunta porque la tarifa de envío no depende
+    // de ella.
+    min: { venta: { rm: 0, region: 0 }, arriendo: { rm: 0, region: 0 } },
   },
   instalacion: {
     nombre: "Instalación",

@@ -66,7 +66,9 @@ export type ConfigPropuesta = {
   accesorios?: Array<{ id: string; modalidad: "venta" | "arriendo"; cantidad: number; descuentoPct?: number; precioUF?: number }>
   serviciosAsociados?: Array<{
     id: ServicioAsociadoId
-    zona: "rm" | "region"
+    /** Solo la INSTALACIÓN la necesita (RM 2/1 vs región 5/4). Para el envío
+     * es irrelevante (misma tarifa) y NO se pregunta (regla Anderson 11-ago). */
+    zona?: "rm" | "region"
     modalidad: "venta" | "arriendo"
     cantidad?: number
     /** Override UF — validado contra el MÍNIMO de tabla por zona/modalidad. */
@@ -326,12 +328,13 @@ export function cotizarPropuesta(config: ConfigPropuesta): ResultadoPropuesta {
       advertencias.push(`Servicio asociado desconocido: ${String(s.id)} — omitido.`)
       continue
     }
-    const lista = def.def[s.modalidad][s.zona]
-    const minimo = def.min[s.modalidad][s.zona]
+    const zona = s.zona || "rm"
+    const lista = def.def[s.modalidad][zona]
+    const minimo = def.min[s.modalidad][zona]
     let unit = lista
     if (s.precioUF !== undefined && Number.isFinite(s.precioUF)) {
       if (s.precioUF < minimo) {
-        advertencias.push(`${def.nombre} (${s.zona}/${s.modalidad}): ${s.precioUF} UF bajo el mínimo ${minimo} UF — se usó el mínimo.`)
+        advertencias.push(`${def.nombre} (${zona}/${s.modalidad}): ${s.precioUF} UF bajo el mínimo ${minimo} UF — se usó el mínimo.`)
         unit = minimo
       } else {
         unit = r3(s.precioUF)
@@ -340,7 +343,9 @@ export function cotizarPropuesta(config: ConfigPropuesta): ResultadoPropuesta {
     const cantidad = Math.max(1, Math.trunc(Number(s.cantidad || 1)))
     if (unit <= 0) continue // p. ej. envío arriendo rebajado a 0: sin línea, como en la UI
     lineas.push({
-      tipo: "servicio_asociado", id: s.id, nombre: `${def.nombre} (${s.zona === "rm" ? "RM" : "Regiones"})`,
+      // Sin zona declarada (envío/homologación, misma tarifa en todo Chile) el
+      // nombre va limpio — un "(RM)" inventado confundiría en el PDF.
+      tipo: "servicio_asociado", id: s.id, nombre: s.zona ? `${def.nombre} (${s.zona === "rm" ? "RM" : "Regiones"})` : def.nombre,
       detalle: `${cantidad} × ${unit} UF — pago único`,
       cantidad, precioUnitarioUF: unit, descuentoPct: 0,
       subtotalUF: r3(cantidad * unit), recurrencia: "pago_unico",
@@ -376,8 +381,17 @@ export function validarPropuesta(config: ConfigPropuesta): string[] {
       pendientes.push("Hardware sin ENVÍO resuelto: cotízalo o exclúyelo explícitamente (envioExcluido).")
     }
     const hayInstalacion = servicios.some((s) => s.id === "instalacion")
-    if (!hayInstalacion && config.instalacionPorCliente !== true) {
-      pendientes.push("Hardware sin INSTALACIÓN resuelta: cotízala o declara instalacionPorCliente.")
+    // Regla Anderson (11-ago): "cuando digamos Envío se entienda también como
+    // auto-instalación" — con envío cotizado, la instalación queda resuelta
+    // por defecto (el cliente instala); solo se cotiza técnico si lo piden.
+    if (!hayInstalacion && !hayEnvio && config.instalacionPorCliente !== true) {
+      pendientes.push("Hardware sin INSTALACIÓN resuelta: cotízala, declara instalacionPorCliente, o agrega envío (envío = auto-instalación).")
+    }
+    // La instalación con técnico SÍ necesita zona (RM 2/1 vs región 5/4).
+    for (const s of servicios) {
+      if (s.id === "instalacion" && !s.zona) {
+        pendientes.push("Instalación con técnico sin zona: indica RM o región (cambia la tarifa).")
+      }
     }
   }
   if (config.promoAsistenciaAddon) {

@@ -71,11 +71,13 @@ function itemDeLinea(l: LineaPropuesta): ItemEmision {
     case "accesorio":
       return { ...base, tipo: "hardware", modalidad: l.recurrencia === "mensual" ? "Arriendo mensual" : "Venta única" }
     case "servicio_asociado":
+      // Sin marcador de zona en el nombre (envío sin zona declarada — regla
+      // Anderson) la tarifa no depende del lugar: zonaTarifa se omite.
       return {
         ...base,
         tipo: "servicio",
         modalidad: "Cobro único",
-        zonaTarifa: /\(RM\)/.test(l.nombre) ? "RM" : "regiones",
+        zonaTarifa: /\(RM\)/.test(l.nombre) ? "RM" : /\(Regiones\)/.test(l.nombre) ? "regiones" : undefined,
       }
     case "promo":
       // Promos de producto (1 UF, SF2A) son mensuales tipo módulo/hardware;
