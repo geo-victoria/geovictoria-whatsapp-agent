@@ -269,6 +269,20 @@ async function kvSet(key: string, value: string, expiresAt?: string): Promise<vo
   }).catch(() => {})
 }
 
+/** Pagada = link de onboarding (flujo MP) O estado "Pagada" en Zoho. El
+ * segundo criterio es la venta por TRANSFERENCIA: marcarCotizacionPagada
+ * (07-ago) deja Estado_Cotizacion="Pagada" sin pasar por texto "acept" y sin
+ * Onboarding_Link garantizado — con el filtro viejo esas ventas desaparecían
+ * de "Ventas cerradas" y los KPIs (cazado 11-ago con COT334/COT408). */
+function esPagada(q: { Estado_Cotizacion?: string | null; Onboarding_Link?: string | null }): boolean {
+  if (String(q.Onboarding_Link || "").trim()) return true
+  return String(q.Estado_Cotizacion || "").toLowerCase().includes("pagad")
+}
+
+function esAceptadaOMas(q: { Estado_Cotizacion?: string | null; Onboarding_Link?: string | null }): boolean {
+  return esPagada(q) || String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
+}
+
 async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaCerrada[]> {
   const token = await getZohoAccessToken().catch(() => "")
   const ventas: VentaCerrada[] = []
@@ -683,7 +697,7 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
     // CUENTA como pago del rango (caso Ayres/Cofradía del 31-jul).
     const quotes = universo.filter((q) => !rango || enRango(q.Created_Time, rango))
     const aceptadasList = universo
-      .filter((q) => String(q.Estado_Cotizacion || "").toLowerCase().includes("acept"))
+      .filter((q) => esAceptadaOMas(q))
       .filter((q) => !rango || enRango(q.Fecha_Hora_Cotizacion || q.Modified_Time, rango))
     const marca = (q: { Intervenci_n_Humana?: string | null }) => String(q.Intervenci_n_Humana || "").toLowerCase()
     const autonomas = aceptadasList.filter((q) => marca(q).includes("100%")).length
@@ -1358,8 +1372,8 @@ function construirListadoComercial(params: {
     if (tel && cubiertos.has(tel)) continue
     if (Date.parse(String(q.Created_Time || "")) < corte30d) continue
     if (tel) cubiertos.add(tel)
-    const pagada = Boolean(String(q.Onboarding_Link || "").trim())
-    const aceptada = String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
+    const pagada = esPagada(q)
+    const aceptada = esAceptadaOMas(q)
     const estado = pagada ? "Pagada" : aceptada ? "Aceptada" : "Formal enviada"
     const fechaIso = pagada || aceptada
       ? String(q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time || "")
@@ -2058,8 +2072,8 @@ function renderEvolucionDiaria(params: {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
     if (tel && isTestContact(tel, testSet)) continue
     suma(sFormal, q.Created_Time)
-    const pagada = Boolean(String(q.Onboarding_Link || "").trim())
-    const aceptada = pagada || String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
+    const pagada = esPagada(q)
+    const aceptada = esAceptadaOMas(q)
     const fechaPago = q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time
     if (aceptada) suma(sAcept, fechaPago)
     if (pagada) suma(sPag, fechaPago)
@@ -2164,7 +2178,7 @@ function renderTrabajoEjecutivos(params: {
     rango ? enRango(iso, rango) : Date.parse(iso) >= ahora - 30 * 864e5
   const ventas = new Map<string, { uf: number; clp: number; n: number }>()
   for (const q of quotes) {
-    if (!String(q.Onboarding_Link || "").trim()) continue
+    if (!esPagada(q)) continue
     const fechaPago = String(q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time || "")
     if (!fechaPago || !enPeriodo(fechaPago)) continue
     const dueno = nombreDe(`${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim())
@@ -4130,8 +4144,8 @@ function renderListaCotizaciones(
   const filas = qs
     .map((q) => {
       const tel = digits(String(q.Tel_fono_Contacto || ""))
-      const aceptada = String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
-      const pagada = Boolean(String(q.Onboarding_Link || "").trim())
+      const aceptada = esAceptadaOMas(q)
+      const pagada = esPagada(q)
       const estado = pagada ? "Pagada" : String(q.Estado_Cotizacion || "—")
       const fechaPago = aceptada || pagada ? String(q.Fecha_Hora_Cotizacion || q.Modified_Time || "") : ""
       const owner = `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—"
@@ -4513,7 +4527,7 @@ export async function GET(req: Request): Promise<Response> {
       // Panel por ejecutivo: fee recurrente POR COTIZACIÓN pagada (la caché
       // fee_mes_v1_<id> se indexa pasando el id como "contact").
       try {
-        const pagadas = (cierre?.todasList || []).filter((q) => q.id && String(q.Onboarding_Link || "").trim())
+        const pagadas = (cierre?.todasList || []).filter((q) => q.id && esPagada(q))
         const feesPorQuote = await fetchFeesMensuales(pagadas.map((q) => ({ contact: String(q.id), quoteId: String(q.id) })))
         const qsPanel = (() => {
           const p = new URLSearchParams({ key, pais })
