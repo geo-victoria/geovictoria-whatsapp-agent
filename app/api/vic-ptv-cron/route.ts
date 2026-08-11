@@ -974,9 +974,22 @@ export async function GET(req: Request) {
   // viejo). Este cron SÍ corre cada 10 minutos, así que los despacha él.
   const huerfanos = await despacharHuerfanos().catch(() => [] as string[])
 
+  // 9. LEADS CRUZADOS DE PAÍS (caso Aleydis/+51994037412, 11-ago): la regla
+  // de Zoho "Asignación Leads Vicky TLMK" corre ASÍNCRONA tras la creación y
+  // puede pisar al dueño correcto con el roster CHILENO de calificación,
+  // aunque el lead sea de otro país (el filtro de territorio de la regla
+  // sigue pendiente del lado de Lalo). Este reconciliador deshace el cruce:
+  // lead SIN convertir del roster CL con territorio ≠ Chile → ejecutivo de
+  // su país (PE → Mónica, MX → Yahel). Best-effort, máx 10 por tick.
+  const cruzados = await reconciliarLeadsCruzados().catch((e) => {
+    console.warn("[ptv-cron] leads cruzados falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+
   return NextResponse.json({
     ok: true,
     crones_huerfanos_despachados: huerfanos,
+    leads_cruzados_corregidos: cruzados,
     conversaciones_revisadas: convs.length,
     traspasados,
     tm_traspasados: tmTraspasados,
@@ -1195,6 +1208,57 @@ async function abrirValvulasDePrecio(ahora: Date): Promise<number> {
  *
  * Con VICKY_PTV_CANDADO_CLASICO=1 no reabre nada (rollback sin deploy).
  */
+/**
+ * LEADS CRUZADOS DE PAÍS (11-ago): deshace las asignaciones de la regla de
+ * Zoho que caen en el roster chileno de calificación con leads de OTRO país.
+ * La regla corre asíncrona tras el create y puede pisar al dueño correcto;
+ * mientras Lalo no le ponga el filtro de territorio, este barrido corrige.
+ * Solo toca leads SIN convertir cuyo dueño es del roster CL — un dueño
+ * humano de otro equipo jamás se pisa.
+ */
+async function reconciliarLeadsCruzados(): Promise<number> {
+  const rosterCL = (process.env.VICKY_TM_ROSTER_CALIFICACION_EMAILS ||
+    "aaraque@geovictoria.com,asepulveda@geovictoria.com")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+  // Destino por territorio (mismos dueños fijos del canal de cada país).
+  const destinoPorTerritorio: Record<string, { id: string; email: string }> = {
+    "perú": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" }, // Mónica
+    "peru": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" },
+    "méxico": { id: "3525045000308323003", email: "ysegura@geovictoria.com" }, // Yahel
+    "mexico": { id: "3525045000308323003", email: "ysegura@geovictoria.com" },
+  }
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken()
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  const emails = rosterCL.map((e) => `'${e}'`).join(",")
+  const q = await fetch(`${api}/crm/v3/coql`, {
+    method: "POST", headers: H, cache: "no-store",
+    body: JSON.stringify({
+      select_query: `select id, Territorio, Phone, Owner.email from Leads where (Owner.email in (${emails}) and Converted__s = false) and Territorio != 'Chile' limit 10`,
+    }),
+  })
+  if (!q.ok || q.status === 204) return 0
+  const filas = ((await q.json().catch(() => ({}))) as { data?: Array<{ id?: string; Territorio?: string; Phone?: string }> }).data || []
+  let corregidos = 0
+  for (const l of filas) {
+    const destino = destinoPorTerritorio[String(l.Territorio || "").trim().toLowerCase()]
+    if (!destino || !l.id) continue
+    const put = await fetch(`${api}/crm/v3/Leads`, {
+      method: "PUT", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        data: [{ id: l.id, Owner: { id: destino.id } }],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    }).catch(() => null)
+    if (put?.ok) {
+      corregidos++
+      console.warn(`[leads-cruzados] lead ${l.id} (${l.Territorio}, ${l.Phone || "?"}) roster CL → ${destino.email}`)
+    }
+  }
+  return corregidos
+}
+
 async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; recerrados: number }> {
   if ((process.env.VICKY_PTV_CANDADO_CLASICO || "").trim() === "1") return { reabiertos: 0, recerrados: 0 }
   const desde = new Date(Date.now() - 7 * 24 * 3600e3).toISOString()
