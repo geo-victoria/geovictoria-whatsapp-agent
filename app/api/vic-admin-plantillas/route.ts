@@ -94,3 +94,40 @@ export async function GET(req: Request): Promise<NextResponse> {
     })),
   })
 }
+
+/**
+ * POST — crear una plantilla HSM nueva (Lalo 11-ago, plantilla del toque
+ * post-pago del doc "Regla general Vicky WhatsApp 3"). Proxy fino y
+ * autenticado del POST /v2.0/whatsapp/templates de Botmaker: el body llega
+ * del admin tal cual (así se puede iterar el formato sin redeploy), con dos
+ * cinturones: el nombre DEBE partir con "vicky_" y la línea se resuelve
+ * igual que el GET. La aprobación final la da Meta (queda "pending").
+ */
+export async function POST(req: Request): Promise<NextResponse> {
+  if (!(await authorized(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  if (!BM_TOKEN) return NextResponse.json({ error: "BOTMAKER_ACCESS_TOKEN no configurado" }, { status: 503 })
+  const body = (await req.json().catch(() => null)) as { line?: string; template?: Record<string, unknown> } | null
+  const template = body?.template
+  if (!template || typeof template !== "object") {
+    return NextResponse.json({ error: "body.template requerido" }, { status: 400 })
+  }
+  const nombre = String(template.name || "")
+  if (!/^vicky_[a-z0-9_]+$/.test(nombre)) {
+    return NextResponse.json({ error: "template.name debe partir con 'vicky_' (solo minúsculas/números/_)" }, { status: 400 })
+  }
+  const line = String(body?.line || "").replace(/\D/g, "") || lineaDefault()
+  if (!line) return NextResponse.json({ error: "sin línea (BOTMAKER_CHANNEL_NUMBER/CHANNEL_V3)" }, { status: 503 })
+  const res = await fetch(`https://api.botmaker.com/v2.0/whatsapp/templates`, {
+    method: "POST",
+    headers: { "access-token": BM_TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ ...template, phoneLineNumber: line }),
+    cache: "no-store",
+  })
+  const texto = await res.text().catch(() => "")
+  let json: unknown = null
+  try { json = JSON.parse(texto) } catch { /* respuesta no-JSON: va cruda */ }
+  return NextResponse.json(
+    { ok: res.ok, status: res.status, botmaker: json ?? texto.slice(0, 800) },
+    { status: res.ok ? 200 : 502 },
+  )
+}
