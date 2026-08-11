@@ -3968,6 +3968,46 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  // Cotizaciones existentes de un deal (Lalo 11-ago, "¿actualizar o crear
+  // nueva?"): el puente de la calculadora las lista ANTES de emitir para que
+  // el ejecutivo elija entre versionar una (v2/vN) o crear otra. Las cerradas
+  // (Aceptada/Pagada) se muestran deshabilitadas — el endpoint de
+  // actualización las rechaza con COTIZACION_CERRADA.
+  if (accion === "cotcalc_cotizaciones") {
+    const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
+    if (!dealId) {
+      return new Response(JSON.stringify({ ok: false, error: "deal faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    try {
+      const { getZohoAccessToken } = await import("@/lib/zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const r = await fetch(`${api}/crm/v3/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          select_query: `select id, Numero_Cotizacion, Name, Estado_Cotizacion, Version_PDF, PDF_URL, Created_Time from ${QUOTE_MODULE} where Deal_Asociado = ${dealId} order by Created_Time desc limit 20`,
+        }),
+        cache: "no-store",
+      })
+      const filas = (((await r.json().catch(() => ({}))) as {
+        data?: Array<{ id?: string; Numero_Cotizacion?: string; Name?: string; Estado_Cotizacion?: string; Version_PDF?: number; PDF_URL?: string; Created_Time?: string }>
+      }).data || []).map((q) => ({
+        id: String(q.id || ""),
+        numero: String(q.Numero_Cotizacion || ""),
+        nombre: String(q.Name || ""),
+        estado: String(q.Estado_Cotizacion || ""),
+        version: Number(q.Version_PDF || 1),
+        pdfUrl: String(q.PDF_URL || ""),
+        fecha: String(q.Created_Time || "").slice(0, 10),
+        cerrada: /aceptada|pagada/i.test(String(q.Estado_Cotizacion || "")),
+      }))
+      return new Response(JSON.stringify({ ok: true, cotizaciones: filas }), { headers: { "content-type": "application/json" } })
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
+    }
+  }
+
   // PDF de una cotización recién emitida (el puente de la calculadora hace
   // polling hasta que el render en segundo plano termina, y ahí lo descarga).
   if (accion === "cotcalc_pdf") {
@@ -3979,12 +4019,12 @@ export async function POST(req: Request): Promise<Response> {
       const { getZohoAccessToken } = await import("@/lib/zoho-token")
       const token = await getZohoAccessToken()
       const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-      const r = await fetch(`${api}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Numero_Cotizacion`, {
+      const r = await fetch(`${api}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Numero_Cotizacion,Version_PDF`, {
         headers: { Authorization: `Zoho-oauthtoken ${token}` },
         cache: "no-store",
       })
-      const rec = ((await r.json().catch(() => ({}))) as { data?: Array<{ PDF_URL?: string; Numero_Cotizacion?: string }> }).data?.[0]
-      return new Response(JSON.stringify({ ok: true, pdfUrl: String(rec?.PDF_URL || ""), numero: String(rec?.Numero_Cotizacion || "") }), { headers: { "content-type": "application/json" } })
+      const rec = ((await r.json().catch(() => ({}))) as { data?: Array<{ PDF_URL?: string; Numero_Cotizacion?: string; Version_PDF?: number }> }).data?.[0]
+      return new Response(JSON.stringify({ ok: true, pdfUrl: String(rec?.PDF_URL || ""), numero: String(rec?.Numero_Cotizacion || ""), version: Number(rec?.Version_PDF || 1) }), { headers: { "content-type": "application/json" } })
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
     }
@@ -4012,16 +4052,70 @@ export async function POST(req: Request): Promise<Response> {
         return new Response(JSON.stringify({ ok: false, error: "deal no encontrado — la emisión requiere una oportunidad válida" }), { status: 404, headers: { "content-type": "application/json" } })
       }
       const { getUFActualSafe } = await import("@/lib/tools/generar-link-cotizadora")
-      const { formatearRut, rutValido } = await import("@/lib/rut")
-      const rutCrudo = String(data.rutEmpresa || info.rut || "").trim()
-      if (!rutCrudo || !rutValido(rutCrudo)) {
-        return new Response(JSON.stringify({ ok: false, error: `RUT '${rutCrudo || "(vacío)"}' inválido — corrígelo en el campo RUT y reintenta.` }), { status: 400, headers: { "content-type": "application/json" } })
-      }
       // UF: la que la calculadora mostró (para que el CLP calce con lo que el
       // ejecutivo vio); si la página no la traía, la del día.
       const ufPagina = Number(data.ufValue)
       const ufActual = ufPagina > 1000 ? ufPagina : await getUFActualSafe()
       const totalCLP = Math.round(r.totalUF * ufActual)
+
+      // ── ACTUALIZAR una cotización existente del deal (Lalo 11-ago) ──
+      // El ejecutivo eligió versionar (v2/vN) en vez de crear otra: misma
+      // tubería del editor (actualizar-cotizacion — reemplaza los ítems,
+      // sube Version_PDF, regenera el PDF en segundo plano y NO manda correo).
+      // El link de aceptación no cambia. Las Aceptadas las rechaza el
+      // endpoint con COTIZACION_CERRADA.
+      const actualizarQuoteId = String((body as { actualizarQuoteId?: unknown } | null)?.actualizarQuoteId || "").replace(/\D/g, "")
+      if (actualizarQuoteId) {
+        const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+        const secreto = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+        const respAct = await fetch(`${base}/api/quote-acceptance/actualizar-cotizacion`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(secreto ? { "x-vicky-secret": secreto } : {}) },
+          body: JSON.stringify({
+            quoteId: actualizarQuoteId,
+            resumenCambio: "Actualización desde la calculadora comercial (canal ejecutivo)",
+            sinCorreoCliente: true,
+            cotizacion: {
+              items: r.items,
+              ufActual: Number(ufActual.toFixed(2)),
+              totalUF: r.totalUF,
+              totalCLP,
+            },
+          }),
+          cache: "no-store",
+        })
+        const dAct = (await respAct.json().catch(() => ({}))) as { ok?: boolean; version?: number; acceptance_url?: string; error?: string }
+        if (!respAct.ok || !dAct.ok) {
+          return new Response(JSON.stringify({ ok: false, error: String(dAct.error || `la actualización falló (HTTP ${respAct.status})`).slice(0, 300) }), { status: 502, headers: { "content-type": "application/json" } })
+        }
+        if (info.telefono && dAct.acceptance_url) {
+          const { setQuotePointer } = await import("@/lib/supabase-persistence-v3")
+          await setQuotePointer(info.telefono, {
+            quoteId: actualizarQuoteId,
+            dealId: info.dealId,
+            acceptanceUrl: String(dAct.acceptance_url || ""),
+            pdfUrl: "",
+            totalClp: totalCLP,
+            totalUf: r.totalUF,
+            empresa: (String(data.empresa || "").trim() || info.accountNombre || undefined) as string | undefined,
+          }).catch(() => {})
+        }
+        return new Response(JSON.stringify({
+          ok: true,
+          actualizada: true,
+          quoteId: actualizarQuoteId,
+          version: Number(dAct.version || 0),
+          acceptanceUrl: String(dAct.acceptance_url || ""),
+          totalUF: r.totalUF,
+          totalCLP,
+        }), { headers: { "content-type": "application/json" } })
+      }
+
+      const { formatearRut, rutValido } = await import("@/lib/rut")
+      const rutCrudo = String(data.rutEmpresa || info.rut || "").trim()
+      if (!rutCrudo || !rutValido(rutCrudo)) {
+        return new Response(JSON.stringify({ ok: false, error: `RUT '${rutCrudo || "(vacío)"}' inválido — corrígelo en el campo RUT y reintenta.` }), { status: 400, headers: { "content-type": "application/json" } })
+      }
       // Dotación para el deal: la cantidad de la línea de asistencia.
       const lineaAsist = (data.servicios || []).find((s) => /asistencia/i.test(String(s?.nombre || "")))
       const userCount = Number(lineaAsist?.cantidad) > 0 ? Number(lineaAsist?.cantidad) : undefined

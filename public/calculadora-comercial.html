@@ -2994,48 +2994,116 @@
 
         // Captura ANTES que el handler original de Nacho: con deal+key el
         // botón emite y descarga el PDF de la casa; el jsPDF original no corre.
+        // Si el deal YA tiene cotizaciones, primero se pregunta: ¿crear una
+        // NUEVA o ACTUALIZAR una existente (v2/vN)? (Lalo 11-ago)
         btn.addEventListener('click', function (e) {
           e.preventDefault();
           e.stopImmediatePropagation();
           var data;
           try { data = gatherProposalData(); } catch (err) { setStatus('⚠️ No pude leer la propuesta: ' + (err && err.message)); return; }
-          var rut = (INFO.rut || '').trim();
-          if (!rut) {
-            rut = (prompt('RUT de la empresa (obligatorio para emitir):', '') || '').trim();
-            if (!rut) { setStatus('⚠️ Emisión cancelada: falta el RUT.'); return; }
-          }
-          data.rutEmpresa = rut;
-          btn.disabled = true;
           var label = btn.textContent;
-          btn.textContent = 'Emitiendo cotización…';
-          setStatus('Creando la cotización en Zoho (amarrada al deal, sin correo al cliente)…');
+          btn.disabled = true;
+          btn.textContent = 'Revisando cotizaciones del deal…';
+          fetch(API + '&accion=cotcalc_cotizaciones&deal=' + DEAL, { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              var lista = (d && d.ok && d.cotizaciones) || [];
+              if (!lista.length) { emitir(data, null, null, label); return; }
+              mostrarSelector(lista, data, label);
+            })
+            .catch(function () { emitir(data, null, null, label); });
+        }, true);
+
+        // Panel "¿nueva o actualizar?" cuando el deal ya tiene cotizaciones.
+        function mostrarSelector(lista, data, label) {
+          btn.textContent = label;
+          var opciones = lista.map(function (q) {
+            var etiqueta = (q.numero || q.nombre || q.id) + ' · v' + q.version + ' · ' + (q.estado || 's/estado') + ' · ' + q.fecha;
+            return '<option value="' + q.id + '" data-pdf="' + (q.pdfUrl || '') + '"' + (q.cerrada ? ' disabled' : '') + '>' +
+              etiqueta + (q.cerrada ? ' (cerrada — solo crear nueva)' : '') + '</option>';
+          }).join('');
+          setStatus(
+            '<div style="border:1px solid #cfe0ea;background:#f4f9fc;border-radius:8px;padding:12px;margin-top:4px">' +
+            '<b>Este deal ya tiene ' + lista.length + ' cotización(es).</b><br>' +
+            '<label style="display:block;margin:8px 0 2px"><input type="radio" name="gvModo" value="nueva" checked> ➕ Crear una cotización NUEVA (asociada al mismo deal)</label>' +
+            '<label style="display:block;margin:2px 0 6px"><input type="radio" name="gvModo" value="actualizar"' + (lista.every(function (q) { return q.cerrada; }) ? ' disabled' : '') + '> ♻️ Actualizar una existente (genera v2/vN, mismo link de aceptación)</label>' +
+            '<select id="gvQuoteSel" style="width:100%;max-width:480px;padding:6px" disabled>' + opciones + '</select>' +
+            '<div style="margin-top:10px"><button id="gvGo" style="padding:7px 18px;border:0;border-radius:6px;background:#00aff2;color:#fff;font-weight:600;cursor:pointer">Continuar</button> ' +
+            '<button id="gvCancel" style="padding:7px 14px;border:1px solid #ccd;border-radius:6px;background:#fff;cursor:pointer">Cancelar</button></div>' +
+            '</div>'
+          );
+          var sel = document.getElementById('gvQuoteSel');
+          // Preseleccionar la primera abierta.
+          for (var i = 0; i < sel.options.length; i++) { if (!sel.options[i].disabled) { sel.selectedIndex = i; break; } }
+          var radios = status.querySelectorAll('input[name="gvModo"]');
+          radios.forEach(function (rd) {
+            rd.addEventListener('change', function () { sel.disabled = (status.querySelector('input[name="gvModo"]:checked') || {}).value !== 'actualizar'; });
+          });
+          document.getElementById('gvCancel').addEventListener('click', function () {
+            btn.disabled = false; btn.textContent = label; setStatus('');
+          });
+          document.getElementById('gvGo').addEventListener('click', function () {
+            var modo = (status.querySelector('input[name="gvModo"]:checked') || {}).value;
+            if (modo === 'actualizar') {
+              var opt = sel.options[sel.selectedIndex];
+              if (!opt || opt.disabled) { alert('Elige una cotización abierta para actualizar.'); return; }
+              emitir(data, opt.value, opt.getAttribute('data-pdf') || '', label);
+            } else {
+              emitir(data, null, null, label);
+            }
+          });
+        }
+
+        // Emite (actualizarQuoteId=null → crea nueva; con id → v2/vN de esa).
+        function emitir(data, actualizarQuoteId, pdfAnterior, label) {
+          if (!actualizarQuoteId) {
+            var rut = (INFO.rut || '').trim();
+            if (!rut) {
+              rut = (prompt('RUT de la empresa (obligatorio para emitir):', '') || '').trim();
+              if (!rut) { btn.disabled = false; btn.textContent = label; setStatus('⚠️ Emisión cancelada: falta el RUT.'); return; }
+            }
+            data.rutEmpresa = rut;
+          }
+          btn.disabled = true;
+          btn.textContent = actualizarQuoteId ? 'Actualizando cotización…' : 'Emitiendo cotización…';
+          setStatus(actualizarQuoteId
+            ? 'Actualizando la cotización en Zoho (nueva versión, mismo link, sin correo al cliente)…'
+            : 'Creando la cotización en Zoho (amarrada al deal, sin correo al cliente)…');
           fetch(API + '&accion=cotcalc_emitir&deal=' + DEAL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: data })
+            body: JSON.stringify(actualizarQuoteId ? { data: data, actualizarQuoteId: actualizarQuoteId } : { data: data })
           })
             .then(function (r) { return r.json(); })
             .then(function (d) {
               if (!d || !d.ok) throw new Error((d && d.error) || 'la emisión falló');
               var quoteId = d.quoteId;
               var accUrl = d.acceptanceUrl || '';
+              var versionEsperada = Number(d.version || 0);
               btn.textContent = 'Generando PDF…';
-              setStatus('✅ Cotización emitida (' + d.totalUF + ' UF · ~$' + Number(d.totalCLP || 0).toLocaleString('es-CL') + ' con IVA). Generando el PDF oficial…');
+              setStatus('✅ ' + (d.actualizada ? 'Cotización actualizada a v' + versionEsperada : 'Cotización emitida') +
+                ' (' + d.totalUF + ' UF · ~$' + Number(d.totalCLP || 0).toLocaleString('es-CL') + ' con IVA). Generando el PDF oficial…');
               var intentos = 0;
               (function poll() {
                 intentos++;
                 if (intentos > 30) {
                   btn.disabled = false; btn.textContent = label;
-                  setStatus('✅ Emitida, pero el PDF sigue generándose — en ~1 min queda en la ficha de Zoho. ' + linkAcc(accUrl));
+                  setStatus('✅ Lista, pero el PDF sigue generándose — en ~1 min queda en la ficha de Zoho. ' + linkAcc(accUrl));
                   return;
                 }
                 fetch(API + '&accion=cotcalc_pdf&quote=' + encodeURIComponent(quoteId), { method: 'POST' })
                   .then(function (r) { return r.json(); })
                   .then(function (p) {
-                    if (p && p.ok && p.pdfUrl) {
+                    // En una actualización, el PDF viejo sigue en la ficha
+                    // hasta que el regenerado lo reemplaza: esperar a que el
+                    // URL CAMBIE (y la versión alcance la esperada).
+                    var listo = p && p.ok && p.pdfUrl &&
+                      (!d.actualizada || (p.pdfUrl !== pdfAnterior && Number(p.version || 0) >= versionEsperada));
+                    if (listo) {
                       btn.disabled = false; btn.textContent = label;
                       window.open(p.pdfUrl, '_blank');
-                      setStatus('✅ <b>' + (p.numero || 'Cotización') + '</b> emitida y PDF descargado. ' + linkAcc(accUrl) +
+                      setStatus('✅ <b>' + (p.numero || 'Cotización') + '</b>' + (d.actualizada ? ' actualizada a v' + versionEsperada : ' emitida') +
+                        ' y PDF descargado. ' + linkAcc(accUrl) +
                         '<br><span style="color:#789">Nada fue enviado al cliente: el PDF y el link los entregas tú.</span>');
                     } else {
                       setTimeout(poll, 4000);
@@ -3048,7 +3116,7 @@
               btn.disabled = false; btn.textContent = label;
               setStatus('⚠️ ' + (err && err.message ? err.message : 'Error al emitir') + ' — corrige y reintenta.');
             });
-        }, true);
+        }
 
         function linkAcc(u) {
           if (!u) return '';
