@@ -273,6 +273,9 @@ export async function chatCotizadoraEjecutivos(params: {
             const cotizacion = payloadDesdePropuesta(r, ufActual)
             const rut = (input.rutEmpresa || info.rut || "").trim()
             const resp = await postCreateFromVicky({
+              // Principio 4: la emisión ejecutiva NO envía el correo al
+              // cliente — entregar es botón humano desde el editor.
+              sinCorreoCliente: true,
               cliente: {
                 empresa: (input.empresa || info.accountNombre || info.nombre || "").trim(),
                 contacto: (info.contactoNombre || "Contacto").trim(),
