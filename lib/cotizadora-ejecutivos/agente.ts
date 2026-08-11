@@ -160,7 +160,7 @@ export type ChatEjecResultado = {
   creado?: { quoteId: string; contact: string }
 }
 
-async function postCreateFromVicky(body: unknown): Promise<{ ok: boolean; [k: string]: unknown }> {
+export async function postCreateFromVicky(body: unknown): Promise<{ ok: boolean; [k: string]: unknown }> {
   for (let intento = 0; intento < 2; intento++) {
     try {
       const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky`, {

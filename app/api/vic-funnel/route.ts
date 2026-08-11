@@ -3130,7 +3130,7 @@ async function renderVickyCotizacionesCrear(dealId: string, key: string, motorEj
 </style></head><body><div class="wrap">
   <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&cotnueva=1">← Elegir otra oportunidad</a></p>
   <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">${motorEjec ? "Cotizadora de Ejecutivos — catálogo comercial" : "Vicky Cotizaciones — nueva cotización"}</h1>
-  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). ${motorEjec ? "Catálogo comercial COMPLETO (1-8.000 usuarios, equipos, casino, BI, promos — precios del canal ejecutivo). El agente no envía nada al cliente: eso es con los botones del editor." : "Cuéntale al agente qué necesita la cotización y la emite de inmediato; después te lleva al editor para ajustes o envío."} · <a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(dealId)}${motorEjec ? "" : "&motor=ejecutivo"}">${motorEjec ? "← usar Vicky clásico (catálogo SMB)" : "usar catálogo comercial completo →"}</a></div>
+  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). ${motorEjec ? "Catálogo comercial COMPLETO (1-8.000 usuarios, equipos, casino, BI, promos — precios del canal ejecutivo). El agente no envía nada al cliente: eso es con los botones del editor." : "Cuéntale al agente qué necesita la cotización y la emite de inmediato; después te lleva al editor para ajustes o envío."} · <a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(dealId)}${motorEjec ? "" : "&motor=ejecutivo"}">${motorEjec ? "← usar Vicky clásico (catálogo SMB)" : "usar catálogo comercial completo →"}</a> · <a href="/calculadora-comercial.html?deal=${encodeURIComponent(dealId)}&key=${encodeURIComponent(key)}" target="_blank">abrir CALCULADORA comercial (UI) →</a></div>
   <div class="cols">
     <div class="chatCol card">
       <div id="chatBox">
@@ -3834,6 +3834,117 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
     }
   }
+  // ── CALCULADORA COMERCIAL (copia de gv-cotizador en public/, 11-ago) ──
+  // Info del deal para el banner de la página.
+  if (accion === "cotcalc_info") {
+    const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
+    if (!dealId) {
+      return new Response(JSON.stringify({ ok: false, error: "deal faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    try {
+      const { infoDeal } = await import("@/lib/cotizaciones-editor")
+      const info = await infoDeal(dealId)
+      if (!info) {
+        return new Response(JSON.stringify({ ok: false, error: "deal no encontrado" }), { status: 404, headers: { "content-type": "application/json" } })
+      }
+      return new Response(JSON.stringify({ ok: true, info: { nombre: info.nombre, accountNombre: info.accountNombre, rut: info.rut, contactoNombre: info.contactoNombre } }), { headers: { "content-type": "application/json" } })
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
+    }
+  }
+
+  // Emisión desde la calculadora: snapshot de gatherProposalData() → ítems
+  // (con verificación de integridad de totales) → create-from-vicky anclado
+  // al deal, SIN correo al cliente. La entrega es siempre del ejecutivo.
+  if (accion === "cotcalc_emitir") {
+    const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
+    if (!dealId) {
+      return new Response(JSON.stringify({ ok: false, error: "deal faltante" }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    const body = (await req.json().catch(() => null)) as { data?: Record<string, unknown> } | null
+    const data = (body?.data || {}) as import("@/lib/cotizadora-ejecutivos/desde-calculadora").SnapshotCalculadora & { rutEmpresa?: string }
+    try {
+      const { itemsDesdeSnapshot } = await import("@/lib/cotizadora-ejecutivos/desde-calculadora")
+      const r = itemsDesdeSnapshot(data)
+      if (!r.ok) {
+        return new Response(JSON.stringify({ ok: false, error: r.error }), { status: 400, headers: { "content-type": "application/json" } })
+      }
+      const { infoDeal } = await import("@/lib/cotizaciones-editor")
+      const info = await infoDeal(dealId)
+      if (!info) {
+        return new Response(JSON.stringify({ ok: false, error: "deal no encontrado — la emisión requiere una oportunidad válida" }), { status: 404, headers: { "content-type": "application/json" } })
+      }
+      const { getUFActualSafe } = await import("@/lib/tools/generar-link-cotizadora")
+      const { formatearRut, rutValido } = await import("@/lib/rut")
+      const rutCrudo = String(data.rutEmpresa || info.rut || "").trim()
+      if (!rutCrudo || !rutValido(rutCrudo)) {
+        return new Response(JSON.stringify({ ok: false, error: `RUT '${rutCrudo || "(vacío)"}' inválido — corrígelo en el campo RUT y reintenta.` }), { status: 400, headers: { "content-type": "application/json" } })
+      }
+      // UF: la que la calculadora mostró (para que el CLP calce con lo que el
+      // ejecutivo vio); si la página no la traía, la del día.
+      const ufPagina = Number(data.ufValue)
+      const ufActual = ufPagina > 1000 ? ufPagina : await getUFActualSafe()
+      const totalCLP = Math.round(r.totalUF * ufActual)
+      // Dotación para el deal: la cantidad de la línea de asistencia.
+      const lineaAsist = (data.servicios || []).find((s) => /asistencia/i.test(String(s?.nombre || "")))
+      const userCount = Number(lineaAsist?.cantidad) > 0 ? Number(lineaAsist?.cantidad) : undefined
+      const { postCreateFromVicky } = await import("@/lib/cotizadora-ejecutivos/agente")
+      const resp = await postCreateFromVicky({
+        sinCorreoCliente: true,
+        cliente: {
+          empresa: (String(data.empresa || "").trim() || info.accountNombre || info.nombre || "").trim(),
+          contacto: (String(data.contacto || "").trim() || info.contactoNombre || "Contacto").trim(),
+          contactoEmail: info.email || undefined,
+          contactoTelefono: info.telefono || "",
+          rutEmpresa: formatearRut(rutCrudo),
+          userCount,
+          sectorEmpresa: "",
+        },
+        existing: {
+          accountId: info.accountId || undefined,
+          contactId: info.contactId || undefined,
+          dealId: info.dealId,
+          ownerId: info.ownerId || undefined,
+        },
+        cotizacion: {
+          items: r.items,
+          subtotalUF: r.subtotalUF,
+          ivaUF: r.ivaUF,
+          totalUF: r.totalUF,
+          ufActual: Number(ufActual.toFixed(2)),
+          totalCLP,
+        },
+      })
+      if (!resp.ok) {
+        return new Response(JSON.stringify({ ok: false, error: String(resp.error || resp.detail || "la cotizadora rechazó la emisión").slice(0, 300) }), { status: 502, headers: { "content-type": "application/json" } })
+      }
+      const quoteId = String(resp.quoteId || "")
+      if (info.telefono && quoteId) {
+        const { setQuotePointer } = await import("@/lib/supabase-persistence-v3")
+        await setQuotePointer(info.telefono, {
+          quoteId,
+          dealId: String(resp.dealId || info.dealId),
+          acceptanceUrl: String(resp.acceptanceUrl || ""),
+          pdfUrl: String(resp.pdfUrl || ""),
+          totalClp: totalCLP,
+          totalUf: r.totalUF,
+          rut: rutCrudo || undefined,
+          empresa: (String(data.empresa || "").trim() || info.accountNombre || undefined) as string | undefined,
+        }).catch(() => {})
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        quoteId,
+        numero: "",
+        acceptanceUrl: String(resp.acceptanceUrl || ""),
+        totalUF: r.totalUF,
+        totalCLP,
+      }), { headers: { "content-type": "application/json" } })
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 300) }), { status: 502, headers: { "content-type": "application/json" } })
+    }
+  }
+
   if (accion === "cotejec_chat") {
     const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
     if (!dealId) {

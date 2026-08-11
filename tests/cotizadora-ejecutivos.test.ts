@@ -12,6 +12,7 @@ import assert from "node:assert"
 import { readFileSync } from "node:fs"
 import { cotizarPropuesta, validarPropuesta, topePromoSf2a } from "../lib/cotizadora-ejecutivos/motor.ts"
 import { payloadDesdePropuesta } from "../lib/cotizadora-ejecutivos/emitir.ts"
+import { itemsDesdeSnapshot } from "../lib/cotizadora-ejecutivos/desde-calculadora.ts"
 
 describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
   test("caso Anderson: 80 usuarios + 5 SF2A arriendo + envío", () => {
@@ -224,8 +225,52 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
     assert.strictEqual(p.totalCLP, Math.round(p.totalUF * 40000))
   })
 
+  test("puente calculadora: el snapshot de gatherProposalData emite ítems fieles", () => {
+    // Caso TORREONES real (PDF de Anderson 10-ago): 80 usuarios −30%,
+    // 3 SF2A promo 0,3 + 2 a 0,35 (arriendo), 5 envíos RM 0,15 único.
+    const r = itemsDesdeSnapshot({
+      empresa: "SERVICIOS INTEGRALES LOS TORREONES LTDA",
+      servicios: [
+        { nombre: "Asistencia", cantidad: 80, precioUnit: 0.065, tipo: "Por usuario", descuento: 30, subtotalUF: 3.64, rango: "51-100" },
+      ],
+      equipos: [
+        { nombre: "Senseface 2A (Promoción)", tipo: "Arriendo", cantidad: 3, precioUnit: 0.3, subtotalUF: 0.9 },
+        { nombre: "Senseface 2A", tipo: "Arriendo", cantidad: 2, precioUnit: 0.35, subtotalUF: 0.7 },
+        { nombre: "Incluye: gabinete", tipo: "Arriendo", cantidad: 2, precioUnit: 0, subtotalUF: 0 },
+      ],
+      serviciosAsoc: [
+        { nombre: "Envío", tipo: "Arriendo", zona: "RM", cantidad: 5, precioUnit: 0.15, subtotalUF: 0.75 },
+      ],
+      totals: { subtotalNeto: 5.99 },
+    })
+    assert.ok(r.ok)
+    if (r.ok) {
+      assert.strictEqual(r.subtotalUF, 5.99)
+      assert.strictEqual(r.totalUF, Number((5.99 * 1.19).toFixed(3)))
+      const sf = r.items.find((i) => i.nombre === "Senseface 2A (Promoción)")
+      assert.strictEqual(sf?.tipo, "hardware")
+      assert.strictEqual(sf?.modalidad, "Arriendo mensual")
+      // La línea informativa "Incluye:" se pliega, no viaja como ítem.
+      assert.ok(!r.items.some((i) => /incluye/i.test(i.nombre)))
+      const envio = r.items.find((i) => /Env/i.test(i.nombre))
+      assert.strictEqual(envio?.modalidad, "Cobro único")
+      assert.strictEqual(envio?.zonaTarifa, "RM")
+      // Asistencia con descuento: unitario NETO × cantidad = subtotal.
+      const asist = r.items.find((i) => /Asistencia/.test(i.nombre))
+      assert.strictEqual(asist?.subtotalUF, 3.64)
+      assert.strictEqual(Number((Number(asist?.precioUnitarioUF) * 80).toFixed(2)), 3.64)
+    }
+
+    // Integridad: si los totales del snapshot no calzan, la emisión se niega.
+    const malo = itemsDesdeSnapshot({
+      servicios: [{ nombre: "Asistencia", cantidad: 10, tipo: "Fijo", subtotalUF: 0.75 }],
+      totals: { subtotalNeto: 9.99 },
+    })
+    assert.strictEqual(malo.ok, false)
+  })
+
   test("frontera: el motor es PURO (sin red, sin Supabase, sin imports externos)", () => {
-    for (const f of ["lib/cotizadora-ejecutivos/motor.ts", "lib/cotizadora-ejecutivos/catalogo.ts", "lib/cotizadora-ejecutivos/emitir.ts"]) {
+    for (const f of ["lib/cotizadora-ejecutivos/motor.ts", "lib/cotizadora-ejecutivos/catalogo.ts", "lib/cotizadora-ejecutivos/emitir.ts", "lib/cotizadora-ejecutivos/desde-calculadora.ts"]) {
       const src = readFileSync(f, "utf-8")
       assert.doesNotMatch(src, /fetch\(/, `${f} no debe hacer red`)
       assert.doesNotMatch(src, /SUPABASE|process\.env/, `${f} no debe leer env ni Supabase`)
