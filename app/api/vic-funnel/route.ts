@@ -2875,7 +2875,7 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
         <td>${esc(p.empresa || "—")}<div class="sub" style="margin:0;font-size:12px">+${esc(d)}${p.rut ? ` · RUT ${esc(p.rut)}` : ""}</div></td>
         <td style="white-space:nowrap;text-align:right">${total}</td>
         <td style="white-space:nowrap">${fmtSantiago(String(p.updated_at || ""))}</td>
-        <td style="white-space:nowrap">${ver ? `<a href="${esc(ver)}" target="_blank" rel="noopener">🧾 ver</a> · ` : ""}<a href="/calculadora-comercial.html?cot=${encodeURIComponent(String(p.quote_id))}&key=${encodeURIComponent(key)}" title="Abrir en la calculadora comercial con la cotización precargada (equipos y servicios con su precio exacto)">✏️ editar</a> · <a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(d)}&cot=${encodeURIComponent(String(p.quote_id))}" title="Editar conversando con Vicky Cotizaciones (conserva los precios Vicky)" style="font-weight:400">💬 chat</a></td>
+        <td style="white-space:nowrap">${ver ? `<a href="${esc(ver)}" target="_blank" rel="noopener">🧾 ver</a> · ` : ""}<a href="?key=${encodeURIComponent(key)}&coted=${encodeURIComponent(d)}&cot=${encodeURIComponent(String(p.quote_id))}">✏️ editar</a></td>
       </tr>`
     })
     .join("")
@@ -3994,81 +3994,6 @@ export async function POST(req: Request): Promise<Response> {
   // el ejecutivo elija entre versionar una (v2/vN) o crear otra. Las cerradas
   // (Aceptada/Pagada) se muestran deshabilitadas — el endpoint de
   // actualización las rechaza con COTIZACION_CERRADA.
-  // PRECARGA de una COT existente en la calculadora comercial (Lalo 12-ago):
-  // devuelve la configuración de la cotización (ítems, dotación, deal, RUT)
-  // para que el puente marque las filas de la UI de Nacho. Solo CHILE (la
-  // calculadora es UF); PE/CO/MX siguen por el chat del editor.
-  if (accion === "cotcalc_precarga") {
-    const quoteIdSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim()
-    if (!quoteIdSel) {
-      return new Response(JSON.stringify({ ok: false, error: "cot faltante" }), { status: 400, headers: { "content-type": "application/json" } })
-    }
-    try {
-      const { getZohoAccessToken } = await import("@/lib/zoho-token")
-      const token = await getZohoAccessToken()
-      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-      const H = { Authorization: `Zoho-oauthtoken ${token}` }
-      const qr = await fetch(`${api}/crm/v3/${QUOTE_MODULE}/${quoteIdSel}`, { headers: H, cache: "no-store" })
-      const quote = (((await qr.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || [])[0]
-      if (!quote) {
-        return new Response(JSON.stringify({ ok: false, error: `no encontré la cotización ${quoteIdSel} en Zoho` }), { status: 404, headers: { "content-type": "application/json" } })
-      }
-      const dealLk = quote.Deal_Asociado as { id?: string; name?: string } | null
-      const dealId = String(dealLk?.id || "").replace(/\D/g, "")
-      if (!dealId) {
-        return new Response(JSON.stringify({ ok: false, error: "la cotización no tiene deal asociado — ábrela por el chat del editor" }), { status: 409, headers: { "content-type": "application/json" } })
-      }
-      // Territorio del deal: la calculadora es UF — solo Chile.
-      let territorio = ""
-      let nDeal = 0
-      try {
-        const dr = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Territorio,N_Empleados_que_marcan`, { headers: H, cache: "no-store" })
-        const deal = (((await dr.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || [])[0]
-        territorio = String(deal?.Territorio || "")
-        nDeal = Number(deal?.N_Empleados_que_marcan || 0)
-      } catch { /* best effort */ }
-      if (territorio && territorio !== "Chile") {
-        return new Response(JSON.stringify({ ok: false, error: `cotización de ${territorio} — la calculadora es solo Chile (UF); edítala por el chat` }), { status: 409, headers: { "content-type": "application/json" } })
-      }
-      const subform = (quote.Detalle_Items_Cotizacion as Array<Record<string, unknown>> | null) || []
-      const items = subform.map((i) => ({
-        codigo: String(i.Codigo_Item || ""),
-        nombre: String(i.Nombre_Item || ""),
-        desc: String(i.Descripcion_Item || ""),
-        cantidad: Number(i.Cantidad || 1),
-        precioUF: Number(i.Precio_Unitario_UF || 0),
-        subtotalUF: Number(i.Subtotal_UF || 0),
-        recurrente: i.Es_Recurrente === true,
-        modalidad: String(i.Modalidad || ""),
-        zona: String(i.Zona_Tarifa || ""),
-      }))
-      // Dotación: ítem "Por usuario" del plan → cantidad; si el plan es tramo
-      // fijo, la dotación real vive en el deal (N_Empleados_que_marcan).
-      const asistPorUsuario = items.find((i) => i.codigo === "asistencia" && /usuario/i.test(i.modalidad))
-      const userCount = asistPorUsuario?.cantidad || nDeal || 0
-      const totalNetoUF = items.reduce((s, i) => s + i.subtotalUF, 0)
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          quoteId: quoteIdSel,
-          dealId,
-          numero: String(quote.Numero_Cotizacion || ""),
-          empresa: String((quote.Cuenta_Asociada as { name?: string } | null)?.name || quote.Empresa_Cliente || ""),
-          rut: String(quote.RUT_Cliente || ""),
-          estado: String(quote.Estado_Cotizacion || ""),
-          version: Number(quote.Version_PDF || 1),
-          cerrada: /aceptada|pagada/i.test(String(quote.Estado_Cotizacion || "")),
-          userCount,
-          items,
-          totalNetoUF: Number(totalNetoUF.toFixed(3)),
-        }),
-        { headers: { "content-type": "application/json" } },
-      )
-    } catch (e) {
-      return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
-    }
-  }
-
   if (accion === "cotcalc_cotizaciones") {
     const dealId = (searchParams.get("deal") || "").replace(/\D/g, "").trim()
     if (!dealId) {
@@ -4743,16 +4668,8 @@ export async function GET(req: Request): Promise<Response> {
           `<p>No encontré ninguna cotización con el número <b>${esc(buscarcot)}</b> en Zoho. Revisa el número (ej: <code>COT400</code>) e inténtalo de nuevo.</p><p><a href="?key=${encodeURIComponent(key)}&vista=editor">← Volver al editor de cotizaciones</a></p>`,
         )
       }
-      // Búsqueda por NÚMERO → calculadora comercial con la COT precargada
-      // (Lalo 12-ago); el chat queda como link secundario en la fila y en el
-      // banner de la calculadora. Sin quoteId resoluble → chat como siempre.
-      if (hallada.quoteId) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: `/calculadora-comercial.html?cot=${encodeURIComponent(hallada.quoteId)}&key=${encodeURIComponent(key)}` },
-        })
-      }
       const p = new URLSearchParams({ key, coted: hallada.contact })
+      if (hallada.conPuntero) p.set("cot", hallada.quoteId)
       return new Response(null, { status: 302, headers: { location: `?${p.toString()}` } })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
