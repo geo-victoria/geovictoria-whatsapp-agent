@@ -103,6 +103,24 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
     con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
     formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
   },
+  // Toques 2-3 fuera de ventana: plantillas PROPIAS vicky_loop_toque2/3
+  // (creadas 12-ago vía API, estado BOTMAKER_PENDING). Mientras Meta no las
+  // apruebe, la celda por defecto va VACÍA → skip limpio y la cadencia avanza
+  // (celda vacía NO envía — patrón del repo). Antes estas filas NO existían y
+  // el fallback caía a la DESPEDIDA del toque 7: caso ROSA 12-ago, "no te
+  // escribo más" DOS veces seguidas con el loop aún vivo. Encendido sin
+  // deploy cuando Meta apruebe: LOOP_TPL_T2=vicky_loop_toque2 /
+  // LOOP_TPL_T3=vicky_loop_toque3 (los envs cubren las 3 etapas).
+  2: {
+    sin_precio: tplCelda("LOOP_TPL_T2", ""),
+    con_precio: tplCelda("LOOP_TPL_T2", ""),
+    formal: tplCelda("LOOP_TPL_T2", ""),
+  },
+  3: {
+    sin_precio: tplCelda("LOOP_TPL_T3", ""),
+    con_precio: tplCelda("LOOP_TPL_T3", ""),
+    formal: tplCelda("LOOP_TPL_T3", ""),
+  },
   4: {
     sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO),
     con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
@@ -139,6 +157,8 @@ const VARS_PLANTILLA: Record<string, readonly string[]> = {
   vicky_loop_retoma: ["nombre"],
   vicky_loop_retoma_rut: ["nombre"],
   vicky_loop_despedida: ["nombre"],
+  vicky_loop_toque2: ["nombre"],
+  vicky_loop_toque3: ["nombre"],
   vicky_react_47_razones_v2: ["nombre"],
   vicky_co_react_preform: ["nombre"],
   vicky_mx_react_corta: ["nombre", "empresa"],
