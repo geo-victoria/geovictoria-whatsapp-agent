@@ -147,7 +147,7 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
     assert.ok(conTecnico.some((p2) => p2.includes("sin zona")))
   })
 
-  test("SF2A en venta es imposible (solo arriendo)", () => {
+  test("SF2A en venta habilitado a 6 UF (Lalo 12-ago: la calculadora debe permitir venta de equipos)", () => {
     const pendientes = validarPropuesta({
       usuarios: 10,
       equipos: [{ id: "senseface_2a", modalidad: "venta", cantidad: 1 }],
@@ -155,7 +155,14 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
       instalacionPorCliente: true,
       firmante: "x",
     })
-    assert.ok(pendientes.some((p) => p.includes("solo existe en arriendo")))
+    assert.ok(!pendientes.some((p) => p.toLowerCase().includes("arriendo")), `pendientes inesperados: ${pendientes.join(" | ")}`)
+    const r = cotizarPropuesta({
+      usuarios: 10,
+      equipos: [{ id: "senseface_2a", modalidad: "venta", cantidad: 1 }],
+    })
+    const sf = r.lineas.find((l) => l.id === "senseface_2a")
+    assert.strictEqual(sf?.subtotalUF, 6)
+    assert.strictEqual(r.totalPagoUnicoUF >= 6, true)
   })
 
   test("bundle IN01 y kit QR con precio propio", () => {

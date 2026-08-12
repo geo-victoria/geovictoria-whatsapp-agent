@@ -371,9 +371,6 @@ export function validarPropuesta(config: ConfigPropuesta): string[] {
     if (e.modalidad !== "venta" && e.modalidad !== "arriendo") {
       pendientes.push(`${e.id}: falta la modalidad (venta o arriendo).`)
     }
-    if (e.id === "senseface_2a" && e.modalidad === "venta") {
-      pendientes.push("Senseface 2A solo existe en arriendo — cambia la modalidad o el equipo.")
-    }
   }
   if (hayFisico) {
     const hayEnvio = servicios.some((s) => s.id === "envio")

@@ -131,7 +131,7 @@ export const EQUIPOS: Equipo[] = [
   { id: "mb10vl", nombre: "MB10-VL (WIFI/LAN)", venta: 3.5, arriendo: 0.5 },
   { id: "mb560vl", nombre: "MB560-vl (WIFI/LAN)", venta: 5, arriendo: 0.6 },
   { id: "s922", nombre: "S922 (4G)", venta: 20, arriendo: 2.5 },
-  { id: "senseface_2a", nombre: "Senseface 2A", venta: 0, arriendo: 0.35 },
+  { id: "senseface_2a", nombre: "Senseface 2A", venta: 6, arriendo: 0.35 }, // venta habilitada (Lalo 12-ago): 6 UF lista Vicky — la calculadora debe permitir venta de equipos
   { id: "senseface_3a", nombre: "Senseface 3A (WIFI/LAN)", venta: 7, arriendo: 0.65 },
   { id: "senseface_4a", nombre: "Senseface 4A", venta: 8.5, arriendo: 0.75 },
   { id: "senseface_7a", nombre: "Senseface 7A (WIFI/LAN)", venta: 10, arriendo: 0.8 },
