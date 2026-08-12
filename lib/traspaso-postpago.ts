@@ -20,7 +20,6 @@ import {
   getQuotePointers,
   setKvValue,
 } from "./supabase-persistence-v3"
-import { cancelPendingCallbacks } from "./dapta-voice"
 import { sendBotmakerMessage } from "./botmaker-push-v3"
 import { PERFIL_CO } from "./paises/co"
 import { ownerDeCotizacion } from "./zoho-quote-owner"
@@ -179,7 +178,6 @@ export async function cerrarYTraspasarPostPago(
   if (!contact) return { traspaso: "sin_contacto" }
 
   await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
-  await cancelPendingCallbacks(contact).catch(() => {})
   // Regla de oro del Loop v2: la venta cerrada corta el loop de toques para
   // siempre (best-effort). El motivo distingue pago real de aceptación (fix
   // 10-ago) — el cobro asistido depende de esa diferencia.

@@ -22,7 +22,6 @@ import { join } from "node:path"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const V3 = readFileSync(join(RAIZ, "app/api/vic-botmaker-v3/route.ts"), "utf8")
-const SALES = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/route.ts"), "utf8")
 
 describe("guardrail ALUCINACIÓN_URL con procedencia (webhook v3)", () => {
   test("calcula si las URLs del reply vienen de tools del turno", () => {
@@ -37,12 +36,5 @@ describe("guardrail ALUCINACIÓN_URL con procedencia (webhook v3)", () => {
   test("el reintento también acepta URLs con procedencia de tool", () => {
     assert.match(V3, /const retryUrlsDeTools = urlsDeToolsDelTurno\(retryTools\)/)
     assert.match(V3, /retryReal \|\| retryLinkConocido \|\| retryVieneDeTools \|\| !retryTieneUrl/)
-  })
-})
-
-describe("guardrail del endpoint sales-agent (mismo criterio)", () => {
-  test("procedencia aplicada antes de fusilar", () => {
-    assert.match(SALES, /urlsVienenDeTools/)
-    assert.match(SALES, /hasCotizacionUrl && !realCotizacion && !urlsVienenDeTools/)
   })
 })

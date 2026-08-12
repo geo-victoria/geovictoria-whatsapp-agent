@@ -968,13 +968,6 @@ export async function GET(req: Request) {
     return 0
   })
 
-  // 6. VÁLVULA DE PRECIO (punto 2, Lalo 08-ago): derivación sobre-umbral sin
-  // contacto del vendedor en N horas hábiles → Vicky recupera el precio.
-  const valvulas = await abrirValvulasDePrecio(ahora).catch((e) => {
-    console.warn("[ptv-cron] válvulas de precio fallaron:", e instanceof Error ? e.message : e)
-    return 0
-  })
-
   // 7. COBRO ASISTIDO (punto 2 de la segunda tanda, Lalo 08-ago): cotización
   // ACEPTADA hace 30+ minutos sin señal de pago → un empujón de pago único.
   // El cliente que aceptó es el más caliente de todo el embudo.
@@ -1020,7 +1013,6 @@ export async function GET(req: Request) {
     loops_reabiertos_sin_atencion: reconciliacion.reabiertos,
     loops_recerrados_por_atencion: reconciliacion.recerrados,
     sla_alertas_60min: slaAlertas,
-    valvulas_precio_abiertas: valvulas,
     cobros_asistidos: cobros.enviados,
     aceptadas_sin_pago: cobros.pendientes,
   })
@@ -1153,63 +1145,6 @@ async function escaladaSla(ahora: Date): Promise<number> {
     alertas++
   }
   return alertas
-}
-
-/**
- * VÁLVULA DE ESCAPE DE PRECIO (punto 2, Lalo 08-ago): un cliente sobre-umbral
- * al que se le prometió ejecutivo (kv sobre_umbral_<fono>) y que en
- * VICKY_VALVULA_HORAS horas hábiles (default 4) no recibió contacto real,
- * recupera a Vicky con autonomía TOTAL de precio (kv valvula_precio_<fono> →
- * umbralPrecios devuelve 50). Se le avisa al cliente si la ventana de Meta
- * está abierta, y al equipo siempre. La inmediatez manda: mejor que Vicky
- * cierre a que el cliente espere a alguien que no llegó.
- */
-async function abrirValvulasDePrecio(ahora: Date): Promise<number> {
-  const { valvulaActiva, valvulaHoras } = await import("@/lib/umbral-autonomia")
-  if (!valvulaActiva()) return 0
-  const marcas = await supa<{ key: string; value: string }>(
-    `vic_kv?key=like.sobre_umbral_%25&select=key,value&limit=200`,
-  )
-  if (!marcas.length) return 0
-  const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
-  let abiertas = 0
-  for (const m of marcas) {
-    if (abiertas >= 10) break
-    const fono = String(m.key).replace("sobre_umbral_", "")
-    if (!/^\d{10,13}$/.test(fono)) continue
-    let at = ""
-    try {
-      at = String((JSON.parse(m.value || "{}") as { at?: string }).at || "")
-    } catch { /* marca ilegible: se ignora */ }
-    if (!at) continue
-    if (await getKvValue(`valvula_precio_${fono}`).catch(() => null)) continue
-    const pais = paisDeContacto(fono) || "cl"
-    const feriados = await feriadosDePais(pais)
-    if (minutosHabilesEntre(new Date(at), ahora, pais, feriados) < valvulaHoras() * 60) continue
-    const atendidos = await contactosAtendidosPorVendedor([{ contact: fono, desdeIso: at }]).catch(
-      () => new Set<string>(),
-    )
-    if (atendidos.has(fono)) continue
-    await setKvValue(`valvula_precio_${fono}`, ahora.toISOString()).catch(() => {})
-    abiertas++
-    await avisarEquipoInterno(
-      `🔓 Válvula de precio abierta para +${fono}: pasaron ${valvulaHoras()} horas hábiles desde la derivación sobre-umbral sin contacto del vendedor. Vicky recupera la autonomía de precio para este caso y retoma el cierre.`,
-    ).catch(() => {})
-    // Aviso al cliente solo con ventana de Meta abierta (24h desde su último
-    // mensaje) — si está cerrada, la válvula igual queda abierta y el precio
-    // sale apenas el cliente escriba o en el siguiente toque del loop.
-    const conv = await supa<{ last_user_at: string | null }>(
-      `vic_v3_conversations?contact=eq.${encodeURIComponent(fono)}&select=last_user_at&limit=1`,
-    )
-    const lastUser = conv[0]?.last_user_at ? Date.parse(conv[0].last_user_at) : 0
-    if (lastUser && ahora.getTime() - lastUser < VENTANA_META_MS && enVentanaProactiva(fono, ahora)) {
-      const texto =
-        "Te cuento: para no dejarte esperando más, retomo yo misma tu cotización y te armo el valor de inmediato si quieres 😊 ¿Seguimos?"
-      const enviado = await sendBotmakerMessage(fono, texto).catch(() => false)
-      if (enviado) await appendAssistantV3(fono, texto).catch(() => {})
-    }
-  }
-  return abiertas
 }
 
 /**

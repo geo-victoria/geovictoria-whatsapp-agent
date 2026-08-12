@@ -114,10 +114,6 @@ type LeadBody = {
   // qué producto estaba mirando en vez de partir genérica.
   paginaConversion?: string
   landingPage?: string
-  // Hook de PRUEBA (mismo patrón que el cron de reactivación): con test=true
-  // salta la exclusión de internos y el dedup para validar la plantilla en un
-  // número del equipo. NO persiste contexto ni toca el lead en Zoho.
-  test?: boolean
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -206,19 +202,6 @@ export async function POST(req: Request): Promise<Response> {
       ? PERFIL_CO.canal.channelId
       : undefined
 
-  // Hook de prueba: envía la plantilla real al número indicado (aunque sea
-  // interno) y termina — sin dedup, sin contexto persistido, sin tocar Zoho.
-  if (body.test === true) {
-    if (!tplPais) {
-      return NextResponse.json({
-        ok: false,
-        test: true,
-        error: `OUTBOUND_TEMPLATE_LEAD${esMX ? "_MX" : esCO ? "_CO" : ""} no configurada`,
-      })
-    }
-    const okTest = await sendBotmakerTemplate(contact, tplPais, { nombre, empresa }, channelId).catch(() => false)
-    return NextResponse.json({ ok: okTest, test: true, contact, template: tplPais })
-  }
   // Los números internos no reciben prospección (mismo set que excluye el
   // embudo). OUTBOUND_ALLOW_CONTACTS (coma-separado) permite excepciones
   // puntuales para pruebas E2E del flujo completo con números del equipo.

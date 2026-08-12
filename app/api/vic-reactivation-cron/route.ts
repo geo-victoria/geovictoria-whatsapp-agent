@@ -293,31 +293,6 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
 
-  // Hook de PRUEBA: ?to=<fono>[&seg=preform|quote] → envía la plantilla a ese
-  // número saltando candidatos/filtros (incluido el de prueba), para validar el
-  // flujo del botón end-to-end. Mismo auth. Marca reactivation_at para que el
-  // reenganche se active al responder.
-  const _u = new URL(req.url)
-  const testTo = (_u.searchParams.get("to") || "").replace(/\D/g, "")
-  if (testTo) {
-    const seg = _u.searchParams.get("seg") === "quote" ? "cotizacion" : "preform"
-    const tpl = seg === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
-    if (!tpl) {
-      return NextResponse.json({ ok: false, error: `plantilla ${seg} no configurada` }, { status: 400 })
-    }
-    const testNombre = (_u.searchParams.get("nombre") || "Cliente").trim()
-    const ok = await sendBotmakerTemplate(testTo, tpl, { nombre: testNombre }).catch(() => false)
-    if (ok) {
-      await appendAssistantV3(testTo, REACT_CONTEXT_MSG[seg] ?? REACT_CONTEXT_MSG.preform).catch(() => {})
-      await supa(`vic_v3_conversations?contact=eq.${testTo}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ reactivation_at: new Date().toISOString() }),
-      }).catch(() => {})
-    }
-    return NextResponse.json({ ok, test: true, to: testTo, seg, tpl })
-  }
-
   if (!TPL_PREFORM && !TPL_QUOTE) {
     return NextResponse.json({ ok: true, skipped: "sin plantillas configuradas (REACTIVATION_TEMPLATE_*)" })
   }
@@ -326,92 +301,16 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const now = Date.now()
-  const coldBefore = new Date(now - COLD_AFTER_H * 3600e3).toISOString()
-  const maxAgeAfter = new Date(now - MAX_AGE_D * 86400e3).toISOString()
-  const gapBefore = new Date(now - MIN_GAP_H * 3600e3).toISOString()
 
-  // Candidatos: enfriados (last_user_at en la ventana), bajo el tope, con datos
-  // para clasificar. Los filtros finos (opt-out, ciclo activo, gap) se aplican en JS.
-  const res = await supa(
-    `vic_v3_conversations?last_user_at=lte.${coldBefore}&last_user_at=gte.${maxAgeAfter}` +
-    `&reactivation_count=lt.${MAX_REACT}` +
-    `&select=id,contact,country,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
-    `&order=last_user_at.asc&limit=400`,
-  )
-  const rows = (res.ok ? await res.json() : []) as Row[]
-  // Números internos de prueba (mismos que excluye el embudo: VIC_FUNNEL_TEST_CONTACTS).
+  // ── DEMOLICIÓN (biblia 12-ago, Fase 1) ────────────────────────────────────
+  // La cadencia vieja 47h/7d/15d (su flag de encendido incluido) y el hook de
+  // prueba ?to= se ELIMINARON: los toques 4-7 del Loop v2 son su reemplazo
+  // oficial. Este cron conserva SOLO el toque CONSENSUADO (promesa acordada
+  // con el cliente vía programar_seguimiento), hasta que la Fase 3 lo absorba
+  // en el loop como único dueño de followup_next_at.
   const testSet = testContactSet()
-  // Loop v2 (flag LOOP_V2_ENABLED): los contactos migrados al motor nuevo NO se
-  // reactivan por acá — un solo fetch batch por lista (con el flag apagado el
-  // helper devuelve set vacío sin tocar la red: comportamiento idéntico a hoy).
-  const enLoopV2 = await contactosEnLoop(rows.map((r) => r.contact)).catch(() => new Set<string>())
   let saltadosLoopV2 = 0
-  // PTV (doc Rodrigo): un contacto TRASPASADO a vendedor no recibe reactivación
-  // — regla explícita, no el efecto secundario de la exclusión por vic_loop
-  // (los traspasados sin fila de loop quedaban expuestos; auditoría 31-jul).
-  const traspasados = await contactosTraspasados(rows.map((r) => r.contact)).catch(() => new Set<string>())
   let saltadosPtv = 0
-  saltadosPtv += rows.filter((r) => traspasados.has(r.contact)).length
-  // ¿Le toca un toque AHORA? El toque N (reactivation_count = N-1) recién aplica
-  // cuando ya pasaron OFFSETS_H[N-1] horas desde el último mensaje del cliente
-  // (47h → 7d → 15d). Así la cadencia se mide desde el silencio, no por gap plano.
-  const tocaAhora = (r: Row): boolean => {
-    const c = r.reactivation_count || 0
-    if (c >= OFFSETS_H.length || !r.last_user_at) return false
-    const hrs = (now - new Date(r.last_user_at).getTime()) / 3600e3
-    if (hrs < OFFSETS_H[c]) return false
-    // Espaciado real ENTRE toques: además del silencio, el toque N espera el
-    // delta de la cadencia desde el toque anterior (47h→7d→15d ⇒ ~5d y ~8d).
-    // Sin esto, un contacto de silencio antiguo recibiría los 3 toques en días
-    // consecutivos (solo limitado por el gap de 24h) — quema al lead.
-    if (c > 0 && r.reactivation_at) {
-      const desdeToque = (now - new Date(r.reactivation_at).getTime()) / 3600e3
-      if (desdeToque < OFFSETS_H[c] - OFFSETS_H[c - 1]) return false
-    }
-    return true
-  }
-  // Migrados al Loop v2 → este motor no los toca (el loop es el dueño del ciclo).
-  saltadosLoopV2 += rows.filter((r) => enLoopV2.has(r.contact)).length
-  let cand = rows.filter(
-    (r) =>
-      r.contact &&
-      !enLoopV2.has(r.contact) &&
-      !traspasados.has(r.contact) &&
-      !isTestContact(r.contact, testSet) &&
-      // 'soporte': pidió soporte → cero proactividad (HSM y correo incluidos),
-      // aunque tenga cotización o preform (decisión de costos 11-jul).
-      // 'rechazo': dijo explícitamente que no le interesa (caso Marcela 19-jul)
-      // — se respeta igual que un opt-out.
-      !["opt_out", "perdido", "soporte", "rechazo"].includes(r.followup_closed_reason || "") &&
-      r.followup_status !== "activo" &&
-      r.followup_status !== "consensuado" && // tiene su propio toque programado
-      (!r.reactivation_at || r.reactivation_at <= gapBefore) &&
-      tocaAhora(r),
-  )
-
-  // ── APAGADO (decisión Lalo 25-jul, encendido del Loop v2) ──────────────────
-  // El loop REEMPLAZA la reactivación 47h/7d/15d y sus ofertas de descuento
-  // proactivas: estos segmentos quedan MUERTOS salvo reactivación explícita por
-  // env. El toque CONSENSUADO (promesa acordada con el cliente) NO es
-  // proactividad vieja y sigue vivo más abajo.
-  if ((process.env.REACTIVATION_OLD_ENABLED || "off").trim().toLowerCase() !== "on") {
-    cand = []
-  }
-
-  // Gate de horario hábil en la ZONA DEL CONTACTO (mismo helper que el follow-up,
-  // vic_is_business_now: Lun-Sáb 9-19 local, sin feriado del país). Una sola
-  // llamada al RPC con todos los candidatos; deja solo los que están en horario.
-  if (cand.length) {
-    const elegibles = await supa(`rpc/vic_filter_business_now`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ p_contacts: cand.map((r) => r.contact) }),
-    })
-      .then((r) => (r.ok ? (r.json() as Promise<string[]>) : Promise.resolve([] as string[])))
-      .catch(() => [] as string[])
-    const okSet = new Set(elegibles)
-    cand = cand.filter((r) => okSet.has(r.contact))
-  }
 
   // ── Seguimiento CONSENSUADO ────────────────────────────────────────────────
   // Toques ÚNICOS programados a una fecha acordada con el cliente (tool
@@ -451,34 +350,9 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
-  // Segmento "cotizacion": tiene formal_quote_id y NO está aceptada/pagada.
-  let segCot: Row[] = []
-  let nombresPorQuote = new Map<string, string>()
-  let empresasPorQuote = new Map<string, string>()
-  if (TPL_QUOTE) {
-    const conQuote = cand.filter((r) => !!r.formal_quote_id)
-    const zoho = await quoteIdsNoAccionables(conQuote.map((r) => r.formal_quote_id as string))
-    nombresPorQuote = zoho.nombres
-    empresasPorQuote = zoho.empresas
-    segCot = conQuote.filter((r) => !zoho.skip.has(String(r.formal_quote_id)))
-  }
-
-  // Segmento "preform": SIN cotización formal pero con un estimado mostrado
-  // (marcador "recurrente" en un mensaje del asistente — el preform de precios).
-  let segPre: Row[] = []
-  if (TPL_PREFORM) {
-    const sinQuote = cand.filter((r) => !r.formal_quote_id)
-    if (sinQuote.length) {
-      const ids = sinQuote.map((r) => r.id).join(",")
-      const mr = await supa(
-        `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant&or=(content.ilike.*recurrente*,content.ilike.*cotizaci%C3%B3n%20referencial*)&select=conversation_id`,
-      )
-      const conPreform = new Set(
-        (mr.ok ? ((await mr.json()) as Array<{ conversation_id: string }>) : []).map((x) => x.conversation_id),
-      )
-      segPre = sinQuote.filter((r) => conPreform.has(r.id))
-    }
-  }
+  // (paramsDe usa este mapa para la empresa MX; sin cadencia vieja queda vacío
+  // y el fallback por historial resuelve.)
+  const empresasPorQuote = new Map<string, string>()
 
   // Correo de reactivación: best-effort, no bloquea ni afecta el conteo del HSM.
   // La cotizadora self-gatea y filtra internos/prueba; aquí solo evitamos la
@@ -525,57 +399,6 @@ export async function GET(req: Request): Promise<Response> {
       "tu empresa"
     return { nombre, empresa }
   }
-  async function enviar(list: Row[], segmento: string) {
-    for (const r of list) {
-      if (enviados >= BATCH) break
-      // Las plantillas v2 llevan \${nombre}: resolverlo (Zoho para cotización;
-      // historial como fallback). Sin nombre NO se envía (quedaría "Hola ,").
-      let nombre =
-        (segmento === "cotizacion" && r.formal_quote_id
-          ? nombresPorQuote.get(String(r.formal_quote_id))
-          : undefined) || null
-      if (!nombre) nombre = await nombreDesdeHistorial(r.contact)
-      if (!nombre) {
-        // Cliente que nunca se presentó (price-shopper): antes se omitía para
-        // SIEMPRE (bug: 5 preforms elegibles llevaban días sin recibir toque).
-        // Saludo neutro que calza en la posición del nombre: "Hola de nuevo!".
-        omitidosSinNombre++
-        nombre = "de nuevo"
-        console.warn(`[reactivation] sin nombre resoluble, va con saludo neutro: ${r.contact} (${segmento})`)
-      }
-      // País: plantilla y canal propios (CO sin promesa de descuento, línea +57;
-      // MX con corta en toques 1..N-1 y breakup "final" en el último toque).
-      // CL además puede tener plantilla específica por toque (tplToque).
-      const toque = (r.reactivation_count || 0) + 1
-      const tpl = esMX(r)
-        ? toque >= MAX_REACT
-          ? TPL_FINAL_MX
-          : segmento === "cotizacion" ? TPL_QUOTE_MX : TPL_PREFORM_MX
-        : esCO(r)
-          ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
-          : tplToque(segmento, toque)
-      const ok = await sendBotmakerTemplate(r.contact, tpl, await paramsDe(r, nombre), canalDe(r)).catch(() => false)
-      if (!ok) continue
-      await supa(`vic_v3_conversations?id=eq.${r.id}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({
-          reactivation_at: new Date().toISOString(),
-          reactivation_count: (r.reactivation_count || 0) + 1,
-        }),
-      }).catch(() => {})
-      enviados++
-      console.log(`[reactivation] ${segmento}${tagPais(r)} → ${r.contact}`)
-      // Deja el toque como turno de Vicky en el historial: así, cuando el cliente
-      // responda, Vicky retoma con continuidad (excepción de reenganche del prompt).
-      await appendAssistantV3(r.contact, contextoDe(r, segmento)).catch(() => {})
-      // En "cotizacion" sumamos el correo (CTA aceptación online + PDF) al HSM.
-      // CO/MX: sin correo de reactivación por ahora (el builder del correo es
-      // chileno — UF/tuteo CL); el HSM basta.
-      if (segmento === "cotizacion" && !esCO(r) && !esMX(r)) await dispararCorreo(r.formal_quote_id)
-    }
-  }
-
   // Toque consensuado: UN solo envío a la fecha acordada. Elige la plantilla por
   // segmento (tiene cotización formal → quote; si no → preform) y, tras enviar,
   // CIERRA el ciclo (no se repite). El cliente ya engagueó, así que no exige el
@@ -616,16 +439,10 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
-  // Primero los consensuados (cita acordada), luego la cadencia: cotización y preform.
   await enviarConsensuadoLista(consensuado)
-  if (TPL_QUOTE) await enviar(segCot, "cotizacion")
-  if (TPL_PREFORM) await enviar(segPre, "preform")
 
   return NextResponse.json({
     ok: true,
-    candidatos: cand.length,
-    segmento_cotizacion: segCot.length,
-    segmento_preform: segPre.length,
     consensuado: consensuado.length,
     enviados,
     enviados_consensuado: enviadosConsensuado,

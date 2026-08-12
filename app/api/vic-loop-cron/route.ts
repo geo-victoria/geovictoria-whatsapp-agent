@@ -21,9 +21,8 @@
  * los nombres reales de Botmaker como default CL y override por env; celda
  * vacía NO envía nada, patrón del repo).
  *
- * Toques 2,3 eran LLAMADA (Dapta). APAGADOS desde el 27-jul: con
- * DAPTA_ENABLED ausente el toque se salta y la cadencia avanza al siguiente
- * toque de WhatsApp. Ver lib/dapta-voice.ts para el motivo.
+ * Toques 2-3 son WhatsApp con textos propios desde el 10-ago (las llamadas
+ * de Dapta se eliminaron en la demolición de la biblia, 12-ago).
  *
  * Auth: x-cron-secret == vic_kv.followup_cron_secret (o Bearer/?key=CRON_SECRET),
  * mismo esquema que vic-outbound-cadence-cron.
@@ -44,7 +43,6 @@ import {
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { ptvHabilitado, debeTraspasar } from "@/lib/ptv"
 import { duenoDealVigente, duenoCotizacionVigente } from "@/lib/tools/agendar-reunion"
-import { llamadasDaptaHabilitadas } from "@/lib/dapta-voice"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
 
@@ -957,22 +955,6 @@ export async function GET(req: Request): Promise<Response> {
     }
   }
 
-  // TOQUE SABATINO (punto 3, Lalo 08-ago): la proactividad corre L-V y una
-  // formal emitida el viernes en la tarde esperaba hasta el lunes. Un ÚNICO
-  // toque suave el sábado 10-14 (hora del país) para formales frescas del
-  // viernes cuyo cliente no ha respondido — sin consumir la cadencia (el
-  // calendario del lunes queda intacto). Un solo envío por contacto/sábado.
-  let sabatinos = 0
-  try {
-    // Toque sabatino RETIRADO (09-ago): con la ventana de seguimiento ampliada
-    // a todos los días 9-21, la cadencia normal ya toca el fin de semana — el
-    // toque especial del sábado duplicaría mensajes. La función queda abajo
-    // por si algún día vuelve una ventana solo-hábil.
-    sabatinos = 0
-  } catch (e) {
-    console.warn("[loop-cron] toque sabatino falló:", e instanceof Error ? e.message : e)
-  }
-
   // VIGÍA DE CERO TRASPASOS (10-ago, autopsia del viernes 08-ago): el PTV
   // corrió TODO ese día hábil respondiendo 200 y no traspasó a NADIE (¿flag
   // apagado?), y nadie se enteró hasta el lunes — la Fundación Amigos de
@@ -1025,80 +1007,11 @@ export async function GET(req: Request): Promise<Response> {
     llamadas,
     pospuestos,
     cerrados,
-    toques_sabatinos: sabatinos,
     detalle,
   })
   } finally {
     await liberarTurno("loop").catch(() => undefined)
   }
-}
-
-/** Sábado 10:00-13:59 del país: formales de las últimas 40 h sin respuesta
- * del cliente reciben un empujón de pago único. Respeta candado v3 (contacto
- * atendido por su vendedor no se toca), pagados, opt-outs y pruebas. */
-async function toqueSabatino(now: number): Promise<number> {
-  const desde = new Date(now - 40 * 3600e3).toISOString()
-  const convsRes = await supa(
-    `vic_v3_conversations?formal_quote_at=gte.${encodeURIComponent(desde)}&formal_quote_id=not.is.null&select=contact,country,last_user_at,formal_quote_at&limit=200`,
-  )
-  const convs = convsRes.ok
-    ? (((await convsRes.json().catch(() => [])) as Array<{ contact: string; country: string | null; last_user_at: string | null; formal_quote_at: string }>) || [])
-    : []
-  if (!convs.length) return 0
-  const lista = convs.map((c) => `"${c.contact}"`).join(",")
-  const loopsRes = await supa(`vic_loop?contact=in.(${lista})&select=contact,estado,motivo_cierre`)
-  const loops = loopsRes.ok ? (((await loopsRes.json().catch(() => [])) as Array<{ contact: string; estado: string | null; motivo_cierre: string | null }>) || []) : []
-  const loopPor = new Map(loops.map((l) => [l.contact, l]))
-  const silenciados = await contactosTraspasados(convs.map((c) => c.contact)).catch(() => new Set<string>())
-  const pruebas = testContactSet()
-  let enviados = 0
-  for (const c of convs) {
-    if (enviados >= 25) break
-    if (isTestContact(c.contact, pruebas)) continue
-    const paisKey = (c.country || "cl").trim().toLowerCase()
-    // Solo sábado 10-13:59 hora local del país.
-    const tz = tzDePais(paisKey)
-    const partes = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false, weekday: "short" }).formatToParts(new Date(now))
-    const dia = partes.find((p) => p.type === "weekday")?.value
-    const hora = Number(partes.find((p) => p.type === "hour")?.value || 0) % 24
-    if (dia !== "Sat" || hora < 10 || hora >= 14) continue
-    const loop = loopPor.get(c.contact)
-    if (loop && loop.estado !== "activo") continue
-    if (loop && ["pagado", "optout", "soporte", "perdido", "mas_de_50", "sobre_umbral"].includes(loop.motivo_cierre || "")) continue
-    if (silenciados.has(c.contact)) continue
-    // Cliente que respondió DESPUÉS de la formal no está frío: se respeta.
-    const lastUser = c.last_user_at ? Date.parse(c.last_user_at) : 0
-    if (lastUser >= Date.parse(c.formal_quote_at)) continue
-    // Un solo toque sabatino por contacto y por sábado.
-    const fecha = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(now))
-    const guardKey = `toque_sabado_${c.contact}_${fecha.replace(/-/g, "")}`
-    const guardRes = await supa(`vic_kv?key=eq.${encodeURIComponent(guardKey)}&select=key&limit=1`)
-    const guardRows = guardRes.ok ? (((await guardRes.json().catch(() => [])) as unknown[]) || []) : []
-    if (guardRows.length) continue
-    const ventanaAbierta = lastUser > 0 && now - lastUser < 24 * 3600e3
-    let ok = false
-    const texto =
-      "Quedó lista tu cotización de ayer y no quería dejarte esperando el fin de semana 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Por aquí estoy, también hoy."
-    if (ventanaAbierta) {
-      ok = await sendBotmakerMessage(c.contact, texto).catch(() => false)
-    } else {
-      const tpl = LOOP_TPL_MATRIZ[1].formal[paisKey as "cl" | "co" | "mx"] || LOOP_TPL_MATRIZ[1].formal.cl
-      if (!tpl) continue
-      const params = await completarParamsConChat(c.contact, undefined, tpl, paramsParaPlantilla(tpl, {}))
-      ok = await sendBotmakerTemplate(c.contact, tpl, params).catch(() => false)
-    }
-    if (ok) {
-      await appendAssistantV3(c.contact, texto, c.country || undefined).catch(() => {})
-      await supa(`vic_kv?on_conflict=key`, {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({ key: guardKey, value: new Date(now).toISOString(), expires_at: new Date(now + 3 * 24 * 3600e3).toISOString() }),
-      }).catch(() => undefined)
-      void logToque(c.contact, "toque_sabatino", 0, "formal", paisKey)
-      enviados++
-    }
-  }
-  return enviados
 }
 
 // pg_cron llama con http_post.

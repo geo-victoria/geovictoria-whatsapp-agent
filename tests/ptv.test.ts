@@ -183,7 +183,7 @@ describe("cableado del cron", () => {
 
   test("ni contactos de prueba ni IDs sin teléfono discable entran al PTV", () => {
     assert.match(CRON, /isTestContact\(c\.contact, contactosPrueba\)/)
-    assert.match(CRON, /\^\(56\|57\|52\)/)
+    assert.match(CRON, /\^\(56\|57\|52\|51\)/)
   })
 
   test("deals CERRADOS no se reasignan; sin lead se crea uno a nombre del vendedor", () => {
