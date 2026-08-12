@@ -1276,6 +1276,7 @@ type DealEquipo = {
   "Contact_Name.Phone"?: string
   "Contact_Name.Mobile"?: string
   "Account_Name.Account_Name"?: string
+  N_Empleados_que_marcan?: number
 }
 
 /** TODOS los deals ACTIVOS del pipeline en Zoho — la cartera completa que
@@ -1317,7 +1318,7 @@ async function fetchDealsEquipo(soloTelemarketing = false): Promise<DealEquipo[]
         body: JSON.stringify({
           select_query:
             `select id, Deal_Name, Stage, Created_Time, Last_Activity_Time, Owner.first_name, Owner.last_name, ` +
-            `Contact_Name.Phone, Contact_Name.Mobile, Account_Name.Account_Name from Deals ` +
+            `Contact_Name.Phone, Contact_Name.Mobile, Account_Name.Account_Name, N_Empleados_que_marcan from Deals ` +
             (soloTelemarketing ? whereTm : whereGeneral) +
             // Hay más de 1000 deals activos (tope de la paginación): el orden
             // por actividad reciente deja fuera solo lo más frío.
@@ -1576,6 +1577,17 @@ function construirListadoComercial(params: {
 // (Implementando/Facturando → Onboarding [antes "Ganada", Rodrigo 11-ago] ·
 // Cierre Perdido → Perdida); el resto es
 // la escalera propia de Vicky.
+/** Tramos de dotación de la cola de gestión (Rodrigo 12-ago). */
+function rangoUsuarios(n?: number | null): string {
+  if (!n || n <= 0) return "—"
+  if (n <= 10) return "1 a 10"
+  if (n <= 20) return "11 a 20"
+  if (n <= 50) return "21 a 50"
+  if (n <= 200) return "51 a 200"
+  if (n <= 300) return "201 a 300"
+  return "301 o más"
+}
+
 const ESTADOS_LISTADO = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada", "Onboarding", "Perdida"]
 
 // ── COLA DE GESTIÓN (pedido Lalo 04-ago): la vista principal del dash es una
@@ -1653,6 +1665,8 @@ type CasoGestion = {
   monto: string
   /** Valor numérico del recurrente para ordenar (UF, o CLP normalizado). */
   montoOrden: number
+  /** Dotación conocida (cotizada o declarada en el deal); 0 = sin dato. */
+  usuarios: number
   diasSinContacto: number
   accionable: string
   resumen: string
@@ -1681,8 +1695,9 @@ function construirCasosGestion(params: {
   montos: Map<string, { uf: number | null; clp: number | null }>
   pais: Pais
   cots?: Map<string, { quoteId: string; ver: string }>
+  usuarios?: Map<string, number>
 }): { casos: CasoGestion[]; nGestionados: number } {
-  const { filas, gestionados, montos, pais, cots = new Map() } = params
+  const { filas, gestionados, montos, pais, cots = new Map(), usuarios = new Map() } = params
   const conTipo = filas
     // Deal en "Cierre Perdido" en Zoho → fuera de la cola de gestión (pedido
     // Lalo 05-ago): la oportunidad ya se dio por perdida, no hay acción.
@@ -1734,6 +1749,7 @@ function construirCasosGestion(params: {
       horaLocal: hl.hora,
       llamable: hl.llamable,
       monto: montoTxt,
+      usuarios: usuarios.get(d) || 0,
       montoOrden: montoUF,
       diasSinContacto: Math.round(dias * 10) / 10,
       accionable: f.accionable,
@@ -1796,6 +1812,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           })()}</td>
           <td data-l="Primer contacto" data-sort="${Date.parse(c.primerContactoIso || "") || 0}" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
           <td data-l="Estado" data-sort="${esc(c.estado.toLowerCase())}"><span class="tag">${esc(c.estado)}</span></td>
+          <td data-l="Usuarios" data-sort="${c.usuarios || 0}" style="white-space:nowrap;text-align:center" title="${c.usuarios ? `${c.usuarios} usuarios` : "sin dato de dotación"}">${rangoUsuarios(c.usuarios)}</td>
           <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
           <td data-l="Recurrente" data-sort="${c.montoOrden || 0}" style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td data-l="Accionable" data-sort="${esc(c.accionable.toLowerCase().slice(0, 80))}">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
@@ -1814,7 +1831,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th class="noSort">Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Última actividad en Zoho</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th class="noSort" style="padding-left:10px">WA</th></tr></thead>
+      <thead><tr><th class="noSort">Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th title="Dotación conocida: cotizada en el chat o declarada en el deal">Usuarios</th><th>Última actividad en Zoho</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th class="noSort" style="padding-left:10px">WA</th></tr></thead>
       <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
@@ -4890,6 +4907,15 @@ export async function GET(req: Request): Promise<Response> {
         const at = wspUltimoAt.get(digits(f.contacto))
         if (at) f.ultimoContactoIso = maxIso(f.ultimoContactoIso, at)
       }
+      // Dotación declarada en el deal (N_Empleados_que_marcan) rellena los
+      // huecos de la dotación cotizada — da rango también a los tratos del
+      // pipeline que no pasaron por Vicky (columna Usuarios, Rodrigo 12-ago).
+      for (const dl of dealsEquipo) {
+        let telDl = digits(String(dl["Contact_Name.Mobile"] || dl["Contact_Name.Phone"] || ""))
+        if (telDl.length === 9 && telDl.startsWith("9")) telDl = `56${telDl}`
+        const n = Number(dl.N_Empleados_que_marcan) || 0
+        if (telDl && n > 0 && !usuariosPorContacto.has(telDl)) usuariosPorContacto.set(telDl, n)
+      }
       evolucionHtml = renderEvolucionDiaria({
         convs: convsListado,
         analysisRows: allRows,
@@ -5039,7 +5065,7 @@ export async function GET(req: Request): Promise<Response> {
     const filasVisibles = filasListado.filter(
       (f) => coincide(f) && tuvoActividad(f) && (origenF === "todo" || (f.origen || "vicky") === origenF),
     )
-    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, cots: cotPorContacto })
+    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, cots: cotPorContacto, usuarios: usuariosPorContacto })
     casosGestion = cola.casos
     nGestionadosCola = cola.nGestionados
     const qsDescarga = (() => {
