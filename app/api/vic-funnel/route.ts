@@ -1340,7 +1340,7 @@ async function fetchDealsEquipo(soloTelemarketing = false): Promise<DealEquipo[]
  * se mapea desde la etapa del pipeline de Zoho. */
 function estadoDesdeStage(stage: string): string {
   const s = (stage || "").toLowerCase()
-  if (/implement|facturando|ganado/.test(s)) return "Ganada"
+  if (/implement|facturando|ganado/.test(s)) return "Onboarding"
   if (/perdido/.test(s)) return "Perdida"
   if (/listo para cierre/.test(s)) return "Aceptada"
   if (/propuesta|negociaci|piloto/.test(s)) return "Formal enviada"
@@ -1561,7 +1561,7 @@ function construirListadoComercial(params: {
   // interno, en ambas direcciones.
   for (const f of filas) {
     if (/implementando|facturando/i.test(f.estadoZoho)) {
-      f.estado = "Ganada"
+      f.estado = "Onboarding"
       f.accionable = "Cliente ganado 🎉 En onboarding/facturación — sin acción comercial pendiente."
     } else if (/perdido/i.test(f.estadoZoho)) {
       f.estado = "Perdida"
@@ -1572,10 +1572,11 @@ function construirListadoComercial(params: {
 }
 
 /** Escalera de estados del listado — también alimenta el filtro global. */
-// Ganada/Perdida son estados TERMINALES espejados desde el deal de Zoho
-// (Implementando/Facturando → Ganada · Cierre Perdido → Perdida); el resto es
+// Onboarding/Perdida son estados TERMINALES espejados desde el deal de Zoho
+// (Implementando/Facturando → Onboarding [antes "Ganada", Rodrigo 11-ago] ·
+// Cierre Perdido → Perdida); el resto es
 // la escalera propia de Vicky.
-const ESTADOS_LISTADO = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada", "Ganada", "Perdida"]
+const ESTADOS_LISTADO = ["Sin contactar", "Contactado", "En levantamiento", "Preform enviado", "Formal enviada", "Aceptada", "Pagada", "Onboarding", "Perdida"]
 
 // ── COLA DE GESTIÓN (pedido Lalo 04-ago): la vista principal del dash es una
 // lista de trabajo — a quién llamar/contactar AHORA, segmentado por tipo de
