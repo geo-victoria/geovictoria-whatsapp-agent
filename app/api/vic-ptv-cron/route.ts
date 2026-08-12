@@ -130,6 +130,7 @@ const NOMBRE_VENDEDOR: Record<string, string> = {
   "agordillo@geovictoria.com": "Alejandro Gordillo",
   "egalindo@geovictoria.com": "Eddy Galindo",
   "ysegura@geovictoria.com": "Yahel Segura",
+  "mguzmanr@geovictoria.com": "Miguel Guzmán",
   "mmendozav@geovictoria.com": "Mónica Mendoza",
 }
 
@@ -1245,7 +1246,7 @@ async function reconciliarLeadsCruzados(): Promise<number> {
   const destinoPorTerritorio: Record<string, { id: string; email: string }> = {
     "perú": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" }, // Mónica
     "peru": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" },
-    "méxico": { id: "3525045000308323003", email: "ysegura@geovictoria.com" }, // Yahel
+    "méxico": { id: "3525045000434395001", email: "mguzmanr@geovictoria.com" }, // Miguel Guzmán (SDR inbound, Lalo 12-ago)
     "mexico": { id: "3525045000308323003", email: "ysegura@geovictoria.com" },
   }
   const { getZohoAccessToken } = await import("@/lib/zoho-token")

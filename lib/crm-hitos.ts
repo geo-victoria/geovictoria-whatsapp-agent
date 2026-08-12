@@ -715,7 +715,7 @@ async function convertirConDeal(
         ? lead.ownerId
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
-          : ({ Colombia: "3525045000613817111", "México": "3525045000308323003", "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          : ({ Colombia: "3525045000613817111", "México": "3525045000434395001" /* Miguel Guzmán, SDR inbound (Lalo 12-ago) */, "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -1070,7 +1070,7 @@ export async function sincronizarHitoCrm(
       const OWNER_INTERINO: Record<string, string> = {
         Chile: "3525045000000211283", // Eddyluz Mujica
         Colombia: "3525045000203758005", // Alejandro Gordillo (solo fallback)
-        "México": "3525045000308323003", // Yahel Segura
+        "México": "3525045000434395001", // Miguel Guzmán — SDR inbound MX (Lalo 12-ago; leads sin formal van a él)
         // Perú: Mónica Mendoza — NO es interina sino la ejecutiva única real
         // (sin tómbola), por eso NO está en INTERINOS: su gestión SÍ se
         // hereda al deal.

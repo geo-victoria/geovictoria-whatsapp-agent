@@ -50,6 +50,10 @@ const SECRET_COTIZADORA_MX = (
 // derivados quedan a su nombre (documento de tropicalización MX). Cuando el
 // equipo MX defina SDRs para round-robin, agregar acá el reparto.
 const EJECUTIVO_MX_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_MX_ID || "3525045000308323003").trim()
+// SDR INBOUND MX (Lalo 12-ago): las oportunidades que NO llegan a cotización
+// formal se asignan como LEAD a Miguel Guzmán (mguzmanr@) — la formal conserva
+// su dueño propio (Yahel/interina).
+const SDR_INBOUND_MX_ID = (process.env.ZOHO_SDR_INBOUND_MX_ID || "3525045000434395001").trim()
 
 // ── Reuniones MX (Cal.com) ──────────────────────────────────────────────────
 // Event type 6101466 (Lalo, 27-jul): agendamiento SIN cotización — la llamada
@@ -512,7 +516,7 @@ export function buildDispatchMX(contact: string) {
           necesidad: [i.resumen || "", rfcInfo].filter(Boolean).join(" · "),
           // v1 MX sin tómbola SDR: TODOS los motivos quedan a nombre del
           // ejecutivo (Yahel Segura), que retoma con todo el contexto.
-          ownerId: EJECUTIVO_MX_ZOHO_ID,
+          ownerId: SDR_INBOUND_MX_ID,
         })
         if (!res || (res as { success?: boolean }).success === false) {
           return {
