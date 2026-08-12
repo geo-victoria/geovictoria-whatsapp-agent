@@ -60,7 +60,19 @@ type BmItem = {
   chat?: { chatId?: string; channelId?: string; contactId?: string }
 }
 
-type Mudo = { contact: string; canal: string; fecha: string; texto: string; tomadoPor: string }
+type Mudo = { contact: string; canal: string; fecha: string; texto: string; tomadoPor: string; reinyectado?: boolean }
+
+// AUTO-REMEDIACIÓN (Lalo 11-ago, "corrige para que no vuelva a pasar"): un
+// mudo confirmado ya no solo se alerta — su mensaje se RE-INYECTA al webhook
+// de Vicky (mismo contrato que la acción de código: contact/message/channelId
+// + x-secret) para que ella lo procese y responda por la API push, que
+// entrega aunque el chat esté tomado en la consola. Candados: solo mensajes
+// de TEXTO, una sola vez por mensaje (kv TTL 7d), tope por tick, y JAMÁS si
+// alguien (agente o bot) ya respondió después del mensaje del cliente.
+// Rollback sin deploy: env VICKY_MUDOS_REINYECTA=0.
+const REINYECTA = (process.env.VICKY_MUDOS_REINYECTA || "1").trim() !== "0"
+const REINYECTA_MAX_POR_TICK = Math.max(1, Number(process.env.VICKY_MUDOS_REINYECTA_MAX || 5) || 5)
+const BOTMAKER_SECRET = (process.env.BOTMAKER_SECRET || "").trim()
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase()
 const sha = (s: string) => createHash("sha1").update(s).digest("hex")
@@ -178,6 +190,7 @@ async function enviarAlerta(mudos: Mudo[]): Promise<boolean> {
 <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap">${m.fecha.replace("T", " ").slice(5, 16)}</td>
 <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0">${m.texto.replace(/</g, "&lt;").slice(0, 200)}</td>
 <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap">${m.tomadoPor || "—"}</td>
+<td style="padding:6px 10px;border-bottom:1px solid #e2e8f0;white-space:nowrap">${m.reinyectado ? '<span style="color:#15803d">re-inyectado ✓ (Vicky responde)</span>' : "—"}</td>
 </tr>`,
     )
     .join("")
@@ -189,6 +202,7 @@ async function enviarAlerta(mudos: Mudo[]): Promise<boolean> {
 <th style="text-align:left;padding:6px 10px;border-bottom:2px solid #cbd5e0">Hora (UTC)</th>
 <th style="text-align:left;padding:6px 10px;border-bottom:2px solid #cbd5e0">Mensaje</th>
 <th style="text-align:left;padding:6px 10px;border-bottom:2px solid #cbd5e0">Chat tomado por</th>
+<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #cbd5e0">Auto-respuesta</th>
 </tr></thead><tbody>${filas}</tbody></table>
 <p style="margin:16px 0 0;color:#718096">Detector vic-mudos-cron · corre cada 30 min · Vicky · GeoVictoria</p>
 </body></html>`
@@ -232,8 +246,17 @@ export async function GET(req: Request): Promise<Response> {
   const ahora = Date.now()
   const GRACIA_MIN = 10
   const VENTANA_MIN = 90
-  const fromIso = new Date(ahora - VENTANA_MIN * 60e3).toISOString()
-  const toIso = new Date(ahora - GRACIA_MIN * 60e3).toISOString()
+  const sp = new URL(req.url).searchParams
+  // Modo AUDITORÍA (?desde=ISO&hasta=ISO&dry=1): ventana libre de hasta 24 h
+  // para barrer historia, sin correo, sin marcas kv y sin re-inyección — solo
+  // lista lo que habría detectado. Lo usa la revisión de reportes.
+  const dry = sp.get("dry") === "1"
+  const desdeParam = Date.parse(sp.get("desde") || "")
+  const hastaParam = Date.parse(sp.get("hasta") || "")
+  const ventanaCustom = Number.isFinite(desdeParam) && Number.isFinite(hastaParam) && desdeParam < hastaParam &&
+    hastaParam - desdeParam <= 24 * 3600e3
+  const fromIso = ventanaCustom ? new Date(desdeParam).toISOString() : new Date(ahora - VENTANA_MIN * 60e3).toISOString()
+  const toIso = ventanaCustom ? new Date(hastaParam).toISOString() : new Date(ahora - GRACIA_MIN * 60e3).toISOString()
 
   // Simulacro (?simulacro=1): valida el camino del correo sin esperar un mudo real.
   if (new URL(req.url).searchParams.get("simulacro")) {
@@ -291,7 +314,26 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const nuestros = await nuestrosPorContacto(fromIso)
-  const candidatos: Array<Omit<Mudo, "tomadoPor">> = []
+  // RESPUESTAS EN CONSOLA (fix 11-ago): el feed también trae los mensajes de
+  // agentes/bot. Si alguien respondió DESPUÉS del mensaje del cliente, ese
+  // cliente está atendido — ni alerta ni re-inyección (antes alertábamos
+  // igual y el "chat tomado por" era en realidad un agente atendiendo).
+  const respuestasPorContacto = new Map<string, number[]>()
+  for (const it of feed) {
+    if (String(it.from || "").toLowerCase() === "user") continue
+    const canalNum = String(it.chat?.channelId || "").replace(/\D/g, "")
+    if (!CANALES_VICKY.some((c) => canalNum.endsWith(c))) continue
+    const cid = String(it.chat?.contactId || "").trim()
+    const t = Date.parse(String(it.creationTime || ""))
+    if (!cid || !Number.isFinite(t)) continue
+    const arr = respuestasPorContacto.get(cid) || []
+    arr.push(t)
+    respuestasPorContacto.set(cid, arr)
+  }
+
+  type Candidato = Omit<Mudo, "tomadoPor"> & { textoCrudo: string; esTexto: boolean }
+  const candidatos: Candidato[] = []
+  let atendidosEnConsola = 0
   for (const it of feed) {
     if (String(it.from || "").toLowerCase() !== "user") continue
     const canalNum = String(it.chat?.channelId || "").replace(/\D/g, "")
@@ -299,7 +341,8 @@ export async function GET(req: Request): Promise<Response> {
     const cid = String(it.chat?.contactId || "").trim()
     if (!cid || /[^\d]/.test(cid)) continue
     const tipo = String(it.content?.type || "")
-    let texto = String(it.content?.text || "").trim()
+    const textoCrudo = String(it.content?.text || "").trim()
+    let texto = textoCrudo
     // Los botones de plantilla llegan como texto JSON {"button":...} — se
     // reportan legibles; cualquier otro tipo (audio/imagen) se identifica.
     if (texto.startsWith('{"button"')) {
@@ -312,18 +355,102 @@ export async function GET(req: Request): Promise<Response> {
     const registrados = nuestros.get(cid) || []
     const n = norm(texto)
     if (registrados.some((rg) => rg.includes(n))) continue
+    // ¿Alguien (agente en consola o bot) respondió después de este mensaje?
+    const tMsg = Date.parse(String(it.creationTime || ""))
+    const respuestas = respuestasPorContacto.get(cid) || []
+    if (Number.isFinite(tMsg) && respuestas.some((tr) => tr > tMsg)) {
+      atendidosEnConsola++
+      continue
+    }
     candidatos.push({
       contact: cid,
       canal: String(it.chat?.channelId || ""),
       fecha: String(it.creationTime || ""),
       texto,
+      textoCrudo,
+      esTexto: tipo === "text" && !!textoCrudo,
+    })
+  }
+
+  // Modo auditoría: lista completa con "tomado por", sin marcas ni acciones.
+  if (dry) {
+    const agentes = await rosterAgentes()
+    const porContactoCanal = new Map<string, string>()
+    const lista: Mudo[] = []
+    for (const c of candidatos) {
+      const k = `${c.contact}|${c.canal}`
+      if (!porContactoCanal.has(k)) porContactoCanal.set(k, await tomadoPor(c.contact, c.canal, agentes))
+      lista.push({ contact: c.contact, canal: c.canal, fecha: c.fecha, texto: c.texto, tomadoPor: porContactoCanal.get(k) || "" })
+    }
+    return NextResponse.json({
+      ok: true, dry: true,
+      ventana: { from: fromIso, to: toIso },
+      feed: feed.length, atendidos_en_consola: atendidosEnConsola,
+      mudos: lista,
     })
   }
 
   // Dedupe (una alerta por mensaje, para siempre dentro del TTL).
-  const nuevos: Array<Omit<Mudo, "tomadoPor">> = []
+  const nuevos: Candidato[] = []
   for (const c of candidatos) {
     if (!(await yaAlertado(`${c.contact}|${c.fecha}|${c.texto}`))) nuevos.push(c)
+  }
+
+  // ── RE-INYECCIÓN: el mudo confirmado vuelve al pipeline de Vicky ──
+  // Se agrupan los mensajes de texto por contacto (en orden) y se mandan al
+  // webhook CL, que rutea CO/MX/PE por prefijo. La respuesta sale por la API
+  // push (entrega aunque el chat esté tomado). Una vez por mensaje (kv),
+  // tope por tick, y la alerta informa si se auto-remedió.
+  const reinyectados = new Set<string>()
+  if (REINYECTA && BOTMAKER_SECRET && nuevos.length) {
+    const origin = new URL(req.url).origin
+    const porContacto = new Map<string, Candidato[]>()
+    for (const c of nuevos) {
+      if (!c.esTexto) continue
+      const arr = porContacto.get(c.contact) || []
+      arr.push(c)
+      porContacto.set(c.contact, arr)
+    }
+    let inyectados = 0
+    for (const [contact, msgs] of porContacto) {
+      if (inyectados >= REINYECTA_MAX_POR_TICK) break
+      // Candado por mensaje: si TODOS los mensajes de este contacto ya se
+      // re-inyectaron alguna vez, no repetir.
+      const marcas = await Promise.all(msgs.map((m) => yaAlertado(`reinj|${m.contact}|${m.fecha}|${m.texto}`)))
+      if (marcas.every(Boolean)) continue
+      msgs.sort((a, b) => a.fecha.localeCompare(b.fecha))
+      const mensaje = msgs.map((m) => m.textoCrudo).join("\n")
+      const canal = msgs[msgs.length - 1].canal
+      inyectados++
+      try {
+        // Timeout corto A PROPÓSITO: el webhook procesa en su propia invocación
+        // (siga o no viva esta conexión) y puede tardar 30-60 s en responder.
+        // Con entregar el request basta; el abort NO cancela el procesamiento.
+        const r = await fetch(`${origin}/api/vic-botmaker-v3`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-secret": BOTMAKER_SECRET },
+          body: JSON.stringify({ contact, message: mensaje, channelId: canal }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(8000),
+        })
+        if (r.ok) {
+          for (const m of msgs) reinyectados.add(`${m.contact}|${m.fecha}`)
+          console.log(`[mudos-cron] re-inyectado ${contact} (${msgs.length} msg) → Vicky respondió (${r.status})`)
+        } else {
+          console.error(`[mudos-cron] re-inyección de ${contact} falló: HTTP ${r.status}`)
+        }
+      } catch (e) {
+        const esTimeout = e instanceof Error && e.name === "TimeoutError"
+        if (esTimeout) {
+          // El request LLEGÓ (la conexión se estableció); el webhook sigue
+          // procesando por su cuenta — se cuenta como re-inyectado.
+          for (const m of msgs) reinyectados.add(`${m.contact}|${m.fecha}`)
+          console.log(`[mudos-cron] re-inyectado ${contact} (${msgs.length} msg) — el webhook sigue procesando (timeout local esperado)`)
+        } else {
+          console.error(`[mudos-cron] re-inyección de ${contact} lanzó:`, e instanceof Error ? e.message : e)
+        }
+      }
+    }
   }
 
   let enviado = false
@@ -334,10 +461,14 @@ export async function GET(req: Request): Promise<Response> {
     for (const c of nuevos) {
       const k = `${c.contact}|${c.canal}`
       if (!porContactoCanal.has(k)) porContactoCanal.set(k, await tomadoPor(c.contact, c.canal, agentes))
-      mudos.push({ ...c, tomadoPor: porContactoCanal.get(k) || "" })
+      mudos.push({
+        contact: c.contact, canal: c.canal, fecha: c.fecha, texto: c.texto,
+        tomadoPor: porContactoCanal.get(k) || "",
+        reinyectado: reinyectados.has(`${c.contact}|${c.fecha}`),
+      })
     }
     enviado = await enviarAlerta(mudos)
-    console.log(`[mudos-cron] ${mudos.length} mudos nuevos, alerta ${enviado ? "enviada" : "FALLÓ"}:`,
+    console.log(`[mudos-cron] ${mudos.length} mudos nuevos (${reinyectados.size} re-inyectados), alerta ${enviado ? "enviada" : "FALLÓ"}:`,
       mudos.map((m) => `${m.contact}@${m.fecha}`).join(", "))
   }
 
@@ -346,7 +477,9 @@ export async function GET(req: Request): Promise<Response> {
     ventana: { from: fromIso, to: toIso },
     feed: feed.length,
     candidatos: candidatos.length,
+    atendidos_en_consola: atendidosEnConsola,
     nuevos: nuevos.length,
+    reinyectados: reinyectados.size,
     alerta_enviada: enviado,
     mudos,
   })
