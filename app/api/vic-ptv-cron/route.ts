@@ -213,6 +213,9 @@ async function asignarEnZoho(
   contact: string,
   pais: string,
   interno: { email: string; zohoId: string },
+  // Escalera de roles (12-ago): con precio mostrado el lead va a la tómbola
+  // de CALIFICADOS (ejecutivos); sin precio, a la de SDR sin calificar.
+  calificado = false,
 ): Promise<VendedorFinal> {
   const porDefecto: VendedorFinal = {
     ...interno,
@@ -260,7 +263,7 @@ async function asignarEnZoho(
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
       } else if (esCL) {
         const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
-        const r = await reasignarLeadCalificacionCL(creado.leadId).catch(() => null)
+        const r = await reasignarLeadCalificacionCL(creado.leadId, { calificado }).catch(() => null)
         await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
         if (r?.success && r.ownerEmail && r.ownerId) {
           const tel = await telefonoDeUsuario(r.ownerId, H, api)
@@ -389,7 +392,7 @@ async function asignarEnZoho(
         }
       }
       const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
-      const r = await reasignarLeadCalificacionCL(lead.id).catch(() => null)
+      const r = await reasignarLeadCalificacionCL(lead.id, { calificado }).catch(() => null)
       if (r?.success && r.ownerEmail && r.ownerId) {
         await notificarTraspasoLeadEmail(lead.id, r.ownerEmail, fono, H, api)
         const tel = await telefonoDeUsuario(r.ownerId, H, api)
@@ -570,7 +573,8 @@ async function traspasarATelemarketing(
     let owner = lead?.Owner && !ownerBot ? lead.Owner : undefined
     if (!owner?.id && pais === "cl") {
       const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
-      const r = await reasignarLeadCalificacionCL(leadId)
+      // Reloj de 24h sin calificar: por definición va a la tómbola SDR.
+      const r = await reasignarLeadCalificacionCL(leadId, { calificado: false })
       if (r.success && r.ownerId && r.ownerEmail) {
         owner = { id: r.ownerId, email: r.ownerEmail, name: r.ownerNombre }
       } else {
@@ -828,7 +832,12 @@ export async function GET(req: Request) {
     // Asignación en Zoho ANTES de presentar: si el deal pasa por la regla de
     // tómbola de Zoho, el dueño que Zoho sorteó es quien se presenta al
     // prospecto y quien recibe la alerta — nunca un nombre distinto al dueño.
-    const vendedor = await asignarEnZoho(c.contact, pais, interno)
+    const vendedor = await asignarEnZoho(
+      c.contact,
+      pais,
+      interno,
+      Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
+    )
     if (vendedor.email !== interno.email) {
       await supa(`vic_ptv?id=eq.${fila[0].id}`, {
         method: "PATCH",

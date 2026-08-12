@@ -496,6 +496,13 @@ export async function reasignarLeadSdrInbound(
  * Devuelve el email del dueño sorteado, o undefined si la regla no asignó.
  */
 const TM_TOMBOLA_LEADS_CL = (process.env.VICKY_TM_TOMBOLA_LEADS_CL || "3525045000649066001").trim()
+// ESCALERA DE ROLES (biblia, reglas de Lalo 12-ago): dos tómbolas de Zoho.
+// Lead CALIFICADO (precio mostrado / dotación conocida) → "Asignación Leads
+// Vicky TLMK" 3525045000649066001, cuyo roster Lalo cambió a EJECUTIVOS el
+// 12-ago 17:11. Lead SIN calificar → "Asignación Leads Sin calificar Vicky
+// SDR" 3525045000652043111 (creada 12-ago). El RR interno Araceli/Aleydis
+// queda de fallback SOLO para el camino sin calificar (es el roster SDR).
+const TM_TOMBOLA_SIN_CALIFICAR_CL = (process.env.VICKY_TM_SIN_CALIFICAR_RULE_ID || "3525045000652043111").trim()
 
 export async function reasignarLeadTelemarketingCL(
   leadId: string,
@@ -525,15 +532,16 @@ export async function reasignarLeadTelemarketingCL(
 }
 
 /**
- * TÓMBOLA DE LEADS NO CALIFICADOS — Aleydis y Aracelli (orden de Lalo 06-ago):
- * lo que Vicky NO pudo calificar (sin número de trabajadores → no es
- * oportunidad calificada; y el reloj de 24 h hábiles sin calificar) vuelve a
- * ellas dos. Lalo confirmó (06-ago) que esa tómbola ES la regla de Zoho
- * "Asignación Leads Vicky TLMK" (3525045000649066001, roster recortado por él
- * a ellas dos) — el camino primario es disparar la REGLA (lar_id) y que Zoho
- * sortee; el round-robin interno de abajo queda SOLO de fallback si la regla
- * no asigna. Overrides sin deploy: VICKY_TM_CALIFICACION_RULE_ID (regla) y
- * VICKY_TM_CALIFICACION_DESTINOS ("email:user_id:Nombre,..." del fallback).
+ * TÓMBOLA DE LEADS POR CALIFICACIÓN — escalera de roles (biblia 12-ago):
+ * `calificado: true` (precio mostrado o dotación conocida) dispara la regla
+ * de leads CALIFICADOS → ejecutivos (649066001, roster de Lalo 12-ago);
+ * sin el flag va a la regla SIN CALIFICAR → SDR (652043111). El camino
+ * primario siempre es la REGLA de Zoho (lar_id); el round-robin interno
+ * Araceli/Aleydis queda de fallback SOLO para el camino sin calificar (ellas
+ * son el roster SDR — un calificado jamás debe caerles por fallback).
+ * Overrides sin deploy: VICKY_TM_CALIFICACION_RULE_ID (calificados),
+ * VICKY_TM_SIN_CALIFICAR_RULE_ID (SDR) y VICKY_TM_CALIFICACION_DESTINOS
+ * ("email:user_id:Nombre,..." del fallback SDR).
  */
 const DESTINOS_CALIFICACION_CL = (
   process.env.VICKY_TM_CALIFICACION_DESTINOS ||
@@ -549,10 +557,14 @@ const DESTINOS_CALIFICACION_CL = (
 
 export async function reasignarLeadCalificacionCL(
   leadId: string,
+  opts: { calificado?: boolean } = {},
 ): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string }> {
   if (!leadId) return { success: false, error: "leadId faltante" }
-  // Camino primario: la REGLA de Zoho (la tómbola real de Araceli/Aleydis).
-  const regla = (process.env.VICKY_TM_CALIFICACION_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+  const calificado = opts.calificado === true
+  // Camino primario: la REGLA de Zoho que corresponda al escalón.
+  const regla = calificado
+    ? (process.env.VICKY_TM_CALIFICACION_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+    : TM_TOMBOLA_SIN_CALIFICAR_CL
   if (regla) {
     try {
       const accessToken = await getZohoAccessToken()
@@ -576,8 +588,13 @@ export async function reasignarLeadCalificacionCL(
           return { success: true, ownerEmail: owner?.email, ownerId: owner?.id, ownerNombre: owner?.name }
         }
       }
-      console.warn(`[zoho-leads] regla de calificación ${regla} no asignó lead ${leadId} — fallback RR interno`)
-    } catch { /* fallback RR abajo */ }
+      console.warn(`[zoho-leads] regla ${calificado ? "calificados" : "sin-calificar"} ${regla} no asignó lead ${leadId}`)
+    } catch { /* fallback RR abajo (solo sin calificar) */ }
+  }
+  // El RR interno es el roster SDR: un lead CALIFICADO no cae ahí — si su
+  // regla no asignó, se reporta y el llamador decide (interino/dueño actual).
+  if (calificado) {
+    return { success: false, error: "regla de calificados no asignó (sin fallback SDR)" }
   }
   if (DESTINOS_CALIFICACION_CL.length === 0) {
     return { success: false, error: "regla no asignó y sin destinos de fallback" }

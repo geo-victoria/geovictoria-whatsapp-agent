@@ -668,7 +668,8 @@ async function convertirConDeal(
       )
     } else if (!heredaGestionAlDeal(lead.ownerId, territorio)) {
       const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
-      const r = await reasignarLeadCalificacionCL(lead.id).catch(() => null)
+      // Hito SIN N° de trabajadores = lead sin calificar → tómbola SDR.
+      const r = await reasignarLeadCalificacionCL(lead.id, { calificado: false }).catch(() => null)
       console.log(
         `[crm-hitos] +${contact}: hito sin N° de trabajadores — deal NO creado; lead ${lead.id} → tómbola de calificación (${r?.ownerEmail || "sin asignar"})`,
       )
