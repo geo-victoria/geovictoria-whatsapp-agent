@@ -2933,19 +2933,91 @@
     (function () {
       var qs = new URLSearchParams(location.search);
       var DEAL = (qs.get('deal') || '').replace(/\D/g, '');
+      var COT = (qs.get('cot') || '').replace(/\D/g, ''); // precarga desde una COT existente (Lalo 12-ago)
       var KEY = qs.get('key') || '';
-      if (!DEAL || !KEY) return;
+      if ((!DEAL && !COT) || !KEY) return;
       var API = '/api/vic-funnel?key=' + encodeURIComponent(KEY);
       var INFO = {};
+      var PRE = null; // payload de la precarga
 
       document.addEventListener('DOMContentLoaded', function () {
         var banner = document.createElement('div');
         banner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#0b3a53;color:#fff;padding:10px 16px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap';
-        banner.innerHTML = '<span id="gvDealInfo">Cargando oportunidad…</span>' +
+        banner.innerHTML = '<span id="gvDealInfo">' + (COT ? 'Precargando cotización…' : 'Cargando oportunidad…') + '</span>' +
           '<span style="opacity:.8;font-size:12px">El botón "Descargar Propuesta" emite en Zoho (amarrada a este deal) y baja el PDF oficial · nada se envía al cliente · ' +
-          '<a href="/api/vic-funnel?key=' + encodeURIComponent(KEY) + '&cotcrear=' + DEAL + '" style="color:#9fd6ff">¿prefieres el chat? →</a></span>';
+          '<a id="gvChatLink" href="/api/vic-funnel?key=' + encodeURIComponent(KEY) + (DEAL ? '&cotcrear=' + DEAL : '&vista=editor') + '" style="color:#9fd6ff">¿prefieres el chat? →</a></span>';
         document.body.prepend(banner);
 
+        // ── PRECARGA (Lalo 12-ago): con ?cot= la calculadora abre con la COT
+        //    existente ya marcada en la UI. Equipos y servicios asociados
+        //    conservan el precio EXACTO de la COT (override libre de la UI);
+        //    plan y módulos quedan a lista comercial (la UI no permite precio
+        //    bajo lista ahí) y la diferencia se muestra en el banner — el
+        //    repreciado es EXPLÍCITO, jamás silencioso. Al emitir, el selector
+        //    llega preseleccionado en "actualizar esta COT" (v2, mismo link).
+        function aplicarPrecarga(pre) {
+          var avisos = [];
+          var items = pre.items || [];
+          var uc = Number(pre.userCount || 0);
+          if (items.some(function (i) { return (i.codigo || '') === 'asistencia'; })) {
+            document.getElementById('asistenciaCheck').checked = true;
+            if (uc > 0) document.getElementById('userCount').value = uc;
+            else avisos.push('dotación no detectada — ingresa los usuarios de Asistencia a mano');
+          }
+          items.forEach(function (i) {
+            var cod = String(i.codigo || '').toLowerCase();
+            var nom = String(i.nombre || '');
+            if (cod === 'asistencia') return;
+            var addonKey = cod.indexOf('vacacion') >= 0 ? 'vacaciones' : cod.indexOf('alerta') >= 0 ? 'alertas' : cod.indexOf('banco') >= 0 ? 'banco' : cod.indexOf('document') >= 0 ? 'documental' : (cod.indexOf('calendario') >= 0 || cod.indexOf('planific') >= 0) ? 'calendario' : cod.indexOf('supervis') >= 0 ? 'appsupervisores' : cod.indexOf('cuadrilla') >= 0 ? 'appcuadrillas' : cod.indexOf('proyecto') >= 0 ? 'proyectos' : '';
+            if (addonKey && addons[addonKey]) {
+              document.getElementById(addons[addonKey].checkId).checked = true;
+              document.getElementById(addons[addonKey].usersId).value = uc > 0 ? uc : Math.max(1, Number(i.cantidad || 1));
+              return;
+            }
+            if (cod.indexOf('instalacion') >= 0 || cod.indexOf('envio') >= 0 || cod.indexOf('homolog') >= 0) {
+              var svcId = cod.indexOf('instalacion') >= 0 ? 'instalacion' : cod.indexOf('envio') >= 0 ? 'envio' : 'homologacion';
+              var svc = catalogoServicios.find(function (s) { return s.id === svcId; });
+              if (svc) {
+                addedServicios.push({ id: svc.id, displayName: svc.displayName, tipo: String(i.modalidad || '').toLowerCase() === 'arriendo' ? 'arriendo' : 'venta', zona: String(i.zona || 'RM').toUpperCase() === 'RM' ? 'rm' : 'region', cantidad: Math.max(1, Number(i.cantidad || 1)), customPrice: Number(i.precioUF || 0), defaultPrice: svc.defaultPrice, minPrice: svc.minPrice });
+                return;
+              }
+            }
+            var eq = catalogoEquipos.find(function (e2) { return e2.id === cod; }) ||
+                     catalogoEquipos.find(function (e2) { return String(i.desc || '').indexOf(e2.modelo) >= 0 || nom.indexOf(e2.modelo) >= 0; });
+            var precio = Number(i.precioUF || 0);
+            if (precio > 0) {
+              addedEquipments.push({
+                id: eq ? eq.id : ('cot_' + cod),
+                displayName: eq ? eq.displayName : (nom + (i.desc ? ' — ' + i.desc : '')),
+                tipo: String(i.modalidad || '').toLowerCase() === 'venta' ? 'venta' : 'arriendo',
+                cantidad: Math.max(1, Number(i.cantidad || 1)),
+                customPrice: precio,
+                minPrice: eq ? { venta: eq.venta, arriendo: eq.arriendo } : { venta: precio, arriendo: precio }
+              });
+            } else {
+              avisos.push('ítem "' + nom + '" no se pudo precargar — agrégalo a mano');
+            }
+          });
+          renderEquiposList(); renderServiciosList(); updateCalculator();
+          var linea = '';
+          try {
+            var g = gatherProposalData();
+            var neto = Number(g.totals.subtotalNeto || 0);
+            var orig = Number(pre.totalNetoUF || 0);
+            var dif = neto - orig;
+            linea = '📥 Precargada desde <b>' + (pre.numero || 'la cotización') + '</b>' + (pre.empresa ? ' (' + pre.empresa + ')' : '') +
+              ' · original ' + orig.toFixed(3) + ' UF neto → calculadora ' + neto.toFixed(3) + ' UF' +
+              (Math.abs(dif) > 0.005 ? ' · <b style="color:#ffd76e">Δ ' + (dif > 0 ? '+' : '') + dif.toFixed(3) + ' UF — plan/módulos quedaron a lista comercial; ajusta con el % de dcto. si quieres respetar el precio original</b>' : ' · sin diferencia ✓');
+          } catch (e3) { linea = '📥 Precargada desde ' + (pre.numero || 'la cotización'); }
+          if (pre.cerrada) linea += '<br>🔒 Esta COT está ' + pre.estado + ': solo podrás emitir una NUEVA (no se actualiza una cerrada).';
+          if (avisos.length) linea += '<br>⚠️ ' + avisos.join(' · ');
+          var pi = document.createElement('div');
+          pi.style.cssText = 'width:100%;font-size:12px;opacity:.95;line-height:1.5';
+          pi.innerHTML = linea;
+          banner.appendChild(pi);
+        }
+
+        function cargarInfoDeal() {
         fetch(API + '&accion=cotcalc_info&deal=' + DEAL, { method: 'POST' })
           .then(function (r) { return r.json(); })
           .then(function (d) {
@@ -2982,6 +3054,30 @@
               : 'No pude cargar el deal ' + DEAL + ' — revisa el link.';
           })
           .catch(function () {});
+        }
+
+        if (COT) {
+          fetch(API + '&accion=cotcalc_precarga&cot=' + COT, { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (pre) {
+              if (!pre || !pre.ok) {
+                document.getElementById('gvDealInfo').innerHTML = '⚠️ ' + ((pre && pre.error) || 'No pude precargar la cotización') +
+                  ' · <a style="color:#9fd6ff" href="/api/vic-funnel?key=' + encodeURIComponent(KEY) + '&vista=editor">volver al editor</a>';
+                return;
+              }
+              PRE = pre;
+              DEAL = String(pre.dealId || '').replace(/\D/g, '');
+              var chat = document.getElementById('gvChatLink');
+              if (chat && DEAL) chat.href = '/api/vic-funnel?key=' + encodeURIComponent(KEY) + '&cotcrear=' + DEAL;
+              cargarInfoDeal();
+              try { aplicarPrecarga(pre); } catch (e4) { console.warn('precarga falló:', e4); }
+            })
+            .catch(function () {
+              document.getElementById('gvDealInfo').textContent = '⚠️ No pude precargar la cotización ' + COT + ' — revisa el link.';
+            });
+        } else {
+          cargarInfoDeal();
+        }
 
         var btn = document.getElementById('downloadProposalBtn');
         if (!btn) return;
@@ -3001,6 +3097,7 @@
           e.stopImmediatePropagation();
           var data;
           try { data = gatherProposalData(); } catch (err) { setStatus('⚠️ No pude leer la propuesta: ' + (err && err.message)); return; }
+          if (!DEAL) { setStatus('⚠️ La precarga de la cotización aún no termina (o falló) — espera un momento y reintenta.'); return; }
           var label = btn.textContent;
           btn.disabled = true;
           btn.textContent = 'Revisando cotizaciones del deal…';
@@ -3039,6 +3136,19 @@
           radios.forEach(function (rd) {
             rd.addEventListener('change', function () { sel.disabled = (status.querySelector('input[name="gvModo"]:checked') || {}).value !== 'actualizar'; });
           });
+          // Precarga (?cot=): el modo natural es ACTUALIZAR esa misma COT
+          // (v2/vN, mismo link) — llega preseleccionado; el vendedor puede
+          // cambiar a "nueva" si quiere otra cotización aparte.
+          if (COT) {
+            for (var pj = 0; pj < sel.options.length; pj++) {
+              if (sel.options[pj].value === COT && !sel.options[pj].disabled) {
+                sel.selectedIndex = pj;
+                var rdAct = status.querySelector('input[name="gvModo"][value="actualizar"]');
+                if (rdAct && !rdAct.disabled) { rdAct.checked = true; sel.disabled = false; }
+                break;
+              }
+            }
+          }
           document.getElementById('gvCancel').addEventListener('click', function () {
             btn.disabled = false; btn.textContent = label; setStatus('');
           });
