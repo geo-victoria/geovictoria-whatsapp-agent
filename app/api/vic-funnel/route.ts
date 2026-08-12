@@ -1798,11 +1798,13 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
           <td data-l="Recurrente" data-sort="${c.montoOrden || 0}" style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td data-l="Accionable" data-sort="${esc(c.accionable.toLowerCase().slice(0, 80))}">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
-          <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa} ${
-            atendidosSet.has(c.contacto)
-              ? `<button class="btnAtendido" data-contact="${esc(c.contacto)}" data-estado="atendido" title="Contacto registrado — clic para DESHACER (Vicky vuelve a hacerle seguimiento)" style="background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:8px;padding:8px 10px;font-size:15px;cursor:pointer">✓</button>`
-              : `<button class="btnAtendido" data-contact="${esc(c.contacto)}" title="Ya lo contacté — registra tu contacto con este cliente (silencia los seguimientos de Vicky y alimenta el panel de SLA)" style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:8px;padding:8px 10px;font-size:15px;cursor:pointer">🤝</button>`
-          }</td>
+          <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
+          <!-- Botón "🤝 Ya lo contacté" RETIRADO (Lalo 12-ago): silenciaba los
+               seguimientos de Vicky (candado v3 lo contaba como atención real)
+               y el aprendizaje de la semana mala es que Vicky nunca se calla.
+               La atención real se detecta sola (WhatsApp espejado / llamadas);
+               la acción "atendido" del backend sigue viva por si hay marcas
+               históricas, pero ya no hay UI que la dispare. -->
         </tr>`
   }
   const secciones = TIPOS_ACCION.map((tipo) => {
@@ -1910,33 +1912,6 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
         });
       }
       document.querySelectorAll(".btnGest").forEach(wire);
-      document.querySelectorAll(".btnAtendido").forEach(function (b) {
-        b.addEventListener("click", async function () {
-          var marcado = this.dataset.estado === "atendido";
-          var msg = marcado
-            ? "¿Deshacer el registro de contacto? Vicky volverá a hacerle seguimiento a este cliente."
-            : "¿Registrar que YA contactaste a este cliente? Vicky deja de mandarle seguimientos automáticos.";
-          if (!confirm(msg)) return;
-          this.disabled = true;
-          try {
-            var r = await fetch(KEYQ + "&accion=atendido&contact=" + encodeURIComponent(this.dataset.contact) + (marcado ? "&deshacer=1" : ""), { method: "POST" });
-            var j = await r.json();
-            if (!j.ok) throw new Error(j.error || "error");
-            if (marcado) {
-              this.dataset.estado = ""; this.textContent = "🤝";
-              this.title = "Ya lo contacté — registra tu contacto con este cliente";
-              this.style.background = "#f0f9ff"; this.style.color = "#0369a1"; this.style.border = "1px solid #bae6fd";
-            } else {
-              this.dataset.estado = "atendido"; this.textContent = "✓";
-              this.title = "Contacto registrado — clic para DESHACER (Vicky vuelve a hacerle seguimiento)";
-              this.style.background = "#dcfce7"; this.style.color = "#166534"; this.style.border = "1px solid #86efac";
-            }
-          } catch (e) {
-            alert("No se pudo actualizar el registro. Inténtalo de nuevo.");
-          }
-          this.disabled = false;
-        });
-      });
       var lnk = document.getElementById("lnkVerGest");
       if (lnk) lnk.addEventListener("click", function (ev) {
         ev.preventDefault();
