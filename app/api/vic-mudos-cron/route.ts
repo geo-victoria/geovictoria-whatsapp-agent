@@ -382,10 +382,37 @@ export async function GET(req: Request): Promise<Response> {
       if (!porContactoCanal.has(k)) porContactoCanal.set(k, await tomadoPor(c.contact, c.canal, agentes))
       lista.push({ contact: c.contact, canal: c.canal, fecha: c.fecha, texto: c.texto, tomadoPor: porContactoCanal.get(k) || "" })
     }
+    // CONVERSACIONES CRUZADAS (Lalo 11-ago): contacto cuyo mensaje ENTRÓ por
+    // una línea pero cuyas respuestas SALIERON solo por OTRA — Meta rechaza el
+    // envío sin sesión en esa línea y el cliente no recibe nada. Se computa
+    // sobre TODO el feed (sin filtro de canal): entrada = líneas con mensajes
+    // del cliente; salida = líneas con mensajes nuestros posteriores.
+    const linea = (canal: string) => (String(canal).match(/(\d{6,})\s*$/) || [])[1] || ""
+    const entradas = new Map<string, Set<string>>()
+    const salidas = new Map<string, Set<string>>()
+    for (const it of feed) {
+      const cid = String(it.chat?.contactId || "").trim()
+      const ln = linea(String(it.chat?.channelId || ""))
+      if (!cid || !ln || /[^\d]/.test(cid)) continue
+      const mapa = String(it.from || "").toLowerCase() === "user" ? entradas : salidas
+      const set = mapa.get(cid) || new Set<string>()
+      set.add(ln)
+      mapa.set(cid, set)
+    }
+    const cruzados: Array<{ contact: string; entro_por: string[]; salio_por: string[] }> = []
+    for (const [cid, ent] of entradas) {
+      const sal = salidas.get(cid)
+      if (!sal || !sal.size) continue
+      // Cruce REAL: ninguna de las salidas usó una línea por la que el
+      // cliente entró (si al menos una salida fue por su línea, sí recibió).
+      const algunaCoincide = [...sal].some((s) => ent.has(s))
+      if (!algunaCoincide) cruzados.push({ contact: cid, entro_por: [...ent], salio_por: [...sal] })
+    }
     return NextResponse.json({
       ok: true, dry: true,
       ventana: { from: fromIso, to: toIso },
       feed: feed.length, atendidos_en_consola: atendidosEnConsola,
+      cruzados,
       mudos: lista,
     })
   }
