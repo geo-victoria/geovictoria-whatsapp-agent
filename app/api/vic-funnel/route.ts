@@ -2477,11 +2477,15 @@ function panelCotizacionHtml(e: EstadoCotizacion): string {
   // envío. Lo que muestra es exactamente lo que saldría al apretar enviar.
   const btnPreview = `<div style="margin-top:12px"><button onclick="previewCotPdf(this)" title="Genera y abre el PDF con los últimos cambios. NO le envía nada al cliente — es para revisar antes de enviar." style="background:#fff;color:#333;border:1px solid #d9d9d9;border-radius:10px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;width:100%">👁 Vista previa del PDF (no envía nada)</button></div>`
   const btnEnviar = `<div style="margin-top:8px"><button onclick="enviarCotCliente(this)" title="Vicky le manda al cliente el PDF vigente por WhatsApp, con un mensaje corto" style="background:#ffbb00;color:#fff;border:0;border-radius:10px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;width:100%">📤 Enviar a cliente por WhatsApp de Vicky</button></div>`
+  // Nota de Venta a demanda (Lalo 12-ago, "déjalo implementado"): convierte la
+  // COT en NDV real de Creator vía el cotizador (handoff completo del post-pago:
+  // numeración NDV-xxx, subforms, tabla de cobro y PDF). Al cliente no le llega nada.
+  const btnNdv = `<div style="margin-top:8px"><button onclick="crearNdvCot(this)" title="Crea la Nota de Venta en Zoho Creator a partir de esta cotización (numerada, con subformularios y PDF). Al cliente NO le llega nada." style="background:#fff;color:#333;border:1px solid #d9d9d9;border-radius:10px;padding:10px 14px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;width:100%">🧾 Crear Nota de Venta (Creator)</button></div>`
   return `<h2 style="margin:0 0 2px;font-size:15px">${esc(p.empresa || "Empresa sin nombre")}</h2>
   <div class="sub" style="margin:0 0 10px">${e.numero ? `${esc(e.numero)} · ` : ""}${p.rut ? `RUT ${esc(p.rut)} · ` : ""}<span class="tag">${esc(e.estadoZoho || "estado desconocido")}</span>${e.descuentoPct ? ` · dcto. recurrente ${e.descuentoPct}%` : ""}</div>
   ${e.items.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Ítem</th><th style="text-align:center">Cant.</th><th>Tipo</th><th style="text-align:right">Neto</th></tr></thead><tbody>${filas}</tbody></table></div>` : `<p class="sub" style="margin:0 0 8px">Detalle de ítems no disponible desde Zoho en este momento.</p>`}
   <div style="margin-top:10px;font-size:14px"><b>Total con IVA:</b> ${p.totalUf ? `UF ${p.totalUf.toLocaleString("es-CL", { maximumFractionDigits: 2 })}` : "—"}${p.totalClp ? ` <span class="sub" style="font-size:12px">(~$${Math.round(p.totalClp).toLocaleString("es-CL")})</span>` : ""}</div>
-  ${links ? `<div style="margin-top:8px;font-size:13px">${links}</div>` : ""}${btnPreview}${btnEnviar}`
+  ${links ? `<div style="margin-top:8px;font-size:13px">${links}</div>` : ""}${btnPreview}${btnEnviar}${btnNdv}`
 }
 
 /** Página del editor conversacional "Vicky Cotizaciones" (pedido Lalo 06-ago):
@@ -2717,6 +2721,30 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
           chip("Envío falló: " + e3, false);
           b.disabled = false;
           b.textContent = orig;
+        }
+      };
+      // Nota de Venta a demanda: el cotizador corre el handoff completo del
+      // post-pago con el maestro naciendo como "Nota de Venta" (numerada).
+      window.crearNdvCot = async function (b) {
+        if (!COT) { chip("Esta cotización aún no tiene ID en Zoho.", false); return; }
+        if (!confirm("¿Crear la Nota de Venta en Creator a partir de esta cotización? Al cliente NO le llega nada.")) return;
+        b.disabled = true;
+        var orig = b.textContent;
+        b.textContent = "Creando NDV… (puede tardar ~30 s)";
+        try {
+          var res = await fetch(KEYQ + "&accion=ndv_crear&contact=" + encodeURIComponent(CONTACT) + "&cot=" + encodeURIComponent(COT), { method: "POST" });
+          var j = null;
+          try { j = await res.json(); } catch (e2) {}
+          if (res.ok && j && j.ok) {
+            b.textContent = "✅ NDV " + (j.idNdv || "creada");
+            chip(j.mensaje || ("Nota de Venta " + (j.idNdv || "") + (j.reused ? " ya existía en Creator ✔" : " creada en Creator ✔")), true);
+          } else {
+            chip("No se pudo crear la NDV: " + ((j && j.error) || ("error " + res.status)), false);
+            b.disabled = false; b.textContent = orig;
+          }
+        } catch (e3) {
+          chip("No se pudo crear la NDV: " + e3, false);
+          b.disabled = false; b.textContent = orig;
         }
       };
       // Envío desde el WhatsApp del VENDEDOR: encola el trabajo y sondea su
@@ -4362,6 +4390,34 @@ export async function POST(req: Request): Promise<Response> {
         return new Response(JSON.stringify({ ok: false, error: "La cotización aún no tiene PDF." }), { status: 409, headers: { "content-type": "application/json" } })
       }
       return new Response(JSON.stringify({ ok: true, pdf_url: pdf, regenerado: Boolean(fresco) }), { headers: { "content-type": "application/json" } })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
+    }
+  }
+  // Botón "Crear Nota de Venta" del editor (Lalo 12-ago): convierte la COT en
+  // NDV real de Creator vía el cotizador (handoff completo del post-pago:
+  // numeración NDV-xxx, subforms, tabla de cobro y PDF). No toca al cliente.
+  if (accion === "ndv_crear") {
+    const quoteIdSel = (searchParams.get("cot") || "").replace(/\D/g, "").trim()
+    if (!quoteIdSel) {
+      return new Response(JSON.stringify({ ok: false, error: "Falta la cotización (cot)." }), { status: 400, headers: { "content-type": "application/json" } })
+    }
+    try {
+      const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+      const secreto = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+      const r = await fetch(`${base}/api/creator/crear-ndv-desde-cot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(secreto ? { "x-vicky-secret": secreto } : {}) },
+        body: JSON.stringify({ quoteId: quoteIdSel }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(55000),
+      })
+      const j = (await r.json().catch(() => null)) as Record<string, unknown> | null
+      return new Response(JSON.stringify(j ?? { ok: false, error: `HTTP ${r.status} del cotizador` }), {
+        status: r.ok ? 200 : 502,
+        headers: { "content-type": "application/json" },
+      })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return new Response(JSON.stringify({ ok: false, error: msg.slice(0, 300) }), { status: 500, headers: { "content-type": "application/json" } })
