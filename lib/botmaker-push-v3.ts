@@ -121,19 +121,25 @@ export async function detectarCanalOrigen(contactId: string): Promise<string> {
   if (!BM_TOKEN || !SUPABASE_URL_KV || !SUPABASE_KEY_KV) return ""
   const clean = normalizeContactId(contactId)
   try {
-    const desde = new Date(Date.now() - 30 * 60 * 1000).toISOString()
-    const r = await fetch(
-      `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desde)}`,
-      { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" },
-    )
-    const data = (await r.json().catch(() => ({}))) as {
-      items?: Array<{
-        from?: string
-        creationTime?: string
-        chat?: { contactId?: string; channelId?: string }
-      }>
+    // Ventana de 24 h CON paginación (fix 11-ago, caso +573003012670: la
+    // búsqueda vieja de 30 min / 250 mensajes no encontraba al contacto en
+    // horas ocupadas, el kv no se escribía y la respuesta salía por la línea
+    // del prefijo — cruzada y rechazada por Meta).
+    const desde = new Date(Date.now() - 24 * 3600e3).toISOString()
+    type Item = { from?: string; creationTime?: string; chat?: { contactId?: string; channelId?: string } }
+    const items: Item[] = []
+    let url = `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desde)}&pag=true`
+    for (let page = 0; page < 8 && url; page++) {
+      const r = await fetch(url, { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" })
+      if (!r.ok) break
+      const data = (await r.json().catch(() => ({}))) as { items?: Item[]; nextPage?: string }
+      items.push(...(Array.isArray(data.items) ? data.items : []))
+      // Corte temprano: si el contacto ya apareció, no hace falta seguir.
+      if (items.some((m) => m.from === "user" && m.chat?.contactId === clean && m.chat?.channelId)) break
+      url = String(data.nextPage || "")
+      if (!Array.isArray(data.items) || data.items.length === 0) break
     }
-    const delContacto = (data.items || [])
+    const delContacto = items
       .filter((m) => m.from === "user" && m.chat?.contactId === clean && m.chat?.channelId)
       .sort((a, b) => String(b.creationTime || "").localeCompare(String(a.creationTime || "")))
     const canal = delContacto[0]?.chat?.channelId || ""
@@ -332,7 +338,20 @@ export async function sendBotmakerTemplate(
     return false
   }
   const cleanContact = normalizeContactId(contactId)
-  const chatChannelNumber = channelNumber(channelId)
+  // El canal de ORIGEN también manda en las PLANTILLAS (fix 11-ago): un
+  // contacto que escribió por una línea de otro país recibía los toques por
+  // la línea de su prefijo — cruzados y sin entregar. Mismo criterio que
+  // sendBotmakerMessage (los números internos de aviso no siguen origen).
+  const internosTpl = new Set(
+    [process.env.QUOTE_NOTIFY_TO, process.env.VICKY_REPORT_PHONE]
+      .map((n) => (n || "").trim().replace(/\D/g, ""))
+      .filter(Boolean),
+  )
+  const origenTpl = internosTpl.has(cleanContact) ? "" : await canalDeOrigen(cleanContact)
+  const chatChannelNumber = channelNumber(origenTpl || channelId)
+  if (origenTpl && channelNumber(origenTpl) !== channelNumber(channelId)) {
+    console.log(`[botmaker-template] contact=${cleanContact}: canal de origen ${origenTpl} (override sobre ${channelId || "default"})`)
+  }
   if (!chatChannelNumber) {
     console.error("[botmaker-template] no se pudo determinar chatChannelNumber")
     return false
