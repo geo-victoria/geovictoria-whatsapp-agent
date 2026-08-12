@@ -355,6 +355,12 @@ export async function GET(req: Request): Promise<Response> {
     const registrados = nuestros.get(cid) || []
     const n = norm(texto)
     if (registrados.some((rg) => rg.includes(n))) continue
+    // ADJUNTOS (caso Jazmin 11-ago): un PDF/imagen entra al feed como "[file]"
+    // pero Vicky lo registra enriquecido ("[El cliente envió un DOCUMENTO…]").
+    // Si el tipo no es texto y Vicky tiene registrado ALGÚN adjunto de este
+    // contacto en la ventana, se da por recibido — el texto literal no calza
+    // nunca y alertaba conversaciones perfectamente atendidas.
+    if (tipo !== "text" && registrados.some((rg) => rg.includes("el cliente envió") || rg.startsWith("["))) continue
     // ¿Alguien (agente en consola o bot) respondió después de este mensaje?
     const tMsg = Date.parse(String(it.creationTime || ""))
     const respuestas = respuestasPorContacto.get(cid) || []
