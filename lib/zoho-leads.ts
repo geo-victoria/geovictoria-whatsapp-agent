@@ -27,7 +27,7 @@ function splitName(fullName?: string): { firstName: string; lastName: string } {
   }
 }
 
-function mapRangoEmpleados(trabajadores?: string | number): string | undefined {
+export function mapRangoEmpleados(trabajadores?: string | number): string | undefined {
   const raw = typeof trabajadores === "number" ? String(trabajadores) : trabajadores || ""
   const n = parseInt(raw.replace(/\D/g, ""))
   if (isNaN(n) || n <= 0) return undefined

@@ -152,6 +152,140 @@ async function notaTraspasoConversacion(leadId: string, fono: string): Promise<v
   }
 }
 
+/**
+ * ENRIQUECIMIENTO DE LEADS DESDE EL CHAT (Lalo 13-ago: "es muy confuso que
+ * sigan apareciendo leads con nombre Prospecto WhatsApp"). Cada tick toma
+ * hasta 6 leads placeholder recientes (Prospecto WhatsApp / Por identificar),
+ * lee su conversación, extrae con Haiku los datos que el CLIENTE dio
+ * (nombre, empresa, email, dotación) y completa SOLO los campos placeholder o
+ * vacíos del lead — jamás pisa datos reales ni gestión. Candado de intento de
+ * 6h por lead en vic_kv (`enrq_<leadId>`) para no martillar. Best-effort.
+ */
+const RE_NOMBRE_PLACEHOLDER = /^prospecto( whatsapp)?$/i
+const RE_EMPRESA_PLACEHOLDER = /^(por identificar|prospecto whatsapp)/i
+
+async function extraerDatosLeadDeChat(
+  dialogo: string,
+  apiKey: string,
+): Promise<{ nombre?: string; empresa?: string; email?: string; trabajadores?: number } | null> {
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        system:
+          "Extrae datos del CLIENTE desde una conversación de ventas por WhatsApp. Responde SOLO un JSON válido con esta forma exacta: " +
+          '{"nombre": string|null, "empresa": string|null, "email": string|null, "trabajadores": number|null}. ' +
+          "Reglas: usa ÚNICAMENTE lo que el CLIENTE dijo explícitamente (nunca inventes ni infieras del contexto de Vicky); " +
+          "nombre = nombre de la persona (no de la empresa); trabajadores = cantidad de personas de su empresa si la dijo; " +
+          "null en todo campo que no aparezca claro. Sin texto adicional fuera del JSON.",
+        messages: [{ role: "user", content: dialogo }],
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = (await res.json().catch(() => ({}))) as { content?: Array<{ text?: string }> }
+    const texto = data?.content?.[0]?.text || ""
+    const m = texto.match(/\{[\s\S]*\}/)
+    if (!m) return null
+    const j = JSON.parse(m[0]) as Record<string, unknown>
+    return {
+      nombre: typeof j.nombre === "string" && j.nombre.trim() ? j.nombre.trim() : undefined,
+      empresa: typeof j.empresa === "string" && j.empresa.trim() ? j.empresa.trim() : undefined,
+      email: typeof j.email === "string" && /@/.test(j.email) ? j.email.trim() : undefined,
+      trabajadores: typeof j.trabajadores === "number" && j.trabajadores > 0 ? j.trabajadores : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+async function enriquecerLeadsDeChat(): Promise<number> {
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) return 0
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const desde = new Date(Date.now() - 14 * 86400e3).toISOString().slice(0, 10)
+    const q =
+      `select id, First_Name, Last_Name, Company, Phone, Email from Leads ` +
+      `where (Last_Name = 'Prospecto WhatsApp' or Last_Name = 'Prospecto' or Company like 'Por identificar%') ` +
+      `and Created_Time >= '${desde}T00:00:00-04:00' order by Created_Time desc limit 25`
+    const res = await fetch(`${api}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store", body: JSON.stringify({ select_query: q }),
+    })
+    if (!res.ok) return 0
+    const filas = (((await res.json().catch(() => ({}))) as {
+      data?: Array<{ id: string; First_Name?: string; Last_Name?: string; Company?: string; Phone?: string; Email?: string }>
+    }).data || [])
+    let hechos = 0
+    for (const ld of filas) {
+      if (hechos >= 6) break
+      const fono = String(ld.Phone || "").replace(/\D/g, "")
+      if (!fono) continue
+      // Candado de intento: un lead se procesa a lo más una vez cada 6h.
+      const kvKey = `enrq_${ld.id}`
+      const vivo = await supa<{ key: string; expires_at?: string }>(
+        `vic_kv?key=eq.${kvKey}&select=key,expires_at&limit=1`,
+      )
+      if (vivo[0] && (!vivo[0].expires_at || new Date(vivo[0].expires_at).getTime() > Date.now())) continue
+      await supa(`vic_kv?on_conflict=key`, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          key: kvKey, value: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 6 * 3600e3).toISOString(),
+        }),
+      }).catch(() => [])
+      const conv = await supa<{ id: string; user_msg_count?: number }>(
+        `vic_v3_conversations?contact=eq.${fono}&select=id,user_msg_count&limit=1`,
+      )
+      if (!conv[0]?.id || (conv[0].user_msg_count || 0) < 1) continue
+      const msgs = await supa<{ role: string; content: string }>(
+        `vic_v3_messages?conversation_id=eq.${conv[0].id}&select=role,content&order=at.asc&limit=40`,
+      )
+      const dialogo = msgs
+        .filter((m) => !String(m.content || "").startsWith("[REGISTRO INTERNO"))
+        .map((m) => `${m.role === "user" ? "CLIENTE" : "VICKY"}: ${String(m.content || "").slice(0, 300)}`)
+        .join("\n")
+        .slice(0, 6000)
+      if (!dialogo.includes("CLIENTE:")) continue
+      const ex = await extraerDatosLeadDeChat(dialogo, apiKey)
+      if (!ex) continue
+      const campos: Record<string, string> = {}
+      if (ex.nombre && RE_NOMBRE_PLACEHOLDER.test(String(ld.Last_Name || "").trim())) {
+        const partes = ex.nombre.split(/\s+/)
+        if (partes[0]) campos.First_Name = partes[0].slice(0, 100)
+        campos.Last_Name = (partes.slice(1).join(" ") || partes[0] || "").slice(0, 100) || "Prospecto"
+      }
+      if (ex.empresa && RE_EMPRESA_PLACEHOLDER.test(String(ld.Company || "").trim())) {
+        campos.Company = ex.empresa.slice(0, 200)
+      }
+      if (ex.email && !String(ld.Email || "").trim()) campos.Email = ex.email
+      if (ex.trabajadores) {
+        const { mapRangoEmpleados } = await import("@/lib/zoho-leads")
+        const rango = mapRangoEmpleados(ex.trabajadores)
+        if (rango) campos.Rango_de_Empleados = rango
+      }
+      if (Object.keys(campos).length === 0) continue
+      const { updateZohoLeadFields } = await import("@/lib/zoho-leads")
+      const ok = await updateZohoLeadFields(ld.id, campos).catch(() => ({ success: false }))
+      if (ok.success) {
+        hechos++
+        console.log(`[ptv] lead ${ld.id} enriquecido desde el chat: ${Object.keys(campos).join(", ")}`)
+      }
+    }
+    return hechos
+  } catch (e) {
+    console.warn("[ptv] enriquecerLeadsDeChat falló:", e instanceof Error ? e.message : e)
+    return 0
+  }
+}
+
 /** Turno de tómbola persistido en vic_kv (equitativo entre invocaciones). */
 async function siguienteVendedor(pais: "cl" | "co" | "mx" | "pe") {
   const lista = vendedoresDePais(pais)
@@ -1142,10 +1276,18 @@ export async function GET(req: Request) {
     return 0
   })
 
+  // Enriquecimiento de leads placeholder desde el chat (Lalo 13-ago): los
+  // "Prospecto WhatsApp" se completan con lo que el cliente ya dijo.
+  const enriquecidos = await enriquecerLeadsDeChat().catch((e) => {
+    console.warn("[ptv-cron] enriquecimiento falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+
   return NextResponse.json({
     ok: true,
     crones_huerfanos_despachados: huerfanos,
     leads_cruzados_corregidos: cruzados,
+    leads_enriquecidos: enriquecidos,
     conversaciones_revisadas: convs.length,
     traspasados,
     tm_traspasados: tmTraspasados,
