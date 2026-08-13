@@ -702,12 +702,45 @@ const SDR_INBOUND_MX = (process.env.VIC_SDR_INBOUND_MX || "")
   })
   .filter((s) => s.email)
 
-/** Reasigna un lead MX al siguiente SDR Inbound del round-robin mexicano. */
+// Tómbola de SDR Inbound MX en ZOHO (Lalo 13-ago): la regla decide el sorteo.
+// Override por env; el RR interno del roster queda solo de fallback.
+const TM_SDR_INBOUND_MX = (process.env.VICKY_TM_SDR_INBOUND_MX_RULE_ID || "3525045000652685096").trim()
+
+/** Reasigna un lead MX vía la tómbola de Zoho de SDR Inbound; fallback RR interno. */
 export async function reasignarLeadSdrInboundMX(
   leadId: string,
 ): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
-  if (!leadId || SDR_INBOUND_MX.length === 0) {
-    return { success: false, error: "leadId faltante o sin SDRs MX configuradas (VIC_SDR_INBOUND_MX)" }
+  if (!leadId) return { success: false, error: "leadId faltante" }
+  // Camino primario: la REGLA de Zoho (lar_id) — mismo patrón que CL.
+  if (TM_SDR_INBOUND_MX) {
+    try {
+      const accessToken = await getZohoAccessToken()
+      const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+      const H = { Authorization: `Zoho-oauthtoken ${accessToken}`, "Content-Type": "application/json" }
+      const put = await fetch(`${apiDomain}/crm/v3/Leads`, {
+        method: "PUT",
+        headers: H,
+        cache: "no-store",
+        body: JSON.stringify({ data: [{ id: leadId }], lar_id: TM_SDR_INBOUND_MX }),
+      })
+      if (put.ok) {
+        const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
+        const owner = g.ok
+          ? ((await g.json().catch(() => ({}))) as {
+              data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }>
+            }).data?.[0]?.Owner
+          : undefined
+        const email = (owner?.email || "").toLowerCase()
+        // La regla asignó solo si el dueño dejó de ser un usuario interino.
+        if (email && !/vicky@|info@geovictoria/.test(email)) {
+          return { success: true, ownerEmail: owner?.email, ownerId: owner?.id }
+        }
+      }
+      console.warn(`[zoho-leads] tómbola SDR MX ${TM_SDR_INBOUND_MX} no asignó lead ${leadId} — fallback RR interno`)
+    } catch { /* fallback RR abajo */ }
+  }
+  if (SDR_INBOUND_MX.length === 0) {
+    return { success: false, error: "tómbola MX no asignó y sin roster de fallback (VIC_SDR_INBOUND_MX)" }
   }
   try {
     const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
