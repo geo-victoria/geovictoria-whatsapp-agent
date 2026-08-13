@@ -1346,7 +1346,7 @@ async function limpiezaCartera7d(ahora: Date): Promise<number> {
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
   const corte = new Date(ahora.getTime() - 7 * 86400e3).toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const q =
-    `select id, Deal_Name, Stage, Last_Activity_Time from Deals ` +
+    `select id, Deal_Name, Stage, Last_Activity_Time, Contact_Name.Phone, Contact_Name.Mobile from Deals ` +
     `where Deal_Name like '%Cotización Vicky%' and Last_Activity_Time <= '${corte}' ` +
     `and Stage in ('1. Trato Creado', '2. Primera Reunion Realizada', '3. En Levantamiento', '4. Propuesta Enviada / En Negociación') ` +
     `order by Last_Activity_Time asc limit 0, 20`
@@ -1360,6 +1360,25 @@ async function limpiezaCartera7d(ahora: Date): Promise<number> {
   for (const d of deals) {
     if (cerrados >= 5) break
     const dealId = String(d.id || "")
+    // LAS 3 FUENTES DE ACTIVIDAD (Lalo 13-ago, "debe estar impecable"): Zoho
+    // ya filtró por Last_Activity, pero un deal puede estar VIVO por WhatsApp
+    // de Vicky o del VENDEDOR (espejo) sin que Zoho lo sepa — jamás cerrarlo
+    // como perdido en ese caso (patrón real: Paola/G&A, venta activa por
+    // espejo con Zoho quieto).
+    let fonoDeal = String(d["Contact_Name.Mobile"] || d["Contact_Name.Phone"] || "").replace(/\D/g, "")
+    if (fonoDeal.length === 9 && fonoDeal.startsWith("9")) fonoDeal = `56${fonoDeal}`
+    if (fonoDeal) {
+      const corte7dIso = new Date(ahora.getTime() - 7 * 86400e3).toISOString()
+      const [convViva, espejoVivo, llamadaViva] = await Promise.all([
+        supa<{ id: string }>(`vic_v3_conversations?contact=eq.${fonoDeal}&updated_at=gte.${corte7dIso}&select=id&limit=1`),
+        supa<{ id: string }>(`vic_wa_espejo_mensajes?telefono_chat=eq.${fonoDeal}&enviado_at=gte.${corte7dIso}&select=id&limit=1`),
+        supa<{ id: string }>(`vic_wa_espejo_llamadas?telefono=eq.${fonoDeal}&at=gte.${corte7dIso}&select=id&limit=1`),
+      ])
+      if (convViva.length || espejoVivo.length || llamadaViva.length) {
+        console.log(`[cartera-7d] deal ${dealId} (${fonoDeal}): actividad viva en ${convViva.length ? "Vicky" : espejoVivo.length ? "espejo vendedor" : "llamada espejo"} — NO se cierra.`)
+        continue
+      }
+    }
     const marca = `cierre7d_${dealId}`
     const previa = await getKvValue(marca).catch(() => null)
     // Un intento por día por deal: los que fallan (transición no disponible,
