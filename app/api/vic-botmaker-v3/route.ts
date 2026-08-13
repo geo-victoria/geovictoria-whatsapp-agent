@@ -454,6 +454,20 @@ async function processOneTurn(
     const directivaUmbral = dotacionDetectada && umbralInfo
       ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral)
       : ""
+    // Directiva determinista del marcaje (biblia 12-ago; caso "Mixto" 13-ago,
+    // dos veces el mismo día): la regla del prompt sola no alcanza — cuando el
+    // cliente ELIGE reloj o marcaje mixto en una respuesta corta, sin declarar
+    // cantidades ni sedes, la orden imperativa entra al FINAL del prompt
+    // (recencia, igual que la del umbral): 1 punto y 1 reloj asumidos, la
+    // única pregunta permitida es la comuna.
+    const msgCorto = (message || "").trim()
+    const eligeReloj =
+      msgCorto.length <= 40 && /\b(mixt[oa]s?|combinad[oa]s?|combinaci[oó]n|reloj(?:es)?)\b/i.test(msgCorto)
+    const declaraCantidadOSedes = /\d|sucursal|sede|punto|local/i.test(msgCorto)
+    const directivaMarcaje =
+      eligeReloj && !declaraCantidadOSedes
+        ? "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de elegir un marcaje que INCLUYE reloj (o dijo 'mixto'). PROHIBIDO preguntarle cuántos relojes o cuántos puntos necesita: ASUME 1 punto y 1 reloj y decláralo en tu mensaje. Si aún no sabes la comuna de ese punto, tu ÚNICA pregunta de este turno es la comuna; si ya la sabes, cotiza AHORA con cotizar_referencial (1 punto, autoInstalada: true) presentando el doble valor (con y sin reloj)."
+        : ""
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)
@@ -476,7 +490,7 @@ async function processOneTurn(
     const result = await runAgentLoop({
       systemPrompt: onboarding
         ? onboarding.systemPrompt
-        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral,
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje,
       history,
       userMessage: message,
       apiKey,
