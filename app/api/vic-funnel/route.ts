@@ -1813,7 +1813,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           <td data-l="Primer contacto" data-sort="${Date.parse(c.primerContactoIso || "") || 0}" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
           <td data-l="Estado" data-sort="${esc(c.estado.toLowerCase())}"><span class="tag">${esc(c.estado)}</span></td>
           <td data-l="Usuarios" data-sort="${c.usuarios || 0}" style="white-space:nowrap;text-align:center" title="${c.usuarios ? `${c.usuarios} usuarios` : "sin dato de dotación"}">${rangoUsuarios(c.usuarios)}</td>
-          <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: llamada, WhatsApp o nota/comentario del ejecutivo en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
+          <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: WhatsApp de Vicky, WhatsApp o llamada del vendedor (espejo), o actividad en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
           <td data-l="Recurrente" data-sort="${c.montoOrden || 0}" style="white-space:nowrap;text-align:right">${c.monto}</td>
           <td data-l="Accionable" data-sort="${esc(c.accionable.toLowerCase().slice(0, 80))}">${esc(c.accionable)}${c.resumen ? `<div class="sub" style="margin:2px 0 0;font-size:12px">${esc(c.resumen)}</div>` : ""}</td>
           <td class="tdWa" style="white-space:nowrap;vertical-align:middle;padding-left:10px">${btnWa}</td>
@@ -1831,8 +1831,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th class="noSort">Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th title="Dotación conocida: cotizada en el chat o declarada en el deal">Usuarios</th><th>Última actividad</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th class="noSort" style="padding-left:10px">WA</th></tr></thead>
-      <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
+      <thead><tr><th class="noSort">Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th title="Dotación conocida: cotizada en el chat o declarada en el deal">Usuarios</th><th title="Última actividad con el cliente por cualquiera de las 3 fuentes: WhatsApp de Vicky, WhatsApp o llamada del vendedor (espejo), o actividad registrada en Zoho">Última actividad</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th class="noSort" style="padding-left:10px">WA</th></tr></thead>      <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
 
@@ -4845,10 +4844,31 @@ export async function GET(req: Request): Promise<Response> {
         // Contactos con chat espejado del WhatsApp de algún vendedor (worker
         // wa-espejo) — habilita el link "wsp vendedor" y su último mensaje
         // cuenta como actividad del caso.
-        fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=telefono_chat,enviado_at&telefono_chat=not.is.null&es_grupo=eq.false&limit=20000`, {
-          headers: hSb,
-          cache: "no-store",
-        }).then((r) => (r.ok ? r.json() : [])).catch(() => []) as Promise<Array<{ telefono_chat: string; enviado_at: string }>>,
+        // PAGINADO (bug 13-ago, caso Paola/G&A): PostgREST capa cada request en
+        // 1000 filas y la versión anterior (limit=20000 SIN order) traía las
+        // 1000 MÁS VIEJAS — la actividad reciente del vendedor no llegaba a la
+        // columna. Ahora: orden desc + páginas de 1000 (ventana 35 días) y las
+        // LLAMADAS aceptadas del espejo también cuentan como actividad.
+        (async () => {
+          const out: Array<{ telefono_chat: string; enviado_at: string }> = []
+          const desde35 = new Date(Date.now() - 35 * 86400e3).toISOString()
+          for (let off = 0; off < 8000; off += 1000) {
+            const r = await fetch(
+              `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=telefono_chat,enviado_at&telefono_chat=not.is.null&es_grupo=eq.false&enviado_at=gte.${desde35}&order=enviado_at.desc&limit=1000&offset=${off}`,
+              { headers: hSb, cache: "no-store" },
+            )
+            const page = r.ok ? ((await r.json().catch(() => [])) as Array<{ telefono_chat: string; enviado_at: string }>) : []
+            out.push(...page)
+            if (page.length < 1000) break
+          }
+          const rl = await fetch(
+            `${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?select=telefono,at&estado=eq.accept&at=gte.${desde35}&order=at.desc&limit=1000`,
+            { headers: hSb, cache: "no-store" },
+          )
+          const llam = rl.ok ? ((await rl.json().catch(() => [])) as Array<{ telefono: string; at: string }>) : []
+          out.push(...llam.map((x) => ({ telefono_chat: x.telefono, enviado_at: x.at })))
+          return out
+        })().catch(() => [] as Array<{ telefono_chat: string; enviado_at: string }>),
         // Cartera completa del equipo (pedido Lalo 07-ago): todos los deals
         // activos de Zoho, hayan pasado o no por Vicky.
         fetchDealsEquipo().catch(() => [] as DealEquipo[]),
