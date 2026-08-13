@@ -2184,6 +2184,200 @@ function renderEvolucionDiaria(params: {
 </div>`
 }
 
+// ── Dashboard INBOUND DIARIO (pedido Rodrigo 13-ago) ────────────────────────
+// "Vicky toma solo las de inbound": cuántas oportunidades inbound llegan cada
+// día y hasta dónde ha llegado cada una. EMBUDO POR COHORTE, no foto diaria:
+// todo se atribuye al día en que el contacto escribió por PRIMERA vez, aunque
+// el hito (precio, formal, pago) haya ocurrido días después. Inbound = el
+// cliente llegó solo por WhatsApp (sin toque 0 de la cadencia outbound).
+
+/** Primera conversación por contacto (min started_at). PostgREST capa cada
+ * request en 1000 filas → paginado ascendente hasta agotar (universo ~1.2k). */
+async function fetchPrimeraConversacion(): Promise<Map<string, string>> {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const primera = new Map<string, string>()
+  for (let offset = 0; offset < 20000; offset += 1000) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=contact,started_at&order=started_at.asc&limit=1000&offset=${offset}`,
+      { headers: h, cache: "no-store" },
+    )
+    if (!res.ok) break
+    const rows = (await res.json().catch(() => [])) as Array<{ contact?: string; started_at?: string }>
+    for (const r of rows) {
+      const tel = digits(String(r.contact || ""))
+      if (tel && r.started_at && !primera.has(tel)) primera.set(tel, String(r.started_at))
+    }
+    if (rows.length < 1000) break
+  }
+  return primera
+}
+
+const ETAPAS_INBOUND = ["llegaron", "comercial", "precio", "formal", "aceptada", "pagada"] as const
+type EtapaInbound = (typeof ETAPAS_INBOUND)[number]
+const ETIQUETA_ETAPA_INBOUND: Record<EtapaInbound, string> = {
+  llegaron: "Llegó (sin intención aún)",
+  comercial: "Intención comercial",
+  precio: "Vio precio",
+  formal: "Formal enviada",
+  aceptada: "Aceptada",
+  pagada: "Pagada",
+}
+
+type CohortesInbound = {
+  dias: string[]
+  /** tel → día de llegada + etapa MÁS AVANZADA alcanzada a hoy
+   * (índice en ETAPAS_INBOUND; 0 = solo llegó). */
+  porContacto: Map<string, { dia: string; etapa: number }>
+}
+
+function computarCohortesInbound(params: {
+  primeraVez: Map<string, string>
+  analysisRows: Row[]
+  preformAt: Map<string, string>
+  quotes: RawAceptada[]
+  hardQuote: Set<string>
+  toque0: Set<string>
+  pais: Pais
+  rango: RangoFechas | null
+}): CohortesInbound {
+  const { primeraVez, analysisRows, preformAt, quotes, hardQuote, toque0, pais, rango } = params
+  const testSet = metricsContactSet()
+  const diaDe = (iso: string | null | undefined): string => {
+    const t = Date.parse(String(iso || ""))
+    if (!Number.isFinite(t)) return ""
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t))
+  }
+  // Mismo rango que 📈 Evolución: sigue el Desde–Hasta; sin filtro, 30 días.
+  const DIA_MS = 864e5
+  const finMs = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
+  const inicioMs = rango && rango.desdeMs > 0 ? rango.desdeMs : finMs - 29 * DIA_MS
+  const nDias = Math.min(366, Math.max(1, Math.floor((finMs - inicioMs) / DIA_MS) + 1))
+  const dias: string[] = []
+  for (let i = nDias - 1; i >= 0; i--) {
+    const d = diaDe(new Date(finMs - i * DIA_MS).toISOString())
+    if (d && dias[dias.length - 1] !== d) dias.push(d)
+  }
+  const diasSet = new Set(dias)
+  // Señales por contacto. Formal/aceptada/pagada son hechos duros (Zoho +
+  // punteros); intención suma el análisis LLM Y los hechos duros — el
+  // analizador a veces se salta conversaciones y sin este refuerzo la
+  // cohorte subcontaría (misma corrección que 📈 Evolución).
+  const comercialSet = new Set<string>()
+  for (const r of analysisRows) if (r.grupo === "comercial") comercialSet.add(digits(r.contact))
+  const formalSet = new Set<string>(hardQuote)
+  const aceptadaSet = new Set<string>()
+  const pagadaSet = new Set<string>()
+  for (const q of quotes) {
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    if (!tel) continue
+    formalSet.add(tel)
+    if (esAceptadaOMas(q)) aceptadaSet.add(tel)
+    if (esPagada(q)) pagadaSet.add(tel)
+  }
+  const porContacto = new Map<string, { dia: string; etapa: number }>()
+  for (const [tel, iso] of primeraVez) {
+    if (paisDeTelefono(tel) !== pais || isTestContact(tel, testSet)) continue
+    if (toque0.has(tel)) continue // outbound: lo tocó la cadencia, no llegó solo
+    const dia = diaDe(iso)
+    if (!diasSet.has(dia)) continue
+    let etapa = 0
+    if (comercialSet.has(tel) || preformAt.has(tel) || formalSet.has(tel)) etapa = 1
+    if (preformAt.has(tel) || formalSet.has(tel)) etapa = 2
+    if (formalSet.has(tel)) etapa = 3
+    if (aceptadaSet.has(tel)) etapa = 4
+    if (pagadaSet.has(tel)) etapa = 5
+    porContacto.set(tel, { dia, etapa })
+  }
+  return { dias, porContacto }
+}
+
+function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | null; qs: string }): string {
+  const { dias, porContacto } = c
+  const idx = new Map(dias.map((d, i) => [d, i]))
+  // exactas[e][i] = contactos del día i cuya etapa MÁS AVANZADA es e.
+  const exactas = ETAPAS_INBOUND.map(() => new Array<number>(dias.length).fill(0))
+  for (const { dia, etapa } of porContacto.values()) {
+    const i = idx.get(dia)
+    if (i !== undefined) exactas[etapa][i]++
+  }
+  // acumuladas[e][i] = contactos del día i que ALCANZARON la etapa e (embudo).
+  const acumuladas = ETAPAS_INBOUND.map((_, e) =>
+    dias.map((_, i) => exactas.slice(e).reduce((a, s) => a + s[i], 0)),
+  )
+  const totalEtapa = (e: number) => acumuladas[e].reduce((a, b) => a + b, 0)
+  const tLleg = totalEtapa(0), tCom = totalEtapa(1), tPre = totalEtapa(2), tFor = totalEtapa(3), tAce = totalEtapa(4), tPag = totalEtapa(5)
+  const prom = dias.length ? (tLleg / dias.length).toFixed(1) : "0"
+  const pctDe = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
+  const href = (dia: string, etapa: EtapaInbound) => `?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}`
+  const celda = (dia: string, e: number, etapa: EtapaInbound, bold = false) => {
+    const i = idx.get(dia)
+    const v = i === undefined ? 0 : acumuladas[e][i]
+    const txt = bold ? `<b>${v}</b>` : String(v)
+    return `<td style="text-align:center">${v > 0 ? `<a href="${href(dia, etapa)}">${txt}</a>` : `<span style="color:#c8cdd3">0</span>`}</td>`
+  }
+  const nombreDia = (d: string) => {
+    const wd = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "short" }).format(new Date(`${d}T12:00:00-04:00`))
+    return `${wd} ${d.slice(8, 10)}-${d.slice(5, 7)}`
+  }
+  const filas = [...dias].reverse().map((d) => {
+    const i = idx.get(d)!
+    const lleg = acumuladas[0][i]
+    const pag = acumuladas[5][i]
+    return `<tr>
+      <td style="white-space:nowrap">${nombreDia(d)}</td>
+      ${celda(d, 0, "llegaron", true)}
+      ${celda(d, 1, "comercial")}
+      ${celda(d, 2, "precio")}
+      ${celda(d, 3, "formal")}
+      ${celda(d, 4, "aceptada")}
+      ${celda(d, 5, "pagada", true)}
+      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, lleg)}</td>
+    </tr>`
+  }).join("")
+  const celdaTotal = (v: number, etapa: EtapaInbound) =>
+    `<td style="text-align:center"><b>${v > 0 ? `<a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}">${v}</a>` : "0"}</b></td>`
+  const filaTotal = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc">
+    <td><b>TOTAL</b></td>
+    ${celdaTotal(tLleg, "llegaron")}${celdaTotal(tCom, "comercial")}${celdaTotal(tPre, "precio")}${celdaTotal(tFor, "formal")}${celdaTotal(tAce, "aceptada")}${celdaTotal(tPag, "pagada")}
+    <td style="text-align:center"><b>${pctDe(tPag, tLleg)}</b></td>
+  </tr>`
+  // Barras apiladas: cada segmento = etapa EXACTA alcanzada (suman "llegaron").
+  const SEGMENTOS = [
+    { e: 5, n: "Pagada", color: "#1b5e20" },
+    { e: 4, n: "Aceptada sin pago", color: "#27ae60" },
+    { e: 3, n: "Formal, sin aceptar", color: "#e67e22" },
+    { e: 2, n: "Vio precio, sin formal", color: "#ffbb00" },
+    { e: 1, n: "Con intención, sin precio", color: "#00aff2" },
+    { e: 0, n: "Sin intención aún", color: "#c8cdd3" },
+  ]
+  const series = SEGMENTOS.map((s) => ({ n: s.n, c: s.color, y: exactas[s.e] }))
+  return `<div class="card"><h2>📥 Oportunidades inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"}</span></h2>
+  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> oportunidades llegaron (${prom}/día) · ${tCom} con intención (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio (${pctDe(tPre, tLleg)}) · ${tFor} con formal · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tLleg)} de cierre de cohorte)</div>
+  <div id="inbDiaria" style="height:320px"></div>
+  <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
+    <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre</th>
+  </tr></thead><tbody>${filas}${filaTotal}</tbody></table></div>
+  <div class="sub" style="margin:8px 0 0">EMBUDO POR COHORTE: cada fila cuenta las oportunidades INBOUND (el cliente escribió solo por WhatsApp, sin toque outbound previo) cuya PRIMERA conversación partió ese día, y hasta dónde ha llegado cada una HOY — aunque el hito haya ocurrido días después. Por eso los días recientes maduran con el tiempo: la cohorte de hoy puede sumar formales y pagos mañana. Distinto del 📈 Evolución de Análisis y KPIs (esa es foto diaria de eventos). Cierre = pagadas ÷ llegadas de la cohorte. Hora de Chile. Clic en cualquier número para ver las empresas detrás.</div>
+  <script>
+    (function () {
+      var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
+      var SERIES = ${JSON.stringify(series)};
+      Plotly.react("inbDiaria", SERIES.map(function (s) {
+        return { x: DIAS, y: s.y, name: s.n, type: "bar", marker: { color: s.c } };
+      }), {
+        barmode: "stack",
+        margin: { l: 34, r: 12, t: 10, b: 46 },
+        legend: { orientation: "h", y: 1.18 },
+        font: { family: "Nunito, 'Segoe UI', sans-serif", size: 12, color: "#4e4e4e" },
+        xaxis: { type: "category", tickangle: -45, fixedrange: true },
+        yaxis: { rangemode: "tozero", gridcolor: "#eef0f3", fixedrange: true },
+        plot_bgcolor: "#ffffff", paper_bgcolor: "#ffffff", hovermode: "x unified"
+      }, { displayModeBar: false, responsive: true });
+    })();
+  </script>
+</div>`
+}
+
 /** Panel de trabajo por EJECUTIVO (pedido Lalo 05-ago): oportunidades activas
  * que maneja cada uno, asignadas en el período, desglose por etapa, venta
  * recurrente del período y antigüedad del último contacto (2 h / 5 h / 1 día /
@@ -4773,9 +4967,12 @@ export async function GET(req: Request): Promise<Response> {
     propF.length = 0
     propF.push(quien)
   }
-  // Vista: "gestion" (default, la cola de trabajo) o "analisis" (KPIs, Sankey
-  // y el resto del embudo) — pestaña arriba a la derecha (pedido Lalo 04-ago).
-  const vista: "gestion" | "analisis" = searchParams.get("vista") === "analisis" ? "analisis" : "gestion"
+  // Vista: "gestion" (default, la cola de trabajo), "analisis" (KPIs, Sankey
+  // y el resto del embudo) o "inbound" (embudo por cohorte diaria de llegadas
+  // inbound, pedido Rodrigo 13-ago) — pestañas arriba a la derecha.
+  const vistaParam = searchParams.get("vista")
+  const vista: "gestion" | "analisis" | "inbound" =
+    vistaParam === "analisis" ? "analisis" : vistaParam === "inbound" ? "inbound" : "gestion"
   // Filtro de ORIGEN de la cola (Lalo 07-ago): "vicky" (default — lo que está
   // pasando AHORA por WhatsApp) · "zoho" (cartera clásica del equipo) · "todo".
   const origenParam = (searchParams.get("origen") || "").trim()
@@ -4791,7 +4988,7 @@ export async function GET(req: Request): Promise<Response> {
     for (const e of estadoF) p.append("estado", e)
     for (const pr of propF) p.append("prop", pr)
     if (origenF !== "vicky") p.set("origen", origenF)
-    if (vista === "analisis") p.set("vista", "analisis")
+    if (vista !== "gestion") p.set("vista", vista)
     return p
   }
   const hrefLista = (bucket: string) => {
@@ -4813,6 +5010,10 @@ export async function GET(req: Request): Promise<Response> {
   // Cola de gestión (vista principal) y sus insumos.
   let colaHtml = ""
   let evolucionHtml = ""
+  // Dashboard inbound diario (vista=inbound) y el mapa de preforms que
+  // necesita (se llena en el bloque del listado comercial).
+  let inboundHtml = ""
+  let preformAtMap = new Map<string, string>()
   let ejecutivosHtml = ""
   let empresasHtml = ""
   let wspVendedorSet = new Set<string>()
@@ -4899,6 +5100,7 @@ export async function GET(req: Request): Promise<Response> {
         fetchDealsEquipo().catch(() => [] as DealEquipo[]),
       ])
       const preformAt = preformData.at
+      preformAtMap = preformAt
       wspVendedorSet = new Set(espejoTels.map((x) => digits(String(x.telefono_chat || ""))).filter(Boolean))
       const wspUltimoAt = new Map<string, string>()
       for (const x of espejoTels) {
@@ -5080,6 +5282,74 @@ export async function GET(req: Request): Promise<Response> {
         wspSet: wspVendedorSet,
         pais,
       })
+    }
+    // Dashboard INBOUND DIARIO (Rodrigo 13-ago): embudo por cohorte de llegada
+    // + su drill-down (?inbdet=<día|TOTAL>&inbEtapa=<etapa>). Solo se computa
+    // cuando la vista lo pide (trae un fetch propio: primera conversación por
+    // contacto, paginado).
+    const inbdet = (searchParams.get("inbdet") || "").trim()
+    if (vista === "inbound" || inbdet) {
+      try {
+        const primeraVez = await fetchPrimeraConversacion()
+        const cohortes = computarCohortesInbound({
+          primeraVez,
+          analysisRows: allRows,
+          preformAt: preformAtMap,
+          quotes: cierre?.todasList || [],
+          hardQuote: hard.quote,
+          toque0: origen.toque0,
+          pais,
+          rango,
+        })
+        if (inbdet) {
+          const etapaQ = (searchParams.get("inbEtapa") || "llegaron").trim() as EtapaInbound
+          const nivel = Math.max(0, ETAPAS_INBOUND.indexOf(etapaQ))
+          const porTelListado = new Map(filasListado.map((f) => [digits(f.contacto), f]))
+          const sub: FilaListado[] = []
+          for (const [tel, info] of cohortes.porContacto) {
+            if (inbdet !== "TOTAL" && info.dia !== inbdet) continue
+            if (info.etapa < nivel) continue
+            const f = porTelListado.get(tel)
+            if (f) {
+              sub.push(f)
+              continue
+            }
+            // Contacto fuera del listado comercial vivo (p. ej. conversación
+            // antigua sin actividad reciente): fila mínima para no perderlo.
+            sub.push({
+              empresa: `+${tel}`,
+              contacto: tel,
+              estado: ETIQUETA_ETAPA_INBOUND[ETAPAS_INBOUND[info.etapa]],
+              fechaIso: primeraVez.get(tel) || "",
+              estadoZoho: "—",
+              propietario: "—",
+              primerContactoIso: primeraVez.get(tel) || "",
+              convId: convIdPorContacto.get(tel) || "",
+              accionable: "—",
+              resumen: "",
+              lastUserIso: "",
+              updatedIso: "",
+              ultimoContactoIso: primeraVez.get(tel) || "",
+              zohoUrl: "",
+            })
+          }
+          const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : `del ${inbdet}`} — ${nivel === 0 ? "todas las llegadas" : `alcanzaron: ${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`}`
+          return renderDetalleEjecutivo({
+            filas: sub,
+            titulo,
+            key,
+            volverQS: `?${filtrosQS().toString()}`,
+            montos: montosPorContacto,
+            usuarios: usuariosPorContacto,
+            wspSet: wspVendedorSet,
+            pais,
+          })
+        }
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString() })
+      } catch (e) {
+        console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
+        inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`
+      }
     }
     propietariosAll = [...new Set(filasListado.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
     // Cache para el login ("¿Quién eres?"): mejor esfuerzo, se refresca en
@@ -5637,19 +5907,20 @@ export async function GET(req: Request): Promise<Response> {
   }
 </style></head><body><div class="wrap">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : "Análisis y KPIs"}</h1></div>
+    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : vista === "inbound" ? "Inbound diario" : "Análisis y KPIs"}</h1></div>
     <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
+      ${vista === "inbound" ? `<b>📥 Inbound diario</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "inbound"); return p.toString() })()}">📥 Inbound diario</a>`}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>
   </div>
-  <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista === "analisis" ? "&vista=analisis" : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}${quien ? ` &nbsp;·&nbsp; 👤 <b>${esc(quien)}</b> <a href="?salir=1" style="font-weight:400">(salir)</a>` : ""}</div>
+  <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista !== "gestion" ? `&vista=${vista}` : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}${quien ? ` &nbsp;·&nbsp; 👤 <b>${esc(quien)}</b> <a href="?salir=1" style="font-weight:400">(salir)</a>` : ""}</div>
   <div class="sub" style="margin-top:6px">
     <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
       <input type="hidden" name="pais" value="${pais}">
-      ${vista === "analisis" ? `<input type="hidden" name="vista" value="analisis">` : ""}
+      ${vista !== "gestion" ? `<input type="hidden" name="vista" value="${vista}">` : ""}
       <label style="font-size:12px">Desde <input type="date" name="desde" value="${rango ? rango.desdeStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <label style="font-size:12px">Hasta <input type="date" name="hasta" value="${rango ? rango.hastaStr : ""}" style="font-size:12px;padding:2px 4px;border:1px solid #d0d5db;border-radius:5px"></label>
       <label style="font-size:12px;vertical-align:top" title="Vicky: casos con conversación de WhatsApp (lo accionable ahora). Cartera Zoho: tratos del pipeline que no han pasado por Vicky.">Origen<br><select name="origen" style="font-size:12px;padding:3px 4px;border:1px solid #d0d5db;border-radius:5px;min-width:120px;background:#fff">
@@ -5672,6 +5943,8 @@ export async function GET(req: Request): Promise<Response> {
 
   ${vista === "gestion" ? `
   ${colaHtml}
+  ` : vista === "inbound" ? `
+  ${inboundHtml}
   ` : `
   ${tasaCierreHtml}
   ${evolucionHtml}
