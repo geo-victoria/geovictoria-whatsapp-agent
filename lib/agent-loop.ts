@@ -511,6 +511,53 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // CANDADO COMUNA ASUMIDA (Lalo 13-ago, caso Rodrigo AM: el modelo
+        // cotizó asumiendo Región Metropolitana sin preguntar). Regla dura:
+        // la ubicación de CADA punto debe haber sido dicha por el CLIENTE en
+        // algún mensaje (acepta abreviaciones tipo "provi" → Providencia).
+        // Si no hay respaldo, la tool se niega y guía a PREGUNTAR la comuna.
+        // Peor caso de un falso positivo: una pregunta de confirmación de
+        // comuna — exactamente el comportamiento que pide la regla.
+        if (
+          !bloqueoUmbral &&
+          (toolName === "cotizar_referencial" || toolName === "generar_link_cotizadora")
+        ) {
+          const puntos = (toolInput as { puntosInstalacion?: Array<{ ubicacion?: string }> })
+            .puntosInstalacion
+          if (Array.isArray(puntos) && puntos.length > 0) {
+            const norm = (s: string) =>
+              s
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+            const textoCliente = norm(
+              [
+                ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
+                userMessage || "",
+              ].join("\n"),
+            )
+            const tokensCliente = textoCliente.split(/[^a-z]+/).filter((t) => t.length >= 4)
+            const sinRespaldo = puntos.some((p) => {
+              const tokensUb = norm(String(p?.ubicacion || ""))
+                .split(/[^a-z]+/)
+                .filter((t) => t.length >= 3)
+              if (tokensUb.length === 0) return true // "RM" pelado u ubicación vacía: sin respaldo posible
+              return !tokensUb.some(
+                (tu) =>
+                  textoCliente.includes(tu) || tokensCliente.some((tc) => tu.startsWith(tc)),
+              )
+            })
+            if (sinRespaldo) {
+              bloqueoUmbral =
+                "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): la ubicación del punto NO la ha dicho el cliente en esta conversación — la comuna JAMÁS se asume (ni la Región Metropolitana por defecto). " +
+                "Haz esto AHORA: pregúntale en qué comuna estará el reloj, y cotiza recién cuando te la dé, con ESA comuna."
+              console.warn(
+                `[agent-loop] candado comuna-asumida: ${toolName} bloqueado (contacto ${contact}) — ubicación sin respaldo en mensajes del cliente.`,
+              )
+            }
+          }
+        }
+
         let result: Awaited<ReturnType<typeof dispatchTool>>
         // REUNIÓN POST-FORMAL = del dueño del deal, no del Round Robin (Lalo,
         // 21-jul, caso notaría). Desde el 28-jul existe la forma de AGENDARLA
