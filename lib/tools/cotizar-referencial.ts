@@ -594,13 +594,45 @@ export async function cotizarReferencial(args: {
   const instalacionCotizada = itemsConsolidados.some(
     (i) => i.tipo === "servicio" && /instalaci/i.test(i.nombre),
   )
-  if (hayReloj && !instalacionCotizada) {
+  // Hardware 100% plug-and-play (huellero USB): no existe instalación técnica
+  // que ofrecer — el disclaimer no aplica.
+  const todoPlugAndPlay =
+    hardware.length > 0 &&
+    hardware.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
+  if (hayReloj && !instalacionCotizada && !todoPlugAndPlay) {
+    // PRECIO DEL TÉCNICO EN EL DISCLAIMER (Lalo 13-ago): la comuna ya se
+    // conoce, así que el monto se muestra — nada de "según la comuna".
+    // Misma tabla por zona que usaría la cotización con autoInstalada=false.
+    let instalacionTecnicoUF = 0
+    try {
+      const mods = new Set(hardware.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"))
+      const modU: "arriendo" | "venta" = mods.size === 1 ? [...mods][0] : "arriendo"
+      const serviciosInstalacion = getServiciosAplicablesConHardware().filter(
+        (s) => s.omitirSiAutoInstalada,
+      )
+      for (const punto of puntosInstalacion) {
+        const c = clasificarUbicacion(punto.ubicacion)
+        if (c.tipo === "no_clasificable") continue
+        for (const s of serviciosInstalacion) {
+          instalacionTecnicoUF += obtenerPrecioServicio(s, c.zonaInstalacion, punto.modalidad ?? modU)
+        }
+      }
+    } catch {
+      instalacionTecnicoUF = 0 // sin precio calculable: cae al texto genérico
+    }
     partes.push("")
     partes.push("[---]")
     partes.push("")
-    partes.push(
-      "📌 La instalación del reloj viene considerada por tu cuenta: es simple y te guiamos paso a paso. Si prefieres que la haga nuestro equipo técnico, tiene un cobro único según la comuna — me dices y te lo agrego.",
-    )
+    if (instalacionTecnicoUF > 0) {
+      const instCLP = Math.round(instalacionTecnicoUF * (1 + IVA_RATE) * ufActual)
+      partes.push(
+        `📌 La instalación del reloj viene considerada por tu cuenta: es simple y te guiamos paso a paso. Si prefieres que la haga nuestro equipo técnico, tiene un cobro único de ${fmtUF(instalacionTecnicoUF)} UF + IVA ($${fmtNumCL(instCLP, 0)} CLP) — me dices y te lo agrego.`,
+      )
+    } else {
+      partes.push(
+        "📌 La instalación del reloj viene considerada por tu cuenta: es simple y te guiamos paso a paso. Si prefieres que la haga nuestro equipo técnico, tiene un cobro único según la comuna — me dices y te lo agrego.",
+      )
+    }
   }
 
   const mensajeParaProspecto = partes.join("\n")
