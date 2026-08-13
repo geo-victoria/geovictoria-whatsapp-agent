@@ -94,6 +94,25 @@ export function metricsContactSet(): Set<string> {
   return set
 }
 
+// CORREOS INTERNOS (Lalo 13-ago, "todo lo mío y de Rodrigo fuera del
+// dash"): las pruebas del EDITOR nacen sin teléfono ("Cotización Rodrigo",
+// COT558 "Eduardo") y el filtro por fono no las caza. Regla: correo de
+// contacto con dominio geovictoria → interno; más la lista explícita
+// (Rodrigo prueba con su gmail personal). Suma por env
+// VIC_FUNNEL_METRICS_EMAILS (coma-separado), sin deploy.
+const METRICS_EMAILS = ["rodrigo.lewit@gmail.com"]
+export function esEmailInterno(email?: string | null): boolean {
+  const low = String(email || "").trim().toLowerCase()
+  if (!low || !low.includes("@")) return false
+  const dominio = low.split("@")[1] || ""
+  if (dominio === "geovictoria.com" || dominio === "geovictoria.pro") return true
+  const extra = (process.env.VIC_FUNNEL_METRICS_EMAILS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+  return METRICS_EMAILS.includes(low) || extra.includes(low)
+}
+
 // El DEFAULT del set es el de MÉTRICAS a propósito: los únicos llamadores
 // sin set explícito son los paneles del dash (vic-funnel). Todo cron
 // operativo pasa testContactSet()/su propio set explícitamente.

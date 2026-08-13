@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto"
 
-import { isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
+import { esEmailInterno, isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
@@ -69,6 +69,7 @@ type RawAceptada = {
   Intervenci_n_Humana?: string | null
   Fecha_Hora_Cotizacion?: string | null
   Tel_fono_Contacto?: string | null
+  Email_Contacto?: string | null
   Created_Time?: string
   Modified_Time?: string
   Descuento_Recurrente_Pct?: number | null
@@ -656,7 +657,7 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage, Deal_Asociado.id from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} order by Created_Time desc limit ${offset}, 200`,
+          select_query: `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Email_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage, Deal_Asociado.id from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} order by Created_Time desc limit ${offset}, 200`,
         }),
         cache: "no-store",
       })
@@ -682,6 +683,10 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
       // "prueba", así que COT420/COT281 —emitidas a los teléfonos de Rodrigo
       // y Lalo, a nombre de "GeoVictoria SPA"— se contaban como ventas.
       if (tel && isTestContact(tel)) return false
+      // Pruebas del EDITOR sin teléfono (Lalo 13-ago, "toooodo fuera del
+      // dash"): el correo de contacto interno saca la cotización de TODO el
+      // universo — KPIs, Evolución, listas y ventas heredan de acá.
+      if (esEmailInterno(String(q.Email_Contacto || ""))) return false
       const nombre = String(q.Name || "").toLowerCase()
       if (nombre.includes("prueba") || nombre.includes("huellerocompany")) return false
       // Nadie le vende a GeoVictoria: una cotización a nombre de la propia
@@ -1275,6 +1280,7 @@ type DealEquipo = {
   "Owner.last_name"?: string
   "Contact_Name.Phone"?: string
   "Contact_Name.Mobile"?: string
+  "Contact_Name.Email"?: string
   "Account_Name.Account_Name"?: string
   N_Empleados_que_marcan?: number
 }
@@ -1318,7 +1324,7 @@ async function fetchDealsEquipo(soloTelemarketing = false): Promise<DealEquipo[]
         body: JSON.stringify({
           select_query:
             `select id, Deal_Name, Stage, Created_Time, Last_Activity_Time, Owner.first_name, Owner.last_name, ` +
-            `Contact_Name.Phone, Contact_Name.Mobile, Account_Name.Account_Name, N_Empleados_que_marcan from Deals ` +
+            `Contact_Name.Phone, Contact_Name.Mobile, Contact_Name.Email, Account_Name.Account_Name, N_Empleados_que_marcan from Deals ` +
             (soloTelemarketing ? whereTm : whereGeneral) +
             // Hay más de 1000 deals activos (tope de la paginación): el orden
             // por actividad reciente deja fuera solo lo más frío.
@@ -1334,7 +1340,18 @@ async function fetchDealsEquipo(soloTelemarketing = false): Promise<DealEquipo[]
   } catch (e) {
     console.warn("[vic-funnel] deals del equipo fallaron:", e instanceof Error ? e.message : e)
   }
-  return out
+  // Deals de PRUEBA fuera del dash (Lalo 13-ago): contacto con correo
+  // interno o teléfono de la lista de métricas. Solo el camino del DASH —
+  // el selector de cotizaciones (soloTelemarketing) los conserva para poder
+  // anclar cotizaciones de prueba a sus propios deals.
+  if (soloTelemarketing) return out
+  const testSet = metricsContactSet()
+  return out.filter((dl) => {
+    if (esEmailInterno(String(dl["Contact_Name.Email"] || ""))) return false
+    let tel = digits(String(dl["Contact_Name.Mobile"] || dl["Contact_Name.Phone"] || ""))
+    if (tel.length === 9 && tel.startsWith("9")) tel = `56${tel}`
+    return !(tel && isTestContact(tel, testSet))
+  })
 }
 
 /** Estado del dashboard para un deal que NO pasó por la escalera de Vicky:
