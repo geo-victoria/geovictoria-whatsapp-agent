@@ -678,13 +678,22 @@ export async function vendedorTraspasado(
  * batch, para que los crons viejos los salten sin caer en N+1. Con el flag
  * apagado devuelve set vacío SIN tocar la red: cero cambio de comportamiento.
  */
-export async function contactosEnLoop(contacts: string[]): Promise<Set<string>> {
+export async function contactosEnLoop(
+  contacts: string[],
+  // soloActivos (biblia F3, 12-ago): los CONSENSUADOS quedaban en tierra de
+  // nadie — la reactivación los excluía por tener CUALQUIER fila en vic_loop
+  // (incluso cerrada) y el loop cerrado jamás los tocaba: 35 promesas
+  // vencidas sin disparar. Con soloActivos la exclusión cuenta únicamente
+  // loops que de verdad van a tocar al contacto.
+  opts: { soloActivos?: boolean } = {},
+): Promise<Set<string>> {
   const enLoop = new Set<string>()
   if (!loopV2Enabled() || !contacts.length || !SUPABASE_URL || !SUPABASE_KEY) return enLoop
   // in.() de PostgREST con los contactos entre comillas (mismo patrón que la
   // consulta batch de vic-outbound-cadence-cron sobre vic_v3_conversations).
   const lista = contacts.map((c) => `"${c}"`).join(",")
-  const res = await supa(`vic_loop?contact=in.(${lista})&select=contact`).catch(() => null)
+  const filtroEstado = opts.soloActivos ? "&estado=eq.activo" : ""
+  const res = await supa(`vic_loop?contact=in.(${lista})&select=contact${filtroEstado}`).catch(() => null)
   if (!res || !res.ok) return enLoop
   const rows = ((await res.json().catch(() => [])) as Array<{ contact: string }>) || []
   for (const r of rows) if (r.contact) enLoop.add(r.contact)

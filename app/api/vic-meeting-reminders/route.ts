@@ -55,6 +55,14 @@ export async function POST(req: Request) {
 
   let sent = 0
   for (const m of due) {
+    // FILTROS (biblia F3, 12-ago — antes este cron no miraba NADA): contactos
+    // internos de prueba y opt-outs no reciben el recordatorio. El claim se
+    // toma igual para que la fila no se reintente cada 5 minutos.
+    const { isTestContact, testContactSet } = await import("@/lib/funnel-analysis")
+    if (isTestContact((m.contact || "").replace(/\D/g, ""), testContactSet())) {
+      await claimMeetingReminder(m.booking_uid)
+      continue
+    }
     // País del contacto: define plantilla y canal (CO → línea +57).
     const country = await getContactCountry(m.contact).catch(() => "cl")
     const esCO = country === "co"
@@ -79,6 +87,14 @@ export async function POST(req: Request) {
 
     if (ok) {
       sent++
+      // RASTRO EN EL HISTORIAL (biblia F3): antes el recordatorio era un envío
+      // INVISIBLE — ni Vicky ni la maquinaria sabían que salió, y si el
+      // cliente respondía "¿qué reunión?", el agente no tenía contexto.
+      const { appendAssistantV3 } = await import("@/lib/supabase-persistence-v3")
+      await appendAssistantV3(
+        m.contact,
+        `Te envié el recordatorio de tu reunión de hoy a las ${hora} 😊 Cualquier cambio de horario me avisas por aquí.`,
+      ).catch(() => {})
     } else {
       // Revertir el claim para reintentar en el próximo tick.
       await unclaimMeetingReminder(m.booking_uid).catch(() => {})

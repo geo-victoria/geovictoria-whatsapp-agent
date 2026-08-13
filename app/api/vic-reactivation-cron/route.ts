@@ -329,7 +329,10 @@ export async function GET(req: Request): Promise<Response> {
     )
     // Migrados al Loop v2: tampoco reciben el toque consensuado viejo (batch propio,
     // los consensuados vienen de otra query que la cadencia 47h/7d/15d).
-    const enLoopCons = await contactosEnLoop(crows.map((r) => r.contact)).catch(() => new Set<string>())
+    // Solo loops ACTIVOS excluyen (biblia F3): el loop vivo es el dueño de la
+    // fecha consensuada (su supresor c-ter la respeta); un loop cerrado no va
+    // a tocar nunca — ahí el toque consensuado sale por acá.
+    const enLoopCons = await contactosEnLoop(crows.map((r) => r.contact), { soloActivos: true }).catch(() => new Set<string>())
     saltadosLoopV2 += crows.filter((r) => enLoopCons.has(r.contact)).length
     crows = crows.filter((r) => !enLoopCons.has(r.contact))
     // Traspasados a vendedor: el toque consensuado lo hace el VENDEDOR, no

@@ -195,8 +195,16 @@ export const ETAPA_INICIO_PREFORM_MIN = 120
  * cliente que gatillan el traspaso (08-ago — vuelve la semántica del TTV
  * original del doc: 15 con precio, pero medida en minutos hábiles). */
 export const SILENCIO_CON_PRECIO_MIN = TTV_CON_PRECIO_MIN
+// BIBLIA (VB 12-ago) — relojes R2/R3: con precio REFERENCIAL el silencio es
+// 30 min hábiles; con FORMAL emitida, 40 min hábiles (antes ambos 15': caían
+// en plena compra — mediana histórica emisión→pago 36 min). Overrides sin
+// deploy: VICKY_R2_REFERENCIAL_MIN / VICKY_R3_FORMAL_MIN.
+export const SILENCIO_REFERENCIAL_MIN = Number(process.env.VICKY_R2_REFERENCIAL_MIN || 30)
+export const SILENCIO_FORMAL_MIN = Number(process.env.VICKY_R3_FORMAL_MIN || 40)
 /** Reloj de calificación: 24 horas HÁBILES = 1440 minutos hábiles. */
-export const CALIFICACION_24H_MIN = 24 * 60
+// R4 biblia (VB 12-ago): la calificación vence en 1 DÍA HÁBIL (10 horas
+// hábiles de la jornada 8-18) — antes 24 h hábiles (~2,4 jornadas).
+export const CALIFICACION_24H_MIN = Number(process.env.VICKY_R4_CALIFICACION_MIN || 10 * 60)
 
 export function traspasoV2Habilitado(): boolean {
   return (process.env.VICKY_TRASPASO_V2_ENABLED || "").trim() === "on"
@@ -281,11 +289,13 @@ export function debeTraspasarEtapa(params: {
     if (!ultimoClienteAt) return { traspasar: false }
     const base = ultimoClienteAt.getTime() > conPrecioAt.getTime() ? ultimoClienteAt : conPrecioAt
     const min = minutosHabilesEntre(desdeConPausa(base), ahora, pais, feriados)
-    return min >= SILENCIO_CON_PRECIO_MIN
+    // R3 (formal, 40') / R2 (referencial, 30') — biblia VB 12-ago.
+    const umbral = formalAt ? SILENCIO_FORMAL_MIN : SILENCIO_REFERENCIAL_MIN
+    return min >= umbral
       ? {
           traspasar: true,
           motivo: formalAt ? "formal_sin_respuesta" : "precio_sin_respuesta",
-          ttv: SILENCIO_CON_PRECIO_MIN,
+          ttv: umbral,
         }
       : { traspasar: false }
   }

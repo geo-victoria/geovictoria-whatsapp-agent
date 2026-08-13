@@ -245,7 +245,9 @@ describe("relojes v2 con-precio son de SILENCIO (orden Lalo 08-ago)", () => {
     assert.equal(d.traspasar, false)
   })
 
-  test("silencio de 20 min tras ver el precio → traspasa (15 de silencio)", async () => {
+  // RELOJES DE LA BIBLIA (VB 12-ago): R2 referencial = 30' de silencio,
+  // R3 formal = 40' de silencio (reemplazan el 15' único del 08-ago).
+  test("silencio de 20 min tras ver el precio → aún NO traspasa (R2 es 30)", async () => {
     const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
     const d = debeTraspasarEtapa({
       ...base,
@@ -254,9 +256,47 @@ describe("relojes v2 con-precio son de SILENCIO (orden Lalo 08-ago)", () => {
       ultimoClienteAt: min(20),
       clienteRespondioDespues: false,
     })
+    assert.equal(d.traspasar, false)
+  })
+
+  test("silencio de 35 min tras el precio referencial → traspasa (R2 = 30)", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      precioAt: min(40),
+      formalAt: null,
+      ultimoClienteAt: min(35),
+      clienteRespondioDespues: false,
+    })
     assert.equal(d.traspasar, true)
     assert.equal(d.motivo, "precio_sin_respuesta")
-    assert.equal(d.ttv, 15)
+    assert.equal(d.ttv, 30)
+  })
+
+  test("silencio de 35 min tras la FORMAL → aún NO traspasa (R3 es 40)", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      precioAt: min(60),
+      formalAt: min(35),
+      ultimoClienteAt: min(50),
+      clienteRespondioDespues: false,
+    })
+    assert.equal(d.traspasar, false)
+  })
+
+  test("silencio de 45 min tras la formal → traspasa (R3 = 40)", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      precioAt: min(60),
+      formalAt: min(45),
+      ultimoClienteAt: min(50),
+      clienteRespondioDespues: false,
+    })
+    assert.equal(d.traspasar, true)
+    assert.equal(d.motivo, "formal_sin_respuesta")
+    assert.equal(d.ttv, 40)
   })
 
   test("formal recién emitida a cliente callado hace 1h: el silencio parte en la FORMAL", async () => {

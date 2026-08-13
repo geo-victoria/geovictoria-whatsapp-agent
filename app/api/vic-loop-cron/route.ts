@@ -334,29 +334,52 @@ const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
 }
 
 const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+  // REGLA DE ORO (biblia, caso 12-ago +56945820380): Vicky se presenta UNA
+  // sola vez por conversación — el t1 cae a los 10 minutos DENTRO de una
+  // conversación viva, así que entra directo al tema, sin "Soy Vicky".
   sin_precio: {
     cl:
-      "Hola! Soy Vicky de GeoVictoria 😊 Para armarte el valor de inmediato solo me falta saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
+      "Para armarte el valor de inmediato solo me falta saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
     co:
-      "Hola! Soy Vicky de GeoVictoria 😊 Te cuento: para armarte el valor de una solo necesito saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\nMe cuentas y lo dejamos listo?",
+      "Para armarte el valor de una solo necesito saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\nMe cuentas y lo dejamos listo?",
     mx:
-      "Hola! Soy Vicky de GeoVictoria 😊 Para armarte el valor de inmediato solo me falta saber cuántas personas registrarían su asistencia y cómo les gustaría checar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
+      "Para armarte el valor de inmediato solo me falta saber cuántas personas registrarían su asistencia y cómo les gustaría checar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
   },
   con_precio: {
     cl:
-      "Hola! Soy Vicky de GeoVictoria 😊 Tu valor ya está listo — solo me falta el RUT (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
+      "Tu valor ya está listo — solo me falta el RUT (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
     co:
-      "Hola! Soy Vicky de GeoVictoria 😊 Te cuento que tu valor ya está listo — solo me falta el NIT (o tu ok) para dejarte la cotización formal.\nLa armamos de una?",
+      "Tu valor ya está listo — solo me falta el NIT (o tu ok) para dejarte la cotización formal.\nLa armamos de una?",
     mx:
-      "Hola! Soy Vicky de GeoVictoria 😊 Tu valor ya está listo — solo me falta el RFC (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
+      "Tu valor ya está listo — solo me falta el RFC (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
   },
   formal: {
     cl:
-      "Hola! Soy Vicky de GeoVictoria 😊 Tu cotización sigue vigente y la puedes aceptar y pagar en línea cuando quieras.\nSi te quedó alguna duda, la vemos enseguida por acá.",
+      "Tu cotización quedó lista y la puedes aceptar y pagar en línea cuando quieras.\nSi te quedó alguna duda, la vemos enseguida por acá.",
     co:
-      "Hola! Soy Vicky de GeoVictoria 😊 Te cuento que tu cotización sigue vigente y la puedes aceptar y pagar en línea cuando quieras.\nSi te queda alguna duda, la resolvemos de una por acá.",
+      "Tu cotización quedó lista y la puedes aceptar y pagar en línea cuando quieras.\nSi te queda alguna duda, la resolvemos de una por acá.",
     mx:
-      "Hola! Soy Vicky de GeoVictoria 😊 Tu cotización sigue vigente y la puedes aceptar cuando gustes.\nSi te quedó alguna duda, la resolvemos por aquí.",
+      "Tu cotización quedó lista y la puedes aceptar cuando gustes.\nSi te quedó alguna duda, la resolvemos por aquí.",
+  },
+}
+
+// Toques 4-7 dentro de ventana: textos PROPIOS (biblia F3) — antes reusaban
+// el texto del t1 y la regla anti-repetición quedaba rota en la cola larga.
+const TEXTOS_T4PLUS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+  sin_precio: {
+    cl: "Sigo disponible para dejarte el valor cuando quieras — me dices cuántas personas marcarían y lo armo en un minuto 😊",
+    co: "Sigo disponible para dejarte el valor cuando quieras — me dices cuántas personas marcarían y lo armo en un minuto 😊",
+    mx: "Sigo disponible para dejarte el valor cuando gustes — me dices cuántas personas checarían y lo armo en un minuto 😊",
+  },
+  con_precio: {
+    cl: "El valor que te preparé sigue disponible — si quieres lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
+    co: "El valor que te preparé sigue disponible — si quieres lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
+    mx: "El valor que te preparé sigue disponible — si gustas lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
+  },
+  formal: {
+    cl: "Tu cotización sigue disponible para aceptar y pagar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
+    co: "Tu cotización sigue disponible para aceptar y pagar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
+    mx: "Tu cotización sigue disponible para aceptar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
   },
 }
 
@@ -898,7 +921,9 @@ export async function GET(req: Request): Promise<Response> {
           ? TEXTOS_T2[stage][paisKey]
           : touch === 3
             ? TEXTOS_T3[stage][paisKey]
-            : TEXTOS[stage][paisKey]
+            : touch >= 4
+              ? TEXTOS_T4PLUS[stage][paisKey]
+              : TEXTOS[stage][paisKey]
       if (ventanaAbierta) {
         const ok = await sendBotmakerMessage(r.contact, texto, canal).catch(() => false)
         if (ok) {
@@ -968,9 +993,20 @@ export async function GET(req: Request): Promise<Response> {
     if (touch >= 7) {
       await patchLoop(r.contact, { estado: "finalizado" })
     } else {
+      // TOPE DE ATRASO (biblia F3, caso ROSA 12-ago): los relojes se calculan
+      // desde T0, así que un loop que despierta tarde (posposición de 48h,
+      // caída del cron) tenía TODOS los toques vencidos y el barrido de 2 min
+      // drenaba la cadencia completa — 3 toques en 3 minutos. Regla nueva: si
+      // el reloj del siguiente toque ya venció, se reprograma al FUTURO con el
+      // espaciado NATURAL entre ambos toques (mínimo 30 min) — jamás se
+      // "reponen" toques atrasados de golpe.
+      const ntBase = calcularProximoToque(t0, touch + 1, country, r.contact)
+      const toqueActualAt = calcularProximoToque(t0, touch, country, r.contact)
+      const gapMs = Math.max(ntBase.getTime() - toqueActualAt.getTime(), 30 * 60e3)
+      const nt = ntBase.getTime() > Date.now() ? ntBase : new Date(Date.now() + gapMs)
       await patchLoop(r.contact, {
         next_touch: touch + 1,
-        next_touch_at: calcularProximoToque(t0, touch + 1, country, r.contact).toISOString(),
+        next_touch_at: nt.toISOString(),
       })
     }
   }
