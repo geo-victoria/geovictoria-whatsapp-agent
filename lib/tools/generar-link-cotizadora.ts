@@ -18,6 +18,7 @@
  */
 
 import {
+  ARRIENDO_RECARGO_REGIONES_UF,
   getModuloDisponibleParaVicky,
   getHardwareDisponibleParaVicky,
   getServiciosAplicablesConHardware,
@@ -600,6 +601,40 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
           subtotalUF: Number(precioUF.toFixed(3)),
           zonaTarifa: esRM ? "RM" : "regiones",
         })
+      }
+    }
+
+    // ── ARRIENDO POR ZONA (Lalo 13-ago) — espejo EXACTO del preform ──
+    // Sin envío en arriendo; el arriendo mensual se cobra 0,35 UF en RM y
+    // 0,40 UF en regiones (recargo por unidad). Zonas mixtas dividen la línea.
+    const zonasPuntosArr = puntosInstalacion
+      .map((p) => clasificarUbicacion(p.ubicacion, { zonaGenericaOk: args.zonaGenericaOk }))
+      .filter((c) => c.tipo !== "no_clasificable")
+      .map((c) => (c.zonaInstalacion === "RM" ? "rm" : "regiones"))
+    const puntosRegionesArr = zonasPuntosArr.filter((z) => z === "regiones").length
+    // Canal ejecutivo con precios dictados (preciosOverrideOk): el vendedor
+    // manda el precio final — sin recargo automático encima.
+    if (puntosRegionesArr > 0 && args.preciosOverrideOk !== true) {
+      for (let ix = items.length - 1; ix >= 0; ix--) {
+        const it = items[ix]
+        if (it.tipo !== "hardware" || it.modalidad !== "Arriendo mensual") continue
+        const enRegiones = Math.min(it.cantidad, puntosRegionesArr)
+        const enRM = it.cantidad - enRegiones
+        const precioReg = Number((it.precioUnitarioUF + ARRIENDO_RECARGO_REGIONES_UF).toFixed(3))
+        if (enRM <= 0) {
+          it.precioUnitarioUF = precioReg
+          it.subtotalUF = Number((it.cantidad * precioReg).toFixed(3))
+        } else {
+          it.cantidad = enRM
+          it.subtotalUF = Number((enRM * it.precioUnitarioUF).toFixed(3))
+          items.splice(ix + 1, 0, {
+            ...it,
+            cantidad: enRegiones,
+            precioUnitarioUF: precioReg,
+            subtotalUF: Number((enRegiones * precioReg).toFixed(3)),
+            nombre: `${it.nombre} (regiones)`,
+          })
+        }
       }
     }
   }

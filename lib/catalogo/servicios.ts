@@ -26,7 +26,12 @@ export const CATALOGO_SERVICIOS: Servicio[] = [
       "Despacho del reloj de control al punto del cliente. Cobro único por punto. Precio fijo (no aplica descuento).",
     tarifa: {
       modelo: "modalidad_zona",
-      arriendo: { RM: 0.0, region: 0.5 },
+      // ARRIENDO SIN ENVÍO (Lalo 13-ago): el despacho va incluido en el
+      // arriendo, que ahora se cobra por zona (RM 0,35 / regiones 0,40 —
+      // recargo ARRIENDO_RECARGO_REGIONES_UF en los motores). Así muere la
+      // línea "Envío de reloj" del arriendo y su explicación. VENTA conserva
+      // su envío aparte (la venta es solo a pedido).
+      arriendo: { RM: 0.0, region: 0.0 },
       venta: { RM: 0.5, region: 0.7 },
     },
     descontable: false,

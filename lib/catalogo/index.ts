@@ -18,7 +18,7 @@ import type { ZonaInstalacion } from "../geografia"
 
 // ─── Re-exports ──────────────────────────────────────────────────────────
 export { CATALOGO_MODULOS } from "./modulos"
-export { CATALOGO_HARDWARE } from "./hardware"
+export { CATALOGO_HARDWARE, ARRIENDO_RECARGO_REGIONES_UF } from "./hardware"
 export { CATALOGO_SERVICIOS } from "./servicios"
 export type * from "./tipos"
 

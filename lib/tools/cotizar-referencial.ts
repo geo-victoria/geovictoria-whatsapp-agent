@@ -34,6 +34,7 @@
  */
 
 import {
+  ARRIENDO_RECARGO_REGIONES_UF,
   getModuloDisponibleParaVicky,
   getModulosDisponiblesParaVicky,
   getHardwareDisponibleParaVicky,
@@ -455,6 +456,41 @@ export async function cotizarReferencial(args: {
           precioUnitarioUF: precioUF,
           subtotalUF: Number(precioUF.toFixed(3)),
         })
+      }
+    }
+
+    // ── ARRIENDO POR ZONA (Lalo 13-ago) ──
+    // El envío del arriendo murió (tarifa 0 en el catálogo): en su lugar el
+    // arriendo mensual se cobra por zona — 0,35 UF en RM y 0,40 UF en
+    // regiones (recargo ARRIENDO_RECARGO_REGIONES_UF por unidad). Con puntos
+    // en zonas mixtas, la línea de arriendo se divide (n unidades RM + m
+    // unidades regiones). La VENTA no cambia (conserva su envío aparte).
+    const zonasPuntos = puntosInstalacion
+      .map((p) => clasificarUbicacion(p.ubicacion))
+      .filter((c) => c.tipo !== "no_clasificable")
+      .map((c) => (c.zonaInstalacion === "RM" ? "rm" : "regiones"))
+    const puntosRegiones = zonasPuntos.filter((z) => z === "regiones").length
+    if (puntosRegiones > 0) {
+      for (let ix = items.length - 1; ix >= 0; ix--) {
+        const it = items[ix]
+        if (it.tipo !== "hardware" || it.modalidad !== "Arriendo mensual") continue
+        const enRegiones = Math.min(it.cantidad, puntosRegiones)
+        const enRM = it.cantidad - enRegiones
+        const precioReg = Number((it.precioUnitarioUF + ARRIENDO_RECARGO_REGIONES_UF).toFixed(3))
+        if (enRM <= 0) {
+          it.precioUnitarioUF = precioReg
+          it.subtotalUF = Number((it.cantidad * precioReg).toFixed(3))
+        } else {
+          it.cantidad = enRM
+          it.subtotalUF = Number((enRM * it.precioUnitarioUF).toFixed(3))
+          items.splice(ix + 1, 0, {
+            ...it,
+            cantidad: enRegiones,
+            precioUnitarioUF: precioReg,
+            subtotalUF: Number((enRegiones * precioReg).toFixed(3)),
+            nombre: `${it.nombre} (regiones)`,
+          })
+        }
       }
     }
   }

@@ -14,6 +14,12 @@
  * Solo "reloj control físico" o "aplicación móvil".
  */
 
+/** ARRIENDO POR ZONA (Lalo 13-ago): el envío del arriendo se eliminó — en su
+ * lugar el arriendo mensual lleva este recargo POR UNIDAD cuando el punto
+ * queda fuera de la Región Metropolitana (SF2A: 0,35 RM / 0,40 regiones). */
+export const ARRIENDO_RECARGO_REGIONES_UF = 0.05
+
+
 import type { Hardware } from "./tipos"
 
 export const CATALOGO_HARDWARE: Hardware[] = [

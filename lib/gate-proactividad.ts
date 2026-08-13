@@ -145,7 +145,12 @@ export async function evaluarGateProactividad(
       return row.value
     }
     const ultimoEnvio = Number(vivo(`gate_last_${clean}`) || 0)
-    if (ultimoEnvio && Date.now() - ultimoEnvio < RAFAGA_MIN * 60e3) motivos.push("rafaga_10min")
+    // Anti-ráfaga con excepción de TURNO (hallazgo de la sombra 13-ago): las
+    // burbujas de una misma respuesta salen con segundos de diferencia y no
+    // son ráfaga — solo cuenta como pisada un envío entre 90s y 10 min del
+    // anterior (dos máquinas distintas tocando al mismo contacto).
+    const delta = ultimoEnvio ? Date.now() - ultimoEnvio : 0
+    if (ultimoEnvio && delta > 90e3 && delta < RAFAGA_MIN * 60e3) motivos.push("rafaga_10min")
     if (opts.tipo === "plantilla" && opts.plantilla && vivo(`gate_tpl_${clean}`) === opts.plantilla) {
       motivos.push("plantilla_repetida")
     }
