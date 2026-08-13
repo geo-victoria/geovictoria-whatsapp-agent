@@ -635,7 +635,37 @@ export async function cotizarReferencial(args: {
     }
   }
 
-  const mensajeParaProspecto = partes.join("\n")
+  let mensajeParaProspecto = partes.join("\n")
+
+  // ── DOBLE VALOR DETERMINISTA (Lalo 13-ago: "No me dio opción 1 y opción 2") ──
+  // Con reloj en la cotización, la TOOL compone las dos opciones tituladas y
+  // la pregunta final — el modelo solo pega. Antes esto era una regla del
+  // prompt y el modelo la saltaba (caso real 13-ago 12:42). SIEMPRE, aunque
+  // el cliente haya pedido reloj explícito: la Opción 2 sin reloj se muestra
+  // igual (decisión comercial: tasa de cierre > ticket). La llamada interna
+  // sin hardware no recursa (entra por la rama sin reloj).
+  if (hayReloj) {
+    try {
+      const alternativa = await cotizarReferencial({ userCount, modulos })
+      if (alternativa.ok) {
+        mensajeParaProspecto = [
+          "Opción 1 — Con reloj control físico:",
+          "",
+          mensajeParaProspecto,
+          "",
+          "[---]",
+          "",
+          "Opción 2 más económica — Sin reloj, con la app gratis:",
+          "",
+          `Con la app en el celular de cada uno (biometría facial + GPS) o en modo cuadrilla — todo el equipo marca en un solo celular o tablet de la empresa, también gratis: $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} CLP/mes (IVA incluido), sin pago inicial de equipos ni instalación.`,
+          "",
+          "[---]",
+          "",
+          "¿Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato.",
+        ].join("\n")
+      }
+    } catch { /* sin alternativa: queda el mensaje simple */ }
+  }
 
   // resumenLegible (uso interno del modelo) usa el mismo formato — una sola
   // fuente de verdad para que no haya inconsistencias entre lo que ve el
