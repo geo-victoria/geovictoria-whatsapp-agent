@@ -150,3 +150,25 @@ describe("sin ejecutivo antes del pago (17-jul)", () => {
     assert.equal(blindarContactoComercial(texto, true), texto)
   })
 })
+
+describe("arriendo del reloj por zona (caso Aysén 13-ago)", () => {
+  test("ninguna línea del prompt CL menciona una tarifa de arriendo sola", () => {
+    // Vicky citó "0,35 UF/mes" sin conocer la comuna y al saber que era Aysén
+    // el precio "subió" a 0,40 — el cliente lo cazó al segundo. Regla: toda
+    // mención de una tarifa de arriendo en el prompt va SIEMPRE con su par de
+    // zona (0,35 RM / 0,40 regiones); una cifra suelta invita al modelo a
+    // repetirla sin comuna.
+    const f = join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts")
+    const infractores: string[] = []
+    for (const linea of readFileSync(f, "utf8").split("\n")) {
+      const tiene035 = /0,35\s*UF/.test(linea)
+      const tiene040 = /0,40?\s*UF/.test(linea)
+      if (tiene035 !== tiene040) infractores.push(linea.trim().slice(0, 120))
+    }
+    assert.deepEqual(
+      infractores,
+      [],
+      `tarifa de arriendo sin su par de zona en prompt.ts:\n${infractores.join("\n")}`,
+    )
+  })
+})
