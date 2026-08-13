@@ -530,6 +530,10 @@ export async function cotizarReferencial(args: {
   // cobro desde el segundo mes: un plan mensual recurrente. Cubrimos los dos
   // casos: con pago único (hardware/instalación) y sin él (solo plan, ej. app).
   if (itemsUnicos.length > 0 && itemsRecurrentes.length > 0) {
+    // Burbuja propia (Lalo 13-ago): el "Al aceptar pagas…" va como mensaje
+    // aparte de WhatsApp, no pegado al desglose.
+    partes.push("")
+    partes.push("[---]")
     partes.push("")
     partes.push(
       `Al aceptar pagas el pago inicial de $${fmtNumCL(
@@ -568,6 +572,9 @@ export async function cotizarReferencial(args: {
       )
     }
   } else if (itemsRecurrentes.length > 0) {
+    // Misma regla en la variante sin pago único: burbuja propia.
+    partes.push("")
+    partes.push("[---]")
     partes.push("")
     partes.push(
       `Al aceptar pagas el primer mes del plan por adelantado: $${fmtNumCL(
