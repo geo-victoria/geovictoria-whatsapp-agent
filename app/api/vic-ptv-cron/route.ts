@@ -980,6 +980,16 @@ export async function GET(req: Request) {
   // 7. COBRO ASISTIDO (punto 2 de la segunda tanda, Lalo 08-ago): cotización
   // ACEPTADA hace 30+ minutos sin señal de pago → un empujón de pago único.
   // El cliente que aceptó es el más caliente de todo el embudo.
+  const limpieza = await limpiezaCartera7d(ahora).catch((e) => {
+    console.warn("[ptv-cron] limpieza de cartera falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+
+  const resorteos = await evaluarRespuestasChequeo(ahora).catch((e) => {
+    console.warn("[ptv-cron] evaluador de chequeos falló:", e instanceof Error ? e.message : e)
+    return { ok: 0, mal: 0 }
+  })
+
   const chequeosOnb = await chequeoOnboardingPostPago(ahora).catch((e) => {
     console.warn("[ptv-cron] chequeo onboarding post-pago falló:", e instanceof Error ? e.message : e)
     return 0
@@ -1029,6 +1039,9 @@ export async function GET(req: Request) {
     sla_alertas_60min: slaAlertas,
     cobros_asistidos: cobros.enviados,
     chequeos_onboarding_post_pago: chequeosOnb,
+    chequeos_ok: resorteos.ok,
+    chequeos_mal_resorteados: resorteos.mal,
+    cartera_cierre_perdido_7d: limpieza,
     aceptadas_sin_pago: cobros.pendientes,
   })
   } finally {
@@ -1054,6 +1067,168 @@ function enVentanaProactiva(fono: string, ahora: Date): boolean {
   const hora =
     Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(ahora)) % 24
   return hora >= 9 && hora < 21
+}
+
+/**
+ * LIMPIEZA DE CARTERA (biblia VB 12-ago, orden de Lalo): deals de VICKY en
+ * etapas tempranas (1/2/3/4) con MÁS DE 7 DÍAS CORRIDOS sin última actividad
+ * pasan a "Cierre Perdido" vía transición de Blueprint (el Stage no se
+ * escribe directo). Máx 5 por tick, candado kv por deal (un intento diario),
+ * y verificación releyendo el Stage — el SUCCESS del PUT no garantiza nada
+ * (cicatriz "partially saved" del 20-jul). "6. Listo para Cierre" (aceptadas)
+ * y "7. Implementando" (pagadas) NO se tocan.
+ */
+async function limpiezaCartera7d(ahora: Date): Promise<number> {
+  if ((process.env.VICKY_LIMPIEZA_7D_OFF || "").trim() === "1") return 0
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken().catch(() => "")
+  if (!token) return 0
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  const corte = new Date(ahora.getTime() - 7 * 86400e3).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+  const q =
+    `select id, Deal_Name, Stage, Last_Activity_Time from Deals ` +
+    `where Deal_Name like '%Cotización Vicky%' and Last_Activity_Time <= '${corte}' ` +
+    `and Stage in ('1. Trato Creado', '2. Primera Reunion Realizada', '3. En Levantamiento', '4. Propuesta Enviada / En Negociación') ` +
+    `order by Last_Activity_Time asc limit 0, 20`
+  const res = await fetch(`${api}/crm/v3/coql`, {
+    method: "POST", headers: H, cache: "no-store", body: JSON.stringify({ select_query: q }),
+  }).catch(() => null)
+  const deals = res && res.ok ? (((await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || []) : []
+  if (!deals.length) return 0
+  const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+  let cerrados = 0
+  for (const d of deals) {
+    if (cerrados >= 5) break
+    const dealId = String(d.id || "")
+    const marca = `cierre7d_${dealId}`
+    const previa = await getKvValue(marca).catch(() => null)
+    // Un intento por día por deal: los que fallan (transición no disponible,
+    // campos raros) no se martillan cada 10 minutos.
+    if (previa && ahora.getTime() - new Date(previa).getTime() < 20 * 3600e3) continue
+    await setKvValue(marca, ahora.toISOString()).catch(() => {})
+    try {
+      const bpRes = await fetch(`${api}/crm/v2/Deals/${dealId}/actions/blueprint`, { headers: H, cache: "no-store" })
+      if (!bpRes.ok) continue
+      const bp = (await bpRes.json().catch(() => ({}))) as {
+        blueprint?: { transitions?: Array<{ id: string; name?: string; next_field_value?: string; data?: Record<string, unknown>; fields?: Array<{ api_name?: string; data_type?: string }> }> }
+      }
+      const transitions = bp?.blueprint?.transitions || []
+      const match = transitions.find((t) =>
+        (String(t.next_field_value || "").toLowerCase().includes("perdido")) ||
+        (String(t.name || "").toLowerCase().includes("perdido")),
+      )
+      if (!match) {
+        console.log(`[cartera-7d] deal ${dealId}: sin transición a Cierre Perdido (${transitions.map((t) => t.next_field_value || t.name).join(", ").slice(0, 100)})`)
+        continue
+      }
+      const data: Record<string, unknown> = { ...(match.data || {}) }
+      const campos = match.fields || []
+      const tieneCampo = (apiName: string) => campos.some((f) => f.api_name === apiName)
+      if (tieneCampo("Raz_n_de_P_rdida") && !data.Raz_n_de_P_rdida) data.Raz_n_de_P_rdida = "Otro"
+      if (tieneCampo("Explicaci_n_Raz_n_P_rdida_Otro") && !data.Explicaci_n_Raz_n_P_rdida_Otro) {
+        data.Explicaci_n_Raz_n_P_rdida_Otro = "Limpieza automática: 7 días corridos sin actividad (regla Vicky 13-ago)"
+      }
+      for (const f of campos) {
+        const apiName = f.api_name || ""
+        if (f.data_type === "multiselectpicklist" && apiName && typeof data[apiName] === "string") {
+          data[apiName] = String(data[apiName]).split(";").map((v) => v.trim()).filter(Boolean)
+        }
+      }
+      const exec = await fetch(`${api}/crm/v2/Deals/${dealId}/actions/blueprint`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({ blueprint: [{ transition_id: match.id, data }] }),
+      })
+      const execData = (await exec.json().catch(() => ({}))) as { code?: string }
+      if (!exec.ok || (execData?.code && execData.code !== "SUCCESS")) continue
+      const ver = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage`, { headers: H, cache: "no-store" })
+      const verData = (await ver.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }
+      const stageNuevo = String(verData?.data?.[0]?.Stage || "")
+      if (/perdido/i.test(stageNuevo)) {
+        cerrados++
+        console.log(`[cartera-7d] deal ${dealId} (${String(d.Deal_Name || "")}) → Cierre Perdido (sin actividad desde ${String(d.Last_Activity_Time || "")})`)
+      }
+    } catch (e) {
+      console.warn(`[cartera-7d] deal ${dealId} falló:`, e instanceof Error ? e.message : e)
+    }
+  }
+  return cerrados
+}
+
+/**
+ * R5 DE LA BIBLIA — evaluador del chequeo 9h (VB 12-ago): tras el "¿cómo te
+ * fue con {Vendedor}?", clasifica la PRIMERA respuesta del cliente. Mala
+ * respuesta ("no me han llamado", "nadie me contactó") → alerta interna +
+ * RE-SORTEO inmediato: la tómbola corre de nuevo, vic_ptv cambia de vendedor
+ * y el nuevo se presenta al cliente. Respuesta positiva → chequeo_resultado
+ * 'ok'. Determinista (regex), sin LLM — máx 10 por tick.
+ */
+async function evaluarRespuestasChequeo(ahora: Date): Promise<{ ok: number; mal: number }> {
+  const filas = await supa<{
+    id: string
+    contact: string
+    vendedor_email: string
+    vendedor_nombre: string | null
+    chequeo_hecho_at: string
+  }>(
+    `vic_ptv?estado=eq.activo&chequeo_hecho_at=not.is.null&chequeo_resultado=is.null&select=id,contact,vendedor_email,vendedor_nombre,chequeo_hecho_at&limit=10`,
+  )
+  if (!filas.length) return { ok: 0, mal: 0 }
+  const NEGATIVA =
+    /\b(no me (ha[ns]? )?(llamado|contactado|escrito|hablado)|nadie me|todav[ií]a no|a[uú]n no|aun no|ninguna llamada|no he (hablado|recibido|sabido)|sin noticias|mal[ai]?\b|pesim|nunca me)/i
+  const POSITIVA = /\b(s[ií]\b|ya (me )?(llam|habl|contact|escrib)|todo (bien|ok|perfecto)|excelente|muy bien|gracias|conversamos|hablamos)/i
+  let okCount = 0
+  let malCount = 0
+  for (const f of filas) {
+    // Primera respuesta del CLIENTE posterior al chequeo.
+    const conv = await supa<{ id: string }>(
+      `vic_v3_conversations?contact=eq.${f.contact}&select=id&limit=1`,
+    ).catch(() => [])
+    if (!conv.length) continue
+    const msgs = await supa<{ content: string; at: string }>(
+      `vic_v3_messages?conversation_id=eq.${conv[0].id}&role=eq.user&at=gt.${encodeURIComponent(f.chequeo_hecho_at)}&select=content,at&order=at.asc&limit=2`,
+    ).catch(() => [])
+    if (!msgs.length) continue // aún sin respuesta: el chequeo sigue pendiente
+    const texto = msgs.map((m) => m.content).join(" ").slice(0, 300)
+    const esMala = NEGATIVA.test(texto) && !POSITIVA.test(texto)
+    if (!esMala) {
+      await supa(`vic_ptv?id=eq.${f.id}`, { method: "PATCH", body: JSON.stringify({ chequeo_resultado: "ok" }) })
+      okCount++
+      continue
+    }
+    // MALA respuesta → alerta + re-sorteo + presentación del nuevo vendedor.
+    malCount++
+    const pais = (paisDeContacto(f.contact) || "cl") as "cl" | "co" | "mx" | "pe"
+    const { avisarEquipoInterno } = await import("@/lib/alerta-interna")
+    await avisarEquipoInterno(
+      `🚨 CHEQUEO 9H NEGATIVO: +${f.contact} dice que ${f.vendedor_nombre || f.vendedor_email || "el vendedor"} no lo contactó ("${texto.slice(0, 120)}"). Re-sorteando vendedor (R5 biblia).`,
+    ).catch(() => {})
+    const interno = await siguienteVendedor(pais)
+    if (!interno) {
+      await supa(`vic_ptv?id=eq.${f.id}`, { method: "PATCH", body: JSON.stringify({ chequeo_resultado: "mal" }) })
+      continue
+    }
+    const nuevo = await asignarEnZoho(f.contact, pais, interno, true).catch(() => null)
+    if (nuevo && nuevo.email && nuevo.email !== f.vendedor_email) {
+      await supa(`vic_ptv?id=eq.${f.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          chequeo_resultado: "mal",
+          vendedor_email: nuevo.email,
+          vendedor_zoho_id: nuevo.zohoId,
+          vendedor_nombre: nuevo.nombre,
+          reasignado_at: new Date().toISOString(),
+        }),
+      })
+      const texto2 = mensajePresentacion(pais, nuevo.nombre, { email: nuevo.email, whatsapp: nuevo.telefono })
+      const enviado = await sendBotmakerMessage(f.contact, `Mil disculpas por la espera 🙏 ${texto2}`).catch(() => false)
+      if (enviado) await appendAssistantV3(f.contact, texto2).catch(() => {})
+    } else {
+      // La tómbola devolvió al mismo (o falló): queda la alerta y el resultado.
+      await supa(`vic_ptv?id=eq.${f.id}`, { method: "PATCH", body: JSON.stringify({ chequeo_resultado: "mal" }) })
+    }
+  }
+  return { ok: okCount, mal: malCount }
 }
 
 /**

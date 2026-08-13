@@ -41,6 +41,25 @@ export type Hito =
   | "aceptada"
   | "onboarding_listo"
 
+/** BIBLIA (VB 12-ago) — DEAL SOLO CON LA FORMAL: en CHILE los hitos
+ * PRE-FORMALES dejan LEAD (calificado si corresponde) y el deal nace
+ * únicamente con la cotización formal (lo crea la emisión del cotizador,
+ * que exige RUT). Los hitos POST-formales (aceptada, onboarding_listo)
+ * conservan la conversión: a esa altura la formal ya existió y un deal
+ * faltante es un hoyo de datos que sí se repara. CO/MX/PE conservan sus
+ * reglas propias. Rollback sin deploy: VICKY_DEAL_CLASICO=1. */
+const HITOS_PRE_FORMALES: ReadonlySet<Hito> = new Set([
+  "intencion",
+  "discovery",
+  "preform",
+  "reunion_realizada",
+])
+
+function dealSoloConFormal(territorio: string | null, hito: Hito): boolean {
+  if ((process.env.VICKY_DEAL_CLASICO || "").trim() === "1") return false
+  return territorio === "Chile" && HITOS_PRE_FORMALES.has(hito)
+}
+
 /** Piso de etapa del deal que garantiza cada hito. */
 export const PISO_POR_HITO: Record<Hito, string> = {
   intencion: "1. Trato Creado",
@@ -1004,6 +1023,49 @@ export const TOOLS_QUE_CREAN_SU_LEAD = new Set([
   "registrar_solicitud_callback",
 ])
 
+/** Destino del LEAD pre-formal (escalera de roles, biblia 12-ago):
+ * reunión → owner forzado al host de la agenda; sorteoInmediato (21-50 / >50
+ * derivados) → tómbola de VENDEDORES (regla de calificados — la dotación
+ * conocida ES la calificación); resto → el lead sigue su curso normal (dueño
+ * actual o los relojes lo entregarán). Nunca nace deal aquí. */
+async function dejarLeadPreFormal(
+  lead: LeadEncontrado,
+  clean: string,
+  hito: Hito,
+  ownerForzadoId: string,
+  sorteoInmediato?: boolean,
+): Promise<void> {
+  try {
+    if (ownerForzadoId && lead.id) {
+      const { getZohoAccessToken } = await import("./zoho-token")
+      const token = await getZohoAccessToken()
+      const api = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+      await fetch(`${api}/crm/v3/Leads`, {
+        method: "PUT",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          data: [{ id: lead.id, Owner: { id: ownerForzadoId } }],
+          skip_feature_execution: [{ name: "assignment_rules" }],
+        }),
+      }).catch(() => {})
+      console.log(`[crm-hitos] ${clean}: hito "${hito}" pre-formal — LEAD ${lead.id} forzado al host de la reunión (deal nace con la formal)`)
+      return
+    }
+    if (sorteoInmediato && lead.id) {
+      const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
+      const r = await reasignarLeadCalificacionCL(lead.id, { calificado: true }).catch(() => null)
+      console.log(
+        `[crm-hitos] ${clean}: hito "${hito}" pre-formal con sorteo inmediato — LEAD ${lead.id} → tómbola de vendedores (${r?.ownerEmail || "regla sin asignar"}); deal nace con la formal`,
+      )
+      return
+    }
+    console.log(`[crm-hitos] ${clean}: hito "${hito}" pre-formal — LEAD ${lead.id} actualizado; el deal nace con la cotización formal (biblia 12-ago)`)
+  } catch (e) {
+    console.warn(`[crm-hitos] dejarLeadPreFormal falló para ${clean}:`, e instanceof Error ? e.message : e)
+  }
+}
+
 export async function sincronizarHitoCrm(
   contact: string,
   hito: Hito,
@@ -1117,6 +1179,10 @@ export async function sincronizarHitoCrm(
         console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${creado.leadId} espera identidad para convertir (deal pendiente)`)
         return
       }
+      if (dealSoloConFormal(territorioDeContacto(clean), hito)) {
+        await dejarLeadPreFormal(lead, clean, hito, ownerForzadoId, opts.sorteoInmediato)
+        return
+      }
       const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato)
       if (!dealId) console.warn(`[crm-hitos] ${clean}: lead ${creado.leadId} quedó sin convertir`)
       else await actualizarNotaTranscripcion(dealId, clean)
@@ -1199,6 +1265,10 @@ export async function sincronizarHitoCrm(
         console.log(`[crm-hitos] ${clean}: deal ${dealCruzado} recién creado por la otra puerta (candado kv) — hito "${hito}" sube el piso, lead ${lead.id} no convierte deal propio`)
         await avanzarDealHasta(dealCruzado, piso)
         await actualizarNotaTranscripcion(dealCruzado, clean)
+        return
+      }
+      if (dealSoloConFormal(territorioDeContacto(clean), hito)) {
+        await dejarLeadPreFormal(lead, clean, hito, ownerForzadoId, opts.sorteoInmediato)
         return
       }
       const dealNuevo = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato)
