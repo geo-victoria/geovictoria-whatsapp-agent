@@ -5208,9 +5208,18 @@ export async function GET(req: Request): Promise<Response> {
   // Vista de detalle de un KPI: usa las MISMAS rows ya filtradas por país,
   // fechas, estado y propietario, más el predicado del bucket.
   // Detalle de los KPIs de cotizaciones (cuentan quotes, no conversaciones).
-  if (listaParam === "zoho_cotizaciones" || listaParam === "zoho_aceptadas") {
-    const quotes = listaParam === "zoho_aceptadas" ? cierre?.aceptadasList || [] : cierre?.quotesList || []
-    const titulo = listaParam === "zoho_aceptadas" ? "Aceptadas / pagadas" : "Cotizaciones en Zoho"
+  if (["zoho_cotizaciones", "zoho_aceptadas", "zoho_aceptadas_solo", "zoho_pagadas"].includes(listaParam || "")) {
+    const acc = cierre?.aceptadasList || []
+    const quotes =
+      listaParam === "zoho_aceptadas" ? acc
+      : listaParam === "zoho_aceptadas_solo" ? acc.filter((q) => !esPagada(q))
+      : listaParam === "zoho_pagadas" ? acc.filter((q) => esPagada(q))
+      : cierre?.quotesList || []
+    const titulo =
+      listaParam === "zoho_aceptadas" ? "Aceptadas / pagadas"
+      : listaParam === "zoho_aceptadas_solo" ? "Aceptadas sin pago"
+      : listaParam === "zoho_pagadas" ? "Pagadas"
+      : "Cotizaciones en Zoho"
     const convPorContacto = new Map<string, string>()
     for (const f of filasListado) {
       const d = digits(f.contacto)
@@ -5553,9 +5562,15 @@ export async function GET(req: Request): Promise<Response> {
         <div class="kpi-l">${avanceMeta}% del camino al objetivo <span class="pct">${leyendaObjetivo}</span></div>
       </div></div>`
         : ""
+      // Separación Aceptada vs Pagada (Rodrigo 13-ago): la aceptación es
+      // intención, el pago es plata — cada una con su tarjeta y su detalle.
+      const pagadasN = cierre.aceptadasList.filter((q) => esPagada(q)).length
+      const aceptadasSinPago = cierre.aceptadas - pagadasN
+      const tasaPagadas = cierre.total ? `${Math.round((pagadasN / cierre.total) * 100)}%` : ""
       flujoCotizHtml = `<div class="kpis">${base}
     ${kpiCard("Cotizaciones en Zoho", cierre.total, col.com, undefined, "zoho_cotizaciones")}
-    ${kpiCard("Aceptadas / pagadas", cierre.aceptadas, col.good, tasaAcept, "zoho_aceptadas")}
+    ${kpiCard("Aceptadas sin pago", aceptadasSinPago, col.warn, tasaAcept ? `${tasaAcept} aceptación total` : undefined, "zoho_aceptadas_solo")}
+    ${kpiCard("Pagadas", pagadasN, col.good, tasaPagadas, "zoho_pagadas")}
   </div>
   <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
     }
