@@ -263,6 +263,23 @@ async function asignarEnZoho(
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
       } else if (esCL) {
         const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
+        if (calificado) {
+          // Vio precio = lead CALIFICADO (escalera de roles): el status nace
+          // correcto y el registro deja de ser un "huérfano" sin señal.
+          const { getZohoAccessToken } = await import("@/lib/zoho-token")
+          const tk = await getZohoAccessToken().catch(() => "")
+          if (tk) {
+            await fetch(`${(process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()}/crm/v3/Leads`, {
+              method: "PUT",
+              headers: { Authorization: `Zoho-oauthtoken ${tk}`, "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({
+                data: [{ id: creado.leadId, Lead_Status: "4. Calificado" }],
+                skip_feature_execution: [{ name: "assignment_rules" }],
+              }),
+            }).catch(() => {})
+          }
+        }
         const r = await reasignarLeadCalificacionCL(creado.leadId, { calificado }).catch(() => null)
         await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
         if (r?.success && r.ownerEmail && r.ownerId) {
@@ -798,7 +815,7 @@ export async function GET(req: Request) {
       : debeTraspasar({
           referenciaRelojAt: ultimoCliente,
           clienteRespondioDespues,
-          precioMostrado: Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
+          precioMostrado: Boolean(c.pref_escalon_at || c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
           pais,
           ahora,
           feriados,
@@ -821,7 +838,7 @@ export async function GET(req: Request) {
         contact: c.contact,
         motivo: decision.motivo,
         ttv_minutos: decision.ttv,
-        precio_mostrado: Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
+        precio_mostrado: Boolean(c.pref_escalon_at || c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
         vendedor_email: interno.email,
         vendedor_zoho_id: interno.zohoId,
         vendedor_nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
@@ -836,7 +853,7 @@ export async function GET(req: Request) {
       c.contact,
       pais,
       interno,
-      Boolean(c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
+      Boolean(c.pref_escalon_at || c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
     )
     if (vendedor.email !== interno.email) {
       await supa(`vic_ptv?id=eq.${fila[0].id}`, {
