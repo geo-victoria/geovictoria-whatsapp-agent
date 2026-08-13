@@ -481,6 +481,36 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // CANDADO RELOJ SIN PEDIRLO (Lalo 13-ago, caso Rodrigo: respuesta
+        // ambigua a la pregunta de marcaje → el modelo asumió reloj solo).
+        // Regla dura: cotizar CON hardware exige que el CLIENTE haya
+        // mencionado el reloj en algún mensaje de la conversación (o este
+        // turno). Si nunca lo pidió, la tool se niega con guía — jamás se
+        // cotiza un reloj que el cliente no nombró. Se asume 1 solo cuando
+        // SÍ lo pidió; nunca se asume el reloj mismo.
+        if (
+          !bloqueoUmbral &&
+          (toolName === "cotizar_referencial" || toolName === "generar_link_cotizadora") &&
+          Array.isArray((toolInput as Record<string, unknown>).hardware) &&
+          ((toolInput as { hardware: unknown[] }).hardware || []).length > 0
+        ) {
+          const RE_RELOJ =
+            /reloj|mixt|combinad|combinaci|biometr|huellero|checador|marcador|t[oó]tem|dispositivo|aparato|m[aá]quina|terminal|equipo f[ií]sico/i
+          const textosCliente = [
+            ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
+            userMessage || "",
+          ].join("\n")
+          if (!RE_RELOJ.test(textosCliente)) {
+            bloqueoUmbral =
+              "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): el cliente NO ha pedido reloj físico en esta conversación, así que NO puedes cotizar con hardware. " +
+              "Haz esto AHORA: si su última respuesta a la pregunta de marcaje fue ambigua o no la respondió, re-pregunta corto ('¿Y cómo prefieren marcar: app (gratis) o reloj físico?'); " +
+              "si eligió app/web/telefónico, cotiza SIN hardware. Solo si el cliente nombra el reloj (o mixto) puedes incluirlo."
+            console.warn(
+              `[agent-loop] candado reloj-sin-pedirlo: ${toolName} con hardware bloqueado (contacto ${contact}) — el cliente nunca mencionó reloj/mixto.`,
+            )
+          }
+        }
+
         let result: Awaited<ReturnType<typeof dispatchTool>>
         // REUNIÓN POST-FORMAL = del dueño del deal, no del Round Robin (Lalo,
         // 21-jul, caso notaría). Desde el 28-jul existe la forma de AGENDARLA
