@@ -462,7 +462,8 @@ async function processOneTurn(
     // única pregunta permitida es la comuna.
     const msgCorto = (message || "").trim()
     const eligeReloj =
-      msgCorto.length <= 40 && /\b(mixt[oa]s?|combinad[oa]s?|combinaci[oó]n|reloj(?:es)?)\b/i.test(msgCorto)
+      msgCorto.length <= 40 &&
+      /\b(mixt[oa]s?|combinad[oa]s?|combinaci[oó]n|reloj(?:es)?|ambos|ambas|los dos|las dos)\b/i.test(msgCorto)
     const declaraCantidadOSedes = /\d|sucursal|sede|punto|local/i.test(msgCorto)
     const directivaMarcaje =
       eligeReloj && !declaraCantidadOSedes

@@ -494,13 +494,23 @@ export async function runAgentLoop(params: {
           Array.isArray((toolInput as Record<string, unknown>).hardware) &&
           ((toolInput as { hardware: unknown[] }).hardware || []).length > 0
         ) {
+          // OJO (bug 13-ago 17:50, caso "me interesa con ambos"): la elección
+          // del reloj suele ser ANAFÓRICA — "ambos", "los dos", "la 1" — sin
+          // nombrar la palabra reloj. Sin esas formas el candado bloqueaba en
+          // círculo (la tool se negaba y el modelo re-preguntaba sin salida).
           const RE_RELOJ =
-            /reloj|mixt|combinad|combinaci|biometr|huellero|checador|marcador|t[oó]tem|dispositivo|aparato|m[aá]quina|terminal|equipo f[ií]sico/i
+            /reloj|mixt|combinad|combinaci|ambos|ambas|los dos|las dos|opci[oó]n 1|la (?:1|uno|primera)|biometr|huellero|checador|marcador|t[oó]tem|dispositivo|aparato|m[aá]quina|terminal|equipo f[ií]sico/i
           const textosCliente = [
             ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
             userMessage || "",
           ].join("\n")
-          if (!RE_RELOJ.test(textosCliente)) {
+          // Afirmación corta ("sí", "claro") respondiendo a una pregunta de
+          // Vicky que mencionaba el reloj/mixto: también cuenta como elección.
+          const ultimoAsistente = [...history].reverse().find((m) => m.role === "assistant")
+          const afirmoRelojPreguntado =
+            /^\s*(s[ií]|claro|dale|ok(?:ay)?|perfecto|correcto|exacto|as[ií] es)\b/i.test(userMessage || "") &&
+            /reloj|mixt/i.test(String(ultimoAsistente?.content || ""))
+          if (!RE_RELOJ.test(textosCliente) && !afirmoRelojPreguntado) {
             bloqueoUmbral =
               "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): el cliente NO ha pedido reloj físico en esta conversación, así que NO puedes cotizar con hardware. " +
               "Haz esto AHORA: si su última respuesta a la pregunta de marcaje fue ambigua o no la respondió, re-pregunta corto ('¿Y cómo prefieren marcar: app (gratis), reloj físico, o mixto?'); " +
