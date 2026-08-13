@@ -481,42 +481,53 @@ export async function runAgentLoop(params: {
           }
         }
 
-        // CANDADO RELOJ SIN PEDIRLO (Lalo 13-ago, caso Rodrigo: respuesta
-        // ambigua a la pregunta de marcaje → el modelo asumió reloj solo).
-        // Regla dura: cotizar CON hardware exige que el CLIENTE haya
-        // mencionado el reloj en algún mensaje de la conversación (o este
-        // turno). Si nunca lo pidió, la tool se niega con guía — jamás se
-        // cotiza un reloj que el cliente no nombró. Se asume 1 solo cuando
-        // SÍ lo pidió; nunca se asume el reloj mismo.
+        // CANDADOS DE EVIDENCIA POR CITA (Lalo 13-ago v2 — "¿por qué 'ambas'
+        // tiene que estar en un listado?"): el MODELO interpreta el lenguaje y
+        // CITA la frase textual del cliente; el CÓDIGO solo verifica que esa
+        // cita exista palabra por palabra en la conversación. Así ninguna
+        // lista de palabras decide por el cliente (el regex anterior bloqueó
+        // en círculo el caso real "me interesa con ambos"), y el modelo no
+        // puede inventar una elección que nadie escribió — sin cita no cotiza.
+        const normEv = (s: string) =>
+          s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim()
+        const textosClienteEv = normEv(
+          [
+            ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
+            userMessage || "",
+          ].join("\n"),
+        )
+        const citaDelCliente = (cita: unknown): boolean => {
+          const c = normEv(String(cita || ""))
+          return c.length >= 2 && textosClienteEv.includes(c)
+        }
+
+        // CANDADO 1 — RELOJ SIN PEDIRLO: cotizar con hardware exige la cita
+        // de la elección (`evidenciaEleccionReloj`). Heurística de palabras
+        // solo como fallback de transición mientras el modelo aprende a citar.
         if (
           !bloqueoUmbral &&
           (toolName === "cotizar_referencial" || toolName === "generar_link_cotizadora") &&
           Array.isArray((toolInput as Record<string, unknown>).hardware) &&
           ((toolInput as { hardware: unknown[] }).hardware || []).length > 0
         ) {
-          // OJO (bug 13-ago 17:50, caso "me interesa con ambos"): la elección
-          // del reloj suele ser ANAFÓRICA — "ambos", "los dos", "la 1" — sin
-          // nombrar la palabra reloj. Sin esas formas el candado bloqueaba en
-          // círculo (la tool se negaba y el modelo re-preguntaba sin salida).
-          const RE_RELOJ =
-            /reloj|mixt|combinad|combinaci|ambos|ambas|los dos|las dos|opci[oó]n 1|la (?:1|uno|primera)|biometr|huellero|checador|marcador|t[oó]tem|dispositivo|aparato|m[aá]quina|terminal|equipo f[ií]sico/i
-          const textosCliente = [
-            ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
-            userMessage || "",
-          ].join("\n")
-          // Afirmación corta ("sí", "claro") respondiendo a una pregunta de
-          // Vicky que mencionaba el reloj/mixto: también cuenta como elección.
-          const ultimoAsistente = [...history].reverse().find((m) => m.role === "assistant")
-          const afirmoRelojPreguntado =
-            /^\s*(s[ií]|claro|dale|ok(?:ay)?|perfecto|correcto|exacto|as[ií] es)\b/i.test(userMessage || "") &&
-            /reloj|mixt/i.test(String(ultimoAsistente?.content || ""))
-          if (!RE_RELOJ.test(textosCliente) && !afirmoRelojPreguntado) {
+          let eleccionRespaldada = citaDelCliente(
+            (toolInput as Record<string, unknown>).evidenciaEleccionReloj,
+          )
+          if (!eleccionRespaldada) {
+            const RE_RELOJ =
+              /reloj|mixt|combinad|combinaci|ambos|ambas|los dos|las dos|biometr|huellero|checador|marcador|t[oó]tem|dispositivo|aparato|m[aá]quina|terminal|equipo f[ií]sico/i
+            const ultimoAsistente = [...history].reverse().find((m) => m.role === "assistant")
+            const afirmoRelojPreguntado =
+              /^\s*(s[ií]|claro|dale|ok(?:ay)?|perfecto|correcto|exacto|as[ií] es)\b/i.test(userMessage || "") &&
+              /reloj|mixt/i.test(String(ultimoAsistente?.content || ""))
+            eleccionRespaldada = RE_RELOJ.test(textosClienteEv) || afirmoRelojPreguntado
+          }
+          if (!eleccionRespaldada) {
             bloqueoUmbral =
-              "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): el cliente NO ha pedido reloj físico en esta conversación, así que NO puedes cotizar con hardware. " +
-              "Haz esto AHORA: si su última respuesta a la pregunta de marcaje fue ambigua o no la respondió, re-pregunta corto ('¿Y cómo prefieren marcar: app (gratis), reloj físico, o mixto?'); " +
-              "si eligió app/web/telefónico, cotiza SIN hardware. Solo si el cliente nombra el reloj (o mixto) puedes incluirlo."
+              "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): para cotizar CON reloj debes pasar `evidenciaEleccionReloj` = la frase TEXTUAL del cliente (copiada literal de su mensaje) donde eligió el reloj o el mixto — y esa frase debe existir en la conversación. " +
+              "Si el cliente YA eligió, vuelve a llamar la tool citando su frase exacta. Si aún NO ha elegido o su respuesta fue ambigua, NO asumas: re-pregunta corto ('¿Y cómo prefieren marcar: app (sin costo adicional), reloj físico, o mixto?') y cotiza cuando responda. Si eligió app/web/telefónico, cotiza SIN hardware."
             console.warn(
-              `[agent-loop] candado reloj-sin-pedirlo: ${toolName} con hardware bloqueado (contacto ${contact}) — el cliente nunca mencionó reloj/mixto.`,
+              `[agent-loop] candado reloj-sin-cita: ${toolName} con hardware bloqueado (contacto ${contact}) — sin evidencia textual de la elección.`,
             )
           }
         }
@@ -535,34 +546,34 @@ export async function runAgentLoop(params: {
           const puntos = (toolInput as { puntosInstalacion?: Array<{ ubicacion?: string }> })
             .puntosInstalacion
           if (Array.isArray(puntos) && puntos.length > 0) {
-            const norm = (s: string) =>
-              s
-                .toLowerCase()
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "")
-            const textoCliente = norm(
-              [
-                ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
-                userMessage || "",
-              ].join("\n"),
+            // Camino primario: cita textual (`evidenciaUbicacion`) — el modelo
+            // copia la frase del cliente donde dijo dónde ("no disculpa es
+            // para olmué") y el código verifica que exista literal. La
+            // interpretación (frase → comuna) es trabajo del modelo.
+            let ubicacionRespaldada = citaDelCliente(
+              (toolInput as Record<string, unknown>).evidenciaUbicacion,
             )
-            const tokensCliente = textoCliente.split(/[^a-z]+/).filter((t) => t.length >= 4)
-            const sinRespaldo = puntos.some((p) => {
-              const tokensUb = norm(String(p?.ubicacion || ""))
-                .split(/[^a-z]+/)
-                .filter((t) => t.length >= 3)
-              if (tokensUb.length === 0) return true // "RM" pelado u ubicación vacía: sin respaldo posible
-              return !tokensUb.some(
-                (tu) =>
-                  textoCliente.includes(tu) || tokensCliente.some((tc) => tu.startsWith(tc)),
-              )
-            })
-            if (sinRespaldo) {
+            if (!ubicacionRespaldada) {
+              // Fallback de transición: tokens de la ubicación en el texto del
+              // cliente (acepta abreviaciones tipo "provi" → Providencia).
+              const tokensCliente = textosClienteEv.split(/[^a-z]+/).filter((t) => t.length >= 4)
+              ubicacionRespaldada = !puntos.some((p) => {
+                const tokensUb = normEv(String(p?.ubicacion || ""))
+                  .split(/[^a-z]+/)
+                  .filter((t) => t.length >= 3)
+                if (tokensUb.length === 0) return true // "RM" pelado u ubicación vacía
+                return !tokensUb.some(
+                  (tu) =>
+                    textosClienteEv.includes(tu) || tokensCliente.some((tc) => tu.startsWith(tc)),
+                )
+              })
+            }
+            if (!ubicacionRespaldada) {
               bloqueoUmbral =
-                "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): la ubicación del punto NO la ha dicho el cliente en esta conversación — la comuna JAMÁS se asume (ni la Región Metropolitana por defecto). " +
-                "Haz esto AHORA: pregúntale en qué comuna estará el reloj, y cotiza recién cuando te la dé, con ESA comuna."
+                "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): la ubicación del punto necesita respaldo del cliente — la comuna JAMÁS se asume (ni la Región Metropolitana por defecto). " +
+                "Si el cliente YA dijo dónde, vuelve a llamar la tool pasando `evidenciaUbicacion` = su frase TEXTUAL (copiada literal). Si no lo ha dicho, pregúntale en qué comuna estará el reloj y cotiza recién cuando te la dé."
               console.warn(
-                `[agent-loop] candado comuna-asumida: ${toolName} bloqueado (contacto ${contact}) — ubicación sin respaldo en mensajes del cliente.`,
+                `[agent-loop] candado comuna-sin-cita: ${toolName} bloqueado (contacto ${contact}) — ubicación sin respaldo del cliente.`,
               )
             }
           }

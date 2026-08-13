@@ -99,6 +99,16 @@ export const cotizarReferencialSchema = {
         description:
           "Lista opcional de hardware de marcaje a incluir. Si el prospecto no menciona necesidad de dispositivo físico, dejar vacío.",
       },
+      evidenciaEleccionReloj: {
+        type: "string",
+        description:
+          "OBLIGATORIO si la cotización incluye hardware: la frase TEXTUAL del cliente (copiada literal de su mensaje, sin parafrasear ni corregir) donde eligió el reloj o el mixto — ej: 'me interesa con ambos', 'quiero el reloj', 'la primera opción'. El sistema verifica que exista palabra por palabra en la conversación; sin esa cita la cotización con hardware se rechaza. Si el cliente aún no ha elegido, NO cotices con hardware: pregúntale el marcaje.",
+      },
+      evidenciaUbicacion: {
+        type: "string",
+        description:
+          "OBLIGATORIO si la cotización incluye hardware: la frase TEXTUAL del cliente (literal) donde dijo la comuna/ubicación del punto — ej: 'no disculpa es para olmué', 'estamos en Renca'. Sin esa cita (o sin que la comuna aparezca en sus mensajes) la cotización con hardware se rechaza.",
+      },
       puntosInstalacion: {
         type: "array" as const,
         items: {
@@ -655,9 +665,9 @@ export async function cotizarReferencial(args: {
           "",
           "[---]",
           "",
-          "Opción 2 más económica — Sin reloj, con la app gratis:",
+          "Opción 2 más económica — Sin reloj, con la app (sin costo adicional):",
           "",
-          `Con la app en el celular de cada uno (biometría facial + GPS) o en modo cuadrilla — todo el equipo marca en un solo celular o tablet de la empresa, también gratis: $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} CLP/mes (IVA incluido), sin pago inicial de equipos ni instalación.`,
+          `Con la app en el celular de cada uno (biometría facial + GPS) o en modo cuadrilla — todo el equipo marca en un solo celular o tablet de la empresa, también sin costo adicional — pagas solo el plan mensual de asistencia: $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} CLP/mes (IVA incluido), sin pago inicial de equipos ni instalación.`,
           "",
           "[---]",
           "",

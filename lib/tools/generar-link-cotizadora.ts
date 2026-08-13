@@ -204,6 +204,16 @@ export const generarLinkCotizadoraSchema = {
           required: ["id"],
         },
       },
+      evidenciaEleccionReloj: {
+        type: "string",
+        description:
+          "OBLIGATORIO si la cotización incluye hardware: la frase TEXTUAL del cliente (copiada literal de su mensaje, sin parafrasear ni corregir) donde eligió el reloj o el mixto — ej: 'me interesa con ambos', 'quiero el reloj', 'la primera opción'. El sistema verifica que exista palabra por palabra en la conversación; sin esa cita la cotización con hardware se rechaza. Si el cliente aún no ha elegido, NO cotices con hardware: pregúntale el marcaje.",
+      },
+      evidenciaUbicacion: {
+        type: "string",
+        description:
+          "OBLIGATORIO si la cotización incluye hardware: la frase TEXTUAL del cliente (literal) donde dijo la comuna/ubicación del punto — ej: 'no disculpa es para olmué', 'estamos en Renca'. Sin esa cita (o sin que la comuna aparezca en sus mensajes) la cotización con hardware se rechaza.",
+      },
       puntosInstalacion: {
         type: "array" as const,
         items: {
