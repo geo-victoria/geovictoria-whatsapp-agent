@@ -5550,17 +5550,20 @@ export async function GET(req: Request): Promise<Response> {
   <div class="sub" style="margin:-2px 0 10px">Zoho no disponible en esta carga — recarga para ver aceptadas y cierre.</div>`
     } else {
       const tasaAcept = cierre.total ? `${Math.round((cierre.aceptadas / cierre.total) * 100)}%` : ""
-      const endToEnd = vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0
+      // Tasa de cierre = SOLO PAGADAS del período ÷ vieron precio del período
+      // (Rodrigo 13-ago): la aceptación no es plata; sale del numerador.
+      const pagadasN = cierre.aceptadasList.filter((q) => esPagada(q)).length
+      const endToEnd = vieronPrecio ? Math.round((pagadasN / vieronPrecio) * 100) : 0
       // Objetivo de cierre POR PAÍS (Lalo 28-jul): Chile 30%; Colombia, Perú y
       // México 10% — los programas nuevos maduran distinto.
       const TARGET_PCT = pais === "cl" ? 30 : 10
       const metaExacta = (TARGET_PCT / 100) * vieronPrecio
-      const cumpleMeta = vieronPrecio > 0 && cierre.aceptadas >= metaExacta
-      const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - cierre.aceptadas))
-      const faltanNuevas = Math.max(0, Math.ceil((metaExacta - cierre.aceptadas) / (1 - TARGET_PCT / 100)))
+      const cumpleMeta = vieronPrecio > 0 && pagadasN >= metaExacta
+      const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - pagadasN))
+      const faltanNuevas = Math.max(0, Math.ceil((metaExacta - pagadasN) / (1 - TARGET_PCT / 100)))
       const leyendaObjetivo = cumpleMeta
-        ? "vio precio → venta · objetivo alcanzado 🎉"
-        : `vio precio → venta · faltan ${faltanEnviadas} venta${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`
+        ? "vio precio → PAGADA · objetivo alcanzado 🎉"
+        : `vio precio → PAGADA · faltan ${faltanEnviadas} pago${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`
       const colorObjetivo = cumpleMeta ? col.best : col.warn
       const avanceMeta = Math.min(100, Math.round((endToEnd / TARGET_PCT) * 100))
       tasaCierreHtml = vieronPrecio
@@ -5572,7 +5575,6 @@ export async function GET(req: Request): Promise<Response> {
         : ""
       // Separación Aceptada vs Pagada (Rodrigo 13-ago): la aceptación es
       // intención, el pago es plata — cada una con su tarjeta y su detalle.
-      const pagadasN = cierre.aceptadasList.filter((q) => esPagada(q)).length
       const aceptadasSinPago = cierre.aceptadas - pagadasN
       const tasaPagadas = cierre.total ? `${Math.round((pagadasN / cierre.total) * 100)}%` : ""
       flujoCotizHtml = `<div class="kpis">${base}
