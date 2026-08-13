@@ -57,18 +57,28 @@ describe("bloque de prompt", () => {
     assert.equal(formatUmbralParaPrompt(50, "inbound"), "")
   })
 
-  test("bajo 50 declara umbral, derivación y acompañamiento", () => {
+  test("bajo 50 declara el FLUJO 21+ (Lalo 13-ago): RUT, operación, llamada o reunión", () => {
     const bloque = formatUmbralParaPrompt(20, "inbound")
     assert.match(bloque, /SOLO hasta 20 trabajadores/)
     assert.match(bloque, /INBOUND/)
     // La derivación nombra la tool y el motivo EXACTOS del toolset CL.
     assert.match(bloque, /derivar_a_soporte/)
     assert.match(bloque, /fuera_de_rango_trabajadores/)
-    // Lo aprendido (Lalo 08-ago): Vicky acompaña, no abandona.
-    assert.match(bloque, /ACOMPAÑA/)
+    // Guion nuevo: RUT primero (sin ser muro), pregunta consultiva, parafraseo
+    // y cierre en llamada de ejecutivo o reunión con el dueño del deal.
+    assert.match(bloque, /RUT/)
+    assert.match(bloque, /rutEmpresa/)
+    assert.match(bloque, /operación/)
+    assert.match(bloque, /no es un muro/)
     assert.match(bloque, /agendar_reunion/)
-    // El >50 conserva su flujo enterprise.
-    assert.match(bloque, /MÁS de 50 trabajadores no cambia/)
+    assert.match(bloque, /consultar_disponibilidad_horario/)
+    assert.match(bloque, /dueño del trato/)
+    // Post-derivación: reactivo, sin proactividad (regla 10-ago intacta).
+    assert.match(bloque, /REACTIVO/)
+    // El flujo bajo el umbral no cambia.
+    assert.match(bloque, /NO cambia en NADA/)
+    // El email nunca es requisito para derivar (solo rama reunión).
+    assert.match(bloque, /email SOLO si ya lo dio/)
   })
 
   test("outbound usa su propio umbral en el texto", () => {
@@ -114,7 +124,8 @@ describe("puntos de decisión del prompt CL reescritos con el umbral", () => {
 
   test("los reemplazos dinámicos usan el umbral", () => {
     assert.match(fuente, /Si tiene 1-\$\{u\} → puede cotizar/)
-    assert.match(fuente, /Si tiene MÁS de \$\{u\} y hasta 50/)
+    assert.match(fuente, /Si tiene MÁS de \$\{u\} → NO entra a cotizar/)
+    assert.match(fuente, /FLUJO 21\+/)
     assert.match(fuente, /entre 1 y \$\{u\} trabajadores/)
     assert.match(fuente, /Cuando el camino es cotizar \(1-\$\{u\} trabajadores\)/)
   })

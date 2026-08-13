@@ -187,12 +187,15 @@ export function datosDeToolInput(toolName: string, input: unknown): DatosConvers
         empleados: parseEmpleados(i.trabajadores),
       }
     // Derivación >50 (Lalo 06-ago): el lead/deal debe nacer con TODOS los
-    // datos para caer en el tramo correcto de la tómbola de deals.
+    // datos para caer en el tramo correcto de la tómbola de deals. Flujo 21+
+    // (Lalo 13-ago): el dato pedido es el RUT — la razón social sale del
+    // padrón SII (se resuelve en sincronizarHitoCrm) y el deal nace con RUT.
     case "derivar_a_soporte":
       return {
         nombre: txt(i.nombre),
         empresa: txt(i.empresa),
         email: txt(i.email),
+        rut: txt(i.rutEmpresa),
         empleados: parseEmpleados(i.trabajadores),
       }
     default:
@@ -1079,6 +1082,18 @@ export async function sincronizarHitoCrm(
     if (!habilitado()) return
     const clean = (contact || "").replace(/\D/g, "")
     if (!clean || esTelefonoDePrueba(clean)) return
+    // Flujo 21+ (Lalo 13-ago): con RUT y sin nombre de empresa, la razón
+    // social se resuelve del padrón SII — el lead/deal nace con nombre real
+    // en vez de "Por identificar". Best-effort: sin ficha, sigue igual.
+    if (datos.rut && !datos.empresa && clean.startsWith("56")) {
+      try {
+        const { fichaEmpresaSii } = await import("./empresas-sii")
+        const ficha = await fichaEmpresaSii(datos.rut.trim().toUpperCase().replace(/\./g, ""))
+        if (ficha?.razonSocial) datos = { ...datos, empresa: ficha.razonSocial }
+      } catch {
+        /* best-effort */
+      }
+    }
     // Host de reunión → id de usuario Zoho (Lalo 06-ago: con reunión, el
     // owner del deal/lead se fuerza al host). Resolución best-effort.
     let ownerForzadoId = ""

@@ -123,7 +123,7 @@ export function getSystemPromptV3(contact?: string, umbralPreciosCL?: number): s
       )
       .replace(
         '- Si tiene 50+ → no cotiza, pregunta "Prefieres reunión o callback?".',
-        `- Si tiene MÁS de ${u} y hasta 50 → NO entra a cotizar ni promete "armarte el valor": aplica la regla "UMBRAL DE PRECIOS" del inicio (capturar nombre/email/empresa, derivar con derivar_a_soporte y ACOMPAÑAR sin precios).\n- Si tiene 50+ → no cotiza, pregunta "Prefieres reunión o callback?".`,
+        `- Si tiene MÁS de ${u} → NO entra a cotizar ni promete "armarte el valor": aplica el FLUJO 21+ de la regla "UMBRAL DE PRECIOS" del inicio (RUT → operación → parafraseo → "¿te llama un ejecutivo o agendamos reunión?" → derivar con derivar_a_soporte).`,
       )
       .replace(
         "Aplica cuando: el usuario pidió cotizar Y tiene entre 1 y 50 trabajadores.",
@@ -162,7 +162,7 @@ export function getSystemPromptV3(contact?: string, umbralPreciosCL?: number): s
       )
       .replace(
         '- El rango de empleados del formulario (ej. "20 - 49") te dice que califica (≤50) pero NO basta para cotizar: confirma el número EXACTO con una sola pregunta natural ("vi que son entre 20 y 49 — ¿cuántos exactamente, para armarte el valor de inmediato?"). Si el exacto resulta >50, deriva a ejecutivo como siempre.',
-        `- El rango de empleados del formulario (ej. "20 - 49") NO basta: confirma el número EXACTO con una sola pregunta natural ("vi que son entre 20 y 49 — ¿cuántos exactamente?"). Si el exacto supera ${u} (tu UMBRAL DE PRECIOS), deriva y acompaña sin precios según la regla del inicio; si supera 50, Modo Lead como siempre.`,
+        `- El rango de empleados del formulario (ej. "20 - 49") NO basta: confirma el número EXACTO con una sola pregunta natural ("vi que son entre 20 y 49 — ¿cuántos exactamente?"). Si el exacto supera ${u} (tu UMBRAL DE PRECIOS), entra al FLUJO 21+ de la regla del inicio (RUT → operación → parafraseo → llamada de ejecutivo o reunión).`,
       )
       .replace(
         "— calcula un estimado mensual. Solo funciona para 1-50 trabajadores.",
@@ -611,7 +611,7 @@ Reglas del modo (se suman a todo el flujo normal de cotización):
 7. agendar_reunion(slotIso, prospectName, prospectEmail, empresa?, ...) — agenda la reunión en Cal.com, crea el Lead en Zoho con Owner = KAM del Round Robin, y crea el Event en Zoho. Úsala SOLO cuando el cliente confirmó un horario específico. Solo pasa parámetros opcionales si el cliente los mencionó.
 7b. reagendar_reunion(newSlotIso, country?) — reagenda la reunión que el cliente YA tiene a un nuevo horario, MANTENIENDO el mismo ejecutivo. Úsala (en vez de agendar_reunion) cuando un cliente con reunión existente quiere cambiar día/hora. Ubica sola la reunión vigente del cliente; no necesita id.
 
-8. derivar_a_soporte(motivo, contexto, nombre?, email?, empresa?, trabajadores?) — red de seguridad para handoff. Motivos: "fuera_de_scope", "tool_fallo", "solicitud_explicita_persona", "fuera_de_rango_trabajadores". Para "fuera_de_rango_trabajadores" (empresas sobre tu UMBRAL DE PRECIOS de esta conversación, o sobre 50) pasa SIEMPRE nombre, email, empresa y trabajadores (el número tal cual lo dijo el cliente, sirve un rango): con ellos el trato entra automático a la tómbola del equipo comercial. NO uses esta tool para callback (usa registrar_solicitud_callback), agendar (usa agendar_reunion), o consulta operativa (usa consultar_agente_soporte).
+8. derivar_a_soporte(motivo, contexto, nombre?, rutEmpresa?, email?, empresa?, trabajadores?) — red de seguridad para handoff. Motivos: "fuera_de_scope", "tool_fallo", "solicitud_explicita_persona", "fuera_de_rango_trabajadores". Para "fuera_de_rango_trabajadores" (empresas sobre tu UMBRAL DE PRECIOS de esta conversación, o sobre 50) pasa SIEMPRE nombre, rutEmpresa y trabajadores (el número tal cual lo dijo el cliente, sirve un rango) — email SOLO si el cliente ya lo dio (por ejemplo al elegir reunión); con el RUT el registro nace con la razón social real y el trato entra automático a la tómbola del equipo comercial. NO uses esta tool para callback (usa registrar_solicitud_callback), agendar (usa agendar_reunion), o consulta operativa (usa consultar_agente_soporte).
 
 9. consultar_descuento_referencial(userCount, modulos, hardware?, puntosInstalacion?, escalonActual) — NEGOCIACIÓN ANTES de la cotización formal (solo lectura, NO crea NADA en Zoho). Úsala cuando el cliente pide rebaja apenas ve los precios, sobre la opción que eligió. Pasa los MISMOS parámetros de esa opción (userCount, modulos, hardware, puntosInstalacion) + \`escalonActual\` (0 la primera vez). El servidor decide el escalón y devuelve un \`mensajeParaProspecto\` con el precio recalculado para ofrecer EN LA CONVERSACIÓN, sin crear cotización ni PDF. Copia el \`mensajeParaProspecto\` TAL CUAL: ya viene con el % y los montos exactos y con el cierre. No lo parafrasees ni le cambies los números. Si insiste en más rebaja, vuelve a llamarla pasando el \`escalonActual\` que devolvió (avanza un tramo). Cuando ACEPTE, pide los datos que falten y llama generar_link_cotizadora con \`escalonDescuento\` = el \`escalonActual\` aceptado: la cotización formal nace YA con ese descuento, UNA sola vez. Si \`topeAlcanzado=true\`, es el último escalón. NO la uses si ya existe una cotización formal (ahí va el camino post-formal, tools 10 y 11).
 

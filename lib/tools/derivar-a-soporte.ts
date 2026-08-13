@@ -53,17 +53,22 @@ export const derivarASoporteSchema = {
       nombre: {
         type: "string" as const,
         description:
-          "Nombre completo del contacto. OBLIGATORIO para motivo fuera_de_rango_trabajadores (captúralo ANTES de derivar).",
+          "Nombre de la persona. OBLIGATORIO para motivo fuera_de_rango_trabajadores (captúralo ANTES de derivar).",
+      },
+      rutEmpresa: {
+        type: "string" as const,
+        description:
+          "RUT de la empresa (formato 76123456-7). OBLIGATORIO para motivo fuera_de_rango_trabajadores en Chile (flujo 21+, Lalo 13-ago): con el RUT el registro nace con la razón social real del SII. Captúralo ANTES de derivar.",
       },
       email: {
         type: "string" as const,
         description:
-          "Email del contacto. OBLIGATORIO para motivo fuera_de_rango_trabajadores (captúralo ANTES de derivar).",
+          "Email del contacto. OPCIONAL en fuera_de_rango_trabajadores: pásalo solo si el cliente ya lo entregó (por ejemplo al pedir reunión) — NO lo exijas para derivar.",
       },
       empresa: {
         type: "string" as const,
         description:
-          "Nombre de la empresa. OBLIGATORIO para motivo fuera_de_rango_trabajadores (captúralo ANTES de derivar).",
+          "Nombre de la empresa. OPCIONAL si pasaste rutEmpresa (la razón social sale del SII); pásalo solo si el cliente lo dijo.",
       },
       trabajadores: {
         type: "string" as const,
@@ -86,9 +91,12 @@ export type DerivarASoporteInput = {
     | "callback"
     | "transferir_soporte_operativo"
   contexto: string
-  /** Datos del lead (obligatorios en fuera_de_rango_trabajadores): con ellos
-   * el hito crea lead + deal y la tómbola de deals sortea el tramo correcto. */
+  /** Datos del lead (fuera_de_rango_trabajadores): nombre + rutEmpresa
+   * obligatorios (flujo 21+, Lalo 13-ago); email solo si el cliente lo dio.
+   * Con ellos el hito crea lead + deal (razón social desde el SII por el
+   * RUT) y la tómbola de deals sortea el tramo correcto. */
   nombre?: string
+  rutEmpresa?: string
   email?: string
   empresa?: string
   trabajadores?: string
@@ -103,7 +111,7 @@ export type DerivarASoporteResultado = {
 
 const MENSAJES_POR_MOTIVO: Record<DerivarASoporteInput["motivo"], string> = {
   fuera_de_rango_trabajadores:
-    "Para empresas de tu tamaño el valor lo arma directo uno de nuestros ejecutivos — considera descuentos por volumen y necesidades específicas. Ya le pasé tus datos y se contactará contigo a la brevedad. Mientras tanto sigo aquí contigo: puedo resolverte cualquier duda de la plataforma, mostrarte cómo funciona o dejarte agendada una reunión. ¿Qué te acomoda?",
+    "Listo — le pasé tus datos a nuestro equipo comercial: un ejecutivo te va a llamar a este mismo teléfono para armar tu propuesta (considera descuentos por volumen y las necesidades específicas de tu operación). ¡Gracias por tu tiempo! Cualquier duda que te surja mientras tanto, aquí estoy.",
   cliente_existente_problema:
     "Veo que ya eres cliente. Para problemas operativos te conviene hablar directo con soporte. Te derivo para que te atiendan lo antes posible.",
   solicitud_explicita_persona:

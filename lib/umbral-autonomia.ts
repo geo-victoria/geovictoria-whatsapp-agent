@@ -159,6 +159,17 @@ export function formatDirectivaSobreUmbral(
   umbral: number,
   d: DerivacionPais = derivacionDePais("56"),
 ): string {
+  // CHILE — FLUJO 21+ (Lalo 13-ago): consultivo con RUT y cierre en llamada
+  // de ejecutivo o reunión con el dueño del deal. El detalle vive en el
+  // bloque del inicio del prompt (formatUmbralParaPrompt); esta directiva
+  // solo lo activa con recencia.
+  if (d.tool === "derivar_a_soporte") {
+    return (
+      `\n\nATENCIÓN (detección automática): este cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). Desde este turno rige el FLUJO 21+ del inicio del prompt: NO sigas el flujo de cotización (nada de marcaje, puntos ni módulos) y NO des ni prometas precios.\n` +
+      `- Si AÚN no has derivado: avanza por el guion 21+ UN PASO POR TURNO, conversacional — (1) pide el RUT de la empresa, (2) pregunta consultiva de operación, (3) parafraseo + "¿prefieres que un ejecutivo te llame a este teléfono o agendamos una reunión con él?", (4) deriva con ${d.tool} motivo "${d.motivo}" pasando nombre, rutEmpresa y trabajadores (email SOLO si eligió reunión o ya lo dio). Los datos que el cliente YA entregó se usan tal cual, sin pedir confirmación. Tras llamar la tool responde SIEMPRE al cliente en ese mismo turno (rama llamada: mensaje sugerido de la tool como despedida; rama reunión: sigue con email y agenda) — JAMÁS dejes la respuesta vacía.\n` +
+      `- Si la derivación ya venía de un turno ANTERIOR (el anuncio del ejecutivo ya está en el historial): NO vuelvas a llamar ${d.tool} ni repitas el anuncio — responde REACTIVO y agenda si el cliente lo pide.\n`
+    )
+  }
   return (
     `\n\nATENCIÓN (detección automática): este cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). Reglas OBLIGATORIAS de aquí en adelante:\n` +
     `- NO sigas el flujo de cotización (nada de preguntar marcaje, puntos ni módulos) y NO des ni prometas precios en ninguna respuesta.\n` +
@@ -177,6 +188,24 @@ export function formatUmbralParaPrompt(
   d: DerivacionPais = derivacionDePais("56"),
 ): string {
   if (umbral >= SCOPE_MAX_SISTEMA) return ""
+  // CHILE — FLUJO 21+ (orden de Lalo 13-ago, supersede el guion del 08-ago):
+  // consultivo, con RUT, y cierre en llamada de ejecutivo o reunión agendada
+  // sobre la agenda del dueño del deal que sorteó la tómbola.
+  if (d.tool === "derivar_a_soporte") {
+    return (
+      `UMBRAL DE PRECIOS DE ESTA CONVERSACIÓN — FLUJO 21+ (proceso 13-ago; esta regla GANA sobre cualquier mención de "1 a 50" más abajo):\n` +
+      `- Esta conversación es ${origen.toUpperCase()}. Puedes DAR PRECIOS (estimados, referenciales, descuentos, cotización formal) SOLO hasta ${umbral} trabajadores.\n` +
+      `- El INICIO no cambia respecto al flujo normal: saludo, nombre y dotación igual que siempre ("Hola {Nombre}! Mucho gusto!").\n` +
+      `- APENAS sepas que son MÁS de ${umbral} trabajadores: DETÉN el flujo de cotización en ese mismo turno — NO preguntes cómo marcan, ni puntos, ni módulos, NO prometas "armarte el valor" y NO des precios de memoria. Desde ahí el flujo es ESTE, en orden y UN PASO POR TURNO:\n` +
+      `  1. RUT: pide el RUT de la empresa ("Para dejar lista la ficha de tu empresa, ¿me compartes su RUT?"). Si no lo sabe o no quiere darlo, no insistas — el RUT no es un muro, sigue al paso 2.\n` +
+      `  2. OPERACIÓN: haz la MISMA pregunta consultiva del flujo normal: "Para darte una mejor atención, cuéntame un poco sobre tu operación: ¿a qué se dedican y cómo trabaja tu equipo?".\n` +
+      `  3. PARAFRASEO + CIERRE: en un solo mensaje, parafrasea su operación con tus palabras, conecta cómo GeoVictoria se adapta a lo que describió y menciona que trabajamos con muchas empresas como la suya (JAMÁS inventes nombres de clientes ni casos específicos). Y en ese MISMO mensaje pregunta: "¿Prefieres que un ejecutivo te llame a este teléfono, o agendamos de una vez una reunión con él?".\n` +
+      `  4a. Si elige LLAMADA (o no quiere reunión): llama ${d.tool} motivo "${d.motivo}" AHORA con nombre, rutEmpresa y trabajadores (email SOLO si ya lo dio) y despídete cordial con el mensaje sugerido de la tool — el trato nace y la tómbola le asigna ejecutivo al acto.\n` +
+      `  4b. Si elige REUNIÓN: pide su email (para la invitación), llama ${d.tool} motivo "${d.motivo}" con nombre, rutEmpresa, email y trabajadores, y LUEGO agenda: pregunta qué día le acomoda, ofrece horarios con consultar_disponibilidad_horario y agenda con agendar_reunion cuando elija — la disponibilidad corre sobre la agenda del ejecutivo dueño del trato (el que sorteó la tómbola).\n` +
+      `- Los datos que el cliente YA entregó se usan tal cual, sin pedirle confirmación. Después de derivar NO haces seguimiento proactivo (la venta es del ejecutivo): respondes REACTIVO cualquier duda y puedes agendar si el cliente lo pide después.\n` +
+      `- El flujo de 1 a ${umbral} trabajadores NO cambia en NADA con esta regla.\n\n`
+    )
+  }
   return (
     `UMBRAL DE PRECIOS DE ESTA CONVERSACIÓN (proceso 08-ago — esta regla GANA sobre cualquier mención de "1 a 50" más abajo):\n` +
     `- Esta conversación es ${origen.toUpperCase()}. Puedes DAR PRECIOS (estimados, referenciales, descuentos, cotización formal) SOLO hasta ${umbral} trabajadores.\n` +
