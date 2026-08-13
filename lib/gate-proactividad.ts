@@ -1,0 +1,209 @@
+/**
+ * GATE CENTRAL DE PROACTIVIDAD — Fase 2 de la biblia (12-ago-2026).
+ *
+ * UN solo candado por el que pasa TODO envío de WhatsApp al cliente, instalado
+ * en el cuello de botella real (los helpers de lib/botmaker-push-v3.ts, que
+ * hasta hoy no validaban nada — el barrido del 12-ago encontró que cada
+ * máquina implementaba, o no, sus propios filtros, y de ahí nacen las
+ * pisadas: chequeos 9h sobre loops vivos, plantillas duplicadas, envíos
+ * fuera de horario, rescates manuales encima de la cadencia).
+ *
+ * MODO SOMBRA (default): el gate evalúa y REGISTRA lo que habría bloqueado
+ * (vic_kv `gatelog_*`, TTL 7 días) pero deja pasar TODO — cero cambio de
+ * comportamiento. El encendido real (GATE_ENFORCE=1) es decisión de Lalo con
+ * los números de la sombra en la mano (compuerta D3 del plan).
+ *
+ * Reglas que evalúa (la biblia, sección "Proactividad: una sola máquina"):
+ *   1. opt-out / perdido / soporte / rechazo → nunca más proactividad.
+ *   2. contacto interno (testContactSet) → la maquinaria no le habla.
+ *   3. ventana 9-21 hora local del contacto.
+ *   4. anti-ráfaga: otro envío al mismo contacto hace <10 min.
+ *   5. anti-repetición: la MISMA plantilla dos veces seguidas al contacto.
+ *
+ * Qué NO evalúa: envíos REACTIVOS (el cliente habló hace <30 min — es su
+ * turno, la conversación manda) y números internos del equipo. El traspaso
+ * (presentación) y el chequeo 9h cruzan el gate como toda proactividad: si
+ * la sombra muestra que los frenaría mal, se ajusta ANTES de encender.
+ *
+ * Fail-open TOTAL: cualquier error de red/base deja pasar el envío y no
+ * lanza — el gate jamás degrada una conversación (principio 24-jul).
+ */
+
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "")
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+
+const RAFAGA_MIN = Number(process.env.GATE_RAFAGA_MIN || 10)
+const REACTIVO_MIN = Number(process.env.GATE_REACTIVO_MIN || 30)
+
+export type GateDecision = {
+  /** true = el envío procede (en sombra SIEMPRE true). */
+  permitir: boolean
+  /** Lo que el gate habría bloqueado (vacío = envío limpio). */
+  motivos: string[]
+  /** true = evaluado como turno reactivo (exento de reglas de proactividad). */
+  reactivo: boolean
+}
+
+function enforceActivo(): boolean {
+  return (process.env.GATE_ENFORCE || "").trim() === "1"
+}
+
+function gateApagado(): boolean {
+  return (process.env.GATE_PROACTIVIDAD_OFF || "").trim() === "1"
+}
+
+async function supa(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      ...(init.headers || {}),
+    },
+    cache: "no-store",
+  })
+}
+
+/** Hora local 9-21 del contacto por prefijo discable (56/57/52/51). */
+function enVentanaHoraria(contact: string): boolean {
+  const d = contact.replace(/\D/g, "")
+  const tz = d.startsWith("57")
+    ? "America/Bogota"
+    : d.startsWith("52")
+      ? "America/Mexico_City"
+      : d.startsWith("51")
+        ? "America/Lima"
+        : "America/Santiago"
+  try {
+    const h = Number(
+      new Intl.DateTimeFormat("es-CL", { timeZone: tz, hour: "numeric", hour12: false }).format(new Date()),
+    )
+    return h >= 9 && h < 21
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Evalúa el gate para un envío al cliente. En sombra devuelve permitir=true
+ * SIEMPRE y registra los motivos; con GATE_ENFORCE=1 devuelve permitir=false
+ * cuando hay motivos (y el helper no envía).
+ */
+export async function evaluarGateProactividad(
+  contact: string,
+  opts: { tipo: "texto" | "plantilla" | "media"; plantilla?: string } = { tipo: "texto" },
+): Promise<GateDecision> {
+  const pasa: GateDecision = { permitir: true, motivos: [], reactivo: false }
+  if (gateApagado()) return pasa
+  const clean = (contact || "").replace(/\D/g, "")
+  // Solo teléfonos de cliente discables; internos e IDs anónimos pasan de largo.
+  if (!/^(56|57|52|51)\d{8,12}$/.test(clean)) return pasa
+  // Números internos de aviso del equipo: no son clientes, el gate no opina.
+  const internos = new Set(
+    [process.env.QUOTE_NOTIFY_TO, process.env.VICKY_REPORT_PHONE]
+      .map((n) => (n || "").trim().replace(/\D/g, ""))
+      .filter(Boolean),
+  )
+  if (internos.has(clean)) return pasa
+  if (!SUPABASE_URL || !SUPABASE_KEY) return pasa
+
+  try {
+    const { isTestContact, testContactSet } = await import("./funnel-analysis")
+    const motivos: string[] = []
+
+    // Conversación: ¿turno reactivo? ¿cerrada por opt-out/perdido?
+    const conv = (await supa(
+      `vic_v3_conversations?contact=eq.${clean}&select=last_user_at,followup_closed_reason&limit=1`,
+    )
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])) as Array<{ last_user_at?: string | null; followup_closed_reason?: string | null }>
+    const lastUserMs = conv[0]?.last_user_at ? new Date(conv[0].last_user_at).getTime() : 0
+    if (lastUserMs && Date.now() - lastUserMs < REACTIVO_MIN * 60e3) {
+      // El cliente habló hace poco: es su turno — el gate no opina.
+      return { permitir: true, motivos: [], reactivo: true }
+    }
+
+    const reason = String(conv[0]?.followup_closed_reason || "")
+    if (["opt_out", "perdido", "soporte", "rechazo"].includes(reason)) {
+      motivos.push(`cerrado_${reason}`)
+    }
+
+    if (isTestContact(clean, testContactSet())) motivos.push("contacto_interno")
+    if (!enVentanaHoraria(clean)) motivos.push("fuera_de_9_21")
+
+    // Anti-ráfaga y anti-repetición (kv propios del gate, TTL corto).
+    const kvRows = (await supa(
+      `vic_kv?key=in.("gate_last_${clean}","gate_tpl_${clean}")&select=key,value,expires_at`,
+    )
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])) as Array<{ key: string; value: string; expires_at?: string | null }>
+    const vivo = (k: string) => {
+      const row = kvRows.find((r) => r.key === k)
+      if (!row) return null
+      if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null
+      return row.value
+    }
+    const ultimoEnvio = Number(vivo(`gate_last_${clean}`) || 0)
+    if (ultimoEnvio && Date.now() - ultimoEnvio < RAFAGA_MIN * 60e3) motivos.push("rafaga_10min")
+    if (opts.tipo === "plantilla" && opts.plantilla && vivo(`gate_tpl_${clean}`) === opts.plantilla) {
+      motivos.push("plantilla_repetida")
+    }
+
+    // Sello del envío (se estampa SIEMPRE que el envío vaya a salir — en
+    // sombra todo sale, así que se estampa acá; con enforce, solo si pasa).
+    const bloquear = enforceActivo() && motivos.length > 0
+    if (!bloquear) {
+      void supa(`vic_kv?on_conflict=key`, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify([
+          {
+            key: `gate_last_${clean}`,
+            value: String(Date.now()),
+            expires_at: new Date(Date.now() + 2 * 3600e3).toISOString(),
+          },
+          ...(opts.tipo === "plantilla" && opts.plantilla
+            ? [
+                {
+                  key: `gate_tpl_${clean}`,
+                  value: opts.plantilla,
+                  expires_at: new Date(Date.now() + 48 * 3600e3).toISOString(),
+                },
+              ]
+            : []),
+        ]),
+      }).catch(() => undefined)
+    }
+
+    // Registro de sombra: solo cuando HAY motivos (los envíos limpios no
+    // interesan y el volumen se mantiene chico).
+    if (motivos.length > 0) {
+      void supa(`vic_kv?on_conflict=key`, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          key: `gatelog_${Date.now()}_${clean}`,
+          value: JSON.stringify({
+            c: clean,
+            tipo: opts.tipo,
+            tpl: opts.plantilla || undefined,
+            motivos,
+            enforce: enforceActivo(),
+            at: new Date().toISOString(),
+          }),
+          expires_at: new Date(Date.now() + 7 * 86400e3).toISOString(),
+        }),
+      }).catch(() => undefined)
+      console.warn(
+        `[gate-proactividad] ${clean} (${opts.tipo}${opts.plantilla ? `:${opts.plantilla}` : ""}) → ${
+          bloquear ? "BLOQUEADO" : "sombra"
+        }: ${motivos.join(", ")}`,
+      )
+    }
+
+    return { permitir: !bloquear, motivos, reactivo: false }
+  } catch {
+    return pasa // fail-open: el gate jamás tumba un envío por error propio
+  }
+}

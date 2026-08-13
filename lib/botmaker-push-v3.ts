@@ -203,6 +203,14 @@ export async function sendBotmakerMessage(
     return false
   }
 
+  // GATE CENTRAL de proactividad (Fase 2 biblia, 12-ago): en modo sombra solo
+  // registra; con GATE_ENFORCE=1 bloquea. Fail-open interno — jamás lanza.
+  {
+    const { evaluarGateProactividad } = await import("./gate-proactividad")
+    const gate = await evaluarGateProactividad(cleanContact, { tipo: "texto" })
+    if (!gate.permitir) return false
+  }
+
   try {
     const res = await fetch(SEND_MESSAGES_URL, {
       method: "POST",
@@ -299,6 +307,13 @@ export async function sendBotmakerMedia(
     },
   })
 
+  // GATE CENTRAL de proactividad (Fase 2 biblia): sombra registra, enforce bloquea.
+  {
+    const { evaluarGateProactividad } = await import("./gate-proactividad")
+    const gate = await evaluarGateProactividad(cleanContact, { tipo: "media" })
+    if (!gate.permitir) return false
+  }
+
   try {
     const res = await fetch(SEND_MESSAGES_URL, {
       method: "POST",
@@ -355,6 +370,13 @@ export async function sendBotmakerTemplate(
   if (!chatChannelNumber) {
     console.error("[botmaker-template] no se pudo determinar chatChannelNumber")
     return false
+  }
+  // GATE CENTRAL de proactividad (Fase 2 biblia): las plantillas son el envío
+  // proactivo por excelencia — acá vive también el anti-repetición de HSM.
+  {
+    const { evaluarGateProactividad } = await import("./gate-proactividad")
+    const gate = await evaluarGateProactividad(cleanContact, { tipo: "plantilla", plantilla: templateName })
+    if (!gate.permitir) return false
   }
   try {
     const res = await fetch(NOTIFICATIONS_URL, {

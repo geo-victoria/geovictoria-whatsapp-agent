@@ -79,3 +79,24 @@ describe("lo que NO se demolió (canal comercial humano)", () => {
     assert.match(INDEX, /registrarSolicitudCallbackSchema/)
   })
 })
+
+describe("Fase 2: gate central de proactividad en los helpers de envío", () => {
+  const GATE = readFileSync(join(RAIZ, "lib/gate-proactividad.ts"), "utf8")
+  const PUSH = readFileSync(join(RAIZ, "lib/botmaker-push-v3.ts"), "utf8")
+
+  test("los TRES helpers pasan por el gate", () => {
+    const hooks = PUSH.match(/evaluarGateProactividad\(/g) || []
+    assert.ok(hooks.length >= 3, `esperaba 3 enganches del gate, hay ${hooks.length}`)
+  })
+
+  test("fail-open y modo sombra por defecto (enforce solo con GATE_ENFORCE=1)", () => {
+    assert.match(GATE, /GATE_ENFORCE/)
+    assert.match(GATE, /fail-open/i)
+    assert.match(GATE, /const bloquear = enforceActivo\(\) && motivos\.length > 0/)
+  })
+
+  test("turno reactivo exento: el gate no opina cuando el cliente acaba de hablar", () => {
+    assert.match(GATE, /REACTIVO_MIN/)
+    assert.match(GATE, /reactivo: true/)
+  })
+})
