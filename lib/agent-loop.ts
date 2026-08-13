@@ -503,7 +503,7 @@ export async function runAgentLoop(params: {
           if (!RE_RELOJ.test(textosCliente)) {
             bloqueoUmbral =
               "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): el cliente NO ha pedido reloj físico en esta conversación, así que NO puedes cotizar con hardware. " +
-              "Haz esto AHORA: si su última respuesta a la pregunta de marcaje fue ambigua o no la respondió, re-pregunta corto ('¿Y cómo prefieren marcar: app (gratis) o reloj físico?'); " +
+              "Haz esto AHORA: si su última respuesta a la pregunta de marcaje fue ambigua o no la respondió, re-pregunta corto ('¿Y cómo prefieren marcar: app (gratis), reloj físico, o mixto?'); " +
               "si eligió app/web/telefónico, cotiza SIN hardware. Solo si el cliente nombra el reloj (o mixto) puedes incluirlo."
             console.warn(
               `[agent-loop] candado reloj-sin-pedirlo: ${toolName} con hardware bloqueado (contacto ${contact}) — el cliente nunca mencionó reloj/mixto.`,
