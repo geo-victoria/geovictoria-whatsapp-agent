@@ -109,6 +109,18 @@ async function asignarVentaAutonoma(
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    // Dueño HUMANO real de la cotización (sin fila PTV igual cuenta — bug
+    // Gescor 13-ago: Grey era la dueña y la asignación autónoma la pisó):
+    // solo los interinos (Vicky/Admin) se consideran "sin dueño".
+    const gOwner = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Owner`, { headers: H, cache: "no-store" })
+    const ownerActual = gOwner.ok
+      ? ((await gOwner.json().catch(() => ({}))) as { data?: Array<{ Owner?: { email?: string } }> }).data?.[0]?.Owner
+      : undefined
+    const emailOwner = (ownerActual?.email || "").toLowerCase()
+    if (emailOwner && !/vicky@|info@geovictoria/.test(emailOwner)) {
+      console.log(`[postpago] cotización ${quoteId} con dueño humano ${emailOwner} — venta NO autónoma, asignación intacta.`)
+      return { autonoma: false }
+    }
     // La cotización, y de ella la cuenta y el contacto asociados ("todos los
     // registros", Lalo 04-ago). El lead convertido no se toca: Zoho no
     // permite editar leads ya convertidos.
@@ -185,7 +197,12 @@ export async function cerrarYTraspasarPostPago(
   // Venta 100% Vicky → todos los registros al dueño de ventas autónomas
   // (Aleydis, vic_kv owner_venta_autonoma) y la bienvenida LA presenta
   // (decisión Lalo 04-ago: ella hace la gestión post-venta).
-  const ventaAutonoma = await asignarVentaAutonoma(contact, quoteId)
+  // SOLO CON PAGO REAL (bug COT395/Gescor 13-ago: la ACEPTACIÓN disparaba
+  // esta asignación y le quitó la cotización a Grey — aceptar no es pagar).
+  const ventaAutonoma =
+    (opts.motivoCierre || "pagado") === "pagado"
+      ? await asignarVentaAutonoma(contact, quoteId)
+      : { autonoma: false as const }
 
   const esCO = contact.startsWith("57")
   const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
