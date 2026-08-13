@@ -2063,7 +2063,7 @@ function renderEvolucionDiaria(params: {
     const i = idx.get(diaDe(iso))
     if (i !== undefined) arr[i]++
   }
-  const sConv = serie(), sCom = serie(), sPreform = serie(), sFormal = serie(), sAcept = serie(), sPag = serie()
+  const sConv = serie(), sCom = serie(), sPreform = serie(), sFormal = serie(), sFormalEjec = serie(), sAcept = serie(), sPag = serie()
 
   const delPais = (tel: string) => paisDeTelefono(tel) === pais && !isTestContact(tel, testSet)
   const inicioPorContacto = new Map<string, string>()
@@ -2098,10 +2098,17 @@ function renderEvolucionDiaria(params: {
   for (const [tel, at] of preformAt) {
     if (delPais(tel)) suma(sPreform, at)
   }
+  // DOS CANALES DE FORMALES (hallazgo 13-ago, pregunta de Lalo "¿por qué el
+  // dash no lo muestra?"): desde el 11-ago el equipo emite cotizaciones por
+  // el EDITOR (Created_By también es Vicky) a contactos SIN chat — 23 de las
+  // 25 formales del 13-ago. Mezcladas inflaban la serie de Vicky y hacían
+  // incomparables formales vs conversaciones/preforms. Discriminador: el
+  // contacto de la cotización tiene conversación con Vicky → canal chat.
+  const telsConChat = new Set(convs.map((c) => digits(c.contact)))
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
     if (tel && isTestContact(tel, testSet)) continue
-    suma(sFormal, q.Created_Time)
+    suma(tel && telsConChat.has(tel) ? sFormal : sFormalEjec, q.Created_Time)
     const pagada = esPagada(q)
     const aceptada = esAceptadaOMas(q)
     const fechaPago = q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time
@@ -2113,7 +2120,8 @@ function renderEvolucionDiaria(params: {
     { nombre: "Conversaciones", datos: sConv, color: "#9aa0a8" },
     { nombre: "Intención comercial", datos: sCom, color: "#00aff2" },
     { nombre: "Precio mostrado (preform)", datos: sPreform, color: "#ffbb00" },
-    { nombre: "Formal enviada", datos: sFormal, color: "#e67e22" },
+    { nombre: "Formal enviada (chat Vicky)", datos: sFormal, color: "#e67e22" },
+    { nombre: "Formal canal ejecutivo", datos: sFormalEjec, color: "#b06ab3" },
     { nombre: "Aceptada", datos: sAcept, color: "#27ae60" },
     { nombre: "Pagada", datos: sPag, color: "#1b5e20" },
   ]
@@ -2126,7 +2134,7 @@ function renderEvolucionDiaria(params: {
     : ""
   return `<div class="card"><h2>📈 Evolución <span class="pct" style="font-weight:400">— ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span>${selector}</h2>
   <div id="evoDiaria" style="height:340px"></div>
-  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por emisión en Zoho, aceptadas y pagadas por su fecha de aceptación/pago. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por emisión en Zoho — separadas por canal: "chat Vicky" (el contacto conversó con Vicky) vs "canal ejecutivo" (emitidas por el equipo desde el editor, sin chat) —, aceptadas y pagadas por su fecha de aceptación/pago. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias)};
