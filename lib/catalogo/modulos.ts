@@ -13,6 +13,13 @@
 
 import type { ModuloSoftware } from "./tipos"
 
+// PRUEBA DE PRECIOS (biblia 12-ago, Rodrigo 11-ago): durante UN MES asistencia
+// 3-10 baja de 0,60 a 0,55 fijo y 11-20 de 0,07 a 0,055/usuario, con Vacaciones
+// como espejo exacto al 50% (0,275 fijo · 0,0275/u). Hipótesis: menor precio
+// sube conversión; al cierre del mes se compara contra el período anterior.
+// Rollback sin deploy: env VICKY_PRECIOS_CLASICOS=1 restaura 0,60/0,07.
+const PRECIOS_CLASICOS = (process.env.VICKY_PRECIOS_CLASICOS || "").trim() === "1"
+
 export const CATALOGO_MODULOS: ModuloSoftware[] = [
   // ─── BASE OBLIGATORIA ───────────────────────────────────────────────────
   {
@@ -24,8 +31,8 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
       // Micro-plan: 1-2 trabajadores que marcan → tarifa especial. Desde 3
       // que marcan, tramo fijo normal (ajuste de tramos, Lalo 31-jul-2026).
       { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 0.25 },
-      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.6 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.07 },
+      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: PRECIOS_CLASICOS ? 0.6 : 0.55 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: PRECIOS_CLASICOS ? 0.07 : 0.055 },
       { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.065 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.055 },
       // ── TRAMOS 51+ = CANAL EJECUTIVO (calculadora de Nacho, 10-ago) ──
@@ -62,8 +69,8 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     // recurrente del cotizador).
     tiers: [
       { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 0.125 },
-      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: 0.3 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 0.035 },
+      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: PRECIOS_CLASICOS ? 0.3 : 0.275 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: PRECIOS_CLASICOS ? 0.035 : 0.0275 },
       { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.0325 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.0275 },
     ],
