@@ -577,6 +577,25 @@ export async function cotizarReferencial(args: {
     )
   }
 
+  // DISCLAIMER DE INSTALACIÓN — DETERMINISTA (Lalo 13-ago, caso Rodrigo: el
+  // modelo lo omitió aunque el prompt lo pedía). Siempre que la cotización
+  // lleva RELOJ y la instalación NO viene cotizada (auto-instalación, el
+  // supuesto por defecto de la biblia), el disclaimer sale EN LA TOOL como
+  // burbuja aparte — aclarar que instala el cliente, con el técnico como
+  // opción de cobro, no depende del criterio del modelo.
+  const hayReloj = itemsConsolidados.some((i) => i.tipo === "hardware")
+  const instalacionCotizada = itemsConsolidados.some(
+    (i) => i.tipo === "servicio" && /instalaci/i.test(i.nombre),
+  )
+  if (hayReloj && !instalacionCotizada) {
+    partes.push("")
+    partes.push("[---]")
+    partes.push("")
+    partes.push(
+      "📌 La instalación del reloj viene considerada por tu cuenta: es simple y te guiamos paso a paso. Si prefieres que la haga nuestro equipo técnico, tiene un cobro único según la comuna — me dices y te lo agrego.",
+    )
+  }
+
   const mensajeParaProspecto = partes.join("\n")
 
   // resumenLegible (uso interno del modelo) usa el mismo formato — una sola
