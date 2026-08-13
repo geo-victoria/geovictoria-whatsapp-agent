@@ -264,21 +264,11 @@ async function asignarEnZoho(
       } else if (esCL) {
         const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
         if (calificado) {
-          // Vio precio = lead CALIFICADO (escalera de roles): el status nace
-          // correcto y el registro deja de ser un "huérfano" sin señal.
-          const { getZohoAccessToken } = await import("@/lib/zoho-token")
-          const tk = await getZohoAccessToken().catch(() => "")
-          if (tk) {
-            await fetch(`${(process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()}/crm/v3/Leads`, {
-              method: "PUT",
-              headers: { Authorization: `Zoho-oauthtoken ${tk}`, "Content-Type": "application/json" },
-              cache: "no-store",
-              body: JSON.stringify({
-                data: [{ id: creado.leadId, Lead_Status: "4. Calificado" }],
-                skip_feature_execution: [{ name: "assignment_rules" }],
-              }),
-            }).catch(() => {})
-          }
+          // Vio precio = lead CALIFICADO (escalera de roles). Lead_Status vive
+          // bajo Blueprint (PUT directo rebota RECORD_IN_BLUEPRINT): va por la
+          // transición, con el helper que ya conoce los campos mandatorios.
+          const { updateZohoLeadStatus } = await import("@/lib/zoho-leads")
+          await updateZohoLeadStatus(creado.leadId, "4. Calificado").catch(() => {})
         }
         const r = await reasignarLeadCalificacionCL(creado.leadId, { calificado }).catch(() => null)
         await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
