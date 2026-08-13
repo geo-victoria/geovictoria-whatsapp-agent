@@ -156,7 +156,11 @@ export const generarLinkCotizadoraSchema = {
   input_schema: {
     type: "object" as const,
     properties: {
-      empresa: { type: "string" as const, description: "Razón social", minLength: 1 },
+      empresa: {
+        type: "string" as const,
+        description:
+          "Razón social — SOLO si el cliente la dijo espontáneamente (NUNCA se la preguntes — regla Lalo 13-ago). Si no la tienes, OMITE el campo: el sistema resuelve la razón social oficial desde el RUT (padrón SII) y, si es persona natural, usa su nombre.",
+      },
       contacto: { type: "string" as const, description: "Nombre del contacto", minLength: 1 },
       contactoEmail: { type: "string" as const, description: "Email del contacto", format: "email" },
       contactoTelefono: { type: "string" as const, description: "Teléfono con +código país" },
@@ -264,7 +268,7 @@ export const generarLinkCotizadoraSchema = {
           "Descuento negociado en el preform. Si el cliente ACEPTÓ un descuento durante la negociación (consultar_descuento_referencial), pasá el `escalon_actual` que devolvió la consulta que el cliente aceptó: la cotización se generará YA con ese descuento (un solo PDF, con el precio acordado). Si no hubo descuento, omití este campo.",
       },
     },
-    required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount", "modulos"],
+    required: ["contacto", "contactoEmail", "rutEmpresa", "userCount", "modulos"],
   },
 }
 
@@ -276,7 +280,7 @@ export type PuntoInstalacionInput = {
 }
 
 export type LinkCotizadoraInput = {
-  empresa: string
+  empresa?: string
   contacto: string
   /** Opcional (Lalo 03-ago): sin correo la formal se emite igual y la entrega
    *  corre por WhatsApp (PDF + link); el cotizador omite el envío de email. */
@@ -659,8 +663,20 @@ export async function generarLinkCotizadora(
     _ownerOverrideId,
   } = args
 
-  if (!empresa?.trim() || !contacto?.trim() || !rutEmpresa?.trim()) {
-    return { ok: false, error: "Faltan campos obligatorios: empresa, contacto, rutEmpresa." }
+  if (!contacto?.trim() || !rutEmpresa?.trim()) {
+    return { ok: false, error: "Faltan campos obligatorios: contacto, rutEmpresa." }
+  }
+  // EMPRESA SIN PREGUNTAR (Lalo 13-ago): si el cliente no la mencionó, la
+  // razón social se resuelve del padrón SII por el RUT; persona natural o RUT
+  // fuera del padrón → nombre de la persona. La conversación jamás se frena.
+  let empresaFinal = (empresa || "").trim()
+  if (!empresaFinal) {
+    try {
+      const { fichaEmpresaSii } = await import("@/lib/empresas-sii")
+      const ficha = await fichaEmpresaSii(rutEmpresa.trim().toUpperCase().replace(/\./g, ""))
+      if (ficha?.razonSocial) empresaFinal = ficha.razonSocial
+    } catch { /* fallback abajo */ }
+    if (!empresaFinal) empresaFinal = contacto.trim()
   }
   if (contactoEmail?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactoEmail)) {
     return { ok: false, error: `El email '${contactoEmail}' no tiene formato válido.` }
@@ -737,7 +753,7 @@ export async function generarLinkCotizadora(
     // su correo automático sigue igual.
     sinCorreoCliente: (args as { _sinCorreoCliente?: boolean })._sinCorreoCliente === true || undefined,
     cliente: {
-      empresa: empresa.trim(),
+      empresa: empresaFinal,
       contacto: contacto.trim(),
       contactoEmail: contactoEmail?.trim() ? contactoEmail.trim().toLowerCase() : undefined,
       contactoTelefono: contactoTelefono?.trim() || "",
