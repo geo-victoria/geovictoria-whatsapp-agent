@@ -5,7 +5,7 @@
  * loop. Los precios SIEMPRE salen de acá (regla dura heredada de Chile: el
  * modelo copia mensajeParaProspecto, jamás calcula).
  *
- * Capacidades: cotización referencial (con capacitación $600 SIEMPRE en el
+ * Capacidades: cotización referencial (capacitación online incluida sin costo en el
  * desglose e IVA 16% en los totales), cotización FORMAL online (link de
  * aceptación + pago), derivación a ejecutivo (lead MX a nombre de Yahel
  * Segura — sin tómbola SDR en el v1), soporte operativo (mismo agente
@@ -146,7 +146,7 @@ export const TOOL_SCHEMAS_MX = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula la cotización referencial de México (1 a 50 usuarios) en pesos mexicanos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (SIN activación — en México no se cobra el primer mes por adelantado; capacitación online $600 SIEMPRE cobrada; equipos/envío/instalación si aplican; los totales ya incluyen el IVA 16%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/alcaldía/municipio tal como la dijo el cliente). En renta el envío es GRATIS en todo México y la instalación es GRATIS en CDMX/Zona Metropolitana; en venta el envío tiene tarifa única nacional y la instalación profesional solo se cotiza en CDMX/Zona Metropolitana (fuera de esa zona la cotiza el ejecutivo aparte, o el cliente auto-instala gratis) — la tool clasifica la zona, tú solo transcribes la ubicación.",
+      "Calcula la cotización referencial de México (1 a 50 usuarios) en pesos mexicanos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (SIN activación — en México no se cobra el primer mes por adelantado; capacitación online incluida sin costo; equipos/envío/instalación si aplican; los totales ya incluyen el IVA 16%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/alcaldía/municipio tal como la dijo el cliente). En renta el envío es GRATIS en todo México y la instalación es GRATIS en CDMX/Zona Metropolitana; en venta el envío tiene tarifa única nacional y la instalación profesional solo se cotiza en CDMX/Zona Metropolitana (fuera de esa zona la cotiza el ejecutivo aparte, o el cliente auto-instala gratis) — la tool clasifica la zona, tú solo transcribes la ubicación.",
     input_schema: {
       type: "object" as const,
       properties: {

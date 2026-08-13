@@ -688,6 +688,67 @@ export async function reasignarLeadSdrInboundCO(
   }
 }
 
+// SDR INBOUND MÉXICO (Lalo 13-ago): todo traspaso MX que NO sea cotización
+// formal entrega el LEAD a los SDR Inbound mexicanos por round-robin (turno
+// en vic_kv `sdr_inbound_rr_mx`). Roster por env VIC_SDR_INBOUND_MX en formato
+// "email:zohoUserId,email:zohoUserId". SIN roster configurado la función
+// devuelve success:false y el llamador cae al comportamiento actual (Yahel) —
+// deployable antes de tener los nombres.
+const SDR_INBOUND_MX = (process.env.VIC_SDR_INBOUND_MX || "")
+  .split(",")
+  .map((s) => {
+    const [email, id] = s.split(":").map((x) => x.trim())
+    return { email, id: id || "" }
+  })
+  .filter((s) => s.email)
+
+/** Reasigna un lead MX al siguiente SDR Inbound del round-robin mexicano. */
+export async function reasignarLeadSdrInboundMX(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  if (!leadId || SDR_INBOUND_MX.length === 0) {
+    return { success: false, error: "leadId faltante o sin SDRs MX configuradas (VIC_SDR_INBOUND_MX)" }
+  }
+  try {
+    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+    const last = parseInt((await getKvValue("sdr_inbound_rr_mx").catch(() => null)) || "-1")
+    const idx = (isNaN(last) ? 0 : last + 1) % SDR_INBOUND_MX.length
+    const sdr = SDR_INBOUND_MX[idx]
+
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    const ownerId = sdr.id || (await resolveOwnerId(sdr.email, accessToken, apiDomain))
+    if (!ownerId) return { success: false, error: `sin user_id para ${sdr.email}` }
+
+    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ Owner: { id: ownerId } }],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    })
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ status?: string; code?: string; message?: string }>
+    }
+    if (!res.ok || data?.data?.[0]?.status !== "success") {
+      return {
+        success: false,
+        error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}`,
+      }
+    }
+    await setKvValue("sdr_inbound_rr_mx", String(idx)).catch(() => {})
+    return { success: true, ownerEmail: sdr.email, ownerId }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
+  }
+}
+
 export type CreateZohoLeadInput = {
   nombre?: string
   empresa?: string

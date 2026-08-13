@@ -100,6 +100,58 @@ async function feriadosDePais(pais: string): Promise<Set<string>> {
   return set
 }
 
+/**
+ * NOTA DE TRASPASO CON LA CONVERSACIÓN (Lalo 13-ago, para los SDR Inbound MX):
+ * al entregar un lead, se le pega como nota de Zoho la URL directa al chat en
+ * Botmaker + el transcript reciente, para que el SDR llegue con TODO el
+ * contexto sin pedir accesos. Best-effort: jamás frena el traspaso.
+ */
+async function notaTraspasoConversacion(leadId: string, fono: string): Promise<void> {
+  if (!leadId || !fono) return
+  try {
+    // URL directa al chat en Botmaker (mismo lookup O(1) de crm/zoho-lead).
+    let chatUrl = ""
+    const bmToken = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
+    if (bmToken) {
+      const res = await fetch(
+        `https://api.botmaker.com/v2.0/chats?contactId=${fono.replace(/\D/g, "")}&limit=1`,
+        { headers: { "access-token": bmToken, Accept: "application/json" }, cache: "no-store" },
+      ).catch(() => null)
+      if (res?.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          items?: Array<{ chat?: { chatId?: string } }>
+        }
+        const chatId = data?.items?.[0]?.chat?.chatId
+        if (chatId) chatUrl = `https://go.botmaker.com/#/chats/${chatId}`
+      }
+    }
+    // Transcript reciente (últimos 25 mensajes, orden cronológico).
+    const conv = await supa<{ id: string }>(
+      `vic_v3_conversations?contact=eq.${fono}&select=id&limit=1`,
+    )
+    let transcript = ""
+    if (conv[0]?.id) {
+      const msgs = await supa<{ role: string; content: string; at: string }>(
+        `vic_v3_messages?conversation_id=eq.${conv[0].id}&select=role,content,at&order=at.desc&limit=25`,
+      )
+      transcript = msgs
+        .reverse()
+        .filter((m) => !String(m.content || "").startsWith("[REGISTRO INTERNO"))
+        .map((m) => `${String(m.at || "").slice(11, 16)} ${m.role === "user" ? "CLIENTE" : "Vicky"}: ${String(m.content || "").slice(0, 500)}`)
+        .join("\n")
+    }
+    const contenido =
+      (chatUrl
+        ? `👉 Habla directo con el prospecto en Botmaker: ${chatUrl}\n\n`
+        : "👉 Chat en Botmaker: busca el contacto +" + fono + " en go.botmaker.com\n\n") +
+      (transcript ? `CONVERSACIÓN RECIENTE CON VICKY:\n${transcript}` : "Sin mensajes registrados aún.")
+    const { agregarNotaLead } = await import("@/lib/zoho-leads")
+    await agregarNotaLead(leadId, "Traspaso de Vicky — conversación y chat directo", contenido)
+  } catch (e) {
+    console.warn(`[ptv] nota de traspaso no creada para lead ${leadId}:`, e instanceof Error ? e.message : e)
+  }
+}
+
 /** Turno de tómbola persistido en vic_kv (equitativo entre invocaciones). */
 async function siguienteVendedor(pais: "cl" | "co" | "mx" | "pe") {
   const lista = vendedoresDePais(pais)
@@ -249,6 +301,10 @@ async function asignarEnZoho(
       // rotación interna (roster de una sola persona = todo a Eddyluz) —
       // nace sin dueño y lo sortea la regla de calificación (Araceli/Aleydis).
       const esCL = pais === "cl"
+      // MX (Lalo 13-ago): solo la FORMAL queda con Yahel (rama del deal);
+      // todo lo demás va como LEAD a los SDR Inbound MX, con nota de la
+      // conversación (URL directa a Botmaker + transcript).
+      const esMX = pais === "mx"
       const creado = await createZohoLead({
         nombre: "Prospecto WhatsApp",
         empresa: `Por identificar (WhatsApp +${fono})`,
@@ -256,8 +312,8 @@ async function asignarEnZoho(
         contactoWA: fono,
         pais: paisNombre,
         necesidad: "Traspaso PTV: conversación activa con Vicky sin registro previo en el CRM — lead creado al asignar vendedor.",
-        ownerEmail: esCO || esCL ? undefined : interno.email,
-        ownerId: esCO || esCL ? undefined : interno.zohoId,
+        ownerEmail: esCO || esCL || esMX ? undefined : interno.email,
+        ownerId: esCO || esCL || esMX ? undefined : interno.zohoId,
       }).catch(() => null)
       if (!creado || !creado.success) {
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
@@ -282,6 +338,26 @@ async function asignarEnZoho(
             via: "tombola_zoho",
           }
         }
+      } else if (esMX) {
+        const { reasignarLeadSdrInboundMX } = await import("@/lib/zoho-leads")
+        const r = await reasignarLeadSdrInboundMX(creado.leadId).catch(() => null)
+        // Nota con la conversación + URL directa a Botmaker (best-effort).
+        await notaTraspasoConversacion(creado.leadId, fono).catch(() => {})
+        // La MISMA notificación de "nuevo lead" que ya reciben los dueños.
+        await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
+        if (r?.success && r.ownerEmail && r.ownerId) {
+          const tel = await telefonoDeUsuario(r.ownerId, H, api)
+          return {
+            email: r.ownerEmail,
+            zohoId: r.ownerId,
+            nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+            telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+            via: "dueno_lead_sdr",
+          }
+        }
+        // Sin roster MX configurado (o RR falló): el lead queda con la
+        // interina como siempre — fallback explícito, no silencioso.
+        await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: creado.leadId, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       } else if (esCO) {
         const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
         const r = await reasignarLeadSdrInboundCO(creado.leadId).catch(() => null)
@@ -414,6 +490,40 @@ async function asignarEnZoho(
       // Fallback (regla y RR fallaron): rotación interna como siempre.
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
+    } else if (pais === "mx") {
+      // MX (Lalo 13-ago): lead vivo sin formal → SDR Inbound MX por round-robin,
+      // con nota de conversación (URL a Botmaker + transcript) y la notificación
+      // de nuevo lead al dueño. Dueño humano real previo NO se pisa (se presenta él).
+      const ownerLeadMx = (lead.Owner?.email || "").toLowerCase()
+      const esInterinaMx = !ownerLeadMx || /vicky@|info@geovictoria|ysegura@/.test(ownerLeadMx)
+      if (!esInterinaMx && lead.Owner?.id) {
+        await notaTraspasoConversacion(lead.id, fono).catch(() => {})
+        await notificarTraspasoLeadEmail(lead.id, ownerLeadMx, fono, H, api)
+        const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
+        return {
+          email: ownerLeadMx,
+          zohoId: lead.Owner.id,
+          nombre: lead.Owner.name || NOMBRE_VENDEDOR[ownerLeadMx] || ownerLeadMx.split("@")[0],
+          telefono: tel || WHATSAPP_VENDEDOR[ownerLeadMx] || "",
+          via: "dueno_lead_sdr",
+        }
+      }
+      const { reasignarLeadSdrInboundMX } = await import("@/lib/zoho-leads")
+      const r = await reasignarLeadSdrInboundMX(lead.id).catch(() => null)
+      await notaTraspasoConversacion(lead.id, fono).catch(() => {})
+      await notificarTraspasoLeadEmail(lead.id, r?.ownerEmail || interno.email, fono, H, api)
+      if (r?.success && r.ownerEmail && r.ownerId) {
+        const tel = await telefonoDeUsuario(r.ownerId, H, api)
+        return {
+          email: r.ownerEmail,
+          zohoId: r.ownerId,
+          nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+          telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+          via: "dueno_lead_sdr",
+        }
+      }
+      // Sin roster MX (VIC_SDR_INBOUND_MX vacío): comportamiento actual (Yahel).
+      await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
     } else {
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)

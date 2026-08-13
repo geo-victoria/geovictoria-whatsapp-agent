@@ -13,7 +13,7 @@
  *     punto en zona cubierta). FUERA de la zona la instalación profesional NO
  *     se cotiza acá: se deja NOTA de que el ejecutivo la cotiza aparte (o el
  *     cliente auto-instala gratis) — la venta nunca se frena.
- *   - CAPACITACIÓN online: $600 pago único y SE COBRA — va como ítem de
+ *   - CAPACITACIÓN online: incluida sin costo (Lalo 13-ago, sin mencionar $600) — ítem de
  *     servicio en TODA cotización (nunca "de regalo" como Chile/Colombia).
  *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado (mismo patrón
  *     CL/CO).
@@ -85,8 +85,8 @@ const TARIFAS_MX = {
   envioVentaPunto: 400,
   /** Instalación por punto — SOLO CDMX/Zona Metropolitana. */
   instalacionCdmxMetro: 700,
-  /** Capacitación online — precio de LISTA. Desde el 12-ago (Lalo) se cobra
-   * $0 como gancho: el valor $600 aparece TACHADO en cotización y discurso. */
+  /** Capacitación online — se cobra $0 y desde el 13-ago (Lalo) el valor de
+   * lista ya NO se menciona (ni tachado). Constante conservada por historia. */
   capacitacionOnline: 600,
 } as const
 
@@ -199,9 +199,9 @@ export function cotizarMX(input: CotizacionMXInput): {
   // Chile/Colombia — acá nunca es de regalo).
   lineas.push({
     concepto: "Capacitación online",
-    // Gancho (Lalo 12-ago): valor de lista TACHADO (~$600~ es strikethrough
-    // de WhatsApp) y costo real $0 — parte de la propuesta de valor.
-    detalle: "Curso online de uso de la plataforma — valor normal ~$600~, incluida SIN COSTO",
+    // Lalo 13-ago: el $600 desaparece del discurso — ni cobrado ni tachado.
+    // La capacitación se presenta simplemente incluida sin costo.
+    detalle: "Curso online de uso de la plataforma — incluida sin costo",
     neto: 0,
     iva: 0,
     recurrente: false,
@@ -314,14 +314,14 @@ export function cotizarMX(input: CotizacionMXInput): {
       afectoIva: true,
     })
   }
-  // Capacitación online: GANCHO (Lalo 12-ago) — el precio de lista ($600)
+  // Capacitación online: incluida sin costo (Lalo 13-ago — sin nombrar el $600)
   // viaja como unitario para que PDF y aceptación lo muestren TACHADO, y el
   // subtotal $0 es lo que se cobra.
   itemsCotizador.push({
     tipo: "servicio",
     id: "capacitacion_online",
     nombre: "Capacitación online",
-    descripcion: "Curso online de uso de la plataforma. Valor normal $600 MXN — incluida sin costo.",
+    descripcion: "Curso online de uso de la plataforma — incluida sin costo.",
     modalidad: "Cobro único",
     cantidad: 1,
     precioUnitarioMXN: TARIFAS_MX.capacitacionOnline,
