@@ -980,6 +980,11 @@ export async function GET(req: Request) {
   // 7. COBRO ASISTIDO (punto 2 de la segunda tanda, Lalo 08-ago): cotización
   // ACEPTADA hace 30+ minutos sin señal de pago → un empujón de pago único.
   // El cliente que aceptó es el más caliente de todo el embudo.
+  const chequeosOnb = await chequeoOnboardingPostPago(ahora).catch((e) => {
+    console.warn("[ptv-cron] chequeo onboarding post-pago falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+
   const cobros = await cobroAsistido(ahora).catch((e) => {
     console.warn("[ptv-cron] cobro asistido falló:", e instanceof Error ? e.message : e)
     return { enviados: 0, pendientes: 0 }
@@ -1023,6 +1028,7 @@ export async function GET(req: Request) {
     loops_recerrados_por_atencion: reconciliacion.recerrados,
     sla_alertas_60min: slaAlertas,
     cobros_asistidos: cobros.enviados,
+    chequeos_onboarding_post_pago: chequeosOnb,
     aceptadas_sin_pago: cobros.pendientes,
   })
   } finally {
@@ -1048,6 +1054,61 @@ function enVentanaProactiva(fono: string, ahora: Date): boolean {
   const hora =
     Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(ahora)) % 24
   return hora >= 9 && hora < 21
+}
+
+/**
+ * TOQUE POST-PAGO (biblia VB 12-ago; plantilla vicky_chequeo_onboarding
+ * APROBADA por Meta el 13-ago): al día siguiente del pago, Vicky pregunta
+ * cómo va la activación de la cuenta. Ventana objetivo: cotizaciones PAGADAS
+ * hace 18-32 horas (≈ "ayer"). Un solo envío por cotización (candado kv),
+ * ventana proactiva 9-21, prefijos discables y sin contactos internos.
+ * La plantilla abre fuera de la ventana de Meta (24h+ tras el pago es lo
+ * normal); su saludo con presentación es válido: re-abre un hilo dormido.
+ */
+async function chequeoOnboardingPostPago(ahora: Date): Promise<number> {
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken().catch(() => "")
+  if (!token) return 0
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const desde = new Date(ahora.getTime() - 32 * 3600_000)
+  const hasta = new Date(ahora.getTime() - 18 * 3600_000)
+  const fmt = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "+00:00")
+  const q =
+    `select id, Numero_Cotizacion, Telefono_Cliente, Tel_fono_Contacto, Pagador_Nombre, Modified_Time ` +
+    `from Cotizaciones_GeoVictoria where Estado_Cotizacion = 'Pagada' and Modified_Time >= '${fmt(desde)}' ` +
+    `and Modified_Time <= '${fmt(hasta)}' order by Modified_Time desc limit 0, 30`
+  const res = await fetch(`${api}/crm/v3/coql`, {
+    method: "POST",
+    headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ select_query: q }),
+  }).catch(() => null)
+  const data = res && res.ok ? (((await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || []) : []
+  if (!data.length) return 0
+  const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+  const tpl = (process.env.VICKY_TPL_CHEQUEO_ONBOARDING || "vicky_chequeo_onboarding").trim()
+  const pruebas = testContactSet()
+  let enviados = 0
+  for (const cot of data) {
+    if (enviados >= 10) break
+    const fono = String(cot.Telefono_Cliente || cot.Tel_fono_Contacto || "").replace(/\D/g, "")
+    if (!/^(56|57|52|51)\d{8,12}$/.test(fono) || isTestContact(fono, pruebas)) continue
+    if (!enVentanaProactiva(fono, ahora)) continue
+    const quoteId = String(cot.id || "")
+    const marca = `chequeo_onboarding_${quoteId}`
+    if (await getKvValue(marca).catch(() => null)) continue
+    const nombre = String(cot.Pagador_Nombre || "").trim().split(/\s+/)[0] || "👋"
+    const ok = await sendBotmakerTemplate(fono, tpl, { nombre }).catch(() => false)
+    if (!ok) continue
+    await setKvValue(marca, new Date().toISOString()).catch(() => {})
+    await appendAssistantV3(
+      fono,
+      `Te escribí para saber cómo va la activación de tu cuenta tras el pago de ayer 😊 Si necesitas una mano con la configuración, me dices por aquí.`,
+    ).catch(() => {})
+    enviados++
+    console.log(`[ptv-cron] chequeo onboarding post-pago → ${fono} (${String(cot.Numero_Cotizacion || quoteId)})`)
+  }
+  return enviados
 }
 
 async function cobroAsistido(ahora: Date): Promise<{ enviados: number; pendientes: number }> {

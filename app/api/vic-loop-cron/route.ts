@@ -108,13 +108,14 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
   // apruebe, la celda por defecto va VACÍA → skip limpio y la cadencia avanza
   // (celda vacía NO envía — patrón del repo). Antes estas filas NO existían y
   // el fallback caía a la DESPEDIDA del toque 7: caso ROSA 12-ago, "no te
-  // escribo más" DOS veces seguidas con el loop aún vivo. Encendido sin
-  // deploy cuando Meta apruebe: LOOP_TPL_T2=vicky_loop_toque2 /
-  // LOOP_TPL_T3=vicky_loop_toque3 (los envs cubren las 3 etapas).
+  // escribo más" DOS veces seguidas con el loop aún vivo.
+  // vicky_loop_toque2 fue APROBADA por Meta el 13-ago AM → cableada. La del
+  // toque 3 sigue ACCOUNT_PENDING: su celda queda vacía y se enciende con
+  // LOOP_TPL_T3=vicky_loop_toque3 (o cambiando el default) al aprobarse.
   2: {
-    sin_precio: tplCelda("LOOP_TPL_T2", ""),
-    con_precio: tplCelda("LOOP_TPL_T2", ""),
-    formal: tplCelda("LOOP_TPL_T2", ""),
+    sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
+    con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
+    formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
   },
   3: {
     sin_precio: tplCelda("LOOP_TPL_T3", ""),
