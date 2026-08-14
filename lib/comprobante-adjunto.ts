@@ -104,6 +104,71 @@ export async function mediaEntranteRecienteDebug(
   }
 }
 
+/** Sube un archivo ya en memoria como Attachment de la cotización. */
+async function subirAdjunto(
+  quoteId: string,
+  buf: ArrayBuffer,
+  contentType: string,
+  filename: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!buf.byteLength) return { ok: false, error: "archivo vacío" }
+  const ext = contentType.includes("pdf")
+    ? "pdf"
+    : contentType.includes("png")
+      ? "png"
+      : contentType.includes("webp")
+        ? "webp"
+        : "jpg"
+  const nombre = /\.[a-z0-9]{2,4}$/i.test(filename) ? filename : `${filename}.${ext}`
+  const form = new FormData()
+  form.append("file", new Blob([buf], { type: contentType }), nombre)
+  const token = await getZohoAccessToken()
+  const up = await fetch(
+    `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${encodeURIComponent(quoteId)}/Attachments`,
+    {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      body: form,
+      cache: "no-store",
+    },
+  )
+  if (!up.ok) {
+    const detalle = await up.text().catch(() => "")
+    console.error(`[comprobante-adjunto] Zoho ${up.status} quote=${quoteId}:`, detalle.slice(0, 300))
+    return { ok: false, error: `Zoho ${up.status}: ${detalle.slice(0, 250)}` }
+  }
+  console.log(`[comprobante-adjunto] adjunto OK quote=${quoteId} (${contentType}, ${buf.byteLength} bytes)`)
+  return { ok: true }
+}
+
+/**
+ * Adjunta un comprobante que NO vino por el chat (Lalo 14-ago, levantamiento
+ * histórico de transferencias): los ejecutivos y finanzas guardan PDFs en sus
+ * teléfonos y correos, sin URL pública que Zoho pueda descargar. Acá el
+ * archivo viaja en base64 y se sube igual que los del chat.
+ */
+export async function adjuntarComprobanteBase64(
+  quoteId: string,
+  contenidoBase64: string,
+  filename = "comprobante-transferencia.pdf",
+  contentType = "application/pdf",
+): Promise<{ ok: boolean; error?: string }> {
+  if (!quoteId || !contenidoBase64) return { ok: false, error: "quoteId o contenidoBase64 faltante" }
+  try {
+    const limpio = contenidoBase64.replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "")
+    const buf = Buffer.from(limpio, "base64")
+    return await subirAdjunto(
+      quoteId,
+      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
+      contentType,
+      filename,
+    )
+  } catch (e) {
+    console.error(`[comprobante-adjunto] base64 excepción quote=${quoteId}:`, e)
+    return { ok: false, error: e instanceof Error ? e.message : "excepción" }
+  }
+}
+
 export async function adjuntarComprobanteACotizacion(
   quoteId: string,
   mediaUrl: string,
@@ -115,33 +180,7 @@ export async function adjuntarComprobanteACotizacion(
     if (!dl.ok) return { ok: false, error: `descarga de la media falló (${dl.status}) — link vencido?` }
     const contentType = dl.headers.get("content-type") || "application/octet-stream"
     const buf = await dl.arrayBuffer()
-    if (!buf.byteLength) return { ok: false, error: "media vacía" }
-    const ext = contentType.includes("pdf")
-      ? "pdf"
-      : contentType.includes("png")
-        ? "png"
-        : contentType.includes("webp")
-          ? "webp"
-          : "jpg"
-    const form = new FormData()
-    form.append("file", new Blob([buf], { type: contentType }), `${filename}.${ext}`)
-    const token = await getZohoAccessToken()
-    const up = await fetch(
-      `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${encodeURIComponent(quoteId)}/Attachments`,
-      {
-        method: "POST",
-        headers: { Authorization: `Zoho-oauthtoken ${token}` },
-        body: form,
-        cache: "no-store",
-      },
-    )
-    if (!up.ok) {
-      const detalle = await up.text().catch(() => "")
-      console.error(`[comprobante-adjunto] Zoho ${up.status} quote=${quoteId}:`, detalle.slice(0, 300))
-      return { ok: false, error: `Zoho ${up.status}: ${detalle.slice(0, 250)}` }
-    }
-    console.log(`[comprobante-adjunto] adjunto OK quote=${quoteId} (${contentType}, ${buf.byteLength} bytes)`)
-    return { ok: true }
+    return await subirAdjunto(quoteId, buf, contentType, filename)
   } catch (e) {
     console.error(`[comprobante-adjunto] excepción quote=${quoteId}:`, e)
     return { ok: false, error: e instanceof Error ? e.message : "excepción" }

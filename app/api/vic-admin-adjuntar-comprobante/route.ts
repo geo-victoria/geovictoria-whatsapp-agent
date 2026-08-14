@@ -6,8 +6,10 @@
  * que llegaron antes de que el flujo lo hiciera solo (03-ago).
  *
  * Body: { quoteId: string, mediaUrl?: string, contact?: string, horas?: number }
+ *  - Con contenidoBase64: sube el archivo tal cual (comprobantes que el
+ *    equipo tiene en su teléfono o correo, sin URL pública — Lalo 14-ago).
  *  - Con mediaUrl: descarga y adjunta esa URL.
- *  - Sin mediaUrl: busca el último archivo entrante del contacto en la API de
+ *  - Sin ninguno: busca el último archivo entrante del contacto en la API de
  *    Botmaker (ventana `horas`, default 6) y adjunta ese.
  *
  * Auth: header x-cron-secret == vic_kv.followup_cron_secret, o ?key=/Bearer ==
@@ -15,7 +17,11 @@
  */
 
 import { NextResponse } from "next/server"
-import { adjuntarComprobanteACotizacion, mediaEntranteRecienteDebug } from "@/lib/comprobante-adjunto"
+import {
+  adjuntarComprobanteACotizacion,
+  adjuntarComprobanteBase64,
+  mediaEntranteRecienteDebug,
+} from "@/lib/comprobante-adjunto"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -44,6 +50,9 @@ export async function POST(req: Request): Promise<Response> {
   }
   let body: {
     quoteId?: string
+    contenidoBase64?: string
+    nombreArchivo?: string
+    contentType?: string
     mediaUrl?: string
     contact?: string
     horas?: number
@@ -59,12 +68,27 @@ export async function POST(req: Request): Promise<Response> {
   if (!quoteId) {
     return NextResponse.json({ ok: false, error: "quoteId requerido" }, { status: 400 })
   }
+  // Archivo subido directo (sin URL pública): el camino de los comprobantes
+  // que viven en el teléfono del ejecutivo o en el correo de finanzas.
+  const base64 = (body.contenidoBase64 || "").trim()
+  if (base64) {
+    const r = await adjuntarComprobanteBase64(
+      quoteId,
+      base64,
+      (body.nombreArchivo || "").trim() || "comprobante-transferencia.pdf",
+      (body.contentType || "").trim() || "application/pdf",
+    )
+    return NextResponse.json(r, { status: r.ok ? 200 : 502 })
+  }
   let mediaUrl = (body.mediaUrl || "").trim()
   let creationTime = ""
   if (!mediaUrl) {
     const contact = (body.contact || "").trim().replace(/\D/g, "")
     if (!contact) {
-      return NextResponse.json({ ok: false, error: "mediaUrl o contact requerido" }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: "contenidoBase64, mediaUrl o contact requerido" },
+        { status: 400 },
+      )
     }
     const bm = await mediaEntranteRecienteDebug(contact, Number(body.horas) || 6, {
       desdeIso: (body.desdeIso || "").trim() || undefined,
