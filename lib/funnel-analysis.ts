@@ -81,6 +81,7 @@ export function testContactSet(): Set<string> {
 const SOLO_METRICAS = [
   "56944668823", // Eduardo (Lalo)
   "56978385048", // Rodrigo
+  "56971345236", // Interno de pruebas (Lalo 14-ago) — probó el flujo completo
 ]
 
 export function metricsContactSet(): Set<string> {
