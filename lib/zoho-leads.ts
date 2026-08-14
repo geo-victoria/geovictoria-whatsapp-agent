@@ -354,12 +354,27 @@ export async function updateZohoLeadStatus(
 const BLUEPRINT_FIELD_DEFAULTS: Record<string, string> = {
   // Picklist "Pendiente para calificado" de la transición a "3. Contactado".
   Motivo_Calificado_no_convertido: "Falta información del cliente",
-  // La transición a "4. Calificado" exige además estos dos (hallazgo 04-ago
-  // en logs: PUT 400 "Tombola/Producto_Soluci_n mandatory param missing" —
-  // ningún lead de Vicky llegaba a Calificado por blueprint).
+  // La transición a "4. Calificado" declara SIETE campos (verificado contra
+  // el blueprint el 14-ago). Con solo dos de ellos, Zoho responde SUCCESS y
+  // NO mueve el lead: falla en silencio, y por eso ningún lead de Vicky
+  // llegaba a Calificado. Los que se pueden dar por defecto van acá; el
+  // resto (N° de empleados, RUT, territorio) se copian del propio lead.
   Tombola: "Mantener propietario",
   Producto_Soluci_n: "Control de Asistencia",
+  Sector: "19. Servicios",
+  Tiene_potencial_de_expansi_n_Regional: "No",
 }
+
+/** Campos que la transición exige y que NO se inventan: se copian del lead si
+ * los tiene. Inventar el N° de empleados fue una cicatriz cara (06-ago: el
+ * default 1 mandaba empresas de 500 al tramo SMB de la tómbola). */
+const BLUEPRINT_FIELDS_DEL_LEAD = [
+  "N_Empleados_que_marcan",
+  "RUT_Empresa",
+  "Territorio",
+  "Sector",
+  "Tiene_potencial_de_expansi_n_Regional",
+]
 
 // Ejecuta la transición del blueprint del lead cuyo valor de destino calza con
 // el status pedido (match exacto o por inclusión, ej. "3. Contactado").
@@ -406,11 +421,31 @@ async function ejecutarTransicionBlueprint(
           .slice(0, 150)})`,
       }
     }
-    // Completar los campos que la transición exige con los defaults conocidos.
-    const data: Record<string, string> = {}
-    for (const f of match.fields || []) {
-      const api = f?.api_name || ""
-      if (api && BLUEPRINT_FIELD_DEFAULTS[api]) data[api] = BLUEPRINT_FIELD_DEFAULTS[api]
+    // Completar TODOS los campos que la transición exige. Primero lo que el
+    // lead ya trae (su verdad manda), después los defaults conocidos.
+    const declarados = (match.fields || []).map((f) => f?.api_name || "").filter(Boolean)
+    const delLead: Record<string, unknown> = {}
+    const aCopiar = declarados.filter((a3) => BLUEPRINT_FIELDS_DEL_LEAD.includes(a3))
+    if (aCopiar.length) {
+      const actual = await fetch(
+        `${apiDomain}/crm/v3/${moduleName}/${leadId}?fields=${aCopiar.join(",")}`,
+        { headers, cache: "no-store" },
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+      Object.assign(
+        delLead,
+        (((actual as { data?: Array<Record<string, unknown>> } | null)?.data || [])[0]) || {},
+      )
+    }
+    const data: Record<string, unknown> = {}
+    for (const api of declarados) {
+      const propio = delLead[api]
+      if (propio !== undefined && propio !== null && String(propio).trim() !== "") {
+        data[api] = propio
+      } else if (BLUEPRINT_FIELD_DEFAULTS[api]) {
+        data[api] = BLUEPRINT_FIELD_DEFAULTS[api]
+      }
     }
     const exec = await fetch(
       `${apiDomain}/crm/v2/${moduleName}/${leadId}/actions/blueprint`,
