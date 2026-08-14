@@ -106,7 +106,9 @@ export async function GET(req: Request): Promise<Response> {
       return NextResponse.json({ ok: false, error: "bmpath inválido" }, { status: 400 })
     }
     const r = await fetch(`https://api.botmaker.com${bmpath}`, { headers: BM_HEADERS, cache: "no-store" })
-    return NextResponse.json({ ok: true, bmpath, status: r.status, body: (await r.text()).slice(0, 8000) })
+    // 8000 se quedaba corto: el listado de agentes del workspace se cortaba en
+    // la letra L y el cruce con los dueños de Zoho salía incompleto.
+    return NextResponse.json({ ok: true, bmpath, status: r.status, body: (await r.text()).slice(0, 120000) })
   }
 
   // ── Modo diagnóstico crudo (se mantiene para futuros ajustes de shape) ──
