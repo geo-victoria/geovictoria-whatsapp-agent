@@ -1332,6 +1332,33 @@ export async function sincronizarHitoCrm(
       }
     }
     if (!dealId) {
+      // LEAD CONVERTIDO Y SIN DEAL VIVO: el hito se perdía en silencio (caso
+      // Eduardo 14-ago, callback de 70 empleados: su solicitud no dejó NADA
+      // en el CRM porque su lead de 2023 estaba convertido y su deal ya no
+      // existía). Es la misma situación de las reglas 4/6 —la oportunidad
+      // anterior terminó— así que el re-contacto RENACE como lead nuevo en
+      // etapa 1 en vez de evaporarse. Sin esto, un cliente que cotizó hace
+      // un año y vuelve queda sin registro y nadie lo llama.
+      if (await reglasRecontactoActivas()) {
+        const { setKvValue } = await import("./supabase-persistence-v3")
+        await setKvValue(`zoho_lead_${clean}`, "").catch(() => {})
+        const { createZohoLead } = await import("./zoho-leads")
+        const renacido = await createZohoLead({
+          contactoWA: clean,
+          telefono: clean,
+          nombre: datos.nombre,
+          empresa: datos.empresa,
+          email: datos.email,
+          trabajadores: datos.empleados,
+        })
+        if (renacido.success) {
+          console.log(
+            `[crm-hitos] ${clean}: lead renacido ${renacido.leadId} (el anterior estaba convertido y sin deal vivo)`,
+          )
+          return
+        }
+        console.warn(`[crm-hitos] ${clean}: no se pudo renacer el lead sin deal vivo`)
+      }
       console.log(`[crm-hitos] ${clean}: lead ${lead.id} convertido sin deal vivo — hito "${hito}" sin destino`)
       return
     }

@@ -1031,10 +1031,19 @@ async function processOneTurn(
         t,
       )
     const afirmaCallbackListo = afirmaCallbackListoEn(reply)
-    const realCallback = toolCalls.some(
-      (c) =>
-        (c.name === "registrar_solicitud_callback" || c.name === "agendar_reunion") && c.ok,
-    )
+    // derivar_a_soporte cuenta como registro REAL (Eduardo 14-ago, su prueba
+    // de callback con 70 empleados "falló"): con el flujo 21+ la rama "que me
+    // llamen" se registra con derivar_a_soporte, no con
+    // registrar_solicitud_callback. El cinturón no la conocía, así que leía
+    // una derivación correcta como alucinación: le pedía disculpas al cliente
+    // por un fallo inexistente y alertaba al equipo por nada.
+    const TOOLS_QUE_REGISTRAN = [
+      "registrar_solicitud_callback",
+      "agendar_reunion",
+      "derivar_a_soporte",
+      "derivar_a_ejecutivo",
+    ]
+    const realCallback = toolCalls.some((c) => TOOLS_QUE_REGISTRAN.includes(c.name) && c.ok)
     if (!enOnboarding && afirmaCallbackListo && !realCallback) {
       let callbackRecuperado = false
       const FORZAR_TOOL_CALLBACK =
@@ -1043,6 +1052,7 @@ async function processOneTurn(
         "pero NO puedes afirmarlo sin antes EJECUTAR la tool. " +
         "Si el cliente pidió que lo llamen/contacten, llama registrar_solicitud_callback(nombre, empresa, telefono, ...) " +
         "con los datos que ya entregó en la conversación. " +
+        "EXCEPCIÓN sobre el umbral (21+ trabajadores): ahí el registro correcto es derivar_a_soporte con motivo \"fuera_de_rango_trabajadores\" pasando nombre, rutEmpresa y trabajadores — llama ESA, no la de callback. " +
         "Si fue un fallback de cotización (tenía intención de cotizar pero faltaron datos para emitirla), pásale seguimientoCotizacion=true. " +
         "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
         "Si faltan datos obligatorios (nombre, empresa o teléfono), PÍDESELOS en vez de afirmar que ya quedó registrado. " +
@@ -1061,8 +1071,7 @@ async function processOneTurn(
       if (retry) {
         const retryReply = (retry.reply || "").trim()
         const retryReal = ((retry.toolCalls || []) as ToolCallRecord[]).some(
-          (c) =>
-            (c.name === "registrar_solicitud_callback" || c.name === "agendar_reunion") && c.ok,
+          (c) => TOOLS_QUE_REGISTRAN.includes(c.name) && c.ok,
         )
         if (retryReal && retryReply) {
           console.warn(`[v3-bg] CALLBACK_RECUPERADO contact=${contact}: el reintento forzó la tool.`)
