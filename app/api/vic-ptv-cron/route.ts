@@ -258,7 +258,7 @@ async function enriquecerLeadsDeChat(): Promise<number> {
     // como el error se traga con `return 0`, este conciliador llevaba desde
     // el 13-ago sin ejecutarse una sola vez (0 leads tocados en 38 casos).
     const q =
-      `select id, First_Name, Last_Name, Company, Phone, Email, RUT_Empresa, Converted__s from Leads ` +
+      `select id, First_Name, Last_Name, Company, Phone, Email, RUT_Empresa from Leads ` +
       `where ((((First_Name = 'Prospecto') or (Last_Name = 'Prospecto WhatsApp')) ` +
       `or (Company like 'Por identificar%')) and (Created_Time >= '${desde}T00:00:00-04:00')) ` +
       `order by Created_Time desc limit 25`
@@ -278,7 +278,6 @@ async function enriquecerLeadsDeChat(): Promise<number> {
         Phone?: string
         Email?: string
         RUT_Empresa?: string
-        Converted__s?: boolean
       }>
     }).data || [])
     let hechos = 0
@@ -356,18 +355,21 @@ async function enriquecerLeadsDeChat(): Promise<number> {
       // trato, la cuenta y el contacto: ahí hay que ir a dejarlo (Lalo
       // 14-ago). El propio lead guarda a dónde fue: Converted_Deal /
       // Converted_Account / Converted_Contact.
-      if (ld.Converted__s) {
-        const det = await fetch(
-          `${api}/crm/v3/Leads/${ld.id}?fields=Converted_Deal,Converted_Account,Converted_Contact`,
-          { headers: H, cache: "no-store" },
-        )
-          .then((r) => (r.ok ? r.json() : null))
-          .catch(() => null)
-        const reg = ((det as { data?: Array<Record<string, { id?: string } | null>> } | null)?.data ||
-          [])[0] as Record<string, { id?: string } | null> | undefined
-        const dealId = reg?.Converted_Deal?.id || ""
-        const accountId = reg?.Converted_Account?.id || ""
-        const contactId = reg?.Converted_Contact?.id || ""
+      // ¿Está convertido? COQL no expone Converted__s en esta org
+      // (INVALID_QUERY, verificado 14-ago), así que se le pregunta al propio
+      // lead — son 6 registros por tick, el costo es irrelevante.
+      const det = await fetch(
+        `${api}/crm/v3/Leads/${ld.id}?fields=Converted_Deal,Converted_Account,Converted_Contact`,
+        { headers: H, cache: "no-store" },
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+      const reg = ((det as { data?: Array<Record<string, { id?: string } | null>> } | null)?.data ||
+        [])[0] as Record<string, { id?: string } | null> | undefined
+      const dealId = reg?.Converted_Deal?.id || ""
+      const accountId = reg?.Converted_Account?.id || ""
+      const contactId = reg?.Converted_Contact?.id || ""
+      if (dealId || accountId || contactId) {
         let tocados = 0
         if (dealId && (campos.Company || campos.RUT_Empresa)) {
           const dealActual = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Rut_ID_Account`, {
