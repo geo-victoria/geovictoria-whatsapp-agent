@@ -662,6 +662,10 @@ async function convertirConDeal(
   ownerForzadoId?: string,
   // Umbral 08-ago: derivación con promesa de ejecutivo → sorteo al nacer.
   sorteoInmediato?: boolean,
+  // Eduardo 14-ago: la DERIVACIÓN (rama "que me llamen") entrega el caso como
+  // LEAD a la tómbola de leads y NO crea trato. La REUNIÓN sí lo crea: ahí hay
+  // un compromiso agendado y el deal nace con el host como dueño.
+  entregarComoLead?: boolean,
 ): Promise<string | null> {
   const { h, api } = await zohoHeaders()
   const territorio = territorioDeContacto(contact) || "Chile"
@@ -680,7 +684,7 @@ async function convertirConDeal(
   // después el ejecutivo cuando corresponda. Antes nacía un trato aunque
   // nadie hubiera hablado con el cliente. El owner sorteado se devuelve para
   // que Vicky pueda presentarlo y ofrecer reunión con él.
-  if (sorteoInmediato && territorio === "Chile") {
+  if (entregarComoLead && territorio === "Chile") {
     if (heredaGestionAlDeal(lead.ownerId, territorio)) {
       console.log(`[crm-hitos] +${contact}: sobre-umbral con dueño humano previo — se conserva`)
       return null
@@ -1150,7 +1154,12 @@ export async function sincronizarHitoCrm(
   // sorteoInmediato (umbral 08-ago): el hito viene de una derivación donde al
   // cliente se le prometió ejecutivo — el deal CL ≤50 NO espera en Vicky: la
   // tómbola sortea y notifica al nacer, igual que los >50.
-  opts: { noCrear?: boolean; ownerForzadoEmail?: string; sorteoInmediato?: boolean } = {},
+  opts: {
+    noCrear?: boolean
+    ownerForzadoEmail?: string
+    sorteoInmediato?: boolean
+    entregarComoLead?: boolean
+  } = {},
 ): Promise<void> {
   try {
     if (!habilitado()) return
@@ -1272,7 +1281,7 @@ export async function sincronizarHitoCrm(
         await dejarLeadPreFormal(lead, clean, hito, ownerForzadoId, opts.sorteoInmediato)
         return
       }
-      const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato)
+      const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato, opts.entregarComoLead)
       if (!dealId) console.warn(`[crm-hitos] ${clean}: lead ${creado.leadId} quedó sin convertir`)
       else await actualizarNotaTranscripcion(dealId, clean)
       return
@@ -1360,7 +1369,7 @@ export async function sincronizarHitoCrm(
         await dejarLeadPreFormal(lead, clean, hito, ownerForzadoId, opts.sorteoInmediato)
         return
       }
-      const dealNuevo = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato)
+      const dealNuevo = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato, opts.entregarComoLead)
       if (dealNuevo) await actualizarNotaTranscripcion(dealNuevo, clean)
       return
     }
@@ -1459,6 +1468,7 @@ export async function sincronizarHitoCrm(
             piso,
             ownerForzadoId || undefined,
             opts.sorteoInmediato,
+            opts.entregarComoLead,
           )
           if (dealRenacido) await actualizarNotaTranscripcion(dealRenacido, clean)
           return

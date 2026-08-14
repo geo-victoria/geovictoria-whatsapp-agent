@@ -837,6 +837,12 @@ export async function runAgentLoop(params: {
           await Promise.race([
             sincronizarHitoCrm(contact, "intencion", datosDeToolInput(toolName, toolInput), {
               sorteoInmediato: true,
+              // entregarComoLead (Eduardo 14-ago): la rama "que me llamen" NO
+              // crea trato — el caso se entrega como LEAD a la tómbola de
+              // leads de ejecutivos comerciales. La rama REUNIÓN sí crea el
+              // deal (más arriba, sin este flag): ahí hay compromiso agendado
+              // y la reunión tiene que nacer con el dueño del deal.
+              entregarComoLead: true,
             }).catch(() => undefined),
             new Promise((r) => setTimeout(r, 8000)),
           ])
