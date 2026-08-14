@@ -269,14 +269,22 @@ export async function updateZohoLeadFields(
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
-    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+    const res = await fetch(`${apiDomain}/crm/v3/${moduleName}/${leadId}`, {
       method: "PUT",
       headers: {
         Authorization: `Zoho-oauthtoken ${accessToken}`,
         "Content-Type": "application/json",
       },
       cache: "no-store",
-      body: JSON.stringify({ data: [{ ...fields }] }),
+      body: JSON.stringify({
+        data: [{ ...fields }],
+        // JAMÁS cambiar propietarios (Eduardo 14-ago). Esta función solo
+        // completa datos (nombre, empresa, RUT, correo), pero un PUT sobre un
+        // lead dispara las assignment rules de Zoho y el dueño se re-sortea
+        // solo — la conciliación habría empezado a mover leads de mano sin
+        // que nadie lo pidiera. El skip corta eso de raíz.
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
     })
     const data = (await res.json().catch(() => ({}))) as {
       data?: Array<{ status?: string; code?: string }>
