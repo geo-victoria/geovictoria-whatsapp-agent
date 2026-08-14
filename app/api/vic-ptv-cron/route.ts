@@ -253,15 +253,22 @@ async function enriquecerLeadsDeChat(): Promise<number> {
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const desde = new Date(Date.now() - 14 * 86400e3).toISOString().slice(0, 10)
+    // COQL exige que CADA comparación vaya entre paréntesis y que las
+    // combinaciones se aniden de a dos. Sin eso responde SYNTAX_ERROR — y
+    // como el error se traga con `return 0`, este conciliador llevaba desde
+    // el 13-ago sin ejecutarse una sola vez (0 leads tocados en 38 casos).
     const q =
       `select id, First_Name, Last_Name, Company, Phone, Email, RUT_Empresa, Converted__s from Leads ` +
-      `where (First_Name = 'Prospecto' or Last_Name = 'Prospecto WhatsApp' or Last_Name = 'Prospecto' ` +
-      `or Company like 'Por identificar%') ` +
-      `and Created_Time >= '${desde}T00:00:00-04:00' order by Created_Time desc limit 25`
+      `where ((((First_Name = 'Prospecto') or (Last_Name = 'Prospecto WhatsApp')) ` +
+      `or (Company like 'Por identificar%')) and (Created_Time >= '${desde}T00:00:00-04:00')) ` +
+      `order by Created_Time desc limit 25`
     const res = await fetch(`${api}/crm/v3/coql`, {
       method: "POST", headers: H, cache: "no-store", body: JSON.stringify({ select_query: q }),
     })
-    if (!res.ok) return 0
+    if (!res.ok) {
+      console.warn(`[ptv] enriquecimiento: COQL ${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`)
+      return 0
+    }
     const filas = (((await res.json().catch(() => ({}))) as {
       data?: Array<{
         id: string
