@@ -617,18 +617,13 @@ export async function cotizarReferencial(args: {
         `- Marcaje sin reloj: con la app incluida en el plan (biometría facial + GPS, o modo cuadrilla donde todo el equipo marca en un solo celular o tablet), sin equipos que comprar ni instalar. Pídeme esa opción y te la muestro.`,
       )
     }
-  } else if (itemsRecurrentes.length > 0) {
-    // Misma regla en la variante sin pago único: burbuja propia.
-    partes.push("")
-    partes.push("[---]")
-    partes.push("")
-    partes.push(
-      `Al aceptar pagas el primer mes del plan por adelantado: $${fmtNumCL(
-        totalRecurrenteCLP,
-        0,
-      )} CLP.`,
-    )
   }
+  // SIN PAGOS ÚNICOS NO SE HABLA DE "PAGO INICIAL" (Eduardo 14-ago): si todo
+  // es recurrente (plan y/o arriendo), el primer mes es EXACTAMENTE la
+  // mensualidad — repetir la misma cifra como "pago inicial" solo confunde y
+  // hace parecer que hay un cobro extra. El pago inicial se muestra únicamente
+  // cuando hay algo one-shot (compra de reloj, envío, instalación), que es
+  // cuando de verdad difiere del mensual.
 
   // DISCLAIMER DE INSTALACIÓN — DETERMINISTA (Lalo 13-ago, caso Rodrigo: el
   // modelo lo omitió aunque el prompt lo pedía). Siempre que la cotización
