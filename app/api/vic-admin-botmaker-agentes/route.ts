@@ -22,7 +22,6 @@ import {
   actualizarAgente,
   chatRefDeContacto,
   crearAgente,
-  etiquetaDeDueno,
   etiquetarChatConDueno,
   listarAgentes,
   type RolBotmaker,
@@ -144,19 +143,20 @@ export async function POST(req: Request): Promise<Response> {
         hechos.push({ correo, estado: "no existe como agente" })
         continue
       }
-      const etiqueta = etiquetaDeDueno(correo)
-      const tags = Array.from(new Set([...(a.tags || []), etiqueta])).filter(Boolean)
-      const yaEsta = a.role === rol && (a.tags || []).includes(etiqueta)
-      if (yaEsta) {
-        hechos.push({ correo, estado: "sin cambios", rol: a.role, etiqueta })
+      // SIN ETIQUETAS (14-ago): Botmaker solo acepta tags de un catálogo ya
+      // creado en la consola, y además dejaron de hacer falta — con la
+      // asignación real funcionando, un OPERATOR ve sus conversaciones
+      // porque las tiene ASIGNADAS, no porque las filtre por tag.
+      if (a.role === rol) {
+        hechos.push({ correo, estado: "sin cambios", rol: a.role })
         continue
       }
       if (dryRun) {
-        hechos.push({ correo, estado: "SIMULADO", de: a.role, a: rol, etiqueta })
+        hechos.push({ correo, estado: "SIMULADO", de: a.role, a: rol })
         continue
       }
-      const r = await actualizarAgente(correo, { role: rol, tags })
-      hechos.push({ correo, estado: r.ok ? "actualizado" : `error: ${r.error}`, de: a.role, a: rol, etiqueta })
+      const r = await actualizarAgente(correo, { role: rol })
+      hechos.push({ correo, estado: r.ok ? "actualizado" : `error: ${r.error}`, de: a.role, a: rol })
     }
     return json({ ok: true, dryRun, accion, hechos })
   }
@@ -174,13 +174,20 @@ export async function POST(req: Request): Promise<Response> {
         hechos.push({ correo, estado: "ya existía" })
         continue
       }
-      const etiqueta = etiquetaDeDueno(correo)
       if (dryRun) {
-        hechos.push({ correo, estado: "SIMULADO", nombre: n.name, rol, etiqueta })
+        hechos.push({ correo, estado: "SIMULADO", nombre: n.name, rol })
         continue
       }
-      const r = await crearAgente({ email: correo, name: n.name, role: rol, tags: [etiqueta] })
-      hechos.push({ correo, estado: r.ok ? "creado" : `error: ${r.error}`, id: r.id, etiqueta })
+      // Botmaker exige contraseña al crear (mínimo 8). Se genera temporal y se
+      // devuelve UNA vez para entregarla; la persona debe cambiarla al entrar.
+      const clave = `Gv${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 6).toUpperCase()}!`
+      const r = await crearAgente({ email: correo, name: n.name, role: rol, password: clave })
+      hechos.push({
+        correo,
+        estado: r.ok ? "creado" : `error: ${r.error}`,
+        id: r.id,
+        clave_temporal: r.ok ? clave : undefined,
+      })
     }
     return json({ ok: true, dryRun, accion, hechos })
   }

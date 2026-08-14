@@ -88,14 +88,15 @@ export async function crearAgente(a: {
   email: string
   name: string
   role: RolBotmaker
-  tags?: string[]
+  /** Obligatoria al crear (mínimo 8): Botmaker rechaza el alta sin ella. */
+  password: string
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   if (!BM_TOKEN || !a.email) return { ok: false, error: "sin token o correo" }
   const r = await fetch(`${BM_API}/v2.0/agents`, {
     method: "POST",
     headers: headers(),
     cache: "no-store",
-    body: JSON.stringify({ email: a.email, name: a.name, role: a.role, tags: a.tags || [] }),
+    body: JSON.stringify({ email: a.email, name: a.name, role: a.role, password: a.password }),
   })
   const txt = await r.text().catch(() => "")
   if (!r.ok) return { ok: false, error: `${r.status} ${txt.slice(0, 300)}` }
