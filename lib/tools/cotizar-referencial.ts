@@ -545,9 +545,12 @@ export async function cotizarReferencial(args: {
     partes.push("")
     partes.push(itemsRecurrentes.map(formatItem).join("\n"))
     partes.push("")
-    // Sin subtotal neto ni línea de IVA (Eduardo 14-ago): el total con IVA y
-    // su equivalente en pesos ya dejan claro qué se paga — las dos líneas
-    // intermedias solo alargan el mensaje.
+    // La línea que calcula el IVA solo NUNCA va (Eduardo 14-ago). El SUBTOTAL
+    // sin IVA vuelve, pero solo con DOS O MÁS líneas: ahí suma —deja ver cómo
+    // se llega al total—; con una sola línea es repetir el mismo número.
+    if (itemsRecurrentes.length >= 2) {
+      partes.push(`Subtotal sin IVA: ${fmtUF(subtotalRecurrenteUF)} UF`)
+    }
     partes.push(`Total mensual con IVA: ${fmtUF(totalRecurrenteUF)} UF`)
     partes.push(
       `Equivalente: $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes (UF del día: $${fmtNumCL(ufActual, 2)})`,
@@ -566,6 +569,9 @@ export async function cotizarReferencial(args: {
     partes.push("")
     partes.push(itemsUnicos.map(formatItem).join("\n"))
     partes.push("")
+    if (itemsUnicos.length >= 2) {
+      partes.push(`Subtotal sin IVA: ${fmtUF(subtotalUnicoUF)} UF`)
+    }
     partes.push(`Total único con IVA: ${fmtUF(totalUnicoUF)} UF`)
     partes.push(`Equivalente único: $${fmtNumCL(totalUnicoCLP, 0)} CLP`)
   }
