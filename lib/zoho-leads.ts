@@ -432,6 +432,26 @@ async function ejecutarTransicionBlueprint(
         error: `blueprint PUT ${exec.status}: ${JSON.stringify(execData).slice(0, 600)}`,
       }
     }
+    // VERIFICAR que de verdad se movió (Eduardo 14-ago). Hay transiciones que
+    // responden SUCCESS y dejan el lead donde estaba —el salto a
+    // "4. Calificado" lo hace— y ese falso éxito hacía que la conciliación
+    // reportara leads corregidos que en el CRM seguían atrás. Mejor decir que
+    // falló y que quede a la vista.
+    const check = await fetch(`${apiDomain}/crm/v3/${moduleName}/${leadId}?fields=Lead_Status`, {
+      headers,
+      cache: "no-store",
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+    const quedo = String(
+      (((check as { data?: Array<{ Lead_Status?: string }> } | null)?.data || [])[0]?.Lead_Status) || "",
+    ).trim()
+    if (quedo && quedo.toLowerCase() !== status.toLowerCase()) {
+      return {
+        success: false,
+        error: `blueprint aceptó la transición "${match.name || match.id}" pero el lead quedó en "${quedo}" (pedido "${status}")`,
+      }
+    }
     return { success: true }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción blueprint" }
