@@ -829,12 +829,34 @@ export async function runAgentLoop(params: {
           // "un ejecutivo te entrega el precio" — el deal NO puede quedar
           // esperando en Vicky hasta el reloj de 120': la tómbola sortea y
           // notifica al nacer, para cualquier N (los >50 ya funcionaban así).
-          void sincronizarHitoCrm(
-            contact,
-            "intencion",
-            datosDeToolInput(toolName, toolInput),
-            { sorteoInmediato: true },
-          ).catch(() => undefined)
+          // SÍNCRONO (Eduardo 14-ago): el hito entrega el lead a la tómbola
+          // de LEADS y necesitamos saber QUIÉN quedó asignado para
+          // presentarlo en esta misma respuesta y ofrecer reunión con él.
+          // Timeout de 8s: si Zoho se demora, el cliente igual recibe su
+          // mensaje (sin nombre) y el registro se completa por detrás.
+          await Promise.race([
+            sincronizarHitoCrm(contact, "intencion", datosDeToolInput(toolName, toolInput), {
+              sorteoInmediato: true,
+            }).catch(() => undefined),
+            new Promise((r) => setTimeout(r, 8000)),
+          ])
+          // Datos del ejecutivo que sorteó la tómbola de leads: se los pasamos
+          // al modelo dentro del resultado de la tool para que lo presente y
+          // ofrezca agendar una reunión con él.
+          const { leerEjecutivoAsignado } = await import("./crm-hitos")
+          const ejec = await leerEjecutivoAsignado(contact).catch(() => null)
+          if (ejec && (ejec.nombre || ejec.email) && result && typeof result === "object") {
+            ;(result as Record<string, unknown>).ejecutivoAsignado = {
+              nombre: ejec.nombre,
+              email: ejec.email,
+              telefono: ejec.telefono || "",
+            }
+            ;(result as Record<string, unknown>).instruccionPresentacion =
+              `PRESENTA a ${ejec.nombre || "tu ejecutivo"} al cliente EN ESTE MENSAJE: su nombre` +
+              (ejec.telefono ? `, su teléfono ${ejec.telefono}` : "") +
+              (ejec.email ? ` y su correo ${ejec.email}` : "") +
+              `. Y pregúntale si quiere que le dejes AGENDADA una reunión con ${ejec.nombre || "él"} (si acepta, pide su correo y usa consultar_disponibilidad_horario + agendar_reunion).`
+          }
         }
 
         const esRedireccionSoporte =

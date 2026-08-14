@@ -674,6 +674,33 @@ async function convertirConDeal(
   // reunión); sin reunión, vuelve a la tómbola de leads de Aracelli/Aleydis,
   // que califican y ahí recién el deal nace en su tramo real. Dueño humano
   // previo no se pisa: esa gestión ya tiene responsable.
+  // SOBRE EL UMBRAL = LEAD, NO TRATO (Eduardo 14-ago, corrige la regla del
+  // 06-ago): la derivación por dotación fuera del rango de Vicky entrega el
+  // caso a la TÓMBOLA DE LEADS de ejecutivos comerciales — el deal lo crea
+  // después el ejecutivo cuando corresponda. Antes nacía un trato aunque
+  // nadie hubiera hablado con el cliente. El owner sorteado se devuelve para
+  // que Vicky pueda presentarlo y ofrecer reunión con él.
+  if (sorteoInmediato && territorio === "Chile") {
+    if (heredaGestionAlDeal(lead.ownerId, territorio)) {
+      console.log(`[crm-hitos] +${contact}: sobre-umbral con dueño humano previo — se conserva`)
+      return null
+    }
+    const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
+    const r = await reasignarLeadCalificacionCL(lead.id, { calificado: empleados > 0 }).catch(
+      () => null,
+    )
+    console.log(
+      `[crm-hitos] +${contact}: sobre-umbral → tómbola de LEADS (${r?.ownerEmail || "sin asignar"}), sin crear trato`,
+    )
+    if (r?.ownerId || r?.ownerEmail) {
+      await guardarEjecutivoAsignado(contact, {
+        id: r.ownerId || "",
+        nombre: r.ownerNombre || "",
+        email: r.ownerEmail || "",
+      })
+    }
+    return null
+  }
   if (territorio === "Chile" && empleados <= 0) {
     if (ownerForzadoId) {
       await fetch(`${api}/crm/v3/Leads`, {
@@ -1066,6 +1093,53 @@ async function dejarLeadPreFormal(
     console.log(`[crm-hitos] ${clean}: hito "${hito}" pre-formal — LEAD ${lead.id} actualizado; el deal nace con la cotización formal (biblia 12-ago)`)
   } catch (e) {
     console.warn(`[crm-hitos] dejarLeadPreFormal falló para ${clean}:`, e instanceof Error ? e.message : e)
+  }
+}
+
+/** Ejecutivo sorteado en una derivación sobre-umbral: se guarda para que la
+ * tool pueda presentarlo al cliente EN EL MISMO turno (Eduardo 14-ago: "al
+ * asignar, Vicky debe devolver los datos del ejecutivo y preguntar si quiere
+ * dejar una reunión agendada con él"). El teléfono sale de su ficha de
+ * usuario en Zoho; sin teléfono se presenta igual, con nombre y correo. */
+export type EjecutivoAsignado = { id: string; nombre: string; email: string; telefono?: string }
+
+export async function guardarEjecutivoAsignado(
+  contact: string,
+  ejec: EjecutivoAsignado,
+): Promise<void> {
+  try {
+    let telefono = ""
+    if (ejec.id) {
+      const { h, api } = await zohoHeaders()
+      const r = await fetch(`${api}/crm/v3/users/${ejec.id}`, { headers: h, cache: "no-store" })
+      if (r.ok) {
+        const u = ((await r.json().catch(() => ({}))) as {
+          users?: Array<{ phone?: string; mobile?: string; full_name?: string; email?: string }>
+        }).users?.[0]
+        telefono = String(u?.phone || u?.mobile || "").trim()
+        if (!ejec.nombre && u?.full_name) ejec.nombre = u.full_name
+        if (!ejec.email && u?.email) ejec.email = u.email
+      }
+    }
+    const { setKvValue } = await import("./supabase-persistence-v3")
+    await setKvValue(
+      `ejec_sobre_umbral_${contact.replace(/\D/g, "")}`,
+      JSON.stringify({ ...ejec, telefono, at: Date.now() }),
+    )
+  } catch {
+    /* best-effort: sin esto la derivación igual queda registrada */
+  }
+}
+
+export async function leerEjecutivoAsignado(contact: string): Promise<EjecutivoAsignado | null> {
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const raw = await getKvValue(`ejec_sobre_umbral_${contact.replace(/\D/g, "")}`)
+    if (!raw) return null
+    const j = JSON.parse(raw) as EjecutivoAsignado & { at?: number }
+    return j?.nombre || j?.email ? j : null
+  } catch {
+    return null
   }
 }
 
