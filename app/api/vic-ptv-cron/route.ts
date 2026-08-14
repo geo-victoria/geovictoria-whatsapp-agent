@@ -368,11 +368,24 @@ async function conciliarStatusLeads(): Promise<number> {
       let tocado = false
 
       if (meta > actual) {
+        // ESCALÓN POR ESCALÓN: el Lead_Status vive bajo Blueprint y solo
+        // existen transiciones entre estados CONSECUTIVOS. Pedir el salto de
+        // "2. Intento de contacto" a "4. Calificado" de una vez devolvía
+        // éxito sin mover nada (dos leads CO con precio dado se quedaron en
+        // 2). Se sube de a un peldaño hasta llegar al objetivo.
         const { updateZohoLeadStatus } = await import("@/lib/zoho-leads")
-        const r = await updateZohoLeadStatus(ld.id, objetivo).catch(() => ({ success: false }))
-        if (r.success) {
+        const escalera = Object.entries(ORDEN_STATUS_LEAD)
+          .filter(([, n]) => n > actual && n <= meta)
+          .sort((a2, b2) => a2[1] - b2[1])
+          .map(([nombre]) => nombre)
+        for (const paso of escalera) {
+          const r = await updateZohoLeadStatus(ld.id, paso).catch(() => ({ success: false }))
+          if (!r.success) {
+            console.warn(`[ptv] lead ${ld.id} no pudo subir a "${paso}" — se detiene la escalera`)
+            break
+          }
           tocado = true
-          console.log(`[ptv] lead ${ld.id} status "${ld.Lead_Status}" → "${objetivo}" (conversación)`)
+          console.log(`[ptv] lead ${ld.id} status → "${paso}" (conversación, objetivo "${objetivo}")`)
         }
       }
 
