@@ -5726,7 +5726,13 @@ export async function GET(req: Request): Promise<Response> {
         ? {
             cotizaciones: cierre.total,
             aceptadas: cierre.aceptadas,
-            tasaEndToEnd: vieronPrecio ? Math.round((cierre.aceptadas / vieronPrecio) * 100) : 0,
+            tasaEndToEnd: (() => {
+              const base =
+                [...preformAtMap.values()].filter((at) => !rango || enRango(at, rango)).length +
+                cierre.quotesList.length
+              const pag = cierre.aceptadasList.filter((q) => esPagada(q)).length
+              return base ? Math.round((pag / base) * 100) : 0
+            })(),
             objetivo: pais === "cl" ? 30 : 10,
           }
         : null,
@@ -5958,6 +5964,17 @@ export async function GET(req: Request): Promise<Response> {
   const slaHtml = vista === "analisis" ? await renderPanelSla().catch(() => "") : ""
   const plantillasHtml = vista === "analisis" ? await renderPanelPlantillas().catch(() => "") : ""
   {
+    // DENOMINADOR DE LA TASA DE CIERRE (Lalo 14-ago — el dash marcó 300%):
+    // antes se usaban los BUCKETS de conversación (cPreform + cEnviada), que
+    // se cuentan por fecha de la CONVERSACIÓN mientras las pagadas se cuentan
+    // por fecha de PAGO. Con un rango de un día el descalce daba tasas
+    // imposibles. Ahora el denominador son las MISMAS series del gráfico y
+    // del mismo período: precios mostrados + formales emitidas.
+    const preformsPeriodo = [...preformAtMap.values()].filter(
+      (at) => !rango || enRango(at, rango),
+    ).length
+    const formalesPeriodo = cierre?.quotesList.length ?? 0
+    const vieronPrecioBase = preformsPeriodo + formalesPeriodo
     const vieronPrecio = cPreform + cEnviada
     const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
     const abandonoPreform = vieronPrecio ? `${Math.round((cPreform / vieronPrecio) * 100)}% de abandono tras ver precio` : ""
@@ -5974,20 +5991,20 @@ export async function GET(req: Request): Promise<Response> {
       // Tasa de cierre = SOLO PAGADAS del período ÷ vieron precio del período
       // (Rodrigo 13-ago): la aceptación no es plata; sale del numerador.
       const pagadasN = cierre.aceptadasList.filter((q) => esPagada(q)).length
-      const endToEnd = vieronPrecio ? Math.round((pagadasN / vieronPrecio) * 100) : 0
+      const endToEnd = vieronPrecioBase ? Math.round((pagadasN / vieronPrecioBase) * 100) : 0
       // Objetivo de cierre POR PAÍS (Lalo 28-jul): Chile 30%; Colombia, Perú y
       // México 10% — los programas nuevos maduran distinto.
       const TARGET_PCT = pais === "cl" ? 30 : 10
-      const metaExacta = (TARGET_PCT / 100) * vieronPrecio
-      const cumpleMeta = vieronPrecio > 0 && pagadasN >= metaExacta
+      const metaExacta = (TARGET_PCT / 100) * vieronPrecioBase
+      const cumpleMeta = vieronPrecioBase > 0 && pagadasN >= metaExacta
       const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - pagadasN))
       const faltanNuevas = Math.max(0, Math.ceil((metaExacta - pagadasN) / (1 - TARGET_PCT / 100)))
       const leyendaObjetivo = cumpleMeta
-        ? "vio precio → PAGADA · objetivo alcanzado 🎉"
-        : `vio precio → PAGADA · faltan ${faltanEnviadas} pago${faltanEnviadas === 1 ? "" : "s"} de cotizaciones ya enviadas · o ${faltanNuevas} con cotizaciones nuevas`
+        ? `${pagadasN} pagadas ÷ ${vieronPrecioBase} que vieron precio (${preformsPeriodo} preform + ${formalesPeriodo} formales) · objetivo alcanzado 🎉`
+        : `${pagadasN} pagadas ÷ ${vieronPrecioBase} que vieron precio (${preformsPeriodo} preform + ${formalesPeriodo} formales) · faltan ${faltanEnviadas} pago${faltanEnviadas === 1 ? "" : "s"} para la meta`
       const colorObjetivo = cumpleMeta ? col.best : col.warn
       const avanceMeta = Math.min(100, Math.round((endToEnd / TARGET_PCT) * 100))
-      tasaCierreHtml = vieronPrecio
+      tasaCierreHtml = vieronPrecioBase
         ? `<div class="kpis"><div class="kpi hero">
         <div class="kpi-v"><span style="color:${colorObjetivo}">${endToEnd}%</span> <span class="hero-meta">de cierre real · objetivo ${TARGET_PCT}%</span></div>
         <div class="hero-bar"><div style="width:${avanceMeta}%;background:${colorObjetivo}"></div></div>
