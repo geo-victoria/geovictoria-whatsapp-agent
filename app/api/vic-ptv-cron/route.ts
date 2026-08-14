@@ -252,7 +252,11 @@ async function enriquecerLeadsDeChat(): Promise<number> {
     const token = await getZohoAccessToken()
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
-    const desde = new Date(Date.now() - 14 * 86400e3).toISOString().slice(0, 10)
+    // Ventana de 60 días: con 14 quedaban fuera las 51 fichas del lote del
+    // 29-jul, que es justo donde se concentra el "Prospecto WhatsApp" que se
+    // ve en el CRM. La ventana existe para no barrer el histórico completo en
+    // cada tick, no para dejar cohortes sin conciliar.
+    const desde = new Date(Date.now() - 60 * 86400e3).toISOString().slice(0, 10)
     // COQL exige que CADA comparación vaya entre paréntesis y que las
     // combinaciones se aniden de a dos. Sin eso responde SYNTAX_ERROR — y
     // como el error se traga con `return 0`, este conciliador llevaba desde
@@ -282,7 +286,7 @@ async function enriquecerLeadsDeChat(): Promise<number> {
     }).data || [])
     let hechos = 0
     for (const ld of filas) {
-      if (hechos >= 6) break
+      if (hechos >= 10) break
       const fono = String(ld.Phone || "").replace(/\D/g, "")
       if (!fono) continue
       // Candado de intento: un lead se procesa a lo más una vez cada 6h.
