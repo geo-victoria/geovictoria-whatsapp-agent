@@ -172,3 +172,19 @@ describe("arriendo del reloj por zona (caso Aysén 13-ago)", () => {
     )
   })
 })
+
+describe("cuadrilla en punto fijo con supervisor (Eduardo 14-ago)", () => {
+  test("el prompt CL obliga a ofrecer cuadrilla donde hay responsable a cargo", () => {
+    // Caso real: una planta productiva recibió solo app + reloj. Donde hay un
+    // supervisor a cargo la cuadrilla es la mejor opción (sin costo adicional
+    // y sin depender del celular de cada trabajador) — la regla no puede
+    // quedar solo en la cabeza del modelo.
+    const p = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts"), "utf8")
+    const bloque = p.slice(p.indexOf("REGLAS DE FIT POR MODALIDAD"), p.indexOf("REGLAS DE FIT POR MODALIDAD") + 2600)
+    assert.match(bloque, /SUPERVISOR o RESPONSABLE/i)
+    assert.match(bloque, /planta productiva/i)
+    assert.match(bloque, /cuadrilla ENTRA al menú/i)
+    // Y el reloj en punto fijo nunca va solo.
+    assert.match(bloque, /NUNCA lo listes solo/i)
+  })
+})
