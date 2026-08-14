@@ -5732,9 +5732,7 @@ export async function GET(req: Request): Promise<Response> {
             cotizaciones: cierre.total,
             aceptadas: cierre.aceptadas,
             tasaEndToEnd: (() => {
-              const base =
-                [...preformAtMap.values()].filter((at) => !rango || enRango(at, rango)).length +
-                cierre.quotesList.length
+              const base = [...preformAtMap.values()].filter((at) => !rango || enRango(at, rango)).length
               const pag = cierre.aceptadasList.filter((q) => esPagada(q)).length
               return base ? Math.round((pag / base) * 100) : 0
             })(),
@@ -5978,8 +5976,10 @@ export async function GET(req: Request): Promise<Response> {
     const preformsPeriodo = [...preformAtMap.values()].filter(
       (at) => !rango || enRango(at, rango),
     ).length
-    const formalesPeriodo = cierre?.quotesList.length ?? 0
-    const vieronPrecioBase = preformsPeriodo + formalesPeriodo
+    // Denominador = SOLO los precios mostrados del período (Lalo 14-ago): la
+    // formal no entra — quien recibe formal ya vio precio antes, sumarla
+    // duplicaría la base.
+    const vieronPrecioBase = preformsPeriodo
     const vieronPrecio = cPreform + cEnviada
     const pasoPreform = vieronPrecio ? `${Math.round((cEnviada / vieronPrecio) * 100)}% de los que vieron precio` : ""
     const abandonoPreform = vieronPrecio ? `${Math.round((cPreform / vieronPrecio) * 100)}% de abandono tras ver precio` : ""
@@ -6005,8 +6005,8 @@ export async function GET(req: Request): Promise<Response> {
       const faltanEnviadas = Math.max(0, Math.ceil(metaExacta - pagadasN))
       const faltanNuevas = Math.max(0, Math.ceil((metaExacta - pagadasN) / (1 - TARGET_PCT / 100)))
       const leyendaObjetivo = cumpleMeta
-        ? `${pagadasN} pagadas ÷ ${vieronPrecioBase} que vieron precio (${preformsPeriodo} preform + ${formalesPeriodo} formales) · objetivo alcanzado 🎉`
-        : `${pagadasN} pagadas ÷ ${vieronPrecioBase} que vieron precio (${preformsPeriodo} preform + ${formalesPeriodo} formales) · faltan ${faltanEnviadas} pago${faltanEnviadas === 1 ? "" : "s"} para la meta`
+        ? `${pagadasN} pagadas ÷ ${vieronPrecioBase} precios mostrados · objetivo alcanzado 🎉`
+        : `${pagadasN} pagadas ÷ ${vieronPrecioBase} precios mostrados · faltan ${faltanEnviadas} pago${faltanEnviadas === 1 ? "" : "s"} para la meta`
       const colorObjetivo = cumpleMeta ? col.best : col.warn
       const avanceMeta = Math.min(100, Math.round((endToEnd / TARGET_PCT) * 100))
       tasaCierreHtml = vieronPrecioBase
