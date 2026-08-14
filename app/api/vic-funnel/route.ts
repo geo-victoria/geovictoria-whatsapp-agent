@@ -2202,6 +2202,21 @@ function renderEvolucionDiaria(params: {
       var DET_VISIBLE = [], ETIQUETAS_X = [];
       // Ventana de DETALLE (Lalo 14-ago): al hacer clic en un punto se listan
       // las cotizaciones (o conversaciones) que componen ese número.
+      // Las líneas se pegan cerca del eje y el clic cae en la serie vecina
+      // (caso Lalo 14-ago: quería el 20 de canal ejecutivo y le abrió las 3
+      // pagadas). Por eso la ventana trae TODAS las series de ese día como
+      // botones: se entra por donde sea y se cambia sin cerrar.
+      function chipsDetalleEvo(serieIdx, puntoIdx) {
+        return SERIES.map(function (s, i) {
+          var n = ((DET_VISIBLE[i] && DET_VISIBLE[i][puntoIdx]) || []).length;
+          if (!n) return "";
+          var act = i === serieIdx;
+          return '<button type="button" data-serie="' + i + '" data-punto="' + puntoIdx + '" ' +
+            'style="border:1px solid ' + (act ? s.c : "#d0d5db") + ';background:' + (act ? s.c : "#fff") +
+            ';color:' + (act ? "#fff" : "#4e4e4e") + ';border-radius:99px;padding:3px 11px;margin:0 6px 6px 0;' +
+            'cursor:pointer;font-family:inherit;font-size:12px;font-weight:700">' + s.n + ' · ' + n + '</button>';
+        }).join("");
+      }
       function abrirDetalleEvo(serieIdx, puntoIdx) {
         var s = SERIES[serieIdx];
         var filas = (DET_VISIBLE[serieIdx] && DET_VISIBLE[serieIdx][puntoIdx]) || [];
@@ -2225,9 +2240,14 @@ function renderEvolucionDiaria(params: {
             }).join("") + '</tbody></table>';
         }
         document.getElementById("evoDetTitulo").textContent = titulo;
-        document.getElementById("evoDetCuerpo").innerHTML = cuerpo;
+        document.getElementById("evoDetCuerpo").innerHTML =
+          '<div style="margin:0 0 12px">' + chipsDetalleEvo(serieIdx, puntoIdx) + '</div>' + cuerpo;
         document.getElementById("evoDet").style.display = "flex";
       }
+      document.getElementById("evoDetCuerpo").addEventListener("click", function (e) {
+        var b = e.target.closest("button[data-serie]");
+        if (b) abrirDetalleEvo(Number(b.dataset.serie), Number(b.dataset.punto));
+      });
       function cerrarDetalleEvo() { document.getElementById("evoDet").style.display = "none"; }
       document.getElementById("evoDetCerrar").addEventListener("click", cerrarDetalleEvo);
       document.getElementById("evoDetFondo").addEventListener("click", cerrarDetalleEvo);
