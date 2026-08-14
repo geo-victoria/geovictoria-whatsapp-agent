@@ -456,15 +456,20 @@ async function ejecutarTransicionBlueprint(
         body: JSON.stringify({ blueprint: [{ transition_id: match.id, data }] }),
       },
     )
-    const execData = (await exec.json().catch(() => ({}))) as {
-      code?: string
-      status?: string
-      message?: string
-    }
+    // OJO con la forma de la respuesta: Zoho devuelve el resultado DENTRO de
+    // un arreglo ({"blueprint":[{code,status,message}]} o {"data":[...]}).
+    // Mirar solo el nivel superior daba "éxito" a errores per-registro — así
+    // es como la transición a "4. Calificado" venía fallando en silencio.
+    const execRaw = (await exec.json().catch(() => ({}))) as Record<string, unknown>
+    const primero =
+      (Array.isArray(execRaw?.blueprint) ? execRaw.blueprint[0] : undefined) ||
+      (Array.isArray(execRaw?.data) ? execRaw.data[0] : undefined) ||
+      execRaw
+    const execData = (primero || {}) as { code?: string; status?: string; message?: string }
     if (!exec.ok || (execData?.code && execData.code !== "SUCCESS")) {
       return {
         success: false,
-        error: `blueprint PUT ${exec.status}: ${JSON.stringify(execData).slice(0, 600)}`,
+        error: `blueprint PUT ${exec.status}: ${JSON.stringify(execRaw).slice(0, 600)}`,
       }
     }
     // VERIFICAR que de verdad se movió (Eduardo 14-ago). Hay transiciones que
