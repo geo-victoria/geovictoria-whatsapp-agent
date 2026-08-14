@@ -2470,7 +2470,9 @@ function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | nu
   const filas = [...dias].reverse().map((d) => {
     const i = idx.get(d)!
     const lleg = acumuladas[0][i]
+    const vioPrecio = acumuladas[2][i]
     const pag = acumuladas[5][i]
+    void lleg
     return `<tr>
       <td style="white-space:nowrap">${nombreDia(d)}</td>
       ${celda(d, 0, "llegaron", true)}
@@ -2479,7 +2481,7 @@ function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | nu
       ${celda(d, 3, "formal")}
       ${celda(d, 4, "aceptada")}
       ${celda(d, 5, "pagada", true)}
-      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, lleg)}</td>
+      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}</td>
     </tr>`
   }).join("")
   const celdaTotal = (v: number, etapa: EtapaInbound) =>
@@ -2487,7 +2489,7 @@ function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | nu
   const filaTotal = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc">
     <td><b>TOTAL</b></td>
     ${celdaTotal(tLleg, "llegaron")}${celdaTotal(tCom, "comercial")}${celdaTotal(tPre, "precio")}${celdaTotal(tFor, "formal")}${celdaTotal(tAce, "aceptada")}${celdaTotal(tPag, "pagada")}
-    <td style="text-align:center"><b>${pctDe(tPag, tLleg)}</b></td>
+    <td style="text-align:center"><b>${pctDe(tPag, tPre)}</b></td>
   </tr>`
   // Barras apiladas: cada segmento = etapa EXACTA alcanzada (suman "llegaron").
   const SEGMENTOS = [
@@ -2500,12 +2502,12 @@ function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | nu
   ]
   const series = SEGMENTOS.map((s) => ({ n: s.n, c: s.color, y: exactas[s.e] }))
   return `<div class="card"><h2>📥 Oportunidades inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"}</span></h2>
-  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> oportunidades llegaron (${prom}/día) · ${tCom} con intención (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio (${pctDe(tPre, tLleg)}) · ${tFor} con formal · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tLleg)} de cierre de cohorte)</div>
+  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> oportunidades llegaron (${prom}/día) · ${tCom} con intención (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio (${pctDe(tPre, tLleg)}) · ${tFor} con formal · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre sobre los que vieron precio)</div>
   <div id="inbDiaria" style="height:320px"></div>
   <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
     <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre</th>
   </tr></thead><tbody>${filas}${filaTotal}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">EMBUDO POR COHORTE: cada fila cuenta las oportunidades INBOUND (el cliente escribió solo por WhatsApp, sin toque outbound previo) cuya PRIMERA conversación partió ese día, y hasta dónde ha llegado cada una HOY — aunque el hito haya ocurrido días después. Por eso los días recientes maduran con el tiempo: la cohorte de hoy puede sumar formales y pagos mañana. Distinto del 📈 Evolución de Análisis y KPIs (esa es foto diaria de eventos). Cierre = pagadas ÷ llegadas de la cohorte. Hora de Chile. Clic en cualquier número para ver las empresas detrás.</div>
+  <div class="sub" style="margin:8px 0 0">EMBUDO POR COHORTE: cada fila cuenta las oportunidades INBOUND (el cliente escribió solo por WhatsApp, sin toque outbound previo) cuya PRIMERA conversación partió ese día, y hasta dónde ha llegado cada una HOY — aunque el hito haya ocurrido días después. Por eso los días recientes maduran con el tiempo: la cohorte de hoy puede sumar formales y pagos mañana. Distinto del 📈 Evolución de Análisis y KPIs (esa es foto diaria de eventos). Cierre = pagadas ÷ los que VIERON PRECIO (misma definición que la tasa de Análisis y KPIs, Lalo 14-ago). Cuenta solo lo que Vicky inició: las cotizaciones que los ejecutivos emiten a clientes propios y los contactos internos quedan fuera. Hora de Chile. Clic en cualquier número para ver las empresas detrás.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
