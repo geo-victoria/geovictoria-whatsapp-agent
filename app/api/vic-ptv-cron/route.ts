@@ -38,6 +38,7 @@ import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { despacharHuerfanos } from "@/lib/despachador-huerfanos"
+import { fichaEmpresaSii, rutEnTexto } from "@/lib/empresas-sii"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -161,8 +162,49 @@ async function notaTraspasoConversacion(leadId: string, fono: string): Promise<v
  * vacíos del lead — jamás pisa datos reales ni gestión. Candado de intento de
  * 6h por lead en vic_kv (`enrq_<leadId>`) para no martillar. Best-effort.
  */
-const RE_NOMBRE_PLACEHOLDER = /^prospecto( whatsapp)?$/i
+// El lead placeholder nace con nombre "Prospecto WhatsApp", y Zoho lo PARTE
+// en First_Name="Prospecto" + Last_Name="WhatsApp". Mirar solo el apellido
+// (bug hasta el 14-ago) hacía que la condición no calzara NUNCA: el nombre
+// jamás se completaba, y por eso Lalo seguía viendo "Prospecto WhatsApp" en
+// leads donde el cliente sí se había presentado.
+const RE_NOMBRE_PLACEHOLDER = /^(prospecto|whatsapp|prospecto whatsapp)$/i
 const RE_EMPRESA_PLACEHOLDER = /^(por identificar|prospecto whatsapp)/i
+
+/** ¿El nombre del registro sigue siendo el placeholder? Se evalúa el nombre
+ * COMPLETO, no una de sus mitades. */
+function nombreEsPlaceholder(first?: string, last?: string): boolean {
+  const f = String(first || "").trim()
+  const l = String(last || "").trim()
+  const completo = `${f} ${l}`.trim()
+  if (!completo) return true
+  if (RE_NOMBRE_PLACEHOLDER.test(completo)) return true
+  return (!f || RE_NOMBRE_PLACEHOLDER.test(f)) && (!l || RE_NOMBRE_PLACEHOLDER.test(l))
+}
+
+/** PUT genérico a Zoho para los registros que NACIERON del lead. Los updates
+ * que no pasan por una assignment rule llevan skip (regla Lalo 31-jul). */
+async function putZoho(
+  api: string,
+  H: Record<string, string>,
+  modulo: string,
+  id: string,
+  campos: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    const r = await fetch(`${api}/crm/v3/${modulo}/${id}`, {
+      method: "PUT",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ id, ...campos }],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
 
 async function extraerDatosLeadDeChat(
   dialogo: string,
@@ -212,15 +254,25 @@ async function enriquecerLeadsDeChat(): Promise<number> {
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const desde = new Date(Date.now() - 14 * 86400e3).toISOString().slice(0, 10)
     const q =
-      `select id, First_Name, Last_Name, Company, Phone, Email from Leads ` +
-      `where (Last_Name = 'Prospecto WhatsApp' or Last_Name = 'Prospecto' or Company like 'Por identificar%') ` +
+      `select id, First_Name, Last_Name, Company, Phone, Email, RUT_Empresa, Converted__s from Leads ` +
+      `where (First_Name = 'Prospecto' or Last_Name = 'Prospecto WhatsApp' or Last_Name = 'Prospecto' ` +
+      `or Company like 'Por identificar%') ` +
       `and Created_Time >= '${desde}T00:00:00-04:00' order by Created_Time desc limit 25`
     const res = await fetch(`${api}/crm/v3/coql`, {
       method: "POST", headers: H, cache: "no-store", body: JSON.stringify({ select_query: q }),
     })
     if (!res.ok) return 0
     const filas = (((await res.json().catch(() => ({}))) as {
-      data?: Array<{ id: string; First_Name?: string; Last_Name?: string; Company?: string; Phone?: string; Email?: string }>
+      data?: Array<{
+        id: string
+        First_Name?: string
+        Last_Name?: string
+        Company?: string
+        Phone?: string
+        Email?: string
+        RUT_Empresa?: string
+        Converted__s?: boolean
+      }>
     }).data || [])
     let hechos = 0
     for (const ld of filas) {
@@ -255,23 +307,116 @@ async function enriquecerLeadsDeChat(): Promise<number> {
         .slice(0, 6000)
       if (!dialogo.includes("CLIENTE:")) continue
       const ex = await extraerDatosLeadDeChat(dialogo, apiKey)
-      if (!ex) continue
+      // El RUT NO se le pide al modelo: se detecta con el validador de dígito
+      // verificador sobre lo que escribió el CLIENTE. De ahí sale la razón
+      // social del padrón SII — desde el 13-ago Vicky ya no pregunta el
+      // nombre de la empresa (era fricción), así que el RUT es la ÚNICA
+      // fuente confiable para dejar de ver "Por identificar" en el CRM.
+      const soloCliente = dialogo
+        .split("\n")
+        .filter((l) => l.startsWith("CLIENTE:"))
+        .join("\n")
+      const rutChat = fono.startsWith("56") ? rutEnTexto(soloCliente) : null
+      let razonSii = ""
+      if (rutChat) {
+        const ficha = await fichaEmpresaSii(rutChat).catch(() => null)
+        razonSii = ficha?.razonSocial || ""
+      }
+      if (!ex && !rutChat) continue
+      const empresaNueva = (ex?.empresa || razonSii || "").slice(0, 200)
+      const nombreCliente = ex?.nombre || ""
+
       const campos: Record<string, string> = {}
-      if (ex.nombre && RE_NOMBRE_PLACEHOLDER.test(String(ld.Last_Name || "").trim())) {
-        const partes = ex.nombre.split(/\s+/)
+      if (nombreCliente && nombreEsPlaceholder(ld.First_Name, ld.Last_Name)) {
+        const partes = nombreCliente.split(/\s+/)
         if (partes[0]) campos.First_Name = partes[0].slice(0, 100)
         campos.Last_Name = (partes.slice(1).join(" ") || partes[0] || "").slice(0, 100) || "Prospecto"
       }
-      if (ex.empresa && RE_EMPRESA_PLACEHOLDER.test(String(ld.Company || "").trim())) {
-        campos.Company = ex.empresa.slice(0, 200)
+      if (empresaNueva && RE_EMPRESA_PLACEHOLDER.test(String(ld.Company || "").trim())) {
+        campos.Company = empresaNueva
       }
-      if (ex.email && !String(ld.Email || "").trim()) campos.Email = ex.email
-      if (ex.trabajadores) {
+      if (ex?.email && !String(ld.Email || "").trim()) campos.Email = ex.email
+      if (rutChat && !String(ld.RUT_Empresa || "").trim()) campos.RUT_Empresa = rutChat
+      if (ex?.trabajadores) {
         const { mapRangoEmpleados } = await import("@/lib/zoho-leads")
         const rango = mapRangoEmpleados(ex.trabajadores)
         if (rango) campos.Rango_de_Empleados = rango
       }
       if (Object.keys(campos).length === 0) continue
+
+      // ¿DÓNDE va el dato? Mientras el lead está vivo, en el lead. Una vez
+      // CONVERTIDO, el lead queda congelado y lo que la gente mira son el
+      // trato, la cuenta y el contacto: ahí hay que ir a dejarlo (Lalo
+      // 14-ago). El propio lead guarda a dónde fue: Converted_Deal /
+      // Converted_Account / Converted_Contact.
+      if (ld.Converted__s) {
+        const det = await fetch(
+          `${api}/crm/v3/Leads/${ld.id}?fields=Converted_Deal,Converted_Account,Converted_Contact`,
+          { headers: H, cache: "no-store" },
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+        const reg = ((det as { data?: Array<Record<string, { id?: string } | null>> } | null)?.data ||
+          [])[0] as Record<string, { id?: string } | null> | undefined
+        const dealId = reg?.Converted_Deal?.id || ""
+        const accountId = reg?.Converted_Account?.id || ""
+        const contactId = reg?.Converted_Contact?.id || ""
+        let tocados = 0
+        if (dealId && (campos.Company || campos.RUT_Empresa)) {
+          const dealActual = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Rut_ID_Account`, {
+            headers: H,
+            cache: "no-store",
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+          const d = ((dealActual as { data?: Array<Record<string, unknown>> } | null)?.data || [])[0] || {}
+          const nombreDeal = String(d.Deal_Name || "")
+          const campoDeal: Record<string, unknown> = {}
+          if (campos.Company && RE_EMPRESA_PLACEHOLDER.test(nombreDeal)) {
+            campoDeal.Deal_Name = `${campos.Company} (Control de Asistencia)`
+          }
+          if (campos.RUT_Empresa && !String(d.Rut_ID_Account || "").trim()) {
+            campoDeal.Rut_ID_Account = campos.RUT_Empresa
+          }
+          if (Object.keys(campoDeal).length && (await putZoho(api, H, "Deals", dealId, campoDeal))) tocados++
+        }
+        if (accountId && campos.Company) {
+          const cuentaActual = await fetch(`${api}/crm/v3/Accounts/${accountId}?fields=Account_Name`, {
+            headers: H,
+            cache: "no-store",
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+          const ac = ((cuentaActual as { data?: Array<Record<string, unknown>> } | null)?.data || [])[0] || {}
+          if (RE_EMPRESA_PLACEHOLDER.test(String(ac.Account_Name || ""))) {
+            if (await putZoho(api, H, "Accounts", accountId, { Account_Name: campos.Company })) tocados++
+          }
+        }
+        if (contactId && (campos.First_Name || campos.Email)) {
+          const contactoActual = await fetch(
+            `${api}/crm/v3/Contacts/${contactId}?fields=First_Name,Last_Name,Email`,
+            { headers: H, cache: "no-store" },
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+          const co = ((contactoActual as { data?: Array<Record<string, unknown>> } | null)?.data || [])[0] || {}
+          const campoCont: Record<string, unknown> = {}
+          if (campos.First_Name && nombreEsPlaceholder(String(co.First_Name || ""), String(co.Last_Name || ""))) {
+            campoCont.First_Name = campos.First_Name
+            campoCont.Last_Name = campos.Last_Name
+          }
+          if (campos.Email && !String(co.Email || "").trim()) campoCont.Email = campos.Email
+          if (Object.keys(campoCont).length && (await putZoho(api, H, "Contacts", contactId, campoCont))) tocados++
+        }
+        if (tocados) {
+          hechos++
+          console.log(
+            `[ptv] lead ${ld.id} CONVERTIDO — dato llevado a ${tocados} registro(s) vivos: ${Object.keys(campos).join(", ")}`,
+          )
+        }
+        continue
+      }
+
       const { updateZohoLeadFields } = await import("@/lib/zoho-leads")
       const ok = await updateZohoLeadFields(ld.id, campos).catch(() => ({ success: false }))
       if (ok.success) {
