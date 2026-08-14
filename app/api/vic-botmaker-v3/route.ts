@@ -470,6 +470,26 @@ async function processOneTurn(
         ? "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de elegir un marcaje que INCLUYE reloj (o dijo 'mixto'). PROHIBIDO preguntarle cuántos relojes o cuántos puntos necesita: ASUME 1 punto y 1 reloj y decláralo en tu mensaje. Si aún no sabes la comuna de ese punto, tu ÚNICA pregunta de este turno es la comuna; si ya la sabes, cotiza AHORA con cotizar_referencial (1 punto, autoInstalada: true) presentando el doble valor (con y sin reloj)."
         : ""
 
+    // Directiva determinista de la ETAPA CONSULTIVA (Eduardo 14-ago, caso
+    // Rodrigo): Vicky preguntó por la operación, el cliente respondió, y ella
+    // volvió a preguntar lo mismo con otras palabras. Si en el historial YA
+    // hay una pregunta consultiva suya y este mensaje es la respuesta del
+    // cliente, se prohíbe repreguntar: toca parafrasear y mostrar el menú.
+    const RE_PREGUNTA_OPERACION =
+      /(sobre tu operaci[oó]n|c[oó]mo trabaja tu equipo|a qu[eé] se dedican|una sola oficina o varias|cu[eé]ntame un poco (m[aá]s )?de tu operaci[oó]n)/i
+    const yaPregunto = (history || []).some(
+      (h) => h.role === "assistant" && RE_PREGUNTA_OPERACION.test(String(h.content || "")),
+    )
+    const yaMostroMenu = (history || []).some(
+      (h) =>
+        h.role === "assistant" &&
+        /formas m[aá]s usadas para marcar|te acomoda m[aá]s para tu operaci[oó]n/i.test(String(h.content || "")),
+    )
+    const directivaConsultiva =
+      yaPregunto && !yaMostroMenu
+        ? "\n\n[DIRECTIVA DEL TURNO — obligatoria] YA hiciste la pregunta consultiva sobre la operación y el cliente acaba de responderla. PROHIBIDO volver a preguntar por su operación, su rubro o cómo trabaja su equipo (aunque su respuesta te parezca corta o incompleta): con lo que dijo, PARAFRASEA en una frase y presenta AHORA el menú de modalidades de marcaje que calzan con su caso, cerrando con la pregunta de cuál le acomoda. Si te falta algún dato para cotizar, pídelo DENTRO de ese mismo mensaje, nunca en un turno aparte."
+        : ""
+
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)
     const modelo = esFlujoCotizacion(message, history, prefEscalonPre, !!quotePointer)
@@ -491,7 +511,7 @@ async function processOneTurn(
     const result = await runAgentLoop({
       systemPrompt: onboarding
         ? onboarding.systemPrompt
-        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje,
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva,
       history,
       userMessage: message,
       apiKey,
