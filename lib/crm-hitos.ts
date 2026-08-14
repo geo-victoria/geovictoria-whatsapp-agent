@@ -1351,10 +1351,42 @@ export async function sincronizarHitoCrm(
           email: datos.email,
           trabajadores: datos.empleados,
         })
-        if (renacido.success) {
+        if (renacido.success && renacido.leadId) {
           console.log(
             `[crm-hitos] ${clean}: lead renacido ${renacido.leadId} (el anterior estaba convertido y sin deal vivo)`,
           )
+          // El lead renacido sigue el MISMO camino que uno nuevo (pregunta de
+          // Lalo 14-ago: "¿este lead pasará a la tómbola?"). Si no continuara,
+          // quedaría huérfano con el dueño por defecto: calificado (con N)
+          // → deal + tómbola de deals; sin N → tómbola de calificación. La
+          // ficha se arma con lo que trae el hito: el lead acaba de nacer.
+          const leadRenacido = {
+            id: String(renacido.leadId),
+            ownerId: "",
+            status: "1. No contactado",
+            company: datos.empresa || "",
+            empleados: datos.empleados || 0,
+            email: datos.email || "",
+            lastName: datos.nombre || "",
+            rut: datos.rut || "",
+            ultimaActividad: "",
+            convertido: false,
+            dealId: null,
+            contactId: null,
+            accountId: null,
+          } as typeof lead
+          if (dealSoloConFormal(territorioDeContacto(clean), hito)) {
+            await dejarLeadPreFormal(leadRenacido, clean, hito, ownerForzadoId, opts.sorteoInmediato)
+            return
+          }
+          const dealRenacido = await convertirConDeal(
+            leadRenacido,
+            clean,
+            piso,
+            ownerForzadoId || undefined,
+            opts.sorteoInmediato,
+          )
+          if (dealRenacido) await actualizarNotaTranscripcion(dealRenacido, clean)
           return
         }
         console.warn(`[crm-hitos] ${clean}: no se pudo renacer el lead sin deal vivo`)
