@@ -17,10 +17,11 @@
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 
 // Líneas de WhatsApp por país (mismas fuentes que el resto del código).
-const LINEA_POR_PAIS: Record<string, string> = {
+export const LINEA_POR_PAIS: Record<string, string> = {
   cl: (process.env.BOTMAKER_CHANNEL_NUMBER || "56967308227").replace(/\D/g, ""),
   co: (process.env.BOTMAKER_CHANNEL_NUMBER_CO || "573181070737").replace(/\D/g, ""),
   mx: (process.env.BOTMAKER_CHANNEL_NUMBER_MX || "5215659778486").replace(/\D/g, ""),
+  pe: (process.env.BOTMAKER_CHANNEL_NUMBER_PE || "51922067167").replace(/\D/g, ""),
 }
 
 /** País del contacto por prefijo telefónico; null si no es CL/CO/MX/PE. */

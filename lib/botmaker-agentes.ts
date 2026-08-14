@@ -19,6 +19,8 @@
  * la conversación del cliente.
  */
 
+import { LINEA_POR_PAIS, paisDeContacto } from "./botmaker-tags"
+
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 const BM_API = "https://api.botmaker.com"
 
@@ -153,19 +155,18 @@ export async function etiquetarChatConDueno(
   return { cambiado: true, etiqueta: nueva }
 }
 
-/** Línea por país para armar `<linea>:<contacto>` cuando no hay chatId. */
-export function lineaDePais(contact: string): string {
-  const c = String(contact || "").replace(/\D/g, "")
-  const env = (k: string) => (process.env[k] || "").replace(/\D/g, "")
-  if (c.startsWith("57")) return env("BOTMAKER_LINEA_CO") || "573242178172"
-  if (c.startsWith("52")) return env("BOTMAKER_LINEA_MX") || "5215585264756"
-  if (c.startsWith("51")) return env("BOTMAKER_LINEA_PE") || "51922067167"
-  return env("BOTMAKER_LINEA_CL") || "56967308227"
-}
-
-/** Referencia de chat de un contacto: la línea de su país + su número. */
+/**
+ * Referencia de chat de un contacto: `<línea del país>:<teléfono>`.
+ *
+ * Las líneas salen del MISMO mapa que usa el tagueo comercial desde julio
+ * (`LINEA_POR_PAIS`). Tenerlas duplicadas acá ya había producido números de
+ * CO y MX distintos de los productivos — y con la línea equivocada el PATCH
+ * apunta a un chat que no existe y la etiqueta se pierde en silencio.
+ */
 export function chatRefDeContacto(contact: string): string {
   const c = String(contact || "").replace(/\D/g, "")
-  if (!c) return ""
-  return `${lineaDePais(c)}:${c}`
+  const pais = paisDeContacto(c)
+  if (!c || !pais) return ""
+  const linea = LINEA_POR_PAIS[pais]
+  return linea ? `${linea}:${c}` : ""
 }
