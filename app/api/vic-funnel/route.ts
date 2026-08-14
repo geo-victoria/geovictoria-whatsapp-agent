@@ -627,6 +627,42 @@ async function fetchFechasConversaciones(): Promise<Map<string, string>> {
   return out
 }
 
+/** Deja en el cierre SOLO las cotizaciones de contactos que conversaron con
+ * Vicky (Lalo 14-ago). Recalcula los contadores para que los KPIs cuadren con
+ * las listas que se muestran al hacer clic. */
+function filtrarCierreAVicky<T extends {
+  total: number
+  aceptadas: number
+  autonomas: number
+  asistidas: number
+  sinClasificar: number
+  aceptadasList: RawAceptada[]
+  todasList: RawAceptada[]
+  quotesList: RawAceptada[]
+}>(cierre: T, convs: ConvListado[]): T {
+  const conChat = new Set(convs.map((c) => digits(c.contact)).filter(Boolean))
+  const deVicky = (q: RawAceptada) => {
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    return Boolean(tel && conChat.has(tel))
+  }
+  const aceptadasList = cierre.aceptadasList.filter(deVicky)
+  const quotesList = cierre.quotesList.filter(deVicky)
+  const marca = (q: RawAceptada) => String(q.Intervenci_n_Humana || "").toLowerCase()
+  const autonomas = aceptadasList.filter((q) => marca(q).includes("100%")).length
+  const asistidas = aceptadasList.filter((q) => marca(q).includes("intervenci")).length
+  return {
+    ...cierre,
+    total: quotesList.length,
+    aceptadas: aceptadasList.length,
+    autonomas,
+    asistidas,
+    sinClasificar: aceptadasList.length - autonomas - asistidas,
+    aceptadasList,
+    quotesList,
+    todasList: cierre.todasList.filter(deVicky),
+  }
+}
+
 async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rango: RangoFechas | null): Promise<{
   total: number
   aceptadas: number
@@ -2071,8 +2107,8 @@ function renderEvolucionDiaria(params: {
     arr[i]++
     if (det && fila && det[i].length < 120) det[i].push(fila)
   }
-  const sConv = serie(), sCom = serie(), sPreform = serie(), sFormal = serie(), sFormalEjec = serie(), sAcept = serie(), sPag = serie()
-  const dConv = detalle(), dCom = detalle(), dPreform = detalle(), dFormal = detalle(), dFormalEjec = detalle(), dAcept = detalle(), dPag = detalle()
+  const sConv = serie(), sCom = serie(), sPreform = serie(), sFormal = serie(), sAcept = serie(), sPag = serie()
+  const dConv = detalle(), dCom = detalle(), dPreform = detalle(), dFormal = detalle(), dAcept = detalle(), dPag = detalle()
   const empresaDeQuote = (q: RawAceptada) =>
     String(q["Cuenta_Asociada.Account_Name"] || "").trim() ||
     String(q.Name || "").replace(/^\s*Cotizaci[oó]n\s*/i, "").replace(/\s*-\s*\d{4}-\d{2}-\d{2}\s*$/, "").trim() ||
@@ -2124,19 +2160,14 @@ function renderEvolucionDiaria(params: {
   for (const [tel, at] of preformAt) {
     if (delPais(tel)) suma(sPreform, at, dPreform, { t: `+${tel}`, e: "precio mostrado en el chat", id: convIdPorTel.get(tel) || "" })
   }
-  // DOS CANALES DE FORMALES (hallazgo 13-ago, pregunta de Lalo "¿por qué el
-  // dash no lo muestra?"): desde el 11-ago el equipo emite cotizaciones por
-  // el EDITOR (Created_By también es Vicky) a contactos SIN chat — 23 de las
-  // 25 formales del 13-ago. Mezcladas inflaban la serie de Vicky y hacían
-  // incomparables formales vs conversaciones/preforms. Discriminador: el
-  // contacto de la cotización tiene conversación con Vicky → canal chat.
-  const telsConChat = new Set(convs.map((c) => digits(c.contact)))
+  // Todas las cotizaciones que llegan acá son de Vicky: el universo ya se
+  // filtró aguas arriba (filtrarCierreAVicky, Lalo 14-ago) — lo que los
+  // ejecutivos emiten a clientes propios no entra al dash.
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
     if (tel && isTestContact(tel, testSet)) continue
-    const esChat = Boolean(tel && telsConChat.has(tel))
     const fila = filaDeQuote(q)
-    suma(esChat ? sFormal : sFormalEjec, q.Created_Time, esChat ? dFormal : dFormalEjec, fila)
+    suma(sFormal, q.Created_Time, dFormal, fila)
     const pagada = esPagada(q)
     const aceptada = esAceptadaOMas(q)
     const fechaPago = q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time
@@ -2148,8 +2179,7 @@ function renderEvolucionDiaria(params: {
     { nombre: "Conversaciones", datos: sConv, color: "#9aa0a8", det: dConv },
     { nombre: "Intención comercial", datos: sCom, color: "#00aff2", det: dCom },
     { nombre: "Precio mostrado (preform)", datos: sPreform, color: "#ffbb00", det: dPreform },
-    { nombre: "Formal enviada (chat Vicky)", datos: sFormal, color: "#e67e22", det: dFormal },
-    { nombre: "Formal canal ejecutivo", datos: sFormalEjec, color: "#b06ab3", det: dFormalEjec },
+    { nombre: "Formal enviada", datos: sFormal, color: "#e67e22", det: dFormal },
     { nombre: "Aceptada", datos: sAcept, color: "#27ae60", det: dAcept },
     { nombre: "Pagada", datos: sPag, color: "#1b5e20", det: dPag },
   ]
@@ -2172,7 +2202,7 @@ function renderEvolucionDiaria(params: {
       <div id="evoDetCuerpo" style="overflow:auto;padding:14px 18px"></div>
     </div>
   </div>
-  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por emisión en Zoho — separadas por canal: "chat Vicky" (el contacto conversó con Vicky) vs "canal ejecutivo" (emitidas por el equipo desde el editor, sin chat) —, aceptadas y pagadas por su fecha de aceptación/pago. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series, y <b>clic en cualquier punto para ver las filas que componen ese número</b>.</div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por emisión en Zoho, aceptadas y pagadas por su fecha de aceptación/pago. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series, y <b>clic en cualquier punto para ver las filas que componen ese número</b>.</div>
   <script>
     (function () {
       var KEY_DASH = ${JSON.stringify(key)};
@@ -5150,7 +5180,14 @@ export async function GET(req: Request): Promise<Response> {
       fetchConvsListado().catch(() => [] as ConvListado[]),
     ])
     origen = origenData
-    cierre = cierreZoho
+    // SOLO LO QUE VICKY INICIÓ (Lalo 14-ago): los ejecutivos emiten desde el
+    // editor a clientes PROPIOS (20 de 29 el 13-ago) y esas cotizaciones
+    // nacen igual con Created_By = Vicky, así que inflaban todo el dash —
+    // KPIs, evolución, ventas y tasa de cierre. Criterio: la cotización
+    // pertenece a Vicky si su contacto tuvo conversación con ella; el resto
+    // es cartera del ejecutivo y no cuenta acá. Las cotizaciones SIN teléfono
+    // (creadas a mano en el editor) tampoco son de Vicky.
+    cierre = cierreZoho ? filtrarCierreAVicky(cierreZoho, convsListado) : cierreZoho
     ultimoMsgPorConv = new Map(
       convsListado.map((c) => [c.id, String(c.updated_at || c.last_user_at || c.started_at || "")]),
     )
@@ -5966,7 +6003,7 @@ export async function GET(req: Request): Promise<Response> {
     ${kpiCard("Aceptadas sin pago", aceptadasSinPago, col.warn, tasaAcept ? `${tasaAcept} aceptación total` : undefined, "zoho_aceptadas_solo")}
     ${kpiCard("Pagadas", pagadasN, col.good, tasaPagadas, "zoho_pagadas")}
   </div>
-  <div class="sub" style="margin:-2px 0 10px">Nota: los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
+  <div class="sub" style="margin:-2px 0 10px">Nota: el dash cuenta <b>solo lo que Vicky inició</b> — las cotizaciones que los ejecutivos emiten desde el editor a clientes propios (sin conversación con Vicky) quedan fuera de todos estos números (Lalo 14-ago). Los 3 primeros KPI cuentan <b>conversaciones</b>; los de Zoho cuentan <b>cotizaciones</b>. Una conversación puede generar más de una cotización (p. ej. un contacto que cotiza para 2 empresas), por eso pueden diferir levemente.</div>`
     }
   }
   const pct = (x: number) => (total ? `${Math.round((x / total) * 100)}%` : "")
