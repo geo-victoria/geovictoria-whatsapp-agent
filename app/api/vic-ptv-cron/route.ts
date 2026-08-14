@@ -244,6 +244,161 @@ async function extraerDatosLeadDeChat(
   }
 }
 
+/**
+ * CONCILIACIÓN DE ESTADO DEL LEAD CONTRA LA CONVERSACIÓN (Eduardo 14-ago).
+ *
+ * Diagnóstico del 14-ago: "3. Contactado" solo se estampaba en el camino
+ * OUTBOUND (la primera respuesta a un toque 0). El lead INBOUND —el que nace
+ * porque el cliente escribió— quedaba en "1. No contactado" hasta que
+ * ocurriera un HITO, que lo salta directo a "4. Calificado". Sin hito, el
+ * status no se movía nunca: 20 leads con el cliente conversando (uno con 26
+ * mensajes) seguían figurando como no contactados.
+ *
+ * Reglas, todas conservadoras:
+ *  - El status SOLO SUBE. Cliente que escribió → "3. Contactado"; precio
+ *    mostrado o cotización formal → "4. Calificado".
+ *  - "No Calificado" NO se toca: es una decisión humana del SDR y tiene su
+ *    propia regla de reactivación en el proceso de marketing.
+ *  - Los PROPIETARIOS no se tocan en ningún caso.
+ *  - "Fecha/Hora Primer Cambio Estado Lead" (Fecha_de_Primera_revision_Lead)
+ *    se corrige al momento REAL del hito, y solo si está vacía o es POSTERIOR:
+ *    la primera vez es la primera, jamás se atrasa una fecha ya registrada.
+ *    Hoy se estampa al crear el lead, así que un lead creado por el reloj de
+ *    calificación en agosto para una conversación de julio declara un cambio
+ *    de estado que ocurrió semanas antes.
+ */
+const ORDEN_STATUS_LEAD: Record<string, number> = {
+  "1. No contactado": 1,
+  "2. Intento de contacto": 2,
+  "3. Contactado": 3,
+  "4. Calificado": 4,
+}
+
+/** Zoho quiere ISO con offset; Supabase entrega "2026-08-12 11:23:17.12+00". */
+function isoZoho(v: string): string {
+  const t = Date.parse(String(v || "").replace(" ", "T"))
+  if (!Number.isFinite(t)) return ""
+  return new Date(t).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+}
+
+async function conciliarStatusLeads(): Promise<number> {
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const desde = new Date(Date.now() - 60 * 86400e3).toISOString().slice(0, 10)
+    // Solo los estados que pueden estar atrasados. "No Calificado" queda fuera
+    // a propósito. Se suman los que no tienen fecha de primer cambio, aunque
+    // ya estén calificados: ese campo también hay que dejarlo cuadrado.
+    const q =
+      `select id, Phone, Lead_Status, Fecha_de_Primera_revision_Lead from Leads ` +
+      `where (((Created_Time >= '${desde}T00:00:00-04:00') and (Canal = 'WhatsApp')) and ` +
+      `((((Lead_Status = '1. No contactado') or (Lead_Status = '2. Intento de contacto')) ` +
+      `or (Lead_Status = '3. Contactado')) or (Fecha_de_Primera_revision_Lead is null))) ` +
+      `order by Created_Time desc limit 40`
+    const res = await fetch(`${api}/crm/v3/coql`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({ select_query: q }),
+    })
+    if (!res.ok) {
+      console.warn(`[ptv] status-leads: COQL ${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`)
+      return 0
+    }
+    const filas = (((await res.json().catch(() => ({}))) as {
+      data?: Array<{
+        id: string
+        Phone?: string
+        Lead_Status?: string
+        Fecha_de_Primera_revision_Lead?: string | null
+      }>
+    }).data || [])
+    let hechos = 0
+    for (const ld of filas) {
+      if (hechos >= 10) break
+      const fono = String(ld.Phone || "").replace(/\D/g, "")
+      if (!fono) continue
+      const kvKey = `stsq_${ld.id}`
+      const vivo = await supa<{ key: string; expires_at?: string }>(
+        `vic_kv?key=eq.${kvKey}&select=key,expires_at&limit=1`,
+      )
+      if (vivo[0] && (!vivo[0].expires_at || new Date(vivo[0].expires_at).getTime() > Date.now())) continue
+      await supa(`vic_kv?on_conflict=key`, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          key: kvKey,
+          value: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 6 * 3600e3).toISOString(),
+        }),
+      }).catch(() => [])
+
+      const conv = await supa<{
+        first_user_at?: string | null
+        user_msg_count?: number
+        pref_escalon_at?: string | null
+        formal_quote_at?: string | null
+        formal_quote_id?: string | null
+      }>(
+        `vic_v3_conversations?contact=eq.${fono}` +
+          `&select=first_user_at,user_msg_count,pref_escalon_at,formal_quote_at,formal_quote_id&limit=1`,
+      )
+      const c = conv[0]
+      if (!c) continue
+
+      // Hito más alto que respalde la conversación, con SU fecha real.
+      let objetivo = ""
+      let momento = ""
+      const precioAt = c.pref_escalon_at || ""
+      const formalAt = c.formal_quote_at || (c.formal_quote_id ? c.first_user_at || "" : "")
+      if (precioAt || formalAt) {
+        objetivo = "4. Calificado"
+        const cand = [precioAt, formalAt].filter(Boolean).map((x) => Date.parse(String(x).replace(" ", "T")))
+        momento = new Date(Math.min(...cand)).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+      } else if ((c.user_msg_count || 0) >= 1 && c.first_user_at) {
+        objetivo = "3. Contactado"
+        momento = isoZoho(c.first_user_at)
+      }
+      if (!objetivo || !momento) continue
+
+      const actual = ORDEN_STATUS_LEAD[String(ld.Lead_Status || "").trim()] || 0
+      const meta = ORDEN_STATUS_LEAD[objetivo] || 0
+      let tocado = false
+
+      if (meta > actual) {
+        const { updateZohoLeadStatus } = await import("@/lib/zoho-leads")
+        const r = await updateZohoLeadStatus(ld.id, objetivo).catch(() => ({ success: false }))
+        if (r.success) {
+          tocado = true
+          console.log(`[ptv] lead ${ld.id} status "${ld.Lead_Status}" → "${objetivo}" (conversación)`)
+        }
+      }
+
+      // La fecha del PRIMER cambio de estado: vacía o posterior al hito real.
+      const fechaActual = Date.parse(String(ld.Fecha_de_Primera_revision_Lead || "").replace(" ", "T"))
+      const fechaHito = Date.parse(momento)
+      if (!Number.isFinite(fechaActual) || fechaActual > fechaHito) {
+        const ok = await putZoho(api, H, "Leads", ld.id, {
+          Fecha_de_Primera_revision_Lead: momento,
+        })
+        if (ok) {
+          tocado = true
+          console.log(
+            `[ptv] lead ${ld.id} fecha primer cambio ${ld.Fecha_de_Primera_revision_Lead || "vacía"} → ${momento}`,
+          )
+        }
+      }
+      if (tocado) hechos++
+    }
+    return hechos
+  } catch (e) {
+    console.warn("[ptv] conciliarStatusLeads falló:", e instanceof Error ? e.message : e)
+    return 0
+  }
+}
+
 async function enriquecerLeadsDeChat(): Promise<number> {
   const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
   if (!apiKey) return 0
@@ -1441,11 +1596,19 @@ export async function GET(req: Request) {
     return 0
   })
 
+  // Estado del lead contra los hitos de la conversación (Eduardo 14-ago): el
+  // status solo sube y la fecha de primer cambio se ancla al hito real.
+  const statusConciliados = await conciliarStatusLeads().catch((e) => {
+    console.warn("[ptv-cron] conciliación de status falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+
   return NextResponse.json({
     ok: true,
     crones_huerfanos_despachados: huerfanos,
     leads_cruzados_corregidos: cruzados,
     leads_enriquecidos: enriquecidos,
+    leads_status_conciliados: statusConciliados,
     conversaciones_revisadas: convs.length,
     traspasados,
     tm_traspasados: tmTraspasados,

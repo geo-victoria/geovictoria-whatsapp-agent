@@ -312,14 +312,18 @@ export async function updateZohoLeadStatus(
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
-    const res = await fetch(`${apiDomain}/crm/v2/${moduleName}/${leadId}`, {
+    const res = await fetch(`${apiDomain}/crm/v3/${moduleName}/${leadId}`, {
       method: "PUT",
       headers: {
         Authorization: `Zoho-oauthtoken ${accessToken}`,
         "Content-Type": "application/json",
       },
       cache: "no-store",
-      body: JSON.stringify({ data: [{ Lead_Status: status }] }),
+      body: JSON.stringify({
+        // Subir el status no puede re-sortear al dueño (Eduardo 14-ago).
+        data: [{ Lead_Status: status }],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
     })
     const data = (await res.json().catch(() => ({}))) as {
       data?: Array<{ status?: string; code?: string }>
