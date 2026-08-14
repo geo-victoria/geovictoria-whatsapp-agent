@@ -172,8 +172,20 @@ export async function postCreateFromVicky(body: unknown): Promise<{ ok: boolean;
         body: JSON.stringify(body),
         cache: "no-store",
       })
-      const data = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string }
-      if (r.ok && data.ok) return data as { ok: true }
+      const data = (await r.json().catch(() => ({}))) as {
+        ok?: boolean
+        error?: string
+        quoteId?: string
+      }
+      if (r.ok && data.ok) {
+        // Nota de auditoría con la tabla del CANAL EJECUTIVO (Lalo 14-ago):
+        // acá la lista aplicada es la comercial completa, no la de Vicky.
+        if (data.quoteId) {
+          const { anotarTablaPrecios } = await import("@/lib/nota-tabla-precios")
+          void anotarTablaPrecios(String(data.quoteId), "ejecutivo").catch(() => false)
+        }
+        return data as { ok: true }
+      }
       if (intento === 0) continue
       return { ok: false, error: data.error || `HTTP ${r.status}` }
     } catch (e) {

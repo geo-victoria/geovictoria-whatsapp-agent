@@ -28,8 +28,12 @@ const TOPE_VICKY = 50
 
 const uf = (n: number) => String(n).replace(".", ",")
 
-/** Texto de la nota, construido desde los catálogos vivos. */
-export function cuerpoNotaTablaPrecios(fecha = new Date()): string {
+export type CanalPrecio = "vicky" | "ejecutivo"
+
+/** Texto de la nota, construido desde los catálogos vivos. El canal decide
+ * QUÉ lista se declara como aplicada: Vicky usa la suya (SMB, 1-50) y el
+ * editor/calculadora usan la comercial completa (1-8.000). */
+export function cuerpoNotaTablaPrecios(canal: CanalPrecio = "vicky", fecha = new Date()): string {
   const asistencia = CATALOGO_MODULOS.find((m) => m.id === "asistencia")
   const propios = (asistencia?.tiers || [])
     .filter((t) => t.minUsuarios <= TOPE_VICKY)
@@ -43,11 +47,41 @@ export function cuerpoNotaTablaPrecios(fecha = new Date()): string {
     (t) =>
       `  · ${t.min.toLocaleString("es-CL")}-${t.max.toLocaleString("es-CL")} trabajadores: ${uf(t.uf)} UF por usuario`,
   )
+  const todosEjecutivo = TRAMOS_EJECUTIVO.map((t) => {
+    const rango =
+      t.min === t.max
+        ? `${t.min}`
+        : `${t.min.toLocaleString("es-CL")}-${t.max.toLocaleString("es-CL")}`
+    const precio = t.tipo === "fijo" ? `${uf(t.uf)} UF fijo` : `${uf(t.uf)} UF por usuario`
+    return `  · ${rango} trabajadores: ${precio}`
+  })
   const enRangoEjecutivo = TRAMOS_EJECUTIVO.filter((t) => t.min <= TOPE_VICKY)
     .map((t) => `${t.min}-${t.max}: ${uf(t.uf)}`)
     .join(" · ")
+  const enRangoVicky = (asistencia?.tiers || [])
+    .filter((t) => t.minUsuarios <= TOPE_VICKY)
+    .map((t) => `${t.minUsuarios}-${t.maxUsuarios}: ${uf(t.precioUF)}`)
+    .join(" · ")
+  const cabecera = `Tabla de precios de CONTROL DE ASISTENCIA vigente el día en que se emitió esta cotización (${fecha.toLocaleDateString("es-CL", { timeZone: "America/Santiago" })}).`
+  const cierre = [
+    "",
+    "Notas: valores netos en UF, sin IVA (19%) ni descuentos. El precio en pesos de esta cotización quedó congelado con la UF del día de emisión.",
+    "",
+    "Registro generado automáticamente al emitir, desde el catálogo vigente en ese momento.",
+  ]
+  if (canal === "ejecutivo") {
+    return [
+      cabecera,
+      "",
+      "LISTA APLICADA — canal EJECUTIVO (editor / calculadora comercial), catálogo completo 1 a 8.000 trabajadores:",
+      ...todosEjecutivo,
+      "",
+      `Referencia: en el rango 1-50 el canal Vicky (WhatsApp) usa su propia lista, más baja (${enRangoVicky} UF): son dos listas oficiales por canal, no un error de cobro.`,
+      ...cierre,
+    ].join("\n")
+  }
   return [
-    `Tabla de precios de CONTROL DE ASISTENCIA vigente el día en que se emitió esta cotización (${fecha.toLocaleDateString("es-CL", { timeZone: "America/Santiago" })}).`,
+    cabecera,
     "",
     "LISTA APLICADA — canal Vicky (WhatsApp):",
     ...propios,
@@ -55,10 +89,8 @@ export function cuerpoNotaTablaPrecios(fecha = new Date()): string {
     "TRAMOS SOBRE 50 TRABAJADORES — fuera del rango de Vicky, se completan con la calculadora del canal ejecutivo:",
     ...ejecutivo,
     "",
-    "Notas: valores netos en UF, sin IVA (19%) ni descuentos. El precio en pesos de esta cotización quedó congelado con la UF del día de emisión.",
     `En el rango 1-50 el canal ejecutivo usa su propia lista, más alta (${enRangoEjecutivo} UF): son dos listas oficiales por canal.`,
-    "",
-    "Registro generado automáticamente al emitir, desde el catálogo vigente en ese momento.",
+    ...cierre,
   ].join("\n")
 }
 
@@ -68,7 +100,10 @@ export function cuerpoNotaTablaPrecios(fecha = new Date()): string {
  * SIEMPRE en silencio en módulos custom — cicatriz del 25-jul con las notas
  * de comprobante, repetida el 14-ago con el backfill de precios.
  */
-export async function anotarTablaPrecios(quoteId: string): Promise<boolean> {
+export async function anotarTablaPrecios(
+  quoteId: string,
+  canal: CanalPrecio = "vicky",
+): Promise<boolean> {
   if (!quoteId) return false
   try {
     const token = await getZohoAccessToken()
@@ -78,7 +113,7 @@ export async function anotarTablaPrecios(quoteId: string): Promise<boolean> {
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          data: [{ Note_Title: TITULO, Note_Content: cuerpoNotaTablaPrecios() }],
+          data: [{ Note_Title: TITULO, Note_Content: cuerpoNotaTablaPrecios(canal) }],
         }),
         cache: "no-store",
       },
@@ -88,7 +123,7 @@ export async function anotarTablaPrecios(quoteId: string): Promise<boolean> {
       console.warn(`[nota-precios] quote=${quoteId} Zoho ${res.status}: ${detalle.slice(0, 200)}`)
       return false
     }
-    console.log(`[nota-precios] tabla anotada en quote=${quoteId}`)
+    console.log(`[nota-precios] tabla anotada en quote=${quoteId} (canal ${canal})`)
     return true
   } catch (e) {
     console.warn("[nota-precios] excepción:", e instanceof Error ? e.message : e)
