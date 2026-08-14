@@ -695,9 +695,15 @@ export async function cotizarReferencial(args: {
       const alternativa = await cotizarReferencial({ userCount, modulos })
       if (alternativa.ok) {
         mensajeParaProspecto = [
-          "Opción 1 — Con reloj control físico:",
+          // La app SIEMPRE va incluida, con reloj o sin él (Eduardo 14-ago):
+          // titular la opción solo con el reloj hacía entender que elegirlo
+          // dejaba fuera la app. Lo que se paga es el fierro; el marcaje por
+          // app no se cobra nunca.
+          "Opción 1 — Reloj control físico y App:",
           "",
           mensajeParaProspecto,
+          "",
+          "(La app va siempre incluida sin costo adicional: tu equipo puede marcar en el reloj, en la app o en ambos.)",
           "",
           "[---]",
           "",

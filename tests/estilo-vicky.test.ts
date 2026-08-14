@@ -188,3 +188,15 @@ describe("cuadrilla en punto fijo con supervisor (Eduardo 14-ago)", () => {
     assert.match(bloque, /NUNCA lo listes solo/i)
   })
 })
+
+describe("la app nunca queda fuera del título con reloj (Eduardo 14-ago)", () => {
+  test("la Opción 1 del doble valor nombra reloj Y app", () => {
+    // "Opción 1 — Con reloj control físico" hacía entender que elegir reloj
+    // dejaba fuera la app. La app no se cobra nunca: lo condicionado a pago
+    // es el fierro.
+    const t = readFileSync(join(RAIZ, "lib/tools/cotizar-referencial.ts"), "utf8")
+    assert.match(t, /Opción 1 — Reloj control físico y App/)
+    assert.ok(!/Opción 1 — Con reloj control físico/.test(t), "quedó el título viejo sin la app")
+    assert.match(t, /app va siempre incluida sin costo adicional/i)
+  })
+})
