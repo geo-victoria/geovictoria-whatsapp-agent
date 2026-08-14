@@ -170,3 +170,106 @@ export function chatRefDeContacto(contact: string): string {
   const linea = LINEA_POR_PAIS[pais]
   return linea ? `${linea}:${c}` : ""
 }
+
+/**
+ * ASIGNACIÓN REAL de la conversación al dueño del registro en Zoho.
+ *
+ * La API no deja escribir `agentId` (probado 14-ago: Botmaker responde 400
+ * "Property 'agentId' not expected"), pero SÍ deja ejecutar un flujo que
+ * contenga la acción "Asignar la conversación a agente específico". Ese flujo
+ * lo creó Lalo el 14-ago y lee la variable `correo_ejecutivo`.
+ *
+ * SE LLAMA POR ID, JAMÁS POR NOMBRE: el workspace tiene DOS intenciones
+ * llamadas `transferir_agente` (mayo y agosto) y por nombre la API resuelve a
+ * la vieja — devuelve 202 y no hace nada. Tres pruebas se perdieron así.
+ *
+ * Un solo flujo sirve para los cuatro países: los canales CL/CO/MX/PE cuelgan
+ * del mismo bot (`GeoVictoriaEspaol-whatsapp-<línea>`). Verificado asignando
+ * un chat mexicano a Yahel con el flujo chileno.
+ */
+const INTENT_ASIGNAR = (
+  process.env.BOTMAKER_INTENT_ASIGNAR || "GeoVictoriaEspaol-psvnpm285o@b.m-1786749912963"
+).trim()
+
+/** Correos que NO son personas: asignarles la conversación no tiene sentido. */
+const NO_ASIGNABLES = new Set(
+  ["vicky@geovictoria.com", "info@geovictoria.com"].concat(
+    (process.env.BOTMAKER_NO_ASIGNABLES || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  ),
+)
+
+let cacheAgentes: { at: number; correos: Set<string> } | null = null
+
+/** Correos que existen como agente. Cache de 5 min: el barrido pregunta mucho. */
+async function correosDeAgentes(): Promise<Set<string>> {
+  if (cacheAgentes && Date.now() - cacheAgentes.at < 5 * 60_000) return cacheAgentes.correos
+  const lista = await listarAgentes().catch(() => [])
+  const correos = new Set(lista.map((a) => String(a.email || "").toLowerCase()).filter(Boolean))
+  if (correos.size) cacheAgentes = { at: Date.now(), correos }
+  return correos
+}
+
+export type ResultadoAsignacion = {
+  asignado: boolean
+  motivo: string
+  agentIdPrevio?: string | null
+  agentIdNuevo?: string | null
+}
+
+/**
+ * Deja la conversación asignada al dueño VIGENTE en Zoho. Best-effort puro:
+ * nunca lanza, nunca toca la conversación con el cliente.
+ *
+ * GUARDA IMPORTANTE: si el correo no existe como agente, la acción de
+ * Botmaker NO falla — degrada a "asignar a un agente" cualquiera de la cola,
+ * y el prospecto le caería a una persona equivocada sin que nadie se entere.
+ * Por eso se verifica ANTES y, si no existe, no se dispara nada.
+ */
+export async function asignarConversacionAlDueno(
+  contact: string,
+  ownerEmail: string,
+): Promise<ResultadoAsignacion> {
+  try {
+    const correo = String(ownerEmail || "").trim().toLowerCase()
+    const chatRef = chatRefDeContacto(contact)
+    if (!BM_TOKEN || !correo || !chatRef) return { asignado: false, motivo: "sin datos" }
+    if (NO_ASIGNABLES.has(correo)) return { asignado: false, motivo: "dueño no asignable (bot/interino)" }
+    const agentes = await correosDeAgentes()
+    if (agentes.size && !agentes.has(correo)) {
+      return { asignado: false, motivo: `${correo} no existe como agente en Botmaker` }
+    }
+    const antes = await leerChat(chatRef)
+    if (!antes) return { asignado: false, motivo: "chat no encontrado" }
+
+    const r = await fetch(`${BM_API}/v2.0/chats-actions/trigger-intent`, {
+      method: "POST",
+      headers: headers(),
+      cache: "no-store",
+      body: JSON.stringify({
+        chat: { channelId: chatRef.split(":")[0], contactId: chatRef.split(":")[1] },
+        intentIdOrName: INTENT_ASIGNAR,
+        variables: { correo_ejecutivo: correo },
+      }),
+    })
+    if (!r.ok) {
+      return { asignado: false, motivo: `trigger ${r.status} ${(await r.text().catch(() => "")).slice(0, 150)}` }
+    }
+    // El flujo corre asíncrono; se le da un respiro y se VERIFICA. Un 202 no
+    // prueba nada por sí solo (así se veían los intentos contra el flujo
+    // equivocado).
+    await new Promise((res) => setTimeout(res, 4000))
+    const despues = await leerChat(chatRef)
+    const cambio = (antes.agentId || null) !== (despues?.agentId || null)
+    return {
+      asignado: cambio,
+      motivo: cambio ? "asignada" : "el flujo no movió el agente",
+      agentIdPrevio: antes.agentId || null,
+      agentIdNuevo: despues?.agentId || null,
+    }
+  } catch (e) {
+    return { asignado: false, motivo: e instanceof Error ? e.message : "excepción" }
+  }
+}

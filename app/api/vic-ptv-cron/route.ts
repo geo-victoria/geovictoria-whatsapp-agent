@@ -33,7 +33,7 @@ import {
 } from "@/lib/ptv"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { contactosAtendidosPorVendedor } from "@/lib/loop-v2"
-import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers } from "@/lib/supabase-persistence-v3"
+import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
@@ -410,6 +410,89 @@ async function conciliarStatusLeads(): Promise<number> {
     console.warn("[ptv] conciliarStatusLeads falló:", e instanceof Error ? e.message : e)
     return 0
   }
+}
+
+/**
+ * CONCILIACIÓN DE ASIGNACIÓN EN BOTMAKER (Lalo 14-ago: "la fuente de la
+ * verdad es Zoho"). Recorre las conversaciones con cursor propio y deja cada
+ * chat asignado al dueño VIGENTE de su registro. Sirve de barrido retroactivo
+ * y, pasada la primera vuelta, de reconciliador permanente: si la tómbola
+ * cambia al dueño, la conversación lo sigue.
+ *
+ * Conservadora: solo asigna si el chat NO tiene ya a esa persona, si el
+ * correo existe como agente y si el dueño no es un usuario-bot. Best-effort.
+ */
+async function conciliarAsignacionBotmaker(): Promise<{ asignadas: number; revisadas: number }> {
+  const cursorKv = "bm_asignacion_offset"
+  try {
+    const offset = parseInt((await getKvValue(cursorKv).catch(() => "0")) || "0") || 0
+    const lote = 12
+    const convs = await supa<{ contact: string }>(
+      `vic_v3_conversations?select=contact&order=updated_at.desc&limit=${lote}&offset=${offset}`,
+    )
+    if (!convs.length) {
+      await setKvValue(cursorKv, "0").catch(() => {})
+      return { asignadas: 0, revisadas: 0 }
+    }
+    const fonos = convs.map((c) => String(c.contact || "").replace(/\D/g, "")).filter(Boolean)
+    const duenos = await duenosEnZohoPorTelefono(fonos)
+    const { asignarConversacionAlDueno, leerChat, chatRefDeContacto } = await import("@/lib/botmaker-agentes")
+    let asignadas = 0
+    for (const fono of fonos) {
+      const owner = duenos.get(fono)
+      if (!owner) continue
+      // Si el chat ya está con un agente, no se toca: puede haberlo tomado
+      // una persona a mano y esa gestión manda sobre el barrido.
+      const chat = await leerChat(chatRefDeContacto(fono)).catch(() => null)
+      if (chat?.agentId) continue
+      const r = await asignarConversacionAlDueno(fono, owner)
+      if (r.asignado) {
+        asignadas++
+        console.log(`[ptv] +${fono}: conversación asignada a ${owner} (conciliación)`)
+      }
+    }
+    await setKvValue(cursorKv, String(offset + convs.length)).catch(() => {})
+    return { asignadas, revisadas: convs.length }
+  } catch (e) {
+    console.warn("[ptv] conciliarAsignacionBotmaker falló:", e instanceof Error ? e.message : e)
+    return { asignadas: 0, revisadas: 0 }
+  }
+}
+
+/** Dueño vigente en Zoho por teléfono: el CONTACTO (lead ya convertido) manda
+ * sobre el lead, porque es el registro vivo de la relación. */
+async function duenosEnZohoPorTelefono(fonos: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (!fonos.length) return out
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const lista = fonos.map((f) => `'+${f}'`).join(",")
+    for (const modulo of ["Leads", "Contacts"]) {
+      const r = await fetch(`${api}/crm/v3/coql`, {
+        method: "POST",
+        headers: H,
+        cache: "no-store",
+        body: JSON.stringify({
+          select_query: `select Phone, Owner.email from ${modulo} where ((Phone in (${lista}))) limit 200`,
+        }),
+      })
+      if (!r.ok) continue
+      const filas = (((await r.json().catch(() => ({}))) as {
+        data?: Array<{ Phone?: string; "Owner.email"?: string }>
+      }).data || [])
+      for (const f of filas) {
+        const fono = String(f.Phone || "").replace(/\D/g, "")
+        const correo = String(f["Owner.email"] || "")
+        if (fono && correo) out.set(fono, correo)
+      }
+    }
+  } catch (e) {
+    console.warn("[ptv] duenosEnZohoPorTelefono falló:", e instanceof Error ? e.message : e)
+  }
+  return out
 }
 
 async function enriquecerLeadsDeChat(): Promise<number> {
@@ -995,6 +1078,26 @@ async function asignarEnZoho(
   }
 }
 
+/**
+ * La conversación en Botmaker sigue al dueño del registro en Zoho (Lalo
+ * 14-ago). Hasta hoy el traspaso asignaba en el CRM y mandaba la
+ * presentación, pero en Botmaker la conversación quedaba sin dueño: el
+ * ejecutivo no la veía, y por eso todos estaban de admin viendo TODO.
+ *
+ * Best-effort absoluto: si falla, el traspaso siguió igual de bien.
+ */
+async function asignarConversacionEnBotmaker(contact: string, ownerEmail: string): Promise<void> {
+  try {
+    const { asignarConversacionAlDueno } = await import("@/lib/botmaker-agentes")
+    const r = await asignarConversacionAlDueno(contact, ownerEmail)
+    console.log(
+      `[ptv] +${contact}: conversación → ${ownerEmail} en Botmaker: ${r.asignado ? "ASIGNADA" : `no (${r.motivo})`}`,
+    )
+  } catch (e) {
+    console.warn(`[ptv] asignación Botmaker falló (${contact}):`, e instanceof Error ? e.message : e)
+  }
+}
+
 /** ¿La cotización formal vigente del contacto ya está Aceptada en Zoho?
  * Solo se consulta para CANDIDATOS a traspaso v2 (barato). Best-effort:
  * ante cualquier duda devuelve false (el traspaso procede). */
@@ -1421,6 +1524,10 @@ export async function GET(req: Request) {
         body: JSON.stringify({ vendedor_email: vendedor.email, vendedor_zoho_id: vendedor.zohoId, vendedor_nombre: vendedor.nombre }),
       })
     }
+    // Y la conversación en Botmaker pasa a ese mismo vendedor: hasta hoy se
+    // asignaba el registro en el CRM y se presentaba al prospecto, pero el
+    // chat quedaba sin dueño y el ejecutivo no lo veía.
+    await asignarConversacionEnBotmaker(c.contact, vendedor.email)
     // Presentación al prospecto (solo con ventana Meta abierta).
     const ventanaAbierta = Boolean(c.last_user_at && ahora.getTime() - new Date(c.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
@@ -1616,12 +1723,20 @@ export async function GET(req: Request) {
     return 0
   })
 
+  // La conversación en Botmaker sigue al dueño del registro en Zoho.
+  const asignacionBm = await conciliarAsignacionBotmaker().catch((e) => {
+    console.warn("[ptv-cron] conciliación Botmaker falló:", e instanceof Error ? e.message : e)
+    return { asignadas: 0, revisadas: 0 }
+  })
+
   return NextResponse.json({
     ok: true,
     crones_huerfanos_despachados: huerfanos,
     leads_cruzados_corregidos: cruzados,
     leads_enriquecidos: enriquecidos,
     leads_status_conciliados: statusConciliados,
+    conversaciones_asignadas_botmaker: asignacionBm.asignadas,
+    conversaciones_revisadas_botmaker: asignacionBm.revisadas,
     conversaciones_revisadas: convs.length,
     traspasados,
     tm_traspasados: tmTraspasados,
@@ -1821,6 +1936,7 @@ async function evaluarRespuestasChequeo(ahora: Date): Promise<{ ok: number; mal:
       continue
     }
     const nuevo = await asignarEnZoho(f.contact, pais, interno, true).catch(() => null)
+    if (nuevo?.email) await asignarConversacionEnBotmaker(f.contact, nuevo.email)
     if (nuevo && nuevo.email && nuevo.email !== f.vendedor_email) {
       await supa(`vic_ptv?id=eq.${f.id}`, {
         method: "PATCH",
