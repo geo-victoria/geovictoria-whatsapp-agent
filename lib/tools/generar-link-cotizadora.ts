@@ -26,6 +26,7 @@ import {
   obtenerTierAplicable,
   validarRangoModulo,
 } from "@/lib/catalogo"
+import { anotarTablaPrecios } from "@/lib/nota-tabla-precios"
 import { clasificarUbicacion } from "@/lib/geografia"
 import { getUFActual } from "@/lib/uf"
 import { rutValido, formatearRut } from "@/lib/rut"
@@ -854,6 +855,12 @@ export async function generarLinkCotizadora(
 
   // Regla de asignación reunión↔cotización (dirección inversa). Best-effort.
   await alinearReunionExistente(contactoTelefono || "", data.quoteId || "")
+
+  // Nota de auditoría con la tabla de precios ofrecida (Lalo 14-ago): queda
+  // en la cotización desde su nacimiento, así nadie tiene que reconstruir a
+  // mano qué lista regía cuando el cliente vio ese valor. Best-effort: su
+  // falla jamás afecta la emisión ni la respuesta al cliente.
+  void anotarTablaPrecios(data.quoteId || "").catch(() => false)
 
   return {
     ok: true,
