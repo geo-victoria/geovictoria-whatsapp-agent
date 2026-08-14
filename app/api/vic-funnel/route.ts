@@ -2170,9 +2170,14 @@ function renderEvolucionDiaria(params: {
     suma(sFormal, q.Created_Time, dFormal, fila)
     const pagada = esPagada(q)
     const aceptada = esAceptadaOMas(q)
-    const fechaPago = q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time
-    if (aceptada) suma(sAcept, fechaPago, dAcept, fila)
-    if (pagada) suma(sPag, fechaPago, dPag, fila)
+    // FOTO DIARIA DE HITOS (Lalo 14-ago): cada serie cuenta el día en que
+    // OCURRIÓ su hito. La aceptación/pago se cuenta por su propia fecha —
+    // JAMÁS por Created_Time (el día de emisión): una cotización enviada el
+    // lunes y aceptada el jueves es formal del lunes y aceptada del jueves.
+    // Sin fecha de hito no se cuenta en ningún día (mejor faltar que mentir).
+    const fechaHito = q.Fecha_Hora_Cotizacion || q.Modified_Time || ""
+    if (aceptada) suma(sAcept, fechaHito, dAcept, fila)
+    if (pagada) suma(sPag, fechaHito, dPag, fila)
   }
 
   const trazas = [
@@ -2202,7 +2207,7 @@ function renderEvolucionDiaria(params: {
       <div id="evoDetCuerpo" style="overflow:auto;padding:14px 18px"></div>
     </div>
   </div>
-  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por emisión en Zoho, aceptadas y pagadas por su fecha de aceptación/pago. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series, y <b>clic en cualquier punto para ver las filas que componen ese número</b>.</div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por su día de EMISIÓN en Zoho, aceptadas por su día de ACEPTACIÓN y pagadas por su día de PAGO — cada hito cae en el día en que ocurrió, nunca en el de la emisión. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series, y <b>clic en cualquier punto para ver las filas que componen ese número</b>.</div>
   <script>
     (function () {
       var KEY_DASH = ${JSON.stringify(key)};
