@@ -2036,8 +2036,9 @@ function renderEvolucionDiaria(params: {
   quotes: RawAceptada[]
   pais: Pais
   rango: RangoFechas | null
+  key?: string
 }): string {
-  const { convs, analysisRows, preformAt, quotes, pais, rango } = params
+  const { convs, analysisRows, preformAt, quotes, pais, rango, key = "" } = params
   const testSet = metricsContactSet()
   const diaDe = (iso: string | null | undefined): string => {
     const t = Date.parse(String(iso || ""))
@@ -2059,19 +2060,44 @@ function renderEvolucionDiaria(params: {
   }
   const idx = new Map(dias.map((d, i) => [d, i]))
   const serie = () => new Array<number>(dias.length).fill(0)
-  const suma = (arr: number[], iso: string | null | undefined) => {
+  // DETALLE POR PUNTO (Lalo 14-ago, "quiero ver el detalle de las filas que
+  // generan el número"): junto al conteo se guarda QUÉ compone cada día de
+  // cada serie, para abrirlo en una ventana al hacer clic en el gráfico.
+  type FilaDet = { t: string; e: string; d?: string; o?: string; s?: string; id?: string }
+  const detalle = () => dias.map(() => [] as FilaDet[])
+  const suma = (arr: number[], iso: string | null | undefined, det?: FilaDet[][], fila?: FilaDet) => {
     const i = idx.get(diaDe(iso))
-    if (i !== undefined) arr[i]++
+    if (i === undefined) return
+    arr[i]++
+    if (det && fila && det[i].length < 120) det[i].push(fila)
   }
   const sConv = serie(), sCom = serie(), sPreform = serie(), sFormal = serie(), sFormalEjec = serie(), sAcept = serie(), sPag = serie()
+  const dConv = detalle(), dCom = detalle(), dPreform = detalle(), dFormal = detalle(), dFormalEjec = detalle(), dAcept = detalle(), dPag = detalle()
+  const empresaDeQuote = (q: RawAceptada) =>
+    String(q["Cuenta_Asociada.Account_Name"] || "").trim() ||
+    String(q.Name || "").replace(/^\s*Cotizaci[oó]n\s*/i, "").replace(/\s*-\s*\d{4}-\d{2}-\d{2}\s*$/, "").trim() ||
+    "(sin empresa)"
+  const filaDeQuote = (q: RawAceptada): FilaDet => ({
+    t: String(q.Numero_Cotizacion || "").trim() || "(sin N°)",
+    e: empresaDeQuote(q),
+    d: digits(String(q.Tel_fono_Contacto || "")),
+    o: `${q["Owner.first_name"] || ""} ${q["Owner.last_name"] || ""}`.trim() || "—",
+    s: esPagada(q) ? "Pagada" : String(q.Estado_Cotizacion || "—"),
+    id: String(q.id || ""),
+  })
 
   const delPais = (tel: string) => paisDeTelefono(tel) === pais && !isTestContact(tel, testSet)
+  const convIdPorTel = new Map<string, string>()
+  for (const c of convs) {
+    const t = digits(c.contact)
+    if (t && !convIdPorTel.has(t)) convIdPorTel.set(t, String(c.id || ""))
+  }
   const inicioPorContacto = new Map<string, string>()
   for (const c of convs) {
     const tel = digits(c.contact)
     if (!tel || !delPais(tel)) continue
     if (!inicioPorContacto.has(tel)) inicioPorContacto.set(tel, String(c.started_at || ""))
-    suma(sConv, c.started_at)
+    suma(sConv, c.started_at, dConv, { t: `+${tel}`, e: "conversación", id: String(c.id || "") })
   }
   // FOTO DIARIA DE EVENTOS (definición final de Lalo 05-ago): cada serie
   // cuenta lo que OCURRIÓ ese día — chats que partieron, precios mostrados,
@@ -2093,10 +2119,10 @@ function renderEvolucionDiaria(params: {
   }
   for (const tel of comercialSet) {
     if (!tel || !delPais(tel)) continue
-    suma(sCom, inicioPorContacto.get(tel))
+    suma(sCom, inicioPorContacto.get(tel), dCom, { t: `+${tel}`, e: "intención comercial", id: convIdPorTel.get(tel) || "" })
   }
   for (const [tel, at] of preformAt) {
-    if (delPais(tel)) suma(sPreform, at)
+    if (delPais(tel)) suma(sPreform, at, dPreform, { t: `+${tel}`, e: "precio mostrado en el chat", id: convIdPorTel.get(tel) || "" })
   }
   // DOS CANALES DE FORMALES (hallazgo 13-ago, pregunta de Lalo "¿por qué el
   // dash no lo muestra?"): desde el 11-ago el equipo emite cotizaciones por
@@ -2108,22 +2134,24 @@ function renderEvolucionDiaria(params: {
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
     if (tel && isTestContact(tel, testSet)) continue
-    suma(tel && telsConChat.has(tel) ? sFormal : sFormalEjec, q.Created_Time)
+    const esChat = Boolean(tel && telsConChat.has(tel))
+    const fila = filaDeQuote(q)
+    suma(esChat ? sFormal : sFormalEjec, q.Created_Time, esChat ? dFormal : dFormalEjec, fila)
     const pagada = esPagada(q)
     const aceptada = esAceptadaOMas(q)
     const fechaPago = q.Fecha_Hora_Cotizacion || q.Modified_Time || q.Created_Time
-    if (aceptada) suma(sAcept, fechaPago)
-    if (pagada) suma(sPag, fechaPago)
+    if (aceptada) suma(sAcept, fechaPago, dAcept, fila)
+    if (pagada) suma(sPag, fechaPago, dPag, fila)
   }
 
   const trazas = [
-    { nombre: "Conversaciones", datos: sConv, color: "#9aa0a8" },
-    { nombre: "Intención comercial", datos: sCom, color: "#00aff2" },
-    { nombre: "Precio mostrado (preform)", datos: sPreform, color: "#ffbb00" },
-    { nombre: "Formal enviada (chat Vicky)", datos: sFormal, color: "#e67e22" },
-    { nombre: "Formal canal ejecutivo", datos: sFormalEjec, color: "#b06ab3" },
-    { nombre: "Aceptada", datos: sAcept, color: "#27ae60" },
-    { nombre: "Pagada", datos: sPag, color: "#1b5e20" },
+    { nombre: "Conversaciones", datos: sConv, color: "#9aa0a8", det: dConv },
+    { nombre: "Intención comercial", datos: sCom, color: "#00aff2", det: dCom },
+    { nombre: "Precio mostrado (preform)", datos: sPreform, color: "#ffbb00", det: dPreform },
+    { nombre: "Formal enviada (chat Vicky)", datos: sFormal, color: "#e67e22", det: dFormal },
+    { nombre: "Formal canal ejecutivo", datos: sFormalEjec, color: "#b06ab3", det: dFormalEjec },
+    { nombre: "Aceptada", datos: sAcept, color: "#27ae60", det: dAcept },
+    { nombre: "Pagada", datos: sPag, color: "#1b5e20", det: dPag },
   ]
   // Agrupación según el largo del rango (pedido Lalo 04-ago): >1 semana
   // ofrece Día/Semana; ≥2 meses suma la opción Mes. La agregación corre en el
@@ -2134,11 +2162,23 @@ function renderEvolucionDiaria(params: {
     : ""
   return `<div class="card"><h2>📈 Evolución <span class="pct" style="font-weight:400">— ${rango ? esc(rango.etiqueta) : "últimos 30 días"}</span>${selector}</h2>
   <div id="evoDiaria" style="height:340px"></div>
-  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por emisión en Zoho — separadas por canal: "chat Vicky" (el contacto conversó con Vicky) vs "canal ejecutivo" (emitidas por el equipo desde el editor, sin chat) —, aceptadas y pagadas por su fecha de aceptación/pago. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series.</div>
+  <div id="evoDet" style="display:none;position:fixed;inset:0;z-index:60;align-items:center;justify-content:center;padding:16px">
+    <div id="evoDetFondo" style="position:absolute;inset:0;background:rgba(15,23,42,.45)"></div>
+    <div style="position:relative;background:#fff;border-radius:14px;max-width:960px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 18px 48px rgba(0,0,0,.22)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+        <b id="evoDetTitulo" style="font-family:${GV_TITLE_FONT};font-size:15px;color:#2f5496"></b>
+        <button id="evoDetCerrar" type="button" style="border:1px solid #d0d5db;background:#fff;border-radius:8px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:13px">✕</button>
+      </div>
+      <div id="evoDetCuerpo" style="overflow:auto;padding:14px 18px"></div>
+    </div>
+  </div>
+  <div class="sub" style="margin:6px 0 0">Sigue el filtro Desde–Hasta (sin filtro: últimos 30 días). FOTO DIARIA DE EVENTOS: cada serie cuenta lo que ocurrió ese día — conversaciones que partieron e intenciones identificadas (por día de inicio del chat), precios mostrados (por el día en que se mostraron), formales por emisión en Zoho — separadas por canal: "chat Vicky" (el contacto conversó con Vicky) vs "canal ejecutivo" (emitidas por el equipo desde el editor, sin chat) —, aceptadas y pagadas por su fecha de aceptación/pago. NO es un embudo: las líneas pueden cruzarse (la formal de hoy puede venir de un chat de ayer). Hora de Chile. Las semanas parten lunes; el primer y último tramo pueden venir incompletos. Clic en la leyenda para ocultar/mostrar series, y <b>clic en cualquier punto para ver las filas que componen ese número</b>.</div>
   <script>
     (function () {
+      var KEY_DASH = ${JSON.stringify(key)};
+      var ZOHO_BASE = ${JSON.stringify(`${ZOHO_CRM_URL}/tab/${QUOTE_MODULE}`)};
       var DIAS = ${JSON.stringify(dias)};
-      var SERIES = ${JSON.stringify(trazas.map((t) => ({ n: t.nombre, c: t.color, y: t.datos })))};
+      var SERIES = ${JSON.stringify(trazas.map((t) => ({ n: t.nombre, c: t.color, y: t.datos, det: t.det })))};
       var MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
       var LAYOUT = {
         margin: { l: 34, r: 12, t: 10, b: 46 },
@@ -2159,6 +2199,39 @@ function renderEvolucionDiaria(params: {
         }
         return d.slice(8, 10) + "-" + d.slice(5, 7);
       }
+      var DET_VISIBLE = [], ETIQUETAS_X = [];
+      // Ventana de DETALLE (Lalo 14-ago): al hacer clic en un punto se listan
+      // las cotizaciones (o conversaciones) que componen ese número.
+      function abrirDetalleEvo(serieIdx, puntoIdx) {
+        var s = SERIES[serieIdx];
+        var filas = (DET_VISIBLE[serieIdx] && DET_VISIBLE[serieIdx][puntoIdx]) || [];
+        var titulo = s.n + " · " + (ETIQUETAS_X[puntoIdx] || "") + " — " + filas.length + " registro" + (filas.length === 1 ? "" : "s");
+        var esCotiz = filas.length > 0 && filas[0].o !== undefined;
+        var cuerpo;
+        if (!filas.length) {
+          cuerpo = '<p class="sub" style="margin:0">Sin registros en este punto.</p>';
+        } else if (esCotiz) {
+          cuerpo = '<table><thead><tr><th>Cotización</th><th>Empresa</th><th>Dueño</th><th>Estado</th><th>Contacto</th></tr></thead><tbody>' +
+            filas.map(function (f) {
+              var link = f.id ? '<a href="' + ZOHO_BASE + '/' + f.id + '" target="_blank" rel="noopener">' + f.t + '</a>' : f.t;
+              return '<tr><td style="white-space:nowrap">' + link + '</td><td>' + f.e + '</td><td>' + (f.o || "—") +
+                '</td><td><span class="tag">' + (f.s || "—") + '</span></td><td style="white-space:nowrap">' + (f.d ? "+" + f.d : "—") + '</td></tr>';
+            }).join("") + '</tbody></table>';
+        } else {
+          cuerpo = '<table><thead><tr><th>Contacto</th><th>Qué es</th><th></th></tr></thead><tbody>' +
+            filas.map(function (f) {
+              var ver = f.id ? '<a href="?key=' + KEY_DASH + '&conv=' + f.id + '" target="_blank" rel="noopener">ver conversación →</a>' : "";
+              return '<tr><td style="white-space:nowrap">' + f.t + '</td><td>' + f.e + '</td><td>' + ver + '</td></tr>';
+            }).join("") + '</tbody></table>';
+        }
+        document.getElementById("evoDetTitulo").textContent = titulo;
+        document.getElementById("evoDetCuerpo").innerHTML = cuerpo;
+        document.getElementById("evoDet").style.display = "flex";
+      }
+      function cerrarDetalleEvo() { document.getElementById("evoDet").style.display = "none"; }
+      document.getElementById("evoDetCerrar").addEventListener("click", cerrarDetalleEvo);
+      document.getElementById("evoDetFondo").addEventListener("click", cerrarDetalleEvo);
+      window.addEventListener("keydown", function (e) { if (e.key === "Escape") cerrarDetalleEvo(); });
       function pintar(modo) {
         var x = [], pos = {};
         DIAS.forEach(function (d) { var k = claveDe(d, modo); if (!(k in pos)) { pos[k] = x.length; x.push(k); } });
@@ -2167,7 +2240,27 @@ function renderEvolucionDiaria(params: {
           DIAS.forEach(function (d, i) { y[pos[claveDe(d, modo)]] += s.y[i]; });
           return { x: x, y: y, name: s.n, type: "scatter", mode: "lines+markers", line: { color: s.c, width: 2 }, marker: { size: 5 } };
         });
-        Plotly.react("evoDiaria", data, LAYOUT, CONFIG);
+        // DETALLE por punto agrupado: se acumulan las filas de los días que
+        // caen en la misma columna (día, semana o mes).
+        DET_VISIBLE = SERIES.map(function (s) {
+          var celdas = x.map(function () { return []; });
+          DIAS.forEach(function (d, i) {
+            var filas = (s.det && s.det[i]) || [];
+            if (filas.length) celdas[pos[claveDe(d, modo)]] = celdas[pos[claveDe(d, modo)]].concat(filas);
+          });
+          return celdas;
+        });
+        ETIQUETAS_X = x;
+        Plotly.react("evoDiaria", data, LAYOUT, CONFIG).then(function () {
+          var g = document.getElementById("evoDiaria");
+          if (g.__drillOn) return;
+          g.__drillOn = true;
+          g.on("plotly_click", function (ev) {
+            var p = ev.points && ev.points[0];
+            if (!p) return;
+            abrirDetalleEvo(p.curveNumber, p.pointIndex);
+          });
+        });
         document.querySelectorAll(".evoBtn").forEach(function (b) {
           var act = b.dataset.modo === modo;
           b.style.background = act ? "#ffbb00" : "#fff";
@@ -5170,6 +5263,7 @@ export async function GET(req: Request): Promise<Response> {
         quotes: cierre?.todasList || [],
         pais,
         rango,
+        key,
       })
       // Panel por ejecutivo: fee recurrente POR COTIZACIÓN pagada (la caché
       // fee_mes_v1_<id> se indexa pasando el id como "contact").
