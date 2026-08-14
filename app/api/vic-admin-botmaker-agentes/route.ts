@@ -267,5 +267,51 @@ export async function POST(req: Request): Promise<Response> {
     })
   }
 
-  return json({ ok: false, error: "accion debe ser roles | crear | etiquetar | probar_agentid" }, 400)
+  // ── 5. SONDA: disparar una INTENCIÓN inyectando variables ─────────────────
+  // El constructor de flujos vive solo en la consola (/intents es GET), pero
+  // una intención que YA existe y está activa se puede ejecutar por API con
+  // variables propias. Si su flujo trae la acción "Asignar la conversación a
+  // agente específico", el agentId del chat cambia — y eso se verifica acá
+  // releyendo el chat antes y después. Probar SIEMPRE contra un número
+  // interno: el flujo puede mandarle un mensaje al contacto.
+  if (accion === "probar_intent") {
+    const b2 = body as { chatRef?: string; intent?: string; variables?: Record<string, string> }
+    const chatRef = String(b2.chatRef || "")
+    const intent = String(b2.intent || "")
+    if (!chatRef || !intent) return json({ ok: false, error: "chatRef e intent requeridos" }, 400)
+    const [canal, contacto] = chatRef.split(":")
+    const { leerChat } = await import("@/lib/botmaker-agentes")
+    const antes = await leerChat(chatRef)
+    const r = await fetch("https://api.botmaker.com/v2.0/chats-actions/trigger-intent", {
+      method: "POST",
+      headers: {
+        "access-token": (process.env.BOTMAKER_ACCESS_TOKEN || "").trim(),
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      cache: "no-store",
+      body: JSON.stringify({
+        chat: { channelId: canal, contactId: contacto },
+        intentIdOrName: intent,
+        variables: b2.variables || {},
+      }),
+    })
+    const cuerpo = (await r.text().catch(() => "")).slice(0, 400)
+    // El flujo corre asíncrono: se le da un respiro antes de releer.
+    await new Promise((res) => setTimeout(res, 6000))
+    const despues = await leerChat(chatRef)
+    return json({
+      ok: true,
+      accion,
+      intent,
+      variables: b2.variables || {},
+      status: r.status,
+      respuesta: cuerpo,
+      agentId_antes: antes?.agentId || null,
+      agentId_despues: despues?.agentId || null,
+      cambio: (antes?.agentId || null) !== (despues?.agentId || null),
+    })
+  }
+
+  return json({ ok: false, error: "accion debe ser roles | crear | etiquetar | probar_agentid | probar_intent" }, 400)
 }
