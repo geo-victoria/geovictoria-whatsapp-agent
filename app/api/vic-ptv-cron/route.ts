@@ -422,7 +422,11 @@ async function conciliarStatusLeads(): Promise<number> {
  * Conservadora: solo asigna si el chat NO tiene ya a esa persona, si el
  * correo existe como agente y si el dueño no es un usuario-bot. Best-effort.
  */
-async function conciliarAsignacionBotmaker(): Promise<{ asignadas: number; revisadas: number }> {
+async function conciliarAsignacionBotmaker(): Promise<{
+  asignadas: number
+  revisadas: number
+  notas: number
+}> {
   const cursorKv = "bm_asignacion_offset"
   try {
     const offset = parseInt((await getKvValue(cursorKv).catch(() => "0")) || "0") || 0
@@ -432,12 +436,13 @@ async function conciliarAsignacionBotmaker(): Promise<{ asignadas: number; revis
     )
     if (!convs.length) {
       await setKvValue(cursorKv, "0").catch(() => {})
-      return { asignadas: 0, revisadas: 0 }
+      return { asignadas: 0, revisadas: 0, notas: 0 }
     }
     const fonos = convs.map((c) => String(c.contact || "").replace(/\D/g, "")).filter(Boolean)
     const fichas = await duenosEnZohoPorTelefono(fonos)
     const { asignarConversacionAlDueno, leerChat, chatRefDeContacto } = await import("@/lib/botmaker-agentes")
     let asignadas = 0
+    let notasRefrescadas = 0
     for (const fono of fonos) {
       const ficha = fichas.get(fono)
       if (!ficha) continue
@@ -456,7 +461,25 @@ async function conciliarAsignacionBotmaker(): Promise<{ asignadas: number; revis
         if (dealId) await guardarLinkChat("Deals", String(dealId), url)
       }
 
-      // 2) La ASIGNACIÓN. Si el chat ya está con un agente no se toca: puede
+      // 2) Las NOTAS de transcripción que ya existen se ponen al día. NO se
+      //    crean nuevas (orden de Lalo 15-ago): la conversación sigue viva
+      //    después del traspaso y la nota que el ejecutivo abre para ponerse
+      //    al día quedaba congelada en el momento en que se creó.
+      const punterosNota = await getQuotePointers(fono).catch(() => [])
+      const dealNota = punterosNota.find((p) => p.dealId)?.dealId
+      const registros: Array<{ modulo: string; id: string }> = []
+      if (ficha.leadId) registros.push({ modulo: "Leads", id: ficha.leadId })
+      if (dealNota) registros.push({ modulo: "Deals", id: String(dealNota) })
+      if (registros.length) {
+        const { refrescarTranscripcionesExistentes } = await import("@/lib/crm-hitos")
+        const n = await refrescarTranscripcionesExistentes(fono, registros).catch(() => 0)
+        if (n) {
+          notasRefrescadas += n
+          console.log(`[ptv] +${fono}: ${n} nota(s) de transcripción puestas al día`)
+        }
+      }
+
+      // 3) La ASIGNACIÓN. Si el chat ya está con un agente no se toca: puede
       //    haberlo tomado una persona a mano y esa gestión manda.
       if (chat?.agentId || !ficha.owner) continue
       const r = await asignarConversacionAlDueno(fono, ficha.owner)
@@ -466,10 +489,10 @@ async function conciliarAsignacionBotmaker(): Promise<{ asignadas: number; revis
       }
     }
     await setKvValue(cursorKv, String(offset + convs.length)).catch(() => {})
-    return { asignadas, revisadas: convs.length }
+    return { asignadas, revisadas: convs.length, notas: notasRefrescadas }
   } catch (e) {
     console.warn("[ptv] conciliarAsignacionBotmaker falló:", e instanceof Error ? e.message : e)
-    return { asignadas: 0, revisadas: 0 }
+    return { asignadas: 0, revisadas: 0, notas: 0 }
   }
 }
 
@@ -1790,7 +1813,7 @@ export async function GET(req: Request) {
   // La conversación en Botmaker sigue al dueño del registro en Zoho.
   const asignacionBm = await conciliarAsignacionBotmaker().catch((e) => {
     console.warn("[ptv-cron] conciliación Botmaker falló:", e instanceof Error ? e.message : e)
-    return { asignadas: 0, revisadas: 0 }
+    return { asignadas: 0, revisadas: 0, notas: 0 }
   })
 
   return NextResponse.json({
@@ -1801,6 +1824,7 @@ export async function GET(req: Request) {
     leads_status_conciliados: statusConciliados,
     conversaciones_asignadas_botmaker: asignacionBm.asignadas,
     conversaciones_revisadas_botmaker: asignacionBm.revisadas,
+    notas_transcripcion_refrescadas: asignacionBm.notas,
     conversaciones_revisadas: convs.length,
     traspasados,
     tm_traspasados: tmTraspasados,

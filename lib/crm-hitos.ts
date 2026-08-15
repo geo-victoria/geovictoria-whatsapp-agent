@@ -980,6 +980,78 @@ const TITULO_NOTA_TRANSCRIPCION = "Transcripción WhatsApp Vicky"
  * se acumulan copias. (El PDF adjunto queda para el barrido batch: en
  * serverless no hay renderer.) Best-effort.
  */
+/**
+ * REFRESCA las notas de transcripción que YA EXISTEN en un registro, sin
+ * crear ninguna nueva (orden de Lalo, 15-ago: "no crear nuevas notas con
+ * transcripción, actualizar las que ya tengan transcripción").
+ *
+ * La conversación sigue viva después del traspaso: la nota que el ejecutivo
+ * abre para ponerse al día quedaba congelada en el momento en que se creó.
+ * Acá se le vuelca el diálogo completo al día.
+ *
+ * Reconoce las dos notas que el sistema escribe con transcripción: la de los
+ * hitos ("Transcripción WhatsApp Vicky") y la del traspaso ("Traspaso de
+ * Vicky — conversación y chat directo"), esta última conservando su cabecera
+ * (el link directo al chat) y reemplazando solo el cuerpo del diálogo.
+ */
+const TITULOS_CON_TRANSCRIPCION = [TITULO_NOTA_TRANSCRIPCION, "Traspaso de Vicky"]
+const MARCA_TRANSCRIPCION = "CONVERSACIÓN RECIENTE CON VICKY:"
+
+export async function refrescarTranscripcionesExistentes(
+  contact: string,
+  registros: Array<{ modulo: string; id: string }>,
+): Promise<number> {
+  let refrescadas = 0
+  try {
+    const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
+    const historia = await fetchHistoryV3(contact, 200)
+    if (!historia.length) return 0
+    const transcript = historia
+      .map((m) => {
+        const rol = m.role === "assistant" ? "Vicky" : "Cliente"
+        const at = (m as { at?: string }).at || ""
+        return `${at} | ${rol}: ${m.content || ""}`
+      })
+      .join("\n")
+      .slice(0, 30000)
+    const { h, api } = await zohoHeaders()
+    for (const reg of registros) {
+      if (!reg.id) continue
+      const res = await fetch(
+        `${api}/crm/v3/${reg.modulo}/${reg.id}/Notes?fields=Note_Title,Note_Content&per_page=50`,
+        { headers: h, cache: "no-store" },
+      )
+      if (!res.ok || res.status === 204) continue
+      const data = (await res.json().catch(() => ({}))) as {
+        data?: Array<{ id?: string; Note_Title?: string; Note_Content?: string }>
+      }
+      for (const n of data?.data || []) {
+        const titulo = String(n.Note_Title || "")
+        if (!TITULOS_CON_TRANSCRIPCION.some((t) => titulo.startsWith(t))) continue
+        // La nota del traspaso lleva cabecera (link al chat + contexto): se
+        // conserva y se reemplaza SOLO el diálogo que va debajo de la marca.
+        const previo = String(n.Note_Content || "")
+        const corte = previo.indexOf(MARCA_TRANSCRIPCION)
+        const contenido =
+          corte >= 0
+            ? `${previo.slice(0, corte)}${MARCA_TRANSCRIPCION}\n${transcript}`
+            : transcript
+        if (contenido.trim() === previo.trim()) continue
+        const put = await fetch(`${api}/crm/v3/Notes/${n.id}`, {
+          method: "PUT",
+          headers: h,
+          cache: "no-store",
+          body: JSON.stringify({ data: [{ Note_Content: contenido.slice(0, 32000) }] }),
+        })
+        if (put.ok) refrescadas++
+      }
+    }
+  } catch (e) {
+    console.warn("[crm-hitos] refrescarTranscripcionesExistentes falló:", e instanceof Error ? e.message : e)
+  }
+  return refrescadas
+}
+
 export async function actualizarNotaTranscripcion(dealId: string, contact: string): Promise<void> {
   try {
     const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
