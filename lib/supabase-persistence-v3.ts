@@ -1018,3 +1018,23 @@ export async function vincularZohoAConversacion(
     console.warn("[persistencia] vincularZohoAConversacion falló:", e instanceof Error ? e.message : e)
   }
 }
+
+/**
+ * Marca conversaciones como revisadas por la conciliación. Es lo que permite
+ * que el barrido avance sin un cursor de offset: se ordena por esta marca
+ * (nulos primero) y cada vuelta toma las más atrasadas. Auto-reparable — no
+ * hay contador que se pueda desincronizar del orden real.
+ */
+export async function marcarConversacionesRevisadas(contactos: string[]): Promise<void> {
+  try {
+    const lista = contactos.map((c) => (c || "").replace(/\D/g, "")).filter(Boolean)
+    if (!lista.length) return
+    await supabaseFetch(`vic_v3_conversations?contact=in.(${lista.join(",")})`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ zoho_link_at: new Date().toISOString() }),
+    })
+  } catch (e) {
+    console.warn("[persistencia] marcarConversacionesRevisadas falló:", e instanceof Error ? e.message : e)
+  }
+}

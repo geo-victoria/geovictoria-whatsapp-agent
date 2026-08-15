@@ -427,17 +427,22 @@ async function conciliarAsignacionBotmaker(): Promise<{
   revisadas: number
   notas: number
 }> {
-  const cursorKv = "bm_asignacion_offset"
   try {
-    const offset = parseInt((await getKvValue(cursorKv).catch(() => "0")) || "0") || 0
+    // SIN CURSOR DE OFFSET (corregido 15-ago). Estaba paginando por offset
+    // sobre `order=updated_at.desc`, y ese orden CAMBIA entre ticks: cada
+    // conversación que recibe un mensaje salta al tope y corre la ventana, así
+    // que había conversaciones que el barrido nunca alcanzaba a visitar — un
+    // hoyo invisible, porque el contador seguía avanzando igual.
+    //
+    // Ahora manda la marca de sincronía: primero las que NUNCA se revisaron
+    // (zoho_link_at nulo) y después las más antiguas. Es auto-reparable — no
+    // hay estado que se desincronice — y cuando la primera vuelta termina, el
+    // barrido sigue solo, refrescando lo más viejo.
     const lote = 12
     const convs = await supa<{ contact: string }>(
-      `vic_v3_conversations?select=contact&order=updated_at.desc&limit=${lote}&offset=${offset}`,
+      `vic_v3_conversations?select=contact,zoho_link_at&order=zoho_link_at.asc.nullsfirst&limit=${lote}`,
     )
-    if (!convs.length) {
-      await setKvValue(cursorKv, "0").catch(() => {})
-      return { asignadas: 0, revisadas: 0, notas: 0 }
-    }
+    if (!convs.length) return { asignadas: 0, revisadas: 0, notas: 0 }
     const fonos = convs.map((c) => String(c.contact || "").replace(/\D/g, "")).filter(Boolean)
     const fichas = await duenosEnZohoPorTelefono(fonos)
     const { asignarConversacionAlDueno, leerChat, chatRefDeContacto } = await import("@/lib/botmaker-agentes")
@@ -509,7 +514,10 @@ async function conciliarAsignacionBotmaker(): Promise<{
         console.log(`[ptv] +${fono}: conversación asignada a ${ficha.owner} (conciliación)`)
       }
     }
-    await setKvValue(cursorKv, String(offset + convs.length)).catch(() => {})
+    // Se marcan como revisadas SIEMPRE, aunque no hubiera nada que hacer:
+    // sin eso el barrido volvería a tomar las mismas 12 en cada tick.
+    const { marcarConversacionesRevisadas } = await import("@/lib/supabase-persistence-v3")
+    await marcarConversacionesRevisadas(fonos).catch(() => undefined)
     return { asignadas, revisadas: convs.length, notas: notasRefrescadas }
   } catch (e) {
     console.warn("[ptv] conciliarAsignacionBotmaker falló:", e instanceof Error ? e.message : e)
