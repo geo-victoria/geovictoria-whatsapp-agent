@@ -176,8 +176,34 @@ export async function postCreateFromVicky(body: unknown): Promise<{ ok: boolean;
         ok?: boolean
         error?: string
         quoteId?: string
+        dealId?: string
+        accountId?: string
+        contactId?: string
       }
       if (r.ok && data.ok) {
+        // TODO lo creado queda registrado también cuando la emisión NO pasa
+        // por el chat de Vicky (Lalo 15-ago): el editor, la calculadora
+        // comercial y esta cotizadora crean cotización, trato, cuenta y
+        // contacto igual que ella, y hasta hoy solo el puntero guardaba algo
+        // — cuenta y contacto no quedaban en ninguna parte.
+        const fono = String(
+          (body as { telefono?: string; contacto?: string } | null)?.telefono ||
+            (body as { contacto?: string } | null)?.contacto ||
+            "",
+        ).replace(/\D/g, "")
+        if (fono) {
+          const { registrarEnZoho } = await import("@/lib/registro-zoho")
+          void registrarEnZoho(
+            fono,
+            [
+              { modulo: "Cotizaciones_GeoVictoria", id: data.quoteId },
+              { modulo: "Deals", id: data.dealId },
+              { modulo: "Accounts", id: data.accountId },
+              { modulo: "Contacts", id: data.contactId },
+            ],
+            { origen: "canal-ejecutivo" },
+          ).catch(() => 0)
+        }
         // Nota de auditoría con la tabla del CANAL EJECUTIVO (Lalo 14-ago):
         // acá la lista aplicada es la comercial completa, no la de Vicky.
         if (data.quoteId) {

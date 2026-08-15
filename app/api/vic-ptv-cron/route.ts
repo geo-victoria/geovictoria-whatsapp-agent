@@ -445,12 +445,36 @@ async function conciliarAsignacionBotmaker(): Promise<{
     if (!convs.length) return { asignadas: 0, revisadas: 0, notas: 0 }
     const fonos = convs.map((c) => String(c.contact || "").replace(/\D/g, "")).filter(Boolean)
     const fichas = await duenosEnZohoPorTelefono(fonos)
+    // Hitos comerciales del lote, para decidir si vale crear lo que falta.
+    const listaFonos = fonos.join(",")
+    const punterosLote = await supa<{ contact: string }>(
+      `vic_v3_quote_pointers?select=contact&contact=in.(${listaFonos})`,
+    )
+    const reunionesLote = await supa<{ contact: string }>(
+      `vic_v3_meetings?select=contact&contact=in.(${listaFonos})`,
+    )
+    const conCotizacion = new Set(punterosLote.map((p) => String(p.contact || "").replace(/\D/g, "")))
+    const conReunionSet = new Set(reunionesLote.map((m) => String(m.contact || "").replace(/\D/g, "")))
     const { asignarConversacionAlDueno, leerChat, chatRefDeContacto } = await import("@/lib/botmaker-agentes")
     let asignadas = 0
     let notasRefrescadas = 0
     for (const fono of fonos) {
       const ficha = fichas.get(fono)
-      if (!ficha) continue
+      if (!ficha) {
+        // NADA en el CRM y la conversación TIENE hito comercial: se dispara el
+        // hito para que nazca el registro (Lalo 15-ago). La conciliación
+        // anotaba lo existente pero no creaba lo faltante, así que un fallo
+        // puntual de la creación en vivo quedaba como hueco para siempre.
+        // Guardas: país reconocible y cotización o reunión de verdad — nunca
+        // por una conversación suelta ni por un id de Instagram.
+        const tieneHito =
+          conCotizacion.has(fono) || conReunionSet.has(fono)
+        if (!tieneHito || !chatRefDeContacto(fono)) continue
+        const { sincronizarHitoCrm } = await import("@/lib/crm-hitos")
+        await sincronizarHitoCrm(fono, "intencion", {}).catch(() => undefined)
+        console.log(`[ptv] +${fono}: hito comercial sin registro — lead disparado por la conciliación`)
+        continue
+      }
       const chat = await leerChat(chatRefDeContacto(fono)).catch(() => null)
 
       // 1) El LINK a la conversación, en el lead y en su trato. Va siempre,
@@ -505,13 +529,31 @@ async function conciliarAsignacionBotmaker(): Promise<{
         }
       }
 
-      // 3) La ASIGNACIÓN. Si el chat ya está con un agente no se toca: puede
-      //    haberlo tomado una persona a mano y esa gestión manda.
-      if (chat?.agentId || !ficha.owner) continue
+      // 3) La ASIGNACIÓN. Zoho es la fuente de la verdad (Lalo 15-ago), así
+      //    que además de asignar el chat sin dueño, se REASIGNA cuando el
+      //    agente actual ya no es el dueño del registro: si la tómbola movió
+      //    el trato, la conversación lo sigue. Antes solo se tocaba el chat
+      //    vacío y una reasignación en el CRM dejaba la conversación con el
+      //    ejecutivo anterior para siempre.
+      //    Rollback sin deploy: VICKY_BM_NO_REASIGNAR=1.
+      if (!ficha.owner) continue
+      if (chat?.agentId) {
+        if ((process.env.VICKY_BM_NO_REASIGNAR || "") === "1") continue
+        const { listarAgentes } = await import("@/lib/botmaker-agentes")
+        const agentes = await listarAgentes().catch(() => [])
+        const idDelDueno = agentes.find(
+          (a) => String(a.email || "").toLowerCase() === ficha.owner.toLowerCase(),
+        )?.id
+        // Sin id del dueño no se toca nada: mejor dejarlo con quien está que
+        // mandarlo a la cola y que le caiga a cualquiera.
+        if (!idDelDueno || idDelDueno === chat.agentId) continue
+      }
       const r = await asignarConversacionAlDueno(fono, ficha.owner)
       if (r.asignado) {
         asignadas++
-        console.log(`[ptv] +${fono}: conversación asignada a ${ficha.owner} (conciliación)`)
+        console.log(
+          `[ptv] +${fono}: conversación ${chat?.agentId ? "REasignada" : "asignada"} a ${ficha.owner}`,
+        )
       }
     }
     // Se marcan como revisadas SIEMPRE, aunque no hubiera nada que hacer:
