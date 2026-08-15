@@ -274,6 +274,74 @@ export async function POST(req: Request): Promise<Response> {
     })
   }
 
+  // ── 6. AUDITORÍA de sincronía CRM ↔ conversaciones ────────────────────────
+  // Pregunta de Lalo (15-ago): ¿está todo cruzado? ¿faltan leads o tratos por
+  // crear? ¿hay oportunidades comerciales fuera del CRM? Se responde con
+  // datos, no con impresiones: se toman TODAS las conversaciones, se marcan
+  // las que tienen hito comercial (precio visto, cotización o reunión) y se
+  // cruzan por teléfono contra Leads y Contacts de Zoho.
+  if (accion === "auditoria") {
+    const convs: Array<{ contact: string; user_msg_count?: number }> = []
+    for (let p = 0; p < 12; p++) {
+      const pagina = await supa<{ contact: string; user_msg_count?: number }>(
+        `vic_v3_conversations?select=contact,user_msg_count&limit=1000&offset=${p * 1000}`,
+      )
+      convs.push(...pagina)
+      if (pagina.length < 1000) break
+    }
+    const internos = new Set(["56944668823", "56978385048", "56971345236"])
+    const todos = convs
+      .map((c) => String(c.contact || "").replace(/\D/g, ""))
+      .filter((c) => c && !internos.has(c))
+    // Hitos comerciales: cotización emitida (puntero) o reunión agendada.
+    const punteros = await supa<{ contact: string; deal_id?: string }>(
+      `vic_v3_quote_pointers?select=contact,deal_id&limit=2000`,
+    )
+    const reuniones = await supa<{ contact: string }>(`vic_v3_meetings?select=contact&limit=2000`)
+    const conCotizacion = new Set(punteros.map((p) => String(p.contact || "").replace(/\D/g, "")))
+    const conReunion = new Set(reuniones.map((m) => String(m.contact || "").replace(/\D/g, "")))
+    const conHito = todos.filter((c) => conCotizacion.has(c) || conReunion.has(c))
+
+    // Cruce contra Zoho por teléfono, en lotes y tolerando el formato: hay
+    // registros guardados con "+56..." y otros sin el signo.
+    const enCrm = new Set<string>()
+    const conDeal = new Set<string>()
+    const lotes: string[][] = []
+    for (let i = 0; i < todos.length; i += 80) lotes.push(todos.slice(i, i + 80))
+    for (const lote of lotes) {
+      const lista = lote.map((f) => `'+${f}','${f}'`).join(",")
+      for (const modulo of ["Leads", "Contacts"]) {
+        const filas = await coql<{ Phone?: string; Converted_Deal?: { id?: string } | null }>(
+          `select id, Phone from ${modulo} where ((Phone in (${lista}))) limit 200`,
+        )
+        for (const f of filas) {
+          const fono = String(f.Phone || "").replace(/\D/g, "")
+          if (fono) enCrm.add(fono)
+          if (modulo === "Contacts" && fono) conDeal.add(fono)
+        }
+      }
+    }
+    for (const p of punteros) {
+      if (p.deal_id) conDeal.add(String(p.contact || "").replace(/\D/g, ""))
+    }
+    const faltantes = todos.filter((c) => !enCrm.has(c))
+    const hitoSinCrm = conHito.filter((c) => !enCrm.has(c))
+    const hitoSinDeal = conHito.filter((c) => !conDeal.has(c))
+    return json({
+      ok: true,
+      accion,
+      conversaciones: todos.length,
+      con_hito_comercial: conHito.length,
+      en_crm: todos.length - faltantes.length,
+      sin_registro_en_crm: faltantes.length,
+      hito_comercial_sin_registro_en_crm: hitoSinCrm.length,
+      hito_comercial_sin_trato: hitoSinDeal.length,
+      muestra_hito_sin_crm: hitoSinCrm.slice(0, 20),
+      muestra_hito_sin_trato: hitoSinDeal.slice(0, 20),
+      muestra_sin_crm: faltantes.slice(0, 20),
+    })
+  }
+
   // ── 5. SONDA: disparar una INTENCIÓN inyectando variables ─────────────────
   // El constructor de flujos vive solo en la consola (/intents es GET), pero
   // una intención que YA existe y está activa se puede ejecutar por API con
