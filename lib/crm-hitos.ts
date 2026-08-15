@@ -817,6 +817,14 @@ async function convertirConDeal(
   const dealCreado = fila?.Deals?.id || fila?.details?.Deals?.id
   if (fila?.code === "SUCCESS" && dealCreado) {
     console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${piso}"`)
+    // El vínculo durable en la conversación + la marca del chat en el trato
+    // (Lalo 15-ago). Best-effort: no se espera ni bloquea la conversión.
+    void (async () => {
+      const { vincularZohoAConversacion } = await import("./supabase-persistence-v3")
+      await vincularZohoAConversacion(contact, { leadId: lead.id, dealId: String(dealCreado) })
+      const { marcarRegistroConChat } = await import("./enlace-conversacion")
+      await marcarRegistroConChat("Deals", String(dealCreado), contact)
+    })().catch(() => undefined)
     // REUNIÓN MANDA (Lalo 06-ago): con reunión agendada el deal se fuerza al
     // HOST — una sola cara ante el cliente. Gana sobre tómbola y traspaso.
     if (ownerForzadoId) {

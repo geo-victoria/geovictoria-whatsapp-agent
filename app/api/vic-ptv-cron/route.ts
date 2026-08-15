@@ -450,25 +450,33 @@ async function conciliarAsignacionBotmaker(): Promise<{
 
       // 1) El LINK a la conversación, en el lead y en su trato. Va siempre,
       //    tenga o no agente: es trazabilidad, no asignación.
+      const punterosLink = await getQuotePointers(fono).catch(() => [])
+      const dealDelPuntero = punterosLink.find((p) => p.dealId)?.dealId
       if (chat?.chatId) {
         const url = `https://go.botmaker.com/#/chats/${chat.chatId}`
         if (ficha.leadId) {
           const ok = await guardarLinkChat("Leads", ficha.leadId, url, ficha.linkChat)
           if (ok) console.log(`[ptv] +${fono}: link de conversación guardado en el lead`)
         }
-        const punteros = await getQuotePointers(fono).catch(() => [])
-        const dealId = punteros.find((p) => p.dealId)?.dealId
-        if (dealId) await guardarLinkChat("Deals", String(dealId), url)
+        if (dealDelPuntero) await guardarLinkChat("Deals", String(dealDelPuntero), url)
+      }
+      // Y el vínculo al revés: la conversación guarda los ids de Zoho, para
+      // que el cruce no dependa de re-buscar por teléfono (que en Zoho está
+      // escrito de cuatro formas distintas).
+      if (ficha.leadId || dealDelPuntero) {
+        const { vincularZohoAConversacion } = await import("@/lib/supabase-persistence-v3")
+        await vincularZohoAConversacion(fono, {
+          leadId: ficha.leadId,
+          dealId: dealDelPuntero ? String(dealDelPuntero) : null,
+        }).catch(() => undefined)
       }
 
       // 2) UNA nota de transcripción por registro, siempre al día: se
       //    actualiza la que exista, y si no hay ninguna y hay conversación,
       //    nace la que de ahora en adelante se irá refrescando.
-      const punterosNota = await getQuotePointers(fono).catch(() => [])
-      const dealNota = punterosNota.find((p) => p.dealId)?.dealId
       const registros: Array<{ modulo: string; id: string }> = []
       if (ficha.leadId) registros.push({ modulo: "Leads", id: ficha.leadId })
-      if (dealNota) registros.push({ modulo: "Deals", id: String(dealNota) })
+      if (dealDelPuntero) registros.push({ modulo: "Deals", id: String(dealDelPuntero) })
       if (registros.length) {
         const { sincronizarNotaTranscripcion } = await import("@/lib/crm-hitos")
         const n = await sincronizarNotaTranscripcion(fono, registros).catch(() => 0)

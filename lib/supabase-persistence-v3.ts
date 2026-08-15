@@ -982,3 +982,39 @@ export async function setKvValue(key: string, value: string): Promise<void> {
     body: JSON.stringify({ key, value }),
   })
 }
+
+/**
+ * Deja en la CONVERSACIÓN el id del lead y del trato que nacieron de ella
+ * (orden de Lalo, 15-ago). Hasta ahora el puntero vivía solo en vic_kv
+ * (`zoho_lead_<fono>`) y cubría 147 de 1238 conversaciones: sin esto, cruzar
+ * conversación con CRM había que reconstruirlo por teléfono — y en Zoho el
+ * teléfono está escrito de cuatro formas distintas, así que el cruce fallaba
+ * justo en los casos que importaban.
+ *
+ * Aditivo: solo escribe lo que llega y nunca borra un id ya guardado.
+ * Best-effort — jamás rompe el flujo que lo llama.
+ */
+export async function vincularZohoAConversacion(
+  contact: string,
+  ids: { leadId?: string | null; dealId?: string | null },
+): Promise<void> {
+  try {
+    const clean = (contact || "").replace(/\D/g, "")
+    const leadId = (ids.leadId || "").trim()
+    const dealId = (ids.dealId || "").trim()
+    if (!clean || (!leadId && !dealId)) return
+    const cambios: Record<string, string> = { zoho_link_at: new Date().toISOString() }
+    if (leadId) cambios.zoho_lead_id = leadId
+    if (dealId) cambios.zoho_deal_id = dealId
+    // Solo columnas vacías: un id ya guardado manda (puede haberlo puesto un
+    // camino con mejor información que este).
+    const filtro = leadId && dealId ? "" : leadId ? "&zoho_lead_id=is.null" : "&zoho_deal_id=is.null"
+    await supabaseFetch(`vic_v3_conversations?contact=eq.${encodeURIComponent(clean)}${filtro}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(cambios),
+    })
+  } catch (e) {
+    console.warn("[persistencia] vincularZohoAConversacion falló:", e instanceof Error ? e.message : e)
+  }
+}

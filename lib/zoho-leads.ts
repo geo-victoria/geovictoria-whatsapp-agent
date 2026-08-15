@@ -1160,6 +1160,20 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         .then(({ setKvValue }) => setKvValue(kvKeyLead, leadId))
         .catch(() => {})
     }
+    // Y el vínculo DURABLE en la conversación (Lalo 15-ago): el candado kv
+    // es anti-duplicación, no un índice — el cruce conversación↔CRM tiene que
+    // vivir en la conversación misma.
+    if (fonoCandado) {
+      import("./supabase-persistence-v3")
+        .then(({ vincularZohoAConversacion }) => vincularZohoAConversacion(fonoCandado, { leadId }))
+        .catch(() => {})
+    }
+    // El registro queda marcado con el chat del que nació.
+    if (fonoCandado) {
+      import("./enlace-conversacion")
+        .then(({ marcarRegistroConChat }) => marcarRegistroConChat("Leads", leadId, fonoCandado))
+        .catch(() => {})
+    }
 
     if (transcript) {
       fetch(`${apiDomain}/crm/v2/Notes`, {
