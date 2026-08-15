@@ -435,20 +435,34 @@ async function conciliarAsignacionBotmaker(): Promise<{ asignadas: number; revis
       return { asignadas: 0, revisadas: 0 }
     }
     const fonos = convs.map((c) => String(c.contact || "").replace(/\D/g, "")).filter(Boolean)
-    const duenos = await duenosEnZohoPorTelefono(fonos)
+    const fichas = await duenosEnZohoPorTelefono(fonos)
     const { asignarConversacionAlDueno, leerChat, chatRefDeContacto } = await import("@/lib/botmaker-agentes")
     let asignadas = 0
     for (const fono of fonos) {
-      const owner = duenos.get(fono)
-      if (!owner) continue
-      // Si el chat ya está con un agente, no se toca: puede haberlo tomado
-      // una persona a mano y esa gestión manda sobre el barrido.
+      const ficha = fichas.get(fono)
+      if (!ficha) continue
       const chat = await leerChat(chatRefDeContacto(fono)).catch(() => null)
-      if (chat?.agentId) continue
-      const r = await asignarConversacionAlDueno(fono, owner)
+
+      // 1) El LINK a la conversación, en el lead y en su trato. Va siempre,
+      //    tenga o no agente: es trazabilidad, no asignación.
+      if (chat?.chatId) {
+        const url = `https://go.botmaker.com/#/chats/${chat.chatId}`
+        if (ficha.leadId) {
+          const ok = await guardarLinkChat("Leads", ficha.leadId, url, ficha.linkChat)
+          if (ok) console.log(`[ptv] +${fono}: link de conversación guardado en el lead`)
+        }
+        const punteros = await getQuotePointers(fono).catch(() => [])
+        const dealId = punteros.find((p) => p.dealId)?.dealId
+        if (dealId) await guardarLinkChat("Deals", String(dealId), url)
+      }
+
+      // 2) La ASIGNACIÓN. Si el chat ya está con un agente no se toca: puede
+      //    haberlo tomado una persona a mano y esa gestión manda.
+      if (chat?.agentId || !ficha.owner) continue
+      const r = await asignarConversacionAlDueno(fono, ficha.owner)
       if (r.asignado) {
         asignadas++
-        console.log(`[ptv] +${fono}: conversación asignada a ${owner} (conciliación)`)
+        console.log(`[ptv] +${fono}: conversación asignada a ${ficha.owner} (conciliación)`)
       }
     }
     await setKvValue(cursorKv, String(offset + convs.length)).catch(() => {})
@@ -459,10 +473,13 @@ async function conciliarAsignacionBotmaker(): Promise<{ asignadas: number; revis
   }
 }
 
-/** Dueño vigente en Zoho por teléfono: el CONTACTO (lead ya convertido) manda
- * sobre el lead, porque es el registro vivo de la relación. */
-async function duenosEnZohoPorTelefono(fonos: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>()
+type FichaZoho = { owner: string; leadId?: string; linkChat?: string | null }
+
+/** Dueño vigente en Zoho por teléfono + el id del lead y su link de chat
+ * actual. El CONTACTO (lead ya convertido) manda sobre el lead como dueño,
+ * porque es el registro vivo de la relación. */
+async function duenosEnZohoPorTelefono(fonos: string[]): Promise<Map<string, FichaZoho>> {
+  const out = new Map<string, FichaZoho>()
   if (!fonos.length) return out
   try {
     const { getZohoAccessToken } = await import("@/lib/zoho-token")
@@ -470,29 +487,76 @@ async function duenosEnZohoPorTelefono(fonos: string[]): Promise<Map<string, str
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const lista = fonos.map((f) => `'+${f}'`).join(",")
-    for (const modulo of ["Leads", "Contacts"]) {
+    const coql = async (q: string) => {
       const r = await fetch(`${api}/crm/v3/coql`, {
         method: "POST",
         headers: H,
         cache: "no-store",
-        body: JSON.stringify({
-          select_query: `select Phone, Owner.email from ${modulo} where ((Phone in (${lista}))) limit 200`,
-        }),
+        body: JSON.stringify({ select_query: q }),
       })
-      if (!r.ok) continue
-      const filas = (((await r.json().catch(() => ({}))) as {
-        data?: Array<{ Phone?: string; "Owner.email"?: string }>
-      }).data || [])
-      for (const f of filas) {
-        const fono = String(f.Phone || "").replace(/\D/g, "")
-        const correo = String(f["Owner.email"] || "")
-        if (fono && correo) out.set(fono, correo)
-      }
+      if (!r.ok) return []
+      return (((await r.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || [])
+    }
+    for (const f of await coql(
+      `select id, Phone, Owner.email, ${CAMPO_LINK_CHAT} from Leads where ((Phone in (${lista}))) limit 200`,
+    )) {
+      const fono = String(f.Phone || "").replace(/\D/g, "")
+      const correo = String(f["Owner.email"] || "")
+      if (!fono) continue
+      out.set(fono, {
+        owner: correo,
+        leadId: String(f.id || ""),
+        linkChat: (f[CAMPO_LINK_CHAT] as string) || null,
+      })
+    }
+    for (const f of await coql(
+      `select Phone, Owner.email from Contacts where ((Phone in (${lista}))) limit 200`,
+    )) {
+      const fono = String(f.Phone || "").replace(/\D/g, "")
+      const correo = String(f["Owner.email"] || "")
+      if (fono && correo) out.set(fono, { ...(out.get(fono) || {}), owner: correo })
     }
   } catch (e) {
     console.warn("[ptv] duenosEnZohoPorTelefono falló:", e instanceof Error ? e.message : e)
   }
   return out
+}
+
+/**
+ * Campo del CRM con el link a la conversación. Hay dos con nombre parecido en
+ * Leads; se verificó el 15-ago cuál está POBLADO: `Conversaci_n_Botmaker`
+ * (textarea) lo está y trae `https://go.botmaker.com/#/chats/<chatId>`;
+ * `Conversaci_n_en_Botmaker` está vacío en el 100% de los registros y queda
+ * para borrar en la consola. El mismo API name existe en Deals.
+ */
+const CAMPO_LINK_CHAT = (process.env.ZOHO_CAMPO_LINK_CHAT || "Conversaci_n_Botmaker").trim()
+
+/** Escribe el link de la conversación en el registro si falta o cambió. */
+async function guardarLinkChat(
+  modulo: string,
+  registroId: string,
+  url: string,
+  actual?: string | null,
+): Promise<boolean> {
+  if (!registroId || !url || (actual || "").trim() === url) return false
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const r = await fetch(`${api}/crm/v3/${modulo}/${registroId}`, {
+      method: "PUT",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ id: registroId, [CAMPO_LINK_CHAT]: url }],
+        // Escribir el link no puede re-sortear al dueño.
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
 }
 
 async function enriquecerLeadsDeChat(): Promise<number> {
