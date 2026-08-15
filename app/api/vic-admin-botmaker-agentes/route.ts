@@ -309,22 +309,39 @@ export async function POST(req: Request): Promise<Response> {
     // "56..."— el lote es de 24 números = 48 valores. Con lotes grandes todas
     // las consultas rebotaban y el resultado daba "0 en el CRM": el silencio
     // parecía un hallazgo.
+    // Los teléfonos en Zoho vienen ESCRITOS DE VARIAS FORMAS: "+56964525048",
+    // "56964525048", "+569 6452 5048" y "+56 9 6249 2757" conviven en la
+    // misma base. Comparando solo el formato plano, tres cotizaciones
+    // emitidas (Transyver, Maca, Ingredientes Alimenticios) figuraban como
+    // "sin registro en el CRM" cuando su trato existe hace semanas.
+    const variantes = (f: string): string[] => {
+      const out = new Set([f, `+${f}`])
+      const m = f.match(/^(\d{2})9(\d{4})(\d{4})$/) // CL: 56 9 XXXX XXXX
+      if (m) {
+        out.add(`+${m[1]} 9 ${m[2]} ${m[3]}`)
+        out.add(`+${m[1]}9 ${m[2]} ${m[3]}`)
+      }
+      return [...out]
+    }
     const enCrm = new Set<string>()
     const lotes: string[][] = []
-    for (let i = 0; i < todos.length; i += 24) lotes.push(todos.slice(i, i + 24))
+    for (let i = 0; i < todos.length; i += 12) lotes.push(todos.slice(i, i + 12))
     // De a 6 lotes en paralelo para que la auditoría completa entre en el
     // tiempo de la función.
     for (let i = 0; i < lotes.length; i += 6) {
       await Promise.all(
         lotes.slice(i, i + 6).map(async (lote) => {
-          const lista = lote.map((f) => `'+${f}','${f}'`).join(",")
+          const lista = lote.flatMap(variantes).map((v) => `'${v}'`).join(",")
+          const porVariante = new Map<string, string>()
+          for (const f of lote) for (const v of variantes(f)) porVariante.set(v, f)
           for (const modulo of ["Leads", "Contacts"]) {
             const filas = await coql<{ Phone?: string }>(
               `select id, Phone from ${modulo} where ((Phone in (${lista}))) limit 200`,
             )
             for (const f of filas) {
-              const fono = String(f.Phone || "").replace(/\D/g, "")
-              if (fono) enCrm.add(fono)
+              const bruto = String(f.Phone || "")
+              const normal = porVariante.get(bruto) || bruto.replace(/\D/g, "")
+              if (normal) enCrm.add(normal)
             }
           }
         }),
