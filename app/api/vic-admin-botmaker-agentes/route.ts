@@ -367,7 +367,9 @@ export async function POST(req: Request): Promise<Response> {
       cotizacion_emitida_sin_trato_asociado: hitoSinDeal.length,
       muestra_hito_sin_crm: hitoSinCrm.slice(0, 20),
       muestra_hito_sin_trato: hitoSinDeal.slice(0, 20),
-      muestra_sin_crm: faltantes.slice(0, 20),
+      // Lista COMPLETA: el detalle es el que permite separar prospectos
+      // reales de ruido (ids de Instagram/Facebook, números de otros países).
+      sin_crm: faltantes,
     })
   }
 
