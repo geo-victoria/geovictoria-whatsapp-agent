@@ -1067,6 +1067,22 @@ export async function runAgentLoop(params: {
                 rut: typeof toolInput.rutEmpresa === "string" ? toolInput.rutEmpresa : undefined,
                 empresa: typeof toolInput.empresa === "string" ? toolInput.empresa : undefined,
               }).catch(() => {})
+              // TODO lo que la emisión creó en Zoho queda registrado (Lalo
+              // 15-ago). La cotización trae además cuenta y contacto, que
+              // hasta hoy no quedaban anotados en ninguna parte — y el
+              // deal_id solo se guardaba en las emisiones chilenas, por eso
+              // 15 cotizaciones de CO/MX figuraban "sin trato" teniéndolo.
+              const { registrarEnZoho } = await import("./registro-zoho")
+              await registrarEnZoho(
+                contact,
+                [
+                  { modulo: "Cotizaciones_GeoVictoria", id: qid },
+                  { modulo: "Deals", id: str("dealId") },
+                  { modulo: "Accounts", id: str("accountId") },
+                  { modulo: "Contacts", id: str("contactId") },
+                ],
+                { origen: "cotizador" },
+              ).catch(() => 0)
             }
           } else if (toolName === "aplicar_siguiente_descuento") {
             // Refrescar la vigencia de la formal sobre la que se negocia.

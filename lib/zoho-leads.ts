@@ -1167,6 +1167,11 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
       import("./supabase-persistence-v3")
         .then(({ vincularZohoAConversacion }) => vincularZohoAConversacion(fonoCandado, { leadId }))
         .catch(() => {})
+      import("./registro-zoho")
+        .then(({ registrarEnZoho }) =>
+          registrarEnZoho(fonoCandado, [{ modulo: "Leads", id: leadId }], { origen: "zoho-leads" }),
+        )
+        .catch(() => {})
     }
     // El registro queda marcado con el chat del que nació.
     if (fonoCandado) {

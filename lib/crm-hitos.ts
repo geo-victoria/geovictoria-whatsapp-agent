@@ -794,8 +794,17 @@ async function convertirConDeal(
     return (await res.json().catch(() => ({}))) as {
       data?: Array<{
         code?: string
+        // La conversión devuelve los TRES registros que crea de una vez:
+        // trato, cuenta y contacto. Antes solo se leía el trato.
         Deals?: { id?: string }
-        details?: { duplicate_record?: { id?: string }; Deals?: { id?: string } }
+        Accounts?: { id?: string }
+        Contacts?: { id?: string }
+        details?: {
+          duplicate_record?: { id?: string }
+          Deals?: { id?: string }
+          Accounts?: { id?: string }
+          Contacts?: { id?: string }
+        }
         duplicate_record?: { id?: string }
       }>
     }
@@ -822,6 +831,19 @@ async function convertirConDeal(
     void (async () => {
       const { vincularZohoAConversacion } = await import("./supabase-persistence-v3")
       await vincularZohoAConversacion(contact, { leadId: lead.id, dealId: String(dealCreado) })
+      // La conversión crea de una vez trato, cuenta y contacto: los tres
+      // quedan registrados, no solo el trato.
+      const { registrarEnZoho } = await import("./registro-zoho")
+      await registrarEnZoho(
+        contact,
+        [
+          { modulo: "Leads", id: lead.id },
+          { modulo: "Deals", id: String(dealCreado) },
+          { modulo: "Accounts", id: fila?.Accounts?.id || fila?.details?.Accounts?.id },
+          { modulo: "Contacts", id: fila?.Contacts?.id || fila?.details?.Contacts?.id },
+        ],
+        { origen: "crm-hitos" },
+      )
       const { marcarRegistroConChat } = await import("./enlace-conversacion")
       await marcarRegistroConChat("Deals", String(dealCreado), contact)
     })().catch(() => undefined)

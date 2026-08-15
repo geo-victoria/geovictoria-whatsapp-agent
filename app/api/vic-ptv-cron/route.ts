@@ -469,6 +469,20 @@ async function conciliarAsignacionBotmaker(): Promise<{
           leadId: ficha.leadId,
           dealId: dealDelPuntero ? String(dealDelPuntero) : null,
         }).catch(() => undefined)
+        // Y al registro único de ids: lo viejo también queda anotado, con la
+        // cotización que ya vivía en el puntero.
+        const { registrarEnZoho } = await import("@/lib/registro-zoho")
+        await registrarEnZoho(
+          fono,
+          [
+            { modulo: "Leads", id: ficha.leadId },
+            { modulo: "Deals", id: dealDelPuntero ? String(dealDelPuntero) : null },
+            ...punterosLink
+              .filter((p) => p.quoteId)
+              .map((p) => ({ modulo: "Cotizaciones_GeoVictoria" as const, id: p.quoteId })),
+          ],
+          { origen: "conciliacion" },
+        ).catch(() => 0)
       }
 
       // 2) UNA nota de transcripción por registro, siempre al día: se
