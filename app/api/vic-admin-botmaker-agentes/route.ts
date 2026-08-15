@@ -304,23 +304,35 @@ export async function POST(req: Request): Promise<Response> {
 
     // Cruce contra Zoho por teléfono, en lotes y tolerando el formato: hay
     // registros guardados con "+56..." y otros sin el signo.
+    // COQL admite un MÁXIMO DE 50 VALORES por IN (LIMIT_EXCEEDED). Como cada
+    // teléfono se busca en sus dos formatos —en Zoho conviven "+56..." y
+    // "56..."— el lote es de 24 números = 48 valores. Con lotes grandes todas
+    // las consultas rebotaban y el resultado daba "0 en el CRM": el silencio
+    // parecía un hallazgo.
     const enCrm = new Set<string>()
-    const conDeal = new Set<string>()
     const lotes: string[][] = []
-    for (let i = 0; i < todos.length; i += 80) lotes.push(todos.slice(i, i + 80))
-    for (const lote of lotes) {
-      const lista = lote.map((f) => `'+${f}','${f}'`).join(",")
-      for (const modulo of ["Leads", "Contacts"]) {
-        const filas = await coql<{ Phone?: string; Converted_Deal?: { id?: string } | null }>(
-          `select id, Phone from ${modulo} where ((Phone in (${lista}))) limit 200`,
-        )
-        for (const f of filas) {
-          const fono = String(f.Phone || "").replace(/\D/g, "")
-          if (fono) enCrm.add(fono)
-          if (modulo === "Contacts" && fono) conDeal.add(fono)
-        }
-      }
+    for (let i = 0; i < todos.length; i += 24) lotes.push(todos.slice(i, i + 24))
+    // De a 6 lotes en paralelo para que la auditoría completa entre en el
+    // tiempo de la función.
+    for (let i = 0; i < lotes.length; i += 6) {
+      await Promise.all(
+        lotes.slice(i, i + 6).map(async (lote) => {
+          const lista = lote.map((f) => `'+${f}','${f}'`).join(",")
+          for (const modulo of ["Leads", "Contacts"]) {
+            const filas = await coql<{ Phone?: string }>(
+              `select id, Phone from ${modulo} where ((Phone in (${lista}))) limit 200`,
+            )
+            for (const f of filas) {
+              const fono = String(f.Phone || "").replace(/\D/g, "")
+              if (fono) enCrm.add(fono)
+            }
+          }
+        }),
+      )
     }
+    // "Con trato" se mide donde el trato realmente se ancla: el puntero de la
+    // cotización. No se infiere de la existencia de un contacto.
+    const conDeal = new Set<string>()
     for (const p of punteros) {
       if (p.deal_id) conDeal.add(String(p.contact || "").replace(/\D/g, ""))
     }
@@ -335,7 +347,7 @@ export async function POST(req: Request): Promise<Response> {
       en_crm: todos.length - faltantes.length,
       sin_registro_en_crm: faltantes.length,
       hito_comercial_sin_registro_en_crm: hitoSinCrm.length,
-      hito_comercial_sin_trato: hitoSinDeal.length,
+      cotizacion_emitida_sin_trato_asociado: hitoSinDeal.length,
       muestra_hito_sin_crm: hitoSinCrm.slice(0, 20),
       muestra_hito_sin_trato: hitoSinDeal.slice(0, 20),
       muestra_sin_crm: faltantes.slice(0, 20),
