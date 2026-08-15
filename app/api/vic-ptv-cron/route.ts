@@ -461,21 +461,20 @@ async function conciliarAsignacionBotmaker(): Promise<{
         if (dealId) await guardarLinkChat("Deals", String(dealId), url)
       }
 
-      // 2) Las NOTAS de transcripción que ya existen se ponen al día. NO se
-      //    crean nuevas (orden de Lalo 15-ago): la conversación sigue viva
-      //    después del traspaso y la nota que el ejecutivo abre para ponerse
-      //    al día quedaba congelada en el momento en que se creó.
+      // 2) UNA nota de transcripción por registro, siempre al día: se
+      //    actualiza la que exista, y si no hay ninguna y hay conversación,
+      //    nace la que de ahora en adelante se irá refrescando.
       const punterosNota = await getQuotePointers(fono).catch(() => [])
       const dealNota = punterosNota.find((p) => p.dealId)?.dealId
       const registros: Array<{ modulo: string; id: string }> = []
       if (ficha.leadId) registros.push({ modulo: "Leads", id: ficha.leadId })
       if (dealNota) registros.push({ modulo: "Deals", id: String(dealNota) })
       if (registros.length) {
-        const { refrescarTranscripcionesExistentes } = await import("@/lib/crm-hitos")
-        const n = await refrescarTranscripcionesExistentes(fono, registros).catch(() => 0)
+        const { sincronizarNotaTranscripcion } = await import("@/lib/crm-hitos")
+        const n = await sincronizarNotaTranscripcion(fono, registros).catch(() => 0)
         if (n) {
           notasRefrescadas += n
-          console.log(`[ptv] +${fono}: ${n} nota(s) de transcripción puestas al día`)
+          console.log(`[ptv] +${fono}: ${n} nota(s) de transcripción al día`)
         }
       }
 

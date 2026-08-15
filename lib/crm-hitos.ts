@@ -981,23 +981,25 @@ const TITULO_NOTA_TRANSCRIPCION = "Transcripción WhatsApp Vicky"
  * serverless no hay renderer.) Best-effort.
  */
 /**
- * REFRESCA las notas de transcripción que YA EXISTEN en un registro, sin
- * crear ninguna nueva (orden de Lalo, 15-ago: "no crear nuevas notas con
- * transcripción, actualizar las que ya tengan transcripción").
+ * UNA SOLA NOTA DE TRANSCRIPCIÓN POR REGISTRO, SIEMPRE AL DÍA (Lalo 15-ago).
  *
- * La conversación sigue viva después del traspaso: la nota que el ejecutivo
- * abre para ponerse al día quedaba congelada en el momento en que se creó.
- * Acá se le vuelca el diálogo completo al día.
+ * La conversación sigue viva después del traspaso, pero la nota que el
+ * ejecutivo abre para ponerse al día quedaba congelada en el momento en que
+ * se creó. Acá se le vuelca el diálogo completo.
  *
- * Reconoce las dos notas que el sistema escribe con transcripción: la de los
- * hitos ("Transcripción WhatsApp Vicky") y la del traspaso ("Traspaso de
- * Vicky — conversación y chat directo"), esta última conservando su cabecera
- * (el link directo al chat) y reemplazando solo el cuerpo del diálogo.
+ * Regla exacta: si el registro YA tiene una nota con transcripción, se
+ * actualiza esa —nunca se agrega otra al lado—; si NO tiene ninguna y hay
+ * conversación, se crea UNA, que desde entonces será la que se refresque.
+ *
+ * Reconoce las dos que el sistema escribe: la de los hitos ("Transcripción
+ * WhatsApp Vicky") y la del traspaso ("Traspaso de Vicky — conversación y
+ * chat directo"), esta última conservando su cabecera (el link directo al
+ * chat) y reemplazando solo el cuerpo del diálogo.
  */
 const TITULOS_CON_TRANSCRIPCION = [TITULO_NOTA_TRANSCRIPCION, "Traspaso de Vicky"]
 const MARCA_TRANSCRIPCION = "CONVERSACIÓN RECIENTE CON VICKY:"
 
-export async function refrescarTranscripcionesExistentes(
+export async function sincronizarNotaTranscripcion(
   contact: string,
   registros: Array<{ modulo: string; id: string }>,
 ): Promise<number> {
@@ -1021,13 +1023,36 @@ export async function refrescarTranscripcionesExistentes(
         `${api}/crm/v3/${reg.modulo}/${reg.id}/Notes?fields=Note_Title,Note_Content&per_page=50`,
         { headers: h, cache: "no-store" },
       )
-      if (!res.ok || res.status === 204) continue
-      const data = (await res.json().catch(() => ({}))) as {
-        data?: Array<{ id?: string; Note_Title?: string; Note_Content?: string }>
+      if (!res.ok) continue
+      const data =
+        res.status === 204
+          ? {}
+          : ((await res.json().catch(() => ({}))) as {
+              data?: Array<{ id?: string; Note_Title?: string; Note_Content?: string }>
+            })
+      const conTranscripcion = (data?.data || []).filter((n) =>
+        TITULOS_CON_TRANSCRIPCION.some((t) => String(n.Note_Title || "").startsWith(t)),
+      )
+      // Sin nota previa y CON conversación: nace la nota que de ahora en
+      // adelante se irá actualizando. Se usa el sub-recurso del registro —
+      // el POST global a /Notes con Parent_Id falla en silencio en módulos
+      // custom (cicatriz del 25-jul y del backfill del 14-ago).
+      if (!conTranscripcion.length) {
+        const creada = await fetch(`${api}/crm/v3/${reg.modulo}/${reg.id}/Notes`, {
+          method: "POST",
+          headers: h,
+          cache: "no-store",
+          body: JSON.stringify({
+            data: [{ Note_Title: TITULO_NOTA_TRANSCRIPCION, Note_Content: transcript }],
+          }),
+        })
+        if (creada.ok) {
+          refrescadas++
+          console.log(`[crm-hitos] ${reg.modulo}/${reg.id}: nota de transcripción creada`)
+        }
+        continue
       }
-      for (const n of data?.data || []) {
-        const titulo = String(n.Note_Title || "")
-        if (!TITULOS_CON_TRANSCRIPCION.some((t) => titulo.startsWith(t))) continue
+      for (const n of conTranscripcion) {
         // La nota del traspaso lleva cabecera (link al chat + contexto): se
         // conserva y se reemplaza SOLO el diálogo que va debajo de la marca.
         const previo = String(n.Note_Content || "")
