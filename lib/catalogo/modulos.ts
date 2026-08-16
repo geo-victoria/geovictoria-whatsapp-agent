@@ -33,7 +33,12 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
       { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 0.25 },
       { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: PRECIOS_CLASICOS ? 0.6 : 0.55 },
       { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: PRECIOS_CLASICOS ? 0.07 : 0.055 },
-      { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.065 },
+      // 21-30 a 0,055 (Lalo, 16-ago). La prueba de precios bajó el 11-20 de 0,07
+      // a 0,055 y dejó este tramo en 0,065: la escalera dejaba de ser
+      // descendente y la NOTA DE VENTA —que imprime la tabla completa— mostraba
+      // que crecer de 20 a 21 usuarios subía el precio unitario un 18%.
+      // Se iguala acá y en PRICING_TIERS del cotizador, en el mismo acto.
+      { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.055 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.055 },
       // ── TRAMOS 51+ = CANAL EJECUTIVO (calculadora de Nacho, 10-ago) ──
       // Vicky WhatsApp NUNCA llega acá: sus guardas (umbral 20/50 y el tope de
