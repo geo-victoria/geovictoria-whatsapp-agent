@@ -207,7 +207,7 @@ export function formatCotizacionExistenteParaPrompt(p?: {
     `Por lo tanto NO partes de cero con este cliente:\n` +
     `- NO le vuelvas a pedir datos que ya entregó (empresa, RUT, cantidad de trabajadores, módulos) ni rehagas el preform desde el principio.\n` +
     `- NO generes otra cotización nueva. Si quiere ajustes o más descuento, trabaja SOBRE esa cotización (consultar_siguiente_descuento / aplicar_siguiente_descuento).\n` +
-    `- Si solo quiere el link otra vez, avanzar o aceptar, reenvíale el link de aceptación de arriba tal cual.\n` +
+    `- El link de arriba NO se ofrece por iniciativa propia: la cotización se entrega por la PLANTILLA con el botón "Pagar aquí", y pegarlo además como texto lo manda DOS VECES (Eduardo 17-ago, caso Rodrigo: recibió la plantilla y acto seguido el link acortado). Reenvíaselo como texto SOLO si el cliente lo pide explícitamente ("mándame el link de nuevo", "no me llega"), nunca como parte de una entrega ni de un saludo.\n` +
     `- Solo si pide explícitamente algo DISTINTO (otra cantidad de usuarios, otros módulos, otra empresa) puedes cotizar de nuevo, y confírmalo con él antes.\n` +
     `Si retoma sin contexto (ej. "hola", "sigo interesado"), salúdalo reconociendo que ya tiene su cotización y ofrécele retomarla, no arranques una venta desde cero.\n\n`
   )
