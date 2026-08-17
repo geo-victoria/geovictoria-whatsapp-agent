@@ -333,6 +333,17 @@ export async function registrarComprobanteTransferencia(
 
   const declarado = input.pagoDeclarado === true
 
+  // Funnel de pago (Rodrigo 17-ago): el comprobante por WhatsApp es un paso
+  // MEDIBLE del último metro — queda como evento `pf_<quoteId>_comprobante_wsp`
+  // junto a los pings de la página (vic-pago-evento). Best-effort: jamás
+  // afecta el registro del comprobante ni la conversación.
+  if (pointer?.quoteId) {
+    void setKvValue(
+      `pf_${pointer.quoteId}_comprobante_wsp`,
+      `${new Date().toISOString()}|wsp${declarado ? "|declarado" : ""}`,
+    ).catch(() => {})
+  }
+
   // ── VALIDACIÓN BLANDA (decisión Lalo 26-jul, MVP/piloto de revenue) ──
   //
   // Antes: el cliente mandaba el comprobante y esperaba hasta 24 horas hábiles a

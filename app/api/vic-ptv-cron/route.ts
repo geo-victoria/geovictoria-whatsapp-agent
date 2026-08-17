@@ -1527,6 +1527,28 @@ export async function GET(req: Request) {
   }
   try {
 
+  // SANADOR DE TOKEN ZOHO (incidente 17-ago): Zoho puede REVOCAR un access
+  // token antes de su vencimiento declarado (tope de tokens vivos — el
+  // cotizador comparte credenciales) y el kv sigue sirviendo el muerto hasta
+  // que el reloj lo venza: una hora de agente ciego a Zoho. Este probe corre
+  // cada tick (~10 min): un 401 fuerza el refresco y repara el kv para TODOS
+  // los consumidores. Best-effort, jamás frena el barrido.
+  try {
+    const { getZohoAccessToken, getZohoAccessTokenFresco } = await import("@/lib/zoho-token")
+    const tok = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const probe = await fetch(`${api}/crm/v3/coql`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${tok}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ select_query: "select id from Leads limit 1" }),
+      cache: "no-store",
+    })
+    if (probe.status === 401) {
+      await getZohoAccessTokenFresco()
+      console.warn("[vic-ptv-cron] token Zoho revocado antes de vencer — refrescado por el sanador")
+    }
+  } catch { /* best-effort */ }
+
   const ahora = new Date()
   const desde = new Date(ahora.getTime() - VENTANA_BARRIDO_MS).toISOString()
   // Flag del traspaso v2: env O vic_kv (traspaso_v2_enabled=on) — la clave kv

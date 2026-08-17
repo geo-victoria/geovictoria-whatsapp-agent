@@ -17,7 +17,7 @@
 import { createHash } from "node:crypto"
 
 import { esEmailInterno, isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
-import { getZohoAccessToken } from "@/lib/zoho-token"
+import { getZohoAccessToken, getZohoAccessTokenFresco } from "@/lib/zoho-token"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
 
@@ -679,7 +679,7 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
   quotesList: RawAceptada[]
 } | null> {
   try {
-    const token = await getZohoAccessToken()
+    let token = await getZohoAccessToken()
     // PAGINADO y ORDENADO (bug cazado 10-ago, pago de Fernando/Empresa
     // Natural "no aparece en el dash"): el `limit 200` original, SIN order
     // by, dejaba que Zoho devolviera las 200 filas MÁS VIEJAS de un universo
@@ -688,8 +688,9 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
     // (lo nuevo primero) y páginas de 200 hasta agotar (tope 3000 — si algún
     // día se supera, lo que se trunca es la prehistoria, no el presente).
     const filas: RawAceptada[] = []
-    for (let offset = 0; offset < 3000; offset += 200) {
-      const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+    let refrescado = false
+    const pedirPagina = (offset: number) =>
+      fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -697,6 +698,17 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
         }),
         cache: "no-store",
       })
+    for (let offset = 0; offset < 3000; offset += 200) {
+      let res = await pedirPagina(offset)
+      // Token REVOCADO antes de su vencimiento declarado (incidente 17-ago:
+      // el dash quedó una hora sin aceptadas/pagadas y la venta de la mañana
+      // "desapareció"): un 401 fuerza refresco UNA vez y reintenta — y el
+      // refresco repara el kv para todos los demás consumidores de Zoho.
+      if (res.status === 401 && !refrescado) {
+        refrescado = true
+        token = await getZohoAccessTokenFresco().catch(() => token)
+        res = await pedirPagina(offset)
+      }
       if (!res.ok) {
         if (offset === 0) return null
         break // páginas posteriores fallan → se sirve lo acumulado

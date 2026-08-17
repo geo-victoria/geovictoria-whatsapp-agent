@@ -100,6 +100,22 @@ export async function getZohoAccessToken(): Promise<string> {
   return refrescarToken(now)
 }
 
+/**
+ * Refresco FORZADO, saltándose ambos cachés (proceso y Supabase).
+ *
+ * CASO REAL (17-ago ~13:00 UTC): Zoho REVOCÓ un access token ~1,5 h antes de
+ * su vencimiento declarado (probable tope de tokens vivos por refresh token —
+ * el cotizador y el agente comparten credenciales). getZohoAccessToken confía
+ * en el expires_at guardado, así que TODO el agente quedó ciego a Zoho por
+ * más de una hora (dash sin aceptadas/pagadas, crm-hitos mudo) sin
+ * auto-repararse. Regla nueva: cuando un caller reciba 401 de Zoho, llama
+ * esto UNA vez y reintenta — el refresco además repara el kv para el resto
+ * de los consumidores.
+ */
+export async function getZohoAccessTokenFresco(): Promise<string> {
+  return refrescarToken(Date.now())
+}
+
 async function refrescarToken(now: number): Promise<string> {
   const domain = getEnv("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
   const res = await fetch(`${domain}/oauth/v2/token`, {
