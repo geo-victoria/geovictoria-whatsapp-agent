@@ -4540,7 +4540,9 @@ export async function POST(req: Request): Promise<Response> {
       // Un error de Zoho se DICE (17-ago): devolver lista vacía ante un 401
       // hizo creer al vendedor que el deal no existía y siguió sin deal.
       if (!r.ok && r.status !== 204) {
-        return new Response(JSON.stringify({ ok: false, error: `Zoho respondió ${r.status} — reintenta en unos segundos` }), { status: 502, headers: { "content-type": "application/json" } })
+        const cuerpo = (await r.text().catch(() => "")).slice(0, 300)
+        console.error(`[cotdeals_buscar] Zoho ${r.status}: ${cuerpo}`)
+        return new Response(JSON.stringify({ ok: false, error: `Zoho respondió ${r.status} (${cuerpo.slice(0, 120)}) — reintenta en unos segundos` }), { status: 502, headers: { "content-type": "application/json" } })
       }
       const rows = r.status !== 204 ? (((await r.json().catch(() => ({}))) as { data?: DealEquipo[] }).data || []) : []
       const deals = rows.map((d) => ({
@@ -4600,7 +4602,9 @@ export async function POST(req: Request): Promise<Response> {
       // que el puente emita una cotización NUEVA en vez de versionar (v2/vN)
       // la existente — duplicado directo en el CRM (incidente 17-ago).
       if (!r.ok && r.status !== 204) {
-        return new Response(JSON.stringify({ ok: false, error: `Zoho respondió ${r.status} — reintenta en unos segundos` }), { status: 502, headers: { "content-type": "application/json" } })
+        const cuerpo = (await r.text().catch(() => "")).slice(0, 300)
+        console.error(`[cotcalc_cotizaciones] Zoho ${r.status}: ${cuerpo}`)
+        return new Response(JSON.stringify({ ok: false, error: `Zoho respondió ${r.status} (${cuerpo.slice(0, 120)}) — reintenta en unos segundos` }), { status: 502, headers: { "content-type": "application/json" } })
       }
       const filas = (((await r.json().catch(() => ({}))) as {
         data?: Array<{ id?: string; Numero_Cotizacion?: string; Name?: string; Estado_Cotizacion?: string; Version_PDF?: number; PDF_URL?: string; Created_Time?: string }>
