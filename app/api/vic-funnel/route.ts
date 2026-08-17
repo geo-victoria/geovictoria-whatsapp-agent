@@ -532,8 +532,14 @@ function fmtDuracionMs(ms: number): string {
   return dias === 0 ? `${horas}h` : `${dias}d ${horas}h`
 }
 
-function renderVentasCerradas(ventas: VentaCerrada[], key: string): string {
+function renderVentasCerradas(ventas: VentaCerrada[], key: string, formularioSet: Set<string> = new Set(), telPorNumero: Map<string, string> = new Map()): string {
   if (!ventas.length) return ""
+  // Canal de llegada por venta: el teléfono no viaja en la caché de la venta,
+  // se cruza por número de cotización contra la lista viva de Zoho.
+  const llegoPorDe = (numero: string): string => {
+    const t = numero ? telPorNumero.get(numero) || "" : ""
+    return t ? chipLlegoPor(formularioSet.has(t)) : "—"
+  }
   // Tarjetas de tiempos (pedido Lalo 20-jul): promedio y mediana del tiempo
   // inicio de conversación → pago, sobre las ventas con ambas fechas válidas.
   const duraciones = ventas
@@ -561,6 +567,7 @@ function renderVentasCerradas(ventas: VentaCerrada[], key: string): string {
     .map(
       (v) => `<tr>
         <td>${v.empresa}${v.numero ? ` <span class="sub" style="display:inline">· ${v.numero}</span>` : ""}${v.convId ? `<div style="margin-top:2px"><a href="?key=${encodeURIComponent(key)}&conv=${encodeURIComponent(v.convId)}" style="font-size:12px;font-weight:400">ver conversación →</a></div>` : ""}</td>
+        <td style="white-space:nowrap">${llegoPorDe(v.numero)}</td>
         <td>${fmtSantiago(v.inicioIso)}${v.inicioAprox ? " *" : ""}</td>
         <td>${fmtSantiago(v.pagoIso)}</td>
         <td style="text-align:center">${v.usuarios || "—"}</td>
@@ -577,7 +584,7 @@ function renderVentasCerradas(ventas: VentaCerrada[], key: string): string {
   ${tarjetasTiempos}
   <div style="overflow-x:auto"><table class="tabla-ventas" style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left;border-bottom:2px solid #e3e7ea">
-      <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:center">Usuarios</th><th style="padding:6px 8px;text-align:center">Dcto.</th><th style="padding:6px 8px;text-align:right">Pago único</th><th style="padding:6px 8px;text-align:right">Recurrencia</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
+      <th style="padding:6px 8px">Empresa</th><th style="padding:6px 8px" title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th style="padding:6px 8px">Inicio conversación</th><th style="padding:6px 8px">Pago</th><th style="padding:6px 8px;text-align:center">Usuarios</th><th style="padding:6px 8px;text-align:center">Dcto.</th><th style="padding:6px 8px;text-align:right">Pago único</th><th style="padding:6px 8px;text-align:right">Recurrencia</th><th style="padding:6px 8px;text-align:right">Inicio → pago</th>
     </tr></thead>
     <tbody>${filas}</tbody>
   </table></div>
@@ -1713,11 +1720,23 @@ function horaLocalCliente(tel: string, paisDash: Pais): { hora: string; llamable
 
 /** Caso listo para gestionar — lo consumen la vista HTML, el modo JSON del
  * dash y el resumen diario por correo. */
+// ── Canal de llegada (Rodrigo 17-ago, "en todos los dashboards"): cómo llegó
+// el contacto. Fila en vic_outbound_cadence = lead CARGADO (formulario web /
+// base → cadencia outbound); sin fila = nos escribió él solo por WhatsApp.
+// Mismo criterio inmutable del funnel por origen y del umbral 20/10.
+function chipLlegoPor(esFormulario: boolean): string {
+  return esFormulario
+    ? `<span class="tag" style="background:#eef2ff;color:#4c51bf" title="Lead cargado a la cadencia outbound (formulario web / base)">📋 Formulario</span>`
+    : `<span class="tag" style="background:#e6f7ee;color:#1b6e3c" title="El cliente nos escribió directo por WhatsApp">📱 WhatsApp</span>`
+}
+
 type CasoGestion = {
   empresa: string
   contacto: string
   propietario: string
   origen: "vicky" | "zoho"
+  /** Canal de llegada: true = lead cargado (formulario/base outbound). */
+  esFormulario: boolean
   convId: string
   tipoId: string
   tipoLabel: string
@@ -1761,8 +1780,10 @@ function construirCasosGestion(params: {
   pais: Pais
   cots?: Map<string, { quoteId: string; ver: string }>
   usuarios?: Map<string, number>
+  /** Contactos con fila en vic_outbound_cadence (lead cargado = formulario). */
+  formularioSet?: Set<string>
 }): { casos: CasoGestion[]; nGestionados: number } {
-  const { filas, gestionados, montos, pais, cots = new Map(), usuarios = new Map() } = params
+  const { filas, gestionados, montos, pais, cots = new Map(), usuarios = new Map(), formularioSet = new Set() } = params
   const conTipo = filas
     // Deal en "Cierre Perdido" en Zoho → fuera de la cola de gestión (pedido
     // Lalo 05-ago): la oportunidad ya se dio por perdida, no hay acción.
@@ -1804,6 +1825,7 @@ function construirCasosGestion(params: {
       contacto: d,
       propietario: f.propietario,
       origen: f.origen || "vicky",
+      esFormulario: formularioSet.has(d),
       convId: f.convId,
       tipoId: tipo.id,
       tipoLabel: tipo.label,
@@ -1877,6 +1899,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
           })()}</td>
           <td data-l="Primer contacto" data-sort="${Date.parse(c.primerContactoIso || "") || 0}" style="white-space:nowrap">${c.primerContactoIso ? fechaCompacta(c.primerContactoIso) : "—"}</td>
           <td data-l="Estado" data-sort="${esc(c.estado.toLowerCase())}"><span class="tag">${esc(c.estado)}</span></td>
+          <td data-l="Llegó por" data-sort="${c.esFormulario ? "formulario" : "whatsapp"}" style="white-space:nowrap">${chipLlegoPor(c.esFormulario)}</td>
           <td data-l="Usuarios" data-sort="${c.usuarios || 0}" style="white-space:nowrap;text-align:center" title="${c.usuarios ? `${c.usuarios} usuarios` : "sin dato de dotación"}">${rangoUsuarios(c.usuarios)}</td>
           <td data-l="Últ. actividad" data-sort="${Date.parse(c.ultimoContactoIso || c.fechaEstadoIso || "") || 0}" style="white-space:nowrap" title="última actividad con el cliente: WhatsApp de Vicky, WhatsApp o llamada del vendedor (espejo), o actividad en Zoho">${haceTexto(c.ultimoContactoIso || c.fechaEstadoIso)}${c.ultimoContactoIso ? `<div class="sub" style="margin:2px 0 0;font-size:11px">${fmtSantiago(c.ultimoContactoIso)}</div>` : ""}</td>
           <td data-l="Recurrente" data-sort="${c.montoOrden || 0}" style="white-space:nowrap;text-align:right">${c.monto}</td>
@@ -1896,7 +1919,7 @@ function renderColaGestion(casos: CasoGestion[], nGestionados: number, key: stri
     if (!grupo.length && !grupoGest.length) return ""
     return `<div class="kgroup" style="margin-top:14px">${tipo.emoji} ${tipo.label} — ${grupo.length}</div>
     <div style="overflow-x:auto"><table>
-      <thead><tr><th class="noSort">Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th title="Dotación conocida: cotizada en el chat o declarada en el deal">Usuarios</th><th title="Última actividad con el cliente por cualquiera de las 3 fuentes: WhatsApp de Vicky, WhatsApp o llamada del vendedor (espejo), o actividad registrada en Zoho">Última actividad</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th class="noSort" style="padding-left:10px">WA</th></tr></thead>      <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
+      <thead><tr><th class="noSort">Comentarios</th><th>Empresa / contacto · ejecutivo</th><th>Primer contacto</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th title="Dotación conocida: cotizada en el chat o declarada en el deal">Usuarios</th><th title="Última actividad con el cliente por cualquiera de las 3 fuentes: WhatsApp de Vicky, WhatsApp o llamada del vendedor (espejo), o actividad registrada en Zoho">Última actividad</th><th style="text-align:right">Recurrente</th><th style="width:38%">Accionable</th><th class="noSort" style="padding-left:10px">WA</th></tr></thead>      <tbody>${grupo.map(fila).join("")}${grupoGest.map(fila).join("")}</tbody>
     </table></div>`
   }).join("")
 
@@ -2519,7 +2542,7 @@ function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | nu
   <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
     <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre</th>
   </tr></thead><tbody>${filas}${filaTotal}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">EMBUDO POR COHORTE: cada fila cuenta las oportunidades INBOUND (el cliente escribió solo por WhatsApp, sin toque outbound previo) cuya PRIMERA conversación partió ese día, y hasta dónde ha llegado cada una HOY — aunque el hito haya ocurrido días después. Por eso los días recientes maduran con el tiempo: la cohorte de hoy puede sumar formales y pagos mañana. Distinto del 📈 Evolución de Análisis y KPIs (esa es foto diaria de eventos). Cierre = pagadas ÷ los que VIERON PRECIO (misma definición que la tasa de Análisis y KPIs, Lalo 14-ago). Cuenta solo lo que Vicky inició: las cotizaciones que los ejecutivos emiten a clientes propios y los contactos internos quedan fuera. Hora de Chile. Clic en cualquier número para ver las empresas detrás.</div>
+  <div class="sub" style="margin:8px 0 0">EMBUDO POR COHORTE: cada fila cuenta las oportunidades INBOUND (el cliente escribió solo por WhatsApp, sin toque outbound previo — por eso esta pestaña no lleva columna «Llegó por»: acá TODOS llegaron por WhatsApp; los cargados por formulario/base van en el funnel outbound de Análisis y KPIs) cuya PRIMERA conversación partió ese día, y hasta dónde ha llegado cada una HOY — aunque el hito haya ocurrido días después. Por eso los días recientes maduran con el tiempo: la cohorte de hoy puede sumar formales y pagos mañana. Distinto del 📈 Evolución de Análisis y KPIs (esa es foto diaria de eventos). Cierre = pagadas ÷ los que VIERON PRECIO (misma definición que la tasa de Análisis y KPIs, Lalo 14-ago). Cuenta solo lo que Vicky inició: las cotizaciones que los ejecutivos emiten a clientes propios y los contactos internos quedan fuera. Hora de Chile. Clic en cualquier número para ver las empresas detrás.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
@@ -2682,8 +2705,10 @@ function renderDetalleEjecutivo(params: {
   usuarios: Map<string, number>
   wspSet: Set<string>
   pais: Pais
+  /** Contactos con fila en vic_outbound_cadence (lead cargado = formulario). */
+  formularioSet?: Set<string>
 }): Response {
-  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais } = params
+  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais, formularioSet = new Set() } = params
   const simbolo = pais === "pe" ? "S/ " : "$"
   const montoTxt = (tel: string): string => {
     const m = montos.get(tel)
@@ -2707,6 +2732,7 @@ function renderDetalleEjecutivo(params: {
         <td><b>${esc(f.empresa)}</b><div class="sub" style="margin:0;font-size:12px">+${esc(tel)}</div>${links ? `<div style="margin-top:2px">${links}</div>` : ""}</td>
         <td>${esc(f.propietario)}</td>
         <td><span class="tag">${esc(f.estado)}</span></td>
+        <td style="white-space:nowrap">${chipLlegoPor(formularioSet.has(tel))}</td>
         <td style="text-align:center">${usuarios.get(tel) || "s/d"}</td>
         <td style="white-space:nowrap">${haceTexto(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}<div class="sub" style="margin:0;font-size:11px">${fmtSantiago(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}</div></td>
         <td style="text-align:right;white-space:nowrap">${montoTxt(tel)}</td>
@@ -2734,7 +2760,7 @@ function renderDetalleEjecutivo(params: {
   <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto</div>
   <div class="card">${
     filas.length
-      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th style="text-align:center">Dotación</th><th>Última actividad</th><th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th style="text-align:center">Dotación</th><th>Última actividad</th><th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
       : `<p class="sub" style="margin:0">Sin empresas para este corte.</p>`
   }</div>
 </div></body></html>`
@@ -4150,6 +4176,7 @@ function renderListaKpi(
   volverQS: string,
   ultimoContactoPorConv: Map<string, string>,
   filaPorContacto: Map<string, FilaListado>,
+  formularioSet: Set<string> = new Set(),
 ): Response {
   const ultimo = (r: Row) => ultimoContactoPorConv.get(r.conversation_id) || ""
   // Más reciente primero: el detalle es una lista de trabajo, no un archivo.
@@ -4174,6 +4201,7 @@ function renderListaKpi(
         <td>${esc(f?.empresa || "(por identificar)")}<div class="sub" style="margin:0;font-size:12px">+${esc(d)}</div></td>
         <td style="white-space:nowrap">${fmtSantiago(ultimo(r))}</td>
         <td>${estadoHtml}${chips ? `<div style="margin-top:3px">${chips}</div>` : ""}</td>
+        <td style="white-space:nowrap">${chipLlegoPor(formularioSet.has(d))}</td>
         <td>${esc(f?.propietario || "—")}</td>
         <td style="max-width:300px">${esc(accionable)}${resumen ? `<div class="sub" style="margin:3px 0 0;font-size:12px">${esc(resumen)}</div>` : ""}<div style="margin-top:4px"><a href="?key=${encodeURIComponent(key)}&conv=${esc(r.conversation_id)}">ver conversación →</a></div></td>
       </tr>`
@@ -4198,7 +4226,7 @@ function renderListaKpi(
   <div class="sub">${rowsBucket.length} conversación${rowsBucket.length === 1 ? "" : "es"} · respeta los filtros activos del embudo (país, fechas, estado, propietario)</div>
   <div class="card">${
     rowsBucket.length
-      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Último contacto</th><th>Estado</th><th>Ejecutivo a cargo</th><th>Accionable (Claude)</th></tr></thead><tbody>${filas}</tbody></table></div>`
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Último contacto</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th>Ejecutivo a cargo</th><th>Accionable (Claude)</th></tr></thead><tbody>${filas}</tbody></table></div>`
       : `<p class="sub" style="margin:0">Sin conversaciones en esta categoría con los filtros actuales.</p>`
   }</div>
 </div></body></html>`
@@ -5075,6 +5103,7 @@ function renderListaCotizaciones(
   volverQS: string,
   convPorContacto: Map<string, string>,
   wspSet: Set<string> = new Set(),
+  formularioSet: Set<string> = new Set(),
 ): Response {
   const qs = [...quotes].sort((a, b) => String(b.Created_Time || "").localeCompare(String(a.Created_Time || "")))
   const filas = qs
@@ -5102,6 +5131,7 @@ function renderListaCotizaciones(
       return `<tr>
         <td>${esc(String(q.Numero_Cotizacion || ""))} · <b>${esc(empresaDeQuote(q))}</b><div class="sub" style="margin:0;font-size:12px">${tel ? `+${esc(tel)}` : "sin teléfono"}</div>${links ? `<div style="margin-top:2px;font-size:12px;white-space:nowrap">${links}</div>` : ""}</td>
         <td><span class="tag">${esc(estado)}</span></td>
+        <td style="white-space:nowrap">${tel ? chipLlegoPor(formularioSet.has(tel)) : "—"}</td>
         <td style="white-space:nowrap">${fmtSantiago(String(q.Created_Time || ""))}</td>
         <td style="white-space:nowrap">${fechaPago ? fmtSantiago(fechaPago) : "—"}</td>
         <td>${esc(owner)}</td>
@@ -5128,7 +5158,7 @@ function renderListaCotizaciones(
   <div class="sub">${qs.length} cotizacion${qs.length === 1 ? "" : "es"} · respeta los filtros activos (país, fechas, estado, propietario)</div>
   <div class="card">${
     qs.length
-      ? `<div style="overflow-x:auto"><table><thead><tr><th>Cotización / contacto</th><th>Estado</th><th>Emisión</th><th>Aceptación/pago</th><th>Ejecutivo</th><th>Etapa deal</th></tr></thead><tbody>${filas}</tbody></table></div>`
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Cotización / contacto</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th>Emisión</th><th>Aceptación/pago</th><th>Ejecutivo</th><th>Etapa deal</th></tr></thead><tbody>${filas}</tbody></table></div>`
       : `<p class="sub" style="margin:0">Sin cotizaciones con los filtros actuales.</p>`
   }</div>
 </div></body></html>`
@@ -5351,6 +5381,10 @@ export async function GET(req: Request): Promise<Response> {
   let usuariosPorContacto = new Map<string, number>()
   let casosGestion: CasoGestion[] = []
   let nGestionadosCola = 0
+  // Canal de llegada por contacto (Rodrigo 17-ago): fila en
+  // vic_outbound_cadence = lead cargado (formulario). Se captura ANTES de que
+  // los filtros globales intersecten `origen` (atributo por contacto, no KPI).
+  let llegoPorFormulario = new Set<string>()
   let gestionados = new Map<string, string>()
   let montosPorContacto = new Map<string, { uf: number | null; clp: number | null }>()
   try {
@@ -5365,6 +5399,7 @@ export async function GET(req: Request): Promise<Response> {
       fetchConvsListado().catch(() => [] as ConvListado[]),
     ])
     origen = origenData
+    llegoPorFormulario = origenData.toque0
     // SOLO LO QUE VICKY INICIÓ (Lalo 14-ago): los ejecutivos emiten desde el
     // editor a clientes PROPIOS (20 de 29 el 13-ago) y esas cotizaciones
     // nacen igual con Created_By = Vicky, así que inflaban todo el dash —
@@ -5586,6 +5621,7 @@ export async function GET(req: Request): Promise<Response> {
         usuarios: usuariosPorContacto,
         wspSet: wspVendedorSet,
         pais,
+        formularioSet: llegoPorFormulario,
       })
     }
     // Detalle de una celda de "Empresas ingresadas en el período"
@@ -5617,6 +5653,7 @@ export async function GET(req: Request): Promise<Response> {
         usuarios: usuariosPorContacto,
         wspSet: wspVendedorSet,
         pais,
+        formularioSet: llegoPorFormulario,
       })
     }
     // Dashboard INBOUND DIARIO (Rodrigo 13-ago): embudo por cohorte de llegada
@@ -5679,6 +5716,7 @@ export async function GET(req: Request): Promise<Response> {
             usuarios: usuariosPorContacto,
             wspSet: wspVendedorSet,
             pais,
+            formularioSet: llegoPorFormulario,
           })
         }
         inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString() })
@@ -5716,7 +5754,7 @@ export async function GET(req: Request): Promise<Response> {
     const filasVisibles = filasListado.filter(
       (f) => coincide(f) && tuvoActividad(f) && (origenF === "todo" || (f.origen || "vicky") === origenF),
     )
-    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, cots: cotPorContacto, usuarios: usuariosPorContacto })
+    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, cots: cotPorContacto, usuarios: usuariosPorContacto, formularioSet: llegoPorFormulario })
     casosGestion = cola.casos
     nGestionadosCola = cola.nGestionados
     const qsDescarga = (() => {
@@ -5776,7 +5814,13 @@ export async function GET(req: Request): Promise<Response> {
       }
     }
     if (cierre?.aceptadasList?.length) {
-      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList), key)
+      const telPorNumero = new Map<string, string>()
+      for (const q of cierre.aceptadasList) {
+        const num = String(q.Numero_Cotizacion || "")
+        const t = digits(String(q.Tel_fono_Contacto || ""))
+        if (num && t) telPorNumero.set(num, t)
+      }
+      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList), key, llegoPorFormulario, telPorNumero)
     }
     rows = allRows.filter((r) => {
       if (isTestContact(r.contact)) return false
@@ -5842,7 +5886,7 @@ export async function GET(req: Request): Promise<Response> {
     // Contactos fuera del listado comercial vivo (cotizaciones viejas): la
     // conversación sale del mapa global de conversaciones.
     for (const [d, id] of convIdPorContacto) if (!convPorContacto.has(d)) convPorContacto.set(d, id)
-    return renderListaCotizaciones(quotes, titulo, key, `?${filtrosQS().toString()}`, convPorContacto, wspVendedorSet)
+    return renderListaCotizaciones(quotes, titulo, key, `?${filtrosQS().toString()}`, convPorContacto, wspVendedorSet, llegoPorFormulario)
   }
 
   if (listaParam && KPI_BUCKETS[listaParam]) {
@@ -5854,7 +5898,7 @@ export async function GET(req: Request): Promise<Response> {
       const d = digits(f.contacto)
       if (d && !filaPorContacto.has(d)) filaPorContacto.set(d, f)
     }
-    return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`, ultimoMsgPorConv, filaPorContacto)
+    return renderListaKpi(rows.filter(b.pred), b.titulo, key, `?${filtrosQS().toString()}`, ultimoMsgPorConv, filaPorContacto, llegoPorFormulario)
   }
 
   // Sin conversaciones ANALIZADAS para el filtro, pero la COLA sí puede tener
@@ -5931,13 +5975,13 @@ export async function GET(req: Request): Promise<Response> {
     const origin = new URL(req.url).origin
     const celda = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`
     const encabezado = [
-      "Tipo de acción", "Empresa", "Teléfono", "Ejecutivo", "Primer contacto", "Estado",
+      "Tipo de acción", "Empresa", "Teléfono", "Llegó por", "Ejecutivo", "Primer contacto", "Estado",
       "Fecha del estado", "Último contacto", "Estado en Zoho", "Días sin contacto",
       "Urgencia", "Monto/mes", "Accionable", "Resumen", "Gestionado", "Link chat", "Link Zoho",
     ].join(";")
     const filasCsv = casosGestion.map((c) =>
       [
-        c.tipoLabel, c.empresa, `+${c.contacto}`, c.propietario,
+        c.tipoLabel, c.empresa, `+${c.contacto}`, c.esFormulario ? "Formulario" : "WhatsApp", c.propietario,
         fmtSantiago(c.primerContactoIso), c.estado, fmtSantiago(c.fechaEstadoIso),
         fmtSantiago(c.ultimoContactoIso), c.estadoZoho, String(c.diasSinContacto),
         c.urgencia, c.monto, c.accionable, c.resumen, c.gestionado ? "sí" : "no",
@@ -5964,6 +6008,7 @@ export async function GET(req: Request): Promise<Response> {
     const filasImp = casosGestion.map((c) => `<tr>
       <td>${esc(c.tipoLabel)}</td>
       <td><b>${esc(c.empresa)}</b><br>+${esc(c.contacto)}</td>
+      <td style="white-space:nowrap">${c.esFormulario ? "📋 Formulario" : "📱 WhatsApp"}</td>
       <td>${esc(c.propietario)}</td>
       <td>${fmtSantiago(c.primerContactoIso)}</td>
       <td>${esc(c.estado)}</td>
@@ -5990,7 +6035,7 @@ export async function GET(req: Request): Promise<Response> {
 </style></head><body>
   <h1><img src="/gv/logo-full-color.svg" alt="GeoVictoria">Gestión de oportunidades — ${casosGestion.length} casos</h1>
   <div class="sub">${esc(filtroTxt)}</div>
-  <table><thead><tr><th>Tipo</th><th>Empresa / contacto</th><th>Ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Último contacto</th><th>Zoho</th><th>Urgencia</th><th>Monto/mes</th><th>Accionable</th></tr></thead>
+  <table><thead><tr><th>Tipo</th><th>Empresa / contacto</th><th>Llegó por</th><th>Ejecutivo</th><th>Primer contacto</th><th>Estado</th><th>Último contacto</th><th>Zoho</th><th>Urgencia</th><th>Monto/mes</th><th>Accionable</th></tr></thead>
   <tbody>${filasImp}</tbody></table>
   <script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 300); });</script>
 </body></html>`
