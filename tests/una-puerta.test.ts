@@ -29,3 +29,27 @@ describe("una sola puerta de entrega (Eduardo 17-ago)", () => {
     assert.equal(quitarLinksDeAceptacion(t).quitados, 0)
   })
 })
+
+describe("entrega completa recortada cuando la plantilla ya salió (caso Rodrigo 17-ago)", () => {
+  test("bota el bloque de entrega entero, incluida la línea Listo!", async () => {
+    const { quitarEntregaCompleta } = await import("../lib/una-puerta-cotizacion.ts")
+    const r = quitarEntregaCompleta(
+      "Listo! 🎉\nAquí revisas, aceptas y pagas tu cotización: https://cotizacion.geovictoria.com/quote-acceptance.html?token=abc.def",
+    )
+    assert.equal(r.limpio, "")
+  })
+
+  test("bota el texto huérfano aunque venga sin link (el caso exacto del doble mensaje)", async () => {
+    const { quitarEntregaCompleta } = await import("../lib/una-puerta-cotizacion.ts")
+    const r = quitarEntregaCompleta("Listo! 🎉\nAquí revisas, aceptas y pagas tu cotización")
+    assert.equal(r.limpio, "")
+  })
+
+  test("conserva lo que no es entrega", async () => {
+    const { quitarEntregaCompleta } = await import("../lib/una-puerta-cotizacion.ts")
+    const r = quitarEntregaCompleta(
+      "Listo! 🎉\nAquí revisas, aceptas y pagas tu cotización\nCualquier duda me dices 😊",
+    )
+    assert.equal(r.limpio, "Cualquier duda me dices 😊")
+  })
+})

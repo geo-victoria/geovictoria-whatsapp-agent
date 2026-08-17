@@ -1275,16 +1275,26 @@ async function processOneTurn(
       // se ve más natural y el mensaje es menos largo". Los bloques
       // estructurados (resumen de precios con listas y totales) no se
       // fragmentan. Ver lib/burbujas.ts.
-      // CANDADO DE UNA SOLA PUERTA (Eduardo 17-ago): el link de aceptación
-      // viaja SOLO en la plantilla con el botón "Pagar aquí". Si el modelo lo
-      // pega igual como texto, se quita acá — dos intentos de resolverlo por
-      // prompt no bastaron. Apagable con VICKY_UNA_PUERTA=0.
+      // CANDADO DE UNA SOLA PUERTA (Eduardo 17-ago, v2 tras el caso Rodrigo):
+      // el link de aceptación viaja SOLO en la plantilla con el botón "Pagar
+      // aquí" — pero ÚNICAMENTE cuando la plantilla realmente salió en este
+      // turno. La v1 recortaba siempre, y eso (a) dejaba el texto de entrega
+      // huérfano (Rodrigo recibió "Listo! Aquí revisas…" dos veces, una sin
+      // link) y (b) rompía el RESPALDO: si la plantilla falla, el link como
+      // texto es el único camino y no se puede tocar.
+      // Apagable con VICKY_UNA_PUERTA=0.
       let replyFinal = reply
-      if ((process.env.VICKY_UNA_PUERTA || "1").trim() !== "0") {
-        const { quitarLinksDeAceptacion } = await import("@/lib/una-puerta-cotizacion")
-        const r = quitarLinksDeAceptacion(reply)
+      const plantillaSalio = (result.toolCalls || []).some(
+        (c) =>
+          c.name === "generar_link_cotizadora" &&
+          c.ok &&
+          Boolean((c.output as { plantillaEnviada?: boolean } | undefined)?.plantillaEnviada),
+      )
+      if (plantillaSalio && (process.env.VICKY_UNA_PUERTA || "1").trim() !== "0") {
+        const { quitarEntregaCompleta } = await import("@/lib/una-puerta-cotizacion")
+        const r = quitarEntregaCompleta(reply)
         if (r.quitados > 0) {
-          console.warn(`[una-puerta] ${r.quitados} link(s) de aceptación quitados del texto a ${contact}`)
+          console.warn(`[una-puerta] entrega duplicada recortada para ${contact} (${r.quitados})`)
           replyFinal = r.limpio
         }
       }

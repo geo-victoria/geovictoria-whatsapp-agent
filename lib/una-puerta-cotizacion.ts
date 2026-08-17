@@ -42,3 +42,37 @@ export function quitarLinksDeAceptacion(texto: string): {
 
   return { limpio, quitados: encontrados.length }
 }
+
+/** Frases que solo existen como envoltorio del link ("Listo! / Aquí revisas,
+ * aceptas y pagas…"). Si el link ya salió en la plantilla, estas líneas
+ * quedan huérfanas y hay que botarlas enteras. */
+const BOILERPLATE_ENTREGA =
+  /revisas,?\s*aceptas?\s*y\s*pagas|aquí\s+puedes\s+revisar,?\s*aceptar|te\s+dejo\s+el\s+link/i
+
+/**
+ * Versión dura para cuando la PLANTILLA ya salió en este turno: además de los
+ * links, bota las líneas de entrega huérfanas ("Listo! 🎉 / Aquí revisas…")
+ * — caso Rodrigo 17-ago: el candado le quitó el link pero le dejó el texto,
+ * y el cliente recibió la entrega dos veces.
+ */
+export function quitarEntregaCompleta(texto: string): { limpio: string; quitados: number } {
+  const base = quitarLinksDeAceptacion(texto)
+  const lineas = base.limpio.split("\n")
+  const filtradas: string[] = []
+  for (const [i, l] of lineas.entries()) {
+    if (BOILERPLATE_ENTREGA.test(l)) {
+      // La línea "Listo!" inmediatamente anterior es parte del mismo bloque.
+      const prev = filtradas[filtradas.length - 1] || ""
+      if (/^\s*¡?Listo[a-z]*[!\s🎉🎊✨]*$/iu.test(prev)) filtradas.pop()
+      continue
+    }
+    void i
+    filtradas.push(l)
+  }
+  const limpio = filtradas
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+  const quitados = base.quitados + (limpio === base.limpio.trim() ? 0 : 1)
+  return { limpio, quitados }
+}
