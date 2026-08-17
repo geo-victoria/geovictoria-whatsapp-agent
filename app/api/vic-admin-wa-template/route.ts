@@ -75,6 +75,23 @@ export async function GET(req: Request): Promise<Response> {
   return NextResponse.json({ ok: r.ok, status: r.status, n: filas.length, plantillas: filas })
 }
 
+export async function DELETE(req: Request): Promise<Response> {
+  if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  if (!BM_TOKEN) return NextResponse.json({ ok: false, error: "sin BOTMAKER_ACCESS_TOKEN" }, { status: 500 })
+  const sp = new URL(req.url).searchParams
+  const name = (sp.get("name") || "").trim()
+  if (!name) return NextResponse.json({ ok: false, error: "falta name" }, { status: 400 })
+  if (sp.get("confirmo") !== "1") return NextResponse.json({ ok: false, error: "falta confirmo=1" }, { status: 400 })
+
+  const r = await fetch(`${BASE}/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: { "access-token": BM_TOKEN, Accept: "application/json" },
+    cache: "no-store",
+  })
+  const cuerpo = await r.text().catch(() => "")
+  return NextResponse.json({ ok: r.ok, status: r.status, name, respuesta: cuerpo.slice(0, 400) })
+}
+
 export async function POST(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   if (!BM_TOKEN) return NextResponse.json({ ok: false, error: "sin BOTMAKER_ACCESS_TOKEN" }, { status: 500 })
