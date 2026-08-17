@@ -696,8 +696,11 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
     // día se supera, lo que se trunca es la prehistoria, no el presente).
     const filas: RawAceptada[] = []
     let refrescado = false
+    // v8: la query junta TRES lookups (Cuenta_Asociada, Owner, Deal_Asociado)
+    // y COQL v3 topa en 2 relaciones (LIMIT_EXCEEDED by:relation — Zoho lo
+    // empezó a aplicar ~17-ago; hasta entonces v3 lo dejaba pasar).
     const pedirPagina = (offset: number) =>
-      fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+      fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1372,7 +1375,9 @@ async function fetchDealsEquipo(soloTelemarketing = false): Promise<DealEquipo[]
       `where ((Last_Activity_Time >= '${desde}T00:00:00-04:00' or Created_Time >= '${desde}T00:00:00-04:00') ` +
       `and Stage not in ('Cierre Perdido', 'Congelado', 'Facturación congelada', '8. Facturando')) `
     for (let offset = 0; offset < 2000; offset += 200) {
-      const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+      // v8: TRES lookups (Owner, Contact_Name, Account_Name) — v3 topa en 2
+      // relaciones (LIMIT_EXCEEDED; ver cotdeals_buscar, mismo incidente).
+      const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
         method: "POST",
         headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         cache: "no-store",
