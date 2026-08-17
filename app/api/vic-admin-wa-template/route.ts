@@ -49,7 +49,16 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, status: r.status, crudo: cuerpo.slice(0, 600) })
   }
 
-  const lista = Array.isArray(data) ? data : (data as { templates?: unknown[] })?.templates || []
+  // `crudo=1` devuelve la respuesta tal cual: la forma real de la API no está
+  // en la documentación y adivinar la clave del arreglo cuesta un deploy.
+  if (sp.get("crudo") === "1") {
+    return NextResponse.json({ ok: r.ok, status: r.status, claves: Object.keys(data || {}), data })
+  }
+
+  const d = data as Record<string, unknown>
+  const lista = Array.isArray(data)
+    ? data
+    : (d?.templates as unknown[]) || (d?.whatsappTemplates as unknown[]) || (d?.result as unknown[]) || (d?.items as unknown[]) || []
   const filtro = (sp.get("contiene") || "").trim().toLowerCase()
   const filas = (lista as Array<Record<string, unknown>>)
     .map((t) => ({
