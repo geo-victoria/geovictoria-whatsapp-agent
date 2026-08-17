@@ -1275,7 +1275,20 @@ async function processOneTurn(
       // se ve más natural y el mensaje es menos largo". Los bloques
       // estructurados (resumen de precios con listas y totales) no se
       // fragmentan. Ver lib/burbujas.ts.
-      const partes = partirEnBurbujas(reply)
+      // CANDADO DE UNA SOLA PUERTA (Eduardo 17-ago): el link de aceptación
+      // viaja SOLO en la plantilla con el botón "Pagar aquí". Si el modelo lo
+      // pega igual como texto, se quita acá — dos intentos de resolverlo por
+      // prompt no bastaron. Apagable con VICKY_UNA_PUERTA=0.
+      let replyFinal = reply
+      if ((process.env.VICKY_UNA_PUERTA || "1").trim() !== "0") {
+        const { quitarLinksDeAceptacion } = await import("@/lib/una-puerta-cotizacion")
+        const r = quitarLinksDeAceptacion(reply)
+        if (r.quitados > 0) {
+          console.warn(`[una-puerta] ${r.quitados} link(s) de aceptación quitados del texto a ${contact}`)
+          replyFinal = r.limpio
+        }
+      }
+      const partes = partirEnBurbujas(replyFinal)
       for (const [i, parte] of partes.entries()) {
         if (HUMAN_DELAY_ON) {
           await sendTypingIndicator(contact, true).catch(() => {})
