@@ -105,6 +105,18 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "body inválido" }, { status: 400 })
   }
 
+  // ?enviar=1&to=<contacto>&name=<plantilla> → manda la plantilla con el body
+  // como `params`. Sirve para probar en vivo que las variables (incluida la
+  // del botón URL) se rellenan antes de tocar el flujo de ventas.
+  if (sp.get("enviar") === "1") {
+    const to = (sp.get("to") || "").replace(/\D/g, "")
+    const name = (sp.get("name") || "").trim()
+    if (!to || !name) return NextResponse.json({ ok: false, error: "faltan to y name" }, { status: 400 })
+    const { sendBotmakerTemplate } = await import("@/lib/botmaker-push-v3")
+    const enviado = await sendBotmakerTemplate(to, name, body as Record<string, string>)
+    return NextResponse.json({ ok: enviado, to, plantilla: name, params: body })
+  }
+
   const r = await fetch(BASE, {
     method: "POST",
     headers: {
