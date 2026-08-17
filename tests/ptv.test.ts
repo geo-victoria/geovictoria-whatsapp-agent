@@ -139,11 +139,16 @@ describe("chequeo de calidad y presentación", () => {
   })
 
   test("la presentación nunca dice 'Oye' y nombra al vendedor", () => {
+    // Versión corta (Eduardo 17-ago): murió el "te va a llamar muy pronto" y
+    // el "no tendrás que repetir nada" — la presentación es solo quién atiende
+    // y sus datos. Se fija que las frases viejas no vuelvan.
     for (const pais of ["cl", "co", "mx"] as const) {
       const m = mensajePresentacion(pais, "Eddyluz")
       assert.ok(!/\bOye\b/i.test(m))
       assert.match(m, /Eddyluz/)
-      assert.match(m, /no tendrás que repetir nada/)
+      assert.ok(!/te va a llamar/i.test(m), "volvió la promesa de llamada")
+      assert.ok(!/repetir nada/i.test(m), "volvió el texto largo")
+      assert.ok(!/¡Hola!/.test(m), "volvió el saludo — la presentación entra directo")
     }
   })
 
