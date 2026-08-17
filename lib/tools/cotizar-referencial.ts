@@ -713,10 +713,11 @@ export async function cotizarReferencial(args: {
         if (instalacionCotizada) {
           fraseInstalacion = " En este caso la instalación por nuestro equipo técnico ya viene incluida."
         } else if (!todoPlugAndPlay) {
+          // Sin monto (Eduardo 17-ago): en esta etapa del flujo el costo de la
+          // instalación aún no está definido — el paréntesis solo anuncia que
+          // la opción existe; la cifra aparece recién en la cotización.
           fraseInstalacion =
-            instalacionTecnicoUF > 0
-              ? ` En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional de ${fmtUF(instalacionTecnicoUF)} UF + IVA).`
-              : " En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional según la comuna)."
+            " En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional)."
         }
 
         const lineasOpcion1 = [
