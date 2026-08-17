@@ -650,6 +650,7 @@ export async function cotizarReferencial(args: {
   // la cotización con autoInstalada=false). Se calcula acá arriba porque lo
   // usan DOS textos: el disclaimer clásico y la Opción 1 del doble valor.
   let instalacionTecnicoUF = 0
+  const instalacionPorPunto: Array<{ ubicacion: string; uf: number }> = []
   if (hayReloj && !instalacionCotizada && !todoPlugAndPlay) {
     try {
       const mods = new Set(hardware.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"))
@@ -660,9 +661,12 @@ export async function cotizarReferencial(args: {
       for (const punto of puntosInstalacion) {
         const c = clasificarUbicacion(punto.ubicacion)
         if (c.tipo === "no_clasificable") continue
+        let ufPunto = 0
         for (const s of serviciosInstalacion) {
-          instalacionTecnicoUF += obtenerPrecioServicio(s, c.zonaInstalacion, punto.modalidad ?? modU)
+          ufPunto += obtenerPrecioServicio(s, c.zonaInstalacion, punto.modalidad ?? modU)
         }
+        instalacionTecnicoUF += ufPunto
+        if (ufPunto > 0) instalacionPorPunto.push({ ubicacion: punto.ubicacion, uf: ufPunto })
       }
     } catch {
       instalacionTecnicoUF = 0 // sin precio calculable: cae al texto genérico
@@ -717,10 +721,20 @@ export async function cotizarReferencial(args: {
           // conocida en este punto — la tool exige puntosInstalacion con
           // hardware — así que la tarifa es real, no una estimación. El
           // genérico queda solo para comunas que no clasifican.
-          fraseInstalacion =
-            instalacionTecnicoUF > 0
-              ? ` En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional de ${fmtUF(instalacionTecnicoUF)} UF + IVA).`
-              : " En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional según la comuna)."
+          // DESGLOSE con 2+ relojes (Eduardo 17-ago, caso Rodrigo): "6 UF" a
+          // secas escondía que eran 1 UF Providencia + 5 UF Talcahuano. Con un
+          // solo punto el total sigue solo, sin desglose.
+          if (instalacionTecnicoUF > 0 && instalacionPorPunto.length >= 2) {
+            const partesInst = instalacionPorPunto.map(
+              (pp, i) => `${fmtUF(pp.uf)} UF + IVA ${i === 0 ? "por la" : "la"} de ${pp.ubicacion}`,
+            )
+            fraseInstalacion = ` En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional de ${partesInst.join(" y ")}).`
+          } else {
+            fraseInstalacion =
+              instalacionTecnicoUF > 0
+                ? ` En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional de ${fmtUF(instalacionTecnicoUF)} UF + IVA).`
+                : " En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional según la comuna)."
+          }
         }
 
         const lineasOpcion1 = [

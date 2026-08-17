@@ -1230,7 +1230,17 @@ export async function runAgentLoop(params: {
     break
   }
 
-  if (!finalText) {
+  // TURNO MUDO LEGÍTIMO (caso Rodrigo 17-ago): cuando la entrega salió por la
+  // PLANTILLA con botón, el prompt ordena cerrar sin texto — y este respaldo
+  // convertía ese silencio intencional en "Disculpa, tuve un problema…".
+  // Con la plantilla enviada, el turno vacío ES el resultado correcto.
+  const plantillaEntregoElTurno = toolCalls.some(
+    (c) =>
+      c.name === "generar_link_cotizadora" &&
+      c.ok &&
+      (c.output as { plantillaEnviada?: boolean } | undefined)?.plantillaEnviada === true,
+  )
+  if (!finalText && !plantillaEntregoElTurno) {
     finalText =
       mensajeHandoffRespaldo ||
       "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"

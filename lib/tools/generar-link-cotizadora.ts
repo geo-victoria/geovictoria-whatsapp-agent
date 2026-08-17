@@ -819,6 +819,21 @@ export async function generarLinkCotizadora(
   // en un 2º intento). Reintentamos hasta MAX_INTENTOS para que el cliente NUNCA
   // vea el "tuve un problema" por una falla pasajera. El acceptanceUrl es lo
   // crítico; el pdfUrl puede venir vacío (se genera en segundo plano).
+  // AVISO INMEDIATO (Eduardo 17-ago): la emisión demora varios segundos y con
+  // la entrega por plantilla el turno termina MUDO — sin este puente el
+  // cliente ve puro silencio entre su último dato y la cotización. Se manda
+  // directo por Botmaker (no por el reply del modelo) para que salga AHORA.
+  // Best-effort: si falla, la emisión sigue igual.
+  {
+    const fono = (contactoTelefono || "").replace(/\D/g, "")
+    if (fono.startsWith("56")) {
+      try {
+        const { sendBotmakerMessage } = await import("@/lib/botmaker-push-v3")
+        void sendBotmakerMessage(fono, "Perfecto, te mando la cotización en seguida.").catch(() => false)
+      } catch {}
+    }
+  }
+
   const MAX_INTENTOS = 3
   let data: CreateFromVickyResp | null = null
   let lastError = "Respuesta inválida de la cotizadora"
