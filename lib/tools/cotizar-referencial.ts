@@ -646,11 +646,11 @@ export async function cotizarReferencial(args: {
   const todoPlugAndPlay =
     hardware.length > 0 &&
     hardware.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
+  // Precio de la instalación técnica opcional (misma tabla por zona que usaría
+  // la cotización con autoInstalada=false). Se calcula acá arriba porque lo
+  // usan DOS textos: el disclaimer clásico y la Opción 1 del doble valor.
+  let instalacionTecnicoUF = 0
   if (hayReloj && !instalacionCotizada && !todoPlugAndPlay) {
-    // PRECIO DEL TÉCNICO EN EL DISCLAIMER (Lalo 13-ago): la comuna ya se
-    // conoce, así que el monto se muestra — nada de "según la comuna".
-    // Misma tabla por zona que usaría la cotización con autoInstalada=false.
-    let instalacionTecnicoUF = 0
     try {
       const mods = new Set(hardware.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"))
       const modU: "arriendo" | "venta" = mods.size === 1 ? [...mods][0] : "arriendo"
@@ -667,6 +667,8 @@ export async function cotizarReferencial(args: {
     } catch {
       instalacionTecnicoUF = 0 // sin precio calculable: cae al texto genérico
     }
+  }
+  if (hayReloj && !instalacionCotizada && !todoPlugAndPlay) {
     partes.push("")
     partes.push("[---]")
     partes.push("")
@@ -695,26 +697,53 @@ export async function cotizarReferencial(args: {
     try {
       const alternativa = await cotizarReferencial({ userCount, modulos })
       if (alternativa.ok) {
+        // TEXTOS DE EDUARDO (17-ago, pantallazo): las opciones son COMPACTAS —
+        // un titular con la recomendación, el mensual con IVA y una línea de
+        // uso; el desglose completo queda para la cotización formal. Antes la
+        // Opción 1 embebía el preform entero y el mensaje se hacía eterno.
+        const mods = new Set(hardware.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"))
+        const modalidadLabel =
+          mods.size === 1 ? (mods.has("venta") ? "Reloj en venta" : "Reloj en arriendo") : "Reloj"
+        const personas = userCount === 1 ? "1 persona" : `${userCount} personas`
+
+        // La frase de instalación se adapta al caso real: auto-instalado con
+        // técnico opcional (el común), instalación ya cotizada, o equipo
+        // plug-and-play (huellero USB) donde no existe instalación técnica.
+        let fraseInstalacion = ""
+        if (instalacionCotizada) {
+          fraseInstalacion = " En este caso la instalación por nuestro equipo técnico ya viene incluida."
+        } else if (!todoPlugAndPlay) {
+          fraseInstalacion =
+            instalacionTecnicoUF > 0
+              ? ` En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional de ${fmtUF(instalacionTecnicoUF)} UF + IVA).`
+              : " En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional según la comuna)."
+        }
+
+        const lineasOpcion1 = [
+          `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
+          `💰 $${fmtNumCL(totalRecurrenteCLP, 0)} al mes, IVA incluido.`,
+          `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.${fraseInstalacion}`,
+        ]
+        // El pago único inicial (envío / equipo en venta) NO estaba en el
+        // pantallazo, pero ocultarlo dejaría la única cifra del preform
+        // incompleta y la formal lo cobraría "por sorpresa". Una línea corta.
+        if (totalUnicoCLP > 0) {
+          lineasOpcion1.push(
+            `Se suma un pago inicial único de $${fmtNumCL(totalUnicoCLP, 0)} (IVA incluido).`,
+          )
+        }
+
         mensajeParaProspecto = [
-          // La app SIEMPRE va incluida, con reloj o sin él (Eduardo 14-ago):
-          // titular la opción solo con el reloj hacía entender que elegirlo
-          // dejaba fuera la app. Lo que se paga es el fierro; el marcaje por
-          // app no se cobra nunca.
-          "Opción 1 — Reloj control físico y App:",
-          "",
-          mensajeParaProspecto,
-          "",
-          "(La app va siempre incluida sin costo adicional: tu equipo puede marcar en el reloj, en la app o en ambos.)",
+          ...lineasOpcion1,
           "",
           "[---]",
           "",
-          "Opción 2 más económica — Sin reloj, con la app (sin costo adicional):",
-          "",
-          `Con la app (biometría facial y georeferenciación) desde el celular de cada uno o desde el celular del supervisor, pagas solo el plan mensual de asistencia: $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} CLP/mes (IVA incluido), sin pago inicial de equipos ni instalación.`,
+          "2.- Una alternativa más económica sería si marcan solo mediante nuestra app:",
+          `💰 $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} al mes, IVA incluido.`,
           "",
           "[---]",
           "",
-          "¿Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato.",
+          "Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato.",
         ].join("\n")
       }
     } catch { /* sin alternativa: queda el mensaje simple */ }

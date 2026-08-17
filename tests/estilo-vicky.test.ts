@@ -207,14 +207,19 @@ describe("el preform no muestra el valor de la UF del día (Eduardo 17-ago)", ()
   })
 })
 
-describe("la app nunca queda fuera del título con reloj (Eduardo 14-ago)", () => {
-  test("la Opción 1 del doble valor nombra reloj Y app", () => {
-    // "Opción 1 — Con reloj control físico" hacía entender que elegir reloj
-    // dejaba fuera la app. La app no se cobra nunca: lo condicionado a pago
-    // es el fierro.
+describe("doble valor compacto (Eduardo 17-ago — supersede los títulos del 14-ago)", () => {
+  test("las opciones usan el formato del pantallazo: recomendación + mensual + app", () => {
+    // El formato viejo embebía el preform entero como Opción 1 y el mensaje se
+    // hacía eterno. El nuevo es compacto: "1 - Para N personas te recomiendo
+    // Reloj en arriendo + App" con el mensual IVA incluido, y la alternativa
+    // solo-app como opción 2. El reloj sigue nombrando a la App en el titular
+    // (la regla del 14-ago se conserva: la app nunca queda fuera).
     const t = readFileSync(join(RAIZ, "lib/tools/cotizar-referencial.ts"), "utf8")
-    assert.match(t, /Opción 1 — Reloj control físico y App/)
-    assert.ok(!/Opción 1 — Con reloj control físico/.test(t), "quedó el título viejo sin la app")
-    assert.match(t, /app va siempre incluida sin costo adicional/i)
+    assert.match(t, /te recomiendo \$\{modalidadLabel\} \+ App/)
+    assert.match(t, /al mes, IVA incluido/)
+    assert.match(t, /marcar desde el reloj o desde el celular/)
+    assert.match(t, /2\.- Una alternativa más económica sería si marcan solo mediante nuestra app/)
+    assert.match(t, /Qué opción prefieres\? Con la que elijas te genero la cotización formal de inmediato/)
+    assert.ok(!/Opción 1 — Reloj control físico y App/.test(t), "quedó el título viejo del 14-ago")
   })
 })
