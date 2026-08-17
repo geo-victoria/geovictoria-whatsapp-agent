@@ -4525,7 +4525,10 @@ export async function POST(req: Request): Promise<Response> {
     try {
       const { fetchZoho } = await import("@/lib/zoho-token")
       const esc2 = q.replace(/'/g, "''")
-      const r = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+      // v8: la query junta TRES lookups (Owner, Contact_Name, Account_Name) y
+      // COQL v3 topa en 2 relaciones — respondía 400 LIMIT_EXCEEDED desde el
+      // día uno y el catch silencioso lo disfrazaba de "sin resultados".
+      const r = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
