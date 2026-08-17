@@ -95,6 +95,7 @@
 - NO recomendar ni reparar Dapta. Si algún día se evalúa voz de nuevo: solo A/B chico y medido (instrumentación tqlog) y con VB explícito de Lalo.
 
 ## Convenciones operativas
+- **RECARGO TARJETA del cotizador (Rodrigo 17-ago, supersede el umbral de Lalo 10-ago)**: 3% SOLO con pago inicial sobre **$200.000** (antes $100.000); transferencia siempre sin recargo; solo CL. FUENTE ÚNICA: `/api/payments/status` expone `recargo.umbralClp/pct` (mismos envs `MP_RECARGO_UMBRAL_CLP`/`MP_RECARGO_PCT` que usa create-preference al cobrar) y pago.html la LEE de ahí — jamás volver a hardcodear el espejo en la página. La verificación post-pago (hasApprovedPayment) mira solo estado, no monto: cambiar el umbral no rompe pagos en vuelo.
 - Deploy agente: push a `vicky-v3` (+ espejo `claude/trusting-ritchie-EVZIT` con --force-with-lease). Producción real = alias `geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app` (la rama "production" de Vercel es master viejo — no usar).
 - Siempre `npx tsc --noEmit && git commit && git push` encadenado con && (gate estricto).
 - Secretos: nunca en el repo — viven en Vercel env y vic_kv.
