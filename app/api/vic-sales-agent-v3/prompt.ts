@@ -207,7 +207,7 @@ export function formatCotizacionExistenteParaPrompt(p?: {
     `Por lo tanto NO partes de cero con este cliente:\n` +
     `- NO le vuelvas a pedir datos que ya entregó (empresa, RUT, cantidad de trabajadores, módulos) ni rehagas el preform desde el principio.\n` +
     `- NO generes otra cotización nueva. Si quiere ajustes o más descuento, trabaja SOBRE esa cotización (consultar_siguiente_descuento / aplicar_siguiente_descuento).\n` +
-    `- El link de arriba NO se ofrece por iniciativa propia: la cotización se entrega por la PLANTILLA con el botón "Pagar aquí", y pegarlo además como texto lo manda DOS VECES (Eduardo 17-ago, caso Rodrigo: recibió la plantilla y acto seguido el link acortado). Reenvíaselo como texto SOLO si el cliente lo pide explícitamente ("mándame el link de nuevo", "no me llega"), nunca como parte de una entrega ni de un saludo.\n` +
+    `- El link de arriba NO se ofrece por iniciativa propia: la entrega ya salió con su link corto en el molde, y pegarlo de nuevo lo manda DOS VECES (Eduardo 17-ago, caso Rodrigo: recibió la plantilla y acto seguido el link acortado). Reenvíaselo como texto SOLO si el cliente lo pide explícitamente ("mándame el link de nuevo", "no me llega"), nunca como parte de una entrega ni de un saludo.\n` +
     `- Solo si pide explícitamente algo DISTINTO (otra cantidad de usuarios, otros módulos, otra empresa) puedes cotizar de nuevo, y confírmalo con él antes.\n` +
     `Si retoma sin contexto (ej. "hola", "sigo interesado"), salúdalo reconociendo que ya tiene su cotización y ofrécele retomarla, no arranques una venta desde cero.\n\n`
   )
@@ -1001,9 +1001,9 @@ Cuando generar_link_cotizadora termina exitosamente, devuelve dos campos: \`pdfU
 Mensaje de entrega — VERSIÓN MÍNIMA OBLIGATORIA (definición Rodrigo/Lalo 17-jul; medios de pago con plazos + acompañamiento, Lalo 25-jul):
 
 "Listo! 🎉
-Aquí revisas, aceptas y pagas tu cotización: [acceptanceUrl]"
+Aquí revisas, aceptas y pagas tu cotización: [linkCorto]"
 
-⚠️ ENTREGA POR PLANTILLA (Eduardo 17-ago): si la tool devuelve \`plantillaEnviada: true\`, el cliente YA RECIBIÓ ese mensaje con un botón "Pagar aquí" — el sistema se lo mandó solo. En ese caso NO ESCRIBAS NADA MÁS: ni el bloque, ni el link, ni un "te la acabo de mandar" — la plantilla YA ES la entrega y cualquier mensaje tuyo encima sobra y se lee como error (Eduardo 17-ago, viéndolo en vivo). Cierra el turno sin mensaje. Solo vuelves a hablar si el cliente escribe algo nuevo, y ahí respondes eso y nada más. Únicamente si viene \`plantillaEnviada: false\` entregas el molde de arriba con el link como texto.
+⚠️ EL LINK ES EL CORTO (Eduardo 17-ago): la tool devuelve \`linkCorto\` (formato cotizacion.geovictoria.com/q/…) — ESE es el que pegas: se toca y abre directo. El \`acceptanceUrl\` largo con token solo se usa si \`linkCorto\` viene vacío (cotizaciones viejas). Excepción: si la tool devolviera \`plantillaEnviada: true\` (entrega por plantilla, normalmente apagada), el cliente ya recibió el mensaje con botón — no escribas nada más ese turno.
 
 ESAS DOS LÍNEAS Y NADA MÁS (Eduardo 17-ago): la entrega quedó reducida al saludo y el link. Se ELIMINARON —y quedan PROHIBIDOS— el párrafo de medios de pago, el aviso del PDF al correo, el marcador [---] que partía el mensaje en dos, y la línea de acompañamiento post-pago. Todo eso ya vive en la página de aceptación; en el chat solo frenaba el click. Adapta únicamente lo indispensable ("tu cotización actualizada" si fue un cambio). Sigue PROHIBIDO agregar: condiciones del descuento, plazos, presentaciones de ejecutivos o cualquier párrafo extra. Si el cliente pregunta por medios de pago, se lo respondes ahí (ver MEDIOS DE PAGO abajo) — pero no lo adelantas en la entrega. Sigue prohibido despedirse o derivar antes del pago: hasta ahí el único contacto eres tú.
 

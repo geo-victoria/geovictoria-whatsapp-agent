@@ -373,6 +373,7 @@ export type LinkCotizadoraResultado =
       pdfUrl: string
       acceptanceUrl: string
       codigoCorto: string
+      linkCorto: string
       /** true = el link ya salió en la plantilla con botón; no repetirlo como texto. */
       plantillaEnviada: boolean
       quoteId: string
@@ -803,6 +804,7 @@ export async function generarLinkCotizadora(
     pdfUrl?: string
     acceptanceUrl?: string
     codigoCorto?: string
+    linkCorto?: string
     quoteId?: string
     dealId?: string
     accountId?: string
@@ -894,7 +896,12 @@ export async function generarLinkCotizadora(
   // sin su link es lo peor que puede pasar en este punto del flujo.
   // Apagado sin deploy: VICKY_ENTREGA_PLANTILLA=0
   let plantillaEnviada = false
-  const plantillaOn = (process.env.VICKY_ENTREGA_PLANTILLA || "1").trim() !== "0"
+  // APAGADA por defecto (Eduardo 17-ago, tras probarla en vivo): el botón de
+  // plantilla obliga al interstitial "¿Deseas abrir este enlace?" de WhatsApp
+  // (URL dinámica) y arrastró turno mudo + falsas alarmas. Dentro de la
+  // ventana de 24 h la entrega vuelve a ser TEXTO con el LINK CORTO (abre
+  // directo, sin diálogo). La plantilla aprobada queda para fuera de ventana.
+  const plantillaOn = (process.env.VICKY_ENTREGA_PLANTILLA || "0").trim() === "1"
   const fonoPlantilla = (contactoTelefono || "").replace(/\D/g, "")
   if (plantillaOn && data.codigoCorto && fonoPlantilla.startsWith("56")) {
     try {
@@ -927,6 +934,9 @@ export async function generarLinkCotizadora(
     pdfUrl: data.pdfUrl || "",
     acceptanceUrl: data.acceptanceUrl,
     codigoCorto: data.codigoCorto || "",
+    // El link que se entrega por chat: corto y sin interstitial. El largo con
+    // el token queda de respaldo para cotizaciones viejas sin código.
+    linkCorto: data.linkCorto || "",
     plantillaEnviada,
     quoteId: data.quoteId || "",
     dealId: data.dealId || "",
