@@ -17,6 +17,9 @@
  *   envían al endpoint create-from-vicky como líneas con tipo "servicio".
  */
 
+/** Plantilla aprobada por Meta para entregar la cotización con botón. */
+const PLANTILLA_ENTREGA = (process.env.VICKY_PLANTILLA_ENTREGA || "vicky_cotizacion_pago_mkt").trim()
+
 import {
   ARRIENDO_RECARGO_REGIONES_UF,
   getModuloDisponibleParaVicky,
@@ -369,6 +372,9 @@ export type LinkCotizadoraResultado =
       ok: true
       pdfUrl: string
       acceptanceUrl: string
+      codigoCorto: string
+      /** true = el link ya salió en la plantilla con botón; no repetirlo como texto. */
+      plantillaEnviada: boolean
       quoteId: string
       dealId: string
       accountId: string
@@ -796,6 +802,7 @@ export async function generarLinkCotizadora(
     ok: boolean
     pdfUrl?: string
     acceptanceUrl?: string
+    codigoCorto?: string
     quoteId?: string
     dealId?: string
     accountId?: string
@@ -862,10 +869,39 @@ export async function generarLinkCotizadora(
   // falla jamás afecta la emisión ni la respuesta al cliente.
   void anotarTablaPrecios(data.quoteId || "").catch(() => false)
 
+  // ENTREGA POR PLANTILLA CON BOTÓN (Eduardo 17-ago). El link largo con el JWT
+  // no cabe en un botón de WhatsApp; el cotizador ahora devuelve `codigoCorto`
+  // (`<quoteId>-<firma HMAC>`) y la plantilla `vicky_cotizacion_pago_mkt` lo
+  // pega en el botón "Pagar aquí" vía `/q/${codigo}`.
+  //
+  // Best-effort y NUNCA bloqueante: si el envío falla, `plantillaEnviada` vuelve
+  // en false y el modelo entrega el link como texto, como siempre. Un cliente
+  // sin su link es lo peor que puede pasar en este punto del flujo.
+  // Apagado sin deploy: VICKY_ENTREGA_PLANTILLA=0
+  let plantillaEnviada = false
+  const plantillaOn = (process.env.VICKY_ENTREGA_PLANTILLA || "1").trim() !== "0"
+  const fonoPlantilla = (contactoTelefono || "").replace(/\D/g, "")
+  if (plantillaOn && data.codigoCorto && fonoPlantilla.startsWith("56")) {
+    try {
+      const { sendBotmakerTemplate } = await import("@/lib/botmaker-push-v3")
+      // El cuerpo exige {{1}}: sin nombre la plantilla la rechaza WhatsApp, así
+      // que va un saludo neutro antes que quedarse sin entregar.
+      const nombre = (contacto || "").trim().split(/\s+/)[0] || "hola"
+      plantillaEnviada = await sendBotmakerTemplate(fonoPlantilla, PLANTILLA_ENTREGA, {
+        nombre,
+        codigo: data.codigoCorto,
+      })
+    } catch (e) {
+      console.warn(`[generar-link] plantilla de entrega falló: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
   return {
     ok: true,
     pdfUrl: data.pdfUrl || "",
     acceptanceUrl: data.acceptanceUrl,
+    codigoCorto: data.codigoCorto || "",
+    plantillaEnviada,
     quoteId: data.quoteId || "",
     dealId: data.dealId || "",
     accountId: data.accountId || "",
