@@ -149,16 +149,20 @@ export function mensajePresentacion(
   nombreVendedor: string,
   contacto?: { email?: string; whatsapp?: string },
 ): string {
-  const base = `Te cuento: para acompañarte mejor con tu cotización, desde ahora te atiende ${nombreVendedor} de nuestro equipo comercial — te va a llamar muy pronto para resolverlo todo de una. Ya tiene el detalle completo de nuestra conversación, así que no tendrás que repetir nada`
+  // VERSIÓN CORTA (Eduardo 17-ago, texto literal de su "cambiar por"): sin el
+  // "¡Hola! Te cuento:", sin "te va a llamar muy pronto" (una promesa que no
+  // controlamos) y sin "ya tiene el detalle de la conversación". Presentación
+  // + datos de contacto + cierre, en líneas seguidas.
+  const base = `Para acompañarte mejor con tu cotización, desde ahora te atiende ${nombreVendedor} de nuestro equipo comercial.`
   const lineas = [
     contacto?.email ? `✉️ ${contacto.email}` : "",
     contacto?.whatsapp ? `📱 WhatsApp: ${contacto.whatsapp}` : "",
   ].filter(Boolean)
-  const datos = lineas.length ? `.\n\n${lineas.join("\n")}\n\n` : ". "
-  if (pais === "co") return `¡Hola! ${base}${datos}Cualquier cosa igual me puedes escribir por aquí 🙌`
-  if (pais === "mx") return `¡Hola! ${base}${datos}Por aquí sigo atenta a lo que necesites 🙌`
-  if (pais === "pe") return `¡Hola! ${base}${datos}Cualquier consulta me puedes escribir por aquí 🙌`
-  return `¡Hola! ${base}${datos}Cualquier cosa me escribes por aquí 🙌`
+  const datos = lineas.length ? `\n${lineas.join("\n")}\n` : " "
+  if (pais === "co") return `${base}${datos}Cualquier cosa igual me puedes escribir por aquí 🙌`
+  if (pais === "mx") return `${base}${datos}Por aquí sigo atenta a lo que necesites 🙌`
+  if (pais === "pe") return `${base}${datos}Cualquier consulta me puedes escribir por aquí 🙌`
+  return `${base}${datos}Cualquier cosa me escribes por aquí 🙌`
 }
 
 /** Pregunta del chequeo de calidad (9 h hábiles post-traspaso). */
