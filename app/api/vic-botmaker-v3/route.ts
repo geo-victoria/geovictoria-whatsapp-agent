@@ -1299,7 +1299,26 @@ async function processOneTurn(
         }
       }
       const partes = partirEnBurbujas(replyFinal)
+      // ¿Este turno ENTREGÓ algo crítico (cotización)? Esas respuestas salen
+      // siempre: descartarlas dejaría al cliente sin su link.
+      const turnoEntregaCotizacion = (result.toolCalls || []).some(
+        (c) => c.name === "generar_link_cotizadora" && c.ok,
+      )
       for (const [i, parte] of partes.entries()) {
+        // RESPUESTA OBSOLETA (Eduardo 17-ago, caso "Rodrigo"→"Somos 20"): si
+        // mientras se generaba (o durante la cadencia humana) llegó OTRO
+        // mensaje del cliente, esta respuesta quedó vieja — mandar "¿y cuántas
+        // personas?" cuando ya dijo "somos 20" se lee como no leer. Se
+        // descarta lo no enviado; el próximo turno del drenaje procesa el
+        // mensaje nuevo con TODO el historial (incluida esta respuesta
+        // persistida) y contesta ambas cosas de una. El debounce de 1,5 s
+        // cubre las ráfagas inmediatas; esto cubre la ventana de generación.
+        if (!turnoEntregaCotizacion && (await inboxHasPending(contact))) {
+          console.warn(
+            `[v3-burst] respuesta obsoleta descartada para ${contact} (${partes.length - i} burbuja(s) sin enviar): llegó un mensaje nuevo durante la generación`,
+          )
+          break
+        }
         if (HUMAN_DELAY_ON) {
           await sendTypingIndicator(contact, true).catch(() => {})
           await sleep(i === 0 ? humanDelayMs(parte) : Math.min(humanDelayMs(parte), 2500))
