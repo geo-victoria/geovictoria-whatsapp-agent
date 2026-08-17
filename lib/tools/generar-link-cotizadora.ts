@@ -906,6 +906,17 @@ export async function generarLinkCotizadora(
         nombre,
         codigo: data.codigoCorto,
       })
+      // Marca de "la entrega YA salió" (caso Rodrigo 17-ago): una pasada
+      // posterior del modelo puede intentar entregar de nuevo — inventando un
+      // link que el guardián anti-alucinación reemplaza por "tuve un
+      // problema…" — y el cliente ve un error tras una entrega EXITOSA. Con
+      // esta marca, el camino de salida bota esos mensajes en silencio.
+      if (plantillaEnviada) {
+        try {
+          const { setKvValue } = await import("@/lib/supabase-persistence-v3")
+          await setKvValue(`plantilla_reciente_${fonoPlantilla}`, String(Date.now())).catch(() => {})
+        } catch {}
+      }
     } catch (e) {
       console.warn(`[generar-link] plantilla de entrega falló: ${e instanceof Error ? e.message : e}`)
     }

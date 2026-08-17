@@ -47,7 +47,7 @@ export function quitarLinksDeAceptacion(texto: string): {
  * aceptas y pagas…"). Si el link ya salió en la plantilla, estas líneas
  * quedan huérfanas y hay que botarlas enteras. */
 const BOILERPLATE_ENTREGA =
-  /revisas,?\s*aceptas?\s*y\s*pagas|aquí\s+puedes\s+revisar,?\s*aceptar|te\s+dejo\s+el\s+link/i
+  /revisas,?\s*aceptas?\s*y\s*pagas|aquí\s+puedes\s+revisar,?\s*aceptar|te\s+dejo\s+el\s+link|problema\s+generando\s+tu\s+cotización/i
 
 /**
  * Versión dura para cuando la PLANTILLA ya salió en este turno: además de los

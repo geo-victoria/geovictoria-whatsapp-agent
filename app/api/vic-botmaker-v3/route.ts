@@ -1284,12 +1284,18 @@ async function processOneTurn(
       // texto es el único camino y no se puede tocar.
       // Apagable con VICKY_UNA_PUERTA=0.
       let replyFinal = reply
-      const plantillaSalio = (result.toolCalls || []).some(
+      let plantillaSalio = (result.toolCalls || []).some(
         (c) =>
           c.name === "generar_link_cotizadora" &&
           c.ok &&
           Boolean((c.output as { plantillaEnviada?: boolean } | undefined)?.plantillaEnviada),
       )
+      // La plantilla pudo salir en una pasada ANTERIOR del mismo drenaje (o un
+      // turno atrás): la marca kv de la tool cubre esa ventana (10 min).
+      if (!plantillaSalio) {
+        const marca = await getKvValue(`plantilla_reciente_${contact}`).catch(() => null)
+        if (marca && Date.now() - Number(marca) < 10 * 60 * 1000) plantillaSalio = true
+      }
       if (plantillaSalio && (process.env.VICKY_UNA_PUERTA || "1").trim() !== "0") {
         const { quitarEntregaCompleta } = await import("@/lib/una-puerta-cotizacion")
         const r = quitarEntregaCompleta(reply)
