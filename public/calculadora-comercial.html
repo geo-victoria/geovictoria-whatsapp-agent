@@ -2979,9 +2979,11 @@
               ? 'Emitiendo para: ' + (INFO.accountNombre || INFO.nombre || ('deal ' + DEAL)) +
                 (INFO.rut ? ' · RUT ' + INFO.rut : ' · SIN RUT en la ficha (se pedirá al emitir)') +
                 (INFO.contactoNombre ? ' · ' + INFO.contactoNombre : '')
-              : 'No pude cargar el deal ' + DEAL + ' — revisa el link.';
+              : '⚠️ No pude cargar el deal ' + DEAL + ' (' + ((d && d.error) || 'sin detalle') + ') — recarga la página en unos segundos.';
           })
-          .catch(function () {});
+          .catch(function () {
+            document.getElementById('gvDealInfo').textContent = '⚠️ No pude cargar el deal ' + DEAL + ' (error de red) — recarga la página en unos segundos.';
+          });
 
         var btn = document.getElementById('downloadProposalBtn');
         if (!btn) return;
@@ -3007,11 +3009,22 @@
           fetch(API + '&accion=cotcalc_cotizaciones&deal=' + DEAL, { method: 'POST' })
             .then(function (r) { return r.json(); })
             .then(function (d) {
-              var lista = (d && d.ok && d.cotizaciones) || [];
+              // Si la consulta FALLA no se emite a ciegas: sin la lista real no
+              // se puede ofrecer "actualizar" y emitir "nueva" duplicaría la
+              // cotización del deal en el CRM (incidente token 17-ago).
+              if (!d || !d.ok) {
+                btn.disabled = false; btn.textContent = label;
+                setStatus('⚠️ No pude revisar las cotizaciones del deal (' + ((d && d.error) || 'sin respuesta') + '). Reintenta en unos segundos — no emití nada.');
+                return;
+              }
+              var lista = d.cotizaciones || [];
               if (!lista.length) { emitir(data, null, null, label); return; }
               mostrarSelector(lista, data, label);
             })
-            .catch(function () { emitir(data, null, null, label); });
+            .catch(function () {
+              btn.disabled = false; btn.textContent = label;
+              setStatus('⚠️ No pude revisar las cotizaciones del deal (error de red). Reintenta en unos segundos — no emití nada.');
+            });
         }, true);
 
         // Panel "¿nueva o actualizar?" cuando el deal ya tiene cotizaciones.

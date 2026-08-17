@@ -3721,6 +3721,13 @@ async function renderSelectorDeal(key: string): Promise<Response> {
         fetch("?key=" + encodeURIComponent(KEY) + "&accion=cotdeals_buscar&q=" + encodeURIComponent(q), { method: "POST" })
           .then(function (r) { return r.json(); })
           .then(function (d) {
+            // Error de Zoho ≠ cero resultados: decirlo evita que el vendedor
+            // concluya que el deal no existe (incidente token 17-ago).
+            if (!d || !d.ok) {
+              aviso.textContent = "⚠️ No pude buscar en Zoho (" + ((d && d.error) || "sin respuesta") + "). Reintenta en unos segundos.";
+              aviso.style.display = "block";
+              return;
+            }
             ((d && d.deals) || []).forEach(function (x) {
               if (!x.id || idsEnTabla[x.id]) return;
               idsEnTabla[x.id] = true;
@@ -3737,7 +3744,10 @@ async function renderSelectorDeal(key: string): Promise<Response> {
             aviso.textContent = visibles ? "" : "Ninguna oportunidad calza con la b\u00fasqueda (tampoco en Zoho).";
             aviso.style.display = visibles ? "none" : "block";
           })
-          .catch(function () {});
+          .catch(function () {
+            aviso.textContent = "\u26a0\ufe0f No pude buscar en Zoho (error de red). Reintenta en unos segundos.";
+            aviso.style.display = "block";
+          });
       }
       input.addEventListener("input", function () {
         filtrar();
@@ -4513,12 +4523,11 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ ok: true, deals: [] }), { headers: { "content-type": "application/json" } })
     }
     try {
-      const token = await getZohoAccessToken()
+      const { fetchZoho } = await import("@/lib/zoho-token")
       const esc2 = q.replace(/'/g, "''")
-      const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+      const r = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
         method: "POST",
-        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
-        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           select_query:
             `select id, Deal_Name, Stage, Owner.first_name, Owner.last_name, ` +
@@ -4528,7 +4537,12 @@ export async function POST(req: Request): Promise<Response> {
             `order by Modified_Time desc limit 30`,
         }),
       })
-      const rows = r.ok && r.status !== 204 ? (((await r.json().catch(() => ({}))) as { data?: DealEquipo[] }).data || []) : []
+      // Un error de Zoho se DICE (17-ago): devolver lista vacía ante un 401
+      // hizo creer al vendedor que el deal no existía y siguió sin deal.
+      if (!r.ok && r.status !== 204) {
+        return new Response(JSON.stringify({ ok: false, error: `Zoho respondió ${r.status} — reintenta en unos segundos` }), { status: 502, headers: { "content-type": "application/json" } })
+      }
+      const rows = r.status !== 204 ? (((await r.json().catch(() => ({}))) as { data?: DealEquipo[] }).data || []) : []
       const deals = rows.map((d) => ({
         id: String(d.id || ""),
         empresa: String(d["Account_Name.Account_Name"] || "").trim() || String(d.Deal_Name || "").trim() || "(sin nombre)",
@@ -4573,17 +4587,21 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ ok: false, error: "deal faltante" }), { status: 400, headers: { "content-type": "application/json" } })
     }
     try {
-      const { getZohoAccessToken } = await import("@/lib/zoho-token")
-      const token = await getZohoAccessToken()
+      const { fetchZoho } = await import("@/lib/zoho-token")
       const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-      const r = await fetch(`${api}/crm/v3/coql`, {
+      const r = await fetchZoho(`${api}/crm/v3/coql`, {
         method: "POST",
-        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           select_query: `select id, Numero_Cotizacion, Name, Estado_Cotizacion, Version_PDF, PDF_URL, Created_Time from ${QUOTE_MODULE} where Deal_Asociado = ${dealId} order by Created_Time desc limit 20`,
         }),
-        cache: "no-store",
       })
+      // Si Zoho falla acá, decirlo es OBLIGATORIO: una lista vacía falsa hace
+      // que el puente emita una cotización NUEVA en vez de versionar (v2/vN)
+      // la existente — duplicado directo en el CRM (incidente 17-ago).
+      if (!r.ok && r.status !== 204) {
+        return new Response(JSON.stringify({ ok: false, error: `Zoho respondió ${r.status} — reintenta en unos segundos` }), { status: 502, headers: { "content-type": "application/json" } })
+      }
       const filas = (((await r.json().catch(() => ({}))) as {
         data?: Array<{ id?: string; Numero_Cotizacion?: string; Name?: string; Estado_Cotizacion?: string; Version_PDF?: number; PDF_URL?: string; Created_Time?: string }>
       }).data || []).map((q) => ({
@@ -4610,13 +4628,9 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ ok: false, error: "quote faltante" }), { status: 400, headers: { "content-type": "application/json" } })
     }
     try {
-      const { getZohoAccessToken } = await import("@/lib/zoho-token")
-      const token = await getZohoAccessToken()
+      const { fetchZoho } = await import("@/lib/zoho-token")
       const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-      const r = await fetch(`${api}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Numero_Cotizacion,Version_PDF`, {
-        headers: { Authorization: `Zoho-oauthtoken ${token}` },
-        cache: "no-store",
-      })
+      const r = await fetchZoho(`${api}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Numero_Cotizacion,Version_PDF`)
       const rec = ((await r.json().catch(() => ({}))) as { data?: Array<{ PDF_URL?: string; Numero_Cotizacion?: string; Version_PDF?: number }> }).data?.[0]
       return new Response(JSON.stringify({ ok: true, pdfUrl: String(rec?.PDF_URL || ""), numero: String(rec?.Numero_Cotizacion || ""), version: Number(rec?.Version_PDF || 1) }), { headers: { "content-type": "application/json" } })
     } catch (e) {

@@ -18,7 +18,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 
 import { getKvValue, getQuotePointers, setQuotePointer, type QuotePointer } from "@/lib/supabase-persistence-v3"
-import { getZohoAccessToken } from "@/lib/zoho-token"
+import { fetchZoho } from "@/lib/zoho-token"
 import {
   actualizarCotizacion,
   actualizarCotizacionSchema,
@@ -91,11 +91,7 @@ export async function estadoCotizacion(contact: string, quoteId?: string): Promi
   const mesesCrudo = await getKvValue(`descuento_meses_${puntero.quoteId}`).catch(() => "")
   const descuentoMeses = mesesCrudo === "" || mesesCrudo === null ? null : Number(mesesCrudo)
   try {
-    const token = await getZohoAccessToken()
-    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${puntero.quoteId}`, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      cache: "no-store",
-    })
+    const r = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${puntero.quoteId}`)
     const body = (await r.json().catch(() => null)) as {
       data?: Array<{
         Numero_Cotizacion?: string
@@ -197,9 +193,7 @@ export type InfoDeal = {
  * sembrar la creación sin duplicar registros. */
 export async function infoDeal(dealId: string): Promise<InfoDeal | null> {
   try {
-    const token = await getZohoAccessToken()
-    const h = { Authorization: `Zoho-oauthtoken ${token}` }
-    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}`, { headers: h, cache: "no-store" })
+    const r = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}`)
     const rec = ((await r.json().catch(() => null)) as { data?: Array<Record<string, unknown>> } | null)?.data?.[0]
     if (!rec) return null
     const look = (v: unknown): { id: string; name: string } => {
@@ -212,10 +206,7 @@ export async function infoDeal(dealId: string): Promise<InfoDeal | null> {
     let telefono = ""
     let email = ""
     if (contacto.id) {
-      const rc = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Contacts/${contacto.id}?fields=Phone,Mobile,Email`, {
-        headers: h,
-        cache: "no-store",
-      })
+      const rc = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/Contacts/${contacto.id}?fields=Phone,Mobile,Email`)
       const c = ((await rc.json().catch(() => null)) as {
         data?: Array<{ Phone?: string; Mobile?: string; Email?: string }>
       } | null)?.data?.[0]
@@ -227,7 +218,7 @@ export async function infoDeal(dealId: string): Promise<InfoDeal | null> {
     // toma la primera clave que parezca RUT con valor string no vacío.
     let rut = ""
     if (cuenta.id) {
-      const ra = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Accounts/${cuenta.id}`, { headers: h, cache: "no-store" })
+      const ra = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/Accounts/${cuenta.id}`)
       const a = ((await ra.json().catch(() => null)) as { data?: Array<Record<string, unknown>> } | null)?.data?.[0]
       if (a) {
         for (const k of Object.keys(a)) {
@@ -486,10 +477,8 @@ async function transcripcionPreform(contact: string): Promise<string> {
 
 async function leadPorFono(contact: string): Promise<{ nombre: string; empresa: string; email: string } | null> {
   try {
-    const token = await getZohoAccessToken()
-    const r = await fetch(
+    const r = await fetchZoho(
       `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?phone=${encodeURIComponent(contact)}&converted=both&per_page=1&fields=Full_Name,Company,Email`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
     )
     if (!r.ok || r.status === 204) return null
     const l = ((await r.json().catch(() => ({}))) as { data?: Array<{ Full_Name?: string; Company?: string; Email?: string }> }).data?.[0]
@@ -648,15 +637,13 @@ export async function buscarCotizacionPorNumero(numeroRaw: string): Promise<Coti
   if (!limpio) return null
   const candidatos = [...new Set([limpio, /^\d+$/.test(limpio) ? `COT${limpio}` : ""])].filter(Boolean)
 
-  const token = await getZohoAccessToken()
   const enLista = candidatos.map((c) => `'${c}'`).join(",")
-  const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+  const r = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
     method: "POST",
-    headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       select_query: `select id, Numero_Cotizacion, Tel_fono_Contacto, Cuenta_Asociada.Account_Name from ${QUOTE_MODULE} where Numero_Cotizacion in (${enLista}) limit 1`,
     }),
-    cache: "no-store",
   })
   const rows = r.ok
     ? (((await r.json().catch(() => null)) as { data?: Array<Record<string, string>> } | null)?.data ?? [])

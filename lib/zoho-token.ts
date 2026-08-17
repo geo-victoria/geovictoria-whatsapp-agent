@@ -116,6 +116,31 @@ export async function getZohoAccessTokenFresco(): Promise<string> {
   return refrescarToken(Date.now())
 }
 
+/**
+ * fetch a Zoho con Authorization puesto y UN reintento ante 401.
+ *
+ * CASO REAL (17-ago tarde, reporte de Lalo por los ejecutivos): el token
+ * revocado del incidente de la mañana dejó ciego al EDITOR del dash — el
+ * buscador de deals devolvía lista vacía, el prellenado de la calculadora no
+ * cargaba y "¿actualizar o crear nueva?" nunca aparecía (cero cotizaciones
+ * visibles), así que los vendedores terminaron en la calculadora pelada con
+ * el PDF nativo de 4 páginas. El sanador de vic-ptv-cron repara el kv, pero
+ * cada instancia caliente guarda el token muerto en su caché de proceso hasta
+ * 55 min y estos endpoints no reintentaban. Regla: todo camino Zoho
+ * interactivo (un humano esperando la respuesta) pasa por acá.
+ */
+export async function fetchZoho(url: string, init?: RequestInit): Promise<Response> {
+  const armar = (token: string): RequestInit => ({
+    ...init,
+    cache: "no-store",
+    headers: { ...(init?.headers as Record<string, string> | undefined), Authorization: `Zoho-oauthtoken ${token}` },
+  })
+  const res = await fetch(url, armar(await getZohoAccessToken()))
+  if (res.status !== 401) return res
+  console.warn("[fetchZoho] 401 de Zoho — token revocado en caché; refrescando y reintentando")
+  return fetch(url, armar(await getZohoAccessTokenFresco()))
+}
+
 async function refrescarToken(now: number): Promise<string> {
   const domain = getEnv("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
   const res = await fetch(`${domain}/oauth/v2/token`, {
