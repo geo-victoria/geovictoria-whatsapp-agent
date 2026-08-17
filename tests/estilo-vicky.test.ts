@@ -173,19 +173,37 @@ describe("arriendo del reloj por zona (caso Aysén 13-ago)", () => {
   })
 })
 
-describe("cuadrilla en punto fijo con supervisor (Eduardo 14-ago)", () => {
-  test("el prompt CL obliga a ofrecer cuadrilla donde hay responsable a cargo", () => {
-    // Caso real: una planta productiva recibió solo app + reloj. Donde hay un
-    // supervisor a cargo la cuadrilla es la mejor opción (sin costo adicional
-    // y sin depender del celular de cada trabajador) — la regla no puede
-    // quedar solo en la cabeza del modelo.
+describe("punto fijo con supervisor lo cubre la app (Eduardo 17-ago)", () => {
+  test("el prompt CL retiró la cuadrilla del menú y la app cubre el celular del supervisor", () => {
+    // SUPERSEDE la regla del 14-ago, que obligaba a ofrecer la cuadrilla donde
+    // hubiera un responsable a cargo. Eduardo la sacó del menú el 17-ago: el
+    // mismo caso —planta, obra, local con jefe de turno— se resuelve con la app
+    // marcando desde el celular del supervisor, sin una segunda modalidad que
+    // explicar. Lo que se conserva es la cobertura del caso, no el nombre.
     const p = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts"), "utf8")
     const bloque = p.slice(p.indexOf("REGLAS DE FIT POR MODALIDAD"), p.indexOf("REGLAS DE FIT POR MODALIDAD") + 2600)
     assert.match(bloque, /SUPERVISOR o RESPONSABLE/i)
-    assert.match(bloque, /planta productiva/i)
-    assert.match(bloque, /cuadrilla ENTRA al menú/i)
+    assert.match(bloque, /planta/i)
+    assert.match(bloque, /celular del supervisor/i)
     // Y el reloj en punto fijo nunca va solo.
     assert.match(bloque, /NUNCA lo listes solo/i)
+  })
+
+  test("la cuadrilla ya no se ofrece como modalidad en el menú de marcaje", () => {
+    const p = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts"), "utf8")
+    assert.ok(!/\d\.\s*\*\*App de marcaje por cuadrilla\*\*/.test(p), "quedó la cuadrilla en la lista de formas de marcar")
+    assert.ok(!/^\d\. App de marcaje por cuadrilla/m.test(p), "quedó la cuadrilla en el menú de ejemplo")
+    assert.ok(!/CUÁNDO SACAR LA CUADRILLA/.test(p), "quedó el bloque proactivo de cuadrilla")
+  })
+})
+
+describe("el preform no muestra el valor de la UF del día (Eduardo 17-ago)", () => {
+  test("la línea de equivalencia en pesos va sin el paréntesis de la UF", () => {
+    // Al prospecto le importa el peso final; el tipo de cambio abre una
+    // conversación que no aporta a la venta.
+    const t = readFileSync(join(RAIZ, "lib/tools/cotizar-referencial.ts"), "utf8")
+    assert.match(t, /Equivalente: \$\$\{fmtNumCL\(totalRecurrenteCLP, 0\)\} CLP\/mes`/)
+    assert.ok(!/UF del día: \$\$\{fmtNumCL\(ufActual/.test(t), "quedó el valor de la UF en el mensaje al prospecto")
   })
 })
 

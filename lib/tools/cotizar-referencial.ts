@@ -552,9 +552,10 @@ export async function cotizarReferencial(args: {
       partes.push(`Subtotal sin IVA: ${fmtUF(subtotalRecurrenteUF)} UF`)
     }
     partes.push(`Total mensual con IVA: ${fmtUF(totalRecurrenteUF)} UF`)
-    partes.push(
-      `Equivalente: $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes (UF del día: $${fmtNumCL(ufActual, 2)})`,
-    )
+    // Sin el valor de la UF del día (Eduardo 17-ago): al prospecto le importa el
+    // peso final, no la mecánica de conversión — mostrarla agrega ruido y abre
+    // una conversación sobre el tipo de cambio que no aporta a la venta.
+    partes.push(`Equivalente: $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes`)
     if (esMicroPlan) {
       partes.push("")
       partes.push(
