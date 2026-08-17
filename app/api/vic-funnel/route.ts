@@ -3196,6 +3196,171 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
   return page(html)
 }
 
+/** Pestaña "Funnel de cotizaciones" (pedido Lalo 17-ago): listado de las
+ * cotizaciones ENVIADAS con todos los hitos del último metro, para ver dónde
+ * se queda pegado cada cliente. Fuentes, todas ya existentes:
+ *   - vic_v3_quote_pointers → emisión (created_at) + empresa/contacto/monto
+ *   - vic_kv `pf_<quoteId>_<evento>` → telemetría del funnel de pago
+ *     (vic-pago-evento, Rodrigo 17-ago): abrio, terminos, acepto,
+ *     pago_abierto, metodo_tarjeta, metodo_transferencia, salida_mp,
+ *     transfer_wsp_click, comprobante_wsp
+ *   - vic_kv `venta_dash_v3_<quoteId>` → pagoIso = PAGADA
+ * Rama liviana e independiente del pipeline pesado del dash. */
+async function renderFunnelCotizaciones(key: string): Promise<Response> {
+  const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const dias = 14
+  const desde = new Date(Date.now() - dias * 86400000).toISOString()
+  const punteros = (await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,quote_id,empresa,rut,total_clp,created_at&created_at=gte.${encodeURIComponent(desde)}&order=created_at.desc&limit=200`,
+    { headers: hSb, cache: "no-store" },
+  )
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])) as Array<{
+    contact: string
+    quote_id: string
+    empresa: string | null
+    rut: string | null
+    total_clp: number | null
+    created_at: string
+  }>
+
+  // Telemetría + pagos en DOS lecturas planas (los pf_ parten hoy 17-ago, el
+  // volumen es chico; si crece, filtrar por quote_id in (...)).
+  const kvs = (await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_kv?select=key,value&or=(key.like.pf_*,key.like.venta_dash_v3_*)&limit=8000`,
+    { headers: hSb, cache: "no-store" },
+  )
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])) as Array<{ key: string; value: string }>
+
+  const eventos = new Map<string, Map<string, string>>() // quoteId → evento → iso
+  const pagadas = new Map<string, string>() // quoteId → pagoIso
+  for (const { key: k, value: v } of kvs) {
+    const mPf = k.match(/^pf_(\d+)_([a-z_]+)$/)
+    if (mPf) {
+      const porQ = eventos.get(mPf[1]) || new Map()
+      porQ.set(mPf[2], v)
+      eventos.set(mPf[1], porQ)
+      continue
+    }
+    const mVd = k.match(/^venta_dash_v3_(\d+)$/)
+    if (mVd) {
+      try {
+        const j = JSON.parse(v)
+        if (j?.pagoIso) pagadas.set(mVd[1], String(j.pagoIso))
+      } catch {}
+    }
+  }
+
+  // Hitos en orden de embudo. Cada celda muestra la hora del PRIMER evento.
+  const HITOS: Array<{ id: string; titulo: string }> = [
+    { id: "emitida", titulo: "Emitida" },
+    { id: "abrio", titulo: "Abrió página" },
+    { id: "terminos", titulo: "Vio T&C" },
+    { id: "acepto", titulo: "Aceptó" },
+    { id: "pago_abierto", titulo: "Vio pago" },
+    { id: "metodo", titulo: "Eligió método" },
+    { id: "salida_mp", titulo: "Fue a MP" },
+    { id: "pagada", titulo: "PAGADA" },
+  ]
+
+  const fmtDT = (iso: string) => {
+    const d = new Date(iso)
+    if (!Number.isFinite(d.getTime())) return ""
+    return d.toLocaleString("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+  }
+  const edad = (iso: string) => {
+    const ms = Date.now() - new Date(iso).getTime()
+    if (!Number.isFinite(ms) || ms < 0) return ""
+    const h = Math.floor(ms / 3600000)
+    if (h < 1) return `${Math.max(1, Math.floor(ms / 60000))}m`
+    if (h < 48) return `${h}h`
+    return `${Math.floor(h / 24)}d`
+  }
+
+  const filas = punteros.map((q) => {
+    const ev = eventos.get(String(q.quote_id)) || new Map<string, string>()
+    const pago = pagadas.get(String(q.quote_id)) || ""
+    const celda = (id: string): { iso: string; extra?: string } => {
+      if (id === "emitida") return { iso: q.created_at }
+      if (id === "pagada") return { iso: pago }
+      if (id === "metodo") {
+        const t = ev.get("metodo_tarjeta")
+        const tr = ev.get("metodo_transferencia")
+        if (t && tr) return { iso: t < tr ? t : tr, extra: "ambos" }
+        if (t) return { iso: t, extra: "tarjeta" }
+        if (tr) return { iso: tr, extra: ev.get("transfer_wsp_click") || ev.get("comprobante_wsp") ? "transfer+wsp" : "transfer" }
+        return { iso: "" }
+      }
+      return { iso: ev.get(id) || "" }
+    }
+    const celdas = HITOS.map((h) => ({ ...h, ...celda(h.id) }))
+    // Último hito alcanzado = dónde está pegada.
+    let ultimo = 0
+    for (const [i, c] of celdas.entries()) if (c.iso) ultimo = i
+    return { q, celdas, ultimo, pagada: Boolean(pago) }
+  })
+
+  // Resumen de dónde se pegan (solo las no pagadas).
+  const pegadas = new Map<string, number>()
+  for (const f of filas) {
+    if (f.pagada) continue
+    const t = f.celdas[f.ultimo]?.titulo || "?"
+    pegadas.set(t, (pegadas.get(t) || 0) + 1)
+  }
+  const resumen = [...pegadas.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `<span style="display:inline-block;background:#eef2ff;border:1px solid #c7d2fe;border-radius:999px;padding:3px 10px;margin:2px;font-size:12.5px"><b>${n}</b> pegadas en “${esc(t)}”</span>`)
+    .join(" ")
+
+  const filasHtml = filas
+    .map(({ q, celdas, ultimo, pagada }) => {
+      const celdasHtml = celdas
+        .map((c, i) => {
+          if (!c.iso)
+            return `<td style="text-align:center;color:#d1d5db">—</td>`
+          const esUltimo = i === ultimo && !pagada
+          const estilo = pagada && c.id === "pagada"
+            ? "background:#dcfce7;font-weight:700"
+            : esUltimo
+              ? "background:#fef9c3;font-weight:600"
+              : ""
+          const extra = c.extra ? `<div style="font-size:10.5px;color:#6b7280">${esc(c.extra)}</div>` : ""
+          const tiempo = esUltimo ? `<div style="font-size:10.5px;color:#b45309">hace ${edad(c.iso)}</div>` : ""
+          return `<td style="text-align:center;${estilo}">${fmtDT(c.iso)}${extra}${tiempo}</td>`
+        })
+        .join("")
+      return `<tr>
+        <td><b>${esc(q.empresa || "(sin empresa)")}</b><div style="font-size:11px;color:#6b7280">${esc(q.contact)} · $${Number(q.total_clp || 0).toLocaleString("es-CL")}</div></td>
+        ${celdasHtml}
+      </tr>`
+    })
+    .join("")
+
+  const html = `
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:6px 0">🧭 Funnel de cotizaciones — últimos ${dias} días (${filas.length})</h2>
+    <a href="?key=${encodeURIComponent(key)}">← volver al dash</a>
+  </div>
+  <div style="margin:6px 0 12px">${resumen || ""}</div>
+  <div style="font-size:12px;color:#6b7280;margin-bottom:10px">
+    La celda amarilla es el ÚLTIMO hito alcanzado (ahí está pegada, con la edad). Verde = pagada.
+    Los hitos de página (“Abrió” en adelante) se registran desde el 17-ago — cotizaciones anteriores solo muestran la emisión.
+  </div>
+  <div style="overflow-x:auto">
+  <table style="border-collapse:collapse;width:100%;font-size:13px">
+    <thead><tr style="background:#0ea5e9;color:#fff">
+      <th style="text-align:left;padding:8px">Cotización</th>
+      ${HITOS.map((h) => `<th style="padding:8px">${h.titulo}</th>`).join("")}
+    </tr></thead>
+    <tbody style="background:#fff">${filasHtml}</tbody>
+  </table>
+  </div>
+  <style>td{padding:7px 8px;border-bottom:1px solid #e5e7eb}</style>`
+  return page(html)
+}
+
+
 /** Pestaña "Editor de cotizaciones" (pedido Lalo 07-ago): buscador por número
  * (COT###) + cotizaciones recientes con link para verlas y editarlas con
  * Vicky Cotizaciones. Rama liviana: solo quote_pointers + un COQL best-effort
@@ -5059,6 +5224,7 @@ export async function GET(req: Request): Promise<Response> {
   // Pestaña "Editor de cotizaciones" (pedido Lalo 07-ago): buscador por número
   // + cotizaciones recientes. Rama temprana: no necesita el pipeline pesado.
   if (searchParams.get("vista") === "editor") return renderEditorCotizaciones(key)
+  if (searchParams.get("vista") === "cotfunnel") return renderFunnelCotizaciones(key)
   // Crear cotización (pedido Lalo 07-ago): primero se elige a qué oportunidad
   // de Zoho se asigna (lista de deals activos con búsqueda), y luego el chat
   // de creación emite la formal amarrada a ese deal.
@@ -6098,6 +6264,7 @@ export async function GET(req: Request): Promise<Response> {
     <div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
+      <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a>
       ${vista === "inbound" ? `<b>📥 Inbound diario</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "inbound"); return p.toString() })()}">📥 Inbound diario</a>`}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>
