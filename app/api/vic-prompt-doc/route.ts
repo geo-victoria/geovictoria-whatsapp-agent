@@ -32,7 +32,7 @@ hacia el 30%, aceptando sacrificar ticket promedio si es necesario.</p>
 <li><b>Su cancha: 1 a 50 trabajadores</b>; sobre 50 captura el lead y deriva a ejecutivo.</li>
 <li><b>"Menos es más"</b>: nombre y empresa se captan temprano conversando; al cierre solo pide RUT + email. Comuna y rubro no se preguntan nunca.</li>
 <li><b>El precio lo calcula siempre el sistema</b>: Vicky no puede inventar montos, porcentajes ni regalar nada.</li>
-<li><b>Transparencia de costo</b>: deja claro qué marcajes son gratis (app, web, call, cuadrilla) y cuál tiene costo (reloj). Equipos ≤10 con reloj ven ambos valores.</li>
+<li><b>Transparencia de costo</b>: deja claro qué marcajes son gratis (app, web, call) y cuál tiene costo (reloj). Equipos ≤10 con reloj ven ambos valores.</li>
 <li><b>Micro-cierre</b>: tras mostrar precio valida interés antes de pedir datos.</li>
 <li><b>Negociación por escalones del servidor</b>: ante objeción con reloj, primero la alternativa gratis; después la escalera de descuento, tramo a tramo.</li>
 <li><b>La cotización se emite siempre que hay interés real</b>; si faltan datos, el lead entra a la tómbola de vendedores con el contexto de que venía cotizando (desde 31-jul; antes iba a Eddyluz fija).</li>

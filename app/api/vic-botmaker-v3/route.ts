@@ -327,8 +327,8 @@ const CONTEXTO_REENGANCHE =
   "NO está en el descuento máximo del plan, ofrécele el máximo de forma proactiva con la tool de " +
   "descuento que corresponda; si YA estaba en el máximo, recuérdale que ese precio caduca pronto. " +
   "ADEMÁS, si el precio que vio llevaba RELOJ control (arriendo), acompaña la oferta con la " +
-  "alternativa más económica sin reloj usando los marcajes sin costo adicional (app, o la app de cuadrilla " +
-  "donde todo el equipo marca en una sola tablet o celular de la empresa): cotízala con " +
+  "alternativa más económica sin reloj usando los marcajes sin costo adicional (la app: cada persona marca " +
+  "desde su propio celular o todo el equipo desde el celular del supervisor): cotízala con " +
   "cotizar_referencial sin hardware y muestra ambos caminos para que elija. " +
   "En todos los casos transmite urgencia (la oferta tiene caducidad). No inventes cifras: usa solo " +
   "los textos que devuelven las tools.\n\n"

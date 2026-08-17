@@ -619,7 +619,7 @@ export async function cotizarReferencial(args: {
         `- Auto-instalación: ustedes montan los relojes (los guiamos paso a paso) y el pago inicial baja a $${fmtNumCL(inicialLivianoCLP, 0)} CLP — se ahorran $${fmtNumCL(ahorroCLP, 0)}.`,
       )
       partes.push(
-        `- Marcaje sin reloj: con la app incluida en el plan (biometría facial + GPS, o modo cuadrilla donde todo el equipo marca en un solo celular o tablet), sin equipos que comprar ni instalar. Pídeme esa opción y te la muestro.`,
+        `- Marcaje sin reloj: con la app incluida en el plan (biometría facial y georeferenciación; cada persona marca desde su propio celular o desde el celular del supervisor), sin equipos que comprar ni instalar. Pídeme esa opción y te la muestro.`,
       )
     }
   }
@@ -709,7 +709,7 @@ export async function cotizarReferencial(args: {
           "",
           "Opción 2 más económica — Sin reloj, con la app (sin costo adicional):",
           "",
-          `Con la app en el celular de cada uno (biometría facial + GPS) o en modo cuadrilla — todo el equipo marca en un solo celular o tablet de la empresa, también sin costo adicional — pagas solo el plan mensual de asistencia: $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} CLP/mes (IVA incluido), sin pago inicial de equipos ni instalación.`,
+          `Con la app (biometría facial y georeferenciación) desde el celular de cada uno o desde el celular del supervisor, pagas solo el plan mensual de asistencia: $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} CLP/mes (IVA incluido), sin pago inicial de equipos ni instalación.`,
           "",
           "[---]",
           "",
