@@ -185,17 +185,22 @@ export async function GET(req: Request): Promise<Response> {
     const p = ptvPorFono.get(fono)
 
     if (tipo === "lead") {
-      // Regla que corrió vs definición.
+      // ESCALERA 18-ago (Lalo): RUT + N>20 → DEAL por la tómbola de deals;
+      // calificado (N conocida) sin RUT → LEAD por la TLMK de ejecutivos;
+      // sin calificar → LEAD por la SDR. La regla que corrió se juzga contra
+      // el escalón que correspondía.
+      const calificado = n > 0
       for (const ev of tl.reglas) {
-        if (ev.reglaId === REGLA_TLMK_VIEJA) bordes.push("regla_vieja_TLMK (definición nueva apunta a la SDR …3111)")
-        else if (ev.reglaId !== REGLA_SDR_NUEVA && ev.reglaId !== REGLA_DEALS) bordes.push(`regla_desconocida:${ev.regla}`)
+        if (ev.reglaId === REGLA_TLMK_VIEJA && !calificado)
+          bordes.push("sin_calificar_en_tombola_ejecutivos (escalera 18-ago: sin calificar → SDR)")
+        else if (ev.reglaId === REGLA_SDR_NUEVA && calificado)
+          bordes.push("calificado_en_SDR (escalera 18-ago: calificado sin RUT → tómbola de ejecutivos)")
+        else if (ev.reglaId !== REGLA_SDR_NUEVA && ev.reglaId !== REGLA_DEALS && ev.reglaId !== REGLA_TLMK_VIEJA)
+          bordes.push(`regla_desconocida:${ev.regla}`)
       }
-      // Intención + identidad y sigue lead sin convertir → deal faltante
-      // (salvo dueño humano previo: definición pendiente).
-      if (!convertido && n > 20 && conIdentidad) {
-        bordes.push(ROBOT_EMAILS.has(duenoEmail) ? "deal_faltante" : "deal_no_creado_por_dueno_humano (definición pendiente)")
-      }
-      if (!convertido && n > 20 && !conIdentidad) bordes.push("intencion_sin_rut (definición pendiente)")
+      // RUT + N>20 y sigue lead sin convertir → el deal debió nacer (si el
+      // dueño es humano, a su nombre — la herencia no exime el deal).
+      if (!convertido && n > 20 && rut) bordes.push("deal_faltante (escalera 18-ago: RUT + N>20 → deal)")
     }
     if (tl.llamadasFantasma.length) bordes.push(`llamada_fantasma:${[...new Set(tl.llamadasFantasma)].join("/")}`)
     if (p) {

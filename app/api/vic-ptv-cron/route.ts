@@ -1300,7 +1300,11 @@ async function cotizacionAceptada(contact: string): Promise<boolean> {
 // telemarketing); PE no tiene tómbola — regla vacía = asignación DIRECTA a la
 // ejecutiva del país (vendedoresDePais). Extensible por env.
 const TM_REGLA: Record<string, string> = {
-  cl: (process.env.VICKY_TM_REASIGNACION_RULE_CL || "3525045000649066001").trim(),
+  // ESCALERA 18-ago (Lalo): "si Vicky no logra calificar pasa a leads de los
+  // SDR" — el reloj de 24h dispara justamente cuando NO hubo calificación,
+  // así que entrega por la regla SDR "Asignación Leads Sin calificar Vicky
+  // SDR" (…3111), ya no por la TLMK de ejecutivos (…6001).
+  cl: (process.env.VICKY_TM_REASIGNACION_RULE_CL || "3525045000652043111").trim(),
   pe: (process.env.VICKY_TM_REASIGNACION_RULE_PE || "").trim(),
 }
 const TM_PAIS_NOMBRE: Record<string, string> = { cl: "Chile", pe: "Perú" }

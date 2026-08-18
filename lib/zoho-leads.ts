@@ -579,7 +579,11 @@ const TM_TOMBOLA_SIN_CALIFICAR_CL = (process.env.VICKY_TM_SIN_CALIFICAR_RULE_ID 
 export async function reasignarLeadTelemarketingCL(
   leadId: string,
 ): Promise<{ success: boolean; ownerEmail?: string; error?: string }> {
-  if (!leadId || !TM_TOMBOLA_LEADS_CL) return { success: false, error: "leadId o regla faltante" }
+  // ESCALERA 18-ago (Lalo): sus tres llamadores (número sin WhatsApp, cadencia
+  // agotada, mensaje no entregado) son casos donde Vicky NO logró calificar →
+  // "pasa a leads de los SDR" (regla …3111), ya no a la TLMK de ejecutivos.
+  const regla = TM_TOMBOLA_SIN_CALIFICAR_CL || TM_TOMBOLA_LEADS_CL
+  if (!leadId || !regla) return { success: false, error: "leadId o regla faltante" }
   try {
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
@@ -588,7 +592,7 @@ export async function reasignarLeadTelemarketingCL(
       method: "PUT",
       headers: H,
       cache: "no-store",
-      body: JSON.stringify({ data: [{ id: leadId }], lar_id: TM_TOMBOLA_LEADS_CL }),
+      body: JSON.stringify({ data: [{ id: leadId }], lar_id: regla }),
     })
     if (!put.ok) return { success: false, error: `regla PUT ${put.status}` }
     const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })

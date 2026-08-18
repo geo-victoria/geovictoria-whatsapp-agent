@@ -33,8 +33,12 @@ function paisDeTelefono(tel: string): "cl" | "co" | "mx" | "pe" {
  * creado (las reglas no corren solas en creates por API) y se lee el dueño
  * sorteado. undefined = la regla no asignó (fallback: rotación interna). */
 const TM_TOMBOLA_LEADS_CL = (process.env.VICKY_TM_TOMBOLA_LEADS_CL || "3525045000649066001").trim()
+// ESCALERA 18-ago (Lalo): calificado (dotación conocida) → tómbola de leads
+// de ejecutivos (TLMK …6001); "si Vicky no logra calificar pasa a leads de
+// los SDR" → regla SDR (…3111). Antes TODO callback iba a la de ejecutivos.
+const TM_TOMBOLA_SDR_CL = (process.env.VICKY_TM_SIN_CALIFICAR_RULE_ID || "3525045000652043111").trim()
 
-async function asignarLeadPorReglaCL(leadId: string): Promise<string | undefined> {
+async function asignarLeadPorReglaCL(leadId: string, calificado: boolean): Promise<string | undefined> {
   try {
     const { getZohoAccessToken } = await import("@/lib/zoho-token")
     const token = await getZohoAccessToken()
@@ -44,7 +48,7 @@ async function asignarLeadPorReglaCL(leadId: string): Promise<string | undefined
       method: "PUT",
       headers: H,
       cache: "no-store",
-      body: JSON.stringify({ data: [{ id: leadId }], lar_id: TM_TOMBOLA_LEADS_CL }),
+      body: JSON.stringify({ data: [{ id: leadId }], lar_id: calificado ? TM_TOMBOLA_LEADS_CL : TM_TOMBOLA_SDR_CL }),
     })
     if (!put.ok) return undefined
     const g = await fetch(`${api}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
@@ -188,7 +192,9 @@ export async function registrarSolicitudCallback(
   // dispara por lar_id).
   const existingLeadId = (args.zohoLeadId || "").trim()
   if (existingLeadId && (usaReglaCL || ownerRotacion)) {
-    let ownerEmail = usaReglaCL ? await asignarLeadPorReglaCL(existingLeadId) : undefined
+    let ownerEmail = usaReglaCL
+      ? await asignarLeadPorReglaCL(existingLeadId, Boolean((args.trabajadores || "").trim()))
+      : undefined
     if (!ownerEmail && ownerRotacion) {
       const upd = await updateZohoLeadOwner(existingLeadId, ownerRotacion)
       if (!upd.success) {
@@ -239,7 +245,7 @@ export async function registrarSolicitudCallback(
   // — un lead REUSADO por el dedup puede traer gestión humana y no se pisa.
   let ownerFinal = result.ownerEmail
   if (usaReglaCL && result.entraATombola) {
-    const porRegla = await asignarLeadPorReglaCL(result.leadId)
+    const porRegla = await asignarLeadPorReglaCL(result.leadId, Boolean((args.trabajadores || "").trim()))
     if (porRegla) ownerFinal = porRegla
     else if (ownerRotacion) {
       const upd = await updateZohoLeadOwner(result.leadId, ownerRotacion).catch(() => ({ success: false as const }))

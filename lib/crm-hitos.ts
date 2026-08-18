@@ -60,6 +60,25 @@ function dealSoloConFormal(territorio: string | null, hito: Hito): boolean {
   return territorio === "Chile" && HITOS_PRE_FORMALES.has(hito)
 }
 
+/** ESCALERA 18-ago (Lalo): "si hay intención comercial y RUT debemos crear
+ * deal y pasarlo a la tómbola de deals". Es la EXCEPCIÓN al deal-solo-formal,
+ * SOLO sobre el umbral de venta autónoma ("el flujo ≤20 no cambia en nada"):
+ * con RUT y dotación >20 el deal nace en el hito y la tómbola de deals lo
+ * sortea al acto. Enterprise (>300) también entra por aquí — lo resuelven las
+ * entradas de la propia regla "Tómbola Deals 2026 Chile" (Lalo 18-ago).
+ * Sin RUT la escalera de leads sigue igual: calificado → tómbola de leads de
+ * ejecutivos; sin calificar → SDR (dejarLeadPreFormal / reloj de 24h). */
+function escaleraDealConRut(
+  territorio: string | null,
+  lead: { rut?: string; empleados?: number },
+  datos: { rut?: string; empleados?: number },
+): boolean {
+  if (territorio !== "Chile") return false
+  const n = datos.empleados || lead.empleados || 0
+  const rut = String(datos.rut || lead.rut || "").trim()
+  return Boolean(rut) && n > 20
+}
+
 /** Piso de etapa del deal que garantiza cada hito. */
 export const PISO_POR_HITO: Record<Hito, string> = {
   intencion: "1. Trato Creado",
@@ -1216,6 +1235,18 @@ async function dejarLeadPreFormal(
     if (sorteoInmediato && lead.id) {
       const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
       const r = await reasignarLeadCalificacionCL(lead.id, { calificado: true }).catch(() => null)
+      // Doc regla general 5a: "con el ejecutivo ya asignado, Vicky lo PRESENTA
+      // en ese mismo mensaje". La entrega como LEAD no guardaba el ejecutivo
+      // sorteado y la tool despedía sin presentar a nadie (18-ago: Instituto,
+      // INTEXGROUP y Castro se derivaron con un "un ejecutivo te va a llamar"
+      // anónimo). Ahora el sorteado queda disponible para la presentación.
+      if (r?.success && r.ownerId) {
+        await guardarEjecutivoAsignado(clean, {
+          id: r.ownerId,
+          nombre: r.ownerNombre || "",
+          email: r.ownerEmail || "",
+        }).catch(() => {})
+      }
       console.log(
         `[crm-hitos] ${clean}: hito "${hito}" pre-formal con sorteo inmediato — LEAD ${lead.id} → tómbola de vendedores (${r?.ownerEmail || "regla sin asignar"}); deal nace con la formal`,
       )
@@ -1409,11 +1440,12 @@ export async function sincronizarHitoCrm(
         console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${creado.leadId} espera identidad para convertir (deal pendiente)`)
         return
       }
-      if (dealSoloConFormal(territorioDeContacto(clean), hito)) {
+      const escaleraNuevo = escaleraDealConRut(territorioDeContacto(clean), lead, datos)
+      if (dealSoloConFormal(territorioDeContacto(clean), hito) && !escaleraNuevo) {
         await dejarLeadPreFormal(lead, clean, hito, ownerForzadoId, opts.sorteoInmediato)
         return
       }
-      const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato, opts.entregarComoLead)
+      const dealId = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato || escaleraNuevo, opts.entregarComoLead)
       if (!dealId) console.warn(`[crm-hitos] ${clean}: lead ${creado.leadId} quedó sin convertir`)
       else await actualizarNotaTranscripcion(dealId, clean)
       return
@@ -1473,15 +1505,24 @@ export async function sincronizarHitoCrm(
 
     if (!lead.convertido) {
       await subirLeadStatus(lead, hito)
+      const escaleraExistente = escaleraDealConRut(territorioDeContacto(clean), lead, datos)
+      // ESCALERA 18-ago sobre lead de dueño humano: con RUT y N>20 el deal SÍ
+      // nace, pero A NOMBRE DEL MISMO dueño (a un humano real nadie lo
+      // re-sortea — 04-ago). Cubre el retrofit de INTEXGROUP/Castro y el caso
+      // "el cliente dio el RUT después de entregado el lead calificado".
+      let ownerHeredado = ""
       if (!esDeVicky && getEnv("VICKY_CRM_HITOS_CONVERTIR_AJENOS") !== "on") {
-        // Lead de un humano: no se pisa su gestión — solo status y nota.
-        const { agregarNotaLead } = await import("./zoho-leads")
-        await agregarNotaLead(
-          lead.id,
-          `Vicky: hito "${hito}" en WhatsApp`,
-          `Vicky detectó el hito "${hito}" conversando con este lead por WhatsApp. Según el diccionario correspondería un deal en "${piso}"; no se creó automáticamente porque el lead tiene dueño humano.`,
-        ).catch(() => false)
-        return
+        if (!escaleraExistente) {
+          // Lead de un humano sin escalera: no se pisa su gestión — solo status y nota.
+          const { agregarNotaLead } = await import("./zoho-leads")
+          await agregarNotaLead(
+            lead.id,
+            `Vicky: hito "${hito}" en WhatsApp`,
+            `Vicky detectó el hito "${hito}" conversando con este lead por WhatsApp. Según el diccionario correspondería un deal en "${piso}"; no se creó automáticamente porque el lead tiene dueño humano.`,
+          ).catch(() => false)
+          return
+        }
+        ownerHeredado = lead.ownerId
       }
       if (!tieneIdentidadComercial(lead, datos)) {
         console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${lead.id} espera identidad para convertir (deal pendiente)`)
@@ -1497,11 +1538,18 @@ export async function sincronizarHitoCrm(
         await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
-      if (dealSoloConFormal(territorioDeContacto(clean), hito)) {
+      if (dealSoloConFormal(territorioDeContacto(clean), hito) && !escaleraExistente) {
         await dejarLeadPreFormal(lead, clean, hito, ownerForzadoId, opts.sorteoInmediato)
         return
       }
-      const dealNuevo = await convertirConDeal(lead, clean, piso, ownerForzadoId || undefined, opts.sorteoInmediato, opts.entregarComoLead)
+      const dealNuevo = await convertirConDeal(
+        lead,
+        clean,
+        piso,
+        ownerForzadoId || ownerHeredado || undefined,
+        opts.sorteoInmediato || (escaleraExistente && !ownerHeredado),
+        opts.entregarComoLead,
+      )
       if (dealNuevo) await actualizarNotaTranscripcion(dealNuevo, clean)
       return
     }
