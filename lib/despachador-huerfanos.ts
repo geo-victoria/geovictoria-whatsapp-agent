@@ -39,6 +39,10 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // resuelve el candado de turno (lib/cron-lock) dentro de cada cron.
   { nombre: "loop_rapido", path: "/api/vic-loop-cron", cadaMin: 2 },
   { nombre: "ptv_rapido", path: "/api/vic-ptv-cron", cadaMin: 2 },
+  // Auditoría de tómbolas (Lalo 18-ago): compara la regla de asignación
+  // definida vs la que Zoho ejecutó (timeline) y marca casos borde para la
+  // pestaña vista=tombolas del dash. Lee ~25 timelines por tick.
+  { nombre: "tombola_audit", path: "/api/vic-tombola-audit-cron", cadaMin: 120 },
 ]
 
 /**

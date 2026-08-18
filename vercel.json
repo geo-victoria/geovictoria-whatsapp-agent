@@ -74,6 +74,10 @@
     {
       "path": "/api/vic-outbound-cadence-cron",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/vic-tombola-audit-cron",
+      "schedule": "0 */2 * * *"
     }
   ],
   "functions": {

@@ -3237,6 +3237,92 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
  *     transfer_wsp_click, comprobante_wsp
  *   - vic_kv `venta_dash_v3_<quoteId>` → pagoIso = PAGADA
  * Rama liviana e independiente del pipeline pesado del dash. */
+/** AUDITORÍA DE TÓMBOLAS (Lalo 18-ago): lo que la regla definida esperaba vs
+ * lo que Zoho realmente ejecutó, por conversación. Los veredictos los produce
+ * vic-tombola-audit-cron (timeline de Zoho: evento owner_assigned con la
+ * regla exacta) y viven en vic_kv `tba_idx`; esta vista solo pinta. */
+async function renderAuditoriaTombolas(key: string, soloBordes: boolean): Promise<Response> {
+  const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const kv = (await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?select=value&key=eq.tba_idx&limit=1`, {
+    headers: hSb,
+    cache: "no-store",
+  })
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])) as Array<{ value: string }>
+  type Fila = {
+    id: string
+    tipo: string
+    nombre: string
+    fono: string
+    n: number
+    rut: string
+    dueno: string
+    reglas: Array<{ reglaId: string; regla: string; owner: string }>
+    bordes: string[]
+    creado: string
+    at: string
+  }
+  let filas: Fila[] = []
+  try {
+    filas = kv[0]?.value ? (JSON.parse(kv[0].value) as Fila[]) : []
+  } catch { filas = [] }
+  const total = filas.length
+  const conBordes = filas.filter((f) => f.bordes.length)
+  const porBorde = new Map<string, number>()
+  for (const f of conBordes) for (const b of f.bordes) porBorde.set(b.split(":")[0].split(" ")[0], (porBorde.get(b.split(":")[0].split(" ")[0]) || 0) + 1)
+  const visibles = soloBordes ? conBordes : filas
+  const filasHtml = visibles
+    .map((f) => {
+      const reglas = f.reglas.length
+        ? f.reglas.map((r) => `${esc(r.regla || r.reglaId)} → <b>${esc(r.owner)}</b>`).join("<br>")
+        : `<span class="sub">sin regla (herencia / interina / manual)</span>`
+      const bordes = f.bordes.length
+        ? f.bordes.map((b) => `<span style="display:inline-block;background:#fdecea;color:#b3261e;border-radius:6px;padding:1px 8px;margin:1px 2px;font-size:12px">${esc(b)}</span>`).join("")
+        : `<span style="color:#1b7f4d;font-weight:600">✓ ok</span>`
+      return `<tr>
+        <td style="white-space:nowrap">${esc(String(f.creado).slice(0, 16).replace("T", " "))}</td>
+        <td>${f.tipo === "deal" ? "💼 deal" : "👤 lead"}</td>
+        <td><b>${esc(f.nombre || "—")}</b>${f.fono ? `<div class="sub" style="margin:0;font-size:12px">+${esc(f.fono)}</div>` : ""}</td>
+        <td style="text-align:right">${f.n || "—"}</td>
+        <td>${esc(f.rut || "—")}</td>
+        <td>${reglas}</td>
+        <td><b>${esc(f.dueno || "—")}</b></td>
+        <td>${bordes}</td>
+      </tr>`
+    })
+    .join("")
+  const chips = [...porBorde.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([b, n]) => `<span style="background:#fdecea;color:#b3261e;border-radius:8px;padding:3px 10px;margin-right:6px;font-size:13px">${esc(b)}: <b>${n}</b></span>`)
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Auditoría de tómbolas — Vicky</title>
+<style>
+  @font-face{font-family:"BR Sonoma";src:url("/gv/fonts/BRSonoma-SemiBold.otf") format("opentype");font-weight:600;font-display:swap}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f4f6f9;color:#16324f}
+  .wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 8px rgba(13,71,161,.07)}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:#5a7184;text-align:left;padding:10px 12px;border-bottom:2px solid #e6ecf2}
+  td{padding:9px 12px;border-bottom:1px solid #eef2f6;font-size:14px;vertical-align:top}
+  .sub{color:#7a8ca0}
+  h1{font-size:22px}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}">← Volver al dash</a> · <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a></p>
+  <h1>🎰 Auditoría de tómbolas <span class="sub" style="font-weight:400;font-size:14px">(regla definida vs lo que ejecutó Zoho · leads y deals de Vicky, últimos 7 días · refresca cada ~2 h)</span></h1>
+  <p style="margin:8px 0 14px">
+    <b>${total}</b> registros auditados · <b style="color:${conBordes.length ? "#b3261e" : "#1b7f4d"}">${conBordes.length} con casos borde</b>
+    &nbsp;·&nbsp; ${soloBordes ? `<a href="?key=${encodeURIComponent(key)}&vista=tombolas">ver todos</a>` : `<a href="?key=${encodeURIComponent(key)}&vista=tombolas&solo=bordes">ver solo bordes →</a>`}
+    <br>${chips}
+  </p>
+  ${total === 0 ? `<p class="sub">Aún no hay veredictos: el auditor corre cada ~2 horas (vic-tombola-audit-cron). Dispáralo a mano o espera el próximo tick.</p>` : `<div style="overflow-x:auto"><table>
+    <tr><th>Creado</th><th>Tipo</th><th>Registro</th><th>N</th><th>RUT</th><th>Regla que asignó → sorteado</th><th>Dueño actual</th><th>Veredicto</th></tr>
+    ${filasHtml}
+  </table></div>`}
+  <p class="sub" style="font-size:12px;margin-top:14px">Fuente: línea de tiempo de Zoho (evento owner_assigned con la regla exacta) + vic_ptv (vendedor presentado) + datos del registro. Los bordes marcados "definición pendiente" son los casos que aún no tienen regla decidida (ej: intención sin RUT).</p>
+</div></body></html>`
+  return page(html)
+}
+
 async function renderFunnelCotizaciones(key: string): Promise<Response> {
   const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   const dias = 14
@@ -5281,6 +5367,7 @@ export async function GET(req: Request): Promise<Response> {
   // + cotizaciones recientes. Rama temprana: no necesita el pipeline pesado.
   if (searchParams.get("vista") === "editor") return renderEditorCotizaciones(key)
   if (searchParams.get("vista") === "cotfunnel") return renderFunnelCotizaciones(key)
+  if (searchParams.get("vista") === "tombolas") return renderAuditoriaTombolas(key, searchParams.get("solo") === "bordes")
   // Crear cotización (pedido Lalo 07-ago): primero se elige a qué oportunidad
   // de Zoho se asigna (lista de deals activos con búsqueda), y luego el chat
   // de creación emite la formal amarrada a ese deal.
@@ -6336,6 +6423,7 @@ export async function GET(req: Request): Promise<Response> {
       ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a>
+      <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
       ${vista === "inbound" ? `<b>📥 Inbound diario</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "inbound"); return p.toString() })()}">📥 Inbound diario</a>`}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>
