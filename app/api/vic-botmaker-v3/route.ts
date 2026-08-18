@@ -470,6 +470,26 @@ async function processOneTurn(
         ? "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de elegir un marcaje que INCLUYE reloj (o dijo 'mixto'). PROHIBIDO preguntarle cuántos relojes o cuántos puntos necesita: ASUME 1 punto y 1 reloj y decláralo en tu mensaje. Si aún no sabes la comuna de ese punto, tu ÚNICA pregunta de este turno es la comuna; si ya la sabes, cotiza AHORA con cotizar_referencial (1 punto, autoInstalada: true) presentando el doble valor (con y sin reloj)."
         : ""
 
+    // Directiva determinista POST-PAGO (Lalo 18-ago, caso +56978903360): el
+    // pagador mandó el comprobante de COT339 y 11 minutos después Vicky le
+    // habló como prospecto nuevo y le EMITIÓ una segunda cotización duplicada.
+    // Con la marca kv del comprobante fresca (48 h), el contacto está en MODO
+    // POST-VENTA: nada de cotizar ni armar valores salvo pedido explícito
+    // para OTRA empresa. (La marca la deja registrar_comprobante_transferencia
+    // junto con cerrar el loop del remitente.)
+    let directivaPostPago = ""
+    try {
+      const marcaComprobante = await getKvValue(`comprobante_ok_${contact}`)
+      if (marcaComprobante) {
+        const parsed = JSON.parse(marcaComprobante) as { at?: string; numero?: string }
+        const edadMs = parsed.at ? Date.now() - new Date(parsed.at).getTime() : Number.POSITIVE_INFINITY
+        if (edadMs < 48 * 60 * 60 * 1000) {
+          directivaPostPago =
+            `\n\n[DIRECTIVA POST-VENTA — obligatoria] Este contacto ACABA de enviar el comprobante de pago de su cotización (${parsed.numero || "registrada"}). Estás en MODO POST-VENTA: NO cotices, NO armes valores, NO preguntes dotación ni marcaje y NO emitas ninguna cotización nueva — su compra YA está cerrada. Acompáñalo con el onboarding y responde sus dudas. SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa distinta (con sus palabras, no por iniciativa tuya) puedes volver al flujo de venta.`
+        }
+      }
+    } catch { /* sin marca, sin directiva */ }
+
     // Directiva determinista de la ETAPA CONSULTIVA (Eduardo 14-ago, caso
     // Rodrigo): Vicky preguntó por la operación, el cliente respondió, y ella
     // volvió a preguntar lo mismo con otras palabras. Si en el historial YA
@@ -511,7 +531,7 @@ async function processOneTurn(
     const result = await runAgentLoop({
       systemPrompt: onboarding
         ? onboarding.systemPrompt
-        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva,
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago,
       history,
       userMessage: message,
       apiKey,

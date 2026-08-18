@@ -466,6 +466,23 @@ export async function registrarComprobanteTransferencia(
     // Y el DEAL avanza a ganado (Lalo 07-ago): misma política que "Pagada" —
     // si el abono no aparece en el banco, cobranza revierte a mano.
     await avanzarDealAGanado(pointer).catch(() => {})
+    // GUARDRAIL DEL PAGADOR (Lalo 18-ago, caso +56978903360/COT339): cuando el
+    // comprobante llega desde un número DISTINTO al de la cotización, el loop
+    // del REMITENTE seguía vivo (solo se cerraba el del contacto de la
+    // cotización) — 11 minutos después el toque t1 le habló como prospecto
+    // nuevo, el cliente siguió la corriente y Vicky le EMITIÓ una segunda
+    // cotización duplicada. Dos candados, ambos best-effort:
+    // (1) el loop del remitente muere con motivo 'pagado';
+    // (2) marca kv 48h → el webhook inyecta la directiva de MODO POST-VENTA
+    //     (no cotizar salvo pedido explícito para OTRA empresa).
+    try {
+      const { pagoCierraLoop } = await import("../loop-v2")
+      await pagoCierraLoop(contact, "pagado")
+    } catch { /* best-effort */ }
+    await setKvValue(
+      `comprobante_ok_${contact}`,
+      JSON.stringify({ at: new Date().toISOString(), numero: (input.numeroCotizacion || "").trim() || pointer.quoteId }),
+    ).catch(() => {})
   }
 
   // 3. Confirmación al cliente.
