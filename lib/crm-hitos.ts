@@ -769,7 +769,7 @@ async function convertirConDeal(
         ? lead.ownerId
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
-          : ({ Colombia: "3525045000613817111", "México": "3525045000434395001" /* Miguel Guzmán, SDR inbound (Lalo 12-ago) */, "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          : ({ Colombia: "3525045000613817111", "México": (process.env.ZOHO_SDR_INBOUND_MX_ID || "3525045000434395001").trim() /* Miguel Guzmán, SDR inbound (Lalo 12-ago; mismo env de mx/tools) */, "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -1347,23 +1347,22 @@ export async function sincronizarHitoCrm(
         console.log(`[crm-hitos] ${clean}: la tool crea su propio lead — no se duplica (se reconcilia en el próximo barrido)`)
         return
       }
-      // ENTRANTE puro (hito sin tool de derivación): lead nuevo con DUEÑO
-      // INTERINO POR PAÍS (Lalo 30-jul) — la tómbola de Zoho no corre en
-      // creaciones por API y la tómbola definitiva de Victoria aún no existe;
-      // sin esto quedaban a nombre del usuario Vicky, en la bandeja de nadie.
-      // Los callbacks y reuniones NO pasan por acá: el callback entra a la
-      // tómbola de Zoho y la reunión hereda el owner que define Cal.com.
+      // ENTRANTE puro (hito sin tool de derivación): lead nuevo SIN interina
+      // humana hardcodeada (Lalo 18-ago, caso Eddyluz/llamadas fantasma —
+      // supersede el "dueño interino por país" del 30-jul). El lead nacía con
+      // Eddyluz, un workflow de Zoho le programaba la LLAMADA de seguimiento
+      // en ese instante, y 3 segundos después la tómbola sorteaba el lead a
+      // otra persona — la llamada quedaba huérfana a nombre de la interina.
+      // Regla nueva (extiende "Vicky es la interina oficial" del 06-ago a los
+      // LEADS): nace con el usuario VICKY y el dueño real lo pone la
+      // maquinaria de cada país (tómbola CL, round-robin SDR CO/MX, o el reloj
+      // de calificación); el reconciliador del cron cubre las fallas de regla.
+      // Perú es la excepción deliberada: Mónica NO es interina sino la
+      // ejecutiva única real (sin tómbola) — su gestión SÍ se hereda al deal.
       const territorio = territorioDeContacto(clean)
       const esCO = territorio === "Colombia"
-      const OWNER_INTERINO: Record<string, string> = {
-        Chile: "3525045000000211283", // Eddyluz Mujica
-        Colombia: "3525045000203758005", // Alejandro Gordillo (solo fallback)
-        "México": "3525045000434395001", // Miguel Guzmán — SDR inbound MX (Lalo 12-ago; leads sin formal van a él)
-        // Perú: Mónica Mendoza — NO es interina sino la ejecutiva única real
-        // (sin tómbola), por eso NO está en INTERINOS: su gestión SÍ se
-        // hereda al deal.
-        "Perú": "3525045000323383015",
-      }
+      const esMX = territorio === "México"
+      const OWNER_PE_MONICA = "3525045000323383015"
       const { createZohoLead } = await import("./zoho-leads")
       const creado = await createZohoLead({
         contactoWA: clean,
@@ -1372,10 +1371,10 @@ export async function sincronizarHitoCrm(
         empresa: datos.empresa,
         email: datos.email,
         trabajadores: datos.empleados,
-        // CO: el lead SIN cotización lo posee el SDR Inbound (acuerdo equipo CO
-        // 04-ago: Gordillo/Valeria) — se asigna abajo por round-robin, no acá.
-        // Si más tarde emite formal, el deal pasa al ejecutivo (heredaGestion).
-        ownerId: esCO ? undefined : territorio ? OWNER_INTERINO[territorio] : undefined,
+        // CO/MX: el lead SIN cotización lo posee el SDR Inbound — se asigna
+        // abajo por round-robin, no acá. CL: usuario Vicky hasta que la
+        // tómbola/reloj entregue. PE: Mónica directa (dueña real única).
+        ownerId: territorio === "Perú" ? OWNER_PE_MONICA : undefined,
       })
       if (!creado.success) {
         console.warn(`[crm-hitos] ${clean}: no se pudo crear lead (${creado.error})`)
@@ -1384,6 +1383,12 @@ export async function sincronizarHitoCrm(
       if (esCO) {
         const { reasignarLeadSdrInboundCO } = await import("./zoho-leads")
         await reasignarLeadSdrInboundCO(creado.leadId).catch(() => {})
+      } else if (esMX) {
+        // MX a SDR Inbound por round-robin (Lalo 13-ago; antes quedaba
+        // hardcodeado en Miguel Guzmán): roster env VIC_SDR_INBOUND_MX,
+        // fallback Yahel dentro de la función.
+        const { reasignarLeadSdrInboundMX } = await import("./zoho-leads")
+        await reasignarLeadSdrInboundMX(creado.leadId).catch(() => {})
       }
       const lead: LeadEncontrado = {
         id: creado.leadId,
