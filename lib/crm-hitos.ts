@@ -752,6 +752,19 @@ async function convertirConDeal(
     }
     return null
   }
+  // SECTOR PÚBLICO POR RAZÓN SOCIAL (Lalo 18-ago, "vamos con tu propuesta"):
+  // la regla de la tómbola de deals rutea >300 + Sector "8. Municipio"/"9.
+  // Gobierno" a los KAM de gobierno (Arizmendi/Navarrete) — con el "19.
+  // Servicios" fijo de siempre, un municipio de 600 caía al roster enterprise
+  // PRIVADO (caso Corp. Municipal de Castro, corregido a mano por el equipo).
+  // Solo los patrones inequívocos; lo dudoso conserva el default y lo
+  // corrige el humano.
+  const sectorPublico = ((n: string): string | null => {
+    if (/municipal/i.test(n)) return "8. Municipio" // municipalidad, corporación municipal
+    if (/ministerio|gobierno de|gobierno regional|subsecretar|servicio de salud|instituto nacional|seremi|junaeb|junji|fonasa|registro civil/i.test(n))
+      return "9. Gobierno"
+    return null
+  })(lead.company || "")
   const deal = {
     Deal_Name: `${lead.company || "Prospecto WhatsApp"} (Control de Asistencia)`,
     // RUT en el DEAL, no solo en la cuenta (Lalo 10-ago, caso Embajada de
@@ -763,7 +776,7 @@ async function convertirConDeal(
     Pipeline: "Standard (Standard)",
     Territorio: territorio,
     Tombola: "Mantener propietario",
-    Sector: "19. Servicios",
+    Sector: sectorPublico || "19. Servicios",
     // Moneda por territorio. OJO Perú: el picklist de Zoho usa "SOL" (no
     // "PEN") — verificado contra el metadata del campo el 05-ago.
     Monda_del_trato:
