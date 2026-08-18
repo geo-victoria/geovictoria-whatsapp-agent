@@ -93,15 +93,21 @@ async function leerTimeline(modulo: string, id: string, duenoFinal: string): Pro
       const owner = (auto.owner || {}) as { name?: string }
       reglas.push({ reglaId: String(regla.id || ""), regla: String(regla.name || ""), owner: String(owner.name || "") })
     }
-    // Llamadas/tareas creadas por workflow al dueño DEL INSTANTE (caso
-    // Eddyluz 18-ago): si ese dueño no es el final, quedó fantasma.
-    const rec = (e.record || {}) as { module?: { api_name?: string } }
+    // Llamadas creadas por workflow al dueño DEL INSTANTE (caso Eddyluz
+    // 18-ago): si ese dueño no es el final, quedó fantasma — pero SOLO cuenta
+    // si la llamada AÚN EXISTE (la limpieza del 18-ago las borró; el timeline
+    // conserva el evento histórico y sin este chequeo el borde nunca sanaría).
+    const rec = (e.record || {}) as { module?: { api_name?: string }; id?: string }
     const modRec = String(rec.module?.api_name || "")
-    if ((modRec === "Calls" || modRec === "Tasks") && (e.action === "added" || e.action === "task_assigned")) {
+    if (modRec === "Calls" && e.action === "added") {
       const wfOwner = ((auto.workflow_rule as { owner?: { name?: string } } | undefined)?.owner?.name ||
         (auto.assigned_to as { name?: string } | undefined)?.name || "") as string
-      if (wfOwner && duenoFinal && wfOwner !== duenoFinal && !/vicky geovictoria/i.test(wfOwner)) {
-        llamadasFantasma.push(wfOwner)
+      const callId = String(rec.id || "")
+      if (wfOwner && duenoFinal && wfOwner !== duenoFinal && !/vicky geovictoria/i.test(wfOwner) && callId) {
+        const vivo = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/Calls/${callId}?fields=id`)
+          .then((rr) => rr.ok)
+          .catch(() => false)
+        if (vivo) llamadasFantasma.push(wfOwner)
       }
     }
   }
