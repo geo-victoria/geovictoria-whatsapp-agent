@@ -18,6 +18,7 @@ import {
   formatDirectivaSobreUmbral,
   paisConUmbral,
   derivacionDePais,
+  cinturonPrecioSobreUmbral,
 } from "../lib/umbral-autonomia.ts"
 
 beforeEach(() => {
@@ -203,6 +204,44 @@ describe("multi-país (réplica del 08-ago PM, orden de Lalo)", () => {
           `${pais}: la ancla "${objetivo.slice(0, 40)}…" aparece ${veces} vez/veces — replace desincronizado`,
         )
       }
+    }
+  })
+})
+
+describe("cinturón de precios sobre el umbral (Lalo 18-ago, caso David Oviedo)", () => {
+  test("caza montos en pesos y en UF escritos a mano por el modelo", () => {
+    for (const texto of [
+      "Para 30 personas el plan queda en:\n• $58.421/mes (con IVA incluido)",
+      "El plan sale 1,5 UF + IVA al mes",
+      "Serían UF 1,5 mensuales",
+      "El arriendo del reloj es 0,35 UF",
+    ]) {
+      assert.equal(cinturonPrecioSobreUmbral(texto).habiaPrecio, true, `no cazó: ${texto}`)
+    }
+  })
+
+  test("NO caza texto sin precios (teléfonos, horas, códigos, dotaciones)", () => {
+    for (const texto of [
+      "Perfecto, David! Ya tengo todo.",
+      "Son 30 personas en 2 turnos, te llamo a las 18:30",
+      "Tu cotización es la COT575 y el RUT 77.842.296-4",
+      "te va a contactar al +56 9 4401 3873",
+      "La UF es la unidad en que facturamos", // mención sin monto
+    ]) {
+      assert.equal(cinturonPrecioSobreUmbral(texto).habiaPrecio, false, `falso positivo: ${texto}`)
+    }
+  })
+
+  test("el reemplazo no promete precio ni nombra a nadie", () => {
+    const r = cinturonPrecioSobreUmbral("$1").reemplazo
+    assert.ok(!/\$\s*\d|\d\s*UF/.test(r))
+    assert.match(r, /ejecutivo/)
+  })
+
+  test("los cuatro webhooks pasan la respuesta por el cinturón", () => {
+    for (const pais of ["v3", "co", "mx", "pe"]) {
+      const src = readFileSync(new URL(`../app/api/vic-botmaker-${pais}/route.ts`, import.meta.url), "utf8")
+      assert.match(src, /cinturonPrecioSobreUmbral/, `falta el cinturón en vic-botmaker-${pais}`)
     }
   })
 })

@@ -37,7 +37,7 @@ import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_PE } from "@/lib/paises/pe"
 import { getSystemPromptPE } from "@/lib/paises/pe/prompt"
-import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
+import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
 import { TOOL_SCHEMAS_PE, buildDispatchPE } from "@/lib/paises/pe/tools"
 import {
   fetchHistoryV3,
@@ -347,6 +347,16 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
     // else: sin cadencia automática que armar en PE (ver comentario de arriba).
   } catch (err) {
     console.error(`[vic-pe][followup] error actualizando seguimiento contact=${contact}:`, err)
+  }
+  // CINTURÓN DE PRECIOS SOBRE EL UMBRAL (Lalo 18-ago, paridad CL — caso
+  // David Oviedo): con dotación declarada sobre el umbral, ningún mensaje
+  // con precio sale al cliente aunque el modelo lo escriba a mano.
+  if (dotacionDetectada && reply) {
+    const cinturon = cinturonPrecioSobreUmbral(reply)
+    if (cinturon.habiaPrecio) {
+      console.warn(`[umbral-cinturon] precio en texto con dotación ${dotacionDetectada} sobre el umbral para ${contact} — respuesta reemplazada`)
+      reply = cinturon.reemplazo
+    }
   }
   // Burbujas por punto aparte (Rodrigo 09-ago, paridad CL): cada párrafo
   // es un mensaje; los bloques estructurados no se fragmentan.

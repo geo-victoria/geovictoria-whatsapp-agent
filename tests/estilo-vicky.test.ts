@@ -197,29 +197,35 @@ describe("punto fijo con supervisor lo cubre la app (Eduardo 17-ago)", () => {
   })
 })
 
-describe("el preform no muestra el valor de la UF del día (Eduardo 17-ago)", () => {
-  test("la línea de equivalencia en pesos va sin el paréntesis de la UF", () => {
-    // Al prospecto le importa el peso final; el tipo de cambio abre una
-    // conversación que no aporta a la venta.
+describe("UF primero, pesos entre paréntesis (Eduardo 18-ago — supersede el 'Equivalente' del 17-ago)", () => {
+  test("toda línea de precio va 'X UF + IVA (aprox. $Y)' y sin el valor de la UF del día", () => {
+    // "Que aparezca siempre la UF y luego el precio entre paréntesis" —
+    // el cobro real es en UF y el peso es aproximación; mostrarlo al revés
+    // generaba reclamos cuando el cargo no calzaba con el peso prometido.
+    // El VALOR de la UF del día sigue sin mostrarse (regla 17-ago intacta).
     const t = readFileSync(join(RAIZ, "lib/tools/cotizar-referencial.ts"), "utf8")
-    assert.match(t, /Equivalente: \$\$\{fmtNumCL\(totalRecurrenteCLP, 0\)\} CLP\/mes`/)
+    assert.match(t, /Total mensual con IVA: \$\{fmtUF\(totalRecurrenteUF\)\} UF \(aprox\. \$\$\{fmtNumCL\(totalRecurrenteCLP, 0\)\}\)/)
+    assert.match(t, /Total único con IVA: \$\{fmtUF\(totalUnicoUF\)\} UF \(aprox\./)
+    assert.match(t, /pago inicial de \$\{fmtUF\(totalUnicoUF \+ totalRecurrenteUF\)\} UF \(aprox\./)
+    assert.ok(!/Equivalente: \$\$\{fmtNumCL/.test(t), "quedó la línea 'Equivalente' CLP-primero del 17-ago")
     assert.ok(!/UF del día: \$\$\{fmtNumCL\(ufActual/.test(t), "quedó el valor de la UF en el mensaje al prospecto")
   })
 })
 
-describe("doble valor compacto (Eduardo 17-ago — supersede los títulos del 14-ago)", () => {
-  test("las opciones usan el formato del pantallazo: recomendación + mensual + app", () => {
-    // El formato viejo embebía el preform entero como Opción 1 y el mensaje se
-    // hacía eterno. El nuevo es compacto: "1 - Para N personas te recomiendo
-    // Reloj en arriendo + App" con el mensual IVA incluido, y la alternativa
-    // solo-app como opción 2. El reloj sigue nombrando a la App en el titular
-    // (la regla del 14-ago se conserva: la app nunca queda fuera).
+describe("doble valor compacto (Eduardo 17-ago; precio en UF desde 18-ago)", () => {
+  test("las opciones usan el formato nuevo: recomendación + UF con aprox + cobro en UF + autoinstalable", () => {
+    // El formato del 17-ago mostraba "$X al mes, IVA incluido"; desde el
+    // 18-ago (propuesta literal de Eduardo) el mensual va en UF + IVA con el
+    // aprox. en pesos, una línea fija explica el cobro en UF, y la
+    // instalación se ofrece como "El reloj es autoinstalable…".
     const t = readFileSync(join(RAIZ, "lib/tools/cotizar-referencial.ts"), "utf8")
     assert.match(t, /te recomiendo \$\{modalidadLabel\} \+ App/)
-    assert.match(t, /al mes, IVA incluido/)
+    assert.match(t, /UF \+ IVA al mes \(aprox\. \$\$\{fmtNumCL\(totalRecurrenteCLP, 0\)\}\)/)
+    assert.match(t, /El cobro se realiza en UF, por lo que el valor en pesos puede variar mes a mes/)
     assert.match(t, /marcar desde el reloj o desde el celular/)
+    assert.match(t, /El reloj es autoinstalable\. Si prefieres que nosotros lo instalemos/)
     assert.match(t, /2\.- Una alternativa más económica sería si marcan solo mediante nuestra app/)
     assert.match(t, /Qué opción prefieres\? Con la que elijas te genero la cotización formal de inmediato/)
-    assert.ok(!/Opción 1 — Reloj control físico y App/.test(t), "quedó el título viejo del 14-ago")
+    assert.ok(!/al mes, IVA incluido/.test(t), "quedó el formato CLP-primero del 17-ago")
   })
 })

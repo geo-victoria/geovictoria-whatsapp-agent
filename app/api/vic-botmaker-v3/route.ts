@@ -77,7 +77,7 @@ import {
   confirmMeetingAttendance,
 } from "@/lib/supabase-persistence-v3"
 import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
-import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral } from "@/lib/umbral-autonomia"
+import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral } from "@/lib/umbral-autonomia"
 
 export const dynamic = "force-dynamic"
 // 300s, igual que los webhooks CO y MX. Estaba en 60 desde el 22-jun, cuando
@@ -1302,6 +1302,20 @@ async function processOneTurn(
         if (r.quitados > 0) {
           console.warn(`[una-puerta] entrega duplicada recortada para ${contact} (${r.quitados})`)
           replyFinal = r.limpio
+        }
+      }
+      // CINTURÓN DE PRECIOS SOBRE EL UMBRAL (Lalo 18-ago, caso David Oviedo /
+      // LC Ingeniería): con dotación declarada sobre el umbral el modelo llegó
+      // a escribir un precio a mano ("$58.421/mes", 1,5 UF del tramo 21-50
+      // viejo) pese al bloque del prompt y la directiva — tercera capa
+      // determinista: ningún mensaje con precio sale de acá.
+      if (dotacionDetectada && replyFinal) {
+        const cinturon = cinturonPrecioSobreUmbral(replyFinal)
+        if (cinturon.habiaPrecio) {
+          console.warn(
+            `[umbral-cinturon] precio en texto con dotación ${dotacionDetectada} sobre el umbral para ${contact} — respuesta reemplazada`,
+          )
+          replyFinal = cinturon.reemplazo
         }
       }
       const partes = partirEnBurbujas(replyFinal)

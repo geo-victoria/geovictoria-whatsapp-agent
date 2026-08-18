@@ -551,11 +551,10 @@ export async function cotizarReferencial(args: {
     if (itemsRecurrentes.length >= 2) {
       partes.push(`Subtotal sin IVA: ${fmtUF(subtotalRecurrenteUF)} UF`)
     }
-    partes.push(`Total mensual con IVA: ${fmtUF(totalRecurrenteUF)} UF`)
-    // Sin el valor de la UF del día (Eduardo 17-ago): al prospecto le importa el
-    // peso final, no la mecánica de conversión — mostrarla agrega ruido y abre
-    // una conversación sobre el tipo de cambio que no aporta a la venta.
-    partes.push(`Equivalente: $${fmtNumCL(totalRecurrenteCLP, 0)} CLP/mes`)
+    // UF PRIMERO, pesos entre paréntesis (Eduardo 18-ago: "siempre la UF y
+    // luego el precio entre paréntesis"). Sin el valor de la UF del día
+    // (Eduardo 17-ago): el tipo de cambio agrega ruido, el aprox. basta.
+    partes.push(`Total mensual con IVA: ${fmtUF(totalRecurrenteUF)} UF (aprox. $${fmtNumCL(totalRecurrenteCLP, 0)})`)
     if (esMicroPlan) {
       partes.push("")
       partes.push(
@@ -573,8 +572,7 @@ export async function cotizarReferencial(args: {
     if (itemsUnicos.length >= 2) {
       partes.push(`Subtotal sin IVA: ${fmtUF(subtotalUnicoUF)} UF`)
     }
-    partes.push(`Total único con IVA: ${fmtUF(totalUnicoUF)} UF`)
-    partes.push(`Equivalente único: $${fmtNumCL(totalUnicoCLP, 0)} CLP`)
+    partes.push(`Total único con IVA: ${fmtUF(totalUnicoUF)} UF (aprox. $${fmtNumCL(totalUnicoCLP, 0)})`)
   }
 
   // Aclaración de base: dejar SIN AMBIGÜEDAD (1) qué se paga al aceptar —el
@@ -588,10 +586,10 @@ export async function cotizarReferencial(args: {
     partes.push("[---]")
     partes.push("")
     partes.push(
-      `Al aceptar pagas el pago inicial de $${fmtNumCL(
+      `Al aceptar pagas el pago inicial de ${fmtUF(totalUnicoUF + totalRecurrenteUF)} UF (aprox. $${fmtNumCL(
         totalUnicoCLP + totalRecurrenteCLP,
         0,
-      )} CLP: incluye el pago único (equipos e instalación) + el primer mes del plan por adelantado.`,
+      )}): incluye el pago único (equipos e instalación) + el primer mes del plan por adelantado.`,
     )
 
     // CERRAR > TICKET (dirección comercial 16-jul): cuando la instalación pesa
@@ -605,6 +603,7 @@ export async function cotizarReferencial(args: {
     if (instalacionUF >= 3) {
       const ahorroConIvaUF = instalacionUF * (1 + IVA_RATE)
       const ahorroCLP = Math.round(ahorroConIvaUF * ufActual)
+      const inicialLivianoUF = totalUnicoUF + totalRecurrenteUF - ahorroConIvaUF
       const inicialLivianoCLP = totalUnicoCLP + totalRecurrenteCLP - ahorroCLP
       // Burbuja aparte (Rodrigo 09-ago, "este mensaje es demasiado largo"):
       // el marcador [---] corta el WhatsApp en dos — el resumen con el pago
@@ -617,7 +616,7 @@ export async function cotizarReferencial(args: {
         `💡 Para partir más liviano tienes dos alternativas:`,
       )
       partes.push(
-        `- Auto-instalación: ustedes montan los relojes (los guiamos paso a paso) y el pago inicial baja a $${fmtNumCL(inicialLivianoCLP, 0)} CLP — se ahorran $${fmtNumCL(ahorroCLP, 0)}.`,
+        `- Auto-instalación: ustedes montan los relojes (los guiamos paso a paso) y el pago inicial baja a ${fmtUF(inicialLivianoUF)} UF (aprox. $${fmtNumCL(inicialLivianoCLP, 0)}) — se ahorran ${fmtUF(ahorroConIvaUF)} UF (aprox. $${fmtNumCL(ahorroCLP, 0)}).`,
       )
       partes.push(
         `- Marcaje sin reloj: con la app incluida en el plan (biometría facial y georeferenciación; cada persona marca desde su propio celular o desde el celular del supervisor), sin equipos que comprar ni instalar. Pídeme esa opción y te la muestro.`,
@@ -679,7 +678,7 @@ export async function cotizarReferencial(args: {
     if (instalacionTecnicoUF > 0) {
       const instCLP = Math.round(instalacionTecnicoUF * (1 + IVA_RATE) * ufActual)
       partes.push(
-        `📌 La instalación del reloj viene considerada por tu cuenta: es simple y te guiamos paso a paso. Si prefieres que la haga nuestro equipo técnico, tiene un cobro único de ${fmtUF(instalacionTecnicoUF)} UF + IVA ($${fmtNumCL(instCLP, 0)} CLP) — me dices y te lo agrego.`,
+        `📌 La instalación del reloj viene considerada por tu cuenta: es simple y te guiamos paso a paso. Si prefieres que la haga nuestro equipo técnico, tiene un cobro único de ${fmtUF(instalacionTecnicoUF)} UF + IVA (aprox. $${fmtNumCL(instCLP, 0)}) — me dices y te lo agrego.`,
       )
     } else {
       partes.push(
@@ -713,9 +712,12 @@ export async function cotizarReferencial(args: {
         // La frase de instalación se adapta al caso real: auto-instalado con
         // técnico opcional (el común), instalación ya cotizada, o equipo
         // plug-and-play (huellero USB) donde no existe instalación técnica.
+        // FRASE DE INSTALACIÓN (formato Eduardo 18-ago): oración propia
+        // "El reloj es autoinstalable. Si prefieres que nosotros lo
+        // instalemos, tiene un costo único adicional de X UF + IVA."
         let fraseInstalacion = ""
         if (instalacionCotizada) {
-          fraseInstalacion = " En este caso la instalación por nuestro equipo técnico ya viene incluida."
+          fraseInstalacion = "En este caso la instalación por nuestro equipo técnico ya viene incluida."
         } else if (!todoPlugAndPlay) {
           // CON monto (Eduardo 17-ago, segunda vuelta): la comuna ya es
           // conocida en este punto — la tool exige puntosInstalacion con
@@ -728,26 +730,35 @@ export async function cotizarReferencial(args: {
             const partesInst = instalacionPorPunto.map(
               (pp, i) => `${fmtUF(pp.uf)} UF + IVA ${i === 0 ? "por la" : "la"} de ${pp.ubicacion}`,
             )
-            fraseInstalacion = ` En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional de ${partesInst.join(" y ")}).`
+            fraseInstalacion = `Los relojes son autoinstalables. Si prefieres que nosotros los instalemos, tiene un costo único adicional de ${partesInst.join(" y ")}.`
           } else {
             fraseInstalacion =
               instalacionTecnicoUF > 0
-                ? ` En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional de ${fmtUF(instalacionTecnicoUF)} UF + IVA).`
-                : " En este caso el reloj es auto-instalado (lo podríamos instalar nosotros por un cobro adicional según la comuna)."
+                ? `El reloj es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional de ${fmtUF(instalacionTecnicoUF)} UF + IVA.`
+                : "El reloj es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional según la comuna."
           }
         }
 
+        // PRECIO EN UF PRIMERO (Eduardo 18-ago, reemplaza el "$X al mes, IVA
+        // incluido" del 17-ago): el mensual va en UF + IVA con el equivalente
+        // en pesos como aproximación, y una línea fija explica que el cobro
+        // es en UF (el valor en pesos varía mes a mes). El valor de la UF del
+        // día sigue SIN mostrarse (regla 17-ago intacta).
         const lineasOpcion1 = [
           `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
-          `💰 $${fmtNumCL(totalRecurrenteCLP, 0)} al mes, IVA incluido.`,
-          `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.${fraseInstalacion}`,
+          `💰 ${fmtUF(subtotalRecurrenteUF)} UF + IVA al mes (aprox. $${fmtNumCL(totalRecurrenteCLP, 0)}).`,
+          ``,
+          `El cobro se realiza en UF, por lo que el valor en pesos puede variar mes a mes.`,
+          ``,
+          `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.`,
         ]
+        if (fraseInstalacion) lineasOpcion1.push(fraseInstalacion)
         // El pago único inicial (envío / equipo en venta) NO estaba en el
         // pantallazo, pero ocultarlo dejaría la única cifra del preform
         // incompleta y la formal lo cobraría "por sorpresa". Una línea corta.
         if (totalUnicoCLP > 0) {
           lineasOpcion1.push(
-            `Se suma un pago inicial único de $${fmtNumCL(totalUnicoCLP, 0)} (IVA incluido).`,
+            `Se suma un pago inicial único de ${fmtUF(subtotalUnicoUF)} UF + IVA (aprox. $${fmtNumCL(totalUnicoCLP, 0)}).`,
           )
         }
 
@@ -757,7 +768,7 @@ export async function cotizarReferencial(args: {
           "[---]",
           "",
           "2.- Una alternativa más económica sería si marcan solo mediante nuestra app:",
-          `💰 $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)} al mes, IVA incluido.`,
+          `💰 ${fmtUF(alternativa.subtotalRecurrenteUF)} UF + IVA al mes (aprox. $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)}).`,
           "",
           "[---]",
           "",

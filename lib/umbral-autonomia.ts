@@ -215,3 +215,32 @@ export function formatUmbralParaPrompt(
     `- El flujo de MÁS de 50 trabajadores no cambia (Modo Lead de siempre).\n\n`
   )
 }
+
+/**
+ * CINTURÓN DE SALIDA (Lalo 18-ago, caso David Oviedo / LC Ingeniería, 30
+ * trabajadores): con la dotación declarada SOBRE el umbral, el modelo escribió
+ * un precio A MANO en el texto ("$58.421/mes" = 1,5 UF del tramo 21-50 viejo,
+ * inventado y subcobrado) — las dos capas existentes (bloque del prompt +
+ * guarda de tools) no vigilan el TEXTO de salida. Esta es la tercera capa,
+ * determinista como los guardianes: si la conversación está sobre el umbral,
+ * NINGÚN mensaje saliente puede contener un precio. En ese estado Vicky no
+ * tiene ningún precio legítimo que dar, así que no existen falsos positivos.
+ *
+ * Detección dura: montos en pesos ($ seguido de dígitos) y montos en UF
+ * (número pegado a "UF" por cualquiera de los dos lados). Sin heurísticas
+ * blandas — un teléfono, una hora o "COT575" jamás calzan.
+ */
+const PATRONES_PRECIO = [
+  /\$\s*\d/, // $58.421, $ 40.000
+  /\d[\d.,]*\s*UF\b/i, // 1,5 UF · 0,35 UF
+  /\bUF\s*[\d.,]*\d/i, // UF 1,5
+]
+
+export function cinturonPrecioSobreUmbral(reply: string): { habiaPrecio: boolean; reemplazo: string } {
+  const habiaPrecio = PATRONES_PRECIO.some((re) => re.test(String(reply || "")))
+  return {
+    habiaPrecio,
+    reemplazo:
+      "El valor exacto para tu dotación te lo entrega directamente nuestro ejecutivo en la propuesta, con los descuentos por volumen que apliquen a tu operación. Aquí sigo yo para todo lo demás — qué más te gustaría saber?",
+  }
+}
