@@ -2934,7 +2934,20 @@
       var qs = new URLSearchParams(location.search);
       var DEAL = (qs.get('deal') || '').replace(/\D/g, '');
       var KEY = qs.get('key') || '';
-      if (!DEAL || !KEY) return;
+      if (!DEAL || !KEY) {
+        // SIN oportunidad asociada la página es la calculadora original de
+        // Nacho y el botón genera su propuesta clásica (jsPDF, sin aceptación
+        // online). Avisarlo evita el "me descargó una cotización antigua"
+        // (18-ago, caso Anderson): el camino con emisión es entrar desde el
+        // dash con el deal elegido.
+        document.addEventListener('DOMContentLoaded', function () {
+          var aviso = document.createElement('div');
+          aviso.style.cssText = 'position:sticky;top:0;z-index:9999;background:#8a5a00;color:#fff;padding:9px 16px;font:13px -apple-system,BlinkMacSystemFont,sans-serif';
+          aviso.textContent = 'Calculadora SIN oportunidad asociada: "Descargar Propuesta" genera la propuesta clásica (sin aceptación online ni registro en Zoho). Para emitir amarrada a un deal y con link de pago, entra desde el dash → ➕ Crear cotización → elegir la oportunidad.';
+          document.body.prepend(aviso);
+        });
+        return;
+      }
       var API = '/api/vic-funnel?key=' + encodeURIComponent(KEY);
       var INFO = {};
 
@@ -2994,12 +3007,17 @@
 
         function setStatus(html) { status.innerHTML = html; }
 
-        // Captura ANTES que el handler original de Nacho: con deal+key el
-        // botón emite y descarga el PDF de la casa; el jsPDF original no corre.
-        // Si el deal YA tiene cotizaciones, primero se pregunta: ¿crear una
-        // NUEVA o ACTUALIZAR una existente (v2/vN)? (Lalo 11-ago)
-        btn.addEventListener('click', function (e) {
+        // Captura EN DOCUMENT, fase de captura (18-ago, caso Anderson): el
+        // listener de Nacho se registra al parsear (antes que este script) y
+        // en el elemento target los listeners corren en orden de registro —
+        // capturar en el propio botón NO alcanzaba a frenarlo y el click
+        // descargaba el jsPDF viejo de 4 páginas ADEMÁS de emitir. La fase de
+        // captura en document corre antes que cualquier listener del botón:
+        // stopPropagation ahí sí mata el handler original.
+        document.addEventListener('click', function (e) {
+          if (e.target !== btn && !btn.contains(e.target)) return;
           e.preventDefault();
+          e.stopPropagation();
           e.stopImmediatePropagation();
           var data;
           try { data = gatherProposalData(); } catch (err) { setStatus('⚠️ No pude leer la propuesta: ' + (err && err.message)); return; }
@@ -3114,9 +3132,14 @@
                       (!d.actualizada || (p.pdfUrl !== pdfAnterior && Number(p.version || 0) >= versionEsperada));
                     if (listo) {
                       btn.disabled = false; btn.textContent = label;
-                      window.open(p.pdfUrl, '_blank');
-                      setStatus('✅ <b>' + (p.numero || 'Cotización') + '</b>' + (d.actualizada ? ' actualizada a v' + versionEsperada : ' emitida') +
-                        ' y PDF descargado. ' + linkAcc(accUrl) +
+                      // El window.open corre en un callback de polling (sin
+                      // gesto de usuario) y el bloqueador de pop-ups suele
+                      // matarlo (18-ago, caso Anderson): el link visible es
+                      // el camino garantizado.
+                      var w = window.open(p.pdfUrl, '_blank');
+                      setStatus('✅ <b>' + (p.numero || 'Cotización') + '</b>' + (d.actualizada ? ' actualizada a v' + versionEsperada : ' emitida') + '.' +
+                        (w ? ' PDF descargado. ' : ' <a href="' + p.pdfUrl + '" target="_blank" rel="noopener" style="font-weight:700">⬇️ Abrir el PDF oficial</a> (el navegador bloqueó la descarga automática). ') +
+                        linkAcc(accUrl) +
                         '<br><span style="color:#789">Nada fue enviado al cliente: el PDF y el link los entregas tú.</span>');
                     } else {
                       setTimeout(poll, 4000);
