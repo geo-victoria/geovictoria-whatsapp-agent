@@ -670,9 +670,15 @@ async function enriquecerLeadsDeChat(): Promise<number> {
     // combinaciones se aniden de a dos. Sin eso responde SYNTAX_ERROR — y
     // como el error se traga con `return 0`, este conciliador llevaba desde
     // el 13-ago sin ejecutarse una sola vez (0 leads tocados en 38 casos).
+    // Hay DOS formas de placeholder según quién creó el lead: la del ptv-cron
+    // (nombre "Prospecto WhatsApp" / empresa "Por identificar…") y la de
+    // createZohoLead (Last_Name "Prospecto" / Company "Prospecto WhatsApp").
+    // La segunda no calzaba con este where y esos leads quedaban invisibles
+    // para siempre (caso Daffne/Claudia Martínez, 18-ago).
     const q =
       `select id, First_Name, Last_Name, Company, Phone, Email, RUT_Empresa from Leads ` +
-      `where ((((First_Name = 'Prospecto') or (Last_Name = 'Prospecto WhatsApp')) ` +
+      `where (((((First_Name = 'Prospecto') or (Last_Name = 'Prospecto WhatsApp')) ` +
+      `or ((Last_Name = 'Prospecto') or (Company = 'Prospecto WhatsApp'))) ` +
       `or (Company like 'Por identificar%')) and (Created_Time >= '${desde}T00:00:00-04:00')) ` +
       `order by Created_Time desc limit 25`
     const res = await fetch(`${api}/crm/v3/coql`, {

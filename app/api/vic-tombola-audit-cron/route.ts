@@ -104,8 +104,10 @@ async function leerTimeline(modulo: string, id: string, duenoFinal: string): Pro
         (auto.assigned_to as { name?: string } | undefined)?.name || "") as string
       const callId = String(rec.id || "")
       if (wfOwner && duenoFinal && wfOwner !== duenoFinal && !/vicky geovictoria/i.test(wfOwner) && callId) {
+        // Zoho responde 204 (sin cuerpo) cuando el registro fue borrado — un
+        // rr.ok a secas lo daba por vivo y el borde jamás sanaba.
         const vivo = await fetchZoho(`${ZOHO_API_DOMAIN}/crm/v3/Calls/${callId}?fields=id`)
-          .then((rr) => rr.ok)
+          .then((rr) => rr.status === 200)
           .catch(() => false)
         if (vivo) llamadasFantasma.push(wfOwner)
       }

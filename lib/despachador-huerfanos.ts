@@ -39,6 +39,11 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // resuelve el candado de turno (lib/cron-lock) dentro de cada cron.
   { nombre: "loop_rapido", path: "/api/vic-loop-cron", cadaMin: 2 },
   { nombre: "ptv_rapido", path: "/api/vic-ptv-cron", cadaMin: 2 },
+  // Reconciliación CRM por hitos (declarado en vercel.json "15 * * * *" desde
+  // el 30-jul pero JAMÁS corrió — scheduler de Vercel muerto y nadie lo agregó
+  // acá; detectado 18-ago: al dispararlo a mano sincronizó un preform
+  // pendiente). Ventana interna de 2h → la cadencia horaria le sobra.
+  { nombre: "crm_hitos", path: "/api/vic-crm-hitos-cron", cadaMin: 60 },
   // Auditoría de tómbolas (Lalo 18-ago): compara la regla de asignación
   // definida vs la que Zoho ejecutó (timeline) y marca casos borde para la
   // pestaña vista=tombolas del dash. Lee ~25 timelines por tick.
