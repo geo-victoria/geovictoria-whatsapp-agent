@@ -24,6 +24,9 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   "gmelendez@geovictoria.com": "6616718", // CL — Grey Meléndez
   "alopez@geovictoria.com": "6616741", // CL — Ana Paula López
   "tmartinezq@geovictoria.com": "6616775", // CL — Tamara Martínez
+  // Creado por Lalo el 18-ago; verificado el mismo día: 128 slots en la
+  // ventana de prueba (agenda propia funcionando).
+  "dgalvez@geovictoria.com": "6723047", // CL — Daniela Gálvez
   // ── Resto de países ──
   "agordillo@geovictoria.com": "6484393", // CO — Alejandro Gordillo
   "ysegura@geovictoria.com": "6484399", // MX — Yahel Segura
@@ -33,8 +36,8 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // round-robin, que sí ofrece agenda. Medición 10-ago en la MISMA ventana
   // de 14 días: Paola 226 · Grey 203 · Eddyluz 193 · Tamara 175 · Ana Paula
   // 127 · Anderson 0.
-  // SIN evento propio todavía (caen al round-robin): Daniela Gálvez,
-  // Aracelli Sepúlveda, Aleydis Araque, Eddy Galindo (CO), Mónica Mendoza (PE).
+  // SIN evento propio todavía (caen al round-robin): Aracelli Sepúlveda,
+  // Aleydis Araque, Eddy Galindo (CO), Mónica Mendoza (PE).
 }
 
 /**
