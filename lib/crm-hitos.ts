@@ -769,7 +769,7 @@ async function convertirConDeal(
         ? lead.ownerId
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
-          : ({ Colombia: "3525045000613817111", "México": (process.env.ZOHO_SDR_INBOUND_MX_ID || "3525045000434395001").trim() /* Miguel Guzmán, SDR inbound (Lalo 12-ago; mismo env de mx/tools) */, "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          : ({ Colombia: "3525045000613817111", "México": "3525045000434395001" /* Miguel Guzmán, SDR inbound (Lalo 12-ago) */, "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -1361,8 +1361,15 @@ export async function sincronizarHitoCrm(
       // ejecutiva única real (sin tómbola) — su gestión SÍ se hereda al deal.
       const territorio = territorioDeContacto(clean)
       const esCO = territorio === "Colombia"
-      const esMX = territorio === "México"
-      const OWNER_PE_MONICA = "3525045000323383015"
+      // SOLO CHILE cambia (Lalo 18-ago: "en los países no toques nada"):
+      // CL sin interina — nace con el usuario Vicky. CO/MX/PE conservan sus
+      // dueños de siempre.
+      const OWNER_INTERINO: Record<string, string> = {
+        "México": "3525045000434395001", // Miguel Guzmán — SDR inbound MX (Lalo 12-ago; leads sin formal van a él)
+        // Perú: Mónica Mendoza — NO es interina sino la ejecutiva única real
+        // (sin tómbola): su gestión SÍ se hereda al deal.
+        "Perú": "3525045000323383015",
+      }
       const { createZohoLead } = await import("./zoho-leads")
       const creado = await createZohoLead({
         contactoWA: clean,
@@ -1371,10 +1378,9 @@ export async function sincronizarHitoCrm(
         empresa: datos.empresa,
         email: datos.email,
         trabajadores: datos.empleados,
-        // CO/MX: el lead SIN cotización lo posee el SDR Inbound — se asigna
-        // abajo por round-robin, no acá. CL: usuario Vicky hasta que la
-        // tómbola/reloj entregue. PE: Mónica directa (dueña real única).
-        ownerId: territorio === "Perú" ? OWNER_PE_MONICA : undefined,
+        // CO: round-robin SDR abajo, no acá. CHILE: usuario Vicky (sin
+        // interina) hasta que la tómbola/reloj entregue al dueño real.
+        ownerId: esCO ? undefined : territorio ? OWNER_INTERINO[territorio] : undefined,
       })
       if (!creado.success) {
         console.warn(`[crm-hitos] ${clean}: no se pudo crear lead (${creado.error})`)
@@ -1383,12 +1389,6 @@ export async function sincronizarHitoCrm(
       if (esCO) {
         const { reasignarLeadSdrInboundCO } = await import("./zoho-leads")
         await reasignarLeadSdrInboundCO(creado.leadId).catch(() => {})
-      } else if (esMX) {
-        // MX a SDR Inbound por round-robin (Lalo 13-ago; antes quedaba
-        // hardcodeado en Miguel Guzmán): roster env VIC_SDR_INBOUND_MX,
-        // fallback Yahel dentro de la función.
-        const { reasignarLeadSdrInboundMX } = await import("./zoho-leads")
-        await reasignarLeadSdrInboundMX(creado.leadId).catch(() => {})
       }
       const lead: LeadEncontrado = {
         id: creado.leadId,
