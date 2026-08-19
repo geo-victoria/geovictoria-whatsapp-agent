@@ -900,6 +900,8 @@ const CURATED_FINDINGS: Array<{ fecha: string; titulo: string; detalle: string }
 type Row = {
   conversation_id: string
   contact: string
+  bolsa: string | null
+  bolsa_sub: string | null
   grupo: string
   sub_bucket: string | null
   cotizacion_outcome: string | null
@@ -919,7 +921,7 @@ async function fetchAnalysis(): Promise<Row[]> {
   const filas: Row[] = []
   for (let offset = 0; offset < 20000; offset += 1000) {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=conversation_id,contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,accionable,hallazgos,analyzed_at&order=analyzed_at.asc&limit=1000&offset=${offset}`,
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=conversation_id,contact,bolsa,bolsa_sub,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,accionable,hallazgos,analyzed_at&order=analyzed_at.asc&limit=1000&offset=${offset}`,
       {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
         cache: "no-store",
@@ -2458,55 +2460,49 @@ async function fetchPrimeraConversacion(): Promise<Map<string, string>> {
   return primera
 }
 
-const ETAPAS_INBOUND = ["llegaron", "cobranza", "soporte", "comercial", "precio", "formal", "aceptada", "pagada"] as const
+const ETAPAS_INBOUND = ["entrantes", "ic", "ce", "ce_sop", "ce_pos", "ce_cob", "nocal", "noid", "precio", "formal", "aceptada", "pagada"] as const
 type EtapaInbound = (typeof ETAPAS_INBOUND)[number]
 const ETIQUETA_ETAPA_INBOUND: Record<EtapaInbound, string> = {
-  llegaron: "Llegó (sin intención aún)",
-  cobranza: "Cliente/Cobranza",
-  soporte: "Cliente/Soporte",
-  comercial: "Intención comercial",
+  entrantes: "Entrante",
+  ic: "Intención comercial",
+  ce: "Cliente existente",
+  ce_sop: "Cliente/Soporte",
+  ce_pos: "Cliente/PostVenta",
+  ce_cob: "Cliente/Cobranza",
+  nocal: "No califica",
+  noid: "No identificado",
   precio: "Vio precio",
   formal: "Formal enviada",
   aceptada: "Aceptada",
   pagada: "Pagada",
 }
-
-type CohortesInbound = {
-  dias: string[]
-  /** LENTE CAJA (Lalo 19-ago, "queremos ver todo como caja"): cada métrica se
-   * cuenta el día en que el EVENTO ocurrió — llegada, precio dado, formal
-   * emitida, aceptación, pago — ya no por cohorte de llegada.
-   * etapa → (día → teléfonos con ese evento ese día). */
-  porDia: Record<EtapaInbound, Map<string, Set<string>>>
-  /** FUERA DEL RANGO DE VICKY (>20 trabajadores, Lalo 19-ago): derivadas al
-   * equipo comercial — no son embudo de venta autónoma. tel → día. */
-  derivadas: Map<string, string>
+/** Alias de los links viejos (fotos/bookmarks pre-Bolsa). */
+const ETAPA_ALIAS: Record<string, EtapaInbound> = {
+  llegaron: "entrantes", comercial: "ic", soporte: "ce_sop", cobranza: "ce_cob", derivada: "ic",
 }
 
+type CohortesInbound = { dias: string[]; porDia: Record<EtapaInbound, Map<string, Set<string>>> }
+
 function computarCohortesInbound(params: {
+  /** Entradas con reactivación (RPC vic_entradas_desde): contacto que
+   * escribe tras >=7 días de silencio vuelve a contar como entrante. */
+  entradas: Array<{ contact: string; at: string }>
   primeraVez: Map<string, string>
   analysisRows: Row[]
   preformAt: Map<string, string>
   quotes: RawAceptada[]
-  hardQuote: Set<string>
   toque0: Set<string>
-  usuarios: Map<string, number>
   pais: Pais
   rango: RangoFechas | null
-  /** Pagos REALES del canal Vicky (registro venta_dash, fecha del pago).
-   * Fuente de la columna 💰 Pagada — incluye outbound (caso Loumar/
-   * Contabilidad IA 19-ago: pagaron lunes/martes y la tabla los perdía por
-   * ser de cadencia). null = no se pudo leer → fallback por cotización. */
   pagos: Array<{ tel: string; t: number }> | null
 }): CohortesInbound {
-  const { primeraVez, analysisRows, preformAt, quotes, hardQuote, toque0, usuarios, pais, rango, pagos } = params
+  const { entradas, primeraVez, analysisRows, preformAt, quotes, toque0, pais, rango, pagos } = params
   const testSet = metricsContactSet()
   const diaDe = (iso: string | null | undefined): string => {
     const t = Date.parse(String(iso || ""))
     if (!Number.isFinite(t)) return ""
     return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t))
   }
-  // Mismo rango que 📈 Evolución: sigue el Desde–Hasta; sin filtro, 30 días.
   const DIA_MS = 864e5
   const finMs = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
   const inicioMs = rango && rango.desdeMs > 0 ? rango.desdeMs : finMs - 29 * DIA_MS
@@ -2517,203 +2513,258 @@ function computarCohortesInbound(params: {
     if (d && dias[dias.length - 1] !== d) dias.push(d)
   }
   const diasSet = new Set(dias)
-  // Señales por contacto. Formal/aceptada/pagada son hechos duros (Zoho +
-  // punteros); intención suma el análisis LLM Y los hechos duros — el
-  // analizador a veces se salta conversaciones y sin este refuerzo la
-  // cohorte subcontaría (misma corrección que 📈 Evolución).
-  const comercialSet = new Set<string>()
-  for (const r of analysisRows) if (r.grupo === "comercial") comercialSet.add(digits(r.contact))
-  // CLIENTES actuales (Lalo 19-ago): columnas Cliente/Cobranza y Cliente/
-  // Soporte entre Llegaron e Intención. Base = análisis grupo=soporte o
-  // es_cliente_actual sin intención comercial; cobranza se distingue por el
-  // TEXTO del análisis (deuda/factura/bloqueo por pago) — no hay clasificación
-  // estructurada de cobranza todavía.
-  const RE_COBRANZA = /cobranz|deud|factur|moros|pago pendiente|bloque\w* (?:de acceso )?por (?:no )?pago|regulariz\w* (?:el |su )?pago|comprobante de (?:pago|transferencia)/i
-  const cobranzaSet = new Set<string>()
-  const soporteSet = new Set<string>()
-  for (const r of analysisRows) {
-    if (!(r.grupo === "soporte" || (r.es_cliente_actual && r.grupo !== "comercial"))) continue
-    const tel = digits(r.contact)
-    const texto = `${r.resumen || ""} ${r.accionable || ""} ${(r.hallazgos || []).map((h) => `${h.tipo} ${h.detalle}`).join(" ")}`
-    if (RE_COBRANZA.test(texto)) cobranzaSet.add(tel)
-    else soporteSet.add(tel)
-  }
-  void hardQuote
-  // ═══ LENTE CAJA (Lalo 19-ago, "queremos ver todo como caja, inclusive en
-  // las barras y en la tabla"): cada métrica se anota el día en que el EVENTO
-  // ocurrió. Llegada = primer mensaje · precio = sello del preform (o la
-  // emisión de la formal, que siempre lleva precio) · formal = emisión ·
-  // aceptada/pagada = fecha de aceptación de Zoho (el pago cae el mismo día
-  // en la práctica: mediana 36 min). ═══
-  const derivadas = new Map<string, string>()
-  const llegadaDia = new Map<string, string>()
-  const enUniverso = new Set<string>()
-  // RANGO DE VICKY: sobre 20 trabajadores Vicky no vende — derivadas aparte.
-  const UMBRAL_RANGO_VICKY = 20
-  for (const [tel, iso] of primeraVez) {
-    if (paisDeTelefono(tel) !== pais || isTestContact(tel, testSet)) continue
-    if (toque0.has(tel)) continue // outbound: lo tocó la cadencia, no llegó solo
-    const dia = diaDe(iso)
-    if ((usuarios.get(tel) || 0) > UMBRAL_RANGO_VICKY) {
-      if (diasSet.has(dia)) derivadas.set(tel, dia)
-      continue
-    }
-    enUniverso.add(tel)
-    if (diasSet.has(dia)) llegadaDia.set(tel, dia)
-  }
   const vacio = () => new Map<string, Set<string>>()
   const porDia: Record<EtapaInbound, Map<string, Set<string>>> = {
-    llegaron: vacio(),
-    cobranza: vacio(),
-    soporte: vacio(),
-    comercial: vacio(),
-    precio: vacio(),
-    formal: vacio(),
-    aceptada: vacio(),
-    pagada: vacio(),
+    entrantes: vacio(), ic: vacio(), ce: vacio(), ce_sop: vacio(), ce_pos: vacio(), ce_cob: vacio(),
+    nocal: vacio(), noid: vacio(), precio: vacio(), formal: vacio(), aceptada: vacio(), pagada: vacio(),
   }
   const anotar = (m: Map<string, Set<string>>, dia: string, tel: string) => {
     if (!diasSet.has(dia)) return
-    const s = m.get(dia) || new Set<string>()
-    s.add(tel)
-    m.set(dia, s)
+    const set = m.get(dia) || new Set<string>()
+    set.add(tel)
+    m.set(dia, set)
   }
-  for (const [tel, dia] of llegadaDia) {
-    anotar(porDia.llegaron, dia, tel)
-    // Cliente actual y la intención: el análisis no trae fecha propia — se
-    // anotan el día de llegada.
-    if (cobranzaSet.has(tel)) anotar(porDia.cobranza, dia, tel)
-    else if (soporteSet.has(tel)) anotar(porDia.soporte, dia, tel)
-    if (comercialSet.has(tel) || preformAt.has(tel)) anotar(porDia.comercial, dia, tel)
+  // ═══ GRUPO BOLSA (Lalo 19-ago): 4 grupos excluyentes que SUMAN las
+  // entrantes del día; cliente_existente se abre en soporte/postventa/
+  // cobranza. La clasificación viene del análisis (campo bolsa, taxonomía
+  // v2); histórico sin bolsa → se deriva del grupo viejo. Hecho duro:
+  // preform o cotización de Vicky fuerzan intención comercial cuando el
+  // análisis no la vio (o aún no corre). Un contacto puede entrar DOS
+  // veces (reactivación tras 7 días): cuenta en ambos días. ═══
+  const bolsaPorTel = new Map<string, { b: string; sub: string | null; at: number }>()
+  for (const r of analysisRows) {
+    const tel = digits(r.contact)
+    const at = Date.parse(String(r.analyzed_at || "")) || 0
+    const prev = bolsaPorTel.get(tel)
+    if (prev && prev.at > at) continue
+    const b = r.bolsa || (r.grupo === "comercial" ? "intencion_comercial" : r.grupo === "soporte" ? "cliente_existente" : "no_identificado")
+    const sub = b === "cliente_existente" ? (r.bolsa_sub || "soporte") : null
+    bolsaPorTel.set(tel, { b, sub, at })
   }
-  // Precio dado: el día del sello del preform.
+  const telsConQuoteVicky = new Set<string>()
+  for (const q of quotes) {
+    const marca = String(q.Intervenci_n_Humana || "")
+    if (/intervenci/i.test(marca)) continue
+    telsConQuoteVicky.add(digits(String(q.Tel_fono_Contacto || "")))
+  }
+  for (const e of entradas) {
+    const tel = digits(e.contact)
+    if (!tel || paisDeTelefono(tel) !== pais || isTestContact(tel, testSet)) continue
+    if (toque0.has(tel)) continue // outbound: lo tocó la cadencia, no llegó solo
+    const dia = diaDe(e.at)
+    if (!diasSet.has(dia)) continue
+    anotar(porDia.entrantes, dia, tel)
+    const cls = bolsaPorTel.get(tel)
+    let b = cls?.b || "no_identificado"
+    if (b === "no_identificado" && (preformAt.has(tel) || telsConQuoteVicky.has(tel))) b = "intencion_comercial"
+    if (b === "intencion_comercial") anotar(porDia.ic, dia, tel)
+    else if (b === "cliente_existente") {
+      anotar(porDia.ce, dia, tel)
+      const sub = cls?.sub === "postventa" ? "ce_pos" : cls?.sub === "cobranza" ? "ce_cob" : "ce_sop"
+      anotar(porDia[sub as EtapaInbound], dia, tel)
+    } else if (b === "no_califica") anotar(porDia.nocal, dia, tel)
+    else anotar(porDia.noid, dia, tel)
+  }
+  // ═══ GRUPO FOTO: hitos del día, vengan de la conversación que vengan
+  // (outbound incluido — igual que la caja). Precio = sello del preform (o
+  // la emisión de la formal, que siempre lleva precio); formal = emisión;
+  // aceptada = fecha de aceptación; pagada = pago REAL (registro venta_dash,
+  // pasado en params.pagos; fallback por cotización si el registro falla).
+  const elegible = (tel: string) => Boolean(tel) && paisDeTelefono(tel) === pais && !isTestContact(tel, testSet)
   for (const [tel, iso] of preformAt) {
-    if (!enUniverso.has(tel)) continue
+    if (!elegible(tel)) continue
     anotar(porDia.precio, diaDe(iso), tel)
   }
-  // Formales / aceptadas / pagadas: SOLO canal Vicky. Marca de la emisión
-  // (Intervenci_n_Humana, estampada desde el 19-ago); histórico sin marca →
-  // regla MATER: la conversación debe existir ANTES de la emisión (si el chat
-  // nació después, el cliente solo llegó a pagar una venta del ejecutivo).
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
-    if (!tel || !enUniverso.has(tel)) continue
+    if (!elegible(tel)) continue
     const marca = String(q.Intervenci_n_Humana || "")
     if (/intervenci/i.test(marca)) continue
     if (!/100%/.test(marca)) {
+      // Histórico sin marca → regla MATER: la conversación debe existir
+      // ANTES de la emisión (si nació después, la venta es del ejecutivo).
       const primeraMs = Date.parse(primeraVez.get(tel) || "")
       const creadaMs = Date.parse(String(q.Created_Time || ""))
       if (Number.isFinite(creadaMs) && (!Number.isFinite(primeraMs) || primeraMs > creadaMs + 3600e3)) continue
     }
     const diaEmision = diaDe(q.Created_Time)
     anotar(porDia.formal, diaEmision, tel)
-    // La formal SIEMPRE lleva precio: sin sello de preform, el precio se
-    // anota el día de la emisión (mitiga el hoyo conocido del sello pref_).
     if (!preformAt.has(tel)) anotar(porDia.precio, diaEmision, tel)
-    // Intención de hechos duros aunque el análisis no la haya clasificado.
-    if (!comercialSet.has(tel) && !preformAt.has(tel)) anotar(porDia.comercial, llegadaDia.get(tel) || diaEmision, tel)
     const diaAcepta = diaDe(q.Fecha_Hora_Cotizacion || q.Modified_Time)
     if (esAceptadaOMas(q)) anotar(porDia.aceptada, diaAcepta, tel)
-    // Pagada por cotización SOLO como fallback: con el registro de pagos
-    // disponible, la columna sale de ahí (día real del pago, con outbound).
     if (esPagada(q) && !pagos) anotar(porDia.pagada, diaAcepta, tel)
   }
   if (pagos) {
-    for (const p of pagos) {
-      if (!p.tel || paisDeTelefono(p.tel) !== pais || isTestContact(p.tel, testSet)) continue
-      anotar(porDia.pagada, diaDe(new Date(p.t).toISOString()), p.tel)
+    for (const pago of pagos) {
+      if (!elegible(pago.tel)) continue
+      anotar(porDia.pagada, diaDe(new Date(pago.t).toISOString()), pago.tel)
     }
   }
-  return { dias, porDia, derivadas }
+  return { dias, porDia }
 }
 
 function renderInboundDiario(
   c: CohortesInbound,
-  opts: { rango: RangoFechas | null; qs: string; caja?: { cantidad: number; monto: number; detalle: string } },
+  opts: {
+    rango: RangoFechas | null
+    qs: string
+    caja?: { cantidad: number; monto: number; detalle: string }
+    /** Nombre de empresa por teléfono (para las viñetas). */
+    nombres: Map<string, string>
+    /** Detalle embebido por teléfono (para el modal instantáneo). */
+    detalles: Map<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }>
+  },
 ): string {
-  const { dias, porDia, derivadas } = c
-  const idx = new Map(dias.map((d, i) => [d, i]))
+  const { dias, porDia } = c
   const cnt = (etapa: EtapaInbound, dia: string) => porDia[etapa].get(dia)?.size || 0
-  // Totales del período: teléfonos ÚNICOS por métrica (un contacto que vio
-  // precio dos días distintos cuenta una vez en el total).
   const totUnico = (etapa: EtapaInbound) => {
     const u = new Set<string>()
-    for (const s of porDia[etapa].values()) for (const t of s) u.add(t)
+    for (const set of porDia[etapa].values()) for (const t of set) u.add(t)
     return u.size
   }
-  const tLleg = totUnico("llegaron"), tCob = totUnico("cobranza"), tSop = totUnico("soporte"), tCom = totUnico("comercial"), tPre = totUnico("precio"), tFor = totUnico("formal"), tAce = totUnico("aceptada"), tPag = totUnico("pagada")
-  const tDer = [...derivadas.values()].filter((d) => idx.has(d)).length
-  const prom = dias.length ? (tLleg / dias.length).toFixed(1) : "0"
+  const T: Record<EtapaInbound, number> = Object.fromEntries(ETAPAS_INBOUND.map((e) => [e, totUnico(e)])) as Record<EtapaInbound, number>
   const pctDe = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
-  const href = (dia: string, etapa: EtapaInbound) => `?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}`
-  const celda = (dia: string, etapa: EtapaInbound, bold = false) => {
-    const v = cnt(etapa, dia)
-    const txt = bold ? `<b>${v}</b>` : String(v)
-    return `<td style="text-align:center">${v > 0 ? `<a href="${href(dia, etapa)}">${txt}</a>` : `<span style="color:#c8cdd3">0</span>`}</td>`
-  }
   const nombreDia = (d: string) => {
     const wd = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "short" }).format(new Date(`${d}T12:00:00-04:00`))
     return `${wd} ${d.slice(8, 10)}-${d.slice(5, 7)}`
+  }
+  // ── Viñetas + detalle EMBEBIDOS (Lalo 19-ago: "cualquier interacción debe
+  // ser rápida") — el hover y el clic al detalle no tocan la red: los datos
+  // viajan dentro de la foto.
+  const nom = (tel: string) => opts.nombres.get(tel) || `+${tel}`
+  const VIN: Record<string, Record<string, Array<[string, string]>>> = {}
+  for (const et of ETAPAS_INBOUND) {
+    VIN[et] = {}
+    for (const [dia, tels] of porDia[et]) {
+      VIN[et][dia] = [...tels].map((t) => [nom(t), t] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
+    }
+    VIN[et]["TOTAL"] = (() => {
+      const u = new Map<string, string>()
+      for (const tels of porDia[et].values()) for (const t of tels) u.set(t, nom(t))
+      return [...u].map(([t, n]) => [n, t] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
+    })()
+  }
+  const DET: Record<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }> = {}
+  for (const et of ETAPAS_INBOUND) for (const lista of Object.values(VIN[et])) for (const [, t] of lista) {
+    if (!DET[t]) DET[t] = opts.detalles.get(t) || { e: nom(t), est: "—", ej: "—", dot: "s/d", ult: "", acc: "", conv: "", z: "" }
+  }
+  const celda = (dia: string, etapa: EtapaInbound, cls = "") => {
+    const v = cnt(etapa, dia)
+    if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
+    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a></td>`
   }
   const filas = [...dias].reverse().map((d) => {
     const pag = cnt("pagada", d)
     const vioPrecio = cnt("precio", d)
     return `<tr>
       <td style="white-space:nowrap">${nombreDia(d)}</td>
-      ${celda(d, "llegaron", true)}
-      ${celda(d, "cobranza")}
-      ${celda(d, "soporte")}
-      ${celda(d, "comercial")}
-      ${celda(d, "precio")}
-      ${celda(d, "formal")}
-      ${celda(d, "aceptada")}
-      ${celda(d, "pagada", true)}
+      ${celda(d, "entrantes")}${celda(d, "ic")}${celda(d, "ce")}${celda(d, "ce_sop", "sube")}${celda(d, "ce_pos", "sube")}${celda(d, "ce_cob", "sube")}${celda(d, "nocal")}${celda(d, "noid")}
+      ${celda(d, "precio", "divi")}${celda(d, "formal")}${celda(d, "aceptada")}${celda(d, "pagada")}
       <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}</td>
     </tr>`
   }).join("")
-  const celdaTotal = (v: number, etapa: EtapaInbound) =>
-    `<td style="text-align:center"><b>${v > 0 ? `<a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}">${v}</a>` : "0"}</b></td>`
-  const filaTotal = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc">
+  const filaTotal = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
     <td><b>TOTAL</b></td>
-    ${celdaTotal(tLleg, "llegaron")}${celdaTotal(tCob, "cobranza")}${celdaTotal(tSop, "soporte")}${celdaTotal(tCom, "comercial")}${celdaTotal(tPre, "precio")}${celdaTotal(tFor, "formal")}${celdaTotal(tAce, "aceptada")}${celdaTotal(tPag, "pagada")}
-    <td style="text-align:center"><b>${pctDe(tPag, tPre)}</b></td>
+    ${celda("TOTAL", "entrantes")}${celda("TOTAL", "ic")}${celda("TOTAL", "ce")}${celda("TOTAL", "ce_sop", "sube")}${celda("TOTAL", "ce_pos", "sube")}${celda("TOTAL", "ce_cob", "sube")}${celda("TOTAL", "nocal")}${celda("TOTAL", "noid")}
+    ${celda("TOTAL", "precio", "divi")}${celda("TOTAL", "formal")}${celda("TOTAL", "aceptada")}${celda("TOTAL", "pagada")}
+    <td style="text-align:center"><b>${pctDe(T.pagada, T.precio)}</b></td>
   </tr>`
-  // GRÁFICO lente caja: barras = llegadas del día; líneas = eventos del día.
-  const serie = (etapa: EtapaInbound) => dias.map((d) => cnt(etapa, d))
-  const SERIES_JS = {
-    llegadas: serie("llegaron"),
-    calificadas: serie("comercial"),
-    precio: serie("precio"),
-    formal: serie("formal"),
-    pagada: serie("pagada"),
+  // celda("TOTAL", …) cuenta 0 (no hay día TOTAL en porDia) — parche: filas
+  // TOTAL con los únicos del período y viñeta inbdet=TOTAL.
+  const celdaTotal = (etapa: EtapaInbound, cls = "") => {
+    const v = T[etapa]
+    if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
+    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a></td>`
   }
-  return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · lente caja</span></h2>
-  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> llegaron en RANGO VICKY (${prom}/día) · ${tCob} cliente/cobranza · ${tSop} cliente/soporte · ${tCom} calificadas (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio · ${tFor} formales de Vicky emitidas · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre del período) · <a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=derivada" style="color:#e67e22"><b>${tDer}</b> derivadas al equipo (&gt;20)</a></div>
+  const filaTotalOk = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
+    <td><b>TOTAL</b></td>
+    ${celdaTotal("entrantes")}${celdaTotal("ic")}${celdaTotal("ce")}${celdaTotal("ce_sop", "sube")}${celdaTotal("ce_pos", "sube")}${celdaTotal("ce_cob", "sube")}${celdaTotal("nocal")}${celdaTotal("noid")}
+    ${celdaTotal("precio", "divi")}${celdaTotal("formal")}${celdaTotal("aceptada")}${celdaTotal("pagada")}
+    <td style="text-align:center"><b>${pctDe(T.pagada, T.precio)}</b></td>
+  </tr>`
+  void filaTotal
+  return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
+  <div class="sub" style="margin:2px 0 10px"><b>${T.entrantes}</b> entrantes · ${T.ic} con intención comercial (${pctDe(T.ic, T.entrantes)}) · ${T.ce} de clientes existentes (${T.ce_sop} soporte / ${T.ce_pos} postventa / ${T.ce_cob} cobranza) · ${T.nocal} no califican · ${T.noid} sin identificar — Foto: ${T.precio} vieron precio · ${T.formal} formales · ${T.aceptada} aceptadas · <b>${T.pagada} pagadas</b></div>
   ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky, inbound + outbound)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
-  <div id="inbDiaria" style="height:320px"></div>
-  <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
-    <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Cliente/Cobranza</th><th style="text-align:center">Cliente/Soporte</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
-  </tr></thead><tbody>${filas}${filaTotal}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">LENTE CAJA: cada número se cuenta el día en que el EVENTO ocurrió — la llegada el día del primer mensaje, el precio el día que Vicky lo mostró, la formal el día de su emisión y el pago el día que entró (por eso un pago de un cliente que llegó hace semanas SÍ aparece en su día). Cliente/Cobranza y Cliente/Soporte son conversaciones de CLIENTES actuales (cobranza = deuda/factura/bloqueo por pago según el análisis; el resto, soporte), anotadas el día de su PRIMERA conversación. Las columnas de embudo son INBOUND en rango de Vicky (≤20); la columna 💰 Pagada es TODA la caja del canal Vicky, <b>outbound incluido</b> (los pagos de la cadencia — Loumar, Contabilidad IA — cuentan el día que pagaron aunque no sumen en «Llegaron»). Las cotizaciones del canal ejecutivo y los contactos internos quedan fuera; los &gt;20 van en «derivadas al equipo». Cierre del día = pagadas del día ÷ vieron precio ese día (puede superar 100% si paga alguien de cosecha vieja u outbound); el cierre del TOTAL usa los únicos del período. Hora de Chile. Clic en cualquier número para ver las empresas.</div>
+  <style>
+    th.sube,td.sube{background:#fbf9ff}
+    th.sube{color:#7c3aed;font-weight:600;font-size:11.5px}
+    .divi{border-left:2px solid #e5e7eb}
+    th.gb{background:#f0f7fc;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#6b7280}
+    th.gf{background:#fff8e8;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#6b7280}
+    #inbpop{position:absolute;display:none;z-index:70;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.15);min-width:230px;max-width:330px;max-height:280px;overflow-y:auto;padding:6px 0}
+    #inbpop .t{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#6b7280;padding:4px 14px 6px;border-bottom:1px solid #f0f1f3}
+    #inbpop a{display:block;padding:6px 14px;font-size:13px;font-weight:600;color:#4e4e4e;text-decoration:none}
+    #inbpop a:hover{background:#f0f9ff;color:#00aff2}
+    #inbdet-modal{position:fixed;inset:0;display:none;z-index:80;background:rgba(30,35,40,.45);align-items:center;justify-content:center}
+    #inbdet-modal .m{background:#fff;border-radius:16px;box-shadow:0 18px 50px rgba(0,0,0,.25);width:min(92vw,520px);max-height:82vh;overflow-y:auto;padding:20px 24px}
+    #inbdet-modal h3{margin:0 0 10px;font-size:17px}
+    #inbdet-modal table{width:100%;border-collapse:collapse;font-size:13.5px}
+    #inbdet-modal td{padding:5px 8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+    #inbdet-modal td:first-child{color:#6b7280;white-space:nowrap;width:34%}
+    #inbdet-modal .x{float:right;cursor:pointer;border:0;background:#f3f4f6;border-radius:8px;padding:4px 10px;font-weight:700}
+  </style>
+  <div style="overflow-x:auto;margin-top:8px"><table><thead>
+  <tr><th></th><th colspan="8" class="gb">🎒 Grupo Bolsa · llegadas del día (nueva o reactivada tras ≥7 días de silencio)</th><th colspan="5" class="gf divi">📸 Grupo Foto · hitos del día</th></tr>
+  <tr>
+    <th>Día</th><th style="text-align:center">Entrantes</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
+    <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
+  </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
+  <div class="sub" style="margin:8px 0 0">BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Entrantes del día; los 3 subgrupos (· morados) suman Cliente existente. Un contacto que vuelve a escribir tras ≥7 días de silencio cuenta como entrante de nuevo ese día. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Entrantes no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
-    (function () {
-      var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
-      var S = ${JSON.stringify(SERIES_JS)};
-      Plotly.react("inbDiaria", [
-        { x: DIAS, y: S.llegadas, name: "Llegaron (rango Vicky)", type: "bar", marker: { color: "#dfe3e8" }, hoverlabel: { namelength: -1 } },
-        { x: DIAS, y: S.calificadas, name: "Calificadas", type: "scatter", mode: "lines+markers", line: { color: "#00aff2", width: 2 }, hoverlabel: { namelength: -1 } },
-        { x: DIAS, y: S.precio, name: "Vieron precio", type: "scatter", mode: "lines+markers", line: { color: "#ffbb00", width: 2 }, hoverlabel: { namelength: -1 } },
-        { x: DIAS, y: S.formal, name: "Formal emitida", type: "scatter", mode: "lines+markers", line: { color: "#e67e22", width: 2 }, hoverlabel: { namelength: -1 } },
-        { x: DIAS, y: S.pagada, name: "Pagada", type: "scatter", mode: "lines+markers", line: { color: "#1b5e20", width: 3 }, hoverlabel: { namelength: -1 } }
-      ], {
-        margin: { l: 34, r: 12, t: 10, b: 46 },
-        legend: { orientation: "h", y: 1.18 },
-        font: { family: "Nunito, 'Segoe UI', sans-serif", size: 12, color: "#4e4e4e" },
-        xaxis: { type: "category", tickangle: -45, fixedrange: true },
-        yaxis: { rangemode: "tozero", gridcolor: "#eef0f3", fixedrange: true },
-        plot_bgcolor: "#ffffff", paper_bgcolor: "#ffffff", hovermode: "x unified"
-      }, { displayModeBar: false, responsive: true });
-    })();
+  (function () {
+    var VIN = ${JSON.stringify(VIN)};
+    var DET = ${JSON.stringify(DET)};
+    var ETQ = ${JSON.stringify(ETIQUETA_ETAPA_INBOUND)};
+    var pop = document.createElement("div"); pop.id = "inbpop"; document.body.appendChild(pop);
+    var timer = null;
+    function abrir(td) {
+      clearTimeout(timer);
+      var et = td.getAttribute("data-et"), dia = td.getAttribute("data-dia");
+      var lista = (VIN[et] || {})[dia] || [];
+      var html = '<div class="t">' + (ETQ[et] || et) + " · " + (dia === "TOTAL" ? "período" : dia) + " · " + lista.length + "</div>";
+      lista.slice(0, 30).forEach(function (par) {
+        html += '<a href="#" data-tel="' + par[1] + '">' + par[0] + "</a>";
+      });
+      if (lista.length > 30) html += '<a href="' + td.querySelector("a").getAttribute("href") + '">… y ' + (lista.length - 30) + " más — ver listado completo</a>";
+      pop.innerHTML = html;
+      pop.querySelectorAll("a[data-tel]").forEach(function (a) {
+        a.addEventListener("click", function (ev) { ev.preventDefault(); detalle(a.getAttribute("data-tel")); });
+      });
+      var r = td.getBoundingClientRect(), w = 280;
+      pop.style.display = "block";
+      w = pop.offsetWidth;
+      pop.style.left = Math.max(8, Math.min(window.scrollX + r.left + r.width / 2 - w / 2, window.scrollX + document.documentElement.clientWidth - w - 8)) + "px";
+      pop.style.top = (window.scrollY + r.bottom + 6) + "px";
+    }
+    function cerrar() { timer = setTimeout(function () { pop.style.display = "none"; }, 200); }
+    function detalle(tel) {
+      var d = DET[tel] || {};
+      var f = function (v) { return v && String(v).trim() ? v : "—"; };
+      document.getElementById("inbdet-cuerpo").innerHTML =
+        "<h3>" + f(d.e) + "</h3><table>" +
+        "<tr><td>Contacto</td><td>+" + tel + "</td></tr>" +
+        "<tr><td>Estado</td><td>" + f(d.est) + "</td></tr>" +
+        "<tr><td>Ejecutivo</td><td>" + f(d.ej) + "</td></tr>" +
+        "<tr><td>Dotación</td><td>" + f(d.dot) + "</td></tr>" +
+        "<tr><td>Última actividad</td><td>" + f(d.ult) + "</td></tr>" +
+        "<tr><td>Accionable</td><td>" + f(d.acc) + "</td></tr>" +
+        "<tr><td>Links</td><td>" + (d.conv ? '<a href="?conv=' + d.conv + '">ver chat</a> · ' : "") + (d.z ? '<a href="' + d.z + '" target="_blank">Zoho</a>' : "") + "</td></tr>" +
+        "</table>";
+      pop.style.display = "none";
+      document.getElementById("inbdet-modal").style.display = "flex";
+    }
+    document.querySelectorAll("td.conpop").forEach(function (td) {
+      td.addEventListener("mouseenter", function () { abrir(td); });
+      td.addEventListener("mouseleave", cerrar);
+    });
+    pop.addEventListener("mouseenter", function () { clearTimeout(timer); });
+    pop.addEventListener("mouseleave", cerrar);
+    document.getElementById("inbdet-modal").addEventListener("click", function (ev) {
+      if (ev.target === this) this.style.display = "none";
+    });
+  })();
   </script>
 </div>`
 }
@@ -6081,42 +6132,50 @@ export async function GET(req: Request): Promise<Response> {
         } catch {
           pagosVicky = null
         }
+        // ENTRADAS con reactivación 7d (RPC): la definición de "entrante" del
+        // panel Bolsa y Foto. Fallback: primera conversación (sin reactivadas).
+        let entradas: Array<{ contact: string; at: string }> = []
+        try {
+          const desdeIso = new Date((rango && rango.desdeMs > 0 ? rango.desdeMs : Date.now() - 29 * 864e5) - 864e5).toISOString()
+          const re = await fetch(`${SUPABASE_URL}/rest/v1/rpc/vic_entradas_desde`, {
+            method: "POST",
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ desde: desdeIso }),
+            cache: "no-store",
+          })
+          if (re.ok) entradas = (await re.json()) as Array<{ contact: string; at: string }>
+        } catch { /* cae al fallback */ }
+        if (!entradas.length) entradas = [...primeraVez].map(([contact, at]) => ({ contact, at }))
         const cohortes = computarCohortesInbound({
+          entradas,
           primeraVez,
           analysisRows: allRows,
           preformAt: preformAtMap,
           quotes: cierre?.todasList || [],
-          hardQuote: hard.quote,
           toque0: origen.toque0,
-          usuarios: usuariosPorContacto,
           pais,
           rango,
           pagos: pagosVicky ? pagosVicky.map((p) => ({ tel: p.tel, t: p.t })) : null,
         })
         if (inbdet) {
-          const etapaCruda = (searchParams.get("inbEtapa") || "llegaron").trim()
-          // Drill-down de las DERIVADAS (>20): viven fuera del embudo.
-          const esDerivadas = etapaCruda === "derivada"
-          const etapaQ = (esDerivadas ? "llegaron" : etapaCruda) as EtapaInbound
+          const etapaCruda = (searchParams.get("inbEtapa") || "entrantes").trim()
+          // Alias de links viejos (llegaron/comercial/soporte/cobranza/derivada).
+          const etapaQ = (ETAPA_ALIAS[etapaCruda] ||
+            ((ETAPAS_INBOUND as readonly string[]).includes(etapaCruda) ? etapaCruda : "entrantes")) as EtapaInbound
           const porTelListado = new Map(filasListado.map((f) => [digits(f.contacto), f]))
           const sub: FilaListado[] = []
           const vistos = new Set<string>()
-          // En el drill-down de LLEGARON, la fila mínima muestra la
-          // clasificación REAL del contacto si se conoce (caso 56984052692,
-          // Lalo 19-ago: era soporte obvio y decía "sin intención aún").
+          // En el drill-down de ENTRANTES, la fila mínima muestra la
+          // clasificación REAL del contacto si se conoce.
           const clasePorTel = new Map<string, string>()
-          if (etapaQ === "llegaron" && !esDerivadas) {
-            for (const et of ["soporte", "cobranza", "comercial"] as EtapaInbound[]) {
+          if (etapaQ === "entrantes") {
+            for (const et of ["ce_sop", "ce_pos", "ce_cob", "ic", "nocal"] as EtapaInbound[]) {
               for (const tels of cohortes.porDia[et].values()) for (const t of tels) clasePorTel.set(t, ETIQUETA_ETAPA_INBOUND[et])
             }
           }
-          // Lente caja: cada etapa vive en porDia[etapa] = Map<día, Set<tel>>;
-          // el drill-down lista los contactos con ese EVENTO en el día pedido.
-          const fuente: Array<[string, string]> = esDerivadas
-            ? [...cohortes.derivadas]
-            : [...(cohortes.porDia[etapaQ] || new Map<string, Set<string>>())].flatMap(
-                ([dia, tels]) => [...tels].map((tel) => [tel, dia] as [string, string]),
-              )
+          const fuente: Array<[string, string]> = [...(cohortes.porDia[etapaQ] || new Map<string, Set<string>>())].flatMap(
+            ([dia, tels]) => [...tels].map((tel) => [tel, dia] as [string, string]),
+          )
           for (const [tel, dia] of fuente) {
             if (inbdet !== "TOTAL" && dia !== inbdet) continue
             if (vistos.has(tel)) continue
@@ -6146,11 +6205,7 @@ export async function GET(req: Request): Promise<Response> {
             })
           }
           const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : `del ${inbdet}`} — ${
-            esDerivadas
-              ? "derivadas al equipo (>20 trabajadores, fuera del rango de Vicky)"
-              : etapaQ === "llegaron"
-                ? "llegadas del día (rango Vicky)"
-                : `evento del día: ${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
+            etapaQ === "entrantes" ? "entrantes del día" : `${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
           }`
           return renderDetalleEjecutivo({
             filas: sub,
@@ -6173,7 +6228,26 @@ export async function GET(req: Request): Promise<Response> {
               detalle: pagosVicky.slice(0, 8).map((p) => p.txt).join(" · ") + (pagosVicky.length > 8 ? " · …" : ""),
             }
           : undefined
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja })
+        // Viñetas + detalle EMBEBIDOS: nombres y ficha por teléfono desde el
+        // listado comercial — el hover y el clic al detalle no tocan la red.
+        const nombresPorTel = new Map<string, string>()
+        const detallesPorTel = new Map<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }>()
+        for (const f of filasListado) {
+          const t = digits(f.contacto)
+          if (!t || nombresPorTel.has(t)) continue
+          nombresPorTel.set(t, f.empresa || `+${t}`)
+          detallesPorTel.set(t, {
+            e: f.empresa || `+${t}`,
+            est: f.estado || "—",
+            ej: f.propietario && f.propietario !== "—" ? f.propietario : "—",
+            dot: usuariosPorContacto.has(t) ? String(usuariosPorContacto.get(t)) : "s/d",
+            ult: f.ultimoContactoIso ? fmtSantiago(f.ultimoContactoIso) : "",
+            acc: f.accionable && f.accionable !== "—" ? f.accionable : "",
+            conv: f.convId || convIdPorContacto.get(t) || "",
+            z: f.zohoUrl || "",
+          })
+        }
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel })
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
         inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`

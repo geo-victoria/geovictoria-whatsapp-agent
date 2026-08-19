@@ -129,6 +129,11 @@ export function isTestContact(contact: string, set = metricsContactSet()): boole
 export type Hallazgo = { tipo: string; detalle: string }
 
 export type ConversationAnalysis = {
+  /** BOLSA (Lalo 19-ago, panel Bolsa y Foto): 4 grupos excluyentes que
+   * particionan las conversaciones entrantes. */
+  bolsa: "intencion_comercial" | "cliente_existente" | "no_califica" | "no_identificado"
+  /** Subgrupo, solo si bolsa="cliente_existente". */
+  bolsa_sub: "soporte" | "postventa" | "cobranza" | null
   grupo: "comercial" | "soporte" | "no_identificado"
   sub_bucket: "crosselling" | "lead" | "reunion" | "cotizacion" | "solo_dudas" | null
   cotizacion_outcome: "preform_mostrado" | "cotizacion_enviada" | "abandonado" | null
@@ -149,6 +154,15 @@ export type TranscriptMessage = { role: "user" | "assistant"; content: string }
 const SYSTEM_PROMPT = `Eres analista comercial de GeoVictoria (control de asistencia B2B en Chile). Vicky es la vendedora-bot por WhatsApp. Recibes el transcript de UNA conversación y la clasificas en una taxonomía. Respondes SOLO un objeto JSON válido, sin texto adicional, sin markdown, sin \`\`\`.
 
 Clasifica así:
+
+0) "bolsa" (obligatorio) — la clasificación PRINCIPAL del panel interno, 4 grupos excluyentes — y "bolsa_sub" (solo si bolsa="cliente_existente"; null en otro caso):
+   - "intencion_comercial": PROSPECTO (no cliente actual) cuya necesidad hace match con lo que GeoVictoria vende — controlar asistencia, app de marcaje, relojes control y módulos. Incluye al que viene SOLO buscando un reloj (hay oportunidad de darlo vuelta). NO exige que haya visto precio: basta el interés real.
+   - "cliente_existente": es cliente ACTUAL de GeoVictoria. Con "bolsa_sub":
+       · "soporte": ayuda con el USO de la plataforma o los métodos de marcaje (configurar, claves, reportes, errores).
+       · "postventa": quiere COMPRAR algo más (reloj adicional, producto/módulo complementario, ampliar usuarios).
+       · "cobranza": deuda, factura, bloqueo por no pago, comprobantes de pago de facturas.
+   - "no_califica": lo que busca NO es lo que ofrecemos (botón de pánico, cámaras, alarmas, GPS vehicular, etc.) y nada del catálogo le interesa. También proveedores/vendedores ofreciendo SUS productos.
+   - "no_identificado": abandonó tras un saludo, spam, número equivocado, prueba, o la conversación no da para clasificar en los anteriores.
 
 1) "grupo" (obligatorio), uno de:
    - "comercial": el prospecto muestra intención comercial SOBRE PRODUCTOS QUE GEOVICTORIA OFRECE — control de asistencia, relojes control, app de marcaje y sus módulos (quiere cotizar, comprar, conocer precios, contratar, agendar reunión, que lo llamen, o es un cliente actual preguntando por OTRO producto nuestro). Una dotación grande (>50) SIGUE siendo comercial: el tamaño no lo excluye.
@@ -180,7 +194,7 @@ Clasifica así:
 8) "hallazgos": arreglo (puede ser vacío) de observaciones accionables para mejorar a Vicky o el proceso de venta. Cada una { "tipo": "<etiqueta_corta_snake_case>", "detalle": "<1 frase>" }. Detecta por ejemplo: objecion_precio_mal_manejada, ofrecio_venta_no_pedida, pidio_fuera_de_catalogo, pidio_humano, dimensionamiento_dudoso, demora_respuesta, confusion_producto, oportunidad_perdida. Solo incluye hallazgos REALES y relevantes de esta conversación.
 
 Devuelve EXACTAMENTE este shape:
-{"grupo":"...","sub_bucket":null,"cotizacion_outcome":null,"motivo_no_cierre":null,"es_cliente_actual":false,"resumen":"...","accionable":"...","confianza":"...","hallazgos":[]}`
+{"bolsa":"...","bolsa_sub":null,"grupo":"...","sub_bucket":null,"cotizacion_outcome":null,"motivo_no_cierre":null,"es_cliente_actual":false,"resumen":"...","accionable":"...","confianza":"...","hallazgos":[]}`
 
 function buildTranscript(messages: TranscriptMessage[]): string {
   return messages
@@ -194,6 +208,19 @@ function coerce(raw: unknown): ConversationAnalysis {
   const grupo = ["comercial", "soporte", "no_identificado"].includes(String(o.grupo))
     ? (o.grupo as ConversationAnalysis["grupo"])
     : "no_identificado"
+  // BOLSA: si el modelo no la entrega (respuesta vieja), se deriva del grupo.
+  let bolsa = ["intencion_comercial", "cliente_existente", "no_califica", "no_identificado"].includes(String(o.bolsa))
+    ? (o.bolsa as ConversationAnalysis["bolsa"])
+    : grupo === "comercial"
+      ? "intencion_comercial"
+      : grupo === "soporte"
+        ? "cliente_existente"
+        : "no_identificado"
+  let bolsaSub = ["soporte", "postventa", "cobranza"].includes(String(o.bolsa_sub))
+    ? (o.bolsa_sub as ConversationAnalysis["bolsa_sub"])
+    : null
+  if (bolsa !== "cliente_existente") bolsaSub = null
+  if (bolsa === "cliente_existente" && !bolsaSub) bolsaSub = "soporte"
   let sub = ["crosselling", "lead", "reunion", "cotizacion", "solo_dudas"].includes(String(o.sub_bucket))
     ? (o.sub_bucket as ConversationAnalysis["sub_bucket"])
     : null
@@ -221,6 +248,8 @@ function coerce(raw: unknown): ConversationAnalysis {
         .slice(0, 8)
     : []
   return {
+    bolsa,
+    bolsa_sub: bolsaSub,
     grupo,
     sub_bucket: sub,
     cotizacion_outcome: outcome,

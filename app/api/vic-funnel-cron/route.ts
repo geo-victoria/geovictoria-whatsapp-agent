@@ -122,6 +122,8 @@ export async function GET(req: Request): Promise<Response> {
             body: JSON.stringify({
               conversation_id: c.id,
               contact: c.contact,
+              bolsa: analysis.bolsa,
+              bolsa_sub: analysis.bolsa_sub,
               grupo: analysis.grupo,
               sub_bucket: analysis.sub_bucket,
               cotizacion_outcome: analysis.cotizacion_outcome,
