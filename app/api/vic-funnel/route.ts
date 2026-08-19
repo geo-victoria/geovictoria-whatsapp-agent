@@ -2715,6 +2715,11 @@ function renderInboundDiario(
     #inbchat .bc{background:#d9fdd3;margin-left:auto;border-bottom-right-radius:3px}
     #inbchat .bv{background:#fff;margin-right:auto;border-bottom-left-radius:3px}
     #inbchat .bt{font-size:10.5px;color:#8a949c;margin-top:3px}
+    @media (max-width: 720px){
+      #inbdet-modal .m{width:96vw;max-height:88vh;padding:14px 14px}
+      #inbpop{max-width:92vw}
+      .card table th, .card table td{padding:5px 6px;font-size:12px}
+    }
   </style>
   <div style="overflow-x:auto;margin-top:8px"><table><thead>
   <tr><th></th><th colspan="8" class="gb">🎒 Grupo Bolsa · llegadas del día (nueva o reactivada tras ≥7 días de silencio)</th><th colspan="5" class="gf divi">📸 Grupo Foto · hitos del día</th></tr>
@@ -2740,7 +2745,8 @@ function renderInboundDiario(
       lista.slice(0, 30).forEach(function (par) {
         html += '<a href="#" data-tel="' + par[1] + '">' + par[0] + "</a>";
       });
-      if (lista.length > 30) html += '<a href="' + td.querySelector("a").getAttribute("href") + '">… y ' + (lista.length - 30) + " más — ver listado completo</a>";
+      if (lista.length > 30) html += '<a href="' + td.querySelector("a").getAttribute("href") + '">… y ' + (lista.length - 30) + " más</a>";
+      html += '<a href="' + td.querySelector("a").getAttribute("href") + '" style="color:#00aff2">📄 listado completo →</a>';
       pop.innerHTML = html;
       pop.querySelectorAll("a[data-tel]").forEach(function (a) {
         a.addEventListener("click", function (ev) { ev.preventDefault(); detalle(a.getAttribute("data-tel")); });
@@ -2791,10 +2797,25 @@ function renderInboundDiario(
       pop.style.display = "none";
       document.getElementById("inbdet-modal").style.display = "flex";
     }
+    // CELULAR (Lalo 19-ago, "hazlo responsivo"): sin hover, el primer toque
+    // en el número abre la viñeta (el listado completo queda como ítem
+    // dentro de ella); tocar fuera la cierra.
+    var esTouch = window.matchMedia && window.matchMedia("(hover: none)").matches;
     document.querySelectorAll("td.conpop").forEach(function (td) {
-      td.addEventListener("mouseenter", function () { abrir(td); });
-      td.addEventListener("mouseleave", cerrar);
+      if (esTouch) {
+        td.addEventListener("click", function (ev) { ev.preventDefault(); abrir(td); });
+      } else {
+        td.addEventListener("mouseenter", function () { abrir(td); });
+        td.addEventListener("mouseleave", cerrar);
+      }
     });
+    if (esTouch) {
+      document.addEventListener("click", function (ev) {
+        if (pop.style.display === "block" && !pop.contains(ev.target) && !(ev.target.closest && ev.target.closest("td.conpop"))) {
+          pop.style.display = "none";
+        }
+      });
+    }
     pop.addEventListener("mouseenter", function () { clearTimeout(timer); });
     pop.addEventListener("mouseleave", cerrar);
     document.getElementById("inbdet-modal").addEventListener("click", function (ev) {
