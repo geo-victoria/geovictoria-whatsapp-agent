@@ -366,8 +366,34 @@ export function clasificarSenalEspera(
  * activo/pausado_compromiso/finalizado — un loop 'cerrado' (opt-out, pagado…)
  * NUNCA revive solo. Best-effort: los webhooks la llaman con .catch(()=>{}).
  */
+/** PAGO REGISTRADO RECIENTE (19-ago, caso MATER/COT546): un contacto cuyo
+ * comprobante de transferencia ya fue casado (vic_kv comprobante_ok_<fono>)
+ * es un CLIENTE, no un prospecto — la maquinaria de venta no lo toca más:
+ * ni enrolamiento/reset de toques, ni relojes de traspaso, ni reapertura del
+ * candado v3. Ayer la clienta pagó $77.001 a las 17:04 y hoy el reloj de
+ * 120' la traspasó igual (correo "Nuevo Deal" a la dueña + presentación) y
+ * el loop le pidió la dotación desde cero. Ventana: 7 días desde el sello. */
+export async function pagoRegistradoReciente(contact: string): Promise<boolean> {
+  const limpio = (contact || "").replace(/\D/g, "")
+  if (!limpio || !SUPABASE_URL || !SUPABASE_KEY) return false
+  try {
+    const res = await supa(
+      `vic_kv?key=eq.${encodeURIComponent(`comprobante_ok_${limpio}`)}&select=value&limit=1`,
+    )
+    const rows = res.ok ? (((await res.json().catch(() => [])) as Array<{ value?: string }>) || []) : []
+    const raw = rows[0]?.value
+    if (!raw) return false
+    const at = Date.parse((JSON.parse(raw) as { at?: string })?.at || "")
+    return Number.isFinite(at) && Date.now() - at < 7 * 86400e3
+  } catch {
+    return false
+  }
+}
+
 export async function resetLoop(contact: string, mensaje?: string): Promise<void> {
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
+  // Cliente con pago registrado: su mensaje post-venta no re-arma la cadencia.
+  if (await pagoRegistradoReciente(contact)) return
   const res = await supa(
     `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado&limit=1`,
   )
@@ -406,6 +432,8 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
  */
 export async function enrolarEnLoop(contact: string, country: string): Promise<void> {
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
+  // Cliente con pago registrado (comprobante casado): jamás se re-enrola.
+  if (await pagoRegistradoReciente(contact)) return
   const res = await supa(
     `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,estado&limit=1`,
   )

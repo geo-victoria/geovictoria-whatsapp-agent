@@ -32,7 +32,7 @@ import {
   sumarHorasHabiles,
 } from "@/lib/ptv"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { contactosAtendidosPorVendedor } from "@/lib/loop-v2"
+import { contactosAtendidosPorVendedor, pagoRegistradoReciente } from "@/lib/loop-v2"
 import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
@@ -1676,6 +1676,12 @@ export async function GET(req: Request) {
           traspasoActivo: conTraspaso.has(c.contact),
         })
     if (!decision.traspasar) continue
+    // PAGO REGISTRADO (19-ago, caso MATER/COT546): el cliente ya pagó por
+    // transferencia — no hay NADA que traspasar. Sin esta guarda, el reloj de
+    // 120' traspasó a una clienta pagada (correo "Asignación Nuevo Deal" a la
+    // dueña del deal + presentación al prospecto) porque su cotización era
+    // del canal EJECUTIVO y la conversación con Vicky nació recién al pagar.
+    if (await pagoRegistradoReciente(c.contact)) continue
     // v2, etapas con cotización de por medio: si la vigente ya está ACEPTADA
     // en Zoho, no hay demora que castigar — el cliente está en el pago.
     if (usaV2 && decision.motivo !== "etapa_sin_preform") {
@@ -2405,6 +2411,10 @@ async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; rec
     const atendido = atendidos.has(l.contact)
     if (!atendido && l.estado === "cerrado" && (l.motivo_cierre === "ptv_traspasado" || l.motivo_cierre === "tm_traspasado")) {
       if (reabiertos >= 40) continue
+      // PAGO REGISTRADO (19-ago, MATER/COT546): el candado v3 reabrió el loop
+      // de una clienta pagada 20 min después del traspaso fantasma y el toque
+      // t1 le pidió la dotación desde cero. Cliente pagado no se reabre.
+      if (await pagoRegistradoReciente(l.contact)) continue
       // Escalonado: 20 min + 7 min por loop reabierto en este tick.
       const proximoToque = new Date(ahoraMs + 20 * 60_000 + reabiertos * 7 * 60_000).toISOString()
       await supa(`vic_loop?contact=eq.${encodeURIComponent(l.contact)}`, {
