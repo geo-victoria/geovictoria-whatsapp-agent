@@ -2514,9 +2514,24 @@ function computarCohortesInbound(params: {
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
     if (!tel) continue
-    if (/intervenci/i.test(String(q.Intervenci_n_Humana || ""))) {
+    const marca = String(q.Intervenci_n_Humana || "")
+    if (/intervenci/i.test(marca)) {
       telesEjecutivo.add(tel)
       continue
+    }
+    // HISTÓRICO SIN MARCA (caso MATER 19-ago, "no pasó por Vicky — solo le
+    // mandaron el comprobante"): una cotización sin canal estampado es de
+    // Vicky SOLO si la conversación existía ANTES de la emisión. Si el chat
+    // nació después (el cliente llegó a pagar una venta del ejecutivo), no
+    // es venta de Vicky.
+    if (!/100%/.test(marca)) {
+      const primeraIso = primeraVez.get(tel) || ""
+      const creadaMs = Date.parse(String(q.Created_Time || ""))
+      const primeraMs = Date.parse(primeraIso)
+      if (Number.isFinite(creadaMs) && (!Number.isFinite(primeraMs) || primeraMs > creadaMs + 3600e3)) {
+        telesEjecutivo.add(tel)
+        continue
+      }
     }
     formalSet.add(tel)
     if (esAceptadaOMas(q)) aceptadaSet.add(tel)
@@ -2622,6 +2637,7 @@ function renderInboundDiario(
   return `<div class="card"><h2>📥 Oportunidades inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"}</span></h2>
   <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> llegaron en RANGO VICKY (${prom}/día) · ${tCom} calificadas (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio (${pctDe(tPre, tCom)} de las calificadas) · ${tFor} con formal de Vicky · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre sobre precio) · <a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=derivada" style="color:#e67e22"><b>${tDer}</b> derivadas al equipo (&gt;20)</a></div>
   ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
+  <div class="sub" style="margin:0 0 4px;color:#9aa1a9">Barras = etapa EXACTA en que está HOY cada oportunidad (los segmentos de un día suman su «Llegaron»). La tabla de abajo ACUMULA: «alcanzaron la etapa» — por eso un día con 1 pagada muestra «Con intención, sin precio: 0» en la barra y «Intención comercial: 1» en la tabla (la pagada ya pasó por ahí).</div>
   <div id="inbDiaria" style="height:320px"></div>
   <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
     <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre</th>
@@ -2632,7 +2648,9 @@ function renderInboundDiario(
       var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
       var SERIES = ${JSON.stringify(series)};
       Plotly.react("inbDiaria", SERIES.map(function (s) {
-        return { x: DIAS, y: s.y, name: s.n, type: "bar", marker: { color: s.c } };
+        // namelength -1: el hover unificado truncaba "Con intención, sin
+        // precio" a "Con intenció…" y la etapa exacta se leía como acumulada.
+        return { x: DIAS, y: s.y, name: s.n, type: "bar", marker: { color: s.c }, hoverlabel: { namelength: -1 } };
       }), {
         barmode: "stack",
         margin: { l: 34, r: 12, t: 10, b: 46 },
@@ -5939,8 +5957,18 @@ export async function GET(req: Request): Promise<Response> {
           const telPorQuote = new Map<string, string>()
           for (const q of cierre?.todasList || []) {
             const qid = String(q.id || "")
-            if (/intervenci/i.test(String(q.Intervenci_n_Humana || ""))) marcaEjec.add(qid)
-            telPorQuote.set(qid, digits(String(q.Tel_fono_Contacto || "")))
+            const marca = String(q.Intervenci_n_Humana || "")
+            const telQ2 = digits(String(q.Tel_fono_Contacto || ""))
+            if (/intervenci/i.test(marca)) marcaEjec.add(qid)
+            // Sin marca (histórico): misma regla del embudo — si la
+            // conversación nació DESPUÉS de la emisión, la venta no es de
+            // Vicky (caso MATER: solo le mandaron el comprobante).
+            if (!/100%/.test(marca) && !/intervenci/i.test(marca)) {
+              const pMs = Date.parse(primeraVez.get(telQ2) || "")
+              const cMs = Date.parse(String(q.Created_Time || ""))
+              if (Number.isFinite(cMs) && (!Number.isFinite(pMs) || pMs > cMs + 3600e3)) marcaEjec.add(qid)
+            }
+            telPorQuote.set(qid, telQ2)
           }
           const finCaja = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
           const iniCaja = rango && rango.desdeMs > 0 ? rango.desdeMs : finCaja - 29 * 864e5
@@ -5951,10 +5979,12 @@ export async function GET(req: Request): Promise<Response> {
             try {
               const v = JSON.parse(row.value) as { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number }
               const qid = String(row.key).replace("venta_dash_v3_", "")
-              if (marcaEjec.has(qid)) continue // canal ejecutivo estampado
+              if (marcaEjec.has(qid)) continue // canal ejecutivo (estampado o sin conversación previa)
               if (/geovictoria|prueba/i.test(String(v.empresa || ""))) continue
+              // Fuera del universo del país (p. ej. la venta CO en COP que
+              // inflaba la caja CL): si el listado no la conoce, no entra.
               const telQ = telPorQuote.get(qid)
-              if (telQ && paisDeTelefono(telQ) !== pais) continue
+              if (!telQ || paisDeTelefono(telQ) !== pais) continue
               const t = Date.parse(String(v.pagoIso || ""))
               if (!Number.isFinite(t) || t < iniCaja || t > finCaja) continue
               cantidad++
