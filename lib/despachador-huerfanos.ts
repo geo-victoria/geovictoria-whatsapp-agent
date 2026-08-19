@@ -48,6 +48,9 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // definida vs la que Zoho ejecutó (timeline) y marca casos borde para la
   // pestaña vista=tombolas del dash. Lee ~25 timelines por tick.
   { nombre: "tombola_audit", path: "/api/vic-tombola-audit-cron", cadaMin: 120 },
+  // Foto horaria del dash (Lalo 19-ago): regenera las páginas precalculadas
+  // (principal + inbound) para que la carga humana sea instantánea.
+  { nombre: "dash_snap", path: "/api/vic-dash-snap-cron", cadaMin: 60 },
 ]
 
 /**

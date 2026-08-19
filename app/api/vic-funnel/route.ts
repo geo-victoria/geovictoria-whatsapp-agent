@@ -5466,6 +5466,51 @@ export async function GET(req: Request): Promise<Response> {
     key = ""
   }
 
+  // ── FOTO HORARIA DEL DASH (Lalo 19-ago, "que no demore tanto en cargar") ──
+  // Las vistas pesadas SIN filtros se sirven al tiro desde una foto en vic_kv
+  // que vic-dash-snap-cron regenera cada hora; el botón "⟳ Actualizar dash"
+  // (?fresh=1) computa en vivo. Filtros, drill-downs y sesiones de VENDEDOR
+  // (cartera propia) siguen 100% en vivo. La foto se guarda solo desde
+  // renders con llave máquina (links con ?key=); al servirla a una sesión
+  // humana se le quita la llave de los links (regla anti-fuga 07-ago) — la
+  // cookie autentica igual.
+  const fresh = searchParams.get("fresh") === "1"
+  const vistaSnap = (searchParams.get("vista") || "").trim()
+  const PARAMS_FOTO = new Set(["key", "vista", "fresh"])
+  const esAdminOMaquina = !quien || /admin/i.test(quien)
+  const snapKey =
+    esAdminOMaquina && ["", "inbound"].includes(vistaSnap) && [...searchParams.keys()].every((k) => PARAMS_FOTO.has(k))
+      ? `dash_snap_${vistaSnap || "main"}`
+      : ""
+  if (snapKey && !fresh) {
+    try {
+      const crudo = await kvGet(snapKey)
+      const foto = crudo ? (JSON.parse(crudo) as { at?: string; html?: string }) : null
+      const edadMs = foto ? Date.now() - Date.parse(String(foto.at || "")) : NaN
+      if (foto?.html && Number.isFinite(edadMs) && edadMs < 2 * 3600e3) {
+        const pFresh = new URLSearchParams()
+        if (key) pFresh.set("key", key)
+        if (vistaSnap) pFresh.set("vista", vistaSnap)
+        pFresh.set("fresh", "1")
+        const mins = Math.max(0, Math.round(edadMs / 60000))
+        const banner = `<div style="position:sticky;top:0;z-index:60;background:#fff8e6;border-bottom:1px solid #f2e3b3;padding:6px 14px;font-size:13px;font-weight:600;color:#7a5b00">🕐 Datos de hace ${mins} min (foto horaria) · <a href="?${pFresh.toString()}" style="color:#00aff2">⟳ Actualizar dash</a></div>`
+        let htmlFoto = foto.html
+        // Anti-fuga: la foto nace de un render máquina (links con la llave);
+        // a una sesión de navegador se le sirven links SIN llave.
+        if (!key && FUNNEL_KEY) {
+          htmlFoto = htmlFoto
+            .split(`key=${FUNNEL_KEY}&`).join("")
+            .split(`?key=${FUNNEL_KEY}`).join("?")
+            .split(`&key=${FUNNEL_KEY}`).join("")
+            .split(`value="${FUNNEL_KEY}"`).join('value=""')
+        }
+        return page(htmlFoto.replace(/<body([^>]*)>/, (_m, a: string) => `<body${a}>${banner}`))
+      }
+    } catch {
+      /* foto ilegible → computar en vivo */
+    }
+  }
+
   const conv = (searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()
   if (conv) return renderConversation(conv, key)
   const wsp = (searchParams.get("wsp") || "").replace(/\D/g, "").trim()
@@ -6790,5 +6835,11 @@ export async function GET(req: Request): Promise<Response> {
 </script>
 </body></html>`
 
+  // Foto del dash: SOLO los renders con llave máquina la guardan (sus links
+  // llevan la llave; al servirla a humanos se les quita). El cron horario y
+  // cualquier carga máquina la mantienen fresca; un miss se auto-repuebla.
+  if (snapKey && key) {
+    void kvSet(snapKey, JSON.stringify({ at: new Date().toISOString(), html }))
+  }
   return page(html)
 }
