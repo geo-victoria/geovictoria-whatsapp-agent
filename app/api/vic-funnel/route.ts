@@ -287,11 +287,27 @@ function esAceptadaOMas(q: { Estado_Cotizacion?: string | null; Onboarding_Link?
 async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaCerrada[]> {
   const token = await getZohoAccessToken().catch(() => "")
   const ventas: VentaCerrada[] = []
+  // Caché completa en lecturas por LOTE (19-ago, "el dash carga lento"): el
+  // kvGet POR VENTA eran ~50 viajes seriales a Supabase en cada carga —
+  // varios segundos solo en leer una caché que casi siempre está completa.
+  const cachePorId = new Map<string, string>()
+  {
+    const ids = [...new Set(aceptadas.map((q) => String(q.id || "")).filter(Boolean))]
+    for (let i = 0; i < ids.length; i += 80) {
+      const keys = ids.slice(i, i + 80).map((id) => `"venta_dash_v3_${id}"`).join(",")
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=in.(${keys})&select=key,value`, {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+        cache: "no-store",
+      }).catch(() => null)
+      const rows = r?.ok ? ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) : []
+      for (const row of rows) cachePorId.set(String(row.key).replace(/^venta_dash_v3_/, ""), String(row.value || ""))
+    }
+  }
   for (const q of aceptadas) {
     const id = String(q.id || "")
     if (!id) continue
     const cacheKey = `venta_dash_v3_${id}`
-    const cached = await kvGet(cacheKey)
+    const cached = cachePorId.get(id) || ""
     if (cached) {
       try {
         const venta = JSON.parse(cached) as VentaCerrada
@@ -708,27 +724,56 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
         }),
         cache: "no-store",
       })
-    for (let offset = 0; offset < 3000; offset += 200) {
-      let res = await pedirPagina(offset)
-      // Token REVOCADO antes de su vencimiento declarado (incidente 17-ago:
-      // el dash quedó una hora sin aceptadas/pagadas y la venta de la mañana
-      // "desapareció"): un 401 fuerza refresco UNA vez y reintenta — y el
-      // refresco repara el kv para todos los demás consumidores de Zoho.
+    // Página 0 SERIAL: maneja el 401 con refresco una sola vez (incidente
+    // 17-ago: token revocado antes de su vencimiento — el dash quedó una hora
+    // sin aceptadas/pagadas; el refresco repara el kv para todos los
+    // consumidores de Zoho).
+    {
+      let res = await pedirPagina(0)
       if (res.status === 401 && !refrescado) {
         refrescado = true
         token = await getZohoAccessTokenFresco().catch(() => token)
-        res = await pedirPagina(offset)
+        res = await pedirPagina(0)
       }
-      if (!res.ok) {
-        if (offset === 0) return null
-        break // páginas posteriores fallan → se sirve lo acumulado
-      }
+      if (!res.ok) return null
       const pagina = (await res.json().catch(() => null)) as {
         data?: RawAceptada[]
         info?: { more_records?: boolean }
       } | null
       filas.push(...(pagina?.data || []))
-      if (!pagina?.info?.more_records) break
+      // Páginas siguientes en OLEADAS PARALELAS de 5 (19-ago, "el dash carga
+      // lento"): el listado eran 4-6 viajes COQL uno tras otro — el mayor
+      // costo fijo de la carga. Con el token ya validado por la página 0, el
+      // paralelo es seguro.
+      if (pagina?.info?.more_records) {
+        let masPaginas = true
+        for (let base = 200; base < 3000 && masPaginas; base += 1000) {
+          const offsets: number[] = []
+          for (let o = base; o < Math.min(base + 1000, 3000); o += 200) offsets.push(o)
+          const resultados = await Promise.all(
+            offsets.map(async (offset) => {
+              const r = await pedirPagina(offset).catch(() => null)
+              if (!r || !r.ok) return { ok: false as const, data: [] as RawAceptada[], more: false }
+              const p = (await r.json().catch(() => null)) as {
+                data?: RawAceptada[]
+                info?: { more_records?: boolean }
+              } | null
+              return { ok: true as const, data: p?.data || [], more: Boolean(p?.info?.more_records) }
+            }),
+          )
+          for (const rp of resultados) {
+            if (!rp.ok) {
+              masPaginas = false
+              break // páginas posteriores fallan → se sirve lo acumulado
+            }
+            filas.push(...rp.data)
+            if (!rp.more) {
+              masPaginas = false
+              break
+            }
+          }
+        }
+      }
     }
     const universo = filas.filter((q) => {
       // País de la cotización: el de su conversación de origen; si no está
