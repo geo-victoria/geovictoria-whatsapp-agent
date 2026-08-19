@@ -2448,10 +2448,12 @@ async function fetchPrimeraConversacion(): Promise<Map<string, string>> {
   return primera
 }
 
-const ETAPAS_INBOUND = ["llegaron", "comercial", "precio", "formal", "aceptada", "pagada"] as const
+const ETAPAS_INBOUND = ["llegaron", "cobranza", "soporte", "comercial", "precio", "formal", "aceptada", "pagada"] as const
 type EtapaInbound = (typeof ETAPAS_INBOUND)[number]
 const ETIQUETA_ETAPA_INBOUND: Record<EtapaInbound, string> = {
   llegaron: "Llegó (sin intención aún)",
+  cobranza: "Cliente/Cobranza",
+  soporte: "Cliente/Soporte",
   comercial: "Intención comercial",
   precio: "Vio precio",
   formal: "Formal enviada",
@@ -2511,6 +2513,21 @@ function computarCohortesInbound(params: {
   // cohorte subcontaría (misma corrección que 📈 Evolución).
   const comercialSet = new Set<string>()
   for (const r of analysisRows) if (r.grupo === "comercial") comercialSet.add(digits(r.contact))
+  // CLIENTES actuales (Lalo 19-ago): columnas Cliente/Cobranza y Cliente/
+  // Soporte entre Llegaron e Intención. Base = análisis grupo=soporte o
+  // es_cliente_actual sin intención comercial; cobranza se distingue por el
+  // TEXTO del análisis (deuda/factura/bloqueo por pago) — no hay clasificación
+  // estructurada de cobranza todavía.
+  const RE_COBRANZA = /cobranz|deud|factur|moros|pago pendiente|bloque\w* (?:de acceso )?por (?:no )?pago|regulariz\w* (?:el |su )?pago|comprobante de (?:pago|transferencia)/i
+  const cobranzaSet = new Set<string>()
+  const soporteSet = new Set<string>()
+  for (const r of analysisRows) {
+    if (!(r.grupo === "soporte" || (r.es_cliente_actual && r.grupo !== "comercial"))) continue
+    const tel = digits(r.contact)
+    const texto = `${r.resumen || ""} ${r.accionable || ""} ${(r.hallazgos || []).map((h) => `${h.tipo} ${h.detalle}`).join(" ")}`
+    if (RE_COBRANZA.test(texto)) cobranzaSet.add(tel)
+    else soporteSet.add(tel)
+  }
   void hardQuote
   // ═══ LENTE CAJA (Lalo 19-ago, "queremos ver todo como caja, inclusive en
   // las barras y en la tabla"): cada métrica se anota el día en que el EVENTO
@@ -2537,6 +2554,8 @@ function computarCohortesInbound(params: {
   const vacio = () => new Map<string, Set<string>>()
   const porDia: Record<EtapaInbound, Map<string, Set<string>>> = {
     llegaron: vacio(),
+    cobranza: vacio(),
+    soporte: vacio(),
     comercial: vacio(),
     precio: vacio(),
     formal: vacio(),
@@ -2551,7 +2570,10 @@ function computarCohortesInbound(params: {
   }
   for (const [tel, dia] of llegadaDia) {
     anotar(porDia.llegaron, dia, tel)
-    // Intención: el análisis no trae fecha propia — se anota el día de llegada.
+    // Cliente actual y la intención: el análisis no trae fecha propia — se
+    // anotan el día de llegada.
+    if (cobranzaSet.has(tel)) anotar(porDia.cobranza, dia, tel)
+    else if (soporteSet.has(tel)) anotar(porDia.soporte, dia, tel)
     if (comercialSet.has(tel) || preformAt.has(tel)) anotar(porDia.comercial, dia, tel)
   }
   // Precio dado: el día del sello del preform.
@@ -2609,7 +2631,7 @@ function renderInboundDiario(
     for (const s of porDia[etapa].values()) for (const t of s) u.add(t)
     return u.size
   }
-  const tLleg = totUnico("llegaron"), tCom = totUnico("comercial"), tPre = totUnico("precio"), tFor = totUnico("formal"), tAce = totUnico("aceptada"), tPag = totUnico("pagada")
+  const tLleg = totUnico("llegaron"), tCob = totUnico("cobranza"), tSop = totUnico("soporte"), tCom = totUnico("comercial"), tPre = totUnico("precio"), tFor = totUnico("formal"), tAce = totUnico("aceptada"), tPag = totUnico("pagada")
   const tDer = [...derivadas.values()].filter((d) => idx.has(d)).length
   const prom = dias.length ? (tLleg / dias.length).toFixed(1) : "0"
   const pctDe = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
@@ -2629,6 +2651,8 @@ function renderInboundDiario(
     return `<tr>
       <td style="white-space:nowrap">${nombreDia(d)}</td>
       ${celda(d, "llegaron", true)}
+      ${celda(d, "cobranza")}
+      ${celda(d, "soporte")}
       ${celda(d, "comercial")}
       ${celda(d, "precio")}
       ${celda(d, "formal")}
@@ -2641,7 +2665,7 @@ function renderInboundDiario(
     `<td style="text-align:center"><b>${v > 0 ? `<a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}">${v}</a>` : "0"}</b></td>`
   const filaTotal = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc">
     <td><b>TOTAL</b></td>
-    ${celdaTotal(tLleg, "llegaron")}${celdaTotal(tCom, "comercial")}${celdaTotal(tPre, "precio")}${celdaTotal(tFor, "formal")}${celdaTotal(tAce, "aceptada")}${celdaTotal(tPag, "pagada")}
+    ${celdaTotal(tLleg, "llegaron")}${celdaTotal(tCob, "cobranza")}${celdaTotal(tSop, "soporte")}${celdaTotal(tCom, "comercial")}${celdaTotal(tPre, "precio")}${celdaTotal(tFor, "formal")}${celdaTotal(tAce, "aceptada")}${celdaTotal(tPag, "pagada")}
     <td style="text-align:center"><b>${pctDe(tPag, tPre)}</b></td>
   </tr>`
   // GRÁFICO lente caja: barras = llegadas del día; líneas = eventos del día.
@@ -2654,13 +2678,13 @@ function renderInboundDiario(
     pagada: serie("pagada"),
   }
   return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · lente caja</span></h2>
-  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> llegaron en RANGO VICKY (${prom}/día) · ${tCom} calificadas (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio · ${tFor} formales de Vicky emitidas · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre del período) · <a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=derivada" style="color:#e67e22"><b>${tDer}</b> derivadas al equipo (&gt;20)</a></div>
+  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> llegaron en RANGO VICKY (${prom}/día) · ${tCob} cliente/cobranza · ${tSop} cliente/soporte · ${tCom} calificadas (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio · ${tFor} formales de Vicky emitidas · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre del período) · <a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=derivada" style="color:#e67e22"><b>${tDer}</b> derivadas al equipo (&gt;20)</a></div>
   ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky, inbound + outbound)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
   <div id="inbDiaria" style="height:320px"></div>
   <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
-    <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
+    <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Cliente/Cobranza</th><th style="text-align:center">Cliente/Soporte</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotal}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">LENTE CAJA: cada número se cuenta el día en que el EVENTO ocurrió — la llegada el día del primer mensaje, el precio el día que Vicky lo mostró, la formal el día de su emisión y el pago el día que entró (por eso un pago de un cliente que llegó hace semanas SÍ aparece en su día). Las columnas de embudo son INBOUND en rango de Vicky (≤20); la columna 💰 Pagada es TODA la caja del canal Vicky, <b>outbound incluido</b> (los pagos de la cadencia — Loumar, Contabilidad IA — cuentan el día que pagaron aunque no sumen en «Llegaron»). Las cotizaciones del canal ejecutivo y los contactos internos quedan fuera; los &gt;20 van en «derivadas al equipo». Cierre del día = pagadas del día ÷ vieron precio ese día (puede superar 100% si paga alguien de cosecha vieja u outbound); el cierre del TOTAL usa los únicos del período. Hora de Chile. Clic en cualquier número para ver las empresas.</div>
+  <div class="sub" style="margin:8px 0 0">LENTE CAJA: cada número se cuenta el día en que el EVENTO ocurrió — la llegada el día del primer mensaje, el precio el día que Vicky lo mostró, la formal el día de su emisión y el pago el día que entró (por eso un pago de un cliente que llegó hace semanas SÍ aparece en su día). Cliente/Cobranza y Cliente/Soporte son conversaciones de CLIENTES actuales (cobranza = deuda/factura/bloqueo por pago según el análisis; el resto, soporte), anotadas el día de su PRIMERA conversación. Las columnas de embudo son INBOUND en rango de Vicky (≤20); la columna 💰 Pagada es TODA la caja del canal Vicky, <b>outbound incluido</b> (los pagos de la cadencia — Loumar, Contabilidad IA — cuentan el día que pagaron aunque no sumen en «Llegaron»). Las cotizaciones del canal ejecutivo y los contactos internos quedan fuera; los &gt;20 van en «derivadas al equipo». Cierre del día = pagadas del día ÷ vieron precio ese día (puede superar 100% si paga alguien de cosecha vieja u outbound); el cierre del TOTAL usa los únicos del período. Hora de Chile. Clic en cualquier número para ver las empresas.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
