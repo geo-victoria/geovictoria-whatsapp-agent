@@ -423,7 +423,9 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
       convId,
     }
     ventas.push(venta)
-    if (montoClp > 0 && pagoIso) await kvSet(cacheKey, JSON.stringify(venta))
+    // Cinturón: al kv de ventas SOLO entran pagadas reales (Onboarding_Link
+    // o estado Pagada) — una Aceptada sin pago jamás se registra como venta.
+    if (montoClp > 0 && pagoIso && esPagada(q)) await kvSet(cacheKey, JSON.stringify(venta))
   }
   return ventas.sort((a, b) => (b.pagoIso || "").localeCompare(a.pagoIso || ""))
 }
@@ -5915,10 +5917,15 @@ export async function GET(req: Request): Promise<Response> {
           if (!rv.ok) throw new Error("kv ventas no disponible")
           const marcaEjec = new Set<string>()
           const telPorQuote = new Map<string, string>()
+          // Estado VIGENTE en Zoho: el kv venta_dash arrastró históricamente
+          // aceptadas sin pago (caso SYM 19-ago) — solo cuenta como pago lo
+          // que HOY es pagada de verdad.
+          const pagadasIds = new Set<string>()
           for (const q of cierre?.todasList || []) {
             const qid = String(q.id || "")
             const marca = String(q.Intervenci_n_Humana || "")
             const telQ2 = digits(String(q.Tel_fono_Contacto || ""))
+            if (esPagada(q)) pagadasIds.add(qid)
             if (/intervenci/i.test(marca)) marcaEjec.add(qid)
             // Sin marca (histórico): misma regla del embudo — si la
             // conversación nació DESPUÉS de la emisión, la venta no es de
@@ -5937,6 +5944,7 @@ export async function GET(req: Request): Promise<Response> {
             try {
               const v = JSON.parse(row.value) as { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number }
               const qid = String(row.key).replace("venta_dash_v3_", "")
+              if (!pagadasIds.has(qid)) continue // aceptada sin pago o fuera del universo
               if (marcaEjec.has(qid)) continue // canal ejecutivo (estampado o sin conversación previa)
               if (/geovictoria|prueba/i.test(String(v.empresa || ""))) continue
               // Fuera del universo del país (p. ej. la venta CO en COP que
@@ -6141,7 +6149,14 @@ export async function GET(req: Request): Promise<Response> {
         const t = digits(String(q.Tel_fono_Contacto || ""))
         if (num && t) telPorNumero.set(num, t)
       }
-      ventasHtml = renderVentasCerradas(await construirVentasCerradas(cierre.aceptadasList), key, llegoPorFormulario, telPorNumero)
+      // SOLO pagadas de verdad (caso SYM 19-ago: aceptó online y nunca pagó
+      // — la aceptación NO es venta ni entra al registro venta_dash).
+      ventasHtml = renderVentasCerradas(
+        await construirVentasCerradas(cierre.aceptadasList.filter((q) => esPagada(q))),
+        key,
+        llegoPorFormulario,
+        telPorNumero,
+      )
     }
     rows = allRows.filter((r) => {
       if (isTestContact(r.contact)) return false
