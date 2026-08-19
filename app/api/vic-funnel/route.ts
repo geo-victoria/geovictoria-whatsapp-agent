@@ -6054,6 +6054,15 @@ export async function GET(req: Request): Promise<Response> {
           const porTelListado = new Map(filasListado.map((f) => [digits(f.contacto), f]))
           const sub: FilaListado[] = []
           const vistos = new Set<string>()
+          // En el drill-down de LLEGARON, la fila mínima muestra la
+          // clasificación REAL del contacto si se conoce (caso 56984052692,
+          // Lalo 19-ago: era soporte obvio y decía "sin intención aún").
+          const clasePorTel = new Map<string, string>()
+          if (etapaQ === "llegaron" && !esDerivadas) {
+            for (const et of ["soporte", "cobranza", "comercial"] as EtapaInbound[]) {
+              for (const tels of cohortes.porDia[et].values()) for (const t of tels) clasePorTel.set(t, ETIQUETA_ETAPA_INBOUND[et])
+            }
+          }
           // Lente caja: cada etapa vive en porDia[etapa] = Map<día, Set<tel>>;
           // el drill-down lista los contactos con ese EVENTO en el día pedido.
           const fuente: Array<[string, string]> = esDerivadas
@@ -6075,7 +6084,7 @@ export async function GET(req: Request): Promise<Response> {
             sub.push({
               empresa: `+${tel}`,
               contacto: tel,
-              estado: ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ,
+              estado: clasePorTel.get(tel) || ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ,
               fechaIso: primeraVez.get(tel) || "",
               estadoZoho: "—",
               propietario: "—",
