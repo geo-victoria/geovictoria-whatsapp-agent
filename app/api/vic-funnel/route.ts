@@ -2478,8 +2478,13 @@ function computarCohortesInbound(params: {
   usuarios: Map<string, number>
   pais: Pais
   rango: RangoFechas | null
+  /** Pagos REALES del canal Vicky (registro venta_dash, fecha del pago).
+   * Fuente de la columna 💰 Pagada — incluye outbound (caso Loumar/
+   * Contabilidad IA 19-ago: pagaron lunes/martes y la tabla los perdía por
+   * ser de cadencia). null = no se pudo leer → fallback por cotización. */
+  pagos: Array<{ tel: string; t: number }> | null
 }): CohortesInbound {
-  const { primeraVez, analysisRows, preformAt, quotes, hardQuote, toque0, usuarios, pais, rango } = params
+  const { primeraVez, analysisRows, preformAt, quotes, hardQuote, toque0, usuarios, pais, rango, pagos } = params
   const testSet = metricsContactSet()
   const diaDe = (iso: string | null | undefined): string => {
     const t = Date.parse(String(iso || ""))
@@ -2574,7 +2579,15 @@ function computarCohortesInbound(params: {
     if (!comercialSet.has(tel) && !preformAt.has(tel)) anotar(porDia.comercial, llegadaDia.get(tel) || diaEmision, tel)
     const diaAcepta = diaDe(q.Fecha_Hora_Cotizacion || q.Modified_Time)
     if (esAceptadaOMas(q)) anotar(porDia.aceptada, diaAcepta, tel)
-    if (esPagada(q)) anotar(porDia.pagada, diaAcepta, tel)
+    // Pagada por cotización SOLO como fallback: con el registro de pagos
+    // disponible, la columna sale de ahí (día real del pago, con outbound).
+    if (esPagada(q) && !pagos) anotar(porDia.pagada, diaAcepta, tel)
+  }
+  if (pagos) {
+    for (const p of pagos) {
+      if (!p.tel || paisDeTelefono(p.tel) !== pais || isTestContact(p.tel, testSet)) continue
+      anotar(porDia.pagada, diaDe(new Date(p.t).toISOString()), p.tel)
+    }
   }
   return { dias, porDia, derivadas }
 }
@@ -2644,7 +2657,7 @@ function renderInboundDiario(
   <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
     <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotal}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">LENTE CAJA: cada número se cuenta el día en que el EVENTO ocurrió — la llegada el día del primer mensaje, el precio el día que Vicky lo mostró, la formal el día de su emisión y el pago el día que entró (por eso un pago de un cliente que llegó hace semanas SÍ aparece en su día). Solo INBOUND en rango de Vicky (≤20) y solo lo que Vicky inició: las cotizaciones del canal ejecutivo y los contactos internos quedan fuera; los &gt;20 van en «derivadas al equipo». Cierre del día = pagadas del día ÷ vieron precio ese día; el cierre del TOTAL usa los únicos del período. Hora de Chile. Clic en cualquier número para ver las empresas.</div>
+  <div class="sub" style="margin:8px 0 0">LENTE CAJA: cada número se cuenta el día en que el EVENTO ocurrió — la llegada el día del primer mensaje, el precio el día que Vicky lo mostró, la formal el día de su emisión y el pago el día que entró (por eso un pago de un cliente que llegó hace semanas SÍ aparece en su día). Las columnas de embudo son INBOUND en rango de Vicky (≤20); la columna 💰 Pagada es TODA la caja del canal Vicky, <b>outbound incluido</b> (los pagos de la cadencia — Loumar, Contabilidad IA — cuentan el día que pagaron aunque no sumen en «Llegaron»). Las cotizaciones del canal ejecutivo y los contactos internos quedan fuera; los &gt;20 van en «derivadas al equipo». Cierre del día = pagadas del día ÷ vieron precio ese día (puede superar 100% si paga alguien de cosecha vieja u outbound); el cierre del TOTAL usa los únicos del período. Hora de Chile. Clic en cualquier número para ver las empresas.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
@@ -5877,6 +5890,63 @@ export async function GET(req: Request): Promise<Response> {
     if (vista === "inbound" || inbdet) {
       try {
         const primeraVez = await fetchPrimeraConversacion()
+        // 💰 PAGOS REALES del canal Vicky (registro venta_dash con pagoIso):
+        // se leen ANTES del cómputo porque alimentan la columna Pagada de la
+        // tabla (día del PAGO, inbound + outbound) además de la tarjeta de
+        // caja. null = lectura fallida → la columna cae al día de aceptación
+        // por cotización (solo inbound), como antes.
+        let pagosVicky: Array<{ tel: string; t: number; monto: number; txt: string }> | null = null
+        try {
+          const rv = await fetch(
+            `${SUPABASE_URL}/rest/v1/vic_kv?select=key,value&key=like.venta_dash_v3_*&limit=3000`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+          )
+          const filasKv = rv.ok ? ((await rv.json()) as Array<{ key: string; value: string }>) : []
+          if (!rv.ok) throw new Error("kv ventas no disponible")
+          const marcaEjec = new Set<string>()
+          const telPorQuote = new Map<string, string>()
+          for (const q of cierre?.todasList || []) {
+            const qid = String(q.id || "")
+            const marca = String(q.Intervenci_n_Humana || "")
+            const telQ2 = digits(String(q.Tel_fono_Contacto || ""))
+            if (/intervenci/i.test(marca)) marcaEjec.add(qid)
+            // Sin marca (histórico): misma regla del embudo — si la
+            // conversación nació DESPUÉS de la emisión, la venta no es de
+            // Vicky (caso MATER: solo le mandaron el comprobante).
+            if (!/100%/.test(marca) && !/intervenci/i.test(marca)) {
+              const pMs = Date.parse(primeraVez.get(telQ2) || "")
+              const cMs = Date.parse(String(q.Created_Time || ""))
+              if (Number.isFinite(cMs) && (!Number.isFinite(pMs) || pMs > cMs + 3600e3)) marcaEjec.add(qid)
+            }
+            telPorQuote.set(qid, telQ2)
+          }
+          const finCaja = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
+          const iniCaja = rango && rango.desdeMs > 0 ? rango.desdeMs : finCaja - 29 * 864e5
+          pagosVicky = []
+          for (const row of filasKv) {
+            try {
+              const v = JSON.parse(row.value) as { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number }
+              const qid = String(row.key).replace("venta_dash_v3_", "")
+              if (marcaEjec.has(qid)) continue // canal ejecutivo (estampado o sin conversación previa)
+              if (/geovictoria|prueba/i.test(String(v.empresa || ""))) continue
+              // Fuera del universo del país (p. ej. la venta CO en COP que
+              // inflaba la caja CL): si el listado no la conoce, no entra.
+              const telQ = telPorQuote.get(qid)
+              if (!telQ || paisDeTelefono(telQ) !== pais) continue
+              const t = Date.parse(String(v.pagoIso || ""))
+              if (!Number.isFinite(t) || t < iniCaja || t > finCaja) continue
+              const m = Number(v.montoClp || 0) || 0
+              pagosVicky.push({ tel: telQ, t, monto: m, txt: `${v.numero || qid} $${m.toLocaleString("es-CL")}` })
+            } catch {
+              /* fila corrupta: se salta */
+            }
+          }
+          // Los más RECIENTES primero (19-ago: el pago de ayer quedaba
+          // escondido detrás de los 6 más antiguos y parecía no contado).
+          pagosVicky.sort((a, b) => b.t - a.t)
+        } catch {
+          pagosVicky = null
+        }
         const cohortes = computarCohortesInbound({
           primeraVez,
           analysisRows: allRows,
@@ -5887,6 +5957,7 @@ export async function GET(req: Request): Promise<Response> {
           usuarios: usuariosPorContacto,
           pais,
           rango,
+          pagos: pagosVicky ? pagosVicky.map((p) => ({ tel: p.tel, t: p.t })) : null,
         })
         if (inbdet) {
           const etapaCruda = (searchParams.get("inbEtapa") || "llegaron").trim()
@@ -5950,66 +6021,15 @@ export async function GET(req: Request): Promise<Response> {
             formularioSet: llegoPorFormulario,
           })
         }
-        // 💰 CAJA DEL PERÍODO (Lalo 19-ago, "ambos lentes"): pagos del CANAL
-        // VICKY cuyo PAGO ocurrió dentro del período — lente de actividad,
-        // complementa la cohorte (que asigna cada pago al día de LLEGADA del
-        // cliente, por eso un pago de cosecha vieja no aparece en el embudo).
-        let caja: { cantidad: number; monto: number; detalle: string } | undefined
-        try {
-          const rv = await fetch(
-            `${SUPABASE_URL}/rest/v1/vic_kv?select=key,value&key=like.venta_dash_v3_*&limit=3000`,
-            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
-          )
-          const filasKv = rv.ok ? ((await rv.json()) as Array<{ key: string; value: string }>) : []
-          const marcaEjec = new Set<string>()
-          const telPorQuote = new Map<string, string>()
-          for (const q of cierre?.todasList || []) {
-            const qid = String(q.id || "")
-            const marca = String(q.Intervenci_n_Humana || "")
-            const telQ2 = digits(String(q.Tel_fono_Contacto || ""))
-            if (/intervenci/i.test(marca)) marcaEjec.add(qid)
-            // Sin marca (histórico): misma regla del embudo — si la
-            // conversación nació DESPUÉS de la emisión, la venta no es de
-            // Vicky (caso MATER: solo le mandaron el comprobante).
-            if (!/100%/.test(marca) && !/intervenci/i.test(marca)) {
-              const pMs = Date.parse(primeraVez.get(telQ2) || "")
-              const cMs = Date.parse(String(q.Created_Time || ""))
-              if (Number.isFinite(cMs) && (!Number.isFinite(pMs) || pMs > cMs + 3600e3)) marcaEjec.add(qid)
+        // 💰 CAJA DEL PERÍODO: misma lectura de pagos que la columna Pagada
+        // (leída arriba, antes del cómputo) — tarjeta y tabla siempre calzan.
+        const caja = pagosVicky
+          ? {
+              cantidad: pagosVicky.length,
+              monto: pagosVicky.reduce((a, p) => a + p.monto, 0),
+              detalle: pagosVicky.slice(0, 8).map((p) => p.txt).join(" · ") + (pagosVicky.length > 8 ? " · …" : ""),
             }
-            telPorQuote.set(qid, telQ2)
-          }
-          const finCaja = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
-          const iniCaja = rango && rango.desdeMs > 0 ? rango.desdeMs : finCaja - 29 * 864e5
-          const pagosCaja: Array<{ t: number; txt: string; monto: number }> = []
-          for (const row of filasKv) {
-            try {
-              const v = JSON.parse(row.value) as { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number }
-              const qid = String(row.key).replace("venta_dash_v3_", "")
-              if (marcaEjec.has(qid)) continue // canal ejecutivo (estampado o sin conversación previa)
-              if (/geovictoria|prueba/i.test(String(v.empresa || ""))) continue
-              // Fuera del universo del país (p. ej. la venta CO en COP que
-              // inflaba la caja CL): si el listado no la conoce, no entra.
-              const telQ = telPorQuote.get(qid)
-              if (!telQ || paisDeTelefono(telQ) !== pais) continue
-              const t = Date.parse(String(v.pagoIso || ""))
-              if (!Number.isFinite(t) || t < iniCaja || t > finCaja) continue
-              const m = Number(v.montoClp || 0) || 0
-              pagosCaja.push({ t, monto: m, txt: `${v.numero || qid} $${m.toLocaleString("es-CL")}` })
-            } catch {
-              /* fila corrupta: se salta */
-            }
-          }
-          // Los más RECIENTES primero (19-ago: el pago de ayer quedaba
-          // escondido detrás de los 6 más antiguos y parecía no contado).
-          pagosCaja.sort((a, b) => b.t - a.t)
-          caja = {
-            cantidad: pagosCaja.length,
-            monto: pagosCaja.reduce((a, p) => a + p.monto, 0),
-            detalle: pagosCaja.slice(0, 8).map((p) => p.txt).join(" · ") + (pagosCaja.length > 8 ? " · …" : ""),
-          }
-        } catch {
-          caja = undefined
-        }
+          : undefined
         inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja })
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
