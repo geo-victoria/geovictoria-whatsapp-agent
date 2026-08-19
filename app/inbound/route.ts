@@ -98,8 +98,10 @@ export async function GET(req: Request): Promise<Response> {
   const mins = Number.isFinite(edadMs) ? Math.max(0, Math.round(edadMs / 60000)) : 0
   const banner = `<div style="position:sticky;top:0;z-index:60;background:#eef7ff;border-bottom:1px solid #cfe6f7;padding:6px 14px;font-size:13px;font-weight:600;color:#0b5e8a">📥 Panel interno · datos de hace ${mins} min (se refresca solo cada hora) · <a href="/inbound?k=${encodeURIComponent(k)}&fresh=1" style="color:#00aff2">⟳ Actualizar ahora</a></div>`
   html = html.replace(/<body([^>]*)>/, (_m, a: string) => `<body${a}>${banner}`)
-  return new Response(html, {
-    status: 200,
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex" },
-  })
+  // Cookie de LECTURA del panel: autoriza en vic-funnel SOLO los drill-downs,
+  // el ver-chat y la vista inbound (Lalo 19-ago: "al detalle me manda a
+  // loguearme") — el resto del dash sigue exigiendo login.
+  const h = new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex" })
+  h.append("set-cookie", `vic_inb=${encodeURIComponent(k)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=5184000`)
+  return new Response(html, { status: 200, headers: h })
 }

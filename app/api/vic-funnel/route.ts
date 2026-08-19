@@ -5510,10 +5510,31 @@ export async function GET(req: Request): Promise<Response> {
   const sesionHumana = cookieDe(req, "vic_auth") === authToken() && Boolean(quienCookie)
   if (key !== FUNNEL_KEY) {
     if (sesionHumana) key = FUNNEL_KEY
-    // LOGIN OFICIAL (Lalo 07-ago, piloto aprobado): correo corporativo +
-    // código por email, en todas las URLs. La pantalla de clave compartida
-    // murió; su POST sigue vivo solo como rescate operativo sin UI.
-    else return renderLoginCorreo("correo")
+    else {
+      // LECTURA DEL PANEL INTERNO (Lalo 19-ago, "al detalle me manda a
+      // loguearme"): la cookie vic_inb (sembrada por /inbound?k=) autoriza
+      // SIN LOGIN solo las vistas de lectura del panel — drill-downs
+      // (inbdet), ver-chat (conv) y la vista inbound. Todo lo demás del
+      // dash sigue con el login por correo.
+      const pideLectura =
+        Boolean((searchParams.get("inbdet") || "").trim()) ||
+        Boolean((searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()) ||
+        (searchParams.get("vista") || "").trim() === "inbound"
+      let lecturaOk = false
+      if (pideLectura) {
+        const tokInb = (() => {
+          try { return decodeURIComponent(cookieDe(req, "vic_inb") || "") } catch { return "" }
+        })()
+        if (tokInb) {
+          const esperado = (await kvGet("inbound_link_key")).trim()
+          lecturaOk = Boolean(esperado) && tokInb === esperado
+        }
+      }
+      // LOGIN OFICIAL (Lalo 07-ago, piloto aprobado): correo corporativo +
+      // código por email, en todas las URLs.
+      if (!lecturaOk) return renderLoginCorreo("correo")
+      // key queda vacía: los links de estas páginas no exponen la llave.
+    }
   }
   // LA COOKIE MANDA SIEMPRE (fuga 07-ago): los links internos llevaban la
   // llave máquina en ?key= y bastaba seguir uno ("Quitar filtros") para que
