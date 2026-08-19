@@ -5486,11 +5486,24 @@ export async function GET(req: Request): Promise<Response> {
   // cookie autentica igual.
   const fresh = searchParams.get("fresh") === "1"
   const vistaSnap = (searchParams.get("vista") || "").trim()
-  const PARAMS_FOTO = new Set(["key", "vista", "fresh"])
   const esAdminOMaquina = !quien || /admin/i.test(quien)
+  // Un parámetro cuenta como NEUTRO si falta o trae su valor por defecto —
+  // los links internos SIEMPRE llevan pais=cl y el form de filtros manda
+  // desde=&hasta=&estado= vacíos, y eso no puede matar la foto (19-ago,
+  // "la página se sigue demorando": la foto solo servía en la URL pelada).
+  const paramNeutro = (k: string): boolean => {
+    const vals = searchParams.getAll(k)
+    switch (k) {
+      case "key": case "vista": case "fresh": return true
+      case "pais": return vals.every((v) => !v.trim() || v.trim().toLowerCase() === "cl")
+      case "origen": return vals.every((v) => !v.trim() || v.trim().toLowerCase() === "vicky")
+      case "desde": case "hasta": case "estado": case "prop": return vals.every((v) => !v.trim())
+      default: return false
+    }
+  }
   const snapKey =
-    esAdminOMaquina && ["", "inbound"].includes(vistaSnap) && [...searchParams.keys()].every((k) => PARAMS_FOTO.has(k))
-      ? `dash_snap_${vistaSnap || "main"}`
+    esAdminOMaquina && ["", "gestion", "inbound"].includes(vistaSnap) && [...new Set(searchParams.keys())].every(paramNeutro)
+      ? `dash_snap_${vistaSnap === "inbound" ? "inbound" : "main"}`
       : ""
   // Botón "⟳ Actualizar" (Lalo 19-ago): también fuerza el ANÁLISIS de las
   // conversaciones nuevas antes de computar — espera acotada (12 s): lo normal
