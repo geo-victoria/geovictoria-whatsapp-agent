@@ -5505,6 +5505,16 @@ export async function GET(req: Request): Promise<Response> {
     esAdminOMaquina && ["", "gestion", "inbound"].includes(vistaSnap) && [...new Set(searchParams.keys())].every(paramNeutro)
       ? `dash_snap_${vistaSnap === "inbound" ? "inbound" : "main"}`
       : ""
+  // ── INBOUND = PANEL INTERNO (Lalo 19-ago): vive en /inbound (URL propia,
+  // sin login, sirve la foto). En esta URL solo lo ven la llave máquina
+  // (cron de fotos) y los ADMINS (drill-downs al hacer clic desde /inbound);
+  // cualquier otra sesión queda fuera.
+  const pideInbound = vistaSnap === "inbound" || Boolean((searchParams.get("inbdet") || "").trim())
+  if (pideInbound && !esAdminOMaquina) {
+    return paginaAviso("Sección no disponible", "<p>Este panel es de gestión interna.</p>", 403)
+  }
+  // Link del panel interno para la pestaña (solo se muestra a admins).
+  const inboundLinkKey = esAdminOMaquina ? (await kvGet("inbound_link_key")).trim() : ""
   // Botón "⟳ Actualizar" (Lalo 19-ago): también fuerza el ANÁLISIS de las
   // conversaciones nuevas antes de computar — espera acotada (12 s): lo normal
   // es un puñado de conversaciones por hora; si tarda más, el cron sigue solo
@@ -6762,7 +6772,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
-      ${vista === "inbound" ? `<b>📥 Inbound diario</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "inbound"); return p.toString() })()}">📥 Inbound diario</a>`}
+      ${vista === "inbound" ? `<b>📥 Inbound diario</b>` : inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>
   </div>
