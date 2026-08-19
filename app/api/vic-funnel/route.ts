@@ -2613,6 +2613,8 @@ function renderInboundDiario(
     nombres: Map<string, string>
     /** Detalle embebido por teléfono (para el modal instantáneo). */
     detalles: Map<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }>
+    /** Transcripción embebida por teléfono: [rol c|v, fecha, texto]. */
+    trans: Map<string, Array<[string, string, string]>>
   },
 ): string {
   const { dias, porDia } = c
@@ -2645,9 +2647,13 @@ function renderInboundDiario(
     })()
   }
   const DET: Record<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }> = {}
+  const TRS: Record<string, Array<[string, string, string]>> = {}
   for (const et of ETAPAS_INBOUND) for (const lista of Object.values(VIN[et])) for (const [, t] of lista) {
     if (!DET[t]) DET[t] = opts.detalles.get(t) || { e: nom(t), est: "—", ej: "—", dot: "s/d", ult: "", acc: "", conv: "", z: "" }
+    if (!TRS[t] && opts.trans.has(t)) TRS[t] = opts.trans.get(t)!
   }
+  // JSON seguro para vivir dentro de <script>: sin "</script>" posibles.
+  const jsonSeguro = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c")
   const celda = (dia: string, etapa: EtapaInbound, cls = "") => {
     const v = cnt(etapa, dia)
     if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
@@ -2703,6 +2709,12 @@ function renderInboundDiario(
     #inbdet-modal td{padding:5px 8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
     #inbdet-modal td:first-child{color:#6b7280;white-space:nowrap;width:34%}
     #inbdet-modal .x{float:right;cursor:pointer;border:0;background:#f3f4f6;border-radius:8px;padding:4px 10px;font-weight:700}
+    #inbdet-modal .vertrans{margin-top:12px;width:100%;padding:9px;border:0;border-radius:10px;background:#00aff2;color:#fff;font-weight:700;cursor:pointer}
+    #inbchat{display:none;margin-top:12px;max-height:340px;overflow-y:auto;background:#eef2f5;border-radius:12px;padding:12px}
+    #inbchat .bb{max-width:82%;margin:5px 0;padding:7px 11px;border-radius:12px;font-size:13px;white-space:pre-wrap;word-break:break-word}
+    #inbchat .bc{background:#d9fdd3;margin-left:auto;border-bottom-right-radius:3px}
+    #inbchat .bv{background:#fff;margin-right:auto;border-bottom-left-radius:3px}
+    #inbchat .bt{font-size:10.5px;color:#8a949c;margin-top:3px}
   </style>
   <div style="overflow-x:auto;margin-top:8px"><table><thead>
   <tr><th></th><th colspan="8" class="gb">🎒 Grupo Bolsa · llegadas del día (nueva o reactivada tras ≥7 días de silencio)</th><th colspan="5" class="gf divi">📸 Grupo Foto · hitos del día</th></tr>
@@ -2714,9 +2726,10 @@ function renderInboundDiario(
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
-    var VIN = ${JSON.stringify(VIN)};
-    var DET = ${JSON.stringify(DET)};
-    var ETQ = ${JSON.stringify(ETIQUETA_ETAPA_INBOUND)};
+    var VIN = ${jsonSeguro(VIN)};
+    var DET = ${jsonSeguro(DET)};
+    var TRS = ${jsonSeguro(TRS)};
+    var ETQ = ${jsonSeguro(ETIQUETA_ETAPA_INBOUND)};
     var pop = document.createElement("div"); pop.id = "inbpop"; document.body.appendChild(pop);
     var timer = null;
     function abrir(td) {
@@ -2742,6 +2755,7 @@ function renderInboundDiario(
     function detalle(tel) {
       var d = DET[tel] || {};
       var f = function (v) { return v && String(v).trim() ? v : "—"; };
+      var trans = TRS[tel] || [];
       document.getElementById("inbdet-cuerpo").innerHTML =
         "<h3>" + f(d.e) + "</h3><table>" +
         "<tr><td>Contacto</td><td>+" + tel + "</td></tr>" +
@@ -2750,8 +2764,30 @@ function renderInboundDiario(
         "<tr><td>Dotación</td><td>" + f(d.dot) + "</td></tr>" +
         "<tr><td>Última actividad</td><td>" + f(d.ult) + "</td></tr>" +
         "<tr><td>Accionable</td><td>" + f(d.acc) + "</td></tr>" +
-        "<tr><td>Links</td><td>" + (d.conv ? '<a href="?conv=' + d.conv + '">ver chat</a> · ' : "") + (d.z ? '<a href="' + d.z + '" target="_blank">Zoho</a>' : "") + "</td></tr>" +
-        "</table>";
+        "<tr><td>Links</td><td>" + (d.conv ? '<a href="?conv=' + d.conv + '">chat completo</a> · ' : "") + (d.z ? '<a href="' + d.z + '" target="_blank">Zoho</a>' : "") + "</td></tr>" +
+        "</table>" +
+        (trans.length ? '<button class="vertrans" id="btntrans">💬 Ver transcripción (' + trans.length + " mensajes)</button><div id=\"inbchat\"></div>" : "");
+      if (trans.length) {
+        document.getElementById("btntrans").addEventListener("click", function () {
+          var box = document.getElementById("inbchat");
+          if (box.style.display === "block") { box.style.display = "none"; this.textContent = "💬 Ver transcripción (" + trans.length + " mensajes)"; return; }
+          if (!box.childNodes.length) {
+            trans.forEach(function (m) {
+              var b = document.createElement("div");
+              b.className = "bb " + (m[0] === "c" ? "bc" : "bv");
+              b.textContent = m[2];
+              var tt = document.createElement("div");
+              tt.className = "bt";
+              tt.textContent = (m[0] === "c" ? "Cliente" : "Vicky") + " · " + m[1];
+              b.appendChild(tt);
+              box.appendChild(b);
+            });
+          }
+          box.style.display = "block";
+          box.scrollTop = box.scrollHeight;
+          this.textContent = "▲ Ocultar transcripción";
+        });
+      }
       pop.style.display = "none";
       document.getElementById("inbdet-modal").style.display = "flex";
     }
@@ -6268,7 +6304,34 @@ export async function GET(req: Request): Promise<Response> {
             z: f.zohoUrl || "",
           })
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel })
+        // Transcripciones EMBEBIDAS (Lalo 19-ago, "ver la transcripción dentro
+        // del pop-up"): últimos 30 mensajes (400 chars c/u) de cada contacto
+        // del panel, en UNA consulta RPC — el pop-up las abre sin red.
+        const transPorTel = new Map<string, Array<[string, string, string]>>()
+        try {
+          const telsPanel = new Set<string>()
+          for (const et of Object.keys(cohortes.porDia) as EtapaInbound[]) {
+            for (const tels of cohortes.porDia[et].values()) for (const t of tels) telsPanel.add(t)
+          }
+          if (telsPanel.size) {
+            const rt = await fetch(`${SUPABASE_URL}/rest/v1/rpc/vic_transcripts_de`, {
+              method: "POST",
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ tels: [...telsPanel], nmax: 30 }),
+              cache: "no-store",
+            })
+            if (rt.ok) {
+              const filasT = (await rt.json()) as Array<{ contact: string; role: string; at: string; content: string }>
+              for (const f of filasT) {
+                const t = digits(f.contact)
+                const arr = transPorTel.get(t) || []
+                arr.push([f.role === "user" ? "c" : "v", fmtSantiago(f.at), String(f.content || "")])
+                transPorTel.set(t, arr)
+              }
+            }
+          }
+        } catch { /* sin transcripciones: el pop-up muestra solo la ficha */ }
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel })
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
         inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`
