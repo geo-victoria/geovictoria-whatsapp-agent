@@ -912,15 +912,25 @@ type Row = {
 }
 
 async function fetchAnalysis(): Promise<Row[]> {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=conversation_id,contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,accionable,hallazgos,analyzed_at`,
-    {
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
-      cache: "no-store",
-    },
-  )
-  if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  return (await res.json()) as Row[]
+  // PAGINADO (bug 19-ago, "tanto sin intención?"): PostgREST corta en 1000
+  // filas y la tabla ya pasó las 1274 — el dash clasificaba con el análisis
+  // TRUNCADO (274 conversaciones invisibles: soporte subcontado, intención
+  // subcontada). Se pagina hasta agotar.
+  const filas: Row[] = []
+  for (let offset = 0; offset < 20000; offset += 1000) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversation_analysis?select=conversation_id,contact,grupo,sub_bucket,cotizacion_outcome,motivo_no_cierre,es_cliente_actual,resumen,accionable,hallazgos,analyzed_at&order=analyzed_at.asc&limit=1000&offset=${offset}`,
+      {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+        cache: "no-store",
+      },
+    )
+    if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    const lote = (await res.json()) as Row[]
+    filas.push(...lote)
+    if (lote.length < 1000) break
+  }
+  return filas
 }
 
 const digits = (c: string) => (c || "").replace(/\D/g, "")
@@ -5482,6 +5492,20 @@ export async function GET(req: Request): Promise<Response> {
     esAdminOMaquina && ["", "inbound"].includes(vistaSnap) && [...searchParams.keys()].every((k) => PARAMS_FOTO.has(k))
       ? `dash_snap_${vistaSnap || "main"}`
       : ""
+  // Botón "⟳ Actualizar" (Lalo 19-ago): también fuerza el ANÁLISIS de las
+  // conversaciones nuevas antes de computar — espera acotada (12 s): lo normal
+  // es un puñado de conversaciones por hora; si tarda más, el cron sigue solo
+  // por detrás y la próxima carga ya lo trae.
+  if (snapKey && fresh && FUNNEL_KEY) {
+    try {
+      await fetch(`${new URL(req.url).origin}/api/vic-funnel-cron?key=${encodeURIComponent(FUNNEL_KEY)}&limit=25`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
+      })
+    } catch {
+      /* timeout esperado con backlog grande: el análisis sigue corriendo solo */
+    }
+  }
   if (snapKey && !fresh) {
     try {
       const crudo = await kvGet(snapKey)

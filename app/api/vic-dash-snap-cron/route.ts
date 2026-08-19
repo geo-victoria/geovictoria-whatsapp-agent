@@ -42,6 +42,19 @@ export async function GET(req: Request): Promise<Response> {
   if (!FUNNEL_KEY) return NextResponse.json({ ok: false, error: "VIC_FUNNEL_KEY no configurada" }, { status: 500 })
   const base = baseUrl(req)
   const resultados: Array<{ vista: string; status: number; bytes: number; ms: number }> = []
+  // 1) ANÁLISIS primero (Lalo 19-ago): reclasificar las conversaciones nuevas
+  // ANTES de fotografiar, para que la foto salga con la categorización al día.
+  let analisis: unknown = null
+  try {
+    const r = await fetch(`${base}/api/vic-funnel-cron?key=${encodeURIComponent(FUNNEL_KEY)}&limit=40`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(60_000),
+    })
+    analisis = await r.json().catch(() => ({ status: r.status }))
+  } catch (e) {
+    console.error("[dash-snap] análisis previo falló:", e instanceof Error ? e.message : e)
+    analisis = { error: true }
+  }
   // Secuencial a propósito: cada render pega a Zoho/Supabase con todo; dos en
   // paralelo duplican la presión sin ganar nada (el cron no tiene apuro).
   for (const vista of ["", "inbound"]) {
@@ -60,5 +73,5 @@ export async function GET(req: Request): Promise<Response> {
       resultados.push({ vista: vista || "main", status: 0, bytes: 0, ms: Date.now() - inicio })
     }
   }
-  return NextResponse.json({ ok: true, resultados })
+  return NextResponse.json({ ok: true, analisis, resultados })
 }
