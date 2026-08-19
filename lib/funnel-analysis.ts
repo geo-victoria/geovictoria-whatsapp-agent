@@ -151,9 +151,9 @@ const SYSTEM_PROMPT = `Eres analista comercial de GeoVictoria (control de asiste
 Clasifica así:
 
 1) "grupo" (obligatorio), uno de:
-   - "comercial": el prospecto muestra intención comercial (quiere cotizar, comprar, conocer precios, contratar, agendar reunión, que lo llamen, o es un cliente actual preguntando por OTRO producto).
+   - "comercial": el prospecto muestra intención comercial SOBRE PRODUCTOS QUE GEOVICTORIA OFRECE — control de asistencia, relojes control, app de marcaje y sus módulos (quiere cotizar, comprar, conocer precios, contratar, agendar reunión, que lo llamen, o es un cliente actual preguntando por OTRO producto nuestro). Una dotación grande (>50) SIGUE siendo comercial: el tamaño no lo excluye.
    - "soporte": la conversación es una consulta operativa o funcional sobre USAR la plataforma (configurar, generar reportes, errores, "no me funciona", feriados) o un problema de un cliente existente. Es el caso donde Vicky consultaría al agente de soporte.
-   - "no_identificado": no se identifica intención (solo un saludo sin desarrollo, spam, número equivocado, mensaje de prueba, o ambiguo sin avanzar).
+   - "no_identificado": no se identifica intención (solo un saludo sin desarrollo, spam, número equivocado, mensaje de prueba, o ambiguo sin avanzar). TAMBIÉN va aquí quien busca EXCLUSIVAMENTE algo que GeoVictoria no vende (botón de pánico, cámaras, alarmas, GPS vehicular, etc.): no es intención comercial nuestra aunque sea una empresa real — registra el hallazgo pidio_fuera_de_catalogo. Si además le interesa algo del catálogo, entonces sí es "comercial".
 
 2) "sub_bucket" (solo si grupo="comercial"; null en otro caso). Elige el estado MÁS avanzado alcanzado, en este orden de prioridad:
    - "cotizacion": entró al flujo de cotización (Vicky pidió datos para cotizar, mostró un precio/estimación, negoció descuento, o envió una cotización formal).

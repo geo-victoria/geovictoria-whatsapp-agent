@@ -1263,6 +1263,7 @@ type LeadListado = {
   Last_Activity_Time?: string | null
   "Owner.first_name"?: string | null
   "Owner.last_name"?: string | null
+  N_Empleados_que_marcan?: number | null
   /** Shape del search API (los convertidos vienen por search, no por COQL). */
   Owner?: { name?: string } | null
   Converted_Deal?: { id?: string } | null
@@ -1297,13 +1298,13 @@ async function fetchZohoListado(contactosConocidos: Set<string>, extraDealIds: s
       fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
         method: "POST", headers: H, cache: "no-store",
         body: JSON.stringify({
-          select_query: `select id, Full_Name, Company, Phone, Lead_Status, Created_Time, Last_Activity_Time, Owner.first_name, Owner.last_name from Leads where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
+          select_query: `select id, Full_Name, Company, Phone, Lead_Status, Created_Time, Last_Activity_Time, N_Empleados_que_marcan, Owner.first_name, Owner.last_name from Leads where Created_By = ${VICKY_CREATOR_ID} and Created_Time >= '${desde}T00:00:00-04:00' limit 200`,
         }),
       }),
       // Convertidos: la búsqueda por criterio trae TODOS los de la org; se
       // filtran después por los contactos que conocemos de las conversaciones.
       fetch(
-        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Created_Time:greater_equal:${desde}T00:00:00-04:00)`)}&converted=true&fields=id,Full_Name,Company,Phone,Lead_Status,Created_Time,Last_Activity_Time,Converted_Deal,Owner&per_page=200`,
+        `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent(`(Created_Time:greater_equal:${desde}T00:00:00-04:00)`)}&converted=true&fields=id,Full_Name,Company,Phone,Lead_Status,Created_Time,Last_Activity_Time,N_Empleados_que_marcan,Converted_Deal,Owner&per_page=200`,
         { headers: H, cache: "no-store" },
       ),
       fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
@@ -5758,6 +5759,15 @@ export async function GET(req: Request): Promise<Response> {
         if (telDl.length === 9 && telDl.startsWith("9")) telDl = `56${telDl}`
         const n = Number(dl.N_Empleados_que_marcan) || 0
         if (telDl && n > 0 && !usuariosPorContacto.has(telDl)) usuariosPorContacto.set(telDl, n)
+      }
+      // …y el LEAD también (caso Instituto Nacional de Normalización 19-ago:
+      // la derivación guardó 80 trabajadores en el lead, pero sin deal ni
+      // cotización la columna quedaba s/d y el >20 no salía a «derivadas»).
+      for (const l of zohoListado.leads) {
+        let telLd = digits(String(l.Phone || ""))
+        if (telLd.length === 9 && telLd.startsWith("9")) telLd = `56${telLd}`
+        const n = Number(l.N_Empleados_que_marcan) || 0
+        if (telLd && n > 0 && !usuariosPorContacto.has(telLd)) usuariosPorContacto.set(telLd, n)
       }
       evolucionHtml = renderEvolucionDiaria({
         convs: convsListado,
