@@ -2458,9 +2458,11 @@ const ETIQUETA_ETAPA_INBOUND: Record<EtapaInbound, string> = {
 
 type CohortesInbound = {
   dias: string[]
-  /** tel → día de llegada + etapa MÁS AVANZADA alcanzada a hoy
-   * (índice en ETAPAS_INBOUND; 0 = solo llegó). */
-  porContacto: Map<string, { dia: string; etapa: number }>
+  /** LENTE CAJA (Lalo 19-ago, "queremos ver todo como caja"): cada métrica se
+   * cuenta el día en que el EVENTO ocurrió — llegada, precio dado, formal
+   * emitida, aceptación, pago — ya no por cohorte de llegada.
+   * etapa → (día → teléfonos con ese evento ese día). */
+  porDia: Record<EtapaInbound, Map<string, Set<string>>>
   /** FUERA DEL RANGO DE VICKY (>20 trabajadores, Lalo 19-ago): derivadas al
    * equipo comercial — no son embudo de venta autónoma. tel → día. */
   derivadas: Map<string, string>
@@ -2501,98 +2503,103 @@ function computarCohortesInbound(params: {
   // cohorte subcontaría (misma corrección que 📈 Evolución).
   const comercialSet = new Set<string>()
   for (const r of analysisRows) if (r.grupo === "comercial") comercialSet.add(digits(r.contact))
-  // CANAL (Lalo 19-ago, "actualmente solo confunden"): una formal del canal
-  // EJECUTIVO (Intervenci_n_Humana = "Con intervención humana", estampado en
-  // la emisión desde el 19-ago) NO cuenta en el embudo de Vicky — antes el
-  // cruce por teléfono marcaba "Formal enviada"/"Vio precio" en conversaciones
-  // donde Vicky jamás mostró un peso (casos LISETTE/LC Ingeniería 18-ago).
-  // Sin marca (histórico) se conserva el criterio por teléfono de siempre.
-  const formalSet = new Set<string>(hardQuote)
-  const aceptadaSet = new Set<string>()
-  const pagadaSet = new Set<string>()
-  const telesEjecutivo = new Set<string>()
-  for (const q of quotes) {
-    const tel = digits(String(q.Tel_fono_Contacto || ""))
-    if (!tel) continue
-    const marca = String(q.Intervenci_n_Humana || "")
-    if (/intervenci/i.test(marca)) {
-      telesEjecutivo.add(tel)
-      continue
-    }
-    // HISTÓRICO SIN MARCA (caso MATER 19-ago, "no pasó por Vicky — solo le
-    // mandaron el comprobante"): una cotización sin canal estampado es de
-    // Vicky SOLO si la conversación existía ANTES de la emisión. Si el chat
-    // nació después (el cliente llegó a pagar una venta del ejecutivo), no
-    // es venta de Vicky.
-    if (!/100%/.test(marca)) {
-      const primeraIso = primeraVez.get(tel) || ""
-      const creadaMs = Date.parse(String(q.Created_Time || ""))
-      const primeraMs = Date.parse(primeraIso)
-      if (Number.isFinite(creadaMs) && (!Number.isFinite(primeraMs) || primeraMs > creadaMs + 3600e3)) {
-        telesEjecutivo.add(tel)
-        continue
-      }
-    }
-    formalSet.add(tel)
-    if (esAceptadaOMas(q)) aceptadaSet.add(tel)
-    if (esPagada(q)) pagadaSet.add(tel)
-  }
-  // Un contacto cuya ÚNICA formal es del ejecutivo tampoco hereda el puntero.
-  for (const tel of telesEjecutivo) {
-    if (!aceptadaSet.has(tel) && !pagadaSet.has(tel) && !preformAt.has(tel)) formalSet.delete(tel)
-  }
-  const porContacto = new Map<string, { dia: string; etapa: number }>()
+  void hardQuote
+  // ═══ LENTE CAJA (Lalo 19-ago, "queremos ver todo como caja, inclusive en
+  // las barras y en la tabla"): cada métrica se anota el día en que el EVENTO
+  // ocurrió. Llegada = primer mensaje · precio = sello del preform (o la
+  // emisión de la formal, que siempre lleva precio) · formal = emisión ·
+  // aceptada/pagada = fecha de aceptación de Zoho (el pago cae el mismo día
+  // en la práctica: mediana 36 min). ═══
   const derivadas = new Map<string, string>()
-  // RANGO DE VICKY (Lalo 19-ago): sobre 20 trabajadores Vicky no vende — esas
-  // conversaciones se DERIVAN al equipo y salen del embudo (se cuentan aparte).
+  const llegadaDia = new Map<string, string>()
+  const enUniverso = new Set<string>()
+  // RANGO DE VICKY: sobre 20 trabajadores Vicky no vende — derivadas aparte.
   const UMBRAL_RANGO_VICKY = 20
   for (const [tel, iso] of primeraVez) {
     if (paisDeTelefono(tel) !== pais || isTestContact(tel, testSet)) continue
     if (toque0.has(tel)) continue // outbound: lo tocó la cadencia, no llegó solo
     const dia = diaDe(iso)
-    if (!diasSet.has(dia)) continue
     if ((usuarios.get(tel) || 0) > UMBRAL_RANGO_VICKY) {
-      derivadas.set(tel, dia)
+      if (diasSet.has(dia)) derivadas.set(tel, dia)
       continue
     }
-    let etapa = 0
-    if (comercialSet.has(tel) || preformAt.has(tel) || formalSet.has(tel)) etapa = 1
-    // "Vio precio": preform real de Vicky — o su formal (que en el canal
-    // Vicky SIEMPRE lleva el precio; el sello pref_ tiene hoyos conocidos).
-    if (preformAt.has(tel) || formalSet.has(tel)) etapa = 2
-    if (formalSet.has(tel)) etapa = 3
-    if (aceptadaSet.has(tel)) etapa = 4
-    if (pagadaSet.has(tel)) etapa = 5
-    porContacto.set(tel, { dia, etapa })
+    enUniverso.add(tel)
+    if (diasSet.has(dia)) llegadaDia.set(tel, dia)
   }
-  return { dias, porContacto, derivadas }
+  const vacio = () => new Map<string, Set<string>>()
+  const porDia: Record<EtapaInbound, Map<string, Set<string>>> = {
+    llegaron: vacio(),
+    comercial: vacio(),
+    precio: vacio(),
+    formal: vacio(),
+    aceptada: vacio(),
+    pagada: vacio(),
+  }
+  const anotar = (m: Map<string, Set<string>>, dia: string, tel: string) => {
+    if (!diasSet.has(dia)) return
+    const s = m.get(dia) || new Set<string>()
+    s.add(tel)
+    m.set(dia, s)
+  }
+  for (const [tel, dia] of llegadaDia) {
+    anotar(porDia.llegaron, dia, tel)
+    // Intención: el análisis no trae fecha propia — se anota el día de llegada.
+    if (comercialSet.has(tel) || preformAt.has(tel)) anotar(porDia.comercial, dia, tel)
+  }
+  // Precio dado: el día del sello del preform.
+  for (const [tel, iso] of preformAt) {
+    if (!enUniverso.has(tel)) continue
+    anotar(porDia.precio, diaDe(iso), tel)
+  }
+  // Formales / aceptadas / pagadas: SOLO canal Vicky. Marca de la emisión
+  // (Intervenci_n_Humana, estampada desde el 19-ago); histórico sin marca →
+  // regla MATER: la conversación debe existir ANTES de la emisión (si el chat
+  // nació después, el cliente solo llegó a pagar una venta del ejecutivo).
+  for (const q of quotes) {
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    if (!tel || !enUniverso.has(tel)) continue
+    const marca = String(q.Intervenci_n_Humana || "")
+    if (/intervenci/i.test(marca)) continue
+    if (!/100%/.test(marca)) {
+      const primeraMs = Date.parse(primeraVez.get(tel) || "")
+      const creadaMs = Date.parse(String(q.Created_Time || ""))
+      if (Number.isFinite(creadaMs) && (!Number.isFinite(primeraMs) || primeraMs > creadaMs + 3600e3)) continue
+    }
+    const diaEmision = diaDe(q.Created_Time)
+    anotar(porDia.formal, diaEmision, tel)
+    // La formal SIEMPRE lleva precio: sin sello de preform, el precio se
+    // anota el día de la emisión (mitiga el hoyo conocido del sello pref_).
+    if (!preformAt.has(tel)) anotar(porDia.precio, diaEmision, tel)
+    // Intención de hechos duros aunque el análisis no la haya clasificado.
+    if (!comercialSet.has(tel) && !preformAt.has(tel)) anotar(porDia.comercial, llegadaDia.get(tel) || diaEmision, tel)
+    const diaAcepta = diaDe(q.Fecha_Hora_Cotizacion || q.Modified_Time)
+    if (esAceptadaOMas(q)) anotar(porDia.aceptada, diaAcepta, tel)
+    if (esPagada(q)) anotar(porDia.pagada, diaAcepta, tel)
+  }
+  return { dias, porDia, derivadas }
 }
 
 function renderInboundDiario(
   c: CohortesInbound,
   opts: { rango: RangoFechas | null; qs: string; caja?: { cantidad: number; monto: number; detalle: string } },
 ): string {
-  const { dias, porContacto } = c
+  const { dias, porDia, derivadas } = c
   const idx = new Map(dias.map((d, i) => [d, i]))
-  // exactas[e][i] = contactos del día i cuya etapa MÁS AVANZADA es e.
-  const exactas = ETAPAS_INBOUND.map(() => new Array<number>(dias.length).fill(0))
-  for (const { dia, etapa } of porContacto.values()) {
-    const i = idx.get(dia)
-    if (i !== undefined) exactas[etapa][i]++
+  const cnt = (etapa: EtapaInbound, dia: string) => porDia[etapa].get(dia)?.size || 0
+  // Totales del período: teléfonos ÚNICOS por métrica (un contacto que vio
+  // precio dos días distintos cuenta una vez en el total).
+  const totUnico = (etapa: EtapaInbound) => {
+    const u = new Set<string>()
+    for (const s of porDia[etapa].values()) for (const t of s) u.add(t)
+    return u.size
   }
-  // acumuladas[e][i] = contactos del día i que ALCANZARON la etapa e (embudo).
-  const acumuladas = ETAPAS_INBOUND.map((_, e) =>
-    dias.map((_, i) => exactas.slice(e).reduce((a, s) => a + s[i], 0)),
-  )
-  const totalEtapa = (e: number) => acumuladas[e].reduce((a, b) => a + b, 0)
-  const tLleg = totalEtapa(0), tCom = totalEtapa(1), tPre = totalEtapa(2), tFor = totalEtapa(3), tAce = totalEtapa(4), tPag = totalEtapa(5)
-  const tDer = [...c.derivadas.values()].filter((d) => idx.has(d)).length
+  const tLleg = totUnico("llegaron"), tCom = totUnico("comercial"), tPre = totUnico("precio"), tFor = totUnico("formal"), tAce = totUnico("aceptada"), tPag = totUnico("pagada")
+  const tDer = [...derivadas.values()].filter((d) => idx.has(d)).length
   const prom = dias.length ? (tLleg / dias.length).toFixed(1) : "0"
   const pctDe = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
   const href = (dia: string, etapa: EtapaInbound) => `?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}`
-  const celda = (dia: string, e: number, etapa: EtapaInbound, bold = false) => {
-    const i = idx.get(dia)
-    const v = i === undefined ? 0 : acumuladas[e][i]
+  const celda = (dia: string, etapa: EtapaInbound, bold = false) => {
+    const v = cnt(etapa, dia)
     const txt = bold ? `<b>${v}</b>` : String(v)
     return `<td style="text-align:center">${v > 0 ? `<a href="${href(dia, etapa)}">${txt}</a>` : `<span style="color:#c8cdd3">0</span>`}</td>`
   }
@@ -2601,19 +2608,16 @@ function renderInboundDiario(
     return `${wd} ${d.slice(8, 10)}-${d.slice(5, 7)}`
   }
   const filas = [...dias].reverse().map((d) => {
-    const i = idx.get(d)!
-    const lleg = acumuladas[0][i]
-    const vioPrecio = acumuladas[2][i]
-    const pag = acumuladas[5][i]
-    void lleg
+    const pag = cnt("pagada", d)
+    const vioPrecio = cnt("precio", d)
     return `<tr>
       <td style="white-space:nowrap">${nombreDia(d)}</td>
-      ${celda(d, 0, "llegaron", true)}
-      ${celda(d, 1, "comercial")}
-      ${celda(d, 2, "precio")}
-      ${celda(d, 3, "formal")}
-      ${celda(d, 4, "aceptada")}
-      ${celda(d, 5, "pagada", true)}
+      ${celda(d, "llegaron", true)}
+      ${celda(d, "comercial")}
+      ${celda(d, "precio")}
+      ${celda(d, "formal")}
+      ${celda(d, "aceptada")}
+      ${celda(d, "pagada", true)}
       <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}</td>
     </tr>`
   }).join("")
@@ -2624,35 +2628,34 @@ function renderInboundDiario(
     ${celdaTotal(tLleg, "llegaron")}${celdaTotal(tCom, "comercial")}${celdaTotal(tPre, "precio")}${celdaTotal(tFor, "formal")}${celdaTotal(tAce, "aceptada")}${celdaTotal(tPag, "pagada")}
     <td style="text-align:center"><b>${pctDe(tPag, tPre)}</b></td>
   </tr>`
-  // Barras apiladas: cada segmento = etapa EXACTA alcanzada (suman "llegaron").
-  const SEGMENTOS = [
-    { e: 5, n: "Pagada", color: "#1b5e20" },
-    { e: 4, n: "Aceptada sin pago", color: "#27ae60" },
-    { e: 3, n: "Formal, sin aceptar", color: "#e67e22" },
-    { e: 2, n: "Vio precio, sin formal", color: "#ffbb00" },
-    { e: 1, n: "Con intención, sin precio", color: "#00aff2" },
-    { e: 0, n: "Sin intención aún", color: "#c8cdd3" },
-  ]
-  const series = SEGMENTOS.map((s) => ({ n: s.n, c: s.color, y: exactas[s.e] }))
-  return `<div class="card"><h2>📥 Oportunidades inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"}</span></h2>
-  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> llegaron en RANGO VICKY (${prom}/día) · ${tCom} calificadas (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio (${pctDe(tPre, tCom)} de las calificadas) · ${tFor} con formal de Vicky · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre sobre precio) · <a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=derivada" style="color:#e67e22"><b>${tDer}</b> derivadas al equipo (&gt;20)</a></div>
-  ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
-  <div class="sub" style="margin:0 0 4px;color:#9aa1a9">Barras = etapa EXACTA en que está HOY cada oportunidad (los segmentos de un día suman su «Llegaron»). La tabla de abajo ACUMULA: «alcanzaron la etapa» — por eso un día con 1 pagada muestra «Con intención, sin precio: 0» en la barra y «Intención comercial: 1» en la tabla (la pagada ya pasó por ahí).</div>
+  // GRÁFICO lente caja: barras = llegadas del día; líneas = eventos del día.
+  const serie = (etapa: EtapaInbound) => dias.map((d) => cnt(etapa, d))
+  const SERIES_JS = {
+    llegadas: serie("llegaron"),
+    calificadas: serie("comercial"),
+    precio: serie("precio"),
+    formal: serie("formal"),
+    pagada: serie("pagada"),
+  }
+  return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · lente caja</span></h2>
+  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> llegaron en RANGO VICKY (${prom}/día) · ${tCom} calificadas (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio · ${tFor} formales de Vicky emitidas · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre del período) · <a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=derivada" style="color:#e67e22"><b>${tDer}</b> derivadas al equipo (&gt;20)</a></div>
+  ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky, inbound + outbound)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
   <div id="inbDiaria" style="height:320px"></div>
   <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
-    <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre</th>
+    <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotal}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">EMBUDO POR COHORTE: cada fila cuenta las oportunidades INBOUND (el cliente escribió solo por WhatsApp, sin toque outbound previo — por eso esta pestaña no lleva columna «Llegó por»: acá TODOS llegaron por WhatsApp; los cargados por formulario/base van en el funnel outbound de Análisis y KPIs) cuya PRIMERA conversación partió ese día, y hasta dónde ha llegado cada una HOY — aunque el hito haya ocurrido días después. Por eso los días recientes maduran con el tiempo: la cohorte de hoy puede sumar formales y pagos mañana. Distinto del 📈 Evolución de Análisis y KPIs (esa es foto diaria de eventos). Cierre = pagadas ÷ los que VIERON PRECIO (misma definición que la tasa de Análisis y KPIs, Lalo 14-ago). Cuenta solo lo que Vicky inició: las cotizaciones que los ejecutivos emiten a clientes propios y los contactos internos quedan fuera. Hora de Chile. Clic en cualquier número para ver las empresas detrás.</div>
+  <div class="sub" style="margin:8px 0 0">LENTE CAJA: cada número se cuenta el día en que el EVENTO ocurrió — la llegada el día del primer mensaje, el precio el día que Vicky lo mostró, la formal el día de su emisión y el pago el día que entró (por eso un pago de un cliente que llegó hace semanas SÍ aparece en su día). Solo INBOUND en rango de Vicky (≤20) y solo lo que Vicky inició: las cotizaciones del canal ejecutivo y los contactos internos quedan fuera; los &gt;20 van en «derivadas al equipo». Cierre del día = pagadas del día ÷ vieron precio ese día; el cierre del TOTAL usa los únicos del período. Hora de Chile. Clic en cualquier número para ver las empresas.</div>
   <script>
     (function () {
       var DIAS = ${JSON.stringify(dias.map((d) => `${d.slice(8, 10)}-${d.slice(5, 7)}`))};
-      var SERIES = ${JSON.stringify(series)};
-      Plotly.react("inbDiaria", SERIES.map(function (s) {
-        // namelength -1: el hover unificado truncaba "Con intención, sin
-        // precio" a "Con intenció…" y la etapa exacta se leía como acumulada.
-        return { x: DIAS, y: s.y, name: s.n, type: "bar", marker: { color: s.c }, hoverlabel: { namelength: -1 } };
-      }), {
-        barmode: "stack",
+      var S = ${JSON.stringify(SERIES_JS)};
+      Plotly.react("inbDiaria", [
+        { x: DIAS, y: S.llegadas, name: "Llegaron (rango Vicky)", type: "bar", marker: { color: "#dfe3e8" }, hoverlabel: { namelength: -1 } },
+        { x: DIAS, y: S.calificadas, name: "Calificadas", type: "scatter", mode: "lines+markers", line: { color: "#00aff2", width: 2 }, hoverlabel: { namelength: -1 } },
+        { x: DIAS, y: S.precio, name: "Vieron precio", type: "scatter", mode: "lines+markers", line: { color: "#ffbb00", width: 2 }, hoverlabel: { namelength: -1 } },
+        { x: DIAS, y: S.formal, name: "Formal emitida", type: "scatter", mode: "lines+markers", line: { color: "#e67e22", width: 2 }, hoverlabel: { namelength: -1 } },
+        { x: DIAS, y: S.pagada, name: "Pagada", type: "scatter", mode: "lines+markers", line: { color: "#1b5e20", width: 3 }, hoverlabel: { namelength: -1 } }
+      ], {
         margin: { l: 34, r: 12, t: 10, b: 46 },
         legend: { orientation: "h", y: 1.18 },
         font: { family: "Nunito, 'Segoe UI', sans-serif", size: 12, color: "#4e4e4e" },
@@ -5890,15 +5893,20 @@ export async function GET(req: Request): Promise<Response> {
           // Drill-down de las DERIVADAS (>20): viven fuera del embudo.
           const esDerivadas = etapaCruda === "derivada"
           const etapaQ = (esDerivadas ? "llegaron" : etapaCruda) as EtapaInbound
-          const nivel = Math.max(0, ETAPAS_INBOUND.indexOf(etapaQ))
           const porTelListado = new Map(filasListado.map((f) => [digits(f.contacto), f]))
           const sub: FilaListado[] = []
-          const fuente: Array<[string, { dia: string; etapa: number }]> = esDerivadas
-            ? [...cohortes.derivadas].map(([tel, dia]) => [tel, { dia, etapa: 0 }])
-            : [...cohortes.porContacto]
-          for (const [tel, info] of fuente) {
-            if (inbdet !== "TOTAL" && info.dia !== inbdet) continue
-            if (!esDerivadas && info.etapa < nivel) continue
+          const vistos = new Set<string>()
+          // Lente caja: cada etapa vive en porDia[etapa] = Map<día, Set<tel>>;
+          // el drill-down lista los contactos con ese EVENTO en el día pedido.
+          const fuente: Array<[string, string]> = esDerivadas
+            ? [...cohortes.derivadas]
+            : [...(cohortes.porDia[etapaQ] || new Map<string, Set<string>>())].flatMap(
+                ([dia, tels]) => [...tels].map((tel) => [tel, dia] as [string, string]),
+              )
+          for (const [tel, dia] of fuente) {
+            if (inbdet !== "TOTAL" && dia !== inbdet) continue
+            if (vistos.has(tel)) continue
+            vistos.add(tel)
             const f = porTelListado.get(tel)
             if (f) {
               sub.push(f)
@@ -5909,7 +5917,7 @@ export async function GET(req: Request): Promise<Response> {
             sub.push({
               empresa: `+${tel}`,
               contacto: tel,
-              estado: ETIQUETA_ETAPA_INBOUND[ETAPAS_INBOUND[info.etapa]],
+              estado: ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ,
               fechaIso: primeraVez.get(tel) || "",
               estadoZoho: "—",
               propietario: "—",
@@ -5926,9 +5934,9 @@ export async function GET(req: Request): Promise<Response> {
           const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : `del ${inbdet}`} — ${
             esDerivadas
               ? "derivadas al equipo (>20 trabajadores, fuera del rango de Vicky)"
-              : nivel === 0
-                ? "todas las llegadas (rango Vicky)"
-                : `alcanzaron: ${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
+              : etapaQ === "llegaron"
+                ? "llegadas del día (rango Vicky)"
+                : `evento del día: ${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
           }`
           return renderDetalleEjecutivo({
             filas: sub,
@@ -5972,9 +5980,7 @@ export async function GET(req: Request): Promise<Response> {
           }
           const finCaja = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
           const iniCaja = rango && rango.desdeMs > 0 ? rango.desdeMs : finCaja - 29 * 864e5
-          let cantidad = 0
-          let monto = 0
-          const nums: string[] = []
+          const pagosCaja: Array<{ t: number; txt: string; monto: number }> = []
           for (const row of filasKv) {
             try {
               const v = JSON.parse(row.value) as { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number }
@@ -5987,14 +5993,20 @@ export async function GET(req: Request): Promise<Response> {
               if (!telQ || paisDeTelefono(telQ) !== pais) continue
               const t = Date.parse(String(v.pagoIso || ""))
               if (!Number.isFinite(t) || t < iniCaja || t > finCaja) continue
-              cantidad++
-              monto += Number(v.montoClp || 0) || 0
-              if (nums.length < 6) nums.push(`${v.numero || qid} $${(Number(v.montoClp || 0) || 0).toLocaleString("es-CL")}`)
+              const m = Number(v.montoClp || 0) || 0
+              pagosCaja.push({ t, monto: m, txt: `${v.numero || qid} $${m.toLocaleString("es-CL")}` })
             } catch {
               /* fila corrupta: se salta */
             }
           }
-          caja = { cantidad, monto, detalle: nums.join(" · ") }
+          // Los más RECIENTES primero (19-ago: el pago de ayer quedaba
+          // escondido detrás de los 6 más antiguos y parecía no contado).
+          pagosCaja.sort((a, b) => b.t - a.t)
+          caja = {
+            cantidad: pagosCaja.length,
+            monto: pagosCaja.reduce((a, p) => a + p.monto, 0),
+            detalle: pagosCaja.slice(0, 8).map((p) => p.txt).join(" · ") + (pagosCaja.length > 8 ? " · …" : ""),
+          }
         } catch {
           caja = undefined
         }
