@@ -79,9 +79,23 @@ export async function GET(req: Request): Promise<Response> {
 
   // Dos consultas simples (más robusto que el embed de PostgREST): conversaciones
   // + análisis existentes, y se cruzan en JS para saber cuáles re-analizar.
+  // PAGINADO (bug 19-ago, mismo mal de fetchAnalysis): PostgREST corta cada
+  // respuesta en 1000 filas y ambas tablas ya pasaron ese tamaño — el cron
+  // solo veía las 1000 conversaciones más recientes y, con el mapa de
+  // análisis cortado, RE-analizaba filas ya listas en cada tick (backfill
+  // estancado + gasto de API repetido).
+  const sbTodo = async <T,>(base: string): Promise<T[]> => {
+    const filas: T[] = []
+    for (let offset = 0; offset < 50000; offset += 1000) {
+      const lote = await sb<T[]>(`${base}&limit=1000&offset=${offset}`)
+      filas.push(...(lote || []))
+      if (!lote || lote.length < 1000) break
+    }
+    return filas
+  }
   const [convs, analyzed] = await Promise.all([
-    sb<ConvRow[]>(`vic_v3_conversations?select=id,contact,updated_at&order=updated_at.desc.nullslast`),
-    sb<AnalRow[]>(`vic_v3_conversation_analysis?select=conversation_id,analyzed_at`),
+    sbTodo<ConvRow>(`vic_v3_conversations?select=id,contact,updated_at&order=updated_at.desc.nullslast`),
+    sbTodo<AnalRow>(`vic_v3_conversation_analysis?select=conversation_id,analyzed_at&order=conversation_id.asc`),
   ])
   const analyzedAt = new Map(analyzed.map((a) => [a.conversation_id, a.analyzed_at]))
 
