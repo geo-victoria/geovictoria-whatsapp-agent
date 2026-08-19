@@ -2416,6 +2416,9 @@ type CohortesInbound = {
   /** tel → día de llegada + etapa MÁS AVANZADA alcanzada a hoy
    * (índice en ETAPAS_INBOUND; 0 = solo llegó). */
   porContacto: Map<string, { dia: string; etapa: number }>
+  /** FUERA DEL RANGO DE VICKY (>20 trabajadores, Lalo 19-ago): derivadas al
+   * equipo comercial — no son embudo de venta autónoma. tel → día. */
+  derivadas: Map<string, string>
 }
 
 function computarCohortesInbound(params: {
@@ -2425,10 +2428,11 @@ function computarCohortesInbound(params: {
   quotes: RawAceptada[]
   hardQuote: Set<string>
   toque0: Set<string>
+  usuarios: Map<string, number>
   pais: Pais
   rango: RangoFechas | null
 }): CohortesInbound {
-  const { primeraVez, analysisRows, preformAt, quotes, hardQuote, toque0, pais, rango } = params
+  const { primeraVez, analysisRows, preformAt, quotes, hardQuote, toque0, usuarios, pais, rango } = params
   const testSet = metricsContactSet()
   const diaDe = (iso: string | null | undefined): string => {
     const t = Date.parse(String(iso || ""))
@@ -2452,34 +2456,62 @@ function computarCohortesInbound(params: {
   // cohorte subcontaría (misma corrección que 📈 Evolución).
   const comercialSet = new Set<string>()
   for (const r of analysisRows) if (r.grupo === "comercial") comercialSet.add(digits(r.contact))
+  // CANAL (Lalo 19-ago, "actualmente solo confunden"): una formal del canal
+  // EJECUTIVO (Intervenci_n_Humana = "Con intervención humana", estampado en
+  // la emisión desde el 19-ago) NO cuenta en el embudo de Vicky — antes el
+  // cruce por teléfono marcaba "Formal enviada"/"Vio precio" en conversaciones
+  // donde Vicky jamás mostró un peso (casos LISETTE/LC Ingeniería 18-ago).
+  // Sin marca (histórico) se conserva el criterio por teléfono de siempre.
   const formalSet = new Set<string>(hardQuote)
   const aceptadaSet = new Set<string>()
   const pagadaSet = new Set<string>()
+  const telesEjecutivo = new Set<string>()
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
     if (!tel) continue
+    if (/intervenci/i.test(String(q.Intervenci_n_Humana || ""))) {
+      telesEjecutivo.add(tel)
+      continue
+    }
     formalSet.add(tel)
     if (esAceptadaOMas(q)) aceptadaSet.add(tel)
     if (esPagada(q)) pagadaSet.add(tel)
   }
+  // Un contacto cuya ÚNICA formal es del ejecutivo tampoco hereda el puntero.
+  for (const tel of telesEjecutivo) {
+    if (!aceptadaSet.has(tel) && !pagadaSet.has(tel) && !preformAt.has(tel)) formalSet.delete(tel)
+  }
   const porContacto = new Map<string, { dia: string; etapa: number }>()
+  const derivadas = new Map<string, string>()
+  // RANGO DE VICKY (Lalo 19-ago): sobre 20 trabajadores Vicky no vende — esas
+  // conversaciones se DERIVAN al equipo y salen del embudo (se cuentan aparte).
+  const UMBRAL_RANGO_VICKY = 20
   for (const [tel, iso] of primeraVez) {
     if (paisDeTelefono(tel) !== pais || isTestContact(tel, testSet)) continue
     if (toque0.has(tel)) continue // outbound: lo tocó la cadencia, no llegó solo
     const dia = diaDe(iso)
     if (!diasSet.has(dia)) continue
+    if ((usuarios.get(tel) || 0) > UMBRAL_RANGO_VICKY) {
+      derivadas.set(tel, dia)
+      continue
+    }
     let etapa = 0
     if (comercialSet.has(tel) || preformAt.has(tel) || formalSet.has(tel)) etapa = 1
+    // "Vio precio": preform real de Vicky — o su formal (que en el canal
+    // Vicky SIEMPRE lleva el precio; el sello pref_ tiene hoyos conocidos).
     if (preformAt.has(tel) || formalSet.has(tel)) etapa = 2
     if (formalSet.has(tel)) etapa = 3
     if (aceptadaSet.has(tel)) etapa = 4
     if (pagadaSet.has(tel)) etapa = 5
     porContacto.set(tel, { dia, etapa })
   }
-  return { dias, porContacto }
+  return { dias, porContacto, derivadas }
 }
 
-function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | null; qs: string }): string {
+function renderInboundDiario(
+  c: CohortesInbound,
+  opts: { rango: RangoFechas | null; qs: string; caja?: { cantidad: number; monto: number; detalle: string } },
+): string {
   const { dias, porContacto } = c
   const idx = new Map(dias.map((d, i) => [d, i]))
   // exactas[e][i] = contactos del día i cuya etapa MÁS AVANZADA es e.
@@ -2494,6 +2526,7 @@ function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | nu
   )
   const totalEtapa = (e: number) => acumuladas[e].reduce((a, b) => a + b, 0)
   const tLleg = totalEtapa(0), tCom = totalEtapa(1), tPre = totalEtapa(2), tFor = totalEtapa(3), tAce = totalEtapa(4), tPag = totalEtapa(5)
+  const tDer = [...c.derivadas.values()].filter((d) => idx.has(d)).length
   const prom = dias.length ? (tLleg / dias.length).toFixed(1) : "0"
   const pctDe = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
   const href = (dia: string, etapa: EtapaInbound) => `?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}`
@@ -2542,7 +2575,8 @@ function renderInboundDiario(c: CohortesInbound, opts: { rango: RangoFechas | nu
   ]
   const series = SEGMENTOS.map((s) => ({ n: s.n, c: s.color, y: exactas[s.e] }))
   return `<div class="card"><h2>📥 Oportunidades inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"}</span></h2>
-  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> oportunidades llegaron (${prom}/día) · ${tCom} con intención (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio (${pctDe(tPre, tLleg)}) · ${tFor} con formal · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre sobre los que vieron precio)</div>
+  <div class="sub" style="margin:2px 0 10px"><b>${tLleg}</b> llegaron en RANGO VICKY (${prom}/día) · ${tCom} calificadas (${pctDe(tCom, tLleg)}) · ${tPre} vieron precio (${pctDe(tPre, tCom)} de las calificadas) · ${tFor} con formal de Vicky · ${tAce} aceptadas · <b>${tPag} pagadas</b> (${pctDe(tPag, tPre)} de cierre sobre precio) · <a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=derivada" style="color:#e67e22"><b>${tDer}</b> derivadas al equipo (&gt;20)</a></div>
+  ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
   <div id="inbDiaria" style="height:320px"></div>
   <div style="overflow-x:auto;margin-top:14px"><table><thead><tr>
     <th>Día</th><th style="text-align:center">Llegaron</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Vieron precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre</th>
@@ -5784,17 +5818,24 @@ export async function GET(req: Request): Promise<Response> {
           quotes: cierre?.todasList || [],
           hardQuote: hard.quote,
           toque0: origen.toque0,
+          usuarios: usuariosPorContacto,
           pais,
           rango,
         })
         if (inbdet) {
-          const etapaQ = (searchParams.get("inbEtapa") || "llegaron").trim() as EtapaInbound
+          const etapaCruda = (searchParams.get("inbEtapa") || "llegaron").trim()
+          // Drill-down de las DERIVADAS (>20): viven fuera del embudo.
+          const esDerivadas = etapaCruda === "derivada"
+          const etapaQ = (esDerivadas ? "llegaron" : etapaCruda) as EtapaInbound
           const nivel = Math.max(0, ETAPAS_INBOUND.indexOf(etapaQ))
           const porTelListado = new Map(filasListado.map((f) => [digits(f.contacto), f]))
           const sub: FilaListado[] = []
-          for (const [tel, info] of cohortes.porContacto) {
+          const fuente: Array<[string, { dia: string; etapa: number }]> = esDerivadas
+            ? [...cohortes.derivadas].map(([tel, dia]) => [tel, { dia, etapa: 0 }])
+            : [...cohortes.porContacto]
+          for (const [tel, info] of fuente) {
             if (inbdet !== "TOTAL" && info.dia !== inbdet) continue
-            if (info.etapa < nivel) continue
+            if (!esDerivadas && info.etapa < nivel) continue
             const f = porTelListado.get(tel)
             if (f) {
               sub.push(f)
@@ -5819,7 +5860,13 @@ export async function GET(req: Request): Promise<Response> {
               zohoUrl: "",
             })
           }
-          const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : `del ${inbdet}`} — ${nivel === 0 ? "todas las llegadas" : `alcanzaron: ${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`}`
+          const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : `del ${inbdet}`} — ${
+            esDerivadas
+              ? "derivadas al equipo (>20 trabajadores, fuera del rango de Vicky)"
+              : nivel === 0
+                ? "todas las llegadas (rango Vicky)"
+                : `alcanzaron: ${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
+          }`
           return renderDetalleEjecutivo({
             filas: sub,
             titulo,
@@ -5832,7 +5879,51 @@ export async function GET(req: Request): Promise<Response> {
             formularioSet: llegoPorFormulario,
           })
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString() })
+        // 💰 CAJA DEL PERÍODO (Lalo 19-ago, "ambos lentes"): pagos del CANAL
+        // VICKY cuyo PAGO ocurrió dentro del período — lente de actividad,
+        // complementa la cohorte (que asigna cada pago al día de LLEGADA del
+        // cliente, por eso un pago de cosecha vieja no aparece en el embudo).
+        let caja: { cantidad: number; monto: number; detalle: string } | undefined
+        try {
+          const rv = await fetch(
+            `${SUPABASE_URL}/rest/v1/vic_kv?select=key,value&key=like.venta_dash_v3_*&limit=3000`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+          )
+          const filasKv = rv.ok ? ((await rv.json()) as Array<{ key: string; value: string }>) : []
+          const marcaEjec = new Set<string>()
+          const telPorQuote = new Map<string, string>()
+          for (const q of cierre?.todasList || []) {
+            const qid = String(q.id || "")
+            if (/intervenci/i.test(String(q.Intervenci_n_Humana || ""))) marcaEjec.add(qid)
+            telPorQuote.set(qid, digits(String(q.Tel_fono_Contacto || "")))
+          }
+          const finCaja = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
+          const iniCaja = rango && rango.desdeMs > 0 ? rango.desdeMs : finCaja - 29 * 864e5
+          let cantidad = 0
+          let monto = 0
+          const nums: string[] = []
+          for (const row of filasKv) {
+            try {
+              const v = JSON.parse(row.value) as { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number }
+              const qid = String(row.key).replace("venta_dash_v3_", "")
+              if (marcaEjec.has(qid)) continue // canal ejecutivo estampado
+              if (/geovictoria|prueba/i.test(String(v.empresa || ""))) continue
+              const telQ = telPorQuote.get(qid)
+              if (telQ && paisDeTelefono(telQ) !== pais) continue
+              const t = Date.parse(String(v.pagoIso || ""))
+              if (!Number.isFinite(t) || t < iniCaja || t > finCaja) continue
+              cantidad++
+              monto += Number(v.montoClp || 0) || 0
+              if (nums.length < 6) nums.push(`${v.numero || qid} $${(Number(v.montoClp || 0) || 0).toLocaleString("es-CL")}`)
+            } catch {
+              /* fila corrupta: se salta */
+            }
+          }
+          caja = { cantidad, monto, detalle: nums.join(" · ") }
+        } catch {
+          caja = undefined
+        }
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja })
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
         inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`
