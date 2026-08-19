@@ -13,6 +13,7 @@
  */
 
 import { NextResponse } from "next/server"
+import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -20,14 +21,14 @@ export const maxDuration = 120
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
 
-function authorized(req: Request): boolean {
-  if (!CRON_SECRET) return false
+async function authorized(req: Request): Promise<boolean> {
   const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
-  if (bearer === CRON_SECRET) return true
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
-  if (xcron === CRON_SECRET) return true
   const key = (new URL(req.url).searchParams.get("key") || "").trim()
-  return key === CRON_SECRET
+  if (CRON_SECRET && [bearer, xcron, key].includes(CRON_SECRET)) return true
+  // Secreto operativo de vic_kv (mismo patrón de los endpoints admin).
+  const operativo = await getFollowupCronSecret().catch(() => "")
+  return Boolean(operativo) && [bearer, xcron, key].includes(operativo)
 }
 
 function baseUrl(req: Request): string {
@@ -37,7 +38,7 @@ function baseUrl(req: Request): string {
 }
 
 export async function GET(req: Request): Promise<Response> {
-  if (!authorized(req)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  if (!(await authorized(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   if (!FUNNEL_KEY) return NextResponse.json({ ok: false, error: "VIC_FUNNEL_KEY no configurada" }, { status: 500 })
   const base = baseUrl(req)
   const resultados: Array<{ vista: string; status: number; bytes: number; ms: number }> = []
