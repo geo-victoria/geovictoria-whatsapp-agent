@@ -6334,22 +6334,29 @@ export async function GET(req: Request): Promise<Response> {
           for (const et of Object.keys(cohortes.porDia) as EtapaInbound[]) {
             for (const tels of cohortes.porDia[et].values()) for (const t of tels) telsPanel.add(t)
           }
-          if (telsPanel.size) {
-            const rt = await fetch(`${SUPABASE_URL}/rest/v1/rpc/vic_transcripts_de`, {
-              method: "POST",
-              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ tels: [...telsPanel], nmax: 30 }),
-              cache: "no-store",
-            })
-            if (rt.ok) {
-              const filasT = (await rt.json()) as Array<{ contact: string; role: string; at: string; content: string }>
+          // LOTES de 25 tels (PostgREST corta cada respuesta en 1000 filas:
+          // 30 msgs x 34 tels ya truncaba — bug cazado el 19-ago con
+          // exactamente 1000 mensajes embebidos). 4 lotes en paralelo.
+          const listaTels = [...telsPanel]
+          const lotes: string[][] = []
+          for (let i = 0; i < listaTels.length; i += 25) lotes.push(listaTels.slice(i, i + 25))
+          for (let i = 0; i < lotes.length; i += 4) {
+            await Promise.all(lotes.slice(i, i + 4).map(async (lote) => {
+              const rt = await fetch(`${SUPABASE_URL}/rest/v1/rpc/vic_transcripts_de`, {
+                method: "POST",
+                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ tels: lote, nmax: 30 }),
+                cache: "no-store",
+              }).catch(() => null)
+              if (!rt?.ok) return
+              const filasT = (await rt.json().catch(() => [])) as Array<{ contact: string; role: string; at: string; content: string }>
               for (const f of filasT) {
                 const t = digits(f.contact)
                 const arr = transPorTel.get(t) || []
                 arr.push([f.role === "user" ? "c" : "v", fmtSantiago(f.at), String(f.content || "")])
                 transPorTel.set(t, arr)
               }
-            }
+            }))
           }
         } catch { /* sin transcripciones: el pop-up muestra solo la ficha */ }
         inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel })
