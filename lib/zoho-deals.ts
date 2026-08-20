@@ -45,6 +45,7 @@ export type ResultadoTransicion = {
 export async function transicionarDealHacia(
   dealId: string,
   objetivo: "listo para cierre" | "implementando",
+  extras?: { fechaPrimeraFactura?: string },
 ): Promise<ResultadoTransicion> {
   const targetIdx = objetivo === "implementando" ? 7 : 6
   try {
@@ -135,6 +136,14 @@ export async function transicionarDealHacia(
     }
     if (tieneCampo("Con_qui_n_marcan") && !data.Con_qui_n_marcan) {
       data.Con_qui_n_marcan = "Todos los trabajadores de la dotación contratada"
+    }
+    // Fecha de Primera Factura: obligatoria-en-transición en esta variante
+    // (sin ella Zoho responde "partially saved" y NO mueve el stage). Con ok
+    // de Lalo 20-ago: fecha del PAGO (la factura sale 2-3 días hábiles
+    // después; el ejecutivo la corrige si difiere). Default: hoy — los
+    // llamadores post-pago corren en el momento del pago.
+    if (tieneCampo("Fecha_de_Primera_Factura") && !data.Fecha_de_Primera_Factura) {
+      data.Fecha_de_Primera_Factura = (extras?.fechaPrimeraFactura || new Date().toISOString()).slice(0, 10)
     }
     // Los multiselect llegan pre-llenados como string ("GeoVictoria APP") pero
     // el PUT los exige como array.

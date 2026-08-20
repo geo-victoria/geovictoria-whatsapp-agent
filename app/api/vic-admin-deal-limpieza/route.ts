@@ -366,7 +366,13 @@ export async function GET(req: Request): Promise<Response> {
         if (stage.includes("perdido") || stage.includes("congelado")) {
           res.pagadas_en_perdido.push(`${quote.Numero_Cotizacion || p.quote_id} → deal ${dealId} (${deal.Stage})`)
         } else {
-          const t = await transicionarDealHacia(dealId, "listo para cierre")
+          // Fecha real del pago (registro venta_dash) para la variante que
+          // exige Fecha_de_Primera_Factura; fallback: aceptación.
+          const vkv = await supa<{ value: string }>(`vic_kv?key=eq.venta_dash_v3_${p.quote_id}&select=value&limit=1`)
+          let fechaPago = ""
+          try { fechaPago = String((JSON.parse(vkv[0]?.value || "{}") as { pagoIso?: string }).pagoIso || "") } catch { /* sin registro */ }
+          if (!fechaPago) fechaPago = String(quote.Fecha_Hora_Cotizacion || "")
+          const t = await transicionarDealHacia(dealId, "listo para cierre", { fechaPrimeraFactura: fechaPago })
           if (t.resultado === "avanzado") res.stage_subido++
           else if (t.resultado === "error") res.errores.push(`stage ${dealId}: ${t.detalle || t.resultado}`)
         }
