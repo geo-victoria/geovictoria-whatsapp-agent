@@ -55,6 +55,9 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // de la cotización, pago ⇒ stage ≥ 6, dueño cotización = dueño deal,
   // punteros. Candado semanal por deal → cada tick toca solo lo pendiente.
   { nombre: "deal_limpieza", path: "/api/vic-admin-deal-limpieza?limit=25", cadaMin: 180 },
+  // Etapas de deals (pagada→6, onboarding completado→7 Implementando): su
+  // "cada hora por Vercel Cron" es el scheduler muerto — garantizado acá.
+  { nombre: "deal_stage", path: "/api/vic-deal-stage-cron", cadaMin: 60 },
 ]
 
 /**
