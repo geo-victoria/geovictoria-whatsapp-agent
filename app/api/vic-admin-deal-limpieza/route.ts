@@ -30,6 +30,7 @@ import { NextResponse } from "next/server"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { transicionarDealHacia } from "@/lib/zoho-deals"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { metricsContactSet, esEmailInterno } from "@/lib/funnel-analysis"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -247,6 +248,17 @@ export async function GET(req: Request): Promise<Response> {
       if (t) cadSet.add(t)
     }
     const mundo = (tel: string): "outbound" | "inbound" => (cadSet.has(tel) ? "outbound" : "inbound")
+    // MISMO filtro de internos que el dash (Lalo 20-ago, "¿limpiaste los
+    // números de prueba?"): teléfonos de métricas + correos internos +
+    // nombres prueba/huellerocompany/geovictoria.
+    const internos = metricsContactSet()
+    const esInterno = (tel: string, nombre?: string, email?: string): boolean => {
+      if (tel && internos.has(tel)) return true
+      if (email && esEmailInterno(email)) return true
+      const n = (nombre || "").toLowerCase()
+      return n.includes("prueba") || n.includes("huellerocompany") || /\bgeo\s*victoria\b/.test(n)
+    }
+    let excluidos = 0
     const vacio = () => ({
       leads_vivos: 0, leads_convertidos: 0, deals: 0, deals_monto_clp: 0,
       deals_pre_precio: 0, deals_propuesta: 0, deals_ganados: 0, deals_perdidos: 0,
@@ -257,12 +269,13 @@ export async function GET(req: Request): Promise<Response> {
     for (let off = 0; off < 1000; off += 200) {
       const r = await fetch(`${ZOHO_API}/crm/v3/coql`, {
         method: "POST", headers: H, cache: "no-store",
-        body: JSON.stringify({ select_query: `select Tel_fono_Contacto, Estado_Cotizacion from Cotizaciones_GeoVictoria where Created_By = 3525045000484500876 order by id limit 200 offset ${off}` }),
+        body: JSON.stringify({ select_query: `select Tel_fono_Contacto, Estado_Cotizacion, Name, Email_Contacto from Cotizaciones_GeoVictoria where Created_By = 3525045000484500876 order by id limit 200 offset ${off}` }),
       })
       if (r.status !== 200) break
-      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Tel_fono_Contacto?: string; Estado_Cotizacion?: string }>; info?: { more_records?: boolean } }
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Tel_fono_Contacto?: string; Estado_Cotizacion?: string; Name?: string; Email_Contacto?: string }>; info?: { more_records?: boolean } }
       for (const q of j?.data || []) {
         const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
+        if (esInterno(tel, q.Name, q.Email_Contacto)) { excluidos++; continue }
         const m = tel ? out[mundo(tel)] : out.sin_telefono
         m.cotizaciones++
         const e = String(q.Estado_Cotizacion || "").toLowerCase()
@@ -298,12 +311,13 @@ export async function GET(req: Request): Promise<Response> {
     for (let off = 0; off < 1000; off += 200) {
       const r = await fetch(`${ZOHO_API}/crm/v3/coql`, {
         method: "POST", headers: H, cache: "no-store",
-        body: JSON.stringify({ select_query: `select id, Stage, Valor_fijo_del_trato_Global, Monda_del_trato from Deals where Created_By = 3525045000484500876 order by id limit 200 offset ${off}` }),
+        body: JSON.stringify({ select_query: `select id, Deal_Name, Stage, Valor_fijo_del_trato_Global, Monda_del_trato from Deals where Created_By = 3525045000484500876 order by id limit 200 offset ${off}` }),
       })
       if (r.status !== 200) break
-      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ id: string; Stage?: string; Valor_fijo_del_trato_Global?: number | null; Monda_del_trato?: string | null }>; info?: { more_records?: boolean } }
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ id: string; Deal_Name?: string; Stage?: string; Valor_fijo_del_trato_Global?: number | null; Monda_del_trato?: string | null }>; info?: { more_records?: boolean } }
       for (const d of j?.data || []) {
         const tel = telPorDeal.get(String(d.id)) || ""
+        if (esInterno(tel, (d as unknown as { Deal_Name?: string }).Deal_Name)) { excluidos++; continue }
         const m = tel ? out[mundo(tel)] : out.sin_telefono
         m.deals++
         if (String(d.Monda_del_trato || "") === "CLP") m.deals_monto_clp += Number(d.Valor_fijo_del_trato_Global || 0) || 0
@@ -325,6 +339,7 @@ export async function GET(req: Request): Promise<Response> {
       const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Phone?: string }>; info?: { more_records?: boolean } }
       for (const l of j?.data || []) {
         const tel = String(l.Phone || "").replace(/\D/g, "")
+        if (esInterno(tel)) { excluidos++; continue }
         ;(tel ? out[mundo(tel)] : out.sin_telefono).leads_vivos++
       }
       if (!j?.info?.more_records) break
@@ -338,11 +353,12 @@ export async function GET(req: Request): Promise<Response> {
       const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Phone?: string }>; info?: { more_records?: boolean } }
       for (const l of j?.data || []) {
         const tel = String(l.Phone || "").replace(/\D/g, "")
+        if (esInterno(tel)) { excluidos++; continue }
         ;(tel ? out[mundo(tel)] : out.sin_telefono).leads_convertidos++
       }
       if (!j?.info?.more_records) break
     }
-    return NextResponse.json({ ok: true, modo: "resumen", criterio: "outbound = contacto en vic_outbound_cadence", ...out })
+    return NextResponse.json({ ok: true, modo: "resumen", criterio: "outbound = contacto en vic_outbound_cadence", excluidos_internos: excluidos, ...out })
   }
 
   // ── CONVERTIR LEAD CONTRA DEAL EXISTENTE (?convertir=<leadId>&deal=<dealId>):
