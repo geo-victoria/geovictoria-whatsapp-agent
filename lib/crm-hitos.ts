@@ -778,9 +778,11 @@ async function convertirConDeal(
     Tombola: "Mantener propietario",
     Sector: sectorPublico || "19. Servicios",
     // Moneda por territorio. OJO Perú: el picklist de Zoho usa "SOL" (no
-    // "PEN") — verificado contra el metadata del campo el 05-ago.
+    // "PEN") — verificado contra el metadata del campo el 05-ago. Chile es
+    // CLP desde el 20-ago (convención de montos de marketing: el recurrente
+    // del trato va en pesos, no en UF).
     Monda_del_trato:
-      territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : territorio === "Perú" ? "SOL" : "UF",
+      territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : territorio === "Perú" ? "SOL" : "CLP",
     Producto_Soluci_n: "Control de Asistencia",
     Tipo_de_Cobro: empleados > 0 && empleados <= 10 ? "Mensual fijo" : "Por usuario",
     ...(empleados > 0 ? { N_Empleados_que_marcan: empleados } : {}),

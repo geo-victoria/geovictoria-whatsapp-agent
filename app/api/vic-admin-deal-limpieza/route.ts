@@ -167,6 +167,58 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, modo: "atribucion", ...out })
   }
 
+  // ── MODO MONEDA (?moneda=1): backfill masivo de "Moneda del trato"
+  // (campo custom Monda_del_trato — el visible en las vistas; distinto del
+  // Currency sistema). Lalo 20-ago: "la moneda del trato también pásala a
+  // CLP". UF solo existe en Chile → todo deal de Vicky con UF pasa a CLP;
+  // CO/MX/PE (COP/MXN/SOL) no se tocan. Pagina hasta agotar o `limit`.
+  if (searchParams.get("moneda") === "1") {
+    const out = { actualizados: 0, errores: [] as string[], quedan: 0 }
+    for (let vuelta = 0; vuelta < 10 && out.actualizados < limit; vuelta++) {
+      const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST",
+        headers: H,
+        cache: "no-store",
+        body: JSON.stringify({
+          select_query: `select id from Deals where Created_By = 3525045000484500876 and Monda_del_trato = 'UF' limit 100`,
+        }),
+      })
+      if (rc.status === 204) break // sin más filas
+      if (rc.status !== 200) { out.errores.push(`coql ${rc.status}`); break }
+      const filas = (((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string }> }).data) || []
+      if (!filas.length) break
+      const ids = filas.slice(0, Math.max(1, limit - out.actualizados))
+      const up = await fetch(`${ZOHO_API}/crm/v3/Deals`, {
+        method: "PUT",
+        headers: H,
+        cache: "no-store",
+        body: JSON.stringify({
+          data: ids.map((f) => ({ id: f.id, Monda_del_trato: "CLP" })),
+          skip_feature_execution: [{ name: "assignment_rules" }],
+          trigger: [],
+        }),
+      })
+      const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string; details?: { id?: string } }> }
+      for (const r of cuerpo?.data || []) {
+        if (r.code === "SUCCESS") out.actualizados++
+        else out.errores.push(`${r.details?.id || "?"}: ${r.code}`)
+      }
+      if (!up.ok && !cuerpo?.data?.length) { out.errores.push(`put ${up.status}`); break }
+    }
+    const rq = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({ select_query: `select COUNT(id) from Deals where Created_By = 3525045000484500876 and Monda_del_trato = 'UF' group by Monda_del_trato` }),
+    })
+    if (rq.status === 200) {
+      const d = (((await rq.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data) || []
+      out.quedan = Number(Object.values(d[0] || {}).find((v) => typeof v === "number") || 0)
+    }
+    console.log(`[deal-limpieza] moneda ${JSON.stringify(out)}`)
+    return NextResponse.json({ ok: true, modo: "moneda", ...out })
+  }
+
   // Emisiones completas, más reciente primero; por deal se usa SU cotización
   // más nueva (la vigente). Punteros sin deal se resuelven vía Deal_Asociado.
   const punteros: Puntero[] = []
@@ -263,7 +315,7 @@ export async function GET(req: Request): Promise<Response> {
       )
 
       // 3. Deal actual.
-      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,N_Empleados_que_marcan,Currency`, { headers: H, cache: "no-store" })
+      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,N_Empleados_que_marcan,Currency,Monda_del_trato`, { headers: H, cache: "no-store" })
       if (rd.status !== 200) continue
       const deal = ((await rd.json().catch(() => ({}))) as {
         data?: Array<{
@@ -273,6 +325,7 @@ export async function GET(req: Request): Promise<Response> {
           Valor_fijo_del_trato_Global?: number | null
           N_Empleados_que_marcan?: number | null
           Currency?: string | null
+          Monda_del_trato?: string | null
         }>
       })?.data?.[0]
       if (!deal) continue
@@ -299,6 +352,13 @@ export async function GET(req: Request): Promise<Response> {
       const telDeal = ((p as unknown as { contact?: string }).contact || "").replace(/\D/g, "")
       if (telDeal.startsWith("56") && String(deal.Currency || "") !== "CLP") {
         cambios.Currency = "CLP"
+      }
+      // Y el campo VISIBLE "Moneda del trato" (custom Monda_del_trato — el que
+      // sale en las vistas de Zoho; Lalo 20-ago "la moneda del trato sigue
+      // diciendo UF"). CL → CLP; UF de cualquier origen también cae acá.
+      const monedaTrato = String(deal.Monda_del_trato || "")
+      if ((telDeal.startsWith("56") || monedaTrato === "UF") && monedaTrato !== "CLP") {
+        cambios.Monda_del_trato = "CLP"
       }
       if (Object.keys(cambios).length) {
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
