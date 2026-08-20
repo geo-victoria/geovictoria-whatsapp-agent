@@ -224,6 +224,18 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, modo: "moneda", ...out })
   }
 
+  // ── DEBUG COQL v8 (?coqlv8=1): reproduce la consulta exacta del funnel
+  // (fetchCierreZoho) con el token del agente y devuelve el status crudo —
+  // para diagnosticar por qué el dash quedó sin la sección de Zoho (20-ago).
+  if (searchParams.get("coqlv8") === "1") {
+    const q = `select id, Name, Numero_Cotizacion, Estado_Cotizacion, Intervenci_n_Humana, Fecha_Hora_Cotizacion, Tel_fono_Contacto, Email_Contacto, Created_Time, Modified_Time, Descuento_Recurrente_Pct, Cuenta_Asociada.Account_Name, Onboarding_Link, Owner.first_name, Owner.last_name, Deal_Asociado.Stage, Deal_Asociado.id from Cotizaciones_GeoVictoria where Created_By = 3525045000484500876 order by Created_Time desc limit 0, 200`
+    const r = await fetch(`${ZOHO_API}/crm/v8/coql`, {
+      method: "POST", headers: H, cache: "no-store", body: JSON.stringify({ select_query: q }),
+    })
+    const texto = await r.text().catch(() => "")
+    return NextResponse.json({ ok: true, status: r.status, filas: (texto.match(/"id"/g) || []).length, cuerpo: texto.slice(0, 500) })
+  }
+
   // ── MODO GESTIÓN DE LEADS (?gestionleads=1): mismo campo Gesti_n_Vicky
   // creado en el módulo LEADS (Lalo 20-ago, "los leads que se asignaron a
   // Vicky, ¿podemos marcarlos igual?"). Universo: leads CREADOS por Vicky O
