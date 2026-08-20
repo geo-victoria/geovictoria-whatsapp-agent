@@ -350,16 +350,16 @@ export async function GET(req: Request): Promise<Response> {
       for (const l of j?.data || []) if (l.Converted_Deal?.id) dealsConLead.add(String(l.Converted_Deal.id))
       if (!j?.info?.more_records) break
     }
-    // 2. Deals del robot.
-    const dealsRobot: Array<{ id: string; nombre: string }> = []
+    // 2. Deals del robot (con fecha y RUT para la EVIDENCIA del pareo).
+    const dealsRobot: Array<{ id: string; nombre: string; creado: string; rut: string }> = []
     for (let off = 0; off < 1000; off += 200) {
       const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
         method: "POST", headers: H, cache: "no-store",
-        body: JSON.stringify({ select_query: `select id, Deal_Name from Deals where Created_By = 3525045000484500876 order by Created_Time desc limit 200 offset ${off}` }),
+        body: JSON.stringify({ select_query: `select id, Deal_Name, Created_Time, Rut_ID_Account from Deals where Created_By = 3525045000484500876 order by Created_Time desc limit 200 offset ${off}` }),
       })
       if (rc.status !== 200) break
-      const j = (await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Deal_Name?: string }>; info?: { more_records?: boolean } }
-      for (const d of j?.data || []) dealsRobot.push({ id: d.id, nombre: String(d.Deal_Name || "") })
+      const j = (await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Deal_Name?: string; Created_Time?: string; Rut_ID_Account?: string | null }>; info?: { more_records?: boolean } }
+      for (const d of j?.data || []) dealsRobot.push({ id: d.id, nombre: String(d.Deal_Name || ""), creado: String(d.Created_Time || ""), rut: String(d.Rut_ID_Account || "").replace(/[.\s-]/g, "").toLowerCase() })
       if (!j?.info?.more_records) break
     }
     const huerfanos = dealsRobot.filter((d) => !dealsConLead.has(d.id))
@@ -381,16 +381,32 @@ export async function GET(req: Request): Promise<Response> {
       const tel = telPorDeal.get(d.id) || ""
       if (!tel) { sinTelefono++; detalle.push({ deal: d.nombre, veredicto: "sin_telefono" }); continue }
       const rs = await fetch(
-        `${ZOHO_API}/crm/v3/Leads/search?phone=${encodeURIComponent(tel)}&converted=both&fields=id,Last_Name,Company,Owner,Lead_Status&per_page=5&page=1`,
+        `${ZOHO_API}/crm/v3/Leads/search?phone=${encodeURIComponent(tel)}&converted=both&fields=id,Last_Name,Company,Owner,Lead_Status,Created_Time,RUT_Empresa&per_page=5&page=1`,
         { headers: H, cache: "no-store" },
       )
-      const j = rs.status === 200 ? ((await rs.json().catch(() => ({}))) as { data?: Array<{ id: string; Company?: string; Owner?: { name?: string }; Lead_Status?: string | null; $converted?: boolean }> }) : null
+      const j = rs.status === 200 ? ((await rs.json().catch(() => ({}))) as { data?: Array<{ id: string; Company?: string; Owner?: { name?: string }; Lead_Status?: string | null; Created_Time?: string; RUT_Empresa?: string | null; $converted?: boolean }> }) : null
       const leads = j?.data || []
       if (!leads.length) { sinLead++; detalle.push({ deal: d.nombre, tel, veredicto: "sin_lead" }); continue }
       const vivo = leads.find((l) => !(l as { $converted?: boolean }).$converted)
       if (vivo) {
         conLeadVivo++
-        detalle.push({ deal: d.nombre, tel, veredicto: "lead_vivo", lead: `${vivo.Company || ""} · ${vivo.Owner?.name || ""} · ${vivo.Lead_Status || ""}`, leadId: vivo.id })
+        // EVIDENCIA del pareo (Lalo 20-ago): además del teléfono exacto,
+        // ¿coinciden nombre de empresa, RUT y qué distancia hay entre la
+        // creación del lead y la del deal?
+        const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "")
+        const nomDeal = norm(d.nombre.replace(/\s*[-(].*$/, ""))
+        const nomLead = norm(String(vivo.Company || ""))
+        const mismaEmpresa = Boolean(nomDeal && nomLead && (nomDeal.includes(nomLead) || nomLead.includes(nomDeal)))
+        const rutLead = String(vivo.RUT_Empresa || "").replace(/[.\s-]/g, "").toLowerCase()
+        const mismoRut = Boolean(d.rut && rutLead && d.rut === rutLead)
+        const tLead = Date.parse(String(vivo.Created_Time || ""))
+        const tDeal = Date.parse(d.creado)
+        const deltaHoras = Number.isFinite(tLead) && Number.isFinite(tDeal) ? Math.round((tDeal - tLead) / 3600e3) : null
+        detalle.push({
+          deal: d.nombre, tel, veredicto: "lead_vivo", leadId: vivo.id,
+          lead: `${vivo.Company || ""} · ${vivo.Owner?.name || ""} · ${vivo.Lead_Status || ""}`,
+          evidencia: { mismaEmpresa, mismoRut, lead_creado: String(vivo.Created_Time || "").slice(0, 16), deal_creado: d.creado.slice(0, 16), delta_horas_lead_a_deal: deltaHoras },
+        })
       } else {
         conLeadConvertidoOtro++
         detalle.push({ deal: d.nombre, tel, veredicto: "lead_convertido_a_otro", leadId: leads[0].id })
