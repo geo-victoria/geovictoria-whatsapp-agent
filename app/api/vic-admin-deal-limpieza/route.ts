@@ -74,6 +74,22 @@ async function authorized(req: Request): Promise<boolean> {
 
 type Puntero = { quote_id: string; deal_id: string | null; created_at: string }
 
+/** Veredicto de atribución CONGELADO al momento del pago (Lalo 20-ago):
+ * compara la fecha del PAGO contra el PRIMER traspaso del contacto en
+ * vic_ptv — inmune a traspasos posteriores ("ahora mismo ya todo se
+ * traspasó"). Pago sin traspaso previo jamás → 100% Autónoma; traspaso
+ * anterior al pago → Asistida; traspaso POSTERIOR al pago → anomalía
+ * histórica "Pago antes del traspaso" (patrón MATER, ya imposible con la
+ * guarda del 19-ago). */
+async function veredictoAtribucion(tel: string, pagoMs: number): Promise<string> {
+  const filas = await supa<{ traspasado_at: string }>(
+    `vic_ptv?contact=eq.${tel}&select=traspasado_at&order=traspasado_at.asc&limit=1`,
+  )
+  const primerMs = filas[0] ? Date.parse(String(filas[0].traspasado_at)) : NaN
+  if (!Number.isFinite(primerMs)) return "100% Autónoma"
+  return primerMs <= pagoMs ? "Asistida" : "Pago antes del traspaso"
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await authorized(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   const { searchParams } = new URL(req.url)
@@ -83,12 +99,53 @@ export async function GET(req: Request): Promise<Response> {
   const token = await getZohoAccessToken()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
 
+  // ── MODO ATRIBUCIÓN (?atribucion=1): recorre las VENTAS PAGADAS del
+  // registro venta_dash y estampa Atribucion_Venta en su deal si está vacío.
+  if (searchParams.get("atribucion") === "1") {
+    const out = { estampadas: 0, ya_tenian: 0, sin_deal: 0, detalle: [] as string[], errores: [] as string[] }
+    const ventas = await supa<{ key: string; value: string }>(`vic_kv?key=like.venta_dash_v3_*&select=key,value&limit=3000`)
+    for (const v of ventas) {
+      try {
+        const qid = String(v.key).replace("venta_dash_v3_", "")
+        const dato = JSON.parse(v.value) as { pagoIso?: string; numero?: string }
+        const pagoMs = Date.parse(String(dato.pagoIso || ""))
+        if (!Number.isFinite(pagoMs)) continue
+        const pt = await supa<{ deal_id: string | null; contact: string }>(
+          `vic_v3_quote_pointers?quote_id=eq.${qid}&select=deal_id,contact&limit=1`,
+        )
+        const dealId = pt[0]?.deal_id || ""
+        const tel = (pt[0]?.contact || "").replace(/\D/g, "")
+        if (!dealId || !tel) { out.sin_deal++; continue }
+        const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta`, { headers: H, cache: "no-store" })
+        if (rd.status !== 200) continue
+        const actual = String(((await rd.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null }> })?.data?.[0]?.Atribucion_Venta || "")
+        if (actual) { out.ya_tenian++; continue }
+        const veredicto = await veredictoAtribucion(tel, pagoMs)
+        const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+          method: "PUT",
+          headers: H,
+          cache: "no-store",
+          body: JSON.stringify({ data: [{ id: dealId, Atribucion_Venta: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+        })
+        const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
+        if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
+          out.estampadas++
+          out.detalle.push(`${dato.numero || qid}: ${veredicto}`)
+        } else out.errores.push(`${dato.numero || qid}: ${cuerpo?.data?.[0]?.code || up.status}`)
+      } catch (e) {
+        out.errores.push(e instanceof Error ? e.message.slice(0, 60) : "err")
+      }
+    }
+    console.log(`[deal-limpieza] atribucion ${JSON.stringify({ ...out, detalle: out.detalle.length })}`)
+    return NextResponse.json({ ok: true, modo: "atribucion", ...out })
+  }
+
   // Emisiones completas, más reciente primero; por deal se usa SU cotización
   // más nueva (la vigente). Punteros sin deal se resuelven vía Deal_Asociado.
   const punteros: Puntero[] = []
   for (let offset = 0; offset < 5000; offset += 1000) {
     const lote = await supa<Puntero>(
-      `vic_v3_quote_pointers?select=quote_id,deal_id,created_at&order=created_at.desc&limit=1000&offset=${offset}`,
+      `vic_v3_quote_pointers?select=quote_id,deal_id,created_at,contact&order=created_at.desc&limit=1000&offset=${offset}`,
     )
     punteros.push(...lote)
     if (lote.length < 1000) break
@@ -216,6 +273,23 @@ export async function GET(req: Request): Promise<Response> {
       const estado = String(quote.Estado_Cotizacion || "").toLowerCase()
       const pagada = estado.includes("pagad") || Boolean(String(quote.Onboarding_Link || "").trim())
       if (pagada) {
+        // Atribución congelada al pago (ventas futuras): si el deal no la
+        // tiene, se calcula y estampa aquí mismo.
+        try {
+          const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta`, { headers: H, cache: "no-store" })
+          const atr = String(((await ra.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null }> })?.data?.[0]?.Atribucion_Venta || "")
+          const telPago = (p as unknown as { contact?: string }).contact || ""
+          const pagoMs = Date.parse(String(quote.Fecha_Hora_Cotizacion || quote.Modified_Time || ""))
+          if (!atr && telPago && Number.isFinite(pagoMs)) {
+            const veredicto = await veredictoAtribucion(telPago.replace(/\D/g, ""), pagoMs)
+            await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+              method: "PUT",
+              headers: H,
+              cache: "no-store",
+              body: JSON.stringify({ data: [{ id: dealId, Atribucion_Venta: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+            }).catch(() => undefined)
+          }
+        } catch { /* best-effort */ }
         const stage = String(deal.Stage || "").toLowerCase()
         if (stage.includes("perdido") || stage.includes("congelado")) {
           res.pagadas_en_perdido.push(`${quote.Numero_Cotizacion || p.quote_id} → deal ${dealId} (${deal.Stage})`)
