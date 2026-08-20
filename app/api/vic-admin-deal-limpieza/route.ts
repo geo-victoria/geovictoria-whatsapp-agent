@@ -237,8 +237,40 @@ export async function GET(req: Request): Promise<Response> {
     })
     if (rc.status !== 200 && rc.status !== 204) return NextResponse.json({ ok: false, error: `coql ${rc.status}` }, { status: 500 })
     const filas = rc.status === 204 ? [] : ((((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> }).data) || [])
-    for (const f of filas.slice(0, limit)) {
+    // Y los leads que Vicky RECIBIÓ por tómbola para la cadencia outbound
+    // (Lalo 20-ago: "no necesariamente ahora es el owner" — pueden estar
+    // reasignados): fuente = vic_outbound_cadence.zoho_lead_id. El GET por id
+    // filtra convertidos/borrados y los que ya tienen estampa; candado kv
+    // `glz_<id>` 30d evita re-mirar los ya revisados en cada tick.
+    const cad = await supa<{ zoho_lead_id: string; contact: string }>(
+      `vic_outbound_cadence?select=zoho_lead_id,contact&zoho_lead_id=not.is.null&limit=1000`,
+    )
+    const yaEnPagina = new Set(filas.map((f) => f.id))
+    const revisados = new Set(
+      (await supa<{ key: string }>(`vic_kv?key=like.glz_*&select=key&limit=2000`)).map((r) => String(r.key).replace("glz_", "")),
+    )
+    const extra: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> = []
+    for (const c of cad) {
+      const lid = String(c.zoho_lead_id || "").replace(/\D/g, "")
+      if (!lid || yaEnPagina.has(lid) || revisados.has(lid)) continue
+      extra.push({ id: lid, Phone: c.contact })
+    }
+    for (const f of [...filas, ...extra].slice(0, limit)) {
       try {
+        const esExtra = !yaEnPagina.has(f.id)
+        if (esExtra) {
+          // Marcar como revisado ANTES (aunque falle, no se re-mira cada tick).
+          await supa(`vic_kv?on_conflict=key`, {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify({ key: `glz_${f.id}`, value: new Date().toISOString(), expires_at: new Date(Date.now() + 30 * 86400e3).toISOString() }),
+          }).catch(() => [])
+          const rl = await fetch(`${ZOHO_API}/crm/v3/Leads/${f.id}?fields=Gesti_n_Vicky,Phone,Mobile`, { headers: H, cache: "no-store" })
+          if (rl.status !== 200) continue // convertido/borrado
+          const lead = ((await rl.json().catch(() => ({}))) as { data?: Array<{ Gesti_n_Vicky?: string | null; Phone?: string | null; Mobile?: string | null }> })?.data?.[0]
+          if (!lead || String(lead.Gesti_n_Vicky || "")) continue
+          f.Mobile = lead.Mobile || lead.Phone || f.Phone
+        }
         const tel = String(f.Mobile || f.Phone || "").replace(/\D/g, "")
         if (!tel) { out.sin_telefono++; continue }
         const veredicto = await veredictoGestion(tel, Date.now(), f.id, H)
@@ -254,7 +286,7 @@ export async function GET(req: Request): Promise<Response> {
       }
     }
     console.log(`[deal-limpieza] gestionleads ${JSON.stringify(out)}`)
-    return NextResponse.json({ ok: true, modo: "gestionleads", quedan_en_pagina: filas.length, ...out })
+    return NextResponse.json({ ok: true, modo: "gestionleads", quedan_en_pagina: filas.length + extra.length, ...out })
   }
 
   // ── MODO GESTIÓN DE HITOS (?gestionhitos=1): deals del robot SIN cotización
