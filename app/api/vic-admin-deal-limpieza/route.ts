@@ -351,7 +351,7 @@ export async function GET(req: Request): Promise<Response> {
       )
 
       // 3. Deal actual.
-      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,N_Empleados_que_marcan,Currency,Monda_del_trato`, { headers: H, cache: "no-store" })
+      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,Valor_por_usuario_Global,N_Empleados_que_marcan,Currency,Monda_del_trato`, { headers: H, cache: "no-store" })
       if (rd.status !== 200) continue
       const deal = ((await rd.json().catch(() => ({}))) as {
         data?: Array<{
@@ -359,6 +359,7 @@ export async function GET(req: Request): Promise<Response> {
           Owner?: { id?: string; email?: string }
           Tipo_de_Cobro?: string | null
           Valor_fijo_del_trato_Global?: number | null
+          Valor_por_usuario_Global?: number | null
           N_Empleados_que_marcan?: number | null
           Currency?: string | null
           Monda_del_trato?: string | null
@@ -379,6 +380,13 @@ export async function GET(req: Request): Promise<Response> {
       }
       if (recurrenteNeto > 0 && String(deal.Tipo_de_Cobro || "") !== "Mensual fijo") {
         cambios.Tipo_de_Cobro = "Mensual fijo"
+      }
+      // Residuo del workflow de Zoho: Valor_por_usuario_Global con tarifa de
+      // LISTA en UF (0,081/0,1275…). Bajo la convención Mensual fijo ese
+      // campo no aplica — se vacía para que no aparezcan "valores extraños"
+      // en los reportes (Lalo 20-ago).
+      if (recurrenteNeto > 0 && Number(deal.Valor_por_usuario_Global || 0) !== 0) {
+        cambios.Valor_por_usuario_Global = null
       }
       if (usuariosCot > 0 && Number(deal.N_Empleados_que_marcan || 0) !== usuariosCot) {
         cambios.N_Empleados_que_marcan = usuariosCot
