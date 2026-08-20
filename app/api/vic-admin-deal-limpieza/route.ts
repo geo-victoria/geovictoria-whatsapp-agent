@@ -74,20 +74,17 @@ async function authorized(req: Request): Promise<boolean> {
 
 type Puntero = { quote_id: string; deal_id: string | null; created_at: string }
 
-/** Veredicto de atribución CONGELADO al momento del pago (Lalo 20-ago):
- * compara la fecha del PAGO contra el PRIMER traspaso del contacto en
- * vic_ptv — inmune a traspasos posteriores ("ahora mismo ya todo se
- * traspasó"). Pago sin traspaso previo jamás → 100% Autónoma; traspaso
- * anterior al pago → Asistida; traspaso POSTERIOR al pago → anomalía
- * histórica "Pago antes del traspaso" (patrón MATER, ya imposible con la
- * guarda del 19-ago). */
+/** Veredicto de atribución CONGELADO al momento del pago (Lalo 20-ago,
+ * afinado): lo ÚNICO que importa es si el PAGO fue antes o después de
+ * traspasar al ejecutivo — un traspaso POSTERIOR al pago es gestión
+ * interna y da lo mismo. Traspaso antes del pago → Asistida; todo lo
+ * demás (sin traspaso, o traspaso posterior) → 100% Autónoma. */
 async function veredictoAtribucion(tel: string, pagoMs: number): Promise<string> {
   const filas = await supa<{ traspasado_at: string }>(
     `vic_ptv?contact=eq.${tel}&select=traspasado_at&order=traspasado_at.asc&limit=1`,
   )
   const primerMs = filas[0] ? Date.parse(String(filas[0].traspasado_at)) : NaN
-  if (!Number.isFinite(primerMs)) return "100% Autónoma"
-  return primerMs <= pagoMs ? "Asistida" : "Pago antes del traspaso"
+  return Number.isFinite(primerMs) && primerMs <= pagoMs ? "Asistida" : "100% Autónoma"
 }
 
 export async function GET(req: Request): Promise<Response> {
