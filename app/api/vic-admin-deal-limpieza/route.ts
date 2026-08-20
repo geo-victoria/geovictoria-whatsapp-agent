@@ -236,6 +236,78 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, status: r.status, filas: (texto.match(/"id"/g) || []).length, cuerpo: texto.slice(0, 500) })
   }
 
+  // ── AUDITORÍA DE HUÉRFANOS (?huerfanos=1): deals del robot SIN lead
+  // convertido apuntándoles + ¿existe ya un lead (vivo o convertido a otra
+  // cosa) con el MISMO teléfono? (Lalo 20-ago, "¿puedes ver si esos leads ya
+  // existen?"). Solo lectura — no crea ni convierte nada.
+  if (searchParams.get("huerfanos") === "1") {
+    // 1. Leads convertidos desde mayo → set de deals con lead.
+    const dealsConLead = new Set<string>()
+    for (let pag = 1; pag <= 10; pag++) {
+      const r = await fetch(
+        `${ZOHO_API}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Created_Time:greater_equal:2026-05-01T00:00:00-04:00)")}&converted=true&fields=id,Converted_Deal&per_page=200&page=${pag}`,
+        { headers: H, cache: "no-store" },
+      )
+      if (r.status !== 200) break
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Converted_Deal?: { id?: string } | null }>; info?: { more_records?: boolean } }
+      for (const l of j?.data || []) if (l.Converted_Deal?.id) dealsConLead.add(String(l.Converted_Deal.id))
+      if (!j?.info?.more_records) break
+    }
+    // 2. Deals del robot.
+    const dealsRobot: Array<{ id: string; nombre: string }> = []
+    for (let off = 0; off < 1000; off += 200) {
+      const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select id, Deal_Name from Deals where Created_By = 3525045000484500876 order by Created_Time desc limit 200 offset ${off}` }),
+      })
+      if (rc.status !== 200) break
+      const j = (await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Deal_Name?: string }>; info?: { more_records?: boolean } }
+      for (const d of j?.data || []) dealsRobot.push({ id: d.id, nombre: String(d.Deal_Name || "") })
+      if (!j?.info?.more_records) break
+    }
+    const huerfanos = dealsRobot.filter((d) => !dealsConLead.has(d.id))
+    // 3. Teléfono por deal (punteros locales) y búsqueda de lead por fono.
+    const telPorDeal = new Map<string, string>()
+    for (let off = 0; off < 5000; off += 1000) {
+      const lote = await supa<{ deal_id: string | null; contact: string | null }>(
+        `vic_v3_quote_pointers?select=deal_id,contact&deal_id=not.is.null&limit=1000&offset=${off}`,
+      )
+      for (const p of lote) {
+        const t = String(p.contact || "").replace(/\D/g, "")
+        if (p.deal_id && t && !telPorDeal.has(p.deal_id)) telPorDeal.set(String(p.deal_id), t)
+      }
+      if (lote.length < 1000) break
+    }
+    const detalle: Array<Record<string, unknown>> = []
+    let conLeadVivo = 0, conLeadConvertidoOtro = 0, sinLead = 0, sinTelefono = 0
+    for (const d of huerfanos.slice(0, Math.min(limit * 10, 120))) {
+      const tel = telPorDeal.get(d.id) || ""
+      if (!tel) { sinTelefono++; detalle.push({ deal: d.nombre, veredicto: "sin_telefono" }); continue }
+      const rs = await fetch(
+        `${ZOHO_API}/crm/v3/Leads/search?phone=${encodeURIComponent(tel)}&converted=both&fields=id,Last_Name,Company,Owner,Lead_Status&per_page=5&page=1`,
+        { headers: H, cache: "no-store" },
+      )
+      const j = rs.status === 200 ? ((await rs.json().catch(() => ({}))) as { data?: Array<{ id: string; Company?: string; Owner?: { name?: string }; Lead_Status?: string | null; $converted?: boolean }> }) : null
+      const leads = j?.data || []
+      if (!leads.length) { sinLead++; detalle.push({ deal: d.nombre, tel, veredicto: "sin_lead" }); continue }
+      const vivo = leads.find((l) => !(l as { $converted?: boolean }).$converted)
+      if (vivo) {
+        conLeadVivo++
+        detalle.push({ deal: d.nombre, tel, veredicto: "lead_vivo", lead: `${vivo.Company || ""} · ${vivo.Owner?.name || ""} · ${vivo.Lead_Status || ""}`, leadId: vivo.id })
+      } else {
+        conLeadConvertidoOtro++
+        detalle.push({ deal: d.nombre, tel, veredicto: "lead_convertido_a_otro", leadId: leads[0].id })
+      }
+    }
+    return NextResponse.json({
+      ok: true, modo: "huerfanos",
+      deals_robot: dealsRobot.length, con_lead_convertido: dealsRobot.length - huerfanos.length,
+      huerfanos: huerfanos.length, evaluados: Math.min(huerfanos.length, Math.min(limit * 10, 120)),
+      con_lead_vivo: conLeadVivo, con_lead_convertido_a_otro: conLeadConvertidoOtro, sin_lead: sinLead, sin_telefono: sinTelefono,
+      detalle,
+    })
+  }
+
   // ── MODO GESTIÓN DE LEADS (?gestionleads=1): mismo campo Gesti_n_Vicky
   // creado en el módulo LEADS (Lalo 20-ago, "los leads que se asignaron a
   // Vicky, ¿podemos marcarlos igual?"). Universo: leads CREADOS por Vicky O
