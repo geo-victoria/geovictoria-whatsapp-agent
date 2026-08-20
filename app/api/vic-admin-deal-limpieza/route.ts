@@ -298,9 +298,29 @@ export async function GET(req: Request): Promise<Response> {
   }
   const dealVisto = new Set<string>()
 
+  // Candados PRECARGADOS en una sola consulta (antes se consultaba vic_kv por
+  // puntero Y se bajaba la cotización de Zoho por puntero — con cientos de
+  // deals ya tratados, la función se comía los 120s solo en saltarlos).
+  const candadoVivo = new Set<string>()
+  if (!forzar) {
+    for (let off = 0; off < 4000; off += 1000) {
+      const lote = await supa<{ key: string; expires_at?: string }>(
+        `vic_kv?key=like.dlz_*&select=key,expires_at&limit=1000&offset=${off}`,
+      )
+      for (const c of lote) {
+        if (!c.expires_at || new Date(c.expires_at).getTime() > Date.now()) {
+          candadoVivo.add(String(c.key).replace("dlz_", ""))
+        }
+      }
+      if (lote.length < 1000) break
+    }
+  }
+
   for (const p of punteros) {
     if (res.procesados >= limit) break
     try {
+      // Salto barato ANTES de tocar Zoho (solo posible con deal_id conocido).
+      if (p.deal_id && (dealVisto.has(p.deal_id) || candadoVivo.has(p.deal_id))) continue
       // 1. Cotización (fuente de verdad del deal, estado, dueño y montos).
       const rq = await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${p.quote_id}`, { headers: H, cache: "no-store" })
       if (rq.status !== 200) continue
@@ -324,15 +344,11 @@ export async function GET(req: Request): Promise<Response> {
         res.punteros_backfilleados++
       }
 
-      // Candado semanal por deal.
-      if (!forzar) {
-        const kvKey = `dlz_${dealId}`
-        const vivo = await supa<{ key: string; expires_at?: string }>(
-          `vic_kv?key=eq.${kvKey}&select=key,expires_at&limit=1`,
-        )
-        if (vivo[0] && (!vivo[0].expires_at || new Date(vivo[0].expires_at).getTime() > Date.now())) continue
-      }
+      // Candado semanal por deal (del precargado; cubre el caso deal_id
+      // resuelto recién vía Deal_Asociado).
+      if (!forzar && candadoVivo.has(dealId)) continue
       res.procesados++
+      candadoVivo.add(dealId)
       await supa(`vic_kv?on_conflict=key`, {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
