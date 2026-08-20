@@ -226,13 +226,14 @@ export async function GET(req: Request): Promise<Response> {
 
   // ── MODO GESTIÓN DE LEADS (?gestionleads=1): mismo campo Gesti_n_Vicky
   // creado en el módulo LEADS (Lalo 20-ago, "los leads que se asignaron a
-  // Vicky, ¿podemos marcarlos igual?"). Universo: leads CREADOS por Vicky aún
-  // sin convertir (COQL excluye convertidos); teléfono del propio lead.
+  // Vicky, ¿podemos marcarlos igual?"). Universo: leads CREADOS por Vicky O
+  // ASIGNADOS a Vicky (los que recibió por tómbola/reglas hace tiempo — Lalo
+  // 20-ago), aún sin convertir (COQL excluye convertidos); teléfono del lead.
   if (searchParams.get("gestionleads") === "1") {
     const out = { estampados: 0, sin_telefono: 0, errores: [] as string[] }
     const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
       method: "POST", headers: H, cache: "no-store",
-      body: JSON.stringify({ select_query: `select id, Phone, Mobile from Leads where Created_By = 3525045000484500876 and Gesti_n_Vicky is null order by Created_Time desc limit 100` }),
+      body: JSON.stringify({ select_query: `select id, Phone, Mobile from Leads where (Created_By = 3525045000484500876 or Owner = 3525045000484500876) and Gesti_n_Vicky is null order by Created_Time desc limit 100` }),
     })
     if (rc.status !== 200 && rc.status !== 204) return NextResponse.json({ ok: false, error: `coql ${rc.status}` }, { status: 500 })
     const filas = rc.status === 204 ? [] : ((((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> }).data) || [])
