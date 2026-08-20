@@ -123,7 +123,7 @@ export async function GET(req: Request): Promise<Response> {
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
 
   // ── MODO ATRIBUCIÓN (?atribucion=1): recorre las VENTAS PAGADAS del
-  // registro venta_dash y estampa Atribucion_Venta en su deal si está vacío.
+  // registro venta_dash y estampa Gestion_Vicky en su deal si está vacío.
   if (searchParams.get("atribucion") === "1") {
     const out = { estampadas: 0, ya_tenian: 0, sin_deal: 0, detalle: [] as string[], errores: [] as string[] }
     const ventas = await supa<{ key: string; value: string }>(`vic_kv?key=like.venta_dash_v3_*&select=key,value&limit=3000`)
