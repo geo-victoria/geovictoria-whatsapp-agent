@@ -123,6 +123,19 @@ export async function transicionarDealHacia(
     if (tieneCampo("M_todo_de_carga_de_informaci_n") && !data.M_todo_de_carga_de_informaci_n) {
       data.M_todo_de_carga_de_informaci_n = "App de carga (cliente)"
     }
+    // Variante "campos de marcaje" (Electrocontrol/Garden, cazada 20-ago):
+    // esta transición exige el cómo/método/con-quién del marcaje y con data
+    // vacío responde INVALID_DATA. Defaults de la venta online de Vicky; la
+    // Fecha_de_Primera_Factura NO se inventa (dato de facturación real).
+    if (tieneCampo("M_todo_de_Marcaje") && !data.M_todo_de_Marcaje) {
+      data.M_todo_de_Marcaje = ["GeoVictoria APP"]
+    }
+    if (tieneCampo("C_mo_marcan") && !data.C_mo_marcan) {
+      data.C_mo_marcan = "Marcaje con GeoVictoria APP (venta online Vicky)"
+    }
+    if (tieneCampo("Con_qui_n_marcan") && !data.Con_qui_n_marcan) {
+      data.Con_qui_n_marcan = "Todos los trabajadores de la dotación contratada"
+    }
     // Los multiselect llegan pre-llenados como string ("GeoVictoria APP") pero
     // el PUT los exige como array.
     for (const f of camposTransicion) {
