@@ -113,9 +113,13 @@ export async function GET(req: Request): Promise<Response> {
         const dealId = pt[0]?.deal_id || ""
         const tel = (pt[0]?.contact || "").replace(/\D/g, "")
         if (!dealId || !tel) { out.sin_deal++; continue }
-        const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta`, { headers: H, cache: "no-store" })
+        const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta,Created_By`, { headers: H, cache: "no-store" })
         if (rd.status !== 200) continue
-        const actual = String(((await rd.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null }> })?.data?.[0]?.Atribucion_Venta || "")
+        const dd = ((await rd.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
+        // Deal creado por un HUMANO = venta del canal ejecutivo (caso MATER):
+        // la atribución Vicky no aplica.
+        if (dd?.Created_By?.id && !ROBOT_OWNER_IDS.has(String(dd.Created_By.id))) { out.sin_deal++; continue }
+        const actual = String(dd?.Atribucion_Venta || "")
         if (actual) { out.ya_tenian++; continue }
         const veredicto = await veredictoAtribucion(tel, pagoMs)
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
@@ -273,11 +277,13 @@ export async function GET(req: Request): Promise<Response> {
         // Atribución congelada al pago (ventas futuras): si el deal no la
         // tiene, se calcula y estampa aquí mismo.
         try {
-          const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta`, { headers: H, cache: "no-store" })
-          const atr = String(((await ra.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null }> })?.data?.[0]?.Atribucion_Venta || "")
+          const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta,Created_By`, { headers: H, cache: "no-store" })
+          const da = ((await ra.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
+          const atr = String(da?.Atribucion_Venta || "")
+          const dealDeHumano = Boolean(da?.Created_By?.id) && !ROBOT_OWNER_IDS.has(String(da?.Created_By?.id))
           const telPago = (p as unknown as { contact?: string }).contact || ""
           const pagoMs = Date.parse(String(quote.Fecha_Hora_Cotizacion || quote.Modified_Time || ""))
-          if (!atr && telPago && Number.isFinite(pagoMs)) {
+          if (!atr && !dealDeHumano && telPago && Number.isFinite(pagoMs)) {
             const veredicto = await veredictoAtribucion(telPago.replace(/\D/g, ""), pagoMs)
             await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
               method: "PUT",
