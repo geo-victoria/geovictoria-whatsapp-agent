@@ -240,7 +240,7 @@ export async function GET(req: Request): Promise<Response> {
       )
 
       // 3. Deal actual.
-      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,N_Empleados_que_marcan`, { headers: H, cache: "no-store" })
+      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,N_Empleados_que_marcan,Currency`, { headers: H, cache: "no-store" })
       if (rd.status !== 200) continue
       const deal = ((await rd.json().catch(() => ({}))) as {
         data?: Array<{
@@ -249,6 +249,7 @@ export async function GET(req: Request): Promise<Response> {
           Tipo_de_Cobro?: string | null
           Valor_fijo_del_trato_Global?: number | null
           N_Empleados_que_marcan?: number | null
+          Currency?: string | null
         }>
       })?.data?.[0]
       if (!deal) continue
@@ -269,6 +270,12 @@ export async function GET(req: Request): Promise<Response> {
       }
       if (usuariosCot > 0 && Number(deal.N_Empleados_que_marcan || 0) !== usuariosCot) {
         cambios.N_Empleados_que_marcan = usuariosCot
+      }
+      // Moneda del trato → CLP (Lalo 20-ago) — SOLO deals de Chile; CO/MX/PE
+      // conservan la suya.
+      const telDeal = ((p as unknown as { contact?: string }).contact || "").replace(/\D/g, "")
+      if (telDeal.startsWith("56") && String(deal.Currency || "") !== "CLP") {
+        cambios.Currency = "CLP"
       }
       if (Object.keys(cambios).length) {
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
