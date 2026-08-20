@@ -271,7 +271,9 @@ export async function GET(req: Request): Promise<Response> {
       }
       if (!j?.info?.more_records) break
     }
-    // Deals del robot (tel vía punteros locales; monto solo CLP tel 56).
+    // Deals del robot (tel vía punteros locales Y vía la conversación que los
+    // creó — vic_v3_conversations.pref_deal_id cubre los deals de hito sin
+    // cotización; monto solo CLP).
     const telPorDeal = new Map<string, string>()
     for (let off = 0; off < 5000; off += 1000) {
       const lote = await supa<{ deal_id: string | null; contact: string | null }>(
@@ -280,6 +282,16 @@ export async function GET(req: Request): Promise<Response> {
       for (const p of lote) {
         const t = String(p.contact || "").replace(/\D/g, "")
         if (p.deal_id && t && !telPorDeal.has(p.deal_id)) telPorDeal.set(String(p.deal_id), t)
+      }
+      if (lote.length < 1000) break
+    }
+    for (let off = 0; off < 5000; off += 1000) {
+      const lote = await supa<{ contact: string; pref_deal_id: string | null }>(
+        `vic_v3_conversations?select=contact,pref_deal_id&pref_deal_id=not.is.null&limit=1000&offset=${off}`,
+      )
+      for (const c of lote) {
+        const t = String(c.contact || "").replace(/\D/g, "")
+        if (c.pref_deal_id && t && !telPorDeal.has(String(c.pref_deal_id))) telPorDeal.set(String(c.pref_deal_id), t)
       }
       if (lote.length < 1000) break
     }
