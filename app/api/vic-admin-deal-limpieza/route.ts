@@ -362,10 +362,10 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   // ── CONVERTIR LEAD CONTRA DEAL EXISTENTE (?convertir=<leadId>&deal=<dealId>):
-  // cierra la regla de oro para los huérfanos — el lead vivo se convierte
-  // asociándolo a la CUENTA y el CONTACTO del deal, y con el propio deal como
-  // Deals.id (soportado por la API v3 de convert para asociar existente; si
-  // Zoho lo rechaza, se reporta el error crudo sin tocar nada más).
+  // patrón del 04-ago (vic-admin-convertir-lead, caso Globe Air Fuel): la API
+  // de Zoho NO permite asociar un deal existente al convertir (verificado en
+  // docs v8 y en vivo el 20-ago) — la cadena queda vía la CUENTA/CONTACTO
+  // compartidos: el lead se convierte contra la cuenta y el contacto del deal.
   const convertirLead = (searchParams.get("convertir") || "").replace(/\D/g, "")
   if (convertirLead) {
     const dealId = (searchParams.get("deal") || "").replace(/\D/g, "")
@@ -377,8 +377,9 @@ export async function GET(req: Request): Promise<Response> {
       overwrite: false,
       notify_lead_owner: false,
       notify_new_entity_owner: false,
-      Deals: { id: dealId },
     }
+    // Con ancla en el deal → merge contra ella; sin ancla → Zoho crea
+    // cuenta/contacto desde el lead y después se estampan en el deal.
     if (deal?.Account_Name?.id) cuerpo.Accounts = { id: deal.Account_Name.id }
     if (deal?.Contact_Name?.id) cuerpo.Contacts = { id: deal.Contact_Name.id }
     const rc = await fetch(`${ZOHO_API}/crm/v3/Leads/${convertirLead}/actions/convert`, {
@@ -389,7 +390,26 @@ export async function GET(req: Request): Promise<Response> {
     // Verificación: releer el lead convertido.
     const rl = await fetch(`${ZOHO_API}/crm/v3/Leads/${convertirLead}?fields=Converted_Deal,Converted_Account,Converted_Contact`, { headers: H, cache: "no-store" })
     const lead = rl.status === 200 ? ((await rl.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> })?.data?.[0] : null
-    return NextResponse.json({ ok: rc.ok, status: rc.status, deal: deal?.Deal_Name || dealId, respuesta: resp.slice(0, 400), verificacion: lead })
+    // CIERRE DE LA CADENA contacto↔deal (Lalo 20-ago): si el deal no tenía
+    // contacto/cuenta, se le estampan los del lead recién convertido — con eso
+    // lead → Converted_Contact = Contact_Name ← deal queda navegable.
+    let dealActualizado: string[] = []
+    if (rc.ok && lead) {
+      const patch: Record<string, unknown> = {}
+      const convContact = (lead.Converted_Contact as { id?: string } | null)?.id
+      const convAccount = (lead.Converted_Account as { id?: string } | null)?.id
+      if (!deal?.Contact_Name?.id && convContact) patch.Contact_Name = { id: convContact }
+      if (!deal?.Account_Name?.id && convAccount) patch.Account_Name = { id: convAccount }
+      if (Object.keys(patch).length) {
+        const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+          method: "PUT", headers: H, cache: "no-store",
+          body: JSON.stringify({ data: [{ id: dealId, ...patch }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+        })
+        const cuerpoUp = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
+        if (up.ok && cuerpoUp?.data?.[0]?.code === "SUCCESS") dealActualizado = Object.keys(patch)
+      }
+    }
+    return NextResponse.json({ ok: rc.ok, status: rc.status, deal: deal?.Deal_Name || dealId, respuesta: resp.slice(0, 300), verificacion: lead, deal_actualizado: dealActualizado })
   }
 
   // ── AUDITORÍA DE HUÉRFANOS (?huerfanos=1): deals del robot SIN lead
@@ -462,7 +482,7 @@ export async function GET(req: Request): Promise<Response> {
         const tDeal = Date.parse(d.creado)
         const deltaHoras = Number.isFinite(tLead) && Number.isFinite(tDeal) ? Math.round((tDeal - tLead) / 3600e3) : null
         detalle.push({
-          deal: d.nombre, tel, veredicto: "lead_vivo", leadId: vivo.id,
+          deal: d.nombre, dealId: d.id, tel, veredicto: "lead_vivo", leadId: vivo.id,
           lead: `${vivo.Company || ""} · ${vivo.Owner?.name || ""} · ${vivo.Lead_Status || ""}`,
           evidencia: { mismaEmpresa, mismoRut, lead_creado: String(vivo.Created_Time || "").slice(0, 16), deal_creado: d.creado.slice(0, 16), delta_horas_lead_a_deal: deltaHoras },
         })
