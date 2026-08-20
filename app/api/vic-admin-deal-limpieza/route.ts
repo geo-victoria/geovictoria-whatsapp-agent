@@ -331,6 +331,18 @@ export async function GET(req: Request): Promise<Response> {
       const estado = String(quote.Estado_Cotizacion || "").toLowerCase()
       const pagada = estado.includes("pagad") || Boolean(String(quote.Onboarding_Link || "").trim())
       if (pagada) {
+        // NORMALIZACIÓN DE ESTADO (Lalo 20-ago, "mi filtro solo pesca 6"):
+        // los pagos MP dejaban la cotización en "Aceptada"+link y el estado
+        // mentía en los filtros del CRM. Toda pagada real queda "Pagada";
+        // trigger:[] para no despertar workflows de Zoho.
+        if (!String(quote.Estado_Cotizacion || "").toLowerCase().includes("pagad")) {
+          await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${p.quote_id}`, {
+            method: "PUT",
+            headers: H,
+            cache: "no-store",
+            body: JSON.stringify({ data: [{ id: p.quote_id, Estado_Cotizacion: "Pagada" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          }).catch(() => undefined)
+        }
         // Atribución congelada al pago (ventas futuras): si el deal no la
         // tiene, se calcula y estampa aquí mismo.
         try {
