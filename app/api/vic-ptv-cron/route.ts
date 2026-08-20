@@ -760,6 +760,15 @@ async function enriquecerLeadsDeChat(): Promise<number> {
       if (empresaNueva && RE_EMPRESA_PLACEHOLDER.test(String(ld.Company || "").trim())) {
         campos.Company = empresaNueva
       }
+      // Conciliación del campo EMPRESA (Lalo 20-ago): lead con NOMBRE real
+      // (recién extraído o ya renombrado antes) pero Empresa aún en
+      // placeholder y sin razón social disponible → se deja "-" (el campo es
+      // obligatorio en Leads, no acepta vacío). "Ximena Godoy / Prospecto
+      // WhatsApp" despistaba más que un guion.
+      const nombreRealConocido = Boolean(nombreCliente) || !nombreEsPlaceholder(ld.First_Name, ld.Last_Name)
+      if (!campos.Company && nombreRealConocido && RE_EMPRESA_PLACEHOLDER.test(String(ld.Company || "").trim())) {
+        campos.Company = "-"
+      }
       if (ex?.email && !String(ld.Email || "").trim()) campos.Email = ex.email
       if (rutChat && !String(ld.RUT_Empresa || "").trim()) campos.RUT_Empresa = rutChat
       if (ex?.trabajadores) {
