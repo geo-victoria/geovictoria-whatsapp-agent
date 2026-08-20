@@ -233,7 +233,8 @@ export async function GET(req: Request): Promise<Response> {
     const out = { estampados: 0, sin_telefono: 0, errores: [] as string[] }
     const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
       method: "POST", headers: H, cache: "no-store",
-      body: JSON.stringify({ select_query: `select id, Phone, Mobile from Leads where (Created_By = 3525045000484500876 or Owner = 3525045000484500876) and Gesti_n_Vicky is null order by Created_Time desc limit 100` }),
+      // OJO: Leads de este org NO tiene columna Mobile (COQL 400) — solo Phone.
+      body: JSON.stringify({ select_query: `select id, Phone from Leads where (Created_By = 3525045000484500876 or Owner = 3525045000484500876) and Gesti_n_Vicky is null order by Created_Time desc limit 100` }),
     })
     if (rc.status !== 200 && rc.status !== 204) return NextResponse.json({ ok: false, error: `coql ${rc.status}` }, { status: 500 })
     const filas = rc.status === 204 ? [] : ((((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> }).data) || [])
@@ -265,11 +266,11 @@ export async function GET(req: Request): Promise<Response> {
             headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
             body: JSON.stringify({ key: `glz_${f.id}`, value: new Date().toISOString(), expires_at: new Date(Date.now() + 30 * 86400e3).toISOString() }),
           }).catch(() => [])
-          const rl = await fetch(`${ZOHO_API}/crm/v3/Leads/${f.id}?fields=Gesti_n_Vicky,Phone,Mobile`, { headers: H, cache: "no-store" })
+          const rl = await fetch(`${ZOHO_API}/crm/v3/Leads/${f.id}?fields=Gesti_n_Vicky,Phone`, { headers: H, cache: "no-store" })
           if (rl.status !== 200) continue // convertido/borrado
-          const lead = ((await rl.json().catch(() => ({}))) as { data?: Array<{ Gesti_n_Vicky?: string | null; Phone?: string | null; Mobile?: string | null }> })?.data?.[0]
+          const lead = ((await rl.json().catch(() => ({}))) as { data?: Array<{ Gesti_n_Vicky?: string | null; Phone?: string | null }> })?.data?.[0]
           if (!lead || String(lead.Gesti_n_Vicky || "")) continue
-          f.Mobile = lead.Mobile || lead.Phone || f.Phone
+          f.Phone = lead.Phone || f.Phone
         }
         const tel = String(f.Mobile || f.Phone || "").replace(/\D/g, "")
         if (!tel) { out.sin_telefono++; continue }
