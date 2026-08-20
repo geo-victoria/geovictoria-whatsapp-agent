@@ -2772,7 +2772,11 @@ function renderInboundDiario(
         "<tr><td>Accionable</td><td>" + f(d.acc) + "</td></tr>" +
         "<tr><td>Links</td><td>" + (d.conv ? '<a href="?conv=' + d.conv + '">chat completo</a> · ' : "") + (d.z ? '<a href="' + d.z + '" target="_blank">Zoho</a>' : "") + "</td></tr>" +
         "</table>" +
-        (trans.length ? '<button class="vertrans" id="btntrans">💬 Ver transcripción (' + trans.length + " mensajes)</button><div id=\"inbchat\"></div>" : "");
+        // OJO: comillas SIMPLES en el div — el \" del template TS llegaba al
+        // navegador sin el backslash y rompía el string: TODO el script del
+        // popover moría con "Unexpected identifier 'inbchat'" y las viñetas
+        // del hover no aparecían (cazado con Chromium headless, 20-ago).
+        (trans.length ? '<button class="vertrans" id="btntrans">💬 Ver transcripción (' + trans.length + " mensajes)</button><div id='inbchat'></div>" : "");
       if (trans.length) {
         document.getElementById("btntrans").addEventListener("click", function () {
           var box = document.getElementById("inbchat");
