@@ -178,6 +178,20 @@ export async function GET(req: Request): Promise<Response> {
     if (lote.length < 1000) break
   }
 
+  // ── MODO PAGADAS (?pagadas=1): la pasada completa (montos CLP, moneda,
+  // stage, dueño, gestión) SOLO sobre las ventas pagadas del registro
+  // venta_dash, ignorando el candado — "cerremos por el grupo de deals que
+  // ya pagaron" (Lalo 20-ago).
+  let forzar = force
+  if (searchParams.get("pagadas") === "1") {
+    const ventas = await supa<{ key: string }>(`vic_kv?key=like.venta_dash_v3_*&select=key&limit=3000`)
+    const qidsPagadas = new Set(ventas.map((v) => String(v.key).replace("venta_dash_v3_", "")))
+    for (let i = punteros.length - 1; i >= 0; i--) {
+      if (!qidsPagadas.has(punteros[i].quote_id)) punteros.splice(i, 1)
+    }
+    forzar = true
+  }
+
   const res = {
     procesados: 0,
     amount_actualizado: 0,
@@ -214,7 +228,7 @@ export async function GET(req: Request): Promise<Response> {
       }
 
       // Candado semanal por deal.
-      if (!force) {
+      if (!forzar) {
         const kvKey = `dlz_${dealId}`
         const vivo = await supa<{ key: string; expires_at?: string }>(
           `vic_kv?key=eq.${kvKey}&select=key,expires_at&limit=1`,
