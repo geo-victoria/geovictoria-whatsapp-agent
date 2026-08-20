@@ -74,17 +74,43 @@ async function authorized(req: Request): Promise<boolean> {
 
 type Puntero = { quote_id: string; deal_id: string | null; created_at: string }
 
-/** Veredicto de atribución CONGELADO al momento del pago (Lalo 20-ago,
- * afinado): lo ÚNICO que importa es si el PAGO fue antes o después de
- * traspasar al ejecutivo — un traspaso POSTERIOR al pago es gestión
- * interna y da lo mismo. Traspaso antes del pago → Asistida; todo lo
- * demás (sin traspaso, o traspaso posterior) → 100% Autónoma. */
-async function veredictoAtribucion(tel: string, pagoMs: number): Promise<string> {
-  const filas = await supa<{ traspasado_at: string }>(
+/** GESTIÓN VICKY (Lalo 20-ago, categorías finales de marketing) —
+ * congelado al momento del PAGO; lo posterior es gestión interna:
+ *   · "Derivado fuera de Rango": el loop se cerró por sobre_umbral/mas_de_50
+ *     antes del pago (Vicky no vende ese rango).
+ *   · "Derivado por Reunión": hay una reunión (Event de Zoho del deal)
+ *     creada antes del pago.
+ *   · "Derivado": traspaso conversacional (vic_ptv) o derivación del loop
+ *     antes del pago.
+ *   · "Gestión Vicky": nada de lo anterior entre el inicio y el pago. */
+async function veredictoGestion(tel: string, pagoMs: number, dealId: string, H: Record<string, string>): Promise<string> {
+  const margen = 5 * 60e3 // eventos "en el acto" del pago no cuentan como previos
+  const loop = await supa<{ motivo_cierre: string | null; estado: string; updated_at: string }>(
+    `vic_loop?contact=eq.${tel}&select=motivo_cierre,estado,updated_at&limit=1`,
+  )
+  const cierre = String(loop[0]?.motivo_cierre || "")
+  const cierreMs = Date.parse(String(loop[0]?.updated_at || ""))
+  const cerradoAntes = loop[0]?.estado === "cerrado" && Number.isFinite(cierreMs) && cierreMs <= pagoMs + margen
+  if ((cierre === "sobre_umbral" || cierre === "mas_de_50") && cerradoAntes) return "Derivado fuera de Rango"
+  try {
+    const re = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({ select_query: `select id, Created_Time from Events where What_Id = ${dealId} limit 5` }),
+    })
+    if (re.status === 200) {
+      const evs = (((await re.json().catch(() => ({}))) as { data?: Array<{ Created_Time?: string }> }).data) || []
+      if (evs.some((e) => Date.parse(String(e.Created_Time || "")) <= pagoMs)) return "Derivado por Reunión"
+    }
+  } catch { /* sin señal de reunión */ }
+  const ptv = await supa<{ traspasado_at: string }>(
     `vic_ptv?contact=eq.${tel}&select=traspasado_at&order=traspasado_at.asc&limit=1`,
   )
-  const primerMs = filas[0] ? Date.parse(String(filas[0].traspasado_at)) : NaN
-  return Number.isFinite(primerMs) && primerMs <= pagoMs ? "Asistida" : "100% Autónoma"
+  const primerMs = ptv[0] ? Date.parse(String(ptv[0].traspasado_at)) : NaN
+  if (Number.isFinite(primerMs) && primerMs <= pagoMs) return "Derivado"
+  if (cierre === "derivado" && cerradoAntes) return "Derivado"
+  return "Gestión Vicky"
 }
 
 export async function GET(req: Request): Promise<Response> {
@@ -113,20 +139,20 @@ export async function GET(req: Request): Promise<Response> {
         const dealId = pt[0]?.deal_id || ""
         const tel = (pt[0]?.contact || "").replace(/\D/g, "")
         if (!dealId || !tel) { out.sin_deal++; continue }
-        const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta,Created_By`, { headers: H, cache: "no-store" })
+        const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Gestion_Vicky,Created_By`, { headers: H, cache: "no-store" })
         if (rd.status !== 200) continue
-        const dd = ((await rd.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
+        const dd = ((await rd.json().catch(() => ({}))) as { data?: Array<{ Gestion_Vicky?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
         // Deal creado por un HUMANO = venta del canal ejecutivo (caso MATER):
         // la atribución Vicky no aplica.
         if (dd?.Created_By?.id && !ROBOT_OWNER_IDS.has(String(dd.Created_By.id))) { out.sin_deal++; continue }
-        const actual = String(dd?.Atribucion_Venta || "")
+        const actual = String(dd?.Gestion_Vicky || "")
         if (actual) { out.ya_tenian++; continue }
-        const veredicto = await veredictoAtribucion(tel, pagoMs)
+        const veredicto = await veredictoGestion(tel, pagoMs, dealId, H)
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: dealId, Atribucion_Venta: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: dealId, Gestion_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
@@ -277,19 +303,19 @@ export async function GET(req: Request): Promise<Response> {
         // Atribución congelada al pago (ventas futuras): si el deal no la
         // tiene, se calcula y estampa aquí mismo.
         try {
-          const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Atribucion_Venta,Created_By`, { headers: H, cache: "no-store" })
-          const da = ((await ra.json().catch(() => ({}))) as { data?: Array<{ Atribucion_Venta?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
-          const atr = String(da?.Atribucion_Venta || "")
+          const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Gestion_Vicky,Created_By`, { headers: H, cache: "no-store" })
+          const da = ((await ra.json().catch(() => ({}))) as { data?: Array<{ Gestion_Vicky?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
+          const atr = String(da?.Gestion_Vicky || "")
           const dealDeHumano = Boolean(da?.Created_By?.id) && !ROBOT_OWNER_IDS.has(String(da?.Created_By?.id))
           const telPago = (p as unknown as { contact?: string }).contact || ""
           const pagoMs = Date.parse(String(quote.Fecha_Hora_Cotizacion || quote.Modified_Time || ""))
           if (!atr && !dealDeHumano && telPago && Number.isFinite(pagoMs)) {
-            const veredicto = await veredictoAtribucion(telPago.replace(/\D/g, ""), pagoMs)
+            const veredicto = await veredictoGestion(telPago.replace(/\D/g, ""), pagoMs, dealId, H)
             await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
               method: "PUT",
               headers: H,
               cache: "no-store",
-              body: JSON.stringify({ data: [{ id: dealId, Atribucion_Venta: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              body: JSON.stringify({ data: [{ id: dealId, Gestion_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
             }).catch(() => undefined)
           }
         } catch { /* best-effort */ }
