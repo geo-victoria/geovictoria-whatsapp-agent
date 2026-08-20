@@ -84,6 +84,11 @@ type Puntero = { quote_id: string; deal_id: string | null; created_at: string; c
  *     antes del pago.
  *   · "Gestión Vicky": nada de lo anterior entre el inicio y el pago. */
 async function veredictoGestion(tel: string, pagoMs: number, dealId: string, H: Record<string, string>): Promise<string> {
+  // Sin conversación en el canal de Vicky (cotizadora usada directo por el
+  // ejecutivo, cliente que jamás escribió) → "No habló con Vicky" (Lalo
+  // 20-ago). El valor vive en el picklist Gesti_n_Vicky.
+  const conv = await supa<{ id: string }>(`vic_v3_conversations?contact=eq.${tel}&select=id&limit=1`)
+  if (!conv[0]) return "No habló con Vicky"
   const margen = 5 * 60e3 // eventos "en el acto" del pago no cuentan como previos
   const loop = await supa<{ motivo_cierre: string | null; estado: string; updated_at: string }>(
     `vic_loop?contact=eq.${tel}&select=motivo_cierre,estado,updated_at&limit=1`,
@@ -534,6 +539,34 @@ export async function GET(req: Request): Promise<Response> {
           const dealDeHumano = Boolean(da?.Created_By?.id) && !ROBOT_OWNER_IDS.has(String(da?.Created_By?.id))
           const telPago = (p as unknown as { contact?: string }).contact || ""
           const pagoMs = Date.parse(String(quote.Fecha_Hora_Cotizacion || quote.Modified_Time || ""))
+          // CORRECCIÓN de estampas pre-20-ago-PM: pagadas del canal ejecutivo
+          // marcadas "Gestión Vicky" sin conversación real → "No habló con
+          // Vicky" (única sobre-escritura permitida en pagadas).
+          if (atr === "Gestión Vicky" && telPago) {
+            const conv = await supa<{ id: string }>(`vic_v3_conversations?contact=eq.${telPago.replace(/\D/g, "")}&select=id&limit=1`)
+            if (!conv[0]) {
+              await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+                method: "PUT",
+                headers: H,
+                cache: "no-store",
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              }).catch(() => undefined)
+            }
+          }
+          // Deal creado por humano: la única estampa automática es "No habló
+          // con Vicky" (sin conversación); con conversación queda vacío hasta
+          // que Lalo defina esa categoría.
+          if (!atr && dealDeHumano && telPago) {
+            const conv = await supa<{ id: string }>(`vic_v3_conversations?contact=eq.${telPago.replace(/\D/g, "")}&select=id&limit=1`)
+            if (!conv[0]) {
+              await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+                method: "PUT",
+                headers: H,
+                cache: "no-store",
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              }).catch(() => undefined)
+            }
+          }
           if (!atr && !dealDeHumano && telPago && Number.isFinite(pagoMs)) {
             const veredicto = await veredictoGestion(telPago.replace(/\D/g, ""), pagoMs, dealId, H)
             await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
@@ -566,6 +599,19 @@ export async function GET(req: Request): Promise<Response> {
         // Deals creados por humanos no se estampan (regla del 20-ago).
         try {
           const dealDeHumano = Boolean(deal.Created_By?.id) && !ROBOT_OWNER_IDS.has(String(deal.Created_By?.id))
+          if (dealDeHumano && telDeal && !String(deal.Gesti_n_Vicky || "")) {
+            // Humano + sin conversación de Vicky → "No habló con Vicky";
+            // humano CON conversación queda vacío (categoría por definir).
+            const conv = await supa<{ id: string }>(`vic_v3_conversations?contact=eq.${telDeal}&select=id&limit=1`)
+            if (!conv[0]) {
+              await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+                method: "PUT",
+                headers: H,
+                cache: "no-store",
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              }).catch(() => undefined)
+            }
+          }
           if (!dealDeHumano && telDeal) {
             const veredicto = await veredictoGestion(telDeal, Date.now(), dealId, H)
             if (veredicto !== String(deal.Gesti_n_Vicky || "")) {
