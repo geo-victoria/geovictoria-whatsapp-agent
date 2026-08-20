@@ -459,14 +459,25 @@ export async function GET(req: Request): Promise<Response> {
     for (const d of huerfanos.slice(0, Math.min(limit * 10, 120))) {
       const tel = telPorDeal.get(d.id) || ""
       if (!tel) { sinTelefono++; detalle.push({ deal: d.nombre, veredicto: "sin_telefono" }); continue }
-      const rs = await fetch(
-        `${ZOHO_API}/crm/v3/Leads/search?phone=${encodeURIComponent(tel)}&converted=both&fields=id,Last_Name,Company,Owner,Lead_Status,Created_Time,RUT_Empresa&per_page=5&page=1`,
-        { headers: H, cache: "no-store" },
-      )
-      const j = rs.status === 200 ? ((await rs.json().catch(() => ({}))) as { data?: Array<{ id: string; Company?: string; Owner?: { name?: string }; Lead_Status?: string | null; Created_Time?: string; RUT_Empresa?: string | null; $converted?: boolean }> }) : null
-      const leads = j?.data || []
-      if (!leads.length) { sinLead++; detalle.push({ deal: d.nombre, tel, veredicto: "sin_lead" }); continue }
-      const vivo = leads.find((l) => !(l as { $converted?: boolean }).$converted)
+      // DOS búsquedas separadas (20-ago: con converted=both + fields, Zoho no
+      // devuelve la marca $converted y TODO parecía vivo — el lote de
+      // conversión rebotó con ID_ALREADY_CONVERTED en 65 casos):
+      // 1) converted=false → leads realmente vivos; 2) converted=true → ya
+      // convertidos (¿a la cuenta del deal o a otra?).
+      const buscar = async (conv: "true" | "false") => {
+        const rs = await fetch(
+          `${ZOHO_API}/crm/v3/Leads/search?phone=${encodeURIComponent(tel)}&converted=${conv}&fields=id,Last_Name,Company,Owner,Lead_Status,Created_Time,RUT_Empresa,Converted_Account,Converted_Deal&per_page=5&page=1`,
+          { headers: H, cache: "no-store" },
+        )
+        if (rs.status !== 200) return []
+        const j = (await rs.json().catch(() => ({}))) as { data?: Array<{ id: string; Company?: string; Owner?: { name?: string }; Lead_Status?: string | null; Created_Time?: string; RUT_Empresa?: string | null; Converted_Account?: { id?: string } | null; Converted_Deal?: { id?: string } | null }> }
+        return j?.data || []
+      }
+      const vivosTel = await buscar("false")
+      const convertidosTel = vivosTel.length ? [] : await buscar("true")
+      if (!vivosTel.length && !convertidosTel.length) { sinLead++; detalle.push({ deal: d.nombre, tel, veredicto: "sin_lead" }); continue }
+      const leads = vivosTel.length ? vivosTel : convertidosTel
+      const vivo = vivosTel[0]
       if (vivo) {
         conLeadVivo++
         // EVIDENCIA del pareo (Lalo 20-ago): además del teléfono exacto,
@@ -488,14 +499,22 @@ export async function GET(req: Request): Promise<Response> {
         })
       } else {
         conLeadConvertidoOtro++
-        detalle.push({ deal: d.nombre, tel, veredicto: "lead_convertido_a_otro", leadId: leads[0].id })
+        // ¿La conversión previa quedó ligada a la MISMA cuenta del deal?
+        // (remediación del 04-ago) → la cadena lead→cuenta←deal ya existe.
+        const rdAcc = await fetch(`${ZOHO_API}/crm/v3/Deals/${d.id}?fields=Account_Name`, { headers: H, cache: "no-store" })
+        const accDeal = rdAcc.status === 200
+          ? String((((await rdAcc.json().catch(() => ({}))) as { data?: Array<{ Account_Name?: { id?: string } | null }> })?.data?.[0]?.Account_Name?.id) || "")
+          : ""
+        const convAcc = String(convertidosTel[0]?.Converted_Account?.id || "")
+        const yaLigado = Boolean(accDeal && convAcc && accDeal === convAcc)
+        detalle.push({ deal: d.nombre, dealId: d.id, tel, veredicto: yaLigado ? "convertido_misma_cuenta" : "convertido_otra_cuenta", leadId: leads[0].id })
       }
     }
     return NextResponse.json({
       ok: true, modo: "huerfanos",
       deals_robot: dealsRobot.length, con_lead_convertido: dealsRobot.length - huerfanos.length,
       huerfanos: huerfanos.length, evaluados: Math.min(huerfanos.length, Math.min(limit * 10, 120)),
-      con_lead_vivo: conLeadVivo, con_lead_convertido_a_otro: conLeadConvertidoOtro, sin_lead: sinLead, sin_telefono: sinTelefono,
+      con_lead_vivo: conLeadVivo, con_lead_convertido_previo: conLeadConvertidoOtro, sin_lead: sinLead, sin_telefono: sinTelefono,
       detalle,
     })
   }
