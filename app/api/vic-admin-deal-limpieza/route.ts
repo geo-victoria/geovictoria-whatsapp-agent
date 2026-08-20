@@ -224,6 +224,38 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, modo: "moneda", ...out })
   }
 
+  // ── MODO GESTIÓN DE LEADS (?gestionleads=1): mismo campo Gesti_n_Vicky
+  // creado en el módulo LEADS (Lalo 20-ago, "los leads que se asignaron a
+  // Vicky, ¿podemos marcarlos igual?"). Universo: leads CREADOS por Vicky aún
+  // sin convertir (COQL excluye convertidos); teléfono del propio lead.
+  if (searchParams.get("gestionleads") === "1") {
+    const out = { estampados: 0, sin_telefono: 0, errores: [] as string[] }
+    const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({ select_query: `select id, Phone, Mobile from Leads where Created_By = 3525045000484500876 and Gesti_n_Vicky is null order by Created_Time desc limit 100` }),
+    })
+    if (rc.status !== 200 && rc.status !== 204) return NextResponse.json({ ok: false, error: `coql ${rc.status}` }, { status: 500 })
+    const filas = rc.status === 204 ? [] : ((((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> }).data) || [])
+    for (const f of filas.slice(0, limit)) {
+      try {
+        const tel = String(f.Mobile || f.Phone || "").replace(/\D/g, "")
+        if (!tel) { out.sin_telefono++; continue }
+        const veredicto = await veredictoGestion(tel, Date.now(), f.id, H)
+        const up = await fetch(`${ZOHO_API}/crm/v3/Leads/${f.id}`, {
+          method: "PUT", headers: H, cache: "no-store",
+          body: JSON.stringify({ data: [{ id: f.id, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+        })
+        const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
+        if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") out.estampados++
+        else out.errores.push(`${f.id}: ${cuerpo?.data?.[0]?.code || up.status}`)
+      } catch (e) {
+        out.errores.push(`${f.id}: ${e instanceof Error ? e.message.slice(0, 50) : "err"}`)
+      }
+    }
+    console.log(`[deal-limpieza] gestionleads ${JSON.stringify(out)}`)
+    return NextResponse.json({ ok: true, modo: "gestionleads", quedan_en_pagina: filas.length, ...out })
+  }
+
   // ── MODO GESTIÓN DE HITOS (?gestionhitos=1): deals del robot SIN cotización
   // (derivación >50, reunión, callback — el barrido normal no los visita
   // porque recorre pares cotización↔deal). El teléfono sale del CONTACTO del
