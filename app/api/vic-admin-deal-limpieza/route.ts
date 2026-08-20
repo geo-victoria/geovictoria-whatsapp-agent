@@ -178,6 +178,15 @@ export async function GET(req: Request): Promise<Response> {
     if (lote.length < 1000) break
   }
 
+  // ── DEBUG BLUEPRINT (?debugbp=<dealId>): transiciones disponibles con sus
+  // campos, para diagnosticar INVALID_DATA (variantes por deal).
+  const debugbp = (searchParams.get("debugbp") || "").replace(/\D/g, "")
+  if (debugbp) {
+    const r = await fetch(`${ZOHO_API.replace("/crm/v3", "")}/crm/v2/Deals/${debugbp}/actions/blueprint`, { headers: H, cache: "no-store" })
+    const cuerpo = await r.json().catch(() => ({}))
+    return NextResponse.json({ ok: true, status: r.status, blueprint: cuerpo })
+  }
+
   // ── MODO PAGADAS (?pagadas=1): la pasada completa (montos CLP, moneda,
   // stage, dueño, gestión) SOLO sobre las ventas pagadas del registro
   // venta_dash, ignorando el candado — "cerremos por el grupo de deals que
