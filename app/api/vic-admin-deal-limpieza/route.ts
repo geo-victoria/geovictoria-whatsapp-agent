@@ -72,7 +72,7 @@ async function authorized(req: Request): Promise<boolean> {
   return false
 }
 
-type Puntero = { quote_id: string; deal_id: string | null; created_at: string }
+type Puntero = { quote_id: string; deal_id: string | null; created_at: string; contact?: string | null; zoho?: boolean }
 
 /** GESTIÓN VICKY (Lalo 20-ago, categorías finales de marketing) —
  * congelado al momento del PAGO; lo posterior es gestión interna:
@@ -229,6 +229,40 @@ export async function GET(req: Request): Promise<Response> {
     punteros.push(...lote)
     if (lote.length < 1000) break
   }
+  // Y el barrido DESDE ZOHO (Lalo 20-ago, "aún hay deals con cotizaciones
+  // existentes pero el valor en 0 o en UF"): el registro local de punteros
+  // solo cubre las emisiones recientes (~93 deals de 239 con cotización) —
+  // las de junio/julio no tienen puntero y quedaban fuera del reconciliador.
+  // Fuente de verdad: toda Cotización con Deal_Asociado. El teléfono para la
+  // regla de moneda sale de la propia cotización (Tel_fono_Contacto).
+  const yaLocal = new Set(punteros.map((p) => p.quote_id))
+  for (let offset = 0; offset < 4000; offset += 200) {
+    const rz = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({
+        select_query: `select id, Deal_Asociado, Tel_fono_Contacto, Created_Time from Cotizaciones_GeoVictoria where Deal_Asociado is not null order by Created_Time desc limit 200 offset ${offset}`,
+      }),
+    })
+    if (rz.status !== 200) break
+    const cuerpo = (await rz.json().catch(() => ({}))) as {
+      data?: Array<{ id: string; Deal_Asociado?: { id?: string } | null; Tel_fono_Contacto?: string | null; Created_Time?: string }>
+      info?: { more_records?: boolean }
+    }
+    for (const q of cuerpo?.data || []) {
+      if (yaLocal.has(q.id)) continue
+      punteros.push({
+        quote_id: q.id,
+        deal_id: String(q.Deal_Asociado?.id || "") || null,
+        created_at: String(q.Created_Time || ""),
+        contact: String(q.Tel_fono_Contacto || "").replace(/\D/g, ""),
+        zoho: true,
+      })
+    }
+    if (!cuerpo?.info?.more_records) break
+  }
+  punteros.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
 
   // ── DEBUG BLUEPRINT (?debugbp=<dealId>): transiciones disponibles con sus
   // campos, para diagnosticar INVALID_DATA (variantes por deal).
@@ -279,7 +313,9 @@ export async function GET(req: Request): Promise<Response> {
       dealVisto.add(dealId)
 
       // Backfill del puntero local (cosmético pero deja la data consistente).
-      if (!p.deal_id && dealAsociado) {
+      // Solo para filas del registro local — las venidas del barrido Zoho no
+      // tienen fila que parchar.
+      if (!p.deal_id && dealAsociado && !p.zoho) {
         await supa(`vic_v3_quote_pointers?quote_id=eq.${p.quote_id}`, {
           method: "PATCH",
           headers: { Prefer: "return=minimal" },
@@ -349,7 +385,7 @@ export async function GET(req: Request): Promise<Response> {
       }
       // Moneda del trato → CLP (Lalo 20-ago) — SOLO deals de Chile; CO/MX/PE
       // conservan la suya.
-      const telDeal = ((p as unknown as { contact?: string }).contact || "").replace(/\D/g, "")
+      const telDeal = (p.contact || "").replace(/\D/g, "")
       if (telDeal.startsWith("56") && String(deal.Currency || "") !== "CLP") {
         cambios.Currency = "CLP"
       }
