@@ -152,7 +152,7 @@ export async function GET(req: Request): Promise<Response> {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
@@ -414,8 +414,13 @@ export async function GET(req: Request): Promise<Response> {
       // 2. Recurrente mensual NETO (subform × (1-desc), sin IVA/IGV).
       const pct = Number(quote.Descuento_Recurrente_Pct || 0) || 0
       const items = (quote.Detalle_Items_Cotizacion as Array<{ Subtotal_CLP?: number; Es_Recurrente?: boolean; Codigo_Item?: string; Modalidad?: string; Cantidad?: number }>) || []
+      // Las emisiones de JUNIO marcaban la asistencia fija Es_Recurrente=false
+      // (caso TAO COT168) — la asistencia SIEMPRE es recurrente, así que entra
+      // por código de ítem aunque el flag venga apagado.
       const recurrenteNeto = Math.round(
-        items.filter((i) => i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0) * (1 - pct / 100),
+        items
+          .filter((i) => i.Es_Recurrente || (i.Codigo_Item || "") === "asistencia")
+          .reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0) * (1 - pct / 100),
       )
 
       // 3. Deal actual.
@@ -479,7 +484,10 @@ export async function GET(req: Request): Promise<Response> {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: dealId, ...cambios }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          // trigger:[] OBLIGATORIO: sin él, el workflow "DEPRECADO. UPDATE
+          // MONEDA Y V. POR USUARIO A" se dispara con NUESTRA edición y
+          // re-estampa Moneda=UF + valor por usuario (caso SUPERMERCADO SUR).
+          body: JSON.stringify({ data: [{ id: dealId, ...cambios }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") res.amount_actualizado++
@@ -495,7 +503,7 @@ export async function GET(req: Request): Promise<Response> {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: p.quote_id, Owner: { id: dealOwnerId } }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: p.quote_id, Owner: { id: dealOwnerId } }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         if (uo.ok) res.owner_cotizacion_alineado++
         else res.errores.push(`owner ${p.quote_id}: HTTP ${uo.status}`)
@@ -532,7 +540,7 @@ export async function GET(req: Request): Promise<Response> {
               method: "PUT",
               headers: H,
               cache: "no-store",
-              body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
             }).catch(() => undefined)
           }
         } catch { /* best-effort */ }
@@ -565,7 +573,7 @@ export async function GET(req: Request): Promise<Response> {
                 method: "PUT",
                 headers: H,
                 cache: "no-store",
-                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
               }).catch(() => undefined)
             }
           }
