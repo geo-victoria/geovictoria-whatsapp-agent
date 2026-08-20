@@ -1,0 +1,211 @@
+/**
+ * LIMPIEZA DE DEALS DE VICKY (Lalo 20-ago, "actualicemos toodo lo de Vicky")
+ * — deja el CRM apto para forecast/pipeline/facturación:
+ *
+ *   1. Amount del deal = cobro RECURRENTE mensual REAL de su cotización más
+ *      reciente (subform, con descuento aplicado, NETO sin IVA, en la moneda
+ *      del país). Los campos *_Global (tarifa de LISTA en UF) NO se tocan:
+ *      los mantiene un workflow de Zoho.
+ *   2. Piso de stage: cotización PAGADA (estado Pagada u Onboarding_Link) →
+ *      deal mínimo "6. Listo para Cierre" (regla Lalo 20-ago: precio ⇒ 4,
+ *      pago ⇒ 6, a Facturando solo lo mueve el ejecutivo). Forward-only vía
+ *      blueprint (transicionarDealHacia). Un pagado en "Cierre Perdido" se
+ *      REPORTA (no se resucita solo — decisión humana).
+ *   3. Dueño cotización = dueño deal (Lalo 20-ago): si el deal tiene humano
+ *      y la cotización quedó con el robot Vicky, se alinea la cotización.
+ *   4. Puntero local sin deal_id pero con Deal_Asociado en Zoho → backfill.
+ *
+ * Idempotente y por tandas: candado vic_kv `dlz_<dealId>` (TTL 7 días) — se
+ * puede correr en loop hasta que responda procesados=0, y colgado del
+ * despachador de huérfanos actúa de reconciliador permanente (cada deal se
+ * re-verifica una vez por semana). `?force=1` ignora el candado.
+ *
+ * GET /api/vic-admin-deal-limpieza?limit=20[&force=1]
+ * Auth: x-cron-secret == vic_kv.followup_cron_secret, o Bearer/?key=CRON_SECRET.
+ */
+
+import { NextResponse } from "next/server"
+import { getZohoAccessToken } from "@/lib/zoho-token"
+import { transicionarDealHacia } from "@/lib/zoho-deals"
+import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+
+export const dynamic = "force-dynamic"
+export const maxDuration = 120
+
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
+const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
+const ZOHO_API = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+const ROBOT_OWNER_IDS = new Set(["3525045000484500876"]) // Vicky GeoVictoria
+
+async function supa<T>(path: string, init: RequestInit = {}): Promise<T[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return []
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...(init.headers || {}),
+    },
+    cache: "no-store",
+  })
+  if (!res.ok) return []
+  return ((await res.json().catch(() => [])) as T[]) || []
+}
+
+async function authorized(req: Request): Promise<boolean> {
+  const xcron = (req.headers.get("x-cron-secret") || "").trim()
+  if (xcron) {
+    const expected = await getFollowupCronSecret().catch(() => "")
+    if (expected && xcron === expected) return true
+  }
+  if (CRON_SECRET) {
+    const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
+    if (bearer === CRON_SECRET) return true
+    const key = (new URL(req.url).searchParams.get("key") || "").trim()
+    if (key === CRON_SECRET) return true
+  }
+  return false
+}
+
+type Puntero = { quote_id: string; deal_id: string | null; created_at: string }
+
+export async function GET(req: Request): Promise<Response> {
+  if (!(await authorized(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  const { searchParams } = new URL(req.url)
+  const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "20", 10) || 20, 1), 60)
+  const force = searchParams.get("force") === "1"
+
+  const token = await getZohoAccessToken()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+
+  // Emisiones completas, más reciente primero; por deal se usa SU cotización
+  // más nueva (la vigente). Punteros sin deal se resuelven vía Deal_Asociado.
+  const punteros: Puntero[] = []
+  for (let offset = 0; offset < 5000; offset += 1000) {
+    const lote = await supa<Puntero>(
+      `vic_v3_quote_pointers?select=quote_id,deal_id,created_at&order=created_at.desc&limit=1000&offset=${offset}`,
+    )
+    punteros.push(...lote)
+    if (lote.length < 1000) break
+  }
+
+  const res = {
+    procesados: 0,
+    amount_actualizado: 0,
+    owner_cotizacion_alineado: 0,
+    stage_subido: 0,
+    punteros_backfilleados: 0,
+    pagadas_en_perdido: [] as string[],
+    errores: [] as string[],
+  }
+  const dealVisto = new Set<string>()
+
+  for (const p of punteros) {
+    if (res.procesados >= limit) break
+    try {
+      // 1. Cotización (fuente de verdad del deal, estado, dueño y montos).
+      const rq = await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${p.quote_id}`, { headers: H, cache: "no-store" })
+      if (rq.status !== 200) continue
+      const quote = ((await rq.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> })?.data?.[0]
+      if (!quote) continue
+      const dealAsociado = (quote.Deal_Asociado as { id?: string } | null)?.id || ""
+      const dealId = p.deal_id || dealAsociado
+      if (!dealId) continue
+      if (dealVisto.has(dealId)) continue // ya tratado con una cotización más nueva
+      dealVisto.add(dealId)
+
+      // Backfill del puntero local (cosmético pero deja la data consistente).
+      if (!p.deal_id && dealAsociado) {
+        await supa(`vic_v3_quote_pointers?quote_id=eq.${p.quote_id}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ deal_id: dealAsociado }),
+        }).catch(() => [])
+        res.punteros_backfilleados++
+      }
+
+      // Candado semanal por deal.
+      if (!force) {
+        const kvKey = `dlz_${dealId}`
+        const vivo = await supa<{ key: string; expires_at?: string }>(
+          `vic_kv?key=eq.${kvKey}&select=key,expires_at&limit=1`,
+        )
+        if (vivo[0] && (!vivo[0].expires_at || new Date(vivo[0].expires_at).getTime() > Date.now())) continue
+      }
+      res.procesados++
+      await supa(`vic_kv?on_conflict=key`, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          key: `dlz_${dealId}`,
+          value: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 7 * 86400e3).toISOString(),
+        }),
+      }).catch(() => [])
+
+      // 2. Recurrente mensual NETO (subform × (1-desc), sin IVA/IGV).
+      const pct = Number(quote.Descuento_Recurrente_Pct || 0) || 0
+      const items = (quote.Detalle_Items_Cotizacion as Array<{ Subtotal_CLP?: number; Es_Recurrente?: boolean }>) || []
+      const recurrenteNeto = Math.round(
+        items.filter((i) => i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0) * (1 - pct / 100),
+      )
+
+      // 3. Deal actual.
+      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Amount,Owner`, { headers: H, cache: "no-store" })
+      if (rd.status !== 200) continue
+      const deal = ((await rd.json().catch(() => ({}))) as {
+        data?: Array<{ Stage?: string; Amount?: number | null; Owner?: { id?: string; email?: string } }>
+      })?.data?.[0]
+      if (!deal) continue
+
+      // 4a. Amount = recurrente neto (solo si difiere en más de $1).
+      if (recurrenteNeto > 0 && Math.abs(Number(deal.Amount || 0) - recurrenteNeto) > 1) {
+        const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+          method: "PUT",
+          headers: H,
+          cache: "no-store",
+          body: JSON.stringify({ data: [{ id: dealId, Amount: recurrenteNeto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+        })
+        if (up.ok) res.amount_actualizado++
+        else res.errores.push(`amount ${dealId}: HTTP ${up.status}`)
+      }
+
+      // 4b. Dueño cotización = dueño deal (solo si el deal tiene HUMANO y la
+      // cotización quedó con el robot).
+      const dealOwnerId = String(deal.Owner?.id || "")
+      const quoteOwnerId = String((quote.Owner as { id?: string } | null)?.id || "")
+      if (dealOwnerId && !ROBOT_OWNER_IDS.has(dealOwnerId) && ROBOT_OWNER_IDS.has(quoteOwnerId)) {
+        const uo = await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${p.quote_id}`, {
+          method: "PUT",
+          headers: H,
+          cache: "no-store",
+          body: JSON.stringify({ data: [{ id: p.quote_id, Owner: { id: dealOwnerId } }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+        })
+        if (uo.ok) res.owner_cotizacion_alineado++
+        else res.errores.push(`owner ${p.quote_id}: HTTP ${uo.status}`)
+      }
+
+      // 4c. Piso de stage para PAGADAS (pago ⇒ mínimo "6. Listo para Cierre").
+      const estado = String(quote.Estado_Cotizacion || "").toLowerCase()
+      const pagada = estado.includes("pagad") || Boolean(String(quote.Onboarding_Link || "").trim())
+      if (pagada) {
+        const stage = String(deal.Stage || "").toLowerCase()
+        if (stage.includes("perdido") || stage.includes("congelado")) {
+          res.pagadas_en_perdido.push(`${quote.Numero_Cotizacion || p.quote_id} → deal ${dealId} (${deal.Stage})`)
+        } else {
+          const t = await transicionarDealHacia(dealId, "listo para cierre")
+          if (t.resultado === "avanzado") res.stage_subido++
+          else if (t.resultado === "error") res.errores.push(`stage ${dealId}: ${t.detalle || t.resultado}`)
+        }
+      }
+    } catch (e) {
+      res.errores.push(`${p.quote_id}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  res.errores = res.errores.slice(0, 15)
+  console.log(`[deal-limpieza] ${JSON.stringify({ ...res, pagadas_en_perdido: res.pagadas_en_perdido.length })}`)
+  return NextResponse.json({ ok: true, ...res, punteros_totales: punteros.length, deals_unicos: dealVisto.size })
+}

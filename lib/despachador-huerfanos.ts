@@ -51,6 +51,10 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // Foto horaria del dash (Lalo 19-ago): regenera las páginas precalculadas
   // (principal + inbound) para que la carga humana sea instantánea.
   { nombre: "dash_snap", path: "/api/vic-dash-snap-cron", cadaMin: 60 },
+  // Limpieza/reconciliación de deals (Lalo 20-ago): Amount = recurrente neto
+  // de la cotización, pago ⇒ stage ≥ 6, dueño cotización = dueño deal,
+  // punteros. Candado semanal por deal → cada tick toca solo lo pendiente.
+  { nombre: "deal_limpieza", path: "/api/vic-admin-deal-limpieza?limit=25", cadaMin: 180 },
 ]
 
 /**
