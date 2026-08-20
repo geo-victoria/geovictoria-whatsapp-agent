@@ -4,8 +4,8 @@
  *
  *   1. MONTOS según convención de MARKETING (David García 20-ago, vía Lalo):
  *      Tipo_de_Cobro = "Mensual fijo" · Valor_fijo_del_trato_Global =
- *      recurrente mensual REAL (subform con descuento, NETO sin IVA) ÷ 1000
- *      (regla Lalo: 1.000 CLP = 1 USD "Global") · N_Empleados_que_marcan =
+ *      recurrente mensual REAL (subform con descuento, NETO sin IVA) en CLP
+ *      tal cual (Lalo 20-ago, caso Constanza) · N_Empleados_que_marcan =
  *      usuarios de la cotización (solo modalidad Por usuario; en tarifa fija
  *      se conserva el del deal). Amount estándar NO se usa (Zoho lo ignora).
  *   2. Piso de stage: cotización PAGADA (estado Pagada u Onboarding_Link) →
@@ -253,14 +253,15 @@ export async function GET(req: Request): Promise<Response> {
       })?.data?.[0]
       if (!deal) continue
 
-      // 4a. Convención de MARKETING (David 20-ago): Mensual fijo + recurrente
-      // real ÷1000 en Valor_fijo + usuarios de la cotización (Por usuario).
-      const valorFijoUsd = Math.round((recurrenteNeto / 1000) * 100) / 100
+      // 4a. Convención FINAL (Lalo 20-ago, caso Constanza: "dejemos el monto
+      // recurrente mensual en CLP"): Mensual fijo + recurrente real NETO en
+      // CLP tal cual en Valor_fijo + usuarios de la cotización (Por usuario).
+      const valorFijoUsd = recurrenteNeto
       const asistencia = items.find((i) => (i.Codigo_Item || "") === "asistencia")
       const modalidadPorUsuario = String(asistencia?.Modalidad || "").toLowerCase().includes("usuario")
       const usuariosCot = modalidadPorUsuario ? Number(asistencia?.Cantidad) || 0 : 0
       const cambios: Record<string, unknown> = {}
-      if (recurrenteNeto > 0 && Math.abs(Number(deal.Valor_fijo_del_trato_Global || 0) - valorFijoUsd) > 0.011) {
+      if (recurrenteNeto > 0 && Math.abs(Number(deal.Valor_fijo_del_trato_Global || 0) - valorFijoUsd) > 1) {
         cambios.Valor_fijo_del_trato_Global = valorFijoUsd
       }
       if (recurrenteNeto > 0 && String(deal.Tipo_de_Cobro || "") !== "Mensual fijo") {
