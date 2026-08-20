@@ -219,6 +219,58 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, modo: "moneda", ...out })
   }
 
+  // ── MODO ENLAZAR (?enlazar=1): cotizaciones de Vicky ANTERIORES al lookup
+  // Deal_Asociado (junio-julio) quedan huérfanas de deal aunque el deal exista
+  // — se emparejan por la CUENTA asociada (deal del robot sin valor + la
+  // cotización del robot de esa misma cuenta) y se escribe Deal_Asociado en la
+  // cotización. Con el enlace puesto, el barrido normal les calcula montos.
+  if (searchParams.get("enlazar") === "1") {
+    const out = { enlazadas: 0, sin_par: 0, errores: [] as string[] }
+    // Deals del robot sin valor, con su cuenta.
+    const dealPorCuenta = new Map<string, string>()
+    for (let off = 0; off < 1000; off += 200) {
+      const rd = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select id, Account_Name from Deals where Created_By = 3525045000484500876 and Valor_fijo_del_trato_Global is null order by Created_Time desc limit 200 offset ${off}` }),
+      })
+      if (rd.status !== 200) break
+      const filas = (((await rd.json().catch(() => ({}))) as { data?: Array<{ id: string; Account_Name?: { id?: string } | null }>; info?: { more_records?: boolean } }))
+      for (const f of filas?.data || []) {
+        const acc = String(f.Account_Name?.id || "")
+        if (acc && !dealPorCuenta.has(acc)) dealPorCuenta.set(acc, f.id)
+      }
+      if (!filas?.info?.more_records) break
+    }
+    // Cotizaciones del robot sin Deal_Asociado, por cuenta.
+    for (let off = 0; off < 1000; off += 200) {
+      const rq = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select id, Cuenta_Asociada from Cotizaciones_GeoVictoria where Created_By = 3525045000484500876 and Deal_Asociado is null order by Created_Time desc limit 200 offset ${off}` }),
+      })
+      if (rq.status !== 200) break
+      const filas = (((await rq.json().catch(() => ({}))) as { data?: Array<{ id: string; Cuenta_Asociada?: { id?: string } | null }>; info?: { more_records?: boolean } }))
+      for (const q of filas?.data || []) {
+        const acc = String(q.Cuenta_Asociada?.id || "")
+        const dealId = acc ? dealPorCuenta.get(acc) : undefined
+        if (!dealId) { out.sin_par++; continue }
+        const up = await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${q.id}`, {
+          method: "PUT", headers: H, cache: "no-store",
+          body: JSON.stringify({ data: [{ id: q.id, Deal_Asociado: dealId }], trigger: [] }),
+        })
+        const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
+        if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
+          out.enlazadas++
+          dealPorCuenta.delete(acc) // un deal recibe UNA cotización (la más nueva)
+          // El candado del deal se libera para que el barrido lo tome ya.
+          await supa(`vic_kv?key=eq.${encodeURIComponent(`dlz_${dealId}`)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }).catch(() => [])
+        } else out.errores.push(`${q.id}: ${cuerpo?.data?.[0]?.code || up.status}`)
+      }
+      if (!filas?.info?.more_records) break
+    }
+    console.log(`[deal-limpieza] enlazar ${JSON.stringify(out)}`)
+    return NextResponse.json({ ok: true, modo: "enlazar", ...out })
+  }
+
   // Emisiones completas, más reciente primero; por deal se usa SU cotización
   // más nueva (la vigente). Punteros sin deal se resuelven vía Deal_Asociado.
   const punteros: Puntero[] = []
