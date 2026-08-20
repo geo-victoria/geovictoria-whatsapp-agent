@@ -2,10 +2,12 @@
  * LIMPIEZA DE DEALS DE VICKY (Lalo 20-ago, "actualicemos toodo lo de Vicky")
  * — deja el CRM apto para forecast/pipeline/facturación:
  *
- *   1. Amount del deal = cobro RECURRENTE mensual REAL de su cotización más
- *      reciente (subform, con descuento aplicado, NETO sin IVA, en la moneda
- *      del país). Los campos *_Global (tarifa de LISTA en UF) NO se tocan:
- *      los mantiene un workflow de Zoho.
+ *   1. MONTOS según convención de MARKETING (David García 20-ago, vía Lalo):
+ *      Tipo_de_Cobro = "Mensual fijo" · Valor_fijo_del_trato_Global =
+ *      recurrente mensual REAL (subform con descuento, NETO sin IVA) ÷ 1000
+ *      (regla Lalo: 1.000 CLP = 1 USD "Global") · N_Empleados_que_marcan =
+ *      usuarios de la cotización (solo modalidad Por usuario; en tarifa fija
+ *      se conserva el del deal). Amount estándar NO se usa (Zoho lo ignora).
  *   2. Piso de stage: cotización PAGADA (estado Pagada u Onboarding_Link) →
  *      deal mínimo "6. Listo para Cierre" (regla Lalo 20-ago: precio ⇒ 4,
  *      pago ⇒ 6, a Facturando solo lo mueve el ejecutivo). Forward-only vía
@@ -148,29 +150,51 @@ export async function GET(req: Request): Promise<Response> {
 
       // 2. Recurrente mensual NETO (subform × (1-desc), sin IVA/IGV).
       const pct = Number(quote.Descuento_Recurrente_Pct || 0) || 0
-      const items = (quote.Detalle_Items_Cotizacion as Array<{ Subtotal_CLP?: number; Es_Recurrente?: boolean }>) || []
+      const items = (quote.Detalle_Items_Cotizacion as Array<{ Subtotal_CLP?: number; Es_Recurrente?: boolean; Codigo_Item?: string; Modalidad?: string; Cantidad?: number }>) || []
       const recurrenteNeto = Math.round(
         items.filter((i) => i.Es_Recurrente).reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0) * (1 - pct / 100),
       )
 
       // 3. Deal actual.
-      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Amount,Owner`, { headers: H, cache: "no-store" })
+      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,N_Empleados_que_marcan`, { headers: H, cache: "no-store" })
       if (rd.status !== 200) continue
       const deal = ((await rd.json().catch(() => ({}))) as {
-        data?: Array<{ Stage?: string; Amount?: number | null; Owner?: { id?: string; email?: string } }>
+        data?: Array<{
+          Stage?: string
+          Owner?: { id?: string; email?: string }
+          Tipo_de_Cobro?: string | null
+          Valor_fijo_del_trato_Global?: number | null
+          N_Empleados_que_marcan?: number | null
+        }>
       })?.data?.[0]
       if (!deal) continue
 
-      // 4a. Amount = recurrente neto (solo si difiere en más de $1).
-      if (recurrenteNeto > 0 && Math.abs(Number(deal.Amount || 0) - recurrenteNeto) > 1) {
+      // 4a. Convención de MARKETING (David 20-ago): Mensual fijo + recurrente
+      // real ÷1000 en Valor_fijo + usuarios de la cotización (Por usuario).
+      const valorFijoUsd = Math.round((recurrenteNeto / 1000) * 100) / 100
+      const asistencia = items.find((i) => (i.Codigo_Item || "") === "asistencia")
+      const modalidadPorUsuario = String(asistencia?.Modalidad || "").toLowerCase().includes("usuario")
+      const usuariosCot = modalidadPorUsuario ? Number(asistencia?.Cantidad) || 0 : 0
+      const cambios: Record<string, unknown> = {}
+      if (recurrenteNeto > 0 && Math.abs(Number(deal.Valor_fijo_del_trato_Global || 0) - valorFijoUsd) > 0.011) {
+        cambios.Valor_fijo_del_trato_Global = valorFijoUsd
+      }
+      if (recurrenteNeto > 0 && String(deal.Tipo_de_Cobro || "") !== "Mensual fijo") {
+        cambios.Tipo_de_Cobro = "Mensual fijo"
+      }
+      if (usuariosCot > 0 && Number(deal.N_Empleados_que_marcan || 0) !== usuariosCot) {
+        cambios.N_Empleados_que_marcan = usuariosCot
+      }
+      if (Object.keys(cambios).length) {
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: dealId, Amount: recurrenteNeto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: dealId, ...cambios }], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
-        if (up.ok) res.amount_actualizado++
-        else res.errores.push(`amount ${dealId}: HTTP ${up.status}`)
+        const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
+        if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") res.amount_actualizado++
+        else res.errores.push(`montos ${dealId}: ${cuerpo?.data?.[0]?.code || up.status} ${String(cuerpo?.data?.[0]?.message || "").slice(0, 60)}`)
       }
 
       // 4b. Dueño cotización = dueño deal (solo si el deal tiene HUMANO y la
