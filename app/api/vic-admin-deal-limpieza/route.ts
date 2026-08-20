@@ -123,7 +123,7 @@ export async function GET(req: Request): Promise<Response> {
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
 
   // ── MODO ATRIBUCIÓN (?atribucion=1): recorre las VENTAS PAGADAS del
-  // registro venta_dash y estampa Gestion_Vicky en su deal si está vacío.
+  // registro venta_dash y estampa Gesti_n_Vicky en su deal si está vacío.
   if (searchParams.get("atribucion") === "1") {
     const out = { estampadas: 0, ya_tenian: 0, sin_deal: 0, detalle: [] as string[], errores: [] as string[] }
     const ventas = await supa<{ key: string; value: string }>(`vic_kv?key=like.venta_dash_v3_*&select=key,value&limit=3000`)
@@ -139,20 +139,20 @@ export async function GET(req: Request): Promise<Response> {
         const dealId = pt[0]?.deal_id || ""
         const tel = (pt[0]?.contact || "").replace(/\D/g, "")
         if (!dealId || !tel) { out.sin_deal++; continue }
-        const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Gestion_Vicky,Created_By`, { headers: H, cache: "no-store" })
+        const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Gesti_n_Vicky,Created_By`, { headers: H, cache: "no-store" })
         if (rd.status !== 200) continue
-        const dd = ((await rd.json().catch(() => ({}))) as { data?: Array<{ Gestion_Vicky?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
+        const dd = ((await rd.json().catch(() => ({}))) as { data?: Array<{ Gesti_n_Vicky?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
         // Deal creado por un HUMANO = venta del canal ejecutivo (caso MATER):
         // la atribución Vicky no aplica.
         if (dd?.Created_By?.id && !ROBOT_OWNER_IDS.has(String(dd.Created_By.id))) { out.sin_deal++; continue }
-        const actual = String(dd?.Gestion_Vicky || "")
+        const actual = String(dd?.Gesti_n_Vicky || "")
         if (actual) { out.ya_tenian++; continue }
         const veredicto = await veredictoGestion(tel, pagoMs, dealId, H)
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: dealId, Gestion_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
@@ -346,9 +346,9 @@ export async function GET(req: Request): Promise<Response> {
         // Atribución congelada al pago (ventas futuras): si el deal no la
         // tiene, se calcula y estampa aquí mismo.
         try {
-          const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Gestion_Vicky,Created_By`, { headers: H, cache: "no-store" })
-          const da = ((await ra.json().catch(() => ({}))) as { data?: Array<{ Gestion_Vicky?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
-          const atr = String(da?.Gestion_Vicky || "")
+          const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Gesti_n_Vicky,Created_By`, { headers: H, cache: "no-store" })
+          const da = ((await ra.json().catch(() => ({}))) as { data?: Array<{ Gesti_n_Vicky?: string | null; Created_By?: { id?: string } }> })?.data?.[0]
+          const atr = String(da?.Gesti_n_Vicky || "")
           const dealDeHumano = Boolean(da?.Created_By?.id) && !ROBOT_OWNER_IDS.has(String(da?.Created_By?.id))
           const telPago = (p as unknown as { contact?: string }).contact || ""
           const pagoMs = Date.parse(String(quote.Fecha_Hora_Cotizacion || quote.Modified_Time || ""))
@@ -358,7 +358,7 @@ export async function GET(req: Request): Promise<Response> {
               method: "PUT",
               headers: H,
               cache: "no-store",
-              body: JSON.stringify({ data: [{ id: dealId, Gestion_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
             }).catch(() => undefined)
           }
         } catch { /* best-effort */ }
