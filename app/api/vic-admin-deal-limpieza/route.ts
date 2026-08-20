@@ -236,6 +236,103 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, status: r.status, filas: (texto.match(/"id"/g) || []).length, cuerpo: texto.slice(0, 500) })
   }
 
+  // ── RESUMEN INBOUND vs OUTBOUND (?resumen=1): foto del universo Vicky
+  // separada por mundo (Lalo 20-ago, cierre del día) — leads / deals /
+  // cotizaciones / aceptadas / pagadas. Criterio de mundo: fila en
+  // vic_outbound_cadence = OUTBOUND (mismo criterio del funnel y el umbral).
+  if (searchParams.get("resumen") === "1") {
+    const cadSet = new Set<string>()
+    for (const c of await supa<{ contact: string }>(`vic_outbound_cadence?select=contact&limit=2000`)) {
+      const t = String(c.contact || "").replace(/\D/g, "")
+      if (t) cadSet.add(t)
+    }
+    const mundo = (tel: string): "outbound" | "inbound" => (cadSet.has(tel) ? "outbound" : "inbound")
+    const vacio = () => ({
+      leads_vivos: 0, leads_convertidos: 0, deals: 0, deals_monto_clp: 0,
+      deals_pre_precio: 0, deals_propuesta: 0, deals_ganados: 0, deals_perdidos: 0,
+      cotizaciones: 0, aceptadas: 0, pagadas: 0,
+    })
+    const out: Record<string, ReturnType<typeof vacio>> = { inbound: vacio(), outbound: vacio(), sin_telefono: vacio() }
+    // Cotizaciones (post-normalización de hoy, el Estado es confiable).
+    for (let off = 0; off < 1000; off += 200) {
+      const r = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select Tel_fono_Contacto, Estado_Cotizacion from Cotizaciones_GeoVictoria where Created_By = 3525045000484500876 order by id limit 200 offset ${off}` }),
+      })
+      if (r.status !== 200) break
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Tel_fono_Contacto?: string; Estado_Cotizacion?: string }>; info?: { more_records?: boolean } }
+      for (const q of j?.data || []) {
+        const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
+        const m = tel ? out[mundo(tel)] : out.sin_telefono
+        m.cotizaciones++
+        const e = String(q.Estado_Cotizacion || "").toLowerCase()
+        if (e.includes("pagad")) { m.pagadas++; m.aceptadas++ }
+        else if (e.includes("acept")) m.aceptadas++
+      }
+      if (!j?.info?.more_records) break
+    }
+    // Deals del robot (tel vía punteros locales; monto solo CLP tel 56).
+    const telPorDeal = new Map<string, string>()
+    for (let off = 0; off < 5000; off += 1000) {
+      const lote = await supa<{ deal_id: string | null; contact: string | null }>(
+        `vic_v3_quote_pointers?select=deal_id,contact&deal_id=not.is.null&limit=1000&offset=${off}`,
+      )
+      for (const p of lote) {
+        const t = String(p.contact || "").replace(/\D/g, "")
+        if (p.deal_id && t && !telPorDeal.has(p.deal_id)) telPorDeal.set(String(p.deal_id), t)
+      }
+      if (lote.length < 1000) break
+    }
+    for (let off = 0; off < 1000; off += 200) {
+      const r = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select id, Stage, Valor_fijo_del_trato_Global, Monda_del_trato from Deals where Created_By = 3525045000484500876 order by id limit 200 offset ${off}` }),
+      })
+      if (r.status !== 200) break
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ id: string; Stage?: string; Valor_fijo_del_trato_Global?: number | null; Monda_del_trato?: string | null }>; info?: { more_records?: boolean } }
+      for (const d of j?.data || []) {
+        const tel = telPorDeal.get(String(d.id)) || ""
+        const m = tel ? out[mundo(tel)] : out.sin_telefono
+        m.deals++
+        if (String(d.Monda_del_trato || "") === "CLP") m.deals_monto_clp += Number(d.Valor_fijo_del_trato_Global || 0) || 0
+        const s = String(d.Stage || "")
+        if (s.startsWith("1.") || s.startsWith("2.") || s.startsWith("3.")) m.deals_pre_precio++
+        else if (s.startsWith("4.")) m.deals_propuesta++
+        else if (s.startsWith("6.") || s.startsWith("7.") || s.startsWith("8.")) m.deals_ganados++
+        else if (s.toLowerCase().includes("perdido")) m.deals_perdidos++
+      }
+      if (!j?.info?.more_records) break
+    }
+    // Leads del universo Vicky: vivos (COQL) y convertidos (search REST).
+    for (let off = 0; off < 1000; off += 200) {
+      const r = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select Phone from Leads where (Created_By = 3525045000484500876 or Owner = 3525045000484500876) order by id limit 200 offset ${off}` }),
+      })
+      if (r.status !== 200) break
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Phone?: string }>; info?: { more_records?: boolean } }
+      for (const l of j?.data || []) {
+        const tel = String(l.Phone || "").replace(/\D/g, "")
+        ;(tel ? out[mundo(tel)] : out.sin_telefono).leads_vivos++
+      }
+      if (!j?.info?.more_records) break
+    }
+    for (let pag = 1; pag <= 5; pag++) {
+      const r = await fetch(
+        `${ZOHO_API}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Created_By.id:equals:3525045000484500876)")}&converted=true&fields=Phone&per_page=200&page=${pag}`,
+        { headers: H, cache: "no-store" },
+      )
+      if (r.status !== 200) break
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Phone?: string }>; info?: { more_records?: boolean } }
+      for (const l of j?.data || []) {
+        const tel = String(l.Phone || "").replace(/\D/g, "")
+        ;(tel ? out[mundo(tel)] : out.sin_telefono).leads_convertidos++
+      }
+      if (!j?.info?.more_records) break
+    }
+    return NextResponse.json({ ok: true, modo: "resumen", criterio: "outbound = contacto en vic_outbound_cadence", ...out })
+  }
+
   // ── AUDITORÍA DE HUÉRFANOS (?huerfanos=1): deals del robot SIN lead
   // convertido apuntándoles + ¿existe ya un lead (vivo o convertido a otra
   // cosa) con el MISMO teléfono? (Lalo 20-ago, "¿puedes ver si esos leads ya
