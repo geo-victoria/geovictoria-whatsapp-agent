@@ -345,6 +345,37 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, modo: "resumen", criterio: "outbound = contacto en vic_outbound_cadence", ...out })
   }
 
+  // ── CONVERTIR LEAD CONTRA DEAL EXISTENTE (?convertir=<leadId>&deal=<dealId>):
+  // cierra la regla de oro para los huérfanos — el lead vivo se convierte
+  // asociándolo a la CUENTA y el CONTACTO del deal, y con el propio deal como
+  // Deals.id (soportado por la API v3 de convert para asociar existente; si
+  // Zoho lo rechaza, se reporta el error crudo sin tocar nada más).
+  const convertirLead = (searchParams.get("convertir") || "").replace(/\D/g, "")
+  if (convertirLead) {
+    const dealId = (searchParams.get("deal") || "").replace(/\D/g, "")
+    if (!dealId) return NextResponse.json({ ok: false, error: "falta &deal=" }, { status: 400 })
+    const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Deal_Name,Account_Name,Contact_Name,Owner`, { headers: H, cache: "no-store" })
+    if (rd.status !== 200) return NextResponse.json({ ok: false, error: `deal ${rd.status}` }, { status: 400 })
+    const deal = ((await rd.json().catch(() => ({}))) as { data?: Array<{ Deal_Name?: string; Account_Name?: { id?: string } | null; Contact_Name?: { id?: string } | null; Owner?: { id?: string } | null }> })?.data?.[0]
+    const cuerpo: Record<string, unknown> = {
+      overwrite: false,
+      notify_lead_owner: false,
+      notify_new_entity_owner: false,
+      Deals: { id: dealId },
+    }
+    if (deal?.Account_Name?.id) cuerpo.Accounts = { id: deal.Account_Name.id }
+    if (deal?.Contact_Name?.id) cuerpo.Contacts = { id: deal.Contact_Name.id }
+    const rc = await fetch(`${ZOHO_API}/crm/v3/Leads/${convertirLead}/actions/convert`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({ data: [cuerpo] }),
+    })
+    const resp = await rc.text().catch(() => "")
+    // Verificación: releer el lead convertido.
+    const rl = await fetch(`${ZOHO_API}/crm/v3/Leads/${convertirLead}?fields=Converted_Deal,Converted_Account,Converted_Contact`, { headers: H, cache: "no-store" })
+    const lead = rl.status === 200 ? ((await rl.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> })?.data?.[0] : null
+    return NextResponse.json({ ok: rc.ok, status: rc.status, deal: deal?.Deal_Name || dealId, respuesta: resp.slice(0, 400), verificacion: lead })
+  }
+
   // ── AUDITORÍA DE HUÉRFANOS (?huerfanos=1): deals del robot SIN lead
   // convertido apuntándoles + ¿existe ya un lead (vivo o convertido a otra
   // cosa) con el MISMO teléfono? (Lalo 20-ago, "¿puedes ver si esos leads ya
