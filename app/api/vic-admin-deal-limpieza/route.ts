@@ -419,7 +419,7 @@ export async function GET(req: Request): Promise<Response> {
       )
 
       // 3. Deal actual.
-      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,Valor_por_usuario_Global,N_Empleados_que_marcan,Currency,Monda_del_trato`, { headers: H, cache: "no-store" })
+      const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,Valor_por_usuario_Global,N_Empleados_que_marcan,Currency,Monda_del_trato,Gesti_n_Vicky,Created_By`, { headers: H, cache: "no-store" })
       if (rd.status !== 200) continue
       const deal = ((await rd.json().catch(() => ({}))) as {
         data?: Array<{
@@ -431,6 +431,8 @@ export async function GET(req: Request): Promise<Response> {
           N_Empleados_que_marcan?: number | null
           Currency?: string | null
           Monda_del_trato?: string | null
+          Gesti_n_Vicky?: string | null
+          Created_By?: { id?: string } | null
         }>
       })?.data?.[0]
       if (!deal) continue
@@ -548,6 +550,26 @@ export async function GET(req: Request): Promise<Response> {
           if (t.resultado === "avanzado") res.stage_subido++
           else if (t.resultado === "error") res.errores.push(`stage ${dealId}: ${t.detalle || t.resultado}`)
         }
+      } else {
+        // 4d. GESTIÓN VICKY también SIN pago (Lalo 20-ago, "aún hay muchos
+        // deals con gestión Vicky vacío"): veredicto "hasta ahora" (reloj =
+        // este momento), recalculado en cada pasada; el PAGO lo congela (la
+        // rama pagada solo estampa cuando está vacío y nunca re-escribe).
+        // Deals creados por humanos no se estampan (regla del 20-ago).
+        try {
+          const dealDeHumano = Boolean(deal.Created_By?.id) && !ROBOT_OWNER_IDS.has(String(deal.Created_By?.id))
+          if (!dealDeHumano && telDeal) {
+            const veredicto = await veredictoGestion(telDeal, Date.now(), dealId, H)
+            if (veredicto !== String(deal.Gesti_n_Vicky || "")) {
+              await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
+                method: "PUT",
+                headers: H,
+                cache: "no-store",
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              }).catch(() => undefined)
+            }
+          }
+        } catch { /* best-effort */ }
       }
     } catch (e) {
       res.errores.push(`${p.quote_id}: ${e instanceof Error ? e.message : String(e)}`)
