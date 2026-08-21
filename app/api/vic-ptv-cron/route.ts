@@ -1960,6 +1960,14 @@ export async function GET(req: Request) {
     return 0
   })
 
+  // Fonos del form con prefijo de país duplicado → se corrigen en Zoho para
+  // que el dedup por fono del chat calce (antes del rescate, mismo tick).
+  const fonosForm = await normalizarFonosForm().catch((e) => {
+    console.warn("[ptv-cron] normalizador fonos form falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+  if (fonosForm) console.log(`[ptv-cron] fonos form corregidos: ${fonosForm}`)
+
   // RESCATE DEL FORM-FILL MUDO (Lalo 21-ago): lead del formulario de landing
   // sin conversación a las 24h → entrega al canal humano de su país.
   const rescatesForm = await rescatarFormSinConversacion(ahora).catch((e) => {
@@ -2418,6 +2426,50 @@ async function escaladaSla(ahora: Date): Promise<number> {
  * conversa, se estampa y no se vuelve a mirar — de ahí lo toma el flujo
  * normal). Ventana ajustable sin deploy: env VICKY_FORM_RESCATE_HORAS.
  */
+/**
+ * NORMALIZADOR DE FONOS DEL FORM (21-ago, caso Maximiliano "+5656954367033"):
+ * el miniform de las landing antepone el código de país aunque el usuario ya
+ * lo haya tipeado (el campo muestra "+56" y la gente igual escribe
+ * "56944668823"). Con el prefijo doble, el dedup por fono del chat no calza
+ * y el lead se duplica. Este paso corrige el Phone en Zoho apenas entra el
+ * lead — corre cada tick, es un COQL + PATCHs puntuales, best-effort.
+ */
+async function normalizarFonosForm(): Promise<number> {
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken()
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  const q = await fetch(`${api}/crm/v3/coql`, {
+    method: "POST", headers: H, cache: "no-store",
+    body: JSON.stringify({
+      select_query:
+        "select id, Phone from Leads where (Form_Vicky = 'Si' and Converted__s = false) and " +
+        "((Phone like '+5656%' or Phone like '+5757%') or (Phone like '+5252%' or Phone like '+5151%')) limit 20",
+    }),
+  })
+  if (!q.ok || q.status === 204) return 0
+  const filas = ((await q.json().catch(() => ({}))) as { data?: Array<{ id?: string; Phone?: string }> }).data || []
+  let corregidos = 0
+  for (const l of filas) {
+    const tel = String(l.Phone || "").replace(/\D/g, "")
+    if (!l.id || !/^(56|57|52|51)\1\d{8,12}$/.test(tel)) continue
+    const real = tel.slice(2)
+    const put = await fetch(`${api}/crm/v3/Leads`, {
+      method: "PUT", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        data: [{ id: l.id, Phone: `+${real}` }],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+        trigger: [],
+      }),
+    }).catch(() => null)
+    if (put?.ok) {
+      corregidos++
+      console.log(`[form-fonos] lead ${l.id}: Phone ${l.Phone} → +${real} (prefijo duplicado del form)`)
+    }
+  }
+  return corregidos
+}
+
 async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
   const horasVentana = Math.max(1, Number(process.env.VICKY_FORM_RESCATE_HORAS || 24) || 24)
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
