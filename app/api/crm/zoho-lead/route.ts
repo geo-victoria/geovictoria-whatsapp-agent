@@ -180,7 +180,9 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         data: [record],
-        trigger: ["workflow"],
+        // "blueprint" explícito (21-ago): sin él, los leads nacen sin la
+        // banda de etapas del blueprint para las SDR.
+        trigger: ["workflow", "blueprint"],
       }),
       cache: "no-store",
     })

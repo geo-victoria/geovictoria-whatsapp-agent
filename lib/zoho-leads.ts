@@ -1225,7 +1225,10 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         "Content-Type": "application/json",
         Authorization: `Zoho-oauthtoken ${accessToken}`,
       },
-      body: JSON.stringify({ data: [record], trigger: ["workflow"] }),
+      // "blueprint" explícito (21-ago, reclamo de las SDR vía Lalo): al listar
+      // triggers, lo no listado queda APAGADO — con solo ["workflow"] los
+      // leads nacían sin blueprint y las SDR no veían la banda de etapas.
+      body: JSON.stringify({ data: [record], trigger: ["workflow", "blueprint"] }),
       cache: "no-store",
     })
 

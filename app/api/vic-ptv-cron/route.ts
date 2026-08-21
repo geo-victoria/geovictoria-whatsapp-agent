@@ -2459,7 +2459,9 @@ async function normalizarFonosForm(): Promise<number> {
       body: JSON.stringify({
         data: [{ id: l.id, Phone: `+${real}` }],
         skip_feature_execution: [{ name: "assignment_rules" }],
-        trigger: [],
+        // blueprint permitido: si el lead del form venía sin engancharse al
+        // blueprint, este toque lo activa (workflows siguen apagados).
+        trigger: ["blueprint"],
       }),
     }).catch(() => null)
     if (put?.ok) {
