@@ -1246,6 +1246,33 @@ export async function runAgentLoop(params: {
       "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"
   }
 
+  // CINTURÓN DE ENTREGA DEL LINK (caso Stephanie/Ciberlabs 21-ago): la tool
+  // emitió la cotización formal OK pero el texto final salió SIN el link — el
+  // cliente quedó con "tu cotización está lista para aceptar y pagar" y nada
+  // que abrir (y los toques posteriores hablan de "el mismo link" fantasma).
+  // Respaldo determinista: si generar_link_cotizadora fue exitosa, no entregó
+  // por plantilla y el reply no trae ni el link corto ni el largo, se anexa.
+  {
+    const emision = toolCalls.find((c) => c.name === "generar_link_cotizadora" && c.ok)
+    if (emision && finalText) {
+      const out = (emision.output || {}) as {
+        linkCorto?: string
+        acceptanceUrl?: string
+        plantillaEnviada?: boolean
+      }
+      const linkEntrega = (out.linkCorto || out.acceptanceUrl || "").trim()
+      const yaLoTrae =
+        (!!out.linkCorto && finalText.includes(out.linkCorto)) ||
+        (!!out.acceptanceUrl && finalText.includes(out.acceptanceUrl))
+      if (linkEntrega && !out.plantillaEnviada && !yaLoTrae) {
+        finalText += `\n\nAquí revisas, aceptas y pagas tu cotización 👉 ${linkEntrega}`
+        console.warn(
+          `[agent-loop] cinturón de entrega: el reply salió sin el link de la cotización recién emitida — anexado (${linkEntrega})`,
+        )
+      }
+    }
+  }
+
   if (iteration >= MAX_ITERATIONS) {
     console.warn(`[vicky-v3] Loop alcanzó MAX_ITERATIONS=${MAX_ITERATIONS}.`)
   }
