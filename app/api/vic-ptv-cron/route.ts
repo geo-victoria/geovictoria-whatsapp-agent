@@ -977,6 +977,37 @@ async function telefonoDeUsuario(userId: string, H: Record<string, string>, api:
  * dueño que Zoho sortee es quien se presenta al prospecto y recibe la
  * alerta. Best-effort: ante cualquier falla se cae al vendedor interno.
  */
+/**
+ * EXCEPCIÓN POR MOTIVO TERMINAL (Lalo 21-ago, catastro de traspasos — reclamo
+ * de las SDR vía Dave: los relojes les "devolvían" contactos que ellas ya
+ * habían descartado). Lead SIN convertir "No Calificado" con motivo terminal
+ * (es un usuario, busca empleo, hardware ajeno, spam, pruebas) → esa
+ * conversación no tiene prospecto que entregar. Devuelve el motivo si aplica;
+ * best-effort: ante cualquier duda devuelve null y el traspaso sigue normal.
+ */
+async function leadTerminalNoProspecto(contact: string): Promise<string | null> {
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const fono = contact.replace(/\D/g, "")
+    // Sin converted=both a propósito: la excepción es SOLO para leads vivos
+    // (un lead convertido tiene deal y sus reglas propias).
+    const res = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&per_page=3`, { headers: H, cache: "no-store" })
+    if (!res.ok || res.status === 204) return null
+    const rows =
+      ((await res.json().catch(() => ({}))) as {
+        data?: Array<{ Lead_Status?: string; Motivo_No_calificado?: string }>
+      }).data || []
+    const { esMotivoTerminal } = await import("@/lib/zoho-leads")
+    const hit = rows.find((l) => esMotivoTerminal(String(l.Lead_Status || ""), String(l.Motivo_No_calificado || "")))
+    return hit ? String(hit.Motivo_No_calificado || "") : null
+  } catch {
+    return null
+  }
+}
+
 async function asignarEnZoho(
   contact: string,
   pais: string,
@@ -1601,7 +1632,7 @@ export async function GET(req: Request) {
   // (sin número) u host de reunión. El reloj de etapa NO les corre (caso
   // Veltis: derivado >50 a las 13:00 y el reloj de 120' lo traspasó igual).
   const mas50 = await supa<{ contact: string }>(
-    `vic_loop?motivo_cierre=in.(mas_de_50,sobre_umbral)&select=contact&limit=1000`,
+    `vic_loop?motivo_cierre=in.(mas_de_50,sobre_umbral,no_prospecto)&select=contact&limit=1000`,
   )
   const contactosMas50 = new Set(mas50.map((m) => m.contact))
   const pausas = await supa<{ contact: string; compromiso_at: string | null }>(
@@ -1695,6 +1726,21 @@ export async function GET(req: Request) {
     // en Zoho, no hay demora que castigar — el cliente está en el pago.
     if (usaV2 && decision.motivo !== "etapa_sin_preform") {
       if (await cotizacionAceptada(c.contact)) continue
+    }
+    // MOTIVO TERMINAL (Lalo 21-ago): un SDR ya descartó a este contacto por
+    // un motivo sin vuelta ("Es un usuario", spam, pruebas…) — no se traspasa
+    // ni se le vuelve a entregar el lead a nadie. El loop cierra con motivo
+    // propio (queda fuera de relojes y toques); Vicky sigue solo reactiva.
+    const motivoTerminal = await leadTerminalNoProspecto(c.contact)
+    if (motivoTerminal) {
+      await supa(`vic_loop?contact=eq.${encodeURIComponent(c.contact)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ estado: "cerrado", motivo_cierre: "no_prospecto" }),
+      })
+      console.log(
+        `[ptv] ${c.contact}: lead No Calificado terminal ("${motivoTerminal}") — traspaso omitido, loop cerrado (no_prospecto)`,
+      )
+      continue
     }
 
     const interno = await siguienteVendedor(pais)

@@ -330,6 +330,9 @@ type LeadEncontrado = {
   lastName: string
   rut: string
   ultimaActividad: string
+  /** Motivo del descarte cuando Lead_Status = "No Calificado" (excepción
+   * terminal 21-ago: ciertos motivos jamás se reactivan ni renacen). */
+  motivoNoCalificado: string
   convertido: boolean
   dealId: string | null
   contactId: string | null
@@ -356,7 +359,7 @@ async function resolverPorTelefono(contact: string): Promise<
     // "creando:<ts>" = reserva anti-carrera de createZohoLead, no un id.
     if (idCandado && !idCandado.startsWith("creando:")) {
       const rDirecto = await fetch(
-        `${api}/crm/v3/Leads/${idCandado}?fields=Owner,Lead_Status,Company,N_Empleados_que_marcan,Email,Last_Name,RUT_Empresa,Last_Activity_Time,Converted_Deal,Converted_Contact,Converted_Account`,
+        `${api}/crm/v3/Leads/${idCandado}?fields=Owner,Lead_Status,Motivo_No_calificado,Company,N_Empleados_que_marcan,Email,Last_Name,RUT_Empresa,Last_Activity_Time,Converted_Deal,Converted_Contact,Converted_Account`,
         { headers: h, cache: "no-store" },
       )
       if (rDirecto.ok) {
@@ -375,6 +378,7 @@ async function resolverPorTelefono(contact: string): Promise<
               lastName: String(l.Last_Name || ""),
               rut: String(l.RUT_Empresa || ""),
               ultimaActividad: String(l.Last_Activity_Time || ""),
+              motivoNoCalificado: String(l.Motivo_No_calificado || ""),
               convertido: Boolean(g("Converted_Account") || g("Converted_Contact") || g("Converted_Deal")),
               dealId: g("Converted_Deal") ? String(g("Converted_Deal")) : null,
               contactId: g("Converted_Contact") ? String(g("Converted_Contact")) : null,
@@ -394,6 +398,7 @@ async function resolverPorTelefono(contact: string): Promise<
         id?: string
         Owner?: { id?: string }
         Lead_Status?: string
+        Motivo_No_calificado?: string
         Company?: string
         N_Empleados_que_marcan?: number
         Email?: string
@@ -420,6 +425,7 @@ async function resolverPorTelefono(contact: string): Promise<
           lastName: String(l.Last_Name || ""),
           rut: String(l.RUT_Empresa || ""),
           ultimaActividad: String(l.Last_Activity_Time || ""),
+          motivoNoCalificado: String(l.Motivo_No_calificado || ""),
           convertido,
           dealId: l.Converted_Deal?.id ? String(l.Converted_Deal.id) : null,
           contactId: l.Converted_Contact?.id ? String(l.Converted_Contact.id) : null,
@@ -1446,6 +1452,7 @@ export async function sincronizarHitoCrm(
         lastName: datos.nombre || "",
         rut: "",
         ultimaActividad: "",
+        motivoNoCalificado: "",
         convertido: false,
         dealId: null,
         contactId: null,
@@ -1480,6 +1487,25 @@ export async function sincronizarHitoCrm(
     const esSdrCO =
       territorioDeContacto(clean) === "Colombia" && SDR_CO_IDS.has(lead.ownerId)
     const esDeVicky = !lead.ownerId || INTERINOS.has(lead.ownerId) || esSdrCO
+
+    // ── EXCEPCIÓN POR MOTIVO TERMINAL (Lalo 21-ago, catastro de traspasos) ──
+    // Un lead que un SDR descartó como "No Calificado" por un motivo TERMINAL
+    // (es un usuario, busca empleo, hardware que no vendemos, spam, pruebas)
+    // no es un prospecto: el re-contacto NO lo reactiva (ni siquiera el
+    // status), NO renace lead nuevo y NO se vuelve a entregar a nadie. Vicky
+    // sigue atendiendo reactiva; el CRM queda como el SDR lo dejó. La única
+    // puerta que lo revive es la venta real: los hitos POST-formales
+    // (aceptada/onboarding) y la emisión formal del cotizador siguen su
+    // camino normal — si el motivo estaba mal puesto, la compra lo demuestra.
+    if (!lead.convertido && HITOS_PRE_FORMALES.has(hito)) {
+      const { esMotivoTerminal } = await import("./zoho-leads")
+      if (esMotivoTerminal(lead.status, lead.motivoNoCalificado)) {
+        console.log(
+          `[crm-hitos] ${clean}: lead ${lead.id} No Calificado terminal ("${lead.motivoNoCalificado}") — hito "${hito}" no reactiva ni renace`,
+        )
+        return
+      }
+    }
 
     // ── Reglas de re-contacto (doc David 30-jul) — detrás de sub-flag ──
     // Reglas 2/5: registro activo → RE-NOTIFICAR al dueño, sin crear nada.
@@ -1648,6 +1674,7 @@ export async function sincronizarHitoCrm(
             lastName: datos.nombre || "",
             rut: datos.rut || "",
             ultimaActividad: "",
+            motivoNoCalificado: "",
             convertido: false,
             dealId: null,
             contactId: null,

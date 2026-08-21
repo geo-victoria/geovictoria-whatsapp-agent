@@ -561,6 +561,36 @@ export async function reasignarLeadSdrInbound(
 }
 
 /**
+ * MOTIVOS TERMINALES de "No Calificado" (Lalo 21-ago, catastro de traspasos —
+ * reclamo de las SDR vía Dave: Vicky les "devolvía" contactos que ellas ya
+ * habían descartado). Un lead descartado por estos motivos NO es un prospecto:
+ * el re-contacto jamás lo reactiva, jamás renace un lead nuevo y jamás se
+ * vuelve a entregar por traspaso. Vicky sigue atendiendo REACTIVA (responde
+ * si le escriben); el CRM queda como el SDR lo dejó. La única puerta que lo
+ * revive es la venta real (emisión formal / hitos post-formales).
+ * Valores EXACTOS del picklist Motivo_No_calificado (verificados 21-ago).
+ * Override sin deploy: env VICKY_MOTIVOS_TERMINALES (lista separada por "|").
+ */
+const MOTIVOS_TERMINALES_DEFAULT = [
+  "Es un usuario",
+  "Usuario que busca empleo",
+  "Quiere otro tipo de Hardware (Que no vendemos)",
+  "Pruebas (internas)",
+  "SPAM (Publicidad-Virus)",
+]
+
+export function esMotivoTerminal(status: string, motivo: string | null | undefined): boolean {
+  if (!/no calificado/i.test(status || "")) return false
+  const custom = (process.env.VICKY_MOTIVOS_TERMINALES || "")
+    .split("|")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const lista = custom.length ? custom : MOTIVOS_TERMINALES_DEFAULT
+  const m = String(motivo || "").trim().toLowerCase()
+  return m !== "" && lista.some((x) => x.toLowerCase() === m)
+}
+
+/**
  * TELEMARKETING CL (Lalo 04-ago): un lead que Vicky NO puede atender (número
  * sin WhatsApp, cadencia agotada, sin calificar) se re-asigna con la REGLA de
  * Zoho "Re-asignación de Vicky" (lar_id) — NO con la rotación SDR interna.
