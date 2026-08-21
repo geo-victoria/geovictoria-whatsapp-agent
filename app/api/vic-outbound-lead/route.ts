@@ -147,6 +147,37 @@ export async function POST(req: Request): Promise<Response> {
     )
   }
 
+  // LEADS DEL BOTÓN WHATSAPP DE LAS LANDINGS (Lalo 21-ago: "el miniform
+  // reenvía a hablar con Vicky — no es para que nosotros enviemos
+  // plantillas"): ese flujo es INBOUND PURO. El cliente llenó el formulario y
+  // viene EN CAMINO a escribir por el mensaje prellenado; mandarle un toque 0
+  // encima duplica el saludo, y la detección de fijo lo entregaría a SDR
+  // cuando el diseño es esperar su mensaje. Con Form_Vicky = "Si" este
+  // endpoint NO hace nada: ni plantilla, ni cadencia, ni entrega — el lead
+  // queda con Vicky esperando el inbound. (Capa 2: Dave excluye Form_Vicky=Si
+  // del workflow "Vicky - Toque 0 WhatsApp lead asignado" en Zoho.)
+  if (zohoLeadId) {
+    try {
+      const { getZohoAccessToken } = await import("@/lib/zoho-token")
+      const tk = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const rl = await fetch(`${api}/crm/v3/Leads/${zohoLeadId}?fields=Form_Vicky`, {
+        headers: { Authorization: `Zoho-oauthtoken ${tk}` },
+        cache: "no-store",
+      })
+      if (rl.status === 200) {
+        const fv = String(
+          ((await rl.json().catch(() => ({}))) as { data?: Array<{ Form_Vicky?: string | null }> })?.data?.[0]
+            ?.Form_Vicky || "",
+        )
+        if (/^si$/i.test(fv.trim())) {
+          console.log(`[outbound-lead] lead ${zohoLeadId} viene del botón WhatsApp de landing (Form_Vicky=Si) — inbound puro, sin toque 0`)
+          return NextResponse.json({ ok: true, skipped: "form_vicky_inbound" })
+        }
+      }
+    } catch { /* ante la duda, el flujo outbound clásico sigue */ }
+  }
+
   // País: el territorio EXPLÍCITO de Zoho manda; el prefijo telefónico es el
   // fallback. Con país conocido se normalizan teléfonos en formato local:
   // CL móvil "9XXXXXXXX" (9 dígitos) → 56...; CO celular "3XXXXXXXXX" (10) → 57...
