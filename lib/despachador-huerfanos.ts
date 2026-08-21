@@ -59,6 +59,11 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // convertir (20-ago): mismos veredictos, teléfono del contacto/lead.
   { nombre: "deal_limpieza_hitos", path: "/api/vic-admin-deal-limpieza?gestionhitos=1&limit=15", cadaMin: 360 },
   { nombre: "deal_limpieza_leads", path: "/api/vic-admin-deal-limpieza?gestionleads=1&limit=15", cadaMin: 360 },
+  // Lector de media del espejo (Lalo 21-ago, "que los chats espejos puedan
+  // leer los mismos medios que Vicky"): transcribe audios y describe
+  // imágenes/PDF de los WhatsApp de vendedores — los comprobantes por foto
+  // dejan de ser invisibles.
+  { nombre: "espejo_media", path: "/api/vic-espejo-media-cron?limit=8", cadaMin: 15 },
   // Etapas de deals (pagada→6, onboarding completado→7 Implementando): su
   // "cada hora por Vercel Cron" es el scheduler muerto — garantizado acá.
   { nombre: "deal_stage", path: "/api/vic-deal-stage-cron", cadaMin: 60 },
