@@ -2603,6 +2603,168 @@ async function renderFormLanding(primeraVez: Map<string, string>, visibles: Fila
   }
 }
 
+/**
+ * 📋 CARTERA DE COTIZACIONES VICKY (Lalo 21-ago): vista GLOBAL por estado —
+ * no por día — de las cotizaciones del canal Vicky, con responsable actual y
+ * PRÓXIMO PASO recomendado por fila. Es el dash de gestión del equipo para
+ * trabajar la cosecha post-formal (el gap detectado 21-ago: los ejecutivos
+ * cierran a días 2-8 con llamadas; las formales de Vicky nadie las trabaja).
+ * El cierre perdido automático corre a los 14 días (compromiso de Lalo con
+ * el equipo) — la columna de urgencia cuenta contra ese plazo.
+ */
+async function renderCartera(quien: string, qsBase: string): Promise<string> {
+  type Cot = {
+    id?: string
+    Numero_Cotizacion?: string
+    Name?: string
+    Estado_Cotizacion?: string
+    Intervenci_n_Humana?: string
+    Owner?: { name?: string } | null
+    Tel_fono_Contacto?: string
+    Created_Time?: string
+    Modified_Time?: string
+  }
+  const token = await getZohoAccessToken()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  const desde = new Date(Date.now() - 30 * 86400e3).toISOString().slice(0, 10)
+  const cots: Cot[] = []
+  for (const offset of [0, 200]) {
+    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        select_query:
+          `select id, Numero_Cotizacion, Name, Estado_Cotizacion, Intervenci_n_Humana, Owner, Tel_fono_Contacto, Created_Time, Modified_Time ` +
+          `from Cotizaciones_GeoVictoria where Created_Time >= '${desde}T00:00:00-04:00' order by Created_Time desc limit ${offset}, 200`,
+      }),
+    })
+    if (!r.ok || r.status === 204) break
+    const d = (await r.json().catch(() => ({}))) as { data?: Cot[]; info?: { more_records?: boolean } }
+    cots.push(...(d.data || []))
+    if (!d.info?.more_records) break
+  }
+  // Canal VICKY: marca '100% Vicky', o sin marca (pre-19-ago) con dueño robot
+  // (Vicky/Victoria Luna = venta autónoma). El canal ejecutivo gestiona lo suyo.
+  const esVicky = (c: Cot) => {
+    const marca = String(c.Intervenci_n_Humana || "")
+    if (/100%/.test(marca)) return true
+    if (/intervenci/i.test(marca)) return false
+    return /vicky|victoria luna|geovictoria$/i.test(String(c.Owner?.name || ""))
+  }
+  const deVicky = cots.filter(esVicky).filter((c) => !/prueba|test/i.test(String(c.Name || "")))
+  const porEstado = new Map<string, number>()
+  for (const c of deVicky) porEstado.set(String(c.Estado_Cotizacion || "—"), (porEstado.get(String(c.Estado_Cotizacion || "—")) || 0) + 1)
+  const vivas = deVicky.filter((c) => /Enviada|Aceptada/i.test(String(c.Estado_Cotizacion || "")))
+  const tels = [...new Set(vivas.map((c) => digits(String(c.Tel_fono_Contacto || ""))).filter(Boolean))]
+  // Contexto de conversación + traspaso + pausas (Supabase, lotes in.()).
+  const sup = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const convPor = new Map<string, { last_user_at?: string; updated_at?: string }>()
+  const ptvPor = new Map<string, { vendedor?: string; estado?: string }>()
+  const pausaPor = new Map<string, string>()
+  for (let i = 0; i < tels.length; i += 40) {
+    const lote = tels.slice(i, i + 40).map((t) => `"${t}"`).join(",")
+    const [rc, rp, rl] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=in.(${lote})&select=contact,last_user_at,updated_at&limit=200`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_ptv?contact=in.(${lote})&select=contact,vendedor_nombre,vendedor_email,estado,traspasado_at&order=traspasado_at.desc&limit=200`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_loop?contact=in.(${lote})&compromiso_at=not.is.null&select=contact,compromiso_at&limit=200`, { headers: sup, cache: "no-store" }),
+    ])
+    for (const f of ((await rc.json().catch(() => [])) as Array<{ contact?: string; last_user_at?: string; updated_at?: string }>) || []) {
+      if (f.contact) convPor.set(digits(f.contact), f)
+    }
+    for (const f of ((await rp.json().catch(() => [])) as Array<{ contact?: string; vendedor_nombre?: string; vendedor_email?: string; estado?: string }>) || []) {
+      const t = digits(String(f.contact || ""))
+      if (t && !ptvPor.has(t)) ptvPor.set(t, { vendedor: f.vendedor_nombre || f.vendedor_email, estado: f.estado })
+    }
+    for (const f of ((await rl.json().catch(() => [])) as Array<{ contact?: string; compromiso_at?: string }>) || []) {
+      if (f.contact && f.compromiso_at) pausaPor.set(digits(f.contact), f.compromiso_at)
+    }
+  }
+  const ahora = Date.now()
+  const dias = (iso?: string) => (iso && Number.isFinite(Date.parse(iso)) ? (ahora - Date.parse(iso)) / 86400e3 : NaN)
+  type Fila = { orden: number; html: string }
+  const filas: Fila[] = []
+  for (const c of vivas) {
+    const tel = digits(String(c.Tel_fono_Contacto || ""))
+    const edad = dias(c.Created_Time)
+    const conv = tel ? convPor.get(tel) : undefined
+    const ptv = tel ? ptvPor.get(tel) : undefined
+    const pausa = tel ? pausaPor.get(tel) : undefined
+    const aceptada = /Aceptada/i.test(String(c.Estado_Cotizacion || ""))
+    const clienteRespondioPost = Boolean(
+      conv?.last_user_at && c.Created_Time && Date.parse(conv.last_user_at) > Date.parse(c.Created_Time),
+    )
+    const diasMudo = dias(conv?.last_user_at)
+    const responsable = ptv?.vendedor
+      ? `${ptv.vendedor}${ptv.estado === "activo" ? "" : " (traspaso cerrado)"}`
+      : /vicky|geovictoria$/i.test(String(c.Owner?.name || ""))
+        ? "Vicky (sin traspaso)"
+        : String(c.Owner?.name || "—")
+    let orden = 5
+    let paso = ""
+    if (aceptada) {
+      orden = 0
+      paso = `🔥 Aceptó hace ${Math.max(0, dias(c.Modified_Time)).toFixed(1)} días y NO ha pagado — llamar YA y empujar el mismo link de pago`
+    } else if (pausa && Date.parse(pausa) > ahora) {
+      orden = 4
+      paso = `⏸ Pausa anunciada por el cliente hasta ${fmtSantiago(pausa)} — retomar entonces (no quemarlo antes)`
+    } else if (edad < 1 && clienteRespondioPost) {
+      orden = 3
+      paso = `🟢 Conversación viva (emitida hoy) — Vicky la trabaja; si no cierra hoy, llamada mañana`
+    } else if (!clienteRespondioPost) {
+      orden = 1
+      paso = `📞 NUNCA respondió después de la formal (${edad.toFixed(1)} días) — llamar directo: puede no haberla visto (el correo cae en Promociones)`
+    } else if (Number.isFinite(diasMudo) && diasMudo > 2) {
+      orden = 2
+      paso = `📞 Tibia: su último mensaje fue hace ${diasMudo.toFixed(1)} días — llamar y ofrecer el descuento de cierre`
+    } else {
+      orden = 3
+      paso = `👀 Respondió hace poco — revisar el chat y cerrar por teléfono si se enfría`
+    }
+    const diasParaCierre = Math.max(0, 14 - edad)
+    const urgencia = aceptada ? "" : ` · <span style="color:${diasParaCierre < 4 ? "#b91c1c" : "#6b7280"}">se pierde en ${diasParaCierre.toFixed(0)} d</span>`
+    const zurl = `https://crm.zoho.com/crm/org685875245/tab/CustomModule5/${c.id}`
+    filas.push({
+      orden: orden * 1000 + Math.max(0, 30 - edad),
+      html:
+        `<tr><td><a href="${zurl}" target="_blank" rel="noopener">${c.Numero_Cotizacion || "—"}</a></td>` +
+        `<td>${esc(String(c.Name || "").replace(/^Cotización /, "").replace(/ - \d{4}-\d{2}-\d{2}$/, ""))}</td>` +
+        `<td>${tel ? `<a href="https://wa.me/${tel}" target="_blank" rel="noopener">+${tel}</a>` : "—"}</td>` +
+        `<td style="white-space:nowrap">${fmtSantiago(String(c.Created_Time || ""))} <span class="sub">(${edad.toFixed(1)} d)</span></td>` +
+        `<td>${aceptada ? "<b style='color:#b45309'>Aceptada 💰</b>" : "Enviada"}${urgencia}</td>` +
+        `<td>${esc(responsable)}</td>` +
+        `<td>${conv?.last_user_at ? fmtSantiago(conv.last_user_at) : "<span style='color:#b91c1c'>sin mensajes</span>"}</td>` +
+        `<td style="max-width:340px">${paso}</td></tr>`,
+    })
+  }
+  filas.sort((a, b) => a.orden - b.orden)
+  const chips = ["Enviada", "Aceptada", "Pagada", "Perdida"]
+    .map((e) => {
+      const n = [...porEstado.entries()].filter(([k]) => k.toLowerCase().includes(e.toLowerCase())).reduce((a, [, v]) => a + v, 0)
+      return `<span style="display:inline-block;padding:6px 14px;border-radius:10px;background:${e === "Pagada" ? "#f0faf4" : e === "Aceptada" ? "#fff8e8" : e === "Perdida" ? "#fdf2f2" : "#f0f7fc"};font-weight:700">${e}: ${n}</span>`
+    })
+    .join(" ")
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cartera Vicky</title>
+  <style>
+    body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;background:#f6f8fa;color:#2d3748}
+    .wrap{max-width:1280px;margin:0 auto;padding:18px}
+    .card{background:#fff;border-radius:14px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:16px}
+    table{width:100%;border-collapse:collapse;font-size:13.5px}
+    th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;padding:8px 8px;border-bottom:2px solid #e5e7eb}
+    td{padding:8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+    a{color:#0284c7;text-decoration:none}
+    .sub{color:#8a949c;font-size:12px}
+    tr:hover td{background:#f8fbfd}
+  </style></head><body><div class="wrap">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px"><img src="/gv/logo-full-color.svg" style="height:28px" alt=""><h1 style="margin:0;font-size:20px">📋 Cartera de cotizaciones Vicky</h1>
+  <a class="sub" href="?${qsBase}">← volver al dash</a></div>
+  <div class="card"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${chips}<span class="sub">· últimos 30 días, canal Vicky</span></div>
+  <p class="sub" style="margin:10px 0 0">El cierre perdido automático corre a los <b>14 días</b> sin actividad. Orden de la tabla = urgencia: aceptadas sin pago primero, luego las que nunca respondieron a la formal, luego tibias. El link del teléfono abre WhatsApp; el COT abre Zoho.</p></div>
+  <div class="card"><h2 style="margin:0 0 10px;font-size:16px">Vivas por trabajar (${filas.length})</h2>
+  <div style="overflow-x:auto"><table><tr><th>COT</th><th>Empresa</th><th>WhatsApp</th><th>Emitida</th><th>Estado</th><th>Responsable</th><th>Últ. msj del cliente</th><th>Próximo paso sugerido</th></tr>
+  ${filas.map((f) => f.html).join("")}</table></div>
+  ${quien && quien !== "Administrador" ? `<p class="sub">Sesión: ${esc(quien)}</p>` : ""}
+  </div></div></body></html>`
+}
+
 async function fetchPrimeraConversacion(): Promise<Map<string, string>> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   const primera = new Map<string, string>()
@@ -6014,6 +6176,18 @@ export async function GET(req: Request): Promise<Response> {
   // y el resto del embudo) o "inbound" (embudo por cohorte diaria de llegadas
   // inbound, pedido Rodrigo 13-ago) — pestañas arriba a la derecha.
   const vistaParam = searchParams.get("vista")
+  // 📋 CARTERA (Lalo 21-ago): página autocontenida — por estado, global, con
+  // responsable y próximo paso. Se sirve antes del pipeline pesado del dash.
+  if (vistaParam === "cartera") {
+    try {
+      const qsVolver = (() => { const p = new URLSearchParams({ key, pais }); return p.toString() })()
+      const htmlCartera = await renderCartera(quien || "", qsVolver)
+      return new Response(htmlCartera, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
+    } catch (e) {
+      console.warn("[vic-funnel] cartera falló:", e instanceof Error ? e.message : e)
+      return new Response("La cartera no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
+    }
+  }
   const vista: "gestion" | "analisis" | "inbound" =
     vistaParam === "analisis" ? "analisis" : vistaParam === "inbound" ? "inbound" : "gestion"
   // Filtro de ORIGEN de la cola (Lalo 07-ago): "vicky" (default — lo que está
@@ -7198,6 +7372,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
+      <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cartera"); return p.toString() })()}">📋 Cartera</a>
       ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>`}

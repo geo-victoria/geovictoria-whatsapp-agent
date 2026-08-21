@@ -2061,7 +2061,11 @@ async function limpiezaCartera7d(ahora: Date): Promise<number> {
   if (!token) return 0
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
-  const corte = new Date(ahora.getTime() - 7 * 86400e3).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+  // 14 DÍAS (Lalo 21-ago, compromiso con el equipo: "cambiar los tiempos de
+  // cierre perdido automático a 2 semanas" — antes 7). Override sin deploy:
+  // env VICKY_CARTERA_DIAS.
+  const diasCartera = Math.max(1, Number(process.env.VICKY_CARTERA_DIAS || 14) || 14)
+  const corte = new Date(ahora.getTime() - diasCartera * 86400e3).toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const q =
     `select id, Deal_Name, Stage, Last_Activity_Time, Contact_Name.Phone, Contact_Name.Mobile from Deals ` +
     `where Deal_Name like '%Cotización Vicky%' and Last_Activity_Time <= '${corte}' ` +
