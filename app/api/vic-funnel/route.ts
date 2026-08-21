@@ -2472,7 +2472,9 @@ async function renderFormLanding(primeraVez: Map<string, string>): Promise<strin
     const filas: FilaForm[] = []
     // Vivos por COQL. Los CONVERTIDOS son invisibles al COQL de Leads: van
     // por search aparte con converted=true (misma limitación de siempre).
-    const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+    // v8 a propósito: el COQL v3 devuelve Owner sin expandir (la columna
+    // Dueño salía "—" en los leads vivos — cazado 21-ago); v8 trae {name,id}.
+    const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
       method: "POST",
       headers: H,
       cache: "no-store",
