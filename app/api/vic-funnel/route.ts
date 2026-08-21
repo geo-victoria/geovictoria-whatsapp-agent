@@ -2621,6 +2621,7 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     Intervenci_n_Humana?: string
     Owner?: { name?: string } | null
     Tel_fono_Contacto?: string
+    Email_Contacto?: string
     Created_Time?: string
     Modified_Time?: string
   }
@@ -2633,7 +2634,7 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
       method: "POST", headers: H, cache: "no-store",
       body: JSON.stringify({
         select_query:
-          `select id, Numero_Cotizacion, Name, Estado_Cotizacion, Intervenci_n_Humana, Owner, Tel_fono_Contacto, Created_Time, Modified_Time ` +
+          `select id, Numero_Cotizacion, Name, Estado_Cotizacion, Intervenci_n_Humana, Owner, Tel_fono_Contacto, Email_Contacto, Created_Time, Modified_Time ` +
           `from Cotizaciones_GeoVictoria where Created_Time >= '${desde}T00:00:00-04:00' order by Created_Time desc limit ${offset}, 200`,
       }),
     })
@@ -2659,6 +2660,12 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     .filter((c) => {
       const t = digits(String(c.Tel_fono_Contacto || ""))
       return !t || !isTestContact(t, setMetricas)
+    })
+    // Sin teléfono, el correo delata a los internos (las pruebas de Rodrigo
+    // del 13-ago venían sin fono y con rodrigo.lewit@gmail.com).
+    .filter((c) => {
+      const em = String(c.Email_Contacto || "").toLowerCase()
+      return !em || (!esEmailInterno(em) && !/rodrigo\.lewit|egomez|rlewit|cfuentesq|pruebasmkt/.test(em))
     })
   const porEstado = new Map<string, number>()
   for (const c of deVicky) porEstado.set(String(c.Estado_Cotizacion || "—"), (porEstado.get(String(c.Estado_Cotizacion || "—")) || 0) + 1)
