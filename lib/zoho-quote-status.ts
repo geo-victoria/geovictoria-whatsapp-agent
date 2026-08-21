@@ -114,7 +114,7 @@ export async function marcarCotizacionRechazada(quoteId: string): Promise<boolea
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         data: [{ Estado_Cotizacion: "Rechazada" }],
-        trigger: ["workflow"],
+        trigger: ["workflow", "blueprint"],
       }),
       cache: "no-store",
     })

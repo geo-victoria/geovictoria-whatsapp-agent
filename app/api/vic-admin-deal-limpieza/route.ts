@@ -158,7 +158,7 @@ export async function GET(req: Request): Promise<Response> {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
@@ -201,7 +201,7 @@ export async function GET(req: Request): Promise<Response> {
         body: JSON.stringify({
           data: ids.map((f) => ({ id: f.id, Monda_del_trato: "CLP" })),
           skip_feature_execution: [{ name: "assignment_rules" }],
-          trigger: [],
+          trigger: ["blueprint"],
         }),
       })
       const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string; details?: { id?: string } }> }
@@ -403,7 +403,7 @@ export async function GET(req: Request): Promise<Response> {
       if (Object.keys(patch).length) {
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
           method: "PUT", headers: H, cache: "no-store",
-          body: JSON.stringify({ data: [{ id: dealId, ...patch }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: dealId, ...patch }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpoUp = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpoUp?.data?.[0]?.code === "SUCCESS") dealActualizado = Object.keys(patch)
@@ -572,7 +572,7 @@ export async function GET(req: Request): Promise<Response> {
         const veredicto = await veredictoGestion(tel, Date.now(), f.id, H)
         const up = await fetch(`${ZOHO_API}/crm/v3/Leads/${f.id}`, {
           method: "PUT", headers: H, cache: "no-store",
-          body: JSON.stringify({ data: [{ id: f.id, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: f.id, Gesti_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") out.estampados++
@@ -609,7 +609,7 @@ export async function GET(req: Request): Promise<Response> {
         const veredicto = await veredictoGestion(tel, Date.now(), f.id, H)
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${f.id}`, {
           method: "PUT", headers: H, cache: "no-store",
-          body: JSON.stringify({ data: [{ id: f.id, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: f.id, Gesti_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") out.estampados++
@@ -658,7 +658,7 @@ export async function GET(req: Request): Promise<Response> {
         if (!dealId) { out.sin_par++; continue }
         const up = await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${q.id}`, {
           method: "PUT", headers: H, cache: "no-store",
-          body: JSON.stringify({ data: [{ id: q.id, Deal_Asociado: dealId }], trigger: [] }),
+          body: JSON.stringify({ data: [{ id: q.id, Deal_Asociado: dealId }], trigger: ["blueprint"] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
@@ -887,10 +887,13 @@ export async function GET(req: Request): Promise<Response> {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          // trigger:[] OBLIGATORIO: sin él, el workflow "DEPRECADO. UPDATE
-          // MONEDA Y V. POR USUARIO A" se dispara con NUESTRA edición y
-          // re-estampa Moneda=UF + valor por usuario (caso SUPERMERCADO SUR).
-          body: JSON.stringify({ data: [{ id: dealId, ...cambios }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          // trigger SIN "workflow" OBLIGATORIO: con workflows activos, el
+          // "DEPRECADO. UPDATE MONEDA Y V. POR USUARIO A" se dispara con
+          // NUESTRA edición y re-estampa Moneda=UF (caso SUPERMERCADO SUR).
+          // "blueprint" SÍ va (Lalo 21-ago): el ejecutivo solo tiene el
+          // blueprint para mover stages — ningún toque nuestro debe dejarlo
+          // desenganchado.
+          body: JSON.stringify({ data: [{ id: dealId, ...cambios }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
         if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") res.amount_actualizado++
@@ -906,7 +909,7 @@ export async function GET(req: Request): Promise<Response> {
           method: "PUT",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ data: [{ id: p.quote_id, Owner: { id: dealOwnerId } }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          body: JSON.stringify({ data: [{ id: p.quote_id, Owner: { id: dealOwnerId } }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
         })
         if (uo.ok) res.owner_cotizacion_alineado++
         else res.errores.push(`owner ${p.quote_id}: HTTP ${uo.status}`)
@@ -919,13 +922,14 @@ export async function GET(req: Request): Promise<Response> {
         // NORMALIZACIÓN DE ESTADO (Lalo 20-ago, "mi filtro solo pesca 6"):
         // los pagos MP dejaban la cotización en "Aceptada"+link y el estado
         // mentía en los filtros del CRM. Toda pagada real queda "Pagada";
-        // trigger:[] para no despertar workflows de Zoho.
+        // trigger sin "workflow" para no despertar los workflows de Zoho
+        // (blueprint sí se permite — Lalo 21-ago).
         if (!String(quote.Estado_Cotizacion || "").toLowerCase().includes("pagad")) {
           await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${p.quote_id}`, {
             method: "PUT",
             headers: H,
             cache: "no-store",
-            body: JSON.stringify({ data: [{ id: p.quote_id, Estado_Cotizacion: "Pagada" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+            body: JSON.stringify({ data: [{ id: p.quote_id, Estado_Cotizacion: "Pagada" }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
           }).catch(() => undefined)
         }
         // Atribución congelada al pago (ventas futuras): si el deal no la
@@ -947,7 +951,7 @@ export async function GET(req: Request): Promise<Response> {
                 method: "PUT",
                 headers: H,
                 cache: "no-store",
-                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
               }).catch(() => undefined)
             }
           }
@@ -961,7 +965,7 @@ export async function GET(req: Request): Promise<Response> {
                 method: "PUT",
                 headers: H,
                 cache: "no-store",
-                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
               }).catch(() => undefined)
             }
           }
@@ -971,7 +975,7 @@ export async function GET(req: Request): Promise<Response> {
               method: "PUT",
               headers: H,
               cache: "no-store",
-              body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+              body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
             }).catch(() => undefined)
           }
         } catch { /* best-effort */ }
@@ -1006,7 +1010,7 @@ export async function GET(req: Request): Promise<Response> {
                 method: "PUT",
                 headers: H,
                 cache: "no-store",
-                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: "No habló con Vicky" }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
               }).catch(() => undefined)
             }
           }
@@ -1017,7 +1021,7 @@ export async function GET(req: Request): Promise<Response> {
                 method: "PUT",
                 headers: H,
                 cache: "no-store",
-                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: [], skip_feature_execution: [{ name: "assignment_rules" }] }),
+                body: JSON.stringify({ data: [{ id: dealId, Gesti_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
               }).catch(() => undefined)
             }
           }
