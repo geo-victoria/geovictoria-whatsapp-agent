@@ -2466,6 +2466,7 @@ async function renderFormLanding(primeraVez: Map<string, string>): Promise<strin
       Owner?: { name?: string } | null
       Created_Time?: string
       Lead_Source?: string
+      Territorio?: string
       _convertido?: boolean
     }
     const filas: FilaForm[] = []
@@ -2477,7 +2478,7 @@ async function renderFormLanding(primeraVez: Map<string, string>): Promise<strin
       cache: "no-store",
       body: JSON.stringify({
         select_query:
-          "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
+          "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
       }),
     })
     if (rq.ok && rq.status !== 204) {
@@ -2485,7 +2486,7 @@ async function renderFormLanding(primeraVez: Map<string, string>): Promise<strin
       for (const f of d.data || []) filas.push(f)
     }
     const rc = await fetch(
-      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source&per_page=200`,
+      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio&per_page=200`,
       { headers: H, cache: "no-store" },
     )
     if (rc.ok && rc.status !== 204) {
@@ -2499,51 +2500,78 @@ async function renderFormLanding(primeraVez: Map<string, string>): Promise<strin
     }
     const visibles = filas.filter((f) => f.id && !esInternoForm(f))
     visibles.sort((a, b) => Date.parse(String(b.Created_Time || "")) - Date.parse(String(a.Created_Time || "")))
-    let conConv = 0
-    let yaConversaba = 0
-    let sinConv = 0
-    let sinTel = 0
-    let telMalo = 0
+    // Contadores por categoría, y los mismos cortados por PAÍS y por
+    // PROPIETARIO (Lalo 21-ago, "sepáralos por país y otra tabla por
+    // propietario"). Sin teléfono, el país sale del Territorio del lead.
+    type Cnt = { total: number; conv: number; ya: number; sin: number; sinTel: number; malo: number }
+    const nuevoCnt = (): Cnt => ({ total: 0, conv: 0, ya: 0, sin: 0, sinTel: 0, malo: 0 })
+    const totalCnt = nuevoCnt()
+    const porPais = new Map<string, Cnt>()
+    const porDueno = new Map<string, Cnt>()
     const filasHtml: string[] = []
     for (const f of visibles) {
       const tel = digits(String(f.Phone || ""))
       const telOk = /^(56|57|52|51)\d{8,12}$/.test(tel)
       const creadoMs = Date.parse(String(f.Created_Time || ""))
       const convIso = telOk ? primeraVez.get(tel) : undefined
-      const pais = tel.startsWith("56") ? "🇨🇱" : tel.startsWith("57") ? "🇨🇴" : tel.startsWith("52") ? "🇲🇽" : tel.startsWith("51") ? "🇵🇪" : "—"
+      const terr = String(f.Territorio || "").trim().toLowerCase()
+      const pais = telOk
+        ? tel.startsWith("56") ? "🇨🇱 Chile" : tel.startsWith("57") ? "🇨🇴 Colombia" : tel.startsWith("52") ? "🇲🇽 México" : "🇵🇪 Perú"
+        : terr === "chile" ? "🇨🇱 Chile" : terr === "colombia" ? "🇨🇴 Colombia" : terr === "méxico" || terr === "mexico" ? "🇲🇽 México" : terr === "perú" || terr === "peru" ? "🇵🇪 Perú" : terr ? terr : "país s/d"
+      const dueno = f.Owner?.name || "—"
+      let cat: keyof Omit<Cnt, "total">
       let estado: string
       if (!f.Phone) {
-        sinTel++
+        cat = "sinTel"
         estado = `<span style="color:#b45309">⚠️ sin teléfono</span>`
       } else if (!telOk) {
-        telMalo++
+        cat = "malo"
         estado = `<span style="color:#b91c1c">✖ teléfono inválido</span>`
       } else if (convIso) {
         const antes = Number.isFinite(creadoMs) && Date.parse(convIso) < creadoMs - 3600e3
-        if (antes) yaConversaba++
-        else conConv++
+        cat = antes ? "ya" : "conv"
         estado = `<span style="color:#15803d">💬 ${antes ? "ya conversaba" : "conversó"} · ${fmtSantiago(convIso)}</span>`
       } else {
-        sinConv++
+        cat = "sin"
         const horas = Number.isFinite(creadoMs) ? Math.floor((Date.now() - creadoMs) / 3600e3) : 0
         estado = `<span style="color:#b45309">⏳ sin conversación (${horas} h)</span>`
+      }
+      for (const c of [totalCnt, porPais.get(pais) || porPais.set(pais, nuevoCnt()).get(pais)!, porDueno.get(dueno) || porDueno.set(dueno, nuevoCnt()).get(dueno)!]) {
+        c.total++
+        c[cat]++
       }
       const nombre = `${f.First_Name || ""} ${f.Last_Name || ""}`.trim() || "—"
       const zurl = `https://crm.zoho.com/crm/org685875245/tab/Leads/${f.id}`
       filasHtml.push(
         `<tr><td>${fmtSantiago(String(f.Created_Time || ""))}</td><td><a href="${zurl}" target="_blank" rel="noopener">${nombre}</a></td>` +
-          `<td>${f.Company || "—"}</td><td>${pais}</td><td>${tel ? `+${tel}` : f.Phone || "—"}</td><td>${f.Email || "—"}</td>` +
-          `<td>${estado}</td><td>${f.Lead_Status || "—"}${f._convertido ? " · convertido" : ""}</td><td>${f.Owner?.name || "—"}</td><td>${f.Lead_Source || "—"}</td></tr>`,
+          `<td>${f.Company || "—"}</td><td>${pais.split(" ")[0]}</td><td>${tel ? `+${tel}` : f.Phone || "—"}</td><td>${f.Email || "—"}</td>` +
+          `<td>${estado}</td><td>${f.Lead_Status || "—"}${f._convertido ? " · convertido" : ""}</td><td>${dueno}</td><td>${f.Lead_Source || "—"}</td></tr>`,
       )
     }
     const chips =
-      `<span class="sub">Total ${visibles.length}</span> · <span style="color:#15803d">💬 conversó ${conConv}</span>` +
-      (yaConversaba ? ` · <span style="color:#15803d">ya conversaba ${yaConversaba}</span>` : "") +
-      ` · <span style="color:#b45309">⏳ sin conversación ${sinConv}</span> · <span style="color:#b45309">⚠️ sin teléfono ${sinTel}</span>` +
-      (telMalo ? ` · <span style="color:#b91c1c">✖ teléfono inválido ${telMalo}</span>` : "")
+      `<span class="sub">Total ${totalCnt.total}</span> · <span style="color:#15803d">💬 conversó ${totalCnt.conv}</span>` +
+      (totalCnt.ya ? ` · <span style="color:#15803d">ya conversaba ${totalCnt.ya}</span>` : "") +
+      ` · <span style="color:#b45309">⏳ sin conversación ${totalCnt.sin}</span> · <span style="color:#b45309">⚠️ sin teléfono ${totalCnt.sinTel}</span>` +
+      (totalCnt.malo ? ` · <span style="color:#b91c1c">✖ teléfono inválido ${totalCnt.malo}</span>` : "")
+    // Tablas resumen: mismas columnas, un corte por país y otro por dueño.
+    const tablaResumen = (titulo: string, mapa: Map<string, Cnt>): string => {
+      const filasR = [...mapa.entries()]
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(
+          ([k, c]) =>
+            `<tr><td>${k}</td><td>${c.total}</td><td>${c.conv}</td><td>${c.ya || ""}</td><td>${c.sin}</td><td>${c.sinTel}</td><td>${c.malo || ""}</td></tr>`,
+        )
+        .join("")
+      return (
+        `<div style="overflow-x:auto;flex:1;min-width:320px"><table><tr><th>${titulo}</th><th>Total</th><th>💬 conversó</th><th>ya conversaba</th><th>⏳ sin conv.</th><th>⚠️ sin tel.</th><th>✖ tel. inválido</th></tr>` +
+        filasR +
+        `</table></div>`
+      )
+    }
     return (
       `<div class="card"><h2>🧲 Formulario de landing (Form_Vicky)</h2>` +
       `<p class="sub">Todos los leads que llenaron el miniform de las landing, cruzados por teléfono contra las conversaciones de Vicky. ${chips}</p>` +
+      `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px">${tablaResumen("País", porPais)}${tablaResumen("Propietario", porDueno)}</div>` +
       `<div style="overflow-x:auto"><table><tr><th>Llenó el form</th><th>Nombre</th><th>Empresa</th><th></th><th>Teléfono</th><th>Correo</th><th>Conversación con Vicky</th><th>Status Zoho</th><th>Dueño</th><th>Fuente</th></tr>` +
       filasHtml.join("") +
       `</table></div></div>`
