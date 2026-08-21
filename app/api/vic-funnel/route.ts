@@ -2451,56 +2451,62 @@ function renderEvolucionDiaria(params: {
  * directos al rescate. Best-effort: ante cualquier falla devuelve una
  * tarjeta de error, jamás tumba la vista inbound.
  */
-async function renderFormLanding(primeraVez: Map<string, string>): Promise<string> {
+type FilaFormVicky = {
+  id?: string
+  First_Name?: string
+  Last_Name?: string
+  Company?: string
+  Phone?: string
+  Email?: string
+  Lead_Status?: string
+  Owner?: { name?: string } | null
+  Created_Time?: string
+  Lead_Source?: string
+  Territorio?: string
+  _convertido?: boolean
+}
+
+/** Todos los leads del miniform (Form_Vicky=Si), internos ya filtrados.
+ * Compartido por la columna "Form Vicky" del panel Bolsa y la tabla detalle. */
+async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
+  const token = await getZohoAccessToken()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  const filas: FilaFormVicky[] = []
+  // Vivos por COQL. Los CONVERTIDOS son invisibles al COQL de Leads: van
+  // por search aparte con converted=true (misma limitación de siempre).
+  // v8 a propósito: el COQL v3 devuelve Owner sin expandir (la columna
+  // Dueño salía "—" en los leads vivos — cazado 21-ago); v8 trae {name,id}.
+  const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
+    method: "POST",
+    headers: H,
+    cache: "no-store",
+    body: JSON.stringify({
+      select_query:
+        "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
+    }),
+  })
+  if (rq.ok && rq.status !== 204) {
+    const d = (await rq.json().catch(() => ({}))) as { data?: FilaFormVicky[] }
+    for (const f of d.data || []) filas.push(f)
+  }
+  const rc = await fetch(
+    `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio&per_page=200`,
+    { headers: H, cache: "no-store" },
+  )
+  if (rc.ok && rc.status !== 204) {
+    const d = (await rc.json().catch(() => ({}))) as { data?: FilaFormVicky[] }
+    for (const f of d.data || []) filas.push({ ...f, _convertido: true })
+  }
+  // Internos fuera (mismo criterio del resto del dash).
+  const esInternoForm = (f: FilaFormVicky) => {
+    const blob = `${f.First_Name || ""} ${f.Last_Name || ""} ${f.Company || ""} ${f.Email || ""}`.toLowerCase()
+    return /prueba|test vicky|no llamar|geovictoria|pruebasmkt|huellerocompany/.test(blob)
+  }
+  return filas.filter((f) => f.id && !esInternoForm(f))
+}
+
+async function renderFormLanding(primeraVez: Map<string, string>, visibles: FilaFormVicky[]): Promise<string> {
   try {
-    const token = await getZohoAccessToken()
-    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
-    type FilaForm = {
-      id?: string
-      First_Name?: string
-      Last_Name?: string
-      Company?: string
-      Phone?: string
-      Email?: string
-      Lead_Status?: string
-      Owner?: { name?: string } | null
-      Created_Time?: string
-      Lead_Source?: string
-      Territorio?: string
-      _convertido?: boolean
-    }
-    const filas: FilaForm[] = []
-    // Vivos por COQL. Los CONVERTIDOS son invisibles al COQL de Leads: van
-    // por search aparte con converted=true (misma limitación de siempre).
-    // v8 a propósito: el COQL v3 devuelve Owner sin expandir (la columna
-    // Dueño salía "—" en los leads vivos — cazado 21-ago); v8 trae {name,id}.
-    const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
-      method: "POST",
-      headers: H,
-      cache: "no-store",
-      body: JSON.stringify({
-        select_query:
-          "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
-      }),
-    })
-    if (rq.ok && rq.status !== 204) {
-      const d = (await rq.json().catch(() => ({}))) as { data?: FilaForm[] }
-      for (const f of d.data || []) filas.push(f)
-    }
-    const rc = await fetch(
-      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio&per_page=200`,
-      { headers: H, cache: "no-store" },
-    )
-    if (rc.ok && rc.status !== 204) {
-      const d = (await rc.json().catch(() => ({}))) as { data?: FilaForm[] }
-      for (const f of d.data || []) filas.push({ ...f, _convertido: true })
-    }
-    // Internos fuera (mismo criterio del resto del dash).
-    const esInternoForm = (f: FilaForm) => {
-      const blob = `${f.First_Name || ""} ${f.Last_Name || ""} ${f.Company || ""} ${f.Email || ""}`.toLowerCase()
-      return /prueba|test vicky|no llamar|geovictoria|pruebasmkt|huellerocompany/.test(blob)
-    }
-    const visibles = filas.filter((f) => f.id && !esInternoForm(f))
     visibles.sort((a, b) => Date.parse(String(b.Created_Time || "")) - Date.parse(String(a.Created_Time || "")))
     // Contadores por categoría, y los mismos cortados por PAÍS y por
     // PROPIETARIO (Lalo 21-ago, "sepáralos por país y otra tabla por
@@ -2575,7 +2581,7 @@ async function renderFormLanding(primeraVez: Map<string, string>): Promise<strin
       )
     }
     return (
-      `<div class="card"><h2>🧲 Formulario de landing (Form_Vicky)</h2>` +
+      `<div class="card" id="formlanding"><h2>🧲 Formulario de landing (Form_Vicky)</h2>` +
       `<p class="sub">Todos los leads que llenaron el miniform de las landing, cruzados por teléfono contra las conversaciones de Vicky. ${chips}</p>` +
       `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px">${tablaResumen("País", porPais)}${tablaResumen("Propietario", porDueno)}</div>` +
       `<div style="overflow-x:auto"><table><tr><th>Llenó el form</th><th>Nombre</th><th>Empresa</th><th></th><th>Teléfono</th><th>Correo</th><th>Conversación con Vicky</th><th>Status Zoho</th><th>Dueño</th><th>Fuente</th></tr>` +
@@ -2762,6 +2768,9 @@ function renderInboundDiario(
     detalles: Map<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }>
     /** Transcripción embebida por teléfono: [rol c|v, fecha, texto]. */
     trans: Map<string, Array<[string, string, string]>>
+    /** Columna "Form Vicky" (Lalo 21-ago): día → [etiqueta, tel discable o ""]
+     * de los que llenaron el miniform de las landing ese día. */
+    formVicky?: Map<string, Array<[string, string]>>
   },
 ): string {
   const { dias, porDia } = c
@@ -2793,9 +2802,24 @@ function renderInboundDiario(
       return [...u].map(([t, n]) => [n, t] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
     })()
   }
+  // Columna "Form Vicky" (Lalo 21-ago): llenaron el miniform ese día. La
+  // viñeta lista nombres; con teléfono discable abre el detalle como las
+  // demás, sin teléfono queda como texto. El número linkea a la tabla
+  // detalle del form (#formlanding), más abajo en la misma página.
+  const fv = opts.formVicky || new Map<string, Array<[string, string]>>()
+  VIN["form"] = {}
+  for (const [dia, lista] of fv) VIN["form"][dia] = [...lista].sort((a, b) => a[0].localeCompare(b[0]))
+  VIN["form"]["TOTAL"] = [...fv.values()].flat().sort((a, b) => a[0].localeCompare(b[0]))
+  const fvTotal = VIN["form"]["TOTAL"].length
+  const celdaForm = (d: string) => {
+    const v = d === "TOTAL" ? fvTotal : (fv.get(d) || []).length
+    if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
+    return `<td class="conpop" data-et="form" data-dia="${d}" style="text-align:center"><a href="#formlanding" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a></td>`
+  }
   const DET: Record<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }> = {}
   const TRS: Record<string, Array<[string, string, string]>> = {}
-  for (const et of ETAPAS_INBOUND) for (const lista of Object.values(VIN[et])) for (const [, t] of lista) {
+  for (const et of [...ETAPAS_INBOUND, "form"] as string[]) for (const lista of Object.values(VIN[et])) for (const [, t] of lista) {
+    if (!t) continue
     if (!DET[t]) DET[t] = opts.detalles.get(t) || { e: nom(t), est: "—", ej: "—", dot: "s/d", ult: "", acc: "", conv: "", z: "" }
     if (!TRS[t] && opts.trans.has(t)) TRS[t] = opts.trans.get(t)!
   }
@@ -2811,7 +2835,7 @@ function renderInboundDiario(
     const vioPrecio = cnt("precio", d)
     return `<tr>
       <td style="white-space:nowrap">${nombreDia(d)}</td>
-      ${celda(d, "entrantes")}${celda(d, "ic")}${celda(d, "ce")}${celda(d, "ce_sop", "sube")}${celda(d, "ce_pos", "sube")}${celda(d, "ce_cob", "sube")}${celda(d, "nocal")}${celda(d, "noid")}
+      ${celdaForm(d)}${celda(d, "entrantes")}${celda(d, "ic")}${celda(d, "ce")}${celda(d, "ce_sop", "sube")}${celda(d, "ce_pos", "sube")}${celda(d, "ce_cob", "sube")}${celda(d, "nocal")}${celda(d, "noid")}
       ${celda(d, "precio", "divi")}${celda(d, "formal")}${celda(d, "aceptada")}${celda(d, "pagada")}
       <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}</td>
     </tr>`
@@ -2831,7 +2855,7 @@ function renderInboundDiario(
   }
   const filaTotalOk = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
     <td><b>TOTAL</b></td>
-    ${celdaTotal("entrantes")}${celdaTotal("ic")}${celdaTotal("ce")}${celdaTotal("ce_sop", "sube")}${celdaTotal("ce_pos", "sube")}${celdaTotal("ce_cob", "sube")}${celdaTotal("nocal")}${celdaTotal("noid")}
+    ${celdaForm("TOTAL")}${celdaTotal("entrantes")}${celdaTotal("ic")}${celdaTotal("ce")}${celdaTotal("ce_sop", "sube")}${celdaTotal("ce_pos", "sube")}${celdaTotal("ce_cob", "sube")}${celdaTotal("nocal")}${celdaTotal("noid")}
     ${celdaTotal("precio", "divi")}${celdaTotal("formal")}${celdaTotal("aceptada")}${celdaTotal("pagada")}
     <td style="text-align:center"><b>${pctDe(T.pagada, T.precio)}</b></td>
   </tr>`
@@ -2869,19 +2893,19 @@ function renderInboundDiario(
     }
   </style>
   <div style="overflow-x:auto;margin-top:8px"><table><thead>
-  <tr><th></th><th colspan="8" class="gb">🎒 Grupo Bolsa · llegadas del día (nueva o reactivada tras ≥7 días de silencio)</th><th colspan="5" class="gf divi">📸 Grupo Foto · hitos del día</th></tr>
+  <tr><th></th><th colspan="9" class="gb">🎒 Grupo Bolsa · llegadas del día (nueva o reactivada tras ≥7 días de silencio)</th><th colspan="5" class="gf divi">📸 Grupo Foto · hitos del día</th></tr>
   <tr>
-    <th>Día</th><th style="text-align:center">Entrantes</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
+    <th>Día</th><th style="text-align:center">🧲 Form Vicky</th><th style="text-align:center">Entrantes</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Entrantes del día; los 3 subgrupos (· morados) suman Cliente existente. Un contacto que vuelve a escribir tras ≥7 días de silencio cuenta como entrante de nuevo ese día. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Entrantes no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform de las landing ese día (con o sin conversación después) — clic en el número lleva al detalle del form, más abajo. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Entrantes del día; los 3 subgrupos (· morados) suman Cliente existente. Un contacto que vuelve a escribir tras ≥7 días de silencio cuenta como entrante de nuevo ese día. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Entrantes no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
     var VIN = ${jsonSeguro(VIN)};
     var DET = ${jsonSeguro(DET)};
     var TRS = ${jsonSeguro(TRS)};
-    var ETQ = ${jsonSeguro(ETIQUETA_ETAPA_INBOUND)};
+    var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Vicky (llenaron el miniform)" })};
     var pop = document.createElement("div"); pop.id = "inbpop"; document.body.appendChild(pop);
     var timer = null;
     function abrir(td) {
@@ -2890,7 +2914,9 @@ function renderInboundDiario(
       var lista = (VIN[et] || {})[dia] || [];
       var html = '<div class="t">' + (ETQ[et] || et) + " · " + (dia === "TOTAL" ? "período" : dia) + " · " + lista.length + "</div>";
       lista.slice(0, 30).forEach(function (par) {
-        html += '<a href="#" data-tel="' + par[1] + '">' + par[0] + "</a>";
+        // Sin teléfono discable (form sin fono) no hay detalle que abrir.
+        if (par[1]) html += '<a href="#" data-tel="' + par[1] + '">' + par[0] + "</a>";
+        else html += '<a href="#formlanding">' + par[0] + " ⚠️</a>";
       });
       if (lista.length > 30) html += '<a href="' + td.querySelector("a").getAttribute("href") + '">… y ' + (lista.length - 30) + " más</a>";
       html += '<a href="' + td.querySelector("a").getAttribute("href") + '" style="color:#00aff2">📄 listado completo →</a>';
@@ -6510,10 +6536,27 @@ export async function GET(req: Request): Promise<Response> {
             }))
           }
         } catch { /* sin transcripciones: el pop-up muestra solo la ficha */ }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel })
-        // 🧲 Leads del formulario de landing (Lalo 21-ago) — solo en la vista
-        // completa, no en los drill-downs (inbdet).
-        if (!inbdet) inboundHtml += await renderFormLanding(primeraVez)
+        // 🧲 Leads del formulario de landing (Lalo 21-ago): alimentan la
+        // columna "Form Vicky" del Grupo Bolsa y la tabla detalle de abajo.
+        const formLeads = inbdet ? [] : await fetchLeadsFormVicky().catch(() => [] as FilaFormVicky[])
+        const formPorDia = new Map<string, Array<[string, string]>>()
+        for (const f of formLeads) {
+          const ms = Date.parse(String(f.Created_Time || ""))
+          if (!Number.isFinite(ms)) continue
+          if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
+          // Mismo día-Santiago del resto de la tabla (YYYY-MM-DD).
+          const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms))
+          let telForm = digits(String(f.Phone || ""))
+          if (/^(56|57|52|51)\1\d{8,12}$/.test(telForm)) telForm = telForm.slice(2)
+          const etiqueta = `${f.First_Name || ""} ${f.Last_Name || ""}`.trim() || f.Company || f.Email || "(sin nombre)"
+          const arr = formPorDia.get(dia) || []
+          arr.push([etiqueta, /^(56|57|52|51)\d{8,12}$/.test(telForm) ? telForm : ""])
+          formPorDia.set(dia, arr)
+        }
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia })
+        // Tabla detalle del form — solo en la vista completa, no en los
+        // drill-downs (inbdet).
+        if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
         inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`
