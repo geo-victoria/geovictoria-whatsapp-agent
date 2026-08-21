@@ -2536,6 +2536,10 @@ async function reconciliarLeadsCruzados(): Promise<number> {
     "peru": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" },
     "méxico": { id: "3525045000434395001", email: "mguzmanr@geovictoria.com" }, // Miguel Guzmán (SDR inbound, Lalo 12-ago)
     "mexico": { id: "3525045000308323003", email: "ysegura@geovictoria.com" },
+    // COLOMBIA faltaba en este mapa (cazado 21-ago con el lead CO del form
+    // que quedó con Sepúlveda): leads CO → SDR fijo Galindo (regla equipo CO
+    // 05-ago; el roster Araceli/Aleydis es SOLO calificación Chile).
+    "colombia": { id: "3525045000613817111", email: "egalindo@geovictoria.com" },
   }
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
   const token = await getZohoAccessToken()
