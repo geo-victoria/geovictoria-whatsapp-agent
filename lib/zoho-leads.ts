@@ -1034,6 +1034,64 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
             }
           }
         }
+        // DEDUP POR EMPRESA/NOMBRE (Lalo 21-ago, botón WhatsApp de las
+        // landings CL): el pre-formulario crea un lead SIN teléfono (nombre,
+        // apellido, correo corporativo, empresa) y el mensaje prellenado del
+        // botón repite esos MISMOS textos ("Hola, soy Belén de Agroindustria
+        // Valle Rojo Spa…") — así que cuando el chat dispara su hito, la
+        // empresa/nombre calzan letra por letra con el lead del formulario.
+        // Match determinista y acotado: lead SIN convertir + SIN teléfono +
+        // creado hace ≤14 días con la MISMA empresa (o, en su defecto, mismo
+        // nombre completo) → se ADOPTA: se le completa el fono y se cierra el
+        // candado hacia él. Jamás toca leads con otro teléfono. Cuando el
+        // formulario incorpore teléfono, el dedup por fono lo pilla antes y
+        // este paso queda de respaldo.
+        try {
+          const desdeIso = new Date(Date.now() - 14 * 86400e3).toISOString()
+          const candidatos: Array<{ id?: string; Phone?: string; Created_Time?: string }> = []
+          const empresaDedup = sanitize(input.empresa, 200).trim()
+          const nombreDedup = (input.nombre || "").trim()
+          const criterios: string[] = []
+          if (empresaDedup && !/^prospecto/i.test(empresaDedup)) {
+            criterios.push(`(Company:equals:${empresaDedup.replace(/[(),]/g, " ").trim()})`)
+          }
+          if (nombreDedup && nombreDedup.includes(" ")) {
+            const n = splitName(nombreDedup)
+            if (n.firstName && n.lastName) {
+              criterios.push(
+                `((First_Name:equals:${n.firstName.replace(/[(),]/g, " ").trim()})and(Last_Name:equals:${n.lastName.replace(/[(),]/g, " ").trim()}))`,
+              )
+            }
+          }
+          for (const criteria of criterios) {
+            const resCrit = await fetch(
+              `${apiDedup}/crm/v3/Leads/search?criteria=${encodeURIComponent(criteria)}&converted=false&fields=id,Phone,Created_Time&per_page=5`,
+              { headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}` }, cache: "no-store" },
+            )
+            if (resCrit.ok && resCrit.status !== 204) {
+              const dataCrit = (await resCrit.json().catch(() => ({}))) as { data?: typeof candidatos }
+              candidatos.push(...(dataCrit?.data || []))
+            }
+            if (candidatos.length) break // la empresa manda; el nombre es respaldo
+          }
+          const adoptable = candidatos.find(
+            (l) => l?.id && !String(l.Phone || "").trim() && String(l.Created_Time || "") >= desdeIso,
+          )
+          if (adoptable?.id) {
+            const { setKvValue } = await import("./supabase-persistence-v3")
+            await setKvValue(kvKeyLead, String(adoptable.id)).catch(() => {})
+            await fetch(`${apiDedup}/crm/v3/Leads`, {
+              method: "PUT",
+              headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}`, "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({ data: [{ id: adoptable.id, Phone: `+${fonoCandado}` }] }),
+            }).catch(() => {})
+            console.log(
+              `[zoho-leads] dedup por empresa/nombre: lead ${adoptable.id} del formulario (sin fono, ≤14d) adoptado para ${fonoCandado} — se le completa el teléfono`,
+            )
+            return { success: true, leadId: String(adoptable.id), entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+          }
+        } catch { /* best-effort: si la búsqueda falla, la creación sigue */ }
         // Reservar el candado ANTES de crear: la ventana de carrera baja de
         // varios segundos (lo que tarda el POST) a milisegundos.
         const { setKvValue } = await import("./supabase-persistence-v3")
