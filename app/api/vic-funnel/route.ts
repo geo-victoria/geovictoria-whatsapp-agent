@@ -2516,6 +2516,9 @@ async function renderFormLanding(primeraVez: Map<string, string>, visibles: Fila
     const totalCnt = nuevoCnt()
     const porPais = new Map<string, Cnt>()
     const porDueno = new Map<string, Cnt>()
+    // Por FUENTE (Lalo 21-ago): el form vive en landings de campaña Y en el
+    // sitio web — Lead_Source separa Google Ads (campaña) de SEO/Direct.
+    const porFuente = new Map<string, Cnt>()
     const filasHtml: string[] = []
     for (const f of visibles) {
       let tel = digits(String(f.Phone || ""))
@@ -2548,7 +2551,13 @@ async function renderFormLanding(primeraVez: Map<string, string>, visibles: Fila
         const horas = Number.isFinite(creadoMs) ? Math.floor((Date.now() - creadoMs) / 3600e3) : 0
         estado = `<span style="color:#b45309">⏳ sin conversación (${horas} h)</span>`
       }
-      for (const c of [totalCnt, porPais.get(pais) || porPais.set(pais, nuevoCnt()).get(pais)!, porDueno.get(dueno) || porDueno.set(dueno, nuevoCnt()).get(dueno)!]) {
+      const fuente = (f.Lead_Source || "—").trim() || "—"
+      for (const c of [
+        totalCnt,
+        porPais.get(pais) || porPais.set(pais, nuevoCnt()).get(pais)!,
+        porDueno.get(dueno) || porDueno.set(dueno, nuevoCnt()).get(dueno)!,
+        porFuente.get(fuente) || porFuente.set(fuente, nuevoCnt()).get(fuente)!,
+      ]) {
         c.total++
         c[cat]++
       }
@@ -2583,7 +2592,7 @@ async function renderFormLanding(primeraVez: Map<string, string>, visibles: Fila
     return (
       `<div class="card" id="formlanding"><h2>🧲 Formulario de landing (Form_Vicky)</h2>` +
       `<p class="sub">Todos los leads que llenaron el miniform de las landing, cruzados por teléfono contra las conversaciones de Vicky. ${chips}</p>` +
-      `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px">${tablaResumen("País", porPais)}${tablaResumen("Propietario", porDueno)}</div>` +
+      `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px">${tablaResumen("País", porPais)}${tablaResumen("Propietario", porDueno)}${tablaResumen("Fuente", porFuente)}</div>` +
       `<div style="overflow-x:auto"><table><tr><th>Llenó el form</th><th>Nombre</th><th>Empresa</th><th></th><th>Teléfono</th><th>Correo</th><th>Conversación con Vicky</th><th>Status Zoho</th><th>Dueño</th><th>Fuente</th></tr>` +
       filasHtml.join("") +
       `</table></div></div>`
@@ -2771,6 +2780,11 @@ function renderInboundDiario(
     /** Columna "Form Vicky" (Lalo 21-ago): día → [etiqueta, tel discable o ""]
      * de los que llenaron el miniform de las landing ese día. */
     formVicky?: Map<string, Array<[string, string]>>
+    /** día → cuántos de esos form-fills llegaron al chat (💬). */
+    formConv?: Map<string, number>
+    /** Todos los teléfonos discables del form: marca qué Entrantes vinieron
+     * de la landing/sitio (🧲) vs inbound orgánico. */
+    formTels?: Set<string>
   },
 ): string {
   const { dias, porDia } = c
@@ -2811,10 +2825,26 @@ function renderInboundDiario(
   for (const [dia, lista] of fv) VIN["form"][dia] = [...lista].sort((a, b) => a[0].localeCompare(b[0]))
   VIN["form"]["TOTAL"] = [...fv.values()].flat().sort((a, b) => a[0].localeCompare(b[0]))
   const fvTotal = VIN["form"]["TOTAL"].length
+  const fvConvTotal = [...(opts.formConv || new Map<string, number>()).values()].reduce((a, n) => a + n, 0)
   const celdaForm = (d: string) => {
     const v = d === "TOTAL" ? fvTotal : (fv.get(d) || []).length
     if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
-    return `<td class="conpop" data-et="form" data-dia="${d}" style="text-align:center"><a href="#formlanding" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a></td>`
+    const conv = d === "TOTAL" ? fvConvTotal : opts.formConv?.get(d) || 0
+    const sufijo = conv > 0 ? ` <span style="font-size:11px;color:#15803d;white-space:nowrap">(${conv}💬)</span>` : ""
+    return `<td class="conpop" data-et="form" data-dia="${d}" style="text-align:center;white-space:nowrap"><a href="#formlanding" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
+  }
+  // Entrantes que vinieron del form (🧲): match por teléfono contra TODOS los
+  // form-fills (el fill puede ser de un día anterior al chat).
+  const entrantesDeForm = (d: string) => {
+    if (!opts.formTels?.size) return 0
+    if (d === "TOTAL") {
+      const u = new Set<string>()
+      for (const set of porDia.entrantes.values()) for (const t of set) if (opts.formTels.has(t)) u.add(t)
+      return u.size
+    }
+    let n = 0
+    for (const t of porDia.entrantes.get(d) || []) if (opts.formTels.has(t)) n++
+    return n
   }
   const DET: Record<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }> = {}
   const TRS: Record<string, Array<[string, string, string]>> = {}
@@ -2828,7 +2858,9 @@ function renderInboundDiario(
   const celda = (dia: string, etapa: EtapaInbound, cls = "") => {
     const v = cnt(etapa, dia)
     if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
-    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a></td>`
+    const deForm = etapa === "entrantes" ? entrantesDeForm(dia) : 0
+    const sufijo = deForm > 0 ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${deForm}🧲)</span>` : ""
+    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${deForm ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
   }
   const filas = [...dias].reverse().map((d) => {
     const pag = cnt("pagada", d)
@@ -2851,7 +2883,9 @@ function renderInboundDiario(
   const celdaTotal = (etapa: EtapaInbound, cls = "") => {
     const v = T[etapa]
     if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
-    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a></td>`
+    const deForm = etapa === "entrantes" ? entrantesDeForm("TOTAL") : 0
+    const sufijo = deForm > 0 ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${deForm}🧲)</span>` : ""
+    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${deForm ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
   }
   const filaTotalOk = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
     <td><b>TOTAL</b></td>
@@ -2898,7 +2932,7 @@ function renderInboundDiario(
     <th>Día</th><th style="text-align:center">🧲 Form Vicky</th><th style="text-align:center">Entrantes</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform de las landing ese día (con o sin conversación después) — clic en el número lleva al detalle del form, más abajo. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Entrantes del día; los 3 subgrupos (· morados) suman Cliente existente. Un contacto que vuelve a escribir tras ≥7 días de silencio cuenta como entrante de nuevo ese día. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Entrantes no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. En ENTRANTES, el (n🧲) es cuántas conversaciones del día vinieron del form (el resto es inbound orgánico). BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Entrantes del día; los 3 subgrupos (· morados) suman Cliente existente. Un contacto que vuelve a escribir tras ≥7 días de silencio cuenta como entrante de nuevo ese día. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Entrantes no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
@@ -6540,20 +6574,29 @@ export async function GET(req: Request): Promise<Response> {
         // columna "Form Vicky" del Grupo Bolsa y la tabla detalle de abajo.
         const formLeads = inbdet ? [] : await fetchLeadsFormVicky().catch(() => [] as FilaFormVicky[])
         const formPorDia = new Map<string, Array<[string, string]>>()
+        // Cruces del embudo web→chat (Lalo 21-ago "OK!"): cuántos del form
+        // llegaron al chat, y qué entrantes vinieron del form (por teléfono).
+        const formConvPorDia = new Map<string, number>()
+        const formTels = new Set<string>()
         for (const f of formLeads) {
           const ms = Date.parse(String(f.Created_Time || ""))
           if (!Number.isFinite(ms)) continue
+          let telForm = digits(String(f.Phone || ""))
+          if (/^(56|57|52|51)\1\d{8,12}$/.test(telForm)) telForm = telForm.slice(2)
+          const telOk = /^(56|57|52|51)\d{8,12}$/.test(telForm)
+          // El set de tels cubre TODO el form (aunque el fill quede fuera del
+          // rango visible): un form de ayer con chat de hoy marca igual.
+          if (telOk) formTels.add(telForm)
           if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
           // Mismo día-Santiago del resto de la tabla (YYYY-MM-DD).
           const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms))
-          let telForm = digits(String(f.Phone || ""))
-          if (/^(56|57|52|51)\1\d{8,12}$/.test(telForm)) telForm = telForm.slice(2)
           const etiqueta = `${f.First_Name || ""} ${f.Last_Name || ""}`.trim() || f.Company || f.Email || "(sin nombre)"
           const arr = formPorDia.get(dia) || []
-          arr.push([etiqueta, /^(56|57|52|51)\d{8,12}$/.test(telForm) ? telForm : ""])
+          arr.push([etiqueta, telOk ? telForm : ""])
           formPorDia.set(dia, arr)
+          if (telOk && primeraVez.has(telForm)) formConvPorDia.set(dia, (formConvPorDia.get(dia) || 0) + 1)
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia })
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
