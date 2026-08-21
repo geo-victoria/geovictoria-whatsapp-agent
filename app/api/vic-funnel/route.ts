@@ -2441,6 +2441,119 @@ function renderEvolucionDiaria(params: {
 
 /** Primera conversación por contacto (min started_at). PostgREST capa cada
  * request en 1000 filas → paginado ascendente hasta agotar (universo ~1.2k). */
+/**
+ * 🧲 LEADS DEL FORMULARIO DE LANDING (Lalo 21-ago, "quisiera que en el dash
+ * también aparezca todo lead que llenó ese formulario"): todo lead con
+ * Form_Vicky=Si (miniform de las landing CL/CO/MX), cruzado por teléfono
+ * contra las conversaciones de Vicky — la brecha entre los que llenaron el
+ * form y los que efectivamente llegaron a hablar. Los sin teléfono o con
+ * teléfono no discable no pueden ser identificados al escribir: candidatos
+ * directos al rescate. Best-effort: ante cualquier falla devuelve una
+ * tarjeta de error, jamás tumba la vista inbound.
+ */
+async function renderFormLanding(primeraVez: Map<string, string>): Promise<string> {
+  try {
+    const token = await getZohoAccessToken()
+    const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    type FilaForm = {
+      id?: string
+      First_Name?: string
+      Last_Name?: string
+      Company?: string
+      Phone?: string
+      Email?: string
+      Lead_Status?: string
+      Owner?: { name?: string } | null
+      Created_Time?: string
+      Lead_Source?: string
+      _convertido?: boolean
+    }
+    const filas: FilaForm[] = []
+    // Vivos por COQL. Los CONVERTIDOS son invisibles al COQL de Leads: van
+    // por search aparte con converted=true (misma limitación de siempre).
+    const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/coql`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({
+        select_query:
+          "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
+      }),
+    })
+    if (rq.ok && rq.status !== 204) {
+      const d = (await rq.json().catch(() => ({}))) as { data?: FilaForm[] }
+      for (const f of d.data || []) filas.push(f)
+    }
+    const rc = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source&per_page=200`,
+      { headers: H, cache: "no-store" },
+    )
+    if (rc.ok && rc.status !== 204) {
+      const d = (await rc.json().catch(() => ({}))) as { data?: FilaForm[] }
+      for (const f of d.data || []) filas.push({ ...f, _convertido: true })
+    }
+    // Internos fuera (mismo criterio del resto del dash).
+    const esInternoForm = (f: FilaForm) => {
+      const blob = `${f.First_Name || ""} ${f.Last_Name || ""} ${f.Company || ""} ${f.Email || ""}`.toLowerCase()
+      return /prueba|test vicky|no llamar|geovictoria|pruebasmkt|huellerocompany/.test(blob)
+    }
+    const visibles = filas.filter((f) => f.id && !esInternoForm(f))
+    visibles.sort((a, b) => Date.parse(String(b.Created_Time || "")) - Date.parse(String(a.Created_Time || "")))
+    let conConv = 0
+    let yaConversaba = 0
+    let sinConv = 0
+    let sinTel = 0
+    let telMalo = 0
+    const filasHtml: string[] = []
+    for (const f of visibles) {
+      const tel = digits(String(f.Phone || ""))
+      const telOk = /^(56|57|52|51)\d{8,12}$/.test(tel)
+      const creadoMs = Date.parse(String(f.Created_Time || ""))
+      const convIso = telOk ? primeraVez.get(tel) : undefined
+      const pais = tel.startsWith("56") ? "🇨🇱" : tel.startsWith("57") ? "🇨🇴" : tel.startsWith("52") ? "🇲🇽" : tel.startsWith("51") ? "🇵🇪" : "—"
+      let estado: string
+      if (!f.Phone) {
+        sinTel++
+        estado = `<span style="color:#b45309">⚠️ sin teléfono</span>`
+      } else if (!telOk) {
+        telMalo++
+        estado = `<span style="color:#b91c1c">✖ teléfono inválido</span>`
+      } else if (convIso) {
+        const antes = Number.isFinite(creadoMs) && Date.parse(convIso) < creadoMs - 3600e3
+        if (antes) yaConversaba++
+        else conConv++
+        estado = `<span style="color:#15803d">💬 ${antes ? "ya conversaba" : "conversó"} · ${fmtSantiago(convIso)}</span>`
+      } else {
+        sinConv++
+        const horas = Number.isFinite(creadoMs) ? Math.floor((Date.now() - creadoMs) / 3600e3) : 0
+        estado = `<span style="color:#b45309">⏳ sin conversación (${horas} h)</span>`
+      }
+      const nombre = `${f.First_Name || ""} ${f.Last_Name || ""}`.trim() || "—"
+      const zurl = `https://crm.zoho.com/crm/org685875245/tab/Leads/${f.id}`
+      filasHtml.push(
+        `<tr><td>${fmtSantiago(String(f.Created_Time || ""))}</td><td><a href="${zurl}" target="_blank" rel="noopener">${nombre}</a></td>` +
+          `<td>${f.Company || "—"}</td><td>${pais}</td><td>${tel ? `+${tel}` : f.Phone || "—"}</td><td>${f.Email || "—"}</td>` +
+          `<td>${estado}</td><td>${f.Lead_Status || "—"}${f._convertido ? " · convertido" : ""}</td><td>${f.Owner?.name || "—"}</td><td>${f.Lead_Source || "—"}</td></tr>`,
+      )
+    }
+    const chips =
+      `<span class="sub">Total ${visibles.length}</span> · <span style="color:#15803d">💬 conversó ${conConv}</span>` +
+      (yaConversaba ? ` · <span style="color:#15803d">ya conversaba ${yaConversaba}</span>` : "") +
+      ` · <span style="color:#b45309">⏳ sin conversación ${sinConv}</span> · <span style="color:#b45309">⚠️ sin teléfono ${sinTel}</span>` +
+      (telMalo ? ` · <span style="color:#b91c1c">✖ teléfono inválido ${telMalo}</span>` : "")
+    return (
+      `<div class="card"><h2>🧲 Formulario de landing (Form_Vicky)</h2>` +
+      `<p class="sub">Todos los leads que llenaron el miniform de las landing, cruzados por teléfono contra las conversaciones de Vicky. ${chips}</p>` +
+      `<div style="overflow-x:auto"><table><tr><th>Llenó el form</th><th>Nombre</th><th>Empresa</th><th></th><th>Teléfono</th><th>Correo</th><th>Conversación con Vicky</th><th>Status Zoho</th><th>Dueño</th><th>Fuente</th></tr>` +
+      filasHtml.join("") +
+      `</table></div></div>`
+    )
+  } catch (e) {
+    console.warn("[vic-funnel] form landing falló:", e instanceof Error ? e.message : e)
+    return `<div class="card"><h2>🧲 Formulario de landing</h2><p class="sub">No se pudo consultar Zoho en este momento.</p></div>`
+  }
+}
+
 async function fetchPrimeraConversacion(): Promise<Map<string, string>> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   const primera = new Map<string, string>()
@@ -6364,6 +6477,9 @@ export async function GET(req: Request): Promise<Response> {
           }
         } catch { /* sin transcripciones: el pop-up muestra solo la ficha */ }
         inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel })
+        // 🧲 Leads del formulario de landing (Lalo 21-ago) — solo en la vista
+        // completa, no en los drill-downs (inbdet).
+        if (!inbdet) inboundHtml += await renderFormLanding(primeraVez)
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
         inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`

@@ -949,7 +949,7 @@ async function notificarTraspasoLeadEmail(
           from: { email: "vicky@geovictoria.com" },
           to: [{ email: destino }],
           ...(esChile ? { cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }] } : {}),
-          subject: `Traspaso PTV: llamar YA a +${fono}`,
+          subject: fono ? `Traspaso PTV: llamar YA a +${fono}` : "Nuevo lead de formulario web para contactar",
           content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Vicky te traspasó esta conversación de WhatsApp: ${cuerpo}</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p></body></html>`,
           mail_format: "html",
         }],
@@ -1960,6 +1960,14 @@ export async function GET(req: Request) {
     return 0
   })
 
+  // RESCATE DEL FORM-FILL MUDO (Lalo 21-ago): lead del formulario de landing
+  // sin conversación a las 24h → entrega al canal humano de su país.
+  const rescatesForm = await rescatarFormSinConversacion(ahora).catch((e) => {
+    console.warn("[ptv-cron] rescate form falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+  if (rescatesForm) console.log(`[ptv-cron] rescate form: ${rescatesForm} leads entregados`)
+
   // Enriquecimiento de leads placeholder desde el chat (Lalo 13-ago): los
   // "Prospecto WhatsApp" se completan con lo que el cliente ya dijo.
   const enriquecidos = await enriquecerLeadsDeChat().catch((e) => {
@@ -2398,6 +2406,126 @@ async function escaladaSla(ahora: Date): Promise<number> {
  * Solo toca leads SIN convertir cuyo dueño es del roster CL — un dueño
  * humano de otro equipo jamás se pisa.
  */
+/**
+ * RESCATE DEL FORM-FILL MUDO (Lalo 21-ago, "sí, configuremos rescate"): lead
+ * del formulario de landing (Form_Vicky=Si) que sigue con el usuario Vicky y
+ * a las 24 h no tiene conversación de WhatsApp — o no puede tenerla nunca
+ * (sin teléfono / teléfono inválido) — se entrega como LEAD al canal humano
+ * de su país: CL → tómbola SDR sin calificar, CO → SDR fijo (Galindo),
+ * MX → RR SDR inbound, PE → Mónica. Con notificación de nuevo lead + nota.
+ * Solo en horario hábil del país (la entrega no cae de madrugada), máx 10
+ * por tick, candado kv `rescate_form_<id>` (un lead se evalúa UNA vez: si ya
+ * conversa, se estampa y no se vuelve a mirar — de ahí lo toma el flujo
+ * normal). Ventana ajustable sin deploy: env VICKY_FORM_RESCATE_HORAS.
+ */
+async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
+  const horasVentana = Math.max(1, Number(process.env.VICKY_FORM_RESCATE_HORAS || 24) || 24)
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken()
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  const q = await fetch(`${api}/crm/v3/coql`, {
+    method: "POST", headers: H, cache: "no-store",
+    body: JSON.stringify({
+      select_query:
+        "select id, First_Name, Last_Name, Company, Phone, Email, Territorio, Created_Time from Leads " +
+        "where (Form_Vicky = 'Si' and Converted__s = false) and Owner.email = 'vicky@geovictoria.com' " +
+        "order by Created_Time asc limit 50",
+    }),
+  })
+  if (!q.ok || q.status === 204) return 0
+  const filas =
+    ((await q.json().catch(() => ({}))) as {
+      data?: Array<{ id?: string; First_Name?: string; Last_Name?: string; Company?: string; Phone?: string; Email?: string; Territorio?: string; Created_Time?: string }>
+    }).data || []
+  const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+  const { esHorarioHabil } = await import("@/lib/ptv")
+  let rescatados = 0
+  for (const l of filas) {
+    if (rescatados >= 10 || !l.id) continue
+    const creadoMs = Date.parse(String(l.Created_Time || ""))
+    if (!Number.isFinite(creadoMs) || ahora.getTime() - creadoMs < horasVentana * 3600e3) continue
+    // Internos de prueba fuera (mismo criterio del dash).
+    const blob = `${l.First_Name || ""} ${l.Last_Name || ""} ${l.Company || ""} ${l.Email || ""}`.toLowerCase()
+    if (/prueba|test vicky|no llamar|geovictoria|pruebasmkt|huellerocompany/.test(blob)) continue
+    if (await getKvValue(`rescate_form_${l.id}`).catch(() => null)) continue
+    const tel = String(l.Phone || "").replace(/\D/g, "")
+    const telOk = /^(56|57|52|51)\d{8,12}$/.test(tel)
+    if (telOk) {
+      const conv = await supa<{ contact: string }>(
+        `vic_v3_conversations?contact=eq.${encodeURIComponent(tel)}&select=contact&limit=1`,
+      ).catch(() => [])
+      if (conv.length) {
+        // Ya conversa: el flujo normal (hitos/relojes) lo gobierna — este
+        // lead sale del radar del rescate para siempre.
+        await setKvValue(`rescate_form_${l.id}`, "conversa").catch(() => {})
+        continue
+      }
+    }
+    // País: prefijo del teléfono; sin teléfono, el Territorio del lead.
+    const terr = String(l.Territorio || "").trim().toLowerCase()
+    const pais = telOk
+      ? tel.startsWith("56") ? "cl" : tel.startsWith("57") ? "co" : tel.startsWith("52") ? "mx" : "pe"
+      : terr === "chile" ? "cl" : terr === "colombia" ? "co" : terr === "méxico" || terr === "mexico" ? "mx" : terr === "perú" || terr === "peru" ? "pe" : ""
+    if (!pais) {
+      console.warn(`[rescate-form] lead ${l.id}: sin teléfono válido ni Territorio — revisar a mano`)
+      await setKvValue(`rescate_form_${l.id}`, "sin_pais").catch(() => {})
+      continue
+    }
+    const feriados = await feriadosDePais(pais)
+    if (!esHorarioHabil(pais, ahora, feriados)) continue // espera la ventana hábil, sin candado
+    await setKvValue(`rescate_form_${l.id}`, "rescatado").catch(() => {})
+    const { reasignarLeadCalificacionCL, reasignarLeadSdrInboundCO, reasignarLeadSdrInboundMX, agregarNotaLead } =
+      await import("@/lib/zoho-leads")
+    let ownerEmail = ""
+    if (pais === "cl") {
+      const r = await reasignarLeadCalificacionCL(l.id, { calificado: false }).catch(() => null)
+      ownerEmail = r?.ownerEmail || ""
+    } else if (pais === "co") {
+      const r = await reasignarLeadSdrInboundCO(l.id).catch(() => null)
+      ownerEmail = r?.ownerEmail || ""
+    } else if (pais === "mx") {
+      const r = await reasignarLeadSdrInboundMX(l.id).catch(() => null)
+      ownerEmail = r?.ownerEmail || ""
+    } else {
+      const put = await fetch(`${api}/crm/v3/Leads`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({
+          data: [{ id: l.id, Owner: { id: "3525045000323383015" } }],
+          skip_feature_execution: [{ name: "assignment_rules" }],
+        }),
+      }).catch(() => null)
+      if (put?.ok) ownerEmail = "mmendozav@geovictoria.com"
+    }
+    if (!ownerEmail) {
+      console.warn(`[rescate-form] lead ${l.id} (${pais}): la entrega no asignó dueño`)
+      continue
+    }
+    const horas = Math.floor((ahora.getTime() - creadoMs) / 3600e3)
+    const detalleTel = !l.Phone
+      ? "El formulario no trajo teléfono, así que Vicky no puede contactarlo por WhatsApp"
+      : telOk
+        ? `Nunca inició conversación por WhatsApp (+${tel})`
+        : `El teléfono del formulario no es válido ("${l.Phone}")`
+    await agregarNotaLead(
+      l.id,
+      "Rescate: llenó el formulario y no conversó con Vicky",
+      `Este lead llenó el formulario de la web/landing hace ${horas} h y no hay conversación de WhatsApp con Vicky. ${detalleTel}. Se entrega al canal humano para contactarlo por correo o teléfono.`,
+    ).catch(() => false)
+    await notificarTraspasoLeadEmail(
+      l.id,
+      ownerEmail,
+      telOk ? tel : "",
+      H,
+      api,
+      `este lead llenó el <b>formulario de la web/landing</b> hace ${horas} h y nunca inició conversación por WhatsApp. ${detalleTel}. Es tuyo: contáctalo por correo${telOk ? " o teléfono" : ""}.`,
+    ).catch(() => {})
+    rescatados++
+    console.log(`[rescate-form] lead ${l.id} (${pais}) → ${ownerEmail} (${horas} h sin conversación)`)
+  }
+  return rescatados
+}
+
 async function reconciliarLeadsCruzados(): Promise<number> {
   const rosterCL = (process.env.VICKY_TM_ROSTER_CALIFICACION_EMAILS ||
     "aaraque@geovictoria.com,asepulveda@geovictoria.com")
