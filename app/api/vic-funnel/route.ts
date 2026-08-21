@@ -2512,7 +2512,11 @@ async function renderFormLanding(primeraVez: Map<string, string>): Promise<strin
     const porDueno = new Map<string, Cnt>()
     const filasHtml: string[] = []
     for (const f of visibles) {
-      const tel = digits(String(f.Phone || ""))
+      let tel = digits(String(f.Phone || ""))
+      // PREFIJO DUPLICADO del form (caso Maximiliano 21-ago, "+5656954367033"):
+      // el formulario antepone el código de país aunque el usuario ya lo haya
+      // puesto — se colapsa para que el cruce calce con el WhatsApp real.
+      if (/^(56|57|52|51)\1\d{8,12}$/.test(tel)) tel = tel.slice(2)
       const telOk = /^(56|57|52|51)\d{8,12}$/.test(tel)
       const creadoMs = Date.parse(String(f.Created_Time || ""))
       const convIso = telOk ? primeraVez.get(tel) : undefined

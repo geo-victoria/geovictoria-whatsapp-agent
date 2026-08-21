@@ -2449,7 +2449,10 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
     const blob = `${l.First_Name || ""} ${l.Last_Name || ""} ${l.Company || ""} ${l.Email || ""}`.toLowerCase()
     if (/prueba|test vicky|no llamar|geovictoria|pruebasmkt|huellerocompany/.test(blob)) continue
     if (await getKvValue(`rescate_form_${l.id}`).catch(() => null)) continue
-    const tel = String(l.Phone || "").replace(/\D/g, "")
+    let tel = String(l.Phone || "").replace(/\D/g, "")
+    // Prefijo de país duplicado por el form ("+5656…"): se colapsa para que
+    // la búsqueda de conversación apunte al WhatsApp real.
+    if (/^(56|57|52|51)\1\d{8,12}$/.test(tel)) tel = tel.slice(2)
     const telOk = /^(56|57|52|51)\d{8,12}$/.test(tel)
     if (telOk) {
       const conv = await supa<{ contact: string }>(
