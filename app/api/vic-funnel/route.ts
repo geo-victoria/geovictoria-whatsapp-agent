@@ -2650,7 +2650,16 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     if (/intervenci/i.test(marca)) return false
     return /vicky|victoria luna|geovictoria$/i.test(String(c.Owner?.name || ""))
   }
-  const deVicky = cots.filter(esVicky).filter((c) => !/prueba|test/i.test(String(c.Name || "")))
+  // Internos fuera con el MISMO criterio de métricas del dash (los "Rodrigo"/
+  // "Nico"/"Recepción Deals" de prueba se colaban — cazado en el primer render).
+  const setMetricas = metricsContactSet()
+  const deVicky = cots
+    .filter(esVicky)
+    .filter((c) => !/prueba|test|recepci.n deals|retenci.n md|geovictoria|huellero/i.test(String(c.Name || "")))
+    .filter((c) => {
+      const t = digits(String(c.Tel_fono_Contacto || ""))
+      return !t || !isTestContact(t, setMetricas)
+    })
   const porEstado = new Map<string, number>()
   for (const c of deVicky) porEstado.set(String(c.Estado_Cotizacion || "—"), (porEstado.get(String(c.Estado_Cotizacion || "—")) || 0) + 1)
   const vivas = deVicky.filter((c) => /Enviada|Aceptada/i.test(String(c.Estado_Cotizacion || "")))
@@ -2736,10 +2745,13 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     })
   }
   filas.sort((a, b) => a.orden - b.orden)
-  const chips = ["Enviada", "Aceptada", "Pagada", "Perdida"]
-    .map((e) => {
-      const n = [...porEstado.entries()].filter(([k]) => k.toLowerCase().includes(e.toLowerCase())).reduce((a, [, v]) => a + v, 0)
-      return `<span style="display:inline-block;padding:6px 14px;border-radius:10px;background:${e === "Pagada" ? "#f0faf4" : e === "Aceptada" ? "#fff8e8" : e === "Perdida" ? "#fdf2f2" : "#f0f7fc"};font-weight:700">${e}: ${n}</span>`
+  // Chips por estado REAL (dinámico: en Zoho conviven Enviada/Aceptada/Pagada/
+  // Vencida/Perdida y variantes — la lista fija escondía estados).
+  const chips = [...porEstado.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([e, n]) => {
+      const bg = /pagada/i.test(e) ? "#f0faf4" : /aceptada/i.test(e) ? "#fff8e8" : /perdida|vencida/i.test(e) ? "#fdf2f2" : "#f0f7fc"
+      return `<span style="display:inline-block;padding:6px 14px;border-radius:10px;background:${bg};font-weight:700">${esc(e)}: ${n}</span>`
     })
     .join(" ")
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cartera Vicky</title>
