@@ -67,6 +67,10 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // Etapas de deals (pagada→6, onboarding completado→7 Implementando): su
   // "cada hora por Vercel Cron" es el scheduler muerto — garantizado acá.
   { nombre: "deal_stage", path: "/api/vic-deal-stage-cron", cadaMin: 60 },
+  // Vigía del auto-onboarding (Lalo 24-ago, caso Bersa/IMP-11175): onboarding
+  // "Completado" sin planillas/implementación → re-dispara el cierre al
+  // wizard/Zoho Flow (candado 6h por registro, máx 3 intentos).
+  { nombre: "ob_vigia", path: "/api/vic-onboarding-vigia", cadaMin: 30 },
 ]
 
 /**
