@@ -29,6 +29,13 @@ export const maxDuration = 120
 const WIZARD_URL = (process.env.VICKY_ONBOARDING_WIZARD_URL || "https://onboarding.geovictoria.com").trim().replace(/\/+$/, "")
 const GRACIA_MIN = 15
 const MAX_REINTENTOS = 3
+// SOLO CIERRES RECIENTES (fix 24-ago, a las 2 horas del estreno): la primera
+// versión no tenía tope de fecha y barrió el HISTÓRICO de onboardings
+// "Completado sin implementación" — creó implementaciones para casos de
+// marzo (SOFTMOTION, Pinnacle, GOLDEN…) que el equipo tuvo que rechazar.
+// El vigía existe para el cierre que se pierde HOY, no para resucitar
+// procesos muertos: ventana de 7 días sobre Fecha_ltimo_avance.
+const VENTANA_DIAS = 7
 
 async function autorizado(req: Request): Promise<boolean> {
   const secreto = await getFollowupCronSecret().catch(() => "")
@@ -115,6 +122,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     const avanceMs = Date.parse(String(fila.Fecha_ltimo_avance || "")) || 0
     if (avanceMs && Date.now() - avanceMs < GRACIA_MIN * 60_000) {
       resultados.push({ id: fila.id, accion: "en_gracia" })
+      continue
+    }
+    // Fuera de la ventana (o sin fecha legible): histórico — no se toca.
+    if (!avanceMs || Date.now() - avanceMs > VENTANA_DIAS * 24 * 3600_000) {
+      resultados.push({ id: fila.id, accion: "historico_fuera_de_ventana" })
       continue
     }
     // Candado: reintento cada 6h, máximo 3 (después queda para gestión humana).
