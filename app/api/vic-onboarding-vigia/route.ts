@@ -55,6 +55,29 @@ type FilaZoho = {
   Fecha_ltimo_avance?: string | null
   Link_planilla_carga_usuarios?: string | null
   Implementaci_n_creada?: { id?: string } | null
+  Cotizacion_Asociada?: { id?: string } | null
+}
+
+/** ID de la CUENTA de Zoho para inyectarlo al payload (Lalo 24-ago): así el
+ * Flow puede tomar la cuenta directo del paquete en vez de deducirla desde el
+ * deal ("Encontrar Cuenta" con criterio vacío fue la causa del caso Bersa).
+ * Fuente: la Cuenta_Asociada de la cotización del onboarding — con la
+ * garantía de cadena del 24-ago, siempre existe. */
+async function cuentaDeCotizacion(quoteId: string, token: string, api: string): Promise<{ id: string; nombre: string } | null> {
+  if (!quoteId) return null
+  try {
+    const r = await fetch(
+      `${api}/crm/v3/Cotizaciones_GeoVictoria/${encodeURIComponent(quoteId)}?fields=Cuenta_Asociada`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+    )
+    if (r.status !== 200) return null
+    const c = ((await r.json().catch(() => ({}))) as {
+      data?: Array<{ Cuenta_Asociada?: { id?: string; name?: string } | null }>
+    }).data?.[0]?.Cuenta_Asociada
+    return c?.id ? { id: String(c.id), nombre: String(c.name || "") } : null
+  } catch {
+    return null
+  }
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
@@ -66,7 +89,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 
   const q =
-    "select id, Token_p_blico, Fecha_ltimo_avance, Link_planilla_carga_usuarios, Implementaci_n_creada " +
+    "select id, Token_p_blico, Fecha_ltimo_avance, Link_planilla_carga_usuarios, Implementaci_n_creada, Cotizacion_Asociada " +
     "from Autoservicio_Onboarding where Estado_del_Onboarding = 'Completado' and " +
     "(Link_planilla_carga_usuarios is null or Implementaci_n_creada is null) " +
     "order by Fecha_ltimo_avance desc limit 20"
@@ -133,6 +156,17 @@ export async function GET(req: Request): Promise<NextResponse> {
       const empresa = fd.empresa as Record<string, unknown>
       empresa.razonSocial = sanearRazonSocial(String(empresa.razonSocial || ""))
       empresa.nombreFantasia = sanearRazonSocial(String(empresa.nombreFantasia || "")) || empresa.razonSocial
+      // CUENTA de Zoho directo en el payload: si la cuenta existe, el nombre
+      // real de la empresa manda sobre lo que traía la sesión (fuente Zoho >
+      // texto contaminado), y el Flow puede usar el id sin pasar por el deal.
+      const cuenta = await cuentaDeCotizacion(String(fila.Cotizacion_Asociada?.id || ""), token, api)
+      if (cuenta) {
+        empresa.cuentaZohoId = cuenta.id
+        if (cuenta.nombre) {
+          empresa.razonSocial = cuenta.nombre
+          empresa.nombreFantasia = cuenta.nombre
+        }
+      }
       const totalTrabajadores = Array.isArray(fd.trabajadores) ? fd.trabajadores.length : 0
 
       const rSubmit = await fetch(`${WIZARD_URL}/api/submit-to-zoho`, {
@@ -153,8 +187,10 @@ export async function GET(req: Request): Promise<NextResponse> {
           pais: "Chile",
           totalTrabajadores,
           formData: fd,
+          ...(cuenta ? { cuentaZohoId: cuenta.id } : {}),
           metadata: {
             pais: "Chile",
+            ...(cuenta ? { cuentaZohoId: cuenta.id } : {}),
             empresaRut: String(empresa.rut || ""),
             empresaNombre: String(empresa.razonSocial || ""),
             pasoActual: 11,
