@@ -2854,6 +2854,12 @@ const ETIQUETA_ETAPA_INBOUND: Record<EtapaInbound, string> = {
 const ETAPA_ALIAS: Record<string, EtapaInbound> = {
   llegaron: "entrantes", comercial: "ic", soporte: "ce_sop", cobranza: "ce_cob", derivada: "ic",
 }
+/** Elementos del Grupo Foto: `tel` (Bolsa/precio) o `tel~quoteId` (formal/
+ * aceptada/pagada — POR COTIZACIÓN, caso Javiera/Vista Kennedy 24-ago: dos
+ * empresas de la misma conversación colapsaban en una porque el set dedupeaba
+ * por teléfono). */
+const telDeElemento = (el: string): string => el.split("~")[0]
+const quoteDeElemento = (el: string): string => el.split("~")[1] || ""
 
 type CohortesInbound = { dias: string[]; porDia: Record<EtapaInbound, Map<string, Set<string>>> }
 
@@ -2868,7 +2874,7 @@ function computarCohortesInbound(params: {
   toque0: Set<string>
   pais: Pais
   rango: RangoFechas | null
-  pagos: Array<{ tel: string; t: number }> | null
+  pagos: Array<{ tel: string; t: number; qid?: string }> | null
 }): CohortesInbound {
   const { entradas, primeraVez, analysisRows, preformAt, quotes, toque0, pais, rango, pagos } = params
   const testSet = metricsContactSet()
@@ -2961,17 +2967,22 @@ function computarCohortesInbound(params: {
       const creadaMs = Date.parse(String(q.Created_Time || ""))
       if (Number.isFinite(creadaMs) && (!Number.isFinite(primeraMs) || primeraMs > creadaMs + 3600e3)) continue
     }
+    // POR COTIZACIÓN (Lalo 24-ago, "no aparece Kennedy"): el elemento lleva
+    // tel~quoteId — dos cotizaciones del mismo fono cuentan como dos hitos y
+    // la viñeta nombra a CADA empresa. "Vio precio" sigue por contacto (el
+    // precio lo ve la persona, no la cotización).
+    const el = `${tel}~${String(q.id || "")}`
     const diaEmision = diaDe(q.Created_Time)
-    anotar(porDia.formal, diaEmision, tel)
+    anotar(porDia.formal, diaEmision, el)
     if (!preformAt.has(tel)) anotar(porDia.precio, diaEmision, tel)
     const diaAcepta = diaDe(q.Fecha_Hora_Cotizacion || q.Modified_Time)
-    if (esAceptadaOMas(q)) anotar(porDia.aceptada, diaAcepta, tel)
-    if (esPagada(q) && !pagos) anotar(porDia.pagada, diaAcepta, tel)
+    if (esAceptadaOMas(q)) anotar(porDia.aceptada, diaAcepta, el)
+    if (esPagada(q) && !pagos) anotar(porDia.pagada, diaAcepta, el)
   }
   if (pagos) {
     for (const pago of pagos) {
       if (!elegible(pago.tel)) continue
-      anotar(porDia.pagada, diaDe(new Date(pago.t).toISOString()), pago.tel)
+      anotar(porDia.pagada, diaDe(new Date(pago.t).toISOString()), pago.qid ? `${pago.tel}~${pago.qid}` : pago.tel)
     }
   }
   return { dias, porDia }
@@ -2985,6 +2996,9 @@ function renderInboundDiario(
     caja?: { cantidad: number; monto: number; detalle: string }
     /** Nombre de empresa por teléfono (para las viñetas). */
     nombres: Map<string, string>
+    /** Empresa por quoteId — nombra cada cotización en las viñetas del Grupo
+     * Foto (elementos tel~quoteId). */
+    nombresQuote?: Map<string, string>
     /** Detalle embebido por teléfono (para el modal instantáneo). */
     detalles: Map<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }>
     /** Transcripción embebida por teléfono: [rol c|v, fecha, texto]. */
@@ -3016,16 +3030,22 @@ function renderInboundDiario(
   // ser rápida") — el hover y el clic al detalle no tocan la red: los datos
   // viajan dentro de la foto.
   const nom = (tel: string) => opts.nombres.get(tel) || `+${tel}`
+  // Elemento tel~quoteId → nombre de ESA cotización (dos empresas del mismo
+  // fono se muestran ambas); el modal/detalle sigue por teléfono pelado.
+  const nomEl = (el: string) => {
+    const qid = quoteDeElemento(el)
+    return (qid && opts.nombresQuote?.get(qid)) || nom(telDeElemento(el))
+  }
   const VIN: Record<string, Record<string, Array<[string, string]>>> = {}
   for (const et of ETAPAS_INBOUND) {
     VIN[et] = {}
     for (const [dia, tels] of porDia[et]) {
-      VIN[et][dia] = [...tels].map((t) => [nom(t), t] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
+      VIN[et][dia] = [...tels].map((t) => [nomEl(t), telDeElemento(t)] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
     }
     VIN[et]["TOTAL"] = (() => {
       const u = new Map<string, string>()
-      for (const tels of porDia[et].values()) for (const t of tels) u.set(t, nom(t))
-      return [...u].map(([t, n]) => [n, t] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
+      for (const tels of porDia[et].values()) for (const t of tels) u.set(t, nomEl(t))
+      return [...u].map(([t, n]) => [n, telDeElemento(t)] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
     })()
   }
   // Columna "Form Vicky" (Lalo 21-ago): llenaron el miniform ese día. La
@@ -6587,7 +6607,7 @@ export async function GET(req: Request): Promise<Response> {
         // tabla (día del PAGO, inbound + outbound) además de la tarjeta de
         // caja. null = lectura fallida → la columna cae al día de aceptación
         // por cotización (solo inbound), como antes.
-        let pagosVicky: Array<{ tel: string; t: number; monto: number; txt: string }> | null = null
+        let pagosVicky: Array<{ tel: string; t: number; monto: number; txt: string; qid: string }> | null = null
         try {
           const rv = await fetch(
             `${SUPABASE_URL}/rest/v1/vic_kv?select=key,value&key=like.venta_dash_v3_*&limit=3000`,
@@ -6634,7 +6654,7 @@ export async function GET(req: Request): Promise<Response> {
               const t = Date.parse(String(v.pagoIso || ""))
               if (!Number.isFinite(t) || t < iniCaja || t > finCaja) continue
               const m = Number(v.montoClp || 0) || 0
-              pagosVicky.push({ tel: telQ, t, monto: m, txt: `${v.numero || qid} $${m.toLocaleString("es-CL")}` })
+              pagosVicky.push({ tel: telQ, t, monto: m, txt: `${v.numero || qid} $${m.toLocaleString("es-CL")}`, qid })
             } catch {
               /* fila corrupta: se salta */
             }
@@ -6668,7 +6688,7 @@ export async function GET(req: Request): Promise<Response> {
           toque0: origen.toque0,
           pais,
           rango,
-          pagos: pagosVicky ? pagosVicky.map((p) => ({ tel: p.tel, t: p.t })) : null,
+          pagos: pagosVicky ? pagosVicky.map((p) => ({ tel: p.tel, t: p.t, qid: p.qid })) : null,
         })
         if (inbdet) {
           const etapaCruda = (searchParams.get("inbEtapa") || "entrantes").trim()
@@ -6687,7 +6707,7 @@ export async function GET(req: Request): Promise<Response> {
             }
           }
           const fuente: Array<[string, string]> = [...(cohortes.porDia[etapaQ] || new Map<string, Set<string>>())].flatMap(
-            ([dia, tels]) => [...tels].map((tel) => [tel, dia] as [string, string]),
+            ([dia, tels]) => [...tels].map((tel) => [telDeElemento(tel), dia] as [string, string]),
           )
           for (const [tel, dia] of fuente) {
             if (inbdet !== "TOTAL" && dia !== inbdet) continue
@@ -6767,7 +6787,7 @@ export async function GET(req: Request): Promise<Response> {
         try {
           const telsPanel = new Set<string>()
           for (const et of Object.keys(cohortes.porDia) as EtapaInbound[]) {
-            for (const tels of cohortes.porDia[et].values()) for (const t of tels) telsPanel.add(t)
+            for (const tels of cohortes.porDia[et].values()) for (const t of tels) telsPanel.add(telDeElemento(t))
           }
           // LOTES de 25 tels (PostgREST corta cada respuesta en 1000 filas:
           // 30 msgs x 34 tels ya truncaba — bug cazado el 19-ago con
@@ -6820,7 +6840,17 @@ export async function GET(req: Request): Promise<Response> {
           formPorDia.set(dia, arr)
           if (telOk && primeraVez.has(telForm)) formConvPorDia.set(dia, (formConvPorDia.get(dia) || 0) + 1)
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels })
+        // Empresa por cotización para las viñetas del Grupo Foto (elementos
+        // tel~quoteId): así el mismo fono con dos cotizaciones nombra ambas.
+        const nombresQuote = new Map<string, string>()
+        for (const q of cierre?.todasList || []) {
+          const qid = String(q.id || "")
+          const emp =
+            String(q["Cuenta_Asociada.Account_Name"] || "").trim() ||
+            String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim()
+          if (qid && emp) nombresQuote.set(qid, emp)
+        }
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
