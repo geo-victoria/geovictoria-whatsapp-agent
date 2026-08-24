@@ -2624,6 +2624,7 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     Email_Contacto?: string
     Created_Time?: string
     Modified_Time?: string
+    Deal_Asociado?: { id?: string; name?: string } | null
   }
   const token = await getZohoAccessToken()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
@@ -2634,7 +2635,7 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
       method: "POST", headers: H, cache: "no-store",
       body: JSON.stringify({
         select_query:
-          `select id, Numero_Cotizacion, Name, Estado_Cotizacion, Intervenci_n_Humana, Owner, Tel_fono_Contacto, Email_Contacto, Created_Time, Modified_Time ` +
+          `select id, Numero_Cotizacion, Name, Estado_Cotizacion, Intervenci_n_Humana, Owner, Tel_fono_Contacto, Email_Contacto, Created_Time, Modified_Time, Deal_Asociado ` +
           `from Cotizaciones_GeoVictoria where Created_Time >= '${desde}T00:00:00-04:00' order by Created_Time desc limit ${offset}, 200`,
       }),
     })
@@ -2643,19 +2644,10 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     cots.push(...(d.data || []))
     if (!d.info?.more_records) break
   }
-  // Canal VICKY: marca '100% Vicky', o sin marca (pre-19-ago) con dueño robot
-  // (Vicky/Victoria Luna = venta autónoma). El canal ejecutivo gestiona lo suyo.
-  const esVicky = (c: Cot) => {
-    const marca = String(c.Intervenci_n_Humana || "")
-    if (/100%/.test(marca)) return true
-    if (/intervenci/i.test(marca)) return false
-    return /vicky|victoria luna|geovictoria$/i.test(String(c.Owner?.name || ""))
-  }
   // Internos fuera con el MISMO criterio de métricas del dash (los "Rodrigo"/
   // "Nico"/"Recepción Deals" de prueba se colaban — cazado en el primer render).
   const setMetricas = metricsContactSet()
-  const deVicky = cots
-    .filter(esVicky)
+  const candidatas = cots
     .filter((c) => !/prueba|test|recepci.n deals|retenci.n md|geovictoria|huellero/i.test(String(c.Name || "")))
     .filter((c) => {
       const t = digits(String(c.Tel_fono_Contacto || ""))
@@ -2667,23 +2659,22 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
       const em = String(c.Email_Contacto || "").toLowerCase()
       return !em || (!esEmailInterno(em) && !/rodrigo\.lewit|egomez|rlewit|cfuentesq|pruebasmkt/.test(em))
     })
-  const porEstado = new Map<string, number>()
-  for (const c of deVicky) porEstado.set(String(c.Estado_Cotizacion || "—"), (porEstado.get(String(c.Estado_Cotizacion || "—")) || 0) + 1)
-  const vivas = deVicky.filter((c) => /Enviada|Aceptada/i.test(String(c.Estado_Cotizacion || "")))
-  const tels = [...new Set(vivas.map((c) => digits(String(c.Tel_fono_Contacto || ""))).filter(Boolean))]
-  // Contexto de conversación + traspaso + pausas (Supabase, lotes in.()).
+  // Contexto de conversación + traspaso + pausas de TODAS las candidatas
+  // (Supabase, lotes in.()) — la conversación además decide el CANAL de las
+  // cotizaciones pre-19-ago sin marca.
+  const tels = [...new Set(candidatas.map((c) => digits(String(c.Tel_fono_Contacto || ""))).filter(Boolean))]
   const sup = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  const convPor = new Map<string, { last_user_at?: string; updated_at?: string }>()
+  const convPor = new Map<string, { started_at?: string; last_user_at?: string; updated_at?: string }>()
   const ptvPor = new Map<string, { vendedor?: string; estado?: string }>()
   const pausaPor = new Map<string, string>()
   for (let i = 0; i < tels.length; i += 40) {
     const lote = tels.slice(i, i + 40).map((t) => `"${t}"`).join(",")
     const [rc, rp, rl] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=in.(${lote})&select=contact,last_user_at,updated_at&limit=200`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=in.(${lote})&select=contact,started_at,last_user_at,updated_at&limit=200`, { headers: sup, cache: "no-store" }),
       fetch(`${SUPABASE_URL}/rest/v1/vic_ptv?contact=in.(${lote})&select=contact,vendedor_nombre,vendedor_email,estado,traspasado_at&order=traspasado_at.desc&limit=200`, { headers: sup, cache: "no-store" }),
       fetch(`${SUPABASE_URL}/rest/v1/vic_loop?contact=in.(${lote})&compromiso_at=not.is.null&select=contact,compromiso_at&limit=200`, { headers: sup, cache: "no-store" }),
     ])
-    for (const f of ((await rc.json().catch(() => [])) as Array<{ contact?: string; last_user_at?: string; updated_at?: string }>) || []) {
+    for (const f of ((await rc.json().catch(() => [])) as Array<{ contact?: string; started_at?: string; last_user_at?: string; updated_at?: string }>) || []) {
       if (f.contact) convPor.set(digits(f.contact), f)
     }
     for (const f of ((await rp.json().catch(() => [])) as Array<{ contact?: string; vendedor_nombre?: string; vendedor_email?: string; estado?: string }>) || []) {
@@ -2695,6 +2686,42 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     }
   }
   const ahora = Date.now()
+  // Canal VICKY: marca '100% Vicky'; sin marca (pre-19-ago) → dueño robot O
+  // conversación de WhatsApp que ya existía al emitir (mismo criterio del
+  // panel de análisis — la limpieza igualó dueños cotización=deal y el owner
+  // dejó de servir como discriminador histórico).
+  const esVicky = (c: Cot) => {
+    const marca = String(c.Intervenci_n_Humana || "")
+    if (/100%/.test(marca)) return true
+    if (/intervenci/i.test(marca)) return false
+    if (/vicky|victoria luna|geovictoria$/i.test(String(c.Owner?.name || ""))) return true
+    const conv = convPor.get(digits(String(c.Tel_fono_Contacto || "")))
+    const inicioConv = Date.parse(String(conv?.started_at || ""))
+    const creada = Date.parse(String(c.Created_Time || ""))
+    return Number.isFinite(inicioConv) && Number.isFinite(creada) && inicioConv <= creada + 3600e3
+  }
+  const deVicky = candidatas.filter(esVicky)
+  const porEstado = new Map<string, number>()
+  for (const c of deVicky) porEstado.set(String(c.Estado_Cotizacion || "—"), (porEstado.get(String(c.Estado_Cotizacion || "—")) || 0) + 1)
+  // COLA DE TRABAJO (Lalo 24-ago): TODO lo no pagado — Enviadas, Aceptadas y
+  // Rechazadas — excluyendo las cuyo DEAL ya está en Cierre Perdido.
+  const trabajables = deVicky.filter((c) => /Enviada|Aceptada|Rechazada/i.test(String(c.Estado_Cotizacion || "")))
+  const dealIds = [...new Set(trabajables.map((c) => String(c.Deal_Asociado?.id || "")).filter(Boolean))]
+  const stagePorDeal = new Map<string, string>()
+  for (let i = 0; i < dealIds.length; i += 40) {
+    const lote = dealIds.slice(i, i + 40).map((d) => `'${d}'`).join(",")
+    const rq2 = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({ select_query: `select id, Stage from Deals where id in (${lote}) limit 200` }),
+    }).catch(() => null)
+    if (!rq2?.ok || rq2.status === 204) continue
+    const d2 = (await rq2.json().catch(() => ({}))) as { data?: Array<{ id?: string; Stage?: string }> }
+    for (const f of d2.data || []) if (f.id) stagePorDeal.set(String(f.id), String(f.Stage || ""))
+  }
+  const vivas = trabajables.filter((c) => {
+    const st = stagePorDeal.get(String(c.Deal_Asociado?.id || "")) || ""
+    return !/Cierre Perdido/i.test(st)
+  })
   const dias = (iso?: string) => (iso && Number.isFinite(Date.parse(iso)) ? (ahora - Date.parse(iso)) / 86400e3 : NaN)
   type Fila = { orden: number; html: string }
   const filas: Fila[] = []
@@ -2705,6 +2732,7 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     const ptv = tel ? ptvPor.get(tel) : undefined
     const pausa = tel ? pausaPor.get(tel) : undefined
     const aceptada = /Aceptada/i.test(String(c.Estado_Cotizacion || ""))
+    const rechazada = /Rechazada/i.test(String(c.Estado_Cotizacion || ""))
     const clienteRespondioPost = Boolean(
       conv?.last_user_at && c.Created_Time && Date.parse(conv.last_user_at) > Date.parse(c.Created_Time),
     )
@@ -2719,6 +2747,9 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
     if (aceptada) {
       orden = 0
       paso = `🔥 Aceptó hace ${Math.max(0, dias(c.Modified_Time)).toFixed(1)} días y NO ha pagado — llamar YA y empujar el mismo link de pago`
+    } else if (rechazada) {
+      orden = 6
+      paso = `❌ El cliente la rechazó — revisar el motivo en el chat: ¿re-cotizar con otro armado o dejarla caer?`
     } else if (pausa && Date.parse(pausa) > ahora) {
       orden = 4
       paso = `⏸ Pausa anunciada por el cliente hasta ${fmtSantiago(pausa)} — retomar entonces (no quemarlo antes)`
@@ -2745,7 +2776,7 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
         `<td>${esc(String(c.Name || "").replace(/^Cotización /, "").replace(/ - \d{4}-\d{2}-\d{2}$/, ""))}</td>` +
         `<td>${tel ? `<a href="https://wa.me/${tel}" target="_blank" rel="noopener">+${tel}</a>` : "—"}</td>` +
         `<td style="white-space:nowrap">${fmtSantiago(String(c.Created_Time || ""))} <span class="sub">(${edad.toFixed(1)} d)</span></td>` +
-        `<td>${aceptada ? "<b style='color:#b45309'>Aceptada 💰</b>" : "Enviada"}${urgencia}</td>` +
+        `<td>${aceptada ? "<b style='color:#b45309'>Aceptada 💰</b>" : rechazada ? "<b style='color:#b91c1c'>Rechazada</b>" : "Enviada"}${rechazada ? "" : urgencia}</td>` +
         `<td>${esc(responsable)}</td>` +
         `<td>${conv?.last_user_at ? fmtSantiago(conv.last_user_at) : "<span style='color:#b91c1c'>sin mensajes</span>"}</td>` +
         `<td style="max-width:340px">${paso}</td></tr>`,
