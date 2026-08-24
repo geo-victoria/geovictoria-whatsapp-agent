@@ -82,6 +82,40 @@ async function datosOwnerAutonoma(
   }
 }
 
+/** Usuarios "robot" cuyas notas NO cuentan como gestión del ejecutivo: el
+ * usuario Vicky y el token de integración (GeoVictoria Admin). Las notas del
+ * ESPEJO las crea el robot pero SÍ cuentan (son el chat real del vendedor):
+ * se reconocen por el título "WhatsApp … (espejo…". */
+const USUARIOS_ROBOT_NOTAS = new Set(["3525045000484500876", "3525045000000200013"])
+
+/** ¿El ejecutivo HIZO algo en el deal? (Lalo 24-ago) — alguna nota suya (o de
+ * cualquier humano) o la nota-espejo de su WhatsApp (vic-espejo-notas-cron la
+ * sincroniza cada ~15 min, así que un chat/llamada real del vendedor cuenta
+ * solo). Mismo criterio que usa el correo PAGADA del cotizador. */
+export async function hayGestionEnDeal(
+  dealId: string,
+  H: Record<string, string>,
+  api: string,
+): Promise<boolean> {
+  try {
+    const r = await fetch(`${api}/crm/v3/Deals/${dealId}/Notes?fields=Note_Title,Created_By&per_page=100`, {
+      headers: H,
+      cache: "no-store",
+    })
+    if (!r.ok || r.status === 204) return false
+    const notas = ((await r.json().catch(() => ({}))) as {
+      data?: Array<{ Note_Title?: string | null; Created_By?: { id?: string } | null }>
+    }).data || []
+    return notas.some((n) => {
+      if (/\(espejo/i.test(String(n.Note_Title || ""))) return true
+      const autor = String(n.Created_By?.id || "")
+      return Boolean(autor) && !USUARIOS_ROBOT_NOTAS.has(autor)
+    })
+  } catch {
+    return false
+  }
+}
+
 async function asignarVentaAutonoma(
   contact: string,
   quoteId: string,
@@ -91,35 +125,62 @@ async function asignarVentaAutonoma(
     if (!owner) return { autonoma: false }
     // SOLO CHILE (Lalo 31-jul): CO y MX siguen con sus reglas antiguas.
     if (!contact.startsWith("56")) return { autonoma: false }
-    // ¿Intervino un humano? Un traspaso PTV activo significa que un vendedor
-    // fue presentado y estaba encima de la venta → esa venta es suya, no
-    // autónoma, y su asignación no se toca.
+    // ¿Intervino un humano? Antes un traspaso PTV activo bastaba para dejarle
+    // la venta al vendedor. REGLA NUEVA (Lalo 24-ago, caso Javiera/Tamara:
+    // tómbola 11:06, pagos 11:26 y 11:55, cero gestión de la vendedora): el
+    // traspaso disparado NO es gestión — en cada pago se verifica si el
+    // ejecutivo hizo ALGO en el deal (alguna nota, o la nota-espejo de su
+    // WhatsApp). Sin gestión, el deal vuelve al dueño de ventas autónomas
+    // (Aleydis) para que acompañe la gestión comercial post-venta.
     const url = (process.env.SUPABASE_URL || "").trim()
     const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    let ptvActivo: { id: string } | null = null
     if (url && key) {
       const r = await fetch(
         `${url}/rest/v1/vic_ptv?contact=eq.${encodeURIComponent(contact)}&estado=eq.activo&select=id&limit=1`,
         { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
       )
-      const filas = r.ok ? ((await r.json().catch(() => [])) as unknown[]) : []
-      if (Array.isArray(filas) && filas.length > 0) return { autonoma: false }
+      const filas = r.ok ? ((await r.json().catch(() => [])) as Array<{ id: string }>) : []
+      if (Array.isArray(filas) && filas.length > 0) ptvActivo = filas[0]
     }
     const { getZohoAccessToken } = await import("./zoho-token")
     const token = await getZohoAccessToken()
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    // El deal se resuelve ANTES de decidir: el chequeo de gestión lo necesita.
+    const fonoDeal = contact.replace(/\D/g, "")
+    const sLead = await fetch(`${api}/crm/v3/Leads/search?phone=${fonoDeal}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
+    const dealIdPre = sLead.ok && sLead.status !== 204
+      ? ((await sLead.json().catch(() => ({}))) as { data?: Array<{ Converted_Deal?: { id?: string } | null }> }).data?.find((l) => l.Converted_Deal?.id)?.Converted_Deal?.id
+      : undefined
+    let traspasoSinGestion = false
+    if (ptvActivo) {
+      const gestiono = dealIdPre ? await hayGestionEnDeal(String(dealIdPre), H, api) : false
+      if (gestiono) {
+        console.log(`[postpago] pago con traspaso activo y gestión del ejecutivo en el deal ${dealIdPre} — venta ASISTIDA, asignación intacta.`)
+        return { autonoma: false }
+      }
+      traspasoSinGestion = true
+      console.log(
+        `[postpago] pago con traspaso activo pero SIN gestión del ejecutivo en el deal ${dealIdPre || "-"} — vuelve al dueño de ventas autónomas (Lalo 24-ago).`,
+      )
+    }
     // Dueño HUMANO real de la cotización (sin fila PTV igual cuenta — bug
     // Gescor 13-ago: Grey era la dueña y la asignación autónoma la pisó):
-    // solo los interinos (Vicky/Admin) se consideran "sin dueño".
-    const gOwner = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Owner`, { headers: H, cache: "no-store" })
-    const ownerActual = gOwner.ok
-      ? ((await gOwner.json().catch(() => ({}))) as { data?: Array<{ Owner?: { email?: string } }> }).data?.[0]?.Owner
-      : undefined
-    const emailOwner = (ownerActual?.email || "").toLowerCase()
-    if (emailOwner && !/vicky@|info@geovictoria/.test(emailOwner)) {
-      console.log(`[postpago] cotización ${quoteId} con dueño humano ${emailOwner} — venta NO autónoma, asignación intacta.`)
-      return { autonoma: false }
+    // solo los interinos (Vicky/Admin) se consideran "sin dueño". Con
+    // traspaso-sin-gestión NO aplica: ese dueño vino de la tómbola
+    // automática, no de gestión real — es justo lo que se está revirtiendo.
+    if (!traspasoSinGestion) {
+      const gOwner = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Owner`, { headers: H, cache: "no-store" })
+      const ownerActual = gOwner.ok
+        ? ((await gOwner.json().catch(() => ({}))) as { data?: Array<{ Owner?: { email?: string } }> }).data?.[0]?.Owner
+        : undefined
+      const emailOwner = (ownerActual?.email || "").toLowerCase()
+      if (emailOwner && !/vicky@|info@geovictoria/.test(emailOwner)) {
+        console.log(`[postpago] cotización ${quoteId} con dueño humano ${emailOwner} — venta NO autónoma, asignación intacta.`)
+        return { autonoma: false }
+      }
     }
     // La cotización, y de ella la cuenta y el contacto asociados ("todos los
     // registros", Lalo 04-ago). El lead convertido no se toca: Zoho no
@@ -152,22 +213,28 @@ async function asignarVentaAutonoma(
         body: JSON.stringify({ data: [{ id: filaQuote.Contacto_Asociado.id, Owner: { id: owner } }], ...skip }),
       }).catch(() => {})
     }
-    const fono = contact.replace(/\D/g, "")
-    const s = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
-    const dealId = s.ok && s.status !== 204
-      ? ((await s.json().catch(() => ({}))) as { data?: Array<{ Converted_Deal?: { id?: string } | null }> }).data?.find((l) => l.Converted_Deal?.id)?.Converted_Deal?.id
-      : undefined
+    const dealId = dealIdPre
     if (dealId) {
       await fetch(`${api}/crm/v3/Deals`, {
         method: "PUT",
         headers: H,
         cache: "no-store",
-        body: JSON.stringify({ data: [{ id: String(dealId), Owner: { id: owner } }], ...skip }),
+        body: JSON.stringify({ data: [{ id: String(dealId), Owner: { id: owner } }], trigger: ["blueprint"], ...skip }),
       }).catch(() => {})
     }
     const ejecutivo = await datosOwnerAutonoma(owner, H, api)
+    // Traspaso revertido por inactividad: la fila vic_ptv pasa a nombre del
+    // dueño autónomo — el chequeo 9h y cualquier flujo posterior hablan de
+    // quien de verdad quedó a cargo.
+    if (traspasoSinGestion && ptvActivo && url && key) {
+      await fetch(`${url}/rest/v1/vic_ptv?id=eq.${ptvActivo.id}`, {
+        method: "PATCH",
+        headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ vendedor_email: ejecutivo.email, vendedor_nombre: ejecutivo.nombre }),
+      }).catch(() => {})
+    }
     console.log(
-      `[postpago] venta 100% Vicky: cotización ${quoteId}, deal ${dealId || "-"}, cuenta y contacto asignados a ${ejecutivo.email}`,
+      `[postpago] venta ${traspasoSinGestion ? "autónoma por INACTIVIDAD del ejecutivo (traspaso revertido)" : "100% Vicky"}: cotización ${quoteId}, deal ${dealId || "-"}, cuenta y contacto asignados a ${ejecutivo.email}`,
     )
     return { autonoma: true, ejecutivo }
   } catch (e) {
