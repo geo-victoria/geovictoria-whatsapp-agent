@@ -365,6 +365,9 @@ type ItemCotizacion = {
   // corresponde a Región Metropolitana o regiones. La cotizadora lo persiste
   // y lo usa para decidir descuentos de instalación.
   zonaTarifa?: "RM" | "regiones"
+  /** Bonificación por línea (ej. envío arriendo 0,5 UF → $0 con −100%): el
+   * subtotal viaja en 0 y el PDF tacha el precio de lista. */
+  descuentoPct?: number
 }
 
 export type LinkCotizadoraResultado =
@@ -392,6 +395,11 @@ export type LinkCotizadoraResultado =
     }
   | { ok: false; error: string }
 
+/** Valor de REFERENCIA del envío en arriendo (lista comercial de Nacho:
+ * envío arriendo 0,5 UF) — se muestra TACHADO con −100% en la cotización;
+ * el cobro real sigue incluido en la tarifa de arriendo por zona (13-ago). */
+export const ENVIO_ARRIENDO_REFERENCIA_UF = 0.5
+
 // Consolida líneas idénticas (mismo tipo, id, nombre, modalidad, precio
 // unitario y zona) en una sola fila, sumando cantidad y subtotal. Evita que,
 // por ejemplo, 4 instalaciones idénticas (mismo punto) aparezcan como 4 filas
@@ -407,6 +415,7 @@ export function consolidarLineasIguales(items: ItemCotizacion[]): ItemCotizacion
       it.modalidad,
       it.precioUnitarioUF,
       it.zonaTarifa ?? "",
+      it.descuentoPct ?? 0,
     ].join("||")
     const existente = porClave.get(clave)
     if (existente) {
@@ -600,9 +609,29 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
           continue
         }
         const precioUF = obtenerPrecioServicio(servicio, zonaPunto, modalidadPunto)
-        // Servicio sin cobro para esta combinación (p. ej. envío arriendo RM = 0):
-        // no se agrega línea.
-        if (precioUF <= 0) continue
+        // ENVÍO DEL ARRIENDO VISIBLE Y BONIFICADO (Lalo 24-ago, reclamo de
+        // Grey/COT798): el despacho sigue incluido en la tarifa de arriendo
+        // por zona (13-ago, sin cobro extra), pero ahora la cotización lo
+        // MUESTRA como línea con el valor de referencia de la lista comercial
+        // (cotizadora de Nacho: envío arriendo 0,5 UF) tachado → $0 −100%,
+        // patrón de la Capacitación. Subtotal 0: no cambia ningún total.
+        if (precioUF <= 0) {
+          if (servicio.id === "envio_reloj" && modalidadPunto === "arriendo") {
+            items.push({
+              tipo: "servicio",
+              id: servicio.id,
+              nombre: `${servicio.nombre} (${punto.ubicacion})`,
+              modalidad: "Cobro único",
+              cantidad: 1,
+              precioUnitarioUF: ENVIO_ARRIENDO_REFERENCIA_UF,
+              subtotalUF: 0,
+              zonaTarifa: esRM ? "RM" : "regiones",
+              descuentoPct: 100,
+            })
+          }
+          // Otras combinaciones sin cobro: no se agrega línea.
+          continue
+        }
         items.push({
           tipo: "servicio",
           id: servicio.id,
