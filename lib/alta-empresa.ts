@@ -20,8 +20,36 @@
 const HOST = (process.env.VICKY_ALTA_API_HOST || "").trim().replace(/\/+$/, "")
 const API_KEY = (process.env.VICKY_ALTA_API_KEY || "").trim()
 
+// FALLBACK vic_kv (24-ago): Nicolás entregó host+key por Teams el 29-jul y
+// quedaron en vic_kv `gva_customer_api_host` / `gva_customer_api_key` vía
+// vic-admin-kv — así el alta puede encenderse/rotarse sin deploy ni tocar
+// Vercel. El env, si está, sigue mandando. Cache 10 min.
+let _kvCreds: { host: string; key: string; exp: number } | null = null
+async function credenciales(): Promise<{ host: string; key: string }> {
+  if (HOST && API_KEY) return { host: HOST, key: API_KEY }
+  if (_kvCreds && _kvCreds.exp > Date.now()) return _kvCreds
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const [h, k] = await Promise.all([
+      getKvValue("gva_customer_api_host").catch(() => null),
+      getKvValue("gva_customer_api_key").catch(() => null),
+    ])
+    _kvCreds = {
+      host: (HOST || String(h || "")).trim().replace(/\/+$/, ""),
+      key: (API_KEY || String(k || "")).trim(),
+      exp: Date.now() + 10 * 60_000,
+    }
+    return _kvCreds
+  } catch {
+    return { host: HOST, key: API_KEY }
+  }
+}
+
 export function altaApiConfigurada(): boolean {
-  return Boolean(HOST && API_KEY)
+  // Con envs es un sí inmediato; sin envs puede estar en vic_kv — se
+  // responde optimista y el fallo real (si no hay nada) lo atrapa `llamar`,
+  // cuyo error cae al alta manual de siempre.
+  return true
 }
 
 /** Identificador en el formato del servicio: solo dígitos y K, sin puntos ni guion. */
@@ -32,10 +60,12 @@ export function identificadorParaAlta(valor: string): string {
 const CODIGO_PAIS: Record<string, string> = { cl: "CL", co: "CO", mx: "MX" }
 
 async function llamar(path: string, body?: unknown): Promise<Response> {
-  return fetch(`${HOST}${path}`, {
+  const { host, key } = await credenciales()
+  if (!host || !key) throw new Error("API de alta sin host/key (ni env ni vic_kv)")
+  return fetch(`${host}${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
-      "X-Api-Key": API_KEY,
+      "X-Api-Key": key,
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),

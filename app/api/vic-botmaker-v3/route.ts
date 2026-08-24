@@ -544,6 +544,19 @@ async function processOneTurn(
 
     let reply = (result.reply || "").trim()
 
+    // Guardrail de largo del ONBOARDING (Lalo 24-ago): mismo espíritu de la
+    // vendedora ("mensajes cortos de WhatsApp") pero determinista — si el
+    // modelo se explaya confirmando fichas o reportando nóminas, el canal
+    // corta limpio en un borde de oración antes de enviar.
+    if (enOnboarding && reply) {
+      const { acortarParaWhatsApp } = await import("@/lib/onboarding/estilo")
+      const acortado = acortarParaWhatsApp(reply)
+      if (acortado !== reply) {
+        console.warn(`[v3-bg] onboarding: mensaje de ${reply.length} chars acortado a ${acortado.length} (tope estilo)`)
+        reply = acortado
+      }
+    }
+
     // 2.4b. Guardrail anti-link ALUCINADO de documentos (caso Cynthia, 21-jul):
     // el modelo "compartió" la certificación DT con un link de Google Drive
     // INVENTADO (drive.google.com/file/d/1Cbga… → "no se pudo abrir el

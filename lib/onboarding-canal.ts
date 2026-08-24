@@ -25,6 +25,7 @@ import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
 import {
   onboardingEnabled,
   faseEfectiva,
+  esFase,
   claveFase,
   claveBorrador,
   claveAltaSolicitada,
@@ -49,11 +50,37 @@ import {
 } from "./onboarding/tools"
 
 /**
+ * PILOTO POR CONTACTO (24-ago, "partimos probando directamente por
+ * WhatsApp"): con el flag global apagado, los contactos listados en vic_kv
+ * `onboarding_piloto` (teléfonos separados por coma) SÍ entran a la fase de
+ * onboarding. Los enrola vic-onboarding-invocar al invocarlos — así el
+ * piloto se maneja sin deploy y sin exponer a ningún cliente real.
+ */
+async function esContactoPiloto(contact: string): Promise<boolean> {
+  try {
+    const lista = (await getKvValue("onboarding_piloto")) || ""
+    const fono = contact.replace(/\D/g, "")
+    return lista
+      .split(",")
+      .map((s) => s.replace(/\D/g, ""))
+      .filter(Boolean)
+      .includes(fono)
+  } catch {
+    return false
+  }
+}
+
+/**
  * Fase del contacto para el gate del webhook. Con el flag apagado devuelve
- * "venta" SIN tocar el kv: cero latencia agregada al camino de venta.
+ * "venta" SIN tocar el kv (cero latencia al camino de venta) — salvo que el
+ * contacto esté en el piloto.
  */
 export async function faseDelContacto(contact: string): Promise<FaseVicky> {
-  if (!onboardingEnabled()) return "venta"
+  if (!onboardingEnabled()) {
+    if (!(await esContactoPiloto(contact))) return "venta"
+    const crudoPiloto = await getKvValue(claveFase(contact)).catch(() => null)
+    return esFase(crudoPiloto) ? crudoPiloto : "venta"
+  }
   const crudo = await getKvValue(claveFase(contact)).catch(() => null)
   return faseEfectiva(crudo)
 }
