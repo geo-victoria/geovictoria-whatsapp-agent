@@ -40,3 +40,37 @@ export async function GET(req: Request): Promise<Response> {
     headers: { "Content-Type": "application/json; charset=utf-8", "x-upstream-status": String(r.status) },
   })
 }
+
+// POST acotado a una ALLOWLIST de endpoints admin del cotizador (24-ago,
+// caso Vista Kennedy: la NDV falló en emisión Y aceptación porque el deal no
+// tenía cuenta; reparada la cadena, recrearla exige el POST autenticado de
+// crear-ndv-desde-cot y el secreto no sale de Vercel). Mismo auth que el GET.
+const POST_PERMITIDOS = new Set([
+  "/api/creator/crear-ndv-desde-cot",
+  "/api/payments/reconcile-pending",
+])
+
+export async function POST(req: Request): Promise<Response> {
+  const sp = new URL(req.url).searchParams
+  const key = (sp.get("key") || "").trim()
+  const kv = await getFollowupCronSecret().catch(() => "")
+  if (!key || (key !== CRON_SECRET && key !== kv)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  }
+  const ruta = (sp.get("ruta") || "").trim()
+  if (!POST_PERMITIDOS.has(ruta)) {
+    return NextResponse.json({ ok: false, error: "ruta no permitida para POST" }, { status: 400 })
+  }
+  const body = await req.text().catch(() => "")
+  const r = await fetch(`${COTIZADOR}${ruta}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-vicky-secret": SECRET, Accept: "application/json" },
+    body: body || "{}",
+    cache: "no-store",
+  })
+  const cuerpo = await r.text().catch(() => "")
+  return new NextResponse(cuerpo, {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8", "x-upstream-status": String(r.status) },
+  })
+}
