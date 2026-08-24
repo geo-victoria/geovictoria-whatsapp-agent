@@ -288,9 +288,45 @@ export async function cerrarYTraspasarPostPago(
       const pointers = await getQuotePointers(contact)
       const pagada = pointers.find((p) => p.quoteId === quoteId) || pointers[0]
       const previo = parsearBorrador(await getKvValue(claveBorrador(contact)).catch(() => null))
+      // ADMIN CANDIDATO desde la venta (Lalo 24-ago, "que solo lo confirme"):
+      // el contacto de la cotización trae nombre/apellido/correo, y el pago
+      // con tarjeta trae el RUT del titular (Pagador_RUT) como SUGERENCIA —
+      // el prompt lo confirma en vez de asumirlo (la tarjeta puede ser de
+      // otra persona), y pregunta primero si el admin será él/ella u otro.
+      let adminSemilla: { nombre?: string; apellido?: string; email?: string; identificador?: string } = {}
+      try {
+        const { getZohoAccessToken } = await import("./zoho-token")
+        const token = await getZohoAccessToken()
+        const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+        const Hh = { Authorization: `Zoho-oauthtoken ${token}` }
+        const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+        const rq = await fetch(
+          `${api}/crm/v3/${quoteModule}/${quoteId}?fields=Contacto_Asociado,Email_Contacto,Pagador_RUT,Pagador_Nombre`,
+          { headers: Hh, cache: "no-store" },
+        )
+        const fila = rq.ok
+          ? ((await rq.json().catch(() => ({}))) as {
+              data?: Array<{ Contacto_Asociado?: { id?: string } | null; Email_Contacto?: string; Pagador_RUT?: string; Pagador_Nombre?: string }>
+            }).data?.[0]
+          : undefined
+        adminSemilla.email = (fila?.Email_Contacto || "").trim() || undefined
+        adminSemilla.identificador = (fila?.Pagador_RUT || "").trim() || undefined
+        const contactoId = fila?.Contacto_Asociado?.id
+        if (contactoId) {
+          const rc = await fetch(`${api}/crm/v3/Contacts/${contactoId}?fields=First_Name,Last_Name,Email`, { headers: Hh, cache: "no-store" })
+          const c = rc.ok
+            ? ((await rc.json().catch(() => ({}))) as { data?: Array<{ First_Name?: string; Last_Name?: string; Email?: string }> }).data?.[0]
+            : undefined
+          if (c) {
+            adminSemilla.nombre = (c.First_Name || "").trim() || undefined
+            adminSemilla.apellido = (c.Last_Name || "").trim() || undefined
+            adminSemilla.email = adminSemilla.email || (c.Email || "").trim() || undefined
+          }
+        }
+      } catch { /* semilla parcial: empresa sola sigue valiendo */ }
       borradorSembrado = sembrarBorrador(
         previo,
-        { empresa: { nombre: pagada?.empresa, identificador: pagada?.rut } },
+        { empresa: { nombre: pagada?.empresa, identificador: pagada?.rut }, admin: adminSemilla },
         "cl",
       )
       await setKvValue(claveBorrador(contact), JSON.stringify(borradorSembrado))

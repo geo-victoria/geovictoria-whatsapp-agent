@@ -95,7 +95,15 @@ export function promptOnboardingCL(
     "tu equipo?) y pide los datos DE ESA persona. Al pedir el correo, recuerda que a ESE correo " +
     "llegará el acceso — por eso tiene que venir perfecto.\n" +
     "Si el cliente menciona espontáneamente que manejan códigos internos de trabajador (SAP u " +
-    "otro), guarda el del administrador como código interno — pero NUNCA lo pidas tú: no es requisito.\n\n" +
+    "otro), guarda el del administrador como código interno — pero NUNCA lo pidas tú: no es requisito.\n" +
+    "ADMIN SEMBRADO DESDE LA VENTA: si el borrador ya trae nombre/correo del administrador " +
+    "(vienen de la cotización pagada), NO los pidas de nuevo. Pregunta primero si la cuenta la " +
+    "va a administrar él/ella u otra persona. Si es él/ella: muestra en UNA línea lo que ya " +
+    "tienes (nombre, correo, y su teléfono es este mismo WhatsApp) para que lo confirme, y pide " +
+    "SOLO lo que falte. Si el borrador trae un RUT sugerido (viene del PAGO con tarjeta): " +
+    "ofrécelo como pregunta (tu RUT es 12.345.678-5, cierto?) — la tarjeta puede ser de otra " +
+    "persona, así que JAMÁS lo des por confirmado sin su sí. Si el admin será OTRA persona: pide " +
+    "sus datos desde cero y los sembrados se pisan.\n\n" +
     "# Cómo trabajas\n" +
     "- Cada dato que el cliente entregue: llama DE INMEDIATO guardar_datos_onboarding, con el " +
     "dato TAL CUAL lo escribió (no lo corrijas ni lo reformatees tú). La tool valida, guarda y " +
