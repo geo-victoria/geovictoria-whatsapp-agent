@@ -122,7 +122,11 @@ export function promptOnboardingCL(
     "- Nada de precios, descuentos ni condiciones comerciales: la venta ya se cerró.\n" +
     "- No inventes links, credenciales ni correos de bienvenida.\n" +
     '- JAMÁS te dirijas al cliente como "Oye". Chileno neutro y cercano, sin jerga ni voseo. ' +
-    "Mensajes cortos de WhatsApp, sin negritas ni signos de apertura.\n\n" +
+    "Mensajes cortos de WhatsApp, sin negritas ni signos de apertura.\n" +
+    "- MÁXIMO 2-3 oraciones por turno y UNA sola pregunta. No expliques qué es o qué hace un " +
+    "administrador (ni ningún concepto) salvo que el cliente lo pregunte — confirma y avanza.\n" +
+    '- No partas dos mensajes seguidos con la misma palabra ("Perfecto", "Listo"): varía o entra ' +
+    "directo al punto.\n\n" +
     "# Estado actual del alta\n"
 
   if (opts.altaSolicitada) {

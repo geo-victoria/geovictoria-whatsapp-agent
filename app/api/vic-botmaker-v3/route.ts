@@ -1358,7 +1358,14 @@ async function processOneTurn(
           replyFinal = cinturon.reemplazo
         }
       }
-      const partes = partirEnBurbujas(replyFinal)
+      let partes = partirEnBurbujas(replyFinal)
+      // ONBOARDING: máximo 2 burbujas por turno (Lalo 24-ago, piloto: "5
+      // mensajes no leídos" — la regla de la vendedora de una burbuja por
+      // párrafo, heredada acá, generaba ráfagas). La primera burbuja queda
+      // sola (el saludo/confirmación corta) y el resto se compacta en una.
+      if (enOnboarding && partes.length > 2) {
+        partes = [partes[0], partes.slice(1).join("\n\n")]
+      }
       // ¿Este turno ENTREGÓ algo crítico (cotización)? Esas respuestas salen
       // siempre: descartarlas dejaría al cliente sin su link.
       const turnoEntregaCotizacion = (result.toolCalls || []).some(
