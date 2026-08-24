@@ -68,18 +68,30 @@ async function authorized(req: Request): Promise<boolean> {
 }
 
 export async function GET(req: Request): Promise<Response> {
-  if (!(await authorized(req))) {
-    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
-  }
   const url = new URL(req.url)
   const session = (url.searchParams.get("session") || "").trim().replace(/[^a-zA-Z0-9_-]/g, "")
+  const esAdmin = await authorized(req)
+  // Link por VENDEDOR (Lalo 24-ago, "regenerar links con QR para avisarles
+  // que lo vuelvan a escanear"): token propio por sesión en vic_kv
+  // `espejo_link_<session>` (?t=) — abre SOLO la página del QR de ESA sesión,
+  // jamás el visor de chats ni otra sesión. Patrón del token de /inbound.
+  let porToken = false
+  if (!esAdmin && session) {
+    const t = (url.searchParams.get("t") || "").trim()
+    const esperado = (await kvGet(`espejo_link_${session}`)).trim()
+    porToken = Boolean(t) && Boolean(esperado) && t === esperado
+  }
+  if (!esAdmin && !porToken) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  }
   if (!session) {
     return NextResponse.json({ ok: false, error: "Falta ?session=<WA_SESSION_ID>" }, { status: 400 })
   }
 
   // Visor en vivo: ?ver=chats lista las conversaciones; ?chat=<jid> abre una.
+  // SOLO admin: el token de vendedor no llega acá.
   const chatJid = (url.searchParams.get("chat") || "").trim()
-  if (chatJid || url.searchParams.get("ver") === "chats") {
+  if (esAdmin && (chatJid || url.searchParams.get("ver") === "chats")) {
     const key = (url.searchParams.get("key") || "").trim()
     return chatJid ? verChat(session, chatJid, key) : verChats(session, key)
   }
