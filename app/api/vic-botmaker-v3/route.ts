@@ -617,8 +617,15 @@ async function processOneTurn(
     // Item B: reenviar el link de aceptación de la cotización YA existente (el
     // del puntero durable, inyectado en el contexto) es legítimo, no una
     // alucinación: lo dejamos pasar aunque no haya tool de cotización este turno.
+    // También el LINK CORTO /q/<quoteId>-<firma> (formato de entrega desde el
+    // 17-ago): el guardrail solo conocía la URL larga con token, así que
+    // re-mencionar el corto de una cotización vigente disparaba un falso
+    // "tuve un problema generando tu cotización" DESPUÉS de una entrega
+    // exitosa (caso Javiera/Bersa 24-ago, dos cotizaciones recién emitidas).
     const reenviaLinkConocido = quotePointers.some(
-      (qp) => !!qp.acceptanceUrl && reply.includes(qp.acceptanceUrl),
+      (qp) =>
+        (!!qp.acceptanceUrl && reply.includes(qp.acceptanceUrl)) ||
+        (!!qp.quoteId && reply.includes(`/q/${qp.quoteId}`)),
     )
     // Item C (29-jul, caso +56958112916): una URL del cotizador que salió de
     // una TOOL de este turno no es alucinación — la produjo nuestro backend.
