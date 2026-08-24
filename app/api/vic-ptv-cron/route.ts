@@ -1976,6 +1976,11 @@ export async function GET(req: Request) {
   })
   if (rescatesForm) console.log(`[ptv-cron] rescate form: ${rescatesForm} leads entregados`)
 
+  // Vigía del espejo (Lalo 24-ago): sin capturas en 3h hábiles → alerta.
+  await vigilarEspejo(ahora).catch((e) => {
+    console.warn("[ptv-cron] vigía espejo falló:", e instanceof Error ? e.message : e)
+  })
+
   // Enriquecimiento de leads placeholder desde el chat (Lalo 13-ago): los
   // "Prospecto WhatsApp" se completan con lo que el cliente ya dijo.
   const enriquecidos = await enriquecerLeadsDeChat().catch((e) => {
@@ -2474,6 +2479,40 @@ async function normalizarFonosForm(): Promise<number> {
     }
   }
   return corregidos
+}
+
+/**
+ * VIGÍA DEL ESPEJO (Lalo 24-ago, "dejemos arreglado los whatsapp espejo"):
+ * la caída del worker del 20-ago estuvo 4 días muda y se descubrió por
+ * deducción. Ahora: si la tabla de mensajes espejados no recibe NADA en más
+ * de 3 horas dentro de horario hábil CL (con 5+ sesiones conectadas, algo
+ * siempre entra), se avisa al equipo interno UNA vez por episodio (candado
+ * kv de 12h). Best-effort.
+ */
+async function vigilarEspejo(ahora: Date): Promise<void> {
+  const feriados = await feriadosDePais("cl").catch(() => new Set<string>())
+  const { esHorarioHabil } = await import("@/lib/ptv")
+  if (!esHorarioHabil("cl", ahora, feriados)) return
+  const filas = await supa<{ created_at?: string }>(
+    `vic_wa_espejo_mensajes?select=created_at&order=created_at.desc&limit=1`,
+  ).catch(() => [])
+  const ultimo = Date.parse(String(filas[0]?.created_at || ""))
+  if (!Number.isFinite(ultimo)) return
+  const horasMudo = (ahora.getTime() - ultimo) / 3600e3
+  const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+  if (horasMudo < 3) {
+    // Episodio cerrado: se re-arma la alerta para la próxima caída.
+    await setKvValue("alerta_espejo_caido", "").catch(() => {})
+    return
+  }
+  // Una alerta cada 12h como máximo por episodio.
+  const alertaPrevia = Date.parse(String((await getKvValue("alerta_espejo_caido").catch(() => "")) || ""))
+  if (Number.isFinite(alertaPrevia) && ahora.getTime() - alertaPrevia < 12 * 3600e3) return
+  await setKvValue("alerta_espejo_caido", new Date(ahora).toISOString()).catch(() => {})
+  await avisarEquipoInterno(
+    `⚠️ ESPEJO WHATSAPP POSIBLEMENTE CAÍDO: la última captura de mensajes de los celulares de los ejecutivos fue hace ${horasMudo.toFixed(1)} horas (en horario hábil eso no es normal). Revisar el worker en Railway (restart/redeploy) y el estado de las sesiones en vic-admin-wa-espejo.`,
+  ).catch(() => {})
+  console.warn(`[vigia-espejo] sin mensajes espejados hace ${horasMudo.toFixed(1)}h — alerta enviada`)
 }
 
 async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
