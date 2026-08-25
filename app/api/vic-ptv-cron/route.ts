@@ -1030,7 +1030,7 @@ async function asignarEnZoho(
     const fono = contact.replace(/\D/g, "")
     const res = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
     const lead = res.ok && res.status !== 204
-      ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null; Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]
+      ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null; Owner?: { id?: string; name?: string; email?: string }; Lead_Status?: string; N_de_empleados?: number | string | null }> }).data?.[0]
       : undefined
     if (!lead?.id) {
       // Sin lead en Zoho no hay registro que asignar: se CREA (regla 1 del
@@ -1221,8 +1221,23 @@ async function asignarEnZoho(
           via: "dueno_lead_sdr",
         }
       }
-      const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
-      const r = await reasignarLeadCalificacionCL(lead.id, { calificado }).catch(() => null)
+      const { reasignarLeadCalificacionCL, updateZohoLeadStatus } = await import("@/lib/zoho-leads")
+      // CALIFICADO SIN PRECIO (Lalo 25-ago, caso Lisandra): "si se logra
+      // calificar no debería volver al proceso de calificación de las SDR —
+      // entregarlo como lead a telemarketing con toda la información". El flag
+      // `calificado` del reloj solo mira PRECIO mostrado; si la conversación
+      // ya dejó la dotación (lead en "4. Calificado" o N° de empleados
+      // llenado), la calificación está HECHA → tómbola TLMK de ejecutivos.
+      const calificadoPorLead =
+        String(lead.Lead_Status || "").trim().startsWith("4.") ||
+        Number(lead.N_de_empleados || 0) > 0
+      const entregaCalificada = calificado || calificadoPorLead
+      if (calificado && !calificadoPorLead) {
+        // Vio precio pero el status quedó atrás: se sube para que el
+        // ejecutivo reciba el lead ya marcado calificado.
+        await updateZohoLeadStatus(lead.id, "4. Calificado").catch(() => {})
+      }
+      const r = await reasignarLeadCalificacionCL(lead.id, { calificado: entregaCalificada }).catch(() => null)
       if (r?.success && r.ownerEmail && r.ownerId) {
         await notificarTraspasoLeadEmail(lead.id, r.ownerEmail, fono, H, api)
         const tel = await telefonoDeUsuario(r.ownerId, H, api)
