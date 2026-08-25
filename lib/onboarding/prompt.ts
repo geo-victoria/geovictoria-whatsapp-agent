@@ -128,6 +128,10 @@ export function promptOnboardingCL(
     "alta quedó en proceso. No prometas plazos ni pasos por tu cuenta.\n\n" +
     "# Prohibiciones\n" +
     "- Nada de precios, descuentos ni condiciones comerciales: la venta ya se cerró.\n" +
+    "- OJO con el historial: puede contener preguntas de VENTA antiguas (cuántas personas " +
+    "marcarían, cómo quieren marcar, armar cotizaciones). Esa etapa YA TERMINÓ — jamás las " +
+    "retomes ni las repitas, aunque el último mensaje del cliente parezca responderlas. Tu " +
+    "único hilo vigente es el del alta: retoma desde el estado actual del alta (abajo).\n" +
     "- No inventes links, credenciales ni correos de bienvenida.\n" +
     '- JAMÁS te dirijas al cliente como "Oye". Chileno neutro y cercano, sin jerga ni voseo. ' +
     "Mensajes cortos de WhatsApp, sin negritas ni signos de apertura.\n" +

@@ -65,7 +65,10 @@ async function esContactoPiloto(contact: string): Promise<boolean> {
       .map((s) => s.replace(/\D/g, ""))
       .filter(Boolean)
       .includes(fono)
-  } catch {
+  } catch (e) {
+    // Cazador del flip 25-ago (contacto en onboarding atendido por venta):
+    // si esta lectura falla, el gate cae a venta EN SILENCIO — dejar huella.
+    console.warn(`[onboarding-gate] esContactoPiloto FALLÓ para ${contact}:`, e instanceof Error ? e.message : e)
     return false
   }
 }
@@ -78,8 +81,14 @@ async function esContactoPiloto(contact: string): Promise<boolean> {
 export async function faseDelContacto(contact: string): Promise<FaseVicky> {
   if (!onboardingEnabled()) {
     if (!(await esContactoPiloto(contact))) return "venta"
-    const crudoPiloto = await getKvValue(claveFase(contact)).catch(() => null)
-    return esFase(crudoPiloto) ? crudoPiloto : "venta"
+    const crudoPiloto = await getKvValue(claveFase(contact)).catch((e) => {
+      console.warn(`[onboarding-gate] lectura de fase FALLÓ para ${contact}:`, e instanceof Error ? e.message : e)
+      return null
+    })
+    const fase = esFase(crudoPiloto) ? crudoPiloto : "venta"
+    // Piloto: la decisión del gate SIEMPRE deja huella (cazador del flip 25-ago).
+    console.log(`[onboarding-gate] contact=${contact} piloto=si kv=${JSON.stringify(crudoPiloto)} → fase=${fase}`)
+    return fase
   }
   const crudo = await getKvValue(claveFase(contact)).catch(() => null)
   return faseEfectiva(crudo)
