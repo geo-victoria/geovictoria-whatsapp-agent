@@ -451,16 +451,25 @@ export async function armarOnboarding(contact: string): Promise<{
             // persona — hablar del admin por nombre y correo sirve en ambos
             // casos. La contraseña temporal viaja SOLO por el correo de la
             // plataforma: Vicky nunca la conoce ni la menciona.
-            // Pasos de ingreso = pieza única compartida con el correo de
-            // instrucciones (Lalo 25-ago, "versión WhatsApp del instructivo").
-            const { pasosIngresoWhatsApp } = await import("./onboarding/instructivo")
+            // DOS MENSAJES SEPARADOS (Lalo 25-ago, prueba de Rodrigo): el del
+            // acceso corto y sin instructivo (los pasos viajan por correo y el
+            // prompt los re-entrega si preguntan cómo entrar), y el
+            // ofrecimiento de nómina aparte. El primero se EMPUJA desde acá
+            // (llega antes) y el segundo lo entrega Vicky como su respuesta.
+            const msgAcceso =
+              `El acceso quedó a nombre de ${b.admin.nombre} ${b.admin.apellido}. ` +
+              `Le enviamos un correo a ${alta.workEmail} con su contraseña temporal.`
+            const msgNomina =
+              "Y si quieres, aquí mismo dejamos cargados a tus trabajadores para que puedan marcar. ¿Lo avanzamos?"
+            const { sendBotmakerMessage } = await import("./botmaker-push-v3")
+            const { appendAssistantV3 } = await import("./supabase-persistence-v3")
+            const empujado = await sendBotmakerMessage(contact, msgAcceso).catch(() => false)
+            if (empujado) await appendAssistantV3(contact, msgAcceso, "cl").catch(() => {})
             return {
               ok: true,
-              mensajeParaProspecto:
-                `¡${b.empresa.nombre} ya tiene su cuenta creada en GeoVictoria! 🎉\n\n` +
-                `El acceso quedó a nombre de ${b.admin.nombre} ${b.admin.apellido}: la plataforma le envió un correo a ${alta.workEmail} con su contraseña temporal.\n\n` +
-                `Para partir:\n${pasosIngresoWhatsApp({ loginUrl: LOGIN_URL || undefined })}\n\n` +
-                `Y si quieres, aquí mismo dejamos cargados a tus trabajadores para que puedan marcar — me mandas la nómina en excel, foto o texto y yo la subo. ¿La cargamos?`,
+              // Si el push falló (ventana/red), ambos van juntos: jamás se
+              // pierde el aviso del acceso.
+              mensajeParaProspecto: empujado ? msgNomina : `${msgAcceso}\n\n${msgNomina}`,
             }
           }
           // Creación falló → cae al alta manual (jamás perder un alta).
