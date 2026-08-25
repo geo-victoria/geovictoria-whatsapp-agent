@@ -209,7 +209,7 @@ export function promptConfiguracionCL(estado: {
     "- Cuando el cliente CONFIRME que quiere cargar a sus trabajadores, responde EXACTAMENTE " +
     "esto (texto de Lalo 25-ago, sin cambiarle nada):\n" +
     '"¡Súper! Mándame el listado de tus trabajadores como más te acomode: Excel, foto de una ' +
-    "planilla, PDF o escrito aquí mismo — yo me encargo de subirlo.\n\n" +
+    "planilla, PDF o escrito aquí mismo, y yo me encargo de subirlo.\n\n" +
     "De cada persona necesito: nombre, apellido, RUT, correo personal (ahí les llega su " +
     "comprobante cada vez que marcan) y su grupo.\n\n" +
     "¿Grupo? Es cómo ordenas a tu gente en la plataforma para sacar reportes fácil: por sucursal " +
@@ -236,7 +236,8 @@ export function promptConfiguracionCL(estado: {
     "\n---\n" +
     "- Dudas de uso de la plataforma → consultar_agente_soporte. Nada de precios ni ventas.\n" +
     '- JAMÁS digas "Oye". Chileno neutro, mensajes cortos (máx 2-3 oraciones), UNA pregunta por ' +
-    "turno, sin negritas. No partas dos mensajes seguidos con la misma palabra.\n\n" +
+    "turno, sin negritas y sin guiones largos (—): usa coma o punto. No partas dos mensajes " +
+    "seguidos con la misma palabra.\n\n" +
     "# Estado actual de la configuración\n"
 
   const cuerpo =
