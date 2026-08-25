@@ -19,7 +19,12 @@ import { identificadorParaAlta } from "../lib/alta-empresa.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const ADAPTADOR = readFileSync(join(RAIZ, "lib/alta-empresa.ts"), "utf8")
-const CANAL = readFileSync(join(RAIZ, "lib/onboarding-canal.ts"), "utf8")
+// El instructivo de ingreso (pasos + Promociones/Spam) vive desde el 25-ago
+// en lib/onboarding/instructivo.ts (pieza única chat+correo) — el canal lo
+// compone en runtime, así que las aserciones de copy miran AMBOS archivos.
+const CANAL =
+  readFileSync(join(RAIZ, "lib/onboarding-canal.ts"), "utf8") +
+  readFileSync(join(RAIZ, "lib/onboarding/instructivo.ts"), "utf8")
 
 describe("identificadores en el formato del servicio", () => {
   test("sin puntos ni guion, K mayúscula", () => {
@@ -102,9 +107,10 @@ describe("el canal del onboarding usa el adaptador con candado", () => {
 
   test("la confirmación habla del ADMIN en tercera persona (comprador ≠ admin)", () => {
     // Quien chatea puede ser el admin o el comprador que nombró a otro: el
-    // copy nombra al admin y su correo, y sirve para ambos casos.
+    // copy nombra al admin y su correo, y sirve para ambos casos (el
+    // instructivo habla de "el correo del administrador", no de "tu correo").
     assert.match(CANAL, /El acceso quedó a nombre de \$\{b\.admin\.nombre\} \$\{b\.admin\.apellido\}/)
-    assert.match(CANAL, /Si el administrador es otra persona/)
+    assert.match(CANAL, /el correo del administrador/)
     // La contraseña temporal viaja SOLO por el correo de la plataforma.
     assert.match(CANAL, /Vicky nunca la conoce/)
   })
