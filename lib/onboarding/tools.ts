@@ -79,7 +79,9 @@ export const TOOL_GUARDAR_NOMINA = {
     "trabajador con columnas separadas por | en este orden: RUT|Correo personal|Nombres|" +
     "Apellidos|Grupo|Tel1|Tel2|Tel3 (los teléfonos pueden ir vacíos). La tool valida fila por " +
     "fila (el correo PERSONAL es obligatorio) y devuelve qué filas quedaron cojas para pedir " +
-    "SOLO lo que falta. Llamadas sucesivas AGREGAN; usa reemplazar=true para partir de cero.",
+    "SOLO lo que falta. Las llamadas FUSIONAN por RUT: un trabajador repetido se actualiza, no " +
+    "se duplica, y lo ya completado no se pierde. reemplazar=true SOLO si el cliente pide " +
+    "explícitamente botar la nómina y partir de cero — jamás porque re-envió un archivo.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -88,7 +90,9 @@ export const TOOL_GUARDAR_NOMINA = {
       ),
       reemplazar: {
         type: "boolean" as const,
-        description: "true = descarta la nómina guardada y parte de nuevo con estas filas.",
+        description:
+          "true = descarta TODA la nómina guardada. Solo ante una orden explícita del cliente de " +
+          "partir de cero; un archivo re-enviado o corregido NUNCA es motivo (la fusión por RUT lo resuelve).",
       },
     },
     required: ["filas"],

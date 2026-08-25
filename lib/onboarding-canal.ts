@@ -153,7 +153,33 @@ export async function armarOnboarding(contact: string): Promise<{
       const nuevas = parsearNominaPegada(String(inp.filas || ""))
       if (!nuevas.length) return { ok: false, error: "No llegó ninguna fila legible." }
       const cfg = await cargarConfig()
-      cfg.trabajadores = inp.reemplazar ? nuevas : [...cfg.trabajadores, ...nuevas]
+      if (inp.reemplazar) {
+        cfg.trabajadores = nuevas
+      } else {
+        // UPSERT por RUT (caso 25-ago: el mismo trabajador puede venir en la
+        // foto Y en el excel — no se duplica; y un dato ya completado por
+        // chat no se pierde porque la planilla re-enviada lo traiga vacío).
+        const compacto = (v: string | undefined) => String(v || "").replace(/[^0-9kK]/g, "").toUpperCase()
+        for (const n of nuevas) {
+          const rut = compacto(n.rut)
+          const idx = rut ? cfg.trabajadores.findIndex((t) => compacto(t.rut) === rut) : -1
+          if (idx >= 0) {
+            const prev = cfg.trabajadores[idx]
+            cfg.trabajadores[idx] = {
+              rut: n.rut || prev.rut,
+              correo: n.correo || prev.correo,
+              nombres: n.nombres || prev.nombres,
+              apellidos: n.apellidos || prev.apellidos,
+              grupo: n.grupo || prev.grupo,
+              telefono1: n.telefono1 || prev.telefono1,
+              telefono2: n.telefono2 || prev.telefono2,
+              telefono3: n.telefono3 || prev.telefono3,
+            }
+          } else {
+            cfg.trabajadores.push(n)
+          }
+        }
+      }
       await guardarConfig(cfg)
       return {
         ok: true,
