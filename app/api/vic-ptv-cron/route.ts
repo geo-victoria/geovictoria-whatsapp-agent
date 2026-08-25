@@ -32,7 +32,7 @@ import {
   sumarHorasHabiles,
 } from "@/lib/ptv"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { contactosAtendidosPorVendedor, pagoRegistradoReciente } from "@/lib/loop-v2"
+import { contactosAtendidosPorVendedor, pagoRegistradoReciente, enFaseOnboarding } from "@/lib/loop-v2"
 import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
@@ -1722,6 +1722,8 @@ export async function GET(req: Request) {
     // dueña del deal + presentación al prospecto) porque su cotización era
     // del canal EJECUTIVO y la conversación con Vicky nació recién al pagar.
     if (await pagoRegistradoReciente(c.contact)) continue
+    // Fase ONBOARDING (25-ago): cliente creando su cuenta — nada que traspasar.
+    if (await enFaseOnboarding(c.contact)) continue
     // v2, etapas con cotización de por medio: si la vigente ya está ACEPTADA
     // en Zoho, no hay demora que castigar — el cliente está en el pago.
     if (usaV2 && decision.motivo !== "etapa_sin_preform") {
@@ -2702,6 +2704,8 @@ async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; rec
       // de una clienta pagada 20 min después del traspaso fantasma y el toque
       // t1 le pidió la dotación desde cero. Cliente pagado no se reabre.
       if (await pagoRegistradoReciente(l.contact)) continue
+      // Fase ONBOARDING (25-ago): el alta en curso jamás se reabre como venta.
+      if (await enFaseOnboarding(l.contact)) continue
       // Escalonado: 20 min + 7 min por loop reabierto en este tick.
       const proximoToque = new Date(ahoraMs + 20 * 60_000 + reabiertos * 7 * 60_000).toISOString()
       await supa(`vic_loop?contact=eq.${encodeURIComponent(l.contact)}`, {

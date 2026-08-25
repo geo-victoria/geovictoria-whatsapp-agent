@@ -390,10 +390,29 @@ export async function pagoRegistradoReciente(contact: string): Promise<boolean> 
   }
 }
 
+/** Contacto en fase ONBOARDING (Lalo 25-ago, caso del toque comercial que se
+ * cruzó con el alta de cuenta): un cliente creando su cuenta con Vicky
+ * Onboarding NO es un prospecto — la maquinaria de VENTA (toques del loop,
+ * relojes de traspaso) no lo toca. La fase vive en vic_kv fase_vicky_<fono>
+ * (lib/onboarding/fase) y la administra el canal de onboarding. */
+export async function enFaseOnboarding(contact: string): Promise<boolean> {
+  const limpio = (contact || "").replace(/\D/g, "")
+  if (!limpio || !SUPABASE_URL || !SUPABASE_KEY) return false
+  try {
+    const res = await supa(`vic_kv?key=eq.${encodeURIComponent(`fase_vicky_${limpio}`)}&select=value&limit=1`)
+    const rows = res.ok ? (((await res.json().catch(() => [])) as Array<{ value?: string }>) || []) : []
+    return String(rows[0]?.value || "").trim() === "onboarding"
+  } catch {
+    return false
+  }
+}
+
 export async function resetLoop(contact: string, mensaje?: string): Promise<void> {
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
   // Cliente con pago registrado: su mensaje post-venta no re-arma la cadencia.
   if (await pagoRegistradoReciente(contact)) return
+  // Cliente en pleno alta de cuenta: sus mensajes son del onboarding, no de venta.
+  if (await enFaseOnboarding(contact)) return
   const res = await supa(
     `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado&limit=1`,
   )
@@ -434,6 +453,8 @@ export async function enrolarEnLoop(contact: string, country: string): Promise<v
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
   // Cliente con pago registrado (comprobante casado): jamás se re-enrola.
   if (await pagoRegistradoReciente(contact)) return
+  // Cliente en fase onboarding: la venta ya se cerró, cero cadencia comercial.
+  if (await enFaseOnboarding(contact)) return
   const res = await supa(
     `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,estado&limit=1`,
   )

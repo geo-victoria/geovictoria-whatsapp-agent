@@ -666,6 +666,25 @@ export async function GET(req: Request): Promise<Response> {
     () => new Set<string>(),
   )
 
+  // Contactos en fase ONBOARDING (Lalo 25-ago): cliente creando su cuenta con
+  // Vicky Onboarding — la venta ya cerró, el loop comercial muere. Una sola
+  // query batch sobre vic_kv (fase_vicky_<fono> = "onboarding").
+  const enOnboarding = new Set<string>()
+  try {
+    const fasesIn = rows.map((r) => `"fase_vicky_${r.contact}"`).join(",")
+    const fasesRes = await supa(`vic_kv?key=in.(${fasesIn})&select=key,value`)
+    for (const f of (fasesRes.ok ? await fasesRes.json().catch(() => []) : []) as Array<{
+      key?: string
+      value?: string
+    }>) {
+      if (String(f.value || "").trim() === "onboarding") {
+        enOnboarding.add(String(f.key || "").replace(/^fase_vicky_/, ""))
+      }
+    }
+  } catch {
+    /* best-effort: sin la señal, el toque de un onboarding se atrapa al tick siguiente */
+  }
+
   // Mapa RAW de traspasos ACTIVOS (contact → traspasado_at). Distinto del set
   // de arriba: aquel es "traspasado Y atendido" (cierra el loop); este es
   // "traspasado a secas", y lo necesita el anti-empalme de abajo — un
@@ -699,6 +718,15 @@ export async function GET(req: Request): Promise<Response> {
       await patchLoop(r.contact, { estado: "cerrado", motivo_cierre: "ptv_traspasado" })
       cerrados++
       detalle.push({ contact: r.contact, accion: "cerrado", motivo: "ptv_traspasado" })
+      continue
+    }
+
+    // (a-0b) Fase ONBOARDING (Lalo 25-ago): el cliente está creando su cuenta
+    // con Vicky Onboarding — el flujo comercial no se le cruza nunca más.
+    if (enOnboarding.has(r.contact)) {
+      await patchLoop(r.contact, { estado: "cerrado", motivo_cierre: "onboarding" })
+      cerrados++
+      detalle.push({ contact: r.contact, accion: "cerrado", motivo: "onboarding" })
       continue
     }
 
