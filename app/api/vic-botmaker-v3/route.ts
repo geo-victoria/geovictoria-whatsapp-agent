@@ -1835,7 +1835,14 @@ export async function POST(request: Request): Promise<NextResponse> {
         const bloque = esArchivoAdjunto || (!imageUrl && fileUrl)
           ? `[El cliente envió un DOCUMENTO (PDF) por WhatsApp. Contenido del documento]: ${descripcion}`
           : `[El cliente envió una imagen por WhatsApp. Contenido de la imagen]: ${descripcion}`
-        message = caption ? `${caption}\n\n${bloque}` : bloque
+        // ONBOARDING (25-ago): la regla del system prompt no basta contra la
+        // inercia del historial ("ya los cargué") — la directiva viaja EN el
+        // mensaje del adjunto: si trae trabajadores, la tool corre SIEMPRE
+        // (el upsert por RUT hace inofensivo repetir).
+        const directivaNomina = (await faseDelContacto(contact).catch(() => "venta")) === "onboarding"
+          ? "\n\n[DIRECTIVA OBLIGATORIA: si este contenido incluye trabajadores (RUT/correo/nombre), llama guardar_nomina AHORA con TODAS las filas transcritas — aunque creas que ya están cargados o el archivo se repita. Tu memoria no cuenta: solo lo guardado por la tool existe.]"
+          : ""
+        message = caption ? `${caption}\n\n${bloque}${directivaNomina}` : `${bloque}${directivaNomina}`
         console.log(`[v3-botmaker] adjunto descrito contact=${contact} len=${descripcion.length}`)
       } else if (esArchivoAdjunto) {
         message = CONTEXTO_DOC_ILEGIBLE
