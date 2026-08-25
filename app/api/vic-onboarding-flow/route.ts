@@ -17,7 +17,9 @@
  */
 
 import { NextResponse } from "next/server"
-import { getFollowupCronSecret, getKvValue, setKvValue, appendAssistantV3 } from "@/lib/supabase-persistence-v3"
+import { getFollowupCronSecret, getKvValue, setKvValue, appendAssistantV3, getQuotePointer } from "@/lib/supabase-persistence-v3"
+import { fichaEmpresaSii } from "@/lib/empresas-sii"
+import { rutValido } from "@/lib/rut"
 import { claveFase, claveBorrador } from "@/lib/onboarding/fase"
 import {
   parsearBorrador,
@@ -48,17 +50,82 @@ async function cargar(contact: string): Promise<Borrador> {
   return parsearBorrador(json) ?? borradorVacio("cl")
 }
 
+/**
+ * Giro/dirección/comuna para el prellenado (Lalo 25-ago): cadena de fuentes,
+ * campo por campo, primera no vacía gana:
+ *   1. lo que el cliente ya tipeó en el propio Flow (kv extras);
+ *   2. lo declarado en el POP-UP de facturación al aceptar/pagar — el handoff
+ *      del cotizador lo deja en Autoservicio_Onboarding (Giro/Direcci_n/
+ *      Comuna, con su propia cascada aceptación > cotización > cuenta);
+ *   3. el padrón SII (hoy solo entrega razón social — las tablas de domicilio
+ *      y giro murieron en el incidente del 10-ago; la pata queda cableada y
+ *      se enciende sola cuando el padrón se reconstruya).
+ * Todo best-effort con timeout corto: el prellenado jamás bota el Flow.
+ */
+async function extrasParaPrefill(
+  contact: string,
+  rutEmpresa: string,
+): Promise<{ giro: string; direccion: string; comuna: string }> {
+  const out = { giro: "", direccion: "", comuna: "" }
+  const toma = (src: Partial<typeof out>) => {
+    if (!out.giro && src.giro) out.giro = String(src.giro).trim()
+    if (!out.direccion && src.direccion) out.direccion = String(src.direccion).trim()
+    if (!out.comuna && src.comuna) out.comuna = String(src.comuna).trim()
+  }
+  // 1. Lo tipeado antes en el Flow.
+  try {
+    const kv = await getKvValue(`onboarding_flow_extras_${contact}`)
+    if (kv) toma(JSON.parse(kv) as Partial<typeof out>)
+  } catch {}
+  // 2. El pop-up de facturación, vía el registro de Autoservicio_Onboarding
+  //    colgado de la cotización más reciente del contacto.
+  if (!out.giro || !out.direccion || !out.comuna) {
+    try {
+      const puntero = await getQuotePointer(contact)
+      if (puntero?.quoteId) {
+        const { getZohoAccessToken } = await import("@/lib/zoho-token")
+        const token = await getZohoAccessToken()
+        const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").replace(/\/$/, "")
+        const modulo = (process.env.ZOHO_ONBOARDING_MODULE || "Autoservicio_Onboarding").trim()
+        const r = await fetch(
+          `${api}/crm/v3/${modulo}/search?criteria=(Cotizacion_Asociada:equals:${puntero.quoteId})&fields=Giro,Direcci_n,Comuna`,
+          { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store", signal: AbortSignal.timeout(6000) },
+        )
+        if (r.status === 200) {
+          const data = (await r.json().catch(() => null)) as {
+            data?: Array<{ Giro?: string; Direcci_n?: string; Comuna?: string }>
+          } | null
+          const fila = data?.data?.[0]
+          if (fila) toma({ giro: fila.Giro || "", direccion: fila.Direcci_n || "", comuna: fila.Comuna || "" })
+        }
+      }
+    } catch {}
+  }
+  // 3. Padrón SII por el RUT de la empresa.
+  if ((!out.giro || !out.direccion || !out.comuna) && rutEmpresa && rutValido(rutEmpresa)) {
+    try {
+      const ficha = await fichaEmpresaSii(rutEmpresa)
+      if (ficha) toma({ giro: ficha.giro || "", direccion: ficha.direccion || "", comuna: ficha.comuna || "" })
+    } catch {}
+  }
+  return out
+}
+
 /** GET — prellenado para pintar el Flow. Claves = nombres de campos del Flow. */
 export async function GET(req: Request): Promise<NextResponse> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const contact = (new URL(req.url).searchParams.get("contact") || "").replace(/\D/g, "")
   if (!contact) return NextResponse.json({ ok: false, error: "falta ?contact=" }, { status: 400 })
   const b = await cargar(contact)
+  const extras = await extrasParaPrefill(contact, b.empresa.identificador || "")
   return NextResponse.json({
     ok: true,
     prefill: {
       razon_social: b.empresa.nombre || "",
       rut_empresa: b.empresa.identificador || "",
+      giro: extras.giro,
+      direccion: extras.direccion,
+      comuna: extras.comuna,
       admin_nombre: b.admin.nombre || "",
       admin_apellido: b.admin.apellido || "",
       admin_rut: b.admin.identificador || "",
