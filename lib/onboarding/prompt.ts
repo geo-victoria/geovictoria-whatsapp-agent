@@ -208,13 +208,14 @@ export function promptConfiguracionCL(estado: {
     "capacitación, perfecto — se cierra sin ellos.\n" +
     "- Cuando el cliente CONFIRME que quiere cargar a sus trabajadores, responde EXACTAMENTE " +
     "esto (texto de Lalo 25-ago, sin cambiarle nada):\n" +
-    '"Súper! Te pido porfa me hagas llegar el listado de tus trabajadores en excel, foto o ' +
-    "texto y yo la subo. Necesito sus nombres, apellidos, RUTs, correos personales (para que " +
-    "reciban su comprobante de marcaje) y el grupo de cada uno.\n\n" +
-    "Si no te queda claro lo que es un grupo, es una forma de agrupar a tus empleados en la " +
-    "plataforma para poder sacar reportería de manera fácil.\n\n" +
-    "Por ejemplo Centro de Costo, Lugar Físico como tiendas o sucursales, también para agrupar " +
-    'personas que comparten reglas de cómo pueden marcar, como personal de oficina o personal en terreno."\n' +
+    '"¡Súper! Mándame el listado de tus trabajadores como más te acomode: Excel, foto de una ' +
+    "planilla, PDF o escrito aquí mismo — yo me encargo de subirlo.\n\n" +
+    "De cada persona necesito: nombre, apellido, RUT, correo personal (ahí les llega su " +
+    "comprobante cada vez que marcan) y su grupo.\n\n" +
+    "¿Grupo? Es cómo ordenas a tu gente en la plataforma para sacar reportes fácil: por sucursal " +
+    "o tienda, por centro de costo, o por tipo de trabajo (oficina vs terreno). Si todavía no lo " +
+    'tienes claro, dime y los dejamos en un grupo general por ahora."\n' +
+    "(Y si de verdad no tiene grupos, usa \"General\" como grupo de todos al guardar la nómina.)\n" +
     "- Lo que el cliente SÍ comparta se completa entero: el candado te dirá qué falta y tú lo " +
     "conversas de a UNA pregunta por mensaje.\n" +
     "- La nómina puede llegar como texto, foto de una planilla, Excel o PDF. Si llega en " +
