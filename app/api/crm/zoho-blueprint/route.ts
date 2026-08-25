@@ -21,9 +21,12 @@ export async function POST(request: Request) {
     }
     // Auth cron (25-ago): el endpoint estaba abierto — ejecuta transiciones de
     // blueprint, eso jamás puede quedar público.
-    const esperado = getEnv("CRON_SECRET")
     const entregado = (key || request.headers.get("x-cron-secret") || "").trim()
-    if (!esperado || entregado !== esperado) {
+    const { getFollowupCronSecret } = await import("@/lib/supabase-persistence-v3")
+    const kvSecret = await getFollowupCronSecret().catch(() => "")
+    const envSecret = getEnv("CRON_SECRET")
+    const autorizado = Boolean(entregado) && (entregado === envSecret || (Boolean(kvSecret) && entregado === kvSecret))
+    if (!autorizado) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 })
     }
     if (!recordId) return NextResponse.json({ error: "recordId requerido" }, { status: 400 })
