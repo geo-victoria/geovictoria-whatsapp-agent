@@ -117,6 +117,8 @@ describe("el canal del onboarding usa el adaptador con candado", () => {
 
   test("el link de login sale de env, jamás inventado", () => {
     assert.match(CANAL, /VICKY_PLATAFORMA_LOGIN_URL/)
-    assert.match(CANAL, /la plataforma GeoVictoria con ese correo/)
+    // El instructivo usa www.geovictoria.com como default visible y acepta
+    // override por loginUrl — jamás un link inventado por el modelo.
+    assert.match(CANAL, /opts\.loginUrl \|\| "www\.geovictoria\.com"/)
   })
 })
