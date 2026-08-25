@@ -70,6 +70,18 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const dry = body.dry === true
   const plantilla = (body.plantilla || "").trim() || PLANTILLA_DEFAULT
+  // VENTANA DURA 9-21 CL (lección 25-ago: la corrida real salió 21:07 y el
+  // gate en sombra solo lo anotó): fuera de ventana el run REAL se niega —
+  // el dry siempre puede correr.
+  const horaCl = Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", hour: "numeric", hour12: false }).format(new Date()),
+  )
+  if (!dry && (horaCl < 9 || horaCl >= 21)) {
+    return NextResponse.json(
+      { ok: false, error: `fuera de ventana 9-21 CL (hora local ${horaCl}) — correr en horario o usar dry` },
+      { status: 425 },
+    )
+  }
   const token = await getZohoAccessToken()
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").replace(/\/$/, "")
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
