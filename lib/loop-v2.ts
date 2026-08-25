@@ -54,7 +54,10 @@ export function loopV2Enabled(): boolean {
   return (process.env.LOOP_V2_ENABLED || "").trim().toLowerCase() === "on"
 }
 
-export type LoopStage = "sin_precio" | "con_precio" | "formal"
+// "aceptada" (25-ago, VB Lalo): cadencia de CIERRE post-aceptación — la
+// aceptación sin pago dejaba a Vicky muda (tierra de nadie hasta la Cartera).
+// 3 toques: +60min / +24h / +72h (urgencia de vigencia), y finaliza.
+export type LoopStage = "sin_precio" | "con_precio" | "formal" | "aceptada"
 export type LoopEstado = "activo" | "pausado_compromiso" | "humano" | "finalizado" | "cerrado"
 
 export type LoopRow = {
@@ -197,10 +200,22 @@ export function calcularProximoToque(
   touchIdx: number,
   country?: string | null,
   contact = "",
+  stage?: LoopStage | null,
 ): Date {
   const base = typeof t0 === "string" ? new Date(t0) : t0
   const tz = tzDePais(country)
   const h = 3600e3
+  // Cadencia de CIERRE post-aceptación (25-ago): 60min / 24h / 72h, tope 3
+  // (el cron finaliza tras el tercero). Ventana 9-21 como todos los toques.
+  if (stage === "aceptada") {
+    const objetivoA =
+      touchIdx <= 1
+        ? new Date(base.getTime() + 60 * 60_000)
+        : touchIdx === 2
+          ? new Date(base.getTime() + 24 * h)
+          : new Date(base.getTime() + 72 * h)
+    return ajustarAHabil(objetivoA, tz, contact)
+  }
   // Toques 5-7 se miden desde el toque 4 (t0+72h) en días hábiles.
   const base4 = new Date(base.getTime() + 72 * h)
   let objetivo: Date
@@ -414,7 +429,7 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
   // Cliente en pleno alta de cuenta: sus mensajes son del onboarding, no de venta.
   if (await enFaseOnboarding(contact)) return
   const res = await supa(
-    `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado&limit=1`,
+    `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado,stage&limit=1`,
   )
   const rows = res.ok ? (((await res.json().catch(() => [])) as LoopRow[]) || []) : []
   const row = rows[0]
@@ -429,7 +444,7 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
     body: JSON.stringify({
       t0: t0.toISOString(),
       next_touch: 1,
-      next_touch_at: calcularProximoToque(t0, 1, row.country, contact).toISOString(),
+      next_touch_at: calcularProximoToque(t0, 1, row.country, contact, row.stage).toISOString(),
       estado: "activo",
       compromiso_at: null,
       updated_at: ahora.toISOString(),
@@ -518,6 +533,36 @@ export async function pagoCierraLoop(
   motivo: "pagado" | "aceptada" = "pagado",
 ): Promise<void> {
   if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
+  // CADENCIA DE CIERRE (25-ago, VB Lalo): la ACEPTACIÓN ya no apaga a Vicky —
+  // el loop pasa a la etapa "aceptada" (3 toques: 60min "te ayudo con el
+  // pago", 24h facilitador, 72h urgencia de vigencia; después finaliza y el
+  // caso queda en la Cartera). El PAGO real sí cierra, como siempre.
+  if (motivo === "aceptada") {
+    const ahora = new Date()
+    const filaRes = await supa(
+      `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country&limit=1`,
+    )
+    const filas = filaRes.ok ? (((await filaRes.json().catch(() => [])) as LoopRow[]) || []) : []
+    const country = filas[0]?.country || (contact.startsWith("57") ? "co" : contact.startsWith("52") ? "mx" : contact.startsWith("51") ? "pe" : "cl")
+    const cuerpo = {
+      contact,
+      country,
+      stage: "aceptada",
+      t0: ahora.toISOString(),
+      next_touch: 1,
+      next_touch_at: calcularProximoToque(ahora, 1, country, contact, "aceptada").toISOString(),
+      estado: "activo",
+      compromiso_at: null,
+      motivo_cierre: null,
+      updated_at: ahora.toISOString(),
+    }
+    await supa(`vic_loop?on_conflict=contact`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(cuerpo),
+    })
+    return
+  }
   await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },

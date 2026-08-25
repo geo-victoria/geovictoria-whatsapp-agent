@@ -81,6 +81,7 @@ function tplCelda(
     mx: (process.env[`${envName}_MX`] || defaultMx).trim(),
   }
 }
+const ACEPTADA_CELDA = tplCelda("LOOP_TPL_ACEPTADA", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago")
 const CO_PREFORM = "vicky_co_react_preform"
 const CO_CON_PRECIO = "vicky_loop_con_precio_co"
 // MX (25-jul, número +52 conectado en Dapta): reutiliza las neutras
@@ -102,6 +103,7 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
     sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO),
     con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
     formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
+    aceptada: ACEPTADA_CELDA,
   },
   // Toques 2-3 fuera de ventana: plantillas PROPIAS vicky_loop_toque2/3
   // (creadas 12-ago vía API, estado BOTMAKER_PENDING). Mientras Meta no las
@@ -116,24 +118,28 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
     sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
     con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
     formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
+    aceptada: ACEPTADA_CELDA,
   },
   3: {
     sin_precio: tplCelda("LOOP_TPL_T3", ""),
     con_precio: tplCelda("LOOP_TPL_T3", ""),
     formal: tplCelda("LOOP_TPL_T3", ""),
+    aceptada: ACEPTADA_CELDA,
   },
   4: {
     sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO),
     con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
     formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
+    aceptada: ACEPTADA_CELDA,
   },
   5: {
     sin_precio: tplCelda("LOOP_TPL_T5_SIN_PRECIO", "vicky_loop_retoma", CO_PREFORM, "vicky_loop_retoma"),
     con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut", CO_CON_PRECIO, MX_CON_PRECIO),
     formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
+    aceptada: ACEPTADA_CELDA,
   },
-  6: { sin_precio: LOOP_TPL_T6, con_precio: LOOP_TPL_T6, formal: LOOP_TPL_T6 },
-  7: { sin_precio: LOOP_TPL_T7, con_precio: LOOP_TPL_T7, formal: LOOP_TPL_T7 },
+  6: { sin_precio: LOOP_TPL_T6, con_precio: LOOP_TPL_T6, formal: LOOP_TPL_T6, aceptada: ACEPTADA_CELDA },
+  7: { sin_precio: LOOP_TPL_T7, con_precio: LOOP_TPL_T7, formal: LOOP_TPL_T7, aceptada: ACEPTADA_CELDA },
 }
 
 // Variables que cada plantilla DECLARA en su cuerpo, leídas de la API de
@@ -315,6 +321,11 @@ const TEXTOS_T2: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     co: "Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
     mx: "¿Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
   },
+  aceptada: {
+    cl: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. El link: {LINK_PAGO}",
+    co: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. El link: {LINK_PAGO}",
+    mx: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. El link: {LINK_PAGO}",
+  },
 }
 const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
   sin_precio: {
@@ -331,6 +342,11 @@ const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     cl: "Tu cotización sigue vigente 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
     co: "Tu cotización sigue vigente 😊 Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
     mx: "Tu cotización sigue vigente 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
+  },
+  aceptada: {
+    cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
+    co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
+    mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
   },
 }
 
@@ -362,6 +378,11 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     mx:
       "Tu cotización quedó lista y la puedes aceptar cuando gustes.\nSi te quedó alguna duda, la resolvemos por aquí.",
   },
+  aceptada: {
+    cl: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nY si prefieres transferencia, me dices y te paso los datos al tiro 😊",
+    co: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nY si prefieres transferencia, me dices y te paso los datos al tiro 😊",
+    mx: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nY si prefieres transferencia, me dices y te paso los datos al tiro 😊",
+  },
 }
 
 // Toques 4-7 dentro de ventana: textos PROPIOS (biblia F3) — antes reusaban
@@ -381,6 +402,11 @@ const TEXTOS_T4PLUS: Record<LoopStage, { cl: string; co: string; mx: string }> =
     cl: "Tu cotización sigue disponible para aceptar y pagar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
     co: "Tu cotización sigue disponible para aceptar y pagar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
     mx: "Tu cotización sigue disponible para aceptar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
+  },
+  aceptada: {
+    cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
+    co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
+    mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
   },
 }
 
@@ -953,10 +979,29 @@ export async function GET(req: Request): Promise<Response> {
             : touch >= 4
               ? TEXTOS_T4PLUS[stage][paisKey]
               : TEXTOS[stage][paisKey]
+      // Etapa ACEPTADA (25-ago): los textos llevan el link real de la
+      // cotización y, en el toque de urgencia, la fecha de vigencia (emisión
+      // + 30 días). Sin puntero no se inventa nada: el toque se salta limpio.
+      let textoFinal = texto
+      if (stage === "aceptada") {
+        const { getQuotePointer } = await import("@/lib/supabase-persistence-v3")
+        const puntero = await getQuotePointer(r.contact).catch(() => null)
+        if (!puntero?.acceptanceUrl) {
+          console.warn(`[loop-cron] ${r.contact}: etapa aceptada sin puntero de cotización — toque omitido`)
+          ejecutado = true
+          detalle.push({ contact: r.contact, accion: "aceptada", touch, skip: "sin puntero" })
+          continue
+        }
+        const emitida = Date.parse(puntero.updatedAt || "")
+        const vigencia = Number.isFinite(emitida)
+          ? new Date(emitida + 30 * 86400e3).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Santiago" })
+          : "vencimiento próximo"
+        textoFinal = texto.replaceAll("{LINK_PAGO}", puntero.acceptanceUrl).replaceAll("{VIGENCIA}", vigencia)
+      }
       if (ventanaAbierta) {
-        const ok = await sendBotmakerMessage(r.contact, texto, canal).catch(() => false)
+        const ok = await sendBotmakerMessage(r.contact, textoFinal, canal).catch(() => false)
         if (ok) {
-          await appendAssistantV3(r.contact, texto, country).catch(() => {})
+          await appendAssistantV3(r.contact, textoFinal, country).catch(() => {})
           void logToque(r.contact, `texto_${stage}`, touch, stage, paisKey)
           enviadosTexto++
           ejecutado = true
@@ -1019,6 +1064,14 @@ export async function GET(req: Request): Promise<Response> {
     // reintenta al próximo tick, igual que la cadencia outbound). Tras el
     // toque 7 el loop termina.
     if (!ejecutado) continue
+    // Cadencia de cierre post-aceptación: 3 toques y a la Cartera (motivo
+    // propio para que el cobro asistido la encuentre de una).
+    if (stage === "aceptada" && touch >= 3) {
+      await patchLoop(r.contact, { estado: "finalizado", motivo_cierre: "aceptada_sin_pago" })
+      cerrados++
+      detalle.push({ contact: r.contact, accion: "finalizado", motivo: "aceptada_sin_pago" })
+      continue
+    }
     if (touch >= 7) {
       await patchLoop(r.contact, { estado: "finalizado" })
     } else {
