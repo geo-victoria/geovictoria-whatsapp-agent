@@ -1173,8 +1173,16 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     // equipo (jul-2026): los leads deben llegar con territorio para que las
     // assignment rules los repartan (los sin territorio quedaban huérfanos).
     const digits = phone.replace(/\D/g, "")
+    // Marcador de línea de los contactos LID ("CO.1594...", 25-ago GRANIPACK):
+    // sin número real, el país lo dice el prefijo que puso el webhook.
+    const marcaLinea = /^\s*(CL|CO|MX|PE)\./i
+      .exec(String(input.telefono || input.contactoWA || ""))?.[1]
+      ?.toUpperCase()
+    const paisDeMarca =
+      marcaLinea === "CL" ? "Chile" : marcaLinea === "CO" ? "Colombia" : marcaLinea === "MX" ? "México" : marcaLinea === "PE" ? "Perú" : ""
     const pais =
       sanitize(input.pais, 100) ||
+      paisDeMarca ||
       (digits.startsWith("56") ? "Chile" : digits.startsWith("57") ? "Colombia" : "")
     if (pais) record.Country = pais
     if (digits.startsWith("56") || pais.toLowerCase() === "chile") record.Territorio = "Chile"

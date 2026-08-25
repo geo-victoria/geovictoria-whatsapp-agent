@@ -297,6 +297,16 @@ function esTelefonoDePrueba(contact: string): boolean {
 }
 
 function territorioDeContacto(contact: string): "Chile" | "Colombia" | "México" | "Perú" | null {
+  // Marcador de línea (25-ago, caso GRANIPACK): los contactos LID de WhatsApp
+  // (número real oculto por Meta) llegan como "CO.1594..." — el webhook del
+  // país los prefija. Sin esto el LID no calza con ningún prefijo telefónico,
+  // territorioDeContacto devolvía null y el deal de un colombiano caía al
+  // default CHILE (Territorio, UF y tómbola CL — terminó sorteado a Grey).
+  const marca = /^\s*(CL|CO|MX|PE)\./i.exec(String(contact || ""))?.[1]?.toUpperCase()
+  if (marca === "CL") return "Chile"
+  if (marca === "CO") return "Colombia"
+  if (marca === "MX") return "México"
+  if (marca === "PE") return "Perú"
   const c = (contact || "").replace(/\D/g, "")
   if (c.startsWith("56")) return "Chile"
   if (c.startsWith("57")) return "Colombia"

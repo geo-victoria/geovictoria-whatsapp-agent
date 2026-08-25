@@ -41,6 +41,11 @@ export type PaisContacto = "cl" | "co" | "mx" | "desconocido"
  * cambiar el comportamiento probado en producción — solo se centralizan.
  */
 export function paisDeContacto(contactRaw: string): PaisContacto {
+  // Marcador de línea "CO."/"MX."/"CL." (25-ago, caso GRANIPACK): los
+  // contactos LID de WhatsApp no tienen prefijo telefónico — el país lo dice
+  // el marcador que les puso el webhook de su línea.
+  const marca = /^\s*(CL|CO|MX)\./i.exec(String(contactRaw || ""))?.[1]?.toLowerCase()
+  if (marca === "cl" || marca === "co" || marca === "mx") return marca
   const c = String(contactRaw || "").replace(/\D/g, "")
   if (!c) return "desconocido"
   if (c.startsWith("521") && c.length >= 13) return "mx"

@@ -26,6 +26,9 @@ export const LINEA_POR_PAIS: Record<string, string> = {
 
 /** País del contacto por prefijo telefónico; null si no es CL/CO/MX/PE. */
 export function paisDeContacto(contact: string): "cl" | "co" | "mx" | "pe" | null {
+  // Marcador de línea de los contactos LID ("CO.1594...", 25-ago GRANIPACK).
+  const marca = /^\s*(CL|CO|MX|PE)\./i.exec(String(contact || ""))?.[1]?.toLowerCase()
+  if (marca === "cl" || marca === "co" || marca === "mx" || marca === "pe") return marca
   const c = (contact || "").replace(/\D/g, "")
   if (c.startsWith("56")) return "cl"
   if (c.startsWith("57")) return "co"
