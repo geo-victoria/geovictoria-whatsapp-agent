@@ -434,6 +434,18 @@ export async function armarOnboarding(contact: string): Promise<{
             await avisarEquipoInterno(
               `✅ ALTA ONBOARDING CL ${simulada ? "SIMULADA (piloto, sin API real)" : "creada POR API"} (companyId ${alta.companyId}) — contacto +${contact}.\n${fichaAlta}`,
             ).catch(() => {})
+            // Correo de INSTRUCCIONES de ingreso (Lalo 25-ago, referencia
+            // plantillas GeoAvanzado): viaja junto al de la contraseña,
+            // best-effort — jamás bloquea el alta.
+            import("./onboarding-correos")
+              .then((m) =>
+                m.enviarCorreoInstruccionesOnboarding({
+                  adminNombre: `${b.admin.nombre} ${b.admin.apellido}`.trim(),
+                  adminEmail: b.admin.email!,
+                  empresa: b.empresa.nombre!,
+                }),
+              )
+              .catch(() => {})
             // Copy en TERCERA persona sobre el admin (Lalo 02-ago): quien
             // chatea puede ser el admin o el comprador que nombró a otra
             // persona — hablar del admin por nombre y correo sirve en ambos
