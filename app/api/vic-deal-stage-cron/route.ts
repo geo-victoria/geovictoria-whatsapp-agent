@@ -93,14 +93,16 @@ async function handler(req: Request): Promise<Response> {
     return NextResponse.json({ ok: r.ok, status: r.status, raw })
   }
 
-  // 1. Objetivo "Listo para Cierre": cotizaciones pagadas de Vicky con deal.
+  // 1. Objetivo "Listo para Cierre": cotizaciones aceptadas/pagadas de Vicky
+  // con deal (la regla: aceptada → 6. Listo para Cierre).
   const pagadas = await coql<{
     id?: string
     Name?: string
+    Estado_Cotizacion?: string
     "Deal_Asociado.id"?: string
     Fecha_Hora_Cotizacion?: string
   }>(
-    `select id, Name, Deal_Asociado.id, Fecha_Hora_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} and Estado_Cotizacion = 'Aceptada' limit 200`,
+    `select id, Name, Estado_Cotizacion, Deal_Asociado.id, Fecha_Hora_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} and Estado_Cotizacion in ('Aceptada', 'Pagada') limit 200`,
   )
 
   // Red de seguridad del TRASPASO post-pago (caso COT233, 20-jul): si el
@@ -114,6 +116,12 @@ async function handler(req: Request): Promise<Response> {
     const nombre = String(q.Name || "").toLowerCase()
     const fecha = Date.parse(String(q.Fecha_Hora_Cotizacion || ""))
     if (!q.id || nombre.includes("prueba") || !Number.isFinite(fecha) || fecha < hace36h) continue
+    // BUG 25-ago (caso Carolina/COT309): el barrido trataba 'Aceptada' como
+    // pagada — herencia de cuando el estado 'Pagada' no existía (nació ayer,
+    // cef2bc2, y SOLO lo escriben caminos con pago MP verificado). Una
+    // aceptada SIN pagar recibía "tu pago quedó registrado" + wizard +
+    // presentación. El traspaso post-pago exige el estado real.
+    if (String(q.Estado_Cotizacion || "") !== "Pagada") continue
     const r = await cerrarYTraspasarPostPago(String(q.id))
     traspasos.push({ ...r, quoteId: String(q.id) })
     if (r.traspaso === "enviado") {
