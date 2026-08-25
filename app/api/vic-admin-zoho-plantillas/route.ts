@@ -40,9 +40,10 @@ export async function GET(req: Request): Promise<NextResponse> {
   const token = await getZohoAccessToken()
   const id = (sp.get("id") || "").trim()
   const modulo = (sp.get("module") || "Implementaciones").trim()
+  const page = Math.max(1, Number(sp.get("page") || 1) || 1)
   const path = id
     ? `/crm/v3/settings/email_templates/${encodeURIComponent(id)}`
-    : `/crm/v3/settings/email_templates?module=${encodeURIComponent(modulo)}`
+    : `/crm/v3/settings/email_templates?module=${encodeURIComponent(modulo)}&page=${page}&per_page=200`
   const r = await fetch(`${ZOHO_API_DOMAIN}${path}`, {
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
     cache: "no-store",
