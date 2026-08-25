@@ -2503,6 +2503,56 @@ async function normalizarFonosForm(): Promise<number> {
       console.log(`[form-fonos] lead ${l.id}: Phone ${l.Phone} → +${real} (prefijo duplicado del form)`)
     }
   }
+  // SEGUNDA PASADA (25-ago, caso Jeremías/Green Energy): el form guardó
+  // "+569432070140" (un dígito de más) y el fono real del chat era
+  // +56932070140 — el dedup no calzó y nació un lead duplicado. Regla:
+  // fono del form SIN conversación cuyos ÚLTIMOS 8 DÍGITOS calzan con
+  // exactamente UNA conversación de Vicky → ese es el número real y se
+  // corrige en Zoho (con eso el dedup y el cruce del dash vuelven a calzar).
+  try {
+    const q2 = await fetch(`${api}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        select_query:
+          "select id, Phone from Leads where (Form_Vicky = 'Si' and Converted__s = false) " +
+          "and Created_Time >= '" + new Date(Date.now() - 30 * 86400e3).toISOString().slice(0, 10) + "T00:00:00-04:00' " +
+          "order by Created_Time desc limit 50",
+      }),
+    })
+    const filas2 = q2.ok && q2.status !== 204
+      ? ((await q2.json().catch(() => ({}))) as { data?: Array<{ id?: string; Phone?: string }> }).data || []
+      : []
+    for (const l of filas2) {
+      const tel = String(l.Phone || "").replace(/\D/g, "")
+      if (!l.id || tel.length < 10) continue
+      // Con conversación propia el fono está bien: nada que corregir.
+      const propia = await supa<{ contact: string }>(
+        `vic_v3_conversations?contact=eq.${encodeURIComponent(tel)}&select=contact&limit=1`,
+      )
+      if (propia.length) continue
+      const suf = tel.slice(-8)
+      const cand = await supa<{ contact: string }>(
+        `vic_v3_conversations?contact=like.*${suf}&select=contact&limit=2`,
+      )
+      if (cand.length !== 1) continue
+      const real = (cand[0].contact || "").replace(/\D/g, "")
+      if (!/^(56|57|52|51)\d{8,12}$/.test(real) || real === tel) continue
+      const put = await fetch(`${api}/crm/v3/Leads`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({
+          data: [{ id: l.id, Phone: `+${real}` }],
+          skip_feature_execution: [{ name: "assignment_rules" }],
+          trigger: ["blueprint"],
+        }),
+      }).catch(() => null)
+      if (put?.ok) {
+        corregidos++
+        console.log(`[form-fonos] lead ${l.id}: Phone ${l.Phone} → +${real} (sufijo calza con conversación única)`)
+      }
+    }
+  } catch (e) {
+    console.warn("[form-fonos] segunda pasada (sufijo) falló:", e instanceof Error ? e.message : e)
+  }
   return corregidos
 }
 
