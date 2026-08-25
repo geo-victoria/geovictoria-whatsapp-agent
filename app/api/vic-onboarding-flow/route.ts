@@ -108,6 +108,10 @@ async function extrasParaPrefill(
       if (ficha) toma({ giro: ficha.giro || "", direccion: ficha.direccion || "", comuna: ficha.comuna || "" })
     } catch {}
   }
+  // Giro sin fuente → "Otro" (Lalo 25-ago: "no debe ser un stopper; si no lo
+  // tenemos, no lo pidamos o un giro Otro"). Dirección/comuna no se inventan:
+  // van vacías y el Flow las tiene como opcionales.
+  if (!out.giro) out.giro = "Otro"
   return out
 }
 
