@@ -62,3 +62,6 @@ export function faseEfectiva(kvCrudo: string | null | undefined): FaseVicky {
   if (!onboardingEnabled()) return "venta"
   return esFase(kvCrudo) ? kvCrudo : "venta"
 }
+
+/** Configuración F2 (nómina/turnos/planificaciones) conversada por chat. */
+export const claveConfiguracion = (contact: string) => `onboarding_config_${contact}`

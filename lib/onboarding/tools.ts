@@ -65,3 +65,118 @@ export const TOOL_CONFIRMAR_ALTA_EMPRESA = {
     required: ["confirmacion_explicita"],
   },
 } as const
+
+// ── F2: CONFIGURACIÓN (nómina / turnos / planificaciones) — 25-ago ─────────
+// Opcionales por regla de Lalo: la nómina sola basta; turnos y planificaciones
+// solo si el cliente quiere dejarlos listos — pero lo que se comparte se
+// completa ENTERO (el candado determinista pendientesConfiguracion decide).
+
+export const TOOL_GUARDAR_NOMINA = {
+  name: "guardar_nomina",
+  description:
+    "Guarda trabajadores de la nómina. Acepta las filas TAL CUAL las entregó el cliente (texto " +
+    "pegado, o transcritas por ti desde una foto/planilla/PDF que haya mandado): una línea por " +
+    "trabajador con columnas separadas por | en este orden: RUT|Correo personal|Nombres|" +
+    "Apellidos|Grupo|Tel1|Tel2|Tel3 (los teléfonos pueden ir vacíos). La tool valida fila por " +
+    "fila (el correo PERSONAL es obligatorio) y devuelve qué filas quedaron cojas para pedir " +
+    "SOLO lo que falta. Llamadas sucesivas AGREGAN; usa reemplazar=true para partir de cero.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      filas: CAMPO_TEXTO(
+        "Trabajadores, una línea por persona: RUT|Correo|Nombres|Apellidos|Grupo|Tel1|Tel2|Tel3.",
+      ),
+      reemplazar: {
+        type: "boolean" as const,
+        description: "true = descarta la nómina guardada y parte de nuevo con estas filas.",
+      },
+    },
+    required: ["filas"],
+  },
+} as const
+
+export const TOOL_DEFINIR_TURNO = {
+  name: "definir_turno",
+  description:
+    "Crea o actualiza UN turno de trabajo (por nombre). Ejemplos: Mañana 09:00-18:30 sin " +
+    "colación; Noche 22:00-06:00 colación libre de 45 min. Los días de descanso NO son un " +
+    "turno: en la planificación se marcan Libre.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      nombre: CAMPO_TEXTO("Nombre del turno (Mañana, Tarde, Administrativo…)."),
+      horaInicio: CAMPO_TEXTO("Hora de entrada, formato HH:MM."),
+      horaFin: CAMPO_TEXTO("Hora de salida, formato HH:MM."),
+      tipoColacion: {
+        type: "string" as const,
+        enum: ["sin", "libre", "fija"],
+        description: "sin = sin colación · libre = N minutos donde quieran · fija = bloque horario.",
+      },
+      colacionMinutos: { type: "number" as const, description: "Minutos de colación (solo tipo libre)." },
+      colacionInicio: CAMPO_TEXTO("Inicio de colación fija, HH:MM."),
+      colacionFin: CAMPO_TEXTO("Fin de colación fija, HH:MM."),
+    },
+    required: ["nombre"],
+  },
+} as const
+
+export const TOOL_ARMAR_PLANIFICACION = {
+  name: "armar_planificacion",
+  description:
+    "Crea o actualiza UNA planificación semanal (por nombre): qué turno corresponde a cada día " +
+    "lunes→domingo, referenciando turnos por su NOMBRE. Días de descanso = \"Libre\". Ejemplo: " +
+    "Semana Normal = [Mañana, Mañana, Mañana, Mañana, Mañana, Libre, Libre].",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      nombre: CAMPO_TEXTO("Nombre de la planificación (Semana Normal, Rotativo A…)."),
+      diasTurnos: {
+        type: "array" as const,
+        items: { type: "string" as const },
+        description:
+          "7 nombres de turno, lunes→domingo. \"Libre\" para descanso; \"\" si el cliente aún no lo decide.",
+      },
+    },
+    required: ["nombre", "diasTurnos"],
+  },
+} as const
+
+export const TOOL_ASIGNAR_PLANIFICACION = {
+  name: "asignar_planificacion",
+  description:
+    "Asigna una planificación a trabajadores de la nómina (por RUT), con fecha de inicio y " +
+    "término. Usa todos=true para asignársela a toda la nómina de una vez.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      planificacion: CAMPO_TEXTO("Nombre de la planificación ya creada."),
+      rutsTrabajadores: {
+        type: "array" as const,
+        items: { type: "string" as const },
+        description: "RUTs de los trabajadores que la usan (omitir si todos=true).",
+      },
+      todos: { type: "boolean" as const, description: "true = toda la nómina con esta planificación." },
+      desde: CAMPO_TEXTO("Desde cuándo rige, YYYY-MM-DD."),
+      hasta: CAMPO_TEXTO('Hasta cuándo: YYYY-MM-DD o "permanente".'),
+    },
+    required: ["planificacion", "desde", "hasta"],
+  },
+} as const
+
+export const TOOL_CONFIRMAR_CONFIGURACION = {
+  name: "confirmar_configuracion",
+  description:
+    "Cierra la configuración y la deja corriendo (planillas + implementación). Llamar SOLO tras " +
+    "mostrar el resumen y recibir el sí explícito del cliente. SE NIEGA en código si hay " +
+    "pendientes — la lista que devuelve es lo que falta conversar.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      confirmacion_explicita: {
+        type: "boolean" as const,
+        description: "true SOLO si el último mensaje del cliente confirma el resumen mostrado.",
+      },
+    },
+    required: ["confirmacion_explicita"],
+  },
+} as const

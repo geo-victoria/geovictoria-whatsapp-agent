@@ -321,20 +321,15 @@ export function pendientesConfiguracion(cfg: Configuracion): PendienteCfg[] {
   for (const plan of cfg.planificaciones) faltas.push(...pendientesPlanificacion(plan, cfg.turnos))
   faltas.push(...pendientesAsignaciones(cfg))
 
-  // Coherencia de conjunto: si hay planificaciones pero ningún turno real, o
-  // trabajadores sin ninguna planificación creada, el hueco se dice claro.
+  // Coherencia de conjunto (Lalo 25-ago: turnos y planificaciones son
+  // OPCIONALES — la nómina sola basta y lo demás puede quedar para el wizard
+  // o la capacitación — pero si el cliente PARTE compartiéndolos, se
+  // completan enteros): planificación compartida exige turnos con horario.
   if (cfg.planificaciones.length && !cfg.turnos.some((t) => !esTurnoLibre(t.nombre))) {
     faltas.push({
       ambito: "turnos",
       referencia: "sin turnos",
       mensaje: "hay planificaciones pero ningún turno con horario creado — partamos por los horarios",
-    })
-  }
-  if (cfg.trabajadores.length && !cfg.planificaciones.length) {
-    faltas.push({
-      ambito: "planificaciones",
-      referencia: "sin planificaciones",
-      mensaje: "ya está la nómina pero falta armar al menos una planificación semanal para asignarles",
     })
   }
   return faltas

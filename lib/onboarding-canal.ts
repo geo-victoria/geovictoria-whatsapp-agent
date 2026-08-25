@@ -29,8 +29,18 @@ import {
   claveFase,
   claveBorrador,
   claveAltaSolicitada,
+  claveConfiguracion,
   type FaseVicky,
 } from "./onboarding/fase"
+import {
+  configuracionVacia,
+  parsearNominaPegada,
+  pendientesConfiguracion,
+  resumenConfiguracion,
+  type Configuracion,
+  type TurnoCfg,
+} from "./onboarding/configuracion"
+import { promptConfiguracionCL } from "./onboarding/prompt"
 import {
   parsearBorrador,
   borradorVacio,
@@ -47,6 +57,11 @@ import { promptOnboardingCL } from "./onboarding/prompt"
 import {
   TOOL_GUARDAR_DATOS_ONBOARDING,
   TOOL_CONFIRMAR_ALTA_EMPRESA,
+  TOOL_GUARDAR_NOMINA,
+  TOOL_DEFINIR_TURNO,
+  TOOL_ARMAR_PLANIFICACION,
+  TOOL_ASIGNAR_PLANIFICACION,
+  TOOL_CONFIRMAR_CONFIGURACION,
 } from "./onboarding/tools"
 
 /**
@@ -111,7 +126,147 @@ export async function armarOnboarding(contact: string): Promise<{
   const borrador = await cargarBorrador(contact)
   const altaSolicitada = !!(await getKvValue(claveAltaSolicitada(contact)).catch(() => null))
 
+  // ── F2: estado de la CONFIGURACIÓN (nómina/turnos/planificaciones) ──
+  const cargarConfig = async (): Promise<Configuracion> => {
+    try {
+      const raw = await getKvValue(claveConfiguracion(contact))
+      if (raw) return { ...configuracionVacia(), ...(JSON.parse(raw) as Partial<Configuracion>) }
+    } catch {}
+    return configuracionVacia()
+  }
+  const guardarConfig = async (cfg: Configuracion) =>
+    setKvValue(claveConfiguracion(contact), JSON.stringify(cfg)).catch(() => {})
+  /** Respuesta estándar de las tools F2: estado + faltas en cotidiano. */
+  const estadoConfig = (cfg: Configuracion) => {
+    const faltas = pendientesConfiguracion(cfg)
+    return {
+      resumen: resumenConfiguracion(cfg),
+      pendientes: faltas.map((f) => f.mensaje),
+      listoParaCerrar: faltas.length === 0 && cfg.trabajadores.length > 0,
+    }
+  }
+
   const dispatch = async (name: string, input: unknown): Promise<unknown> => {
+    // ── Tools F2 (fase configuración) ──
+    if (name === TOOL_GUARDAR_NOMINA.name) {
+      const inp = (input || {}) as { filas?: string; reemplazar?: boolean }
+      const nuevas = parsearNominaPegada(String(inp.filas || ""))
+      if (!nuevas.length) return { ok: false, error: "No llegó ninguna fila legible." }
+      const cfg = await cargarConfig()
+      cfg.trabajadores = inp.reemplazar ? nuevas : [...cfg.trabajadores, ...nuevas]
+      await guardarConfig(cfg)
+      return {
+        ok: true,
+        agregados: nuevas.length,
+        totalNomina: cfg.trabajadores.length,
+        ...estadoConfig(cfg),
+        instruccion:
+          "Si hay pendientes de la nómina, pídelos de a pocos (los correos personales primero). " +
+          "Con la nómina sana, ofrece turnos/planificaciones como OPCIONALES o cerrar.",
+      }
+    }
+    if (name === TOOL_DEFINIR_TURNO.name) {
+      const t = (input || {}) as TurnoCfg
+      if (!String(t.nombre || "").trim()) return { ok: false, error: "El turno necesita nombre." }
+      const cfg = await cargarConfig()
+      const clave = String(t.nombre).trim().toLowerCase()
+      const idx = cfg.turnos.findIndex((x) => String(x.nombre || "").trim().toLowerCase() === clave)
+      if (idx >= 0) cfg.turnos[idx] = { ...cfg.turnos[idx], ...t }
+      else cfg.turnos.push(t)
+      await guardarConfig(cfg)
+      return { ok: true, ...estadoConfig(cfg) }
+    }
+    if (name === TOOL_ARMAR_PLANIFICACION.name) {
+      const p = (input || {}) as { nombre?: string; diasTurnos?: string[] }
+      if (!String(p.nombre || "").trim()) return { ok: false, error: "La planificación necesita nombre." }
+      const dias = Array.from({ length: 7 }, (_, i) => String((p.diasTurnos || [])[i] || "").trim())
+      const cfg = await cargarConfig()
+      const clave = String(p.nombre).trim().toLowerCase()
+      const idx = cfg.planificaciones.findIndex((x) => String(x.nombre || "").trim().toLowerCase() === clave)
+      if (idx >= 0) cfg.planificaciones[idx] = { nombre: p.nombre, diasTurnos: dias }
+      else cfg.planificaciones.push({ nombre: p.nombre, diasTurnos: dias })
+      await guardarConfig(cfg)
+      return { ok: true, ...estadoConfig(cfg) }
+    }
+    if (name === TOOL_ASIGNAR_PLANIFICACION.name) {
+      const a = (input || {}) as {
+        planificacion?: string
+        rutsTrabajadores?: string[]
+        todos?: boolean
+        desde?: string
+        hasta?: string
+      }
+      const cfg = await cargarConfig()
+      const compacto = (v: string | undefined) => String(v || "").replace(/[^0-9kK]/g, "").toUpperCase()
+      const ruts = a.todos
+        ? cfg.trabajadores.map((t) => t.rut).filter(Boolean)
+        : (a.rutsTrabajadores || []).filter(Boolean)
+      if (!ruts.length) return { ok: false, error: "Sin trabajadores a asignar (¿todos=true o lista de RUTs?)." }
+      for (const rut of ruts) {
+        const idx = cfg.asignaciones.findIndex((x) => compacto(x.rutTrabajador) === compacto(rut))
+        const fila = { rutTrabajador: rut, planificacion: a.planificacion, desde: a.desde, hasta: a.hasta }
+        if (idx >= 0) cfg.asignaciones[idx] = fila
+        else cfg.asignaciones.push(fila)
+      }
+      await guardarConfig(cfg)
+      return { ok: true, asignados: ruts.length, ...estadoConfig(cfg) }
+    }
+    if (name === TOOL_CONFIRMAR_CONFIGURACION.name) {
+      const confirmado = (input as { confirmacion_explicita?: boolean })?.confirmacion_explicita
+      if (confirmado !== true) {
+        return { ok: false, error: "Falta la confirmación explícita del cliente al resumen." }
+      }
+      const cfg = await cargarConfig()
+      const faltas = pendientesConfiguracion(cfg)
+      if (faltas.length) {
+        // EL CANDADO (Lalo 25-ago): lo compartido se completa entero.
+        return { ok: false, pendientes: faltas.map((f) => f.mensaje), instruccion: "Conversa estos puntos de a uno; recién con la lista vacía se puede cerrar." }
+      }
+      if (!cfg.trabajadores.length) {
+        return { ok: false, error: "No hay nómina cargada — sin trabajadores no hay nada que cerrar." }
+      }
+      // Sesión del wizard: crear/reusar → escribir → cerrar (planillas + Flow).
+      const { asegurarSesionWizard, escribirConfiguracionWizard, cerrarWizard } = await import("./wizard-sesion")
+      const extras = await getKvValue(`onboarding_flow_extras_${contact}`)
+        .then((v) => (v ? (JSON.parse(v) as { giro?: string; direccion?: string; comuna?: string }) : {}))
+        .catch(() => ({}))
+      let dealId = ""
+      try {
+        const { getQuotePointer } = await import("./supabase-persistence-v3")
+        dealId = (await getQuotePointer(contact))?.dealId || ""
+      } catch {}
+      const b = await cargarBorrador(contact)
+      const fallaOperativa = async (detalle: string) => {
+        await avisarEquipoInterno(
+          `⚠️ CONFIGURACIÓN ONBOARDING de +${contact} NO pudo cerrarse sola (${detalle}). ` +
+            `La configuración conversada está íntegra en vic_kv ${claveConfiguracion(contact)} — cerrar a mano en el wizard.`,
+        ).catch(() => {})
+        return {
+          ok: true,
+          cerradoEnProceso: true,
+          mensajeParaProspecto:
+            "¡Quedó todo registrado! 🙌 Estoy dejando tu configuración cargada en la plataforma — te confirmo por este chat apenas esté lista (dentro del día hábil).",
+        }
+      }
+      const ses = await asegurarSesionWizard(contact, b, { dealId, extras })
+      if ("error" in ses) return await fallaOperativa(`sesión: ${ses.error}`)
+      const w = await escribirConfiguracionWizard(ses.token, cfg)
+      if ("error" in w) return await fallaOperativa(`escritura: ${w.error}`)
+      const cierre = await cerrarWizard(ses.token, { idZoho: dealId || undefined })
+      if ("error" in cierre) return await fallaOperativa(`cierre: ${cierre.error}`)
+      await setKvValue(claveFase(contact), "completado").catch(() => {})
+      await avisarEquipoInterno(
+        `✅ CONFIGURACIÓN ONBOARDING de +${contact} cerrada por chat: ${cfg.trabajadores.length} trabajadores, ` +
+          `${cfg.turnos.length} turnos, ${cfg.planificaciones.length} planificaciones. Sesión wizard ${ses.token}.`,
+      ).catch(() => {})
+      return {
+        ok: true,
+        mensajeParaProspecto:
+          `¡Listo! Tu configuración quedó andando: ${cfg.trabajadores.length} trabajador${cfg.trabajadores.length === 1 ? "" : "es"}` +
+          (cfg.planificaciones.length ? " con sus turnos y planificaciones" : "") +
+          ". El equipo de implementación toma el relevo desde aquí — te llegará un correo con los próximos pasos y tu capacitación. Cualquier duda, este chat sigue abierto 😊",
+      }
+    }
     if (name === TOOL_GUARDAR_DATOS_ONBOARDING.name) {
       const datos = (input || {}) as DatosParciales
       const actualizado = aplicarDatos(await cargarBorrador(contact), datos)
@@ -253,7 +408,7 @@ export async function armarOnboarding(contact: string): Promise<{
                 `2. ${dondeEntrar}\n` +
                 `3. Cambiar la contraseña — y la cuenta queda operativa\n\n` +
                 `Si el administrador es otra persona, avísale que su acceso ya le llegó 😉\n\n` +
-                `Cualquier duda con los primeros pasos me escribes por aquí — y si el correo no llega, dime y lo vemos.`,
+                `Y si quieres, aquí mismo dejamos cargados a tus trabajadores para que puedan marcar — me mandas la nómina en excel, foto o texto y yo la subo. ¿La cargamos?`,
             }
           }
           // Creación falló → cae al alta manual (jamás perder un alta).
@@ -282,13 +437,37 @@ export async function armarOnboarding(contact: string): Promise<{
   }
 
   return {
-    systemPrompt: promptOnboardingCL(borrador, { altaSolicitada }),
+    // Con el alta ya solicitada, el agente pasa a la fase de CONFIGURACIÓN
+    // (F2): nómina + turnos/planificaciones opcionales, con el candado
+    // determinista. Antes del alta, el prompt y las tools son los del alta.
+    systemPrompt: altaSolicitada
+      ? await (async () => {
+          const cfg = await cargarConfig()
+          const faltas = pendientesConfiguracion(cfg)
+          const altaVia = await getKvValue(claveAltaSolicitada(contact)).catch(() => null)
+          return promptConfiguracionCL({
+            resumen: resumenConfiguracion(cfg),
+            pendientes: faltas.map((f) => f.mensaje),
+            nTrabajadores: cfg.trabajadores.length,
+            altaCreada: /companyId/.test(String(altaVia || "")),
+          })
+        })()
+      : promptOnboardingCL(borrador, { altaSolicitada }),
     tools: {
-      schemas: [
-        TOOL_GUARDAR_DATOS_ONBOARDING,
-        TOOL_CONFIRMAR_ALTA_EMPRESA,
-        consultarAgenteSoporteSchema,
-      ] as unknown as unknown[],
+      schemas: (altaSolicitada
+        ? [
+            TOOL_GUARDAR_NOMINA,
+            TOOL_DEFINIR_TURNO,
+            TOOL_ARMAR_PLANIFICACION,
+            TOOL_ASIGNAR_PLANIFICACION,
+            TOOL_CONFIRMAR_CONFIGURACION,
+            consultarAgenteSoporteSchema,
+          ]
+        : [
+            TOOL_GUARDAR_DATOS_ONBOARDING,
+            TOOL_CONFIRMAR_ALTA_EMPRESA,
+            consultarAgenteSoporteSchema,
+          ]) as unknown as unknown[],
       dispatch,
     },
   }

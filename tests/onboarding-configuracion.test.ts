@@ -157,12 +157,10 @@ describe("el candado de conjunto", () => {
     assert.match(mensajes, /permanente/)
   })
 
-  test("nómina sin planificaciones lo dice como siguiente paso", () => {
+  test("nómina SOLA basta: turnos/planificaciones son opcionales (Lalo 25-ago)", () => {
     const cfg = configuracionVacia()
     cfg.trabajadores = [TRABAJADOR_OK]
-    const faltas = pendientesConfiguracion(cfg)
-    assert.equal(faltas.length, 1)
-    assert.match(faltas[0].mensaje, /falta armar al menos una planificación/)
+    assert.deepEqual(pendientesConfiguracion(cfg), [])
   })
 
   test("configuración vacía no inventa pendientes (el riel es opcional)", () => {
