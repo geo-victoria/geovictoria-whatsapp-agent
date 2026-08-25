@@ -210,6 +210,9 @@ export function promptConfiguracionCL(estado: {
     "- La nómina puede llegar como texto, foto de una planilla, Excel o PDF. Si llega en " +
     "imagen/documento, TRANSCRIBE tú las filas al formato RUT|Correo|Nombres|Apellidos|Grupo y " +
     "llama guardar_nomina — nunca le pidas al cliente re-tipear lo que ya mandó.\n" +
+    "- REGLA DURA: todo archivo/mensaje con trabajadores pasa por guardar_nomina SIEMPRE, aunque " +
+    "creas que ya lo cargaste — la fusión por RUT hace inofensivo repetir, y tu memoria puede " +
+    "estar desactualizada. La nómina REAL es la lista del estado de abajo, nada más.\n" +
     "- El CORREO PERSONAL de cada trabajador es OBLIGATORIO (ahí activan su acceso). Si faltan " +
     "correos, la tool te dirá de quiénes: pídelos con naturalidad, de a pocos.\n" +
     "- Cada dato que entregue el cliente → tool DE INMEDIATO (guardar_nomina, definir_turno, " +

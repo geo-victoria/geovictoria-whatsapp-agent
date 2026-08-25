@@ -341,6 +341,14 @@ export function resumenConfiguracion(cfg: Configuracion): string {
   if (cfg.trabajadores.length) {
     const grupos = new Set(cfg.trabajadores.map((t) => normalizarTexto(t.grupo)).filter(Boolean))
     lineas.push(`Trabajadores: ${cfg.trabajadores.length} (${grupos.size || 1} grupo${grupos.size === 1 ? "" : "s"})`)
+    // Nómina NOMINADA (caso 25-ago: sin los nombres a la vista, el modelo no
+    // puede cotejar un archivo entrante contra lo realmente guardado y
+    // "recuerda" trabajadores que ya no están). Cap defensivo de 60.
+    for (const t of cfg.trabajadores.slice(0, 60)) {
+      const nombre = `${t.nombres || ""} ${t.apellidos || ""}`.trim() || t.rut || "(sin nombre)"
+      lineas.push(`  · ${nombre} — ${t.rut || "sin RUT"} (${t.grupo || "sin grupo"})${t.correo ? "" : " [SIN CORREO]"}`)
+    }
+    if (cfg.trabajadores.length > 60) lineas.push(`  · … y ${cfg.trabajadores.length - 60} más`)
   }
   for (const t of cfg.turnos) {
     if (esTurnoLibre(t.nombre)) continue
