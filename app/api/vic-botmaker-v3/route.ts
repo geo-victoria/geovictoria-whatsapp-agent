@@ -1367,12 +1367,12 @@ async function processOneTurn(
         }
       }
       let partes = partirEnBurbujas(replyFinal)
-      // ONBOARDING: máximo 2 burbujas por turno (Lalo 24-ago, piloto: "5
-      // mensajes no leídos" — la regla de la vendedora de una burbuja por
-      // párrafo, heredada acá, generaba ráfagas). La primera burbuja queda
-      // sola (el saludo/confirmación corta) y el resto se compacta en una.
-      if (enOnboarding && partes.length > 2) {
-        partes = [partes[0], partes.slice(1).join("\n\n")]
+      // ONBOARDING: máximo 3 burbujas por turno (tope 2 del 24-ago, piloto
+      // "5 mensajes no leídos"; subido a 3 el 25-ago — el mensaje de la
+      // nómina son 3 párrafos y Lalo los quiere como burbujas separadas).
+      // Las dos primeras quedan solas y el resto se compacta en la tercera.
+      if (enOnboarding && partes.length > 3) {
+        partes = [partes[0], partes[1], partes.slice(2).join("\n\n")]
       }
       // ¿Este turno ENTREGÓ algo crítico (cotización)? Esas respuestas salen
       // siempre: descartarlas dejaría al cliente sin su link.
