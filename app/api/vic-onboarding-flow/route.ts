@@ -115,8 +115,9 @@ async function extrasParaPrefill(
 export async function GET(req: Request): Promise<NextResponse> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const contact = (new URL(req.url).searchParams.get("contact") || "").replace(/\D/g, "")
-  if (!contact) return NextResponse.json({ ok: false, error: "falta ?contact=" }, { status: 400 })
-  const b = await cargar(contact)
+  // Sin contacto (chat frío: la Code Action no logró resolver el teléfono —
+  // caso Diego 25-ago) el Flow igual debe abrir: prefill vacío, nunca 400.
+  const b = await cargar(contact || "sin-contacto")
   const extras = await extrasParaPrefill(contact, b.empresa.identificador || "")
   return NextResponse.json({
     ok: true,
@@ -153,7 +154,14 @@ export async function POST(req: Request): Promise<NextResponse> {
   const contact = String(body.contact || "").replace(/\D/g, "")
   const pantalla = String(body.pantalla || "").toUpperCase()
   const campos = body.campos || {}
-  if (!contact || !pantalla) return NextResponse.json({ ok: false, error: "faltan contact/pantalla" }, { status: 400 })
+  if (!pantalla) return NextResponse.json({ ok: false, error: "falta pantalla" }, { status: 400 })
+  // CHAT FRÍO (caso Diego 25-ago): la Code Action puede no resolver el
+  // teléfono en chats nacidos de la plantilla, sin mensaje entrante previo.
+  // Antes esto era 400 → la Code Action pintaba "⚠️ " mudo. Ahora: se validan
+  // igual los campos (la validación no necesita identidad) para devolver
+  // errores legibles; y si los campos están BIEN, se responde inválido con
+  // instrucción clara — sin contacto no hay dónde persistir el avance.
+  const sinContacto = !contact
 
   // Aplicar SOLO los campos de la pantalla al borrador en memoria y validar
   // con las reglas del cerebro. giro/direccion/comuna no viven en el borrador
@@ -192,6 +200,16 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   if (Object.keys(errores).length > 0) {
     return NextResponse.json({ ok: true, valido: false, errores })
+  }
+
+  // Campos OK pero sin identidad: no hay dónde guardar el avance ni chat que
+  // despertar. Instrucción accionable en vez del ⚠️ mudo.
+  if (sinContacto) {
+    return NextResponse.json({
+      ok: true,
+      valido: false,
+      errores: { _general: 'No pudimos identificar tu WhatsApp. Escríbele un mensaje a Vicky en este chat (un "hola" basta) y vuelve a tocar el botón.' },
+    })
   }
 
   // Pantalla válida → persistir el avance.
