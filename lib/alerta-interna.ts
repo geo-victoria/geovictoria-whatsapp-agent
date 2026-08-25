@@ -72,8 +72,20 @@ export async function avisarEquipoInterno(texto: string): Promise<boolean> {
 
   // 2. Push best-effort. Fuera de la ventana de 24h esto se pierde y no hay
   //    forma de saberlo desde acá — por eso el paso 1 va antes y no depende.
+  // INTERRUPTOR (Lalo 25-ago, "apaga las notificaciones internas a mi
+  // whatsapp, solo ensucian cuando quiero hacer pruebas"): vic_kv
+  // `avisos_internos_wsp` = "off" silencia SOLO el push de WhatsApp — la
+  // alerta sigue persistida en vic_v3_inbox (paso 1) y visible en el dash.
+  // Reactivar sin deploy: borrar la clave o ponerla en "on".
+  let silenciado = false
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    silenciado = ((await getKvValue("avisos_internos_wsp")) || "").trim().toLowerCase() === "off"
+  } catch {
+    /* sin kv legible, se avisa como siempre */
+  }
   let enviada = false
-  if (NOTIFY_TO) {
+  if (NOTIFY_TO && !silenciado) {
     enviada = await sendBotmakerMessage(NOTIFY_TO, texto).catch((e) => {
       console.error("[alerta-interna] push al equipo falló:", e)
       return false
