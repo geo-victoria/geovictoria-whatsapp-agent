@@ -322,9 +322,9 @@ const TEXTOS_T2: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     mx: "¿Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
   },
   aceptada: {
-    cl: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. El link: {LINK_PAGO}",
-    co: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. El link: {LINK_PAGO}",
-    mx: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. El link: {LINK_PAGO}",
+    cl: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de inmediato por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
+    co: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de una por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
+    mx: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de inmediato por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
   },
 }
 const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
@@ -344,9 +344,9 @@ const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     mx: "Tu cotización sigue vigente 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
   },
   aceptada: {
-    cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
-    co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
-    mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
+    cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
+    co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
+    mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
   },
 }
 
@@ -379,9 +379,12 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
       "Tu cotización quedó lista y la puedes aceptar cuando gustes.\nSi te quedó alguna duda, la resolvemos por aquí.",
   },
   aceptada: {
-    cl: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nY si prefieres transferencia, me dices y te paso los datos al tiro 😊",
-    co: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nY si prefieres transferencia, me dices y te paso los datos al tiro 😊",
-    mx: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nY si prefieres transferencia, me dices y te paso los datos al tiro 😊",
+    // Propuesta de valor de INMEDIATEZ (Lalo 25-ago): pagado el plan, la
+    // activación parte al tiro por este mismo chat — ese es el argumento de
+    // cierre, no presión falsa (principio central 25-jul).
+    cl: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nApenas quede el pago partimos al tiro con la activación de tu cuenta por este mismo chat — sin esperar a nadie. Y si prefieres transferencia, me dices y te paso los datos 😊",
+    co: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nApenas quede el pago arrancamos de una con la activación de tu cuenta por este mismo chat — sin esperar a nadie. Y si prefieres transferencia, me dices y te paso los datos 😊",
+    mx: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nEn cuanto quede el pago arrancamos enseguida con la activación de tu cuenta por este mismo chat — sin esperar a nadie. Y si prefieres transferencia, me dices y te paso los datos 😊",
   },
 }
 
@@ -404,9 +407,9 @@ const TEXTOS_T4PLUS: Record<LoopStage, { cl: string; co: string; mx: string }> =
     mx: "Tu cotización sigue disponible para aceptar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
   },
   aceptada: {
-    cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
-    co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
-    mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si quieres la dejamos lista hoy: {LINK_PAGO}",
+    cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
+    co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
+    mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
   },
 }
 
