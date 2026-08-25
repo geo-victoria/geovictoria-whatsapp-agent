@@ -648,7 +648,7 @@ export async function notificarTraspasoDeal(dealId: string): Promise<void> {
   }
 }
 
-async function aplicarTombolaDeals(dealId: string, territorio: string): Promise<void> {
+export async function aplicarTombolaDeals(dealId: string, territorio: string): Promise<void> {
   const regla = TOMBOLA_DEALS_POR_TERRITORIO[territorio] || ""
   if (!regla) return
   try {
