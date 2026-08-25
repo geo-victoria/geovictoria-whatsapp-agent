@@ -178,5 +178,8 @@ export async function GET(req: Request): Promise<Response> {
     marcadas,
     errores,
     muestraEjecutivo: ejecutivo.slice(0, 60).map((f) => `${f.numero} ${f.fono || "sin-fono"} ${new Date(f.createdMs).toISOString().slice(0, 16)}`),
+    // ?ids=1: lista completa de ids clasificados ejecutivo (para estampar
+    // desde fuera cuando este endpoint corre solo en modo lectura).
+    ...(sp.get("ids") === "1" ? { idsEjecutivo: ejecutivo.map((f) => f.id) } : {}),
   })
 }
