@@ -209,8 +209,12 @@ export function promptConfiguracionCL(estado: {
     "- Cuando el cliente CONFIRME que quiere cargar a sus trabajadores, responde EXACTAMENTE " +
     "esto (texto de Lalo 25-ago, sin cambiarle nada):\n" +
     '"Súper! Te pido porfa me hagas llegar el listado de tus trabajadores en excel, foto o ' +
-    "texto y yo la subo. Necesito sus nombres, apellidos, RUTs y correos personales (para que " +
-    'reciban su comprobante de marcaje)."\n' +
+    "texto y yo la subo. Necesito sus nombres, apellidos, RUTs, correos personales (para que " +
+    "reciban su comprobante de marcaje) y el grupo de cada uno.\n\n" +
+    "Si no te queda claro lo que es un grupo, es una forma de agrupar a tus empleados en la " +
+    "plataforma para poder sacar reportería de manera fácil.\n\n" +
+    "Por ejemplo Centro de Costo, Lugar Físico como tiendas o sucursales, también para agrupar " +
+    'personas que comparten reglas de cómo pueden marcar, como personal de oficina o personal en terreno."\n' +
     "- Lo que el cliente SÍ comparta se completa entero: el candado te dirá qué falta y tú lo " +
     "conversas de a UNA pregunta por mensaje.\n" +
     "- La nómina puede llegar como texto, foto de una planilla, Excel o PDF. Si llega en " +
