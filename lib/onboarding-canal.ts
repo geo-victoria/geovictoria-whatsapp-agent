@@ -61,6 +61,7 @@ import {
   TOOL_DEFINIR_TURNO,
   TOOL_ARMAR_PLANIFICACION,
   TOOL_ASIGNAR_PLANIFICACION,
+  TOOL_ELIMINAR_TRABAJADOR,
   TOOL_CONFIRMAR_CONFIGURACION,
 } from "./onboarding/tools"
 
@@ -189,6 +190,23 @@ export async function armarOnboarding(contact: string): Promise<{
         instruccion:
           "Si hay pendientes de la nómina, pídelos de a pocos (los correos personales primero). " +
           "Con la nómina sana, ofrece turnos/planificaciones como OPCIONALES o cerrar.",
+      }
+    }
+    if (name === TOOL_ELIMINAR_TRABAJADOR.name) {
+      const rut = String((input as { rut?: string })?.rut || "")
+      const compacto = (v: string | undefined) => String(v || "").replace(/[^0-9kK]/g, "").toUpperCase()
+      const clave = compacto(rut)
+      if (!clave) return { ok: false, error: "Falta el RUT del trabajador a eliminar." }
+      const cfg = await cargarConfig()
+      const idx = cfg.trabajadores.findIndex((t) => compacto(t.rut) === clave)
+      if (idx < 0) return { ok: false, error: `No hay ningún trabajador con RUT ${rut} en la nómina.` }
+      const [fuera] = cfg.trabajadores.splice(idx, 1)
+      cfg.asignaciones = cfg.asignaciones.filter((a) => compacto(a.rutTrabajador) !== clave)
+      await guardarConfig(cfg)
+      return {
+        ok: true,
+        eliminado: `${fuera.nombres || ""} ${fuera.apellidos || ""}`.trim() || fuera.rut,
+        ...estadoConfig(cfg),
       }
     }
     if (name === TOOL_DEFINIR_TURNO.name) {
@@ -486,6 +504,7 @@ export async function armarOnboarding(contact: string): Promise<{
             TOOL_DEFINIR_TURNO,
             TOOL_ARMAR_PLANIFICACION,
             TOOL_ASIGNAR_PLANIFICACION,
+            TOOL_ELIMINAR_TRABAJADOR,
             TOOL_CONFIRMAR_CONFIGURACION,
             consultarAgenteSoporteSchema,
           ]

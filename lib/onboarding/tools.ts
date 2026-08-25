@@ -184,3 +184,19 @@ export const TOOL_CONFIRMAR_CONFIGURACION = {
     required: ["confirmacion_explicita"],
   },
 } as const
+
+export const TOOL_ELIMINAR_TRABAJADOR = {
+  name: "eliminar_trabajador",
+  description:
+    "Elimina UN trabajador de la nómina por su RUT (también borra sus asignaciones). Úsala para " +
+    "duplicados (ej: se corrigió un RUT y quedó el registro viejo) o cuando el cliente pida " +
+    "sacar a alguien. Llamar SOLO tras confirmar con el cliente a QUIÉN se borra, nombrándolo " +
+    "con su RUT exacto.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      rut: CAMPO_TEXTO("RUT exacto del trabajador a eliminar, tal como figura en la nómina."),
+    },
+    required: ["rut"],
+  },
+} as const
