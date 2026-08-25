@@ -16,8 +16,12 @@
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 
-/** Crones vigilados. El nombre es la clave kv (latido_<nombre>). */
-export const CRONES_VIGILADOS = ["ptv", "loop", "followup", "outbound"] as const
+/** Crones vigilados. El nombre es la clave kv (latido_<nombre>).
+ * OJO: "followup" se RETIRÓ el 25-ago — vic-followup-cron se eliminó en la
+ * demolición del 12-ago y el vigía llevaba 13 días alertando cada hora hábil
+ * por un cron que ya no existe (falso positivo permanente). Al retirar un
+ * cron: sacarlo también de esta lista y borrar su vic_kv latido_<nombre>. */
+export const CRONES_VIGILADOS = ["ptv", "loop", "outbound"] as const
 export type CronVigilado = (typeof CRONES_VIGILADOS)[number]
 
 const ATRASO_MAX_MS = 30 * 60_000
