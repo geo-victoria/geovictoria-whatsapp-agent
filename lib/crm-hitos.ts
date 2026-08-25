@@ -499,13 +499,43 @@ const DEAL_KV_TTL_MS = 6 * 60 * 60 * 1000
 async function dealActivoEnKv(fono: string): Promise<string | null> {
   try {
     const { getKvValue } = await import("./supabase-persistence-v3")
-    const raw = await getKvValue(`deal_fono_${fono}`)
-    if (!raw) return null
-    const v = JSON.parse(raw) as { at?: string; dealId?: string }
-    if (!v?.dealId || !v.at || Date.now() - Date.parse(v.at) > DEAL_KV_TTL_MS) return null
-    return String(v.dealId)
+    const leer = async (): Promise<{ at?: string; dealId?: string; creando?: boolean } | null> => {
+      const raw = await getKvValue(`deal_fono_${fono}`)
+      return raw ? (JSON.parse(raw) as { at?: string; dealId?: string; creando?: boolean }) : null
+    }
+    let v = await leer()
+    if (!v?.at || Date.now() - Date.parse(v.at) > DEAL_KV_TTL_MS) return null
+    // Marca "creando" (anti-carrera 25-ago, gemelos Quilodrán): la otra puerta
+    // está pariendo el deal AHORA MISMO — esperar su id real y reusarlo.
+    if (!v.dealId && v.creando && Date.now() - Date.parse(v.at) < 120_000) {
+      for (let i = 0; i < 3 && !v?.dealId; i++) {
+        await new Promise((r) => setTimeout(r, 5000))
+        v = await leer()
+      }
+    }
+    return v?.dealId ? String(v.dealId) : null
   } catch {
     return null
+  }
+}
+
+/** Reserva la creación del deal del fono (marca "creando") ANTES de crear.
+ * false = otra puerta ya tiene deal o reserva vigente → re-consultar y REUSAR. */
+async function reservarDealEnKv(fono: string, origen: string): Promise<boolean> {
+  try {
+    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+    const raw = await getKvValue(`deal_fono_${fono}`)
+    if (raw) {
+      const v = JSON.parse(raw) as { at?: string; dealId?: string; creando?: boolean }
+      if (v?.at && Date.now() - Date.parse(v.at) < DEAL_KV_TTL_MS) {
+        if (v.dealId) return false
+        if (v.creando && Date.now() - Date.parse(v.at) < 120_000) return false
+      }
+    }
+    await setKvValue(`deal_fono_${fono}`, JSON.stringify({ at: new Date().toISOString(), creando: true, origen }))
+    return true
+  } catch {
+    return true // fail-open: mejor un posible gemelo que un hito perdido
   }
 }
 
@@ -692,6 +722,19 @@ async function convertirConDeal(
   // un compromiso agendado y el deal nace con el host como dueño.
   entregarComoLead?: boolean,
 ): Promise<string | null> {
+  // CANDADO ANTI-CARRERA (25-ago): reservar la creación ANTES de convertir.
+  // Si la emisión (u otro hito) ya está creando el deal de este fono, se
+  // espera su id real y se REUSA — los gemelos de Quilodrán nacieron en la
+  // ventana entre la consulta y la escritura del candado.
+  const fonoCandado = contact.replace(/\D/g, "")
+  if (fonoCandado && !(await reservarDealEnKv(fonoCandado, "hito"))) {
+    const otro = await dealActivoEnKv(fonoCandado)
+    if (otro) {
+      console.log(`[crm-hitos] ${fonoCandado}: creación en curso por la otra puerta — se reusa deal ${otro} (anti-carrera)`)
+      return otro
+    }
+    // Reserva ajena vencida sin id: se sigue creando (jamás perder el hito).
+  }
   const { h, api } = await zohoHeaders()
   const territorio = territorioDeContacto(contact) || "Chile"
   // Sin dato real, el N NO se inventa (Lalo 06-ago): el default 1 mandaba

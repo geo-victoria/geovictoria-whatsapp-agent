@@ -150,7 +150,49 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // ── (2) Deals varados: tómbola de deals CL (con notificación al sorteado) ──
   const alertar = new Set(body.alertaDeals || [])
+  const ROBOTS = new Set(["3525045000484500876", "3525045000000200013"])
   for (const id of body.deals || []) {
+    // CHEQUEO DE HERMANOS (caso WG 25-ago): si el mismo cliente ya tiene OTRO
+    // deal vivo con dueño HUMANO, este es un gemelo varado — alertar en vez de
+    // tombolear (re-entregarlo pone a dos vendedores sobre el mismo cliente).
+    try {
+      const g0 = await fetch(`${api}/crm/v3/Deals/${id}?fields=Deal_Name,Account_Name,Contact_Name,Stage`, { headers: H, cache: "no-store" })
+      const d0 = g0.status === 200
+        ? ((await g0.json().catch(() => ({}))) as { data?: Array<{ Deal_Name?: string; Account_Name?: { id?: string }; Contact_Name?: { id?: string } }> }).data?.[0]
+        : undefined
+      const criterios: string[] = []
+      if (d0?.Account_Name?.id) criterios.push(`Account_Name.id = ${d0.Account_Name.id}`)
+      if (d0?.Contact_Name?.id) criterios.push(`Contact_Name.id = ${d0.Contact_Name.id}`)
+      let hermano: { id?: string; nombre?: string; dueno?: string } | null = null
+      for (const c of criterios) {
+        const rq = await fetch(`${api}/crm/v3/coql`, {
+          method: "POST",
+          headers: H,
+          cache: "no-store",
+          body: JSON.stringify({
+            select_query: `select id, Deal_Name, Owner from Deals where ${c} and id != ${id} and Stage not in ('Cierre Perdido') limit 5`,
+          }),
+        })
+        const filas = rq.status === 200
+          ? ((await rq.json().catch(() => ({}))) as { data?: Array<{ id?: string; Deal_Name?: string; Owner?: { id?: string; email?: string } }> }).data || []
+          : []
+        const vivoHumano = filas.find((f) => f.Owner?.id && !ROBOTS.has(String(f.Owner.id)))
+        if (vivoHumano) {
+          hermano = { id: String(vivoHumano.id), nombre: vivoHumano.Deal_Name, dueno: vivoHumano.Owner?.email }
+          break
+        }
+      }
+      if (hermano) {
+        await avisarEquipoInterno(
+          `⚠️ RESCATE OMITIDO: "${d0?.Deal_Name || id}" es gemelo de un deal VIVO de ${hermano.dueno} (${hermano.nombre}). ` +
+            `No se re-entrega — revisar si corresponde cerrarlo como duplicado.`,
+        ).catch(() => undefined)
+        resultado.deals.push({ id, accion: "omitido", motivo: `gemelo vivo de ${hermano.dueno}`, hermano: hermano.id })
+        continue
+      }
+    } catch {
+      /* chequeo best-effort: si falla, se procede como antes */
+    }
     if (dry) {
       resultado.deals.push({ id, accion: "dry" })
       continue
