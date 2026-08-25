@@ -93,6 +93,26 @@ export async function describirImagen(imageUrl: string): Promise<string> {
       console.error(`[v3-imagen] archivo inválido (bytes=${buf.byteLength}, pdf=${esPdf})`)
       return ""
     }
+    // EXCEL (.xlsx = zip) — 25-ago, F2 nómina multi-modal: la visión no lee
+    // binarios; la planilla se transcribe a texto tabular y ESO es la
+    // "descripción" (el modelo la procesa igual que una nómina pegada).
+    if (!esPdf) {
+      const { esZip, excelATexto } = await import("./leer-excel")
+      if (esZip(bytes)) {
+        const tabla = excelATexto(bytes)
+        if (tabla) {
+          console.log(`[v3-imagen] planilla Excel transcrita (${tabla.length} chars)`)
+          return `Planilla Excel adjunta — contenido transcrito fila por fila (columnas separadas por tab):\n${tabla}`
+        }
+        console.warn(`[v3-imagen] zip sin hoja de cálculo legible: ${rawType}`)
+        return ""
+      }
+      // CSV / texto plano tabular.
+      if (rawType.includes("csv") || rawType.startsWith("text/")) {
+        const texto = Buffer.from(buf).toString("utf8").slice(0, 8000).trim()
+        if (texto) return `Archivo de texto adjunto — contenido:\n${texto}`
+      }
+    }
     const mime = esPdf ? null : pickImageMime(bytes, rawType)
     if (!esPdf && !mime) {
       console.warn(`[v3-imagen] tipo no soportado como imagen: ${rawType}`)
