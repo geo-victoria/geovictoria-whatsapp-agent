@@ -439,8 +439,16 @@ async function processOneTurn(
     const contextoUmbral = umbralInfo
       ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen)
       : ""
+    // Ejecutivo asignado (caso Carlos/RCT 25-ago): con traspaso activo o
+    // derivación sobre-umbral, el prompt recibe nombre/teléfono/correo REALES
+    // del ejecutivo — sin esto el modelo improvisaba y llegó a dar el número
+    // de la Mesa de Ayuda como si fuera el WhatsApp de la vendedora.
+    const contextoEjecutivo = await (async () => {
+      const { contextoEjecutivoAsignado } = await import("@/lib/ejecutivo-contexto")
+      return contextoEjecutivoAsignado(contact)
+    })().catch(() => "")
     const contextoCotizacion =
-      contextoUmbral + (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente
+      contextoUmbral + contextoEjecutivo + (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente
     // Directiva determinista (umbral 08-ago): si la CONVERSACIÓN declaró una
     // dotación sobre el umbral ("30 trabajadores" — en este mensaje o en
     // cualquiera anterior del cliente), la directiva va al FINAL del prompt
