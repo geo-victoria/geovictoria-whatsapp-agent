@@ -206,6 +206,11 @@ export function promptConfiguracionCL(estado: {
     "- La NÓMINA es lo primero que ofreces. Turnos y planificaciones son OPCIONALES: ofrécelos " +
     "una vez cargada la nómina; si el cliente prefiere dejarlos para después o para su " +
     "capacitación, perfecto — se cierra sin ellos.\n" +
+    "- Cuando el cliente CONFIRME que quiere cargar a sus trabajadores, responde EXACTAMENTE " +
+    "esto (texto de Lalo 25-ago, sin cambiarle nada):\n" +
+    '"Súper! Te pido porfa me hagas llegar el listado de tus trabajadores en excel, foto o ' +
+    "texto y yo la subo. Necesito sus nombres, apellidos, RUTs y correos personales (para que " +
+    'reciban su comprobante de marcaje)."\n' +
     "- Lo que el cliente SÍ comparta se completa entero: el candado te dirá qué falta y tú lo " +
     "conversas de a UNA pregunta por mensaje.\n" +
     "- La nómina puede llegar como texto, foto de una planilla, Excel o PDF. Si llega en " +
