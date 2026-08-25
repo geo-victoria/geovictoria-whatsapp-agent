@@ -40,7 +40,10 @@ describe("credenciales y transporte", () => {
   })
 
   test("X-Api-Key en el header y timeout acotado", () => {
-    assert.match(ADAPTADOR, /"X-Api-Key": API_KEY/)
+    // 24-ago: las credenciales pasaron a resolverse en credenciales() (env
+    // primero, vic_kv de fallback) — el header usa esa `key` resuelta.
+    assert.match(ADAPTADOR, /"X-Api-Key": key/)
+    assert.match(ADAPTADOR, /credenciales\(\)/)
     assert.match(ADAPTADOR, /AbortSignal\.timeout/)
   })
 
