@@ -451,19 +451,15 @@ export async function armarOnboarding(contact: string): Promise<{
             // persona — hablar del admin por nombre y correo sirve en ambos
             // casos. La contraseña temporal viaja SOLO por el correo de la
             // plataforma: Vicky nunca la conoce ni la menciona.
-            const dondeEntrar = LOGIN_URL
-              ? `Iniciar sesión en ${LOGIN_URL} con ese correo y la contraseña temporal`
-              : `Iniciar sesión en la plataforma GeoVictoria con ese correo y la contraseña temporal`
+            // Pasos de ingreso = pieza única compartida con el correo de
+            // instrucciones (Lalo 25-ago, "versión WhatsApp del instructivo").
+            const { pasosIngresoWhatsApp } = await import("./onboarding/instructivo")
             return {
               ok: true,
               mensajeParaProspecto:
                 `¡${b.empresa.nombre} ya tiene su cuenta creada en GeoVictoria! 🎉\n\n` +
                 `El acceso quedó a nombre de ${b.admin.nombre} ${b.admin.apellido}: la plataforma le envió un correo a ${alta.workEmail} con su contraseña temporal.\n\n` +
-                `Para partir son 3 pasos:\n` +
-                `1. Abrir el correo de no-reply@geovictoria.com (si no aparece en unos minutos, revisar Promociones o Spam)\n` +
-                `2. ${dondeEntrar}\n` +
-                `3. Cambiar la contraseña — y la cuenta queda operativa\n\n` +
-                `Si el administrador es otra persona, avísale que su acceso ya le llegó 😉\n\n` +
+                `Para partir:\n${pasosIngresoWhatsApp({ loginUrl: LOGIN_URL || undefined })}\n\n` +
                 `Y si quieres, aquí mismo dejamos cargados a tus trabajadores para que puedan marcar — me mandas la nómina en excel, foto o texto y yo la subo. ¿La cargamos?`,
             }
           }

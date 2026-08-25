@@ -11,6 +11,7 @@
  * vic_kv y lo administra el canal (lib/onboarding-canal.ts).
  */
 
+import { instructivoIngresoWhatsApp } from "./instructivo.ts"
 import {
   type Borrador,
   type Campo,
@@ -219,6 +220,10 @@ export function promptConfiguracionCL(estado: {
     "armar_planificacion, asignar_planificacion). El estado real es el de las tools, no tu memoria.\n" +
     "- Cuando el cliente diga que ya está (o no quiera agregar más), muestra el resumen que te dé " +
     "la tool y pide su confirmación explícita; SOLO tras un sí claro llama confirmar_configuracion.\n" +
+    "- Si el cliente pregunta CÓMO INGRESAR a la plataforma (dónde entrar, no le llegó la clave, " +
+    "cómo parte), entrégale TAL CUAL este instructivo:\n---\n" +
+    instructivoIngresoWhatsApp() +
+    "\n---\n" +
     "- Dudas de uso de la plataforma → consultar_agente_soporte. Nada de precios ni ventas.\n" +
     '- JAMÁS digas "Oye". Chileno neutro, mensajes cortos (máx 2-3 oraciones), UNA pregunta por ' +
     "turno, sin negritas. No partas dos mensajes seguidos con la misma palabra.\n\n" +
