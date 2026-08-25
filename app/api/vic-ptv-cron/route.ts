@@ -2325,10 +2325,18 @@ async function cobroAsistido(ahora: Date): Promise<{ enviados: number; pendiente
     // Señal de pago: loop cerrado por PAGO REAL (motivo diferenciado 10-ago).
     // OJO: ID_SO ya NO sirve — desde que la cotización nace en Creator al
     // emitirse, ese campo viene lleno SIEMPRE (dejaba al cobro asistido ciego).
-    const loopPagado = await supa<{ contact: string }>(
-      `vic_loop?contact=eq.${encodeURIComponent(fono)}&motivo_cierre=eq.pagado&select=contact&limit=1`,
+    const loopRow = await supa<{ contact: string; stage: string | null; motivo_cierre: string | null }>(
+      `vic_loop?contact=eq.${encodeURIComponent(fono)}&select=contact,stage,motivo_cierre&limit=1`,
     )
-    if (loopPagado.length) continue
+    const loop = loopRow[0]
+    if (loop?.motivo_cierre === "pagado") continue
+    // CADENCIA DE CIERRE (25-ago, VB Lalo): la aceptación ya no cierra el loop
+    // — pasa a la etapa 'aceptada' con sus toques 60'/24h/72h. Si esa etapa
+    // gobierna (activa o agotada: aceptada_sin_pago), el empujón +30' se
+    // RETIRA para no duplicar (el doc lo pedía: "pasando por el gate
+    // central"). El cobro asistido queda de RESPALDO para contactos que no
+    // alcanzaron a enrolarse en el loop.
+    if (loop && (loop.stage === "aceptada" || loop.motivo_cierre === "aceptada_sin_pago")) continue
     // 30 minutos de gracia para pagar solo; Modified_Time es el proxy del
     // momento de aceptación (el clic en aceptar la modifica).
     const modMs = Date.parse(String(cot.Modified_Time || ""))
