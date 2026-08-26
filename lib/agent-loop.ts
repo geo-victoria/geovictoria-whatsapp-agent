@@ -936,8 +936,14 @@ export async function runAgentLoop(params: {
               if (/^(57|52|51)\d{8,12}$/.test(digits) && okRef) {
                 await setPrefDraft(contact, {}).catch(() => {})
               } else if (/^56\d{8,12}$/.test(digits) && okRef) {
+                // BUG 26-ago (caso José Ormeño): getPrefDraft NUNCA devuelve
+                // null — entrega EMPTY_PREF_DRAFT — así que `if (!draftCL)`
+                // jamás corría y el estampado CL del 10-ago nació muerto
+                // (34 de 37 precios de agosto sin estampa → reloj de 120' en
+                // vez del de 15' de silencio). Lo que no se puede pisar es un
+                // ESCALÓN negociado, no el draft vacío.
                 const draftCL = await getPrefDraft(contact).catch(() => null)
-                if (!draftCL) await setPrefDraft(contact, {}).catch(() => {})
+                if (!draftCL || !(draftCL.escalon > 0)) await setPrefDraft(contact, {}).catch(() => {})
               }
             }
             // Si ya hay un descuento ACORDADO (escalón negociado) y el cliente
