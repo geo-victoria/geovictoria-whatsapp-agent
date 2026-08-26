@@ -2885,8 +2885,9 @@ const quoteDeElemento = (el: string): string => el.split("~")[1] || ""
 type CohortesInbound = { dias: string[]; porDia: Record<EtapaInbound, Map<string, Set<string>>> }
 
 function computarCohortesInbound(params: {
-  /** Entradas con reactivación (RPC vic_entradas_desde): contacto que
-   * escribe tras >=7 días de silencio vuelve a contar como entrante. */
+  /** Entradas del RPC vic_entradas_desde. OJO: el feed trae reactivaciones
+   * (>=7 días de silencio) pero desde el 26-ago solo se cuenta la PRIMERA
+   * entrada de la vida de cada contacto (primer hito para siempre). */
   entradas: Array<{ contact: string; at: string }>
   primeraVez: Map<string, string>
   analysisRows: Row[]
@@ -2930,8 +2931,8 @@ function computarCohortesInbound(params: {
   // cobranza. La clasificación viene del análisis (campo bolsa, taxonomía
   // v2); histórico sin bolsa → se deriva del grupo viejo. Hecho duro:
   // preform o cotización de Vicky fuerzan intención comercial cuando el
-  // análisis no la vio (o aún no corre). Un contacto puede entrar DOS
-  // veces (reactivación tras 7 días): cuenta en ambos días. ═══
+  // análisis no la vio (o aún no corre). El primer hito por contacto
+  // es PARA SIEMPRE (Lalo 26-ago): nadie vuelve a contar como entrante. ═══
   const bolsaPorTel = new Map<string, { b: string; sub: string | null; at: number }>()
   for (const r of analysisRows) {
     const tel = digits(r.contact)
@@ -2948,12 +2949,28 @@ function computarCohortesInbound(params: {
     if (/intervenci/i.test(marca)) continue
     telsConQuoteVicky.add(digits(String(q.Tel_fono_Contacto || "")))
   }
+  // ═══ PRIMER HITO PARA SIEMPRE (Lalo 26-ago): un contacto ENTRA una sola
+  // vez en la vida — el día de su primera conversación. Reactivaciones tras
+  // ≥7 días, campañas, re-engagement: nada vuelve a contarlo como entrante.
+  // Si su primera vez quedó fuera del rango visible, no aparece (correcto:
+  // ya fue contado en su día). Fallback sin primeraVez: su entrada más
+  // antigua del feed. ═══
+  const entradaMasAntigua = new Map<string, string>()
+  for (const e of entradas) {
+    const tel = digits(e.contact)
+    if (!tel) continue
+    const d = diaDe(e.at)
+    const prev = entradaMasAntigua.get(tel)
+    if (d && (!prev || d < prev)) entradaMasAntigua.set(tel, d)
+  }
   for (const e of entradas) {
     const tel = digits(e.contact)
     if (!tel || paisDeTelefono(tel) !== pais || isTestContact(tel, testSet)) continue
     if (toque0.has(tel)) continue // outbound: lo tocó la cadencia, no llegó solo
     const dia = diaDe(e.at)
     if (!diasSet.has(dia)) continue
+    const diaPrimero = diaDe(primeraVez.get(tel) || "") || entradaMasAntigua.get(tel) || dia
+    if (dia !== diaPrimero) continue
     anotar(porDia.entrantes, dia, tel)
     const cls = bolsaPorTel.get(tel)
     let b = cls?.b || "no_identificado"
@@ -2972,9 +2989,19 @@ function computarCohortesInbound(params: {
   // aceptada = fecha de aceptación; pagada = pago REAL (registro venta_dash,
   // pasado en params.pagos; fallback por cotización si el registro falla).
   const elegible = (tel: string) => Boolean(tel) && paisDeTelefono(tel) === pais && !isTestContact(tel, testSet)
+  // PRIMER PRECIO PARA SIEMPRE (Lalo 26-ago): "vio precio" es el día MÁS
+  // ANTIGUO entre el sello del preform y cualquier emisión formal — mostrar
+  // un precio actualizado o re-estampar el sello ya no lo corre a un día
+  // nuevo. Se junta primero y se anota una sola vez al final.
+  const precioDiaPorTel = new Map<string, string>()
+  const tomarPrecio = (tel: string, dia: string) => {
+    if (!dia) return
+    const prev = precioDiaPorTel.get(tel)
+    if (!prev || dia < prev) precioDiaPorTel.set(tel, dia)
+  }
   for (const [tel, iso] of preformAt) {
     if (!elegible(tel)) continue
-    anotar(porDia.precio, diaDe(iso), tel)
+    tomarPrecio(tel, diaDe(iso))
   }
   for (const q of quotes) {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
@@ -2995,11 +3022,12 @@ function computarCohortesInbound(params: {
     const el = `${tel}~${String(q.id || "")}`
     const diaEmision = diaDe(q.Created_Time)
     anotar(porDia.formal, diaEmision, el)
-    if (!preformAt.has(tel)) anotar(porDia.precio, diaEmision, tel)
+    tomarPrecio(tel, diaEmision)
     const diaAcepta = diaDe(q.Fecha_Hora_Cotizacion || q.Modified_Time)
     if (esAceptadaOMas(q)) anotar(porDia.aceptada, diaAcepta, el)
     if (esPagada(q) && !pagos) anotar(porDia.pagada, diaAcepta, el)
   }
+  for (const [tel, dia] of precioDiaPorTel) anotar(porDia.precio, dia, tel)
   if (pagos) {
     for (const pago of pagos) {
       if (!elegible(pago.tel)) continue
@@ -3263,7 +3291,7 @@ function renderInboundDiario(
     <th>Día</th><th style="text-align:center">🧲 Form Vicky</th><th style="text-align:center">Entrantes</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. En ENTRANTES, el (n🧲) es cuántas conversaciones del día vinieron del form (el resto es inbound orgánico). BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Entrantes del día; los 3 subgrupos (· morados) suman Cliente existente. Un contacto que vuelve a escribir tras ≥7 días de silencio cuenta como entrante de nuevo ese día. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Entrantes no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. En ENTRANTES, el (n🧲) es cuántas conversaciones del día vinieron del form (el resto es inbound orgánico). BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Entrantes del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Entrantes no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
