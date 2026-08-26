@@ -45,6 +45,9 @@ export type EstadoCampana = {
   pctAplicado?: number
   linkUrl?: string
   aplicadoAt?: string
+  /** Reintentos del vigía (26-ago). 99 = caso cerrado para el vigía. */
+  vigiaIntentos?: number
+  vigiaAviso?: boolean
 }
 
 function textoEsSi(t: string): boolean {
@@ -290,4 +293,121 @@ export async function aplicarCampanaAQuoteNueva(contact: string, quoteId: string
       `⚠️ CAMPAÑA 10%: la formal ${quoteId} de +${fono} se emitió pero el descuento de campaña NO quedó aplicado — aplicar a mano.`,
     ).catch(() => {})
   }
+}
+
+/**
+ * VIGÍA DE DESCUENTOS DE CAMPAÑA (orden de Lalo 26-ago: "un agente vigía que
+ * vaya corrigiendo los errores de vicky al aplicar descuentos"). Corre en el
+ * latido de 2 min: busca aceptaciones (respuesta "si") que quedaron SIN
+ * descuento aplicado y las repara solo:
+ *
+ *   - Con quoteId y sin pctAplicado → reintenta la aplicación (máx 5 veces;
+ *     al 3er fallo avisa al equipo una sola vez). Al lograrlo manda al
+ *     cliente el link con el descuento — la promesa "te confirmo por aquí"
+ *     del fallback se cumple sola.
+ *   - Sin quoteId (segmento 1) pero con formal emitida DESPUÉS de aceptar
+ *     (el hook post-emisión falló) → adopta la cotización del puntero y
+ *     aplica.
+ *   - Cotización pagada o del canal ejecutivo → cierra el caso (99): ahí no
+ *     hay nada que automatizar de más.
+ */
+export async function reintentarDescuentosCampana(): Promise<{ candidatos: number; aplicados: number }> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return { candidatos: 0, aplicados: 0 }
+  const cab = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_kv?key=like.campana_dcto_*&select=key,value&limit=300`,
+    { headers: cab, cache: "no-store" },
+  ).catch(() => null)
+  if (!r || !r.ok) return { candidatos: 0, aplicados: 0 }
+  const filas = ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) || []
+
+  let candidatos = 0
+  let aplicados = 0
+  const ahora = Date.now()
+
+  for (const fila of filas) {
+    let st: EstadoCampana
+    try {
+      st = JSON.parse(fila.value) as EstadoCampana
+    } catch {
+      continue
+    }
+    const fono = fila.key.replace("campana_dcto_", "")
+    if (st.respuesta !== "si" || st.pctAplicado) continue
+    if ((st.vigiaIntentos || 0) >= 5) continue
+    const desde = Date.parse(st.respondidoAt || "") || 0
+    if (!desde || ahora - desde < 3 * 60_000) continue
+
+    // Segmento 1 sin cotización: solo actuar si nació una formal DESPUÉS de
+    // la aceptación (hook post-emisión caído); si no, el agente sigue
+    // conversando y no hay nada que reparar.
+    if (!st.quoteId) {
+      const rp = await fetch(
+        `${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?contact=eq.${fono}&select=quote_id,updated_at&limit=1`,
+        { headers: cab, cache: "no-store" },
+      ).catch(() => null)
+      const p = rp && rp.ok ? (((await rp.json().catch(() => [])) as Array<{ quote_id?: string; updated_at?: string }>)[0] ?? null) : null
+      const emitidaAt = Date.parse(p?.updated_at || "") || 0
+      if (!p?.quote_id || emitidaAt <= desde) continue
+      st.quoteId = p.quote_id
+    }
+
+    candidatos++
+    st.vigiaIntentos = (st.vigiaIntentos || 0) + 1
+    await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
+
+    try {
+      const q = await leerQuote(st.quoteId!)
+      if (q && /pagada/i.test(q.estado)) {
+        st.vigiaIntentos = 99
+        await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
+        continue
+      }
+      if (q && /intervención humana/i.test(q.canal)) {
+        st.vigiaIntentos = 99
+        await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
+        continue
+      }
+      const base = Math.max(q ? q.dcto : 0, Number(st.pctPrevio || 0))
+      const nuevo = Math.min(base + 10, TOPE_CAMPANA)
+      const ra = await fetch(`${COTIZADOR}/api/quote-acceptance/descuento-ejecutivo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+        },
+        body: JSON.stringify({ quoteId: st.quoteId, pct: nuevo, meses: 6, regenerarPdf: true }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(45000),
+      })
+      const d = (await ra.json().catch(() => ({}))) as { ok?: boolean; pct_aplicado?: number; acceptance_url?: string }
+      if (!ra.ok || !d.ok) throw new Error(`descuento-ejecutivo ${ra.status}`)
+
+      st.pctAplicado = Number(d.pct_aplicado ?? nuevo)
+      st.linkUrl = d.acceptance_url || st.linkUrl
+      st.aplicadoAt = new Date().toISOString()
+      await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
+      await registrarRespuesta(fono, st, "si_aplicado_vigia")
+      const msg =
+        `¡Listo! 🎉 Quedó aplicado: tu plan con ${st.pctAplicado}% de descuento por los primeros 6 meses.` +
+        (st.linkUrl ? `\n\nAquí lo revisas y pagas: ${st.linkUrl}` : "") +
+        `\n\nY apenas pagues, activamos tu cuenta por este mismo chat 😊`
+      const { sendBotmakerMessage } = await import("./botmaker-push-v3")
+      const { appendTurnV3 } = await import("./supabase-persistence-v3")
+      await sendBotmakerMessage(fono, msg).catch(() => {})
+      await appendTurnV3(fono, "(vigía campaña: descuento reparado)", msg, "cl").catch(() => {})
+      aplicados++
+      console.log(`[campana-vigia] reparado ${fono} quote=${st.quoteId} → ${st.pctAplicado}%`)
+    } catch (e) {
+      console.error(`[campana-vigia] reintento fallo ${fono}/${st.quoteId}:`, e instanceof Error ? e.message : e)
+      if ((st.vigiaIntentos || 0) >= 3 && !st.vigiaAviso) {
+        st.vigiaAviso = true
+        await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
+        await avisarEquipoInterno(
+          `⚠️ CAMPAÑA 10%: el vigía lleva ${st.vigiaIntentos} intentos sin poder aplicar el descuento de +${fono} (quote ${st.quoteId}). Revisar descuento-ejecutivo / aplicar a mano.`,
+        ).catch(() => {})
+      }
+    }
+  }
+  return { candidatos, aplicados }
 }

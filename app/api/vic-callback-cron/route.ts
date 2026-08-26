@@ -35,11 +35,18 @@ export async function POST(req: Request): Promise<Response> {
   const { barrerBotonesCampana } = await import("@/lib/campana-botones")
   const botones = await barrerBotonesCampana().catch(() => undefined)
 
+  // Vigía de descuentos (Lalo 26-ago): repara aceptaciones que quedaron sin
+  // el descuento aplicado (reintenta, adopta la formal nueva, avisa al 3er
+  // fallo) y le manda al cliente el link cuando lo logra.
+  const { reintentarDescuentosCampana } = await import("@/lib/campana-descuento")
+  const vigiaDcto = await reintentarDescuentosCampana().catch(() => undefined)
+
   return NextResponse.json({
     ok: true,
     latido: true,
     despachados: despachados ?? "error",
     botones: botones ?? "error",
+    vigiaDcto: vigiaDcto ?? "error",
     voz: "eliminada (demolición biblia 12-ago — Dapta fuera)",
   })
 }
