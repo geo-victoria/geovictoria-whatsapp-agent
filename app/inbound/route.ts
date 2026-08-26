@@ -49,6 +49,17 @@ export async function GET(req: Request): Promise<Response> {
   const k = (searchParams.get("k") || "").trim()
   const esperado = (await kvGet("inbound_link_key")).trim()
   if (!esperado || k !== esperado) {
+    // CINTURÓN (26-ago, "se rompe al filtrar"): las pestañas con la foto
+    // VIEJA tienen el form de filtros sin action — su envío caía acá
+    // (/inbound?vista=inbound&desde=…) sin el token y moría en 404. Si la
+    // request trae pinta de FILTRO del dash, se redirige al dash real, donde
+    // la cookie vic_inb del lector autentica. Sin params de filtro, el 404
+    // de siempre (seguridad del token intacta).
+    if (searchParams.get("vista") || searchParams.get("desde") || searchParams.get("hasta")) {
+      const p = new URLSearchParams(searchParams)
+      p.delete("k")
+      return Response.redirect(`${new URL(req.url).origin}/api/vic-funnel?${p.toString()}`, 302)
+    }
     return new Response("No encontrado", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } })
   }
   const fresh = searchParams.get("fresh") === "1"
