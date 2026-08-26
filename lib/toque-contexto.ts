@@ -30,7 +30,7 @@ const REGLAS = [
   "1. Dos o tres frases, máximo 400 caracteres.",
   "2. Menciona la operación o el dolor CONCRETO que el cliente contó (su rubro, su equipo, su problema, con sus palabras) y el punto exacto donde quedó la conversación.",
   "3. UNA sola pregunta, al final del mensaje.",
-  "4. NO te presentes ni digas tu nombre: el cliente ya te conoce.",
+  "4. NO saludes ni te presentes: tu texto va DENTRO de un mensaje que ya parte con 'Hola, todo bien?' — entra directo al tema.",
   "5. Prohibido partir con 'Oye'. Prohibido usar guiones largos, negritas o listas.",
   "6. Tuteo chileno neutro y cercano, sin jerga.",
   "7. No inventes datos, precios ni promesas que no estén en la conversación. No ofrezcas descuentos.",

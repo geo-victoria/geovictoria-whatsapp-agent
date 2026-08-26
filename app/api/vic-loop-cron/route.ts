@@ -1015,7 +1015,12 @@ export async function GET(req: Request): Promise<Response> {
         textoFinal = texto.replaceAll("{LINK_PAGO}", puntero.acceptanceUrl).replaceAll("{VIGENCIA}", vigencia)
       }
       if (ventanaAbierta) {
-        const cuerpo = contextoT5 || textoFinal
+        // T5 personalizado = el MISMO mix de la campaña (Lalo 26-ago): marco
+        // fijo + contexto libre al medio — dentro de ventana se arma acá; fuera
+        // de ventana lo arma la plantilla con la variable ${contexto}.
+        const cuerpo = contextoT5
+          ? `Hola, todo bien? ${contextoT5}\n\nTe escribo porque quería retomar lo que quedó pendiente.`
+          : textoFinal
         const ok = await sendBotmakerMessage(r.contact, cuerpo, canal).catch(() => false)
         if (ok) {
           await appendAssistantV3(r.contact, cuerpo, country).catch(() => {})
