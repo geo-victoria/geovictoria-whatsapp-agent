@@ -933,8 +933,14 @@ export async function runAgentLoop(params: {
             {
               const digits = contact.replace(/\D/g, "")
               const okRef = (result as { ok?: boolean }).ok === true
+              // Diagnóstico 26-ago (caso Leonardo/Rovira): el estampado siguió
+              // sin correr después del fix del EMPTY_PREF_DRAFT — este log
+              // dice en qué condición muere el próximo caso real.
+              console.log(`[pref-estampa] contact=${digits} okRef=${okRef} tool=cotizar_referencial`)
               if (/^(57|52|51)\d{8,12}$/.test(digits) && okRef) {
-                await setPrefDraft(contact, {}).catch(() => {})
+                await setPrefDraft(contact, {}).catch((e) =>
+                  console.error(`[pref-estampa] setPrefDraft falló ${digits}:`, e instanceof Error ? e.message : e),
+                )
               } else if (/^56\d{8,12}$/.test(digits) && okRef) {
                 // BUG 26-ago (caso José Ormeño): getPrefDraft NUNCA devuelve
                 // null — entrega EMPTY_PREF_DRAFT — así que `if (!draftCL)`
@@ -943,7 +949,11 @@ export async function runAgentLoop(params: {
                 // vez del de 15' de silencio). Lo que no se puede pisar es un
                 // ESCALÓN negociado, no el draft vacío.
                 const draftCL = await getPrefDraft(contact).catch(() => null)
-                if (!draftCL || !(draftCL.escalon > 0)) await setPrefDraft(contact, {}).catch(() => {})
+                console.log(`[pref-estampa] contact=${digits} draftEscalon=${draftCL?.escalon ?? "null"}`)
+                if (!draftCL || !(draftCL.escalon > 0))
+                  await setPrefDraft(contact, {}).catch((e) =>
+                    console.error(`[pref-estampa] setPrefDraft falló ${digits}:`, e instanceof Error ? e.message : e),
+                  )
               }
             }
             // Si ya hay un descuento ACORDADO (escalón negociado) y el cliente
