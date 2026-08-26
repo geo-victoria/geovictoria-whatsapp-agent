@@ -3042,6 +3042,23 @@ function renderInboundDiario(
   }
   const T: Record<EtapaInbound, number> = Object.fromEntries(ETAPAS_INBOUND.map((e) => [e, totUnico(e)])) as Record<EtapaInbound, number>
   const pctDe = (parte: number, base: number) => (base > 0 ? `${Math.round((parte / base) * 100)}%` : "—")
+  // Tasa de cierre ACUMULADA desde el lunes 17-ago (Lalo 26-ago): ancla FIJA,
+  // independiente del rango visible — pagadas (por cotización) ÷ vieron precio
+  // (por contacto), sumando solo los días desde el ancla. La foto sin filtros
+  // trae 30 días, así que el ancla siempre queda cubierta; con un filtro que
+  // parta después del ancla, acumula desde donde hay data.
+  const ANCLA_CIERRE = "2026-08-17"
+  const unicosDesdeAncla = (etapa: EtapaInbound) => {
+    const u = new Set<string>()
+    for (const [dia, set] of porDia[etapa]) if (dia >= ANCLA_CIERRE) for (const t of set) u.add(t)
+    return u.size
+  }
+  const precioAcum = unicosDesdeAncla("precio")
+  const pagadaAcum = unicosDesdeAncla("pagada")
+  const tasaAcumHtml =
+    precioAcum > 0
+      ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#eef4ff;border-radius:8px">🎯 <b>Tasa de cierre acumulada desde el lun 17-ago:</b> <b>${Math.round((pagadaAcum / precioAcum) * 100)}%</b> — ${pagadaAcum} pagada${pagadaAcum === 1 ? "" : "s"} ÷ ${precioAcum} que vieron precio</div>`
+      : ""
   const nombreDia = (d: string) => {
     const wd = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "short" }).format(new Date(`${d}T12:00:00-04:00`))
     return `${wd} ${d.slice(8, 10)}-${d.slice(5, 7)}`
@@ -3149,6 +3166,7 @@ function renderInboundDiario(
   return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
   <div class="sub" style="margin:2px 0 10px"><b>${T.entrantes}</b> entrantes · ${T.ic} con intención comercial (${pctDe(T.ic, T.entrantes)}) · ${T.ce} de clientes existentes (${T.ce_sop} soporte / ${T.ce_pos} postventa / ${T.ce_cob} cobranza) · ${T.nocal} no califican · ${T.noid} sin identificar — Foto: ${T.precio} vieron precio · ${T.formal} formales · ${T.aceptada} aceptadas · <b>${T.pagada} pagadas</b></div>
   ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky, inbound + outbound)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
+  ${tasaAcumHtml}
   <style>
     th.sube,td.sube{background:#fbf9ff}
     th.sube{color:#7c3aed;font-weight:600;font-size:11.5px}
