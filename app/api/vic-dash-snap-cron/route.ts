@@ -64,7 +64,7 @@ export async function GET(req: Request): Promise<Response> {
       if (vista) p.set("vista", vista)
       const r = await fetch(`${base}/api/vic-funnel?${p.toString()}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(55_000),
+        signal: AbortSignal.timeout(110_000),
       })
       const cuerpo = await r.text().catch(() => "")
       resultados.push({ vista: vista || "main", status: r.status, bytes: cuerpo.length, ms: Date.now() - inicio })
