@@ -24,7 +24,7 @@ import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/l
 export const dynamic = "force-dynamic"
 // El chat de Vicky Cotizaciones corre un loop de tool use contra la cotizadora
 // y Zoho: necesita más que los 10 s por defecto.
-export const maxDuration = 120
+export const maxDuration = 300
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
@@ -6119,6 +6119,14 @@ function renderListaCotizaciones(
 export async function GET(req: Request): Promise<Response> {
   const { searchParams } = new URL(req.url)
   let key = (searchParams.get("key") || "").trim()
+  // Cronómetro del render (26-ago, "el dash se cae al filtrar"): cada carga
+  // deja su duración en el log para cazar los timeouts intermitentes.
+  const t0Render = Date.now()
+  const finLog = () => {
+    const p = new URLSearchParams(searchParams)
+    p.delete("key")
+    console.log(`[funnel-timing] ${Math.round((Date.now() - t0Render) / 100) / 10}s ${p.toString().slice(0, 200)}`)
+  }
 
   if (!FUNNEL_KEY) {
     return paginaAviso("Falta configurar VIC_FUNNEL_KEY", "<p>Define la variable de entorno <code>VIC_FUNNEL_KEY</code> en Vercel.</p>", 503)
@@ -7724,5 +7732,6 @@ export async function GET(req: Request): Promise<Response> {
   if (snapKey && key) {
     void kvSet(snapKey, JSON.stringify({ at: new Date().toISOString(), html }))
   }
+  finLog()
   return page(html)
 }
