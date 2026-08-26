@@ -145,7 +145,9 @@ async function notaTraspasoConversacion(leadId: string, fono: string): Promise<v
       (chatUrl
         ? `👉 Habla directo con el prospecto en Botmaker: ${chatUrl}\n\n`
         : "👉 Chat en Botmaker: busca el contacto +" + fono + " en go.botmaker.com\n\n") +
-      (transcript ? `CONVERSACIÓN RECIENTE CON VICKY:\n${transcript}` : "Sin mensajes registrados aún.")
+      (transcript
+        ? `CONVERSACIÓN RECIENTE CON VICKY:\n${transcript}`
+        : "SIN CONVERSACIÓN: este contacto no ha escrito por WhatsApp (típico: llenó el formulario de la landing y no siguió al chat). No hay transcript que buscar en el bot — llamar directo.")
     const { agregarNotaLead } = await import("@/lib/zoho-leads")
     await agregarNotaLead(leadId, "Traspaso de Vicky — conversación y chat directo", contenido)
   } catch (e) {
@@ -1029,9 +1031,15 @@ async function asignarEnZoho(
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     const fono = contact.replace(/\D/g, "")
     const res = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
-    const lead = res.ok && res.status !== 204
-      ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null; Owner?: { id?: string; name?: string; email?: string }; Lead_Status?: string; N_de_empleados?: number | string | null }> }).data?.[0]
-      : undefined
+    // GEMELOS del mismo fono (caso Paola/CPT 26-ago): el form de la landing y
+    // la emision de Vicky pueden parir DOS leads en minutos (el dedup no ve al
+    // recien nacido por el retraso de indexacion de Zoho). Si un resultado ya
+    // CONVIRTIO a deal, ese manda — entregar el gemelo sin convertir como
+    // "lead para llamar" arma doble gestion.
+    const filasLead = res.ok && res.status !== 204
+      ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Converted_Deal?: { id?: string } | null; Owner?: { id?: string; name?: string; email?: string }; Lead_Status?: string; N_de_empleados?: number | string | null }> }).data || []
+      : []
+    const lead = filasLead.find((l) => l.Converted_Deal?.id) || filasLead[0]
     if (!lead?.id) {
       // Sin lead en Zoho no hay registro que asignar: se CREA (regla 1 del
       // Proceso de Gestión de Leads: primer contacto → lead automático) ya a
@@ -1074,6 +1082,8 @@ async function asignarEnZoho(
           await updateZohoLeadStatus(creado.leadId, "4. Calificado").catch(() => {})
         }
         const r = await reasignarLeadCalificacionCL(creado.leadId, { calificado }).catch(() => null)
+        // TODA entrega CL lleva la nota con el chat (Ana 26-ago) — antes solo MX.
+        await notaTraspasoConversacion(creado.leadId, fono).catch(() => {})
         await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
         if (r?.success && r.ownerEmail && r.ownerId) {
           const tel = await telefonoDeUsuario(r.ownerId, H, api)
@@ -1238,6 +1248,8 @@ async function asignarEnZoho(
         await updateZohoLeadStatus(lead.id, "4. Calificado").catch(() => {})
       }
       const r = await reasignarLeadCalificacionCL(lead.id, { calificado: entregaCalificada }).catch(() => null)
+      // Nota con el chat en toda entrega CL (Ana 26-ago).
+      await notaTraspasoConversacion(lead.id, fono).catch(() => {})
       if (r?.success && r.ownerEmail && r.ownerId) {
         await notificarTraspasoLeadEmail(lead.id, r.ownerEmail, fono, H, api)
         const tel = await telefonoDeUsuario(r.ownerId, H, api)
@@ -1476,6 +1488,8 @@ async function traspasarATelemarketing(
     let owner = lead?.Owner && !ownerBot ? lead.Owner : undefined
     if (!owner?.id && pais === "cl") {
       const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
+      // Nota con el chat en toda entrega CL (Ana 26-ago).
+      await notaTraspasoConversacion(leadId, fono).catch(() => {})
       // Reloj de 24h sin calificar: por definición va a la tómbola SDR.
       const r = await reasignarLeadCalificacionCL(leadId, { calificado: false })
       if (r.success && r.ownerId && r.ownerEmail) {
