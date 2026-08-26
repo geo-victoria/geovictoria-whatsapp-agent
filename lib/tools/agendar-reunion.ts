@@ -185,6 +185,12 @@ export const agendarReunionSchema = {
         type: "string" as const,
         description: "País del cliente. Default Chile.",
       },
+      invitadosExtra: {
+        type: "array" as const,
+        items: { type: "string" as const },
+        description:
+          "Correos ADICIONALES del lado del cliente que deben recibir la invitacion (colegas que asistiran). Solo correos que el cliente haya dado explicitamente. El titular va en prospectEmail; aqui SOLO los extras (max 5).",
+      },
       zohoLeadId: {
         type: "string" as const,
         description:
@@ -198,6 +204,7 @@ export const agendarReunionSchema = {
 export type AgendarReunionInput = {
   slotIso: string
   prospectName: string
+  invitadosExtra?: string[]
   prospectEmail: string
   empresa?: string
   telefono?: string
@@ -263,7 +270,15 @@ export async function agendarReunion(
   const booking = await bookMeeting({
     slotIso, prospectName, prospectEmail, timeZone, language: "es",
     eventTypeId: args.eventTypeId,
-    guestEmails: duenoDeal ? [duenoDeal.email] : [],
+    // Invitados extra del cliente (caso Cowork Labs 26-ago: Vicky prometio
+    // invitar a 3 personas pero el booking solo llevaba al titular).
+    guestEmails: [
+      ...(duenoDeal ? [duenoDeal.email] : []),
+      ...((args.invitadosExtra || [])
+        .map((e) => String(e || "").trim().toLowerCase())
+        .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))
+        .slice(0, 5)),
+    ],
   })
 
   if (!booking.success) {
@@ -432,7 +447,7 @@ export async function agendarReunion(
   const mensajeParaProspecto =
     `¡Listo! Tu reunión quedó agendada para el ${fechaLegible}` +
     (atiende ? `, con ${atiende.nombre}` : organizerEmail ? `, con un ejecutivo de nuestro equipo` : "") +
-    (meetingUrl ? `. Te llegará el link de la reunión por email a ${prospectEmail}` : ` (te enviaremos el link por email)`) +
+    (meetingUrl ? `. Te llegará el link de la reunión por email a ${prospectEmail}${(args.invitadosExtra || []).length ? ` (y la invitación también a ${(args.invitadosExtra || []).join(", ")})` : ""}` : ` (te enviaremos el link por email)`) +
     datosAtiende +
     `. ¿Hay algo más en lo que pueda ayudarte?`
 
