@@ -156,6 +156,9 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
 // no esté en este mapa tampoco recibe params (default conservador): antes de
 // agregarla, mirar su cuerpo real en Botmaker.
 const VARS_PLANTILLA: Record<string, readonly string[]> = {
+  // Toque 5 personalizado fuera de ventana (26-ago): nombre lo resuelve el
+  // chat de Botmaker; contexto viene generado por conversación.
+  campana_contexto_vicky_p1_v2: ["nombre", "contexto"],
   vicky_loop_sin_precio: [],
   vicky_loop_con_precio: [],
   vicky_loop_con_precio_co: [],
@@ -982,6 +985,16 @@ export async function GET(req: Request): Promise<Response> {
             : touch >= 4
               ? TEXTOS_T4PLUS[stage][paisKey]
               : TEXTOS[stage][paisKey]
+      // TOQUE 5 PERSONALIZADO (Rodrigo/Lalo 26-ago, doc v21 — solo CL, etapas
+      // de venta): texto libre generado con el dolor del cliente y la etapa
+      // donde quedó. Si la generación falla, `contextoT5` queda null y todo
+      // sigue por el camino fijo de siempre.
+      let contextoT5: string | null = null
+      if (touch === 5 && paisKey === "cl" && !esPresentacion && stage !== "aceptada") {
+        const { generarToqueContexto } = await import("@/lib/toque-contexto")
+        contextoT5 = await generarToqueContexto(r.contact, stage).catch(() => null)
+        if (contextoT5) console.log(`[loop-cron] t5 personalizado ${r.contact} (${contextoT5.length} chars)`)
+      }
       // Etapa ACEPTADA (25-ago): los textos llevan el link real de la
       // cotización y, en el toque de urgencia, la fecha de vigencia (emisión
       // + 30 días). Sin puntero no se inventa nada: el toque se salta limpio.
@@ -1002,15 +1015,39 @@ export async function GET(req: Request): Promise<Response> {
         textoFinal = texto.replaceAll("{LINK_PAGO}", puntero.acceptanceUrl).replaceAll("{VIGENCIA}", vigencia)
       }
       if (ventanaAbierta) {
-        const ok = await sendBotmakerMessage(r.contact, textoFinal, canal).catch(() => false)
+        const cuerpo = contextoT5 || textoFinal
+        const ok = await sendBotmakerMessage(r.contact, cuerpo, canal).catch(() => false)
         if (ok) {
-          await appendAssistantV3(r.contact, textoFinal, country).catch(() => {})
-          void logToque(r.contact, `texto_${stage}`, touch, stage, paisKey)
+          await appendAssistantV3(r.contact, cuerpo, country).catch(() => {})
+          void logToque(r.contact, contextoT5 ? "texto_t5_contexto" : `texto_${stage}`, touch, stage, paisKey)
           enviadosTexto++
           ejecutado = true
-          detalle.push({ contact: r.contact, accion: "texto", touch, stage })
+          detalle.push({ contact: r.contact, accion: contextoT5 ? "texto_contexto" : "texto", touch, stage })
         } else {
           detalle.push({ contact: r.contact, accion: "texto", touch, ok: false })
+        }
+      } else if (contextoT5) {
+        // Fuera de ventana el contexto viaja como variable de la plantilla de
+        // retome (misma mecánica probada en vivo con la campaña del 10% hoy):
+        // el texto fijo de la plantilla enmarca y `${contexto}` personaliza.
+        const { contextoParaPlantilla } = await import("@/lib/toque-contexto")
+        const tplCtx = (process.env.LOOP_TPL_T5_CONTEXTO || "campana_contexto_vicky_p1_v2").trim()
+        const params = await completarParamsConChat(r.contact, canal, tplCtx, {
+          contexto: contextoParaPlantilla(contextoT5),
+        })
+        const ok = await sendBotmakerTemplate(r.contact, tplCtx, params, canal).catch(() => false)
+        if (ok) {
+          await appendAssistantV3(
+            r.contact,
+            `${contextoT5}\nTe escribo porque quería retomar lo que quedó pendiente.`,
+            country,
+          ).catch(() => {})
+          void logToque(r.contact, tplCtx, touch, stage, paisKey)
+          enviadosPlantilla++
+          ejecutado = true
+          detalle.push({ contact: r.contact, accion: "plantilla_contexto", touch, tpl: tplCtx })
+        } else {
+          detalle.push({ contact: r.contact, accion: "plantilla_contexto", touch, tpl: tplCtx, ok: false })
         }
       } else {
         const tpl = (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][paisKey]
