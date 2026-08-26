@@ -2619,7 +2619,7 @@ async function renderCampanas(): Promise<string> {
         return `<tr><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div></td>
         <td style="text-align:center"><b>${env}</b></td>
         <td style="text-align:center">${respTotal} <span class="pct">(${pct(respTotal)})</span></td>
-        <td style="text-align:center;color:#15803d"><b>${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto${a.ejecutivo.size ? ` · ${a.ejecutivo.size} vía ejecutivo` : ""}</div></td>
+        <td style="text-align:center;color:#15803d"><b>${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto</div></td>
         <td style="text-align:center;color:#b45309">${a.no.size}${a.no.size ? `<div class="sub" style="margin:2px 0 0">${a.noBoton.size} botón · ${a.no.size - a.noBoton.size} texto</div>` : ""}</td>
         <td style="text-align:center">${a.aplicados.size}</td>
         <td style="text-align:center">${pg.n ? `<b>${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
