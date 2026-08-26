@@ -79,6 +79,34 @@ async function registrarRespuesta(fono: string, st: EstadoCampana, respuesta: st
   }).catch(() => undefined)
 }
 
+/**
+ * ENTREGA DE LA ACTUALIZACIÓN (Lalo 26-ago, "ideal que le llegue correo a
+ * todos con su actualización en PDF" + "dejarle el PDF por WhatsApp"): tras
+ * aplicar el descuento, el cliente recibe (a) el correo con el PDF adjunto
+ * (send-reactivation-email con forzar) y (b) el PDF directo por WhatsApp.
+ * Todo best-effort: si algo falla, el link del chat sigue siendo la entrega.
+ */
+async function entregarActualizacion(fono: string, quoteId: string, linkPdf?: string): Promise<void> {
+  fetch(`${COTIZADOR}/api/quote-acceptance/send-reactivation-email`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+    },
+    body: JSON.stringify({ quoteId, forzar: true }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(30000),
+  }).catch(() => undefined)
+  if (linkPdf) {
+    try {
+      const { sendBotmakerMedia } = await import("./botmaker-push-v3")
+      await sendBotmakerMedia(fono, linkPdf, { filename: "cotizacion_actualizada.pdf" })
+    } catch {
+      /* el link del chat basta */
+    }
+  }
+}
+
 async function leerQuote(quoteId: string): Promise<{ estado: string; dcto: number; canal: string } | null> {
   try {
     const { getZohoAccessToken } = await import("./zoho-token")
@@ -219,6 +247,7 @@ export async function procesarRespuestaCampana(
       ok?: boolean
       pct_aplicado?: number
       acceptance_url?: string
+      link_pdf?: string
     }
     if (!r.ok || !d.ok) throw new Error(`descuento-ejecutivo ${r.status}`)
 
@@ -227,12 +256,13 @@ export async function procesarRespuestaCampana(
     st.aplicadoAt = new Date().toISOString()
     await setKvValue(claveCampana(fono), JSON.stringify(st)).catch(() => {})
     await registrarRespuesta(fono, st, "si_aplicado")
+    await entregarActualizacion(fono, st.quoteId!, d.link_pdf).catch(() => {})
     return {
       atendida: true,
       respuesta:
         `¡Listo! 🎉 Quedó aplicado: tu plan con ${st.pctAplicado}% de descuento por los primeros 6 meses.` +
         (st.linkUrl ? `\n\nAquí lo revisas y pagas: ${st.linkUrl}` : "") +
-        `\n\nY apenas pagues, activamos tu cuenta por este mismo chat 😊`,
+        `\n\nTe dejé el PDF actualizado aquí mismo y también te lo enviamos a tu correo. Y apenas pagues, activamos tu cuenta por este mismo chat 😊`,
     }
   } catch (e) {
     // Jamás dejar al cliente sin respuesta: promesa honesta + rescate manual.
@@ -286,6 +316,7 @@ export async function aplicarCampanaAQuoteNueva(contact: string, quoteId: string
     st.aplicadoAt = new Date().toISOString()
     await setKvValue(claveCampana(fono), JSON.stringify(st)).catch(() => {})
     await registrarRespuesta(fono, st, "si_aplicado_emision")
+    await entregarActualizacion(fono, quoteId, (d as { link_pdf?: string }).link_pdf).catch(() => {})
     console.log(`[campana-dcto] aplicado ${st.pctAplicado}% a quote nueva ${quoteId} de ${fono}`)
   } catch (e) {
     console.error(`[campana-dcto] hook emision fallo ${fono}/${quoteId}:`, e instanceof Error ? e.message : e)
@@ -388,10 +419,11 @@ export async function reintentarDescuentosCampana(): Promise<{ candidatos: numbe
       st.aplicadoAt = new Date().toISOString()
       await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
       await registrarRespuesta(fono, st, "si_aplicado_vigia")
+      await entregarActualizacion(fono, st.quoteId!, (d as { link_pdf?: string }).link_pdf).catch(() => {})
       const msg =
         `¡Listo! 🎉 Quedó aplicado: tu plan con ${st.pctAplicado}% de descuento por los primeros 6 meses.` +
         (st.linkUrl ? `\n\nAquí lo revisas y pagas: ${st.linkUrl}` : "") +
-        `\n\nY apenas pagues, activamos tu cuenta por este mismo chat 😊`
+        `\n\nTe dejé el PDF actualizado aquí mismo y también te lo enviamos a tu correo. Y apenas pagues, activamos tu cuenta por este mismo chat 😊`
       const { sendBotmakerMessage } = await import("./botmaker-push-v3")
       const { appendTurnV3 } = await import("./supabase-persistence-v3")
       await sendBotmakerMessage(fono, msg).catch(() => {})
