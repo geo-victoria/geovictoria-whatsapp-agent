@@ -48,6 +48,9 @@ export async function GET(req: Request): Promise<Response> {
 const POST_PERMITIDOS = new Set([
   "/api/creator/crear-ndv-desde-cot",
   "/api/payments/reconcile-pending",
+  // Correo al cliente con el PDF actualizado (campaña 10%, 26-ago): permite
+  // el retro-envío manual para aceptaciones previas al cableado automático.
+  "/api/quote-acceptance/send-reactivation-email",
 ])
 
 export async function POST(req: Request): Promise<Response> {
