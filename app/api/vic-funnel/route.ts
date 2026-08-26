@@ -2463,6 +2463,7 @@ type FilaFormVicky = {
   Created_Time?: string
   Lead_Source?: string
   Territorio?: string
+  Landing_Page?: string
   _convertido?: boolean
 }
 
@@ -2482,7 +2483,7 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
     cache: "no-store",
     body: JSON.stringify({
       select_query:
-        "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
+        "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio, Landing_Page from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
     }),
   })
   if (rq.ok && rq.status !== 204) {
@@ -2490,7 +2491,7 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
     for (const f of d.data || []) filas.push(f)
   }
   const rc = await fetch(
-    `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio&per_page=200`,
+    `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio,Landing_Page&per_page=200`,
     { headers: H, cache: "no-store" },
   )
   if (rc.ok && rc.status !== 204) {
@@ -3031,9 +3032,22 @@ function renderInboundDiario(
     /** Todos los teléfonos discables del form: marca qué Entrantes vinieron
      * de la landing/sitio (🧲) vs inbound orgánico. */
     formTels?: Set<string>
+    /** tel → origen ("🧲 /landing/..." para form-fills); sin entrada = botón
+     * directo del sitio web. Alimenta las sub-filas por origen (Lalo 26-ago). */
+    origenes?: Map<string, string>
   },
 ): string {
-  const { dias, porDia } = c
+  const { dias: diasCrudos, porDia } = c
+  // DESDE EL LUNES 17-AGO (Lalo 26-ago, "quitemos todo lo anterior"): sin un
+  // rango elegido por el usuario, la tabla, los totales y las viñetas parten
+  // en el 17-ago — lo previo es de otra era operativa y ensucia los números.
+  // Con filtro de fechas explícito se respeta lo que el usuario pida.
+  const DESDE_TABLA = "2026-08-17"
+  const dias = opts.rango ? diasCrudos : diasCrudos.filter((d) => d >= DESDE_TABLA)
+  if (!opts.rango) {
+    for (const et of ETAPAS_INBOUND) for (const k of [...porDia[et].keys()]) if (k < DESDE_TABLA) porDia[et].delete(k)
+    if (opts.formVicky) for (const k of [...opts.formVicky.keys()]) if (k < DESDE_TABLA) opts.formVicky.delete(k)
+  }
   const cnt = (etapa: EtapaInbound, dia: string) => porDia[etapa].get(dia)?.size || 0
   const totUnico = (etapa: EtapaInbound) => {
     const u = new Set<string>()
@@ -3131,15 +3145,62 @@ function renderInboundDiario(
     const sufijo = deForm > 0 ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${deForm}🧲)</span>` : ""
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${deForm ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
   }
+  // ── SUB-FILAS POR ORIGEN (Lalo 26-ago): cada día se despliega con una
+  // flechita en filas por origen — "Sitio web" (botón directo, sin form) y
+  // una por cada LANDING del miniform (Landing_Page del lead). El origen es
+  // por CONTACTO: aplica a todas sus etapas del día.
+  const ORIGEN_WEB = "🌐 Sitio web (botón directo)"
+  const origenDe = (el: string) => opts.origenes?.get(telDeElemento(el)) || ORIGEN_WEB
+  const origenesDelDia = (d: string): string[] => {
+    const set = new Set<string>()
+    for (const et of ETAPAS_INBOUND) {
+      const tels = d === "TOTAL" ? [...porDia[et].values()].flatMap((s) => [...s]) : [...(porDia[et].get(d) || [])]
+      for (const t of tels) set.add(origenDe(t))
+    }
+    return [...set].sort((a, b) => (a === ORIGEN_WEB ? -1 : b === ORIGEN_WEB ? 1 : a.localeCompare(b)))
+  }
+  const cntOrigen = (etapa: EtapaInbound, d: string, origen: string): number => {
+    const tels = d === "TOTAL" ? [...porDia[etapa].values()].flatMap((s) => [...s]) : [...(porDia[etapa].get(d) || [])]
+    const u = new Set<string>()
+    for (const t of tels) if (origenDe(t) === origen) u.add(t)
+    return u.size
+  }
+  const claseDia = (d: string) => `ofila-${d.replace(/[^0-9A-Za-z-]/g, "")}`
+  const flechaOrigen = (d: string): string => {
+    if (!opts.origenes) return ""
+    if (origenesDelDia(d).length === 0) return ""
+    return `<button class="oarrow" data-odia="${claseDia(d)}" title="Desglosar por origen (sitio web vs landings)" style="border:0;background:none;cursor:pointer;color:#00aff2;font-size:12px;padding:0 4px 0 0">▸</button>`
+  }
+  const subFilasOrigen = (d: string): string => {
+    if (!opts.origenes) return ""
+    const origenes = origenesDelDia(d)
+    if (origenes.length === 0) return ""
+    return origenes
+      .map((o) => {
+        const c = (et: EtapaInbound, cls = "") => {
+          const v = cntOrigen(et, d, o)
+          return `<td class="${cls}" style="text-align:center;color:${v > 0 ? "#374151" : "#d4d8dd"}">${v}</td>`
+        }
+        const pagO = cntOrigen("pagada", d, o)
+        const precioO = cntOrigen("precio", d, o)
+        return `<tr class="ofila ${claseDia(d)}" style="display:none;background:#f7fafc;font-size:12px">
+      <td style="padding-left:22px;white-space:nowrap;color:#4b5563">${esc(o)}</td>
+      <td style="text-align:center;color:#c8cdd3">—</td>${c("entrantes")}${c("ic")}${c("ce")}${c("ce_sop", "sube")}${c("ce_pos", "sube")}${c("ce_cob", "sube")}${c("nocal")}${c("noid")}
+      ${c("precio", "divi")}${c("formal")}${c("aceptada")}${c("pagada")}
+      <td style="text-align:center;color:#6b7280">${pctDe(pagO, precioO)}</td>
+    </tr>`
+      })
+      .join("")
+  }
   const filas = [...dias].reverse().map((d) => {
     const pag = cnt("pagada", d)
     const vioPrecio = cnt("precio", d)
     return `<tr>
-      <td style="white-space:nowrap">${nombreDia(d)}</td>
+      <td style="white-space:nowrap">${flechaOrigen(d)}${nombreDia(d)}</td>
       ${celdaForm(d)}${celda(d, "entrantes")}${celda(d, "ic")}${celda(d, "ce")}${celda(d, "ce_sop", "sube")}${celda(d, "ce_pos", "sube")}${celda(d, "ce_cob", "sube")}${celda(d, "nocal")}${celda(d, "noid")}
       ${celda(d, "precio", "divi")}${celda(d, "formal")}${celda(d, "aceptada")}${celda(d, "pagada")}
       <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}</td>
-    </tr>`
+    </tr>${subFilasOrigen(d)}`
   }).join("")
   const filaTotal = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
     <td><b>TOTAL</b></td>
@@ -3157,11 +3218,11 @@ function renderInboundDiario(
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${deForm ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
   }
   const filaTotalOk = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
-    <td><b>TOTAL</b></td>
+    <td>${flechaOrigen("TOTAL")}<b>TOTAL</b></td>
     ${celdaForm("TOTAL")}${celdaTotal("entrantes")}${celdaTotal("ic")}${celdaTotal("ce")}${celdaTotal("ce_sop", "sube")}${celdaTotal("ce_pos", "sube")}${celdaTotal("ce_cob", "sube")}${celdaTotal("nocal")}${celdaTotal("noid")}
     ${celdaTotal("precio", "divi")}${celdaTotal("formal")}${celdaTotal("aceptada")}${celdaTotal("pagada")}
     <td style="text-align:center"><b>${pctDe(T.pagada, T.precio)}</b></td>
-  </tr>`
+  </tr>${subFilasOrigen("TOTAL")}`
   void filaTotal
   return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
   <div class="sub" style="margin:2px 0 10px"><b>${T.entrantes}</b> entrantes · ${T.ic} con intención comercial (${pctDe(T.ic, T.entrantes)}) · ${T.ce} de clientes existentes (${T.ce_sop} soporte / ${T.ce_pos} postventa / ${T.ce_cob} cobranza) · ${T.nocal} no califican · ${T.noid} sin identificar — Foto: ${T.precio} vieron precio · ${T.formal} formales · ${T.aceptada} aceptadas · <b>${T.pagada} pagadas</b></div>
@@ -3211,6 +3272,17 @@ function renderInboundDiario(
     var TRS = ${jsonSeguro(TRS)};
     var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Vicky (llenaron el miniform)" })};
     var pop = document.createElement("div"); pop.id = "inbpop"; document.body.appendChild(pop);
+    // Flechitas de origen (Lalo 26-ago): despliegan las sub-filas por origen
+    // (sitio web vs cada landing) del día.
+    document.querySelectorAll(".oarrow").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var abierto = b.textContent === "▾";
+        b.textContent = abierto ? "▸" : "▾";
+        document.querySelectorAll("tr." + b.getAttribute("data-odia")).forEach(function (tr) {
+          tr.style.display = abierto ? "none" : "table-row";
+        });
+      });
+    });
     var timer = null;
     function abrir(td) {
       clearTimeout(timer);
@@ -6860,6 +6932,10 @@ export async function GET(req: Request): Promise<Response> {
         // llegaron al chat, y qué entrantes vinieron del form (por teléfono).
         const formConvPorDia = new Map<string, number>()
         const formTels = new Set<string>()
+        // Origen por contacto (Lalo 26-ago): quien llenó el form queda con la
+        // LANDING de su lead; quien llegó por el botón directo cae a "Sitio
+        // web" en el render. Un tel con varios fills conserva el primero.
+        const origenPorTel = new Map<string, string>()
         for (const f of formLeads) {
           const ms = Date.parse(String(f.Created_Time || ""))
           if (!Number.isFinite(ms)) continue
@@ -6869,6 +6945,10 @@ export async function GET(req: Request): Promise<Response> {
           // El set de tels cubre TODO el form (aunque el fill quede fuera del
           // rango visible): un form de ayer con chat de hoy marca igual.
           if (telOk) formTels.add(telForm)
+          if (telOk && !origenPorTel.has(telForm)) {
+            const lp = String(f.Landing_Page || "").trim().replace(/^https?:\/\/[^/]+/i, "")
+            origenPorTel.set(telForm, `🧲 ${lp || "landing (sin página)"}`)
+          }
           if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
           // Mismo día-Santiago del resto de la tabla (YYYY-MM-DD).
           const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms))
@@ -6888,7 +6968,7 @@ export async function GET(req: Request): Promise<Response> {
             String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim()
           if (qid && emp) nombresQuote.set(qid, emp)
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels })
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
