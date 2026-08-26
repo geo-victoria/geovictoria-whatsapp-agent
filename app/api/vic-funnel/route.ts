@@ -2574,24 +2574,10 @@ async function renderCampanas(): Promise<string> {
         a.segmentos.set(seg, (a.segmentos.get(seg) || 0) + 1)
       } catch { /* kv corrupto */ }
     }
-    // Respuesta por TEXTO: contactos de campaña cuyo último mensaje es
-    // posterior al primer envío de su campaña.
-    const rConv = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=contact,last_user_at&limit=10000`, { headers: h, cache: "no-store" })
-    const texto = new Map<string, Set<string>>()
-    if (rConv.ok) {
-      const convs = ((await rConv.json().catch(() => [])) as Array<{ contact: string; last_user_at?: string }>) || []
-      for (const cv of convs) {
-        const camp = contactosDe.get(digits(cv.contact))
-        if (!camp) continue
-        const a = porCampana.get(camp)
-        const t = Date.parse(String(cv.last_user_at || ""))
-        if (a && Number.isFinite(t) && t >= a.inicio) {
-          const set = texto.get(camp) || new Set<string>()
-          set.add(cv.contact)
-          texto.set(camp, set)
-        }
-      }
-    }
+    // Respondieron = sí + no (Lalo 26-ago, "sí y no deben sumar el total").
+    // Toda respuesta por TEXTO se clasifica por intención y entra como evento
+    // si_texto/no_texto (hoy: clasificación manual/IA; automatizarla es el
+    // siguiente paso) — el conteo por last_user_at murió con la columna.
     // Pagos posteriores al envío, atribuidos por contacto de la campaña.
     const rVd = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.venta_dash_v3_*&select=key,value&limit=4000`, { headers: h, cache: "no-store" })
     const rPtr = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,quote_id&limit=8000`, { headers: h, cache: "no-store" })
@@ -2626,8 +2612,7 @@ async function renderCampanas(): Promise<string> {
         // caso Alan 26-ago) no cuenta como no.
         for (const c of a.si) { a.no.delete(c); a.noBoton.delete(c) }
         const env = a.enviados.size
-        const respTexto = texto.get(nombre)?.size || 0
-        const respTotal = new Set([...a.si, ...a.no, ...(texto.get(nombre) || [])]).size
+        const respTotal = new Set([...a.si, ...a.no]).size
         const pg = pagos.get(nombre) || { n: 0, monto: 0 }
         const segTxt = [...a.segmentos.entries()].sort().map(([k, v]) => `${SEG_ETQ[k] || k}: ${v}`).join(" · ")
         const pct = (n: number) => (env ? `${Math.round((n / env) * 100)}%` : "—")
@@ -2636,14 +2621,13 @@ async function renderCampanas(): Promise<string> {
         <td style="text-align:center">${respTotal} <span class="pct">(${pct(respTotal)})</span></td>
         <td style="text-align:center;color:#15803d"><b>${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto${a.ejecutivo.size ? ` · ${a.ejecutivo.size} vía ejecutivo` : ""}</div></td>
         <td style="text-align:center;color:#b45309">${a.no.size}${a.no.size ? `<div class="sub" style="margin:2px 0 0">${a.noBoton.size} botón · ${a.no.size - a.noBoton.size} texto</div>` : ""}</td>
-        <td style="text-align:center">${respTexto}</td>
         <td style="text-align:center">${a.aplicados.size}</td>
         <td style="text-align:center">${pg.n ? `<b>${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
       })
     if (!filas.length) return ""
     return `<div class="card" id="campanas"><h2>📣 Campañas de re-encantamiento</h2>
   <div class="sub" style="margin:2px 0 10px">Resultados por campaña: respuestas por botón y por texto, descuentos aplicados automáticos y pagos POSTERIORES al envío de contactos de la campaña. Los contactos internos de prueba quedan fuera. Regla: máximo 2 campañas por cliente.</div>
-  <div style="overflow-x:auto"><table><thead><tr><th>Campaña · segmentos</th><th>Enviados</th><th>Respondieron</th><th>Sí al descuento</th><th>No</th><th>Por texto</th><th>Dcto aplicado</th><th>Pagos post-envío</th></tr></thead>
+  <div style="overflow-x:auto"><table><thead><tr><th>Campaña · segmentos</th><th>Enviados</th><th>Respondieron</th><th>Sí al descuento</th><th>No</th><th>Dcto aplicado</th><th>Pagos post-envío</th></tr></thead>
   <tbody>${filas.join("")}</tbody></table></div></div>`
   } catch (e) {
     console.warn("[funnel] renderCampanas falló:", e instanceof Error ? e.message : e)
