@@ -30,10 +30,16 @@ export async function POST(req: Request): Promise<Response> {
   const { despacharHuerfanos } = await import("@/lib/despachador-huerfanos")
   const despachados = await despacharHuerfanos().catch(() => undefined)
 
+  // Botones de campaña: los QUICK_REPLY de plantilla no pasan por el webhook
+  // (26-ago) — el latido de 2 min los caza directo del feed de Botmaker.
+  const { barrerBotonesCampana } = await import("@/lib/campana-botones")
+  const botones = await barrerBotonesCampana().catch(() => undefined)
+
   return NextResponse.json({
     ok: true,
     latido: true,
     despachados: despachados ?? "error",
+    botones: botones ?? "error",
     voz: "eliminada (demolición biblia 12-ago — Dapta fuera)",
   })
 }

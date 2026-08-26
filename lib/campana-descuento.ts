@@ -109,7 +109,18 @@ export async function procesarRespuestaCampana(
   contact: string,
   mensaje: string,
 ): Promise<{ atendida: boolean; respuesta?: string }> {
-  const texto = String(mensaje || "").trim().toLowerCase()
+  // Los QUICK_REPLY de plantilla llegan como JSON {"button":"Quiero el
+  // descuento",...} — se extrae el texto del botón antes de matchear.
+  let crudo = String(mensaje || "").trim()
+  if (crudo.startsWith("{")) {
+    try {
+      const j = JSON.parse(crudo) as { button?: unknown }
+      if (j && typeof j.button === "string" && j.button.trim()) crudo = j.button.trim()
+    } catch {
+      /* no era JSON */
+    }
+  }
+  const texto = crudo.toLowerCase()
   const si = textoEsSi(texto)
   const no = textoEsNo(texto)
   if (!si && !no) return { atendida: false }
