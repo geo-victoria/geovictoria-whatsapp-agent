@@ -2526,11 +2526,17 @@ async function renderCampanas(): Promise<string> {
     type Agg = {
       enviados: Set<string>; si: Set<string>; no: Set<string>; aplicados: Set<string>
       ejecutivo: Set<string>; inicio: number; segmentos: Map<string, number>
+      // Vía de la respuesta (Lalo 26-ago, "diferenciar botón y texto"): el
+      // barrido de botones registra respuesta "si"/"si_ejecutivo"/"no"; las
+      // clasificaciones de intención por TEXTO entran como "si_texto"/
+      // "no_texto". Marcadores del vigía ("si_aplicado_vigia") suman al total
+      // pero no definen vía: si el contacto no tiene evento de botón, es texto.
+      siBoton: Set<string>; noBoton: Set<string>
     }
     const porCampana = new Map<string, Agg>()
     const agg = (c: string): Agg => {
       let a = porCampana.get(c)
-      if (!a) { a = { enviados: new Set(), si: new Set(), no: new Set(), aplicados: new Set(), ejecutivo: new Set(), inicio: Number.MAX_SAFE_INTEGER, segmentos: new Map() }; porCampana.set(c, a) }
+      if (!a) { a = { enviados: new Set(), si: new Set(), no: new Set(), aplicados: new Set(), ejecutivo: new Set(), inicio: Number.MAX_SAFE_INTEGER, segmentos: new Map(), siBoton: new Set(), noBoton: new Set() }; porCampana.set(c, a) }
       return a
     }
     const INTERNOS = new Set(["56944668823", "56978385048"])
@@ -2542,9 +2548,15 @@ async function renderCampanas(): Promise<string> {
       if (e.evento === "enviado") a.enviados.add(e.contact)
       if (e.evento === "respuesta") {
         const r = String(e.respuesta || "")
-        if (r === "no") a.no.add(e.contact)
-        else if (r.startsWith("si")) {
+        if (r.startsWith("no")) {
+          a.no.add(e.contact)
+          if (r === "no") a.noBoton.add(e.contact)
+        } else if (r.startsWith("si")) {
           a.si.add(e.contact)
+          // Botón = lo que registra el barrido de QUICK_REPLY (si / si_aplicado
+          // / si_ejecutivo). "si_aplicado_vigia" NO define vía (el vigía repara
+          // ambas): sin evento de botón, el contacto cuenta como texto.
+          if (r === "si" || r === "si_aplicado" || r === "si_ejecutivo") a.siBoton.add(e.contact)
           if (r === "si_ejecutivo") a.ejecutivo.add(e.contact)
         }
       }
@@ -2610,6 +2622,9 @@ async function renderCampanas(): Promise<string> {
       .filter(([, a]) => a.enviados.size > 0)
       .sort((x, y) => y[1].inicio - x[1].inicio)
       .map(([nombre, a]) => {
+        // Intención FINAL manda: un "no" seguido de "sí" (misclick del botón,
+        // caso Alan 26-ago) no cuenta como no.
+        for (const c of a.si) { a.no.delete(c); a.noBoton.delete(c) }
         const env = a.enviados.size
         const respTexto = texto.get(nombre)?.size || 0
         const respTotal = new Set([...a.si, ...a.no, ...(texto.get(nombre) || [])]).size
@@ -2619,8 +2634,8 @@ async function renderCampanas(): Promise<string> {
         return `<tr><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div></td>
         <td style="text-align:center"><b>${env}</b></td>
         <td style="text-align:center">${respTotal} <span class="pct">(${pct(respTotal)})</span></td>
-        <td style="text-align:center;color:#15803d"><b>${a.si.size}</b>${a.ejecutivo.size ? ` <span class="pct">(${a.ejecutivo.size} vía ejecutivo)</span>` : ""}</td>
-        <td style="text-align:center;color:#b45309">${a.no.size}</td>
+        <td style="text-align:center;color:#15803d"><b>${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto${a.ejecutivo.size ? ` · ${a.ejecutivo.size} vía ejecutivo` : ""}</div></td>
+        <td style="text-align:center;color:#b45309">${a.no.size}${a.no.size ? `<div class="sub" style="margin:2px 0 0">${a.noBoton.size} botón · ${a.no.size - a.noBoton.size} texto</div>` : ""}</td>
         <td style="text-align:center">${respTexto}</td>
         <td style="text-align:center">${a.aplicados.size}</td>
         <td style="text-align:center">${pg.n ? `<b>${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
