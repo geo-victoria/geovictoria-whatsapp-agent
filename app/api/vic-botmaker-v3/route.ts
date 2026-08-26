@@ -795,7 +795,14 @@ async function processOneTurn(
     // Se evalúa CADA mención de "% de descuento" con su contexto inmediato: la
     // que viene precedida de capacitación/regalo/incluida se ignora; cualquier
     // otra sigue contando como oferta (un mensaje con AMBAS se detecta igual).
-    const PCT_DESCUENTO_RE = /(\d{1,3})\s*%\s*de\s+descuento|descuento\s+del?\s+(\d{1,3})\s*%/gi
+    // AMPLIADO 26-ago (caso Leonardo/Rovira COT905): el modelo prometió "20%
+    // menos durante los primeros 6 meses" — la forma "X% menos" no matcheaba
+    // y la promesa salió sin tool (la formal nació con otro %). Se suman
+    // "dcto", "rebaja", "off" y "X% menos" (esta última exige señal de precio
+    // en el contexto para no confundirse con pitches tipo "30% menos de
+    // atrasos").
+    const PCT_DESCUENTO_RE =
+      /(\d{1,3})\s*%\s*(?:de\s+)?(?:descuento|dcto|rebaja|off)|(?:descuento|dcto|rebaja)\s+del?\s+(\d{1,3})\s*%|(\d{1,3})\s*%\s*menos/gi
     let ofrecePctDescuento = false
     let pctNegociado: number | null = null
     let finMencionPrevia = 0
@@ -807,8 +814,11 @@ async function processOneTurn(
       const contexto = reply.slice(Math.max(finMencionPrevia, idx - 60), idx)
       finMencionPrevia = idx + m[0].length
       if (/capacitaci|de\s+regalo|incluida\s+de/i.test(contexto)) continue
+      // La forma "X% menos" solo cuenta con señal de PRECIO alrededor (evita
+      // falsos positivos de pitch: "un 30% menos de atrasos").
+      if (m[3] !== undefined && !/\$|\bprecio|\bplan\b|mensual|\buf\b|\biva\b|paga/i.test(contexto)) continue
       ofrecePctDescuento = true
-      if (pctNegociado === null) pctNegociado = Number(m[1] ?? m[2])
+      if (pctNegociado === null) pctNegociado = Number(m[1] ?? m[2] ?? m[3])
     }
     const ofreceRebajaSinPct =
       /\bte\s+(ahorro|regalo|bonifico|rebajo|descuento)\b|\bte\s+(?:la|lo|los|las)\s+(?:dejo|doy)\s+(?:gratis|sin\s+costo|sin\s+cargo|en\s+(?:0|cero))/i.test(
