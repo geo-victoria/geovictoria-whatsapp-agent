@@ -2519,6 +2519,10 @@ async function renderFormLanding(primeraVez: Map<string, string>, visibles: Fila
     // Por FUENTE (Lalo 21-ago): el form vive en landings de campaña Y en el
     // sitio web — Lead_Source separa Google Ads (campaña) de SEO/Direct.
     const porFuente = new Map<string, Cnt>()
+    // Para el complemento "botón directo": teléfonos que SÍ pasaron por el
+    // form y la fecha del lead más antiguo visible (inicio del período).
+    const telsForm = new Set<string>()
+    let desdeMs = Number.POSITIVE_INFINITY
     const filasHtml: string[] = []
     for (const f of visibles) {
       let tel = digits(String(f.Phone || ""))
@@ -2528,6 +2532,8 @@ async function renderFormLanding(primeraVez: Map<string, string>, visibles: Fila
       if (/^(56|57|52|51)\1\d{8,12}$/.test(tel)) tel = tel.slice(2)
       const telOk = /^(56|57|52|51)\d{8,12}$/.test(tel)
       const creadoMs = Date.parse(String(f.Created_Time || ""))
+      if (telOk) telsForm.add(tel)
+      if (Number.isFinite(creadoMs) && creadoMs < desdeMs) desdeMs = creadoMs
       const convIso = telOk ? primeraVez.get(tel) : undefined
       const terr = String(f.Territorio || "").trim().toLowerCase()
       const pais = telOk
@@ -2569,11 +2575,25 @@ async function renderFormLanding(primeraVez: Map<string, string>, visibles: Fila
           `<td>${estado}</td><td>${f.Lead_Status || "—"}${f._convertido ? " · convertido" : ""}</td><td>${dueno}</td><td>${f.Lead_Source || "—"}</td></tr>`,
       )
     }
+    // BOTÓN DIRECTO SIN ATRIBUCIÓN (Lalo 26-ago, "cuántas inició Vicky por
+    // Google Ads vs orgánico"): el corte por Fuente atribuye SOLO a quienes
+    // pasaron por el form; el resto de las conversaciones nacidas en el mismo
+    // período llegaron por el botón de WhatsApp directo (hoy sin atribución
+    // Ads/SEO — para atribuirlas haría falta un wa.me distinto por canal).
+    let botonDirecto = 0
+    if (Number.isFinite(desdeMs)) {
+      for (const [telConv, iso] of primeraVez) {
+        if (!/^(56|57|52|51)\d{8,12}$/.test(telConv) || telsForm.has(telConv)) continue
+        const t = Date.parse(iso)
+        if (Number.isFinite(t) && t >= desdeMs) botonDirecto++
+      }
+    }
     const chips =
       `<span class="sub">Total ${totalCnt.total}</span> · <span style="color:#15803d">💬 conversó ${totalCnt.conv}</span>` +
       (totalCnt.ya ? ` · <span style="color:#15803d">ya conversaba ${totalCnt.ya}</span>` : "") +
       ` · <span style="color:#b45309">⏳ sin conversación ${totalCnt.sin}</span> · <span style="color:#b45309">⚠️ sin teléfono ${totalCnt.sinTel}</span>` +
-      (totalCnt.malo ? ` · <span style="color:#b91c1c">✖ teléfono inválido ${totalCnt.malo}</span>` : "")
+      (totalCnt.malo ? ` · <span style="color:#b91c1c">✖ teléfono inválido ${totalCnt.malo}</span>` : "") +
+      ` · <span style="color:#475569">📲 botón directo sin form: ${botonDirecto} conversaciones en el mismo período (sin atribución)</span>`
     // Tablas resumen: mismas columnas, un corte por país y otro por dueño.
     const tablaResumen = (titulo: string, mapa: Map<string, Cnt>): string => {
       const filasR = [...mapa.entries()]
