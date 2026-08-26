@@ -3838,7 +3838,7 @@ async function renderVickyCotizaciones(contact: string, key: string, quoteId = "
   @media (max-width:760px){.cols{flex-direction:column}.lado{width:auto;position:static}}
 </style></head><body><div class="wrap">
   <p style="margin:0 0 10px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><a href="?key=${encodeURIComponent(key)}">← Volver a la cola de gestión</a>
-    <form method="GET" style="display:inline-flex;gap:6px;align-items:center">
+    <form method="GET" action="/api/vic-funnel" style="display:inline-flex;gap:6px;align-items:center">
       <input type="hidden" name="key" value="${esc(key)}">
       <input type="text" name="buscarcot" placeholder="Otra cotización o teléfono" style="padding:6px 10px;border:1px solid #d0d5db;border-radius:8px;font-size:13px;font-family:inherit;width:190px">
       <button type="submit" style="background:#00aff2;color:#fff;border:0;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer">🔍 Buscar</button>
@@ -4436,7 +4436,7 @@ async function renderEditorCotizaciones(key: string): Promise<Response> {
   <div class="sub" style="margin-top:4px">Busca una cotización por su número o toma una de las recientes, y edítala conversando con Vicky Cotizaciones: cambia dotación, relojes o módulos con los precios oficiales, o aplica descuento (escalera oficial, tope 20%). El PDF se regenera, el link de aceptación no cambia y al cliente se le envía solo con tu OK.</div>
   <div class="card">
     <h2>🔍 Buscar por número</h2>
-    <form method="GET" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <form method="GET" action="/api/vic-funnel" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <input type="hidden" name="key" value="${esc(key)}">
       <input type="text" name="buscarcot" placeholder="Ej: COT400 o +56 9 1234 5678" required style="padding:9px 12px;border:1px solid #d0d5db;border-radius:8px;font-size:14px;font-family:inherit;width:220px">
       <button type="submit" style="background:#ffbb00;color:#fff;border:0;border-radius:8px;padding:9px 18px;font-family:${GV_TITLE_FONT};font-weight:700;font-size:14px;cursor:pointer">Buscar y abrir</button>
@@ -7613,7 +7613,7 @@ export async function GET(req: Request): Promise<Response> {
   </div>
   <div class="sub">${(Object.keys(PAISES) as Pais[]).map((k) => `<a href="?key=${encodeURIComponent(key)}&pais=${k}${vista !== "gestion" ? `&vista=${vista}` : ""}" style="font-weight:${pais === k ? 700 : 400}">${PAISES[k].label}</a>`).join(" | ")}${quien ? ` &nbsp;·&nbsp; 👤 <b>${esc(quien)}</b> <a href="?salir=1" style="font-weight:400">(salir)</a>` : ""}</div>
   <div class="sub" style="margin-top:6px">
-    <form method="GET" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <form method="GET" action="/api/vic-funnel" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="hidden" name="key" value="${esc(key)}">
       <input type="hidden" name="pais" value="${pais}">
       ${vista !== "gestion" ? `<input type="hidden" name="vista" value="${vista}">` : ""}
