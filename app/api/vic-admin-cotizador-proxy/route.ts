@@ -51,6 +51,9 @@ const POST_PERMITIDOS = new Set([
   // Correo al cliente con el PDF actualizado (campaña 10%, 26-ago): permite
   // el retro-envío manual para aceptaciones previas al cableado automático.
   "/api/quote-acceptance/send-reactivation-email",
+  // Aplicación manual de descuento (campaña 10%, 26-ago): los casos de canal
+  // ejecutivo que el vigía cierra a propósito se resuelven por orden humana.
+  "/api/quote-acceptance/descuento-ejecutivo",
 ])
 
 export async function POST(req: Request): Promise<Response> {
