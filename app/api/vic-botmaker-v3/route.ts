@@ -1996,6 +1996,26 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
 
+    // 6-bis. RESPUESTA DE CAMPAÑA DE DESCUENTO (26-ago): los botones de la
+    // plantilla `vicky_campana_dcto_v1` llegan como payload y se resuelven
+    // DETERMINISTAS acá, sin lock ni modelo — el % lo aplica el backend.
+    // Solo intercepta si el contacto tiene campaña sembrada en vic_kv.
+    try {
+      const { procesarRespuestaCampana } = await import("@/lib/campana-descuento")
+      const camp = await procesarRespuestaCampana(contact, message)
+      if (camp.atendida) {
+        console.log(`[v3-campana] respuesta de campaña de ${contact} atendida determinista`)
+        const { appendTurnV3 } = await import("@/lib/supabase-persistence-v3")
+        if (camp.respuesta) {
+          await sendBotmakerMessage(contact, camp.respuesta).catch(() => false)
+          await appendTurnV3(contact, message, camp.respuesta, "cl").catch(() => {})
+        }
+        return NextResponse.json({ reply: "" })
+      }
+    } catch (e) {
+      console.error("[v3-campana] error procesando respuesta de campaña:", e instanceof Error ? e.message : e)
+    }
+
     // 7. Tomar el lock. Solo UNA request por contacto procesa la ráfaga; las
     //    demás dejan su mensaje en el buffer y el procesador activo lo drena.
     const lockResult = await acquireLock(contact, messageHash)

@@ -1073,6 +1073,13 @@ export async function runAgentLoop(params: {
                 rut: typeof toolInput.rutEmpresa === "string" ? toolInput.rutEmpresa : undefined,
                 empresa: typeof toolInput.empresa === "string" ? toolInput.empresa : undefined,
               }).catch(() => {})
+              // CAMPAÑA 10% (26-ago): si el contacto aceptó la oferta de la
+              // campaña ANTES de tener formal (segmento vio-precio), la
+              // emisión recién creada recibe su % exacto por fuera del chat
+              // (descuento-ejecutivo). Best-effort: no toca la conversación.
+              import("./campana-descuento")
+                .then((m) => m.aplicarCampanaAQuoteNueva(contact, qid))
+                .catch(() => {})
               // TODO lo que la emisión creó en Zoho queda registrado (Lalo
               // 15-ago). La cotización trae además cuenta y contacto, que
               // hasta hoy no quedaban anotados en ninguna parte — y el
