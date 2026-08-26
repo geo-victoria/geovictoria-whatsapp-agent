@@ -2506,6 +2506,136 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
   return filas.filter((f) => f.id && !esInternoForm(f))
 }
 
+/** 📣 PESTAÑA CAMPAÑAS (Lalo 26-ago): resultados de cada campaña de
+ * re-encantamiento — enviados, respuestas por botón y por texto, descuentos
+ * aplicados y pagos posteriores al envío. Fuentes: vic_campanas (eventos),
+ * vic_kv campana_dcto_* (estado por contacto), conversaciones (respuesta por
+ * texto) y el registro de ventas (pagos). Todo best-effort: sin datos, la
+ * tarjeta no aparece. */
+async function renderCampanas(): Promise<string> {
+  try {
+    const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    const [rEv, rKv] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/vic_campanas?select=contact,campana,evento,respuesta,at&limit=8000`, { headers: h, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.campana_dcto_*&select=key,value&limit=1000`, { headers: h, cache: "no-store" }),
+    ])
+    if (!rEv.ok) return ""
+    const eventos = ((await rEv.json().catch(() => [])) as Array<{ contact: string; campana: string; evento: string; respuesta?: string; at?: string }>) || []
+    const kvs = rKv.ok ? (((await rKv.json().catch(() => [])) as Array<{ key: string; value: string }>) || []) : []
+    if (!eventos.length) return ""
+    type Agg = {
+      enviados: Set<string>; si: Set<string>; no: Set<string>; aplicados: Set<string>
+      ejecutivo: Set<string>; inicio: number; segmentos: Map<string, number>
+    }
+    const porCampana = new Map<string, Agg>()
+    const agg = (c: string): Agg => {
+      let a = porCampana.get(c)
+      if (!a) { a = { enviados: new Set(), si: new Set(), no: new Set(), aplicados: new Set(), ejecutivo: new Set(), inicio: Number.MAX_SAFE_INTEGER, segmentos: new Map() }; porCampana.set(c, a) }
+      return a
+    }
+    const INTERNOS = new Set(["56944668823", "56978385048"])
+    for (const e of eventos) {
+      if (!e.campana || INTERNOS.has(digits(e.contact))) continue
+      const a = agg(e.campana)
+      const t = Date.parse(String(e.at || ""))
+      if (Number.isFinite(t)) a.inicio = Math.min(a.inicio, t)
+      if (e.evento === "enviado") a.enviados.add(e.contact)
+      if (e.evento === "respuesta") {
+        const r = String(e.respuesta || "")
+        if (r === "no") a.no.add(e.contact)
+        else if (r.startsWith("si")) {
+          a.si.add(e.contact)
+          if (r === "si_ejecutivo") a.ejecutivo.add(e.contact)
+        }
+      }
+    }
+    const contactosDe = new Map<string, string>()
+    for (const fila of kvs) {
+      try {
+        const st = JSON.parse(fila.value) as { campana?: string; segmento?: string; pctAplicado?: number }
+        const tel = fila.key.replace("campana_dcto_", "")
+        if (!st.campana || INTERNOS.has(tel) || !porCampana.has(st.campana)) continue
+        contactosDe.set(tel, st.campana)
+        const a = agg(st.campana)
+        if (st.pctAplicado) a.aplicados.add(tel)
+        const seg = String(st.segmento || "?")
+        a.segmentos.set(seg, (a.segmentos.get(seg) || 0) + 1)
+      } catch { /* kv corrupto */ }
+    }
+    // Respuesta por TEXTO: contactos de campaña cuyo último mensaje es
+    // posterior al primer envío de su campaña.
+    const rConv = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=contact,last_user_at&limit=10000`, { headers: h, cache: "no-store" })
+    const texto = new Map<string, Set<string>>()
+    if (rConv.ok) {
+      const convs = ((await rConv.json().catch(() => [])) as Array<{ contact: string; last_user_at?: string }>) || []
+      for (const cv of convs) {
+        const camp = contactosDe.get(digits(cv.contact))
+        if (!camp) continue
+        const a = porCampana.get(camp)
+        const t = Date.parse(String(cv.last_user_at || ""))
+        if (a && Number.isFinite(t) && t >= a.inicio) {
+          const set = texto.get(camp) || new Set<string>()
+          set.add(cv.contact)
+          texto.set(camp, set)
+        }
+      }
+    }
+    // Pagos posteriores al envío, atribuidos por contacto de la campaña.
+    const rVd = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.venta_dash_v3_*&select=key,value&limit=4000`, { headers: h, cache: "no-store" })
+    const rPtr = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,quote_id&limit=8000`, { headers: h, cache: "no-store" })
+    const pagos = new Map<string, { n: number; monto: number }>()
+    if (rVd.ok && rPtr.ok) {
+      const punteros = ((await rPtr.json().catch(() => [])) as Array<{ contact: string; quote_id: string }>) || []
+      const telDeQuote = new Map<string, string>()
+      for (const pt of punteros) telDeQuote.set(pt.quote_id, digits(pt.contact))
+      const vds = ((await rVd.json().catch(() => [])) as Array<{ key: string; value: string }>) || []
+      for (const vd of vds) {
+        try {
+          const v = JSON.parse(vd.value) as { pagoIso?: string; montoClp?: number }
+          const tel = telDeQuote.get(vd.key.replace("venta_dash_v3_", "")) || ""
+          const camp = contactosDe.get(tel)
+          if (!camp) continue
+          const a = porCampana.get(camp)
+          const t = Date.parse(String(v.pagoIso || ""))
+          if (a && Number.isFinite(t) && t >= a.inicio) {
+            const acc = pagos.get(camp) || { n: 0, monto: 0 }
+            acc.n++; acc.monto += Number(v.montoClp || 0) || 0
+            pagos.set(camp, acc)
+          }
+        } catch { /* fila corrupta */ }
+      }
+    }
+    const SEG_ETQ: Record<string, string> = { "1": "vio precio", "2": "formal", "3": "aceptada" }
+    const filas = [...porCampana.entries()]
+      .filter(([, a]) => a.enviados.size > 0)
+      .sort((x, y) => y[1].inicio - x[1].inicio)
+      .map(([nombre, a]) => {
+        const env = a.enviados.size
+        const respTexto = texto.get(nombre)?.size || 0
+        const respTotal = new Set([...a.si, ...a.no, ...(texto.get(nombre) || [])]).size
+        const pg = pagos.get(nombre) || { n: 0, monto: 0 }
+        const segTxt = [...a.segmentos.entries()].sort().map(([k, v]) => `${SEG_ETQ[k] || k}: ${v}`).join(" · ")
+        const pct = (n: number) => (env ? `${Math.round((n / env) * 100)}%` : "—")
+        return `<tr><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div></td>
+        <td style="text-align:center"><b>${env}</b></td>
+        <td style="text-align:center">${respTotal} <span class="pct">(${pct(respTotal)})</span></td>
+        <td style="text-align:center;color:#15803d"><b>${a.si.size}</b>${a.ejecutivo.size ? ` <span class="pct">(${a.ejecutivo.size} vía ejecutivo)</span>` : ""}</td>
+        <td style="text-align:center;color:#b45309">${a.no.size}</td>
+        <td style="text-align:center">${respTexto}</td>
+        <td style="text-align:center">${a.aplicados.size}</td>
+        <td style="text-align:center">${pg.n ? `<b>${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
+      })
+    if (!filas.length) return ""
+    return `<div class="card" id="campanas"><h2>📣 Campañas de re-encantamiento</h2>
+  <div class="sub" style="margin:2px 0 10px">Resultados por campaña: respuestas por botón y por texto, descuentos aplicados automáticos y pagos POSTERIORES al envío de contactos de la campaña. Los contactos internos de prueba quedan fuera. Regla: máximo 2 campañas por cliente.</div>
+  <div style="overflow-x:auto"><table><thead><tr><th>Campaña · segmentos</th><th>Enviados</th><th>Respondieron</th><th>Sí al descuento</th><th>No</th><th>Por texto</th><th>Dcto aplicado</th><th>Pagos post-envío</th></tr></thead>
+  <tbody>${filas.join("")}</tbody></table></div></div>`
+  } catch (e) {
+    console.warn("[funnel] renderCampanas falló:", e instanceof Error ? e.message : e)
+    return ""
+  }
+}
+
 async function renderFormLanding(primeraVez: Map<string, string>, visibles: FilaFormVicky[]): Promise<string> {
   try {
     visibles.sort((a, b) => Date.parse(String(b.Created_Time || "")) - Date.parse(String(a.Created_Time || "")))
@@ -7008,6 +7138,7 @@ export async function GET(req: Request): Promise<Response> {
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
+        if (!inbdet) inboundHtml += await renderCampanas()
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
         inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`
