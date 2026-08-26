@@ -590,6 +590,30 @@ async function processOneTurn(
       }
     }
 
+    // 2.4b-bis. GUARDIA MESA DE AYUDA EN CONVERSACIÓN COMERCIAL (26-ago, caso
+    // Cowork/Ariel; segundo incidente tras Tamara 25-ago): el modelo presentó
+    // "Eddyluz Mujica al +56 9 4401 3873" — nombre inventado + el número de la
+    // MESA DE AYUDA como si fuera del ejecutivo (el sorteo real era Anderson).
+    // Determinista: el número de la Mesa solo puede aparecer si ESTE turno
+    // corrió consultar_agente_soporte; si no, la ORACIÓN que lo contiene se
+    // retira completa (recortar solo el número deja frases cojas), con
+    // fallback honesto si la respuesta queda vacía.
+    {
+      const MESA_RE = /(\+?\s?56\s?9?\s?4401\s?3873|944013873|4401\s?3873)/
+      const huboSoporteTurno = (result.toolCalls || []).some(
+        (c) => c.name === "consultar_agente_soporte" && c.ok,
+      )
+      if (!huboSoporteTurno && MESA_RE.test(reply)) {
+        console.error(
+          `[v3-bg] MESA_EN_COMERCIAL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 250))}`,
+        )
+        const frases = reply.split(/(?<=[.!?😊🙌🙏])\s+|\n+/)
+        const limpias = frases.filter((f) => !MESA_RE.test(f))
+        reply = limpias.join("\n").trim()
+        if (!reply) reply = "Nuestro ejecutivo se va a contactar contigo en breve por este mismo medio 😊"
+      }
+    }
+
     // 2.4c. ALLOWLIST de dominios (caso Transportes Viig, 22-jul): el modelo
     // inventó una "ficha técnica" en storage.googleapis.com — bucket
     // inexistente. Enumerar dominios malos no escala: TODO link cuyo dominio
