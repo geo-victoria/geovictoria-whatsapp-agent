@@ -65,6 +65,22 @@ function htmlCorreo(empresa: string, lineaPersonal?: string): string {
 </body></html>`
 }
 
+/** Versión "escrita a mano" (Lalo 27-ago): cero look de marketing — párrafos
+ * simples, tipografía por defecto, links planos. Como un correo persona a
+ * persona de Vicky. */
+function htmlPersonal(empresa: string, lineaPersonal?: string): string {
+  const intro = lineaPersonal
+    ? esc(lineaPersonal)
+    : `Ayer te escribí por WhatsApp por tu cotización${empresa ? ` de ${esc(empresa)}` : ""} y no quise dejarlo pasar.`
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;line-height:1.65;max-width:600px">
+<p>Hola! Soy Vicky, de GeoVictoria.</p>
+<p>${intro}</p>
+<p>Te guardé un 10% adicional sobre el plan mensual, por los primeros 6 meses. Si te interesa lo activo al tiro: me escribes al WhatsApp (<a href="${WA_VICKY}">+56 9 6730 8227</a>) o me respondes este correo con un "sí" y te dejo la cotización actualizada, con el pago en línea listo.</p>
+<p>Y si ya no lo necesitan, me dices y no te molesto más con esto.</p>
+<p>Un abrazo,<br>Vicky<br>GeoVictoria</p>
+</div>`
+}
+
 export async function POST(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   const body = (await req.json().catch(() => ({}))) as { campana?: string; dryRun?: boolean; max?: number }
@@ -82,6 +98,15 @@ export async function POST(req: Request): Promise<Response> {
     const anchor = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
     const lineaEjemplo =
       "Cuando hablamos quedó dando vueltas cómo sumar a los subcontratados de Temple Norte: se puede, marcan igual que el resto y el plan se ajusta solo."
+    const estilo = ((body as { estilo?: string }).estilo || "marketing").trim()
+    const contenido =
+      estilo === "personal"
+        ? htmlPersonal("Temple Norte Selección y Chancado Spa", lineaEjemplo)
+        : htmlCorreo("Temple Norte Selección y Chancado Spa", lineaEjemplo)
+    const asunto =
+      estilo === "personal"
+        ? "[PRUEBA · estilo personal] Te guardé un 10% en tu cotización"
+        : "[PRUEBA · estilo marketing] Tu 10% extra sigue esperando 👀"
     const rs = await fetch(`${ZOHO_API}/crm/v3/${anchor}/actions/send_mail`, {
       method: "POST",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
@@ -89,15 +114,15 @@ export async function POST(req: Request): Promise<Response> {
         data: [{
           from: { email: FROM_EMAIL },
           to: [{ email: testTo }],
-          subject: "[PRUEBA] Tu 10% extra sigue esperando 👀",
-          content: htmlCorreo("Temple Norte Selección y Chancado Spa", lineaEjemplo),
+          subject: asunto,
+          content: contenido,
           mail_format: "html",
         }],
       }),
       cache: "no-store",
       signal: AbortSignal.timeout(15_000),
     })
-    return NextResponse.json({ ok: rs.ok, test: true, to: testTo, status: rs.status })
+    return NextResponse.json({ ok: rs.ok, test: true, estilo, to: testTo, status: rs.status })
   }
 
   // 1. Pendientes de la cascada: enviados (WhatsApp) sin respuesta y sin
