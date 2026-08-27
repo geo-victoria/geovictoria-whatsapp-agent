@@ -2477,26 +2477,33 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
   // por search aparte con converted=true (misma limitación de siempre).
   // v8 a propósito: el COQL v3 devuelve Owner sin expandir (la columna
   // Dueño salía "—" en los leads vivos — cazado 21-ago); v8 trae {name,id}.
-  const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
-    method: "POST",
-    headers: H,
-    cache: "no-store",
-    body: JSON.stringify({
-      select_query:
-        "select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio, Landing_Page from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200",
-    }),
-  })
-  if (rq.ok && rq.status !== 204) {
-    const d = (await rq.json().catch(() => ({}))) as { data?: FilaFormVicky[] }
+  // PAGINADO (Lalo 27-ago): a ~9 fills/día los 200 de una página se agotan a
+  // las 3 semanas y los días viejos del dash empezarían a descontar. Tope de
+  // 10 páginas (2.000 leads) como backstop, no como límite esperado.
+  for (let offset = 0; offset < 2000; offset += 200) {
+    const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({
+        select_query:
+          `select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio, Landing_Page from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200 offset ${offset}`,
+      }),
+    })
+    if (!rq.ok || rq.status === 204) break
+    const d = (await rq.json().catch(() => ({}))) as { data?: FilaFormVicky[]; info?: { more_records?: boolean } }
     for (const f of d.data || []) filas.push(f)
+    if (!d.info?.more_records || !(d.data || []).length) break
   }
-  const rc = await fetch(
-    `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio,Landing_Page&per_page=200`,
-    { headers: H, cache: "no-store" },
-  )
-  if (rc.ok && rc.status !== 204) {
-    const d = (await rc.json().catch(() => ({}))) as { data?: FilaFormVicky[] }
+  for (let page = 1; page <= 10; page++) {
+    const rc = await fetch(
+      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio,Landing_Page&per_page=200&page=${page}`,
+      { headers: H, cache: "no-store" },
+    )
+    if (!rc.ok || rc.status === 204) break
+    const d = (await rc.json().catch(() => ({}))) as { data?: FilaFormVicky[]; info?: { more_records?: boolean } }
     for (const f of d.data || []) filas.push({ ...f, _convertido: true })
+    if (!d.info?.more_records || !(d.data || []).length) break
   }
   // Internos fuera (mismo criterio del resto del dash).
   const esInternoForm = (f: FilaFormVicky) => {
