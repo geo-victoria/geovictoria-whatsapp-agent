@@ -6590,7 +6590,9 @@ export async function GET(req: Request): Promise<Response> {
       const pideLectura =
         Boolean((searchParams.get("inbdet") || "").trim()) ||
         Boolean((searchParams.get("conv") || "").replace(/[^a-fA-F0-9-]/g, "").trim()) ||
-        (searchParams.get("vista") || "").trim() === "inbound"
+        // campanas y espejos también son de lectura para el panel interno
+        // (Lalo 27-ago: pestañas en el dash nuevo de administrador).
+        ["inbound", "campanas", "espejos"].includes((searchParams.get("vista") || "").trim())
       let lecturaOk = false
       if (pideLectura) {
         const tokInb = (() => {

@@ -107,7 +107,7 @@ export async function GET(req: Request): Promise<Response> {
   html = html.replace(/<head([^>]*)>/, (_m, a: string) => `<head${a}><base href="/api/vic-funnel">`)
   const edadMs = Date.now() - Date.parse(String(foto.at || ""))
   const mins = Number.isFinite(edadMs) ? Math.max(0, Math.round(edadMs / 60000)) : 0
-  const banner = `<div style="position:sticky;top:0;z-index:60;background:#eef7ff;border-bottom:1px solid #cfe6f7;padding:6px 14px;font-size:13px;font-weight:600;color:#0b5e8a">📥 Panel interno · datos de hace ${mins} min (se refresca solo cada hora) · <a href="/inbound?k=${encodeURIComponent(k)}&fresh=1" style="color:#00aff2">⟳ Actualizar ahora</a></div>`
+  const banner = `<div style="position:sticky;top:0;z-index:60;background:#eef7ff;border-bottom:1px solid #cfe6f7;padding:6px 14px;font-size:13px;font-weight:600;color:#0b5e8a">📥 Panel interno · datos de hace ${mins} min (se refresca solo cada hora) · <a href="/inbound?k=${encodeURIComponent(k)}&fresh=1" style="color:#00aff2">⟳ Actualizar ahora</a> · <a href="/api/vic-funnel?vista=campanas" style="color:#00aff2">📣 Campañas</a> · <a href="/api/vic-funnel?vista=espejos" style="color:#00aff2">🪞 Espejos</a></div>`
   html = html.replace(/<body([^>]*)>/, (_m, a: string) => `<body${a}>${banner}`)
   // Cookie de LECTURA del panel: autoriza en vic-funnel SOLO los drill-downs,
   // el ver-chat y la vista inbound (Lalo 19-ago: "al detalle me manda a
