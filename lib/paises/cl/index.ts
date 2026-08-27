@@ -80,14 +80,15 @@ export const PERFIL_CL: PerfilPais = {
       { email: "aaraque@geovictoria.com", zohoUserId: "3525045000583802005" },
       { email: "asepulveda@geovictoria.com", zohoUserId: "3525045000594735052" },
     ],
-    // Relevo 27-jul (Lalo): todo lo NUEVO va a Eddyluz; lo ya asignado queda
-    // con Anderson. Este perfil es el DEFAULT para lo nuevo — quien presente
-    // un ejecutivo por una cotización EXISTENTE debe resolver el Owner real
-    // con lib/zoho-quote-owner.ts (lo hace el traspaso post-pago).
+    // 27-ago (Lalo, "quita a Eddy de todo fallback"): el símil CL apunta a
+    // Aleydis, la dueña oficial de ventas autónomas. Quien presente un
+    // ejecutivo por una cotización EXISTENTE debe resolver el Owner real con
+    // lib/zoho-quote-owner.ts (lo hace el traspaso post-pago) — este perfil
+    // es solo el último recurso.
     ejecutivo: {
-      nombre: "Eddyluz Mujica",
-      email: "emujica@geovictoria.com",
-      telefono: "+56 9 3932 1687",
+      nombre: "Aleydis Araque",
+      email: "aaraque@geovictoria.com",
+      telefono: "+56 9 8291 6868",
     },
   },
 

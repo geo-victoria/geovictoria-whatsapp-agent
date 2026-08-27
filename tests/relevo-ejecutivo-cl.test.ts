@@ -47,10 +47,10 @@ describe("los caminos de asignación pasan por la tómbola, no por un nombre fij
     assert.match(GENERAR, /const EJECUTIVO_DEFAULT = "Vicky \(sin ejecutivo asignado/)
   })
 
-  test("el perfil CL conserva a Eddyluz como símil de fallback con datos reales", () => {
-    assert.match(PERFIL, /nombre: "Eddyluz Mujica"/)
-    assert.match(PERFIL, /email: "emujica@geovictoria\.com"/)
-    assert.match(PERFIL, /telefono: "\+56 9 3932 1687"/)
+  test("el símil CL es Aleydis, la dueña de ventas autónomas (27-ago: cero fallbacks a Eddy)", () => {
+    assert.match(PERFIL, /nombre: "Aleydis Araque"/)
+    assert.match(PERFIL, /email: "aaraque@geovictoria\.com"/)
+    assert.doesNotMatch(PERFIL, /Eddyluz Mujica/)
     assert.doesNotMatch(PERFIL, /Anderson Díaz"/)
   })
 

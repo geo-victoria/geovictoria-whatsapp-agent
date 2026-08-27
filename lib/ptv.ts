@@ -39,7 +39,11 @@ export const TTV_CON_PRECIO_MIN = 15
  * país) hasta que Victoria entregue la tómbola definitiva; se reemplaza por
  * env VICKY_PTV_VENDEDORES_<CC>="email:zohoId,email:zohoId". */
 const VENDEDORES_DEFAULT: Record<string, string> = {
-  cl: "emujica@geovictoria.com:3525045000000211283",
+  // CL: Aleydis (Lalo 27-ago, "quita a Eddy de todo fallback") — es la dueña
+  // oficial de ventas autónomas, así que también recibe el residuo cuando la
+  // regla de Zoho no responde. Esta rotación interna es SOLO fallback: el
+  // camino normal son las reglas de asignación de Zoho.
+  cl: "aaraque@geovictoria.com:3525045000583802005",
   co: "agordillo@geovictoria.com:3525045000203758005",
   mx: "ysegura@geovictoria.com:3525045000308323003",
   // Perú (04-ago): Mónica Mendoza, única ejecutiva — sin tómbola.

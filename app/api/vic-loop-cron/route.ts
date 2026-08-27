@@ -253,8 +253,11 @@ async function completarParamsConChat(
 // el SISTEMA, no el modelo. Nota consciente: las cotizaciones viejas de
 // Anderson ya pasaron su toque 1 hace días, así que este texto solo alcanza a
 // las nuevas — no hace falta resolver el Owner por fila.
-const EJECUTIVA_LOOP: Record<"cl" | "co" | "mx", { nombre: string; email: string; whatsapp: string; trato: string }> = {
-  cl: { nombre: "Eddyluz Mujica", email: "emujica@geovictoria.com", whatsapp: "+56 9 3932 1687", trato: "ella" },
+// CL sin entrada fija (Lalo 27-ago, "quita a Eddy de todo fallback"): sin
+// dueño humano resuelto NO se presenta a nadie con nombre — el texto cae al
+// genérico "un ejecutivo de nuestro equipo". CO/MX conservan sus responsables
+// FIJOS de país (Gordillo/Yahel no son fallback: son el dueño real).
+const EJECUTIVA_LOOP: Record<"co" | "mx", { nombre: string; email: string; whatsapp: string; trato: string }> = {
   co: { nombre: "Alejandro Gordillo", email: "agordillo@geovictoria.com", whatsapp: "+57 314 267 7765", trato: "él" },
   mx: { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", whatsapp: "+52 55 3763 6604", trato: "ella" },
 }
@@ -293,7 +296,15 @@ function textoPresentacion(
           whatsapp: telefonoDeEjecutivo(duenoReal.email),
           trato: duenoReal.nombre.split(" ")[0],
         }
-      : EJECUTIVA_LOOP[pais]
+      : pais === "cl"
+        ? null
+        : EJECUTIVA_LOOP[pais]
+  if (!e) {
+    return (
+      `Un ejecutivo de nuestro equipo te va a acompañar con el resto del proceso 😊\n` +
+      `\nTu cotización sigue vigente — cualquier duda la resolvemos por aquí.`
+    )
+  }
   return (
     `Te presento a ${e.nombre}, quien te ayudará con el resto del proceso 😊\n` +
     `✉️ ${e.email}\n` +
