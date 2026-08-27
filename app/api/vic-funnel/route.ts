@@ -7538,6 +7538,26 @@ export async function GET(req: Request): Promise<Response> {
           formPorDia.set(dia, arr)
           if (telOk && primeraVez.has(telForm)) formConvPorDia.set(dia, (formConvPorDia.get(dia) || 0) + 1)
         }
+        // 📣 CAMPAÑAS COMO ORIGEN (Lalo 27-ago): un entrante que recibió un
+        // toque de campaña (WhatsApp/correo/Dapta) en los últimos 14 días es
+        // una REACTIVACIÓN de campaña, no "botón directo" — sin esta fila las
+        // respuestas de la campaña ensuciaban la lectura del inbound orgánico.
+        // El form (🧲) gana: quien llenó el miniform conserva su landing.
+        try {
+          const hCamp = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+          const desdeCamp = new Date(Date.now() - 14 * 86_400_000).toISOString()
+          const rCamp = await fetch(
+            `${SUPABASE_URL}/rest/v1/vic_campanas?select=contact,evento&evento=in.(enviado,enviado_correo,enviado_dapta)&at=gte.${encodeURIComponent(desdeCamp)}&limit=8000`,
+            { headers: hCamp, cache: "no-store" },
+          )
+          if (rCamp.ok) {
+            const evsCamp = ((await rCamp.json().catch(() => [])) as Array<{ contact: string }>) || []
+            for (const e of evsCamp) {
+              const telCamp = String(e.contact || "").replace(/\D/g, "")
+              if (telCamp && !origenPorTel.has(telCamp)) origenPorTel.set(telCamp, "📣 Campaña (reactivación)")
+            }
+          }
+        } catch { /* sin campañas, la clasificación queda como estaba */ }
         // Empresa por cotización para las viñetas del Grupo Foto (elementos
         // tel~quoteId): así el mismo fono con dos cotizaciones nombra ambas.
         const nombresQuote = new Map<string, string>()
