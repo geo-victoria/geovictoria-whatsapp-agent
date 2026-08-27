@@ -178,7 +178,17 @@ export async function POST(req: Request): Promise<Response> {
     const empresa = (fila?.Cuenta_Asociada?.name || "").trim()
     if (String(fila?.Estado_Cotizacion || "") === "Pagada") { resultados.push({ contact: tel, estado: "ya_pagada" }); continue }
     if (!email || !/@/.test(email)) { resultados.push({ contact: tel, estado: "sin_email", empresa }); continue }
-    if (dryRun) { resultados.push({ contact: tel, estado: "dry_run_enviaria", email, empresa }); enviadosAhora++; continue }
+    // TEST A/B (Lalo 27-ago): mitad estilo MARKETING (tarjeta + boton), mitad
+    // estilo PERSONAL (texto plano escrito a mano). Asignacion determinista
+    // por paridad del ultimo digito del telefono — reproducible y ciega al
+    // contenido. La variante queda registrada en el evento para medir cual
+    // convierte mejor (respuestas y pagos atribuidos al toque correo).
+    const variante = Number(tel.slice(-1)) % 2 === 0 ? "marketing" : "personal"
+    const asunto = variante === "personal"
+      ? "Te guardé un 10% en tu cotización"
+      : "Tu 10% extra sigue esperando 👀"
+    const contenido = variante === "personal" ? htmlPersonal(empresa) : htmlCorreo(empresa)
+    if (dryRun) { resultados.push({ contact: tel, estado: `dry_run_enviaria_${variante}`, email, empresa }); enviadosAhora++; continue }
     const rs = await fetch(`${ZOHO_API}/crm/v3/${QUOTE_MODULE}/${quoteId}/actions/send_mail`, {
       method: "POST",
       headers: HZ,
@@ -186,8 +196,8 @@ export async function POST(req: Request): Promise<Response> {
         data: [{
           from: { email: FROM_EMAIL },
           to: [{ email }],
-          subject: "Tu cotización GeoVictoria sigue vigente, con un 10% adicional",
-          content: htmlCorreo(empresa),
+          subject: asunto,
+          content: contenido,
           mail_format: "html",
         }],
       }),
@@ -202,10 +212,10 @@ export async function POST(req: Request): Promise<Response> {
     await fetch(`${SUPABASE_URL}/rest/v1/vic_campanas`, {
       method: "POST",
       headers: { ...H_SB(), "Content-Type": "application/json" },
-      body: JSON.stringify({ contact: tel, campana, evento: "enviado_correo", at: new Date().toISOString() }),
+      body: JSON.stringify({ contact: tel, campana, evento: "enviado_correo", respuesta: variante, at: new Date().toISOString() }),
       cache: "no-store",
     }).catch(() => {})
-    resultados.push({ contact: tel, estado: "enviado", email, empresa })
+    resultados.push({ contact: tel, estado: `enviado_${variante}`, email, empresa })
     enviadosAhora++
     await new Promise((r) => setTimeout(r, 400))
   }
