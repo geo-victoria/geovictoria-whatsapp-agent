@@ -447,7 +447,29 @@ export async function cerrarYTraspasarPostPago(
     traspaso,
     esCO ? PERFIL_CO.canal.channelId : undefined,
   ).catch(() => false)
-  if (!pushed) return { contact, traspaso: "push_fallo" }
+  if (!pushed) {
+    // Ventana de 24 h cerrada (cliente que pagó sin haber conversado con
+    // Vicky, o callado hace días — caso Cafetería Aragón 27-ago: pagó por el
+    // canal del ejecutivo y se quedó sin bienvenida ni link de onboarding).
+    // Respaldo por plantilla HSM, mismo patrón del kickoff de onboarding.
+    // Solo CL: la plantilla vive en el bot Vicky Chile.
+    if (!esCO && !esMX) {
+      const { sendBotmakerTemplate } = await import("./botmaker-push-v3")
+      const { PLANTILLA_BIENVENIDA_PAGO_CL, paramsBienvenidaPago } = await import("./plantilla-bienvenida-pago")
+      const okTpl = await sendBotmakerTemplate(
+        contact,
+        PLANTILLA_BIENVENIDA_PAGO_CL.name,
+        paramsBienvenidaPago(linkOnboarding, quienPresenta),
+      ).catch(() => false)
+      if (okTpl) {
+        await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+        // La plantilla la despacha Botmaker: no entra al historial (patrón
+        // del kickoff — meterla le daría al modelo un turno que no dijo).
+        return { contact, traspaso: "enviado" }
+      }
+    }
+    return { contact, traspaso: "push_fallo" }
+  }
   await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
   await appendAssistantV3(contact, traspaso, esCO ? "co" : "cl").catch(() => {})
   return { contact, traspaso: "enviado" }

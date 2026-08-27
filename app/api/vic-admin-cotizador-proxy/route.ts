@@ -54,6 +54,10 @@ const POST_PERMITIDOS = new Set([
   // Aplicación manual de descuento (campaña 10%, 26-ago): los casos de canal
   // ejecutivo que el vigía cierra a propósito se resuelven por orden humana.
   "/api/quote-acceptance/descuento-ejecutivo",
+  // Link del auto-onboarding por quoteId (27-ago, caso Cafetería Aragón: la
+  // bienvenida post-pago murió fuera de ventana y hubo que recuperar el link
+  // a mano para entregarlo por el ejecutivo). Idempotente en el cotizador.
+  "/api/quote-acceptance/onboarding-link",
 ])
 
 export async function POST(req: Request): Promise<Response> {
