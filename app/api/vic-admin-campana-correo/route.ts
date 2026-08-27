@@ -45,14 +45,18 @@ function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-function htmlCorreo(empresa: string): string {
+function htmlCorreo(empresa: string, lineaPersonal?: string): string {
+  const intro = lineaPersonal
+    ? esc(lineaPersonal)
+    : `Ayer te escribí por WhatsApp: conseguí un <b>10% de descuento adicional</b> sobre el plan mensual de tu cotización${empresa ? ` para <b>${esc(empresa)}</b>` : ""}, y sigue disponible.`
   return `<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:'Segoe UI',Arial,sans-serif;color:#2d3748">
 <div style="max-width:560px;margin:0 auto;padding:26px 18px">
   <div style="background:#fff;border-radius:14px;padding:28px 26px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+    <p style="margin:0 0 6px;font-size:22px;font-weight:700;color:#0087C8">Tu 10% extra sigue esperando 👀</p>
     <p style="margin:0 0 14px;font-size:15px">Hola! Soy <b>Vicky</b>, de GeoVictoria 👋</p>
-    <p style="margin:0 0 14px;font-size:14.5px;line-height:1.6">Ayer te escribí por WhatsApp: conseguí un <b>10% de descuento adicional</b> sobre el plan mensual de tu cotización${empresa ? ` para <b>${esc(empresa)}</b>` : ""}, y sigue disponible.</p>
-    <p style="margin:0 0 20px;font-size:14.5px;line-height:1.6">Si te interesa, me respondes por WhatsApp y te dejo la cotización actualizada al instante, con el pago en línea listo para activar tu cuenta el mismo día.</p>
-    <p style="text-align:center;margin:24px 0"><a href="${WA_VICKY}" style="background:#25D366;color:#fff;text-decoration:none;font-weight:700;padding:12px 26px;border-radius:10px;display:inline-block">Quiero el descuento 💬</a></p>
+    <p style="margin:0 0 14px;font-size:14.5px;line-height:1.6">${intro}</p>
+    <p style="margin:0 0 20px;font-size:14.5px;line-height:1.6">Tienes un <b>10% de descuento adicional</b> sobre el plan mensual, por los primeros 6 meses. Me respondes por WhatsApp y te dejo la cotización actualizada al instante, con pago en línea y tu cuenta activa el mismo día.</p>
+    <p style="text-align:center;margin:24px 0"><a href="${WA_VICKY}" style="background:#25D366;color:#fff;text-decoration:none;font-weight:700;padding:13px 28px;border-radius:10px;display:inline-block;font-size:15px">Quiero mi descuento 💬</a></p>
     <p style="margin:0;font-size:13px;color:#718096;line-height:1.6">Si ya no lo necesitas o prefieres que no te escribamos más por esta cotización, respóndeme este correo y lo dejo hasta aquí.</p>
     <p style="margin:18px 0 0;font-size:13.5px">Un abrazo,<br><b>Vicky</b> · GeoVictoria</p>
   </div>
@@ -68,6 +72,33 @@ export async function POST(req: Request): Promise<Response> {
   if (!campana) return NextResponse.json({ ok: false, error: "falta campana" }, { status: 400 })
   const dryRun = body.dryRun === true
   const max = Math.min(Math.max(Number(body.max) || 25, 1), 60)
+
+  // Modo PRUEBA: manda UN correo de muestra al email indicado (para ver cómo
+  // lo recibe el cliente), anclado al contacto interno — sin eventos ni kv.
+  const testTo = ((body as { testTo?: string }).testTo || "").trim()
+  if (testTo && /@/.test(testTo)) {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const anchor = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+    const lineaEjemplo =
+      "Cuando hablamos quedó dando vueltas cómo sumar a los subcontratados de Temple Norte: se puede, marcan igual que el resto y el plan se ajusta solo."
+    const rs = await fetch(`${ZOHO_API}/crm/v3/${anchor}/actions/send_mail`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        data: [{
+          from: { email: FROM_EMAIL },
+          to: [{ email: testTo }],
+          subject: "[PRUEBA] Tu 10% extra sigue esperando 👀",
+          content: htmlCorreo("Temple Norte Selección y Chancado Spa", lineaEjemplo),
+          mail_format: "html",
+        }],
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    })
+    return NextResponse.json({ ok: rs.ok, test: true, to: testTo, status: rs.status })
+  }
 
   // 1. Pendientes de la cascada: enviados (WhatsApp) sin respuesta y sin
   // correo ya enviado.
