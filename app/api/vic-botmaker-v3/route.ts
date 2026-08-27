@@ -684,6 +684,20 @@ async function processOneTurn(
     const urlsVienenDeTools =
       urlsCotizadorReply.length > 0 &&
       urlsCotizadorReply.every((u) => vieneDeUnaTool(u, urlsToolsTurno))
+    // Procedencia HISTORIAL (27-ago, caso Mesa Incógnita): un link que VICKY
+    // MISMA ya le envió antes a este contacto no es alucinación — es el
+    // re-envío del link de siempre. El puntero cubría esto, pero los punteros
+    // de cotizaciones viejas se pierden (COT379 era del 05-ago) y el cinturón
+    // fusilaba el re-envío legítimo con la disculpa enlatada — TRES veces,
+    // mientras el cliente contaba que se fue a la competencia por falta de
+    // seguimiento. El riesgo Multirut (reusar link viejo para una cotización
+    // NUEVA) queda cubierto por el resto del embudo: acá solo se aceptan URLs
+    // EXACTAS ya enviadas por el asistente en esta conversación.
+    const urlsEnHistorial =
+      urlsCotizadorReply.length > 0 &&
+      urlsCotizadorReply.every((u) =>
+        history.some((h) => h.role === "assistant" && String(h.content || "").includes(u)),
+      )
     // (los reintentos forzados son del flujo de VENTA: re-corren el loop con el
     // prompt y las tools de venta, así que en fase onboarding no deben disparar)
     if (
@@ -691,7 +705,8 @@ async function processOneTurn(
       hasCotizacionUrl &&
       !realCotizacion &&
       !reenviaLinkConocido &&
-      !urlsVienenDeTools
+      !urlsVienenDeTools &&
+      !urlsEnHistorial
     ) {
       console.error(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
@@ -756,8 +771,32 @@ async function processOneTurn(
         }
       }
       if (!recuperadoUrl) {
-        reply =
+        // CONTENCIÓN HONESTA + ROMPE-LOOP + AVISO INTERNO (27-ago, casos Mesa
+        // Incógnita y Renca 29-jul): la disculpa vieja MENTÍA ("tuve un
+        // problema generando tu cotización" ante un "holaa") y le pedía
+        // trabajo al cliente ("¿me confirmas otra vez?"). Y sin rompe-loop
+        // salió dos veces seguidas al mismo cliente. Ahora: texto neutro que
+        // no inventa una emisión en curso; si la contención ya salió hace
+        // poco, no se repite — se avisa al equipo (respaldo real) y se dice.
+        const CONTENCION_VIEJA =
           "Disculpa, tuve un problema generando tu cotización formal. ¿Me confirmas otra vez para procesarla?"
+        const CONTENCION_URL =
+          "Perdón, se me enredó el sistema con este mensaje 🙈 ¿Me repites en una línea qué necesitas? Te respondo al tiro."
+        const contencionReciente = history
+          .slice(-6)
+          .some(
+            (h) =>
+              h.role === "assistant" &&
+              (String(h.content || "").includes(CONTENCION_URL) ||
+                String(h.content || "").includes(CONTENCION_VIEJA)),
+          )
+        void avisarEquipoInterno(
+          `⚠️ Cinturón de URL contuvo la respuesta a +${contact} (${contencionReciente ? "REINCIDENTE — revisar el chat ya" : "primera vez en la conversación"}). ` +
+            `Borrador del modelo: "${reply.slice(0, 180)}"`,
+        ).catch(() => false)
+        reply = contencionReciente
+          ? "Le pedí una mano a nuestro equipo para responderte bien esto — te escribimos enseguida 🙌"
+          : CONTENCION_URL
       }
     }
 
