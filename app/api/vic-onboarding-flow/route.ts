@@ -115,6 +115,20 @@ async function extrasParaPrefill(
   return out
 }
 
+/**
+ * PERSONA NATURAL (Lalo 27-ago, misma regla del cotizador): RUT chileno con
+ * parte numérica bajo 50.000.000 = persona, no empresa. A la boleta no le
+ * aplican giro/dirección/comuna — el giro viaja "Persona Natural" (la misma
+ * convención de quote-acceptance) y el Flow recibe el flag para ocultar los
+ * campos que no necesita llenar (visibilidad condicional en el JSON del Flow).
+ */
+function esPersonaNaturalCl(rut: string): boolean {
+  const limpio = String(rut || "").replace(/[^0-9kK]/g, "")
+  if (limpio.length < 7) return false
+  const num = parseInt(limpio.slice(0, -1), 10)
+  return Number.isFinite(num) && num > 0 && num < 50_000_000
+}
+
 /** GET — prellenado para pintar el Flow. Claves = nombres de campos del Flow. */
 export async function GET(req: Request): Promise<NextResponse> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
@@ -123,9 +137,17 @@ export async function GET(req: Request): Promise<NextResponse> {
   // caso Diego 25-ago) el Flow igual debe abrir: prefill vacío, nunca 400.
   const b = await cargar(contact || "sin-contacto")
   const extras = await extrasParaPrefill(contact, b.empresa.identificador || "")
+  // Persona natural: giro "Persona Natural" (si ninguna fuente dio uno mejor)
+  // y flags para que el Flow oculte giro/dirección/comuna — no aplican a la
+  // boleta. `mostrar_campos_empresa` va en positivo para bindear `visible`
+  // directo en el JSON del Flow sin negaciones.
+  const natural = b.pais === "cl" && esPersonaNaturalCl(b.empresa.identificador || "")
+  if (natural && (!extras.giro || extras.giro === "Otro")) extras.giro = "Persona Natural"
   return NextResponse.json({
     ok: true,
     prefill: {
+      es_persona_natural: natural,
+      mostrar_campos_empresa: !natural,
       razon_social: b.empresa.nombre || "",
       rut_empresa: b.empresa.identificador || "",
       giro: extras.giro,
