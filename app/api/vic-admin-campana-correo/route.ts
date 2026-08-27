@@ -170,10 +170,14 @@ export async function POST(req: Request): Promise<Response> {
     if (enviadosAhora >= max) { resultados.push({ contact: tel, estado: "queda_para_proximo_lote" }); continue }
     const quoteId = quoteDe.get(tel)
     if (!quoteId) { resultados.push({ contact: tel, estado: "sin_quote_en_kv" }); continue }
-    const rq = await fetch(`${ZOHO_API}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Email_Contacto,Cuenta_Asociada,Estado_Cotizacion`, { headers: HZ, cache: "no-store" })
+    const rq = await fetch(`${ZOHO_API}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Email_Contacto,Cuenta_Asociada,Estado_Cotizacion,Owner`, { headers: HZ, cache: "no-store" })
     const fila = rq.ok && rq.status !== 204
-      ? (((await rq.json().catch(() => null)) as { data?: Array<{ Email_Contacto?: string; Estado_Cotizacion?: string; Cuenta_Asociada?: { name?: string } | null }> } | null)?.data || [])[0]
+      ? (((await rq.json().catch(() => null)) as { data?: Array<{ Email_Contacto?: string; Estado_Cotizacion?: string; Cuenta_Asociada?: { name?: string } | null; Owner?: { email?: string } | null }> } | null)?.data || [])[0]
       : undefined
+    // Si el cliente RESPONDE el correo, la respuesta va al EJECUTIVO dueño de
+    // la cotización (Lalo 27-ago); dueño robot → vicky@ (no hay humano aún).
+    const ownerMail = String(fila?.Owner?.email || "").toLowerCase()
+    const replyTo = ownerMail && !/vicky@|info@geovictoria/.test(ownerMail) ? ownerMail : FROM_EMAIL
     const email = (fila?.Email_Contacto || "").trim()
     const empresa = (fila?.Cuenta_Asociada?.name || "").trim()
     if (String(fila?.Estado_Cotizacion || "") === "Pagada") { resultados.push({ contact: tel, estado: "ya_pagada" }); continue }
@@ -196,6 +200,7 @@ export async function POST(req: Request): Promise<Response> {
         data: [{
           from: { email: FROM_EMAIL },
           to: [{ email }],
+          reply_to: { email: replyTo },
           subject: asunto,
           content: contenido,
           mail_format: "html",
