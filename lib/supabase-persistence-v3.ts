@@ -602,7 +602,14 @@ export async function findContactByQuoteId(quoteId: string): Promise<string | nu
   const rows = await supabaseFetch<Array<{ contact: string }>>(
     `vic_v3_conversations?formal_quote_id=eq.${encodeURIComponent(quoteId)}&select=contact&limit=1`,
   )
-  return rows?.[0]?.contact || null
+  if (rows?.[0]?.contact) return rows[0].contact
+  // Fallback (27-ago, caso Cafetería Aragón): las emisiones del CANAL
+  // EJECUTIVO no dejan formal_quote_id en la conversación (el cliente puede
+  // no haber chateado jamás con Vicky), pero sí dejan puntero de cotización.
+  const punteros = await supabaseFetch<Array<{ contact: string }>>(
+    `vic_v3_quote_pointers?quote_id=eq.${encodeURIComponent(quoteId)}&select=contact&limit=1`,
+  ).catch(() => null)
+  return punteros?.[0]?.contact || null
 }
 
 export async function closeFollowup(

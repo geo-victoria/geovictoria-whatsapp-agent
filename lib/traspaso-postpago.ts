@@ -253,7 +253,30 @@ export async function cerrarYTraspasarPostPago(
   opts: { enviarTraspaso?: boolean; motivoCierre?: "pagado" | "aceptada" } = {},
 ): Promise<ResultadoTraspaso> {
   const enviarTraspaso = opts.enviarTraspaso !== false
-  const contact = await findContactByQuoteId(quoteId).catch(() => null)
+  let contact = await findContactByQuoteId(quoteId).catch(() => null)
+  if (!contact) {
+    // Último fallback (27-ago, caso Cafetería Aragón): pago del CANAL
+    // EJECUTIVO de un cliente que jamás chateó con Vicky — sin conversación y
+    // sin puntero, el teléfono vive solo en la cotización. Solo celular
+    // chileno: un fijo no tiene WhatsApp y otros países siguen su camino.
+    try {
+      const { getZohoAccessToken } = await import("./zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+      const r = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Tel_fono_Contacto`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      const tel = r.ok && r.status === 200
+        ? String(
+            ((await r.json().catch(() => ({}))) as { data?: Array<{ Tel_fono_Contacto?: string }> }).data?.[0]
+              ?.Tel_fono_Contacto || "",
+          ).replace(/\D/g, "")
+        : ""
+      if (/^569\d{8}$/.test(tel)) contact = tel
+    } catch { /* sin teléfono utilizable: sin_contacto como siempre */ }
+  }
   if (!contact) return { traspaso: "sin_contacto" }
 
   await closeFollowup(contact, "cotizacion_aceptada").catch(() => {})
