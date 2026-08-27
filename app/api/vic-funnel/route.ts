@@ -2729,6 +2729,111 @@ async function renderCampanas(): Promise<string> {
 }
 
 /**
+ * 🪞 MONITOREO DE WHATSAPP ESPEJO (Lalo 27-ago): listado de todos los
+ * usuarios ACTIVOS de Zoho con perfil Ejecutivo Comercial o Telemarketing,
+ * con el estado de su sesión de espejo (Conectado/Desconectado, según la
+ * señal que publica el worker en vic_kv wa_espejo_status_<sesión>), filtros
+ * por perfil y estado, y la URL del QR de cada uno lista para compartir
+ * (token por sesión en vic_kv espejo_link_<sesión>; si no existe, se genera
+ * aquí mismo — el link abre SOLO la página del QR de esa sesión).
+ */
+async function renderEspejos(qsBase: string): Promise<string> {
+  const token = await getZohoAccessToken()
+  const H = { Authorization: `Zoho-oauthtoken ${token}` }
+  const PERFILES = new Set(["Ejecutivo Comercial", "Telemarketing"])
+  type UsuarioFila = { nombre: string; email: string; perfil: string; sesion: string }
+  const usuarios: UsuarioFila[] = []
+  for (let page = 1; page <= 5; page++) {
+    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/users?type=ActiveUsers&per_page=100&page=${page}`, { headers: H, cache: "no-store" })
+    if (!r.ok || r.status === 204) break
+    const cuerpo = (await r.json().catch(() => null)) as {
+      users?: Array<{ full_name?: string; email?: string; profile?: { name?: string } | null }>
+      info?: { more_records?: boolean }
+    } | null
+    for (const u of cuerpo?.users || []) {
+      const perfil = String(u.profile?.name || "")
+      const email = String(u.email || "").toLowerCase()
+      if (!PERFILES.has(perfil) || !email) continue
+      usuarios.push({ nombre: String(u.full_name || email), email, perfil, sesion: email.split("@")[0] })
+    }
+    if (!cuerpo?.info?.more_records) break
+  }
+  usuarios.sort((a, b) => a.perfil.localeCompare(b.perfil) || a.nombre.localeCompare(b.nombre))
+  // Estado del worker y tokens de link, en dos lecturas batch de vic_kv.
+  const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const leerKvs = async (patron: string): Promise<Map<string, string>> => {
+    const m = new Map<string, string>()
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.${patron}*&select=key,value&limit=1000`, { headers: hSb, cache: "no-store" })
+      for (const f of ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) || []) m.set(f.key, f.value)
+    } catch { /* sin kv: columnas quedan vacías */ }
+    return m
+  }
+  const [estados, links] = await Promise.all([leerKvs("wa_espejo_status_"), leerKvs("espejo_link_")])
+  // Token de link faltante → se genera acá mismo (el link es solo-QR).
+  const { randomBytes } = await import("crypto")
+  for (const u of usuarios) {
+    if (links.has(`espejo_link_${u.sesion}`)) continue
+    const t = randomBytes(8).toString("hex")
+    links.set(`espejo_link_${u.sesion}`, t)
+    await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?on_conflict=key`, {
+      method: "POST",
+      headers: { ...hSb, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key: `espejo_link_${u.sesion}`, value: t }),
+      cache: "no-store",
+    }).catch(() => {})
+  }
+  const filas = usuarios.map((u) => {
+    let estado = "desconectado"
+    let detalle = "sin sesión en el worker"
+    try {
+      const st = JSON.parse(estados.get(`wa_espejo_status_${u.sesion}`) || "{}") as { estado?: string; numero?: string; at?: string }
+      if (st.estado) {
+        estado = st.estado === "conectado" ? "conectado" : "desconectado"
+        detalle = [st.estado !== "conectado" ? st.estado : "", st.numero ? `+${st.numero}` : "", st.at ? new Date(st.at).toLocaleString("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""]
+          .filter(Boolean).join(" · ")
+      }
+    } catch { /* sin señal */ }
+    const urlQr = `/api/vic-admin-wa-espejo?session=${encodeURIComponent(u.sesion)}&t=${encodeURIComponent(links.get(`espejo_link_${u.sesion}`) || "")}`
+    return `<tr data-perfil="${esc(u.perfil)}" data-estado="${estado}">
+    <td><b>${esc(u.nombre)}</b><div class="sub">${esc(u.email)}</div></td>
+    <td>${esc(u.perfil)}</td>
+    <td>${estado === "conectado" ? '<span style="color:#15803d;font-weight:700">✅ Conectado</span>' : '<span style="color:#b91c1c;font-weight:700">⛔ Desconectado</span>'}<div class="sub">${esc(detalle)}</div></td>
+    <td><a href="${urlQr}" target="_blank" rel="noopener">abrir QR</a> · <a href="#" onclick="navigator.clipboard.writeText(location.origin+'${urlQr}');this.textContent='copiado ✓';return false">copiar link</a></td></tr>`
+  })
+  const conectados = usuarios.filter((u) => {
+    try { return (JSON.parse(estados.get(`wa_espejo_status_${u.sesion}`) || "{}") as { estado?: string }).estado === "conectado" } catch { return false }
+  }).length
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Espejos WhatsApp</title>
+  <style>
+    body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;background:#f6f8fa;color:#2d3748}
+    .wrap{max-width:1100px;margin:0 auto;padding:18px}
+    .card{background:#fff;border-radius:14px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:16px}
+    table{width:100%;border-collapse:collapse;font-size:13.5px}
+    th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;padding:8px 8px;border-bottom:2px solid #e5e7eb}
+    td{padding:8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+    a{color:#0284c7;text-decoration:none}
+    .sub{color:#8a949c;font-size:12px}
+    tr:hover td{background:#f8fbfd}
+    select{padding:6px 10px;border:1px solid #d7dde3;border-radius:8px;font-size:13px}
+  </style></head><body><div class="wrap">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap"><img src="/gv/logo-full-color.svg" style="height:28px" alt=""><h1 style="margin:0;font-size:20px">🪞 Espejos de WhatsApp</h1>
+  <a class="sub" href="?${qsBase}">← volver al dash</a></div>
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <b>${conectados} conectados de ${usuarios.length}</b>
+      <label class="sub">Perfil: <select id="fPerfil" onchange="filtra()"><option value="">todos</option><option>Ejecutivo Comercial</option><option>Telemarketing</option></select></label>
+      <label class="sub">Estado: <select id="fEstado" onchange="filtra()"><option value="">todos</option><option value="conectado">Conectado</option><option value="desconectado">Desconectado</option></select></label>
+    </div>
+    <p class="sub" style="margin:8px 0 10px">El link del QR es individual por persona y se puede compartir directo con ella: abre SOLO su página de vinculación (WhatsApp Business → Dispositivos vinculados → escanear). El estado lo publica el worker del espejo; "sin sesión en el worker" = falta agregar esa persona a WA_SESSION_IDS en Railway.</p>
+    <div style="overflow-x:auto"><table id="tEsp"><thead><tr><th>Persona</th><th>Perfil</th><th>Estado</th><th>Link del QR</th></tr></thead>
+    <tbody>${filas.join("")}</tbody></table></div>
+  </div>
+  <script>function filtra(){var p=document.getElementById('fPerfil').value,e=document.getElementById('fEstado').value;document.querySelectorAll('#tEsp tbody tr').forEach(function(tr){var ok=(!p||tr.getAttribute('data-perfil')===p)&&(!e||tr.getAttribute('data-estado')===e);tr.style.display=ok?'':'none'})}</script>
+  </div></body></html>`
+}
+
+/**
  * 📣 PANEL DE CAMPAÑAS para el EQUIPO (Lalo 27-ago): página autocontenida con
  * (1) los resultados por campaña con la cascada de toques y (2) el listado de
  * CANDIDATOS a la próxima ola — actualizable bajo demanda y filtrable por
@@ -6707,6 +6812,23 @@ export async function GET(req: Request): Promise<Response> {
       return new Response("La cartera no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
     }
   }
+  // 🪞 ESPEJOS (Lalo 27-ago): monitoreo de sesiones de WhatsApp espejo del
+  // equipo comercial — solo ADMINISTRADOR (los links QR que expone permiten
+  // vincular la sesión de cualquiera; cada vendedor recibe SU link, no la
+  // página completa).
+  if (vistaParam === "espejos") {
+    if (quien && quien !== "Administrador") {
+      return new Response("Solo administración puede ver el monitoreo de espejos.", { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } })
+    }
+    try {
+      const qsVolver = (() => { const p = new URLSearchParams({ key, pais }); return p.toString() })()
+      const htmlEsp = await renderEspejos(qsVolver)
+      return new Response(htmlEsp, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
+    } catch (e) {
+      console.warn("[vic-funnel] espejos falló:", e instanceof Error ? e.message : e)
+      return new Response("El monitoreo de espejos no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
+    }
+  }
   // 📣 CAMPAÑAS (Lalo 27-ago): panel autocontenido para el equipo —
   // resultados con la cascada de toques + candidatos a la próxima ola
   // (actualizable, filtrable por ejecutivo). Mismo patrón que la Cartera.
@@ -7925,6 +8047,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cartera"); return p.toString() })()}">📋 Cartera</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "campanas"); return p.toString() })()}">📣 Campañas</a>
+      ${esAdmin ? `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "espejos"); return p.toString() })()}">🪞 Espejos</a>` : ""}
       ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>`}
