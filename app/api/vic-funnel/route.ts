@@ -2898,7 +2898,7 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
   const listaVisible = mananaHayToque()
   const fechaCorta = (ymd: string) => {
     const d = new Date(`${ymd}T12:00:00Z`)
-    return d.toLocaleDateString("es-CL", { timeZone: "UTC", day: "2-digit", month: "2-digit" })
+    return d.toLocaleDateString("es-CL", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric" })
   }
   const diaAntes = (ymd: string) => new Date(Date.parse(`${ymd}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
   // El TOTAL lleva la misma viñeta al pasar el mouse que el resto del panel:
@@ -2912,7 +2912,7 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
   })()
   const fechaLarga = (ymd: string) => {
     const d = new Date(`${ymd}T12:00:00Z`)
-    const txt = d.toLocaleDateString("es-CL", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" })
+    const txt = d.toLocaleDateString("es-CL", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" })
     return txt.charAt(0).toUpperCase() + txt.slice(1)
   }
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Campañas Vicky</title>
