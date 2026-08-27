@@ -890,8 +890,14 @@ async function processOneTurn(
     // ¿El CLIENTE está pidiendo rebaja en ESTE turno? Regex estricto a
     // peticiones inequívocas — si fuera amplio, el reintento forzado ofrecería
     // el siguiente tramo sin que nadie lo pidiera (regalar descuento).
+    // OJO (caso Ivanna 27-ago): la sola PALABRA "descuento" NO es pedir rebaja
+    // — "¿en cuánto queda la cuota cuando pasen los 6 meses del descuento?" es
+    // una pregunta INFORMATIVA sobre el descuento ya comiteado, y con el match
+    // amplio anulaba la exención de recapitulación benigna (la respuesta con
+    // los números reales se reemplazaba por la enlatada "ya quedó con el mejor
+    // precio"). Pedir rebaja exige forma de PETICIÓN.
     const pideRebaja =
-      /\b(descuento|rebaj\w+|m[aá]s\s+barat\w+|muy\s+caro|me\s+lo\s+dejar?[ií]?a?s\b|d[eé]jamelo\s+(a|en)\b|baj[ae]\w*\s+(el\s+)?precio)/i.test(
+      /\b((alg[uú]n|otro|m[aá]s|mejor)\s+descuento|descuento\s+adicional|(quiero|dame|dan|das|hay|tienes?|tienen|hacen|har[ií]an|aplican?|manejan)\s+(alg[uú]n\s+|un\s+|el\s+|m[aá]s\s+)?descuento|rebaj\w+|m[aá]s\s+barat\w+|muy\s+caro|me\s+lo\s+dejar?[ií]?a?s\b|d[eé]jamelo\s+(a|en)\b|baj[ae]\w*\s+(el\s+)?precio)/i.test(
         message,
       )
     const pctYaNegociado =
