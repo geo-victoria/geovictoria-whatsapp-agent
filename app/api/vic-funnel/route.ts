@@ -2532,11 +2532,16 @@ async function renderCampanas(): Promise<string> {
       // "no_texto". Marcadores del vigía ("si_aplicado_vigia") suman al total
       // pero no definen vía: si el contacto no tiene evento de botón, es texto.
       siBoton: Set<string>; noBoton: Set<string>
+      // Cascada de TOQUES (Lalo 27-ago): cada campaña son hasta 3 toques —
+      // WhatsApp → correo → Dapta, en ese orden, y cada uno va SOLO a quienes
+      // no respondieron el anterior. Evento 'enviado' = WhatsApp,
+      // 'enviado_correo' y 'enviado_dapta' = los siguientes.
+      toques: Map<string, { n: Set<string>; primerAt: number }>
     }
     const porCampana = new Map<string, Agg>()
     const agg = (c: string): Agg => {
       let a = porCampana.get(c)
-      if (!a) { a = { enviados: new Set(), si: new Set(), no: new Set(), aplicados: new Set(), ejecutivo: new Set(), inicio: Number.MAX_SAFE_INTEGER, segmentos: new Map(), siBoton: new Set(), noBoton: new Set() }; porCampana.set(c, a) }
+      if (!a) { a = { enviados: new Set(), si: new Set(), no: new Set(), aplicados: new Set(), ejecutivo: new Set(), inicio: Number.MAX_SAFE_INTEGER, segmentos: new Map(), siBoton: new Set(), noBoton: new Set(), toques: new Map() }; porCampana.set(c, a) }
       return a
     }
     const INTERNOS = new Set(["56944668823", "56978385048"])
@@ -2545,7 +2550,13 @@ async function renderCampanas(): Promise<string> {
       const a = agg(e.campana)
       const t = Date.parse(String(e.at || ""))
       if (Number.isFinite(t)) a.inicio = Math.min(a.inicio, t)
-      if (e.evento === "enviado") a.enviados.add(e.contact)
+      if (e.evento === "enviado" || e.evento === "enviado_correo" || e.evento === "enviado_dapta") {
+        if (e.evento === "enviado") a.enviados.add(e.contact)
+        const tq = a.toques.get(e.evento) || { n: new Set<string>(), primerAt: Number.MAX_SAFE_INTEGER }
+        tq.n.add(e.contact)
+        if (Number.isFinite(t)) tq.primerAt = Math.min(tq.primerAt, t)
+        a.toques.set(e.evento, tq)
+      }
       if (e.evento === "respuesta") {
         const r = String(e.respuesta || "")
         if (r.startsWith("no")) {
@@ -2616,7 +2627,25 @@ async function renderCampanas(): Promise<string> {
         const pg = pagos.get(nombre) || { n: 0, monto: 0 }
         const segTxt = [...a.segmentos.entries()].sort().map(([k, v]) => `${SEG_ETQ[k] || k}: ${v}`).join(" · ")
         const pct = (n: number) => (env ? `${Math.round((n / env) * 100)}%` : "—")
-        return `<tr><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div></td>
+        // Timeline de la CASCADA (Lalo 27-ago): WhatsApp → correo → Dapta con
+        // su fecha; los toques pendientes muestran a cuántos les tocaría HOY
+        // (los que aún no responden el toque anterior).
+        const fechaDe = (ms: number) =>
+          new Date(ms).toLocaleDateString("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit" })
+        const respondieron = new Set([...a.si, ...a.no])
+        const ORDEN_TOQUES: Array<{ ev: string; etq: string }> = [
+          { ev: "enviado", etq: "📱 WhatsApp" },
+          { ev: "enviado_correo", etq: "✉️ Correo" },
+          { ev: "enviado_dapta", etq: "📞 Dapta" },
+        ]
+        let base = a.enviados
+        const timeline = ORDEN_TOQUES.map(({ ev, etq }) => {
+          const tq = a.toques.get(ev)
+          if (tq && tq.n.size) { base = tq.n; return `${etq} ${fechaDe(tq.primerAt)} · ${tq.n.size}` }
+          const sinResp = [...base].filter((c) => !respondieron.has(c)).length
+          return `${etq} pendiente (${sinResp} sin respuesta)`
+        }).join(" → ")
+        return `<tr><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div><div class="sub" style="margin:2px 0 0">${timeline}</div></td>
         <td style="text-align:center"><b>${env}</b></td>
         <td style="text-align:center">${respTotal} <span class="pct">(${pct(respTotal)})</span></td>
         <td style="text-align:center;color:#15803d"><b>${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto</div></td>
@@ -2626,13 +2655,94 @@ async function renderCampanas(): Promise<string> {
       })
     if (!filas.length) return ""
     return `<div class="card" id="campanas"><h2>📣 Campañas de re-encantamiento</h2>
-  <div class="sub" style="margin:2px 0 10px">Resultados por campaña: respuestas por botón y por texto, descuentos aplicados automáticos y pagos POSTERIORES al envío de contactos de la campaña. Los contactos internos de prueba quedan fuera. Regla: máximo 2 campañas por cliente.</div>
+  <div class="sub" style="margin:2px 0 10px">Resultados por campaña: respuestas por botón y por texto, descuentos aplicados automáticos y pagos POSTERIORES al envío. Cada campaña son hasta 3 toques en cascada — WhatsApp → correo → Dapta — y cada toque va SOLO a quienes no respondieron el anterior. Los contactos internos de prueba quedan fuera. Reglas: máximo 2 campañas por cliente; entra solo quien lleva 48 horas hábiles sin actividad (ni con Vicky ni con un ejecutivo).</div>
   <div style="overflow-x:auto"><table><thead><tr><th>Campaña · segmentos</th><th>Enviados</th><th>Respondieron</th><th>Sí al descuento</th><th>No</th><th>Dcto aplicado</th><th>Pagos post-envío</th></tr></thead>
   <tbody>${filas.join("")}</tbody></table></div></div>`
   } catch (e) {
     console.warn("[funnel] renderCampanas falló:", e instanceof Error ? e.message : e)
     return ""
   }
+}
+
+/**
+ * 📣 PANEL DE CAMPAÑAS para el EQUIPO (Lalo 27-ago): página autocontenida con
+ * (1) los resultados por campaña con la cascada de toques y (2) el listado de
+ * CANDIDATOS a la próxima ola — actualizable bajo demanda y filtrable por
+ * ejecutivo comercial. Vive en el dash antiguo porque lo consumen ejecutivos
+ * con su login (regla de los dos mundos, 21-ago).
+ */
+async function renderPanelCampanas(quien: string, qsBase: string, recalcular: boolean): Promise<string> {
+  const { leerFotoCandidatos, recalcularCandidatosCampana } = await import("@/lib/campana-candidatos")
+  let errorRecalc = ""
+  let foto = null as Awaited<ReturnType<typeof leerFotoCandidatos>>
+  if (recalcular) {
+    try {
+      foto = await recalcularCandidatosCampana()
+    } catch (e) {
+      errorRecalc = e instanceof Error ? e.message : String(e)
+      foto = await leerFotoCandidatos()
+    }
+  } else {
+    foto = await leerFotoCandidatos()
+  }
+  const resultados = await renderCampanas()
+  const MOTIVOS: Record<string, string> = {
+    cliente_activo_con_vicky: "activo con Vicky",
+    gestion_ejecutivo_espejo: "gestión del ejecutivo (chat/llamada)",
+    nota_humana_en_deal: "gestión del ejecutivo (nota en el deal)",
+    cliente_existente: "cliente facturando",
+    tope_2_campanas: "ya recibió 2 campañas",
+    interno: "contacto interno",
+  }
+  const ejecutivos = [...new Set((foto?.aptos || []).map((c) => c.ejecutivo).filter(Boolean))].sort()
+  const filaCand = (c: NonNullable<typeof foto>["aptos"][number]) =>
+    `<tr data-ejec="${esc(c.ejecutivo)}"><td>${esc(c.empresa || "—")}</td><td>${esc(c.cot)}</td><td>${esc(c.estado)}</td><td>${esc(c.fechaCot)}</td>
+     <td><a href="https://wa.me/${esc(c.contact)}" target="_blank" rel="noopener">+${esc(c.contact)}</a></td><td>${esc(c.ejecutivo)}</td>${c.motivoExclusion ? `<td>${esc(MOTIVOS[c.motivoExclusion] || c.motivoExclusion)}</td>` : ""}</tr>`
+  const porMotivo = new Map<string, number>()
+  for (const e of foto?.excluidos || []) porMotivo.set(e.motivoExclusion || "?", (porMotivo.get(e.motivoExclusion || "?") || 0) + 1)
+  const chipsExcl = [...porMotivo.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([m, n]) => `<span style="display:inline-block;padding:5px 12px;border-radius:10px;background:#fdf2f2;font-weight:600">${esc(MOTIVOS[m] || m)}: ${n}</span>`)
+    .join(" ")
+  const edadMin = foto ? Math.max(0, Math.round((Date.now() - Date.parse(foto.generadoAt)) / 60000)) : null
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Campañas Vicky</title>
+  <style>
+    body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;background:#f6f8fa;color:#2d3748}
+    .wrap{max-width:1280px;margin:0 auto;padding:18px}
+    .card{background:#fff;border-radius:14px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:16px}
+    table{width:100%;border-collapse:collapse;font-size:13.5px}
+    th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;padding:8px 8px;border-bottom:2px solid #e5e7eb}
+    td{padding:8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+    a{color:#0284c7;text-decoration:none}
+    .sub{color:#8a949c;font-size:12px}
+    .pct{color:#8a949c;font-size:12px}
+    h2{margin:0 0 6px;font-size:16px}
+    tr:hover td{background:#f8fbfd}
+    .btn{display:inline-block;padding:7px 14px;border-radius:9px;background:#00aff2;color:#fff;font-weight:700;font-size:13px}
+    select{padding:6px 10px;border:1px solid #d7dde3;border-radius:8px;font-size:13px}
+  </style></head><body><div class="wrap">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap"><img src="/gv/logo-full-color.svg" style="height:28px" alt=""><h1 style="margin:0;font-size:20px">📣 Campañas de re-encantamiento</h1>
+  <a class="sub" href="?${qsBase}">← volver al dash</a></div>
+  ${resultados || '<div class="card sub">Aún no hay campañas enviadas.</div>'}
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">Candidatos a la próxima ola${foto ? ` (${foto.aptos.length})` : ""}</h2>
+      ${foto ? `<span class="sub">foto de hace ${edadMin} min</span>` : ""}
+      <a class="btn" href="?${qsBase}&vista=campanas&recalcular=1">⟳ Actualizar</a>
+      <label class="sub">Ejecutivo: <select id="fEjec" onchange="filtraEjec()"><option value="">todos</option>${ejecutivos.map((e) => `<option>${esc(e)}</option>`).join("")}</select></label>
+    </div>
+    <p class="sub" style="margin:8px 0 10px">Cotizaciones formales sin pagar cuyo contacto lleva 48 horas hábiles sin actividad: ni con Vicky ni con un ejecutivo (chat, llamada o nota). El "Ejecutivo" es quien tiene la conversación a cargo (traspaso activo o dueño de la cotización); Vicky = sin traspaso. La actualización tarda ~1-2 min porque revisa chats, llamadas y notas de cada deal.</p>
+    ${errorRecalc ? `<p class="sub" style="color:#b91c1c">La actualización falló (${esc(errorRecalc)}) — se muestra la última foto disponible.</p>` : ""}
+    ${foto ? `<div style="overflow-x:auto"><table id="tCand"><thead><tr><th>Empresa</th><th>COT</th><th>Estado</th><th>Emitida</th><th>WhatsApp</th><th>Ejecutivo</th></tr></thead>
+    <tbody>${foto.aptos.map(filaCand).join("")}</tbody></table></div>
+    <details style="margin-top:12px"><summary class="sub" style="cursor:pointer">Excluidos de la próxima ola (${foto.excluidos.length}) — ${chipsExcl || "ninguno"}</summary>
+    <div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Empresa</th><th>COT</th><th>Estado</th><th>Emitida</th><th>WhatsApp</th><th>Ejecutivo</th><th>Motivo</th></tr></thead>
+    <tbody>${foto.excluidos.map(filaCand).join("")}</tbody></table></div></details>`
+      : `<p class="sub">Todavía no se genera la primera foto de candidatos — usa ⟳ Actualizar.</p>`}
+  </div>
+  ${quien && quien !== "Administrador" ? `<p class="sub">Sesión: ${esc(quien)}</p>` : ""}
+  <script>function filtraEjec(){var v=document.getElementById('fEjec').value;document.querySelectorAll('#tCand tbody tr').forEach(function(tr){tr.style.display=!v||tr.getAttribute('data-ejec')===v?'':'none'})}</script>
+  </div></body></html>`
 }
 
 async function renderFormLanding(primeraVez: Map<string, string>, visibles: FilaFormVicky[]): Promise<string> {
@@ -6533,6 +6643,19 @@ export async function GET(req: Request): Promise<Response> {
       return new Response("La cartera no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
     }
   }
+  // 📣 CAMPAÑAS (Lalo 27-ago): panel autocontenido para el equipo —
+  // resultados con la cascada de toques + candidatos a la próxima ola
+  // (actualizable, filtrable por ejecutivo). Mismo patrón que la Cartera.
+  if (vistaParam === "campanas") {
+    try {
+      const qsVolver = (() => { const p = new URLSearchParams({ key, pais }); return p.toString() })()
+      const htmlCamp = await renderPanelCampanas(quien || "", qsVolver, searchParams.get("recalcular") === "1")
+      return new Response(htmlCamp, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
+    } catch (e) {
+      console.warn("[vic-funnel] panel campañas falló:", e instanceof Error ? e.message : e)
+      return new Response("El panel de campañas no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
+    }
+  }
   const vista: "gestion" | "analisis" | "inbound" =
     vistaParam === "analisis" ? "analisis" : vistaParam === "inbound" ? "inbound" : "gestion"
   // Filtro de ORIGEN de la cola (Lalo 07-ago): "vicky" (default — lo que está
@@ -7737,6 +7860,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cartera"); return p.toString() })()}">📋 Cartera</a>
+      <a href="?${(() => { const p = filtrosQS(); p.set("vista", "campanas"); return p.toString() })()}">📣 Campañas</a>
       ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>`}
