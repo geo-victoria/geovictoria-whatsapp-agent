@@ -146,12 +146,12 @@ export async function filtrarPadronCampana(
         headers: H,
         cache: "no-store",
         body: JSON.stringify({
-          select_query: `select id, Contact_Phone, Stage, Fecha_ultima_Nota from Deals where Contact_Phone in (${valores}) limit 200`,
+          select_query: `select id, Contact_Phone, Stage, Fecha_ultima_Nota, Last_Activity_Time from Deals where Contact_Phone in (${valores}) limit 200`,
         }),
       })
       if (!r.ok) continue
       const deals = (((await r.json().catch(() => null)) as {
-        data?: Array<{ id: string; Contact_Phone?: string; Stage?: string; Fecha_ultima_Nota?: string }>
+        data?: Array<{ id: string; Contact_Phone?: string; Stage?: string; Fecha_ultima_Nota?: string; Last_Activity_Time?: string }>
       } | null)?.data || [])
       for (const d of deals) {
         const tel = String(d.Contact_Phone || "").replace(/\D/g, "")
@@ -166,6 +166,31 @@ export async function filtrarPadronCampana(
           vivos.delete(tel)
           excluidos.push({ contact: tel, motivo: "cliente_existente", detalle: `${d.id} · ${stage}` })
           continue
+        }
+        // LLAMADAS y TAREAS de Zoho (Lalo 27-ago, "¿seguro que no tienen
+        // actividad en Zoho?"): un vendedor que loguea una llamada o tarea
+        // sin dejar nota tambien es gestion activa. Solo se consulta para
+        // deals con actividad reciente en el registro (Last_Activity_Time).
+        const actividadReciente = Boolean(d.Last_Activity_Time) && String(d.Last_Activity_Time) >= `${corteNota}T00:00:00`
+        if (actividadReciente && vivos.has(tel)) {
+          for (const lista of ["Calls", "Tasks"]) {
+            try {
+              const ra = await fetch(`${ZOHO_API}/crm/v3/Deals/${d.id}/${lista}?fields=Owner,Created_Time&per_page=10`, { headers: H, cache: "no-store" })
+              if (!ra.ok || ra.status === 204) continue
+              const acts = (((await ra.json().catch(() => null)) as {
+                data?: Array<{ Created_Time?: string; Owner?: { id?: string } | null }>
+              } | null)?.data || [])
+              const humanaReciente = acts.find(
+                (a2) => !ROBOTS_NOTAS.has(String(a2.Owner?.id || "")) && dentroDeVentana(a2.Created_Time),
+              )
+              if (humanaReciente) {
+                vivos.delete(tel)
+                excluidos.push({ contact: tel, motivo: "actividad_zoho_ejecutivo", detalle: `${lista} ${humanaReciente.Created_Time}` })
+                break
+              }
+            } catch { /* lista no disponible: se sigue con la otra */ }
+          }
+          if (!vivos.has(tel)) continue
         }
         if (!d.Fecha_ultima_Nota || d.Fecha_ultima_Nota < corteNota) continue
         const rn = await fetch(
