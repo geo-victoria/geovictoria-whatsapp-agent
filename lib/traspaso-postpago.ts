@@ -358,11 +358,36 @@ export async function cerrarYTraspasarPostPago(
     }
   }
 
+  // MARCA DE PAGO CON TARJETA (P1 27-ago, caso EMD: tras pagar con tarjeta,
+  // Vicky le pidió el comprobante de transferencia). Este camino corre SOLO
+  // para pagos online verificados en MP — la marca alimenta la directiva
+  // post-venta del webhook para que el guion sepa el MÉTODO.
+  if ((opts.motivoCierre || "pagado") === "pagado") {
+    await setKvValue(
+      `pago_online_${contact}`,
+      JSON.stringify({ at: new Date().toISOString(), quoteId }),
+    ).catch(() => {})
+  }
+
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
 
   const kvKey = `traspaso_postpago_${quoteId}`
   const ya = await getKvValue(kvKey).catch(() => null)
   if (ya) return { contact, traspaso: "ya_enviado" }
+  // DEDUP POR CONTACTO (P1 27-ago, caso Javiera 24-ago: pagó DOS cotizaciones
+  // el mismo día y recibió dos bienvenidas idénticas en el mismo minuto). Si
+  // este contacto ya recibió una bienvenida hace <6h, la segunda cotización no
+  // repite el discurso: si su link de onboarding es DISTINTO (otra empresa),
+  // va solo el link corto; si es el mismo, no va nada.
+  const kvContacto = `traspaso_postpago_c_${contact}`
+  const previaCruda = await getKvValue(kvContacto).catch(() => null)
+  let bienvenidaPrevia: { at?: string; link?: string } | null = null
+  try {
+    bienvenidaPrevia = previaCruda ? (JSON.parse(previaCruda) as { at?: string; link?: string }) : null
+  } catch { bienvenidaPrevia = null }
+  const previaReciente =
+    Boolean(bienvenidaPrevia?.at) &&
+    Date.now() - new Date(String(bienvenidaPrevia?.at)).getTime() < 6 * 3600e3
 
   // Vicky AUTÓNOMA en CL (decisión 26-jul): con el flag encendido NO se
   // presenta a ningún ejecutivo — el mismo mensaje de bienvenida abre el alta
@@ -391,24 +416,12 @@ export async function cerrarYTraspasarPostPago(
   // siguen siendo de Anderson — presentar al equivocado en el mensaje de
   // bienvenida es exactamente la incoherencia del caso "yo misma te
   // acompaño" (tests/coherencia-post-pago), ahora entre dos humanos.
-  const EJECUTIVOS_CL: Record<string, { nombre: string; email: string; telefono: string }> = {
-    "emujica@geovictoria.com": { nombre: "Eddyluz Mujica", email: "emujica@geovictoria.com", telefono: "+56 9 3932 1687" },
-    "adiazg@geovictoria.com": { nombre: "Anderson Díaz", email: "adiazg@geovictoria.com", telefono: "+56 9 3937 2058" },
-    // Vendedores de la tómbola de deals (31-jul). Extensible sin deploy por
-    // env VICKY_TELEFONOS_EJECUTIVOS="email:+56 9 ...,email:+56 9 ...".
-    "tmartinezq@geovictoria.com": { nombre: "Tamara Martínez", email: "tmartinezq@geovictoria.com", telefono: "+56 9 3452 9937" },
-    "alopez@geovictoria.com": { nombre: "Ana Paula López", email: "alopez@geovictoria.com", telefono: "+56 9 6647 4270" },
-  }
-  for (const par of (process.env.VICKY_TELEFONOS_EJECUTIVOS || "").split(",")) {
-    const idx = par.indexOf(":")
-    if (idx > 0) {
-      const email = par.slice(0, idx).trim().toLowerCase()
-      const telefono = par.slice(idx + 1).trim()
-      if (email && telefono) {
-        EJECUTIVOS_CL[email] = { nombre: EJECUTIVOS_CL[email]?.nombre || email.split("@")[0], email, telefono }
-      }
-    }
-  }
+  // FUENTE ÚNICA (P1 27-ago): el directorio vive en lib/directorio-ejecutivos
+  // (mismo que usa el cinturón de teléfonos del webhook). Extensible sin
+  // deploy por env VICKY_TELEFONOS_EJECUTIVOS.
+  const { directorioEjecutivos } = await import("./directorio-ejecutivos")
+  const EJECUTIVOS_CL: Record<string, { nombre: string; email: string; telefono: string }> = {}
+  for (const f of directorioEjecutivos()) EJECUTIVOS_CL[f.email] = f
   const duenoCL = !esMX && !esCO ? await ownerDeCotizacion(quoteId).catch(() => null) : null
   // Teléfono del dueño: directorio local primero; si no lo conocemos, su
   // ficha de usuario en Zoho (mismo dato que usa el modal de transferencia).
@@ -449,6 +462,42 @@ export async function cerrarYTraspasarPostPago(
   // del auto-onboarding — antes solo presentaba al ejecutivo y el cliente
   // tenía que encontrar el wizard por su cuenta. El endpoint es idempotente.
   const linkOnboarding = await obtenerLinkOnboarding(quoteId).catch(() => "")
+  if (previaReciente) {
+    const linkNuevo = (linkOnboarding || "").trim()
+    const linkPrevio = (bienvenidaPrevia?.link || "").trim()
+    if (!linkNuevo || linkNuevo === linkPrevio) {
+      // Mismo onboarding (o sin link): la bienvenida de hace un rato ya lo
+      // cubrió. Se sella el candado de ESTA cotización para que el respaldo
+      // horario no la reintente.
+      await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+      return { contact, traspaso: "ya_enviado" }
+    }
+    // Segunda empresa del mismo pagador (caso Javiera): solo el dato nuevo,
+    // sin repetir el discurso de bienvenida. Misma regla de ventana.
+    const corto =
+      `Tu segunda cotización también quedó registrada ✅ El auto-onboarding de esta empresa va aparte, aquí:\n👉 ${linkNuevo}`
+    const { getLastUserAt } = await import("./supabase-persistence-v3")
+    const ultimo2 = await getLastUserAt(contact).catch(() => null)
+    const abierta2 = Boolean(ultimo2) && Date.now() - (ultimo2 as Date).getTime() < 24 * 3600e3
+    let salio = false
+    if (abierta2) {
+      salio = await sendBotmakerMessage(contact, corto).catch(() => false)
+      if (salio) await appendAssistantV3(contact, corto, "cl").catch(() => {})
+    }
+    if (!salio && !esCO && !esMX) {
+      const { sendBotmakerTemplate } = await import("./botmaker-push-v3")
+      const { PLANTILLA_BIENVENIDA_PAGO_CL, paramsBienvenidaPago } = await import("./plantilla-bienvenida-pago")
+      salio = await sendBotmakerTemplate(
+        contact,
+        PLANTILLA_BIENVENIDA_PAGO_CL.name,
+        paramsBienvenidaPago(linkNuevo, null),
+      ).catch(() => false)
+    }
+    if (!salio) return { contact, traspaso: "push_fallo" }
+    await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+    await setKvValue(kvContacto, JSON.stringify({ at: new Date().toISOString(), link: linkNuevo })).catch(() => {})
+    return { contact, traspaso: "enviado" }
+  }
   const encabezado =
     `¡Felicitaciones y bienvenido a GeoVictoria! 🎉 Tu pago quedó registrado.\n\n` +
     (linkOnboarding
@@ -482,6 +531,7 @@ export async function cerrarYTraspasarPostPago(
     ).catch(() => false)
     if (pushed) {
       await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+      await setKvValue(kvContacto, JSON.stringify({ at: new Date().toISOString(), link: (linkOnboarding || "").trim() })).catch(() => {})
       await appendAssistantV3(contact, traspaso, esCO ? "co" : "cl").catch(() => {})
       return { contact, traspaso: "enviado" }
     }
@@ -498,6 +548,7 @@ export async function cerrarYTraspasarPostPago(
   ).catch(() => false)
   if (okTpl) {
     await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+    await setKvValue(kvContacto, JSON.stringify({ at: new Date().toISOString(), link: (linkOnboarding || "").trim() })).catch(() => {})
     // La plantilla la despacha Botmaker: no entra al historial (patrón
     // del kickoff — meterla le daría al modelo un turno que no dijo).
     return { contact, traspaso: "enviado" }

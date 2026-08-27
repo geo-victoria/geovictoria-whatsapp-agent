@@ -496,6 +496,20 @@ async function processOneTurn(
             `\n\n[DIRECTIVA POST-VENTA — obligatoria] Este contacto ACABA de enviar el comprobante de pago de su cotización (${parsed.numero || "registrada"}). Estás en MODO POST-VENTA: NO cotices, NO armes valores, NO preguntes dotación ni marcaje y NO emitas ninguna cotización nueva — su compra YA está cerrada. Acompáñalo con el onboarding y responde sus dudas. SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa distinta (con sus palabras, no por iniciativa tuya) puedes volver al flujo de venta.`
         }
       }
+      // MÉTODO DE PAGO (P1 27-ago, caso EMD: pagó con TARJETA y Vicky le pidió
+      // el comprobante de transferencia). La marca pago_online_ la deja el
+      // post-pago SOLO con pago verificado en MercadoPago.
+      if (!directivaPostPago) {
+        const marcaOnline = await getKvValue(`pago_online_${contact}`)
+        if (marcaOnline) {
+          const p = JSON.parse(marcaOnline) as { at?: string }
+          const edadMs = p.at ? Date.now() - new Date(p.at).getTime() : Number.POSITIVE_INFINITY
+          if (edadMs < 48 * 60 * 60 * 1000) {
+            directivaPostPago =
+              `\n\n[DIRECTIVA POST-VENTA — obligatoria] Este contacto PAGÓ ONLINE (tarjeta vía MercadoPago) y su pago está CONFIRMADO automáticamente. JAMÁS le pidas comprobante de transferencia ni digas que falta validar el pago. Estás en MODO POST-VENTA: NO cotices ni armes valores nuevos — acompáñalo con el onboarding y responde sus dudas. SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa vuelves al flujo de venta.`
+          }
+        }
+      }
     } catch { /* sin marca, sin directiva */ }
 
     // Directiva determinista de la ETAPA CONSULTIVA (Eduardo 14-ago, caso
@@ -1025,7 +1039,34 @@ async function processOneTurn(
         }
       }
 
-      if (recuperado) {
+      // ROMPE-LOOP ROBUSTO (27-ago, caso Mesa Incógnita: NUEVE muletillas
+      // idénticas seguidas — el chequeo por "último mensaje exacto" no bastó y
+      // el cliente terminó contratando a la competencia). Ahora se cuentan
+      // TODAS las contenciones de este guardrail en los últimos 6 mensajes del
+      // asistente; a la segunda, se escala con aviso interno REAL y no se
+      // vuelve a mandar ningún enlatado.
+      const TEXTOS_CONTENCION_DESCUENTO = [
+        ...MULETILLAS_DESCUENTO,
+        "Para no darte más vueltas con los números",
+        "Ese es el mejor precio que te puedo ofrecer",
+        "Tu cotización ya quedó con el mejor precio",
+        "No quiero marearte con vueltas de números",
+      ]
+      const contencionesRecientes = history
+        .filter((h) => h.role === "assistant")
+        .slice(-6)
+        .filter((h) => TEXTOS_CONTENCION_DESCUENTO.some((t) => String(h.content || "").includes(t))).length
+      if (!recuperado && contencionesRecientes >= 2) {
+        console.error(
+          `[v3-bg] LOOP_DESCUENTO_ESCALADO contact=${contact} contenciones=${contencionesRecientes}`,
+        )
+        void avisarEquipoInterno(
+          `🔁 Guardrail de descuento atascado con +${contact} (${contencionesRecientes} contenciones recientes) — revisar el chat YA. ` +
+            `Último mensaje del cliente: "${String(message || "").slice(0, 140)}"`,
+        ).catch(() => false)
+        reply =
+          "Le pedí a nuestro equipo que revise tu caso para darte una respuesta bien precisa — te escribimos enseguida 🙌"
+      } else if (recuperado) {
         // ya tenemos un % real desde la tool; no aplicar muletilla.
       } else if (MULETILLAS_DESCUENTO.has(ultimoAsistente || "")) {
         // (B2) Ya pedimos "procesar el descuento" el turno anterior: romper el
@@ -1055,19 +1096,48 @@ async function processOneTurn(
         reply =
           "Tu cotización ya quedó con el mejor precio que te ofrecí. Si quieres revisarla o ajustar algo, te puedo contactar con un ejecutivo. ¿Cómo prefieres seguir?"
       } else {
-        // Antes aquí se ENVIABA la muletilla ("permíteme procesar el descuento…
-        // ¿te parece?") como holding para el próximo turno. El usuario la marcó
-        // como robótica (suena a bot atascado y agrega una vuelta extra). Como el
-        // reintento forzado de la tool ya falló, NO podemos inventar el %, pero
-        // tampoco mandamos la muletilla: cerramos directo y cálido, sin "procesar
-        // en el sistema" ni "¿te parece?", invitando a seguir.
+        // DERIVA CORREGIDA (27-ago): el comentario histórico de este branch
+        // decía "tampoco mandamos la muletilla" pero el código la mandaba —
+        // era LA muletilla que atrapó a Mesa Incógnita 9 veces. Ahora cierra
+        // hacia una DECISIÓN, honesto y sin "procesar en el sistema".
         console.error(
           `[v3-bg] DESCUENTO_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
         reply =
-          "Déjame dejarte el mejor precio posible y te lo confirmo enseguida. Me confirmas que seguimos con esta opción?"
+          "No quiero marearte con vueltas de números: puedo dejarte la cotización formal con el mejor precio que te ofrecí, o contactarte con un ejecutivo para revisarlo. ¿Qué prefieres?"
       }
     }
+
+    // 2.6b'. Cinturón de TELÉFONOS DE EJECUTIVOS (P1 27-ago, caso RCT: Vicky
+    // presentó el número de la Mesa de Ayuda como si fuera el de Tamara,
+    // habiendo dado el correcto antes — 3 casos de números mezclados en el
+    // catastro de Rodrigo). Fuente única: lib/directorio-ejecutivos. Si la
+    // respuesta nombra a UN ejecutivo del directorio junto a un número que no
+    // es el suyo (ni oficial en contexto de soporte, ni aportado por el
+    // cliente), el número se corrige por el del directorio y se avisa interno.
+    try {
+      const { corregirTelefonosEjecutivos } = await import("@/lib/directorio-ejecutivos")
+      const numerosCliente = new Set<string>([contact.replace(/\D/g, "")])
+      const sumar = (texto: string) => {
+        for (const m of texto.match(/\+?\d[\d\s.-]{7,}\d/g) || []) {
+          const d = m.replace(/\D/g, "")
+          if (d.length >= 8) numerosCliente.add(d)
+        }
+      }
+      for (const h of history) if (h.role === "user") sumar(String(h.content || ""))
+      sumar(String(message || ""))
+      const fix = corregirTelefonosEjecutivos(reply, numerosCliente)
+      if (fix.correcciones.length > 0) {
+        console.error(
+          `[v3-bg] TELEFONO_EJECUTIVO_CORREGIDO contact=${contact} ${JSON.stringify(fix.correcciones)}`,
+        )
+        void avisarEquipoInterno(
+          `📵 Corregí un teléfono mal atribuido en el chat con +${contact}: ` +
+            fix.correcciones.map((c) => `${c.nombre}: "${c.malo}" → ${c.bueno}`).join("; "),
+        ).catch(() => false)
+        reply = fix.reply
+      }
+    } catch { /* cinturón best-effort: jamás bloquea la respuesta */ }
 
     // 2.6b. Guardrail anti-alucinación de reunión agendada.
     // Caso real (Eduardo): Vicky dijo "Tu reunión quedó agendada" SIN invocar
