@@ -2933,8 +2933,12 @@
     (function () {
       var qs = new URLSearchParams(location.search);
       var DEAL = (qs.get('deal') || '').replace(/\D/g, '');
+      // La KEY es OPCIONAL (27-ago): las sesiones de navegador del dash no
+      // exponen la llave en los links (regla anti-fuga 07-ago) — su cookie
+      // autentica los fetch igual (el POST de vic-funnel la acepta). La llave
+      // queda solo para accesos máquina/links de correo.
       var KEY = qs.get('key') || '';
-      if (!DEAL || !KEY) {
+      if (!DEAL) {
         // SIN oportunidad asociada la página es la calculadora original de
         // Nacho y el botón genera su propuesta clásica (jsPDF, sin aceptación
         // online). Avisarlo evita el "me descargó una cotización antigua"
@@ -2955,8 +2959,7 @@
         var banner = document.createElement('div');
         banner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#0b3a53;color:#fff;padding:10px 16px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap';
         banner.innerHTML = '<span id="gvDealInfo">Cargando oportunidad…</span>' +
-          '<span style="opacity:.8;font-size:12px">El botón "Descargar Propuesta" emite en Zoho (amarrada a este deal) y baja el PDF oficial · nada se envía al cliente · ' +
-          '<a href="/api/vic-funnel?key=' + encodeURIComponent(KEY) + '&cotcrear=' + DEAL + '" style="color:#9fd6ff">¿prefieres el chat? →</a></span>';
+          '<span style="opacity:.8;font-size:12px">El botón "Descargar Propuesta" emite en Zoho (amarrada a este deal) y baja el PDF oficial · nada se envía al cliente</span>';
         document.body.prepend(banner);
 
         fetch(API + '&accion=cotcalc_info&deal=' + DEAL, { method: 'POST' })
