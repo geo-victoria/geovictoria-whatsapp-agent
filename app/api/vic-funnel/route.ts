@@ -2591,12 +2591,17 @@ async function renderCampanas(): Promise<string> {
     // siguiente paso) — el conteo por last_user_at murió con la columna.
     // Pagos posteriores al envío, atribuidos por contacto de la campaña.
     const rVd = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.venta_dash_v3_*&select=key,value&limit=4000`, { headers: h, cache: "no-store" })
-    const rPtr = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,quote_id&limit=8000`, { headers: h, cache: "no-store" })
-    const pagos = new Map<string, { n: number; monto: number }>()
+    const rPtr = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?select=contact,quote_id,empresa,updated_at&order=updated_at.asc&limit=8000`, { headers: h, cache: "no-store" })
+    const pagos = new Map<string, { n: number; monto: number; quienes: string[] }>()
+    // Empresa por contacto (para los tooltips): manda el puntero más reciente.
+    const empresaDe = new Map<string, string>()
     if (rVd.ok && rPtr.ok) {
-      const punteros = ((await rPtr.json().catch(() => [])) as Array<{ contact: string; quote_id: string }>) || []
+      const punteros = ((await rPtr.json().catch(() => [])) as Array<{ contact: string; quote_id: string; empresa?: string }>) || []
       const telDeQuote = new Map<string, string>()
-      for (const pt of punteros) telDeQuote.set(pt.quote_id, digits(pt.contact))
+      for (const pt of punteros) {
+        telDeQuote.set(pt.quote_id, digits(pt.contact))
+        if ((pt.empresa || "").trim()) empresaDe.set(digits(pt.contact), String(pt.empresa).trim())
+      }
       const vds = ((await rVd.json().catch(() => [])) as Array<{ key: string; value: string }>) || []
       for (const vd of vds) {
         try {
@@ -2607,12 +2612,32 @@ async function renderCampanas(): Promise<string> {
           const a = porCampana.get(camp)
           const t = Date.parse(String(v.pagoIso || ""))
           if (a && Number.isFinite(t) && t >= a.inicio) {
-            const acc = pagos.get(camp) || { n: 0, monto: 0 }
+            const acc = pagos.get(camp) || { n: 0, monto: 0, quienes: [] }
             acc.n++; acc.monto += Number(v.montoClp || 0) || 0
+            acc.quienes.push(`${tel}|${Number(v.montoClp || 0) || 0}`)
             pagos.set(camp, acc)
           }
         } catch { /* fila corrupta */ }
       }
+    }
+    // Tooltip al pasar el mouse (Lalo 27-ago): quién está detrás de cada
+    // número — empresa, teléfono y ejecutivo a cargo (traspaso activo;
+    // sin traspaso = Vicky), tope de 40 líneas.
+    const ejecutivoDe = new Map<string, string>()
+    try {
+      const rPtv = await fetch(`${SUPABASE_URL}/rest/v1/vic_ptv?estado=eq.activo&select=contact,vendedor_nombre,vendedor_email&limit=5000`, { headers: h, cache: "no-store" })
+      for (const f of ((await rPtv.json().catch(() => [])) as Array<{ contact: string; vendedor_nombre?: string; vendedor_email?: string }>) || []) {
+        const nombre = (f.vendedor_nombre || "").trim() || (f.vendedor_email || "").split("@")[0]
+        if (nombre) ejecutivoDe.set(digits(f.contact), nombre)
+      }
+    } catch { /* sin ptv: todos salen como Vicky */ }
+    const lineaDe = (c: string): string =>
+      `${empresaDe.get(digits(c)) || "—"} · +${digits(c)} · ${ejecutivoDe.get(digits(c)) || "Vicky"}`
+    const tip = (tels: Iterable<string>): string => {
+      const lineas = [...tels].map(lineaDe)
+      const corte = lineas.slice(0, 40)
+      if (lineas.length > corte.length) corte.push(`… y ${lineas.length - corte.length} más`)
+      return esc(corte.join("\n"))
     }
     const SEG_ETQ: Record<string, string> = { "1": "vio precio", "2": "formal", "3": "aceptada" }
     const filas = [...porCampana.entries()]
@@ -2624,7 +2649,7 @@ async function renderCampanas(): Promise<string> {
         for (const c of a.si) { a.no.delete(c); a.noBoton.delete(c) }
         const env = a.enviados.size
         const respTotal = new Set([...a.si, ...a.no]).size
-        const pg = pagos.get(nombre) || { n: 0, monto: 0 }
+        const pg = pagos.get(nombre) || { n: 0, monto: 0, quienes: [] as string[] }
         const segTxt = [...a.segmentos.entries()].sort().map(([k, v]) => `${SEG_ETQ[k] || k}: ${v}`).join(" · ")
         const pct = (n: number) => (env ? `${Math.round((n / env) * 100)}%` : "—")
         // Timeline de la CASCADA (Lalo 27-ago): WhatsApp → correo → Dapta con
@@ -2646,12 +2671,12 @@ async function renderCampanas(): Promise<string> {
           return `${etq} pendiente (${sinResp} sin respuesta)`
         }).join(" → ")
         return `<tr><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div><div class="sub" style="margin:2px 0 0">${timeline}</div></td>
-        <td style="text-align:center"><b>${env}</b></td>
-        <td style="text-align:center">${respTotal} <span class="pct">(${pct(respTotal)})</span></td>
-        <td style="text-align:center;color:#15803d"><b>${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto</div></td>
-        <td style="text-align:center;color:#b45309">${a.no.size}${a.no.size ? `<div class="sub" style="margin:2px 0 0">${a.noBoton.size} botón · ${a.no.size - a.noBoton.size} texto</div>` : ""}</td>
-        <td style="text-align:center">${a.aplicados.size}</td>
-        <td style="text-align:center">${pg.n ? `<b>${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
+        <td style="text-align:center"><b title="${tip(a.enviados)}" style="cursor:help">${env}</b></td>
+        <td style="text-align:center"><span title="${tip(respondieron)}" style="cursor:help">${respTotal}</span> <span class="pct">(${pct(respTotal)})</span></td>
+        <td style="text-align:center;color:#15803d"><b title="${tip(a.si)}" style="cursor:help">${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto</div></td>
+        <td style="text-align:center;color:#b45309"><span title="${tip(a.no)}" style="cursor:help">${a.no.size}</span>${a.no.size ? `<div class="sub" style="margin:2px 0 0">${a.noBoton.size} botón · ${a.no.size - a.noBoton.size} texto</div>` : ""}</td>
+        <td style="text-align:center"><span title="${tip(a.aplicados)}" style="cursor:help">${a.aplicados.size}</span></td>
+        <td style="text-align:center">${pg.n ? `<b title="${esc(pg.quienes.map((q) => { const [t, m] = q.split("|"); return `${lineaDe(t)} · $${Number(m).toLocaleString("es-CL")}` }).join("\n"))}" style="cursor:help">${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
       })
     if (!filas.length) return ""
     return `<div class="card" id="campanas"><h2>📣 Campañas de re-encantamiento</h2>
