@@ -1203,6 +1203,26 @@ async function processOneTurn(
       }
     }
 
+    // 2.6b''. Guardrail "COTIZACIÓN ACTUALIZADA" SIN TOOL (27-ago, caso
+    // Guillermo/Genesys COT956): el cliente pidió la variante solo-app, el
+    // modelo anunció "te envío la cotización actualizada solo con app" y
+    // despachó el PDF VIGENTE (reloj) sin actualizar nada — cliente con un
+    // documento etiquetado al revés. Anunciar "actualizada/nueva versión"
+    // exige que actualizar_cotizacion (o una emisión) haya corrido DE VERDAD
+    // en este turno. Gemelo del guardrail de reunión agendada.
+    const ANUNCIA_ACTUALIZADA_RE =
+      /cotizaci[oó]n\s+(actualizada|modificada|corregida)|actualic[eé]\s+(tu|la)\s+cotizaci[oó]n|te\s+(env[ií]o|mando|mand[eé]|acabo\s+de\s+mandar)\s+la\s+cotizaci[oó]n\s+actualizada|nueva\s+versi[oó]n\s+de\s+(tu|la)\s+cotizaci[oó]n/i
+    const actualizoReal = toolCalls.some(
+      (c) => (c.name === "actualizar_cotizacion" || c.name === "generar_link_cotizadora") && c.ok,
+    )
+    if (!enOnboarding && ANUNCIA_ACTUALIZADA_RE.test(reply) && !actualizoReal) {
+      console.error(
+        `[v3-bg] ACTUALIZADA_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+      )
+      reply =
+        "Ojo conmigo, para ser bien precisa: tu cotización formal sigue siendo la vigente — todavía no la he actualizado. ¿Quieres que la deje con esta nueva configuración? Me confirmas y la actualizo al tiro, y te llega el documento corregido 😊"
+    }
+
     // 2.6c. Guardrail anti-alucinación de callback / lead registrado.
     // Caso real (Rodrigo/Dixi): Vicky dijo "dejé registrados tus datos, un
     // ejecutivo te contactará" SIN invocar registrar_solicitud_callback → no se
