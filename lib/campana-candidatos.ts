@@ -138,3 +138,71 @@ export async function recalcularCandidatosCampana(): Promise<FotoCandidatos> {
   await setKvValue(KV_CANDIDATOS, JSON.stringify(foto))
   return foto
 }
+
+// ── Calendario de campañas (doc v21, Lalo) ──────────────────────────────────
+// Cada campaña = 3 toques en días seguidos: lunes WhatsApp, martes correo,
+// miércoles Dapta. Ideal iniciar el lunes 18 o el lunes 28 del mes (o el lunes
+// MÁS CERCANO a esas anclas), y NINGÚN toque cruza de mes.
+
+export type ToqueProgramado = { canal: "whatsapp" | "correo" | "dapta"; fecha: string }
+export type CampanaProgramada = { inicio: string; toques: ToqueProgramado[] }
+
+const DIA_MS = 86_400_000
+
+function ymdChile(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(d)
+}
+
+function aFecha(ymd: string): Date {
+  return new Date(`${ymd}T12:00:00Z`)
+}
+
+function sumaDias(ymd: string, dias: number): string {
+  return new Date(aFecha(ymd).getTime() + dias * DIA_MS).toISOString().slice(0, 10)
+}
+
+/** Lunes del mes (y, m 1-12) más cercano al día `ancla` cuyo miércoles
+ * (lunes+2) sigue dentro del mes. */
+function lunesAncla(y: number, m: number, ancla: number): string | null {
+  const ultimo = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  let mejor: { dia: number; dist: number } | null = null
+  for (let d = 1; d + 2 <= ultimo; d++) {
+    if (aFecha(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`).getUTCDay() !== 1) continue
+    const dist = Math.abs(d - ancla)
+    if (!mejor || dist < mejor.dist) mejor = { dia: d, dist }
+  }
+  return mejor ? `${y}-${String(m).padStart(2, "0")}-${String(mejor.dia).padStart(2, "0")}` : null
+}
+
+/** Las próximas `max` campañas del calendario, desde HOY (hora de Chile). */
+export function proximasCampanas(hoyYmd?: string, max = 2): CampanaProgramada[] {
+  const hoy = hoyYmd || ymdChile(new Date())
+  const [y0, m0] = hoy.split("-").map(Number)
+  const res: CampanaProgramada[] = []
+  for (let k = 0; k < 4 && res.length < max; k++) {
+    const y = y0 + Math.floor((m0 - 1 + k) / 12)
+    const m = ((m0 - 1 + k) % 12) + 1
+    for (const ancla of [18, 28]) {
+      const inicio = lunesAncla(y, m, ancla)
+      if (!inicio || inicio <= hoy) continue
+      if (res.some((c) => c.inicio === inicio)) continue
+      res.push({
+        inicio,
+        toques: [
+          { canal: "whatsapp", fecha: inicio },
+          { canal: "correo", fecha: sumaDias(inicio, 1) },
+          { canal: "dapta", fecha: sumaDias(inicio, 2) },
+        ],
+      })
+    }
+  }
+  return res.sort((a, b) => a.inicio.localeCompare(b.inicio)).slice(0, max)
+}
+
+/** ¿Mañana (hora de Chile) hay un toque programado? El listado DETALLADO de
+ * candidatos solo se publica el día previo a cada toque (Lalo 27-ago). */
+export function mananaHayToque(hoyYmd?: string): boolean {
+  const hoy = hoyYmd || ymdChile(new Date())
+  const manana = sumaDias(hoy, 1)
+  return proximasCampanas(hoy, 2).some((c) => c.toques.some((t) => t.fecha === manana))
+}

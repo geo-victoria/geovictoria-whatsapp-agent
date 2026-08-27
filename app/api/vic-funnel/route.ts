@@ -2858,7 +2858,7 @@ async function renderEspejos(qsBase: string, soloDe?: string): Promise<string> {
  * con su login (regla de los dos mundos, 21-ago).
  */
 async function renderPanelCampanas(quien: string, qsBase: string, recalcular: boolean): Promise<string> {
-  const { leerFotoCandidatos, recalcularCandidatosCampana } = await import("@/lib/campana-candidatos")
+  const { leerFotoCandidatos, recalcularCandidatosCampana, proximasCampanas, mananaHayToque } = await import("@/lib/campana-candidatos")
   let errorRecalc = ""
   let foto = null as Awaited<ReturnType<typeof leerFotoCandidatos>>
   if (recalcular) {
@@ -2891,6 +2891,20 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
     .map(([m, n]) => `<span style="display:inline-block;padding:5px 12px;border-radius:10px;background:#fdf2f2;font-weight:600">${esc(MOTIVOS[m] || m)}: ${n}</span>`)
     .join(" ")
   const edadMin = foto ? Math.max(0, Math.round((Date.now() - Date.parse(foto.generadoAt)) / 60000)) : null
+  // Calendario (Lalo 27-ago): la sección muestra las PRÓXIMAS campañas con la
+  // fecha de sus 3 toques; los candidatos van como TOTAL, y el listado con
+  // nombres solo se publica el día previo a cada toque.
+  const proximas = proximasCampanas(undefined, 2)
+  const listaVisible = mananaHayToque()
+  const fechaCorta = (ymd: string) => {
+    const d = new Date(`${ymd}T12:00:00Z`)
+    return d.toLocaleDateString("es-CL", { timeZone: "UTC", day: "2-digit", month: "2-digit" })
+  }
+  const fechaLarga = (ymd: string) => {
+    const d = new Date(`${ymd}T12:00:00Z`)
+    const txt = d.toLocaleDateString("es-CL", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" })
+    return txt.charAt(0).toUpperCase() + txt.slice(1)
+  }
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Campañas Vicky</title>
   <style>
     body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;background:#f6f8fa;color:#2d3748}
@@ -2912,19 +2926,25 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
   ${resultados || '<div class="card sub">Aún no hay campañas enviadas.</div>'}
   <div class="card">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <h2 style="margin:0">Candidatos a la próxima ola${foto ? ` (${foto.aptos.length})` : ""}</h2>
-      ${foto ? `<span class="sub">foto de hace ${edadMin} min</span>` : ""}
-      <a class="btn" href="?${qsBase}&vista=campanas&recalcular=1">⟳ Actualizar</a>
+      <h2 style="margin:0">📅 Próximas campañas</h2>
+      ${foto ? `<span class="sub">candidatos: foto de hace ${edadMin} min</span>` : ""}
+      <a class="btn" href="?${qsBase}&vista=campanas&recalcular=1">⟳ Actualizar candidatos</a>
+    </div>
+    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>Campaña</th><th>📱 WhatsApp</th><th>✉️ Correo</th><th>📞 Dapta</th><th>Candidatos</th></tr></thead>
+    <tbody>${proximas.map((c, i) => `<tr><td><b>${fechaLarga(c.inicio)}</b></td>${c.toques.map((t) => `<td style="text-align:center">${fechaCorta(t.fecha)}</td>`).join("")}
+      <td style="text-align:center">${i === 0 && foto ? `<b>${foto.aptos.length}</b> <span class="pct">(+ ${foto.excluidos.length} excluidos)</span>` : '<span class="sub">se calculan al acercarse</span>'}</td></tr>`).join("")}</tbody></table></div>
+    <p class="sub" style="margin:10px 0 0">Cada campaña son 3 toques en cascada y cada toque va solo a quienes no respondieron el anterior. Candidato = cotización formal sin pagar cuyo contacto lleva 48 horas hábiles sin actividad de nadie (ni Vicky ni un ejecutivo por chat, llamada o nota). El listado DETALLADO con nombres se publica el día previo a cada toque — si un cliente suyo aparece, con una nota al deal o un chat por su WhatsApp espejado queda fuera en el próximo recálculo.</p>
+    ${errorRecalc ? `<p class="sub" style="color:#b91c1c">La actualización falló (${esc(errorRecalc)}) — se muestra la última foto disponible.</p>` : ""}
+    ${listaVisible && foto ? `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px">
+      <h2 style="margin:0">Listado de candidatos (${foto.aptos.length})</h2>
       <label class="sub">Ejecutivo: <select id="fEjec" onchange="filtraEjec()"><option value="">todos</option>${ejecutivos.map((e) => `<option>${esc(e)}</option>`).join("")}</select></label>
     </div>
-    <p class="sub" style="margin:8px 0 10px">Cotizaciones formales sin pagar cuyo contacto lleva 48 horas hábiles sin actividad: ni con Vicky ni con un ejecutivo (chat, llamada o nota). El "Ejecutivo" es quien tiene la conversación a cargo (traspaso activo o dueño de la cotización); Vicky = sin traspaso. La actualización tarda ~1-2 min porque revisa chats, llamadas y notas de cada deal.</p>
-    ${errorRecalc ? `<p class="sub" style="color:#b91c1c">La actualización falló (${esc(errorRecalc)}) — se muestra la última foto disponible.</p>` : ""}
-    ${foto ? `<div style="overflow-x:auto"><table id="tCand"><thead><tr><th>Empresa</th><th>COT</th><th>Estado</th><th>Emitida</th><th>WhatsApp</th><th>Ejecutivo</th></tr></thead>
+    <div style="overflow-x:auto;margin-top:8px"><table id="tCand"><thead><tr><th>Empresa</th><th>COT</th><th>Estado</th><th>Emitida</th><th>WhatsApp</th><th>Ejecutivo</th></tr></thead>
     <tbody>${foto.aptos.map(filaCand).join("")}</tbody></table></div>
-    <details style="margin-top:12px"><summary class="sub" style="cursor:pointer">Excluidos de la próxima ola (${foto.excluidos.length}) — ${chipsExcl || "ninguno"}</summary>
+    <details style="margin-top:12px"><summary class="sub" style="cursor:pointer">Excluidos (${foto.excluidos.length}) — ${chipsExcl || "ninguno"}</summary>
     <div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Empresa</th><th>COT</th><th>Estado</th><th>Emitida</th><th>WhatsApp</th><th>Ejecutivo</th><th>Motivo</th></tr></thead>
     <tbody>${foto.excluidos.map(filaCand).join("")}</tbody></table></div></details>`
-      : `<p class="sub">Todavía no se genera la primera foto de candidatos — usa ⟳ Actualizar.</p>`}
+      : `<p class="sub" style="margin:8px 0 0">📋 El listado detallado de candidatos aparecerá aquí el día previo al próximo toque${proximas.length ? ` (${fechaCorta(proximas[0].inicio)})` : ""}.</p>`}
   </div>
   ${quien && quien !== "Administrador" ? `<p class="sub">Sesión: ${esc(quien)}</p>` : ""}
   <script>function filtraEjec(){var v=document.getElementById('fEjec').value;document.querySelectorAll('#tCand tbody tr').forEach(function(tr){tr.style.display=!v||tr.getAttribute('data-ejec')===v?'':'none'})}</script>
