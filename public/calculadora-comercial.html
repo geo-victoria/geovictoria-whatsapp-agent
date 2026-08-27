@@ -5,11 +5,31 @@
 <title>Calculadora movida</title>
 <style>body{font-family:system-ui,sans-serif;background:#f4f7fa;color:#1f2937;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
 .card{background:#fff;border:1px solid #dbe4ec;border-radius:12px;padding:32px 36px;max-width:520px;box-shadow:0 2px 10px rgba(15,40,70,.08)}
-h1{font-size:20px;margin:0 0 10px;color:#0f2846}p{margin:8px 0;line-height:1.5}</style>
+h1{font-size:20px;margin:0 0 10px;color:#0f2846}p{margin:8px 0;line-height:1.5}
+a.btn{display:inline-block;margin-top:14px;background:#00aff2;color:#fff;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:8px}
+.sub{color:#64748b;font-size:13px;margin-top:10px}</style>
 </head>
 <body><div class="card">
 <h1>Esta calculadora ya no se usa para cotizar clientes</h1>
-<p>Para evitar propuestas sin registro, las cotizaciones se crean en el <b>editor de cotizaciones del dash de gestión</b> (botón "crear cotización" de la oportunidad): ahí quedan en Zoho, con PDF oficial y link de pago.</p>
-<p>Si necesitas esta calculadora para un caso puntual, pídesela a Eduardo.</p>
-</div></body>
+<p>Para evitar propuestas sin registro, las cotizaciones se crean en el <b>editor de cotizaciones del dash de gestión</b>: ahí quedan en Zoho, con PDF oficial y link de pago.</p>
+<a class="btn" id="ir" href="https://cotizacion.geovictoria.com/oportunidades">Ir al editor de cotizaciones →</a>
+<p class="sub" id="cuenta">Te llevo en 6 segundos…</p>
+<p class="sub">Si necesitas esta calculadora para un caso puntual, pídesela a Eduardo.</p>
+</div>
+<script>
+  // Links viejos traían ?deal=<id>&key=: se respeta el destino y se abre el
+  // chat de creación de ESA oportunidad en vez de la portada del dash.
+  var p = new URLSearchParams(location.search);
+  var destino = "https://cotizacion.geovictoria.com/oportunidades";
+  if (p.get("deal") && p.get("key")) {
+    destino = "https://cotizacion.geovictoria.com/api/vic-funnel?key=" + encodeURIComponent(p.get("key")) + "&cotcrear=" + encodeURIComponent(p.get("deal"));
+  }
+  document.getElementById("ir").href = destino;
+  var s = 6, el = document.getElementById("cuenta");
+  var t = setInterval(function () {
+    s--; if (s <= 0) { clearInterval(t); location.href = destino; return; }
+    el.textContent = "Te llevo en " + s + " segundos…";
+  }, 1000);
+</script>
+</body>
 </html>
