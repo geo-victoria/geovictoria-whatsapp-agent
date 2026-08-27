@@ -75,7 +75,7 @@ function htmlPersonal(empresa: string, lineaPersonal?: string): string {
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;line-height:1.65;max-width:600px">
 <p>Hola! Soy Vicky, de GeoVictoria.</p>
 <p>${intro}</p>
-<p>Te guardé un 10% adicional sobre el plan mensual, por los primeros 6 meses. Si te interesa lo activo al tiro: me escribes al WhatsApp (<a href="${WA_VICKY}">+56 9 6730 8227</a>) o me respondes este correo con un "sí" y te dejo la cotización actualizada, con el pago en línea listo.</p>
+<p>Te guardé un 10% adicional sobre el plan mensual, por los primeros 6 meses. Si te interesa lo activo al tiro: <a href="${WA_VICKY}">me escribes por WhatsApp</a> o me respondes este correo con un "sí", y te dejo la cotización actualizada con el pago en línea listo.</p>
 <p>Y si ya no lo necesitan, me dices y no te molesto más con esto.</p>
 <p>Un abrazo,<br>Vicky<br>GeoVictoria</p>
 </div>`
