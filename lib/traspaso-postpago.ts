@@ -387,6 +387,28 @@ export async function cerrarYTraspasarPostPago(
     }
   }
   const duenoCL = !esMX && !esCO ? await ownerDeCotizacion(quoteId).catch(() => null) : null
+  // Teléfono del dueño: directorio local primero; si no lo conocemos, su
+  // ficha de usuario en Zoho (mismo dato que usa el modal de transferencia).
+  let telefonoDuenoCL = duenoCL ? EJECUTIVOS_CL[duenoCL.email.toLowerCase()]?.telefono || "" : ""
+  if (duenoCL && !telefonoDuenoCL && duenoCL.id) {
+    try {
+      const { getZohoAccessToken } = await import("./zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const r = await fetch(`${api}/crm/v3/users/${duenoCL.id}`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      const u = r.ok
+        ? ((await r.json().catch(() => ({}))) as { users?: Array<{ phone?: string; mobile?: string }> }).users?.[0]
+        : undefined
+      telefonoDuenoCL = (u?.phone || u?.mobile || "").trim()
+    } catch { /* sin teléfono: el mensaje va solo con correo */ }
+  }
+  // Sin dueño humano resuelto NO se inventa uno: presentar a la persona
+  // equivocada es peor que presentar al equipo (caso Moncada 27-ago — el
+  // resolver COQL roto hacía caer TODOS los pagos al fallback Eddyluz
+  // mientras el deal era de Anderson). El fallback con nombre murió.
   const ejecutivo = esMX
     ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "+52 55 3763 6604" }
     : esCO
@@ -394,12 +416,12 @@ export async function cerrarYTraspasarPostPago(
       : duenoCL
         ? {
             // Nombre real desde Zoho (jamás un prefijo de correo); el teléfono
-            // sale del directorio si lo conocemos.
+            // sale del directorio o de su ficha Zoho.
             nombre: duenoCL.nombre || EJECUTIVOS_CL[duenoCL.email]?.nombre || "",
             email: duenoCL.email,
-            telefono: EJECUTIVOS_CL[duenoCL.email.toLowerCase()]?.telefono || "",
+            telefono: telefonoDuenoCL,
           }
-        : EJECUTIVOS_CL["emujica@geovictoria.com"]
+        : null
   // Caso Jessica/JEANSCO (24-jul): el mensaje de bienvenida DEBE traer el link
   // del auto-onboarding — antes solo presentaba al ejecutivo y el cliente
   // tenía que encontrar el wizard por su cuenta. El endpoint es idempotente.
@@ -415,9 +437,11 @@ export async function cerrarYTraspasarPostPago(
   const quienPresenta = ventaAutonoma.autonoma && ventaAutonoma.ejecutivo ? ventaAutonoma.ejecutivo : ejecutivo
   const traspaso =
     encabezado +
-    `De aquí en adelante te acompaña *${quienPresenta.nombre}*, ${ventaAutonoma.autonoma ? "de nuestro equipo" : "tu ejecutivo comercial"}, quien te contactará para coordinar la puesta en marcha:\n` +
-    (quienPresenta.telefono ? `📱 ${quienPresenta.telefono}\n` : "") +
-    `✉️ ${quienPresenta.email}`
+    (quienPresenta && quienPresenta.nombre
+      ? `De aquí en adelante te acompaña *${quienPresenta.nombre}*, ${ventaAutonoma.autonoma ? "de nuestro equipo" : "tu ejecutivo comercial"}, quien te contactará para coordinar la puesta en marcha:\n` +
+        (quienPresenta.telefono ? `📱 ${quienPresenta.telefono}\n` : "") +
+        `✉️ ${quienPresenta.email}`
+      : `De aquí en adelante te acompaña nuestro equipo comercial, que te contactará para coordinar la puesta en marcha. Cualquier duda me escribes por aquí 🙌`)
   const pushed = await sendBotmakerMessage(
     contact,
     traspaso,

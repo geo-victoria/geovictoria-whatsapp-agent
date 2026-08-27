@@ -73,19 +73,23 @@ describe("el traspaso post-pago resuelve al dueño real", () => {
     assert.match(TRASPASO, /"alopez@geovictoria\.com": \{ nombre: "Ana Paula López"/)
   })
 
-  test("el default —Zoho caído o sin owner— es Eddyluz, la del presente", () => {
-    assert.match(TRASPASO, /EJECUTIVOS_CL\["emujica@geovictoria\.com"\]/)
+  test("sin dueño resuelto NO se presenta a nadie con nombre (27-ago, caso Moncada)", () => {
+    // El fallback Eddyluz murió: presentar a la persona equivocada es peor
+    // que presentar al equipo. El único uso restante del directorio con su
+    // email es como fila del mapa, no como default.
+    assert.doesNotMatch(TRASPASO, /: EJECUTIVOS_CL\["emujica@geovictoria\.com"\]/)
+    assert.match(TRASPASO, /te acompaña nuestro equipo comercial/)
   })
 
   test("un dueño fuera del mapa igual se presenta, con su nombre de Zoho", () => {
-    // Desde el 31-jul (tómbola): nombre real de Zoho siempre, y el teléfono
-    // sale del directorio cuando lo conocemos ("" si no).
+    // Nombre real de Zoho siempre; el teléfono sale del directorio o de su
+    // ficha de usuario en Zoho.
     assert.match(TRASPASO, /nombre: duenoCL\.nombre \|\| EJECUTIVOS_CL\[duenoCL\.email\]\?\.nombre \|\| ""/)
-    assert.match(TRASPASO, /telefono: EJECUTIVOS_CL\[duenoCL\.email\.toLowerCase\(\)\]\?\.telefono \|\| ""/)
+    assert.match(TRASPASO, /telefonoDuenoCL/)
   })
 
   test("la premisa de coherencia post-pago sigue en pie (presenta al ejecutivo)", () => {
-    assert.match(TRASPASO, /te acompaña \*\$\{ejecutivo\.nombre\}\*/)
+    assert.match(TRASPASO, /te acompaña \*\$\{quienPresenta\.nombre\}\*/)
   })
 })
 
