@@ -3291,6 +3291,38 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
   <a class="sub" href="?${qsBase}">← volver al dash</a></div>
   <div class="card"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">${chips}<span class="sub">· últimos 30 días, canal Vicky</span></div>
   <p class="sub" style="margin:10px 0 0">El cierre perdido automático corre a los <b>14 días</b> sin actividad. Orden de la tabla = urgencia: aceptadas sin pago primero, luego las que nunca respondieron a la formal, luego tibias. El link del teléfono abre WhatsApp; el COT abre Zoho.</p></div>
+  ${await (async () => {
+    // 🤝 PROMESAS DE CONTACTO (P1 27-ago): lo que Vicky prometió que un humano
+    // haría ("te llama un ejecutivo", callback). Vencida sin evidencia en el
+    // espejo = alertada — acá deja de ser invisible.
+    try {
+      const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+      const desde = new Date(Date.now() - 14 * 86_400_000).toISOString()
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/vic_promesas?creado_at=gte.${encodeURIComponent(desde)}&order=creado_at.desc&limit=200`,
+        { headers: h, cache: "no-store" },
+      )
+      if (!r.ok) return ""
+      const filasP = ((await r.json().catch(() => [])) as Array<{
+        contact: string; tipo: string; detalle?: string; vendedor_email?: string
+        creado_at: string; deadline_at: string; estado: string; evidencia?: string
+      }>) || []
+      if (!filasP.length) return ""
+      const abiertas = filasP.filter((p) => p.estado !== "cumplida")
+      const cumplidas = filasP.length - abiertas.length
+      const etq = (t: string) => (t === "callback" ? "llamada pedida" : t === "cotizacion_por_correo" ? "cotización por correo" : "llamada de ejecutivo")
+      const chip = (e: string) =>
+        e === "alertada"
+          ? '<span style="background:#fee2e2;color:#b91c1c;font-size:11px;padding:2px 8px;border-radius:99px;font-weight:700">VENCIDA</span>'
+          : '<span style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 8px;border-radius:99px;font-weight:700">pendiente</span>'
+      const fmtP = (iso: string) => new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso))
+      return `<div class="card"><h2 style="margin:0 0 6px;font-size:16px">🤝 Promesas de contacto (14 días: ${filasP.length} · cumplidas ${cumplidas})</h2>
+      <p class="sub" style="margin:0 0 10px">Cada vez que Vicky promete que un humano llamará, queda registrado con plazo hábil. "VENCIDA" = pasó el plazo sin rastro de contacto en el espejo (ya se avisó por alerta interna). Se marca cumplida sola al detectar el WhatsApp o la llamada del ejecutivo.</p>
+      ${abiertas.length ? `<div style="overflow-x:auto"><table><tr><th>Cliente</th><th>Promesa</th><th>Responsable</th><th>Prometida</th><th>Vencía</th><th>Estado</th></tr>
+      ${abiertas.map((p) => `<tr><td><a href="https://wa.me/${esc(p.contact)}" target="_blank">+${esc(p.contact)}</a></td><td>${esc(etq(p.tipo))}${p.detalle ? ` <span class="sub">· ${esc(p.detalle)}</span>` : ""}</td><td>${esc(p.vendedor_email || "—")}</td><td>${fmtP(p.creado_at)}</td><td>${fmtP(p.deadline_at)}</td><td>${chip(p.estado)}</td></tr>`).join("")}</table></div>` : '<p class="sub">Sin promesas abiertas 🎉</p>'}
+      </div>`
+    } catch { return "" }
+  })()}
   <div class="card"><h2 style="margin:0 0 10px;font-size:16px">Vivas por trabajar (${filas.length})</h2>
   <div style="overflow-x:auto"><table><tr><th>COT</th><th>Empresa</th><th>WhatsApp</th><th>Emitida</th><th>Estado</th><th>Responsable</th><th>Últ. msj del cliente</th><th>Próximo paso sugerido</th></tr>
   ${filas.map((f) => f.html).join("")}</table></div>

@@ -2012,6 +2012,17 @@ export async function GET(req: Request) {
     console.warn("[ptv-cron] vigía espejo falló:", e instanceof Error ? e.message : e)
   })
 
+  // Vigía de PROMESAS de contacto humano (P1 27-ago): promesas vencidas sin
+  // evidencia en el espejo → alerta interna + visible en la Cartera.
+  const promesas = await (async () => {
+    const { vigilarPromesas } = await import("@/lib/promesas")
+    return vigilarPromesas(15)
+  })().catch((e) => {
+    console.warn("[ptv-cron] vigía de promesas falló:", e instanceof Error ? e.message : e)
+    return { revisadas: 0, cumplidas: 0, alertadas: 0 }
+  })
+  if (promesas.revisadas > 0) console.log(`[ptv-cron] promesas: ${JSON.stringify(promesas)}`)
+
   // Enriquecimiento de leads placeholder desde el chat (Lalo 13-ago): los
   // "Prospecto WhatsApp" se completan con lo que el cliente ya dijo.
   const enriquecidos = await enriquecerLeadsDeChat().catch((e) => {

@@ -865,6 +865,37 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // PROMESA RASTREABLE (P1 27-ago, catastro Rodrigo: "pidió llamada" y
+        // "te contactará un ejecutivo" quedaban en tierra de nadie). Toda tool
+        // que promete contacto HUMANO deja fila en vic_promesas con deadline
+        // hábil; el vigía del ptv-cron alerta si venció sin evidencia en el
+        // espejo. Best-effort: jamás toca la conversación.
+        try {
+          const motivoDeriv = String(toolInput.motivo || "")
+          const prometeContacto =
+            (toolName === "derivar_a_soporte" &&
+              ["fuera_de_rango_trabajadores", "solicitud_explicita_persona", "fuera_de_scope", "callback"].includes(motivoDeriv)) ||
+            (toolName === "registrar_solicitud_callback" && Boolean((result as { ok?: boolean } | null)?.ok))
+          if (contact && prometeContacto) {
+            const { registrarPromesa } = await import("./promesas")
+            const { leerEjecutivoAsignado } = await import("./crm-hitos")
+            const ejecPromesa = await leerEjecutivoAsignado(contact).catch(() => null)
+            void registrarPromesa({
+              contact,
+              tipo:
+                toolName === "registrar_solicitud_callback" || motivoDeriv === "callback"
+                  ? "callback"
+                  : "llamada_ejecutivo",
+              detalle:
+                toolName === "derivar_a_soporte"
+                  ? `derivación ${motivoDeriv}${toolInput.trabajadores ? ` · ${String(toolInput.trabajadores)} trabajadores` : ""}`
+                  : "callback pedido por el cliente",
+              vendedorEmail: ejecPromesa?.email || undefined,
+              horasHabiles: 4,
+            }).catch(() => false)
+          }
+        } catch { /* registro de promesa best-effort */ }
+
         const esRedireccionSoporte =
           toolName === "consultar_agente_soporte" ||
           (toolName === "derivar_a_soporte" &&
