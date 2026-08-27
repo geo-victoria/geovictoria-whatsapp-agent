@@ -5049,7 +5049,7 @@ async function renderSelectorDeal(key: string): Promise<Response> {
         <td><span class="tag">${esc(String(d.Stage || "—"))}</span></td>
         <td>${esc(dueno)}</td>
         <td style="white-space:nowrap">${tel ? `+${esc(tel)}` : `<span class="sub">sin teléfono</span>`}</td>
-        <td style="white-space:nowrap"><a href="/calculadora-comercial.html?deal=${encodeURIComponent(String(d.id))}&key=${encodeURIComponent(key)}">elegir →</a></td>
+        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(String(d.id))}">elegir →</a></td>
       </tr>`
     })
     .join("")
@@ -5129,7 +5129,7 @@ async function renderSelectorDeal(key: string): Promise<Response> {
                 "<td><span class=\\"tag\\">" + esc(x.etapa) + "</span></td>" +
                 "<td>" + esc(x.dueno) + "</td>" +
                 "<td style=\\"white-space:nowrap\\">" + (x.telefono ? "+" + esc(x.telefono) : "<span class=\\"sub\\">sin tel\u00e9fono</span>") + "</td>" +
-                "<td style=\\"white-space:nowrap\\"><a href=\\"/calculadora-comercial.html?deal=" + encodeURIComponent(x.id) + "&key=" + encodeURIComponent(KEY) + "\\">elegir \u2192</a></td>";
+                "<td style=\\"white-space:nowrap\\"><a href=\\"?key=" + encodeURIComponent(KEY) + "&cotcrear=" + encodeURIComponent(x.id) + "\\">elegir →</a></td>";
               cuerpo.appendChild(tr);
             });
             var visibles = filtrar();
