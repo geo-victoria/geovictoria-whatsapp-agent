@@ -2737,7 +2737,10 @@ async function renderCampanas(): Promise<string> {
  * (token por sesión en vic_kv espejo_link_<sesión>; si no existe, se genera
  * aquí mismo — el link abre SOLO la página del QR de esa sesión).
  */
-async function renderEspejos(qsBase: string): Promise<string> {
+async function renderEspejos(qsBase: string, soloDe?: string): Promise<string> {
+  // soloDe (Lalo 27-ago): un EJECUTIVO logueado ve SOLO su propio espejo —
+  // su estado y su link del QR — sin la lista del resto del equipo.
+  const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase()
   const token = await getZohoAccessToken()
   const H = { Authorization: `Zoho-oauthtoken ${token}` }
   const PERFILES = new Set(["Ejecutivo Comercial", "Telemarketing"])
@@ -2759,6 +2762,18 @@ async function renderEspejos(qsBase: string): Promise<string> {
     if (!cuerpo?.info?.more_records) break
   }
   usuarios.sort((a, b) => a.perfil.localeCompare(b.perfil) || a.nombre.localeCompare(b.nombre))
+  let usuariosVista = usuarios
+  if (soloDe) {
+    usuariosVista = usuarios.filter(
+      (u) => norm(u.nombre) === norm(soloDe) || u.email === soloDe.toLowerCase() || u.sesion === norm(soloDe),
+    )
+    if (!usuariosVista.length) {
+      return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Espejo WhatsApp</title></head>
+      <body style="font-family:system-ui;max-width:520px;margin:60px auto;text-align:center;color:#2d3748">
+      <h2>🪞 Tu espejo de WhatsApp</h2><p>No encontramos tu usuario en el listado de espejos (sesión: ${esc(soloDe)}). Avísale a administración para configurarlo.</p>
+      <p><a href="?${qsBase}" style="color:#0284c7">← volver al dash</a></p></body></html>`
+    }
+  }
   // Estado del worker y tokens de link, en dos lecturas batch de vic_kv.
   const hSb = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   const leerKvs = async (patron: string): Promise<Map<string, string>> => {
@@ -2772,7 +2787,7 @@ async function renderEspejos(qsBase: string): Promise<string> {
   const [estados, links] = await Promise.all([leerKvs("wa_espejo_status_"), leerKvs("espejo_link_")])
   // Token de link faltante → se genera acá mismo (el link es solo-QR).
   const { randomBytes } = await import("crypto")
-  for (const u of usuarios) {
+  for (const u of usuariosVista) {
     if (links.has(`espejo_link_${u.sesion}`)) continue
     const t = randomBytes(8).toString("hex")
     links.set(`espejo_link_${u.sesion}`, t)
@@ -2783,7 +2798,7 @@ async function renderEspejos(qsBase: string): Promise<string> {
       cache: "no-store",
     }).catch(() => {})
   }
-  const filas = usuarios.map((u) => {
+  const filas = usuariosVista.map((u) => {
     let estado = "desconectado"
     let detalle = "sin sesión en el worker"
     try {
@@ -2801,7 +2816,7 @@ async function renderEspejos(qsBase: string): Promise<string> {
     <td>${estado === "conectado" ? '<span style="color:#15803d;font-weight:700">✅ Conectado</span>' : '<span style="color:#b91c1c;font-weight:700">⛔ Desconectado</span>'}<div class="sub">${esc(detalle)}</div></td>
     <td><a href="${urlQr}" target="_blank" rel="noopener">abrir QR</a> · <a href="#" onclick="navigator.clipboard.writeText(location.origin+'${urlQr}');this.textContent='copiado ✓';return false">copiar link</a></td></tr>`
   })
-  const conectados = usuarios.filter((u) => {
+  const conectados = usuariosVista.filter((u) => {
     try { return (JSON.parse(estados.get(`wa_espejo_status_${u.sesion}`) || "{}") as { estado?: string }).estado === "conectado" } catch { return false }
   }).length
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Espejos WhatsApp</title>
@@ -2821,11 +2836,13 @@ async function renderEspejos(qsBase: string): Promise<string> {
   <a class="sub" href="?${qsBase}">← volver al dash</a></div>
   <div class="card">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-      <b>${conectados} conectados de ${usuarios.length}</b>
+      ${soloDe ? `<b>Tu espejo de WhatsApp</b>` : `<b>${conectados} conectados de ${usuariosVista.length}</b>
       <label class="sub">Perfil: <select id="fPerfil" onchange="filtra()"><option value="">todos</option><option>Ejecutivo Comercial</option><option>Telemarketing</option></select></label>
-      <label class="sub">Estado: <select id="fEstado" onchange="filtra()"><option value="">todos</option><option value="conectado">Conectado</option><option value="desconectado">Desconectado</option></select></label>
+      <label class="sub">Estado: <select id="fEstado" onchange="filtra()"><option value="">todos</option><option value="conectado">Conectado</option><option value="desconectado">Desconectado</option></select></label>`}
     </div>
-    <p class="sub" style="margin:8px 0 10px">El link del QR es individual por persona y se puede compartir directo con ella: abre SOLO su página de vinculación (WhatsApp Business → Dispositivos vinculados → escanear). El estado lo publica el worker del espejo; "sin sesión en el worker" = falta agregar esa persona a WA_SESSION_IDS en Railway.</p>
+    <p class="sub" style="margin:8px 0 10px">${soloDe
+      ? "Con tu espejo conectado, tus chats y llamadas por WhatsApp cuentan como gestión tuya: sacan a tus clientes de las campañas automáticas y quedan espejados en el deal. Si sale Desconectado, abre el link del QR y escanéalo desde tu WhatsApp Business (Dispositivos vinculados → Vincular dispositivo)."
+      : 'El link del QR es individual por persona y se puede compartir directo con ella: abre SOLO su página de vinculación (WhatsApp Business → Dispositivos vinculados → escanear). El estado lo publica el worker del espejo; "sin sesión en el worker" = falta agregar esa persona a WA_SESSION_IDS en Railway.'}</p>
     <div style="overflow-x:auto"><table id="tEsp"><thead><tr><th>Persona</th><th>Perfil</th><th>Estado</th><th>Link del QR</th></tr></thead>
     <tbody>${filas.join("")}</tbody></table></div>
   </div>
@@ -6817,12 +6834,11 @@ export async function GET(req: Request): Promise<Response> {
   // vincular la sesión de cualquiera; cada vendedor recibe SU link, no la
   // página completa).
   if (vistaParam === "espejos") {
-    if (quien && quien !== "Administrador") {
-      return new Response("Solo administración puede ver el monitoreo de espejos.", { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } })
-    }
     try {
       const qsVolver = (() => { const p = new URLSearchParams({ key, pais }); return p.toString() })()
-      const htmlEsp = await renderEspejos(qsVolver)
+      // Un VENDEDOR logueado ve SOLO su propio espejo (estado + su QR);
+      // Administrador y acceso máquina ven el monitoreo completo.
+      const htmlEsp = await renderEspejos(qsVolver, esAdmin ? undefined : quien)
       return new Response(htmlEsp, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
     } catch (e) {
       console.warn("[vic-funnel] espejos falló:", e instanceof Error ? e.message : e)
