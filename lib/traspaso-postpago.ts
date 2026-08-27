@@ -465,35 +465,42 @@ export async function cerrarYTraspasarPostPago(
         (quienPresenta.telefono ? `📱 ${quienPresenta.telefono}\n` : "") +
         `✉️ ${quienPresenta.email}`
       : `De aquí en adelante te acompaña nuestro equipo comercial, que te contactará para coordinar la puesta en marcha. Cualquier duda me escribes por aquí 🙌`)
-  const pushed = await sendBotmakerMessage(
-    contact,
-    traspaso,
-    esCO ? PERFIL_CO.canal.channelId : undefined,
-  ).catch(() => false)
-  if (!pushed) {
-    // Ventana de 24 h cerrada (cliente que pagó sin haber conversado con
-    // Vicky, o callado hace días — caso Cafetería Aragón 27-ago: pagó por el
-    // canal del ejecutivo y se quedó sin bienvenida ni link de onboarding).
-    // Respaldo por plantilla HSM, mismo patrón del kickoff de onboarding.
-    // Solo CL: la plantilla vive en el bot Vicky Chile.
-    if (!esCO && !esMX) {
-      const { sendBotmakerTemplate } = await import("./botmaker-push-v3")
-      const { PLANTILLA_BIENVENIDA_PAGO_CL, paramsBienvenidaPago } = await import("./plantilla-bienvenida-pago")
-      const okTpl = await sendBotmakerTemplate(
-        contact,
-        PLANTILLA_BIENVENIDA_PAGO_CL.name,
-        paramsBienvenidaPago(linkOnboarding, quienPresenta),
-      ).catch(() => false)
-      if (okTpl) {
-        await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
-        // La plantilla la despacha Botmaker: no entra al historial (patrón
-        // del kickoff — meterla le daría al modelo un turno que no dijo).
-        return { contact, traspaso: "enviado" }
-      }
+  // LA VENTANA SE CHEQUEA ANTES, NO SE CONFÍA EN EL PUSH (27-ago, lección del
+  // barrido de las 12:42): Botmaker ACEPTA el texto libre y devuelve OK aunque
+  // la ventana de 24 h esté cerrada — el mensaje muere en silencio después.
+  // Mismo patrón de entregarKickoffOnboarding: con ventana abierta va texto
+  // libre; cerrada (o push fallido), plantilla HSM. Solo CL tiene plantilla
+  // (vive en el bot Vicky Chile); CO/MX conservan el texto libre de siempre.
+  const { getLastUserAt } = await import("./supabase-persistence-v3")
+  const ultimoUsuario = await getLastUserAt(contact).catch(() => null)
+  const ventanaAbierta = Boolean(ultimoUsuario) && Date.now() - (ultimoUsuario as Date).getTime() < 24 * 3600e3
+  if (ventanaAbierta || esCO || esMX) {
+    const pushed = await sendBotmakerMessage(
+      contact,
+      traspaso,
+      esCO ? PERFIL_CO.canal.channelId : undefined,
+    ).catch(() => false)
+    if (pushed) {
+      await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+      await appendAssistantV3(contact, traspaso, esCO ? "co" : "cl").catch(() => {})
+      return { contact, traspaso: "enviado" }
     }
-    return { contact, traspaso: "push_fallo" }
+    // La ventana pudo cerrarse entre la consulta y el envío: CL sigue al
+    // respaldo de plantilla antes de darlo por perdido.
+    if (esCO || esMX) return { contact, traspaso: "push_fallo" }
   }
-  await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
-  await appendAssistantV3(contact, traspaso, esCO ? "co" : "cl").catch(() => {})
-  return { contact, traspaso: "enviado" }
+  const { sendBotmakerTemplate } = await import("./botmaker-push-v3")
+  const { PLANTILLA_BIENVENIDA_PAGO_CL, paramsBienvenidaPago } = await import("./plantilla-bienvenida-pago")
+  const okTpl = await sendBotmakerTemplate(
+    contact,
+    PLANTILLA_BIENVENIDA_PAGO_CL.name,
+    paramsBienvenidaPago(linkOnboarding, quienPresenta),
+  ).catch(() => false)
+  if (okTpl) {
+    await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
+    // La plantilla la despacha Botmaker: no entra al historial (patrón
+    // del kickoff — meterla le daría al modelo un turno que no dijo).
+    return { contact, traspaso: "enviado" }
+  }
+  return { contact, traspaso: "push_fallo" }
 }
