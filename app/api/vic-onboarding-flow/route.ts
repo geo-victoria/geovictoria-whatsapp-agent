@@ -171,15 +171,26 @@ type CamposFlow = {
   admin_apellido?: string
   admin_rut?: string
   admin_email?: string
+  /** Identificación de RESPALDO (27-ago): cuando Botmaker no resuelve el
+   * teléfono (chat frío / sesión vencida), el Flow muestra un campo y el
+   * cliente lo escribe. Viaja en los campos y acá se vuelve el contact. */
+  telefono_wsp?: string
 }
 
 /** POST — valida la pantalla; en ADMIN válida persiste y despierta a Vicky. */
 export async function POST(req: Request): Promise<NextResponse> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const body = (await req.json().catch(() => ({}))) as { contact?: string; pantalla?: string; campos?: CamposFlow }
-  const contact = String(body.contact || "").replace(/\D/g, "")
   const pantalla = String(body.pantalla || "").toUpperCase()
   const campos = body.campos || {}
+  // Identificación de respaldo: sin contact de Botmaker, vale el teléfono que
+  // el cliente escribió en el Flow (campo telefono_wsp, visible solo cuando
+  // el INIT no lo identificó). Solo dígitos, largo de fono real.
+  let contact = String(body.contact || "").replace(/\D/g, "")
+  if (!contact) {
+    const tipeado = String(campos.telefono_wsp || "").replace(/\D/g, "")
+    if (tipeado.length >= 10 && tipeado.length <= 15) contact = tipeado
+  }
   if (!pantalla) return NextResponse.json({ ok: false, error: "falta pantalla" }, { status: 400 })
   // CHAT FRÍO (caso Diego 25-ago): la Code Action puede no resolver el
   // teléfono en chats nacidos de la plantilla, sin mensaje entrante previo.
@@ -257,6 +268,17 @@ export async function POST(req: Request): Promise<NextResponse> {
       `Recibí tu formulario, gracias! 🙌\n\n${resumenParaConfirmar(actualizado)}`
     const enviado = await sendBotmakerMessage(contact, mensaje).catch(() => false)
     if (enviado) await appendAssistantV3(contact, mensaje, "cl").catch(() => {})
+    else {
+      // Chat frío (ej. designado que nunca nos escribió): el texto libre muere
+      // y Vicky no puede retomar — que un humano lo tome, jamás se pierde.
+      try {
+        const { avisarEquipoInterno } = await import("@/lib/alerta-interna")
+        await avisarEquipoInterno(
+          `📝 Formulario de ALTA completado por +${contact} pero no pude retomarle el chat (posible chat frío/fuera de ventana). ` +
+            `Datos guardados en su borrador — contactarlo para la confirmación final del alta.`,
+        )
+      } catch {}
+    }
   }
   return NextResponse.json({ ok: true, valido: true, completo: borradorCompleto(actualizado), resumenEnviado: Boolean(mensaje) })
 }
