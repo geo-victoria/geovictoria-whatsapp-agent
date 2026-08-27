@@ -23,6 +23,41 @@ import { fetchHistoryV3 } from "./supabase-persistence-v3"
 const MODEL = (process.env.VICKY_TOQUE5_MODEL || "claude-haiku-4-5-20251001").trim()
 const MAX_CHARS = 480
 
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
+const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+
+/** Conversación del cliente con su EJECUTIVO por el WhatsApp espejado
+ * (Lalo 27-ago: el toque también incorpora lo clave del espejo, y con
+ * conversación de vendedor el foco pasa a "¿cómo te fue con X?"). */
+async function transcriptEspejo(
+  contact: string,
+): Promise<{ transcript: string; vendedorSesion: string } | null> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return null
+  try {
+    const nueve = contact.replace(/\D/g, "").slice(-9)
+    const desde = new Date(Date.now() - 14 * 86_400_000).toISOString()
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=from_me,texto,enviado_at,session_id&telefono_chat=like.*${nueve}&es_grupo=eq.false&enviado_at=gte.${encodeURIComponent(desde)}&order=enviado_at.desc&limit=16`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+    )
+    if (!r.ok) return null
+    const filas = ((await r.json().catch(() => [])) as Array<{
+      from_me: boolean
+      texto?: string
+      session_id?: string
+    }>) || []
+    if (!filas.length) return null
+    const transcript = filas
+      .reverse()
+      .map((f) => `${f.from_me ? "Ejecutivo" : "Cliente"}: ${String(f.texto || "").slice(0, 300)}`)
+      .join("\n")
+      .slice(-3000)
+    return { transcript, vendedorSesion: filas.find((f) => f.from_me)?.session_id || "" }
+  } catch {
+    return null
+  }
+}
+
 const REGLAS = [
   "Eres Vicky, la vendedora de GeoVictoria por WhatsApp (control de asistencia y gestión de personal en Chile).",
   "Vas a escribir UN solo mensaje corto para retomar el contacto con un cliente que dejó de responder hace días.",
@@ -67,6 +102,25 @@ export async function generarToqueContexto(
           ? "ya vio el valor referencial; solo falta el RUT (o su ok) para dejarle la cotización formal"
           : "tiene la cotización formal lista para aceptar y pagar en línea"
 
+    // ESPEJO DEL EJECUTIVO (Lalo 27-ago): si el cliente ya conversó con un
+    // vendedor humano, el toque cambia de naturaleza — el foco es preguntar
+    // CÓMO LE FUE con el ejecutivo y recoger lo clave de ESA conversación
+    // (Vicky nunca se apaga: acompaña como equipo, no compite).
+    const espejo = await transcriptEspejo(contact).catch(() => null)
+    let nombreEjecutivo = ""
+    if (espejo?.vendedorSesion) {
+      try {
+        const { directorioEjecutivos } = await import("./directorio-ejecutivos")
+        const ficha = directorioEjecutivos().find((f) =>
+          f.email.toLowerCase().startsWith(espejo.vendedorSesion.toLowerCase() + "@"),
+        )
+        nombreEjecutivo = ficha?.nombre?.split(/\s+/)[0] || ""
+      } catch { /* sin nombre: se dice "nuestro ejecutivo" */ }
+    }
+    const bloqueEspejo = espejo
+      ? `\n\nCONVERSACIÓN DEL CLIENTE CON ${nombreEjecutivo ? `SU EJECUTIVO/A ${nombreEjecutivo.toUpperCase()}` : "SU EJECUTIVO/A"} (por el WhatsApp del ejecutivo):\n${espejo.transcript}\n\nINSTRUCCIÓN ESPECIAL: como el cliente ya está conversando con ${nombreEjecutivo || "un ejecutivo del equipo"}, tu mensaje debe centrarse en preguntarle CÓMO LE FUE con ${nombreEjecutivo || "el ejecutivo"} y recoger con naturalidad lo clave que quedó en esa conversación (un acuerdo, una duda, un pendiente). Preséntate como parte del mismo equipo que acompaña, JAMÁS contradigas ni repitas lo que el ejecutivo ya ofreció, y no cites frases textuales.`
+      : ""
+
     const client = new Anthropic({ apiKey })
     const res = await client.messages.create({
       model: MODEL,
@@ -75,7 +129,7 @@ export async function generarToqueContexto(
       messages: [
         {
           role: "user",
-          content: `TRANSCRIPCIÓN DE LA CONVERSACIÓN:\n${transcript}\n\nETAPA EN QUE QUEDÓ: ${etapa}\n\nEscribe el mensaje de retome.`,
+          content: `TRANSCRIPCIÓN DE LA CONVERSACIÓN CON VICKY:\n${transcript}\n\nETAPA EN QUE QUEDÓ: ${etapa}${bloqueEspejo}\n\nEscribe el mensaje de retome.`,
         },
       ],
     })

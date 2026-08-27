@@ -718,6 +718,17 @@ export async function contactosAtendidosPorVendedor(
 export async function contactosTraspasados(contacts: string[]): Promise<Set<string>> {
   const out = new Set<string>()
   if (!contacts.length || !SUPABASE_URL || !SUPABASE_KEY) return out
+  // CANDADO v4 (Lalo 27-ago, "no hay que apagar a Vicky en ningún momento"):
+  // el traspaso YA NO silencia la proactividad NUNCA — ni siquiera con
+  // contacto real del vendedor. Vicky acompaña siempre; lo que cambia con el
+  // traspaso es el CONTENIDO del toque (el t5 con contexto pregunta cómo le
+  // fue con el ejecutivo y recoge lo clave de la conversación del espejo).
+  // Rollbacks sin deploy: VICKY_TRASPASO_SILENCIA=1 restaura el candado v3
+  // (silencio con atención real); VICKY_PTV_CANDADO_CLASICO=1 el clásico.
+  const modo = (process.env.VICKY_TRASPASO_SILENCIA || "").trim()
+  if (modo !== "1" && (process.env.VICKY_PTV_CANDADO_CLASICO || "").trim() !== "1") {
+    return out
+  }
   const lista = contacts.map((c) => `"${c}"`).join(",")
   const res = await supa(
     `vic_ptv?contact=in.(${lista})&estado=eq.activo&select=contact,traspasado_at`,

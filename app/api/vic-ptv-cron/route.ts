@@ -2794,8 +2794,15 @@ async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; rec
   let reabiertos = 0
   let recerrados = 0
   const ahoraMs = Date.now()
+  // CANDADO v4 (Lalo 27-ago): Vicky no se apaga NUNCA por traspaso — se
+  // reabren TODOS los loops cerrados por ptv/tm (atendidos incluidos) y ya no
+  // se re-cierra por atención del vendedor. El acompañamiento sigue; el t5
+  // con contexto pregunta cómo le fue con el ejecutivo. Rollback sin deploy:
+  // VICKY_TRASPASO_SILENCIA=1 restaura el comportamiento v3.
+  const silenciaV3 = (process.env.VICKY_TRASPASO_SILENCIA || "").trim() === "1" ||
+    (process.env.VICKY_PTV_CANDADO_CLASICO || "").trim() === "1"
   for (const l of loops) {
-    const atendido = atendidos.has(l.contact)
+    const atendido = silenciaV3 ? atendidos.has(l.contact) : false
     if (!atendido && l.estado === "cerrado" && (l.motivo_cierre === "ptv_traspasado" || l.motivo_cierre === "tm_traspasado")) {
       if (reabiertos >= 40) continue
       // PAGO REGISTRADO (19-ago, MATER/COT546): el candado v3 reabrió el loop
