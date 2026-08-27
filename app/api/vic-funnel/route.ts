@@ -2537,11 +2537,16 @@ async function renderCampanas(): Promise<string> {
       // no respondieron el anterior. Evento 'enviado' = WhatsApp,
       // 'enviado_correo' y 'enviado_dapta' = los siguientes.
       toques: Map<string, { n: Set<string>; primerAt: number }>
+      // Atribución POR CANAL (Lalo 27-ago, "que quede clara la diferenciación
+      // de resultados por canal"): cada respuesta/pago se atribuye al ÚLTIMO
+      // toque que ese contacto recibió antes de responder/pagar.
+      envioAt: Map<string, Map<string, number>>
+      respAt: Map<string, number>
     }
     const porCampana = new Map<string, Agg>()
     const agg = (c: string): Agg => {
       let a = porCampana.get(c)
-      if (!a) { a = { enviados: new Set(), si: new Set(), no: new Set(), aplicados: new Set(), ejecutivo: new Set(), inicio: Number.MAX_SAFE_INTEGER, segmentos: new Map(), siBoton: new Set(), noBoton: new Set(), toques: new Map() }; porCampana.set(c, a) }
+      if (!a) { a = { enviados: new Set(), si: new Set(), no: new Set(), aplicados: new Set(), ejecutivo: new Set(), inicio: Number.MAX_SAFE_INTEGER, segmentos: new Map(), siBoton: new Set(), noBoton: new Set(), toques: new Map(), envioAt: new Map(), respAt: new Map() }; porCampana.set(c, a) }
       return a
     }
     const INTERNOS = new Set(["56944668823", "56978385048"])
@@ -2556,9 +2561,13 @@ async function renderCampanas(): Promise<string> {
         tq.n.add(e.contact)
         if (Number.isFinite(t)) tq.primerAt = Math.min(tq.primerAt, t)
         a.toques.set(e.evento, tq)
+        const ea = a.envioAt.get(e.evento) || new Map<string, number>()
+        if (Number.isFinite(t) && !ea.has(e.contact)) ea.set(e.contact, t)
+        a.envioAt.set(e.evento, ea)
       }
       if (e.evento === "respuesta") {
         const r = String(e.respuesta || "")
+        if (Number.isFinite(t) && !a.respAt.has(e.contact)) a.respAt.set(e.contact, t)
         if (r.startsWith("no")) {
           a.no.add(e.contact)
           if (r === "no") a.noBoton.add(e.contact)
@@ -2614,7 +2623,7 @@ async function renderCampanas(): Promise<string> {
           if (a && Number.isFinite(t) && t >= a.inicio) {
             const acc = pagos.get(camp) || { n: 0, monto: 0, quienes: [] }
             acc.n++; acc.monto += Number(v.montoClp || 0) || 0
-            acc.quienes.push(`${tel}|${Number(v.montoClp || 0) || 0}`)
+            acc.quienes.push(`${tel}|${Number(v.montoClp || 0) || 0}|${t}`)
             pagos.set(camp, acc)
           }
         } catch { /* fila corrupta */ }
@@ -2648,35 +2657,65 @@ async function renderCampanas(): Promise<string> {
         // caso Alan 26-ago) no cuenta como no.
         for (const c of a.si) { a.no.delete(c); a.noBoton.delete(c) }
         const env = a.enviados.size
-        const respTotal = new Set([...a.si, ...a.no]).size
+        const respondieron = new Set([...a.si, ...a.no])
+        const respTotal = respondieron.size
         const pg = pagos.get(nombre) || { n: 0, monto: 0, quienes: [] as string[] }
         const segTxt = [...a.segmentos.entries()].sort().map(([k, v]) => `${SEG_ETQ[k] || k}: ${v}`).join(" · ")
-        const pct = (n: number) => (env ? `${Math.round((n / env) * 100)}%` : "—")
-        // Timeline de la CASCADA (Lalo 27-ago): WhatsApp → correo → Dapta con
-        // su fecha; los toques pendientes muestran a cuántos les tocaría HOY
-        // (los que aún no responden el toque anterior).
         const fechaDe = (ms: number) =>
           new Date(ms).toLocaleDateString("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit" })
-        const respondieron = new Set([...a.si, ...a.no])
         const ORDEN_TOQUES: Array<{ ev: string; etq: string }> = [
           { ev: "enviado", etq: "📱 WhatsApp" },
           { ev: "enviado_correo", etq: "✉️ Correo" },
           { ev: "enviado_dapta", etq: "📞 Dapta" },
         ]
+        // ATRIBUCIÓN POR CANAL (Lalo 27-ago): una respuesta o pago pertenece
+        // al ÚLTIMO toque que ese contacto recibió antes de ese instante.
+        const toqueDe = (contact: string, instante: number): string => {
+          let mejor = ""
+          let mejorAt = -1
+          for (const { ev } of ORDEN_TOQUES) {
+            const at = a.envioAt.get(ev)?.get(contact)
+            if (at !== undefined && at <= instante && at > mejorAt) { mejor = ev; mejorAt = at }
+          }
+          if (!mejor) for (const { ev } of ORDEN_TOQUES) if (a.envioAt.get(ev)?.has(contact)) return ev
+          return mejor || "enviado"
+        }
+        const pagoFila = (q: string) => { const [t2, m] = q.split("|"); return `${lineaDe(t2)} · $${Number(m).toLocaleString("es-CL")}` }
+        // Fila TOTAL de la campaña + una sub-fila por toque con SUS resultados.
         let base = a.enviados
-        const timeline = ORDEN_TOQUES.map(({ ev, etq }) => {
+        const subFilas = ORDEN_TOQUES.map(({ ev, etq }) => {
           const tq = a.toques.get(ev)
-          if (tq && tq.n.size) { base = tq.n; return `${etq} ${fechaDe(tq.primerAt)} · ${tq.n.size}` }
-          const sinResp = [...base].filter((c) => !respondieron.has(c)).length
-          return `${etq} pendiente (${sinResp} sin respuesta)`
-        }).join(" → ")
-        return `<tr><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div><div class="sub" style="margin:2px 0 0">${timeline}</div></td>
+          if (!tq || !tq.n.size) {
+            const sinResp = [...base].filter((c) => !respondieron.has(c))
+            return `<tr><td style="padding-left:26px"><span class="sub">${etq} · pendiente</span></td>
+            <td style="text-align:center"><span class="sub" title="${tip(sinResp)}" style="cursor:help">irá a ${sinResp.length}</span></td><td colspan="5"></td></tr>`
+          }
+          base = tq.n
+          const instanteDe = (c: string) => a.respAt.get(c) ?? Number.MAX_SAFE_INTEGER
+          const siT = [...a.si].filter((c) => toqueDe(c, instanteDe(c)) === ev)
+          const noT = [...a.no].filter((c) => toqueDe(c, instanteDe(c)) === ev)
+          const respT = [...new Set([...siT, ...noT])]
+          const aplT = [...a.aplicados].filter((c) => toqueDe(c, instanteDe(c)) === ev)
+          const pagosT = pg.quienes.filter((q) => { const partes = q.split("|"); return toqueDe(partes[0], Number(partes[2]) || Number.MAX_SAFE_INTEGER) === ev })
+          const montoT = pagosT.reduce((acc, q) => acc + (Number(q.split("|")[1]) || 0), 0)
+          const pctT = tq.n.size ? `${Math.round((respT.length / tq.n.size) * 100)}%` : "—"
+          return `<tr><td style="padding-left:26px">${etq} · ${fechaDe(tq.primerAt)}</td>
+          <td style="text-align:center"><span title="${tip(tq.n)}" style="cursor:help">${tq.n.size}</span></td>
+          <td style="text-align:center"><span title="${tip(respT)}" style="cursor:help">${respT.length}</span> <span class="pct">(${pctT})</span></td>
+          <td style="text-align:center;color:#15803d"><span title="${tip(siT)}" style="cursor:help">${siT.length}</span></td>
+          <td style="text-align:center;color:#b45309"><span title="${tip(noT)}" style="cursor:help">${noT.length}</span></td>
+          <td style="text-align:center"><span title="${tip(aplT)}" style="cursor:help">${aplT.length}</span></td>
+          <td style="text-align:center">${pagosT.length ? `<span title="${esc(pagosT.map(pagoFila).join("\n"))}" style="cursor:help">${pagosT.length}</span> · $${montoT.toLocaleString("es-CL")}` : "0"}</td></tr>`
+        })
+        const pct = (n: number) => (env ? `${Math.round((n / env) * 100)}%` : "—")
+        const filaTotal = `<tr style="background:#f8fafc"><td><b>${esc(nombre)}</b><div class="sub" style="margin:2px 0 0">${esc(segTxt)}</div></td>
         <td style="text-align:center"><b title="${tip(a.enviados)}" style="cursor:help">${env}</b></td>
-        <td style="text-align:center"><span title="${tip(respondieron)}" style="cursor:help">${respTotal}</span> <span class="pct">(${pct(respTotal)})</span></td>
+        <td style="text-align:center"><b title="${tip(respondieron)}" style="cursor:help">${respTotal}</b> <span class="pct">(${pct(respTotal)})</span></td>
         <td style="text-align:center;color:#15803d"><b title="${tip(a.si)}" style="cursor:help">${a.si.size}</b><div class="sub" style="margin:2px 0 0">${a.siBoton.size} botón · ${a.si.size - a.siBoton.size} texto</div></td>
-        <td style="text-align:center;color:#b45309"><span title="${tip(a.no)}" style="cursor:help">${a.no.size}</span>${a.no.size ? `<div class="sub" style="margin:2px 0 0">${a.noBoton.size} botón · ${a.no.size - a.noBoton.size} texto</div>` : ""}</td>
-        <td style="text-align:center"><span title="${tip(a.aplicados)}" style="cursor:help">${a.aplicados.size}</span></td>
-        <td style="text-align:center">${pg.n ? `<b title="${esc(pg.quienes.map((q) => { const [t, m] = q.split("|"); return `${lineaDe(t)} · $${Number(m).toLocaleString("es-CL")}` }).join("\n"))}" style="cursor:help">${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
+        <td style="text-align:center;color:#b45309"><b title="${tip(a.no)}" style="cursor:help">${a.no.size}</b>${a.no.size ? `<div class="sub" style="margin:2px 0 0">${a.noBoton.size} botón · ${a.no.size - a.noBoton.size} texto</div>` : ""}</td>
+        <td style="text-align:center"><b title="${tip(a.aplicados)}" style="cursor:help">${a.aplicados.size}</b></td>
+        <td style="text-align:center">${pg.n ? `<b title="${esc(pg.quienes.map(pagoFila).join("\n"))}" style="cursor:help">${pg.n}</b> · $${pg.monto.toLocaleString("es-CL")}` : "0"}</td></tr>`
+        return filaTotal + subFilas.join("")
       })
     if (!filas.length) return ""
     return `<div class="card" id="campanas"><h2>📣 Campañas de re-encantamiento</h2>
