@@ -5199,7 +5199,15 @@ async function renderVickyCotizacionesCrear(dealId: string, key: string, motorEj
 </style></head><body><div class="wrap">
   <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}&cotnueva=1">← Elegir otra oportunidad</a></p>
   <h1><img class="logo" src="/gv/logo-full-color.svg" alt="GeoVictoria">${motorEjec ? "Cotizadora de Ejecutivos — catálogo comercial" : "Vicky Cotizaciones — nueva cotización"}</h1>
-  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). ${motorEjec ? "Catálogo comercial COMPLETO (1-8.000 usuarios, equipos, casino, BI, promos — precios del canal ejecutivo). El agente no envía nada al cliente: eso es con los botones del editor." : "Cuéntale al agente qué necesita la cotización y la emite de inmediato; después te lleva al editor para ajustes o envío."} · <a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(dealId)}${motorEjec ? "" : "&motor=ejecutivo"}">${motorEjec ? "← usar Vicky clásico (catálogo SMB)" : "usar catálogo comercial completo →"}</a> · <a href="/calculadora-comercial.html?deal=${encodeURIComponent(dealId)}&key=${encodeURIComponent(key)}" target="_blank">abrir CALCULADORA comercial (UI) →</a></div>
+  <div class="sub">Se asignará a la oportunidad <b>${esc(info.nombre || info.accountNombre)}</b> (misma cuenta, contacto y dueño en Zoho). ${motorEjec ? "Catálogo comercial COMPLETO (1-8.000 usuarios, equipos, casino, BI, promos — precios del canal ejecutivo). El agente no envía nada al cliente: eso es con los botones del editor." : "Cuéntale al agente qué necesita la cotización y la emite de inmediato; después te lleva al editor para ajustes o envío."}${
+    // UNA SOLA PUERTA (Lalo 27-ago, "esconde lo que pueda confundir"): los
+    // accesos al motor ejecutivo y a la calculadora UI generaban propuestas
+    // por caminos paralelos y el equipo se perdía. Siguen operativos por URL
+    // directa para admin; para reexponerlos, env VICKY_COTIZADORAS_ALTERNAS=1.
+    (process.env.VICKY_COTIZADORAS_ALTERNAS || "").trim() === "1"
+      ? ` · <a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(dealId)}${motorEjec ? "" : "&motor=ejecutivo"}">${motorEjec ? "← usar Vicky clásico (catálogo SMB)" : "usar catálogo comercial completo →"}</a> · <a href="/calculadora-comercial-full.html?deal=${encodeURIComponent(dealId)}&key=${encodeURIComponent(key)}" target="_blank">abrir CALCULADORA comercial (UI) →</a>`
+      : ""
+  }</div>
   <div class="cols">
     <div class="chatCol card">
       <div id="chatBox">
