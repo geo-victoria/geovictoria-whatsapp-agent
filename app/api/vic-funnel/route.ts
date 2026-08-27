@@ -2900,6 +2900,16 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
     const d = new Date(`${ymd}T12:00:00Z`)
     return d.toLocaleDateString("es-CL", { timeZone: "UTC", day: "2-digit", month: "2-digit" })
   }
+  const diaAntes = (ymd: string) => new Date(Date.parse(`${ymd}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
+  // El TOTAL lleva la misma viñeta al pasar el mouse que el resto del panel:
+  // empresa, teléfono y ejecutivo de cada candidato (tope 40 líneas).
+  const tipTotal = (() => {
+    if (!foto) return ""
+    const lineas = foto.aptos.map((c) => `${c.empresa || "—"} · +${c.contact} · ${c.ejecutivo}`)
+    const corte = lineas.slice(0, 40)
+    if (lineas.length > corte.length) corte.push(`… y ${lineas.length - corte.length} más`)
+    return esc(corte.join("\n"))
+  })()
   const fechaLarga = (ymd: string) => {
     const d = new Date(`${ymd}T12:00:00Z`)
     const txt = d.toLocaleDateString("es-CL", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" })
@@ -2927,12 +2937,12 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
   <div class="card">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <h2 style="margin:0">📅 Próximas campañas</h2>
-      ${foto ? `<span class="sub">candidatos: foto de hace ${edadMin} min</span>` : ""}
-      <a class="btn" href="?${qsBase}&vista=campanas&recalcular=1">⟳ Actualizar candidatos</a>
+      ${listaVisible && foto ? `<span class="sub">candidatos: foto de hace ${edadMin} min</span>` : ""}
+      ${listaVisible ? `<a class="btn" href="?${qsBase}&vista=campanas&recalcular=1">⟳ Actualizar candidatos</a>` : ""}
     </div>
     <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>Campaña</th><th>📱 WhatsApp</th><th>✉️ Correo</th><th>📞 Dapta</th><th>Candidatos</th></tr></thead>
     <tbody>${proximas.map((c, i) => `<tr><td><b>${fechaLarga(c.inicio)}</b></td>${c.toques.map((t) => `<td style="text-align:center">${fechaCorta(t.fecha)}</td>`).join("")}
-      <td style="text-align:center">${i === 0 && foto ? `<b>${foto.aptos.length}</b> <span class="pct">(+ ${foto.excluidos.length} excluidos)</span>` : '<span class="sub">se calculan al acercarse</span>'}</td></tr>`).join("")}</tbody></table></div>
+      <td style="text-align:center">${i === 0 && listaVisible && foto ? `<b title="${tipTotal}" style="cursor:help">${foto.aptos.length}</b> <span class="pct">(+ ${foto.excluidos.length} excluidos)</span>` : `<span class="sub">se publica el ${fechaCorta(diaAntes(c.inicio))}</span>`}</td></tr>`).join("")}</tbody></table></div>
     <p class="sub" style="margin:10px 0 0">Cada campaña son 3 toques en cascada y cada toque va solo a quienes no respondieron el anterior. Candidato = cotización formal sin pagar cuyo contacto lleva 48 horas hábiles sin actividad de nadie (ni Vicky ni un ejecutivo por chat, llamada o nota). El listado DETALLADO con nombres se publica el día previo a cada toque — si un cliente suyo aparece, con una nota al deal o un chat por su WhatsApp espejado queda fuera en el próximo recálculo.</p>
     ${errorRecalc ? `<p class="sub" style="color:#b91c1c">La actualización falló (${esc(errorRecalc)}) — se muestra la última foto disponible.</p>` : ""}
     ${listaVisible && foto ? `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px">
@@ -2944,7 +2954,7 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
     <details style="margin-top:12px"><summary class="sub" style="cursor:pointer">Excluidos (${foto.excluidos.length}) — ${chipsExcl || "ninguno"}</summary>
     <div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Empresa</th><th>COT</th><th>Estado</th><th>Emitida</th><th>WhatsApp</th><th>Ejecutivo</th><th>Motivo</th></tr></thead>
     <tbody>${foto.excluidos.map(filaCand).join("")}</tbody></table></div></details>`
-      : `<p class="sub" style="margin:8px 0 0">📋 El listado detallado de candidatos aparecerá aquí el día previo al próximo toque${proximas.length ? ` (${fechaCorta(proximas[0].inicio)})` : ""}.</p>`}
+      : `<p class="sub" style="margin:8px 0 0">📋 El número de candidatos y el listado detallado (con empresa, teléfono y ejecutivo) se publican el día previo a cada campaña${proximas.length ? ` — la próxima parte el ${fechaLarga(proximas[0].inicio)}, así que aparecerán el ${fechaLarga(diaAntes(proximas[0].inicio))}` : ""}.</p>`}
   </div>
   ${quien && quien !== "Administrador" ? `<p class="sub">Sesión: ${esc(quien)}</p>` : ""}
   <script>function filtraEjec(){var v=document.getElementById('fEjec').value;document.querySelectorAll('#tCand tbody tr').forEach(function(tr){tr.style.display=!v||tr.getAttribute('data-ejec')===v?'':'none'})}</script>
