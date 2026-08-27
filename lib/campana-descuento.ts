@@ -50,11 +50,28 @@ export type EstadoCampana = {
   vigiaAviso?: boolean
 }
 
+/** Normaliza para matchear variantes humanas del texto pre-escrito del link
+ * (27-ago, ola de correo): sin tildes, sin signos ni emojis, espacios
+ * colapsados. Solo corre para contactos CON campaña sembrada, así que el
+ * riesgo de falso positivo es bajo — igual se exige la frase completa. */
+function normalizar(t: string): string {
+  return t
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zñ0-9\s]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+}
 function textoEsSi(t: string): boolean {
-  return t === "campana_dcto_si" || t === "quiero el descuento"
+  if (t === "campana_dcto_si") return true
+  const n = normalizar(t)
+  return /^(hola\s+)?(si\s+)?(quiero|acepto)\s+(el|mi|ese|un)?\s*(10\s*)?(%\s*de\s*)?descuento$/.test(n) || n === "quiero el 10" || n === "si quiero"
 }
 function textoEsNo(t: string): boolean {
-  return t === "campana_dcto_no" || t === "no quiero el descuento"
+  if (t === "campana_dcto_no") return true
+  const n = normalizar(t)
+  return /^(hola\s+)?no\s+(quiero|me\s+interesa)\s*(el|mi|ese|un)?\s*descuento$/.test(n) || n === "no quiero" || n === "no me interesa"
 }
 
 async function registrarRespuesta(fono: string, st: EstadoCampana, respuesta: string): Promise<void> {
