@@ -156,9 +156,15 @@ export async function filtrarPadronCampana(
       for (const d of deals) {
         const tel = String(d.Contact_Phone || "").replace(/\D/g, "")
         if (!vivos.has(tel)) continue
-        if (String(d.Stage || "") === "8. Facturando") {
+        // Cliente existente = deal Implementando O Facturando (caso
+        // Ingredientes Alimenticios 27-ago: pagó por transferencia gestionada
+        // a mano, el deal estaba en "7. Implementando" con primera factura y
+        // la cotización seguía "Aceptada" — casi le ofrecemos un 10% siendo
+        // ya cliente. Implementando también es post-pago.)
+        const stage = String(d.Stage || "")
+        if (stage === "8. Facturando" || stage === "7. Implementando") {
           vivos.delete(tel)
-          excluidos.push({ contact: tel, motivo: "cliente_existente", detalle: d.id })
+          excluidos.push({ contact: tel, motivo: "cliente_existente", detalle: `${d.id} · ${stage}` })
           continue
         }
         if (!d.Fecha_ultima_Nota || d.Fecha_ultima_Nota < corteNota) continue
