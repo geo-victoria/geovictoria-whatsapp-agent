@@ -5049,7 +5049,7 @@ async function renderSelectorDeal(key: string): Promise<Response> {
         <td><span class="tag">${esc(String(d.Stage || "—"))}</span></td>
         <td>${esc(dueno)}</td>
         <td style="white-space:nowrap">${tel ? `+${esc(tel)}` : `<span class="sub">sin teléfono</span>`}</td>
-        <td style="white-space:nowrap"><a href="?key=${encodeURIComponent(key)}&cotcrear=${encodeURIComponent(String(d.id))}">elegir →</a></td>
+        <td style="white-space:nowrap"><a href="/calculadora-comercial.html?deal=${encodeURIComponent(String(d.id))}&key=${encodeURIComponent(key)}">elegir →</a></td>
       </tr>`
     })
     .join("")
@@ -5129,7 +5129,7 @@ async function renderSelectorDeal(key: string): Promise<Response> {
                 "<td><span class=\\"tag\\">" + esc(x.etapa) + "</span></td>" +
                 "<td>" + esc(x.dueno) + "</td>" +
                 "<td style=\\"white-space:nowrap\\">" + (x.telefono ? "+" + esc(x.telefono) : "<span class=\\"sub\\">sin tel\u00e9fono</span>") + "</td>" +
-                "<td style=\\"white-space:nowrap\\"><a href=\\"?key=" + encodeURIComponent(KEY) + "&cotcrear=" + encodeURIComponent(x.id) + "\\">elegir →</a></td>";
+                "<td style=\\"white-space:nowrap\\"><a href=\\"/calculadora-comercial.html?deal=" + encodeURIComponent(x.id) + "&key=" + encodeURIComponent(KEY) + "\\">elegir \u2192</a></td>";
               cuerpo.appendChild(tr);
             });
             var visibles = filtrar();
@@ -6795,6 +6795,17 @@ export async function GET(req: Request): Promise<Response> {
   // de creación emite la formal amarrada a ese deal.
   if (searchParams.get("cotnueva")) return renderSelectorDeal(key)
   const cotcrear = (searchParams.get("cotcrear") || "").replace(/\D/g, "").trim()
+  // EL CHAT DE CREACIÓN QUEDÓ FUERA DEL FLUJO (Lalo 27-ago, "el chat para
+  // cotizar nunca funcionó"): la puerta oficial es la CALCULADORA con el deal
+  // anclado (selección de deal → emitir con aceptación online → PDF + link de
+  // pago). Los links viejos a cotcrear llegan igual al destino correcto.
+  // Para reabrir el chat sin deploy: env VICKY_CHAT_COTIZADOR=1.
+  if (cotcrear && (process.env.VICKY_CHAT_COTIZADOR || "").trim() !== "1") {
+    return Response.redirect(
+      new URL(`/calculadora-comercial.html?deal=${encodeURIComponent(cotcrear)}&key=${encodeURIComponent(key)}`, req.url),
+      302,
+    )
+  }
   if (cotcrear) return renderVickyCotizacionesCrear(cotcrear, key, searchParams.get("motor") === "ejecutivo")
   // Crear PROPUESTAS (pedido Lalo 07-ago): misma estructura que crear
   // cotizaciones — elegir la empresa (cartera del vendedor logueado) y
