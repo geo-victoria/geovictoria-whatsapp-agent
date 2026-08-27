@@ -3591,9 +3591,28 @@ function renderInboundDiario(
   }
   const precioAcum = unicosDesdeAncla("precio")
   const pagadaAcum = unicosDesdeAncla("pagada")
+  // TASA ESTRICTA entre paréntesis (Lalo 27-ago): la principal cuenta todo
+  // pago del período aunque su precio se haya mostrado antes del ancla (es el
+  // objetivo declarado de las campañas: subir la tasa de LA SEMANA). La
+  // estricta trae al denominador a esos pagadores de siembra vieja — misma
+  // población arriba y abajo, jamás inflable. Las dos miradas, sin elegir.
+  const telsPrecioAncla = new Set<string>()
+  for (const [dia, set] of porDia.precio) if (dia >= ANCLA_CIERRE) for (const t of set) telsPrecioAncla.add(telDeElemento(t))
+  const pagadoresViejos = new Set<string>()
+  for (const [dia, set] of porDia.pagada)
+    if (dia >= ANCLA_CIERRE)
+      for (const el of set) {
+        const t = telDeElemento(el)
+        if (!telsPrecioAncla.has(t)) pagadoresViejos.add(t)
+      }
+  const baseEstricta = precioAcum + pagadoresViejos.size
   const tasaAcumHtml =
     precioAcum > 0
-      ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#eef4ff;border-radius:8px">🎯 <b>Tasa de cierre acumulada desde el lun 17-ago:</b> <b>${Math.round((pagadaAcum / precioAcum) * 100)}%</b> — ${pagadaAcum} pagada${pagadaAcum === 1 ? "" : "s"} ÷ ${precioAcum} que vieron precio</div>`
+      ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#eef4ff;border-radius:8px">🎯 <b>Tasa de cierre acumulada desde el lun 17-ago:</b> <b>${Math.round((pagadaAcum / precioAcum) * 100)}%</b> — ${pagadaAcum} pagada${pagadaAcum === 1 ? "" : "s"} ÷ ${precioAcum} que vieron precio` +
+        (pagadoresViejos.size > 0
+          ? ` <span style="color:#6b7280">(estricta: <b>${Math.round((pagadaAcum / baseEstricta) * 100)}%</b> — sumando al denominador ${pagadoresViejos.size} pagador${pagadoresViejos.size === 1 ? "" : "es"} que vieron precio antes del 17)</span>`
+          : "") +
+        `</div>`
       : ""
   const nombreDia = (d: string) => {
     const wd = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "short" }).format(new Date(`${d}T12:00:00-04:00`))
