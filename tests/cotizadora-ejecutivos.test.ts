@@ -278,6 +278,42 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
     assert.strictEqual(malo.ok, false)
   })
 
+  test("puente calculadora ANUAL: recurrentes → cobro único 12 × mensual, únicos una vez", () => {
+    // 10 usuarios plan fijo 0,75 + 1 SF2A arriendo 0,35 + envío 0,5 único,
+    // con el toggle en Anual: (0,75 + 0,35) × 12 + 0,5 = 13,7 UF neto.
+    const r = itemsDesdeSnapshot({
+      empresa: "ANUALIDAD SPA",
+      periodo: "anual",
+      servicios: [
+        { nombre: "Asistencia", cantidad: 10, precioUnit: 0.75, tipo: "Fijo", descuento: 0, subtotalUF: 0.75, rango: "1-10" },
+      ],
+      equipos: [{ nombre: "Senseface 2A", tipo: "Arriendo", cantidad: 1, precioUnit: 0.35, subtotalUF: 0.35 }],
+      serviciosAsoc: [{ nombre: "Envío", tipo: "Arriendo", zona: "RM", cantidad: 1, precioUnit: 0.5, subtotalUF: 0.5 }],
+      // Los totales del snapshot son SIEMPRE mensuales (la verificación de
+      // integridad corre en base mensual; la anualización viene después).
+      totals: { subtotalNeto: 1.6 },
+    })
+    assert.ok(r.ok)
+    if (r.ok) {
+      const asist = r.items.find((i) => /Asistencia/.test(i.nombre))
+      assert.strictEqual(asist?.nombre, "Asistencia — Anualidad (12 meses)")
+      assert.strictEqual(asist?.modalidad, "Cobro único") // → Zoho "Venta", bucket pago único
+      assert.strictEqual(asist?.cantidad, 12)
+      assert.strictEqual(asist?.precioUnitarioUF, 0.75)
+      assert.strictEqual(asist?.subtotalUF, 9)
+      const sf = r.items.find((i) => /Senseface/.test(i.nombre))
+      assert.strictEqual(sf?.modalidad, "Cobro único")
+      assert.strictEqual(sf?.subtotalUF, Number((0.35 * 12).toFixed(3)))
+      // El pago único real NO se multiplica.
+      const envio = r.items.find((i) => /Env/i.test(i.nombre))
+      assert.strictEqual(envio?.subtotalUF, 0.5)
+      assert.strictEqual(envio?.cantidad, 1)
+      // Total anual: 13,7 neto → ninguna línea quedó mensual.
+      assert.strictEqual(r.subtotalUF, 13.7)
+      assert.ok(r.items.every((i) => i.modalidad === "Cobro único" || i.modalidad === "Venta única"))
+    }
+  })
+
   test("frontera: el motor es PURO (sin red, sin Supabase, sin imports externos)", () => {
     for (const f of ["lib/cotizadora-ejecutivos/motor.ts", "lib/cotizadora-ejecutivos/catalogo.ts", "lib/cotizadora-ejecutivos/emitir.ts", "lib/cotizadora-ejecutivos/desde-calculadora.ts"]) {
       const src = readFileSync(f, "utf-8")

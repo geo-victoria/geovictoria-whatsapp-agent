@@ -41,6 +41,8 @@ export type SnapshotCalculadora = {
     iva?: number
     totalConIva?: number
   }
+  /** "mensual" (default) o "anual" — el toggle de la calculadora (28-ago). */
+  periodo?: string
   ufValue?: number
 }
 
@@ -153,15 +155,48 @@ export function itemsDesdeSnapshot(data: SnapshotCalculadora): ResultadoSnapshot
   if (!items.length) return { ok: false, error: "La propuesta no tiene líneas — agrega al menos un servicio." }
 
   // ── Verificación de integridad: las líneas deben sumar los totales que la
-  // calculadora mostró (tolerancia 1 centésima de UF por redondeos). ──
-  const subtotalUF = r3(items.reduce((a, i) => a + i.subtotalUF, 0))
+  // calculadora mostró (tolerancia 1 centésima de UF por redondeos). Se
+  // verifica SIEMPRE en base mensual — los totales del snapshot son mensuales
+  // aunque el toggle esté en Anual (la anualización viene después). ──
+  const subtotalMensualUF = r3(items.reduce((a, i) => a + i.subtotalUF, 0))
   const declarado = Number(data.totals?.subtotalNeto)
-  if (Number.isFinite(declarado) && Math.abs(subtotalUF - declarado) > 0.011) {
+  if (Number.isFinite(declarado) && Math.abs(subtotalMensualUF - declarado) > 0.011) {
     return {
       ok: false,
-      error: `Los totales no calzan (líneas suman ${subtotalUF} UF, la calculadora mostró ${declarado} UF). Recarga la página y reintenta.`,
+      error: `Los totales no calzan (líneas suman ${subtotalMensualUF} UF, la calculadora mostró ${declarado} UF). Recarga la página y reintenta.`,
     }
   }
+
+  // ── ANUALIDAD (28-ago, pedido de Tamara vía Lalo): con el toggle en Anual,
+  // cada línea RECURRENTE se convierte en un cobro único estilo NDV de
+  // anualidad — "Cant. 12 × cobro mensual de la línea" — y viaja con
+  // modalidad "Cobro único" (→ Zoho "Venta", bucket pago único en cobro/PDF/
+  // aceptación/NDV). Los pagos únicos reales quedan tal cual, una sola vez.
+  // Resultado: el link de aceptación cobra el año completo + únicos de una,
+  // sin mensualidad. ──
+  if (String(data.periodo || "").toLowerCase() === "anual") {
+    for (const it of items) {
+      const esRecurrente =
+        it.modalidad === "Fijo" || it.modalidad === "Por usuario" || it.modalidad === "Arriendo mensual"
+      if (!esRecurrente) continue
+      const mensualLinea = r3(it.subtotalUF)
+      const detalleBase =
+        it.modalidad === "Por usuario"
+          ? `${it.cantidad} usuarios`
+          : it.modalidad === "Arriendo mensual"
+            ? `arriendo, ${it.cantidad} equipo(s)`
+            : ""
+      it.nombre = `${it.nombre} — Anualidad (12 meses)`
+      it.tierAplicado =
+        [`cobro mensual ${mensualLinea} UF × 12`, detalleBase, it.tierAplicado].filter(Boolean).join(" · ")
+      it.modalidad = "Cobro único"
+      it.cantidad = 12
+      it.precioUnitarioUF = mensualLinea
+      it.subtotalUF = r3(mensualLinea * 12)
+    }
+  }
+
+  const subtotalUF = r3(items.reduce((a, i) => a + i.subtotalUF, 0))
   const ivaUF = r3(subtotalUF * IVA_RATE)
   const totalUF = r3(subtotalUF + ivaUF)
   return { ok: true, items, subtotalUF, ivaUF, totalUF }

@@ -3049,12 +3049,11 @@
           e.stopImmediatePropagation();
           var data;
           try { data = gatherProposalData(); } catch (err) { setStatus('⚠️ No pude leer la propuesta: ' + (err && err.message)); return; }
-          // ANUALIDAD: la emisión online (aceptación + pago) sigue siendo
-          // MENSUAL — emitir con el toggle en Anual cobraría otra cosa que lo
-          // que el PDF muestra. Se frena con instrucción, no en silencio.
+          // ANUALIDAD (28-ago): la emisión online SÍ soporta anual — el puente
+          // convierte cada línea recurrente en cobro único "12 × mensual" y el
+          // link de aceptación cobra el año completo + pagos únicos de una.
           if (data && data.periodo === 'anual') {
-            setStatus('⚠️ La emisión online aún es MENSUAL: el link de aceptación/pago cobraría la mensualidad, no la anualidad. Vuelve el selector a "Mensual" para emitir online, o descarga el PDF anual y esa venta se gestiona con nota de venta manual.');
-            return;
+            setStatus('Emitiendo en modalidad ANUAL: el link de aceptación cobrará los 12 meses adelantados + pagos únicos, en un solo pago (sin mensualidad).');
           }
           var label = btn.textContent;
           btn.disabled = true;
