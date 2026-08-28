@@ -2621,7 +2621,12 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
   const token = await getZohoAccessToken()
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
-  const q = await fetch(`${api}/crm/v3/coql`, {
+  // COQL v8, NO v3 (autopsia 28-ago, "por qué el rescate jamás entregó"): la
+  // condición Owner.email no resuelve en v3 —igual que el hallazgo del dash
+  // "v3 NO expande Owner"— y la consulta moría con 400. Con el `return 0`
+  // mudo de abajo, el rescate llevaba una semana sin entregar a nadie y sin
+  // dejar rastro (ni candados, ni logs). Ahora el fallo se LOGUEA siempre.
+  const q = await fetch(`${api}/crm/v8/coql`, {
     method: "POST", headers: H, cache: "no-store",
     body: JSON.stringify({
       select_query:
@@ -2630,7 +2635,11 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
         "order by Created_Time asc limit 50",
     }),
   })
-  if (!q.ok || q.status === 204) return 0
+  if (!q.ok) {
+    console.warn(`[rescate-form] COQL falló ${q.status}: ${(await q.text().catch(() => "")).slice(0, 200)}`)
+    return 0
+  }
+  if (q.status === 204) return 0
   const filas =
     ((await q.json().catch(() => ({}))) as {
       data?: Array<{ id?: string; First_Name?: string; Last_Name?: string; Company?: string; Phone?: string; Email?: string; Territorio?: string; Created_Time?: string }>
