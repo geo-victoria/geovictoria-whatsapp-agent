@@ -562,6 +562,11 @@ async function processOneTurn(
         const qrOn = ((await kvGet("alta_qr_intent").catch(() => null)) || "").trim() === "on"
         if (qrOn) {
           console.log(`[v3-botmaker] tap quick-reply del alta de ${contact} — responde el bloque #altaflow, Vicky calla`)
+          // El tap ES un mensaje del usuario: queda en el historial (actualiza
+          // el reloj de ventana — el resumen post-formulario decide con él) y
+          // el marcador del asistente le da contexto al modelo para después.
+          const { appendTurnV3: append } = await import("@/lib/supabase-persistence-v3")
+          await append(contact, message, "[Le enviamos el formulario de alta por WhatsApp]").catch(() => {})
           return
         }
       }
