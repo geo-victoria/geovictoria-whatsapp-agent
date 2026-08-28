@@ -96,8 +96,12 @@ export const maxDuration = 300
 
 // ── Guardrails de seguridad ───────────────────────────────────────────
 const MAX_INPUT_CHARS = 2000
+// OJO (28-ago, caso pantallazo del correo de bienvenida): `INSTRUC` pelado
+// atrapaba la palabra chilena de todos los días "instrucciones" ("no me
+// llegaron las instrucciones") y el cliente recibía "formato no válido". Se
+// exige la frase de inyección real (EN o ES), no la palabra suelta.
 const INJECT_RE =
-  /###|IGNORE|DUMP|INSTRUC|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
+  /###|\bIGNORE\s+(?:ALL\s+|PREVIOUS\s+)?INSTRUCTIONS?\b|\bDUMP\b|IGNORA(?:R)?\s+(?:TODAS\s+)?(?:LAS\s+)?INSTRUCCIONES|SYSTEM PROMPT|\bPROMPT\b|\\u202|<script|DROP\s+TABLE|DELETE\s+FROM|UNION\s+SELECT/i
 
 // ── Ráfaga de mensajes (buffer + debounce + drenaje) ──────────────────────
 // Cada mensaje entrante se encola en vic_v3_inbox. El que toma el lock espera
@@ -2132,8 +2136,21 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ reply: "" })
     }
 
-    // 3. Guardrails de input (largo + prompt injection)
-    if (message.length > MAX_INPUT_CHARS || INJECT_RE.test(message)) {
+    // 3. Guardrails de input (largo + prompt injection). El tope de largo NO
+    // aplica a adjuntos descritos: ese texto lo generamos NOSOTROS (visión +
+    // directiva) y puede superar el tope legítimamente — se recorta en vez de
+    // rechazar (28-ago: el pantallazo largo de un correo devolvía "formato no
+    // válido" al cliente).
+    const esAdjuntoDescrito = message.startsWith("[El cliente envió")
+    if (!esAdjuntoDescrito && message.length > MAX_INPUT_CHARS) {
+      return NextResponse.json({
+        reply: "El formato del mensaje no es válido.",
+      })
+    }
+    if (esAdjuntoDescrito && message.length > MAX_INPUT_CHARS * 3) {
+      message = message.slice(0, MAX_INPUT_CHARS * 3)
+    }
+    if (INJECT_RE.test(message)) {
       return NextResponse.json({
         reply: "El formato del mensaje no es válido.",
       })
