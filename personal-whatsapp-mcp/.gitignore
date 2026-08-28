@@ -1,0 +1,4 @@
+node_modules/
+auth/
+messages.jsonl
+package-lock.json
