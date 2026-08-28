@@ -59,6 +59,7 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // convertir (20-ago): mismos veredictos, teléfono del contacto/lead.
   { nombre: "deal_limpieza_hitos", path: "/api/vic-admin-deal-limpieza?gestionhitos=1&limit=15", cadaMin: 360 },
   { nombre: "deal_limpieza_leads", path: "/api/vic-admin-deal-limpieza?gestionleads=1&limit=15", cadaMin: 360 },
+  { nombre: "deal_limpieza_origen", path: "/api/vic-admin-deal-limpieza?origen=1&limit=15", cadaMin: 360 },
   // Lector de media del espejo (Lalo 21-ago, "que los chats espejos puedan
   // leer los mismos medios que Vicky"): transcribe audios y describe
   // imágenes/PDF de los WhatsApp de vendedores — los comprobantes por foto

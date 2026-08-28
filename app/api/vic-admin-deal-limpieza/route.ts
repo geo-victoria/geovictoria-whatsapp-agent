@@ -119,6 +119,44 @@ async function veredictoGestion(tel: string, pagoMs: number, dealId: string, H: 
   return "Gestión Vicky"
 }
 
+/** ATRIBUCIÓN DE ORIGEN (Lalo 28-ago, campo Atribuci_n_Vicky — conversación
+ * con Christian/forecast): hito MÁXIMO que Vicky alcanzó ANTES del primer
+ * traspaso a ejecutivo (o hasta hoy si nunca hubo traspaso). Es el eje
+ * complementario de Gesti_n_Vicky (que mide el CIERRE): un deal "Derivado"
+ * puede llevar atribución "Cotizó formal" si Vicky emitió la formal y recién
+ * después el reloj lo traspasó.
+ *   · "Cotizó formal"    → cotización del deal creada antes del corte
+ *     (margen 5': la formal que gatilla el propio traspaso cuenta).
+ *   · "Mostró precio"    → precio referencial antes del corte (flag
+ *     precio_mostrado del traspaso; sin traspaso, la estampa pref_escalon_at).
+ *   · "Solo conversó"    → conversación sin precio antes del corte.
+ *   · "Sin conversación" → canal ejecutivo puro. */
+async function veredictoAtribucion(tel: string, dealId: string, H: Record<string, string>): Promise<string> {
+  const conv = await supa<{ id: string; pref_escalon_at: string | null }>(
+    `vic_v3_conversations?contact=eq.${tel}&select=id,pref_escalon_at&limit=1`,
+  )
+  if (!conv[0]) return "Sin conversación"
+  const ptv = await supa<{ traspasado_at: string; precio_mostrado: boolean | null }>(
+    `vic_ptv?contact=eq.${tel}&select=traspasado_at,precio_mostrado&order=traspasado_at.asc&limit=1`,
+  )
+  const corteMs = (ptv[0] ? Date.parse(String(ptv[0].traspasado_at)) : Date.now()) + 5 * 60e3
+  try {
+    const iso = new Date(corteMs).toISOString().slice(0, 19) + "+00:00"
+    const rq = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        select_query: `select id from Cotizaciones_GeoVictoria where Deal_Asociado = ${dealId} and Created_Time <= '${iso}' limit 1`,
+      }),
+    })
+    if (rq.status === 200) {
+      const filas = (((await rq.json().catch(() => ({}))) as { data?: Array<{ id: string }> }).data) || []
+      if (filas.length > 0) return "Cotizó formal"
+    }
+  } catch { /* sin señal de formal: se decide por precio/conversación */ }
+  if (ptv[0]) return ptv[0].precio_mostrado === true ? "Mostró precio" : "Solo conversó"
+  return conv[0].pref_escalon_at ? "Mostró precio" : "Solo conversó"
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await authorized(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   const { searchParams } = new URL(req.url)
@@ -620,6 +658,48 @@ export async function GET(req: Request): Promise<Response> {
     }
     console.log(`[deal-limpieza] gestionhitos ${JSON.stringify(out)}`)
     return NextResponse.json({ ok: true, modo: "gestionhitos", quedan_en_pagina: filas.length, ...out })
+  }
+
+  // ── MODO ATRIBUCIÓN DE ORIGEN (?origen=1): estampa Atribuci_n_Vicky en los
+  // deals del robot que aún no la tienen — el hito máximo alcanzado por Vicky
+  // antes del primer traspaso (campo creado 28-ago para el forecast de
+  // Christian). Sin candado: el estampado los saca de la consulta.
+  if (searchParams.get("origen") === "1") {
+    const out = { estampados: 0, sin_contacto: 0, sin_telefono: 0, detalle: [] as string[], errores: [] as string[] }
+    const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({ select_query: `select id, Deal_Name, Contact_Name from Deals where Created_By = 3525045000484500876 and Atribuci_n_Vicky is null order by Created_Time desc limit 100` }),
+    })
+    if (rc.status !== 200 && rc.status !== 204) return NextResponse.json({ ok: false, error: `coql ${rc.status}` }, { status: 500 })
+    const filas = rc.status === 204 ? [] : ((((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Deal_Name?: string; Contact_Name?: { id?: string } | null }> }).data) || [])
+    for (const f of filas.slice(0, limit)) {
+      try {
+        const contactId = String(f.Contact_Name?.id || "")
+        // Sin contacto asociado no hay teléfono que cruzar: cuenta como canal
+        // sin conversación de Vicky (deal de hito muy temprano o dato roto).
+        let veredicto = "Sin conversación"
+        if (contactId) {
+          const rp = await fetch(`${ZOHO_API}/crm/v3/Contacts/${contactId}?fields=Phone,Mobile`, { headers: H, cache: "no-store" })
+          const cont = rp.status === 200 ? ((await rp.json().catch(() => ({}))) as { data?: Array<{ Phone?: string | null; Mobile?: string | null }> })?.data?.[0] : undefined
+          const tel = String(cont?.Mobile || cont?.Phone || "").replace(/\D/g, "")
+          if (tel) veredicto = await veredictoAtribucion(tel, f.id, H)
+          else out.sin_telefono++
+        } else out.sin_contacto++
+        const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${f.id}`, {
+          method: "PUT", headers: H, cache: "no-store",
+          body: JSON.stringify({ data: [{ id: f.id, Atribuci_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
+        })
+        const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
+        if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") {
+          out.estampados++
+          out.detalle.push(`${String(f.Deal_Name || f.id).slice(0, 40)}: ${veredicto}`)
+        } else out.errores.push(`${f.id}: ${cuerpo?.data?.[0]?.code || up.status}`)
+      } catch (e) {
+        out.errores.push(`${f.id}: ${e instanceof Error ? e.message.slice(0, 50) : "err"}`)
+      }
+    }
+    console.log(`[deal-limpieza] origen ${JSON.stringify({ ...out, detalle: out.detalle.length })}`)
+    return NextResponse.json({ ok: true, modo: "origen", quedan_en_pagina: filas.length, ...out })
   }
 
   // ── MODO ENLAZAR (?enlazar=1): cotizaciones de Vicky ANTERIORES al lookup
