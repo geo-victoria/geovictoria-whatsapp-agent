@@ -683,15 +683,23 @@ export async function reasignarLeadCalificacionCL(
         body: JSON.stringify({ data: [{ id: leadId }], lar_id: regla }),
       })
       if (put.ok) {
-        const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
-        const owner = g.ok
-          ? ((await g.json().catch(() => ({}))) as {
-              data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }>
-            }).data?.[0]?.Owner
-          : undefined
-        const email = (owner?.email || "").toLowerCase()
-        if (email && !/vicky@|info@geovictoria/.test(email)) {
-          return { success: true, ownerEmail: owner?.email, ownerId: owner?.id, ownerNombre: owner?.name }
+        // La regla de Zoho corre ASÍNCRONA tras el PUT: una sola lectura
+        // inmediata suele ver todavía a vicky@ y el llamador cae al fallback —
+        // el correo de "nuevo lead" termina en la persona equivocada y la
+        // dueña real jamás se entera (caso Ana López / Clínica Alemana,
+        // 28-ago). Se relee con reintentos hasta ver al ganador del sorteo.
+        for (let intento = 0; intento < 4; intento++) {
+          if (intento > 0) await new Promise((r) => setTimeout(r, 2500))
+          const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
+          const owner = g.ok
+            ? ((await g.json().catch(() => ({}))) as {
+                data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }>
+              }).data?.[0]?.Owner
+            : undefined
+          const email = (owner?.email || "").toLowerCase()
+          if (email && !/vicky@|info@geovictoria/.test(email)) {
+            return { success: true, ownerEmail: owner?.email, ownerId: owner?.id, ownerNombre: owner?.name }
+          }
         }
       }
       console.warn(`[zoho-leads] regla ${calificado ? "calificados" : "sin-calificar"} ${regla} no asignó lead ${leadId}`)

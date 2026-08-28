@@ -2671,6 +2671,45 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
         continue
       }
     }
+    // GEMELO YA ATENDIDO (28-ago, caso Aleydis/Maximiliano Varas): el form
+    // crea leads SIN dedup, y muchos "mudos" son personas que YA existen como
+    // CONTACTO en Zoho (las atendió un ejecutivo por otro registro). Entregar
+    // el gemelo genera ruido real ("llamé y me dijo que ya le enviaron
+    // cotización"). Si el teléfono o el correo ya son de un contacto, el lead
+    // NO se entrega: candado + nota para el dedup humano (patrón Recontacto).
+    try {
+      const correo = String(l.Email || "").trim().replace(/'/g, "")
+      const condiciones = [
+        telOk ? `Phone = '+${tel}'` : "",
+        correo ? `Email = '${correo}'` : "",
+      ].filter(Boolean)
+      if (condiciones.length) {
+        const rg = await fetch(`${api}/crm/v8/coql`, {
+          method: "POST", headers: H, cache: "no-store",
+          body: JSON.stringify({
+            select_query: `select id, Last_Name, Owner.last_name from Contacts where ${condiciones.length === 2 ? `(${condiciones.join(" or ")})` : condiciones[0]} limit 1`,
+          }),
+        })
+        if (rg.status === 200) {
+          const gemelo = (((await rg.json().catch(() => ({}))) as {
+            data?: Array<{ id?: string; Last_Name?: string; "Owner.last_name"?: string }>
+          }).data || [])[0]
+          if (gemelo?.id) {
+            await setKvValue(`rescate_form_${l.id}`, `gemelo:${gemelo.id}`).catch(() => {})
+            const { agregarNotaLead } = await import("@/lib/zoho-leads")
+            await agregarNotaLead(
+              l.id,
+              "Form Vicky — posible duplicado, no se entrega",
+              `Este lead llegó por el formulario de las landing pero su teléfono/correo ya existe como CONTACTO en Zoho ` +
+                `(${gemelo.Last_Name || "contacto"}, dueño ${gemelo["Owner.last_name"] || "?"}, id ${gemelo.id}) — la persona ya fue atendida por otro registro. ` +
+                `Se omite de la tómbola SDR para no duplicar gestión; revisar/fusionar como Recontacto si corresponde.`,
+            ).catch(() => {})
+            console.log(`[rescate-form] lead ${l.id} omitido: gemelo contacto ${gemelo.id}`)
+            continue
+          }
+        }
+      }
+    } catch { /* sin señal de gemelo: sigue el rescate normal */ }
     // País: prefijo del teléfono; sin teléfono, el Territorio del lead.
     const terr = String(l.Territorio || "").trim().toLowerCase()
     const pais = telOk
