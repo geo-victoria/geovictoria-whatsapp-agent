@@ -547,6 +547,25 @@ async function processOneTurn(
     // Con el flag off, faseDelContacto devuelve "venta" sin tocar el kv y todo
     // este bloque es inerte.
     const enOnboarding = (await faseDelContacto(contact)) === "onboarding"
+    // TAP DEL QUICK-REPLY del alta (híbrido 28-ago): "Crear mi cuenta" viene
+    // de la plantilla QR — el intent de Botmaker responde con el flow en
+    // sesión (bloque #altaflow), así que Vicky CALLA para no duplicar. Gate
+    // vic_kv `alta_qr_intent`: sin el bloque cableado, el mensaje sigue al
+    // agente como cualquier otro (jamás un tap mudo).
+    if (enOnboarding) {
+      const { TEXTO_BOTON_ALTA_QR } = await import("@/lib/onboarding/plantilla")
+      const esTapQr =
+        message.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") ===
+        TEXTO_BOTON_ALTA_QR.toLowerCase()
+      if (esTapQr) {
+        const { getKvValue: kvGet } = await import("@/lib/supabase-persistence-v3")
+        const qrOn = ((await kvGet("alta_qr_intent").catch(() => null)) || "").trim() === "on"
+        if (qrOn) {
+          console.log(`[v3-botmaker] tap quick-reply del alta de ${contact} — responde el bloque #altaflow, Vicky calla`)
+          return
+        }
+      }
+    }
     const onboarding = enOnboarding ? await armarOnboarding(contact) : null
 
     // Correr el agent

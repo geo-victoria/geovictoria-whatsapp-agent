@@ -44,11 +44,24 @@ export async function entregarKickoffOnboarding(
   // sigue el camino clásico conversacional: nadie se queda sin alta.
   const flowOn = ((await getKvValue("alta_flow_kickoff").catch(() => null)) || "").trim() === "on"
   if (flowOn) {
-    const okFlow = await sendBotmakerTemplate(
-      contact,
-      PLANTILLA_ALTA_FLOW_CL.name,
-      paramsPlantillaAltaFlow(nombreCliente, empresa),
-    ).catch(() => false)
+    const params = paramsPlantillaAltaFlow(nombreCliente, empresa)
+    // HÍBRIDO POR VENTANA (Lalo 28-ago): con ventana VENCIDA (designado frío)
+    // el botón FLOW directo abre un formulario cuyo cierre no puede retomar el
+    // chat (Meta 131047) — va la plantilla QUICK-REPLY: su tap es mensaje del
+    // usuario (abre ventana) y el intent de Botmaker manda el flow en sesión
+    // con identificación garantizada. Gate vic_kv `alta_qr_intent` = "on"
+    // (recién cuando el bloque #altaflow→v3 esté cableado en Botmaker); sin
+    // gate o si la QR falla, cae a la plantilla FLOW de siempre.
+    const ultimoMsg = await getLastUserAt(contact).catch(() => null)
+    const ventanaViva = !!ultimoMsg && Date.now() - ultimoMsg.getTime() < 23 * 3600e3
+    const qrOn = ((await getKvValue("alta_qr_intent").catch(() => null)) || "").trim() === "on"
+    if (!ventanaViva && qrOn) {
+      const { PLANTILLA_ALTA_QR_CL } = await import("./onboarding/plantilla")
+      const okQr = await sendBotmakerTemplate(contact, PLANTILLA_ALTA_QR_CL.name, params).catch(() => false)
+      if (okQr) return { via: "flow", texto: "" }
+      console.warn(`[onboarding-envio] plantilla QR falló para ${contact}; se intenta la plantilla FLOW`)
+    }
+    const okFlow = await sendBotmakerTemplate(contact, PLANTILLA_ALTA_FLOW_CL.name, params).catch(() => false)
     if (okFlow) return { via: "flow", texto: "" }
     console.warn(`[onboarding-envio] plantilla flow falló para ${contact}; kickoff clásico de respaldo`)
   }

@@ -103,6 +103,31 @@ export const PLANTILLA_ALTA_RESUMEN_CL = {
     "por aquí y te muestro el resumen final para confirmar.",
 } as const
 
+/**
+ * Plantilla QUICK-REPLY del alta para VENTANA VENCIDA (idea de Lalo 28-ago):
+ * en vez del botón FLOW directo, un botón de texto "Crear mi cuenta" cuyo tap
+ * ES un mensaje del usuario — abre la ventana de 24h, actualiza nuestro reloj
+ * y dispara el intent de Botmaker que manda el flow EN SESIÓN (bloque
+ * #altaflow → alta_cuenta_v3), donde la identificación es garantizada. Así el
+ * designado frío no ve la pantalla del número Y el resumen final siempre sale
+ * por texto libre. El tap lo silencia el webhook (gate vic_kv alta_qr_intent)
+ * para que responda solo el bloque.
+ */
+export const PLANTILLA_ALTA_QR_CL = {
+  name: "vicky_alta_qr_cl",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky Chile",
+  body:
+    "Felicidades ${nombre}, tu pago quedó registrado 🙌 Ya está todo listo para crear tu cuenta: " +
+    "solo falta confirmar los datos de tu empresa y de quien la administrará. " +
+    "Los completas aquí mismo, en un formulario rápido.",
+} as const
+
+/** Texto EXACTO del botón quick-reply de la plantilla QR (el webhook lo usa
+ * para callar y dejar que el bloque del Bot Designer responda con el flow). */
+export const TEXTO_BOTON_ALTA_QR = "Crear mi cuenta"
+
 export type ParamsOnboarding = { empresa: string; rut_empresa: string }
 
 /** Params de la plantilla. Sin dato, genéricos que no dejan huecos raros. */
