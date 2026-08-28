@@ -56,6 +56,31 @@ export async function entregarKickoffOnboarding(
     const ventanaViva = !!ultimoMsg && Date.now() - ultimoMsg.getTime() < 23 * 3600e3
     const qrOn = ((await getKvValue("alta_qr_intent").catch(() => null)) || "").trim() === "on"
     if (!ventanaViva && qrOn) {
+      // SIEMBRA de variables alta_* ANTES de la plantilla (28-ago noche): el
+      // tap del botón dispara el intent #altaflow directo en Botmaker (no pasa
+      // por este webhook), así que el bloque interpola ${alta_*} — que deben
+      // estar sembradas de antes. trigger-intent exige un intent: se usa el
+      // flujo VACÍO #setvars (no manda mensajes; solo aplica las variables).
+      try {
+        const { triggerBotmakerIntent } = await import("./botmaker-push-v3")
+        const { getFollowupCronSecret } = await import("./supabase-persistence-v3")
+        const secreto = await getFollowupCronSecret()
+        const base = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app"
+        const r = await fetch(`${base}/api/vic-onboarding-flow?key=${encodeURIComponent(secreto)}&contact=${contact}`, { cache: "no-store" })
+        const prefill = ((await r.json().catch(() => ({}))) as { prefill?: Record<string, unknown> }).prefill || {}
+        const v = (k: string) => String(prefill[k] ?? "")
+        await triggerBotmakerIntent(contact, "#setvars", {
+          alta_razon: v("razon_social"),
+          alta_rut: v("rut_empresa"),
+          alta_giro: v("giro"),
+          alta_direccion: v("direccion"),
+          alta_comuna: v("comuna"),
+          alta_campos: String(prefill["mostrar_campos_empresa"] !== false),
+          alta_fono: contact,
+        })
+      } catch (e) {
+        console.warn(`[onboarding-envio] siembra de variables alta_* falló para ${contact}:`, e instanceof Error ? e.message : e)
+      }
       const { PLANTILLA_ALTA_QR_CL } = await import("./onboarding/plantilla")
       const okQr = await sendBotmakerTemplate(contact, PLANTILLA_ALTA_QR_CL.name, params).catch(() => false)
       if (okQr) return { via: "flow", texto: "" }

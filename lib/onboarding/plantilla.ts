@@ -117,10 +117,12 @@ export const PLANTILLA_ALTA_RESUMEN_CL = {
  * para que responda solo el bloque.
  */
 export const PLANTILLA_ALTA_QR_CL = {
-  // v2 (28-ago noche): el botón ya NO auto-dispara el intent (webhookPayload
-  // en vez de intentIdOrName) — el intent lo dispara el WEBHOOK por API con
-  // las variables alta_* frescas, y el bloque abre EMPRESA prellenada.
-  name: "vicky_alta_qr_clv2",
+  // DE VUELTA a la v1 (28-ago noche, 2ª iteración): el botón con
+  // webhookPayload de la v2 iba al webhook de NOTIFICACIONES de Botmaker (no
+  // al pipeline del bot) — tap muerto, cero eventos. La v1 con intentIdOrName
+  // #altaflow SÍ dispara el bloque; las variables alta_* se siembran en el
+  // KICKOFF vía trigger-intent al flujo vacío #setvars (no manda mensajes).
+  name: "vicky_alta_qr_cl",
   category: "UTILITY" as const,
   locale: "es",
   botName: "Vicky Chile",
