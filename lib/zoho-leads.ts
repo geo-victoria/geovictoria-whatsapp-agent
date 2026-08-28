@@ -666,7 +666,43 @@ export async function reasignarLeadCalificacionCL(
   opts: { calificado?: boolean } = {},
 ): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string }> {
   if (!leadId) return { success: false, error: "leadId faltante" }
-  const calificado = opts.calificado === true
+  // TRAMO ENTERPRISE >300 (Lalo 28-ago, caso Clínica Alemana→Ana): un lead
+  // enterprise JAMÁS va al circuito de venta TLMK. Sin RUT no puede subir a
+  // deal por la escalera, así que se entrega a las SDR con la MISIÓN de
+  // conseguir el RUT — con RUT registrado, la escalera lo convierte a deal y
+  // la Tómbola de Deals (entradas 301+) lo asigna al roster KAM. Este es el
+  // punto único por el que pasan todas las entregas CL (traspaso, reloj de
+  // calificación, rescate de forms), así que la regla vive acá.
+  let esEnterprise = false
+  let dotacionLead = 0
+  try {
+    const tk = await getZohoAccessToken()
+    const dom = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const g = await fetch(`${dom}/crm/v3/Leads/${leadId}?fields=N_Empleados_que_marcan`, {
+      headers: { Authorization: `Zoho-oauthtoken ${tk}` },
+      cache: "no-store",
+    })
+    dotacionLead =
+      Number(
+        ((await g.json().catch(() => ({}))) as { data?: Array<{ N_Empleados_que_marcan?: number }> }).data?.[0]
+          ?.N_Empleados_que_marcan,
+      ) || 0
+    const umbralEnt = Number(process.env.VICKY_ENTERPRISE_UMBRAL || 300) || 300
+    esEnterprise = dotacionLead > umbralEnt
+  } catch {
+    /* sin dotación legible: flujo normal */
+  }
+  const calificado = opts.calificado === true && !esEnterprise
+  const notaEnterprise = async () => {
+    if (!esEnterprise) return
+    await agregarNotaLead(
+      leadId,
+      "TRAMO ENTERPRISE — misión SDR: conseguir el RUT",
+      `Este lead declara ~${dotacionLead} personas: supera el rango de venta de telemarketing (>300) y por regla va a calificación SDR, no al circuito TLMK. ` +
+        `Misión: obtener el RUT y calificar — con el RUT registrado, el sistema crea el deal automáticamente y lo asigna al roster enterprise por la Tómbola de Deals. ` +
+        `NO cotizar desde telemarketing. (Ruteo enterprise automático, regla del 28-ago.)`,
+    ).catch(() => {})
+  }
   // Camino primario: la REGLA de Zoho que corresponda al escalón.
   const regla = calificado
     ? (process.env.VICKY_TM_CALIFICACION_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
@@ -698,6 +734,7 @@ export async function reasignarLeadCalificacionCL(
             : undefined
           const email = (owner?.email || "").toLowerCase()
           if (email && !/vicky@|info@geovictoria/.test(email)) {
+            await notaEnterprise()
             return { success: true, ownerEmail: owner?.email, ownerId: owner?.id, ownerNombre: owner?.name }
           }
         }
@@ -737,6 +774,7 @@ export async function reasignarLeadCalificacionCL(
       return { success: false, error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}` }
     }
     await setKvValue("tm_calif_rr_cl", String(idx)).catch(() => {})
+    await notaEnterprise()
     return { success: true, ownerEmail: destino.email, ownerId: destino.id, ownerNombre: destino.nombre }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }

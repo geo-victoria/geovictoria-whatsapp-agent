@@ -2007,6 +2007,16 @@ export async function GET(req: Request) {
   })
   if (rescatesForm) console.log(`[ptv-cron] rescate form: ${rescatesForm} leads entregados`)
 
+  // BACKSTOP ENTERPRISE (Lalo 28-ago, caso Clínica Alemana→Ana): lead vivo
+  // >300 personas parado en el roster TLMK → se re-encamina a calificación
+  // SDR (la guarda de reasignarLeadCalificacionCL le deja la nota de misión:
+  // conseguir el RUT para que la escalera lo suba a deal enterprise).
+  const enterpriseTlmk = await reencaminarEnterpriseTlmk().catch((e) => {
+    console.warn("[ptv-cron] backstop enterprise TLMK falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+  if (enterpriseTlmk) console.log(`[ptv-cron] enterprise en TLMK re-encaminados: ${enterpriseTlmk}`)
+
   // Vigía del espejo (Lalo 24-ago): sin capturas en 3h hábiles → alerta.
   await vigilarEspejo(ahora).catch((e) => {
     console.warn("[ptv-cron] vigía espejo falló:", e instanceof Error ? e.message : e)
@@ -2819,6 +2829,72 @@ async function reconciliarLeadsCruzados(): Promise<number> {
     }
   }
   return corregidos
+}
+
+/**
+ * BACKSTOP ENTERPRISE EN TLMK (Lalo 28-ago, caso Clínica Alemana→Ana López):
+ * un lead vivo que declara >300 personas jamás debe quedar en el roster de
+ * VENTA de telemarketing — su rango tope es 300. La guarda preventiva vive en
+ * reasignarLeadCalificacionCL (toda entrega nueva ya rutea a SDR); este
+ * reconciliador caza los que ya quedaron mal parados (histórico + cualquier
+ * camino lateral: regla de Zoho asíncrona, asignación manual, form). Máx 5
+ * por tick, candado kv por lead — jamás toca leads convertidos ni gestión
+ * cerrada (No Calificado / Calificado convertido).
+ */
+async function reencaminarEnterpriseTlmk(): Promise<number> {
+  const umbral = Number(process.env.VICKY_ENTERPRISE_UMBRAL || 300) || 300
+  const rosterTlmk = (process.env.VICKY_TLMK_ROSTER_EMAILS ||
+    "emujica@geovictoria.com,pdiaz@geovictoria.com,gmelendez@geovictoria.com," +
+    "tmartinezq@geovictoria.com,alopez@geovictoria.com,dgalvez@geovictoria.com,adiazg@geovictoria.com")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+  if (!rosterTlmk.length) return 0
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken()
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  // v8: v3 no expande Owner en COQL (misma cicatriz del rescate del form).
+  const q = await fetch(`${api}/crm/v8/coql`, {
+    method: "POST", headers: H, cache: "no-store",
+    body: JSON.stringify({
+      select_query:
+        `select id, Phone, Owner.email, N_Empleados_que_marcan from Leads ` +
+        `where ((N_Empleados_que_marcan > ${umbral} and Converted__s = false) and ` +
+        `Lead_Status in ('1. No contactado','2. Intento de contacto','3. Contactado','4. Calificado')) ` +
+        `order by Created_Time desc limit 40`,
+    }),
+  })
+  if (!q.ok) {
+    console.warn(`[enterprise-tlmk] COQL falló ${q.status}: ${(await q.text().catch(() => "")).slice(0, 200)}`)
+    return 0
+  }
+  if (q.status === 204) return 0
+  const filas = ((await q.json().catch(() => ({}))) as {
+    data?: Array<{ id?: string; Phone?: string; "Owner.email"?: string; N_Empleados_que_marcan?: number }>
+  }).data || []
+  const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+  let movidos = 0
+  for (const l of filas) {
+    if (movidos >= 5) break
+    const ownerEmail = String(l["Owner.email"] || "").toLowerCase()
+    if (!l.id || !rosterTlmk.includes(ownerEmail)) continue
+    const marca = `ent_tlmk_${l.id}`
+    if (await getKvValue(marca).catch(() => null)) continue
+    await setKvValue(marca, new Date().toISOString()).catch(() => {})
+    const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
+    const r = await reasignarLeadCalificacionCL(l.id, { calificado: false }).catch(() => null)
+    if (r?.success) {
+      movidos++
+      console.warn(`[enterprise-tlmk] lead ${l.id} (~${l.N_Empleados_que_marcan} pers., estaba con ${ownerEmail}) → ${r.ownerEmail}`)
+      if (r.ownerEmail) {
+        await notificarTraspasoLeadEmail(
+          l.id, r.ownerEmail, String(l.Phone || "").replace(/\D/g, ""), H, api,
+          `este lead declara ~${l.N_Empleados_que_marcan} personas (tramo enterprise, sobre el rango de telemarketing). ` +
+            `<b>Tu misión es conseguir el RUT y calificarlo</b> — con el RUT registrado el sistema crea el deal y lo asigna solo al equipo enterprise. No se cotiza desde telemarketing.`,
+        ).catch(() => {})
+      }
+    }
+  }
+  return movidos
 }
 
 async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; recerrados: number }> {
