@@ -246,6 +246,49 @@ export async function sendBotmakerMessage(
  * extrae del channelId (ej. "GeoVictoriaEspaol-whatsapp-56967308227" →
  * "56967308227").
  */
+/**
+ * Dispara un INTENT de Botmaker sobre el chat de un contacto, opcionalmente
+ * seteando VARIABLES del chat antes de la ejecución (la API las aplica en la
+ * misma llamada). Uso 28-ago: el tap del quick-reply del alta dispara
+ * `#altaflow` con las variables `alta_*` frescas del borrador — el bloque del
+ * Bot Designer abre el formulario DIRECTO en "Datos de tu empresa" prellenada
+ * (sin pantalla del número y sin depender del INIT roto de Botmaker).
+ */
+const BM_BUSINESS_ID = (process.env.BOTMAKER_BUSINESS_ID || "GeoVictoriaEspaol").trim()
+
+export async function triggerBotmakerIntent(
+  contactId: string,
+  intentIdOrName: string,
+  variables?: Record<string, string>,
+): Promise<boolean> {
+  if (!BM_TOKEN || !contactId || !intentIdOrName) return false
+  const clean = normalizeContactId(contactId)
+  const origen = await canalDeOrigen(clean)
+  const num = channelNumber(origen || undefined)
+  if (!num) return false
+  try {
+    const res = await fetch("https://api.botmaker.com/v2.0/chats-actions/trigger-intent", {
+      method: "POST",
+      headers: BM_HEADERS,
+      cache: "no-store",
+      body: JSON.stringify({
+        chat: { contactId: clean, channelId: `${BM_BUSINESS_ID}-whatsapp-${num}` },
+        intentIdOrName,
+        ...(variables && Object.keys(variables).length ? { variables } : {}),
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => "")
+      console.error(`[botmaker-intent] ${intentIdOrName} → ${res.status} para ${clean}:`, body.slice(0, 300))
+      return false
+    }
+    return true
+  } catch (e) {
+    console.error("[botmaker-intent] excepción:", e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
 function channelNumber(overrideNumero?: string): string {
   const explicitOverride = (overrideNumero || "").replace(/\D/g, "")
   if (explicitOverride) return explicitOverride

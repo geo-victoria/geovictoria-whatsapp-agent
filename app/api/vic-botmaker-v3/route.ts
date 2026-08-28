@@ -565,22 +565,31 @@ async function processOneTurn(
         const { getKvValue: kvGet } = await import("@/lib/supabase-persistence-v3")
         const qrOn = ((await kvGet("alta_qr_intent").catch(() => null)) || "").trim() === "on"
         if (qrOn) {
-          // CAMBIO 28-ago noche: el bloque #altaflow del Bot Designer quedó
-          // fuera del circuito (el envío de flow en sesión fallaba con el bug
-          // del INIT y su config es frágil) — el tap lo responde ESTE webhook
-          // mandando la plantilla FLOW probada (clv4→v2): el usuario ve al
-          // tiro el botón del formulario. Sin turno del modelo.
-          console.log(`[v3-botmaker] tap quick-reply del alta de ${contact} — se responde con la plantilla del formulario`)
-          const { claveBorrador } = await import("@/lib/onboarding/fase")
-          const { parsearBorrador } = await import("@/lib/onboarding/borrador")
-          const { PLANTILLA_ALTA_FLOW_CL, paramsPlantillaAltaFlow } = await import("@/lib/onboarding/plantilla")
-          const { sendBotmakerTemplate } = await import("@/lib/botmaker-push-v3")
-          const bAlta = parsearBorrador(await kvGet(claveBorrador(contact)).catch(() => null))
-          await sendBotmakerTemplate(
-            contact,
-            PLANTILLA_ALTA_FLOW_CL.name,
-            paramsPlantillaAltaFlow(bAlta?.admin.nombre, bAlta?.empresa.nombre),
-          ).catch(() => false)
+          // DISEÑO FINAL 28-ago noche (sin pantalla de teléfono): el tap
+          // dispara por API el intent `#altaflow` seteando en la MISMA llamada
+          // las variables `alta_*` con el prefill fresco del borrador — el
+          // bloque del Bot Designer abre el formulario DIRECTO en "Datos de tu
+          // empresa" prellenada (sin INIT de Meta, sin pantalla del número).
+          console.log(`[v3-botmaker] tap quick-reply del alta de ${contact} — trigger #altaflow con variables frescas`)
+          const { triggerBotmakerIntent } = await import("@/lib/botmaker-push-v3")
+          const { getFollowupCronSecret } = await import("@/lib/supabase-persistence-v3")
+          let prefill: Record<string, unknown> = {}
+          try {
+            const secreto = await getFollowupCronSecret()
+            const base = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app"
+            const r = await fetch(`${base}/api/vic-onboarding-flow?key=${encodeURIComponent(secreto)}&contact=${contact}`, { cache: "no-store" })
+            prefill = ((await r.json().catch(() => ({}))) as { prefill?: Record<string, unknown> }).prefill || {}
+          } catch {}
+          const v = (k: string) => String(prefill[k] ?? "")
+          await triggerBotmakerIntent(contact, "#altaflow", {
+            alta_razon: v("razon_social"),
+            alta_rut: v("rut_empresa"),
+            alta_giro: v("giro"),
+            alta_direccion: v("direccion"),
+            alta_comuna: v("comuna"),
+            alta_campos: String(prefill["mostrar_campos_empresa"] !== false),
+            alta_fono: contact,
+          }).catch(() => false)
           const { appendTurnV3: append, markUserActivity: marcar } = await import("@/lib/supabase-persistence-v3")
           await append(contact, message, "[Le enviamos el formulario de alta por WhatsApp]").catch(() => {})
           // El reloj de ventana (getLastUserAt) lee last_user_at, que solo lo

@@ -117,7 +117,10 @@ export const PLANTILLA_ALTA_RESUMEN_CL = {
  * para que responda solo el bloque.
  */
 export const PLANTILLA_ALTA_QR_CL = {
-  name: "vicky_alta_qr_cl",
+  // v2 (28-ago noche): el botón ya NO auto-dispara el intent (webhookPayload
+  // en vez de intentIdOrName) — el intent lo dispara el WEBHOOK por API con
+  // las variables alta_* frescas, y el bloque abre EMPRESA prellenada.
+  name: "vicky_alta_qr_clv2",
   category: "UTILITY" as const,
   locale: "es",
   botName: "Vicky Chile",
