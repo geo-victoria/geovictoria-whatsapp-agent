@@ -275,8 +275,19 @@ export async function POST(req: Request): Promise<NextResponse> {
     // invisible para este código). Con ventana vencida el resumen NO se
     // intenta por texto: va la plantilla que reabre la conversación; el
     // cliente responde y el agente muestra el resumen de siempre.
-    const ultimo = await (await import("@/lib/supabase-persistence-v3")).getLastUserAt(contact).catch(() => null)
-    const ventanaViva = !!ultimo && Date.now() - ultimo.getTime() < 23 * 3600e3
+    // Fuente de verdad de la ventana (28-ago PM): Botmaker la expone directo
+    // (whatsAppWindowCloseDatetime) — nuestro reloj interno no ve los taps de
+    // quick-reply que van por intent y mandaba a plantilla con la ventana
+    // recién abierta. Fallback al reloj interno solo si la API no responde.
+    const { ventanaWhatsAppAbierta } = await import("@/lib/botmaker-push-v3")
+    const ventanaReal = await ventanaWhatsAppAbierta(contact).catch(() => null)
+    let ventanaViva: boolean
+    if (ventanaReal !== null) {
+      ventanaViva = ventanaReal
+    } else {
+      const ultimo = await (await import("@/lib/supabase-persistence-v3")).getLastUserAt(contact).catch(() => null)
+      ventanaViva = !!ultimo && Date.now() - ultimo.getTime() < 23 * 3600e3
+    }
     let enviado = false
     if (ventanaViva) {
       enviado = await sendBotmakerMessage(contact, mensaje).catch(() => false)

@@ -289,6 +289,38 @@ export async function triggerBotmakerIntent(
   }
 }
 
+/**
+ * ¿La ventana de 24h de WhatsApp del contacto está ABIERTA? Fuente de verdad
+ * REAL: Botmaker expone `whatsAppWindowCloseDatetime` en el chat (28-ago —
+ * nuestro reloj getLastUserAt no ve los taps de quick-reply que van por
+ * intent, y decidía "plantilla" con la ventana recién abierta). null = no se
+ * pudo saber (el caller decide su fallback).
+ */
+export async function ventanaWhatsAppAbierta(contactId: string): Promise<boolean | null> {
+  if (!BM_TOKEN || !contactId) return null
+  const clean = normalizeContactId(contactId)
+  const origen = await canalDeOrigen(clean)
+  const num = channelNumber(origen || undefined)
+  if (!num) return null
+  try {
+    const r = await fetch(
+      `https://api.botmaker.com/v2.0/chats?contact-id=${encodeURIComponent(clean)}&channel-id=${encodeURIComponent(`${BM_BUSINESS_ID}-whatsapp-${num}`)}`,
+      { headers: BM_HEADERS, cache: "no-store" },
+    )
+    if (!r.ok) return null
+    const data = (await r.json().catch(() => null)) as
+      | { items?: Array<{ whatsAppWindowCloseDatetime?: string }> }
+      | Array<{ whatsAppWindowCloseDatetime?: string }>
+      | null
+    const item = Array.isArray(data) ? data[0] : data?.items?.[0]
+    const cierre = Date.parse(String(item?.whatsAppWindowCloseDatetime || ""))
+    if (!Number.isFinite(cierre)) return false // sin ventana registrada = cerrada
+    return cierre > Date.now() + 60_000 // margen de 1 min para el envío
+  } catch {
+    return null
+  }
+}
+
 function channelNumber(overrideNumero?: string): string {
   const explicitOverride = (overrideNumero || "").replace(/\D/g, "")
   if (explicitOverride) return explicitOverride
