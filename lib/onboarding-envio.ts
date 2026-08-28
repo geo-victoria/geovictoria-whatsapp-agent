@@ -9,10 +9,12 @@
  * que el ciclo no existe.
  */
 
-import { getLastUserAt } from "./supabase-persistence-v3"
+import { getKvValue, getLastUserAt } from "./supabase-persistence-v3"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "./botmaker-push-v3"
 import {
+  PLANTILLA_ALTA_FLOW_CL,
   PLANTILLA_ONBOARDING_CL,
+  paramsPlantillaAltaFlow,
   paramsPlantillaOnboarding,
   renderPlantillaOnboarding,
 } from "./onboarding/plantilla"
@@ -32,7 +34,24 @@ export async function entregarKickoffOnboarding(
   contact: string,
   empresa?: string,
   rut?: string,
-): Promise<{ via: "texto" | "plantilla" | "fallo"; texto: string }> {
+  nombreCliente?: string,
+): Promise<{ via: "texto" | "plantilla" | "flow" | "fallo"; texto: string }> {
+  // ALTA POR FORMULARIO (28-ago): con el gate encendido, el kickoff es la
+  // plantilla con botón FLOW (alta_cuenta_v2_flow) — dentro o fuera de
+  // ventana da igual, las plantillas entran siempre. Gate en vic_kv para
+  // encender SIN deploy recién cuando Meta apruebe la clv4 (una plantilla
+  // PENDING se "acepta" y se bota — cicatriz 25-ago). Si el envío falla,
+  // sigue el camino clásico conversacional: nadie se queda sin alta.
+  const flowOn = ((await getKvValue("alta_flow_kickoff").catch(() => null)) || "").trim() === "on"
+  if (flowOn) {
+    const okFlow = await sendBotmakerTemplate(
+      contact,
+      PLANTILLA_ALTA_FLOW_CL.name,
+      paramsPlantillaAltaFlow(nombreCliente, empresa),
+    ).catch(() => false)
+    if (okFlow) return { via: "flow", texto: "" }
+    console.warn(`[onboarding-envio] plantilla flow falló para ${contact}; kickoff clásico de respaldo`)
+  }
   const params = paramsPlantillaOnboarding(empresa, rut)
   const texto = renderPlantillaOnboarding(params)
 

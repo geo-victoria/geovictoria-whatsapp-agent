@@ -55,6 +55,31 @@ export const PLANTILLA_ONBOARDING_CL = {
     "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, RUT y correo.",
 } as const
 
+/**
+ * Plantilla del ALTA POR FORMULARIO (WhatsApp Flow, 28-ago): botón FLOW
+ * "Crear cuenta" → alta_cuenta_v2_flow (3 pantallas, endpoint vickyaltaflowv3).
+ * Se manda SOLO con el gate vic_kv `alta_flow_kickoff` = "on" (la plantilla
+ * debe estar APROBADA: Botmaker acepta encargos de plantillas PENDING y los
+ * bota en silencio — cicatriz del 25-ago). Si el envío falla, el kickoff cae
+ * al camino clásico conversacional: nadie se queda sin alta.
+ */
+export const PLANTILLA_ALTA_FLOW_CL = {
+  name: "vicky_alta_flow_clv4",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky Chile",
+  body:
+    "Felicidades ${nombre}, tu pago quedó registrado 🙌 Ya está todo listo para crear tu cuenta: " +
+    "solo falta confirmar los datos de tu empresa y de quien la administrará. " +
+    "Los completas aquí mismo, en un formulario rápido.",
+} as const
+
+/** Param de la plantilla del Flow. Fallbacks: nombre → empresa → emoji. */
+export function paramsPlantillaAltaFlow(nombre?: string, empresa?: string): { nombre: string } {
+  const primero = (nombre || "").trim().split(/\s+/)[0] || ""
+  return { nombre: primero || (empresa || "").trim() || "🎉" }
+}
+
 export type ParamsOnboarding = { empresa: string; rut_empresa: string }
 
 /** Params de la plantilla. Sin dato, genéricos que no dejan huecos raros. */

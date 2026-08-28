@@ -138,7 +138,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   await setKvValue(claveFase(contact), "onboarding")
 
   // 4. Kickoff (texto en ventana, plantilla fuera de ella).
-  const kickoff = await entregarKickoffOnboarding(contact, borrador.empresa.nombre, borrador.empresa.identificador)
+  const kickoff = await entregarKickoffOnboarding(
+    contact,
+    borrador.empresa.nombre,
+    borrador.empresa.identificador,
+    borrador.admin.nombre,
+  )
   console.log(`[onboarding-invocar] contacto ${contact} → fase onboarding, kickoff via=${kickoff.via}`)
   return NextResponse.json({
     ok: kickoff.via !== "fallo",

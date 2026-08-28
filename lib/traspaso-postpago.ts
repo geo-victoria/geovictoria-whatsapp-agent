@@ -402,6 +402,7 @@ export async function cerrarYTraspasarPostPago(
       contact,
       borradorSembrado?.empresa.nombre,
       borradorSembrado?.empresa.identificador,
+      borradorSembrado?.admin.nombre,
     )
     if (via === "fallo") return { contact, traspaso: "push_fallo" }
     await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
