@@ -64,11 +64,14 @@ export const PLANTILLA_ONBOARDING_CL = {
  * al camino clásico conversacional: nadie se queda sin alta.
  */
 export const PLANTILLA_ALTA_FLOW_CL = {
-  // clv5 (28-ago PM): apunta a alta_cuenta_v3 — el flow con "Enable init"
-  // ENCENDIDO, para que Meta consulte el endpoint al abrir y el identificado
-  // entre directo a EMPRESA prellenada (la clv4 quedó soldada al v2, que
-  // abría siempre en la pantalla del teléfono).
-  name: "vicky_alta_flow_clv5",
+  // ROLLBACK a clv4/v2 (28-ago noche): el flow v3 con "Enable init" responde
+  // el INIT perfecto desde nuestro endpoint (logs lo prueban) pero la capa de
+  // Botmaker no se lo devuelve bien a Meta y el cliente ve "Se produjo un
+  // error" al abrir — ticket enviado a Botmaker con la evidencia. Mientras lo
+  // arreglan, producción usa la clv5→v3 NO: usa esta clv4→v2 estable (pide el
+  // número al abrir, después todo prellenado). Cuando Botmaker repare el
+  // INIT: volver a "vicky_alta_flow_clv5".
+  name: "vicky_alta_flow_clv4",
   category: "UTILITY" as const,
   locale: "es",
   botName: "Vicky Chile",
