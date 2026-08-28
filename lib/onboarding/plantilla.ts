@@ -64,7 +64,11 @@ export const PLANTILLA_ONBOARDING_CL = {
  * al camino clásico conversacional: nadie se queda sin alta.
  */
 export const PLANTILLA_ALTA_FLOW_CL = {
-  name: "vicky_alta_flow_clv4",
+  // clv5 (28-ago PM): apunta a alta_cuenta_v3 — el flow con "Enable init"
+  // ENCENDIDO, para que Meta consulte el endpoint al abrir y el identificado
+  // entre directo a EMPRESA prellenada (la clv4 quedó soldada al v2, que
+  // abría siempre en la pantalla del teléfono).
+  name: "vicky_alta_flow_clv5",
   category: "UTILITY" as const,
   locale: "es",
   botName: "Vicky Chile",
