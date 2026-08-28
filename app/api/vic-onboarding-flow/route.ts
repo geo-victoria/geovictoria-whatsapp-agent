@@ -155,7 +155,10 @@ export async function GET(req: Request): Promise<NextResponse> {
       comuna: extras.comuna,
       admin_nombre: b.admin.nombre || "",
       admin_apellido: b.admin.apellido || "",
-      admin_rut: b.admin.identificador || "",
+      // Persona natural sin RUT de admin: es LA MISMA persona — su RUT
+      // personal ya vino como identificador (Lalo 28-ago, "por qué no se
+      // prellenó"). No se pide dos veces; editable igual en el Flow.
+      admin_rut: b.admin.identificador || (natural ? b.empresa.identificador || "" : ""),
       admin_email: b.admin.email || "",
     },
   })
