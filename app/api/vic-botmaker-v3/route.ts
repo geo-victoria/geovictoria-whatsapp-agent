@@ -577,8 +577,12 @@ async function processOneTurn(
             PLANTILLA_ALTA_FLOW_CL.name,
             paramsPlantillaAltaFlow(bAlta?.admin.nombre, bAlta?.empresa.nombre),
           ).catch(() => false)
-          const { appendTurnV3: append } = await import("@/lib/supabase-persistence-v3")
+          const { appendTurnV3: append, markUserActivity: marcar } = await import("@/lib/supabase-persistence-v3")
           await append(contact, message, "[Le enviamos el formulario de alta por WhatsApp]").catch(() => {})
+          // El reloj de ventana (getLastUserAt) lee last_user_at, que solo lo
+          // toca markUserActivity — sin esto, el resumen post-formulario creía
+          // la ventana vencida aunque el tap la acababa de abrir (prueba 28-ago).
+          await marcar(contact).catch(() => {})
           return
         }
       }
