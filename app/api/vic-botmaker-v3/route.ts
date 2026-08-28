@@ -561,10 +561,22 @@ async function processOneTurn(
         const { getKvValue: kvGet } = await import("@/lib/supabase-persistence-v3")
         const qrOn = ((await kvGet("alta_qr_intent").catch(() => null)) || "").trim() === "on"
         if (qrOn) {
-          console.log(`[v3-botmaker] tap quick-reply del alta de ${contact} — responde el bloque #altaflow, Vicky calla`)
-          // El tap ES un mensaje del usuario: queda en el historial (actualiza
-          // el reloj de ventana — el resumen post-formulario decide con él) y
-          // el marcador del asistente le da contexto al modelo para después.
+          // CAMBIO 28-ago noche: el bloque #altaflow del Bot Designer quedó
+          // fuera del circuito (el envío de flow en sesión fallaba con el bug
+          // del INIT y su config es frágil) — el tap lo responde ESTE webhook
+          // mandando la plantilla FLOW probada (clv4→v2): el usuario ve al
+          // tiro el botón del formulario. Sin turno del modelo.
+          console.log(`[v3-botmaker] tap quick-reply del alta de ${contact} — se responde con la plantilla del formulario`)
+          const { claveBorrador } = await import("@/lib/onboarding/fase")
+          const { parsearBorrador } = await import("@/lib/onboarding/borrador")
+          const { PLANTILLA_ALTA_FLOW_CL, paramsPlantillaAltaFlow } = await import("@/lib/onboarding/plantilla")
+          const { sendBotmakerTemplate } = await import("@/lib/botmaker-push-v3")
+          const bAlta = parsearBorrador(await kvGet(claveBorrador(contact)).catch(() => null))
+          await sendBotmakerTemplate(
+            contact,
+            PLANTILLA_ALTA_FLOW_CL.name,
+            paramsPlantillaAltaFlow(bAlta?.admin.nombre, bAlta?.empresa.nombre),
+          ).catch(() => false)
           const { appendTurnV3: append } = await import("@/lib/supabase-persistence-v3")
           await append(contact, message, "[Le enviamos el formulario de alta por WhatsApp]").catch(() => {})
           return
