@@ -121,7 +121,7 @@ export type AltaEmpresaResultado =
       loginUserCreated: boolean
       workEmail: string
     }
-  | { ok: false; error: string; yaExiste?: boolean }
+  | { ok: false; error: string; yaExiste?: boolean; correoOcupado?: boolean }
 
 /** Crea la empresa + su primer administrador. NO consulta exists: ese candado
  * es responsabilidad del caller (consultar-antes-de-crear). */
@@ -146,11 +146,19 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
     const texto = await res.text().catch(() => "")
     if (!res.ok) {
       console.warn(`[alta-empresa] company → ${res.status}: ${texto.slice(0, 200)}`)
-      // 409 company_already_exists: el servicio tiene su PROPIO candado
-      // anti-duplicados (verificado 02-ago). Se distingue para que el canal
-      // responda como "ya existe" (activación al equipo), no como falla.
-      const yaExiste = res.status === 409 || /company_already_exists/.test(texto)
-      return { ok: false, error: `El servicio de alta devolvió ${res.status}`, ...(yaExiste ? { yaExiste: true } : {}) }
+      // Los 409 del servicio son DOS casos distintos (28-ago, caso Lalo):
+      // user_already_exists = el CORREO del admin ya tiene usuario en la
+      // plataforma → se pide otro correo, el alta sigue abierta. El resto
+      // (company_already_exists o 409 pelado) = la EMPRESA ya existe →
+      // activación al equipo sobre la cuenta existente (caso Cofradía).
+      const correoOcupado = /user_already_exists/.test(texto)
+      const yaExiste = !correoOcupado && (res.status === 409 || /company_already_exists/.test(texto))
+      return {
+        ok: false,
+        error: `El servicio de alta devolvió ${res.status}`,
+        ...(yaExiste ? { yaExiste: true } : {}),
+        ...(correoOcupado ? { correoOcupado: true } : {}),
+      }
     }
     const data = JSON.parse(texto || "{}") as {
       company?: { companyId?: string | number }

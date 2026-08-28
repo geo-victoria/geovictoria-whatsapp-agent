@@ -422,6 +422,22 @@ export async function armarOnboarding(contact: string): Promise<{
               idInterno: b.admin.idInterno,
             },
           })
+          // CORREO OCUPADO (28-ago): el correo del admin ya tiene un usuario
+          // en la plataforma (409 user_already_exists). NO es "empresa ya
+          // existe": el alta queda ABIERTA (sin marcar solicitada) y se le
+          // pide otro correo de acceso — con el nuevo, confirmar_alta_empresa
+          // se reintenta completo.
+          if (!alta.ok && alta.correoOcupado) {
+            await avisarEquipoInterno(
+              `📧 ALTA ONBOARDING CL: el correo del admin (${b.admin.email}) YA tiene usuario en la plataforma — se le pidió otro correo. Contacto +${contact}.\n${fichaAlta}`,
+            ).catch(() => {})
+            return {
+              ok: true,
+              mensajeParaProspecto:
+                `El correo ${b.admin.email} ya tiene un usuario en GeoVictoria, así que no puedo usarlo ` +
+                "como acceso nuevo. ¿Me das otro correo para el administrador? Con ese te dejo la cuenta creada al tiro.",
+            }
+          }
           // Carrera entre el exists y el create: el 409 del propio servicio
           // (company_already_exists, verificado 02-ago) la atrapa — mismo
           // camino que exists=true, jamás alta manual duplicada.
