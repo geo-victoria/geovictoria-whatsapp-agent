@@ -84,6 +84,25 @@ export function paramsPlantillaAltaFlow(nombre?: string, empresa?: string): { no
   return { nombre: primero || (empresa || "").trim() || "🎉" }
 }
 
+/**
+ * Plantilla del RESUMEN POST-FORMULARIO con ventana vencida (caso Rodrigo
+ * 28-ago, error Meta 131047): un designado frío completa el Flow días después
+ * del último mensaje y el texto libre del resumen muere. Esta plantilla
+ * reabre la conversación; cuando el cliente responde, el agente muestra el
+ * resumen de siempre. Pendiente de crear/aprobar en Botmaker (bot Vicky
+ * Chile, UTILITY) — mientras no exista, el envío falla limpio y queda el
+ * aviso interno de siempre.
+ */
+export const PLANTILLA_ALTA_RESUMEN_CL = {
+  name: "vicky_alta_resumen_cl",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky Chile",
+  body:
+    "Recibí tu formulario, ${nombre}, gracias 🙌 Para dejar tu cuenta creada respóndeme un ok " +
+    "por aquí y te muestro el resumen final para confirmar.",
+} as const
+
 export type ParamsOnboarding = { empresa: string; rut_empresa: string }
 
 /** Params de la plantilla. Sin dato, genéricos que no dejan huecos raros. */

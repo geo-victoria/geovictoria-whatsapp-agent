@@ -269,9 +269,29 @@ export async function POST(req: Request): Promise<NextResponse> {
     await setKvValue(claveFase(contact), "onboarding").catch(() => {})
     mensaje =
       `Recibí tu formulario, gracias! 🙌\n\n${resumenParaConfirmar(actualizado)}`
-    const enviado = await sendBotmakerMessage(contact, mensaje).catch(() => false)
-    if (enviado) await appendAssistantV3(contact, mensaje, "cl").catch(() => {})
-    else {
+    // VENTANA DE 24H (caso Rodrigo 28-ago, error Meta 131047): un designado
+    // frío completa el formulario días después del último mensaje — el texto
+    // libre muere EN META (Botmaker lo acepta igual, la falla es asíncrona e
+    // invisible para este código). Con ventana vencida el resumen NO se
+    // intenta por texto: va la plantilla que reabre la conversación; el
+    // cliente responde y el agente muestra el resumen de siempre.
+    const ultimo = await (await import("@/lib/supabase-persistence-v3")).getLastUserAt(contact).catch(() => null)
+    const ventanaViva = !!ultimo && Date.now() - ultimo.getTime() < 23 * 3600e3
+    let enviado = false
+    if (ventanaViva) {
+      enviado = await sendBotmakerMessage(contact, mensaje).catch(() => false)
+      if (enviado) await appendAssistantV3(contact, mensaje, "cl").catch(() => {})
+    }
+    if (!enviado) {
+      const { PLANTILLA_ALTA_RESUMEN_CL, paramsPlantillaAltaFlow } = await import("@/lib/onboarding/plantilla")
+      const { sendBotmakerTemplate } = await import("@/lib/botmaker-push-v3")
+      enviado = await sendBotmakerTemplate(
+        contact,
+        PLANTILLA_ALTA_RESUMEN_CL.name,
+        paramsPlantillaAltaFlow(actualizado.admin.nombre, actualizado.empresa.nombre),
+      ).catch(() => false)
+    }
+    if (!enviado) {
       // Chat frío (ej. designado que nunca nos escribió): el texto libre muere
       // y Vicky no puede retomar — que un humano lo tome, jamás se pierde.
       try {
