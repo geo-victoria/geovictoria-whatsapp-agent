@@ -2525,7 +2525,7 @@
             const ivaCLP = Math.round(subtotalNetoCLP * IVA_RATE);
             const totalConIvaCLP = subtotalNetoCLP + ivaCLP;
 
-            return { empresa, contacto, ejecutivo, email, telefono, cargo, fecha, fechaEn, servicios, equipos, accesorios, serviciosAsoc, totals: { totalServ, totalEquip, totalAcc, totalSvcAs, subtotalNeto, iva, totalConIva, subtotalNetoCLP, ivaCLP, totalConIvaCLP }, ufValue: currentUFValue, ufDate, ufDateEn };
+            return { empresa, contacto, ejecutivo, email, telefono, cargo, fecha, fechaEn, servicios, equipos, accesorios, serviciosAsoc, totals: { totalServ, totalEquip, totalAcc, totalSvcAs, subtotalNeto, iva, totalConIva, subtotalNetoCLP, ivaCLP, totalConIvaCLP }, periodo: displayPeriod, ufValue: currentUFValue, ufDate, ufDateEn };
         }
 
 
@@ -2540,7 +2540,13 @@
             const fc = v => '$' + Math.round(v).toLocaleString('es-CL');
             const fcn = v => '$' + v.toLocaleString('es-CL');
             const uf = data.ufValue;
-            const t = data.totals;
+            let t = data.totals;
+            // ANUALIDAD (28-ago, pedido de Tamara vía Lalo): el toggle Mensual/
+            // Anual deja de ser solo visual del cuadro superior — con Anual, el
+            // PDF sale estilo NDV de anualidad: todo lo RECURRENTE ×12 ("servicio
+            // adelantado por un período anual"), los pagos únicos una sola vez.
+            const ANUAL = data.periodo === 'anual';
+            const REC_F = ANUAL ? 12 : 1;
 
             // ---- Language layer: labels + helpers (ES default, EN when downloading in English) ----
             const nm = n => { if (!EN || !n) return n; return String(n).split(' + ').map(p => NAME_EN[p] || p).join(' + '); };
@@ -2551,28 +2557,28 @@
                 tagline: 'Time & Attendance & Workforce Management', proposalTitle: 'Commercial Proposal',
                 lblFecha: 'Date', lblEjecutivo: 'Sales Representative', lblEmpresa: 'Company', lblEmail: 'Email', lblContacto: 'Contact', lblTelefono: 'Phone',
                 about: 'About GeoVictoria', why: 'Why GeoVictoria?',
-                summary: 'Proposal Summary', proposalFor: 'Proposal for', monthly: 'Monthly Payment', oneTime: 'One-time Payment',
-                subtotal: 'Subtotal (excl. VAT)', vat: 'VAT (19%)', totalWithVat: 'Total (incl. VAT)', costDetail: 'Cost Breakdown',
+                summary: 'Proposal Summary', proposalFor: 'Proposal for', monthly: ANUAL ? 'Annual Payment (12 months)' : 'Monthly Payment', oneTime: 'One-time Payment',
+                subtotal: ANUAL ? 'Annual Subtotal (excl. VAT)' : 'Subtotal (excl. VAT)', vat: 'VAT (19%)', totalWithVat: ANUAL ? 'Annual Total (incl. VAT)' : 'Total (incl. VAT)', costDetail: 'Cost Breakdown',
                 thItem: 'Item', thMode: 'Type', thQty: 'Qty', thUnit: 'Unit $', thDisc: 'Disc.', thUnitDisc: 'Disc. Unit $', thSubtotal: 'Subtotal (UF)', thRefClp: 'CLP Ref.',
                 priceTable: 'Pricing Table — Time & Attendance', thRange: 'User Range', thMonthlyPrice: 'Monthly Price',
                 tyc: 'Terms & Conditions', freeTitle: 'Additional Services at No Cost', thIncluded: 'Included Service', thDesc: 'Description',
                 validityLabel: 'Validity:', validityText: q => 'This proposal is valid for 10 days from the issue date (' + q + '). After this period, values may be updated.',
                 users: 'users', sale: 'Sale', service: 'Service', device: 'Device', accessory: 'Accessory', assocService: 'Assoc. Service',
-                pMonthly: 'Monthly', pOneTime: 'One-time', fixed: 'Fixed', perUser: 'user', rangeApplied: 'Applied range',
+                pMonthly: ANUAL ? 'Annual (12x)' : 'Monthly', pOneTime: 'One-time', fixed: 'Fixed', perUser: 'user', rangeApplied: 'Applied range',
                 ufNote1: d => '* Reference values in CLP calculated with the UF of ' + d + ': ' + fc(uf) + '. Billing is done in UF.',
                 ufNote2: '* Administrators are also counted as users.', company: 'GeoVictoria | Chile', today: 'today', fixedPrefix: 'Fixed: ', cargo: 'Sales Representative'
             } : {
                 tagline: 'Control de Asistencia & Gestión de Personal', proposalTitle: 'Propuesta Comercial',
                 lblFecha: 'Fecha', lblEjecutivo: 'Ejecutivo Comercial', lblEmpresa: 'Empresa', lblEmail: 'Email', lblContacto: 'Contacto', lblTelefono: 'Teléfono',
                 about: 'Acerca de GeoVictoria', why: '¿Por qué GeoVictoria?',
-                summary: 'Resumen de la Propuesta', proposalFor: 'Propuesta para', monthly: 'Pago Mensual', oneTime: 'Pago Único',
-                subtotal: 'Subtotal (sin IVA)', vat: 'IVA (19%)', totalWithVat: 'Total con IVA', costDetail: 'Detalle de Costos',
+                summary: 'Resumen de la Propuesta', proposalFor: 'Propuesta para', monthly: ANUAL ? 'Pago Anual (12 meses)' : 'Pago Mensual', oneTime: 'Pago Único',
+                subtotal: ANUAL ? 'Subtotal Anual (sin IVA)' : 'Subtotal (sin IVA)', vat: 'IVA (19%)', totalWithVat: ANUAL ? 'Total Anual con IVA' : 'Total con IVA', costDetail: 'Detalle de Costos',
                 thItem: 'Ítem', thMode: 'Modalidad', thQty: 'Cant.', thUnit: '$ Unitario', thDisc: 'Dcto.', thUnitDisc: '$ Unit. Dscto.', thSubtotal: 'Subtotal (UF)', thRefClp: 'Ref. CLP',
                 priceTable: 'Tabla de Precios — Asistencia', thRange: 'Rango de Usuarios', thMonthlyPrice: 'Precio Mensual',
                 tyc: 'Términos y Condiciones', freeTitle: 'Servicios Adicionales Sin Costo', thIncluded: 'Servicio Incluido', thDesc: 'Descripción',
                 validityLabel: 'Vigencia:', validityText: q => 'Esta propuesta tiene una validez de 10 días a partir de la fecha de emisión (' + q + '). Posterior a este período, los valores podrán ser actualizados.',
                 users: 'usuarios', sale: 'Venta', service: 'Servicio', device: 'Equipo', accessory: 'Accesorio', assocService: 'Serv. Asoc.',
-                pMonthly: 'P. Mensual', pOneTime: 'P. Único', fixed: 'Fijo', perUser: 'usuario', rangeApplied: 'Rango aplicado',
+                pMonthly: ANUAL ? 'P. Anual (12×)' : 'P. Mensual', pOneTime: 'P. Único', fixed: 'Fijo', perUser: 'usuario', rangeApplied: 'Rango aplicado',
                 ufNote1: d => '* Valores referenciales en CLP calculados con UF del ' + d + ': ' + fc(uf) + '. El cobro se realiza en UF.',
                 ufNote2: '* Los administradores también se cuentan como usuarios.', company: 'GeoVictoria | Chile', today: 'hoy', fixedPrefix: 'Fijo: ', cargo: data.cargo
             };
@@ -2591,6 +2597,18 @@
             data.equipos.forEach(e => { if (e.tipo === 'Arriendo') { totalRec += e.subtotalUF; totalRecCLP += e.clp || 0; } else { totalNR += e.subtotalUF; totalNRCLP += e.clp || 0; } });
             data.accesorios.forEach(a => { if (a.tipo === 'Arriendo') { totalRec += a.subtotalUF; totalRecCLP += a.clp || 0; } else { totalNR += a.subtotalUF; totalNRCLP += a.clp || 0; } });
             data.serviciosAsoc.forEach(s => { totalNR += s.subtotalUF; totalNRCLP += s.clp || 0; });
+            if (ANUAL) {
+                // Recurrente ×12; los totales del documento (resumen y detalle)
+                // se recalculan anuales para que TODO cierre con las filas ×12.
+                totalRec *= 12; totalRecCLP *= 12;
+                const subAnual = totalRec + totalNR;
+                const subAnualCLP = totalRecCLP + totalNRCLP;
+                const ivaAnualCLP = Math.round(subAnualCLP * 0.19);
+                t = Object.assign({}, t, {
+                    subtotalNeto: subAnual, iva: subAnual * 0.19, totalConIva: subAnual * 1.19,
+                    subtotalNetoCLP: subAnualCLP, ivaCLP: ivaAnualCLP, totalConIvaCLP: subAnualCLP + ivaAnualCLP
+                });
+            }
             const ivaRec = totalRec * 0.19;
             const ivaNR = totalNR * 0.19;
             const totalRecIva = totalRec + ivaRec;
@@ -2639,13 +2657,15 @@
                 const pUnitDcto = s.precioUnit * (1 - s.descuento / 100);
                 const precioDcto = s.tipo === 'Fijo' ? T.fixedPrefix + fu(pUnitDcto) + ' UF' : fu(pUnitDcto) + ' UF/u';
                 const dctoCells = hasDiscount ? (s.descuento > 0 ? '<td>' + s.descuento + '%</td><td>' + precioDcto + '</td>' : '<td>-</td><td>-</td>') : '';
-                detailRows += '<tr><td>' + nm(s.nombre) + rng + '</td><td>' + T.service + ' - ' + T.pMonthly + '</td><td>' + s.cantidad + '</td><td>' + precio + '</td>' + dctoCells + '<td>' + fu(s.subtotalUF) + '</td><td>' + (uf > 0 ? fcn(s.clp || 0) : '-') + '</td></tr>';
+                detailRows += '<tr><td>' + nm(s.nombre) + rng + '</td><td>' + T.service + ' - ' + T.pMonthly + '</td><td>' + s.cantidad + '</td><td>' + precio + '</td>' + dctoCells + '<td>' + fu(s.subtotalUF * REC_F) + '</td><td>' + (uf > 0 ? fcn((s.clp || 0) * REC_F) : '-') + '</td></tr>';
             });
             data.equipos.forEach(e => {
-                detailRows += '<tr><td>' + nm(e.nombre) + '</td><td>' + T.device + ' - ' + tipoTx(e.tipo) + ' - ' + (e.tipo === 'Arriendo' ? T.pMonthly : T.pOneTime) + '</td><td>' + e.cantidad + '</td><td>' + fu(e.precioUnit) + ' UF</td>' + emptyDctoCells + '<td>' + fu(e.subtotalUF) + '</td><td>' + (uf > 0 ? fcn(e.clp || 0) : '-') + '</td></tr>';
+                const fRec = e.tipo === 'Arriendo' ? REC_F : 1;
+                detailRows += '<tr><td>' + nm(e.nombre) + '</td><td>' + T.device + ' - ' + tipoTx(e.tipo) + ' - ' + (e.tipo === 'Arriendo' ? T.pMonthly : T.pOneTime) + '</td><td>' + e.cantidad + '</td><td>' + fu(e.precioUnit) + ' UF</td>' + emptyDctoCells + '<td>' + fu(e.subtotalUF * fRec) + '</td><td>' + (uf > 0 ? fcn((e.clp || 0) * fRec) : '-') + '</td></tr>';
             });
             data.accesorios.forEach(a => {
-                detailRows += '<tr><td>' + nm(a.nombre) + '</td><td>' + T.accessory + ' - ' + tipoTx(a.tipo) + ' - ' + (a.tipo === 'Arriendo' ? T.pMonthly : T.pOneTime) + '</td><td>' + a.cantidad + '</td><td>' + fu(a.precioUnit) + ' UF</td>' + emptyDctoCells + '<td>' + fu(a.subtotalUF) + '</td><td>' + (uf > 0 ? fcn(a.clp || 0) : '-') + '</td></tr>';
+                const fRec = a.tipo === 'Arriendo' ? REC_F : 1;
+                detailRows += '<tr><td>' + nm(a.nombre) + '</td><td>' + T.accessory + ' - ' + tipoTx(a.tipo) + ' - ' + (a.tipo === 'Arriendo' ? T.pMonthly : T.pOneTime) + '</td><td>' + a.cantidad + '</td><td>' + fu(a.precioUnit) + ' UF</td>' + emptyDctoCells + '<td>' + fu(a.subtotalUF * fRec) + '</td><td>' + (uf > 0 ? fcn((a.clp || 0) * fRec) : '-') + '</td></tr>';
             });
             data.serviciosAsoc.forEach(s => {
                 detailRows += '<tr><td>' + nm(s.nombre) + (s.zona ? ' (' + zonaTx(s.zona) + ')' : '') + '</td><td>' + T.assocService + (s.tipo ? ' - ' + tipoTx(s.tipo) : '') + ' - ' + T.pOneTime + '</td><td>' + s.cantidad + '</td><td>' + fu(s.precioUnit) + ' UF</td>' + emptyDctoCells + '<td>' + fu(s.subtotalUF) + '</td><td>' + (uf > 0 ? fcn(s.clp || 0) : '-') + '</td></tr>';
@@ -2657,7 +2677,12 @@
             let freeRows = '';
             FREE.forEach(s => { freeRows += '<tr><td>' + s.servicio + '</td><td style="text-align:left">' + s.desc + '</td></tr>'; });
 
-            const ufNote = '<p class="ufn">' + (uf > 0 ? T.ufNote1(ufDateStr) + '<br>' : '') + T.ufNote2 + '</p>';
+            const notaAnual = ANUAL
+                ? (EN
+                    ? '* Annual mode: the service is billed in advance for a 12-month period (monthly value × 12, per line). One-time charges are billed once.<br>'
+                    : '* Modalidad anual: el servicio se cobra adelantado por un período de 12 meses (valor mensual × 12 en cada línea recurrente). Los pagos únicos se cobran una sola vez.<br>')
+                : '';
+            const ufNote = '<p class="ufn">' + notaAnual + (uf > 0 ? T.ufNote1(ufDateStr) + '<br>' : '') + T.ufNote2 + '</p>';
 
             const CSS = `
 .pp *{margin:0;padding:0;box-sizing:border-box}
@@ -3024,6 +3049,13 @@
           e.stopImmediatePropagation();
           var data;
           try { data = gatherProposalData(); } catch (err) { setStatus('⚠️ No pude leer la propuesta: ' + (err && err.message)); return; }
+          // ANUALIDAD: la emisión online (aceptación + pago) sigue siendo
+          // MENSUAL — emitir con el toggle en Anual cobraría otra cosa que lo
+          // que el PDF muestra. Se frena con instrucción, no en silencio.
+          if (data && data.periodo === 'anual') {
+            setStatus('⚠️ La emisión online aún es MENSUAL: el link de aceptación/pago cobraría la mensualidad, no la anualidad. Vuelve el selector a "Mensual" para emitir online, o descarga el PDF anual y esa venta se gestiona con nota de venta manual.');
+            return;
+          }
           var label = btn.textContent;
           btn.disabled = true;
           btn.textContent = 'Revisando cotizaciones del deal…';
