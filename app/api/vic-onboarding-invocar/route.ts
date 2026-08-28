@@ -25,7 +25,7 @@
 
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
-import { claveFase, claveBorrador } from "@/lib/onboarding/fase"
+import { claveFase, claveBorrador, claveAltaSolicitada, claveConfiguracion } from "@/lib/onboarding/fase"
 import { parsearBorrador, sembrarBorrador, type DatosParciales } from "@/lib/onboarding/borrador"
 import { entregarKickoffOnboarding } from "@/lib/onboarding-envio"
 
@@ -126,6 +126,15 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const borrador = sembrarBorrador(previo, semilla, "cl")
   await setKvValue(claveBorrador(contact), JSON.stringify(borrador))
+
+  // 1.5 RESET del ciclo de alta (28-ago, caso "cuenta creada" de mentira): si
+  // el contacto ya pasó por un alta (prueba anterior o alta real), el estado
+  // viejo (alta_solicitada + configuración F2) dejaba al agente en fase
+  // CONFIGURACIÓN sin tools de alta — y el modelo "confirmaba" altas de boca.
+  // Invocar = iniciar un alta NUEVA: se limpia ese estado para que el ciclo
+  // parta de cero de verdad.
+  await setKvValue(claveAltaSolicitada(contact), "").catch(() => {})
+  await setKvValue(claveConfiguracion(contact), "").catch(() => {})
 
   // 2. Enrolar en el piloto (idempotente) para que el webhook rutee la fase.
   const lista = (await getKvValue("onboarding_piloto").catch(() => null)) || ""

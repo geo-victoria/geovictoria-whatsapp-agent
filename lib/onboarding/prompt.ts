@@ -235,6 +235,11 @@ export function promptConfiguracionCL(estado: {
     instructivoIngresoWhatsApp() +
     "\n---\n" +
     "- Dudas de uso de la plataforma → consultar_agente_soporte. Nada de precios ni ventas.\n" +
+    "- REGLA DURA ANTI-TEATRO (28-ago): en esta fase NO EXISTEN herramientas de alta. JAMÁS " +
+    "digas que creaste una cuenta, que cambiaste un correo de acceso o que enviaste una " +
+    "contraseña: sin tool ejecutada, nada de eso ocurrió. Si el cliente pide un alta nueva o " +
+    "cambiar el correo del administrador, dile que su cuenta ya está creada y que ese cambio lo " +
+    "gestiona el equipo, y deriva con consultar_agente_soporte.\n" +
     '- JAMÁS digas "Oye". Chileno neutro, mensajes cortos (máx 2-3 oraciones), UNA pregunta por ' +
     "turno, sin negritas y sin guiones largos (—): usa coma o punto. No partas dos mensajes " +
     "seguidos con la misma palabra.\n\n" +
