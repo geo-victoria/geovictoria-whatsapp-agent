@@ -109,9 +109,32 @@ export type DerivarASoporteResultado = {
   mensajeSugeridoUsuario: string
 }
 
+/**
+ * CUÁNDO comprometido de la llamada (lista de Rodrigo, cerrado 29-ago): "muy
+ * pronto" no compromete nada — se promete una ventana concreta según la hora
+ * hábil de Chile (L-V 8-18). El equipo recibe la alerta con sorteo inmediato,
+ * así que la promesa es cumplible.
+ */
+export function compromisoLlamadaCL(ahora: Date = new Date()): string {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Santiago",
+    hour12: false,
+    weekday: "short",
+    hour: "2-digit",
+  }).formatToParts(ahora)
+  const dia = partes.find((p) => p.type === "weekday")?.value || ""
+  const hora = Number(partes.find((p) => p.type === "hour")?.value || "0")
+  const habil = !["Sat", "Sun"].includes(dia)
+  if (habil && hora >= 8 && hora < 17) return "hoy mismo, antes de las 18:00"
+  if (habil && hora < 8) return "hoy en la mañana, entre 9:00 y 12:00"
+  // Tarde de un hábil (17+), o fin de semana: el próximo bloque de mañana.
+  if (dia === "Fri" || dia === "Sat" || dia === "Sun") return "el lunes en la mañana, entre 9:00 y 12:00"
+  return "mañana en la mañana, entre 9:00 y 12:00"
+}
+
 const MENSAJES_POR_MOTIVO: Record<DerivarASoporteInput["motivo"], string> = {
   fuera_de_rango_trabajadores:
-    "Listo — le pasé tus datos a nuestro equipo comercial: un ejecutivo te va a llamar a este mismo teléfono para armar tu propuesta (considera descuentos por volumen y las necesidades específicas de tu operación). ¡Gracias por tu tiempo! Cualquier duda que te surja mientras tanto, aquí estoy.",
+    "Listo — le pasé tus datos a nuestro equipo comercial: un ejecutivo te va a llamar a este mismo teléfono {CUANDO} para armar tu propuesta (considera descuentos por volumen y las necesidades específicas de tu operación). ¡Gracias por tu tiempo! Cualquier duda que te surja mientras tanto, aquí estoy.",
   cliente_existente_problema:
     "Veo que ya eres cliente. Para problemas operativos te conviene hablar directo con soporte. Te derivo para que te atiendan lo antes posible.",
   solicitud_explicita_persona:
@@ -137,6 +160,6 @@ export function derivarASoporte(args: DerivarASoporteInput): DerivarASoporteResu
     ok: true,
     handoff: true,
     motivo,
-    mensajeSugeridoUsuario: MENSAJES_POR_MOTIVO[motivo],
+    mensajeSugeridoUsuario: MENSAJES_POR_MOTIVO[motivo].replace("{CUANDO}", compromisoLlamadaCL()),
   }
 }

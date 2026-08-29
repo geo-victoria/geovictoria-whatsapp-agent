@@ -307,6 +307,15 @@ export function debeTraspasarEtapa(params: {
         }
       : { traspasar: false }
   }
+  // CASO LOUMAR (lista de Rodrigo, cerrado 29-ago): el reloj de etapa seguía
+  // siendo de ETAPA (corre aunque converse — decisión 08-ago intacta), pero el
+  // ANUNCIO del traspaso caía EN MEDIO de una conversación activa. Regla: con
+  // el cliente escribiendo hace <10 min, o esperándonos respuesta, el anuncio
+  // se aplaza al próximo tick — el reloj no se reinicia, solo espera la pausa.
+  if (clienteRespondioDespues) return { traspasar: false }
+  if (ultimoClienteAt && ahora.getTime() - ultimoClienteAt.getTime() < 10 * 60_000) {
+    return { traspasar: false }
+  }
   const min = minutosHabilesEntre(desdeConPausa(firstUserAt), ahora, pais, feriados)
   return min >= ETAPA_INICIO_PREFORM_MIN
     ? { traspasar: true, motivo: "etapa_sin_preform", ttv: ETAPA_INICIO_PREFORM_MIN }
