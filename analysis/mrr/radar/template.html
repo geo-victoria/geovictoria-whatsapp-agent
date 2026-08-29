@@ -571,7 +571,9 @@ function renderGlobal() {
   v.innerHTML = `
   <div class="kpis">
     ${kpi("MRR " + D.meta.cierre, fk(K.mrr), "ARR ≈ US$ " + nf1.format(K.arr) + " M")}
-    ${kpi("Crecimiento 12m", sgn(K.yoy), "vs jul-2025", "ok")}
+    ${CURR === "loc" && K.yoy_local != null
+      ? kpi("Crecimiento 12m · moneda local", sgn(K.yoy_local), "US$ (referencia): " + sgn(K.yoy), "ok")
+      : kpi("Crecimiento 12m", sgn(K.yoy), "vs " + D.rep.months[D.rep.months.length - 13], "ok")}
     ${kpi("NRR 12m · moneda local", fp(K.nrr_local), "USD (referencia): " + fp(K.nrr), K.nrr_local < 107 ? "bad" : "blue")}
     ${kpi("Fuga 12m", fp(K.churn_mrr_12m) + " del MRR", "US$ " + nf1.format(D.rep.churn12_total) + " k · " + nf0.format(D.rep.churn12_n) + " cuentas")}
     ${kpi("Conglomerados activos", nf0.format(K.activos), "top 10 = " + fp(K.top10_share) + " del MRR")}
@@ -602,7 +604,7 @@ function renderGlobal() {
       <tbody>${D.orden.slice(1).map(k => { const t = D.tabs[k], q = t.kpis; return `<tr>
         <td class="tname">${TABKEY[k]}</td>
         <td class="num r">${CURR === "loc" && t.kpis_loc ? cfm(t.kpis_loc.mrr, t.mon) : nf1.format(q.mrr) + " k"}</td>
-        <td class="num r">${sgn(q.yoy)}</td>
+        <td class="num r">${CURR === "loc" && q.yoy_loc != null ? sgn(q.yoy_loc) : sgn(q.yoy)}</td>
         <td class="r">${pillNRR(q.nrr_loc)}</td>
         <td class="num r">${fp(q.fuga_pct)}</td>
         <td class="num r">${nf0.format(q.activos)}</td>
@@ -670,7 +672,9 @@ function renderPais(k) {
   <p class="pais-sub">${diag}</p>
   <div class="kpis">
     ${kpi("MRR " + D.meta.cierre, useLoc ? cf(t.kpis_loc.mrr) : fk(q.mrr), useLoc ? "US$ " + nf1.format(q.mrr) + " k" : "")}
-    ${kpi("Crecimiento 12m", sgn(q.yoy), "vs jul-2025", q.yoy >= 15 ? "ok" : q.yoy < 0 ? "bad" : "")}
+    ${useLoc && q.yoy_loc != null
+      ? kpi("Crecimiento 12m · moneda local", sgn(q.yoy_loc), "US$ (referencia): " + sgn(q.yoy), q.yoy_loc >= 15 ? "ok" : q.yoy_loc < 0 ? "bad" : "")
+      : kpi("Crecimiento 12m", sgn(q.yoy), "vs " + D.rep.months[D.rep.months.length - 13], q.yoy >= 15 ? "ok" : q.yoy < 0 ? "bad" : "")}
     ${kpi("NRR 12m · moneda local", q.nrr_loc === null ? "—" : fp(q.nrr_loc), "USD (referencia): " + (q.nrr_usd === null ? "—" : fp(q.nrr_usd)), q.nrr_loc !== null && q.nrr_loc < 100 ? "bad" : q.nrr_loc >= 110 ? "ok" : "blue")}
     ${kpi("Fuga 12m", fp(q.fuga_pct) + " del MRR", nf0.format(q.fuga_n) + " cuentas · " + (useLoc ? cf(t.kpis_loc.fuga) : "US$ " + nf1.format(q.fuga_k) + " k"), q.fuga_pct >= 10 ? "bad" : "")}
     ${kpi("Cuentas activas", nf0.format(q.activos), nf0.format(q.nuevos) + " nuevas en 12m (" + (useLoc ? cf(t.kpis_loc.nuevos) : "US$ " + nf1.format(q.nuevos_k) + " k") + ")")}
@@ -678,7 +682,7 @@ function renderPais(k) {
   ${t.sub ? `<div class="card" style="margin-bottom:16px">
     <div class="card-head"><div><h3>Los países de esta pestaña</h3></div></div>
     <div class="tbl-wrap"><table><thead><tr><th>País</th><th class="r">MRR ${D.meta.cierre}</th><th class="r">Crec. 12m</th><th class="r">NRR local</th><th class="r">Activos</th></tr></thead>
-    <tbody>${t.sub.map(s => `<tr><td class="tname">${esc(s.pais)}</td><td class="num r">${nf1.format(s.mrr)} k</td><td class="num r">${s.yoy === null ? "—" : sgn(s.yoy)}</td><td class="r">${pillNRR(s.nrr_loc)}</td><td class="num r">${nf0.format(s.activos)}</td></tr>`).join("")}</tbody></table></div>
+    <tbody>${t.sub.map(s => `<tr><td class="tname">${esc(s.pais)}</td><td class="num r">${nf1.format(s.mrr)} k</td><td class="num r">${CURR === "loc" && s.yoy_loc != null ? sgn(s.yoy_loc) : (s.yoy === null ? "—" : sgn(s.yoy))}</td><td class="r">${pillNRR(s.nrr_loc)}</td><td class="num r">${nf0.format(s.activos)}</td></tr>`).join("")}</tbody></table></div>
   </div>` : ""}
   <div class="card">
     <div class="card-head"><div><h3>Evolución mensual</h3><p class="desc">Cambia entre MRR y número de cuentas activas.</p></div><div class="sp"></div>
