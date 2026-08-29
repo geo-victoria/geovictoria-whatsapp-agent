@@ -70,6 +70,9 @@ export async function entregarKickoffOnboarding(
         const prefill = ((await r.json().catch(() => ({}))) as { prefill?: Record<string, unknown> }).prefill || {}
         const v = (k: string) => String(prefill[k] ?? "")
         await triggerBotmakerIntent(contact, "#setvars", {
+          // Primer nombre para personalizar el MENSAJE del bloque (la entrega
+          // del formulario saluda por nombre — doble paso con progresión, no eco).
+          alta_nombre: (v("admin_nombre").trim().split(/\s+/)[0] || "").trim(),
           alta_razon: v("razon_social"),
           alta_rut: v("rut_empresa"),
           alta_giro: v("giro"),
