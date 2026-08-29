@@ -46,6 +46,24 @@ export async function notificarLeadAsignado(info: LeadAsignadoInfo): Promise<boo
   // Dueños robot: no son personas, no reciben aviso.
   if (/vicky@|info@geovictoria/i.test(vendedorEmail)) return false
   try {
+    // MISMOS DESTINATARIOS QUE LA ACCIÓN OFICIAL (Lalo 29-ago, "usa la acción,
+    // ahí ya se definen los destinatarios"): la API de Zoho NO deja ejecutar
+    // una acción de workflow desde fuera, pero el timeline de los leads
+    // mostró su configuración exacta — "Nuevo Lead Chile" va al DUEÑO del
+    // registro (verificado: Karina Soto→asepulveda@, manuel garcia→aaraque@)
+    // con copia FIJA a Brayan Bernal y Valeria Barbano. Se replica acá.
+    // Override por env; `-` deja el correo sin copia.
+    const ccCrudo = (process.env.VICKY_CC_LEAD_ASIGNADO || "bbernal@geovictoria.com,vbarbano@geovictoria.com").trim()
+    const ccFijos = ccCrudo === "-" ? [] : ccCrudo.split(",").map((e) => e.trim()).filter(Boolean)
+    // CONTENIDO: por defecto el nuestro (trae dotación y la marca de "pidió
+    // que lo llamaran", que la plantilla oficial no tiene). Con vic_kv
+    // `tpl_lead_asignado` = <id de plantilla Zoho> se manda EXACTAMENTE la
+    // plantilla oficial en vez del HTML propio — sin deploy.
+    let tplOficial = ""
+    try {
+      const { getKvValue } = await import("./supabase-persistence-v3")
+      tplOficial = ((await getKvValue("tpl_lead_asignado")) || "").trim()
+    } catch { /* sin kv, contenido propio */ }
     const token = await getZohoAccessToken()
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
@@ -63,6 +81,11 @@ export async function notificarLeadAsignado(info: LeadAsignadoInfo): Promise<boo
       ? `Lead calificado por Vicky: ${info.empresa || info.nombre || "nuevo prospecto"} (+${fono})`
       : "Lead calificado por Vicky para contactar"
 
+    // La copia de la acción oficial (fija) más la de traspaso chilena, sin
+    // repetir a nadie ni copiarse al propio destinatario.
+    const cc = [...ccFijos, ...(esChile ? [(process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim()] : [])]
+      .filter((e, i, a) => e && e.toLowerCase() !== destino.toLowerCase() && a.indexOf(e) === i)
+
     const res = await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
       method: "POST",
       headers: H,
@@ -72,17 +95,19 @@ export async function notificarLeadAsignado(info: LeadAsignadoInfo): Promise<boo
           {
             from: { email: "vicky@geovictoria.com" },
             to: [{ email: destino }],
-            ...(esChile
-              ? { cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }] }
-              : {}),
+            ...(cc.length ? { cc: cc.map((email) => ({ email })) } : {}),
             subject: asunto,
-            content:
-              `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;">` +
-              `<p>Te asignamos un lead que Vicky ya calificó: <b>${quien}</b> (${dotacion}).</p>` +
-              `<p>${urgencia}La conversación completa está en las notas del lead${fono ? `, y su WhatsApp es <b>+${fono}</b>` : ""}.</p>` +
-              `<p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p>` +
-              `</body></html>`,
-            mail_format: "html",
+            ...(tplOficial
+              ? { template: { id: tplOficial } }
+              : {
+                  content:
+                    `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;">` +
+                    `<p>Te asignamos un lead que Vicky ya calificó: <b>${quien}</b> (${dotacion}).</p>` +
+                    `<p>${urgencia}La conversación completa está en las notas del lead${fono ? `, y su WhatsApp es <b>+${fono}</b>` : ""}.</p>` +
+                    `<p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p>` +
+                    `</body></html>`,
+                  mail_format: "html",
+                }),
           },
         ],
       }),
