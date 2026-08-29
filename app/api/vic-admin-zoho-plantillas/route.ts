@@ -45,9 +45,29 @@ export async function GET(req: Request): Promise<NextResponse> {
   // ejecutarlas — con esto el aviso propio puede clonar la acción oficial.
   if (sp.get("acciones")) {
     const accId = (sp.get("accion") || "").trim()
-    const p = accId
-      ? `/crm/v8/settings/automation/actions/email_notifications/${encodeURIComponent(accId)}`
-      : `/crm/v8/settings/automation/actions/email_notifications?module=${encodeURIComponent(sp.get("module") || "Leads")}`
+    // La ruta cambió entre versiones de la API; se prueban las conocidas y
+    // gana la primera que responda 200.
+    const mod = encodeURIComponent(sp.get("module") || "Leads")
+    const rutas = accId
+      ? [
+          `/crm/v8/settings/actions/email_notifications/${encodeURIComponent(accId)}`,
+          `/crm/v6/settings/actions/email_notifications/${encodeURIComponent(accId)}`,
+          `/crm/v3/settings/actions/email_notifications/${encodeURIComponent(accId)}`,
+        ]
+      : [
+          `/crm/v8/settings/actions/email_notifications?module=${mod}`,
+          `/crm/v6/settings/actions/email_notifications?module=${mod}`,
+          `/crm/v3/settings/actions/email_notifications?module=${mod}`,
+          `/crm/v8/settings/actions/email_notifications`,
+        ]
+    let p = rutas[0]
+    for (const cand of rutas) {
+      const probe = await fetch(`${ZOHO_API_DOMAIN}${cand}`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      if (probe.ok) { p = cand; break }
+    }
     const ra = await fetch(`${ZOHO_API_DOMAIN}${p}`, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
       cache: "no-store",
