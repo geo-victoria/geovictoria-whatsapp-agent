@@ -99,6 +99,9 @@ def main():
     ap.add_argument("--clave", default=os.environ.get("RADAR_CLAVE"),
                     help="clave de acceso (o variable de entorno RADAR_CLAVE)")
     ap.add_argument("--json", help="además, volcar los datos sin cifrar a este archivo (debug)")
+    ap.add_argument("--artifact", action="store_true",
+                    help="salida como fragmento (sin <!doctype>/<head>), para publicar como artifact de Claude; "
+                         "por defecto se genera un documento HTML completo (Vercel / archivo suelto)")
     args = ap.parse_args()
     if not args.clave:
         ap.error("falta la clave: --clave o RADAR_CLAVE")
@@ -456,6 +459,18 @@ def main():
         assert k in tpl, f"falta {k} en template.html"
         tpl = tpl.replace(k, v)
     assert "@@" not in tpl
+    if not args.artifact:
+        # documento completo: el artifact de Claude agrega su propio esqueleto, pero
+        # Vercel o un archivo suelto necesitan doctype/head propios
+        m = re.match(r"\s*<title>(.*?)</title>", tpl)
+        titulo = m.group(1) if m else "Radar MRR"
+        cuerpo = tpl[m.end():] if m else tpl
+        tpl = ('<!doctype html><html lang="es"><head><meta charset="utf-8">'
+               '<meta name="viewport" content="width=device-width,initial-scale=1">'
+               '<meta name="robots" content="noindex,nofollow">'
+               f"<title>{titulo}</title>"
+               "<style>:root{color-scheme:light}body{margin:0}</style>"
+               "</head><body>" + cuerpo + "</body></html>")
     open(args.salida, "w", encoding="utf-8").write(tpl)
     print(f"OK -> {args.salida} ({len(tpl) // 1024} KB, cifrado con la clave entregada)")
     print(f"  MRR {es(kpi['mrr'])} k | +{es(kpi['yoy'])}% | NRR local {es(kpi['nrr_local'])}% | "
