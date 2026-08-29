@@ -43,6 +43,25 @@ export async function GET(req: Request): Promise<NextResponse> {
   // Lalo: "usa la acción, ahí ya se definen los destinatarios"). La API deja
   // LEER su configuración (plantilla + destinatarios + from), aunque no
   // ejecutarlas — con esto el aviso propio puede clonar la acción oficial.
+  // Sonda de solo lectura sobre settings (29-ago): permite explorar rutas de
+  // metadata sin un deploy por intento. Restringida a /crm/*/settings/*.
+  const raw = (sp.get("raw") || "").trim()
+  if (raw) {
+    if (!/^\/crm\/v\d+\/settings\//.test(raw)) {
+      return NextResponse.json({ ok: false, error: "solo rutas /crm/vN/settings/*" }, { status: 400 })
+    }
+    const rr = await fetch(`${ZOHO_API_DOMAIN}${raw}`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    const t = await rr.text().catch(() => "")
+    try {
+      return NextResponse.json({ ok: rr.ok, status: rr.status, data: JSON.parse(t) })
+    } catch {
+      return NextResponse.json({ ok: false, status: rr.status, crudo: t.slice(0, 600) })
+    }
+  }
+
   if (sp.get("acciones")) {
     const accId = (sp.get("accion") || "").trim()
     // La ruta cambió entre versiones de la API; se prueban las conocidas y
