@@ -1,0 +1,974 @@
+<title>Radar MRR</title>
+<style>
+@font-face{font-family:"BR Sonoma";src:url(data:font/otf;base64,@@FONT_BS@@) format("opentype");font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:"Nunito";src:url(data:font/ttf;base64,@@FONT_NR@@) format("truetype");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"Nunito";src:url(data:font/ttf;base64,@@FONT_NS@@) format("truetype");font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:"Nunito";src:url(data:font/ttf;base64,@@FONT_NB@@) format("truetype");font-weight:700;font-style:normal;font-display:swap}
+:root{
+  --gv-gray:#646464;--gv-yellow:#ffbb00;--gv-blue:#00aff2;
+  --y-50:#fffaeb;--y-100:#fff1c2;--y-200:#ffe28a;--y-400:#ffc31f;--y-500:#ffbb00;
+  --b-50:#e6f8fe;--b-100:#c0edfc;--b-200:#87def9;--b-300:#4ccef6;--b-400:#1cbef3;--b-500:#00aff2;
+  --g-50:#f7f8fa;--g-100:#eef0f3;--g-200:#dfe2e7;--g-300:#c4c8cf;--g-400:#9aa0a8;--g-500:#646464;--g-600:#4e4e4e;
+  --bg:#ffffff;--bg-muted:var(--g-50);--fg-1:var(--g-600);--fg-2:var(--g-500);--fg-3:var(--g-400);
+  --border:var(--g-200);--border-subtle:var(--g-100);
+  --ok-bg:#e9f7ef;--ok-fg:#1f7a3f;--ok-bd:#b8e2c8;
+  --warn-bg:var(--y-50);--warn-fg:var(--g-600);--warn-bd:var(--y-200);
+  --bad-bg:#fdecec;--bad-fg:#b3261e;--bad-bd:#f4b8b4;
+  --info-bg:var(--b-50);--info-fg:var(--b-500);--info-bd:var(--b-200);
+  --disp:"BR Sonoma",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --ui:"Nunito",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --sh-sm:0 2px 4px rgba(20,20,20,.05),0 1px 2px rgba(20,20,20,.04);
+  --sh-md:0 6px 16px -4px rgba(20,20,20,.08),0 2px 4px rgba(20,20,20,.04);
+  --sh-lg:0 14px 32px -8px rgba(20,20,20,.12),0 4px 8px rgba(20,20,20,.04);
+  --ring:0 0 0 3px rgba(0,175,242,.30);
+  --c1:#00aff2;--c2:#eb9c00;--c3:#159081;--c4:#8a7bd8;--c5:#e8654f;--c6:#6d86c9;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{font-family:var(--ui);font-size:14px;line-height:1.45;color:var(--fg-1);background:var(--bg);margin:0}
+::selection{background:var(--y-200);color:var(--g-600)}
+button{font-family:var(--ui)}
+button:focus-visible,input:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:none;box-shadow:var(--ring)}
+h1,h2,h3{margin:0}
+.num{font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+
+/* ---------- lock ---------- */
+#lock{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:24px}
+.lock-card{width:100%;max-width:420px;background:var(--bg);border:1px solid var(--border);border-radius:20px;box-shadow:var(--sh-lg);padding:40px 32px;text-align:center}
+.lock-card .logo svg{height:34px;width:auto}
+.lock-card h1{font-family:var(--disp);font-weight:600;font-size:28px;letter-spacing:-.015em;margin-top:24px}
+.lock-card .sub{color:var(--fg-2);margin:8px 0 28px;font-size:14px}
+.lock-field{text-align:left;margin-bottom:16px}
+.lock-field label{display:block;font-weight:600;font-size:13px;color:var(--fg-2);margin-bottom:6px}
+.lock-field input{width:100%;border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:16px;font-family:var(--ui);color:var(--fg-1);background:var(--bg)}
+.btn-y{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;background:var(--y-500);color:#fff;border:none;border-radius:10px;padding:12px 20px;font-size:16px;font-weight:700;cursor:pointer;transition:background 120ms cubic-bezier(.2,.8,.2,1)}
+.btn-y:hover{background:var(--y-400)}
+.btn-y:active{transform:translateY(1px)}
+#lockerr{display:none;margin-top:14px;background:var(--bad-bg);border:1px solid var(--bad-bd);color:var(--bad-fg);border-radius:10px;padding:10px 12px;font-size:13px;text-align:left}
+.lock-note{margin-top:22px;font-size:12px;color:var(--fg-3);display:flex;gap:6px;align-items:center;justify-content:center}
+.lock-note svg{flex:none}
+
+/* ---------- shell ---------- */
+#app{min-height:100vh;display:flex;flex-direction:column;background:var(--bg-muted)}
+header.top{background:var(--bg);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:30}
+.top-in{max-width:1200px;margin:0 auto;padding:0 24px;height:64px;display:flex;align-items:center;gap:16px}
+.top-in .logo svg{height:26px;width:auto;display:block}
+.top-title{font-family:var(--disp);font-weight:600;font-size:18px;letter-spacing:-.01em;border-left:1px solid var(--border);padding-left:16px}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg-muted);border:1px solid var(--border);color:var(--fg-2);border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;white-space:nowrap}
+nav.tabs{background:var(--bg);border-bottom:1px solid var(--border);position:sticky;top:64px;z-index:29}
+.tabs-in{max-width:1200px;margin:0 auto;padding:0 16px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.tabs-in::-webkit-scrollbar{display:none}
+.tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--fg-2);font-size:14px;font-weight:600;padding:12px 14px;cursor:pointer;white-space:nowrap;transition:color 120ms}
+.tab:hover{color:var(--fg-1);background:var(--g-100);border-radius:10px 10px 0 0}
+.tab.on{color:var(--b-500);border-bottom-color:var(--b-500)}
+main{flex:1;width:100%;max-width:1200px;margin:0 auto;padding:24px 24px 96px}
+footer.foot{background:var(--bg);border-top:1px solid var(--border);padding:16px 24px;font-size:12px;color:var(--fg-3);text-align:center}
+
+/* ---------- cards & grid ---------- */
+.grid{display:grid;gap:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:16px 18px;box-shadow:var(--sh-sm)}
+.kpi .lbl{font-size:12px;font-weight:600;color:var(--fg-2)}
+.kpi .val{font-family:var(--disp);font-weight:600;font-size:26px;letter-spacing:-.02em;line-height:1.15;margin-top:4px;font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:12px;color:var(--fg-3);margin-top:2px}
+.kpi.tone-ok .val{color:var(--ok-fg)}
+.kpi.tone-bad .val{color:var(--bad-fg)}
+.kpi.tone-blue .val{color:var(--b-500)}
+.card{background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:var(--sh-sm);padding:24px;min-width:0}
+.card h3{font-family:var(--disp);font-weight:600;font-size:18px;letter-spacing:-.01em}
+.card .desc{font-size:13px;color:var(--fg-2);margin:4px 0 0}
+.card-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.card-head .sp{flex:1}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+@media(max-width:900px){.two{grid-template-columns:1fr}}
+.sec{margin-top:16px}
+h2.pais{font-family:var(--disp);font-weight:600;font-size:26px;letter-spacing:-.015em;margin:4px 0 2px}
+.pais-sub{color:var(--fg-2);font-size:14px;margin:0 0 16px}
+
+/* ---------- controls ---------- */
+.seg{display:inline-flex;background:var(--g-100);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:none;background:none;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;color:var(--fg-2);cursor:pointer;transition:background 120ms,color 120ms}
+.seg button.on{background:var(--bg);color:var(--b-500);box-shadow:var(--sh-sm)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
+.legend button{display:inline-flex;align-items:center;gap:6px;background:none;border:none;padding:2px 4px;font-size:12px;font-weight:600;color:var(--fg-2);cursor:pointer;border-radius:6px}
+.legend button .dot{width:10px;height:10px;border-radius:3px}
+.legend button.off{opacity:.35}
+
+/* ---------- charts ---------- */
+.chart-wrap{position:relative}
+.chart-wrap svg{display:block;width:100%;height:auto}
+#tt{position:fixed;pointer-events:none;background:var(--bg);border:1px solid var(--border);border-radius:10px;box-shadow:var(--sh-md);padding:10px 12px;font-size:12px;z-index:90;display:none;min-width:150px}
+#tt .tm{font-weight:700;color:var(--fg-1);margin-bottom:6px}
+#tt .tr{display:flex;align-items:center;gap:6px;color:var(--fg-2);margin-top:2px}
+#tt .tr .dot{width:8px;height:8px;border-radius:2px;flex:none}
+#tt .tr b{margin-left:auto;color:var(--fg-1);font-variant-numeric:tabular-nums;padding-left:12px}
+
+/* ---------- tables ---------- */
+.tbl-wrap{overflow-x:auto;margin:0 -8px;padding:0 8px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+th.r,td.r{text-align:right}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--b-500)}
+td{padding:9px 10px;border-bottom:1px solid var(--border-subtle);vertical-align:top}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr{transition:background 120ms}
+tbody tr:hover{background:var(--g-50)}
+.tname{font-weight:700;color:var(--fg-1)}
+.tind{font-size:11px;color:var(--fg-3)}
+.pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.p-ok{background:var(--ok-bg);color:var(--ok-fg)}
+.p-warn{background:var(--warn-bg);color:#8a6400}
+.p-bad{background:var(--bad-bg);color:var(--bad-fg)}
+.p-info{background:var(--info-bg);color:var(--info-fg)}
+.p-mut{background:var(--g-100);color:var(--fg-2)}
+.linkbtn{background:none;border:1px solid var(--border);color:var(--b-500);font-weight:700;font-size:12px;border-radius:10px;padding:5px 12px;cursor:pointer;transition:background 120ms}
+.linkbtn:hover{background:var(--b-50)}
+
+/* ---------- alerts & recs ---------- */
+.alerts{display:flex;flex-direction:column;gap:10px}
+.alert{display:flex;gap:12px;border-radius:14px;border:1px solid;padding:14px 16px}
+.alert svg{flex:none;margin-top:1px}
+.alert .at{font-weight:700;font-size:13.5px}
+.alert .ad{font-size:12.5px;margin-top:2px;line-height:1.5}
+.alert.crit{background:var(--bad-bg);border-color:var(--bad-bd);color:var(--bad-fg)}
+.alert.crit .ad{color:#8f2a24}
+.alert.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-fg)}
+.alert.warn .ad{color:var(--fg-2)}
+.alert.warn svg{color:#c98200}
+.alert.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-fg)}
+.alert.ok .ad{color:#2b6b44}
+.alert.info{background:var(--info-bg);border-color:var(--info-bd);color:var(--g-600)}
+.alert.info svg{color:var(--b-500)}
+.alert.info .ad{color:var(--fg-2)}
+.recs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;counter-reset:rec}
+.recs li{position:relative;padding-left:38px;font-size:13.5px;line-height:1.55;counter-increment:rec}
+.recs li::before{content:counter(rec);position:absolute;left:0;top:0;width:26px;height:26px;border-radius:8px;background:var(--b-50);color:var(--b-500);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
+
+/* ---------- hbars ---------- */
+.hb{display:grid;grid-template-columns:minmax(110px,180px) 1fr auto;gap:8px 12px;align-items:center;font-size:13px}
+.hb .n{font-weight:600;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb .bar{height:12px;border-radius:4px;background:var(--b-100);position:relative;overflow:hidden}
+.hb .bar i{position:absolute;inset:0 auto 0 0;background:var(--b-500);border-radius:4px}
+.hb .v{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.hb .v small{color:var(--fg-3);font-weight:600}
+
+/* ---------- agent ---------- */
+#fab{position:fixed;right:24px;bottom:24px;z-index:60;display:inline-flex;align-items:center;gap:10px;background:var(--y-500);color:#fff;border:none;border-radius:999px;padding:14px 22px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:var(--sh-lg);transition:background 120ms}
+#fab:hover{background:var(--y-400)}
+#agent{position:fixed;top:0;right:0;bottom:0;width:400px;max-width:100vw;background:var(--bg);border-left:1px solid var(--border);box-shadow:var(--sh-lg);z-index:70;display:flex;flex-direction:column;transform:translateX(105%);transition:transform 320ms cubic-bezier(.2,.8,.2,1)}
+#agent.open{transform:none}
+.ag-head{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border)}
+.ag-head .ttl{font-family:var(--disp);font-weight:600;font-size:16px}
+.ag-head .st{font-size:11px;color:var(--fg-3)}
+.ag-dot{width:9px;height:9px;border-radius:50%;background:var(--b-500);flex:none}
+.ag-close{margin-left:auto;background:none;border:none;color:var(--fg-2);cursor:pointer;padding:6px;border-radius:8px}
+.ag-close:hover{background:var(--g-100)}
+#aglog{flex:1;overflow-y:auto;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:92%;border-radius:14px;padding:10px 14px;font-size:13px;line-height:1.55}
+.msg.me{align-self:flex-end;background:var(--g-100);color:var(--fg-1);border-bottom-right-radius:4px}
+.msg.bot{align-self:flex-start;background:var(--b-50);border:1px solid var(--b-100);color:var(--fg-1);border-bottom-left-radius:4px}
+.msg.bot table{font-size:12px;margin-top:8px;background:var(--bg);border-radius:8px}
+.msg.bot th{padding:5px 8px}
+.msg.bot td{padding:5px 8px}
+.msg.bot p{margin:0 0 6px}
+.msg.bot p:last-child{margin:0}
+.msg.bot .src{display:block;margin-top:8px;font-size:10.5px;color:var(--fg-3)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px 10px}
+.chips button{background:var(--bg);border:1px solid var(--border);color:var(--b-500);font-size:12px;font-weight:600;border-radius:999px;padding:6px 12px;cursor:pointer;transition:background 120ms}
+.chips button:hover{background:var(--b-50)}
+.ag-in{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--border)}
+.ag-in input{flex:1;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:14px;font-family:var(--ui);color:var(--fg-1)}
+.ag-send{background:var(--b-500);color:#fff;border:none;border-radius:10px;width:42px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 120ms}
+.ag-send:hover{background:var(--b-400)}
+.ag-note{padding:8px 20px 14px;font-size:10.5px;color:var(--fg-3);line-height:1.45}
+@media(max-width:700px){
+  #cierre-chip{display:none}
+  main{padding:16px 14px 110px}
+  .top-in{padding:0 14px}
+  .top-title{font-size:15px}
+  .card{padding:18px}
+  #agent{width:100vw}
+  #fab{right:14px;bottom:14px;padding:12px 18px}
+}
+</style>
+
+<div id="lock">
+  <div class="lock-card">
+    <div class="logo" aria-hidden="true">@@LOGO@@</div>
+    <h1>Radar MRR</h1>
+    <p class="sub">Panel confidencial de resultados por país</p>
+    <form id="lockform">
+      <div class="lock-field">
+        <label for="pw">Clave de acceso</label>
+        <input id="pw" type="password" autocomplete="off" autofocus>
+      </div>
+      <button class="btn-y" type="submit" id="lockbtn">Entrar</button>
+    </form>
+    <div id="lockerr">La clave no es correcta. Revísala e intenta de nuevo.</div>
+    <div class="lock-note"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Los datos están cifrados: sin la clave no se pueden leer.</div>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <div class="top-in">
+      <div class="logo" aria-hidden="true">@@LOGO@@</div>
+      <div class="top-title">Radar MRR</div>
+      <div class="top-right">
+        <span class="chip"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Confidencial</span>
+        <span class="chip num" id="cierre-chip"></span>
+      </div>
+    </div>
+  </header>
+  <nav class="tabs"><div class="tabs-in" id="tabs"></div></nav>
+  <main id="view"></main>
+  <footer class="foot">GeoVictoria · Radar MRR · datos consolidados por conglomerado (fusiones validadas ago-2026) · NRR siempre en moneda local, USD como referencia</footer>
+  <button id="fab"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>Preguntar</button>
+  <aside id="agent" aria-label="Asistente de datos">
+    <div class="ag-head">
+      <span class="ag-dot"></span>
+      <div><div class="ttl">Asistente de datos</div><div class="st">Responde con los datos cargados en este panel</div></div>
+      <button class="ag-close" id="agclose" aria-label="Cerrar asistente"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div id="aglog"></div>
+    <div class="chips" id="agchips"></div>
+    <div class="ag-in">
+      <input id="agin" type="text" placeholder="Pregunta por un país, cliente o métrica…" autocomplete="off">
+      <button class="ag-send" id="agsend" aria-label="Enviar pregunta"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button>
+    </div>
+    <div class="ag-note">Este asistente no es un modelo de lenguaje: busca y calcula sobre los datos del panel. Para análisis nuevos o cruces distintos, pídelos en la conversación de Claude.</div>
+  </aside>
+</div>
+<div id="tt"></div>
+
+<script>
+"use strict";
+const ENC = @@ENC@@;
+let D = null; // datos descifrados
+
+/* ---------- descifrado ---------- */
+const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function descifrar(pass) {
+  const enc = new TextEncoder();
+  const km = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: b64d(ENC.s), iterations: ENC.it, hash: "SHA-256" },
+    km, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(ENC.i) }, key, b64d(ENC.c));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+document.getElementById("lockform").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const btn = document.getElementById("lockbtn"), err = document.getElementById("lockerr");
+  btn.textContent = "Abriendo…"; err.style.display = "none";
+  try {
+    D = await descifrar(document.getElementById("pw").value);
+    document.getElementById("lock").hidden = true;
+    document.getElementById("app").hidden = false;
+    boot();
+  } catch (e) {
+    err.style.display = "block";
+    btn.textContent = "Entrar";
+    document.getElementById("pw").select();
+  }
+});
+
+/* ---------- utilidades ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const nf1 = new Intl.NumberFormat("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf0 = new Intl.NumberFormat("es-CL", { maximumFractionDigits: 0 });
+const fk = v => "US$ " + nf1.format(v) + " k";
+const fus = v => "US$ " + nf0.format(v);
+const fp = v => nf1.format(v) + "%";
+const sgn = v => (v > 0 ? "+" : "") + nf1.format(v) + "%";
+const MES = { ene:"enero",feb:"febrero",mar:"marzo",abr:"abril",may:"mayo",jun:"junio",jul:"julio",ago:"agosto",sep:"septiembre",oct:"octubre",nov:"noviembre",dic:"diciembre" };
+const norm = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const IC = {
+  alert: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  bad: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>',
+  ok: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>',
+  info: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+  bulb: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 0 0 18 8a6 6 0 0 0-12 0 5 5 0 0 0 1.5 3.5c.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6M10 22h4"/></svg>'
+};
+function pillD(v) { // delta 12m en moneda local
+  if (v === null || v === undefined) return '<span class="pill p-mut">nuevo</span>';
+  const c = v <= -8 ? "p-bad" : v < 5 ? "p-warn" : "p-ok";
+  return `<span class="pill ${c}">${sgn(v)}</span>`;
+}
+function pillNRR(v) {
+  if (v === null || v === undefined) return '<span class="pill p-mut">—</span>';
+  const c = v < 100 ? "p-bad" : v < 110 ? "p-warn" : "p-ok";
+  return `<span class="pill ${c}">${fp(v)}</span>`;
+}
+
+/* ---------- tooltip ---------- */
+const TT = $("#tt");
+function ttShow(x, y, html) {
+  TT.innerHTML = html; TT.style.display = "block";
+  const w = TT.offsetWidth, h = TT.offsetHeight;
+  let px = x + 14, py = y - h - 10;
+  if (px + w > innerWidth - 8) px = x - w - 14;
+  if (py < 8) py = y + 14;
+  TT.style.left = px + "px"; TT.style.top = py + "px";
+}
+function ttHide() { TT.style.display = "none"; }
+
+/* ---------- motor de gráficos (SVG) ---------- */
+let CID = 0;
+function lineChart(host, cfg) {
+  // cfg: labels[], series[{name,color,vals,fill,dash,width}], yfmt, refs[{y,label,color,dash}], height
+  const state = { from: Math.max(0, cfg.labels.length - (cfg.initial || cfg.labels.length)), hide: new Set() };
+  const id = "ch" + (++CID);
+  host.innerHTML = `<div class="chart-wrap" id="${id}"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div class="legend" id="${id}-lg"></div>
+      ${cfg.ranges ? `<div class="seg" id="${id}-rg"></div>` : ""}
+    </div>`;
+  const wrap = document.getElementById(id);
+  if (cfg.ranges) {
+    const rg = document.getElementById(id + "-rg");
+    cfg.ranges.forEach(r => {
+      const b = document.createElement("button");
+      b.textContent = r.label;
+      b.onclick = () => { state.from = Math.max(0, cfg.labels.length - r.n); draw(); rg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); };
+      if (r.n >= (cfg.initial || cfg.labels.length) && !rg.querySelector(".on")) b.classList.add("on");
+      rg.appendChild(b);
+    });
+  }
+  const lg = document.getElementById(id + "-lg");
+  cfg.series.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.innerHTML = `<span class="dot" style="background:${s.color}"></span>${esc(s.name)}`;
+    b.onclick = () => { state.hide.has(i) ? state.hide.delete(i) : state.hide.add(i); b.classList.toggle("off"); draw(); };
+    lg.appendChild(b);
+  });
+  function draw() {
+    const W = 860, H = cfg.height || 300, pl = 46, pr = 12, pt = 14, pb = 26;
+    const labels = cfg.labels.slice(state.from);
+    const act = cfg.series.filter((s, i) => !state.hide.has(i)).map(s => ({ ...s, v: s.vals.slice(state.from) }));
+    let vals = act.flatMap(s => s.v).filter(v => v !== null && v !== undefined);
+    (cfg.refs || []).forEach(r => vals.push(r.y));
+    let mn = Math.min(...vals), mx = Math.max(...vals);
+    if (cfg.zero) mn = Math.min(0, mn);
+    const pad = (mx - mn) * 0.08 || 1; mx += pad; if (!cfg.zero) mn -= pad; else mn = Math.min(mn, 0);
+    const X = i => pl + i * (W - pl - pr) / Math.max(1, labels.length - 1);
+    const Y = v => pt + (H - pt - pb) * (1 - (v - mn) / (mx - mn));
+    let g = "";
+    const ticks = 4;
+    for (let t = 0; t <= ticks; t++) {
+      const v = mn + (mx - mn) * t / ticks, y = Y(v);
+      g += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="var(--g-100)"/>` +
+           `<text x="${pl - 8}" y="${y + 4}" text-anchor="end" font-size="10.5" fill="var(--g-400)">${(cfg.yfmt || nf0.format)(v)}</text>`;
+    }
+    const step = Math.ceil(labels.length / 7);
+    labels.forEach((l, i) => {
+      const last = labels.length - 1;
+      if (!((i % step === 0 && last - i > step * 0.55) || i === last)) return;
+      g += `<text x="${X(i)}" y="${H - 7}" text-anchor="${i === last ? "end" : i === 0 ? "start" : "middle"}" font-size="10.5" fill="var(--g-400)">${l}</text>`; });
+    (cfg.refs || []).forEach(r => {
+      g += `<line x1="${pl}" x2="${W - pr}" y1="${Y(r.y)}" y2="${Y(r.y)}" stroke="${r.color}" stroke-dasharray="${r.dash || "4 4"}" stroke-width="1.2"/>` +
+           `<text x="${W - pr}" y="${Y(r.y) - 5}" text-anchor="end" font-size="10" font-weight="700" fill="${r.color}">${r.label}</text>`;
+    });
+    act.forEach(s => {
+      const pts = s.v.map((v, i) => v == null ? null : [X(i), Y(v)]).filter(Boolean);
+      const path = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
+      if (s.fill) g += `<path d="${path}L${pts[pts.length - 1][0]} ${Y(Math.max(mn, 0))}L${pts[0][0]} ${Y(Math.max(mn, 0))}Z" fill="${s.color}" opacity="0.10"/>`;
+      g += `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
+      const lp = pts[pts.length - 1];
+      g += `<circle cx="${lp[0]}" cy="${lp[1]}" r="3.4" fill="${s.color}"/>`;
+    });
+    g += `<line id="${id}-gx" x1="0" x2="0" y1="${pt}" y2="${H - pb}" stroke="var(--g-300)" stroke-width="1" style="display:none"/>`;
+    wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="gráfico">${g}</svg>`;
+    const svg = wrap.querySelector("svg");
+    svg.addEventListener("pointermove", ev => {
+      const r = svg.getBoundingClientRect();
+      const sx = (ev.clientX - r.left) / r.width * W;
+      const i = Math.max(0, Math.min(labels.length - 1, Math.round((sx - pl) / ((W - pl - pr) / Math.max(1, labels.length - 1)))));
+      const gx = document.getElementById(id + "-gx");
+      gx.style.display = "block"; gx.setAttribute("x1", X(i)); gx.setAttribute("x2", X(i));
+      let rows = act.map(s => s.v[i] == null ? "" :
+        `<div class="tr"><span class="dot" style="background:${s.color}"></span>${esc(s.name)}<b>${(cfg.ttfmt || cfg.yfmt || nf1.format)(s.v[i])}</b></div>`).join("");
+      ttShow(ev.clientX, ev.clientY, `<div class="tm">${labels[i]}</div>${rows}`);
+    });
+    svg.addEventListener("pointerleave", () => { ttHide(); const gx = document.getElementById(id + "-gx"); if (gx) gx.style.display = "none"; });
+  }
+  draw();
+}
+
+function stackChart(host, cfg) { // áreas apiladas por país
+  const state = { from: Math.max(0, cfg.labels.length - (cfg.initial || cfg.labels.length)) };
+  const id = "ch" + (++CID);
+  host.innerHTML = `<div class="chart-wrap" id="${id}"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div class="legend">${cfg.series.map(s => `<button disabled style="cursor:default"><span class="dot" style="background:${s.color}"></span>${esc(s.name)}</button>`).join("")}</div>
+      <div class="seg" id="${id}-rg"></div>
+    </div>`;
+  const wrap = document.getElementById(id), rg = document.getElementById(id + "-rg");
+  (cfg.ranges || []).forEach(r => {
+    const b = document.createElement("button");
+    b.textContent = r.label;
+    b.onclick = () => { state.from = Math.max(0, cfg.labels.length - r.n); draw(); rg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); };
+    if (r.n >= (cfg.initial || cfg.labels.length) && !rg.querySelector(".on")) b.classList.add("on");
+    rg.appendChild(b);
+  });
+  function draw() {
+    const W = 860, H = 320, pl = 46, pr = 12, pt = 14, pb = 26;
+    const labels = cfg.labels.slice(state.from);
+    const S = cfg.series.map(s => ({ ...s, v: s.vals.slice(state.from) }));
+    const tot = labels.map((_, i) => S.reduce((a, s) => a + (s.v[i] || 0), 0));
+    const mx = Math.max(...tot) * 1.06;
+    const X = i => pl + i * (W - pl - pr) / Math.max(1, labels.length - 1);
+    const Y = v => pt + (H - pt - pb) * (1 - v / mx);
+    let g = "";
+    for (let t = 0; t <= 4; t++) {
+      const v = mx * t / 4, y = Y(v);
+      g += `<line x1="${pl}" x2="${W - pr}" y1="${y}" y2="${y}" stroke="var(--g-100)"/>` +
+           `<text x="${pl - 8}" y="${y + 4}" text-anchor="end" font-size="10.5" fill="var(--g-400)">${nf0.format(v)}</text>`;
+    }
+    const step = Math.ceil(labels.length / 7);
+    labels.forEach((l, i) => {
+      const last = labels.length - 1;
+      if (!((i % step === 0 && last - i > step * 0.55) || i === last)) return;
+      g += `<text x="${X(i)}" y="${H - 7}" text-anchor="${i === last ? "end" : i === 0 ? "start" : "middle"}" font-size="10.5" fill="var(--g-400)">${l}</text>`; });
+    let base = labels.map(() => 0);
+    S.forEach(s => {
+      const topv = base.map((b, i) => b + (s.v[i] || 0));
+      const up = topv.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join("");
+      const dn = base.map((v, i) => `L${X(base.length - 1 - i).toFixed(1)} ${Y(base[base.length - 1 - i]).toFixed(1)}`).join("");
+      g += `<path d="${up}${dn}Z" fill="${s.color}" opacity="0.72"/>`;
+      base = topv;
+    });
+    g += `<path d="${base.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join("")}" fill="none" stroke="var(--g-300)" stroke-width="1"/>`;
+    g += `<line id="${id}-gx" x1="0" x2="0" y1="${pt}" y2="${H - pb}" stroke="var(--g-400)" stroke-width="1" style="display:none"/>`;
+    wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="MRR por país">${g}</svg>`;
+    const svg = wrap.querySelector("svg");
+    svg.addEventListener("pointermove", ev => {
+      const r = svg.getBoundingClientRect();
+      const sx = (ev.clientX - r.left) / r.width * W;
+      const i = Math.max(0, Math.min(labels.length - 1, Math.round((sx - pl) / ((W - pl - pr) / Math.max(1, labels.length - 1)))));
+      const gx = document.getElementById(id + "-gx");
+      gx.style.display = "block"; gx.setAttribute("x1", X(i)); gx.setAttribute("x2", X(i));
+      const rows = S.slice().reverse().map(s =>
+        `<div class="tr"><span class="dot" style="background:${s.color}"></span>${esc(s.name)}<b>${nf1.format(s.v[i] || 0)} k</b></div>`).join("");
+      ttShow(ev.clientX, ev.clientY, `<div class="tm">${labels[i]} · total ${nf1.format(tot[i])} k</div>${rows}`);
+    });
+    svg.addEventListener("pointerleave", () => { ttHide(); const gx = document.getElementById(id + "-gx"); if (gx) gx.style.display = "none"; });
+  }
+  draw();
+}
+
+function hbars(rows) { // [{n, v, txt}]
+  const mx = Math.max(...rows.map(r => r.v));
+  return `<div class="hb">` + rows.map(r =>
+    `<span class="n" title="${esc(r.n)}">${esc(r.n)}</span><span class="bar"><i style="width:${(r.v / mx * 100).toFixed(1)}%"></i></span><span class="v">${r.txt}</span>`
+  ).join("") + `</div>`;
+}
+
+function fmtAuto(mx, mon) {
+  if (mx >= 1e9) return v => nf1.format(v / 1e6) + " M " + mon;
+  if (mx >= 1e6) return v => nf0.format(Math.round(v / 1e3)) + " k " + mon;
+  return v => nf0.format(Math.round(v)) + " " + mon;
+}
+function waterfall(host, b, fmtv) {
+  const steps = [
+    { l: "Inicio", t: "abs", v: b.start, c: "var(--g-300)" },
+    { l: "Ventas nuevas", t: "up", v: b.nuevo, c: "var(--c1)" },
+    { l: "Expansión", t: "up", v: b.exp, c: "var(--c3)" },
+    { l: "Contracción", t: "dn", v: b.contr, c: "var(--c2)" },
+    { l: "Fuga", t: "dn", v: b.fuga, c: "var(--c5)" },
+    { l: "Cierre", t: "abs", v: b.end, c: "var(--b-500)" },
+  ];
+  const W = 860, H = 300, pl = 12, pr = 12, pt = 34, pb = 26;
+  let run = 0; const segs = [], lvl = [];
+  steps.forEach(s => {
+    if (s.t === "abs") { segs.push([0, s.v]); run = s.v; }
+    else if (s.t === "up") { segs.push([run, run + s.v]); run += s.v; }
+    else { segs.push([run - s.v, run]); run -= s.v; }
+    lvl.push(run);
+  });
+  const mx = Math.max(...segs.flat(), 1) * 1.1;
+  const Y = v => pt + (H - pt - pb) * (1 - v / mx);
+  const gap = (W - pl - pr) / steps.length, bw = gap * 0.56;
+  let g = "";
+  for (let i = 0; i <= 3; i++) { const v = mx * i / 3; g += `<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--g-100)"/>`; }
+  steps.forEach((s, i) => {
+    const x = pl + gap * i + (gap - bw) / 2;
+    const [a, z] = segs[i];
+    const y0 = Y(Math.max(a, z)), h = Math.max(2, Math.abs(Y(a) - Y(z)));
+    g += `<rect x="${x.toFixed(1)}" y="${y0.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${s.c}"/>`;
+    const sg = s.t === "up" ? "+" : s.t === "dn" ? "−" : "";
+    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y0 - 8).toFixed(1)}" text-anchor="middle" font-size="12" font-weight="700" fill="var(--g-600)">${sg}${fmtv(s.v)}</text>`;
+    g += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" text-anchor="middle" font-size="11" fill="var(--g-400)">${s.l}</text>`;
+    if (i < steps.length - 1)
+      g += `<line x1="${(x + bw).toFixed(1)}" x2="${(x + gap).toFixed(1)}" y1="${Y(lvl[i]).toFixed(1)}" y2="${Y(lvl[i]).toFixed(1)}" stroke="var(--g-300)" stroke-dasharray="3 3"/>`;
+  });
+  host.innerHTML = `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="puente del MRR">${g}</svg></div>`;
+}
+
+/* ---------- componentes ---------- */
+function kpi(lbl, val, sub, tone) {
+  return `<div class="kpi ${tone ? "tone-" + tone : ""}"><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+}
+function alertCard(a) {
+  const ic = a.s === "crit" ? IC.bad : a.s === "warn" ? IC.alert : a.s === "ok" ? IC.ok : IC.info;
+  return `<div class="alert ${a.s}">${ic}<div><div class="at">${esc(a.t)}</div><div class="ad">${esc(a.d)}</div></div></div>`;
+}
+function recsList(rs) {
+  return `<ul class="recs">${rs.map(r => `<li>${esc(r)}</li>`).join("")}</ul>`;
+}
+
+/* ---------- pestañas ---------- */
+const TABKEY = { GLOBAL: "Global", CHILE: "Chile", COLOMBIA: "Colombia", "MÉXICO": "México", "PERÚ": "Perú", ARGENTINA: "Argentina", OTROS: "Otros países" };
+let CUR = "GLOBAL";
+function boot() {
+  $("#cierre-chip").textContent = "Cierre " + D.meta.cierre;
+  const tabs = $("#tabs");
+  D.orden.forEach(k => {
+    const b = document.createElement("button");
+    b.className = "tab"; b.textContent = TABKEY[k]; b.dataset.k = k;
+    b.onclick = () => go(k);
+    tabs.appendChild(b);
+  });
+  agentBoot();
+  go("GLOBAL");
+}
+function go(k) {
+  CUR = k;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.k === k));
+  window.scrollTo({ top: 0 });
+  if (k === "GLOBAL") renderGlobal(); else renderPais(k);
+}
+
+/* ---------- vista global ---------- */
+function renderGlobal() {
+  const R = D.rep, K = R.kpi, v = $("#view");
+  v.innerHTML = `
+  <div class="kpis">
+    ${kpi("MRR " + D.meta.cierre, fk(K.mrr), "ARR ≈ US$ " + nf1.format(K.arr) + " M")}
+    ${kpi("Crecimiento 12m", sgn(K.yoy), "vs jul-2025", "ok")}
+    ${kpi("NRR 12m · moneda local", fp(K.nrr_local), "USD (referencia): " + fp(K.nrr), K.nrr_local < 107 ? "bad" : "blue")}
+    ${kpi("Fuga 12m", fp(K.churn_mrr_12m) + " del MRR", "US$ " + nf1.format(D.rep.churn12_total) + " k · " + nf0.format(D.rep.churn12_n) + " cuentas")}
+    ${kpi("Conglomerados activos", nf0.format(K.activos), "top 10 = " + fp(K.top10_share) + " del MRR")}
+  </div>
+  <div class="card">
+    <div class="card-head"><div><h3>Evolución del MRR por país</h3><p class="desc">US$ miles por mes, consolidado por conglomerado. Pasa el cursor para ver el detalle de cada mes.</p></div></div>
+    <div id="g-stack"></div>
+  </div>
+  <div class="card sec">
+    <div class="card-head"><div><h3>Qué explica el crecimiento</h3><p class="desc">Puente del MRR ${D.rep.months[D.rep.months.length - 13]} → ${D.meta.cierre}, en US$ miles. En USD incluye efecto cambiario; la mirada sin ese efecto es la línea azul del NRR local.</p></div></div>
+    <div id="g-bridge"></div>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="card-head"><div><h3>Retención neta (NRR 12 meses)</h3><p class="desc">Cada punto compara la base de hace 12 meses con lo que factura hoy. La línea que importa es la de moneda local.</p></div></div>
+      <div id="g-nrr"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Alertas</h3><p class="desc">Lo que pide atención primero a nivel compañía.</p></div></div>
+      <div class="alerts">${D.galerts.map(alertCard).join("")}</div>
+    </div>
+  </div>
+  <div class="card sec">
+    <div class="card-head"><div><h3>Resumen por país</h3><p class="desc">MRR y salud de la base. Entra a cada país para el detalle que le importa a su gerente general.</p></div></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>País</th><th class="r">MRR ${D.meta.cierre}</th><th class="r">Crec. 12m</th><th class="r">NRR local</th><th class="r">Fuga 12m</th><th class="r">Activos</th><th></th></tr></thead>
+      <tbody>${D.orden.slice(1).map(k => { const t = D.tabs[k], q = t.kpis; return `<tr>
+        <td class="tname">${TABKEY[k]}</td>
+        <td class="num r">${nf1.format(q.mrr)} k</td>
+        <td class="num r">${sgn(q.yoy)}</td>
+        <td class="r">${pillNRR(q.nrr_loc)}</td>
+        <td class="num r">${fp(q.fuga_pct)}</td>
+        <td class="num r">${nf0.format(q.activos)}</td>
+        <td class="r"><button class="linkbtn" onclick="go('${k}')">Ver país</button></td></tr>`; }).join("")}</tbody>
+    </table></div>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="card-head"><div><h3>Industrias que sostienen el MRR</h3><p class="desc">Participación de cada industria en el MRR del cierre.</p></div></div>
+      ${hbars(R.industry.slice(0, 8).map(i => ({ n: i.ind, v: i.jul26, txt: nf1.format(i.jul26) + " k <small>· " + fp(i.share) + "</small>" })))}
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Recomendaciones</h3><p class="desc">Dónde actuar primero, según los datos.</p></div></div>
+      ${recsList(D.grecs)}
+    </div>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="card-head"><div><h3>La regla 80/20 de la cartera</h3></div></div>
+      <p style="margin:0;font-size:13.5px;line-height:1.6">${esc(D.meta.m8020)}</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Señales estructurales</h3></div></div>
+      <div class="alerts">
+        ${alertCard({ s: "info", t: "Estacionalidad de la fuga", d: D.meta.estacionalidad })}
+        ${alertCard({ s: "info", t: "Partners", d: D.meta.partners })}
+        ${alertCard({ s: "info", t: "Ticket de entrada", d: D.meta.ticket })}
+      </div>
+    </div>
+  </div>`;
+  waterfall($("#g-bridge"), D.gbridge.usd, v => nf0.format(Math.round(v / 1000)) + " k");
+  stackChart($("#g-stack"), {
+    labels: R.months,
+    series: Object.entries(R.country_series).map(([n, vals], i) =>
+      ({ name: n.charAt(0) + n.slice(1).toLowerCase(), color: ["var(--c1)", "var(--c3)", "var(--c2)", "var(--c4)", "var(--c5)", "var(--c6)"][i], vals })),
+    ranges: [{ label: "12 m", n: 12 }, { label: "24 m", n: 24 }, { label: "Todo", n: R.months.length }],
+    initial: R.months.length
+  });
+  lineChart($("#g-nrr"), {
+    labels: R.nrr.map(r => r.m),
+    series: [
+      { name: "NRR moneda local", color: "var(--c1)", vals: R.nrr.map(r => r.nrr_local), width: 2.6, fill: true },
+      { name: "NRR USD (ref.)", color: "var(--g-400)", vals: R.nrr.map(r => r.nrr), dash: "5 4", width: 1.6 },
+      { name: "GRR", color: "var(--c4)", vals: R.nrr.map(r => r.grr), width: 1.6 }
+    ],
+    refs: [{ y: 100, label: "100%", color: "#c4c8cf" }, { y: 115, label: "meta 115%", color: "#1f7a3f" }],
+    yfmt: v => nf0.format(v) + "%", ttfmt: v => nf1.format(v) + "%",
+    height: 290
+  });
+}
+
+/* ---------- vista país ---------- */
+let sortState = { col: "mrr", dir: -1 };
+function renderPais(k) {
+  const t = D.tabs[k], q = t.kpis, v = $("#view");
+  const diag = q.nrr_loc === null ? "" :
+    q.nrr_loc < 100 ? `La base instalada se contrae: el NRR local está bajo 100%. La prioridad es frenar fuga y contracción.` :
+    q.nrr_loc < 107 ? `La base se sostiene pero no empuja: el crecimiento depende de las ventas nuevas.` :
+    `La base instalada crece por sí sola y las ventas nuevas aceleran encima.`;
+  v.innerHTML = `
+  <h2 class="pais">${TABKEY[k]}</h2>
+  <p class="pais-sub">${diag}</p>
+  <div class="kpis">
+    ${kpi("MRR " + D.meta.cierre, fk(q.mrr), "")}
+    ${kpi("Crecimiento 12m", sgn(q.yoy), "vs jul-2025", q.yoy >= 15 ? "ok" : q.yoy < 0 ? "bad" : "")}
+    ${kpi("NRR 12m · moneda local", q.nrr_loc === null ? "—" : fp(q.nrr_loc), "USD (referencia): " + (q.nrr_usd === null ? "—" : fp(q.nrr_usd)), q.nrr_loc !== null && q.nrr_loc < 100 ? "bad" : q.nrr_loc >= 110 ? "ok" : "blue")}
+    ${kpi("Fuga 12m", fp(q.fuga_pct) + " del MRR", nf0.format(q.fuga_n) + " cuentas · US$ " + nf1.format(q.fuga_k) + " k", q.fuga_pct >= 10 ? "bad" : "")}
+    ${kpi("Cuentas activas", nf0.format(q.activos), nf0.format(q.nuevos) + " nuevas en 12m (US$ " + nf1.format(q.nuevos_k) + " k)")}
+  </div>
+  ${t.sub ? `<div class="card" style="margin-bottom:16px">
+    <div class="card-head"><div><h3>Los países de esta pestaña</h3></div></div>
+    <div class="tbl-wrap"><table><thead><tr><th>País</th><th class="r">MRR ${D.meta.cierre}</th><th class="r">Crec. 12m</th><th class="r">NRR local</th><th class="r">Activos</th></tr></thead>
+    <tbody>${t.sub.map(s => `<tr><td class="tname">${esc(s.pais)}</td><td class="num r">${nf1.format(s.mrr)} k</td><td class="num r">${s.yoy === null ? "—" : sgn(s.yoy)}</td><td class="r">${pillNRR(s.nrr_loc)}</td><td class="num r">${nf0.format(s.activos)}</td></tr>`).join("")}</tbody></table></div>
+  </div>` : ""}
+  <div class="card">
+    <div class="card-head"><div><h3>Evolución mensual</h3><p class="desc">Cambia entre MRR y número de cuentas activas.</p></div><div class="sp"></div>
+      <div class="seg" id="p-metric"><button class="on" data-m="mrr">MRR</button><button data-m="act">Cuentas activas</button></div></div>
+    <div id="p-serie"></div>
+  </div>
+  <div class="card sec">
+    <div class="card-head"><div><h3>Qué explica el crecimiento</h3><p class="desc" id="p-bdesc"></p></div><div class="sp"></div>
+      ${t.bridge && t.bridge.loc ? '<div class="seg" id="p-bseg"><button class="on" data-b="loc">Moneda local</button><button data-b="usd">USD</button></div>' : ""}</div>
+    <div id="p-bridge"></div>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="card-head"><div><h3>Retención neta (NRR 12 meses)</h3><p class="desc">Moneda local primero; USD solo como referencia.</p></div></div>
+      <div id="p-nrr"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Alertas</h3><p class="desc">Lo que pide atención primero en ${TABKEY[k]}.</p></div></div>
+      <div class="alerts">${t.alerts.map(alertCard).join("") || '<p style="font-size:13px;color:var(--fg-2);margin:0">Sin alertas activas.</p>'}</div>
+    </div>
+  </div>
+  <div class="card sec">
+    <div class="card-head"><div><h3>Cuentas que mueven la aguja</h3><p class="desc">Las 12 mayores por MRR. La variación es a 12 meses y en moneda local; ordena haciendo clic en las columnas.</p></div></div>
+    <div class="tbl-wrap"><table id="toptbl">
+      <thead><tr><th>Conglomerado</th><th class="r sortable" data-c="mrr">MRR (US$/mes)</th><th class="r sortable" data-c="share">% país</th><th class="r sortable" data-c="d12">Var. 12m local</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="card-head"><div><h3>En riesgo: contracción sostenida</h3><p class="desc">Cuentas ≥ US$ 500/mes cayendo ≥ 22% en moneda local. Este patrón precedió a las fugas grandes.${q.riesgo_n > 10 ? ` Se muestran las 10 mayores de ${q.riesgo_n}.` : ""}</p></div></div>
+      ${t.riesgo.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cuenta</th><th class="r">MRR</th><th class="r">Caída local</th></tr></thead>
+        <tbody>${t.riesgo.map(r => `<tr><td><span class="tname">${esc(r.n)}</span><br><span class="tind">${esc(r.ind)}</span></td><td class="num r">${fus(r.mrr)}</td><td class="r"><span class="pill p-bad">−${nf1.format(r.ca)}%</span></td></tr>`).join("")}</tbody></table></div>`
+      : '<p style="font-size:13px;color:var(--fg-2);margin:0">Ninguna cuenta grande muestra contracción sostenida. Buen momento para trabajar expansión.</p>'}
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Fugas de los últimos 12 meses</h3><p class="desc">Mayores cuentas que dejaron de facturar (cohorte ${D.rep.months[D.rep.months.length - 13]} → ${D.meta.cierre}).</p></div></div>
+      ${t.fugas.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cuenta</th><th class="r">MRR perdido</th></tr></thead>
+        <tbody>${t.fugas.map(f => `<tr><td><span class="tname">${esc(f.n)}</span><br><span class="tind">${esc(f.ind)}</span></td><td class="num r">${fus(f.mrr)}</td></tr>`).join("")}</tbody></table></div>`
+      : '<p style="font-size:13px;color:var(--fg-2);margin:0">Sin fugas en la última cohorte de 12 meses.</p>'}
+    </div>
+  </div>
+  <div class="two">
+    <div class="card">
+      <div class="card-head"><div><h3>Industrias del país</h3><p class="desc">MRR al cierre y variación a 12 meses.</p></div></div>
+      ${hbars(t.industrias.map(i => ({ n: i.ind, v: i.mrr, txt: nf1.format(i.mrr) + " k <small>· " + (i.yoy === null ? "nuevo" : sgn(i.yoy)) + "</small>" })))}
+    </div>
+    <div class="card">
+      <div class="card-head"><div><h3>Recomendaciones</h3><p class="desc">Dónde actuar primero en ${TABKEY[k]}.</p></div></div>
+      ${recsList(t.recs.length ? t.recs : ["Mantener el playbook actual y vigilar la lista de riesgo cada mes."])}
+    </div>
+  </div>`;
+  // serie mensual con toggle
+  const drawSerie = m => {
+    lineChart($("#p-serie"), m === "mrr" ? {
+      labels: D.rep.months, series: [{ name: "MRR (US$ k)", color: "var(--c1)", vals: t.mrr_serie, fill: true, width: 2.4 }],
+      ranges: [{ label: "12 m", n: 12 }, { label: "24 m", n: 24 }, { label: "Todo", n: 43 }],
+      yfmt: v => nf0.format(v), ttfmt: v => nf1.format(v) + " k", zero: false, height: 280
+    } : {
+      labels: D.rep.months, series: [{ name: "Cuentas activas", color: "var(--c3)", vals: t.act_serie, fill: true, width: 2.4 }],
+      ranges: [{ label: "12 m", n: 12 }, { label: "24 m", n: 24 }, { label: "Todo", n: 43 }],
+      yfmt: v => nf0.format(v), ttfmt: v => nf0.format(v), zero: false, height: 280
+    });
+  };
+  drawSerie("mrr");
+  document.querySelectorAll("#p-metric button").forEach(b => b.onclick = () => {
+    document.querySelectorAll("#p-metric button").forEach(x => x.classList.toggle("on", x === b));
+    drawSerie(b.dataset.m);
+  });
+  if (t.bridge) {
+    const prevM = D.rep.months[D.rep.months.length - 13];
+    const drawBridge = mode => {
+      const b = mode === "loc" ? t.bridge.loc : t.bridge.usd;
+      const f = mode === "loc" ? fmtAuto(Math.max(b.start, b.end), t.bridge.mon)
+                               : (v => nf0.format(Math.round(v / 1000)) + " k");
+      $("#p-bdesc").textContent = mode === "loc"
+        ? `Puente del MRR ${prevM} → ${D.meta.cierre} en ${t.bridge.mon} (moneda local: sin efecto cambiario).`
+        : `Puente del MRR ${prevM} → ${D.meta.cierre} en US$ (incluye efecto cambiario).`;
+      waterfall($("#p-bridge"), b, f);
+    };
+    drawBridge(t.bridge.loc ? "loc" : "usd");
+    document.querySelectorAll("#p-bseg button").forEach(bt => bt.onclick = () => {
+      document.querySelectorAll("#p-bseg button").forEach(x => x.classList.toggle("on", x === bt));
+      drawBridge(bt.dataset.b);
+    });
+  }
+  lineChart($("#p-nrr"), {
+    labels: t.nrr_serie.map(r => r.m),
+    series: [
+      { name: "NRR moneda local", color: "var(--c1)", vals: t.nrr_serie.map(r => r.loc), width: 2.6, fill: true },
+      { name: "NRR USD (ref.)", color: "var(--g-400)", vals: t.nrr_serie.map(r => r.usd), dash: "5 4", width: 1.6 }
+    ],
+    refs: [{ y: 100, label: "100%", color: "#c4c8cf" }, { y: 115, label: "meta 115%", color: "#1f7a3f" }],
+    yfmt: v => nf0.format(v) + "%", ttfmt: v => nf1.format(v) + "%", height: 260
+  });
+  // tabla top ordenable
+  sortState = { col: "mrr", dir: -1 };
+  const tb = document.querySelector("#toptbl tbody");
+  const drawTop = () => {
+    const rows = t.top.slice().sort((a, b) => {
+      const x = a[sortState.col], y = b[sortState.col];
+      if (x == null) return 1; if (y == null) return -1;
+      return (x - y) * sortState.dir;
+    });
+    tb.innerHTML = rows.map(r => `<tr><td><span class="tname">${esc(r.n)}</span><br><span class="tind">${esc(r.ind)}</span></td>
+      <td class="num r">${fus(r.mrr)}</td><td class="num r">${fp(r.share)}</td><td class="r">${pillD(r.d12)}</td></tr>`).join("");
+  };
+  drawTop();
+  document.querySelectorAll("#toptbl th.sortable").forEach(h => h.onclick = () => {
+    sortState = { col: h.dataset.c, dir: sortState.col === h.dataset.c ? -sortState.dir : -1 };
+    drawTop();
+  });
+}
+
+/* ============================================================
+   Asistente de datos — motor de intenciones sobre D
+   ============================================================ */
+const PAISES = [
+  { k: "CHILE", re: /\bchile\b/ }, { k: "COLOMBIA", re: /\bcolombia\b/ },
+  { k: "MÉXICO", re: /\bmexico\b/ }, { k: "PERÚ", re: /\bperu\b/ },
+  { k: "ARGENTINA", re: /\bargentina\b/ }, { k: "OTROS", re: /\botros\b/ },
+  { sub: "Panamá", re: /\bpanama\b/ }, { sub: "España", re: /\bespana\b/ },
+  { sub: "Brasil", re: /\bbrasil\b/ }, { sub: "Uruguay", re: /\buruguay\b/ }
+];
+function agBoot() {} // placeholder
+function agentBoot() {
+  const panel = $("#agent"), fab = $("#fab");
+  fab.onclick = () => { panel.classList.add("open"); $("#agin").focus(); };
+  $("#agclose").onclick = () => panel.classList.remove("open");
+  const chips = ["¿Cómo va México?", "Top 5 clientes de Chile", "¿Qué cuentas están en riesgo?", "¿Quién se fugó en Perú?", "Compara Chile y Colombia", "¿Qué es el NRR local?"];
+  $("#agchips").innerHTML = chips.map(c => `<button>${c}</button>`).join("");
+  document.querySelectorAll("#agchips button").forEach(b => b.onclick = () => ask(b.textContent));
+  $("#agsend").onclick = () => { const q = $("#agin").value.trim(); if (q) ask(q); };
+  $("#agin").addEventListener("keydown", e => { if (e.key === "Enter") { const q = $("#agin").value.trim(); if (q) ask(q); } });
+  botSay(`<p>Hola. Puedo responder sobre el MRR, NRR, fugas, riesgo, industrias y clientes de cada país, con los mismos datos de este panel.</p><p>Prueba con un país ("¿cómo va Colombia?"), un cliente ("MRR de Falabella") o una métrica ("fuga de México").</p>`);
+}
+function botSay(html) {
+  const log = $("#aglog"), d = document.createElement("div");
+  d.className = "msg bot"; d.innerHTML = html + '<span class="src">Fuente: datos del panel · cierre ' + D.meta.cierre + ' · NRR en moneda local</span>';
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+function meSay(txt) {
+  const log = $("#aglog"), d = document.createElement("div");
+  d.className = "msg me"; d.textContent = txt;
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+function tbl(head, rows) {
+  return `<div class="tbl-wrap"><table><thead><tr>${head.map((h, i) => `<th${i ? ' class="r"' : ""}>${h}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r => `<tr>${r.map((c, i) => `<td${i ? ' class="num r"' : ""}>${c}</td>`).join("")}</tr>`).join("") + "</tbody></table></div>";
+}
+function briefPais(k) {
+  const t = D.tabs[k], q = t.kpis;
+  const al = t.alerts.filter(a => a.s !== "ok")[0];
+  return `<p><b>${TABKEY[k]}</b> cerró ${D.meta.cierre} con <b>${fk(q.mrr)}</b> de MRR (${sgn(q.yoy)} en 12 meses) y ${nf0.format(q.activos)} cuentas activas.</p>` +
+    `<p>NRR 12m: <b>${q.nrr_loc === null ? "—" : fp(q.nrr_loc)} en moneda local</b> (USD ${q.nrr_usd === null ? "—" : fp(q.nrr_usd)}). Fuga: ${fp(q.fuga_pct)} del MRR (${nf0.format(q.fuga_n)} cuentas).</p>` +
+    (al ? `<p>Lo más urgente: ${esc(al.t)}.</p>` : "") +
+    `<p>El detalle completo está en la pestaña ${TABKEY[k]}.</p>`;
+}
+function findPais(q) {
+  for (const p of PAISES) if (p.re.test(q)) return p;
+  return null;
+}
+function findEmpresas(qn) {
+  const toks = qn.replace(/[¿?¡!.,]/g, " ").split(/\s+/).filter(w => w.length >= 4 &&
+    !/^(como|cual|cuales|cuanto|cuanta|donde|quien|esta|estan|tiene|tienen|para|sobre|entre|desde|hasta|clientes?|cuentas?|empresas?|conglomerados?|muestrame|dame|dime|factura|facturacion|riesgo|fuga|fugas|chile|colombia|mexico|peru|argentina|panama|espana|brasil|uruguay|otros|local|moneda|top)$/.test(w));
+  if (!toks.length) return [];
+  const hits = [];
+  for (const r of D.idx) {
+    const n = norm(r[0]);
+    let score = 0;
+    for (const t of toks) if (n.includes(t)) score += t.length;
+    if (score > 0) hits.push({ r, score });
+  }
+  hits.sort((a, b) => b.score - a.score || b.r[3] - a.r[3]);
+  return hits.slice(0, 5).map(h => h.r);
+}
+function ask(q) {
+  meSay(q); $("#agin").value = "";
+  const qn = norm(q);
+  const p = findPais(qn);
+  const t = p && p.k ? D.tabs[p.k] : null;
+  const K = D.rep.kpi;
+  let out = null;
+
+  const wants = re => re.test(qn);
+  // saludo / ayuda
+  if (wants(/^(hola|buenas|hey|que puedes|ayuda|help)/)) {
+    out = `<p>Puedo responder, por país o a nivel global:</p><p>· MRR y su evolución (también por mes o año)<br>· NRR en moneda local y USD<br>· fugas y cuentas en riesgo<br>· top clientes e industrias<br>· clientes puntuales por nombre<br>· partners, estacionalidad y metodología</p>`;
+  }
+  // metodología
+  else if (wants(/que es (el )?nrr|como (se )?calcul|metodolog|convencion/)) {
+    out = `<p>El NRR compara lo que factura hoy la base de clientes de hace 12 meses (sin contar ventas nuevas). Sobre 100% la base crece sola; bajo 100% se contrae. Un NRR sano es sobre 115%.</p><p>${esc(D.meta.convenciones.join(" · "))}.</p>`;
+  }
+  else if (wants(/estacional/)) out = `<p>${esc(D.meta.estacionalidad)}</p>`;
+  else if (wants(/partner/)) out = `<p>${esc(D.meta.partners)}</p>`;
+  else if (wants(/ticket/)) out = `<p>${esc(D.meta.ticket)}</p>`;
+  // comparación entre países
+  else if (wants(/\bcompara|\bversus\b|\bvs\b/)) {
+    const ms = PAISES.filter(x => x.k && x.re.test(qn));
+    if (ms.length >= 2) {
+      out = `<p>Así se comparan al cierre de ${D.meta.cierre}:</p>` + tbl(["", ...ms.map(m => TABKEY[m.k])],
+        [["MRR", ...ms.map(m => nf1.format(D.tabs[m.k].kpis.mrr) + " k")],
+         ["Crec. 12m", ...ms.map(m => sgn(D.tabs[m.k].kpis.yoy))],
+         ["NRR local", ...ms.map(m => fp(D.tabs[m.k].kpis.nrr_loc))],
+         ["Fuga 12m", ...ms.map(m => fp(D.tabs[m.k].kpis.fuga_pct))],
+         ["Activos", ...ms.map(m => nf0.format(D.tabs[m.k].kpis.activos))]]);
+    } else out = `<p>Dime qué dos países comparo, por ejemplo: "compara Chile y Perú".</p>`;
+  }
+  // puente del crecimiento
+  else if (wants(/puente|desglose|explica|por que crec|waterfall/)) {
+    const b = t ? t.bridge.usd : D.gbridge.usd;
+    const nm2 = t ? TABKEY[p.k] : "la compañía";
+    const pv = D.rep.months[D.rep.months.length - 13];
+    out = `<p>Entre ${pv} y ${D.meta.cierre}, el MRR de ${nm2} pasó de US$ ${nf1.format(b.start / 1000)} k a US$ ${nf1.format(b.end / 1000)} k:</p>` +
+      `<p>· Ventas nuevas: +${nf1.format(b.nuevo / 1000)} k<br>· Expansión: +${nf1.format(b.exp / 1000)} k<br>· Contracción: −${nf1.format(b.contr / 1000)} k<br>· Fuga: −${nf1.format(b.fuga / 1000)} k</p>` +
+      `<p>Cifras en US$ (incluyen efecto cambiario). El detalle está en la tarjeta "Qué explica el crecimiento"${t ? " de la pestaña " + TABKEY[p.k] : ""}.</p>`;
+  }
+  // sub-país (Panamá/España/Brasil/Uruguay)
+  else if (p && p.sub) {
+    const s = D.tabs.OTROS.sub.find(x => x.pais === p.sub);
+    out = `<p><b>${s.pais}</b>: MRR ${nf1.format(s.mrr)} k (${s.yoy === null ? "sin base 2025" : sgn(s.yoy) + " en 12m"}), ${nf0.format(s.activos)} cuentas activas, NRR local ${s.nrr_loc === null ? "—" : fp(s.nrr_loc)}.</p><p>El detalle agregado está en la pestaña Otros países.</p>` +
+      (p.sub === "España" ? `<p>Ojo: España llegó sin carga en jul-2026, así que el cierre usa jun-2026.</p>` : "");
+  }
+  // riesgo
+  else if (wants(/riesgo|contraccion/)) {
+    const rows = t ? t.riesgo : D.orden.slice(1).flatMap(k => D.tabs[k].riesgo.map(r => ({ ...r, pais: TABKEY[k] })));
+    const nR = t ? t.kpis.riesgo_n : D.orden.slice(1).reduce((a, k) => a + D.tabs[k].kpis.riesgo_n, 0);
+    const top = rows.slice().sort((a, b) => b.mrr - a.mrr).slice(0, 8);
+    out = top.length ? `<p>${t ? "En " + TABKEY[p.k] : "En toda la compañía"} hay <b>${nR} cuentas grandes en contracción sostenida</b> (≥22% de caída en moneda local). Las mayores:</p>` +
+      tbl(["Cuenta", t ? "Caída" : "País", "MRR", ...(t ? [] : ["Caída"])],
+        top.map(r => t ? [esc(r.n), "−" + nf1.format(r.ca) + "%", fus(r.mrr)] : [esc(r.n), r.pais, fus(r.mrr), "−" + nf1.format(r.ca) + "%"])) +
+      `<p>La lista completa está en cada pestaña de país.</p>`
+      : `<p>No hay cuentas grandes en contracción sostenida${t ? " en " + TABKEY[p.k] : ""}. Buen momento para trabajar expansión.</p>`;
+  }
+  // fugas
+  else if (wants(/fuga|churn|se fue|se fugo|perdimos|abandono/)) {
+    if (t) {
+      const q2 = t.kpis;
+      out = `<p>En ${TABKEY[p.k]} la fuga de los últimos 12 meses fue <b>${fp(q2.fuga_pct)} del MRR</b>: ${nf0.format(q2.fuga_n)} cuentas por US$ ${nf1.format(q2.fuga_k)} k/mes.</p>` +
+        (t.fugas.length ? tbl(["Cuenta", "MRR perdido"], t.fugas.slice(0, 6).map(f => [esc(f.n), fus(f.mrr)])) : "");
+    } else {
+      out = `<p>Fuga global 12m: <b>${fp(K.churn_mrr_12m)} del MRR</b> (US$ ${nf1.format(D.rep.churn12_total)} k, ${nf0.format(D.rep.churn12_n)} cuentas). Mayores fugas históricas:</p>` +
+        tbl(["Cuenta", "País", "MRR"], D.rep.top_churn.slice(0, 6).map(c => [esc(c.cg), c.pais.charAt(0) + c.pais.slice(1).toLowerCase(), fus(c.mrr)]));
+    }
+  }
+  // top clientes
+  else if (wants(/top|mayores|principales|mas grandes|clientes|cuentas/) && (t || wants(/global|compania|empresa\b/)) ) {
+    const nm = qn.match(/top\s*(\d+)/), n = nm ? Math.min(12, +nm[1]) : 5;
+    const rows = (t || D.tabs.CHILE) && t ? t.top.slice(0, n) : null;
+    if (rows) out = `<p>Top ${rows.length} de ${TABKEY[p.k]} por MRR (variación a 12m en moneda local):</p>` +
+      tbl(["Cuenta", "MRR", "Var. 12m"], rows.map(r => [esc(r.n), fus(r.mrr), r.d12 === null ? "nuevo" : sgn(r.d12)]));
+  }
+  // NRR
+  else if (wants(/\bnrr\b|retencion/)) {
+    if (t) {
+      const q2 = t.kpis;
+      out = `<p>NRR 12m de ${TABKEY[p.k]}: <b>${fp(q2.nrr_loc)} en moneda local</b> (USD, referencia: ${fp(q2.nrr_usd)}).</p><p>${q2.nrr_loc < 100 ? "La base instalada se contrae: prioridad en frenar fuga y contracción." : q2.nrr_loc < 107 ? "La base se sostiene pero no empuja: el crecimiento depende de ventas nuevas." : "La base crece por sí sola."}</p>` +
+        (p.k === "ARGENTINA" ? `<p>Ojo: en Argentina el NRR local incluye inflación; mira también el USD.</p>` : "");
+    } else {
+      out = `<p>NRR global 12m: <b>${fp(K.nrr_local)} en moneda local</b> (USD: ${fp(K.nrr)}). La meta sana es 115%.</p>` +
+        tbl(["País", "NRR local", "NRR USD"], D.orden.slice(1).map(k2 => [TABKEY[k2], fp(D.tabs[k2].kpis.nrr_loc), fp(D.tabs[k2].kpis.nrr_usd)]));
+    }
+  }
+  // industrias
+  else if (wants(/industria|sector|rubro/)) {
+    const rows = t ? t.industrias : D.rep.industry.slice(0, 8).map(i => ({ ind: i.ind, mrr: i.jul26, share: i.share, yoy: null }));
+    out = `<p>Industrias por MRR${t ? " en " + TABKEY[p.k] : ""}:</p>` +
+      tbl(["Industria", "MRR", "% del total"], rows.map(i => [esc(i.ind), nf1.format(i.mrr) + " k", fp(i.share)]));
+  }
+  // nuevos / altas
+  else if (wants(/nuevo|altas|logos/)) {
+    if (t) out = `<p>${TABKEY[p.k]} sumó <b>${nf0.format(t.kpis.nuevos)} cuentas nuevas</b> en 12 meses, que aportan US$ ${nf1.format(t.kpis.nuevos_k)} k/mes.</p><p>${D.meta.ticket}</p>`;
+    else out = `<p>${D.meta.ticket}</p><p>Pregúntame por un país para ver sus altas: "nuevos clientes de Chile".</p>`;
+  }
+  // MRR / crecimiento / activos (con mes/año opcional)
+  else if (wants(/mrr|factur|ingreso|crec|interanual|yoy|activ|cuantas cuentas/)) {
+    const mm = qn.match(/\b(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)[a-z]*[\s-]*(20\d\d)/);
+    const ym = qn.match(/\b(20\d\d)\b/);
+    const serie = t ? t.mrr_serie : D.rep.total;
+    const nombre = t ? TABKEY[p.k] : "la compañía";
+    if (mm) {
+      const lbl = mm[1] + "-" + mm[2], i = D.rep.months.indexOf(lbl);
+      out = i < 0 ? `<p>No tengo ese mes: la serie va de ${D.rep.months[0]} a ${D.meta.cierre}.</p>`
+        : `<p>MRR de ${nombre} en ${MES[mm[1]]} ${mm[2]}: <b>${fk(serie[i])}</b>.</p>`;
+    } else if (ym && !qn.includes("12m")) {
+      const idxs = D.rep.months.map((m, i) => m.endsWith(ym[1]) ? i : -1).filter(i => i >= 0);
+      const avg = idxs.reduce((a, i) => a + serie[i], 0) / idxs.length;
+      out = `<p>MRR promedio de ${nombre} en ${ym[1]}: <b>${fk(avg)}</b> (de ${nf1.format(serie[idxs[0]])} k en ${D.rep.months[idxs[0]]} a ${nf1.format(serie[idxs[idxs.length - 1]])} k en ${D.rep.months[idxs[idxs.length - 1]]}).</p>`;
+    } else if (t) {
+      out = briefPais(p.k);
+    } else {
+      out = `<p>La compañía cerró ${D.meta.cierre} con <b>${fk(K.mrr)}</b> de MRR (${sgn(K.yoy)} interanual), ${nf0.format(K.activos)} conglomerados activos y un ARR de ≈ US$ ${nf1.format(K.arr)} M.</p><p>NRR ${fp(K.nrr_local)} local · fuga 12m ${fp(K.churn_mrr_12m)}.</p>`;
+    }
+  }
+  // "cómo va X" → brief
+  else if (t && wants(/como va|resumen|situacion|estado|panorama/)) {
+    out = briefPais(p.k);
+  }
+  // búsqueda de empresa
+  if (!out) {
+    const hits = findEmpresas(qn);
+    if (hits.length) {
+      const r = hits[0];
+      out = `<p><b>${esc(r[0])}</b> (${esc(r[1])}${r[2] ? " · " + esc(r[2]) : ""}): ` +
+        (r[5] === "fugado" ? `se fugó — facturaba <b>${fus(r[3])}/mes</b> antes de irse.` :
+          `factura <b>${fus(r[3])}/mes</b>${r[4] !== null ? ` y varió ${sgn(r[4])} en 12 meses en moneda local` : " (cuenta nueva, sin base de hace 12 meses)"}.`) + `</p>` +
+        (hits.length > 1 ? `<p>También encontré: ${hits.slice(1, 4).map(h => esc(h[0])).join(" · ")}.</p>` : "");
+    } else if (t) {
+      out = briefPais(p.k);
+    } else {
+      out = `<p>No encontré eso en los datos del panel. Puedo responder sobre MRR, NRR, fugas, riesgo, industrias, top clientes y clientes por nombre (los 800 mayores + fugas recientes).</p><p>Para un análisis nuevo o un cruce distinto, pídeselo a Claude en la conversación.</p>`;
+    }
+  }
+  botSay(out);
+}
+window.go = go;
+</script>
