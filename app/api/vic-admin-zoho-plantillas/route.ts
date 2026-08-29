@@ -38,6 +38,28 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   const sp = new URL(req.url).searchParams
   const token = await getZohoAccessToken()
+
+  // ACCIONES de notificación por correo de los workflows (29-ago, pedido de
+  // Lalo: "usa la acción, ahí ya se definen los destinatarios"). La API deja
+  // LEER su configuración (plantilla + destinatarios + from), aunque no
+  // ejecutarlas — con esto el aviso propio puede clonar la acción oficial.
+  if (sp.get("acciones")) {
+    const accId = (sp.get("accion") || "").trim()
+    const p = accId
+      ? `/crm/v8/settings/automation/actions/email_notifications/${encodeURIComponent(accId)}`
+      : `/crm/v8/settings/automation/actions/email_notifications?module=${encodeURIComponent(sp.get("module") || "Leads")}`
+    const ra = await fetch(`${ZOHO_API_DOMAIN}${p}`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    const txt = await ra.text().catch(() => "")
+    try {
+      return NextResponse.json({ ok: ra.ok, status: ra.status, data: JSON.parse(txt) })
+    } catch {
+      return NextResponse.json({ ok: false, status: ra.status, crudo: txt.slice(0, 600) })
+    }
+  }
+
   const id = (sp.get("id") || "").trim()
   const modulo = (sp.get("module") || "Implementaciones").trim()
   const page = Math.max(1, Number(sp.get("page") || 1) || 1)
