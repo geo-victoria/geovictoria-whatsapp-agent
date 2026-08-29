@@ -780,6 +780,20 @@ async function convertirConDeal(
         nombre: r.ownerNombre || "",
         email: r.ownerEmail || "",
       })
+      // AVISO AL EJECUTIVO (29-ago): la regla de Zoho asignaba en SILENCIO —
+      // el único correo ("Nuevo Lead Chile") sale al crearse el lead, cuando
+      // el dueño todavía es Vicky. Casos Sebastián Goic y Belén Fuentes:
+      // pidieron que los llamaran y el ejecutivo nunca supo que los tenía.
+      const { notificarLeadAsignado } = await import("./notificar-lead-asignado")
+      await notificarLeadAsignado({
+        leadId: lead.id,
+        vendedorEmail: r.ownerEmail || "",
+        contact,
+        nombre: lead.lastName,
+        empresa: lead.company,
+        empleados,
+        pidioHumano: true,
+      }).catch(() => false)
     }
     return null
   }
@@ -1320,6 +1334,17 @@ async function dejarLeadPreFormal(
           nombre: r.ownerNombre || "",
           email: r.ownerEmail || "",
         }).catch(() => {})
+        // Mismo hueco del silencio (29-ago): la regla asigna y nadie avisa.
+        const { notificarLeadAsignado } = await import("./notificar-lead-asignado")
+        await notificarLeadAsignado({
+          leadId: lead.id,
+          vendedorEmail: r.ownerEmail || "",
+          contact: clean,
+          nombre: lead.lastName,
+          empresa: lead.company,
+          empleados: lead.empleados,
+          pidioHumano: true,
+        }).catch(() => false)
       }
       console.log(
         `[crm-hitos] ${clean}: hito "${hito}" pre-formal con sorteo inmediato — LEAD ${lead.id} → tómbola de vendedores (${r?.ownerEmail || "regla sin asignar"}); deal nace con la formal`,
