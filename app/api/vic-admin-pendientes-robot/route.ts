@@ -86,9 +86,12 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const robots = IDS_ROBOT.map((i) => `'${i}'`).join(",")
   const pendientes: Record<"Tasks" | "Calls", Actividad[]> = {
+    // OJO COQL: con TRES o más criterios exige agrupación explícita con
+    // paréntesis — sin ellos la consulta falla en silencio y devuelve vacío
+    // (la de tareas volvió con 0 hasta que se agruparon, 29-ago).
     Tasks: await coql(
       `select id, What_Id, '$se_module', Created_Time from Tasks ` +
-        `where Owner in (${robots}) and Status = 'No iniciado' and Created_Time > '${desde}' ` +
+        `where ((Owner in (${robots}) and Status = 'No iniciado') and Created_Time > '${desde}') ` +
         `order by Created_Time desc limit ${limite}`,
     ),
     Calls: await coql(
