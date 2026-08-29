@@ -187,7 +187,7 @@ tbody tr:hover{background:var(--g-50)}
 .ag-send:hover{background:var(--b-400)}
 .ag-note{padding:8px 20px 14px;font-size:10.5px;color:var(--fg-3);line-height:1.45}
 @media(max-width:700px){
-  #cierre-chip{display:none}
+  .top-right .chip{display:none}
   main{padding:16px 14px 110px}
   .top-in{padding:0 14px}
   .top-title{font-size:15px}
@@ -220,6 +220,7 @@ tbody tr:hover{background:var(--g-50)}
       <div class="logo" aria-hidden="true">@@LOGO@@</div>
       <div class="top-title">Radar MRR</div>
       <div class="top-right">
+        <div class="seg" id="curr-seg" aria-label="Moneda de los montos"><button class="on" data-c="usd">US$</button><button data-c="loc">Moneda local</button></div>
         <span class="chip"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Confidencial</span>
         <span class="chip num" id="cierre-chip"></span>
       </div>
@@ -296,6 +297,14 @@ const IC = {
   info: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
   bulb: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5 5 0 0 0 18 8a6 6 0 0 0-12 0 5 5 0 0 0 1.5 3.5c.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6M10 22h4"/></svg>'
 };
+function cfm(v, mon) { // monto en moneda local, compacto
+  if (v == null) return "—";
+  const a = Math.abs(v);
+  if (a >= 1e8) return mon + " " + nf0.format(Math.round(v / 1e6)) + " M";
+  if (a >= 1e6) return mon + " " + nf1.format(v / 1e6) + " M";
+  if (a >= 1e4) return mon + " " + nf0.format(Math.round(v / 1e3)) + " k";
+  return mon + " " + nf0.format(Math.round(v));
+}
 function pillD(v) { // delta 12m en moneda local
   if (v === null || v === undefined) return '<span class="pill p-mut">nuevo</span>';
   const c = v <= -8 ? "p-bad" : v < 5 ? "p-warn" : "p-ok";
@@ -526,8 +535,19 @@ function recsList(rs) {
 /* ---------- pestañas ---------- */
 const TABKEY = { GLOBAL: "Global", CHILE: "Chile", COLOMBIA: "Colombia", "MÉXICO": "México", "PERÚ": "Perú", ARGENTINA: "Argentina", OTROS: "Otros países" };
 let CUR = "GLOBAL";
+let CURR = "usd"; // "usd" | "loc" — moneda elegida para los montos
 function boot() {
   $("#cierre-chip").textContent = "Cierre " + D.meta.cierre;
+  try { CURR = localStorage.getItem("radar_curr") === "loc" ? "loc" : "usd"; } catch (e) {}
+  document.querySelectorAll("#curr-seg button").forEach(b => {
+    b.classList.toggle("on", b.dataset.c === CURR);
+    b.onclick = () => {
+      CURR = b.dataset.c;
+      document.querySelectorAll("#curr-seg button").forEach(x => x.classList.toggle("on", x === b));
+      try { localStorage.setItem("radar_curr", CURR); } catch (e) {}
+      go(CUR);
+    };
+  });
   const tabs = $("#tabs");
   D.orden.forEach(k => {
     const b = document.createElement("button");
@@ -556,6 +576,7 @@ function renderGlobal() {
     ${kpi("Fuga 12m", fp(K.churn_mrr_12m) + " del MRR", "US$ " + nf1.format(D.rep.churn12_total) + " k · " + nf0.format(D.rep.churn12_n) + " cuentas")}
     ${kpi("Conglomerados activos", nf0.format(K.activos), "top 10 = " + fp(K.top10_share) + " del MRR")}
   </div>
+  ${CURR === "loc" ? '<p style="margin:-6px 0 16px;font-size:12.5px;color:var(--fg-2)">Los totales globales van en US$ porque mezclan monedas. La tabla de países y cada pestaña muestran los montos en su moneda local.</p>' : ""}
   <div class="card">
     <div class="card-head"><div><h3>Evolución del MRR por país</h3><p class="desc">US$ miles por mes, consolidado por conglomerado. Pasa el cursor para ver el detalle de cada mes.</p></div></div>
     <div id="g-stack"></div>
@@ -580,7 +601,7 @@ function renderGlobal() {
       <thead><tr><th>País</th><th class="r">MRR ${D.meta.cierre}</th><th class="r">Crec. 12m</th><th class="r">NRR local</th><th class="r">Fuga 12m</th><th class="r">Activos</th><th></th></tr></thead>
       <tbody>${D.orden.slice(1).map(k => { const t = D.tabs[k], q = t.kpis; return `<tr>
         <td class="tname">${TABKEY[k]}</td>
-        <td class="num r">${nf1.format(q.mrr)} k</td>
+        <td class="num r">${CURR === "loc" && t.kpis_loc ? cfm(t.kpis_loc.mrr, t.mon) : nf1.format(q.mrr) + " k"}</td>
         <td class="num r">${sgn(q.yoy)}</td>
         <td class="r">${pillNRR(q.nrr_loc)}</td>
         <td class="num r">${fp(q.fuga_pct)}</td>
@@ -637,6 +658,9 @@ function renderGlobal() {
 let sortState = { col: "mrr", dir: -1 };
 function renderPais(k) {
   const t = D.tabs[k], q = t.kpis, v = $("#view");
+  const useLoc = CURR === "loc" && !!t.kpis_loc;
+  const cf = val => cfm(val, t.mon);
+  const amt = (usdv, locv) => (useLoc && locv != null) ? cf(locv) : fus(usdv);
   const diag = q.nrr_loc === null ? "" :
     q.nrr_loc < 100 ? `La base instalada se contrae: el NRR local está bajo 100%. La prioridad es frenar fuga y contracción.` :
     q.nrr_loc < 107 ? `La base se sostiene pero no empuja: el crecimiento depende de las ventas nuevas.` :
@@ -645,11 +669,11 @@ function renderPais(k) {
   <h2 class="pais">${TABKEY[k]}</h2>
   <p class="pais-sub">${diag}</p>
   <div class="kpis">
-    ${kpi("MRR " + D.meta.cierre, fk(q.mrr), "")}
+    ${kpi("MRR " + D.meta.cierre, useLoc ? cf(t.kpis_loc.mrr) : fk(q.mrr), useLoc ? "US$ " + nf1.format(q.mrr) + " k" : "")}
     ${kpi("Crecimiento 12m", sgn(q.yoy), "vs jul-2025", q.yoy >= 15 ? "ok" : q.yoy < 0 ? "bad" : "")}
     ${kpi("NRR 12m · moneda local", q.nrr_loc === null ? "—" : fp(q.nrr_loc), "USD (referencia): " + (q.nrr_usd === null ? "—" : fp(q.nrr_usd)), q.nrr_loc !== null && q.nrr_loc < 100 ? "bad" : q.nrr_loc >= 110 ? "ok" : "blue")}
-    ${kpi("Fuga 12m", fp(q.fuga_pct) + " del MRR", nf0.format(q.fuga_n) + " cuentas · US$ " + nf1.format(q.fuga_k) + " k", q.fuga_pct >= 10 ? "bad" : "")}
-    ${kpi("Cuentas activas", nf0.format(q.activos), nf0.format(q.nuevos) + " nuevas en 12m (US$ " + nf1.format(q.nuevos_k) + " k)")}
+    ${kpi("Fuga 12m", fp(q.fuga_pct) + " del MRR", nf0.format(q.fuga_n) + " cuentas · " + (useLoc ? cf(t.kpis_loc.fuga) : "US$ " + nf1.format(q.fuga_k) + " k"), q.fuga_pct >= 10 ? "bad" : "")}
+    ${kpi("Cuentas activas", nf0.format(q.activos), nf0.format(q.nuevos) + " nuevas en 12m (" + (useLoc ? cf(t.kpis_loc.nuevos) : "US$ " + nf1.format(q.nuevos_k) + " k") + ")")}
   </div>
   ${t.sub ? `<div class="card" style="margin-bottom:16px">
     <div class="card-head"><div><h3>Los países de esta pestaña</h3></div></div>
@@ -679,7 +703,7 @@ function renderPais(k) {
   <div class="card sec">
     <div class="card-head"><div><h3>Cuentas que mueven la aguja</h3><p class="desc">Las 12 mayores por MRR. La variación es a 12 meses y en moneda local; ordena haciendo clic en las columnas.</p></div></div>
     <div class="tbl-wrap"><table id="toptbl">
-      <thead><tr><th>Conglomerado</th><th class="r sortable" data-c="mrr">MRR (US$/mes)</th><th class="r sortable" data-c="share">% país</th><th class="r sortable" data-c="d12">Var. 12m local</th></tr></thead>
+      <thead><tr><th>Conglomerado</th><th class="r sortable" data-c="mrr">MRR (${useLoc ? t.mon : "US$"}/mes)</th><th class="r sortable" data-c="share">% país</th><th class="r sortable" data-c="d12">Var. 12m local</th></tr></thead>
       <tbody></tbody>
     </table></div>
   </div>
@@ -687,20 +711,20 @@ function renderPais(k) {
     <div class="card">
       <div class="card-head"><div><h3>En riesgo: contracción sostenida</h3><p class="desc">Cuentas ≥ US$ 500/mes cayendo ≥ 22% en moneda local. Este patrón precedió a las fugas grandes.${q.riesgo_n > 10 ? ` Se muestran las 10 mayores de ${q.riesgo_n}.` : ""}</p></div></div>
       ${t.riesgo.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cuenta</th><th class="r">MRR</th><th class="r">Caída local</th></tr></thead>
-        <tbody>${t.riesgo.map(r => `<tr><td><span class="tname">${esc(r.n)}</span><br><span class="tind">${esc(r.ind)}</span></td><td class="num r">${fus(r.mrr)}</td><td class="r"><span class="pill p-bad">−${nf1.format(r.ca)}%</span></td></tr>`).join("")}</tbody></table></div>`
+        <tbody>${t.riesgo.map(r => `<tr><td><span class="tname">${esc(r.n)}</span><br><span class="tind">${esc(r.ind)}</span></td><td class="num r">${amt(r.mrr, r.mrr_loc)}</td><td class="r"><span class="pill p-bad">−${nf1.format(r.ca)}%</span></td></tr>`).join("")}</tbody></table></div>`
       : '<p style="font-size:13px;color:var(--fg-2);margin:0">Ninguna cuenta grande muestra contracción sostenida. Buen momento para trabajar expansión.</p>'}
     </div>
     <div class="card">
       <div class="card-head"><div><h3>Fugas de los últimos 12 meses</h3><p class="desc">Mayores cuentas que dejaron de facturar (cohorte ${D.rep.months[D.rep.months.length - 13]} → ${D.meta.cierre}).</p></div></div>
       ${t.fugas.length ? `<div class="tbl-wrap"><table><thead><tr><th>Cuenta</th><th class="r">MRR perdido</th></tr></thead>
-        <tbody>${t.fugas.map(f => `<tr><td><span class="tname">${esc(f.n)}</span><br><span class="tind">${esc(f.ind)}</span></td><td class="num r">${fus(f.mrr)}</td></tr>`).join("")}</tbody></table></div>`
+        <tbody>${t.fugas.map(f => `<tr><td><span class="tname">${esc(f.n)}</span><br><span class="tind">${esc(f.ind)}</span></td><td class="num r">${amt(f.mrr, f.mrr_loc)}</td></tr>`).join("")}</tbody></table></div>`
       : '<p style="font-size:13px;color:var(--fg-2);margin:0">Sin fugas en la última cohorte de 12 meses.</p>'}
     </div>
   </div>
   <div class="two">
     <div class="card">
       <div class="card-head"><div><h3>Industrias del país</h3><p class="desc">MRR al cierre y variación a 12 meses.</p></div></div>
-      ${hbars(t.industrias.map(i => ({ n: i.ind, v: i.mrr, txt: nf1.format(i.mrr) + " k <small>· " + (i.yoy === null ? "nuevo" : sgn(i.yoy)) + "</small>" })))}
+      ${hbars(t.industrias.map(i => ({ n: i.ind, v: i.mrr, txt: ((useLoc && i.mrr_loc != null) ? cf(i.mrr_loc) : nf1.format(i.mrr) + " k") + " <small>· " + (i.yoy === null ? "nuevo" : sgn(i.yoy)) + "</small>" })))}
     </div>
     <div class="card">
       <div class="card-head"><div><h3>Recomendaciones</h3><p class="desc">Dónde actuar primero en ${TABKEY[k]}.</p></div></div>
@@ -709,10 +733,19 @@ function renderPais(k) {
   </div>`;
   // serie mensual con toggle
   const drawSerie = m => {
+    let sv = t.mrr_serie, snm = "MRR (US$ k)", stt = v => nf1.format(v) + " k";
+    if (useLoc && t.mrr_serie_loc) {
+      const mx = Math.max(...t.mrr_serie_loc);
+      const dv = mx >= 1e9 ? 1e6 : mx >= 1e6 ? 1e3 : 1;
+      const un = dv === 1e6 ? "M" : dv === 1e3 ? "k" : "";
+      sv = t.mrr_serie_loc.map(x => Math.round(x / dv * 10) / 10);
+      snm = "MRR (" + (un ? un + " " : "") + t.mon + ")";
+      stt = v => nf1.format(v) + (un ? " " + un : "");
+    }
     lineChart($("#p-serie"), m === "mrr" ? {
-      labels: D.rep.months, series: [{ name: "MRR (US$ k)", color: "var(--c1)", vals: t.mrr_serie, fill: true, width: 2.4 }],
+      labels: D.rep.months, series: [{ name: snm, color: "var(--c1)", vals: sv, fill: true, width: 2.4 }],
       ranges: [{ label: "12 m", n: 12 }, { label: "24 m", n: 24 }, { label: "Todo", n: 43 }],
-      yfmt: v => nf0.format(v), ttfmt: v => nf1.format(v) + " k", zero: false, height: 280
+      yfmt: v => nf0.format(v), ttfmt: stt, zero: false, height: 280
     } : {
       labels: D.rep.months, series: [{ name: "Cuentas activas", color: "var(--c3)", vals: t.act_serie, fill: true, width: 2.4 }],
       ranges: [{ label: "12 m", n: 12 }, { label: "24 m", n: 24 }, { label: "Todo", n: 43 }],
@@ -735,7 +768,9 @@ function renderPais(k) {
         : `Puente del MRR ${prevM} → ${D.meta.cierre} en US$ (incluye efecto cambiario).`;
       waterfall($("#p-bridge"), b, f);
     };
-    drawBridge(t.bridge.loc ? "loc" : "usd");
+    const bm = (t.bridge.loc && CURR !== "usd") ? "loc" : "usd";
+    drawBridge(bm);
+    document.querySelectorAll("#p-bseg button").forEach(x => x.classList.toggle("on", x.dataset.b === bm));
     document.querySelectorAll("#p-bseg button").forEach(bt => bt.onclick = () => {
       document.querySelectorAll("#p-bseg button").forEach(x => x.classList.toggle("on", x === bt));
       drawBridge(bt.dataset.b);
@@ -760,7 +795,7 @@ function renderPais(k) {
       return (x - y) * sortState.dir;
     });
     tb.innerHTML = rows.map(r => `<tr><td><span class="tname">${esc(r.n)}</span><br><span class="tind">${esc(r.ind)}</span></td>
-      <td class="num r">${fus(r.mrr)}</td><td class="num r">${fp(r.share)}</td><td class="r">${pillD(r.d12)}</td></tr>`).join("");
+      <td class="num r">${amt(r.mrr, r.mrr_loc)}</td><td class="num r">${fp(r.share)}</td><td class="r">${pillD(r.d12)}</td></tr>`).join("");
   };
   drawTop();
   document.querySelectorAll("#toptbl th.sortable").forEach(h => h.onclick = () => {

@@ -189,9 +189,17 @@ def main():
                     return round(float(L.loc[cg, ult] / L.loc[cg, m0] - 1) * 100, 1)
             return None
 
+        # matriz local del país (solo pestañas de un país; en mezclas no hay moneda común)
+        L1 = Ls.get(pres[0]) if len(pres) == 1 else None
+
+        def lval(cg, col):
+            if L1 is not None and cg in L1.index:
+                return round(float(L1.loc[cg, col]))
+            return None
+
         tot_ult = float(U[ult].sum())
         top_rows = [{"n": nombre[cg], "ind": str(indus.get(cg, ""))[:26],
-                     "mrr": round(float(U.loc[cg, ult])),
+                     "mrr": round(float(U.loc[cg, ult])), "mrr_loc": lval(cg, ult),
                      "share": round(float(U.loc[cg, ult]) / tot_ult * 100, 1),
                      "d12": d12_local(cg)}
                     for cg in U[ult].sort_values(ascending=False).head(12).index]
@@ -206,19 +214,23 @@ def main():
                     if b > 0 and a / b <= 1 - CONTRACCION_RIESGO:
                         riesgo.append({"n": nombre[cg], "ind": str(indus.get(cg, ""))[:26],
                                        "mrr": round(float(U.loc[cg, rec3].mean())),
+                                       "mrr_loc": round(a) if L1 is not None else None,
                                        "ca": round((1 - a / b) * 100, 1)})
                     break
         riesgo = sorted(riesgo, key=lambda r: -r["mrr"])
-        fugas = [{"n": nombre[cg], "ind": str(indus.get(cg, ""))[:26], "mrr": round(float(fuga.loc[cg, m0]))}
+        fugas = [{"n": nombre[cg], "ind": str(indus.get(cg, ""))[:26], "mrr": round(float(fuga.loc[cg, m0])),
+                  "mrr_loc": lval(cg, m0)}
                  for cg in fuga[m0].sort_values(ascending=False).head(10).index]
 
         it = {}
         for cg in U[U[ult] > 0].index:
             i = str(indus.get(cg, "Otros"))
-            it.setdefault(i, [0.0, 0.0])
+            it.setdefault(i, [0.0, 0.0, 0.0])
             it[i][0] += float(U.loc[cg, ult])
             it[i][1] += float(U.loc[cg, m0])
+            it[i][2] += (lval(cg, ult) or 0)
         industrias = [{"ind": k, "mrr": round(v[0] / 1000, 1), "share": round(v[0] / tot_ult * 100, 1),
+                       "mrr_loc": (round(v[2]) if L1 is not None else None),
                        "yoy": (round((v[0] / v[1] - 1) * 100, 1) if v[1] > 0 else None)}
                       for k, v in sorted(it.items(), key=lambda kv: -kv[1][0])[:6]]
 
@@ -254,9 +266,18 @@ def main():
                             "activos": int((Up[ult] > 0).sum()),
                             "yoy": round((float(Up[ult].sum() / Up[m0].sum()) - 1) * 100, 1) if Up[m0].sum() > 0 else None,
                             "nrr_loc": lo})
+        # totales en moneda local para el selector US$/local del panel
+        mon = moneda.get(pres[0], "") if len(pres) == 1 else None
+        mrr_serie_loc = kpis_loc = None
+        if L1 is not None:
+            mrr_serie_loc = [round(float(L1[m].sum())) for m in mcols]
+            kpis_loc = {"mrr": mrr_serie_loc[-1],
+                        "fuga": int(sum(lval(cg, m0) or 0 for cg in fuga.index)),
+                        "nuevos": int(sum(lval(cg, ult) or 0 for cg in nuevos.index))}
         return {"titulo": TITULO[key], "kpis": kpis, "mrr_serie": mrr_serie, "act_serie": act_serie,
                 "nrr_serie": nrr_serie, "top": top_rows, "riesgo": riesgo[:10], "fugas": fugas,
-                "industrias": industrias, "sub": sub, "bridge": bridge}
+                "industrias": industrias, "sub": sub, "bridge": bridge,
+                "mon": mon, "mrr_serie_loc": mrr_serie_loc, "kpis_loc": kpis_loc}
 
     tabs = {p: build_tab(p, [p]) for p in MAIN}
     otros_reales = [p for p in sorted(MUC) if p not in MAIN]
