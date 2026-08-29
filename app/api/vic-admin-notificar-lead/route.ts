@@ -86,12 +86,17 @@ export async function POST(req: Request): Promise<NextResponse> {
       pidioHumano: true,
     })
     if (avisado) await setKvValue(candado, new Date().toISOString()).catch(() => {})
+    // Y sus PENDIENTES: la tarea y la llamada del workflow quedaron a nombre
+    // del robot al nacer el lead; se las pasamos al dueño de ahora.
+    const { reasignarPendientesDelLead } = await import("@/lib/reasignar-pendientes-lead")
+    const pendientes = await reasignarPendientesDelLead(leadId, { ownerEmail: vendedorEmail })
     return NextResponse.json({
       ok: avisado,
       leadId,
       avisado,
       vendedor: vendedorEmail,
       cliente: [lead?.Full_Name, lead?.Company].filter(Boolean).join(" · "),
+      pendientes: { tareas: pendientes.tareas, llamadas: pendientes.llamadas, error: pendientes.error },
     })
   } catch (e) {
     return NextResponse.json(

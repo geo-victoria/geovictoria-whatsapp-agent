@@ -517,6 +517,21 @@ const SDR_INBOUND = (
  * Reasigna un lead al siguiente SDR Inbound del round-robin (turno persistido
  * en vic_kv → equitativo entre invocaciones serverless). Devuelve a quién quedó.
  */
+/**
+ * Cada entrega de lead arrastra sus PENDIENTES (Lalo 29-ago): la tarea y la
+ * llamada que el workflow "TASK Y CALL NO CONTACTADO" dejó a nombre del robot
+ * pasan al dueño sorteado, para que aparezcan en su to-do. Best-effort: si
+ * falla, la entrega del lead igual se dio por buena.
+ */
+async function moverPendientes(leadId: string, ownerId?: string, ownerEmail?: string): Promise<void> {
+  try {
+    const { reasignarPendientesDelLead } = await import("./reasignar-pendientes-lead")
+    await reasignarPendientesDelLead(leadId, { ownerId, ownerEmail })
+  } catch {
+    /* nunca bloquea el traspaso */
+  }
+}
+
 export async function reasignarLeadSdrInbound(
   leadId: string,
 ): Promise<{ success: boolean; ownerEmail?: string; error?: string }> {
@@ -554,6 +569,7 @@ export async function reasignarLeadSdrInbound(
       }
     }
     await setKvValue("sdr_inbound_rr", String(idx)).catch(() => {})
+    await moverPendientes(leadId, ownerId, sdr.email)
     return { success: true, ownerEmail: sdr.email }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
@@ -631,6 +647,7 @@ export async function reasignarLeadTelemarketingCL(
       : undefined
     const email = (owner?.email || "").toLowerCase()
     if (!email || /vicky@|info@geovictoria/.test(email)) return { success: false, error: "la regla no asignó dueño" }
+    await moverPendientes(leadId, undefined, owner?.email)
     return { success: true, ownerEmail: owner?.email }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción" }
@@ -735,6 +752,7 @@ export async function reasignarLeadCalificacionCL(
           const email = (owner?.email || "").toLowerCase()
           if (email && !/vicky@|info@geovictoria/.test(email)) {
             await notaEnterprise()
+            await moverPendientes(leadId, owner?.id, owner?.email)
             return { success: true, ownerEmail: owner?.email, ownerId: owner?.id, ownerNombre: owner?.name }
           }
         }
@@ -775,6 +793,7 @@ export async function reasignarLeadCalificacionCL(
     }
     await setKvValue("tm_calif_rr_cl", String(idx)).catch(() => {})
     await notaEnterprise()
+    await moverPendientes(leadId, destino.id, destino.email)
     return { success: true, ownerEmail: destino.email, ownerId: destino.id, ownerNombre: destino.nombre }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
@@ -834,6 +853,7 @@ export async function reasignarLeadSdrInboundCO(
         error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}`,
       }
     }
+    await moverPendientes(leadId, ownerId, sdr.email)
     return { success: true, ownerEmail: sdr.email, ownerId }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
@@ -885,6 +905,7 @@ export async function reasignarLeadSdrInboundMX(
         const email = (owner?.email || "").toLowerCase()
         // La regla asignó solo si el dueño dejó de ser un usuario interino.
         if (email && !/vicky@|info@geovictoria/.test(email)) {
+          await moverPendientes(leadId, owner?.id, owner?.email)
           return { success: true, ownerEmail: owner?.email, ownerId: owner?.id }
         }
       }
