@@ -48,6 +48,24 @@ function enforceActivo(): boolean {
   return (process.env.GATE_ENFORCE || "").trim() === "1"
 }
 
+/**
+ * ENCENDIDO del gate (Lalo 29-ago, cierre de la lista de Rodrigo): env
+ * GATE_ENFORCE=1 o vic_kv `gate_enforce`="on" (apagable sin deploy). Los
+ * PROBADORES internos (metricsContactSet: Lalo/Rodrigo) quedan exentos del
+ * bloqueo — para ellos el gate sigue en sombra y las pruebas no se frenan.
+ */
+async function enforceEncendido(): Promise<boolean> {
+  if (enforceActivo()) return true
+  try {
+    const rows = (await supa(`vic_kv?key=eq.gate_enforce&select=value&limit=1`)
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])) as Array<{ value?: string }>
+    return String(rows[0]?.value || "").trim() === "on"
+  } catch {
+    return false
+  }
+}
+
 function gateApagado(): boolean {
   return (process.env.GATE_PROACTIVIDAD_OFF || "").trim() === "1"
 }
@@ -157,7 +175,12 @@ export async function evaluarGateProactividad(
 
     // Sello del envío (se estampa SIEMPRE que el envío vaya a salir — en
     // sombra todo sale, así que se estampa acá; con enforce, solo si pasa).
-    const bloquear = enforceActivo() && motivos.length > 0
+    // Probadores internos (Lalo/Rodrigo, metricsContactSet): jamás se les
+    // bloquea — sus pruebas necesitan ráfagas que a un cliente real no le
+    // haríamos. Para ellos el gate queda en sombra permanente.
+    const { metricsContactSet } = await import("./funnel-analysis")
+    const esProbadorInterno = isTestContact(clean, metricsContactSet())
+    const bloquear = !esProbadorInterno && (await enforceEncendido()) && motivos.length > 0
     if (!bloquear) {
       void supa(`vic_kv?on_conflict=key`, {
         method: "POST",
@@ -194,7 +217,8 @@ export async function evaluarGateProactividad(
             tipo: opts.tipo,
             tpl: opts.plantilla || undefined,
             motivos,
-            enforce: enforceActivo(),
+            enforce: bloquear,
+            probador: esProbadorInterno || undefined,
             at: new Date().toISOString(),
           }),
           expires_at: new Date(Date.now() + 7 * 86400e3).toISOString(),
