@@ -658,13 +658,29 @@ const CC_TRASPASO_DEAL = (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.co
 export async function notificarTraspasoDeal(dealId: string): Promise<void> {
   try {
     const { h, api } = await zohoHeaders()
-    const g = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner,Territorio`, { headers: h, cache: "no-store" })
-    if (!g.ok) return
-    const fila = ((await g.json().catch(() => ({}))) as {
-      data?: Array<{ Owner?: { email?: string }; Territorio?: string }>
-    }).data?.[0]
+    // La regla de Zoho corre ASÍNCRONA tras el PUT: una sola lectura inmediata
+    // suele ver todavía a vicky@, y entonces el aviso de "tienes un trato
+    // nuevo" sale al ROBOT — o sea, a nadie (misma cicatriz que el 28-ago en
+    // los leads, caso Ana López / Clínica Alemana). Se relee hasta ver a una
+    // persona; si el sorteo nunca aterriza, NO se manda nada y queda el aviso
+    // en el log, que es honesto: no hubo a quién avisarle.
+    let fila: { Owner?: { email?: string }; Territorio?: string } | undefined
+    for (let intento = 0; intento < 4; intento++) {
+      if (intento > 0) await new Promise((r) => setTimeout(r, 2500))
+      const g = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner,Territorio`, { headers: h, cache: "no-store" })
+      if (!g.ok) return
+      fila = ((await g.json().catch(() => ({}))) as {
+        data?: Array<{ Owner?: { email?: string }; Territorio?: string }>
+      }).data?.[0]
+      const correo = (fila?.Owner?.email || "").toLowerCase()
+      if (correo && !/vicky@|info@geovictoria/.test(correo)) break
+      fila = undefined
+    }
     const owner = fila?.Owner
-    if (!owner?.email) return
+    if (!owner?.email) {
+      console.warn(`[crm-hitos] deal ${dealId} sigue con dueño robot tras el sorteo — nadie fue notificado`)
+      return
+    }
     // La copia a Victoria Luna es SOLO CHILE (Lalo 31-jul): CO y MX siguen
     // con sus reglas antiguas — el dueño recibe su aviso, sin CC.
     const esChile = /chile/i.test(String(fila?.Territorio || "")) || !fila?.Territorio
