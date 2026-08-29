@@ -42,11 +42,18 @@ python analysis/mrr/radar/build_radar.py MRR_consolidado_202608.xlsx \
 ```
 
 El HTML resultante es autocontenido y lleva los datos cifrados (AES-256-GCM):
-sin la clave no se puede leer nada, ni mirando el código fuente. Para dejarlo
-en el link de siempre, subir el HTML a una conversación de Claude y pedir
-"publica este archivo en la URL del Radar MRR", pegando la URL del panel.
-La clave puede cambiarse en cada corrida (los que tengan la anterior deberán
-pedir la nueva).
+sin la clave no se puede leer nada, ni mirando el código fuente.
+
+**URL oficial del panel**: https://radar-mrr-git-master-geo-victoria.vercel.app
+(proyecto Vercel `radar-mrr`, sirve `analysis/mrr/radar/dist/` de la rama
+`master`). Para actualizarla: copiar la salida a `analysis/mrr/radar/dist/index.html`,
+commitear y pushear a `master` — Vercel redeploya solo. La clave puede cambiarse
+en cada corrida (los que tengan la anterior deberán pedir la nueva).
+
+Nota: el dominio corto `radar-mrr.vercel.app` quedó apuntando a una rama de
+producción `main` que no existe en este repo; si algún día se cambia la
+"Production Branch" del proyecto a `master` en la configuración de Vercel,
+ese dominio corto también quedará al día.
 
 Notas:
 - Las fusiones se toman de `fusiones_conglomerados.csv` (compartidas con el monitoreo).
