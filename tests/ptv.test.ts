@@ -316,7 +316,7 @@ describe("relojes v2 con-precio son de SILENCIO (orden Lalo 08-ago)", () => {
     assert.equal(d.traspasar, false)
   })
 
-  test("sin precio, el reloj de etapa 120' sigue corriendo aunque converse", async () => {
+  test("sin precio, reloj de etapa vencido + cliente ESCRIBIENDO (<10 min): el anuncio ESPERA (caso Loumar, 29-ago)", async () => {
     const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
     const d = debeTraspasarEtapa({
       ...base,
@@ -324,6 +324,22 @@ describe("relojes v2 con-precio son de SILENCIO (orden Lalo 08-ago)", () => {
       precioAt: null,
       formalAt: null,
       ultimoClienteAt: min(3),
+      clienteRespondioDespues: false,
+    })
+    // El reloj de ETAPA sigue vencido (08-ago intacto), pero el ANUNCIO se
+    // aplaza mientras el cliente está activo: se dispara al próximo tick con
+    // ≥10 min de silencio.
+    assert.equal(d.traspasar, false)
+  })
+
+  test("sin precio, reloj de etapa vencido + cliente en PAUSA (≥10 min): el traspaso se anuncia", async () => {
+    const { debeTraspasarEtapa } = await import("../lib/ptv.ts")
+    const d = debeTraspasarEtapa({
+      ...base,
+      firstUserAt: min(130),
+      precioAt: null,
+      formalAt: null,
+      ultimoClienteAt: min(12),
       clienteRespondioDespues: false,
     })
     assert.equal(d.traspasar, true)
