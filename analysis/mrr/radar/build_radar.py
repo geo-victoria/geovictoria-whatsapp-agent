@@ -245,8 +245,20 @@ def main():
                 mom_num += (a / b - 1) * w
                 mom_den += w
         momentum = round(mom_num / mom_den * 100, 1) if mom_den else 0.0
+        yl_num = yl_den = 0.0
+        for p in pres:
+            L = Ls.get(p)
+            if L is None:
+                continue
+            a0, a1 = float(L[m0].sum()), float(L[ult].sum())
+            if a0 > 0:
+                w = float(MUC[p][m0].sum())
+                yl_num += (a1 / a0 - 1) * w
+                yl_den += w
+        yoy_loc = round(yl_num / yl_den * 100, 1) if yl_den else None
         nrr_loc, nrr_usd = nrr_pair(pres, N - 13, N - 1)
         kpis = {"mrr": mrr_serie[-1], "yoy": round((float(U[ult].sum() / U[m0].sum()) - 1) * 100, 1),
+                "yoy_loc": yoy_loc,
                 "activos": act_serie[-1], "nrr_loc": nrr_loc, "nrr_usd": nrr_usd,
                 "fuga_n": int(len(fuga)), "fuga_k": round(fuga_k, 1),
                 "fuga_pct": round(fuga_k * 1000 / float(coh[m0].sum()) * 100, 1) if coh[m0].sum() > 0 else 0,
@@ -261,11 +273,15 @@ def main():
             sub = []
             for p in pres:
                 Up = MUC[p]
+                Lp = ML.get(p)
                 lo, _ = nrr_pair([p], N - 13, N - 1)
+                yl = None
+                if Lp is not None and float(Lp[m0].sum()) > 0:
+                    yl = round((float(Lp[ult].sum() / Lp[m0].sum()) - 1) * 100, 1)
                 sub.append({"pais": TITULO.get(p, p.title()), "mrr": round(float(Up[ult].sum()) / 1000, 1),
                             "activos": int((Up[ult] > 0).sum()),
                             "yoy": round((float(Up[ult].sum() / Up[m0].sum()) - 1) * 100, 1) if Up[m0].sum() > 0 else None,
-                            "nrr_loc": lo})
+                            "yoy_loc": yl, "nrr_loc": lo})
         # totales en moneda local para el selector US$/local del panel
         mon = moneda.get(pres[0], "") if len(pres) == 1 else None
         mrr_serie_loc = kpis_loc = None
@@ -369,7 +385,17 @@ def main():
     nrr_loc_g, _ = nrr_pair(todos, N - 13, N - 1)
     nrr_usd_g = round(float(coh[ult].sum() / coh[m0].sum()) * 100, 1)  # cohorte global en USD
     top10_g = round(float(MU[ult].sort_values(ascending=False).head(10).sum() / MU[ult].sum()) * 100, 1)
+    gl_num = gl_den = 0.0
+    for p in todos:
+        Lp = ML.get(p)
+        if Lp is None or float(Lp[m0].sum()) <= 0:
+            continue
+        w = float(MUC[p][m0].sum())
+        gl_num += (float(Lp[ult].sum() / Lp[m0].sum()) - 1) * w
+        gl_den += w
+    yoy_local_g = round(gl_num / gl_den * 100, 1) if gl_den else None
     kpi = {"mrr": total[-1], "yoy": round((float(MU[ult].sum() / MU[m0].sum()) - 1) * 100, 1),
+           "yoy_local": yoy_local_g,
            "activos": int((MU[ult] > 0).sum()), "nrr": nrr_usd_g, "nrr_local": nrr_loc_g,
            "churn_mrr_12m": round(float(fuga_g[m0].sum() / coh[m0].sum()) * 100, 1),
            "top10_share": top10_g, "arr": round(total[-1] * 12 / 1000, 1)}
