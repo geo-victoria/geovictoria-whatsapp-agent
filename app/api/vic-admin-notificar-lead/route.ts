@@ -42,10 +42,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   const leadId = String(body.leadId || "").replace(/\D/g, "")
   if (!leadId) return NextResponse.json({ ok: false, error: "falta leadId" }, { status: 400 })
 
+  // El candado frena SOLO el correo (no bombardear al ejecutivo si la llamada
+  // se repite); el traspaso de tareas y llamadas corre igual — es idempotente
+  // por naturaleza (una actividad que ya cambió de dueño deja de calificar).
   const candado = `notif_lead_${leadId}`
-  if (!body.forzar && (await getKvValue(candado).catch(() => null))) {
-    return NextResponse.json({ ok: true, leadId, avisado: false, motivo: "ya avisado antes" })
-  }
+  const yaAvisado = !body.forzar && Boolean(await getKvValue(candado).catch(() => null))
 
   try {
     const token = await getZohoAccessToken()
@@ -76,24 +77,27 @@ export async function POST(req: Request): Promise<NextResponse> {
       })
     }
 
-    const avisado = await notificarLeadAsignado({
-      leadId,
-      vendedorEmail,
-      contact: String(lead?.Phone || "").replace(/\D/g, ""),
-      nombre: lead?.Full_Name,
-      empresa: lead?.Company,
-      empleados: Number(lead?.N_Empleados_que_marcan) || 0,
-      pidioHumano: true,
-    })
+    const avisado = yaAvisado
+      ? false
+      : await notificarLeadAsignado({
+          leadId,
+          vendedorEmail,
+          contact: String(lead?.Phone || "").replace(/\D/g, ""),
+          nombre: lead?.Full_Name,
+          empresa: lead?.Company,
+          empleados: Number(lead?.N_Empleados_que_marcan) || 0,
+          pidioHumano: true,
+        })
     if (avisado) await setKvValue(candado, new Date().toISOString()).catch(() => {})
     // Y sus PENDIENTES: la tarea y la llamada del workflow quedaron a nombre
     // del robot al nacer el lead; se las pasamos al dueño de ahora.
     const { reasignarPendientesDelLead } = await import("@/lib/reasignar-pendientes-lead")
     const pendientes = await reasignarPendientesDelLead(leadId, { ownerEmail: vendedorEmail })
     return NextResponse.json({
-      ok: avisado,
+      ok: avisado || yaAvisado,
       leadId,
       avisado,
+      ...(yaAvisado ? { motivo: "correo ya enviado antes; solo se revisaron los pendientes" } : {}),
       vendedor: vendedorEmail,
       cliente: [lead?.Full_Name, lead?.Company].filter(Boolean).join(" · "),
       pendientes: { tareas: pendientes.tareas, llamadas: pendientes.llamadas, error: pendientes.error },
