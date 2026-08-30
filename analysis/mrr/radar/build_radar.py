@@ -189,12 +189,23 @@ def main():
                     return round(float(L.loc[cg, ult] / L.loc[cg, m0] - 1) * 100, 1)
             return None
 
-        # matriz local del país (solo pestañas de un país; en mezclas no hay moneda común)
+        # matriz local del país; para mezclas de países se usa US$ a t.c. constante del cierre
         L1 = Ls.get(pres[0]) if len(pres) == 1 else None
+        rateL = {}
+        for p in pres:
+            L = Ls.get(p)
+            if L is not None and float(L[ult].sum()) > 0:
+                rateL[p] = float(MUC[p][ult].sum()) / float(L[ult].sum())
 
         def lval(cg, col):
-            if L1 is not None and cg in L1.index:
-                return round(float(L1.loc[cg, col]))
+            if L1 is not None:
+                if cg in L1.index:
+                    return round(float(L1.loc[cg, col]))
+                return None
+            for p in pres:
+                L = Ls.get(p)
+                if L is not None and cg in L.index and rateL.get(p):
+                    return round(float(L.loc[cg, col]) * rateL[p])
             return None
 
         tot_ult = float(U[ult].sum())
@@ -214,7 +225,8 @@ def main():
                     if b > 0 and a / b <= 1 - CONTRACCION_RIESGO:
                         riesgo.append({"n": nombre[cg], "ind": str(indus.get(cg, ""))[:26],
                                        "mrr": round(float(U.loc[cg, rec3].mean())),
-                                       "mrr_loc": round(a) if L1 is not None else None,
+                                       "mrr_loc": (round(a) if L1 is not None else
+                                                   (round(a * rateL[p]) if rateL.get(p) else None)),
                                        "ca": round((1 - a / b) * 100, 1)})
                     break
         riesgo = sorted(riesgo, key=lambda r: -r["mrr"])
@@ -230,7 +242,7 @@ def main():
             it[i][1] += float(U.loc[cg, m0])
             it[i][2] += (lval(cg, ult) or 0)
         industrias = [{"ind": k, "mrr": round(v[0] / 1000, 1), "share": round(v[0] / tot_ult * 100, 1),
-                       "mrr_loc": (round(v[2]) if L1 is not None else None),
+                       "mrr_loc": round(v[2]),
                        "yoy": (round((v[0] / v[1] - 1) * 100, 1) if v[1] > 0 else None)}
                       for k, v in sorted(it.items(), key=lambda kv: -kv[1][0])[:6]]
 
@@ -265,9 +277,19 @@ def main():
                 "top10": top10_share, "nuevos": int(len(nuevos)),
                 "nuevos_k": round(float(nuevos[ult].sum()) / 1000, 1), "momentum": momentum,
                 "riesgo_n": int(len(riesgo)), "riesgo_usd": int(sum(r["mrr"] for r in riesgo))}
-        bridge = {"usd": puente(U),
-                  "loc": puente(ML[pres[0]]) if len(pres) == 1 and pres[0] in ML else None,
-                  "mon": moneda.get(pres[0], "") if len(pres) == 1 else None}
+        if len(pres) == 1 and pres[0] in ML:
+            bridge_loc = puente(ML[pres[0]])
+        else:
+            bridge_loc = {k2: 0.0 for k2 in ("start", "nuevo", "exp", "contr", "fuga", "end")}
+            for p in pres:
+                L, r = Ls.get(p), rateL.get(p)
+                if L is None or not r:
+                    continue
+                bp = puente(L)
+                for k2 in bridge_loc:
+                    bridge_loc[k2] += bp[k2] * r
+        bridge = {"usd": puente(U), "loc": bridge_loc,
+                  "mon": moneda.get(pres[0], "") if len(pres) == 1 else "US$ const."}
         sub = None
         if len(pres) > 1:
             sub = []
@@ -282,14 +304,17 @@ def main():
                             "activos": int((Up[ult] > 0).sum()),
                             "yoy": round((float(Up[ult].sum() / Up[m0].sum()) - 1) * 100, 1) if Up[m0].sum() > 0 else None,
                             "yoy_loc": yl, "nrr_loc": lo})
-        # totales en moneda local para el selector US$/local del panel
-        mon = moneda.get(pres[0], "") if len(pres) == 1 else None
-        mrr_serie_loc = kpis_loc = None
+        # totales en moneda local (o US$ constante si la pestaña mezcla países)
+        mon = moneda.get(pres[0], "") if len(pres) == 1 else "US$ const."
         if L1 is not None:
             mrr_serie_loc = [round(float(L1[m].sum())) for m in mcols]
-            kpis_loc = {"mrr": mrr_serie_loc[-1],
-                        "fuga": int(sum(lval(cg, m0) or 0 for cg in fuga.index)),
-                        "nuevos": int(sum(lval(cg, ult) or 0 for cg in nuevos.index))}
+        else:
+            mrr_serie_loc = [round(sum(float(Ls[p][m].sum()) * rateL[p]
+                                       for p in pres if Ls.get(p) is not None and rateL.get(p)))
+                             for m in mcols]
+        kpis_loc = {"mrr": mrr_serie_loc[-1],
+                    "fuga": int(sum(lval(cg, m0) or 0 for cg in fuga.index)),
+                    "nuevos": int(sum(lval(cg, ult) or 0 for cg in nuevos.index))}
         return {"titulo": TITULO[key], "kpis": kpis, "mrr_serie": mrr_serie, "act_serie": act_serie,
                 "nrr_serie": nrr_serie, "top": top_rows, "riesgo": riesgo[:10], "fugas": fugas,
                 "industrias": industrias, "sub": sub, "bridge": bridge,
@@ -385,6 +410,11 @@ def main():
     nrr_loc_g, _ = nrr_pair(todos, N - 13, N - 1)
     nrr_usd_g = round(float(coh[ult].sum() / coh[m0].sum()) * 100, 1)  # cohorte global en USD
     top10_g = round(float(MU[ult].sort_values(ascending=False).head(10).sum() / MU[ult].sum()) * 100, 1)
+    rate = {}
+    for p in todos:
+        lu = float(ML[p][ult].sum()) if p in ML else 0.0
+        if lu > 0:
+            rate[p] = float(MUC[p][ult].sum()) / lu
     gl_num = gl_den = 0.0
     for p in todos:
         Lp = ML.get(p)
@@ -478,14 +508,51 @@ def main():
     if sin_carga:
         convenciones.append(f"{', '.join(sorted(sin_carga)).title()} sin carga en {ult}: se usa {mcols[-2]}")
 
-    rep = {"months": mcols, "total": total, "country_series": country_series, "industry": industry,
+    # serie por país a t.c. constante del cierre (para el modo moneda local del global)
+    csc = {}
+    for p in MAIN:
+        Lp, r = ML.get(p), rate.get(p)
+        csc[p] = ([round(float(Lp[m].sum()) * r / 1000, 1) for m in mcols]
+                  if (Lp is not None and r) else country_series[p])
+    csc["OTROS"] = [round(sum(float(ML[p][m].sum()) * rate[p]
+                              for p in otros_reales if p in ML and rate.get(p)) / 1000, 1)
+                    for m in mcols]
+    # fuga 12m en moneda local (mezcla por peso USD) y su monto a t.c. constante
+    fl_num = fl_den = fc = 0.0
+    for p in todos:
+        Lp, r = ML.get(p), rate.get(p)
+        if Lp is None or not r:
+            continue
+        cohL = Lp[Lp[m0] > 0]
+        fuL = cohL[(cohL[rec3] <= 0).all(axis=1)]
+        bl = float(cohL[m0].sum())
+        if bl <= 0:
+            continue
+        w = float(MUC[p][MUC[p][m0] > 0][m0].sum())
+        fl_num += float(fuL[m0].sum()) / bl * w
+        fl_den += w
+        fc += float(fuL[m0].sum()) * r
+    kpi["churn_local_pct"] = round(fl_num / fl_den * 100, 1) if fl_den else None
+    kpi["churn_const_k"] = round(fc / 1000, 1)
+    # puente global a t.c. constante
+    gb_loc = {k2: 0.0 for k2 in ("start", "nuevo", "exp", "contr", "fuga", "end")}
+    for p in todos:
+        Lp, r = ML.get(p), rate.get(p)
+        if Lp is None or not r:
+            continue
+        bp = puente(Lp)
+        for k2 in gb_loc:
+            gb_loc[k2] += bp[k2] * r
+
+    rep = {"months": mcols, "total": total, "country_series": country_series,
+           "country_series_const": csc, "industry": industry,
            "nrr": nrr_rows, "top_churn": top_churn,
            "churn12_total": round(float(fuga_g[m0].sum()) / 1000, 1), "churn12_n": int(len(fuga_g)),
            "kpi": kpi}
     meta = {"cierre": ult, "meses": [mcols[0], ult], "convenciones": convenciones,
             "estacionalidad": ESTACIONALIDAD, "partners": PARTNERS, "ticket": TICKET, "m8020": m8020}
     out = {"tabs": tabs, "orden": ["GLOBAL"] + MAIN + ["OTROS"], "galerts": galerts, "grecs": grecs,
-           "idx": idx, "meta": meta, "rep": rep, "gbridge": {"usd": puente(MU)}}
+           "idx": idx, "meta": meta, "rep": rep, "gbridge": {"usd": puente(MU), "loc": gb_loc}}
 
     datos = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
     if args.json:

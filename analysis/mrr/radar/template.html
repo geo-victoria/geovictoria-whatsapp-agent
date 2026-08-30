@@ -302,7 +302,8 @@ function cfm(v, mon) { // monto en moneda local, compacto
   const a = Math.abs(v);
   if (a >= 1e8) return mon + " " + nf0.format(Math.round(v / 1e6)) + " M";
   if (a >= 1e6) return mon + " " + nf1.format(v / 1e6) + " M";
-  if (a >= 1e4) return mon + " " + nf0.format(Math.round(v / 1e3)) + " k";
+  if (a >= 1e5) return mon + " " + nf0.format(Math.round(v / 1e3)) + " k";
+  if (a >= 1e4) return mon + " " + nf1.format(v / 1e3) + " k";
   return mon + " " + nf0.format(Math.round(v));
 }
 function pillD(v) { // delta 12m en moneda local
@@ -575,16 +576,18 @@ function renderGlobal() {
       ? kpi("Crecimiento 12m · moneda local", sgn(K.yoy_local), "US$ (referencia): " + sgn(K.yoy), "ok")
       : kpi("Crecimiento 12m", sgn(K.yoy), "vs " + D.rep.months[D.rep.months.length - 13], "ok")}
     ${kpi("NRR 12m · moneda local", fp(K.nrr_local), "USD (referencia): " + fp(K.nrr), K.nrr_local < 107 ? "bad" : "blue")}
-    ${kpi("Fuga 12m", fp(K.churn_mrr_12m) + " del MRR", "US$ " + nf1.format(D.rep.churn12_total) + " k · " + nf0.format(D.rep.churn12_n) + " cuentas")}
+    ${CURR === "loc" && K.churn_local_pct != null
+      ? kpi("Fuga 12m · moneda local", fp(K.churn_local_pct) + " del MRR", "US$ const. " + nf1.format(K.churn_const_k) + " k · " + nf0.format(D.rep.churn12_n) + " cuentas")
+      : kpi("Fuga 12m", fp(K.churn_mrr_12m) + " del MRR", "US$ " + nf1.format(D.rep.churn12_total) + " k · " + nf0.format(D.rep.churn12_n) + " cuentas")}
     ${kpi("Conglomerados activos", nf0.format(K.activos), "top 10 = " + fp(K.top10_share) + " del MRR")}
   </div>
-  ${CURR === "loc" ? '<p style="margin:-6px 0 16px;font-size:12.5px;color:var(--fg-2)">Los totales globales van en US$ porque mezclan monedas. La tabla de países y cada pestaña muestran los montos en su moneda local.</p>' : ""}
+  ${CURR === "loc" ? '<p style="margin:-6px 0 16px;font-size:12.5px;color:var(--fg-2)">En moneda local, los montos globales se muestran en US$ a tipo de cambio constante del cierre (sin efecto cambiario); por eso el MRR del cierre coincide con el corriente. Cada país muestra su propia moneda.</p>' : ""}
   <div class="card">
-    <div class="card-head"><div><h3>Evolución del MRR por país</h3><p class="desc">US$ miles por mes, consolidado por conglomerado. Pasa el cursor para ver el detalle de cada mes.</p></div></div>
+    <div class="card-head"><div><h3>Evolución del MRR por país</h3><p class="desc">${CURR === "loc" ? "US$ miles a tipo de cambio constante del cierre (sin efecto cambiario)." : "US$ miles por mes, consolidado por conglomerado."} Pasa el cursor para ver el detalle de cada mes.</p></div></div>
     <div id="g-stack"></div>
   </div>
   <div class="card sec">
-    <div class="card-head"><div><h3>Qué explica el crecimiento</h3><p class="desc">Puente del MRR ${D.rep.months[D.rep.months.length - 13]} → ${D.meta.cierre}, en US$ miles. En USD incluye efecto cambiario; la mirada sin ese efecto es la línea azul del NRR local.</p></div></div>
+    <div class="card-head"><div><h3>Qué explica el crecimiento</h3><p class="desc">Puente del MRR ${D.rep.months[D.rep.months.length - 13]} → ${D.meta.cierre}, en US$ miles${CURR === "loc" ? " a tipo de cambio constante (sin efecto cambiario)" : "; en USD corriente incluye efecto cambiario"}.</p></div></div>
     <div id="g-bridge"></div>
   </div>
   <div class="two">
@@ -635,10 +638,11 @@ function renderGlobal() {
       </div>
     </div>
   </div>`;
-  waterfall($("#g-bridge"), D.gbridge.usd, v => nf0.format(Math.round(v / 1000)) + " k");
+  waterfall($("#g-bridge"), CURR === "loc" && D.gbridge.loc ? D.gbridge.loc : D.gbridge.usd, v => nf0.format(Math.round(v / 1000)) + " k");
+  const CSG = CURR === "loc" && R.country_series_const ? R.country_series_const : R.country_series;
   stackChart($("#g-stack"), {
     labels: R.months,
-    series: Object.entries(R.country_series).map(([n, vals], i) =>
+    series: Object.entries(CSG).map(([n, vals], i) =>
       ({ name: n.charAt(0) + n.slice(1).toLowerCase(), color: ["var(--c1)", "var(--c3)", "var(--c2)", "var(--c4)", "var(--c5)", "var(--c6)"][i], vals })),
     ranges: [{ label: "12 m", n: 12 }, { label: "24 m", n: 24 }, { label: "Todo", n: R.months.length }],
     initial: R.months.length
@@ -768,7 +772,9 @@ function renderPais(k) {
       const f = mode === "loc" ? fmtAuto(Math.max(b.start, b.end), t.bridge.mon)
                                : (v => nf0.format(Math.round(v / 1000)) + " k");
       $("#p-bdesc").textContent = mode === "loc"
-        ? `Puente del MRR ${prevM} → ${D.meta.cierre} en ${t.bridge.mon} (moneda local: sin efecto cambiario).`
+        ? (t.bridge.mon === "US$ const."
+           ? `Puente del MRR ${prevM} → ${D.meta.cierre} en US$ a tipo de cambio constante (sin efecto cambiario).`
+           : `Puente del MRR ${prevM} → ${D.meta.cierre} en ${t.bridge.mon} (moneda local: sin efecto cambiario).`)
         : `Puente del MRR ${prevM} → ${D.meta.cierre} en US$ (incluye efecto cambiario).`;
       waterfall($("#p-bridge"), b, f);
     };
