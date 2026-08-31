@@ -396,6 +396,23 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // Capa 3b2 — TELÉFONO DETERMINISTA (31-ago, caso COT1042/Daniela): el
+        // modelo solo pasa contactoTelefono si el cliente lo tipeó en el chat,
+        // así que una emisión normal salía SIN teléfono en la cotización — y
+        // sin teléfono el dash no la cuenta, el candado deal_fono no la ve y
+        // el comprobante no encuentra a quién avisar. El número REAL es el del
+        // canal: se inyecta siempre que el modelo no traiga uno.
+        if (
+          (toolName === "generar_link_cotizadora" || toolName === "actualizar_cotizacion") &&
+          contact &&
+          !String(toolInput.contactoTelefono || "").trim()
+        ) {
+          toolInput.contactoTelefono = `+${String(contact).replace(/\D/g, "")}`
+          console.log(
+            `[agent-loop] Capa 3b2: contactoTelefono inyectado desde el canal (+${contact}) a ${toolName}.`,
+          )
+        }
+
         // Capa 3c — contacto ya TRASPASADO a un ejecutivo (vic_ptv activo): la
         // formal nace con ESE dueño, sin re-sorteo de tómbola, para que el
         // correo con el PDF salga sí o sí con el ejecutivo asignado en copia y
