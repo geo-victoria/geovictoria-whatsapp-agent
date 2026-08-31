@@ -111,6 +111,42 @@ async function origenDeContacto(contact: string): Promise<OrigenConversacion> {
 }
 
 /**
+ * Override SIN DEPLOY por vic_kv (31-ago, al retomar la prospección de
+ * formularios): la regla de Zoho manda a Vicky el tramo 1-20 del canal
+ * outbound, así que su umbral de precios tiene que poder moverse el mismo día
+ * en que se mueve la tómbola, sin esperar un redeploy. Claves `umbral_inbound`
+ * y `umbral_outbound` (enteros 1..50). Precedencia: kv → env → default; un
+ * valor basura o la base caída dejan el valor de siempre. Cache de 60s por
+ * instancia para no pegarle a Supabase en cada turno.
+ */
+const kvUmbralCache = new Map<string, { valor: number | null; hasta: number }>()
+
+async function umbralKv(clave: string): Promise<number | null> {
+  const cacheado = kvUmbralCache.get(clave)
+  if (cacheado && cacheado.hasta > Date.now()) return cacheado.valor
+  const url = (process.env.SUPABASE_URL || "").replace(/\/$/, "")
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+  let valor: number | null = null
+  if (url && key) {
+    try {
+      const res = await fetch(
+        `${url}/rest/v1/vic_kv?key=eq.${encodeURIComponent(clave)}&select=value&limit=1`,
+        { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
+      )
+      if (res.ok) {
+        const rows = (await res.json().catch(() => [])) as Array<{ value?: string }>
+        const n = Number(String(rows[0]?.value || "").trim())
+        if (Number.isInteger(n) && n >= 1 && n <= SCOPE_MAX_SISTEMA) valor = n
+      }
+    } catch {
+      /* fail-open: se queda con env/default */
+    }
+  }
+  kvUmbralCache.set(clave, { valor, hasta: Date.now() + 60_000 })
+  return valor
+}
+
+/**
  * Umbral de precios vigente para un contacto. Fail-open a inbound: un
  * error de red jamás bloquea más de lo que la regla nueva ya bloquea.
  */
@@ -119,7 +155,10 @@ export async function umbralPrecios(
 ): Promise<{ umbral: number; origen: OrigenConversacion }> {
   if (modoClasico()) return { umbral: SCOPE_MAX_SISTEMA, origen: "inbound" }
   const origen = await origenDeContacto(contact)
-  return { umbral: origen === "outbound" ? umbralOutbound() : umbralInbound(), origen }
+  const clave = origen === "outbound" ? "umbral_outbound" : "umbral_inbound"
+  const kv = await umbralKv(clave).catch(() => null)
+  const base = origen === "outbound" ? umbralOutbound() : umbralInbound()
+  return { umbral: kv ?? base, origen }
 }
 
 /**
