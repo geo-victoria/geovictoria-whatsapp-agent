@@ -31,7 +31,7 @@ import { parsearBorrador, sembrarBorrador, type Borrador } from "./onboarding/bo
 
 export type ResultadoTraspaso = {
   contact?: string
-  traspaso: "enviado" | "ya_enviado" | "push_fallo" | "omitido" | "sin_contacto"
+  traspaso: "enviado" | "ya_enviado" | "push_fallo" | "omitido" | "sin_contacto" | "sin_link_onboarding"
 }
 
 /**
@@ -539,6 +539,17 @@ export async function cerrarYTraspasarPostPago(
     // La ventana pudo cerrarse entre la consulta y el envío: CL sigue al
     // respaldo de plantilla antes de darlo por perdido.
     if (esCO || esMX) return { contact, traspaso: "push_fallo" }
+  }
+  // SIN LINK NO SALE LA PLANTILLA (31-ago, caso COMERCIAL PEREA): el cuerpo
+  // del HSM es fijo y dice "completa tu auto-onboarding en este link: 👉
+  // ${link}". Sin link, la variable caía en un texto de relleno y al cliente
+  // le llegaba "en este link: 👉 te lo comparto enseguida por este chat" —
+  // un mensaje que promete algo que no está. El texto libre sí puede omitir
+  // esa línea (arriba), la plantilla no. Se espera: el kv NO se sella, así
+  // que el respaldo horario reintenta cuando el onboarding exista.
+  if (!(linkOnboarding || "").trim()) {
+    console.warn(`[postpago] bienvenida DIFERIDA para ${contact}: la cotización ${quoteId} aún no tiene link de onboarding`)
+    return { contact, traspaso: "sin_link_onboarding" }
   }
   const { sendBotmakerTemplate } = await import("./botmaker-push-v3")
   const { PLANTILLA_BIENVENIDA_PAGO_CL, paramsBienvenidaPago } = await import("./plantilla-bienvenida-pago")
