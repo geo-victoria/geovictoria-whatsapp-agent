@@ -657,7 +657,30 @@ export async function runAgentLoop(params: {
               if (eventoDelDueno) {
                 ;(toolInput as Record<string, unknown>).eventTypeId = eventoDelDueno
               } else if (dueno && toolName === "agendar_reunion") {
-                reunionPostFormal = true
+                // Solo se le promete "el ejecutivo a cargo" si hay una PERSONA
+                // detrás: con la cotización todavía en un usuario robot esa
+                // frase deja al cliente esperando una invitación que nadie va
+                // a mandar.
+                const esRobot = /vicky@|info@geovictoria/i.test(dueno.email || "")
+                if (!esRobot) reunionPostFormal = true
+              }
+              // EL DUEÑO DEL NEGOCIO PUEDE VIVIR SOLO EN EL TRATO (Lalo
+              // 29-ago): cuando el lead se convirtió, su Owner queda congelado
+              // —muchas veces en la SDR— y el dueño real es el del trato. La
+              // cadena ya prefiere el trato, pero Zoho a veces convierte SIN
+              // crear trato (caso Vista Kennedy) y entonces no hay por dónde
+              // llegar. La cotización sí sabe cuál es su trato: se usa ese.
+              if (!(toolInput as Record<string, unknown>).eventTypeId && !reunionPostFormal) {
+                try {
+                  const { estadoRealDelCaso } = await import("./conciliador")
+                  const real = await estadoRealDelCaso(formalReunion)
+                  const eventoPorTrato = real?.duenoDealEmail
+                    ? eventoSeguimientoDe(real.duenoDealEmail)
+                    : undefined
+                  if (eventoPorTrato) {
+                    ;(toolInput as Record<string, unknown>).eventTypeId = eventoPorTrato
+                  }
+                } catch { /* se sigue a la agenda del lead */ }
               }
             }
             // ÚLTIMO ESLABÓN (Lalo 29-ago): "Zoho manda la asignación y el
