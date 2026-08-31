@@ -35,7 +35,12 @@ import {
 } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { getTimezone, computeMeetingReminderAt } from "./calendar"
-import { duenoCotizacionVigente, duenoDealVigente, type DuenoReunion } from "./tools/agendar-reunion"
+import {
+  duenoCotizacionVigente,
+  duenoDealVigente,
+  duenoLeadVigente,
+  type DuenoReunion,
+} from "./tools/agendar-reunion"
 import { eventoSeguimientoDe } from "./eventos-seguimiento"
 import { tagearChatComercial, TOOLS_SENAL_COMERCIAL } from "./botmaker-tags"
 import { sincronizarHitoCrm, datosDeToolInput, HITO_POR_TOOL, TOOLS_QUE_CREAN_SU_LEAD, actualizarNotaTranscripcion, parseEmpleados } from "./crm-hitos"
@@ -654,6 +659,22 @@ export async function runAgentLoop(params: {
               } else if (dueno && toolName === "agendar_reunion") {
                 reunionPostFormal = true
               }
+            }
+            // ÚLTIMO ESLABÓN (Lalo 29-ago): "Zoho manda la asignación y el
+            // calendario se ajusta a la disponibilidad del asignado". Si el
+            // caso todavía no llegó a trato ni a cotización pero el LEAD ya
+            // tiene dueño, la agenda es la de esa persona. Sin esto la
+            // reunión caía al sorteo por defecto de Cal y elegía a otra
+            // — así se partió el caso de José Pablo Gonzáles (550 personas),
+            // cuyo lead tenía dueña desde el primer minuto.
+            if (!(toolInput as Record<string, unknown>).eventTypeId && !reunionPostFormal) {
+              const duenoLead: DuenoReunion | null = await duenoLeadVigente(contact).catch(() => null)
+              const eventoLead = duenoLead ? eventoSeguimientoDe(duenoLead.email) : undefined
+              if (eventoLead) {
+                ;(toolInput as Record<string, unknown>).eventTypeId = eventoLead
+              }
+              // Sin agenda propia configurada se cae al camino de siempre, que
+              // sí ofrece horas: al cliente jamás se le niega la reunión.
             }
           }
         }

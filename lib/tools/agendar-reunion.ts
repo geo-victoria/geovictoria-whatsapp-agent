@@ -74,6 +74,46 @@ export async function duenoDealVigente(telefono: string): Promise<DuenoReunion |
 }
 
 /**
+ * DUEÑO DEL LEAD (29-ago, orden de Lalo: "Zoho manda la asignación y el
+ * calendario se ajusta a la disponibilidad del asignado").
+ *
+ * ÚLTIMO ESLABÓN de la cadena. Hasta hoy el agendamiento miraba el dueño del
+ * TRATO y el de la COTIZACIÓN, pero nunca el del LEAD — y si el caso todavía
+ * no llegaba a trato, la reunión caía al sorteo por defecto de Cal, que elige
+ * a cualquiera. Eso partió el caso de José Pablo Gonzáles (550 personas): su
+ * lead tenía dueña desde el primer minuto y la reunión se agendó con otra
+ * persona, así que ninguna de las dos tuvo la foto completa.
+ *
+ * Solo devuelve leads SIN convertir: el convertido ya lo cubre
+ * duenoDealVigente, que mira el trato. Y descarta a los usuarios robot — un
+ * lead que todavía espera en Vicky no tiene dueño real que ofrecer.
+ */
+export async function duenoLeadVigente(telefono: string): Promise<DuenoReunion | null> {
+  try {
+    const contact = (telefono || "").replace(/\D/g, "")
+    if (!contact) return null
+    const token = await getZohoAccessToken()
+    const H = { Authorization: `Zoho-oauthtoken ${token}` }
+    const res = await fetch(
+      `${ZOHO_API_DOMAIN_REU}/crm/v3/Leads/search?phone=${contact}&converted=false&per_page=3`,
+      { headers: H, cache: "no-store" },
+    )
+    if (!res.ok || res.status === 204) return null
+    const leads = ((await res.json().catch(() => ({}))) as {
+      data?: Array<{ id?: string; Owner?: { name?: string; email?: string } }>
+    }).data
+    for (const l of leads || []) {
+      const email = (l.Owner?.email || "").trim().toLowerCase()
+      if (!email || email === VICKY_ROBOT_EMAIL || /info@geovictoria/i.test(email)) continue
+      return { email, nombre: (l.Owner?.name || email.split("@")[0]).trim() }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Dueño (Owner) de la cotización formal VIGENTE del contacto, si existe.
  *
  * REGLA DE ASIGNACIÓN (Lalo, 27-jul): si el cliente ya tiene cotización, la
