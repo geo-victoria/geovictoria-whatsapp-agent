@@ -58,5 +58,32 @@ export async function POST(req: Request): Promise<NextResponse> {
     )
   }
   console.log(`[cotizacion-chat] ${ctx.quoteId} (${ctx.empresa || "-"}): respondido`)
+  // PERSISTENCIA (Lalo 31-ago, "necesito que esas conversaciones persistan"):
+  // hasta hoy estos chats vivían solo en los logs de Vercel (3 días). Cada
+  // turno guarda pregunta y respuesta en vic_widget_chat, best-effort — un
+  // fallo acá jamás le quita la respuesta al cliente.
+  guardarTurnoWidget(ctx.quoteId, ctx.empresa || "", mensaje, r.reply || "").catch(() => {})
   return NextResponse.json({ ok: true, reply: r.reply }, { headers: CORS })
+}
+
+const SUPA_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "")
+const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || ""
+
+async function guardarTurnoWidget(quoteId: string, empresa: string, pregunta: string, respuesta: string): Promise<void> {
+  if (!SUPA_URL || !SUPA_KEY) return
+  const filas = [
+    { quote_id: quoteId, empresa: empresa.slice(0, 200), role: "user", content: pregunta.slice(0, 4000) },
+    { quote_id: quoteId, empresa: empresa.slice(0, 200), role: "assistant", content: respuesta.slice(0, 4000) },
+  ]
+  await fetch(`${SUPA_URL}/rest/v1/vic_widget_chat`, {
+    method: "POST",
+    headers: {
+      apikey: SUPA_KEY,
+      Authorization: `Bearer ${SUPA_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify(filas),
+    cache: "no-store",
+  }).catch(() => undefined)
 }
