@@ -3568,8 +3568,10 @@ function renderInboundDiario(
      * leads del formulario web que la tómbola asignó a Vicky por el tramo
      * 1-20 y recibieron su toque 0 ese día. */
     outbound?: Map<string, Array<[string, string]>>
-    /** día → cuántos de esos respondieron (💬). */
-    outboundConv?: Map<string, number>
+    /** día → cuántos recibieron su toque (✓). */
+    outboundToc?: Map<string, number>
+    /** día → cuántos se entregaron a una SDR sin lograr contacto (↪). */
+    outboundReg?: Map<string, number>
     /** Todos los teléfonos del canal outbound: marca qué conversaciones del
      * día nacieron de un toque de Vicky (📋). */
     outboundTels?: Set<string>
@@ -3681,12 +3683,19 @@ function renderInboundDiario(
   for (const [dia, lista] of ob) VIN["outb"][dia] = [...lista].sort((a, b) => a[0].localeCompare(b[0]))
   VIN["outb"]["TOTAL"] = [...ob.values()].flat().sort((a, b) => a[0].localeCompare(b[0]))
   const obTotal = VIN["outb"]["TOTAL"].length
-  const obConvTotal = [...(opts.outboundConv || new Map<string, number>()).values()].reduce((a, n) => a + n, 0)
+  const suma = (m?: Map<string, number>) => [...(m || new Map<string, number>()).values()].reduce((a, n) => a + n, 0)
+  const obTocTotal = suma(opts.outboundToc)
+  const obRegTotal = suma(opts.outboundReg)
   const celdaOutbound = (d: string) => {
     const v = d === "TOTAL" ? obTotal : (ob.get(d) || []).length
     if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
-    const conv = d === "TOTAL" ? obConvTotal : opts.outboundConv?.get(d) || 0
-    const sufijo = conv > 0 ? ` <span style="font-size:11px;color:#b45309;white-space:nowrap" title="Regalados: entregados al equipo sin lograr contactarlos">(${conv}↪)</span>` : ""
+    const toc = d === "TOTAL" ? obTocTotal : opts.outboundToc?.get(d) || 0
+    const reg = d === "TOTAL" ? obRegTotal : opts.outboundReg?.get(d) || 0
+    const partes = [
+      toc > 0 ? `<span style="color:#15803d" title="Contactados: les salió el toque de Vicky">${toc}✓</span>` : "",
+      reg > 0 ? `<span style="color:#b45309" title="Entregados a una SDR sin lograr contacto — pasa el mouse para ver a quién">${reg}↪</span>` : "",
+    ].filter(Boolean)
+    const sufijo = partes.length ? ` <span style="font-size:11px;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
     return `<td class="conpop" data-et="outb" data-dia="${d}" style="text-align:center;white-space:nowrap"><b>${v}</b>${sufijo}</td>`
   }
   /** Conversaciones del día que nacieron de un toque de Vicky (📋). */
@@ -3852,7 +3861,7 @@ function renderInboundDiario(
     <th>Día</th><th style="text-align:center">🧲 Form Vicky</th><th style="text-align:center">📋 Formulario</th><th style="text-align:center">Conversaciones iniciadas</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORMULARIO: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el (n↪) es cuántos tuvo que regalar al equipo sin lograr contactarlos; el resto recibió su toque. Cuántos respondieron se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORMULARIO: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el paréntesis desglosa en qué terminó cada uno: ✓ contactados (les salió el toque) y ↪ entregados a una SDR sin lograr contacto — al pasar el mouse por el número se ve cada empresa y, en los ↪, a qué ejecutiva se entregó. Cuántos RESPONDIERON se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
@@ -7606,29 +7615,40 @@ export async function GET(req: Request): Promise<Response> {
           if (telOk && primeraVez.has(telForm)) formConvPorDia.set(dia, (formConvPorDia.get(dia) || 0) + 1)
         }
         // 📋 FORMULARIO WEB · TRAMO VICKY (Lalo 31-ago; redefinida la misma
-        // tarde): la columna cuenta lo que se le ASIGNÓ a Vicky — la foto la
-        // deja vic-outbound-lead en vic_kv `outb_asignado_<leadId>` la primera
-        // vez que ve el lead, gane o pierda el envío después. El paréntesis
-        // (n↪) son los que tuvo que REGALAR al equipo sin lograr contactarlos
-        // (marcas `outb_regalado_`): la tasa asignado→contactado que pidió
-        // Lalo. Días previos a las marcas (antes del 31-ago) caen al respaldo
-        // histórico de vic_outbound_cadence, donde asignado ≈ tocado.
+        // tarde, dos veces): el número grande es TODO lo que le tocó a Vicky
+        // (marcas `outb_asignado_`, foto inmutable al asignarse) y el
+        // paréntesis desglosa en qué terminó cada lead: ✓ contactado (le
+        // salió el toque — fila real en vic_outbound_cadence), ↪ entregado a
+        // una SDR sin lograr contacto (marca `outb_regalado_`, con el nombre
+        // de quién lo recibió para el detalle al pasar el mouse), ⏳ todavía
+        // en reintentos. Días previos a las marcas: respaldo histórico de la
+        // cadencia, donde asignado = contactado.
         const outbPorDia = new Map<string, Array<[string, string]>>()
-        const outbConvPorDia = new Map<string, number>() // ahora: regalados (n↪)
+        const outbTocPorDia = new Map<string, number>()
+        const outbRegPorDia = new Map<string, number>()
         const outbTels = new Set<string>()
         try {
           const hOut = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
           const diaDeMs = (ms: number) =>
             new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms))
-          const vistos = new Set<string>()
-          // 1) Marcas de asignación (la foto) + regalos.
-          const [rAsig, rReg] = await Promise.all([
+          const [rAsig, rReg, rOut] = await Promise.all([
             fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.outb_asignado_*&select=key,value&limit=4000`, { headers: hOut, cache: "no-store" }),
             fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.outb_regalado_*&select=key,value&limit=4000`, { headers: hOut, cache: "no-store" }),
+            fetch(`${SUPABASE_URL}/rest/v1/vic_outbound_cadence?select=contact,started_at,nombre,empresa&order=started_at.desc&limit=4000`, { headers: hOut, cache: "no-store" }),
           ])
-          const parsea = (v: string) => { try { return JSON.parse(v) as { at?: string; contact?: string; nombre?: string; empresa?: string } } catch { return {} } }
-          const asigs = rAsig.ok ? ((await rAsig.json().catch(() => [])) as Array<{ key: string; value: string }>) : []
-          for (const fila of asigs) {
+          const parsea = (v: string) => { try { return JSON.parse(v) as { at?: string; contact?: string; nombre?: string; empresa?: string; motivo?: string; a?: string } } catch { return {} } }
+          const leadDeKey = (k: string) => k.replace(/^outb_(asignado|regalado)_/, "")
+          const regalos = new Map<string, { motivo: string; a: string }>()
+          for (const fila of rReg.ok ? ((await rReg.json().catch(() => [])) as Array<{ key: string; value: string }>) : []) {
+            const d = parsea(fila.value)
+            regalos.set(leadDeKey(fila.key), { motivo: String(d.motivo || ""), a: String(d.a || "") })
+          }
+          const cadencia = rOut.ok
+            ? (((await rOut.json().catch(() => [])) as Array<{ contact?: string; started_at?: string; nombre?: string; empresa?: string }>) || [])
+            : []
+          const telsTocados = new Set(cadencia.map((f) => digits(String(f.contact || ""))))
+          const vistos = new Set<string>()
+          for (const fila of rAsig.ok ? ((await rAsig.json().catch(() => [])) as Array<{ key: string; value: string }>) : []) {
             const d = parsea(fila.value)
             const tel = digits(String(d.contact || ""))
             const ms = Date.parse(String(d.at || ""))
@@ -7637,43 +7657,37 @@ export async function GET(req: Request): Promise<Response> {
             vistos.add(tel)
             if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
             const dia = diaDeMs(ms)
+            const regalo = regalos.get(leadDeKey(fila.key))
+            const base = String(d.empresa || d.nombre || "").trim() || tel
+            let etiqueta = `✓ ${base}`
+            if (regalo) {
+              const sdr = (regalo.a || "").split("@")[0] || "SDR"
+              etiqueta = `↪ ${base} → ${sdr}`
+              outbRegPorDia.set(dia, (outbRegPorDia.get(dia) || 0) + 1)
+            } else if (telsTocados.has(tel)) {
+              outbTocPorDia.set(dia, (outbTocPorDia.get(dia) || 0) + 1)
+            } else {
+              etiqueta = `⏳ ${base}`
+            }
             const arr = outbPorDia.get(dia) || []
-            arr.push([String(d.empresa || d.nombre || "").trim() || tel, tel])
+            arr.push([etiqueta, tel])
             outbPorDia.set(dia, arr)
           }
-          const regs = rReg.ok ? ((await rReg.json().catch(() => [])) as Array<{ key: string; value: string }>) : []
-          for (const fila of regs) {
-            const d = parsea(fila.value)
-            const tel = digits(String(d.contact || ""))
-            const ms = Date.parse(String(d.at || ""))
-            if (!tel || !Number.isFinite(ms) || paisDeTelefono(tel) !== pais || isTestContact(tel, metricsContactSet())) continue
+          // Respaldo histórico: toques previos a la foto (sin marca kv).
+          for (const f of cadencia) {
+            const tel = digits(String(f.contact || ""))
+            const ms = Date.parse(String(f.started_at || ""))
+            if (!tel || !Number.isFinite(ms)) continue
+            if (vistos.has(tel)) continue
+            if (paisDeTelefono(tel) !== pais) continue
+            if (isTestContact(tel, metricsContactSet())) continue
+            outbTels.add(tel)
             if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
             const dia = diaDeMs(ms)
-            outbConvPorDia.set(dia, (outbConvPorDia.get(dia) || 0) + 1)
-          }
-          // 2) Respaldo histórico: toques previos a la foto (sin marca kv).
-          const rOut = await fetch(
-            `${SUPABASE_URL}/rest/v1/vic_outbound_cadence?select=contact,started_at,nombre,empresa&order=started_at.desc&limit=4000`,
-            { headers: hOut, cache: "no-store" },
-          )
-          if (rOut.ok) {
-            const filas = ((await rOut.json().catch(() => [])) as Array<{
-              contact?: string; started_at?: string; nombre?: string; empresa?: string
-            }>) || []
-            for (const f of filas) {
-              const tel = digits(String(f.contact || ""))
-              const ms = Date.parse(String(f.started_at || ""))
-              if (!tel || !Number.isFinite(ms)) continue
-              if (vistos.has(tel)) continue
-              if (paisDeTelefono(tel) !== pais) continue
-              if (isTestContact(tel, metricsContactSet())) continue
-              outbTels.add(tel)
-              if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
-              const dia = diaDeMs(ms)
-              const arr = outbPorDia.get(dia) || []
-              arr.push([String(f.empresa || f.nombre || "").trim() || tel, tel])
-              outbPorDia.set(dia, arr)
-            }
+            const arr = outbPorDia.get(dia) || []
+            arr.push([`✓ ${String(f.empresa || f.nombre || "").trim() || tel}`, tel])
+            outbPorDia.set(dia, arr)
+            outbTocPorDia.set(dia, (outbTocPorDia.get(dia) || 0) + 1)
           }
         } catch { /* sin outbound, la columna queda en 0 */ }
         // 📣 CAMPAÑAS COMO ORIGEN (Lalo 27-ago): un entrante que recibió un
@@ -7706,7 +7720,7 @@ export async function GET(req: Request): Promise<Response> {
             String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim()
           if (qid && emp) nombresQuote.set(qid, emp)
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, outbound: inbdet ? undefined : outbPorDia, outboundConv: inbdet ? undefined : outbConvPorDia, outboundTels: inbdet ? undefined : outbTels })
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)

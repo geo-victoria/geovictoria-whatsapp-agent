@@ -43,6 +43,11 @@ const REACTIVO_MIN = Number(process.env.GATE_REACTIVO_MIN || 30)
 export async function sellarPlantillaEnviada(contact: string, plantilla: string): Promise<void> {
   const clean = String(contact || "").replace(/\D/g, "")
   if (!clean || !plantilla) return
+  // TTL 20h, no 48 (31-ago, caso SOUTH TRADE): la cadencia post-aceptación
+  // manda la MISMA plantilla (vicky_loop_pago) a +60min, +24h y +72h — con
+  // 48h de marca, el toque de las 24h moría SIEMPRE en plantilla_repetida.
+  // 20h sigue atrapando el duplicado real (dos máquinas el mismo día) sin
+  // pisar una cadencia diaria legítima; la ráfaga corta la cubre gate_last_.
   await supa(`vic_kv?on_conflict=key`, {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
@@ -50,7 +55,7 @@ export async function sellarPlantillaEnviada(contact: string, plantilla: string)
       {
         key: `gate_tpl_${clean}`,
         value: plantilla,
-        expires_at: new Date(Date.now() + 48 * 3600e3).toISOString(),
+        expires_at: new Date(Date.now() + 20 * 3600e3).toISOString(),
       },
     ]),
   }).catch(() => undefined)
