@@ -474,6 +474,12 @@ export async function sendBotmakerTemplate(
       )
       return false
     }
+    // Envío ACEPTADO por Botmaker: recién ahora se quema el anti-repetición
+    // (31-ago — estamparlo al evaluar condenaba los reintentos de un fallo).
+    {
+      const { sellarPlantillaEnviada } = await import("./gate-proactividad")
+      void sellarPlantillaEnviada(cleanContact, templateName)
+    }
     return true
   } catch (err) {
     console.error("[botmaker-template] Excepción al enviar plantilla:", err)

@@ -35,6 +35,27 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 const RAFAGA_MIN = Number(process.env.GATE_RAFAGA_MIN || 10)
 const REACTIVO_MIN = Number(process.env.GATE_REACTIVO_MIN || 30)
 
+/**
+ * Sello del anti-repetición de plantillas (31-ago): lo llama el push DESPUÉS
+ * de que Botmaker aceptó el envío. Solo un envío que salió de verdad quema la
+ * plantilla para ese contacto (48 h); un intento fallido puede reintentarse.
+ */
+export async function sellarPlantillaEnviada(contact: string, plantilla: string): Promise<void> {
+  const clean = String(contact || "").replace(/\D/g, "")
+  if (!clean || !plantilla) return
+  await supa(`vic_kv?on_conflict=key`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify([
+      {
+        key: `gate_tpl_${clean}`,
+        value: plantilla,
+        expires_at: new Date(Date.now() + 48 * 3600e3).toISOString(),
+      },
+    ]),
+  }).catch(() => undefined)
+}
+
 export type GateDecision = {
   /** true = el envío procede (en sombra SIEMPRE true). */
   permitir: boolean
@@ -191,15 +212,12 @@ export async function evaluarGateProactividad(
             value: String(Date.now()),
             expires_at: new Date(Date.now() + 2 * 3600e3).toISOString(),
           },
-          ...(opts.tipo === "plantilla" && opts.plantilla
-            ? [
-                {
-                  key: `gate_tpl_${clean}`,
-                  value: opts.plantilla,
-                  expires_at: new Date(Date.now() + 48 * 3600e3).toISOString(),
-                },
-              ]
-            : []),
+          // OJO (31-ago, caso de los 8 leads regalados): la marca de plantilla
+          // ya NO se estampa acá — estampar al EVALUAR condenaba por 48h a
+          // todo envío que después fallara (la marca quedaba y cada reintento
+          // moría en plantilla_repetida). Ahora la estampa el push cuando el
+          // envío efectivamente SALIÓ (sellarPlantillaEnviada, llamada desde
+          // sendBotmakerTemplate).
         ]),
       }).catch(() => undefined)
     }

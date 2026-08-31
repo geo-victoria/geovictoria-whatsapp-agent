@@ -33,7 +33,7 @@
 
 import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { appendAssistantV3, getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import {
   agregarNotaLead,
@@ -157,22 +157,43 @@ export async function POST(req: Request): Promise<Response> {
   // queda con Vicky esperando el inbound. (Capa 2: Dave excluye Form_Vicky=Si
   // del workflow "Vicky - Toque 0 WhatsApp lead asignado" en Zoho.)
   if (zohoLeadId) {
+    // CANDADO POR LEAD (31-ago, caso Doctoc: el webhook de Zoho y el poller
+    // dispararon con 5 segundos de diferencia y cada uno "regaló" el lead a
+    // una SDR distinta). El primero en llegar marca; el segundo se aplaza y
+    // el poller decide después con el estado real.
+    const lockKey = `outb_lock_${zohoLeadId}`
+    const lock = Number((await getKvValue(lockKey).catch(() => null)) || 0)
+    if (lock && Date.now() - lock < 90_000) {
+      console.log(`[outbound-lead] lead ${zohoLeadId} ya está siendo procesado (candado) — aplazado`)
+      return NextResponse.json({ ok: true, aplazado: "en_proceso", contact })
+    }
+    await setKvValue(lockKey, String(Date.now())).catch(() => {})
     try {
       const { getZohoAccessToken } = await import("@/lib/zoho-token")
       const tk = await getZohoAccessToken()
       const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-      const rl = await fetch(`${api}/crm/v3/Leads/${zohoLeadId}?fields=Form_Vicky`, {
+      const rl = await fetch(`${api}/crm/v3/Leads/${zohoLeadId}?fields=Form_Vicky,Owner`, {
         headers: { Authorization: `Zoho-oauthtoken ${tk}` },
         cache: "no-store",
       })
       if (rl.status === 200) {
-        const fv = String(
-          ((await rl.json().catch(() => ({}))) as { data?: Array<{ Form_Vicky?: string | null }> })?.data?.[0]
-            ?.Form_Vicky || "",
-        )
+        const dl = ((await rl.json().catch(() => ({}))) as {
+          data?: Array<{ Form_Vicky?: string | null; Owner?: { id?: string; email?: string } | null }>
+        })?.data?.[0]
+        const fv = String(dl?.Form_Vicky || "")
         if (/^si$/i.test(fv.trim())) {
           console.log(`[outbound-lead] lead ${zohoLeadId} viene del botón WhatsApp de landing (Form_Vicky=Si) — inbound puro, sin toque 0`)
           return NextResponse.json({ ok: true, skipped: "form_vicky_inbound" })
+        }
+        // LEAD YA ENTREGADO (orden Lalo 31-ago: "no vuelvas a enviar
+        // plantillas si ya traspasamos estos leads a las SDR"): si el dueño
+        // vigente ya no es el robot, el lead es de un humano — ni plantilla
+        // ni reasignación, nada.
+        const ownerId = String(dl?.Owner?.id || "")
+        const VICKY_ID = (process.env.VICKY_ZOHO_CREATOR_ID || "3525045000484500876").trim()
+        if (ownerId && ownerId !== VICKY_ID) {
+          console.log(`[outbound-lead] lead ${zohoLeadId} ya es de ${dl?.Owner?.email || ownerId} — sin toque 0`)
+          return NextResponse.json({ ok: true, skipped: `lead ya entregado a ${dl?.Owner?.email || "un humano"}` })
         }
       }
     } catch { /* ante la duda, el flujo outbound clásico sigue */ }
@@ -403,31 +424,56 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, envio: "omitido_numero_fijo", contact, reasignado })
   }
 
-  // GATE HORARIO — el lead de la noche NO se pierde (31-ago, al retomar la
-  // prospección de formularios). Con el gate de proactividad ENCENDIDO
-  // (29-ago) todo envío fuera de 9-21 local vuelve `false`, y ese false era
-  // indistinguible de un envío fallido: el lead se reasignaba a un humano en
-  // el acto en vez de esperar a la mañana — justo los form-fills nocturnos,
-  // que son muchos. Los motivos TRANSITORIOS (ventana horaria, anti-ráfaga)
-  // ahora APLAZAN: se responde ok SIN `skipped`, el poller no escribe
-  // Comentario_Vicky y su próximo tick (cada 2 min) lo reintenta hasta que la
-  // ventana abre. Los motivos terminales (opt-out, perdido) siguen su camino.
+  // GATE — NINGÚN BLOQUEO ES UN ENVÍO FALLIDO (31-ago, al retomar la
+  // prospección de formularios; AMPLIADO la misma tarde tras el caso de los 8
+  // leads regalados por `plantilla_repetida`). Cualquier bloqueo del gate es
+  // NUESTRO y jamás debe leerse como "envío fallido":
+  //   · motivos transitorios (ventana 9-21, anti-ráfaga) → APLAZAR: ok sin
+  //     `skipped`, el poller no marca nada y reintenta cada 2 min.
+  //   · plantilla_repetida → SKIP con motivo: desde hoy la marca solo se
+  //     estampa con envío exitoso, así que repetida = ya la recibió.
+  //   · cerrado_* (opt-out, perdido, soporte) → SKIP con motivo: a ese
+  //     contacto no se le escribe, y el lead queda marcado en Zoho para que
+  //     un humano decida.
+  // En NINGÚN caso un bloqueo del gate entrega el lead a una SDR.
   {
     const { evaluarGateProactividad } = await import("@/lib/gate-proactividad")
     const gate = await evaluarGateProactividad(contact, { tipo: "plantilla", plantilla: tplPais })
-    const TRANSITORIOS = new Set(["fuera_de_9_21", "rafaga_10min"])
-    if (!gate.permitir && gate.motivos.length > 0 && gate.motivos.every((m) => TRANSITORIOS.has(m))) {
-      console.log(`[outbound-lead] toque 0 APLAZADO ${contact}: ${gate.motivos.join(",")} — se reintenta en el próximo tick`)
-      return NextResponse.json({ ok: true, aplazado: gate.motivos.join(","), contact })
+    if (!gate.permitir && gate.motivos.length > 0) {
+      const TRANSITORIOS = new Set(["fuera_de_9_21", "rafaga_10min"])
+      if (gate.motivos.every((m) => TRANSITORIOS.has(m))) {
+        console.log(`[outbound-lead] toque 0 APLAZADO ${contact}: ${gate.motivos.join(",")} — se reintenta en el próximo tick`)
+        return NextResponse.json({ ok: true, aplazado: gate.motivos.join(","), contact })
+      }
+      console.warn(`[outbound-lead] toque 0 OMITIDO ${contact} por gate: ${gate.motivos.join(",")} — el lead queda con Vicky, marcado`)
+      return NextResponse.json({ ok: true, skipped: `gate: ${gate.motivos.join(",")}`, contact })
     }
   }
 
   // 1. Plantilla HSM de apertura (variables por nombre, como las define Botmaker).
   const sent = await sendBotmakerTemplate(contact, tplPais, { nombre, empresa }, channelId).catch(() => false)
   if (!sent) {
-    // Acuerdo con Marketing (jul-2026): si el WhatsApp no se pudo enviar, el
-    // lead NO se queda con Vicky — vuelve a un humano (round-robin SDR Inbound
-    // del país correspondiente).
+    // PRESUPUESTO DE REINTENTOS (Lalo 31-ago, tras los 8 leads regalados): un
+    // fallo real de envío ya no entrega el lead al primer golpe — el poller
+    // vuelve cada 2 minutos y acá se cuentan los intentos. Recién al TERCER
+    // fallo el lead pasa a un humano, y con el motivo escrito en
+    // Comentario_Vicky (que quedara vacío fue lo que hizo invisible el bug).
+    if (zohoLeadId) {
+      const kIntentos = `outb_intentos_${zohoLeadId}`
+      const intentos = Number((await getKvValue(kIntentos).catch(() => null)) || 0) + 1
+      if (intentos < 3) {
+        await setKvValue(kIntentos, String(intentos)).catch(() => {})
+        // liberar el candado para que el reintento del poller entre
+        await setKvValue(`outb_lock_${zohoLeadId}`, "0").catch(() => {})
+        console.warn(`[outbound-lead] envío falló (intento ${intentos}/3) lead=${zohoLeadId} — se reintenta, el lead SIGUE con Vicky`)
+        return NextResponse.json({ ok: true, aplazado: `envio_fallido_${intentos}`, contact })
+      }
+      await updateZohoLeadFields(zohoLeadId, {
+        Comentario_Vicky: `Outbound: envío de plantilla falló 3 veces (${new Date().toISOString().slice(0, 16)}Z) → entregado al equipo`,
+      }).catch(() => {})
+    }
+    // Acuerdo con Marketing (jul-2026): agotados los reintentos, el lead
+    // vuelve a un humano (round-robin SDR Inbound del país correspondiente).
     let reasignado: string | undefined
     if (zohoLeadId) {
       if (esMX) {
