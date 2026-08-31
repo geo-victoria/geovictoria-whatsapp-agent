@@ -31,7 +31,7 @@ import { parsearBorrador, sembrarBorrador, type Borrador } from "./onboarding/bo
 
 export type ResultadoTraspaso = {
   contact?: string
-  traspaso: "enviado" | "ya_enviado" | "push_fallo" | "omitido" | "sin_contacto" | "sin_link_onboarding"
+  traspaso: "enviado" | "ya_enviado" | "push_fallo" | "omitido" | "sin_contacto" | "sin_link_onboarding" | "omitido_canal_ejecutivo"
 }
 
 /**
@@ -370,6 +370,36 @@ export async function cerrarYTraspasarPostPago(
   }
 
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
+
+  // CANAL EJECUTIVO: NADA POR EL WHATSAPP DE VICKY (Lalo 31-ago, casos
+  // COMERCIAL PEREA y GAMAN MEDINA). Cuando la cotización la emitió un
+  // ejecutivo con la cotizadora, el cliente muchas veces no ha hablado nunca
+  // con Vicky: la bienvenida le llega como PRIMER mensaje, de alguien que no
+  // conoce, mientras su ejecutivo ya le está entregando el onboarding por su
+  // propio hilo. Todo lo demás sigue igual —el auto-onboarding se genera, el
+  // loop se cierra, el CRM se ordena—: lo único que se apaga es el mensaje.
+  // Sin marca de canal (cotizaciones anteriores al 19-ago) se envía como
+  // siempre: la ausencia de dato no puede dejar a un cliente sin bienvenida.
+  try {
+    const { getZohoAccessToken } = await import("./zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const r = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Intervenci_n_Humana`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    if (r.status === 200) {
+      const marca = String(
+        ((await r.json().catch(() => ({}))) as { data?: Array<{ Intervenci_n_Humana?: string }> }).data?.[0]
+          ?.Intervenci_n_Humana || "",
+      )
+      if (/intervenci/i.test(marca)) {
+        console.log(`[postpago] canal EJECUTIVO en ${quoteId}: sin mensaje de Vicky a ${contact}`)
+        return { contact, traspaso: "omitido_canal_ejecutivo" }
+      }
+    }
+  } catch { /* ante la duda, se envía: mejor una bienvenida de más que un cliente huérfano */ }
 
   const kvKey = `traspaso_postpago_${quoteId}`
   const ya = await getKvValue(kvKey).catch(() => null)
