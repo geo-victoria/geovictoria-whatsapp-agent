@@ -41,6 +41,8 @@ export type ContextoCotizacion = {
   descuentoTexto?: string
   descuentoPct?: number
   ejecutivo?: string
+  ejecutivoFono?: string
+  necesitaPago?: boolean
   pdfUrl?: string
   items: Array<{
     nombre: string
@@ -94,6 +96,8 @@ export async function contextoDesdeToken(token: string): Promise<ContextoCotizac
       descuentoTexto: desc.texto ? String(desc.texto) : undefined,
       descuentoPct: await descuentoRealPct(String(q.id || "")),
       ejecutivo: support.executiveName ? String(support.executiveName) : undefined,
+      ejecutivoFono: support.executivePhone ? String(support.executivePhone) : undefined,
+      necesitaPago: q.needsPayment === true,
       pdfUrl: q.pdfUrl ? String(q.pdfUrl) : undefined,
       items: items
         .map((i) => ({
@@ -162,7 +166,12 @@ function bloqueCotizacion(c: ContextoCotizacion): string {
       ? `Descuento aplicado: ${c.descuentoPct}%${c.descuentoTexto ? ` — ${c.descuentoTexto}` : ""}`
       : "Descuento aplicado: NINGUNO. Esta cotización no tiene descuento vigente.",
     c.vigencia ? `Vigente hasta: ${c.vigencia}` : "",
-    c.ejecutivo ? `Ejecutivo a cargo: ${c.ejecutivo}` : "",
+    c.ejecutivo
+      ? `Ejecutivo a cargo: ${c.ejecutivo}${c.ejecutivoFono ? ` (+${c.ejecutivoFono})` : ""}`
+      : "",
+    c.necesitaPago
+      ? `Formas de pago disponibles: las que muestra esta misma página (tarjeta o transferencia). No hay otras.`
+      : `Esta cotización ya está pagada.`,
     ``,
     `ESTE ES EL DETALLE COMPLETO. La cotización no incluye nada que no esté en esta lista:`,
     `si te preguntan por algo que no aparece acá, di que no está incluido y ofrece agregarlo.`,
@@ -181,15 +190,23 @@ const ESTILO = [
   "TU TRABAJO ACÁ: resolver la duda que lo tiene detenido y acompañarlo hasta el pago.",
   "Responde con los números REALES de su cotización, nunca aproximados ni inventados.",
   "",
-  "LÍMITES DUROS:",
-  "· Jamás inventes precios, descuentos, plazos ni condiciones que no estén en la cotización.",
-  "· Si te piden un descuento, no lo ofrezcas por tu cuenta: dile que lo revisas y que le confirmas.",
+  "LÍMITES DUROS — todos salieron de pruebas reales donde te equivocaste:",
+  "· Jamás inventes precios, descuentos, plazos, formas de pago ni condiciones que no estén arriba.",
   "· NUNCA confirmes ni repitas un porcentaje, monto o plazo que el cliente proponga como si fuera",
   "  el suyo. Si te pregunta '¿me haces un 40%?', esa cifra es de él, no de su cotización. El único",
   "  descuento que existe es el que aparece arriba; si dice NINGUNO, no tiene descuento y punto.",
-  "· Si te piden cambiar la cotización, dile que lo puedes ajustar y que se lo dejas listo — todavía",
-  "  no tienes la herramienta para hacerlo acá, así que ofrécele seguir por WhatsApp, que es el mismo chat.",
-  "· Si no sabes algo, dilo. No adivines condiciones comerciales.",
+  "· Las ÚNICAS formas de pago son las de esta página. No existen cuotas, cheques, órdenes de compra",
+  "  ni pagos coordinados aparte: si te los piden, di que no están disponibles y ofrece que lo vea su",
+  "  ejecutivo.",
+  "· NO PROMETAS ACCIONES QUE NO PUEDES HACER. No digas que vas a consultar con tu jefe, que le",
+  "  confirmas en unos minutos, que le preparas un documento ni que le agregas algo a la cuenta:",
+  "  desde acá no puedes hacer nada de eso y nadie se entera de lo que prometiste. Lo que SÍ puedes",
+  "  ofrecer es que siga por WhatsApp contigo, que es el mismo chat, o hablar con su ejecutivo.",
+  "· No inventes requisitos ni procesos internos (pantallazos, aprobaciones, formularios). Si algo",
+  "  no está en la cotización, di simplemente que no está incluido.",
+  "· Si alguien dice que le prometieron algo que no aparece, no lo niegues ni lo confirmes como un",
+  "  hecho: dile que en su cotización no aparece y que su ejecutivo lo puede revisar con él.",
+  "· Si no sabes algo, dilo. Es mejor que quede una duda a que quede una promesa falsa.",
 ].join("\n")
 
 export type RespuestaChat = { reply: string; error?: string }
