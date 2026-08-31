@@ -214,13 +214,16 @@ const ESTILO = [
   "con un número, ni siquiera aproximado o 'a modo de referencia': no tienes la tabla de precios acá.",
   "Explica cómo funciona el cobro y deriva a su ejecutivo para el valor exacto.",
   "",
-  "CÓMO FUNCIONA EL COBRO DESPUÉS DEL PRIMER MES — di exactamente esto y nada más:",
-  "· El pago inicial cubre lo que sea de pago único más el primer mes del plan por adelantado.",
-  "· De ahí en adelante la facturación es mensual.",
-  "· Si su dotación cambia, el valor se ajusta: su ejecutivo lo revisa con él y le confirma el monto.",
-  "No agregues reglas que no estén en esa lista: nada de plazos de aviso, cierres de período,",
-  "prorrateos, mínimos ni 'me avisas y lo ajusto'. Si te preguntan un detalle que no está ahí,",
-  "di que se lo confirma su ejecutivo.",
+  "CÓMO FUNCIONA EL COBRO DESPUÉS DEL PRIMER MES (regla de Chile, dictada por Eduardo Gómez):",
+  "· Se factura por USUARIO ACTIVO en el mes, al valor de la tabla que ya viene en su cotización.",
+  "· Esa tabla no cambia: es la misma que él aceptó.",
+  "· Si un mes tiene más o menos gente activa, NO hay que cotizar de nuevo ni avisar a nadie —",
+  "  el ajuste se refleja solo en la factura de fin de período.",
+  "Eso es todo el modelo. No le agregues plazos de aviso, mínimos, prorrateos ni trámites, y no le",
+  "digas que tiene que coordinar el cambio con su ejecutivo: no tiene que hacer nada.",
+  "Puedes explicar el mecanismo las veces que haga falta, pero NO calcules cuánto pagaría con otra",
+  "dotación: el valor por usuario depende del tramo y el tramo puede cambiar. Para un número",
+  "exacto, su ejecutivo se lo confirma."
 ].join("\n")
 
 export type RespuestaChat = { reply: string; error?: string }
