@@ -156,7 +156,7 @@ export async function getUFActualSafe(): Promise<number> {
 export const generarLinkCotizadoraSchema = {
   name: "generar_link_cotizadora",
   description:
-    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y envía el correo al cliente. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala apenas el cliente entregue los datos que le pediste tras mostrar el precio (normalmente RUT + email): esa entrega ES la confirmación implícita (política 24-jul) — no hagas preguntas de confirmación adicionales. NO la uses si el cliente está rechazando ni antes de que haya visto un precio. Si la cotización incluye hardware, requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un reloj). Normalmente NO necesitas pasar IDs de Zoho: el backend deduplica por RUT — si la empresa ya existe asocia la cotización a su cuenta, y si no la crea. EXCEPCIÓN (conversaciones que iniciaste tú, con bloque '[Datos del formulario web: ... zohoLeadId ...]'): pasa `leadId` = ese zohoLeadId para que el lead original se CONVIERTA en cuenta+contacto+deal con la cotización asociada, sin duplicados.",
+    "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y, SI hay correo, se lo envía al cliente. `contactoEmail` es OPCIONAL (Lalo 31-ago): con el RUT basta para emitir — sin correo la entrega corre por este mismo WhatsApp (tu mensaje con el link + el PDF que adjunta el sistema) y el correo se lo pide el formulario de facturación al aceptar. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala apenas el cliente entregue el RUT tras mostrar el precio (con o sin correo): esa entrega ES la confirmación implícita (política 24-jul) — no hagas preguntas de confirmación adicionales. NO la uses si el cliente está rechazando ni antes de que haya visto un precio. Si la cotización incluye hardware, requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un reloj). Normalmente NO necesitas pasar IDs de Zoho: el backend deduplica por RUT — si la empresa ya existe asocia la cotización a su cuenta, y si no la crea. EXCEPCIÓN (conversaciones que iniciaste tú, con bloque '[Datos del formulario web: ... zohoLeadId ...]'): pasa `leadId` = ese zohoLeadId para que el lead original se CONVIERTA en cuenta+contacto+deal con la cotización asociada, sin duplicados.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -272,7 +272,7 @@ export const generarLinkCotizadoraSchema = {
           "Descuento negociado en el preform. Si el cliente ACEPTÓ un descuento durante la negociación (consultar_descuento_referencial), pasá el `escalon_actual` que devolvió la consulta que el cliente aceptó: la cotización se generará YA con ese descuento (un solo PDF, con el precio acordado). Si no hubo descuento, omití este campo.",
       },
     },
-    required: ["contacto", "contactoEmail", "rutEmpresa", "userCount", "modulos"],
+    required: ["contacto", "rutEmpresa", "userCount", "modulos"],
   },
 }
 
