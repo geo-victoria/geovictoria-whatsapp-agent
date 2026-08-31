@@ -403,6 +403,25 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, envio: "omitido_numero_fijo", contact, reasignado })
   }
 
+  // GATE HORARIO — el lead de la noche NO se pierde (31-ago, al retomar la
+  // prospección de formularios). Con el gate de proactividad ENCENDIDO
+  // (29-ago) todo envío fuera de 9-21 local vuelve `false`, y ese false era
+  // indistinguible de un envío fallido: el lead se reasignaba a un humano en
+  // el acto en vez de esperar a la mañana — justo los form-fills nocturnos,
+  // que son muchos. Los motivos TRANSITORIOS (ventana horaria, anti-ráfaga)
+  // ahora APLAZAN: se responde ok SIN `skipped`, el poller no escribe
+  // Comentario_Vicky y su próximo tick (cada 2 min) lo reintenta hasta que la
+  // ventana abre. Los motivos terminales (opt-out, perdido) siguen su camino.
+  {
+    const { evaluarGateProactividad } = await import("@/lib/gate-proactividad")
+    const gate = await evaluarGateProactividad(contact, { tipo: "plantilla", plantilla: tplPais })
+    const TRANSITORIOS = new Set(["fuera_de_9_21", "rafaga_10min"])
+    if (!gate.permitir && gate.motivos.length > 0 && gate.motivos.every((m) => TRANSITORIOS.has(m))) {
+      console.log(`[outbound-lead] toque 0 APLAZADO ${contact}: ${gate.motivos.join(",")} — se reintenta en el próximo tick`)
+      return NextResponse.json({ ok: true, aplazado: gate.motivos.join(","), contact })
+    }
+  }
+
   // 1. Plantilla HSM de apertura (variables por nombre, como las define Botmaker).
   const sent = await sendBotmakerTemplate(contact, tplPais, { nombre, empresa }, channelId).catch(() => false)
   if (!sent) {
