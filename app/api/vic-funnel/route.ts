@@ -2464,6 +2464,8 @@ type FilaFormVicky = {
   Lead_Source?: string
   Territorio?: string
   Landing_Page?: string
+  Campaign?: string
+  Medium?: string
   _convertido?: boolean
 }
 
@@ -2487,7 +2489,7 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
       cache: "no-store",
       body: JSON.stringify({
         select_query:
-          `select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio, Landing_Page from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200 offset ${offset}`,
+          `select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio, Landing_Page, Campaign, Medium from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200 offset ${offset}`,
       }),
     })
     if (!rq.ok || rq.status === 204) break
@@ -2497,7 +2499,7 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
   }
   for (let page = 1; page <= 10; page++) {
     const rc = await fetch(
-      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio,Landing_Page&per_page=200&page=${page}`,
+      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio,Landing_Page,Campaign,Medium&per_page=200&page=${page}`,
       { headers: H, cache: "no-store" },
     )
     if (!rc.ok || rc.status === 204) break
@@ -3558,6 +3560,8 @@ function renderInboundDiario(
     formVicky?: Map<string, Array<[string, string]>>
     /** día → cuántos de esos form-fills llegaron al chat (💬). */
     formConv?: Map<string, number>
+    /** tel → nombre de la campaña de marketing del lead (rotula sub-filas). */
+    campanas?: Map<string, string>
     /** Tels del form que llegaron al chat (viñeta del paréntesis n💬). */
     formConvTels?: Set<string>
     /** Todos los teléfonos discables del form: marca qué Entrantes vinieron
@@ -3784,6 +3788,41 @@ function renderInboundDiario(
     if (origenesDelDia(d).length === 0) return ""
     return `<button class="oarrow" data-odia="${claseDia(d)}" title="Desglosar por origen (sitio web vs landings)" style="border:0;background:none;cursor:pointer;color:#00aff2;font-size:12px;padding:0 4px 0 0">▸</button>`
   }
+  // Nombre legible de una landing a partir del path (Lalo 31-ago): se botan
+  // los prefijos de idioma/país y los guiones — "/es-cl/marcaje/reloj-control/"
+  // → "Marcaje · Reloj control"; "/es-cl/" → "Home".
+  const nombreLanding = (path: string): string => {
+    const segs = path.split("/").filter(Boolean).filter((sg) => !/^es(-[a-z]{2})?$/i.test(sg))
+    if (!segs.length) return "Home"
+    return segs.map((sg) => {
+      const limpio = sg.replace(/-/g, " ").trim()
+      return limpio.charAt(0).toUpperCase() + limpio.slice(1)
+    }).join(" · ")
+  }
+  // Campañas de marketing (Campaign del lead) de los contactos de esa fila.
+  const campanasDe = (d: string, origen: string): string[] => {
+    if (!opts.campanas?.size) return []
+    const u = new Set<string>()
+    for (const et of ETAPAS_INBOUND) {
+      const tels = d === "TOTAL" ? [...porDia[et].values()].flatMap((sx) => [...sx]) : [...(porDia[et].get(d) || [])]
+      for (const t of tels) {
+        if (origenDe(t) !== origen) continue
+        const c = opts.campanas.get(telDeElemento(t))
+        if (c) u.add(c)
+      }
+    }
+    return [...u].sort()
+  }
+  const etiquetaOrigen = (d: string, o: string): string => {
+    if (!o.startsWith("🧲 ") || o.includes("(sin página)")) return esc(o)
+    const path = o.slice(3).trim()
+    const url = `https://geovictoria.com${path.startsWith("/") ? path : `/${path}`}`
+    const camps = campanasDe(d, o)
+    const sufijoCamp = camps.length
+      ? ` <span style="color:#8a5a00" title="Campaña de marketing (campo Campaign del lead)">📣 ${esc(camps.slice(0, 2).join(", "))}${camps.length > 2 ? ` +${camps.length - 2}` : ""}</span>`
+      : ""
+    return `🧲 <a href="${url}" target="_blank" rel="noopener" title="${esc(path)} — abrir la landing" style="color:#0e7490;border-bottom:1px dashed #9fc3d0">${esc(nombreLanding(path))}</a>${sufijoCamp}`
+  }
   const subFilasOrigen = (d: string): string => {
     if (!opts.origenes) return ""
     const origenes = origenesDelDia(d)
@@ -3797,7 +3836,7 @@ function renderInboundDiario(
         const pagO = cntOrigen("pagada", d, o)
         const precioO = cntOrigen("precio", d, o)
         return `<tr class="ofila ${claseDia(d)}" style="display:none;background:#f7fafc;font-size:12px">
-      <td style="padding-left:22px;white-space:nowrap;color:#4b5563">${esc(o)}</td>
+      <td style="padding-left:22px;white-space:nowrap;color:#4b5563">${etiquetaOrigen(d, o)}</td>
       <td style="text-align:center;color:#c8cdd3">—</td><td style="text-align:center;color:#c8cdd3">—</td>${c("entrantes")}${c("ic")}${c("ce")}${c("ce_sop", "sube")}${c("ce_pos", "sube")}${c("ce_cob", "sube")}${c("nocal")}${c("noid")}
       ${c("precio", "divi")}${c("formal")}${c("aceptada")}${c("pagada")}
       <td style="text-align:center;color:#6b7280">${pctDe(pagO, precioO)}</td>
@@ -7626,6 +7665,9 @@ export async function GET(req: Request): Promise<Response> {
         // LANDING de su lead; quien llegó por el botón directo cae a "Sitio
         // web" en el render. Un tel con varios fills conserva el primero.
         const origenPorTel = new Map<string, string>()
+        // Campaña de marketing del lead (Campaign, ej "Chile-Search-Hardware")
+        // para rotular las sub-filas por landing (Lalo 31-ago).
+        const campanaPorTel = new Map<string, string>()
         for (const f of formLeads) {
           const ms = Date.parse(String(f.Created_Time || ""))
           if (!Number.isFinite(ms)) continue
@@ -7638,6 +7680,9 @@ export async function GET(req: Request): Promise<Response> {
           if (telOk && !origenPorTel.has(telForm)) {
             const lp = String(f.Landing_Page || "").trim().replace(/^https?:\/\/[^/]+/i, "")
             origenPorTel.set(telForm, `🧲 ${lp || "landing (sin página)"}`)
+          }
+          if (telOk && !campanaPorTel.has(telForm) && String(f.Campaign || "").trim()) {
+            campanaPorTel.set(telForm, String(f.Campaign || "").trim())
           }
           if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
           // Mismo día-Santiago del resto de la tabla (YYYY-MM-DD).
@@ -7757,7 +7802,7 @@ export async function GET(req: Request): Promise<Response> {
             String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim()
           if (qid && emp) nombresQuote.set(qid, emp)
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formConvTels: inbdet ? undefined : formConvTels, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formConvTels: inbdet ? undefined : formConvTels, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, campanas: inbdet ? undefined : campanaPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
