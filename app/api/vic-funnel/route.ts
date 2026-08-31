@@ -3558,6 +3558,8 @@ function renderInboundDiario(
     formVicky?: Map<string, Array<[string, string]>>
     /** día → cuántos de esos form-fills llegaron al chat (💬). */
     formConv?: Map<string, number>
+    /** Tels del form que llegaron al chat (viñeta del paréntesis n💬). */
+    formConvTels?: Set<string>
     /** Todos los teléfonos discables del form: marca qué Entrantes vinieron
      * de la landing/sitio (🧲) vs inbound orgánico. */
     formTels?: Set<string>
@@ -3672,7 +3674,7 @@ function renderInboundDiario(
     const v = d === "TOTAL" ? fvTotal : (fv.get(d) || []).length
     if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
     const conv = d === "TOTAL" ? fvConvTotal : opts.formConv?.get(d) || 0
-    const sufijo = conv > 0 ? ` <span style="font-size:11px;color:#15803d;white-space:nowrap">(${conv}💬)</span>` : ""
+    const sufijo = conv > 0 ? ` <span class="subpop" data-et="formconv" data-dia="${d}" style="font-size:11px;color:#15803d;white-space:nowrap;cursor:pointer">(${conv}💬)</span>` : ""
     return `<td class="conpop" data-et="form" data-dia="${d}" style="text-align:center;white-space:nowrap"><a href="#formlanding" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
   }
   // Columna "📋 Formulario" (Lalo 31-ago): leads del formulario web asignados
@@ -3686,14 +3688,26 @@ function renderInboundDiario(
   const suma = (m?: Map<string, number>) => [...(m || new Map<string, number>()).values()].reduce((a, n) => a + n, 0)
   const obTocTotal = suma(opts.outboundToc)
   const obRegTotal = suma(opts.outboundReg)
+  // Viñetas de los PARÉNTESIS (Lalo 31-ago): cada sub-número tiene su propio
+  // listado al pasar el mouse — subconjuntos de las listas ya armadas.
+  const subLista = (base: Record<string, Array<[string, string]>>, pred: (par: [string, string]) => boolean) => {
+    const out: Record<string, Array<[string, string]>> = {}
+    for (const [dia, lista] of Object.entries(base || {})) out[dia] = lista.filter(pred)
+    return out
+  }
+  VIN["formconv"] = subLista(VIN["form"], (p) => !!p[1] && !!opts.formConvTels?.has(p[1]))
+  VIN["outbtoc"] = subLista(VIN["outb"], (p) => p[0].startsWith("💬"))
+  VIN["outbreg"] = subLista(VIN["outb"], (p) => p[0].startsWith("↪"))
+  VIN["convform"] = subLista(VIN["entrantes"], (p) => !!p[1] && !!opts.formTels?.has(p[1]))
+  VIN["convoutb"] = subLista(VIN["entrantes"], (p) => !!p[1] && !!opts.outboundTels?.has(p[1]))
   const celdaOutbound = (d: string) => {
     const v = d === "TOTAL" ? obTotal : (ob.get(d) || []).length
     if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
     const toc = d === "TOTAL" ? obTocTotal : opts.outboundToc?.get(d) || 0
     const reg = d === "TOTAL" ? obRegTotal : opts.outboundReg?.get(d) || 0
     const partes = [
-      toc > 0 ? `<span style="color:#15803d" title="Contactados: les salió el toque de Vicky">${toc}💬</span>` : "",
-      reg > 0 ? `<span style="color:#b45309" title="Entregados a una SDR sin lograr contacto — pasa el mouse para ver a quién">${reg}↪</span>` : "",
+      toc > 0 ? `<span class="subpop" data-et="outbtoc" data-dia="${d}" style="color:#15803d;cursor:pointer" title="Contactados: les salió el toque de Vicky">${toc}💬</span>` : "",
+      reg > 0 ? `<span class="subpop" data-et="outbreg" data-dia="${d}" style="color:#b45309;cursor:pointer" title="Entregados a una SDR sin lograr contacto — pasa el mouse para ver a quién">${reg}↪</span>` : "",
     ].filter(Boolean)
     const sufijo = partes.length ? ` <span style="font-size:11px;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
     return `<td class="conpop" data-et="outb" data-dia="${d}" style="text-align:center;white-space:nowrap"><b>${v}</b>${sufijo}</td>`
@@ -3737,7 +3751,10 @@ function renderInboundDiario(
     if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
     const deForm = etapa === "entrantes" ? entrantesDeForm(dia) : 0
     const deOut = etapa === "entrantes" ? entrantesDeOutbound(dia) : 0
-    const partes = [deForm > 0 ? `${deForm}🧲` : "", deOut > 0 ? `${deOut}📋` : ""].filter(Boolean)
+    const partes = [
+      deForm > 0 ? `<span class="subpop" data-et="convform" data-dia="${dia}" style="cursor:pointer">${deForm}🧲</span>` : "",
+      deOut > 0 ? `<span class="subpop" data-et="convoutb" data-dia="${dia}" style="cursor:pointer">${deOut}📋</span>` : "",
+    ].filter(Boolean)
     const sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${partes.length ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
   }
@@ -3811,7 +3828,10 @@ function renderInboundDiario(
     if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
     const deForm = etapa === "entrantes" ? entrantesDeForm("TOTAL") : 0
     const deOut = etapa === "entrantes" ? entrantesDeOutbound("TOTAL") : 0
-    const partes = [deForm > 0 ? `${deForm}🧲` : "", deOut > 0 ? `${deOut}📋` : ""].filter(Boolean)
+    const partes = [
+      deForm > 0 ? `<span class="subpop" data-et="convform" data-dia="TOTAL" style="cursor:pointer">${deForm}🧲</span>` : "",
+      deOut > 0 ? `<span class="subpop" data-et="convoutb" data-dia="TOTAL" style="cursor:pointer">${deOut}📋</span>` : "",
+    ].filter(Boolean)
     const sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${partes.length ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
   }
@@ -3861,14 +3881,14 @@ function renderInboundDiario(
     <th>Día</th><th style="text-align:center">🧲 Form Inbound</th><th style="text-align:center">📋 Form Outbound</th><th style="text-align:center">Conversaciones iniciadas</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">FORM INBOUND: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORM OUTBOUND: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el paréntesis desglosa en qué terminó cada uno: 💬 contactados (les salió el toque) y ↪ entregados a una SDR sin lograr contacto — al pasar el mouse por el número se ve cada empresa y, en los ↪, a qué ejecutiva se entregó. Cuántos RESPONDIERON se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM INBOUND: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORM OUTBOUND: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el paréntesis desglosa en qué terminó cada uno: 💬 contactados (les salió el toque) y ↪ entregados a una SDR sin lograr contacto — al pasar el mouse por el número se ve cada empresa y, en los ↪, a qué ejecutiva se entregó. Cuántos RESPONDIERON se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas — los números de los PARÉNTESIS también tienen su viñeta con el detalle; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
     var VIN = ${jsonSeguro(VIN)};
     var DET = ${jsonSeguro(DET)};
     var TRS = ${jsonSeguro(TRS)};
-    var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Inbound (llenaron el miniform)", outb: "📋 Form Outbound · tramo Vicky (toque 0 de Vicky)" })};
+    var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Inbound (llenaron el miniform)", outb: "📋 Form Outbound · tramo Vicky (toque 0 de Vicky)", formconv: "🧲💬 Form Inbound que llegaron al chat", outbtoc: "📋💬 Form Outbound contactados (les salió el toque)", outbreg: "📋↪ Form Outbound entregados a una SDR", convform: "Conversaciones venidas del Form Inbound 🧲", convoutb: "Conversaciones venidas del Form Outbound 📋" })};
     var pop = document.createElement("div"); pop.id = "inbpop"; document.body.appendChild(pop);
     // Flechitas de origen (Lalo 26-ago): despliegan las sub-filas por origen
     // (sitio web vs cada landing) del día.
@@ -3892,8 +3912,12 @@ function renderInboundDiario(
         if (par[1]) html += '<a href="#" data-tel="' + par[1] + '">' + par[0] + "</a>";
         else html += '<a href="#formlanding">' + par[0] + " ⚠️</a>";
       });
-      if (lista.length > 30) html += '<a href="' + td.querySelector("a").getAttribute("href") + '">… y ' + (lista.length - 30) + " más</a>";
-      html += '<a href="' + td.querySelector("a").getAttribute("href") + '" style="color:#00aff2">📄 listado completo →</a>';
+      // La ancla del TD padre (si existe) da el "listado completo"; la celda
+      // 📋 y los sub-números del paréntesis no siempre la tienen.
+      var tdBase = td.closest ? (td.closest("td") || td) : td;
+      var ancla = tdBase.querySelector ? tdBase.querySelector("a[href]") : null;
+      if (lista.length > 30) html += ancla ? '<a href="' + ancla.getAttribute("href") + '">… y ' + (lista.length - 30) + " más</a>" : '<div class="t">… y ' + (lista.length - 30) + " más</div>";
+      if (ancla) html += '<a href="' + ancla.getAttribute("href") + '" style="color:#00aff2">📄 listado completo →</a>';
       pop.innerHTML = html;
       pop.querySelectorAll("a[data-tel]").forEach(function (a) {
         a.addEventListener("click", function (ev) { ev.preventDefault(); detalle(a.getAttribute("data-tel")); });
@@ -3958,6 +3982,15 @@ function renderInboundDiario(
       } else {
         td.addEventListener("mouseenter", function () { abrir(td); });
         td.addEventListener("mouseleave", cerrar);
+      }
+    });
+    // Sub-números del paréntesis (Lalo 31-ago): viñeta propia con su listado.
+    document.querySelectorAll(".subpop").forEach(function (sp) {
+      if (esTouch) {
+        sp.addEventListener("click", function (ev) { ev.preventDefault(); ev.stopPropagation(); abrir(sp); });
+      } else {
+        sp.addEventListener("mouseenter", function () { abrir(sp); });
+        sp.addEventListener("mouseleave", cerrar);
       }
     });
     if (esTouch) {
@@ -7587,6 +7620,7 @@ export async function GET(req: Request): Promise<Response> {
         // Cruces del embudo web→chat (Lalo 21-ago "OK!"): cuántos del form
         // llegaron al chat, y qué entrantes vinieron del form (por teléfono).
         const formConvPorDia = new Map<string, number>()
+        const formConvTels = new Set<string>()
         const formTels = new Set<string>()
         // Origen por contacto (Lalo 26-ago): quien llenó el form queda con la
         // LANDING de su lead; quien llegó por el botón directo cae a "Sitio
@@ -7612,7 +7646,10 @@ export async function GET(req: Request): Promise<Response> {
           const arr = formPorDia.get(dia) || []
           arr.push([etiqueta, telOk ? telForm : ""])
           formPorDia.set(dia, arr)
-          if (telOk && primeraVez.has(telForm)) formConvPorDia.set(dia, (formConvPorDia.get(dia) || 0) + 1)
+          if (telOk && primeraVez.has(telForm)) {
+            formConvPorDia.set(dia, (formConvPorDia.get(dia) || 0) + 1)
+            formConvTels.add(telForm)
+          }
         }
         // 📋 FORMULARIO WEB · TRAMO VICKY (Lalo 31-ago; redefinida la misma
         // tarde, dos veces): el número grande es TODO lo que le tocó a Vicky
@@ -7720,7 +7757,7 @@ export async function GET(req: Request): Promise<Response> {
             String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim()
           if (qid && emp) nombresQuote.set(qid, emp)
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formConvTels: inbdet ? undefined : formConvTels, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
