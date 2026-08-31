@@ -1628,6 +1628,44 @@ async function processOneTurn(
           break
         }
       }
+
+      // EL PDF VIAJA CON EL LINK (Lalo 31-ago): cuando el turno entrega la
+      // aceptación online, el documento va TAMBIÉN como archivo en el chat —
+      // no como un link más. El cliente que quiere leer la propuesta la abre
+      // ahí mismo, sin salir de WhatsApp ni buscar el correo (que cae en
+      // Promociones — diagnóstico 26-jul). Va DESPUÉS del texto para que el
+      // mensaje explique el archivo y no al revés. Best-effort absoluto: si
+      // el envío falla, el link ya salió y la venta sigue.
+      try {
+        const entregaCot = (result.toolCalls || []).some(
+          (c) => (c.name === "generar_link_cotizadora" || c.name === "actualizar_cotizacion") && c.ok,
+        )
+        if (entregaCot) {
+          let pdfUrl = extractPdfUrl(result.toolCalls as ToolCallRecord[] | undefined) || ""
+          let numero = ""
+          if (!pdfUrl) {
+            const puntero = await getQuotePointer(contact).catch(() => null)
+            pdfUrl = String(puntero?.pdfUrl || "")
+            numero = String(puntero?.quoteId || "")
+          }
+          // Anti-repetición: el mismo archivo no se manda dos veces (un
+          // reintento del turno, o una actualización que no cambió el PDF).
+          // La marca es la URL misma: cada regeneración trae nombre nuevo.
+          const marcaPdf = pdfUrl ? `pdfwa_${pdfUrl.split("/").pop()}` : ""
+          const yaEnviado = marcaPdf ? await getKvValue(marcaPdf).catch(() => null) : null
+          if (pdfUrl && !yaEnviado) {
+            const { sendBotmakerMedia } = await import("@/lib/botmaker-push-v3")
+            const ok = await sendBotmakerMedia(contact, pdfUrl, {
+              filename: `Cotizacion_GeoVictoria${numero ? `_${numero}` : ""}.pdf`,
+              mimeType: "application/pdf",
+            })
+            if (ok && marcaPdf) await setKvValue(marcaPdf, new Date().toISOString()).catch(() => {})
+            console.log(`[v3-bg] PDF adjunto ${ok ? "enviado" : "FALLÓ"} a ${contact}: ${pdfUrl}`)
+          }
+        }
+      } catch (e) {
+        console.warn(`[v3-bg] adjunto del PDF falló para ${contact}:`, e instanceof Error ? e.message : e)
+      }
     } else {
       console.warn(`[v3-bg] Reply vacío para ${contact}, no se envía push`)
     }
