@@ -52,7 +52,33 @@ async function autorizado(req: Request): Promise<boolean> {
   return Boolean(entregado) && (entregado === secreto || (Boolean(cron) && entregado === cron))
 }
 
-async function actuando(): Promise<boolean> {
+/**
+ * DOS INTERRUPTORES, no uno (29-ago): las dos acciones tienen riesgos muy
+ * distintos y no deben encenderse juntas.
+ *
+ * · CIERRE POR PAGO — no cambia la propiedad de nada: solo deja de mandarle
+ *   mensajes de venta a alguien que ya pagó. Se puede encender de inmediato.
+ * · ESCALADA A TELEMARKETING — mueve oportunidades entre personas. Merece
+ *   quedarse en sombra hasta ver varios casos reales.
+ *
+ * Cada uno con su llave en vic_kv (o su env). `?dry=1` fuerza sombra en ambos.
+ */
+async function actuandoCierrePago(): Promise<boolean> {
+  if ((process.env.CONCILIADOR_CIERRE_PAGO || "").trim() === "1") return true
+  const kv = await getKvValue("conciliador_cierre_pago").catch(() => null)
+  if ((kv || "").trim().toLowerCase() === "on") return true
+  return actuandoGlobal()
+}
+
+async function actuandoEscalada(): Promise<boolean> {
+  if ((process.env.CONCILIADOR_ESCALADA || "").trim() === "1") return true
+  const kv = await getKvValue("conciliador_escalada").catch(() => null)
+  if ((kv || "").trim().toLowerCase() === "on") return true
+  return actuandoGlobal()
+}
+
+/** Llave maestra: enciende las dos de una vez. */
+async function actuandoGlobal(): Promise<boolean> {
   if ((process.env.CONCILIADOR_ENABLED || "").trim() === "1") return true
   const kv = await getKvValue("conciliador_enabled").catch(() => null)
   return (kv || "").trim().toLowerCase() === "on"
@@ -84,7 +110,9 @@ async function correr(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "sin credenciales de base" }, { status: 503 })
   }
   const sp = new URL(req.url).searchParams
-  const dry = sp.get("dry") === "1" || !(await actuando())
+  const forzarSombra = sp.get("dry") === "1"
+  const dryPago = forzarSombra || !(await actuandoCierrePago())
+  const dryEscalada = forzarSombra || !(await actuandoEscalada())
   const tope = Math.min(Math.max(Number(sp.get("limite")) || 40, 1), 120)
 
   const hallazgos: Desajuste[] = []
@@ -107,7 +135,7 @@ async function correr(req: Request): Promise<NextResponse> {
         contact,
         detalle: `pago registrado (${cot}) y el loop sigue activo`,
       })
-      if (dry) continue
+      if (dryPago) continue
       try {
         const { pagoCierraLoop } = await import("@/lib/loop-v2")
         await pagoCierraLoop(contact, "pagado")
@@ -156,7 +184,7 @@ async function correr(req: Request): Promise<NextResponse> {
         dueno: real.duenoDealEmail,
         detalle: `cotización ${real.estadoCotizacion} en manos de SDR`,
       })
-      if (dry) continue
+      if (dryEscalada) continue
       const candado = `conc_formal_${real.dealId}`
       if (await getKvValue(candado).catch(() => null)) continue
       try {
@@ -174,7 +202,10 @@ async function correr(req: Request): Promise<NextResponse> {
 
   return NextResponse.json({
     ok: true,
-    modo: dry ? "sombra (solo reporta)" : "aplicando",
+    modo: {
+      cierre_por_pago: dryPago ? "sombra" : "aplicando",
+      escalada_a_telemarketing: dryEscalada ? "sombra" : "aplicando",
+    },
     revisados: tope,
     hallazgos,
     ...(aplicados.length ? { aplicados } : {}),
