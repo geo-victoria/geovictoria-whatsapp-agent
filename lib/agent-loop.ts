@@ -1219,6 +1219,30 @@ export async function runAgentLoop(params: {
                 zohoEventId: typeof r.eventId === "string" ? r.eventId : undefined,
                 reminderAt: reminderAt ? reminderAt.toISOString() : null,
               }).catch(() => {})
+              // LA REUNIÓN QUEDA ESCRITA EN ZOHO (29-ago): evento, tarea al
+              // anfitrión y nota en el lead. Hasta hoy la reunión vivía solo
+              // en Cal y en el calendario del host — quien abría el lead no
+              // tenía cómo saber que existía (caso José Pablo, 550 personas,
+              // que confirmó asistencia y esperó solo). Va DESPUÉS de
+              // persistir y es best-effort: si Zoho no responde, la reunión
+              // sigue agendada y el cliente ya tiene su invitación.
+              try {
+                const { escribirReunionEnZoho } = await import("./reunion-en-zoho")
+                await escribirReunionEnZoho({
+                  leadId: typeof r.leadId === "string" ? r.leadId : undefined,
+                  contact,
+                  prospectName:
+                    typeof toolInput.prospectName === "string" ? toolInput.prospectName : undefined,
+                  prospectEmail:
+                    typeof toolInput.prospectEmail === "string" ? toolInput.prospectEmail : undefined,
+                  startIso,
+                  timezone,
+                  meetingUrl: typeof r.meetingUrl === "string" ? r.meetingUrl : undefined,
+                  organizerEmail:
+                    typeof r.organizerEmail === "string" ? r.organizerEmail : undefined,
+                  bookingUid,
+                })
+              } catch { /* nunca bloquea el agendamiento */ }
             }
           }
         }
