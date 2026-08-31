@@ -195,6 +195,20 @@ export async function POST(req: Request): Promise<Response> {
           console.log(`[outbound-lead] lead ${zohoLeadId} ya es de ${dl?.Owner?.email || ownerId} — sin toque 0`)
           return NextResponse.json({ ok: true, skipped: `lead ya entregado a ${dl?.Owner?.email || "un humano"}` })
         }
+        // FOTO DE LA ASIGNACIÓN (Lalo 31-ago, "quiero la tasa entre lo que se
+        // le asigna y lo que logra contactar"): la primera vez que este lead
+        // del tramo pasa por acá siendo de Vicky, queda la marca — inmutable,
+        // gane o pierda el envío después. El dash cuenta la columna 📋 desde
+        // estas marcas; vic_outbound_cadence (que además gobierna el umbral
+        // de precios) sigue naciendo solo con el toque REAL.
+        const kAsig = `outb_asignado_${zohoLeadId}`
+        const yaAsig = await getKvValue(kAsig).catch(() => null)
+        if (!yaAsig) {
+          await setKvValue(
+            kAsig,
+            JSON.stringify({ at: new Date().toISOString(), contact, nombre, empresa }),
+          ).catch(() => {})
+        }
       }
     } catch { /* ante la duda, el flujo outbound clásico sigue */ }
   }
@@ -300,6 +314,13 @@ export async function POST(req: Request): Promise<Response> {
       console.warn(
         `[outbound-lead] telefono ${contact} sin prefijo +56/+57 (país real: ${paisReal || "desconocido"}) → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`,
       )
+    }
+
+    if (zohoLeadId) {
+      await setKvValue(
+        `outb_regalado_${zohoLeadId}`,
+        JSON.stringify({ at: new Date().toISOString(), contact, motivo: "telefono_sin_prefijo", a: reasignado || "" }),
+      ).catch(() => {})
     }
     return NextResponse.json({
       ok: true,
@@ -420,6 +441,13 @@ export async function POST(req: Request): Promise<Response> {
         reasignado = r?.ownerEmail
       }
     }
+
+    if (zohoLeadId) {
+      await setKvValue(
+        `outb_regalado_${zohoLeadId}`,
+        JSON.stringify({ at: new Date().toISOString(), contact, motivo: "numero_fijo", a: reasignado || "" }),
+      ).catch(() => {})
+    }
     console.warn(`[outbound-lead] número fijo +${contact} → sin WhatsApp; lead ${zohoLeadId || "(sin id)"} a ${reasignado || "humano (reasignación falló)"}`)
     return NextResponse.json({ ok: true, envio: "omitido_numero_fijo", contact, reasignado })
   }
@@ -498,6 +526,13 @@ export async function POST(req: Request): Promise<Response> {
         reasignado = r?.ownerEmail
       }
       console.warn(`[outbound-lead] envío falló → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`)
+    }
+
+    if (zohoLeadId) {
+      await setKvValue(
+        `outb_regalado_${zohoLeadId}`,
+        JSON.stringify({ at: new Date().toISOString(), contact, motivo: "envio_fallido_3_intentos", a: reasignado || "" }),
+      ).catch(() => {})
     }
     return NextResponse.json(
       { ok: false, error: "fallo el envío de la plantilla", contact, reasignado },

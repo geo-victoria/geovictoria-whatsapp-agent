@@ -3686,7 +3686,7 @@ function renderInboundDiario(
     const v = d === "TOTAL" ? obTotal : (ob.get(d) || []).length
     if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
     const conv = d === "TOTAL" ? obConvTotal : opts.outboundConv?.get(d) || 0
-    const sufijo = conv > 0 ? ` <span style="font-size:11px;color:#15803d;white-space:nowrap">(${conv}💬)</span>` : ""
+    const sufijo = conv > 0 ? ` <span style="font-size:11px;color:#b45309;white-space:nowrap" title="Regalados: entregados al equipo sin lograr contactarlos">(${conv}↪)</span>` : ""
     return `<td class="conpop" data-et="outb" data-dia="${d}" style="text-align:center;white-space:nowrap"><b>${v}</b>${sufijo}</td>`
   }
   /** Conversaciones del día que nacieron de un toque de Vicky (📋). */
@@ -3852,7 +3852,7 @@ function renderInboundDiario(
     <th>Día</th><th style="text-align:center">🧲 Form Vicky</th><th style="text-align:center">📋 Formulario</th><th style="text-align:center">Conversaciones iniciadas</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORMULARIO: leads del formulario web grande que la tómbola asignó a Vicky por el tramo 1-20 y recibieron su toque 0 ese día — el (n💬) es cuántos respondieron. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORMULARIO: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el (n↪) es cuántos tuvo que regalar al equipo sin lograr contactarlos; el resto recibió su toque. Cuántos respondieron se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
@@ -7605,16 +7605,53 @@ export async function GET(req: Request): Promise<Response> {
           formPorDia.set(dia, arr)
           if (telOk && primeraVez.has(telForm)) formConvPorDia.set(dia, (formConvPorDia.get(dia) || 0) + 1)
         }
-        // 📋 FORMULARIO WEB · TRAMO VICKY (Lalo 31-ago): los leads que la
-        // tómbola de Zoho le asigna a Vicky por estar en el tramo 1-20 y a los
-        // que ella escribe primero. La fuente es vic_outbound_cadence: una
-        // fila por toque 0 enviado, con su fecha. El (n💬) sale del feed de
-        // entradas, que son mensajes DEL CLIENTE: responder es haber hablado.
+        // 📋 FORMULARIO WEB · TRAMO VICKY (Lalo 31-ago; redefinida la misma
+        // tarde): la columna cuenta lo que se le ASIGNÓ a Vicky — la foto la
+        // deja vic-outbound-lead en vic_kv `outb_asignado_<leadId>` la primera
+        // vez que ve el lead, gane o pierda el envío después. El paréntesis
+        // (n↪) son los que tuvo que REGALAR al equipo sin lograr contactarlos
+        // (marcas `outb_regalado_`): la tasa asignado→contactado que pidió
+        // Lalo. Días previos a las marcas (antes del 31-ago) caen al respaldo
+        // histórico de vic_outbound_cadence, donde asignado ≈ tocado.
         const outbPorDia = new Map<string, Array<[string, string]>>()
-        const outbConvPorDia = new Map<string, number>()
+        const outbConvPorDia = new Map<string, number>() // ahora: regalados (n↪)
         const outbTels = new Set<string>()
         try {
           const hOut = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+          const diaDeMs = (ms: number) =>
+            new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms))
+          const vistos = new Set<string>()
+          // 1) Marcas de asignación (la foto) + regalos.
+          const [rAsig, rReg] = await Promise.all([
+            fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.outb_asignado_*&select=key,value&limit=4000`, { headers: hOut, cache: "no-store" }),
+            fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.outb_regalado_*&select=key,value&limit=4000`, { headers: hOut, cache: "no-store" }),
+          ])
+          const parsea = (v: string) => { try { return JSON.parse(v) as { at?: string; contact?: string; nombre?: string; empresa?: string } } catch { return {} } }
+          const asigs = rAsig.ok ? ((await rAsig.json().catch(() => [])) as Array<{ key: string; value: string }>) : []
+          for (const fila of asigs) {
+            const d = parsea(fila.value)
+            const tel = digits(String(d.contact || ""))
+            const ms = Date.parse(String(d.at || ""))
+            if (!tel || !Number.isFinite(ms) || paisDeTelefono(tel) !== pais || isTestContact(tel, metricsContactSet())) continue
+            outbTels.add(tel)
+            vistos.add(tel)
+            if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
+            const dia = diaDeMs(ms)
+            const arr = outbPorDia.get(dia) || []
+            arr.push([String(d.empresa || d.nombre || "").trim() || tel, tel])
+            outbPorDia.set(dia, arr)
+          }
+          const regs = rReg.ok ? ((await rReg.json().catch(() => [])) as Array<{ key: string; value: string }>) : []
+          for (const fila of regs) {
+            const d = parsea(fila.value)
+            const tel = digits(String(d.contact || ""))
+            const ms = Date.parse(String(d.at || ""))
+            if (!tel || !Number.isFinite(ms) || paisDeTelefono(tel) !== pais || isTestContact(tel, metricsContactSet())) continue
+            if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
+            const dia = diaDeMs(ms)
+            outbConvPorDia.set(dia, (outbConvPorDia.get(dia) || 0) + 1)
+          }
+          // 2) Respaldo histórico: toques previos a la foto (sin marca kv).
           const rOut = await fetch(
             `${SUPABASE_URL}/rest/v1/vic_outbound_cadence?select=contact,started_at,nombre,empresa&order=started_at.desc&limit=4000`,
             { headers: hOut, cache: "no-store" },
@@ -7623,20 +7660,19 @@ export async function GET(req: Request): Promise<Response> {
             const filas = ((await rOut.json().catch(() => [])) as Array<{
               contact?: string; started_at?: string; nombre?: string; empresa?: string
             }>) || []
-            const respondio = new Set(entradas.map((e) => digits(String(e.contact || ""))))
             for (const f of filas) {
               const tel = digits(String(f.contact || ""))
               const ms = Date.parse(String(f.started_at || ""))
               if (!tel || !Number.isFinite(ms)) continue
+              if (vistos.has(tel)) continue
               if (paisDeTelefono(tel) !== pais) continue
               if (isTestContact(tel, metricsContactSet())) continue
               outbTels.add(tel)
               if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
-              const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms))
+              const dia = diaDeMs(ms)
               const arr = outbPorDia.get(dia) || []
               arr.push([String(f.empresa || f.nombre || "").trim() || tel, tel])
               outbPorDia.set(dia, arr)
-              if (respondio.has(tel)) outbConvPorDia.set(dia, (outbConvPorDia.get(dia) || 0) + 1)
             }
           }
         } catch { /* sin outbound, la columna queda en 0 */ }
