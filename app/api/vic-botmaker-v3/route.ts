@@ -38,6 +38,7 @@ import { faseDelContacto, armarOnboarding } from "@/lib/onboarding-canal"
 import { honestarMencionesDeCorreo } from "@/lib/honestidad-entrega"
 import { corregirPedidoDeTelefono } from "@/lib/no-pedir-telefono"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
+import { directivaRutSinCorreo } from "@/lib/rut-sin-correo"
 import {
   getSystemPromptV3,
   formatCotizacionExistenteParaPrompt,
@@ -482,6 +483,12 @@ async function processOneTurn(
         ? "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de elegir un marcaje que INCLUYE reloj (o dijo 'mixto'). PROHIBIDO preguntarle cuántos relojes o cuántos puntos necesita: ASUME 1 punto y 1 reloj y decláralo en tu mensaje. Si aún no sabes la comuna de ese punto, tu ÚNICA pregunta de este turno es la comuna; si ya la sabes, cotiza AHORA con cotizar_referencial (1 punto, autoInstalada: true) presentando el doble valor (con y sin reloj)."
         : ""
 
+    // Directiva determinista RUT-SIN-CORREO (Lalo 31-ago, prueba en vivo): la
+    // regla de los tres escenarios del prompt no aguantó el primer caso real
+    // (dio el RUT y Vicky respondió "Y tu email?"). El guion pide RUT + email
+    // en todas partes, así que la orden va al FINAL, en el contexto inmediato.
+    const directivaRutSolo = directivaRutSinCorreo(message || "", history)
+
     // Directiva determinista POST-PAGO (Lalo 18-ago, caso +56978903360): el
     // pagador mandó el comprobante de COT339 y 11 minutos después Vicky le
     // habló como prospecto nuevo y le EMITIÓ una segunda cotización duplicada.
@@ -606,7 +613,7 @@ async function processOneTurn(
     const result = await runAgentLoop({
       systemPrompt: onboarding
         ? onboarding.systemPrompt
-        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago,
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo,
       history,
       userMessage: message,
       apiKey,
