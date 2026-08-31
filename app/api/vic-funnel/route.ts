@@ -2466,6 +2466,7 @@ type FilaFormVicky = {
   Landing_Page?: string
   Campaign?: string
   Medium?: string
+  DB_Source_2?: string
   _convertido?: boolean
 }
 
@@ -2489,7 +2490,7 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
       cache: "no-store",
       body: JSON.stringify({
         select_query:
-          `select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio, Landing_Page, Campaign, Medium from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200 offset ${offset}`,
+          `select id, First_Name, Last_Name, Company, Phone, Email, Lead_Status, Owner, Created_Time, Lead_Source, Territorio, Landing_Page, Campaign, Medium, DB_Source_2 from Leads where Form_Vicky = 'Si' order by Created_Time desc limit 200 offset ${offset}`,
       }),
     })
     if (!rq.ok || rq.status === 204) break
@@ -2499,7 +2500,7 @@ async function fetchLeadsFormVicky(): Promise<FilaFormVicky[]> {
   }
   for (let page = 1; page <= 10; page++) {
     const rc = await fetch(
-      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio,Landing_Page,Campaign,Medium&per_page=200&page=${page}`,
+      `${ZOHO_API_DOMAIN}/crm/v3/Leads/search?criteria=${encodeURIComponent("(Form_Vicky:equals:Si)")}&converted=true&fields=id,First_Name,Last_Name,Company,Phone,Email,Lead_Status,Owner,Created_Time,Lead_Source,Territorio,Landing_Page,Campaign,Medium,DB_Source_2&per_page=200&page=${page}`,
       { headers: H, cache: "no-store" },
     )
     if (!rc.ok || rc.status === 204) break
@@ -3774,7 +3775,9 @@ function renderInboundDiario(
       const tels = d === "TOTAL" ? [...porDia[et].values()].flatMap((s) => [...s]) : [...(porDia[et].get(d) || [])]
       for (const t of tels) set.add(origenDe(t))
     }
-    return [...set].sort((a, b) => (a === ORIGEN_WEB ? -1 : b === ORIGEN_WEB ? 1 : a.localeCompare(b)))
+    const rango = (o: string) =>
+      o === ORIGEN_WEB ? 0 : o.startsWith("🧲💰") ? 1 : o.startsWith("🧲🌱") ? 2 : o.startsWith("🧲🔗") ? 3 : o.startsWith("🧲") ? 4 : 5
+    return [...set].sort((a, b) => rango(a) - rango(b) || a.localeCompare(b))
   }
   const cntOrigen = (etapa: EtapaInbound, d: string, origen: string): number => {
     const tels = d === "TOTAL" ? [...porDia[etapa].values()].flatMap((s) => [...s]) : [...(porDia[etapa].get(d) || [])]
@@ -3813,15 +3816,25 @@ function renderInboundDiario(
     }
     return [...u].sort()
   }
+  const CHIP_FUENTE: Record<string, string> = {
+    "💰": `<span title="Tráfico PAGADO (Lead Source Google Ads / DB Source Paid Media)" style="background:#fdf2d0;color:#8a5a00;border-radius:6px;padding:0 5px;font-size:11px">💰 Pagado</span>`,
+    "🌱": `<span title="Tráfico ORGÁNICO (Lead Source SEO / AI / blog)" style="background:#e2f5e5;color:#1b5e20;border-radius:6px;padding:0 5px;font-size:11px">🌱 Orgánico</span>`,
+    "🔗": `<span title="Tráfico DIRECTO (Lead Source Direct)" style="background:#e8eef5;color:#334155;border-radius:6px;padding:0 5px;font-size:11px">🔗 Directo</span>`,
+    "❔": `<span title="Lead Source sin categoría conocida" style="background:#eee;color:#555;border-radius:6px;padding:0 5px;font-size:11px">❔ Otro</span>`,
+  }
   const etiquetaOrigen = (d: string, o: string): string => {
-    if (!o.startsWith("🧲 ") || o.includes("(sin página)")) return esc(o)
-    const path = o.slice(3).trim()
+    if (!o.startsWith("🧲")) return esc(o)
+    const cat = [..."💰🌱🔗❔"].find((c) => o.startsWith(`🧲${c}`)) || ""
+    const chip = cat ? ` ${CHIP_FUENTE[cat]}` : ""
+    const resto = o.replace(/^🧲[💰🌱🔗❔]?\s*/u, "").trim()
+    if (!resto.startsWith("/")) return `🧲${chip} ${esc(resto)}`
+    const path = resto
     const url = `https://geovictoria.com${path.startsWith("/") ? path : `/${path}`}`
     const camps = campanasDe(d, o)
     const sufijoCamp = camps.length
       ? ` <span style="color:#8a5a00" title="Campaña de marketing (campo Campaign del lead)">📣 ${esc(camps.slice(0, 2).join(", "))}${camps.length > 2 ? ` +${camps.length - 2}` : ""}</span>`
       : ""
-    return `🧲 <a href="${url}" target="_blank" rel="noopener" title="${esc(path)} — abrir la landing" style="color:#0e7490;border-bottom:1px dashed #9fc3d0">${esc(nombreLanding(path))}</a>${sufijoCamp}`
+    return `🧲${chip} <a href="${url}" target="_blank" rel="noopener" title="${esc(path)} — abrir la landing" style="color:#0e7490;border-bottom:1px dashed #9fc3d0">${esc(nombreLanding(path))}</a>${sufijoCamp}`
   }
   const subFilasOrigen = (d: string): string => {
     if (!opts.origenes) return ""
@@ -7679,7 +7692,22 @@ export async function GET(req: Request): Promise<Response> {
           if (telOk) formTels.add(telForm)
           if (telOk && !origenPorTel.has(telForm)) {
             const lp = String(f.Landing_Page || "").trim().replace(/^https?:\/\/[^/]+/i, "")
-            origenPorTel.set(telForm, `🧲 ${lp || "landing (sin página)"}`)
+            // Categoría de la fuente (Lalo 31-ago, "agrupar pagado vs orgánico"):
+            // DB_Source_2 solo trae "Paid Media" o nada (verificado en 91 leads
+            // jul-ago), así que refuerza el PAGADO y Lead_Source clasifica el
+            // resto: SEO/AI = orgánico, Direct = directo. Va DENTRO de la llave
+            // de agrupación: una misma landing con tráfico pagado y orgánico se
+            // parte en dos filas — separar eso es justo lo que se quiere medir.
+            const db = String(f.DB_Source_2 || "").toLowerCase()
+            const src = String(f.Lead_Source || "").toLowerCase()
+            const cat = db.includes("paid") || /ads|adwords|paid|meta|facebook|instagram|linkedin/.test(src)
+              ? "💰"
+              : /seo|organic|org[áa]nico|blog|youtube/.test(src) || src === "ai"
+                ? "🌱"
+                : /direct/.test(src)
+                  ? "🔗"
+                  : "❔"
+            origenPorTel.set(telForm, `🧲${cat} ${lp || "landing (sin página)"}`)
           }
           // "none"/"(none)" es el relleno de tráfico directo u orgánico en el
           // campo Campaign — no es una campaña, no se rotula.
