@@ -38,10 +38,27 @@ export type ContextoCotizacion = {
   totalMensualClp?: number
   pagoInicialClp?: number
   vigencia?: string
-  items: Array<{ nombre: string; cantidad?: number; subtotalClp?: number; recurrente?: boolean }>
+  descuentoTexto?: string
+  ejecutivo?: string
+  pdfUrl?: string
+  items: Array<{
+    nombre: string
+    cantidad?: number
+    subtotalClp?: number
+    recurrente?: boolean
+    modalidad?: string
+  }>
 }
 
-/** Pregunta al cotizador si el token es válido y trae la cotización. */
+/** Pregunta al cotizador si el token es válido y trae la cotización.
+ *
+ * La forma la dicta el endpoint de sesión y NO es plana: los datos del
+ * encabezado van en `quote`, pero los ítems, los totales y el descuento
+ * cuelgan de la raíz. Mapearlo mal no rompe nada visible — simplemente deja
+ * a Vicky sin datos, y entonces alucina: en la primera prueba respondió
+ * "tu cotización incluye 5 planes con reportes en tiempo real", nada de lo
+ * cual estaba en la cotización. Por eso cada campo se lee del lugar exacto y
+ * el llamador exige al menos un ítem antes de dejarla hablar. */
 export async function contextoDesdeToken(token: string): Promise<ContextoCotizacion | null> {
   if (!token) return null
   try {
@@ -51,25 +68,40 @@ export async function contextoDesdeToken(token: string): Promise<ContextoCotizac
     )
     if (!r.ok) return null
     const d = (await r.json().catch(() => null)) as Record<string, unknown> | null
-    if (!d || d.success === false) return null
-    const q = (d.quote || d.data || d) as Record<string, unknown>
-    const items = Array.isArray(q.items) ? (q.items as Array<Record<string, unknown>>) : []
+    if (!d || d.success !== true) return null
+    const q = (d.quote || {}) as Record<string, unknown>
+    const totals = (d.totals || {}) as Record<string, unknown>
+    const desc = (d.descuento || {}) as Record<string, unknown>
+    const support = (d.support || {}) as Record<string, unknown>
+    const items = Array.isArray(d.items) ? (d.items as Array<Record<string, unknown>>) : []
+
+    const recurrentes = items.filter((i) => String(i.modalidad || "").toLowerCase() !== "cobro único")
+    const mensual =
+      Number(totals.totalConIvaClp || totals.totalClp || 0) ||
+      recurrentes.reduce((a, i) => a + (Number(i.subtotalClp) || 0), 0)
+
     return {
-      quoteId: String(q.quoteId || q.id || ""),
-      numero: q.numeroCotizacion ? String(q.numeroCotizacion) : undefined,
-      empresa: q.empresa ? String(q.empresa) : undefined,
-      estado: q.estado ? String(q.estado) : q.status ? String(q.status) : undefined,
-      pais: q.pais ? String(q.pais) : "cl",
-      telefono: String(q.telefono || q.telefonoContacto || q.phone || "").replace(/\D/g, ""),
-      totalMensualClp: Number(q.totalMensualClp || q.totalRecurrenteClp || 0) || undefined,
-      pagoInicialClp: Number(q.pagoInicialClp || q.oneShotClp || 0) || undefined,
-      vigencia: q.vigencia ? String(q.vigencia) : undefined,
-      items: items.map((i) => ({
-        nombre: String(i.nombre || i.Nombre_Item || i.name || ""),
-        cantidad: Number(i.cantidad || i.Cantidad || 0) || undefined,
-        subtotalClp: Number(i.subtotalClp || i.Subtotal_CLP || 0) || undefined,
-        recurrente: Boolean(i.recurrente ?? i.Es_Recurrente),
-      })).filter((i) => i.nombre),
+      quoteId: String(q.id || ""),
+      numero: q.name ? String(q.name) : undefined,
+      empresa: q.name ? String(q.name).replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "") : undefined,
+      estado: q.status ? String(q.status) : undefined,
+      pais: d.pais ? String(d.pais) : "cl",
+      telefono: String(q.contactPhone || q.billingPhone || "").replace(/\D/g, ""),
+      totalMensualClp: mensual || undefined,
+      pagoInicialClp: Number(q.pagoInicialClp || 0) || undefined,
+      vigencia: q.expiresAt ? String(q.expiresAt).slice(0, 10) : undefined,
+      descuentoTexto: desc.texto ? String(desc.texto) : undefined,
+      ejecutivo: support.executiveName ? String(support.executiveName) : undefined,
+      pdfUrl: q.pdfUrl ? String(q.pdfUrl) : undefined,
+      items: items
+        .map((i) => ({
+          nombre: String(i.nombre || ""),
+          cantidad: Number(i.cantidad) || undefined,
+          subtotalClp: Number(i.subtotalClp) || undefined,
+          recurrente: String(i.modalidad || "").toLowerCase() !== "cobro único",
+          modalidad: i.modalidad ? String(i.modalidad) : undefined,
+        }))
+        .filter((i) => i.nombre),
     }
   } catch {
     return null
@@ -83,16 +115,24 @@ function clp(n?: number): string {
 function bloqueCotizacion(c: ContextoCotizacion): string {
   const lineas = c.items
     .slice(0, 25)
-    .map((i) => `  · ${i.nombre}${i.cantidad && i.cantidad > 1 ? ` x${i.cantidad}` : ""} — ${clp(i.subtotalClp)}${i.recurrente ? "/mes" : " (pago único)"}`)
+    .map((i) => {
+      const cant = i.cantidad && i.cantidad > 1 ? ` — ${i.cantidad} ${i.modalidad === "Por usuario" ? "usuarios" : "unidades"}` : ""
+      return `  · ${i.nombre}${cant}: ${clp(i.subtotalClp)}${i.recurrente ? " al mes" : " (pago único)"}`
+    })
     .join("\n")
   return [
     `LA COTIZACIÓN QUE EL CLIENTE ESTÁ MIRANDO AHORA:`,
-    c.numero ? `Número: ${c.numero}` : "",
     c.empresa ? `Empresa: ${c.empresa}` : "",
     c.estado ? `Estado: ${c.estado}` : "",
     lineas ? `Detalle:\n${lineas}` : "",
-    `Mensualidad: ${clp(c.totalMensualClp)} · Pago inicial: ${clp(c.pagoInicialClp)}`,
-    c.vigencia ? `Vigencia: ${c.vigencia}` : "",
+    `Mensualidad con IVA: ${clp(c.totalMensualClp)}`,
+    c.pagoInicialClp ? `Pago inicial: ${clp(c.pagoInicialClp)}` : "",
+    c.descuentoTexto ? `Descuento: ${c.descuentoTexto}` : "",
+    c.vigencia ? `Vigente hasta: ${c.vigencia}` : "",
+    c.ejecutivo ? `Ejecutivo a cargo: ${c.ejecutivo}` : "",
+    ``,
+    `ESTE ES EL DETALLE COMPLETO. La cotización no incluye nada que no esté en esta lista:`,
+    `si te preguntan por algo que no aparece acá, di que no está incluido y ofrece agregarlo.`,
   ].filter(Boolean).join("\n")
 }
 
