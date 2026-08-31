@@ -7681,8 +7681,11 @@ export async function GET(req: Request): Promise<Response> {
             const lp = String(f.Landing_Page || "").trim().replace(/^https?:\/\/[^/]+/i, "")
             origenPorTel.set(telForm, `🧲 ${lp || "landing (sin página)"}`)
           }
-          if (telOk && !campanaPorTel.has(telForm) && String(f.Campaign || "").trim()) {
-            campanaPorTel.set(telForm, String(f.Campaign || "").trim())
+          // "none"/"(none)" es el relleno de tráfico directo u orgánico en el
+          // campo Campaign — no es una campaña, no se rotula.
+          const campRaw = String(f.Campaign || "").trim()
+          if (telOk && !campanaPorTel.has(telForm) && campRaw && !/^\(?none\)?$/i.test(campRaw)) {
+            campanaPorTel.set(telForm, campRaw)
           }
           if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
           // Mismo día-Santiago del resto de la tabla (YYYY-MM-DD).
