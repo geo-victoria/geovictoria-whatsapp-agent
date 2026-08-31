@@ -3692,7 +3692,7 @@ function renderInboundDiario(
     const toc = d === "TOTAL" ? obTocTotal : opts.outboundToc?.get(d) || 0
     const reg = d === "TOTAL" ? obRegTotal : opts.outboundReg?.get(d) || 0
     const partes = [
-      toc > 0 ? `<span style="color:#15803d" title="Contactados: les salió el toque de Vicky">${toc}✓</span>` : "",
+      toc > 0 ? `<span style="color:#15803d" title="Contactados: les salió el toque de Vicky">${toc}💬</span>` : "",
       reg > 0 ? `<span style="color:#b45309" title="Entregados a una SDR sin lograr contacto — pasa el mouse para ver a quién">${reg}↪</span>` : "",
     ].filter(Boolean)
     const sufijo = partes.length ? ` <span style="font-size:11px;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
@@ -3858,17 +3858,17 @@ function renderInboundDiario(
   <div style="overflow-x:auto;margin-top:8px"><table><thead>
   <tr><th></th><th colspan="10" class="gb">🎒 Grupo Bolsa · llegadas del día (nueva o reactivada tras ≥7 días de silencio)</th><th colspan="5" class="gf divi">📸 Grupo Foto · hitos del día</th></tr>
   <tr>
-    <th>Día</th><th style="text-align:center">🧲 Form Vicky</th><th style="text-align:center">📋 Formulario</th><th style="text-align:center">Conversaciones iniciadas</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
+    <th>Día</th><th style="text-align:center">🧲 Form Inbound</th><th style="text-align:center">📋 Form Outbound</th><th style="text-align:center">Conversaciones iniciadas</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORMULARIO: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el paréntesis desglosa en qué terminó cada uno: ✓ contactados (les salió el toque) y ↪ entregados a una SDR sin lograr contacto — al pasar el mouse por el número se ve cada empresa y, en los ↪, a qué ejecutiva se entregó. Cuántos RESPONDIERON se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM INBOUND: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORM OUTBOUND: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el paréntesis desglosa en qué terminó cada uno: 💬 contactados (les salió el toque) y ↪ entregados a una SDR sin lograr contacto — al pasar el mouse por el número se ve cada empresa y, en los ↪, a qué ejecutiva se entregó. Cuántos RESPONDIERON se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
     var VIN = ${jsonSeguro(VIN)};
     var DET = ${jsonSeguro(DET)};
     var TRS = ${jsonSeguro(TRS)};
-    var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Vicky (llenaron el miniform)", outb: "📋 Formulario web · tramo Vicky (toque 0 de Vicky)" })};
+    var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Inbound (llenaron el miniform)", outb: "📋 Form Outbound · tramo Vicky (toque 0 de Vicky)" })};
     var pop = document.createElement("div"); pop.id = "inbpop"; document.body.appendChild(pop);
     // Flechitas de origen (Lalo 26-ago): despliegan las sub-filas por origen
     // (sitio web vs cada landing) del día.
@@ -7659,7 +7659,7 @@ export async function GET(req: Request): Promise<Response> {
             const dia = diaDeMs(ms)
             const regalo = regalos.get(leadDeKey(fila.key))
             const base = String(d.empresa || d.nombre || "").trim() || tel
-            let etiqueta = `✓ ${base}`
+            let etiqueta = `💬 ${base}`
             if (regalo) {
               const sdr = (regalo.a || "").split("@")[0] || "SDR"
               etiqueta = `↪ ${base} → ${sdr}`
@@ -7685,7 +7685,7 @@ export async function GET(req: Request): Promise<Response> {
             if (rango && (ms < rango.desdeMs || ms >= rango.hastaMs)) continue
             const dia = diaDeMs(ms)
             const arr = outbPorDia.get(dia) || []
-            arr.push([`✓ ${String(f.empresa || f.nombre || "").trim() || tel}`, tel])
+            arr.push([`💬 ${String(f.empresa || f.nombre || "").trim() || tel}`, tel])
             outbPorDia.set(dia, arr)
             outbTocPorDia.set(dia, (outbTocPorDia.get(dia) || 0) + 1)
           }
