@@ -381,13 +381,29 @@ export function clasificarSenalEspera(
  * activo/pausado_compromiso/finalizado — un loop 'cerrado' (opt-out, pagado…)
  * NUNCA revive solo. Best-effort: los webhooks la llaman con .catch(()=>{}).
  */
-/** PAGO REGISTRADO RECIENTE (19-ago, caso MATER/COT546): un contacto cuyo
- * comprobante de transferencia ya fue casado (vic_kv comprobante_ok_<fono>)
- * es un CLIENTE, no un prospecto — la maquinaria de venta no lo toca más:
- * ni enrolamiento/reset de toques, ni relojes de traspaso, ni reapertura del
- * candado v3. Ayer la clienta pagó $77.001 a las 17:04 y hoy el reloj de
- * 120' la traspasó igual (correo "Nuevo Deal" a la dueña + presentación) y
- * el loop le pidió la dotación desde cero. Ventana: 7 días desde el sello. */
+/** PAGO REGISTRADO (19-ago, caso MATER/COT546; ventana revisada el 29-ago):
+ * un contacto cuyo comprobante de transferencia ya fue casado (vic_kv
+ * comprobante_ok_<fono>) es un CLIENTE, no un prospecto — la maquinaria de
+ * venta no lo toca: ni enrolamiento/reset de toques, ni relojes de traspaso,
+ * ni reapertura del candado v3.
+ *
+ * POR QUÉ NO ES UNA VENTANA FIJA (saneamiento 29-ago): la guarda nació con 7
+ * días y esa fecha de vencimiento reabrió el caso que venía a proteger. La
+ * misma clienta de MATER pagó $77.001 el 18-ago, siguió conversando por su
+ * onboarding y al noveno día la marca caducó: el loop la reenroló como
+ * prospecta y le mandó cuatro toques de venta, el último a los diez días del
+ * pago. Alguien que pagó no deja de ser cliente por el paso del tiempo.
+ *
+ * PERO TAMPOCO ES PARA SIEMPRE, y ese era el motivo legítimo de la ventana: un
+ * cliente puede volver meses después a comprar otra cosa, y ahí sí debe entrar
+ * al circuito. La señal de que empezó un ciclo NUEVO no es el calendario — es
+ * que se le emitió una cotización DESPUÉS del pago. Mientras no exista esa
+ * cotización nueva, sigue siendo el mismo ciclo y la venta no lo toca.
+ *
+ * COSTO EN EL CAMINO DE LA CONVERSACIÓN: cero para el caso normal. Los
+ * primeros 7 días responde con la marca, sin consultas extra; recién pasada
+ * esa ventana mira los punteros de cotización (Supabase, no Zoho). Rollback
+ * sin deploy: VICKY_PAGO_VENTANA_CLASICA=1 restaura el comportamiento viejo. */
 export async function pagoRegistradoReciente(contact: string): Promise<boolean> {
   const limpio = (contact || "").replace(/\D/g, "")
   if (!limpio || !SUPABASE_URL || !SUPABASE_KEY) return false
@@ -399,7 +415,20 @@ export async function pagoRegistradoReciente(contact: string): Promise<boolean> 
     const raw = rows[0]?.value
     if (!raw) return false
     const at = Date.parse((JSON.parse(raw) as { at?: string })?.at || "")
-    return Number.isFinite(at) && Date.now() - at < 7 * 86400e3
+    if (!Number.isFinite(at)) return false
+    const dentroDeVentana = Date.now() - at < 7 * 86400e3
+    if (dentroDeVentana) return true
+    if ((process.env.VICKY_PAGO_VENTANA_CLASICA || "").trim() === "1") return false
+    // Pasada la ventana: sigue siendo cliente del MISMO ciclo mientras no se
+    // le haya emitido una cotización nueva después del pago.
+    const desde = new Date(at).toISOString()
+    const q = await supa(
+      `vic_v3_quote_pointers?contact=eq.${encodeURIComponent(limpio)}` +
+        `&created_at=gt.${encodeURIComponent(desde)}&select=contact&limit=1`,
+    )
+    if (!q.ok) return true // sin poder verificar, se protege al cliente
+    const nuevas = ((await q.json().catch(() => [])) as unknown[]) || []
+    return nuevas.length === 0
   } catch {
     return false
   }
