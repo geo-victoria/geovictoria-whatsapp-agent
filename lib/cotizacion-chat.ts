@@ -39,6 +39,7 @@ export type ContextoCotizacion = {
   pagoInicialClp?: number
   vigencia?: string
   descuentoTexto?: string
+  descuentoPct?: number
   ejecutivo?: string
   pdfUrl?: string
   items: Array<{
@@ -91,6 +92,7 @@ export async function contextoDesdeToken(token: string): Promise<ContextoCotizac
       pagoInicialClp: Number(q.pagoInicialClp || 0) || undefined,
       vigencia: q.expiresAt ? String(q.expiresAt).slice(0, 10) : undefined,
       descuentoTexto: desc.texto ? String(desc.texto) : undefined,
+      descuentoPct: await descuentoRealPct(String(q.id || "")),
       ejecutivo: support.executiveName ? String(support.executiveName) : undefined,
       pdfUrl: q.pdfUrl ? String(q.pdfUrl) : undefined,
       items: items
@@ -105,6 +107,35 @@ export async function contextoDesdeToken(token: string): Promise<ContextoCotizac
     }
   } catch {
     return null
+  }
+}
+
+/** PORCENTAJE REAL DEL DESCUENTO (31-ago, hallazgo de la prueba adversarial).
+ *
+ * El endpoint de sesión entrega el TEXTO del descuento ("aplica durante los
+ * primeros 6 meses") pero no el porcentaje. Sin ese número, ante un cliente
+ * que pregunta "¿me haces un 40%?" el modelo llenó el hueco con la cifra de
+ * la pregunta y respondió que su descuento ERA del 40% — cuando la campaña le
+ * había dado 10%. Un compromiso comercial inventado, y de los que suenan
+ * informados. El dato vive en Zoho: se lee de ahí. */
+async function descuentoRealPct(quoteId: string): Promise<number | undefined> {
+  if (!quoteId) return undefined
+  try {
+    const { getZohoAccessToken } = await import("./zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const r = await fetch(
+      `${api}/crm/v3/Cotizaciones_GeoVictoria/${quoteId}?fields=Descuento_Recurrente_Pct`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" },
+    )
+    if (r.status !== 200) return undefined
+    const pct = Number(
+      ((await r.json().catch(() => ({}))) as { data?: Array<{ Descuento_Recurrente_Pct?: number }> })
+        .data?.[0]?.Descuento_Recurrente_Pct,
+    )
+    return Number.isFinite(pct) && pct > 0 ? pct : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -127,7 +158,9 @@ function bloqueCotizacion(c: ContextoCotizacion): string {
     lineas ? `Detalle:\n${lineas}` : "",
     `Mensualidad con IVA: ${clp(c.totalMensualClp)}`,
     c.pagoInicialClp ? `Pago inicial: ${clp(c.pagoInicialClp)}` : "",
-    c.descuentoTexto ? `Descuento: ${c.descuentoTexto}` : "",
+    c.descuentoPct
+      ? `Descuento aplicado: ${c.descuentoPct}%${c.descuentoTexto ? ` — ${c.descuentoTexto}` : ""}`
+      : "Descuento aplicado: NINGUNO. Esta cotización no tiene descuento vigente.",
     c.vigencia ? `Vigente hasta: ${c.vigencia}` : "",
     c.ejecutivo ? `Ejecutivo a cargo: ${c.ejecutivo}` : "",
     ``,
@@ -151,6 +184,9 @@ const ESTILO = [
   "LÍMITES DUROS:",
   "· Jamás inventes precios, descuentos, plazos ni condiciones que no estén en la cotización.",
   "· Si te piden un descuento, no lo ofrezcas por tu cuenta: dile que lo revisas y que le confirmas.",
+  "· NUNCA confirmes ni repitas un porcentaje, monto o plazo que el cliente proponga como si fuera",
+  "  el suyo. Si te pregunta '¿me haces un 40%?', esa cifra es de él, no de su cotización. El único",
+  "  descuento que existe es el que aparece arriba; si dice NINGUNO, no tiene descuento y punto.",
   "· Si te piden cambiar la cotización, dile que lo puedes ajustar y que se lo dejas listo — todavía",
   "  no tienes la herramienta para hacerlo acá, así que ofrécele seguir por WhatsApp, que es el mismo chat.",
   "· Si no sabes algo, dilo. No adivines condiciones comerciales.",
