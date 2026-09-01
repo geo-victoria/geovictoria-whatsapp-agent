@@ -3751,6 +3751,16 @@ function renderInboundDiario(
   }
   // JSON seguro para vivir dentro de <script>: sin "</script>" posibles.
   const jsonSeguro = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c")
+  // Desglose inbound/outbound de una etapa en un día (Lalo 01-sep): elementos
+  // únicos partidos por si el CONTACTO nació de un toque outbound
+  // (vic_outbound_cadence, criterio inmutable del funnel).
+  const partirInOut = (etapa: EtapaInbound, dia: string): { ins: number; out: number } => {
+    const lista = dia === "TOTAL" ? [...porDia[etapa].values()].flatMap((s) => [...s]) : [...(porDia[etapa].get(dia) || [])]
+    const u = new Set(lista)
+    let out = 0
+    for (const el of u) if (opts.outboundTels?.has(telDeElemento(el))) out++
+    return { ins: u.size - out, out }
+  }
   const celda = (dia: string, etapa: EtapaInbound, cls = "") => {
     const v = cnt(etapa, dia)
     if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
@@ -3760,8 +3770,21 @@ function renderInboundDiario(
       deForm > 0 ? `<span class="subpop" data-et="convform" data-dia="${dia}" style="cursor:pointer">${deForm}🧲</span>` : "",
       deOut > 0 ? `<span class="subpop" data-et="convoutb" data-dia="${dia}" style="cursor:pointer">${deOut}📋</span>` : "",
     ].filter(Boolean)
-    const sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
-    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${partes.length ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
+    let sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
+    // % DE CIERRE POR ORIGEN (Lalo 01-sep): junto a FORMALES el conteo por
+    // origen (in = inbound, out = outbound); junto a PAGADAS el CIERRE de
+    // cada origen = pagadas ÷ formales de ese origen en el mismo día.
+    if ((etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
+      const f = partirInOut("formal", dia)
+      if (etapa === "formal" && (f.ins > 0 || f.out > 0)) {
+        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Formales por origen: inbound · outbound">(${f.ins} in · ${f.out} out)</span>`
+      } else if (etapa === "pagada") {
+        const p = partirInOut("pagada", dia)
+        const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a * 100) / b)}%` : "—")
+        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Cierre por origen: pagadas ÷ formales del mismo origen (in = inbound, out = outbound)">(in ${pct(p.ins, f.ins)} · out ${pct(p.out, f.out)})</span>`
+      }
+    }
+    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${sufijo ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
   }
   // ── SUB-FILAS POR ORIGEN (Lalo 26-ago): cada día se despliega con una
   // flechita en filas por origen — "Sitio web" (botón directo, sin form) y
@@ -3884,7 +3907,18 @@ function renderInboundDiario(
       deForm > 0 ? `<span class="subpop" data-et="convform" data-dia="TOTAL" style="cursor:pointer">${deForm}🧲</span>` : "",
       deOut > 0 ? `<span class="subpop" data-et="convoutb" data-dia="TOTAL" style="cursor:pointer">${deOut}📋</span>` : "",
     ].filter(Boolean)
-    const sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
+    let sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
+    // Mismo desglose in/out del período completo (Lalo 01-sep).
+    if ((etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
+      const f = partirInOut("formal", "TOTAL")
+      if (etapa === "formal" && (f.ins > 0 || f.out > 0)) {
+        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Formales por origen: inbound · outbound">(${f.ins} in · ${f.out} out)</span>`
+      } else if (etapa === "pagada") {
+        const p = partirInOut("pagada", "TOTAL")
+        const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a * 100) / b)}%` : "—")
+        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Cierre por origen: pagadas ÷ formales del mismo origen">(in ${pct(p.ins, f.ins)} · out ${pct(p.out, f.out)})</span>`
+      }
+    }
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${partes.length ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
   }
   const filaTotalOk = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
