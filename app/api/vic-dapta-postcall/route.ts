@@ -331,15 +331,25 @@ export async function POST(req: Request): Promise<Response> {
       .join("; ")
     const abierta = await ventanaAbierta(contact)
     if (!abierta) {
-      // Ventana cerrada y SIN precio aplicado en el sistema: no hay plantilla
-      // honesta que enviar (afirmaría una actualización no comiteada). Nota
-      // interna con lo comprometido; el próximo toque/respuesta lo retoma.
+      // Ventana cerrada y SIN precio nuevo comiteado. La plantilla con el
+      // precio VIGENTE de su cotización SÍ es honesta (aprendizaje tanda
+      // 01-sep: Juan y Simon quedaron en deuda hasta el cumplimiento manual)
+      // — se envía con el monto vigente y la nota interna guarda lo
+      // comprometido para cuando el cliente responda.
+      const montoVigente = Number(String(vars.monto_mensual || "").replace(/[^\d]/g, "")) || 0
+      const plantillaOk =
+        quoteId && montoVigente > 0
+          ? await enviarPlantillaPostcall(contact, firstString(vars.customer_name), quoteId, montoVigente)
+          : false
       await appendAssistantV3(
         contact,
-        `[REGISTRO INTERNO — no visible para el cliente] Llamada recién terminada y ventana de 24h CERRADA (no se pudo enviar el WhatsApp). ` +
-          `En el PRÓXIMO contacto (respuesta del cliente o toque programado), cumple lo comprometido en la llamada SIN volver a preguntar lo ya confirmado: ${pedido || resumen || "ver registro de la llamada"}.`,
+        `[REGISTRO INTERNO — no visible para el cliente] Llamada recién terminada y ventana de 24h CERRADA` +
+          (plantillaOk
+            ? ` — se le envió la PLANTILLA con su cotización al precio vigente.`
+            : ` (tampoco se pudo enviar plantilla).`) +
+          ` En el PRÓXIMO contacto (respuesta del cliente o toque programado), cumple lo comprometido en la llamada SIN volver a preguntar lo ya confirmado: ${pedido || resumen || "ver registro de la llamada"}.`,
       ).catch(() => {})
-      console.log(`[dapta-postcall] ventana cerrada sin precio aplicado contact=${contact} → solo nota interna`)
+      console.log(`[dapta-postcall] ventana cerrada sin precio aplicado contact=${contact} → plantilla=${plantillaOk}`)
     } else {
       const evento =
         `[EVENTO INTERNO — LLAMADA TELEFÓNICA RECIÉN TERMINADA (esto NO lo escribió el cliente)] ` +
@@ -400,6 +410,25 @@ export async function POST(req: Request): Promise<Response> {
   //     hábil, el cron de llamadas la retiene solo hasta la próxima ventana.
   //   - "no_contesta" → UN reintento al siguiente día hábil a las 15:00, en
   //     horario distinto al primer intento.
+  // PIDE_TIEMPO → cotización a mano por plantilla (Lalo 01-sep, tras la tanda:
+  // "quizás un reenvío del pdf y la url para que lo tengan a mano"). Con la
+  // ventana cerrada, la plantilla con el precio vigente le deja el botón a su
+  // cotización sin esperar el próximo toque. Best-effort, no toca el callback.
+  if (estado === "pide_tiempo") {
+    const quoteIdPT = firstString(vars.quote_id)
+    const montoPT = Number(String(vars.monto_mensual || "").replace(/[^\d]/g, "")) || 0
+    if (quoteIdPT && montoPT > 0 && !(await ventanaAbierta(contact))) {
+      const ok = await enviarPlantillaPostcall(contact, firstString(vars.customer_name), quoteIdPT, montoPT)
+      if (ok) {
+        await appendAssistantV3(
+          contact,
+          `[REGISTRO INTERNO — no visible para el cliente] El cliente pidió tiempo en la llamada; se le dejó su cotización a mano por plantilla (precio vigente $${montoPT.toLocaleString("es-CL")}).`,
+        ).catch(() => {})
+      }
+      console.log(`[dapta-postcall] pide_tiempo plantilla contact=${contact} ok=${ok}`)
+    }
+  }
+
   // Guarda anti-loop: máximo un auto-agendamiento de cada tipo por semana.
   if (!callbackAgendado && (estado === "pide_tiempo" || estado === "no_contesta")) {
     const esCO = contact.startsWith("57")
