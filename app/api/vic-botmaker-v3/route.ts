@@ -1082,10 +1082,17 @@ async function processOneTurn(
           const retryTools = (retry.toolCalls || []) as ToolCallRecord[]
           const retryReal = retryTools.some(
             (c) =>
-              (c.name === "consultar_descuento_referencial" ||
-                c.name === "consultar_siguiente_descuento" ||
-                c.name === "aplicar_siguiente_descuento" ||
-                c.name === "generar_link_cotizadora") &&
+              // PRE-formal solo cuenta la tool REFERENCIAL (01-sep, caso
+              // Rodrigo/$62.758): sin formal en ESTA conversación, el modelo
+              // llamó consultar_siguiente_descuento y escaló sobre una
+              // cotización VIEJA de otra prueba del mismo RUT — número real
+              // pero de otra configuración, incoherente con todo lo conversado.
+              (tieneFormal
+                ? c.name === "consultar_siguiente_descuento" ||
+                  c.name === "aplicar_siguiente_descuento" ||
+                  c.name === "consultar_descuento_referencial"
+                : c.name === "consultar_descuento_referencial" ||
+                  c.name === "generar_link_cotizadora") &&
               c.ok,
           )
           if (retryReal && retryReply) {
