@@ -180,3 +180,15 @@
 - Deploy agente: push a `vicky-v3` (+ espejo `claude/trusting-ritchie-EVZIT` con --force-with-lease). Producción real = alias `geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app` (la rama "production" de Vercel es master viejo — no usar).
 - Siempre `npx tsc --noEmit && git commit && git push` encadenado con && (gate estricto).
 - Secretos: nunca en el repo — viven en Vercel env y vic_kv.
+
+## Campaña de VOZ re-encantamiento (acuerdos Lalo+Rodrigo, 01-sep — VB explícito que supersede el "no reencender Dapta" del 08-ago SOLO para esta campaña)
+- **Guion de la llamada (natural, jamás robótico)**: "Hola, ¿hablo con XXX? Mira, tú hablas con Vicky de GeoVictoria. Habías cotizado hace un tiempo y quería saber si sigues interesado." → desde ahí conversación NATURAL, igual que Vicky por WhatsApp.
+- **Si le interesa** → Vicky se COMPROMETE a enviarle la cotización actualizada (y debe cumplirse: regenerar/reenviar tras la llamada).
+- **Si dice que no / objeta** → Vicky puede ofrecer un DESCUENTO ADICIONAL al valor ya establecido previamente.
+- **Cohorte objetivo**: los ~100 sin respuesta de la campaña `dcto10_2026-08-26` (117 tocados, 17 respondieron, 15 aplicados — kv `campana_dcto_*`). Filtros pendientes al armar la lista: pagados, opt-out, traspasados con atención real, motivos terminales, contactos internos.
+- **PENDIENTE de diseño (revisar con Lalo)**: alcances de la llamada y qué gatilla (post-llamada → envío cotización actualizada / descuento / registro en Zoho); por ahora la spec SOLO SE GUARDA — nada implementado ni encendido.
+
+## Anualidad + tarjetas nativas de Vicky (01-sep)
+- **anualizar_cotizacion(quote_id)**: pago anual SOLO a pedido; 12× todo lo recurrente (plan+arriendos), mismo precio; objeción → escalera normal ANTES de anualizar (hereda pct y vigencia Descuento_Meses/kv, default 6, 0=12); presentación = UNA fila "Plan anual" PRIMERA + recurrentes en $0 con marca `oculto` (subform Metadata_Item_JSON {"oculto":true} — PDF, regeneraciones y aceptación NO la pintan; totales intactos). Volver a mensual = actualizar_cotizacion normal.
+- **Tarjetas de proximidad** (`tarjeta_id`, 0,03 UF venta única): accesorio reactivo del catálogo Vicky (esAccesorio) — solo junto al reloj (guardia en ambos constructores), sin puntos/envío/instalación propios; ficha oficial respalda (valida por tarjeta, 3.000). Jamás proactivas; sugerir 1 por persona.
+- Descripción MANUAL de ítem (item.descripcion) ahora persiste en Descripcion_Item y GANA en el PDF (fix del "Plan anual" de Quilacanta que salía con texto de instalación).

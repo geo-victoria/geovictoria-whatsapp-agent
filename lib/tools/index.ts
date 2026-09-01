@@ -76,6 +76,11 @@ import {
   type AplicarSiguienteDescuentoResultado,
 } from "./aplicar-siguiente-descuento"
 import {
+  anualizarCotizacionSchema,
+  anualizarCotizacion,
+  type AnualizarCotizacionResultado,
+} from "./anualizar-cotizacion"
+import {
   enviarCertificacionSchema,
   enviarCertificacion,
   type EnviarCertificacionResultado,
@@ -131,6 +136,9 @@ export const TOOL_SCHEMAS = [
   consultarDescuentoReferencialSchema,
   consultarSiguienteDescuentoSchema,
   aplicarSiguienteDescuentoSchema,
+  // Pago anual a pedido del cliente (Lalo 01-sep): 12 meses de todo lo
+  // recurrente en un solo pago, mismo precio, escalera normal ante objeción.
+  anualizarCotizacionSchema,
   enviarCertificacionSchema,
   enviarFichaRelojSchema,
   actualizarCotizacionSchema,
@@ -157,6 +165,7 @@ export type ToolResult =
   | ConsultarDescuentoReferencialResultado
   | ConsultarSiguienteDescuentoResultado
   | AplicarSiguienteDescuentoResultado
+  | AnualizarCotizacionResultado
   | EnviarCertificacionResultado
   | EnviarFichaRelojResultado
   | ActualizarCotizacionResultado
@@ -213,6 +222,9 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
 
       case "aplicar_siguiente_descuento":
         return await aplicarSiguienteDescuento(input as never)
+
+      case "anualizar_cotizacion":
+        return await anualizarCotizacion(input as never)
 
       case "enviar_certificacion":
         return await enviarCertificacion()
