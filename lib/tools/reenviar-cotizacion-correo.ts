@@ -21,7 +21,7 @@ const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim
 export const reenviarCotizacionCorreoSchema = {
   name: "reenviar_cotizacion_correo",
   description:
-    "Reenvía la cotización formal por CORREO a otra persona que el cliente designe (su jefe, socio, RRHH, finanzas). Úsala cuando el cliente pida compartir/enviar la cotización a alguien más. SOLO correo: al tercero NUNCA se le escribe por WhatsApp (no pidió ser contactado por ese canal); si el cliente pide WhatsApp para el tercero, explícale que por respeto solo usamos correo con personas que no han hablado con nosotros, y que él mismo puede reenviar el PDF si prefiere. ANTES de llamarla confirma con el cliente el correo del destinatario (pídelo si no lo ha dado). El cliente queda en copia del correo. Copia el campo mensajeParaProspecto TAL CUAL.",
+    "Reenvía la cotización formal por CORREO. Dos usos: (a) a otra persona que el cliente designe (su jefe, socio, RRHH, finanzas) — cuando pida compartirla con alguien más; (b) al PROPIO cliente, con esCorreoDelCliente=true, cuando entrega SU correo DESPUÉS de emitida la formal o pide recibirla por correo — esta tool es la ÚNICA forma real de que la cotización llegue a un correo: sin llamarla, ningún correo sale. SOLO correo: al tercero NUNCA se le escribe por WhatsApp (no pidió ser contactado por ese canal); si el cliente pide WhatsApp para el tercero, explícale que por respeto solo usamos correo con personas que no han hablado con nosotros, y que él mismo puede reenviar el PDF si prefiere. ANTES de llamarla confirma con el cliente el correo del destinatario (pídelo si no lo ha dado). El cliente queda en copia del correo. Copia el campo mensajeParaProspecto TAL CUAL.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -53,6 +53,11 @@ export const reenviarCotizacionCorreoSchema = {
         description: "Correo del cliente solicitante, para dejarlo en copia.",
         maxLength: 120,
       },
+      esCorreoDelCliente: {
+        type: "boolean" as const,
+        description:
+          "true cuando el destinatario es el PROPIO cliente de la conversación (entregó su correo después de emitida la formal, o pide que se la mandes a su correo). El correo sale como continuación del chat, no como 'alguien me pidió compartirte'.",
+      },
     },
     required: ["quote_id", "destinatarioEmail"],
   },
@@ -64,6 +69,7 @@ export type ReenviarCotizacionCorreoInput = {
   destinatarioNombre?: string
   solicitanteNombre?: string
   solicitanteEmail?: string
+  esCorreoDelCliente?: boolean
 }
 
 export type ReenviarCotizacionCorreoResultado =
@@ -97,7 +103,8 @@ export async function reenviarCotizacionCorreo(
         destinatarioEmail: email,
         destinatarioNombre: args.destinatarioNombre || "",
         solicitanteNombre: args.solicitanteNombre || "",
-        ccSolicitante: args.solicitanteEmail || "",
+        ccSolicitante: args.esCorreoDelCliente ? "" : (args.solicitanteEmail || ""),
+        correoPropio: args.esCorreoDelCliente === true,
       }),
       cache: "no-store",
     })
@@ -114,6 +121,16 @@ export async function reenviarCotizacionCorreo(
       }
     }
     const nombre = args.destinatarioNombre || data.destinatario || email
+    if (args.esCorreoDelCliente) {
+      return {
+        ok: true,
+        numero: data.numero || quoteId,
+        destinatario: email,
+        mensajeParaProspecto:
+          `Listo! 📧 Te envié la cotización ${data.numero || ""} a ${email}. ` +
+          `Si no la ves en unos minutos, revisa la carpeta de promociones o spam. Igual la tienes en este chat con el link para aceptar y pagar en línea.`,
+      }
+    }
     return {
       ok: true,
       numero: data.numero || quoteId,
