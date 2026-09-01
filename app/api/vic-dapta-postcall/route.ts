@@ -347,7 +347,10 @@ export async function POST(req: Request): Promise<Response> {
         `Lo comprometido: ${pedido || resumen || "ver registro de la llamada en el historial"}. ` +
         `Actúa AHORA: salúdalo en una línea haciendo referencia a la llamada ("como te prometí por teléfono..."), ` +
         `genera la cotización actualizada con tus herramientas y envíale el link. ` +
-        `No le vuelvas a preguntar lo que ya confirmó en la llamada; si falta un dato imprescindible para cotizar, pídelo directo y corto.`
+        `PROHIBIDO pedir confirmación o preguntar "¿me confirmas?": la confirmación YA OCURRIÓ por teléfono — la regla de ` +
+        `"repite el cambio y espera confirmación" de actualizar_cotizacion NO aplica a este evento (caso real 01-sep: en vez de ` +
+        `ejecutar, se le preguntó al cliente de nuevo y la promesa de la llamada quedó rota). Llama la tool EN ESTE MISMO TURNO. ` +
+        `Solo si falta un dato imprescindible para cotizar, pídelo directo y corto.`
       const r = await fetch(`${SELF_BASE}/api/vic-botmaker-v3`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-secret": BOTMAKER_SECRET },
