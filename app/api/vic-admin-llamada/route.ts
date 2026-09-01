@@ -168,23 +168,31 @@ export async function POST(req: Request): Promise<NextResponse> {
     filaId = Number(((await ins.json().catch(() => [])) as Array<{ id?: number }>)[0]?.id || 0)
   } catch { /* best-effort */ }
 
+  // FORMATO DEL PUENTE (descubierto en la prueba del 01-sep): el agent_id va
+  // con prefijo "agent_" — SIN el prefijo el puente responde 200 {"error":null}
+  // y bota la llamada en silencio (la "llamada fantasma" del caso Alejandro).
+  // Las variables van como diccionario plano.
   const r = await fetch(PHONECALL_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       from_number: FROM_NUMBER,
       to_number: `+${contact}`,
-      agent_id: agentId,
+      agent_id: agentId.startsWith("agent_") ? agentId : `agent_${agentId}`,
       variables,
     }),
     cache: "no-store",
   }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }) as unknown as Response)
 
   const respuesta = await r.text().catch(() => "")
-  console.log(`[vic-admin-llamada] ${campana} → +${contact} (agente ${agentId.slice(0, 8)}): ${r.status} ${respuesta.slice(0, 200)}`)
+  // ÉXITO REAL = call_id en la respuesta. El puente responde 200 hasta con
+  // payloads que bota (cicatriz Alejandro + prueba de hoy): el 200 no vale.
+  const callId = (respuesta.match(/"call_id"\s*:\s*"([^"]+)"/) || [])[1] || ""
+  console.log(`[vic-admin-llamada] ${campana} → +${contact} (agente ${agentId.slice(0, 8)}): ${r.status} call_id=${callId || "NINGUNO"} ${respuesta.slice(0, 150)}`)
   return NextResponse.json({
-    ok: r.ok,
+    ok: r.ok && Boolean(callId),
     filaId,
+    callId,
     status: r.status,
     respuesta: respuesta.slice(0, 400),
     variables,
