@@ -1279,8 +1279,17 @@ async function processOneTurn(
     // en este turno. Gemelo del guardrail de reunión agendada.
     const ANUNCIA_ACTUALIZADA_RE =
       /cotizaci[oó]n\s+(actualizada|modificada|corregida)|actualic[eé]\s+(tu|la)\s+cotizaci[oó]n|te\s+(env[ií]o|mando|mand[eé]|acabo\s+de\s+mandar)\s+la\s+cotizaci[oó]n\s+actualizada|nueva\s+versi[oó]n\s+de\s+(tu|la)\s+cotizaci[oó]n/i
+    // aplicar_siguiente_descuento y anualizar_cotizacion TAMBIÉN regeneran la
+    // cotización (falso positivo 01-sep: la promesa post-llamada aplicó el 10%
+    // de verdad y el guardrail igual reemplazó el anuncio por la pregunta
+    // enlatada — trabajo bien hecho, celado por el guardia).
     const actualizoReal = toolCalls.some(
-      (c) => (c.name === "actualizar_cotizacion" || c.name === "generar_link_cotizadora") && c.ok,
+      (c) =>
+        (c.name === "actualizar_cotizacion" ||
+          c.name === "generar_link_cotizadora" ||
+          c.name === "aplicar_siguiente_descuento" ||
+          c.name === "anualizar_cotizacion") &&
+        c.ok,
     )
     if (!enOnboarding && ANUNCIA_ACTUALIZADA_RE.test(reply) && !actualizoReal) {
       console.error(
