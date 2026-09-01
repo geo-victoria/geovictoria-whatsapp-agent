@@ -47,6 +47,24 @@ export async function POST(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as Partial<ActualizarCotizacionInput> & {
     contact?: string
     send?: boolean
+    anualizar?: boolean
+  }
+  // Canal admin de la ANUALIDAD (01-sep): con anualizar=true la cotización se
+  // convierte a pago anual con la misma tool determinista de Vicky.
+  if (body.anualizar === true && body.quote_id) {
+    const { anualizarCotizacion } = await import("@/lib/tools/anualizar-cotizacion")
+    const r = await anualizarCotizacion({
+      quote_id: body.quote_id,
+      _sinCorreoCliente: (body as { _sinCorreoCliente?: boolean })._sinCorreoCliente === true,
+    })
+    if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: 502 })
+    return NextResponse.json({
+      ok: true,
+      version: r.version,
+      acceptanceUrl: r.acceptanceUrl,
+      totalCLP: r.totalConIvaCLP,
+      mensaje: r.mensajeParaProspecto,
+    })
   }
   if (!body.quote_id || !body.userCount || !body.modulos?.length || !body.resumen_cambio) {
     return NextResponse.json(

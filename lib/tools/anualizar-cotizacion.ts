@@ -49,7 +49,11 @@ export const anualizarCotizacionSchema = {
   },
 }
 
-export type AnualizarCotizacionInput = { quote_id: string }
+export type AnualizarCotizacionInput = {
+  quote_id: string
+  /** Canal admin: regenerar sin correo al cliente (revisión previa de Lalo). */
+  _sinCorreoCliente?: boolean
+}
 
 export type AnualizarCotizacionResultado =
   | {
@@ -227,6 +231,7 @@ export async function anualizarCotizacion(
       },
       body: JSON.stringify({
         quoteId,
+        ...(args._sinCorreoCliente === true ? { sinCorreoCliente: true } : {}),
         resumenCambio: "Pago anual habilitado: 12 meses de todo lo recurrente anticipados en un solo pago",
         cotizacion: {
           items,
