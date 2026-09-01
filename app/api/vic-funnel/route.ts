@@ -3775,13 +3775,13 @@ function renderInboundDiario(
     // origen (in = inbound, out = outbound); junto a PAGADAS el CIERRE de
     // cada origen = pagadas ÷ formales de ese origen en el mismo día.
     if ((etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
-      const f = partirInOut("formal", dia)
-      if (etapa === "formal" && (f.ins > 0 || f.out > 0)) {
-        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Formales por origen: inbound · outbound">(${f.ins} in · ${f.out} out)</span>`
-      } else if (etapa === "pagada") {
-        const p = partirInOut("pagada", dia)
-        const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a * 100) / b)}%` : "—")
-        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Cierre por origen: pagadas ÷ formales del mismo origen (in = inbound, out = outbound)">(in ${pct(p.ins, f.ins)} · out ${pct(p.out, f.out)})</span>`
+      // Composición por tipo de conversación (Lalo 01-sep): dos porcentajes
+      // que suman 100 — qué parte del número es inbound y qué parte outbound.
+      const x = partirInOut(etapa, dia)
+      const tot = x.ins + x.out
+      if (tot > 0) {
+        const pin = Math.round((x.ins * 100) / tot)
+        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: % inbound · % outbound (suman 100)">(${pin}% in · ${100 - pin}% out)</span>`
       }
     }
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${sufijo ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
@@ -3910,13 +3910,11 @@ function renderInboundDiario(
     let sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
     // Mismo desglose in/out del período completo (Lalo 01-sep).
     if ((etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
-      const f = partirInOut("formal", "TOTAL")
-      if (etapa === "formal" && (f.ins > 0 || f.out > 0)) {
-        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Formales por origen: inbound · outbound">(${f.ins} in · ${f.out} out)</span>`
-      } else if (etapa === "pagada") {
-        const p = partirInOut("pagada", "TOTAL")
-        const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a * 100) / b)}%` : "—")
-        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Cierre por origen: pagadas ÷ formales del mismo origen">(in ${pct(p.ins, f.ins)} · out ${pct(p.out, f.out)})</span>`
+      const x = partirInOut(etapa, "TOTAL")
+      const tot = x.ins + x.out
+      if (tot > 0) {
+        const pin = Math.round((x.ins * 100) / tot)
+        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: % inbound · % outbound (suman 100)">(${pin}% in · ${100 - pin}% out)</span>`
       }
     }
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${partes.length ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
