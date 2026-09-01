@@ -274,6 +274,8 @@ export type ConsultarDescuentoReferencialResultado =
       escalonActual: number
       topeAlcanzado: boolean
       mensajeParaProspecto: string
+      /** Configuración sobre la que se calculó (etiqueta determinista). */
+      opcionCalculada?: string
       // Presente solo si se pudo registrar/actualizar el Borrador en Zoho.
       draft?: DraftCotizacionIds
     }
@@ -400,6 +402,24 @@ export async function consultarDescuentoReferencial(
     // (pref_escalon/pref_params), y la cotización formal se crea UNA sola vez
     // con generar_link_cotizadora al aceptar.
 
+    // ETIQUETA DE LA OPCIÓN (31-ago, prueba de Rodrigo): el primer 10% se
+    // calculó sobre la opción reloj+app cuando el cliente había elegido la de
+    // solo app — y el mensaje no decía sobre QUÉ opción era, así que el error
+    // quedó invisible hasta que el cliente reclamó. El mensaje ahora nombra
+    // la configuración de forma DETERMINISTA desde los args reales: si el
+    // modelo pasó la opción equivocada, se nota al tiro (y el modelo mismo
+    // puede corregir antes de responder).
+    const { getHardwareById } = await import("../catalogo")
+    const partesOpcion = [
+      `App móvil para ${args.userCount} personas`,
+      ...(args.hardware || []).map((h) => {
+        const nombre = getHardwareById(h.id)?.displayName || h.id
+        const mod = (h.modalidad || "arriendo") === "venta" ? "en compra" : "en arriendo"
+        return `${nombre} ${mod}${(h.cantidad || 1) > 1 ? ` ×${h.cantidad}` : ""}`
+      }),
+    ]
+    const etiquetaOpcion = `(Este valor es para la opción: ${partesOpcion.join(" + ")}.)`
+
     return {
       ok: true,
       escalon: {
@@ -413,7 +433,8 @@ export async function consultarDescuentoReferencial(
       },
       escalonActual: escalonActualFinal,
       topeAlcanzado: Boolean(data.tope_alcanzado),
-      mensajeParaProspecto: data.mensaje_para_prospecto,
+      mensajeParaProspecto: `${data.mensaje_para_prospecto}\n${etiquetaOpcion}`,
+      opcionCalculada: partesOpcion.join(" + "),
     }
   } catch (err) {
     console.error("[consultar_descuento_referencial] excepción:", err)

@@ -416,8 +416,19 @@ export async function reintentarDescuentosCampana(): Promise<{ candidatos: numbe
         await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
         continue
       }
-      const base = Math.max(q ? q.dcto : 0, Number(st.pctPrevio || 0))
-      const nuevo = Math.min(base + 10, TOPE_CAMPANA)
+      // La promesa de la campaña es +10 puntos SOBRE LO QUE TENÍA AL ACEPTARLA
+      // (pctPrevio) — jamás sobre un descuento negociado DESPUÉS en el chat.
+      // Caso Rodrigo 31-ago: negoció 20% por WhatsApp y el vigía, sumando
+      // sobre el dcto vigente, lo subió a 30%. Si la cotización ya tiene un
+      // descuento igual o mejor que la promesa, no hay nada que reparar.
+      const nuevo = Math.min(Number(st.pctPrevio || 0) + 10, TOPE_CAMPANA)
+      if (q && q.dcto >= nuevo) {
+        st.pctAplicado = q.dcto
+        st.aplicadoAt = new Date().toISOString()
+        await setKvValue(fila.key, JSON.stringify(st)).catch(() => {})
+        console.log(`[campana-vigia] ${fono}: dcto vigente ${q.dcto}% ya cubre la promesa (${nuevo}%) — sin reparación.`)
+        continue
+      }
       const ra = await fetch(`${COTIZADOR}/api/quote-acceptance/descuento-ejecutivo`, {
         method: "POST",
         headers: {

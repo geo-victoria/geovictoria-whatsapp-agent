@@ -69,23 +69,18 @@ export async function POST(req: Request): Promise<NextResponse> {
     cache: "no-store",
   })
 
-  // 2. Estado de onboarding en vic_kv (fase, borrador, alta, kickoff).
-  const llaves = [
-    `fase_vicky_${contact}`,
-    `onboarding_borrador_${contact}`,
-    `onboarding_alta_solicitada_${contact}`,
-    `traspaso_postpago_%`, // no aplica por contacto — se omite abajo
-  ]
+  // 2. TODO el estado por contacto en vic_kv (31-ago, caso Rodrigo: el reset
+  // dejaba vivo `campana_dcto_` de una prueba anterior y el vigía de la
+  // campaña le aplicó +10 sobre el descuento recién negociado). El endpoint
+  // es SOLO para los probadores de la lista blanca, así que borrar toda
+  // llave que contenga su número es lo correcto: fase, borrador, campaña,
+  // gate, marcas de pago, dedup de lead, tqlogs — prueba limpia de verdad.
   let llavesBorradas = 0
-  for (const k of llaves) {
-    if (k.includes("%")) continue
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(k)}`, {
-      method: "DELETE",
-      headers: H(),
-      cache: "no-store",
-    })
-    if (r.ok) llavesBorradas++
-  }
+  const rk = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_kv?key=like.${encodeURIComponent(`*${contact}*`)}`,
+    { method: "DELETE", headers: { ...H(), Prefer: "count=exact" }, cache: "no-store" },
+  )
+  if (rk.ok) llavesBorradas = Number(rk.headers.get("content-range")?.split("/")[1] || 0)
 
   console.log(`[reset-contacto] +${contact}: ${convs.length} conversación(es), ${mensajesBorrados} mensajes, ${llavesBorradas} llaves kv`)
   return NextResponse.json({ ok: true, contact, conversaciones: convs.length, mensajes: mensajesBorrados, llavesKv: llavesBorradas })
