@@ -58,6 +58,9 @@ const POST_PERMITIDOS = new Set([
   // bienvenida post-pago murió fuera de ventana y hubo que recuperar el link
   // a mano para entregarlo por el ejecutivo). Idempotente en el cotizador.
   "/api/quote-acceptance/onboarding-link",
+  // Barrido de correos de cotización pendientes (01-sep, regla Lalo "si el
+  // correo existe, el correo sale"): disparo manual del cron determinista.
+  "/api/quote-acceptance/correos-pendientes",
 ])
 
 export async function POST(req: Request): Promise<Response> {
