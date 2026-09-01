@@ -1286,8 +1286,26 @@ async function processOneTurn(
       console.error(
         `[v3-bg] ACTUALIZADA_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
       )
-      reply =
-        "Ojo conmigo, para ser bien precisa: tu cotización formal sigue siendo la vigente — todavía no la he actualizado. ¿Quieres que la deje con esta nueva configuración? Me confirmas y la actualizo al tiro, y te llega el documento corregido 😊"
+      // ESCAPE DEL BUCLE (01-sep, caso Lalo post-llamada): el cliente dijo
+      // "sí" DOS veces y esta guarda le repitió la misma pregunta enlatada —
+      // la tool seguía sin correr bien y no había salida. A la segunda vez en
+      // 30 min: honestidad + aviso interno (patrón del guardrail de agenda),
+      // jamás la misma pregunta de nuevo.
+      const kvLoop = `act_sin_tool_${contact}`
+      const previa = Number((await getKvValue(kvLoop).catch(() => null)) || 0)
+      const reciente = previa > 0 && Date.now() - previa < 30 * 60 * 1000
+      if (reciente) {
+        reply =
+          "Disculpa, tuve un problema técnico al actualizar tu cotización — ya le avisé al equipo y te la hago llegar corregida apenas esté lista, no necesitas confirmarme nada más 🙌"
+        await setKvValue(kvLoop, "0").catch(() => {})
+        await avisarEquipoInterno(
+          `⚠️ ACTUALIZACIÓN de cotización FALLÓ dos veces seguidas — contacto +${contact}. El cliente ya confirmó el cambio y quedó con la promesa: revisar la conversación y actualizar/enviar a mano.`,
+        ).catch(() => {})
+      } else {
+        await setKvValue(kvLoop, String(Date.now())).catch(() => {})
+        reply =
+          "Ojo conmigo, para ser bien precisa: tu cotización formal sigue siendo la vigente — todavía no la he actualizado. ¿Quieres que la deje con esta nueva configuración? Me confirmas y la actualizo al tiro, y te llega el documento corregido 😊"
+      }
     }
 
     // 2.6c. Guardrail anti-alucinación de callback / lead registrado.
