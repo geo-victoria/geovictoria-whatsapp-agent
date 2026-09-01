@@ -486,16 +486,31 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
     })
   }
 
+  // ACCESORIOS (tarjetas de proximidad, 01-sep): acompañan al reloj como
+  // venta única. NO cuentan para puntos/envío/instalación ni arriendo por
+  // zona, y SOLOS no se cotizan (sin reloj no hay lector que las lea).
+  const hayAccesorios = hardware.some((hw) => getHardwareDisponibleParaVicky(hw.id)?.esAccesorio === true)
+  const hardwareEquipos = hardware.filter((hw) => getHardwareDisponibleParaVicky(hw.id)?.esAccesorio !== true)
+  if (hayAccesorios && !hardwareEquipos.some((hw) => hw.id === "senseface_2a")) {
+    return {
+      ok: false,
+      error:
+        "Las tarjetas de proximidad solo acompañan al reloj control físico (se marcan en su lector). " +
+        "Cotízalas junto al reloj, o agrega el reloj a la configuración.",
+    }
+  }
+
   let hayHardware = false
   for (const hw of hardware) {
     const dispositivo = getHardwareDisponibleParaVicky(hw.id)
     if (!dispositivo) return { ok: false, error: `Hardware '${hw.id}' no está habilitado para Vicky.` }
+    const esAccesorio = dispositivo.esAccesorio === true
     const cantidad = hw.cantidad ?? dispositivo.cantidadSugerida
-    const modalidadElegida: "arriendo" | "venta" = hw.modalidad ?? "arriendo"
+    const modalidadElegida: "arriendo" | "venta" = hw.modalidad ?? (esAccesorio ? "venta" : "arriendo")
     if (!dispositivo.modalidadesDisponibles.includes(modalidadElegida)) {
       return { ok: false, error: `${dispositivo.displayName} no disponible en modalidad '${modalidadElegida}'` }
     }
-    if (modalidadElegida === "venta") {
+    if (modalidadElegida === "venta" && !esAccesorio) {
       // Vicky NUNCA propone venta por su cuenta: solo si el cliente pidió
       // comprar. Si esto aparece sin que el cliente lo haya pedido, el modelo
       // se saltó la regla — y la diferencia de precio es enorme (6 UF de una vez
@@ -528,7 +543,8 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
       precioUnitarioUF: precioUnitario,
       subtotalUF: Number((cantidad * precioUnitario).toFixed(3)),
     })
-    hayHardware = true
+    // Los accesorios no gatillan puntos/envío/instalación: viajan con el reloj.
+    if (!esAccesorio) hayHardware = true
   }
 
   if (hayHardware) {
@@ -557,7 +573,7 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
     // cuando la cotización es de una sola modalidad). Si hay arriendo Y venta a
     // la vez, cada punto debe traer su `modalidad` explícita.
     const modalidadesHw = new Set(
-      hardware.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"),
+      hardwareEquipos.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"),
     )
     const modalidadUniforme: "arriendo" | "venta" | null =
       modalidadesHw.size === 1 ? [...modalidadesHw][0] : null
@@ -567,8 +583,8 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
     // el servicio de instalación no se cobra (el envío sí se mantiene). Mismo
     // criterio que cotizar_referencial — cero drift entre estimado y formal.
     const soloHardwareSinInstalacion =
-      hardware.length > 0 &&
-      hardware.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
+      hardwareEquipos.length > 0 &&
+      hardwareEquipos.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
 
     const serviciosAplicables = getServiciosAplicablesConHardware()
     for (const punto of puntosInstalacion) {

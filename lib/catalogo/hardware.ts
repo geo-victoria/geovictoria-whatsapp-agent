@@ -53,6 +53,22 @@ export const CATALOGO_HARDWARE: Hardware[] = [
     disponibleParaVicky: true,
   },
 
+  {
+    id: "tarjeta_id",
+    modelo: "Tarjeta ID",
+    displayName: "Tarjeta de proximidad",
+    conexion: "-",
+    ventaUF: 0.03,
+    arriendoUF: 0,
+    descripcion:
+      "Tarjeta de proximidad para marcar asistencia acercándola al lector del reloj control físico. Se vende por unidad (pago único) y solo acompaña a un reloj — el reloj admite hasta 3.000 tarjetas registradas.",
+    modalidadesDisponibles: ["venta"],
+    cantidadSugerida: 1,
+    requiereInstalacionOnsite: false,
+    disponibleParaVicky: true,
+    esAccesorio: true,
+  },
+
   // ─── DECLARADOS PERO DESHABILITADOS ─────────────────────────────────────
   {
     id: "armorpad",

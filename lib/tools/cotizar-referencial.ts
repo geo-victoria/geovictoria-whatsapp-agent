@@ -325,6 +325,18 @@ export async function cotizarReferencial(args: {
   }
 
   // ── Procesar hardware ──
+  // ACCESORIOS (tarjetas de proximidad, 01-sep): venta única que acompaña al
+  // reloj — no cuenta para puntos/envío/instalación y sola no se cotiza.
+  const hayAccesorios = hardware.some((hw) => getHardwareDisponibleParaVicky(hw.id)?.esAccesorio === true)
+  const hardwareEquipos = hardware.filter((hw) => getHardwareDisponibleParaVicky(hw.id)?.esAccesorio !== true)
+  if (hayAccesorios && !hardwareEquipos.some((hw) => hw.id === "senseface_2a")) {
+    return {
+      ok: false,
+      error:
+        "Las tarjetas de proximidad solo acompañan al reloj control físico (se marcan en su lector). " +
+        "Cotízalas junto al reloj, o agrega el reloj a la configuración.",
+    }
+  }
   let hayHardware = false
   for (const hw of hardware) {
     const dispositivo = getHardwareDisponibleParaVicky(hw.id)
@@ -336,8 +348,9 @@ export async function cotizarReferencial(args: {
       }
     }
 
+    const esAccesorio = dispositivo.esAccesorio === true
     const cantidad = hw.cantidad ?? dispositivo.cantidadSugerida
-    const modalidadElegida: "arriendo" | "venta" = hw.modalidad ?? "arriendo"
+    const modalidadElegida: "arriendo" | "venta" = hw.modalidad ?? (esAccesorio ? "venta" : "arriendo")
 
     if (!dispositivo.modalidadesDisponibles.includes(modalidadElegida)) {
       return {
@@ -365,9 +378,10 @@ export async function cotizarReferencial(args: {
       precioUnitarioUF: precioUnitario,
       subtotalUF: Number((cantidad * precioUnitario).toFixed(3)),
     })
-    hayHardware = true
+    // Los accesorios no gatillan puntos/envío/instalación: viajan con el reloj.
+    if (!esAccesorio) hayHardware = true
 
-    if (cantidad > dispositivo.cantidadSugerida) {
+    if (!esAccesorio && cantidad > dispositivo.cantidadSugerida) {
       advertencias.push(
         `Para ${dispositivo.displayName} se está cotizando ${cantidad} unidades. La cotizadora oficial puede aplicar precios distintos a las unidades adicionales (descuento promo aplica solo a las primeras unidades).`
       )
@@ -400,7 +414,7 @@ export async function cotizarReferencial(args: {
     }
 
     const modalidadesHw = new Set(
-      hardware.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"),
+      hardwareEquipos.map((hw) => (hw.modalidad ?? "arriendo") as "arriendo" | "venta"),
     )
     const modalidadUniforme: "arriendo" | "venta" | null =
       modalidadesHw.size === 1 ? [...modalidadesHw][0] : null
@@ -410,8 +424,8 @@ export async function cotizarReferencial(args: {
     // el servicio de instalación no se cobra (el envío sí se mantiene: el equipo
     // se despacha igual). Un reloj de pared mezclado reactiva la instalación.
     const soloHardwareSinInstalacion =
-      hardware.length > 0 &&
-      hardware.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
+      hardwareEquipos.length > 0 &&
+      hardwareEquipos.every((hw) => getHardwareDisponibleParaVicky(hw.id)?.requiereInstalacionOnsite === false)
 
     const serviciosAplicables = getServiciosAplicablesConHardware()
     for (const punto of puntosInstalacion) {

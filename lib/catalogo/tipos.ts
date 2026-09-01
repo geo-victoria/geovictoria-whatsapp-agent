@@ -103,6 +103,12 @@ export type Hardware = {
   requiereInstalacionOnsite?: boolean
   /** Si es `true`, Vicky puede ofrecerlo. */
   disponibleParaVicky: boolean
+  /** Accesorio que ACOMPAÑA a un reloj (tarjetas de proximidad): no cuenta
+   * como hardware para envío/instalación/puntos ni para el arriendo por
+   * zona — es una línea de venta única que viaja con el equipo (01-sep,
+   * caso Valuaciones: el cliente quería cerrar y las tarjetas se agregaron
+   * a mano; ahora Vicky puede sola). */
+  esAccesorio?: boolean
 }
 
 /**
