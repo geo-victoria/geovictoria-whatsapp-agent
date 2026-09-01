@@ -79,7 +79,18 @@ async function variablesDesdeQuote(quoteId: string): Promise<Record<string, stri
   const q = ((await r.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data?.[0]
   if (!q) throw new Error(`cotización ${quoteId} vacía`)
   const filas = (Array.isArray(q.Detalle_Items_Cotizacion) ? q.Detalle_Items_Cotizacion : []) as Array<Record<string, unknown>>
-  const uf = Number(q.UF_Valor || 0)
+  // Las cotizaciones viejas (pre-ago) no guardan UF_Valor → los montos salían
+  // en 0 y el guion quedaba sin cifras (visto en la tanda del 01-sep, casos
+  // Carolina/Johana/David). Fallback: UF del día vía mindicador (best-effort).
+  let uf = Number(q.UF_Valor || 0)
+  if (!(uf > 0)) {
+    uf = await fetch("https://mindicador.cl/api/uf", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { serie?: Array<{ valor?: number }> }) => Number(d?.serie?.[0]?.valor || 0))
+      .catch(() => 0)
+  }
+  if (!(uf > 0)) throw new Error(`cotización ${quoteId} sin UF (ni Zoho ni mindicador)`)
+
   const pct = Number(q.Descuento_Recurrente_Pct || 0)
   let recNetoUF = 0
   let planUF = 0
