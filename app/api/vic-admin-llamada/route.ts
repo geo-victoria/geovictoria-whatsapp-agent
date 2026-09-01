@@ -100,6 +100,9 @@ async function variablesDesdeQuote(quoteId: string): Promise<Record<string, stri
   return {
     customer_name: nombreCliente,
     company: empresa,
+    // El postcall usa quote_id para aplicar el precio acordado a la
+    // cotización REAL y para agendar la llamada devuelta con contexto.
+    quote_id: quoteId,
     monto_mensual: String(mensualVigenteClp),
     oferta_pct: pctOferta > 0 ? String(pctOferta) : "",
     monto_oferta: pctOferta > 0 ? String(mensualOfertaClp) : "",
