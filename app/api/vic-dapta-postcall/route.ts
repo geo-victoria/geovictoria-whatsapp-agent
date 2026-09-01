@@ -194,6 +194,35 @@ export async function POST(req: Request): Promise<Response> {
     `[dapta-postcall] contact=${contact} estado=${estado || "?"} cambio=${cambio ? "sí" : "no"} dur=${duracionS}s`,
   )
 
+  // REGISTRO DE CAMPAÑA (Lalo 01-sep, "visualizar en el dash cuándo la
+  // llamada tocó al usuario y si generó una venta"): el resultado se estampa
+  // en la fila más reciente de vic_llamadas del contacto (la creó el disparo
+  // manual de vic-admin-llamada). Best-effort — jamás bloquea el postcall.
+  try {
+    const supaUrl = (process.env.SUPABASE_URL || "").trim()
+    const supaKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    if (supaUrl && supaKey) {
+      const H = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, "Content-Type": "application/json" }
+      const ult = await fetch(
+        `${supaUrl}/rest/v1/vic_llamadas?contact=eq.${contact}&order=disparada_at.desc&limit=1&select=id`,
+        { headers: H, cache: "no-store" },
+      )
+      const fila = ((await ult.json().catch(() => [])) as Array<{ id?: number }>)[0]
+      if (fila?.id) {
+        await fetch(`${supaUrl}/rest/v1/vic_llamadas?id=eq.${fila.id}`, {
+          method: "PATCH",
+          headers: H,
+          body: JSON.stringify({
+            resultado: estado || (duracionS > 0 ? "sin_estado" : "no_contesta"),
+            resumen: (resumen || "").slice(0, 2000),
+            resultado_at: new Date().toISOString(),
+          }),
+          cache: "no-store",
+        })
+      }
+    }
+  } catch { /* best-effort */ }
+
   // ── Acción 1: cumplir la promesa "te la mando por WhatsApp" ───────────────
   // Si el cliente pidió modificar la cotización, reinyectamos un EVENTO INTERNO
   // al pipeline normal de la Vicky de WhatsApp (mismo webhook que Botmaker):
