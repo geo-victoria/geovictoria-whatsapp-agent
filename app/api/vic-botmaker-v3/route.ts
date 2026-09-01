@@ -66,7 +66,13 @@ import {
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { consumirCotizacionPendiente } from "@/lib/enviar-cotizacion-wa"
-import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial } from "@/lib/voseo-v3"
+import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial, blindarSoporteInventado } from "@/lib/voseo-v3"
+import { directorioEjecutivos } from "@/lib/directorio-ejecutivos"
+
+// Lista blanca de correos reales para el blindaje de soporte inventado.
+function emailsDirectorio(): Set<string> {
+  return new Set(directorioEjecutivos().map((f) => f.email.toLowerCase()))
+}
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
 import { marcarCotizacionRechazada } from "@/lib/zoho-quote-status"
@@ -1515,6 +1521,10 @@ async function processOneTurn(
     // (evento 'pagada'), no el modelo. Si Vicky lo filtra, se reemplaza por el
     // WhatsApp real de soporte.
     reply = blindarContactoComercial(reply, false)
+    // 2.8b. Blindaje de SOPORTE INVENTADO (Lalo 01-sep, caso Jeshu): fijos
+    // +56 2 alucinados → fono real de la Mesa de Ayuda; correos
+    // @geovictoria.com desconocidos → soporte@. Siempre activo.
+    reply = blindarSoporteInventado(reply, emailsDirectorio())
 
     // 2.9. ANTI-ECO (caso Atcomo 09-ago): el cliente confirmó un supuesto ya
     // cotizado ("la instalan ustedes") y el modelo re-cotizó con los mismos
@@ -1552,12 +1562,12 @@ async function processOneTurn(
         }).catch(() => null)
         const retryReply = (retryEco?.reply || "").trim()
         if (retryReply && normEco(retryReply) !== normEco(reply)) {
-          let curado = blindarContactoComercial(
+          let curado = blindarSoporteInventado(blindarContactoComercial(
             corregirPedidoDeTelefono(
               honestarMencionesDeCorreo(quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))),
             ),
             false,
-          )
+          ), emailsDirectorio())
           // El reintento corre DESPUÉS de 2.7c: la cura de placeholders se
           // aplica de nuevo aquí para que no se la salte.
           const curaEco = curarPlaceholdersDeLink(

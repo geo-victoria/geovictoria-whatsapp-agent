@@ -129,3 +129,35 @@ export function blindarContactoComercial(
   if (!texto || permitidoComercial) return texto
   return TELS_COMERCIALES_RE.reduce((t, re) => t.replace(re, SOPORTE_WHATSAPP), texto)
 }
+
+// ── BLINDAJE DE SOPORTE INVENTADO (Lalo 01-sep, caso Jeshu) ─────────────────
+// El modelo ALUCINÓ una Mesa de Ayuda completa ("+56 2 2932 70 80" y
+// "ayuda@geovictoria.com" — ninguno existe) y un cliente quedó marcando un
+// número muerto. Regla determinista, siempre activa:
+//  · Todo FIJO chileno (+56 2 …) en la salida se reemplaza por el teléfono
+//    REAL de la Mesa de Ayuda: Vicky no tiene ningún fijo legítimo que dar
+//    (los ejecutivos son celulares 9-xxxx y soporte atiende en el 600).
+//  · Todo correo @geovictoria.com que NO esté en la lista blanca (soporte,
+//    vicky, cobranza, ayuda-real de países y los del directorio de
+//    ejecutivos) se reemplaza por soporte@geovictoria.com.
+// Fuente de verdad de la tarjeta: MENSAJE_ESCALAMIENTO_HUMANO en
+// lib/tools/consultar-agente-soporte.ts (WhatsApp arriba, fono 600 acá).
+const SOPORTE_FONO_600 = "600 914 3819"
+const FIJO_CL_RE = /\+?\s*56[\s.)-]*\(?0?2\)?[\s.)-]*\d{3,4}[\s.)-]*\d{2}[\s.)-]*\d{2}\b/g
+const CORREO_GV_RE = /\b([a-z0-9._%+-]+)@geovictoria\.com\b/gi
+const CORREOS_GV_FIJOS = new Set([
+  "soporte", "vicky", "cobranza", "info", "vluna", "egomez", "rlewit",
+  "soportemx", "soporteco", "ssttperu",
+])
+
+export function blindarSoporteInventado(texto: string, emailsPermitidos?: Set<string>): string {
+  if (!texto) return texto
+  let salida = texto.replace(FIJO_CL_RE, SOPORTE_FONO_600)
+  salida = salida.replace(CORREO_GV_RE, (todo, usuario: string) => {
+    const u = usuario.toLowerCase()
+    if (CORREOS_GV_FIJOS.has(u)) return todo
+    if (emailsPermitidos?.has(`${u}@geovictoria.com`)) return todo
+    return "soporte@geovictoria.com"
+  })
+  return salida
+}
