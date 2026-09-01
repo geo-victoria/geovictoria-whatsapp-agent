@@ -93,9 +93,13 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
     id: "alertas",
     nombre: "Alertas",
     descripcion:
-      "Notificaciones automáticas a supervisores ante atrasos, ausencias o anomalías de marcaje.",
+      "Notificaciones automáticas a supervisores ante atrasos, ausencias o anomalías de marcaje — llegan por correo apenas ocurren, y el detalle queda en los reportes de la plataforma web.",
+    // HABILITADO PARA VICKY (Lalo 01-sep, caso Vivian/Vipacar: la clienta lo
+    // pidió y Vicky lo derivaba al ejecutivo). Mismo precio de la lista
+    // oficial (0,019 UF/usuario). Oferta REACTIVA como vacaciones: solo si lo
+    // piden o mencionan el dolor de atrasos/ausencias.
     tiers: [{ minUsuarios: 1, maxUsuarios: 8000, modalidad: "por_usuario", precioUF: 0.019 }],
-    disponibleParaVicky: false,
+    disponibleParaVicky: true,
   },
   {
     id: "calendario",
