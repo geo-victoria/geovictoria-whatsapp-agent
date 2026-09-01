@@ -143,6 +143,22 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (noLlamar) {
     return NextResponse.json({ ok: false, error: `contacto pidió NO ser llamado (${noLlamar})` }, { status: 403 })
   }
+  // Caso de SOPORTE = jamás campaña comercial (Lalo 01-sep, caso LA FLORERA:
+  // clienta esperando instalación recibió la llamada de re-encantamiento —
+  // la marca 'soporte' de la conversación ahora bloquea el disparo, sin
+  // override por forzar). Fail-open si Supabase no responde.
+  try {
+    const conv = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${contact}&select=followup_closed_reason&limit=1`,
+      { headers: HS(), cache: "no-store" },
+    ).then((r) => (r.ok ? r.json() : []))
+    if (Array.isArray(conv) && conv[0]?.followup_closed_reason === "soporte") {
+      return NextResponse.json(
+        { ok: false, error: "conversación marcada SOPORTE (cliente existente/reclamo) — sin campañas comerciales" },
+        { status: 403 },
+      )
+    }
+  } catch { /* fail-open */ }
   const h = horaCL()
   if ((h < 9 || h >= 21) && body.forzar !== true) {
     return NextResponse.json({ ok: false, error: `fuera de ventana 9-21 CL (hora actual ${h}); forzar=true solo para pruebas internas` }, { status: 403 })
