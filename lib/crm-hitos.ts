@@ -1438,6 +1438,32 @@ export async function sincronizarHitoCrm(
     if (!habilitado()) return
     const clean = (contact || "").replace(/\D/g, "")
     if (!clean || esTelefonoDePrueba(clean)) return
+    // RUT DESDE EL HISTORIAL (Lalo 01-sep, caso Avilés/Centro de Desarrollo):
+    // el cliente dio el RUT en el chat 3 minutos antes de la derivación, pero
+    // el modelo no lo pasó en la tool → la escalera clasificó "calificado sin
+    // RUT" y entregó LEAD donde correspondía DEAL con tómbola. Antes de
+    // clasificar, si el hito viene sin RUT se busca el primer RUT válido en
+    // los mensajes recientes del CLIENTE (mismo extractor del enriquecedor).
+    // Solo PRE-entrega: el RUT que aparece DESPUÉS de entregado jamás
+    // convierte ni re-sortea (decisión Lalo 01-sep — eso es del ejecutivo).
+    if (!datos.rut && clean.startsWith("56")) {
+      try {
+        const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
+        const { rutEnTexto } = await import("./empresas-sii")
+        const historial = await fetchHistoryV3(clean, 40)
+        const soloCliente = historial
+          .filter((m) => m.role === "user")
+          .map((m) => String(m.content || ""))
+          .join("\n")
+        const rutChat = rutEnTexto(soloCliente)
+        if (rutChat) {
+          datos = { ...datos, rut: rutChat }
+          console.log(`[crm-hitos] ${clean}: RUT ${rutChat} recuperado del historial para clasificar el hito "${hito}"`)
+        }
+      } catch {
+        /* best-effort: sin historial, clasifica con lo que trajo la tool */
+      }
+    }
     // Flujo 21+ (Lalo 13-ago): con RUT y sin nombre de empresa, la razón
     // social se resuelve del padrón SII — el lead/deal nace con nombre real
     // en vez de "Por identificar". Best-effort: sin ficha, sigue igual.
