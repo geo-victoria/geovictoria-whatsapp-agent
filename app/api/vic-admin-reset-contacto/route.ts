@@ -82,6 +82,47 @@ export async function POST(req: Request): Promise<NextResponse> {
   )
   if (rk.ok) llavesBorradas = Number(rk.headers.get("content-range")?.split("/")[1] || 0)
 
-  console.log(`[reset-contacto] +${contact}: ${convs.length} conversación(es), ${mensajesBorrados} mensajes, ${llavesBorradas} llaves kv`)
-  return NextResponse.json({ ok: true, contact, conversaciones: convs.length, mensajes: mensajesBorrados, llavesKv: llavesBorradas })
+  // 3. COTIZACIONES VIVAS EN ZOHO → Expirada (Lalo 01-sep, tras el caso del
+  // descuento sobre una cotización vieja de Rodrigo): las cotizaciones de
+  // pruebas anteriores quedaban vivas en el CRM y cualquier tool que busque
+  // "la cotización del contacto" podía adoptarlas. NO se borra nada (deals,
+  // NDV y PDFs quedan como historia); solo se expiran las que siguen en
+  // juego (Borrador/Enviada/Aceptada). Las Pagadas no se tocan jamás.
+  let cotizacionesExpiradas = 0
+  try {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const HZ = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const rs = await fetch(`${api}/crm/v3/${quoteModule}/search?phone=${contact}&per_page=50`, {
+      headers: HZ,
+      cache: "no-store",
+    })
+    if (rs.ok && rs.status === 200) {
+      const filas = ((await rs.json().catch(() => ({}))) as {
+        data?: Array<{ id?: string; Estado_Cotizacion?: string | null }>
+      }).data || []
+      const vivas = filas.filter((q) =>
+        /^(borrador|enviada|aceptada)$/i.test(String(q.Estado_Cotizacion || "").trim()),
+      )
+      for (const q of vivas) {
+        const ru = await fetch(`${api}/crm/v3/${quoteModule}/${q.id}`, {
+          method: "PUT",
+          headers: HZ,
+          body: JSON.stringify({
+            data: [{ id: q.id, Estado_Cotizacion: "Expirada" }],
+            trigger: ["blueprint"],
+          }),
+          cache: "no-store",
+        })
+        if (ru.ok) cotizacionesExpiradas++
+      }
+    }
+  } catch (e) {
+    console.warn(`[reset-contacto] expirar cotizaciones falló (no bloquea):`, e instanceof Error ? e.message : e)
+  }
+
+  console.log(`[reset-contacto] +${contact}: ${convs.length} conversación(es), ${mensajesBorrados} mensajes, ${llavesBorradas} llaves kv, ${cotizacionesExpiradas} cotización(es) expirada(s)`)
+  return NextResponse.json({ ok: true, contact, conversaciones: convs.length, mensajes: mensajesBorrados, llavesKv: llavesBorradas, cotizacionesExpiradas })
 }
