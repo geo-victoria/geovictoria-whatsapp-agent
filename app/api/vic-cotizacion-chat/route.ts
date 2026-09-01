@@ -45,6 +45,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "cotización no disponible" }, { status: 401, headers: CORS })
   }
 
+  // __ping__ es el chequeo de disponibilidad de la página (decide si mostrar
+  // la burbuja). Hasta hoy pasaba por el MODELO y se PERSISTÍA: cada carga de
+  // página gastaba una llamada y dejaba conversaciones basura ("__pong__",
+  // JSON inventado) en vic_widget_chat. El token ya se validó arriba — eso es
+  // todo lo que el ping necesita saber.
+  if (mensaje === "__ping__") {
+    return NextResponse.json({ ok: true, reply: "" }, { headers: CORS })
+  }
+
   const historial = (body.historial || [])
     .filter((m) => (m.role === "user" || m.role === "assistant") && String(m.content || "").trim())
     .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content) }))
