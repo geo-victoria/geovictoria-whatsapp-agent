@@ -655,6 +655,49 @@ async function guardarLinkChat(
   }
 }
 
+/** Reintenta los correos internos de PAGADA por transferencia que quedaron
+ * pendientes (marcas notify_pagada_pend_<quoteId> en vic_kv, dejadas por
+ * notificarPagadaAlCotizador cuando el cotizador no confirmó). Entregado →
+ * se borra la marca; más de 48h → se descarta con grito en el log. */
+async function reintentarNotifyPagadaPendientes(): Promise<number> {
+  const filas = (await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_kv?key=like.notify_pagada_pend_*&select=key,value&limit=5`,
+    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+  ).then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])) as Array<{ key: string; value: string }>
+  if (!filas.length) return 0
+  const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+  const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+  if (!secret) return 0
+  const borrar = (key: string) =>
+    fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      cache: "no-store",
+    }).catch(() => undefined)
+  let entregados = 0
+  for (const fila of filas) {
+    const quoteId = fila.key.replace(/^notify_pagada_pend_/, "")
+    const edadMs = Date.now() - new Date(fila.value || 0).getTime()
+    if (!quoteId || !Number.isFinite(edadMs) || edadMs > 48 * 3600 * 1000) {
+      console.warn(`[ptv-cron] notify-paid pendiente DESCARTADO (48h) quote=${quoteId}`)
+      await borrar(fila.key)
+      continue
+    }
+    const r = await fetch(`${base}/api/payments/notify-paid?quoteId=${encodeURIComponent(quoteId)}`, {
+      method: "POST",
+      headers: { "x-vicky-secret": secret },
+      cache: "no-store",
+    }).catch(() => null)
+    if (r?.ok) {
+      entregados += 1
+      await borrar(fila.key)
+      console.log(`[ptv-cron] correo PAGADA reintentado OK quote=${quoteId}`)
+    }
+  }
+  return entregados
+}
+
 async function enriquecerLeadsDeChat(): Promise<number> {
   const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
   if (!apiKey) return 0
@@ -2021,6 +2064,17 @@ export async function GET(req: Request) {
   await vigilarEspejo(ahora).catch((e) => {
     console.warn("[ptv-cron] vigía espejo falló:", e instanceof Error ? e.message : e)
   })
+
+  // REINTENTO DE CORREOS DE PAGADA POR TRANSFERENCIA (Lalo 01-sep, caso
+  // Valuaciones/COT1052: el notify-paid best-effort murió en una tormenta de
+  // tokens de Zoho y el correo jamás salió). Las marcas notify_pagada_pend_*
+  // las deja notificarPagadaAlCotizador al fallar; acá se reintentan hasta
+  // entregar (ventana 48h, máx 5 por tick).
+  const notifPagadas = await reintentarNotifyPagadaPendientes().catch((e) => {
+    console.warn("[ptv-cron] reintento notify-paid falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+  if (notifPagadas) console.log(`[ptv-cron] correos PAGADA reintentados con éxito: ${notifPagadas}`)
 
   // Vigía de PROMESAS de contacto humano (P1 27-ago): promesas vencidas sin
   // evidencia en el espejo → alerta interna + visible en la Cartera.

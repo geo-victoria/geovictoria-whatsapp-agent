@@ -213,6 +213,7 @@ export async function marcarCotizacionPagada(quoteId: string): Promise<boolean> 
  * MercadoPago. Nunca lanza. Exportada para el reenvío manual
  * (vic-admin-notify-paid). */
 export async function notificarPagadaAlCotizador(quoteId: string): Promise<void> {
+  let entrego = false
   try {
     const base = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
     const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
@@ -222,9 +223,17 @@ export async function notificarPagadaAlCotizador(quoteId: string): Promise<void>
       headers: { "x-vicky-secret": secret },
       cache: "no-store",
     })
+    entrego = r.ok
     console.log(`[comprobante] notify-paid ${r.ok ? "ok" : `falló (${r.status})`} quote=${quoteId}`)
   } catch (e) {
     console.warn("[comprobante] notify-paid lanzó:", e instanceof Error ? e.message : e)
+  }
+  // COLA DE REINTENTO (Lalo 01-sep, caso Valuaciones/COT1052: el disparo
+  // best-effort murió en la tormenta de tokens de Zoho y el correo de PAGADA
+  // jamás salió). Si el cotizador no confirmó, queda marca en vic_kv y el
+  // vic-ptv-cron reintenta hasta que el correo salga (ventana 48h).
+  if (!entrego) {
+    await setKvValue(`notify_pagada_pend_${quoteId}`, new Date().toISOString()).catch(() => {})
   }
 }
 
