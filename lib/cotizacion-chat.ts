@@ -171,9 +171,11 @@ function bloqueCotizacion(c: ContextoCotizacion): string {
     c.ejecutivo
       ? `Ejecutivo a cargo: ${c.ejecutivo}${c.ejecutivoFono ? ` (+${c.ejecutivoFono})` : ""}`
       : "",
-    c.necesitaPago
-      ? `Formas de pago disponibles: las que muestra esta misma página (tarjeta o transferencia). No hay otras.`
-      : `Esta cotización ya está pagada.`,
+    /pagad/i.test(c.estado || "")
+      ? `Esta cotización ya está pagada.`
+      : c.necesitaPago
+        ? `Formas de pago disponibles: las que muestra esta misma página (tarjeta o transferencia). No hay otras.`
+        : `Para pagar, el cliente primero ACEPTA la cotización en esta misma página; recién ahí se habilitan las formas de pago (tarjeta o transferencia). No hay otras.`,
     ``,
     `ESTE ES EL DETALLE COMPLETO. La cotización no incluye nada que no esté en esta lista:`,
     `si te preguntan por algo que no aparece acá, di que no está incluido y ofrece agregarlo.`,
@@ -202,24 +204,15 @@ const ESTILO = [
   "  ejecutivo.",
   "· NO PROMETAS ACCIONES QUE NO PUEDES HACER. No digas que vas a consultar con tu jefe, que le",
   "  confirmas en unos minutos, que le preparas un documento ni que le agregas algo a la cuenta:",
-  "  lo ÚNICO que puedes ejecutar desde acá es el descuento con tus tools (si las tienes en este",
-  "  turno); todo lo demás no, y nadie se entera de lo que prometiste. Lo que SÍ puedes ofrecer es",
-  "  que siga por WhatsApp contigo, que es el mismo chat, o hablar con su ejecutivo.",
+  "  lo único que ejecutas de verdad es lo que una tool disponible en ESTE turno haga; todo lo",
+  "  demás no existe y nadie se entera de lo que prometiste. Y las tools jamás se simulan: si no",
+  "  las tienes, no describas ni actúes una llamada en el texto. Lo que SÍ puedes ofrecer es que",
+  "  siga por WhatsApp contigo, que es el mismo chat, o hablar con su ejecutivo.",
   "· No inventes requisitos ni procesos internos (pantallazos, aprobaciones, formularios). Si algo",
   "  no está en la cotización, di simplemente que no está incluido.",
   "· Si alguien dice que le prometieron algo que no aparece, no lo niegues ni lo confirmes como un",
   "  hecho: dile que en su cotización no aparece y que su ejecutivo lo puede revisar con él.",
   "· Si no sabes algo, dilo. Es mejor que quede una duda a que quede una promesa falsa.",
-  "· DESCUENTOS: acá rigen las MISMAS reglas y topes que tienes en WhatsApp — es UNA sola escalera",
-  "  compartida: el descuento vigente de arriba puede venir de esta página o del chat de WhatsApp,",
-  "  y el servidor es el único que lleva la cuenta. Por eso JAMÁS negocies de memoria: si el",
-  "  cliente objeta el precio de forma EXPLÍCITA ('muy caro', 'fuera de presupuesto', pide rebaja),",
-  "  usa consultar_descuento y ofrécele copiando el mensajeParaProspecto tal cual; si ACEPTA esa",
-  "  oferta, recién ahí aplicar_descuento. NUNCA ofrezcas descuento de forma proactiva, NUNCA",
-  "  enuncies porcentajes ni totales que no vengan de una tool, y si la tool dice topeAlcanzado",
-  "  ese es el último escalón: no hay más rebaja, ni acá ni por WhatsApp ni con el ejecutivo.",
-  "  Si en este turno NO tienes esas tools (cotización pagada o de otro país), no negocies nada:",
-  "  di el descuento que aparece arriba y deriva a su ejecutivo.",
   "",
   "PRECIOS A FUTURO — NUNCA los calcules ni los estimes:",
   "El único precio que conoces es el de la cotización de arriba, para la cantidad que dice.",
@@ -254,6 +247,43 @@ const ESTILO = [
  * TOPE_CLIENTE_PCT antes de salir.
  */
 const TOPE_CLIENTE_PCT = 20
+
+/**
+ * La regla de descuentos se elige POR TURNO según si las tools existen.
+ * Cicatriz de la prueba en vivo (01-sep, COT840): con las tools apagadas pero
+ * el prompt hablando de ellas, el modelo FABRICÓ una llamada falsa en texto
+ * (<attempt_tool_call> con un 30% sacado del historial) y eso salió como
+ * respuesta al cliente. Regla: jamás describirle al modelo una tool que no
+ * tiene en este turno.
+ */
+const REGLA_DESCUENTOS_CON_TOOLS = [
+  "· DESCUENTOS: acá rigen las MISMAS reglas y topes que tienes en WhatsApp — es UNA sola escalera",
+  "  compartida: el descuento vigente de arriba puede venir de esta página o del chat de WhatsApp,",
+  "  y el servidor es el único que lleva la cuenta. Por eso JAMÁS negocies de memoria: si el",
+  "  cliente objeta el precio de forma EXPLÍCITA ('muy caro', 'fuera de presupuesto', pide rebaja),",
+  "  usa consultar_descuento y ofrécele copiando el mensajeParaProspecto tal cual; si ACEPTA esa",
+  "  oferta, recién ahí aplicar_descuento. NUNCA ofrezcas descuento de forma proactiva, NUNCA",
+  "  enuncies porcentajes ni totales que no vengan de una tool, y si la tool dice topeAlcanzado",
+  "  ese es el último escalón: no hay más rebaja, ni acá ni por WhatsApp ni con el ejecutivo.",
+].join("\n")
+
+const REGLA_DESCUENTOS_SIN_TOOLS = [
+  "· DESCUENTOS: en este chat NO ofreces, NO negocias y NO prometes descuentos, ni confirmas",
+  "  porcentajes de memoria. Si la cotización trae uno, di exactamente el que aparece en los datos",
+  "  de arriba; si te piden más rebaja, que siga la conversación por WhatsApp con Vicky.",
+].join("\n")
+
+/** Red determinista: si el modelo alguna vez vuelve a teatralizar una llamada
+ * a tool en texto plano, esos bloques pseudo-XML se cortan antes de que
+ * lleguen al cliente. */
+function limpiarPseudoTags(t: string): string {
+  return t
+    .replace(/<think>[\s\S]*?(<\/think>|$)/gi, "")
+    .replace(/<attempt_tool_call>[\s\S]*?(<\/attempt_tool_call>|$)/gi, "")
+    .replace(/<tool_result>[\s\S]*?(<\/tool_result>|$)/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
 
 const TOOLS_DESCUENTO_WIDGET: Anthropic.Tool[] = [
   {
@@ -322,8 +352,20 @@ export async function chatEnCotizacion(
     .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${String(m.content).replace(/\s+/g, " ").slice(0, 300)}`)
     .join("\n")
 
+  // Las tools de descuento existen para cotizaciones CL que siguen en juego
+  // (Borrador/Enviada/Aceptada): la escalera es un mecanismo chileno, y sobre
+  // una Pagada/Expirada/Rechazada no hay nada que negociar. OJO: no usar
+  // necesitaPago acá — es false en toda Enviada (el pago nace al aceptar) y
+  // apagaba las tools justo en el escenario principal de negociación.
+  const negociable =
+    (ctx.pais || "cl") === "cl" &&
+    Boolean(ctx.quoteId) &&
+    !/pagad|expirad|rechazad/i.test(ctx.estado || "")
+  const tools = negociable ? TOOLS_DESCUENTO_WIDGET : undefined
+
   const system = [
     ESTILO,
+    negociable ? REGLA_DESCUENTOS_CON_TOOLS : REGLA_DESCUENTOS_SIN_TOOLS,
     "",
     bloqueCotizacion(ctx),
     resumenWa ? `\nLO QUE CONVERSARON POR WHATSAPP (lo más reciente al final):\n${resumenWa}` : "",
@@ -331,12 +373,6 @@ export async function chatEnCotizacion(
 
   const client = new Anthropic({ apiKey })
   const model = (process.env.ANTHROPIC_COTCHAT_MODEL || DEFAULT_MODEL).trim()
-
-  // Las tools de descuento solo existen para cotizaciones CL sin pagar: la
-  // escalera es un mecanismo chileno y sobre una Pagada no hay nada que
-  // negociar. Sin tools, el prompt manda al modelo a no negociar.
-  const negociable = (ctx.pais || "cl") === "cl" && ctx.necesitaPago === true && Boolean(ctx.quoteId)
-  const tools = negociable ? TOOLS_DESCUENTO_WIDGET : undefined
 
   const mensajes: Anthropic.MessageParam[] = [
     ...historialLocal
@@ -363,11 +399,12 @@ export async function chatEnCotizacion(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
       )
       if (usosTool.length === 0 || res.stop_reason !== "tool_use") {
-        const reply = res.content
-          .filter((b): b is Anthropic.TextBlock => b.type === "text")
-          .map((b) => b.text)
-          .join("\n")
-          .trim()
+        const reply = limpiarPseudoTags(
+          res.content
+            .filter((b): b is Anthropic.TextBlock => b.type === "text")
+            .map((b) => b.text)
+            .join("\n"),
+        )
         return {
           reply: reply || "Disculpa, no alcancé a procesar eso. ¿Me lo repites?",
           descuentoAplicado: descuentoAplicado || undefined,
