@@ -410,15 +410,12 @@ export async function consultarDescuentoReferencial(
     // modelo pasó la opción equivocada, se nota al tiro (y el modelo mismo
     // puede corregir antes de responder).
     const { getHardwareById } = await import("../catalogo")
-    const partesOpcion = [
-      `App móvil para ${args.userCount} personas`,
-      ...(args.hardware || []).map((h) => {
-        const nombre = getHardwareById(h.id)?.displayName || h.id
-        const mod = (h.modalidad || "arriendo") === "venta" ? "en compra" : "en arriendo"
-        return `${nombre} ${mod}${(h.cantidad || 1) > 1 ? ` ×${h.cantidad}` : ""}`
-      }),
-    ]
-    const etiquetaOpcion = `(Este valor es para la opción: ${partesOpcion.join(" + ")}.)`
+    const { etiquetaOpcionDescuento } = await import("./etiqueta-opcion.ts")
+    const { etiqueta: etiquetaOpcion, opcion } = etiquetaOpcionDescuento(
+      args.userCount,
+      args.hardware,
+      (id) => getHardwareById(id)?.displayName || null,
+    )
 
     return {
       ok: true,
@@ -434,7 +431,7 @@ export async function consultarDescuentoReferencial(
       escalonActual: escalonActualFinal,
       topeAlcanzado: Boolean(data.tope_alcanzado),
       mensajeParaProspecto: `${data.mensaje_para_prospecto}\n${etiquetaOpcion}`,
-      opcionCalculada: partesOpcion.join(" + "),
+      opcionCalculada: opcion,
     }
   } catch (err) {
     console.error("[consultar_descuento_referencial] excepción:", err)
