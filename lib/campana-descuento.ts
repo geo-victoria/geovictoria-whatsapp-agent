@@ -310,11 +310,20 @@ export async function aplicarCampanaAQuoteNueva(contact: string, quoteId: string
     const st = JSON.parse(raw) as EstadoCampana
     if (st.respuesta !== "si" || st.pctAplicado || !quoteId) return
     const q = await leerQuote(quoteId)
-    // La emision nueva puede salir con 0% aunque el cliente YA tuviera un
-    // escalon negociado en el preform: manda el mayor entre lo comiteado en
-    // la quote y lo sembrado por el runner (pctPrevio), mas los 10 de campana.
-    const base = Math.max(q ? q.dcto : 0, Number(st.pctPrevio || 0))
-    const nuevo = Math.min(base + 10, TOPE_CAMPANA)
+    // La promesa de la campaña es +10 puntos SOBRE LO QUE TENÍA AL ACEPTARLA
+    // (pctPrevio) — jamás sobre un descuento negociado DESPUÉS en el chat
+    // (31-ago, caso Rodrigo: negoció 20% y este hook lo subió a 30%). Si la
+    // emisión ya salió con un descuento igual o mejor, la promesa está
+    // cumplida y no se toca nada.
+    const nuevo = Math.min(Number(st.pctPrevio || 0) + 10, TOPE_CAMPANA)
+    if (q && q.dcto >= nuevo) {
+      st.quoteId = quoteId
+      st.pctAplicado = q.dcto
+      st.aplicadoAt = new Date().toISOString()
+      await setKvValue(claveCampana(fono), JSON.stringify(st)).catch(() => {})
+      console.log(`[campana-dcto] ${fono}: la formal ${quoteId} ya trae ${q.dcto}% (promesa ${nuevo}%) — sin cambios.`)
+      return
+    }
     const r = await fetch(`${COTIZADOR}/api/quote-acceptance/descuento-ejecutivo`, {
       method: "POST",
       headers: {
