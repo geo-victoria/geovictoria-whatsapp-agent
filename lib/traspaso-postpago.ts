@@ -380,26 +380,41 @@ export async function cerrarYTraspasarPostPago(
   // loop se cierra, el CRM se ordena—: lo único que se apaga es el mensaje.
   // Sin marca de canal (cotizaciones anteriores al 19-ago) se envía como
   // siempre: la ausencia de dato no puede dejar a un cliente sin bienvenida.
+  // La lectura de la marca REINTENTA (01-sep, caso TELECO/COT1037): la caída
+  // de Zoho de las 00:26 hizo fallar este fetch, el fail-open dejó pasar la
+  // bienvenida y le llegó a una clienta del canal ejecutivo — exactamente lo
+  // que la guarda existe para impedir. Tres intentos con espera; el fail-open
+  // queda solo para cuando Zoho falla TRES veces seguidas (mejor una
+  // bienvenida de más que un cliente huérfano, pero no al primer estornudo).
   try {
     const { getZohoAccessToken } = await import("./zoho-token")
-    const token = await getZohoAccessToken()
     const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
     const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
-    const r = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Intervenci_n_Humana`, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      cache: "no-store",
-    })
-    if (r.status === 200) {
-      const marca = String(
-        ((await r.json().catch(() => ({}))) as { data?: Array<{ Intervenci_n_Humana?: string }> }).data?.[0]
-          ?.Intervenci_n_Humana || "",
-      )
-      if (/intervenci/i.test(marca)) {
-        console.log(`[postpago] canal EJECUTIVO en ${quoteId}: sin mensaje de Vicky a ${contact}`)
-        return { contact, traspaso: "omitido_canal_ejecutivo" }
+    for (let intento = 1; intento <= 3; intento++) {
+      try {
+        const token = await getZohoAccessToken()
+        const r = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Intervenci_n_Humana`, {
+          headers: { Authorization: `Zoho-oauthtoken ${token}` },
+          cache: "no-store",
+        })
+        if (r.status === 200) {
+          const marca = String(
+            ((await r.json().catch(() => ({}))) as { data?: Array<{ Intervenci_n_Humana?: string }> }).data?.[0]
+              ?.Intervenci_n_Humana || "",
+          )
+          if (/intervenci/i.test(marca)) {
+            console.log(`[postpago] canal EJECUTIVO en ${quoteId}: sin mensaje de Vicky a ${contact}`)
+            return { contact, traspaso: "omitido_canal_ejecutivo" }
+          }
+          break // marca leída y no es ejecutivo → se envía
+        }
+        console.warn(`[postpago] lectura de canal ${quoteId} intento ${intento}: HTTP ${r.status}`)
+      } catch (e) {
+        console.warn(`[postpago] lectura de canal ${quoteId} intento ${intento} falló:`, e instanceof Error ? e.message : e)
       }
+      if (intento < 3) await new Promise((res) => setTimeout(res, 2000 * intento))
     }
-  } catch { /* ante la duda, se envía: mejor una bienvenida de más que un cliente huérfano */ }
+  } catch { /* fail-open tras agotar reintentos */ }
 
   const kvKey = `traspaso_postpago_${quoteId}`
   const ya = await getKvValue(kvKey).catch(() => null)
