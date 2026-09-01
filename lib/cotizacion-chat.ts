@@ -24,6 +24,8 @@
 
 import Anthropic from "@anthropic-ai/sdk"
 import { fetchHistoryV3 } from "./supabase-persistence-v3"
+import { consultarSiguienteDescuento } from "./tools/consultar-siguiente-descuento"
+import { aplicarSiguienteDescuento } from "./tools/aplicar-siguiente-descuento"
 
 const COTIZADOR_BASE = (process.env.VICKY_COTIZADOR_BASE || "https://cotizacion.geovictoria.com").trim()
 const DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
@@ -200,16 +202,24 @@ const ESTILO = [
   "  ejecutivo.",
   "· NO PROMETAS ACCIONES QUE NO PUEDES HACER. No digas que vas a consultar con tu jefe, que le",
   "  confirmas en unos minutos, que le preparas un documento ni que le agregas algo a la cuenta:",
-  "  desde acá no puedes hacer nada de eso y nadie se entera de lo que prometiste. Lo que SÍ puedes",
-  "  ofrecer es que siga por WhatsApp contigo, que es el mismo chat, o hablar con su ejecutivo.",
+  "  lo ÚNICO que puedes ejecutar desde acá es el descuento con tus tools (si las tienes en este",
+  "  turno); todo lo demás no, y nadie se entera de lo que prometiste. Lo que SÍ puedes ofrecer es",
+  "  que siga por WhatsApp contigo, que es el mismo chat, o hablar con su ejecutivo.",
   "· No inventes requisitos ni procesos internos (pantallazos, aprobaciones, formularios). Si algo",
   "  no está en la cotización, di simplemente que no está incluido.",
   "· Si alguien dice que le prometieron algo que no aparece, no lo niegues ni lo confirmes como un",
   "  hecho: dile que en su cotización no aparece y que su ejecutivo lo puede revisar con él.",
   "· Si no sabes algo, dilo. Es mejor que quede una duda a que quede una promesa falsa.",
-  "· DESCUENTOS: en este chat NO ofreces, NO negocias y NO prometes descuentos, ni confirmas",
-  "  porcentajes de memoria. Si la cotización trae uno, di exactamente el que aparece en los datos",
-  "  de arriba; si te piden más rebaja, que siga la conversación por WhatsApp con Vicky.",
+  "· DESCUENTOS: acá rigen las MISMAS reglas y topes que tienes en WhatsApp — es UNA sola escalera",
+  "  compartida: el descuento vigente de arriba puede venir de esta página o del chat de WhatsApp,",
+  "  y el servidor es el único que lleva la cuenta. Por eso JAMÁS negocies de memoria: si el",
+  "  cliente objeta el precio de forma EXPLÍCITA ('muy caro', 'fuera de presupuesto', pide rebaja),",
+  "  usa consultar_descuento y ofrécele copiando el mensajeParaProspecto tal cual; si ACEPTA esa",
+  "  oferta, recién ahí aplicar_descuento. NUNCA ofrezcas descuento de forma proactiva, NUNCA",
+  "  enuncies porcentajes ni totales que no vengan de una tool, y si la tool dice topeAlcanzado",
+  "  ese es el último escalón: no hay más rebaja, ni acá ni por WhatsApp ni con el ejecutivo.",
+  "  Si en este turno NO tienes esas tools (cotización pagada o de otro país), no negocies nada:",
+  "  di el descuento que aparece arriba y deriva a su ejecutivo.",
   "",
   "PRECIOS A FUTURO — NUNCA los calcules ni los estimes:",
   "El único precio que conoces es el de la cotización de arriba, para la cantidad que dice.",
@@ -229,7 +239,68 @@ const ESTILO = [
   "exacto, su ejecutivo se lo confirma."
 ].join("\n")
 
-export type RespuestaChat = { reply: string; error?: string }
+/**
+ * TOOLS DE DESCUENTO DEL WIDGET (01-sep, orden de Lalo: "dale las mismas
+ * atribuciones de descuentos de Vicky WhatsApp pero que ninguna pueda dar más
+ * descuento del permitido y sepa el descuento vigente que dio la otra Vicky").
+ *
+ * Son los MISMOS endpoints del cotizador que usan las tools de WhatsApp
+ * (consultar/aplicar-siguiente-descuento): el estado de la escalera y el tope
+ * de cliente viven en el SERVIDOR, por cotización — así las dos Vickys
+ * comparten el descuento vigente sin sincronizar nada, y ninguna puede pasar
+ * el tope aunque el modelo lo pida. Diferencias deliberadas con WhatsApp:
+ * el quote_id NO lo pasa el modelo (se inyecta el de la sesión del token —
+ * el widget jamás puede tocar otra cotización) y el pct_ofrecido se acota a
+ * TOPE_CLIENTE_PCT antes de salir.
+ */
+const TOPE_CLIENTE_PCT = 20
+
+const TOOLS_DESCUENTO_WIDGET: Anthropic.Tool[] = [
+  {
+    name: "consultar_descuento",
+    description:
+      "Consulta (solo lectura) qué descuento puedes ofrecer y devuelve el precio recalculado. Úsala SOLO cuando el cliente objeta el precio de forma explícita ('muy caro', 'fuera de presupuesto', pide rebaja) o insiste en más descuento. NUNCA la uses de forma proactiva. No recibe porcentaje: el servidor decide el escalón según lo ya negociado en cualquier canal (WhatsApp o este chat). Comunica al cliente SOLO el contenido de mensajeParaProspecto. Si topeAlcanzado=true, es el último escalón: no ofrezcas más rebaja.",
+    input_schema: { type: "object" as const, properties: {} },
+  },
+  {
+    name: "aplicar_descuento",
+    description:
+      "Aplica a la cotización el descuento que el cliente ACEPTÓ tras ofrecérselo con consultar_descuento, y regenera el documento. Úsala SOLO después de que el cliente acepte una oferta que vino de consultar_descuento en esta misma conversación — nunca antes de consultar, nunca sin aceptación explícita. Pasa pct_ofrecido = el porcentaje EXACTO que consultar_descuento te devolvió y que le comunicaste. Comunica al cliente SOLO el contenido de mensajeParaProspecto.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        pct_ofrecido: {
+          type: "number" as const,
+          description:
+            "Porcentaje exacto sobre el plan mensual que le ofreciste al cliente y que vino de consultar_descuento (ej. 10). No lo inventes.",
+          minimum: 0,
+          maximum: 40,
+        },
+      },
+    },
+  },
+]
+
+async function ejecutarToolWidget(
+  quoteId: string,
+  nombre: string,
+  input: Record<string, unknown>,
+): Promise<{ resultado: unknown; aplicado: boolean }> {
+  if (nombre === "consultar_descuento") {
+    const r = await consultarSiguienteDescuento({ quote_id: quoteId })
+    return { resultado: r, aplicado: false }
+  }
+  if (nombre === "aplicar_descuento") {
+    const pctNum = Number(input?.pct_ofrecido)
+    const pct =
+      Number.isFinite(pctNum) && pctNum > 0 ? Math.min(TOPE_CLIENTE_PCT, pctNum) : undefined
+    const r = await aplicarSiguienteDescuento({ quote_id: quoteId, pct_ofrecido: pct })
+    return { resultado: r, aplicado: r.ok === true }
+  }
+  return { resultado: { ok: false, error: `tool desconocida: ${nombre}` }, aplicado: false }
+}
+
+export type RespuestaChat = { reply: string; error?: string; descuentoAplicado?: boolean }
 
 export async function chatEnCotizacion(
   ctx: ContextoCotizacion,
@@ -260,25 +331,70 @@ export async function chatEnCotizacion(
 
   const client = new Anthropic({ apiKey })
   const model = (process.env.ANTHROPIC_COTCHAT_MODEL || DEFAULT_MODEL).trim()
+
+  // Las tools de descuento solo existen para cotizaciones CL sin pagar: la
+  // escalera es un mecanismo chileno y sobre una Pagada no hay nada que
+  // negociar. Sin tools, el prompt manda al modelo a no negociar.
+  const negociable = (ctx.pais || "cl") === "cl" && ctx.necesitaPago === true && Boolean(ctx.quoteId)
+  const tools = negociable ? TOOLS_DESCUENTO_WIDGET : undefined
+
+  const mensajes: Anthropic.MessageParam[] = [
+    ...historialLocal
+      .filter((m) => String(m.content || "").trim())
+      .slice(-12)
+      .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) })),
+    { role: "user" as const, content: mensaje.slice(0, 4000) },
+  ]
+
   try {
-    const res = await client.messages.create({
-      model,
-      max_tokens: 700,
-      system,
-      messages: [
-        ...historialLocal
-          .filter((m) => String(m.content || "").trim())
-          .slice(-12)
-          .map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) })),
-        { role: "user" as const, content: mensaje.slice(0, 4000) },
-      ],
-    })
-    const reply = res.content
-      .filter((b): b is Anthropic.TextBlock => b.type === "text")
-      .map((b) => b.text)
-      .join("\n")
-      .trim()
-    return { reply: reply || "Disculpa, no alcancé a procesar eso. ¿Me lo repites?" }
+    let descuentoAplicado = false
+    // Hasta 4 vueltas de tools por turno (consultar → aplicar y margen); la
+    // última llamada se hace sin tools para forzar el cierre en texto.
+    for (let vuelta = 0; vuelta < 5; vuelta++) {
+      const res = await client.messages.create({
+        model,
+        max_tokens: 900,
+        system,
+        messages: mensajes,
+        ...(tools && vuelta < 4 ? { tools } : {}),
+      })
+
+      const usosTool = res.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+      )
+      if (usosTool.length === 0 || res.stop_reason !== "tool_use") {
+        const reply = res.content
+          .filter((b): b is Anthropic.TextBlock => b.type === "text")
+          .map((b) => b.text)
+          .join("\n")
+          .trim()
+        return {
+          reply: reply || "Disculpa, no alcancé a procesar eso. ¿Me lo repites?",
+          descuentoAplicado: descuentoAplicado || undefined,
+        }
+      }
+
+      mensajes.push({ role: "assistant", content: res.content })
+      const resultados: Anthropic.ToolResultBlockParam[] = []
+      for (const uso of usosTool) {
+        const { resultado, aplicado } = await ejecutarToolWidget(
+          ctx.quoteId,
+          uso.name,
+          (uso.input || {}) as Record<string, unknown>,
+        )
+        if (aplicado) descuentoAplicado = true
+        console.log(
+          `[cotizacion-chat] ${ctx.quoteId}: tool ${uso.name} → ${JSON.stringify(resultado).slice(0, 300)}`,
+        )
+        resultados.push({
+          type: "tool_result",
+          tool_use_id: uso.id,
+          content: JSON.stringify(resultado).slice(0, 4000),
+        })
+      }
+      mensajes.push({ role: "user", content: resultados })
+    }
+    return { reply: "", error: "el turno no cerró en texto tras las vueltas de tools" }
   } catch (e) {
     return { reply: "", error: e instanceof Error ? e.message : "excepción del modelo" }
   }

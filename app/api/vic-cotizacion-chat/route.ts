@@ -57,13 +57,25 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 503, headers: CORS },
     )
   }
-  console.log(`[cotizacion-chat] ${ctx.quoteId} (${ctx.empresa || "-"}): respondido`)
+  console.log(
+    `[cotizacion-chat] ${ctx.quoteId} (${ctx.empresa || "-"}): respondido${r.descuentoAplicado ? " + DESCUENTO APLICADO" : ""}`,
+  )
   // PERSISTENCIA (Lalo 31-ago, "necesito que esas conversaciones persistan"):
   // hasta hoy estos chats vivían solo en los logs de Vercel (3 días). Cada
   // turno guarda pregunta y respuesta en vic_widget_chat, best-effort — un
   // fallo acá jamás le quita la respuesta al cliente.
-  guardarTurnoWidget(ctx.quoteId, ctx.empresa || "", mensaje, r.reply || "").catch(() => {})
-  return NextResponse.json({ ok: true, reply: r.reply }, { headers: CORS })
+  guardarTurnoWidget(
+    ctx.quoteId,
+    ctx.empresa || "",
+    mensaje,
+    (r.reply || "") + (r.descuentoAplicado ? "\n[descuento aplicado desde el widget]" : ""),
+  ).catch(() => {})
+  // descuentoAplicado le avisa a la página que los totales que muestra
+  // quedaron viejos: el widget recarga para que el cliente vea el precio nuevo.
+  return NextResponse.json(
+    { ok: true, reply: r.reply, descuentoAplicado: r.descuentoAplicado === true },
+    { headers: CORS },
+  )
 }
 
 const SUPA_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "")
