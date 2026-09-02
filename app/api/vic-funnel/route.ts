@@ -3539,12 +3539,18 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
     }
   } catch {}
 
+  // Un nombre por correo: las filas con trato traen el nombre de Zoho y las
+  // sin trato el de la bitácora, y la misma persona salía dos veces en la
+  // tabla ("Daniela Galvez" y "Daniela Gálvez").
+  const nombrePorEmail = new Map<string, string>()
+  for (const d of duenoDeal.values()) if (d.email && d.nombre) nombrePorEmail.set(d.email, d.nombre)
   const filas: FilaTraspaso[] = filasBase.map((f) => {
     const dueno = duenoDeal.get(cot.get(f.contact)?.dealId || "")
     if (dueno) {
       f.vendedorEmail = dueno.email
       f.vendedorNombre = dueno.nombre
     }
+    f.vendedorNombre = nombrePorEmail.get(f.vendedorEmail) || f.vendedorNombre
     const ses = sesionEspejoDe(f.vendedorEmail)
     const propio = (s: string) => Boolean(ses) && s.toLowerCase() === ses
     return {
