@@ -488,9 +488,17 @@ async function contactosQueVieronPrecio(convs: Map<string, ConvRow>): Promise<Se
   if (porId.size === 0) return new Set()
   try {
     const ids = [...porId.keys()].map((id) => `"${id}"`).join(",")
+    // TRES FIRMAS, no una (02-sep, caso Nicole/Alvarado Castillo): buscar solo
+    // "Total mensual" dejaba fuera el formato de recomendación con opciones
+    // ("💰 1,23 UF + IVA al mes (aprox. $59.588)"), así que a los 10 minutos el
+    // toque le preguntó otra vez cuántas personas marcarían — con el precio ya
+    // dado y la clienta habiendo respondido. Ante la duda conviene el falso
+    // positivo: tratar como "ya vio precio" no inventa nada, solo evita la
+    // repregunta insultante.
+    const firmas = ["*Total mensual*", "*UF + IVA al mes*", "*💰*"]
+    const orPrecio = `or=(${firmas.map((p) => `content.like.${encodeURIComponent(p)}`).join(",")})`
     const res = await supa(
-      `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant` +
-        `&content=like.*Total mensual*&select=conversation_id`,
+      `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant&${orPrecio}&select=conversation_id`,
     )
     if (!res.ok) return new Set()
     const filas = (await res.json().catch(() => [])) as Array<{ conversation_id?: string }>
