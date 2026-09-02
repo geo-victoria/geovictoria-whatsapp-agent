@@ -3359,9 +3359,23 @@ type FilaTraspaso = {
   totalClp: number
   aceptacionUrl: string
   ultVendedor: string
+  ultOtroVendedor: string
   ultCliente: string
   llamada: string
   ultCliVicky: string
+}
+
+/** Sesión de espejo de un ejecutivo = la parte local de su correo
+ *  (pdiaz@ → sesión "pdiaz"), como están dadas de alta en el worker.
+ *  Override sin deploy: VICKY_ESPEJO_SESION_POR_EMAIL="correo:sesion,...". */
+function sesionEspejoDe(email: string): string {
+  const e = String(email || "").toLowerCase().trim()
+  if (!e) return ""
+  for (const par of (process.env.VICKY_ESPEJO_SESION_POR_EMAIL || "").split(",")) {
+    const [correo, ses] = par.split(":").map((s) => s.trim().toLowerCase())
+    if (correo && ses && correo === e) return ses
+  }
+  return e.split("@")[0] || ""
 }
 
 async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParams): Promise<string> {
@@ -3410,9 +3424,22 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   //    atención del vendedor (espejo de WhatsApp + llamadas).
   const cot = new Map<string, { quoteId: string; empresa: string; totalClp: number; url: string }>()
   const convCli = new Map<string, string>()
-  const ultVend = new Map<string, string>()
+  // Por contacto: última salida del vendedor POR SESIÓN de espejo. La
+  // atribución importa (02-sep): sin separar por sesión, el WhatsApp de un
+  // ejecutivo a un cliente de OTRO contaba como gestión del otro.
+  const ultVendSes = new Map<string, Map<string, string>>()
+  const ultCallSes = new Map<string, Map<string, string>>()
   const ultCli = new Map<string, string>()
-  const ultCall = new Map<string, string>()
+  const anota = (mapa: Map<string, Map<string, string>>, tel: string, ses: string, at: string) => {
+    const m = mapa.get(tel) || new Map<string, string>()
+    if (!m.get(ses) || m.get(ses)! < at) m.set(ses, at)
+    mapa.set(tel, m)
+  }
+  const maxDe = (m: Map<string, string> | undefined, incluir: (s: string) => boolean) => {
+    let out = ""
+    for (const [s, at] of m || []) if (incluir(s) && at > out) out = at
+    return out
+  }
   const minTraspaso = filasBase.reduce(
     (m, f) => (Date.parse(f.traspasadoAt) < m ? Date.parse(f.traspasadoAt) : m),
     Date.parse(hastaISO),
@@ -3423,8 +3450,8 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
     const [rq, rc, rm, rl] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?contact=in.(${lote})&select=contact,quote_id,empresa,total_clp,acceptance_url&limit=200`, { headers: sup, cache: "no-store" }),
       fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=in.(${lote})&select=contact,last_user_at&limit=200`, { headers: sup, cache: "no-store" }),
-      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=in.(${lote})&enviado_at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono_chat,from_me,enviado_at&order=enviado_at.desc&limit=3000`, { headers: sup, cache: "no-store" }),
-      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?telefono=in.(${lote})&at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono,estado,at&order=at.desc&limit=800`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=in.(${lote})&enviado_at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono_chat,from_me,enviado_at,session_id&order=enviado_at.desc&limit=3000`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?telefono=in.(${lote})&at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono,estado,at,session_id&order=at.desc&limit=800`, { headers: sup, cache: "no-store" }),
     ])
     for (const f of ((await rq.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
       const t = digits(String(f.contact || ""))
@@ -3439,53 +3466,83 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
       const t = digits(String(f.telefono_chat || ""))
       const at = String(f.enviado_at || "")
       if (!t || !at) continue
-      const mapa = f.from_me ? ultVend : ultCli
-      if (!mapa.get(t) || mapa.get(t)! < at) mapa.set(t, at)
+      if (f.from_me) anota(ultVendSes, t, String(f.session_id || ""), at)
+      else if (!ultCli.get(t) || ultCli.get(t)! < at) ultCli.set(t, at)
     }
     for (const f of ((await rl.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
       const t = digits(String(f.telefono || ""))
       const at = String(f.at || "")
       // "accept" = llamada que la otra parte tomó; eso ES contacto humano.
-      if (t && at && String(f.estado || "") === "accept" && (!ultCall.get(t) || ultCall.get(t)! < at)) ultCall.set(t, at)
+      if (t && at && String(f.estado || "") === "accept") anota(ultCallSes, t, String(f.session_id || ""), at)
     }
   }
 
-  const filas: FilaTraspaso[] = filasBase.map((f) => ({
-    ...f,
-    empresa: cot.get(f.contact)?.empresa || "",
-    quoteId: cot.get(f.contact)?.quoteId || "",
-    totalClp: cot.get(f.contact)?.totalClp || 0,
-    aceptacionUrl: cot.get(f.contact)?.url || "",
-    ultVendedor: ultVend.get(f.contact) || "",
-    ultCliente: ultCli.get(f.contact) || "",
-    llamada: ultCall.get(f.contact) || "",
-    ultCliVicky: convCli.get(f.contact) || "",
-  }))
+  // Sesiones de espejo VIVAS. Sin esto el panel acusaba de "no contactó" a
+  // quien simplemente no tiene su WhatsApp espejado (02-sep: Aleydis y
+  // Aracelli nunca fueron dadas de alta en el worker).
+  const sesionesVivas = new Set<string>()
+  try {
+    const rs = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.wa_espejo_status_*&select=key,value&limit=60`, { headers: sup, cache: "no-store" })
+    for (const f of ((await rs.json().catch(() => [])) as Array<{ key?: string; value?: string }>) || []) {
+      const ses = String(f.key || "").replace(/^wa_espejo_status_/, "")
+      if (ses && /conectado/.test(String(f.value || ""))) sesionesVivas.add(ses.toLowerCase())
+    }
+  } catch {}
+
+  const filas: FilaTraspaso[] = filasBase.map((f) => {
+    const ses = sesionEspejoDe(f.vendedorEmail)
+    const propio = (s: string) => Boolean(ses) && s.toLowerCase() === ses
+    return {
+      ...f,
+      empresa: cot.get(f.contact)?.empresa || "",
+      quoteId: cot.get(f.contact)?.quoteId || "",
+      totalClp: cot.get(f.contact)?.totalClp || 0,
+      aceptacionUrl: cot.get(f.contact)?.url || "",
+      ultVendedor: maxDe(ultVendSes.get(f.contact), propio),
+      ultOtroVendedor: maxDe(ultVendSes.get(f.contact), (s) => !propio(s)),
+      ultCliente: ultCli.get(f.contact) || "",
+      llamada: maxDe(ultCallSes.get(f.contact), propio),
+      ultCliVicky: convCli.get(f.contact) || "",
+    }
+  })
 
   const posterior = (iso: string, ref: string) => Boolean(iso) && Date.parse(iso) > Date.parse(ref)
+  const conEspejo = (f: FilaTraspaso) => sesionesVivas.has(sesionEspejoDe(f.vendedorEmail))
   const atendida = (f: FilaTraspaso) => posterior(f.ultVendedor, f.traspasadoAt) || posterior(f.llamada, f.traspasadoAt)
+  const tocadaPorOtro = (f: FilaTraspaso) => posterior(f.ultOtroVendedor, f.traspasadoAt)
+  // Sin espejo no hay forma de saberlo: no se cuenta ni como atendida ni como
+  // abandonada — se declara "no medible" y punto.
+  const medible = (f: FilaTraspaso) => conEspejo(f)
+  const sinContactar = (f: FilaTraspaso) => medible(f) && !atendida(f) && !tocadaPorOtro(f)
   const ultimaActividad = (f: FilaTraspaso) =>
-    [f.ultVendedor, f.ultCliente, f.llamada, f.ultCliVicky].filter(Boolean).sort().slice(-1)[0] || ""
+    [f.ultVendedor, f.ultOtroVendedor, f.ultCliente, f.llamada, f.ultCliVicky].filter(Boolean).sort().slice(-1)[0] || ""
 
   // 3. Resumen por ejecutivo.
-  type Ejec = { email: string; nombre: string; total: number; conCot: number; atendidos: number; masViejoSinAtender: number }
+  type Ejec = { email: string; nombre: string; total: number; conCot: number; atendidos: number; porOtro: number; sinContactar: number; espejo: boolean; masViejoSinAtender: number }
   const porEjec = new Map<string, Ejec>()
   for (const f of filas) {
     const clave = f.vendedorEmail || f.vendedorNombre || "—"
-    const e = porEjec.get(clave) || { email: f.vendedorEmail, nombre: f.vendedorNombre || f.vendedorEmail || "sin ejecutivo", total: 0, conCot: 0, atendidos: 0, masViejoSinAtender: 0 }
+    const e = porEjec.get(clave) || {
+      email: f.vendedorEmail, nombre: f.vendedorNombre || f.vendedorEmail || "sin ejecutivo",
+      total: 0, conCot: 0, atendidos: 0, porOtro: 0, sinContactar: 0, espejo: conEspejo(f), masViejoSinAtender: 0,
+    }
     if (!e.nombre || /@/.test(e.nombre)) e.nombre = f.vendedorNombre || e.nombre
     e.total++
     if (f.quoteId) e.conCot++
     if (atendida(f)) e.atendidos++
-    else {
+    else if (tocadaPorOtro(f)) e.porOtro++
+    if (sinContactar(f)) {
+      e.sinContactar++
       const h = (Date.now() - Date.parse(f.traspasadoAt)) / 3_600_000
       if (Number.isFinite(h) && h > e.masViejoSinAtender) e.masViejoSinAtender = h
     }
     porEjec.set(clave, e)
   }
-  const ejecs = [...porEjec.values()].sort((a, b) => b.total - a.total || b.total - b.atendidos - (a.total - a.atendidos))
+  const ejecs = [...porEjec.values()].sort((a, b) => b.sinContactar - a.sinContactar || b.total - a.total)
   const totalT = filas.length
   const totalAt = filas.filter(atendida).length
+  const totalSin = filas.filter(sinContactar).length
+  const totalNoMedible = filas.filter((f) => !medible(f)).length
   const totalCot = filas.filter((f) => f.quoteId).length
 
   // 4. Chats del espejo que aún no cruzan con un número (transparencia).
@@ -3502,11 +3559,8 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
     iso ? new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—"
   const clp = (n: number) => (n > 0 ? `$${Math.round(n).toLocaleString("es-CL")}` : "—")
   const visibles = ejecF ? filas.filter((f) => (f.vendedorEmail || f.vendedorNombre || "—").toLowerCase() === ejecF) : filas
-  const orden = [...visibles].sort((a, b) => {
-    const aa = atendida(a) ? 1 : 0
-    const bb = atendida(b) ? 1 : 0
-    return aa - bb || Date.parse(a.traspasadoAt) - Date.parse(b.traspasadoAt)
-  })
+  const rango = (f: FilaTraspaso) => (sinContactar(f) ? 0 : !medible(f) ? 1 : atendida(f) ? 3 : 2)
+  const orden = [...visibles].sort((a, b) => rango(a) - rango(b) || Date.parse(a.traspasadoAt) - Date.parse(b.traspasadoAt))
   const qsRango = (extra: Record<string, string>) => {
     const p = new URLSearchParams(qsBase)
     p.set("vista", "traspasos")
@@ -3532,7 +3586,11 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
       const horas = (Date.now() - Date.parse(f.traspasadoAt)) / 3_600_000
       const estado = at
         ? `<span style="background:#e7f6ec;color:#166534;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">CONTACTADO</span>`
-        : `<span style="background:${horas > 24 ? "#fee2e2" : "#fef9c3"};color:${horas > 24 ? "#b91c1c" : "#854d0e"};font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">SIN CONTACTAR</span>`
+        : tocadaPorOtro(f)
+          ? `<span style="background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">LO TOMÓ OTRO</span>`
+          : !medible(f)
+            ? `<span style="background:#f1f3f5;color:#6b7280;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">SIN ESPEJO</span>`
+            : `<span style="background:${horas > 24 ? "#fee2e2" : "#fef9c3"};color:${horas > 24 ? "#b91c1c" : "#854d0e"};font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">SIN CONTACTAR</span>`
       const cotHtml = f.quoteId
         ? `<a href="https://crm.zoho.com/crm/org685875245/tab/CustomModule5/${esc(f.quoteId)}" target="_blank" rel="noopener">cotización</a> <span class="sub">${clp(f.totalClp)}</span>`
         : `<span class="sub">sin cotización</span>`
@@ -3552,22 +3610,26 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
 
   const tarjetasEjec = ejecs
     .map((e) => {
-      const sin = e.total - e.atendidos
-      const pct = e.total ? Math.round((e.atendidos / e.total) * 100) : 0
+      const pct = e.total ? Math.round(((e.atendidos + e.porOtro) / e.total) * 100) : 0
       const clave = (e.email || e.nombre || "—").toLowerCase()
       const activo = ejecF === clave
+      const cuerpo = e.espejo
+        ? `<div style="margin-top:6px"><span style="color:#166534;font-weight:700">${e.atendidos} contactados</span> · <span style="color:${e.sinContactar ? "#b91c1c" : "#6b7280"};font-weight:700">${e.sinContactar} sin contactar</span>${e.porOtro ? ` <span class="sub">· ${e.porOtro} lo tomó otro</span>` : ""}</div>` +
+          `<div style="height:6px;border-radius:99px;background:#eef1f4;margin-top:8px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${pct >= 70 ? "#16a34a" : pct >= 40 ? "#f59e0b" : "#dc2626"}"></div></div>` +
+          (e.sinContactar
+            ? `<div class="sub" style="margin-top:6px">el más antiguo sin contactar: ${e.masViejoSinAtender < 48 ? `${e.masViejoSinAtender.toFixed(0)} h` : `${(e.masViejoSinAtender / 24).toFixed(0)} d`}</div>`
+            : `<div class="sub" style="margin-top:6px">al día 🎉</div>`)
+        : `<div style="margin-top:6px"><span style="background:#f1f3f5;color:#4b5563;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">SIN ESPEJO</span></div>` +
+          `<div class="sub" style="margin-top:6px">su WhatsApp no está espejado: no podemos saber a quién contactó.</div>`
       return (
-        `<a href="${qsRango({ ejec: activo ? "" : clave })}" style="display:block;text-decoration:none;color:inherit;border:1px solid ${activo ? "#0284c7" : "#e8eaed"};background:${activo ? "#f0f9ff" : "#fff"};border-radius:12px;padding:12px 14px;min-width:190px">` +
+        `<a href="${qsRango({ ejec: activo ? "" : clave })}" style="display:block;text-decoration:none;color:inherit;border:1px solid ${activo ? "#0284c7" : "#e8eaed"};background:${activo ? "#f0f9ff" : "#fff"};border-radius:12px;padding:12px 14px;min-width:200px">` +
         `<div style="font-weight:700;margin-bottom:6px">${esc(e.nombre)}</div>` +
         `<div style="font-size:22px;font-weight:700">${e.total} <span class="sub" style="font-size:12px;font-weight:500">traspasos</span></div>` +
-        `<div class="sub" style="margin-top:4px">${e.conCot} con cotización</div>` +
-        `<div style="margin-top:6px"><span style="color:#166534;font-weight:700">${e.atendidos} contactados</span> · <span style="color:${sin ? "#b91c1c" : "#6b7280"};font-weight:700">${sin} sin contactar</span></div>` +
-        `<div style="height:6px;border-radius:99px;background:#eef1f4;margin-top:8px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${pct >= 70 ? "#16a34a" : pct >= 40 ? "#f59e0b" : "#dc2626"}"></div></div>` +
-        (sin ? `<div class="sub" style="margin-top:6px">el más antiguo sin contactar: ${e.masViejoSinAtender < 48 ? `${e.masViejoSinAtender.toFixed(0)} h` : `${(e.masViejoSinAtender / 24).toFixed(0)} d`}</div>` : `<div class="sub" style="margin-top:6px">al día 🎉</div>`) +
-        `</a>`
+        `<div class="sub" style="margin-top:4px">${e.conCot} con cotización</div>${cuerpo}</a>`
       )
     })
     .join("")
+  const sinEspejo = ejecs.filter((e) => !e.espejo && e.email)
 
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Traspasos de Vicky</title>
   <style>
@@ -3600,15 +3662,26 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
       <div><div style="font-size:26px;font-weight:700">${totalT}</div><div class="sub">traspasos en el período</div></div>
       <div><div style="font-size:26px;font-weight:700">${totalCot}</div><div class="sub">con cotización emitida</div></div>
       <div><div style="font-size:26px;font-weight:700;color:#166534">${totalAt}</div><div class="sub">ya contactados por el ejecutivo</div></div>
-      <div><div style="font-size:26px;font-weight:700;color:${totalT - totalAt ? "#b91c1c" : "#6b7280"}">${totalT - totalAt}</div><div class="sub">sin contactar desde el traspaso</div></div>
+      <div><div style="font-size:26px;font-weight:700;color:${totalSin ? "#b91c1c" : "#6b7280"}">${totalSin}</div><div class="sub">sin contactar desde el traspaso</div></div>
+      ${totalNoMedible ? `<div><div style="font-size:26px;font-weight:700;color:#6b7280">${totalNoMedible}</div><div class="sub">no medibles (ejecutivo sin espejo)</div></div>` : ""}
     </div>
   </div>
+  ${
+    sinEspejo.length
+      ? `<div class="card" style="border-left:4px solid #f59e0b">
+    <h2 style="margin:0 0 6px;font-size:16px">⚠️ ${sinEspejo.length} ejecutivo(s) con el WhatsApp sin espejar</h2>
+    <p class="sub" style="margin:0 0 10px">De ellos NO sabemos si contactaron o no: sus mensajes no llegan al sistema. Sus ${sinEspejo.reduce((n, e) => n + e.total, 0)} traspasos del período quedan fuera de la cuenta de "sin contactar".</p>
+    <ul style="margin:0 0 10px;padding-left:20px">${sinEspejo.map((e) => `<li><b>${esc(e.nombre)}</b> <span class="sub">${esc(e.email)} · ${e.total} traspasos (${e.conCot} con cotización)</span></li>`).join("")}</ul>
+    <a href="?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(qsBase)), vista: "espejos" }).toString()}" style="font-weight:700">🪞 Ir a Espejos para vincular el teléfono →</a>
+  </div>`
+      : ""
+  }
 
   <div class="card"><h2 style="margin:0 0 12px;font-size:16px">Por ejecutivo${ejecF ? ' <span class="sub">· filtrando (clic de nuevo para quitar)</span>' : ""}</h2>
   <div style="display:flex;gap:12px;flex-wrap:wrap">${tarjetasEjec || '<p class="sub">Sin traspasos en el período.</p>'}</div></div>
 
   <div class="card"><h2 style="margin:0 0 6px;font-size:16px">Detalle (${orden.length}) — sin contactar primero</h2>
-  <p class="sub" style="margin:0 0 12px">"Contactado" = el ejecutivo escribió por su WhatsApp o el cliente le tomó una llamada, después del traspaso. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
+  <p class="sub" style="margin:0 0 12px">"Contactado" = el ejecutivo <b>a cargo</b> escribió por su WhatsApp o le tomaron una llamada, después del traspaso. "Lo tomó otro" = quien escribió fue otra persona del equipo. "Sin espejo" = su WhatsApp no está espejado y no hay forma de saberlo. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
   <div style="overflow-x:auto"><table><tr><th>Ejecutivo</th><th>Cliente</th><th>Cotización</th><th>Traspasado</th><th>Estado</th><th>1<sup>er</sup> contacto</th><th>Última actividad</th><th>Presentado</th></tr>
   ${filasHtml || '<tr><td colspan="8" class="sub">Sin filas.</td></tr>'}</table></div></div>
 
