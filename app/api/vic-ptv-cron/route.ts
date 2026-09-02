@@ -945,6 +945,19 @@ const NOMBRE_VENDEDOR: Record<string, string> = {
   "ysegura@geovictoria.com": "Yahel Segura",
   "mguzmanr@geovictoria.com": "Miguel Guzmán",
   "mmendozav@geovictoria.com": "Mónica Mendoza",
+  // Roster CL de la rotación de respaldo y de las reglas de Zoho (02-sep):
+  // sin estas entradas la fila quedaba con el usuario del correo ("aaraque")
+  // en vez del nombre real. Al cliente nunca le llegó así — el mensaje usa el
+  // nombre de la ficha de Zoho — pero el registro interno sí, y es el que
+  // leen la cartera, el chequeo 9h y las alertas.
+  "aaraque@geovictoria.com": "Aleydis Araque",
+  "asepulveda@geovictoria.com": "Aracelli Sepúlveda",
+  "alopez@geovictoria.com": "Ana Paula López",
+  "dgalvez@geovictoria.com": "Daniela Galvez",
+  "gmelendez@geovictoria.com": "Grey Melendez",
+  "tmartinezq@geovictoria.com": "Tamara Martinez",
+  "adiazg@geovictoria.com": "Anderson Diaz",
+  "pdiaz@geovictoria.com": "Paola Diaz",
 }
 
 /** WhatsApp de los interinos (directorio verificado 27-jul; Mónica desde su
@@ -1843,7 +1856,11 @@ export async function GET(req: Request) {
       interno,
       Boolean(c.pref_escalon_at || c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
     )
-    if (vendedor.email !== interno.email) {
+    // El registro se corrige cuando cambia el correo O el id (Lalo 02-sep):
+    // comparar solo el correo dejaba filas con el id de otra persona cuando la
+    // tómbola devolvía el mismo correo con distinto usuario. Los tres campos
+    // viajan siempre juntos: nombre, correo e id son de la MISMA persona.
+    if (vendedor.email !== interno.email || vendedor.zohoId !== interno.zohoId) {
       await supa(`vic_ptv?id=eq.${fila[0].id}`, {
         method: "PATCH",
         body: JSON.stringify({ vendedor_email: vendedor.email, vendedor_zoho_id: vendedor.zohoId, vendedor_nombre: vendedor.nombre }),

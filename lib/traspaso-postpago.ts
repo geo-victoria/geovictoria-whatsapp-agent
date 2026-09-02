@@ -230,7 +230,17 @@ async function asignarVentaAutonoma(
       await fetch(`${url}/rest/v1/vic_ptv?id=eq.${ptvActivo.id}`, {
         method: "PATCH",
         headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ vendedor_email: ejecutivo.email, vendedor_nombre: ejecutivo.nombre }),
+        // Los TRES campos juntos (Lalo 02-sep, auditoría de traspasos de la
+        // semana): hasta hoy el PATCH escribía email y nombre pero dejaba el
+        // vendedor_zoho_id del traspaso anterior, así que la fila quedaba
+        // mezclada — nombre y correo de una persona, id de otra (caso Cristian
+        // Banda 31-ago: presentado a Ana Paula, registro con Aleydis y el id de
+        // Ana Paula). El chequeo 9h, la cartera y las alertas leen esa fila.
+        body: JSON.stringify({
+          vendedor_email: ejecutivo.email,
+          vendedor_nombre: ejecutivo.nombre,
+          vendedor_zoho_id: String(owner || ""),
+        }),
       }).catch(() => {})
     }
     console.log(
