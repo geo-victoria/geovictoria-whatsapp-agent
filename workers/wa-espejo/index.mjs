@@ -639,7 +639,12 @@ async function conectar(sessionId) {
     }
     if (connection === "close") {
       const codigo = lastDisconnect?.error?.output?.statusCode
-      const cerroSesion = codigo === DisconnectReason.loggedOut
+      // CONEXIÓN REEMPLAZADA (440) — 02-sep: en cada deploy conviven la
+      // instancia vieja y la nueva; a la vieja WhatsApp la desconecta y eso
+      // NO es un cierre de sesión. Antes caía en la rama de abajo y podía
+      // dejar la sesión estacionada. Se reintenta con backoff, nada más.
+      const reemplazada = codigo === DisconnectReason.connectionReplaced || codigo === 440
+      const cerroSesion = codigo === DisconnectReason.loggedOut && !reemplazada
       if (cerroSesion) {
         // Desvinculado desde el teléfono (o por WhatsApp): credenciales fuera
         // y la sesión vuelve al estacionamiento — pedirá QR cuando alguien
@@ -654,7 +659,14 @@ async function conectar(sessionId) {
         return
       }
       // Sesión sin vincular y ya nadie mira la página → estacionar, no loopear.
-      const vinculada = Boolean(state.creds?.registered)
+      // OJO (02-sep, caso Eddyluz/Tamara/Daniela): `registered` es FALSE en
+      // TODAS nuestras sesiones — son dispositivos vinculados, no registros
+      // primarios (la misma cicatriz que ya documentaba tieneCredenciales).
+      // Mirando solo ese campo, CUALQUIER desconexión normal estacionaba la
+      // sesión hasta que alguien abriera su QR: el espejo del ejecutivo se
+      // apagaba en silencio y su gestión dejaba de registrarse. Identidad
+      // (`me.id`) = sesión vinculada.
+      const vinculada = Boolean(state.creds?.registered || state.creds?.me?.id)
       if (!vinculada && !(await paginaAbierta(sessionId))) {
         await kvSet(`wa_espejo_qr_${sessionId}`, "", 1)
         esperarActivacion(sessionId)
