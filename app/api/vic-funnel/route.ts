@@ -3496,7 +3496,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   // bitácora decía Aracelli y el trato era de Paola). Quien tiene que trabajar
   // el caso es el DUEÑO del trato — esa es la verdad del CRM y con esa se mide.
   // Sin trato (o con el trato aún en el robot) manda la bitácora.
-  const duenoDeal = new Map<string, { email: string; nombre: string }>()
+  const duenoDeal = new Map<string, { email: string; nombre: string; stage: string }>()
   const dealIds = [...new Set([...cot.values()].map((c) => c.dealId).filter(Boolean))]
   if (dealIds.length) {
     try {
@@ -3509,7 +3509,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
           // `Owner` a secas trae solo el APELLIDO (dos "Diaz" en el roster —
           // Anderson y Paola — se confundían); los campos del lookup traen
           // correo y nombre de pila.
-          body: JSON.stringify({ select_query: `select id, Owner.email, Owner.first_name, Owner.last_name from Deals where id in (${lote}) limit 200` }),
+          body: JSON.stringify({ select_query: `select id, Stage, Owner.email, Owner.first_name, Owner.last_name from Deals where id in (${lote}) limit 200` }),
         }).catch(() => null)
         if (!rq?.ok || rq.status === 204) continue
         const dd = (await rq.json().catch(() => ({}))) as {
@@ -3519,7 +3519,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
           const em = String(f["Owner.email"] || "").toLowerCase()
           const nom = `${String(f["Owner.first_name"] || "").trim()} ${String(f["Owner.last_name"] || "").trim()}`.trim()
           // Los usuarios robot (Vicky, GeoVictoria Admin) no son responsables.
-          if (f.id && em && !/^(vicky|info)@geovictoria\.com$/.test(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em })
+          if (f.id && em && !/^(vicky|info)@geovictoria\.com$/.test(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: String(f.Stage || "") })
         }
       }
     } catch (e) {
@@ -3568,13 +3568,18 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   })
 
   const posterior = (iso: string, ref: string) => Boolean(iso) && Date.parse(iso) > Date.parse(ref)
+  // Caso CERRADO: el trato ya está implementando, facturando o perdido. No es
+  // gestión pendiente (02-sep: un cliente que YA PAGÓ salía como "sin
+  // contactar" y eso solo hace ruido en la lista del ejecutivo).
+  const cerrado = (f: FilaTraspaso) =>
+    /7\.|8\.|Cierre Perdido|Implementando|Facturando/i.test(duenoDeal.get(cot.get(f.contact)?.dealId || "")?.stage || "")
   const conEspejo = (f: FilaTraspaso) => sesionesVivas.has(sesionEspejoDe(f.vendedorEmail))
   const atendida = (f: FilaTraspaso) => posterior(f.ultVendedor, f.traspasadoAt) || posterior(f.llamada, f.traspasadoAt)
   const tocadaPorOtro = (f: FilaTraspaso) => posterior(f.ultOtroVendedor, f.traspasadoAt)
   // Sin espejo no hay forma de saberlo: no se cuenta ni como atendida ni como
   // abandonada — se declara "no medible" y punto.
   const medible = (f: FilaTraspaso) => conEspejo(f)
-  const sinContactar = (f: FilaTraspaso) => medible(f) && !atendida(f) && !tocadaPorOtro(f)
+  const sinContactar = (f: FilaTraspaso) => medible(f) && !atendida(f) && !tocadaPorOtro(f) && !cerrado(f)
   const ultimaActividad = (f: FilaTraspaso) =>
     [f.ultVendedor, f.ultOtroVendedor, f.ultCliente, f.llamada, f.ultCliVicky].filter(Boolean).sort().slice(-1)[0] || ""
 
@@ -3653,7 +3658,9 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
     .map((f) => {
       const at = atendida(f)
       const horas = (Date.now() - Date.parse(f.traspasadoAt)) / 3_600_000
-      const estado = at
+      const estado = cerrado(f)
+        ? `<span style="background:#f0faf4;color:#166534;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">CERRADO</span>`
+        : at
         ? `<span style="background:#e7f6ec;color:#166534;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">CONTACTADO</span>`
         : tocadaPorOtro(f)
           ? `<span style="background:#eef2ff;color:#3730a3;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">LO TOMÓ OTRO</span>`
