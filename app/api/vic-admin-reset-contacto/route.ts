@@ -82,6 +82,38 @@ export async function POST(req: Request): Promise<NextResponse> {
   )
   if (rk.ok) llavesBorradas = Number(rk.headers.get("content-range")?.split("/")[1] || 0)
 
+  // 2-bis. ESTADO OPERATIVO FUERA DE vic_kv (Lalo 02-sep: "de nuevo borra
+  // todo" — Vicky le respondió con la cotización COT1074 de una prueba
+  // anterior, ya expirada, en vez de emitir una nueva). El puntero de
+  // cotización vive en `vic_v3_quote_pointers`, tabla SEPARADA a propósito
+  // para sobrevivir a la conversación; el reset lo dejaba intacto y el
+  // siguiente turno recuperaba la cotización vieja. Lo mismo el loop de
+  // seguimiento, el traspaso (que además deja al probador "presentado" a un
+  // vendedor) y las llamadas/promesas de campaña. Sin esto el reset borra
+  // el historial pero NO el estado: la prueba nace sucia.
+  const tablasEstado: Array<[string, string]> = [
+    ["vic_v3_quote_pointers", "contact"],
+    ["vic_loop", "contact"],
+    ["vic_ptv", "contact"],
+    ["vic_scheduled_calls", "contact"],
+    ["vic_llamadas", "contact"],
+    ["vic_promesas", "contact"],
+  ]
+  const estadoBorrado: Record<string, number> = {}
+  for (const [tabla, col] of tablasEstado) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabla}?${col}=eq.${contact}`, {
+        method: "DELETE",
+        headers: { ...H(), Prefer: "count=exact" },
+        cache: "no-store",
+      })
+      // Una tabla ausente (404) no rompe el reset: se anota en 0.
+      estadoBorrado[tabla] = r.ok ? Number(r.headers.get("content-range")?.split("/")[1] || 0) : 0
+    } catch {
+      estadoBorrado[tabla] = 0
+    }
+  }
+
   // 3. COTIZACIONES VIVAS EN ZOHO → Expirada (Lalo 01-sep, tras el caso del
   // descuento sobre una cotización vieja de Rodrigo): las cotizaciones de
   // pruebas anteriores quedaban vivas en el CRM y cualquier tool que busque
@@ -123,6 +155,18 @@ export async function POST(req: Request): Promise<NextResponse> {
     console.warn(`[reset-contacto] expirar cotizaciones falló (no bloquea):`, e instanceof Error ? e.message : e)
   }
 
-  console.log(`[reset-contacto] +${contact}: ${convs.length} conversación(es), ${mensajesBorrados} mensajes, ${llavesBorradas} llaves kv, ${cotizacionesExpiradas} cotización(es) expirada(s)`)
-  return NextResponse.json({ ok: true, contact, conversaciones: convs.length, mensajes: mensajesBorrados, llavesKv: llavesBorradas, cotizacionesExpiradas })
+  const estadoTxt = Object.entries(estadoBorrado)
+    .filter(([, n]) => n > 0)
+    .map(([t, n]) => `${t}=${n}`)
+    .join(" ")
+  console.log(`[reset-contacto] +${contact}: ${convs.length} conversación(es), ${mensajesBorrados} mensajes, ${llavesBorradas} llaves kv, ${cotizacionesExpiradas} cotización(es) expirada(s)${estadoTxt ? `, estado: ${estadoTxt}` : ""}`)
+  return NextResponse.json({
+    ok: true,
+    contact,
+    conversaciones: convs.length,
+    mensajes: mensajesBorrados,
+    llavesKv: llavesBorradas,
+    cotizacionesExpiradas,
+    estado: estadoBorrado,
+  })
 }
