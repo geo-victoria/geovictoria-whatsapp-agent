@@ -116,6 +116,7 @@ export async function anualizarCotizacion(
   let filas: FilaSubform[] = []
   let pct = 0
   let estado = ""
+  let dealId = ""
   let mesesVigencia = MESES_DCTO_DEFAULT
   try {
     const { getZohoAccessToken } = await import("@/lib/zoho-token")
@@ -131,6 +132,7 @@ export async function anualizarCotizacion(
     }).data?.[0]
     if (!q) return { ok: false, error: `No encontré la cotización ${quoteId} en el CRM.` }
     estado = String(q.Estado_Cotizacion || "")
+    dealId = String((q.Deal_Asociado as { id?: string } | null)?.id || "")
     pct = Number(q.Descuento_Recurrente_Pct || 0)
     filas = (Array.isArray(q.Detalle_Items_Cotizacion) ? q.Detalle_Items_Cotizacion : []) as FilaSubform[]
     // Vigencia del descuento: campo del CRM si existe; si no, vic_kv del
@@ -175,11 +177,34 @@ export async function anualizarCotizacion(
     if (String(f.Modalidad || "") === "Arriendo") arriendoMensualUF += sub
     else {
       planMensualUF += sub
-      if (String(f.Codigo_Item || "") === "asistencia") personas = Number(f.Cantidad || 0)
+      // Dotación real SOLO cuando el plan viaja "Por usuario". En los tramos
+      // fijos (1-2 y 3-10 personas) la fila lleva Cantidad 1 con el precio del
+      // tramo, y "1 personas" salía en el nombre del plan anual (caso Patricio
+      // 02-sep, 8 personas). Sin dotación en la fila, se lee del deal más abajo.
+      if (String(f.Codigo_Item || "") === "asistencia") {
+        personas = String(f.Modalidad || "") === "Por usuario" ? Number(f.Cantidad || 0) : 0
+      }
     }
   }
   if (planMensualUF + arriendoMensualUF <= 0) {
     return { ok: false, error: "La cotización no tiene componentes recurrentes que anualizar." }
+  }
+
+  if (!(personas > 0) && dealId) {
+    // Tramo fijo: la dotación vive en el deal (N_Empleados_que_marcan). Best-effort:
+    // sin dato, el nombre del plan anual va sin paréntesis (jamás "1 personas").
+    try {
+      const { getZohoAccessToken } = await import("@/lib/zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const r = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=N_Empleados_que_marcan`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      const d = ((await r.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data?.[0]
+      const n = Number(d?.N_Empleados_que_marcan || 0)
+      if (n > 0) personas = n
+    } catch { /* sin dotación: nombre sin paréntesis */ }
   }
 
   const anualUF = calcularAnualUF(planMensualUF, arriendoMensualUF, pct, meses)
