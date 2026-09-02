@@ -3378,7 +3378,19 @@ function sesionEspejoDe(email: string): string {
   return e.split("@")[0] || ""
 }
 
-async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParams): Promise<string> {
+/** Líderes comerciales: ven al equipo completo. Un ejecutivo ve SOLO lo suyo
+ *  (el panel es para empujar al equipo, no para que cada uno mire al resto). */
+const LIDERES_COMERCIALES = (
+  process.env.VICKY_LIDERES_COMERCIALES ||
+  "vluna@geovictoria.com,egomez@geovictoria.com,rlewit@geovictoria.com,victoria luna,eduardo gomez,eduardo gómez,rodrigo lewit"
+)
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean)
+
+async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParams, esAdmin: boolean): Promise<string> {
+  const norm = (s: string) => s.trim().toLowerCase()
+  const verTodo = esAdmin || LIDERES_COMERCIALES.includes(norm(quien))
   const sup = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   const fechaCL = (d: Date) =>
     new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(d)
@@ -3388,7 +3400,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   const desdeP = sp.get("desde") || ""
   const hasta = valida(hastaP) ? hastaP : hoyCL
   const desde = valida(desdeP) ? desdeP : fechaCL(new Date(Date.now() - 6 * 86_400_000))
-  const ejecF = (sp.get("ejec") || "").trim().toLowerCase()
+  let ejecF = (sp.get("ejec") || "").trim().toLowerCase()
   const desdeISO = `${desde}T00:00:00-04:00`
   const hastaISO = `${hasta}T23:59:59-04:00`
 
@@ -3422,7 +3434,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
 
   // 2. Contexto por lotes: cotización, conversación con Vicky y evidencia de
   //    atención del vendedor (espejo de WhatsApp + llamadas).
-  const cot = new Map<string, { quoteId: string; empresa: string; totalClp: number; url: string }>()
+  const cot = new Map<string, { quoteId: string; dealId: string; empresa: string; totalClp: number; url: string }>()
   const convCli = new Map<string, string>()
   // Por contacto: última salida del vendedor POR SESIÓN de espejo. La
   // atribución importa (02-sep): sin separar por sesión, el WhatsApp de un
@@ -3448,14 +3460,14 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   for (let i = 0; i < tels.length; i += 40) {
     const lote = tels.slice(i, i + 40).map((t) => `"${t}"`).join(",")
     const [rq, rc, rm, rl] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?contact=in.(${lote})&select=contact,quote_id,empresa,total_clp,acceptance_url&limit=200`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?contact=in.(${lote})&select=contact,quote_id,deal_id,empresa,total_clp,acceptance_url&limit=200`, { headers: sup, cache: "no-store" }),
       fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=in.(${lote})&select=contact,last_user_at&limit=200`, { headers: sup, cache: "no-store" }),
       fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=in.(${lote})&enviado_at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono_chat,from_me,enviado_at,session_id&order=enviado_at.desc&limit=3000`, { headers: sup, cache: "no-store" }),
       fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?telefono=in.(${lote})&at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono,estado,at,session_id&order=at.desc&limit=800`, { headers: sup, cache: "no-store" }),
     ])
     for (const f of ((await rq.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
       const t = digits(String(f.contact || ""))
-      if (t && !cot.has(t)) cot.set(t, { quoteId: String(f.quote_id || ""), empresa: String(f.empresa || ""), totalClp: Number(f.total_clp || 0), url: String(f.acceptance_url || "") })
+      if (t && !cot.has(t)) cot.set(t, { quoteId: String(f.quote_id || ""), dealId: String(f.deal_id || ""), empresa: String(f.empresa || ""), totalClp: Number(f.total_clp || 0), url: String(f.acceptance_url || "") })
     }
     for (const f of ((await rc.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
       const t = digits(String(f.contact || ""))
@@ -3477,6 +3489,44 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
     }
   }
 
+  // ── EL RESPONSABLE ES EL DUEÑO DEL TRATO EN ZOHO (02-sep) ────────────────
+  // La bitácora `vic_ptv` guarda a quién PRESENTAMOS, y la tómbola de Zoho
+  // corre asíncrona: medido sobre los traspasos de esta semana, 8 de 48 filas
+  // nombraban a un ejecutivo distinto del dueño real del trato (en un caso la
+  // bitácora decía Aracelli y el trato era de Paola). Quien tiene que trabajar
+  // el caso es el DUEÑO del trato — esa es la verdad del CRM y con esa se mide.
+  // Sin trato (o con el trato aún en el robot) manda la bitácora.
+  const duenoDeal = new Map<string, { email: string; nombre: string }>()
+  const dealIds = [...new Set([...cot.values()].map((c) => c.dealId).filter(Boolean))]
+  if (dealIds.length) {
+    try {
+      const token = await getZohoAccessToken()
+      const HZ = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+      for (let i = 0; i < dealIds.length; i += 40) {
+        const lote = dealIds.slice(i, i + 40).map((d) => `'${d}'`).join(",")
+        const rq = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
+          method: "POST", headers: HZ, cache: "no-store",
+          // `Owner` a secas trae solo el APELLIDO (dos "Diaz" en el roster —
+          // Anderson y Paola — se confundían); los campos del lookup traen
+          // correo y nombre de pila.
+          body: JSON.stringify({ select_query: `select id, Owner.email, Owner.first_name, Owner.last_name from Deals where id in (${lote}) limit 200` }),
+        }).catch(() => null)
+        if (!rq?.ok || rq.status === 204) continue
+        const dd = (await rq.json().catch(() => ({}))) as {
+          data?: Array<Record<string, string | null | undefined>>
+        }
+        for (const f of dd.data || []) {
+          const em = String(f["Owner.email"] || "").toLowerCase()
+          const nom = `${String(f["Owner.first_name"] || "").trim()} ${String(f["Owner.last_name"] || "").trim()}`.trim()
+          // Los usuarios robot (Vicky, GeoVictoria Admin) no son responsables.
+          if (f.id && em && !/^(vicky|info)@geovictoria\.com$/.test(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em })
+        }
+      }
+    } catch (e) {
+      console.warn("[traspasos] dueños de trato:", e instanceof Error ? e.message : e)
+    }
+  }
+
   // Sesiones de espejo VIVAS. Sin esto el panel acusaba de "no contactó" a
   // quien simplemente no tiene su WhatsApp espejado (02-sep: Aleydis y
   // Aracelli nunca fueron dadas de alta en el worker).
@@ -3490,6 +3540,11 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   } catch {}
 
   const filas: FilaTraspaso[] = filasBase.map((f) => {
+    const dueno = duenoDeal.get(cot.get(f.contact)?.dealId || "")
+    if (dueno) {
+      f.vendedorEmail = dueno.email
+      f.vendedorNombre = dueno.nombre
+    }
     const ses = sesionEspejoDe(f.vendedorEmail)
     const propio = (s: string) => Boolean(ses) && s.toLowerCase() === ses
     return {
@@ -3538,12 +3593,20 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
     }
     porEjec.set(clave, e)
   }
-  const ejecs = [...porEjec.values()].sort((a, b) => b.sinContactar - a.sinContactar || b.total - a.total)
-  const totalT = filas.length
-  const totalAt = filas.filter(atendida).length
-  const totalSin = filas.filter(sinContactar).length
-  const totalNoMedible = filas.filter((f) => !medible(f)).length
-  const totalCot = filas.filter((f) => f.quoteId).length
+  // Un ejecutivo queda clavado en su propia fila (no ve la del resto).
+  if (!verTodo) {
+    const mio = [...porEjec.values()].find((e) => norm(e.nombre) === norm(quien) || norm(e.email) === norm(quien))
+    ejecF = (mio?.email || mio?.nombre || quien).toLowerCase()
+  }
+  const ejecs = [...porEjec.values()]
+    .filter((e) => verTodo || (e.email || e.nombre || "—").toLowerCase() === ejecF)
+    .sort((a, b) => b.sinContactar - a.sinContactar || b.total - a.total)
+  const alcance = verTodo ? filas : filas.filter((f) => (f.vendedorEmail || f.vendedorNombre || "—").toLowerCase() === ejecF)
+  const totalT = alcance.length
+  const totalAt = alcance.filter(atendida).length
+  const totalSin = alcance.filter(sinContactar).length
+  const totalNoMedible = alcance.filter((f) => !medible(f)).length
+  const totalCot = alcance.filter((f) => f.quoteId).length
 
   // 4. Chats del espejo que aún no cruzan con un número (transparencia).
   let sinIdentificar = 0
@@ -3558,7 +3621,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   const fmtCorto = (iso: string) =>
     iso ? new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—"
   const clp = (n: number) => (n > 0 ? `$${Math.round(n).toLocaleString("es-CL")}` : "—")
-  const visibles = ejecF ? filas.filter((f) => (f.vendedorEmail || f.vendedorNombre || "—").toLowerCase() === ejecF) : filas
+  const visibles = ejecF ? alcance.filter((f) => (f.vendedorEmail || f.vendedorNombre || "—").toLowerCase() === ejecF) : alcance
   const rango = (f: FilaTraspaso) => (sinContactar(f) ? 0 : !medible(f) ? 1 : atendida(f) ? 3 : 2)
   const orden = [...visibles].sort((a, b) => rango(a) - rango(b) || Date.parse(a.traspasadoAt) - Date.parse(b.traspasadoAt))
   const qsRango = (extra: Record<string, string>) => {
@@ -3681,7 +3744,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   <div style="display:flex;gap:12px;flex-wrap:wrap">${tarjetasEjec || '<p class="sub">Sin traspasos en el período.</p>'}</div></div>
 
   <div class="card"><h2 style="margin:0 0 6px;font-size:16px">Detalle (${orden.length}) — sin contactar primero</h2>
-  <p class="sub" style="margin:0 0 12px">"Contactado" = el ejecutivo <b>a cargo</b> escribió por su WhatsApp o le tomaron una llamada, después del traspaso. "Lo tomó otro" = quien escribió fue otra persona del equipo. "Sin espejo" = su WhatsApp no está espejado y no hay forma de saberlo. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
+  <p class="sub" style="margin:0 0 12px">El ejecutivo de cada fila es el <b>dueño del trato en Zoho</b> (si el trato no existe o sigue en Vicky, el que registró el traspaso). "Contactado" = el ejecutivo <b>a cargo</b> escribió por su WhatsApp o le tomaron una llamada, después del traspaso. "Lo tomó otro" = quien escribió fue otra persona del equipo. "Sin espejo" = su WhatsApp no está espejado y no hay forma de saberlo. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
   <div style="overflow-x:auto"><table><tr><th>Ejecutivo</th><th>Cliente</th><th>Cotización</th><th>Traspasado</th><th>Estado</th><th>1<sup>er</sup> contacto</th><th>Última actividad</th><th>Presentado</th></tr>
   ${filasHtml || '<tr><td colspan="8" class="sub">Sin filas.</td></tr>'}</table></div></div>
 
@@ -7476,7 +7539,7 @@ export async function GET(req: Request): Promise<Response> {
   if (vistaParam === "traspasos") {
     try {
       const qsVolver = (() => { const p = new URLSearchParams({ key, pais }); return p.toString() })()
-      const htmlTr = await renderTraspasos(quien || "", qsVolver, searchParams)
+      const htmlTr = await renderTraspasos(quien || "", qsVolver, searchParams, esAdmin)
       return new Response(htmlTr, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
     } catch (e) {
       console.warn("[vic-funnel] traspasos falló:", e instanceof Error ? e.message : e)
