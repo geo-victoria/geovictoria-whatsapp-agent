@@ -675,15 +675,43 @@ async function reintentarNotifyPagadaPendientes(): Promise<number> {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       cache: "no-store",
     }).catch(() => undefined)
+  // La marca puede ser el ISO pelado (formato viejo) o {at, intentos}.
+  const leerMarca = (v: string): { at: string; intentos: number } => {
+    try {
+      const j = JSON.parse(v) as { at?: string; intentos?: number }
+      if (j && typeof j === "object" && j.at) return { at: String(j.at), intentos: Number(j.intentos || 0) }
+    } catch {}
+    return { at: String(v || ""), intentos: 0 }
+  }
+  const anotarIntento = (key: string, at: string, intentos: number) =>
+    fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}`, {
+      method: "PATCH",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ value: JSON.stringify({ at, intentos }) }),
+      cache: "no-store",
+    }).catch(() => undefined)
+  // TOPE DE INTENTOS (02-sep, incidente COT1142: SIETE avisos idénticos en 11
+  // minutos). El endpoint puede MANDAR el correo y aun así no confirmarlo a
+  // tiempo; sin tope, la marca vive 48h y el cron reenvía cada ~2 min. Tres
+  // intentos y se descarta: un aviso interno perdido se recupera mirando la
+  // cotización, una lluvia de correos quema al equipo.
+  const MAX_INTENTOS = 3
   let entregados = 0
   for (const fila of filas) {
     const quoteId = fila.key.replace(/^notify_pagada_pend_/, "")
-    const edadMs = Date.now() - new Date(fila.value || 0).getTime()
+    const marca = leerMarca(fila.value)
+    const edadMs = Date.now() - new Date(marca.at || 0).getTime()
     if (!quoteId || !Number.isFinite(edadMs) || edadMs > 48 * 3600 * 1000) {
       console.warn(`[ptv-cron] notify-paid pendiente DESCARTADO (48h) quote=${quoteId}`)
       await borrar(fila.key)
       continue
     }
+    if (marca.intentos >= MAX_INTENTOS) {
+      console.warn(`[ptv-cron] notify-paid pendiente DESCARTADO (${marca.intentos} intentos) quote=${quoteId}`)
+      await borrar(fila.key)
+      continue
+    }
+    await anotarIntento(fila.key, marca.at, marca.intentos + 1)
     const r = await fetch(`${base}/api/payments/notify-paid?quoteId=${encodeURIComponent(quoteId)}`, {
       method: "POST",
       headers: { "x-vicky-secret": secret },
