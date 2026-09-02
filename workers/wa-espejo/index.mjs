@@ -531,12 +531,44 @@ async function procesarEnviosPendientes(sessionId, sock) {
   }
 }
 
+/** true = vinculada · false = sin credenciales · null = NO SE PUDO LEER.
+ *  El null importa (02-sep, caso Eddyluz/Tamara): un fallo de LECTURA de
+ *  Supabase se trataba como "sin vincular" y estacionaba una sesión VIVA —
+ *  el espejo dejaba de registrar sus WhatsApp y el panel de traspasos daba
+ *  por no contactados a clientes que sí lo estaban. Ante duda: reintentar,
+ *  nunca desvincular. */
 async function tieneCredenciales(sessionId) {
-  const creds = await estadoGet(sessionId, "creds", "creds").catch(() => null)
-  // `registered` no siempre queda true en sesiones de dispositivo vinculado
-  // (caso Grey/Daniela 06-ago: vinculadas, reinicio del worker las estacionó
-  // como "sin vincular"). Una sesión con identidad (`me.id`) está vinculada.
-  return Boolean(creds && (creds.registered || creds.me?.id))
+  for (let intento = 1; intento <= 4; intento++) {
+    try {
+      const creds = await estadoGet(sessionId, "creds", "creds")
+      // `registered` no siempre queda true en sesiones de dispositivo
+      // vinculado (caso Grey/Daniela 06-ago): con identidad (`me.id`) basta.
+      return Boolean(creds && (creds.registered || creds.me?.id))
+    } catch (e) {
+      console.error(`[${sessionId}] leer credenciales (intento ${intento}):`, e.message)
+      if (intento < 4) await new Promise((ok) => setTimeout(ok, 2000 * intento))
+    }
+  }
+  return null
+}
+
+/** Arranque de una sesión: vinculada → conectar; sin credenciales →
+ *  estacionar; ilegible → reintentar en un minuto SIN tocar su estado (la
+ *  sesión sigue como estaba para el panel). */
+async function arrancarSesion(sessionId) {
+  try {
+    const vinculada = await tieneCredenciales(sessionId)
+    if (vinculada === null) {
+      console.error(`[${sessionId}] credenciales ilegibles — reintento en 60 s (no se desvincula)`)
+      setTimeout(() => arrancarSesion(sessionId), 60_000)
+      return
+    }
+    if (vinculada) await conectar(sessionId)
+    else await esperarActivacion(sessionId)
+  } catch (e) {
+    console.error(`[${sessionId}] arranque:`, e.message)
+    setTimeout(() => arrancarSesion(sessionId), 60_000)
+  }
 }
 
 async function paginaAbierta(sessionId) {
@@ -549,10 +581,20 @@ async function esperarActivacion(sessionId) {
     JSON.stringify({ estado: "en_pausa_sin_vincular", at: new Date().toISOString() }),
   )
   console.log(`[${sessionId}] Sin vincular: estacionada hasta que abran su página de QR`)
+  let vueltas = 0
   const timer = setInterval(async () => {
     if (await paginaAbierta(sessionId)) {
       clearInterval(timer)
       console.log(`[${sessionId}] Página de QR abierta — iniciando pareo`)
+      conectar(sessionId).catch((e) => console.error(`[${sessionId}] conectar:`, e.message))
+      return
+    }
+    // AUTO-RESCATE cada ~5 min (02-sep): si la sesión sí tenía credenciales y
+    // se estacionó por un error de lectura, vuelve sola sin que nadie tenga
+    // que abrir un QR. Una sesión genuinamente desvinculada sigue esperando.
+    if (++vueltas % 20 === 0 && (await tieneCredenciales(sessionId)) === true) {
+      clearInterval(timer)
+      console.log(`[${sessionId}] Tenía credenciales válidas — reconectando sin QR`)
       conectar(sessionId).catch((e) => console.error(`[${sessionId}] conectar:`, e.message))
     }
   }, 15_000)
@@ -712,7 +754,5 @@ async function conectar(sessionId) {
 console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — pasivo + cola de envíos del editor`)
 await cargarLidPn()
 for (const sessionId of SESIONES) {
-  tieneCredenciales(sessionId)
-    .then((vinculada) => (vinculada ? conectar(sessionId) : esperarActivacion(sessionId)))
-    .catch((e) => console.error(`[${sessionId}] arranque:`, e.message))
+  arrancarSesion(sessionId)
 }
