@@ -63,6 +63,46 @@ function horaCL(): number {
   return parseInt(f.format(new Date()), 10)
 }
 
+/** UF del día para cotizaciones viejas sin UF_Valor. Orden: vic_kv (cache
+ * diario) → mindicador (6 s) → gael (6 s); la primera que responde se cachea.
+ * Cicatriz 02-sep: mindicador se colgó >60 s, la función murió por timeout de
+ * Vercel (504) y la tanda de voz se frenó en la primera llamada — un fetch
+ * externo SIN timeout jamás va en el camino del disparo. */
+async function ufDelDia(): Promise<number> {
+  const key = `uf_clp_${new Date().toISOString().slice(0, 10)}`
+  const cached = Number((await getKvValue(key).catch(() => "")) || 0)
+  if (cached > 0) return cached
+  const conTimeout = async (url: string, ms: number): Promise<string> => {
+    const ctl = new AbortController()
+    const t = setTimeout(() => ctl.abort(), ms)
+    try {
+      return await fetch(url, { cache: "no-store", signal: ctl.signal }).then((r) => r.text())
+    } finally {
+      clearTimeout(t)
+    }
+  }
+  let uf = 0
+  try {
+    const d = JSON.parse(await conTimeout("https://mindicador.cl/api/uf", 6000)) as { serie?: Array<{ valor?: number }> }
+    uf = Number(d?.serie?.[0]?.valor || 0)
+  } catch { /* sigue a gael */ }
+  if (!(uf > 0)) {
+    try {
+      const d = JSON.parse(await conTimeout("https://api.gael.cloud/general/public/monedas/UF", 6000)) as { Valor?: string }
+      uf = Number(String(d?.Valor || "").replace(/\./g, "").replace(",", "."))
+    } catch { /* sin UF */ }
+  }
+  if (uf > 0) {
+    await fetch(`${SUPABASE_URL}/rest/v1/vic_kv`, {
+      method: "POST",
+      headers: { ...HS(), Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key, value: String(uf) }),
+      cache: "no-store",
+    }).catch(() => {})
+  }
+  return uf
+}
+
 /** Compone las variables de la llamada desde la cotización REAL en Zoho.
  * Oferta = dcto vigente + 10 (tope 20, escalera de cliente); si ya está en
  * 20 o más, no hay oferta (el agente no ofrece nada). Determinista y SIN
@@ -83,13 +123,8 @@ async function variablesDesdeQuote(quoteId: string): Promise<Record<string, stri
   // en 0 y el guion quedaba sin cifras (visto en la tanda del 01-sep, casos
   // Carolina/Johana/David). Fallback: UF del día vía mindicador (best-effort).
   let uf = Number(q.UF_Valor || 0)
-  if (!(uf > 0)) {
-    uf = await fetch("https://mindicador.cl/api/uf", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: { serie?: Array<{ valor?: number }> }) => Number(d?.serie?.[0]?.valor || 0))
-      .catch(() => 0)
-  }
-  if (!(uf > 0)) throw new Error(`cotización ${quoteId} sin UF (ni Zoho ni mindicador)`)
+  if (!(uf > 0)) uf = await ufDelDia()
+  if (!(uf > 0)) throw new Error(`cotización ${quoteId} sin UF (ni Zoho, ni kv, ni mindicador, ni gael)`)
 
   const pct = Number(q.Descuento_Recurrente_Pct || 0)
   let recNetoUF = 0
@@ -176,6 +211,23 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!agentId) {
     return NextResponse.json({ ok: false, error: "sin agente: setea vic_kv dapta_agente_reencantamiento o pasa agentId" }, { status: 400 })
   }
+
+  // IDEMPOTENCIA (02-sep): un contacto se marca UNA vez por campaña. Si la
+  // respuesta HTTP se pierde (504 de Vercel con la llamada ya despachada), el
+  // reintento del ensamble NO puede volver a llamar al cliente. Fail-open si
+  // Supabase no responde (candado best-effort; el runner tampoco reintenta).
+  try {
+    const dup = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_llamadas?contact=eq.${contact}&campana=eq.${encodeURIComponent(campana)}&select=id&limit=1`,
+      { headers: HS(), cache: "no-store" },
+    ).then((r) => (r.ok ? r.json() : []))
+    if (Array.isArray(dup) && dup[0]?.id) {
+      return NextResponse.json(
+        { ok: false, duplicada: true, filaId: dup[0].id, error: `ya disparada en la campaña ${campana} (fila ${dup[0].id})` },
+        { status: 409 },
+      )
+    }
+  } catch { /* fail-open */ }
 
   let variables: Record<string, string> = {}
   const overrides = { ...(body.variables || {}) }
