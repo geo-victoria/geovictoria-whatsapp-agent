@@ -103,6 +103,14 @@ async function variablesDesdeQuote(quoteId: string): Promise<Record<string, stri
   // Mensual vigente con IVA (el descuento comiteado aplica solo al plan).
   const mensualVigenteUF = (planUF * (1 - pct / 100) + (recNetoUF - planUF)) * 1.19
   const mensualVigenteClp = Math.round(mensualVigenteUF * uf)
+  // CINTURÓN (01-sep, tanda 1): jamás marcar con monto 0 — el guion ofrecía
+  // "10% de descuento sobre $0" en 19/22 llamadas (cotizaciones viejas sin
+  // UF_Valor, antes del fallback). Toda cotización FORMAL tiene recurrente > 0;
+  // si aquí queda 0 es cotización rota o UF caída → se salta el disparo (502),
+  // no se llama al cliente con una cifra vacía.
+  if (!(mensualVigenteClp > 0)) {
+    throw new Error(`cotización ${quoteId} con mensualidad vigente 0 (recurrente=${recNetoUF} UF, uf=${uf}) — no se llama`)
+  }
   const pctOferta = pct >= 20 ? 0 : Math.min(20, pct + 10)
   const mensualOfertaClp =
     pctOferta > 0 ? Math.round((planUF * (1 - pctOferta / 100) + (recNetoUF - planUF)) * 1.19 * uf) : 0
@@ -170,14 +178,20 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   let variables: Record<string, string> = {}
+  const overrides = { ...(body.variables || {}) }
   if (body.quoteId) {
     try {
       variables = await variablesDesdeQuote(String(body.quoteId))
     } catch (e) {
       return NextResponse.json({ ok: false, error: `componiendo variables: ${e instanceof Error ? e.message : "error"}` }, { status: 502 })
     }
+    // Con quoteId, el precio lo manda SIEMPRE el cálculo determinista desde la
+    // cotización real — el body no puede pisar los campos de precio (así un
+    // ensamble que pre-calcule mal jamás mete un monto falso, cicatriz $0 del
+    // 01-sep). Los demás overrides (p.ej. contexto extra) sí se respetan.
+    for (const k of ["monto_mensual", "monto_oferta", "oferta_pct", "contexto"]) delete overrides[k]
   }
-  variables = { ...variables, ...(body.variables || {}) }
+  variables = { ...variables, ...overrides }
 
   // Registro ANTES de marcar (si el puente falla, la fila queda con resultado
   // null y el reintento es visible).
