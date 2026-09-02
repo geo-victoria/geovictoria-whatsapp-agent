@@ -3333,6 +3333,291 @@ async function renderCartera(quien: string, qsBase: string): Promise<string> {
   </div></div></body></html>`
 }
 
+// ── 🤝 TRASPASOS DE VICKY AL EQUIPO (Lalo 02-sep) ───────────────────────────
+// Herramienta para la LÍDER COMERCIAL (Victoria Luna): por ejecutivo, cuánto le
+// traspasó Vicky en el período —con o sin cotización— separando lo que YA tuvo
+// contacto del vendedor de lo que sigue sin tocar desde el traspaso.
+//
+// Qué cuenta como ATENDIDO (mismo criterio del candado PTV v3, nada de fe):
+// un WhatsApp del vendedor por su línea espejada o una llamada aceptada,
+// posteriores al traspaso. Notas de Zoho NO se miran acá: esto mide el contacto
+// real con el cliente, no el registro administrativo.
+//
+// HONESTIDAD: los chats del espejo que aún no tienen número identificado se
+// declaran arriba. Mientras un chat no cruce, su cliente puede figurar "sin
+// contactar" siendo falso — el pie de la página lo dice con todas sus letras.
+type FilaTraspaso = {
+  contact: string
+  vendedorEmail: string
+  vendedorNombre: string
+  traspasadoAt: string
+  motivo: string
+  presentado: boolean
+  estado: string
+  empresa: string
+  quoteId: string
+  totalClp: number
+  aceptacionUrl: string
+  ultVendedor: string
+  ultCliente: string
+  llamada: string
+  ultCliVicky: string
+}
+
+async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParams): Promise<string> {
+  const sup = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const fechaCL = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(d)
+  const valida = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
+  const hoyCL = fechaCL(new Date())
+  const hastaP = sp.get("hasta") || ""
+  const desdeP = sp.get("desde") || ""
+  const hasta = valida(hastaP) ? hastaP : hoyCL
+  const desde = valida(desdeP) ? desdeP : fechaCL(new Date(Date.now() - 6 * 86_400_000))
+  const ejecF = (sp.get("ejec") || "").trim().toLowerCase()
+  const desdeISO = `${desde}T00:00:00-04:00`
+  const hastaISO = `${hasta}T23:59:59-04:00`
+
+  // 1. Traspasos del período (vic_ptv es la bitácora del PTV: una fila por
+  //    conversación entregada, con el vendedor que quedó a cargo).
+  const rp = await fetch(
+    `${SUPABASE_URL}/rest/v1/vic_ptv?traspasado_at=gte.${encodeURIComponent(desdeISO)}&traspasado_at=lte.${encodeURIComponent(hastaISO)}` +
+      `&select=contact,vendedor_email,vendedor_nombre,vendedor_zoho_id,traspasado_at,motivo,presentado_al_prospecto,estado&order=traspasado_at.desc&limit=800`,
+    { headers: sup, cache: "no-store" },
+  )
+  const crudas = ((await rp.json().catch(() => [])) as Array<Record<string, unknown>>) || []
+  const setMetricas = metricsContactSet()
+  const base = crudas
+    .map((f) => ({
+      contact: digits(String(f.contact || "")),
+      vendedorEmail: String(f.vendedor_email || "").toLowerCase(),
+      vendedorNombre: String(f.vendedor_nombre || "").trim(),
+      traspasadoAt: String(f.traspasado_at || ""),
+      motivo: String(f.motivo || ""),
+      presentado: Boolean(f.presentado_al_prospecto),
+      estado: String(f.estado || ""),
+    }))
+    .filter((f) => f.contact && !isTestContact(f.contact, setMetricas))
+  // Un contacto traspasado dos veces en el período cuenta UNA vez, por su
+  // traspaso más reciente (el vigente): si no, el mismo cliente aparecería
+  // "sin atender" en dos ejecutivos distintos.
+  const porContacto = new Map<string, (typeof base)[number]>()
+  for (const f of base) if (!porContacto.has(f.contact)) porContacto.set(f.contact, f)
+  const filasBase = [...porContacto.values()]
+  const tels = filasBase.map((f) => f.contact)
+
+  // 2. Contexto por lotes: cotización, conversación con Vicky y evidencia de
+  //    atención del vendedor (espejo de WhatsApp + llamadas).
+  const cot = new Map<string, { quoteId: string; empresa: string; totalClp: number; url: string }>()
+  const convCli = new Map<string, string>()
+  const ultVend = new Map<string, string>()
+  const ultCli = new Map<string, string>()
+  const ultCall = new Map<string, string>()
+  const minTraspaso = filasBase.reduce(
+    (m, f) => (Date.parse(f.traspasadoAt) < m ? Date.parse(f.traspasadoAt) : m),
+    Date.parse(hastaISO),
+  )
+  const desdeEspejo = new Date(Number.isFinite(minTraspaso) ? minTraspaso : Date.parse(desdeISO)).toISOString()
+  for (let i = 0; i < tels.length; i += 40) {
+    const lote = tels.slice(i, i + 40).map((t) => `"${t}"`).join(",")
+    const [rq, rc, rm, rl] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?contact=in.(${lote})&select=contact,quote_id,empresa,total_clp,acceptance_url&limit=200`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=in.(${lote})&select=contact,last_user_at&limit=200`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=in.(${lote})&enviado_at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono_chat,from_me,enviado_at&order=enviado_at.desc&limit=3000`, { headers: sup, cache: "no-store" }),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?telefono=in.(${lote})&at=gte.${encodeURIComponent(desdeEspejo)}&select=telefono,estado,at&order=at.desc&limit=800`, { headers: sup, cache: "no-store" }),
+    ])
+    for (const f of ((await rq.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
+      const t = digits(String(f.contact || ""))
+      if (t && !cot.has(t)) cot.set(t, { quoteId: String(f.quote_id || ""), empresa: String(f.empresa || ""), totalClp: Number(f.total_clp || 0), url: String(f.acceptance_url || "") })
+    }
+    for (const f of ((await rc.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
+      const t = digits(String(f.contact || ""))
+      const u = String(f.last_user_at || "")
+      if (t && u && (!convCli.get(t) || convCli.get(t)! < u)) convCli.set(t, u)
+    }
+    for (const f of ((await rm.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
+      const t = digits(String(f.telefono_chat || ""))
+      const at = String(f.enviado_at || "")
+      if (!t || !at) continue
+      const mapa = f.from_me ? ultVend : ultCli
+      if (!mapa.get(t) || mapa.get(t)! < at) mapa.set(t, at)
+    }
+    for (const f of ((await rl.json().catch(() => [])) as Array<Record<string, unknown>>) || []) {
+      const t = digits(String(f.telefono || ""))
+      const at = String(f.at || "")
+      // "accept" = llamada que la otra parte tomó; eso ES contacto humano.
+      if (t && at && String(f.estado || "") === "accept" && (!ultCall.get(t) || ultCall.get(t)! < at)) ultCall.set(t, at)
+    }
+  }
+
+  const filas: FilaTraspaso[] = filasBase.map((f) => ({
+    ...f,
+    empresa: cot.get(f.contact)?.empresa || "",
+    quoteId: cot.get(f.contact)?.quoteId || "",
+    totalClp: cot.get(f.contact)?.totalClp || 0,
+    aceptacionUrl: cot.get(f.contact)?.url || "",
+    ultVendedor: ultVend.get(f.contact) || "",
+    ultCliente: ultCli.get(f.contact) || "",
+    llamada: ultCall.get(f.contact) || "",
+    ultCliVicky: convCli.get(f.contact) || "",
+  }))
+
+  const posterior = (iso: string, ref: string) => Boolean(iso) && Date.parse(iso) > Date.parse(ref)
+  const atendida = (f: FilaTraspaso) => posterior(f.ultVendedor, f.traspasadoAt) || posterior(f.llamada, f.traspasadoAt)
+  const ultimaActividad = (f: FilaTraspaso) =>
+    [f.ultVendedor, f.ultCliente, f.llamada, f.ultCliVicky].filter(Boolean).sort().slice(-1)[0] || ""
+
+  // 3. Resumen por ejecutivo.
+  type Ejec = { email: string; nombre: string; total: number; conCot: number; atendidos: number; masViejoSinAtender: number }
+  const porEjec = new Map<string, Ejec>()
+  for (const f of filas) {
+    const clave = f.vendedorEmail || f.vendedorNombre || "—"
+    const e = porEjec.get(clave) || { email: f.vendedorEmail, nombre: f.vendedorNombre || f.vendedorEmail || "sin ejecutivo", total: 0, conCot: 0, atendidos: 0, masViejoSinAtender: 0 }
+    if (!e.nombre || /@/.test(e.nombre)) e.nombre = f.vendedorNombre || e.nombre
+    e.total++
+    if (f.quoteId) e.conCot++
+    if (atendida(f)) e.atendidos++
+    else {
+      const h = (Date.now() - Date.parse(f.traspasadoAt)) / 3_600_000
+      if (Number.isFinite(h) && h > e.masViejoSinAtender) e.masViejoSinAtender = h
+    }
+    porEjec.set(clave, e)
+  }
+  const ejecs = [...porEjec.values()].sort((a, b) => b.total - a.total || b.total - b.atendidos - (a.total - a.atendidos))
+  const totalT = filas.length
+  const totalAt = filas.filter(atendida).length
+  const totalCot = filas.filter((f) => f.quoteId).length
+
+  // 4. Chats del espejo que aún no cruzan con un número (transparencia).
+  let sinIdentificar = 0
+  try {
+    const rsi = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=is.null&es_grupo=eq.false&chat_jid=like.*@lid&enviado_at=gte.${encodeURIComponent(desdeEspejo)}&select=chat_jid&limit=3000`,
+      { headers: sup, cache: "no-store" },
+    )
+    sinIdentificar = new Set(((await rsi.json().catch(() => [])) as Array<{ chat_jid?: string }>).map((f) => String(f.chat_jid || ""))).size
+  } catch {}
+
+  const fmtCorto = (iso: string) =>
+    iso ? new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—"
+  const clp = (n: number) => (n > 0 ? `$${Math.round(n).toLocaleString("es-CL")}` : "—")
+  const visibles = ejecF ? filas.filter((f) => (f.vendedorEmail || f.vendedorNombre || "—").toLowerCase() === ejecF) : filas
+  const orden = [...visibles].sort((a, b) => {
+    const aa = atendida(a) ? 1 : 0
+    const bb = atendida(b) ? 1 : 0
+    return aa - bb || Date.parse(a.traspasadoAt) - Date.parse(b.traspasadoAt)
+  })
+  const qsRango = (extra: Record<string, string>) => {
+    const p = new URLSearchParams(qsBase)
+    p.set("vista", "traspasos")
+    p.set("desde", desde)
+    p.set("hasta", hasta)
+    for (const [k, v] of Object.entries(extra)) v ? p.set(k, v) : p.delete(k)
+    return `?${p.toString()}`
+  }
+  const atajo = (dias: number, etiqueta: string) => {
+    const d = fechaCL(new Date(Date.now() - (dias - 1) * 86_400_000))
+    const p = new URLSearchParams(qsBase)
+    p.set("vista", "traspasos")
+    p.set("desde", d)
+    p.set("hasta", hoyCL)
+    if (ejecF) p.set("ejec", ejecF)
+    const activo = desde === d && hasta === hoyCL
+    return `<a href="?${p.toString()}" style="padding:5px 12px;border-radius:8px;border:1px solid ${activo ? "#0284c7" : "#e5e7eb"};background:${activo ? "#e8f4fb" : "#fff"};font-weight:${activo ? 700 : 500}">${etiqueta}</a>`
+  }
+
+  const filasHtml = orden
+    .map((f) => {
+      const at = atendida(f)
+      const horas = (Date.now() - Date.parse(f.traspasadoAt)) / 3_600_000
+      const estado = at
+        ? `<span style="background:#e7f6ec;color:#166534;font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">CONTACTADO</span>`
+        : `<span style="background:${horas > 24 ? "#fee2e2" : "#fef9c3"};color:${horas > 24 ? "#b91c1c" : "#854d0e"};font-size:11px;padding:2px 9px;border-radius:99px;font-weight:700">SIN CONTACTAR</span>`
+      const cotHtml = f.quoteId
+        ? `<a href="https://crm.zoho.com/crm/org685875245/tab/CustomModule5/${esc(f.quoteId)}" target="_blank" rel="noopener">cotización</a> <span class="sub">${clp(f.totalClp)}</span>`
+        : `<span class="sub">sin cotización</span>`
+      const via = f.llamada && posterior(f.llamada, f.traspasadoAt) ? " 📞" : ""
+      return (
+        `<tr><td>${esc(f.vendedorNombre || f.vendedorEmail || "—")}</td>` +
+        `<td>${esc(f.empresa || "—")}<br><a href="https://wa.me/${esc(f.contact)}" target="_blank" rel="noopener" class="sub">+${esc(f.contact)}</a></td>` +
+        `<td>${cotHtml}</td>` +
+        `<td style="white-space:nowrap">${fmtCorto(f.traspasadoAt)}<br><span class="sub">${horas < 48 ? `hace ${horas.toFixed(0)} h` : `hace ${(horas / 24).toFixed(0)} d`}</span></td>` +
+        `<td>${estado}${via}</td>` +
+        `<td style="white-space:nowrap">${at ? fmtCorto(f.ultVendedor || f.llamada) : "—"}</td>` +
+        `<td style="white-space:nowrap">${fmtCorto(ultimaActividad(f))}</td>` +
+        `<td>${f.presentado ? "sí" : '<span class="sub">no</span>'}</td></tr>`
+      )
+    })
+    .join("")
+
+  const tarjetasEjec = ejecs
+    .map((e) => {
+      const sin = e.total - e.atendidos
+      const pct = e.total ? Math.round((e.atendidos / e.total) * 100) : 0
+      const clave = (e.email || e.nombre || "—").toLowerCase()
+      const activo = ejecF === clave
+      return (
+        `<a href="${qsRango({ ejec: activo ? "" : clave })}" style="display:block;text-decoration:none;color:inherit;border:1px solid ${activo ? "#0284c7" : "#e8eaed"};background:${activo ? "#f0f9ff" : "#fff"};border-radius:12px;padding:12px 14px;min-width:190px">` +
+        `<div style="font-weight:700;margin-bottom:6px">${esc(e.nombre)}</div>` +
+        `<div style="font-size:22px;font-weight:700">${e.total} <span class="sub" style="font-size:12px;font-weight:500">traspasos</span></div>` +
+        `<div class="sub" style="margin-top:4px">${e.conCot} con cotización</div>` +
+        `<div style="margin-top:6px"><span style="color:#166534;font-weight:700">${e.atendidos} contactados</span> · <span style="color:${sin ? "#b91c1c" : "#6b7280"};font-weight:700">${sin} sin contactar</span></div>` +
+        `<div style="height:6px;border-radius:99px;background:#eef1f4;margin-top:8px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${pct >= 70 ? "#16a34a" : pct >= 40 ? "#f59e0b" : "#dc2626"}"></div></div>` +
+        (sin ? `<div class="sub" style="margin-top:6px">el más antiguo sin contactar: ${e.masViejoSinAtender < 48 ? `${e.masViejoSinAtender.toFixed(0)} h` : `${(e.masViejoSinAtender / 24).toFixed(0)} d`}</div>` : `<div class="sub" style="margin-top:6px">al día 🎉</div>`) +
+        `</a>`
+      )
+    })
+    .join("")
+
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Traspasos de Vicky</title>
+  <style>
+    body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;background:#f6f8fa;color:#2d3748}
+    .wrap{max-width:1360px;margin:0 auto;padding:18px}
+    .card{background:#fff;border-radius:14px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:16px}
+    table{width:100%;border-collapse:collapse;font-size:13.5px}
+    th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;padding:8px;border-bottom:2px solid #e5e7eb}
+    td{padding:8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+    a{color:#0284c7;text-decoration:none}
+    .sub{color:#8a949c;font-size:12px}
+    tr:hover td{background:#f8fbfd}
+    input[type=date]{border:1px solid #d8dde2;border-radius:8px;padding:5px 8px;font:inherit}
+  </style></head><body><div class="wrap">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap"><img src="/gv/logo-full-color.svg" style="height:28px" alt="">
+  <h1 style="margin:0;font-size:20px">🤝 Traspasos de Vicky al equipo</h1>
+  <a class="sub" href="?${qsBase}">← volver al dash</a><a class="sub" href="?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(qsBase)), vista: "cartera" }).toString()}">📋 Cartera</a></div>
+
+  <div class="card">
+    <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${[...new URLSearchParams(qsBase).entries()].map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join("")}
+      <input type="hidden" name="vista" value="traspasos">
+      ${ejecF ? `<input type="hidden" name="ejec" value="${esc(ejecF)}">` : ""}
+      <label class="sub">Desde <input type="date" name="desde" value="${esc(desde)}"></label>
+      <label class="sub">Hasta <input type="date" name="hasta" value="${esc(hasta)}"></label>
+      <button type="submit" style="padding:6px 16px;border-radius:8px;border:0;background:#0284c7;color:#fff;font-weight:700;cursor:pointer">Ver</button>
+      <span style="display:flex;gap:6px;margin-left:6px">${atajo(1, "hoy")}${atajo(7, "7 días")}${atajo(14, "14 días")}${atajo(30, "30 días")}</span>
+    </form>
+    <div style="display:flex;gap:26px;flex-wrap:wrap;margin-top:14px">
+      <div><div style="font-size:26px;font-weight:700">${totalT}</div><div class="sub">traspasos en el período</div></div>
+      <div><div style="font-size:26px;font-weight:700">${totalCot}</div><div class="sub">con cotización emitida</div></div>
+      <div><div style="font-size:26px;font-weight:700;color:#166534">${totalAt}</div><div class="sub">ya contactados por el ejecutivo</div></div>
+      <div><div style="font-size:26px;font-weight:700;color:${totalT - totalAt ? "#b91c1c" : "#6b7280"}">${totalT - totalAt}</div><div class="sub">sin contactar desde el traspaso</div></div>
+    </div>
+  </div>
+
+  <div class="card"><h2 style="margin:0 0 12px;font-size:16px">Por ejecutivo${ejecF ? ' <span class="sub">· filtrando (clic de nuevo para quitar)</span>' : ""}</h2>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">${tarjetasEjec || '<p class="sub">Sin traspasos en el período.</p>'}</div></div>
+
+  <div class="card"><h2 style="margin:0 0 6px;font-size:16px">Detalle (${orden.length}) — sin contactar primero</h2>
+  <p class="sub" style="margin:0 0 12px">"Contactado" = el ejecutivo escribió por su WhatsApp o el cliente le tomó una llamada, después del traspaso. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
+  <div style="overflow-x:auto"><table><tr><th>Ejecutivo</th><th>Cliente</th><th>Cotización</th><th>Traspasado</th><th>Estado</th><th>1<sup>er</sup> contacto</th><th>Última actividad</th><th>Presentado</th></tr>
+  ${filasHtml || '<tr><td colspan="8" class="sub">Sin filas.</td></tr>'}</table></div></div>
+
+  <div class="card"><p class="sub" style="margin:0">Fuente: bitácora de traspasos de Vicky cruzada con el espejo de WhatsApp del equipo.
+  ${sinIdentificar ? `<b>${sinIdentificar} chat(s) del espejo</b> aún no tienen número identificado en el período: si alguno de ellos es un cliente de esta lista, su fila puede decir "sin contactar" sin serlo. El worker los va resolviendo solo.` : "Todos los chats del espejo del período están identificados."}
+  ${quien && quien !== "Administrador" ? `<br>Sesión: ${esc(quien)}` : ""}</p></div>
+  </div></body></html>`
+}
+
 async function fetchPrimeraConversacion(): Promise<Map<string, string>> {
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   const primera = new Map<string, string>()
@@ -7112,6 +7397,19 @@ export async function GET(req: Request): Promise<Response> {
       return new Response("La cartera no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
     }
   }
+  // 🤝 TRASPASOS (Lalo 02-sep): herramienta de la líder comercial — por
+  // ejecutivo, qué le traspasó Vicky y qué sigue sin contactar. Autocontenida
+  // y con filtro de fechas propio, igual que la Cartera.
+  if (vistaParam === "traspasos") {
+    try {
+      const qsVolver = (() => { const p = new URLSearchParams({ key, pais }); return p.toString() })()
+      const htmlTr = await renderTraspasos(quien || "", qsVolver, searchParams)
+      return new Response(htmlTr, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
+    } catch (e) {
+      console.warn("[vic-funnel] traspasos falló:", e instanceof Error ? e.message : e)
+      return new Response("El panel de traspasos no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
+    }
+  }
   // 🪞 ESPEJOS (Lalo 27-ago): monitoreo de sesiones de WhatsApp espejo del
   // equipo comercial — solo ADMINISTRADOR (los links QR que expone permiten
   // vincular la sesión de cualquiera; cada vendedor recibe SU link, no la
@@ -8469,6 +8767,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cartera"); return p.toString() })()}">📋 Cartera</a>
+      <a href="?${(() => { const p = filtrosQS(); p.set("vista", "traspasos"); return p.toString() })()}">🤝 Traspasos</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "campanas"); return p.toString() })()}">📣 Campañas</a>
       ${esAdmin ? `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "espejos"); return p.toString() })()}">🪞 Espejos</a>` : ""}
       ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}

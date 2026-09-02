@@ -241,14 +241,37 @@ setInterval(() => {
 let resolutorActivo = false
 const resolutorTimers = new Map()
 
+/** Teléfonos que nos importa poder cruzar, en orden de prioridad.
+ *  02-sep (dash de traspasos para Victoria Luna): la fuente era SOLO las 400
+ *  conversaciones más recientes de Vicky, así que un cliente TRASPASADO hace
+ *  más de esas 400 conversaciones quedaba sin mapeo y su chat con el vendedor
+ *  no cruzaba — el dash lo mostraba como "sin actividad" siendo falso. Los
+ *  traspasos vivos entran primero: son exactamente la gente que el dash mide. */
+async function telefonosDeInteres() {
+  const fuentes = [
+    "vic_ptv?select=contact&order=traspasado_at.desc&limit=600",
+    "vic_v3_conversations?select=contact&order=started_at.desc&limit=800",
+  ]
+  const out = []
+  for (const url of fuentes) {
+    try {
+      const res = await sb(url)
+      for (const f of await res.json()) {
+        const t = soloDigitos(f.contact)
+        if (t) out.push(t)
+      }
+    } catch {}
+  }
+  return [...new Set(out)]
+}
+
 async function resolverContactosVicky(sock) {
   if (resolutorActivo) return
   resolutorActivo = true
   try {
-    const res = await sb("vic_v3_conversations?select=contact&order=started_at.desc&limit=400")
-    const contactos = (await res.json()).map((c) => soloDigitos(c.contact)).filter(Boolean)
+    const contactos = await telefonosDeInteres()
     const mapeados = new Set(lidPn.values())
-    const pendientes = [...new Set(contactos)].filter((t) => !mapeados.has(t)).slice(0, 200)
+    const pendientes = contactos.filter((t) => !mapeados.has(t)).slice(0, 300)
     let aprendidos = 0
     for (let i = 0; i < pendientes.length; i += 50) {
       const lote = pendientes.slice(i, i + 50).map((t) => `${t}@s.whatsapp.net`)
@@ -266,6 +289,61 @@ async function resolverContactosVicky(sock) {
     console.error("[lid] resolutor", e.message)
   } finally {
     resolutorActivo = false
+  }
+}
+
+// ── Sanador de teléfonos ya espejados (02-sep) ──────────────────────────────
+// El backfill de aprenderLid solo alcanza a los mensajes que YA existían al
+// aprender el mapeo. Un mapeo aprendido por OTRA sesión (llega por vic_kv al
+// arrancar) dejaba los chats viejos de esta sesión con telefono_chat en NULL
+// para siempre. Este barrido cierra ese hueco: toma los chats @lid espejados
+// sin teléfono y les estampa el número cuando el mapa ya lo conoce, o lo pide
+// al mapeo LID→PN del propio Baileys cuando la versión lo expone.
+let sanadorActivo = false
+
+async function pnDesdeBaileys(sock, lid) {
+  try {
+    const m = sock?.signalRepository?.lidMapping
+    const pn = (await (m?.getPNForLID?.(`${lid}@lid`) ?? m?.getPNForLID?.(lid))) || null
+    return soloDigitos(pn) || null
+  } catch {
+    return null
+  }
+}
+
+async function sanarTelefonosPendientes(sock) {
+  if (sanadorActivo) return
+  sanadorActivo = true
+  try {
+    const res = await sb(
+      "vic_wa_espejo_mensajes?select=chat_jid&telefono_chat=is.null&es_grupo=eq.false&chat_jid=like.*@lid&order=enviado_at.desc&limit=3000",
+    )
+    const lids = [...new Set((await res.json()).map((f) => soloDigitos(f.chat_jid)).filter(Boolean))]
+    let sanados = 0
+    let sinMapeo = 0
+    for (const lid of lids) {
+      let pn = lidPn.get(lid) || null
+      if (!pn) pn = await pnDesdeBaileys(sock, lid)
+      if (!pn) {
+        sinMapeo++
+        continue
+      }
+      // aprenderLid ya hace el PATCH retroactivo del chat; si el mapeo ya
+      // estaba en memoria hay que estampar igual las filas que quedaron NULL.
+      if (lidPn.get(lid) !== pn) aprenderLid(lid, pn)
+      else
+        await sb(`vic_wa_espejo_mensajes?chat_jid=eq.${encodeURIComponent(`${lid}@lid`)}&telefono_chat=is.null`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ telefono_chat: pn }),
+        }).catch(() => {})
+      sanados++
+    }
+    if (sanados || sinMapeo) console.log(`[lid] sanador: ${sanados} chat(s) estampados, ${sinMapeo} sin mapeo aún`)
+  } catch (e) {
+    console.error("[lid] sanador", e.message)
+  } finally {
+    sanadorActivo = false
   }
 }
 
@@ -333,8 +411,15 @@ async function guardarMensaje(sessionId, m) {
   if (TIPOS_RUIDO.has(tipo)) return
   if (tipo === "desconocido" && !texto) return
   const esLid = jid.endsWith("@lid")
-  // En chats @lid el número real viaja en senderPn (mensajes del cliente).
-  if (esLid && !m.key?.fromMe && m.key?.senderPn) aprenderLid(jid, m.key.senderPn)
+  // En chats @lid el número real viaja aparte de la clave del chat: senderPn
+  // en los mensajes del cliente y remoteJidAlt/participantAlt en los que MANDA
+  // el vendedor (02-sep: un chat que abre el ejecutivo se quedaba sin número
+  // hasta que el cliente contestara — y en el dash figuraba "sin actividad").
+  if (esLid) {
+    for (const alt of [m.key?.senderPn, m.key?.remoteJidAlt, m.key?.participantAlt, m.key?.participantPn]) {
+      if (alt) aprenderLid(jid, alt)
+    }
+  }
   const telefonoChat = esGrupo
     ? null
     : esLid
@@ -556,6 +641,20 @@ async function conectar(sessionId) {
   // WhatsApp comparte explícitamente el número detrás de un LID.
   sock.ev.on("chats.phoneNumberShare", ({ lid, jid }) => aprenderLid(lid, jid))
 
+  // La agenda del dispositivo también trae el par LID↔número (02-sep): el sync
+  // de contactos es la vía que no depende de que el cliente escriba primero.
+  const deContactos = (lista) => {
+    for (const c of lista || []) {
+      const id = c?.id || ""
+      const alt = c?.lid || c?.phoneNumber || c?.jid || ""
+      if (!id || !alt) continue
+      if (String(id).endsWith("@lid")) aprenderLid(id, alt)
+      else if (String(alt).endsWith("@lid")) aprenderLid(alt, id)
+    }
+  }
+  sock.ev.on("contacts.upsert", deContactos)
+  sock.ev.on("contacts.update", deContactos)
+
   // LLAMADAS de WhatsApp (07-ago, pedido Lalo: registrar los llamados de los
   // ejecutivos e identificar las llamadas con clientes con proceso). El
   // dispositivo vinculado recibe los eventos de llamada del número: se
@@ -590,8 +689,19 @@ async function conectar(sessionId) {
   // Resolutor proactivo: 30 s tras conectar y luego cada 5 min (el candado
   // resolutorActivo evita que varias sesiones consulten a la vez).
   clearInterval(resolutorTimers.get(sessionId))
-  resolutorTimers.set(sessionId, setInterval(() => resolverContactosVicky(sock).catch(() => {}), 5 * 60_000))
-  setTimeout(() => resolverContactosVicky(sock).catch(() => {}), 30_000)
+  resolutorTimers.set(
+    sessionId,
+    setInterval(() => {
+      resolverContactosVicky(sock)
+        .catch(() => {})
+        .then(() => sanarTelefonosPendientes(sock).catch(() => {}))
+    }, 5 * 60_000),
+  )
+  setTimeout(() => {
+    resolverContactosVicky(sock)
+      .catch(() => {})
+      .then(() => sanarTelefonosPendientes(sock).catch(() => {}))
+  }, 30_000)
 
   // Cola de envíos del vendedor: cada 15 s se despachan los trabajos
   // pendientes de ESTA sesión (reconectar rearma el timer con el sock nuevo).
