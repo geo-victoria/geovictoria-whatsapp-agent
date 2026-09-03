@@ -937,10 +937,41 @@ export async function runAgentLoop(params: {
             (toolName === "derivar_a_soporte" &&
               ["fuera_de_rango_trabajadores", "solicitud_explicita_persona", "fuera_de_scope", "callback"].includes(motivoDeriv)) ||
             (toolName === "registrar_solicitud_callback" && Boolean((result as { ok?: boolean } | null)?.ok))
+          // TRASPASO INMEDIATO (Lalo 03-sep): pedir hablar con una persona ya
+          // no genera solo una promesa — dispara el traspaso completo
+          // (registro en Zoho por la escalera, tómbola y vendedor asignado), y
+          // Vicky lo presenta en ESTE mismo turno. Antes se prometía "se va a
+          // contactar contigo en las próximas horas" sin que existiera
+          // registro ni responsable: 20 de 33 promesas vencieron sin cumplirse.
+          // La promesa se sigue registrando como respaldo del vigía, pero YA
+          // con el dueño real que devolvió la tómbola.
+          let ejecTraspaso: { nombre: string; email: string; telefono: string } | null = null
+          if (contact && prometeContacto && contact.replace(/\D/g, "").startsWith("56")) {
+            try {
+              const { traspasarAhora } = await import("@/app/api/vic-ptv-cron/route")
+              const r = await Promise.race([
+                // "calificado" = ya vio un precio (hay cotización con puntero).
+                // Es el mismo criterio de la escalera: con precio el registro
+                // va a la tómbola de ejecutivos; sin precio, a SDR.
+                getQuotePointer(contact)
+                  .catch(() => null)
+                  .then((puntero) =>
+                    traspasarAhora(contact, {
+                      motivo: motivoDeriv || "solicitud_explicita_persona",
+                      calificado: Boolean(puntero?.quoteId),
+                    }),
+                  ),
+                new Promise<null>((res) => setTimeout(() => res(null), 8000)),
+              ])
+              if (r?.ok && r.vendedor?.email) ejecTraspaso = r.vendedor
+            } catch { /* si falla, queda la promesa + el reloj del cron */ }
+          }
           if (contact && prometeContacto) {
             const { registrarPromesa } = await import("./promesas")
             const { leerEjecutivoAsignado } = await import("./crm-hitos")
-            const ejecPromesa = await leerEjecutivoAsignado(contact).catch(() => null)
+            const ejecPromesa =
+              (ejecTraspaso ? { nombre: ejecTraspaso.nombre, email: ejecTraspaso.email } : null) ||
+              (await leerEjecutivoAsignado(contact).catch(() => null))
             void registrarPromesa({
               contact,
               tipo:
@@ -954,6 +985,22 @@ export async function runAgentLoop(params: {
               vendedorEmail: ejecPromesa?.email || undefined,
               horasHabiles: 4,
             }).catch(() => false)
+          }
+          // Y Vicky lo PRESENTA en este mismo turno. Sin esto el traspaso
+          // ocurría por detrás y el cliente seguía leyendo "se va a contactar
+          // contigo en las próximas horas" — una promesa sin cara ni plazo,
+          // que es exactamente lo que veníamos incumpliendo. La directiva va
+          // al FINAL del contexto (recencia): el guion de venta le gana a las
+          // reglas del prompt, lección de la E2E del 08-ago.
+          if (ejecTraspaso?.nombre && result && typeof result === "object") {
+            ;(result as Record<string, unknown>).ejecutivoAsignado = ejecTraspaso
+            ;(result as Record<string, unknown>).instruccionPresentacion =
+              `TRASPASO YA HECHO: la conversación quedó asignada a ${ejecTraspaso.nombre}. ` +
+              `PRESÉNTALO EN ESTE MENSAJE con su nombre` +
+              (ejecTraspaso.telefono ? `, su WhatsApp ${ejecTraspaso.telefono}` : "") +
+              (ejecTraspaso.email ? ` y su correo ${ejecTraspaso.email}` : "") +
+              `. PROHIBIDO decir "se va a contactar contigo en las próximas horas" o cualquier plazo: ` +
+              `di que ya quedó asignado y que tú sigues acá por cualquier cosa.`
           }
         } catch { /* registro de promesa best-effort */ }
 

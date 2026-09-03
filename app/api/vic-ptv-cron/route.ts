@@ -1673,6 +1673,136 @@ async function traspasarATelemarketing(
   }
 }
 
+/**
+ * TRASPASO INMEDIATO — "quiero que me llamen" deja de ser una promesa y pasa a
+ * ser un traspaso de verdad (Lalo, 03-sep).
+ *
+ * EL PROBLEMA QUE RESUELVE. Hasta hoy, pedir hablar con una persona solo
+ * dejaba una fila en `vic_promesas` y un mensaje diciendo "se va a contactar
+ * contigo en las próximas horas". Nada más: sin registro en Zoho, sin tómbola
+ * y sin nadie asignado. De 33 promesas hechas desde el 29-ago, 20 vencieron
+ * sin cumplirse (61%) y las 33 nacieron con `vendedor_email` en NULL — se le
+ * preguntaba al sistema quién era el responsable un segundo ANTES de que el
+ * sistema lo decidiera. El caso Soledad (pidió tres veces, dos promesas
+ * registradas, nadie llamó) es el retrato exacto.
+ *
+ * VIVE ACÁ A PROPÓSITO. La maquinaria de traspaso —escalera de registro,
+ * tómbola, candados de dueño humano— ya existe en este archivo y es el camino
+ * más crítico del sistema. Moverla a lib/ sería un refactor grande con riesgo
+ * real de regresión; en cambio exportar la función desde acá garantiza UNA
+ * sola implementación: el reloj del cron y la petición explícita hacen
+ * exactamente lo mismo, y no pueden desincronizarse.
+ *
+ * LOS DATOS QUE MANDAN EL DISEÑO (medidos el 03-sep sobre 178 leads en 4 días):
+ *  · 89% de los contactos YA tiene lead (lo crea el formulario web). No se
+ *    crea nada: se reusa. Solo el 11% que escribe directo al WhatsApp necesita
+ *    uno nuevo, y el dedup ya evita duplicarlos (los 19 del período eran
+ *    genuinamente nuevos, ni uno duplicó un lead del formulario).
+ *  · El registro correcto lo elige la ESCALERA que ya existe según lo que la
+ *    conversación logró calificar — no se fuerza deal ni lead desde acá.
+ */
+export type ResultadoTraspaso = {
+  ok: boolean
+  motivo?: string
+  vendedor?: { nombre: string; email: string; telefono: string }
+  yaTeniaVendedor?: boolean
+}
+
+export async function traspasarAhora(
+  contact: string,
+  opts: { motivo: string; calificado?: boolean } = { motivo: "solicitud_explicita_persona" },
+): Promise<ResultadoTraspaso> {
+  const clean = (contact || "").replace(/\D/g, "")
+  if (!clean) return { ok: false, motivo: "sin contacto" }
+  const pais = (paisDeContacto(clean) || "cl") as "cl" | "co" | "mx" | "pe"
+
+  // 0. CANDADO: si ya hay traspaso activo, NO se re-sortea. Se devuelve el
+  //    vendedor que ya lo atiende para que Vicky lo repita, en vez de mover al
+  //    cliente de manos por segunda vez.
+  const activo = await supa<{ vendedor_email: string; vendedor_nombre: string }>(
+    `vic_ptv?contact=eq.${encodeURIComponent(clean)}&estado=eq.activo&select=vendedor_email,vendedor_nombre&limit=1`,
+  ).catch(() => [])
+  if (activo.length) {
+    const email = activo[0].vendedor_email || ""
+    return {
+      ok: true,
+      yaTeniaVendedor: true,
+      vendedor: {
+        nombre: activo[0].vendedor_nombre || NOMBRE_VENDEDOR[email] || email.split("@")[0],
+        email,
+        telefono: WHATSAPP_VENDEDOR[email] || "",
+      },
+    }
+  }
+
+  const interno = await siguienteVendedor(pais)
+  if (!interno) return { ok: false, motivo: "sin roster" }
+
+  // 1. Registro PRIMERO: el UNIQUE de vic_ptv es el candado anti-carrera (dos
+  //    turnos del modelo en paralelo no pueden traspasar dos veces).
+  const ahora = new Date()
+  const feriados = await feriadosDePais(pais).catch(() => new Set<string>())
+  const fila = await supa<{ id: string }>(`vic_ptv`, {
+    method: "POST",
+    body: JSON.stringify({
+      contact: clean,
+      motivo: opts.motivo,
+      ttv_minutos: 0,
+      precio_mostrado: Boolean(opts.calificado),
+      vendedor_email: interno.email,
+      vendedor_zoho_id: interno.zohoId,
+      vendedor_nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+      chequeo_at: sumarHorasHabiles(ahora, 9, pais, feriados).toISOString(),
+    }),
+  }).catch(() => [])
+  if (!fila.length) return { ok: false, motivo: "candado: ya había traspaso" }
+
+  // 2. Zoho: la ESCALERA elige el registro (reusa el lead del formulario en el
+  //    89% de los casos) y la tómbola sortea. El dueño humano nunca se pisa —
+  //    esa guarda vive dentro de asignarEnZoho.
+  const vendedor = await asignarEnZoho(clean, pais, interno, Boolean(opts.calificado)).catch(() => null)
+  const v = vendedor || {
+    ...interno,
+    nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+    telefono: WHATSAPP_VENDEDOR[interno.email] || "",
+    via: "fallback",
+  }
+  if (v.email !== interno.email || v.zohoId !== interno.zohoId) {
+    await supa(`vic_ptv?id=eq.${fila[0].id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ vendedor_email: v.email, vendedor_zoho_id: v.zohoId, vendedor_nombre: v.nombre }),
+    }).catch(() => {})
+  }
+
+  // 3. El chat de Botmaker pasa a esa persona (si no, el ejecutivo no lo ve).
+  await asignarConversacionEnBotmaker(clean, v.email).catch(() => {})
+
+  // 4. Se apaga la cadencia: con vendedor encima, Vicky no sigue tocando.
+  //    Sigue respondiendo si el cliente escribe (candado v3).
+  await supa(`vic_loop?contact=eq.${encodeURIComponent(clean)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ estado: "cerrado", motivo_cierre: "ptv_traspasado" }),
+  }).catch(() => {})
+
+  // 5. Alerta interna con el reloj explícito.
+  await avisarEquipoInterno(
+    `📞 TRASPASO INMEDIATO (${opts.motivo}) a ${v.email} — contacto +${clean}. El cliente PIDIÓ hablar con una persona: LLAMAR EN MENOS DE 5 MINUTOS. La conversación completa está en las notas del registro en Zoho.`,
+  ).catch(() => {})
+
+  // La presentación al prospecto NO se manda desde acá: la hace Vicky en su
+  // propia respuesta, en el mismo turno, para que el cliente reciba UN mensaje
+  // coherente y no dos seguidos. Por eso se devuelven los datos del vendedor.
+  await supa(`vic_ptv?id=eq.${fila[0].id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ presentado_al_prospecto: true }),
+  }).catch(() => {})
+
+  return {
+    ok: true,
+    vendedor: { nombre: v.nombre, email: v.email, telefono: v.telefono || "" },
+  }
+}
+
 export async function GET(req: Request) {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
