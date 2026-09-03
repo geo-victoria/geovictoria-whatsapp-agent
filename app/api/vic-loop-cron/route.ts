@@ -460,6 +460,42 @@ async function empresaDeCotizacion(contact: string): Promise<string> {
 }
 
 /**
+ * ANTI-REPETICIÓN DE TOQUES (03-sep, lectura de las 17 conversaciones que no
+ * cerraron el 02-sep).
+ *
+ * Vicky le mandaba a la MISMA persona el MISMO texto varias veces: Ana Delgado
+ * recibió "Tu cotización quedó lista…" CUATRO veces entre el 02 15:02 y el 03
+ * 13:18, y a otros dos contactos les llegó repetido con 11 y 19 minutos de
+ * diferencia. En 3 días hubo 25 pares de texto repetido. Un cliente que ya
+ * respondió ese mensaje ("Si la vi muchas gracias") y lo recibe de nuevo lee
+ * exactamente lo que es: que nadie está mirando.
+ *
+ * Guarda determinista: si el arranque del texto ya salió a ese contacto en los
+ * últimos 7 días, el toque NO se manda. La cadencia SÍ avanza (se marca como
+ * ejecutado), para que el contacto siga su ciclo en vez de quedar atascado
+ * reintentando el mismo texto para siempre.
+ */
+async function textoYaEnviado(contact: string, texto: string): Promise<boolean> {
+  const arranque = texto.trim().slice(0, 40)
+  if (arranque.length < 15) return false
+  try {
+    const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
+    const historial = await fetchHistoryV3(contact, 60)
+    const desde = Date.now() - 7 * 86400e3
+    return historial.some((m) => {
+      if (m.role !== "assistant") return false
+      const t = Date.parse(String((m as { at?: string }).at || ""))
+      if (Number.isFinite(t) && t < desde) return false
+      return String(m.content || "").trim().startsWith(arranque)
+    })
+  } catch {
+    // Ante un fallo de lectura se manda igual: un duplicado molesta, pero
+    // perder el toque de un cliente vivo cuesta más.
+    return false
+  }
+}
+
+/**
  * Contactos a los que Vicky YA les mostró un precio, leído del historial real.
  *
  * CASO QUE ORIGINA ESTA FUNCIÓN (27-jul, Ignacia de Tierra del Carmen): a las
@@ -1032,6 +1068,13 @@ export async function GET(req: Request): Promise<Response> {
           ? new Date(emitida + 30 * 86400e3).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Santiago" })
           : "vencimiento próximo"
         textoFinal = texto.replaceAll("{LINK_PAGO}", puntero.acceptanceUrl).replaceAll("{VIGENCIA}", vigencia)
+      }
+      // Anti-repetición: nunca el mismo texto dos veces al mismo contacto.
+      if (await textoYaEnviado(r.contact, textoFinal)) {
+        console.warn(`[loop-cron] ${r.contact}: toque ${touch} omitido — ese texto ya salió`)
+        ejecutado = true
+        detalle.push({ contact: r.contact, accion: "texto", touch, stage, skip: "repetido" })
+        continue
       }
       if (ventanaAbierta) {
         // T5 personalizado = el MISMO mix de la campaña (Lalo 26-ago): marco

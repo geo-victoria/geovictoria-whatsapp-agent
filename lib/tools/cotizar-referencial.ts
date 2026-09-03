@@ -776,12 +776,28 @@ export async function cotizarReferencial(args: {
           )
         }
 
+        // LA ALTERNATIVA TIENE QUE DECIR EN QUÉ ES MEJOR (03-sep, caso Juan
+        // Pablo/COT1148, reloj en VENTA): con el reloj comprado no hay
+        // arriendo, así que el mensual de las dos opciones es EL MISMO — y
+        // Vicky igual anunciaba la segunda como "una alternativa más
+        // económica" con la cifra idéntica al lado. Al cliente le quedaban dos
+        // opciones que valen lo mismo y una etiqueta que no se sostiene,
+        // cuando lo que de verdad cambia es que la app sola no tiene el pago
+        // inicial (en su caso, $325.908). Ahora el encabezado se elige por lo
+        // que la alternativa REALMENTE ahorra: mensualidad, entrada, o ambas.
+        const ahorraMensual = alternativa.subtotalRecurrenteUF < subtotalRecurrenteUF - 0.001
+        const ahorraEntrada = totalUnicoCLP > 0
+        const encabezadoAlternativa = ahorraMensual
+          ? "2.- Una alternativa más económica sería si marcan solo mediante nuestra app:"
+          : ahorraEntrada
+            ? "2.- Si prefieres partir sin desembolso inicial, marcando solo con nuestra app (misma mensualidad, sin el pago único):"
+            : "2.- También puedes partir marcando solo con nuestra app:"
         mensajeParaProspecto = [
           ...lineasOpcion1,
           "",
           "[---]",
           "",
-          "2.- Una alternativa más económica sería si marcan solo mediante nuestra app:",
+          encabezadoAlternativa,
           `💰 ${fmtUF(alternativa.subtotalRecurrenteUF)} UF + IVA al mes (aprox. $${fmtNumCL(alternativa.totalRecurrenteCLP, 0)}).`,
           "",
           "[---]",
