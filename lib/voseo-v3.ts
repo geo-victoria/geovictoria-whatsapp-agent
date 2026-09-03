@@ -112,22 +112,45 @@ export function quitarSignosApertura(texto: string): string {
 // (Tamara Martínez) y "6647 ... 4270" (Ana Paula López) — sus números ahora
 // circulan en presentaciones del sistema y quedan en historiales, así que el
 // modelo puede repetirlos igual que los antiguos. Ningún blindaje se retira.
+// Los bordes (?<!\d)/(?!\d) y el salto de URLs son de la misma cicatriz del
+// 03-sep: sin ellos estos patrones también podían morder dentro de un id de
+// cotización y romper el link de pago.
 const TELS_COMERCIALES_RE = [
-  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3937[\s).-]*2058/gi, // Anderson Díaz
-  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3932[\s).-]*1687/gi, // Eddyluz Mujica
-  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3452[\s).-]*9937/gi, // Tamara Martínez
-  /(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?6647[\s).-]*4270/gi, // Ana Paula López
+  /(?<!\d)(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3937[\s).-]*2058(?!\d)/gi, // Anderson Díaz
+  /(?<!\d)(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3932[\s).-]*1687(?!\d)/gi, // Eddyluz Mujica
+  /(?<!\d)(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?3452[\s).-]*9937(?!\d)/gi, // Tamara Martínez
+  /(?<!\d)(?:\+?\s*56)?[\s)]*(?:9[\s).-]*)?6647[\s).-]*4270(?!\d)/gi, // Ana Paula López
 ]
 // Fuente de verdad del canal de soporte: MENSAJE_ESCALAMIENTO_HUMANO en
 // lib/tools/consultar-agente-soporte.ts. Si cambia allá, actualizar aquí.
 const SOPORTE_WHATSAPP = "+56 9 4401 3873"
+
+/** Copia local a propósito (gemela de la de lib/directorio-ejecutivos): los dos
+ * cinturones son módulos PUROS y sin dependencias, y así siguen. Ningún
+ * cinturón de teléfonos puede tocar el interior de una URL — ahí viven los ids
+ * de cotización y los tokens de pago (cicatriz del 03-sep). */
+function reemplazarFueraDeUrls(texto: string, re: RegExp, reemplazo: () => string): string {
+  const URL_RE = /https?:\/\/\S+/g
+  let salida = ""
+  let ultimo = 0
+  for (const url of texto.matchAll(URL_RE)) {
+    const i = url.index ?? 0
+    salida += texto.slice(ultimo, i).replace(re, reemplazo)
+    salida += url[0]
+    ultimo = i + url[0].length
+  }
+  return salida + texto.slice(ultimo).replace(re, reemplazo)
+}
 
 export function blindarContactoComercial(
   texto: string,
   permitidoComercial: boolean,
 ): string {
   if (!texto || permitidoComercial) return texto
-  return TELS_COMERCIALES_RE.reduce((t, re) => t.replace(re, SOPORTE_WHATSAPP), texto)
+  return TELS_COMERCIALES_RE.reduce(
+    (t, re) => reemplazarFueraDeUrls(t, re, () => SOPORTE_WHATSAPP),
+    texto,
+  )
 }
 
 // ── BLINDAJE DE SOPORTE INVENTADO (Lalo 01-sep, caso Jeshu) ─────────────────

@@ -62,8 +62,38 @@ const normalizar = (s: string): string =>
 
 /** Teléfonos chilenos/latam con formato de presentación (con +56/51/52 o con
  * separadores tipo "9 4401 3873"). A propósito NO matchea RUTs ni cifras
- * pegadas sin prefijo. */
-const RE_TELEFONO = /\+?5[126]\s?9?[\s.-]?\d{3,4}[\s.-]?\d{3}[\s.-]?\d{3,4}|\b9[\s.-]\d{4}[\s.-]\d{4}\b/g
+ * pegadas sin prefijo.
+ *
+ * CICATRIZ (03-sep, casos Ana Delgado COT1151 y Ana María COT1162): sin los
+ * bordes `(?<!\d)`/`(?!\d)` el patrón arrancaba DENTRO de un número más
+ * largo. Todo id de cotización de Zoho empieza en `35250450006…`, que lleva un
+ * "52" en la segunda posición: el regex se comía 13 dígitos del id y los
+ * reemplazaba por el teléfono del ejecutivo, dejando el link de pago ROTO
+ * (`/q/3+56 9 4401 387368552-…`). Bastaba que el mensaje nombrara a UNA
+ * persona del directorio — y los clientes se llaman Ana, Paola, Tamara o
+ * Daniela todo el tiempo, así que el nombre del propio cliente lo disparaba. */
+const RE_TELEFONO = /(?<!\d)(?:\+?5[126]\s?9?[\s.-]?\d{3,4}[\s.-]?\d{3}[\s.-]?\d{3,4}|\b9[\s.-]\d{4}[\s.-]\d{4}\b)(?!\d)/g
+
+/** Ningún cinturón de teléfonos puede tocar el interior de una URL: ahí viven
+ * los ids de cotización y los tokens de pago. Se reemplaza SOLO fuera de los
+ * links. */
+export function reemplazarFueraDeUrls(
+  texto: string,
+  re: RegExp,
+  reemplazo: (m: string) => string,
+): string {
+  const URL_RE = /https?:\/\/\S+/g
+  let salida = ""
+  let ultimo = 0
+  for (const url of texto.matchAll(URL_RE)) {
+    const i = url.index ?? 0
+    salida += texto.slice(ultimo, i).replace(re, (m) => reemplazo(m))
+    salida += url[0]
+    ultimo = i + url[0].length
+  }
+  salida += texto.slice(ultimo).replace(re, (m) => reemplazo(m))
+  return salida
+}
 
 /**
  * Cinturón: corrige números mal atribuidos a ejecutivos del directorio.
@@ -92,7 +122,7 @@ export function corregirTelefonosEjecutivos(
   if (!telPersona) return { reply, correcciones: [] }
 
   const correcciones: Array<{ nombre: string; malo: string; bueno: string }> = []
-  const corregida = reply.replace(RE_TELEFONO, (m) => {
+  const corregida = reemplazarFueraDeUrls(reply, RE_TELEFONO, (m) => {
     const d = soloDigitos(m)
     if (d.length < 9) return m
     if (d === telPersona || telPersona.endsWith(d) || d.endsWith(telPersona)) return m
