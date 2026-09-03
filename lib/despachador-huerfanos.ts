@@ -77,6 +77,12 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // "Completado" sin planillas/implementación → re-dispara el cierre al
   // wizard/Zoho Flow (candado 6h por registro, máx 3 intentos).
   { nombre: "ob_vigia", path: "/api/vic-onboarding-vigia", cadaMin: 30 },
+  // Cierre diario (Lalo 02-sep, "el dash de mejoras y el correo programado
+  // diario"): calcula la foto del día anterior, la deja en vic_kv
+  // `foto_dia_<fecha>` (fuente única del panel) y manda el correo. El propio
+  // endpoint tiene la ventana 07-10 CL y el candado `cierre_enviado_<fecha>`,
+  // así que despacharlo cada 30' solo significa "que no se le pase la hora".
+  { nombre: "cierre_diario", path: "/api/vic-cierre-diario?enviar=1", cadaMin: 30 },
 ]
 
 /**
