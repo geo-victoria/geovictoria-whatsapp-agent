@@ -3360,6 +3360,7 @@ type FilaTraspaso = {
   aceptacionUrl: string
   ultVendedor: string
   ultOtroVendedor: string
+  ultNota: string
   ultCliente: string
   llamada: string
   ultCliVicky: string
@@ -3527,6 +3528,45 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
     }
   }
 
+  // ── LA GESTIÓN TAMBIÉN VIVE EN LAS NOTAS DEL TRATO (03-sep) ──────────────
+  // Orden de Lalo: "para poder decir que no hay contacto hay que mirar todo".
+  // Medido sobre los 19 casos que el panel daba por no contactados, 6 tenían
+  // nota del ejecutivo en Zoho — entre ellos la oportunidad más grande de la
+  // semana ($391.563), que Eddyluz había atendido 58 minutos después del
+  // traspaso pegando la conversación como nota. El espejo no lo vio porque su
+  // sesión estaba caída. Una nota escrita por una PERSONA (los robots Vicky y
+  // GeoVictoria Admin no cuentan) posterior al traspaso es gestión.
+  const ultNotaDeal = new Map<string, string>()
+  if (dealIds.length) {
+    try {
+      const token = await getZohoAccessToken()
+      const HZ = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+      const ROBOTS = new Set(["3525045000484500876", "3525045000000200013"])
+      for (let i = 0; i < dealIds.length; i += 20) {
+        const lote = dealIds.slice(i, i + 20).map((d) => `'${d}'`).join(",")
+        const rn = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, {
+          method: "POST", headers: HZ, cache: "no-store",
+          body: JSON.stringify({
+            select_query: `select id, Parent_Id, Created_Time, Created_By from Notes where Parent_Id in (${lote}) order by Created_Time desc limit 200`,
+          }),
+        }).catch(() => null)
+        if (!rn?.ok || rn.status === 204) continue
+        const dn = (await rn.json().catch(() => ({}))) as {
+          data?: Array<{ Parent_Id?: { id?: string } | null; Created_Time?: string; Created_By?: { id?: string } | null }>
+        }
+        for (const n of dn.data || []) {
+          const deal = String(n.Parent_Id?.id || "")
+          const autor = String(n.Created_By?.id || "")
+          const at = String(n.Created_Time || "")
+          if (!deal || !at || ROBOTS.has(autor)) continue
+          if (!ultNotaDeal.get(deal) || ultNotaDeal.get(deal)! < at) ultNotaDeal.set(deal, at)
+        }
+      }
+    } catch (e) {
+      console.warn("[traspasos] notas del trato:", e instanceof Error ? e.message : e)
+    }
+  }
+
   // Sesiones de espejo VIVAS. Sin esto el panel acusaba de "no contactó" a
   // quien simplemente no tiene su WhatsApp espejado (02-sep: Aleydis y
   // Aracelli nunca fueron dadas de alta en el worker).
@@ -3561,6 +3601,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
       aceptacionUrl: cot.get(f.contact)?.url || "",
       ultVendedor: maxDe(ultVendSes.get(f.contact), propio),
       ultOtroVendedor: maxDe(ultVendSes.get(f.contact), (s) => !propio(s)),
+      ultNota: ultNotaDeal.get(cot.get(f.contact)?.dealId || "") || "",
       ultCliente: ultCli.get(f.contact) || "",
       llamada: maxDe(ultCallSes.get(f.contact), propio),
       ultCliVicky: convCli.get(f.contact) || "",
@@ -3574,14 +3615,16 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   const cerrado = (f: FilaTraspaso) =>
     /7\.|8\.|Cierre Perdido|Implementando|Facturando/i.test(duenoDeal.get(cot.get(f.contact)?.dealId || "")?.stage || "")
   const conEspejo = (f: FilaTraspaso) => sesionesVivas.has(sesionEspejoDe(f.vendedorEmail))
-  const atendida = (f: FilaTraspaso) => posterior(f.ultVendedor, f.traspasadoAt) || posterior(f.llamada, f.traspasadoAt)
+  const atendida = (f: FilaTraspaso) =>
+    posterior(f.ultVendedor, f.traspasadoAt) || posterior(f.llamada, f.traspasadoAt) || posterior(f.ultNota, f.traspasadoAt)
   const tocadaPorOtro = (f: FilaTraspaso) => posterior(f.ultOtroVendedor, f.traspasadoAt)
   // Sin espejo no hay forma de saberlo: no se cuenta ni como atendida ni como
   // abandonada — se declara "no medible" y punto.
-  const medible = (f: FilaTraspaso) => conEspejo(f)
+  // Con nota en el trato la gestión es visible aunque no haya espejo.
+  const medible = (f: FilaTraspaso) => conEspejo(f) || posterior(f.ultNota, f.traspasadoAt)
   const sinContactar = (f: FilaTraspaso) => medible(f) && !atendida(f) && !tocadaPorOtro(f) && !cerrado(f)
   const ultimaActividad = (f: FilaTraspaso) =>
-    [f.ultVendedor, f.ultOtroVendedor, f.ultCliente, f.llamada, f.ultCliVicky].filter(Boolean).sort().slice(-1)[0] || ""
+    [f.ultVendedor, f.ultOtroVendedor, f.ultCliente, f.llamada, f.ultNota, f.ultCliVicky].filter(Boolean).sort().slice(-1)[0] || ""
 
   // 3. Resumen por ejecutivo.
   type Ejec = { email: string; nombre: string; total: number; conCot: number; atendidos: number; porOtro: number; sinContactar: number; espejo: boolean; masViejoSinAtender: number }
@@ -3670,7 +3713,9 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
       const cotHtml = f.quoteId
         ? `<a href="https://crm.zoho.com/crm/org685875245/tab/CustomModule5/${esc(f.quoteId)}" target="_blank" rel="noopener">cotización</a> <span class="sub">${clp(f.totalClp)}</span>`
         : `<span class="sub">sin cotización</span>`
-      const via = f.llamada && posterior(f.llamada, f.traspasadoAt) ? " 📞" : ""
+      const via =
+        (f.llamada && posterior(f.llamada, f.traspasadoAt) ? " 📞" : "") +
+        (posterior(f.ultNota, f.traspasadoAt) && !posterior(f.ultVendedor, f.traspasadoAt) ? " 📝" : "")
       return (
         `<tr><td>${esc(f.vendedorNombre || f.vendedorEmail || "—")}</td>` +
         `<td>${esc(f.empresa || "—")}<br><a href="https://wa.me/${esc(f.contact)}" target="_blank" rel="noopener" class="sub">+${esc(f.contact)}</a></td>` +
@@ -3757,7 +3802,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   <div style="display:flex;gap:12px;flex-wrap:wrap">${tarjetasEjec || '<p class="sub">Sin traspasos en el período.</p>'}</div></div>
 
   <div class="card"><h2 style="margin:0 0 6px;font-size:16px">Detalle (${orden.length}) — sin contactar primero</h2>
-  <p class="sub" style="margin:0 0 12px">El ejecutivo de cada fila es el <b>dueño del trato en Zoho</b> (si el trato no existe o sigue en Vicky, el que registró el traspaso). "Contactado" = el ejecutivo <b>a cargo</b> escribió por su WhatsApp o le tomaron una llamada, después del traspaso. "Lo tomó otro" = quien escribió fue otra persona del equipo. "Sin espejo" = su WhatsApp no está espejado y no hay forma de saberlo. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
+  <p class="sub" style="margin:0 0 12px">El ejecutivo de cada fila es el <b>dueño del trato en Zoho</b> (si el trato no existe o sigue en Vicky, el que registró el traspaso). "Contactado" = después del traspaso el ejecutivo <b>a cargo</b> escribió por su WhatsApp espejado, le tomaron una llamada, <b>o dejó una nota en el trato</b> (📝). Las notas de Vicky y del sistema no cuentan: solo las escritas por una persona. "Lo tomó otro" = quien escribió fue otra persona del equipo. "Sin espejo" = su WhatsApp no está espejado y no hay forma de saberlo. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
   <div style="overflow-x:auto"><table><tr><th>Ejecutivo</th><th>Cliente</th><th>Cotización</th><th>Traspasado</th><th>Estado</th><th>1<sup>er</sup> contacto</th><th>Última actividad</th><th>Presentado</th></tr>
   ${filasHtml || '<tr><td colspan="8" class="sub">Sin filas.</td></tr>'}</table></div></div>
 
