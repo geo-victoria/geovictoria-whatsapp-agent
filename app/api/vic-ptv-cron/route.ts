@@ -1807,6 +1807,26 @@ export async function GET(req: Request) {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
+  // ── DISPARO DEL CANARIO (Rodrigo 03-sep) ──────────────────────────────────
+  // Los crons del vercel.json NO corren en este proyecto (la "producción" de
+  // Vercel apunta al master viejo; los ticks reales vienen de un programador
+  // externo que golpea estos endpoints). El canario del camino de oro se
+  // dispara desde acá: 1 vez por hora, best-effort, jamás frena el barrido —
+  // y corre aunque el PTV esté apagado (por eso va ANTES de ese switch).
+  try {
+    const ultimo = Date.parse((await getKvValue("canario_last_disparo")) || "") || 0
+    if (Date.now() - ultimo > 55 * 60_000) {
+      await setKvValue("canario_last_disparo", new Date().toISOString())
+      const secretoCanario = await getFollowupCronSecret().catch(() => "")
+      if (secretoCanario) {
+        await fetch(`${new URL(req.url).origin}/api/vic-canario`, {
+          headers: { "x-cron-secret": secretoCanario },
+          cache: "no-store",
+          signal: AbortSignal.timeout(20_000),
+        }).catch((e) => console.warn("[ptv] canario no respondió:", e instanceof Error ? e.message : e))
+      }
+    }
+  } catch { /* best-effort: el canario nunca frena el PTV */ }
   if (!ptvHabilitado()) {
     {
       const { estamparLatido } = await import("@/lib/latido")
