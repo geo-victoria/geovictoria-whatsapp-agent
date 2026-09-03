@@ -109,11 +109,35 @@ const ORDEN_ETAPA: Record<string, number> = {
  * hito. null = no tocar (ya está en o sobre el piso, o está en un estado
  * fuera del pipeline como "Cierre Perdido").
  */
-export function etapaObjetivo(actual: string, piso: string): string | null {
-  const a = ORDEN_ETAPA[actual]
+export function etapaObjetivo(actual: string, piso: string, revivirPerdido = false): string | null {
   const p = ORDEN_ETAPA[piso]
-  if (!a || !p) return null
+  if (!p) return null
+  // CAMPAÑA DE REACTIVACIÓN (Lalo 03-sep): un deal en Cierre Perdido SÍ vuelve
+  // al pipeline, pero SOLO para los contactos marcados de la campaña — el
+  // resto sigue con la regla de siempre (perdido es terminal, el re-contacto
+  // renace como lead nuevo). El dueño NO cambia: revivir es del deal, no de
+  // su propiedad.
+  if (revivirPerdido && actual === "Cierre Perdido") return piso
+  const a = ORDEN_ETAPA[actual]
+  if (!a) return null
   return a < p ? piso : null
+}
+
+/**
+ * ¿Este contacto pertenece a la campaña de reactivación? La marca la siembra
+ * la campaña (vic_kv `reactivar_deal_<fono>` = id del deal perdido) y es lo
+ * único que habilita revivir un Cierre Perdido. Sin marca, nada cambia.
+ */
+export async function dealAReactivar(contact: string): Promise<string | null> {
+  const clean = (contact || "").replace(/\D/g, "")
+  if (!clean) return null
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const v = (await getKvValue(`reactivar_deal_${clean}`)) || ""
+    return /^\d{6,}$/.test(v.trim()) ? v.trim() : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -1055,7 +1079,7 @@ async function convertirConDeal(
  * Los campos mandatorios de cada transición se completan con los valores del
  * propio deal (releídos) — la lección del backfill: van DENTRO del data.
  */
-async function avanzarDealHasta(dealId: string, piso: string): Promise<void> {
+async function avanzarDealHasta(dealId: string, piso: string, revivirPerdido = false): Promise<void> {
   const { h, api } = await zohoHeaders()
   for (let salto = 0; salto < 3; salto++) {
     const bpRes = await fetch(`${api}/crm/v3/Deals/${dealId}/actions/blueprint`, {
@@ -1074,13 +1098,16 @@ async function avanzarDealHasta(dealId: string, piso: string): Promise<void> {
       }
     }
     const actual = bp?.blueprint?.process_info?.field_value || ""
-    const objetivo = etapaObjetivo(actual, piso)
+    const objetivo = etapaObjetivo(actual, piso, revivirPerdido)
     if (!objetivo) return
     // La transición que más avance sin pasarse del piso.
     const candidatas = (bp?.blueprint?.transitions || [])
       .filter((t) => {
         const orden = ORDEN_ETAPA[t.next_field_value || ""]
-        return orden && orden > (ORDEN_ETAPA[actual] || 0) && orden <= (ORDEN_ETAPA[piso] || 0)
+        // Saliendo de Cierre Perdido no hay "orden actual" contra el cual
+        // comparar: sirve cualquier transición que no pase del piso.
+        const desde = revivirPerdido && actual === "Cierre Perdido" ? 0 : ORDEN_ETAPA[actual] || 0
+        return orden && orden > desde && orden <= (ORDEN_ETAPA[piso] || 0)
       })
       .sort((a, b) => (ORDEN_ETAPA[b.next_field_value || ""] || 0) - (ORDEN_ETAPA[a.next_field_value || ""] || 0))
     const trans = candidatas[0]
@@ -1511,7 +1538,7 @@ export async function sincronizarHitoCrm(
       const dealCruzado = await dealActivoEnKv(clean)
       if (dealCruzado) {
         console.log(`[crm-hitos] ${clean}: deal ${dealCruzado} recién creado por la otra puerta (candado kv) — hito "${hito}" solo sube el piso, sin lead ni deal nuevos`)
-        await avanzarDealHasta(dealCruzado, piso)
+        await avanzarDealHasta(dealCruzado, piso, Boolean(await dealAReactivar(clean)))
         await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
@@ -1695,7 +1722,7 @@ export async function sincronizarHitoCrm(
       const dealCruzado = await dealActivoEnKv(clean)
       if (dealCruzado) {
         console.log(`[crm-hitos] ${clean}: deal ${dealCruzado} recién creado por la otra puerta (candado kv) — hito "${hito}" sube el piso, lead ${lead.id} no convierte deal propio`)
-        await avanzarDealHasta(dealCruzado, piso)
+        await avanzarDealHasta(dealCruzado, piso, Boolean(await dealAReactivar(clean)))
         await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
@@ -1731,7 +1758,15 @@ export async function sincronizarHitoCrm(
         const rEstado = await fetch(`${api}/crm/v3/Deals/${idParaEstado}?fields=Stage,Owner`, { headers: h, cache: "no-store" })
         const dEstado = ((await rEstado.json().catch(() => ({}))) as { data?: Array<{ Stage?: string; Owner?: { id?: string } }> }).data?.[0]
         stageActual = String(dEstado?.Stage || "")
-        if (stageActual === "Cierre Perdido" || stageActual === "8. Facturando") {
+        // EXCEPCIÓN DE CAMPAÑA (Lalo 03-sep): si el contacto está marcado para
+        // reactivación, su deal perdido NO renace como lead nuevo — se revive
+        // el mismo deal, con su dueño intacto, y la cotización queda asociada
+        // ahí. Solo aplica a Cierre Perdido: un cliente en 8. Facturando sigue
+        // renaciendo como oportunidad nueva, que es lo correcto.
+        const reactivar = await dealAReactivar(clean)
+        if (reactivar && stageActual === "Cierre Perdido") {
+          console.log(`[crm-hitos] ${clean}: campaña de reactivación — se revive el deal ${idParaEstado} (dueño intacto)`)
+        } else if (stageActual === "Cierre Perdido" || stageActual === "8. Facturando") {
           const { setKvValue } = await import("./supabase-persistence-v3")
           await setKvValue(`zoho_lead_${clean}`, "").catch(() => {})
           const { createZohoLead } = await import("./zoho-leads")
@@ -1820,7 +1855,7 @@ export async function sincronizarHitoCrm(
       console.log(`[crm-hitos] ${clean}: lead ${lead.id} convertido sin deal vivo — hito "${hito}" sin destino`)
       return
     }
-    await avanzarDealHasta(dealId, piso)
+    await avanzarDealHasta(dealId, piso, Boolean(await dealAReactivar(clean)))
     await actualizarNotaTranscripcion(dealId, clean)
     // Umbral 08-ago: si el deal EXISTENTE seguía esperando con Vicky (u otro
     // interino) y este hito promete ejecutivo (sorteoInmediato), la tómbola
