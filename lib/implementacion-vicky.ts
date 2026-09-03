@@ -1,0 +1,154 @@
+/**
+ * IMPLEMENTACIÓN AUTOMÁTICA DEL ALTA POR CHAT (Lalo, 03-sep).
+ *
+ * "La empresa se crea automáticamente y además se desprende una
+ * implementación. Creémosla nosotros, no por Zoho Flow: no habrá duplicidad
+ * porque en este caso no hay wizard de auto-onboarding."
+ *
+ * DOS CAMINOS QUE NO SE PISAN. Las ventas que pasan por el WIZARD generan su
+ * implementación desde el Zoho Flow, nacen como `GV Portal` y se reparten
+ * solas entre el equipo de ese pipeline (Ortega / González / Bahamondes).
+ * El alta POR CHAT no pasa por el wizard, así que ahí no nace nada: esta
+ * función llena ese hueco creando la implementación `GV Avanzado`, que es la
+ * que llevan Diego Alegre e Ignacio Salinas.
+ *
+ * TÓMBOLA. Las 11 GV Avanzado del mes se crearon a mano y quedaron 8 para
+ * Ignacio y 3 para Diego. Acá se reparten por turno alternado en vic_kv.
+ * OJO con la cuenta de Ignacio: `productmanager@geovictoria.pro` es
+ * COMPARTIDA y hace de default del módulo, así que el Owner por sí solo no
+ * distingue "le tocó a Ignacio" de "no la tomó nadie". Por eso se escribe
+ * SIEMPRE `Jefe_de_Proyectos` + `Correo_Jefe_de_Proyectos`: ese par es lo que
+ * hace la asignación legible, y es justo lo que hoy el humano pone a mano.
+ *
+ * Todo best-effort: si Zoho falla, el alta de la empresa NO se cae — el
+ * cliente ya pagó y ya tiene su cuenta. Queda aviso interno para crearla a
+ * mano.
+ */
+
+import { getZohoAccessToken } from "./zoho-token"
+import { getKvValue, setKvValue } from "./supabase-persistence-v3"
+
+const API = () => (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+
+/** Relatores de GV Avanzado. La cuenta de Ignacio es compartida a propósito. */
+export const RELATORES_GV_AVANZADO = [
+  { nombre: "Diego Alegre", email: "dalegre@geovictoria.com", zohoId: "3525045000451232212" },
+  { nombre: "Ignacio Salinas", email: "isalinas@geovictoria.com", zohoId: "3525045000440597415" },
+] as const
+
+/** Turno alternado, persistido — sobrevive a los reinicios de instancia. */
+export async function siguienteRelator(): Promise<(typeof RELATORES_GV_AVANZADO)[number]> {
+  try {
+    const raw = (await getKvValue("tombola_implementacion_rr")) || ""
+    const idx = (Number(raw) || 0) % RELATORES_GV_AVANZADO.length
+    await setKvValue("tombola_implementacion_rr", String(idx + 1)).catch(() => {})
+    return RELATORES_GV_AVANZADO[idx]
+  } catch {
+    return RELATORES_GV_AVANZADO[0]
+  }
+}
+
+export type DatosImplementacion = {
+  razonSocial: string
+  rut?: string
+  accountId?: string
+  contactId?: string
+  dealId?: string
+  quoteId?: string
+  ndvId?: string
+  usuarios?: number
+  equipos?: number
+  metodoMarcaje?: string[]
+  correoSolicitante?: string
+  ejComercialId?: string
+  comentarios?: string
+}
+
+/**
+ * Crea la implementación en Zoho. Devuelve el id, o "" si no se pudo (el
+ * llamador avisa al equipo, nunca rompe el alta).
+ *
+ * Los campos son los que el humano llena AL CREAR (verificados contra
+ * IMP-11320); todo lo de ejecución —fechas y relatores de capacitación,
+ * semáforo, avances, `Confirmo_Creación_Empresa`— se llena DESPUÉS y va nulo.
+ */
+export async function crearImplementacionGvAvanzado(
+  d: DatosImplementacion,
+): Promise<{ id: string; relator: { nombre: string; email: string } } | null> {
+  if (!d.razonSocial) return null
+  const relator = await siguienteRelator()
+  const registro: Record<string, unknown> = {
+    Name: `ASISTENCIA - ${d.razonSocial}`.slice(0, 120),
+    Plataforma: "GV Avanzado",
+    Tipo_de_Ingreso: "Telemarketing",
+    Tipo_de_Cliente: "SMB",
+    Tipo_de_Implementaci_n: "Standard",
+    Servicios_a_Impementar: ["Asistencia"],
+    Pa_s: "Chile",
+    Territorio_Cliente: "Chile",
+    Es_un_ingreso_nuevo: "Sí",
+    Se_debe_realizar_capacitaci_n: "Sí",
+    // El alta por chat crea la empresa en la plataforma en el mismo acto, así
+    // que esto ya está resuelto cuando nace la implementación.
+    Se_debe_crear_empresa: "No",
+    // OJO: el Owner NO se puede fijar al CREAR — un workflow del módulo lo
+    // pisa y todo cae en la cuenta compartida (verificado 03-sep: IMP-11377
+    // nació con Owner=Diego en el payload y quedó en productmanager@). Se
+    // asigna en un PUT posterior con trigger ["blueprint"], que sí lo
+    // respeta. Por eso las 8 implementaciones "de Ignacio" del mes están en
+    // esa cuenta: no se las asignaron, el workflow las mandó ahí.
+    Jefe_de_Proyectos: relator.nombre,
+    Correo_Jefe_de_Proyectos: relator.email,
+  }
+  // RUT_Empresa_Account NO se escribe: es derivado de la Cuenta (probado
+  // 03-sep, quedó null aunque se mandara). Llega solo al asociar el Cliente.
+  if (d.accountId) registro.Cliente = { id: d.accountId }
+  if (d.contactId) registro.Contacto = { id: d.contactId }
+  if (d.ndvId) registro.Nota_de_Venta_Asociada = { id: d.ndvId }
+  if (d.usuarios && d.usuarios > 0) registro.Cantidad_de_Usuarios_a_Implementar = d.usuarios
+  if (typeof d.equipos === "number") registro.Cantidad_de_equipos = d.equipos
+  if (d.metodoMarcaje?.length) registro.M_doto_Marcaje = d.metodoMarcaje
+  if (d.correoSolicitante) registro.Correo_solicitante = d.correoSolicitante
+  if (d.ejComercialId) registro.Ej_Comercial = { id: d.ejComercialId }
+  registro.Comentarios = d.comentarios || "Alta creada por Vicky (chat, sin wizard). Empresa ya creada en la plataforma."
+
+  try {
+    const token = await getZohoAccessToken()
+    const r = await fetch(`${API()}/crm/v3/Implementaciones`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      // trigger con blueprint: sin él los registros quedan desenganchados de
+      // la banda de etapas (regla del 21-ago, reclamo de Aleydis).
+      body: JSON.stringify({ data: [registro], trigger: ["workflow", "blueprint"] }),
+    })
+    const body = (await r.json().catch(() => ({}))) as {
+      data?: Array<{ code?: string; details?: { id?: string }; message?: string }>
+    }
+    const fila = body?.data?.[0]
+    if (!r.ok || fila?.code !== "SUCCESS" || !fila?.details?.id) {
+      console.warn(`[implementacion] no se creó: ${JSON.stringify(body).slice(0, 300)}`)
+      return null
+    }
+    // Segundo paso: el dueño. Sin esto la tómbola no se ve en el Owner y todo
+    // queda con cara de "sin asignar".
+    const dueno = await fetch(`${API()}/crm/v3/Implementaciones/${fila.details.id}`, {
+      method: "PUT",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ Owner: { id: relator.zohoId } }],
+        trigger: ["blueprint"],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    }).catch(() => null)
+    if (!dueno?.ok) {
+      console.warn(`[implementacion] ${fila.details.id}: no se pudo asignar a ${relator.email} — queda en la cuenta compartida`)
+    }
+    console.log(`[implementacion] creada ${fila.details.id} para ${d.razonSocial} → ${relator.nombre}`)
+    return { id: fila.details.id, relator: { nombre: relator.nombre, email: relator.email } }
+  } catch (e) {
+    console.warn("[implementacion] excepción:", e instanceof Error ? e.message : e)
+    return null
+  }
+}

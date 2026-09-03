@@ -450,6 +450,36 @@ export async function armarOnboarding(contact: string): Promise<{
             await avisarEquipoInterno(
               `✅ ALTA ONBOARDING CL ${simulada ? "SIMULADA (piloto, sin API real)" : "creada POR API"} (companyId ${alta.companyId}) — contacto +${contact}.\n${fichaAlta}`,
             ).catch(() => {})
+            // IMPLEMENTACIÓN GV AVANZADO (Lalo 03-sep): "la empresa se crea
+            // automáticamente y además se desprende una implementación —
+            // creémosla nosotros, no por Zoho Flow; no habrá duplicidad
+            // porque en este caso no hay wizard de auto-onboarding". Las
+            // ventas que SÍ pasan por el wizard las crea el Flow como
+            // GV Portal con su propio equipo; el alta por chat no pasaba por
+            // ahí y no generaba ninguna. Best-effort: si Zoho falla, el alta
+            // NO se cae —el cliente ya pagó y ya tiene su cuenta— y queda
+            // aviso para crearla a mano.
+            void import("./implementacion-vicky")
+              .then(async (m) => {
+                const imp = await m.crearImplementacionGvAvanzado({
+                  razonSocial: b.empresa.nombre || "",
+                  // El identificador del borrador ES el RUT (así lo pide la
+                  // API de alta: sin puntos ni guión).
+                  rut: b.empresa.identificador || undefined,
+                  correoSolicitante: b.admin.email || undefined,
+                  comentarios: `Alta por chat de Vicky (companyId ${alta.companyId}). Empresa YA creada en la plataforma; no requiere creación.`,
+                })
+                if (imp) {
+                  await avisarEquipoInterno(
+                    `🛠️ IMPLEMENTACIÓN GV Avanzado creada para ${b.empresa.nombre} → ${imp.relator.nombre} (${imp.relator.email}). Falta agendar Curso 1.`,
+                  ).catch(() => {})
+                } else {
+                  await avisarEquipoInterno(
+                    `⚠️ NO se pudo crear la implementación de ${b.empresa.nombre} (companyId ${alta.companyId}). La empresa SÍ quedó creada — hay que abrir la implementación a mano.`,
+                  ).catch(() => {})
+                }
+              })
+              .catch(() => {})
             // Correo de INSTRUCCIONES de ingreso (Lalo 25-ago, referencia
             // plantillas GeoAvanzado): viaja junto al de la contraseña,
             // best-effort — jamás bloquea el alta.
