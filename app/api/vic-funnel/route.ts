@@ -3497,7 +3497,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   // bitácora decía Aracelli y el trato era de Paola). Quien tiene que trabajar
   // el caso es el DUEÑO del trato — esa es la verdad del CRM y con esa se mide.
   // Sin trato (o con el trato aún en el robot) manda la bitácora.
-  const duenoDeal = new Map<string, { email: string; nombre: string; stage: string }>()
+  const duenoDeal = new Map<string, { email: string; nombre: string; stage: string; creado: string }>()
   const dealIds = [...new Set([...cot.values()].map((c) => c.dealId).filter(Boolean))]
   if (dealIds.length) {
     try {
@@ -3510,7 +3510,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
           // `Owner` a secas trae solo el APELLIDO (dos "Diaz" en el roster —
           // Anderson y Paola — se confundían); los campos del lookup traen
           // correo y nombre de pila.
-          body: JSON.stringify({ select_query: `select id, Stage, Owner.email, Owner.first_name, Owner.last_name from Deals where id in (${lote}) limit 200` }),
+          body: JSON.stringify({ select_query: `select id, Stage, Created_Time, Owner.email, Owner.first_name, Owner.last_name from Deals where id in (${lote}) limit 200` }),
         }).catch(() => null)
         if (!rq?.ok || rq.status === 204) continue
         const dd = (await rq.json().catch(() => ({}))) as {
@@ -3520,7 +3520,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
           const em = String(f["Owner.email"] || "").toLowerCase()
           const nom = `${String(f["Owner.first_name"] || "").trim()} ${String(f["Owner.last_name"] || "").trim()}`.trim()
           // Los usuarios robot (Vicky, GeoVictoria Admin) no son responsables.
-          if (f.id && em && !/^(vicky|info)@geovictoria\.com$/.test(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: String(f.Stage || "") })
+          if (f.id && em && !/^(vicky|info)@geovictoria\.com$/.test(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: String(f.Stage || ""), creado: String(f.Created_Time || "") })
         }
       }
     } catch (e) {
@@ -3609,6 +3609,21 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   })
 
   const posterior = (iso: string, ref: string) => Boolean(iso) && Date.parse(iso) > Date.parse(ref)
+  // ── FUERA LAS DEVOLUCIONES DE CARTERA ANTERIOR (03-sep, orden de Lalo) ────
+  // El reloj de "formal sin respuesta" devuelve a su dueño de siempre a los
+  // clientes viejos que reaparecen por las campañas de reactivación: seis de
+  // los 18 de Anderson eran tratos suyos desde junio y julio. Eso no es una
+  // oportunidad entregada esta semana y castiga al que más ha vendido, porque
+  // mientras más cartera propia acumula, más devoluciones recibe. Un trato
+  // creado más de 14 días antes del traspaso es cartera anterior, no traspaso
+  // nuevo: sale de la cuenta (env VICKY_TRASPASOS_ANTIGUEDAD_DIAS).
+  const DIAS_ANTIGUO = Math.max(1, Number(process.env.VICKY_TRASPASOS_ANTIGUEDAD_DIAS || 14))
+  const devolucion = (f: FilaTraspaso) => {
+    const creado = duenoDeal.get(cot.get(f.contact)?.dealId || "")?.creado || ""
+    if (!creado) return false
+    const dias = (Date.parse(f.traspasadoAt) - Date.parse(creado)) / 86_400_000
+    return Number.isFinite(dias) && dias > DIAS_ANTIGUO
+  }
   // Caso CERRADO: el trato ya está implementando, facturando o perdido. No es
   // gestión pendiente (02-sep: un cliente que YA PAGÓ salía como "sin
   // contactar" y eso solo hace ruido en la lista del ejecutivo).
@@ -3626,10 +3641,13 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   const ultimaActividad = (f: FilaTraspaso) =>
     [f.ultVendedor, f.ultOtroVendedor, f.ultCliente, f.llamada, f.ultNota, f.ultCliVicky].filter(Boolean).sort().slice(-1)[0] || ""
 
+  const devoluciones = filas.filter(devolucion)
+  const nuevas = filas.filter((f) => !devolucion(f))
+
   // 3. Resumen por ejecutivo.
   type Ejec = { email: string; nombre: string; total: number; conCot: number; atendidos: number; porOtro: number; sinContactar: number; espejo: boolean; masViejoSinAtender: number }
   const porEjec = new Map<string, Ejec>()
-  for (const f of filas) {
+  for (const f of nuevas) {
     const clave = f.vendedorEmail || f.vendedorNombre || "—"
     const e = porEjec.get(clave) || {
       email: f.vendedorEmail, nombre: f.vendedorNombre || f.vendedorEmail || "sin ejecutivo",
@@ -3655,7 +3673,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   const ejecs = [...porEjec.values()]
     .filter((e) => verTodo || (e.email || e.nombre || "—").toLowerCase() === ejecF)
     .sort((a, b) => b.sinContactar - a.sinContactar || b.total - a.total)
-  const alcance = verTodo ? filas : filas.filter((f) => (f.vendedorEmail || f.vendedorNombre || "—").toLowerCase() === ejecF)
+  const alcance = verTodo ? nuevas : nuevas.filter((f) => (f.vendedorEmail || f.vendedorNombre || "—").toLowerCase() === ejecF)
   const totalT = alcance.length
   const totalAt = alcance.filter(atendida).length
   const totalSin = alcance.filter(sinContactar).length
@@ -3785,6 +3803,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
       <div><div style="font-size:26px;font-weight:700;color:#166534">${totalAt}</div><div class="sub">ya contactados por el ejecutivo</div></div>
       <div><div style="font-size:26px;font-weight:700;color:${totalSin ? "#b91c1c" : "#6b7280"}">${totalSin}</div><div class="sub">sin contactar desde el traspaso</div></div>
       ${totalNoMedible ? `<div><div style="font-size:26px;font-weight:700;color:#6b7280">${totalNoMedible}</div><div class="sub">no medibles (ejecutivo sin espejo)</div></div>` : ""}
+      ${devoluciones.length ? `<div><div style="font-size:26px;font-weight:700;color:#6b7280">${devoluciones.length}</div><div class="sub">devoluciones de cartera anterior (fuera de la cuenta)</div></div>` : ""}
     </div>
   </div>
   ${
@@ -3802,7 +3821,7 @@ async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParam
   <div style="display:flex;gap:12px;flex-wrap:wrap">${tarjetasEjec || '<p class="sub">Sin traspasos en el período.</p>'}</div></div>
 
   <div class="card"><h2 style="margin:0 0 6px;font-size:16px">Detalle (${orden.length}) — sin contactar primero</h2>
-  <p class="sub" style="margin:0 0 12px">El ejecutivo de cada fila es el <b>dueño del trato en Zoho</b> (si el trato no existe o sigue en Vicky, el que registró el traspaso). "Contactado" = después del traspaso el ejecutivo <b>a cargo</b> escribió por su WhatsApp espejado, le tomaron una llamada, <b>o dejó una nota en el trato</b> (📝). Las notas de Vicky y del sistema no cuentan: solo las escritas por una persona. "Lo tomó otro" = quien escribió fue otra persona del equipo. "Sin espejo" = su WhatsApp no está espejado y no hay forma de saberlo. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
+  <p class="sub" style="margin:0 0 12px">Quedan fuera las <b>devoluciones de cartera anterior</b>: cuando un cliente viejo reaparece y vuelve a quedar en silencio, el reloj lo devuelve a su dueño de siempre — eso no es una oportunidad entregada esta semana (trato creado más de ${DIAS_ANTIGUO} días antes del traspaso). El ejecutivo de cada fila es el <b>dueño del trato en Zoho</b> (si el trato no existe o sigue en Vicky, el que registró el traspaso). "Contactado" = después del traspaso el ejecutivo <b>a cargo</b> escribió por su WhatsApp espejado, le tomaron una llamada, <b>o dejó una nota en el trato</b> (📝). Las notas de Vicky y del sistema no cuentan: solo las escritas por una persona. "Lo tomó otro" = quien escribió fue otra persona del equipo. "Sin espejo" = su WhatsApp no está espejado y no hay forma de saberlo. "Última actividad" incluye también lo que el cliente responde. "Presentado" = Vicky alcanzó a presentar al ejecutivo por chat (con la ventana de 24 h vencida no se puede).</p>
   <div style="overflow-x:auto"><table><tr><th>Ejecutivo</th><th>Cliente</th><th>Cotización</th><th>Traspasado</th><th>Estado</th><th>1<sup>er</sup> contacto</th><th>Última actividad</th><th>Presentado</th></tr>
   ${filasHtml || '<tr><td colspan="8" class="sub">Sin filas.</td></tr>'}</table></div></div>
 
