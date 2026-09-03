@@ -82,6 +82,10 @@
     {
       "path": "/api/vic-espejo-media-cron?limit=8",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/vic-canario",
+      "schedule": "5 * * * *"
     }
   ],
   "functions": {
