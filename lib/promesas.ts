@@ -120,6 +120,41 @@ async function evidenciaDeContacto(contact: string, desdeIso: string): Promise<s
   return ""
 }
 
+
+/**
+ * DUEÑO REAL DE LA PROMESA (03-sep). Las 33 promesas registradas desde el
+ * 29-ago nacieron con `vendedor_email` en NULL, y las 20 que vencieron
+ * generaron alertas sin destinatario: "promesa vencida con +569…" sin decir
+ * de quién era. Nadie persigue una carta sin dirección.
+ *
+ * La causa era de ORDEN: se preguntaba quién era el responsable en el mismo
+ * instante de la derivación, ANTES de que la tómbola lo decidiera. Por eso
+ * ahora se resuelve TARDE, cuando el vigía pasa — para entonces el traspaso ya
+ * ocurrió y `vic_ptv` tiene al dueño real.
+ */
+async function duenoDeLaPromesa(contact: string): Promise<string> {
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_ptv?contact=eq.${encodeURIComponent(contact)}&select=vendedor_email&order=traspasado_at.desc&limit=1`,
+      { headers: H(), cache: "no-store" },
+    )
+    const filas = r.ok ? ((await r.json().catch(() => [])) as Array<{ vendedor_email?: string }>) : []
+    if (filas[0]?.vendedor_email) return filas[0].vendedor_email
+  } catch { /* sigue el fallback */ }
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const raw = await getKvValue(`ejec_sobre_umbral_${contact.replace(/\D/g, "")}`)
+    if (raw) {
+      const j = JSON.parse(raw) as { email?: string }
+      if (j?.email) return j.email
+    }
+  } catch { /* sin dueño */ }
+  return ""
+}
+
+/** Horas hábiles que espera una promesa YA alertada antes de escalar. */
+const HORAS_PARA_ESCALAR = 4
+
 /** Vigía: promesas vencidas sin evidencia → alerta interna; con evidencia →
  * cumplida. Acotado por corrida; corre del vic-ptv-cron. */
 export async function vigilarPromesas(max = 15): Promise<{ revisadas: number; cumplidas: number; alertadas: number }> {
@@ -127,7 +162,11 @@ export async function vigilarPromesas(max = 15): Promise<{ revisadas: number; cu
   if (!SUPABASE_URL || !SUPABASE_KEY) return out
   const ahora = new Date().toISOString()
   const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_promesas?estado=eq.pendiente&deadline_at=lt.${encodeURIComponent(ahora)}&order=deadline_at.asc&limit=${max}`,
+    // ALERTADA YA NO ES TERMINAL (03-sep): antes el vigía solo miraba
+    // `pendiente`, así que una promesa alertada nunca se volvía a revisar —
+    // ni para marcarla cumplida si alguien la atendía tarde, ni para escalar
+    // si seguía sin nadie. Un aviso al vacío y se acababa.
+    `${SUPABASE_URL}/rest/v1/vic_promesas?estado=in.(pendiente,alertada)&deadline_at=lt.${encodeURIComponent(ahora)}&order=deadline_at.asc&limit=${max}`,
     { headers: H(), cache: "no-store" },
   ).catch(() => null)
   if (!r || !r.ok) return out
@@ -147,16 +186,50 @@ export async function vigilarPromesas(max = 15): Promise<{ revisadas: number; cu
     }
     const etiqueta =
       p.tipo === "callback" ? "llamada pedida por el cliente" : p.tipo === "cotizacion_por_correo" ? "cotización por correo" : "llamada de ejecutivo"
+
+    // El dueño se resuelve ACÁ, no al registrar: para este momento la tómbola
+    // ya corrió y vic_ptv tiene al responsable real. Si aparece, se persiste
+    // para que la Cartera y el correo diario también lo muestren.
+    const responsable = p.vendedor_email || (await duenoDeLaPromesa(p.contact))
+
+    // SEGUNDA VUELTA = ESCALAMIENTO. Una promesa ya alertada que sigue sin
+    // evidencia pasadas 4 horas hábiles deja de ser un aviso más: se escala,
+    // nombrando al responsable, y se cierra el ciclo del vigía para no repetir
+    // el mismo grito cada 10 minutos.
+    if (p.estado === "alertada") {
+      const desdeAlerta = Date.parse(String((p as { alertado_at?: string }).alertado_at || p.deadline_at))
+      const vence = Number.isFinite(desdeAlerta) ? sumarHorasHabiles(new Date(desdeAlerta), HORAS_PARA_ESCALAR) : null
+      if (!vence || vence.getTime() > Date.now()) continue
+      await avisarEquipoInterno(
+        `🚨 ESCALAMIENTO — promesa incumplida hace ${HORAS_PARA_ESCALAR} h hábiles: ${etiqueta} a +${p.contact}` +
+          (responsable ? ` · responsable: ${responsable}` : " · SIN RESPONSABLE ASIGNADO") +
+          (p.detalle ? ` — ${p.detalle}` : "") +
+          `. El cliente PIDIÓ que lo contactaran y nadie lo hizo. Necesita que alguien lo tome AHORA.`,
+      ).catch(() => false)
+      await fetch(`${SUPABASE_URL}/rest/v1/vic_promesas?id=eq.${p.id}`, {
+        method: "PATCH",
+        headers: H(),
+        body: JSON.stringify({ estado: "escalada", vendedor_email: responsable || null }),
+        cache: "no-store",
+      }).catch(() => {})
+      out.alertadas++
+      continue
+    }
+
     await avisarEquipoInterno(
       `🤝⏰ PROMESA VENCIDA sin evidencia de contacto: ${etiqueta} a +${p.contact}` +
-        (p.vendedor_email ? ` (responsable: ${p.vendedor_email})` : "") +
+        (responsable ? ` · RESPONSABLE: ${responsable}` : " · SIN RESPONSABLE ASIGNADO") +
         (p.detalle ? ` — ${p.detalle}` : "") +
         `. Prometida ${p.creado_at.slice(0, 16)}Z, vencía ${p.deadline_at.slice(0, 16)}Z. Queda visible en la Cartera.`,
     ).catch(() => false)
     await fetch(`${SUPABASE_URL}/rest/v1/vic_promesas?id=eq.${p.id}`, {
       method: "PATCH",
       headers: H(),
-      body: JSON.stringify({ estado: "alertada", alertado_at: new Date().toISOString() }),
+      body: JSON.stringify({
+        estado: "alertada",
+        alertado_at: new Date().toISOString(),
+        vendedor_email: responsable || null,
+      }),
       cache: "no-store",
     }).catch(() => {})
     out.alertadas++

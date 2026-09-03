@@ -1352,6 +1352,16 @@ async function dejarLeadPreFormal(
   sorteoInmediato?: boolean,
 ): Promise<void> {
   try {
+    // LA CONVERSACIÓN VIAJA SIEMPRE (03-sep). Este era el ÚNICO camino de
+    // entrega donde el lead llegaba sin la transcripción: los deals la tienen
+    // (actualizarNotaTranscripcion) y el lead que entrega el cron también,
+    // pero acá solo se cambiaba el status y se reasignaba. El ejecutivo
+    // recibía nombre y teléfono sin saber qué se conversó — justo en el
+    // camino de "quiero que me llamen" antes de calificar.
+    if (lead.id) {
+      const { dejarNotaConversacionEnLead } = await import("./nota-conversacion-lead")
+      void dejarNotaConversacionEnLead(lead.id, clean).catch(() => false)
+    }
     if (ownerForzadoId && lead.id) {
       const { getZohoAccessToken } = await import("./zoho-token")
       const token = await getZohoAccessToken()
