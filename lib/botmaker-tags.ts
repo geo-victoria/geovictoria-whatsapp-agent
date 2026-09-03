@@ -45,6 +45,39 @@ const yaTagueados = new Set<string>()
 /**
  * Marca el chat del contacto como comercial de su país. Best-effort.
  */
+/**
+ * Pone UN tag cualquiera en la conversación (03-sep, campaña de reactivación:
+ * "etiquetar con tags, no con variables, para poder filtrarlas en Botmaker").
+ * Mismo PATCH que el tag comercial, sin el guard de memoria — acá el llamador
+ * decide cuándo. Poner un tag dos veces es idempotente en Botmaker.
+ */
+export async function tagearChat(contact: string, tag: string): Promise<boolean> {
+  try {
+    const clean = (contact || "").replace(/\D/g, "")
+    const limpio = String(tag || "").trim()
+    if (!clean || !limpio || !BM_TOKEN) return false
+    const pais = paisDeContacto(clean)
+    if (!pais) return false
+    const res = await fetch(
+      `https://api.botmaker.com/v2.0/chats/${encodeURIComponent(`${LINEA_POR_PAIS[pais]}:${clean}`)}`,
+      {
+        method: "PATCH",
+        headers: { "access-token": BM_TOKEN, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ tags: { [limpio]: true } }),
+        cache: "no-store",
+      },
+    )
+    if (!res.ok) {
+      console.warn(`[botmaker-tags] PATCH ${limpio} ${clean} → ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn("[botmaker-tags] excepción:", e)
+    return false
+  }
+}
+
 export async function tagearChatComercial(contact: string): Promise<boolean> {
   try {
     const clean = (contact || "").replace(/\D/g, "")
