@@ -76,7 +76,13 @@ export const CATALOGO_MODULOS: ModuloSoftware[] = [
       { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 0.125 },
       { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: PRECIOS_CLASICOS ? 0.3 : 0.275 },
       { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: PRECIOS_CLASICOS ? 0.035 : 0.0275 },
-      { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.0325 },
+      // 21-30 a 0,0275 (03-sep): quedó espejando el valor VIEJO de asistencia.
+      // El 16-ago asistencia 21-30 bajó de 0,065 a 0,055 y este tier no se
+      // movió con ella, así que Vacaciones quedaba 18% cara justo en ese
+      // tramo y rompía la regla del 50% exacto. No afectaba a Vicky (no
+      // cotiza sobre 20 ni ofrece Vacaciones proactivamente) pero sí al canal
+      // ejecutivo y a la NOTA DE VENTA, que imprime la escalera completa.
+      { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 0.0275 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 0.0275 },
     ],
     disponibleParaVicky: true,
