@@ -144,36 +144,71 @@ async function construirFoto(fecha: string): Promise<Foto> {
     sinContacto = telsPtv.filter((t) => !tocados.has(t)).length
   }
 
-  // Ventas del día: cotizaciones que pasaron a Pagada ese día (Zoho).
+  // VENTAS DEL DÍA — misma fuente que la Caja del dash (vic_kv `venta_dash_v3_`),
+  // no una consulta propia. El primer intento filtraba Zoho por Modified_Time y
+  // devolvía 15 "ventas" de $0 el 02-sep (cualquier cotización Pagada que un
+  // cron hubiera tocado ese día) cuando las reales eran 5 por $257.289. El kv
+  // lo escribe construirVentasCerradas SOLO con pago verificado y monto > 0
+  // (recurrente + único del subform, con IVA), así que acá el número del correo
+  // y el de la Caja no pueden discrepar.
   const ventas: Foto["ventas"] = []
   try {
-    const token = await getZohoAccessToken()
-    const r = await fetch(`${ZOHO_API}/crm/v8/coql`, {
-      method: "POST",
-      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        select_query:
-          `select Numero_Cotizacion, Name, Estado_Cotizacion, Total_Con_IVA_CLP_Ref, Owner, Modified_Time ` +
-          `from ${QUOTE_MODULE} where ((Estado_Cotizacion = 'Pagada' and Modified_Time >= '${d0}') and Modified_Time <= '${d1}') ` +
-          `order by Modified_Time desc limit 50`,
-      }),
-    })
-    if (r.ok && r.status === 200) {
-      const dd = (await r.json().catch(() => ({}))) as {
-        data?: Array<{ Numero_Cotizacion?: string; Name?: string; Total_Con_IVA_CLP_Ref?: number; Owner?: { name?: string } }>
+    const filas = await sb<{ key: string; value: string }>(
+      `vic_kv?select=key,value&key=like.venta_dash_v3_*&limit=3000`,
+    )
+    const delDia: Array<Foto["ventas"][number] & { _t: number }> = []
+    for (const f of filas) {
+      let v: { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number } = {}
+      try {
+        v = JSON.parse(String(f.value || "{}"))
+      } catch {
+        continue
       }
-      for (const q of dd.data || []) {
-        ventas.push({
-          cot: String(q.Numero_Cotizacion || "—"),
-          empresa: String(q.Name || "").replace(/^Cotización /, "").replace(/ - \d{4}-\d{2}-\d{2}$/, ""),
-          monto: Number(q.Total_Con_IVA_CLP_Ref || 0),
-          dueno: String(q.Owner?.name || ""),
-        })
-      }
+      const t = Date.parse(String(v.pagoIso || ""))
+      if (!Number.isFinite(t) || fechaCL(new Date(t)) !== fecha) continue
+      delDia.push({
+        cot: String(v.numero || "—"),
+        empresa: String(v.empresa || "(sin nombre)"),
+        monto: Number(v.montoClp || 0),
+        dueno: "",
+        _t: t,
+      })
     }
+    delDia.sort((a, b) => a._t - b._t)
+    for (const v of delDia) ventas.push({ cot: v.cot, empresa: v.empresa, monto: v.monto, dueno: v.dueno })
   } catch (e) {
-    console.warn("[cierre] ventas Zoho:", e instanceof Error ? e.message : e)
+    console.warn("[cierre] ventas kv:", e instanceof Error ? e.message : e)
+  }
+  // Dueño de cada venta: una sola consulta a Zoho por los números del día.
+  // Es un adorno — si Zoho no responde, la venta se muestra igual sin nombre.
+  if (ventas.length) {
+    try {
+      const nums = ventas.map((v) => `'${v.cot.replace(/'/g, "")}'`).join(",")
+      const token = await getZohoAccessToken()
+      const r = await fetch(`${ZOHO_API}/crm/v8/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          select_query:
+            `select Numero_Cotizacion, Owner.first_name, Owner.last_name from ${QUOTE_MODULE} ` +
+            `where Numero_Cotizacion in (${nums}) limit 60`,
+        }),
+      })
+      if (r.status === 200) {
+        const dd = (await r.json().catch(() => ({}))) as {
+          data?: Array<Record<string, unknown>>
+        }
+        const por = new Map<string, string>()
+        for (const q of dd.data || []) {
+          const nom = `${String(q["Owner.first_name"] || "")} ${String(q["Owner.last_name"] || "")}`.trim()
+          por.set(String(q.Numero_Cotizacion || ""), nom)
+        }
+        for (const v of ventas) v.dueno = por.get(v.cot) || ""
+      }
+    } catch (e) {
+      console.warn("[cierre] dueños:", e instanceof Error ? e.message : e)
+    }
   }
 
   return {
