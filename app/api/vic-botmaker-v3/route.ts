@@ -198,8 +198,13 @@ const OPTOUT_GOODBYE_MSG =
 // Circuit-breaker (C): tras varios errores seguidos en una misma conversación,
 // escalamos a humano UNA vez en lugar de repetir el fallback en loop (en
 // producción este loop llegó a 60 mensajes idénticos).
+// (03-sep, caída de la API de Claude) Antes decía "ya le avisé a un ejecutivo"
+// y NO avisaba a nadie: quedaba una promesa falsa y el cliente esperando. Orden
+// de Lalo: no hay que avisar a nadie, Vicky sigue ella. El texto ya no promete
+// un humano — pide un momento y la conversación se retoma por el mismo chat en
+// cuanto el cliente vuelve a escribir.
 const ESCALADA_ERROR_MSG =
-  "Disculpa, sigo teniendo un problema técnico. Ya le avisé a un ejecutivo para que se contacte contigo a la brevedad. 🙏"
+  "Disculpa, tengo un problema técnico y no logro leerte bien 🙏 Dame unos minutos y lo retomamos por acá mismo."
 
 // Saneador anti-voseo (D): vive en lib/voseo-v3.ts (compartido con el cron de
 // re-engagement, que también sanea sus nudges antes de enviar).
