@@ -1303,7 +1303,10 @@ async function asignarEnZoho(
       // Dueño humano real no se pisa: se presenta ÉL. Eddyluz cuenta como
       // interina (marcador de "sin dueño real"), igual que Vicky.
       const ownerLead = (lead.Owner?.email || "").toLowerCase()
-      const esInterina = !ownerLead || /vicky@|info@geovictoria|emujica@/.test(ownerLead)
+      // emujica@ salió de este patrón el 03-sep (orden de Lalo: "ella no es
+      // interina, ni Anderson"). Un lead de Eddyluz es de Eddyluz: se le
+      // presenta ella, no se re-sortea.
+      const esInterina = !ownerLead || /vicky@|info@geovictoria/.test(ownerLead)
       if (!esInterina && lead.Owner?.id) {
         await notificarTraspasoLeadEmail(lead.id, ownerLead, fono, H, api)
         const tel = await telefonoDeUsuario(lead.Owner.id, H, api)

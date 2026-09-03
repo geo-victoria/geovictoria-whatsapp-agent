@@ -277,7 +277,12 @@ const INTERINOS = new Set([
   // leads del formulario web: heredarlo dejaba deals con dueño fantasma que
   // nadie atiende y fuera de Vicky-interina/tómbola (hallazgo Lalo 07-ago:
   // 4 deals del Admin, 2 nacidos ese mismo día).
-  "3525045000000211283", // Eddyluz (ex-interina CL)
+  // Eddyluz (3525045000000211283) SALIÓ de esta lista el 03-sep por orden de
+  // Lalo: "ella no es interina, ni Anderson". Venía del relevo del 27-jul,
+  // cuando todo lo nuevo nacía a su nombre y ese marcador servía para saber
+  // que el deal aún no tenía dueño real. Hace tiempo que dejó de ser cierto:
+  // es una ejecutiva más y su cartera se respeta como la de cualquiera. Con
+  // ella acá, cualquier hito con sorteoInmediato podía QUITARLE un deal suyo.
   "3525045000203758005", // Gordillo (interino CO)
   "3525045000308323003", // Yahel (interina MX)
 ])
