@@ -68,10 +68,8 @@ type Foto = {
   fecha: string
   conversaciones: number
   nuevas: number
-  vieronPrecio: number
   formales: number
-  medInicioPrecio: number | null
-  medPrecioFormal: number | null
+  medInicioFormal: number | null
   ventas: Array<{ cot: string; empresa: string; monto: number; dueno: string }>
   montoVentas: number
   motivos: Array<{ motivo: string; casos: Array<{ contact: string; resumen: string; accionable: string }> }>
@@ -93,23 +91,40 @@ async function construirFoto(fecha: string): Promise<Foto> {
   const convs = await sb<{ id: string; contact: string; first_user_at: string; pref_escalon_at: string; formal_quote_at: string }>(
     `vic_v3_conversations?select=id,contact,first_user_at,pref_escalon_at,formal_quote_at&limit=4000&order=updated_at.desc`,
   )
-  const enDia = (iso?: string) => Boolean(iso) && String(iso) >= d0.slice(0, 10) && String(iso).slice(0, 10) <= fecha && String(iso).slice(0, 10) >= fecha
+  // El día es el día de CHILE, no el UTC: comparar el prefijo del ISO metía en
+  // el día siguiente todo lo ocurrido después de las 20:00.
+  const enDia = (iso?: string) => {
+    const t = Date.parse(String(iso || ""))
+    return Number.isFinite(t) && fechaCL(new Date(t)) === fecha
+  }
   const nuevas = convs.filter((c) => enDia(c.first_user_at)).length
-  const precio = convs.filter((c) => enDia(c.pref_escalon_at))
   const formal = convs.filter((c) => enDia(c.formal_quote_at))
   const mins = (a?: string, b?: string) =>
     a && b ? Math.round((Date.parse(b) - Date.parse(a)) / 60000) : null
-  const m1 = mediana(precio.map((c) => mins(c.first_user_at, c.pref_escalon_at)).filter((n): n is number => n !== null && n >= 0))
-  const m2 = mediana(formal.map((c) => mins(c.pref_escalon_at, c.formal_quote_at)).filter((n): n is number => n !== null && n >= 0))
+  // Tiempo de la máquina: desde que el cliente escribe hasta que tiene su
+  // cotización formal en la mano. (`pref_escalon_at` casi no se estampa —el
+  // 02-sep, 2 veces contra 23 formales— así que un embudo apoyado en él
+  // mentía: "2 vieron precio · 23 formales · 1150%".)
+  const m1 = mediana(formal.map((c) => mins(c.first_user_at, c.formal_quote_at)).filter((n): n is number => n !== null && n >= 0))
 
   // Motivos de no-cierre del clasificador, con su accionable.
+  // OJO: el clasificador corre en rueda y `analyzed_at` es cuándo lo analizó,
+  // no cuándo pasó. El 02-sep analizó 136 conversaciones con 39 conversando —
+  // el filtro tiene que ser el CONTACTO que habló ese día, no el análisis.
+  const contactosDia = new Set(
+    convs.filter((c) => convsDia.has(c.id)).map((c) => c.contact).filter(Boolean),
+  )
   const analisis = await sb<{ contact: string; motivo_no_cierre: string; resumen: string; accionable: string }>(
-    `vic_v3_conversation_analysis?select=contact,motivo_no_cierre,resumen,accionable&${rango("analyzed_at")}&motivo_no_cierre=not.is.null&limit=200`,
+    `vic_v3_conversation_analysis?select=contact,motivo_no_cierre,resumen,accionable&${rango("analyzed_at")}&motivo_no_cierre=not.is.null&limit=400`,
   )
   const porMotivo = new Map<string, Foto["motivos"][number]["casos"]>()
+  const yaVisto = new Set<string>()
   for (const a of analisis) {
     const k = String(a.motivo_no_cierre || "").trim()
     if (!k) continue
+    if (!contactosDia.has(a.contact)) continue
+    if (yaVisto.has(a.contact)) continue
+    yaVisto.add(a.contact)
     const arr = porMotivo.get(k) || []
     arr.push({ contact: a.contact, resumen: String(a.resumen || "").slice(0, 240), accionable: String(a.accionable || "").slice(0, 240) })
     porMotivo.set(k, arr)
@@ -215,10 +230,8 @@ async function construirFoto(fecha: string): Promise<Foto> {
     fecha,
     conversaciones: convsDia.size,
     nuevas,
-    vieronPrecio: precio.length,
     formales: formal.length,
-    medInicioPrecio: m1,
-    medPrecioFormal: m2,
+    medInicioFormal: m1,
     ventas,
     montoVentas: ventas.reduce((s, v) => s + v.monto, 0),
     motivos: [...porMotivo.entries()].map(([motivo, casos]) => ({ motivo, casos })).sort((a, b) => b.casos.length - a.casos.length),
@@ -287,11 +300,10 @@ function render(f: Foto, paraCorreo: boolean): string {
   <table style="border-collapse:collapse;margin-bottom:4px"><tr>
     ${kpi(String(f.conversaciones), "conversaciones")}
     ${kpi(String(f.nuevas), "nuevas")}
-    ${kpi(`${f.vieronPrecio}`, `vieron precio · ${tasa(f.vieronPrecio, f.conversaciones)}`)}
-    ${kpi(`${f.formales}`, `formales · ${tasa(f.formales, f.vieronPrecio)}`)}
+    ${kpi(`${f.formales}`, `formales · ${tasa(f.formales, f.conversaciones)}`)}
     ${kpi(String(f.ventas.length), "ventas")}
   </tr></table>
-  ${p(`Tiempos medianos: inicio → precio ${f.medInicioPrecio ?? "—"} min · precio → formal ${f.medPrecioFormal ?? "—"} min.`)}
+  ${p(`Del primer mensaje del cliente a su cotización formal: <b>${f.medInicioFormal ?? "—"} min</b> (mediana). Cierre del día: <b>${tasa(f.ventas.length, f.formales)}</b> de las formales.`)}
   ${secc("Qué vendió", ventas)}
   ${secc("Qué no vendió, y por qué", motivos)}
   ${secc("Fallas técnicas del día", fallas)}
@@ -299,7 +311,7 @@ function render(f: Foto, paraCorreo: boolean): string {
   <p style="margin:22px 0 0;font-size:11.5px;color:#7d8890;border-top:1px solid #e5e7e6;padding-top:10px">
   Generado desde la foto del día que guarda el sistema, así que el panel y este correo muestran los mismos números.
   Lo que todavía NO trae: la categoría de cada objeción con la cita textual del cliente y el MRR en juego — el clasificador guarda hoy un motivo grueso, y enriquecerlo es el siguiente paso.
-  ${paraCorreo ? "" : `<br>Foto calculada ${hhmm(f.generadoAt)}.`}</p>
+  ${paraCorreo ? "" : `<br>Foto calculada a las ${hhmm(f.generadoAt)}`}</p>
 </div>`
 }
 

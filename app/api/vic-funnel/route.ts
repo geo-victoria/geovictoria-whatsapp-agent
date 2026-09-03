@@ -3389,6 +3389,185 @@ const LIDERES_COMERCIALES = (
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean)
 
+/**
+ * 📅 CIERRE DIARIO (Lalo 02-sep, "el dash de mejoras y el correo programado
+ * diario"). El panel NO recalcula nada: lee la foto que dejó
+ * `vic-cierre-diario` en vic_kv (`foto_dia_<fecha>`), que es la misma que se
+ * manda por correo a las 07:30 — así el panel y el correo no pueden mostrar
+ * números distintos, que es el punto del ejercicio.
+ */
+type FotoCierre = {
+  fecha: string
+  conversaciones: number
+  nuevas: number
+  formales: number
+  medInicioFormal: number | null
+  ventas: Array<{ cot: string; empresa: string; monto: number; dueno: string }>
+  montoVentas: number
+  motivos: Array<{ motivo: string; casos: Array<{ contact: string; resumen: string; accionable: string }> }>
+  fallas: Array<{ contact: string; hora: string; mensajes: number }>
+  traspasos: { total: number; sinContacto: number }
+  generadoAt: string
+}
+
+const ETIQUETA_MOTIVO_CIERRE: Record<string, string> = {
+  faltaron_datos: "Faltaron datos para cotizar",
+  silencio: "Silencio después del precio",
+  evaluando: "Está evaluando / lo ve con otro",
+  precio: "Precio",
+  prefirio_humano: "Pidió hablar con una persona",
+  proveedor_actual: "Tiene otro proveedor",
+  hardware: "Hardware o compatibilidad",
+}
+
+async function renderCierre(qsBase: string, sp: URLSearchParams): Promise<string> {
+  const hoyCL = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+  const dias: string[] = []
+  for (let i = 1; i <= 14; i++) {
+    const d = new Date(Date.parse(`${hoyCL}T12:00:00-04:00`) - i * 864e5)
+    dias.push(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(d))
+  }
+  const pedida = (sp.get("dia") || "").trim()
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(pedida) ? pedida : dias[0]
+
+  const claves = [...new Set([fecha, ...dias])].map((d) => `"foto_dia_${d}"`).join(",")
+  let filas: Array<{ key: string; value: string }> = []
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?select=key,value&key=in.(${encodeURIComponent(claves)})&limit=40`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      cache: "no-store",
+    })
+    if (r.ok) filas = (await r.json()) as Array<{ key: string; value: string }>
+  } catch {
+    filas = []
+  }
+  const porDia = new Map<string, FotoCierre>()
+  for (const f of filas) {
+    try {
+      porDia.set(String(f.key).replace("foto_dia_", ""), JSON.parse(f.value) as FotoCierre)
+    } catch {
+      /* foto ilegible: el día sale vacío */
+    }
+  }
+  const f = porDia.get(fecha)
+  const clpN = (n: number) => `$${Math.round(n).toLocaleString("es-CL")}`
+  const largoCL = (d: string) =>
+    new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long" }).format(new Date(`${d}T12:00:00-04:00`))
+  const tasa = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "—")
+
+  const tira = dias
+    .map((d) => {
+      const fd = porDia.get(d)
+      const on = d === fecha
+      const p = new URLSearchParams(qsBase)
+      p.set("vista", "cierre")
+      p.set("dia", d)
+      const dow = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "short", day: "numeric" }).format(new Date(`${d}T12:00:00-04:00`))
+      return `<a href="?${p.toString()}" style="display:inline-block;padding:7px 11px;border-radius:9px;text-decoration:none;border:1px solid ${on ? "#0284c7" : "#e5e7eb"};background:${on ? "#e8f4fd" : "#fff"};color:#2d3748;min-width:64px;text-align:center">
+        <div style="font-size:11px;color:#6b7280">${esc(dow)}</div>
+        <div style="font-weight:800;font-size:15px;color:${fd && fd.ventas.length ? "#0e8a6d" : "#9aa0a8"}">${fd ? fd.ventas.length : "·"}</div></a>`
+    })
+    .join("")
+
+  const cuerpo = !f
+    ? `<div class="card"><b>Ese día todavía no tiene foto.</b><div class="sub" style="margin-top:6px">La foto se calcula sola cada mañana. Los días anteriores al 03-sep-2026 no existen: el cierre diario nació ese día.</div></div>`
+    : `
+  <div class="card">
+    <div style="display:flex;gap:30px;flex-wrap:wrap">
+      ${[
+        [String(f.ventas.length), "ventas", "#0e8a6d"],
+        [clpN(f.montoVentas), "cobrados", "#0e8a6d"],
+        [String(f.conversaciones), "conversaciones", "#2d3748"],
+        [String(f.nuevas), "nuevas", "#2d3748"],
+        [String(f.formales), `formales · ${tasa(f.formales, f.conversaciones)}`, "#2d3748"],
+        [f.medInicioFormal !== null ? `${f.medInicioFormal} min` : "—", "del 1er mensaje a la formal", "#2d3748"],
+      ]
+        .map(([n, l, c]) => `<div><div style="font-size:23px;font-weight:800;color:${c}">${esc(n)}</div><div class="sub">${esc(l)}</div></div>`)
+        .join("")}
+    </div>
+    <div class="sub" style="margin-top:10px">Cierre del día: <b>${tasa(f.ventas.length, f.formales)}</b> de las cotizaciones formales terminó pagada.</div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 10px;font-size:15px">💰 Qué vendió</h3>
+    ${
+      f.ventas.length
+        ? `<table><tr><th>Empresa</th><th>Cotización</th><th style="text-align:right">Monto</th><th>Quedó con</th></tr>${f.ventas
+            .map(
+              (v) =>
+                `<tr><td><b>${esc(v.empresa)}</b></td><td class="sub">${esc(v.cot)}</td><td style="text-align:right">${v.monto ? clpN(v.monto) : "—"}</td><td class="sub">${esc(v.dueno || "—")}</td></tr>`,
+            )
+            .join("")}</table>`
+        : `<div class="sub">Ninguna venta ese día.</div>`
+    }
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 4px;font-size:15px">🧭 Qué no vendió, y por qué</h3>
+    <div class="sub" style="margin-bottom:10px">Conversaciones de ese día que el clasificador cerró sin venta, con lo que se puede hacer todavía.</div>
+    ${
+      f.motivos.length
+        ? f.motivos
+            .map(
+              (m) =>
+                `<div style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px">${esc(ETIQUETA_MOTIVO_CIERRE[m.motivo] || m.motivo)} <span class="sub">· ${m.casos.length} ${m.casos.length === 1 ? "caso" : "casos"}</span></div>` +
+                `<table style="margin-top:6px">${m.casos
+                  .map(
+                    (c) =>
+                      `<tr><td style="width:130px"><a href="https://wa.me/${esc(c.contact)}">+${esc(c.contact)}</a></td>` +
+                      `<td>${esc(c.resumen || "—")}${c.accionable ? `<div class="sub" style="margin-top:3px">→ ${esc(c.accionable)}</div>` : ""}</td></tr>`,
+                  )
+                  .join("")}</table></div>`,
+            )
+            .join("")
+        : `<div class="sub">Sin casos clasificados ese día.</div>`
+    }
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 4px;font-size:15px">⚠️ Fallas técnicas</h3>
+    <div class="sub" style="margin-bottom:10px">Veces que Vicky tuvo que decirle a alguien que no podía responderle. Cada línea es una persona que se quedó esperando.</div>
+    ${
+      f.fallas.length
+        ? `<table>${f.fallas
+            .map(
+              (x) =>
+                `<tr><td style="width:130px"><a href="https://wa.me/${esc(x.contact)}">+${esc(x.contact)}</a></td><td>${x.mensajes} ${x.mensajes === 1 ? "mensaje" : "mensajes"} de error</td></tr>`,
+            )
+            .join("")}</table>`
+        : `<div class="sub" style="color:#0e8a6d">Ninguna. Vicky respondió todo el día.</div>`
+    }
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 6px;font-size:15px">🤝 Traspasos</h3>
+    <div class="sub">${f.traspasos.total} conversaciones traspasadas ese día · <b>${f.traspasos.sinContacto}</b> sin WhatsApp del ejecutivo en lo que quedó del día.
+    <a href="?${(() => { const p = new URLSearchParams(qsBase); p.set("vista", "traspasos"); return p.toString() })()}">ver el panel de Traspasos →</a></div>
+  </div>
+
+  <div class="sub" style="margin:0 0 20px">Estos son los mismos números del correo diario de las 07:30 — panel y correo leen la foto que el sistema guarda al cerrar el día. Todavía NO trae: la categoría de cada objeción con la cita textual del cliente y el MRR en juego.</div>`
+
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cierre diario de Vicky</title><style>
+    body{font-family:'Segoe UI',system-ui,sans-serif;margin:0;background:#f6f8fa;color:#2d3748}
+    .wrap{max-width:1100px;margin:0 auto;padding:18px}
+    .card{background:#fff;border-radius:14px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:16px}
+    table{width:100%;border-collapse:collapse;font-size:13.5px}
+    th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;padding:8px;border-bottom:2px solid #e5e7eb}
+    td{padding:8px;border-bottom:1px solid #f0f1f3;vertical-align:top}
+    a{color:#0284c7;text-decoration:none}
+    .sub{color:#8a949c;font-size:12px}
+  </style></head><body><div class="wrap">
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;flex-wrap:wrap"><img src="/gv/logo-full-color.svg" style="height:28px" alt="">
+  <h1 style="margin:0;font-size:20px">📅 Cierre diario de Vicky</h1>
+  <span class="sub">${esc(largoCL(fecha))}</span>
+  <a class="sub" href="?${qsBase}">← volver al dash</a></div>
+  <div class="card" style="padding:12px 14px"><div class="sub" style="margin-bottom:8px">Últimos 14 días — el número es cuántas ventas cerró Vicky ese día</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">${tira}</div></div>
+  ${cuerpo}
+  </div></body></html>`
+}
+
 async function renderTraspasos(quien: string, qsBase: string, sp: URLSearchParams, esAdmin: boolean): Promise<string> {
   const norm = (s: string) => s.trim().toLowerCase()
   const verTodo = esAdmin || LIDERES_COMERCIALES.includes(norm(quien))
@@ -7623,6 +7802,19 @@ export async function GET(req: Request): Promise<Response> {
       return new Response("El panel de traspasos no se pudo calcular — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
     }
   }
+  // 📅 CIERRE DIARIO (Lalo 02-sep): la foto del día anterior — lo que vendió,
+  // lo que no y por qué, las fallas técnicas. Lee la foto guardada, no
+  // recalcula: es la misma que sale por correo a las 07:30.
+  if (vistaParam === "cierre") {
+    try {
+      const qsVolver = (() => { const p = new URLSearchParams({ key, pais }); return p.toString() })()
+      const htmlC = await renderCierre(qsVolver, searchParams)
+      return new Response(htmlC, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
+    } catch (e) {
+      console.warn("[vic-funnel] cierre falló:", e instanceof Error ? e.message : e)
+      return new Response("El cierre diario no se pudo mostrar — recarga en un momento.", { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } })
+    }
+  }
   // 🪞 ESPEJOS (Lalo 27-ago): monitoreo de sesiones de WhatsApp espejo del
   // equipo comercial — solo ADMINISTRADOR (los links QR que expone permiten
   // vincular la sesión de cualquiera; cada vendedor recibe SU link, no la
@@ -8981,6 +9173,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cartera"); return p.toString() })()}">📋 Cartera</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "traspasos"); return p.toString() })()}">🤝 Traspasos</a>
+      <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cierre"); return p.toString() })()}">📅 Cierre diario</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "campanas"); return p.toString() })()}">📣 Campañas</a>
       ${esAdmin ? `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "espejos"); return p.toString() })()}">🪞 Espejos</a>` : ""}
       ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}
