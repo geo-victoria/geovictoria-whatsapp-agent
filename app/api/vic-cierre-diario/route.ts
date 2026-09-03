@@ -108,26 +108,43 @@ async function construirFoto(fecha: string): Promise<Foto> {
   const m1 = mediana(formal.map((c) => mins(c.first_user_at, c.formal_quote_at)).filter((n): n is number => n !== null && n >= 0))
 
   // Motivos de no-cierre del clasificador, con su accionable.
-  // OJO: el clasificador corre en rueda y `analyzed_at` es cuándo lo analizó,
-  // no cuándo pasó. El 02-sep analizó 136 conversaciones con 39 conversando —
-  // el filtro tiene que ser el CONTACTO que habló ese día, no el análisis.
+  // DOS LISTAS, porque el clasificador corre en rueda y va ATRASADO respecto
+  // del día: `analyzed_at` es cuándo lo analizó, no cuándo pasó (el 02-sep
+  // analizó 136 conversaciones habiendo 39, casi todas viejas), y de las 39 de
+  // ese día solo 3 tenían motivo al día siguiente. Filtrar solo por el día
+  // dejaba el correo en 2 casos; filtrar solo por analyzed_at lo llenaba de
+  // conversaciones de otra semana disfrazadas de "hoy". Así que se dice cuál
+  // es cuál: primero los del día, después el resto de lo revisado.
   const contactosDia = new Set(
     convs.filter((c) => convsDia.has(c.id)).map((c) => c.contact).filter(Boolean),
   )
-  const analisis = await sb<{ contact: string; motivo_no_cierre: string; resumen: string; accionable: string }>(
-    `vic_v3_conversation_analysis?select=contact,motivo_no_cierre,resumen,accionable&${rango("analyzed_at")}&motivo_no_cierre=not.is.null&limit=400`,
+  type Fila = { contact: string; motivo_no_cierre: string; resumen: string; accionable: string }
+  const campos = "contact,motivo_no_cierre,resumen,accionable"
+  const analisis = await sb<Fila>(
+    `vic_v3_conversation_analysis?select=${campos}&${rango("analyzed_at")}&motivo_no_cierre=not.is.null&limit=400`,
   )
+  const delDia: Fila[] = []
+  if (contactosDia.size) {
+    const lote = [...contactosDia].slice(0, 120).map((t) => `"${t}"`).join(",")
+    delDia.push(
+      ...(await sb<Fila>(
+        `vic_v3_conversation_analysis?select=${campos}&contact=in.(${lote})&motivo_no_cierre=not.is.null&order=analyzed_at.desc&limit=200`,
+      )),
+    )
+  }
   const porMotivo = new Map<string, Foto["motivos"][number]["casos"]>()
   const yaVisto = new Set<string>()
-  for (const a of analisis) {
+  // Los del día primero: si un contacto aparece en las dos listas, gana su
+  // análisis más reciente y no se cuenta dos veces.
+  for (const a of [...delDia, ...analisis]) {
     const k = String(a.motivo_no_cierre || "").trim()
-    if (!k) continue
-    if (!contactosDia.has(a.contact)) continue
-    if (yaVisto.has(a.contact)) continue
+    if (!k || yaVisto.has(a.contact)) continue
     yaVisto.add(a.contact)
-    const arr = porMotivo.get(k) || []
+    const esDelDia = contactosDia.has(a.contact)
+    const clave = esDelDia ? k : `otros:${k}`
+    const arr = porMotivo.get(clave) || []
     arr.push({ contact: a.contact, resumen: String(a.resumen || "").slice(0, 240), accionable: String(a.accionable || "").slice(0, 240) })
-    porMotivo.set(k, arr)
+    porMotivo.set(clave, arr)
   }
 
   // FALLAS TÉCNICAS reales: los mensajes de error que Vicky mandó ese día.
@@ -234,7 +251,9 @@ async function construirFoto(fecha: string): Promise<Foto> {
     medInicioFormal: m1,
     ventas,
     montoVentas: ventas.reduce((s, v) => s + v.monto, 0),
-    motivos: [...porMotivo.entries()].map(([motivo, casos]) => ({ motivo, casos })).sort((a, b) => b.casos.length - a.casos.length),
+    motivos: [...porMotivo.entries()]
+      .map(([motivo, casos]) => ({ motivo, casos }))
+      .sort((a, b) => Number(a.motivo.startsWith("otros:")) - Number(b.motivo.startsWith("otros:")) || b.casos.length - a.casos.length),
     fallas: [...porContacto.entries()].map(([contact, v]) => ({ contact, hora: v.hora, mensajes: v.n })),
     traspasos: { total: telsPtv.length, sinContacto },
     generadoAt: new Date().toISOString(),
@@ -249,6 +268,13 @@ const ETIQUETA_MOTIVO: Record<string, string> = {
   prefirio_humano: "Pidió hablar con una persona",
   proveedor_actual: "Tiene otro proveedor",
   hardware: "Hardware o compatibilidad",
+}
+
+/** El prefijo `otros:` marca los casos que el clasificador revisó ese día pero
+ * cuya conversación es de otro día — se muestran, pero dichos como lo que son. */
+function etiquetaMotivo(k: string): string {
+  const base = k.replace(/^otros:/, "")
+  return ETIQUETA_MOTIVO[base] || base
 }
 
 function render(f: Foto, paraCorreo: boolean): string {
@@ -276,7 +302,7 @@ function render(f: Foto, paraCorreo: boolean): string {
     ? f.motivos
         .map(
           (m) =>
-            `<p style="margin:10px 0 4px;font-size:13.5px"><b>${esc(ETIQUETA_MOTIVO[m.motivo] || m.motivo)}</b> · ${m.casos.length} ${m.casos.length === 1 ? "caso" : "casos"}</p>` +
+            `<p style="margin:10px 0 4px;font-size:13.5px"><b>${esc(etiquetaMotivo(m.motivo))}</b> · ${m.casos.length} ${m.casos.length === 1 ? "caso" : "casos"}${m.motivo.startsWith("otros:") ? ` <span style="color:#9aa0a8">(revisado ese día, conversación de otro día)</span>` : ""}</p>` +
             `<ul style="margin:0 0 6px;padding-left:18px;font-size:13px;color:#39434a">${m.casos
               .slice(0, 4)
               .map((c) => `<li>+${esc(c.contact)} — ${esc(c.resumen || "sin resumen")}${c.accionable ? `<br><span style="color:#7d8890">Accionable: ${esc(c.accionable)}</span>` : ""}</li>`)

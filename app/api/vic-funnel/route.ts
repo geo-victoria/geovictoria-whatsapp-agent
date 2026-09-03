@@ -3510,7 +3510,7 @@ async function renderCierre(qsBase: string, sp: URLSearchParams): Promise<string
         ? f.motivos
             .map(
               (m) =>
-                `<div style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px">${esc(ETIQUETA_MOTIVO_CIERRE[m.motivo] || m.motivo)} <span class="sub">· ${m.casos.length} ${m.casos.length === 1 ? "caso" : "casos"}</span></div>` +
+                `<div style="margin-bottom:14px"><div style="font-weight:700;font-size:13.5px">${esc(ETIQUETA_MOTIVO_CIERRE[m.motivo.replace(/^otros:/, "")] || m.motivo.replace(/^otros:/, ""))} <span class="sub">· ${m.casos.length} ${m.casos.length === 1 ? "caso" : "casos"}${m.motivo.startsWith("otros:") ? " · revisado ese día, conversación de otro día" : ""}</span></div>` +
                 `<table style="margin-top:6px">${m.casos
                   .map(
                     (c) =>
