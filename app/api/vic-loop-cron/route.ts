@@ -81,7 +81,19 @@ function tplCelda(
     mx: (process.env[`${envName}_MX`] || defaultMx).trim(),
   }
 }
-const ACEPTADA_CELDA = tplCelda("LOOP_TPL_ACEPTADA", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago")
+// ENCENDIDA EN CHILE (04-sep): Meta aprobó vicky_loop_pago_link_cl y ya lleva
+// el link real de la cotización (variable `link`, resuelta arriba desde el
+// puntero del contacto). La vieja, vicky_loop_pago, solo preguntaba "¿te ayudo
+// con el pago?" sin llevar a ninguna parte — 28 toques salieron así a 14
+// clientes que YA habían aceptado, que es justo donde el link ES el toque.
+// CO y MX siguen con la vieja: la nueva vive en el bot Vicky Chile y una
+// plantilla solo se despacha desde el bot de su línea.
+const ACEPTADA_CELDA = tplCelda(
+  "LOOP_TPL_ACEPTADA",
+  "vicky_loop_pago_link_cl",
+  "vicky_loop_pago",
+  "vicky_loop_pago",
+)
 const CO_PREFORM = "vicky_co_react_preform"
 const CO_CON_PRECIO = "vicky_loop_con_precio_co"
 // MX (25-jul, número +52 conectado en Dapta): reutiliza las neutras
