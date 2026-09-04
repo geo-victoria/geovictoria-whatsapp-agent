@@ -74,7 +74,7 @@ export type DatosImplementacion = {
  */
 export async function crearImplementacionGvAvanzado(
   d: DatosImplementacion,
-): Promise<{ id: string; relator: { nombre: string; email: string } } | null> {
+): Promise<{ id: string; numero?: string; relator: { nombre: string; email: string } } | null> {
   if (!d.razonSocial) return null
   const relator = await siguienteRelator()
   const registro: Record<string, unknown> = {
@@ -145,8 +145,30 @@ export async function crearImplementacionGvAvanzado(
     if (!dueno?.ok) {
       console.warn(`[implementacion] ${fila.details.id}: no se pudo asignar a ${relator.email} — queda en la cuenta compartida`)
     }
-    console.log(`[implementacion] creada ${fila.details.id} para ${d.razonSocial} → ${relator.nombre}`)
-    return { id: fila.details.id, relator: { nombre: relator.nombre, email: relator.email } }
+    // El NÚMERO (IMP-xxxxx) lo genera Zoho al crear y no viene en la
+    // respuesta: hay que releerlo. Lo necesita el formulario de Bookings, que
+    // exige "Numero de implementacion" como campo obligatorio — sin él la
+    // reserva de la capacitación se rechaza. Best-effort: si la relectura
+    // falla, la implementación igual quedó creada.
+    let numero = ""
+    try {
+      const rr = await fetch(`${API()}/crm/v3/Implementaciones/${fila.details.id}?fields=N_Implementacion`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      if (rr.ok) {
+        const jj = (await rr.json()) as { data?: Array<{ N_Implementacion?: string }> }
+        numero = String(jj?.data?.[0]?.N_Implementacion || "")
+      }
+    } catch {
+      /* sin número: el agendamiento lo pedirá por otra vía */
+    }
+    console.log(`[implementacion] creada ${fila.details.id}${numero ? ` (${numero})` : ""} para ${d.razonSocial} → ${relator.nombre}`)
+    return {
+      id: fila.details.id,
+      numero: numero || undefined,
+      relator: { nombre: relator.nombre, email: relator.email },
+    }
   } catch (e) {
     console.warn("[implementacion] excepción:", e instanceof Error ? e.message : e)
     return null

@@ -29,6 +29,7 @@ import {
   claveFase,
   claveBorrador,
   claveAltaSolicitada,
+  claveCapacitacion,
   claveConfiguracion,
   type FaseVicky,
 } from "./onboarding/fase"
@@ -470,8 +471,22 @@ export async function armarOnboarding(contact: string): Promise<{
                   comentarios: `Alta por chat de Vicky (companyId ${alta.companyId}). Empresa YA creada en la plataforma; no requiere creación.`,
                 })
                 if (imp) {
+                  // Se GUARDA quién es su relator y el número de
+                  // implementación: hasta hoy esto se calculaba, se anunciaba
+                  // por interno y se botaba, así que cuando llegaba el momento
+                  // de agendar la capacitación no había forma de saber a cuál
+                  // de los cuatro servicios de Bookings correspondía.
+                  await setKvValue(
+                    claveCapacitacion(contact),
+                    JSON.stringify({
+                      implementacionId: imp.id,
+                      numero: imp.numero || "",
+                      relator: imp.relator,
+                      empresa: b.empresa.nombre || "",
+                    }),
+                  ).catch(() => {})
                   await avisarEquipoInterno(
-                    `🛠️ IMPLEMENTACIÓN GV Avanzado creada para ${b.empresa.nombre} → ${imp.relator.nombre} (${imp.relator.email}). Falta agendar Curso 1.`,
+                    `🛠️ IMPLEMENTACIÓN GV Avanzado creada para ${b.empresa.nombre} → ${imp.relator.nombre} (${imp.relator.email})${imp.numero ? ` · ${imp.numero}` : ""}.`,
                   ).catch(() => {})
                 } else {
                   await avisarEquipoInterno(

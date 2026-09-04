@@ -27,6 +27,15 @@ export function onboardingEnabled(): boolean {
  */
 export const claveFase = (contact: string) => `fase_vicky_${contact}`
 export const claveBorrador = (contact: string) => `onboarding_borrador_${contact}`
+/**
+ * Lo que la capacitación necesita saber y hoy se calculaba y se botaba: qué
+ * relator le tocó a este cliente (Diego o Nacho, ya sorteado por la
+ * implementación) y el número de implementación, que el formulario de Bookings
+ * exige como campo obligatorio. Guarda también la cita una vez tomada, que es
+ * lo que impide agendar dos veces al mismo cliente.
+ */
+export const claveCapacitacion = (contact: string) => `onboarding_capacitacion_${contact}`
+
 /** Timestamp ISO de cuándo se solicitó el alta (candado anti doble-solicitud). */
 export const claveAltaSolicitada = (contact: string) => `onboarding_alta_solicitada_${contact}`
 
