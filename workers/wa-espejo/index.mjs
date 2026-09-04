@@ -50,6 +50,42 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !SESIONES.length) {
   process.exit(1)
 }
 
+// SESIONES EXTRA SIN TOCAR RAILWAY (04-sep). Aleydis (aaraque) y Aracelli
+// (asepulveda) llevaban dos semanas sin espejo —las dos con más traspasos
+// después de Eddyluz— porque agregar una sesión exigía editar WA_SESSION_IDS
+// en Railway y redesplegar, y nadie con acceso lo hacía. Sin sesión no hay
+// socket, sin socket no hay QR, y su página mostraba "sin señal del worker"
+// para siempre.
+//
+// Ahora la lista también sale de vic_kv `wa_sesiones_extra` (coma-separado),
+// que se escribe por API. El worker la relee cada 2 minutos y arranca sola
+// cualquier sesión nueva: agregar un vendedor pasa a ser una línea de kv, no
+// un deploy. Quitar una del kv NO la apaga (se apaga al reiniciar): bajar un
+// espejo en caliente es una decisión que merece intención explícita.
+const SESIONES_VIVAS = new Set(SESIONES)
+
+async function sesionesExtra() {
+  try {
+    const r = await sb(`vic_kv?key=eq.wa_sesiones_extra&select=value&limit=1`)
+    const rows = await r.json()
+    return String(rows?.[0]?.value || "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+async function revisarSesionesNuevas() {
+  for (const id of await sesionesExtra()) {
+    if (SESIONES_VIVAS.has(id)) continue
+    SESIONES_VIVAS.add(id)
+    console.log(`[${id}] sesión NUEVA desde vic_kv wa_sesiones_extra — arrancando`)
+    arrancarSesion(id)
+  }
+}
+
 const logger = pino({ level: process.env.WA_LOG_LEVEL || "warn" })
 const H = {
   apikey: SUPABASE_KEY,
@@ -768,3 +804,8 @@ await cargarLidPn()
 for (const sessionId of SESIONES) {
   arrancarSesion(sessionId)
 }
+// Las extra del kv: al arrancar y cada 2 minutos.
+await revisarSesionesNuevas()
+setInterval(() => {
+  revisarSesionesNuevas().catch(() => {})
+}, 2 * 60_000)
