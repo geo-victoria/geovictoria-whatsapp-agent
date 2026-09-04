@@ -1646,6 +1646,44 @@ async function processOneTurn(
       }
     }
 
+    // 2.9. ÚLTIMO FILTRO: ningún link de cotización inventado sale de acá.
+    //
+    // El 03-sep Andrea y Andrés recibieron `/q/COT-310` y `/q/COT000394` —
+    // links que nunca existieron, compuestos por el modelo cuando la tool de
+    // emisión no corrió. El cinturón de URLs los caza, pero se le escaparon
+    // por dos rendijas: el reintento ANTI-ECO de más arriba no vuelve a
+    // pasar por él, y su excepción de "link que Vicky ya envió antes"
+    // bendecía para siempre a un falso que ya había salido una vez.
+    //
+    // Por eso este chequeo vive al FINAL, en el único punto por donde pasa
+    // todo lo que se envía: cubre cada rama de arriba y cualquiera que se
+    // agregue mañana. Es puro y determinista (firma HMAC del código corto,
+    // sin red): un link legítimo pasa aunque Zoho o el cotizador estén caídos.
+    {
+      const { linksInvalidos } = await import("@/lib/link-cotizacion")
+      const malos = linksInvalidos(reply)
+      if (malos.length) {
+        console.error(
+          `[v3-bg] LINK_INVENTADO_BLOQUEADO contact=${contact} links=${JSON.stringify(malos)} reply=${JSON.stringify(reply.slice(0, 240))}`,
+        )
+        const puntero = quotePointers.find((qp) => !!qp.acceptanceUrl)?.acceptanceUrl || ""
+        if (puntero) {
+          // Hay cotización de verdad: se entrega SU link (el largo no depende
+          // de /q/ ni de Zoho). El cliente nunca se queda sin nada.
+          for (const malo of malos) reply = reply.split(malo).join(puntero)
+          console.warn(`[v3-bg] LINK_SUSTITUIDO_POR_PUNTERO contact=${contact}`)
+        } else {
+          // No hay cotización: prometer un link seria repetir el caso Andrea.
+          reply =
+            "Dame un momento y te dejo tu cotización lista — te la mando por acá en cuanto la tenga 🙌"
+        }
+        void avisarEquipoInterno(
+          `⚠️ LINK INVENTADO bloqueado a +${contact}: ${malos.join(", ")}. ` +
+            (puntero ? "Se entregó el link real de su cotización." : "NO hay cotización emitida — revisar el chat."),
+        ).catch(() => false)
+      }
+    }
+
     // 3. Persistir turno en Supabase
     // En el historial el turno queda como UN texto (el marcador de
     // multi-mensaje — [---] o una línea de solo guiones — se convierte en
