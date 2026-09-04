@@ -140,31 +140,25 @@ export async function reservarCupo(args: {
   /** Campos propios del formulario del servicio, por etiqueta exacta. */
   camposPropios?: Record<string, string>
 }): Promise<{ ok: boolean; bookingId?: string; estado?: string; detalle: unknown }> {
-  // Bookings exige phone_number SIEMPRE (sin él responde "invalid
-  // phone_number") y, en los servicios de GeoAvanzado, dos campos propios del
-  // formulario: la empresa y el número de implementación. Los dos los tenemos:
-  // Vicky crea la implementación, así que sabe cuál es — y con eso el relator
-  // ve en su agenda a qué cliente corresponde la sesión.
+  // Según la documentación de Bookings: customer_details lleva SOLO nombre,
+  // correo y teléfono (phone_number es obligatorio: sin él responde "invalid
+  // phone_number"), y los campos propios del formulario viajan aparte, en un
+  // parámetro de PRIMER NIVEL llamado additional_fields, con la etiqueta
+  // exacta del campo como clave. Meterlos dentro de customer_details no
+  // funciona — Zoho los ignora y sigue reclamando que faltan.
   const cliente: Record<string, string> = {
     name: args.nombre,
     email: args.email,
     phone_number: args.telefono || "",
   }
-  // Los campos propios viajan SUELTOS y también anidados: Zoho documenta las
-  // dos formas según la versión del formulario y no hay endpoint que diga cuál
-  // usa este servicio. Las claves que sobren se ignoran.
   const propios = args.camposPropios || {}
-  for (const [k, v] of Object.entries(propios)) cliente[k] = v
-  if (Object.keys(propios).length) {
-    ;(cliente as Record<string, unknown>).custom_fields = propios
-    ;(cliente as Record<string, unknown>).additional_fields = propios
-  }
   const r = await apiPost("appointment", {
     service_id: args.servicioId,
     staff_id: args.staffId,
     from_time: args.desde,
-    time_zone: "America/Santiago",
+    timezone: "America/Santiago",
     customer_details: JSON.stringify(cliente),
+    ...(Object.keys(propios).length ? { additional_fields: JSON.stringify(propios) } : {}),
     ...(args.notas ? { notes: args.notas } : {}),
   })
   const data = (r.body as { response?: { returnvalue?: Record<string, unknown> } })?.response?.returnvalue
