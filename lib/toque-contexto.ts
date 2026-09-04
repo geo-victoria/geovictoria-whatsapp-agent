@@ -69,6 +69,12 @@ const REGLAS = [
   "5. Prohibido partir con 'Oye'. Prohibido usar guiones largos, negritas o listas.",
   "6. Tuteo chileno neutro y cercano, sin jerga.",
   "7. No inventes datos, precios ni promesas que no estén en la conversación. No ofrezcas descuentos.",
+  // (Lalo 04-sep) "Los toques son muy malos en contenido, son apelando al pago,
+  // y deberían apelar a cómo resolvemos los dolores que levantó durante la
+  // conversación." En etapa formal el cliente ya tiene su cotización: si no
+  // avanzó fue por algo, y pedirle el pago por cuarta vez no lo resuelve.
+  "8. NO pidas el pago ni digas 'acepta y paga'. El cliente que ya tiene su cotización no se frenó por falta de un recordatorio: se frenó por una duda, una comparación o algo de su operación. Tu trabajo es retomar ESO. El pago se pide solo cuando el cliente ya aceptó y lo único que falta es pagar.",
+  "9. Si el cliente dejó una duda sin responder, una objeción o una comparación con otro proveedor, ese es el tema del mensaje.",
   "Responde SOLO con el texto del mensaje, sin comillas ni explicaciones.",
 ].join("\n")
 
@@ -143,6 +149,21 @@ export async function generarToqueContexto(
     if (/^oye\b/i.test(texto)) return null
     // Estilo sellado: sin guiones largos (parecen IA — Lalo 26-ago).
     texto = texto.replace(/\s*—\s*/g, ", ").replace(/\s{2,}/g, " ")
+    // NINGÚN PRECIO SIN RESPALDO, también acá (04-sep). El toque generado cita
+    // cifras cuando la conversación las tuvo ("$67.616 al mes"), y eso está
+    // bien; lo que no puede hacer es componer una nueva. Se compara contra lo
+    // que Vicky YA le dijo a este contacto: si aparece un monto que nadie le
+    // dio, el toque generado se descarta y sale el texto fijo de siempre.
+    // El toque nunca se pierde por esto — a lo más pierde personalización.
+    const { chequearPreciosDelReply } = await import("./precio-sin-tool")
+    const dichos = historia.filter((m) => m.role === "assistant").map((m) => String(m.content || ""))
+    const chequeo = chequearPreciosDelReply(texto, [], dichos)
+    if (chequeo.hayInventado) {
+      console.warn(
+        `[toque-contexto] ${contact}: PRECIO SIN RESPALDO en el toque generado (${chequeo.inventados.join(", ")}) — se usa el texto fijo`,
+      )
+      return null
+    }
     return recortarEnOracion(texto, MAX_CHARS)
   } catch (e) {
     console.error(`[toque5] generación falló ${contact}:`, e instanceof Error ? e.message : e)

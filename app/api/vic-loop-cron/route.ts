@@ -336,9 +336,9 @@ const TEXTOS_T2: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     mx: "¿Qué te pareció el valor que te pasé? Si te acomoda, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
   },
   formal: {
-    cl: "¿Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
-    co: "Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
-    mx: "¿Pudiste revisar tu cotización? Cualquier duda o ajuste me dices por aquí — y si quieres avanzar, en el mismo link la aceptas y pagas 😊",
+    cl: "¿Pudiste revisar tu cotización? Si algo no te calzó, el equipo, la cantidad de personas o cómo van a marcar, lo ajustamos por aquí 😊",
+    co: "Pudiste revisar tu cotización? Si algo no te calzó, el equipo, la cantidad de personas o cómo van a marcar, lo ajustamos por aquí 😊",
+    mx: "¿Pudiste revisar tu cotización? Si algo no te acomodó, el equipo, la cantidad de personas o cómo van a checar, lo ajustamos por aquí 😊",
   },
   aceptada: {
     cl: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de inmediato por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
@@ -358,9 +358,9 @@ const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     mx: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. ¿Avanzamos con la cotización formal o prefieres ajustar algo primero?",
   },
   formal: {
-    cl: "Tu cotización sigue vigente 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
-    co: "Tu cotización sigue vigente 😊 Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
-    mx: "Tu cotización sigue vigente 😊 ¿Te ayudo a resolver alguna duda o a completar el pago? Cualquier ajuste también lo hacemos por aquí.",
+    cl: "Tu cotización sigue vigente 😊 ¿Quedó alguna duda dando vueltas? Dime cuál y la resolvemos; si necesitas ajustar algo, también lo hacemos por aquí.",
+    co: "Tu cotización sigue vigente 😊 Quedó alguna duda dando vueltas? Dime cuál y la resolvemos; si necesitas ajustar algo, también lo hacemos por aquí.",
+    mx: "Tu cotización sigue vigente 😊 ¿Quedó alguna duda dando vueltas? Dime cuál y la resolvemos; si necesitas ajustar algo, también lo hacemos por aquí.",
   },
   aceptada: {
     cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
@@ -391,11 +391,11 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
   },
   formal: {
     cl:
-      "Tu cotización quedó lista y la puedes aceptar y pagar en línea cuando quieras.\nSi te quedó alguna duda, la vemos enseguida por acá.",
+      "Tu cotización quedó lista.\nSi te quedó alguna duda o quieres ajustar algo, la vemos enseguida por acá.",
     co:
-      "Tu cotización quedó lista y la puedes aceptar y pagar en línea cuando quieras.\nSi te queda alguna duda, la resolvemos de una por acá.",
+      "Tu cotización quedó lista.\nSi te queda alguna duda o quieres ajustar algo, la resolvemos de una por acá.",
     mx:
-      "Tu cotización quedó lista y la puedes aceptar cuando gustes.\nSi te quedó alguna duda, la resolvemos por aquí.",
+      "Tu cotización quedó lista.\nSi te quedó alguna duda o quieres ajustar algo, la resolvemos por aquí.",
   },
   aceptada: {
     // Propuesta de valor de INMEDIATEZ (Lalo 25-ago): pagado el plan, la
@@ -421,9 +421,9 @@ const TEXTOS_T4PLUS: Record<LoopStage, { cl: string; co: string; mx: string }> =
     mx: "El valor que te preparé sigue disponible — si gustas lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
   },
   formal: {
-    cl: "Tu cotización sigue disponible para aceptar y pagar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
-    co: "Tu cotización sigue disponible para aceptar y pagar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
-    mx: "Tu cotización sigue disponible para aceptar en línea — y si algo cambió en lo que necesitas, la ajustamos por aquí 😊",
+    cl: "Tu cotización sigue disponible, y si algo cambió en lo que necesitas la ajustamos por aquí 😊 ¿Te quedó alguna duda que no alcanzamos a ver?",
+    co: "Tu cotización sigue disponible, y si algo cambió en lo que necesitas la ajustamos por aquí 😊 Te quedó alguna duda que no alcanzamos a ver?",
+    mx: "Tu cotización sigue disponible, y si algo cambió en lo que necesitas la ajustamos por aquí 😊 ¿Te quedó alguna duda que no alcanzamos a ver?",
   },
   aceptada: {
     cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
@@ -1050,10 +1050,22 @@ export async function GET(req: Request): Promise<Response> {
       // donde quedó. Si la generación falla, `contextoT5` queda null y todo
       // sigue por el camino fijo de siempre.
       let contextoT5: string | null = null
-      if (touch === 5 && paisKey === "cl" && !esPresentacion && stage !== "aceptada") {
+      // GENERACIÓN POR CONTEXTO, TOQUES 1-5 (Lalo 04-sep). Hasta hoy solo el
+      // toque 5 hablaba del cliente; los 1-4 salían con el texto fijo por
+      // etapa, y en `formal` los cuatro decían lo mismo: acepta y paga. Ana
+      // Delgado contó que estaba comparando con la competencia y once minutos
+      // después recibió "Tu cotización quedó lista y la puedes aceptar y pagar
+      // en línea". Ahora el toque retoma SU tema.
+      //
+      // Los 1-4 se generan solo DENTRO de la ventana de 24 h, que es donde el
+      // texto libre es legal; fuera de ventana siguen con su plantilla (el 5
+      // ya tiene la suya con variable `contexto`). Si la generación falla o la
+      // conversación no da material, cae al texto fijo: el toque no se pierde.
+      const generable = touch >= 1 && touch <= 5 && (touch === 5 || ventanaAbierta)
+      if (generable && paisKey === "cl" && !esPresentacion && stage !== "aceptada") {
         const { generarToqueContexto } = await import("@/lib/toque-contexto")
         contextoT5 = await generarToqueContexto(r.contact, stage).catch(() => null)
-        if (contextoT5) console.log(`[loop-cron] t5 personalizado ${r.contact} (${contextoT5.length} chars)`)
+        if (contextoT5) console.log(`[loop-cron] toque ${touch} personalizado ${r.contact} (${contextoT5.length} chars)`)
       }
       // Etapa ACEPTADA (25-ago): los textos llevan el link real de la
       // cotización y, en el toque de urgencia, la fecha de vigencia (emisión
