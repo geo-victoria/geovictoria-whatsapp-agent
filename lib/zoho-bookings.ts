@@ -137,9 +137,20 @@ export async function reservarCupo(args: {
   email: string
   telefono?: string
   notas?: string
+  /** Campos propios del formulario del servicio, por etiqueta exacta. */
+  camposPropios?: Record<string, string>
 }): Promise<{ ok: boolean; bookingId?: string; estado?: string; detalle: unknown }> {
-  const cliente: Record<string, string> = { name: args.nombre, email: args.email }
-  if (args.telefono) cliente.phone_number = args.telefono
+  // Bookings exige phone_number SIEMPRE (sin él responde "invalid
+  // phone_number") y, en los servicios de GeoAvanzado, dos campos propios del
+  // formulario: la empresa y el número de implementación. Los dos los tenemos:
+  // Vicky crea la implementación, así que sabe cuál es — y con eso el relator
+  // ve en su agenda a qué cliente corresponde la sesión.
+  const cliente: Record<string, string> = {
+    name: args.nombre,
+    email: args.email,
+    phone_number: args.telefono || "",
+  }
+  for (const [k, v] of Object.entries(args.camposPropios || {})) cliente[k] = v
   const r = await apiPost("appointment", {
     service_id: args.servicioId,
     staff_id: args.staffId,

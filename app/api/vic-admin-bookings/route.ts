@@ -144,6 +144,7 @@ export async function POST(req: Request): Promise<Response> {
       email: t("email"),
       telefono: t("telefono") || undefined,
       notas: t("notas") || undefined,
+      camposPropios: (b.camposPropios || undefined) as Record<string, string> | undefined,
     })
     return NextResponse.json(r, { status: r.ok ? 200 : 502 })
   }
