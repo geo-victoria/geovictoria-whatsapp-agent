@@ -5,7 +5,10 @@
  * mezcla WhatsApp + llamada reemplaza, para los contactos migrados, a la
  * cadencia outbound y a la reactivación (los crons viejos los saltan vía
  * contactosEnLoop). Cada mensaje entrante del cliente RE-ANCLA el loop
- * (resetLoop): T0 vuelve a ahora y la cuenta parte del toque 1.
+ * (resetLoop): T0 vuelve a ahora, pero la CUENTA DE TOQUES NO RETROCEDE
+ * (04-sep). Hasta ese día volvía al toque 1, y con el toque 1 a diez minutos
+ * (10-ago) eso le devolvía al cliente el mismo texto enlatado justo después
+ * de conversar: 1 de cada 5 toques retrocedía.
  *
  * SEGURO POR DEFECTO: con LOOP_V2_ENABLED ausente u "off", TODAS las funciones
  * de este módulo son no-op — el comportamiento del sistema es idéntico al de hoy.
@@ -458,7 +461,7 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
   // Cliente en pleno alta de cuenta: sus mensajes son del onboarding, no de venta.
   if (await enFaseOnboarding(contact)) return
   const res = await supa(
-    `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado,stage&limit=1`,
+    `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado,stage,next_touch&limit=1`,
   )
   const rows = res.ok ? (((await res.json().catch(() => [])) as LoopRow[]) || []) : []
   const row = rows[0]
@@ -467,13 +470,33 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
   const ahora = new Date()
   const senal = mensaje ? clasificarSenalEspera(mensaje, row.country, contact, ahora) : null
   const t0 = senal ? new Date(senal.cuando.getTime() - 3600e3) : ahora
+  // EL RELOJ SE REANCLA, EL CONTADOR NO RETROCEDE (04-sep, hallazgo de Rodrigo).
+  //
+  // Hasta hoy esto ponía `next_touch: 1`. Era una decisión explícita del
+  // 23-jul ("T0 vuelve a ahora y la cuenta parte del toque 1") y con la
+  // cadencia vieja —toque 1 a +1h, toques 2 y 3 por llamada— se notaba poco.
+  // El 10-ago el toque 1 se movió a +10 MINUTOS y la combinación se volvió
+  // dañina: cada mensaje del cliente rebobinaba la cadencia y le devolvía el
+  // MISMO texto enlatado diez minutos después, encima de la conversación viva.
+  // Medido: 1 de cada 5 toques retrocedía, y 72 toques repetidos a 66
+  // clientes en una semana. Caso Ana Delgado: recibió el texto del toque 1
+  // tres veces en dos horas, una de ellas justo después de contarnos que
+  // estaba comparando con la competencia.
+  //
+  // El silencio SÍ se mide desde el último mensaje del cliente (t0 = ahora),
+  // pero la escalera de toques solo sube: quien ya recibió el toque 3 recibe
+  // el 4, no el 1 otra vez. Y como cada toque conserva su propia distancia
+  // desde t0, el cliente que conversa recibe el siguiente toque con el
+  // espaciado de SU escalón, no a los diez minutos — menos insistente,
+  // exactamente lo que el documento describe (offsets medidos desde T0).
+  const siguiente = Math.max(1, Number(row.next_touch) || 1)
   await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
       t0: t0.toISOString(),
-      next_touch: 1,
-      next_touch_at: calcularProximoToque(t0, 1, row.country, contact, row.stage).toISOString(),
+      next_touch: siguiente,
+      next_touch_at: calcularProximoToque(t0, siguiente, row.country, contact, row.stage).toISOString(),
       estado: "activo",
       compromiso_at: null,
       updated_at: ahora.toISOString(),
