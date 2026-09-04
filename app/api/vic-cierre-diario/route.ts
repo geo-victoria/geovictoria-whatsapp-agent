@@ -70,8 +70,14 @@ type Foto = {
   nuevas: number
   formales: number
   medInicioFormal: number | null
+  /** SOLO canal Vicky. El canal ejecutivo va aparte — ver ventasEjecutivo. */
   ventas: Array<{ cot: string; empresa: string; monto: number; dueno: string }>
   montoVentas: number
+  /** Ventas del día del CANAL EJECUTIVO (cotizadora del dash), informativas. */
+  ventasEjecutivo: number
+  montoVentasEjecutivo: number
+  /** Ventas que no se pudieron clasificar (Zoho no respondió): se declaran. */
+  ventasSinClasificar: number
   motivos: Array<{ motivo: string; casos: Array<{ contact: string; resumen: string; accionable: string }> }>
   fallas: Array<{ contact: string; hora: string; mensajes: number }>
   traspasos: { total: number; sinContacto: number }
@@ -183,12 +189,12 @@ async function construirFoto(fecha: string): Promise<Foto> {
   // lo escribe construirVentasCerradas SOLO con pago verificado y monto > 0
   // (recurrente + único del subform, con IVA), así que acá el número del correo
   // y el de la Caja no pueden discrepar.
-  const ventas: Foto["ventas"] = []
+  const ventas: Array<Foto["ventas"][number] & { canal?: string }> = []
   try {
     const filas = await sb<{ key: string; value: string }>(
       `vic_kv?select=key,value&key=like.venta_dash_v3_*&limit=3000`,
     )
-    const delDia: Array<Foto["ventas"][number] & { _t: number }> = []
+    const delDia: Array<Foto["ventas"][number] & { _t: number; canal?: string }> = []
     for (const f of filas) {
       let v: { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number } = {}
       try {
@@ -223,7 +229,7 @@ async function construirFoto(fecha: string): Promise<Foto> {
         cache: "no-store",
         body: JSON.stringify({
           select_query:
-            `select Numero_Cotizacion, Owner.first_name, Owner.last_name from ${QUOTE_MODULE} ` +
+            `select Numero_Cotizacion, Owner.first_name, Owner.last_name, Intervenci_n_Humana from ${QUOTE_MODULE} ` +
             `where Numero_Cotizacion in (${nums}) limit 60`,
         }),
       })
@@ -232,16 +238,38 @@ async function construirFoto(fecha: string): Promise<Foto> {
           data?: Array<Record<string, unknown>>
         }
         const por = new Map<string, string>()
+        const canalDe = new Map<string, string>()
         for (const q of dd.data || []) {
           const nom = `${String(q["Owner.first_name"] || "")} ${String(q["Owner.last_name"] || "")}`.trim()
-          por.set(String(q.Numero_Cotizacion || ""), nom)
+          const cot = String(q.Numero_Cotizacion || "")
+          por.set(cot, nom)
+          canalDe.set(cot, String(q["Intervenci_n_Humana"] || ""))
         }
-        for (const v of ventas) v.dueno = por.get(v.cot) || ""
+        for (const v of ventas) {
+          v.dueno = por.get(v.cot) || ""
+          v.canal = canalDe.get(v.cot) || ""
+        }
       }
     } catch (e) {
       console.warn("[cierre] dueños:", e instanceof Error ? e.message : e)
     }
   }
+
+  // SEPARAR CANAL (04-sep, correccion de Lalo). `venta_dash_v3_` es la Caja del
+  // dash y ahi caen los DOS canales: el 03-sep tenia 7 pagos y solo UNO era de
+  // Vicky (los otros 6 los cerraron Grey, Anderson y Ana Lopez desde la
+  // cotizadora). El correo se llama "cierre de Vicky" y reportaba los 7 — sobre
+  // esa foto contaminada se discutio media manana si la caida era real. El
+  // discriminador oficial es `Intervenci_n_Humana` ('100% Vicky' vs 'Con
+  // intervencion humana'), el mismo que usa el correo de PAGADA del cotizador.
+  //
+  // Sin clasificacion (Zoho no respondio) NO se atribuye a nadie: esas ventas
+  // se cuentan aparte y el correo lo declara. Antes que inflar a Vicky,
+  // decirlo.
+  const esVicky = (v: { canal?: string }) => String(v.canal || "").startsWith("100%")
+  const clasificadas = ventas.filter((v) => String(v.canal || "").trim() !== "")
+  const deVicky = clasificadas.filter(esVicky)
+  const deEjecutivo = clasificadas.filter((v) => !esVicky(v))
 
   return {
     fecha,
@@ -249,8 +277,11 @@ async function construirFoto(fecha: string): Promise<Foto> {
     nuevas,
     formales: formal.length,
     medInicioFormal: m1,
-    ventas,
-    montoVentas: ventas.reduce((s, v) => s + v.monto, 0),
+    ventas: deVicky.map((v) => ({ cot: v.cot, empresa: v.empresa, monto: v.monto, dueno: v.dueno })),
+    montoVentas: deVicky.reduce((s, v) => s + v.monto, 0),
+    ventasEjecutivo: deEjecutivo.length,
+    montoVentasEjecutivo: deEjecutivo.reduce((s, v) => s + v.monto, 0),
+    ventasSinClasificar: ventas.length - clasificadas.length,
     motivos: [...porMotivo.entries()]
       .map(([motivo, casos]) => ({ motivo, casos }))
       .sort((a, b) => Number(a.motivo.startsWith("otros:")) - Number(b.motivo.startsWith("otros:")) || b.casos.length - a.casos.length),
@@ -321,7 +352,9 @@ function render(f: Foto, paraCorreo: boolean): string {
   <div style="border-bottom:2px solid #0e8a6d;padding-bottom:12px;margin-bottom:16px">
     <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#7d8890">Cierre diario de Vicky</div>
     <h1 style="margin:4px 0 0;font-size:20px">${largo(f.fecha)}</h1>
-    <div style="font-size:13px;color:#39434a;margin-top:4px">${f.ventas.length} ${f.ventas.length === 1 ? "venta" : "ventas"} · ${clp(f.montoVentas)} cobrados · ${f.conversaciones} conversaciones · ${f.formales} formales</div>
+    <div style="font-size:13px;color:#39434a;margin-top:4px">${f.ventas.length} ${f.ventas.length === 1 ? "venta" : "ventas"} de Vicky · ${clp(f.montoVentas)} cobrados · ${f.conversaciones} conversaciones · ${f.formales} formales</div>
+    ${f.ventasEjecutivo ? `<div style="font-size:12px;color:#7d8890;margin-top:3px">Ese día el canal ejecutivo (cotizadora del dash) cerró además ${f.ventasEjecutivo} ${f.ventasEjecutivo === 1 ? "venta" : "ventas"} por ${clp(f.montoVentasEjecutivo)} — no entran en las cifras de Vicky.</div>` : ""}
+    ${f.ventasSinClasificar ? `<div style="font-size:12px;color:#b26a00;margin-top:3px">${f.ventasSinClasificar} ${f.ventasSinClasificar === 1 ? "venta quedó" : "ventas quedaron"} sin clasificar por canal (Zoho no respondió): no se cuentan como de Vicky.</div>` : ""}
   </div>
   <table style="border-collapse:collapse;margin-bottom:4px"><tr>
     ${kpi(String(f.conversaciones), "conversaciones")}
@@ -374,7 +407,7 @@ export async function GET(req: Request): Promise<NextResponse | Response> {
   if (!forzar && (h < 7 || h > 10)) return NextResponse.json({ ok: true, enviado: false, motivo: `fuera de ventana (hora CL ${h})` })
   if (await yaEnviado(fecha)) return NextResponse.json({ ok: true, enviado: false, motivo: "ya se envió el cierre de ese día" })
 
-  const asunto = `Vicky · cierre ${largo(fecha)}: ${foto.ventas.length} ${foto.ventas.length === 1 ? "venta" : "ventas"} · ${clp(foto.montoVentas)}`
+  const asunto = `Vicky · cierre ${largo(fecha)}: ${foto.ventas.length} ${foto.ventas.length === 1 ? "venta" : "ventas"} de Vicky · ${clp(foto.montoVentas)}`
   let ok = false
   try {
     const token = await getZohoAccessToken()
