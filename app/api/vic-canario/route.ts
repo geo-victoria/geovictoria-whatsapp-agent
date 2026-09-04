@@ -43,6 +43,7 @@ import {
   blindarSoporteInventado,
 } from "@/lib/voseo-v3"
 import { corregirTelefonosEjecutivos, directorioEjecutivos } from "@/lib/directorio-ejecutivos"
+import { linksInvalidos, linkCortoDe } from "@/lib/link-cotizacion"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -168,6 +169,19 @@ function correrCanario(): { casos: number; fallas: Falla[] } {
         fallas.push({ caso: nombre, detalle: `link alterado: ${url} → salida: ${salida.slice(0, 240)}` })
       }
     }
+  }
+  // Detector de links INVENTADOS (04-sep, caso Andrea `/q/COT-310`): debe
+  // seguir cazando códigos que no son id-hash — y jamás marcar uno legítimo
+  // firmado con el secreto vigente (falso positivo = matar links buenos).
+  const inventados = linksInvalidos(
+    "Revísala aquí: https://cotizacion.geovictoria.com/q/COT-310 o https://cotizacion.geovictoria.com/q/COT000394",
+  )
+  if (inventados.length !== 2) {
+    fallas.push({ caso: "detector links inventados", detalle: `esperaba 2 marcados y dio ${inventados.length} — el cinturón de links inventados dejó de cazar` })
+  }
+  const legitimo = linkCortoDe("3525045000657868552")
+  if (legitimo && linksInvalidos(`Paga aquí: ${legitimo}`).length) {
+    fallas.push({ caso: "falso positivo links", detalle: `el detector marca como inventado un link corto legítimo: ${legitimo}` })
   }
   // Control positivo: el cinturón debe SEGUIR corrigiendo un número equivocado
   // junto a una ejecutiva (si dejó de corregir, murió en silencio).
