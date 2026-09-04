@@ -46,14 +46,13 @@ export async function notificarLeadAsignado(info: LeadAsignadoInfo): Promise<boo
   // Dueños robot: no son personas, no reciben aviso.
   if (/vicky@|info@geovictoria/i.test(vendedorEmail)) return false
   try {
-    // MISMOS DESTINATARIOS QUE LA ACCIÓN OFICIAL (Lalo 29-ago, "usa la acción,
-    // ahí ya se definen los destinatarios"): la API de Zoho NO deja ejecutar
-    // una acción de workflow desde fuera, pero el timeline de los leads
-    // mostró su configuración exacta — "Nuevo Lead Chile" va al DUEÑO del
-    // registro (verificado: Karina Soto→asepulveda@, manuel garcia→aaraque@)
-    // con copia FIJA a Brayan Bernal y Valeria Barbano. Se replica acá.
-    // Override por env; `-` deja el correo sin copia.
-    const ccCrudo = (process.env.VICKY_CC_LEAD_ASIGNADO || "bbernal@geovictoria.com,vbarbano@geovictoria.com").trim()
+    // DESTINATARIOS: el ejecutivo asignado + Victoria Luna en Chile. Hasta el
+    // 04-sep se copiaba además a Brayan Bernal y Valeria Barbano, replicando
+    // la acción de Zoho "Nuevo Lead Chile" (29-ago). Valeria pidió salir
+    // ("que solo le lleguen al comercial + Vicky Luna") y Lalo ordenó sacar a
+    // los dos de todas las comunicaciones de Vicky. Copias extra solo por env
+    // VICKY_CC_LEAD_ASIGNADO (lista separada por coma).
+    const ccCrudo = (process.env.VICKY_CC_LEAD_ASIGNADO || "").trim()
     const ccFijos = ccCrudo === "-" ? [] : ccCrudo.split(",").map((e) => e.trim()).filter(Boolean)
     // CONTENIDO: por defecto el nuestro (trae dotación y la marca de "pidió
     // que lo llamaran", que la plantilla oficial no tiene). Con vic_kv
