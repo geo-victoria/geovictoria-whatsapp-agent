@@ -14,12 +14,19 @@
  *   GET ?key=<cron>&cupos=<serviceId>   → horarios libres, respetando la
  *                                         holgura de 2 días hábiles
  *
- * SOLO LECTURA. No agenda nada.
+ * Los GET son SOLO LECTURA. Desde el 04-sep hay además un POST que RESERVA y
+ * otro que CANCELA — escriben en el calendario real de Diego o Nacho, así que
+ * exigen `confirmo:1` explícito y nunca ocurren por accidente.
+ *
+ *   POST {accion:"reservar", servicioId, staffId, desde, nombre, email, confirmo:1}
+ *   POST {accion:"cancelar", bookingId, confirmo:1}
  */
 
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import {
+  reservarCupo,
+  cancelarCupo,
   fetchDisponibilidad,
   bookingsConfigurado,
   accessTokenBookings,
@@ -95,4 +102,51 @@ export async function GET(req: Request): Promise<Response> {
     tokenRenueva: Boolean(token),
     detalle: token ? "el refresh token responde" : "el refresh token NO renueva — revisar credenciales",
   })
+}
+
+/**
+ * ESCRITURAS. Separadas del GET a propósito: agendar deja una cita real en la
+ * agenda de una persona y cancelar se la quita. Las dos piden `confirmo`.
+ */
+export async function POST(req: Request): Promise<Response> {
+  if (!(await autorizado(req))) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  }
+  if (!bookingsConfigurado()) {
+    return NextResponse.json({ ok: false, error: "Bookings no configurado" }, { status: 503 })
+  }
+  const b = (await req.json().catch(() => ({}))) as Record<string, unknown>
+  const t = (k: string) => String(b[k] || "").trim()
+  if (String(b.confirmo || "") !== "1") {
+    return NextResponse.json(
+      { ok: false, error: "falta confirmo:1 — esta llamada escribe en el calendario de una persona" },
+      { status: 400 },
+    )
+  }
+
+  if (t("accion") === "cancelar") {
+    const id = t("bookingId")
+    if (!id) return NextResponse.json({ ok: false, error: "falta bookingId" }, { status: 400 })
+    const ok = await cancelarCupo(id, t("motivo") || "Cancelada")
+    return NextResponse.json({ ok, bookingId: id })
+  }
+
+  if (t("accion") === "reservar") {
+    const faltan = ["servicioId", "staffId", "desde", "nombre", "email"].filter((k) => !t(k))
+    if (faltan.length) {
+      return NextResponse.json({ ok: false, error: `faltan campos: ${faltan.join(", ")}` }, { status: 400 })
+    }
+    const r = await reservarCupo({
+      servicioId: t("servicioId"),
+      staffId: t("staffId"),
+      desde: t("desde"),
+      nombre: t("nombre"),
+      email: t("email"),
+      telefono: t("telefono") || undefined,
+      notas: t("notas") || undefined,
+    })
+    return NextResponse.json(r, { status: r.ok ? 200 : 502 })
+  }
+
+  return NextResponse.json({ ok: false, error: "accion debe ser reservar|cancelar" }, { status: 400 })
 }
