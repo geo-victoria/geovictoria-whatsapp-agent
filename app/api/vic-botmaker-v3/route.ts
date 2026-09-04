@@ -74,6 +74,7 @@ function emailsDirectorio(): Set<string> {
   return new Set(directorioEjecutivos().map((f) => f.email.toLowerCase()))
 }
 import { transcribirAudio } from "@/lib/transcribe-audio"
+import { contactoEnMudo } from "@/lib/mudo-contacto"
 import { describirImagen } from "@/lib/describe-image"
 import { marcarCotizacionRechazada } from "@/lib/zoho-quote-status"
 import { updateZohoLeadStatus } from "@/lib/zoho-leads"
@@ -2194,6 +2195,24 @@ export async function POST(request: Request): Promise<NextResponse> {
         { reply: "Error: contact y message son requeridos." },
         { status: 400 },
       )
+    }
+
+    // 2.6-bis. MUDO TEMPORAL (04-sep, pedido de Lalo): la línea de Vicky usada
+    // como BUZÓN. Todo lo de arriba ya corrió —la nota de voz quedó
+    // transcrita, la captura y el PDF descritos con visión—, así que el
+    // material queda en el historial en texto y se puede leer después. Lo
+    // único que se corta es la respuesta: ni modelo, ni tools, ni maquinaria
+    // proactiva (por eso va ANTES de markUserActivity y resetLoop: un reenvío
+    // no debe re-anclar la cadencia y agendarle un toque a los 10 minutos).
+    // El mudo lleva su vencimiento adentro y tope de 12 h — ver lib/mudo-contacto.
+    if (await contactoEnMudo(contact)) {
+      await appendTurnV3(
+        contact,
+        message,
+        "[Vicky en mudo: mensaje recibido y transcrito, sin respuesta]",
+      ).catch(() => {})
+      console.log(`[v3-botmaker] contacto ${contact} EN MUDO — guardado sin responder (${message.length} chars)`)
+      return NextResponse.json({ reply: "" })
     }
 
     // 2.6. Botón "Confirmo asistencia" del recordatorio de reunión (plantilla
