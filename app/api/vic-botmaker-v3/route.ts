@@ -662,7 +662,17 @@ async function processOneTurn(
     const LINK_FABRICADO =
       /https?:\/\/(?:drive|docs)\.google\.com\/\S+|https?:\/\/(?:www\.)?(?:dropbox|wetransfer|mega)\.[a-z]+\/\S+/gi
     if (LINK_FABRICADO.test(reply)) {
-      console.error(
+      // CONVENCIÓN DE NIVEL DE LOG EN LOS CINTURONES (04-sep).
+      // Un cinturón que ataja algo NO es una falla: es el sistema haciendo su
+      // pega — el cliente recibió la respuesta corregida y nadie tiene que ir
+      // a apagar un incendio. Por eso todos los cinturones de este archivo van
+      // en `warn`: quedan escritos y buscables, pero fuera del panel de
+      // errores de Vercel, que es el que dispara las alertas al equipo. Un
+      // tercio del ruido que le llegaba a Rodrigo eran cinturones exitosos.
+      // En `error` se queda SOLO lo que de verdad se rompió y nadie atajó:
+      // los "Reintento forzado ... falló", el fallo al persistir el turno, el
+      // fallo al enviar la respuesta y el CIRCUIT_BREAKER.
+      console.warn(
         `[v3-bg] LINK_FABRICADO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
       )
       const esContextoCert = /certificaci|direcci[oó]n del trabajo|\bDT\b|resoluci[oó]n/i.test(reply)
@@ -690,7 +700,7 @@ async function processOneTurn(
         (c) => c.name === "consultar_agente_soporte" && c.ok,
       )
       if (!huboSoporteTurno && MESA_RE.test(reply)) {
-        console.error(
+        console.warn(
           `[v3-bg] MESA_EN_COMERCIAL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 250))}`,
         )
         const frases = reply.split(/(?<=[.!?😊🙌🙏])\s+|\n+/)
@@ -721,7 +731,7 @@ async function processOneTurn(
         console.log(`[v3-bg] LINK_DE_TOOL_RESCATADO contact=${contact} url=${u.slice(0, 140)}`)
         continue
       }
-      console.error(`[v3-bg] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
+      console.warn(`[v3-bg] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
       reply = reply.split(u).join("(te lo hago llegar enseguida)").trim()
     }
 
@@ -794,7 +804,7 @@ async function processOneTurn(
       !urlsVienenDeTools &&
       !urlsEnHistorial
     ) {
-      console.error(
+      console.warn(
         `[v3-bg] ALUCINACIÓN_URL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
       )
       // Auto-recuperación (17-jul, caso Multirut): con historial lleno de links
@@ -904,7 +914,7 @@ async function processOneTurn(
         .map((h) => String(h.content || ""))
       const chequeo = chequearPreciosDelReply(reply, toolsOk, histAsistente)
       if (!enOnboarding && chequeo.hayInventado) {
-        console.error(
+        console.warn(
           `[v3-bg] PRECIO_SIN_TOOL contact=${contact} montos=${JSON.stringify(chequeo.inventados)} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
         )
         const FORZAR_TOOL_PRECIO =
@@ -1195,7 +1205,7 @@ async function processOneTurn(
         .slice(-6)
         .filter((h) => TEXTOS_CONTENCION_DESCUENTO.some((t) => String(h.content || "").includes(t))).length
       if (!recuperado && contencionesRecientes >= 2) {
-        console.error(
+        console.warn(
           `[v3-bg] LOOP_DESCUENTO_ESCALADO contact=${contact} contenciones=${contencionesRecientes}`,
         )
         void avisarEquipoInterno(
@@ -1209,7 +1219,7 @@ async function processOneTurn(
       } else if (MULETILLAS_DESCUENTO.has(ultimoAsistente || "")) {
         // (B2) Ya pedimos "procesar el descuento" el turno anterior: romper el
         // loop cerrando hacia una decisión o derivación.
-        console.error(
+        console.warn(
           `[v3-bg] LOOP_MULETILLA_ROTO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
         )
         reply =
@@ -1218,7 +1228,7 @@ async function processOneTurn(
         // En el tope ya no hay margen y el prompt prohíbe volver a llamar la
         // tool: en vez de la muletilla "permíteme procesar el descuento" (paso
         // intermedio que sobra acá), declina firme en UNA sola frase.
-        console.error(
+        console.warn(
           `[v3-bg] TOPE_DECLINE_LIMPIO contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
         )
         reply =
@@ -1228,7 +1238,7 @@ async function processOneTurn(
         // muletilla "permíteme procesar el descuento" (paso intermedio que aquí
         // sobra y confunde —p. ej. cuando el cliente solo se está despidiendo—):
         // cierra suave hacia la decisión o la derivación.
-        console.error(
+        console.warn(
           `[v3-bg] POST_FORMAL_NO_MULETILLA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
         )
         reply =
@@ -1238,7 +1248,7 @@ async function processOneTurn(
         // decía "tampoco mandamos la muletilla" pero el código la mandaba —
         // era LA muletilla que atrapó a Mesa Incógnita 9 veces. Ahora cierra
         // hacia una DECISIÓN, honesto y sin "procesar en el sistema".
-        console.error(
+        console.warn(
           `[v3-bg] DESCUENTO_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
         reply =
@@ -1266,7 +1276,7 @@ async function processOneTurn(
       sumar(String(message || ""))
       const fix = corregirTelefonosEjecutivos(reply, numerosCliente)
       if (fix.correcciones.length > 0) {
-        console.error(
+        console.warn(
           `[v3-bg] TELEFONO_EJECUTIVO_CORREGIDO contact=${contact} ${JSON.stringify(fix.correcciones)}`,
         )
         void avisarEquipoInterno(
@@ -1327,7 +1337,7 @@ async function processOneTurn(
         }
       }
       if (!agendaRecuperada) {
-        console.error(
+        console.warn(
           `[v3-bg] ALUCINACIÓN_AGENDA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
         // Auditoría 20-jul: el fallo técnico NO se le cobra al cliente
@@ -1363,7 +1373,7 @@ async function processOneTurn(
         c.ok,
     )
     if (!enOnboarding && ANUNCIA_ACTUALIZADA_RE.test(reply) && !actualizoReal) {
-      console.error(
+      console.warn(
         `[v3-bg] ACTUALIZADA_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
       )
       // ESCAPE DEL BUCLE (01-sep, caso Lalo post-llamada): el cliente dijo
@@ -1474,7 +1484,7 @@ async function processOneTurn(
         }
       }
       if (!callbackRecuperado) {
-        console.error(
+        console.warn(
           `[v3-bg] ALUCINACIÓN_CALLBACK contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
         // Auditoría 20-jul (≥7 casos, un cliente urgido tipeó sus datos 3
@@ -1573,7 +1583,7 @@ async function processOneTurn(
         quotePointers.find((qp) => !!qp.acceptanceUrl)?.acceptanceUrl,
       )
       if (cura.curado) {
-        console.error(
+        console.warn(
           `[v3-bg] PLACEHOLDER_LINK contact=${contact} sinReemplazo=${cura.sinReemplazo} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
         )
         reply = cura.texto
@@ -1611,7 +1621,7 @@ async function processOneTurn(
         normEco(String(ultimoAsistente.content || "")) === normEco(reply) &&
         normEco(reply).length > 40
       ) {
-        console.error(`[v3-bg] ECO_DETECTADO contact=${contact}: reply idéntico al turno anterior, reintentando.`)
+        console.warn(`[v3-bg] ECO_DETECTADO contact=${contact}: reply idéntico al turno anterior, reintentando.`)
         const FORZAR_NO_ECO =
           "\n\n# Instrucción de sistema (este turno)\n" +
           "Tu borrador REPITE EXACTAMENTE tu mensaje anterior. El cliente acaba de decirte algo nuevo: respóndele a ESO, corto y natural. " +
@@ -1663,7 +1673,7 @@ async function processOneTurn(
       const { linksInvalidos } = await import("@/lib/link-cotizacion")
       const malos = linksInvalidos(reply)
       if (malos.length) {
-        console.error(
+        console.warn(
           `[v3-bg] LINK_INVENTADO_BLOQUEADO contact=${contact} links=${JSON.stringify(malos)} reply=${JSON.stringify(reply.slice(0, 240))}`,
         )
         const puntero = quotePointers.find((qp) => !!qp.acceptanceUrl)?.acceptanceUrl || ""

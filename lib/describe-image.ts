@@ -90,7 +90,10 @@ export async function describirImagen(imageUrl: string): Promise<string> {
       (bytes.length > 3 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) ||
       rawType.includes("pdf")
     if (buf.byteLength === 0 || buf.byteLength > (esPdf ? MAX_PDF_BYTES : MAX_IMAGE_BYTES)) {
-      console.error(`[v3-imagen] archivo inválido (bytes=${buf.byteLength}, pdf=${esPdf})`)
+      // Un adjunto vacío o más pesado que el tope no es una falla nuestra: es
+      // lo que mandó el cliente, y el lector lo rechaza bien (con tope de 3
+      // intentos en el cron). Va en warn para no ocupar el panel de errores.
+      console.warn(`[v3-imagen] archivo inválido (bytes=${buf.byteLength}, pdf=${esPdf})`)
       return ""
     }
     // EXCEL (.xlsx = zip) — 25-ago, F2 nómina multi-modal: la visión no lee
