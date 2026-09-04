@@ -145,16 +145,37 @@ ${botonWhatsApp("Retomar cuando quieras")}
 }
 
 /**
+ * ¿El rechazo de Zoho es DEFINITIVO o vale la pena reintentar? (04-sep)
+ *
+ * Distinguirlo es lo que evita que un correo imposible se reintente para
+ * siempre: el correo del lead rebota porque su dominio no existe, o el lead
+ * fue borrado/fusionado y su id ya no resuelve. Ninguna de las dos se arregla
+ * sola, y el cron las reintentaba en cada tick — dos casos de julio llevaban
+ * ~5.000 errores acumulados y eran el grueso de las alertas que le llegaban a
+ * Rodrigo.
+ *
+ * Regla: 4xx = el pedido está mal y lo va a seguir estando (dominio muerto,
+ * id inválido, permiso) → definitivo. La única excepción es 429, que es
+ * "ahora no" y sí se reintenta. 5xx y los cortes de red son transitorios.
+ */
+export function esRechazoDefinitivo(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 429
+}
+
+/**
  * Envía un correo al lead desde su registro en Zoho (from = vicky@). Devuelve
  * { ok } y, si Zoho rechaza, el detalle del error — nunca lanza.
+ *
+ * `definitivo` le dice al llamador que NO reintente: el correo no va a salir
+ * nunca por este camino y la cadencia tiene que avanzar igual.
  */
 export async function sendLeadEmail(
   leadId: string,
   toEmail: string,
   subject: string,
   html: string,
-): Promise<{ ok: boolean; error?: string }> {
-  if (!leadId || !toEmail) return { ok: false, error: "leadId o email faltante" }
+): Promise<{ ok: boolean; error?: string; definitivo?: boolean }> {
+  if (!leadId || !toEmail) return { ok: false, error: "leadId o email faltante", definitivo: true }
   try {
     const token = await getZohoAccessToken()
     const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -182,8 +203,16 @@ export async function sendLeadEmail(
     )
     if (!res.ok) {
       const body = await res.text().catch(() => "")
-      console.error(`[lead-mail] send_mail ${res.status} lead=${leadId}:`, body.slice(0, 300))
-      return { ok: false, error: `${res.status}: ${body.slice(0, 250)}` }
+      const definitivo = esRechazoDefinitivo(res.status)
+      // Un rechazo definitivo NO es una falla del sistema: es un dato malo del
+      // lead. Va como warn para que no engorde el panel de errores de Vercel
+      // (era el 88% de lo que llegaba), pero queda escrito y legible.
+      const log = definitivo ? console.warn : console.error
+      log(
+        `[lead-mail] send_mail ${res.status}${definitivo ? " DEFINITIVO" : ""} lead=${leadId}:`,
+        body.slice(0, 300),
+      )
+      return { ok: false, error: `${res.status}: ${body.slice(0, 250)}`, definitivo }
     }
     return { ok: true }
   } catch (e) {

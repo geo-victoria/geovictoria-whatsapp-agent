@@ -160,6 +160,10 @@ export async function GET(req: Request): Promise<Response> {
     .concat([2, 24, 120, 168, 192])
     .slice(0, 5)
   const hAgotar = hE3 + 4
+  // Techo de reintentos por toque: pasadas estas horas desde que el toque
+  // venció, se marca y la cadencia sigue aunque nunca haya salido. Es la red
+  // que atrapa cualquier falla nueva que no sepamos clasificar todavía.
+  const HORAS_REINTENTO_TOQUE = 48
 
   const res = await supa(
     `vic_outbound_cadence?status=eq.activa&select=*&order=started_at.asc&limit=200`,
@@ -196,7 +200,14 @@ export async function GET(req: Request): Promise<Response> {
   const now = Date.now()
   let cerradosRespondio = 0
   let cerradosOptout = 0
-  const pendientes: Array<{ row: Row; accion: "e1" | "waNudge" | "e2" | "waCierre" | "e3" | "agotar" }> = []
+  const pendientes: Array<{
+    row: Row
+    accion: "e1" | "waNudge" | "e2" | "waCierre" | "e3" | "agotar"
+    /** Horas desde el toque 0 y hora en que ESTE toque venció: con las dos se
+     *  sabe cuánto lleva un toque intentándose sin salir. */
+    hrs: number
+    vencioA: number
+  }> = []
 
   for (const r of rows) {
     // Migrado al Loop v2 → este motor no lo toca (el loop es el dueño del ciclo).
@@ -217,12 +228,12 @@ export async function GET(req: Request): Promise<Response> {
       continue
     }
     const hrs = (now - new Date(r.started_at).getTime()) / 3600e3
-    if (!r.e1_sent_at && hrs >= hE1) pendientes.push({ row: r, accion: "e1" })
-    else if (!r.wa_nudge_sent_at && hrs >= hWaN) pendientes.push({ row: r, accion: "waNudge" })
-    else if (!r.e2_sent_at && hrs >= hE2) pendientes.push({ row: r, accion: "e2" })
-    else if (!r.wa_cierre_sent_at && hrs >= hWaC) pendientes.push({ row: r, accion: "waCierre" })
-    else if (!r.e3_sent_at && hrs >= hE3) pendientes.push({ row: r, accion: "e3" })
-    else if (r.e3_sent_at && hrs >= hAgotar) pendientes.push({ row: r, accion: "agotar" })
+    if (!r.e1_sent_at && hrs >= hE1) pendientes.push({ row: r, accion: "e1", hrs, vencioA: hE1 })
+    else if (!r.wa_nudge_sent_at && hrs >= hWaN) pendientes.push({ row: r, accion: "waNudge", hrs, vencioA: hWaN })
+    else if (!r.e2_sent_at && hrs >= hE2) pendientes.push({ row: r, accion: "e2", hrs, vencioA: hE2 })
+    else if (!r.wa_cierre_sent_at && hrs >= hWaC) pendientes.push({ row: r, accion: "waCierre", hrs, vencioA: hWaC })
+    else if (!r.e3_sent_at && hrs >= hE3) pendientes.push({ row: r, accion: "e3", hrs, vencioA: hE3 })
+    else if (r.e3_sent_at && hrs >= hAgotar) pendientes.push({ row: r, accion: "agotar", hrs, vencioA: hAgotar })
   }
 
   // Horario hábil del contacto (mismo RPC que seguimiento/reactivación).
@@ -322,9 +333,26 @@ export async function GET(req: Request): Promise<Response> {
         await marcarToque(p.row.contact, campo)
         enviados++
         detalle.push({ contact: p.row.contact, accion: p.accion, ok: true })
-      } else {
-        detalle.push({ contact: p.row.contact, accion: p.accion, ok: false, error: envio.error })
+        continue
       }
+      // NINGÚN TOQUE SE REINTENTA PARA SIEMPRE (04-sep). Antes, un correo que
+      // fallaba dejaba el toque sin marcar y el cron lo reintentaba en cada
+      // tick — dos leads de julio (uno con el dominio del correo inexistente,
+      // otro borrado del CRM) llevaban ~5.000 intentos. Las otras dos ramas de
+      // este mismo cron ya marcaban el toque para avanzar; a esta se le olvidó.
+      const definitivo = envio.definitivo === true
+      const agotado = p.hrs > p.vencioA + HORAS_REINTENTO_TOQUE
+      if (definitivo || agotado) {
+        await marcarToque(p.row.contact, campo)
+        detalle.push({
+          contact: p.row.contact,
+          accion: p.accion,
+          skip: definitivo ? "correo imposible (rechazo definitivo)" : "reintentos agotados",
+          error: envio.error,
+        })
+        continue
+      }
+      detalle.push({ contact: p.row.contact, accion: p.accion, ok: false, error: envio.error })
       continue
     }
 
