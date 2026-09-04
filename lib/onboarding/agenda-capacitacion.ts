@@ -103,8 +103,52 @@ export const SERVICIOS_GEOAVANZADO = {
     "isalinas@geovictoria.com": "4631613000006546494",
     "dalegre@geovictoria.com": "4631613000006546604",
   } as Record<string, string>,
+  /** Bookings pide el id del relator aparte del servicio (verificados en vivo). */
+  staff: {
+    "isalinas@geovictoria.com": "4631613000006534230",
+    "dalegre@geovictoria.com": "4631613000006545465",
+  } as Record<string, string>,
 } as const
 
+const norm = (correo: string) => correo.trim().toLowerCase()
+
 export function servicioCurso1De(correoRelator: string): string | null {
-  return SERVICIOS_GEOAVANZADO.curso1[correoRelator.trim().toLowerCase()] || null
+  return SERVICIOS_GEOAVANZADO.curso1[norm(correoRelator)] || null
+}
+
+export function staffDe(correoRelator: string): string | null {
+  return SERVICIOS_GEOAVANZADO.staff[norm(correoRelator)] || null
+}
+
+/**
+ * "2026-09-08" + "14:30" → "08-Sep-2026 14:30:00", que es lo que come Bookings.
+ * Acepta la hora en 24h o con AM/PM, porque los cupos vienen como "02:30 PM"
+ * y el cliente escribe "14:30" — traducir eso a mano es pedir un bug.
+ */
+export function momentoBookings(fechaISO: string, hora: string): string | null {
+  const h = hora.trim().toUpperCase()
+  const m = h.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/)
+  if (!m) return null
+  let hh = Number(m[1])
+  const mm = Number(m[2])
+  if (hh > 23 || mm > 59) return null
+  if (m[3] === "PM" && hh < 12) hh += 12
+  if (m[3] === "AM" && hh === 12) hh = 0
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaISO)) return null
+  return `${aFormatoBookings(fechaISO)} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00`
+}
+
+/** Compara dos horas escritas distinto ("02:30 PM" vs "14:30") sin fallar. */
+export function mismaHora(a: string, b: string): boolean {
+  const norm24 = (x: string): string | null => {
+    const m = x.trim().toUpperCase().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/)
+    if (!m) return null
+    let hh = Number(m[1])
+    if (m[3] === "PM" && hh < 12) hh += 12
+    if (m[3] === "AM" && hh === 12) hh = 0
+    return `${String(hh).padStart(2, "0")}:${m[2]}`
+  }
+  const na = norm24(a)
+  const nb = norm24(b)
+  return Boolean(na && nb && na === nb)
 }

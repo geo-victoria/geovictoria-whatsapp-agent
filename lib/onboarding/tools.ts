@@ -200,3 +200,42 @@ export const TOOL_ELIMINAR_TRABAJADOR = {
     required: ["rut"],
   },
 } as const
+
+/**
+ * VER CUPOS DE LA CAPACITACIÓN. Devuelve solo horarios que Bookings dice que
+ * están libres, y ya filtrados por la holgura de 2 días hábiles: lo que sale
+ * de acá es exactamente lo que se le puede ofrecer al cliente. Vicky NUNCA
+ * inventa un horario ni lo deduce.
+ */
+export const TOOL_VER_CUPOS_CAPACITACION = {
+  name: "ver_cupos_capacitacion",
+  description:
+    "Consulta los horarios disponibles para la capacitación (Curso 1) del cliente, con el relator que ya tiene asignado. " +
+    "Úsala cuando el cliente diga que quiere agendar, o cuando le vayas a ofrecer horarios. " +
+    "No recibe parámetros. Devuelve el nombre del relator y las fechas con sus horas libres. " +
+    "Ofrece SOLO estos horarios: no propongas ninguno que no venga en esta lista.",
+  input_schema: { type: "object" as const, properties: {}, required: [] as string[] },
+}
+
+/**
+ * AGENDAR. Es la única acción del onboarding que escribe en la agenda de una
+ * persona, así que el candado no está en el prompt: la tool verifica que el
+ * horario venga de la disponibilidad real y se niega si el cliente ya tiene
+ * su cita tomada.
+ */
+export const TOOL_AGENDAR_CAPACITACION = {
+  name: "agendar_capacitacion",
+  description:
+    "Reserva la capacitación (Curso 1) en el horario que eligió el cliente. Llámala SOLO después de que el cliente " +
+    "haya elegido uno de los horarios que devolvió ver_cupos_capacitacion, y solo con un horario de esa lista. " +
+    "Devuelve la confirmación con el día, la hora, el relator y el link de la reunión, en mensajeParaProspecto: " +
+    "cópialo tal cual. Si el cliente ya tiene una capacitación agendada, te lo dirá en vez de agendar otra.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      fecha: { type: "string" as const, description: "Fecha elegida en formato YYYY-MM-DD, tal como vino en los cupos." },
+      hora: { type: "string" as const, description: "Hora elegida, tal como vino en los cupos (ej. '02:30 PM' o '14:30')." },
+    },
+    required: ["fecha", "hora"],
+  },
+}

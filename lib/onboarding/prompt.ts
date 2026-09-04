@@ -224,6 +224,15 @@ export function promptConfiguracionCL(estado: {
     "- REGLA DURA: todo archivo/mensaje con trabajadores pasa por guardar_nomina SIEMPRE, aunque " +
     "creas que ya lo cargaste — la fusión por RUT hace inofensivo repetir, y tu memoria puede " +
     "estar desactualizada. La nómina REAL es la lista del estado de abajo, nada más.\n" +
+    "\n# La capacitación\n" +
+    "- Una vez cargada la nómina, OFRÉCELE agendar su capacitación (Curso 1, 2 horas por videollamada). " +
+    "Es lo que lo deja usando la plataforma de verdad, así que vale la pena empujarlo.\n" +
+    "- Para saber qué horarios hay, llama ver_cupos_capacitacion. Ofrécele SOLO los horarios que devuelva: " +
+    "esos son los que su relator tiene libres de verdad. JAMÁS inventes una hora ni digas 'te contacto para " +
+    "coordinar' — tú puedes cerrarlo aquí mismo.\n" +
+    "- Cuando elija uno, llama agendar_capacitacion con esa fecha y hora, y copia el mensajeParaProspecto tal cual.\n" +
+    "- Si el cliente prefiere agendarla después, perfecto: no insistas más de una vez y cierra igual.\n" +
+    "- Si la tool te dice que ya tiene una capacitación agendada, recuérdasela; no agendes otra.\n" +
     "- El CORREO PERSONAL de cada trabajador es OBLIGATORIO (ahí activan su acceso). Si faltan " +
     "correos, la tool te dirá de quiénes: pídelos con naturalidad, de a pocos.\n" +
     "- Cada dato que entregue el cliente → tool DE INMEDIATO (guardar_nomina, definir_turno, " +

@@ -6,6 +6,9 @@ import {
   esDiaHabil,
   aFormatoBookings,
   servicioCurso1De,
+  staffDe,
+  momentoBookings,
+  mismaHora,
 } from "../lib/onboarding/agenda-capacitacion.ts"
 
 /** Mediodía en Chile del día dado, para que la fecha no se corra por zona. */
@@ -76,5 +79,41 @@ describe("el curso sigue al jefe de proyecto", () => {
   })
   test("un relator desconocido devuelve null, no un servicio equivocado", () => {
     assert.equal(servicioCurso1De("otra@geovictoria.com"), null)
+  })
+})
+
+describe("traducción de horas — donde nacen los bugs de agenda", () => {
+  test("los cupos vienen en AM/PM y el cliente escribe en 24h: son la misma hora", () => {
+    assert.equal(mismaHora("02:30 PM", "14:30"), true)
+    assert.equal(mismaHora("08:30 AM", "8:30"), true)
+    assert.equal(mismaHora("12:00 AM", "00:00"), true)
+    assert.equal(mismaHora("12:00 PM", "12:00"), true)
+  })
+  test("horas distintas no se confunden", () => {
+    assert.equal(mismaHora("02:30 PM", "02:30 AM"), false)
+    assert.equal(mismaHora("09:00 AM", "09:15"), false)
+  })
+  test("basura no calza con nada — jamás abre la puerta a reservar", () => {
+    assert.equal(mismaHora("cuando sea", "14:30"), false)
+    assert.equal(mismaHora("", "14:30"), false)
+  })
+  test("arma el momento que come Bookings", () => {
+    assert.equal(momentoBookings("2026-09-10", "04:00 PM"), "10-Sep-2026 16:00:00")
+    assert.equal(momentoBookings("2026-09-08", "8:30"), "08-Sep-2026 08:30:00")
+  })
+  test("rechaza lo que no puede traducir, en vez de inventar una hora", () => {
+    assert.equal(momentoBookings("2026-09-10", "en la tarde"), null)
+    assert.equal(momentoBookings("10-09-2026", "16:00"), null)
+    assert.equal(momentoBookings("2026-09-10", "25:00"), null)
+  })
+})
+
+describe("el relator y su calendario", () => {
+  test("cada uno con su servicio y su ficha en Bookings", () => {
+    assert.equal(staffDe("dalegre@geovictoria.com"), "4631613000006545465")
+    assert.equal(staffDe("isalinas@geovictoria.com"), "4631613000006534230")
+  })
+  test("un correo desconocido no devuelve el calendario de otro", () => {
+    assert.equal(staffDe("cualquiera@geovictoria.com"), null)
   })
 })

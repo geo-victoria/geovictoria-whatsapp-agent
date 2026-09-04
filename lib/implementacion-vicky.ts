@@ -174,3 +174,54 @@ export async function crearImplementacionGvAvanzado(
     return null
   }
 }
+
+/**
+ * Deja la capacitación agendada ESCRITA en la implementación, con la misma
+ * convención que usa el auto-onboarding: `Estado_Curso_1_SMB` en
+ * "Autoagendamiento" (verificado en IMP-11366 del wizard, 03-sep). Así el
+ * equipo de implementación ve las capacitaciones que agenda Vicky exactamente
+ * igual que las que agenda el formulario, sin aprender nada nuevo.
+ *
+ * Best-effort: la cita YA está tomada en Bookings y el cliente ya la tiene
+ * confirmada — si el CRM falla, lo que se pierde es el reflejo, no la hora.
+ */
+export async function registrarCurso1Agendado(
+  implementacionId: string,
+  d: { desdeBookings: string; relator: string },
+): Promise<boolean> {
+  try {
+    const token = await getZohoAccessToken()
+    // "10-Sep-2026 16:00:00" → "2026-09-10T16:00:00-04:00" (hora de Chile).
+    const MESES: Record<string, string> = {
+      Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+      Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+    }
+    const m = d.desdeBookings.match(/^(\d{2})-([A-Za-z]{3})-(\d{4})\s+(\d{2}:\d{2}):\d{2}$/)
+    const iso = m ? `${m[3]}-${MESES[m[2]] || "01"}-${m[1]}T${m[4]}:00-04:00` : null
+    if (!iso) return false
+    const r = await fetch(`${API()}/crm/v3/Implementaciones/${implementacionId}`, {
+      method: "PUT",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [
+          {
+            Fecha_y_Hora_Curso_1: iso,
+            Relator_Curso_1: d.relator,
+            Estado_Curso_1_SMB: "Autoagendamiento",
+            Fecha_hora_agendamiento_Curso_1: new Date().toISOString(),
+          },
+        ],
+        trigger: ["blueprint"],
+      }),
+    })
+    if (!r.ok) {
+      console.warn(`[implementacion] no se pudo escribir el Curso 1 en ${implementacionId}: ${r.status}`)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn("[implementacion] excepción escribiendo el Curso 1:", e instanceof Error ? e.message : e)
+    return false
+  }
+}

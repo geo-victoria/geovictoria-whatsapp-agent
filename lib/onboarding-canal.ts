@@ -64,6 +64,8 @@ import {
   TOOL_ASIGNAR_PLANIFICACION,
   TOOL_ELIMINAR_TRABAJADOR,
   TOOL_CONFIRMAR_CONFIGURACION,
+  TOOL_VER_CUPOS_CAPACITACION,
+  TOOL_AGENDAR_CAPACITACION,
 } from "./onboarding/tools"
 
 /**
@@ -149,6 +151,150 @@ export async function armarOnboarding(contact: string): Promise<{
   }
 
   const dispatch = async (name: string, input: unknown): Promise<unknown> => {
+    // ── CAPACITACIÓN (Curso 1) ────────────────────────────────────────────
+    // Vicky cierra sola (decisión de Lalo 04-sep). Los candados están acá, no
+    // en el prompt: el horario tiene que venir de la disponibilidad REAL, y un
+    // cliente que ya tiene su cita no puede tomar otra.
+    if (name === TOOL_VER_CUPOS_CAPACITACION.name || name === TOOL_AGENDAR_CAPACITACION.name) {
+      const crudo = await getKvValue(claveCapacitacion(contact)).catch(() => null)
+      const cap = crudo
+        ? (JSON.parse(crudo) as {
+            implementacionId?: string
+            numero?: string
+            empresa?: string
+            relator?: { nombre: string; email: string }
+            bookingId?: string
+            cuando?: string
+          })
+        : null
+      if (!cap?.relator?.email) {
+        return {
+          ok: false,
+          error:
+            "Todavía no hay implementación creada para este cliente, así que no sé qué relator le toca. " +
+            "No ofrezcas capacitación: primero tiene que quedar creada su cuenta.",
+        }
+      }
+      const {
+        servicioCurso1De, staffDe, fechasAgendables, aFormatoBookings, momentoBookings, mismaHora,
+      } = await import("./onboarding/agenda-capacitacion")
+      const servicioId = servicioCurso1De(cap.relator.email)
+      const staffId = staffDe(cap.relator.email)
+      if (!servicioId || !staffId) {
+        return { ok: false, error: `No tengo el calendario de ${cap.relator.nombre}. Avisa al equipo; no prometas una hora.` }
+      }
+      const { fetchDisponibilidad } = await import("./zoho-bookings")
+      const cuposDe = async (fechaISO: string): Promise<string[]> => {
+        const r = (await fetchDisponibilidad(servicioId, aFormatoBookings(fechaISO), staffId).catch(() => null)) as
+          | { response?: { returnvalue?: { data?: unknown } } }
+          | null
+        const d = r?.response?.returnvalue?.data
+        const lista = Array.isArray(d) ? d : d ? [d] : []
+        return lista.flat().map((x) => String(x)).filter(Boolean)
+      }
+
+      if (name === TOOL_VER_CUPOS_CAPACITACION.name) {
+        if (cap.bookingId) {
+          return {
+            ok: true,
+            yaAgendada: true,
+            cuando: cap.cuando,
+            relator: cap.relator.nombre,
+            nota: "Este cliente YA tiene su capacitación agendada. Recuérdasela en vez de ofrecer otra.",
+          }
+        }
+        const dias: Array<{ fecha: string; horas: string[] }> = []
+        for (const f of fechasAgendables(new Date(), 4)) {
+          const horas = await cuposDe(f)
+          if (horas.length) dias.push({ fecha: f, horas })
+        }
+        return {
+          ok: true,
+          relator: cap.relator.nombre,
+          duracionMin: 120,
+          dias,
+          nota: dias.length
+            ? "Ofrece SOLO estos horarios. Son de la agenda real del relator."
+            : "Sin cupos en los próximos días. Dile que le confirmas la hora por este chat y avisa al equipo.",
+        }
+      }
+
+      // ── AGENDAR ──
+      if (cap.bookingId) {
+        return {
+          ok: false,
+          yaAgendada: true,
+          cuando: cap.cuando,
+          error: `Este cliente ya tiene su capacitación agendada (${cap.cuando}). No se agenda otra.`,
+        }
+      }
+      const inp = (input || {}) as { fecha?: string; hora?: string }
+      const fecha = String(inp.fecha || "").trim()
+      const hora = String(inp.hora || "").trim()
+      const libres = await cuposDe(fecha)
+      if (!libres.some((h) => mismaHora(h, hora))) {
+        return {
+          ok: false,
+          error: `El ${fecha} a las ${hora} no está disponible. Vuelve a mirar los cupos y ofrécele uno de los que salgan.`,
+          disponibles: libres,
+        }
+      }
+      const desde = momentoBookings(fecha, hora)
+      if (!desde) return { ok: false, error: "No entendí la fecha o la hora. Pídeselas de nuevo con un horario de la lista." }
+
+      const b = await cargarBorrador(contact)
+      const { reservarCupo } = await import("./zoho-bookings")
+      const nombreCliente = `${b.admin.nombre || ""} ${b.admin.apellido || ""}`.trim() || cap.empresa || "Cliente"
+      const r = await reservarCupo({
+        servicioId,
+        staffId,
+        desde,
+        nombre: nombreCliente,
+        email: b.admin.email || "",
+        telefono: `+${contact.replace(/\D/g, "")}`,
+        camposPropios: {
+          Empresa: cap.empresa || b.empresa.nombre || "",
+          "Numero de implementacion": cap.numero || "",
+        },
+        notas: "Agendada por Vicky desde el chat de onboarding.",
+      })
+      if (!r.ok) {
+        await avisarEquipoInterno(
+          `⚠️ No se pudo agendar la capacitación de +${contact} (${cap.empresa}) con ${cap.relator.nombre}: ${JSON.stringify(r.detalle).slice(0, 300)}`,
+        ).catch(() => {})
+        return {
+          ok: false,
+          error: "La reserva no entró. Dile que le confirmas la hora por este chat — NO afirmes que quedó agendada.",
+        }
+      }
+      const cuandoLegible = `${fecha} a las ${hora}`
+      await setKvValue(
+        claveCapacitacion(contact),
+        JSON.stringify({ ...cap, bookingId: r.bookingId, cuando: cuandoLegible }),
+      ).catch(() => {})
+      // Queda escrita en la implementación con la MISMA convención que usa el
+      // auto-onboarding ("Autoagendamiento"), para que el equipo vea nuestras
+      // capacitaciones igual que las suyas.
+      if (cap.implementacionId) {
+        const { registrarCurso1Agendado } = await import("./implementacion-vicky")
+        await registrarCurso1Agendado(cap.implementacionId, {
+          desdeBookings: desde,
+          relator: cap.relator.nombre,
+        }).catch(() => {})
+      }
+      const detalle = (r.detalle as { response?: { returnvalue?: { meeting_info?: { join_link?: string } } } })?.response
+        ?.returnvalue?.meeting_info?.join_link
+      return {
+        ok: true,
+        bookingId: r.bookingId,
+        mensajeParaProspecto:
+          `¡Listo! Tu capacitación quedó agendada para el ${cuandoLegible} con ${cap.relator.nombre} 🎉\n\n` +
+          `Dura 2 horas y es por videollamada.` +
+          (detalle ? `\n\nAcá te conectas el día de la sesión:\n${detalle}` : "") +
+          `\n\nTe va a llegar la invitación al correo también. Cualquier cosa me escribes por acá 😊`,
+      }
+    }
+
     // ── Tools F2 (fase configuración) ──
     if (name === TOOL_GUARDAR_NOMINA.name) {
       const inp = (input || {}) as { filas?: string; reemplazar?: boolean }
@@ -584,6 +730,11 @@ export async function armarOnboarding(contact: string): Promise<{
             TOOL_ASIGNAR_PLANIFICACION,
             TOOL_ELIMINAR_TRABAJADOR,
             TOOL_CONFIRMAR_CONFIGURACION,
+            // La capacitación vive en la fase de CONFIGURACIÓN: recién ahí el
+            // cliente ya tiene su cuenta y su implementación, que es de donde
+            // sale el relator que le toca.
+            TOOL_VER_CUPOS_CAPACITACION,
+            TOOL_AGENDAR_CAPACITACION,
             consultarAgenteSoporteSchema,
           ]
         : [
