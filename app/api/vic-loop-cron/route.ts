@@ -164,6 +164,11 @@ const VARS_PLANTILLA: Record<string, readonly string[]> = {
   vicky_loop_con_precio_co: [],
   vicky_loop_con_precio_mx: [],
   vicky_loop_pago: ["nombre"],
+  // Gemela CON LINK (04-sep): la de arriba dice "¿te ayudo con el pago?" y no
+  // lleva a ninguna parte — 28 toques salieron así a 14 clientes que YA habían
+  // aceptado, justo donde el link ES el toque. Se activa por env
+  // LOOP_TPL_ACEPTADA cuando Meta la apruebe.
+  vicky_loop_pago_link_cl: ["nombre", "link"],
   vicky_loop_retoma: ["nombre"],
   vicky_loop_retoma_rut: ["nombre"],
   vicky_loop_despedida: ["nombre"],
@@ -1054,6 +1059,10 @@ export async function GET(req: Request): Promise<Response> {
       // cotización y, en el toque de urgencia, la fecha de vigencia (emisión
       // + 30 días). Sin puntero no se inventa nada: el toque se salta limpio.
       let textoFinal = texto
+      // Link de pago del contacto: lo usa el texto dentro de ventana y, desde
+      // el 04-sep, también la PLANTILLA de fuera de ventana (la vieja pedía el
+      // pago sin llevar a ninguna parte).
+      let linkPago = ""
       if (stage === "aceptada") {
         const { getQuotePointer } = await import("@/lib/supabase-persistence-v3")
         const puntero = await getQuotePointer(r.contact).catch(() => null)
@@ -1067,6 +1076,11 @@ export async function GET(req: Request): Promise<Response> {
         const vigencia = Number.isFinite(emitida)
           ? new Date(emitida + 30 * 86400e3).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "America/Santiago" })
           : "vencimiento próximo"
+        // El corto (/q/…) cabe en una variable de plantilla; el largo lleva un
+        // JWT que no. Si no hay secreto para firmarlo, va el largo igual: en
+        // el cuerpo del mensaje entra sin problema.
+        const { linkCortoDe } = await import("@/lib/link-cotizacion")
+        linkPago = linkCortoDe(puntero.quoteId || "") || puntero.acceptanceUrl
         textoFinal = texto.replaceAll("{LINK_PAGO}", puntero.acceptanceUrl).replaceAll("{VIGENCIA}", vigencia)
       }
       // Anti-repetición: nunca el mismo texto dos veces al mismo contacto.
@@ -1159,7 +1173,7 @@ export async function GET(req: Request): Promise<Response> {
             r.contact,
             canal,
             tpl,
-            paramsParaPlantilla(tpl, { empresa: empresaReal }),
+            paramsParaPlantilla(tpl, { empresa: empresaReal, link: linkPago }),
           )
 
           const ok = await sendBotmakerTemplate(r.contact, tpl, params, canal).catch(() => false)

@@ -62,3 +62,21 @@ export function linksInvalidos(texto: string): string[] {
     .filter((l) => l.veredicto !== "valido")
     .map((l) => l.url)
 }
+
+/** Base pública del cotizador (misma que usa el resto del repo). */
+const BASE_COTIZADOR = (process.env.VICKY_COTIZADOR_BASE || "https://cotizacion.geovictoria.com").replace(/\/$/, "")
+
+/**
+ * Link CORTO firmado de una cotización, o "" si no hay secreto para firmarlo.
+ *
+ * El corto existe porque el token JWT del link largo no cabe en una variable
+ * de plantilla de Meta. Se construye igual que en el cotizador: HMAC del
+ * quoteId truncado a 10 hex.
+ */
+export function linkCortoDe(quoteId: string): string {
+  const id = String(quoteId || "").replace(/\D/g, "")
+  const s = secreto()
+  if (!id || !s) return ""
+  const firma = createHmac("sha256", s).update(id).digest("hex").slice(0, 10)
+  return `${BASE_COTIZADOR}/q/${id}-${firma}`
+}
