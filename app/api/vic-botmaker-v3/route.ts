@@ -886,6 +886,65 @@ async function processOneTurn(
       }
     }
 
+    // 2.5-bis. NINGÚN PRECIO SALE SIN RESPALDO (04-sep, caso Carlos/Anton Paar).
+    //
+    // Vicky le dijo que su plan subía de $43.781 a "$47.642 con 6 personas".
+    // Falso: el tramo 3-10 es FIJO. Nadie calculó ese número — el modelo lo
+    // compuso, y el cliente bajó su pedido de 6 personas a 5 por una cifra
+    // inventada (la cachó dos veces: "creo que subió el precio").
+    //
+    // Misma regla de procedencia que el cinturón de URLs: un monto vale si lo
+    // produjo una tool de precio de ESTE turno, o si Vicky ya se lo había
+    // dicho antes a este contacto (repetir el precio vigente es legítimo).
+    {
+      const { chequearPreciosDelReply } = await import("@/lib/precio-sin-tool")
+      const toolsOk = (toolCalls || []).filter((c) => c.ok).map((c) => c.name)
+      const histAsistente = history
+        .filter((h) => h.role === "assistant")
+        .map((h) => String(h.content || ""))
+      const chequeo = chequearPreciosDelReply(reply, toolsOk, histAsistente)
+      if (!enOnboarding && chequeo.hayInventado) {
+        console.error(
+          `[v3-bg] PRECIO_SIN_TOOL contact=${contact} montos=${JSON.stringify(chequeo.inventados)} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
+        )
+        const FORZAR_TOOL_PRECIO =
+          "\n\n# Instrucción de sistema (este turno)\n" +
+          "Tu borrador anterior AFIRMÓ un precio que ninguna tool calculó en este turno y que " +
+          "tú nunca le habías dicho a este cliente. PROHIBIDO componer, estimar o extrapolar " +
+          "precios: el motor es la única fuente. Si el cliente pregunta por un valor nuevo " +
+          "(otra dotación, otra configuración), llama AHORA la tool que corresponde " +
+          "(cotizar_referencial o actualizar_cotizacion) y entrega su cifra tal cual. Si el " +
+          "precio no cambió, dilo sin inventar una cifra nueva."
+        const retryP = await runAgentLoop({
+          systemPrompt:
+            contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_PRECIO,
+          history,
+          userMessage: message,
+          apiKey,
+          contact,
+          model: MODELO_COTIZACION,
+        }).catch(() => null)
+        const rReply = (retryP?.reply || "").trim()
+        const rTools = ((retryP?.toolCalls || []) as ToolCallRecord[]).filter((c) => c.ok).map((c) => c.name)
+        const rOk = rReply && !chequearPreciosDelReply(rReply, rTools, histAsistente).hayInventado
+        if (rOk) {
+          console.warn(`[v3-bg] PRECIO_RECUPERADO contact=${contact}`)
+          reply = rReply
+          if (retryP?.toolCalls) result.toolCalls = retryP.toolCalls
+        } else {
+          // El precio equivocado a un cliente que está por pagar es peor que
+          // una demora: se contiene y el equipo se entera (mismo criterio que
+          // el cinturón de URLs).
+          reply =
+            "Déjame confirmarte el valor exacto con el sistema para no darte una cifra equivocada — te lo digo en un momento 🙌"
+        }
+        void avisarEquipoInterno(
+          `⚠️ PRECIO SIN RESPALDO a +${contact}: el modelo afirmó ${chequeo.inventados.join(", ")} sin tool. ` +
+            `${rOk ? "Recuperado con la tool en el reintento." : "CONTENIDO — revisar el chat."}`,
+        ).catch(() => false)
+      }
+    }
+
     // 2.6. Guardrail anti-alucinación de descuento.
     // Si el reply menciona un % de descuento pero NO hubo una tool de descuento
     // exitosa en este turno, lo normal es que el modelo lo inventó. Pero hay dos
