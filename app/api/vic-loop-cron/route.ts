@@ -1070,13 +1070,24 @@ export async function GET(req: Request): Promise<Response> {
         textoFinal = texto.replaceAll("{LINK_PAGO}", puntero.acceptanceUrl).replaceAll("{VIGENCIA}", vigencia)
       }
       // Anti-repetición: nunca el mismo texto dos veces al mismo contacto.
-      if (await textoYaEnviado(r.contact, textoFinal)) {
+      //
+      // OJO (04-sep, reclamo de Rodrigo): acá había un `continue`, y el
+      // `continue` de este bucle salta TAMBIÉN el avance del ciclo que vive al
+      // final de la iteración. Resultado: el contacto quedaba clavado en el
+      // mismo toque, re-evaluado por el barrido cada 2 minutos para siempre —
+      // 15 loops congelados en las primeras 6 horas, uno de ellos con el
+      // reloj vencido hace días. El toque se OMITE (no se manda el texto
+      // repetido), pero la cadencia TIENE que seguir corriendo: por eso es una
+      // bandera y no un salto.
+      const omitidoPorRepetido = await textoYaEnviado(r.contact, textoFinal)
+      if (omitidoPorRepetido) {
         console.warn(`[loop-cron] ${r.contact}: toque ${touch} omitido — ese texto ya salió`)
         ejecutado = true
         detalle.push({ contact: r.contact, accion: "texto", touch, stage, skip: "repetido" })
-        continue
       }
-      if (ventanaAbierta) {
+      if (omitidoPorRepetido) {
+        // Nada que enviar: cae directo al avance del ciclo del final.
+      } else if (ventanaAbierta) {
         // T5 personalizado = el MISMO mix de la campaña (Lalo 26-ago): marco
         // fijo + contexto libre al medio — dentro de ventana se arma acá; fuera
         // de ventana lo arma la plantilla con la variable ${contexto}.
