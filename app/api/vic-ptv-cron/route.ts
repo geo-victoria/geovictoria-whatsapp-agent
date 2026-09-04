@@ -1493,6 +1493,59 @@ function telefonoTmPorEmail(email: string): string {
 
 type CandidatoTM = { contact: string; origen: "outbound" | "inbound"; pais: "cl" | "pe" }
 
+/**
+ * LA ENTREGA A TELEMARKETING QUE FALLA NO PUEDE REINTENTARSE PARA SIEMPRE
+ * (04-sep). `traspasarATelemarketing` tiene dos salidas de error —no se pudo
+ * crear el lead, y sin dueño tras la regla— que cerraban la fila `vic_ptv`
+ * pero dejaban la conversación intacta: al tick siguiente volvía a
+ * candidatearse. Dos contactos (56928393806 y 56974962588, ambos con lead
+ * imposible de crear) generaron 58 y 26 filas `vic_ptv` en un día, una cada
+ * dos minutos, y ensuciaron el panel de traspasos con entregas fantasma.
+ *
+ * Regla: hasta 3 intentos —una caída de Zoho no debe costar la entrega— y al
+ * cuarto la conversación se marca y sale del radar, con aviso interno para
+ * que un humano la recoja. El contador vive 7 días en vic_kv.
+ */
+const TM_MAX_INTENTOS = 3
+
+async function registrarFalloEntregaTm(
+  contact: string,
+  origen: string,
+  detalle: string,
+): Promise<void> {
+  const key = `tm24_int_${contact}`
+  const previo = await supa<{ key: string; value?: string }>(
+    `vic_kv?key=eq.${encodeURIComponent(key)}&select=key,value&limit=1`,
+  ).catch(() => [])
+  const intentos = Number(previo[0]?.value || 0) + 1
+  await supa(`vic_kv?on_conflict=key`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      key,
+      value: String(intentos),
+      expires_at: new Date(Date.now() + 7 * 24 * 3600e3).toISOString(),
+    }),
+  }).catch(() => [])
+  if (intentos < TM_MAX_INTENTOS) return
+
+  // Agotados los intentos: se saca del radar por los dos caminos por los que
+  // entra (loop = outbound, conversación = inbound).
+  await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ estado: "cerrado", motivo_cierre: "tm_entrega_fallida" }),
+  }).catch(() => [])
+  await supa(`vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ followup_closed_reason: "tm_entrega_fallida" }),
+  }).catch(() => [])
+  await avisarEquipoInterno(
+    `\u26a0\ufe0f Entrega a telemarketing IMPOSIBLE tras ${intentos} intentos — +${contact}\n` +
+      `Motivo tecnico: ${detalle} (origen ${origen}).\n` +
+      `La conversacion queda fuera del reloj de calificacion: hay que crear el lead a mano si el caso vale.`,
+  ).catch(() => false)
+}
+
 async function traspasarATelemarketing(
   contact: string,
   origen: string,
@@ -1559,6 +1612,7 @@ async function traspasarATelemarketing(
       }).catch(() => null)
       if (!creado || !creado.success) {
         await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ estado: "cerrado" }) })
+        await registrarFalloEntregaTm(contact, origen, "no se pudo crear el lead")
         return { ok: false, detalle: "no se pudo crear el lead" }
       }
       leadId = creado.leadId
@@ -1612,6 +1666,7 @@ async function traspasarATelemarketing(
     }
     if (!owner?.id || !owner.email) {
       await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ estado: "cerrado" }) })
+      await registrarFalloEntregaTm(contact, origen, "sin dueño tras la regla de asignación")
       return { ok: false, detalle: "sin dueño tras la regla" }
     }
 
