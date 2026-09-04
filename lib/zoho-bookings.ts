@@ -150,7 +150,15 @@ export async function reservarCupo(args: {
     email: args.email,
     phone_number: args.telefono || "",
   }
-  for (const [k, v] of Object.entries(args.camposPropios || {})) cliente[k] = v
+  // Los campos propios viajan SUELTOS y también anidados: Zoho documenta las
+  // dos formas según la versión del formulario y no hay endpoint que diga cuál
+  // usa este servicio. Las claves que sobren se ignoran.
+  const propios = args.camposPropios || {}
+  for (const [k, v] of Object.entries(propios)) cliente[k] = v
+  if (Object.keys(propios).length) {
+    ;(cliente as Record<string, unknown>).custom_fields = propios
+    ;(cliente as Record<string, unknown>).additional_fields = propios
+  }
   const r = await apiPost("appointment", {
     service_id: args.servicioId,
     staff_id: args.staffId,
