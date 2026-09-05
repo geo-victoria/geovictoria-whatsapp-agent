@@ -42,16 +42,12 @@ import {
   renderPlantillaOnboarding,
 } from "@/lib/onboarding/plantilla"
 import { getZohoAccessToken } from "@/lib/zoho-token"
-import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
+import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { enviarCorreoCobranza } from "@/lib/correo-cobranza"
 import { adjuntarComprobanteACotizacion, mediaEntranteReciente } from "@/lib/comprobante-adjunto"
 
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-// Mismo destinatario interno que las notificaciones de cotización (Eduardo).
-const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
-  .trim()
-  .replace(/\D/g, "")
 
 export const registrarComprobanteTransferenciaSchema = {
   name: "registrar_comprobante_transferencia",
@@ -402,9 +398,10 @@ export async function registrarComprobanteTransferencia(
   // 1. Nota en la cotización de Zoho (la traza durable para finanzas).
   const notaCreada = pointer ? await crearNotaEnCotizacion(pointer.quoteId, contenidoNota) : false
 
-  // 2. Aviso interno por WhatsApp (best-effort: puede fallar fuera de ventana).
-  const avisoInterno = await sendBotmakerMessage(
-    NOTIFY_TO,
+  // 2. Aviso interno por el canal único (05-sep, orden de Lalo "quita las
+  //    notificaciones internas que mandas a mi whatsapp"): respeta el
+  //    interruptor vic_kv avisos_internos_wsp y queda persistido en el inbox.
+  const avisoInterno = await avisarEquipoInterno(
     `💰 COMPROBANTE DE TRANSFERENCIA\n${contenidoNota}`,
   ).catch(() => false)
 
@@ -547,8 +544,7 @@ export async function registrarComprobanteTransferencia(
     const linkOnboarding = await obtenerLinkOnboarding(pointer.quoteId)
     if (!linkOnboarding) {
       // Sin link no hay habilitación posible: el equipo debe mandarlo a mano.
-      sendBotmakerMessage(
-        NOTIFY_TO,
+      avisarEquipoInterno(
         `⚠️ Comprobante ${pais.toUpperCase()} de +${contact}: no se pudo generar el link de auto-onboarding (quote ${pointer.quoteId}). Enviarlo a mano.`,
       ).catch(() => {})
     }

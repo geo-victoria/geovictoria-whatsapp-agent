@@ -18,7 +18,7 @@
 
 import { buscarLeadAbiertoDeOtroDueno, agregarNotaLead } from "./zoho-leads"
 import { appendAssistantV3 } from "./supabase-persistence-v3"
-import { sendBotmakerMessage } from "./botmaker-push-v3"
+import { avisarEquipoInterno } from "./alerta-interna"
 
 const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
   .replace(/\D/g, "")
@@ -80,8 +80,7 @@ export async function detectarProcesoHumano(
   ).catch(() => {})
 
   // Aviso interno inmediato por WhatsApp (best-effort).
-  sendBotmakerMessage(
-    NOTIFY_TO,
+  avisarEquipoInterno(
     `ℹ️ Cliente de ${humano.ownerNombre} escribió al WhatsApp de Vicky (+${contact}). Vicky lo atiende y le cotizará si lo pide (sin barrera, política 24-jul); el ejecutivo ya tiene nota en su lead para coordinar.`,
   ).catch(() => {})
 

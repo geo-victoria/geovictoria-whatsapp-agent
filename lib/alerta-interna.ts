@@ -27,6 +27,7 @@
  * lanza: un fallo del aviso no puede tumbar el turno del cliente.
  */
 
+import { createHash } from "crypto"
 import { sendBotmakerMessage } from "./botmaker-push-v3"
 
 const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
@@ -54,7 +55,15 @@ async function persistirAlerta(texto: string): Promise<boolean> {
         "Content-Type": "application/json",
         Prefer: "return=minimal",
       },
-      body: JSON.stringify([{ contact: CONTACTO_ALERTAS, message: texto.slice(0, 4000) }]),
+      // msg_hash es NOT NULL en vic_v3_inbox y aquí nunca se mandaba: desde el
+      // 27-jul (cuando nació este canal "durable") CERO alertas se persistieron
+      // — descubierto el 04-sep revisando por qué `equipo:alerta` no tenía ni
+      // una fila. Con el push apagado desde el 25-ago, los avisos iban al vacío.
+      body: JSON.stringify([{
+        contact: CONTACTO_ALERTAS,
+        message: texto.slice(0, 4000),
+        msg_hash: createHash("sha256").update(`${Date.now()}:${texto}`).digest("hex").slice(0, 40),
+      }]),
       cache: "no-store",
     })
     return res.ok

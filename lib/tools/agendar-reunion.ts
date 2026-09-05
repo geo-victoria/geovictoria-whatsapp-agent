@@ -172,10 +172,6 @@ const DIRECTORIO: Record<string, { nombre: string; whatsapp?: string }> = {
   "ysegura@geovictoria.com": { nombre: "Yahel Segura", whatsapp: "+52 55 3763 6604" },
 }
 
-// Mismo destinatario interno que el resto de los avisos operativos.
-const NOTIFY_TO = (process.env.QUOTE_NOTIFY_TO || process.env.VICKY_REPORT_PHONE || "56944668823")
-  .trim()
-  .replace(/\D/g, "")
 
 export const agendarReunionSchema = {
   name: "agendar_reunion",
@@ -414,8 +410,7 @@ export async function agendarReunion(
         `La reunión quedó agendada en el calendario (bookingId ${bookingId}) pero NO se ` +
         `registró en el CRM: ${leadResult.error}. Confirma la reunión al cliente con ` +
         `normalidad — ya está hecha. El registro en Zoho lo hace el equipo a mano.`
-      await sendBotmakerMessage(
-        NOTIFY_TO,
+      await avisarEquipoInterno(
         `⚠️ Reunión agendada SIN registro en el CRM\n` +
           `Booking: ${bookingId}\n` +
           `Cliente: ${prospectName} — ${empresa || "sin empresa"}\n` +
