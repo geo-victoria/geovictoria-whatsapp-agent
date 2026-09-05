@@ -83,6 +83,11 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // endpoint tiene la ventana 07-10 CL y el candado `cierre_enviado_<fecha>`,
   // así que despacharlo cada 30' solo significa "que no se le pase la hora".
   { nombre: "cierre_diario", path: "/api/vic-cierre-diario?enviar=1", cadaMin: 30 },
+  // Vigía del onboarding por chat (Lalo 05-sep, punto 8): el cliente que
+  // paga y se calla recibe un toque de Vicky (alta pendiente a las 2 h,
+  // capacitación a las 24 h hábiles, nómina el día antes del curso) y el
+  // equipo un aviso cuando tampoco eso alcanza. Caso Maquinarias Santa Sara.
+  { nombre: "onboarding_toques", path: "/api/vic-onboarding-toques", cadaMin: 30 },
 ]
 
 /**
