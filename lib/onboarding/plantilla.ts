@@ -39,6 +39,8 @@
  * borrar y recrear con el mismo.
  */
 
+import { normalizarRut, rutValido } from "../rut"
+
 export const PLANTILLA_ONBOARDING_CL = {
   /** ruleNameOrId que espera la API de notificaciones de Botmaker. */
   name: "vicky_alta_cuenta_cl",
@@ -142,8 +144,21 @@ export type ParamsOnboarding = { empresa: string; rut_empresa: string }
 export function paramsPlantillaOnboarding(empresa?: string, rut?: string): ParamsOnboarding {
   return {
     empresa: (empresa || "").trim() || "tu empresa",
-    rut_empresa: (rut || "").trim() || "el de tu cotización",
+    rut_empresa: rutLegible(rut) || "el de tu cotización",
   }
+}
+
+/**
+ * RUT como lo lee una persona (88.501.007-5). El puntero de la cotización lo
+ * guarda pelado ("885010075", convención Zoho) y así salía en el mensaje de
+ * arranque (pruebas 05-sep: "RUT: 885010075"). Si no valida, va tal cual.
+ */
+export function rutLegible(rut?: string): string {
+  const crudo = String(rut || "").trim()
+  if (!crudo || !rutValido(crudo)) return crudo
+  const limpio = normalizarRut(crudo)
+  const cuerpo = limpio.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+  return `${cuerpo}-${limpio.slice(-1)}`
 }
 
 /**
