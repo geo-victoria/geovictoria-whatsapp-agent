@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { onboardingActivoPara } from "@/lib/onboarding-piloto"
+import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -25,15 +26,21 @@ const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 /** Auth: secreto compartido con el cotizador (header) o el secreto admin de
  *  crones (`?key=` / Bearer) para diagnóstico — p. ej. verificar tras un deploy
  *  que `VICKY_ONBOARDING_ENABLED` quedó encendido (05-sep). */
-function autorizado(req: Request): boolean {
+async function autorizado(req: Request): Promise<boolean> {
   if (SECRET && (req.headers.get("x-vicky-secret") || "").trim() === SECRET) return true
   const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
   const key = (new URL(req.url).searchParams.get("key") || "").trim()
-  return Boolean(CRON_SECRET && (bearer === CRON_SECRET || key === CRON_SECRET))
+  if (CRON_SECRET && (bearer === CRON_SECRET || key === CRON_SECRET)) return true
+  if (key) {
+    // Mismo fallback que el resto de los endpoints admin: secreto de crones en vic_kv.
+    const kvSecret = await getFollowupCronSecret().catch(() => "")
+    if (kvSecret && key === kvSecret) return true
+  }
+  return false
 }
 
 export async function GET(req: Request): Promise<Response> {
-  if (!autorizado(req)) {
+  if (!(await autorizado(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
   const contact = (new URL(req.url).searchParams.get("contact") || "").replace(/\D/g, "")
