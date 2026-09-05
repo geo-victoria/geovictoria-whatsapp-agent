@@ -209,14 +209,19 @@ export async function registrarCurso1Agendado(
             Fecha_y_Hora_Curso_1: iso,
             Relator_Curso_1: d.relator,
             Estado_Curso_1_SMB: "Autoagendamiento",
-            Fecha_hora_agendamiento_Curso_1: new Date().toISOString(),
+            // Zoho rechaza el ISO con milisegundos y "Z" ("2026-09-05T03:15:00.123Z"
+            // → 400 INVALID_DATA). Descubierto en la prueba E2E del 05-sep: la
+            // reserva en Bookings salía bien y el reflejo en la Implementación
+            // moría acá. Formato aceptado: sin milisegundos y con offset.
+            Fecha_hora_agendamiento_Curso_1: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
           },
         ],
         trigger: ["blueprint"],
       }),
     })
     if (!r.ok) {
-      console.warn(`[implementacion] no se pudo escribir el Curso 1 en ${implementacionId}: ${r.status}`)
+      const cuerpo = await r.text().catch(() => "")
+      console.warn(`[implementacion] no se pudo escribir el Curso 1 en ${implementacionId}: ${r.status} ${cuerpo.slice(0, 300)}`)
       return false
     }
     return true
