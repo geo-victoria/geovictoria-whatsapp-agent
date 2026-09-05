@@ -575,6 +575,18 @@ export async function registrarComprobanteTransferencia(
     }).catch(() => {})
     // Comprobante real recibido → Estado_Cotizacion "Pagada" (opción 1, Lalo
     // 04-ago): dispara los workflows de Zoho amarrados al estado. Best-effort.
+    // MARCAS ANTES DE "PAGADA" (Lalo 05-sep, "parece que gatilla 2 altas"):
+    // marcar Pagada avisa al cotizador, y el cotizador dispara el post-pago del
+    // agente (vic-quote-notify evento pagada) — que 27 s después mandaba una
+    // SEGUNDA bienvenida con wizard encima del acuse de esta tool (caso
+    // Leonardo/COT1142) y estampaba `pago_online_` como si fuera tarjeta. Con
+    // el candado del post-pago y la marca de comprobante puestos ANTES, ese
+    // camino ve "ya_enviado" y sabe que fue transferencia.
+    await setKvValue(`traspaso_postpago_${pointer.quoteId}`, new Date().toISOString()).catch(() => {})
+    await setKvValue(
+      `comprobante_ok_${contact}`,
+      JSON.stringify({ at: new Date().toISOString(), numero: (input.numeroCotizacion || "").trim() || pointer.quoteId, quoteId: pointer.quoteId }),
+    ).catch(() => {})
     await marcarCotizacionPagada(pointer.quoteId).catch(() => false)
     // Y el DEAL avanza a ganado (Lalo 07-ago): misma política que "Pagada" —
     // si el abono no aparece en el banco, cobranza revierte a mano.
@@ -592,10 +604,6 @@ export async function registrarComprobanteTransferencia(
       const { pagoCierraLoop } = await import("../loop-v2")
       await pagoCierraLoop(contact, "pagado")
     } catch { /* best-effort */ }
-    await setKvValue(
-      `comprobante_ok_${contact}`,
-      JSON.stringify({ at: new Date().toISOString(), numero: (input.numeroCotizacion || "").trim() || pointer.quoteId }),
-    ).catch(() => {})
   }
 
   // 3. Confirmación al cliente.

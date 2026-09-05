@@ -403,7 +403,23 @@ export async function cerrarYTraspasarPostPago(
   // Vicky le pidió el comprobante de transferencia). Este camino corre SOLO
   // para pagos online verificados en MP — la marca alimenta la directiva
   // post-venta del webhook para que el guion sepa el MÉTODO.
-  if ((opts.motivoCierre || "pagado") === "pagado") {
+  // SOLO SI DE VERDAD FUE TARJETA (05-sep): este camino también corre cuando
+  // un comprobante de TRANSFERENCIA marca la cotización Pagada (la tool avisa
+  // al cotizador y el cotizador dispara este post-pago) y cuando el barrido de
+  // respaldo repasa las Pagadas 35 h después. En esos casos estampar
+  // `pago_online_` hacía que Vicky dijera "pagaste con tarjeta" a quien
+  // transfirió. Si hay comprobante registrado para esta cotización, no es MP.
+  let fueTransferencia = false
+  try {
+    const raw = await getKvValue(`comprobante_ok_${contact}`)
+    if (raw) {
+      const c = JSON.parse(raw) as { at?: string; numero?: string; quoteId?: string }
+      const edadMs = c.at ? Date.now() - new Date(c.at).getTime() : Number.POSITIVE_INFINITY
+      const mismaCot = String(c.quoteId || c.numero || "") === String(quoteId)
+      fueTransferencia = mismaCot || edadMs < 6 * 60 * 60 * 1000
+    }
+  } catch { /* sin marca */ }
+  if ((opts.motivoCierre || "pagado") === "pagado" && !fueTransferencia) {
     await setKvValue(
       `pago_online_${contact}`,
       JSON.stringify({ at: new Date().toISOString(), quoteId }),
