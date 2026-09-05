@@ -136,6 +136,8 @@ export type DatosImplementacion = {
   correoSolicitante?: string
   ejComercialId?: string
   comentarios?: string
+  /** Id de la empresa en la plataforma (GV Avanzado), el que devolvió la API del alta. */
+  companyId?: string
 }
 
 /**
@@ -188,6 +190,11 @@ export async function crearImplementacionGvAvanzado(
   if (d.correoSolicitante) registro.Correo_solicitante = d.correoSolicitante
   if (d.ejComercialId) registro.Ej_Comercial = { id: d.ejComercialId }
   registro.Comentarios = d.comentarios || "Alta creada por Vicky (chat, sin wizard). Empresa ya creada en la plataforma."
+  // ID de la empresa en GV Avanzado (Lalo 05-sep): es el dato que después
+  // necesitan la nota de venta ("Creada en Plataforma" + NOMBRE-RUT-ID) y
+  // facturación. Numeración de la plataforma NUEVA — no confundir con el
+  // Id_Empresa de "Empresas en GeoVictoria", que es de la plataforma antigua.
+  if (d.companyId && /^\d+$/.test(String(d.companyId))) registro.ID_Empresa_GV = String(d.companyId)
 
   try {
     const token = await getZohoAccessToken()

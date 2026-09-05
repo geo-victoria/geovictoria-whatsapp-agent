@@ -693,6 +693,7 @@ export async function armarOnboarding(contact: string): Promise<{
                   // El identificador del borrador ES el RUT (así lo pide la
                   // API de alta: sin puntos ni guión).
                   rut: b.empresa.identificador || undefined,
+                  companyId: String(alta.companyId || ""),
                   comentarios: `Alta por chat de Vicky (companyId ${alta.companyId}). Empresa YA creada en la plataforma; no requiere creación.`,
                 })
                 if (imp) {
