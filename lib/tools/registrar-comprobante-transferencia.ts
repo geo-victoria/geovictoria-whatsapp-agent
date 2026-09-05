@@ -100,6 +100,28 @@ type Input = {
 // el equipo corta el onboarding a mano.
 const COTIZADORA_API_BASE = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
 const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+
+/**
+ * Pago inicial ESPERADO de la cotización, en CLP y sin recargo de tarjeta —
+ * la misma fórmula que cobra el checkout, servida por el cotizador
+ * (`/api/quote-acceptance/pago-inicial`). 0 si no se pudo saber: ahí no se
+ * frena nada (fail-open a la validación blanda de siempre).
+ */
+async function pagoInicialEsperadoClp(quoteId: string): Promise<number> {
+  try {
+    if (!VICKY_COTIZADORA_SECRET) return 0
+    const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/pago-inicial?quoteId=${encodeURIComponent(quoteId)}`, {
+      headers: { "x-vicky-secret": VICKY_COTIZADORA_SECRET },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!r.ok) return 0
+    const j = (await r.json().catch(() => ({}))) as { ok?: boolean; oneShotClp?: number }
+    return j?.ok ? Math.max(0, Math.round(Number(j.oneShotClp) || 0)) : 0
+  } catch {
+    return 0
+  }
+}
 const EJECUTIVA_MX = {
   nombre: "Yahel Segura",
   whatsapp: "+52 55 3763 6604",
@@ -358,6 +380,35 @@ export async function registrarComprobanteTransferencia(
 
   const declarado = input.pagoDeclarado === true
 
+  // PAGO CON TARJETA YA REGISTRADO (Lalo 05-sep, caso Maquinarias Santa Sara):
+  // el cliente pagó por Mercado Pago y después mandó la imagen del
+  // comprobante que entrega MP. Esta tool lo tomaba como una transferencia
+  // nueva: segunda "Pagada", segundo enrolamiento y un wizard encima del
+  // arranque que ya había salido por el pago online. Si el post-pago dejó la
+  // marca `pago_online_` para esta cotización (<48 h), acá no se registra
+  // nada: se le agradece y se sigue con el alta que ya está en curso.
+  if (pointer) {
+    try {
+      const rawOnline = await getKvValue(`pago_online_${contact}`)
+      if (rawOnline) {
+        const po = JSON.parse(rawOnline) as { at?: string; quoteId?: string }
+        const edadMs = po.at ? Date.now() - new Date(po.at).getTime() : Number.POSITIVE_INFINITY
+        if (edadMs < 48 * 60 * 60 * 1000 && (!po.quoteId || String(po.quoteId) === String(pointer.quoteId))) {
+          await avisarEquipoInterno(
+            `ℹ️ +${contact} mandó el comprobante de Mercado Pago DESPUÉS de pagar con tarjeta (quote ${pointer.quoteId}). No se registra dos veces; el alta sigue por el camino del pago online.`,
+          ).catch(() => false)
+          return {
+            ok: true,
+            mensajeParaProspecto:
+              "¡Gracias! Ese pago con tarjeta ya me llegó confirmado por Mercado Pago, así que no necesitas mandarme comprobante 🙌 Seguimos con la creación de tu cuenta por aquí.",
+            notaCreada: false,
+            avisoInterno: true,
+          }
+        }
+      }
+    } catch { /* sin marca: sigue el registro normal */ }
+  }
+
   // Funnel de pago (Rodrigo 17-ago): el comprobante por WhatsApp es un paso
   // MEDIBLE del último metro — queda como evento `pf_<quoteId>_comprobante_wsp`
   // junto a los pings de la página (vic-pago-evento). Best-effort: jamás
@@ -390,7 +441,15 @@ export async function registrarComprobanteTransferencia(
   // Lo que NO cambia: la cotización nunca se marca como pagada desde acá, y
   // Vicky jamás afirma que el pago quedó confirmado.
   const comprobanteLegible = !declarado && monto > 0
-  const habilitaBlanda = comprobanteLegible && !!pointer
+  // MONTO CONTRA EL PAGO INICIAL (Lalo 05-sep, prueba E3: $20.000 contra
+  // $26.756 se aceptó como pago completo). Si el comprobante trae MENOS que
+  // el pago inicial de la cotización (tolerancia 2% por redondeos), NO se
+  // habilita el alta ni se marca Pagada: se le pide la diferencia. Sin dato
+  // del cotizador (0) rige la validación blanda de siempre.
+  const esperadoClp = pointer && comprobanteLegible ? await pagoInicialEsperadoClp(pointer.quoteId) : 0
+  const montoInsuficiente = comprobanteLegible && esperadoClp > 0 && monto < Math.round(esperadoClp * 0.98)
+  const habilitaBlanda = comprobanteLegible && !!pointer && !montoInsuficiente
+  const fmtClp = (n: number) => `$${Math.round(n).toLocaleString("es-CL")}`
 
   const lineas = [
     declarado
@@ -402,6 +461,10 @@ export async function registrarComprobanteTransferencia(
       ? `⚠️ ASOCIACIÓN POR NÚMERO: el comprobante llegó desde un número de WhatsApp DISTINTO al de la cotización; se asoció por el número de cotización que mencionó el cliente (${(input.numeroCotizacion || "").trim()}). Verificar con más atención.`
       : "",
     `Monto según comprobante: ${montoFmt}`,
+    esperadoClp > 0 ? `Pago inicial esperado (cotizador): ${fmtClp(esperadoClp)}` : "",
+    montoInsuficiente
+      ? `⛔ MONTO INSUFICIENTE: el comprobante (${montoFmt}) es menor al pago inicial (${fmtClp(esperadoClp)}). NO se habilitó el onboarding ni se marcó Pagada; se le pidió al cliente la diferencia de ${fmtClp(esperadoClp - monto)}.`
+      : "",
     pointer?.totalClp ? `Total registrado en la cotización: $${Math.round(pointer.totalClp).toLocaleString("es-CL")} (referencial — verificar pago inicial exacto)` : "",
     input.bancoOrigen ? `Banco origen: ${input.bancoOrigen}` : "",
     input.fechaDetectada ? `Fecha transferencia: ${input.fechaDetectada}` : "",
@@ -428,6 +491,30 @@ export async function registrarComprobanteTransferencia(
   console.log(
     `[comprobante] contact=${contact} monto=${monto} quote=${pointer?.quoteId || "-"} nota=${notaCreada} aviso=${avisoInterno}`,
   )
+
+  // 3. Monto insuficiente: queda la nota y el aviso; el alta NO parte.
+  if (montoInsuficiente && pointer) {
+    await enviarCorreoCobranza({
+      quoteId: pointer.quoteId,
+      numeroCotizacion: (input.numeroCotizacion || "").trim() || undefined,
+      empresa: pointer.empresa,
+      rut: pointer.rut,
+      telefono: contact,
+      monto: montoFmt,
+      banco: input.bancoOrigen,
+      fecha: input.fechaDetectada,
+      detalle: input.detalle,
+      advertencia: `MONTO INSUFICIENTE: el comprobante es de ${montoFmt} y el pago inicial de la cotización es ${fmtClp(esperadoClp)}. Vicky NO habilitó el alta y le pidió al cliente la diferencia de ${fmtClp(esperadoClp - monto)}.`,
+    }).catch(() => {})
+    return {
+      ok: true,
+      mensajeParaProspecto:
+        `Recibí tu comprobante por ${montoFmt} 🙌 Lo dejé asociado a tu cotización, pero el pago inicial es de ${fmtClp(esperadoClp)}, así que faltan ${fmtClp(esperadoClp - monto)}. ` +
+        "Cuando transfieras la diferencia me mandas ese comprobante y dejamos tu cuenta andando al tiro 😊",
+      notaCreada,
+      avisoInterno,
+    }
+  }
 
   // 3bis. Pago DECLARADO sin comprobante (caso Transportes Viig, 22-jul): el
   // cliente dijo "el pago está listo" y Vicky afirmó una confirmación que no
@@ -558,9 +645,39 @@ export async function registrarComprobanteTransferencia(
       // justamente hacerlo esperar. Acá la ventana está abierta por definición
       // (el cliente acaba de mandar la imagen), así que el texto va directo,
       // renderizado del MISMO cuerpo que usa la plantilla del pago online.
+      // TODO PAGO ARRANCA EL FORMULARIO (Lalo 05-sep): con el gate del Flow
+      // encendido, el comprobante manda la misma plantilla "Crear cuenta" que
+      // el pago con tarjeta (entregarKickoffOnboarding decide Flow o botón
+      // según la ventana). La marca traspaso_postpago_<quote> evita que el
+      // post-pago del cotizador vuelva a mandar el arranque si después llega
+      // un pago online de la misma cotización.
+      const flowOn = ((await getKvValue("alta_flow_kickoff").catch(() => null)) || "").trim() === "on"
+      if (flowOn) {
+        try {
+          const { entregarKickoffOnboarding } = await import("@/lib/onboarding-envio")
+          const nombreCliente = await nombreContactoDeCotizacion(pointer.quoteId).catch(() => "")
+          const k = await entregarKickoffOnboarding(
+            contact,
+            sembrado?.empresa.nombre,
+            sembrado?.empresa.identificador,
+            nombreCliente || undefined,
+          )
+          if (k.via !== "fallo") {
+            await setKvValue(`traspaso_postpago_${pointer.quoteId}`, new Date().toISOString()).catch(() => {})
+            const cierre =
+              k.via === "texto"
+                ? "" // el arranque conversacional ya salió por el push del helper
+                : '\n\nTe acabo de mandar el formulario "Crear cuenta": ahí completas los datos de tu empresa y del administrador en un minuto. Si prefieres, también lo hacemos conversando por aquí.'
+            return { ok: true, mensajeParaProspecto: `${acuseComprobanteCL(montoFmt)}${cierre}`, notaCreada, avisoInterno }
+          }
+        } catch (e) {
+          console.warn("[comprobante] kickoff por formulario falló; sigue el arranque en el mensaje:", e instanceof Error ? e.message : e)
+        }
+      }
       const arranque = renderPlantillaOnboarding(
         paramsPlantillaOnboarding(sembrado?.empresa.nombre, sembrado?.empresa.identificador),
       )
+      await setKvValue(`traspaso_postpago_${pointer.quoteId}`, new Date().toISOString()).catch(() => {})
       return {
         ok: true,
         mensajeParaProspecto: `${acuseComprobanteCL(montoFmt)}\n\n${arranque}`,
