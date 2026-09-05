@@ -12,7 +12,7 @@
  */
 
 import { NextResponse } from "next/server"
-import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { getFollowupCronSecret, setKvValue } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -81,6 +81,10 @@ export async function POST(req: Request): Promise<NextResponse> {
     { method: "DELETE", headers: { ...H(), Prefer: "count=exact" }, cache: "no-store" },
   )
   if (rk.ok) llavesBorradas = Number(rk.headers.get("content-range")?.split("/")[1] || 0)
+  // Marca de reset (05-sep): el detector de mudos no re-inyecta mensajes del
+  // feed de Botmaker anteriores a este instante. Lleva el número en la llave,
+  // así el próximo reset la borra y la vuelve a escribir.
+  await setKvValue(`reset_contacto_${contact}`, new Date().toISOString()).catch(() => {})
 
   // 2-bis. ESTADO OPERATIVO FUERA DE vic_kv (Lalo 02-sep: "de nuevo borra
   // todo" — Vicky le respondió con la cotización COT1074 de una prueba

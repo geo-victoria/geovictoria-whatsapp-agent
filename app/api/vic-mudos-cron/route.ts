@@ -21,7 +21,7 @@
 
 import { NextResponse } from "next/server"
 import { createHash } from "crypto"
-import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
 export const dynamic = "force-dynamic"
@@ -445,8 +445,16 @@ export async function GET(req: Request): Promise<Response> {
       porContacto.set(c.contact, arr)
     }
     let inyectados = 0
-    for (const [contact, msgs] of porContacto) {
+    for (const [contact, msgsTodos] of porContacto) {
       if (inyectados >= REINYECTA_MAX_POR_TICK) break
+      // CONTACTO RESETEADO (05-sep, prueba E14): vic-admin-reset-contacto borra
+      // el historial y el feed de Botmaker sigue teniendo los mensajes de la
+      // prueba anterior — todos parecían "sin respuesta" y se re-inyectaron
+      // en una conversación vacía ("me falta el RUT para tu formal" de la
+      // nada). Lo anterior al reset no se re-inyecta.
+      const resetIso = (await getKvValue(`reset_contacto_${contact}`).catch(() => null)) || ""
+      const msgs = resetIso ? msgsTodos.filter((m) => m.fecha > resetIso) : msgsTodos
+      if (!msgs.length) continue
       // Candado por mensaje: si TODOS los mensajes de este contacto ya se
       // re-inyectaron alguna vez, no repetir.
       const marcas = await Promise.all(msgs.map((m) => yaAlertado(`reinj|${m.contact}|${m.fecha}|${m.texto}`)))
