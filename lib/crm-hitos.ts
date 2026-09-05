@@ -792,6 +792,33 @@ async function convertirConDeal(
   }
   const { h, api } = await zohoHeaders()
   const territorio = territorioDeContacto(contact) || "Chile"
+  // CUENTA "-" (05-sep): Zoho nombra la cuenta nueva con Lead.Company y, si ya
+  // existe una con ese nombre, FUSIONA ahí. El conciliador de nombres deja
+  // Company="-" cuando no hay razón social (regla Lalo 20-ago) y con eso cuatro
+  // clientes reales terminaron colgando de una cuenta "-" de 2022. Antes de
+  // convertir, un Company placeholder se reemplaza por la razón social del SII
+  // (si hay RUT) o por el placeholder ÚNICO por contacto que ya usa el
+  // ptv-cron, para que la cuenta nazca propia y el cotizador la renombre
+  // después. Best-effort: si el PUT falla, el convert sigue.
+  const companyLead = String(lead.company || "").trim()
+  if (!companyLead || /^[-–—\s]*$/.test(companyLead) || /^prospecto whatsapp$/i.test(companyLead)) {
+    let nombreCuenta = ""
+    if (lead.rut) {
+      try {
+        const { fichaEmpresaSii } = await import("./empresas-sii")
+        nombreCuenta = (await fichaEmpresaSii(lead.rut.trim().toUpperCase().replace(/\./g, "")))?.razonSocial || ""
+      } catch { nombreCuenta = "" }
+    }
+    if (!nombreCuenta) nombreCuenta = `Por identificar (WhatsApp +${contact.replace(/\D/g, "")})`
+    await fetch(`${api}/crm/v3/Leads/${lead.id}`, {
+      method: "PUT",
+      headers: h,
+      cache: "no-store",
+      body: JSON.stringify({ data: [{ id: lead.id, Company: nombreCuenta }], trigger: ["blueprint"] }),
+    }).catch(() => null)
+    lead = { ...lead, company: nombreCuenta }
+    console.log(`[crm-hitos] ${contact}: Company placeholder "${companyLead || "∅"}" → "${nombreCuenta}" antes de convertir`)
+  }
   // Sin dato real, el N NO se inventa (Lalo 06-ago): el default 1 mandaba
   // empresas de 500 al tramo SMB de la tómbola de deals (casos VDZ/Bodegas
   // San Francisco/VITAPRO).
