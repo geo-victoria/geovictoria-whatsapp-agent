@@ -745,8 +745,13 @@ export async function armarOnboarding(contact: string): Promise<{
             const msgAcceso =
               `El acceso quedó a nombre de ${b.admin.nombre} ${b.admin.apellido}. ` +
               `Le enviamos un correo a ${alta.workEmail} con su contraseña temporal.`
+            // Nómina Y capacitación en la misma oferta (Lalo 05-sep, caso
+            // Maquinarias Santa Sara: el cliente aceptó cargar la nómina, no la
+            // mandó y nadie le ofreció el curso). La capacitación no depende de
+            // la nómina.
             const msgNomina =
-              "Y si quieres, aquí mismo dejamos cargados a tus trabajadores para que puedan marcar. ¿Lo avanzamos?"
+              "Y por aquí mismo seguimos con dos cosas: cargar a tus trabajadores para que puedan marcar, y agendar tu capacitación " +
+              "(2 horas por videollamada con tu relator). ¿Partimos por la nómina o te muestro los horarios de la capacitación?"
             // Antes el del acceso se EMPUJABA aparte y Vicky entregaba solo el
             // de la nómina — pero el modelo volvía a contar el acceso en su
             // respuesta y el cliente recibía dos veces lo mismo (E8 05-sep:

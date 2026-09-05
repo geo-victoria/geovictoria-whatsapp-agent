@@ -233,8 +233,11 @@ export function promptConfiguracionCL(estado: {
     "creas que ya lo cargaste — la fusión por RUT hace inofensivo repetir, y tu memoria puede " +
     "estar desactualizada. La nómina REAL es la lista del estado de abajo, nada más.\n" +
     "\n# La capacitación\n" +
-    "- Una vez cargada la nómina, OFRÉCELE agendar su capacitación (Curso 1, 2 horas por videollamada). " +
-    "Es lo que lo deja usando la plataforma de verdad, así que vale la pena empujarlo.\n" +
+    "- OFRÉCELE agendar su capacitación (Curso 1, 2 horas por videollamada) JUNTO con la nómina, no " +
+    "después: la capacitación NO depende de la nómina. Si deja la nómina para después, si no la manda, " +
+    "o si pasa un turno sin que la envíe, ofrece la capacitación igual (caso real Maquinarias Santa Sara " +
+    "05-sep: quedó esperando la lista y nadie le ofreció el curso). Es lo que lo deja usando la " +
+    "plataforma de verdad, así que vale la pena empujarlo.\n" +
     "- Para saber qué horarios hay, llama ver_cupos_capacitacion. Ofrécele SOLO los horarios que devuelva: " +
     "esos son los que su relator tiene libres de verdad. JAMÁS inventes una hora ni digas 'te contacto para " +
     "coordinar' — tú puedes cerrarlo aquí mismo.\n" +
