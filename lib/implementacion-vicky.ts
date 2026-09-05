@@ -74,10 +74,29 @@ export async function contextoImplementacionDesdeVenta(contact: string): Promise
     const token = await getZohoAccessToken()
     const H = { Authorization: `Zoho-oauthtoken ${token}` }
     const modulo = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
-    const rq = await fetch(`${API()}/crm/v3/${modulo}/${p.quoteId}?fields=Cuenta_Asociada,Contacto_Asociado,Deal_Asociado,Owner`, { headers: H, cache: "no-store" })
+    const rq = await fetch(`${API()}/crm/v3/${modulo}/${p.quoteId}?fields=Cuenta_Asociada,Contacto_Asociado,Deal_Asociado,Owner,Detalle_Items_Cotizacion`, { headers: H, cache: "no-store" })
     const q = ((await rq.json().catch(() => ({}))) as {
-      data?: Array<{ Cuenta_Asociada?: { id?: string }; Contacto_Asociado?: { id?: string }; Deal_Asociado?: { id?: string }; Owner?: { id?: string; email?: string } }>
+      data?: Array<{
+        Cuenta_Asociada?: { id?: string }
+        Contacto_Asociado?: { id?: string }
+        Deal_Asociado?: { id?: string }
+        Owner?: { id?: string; email?: string }
+        Detalle_Items_Cotizacion?: Array<{ Codigo_Item?: string | null; Categoria_Item?: string | null; Cantidad?: number | null }>
+      }>
     }).data?.[0]
+    // Método de marcaje y cantidad de relojes: las GV Avanzado humanas llenan
+    // M_doto_Marcaje (APP/Box/WEB/Call) y Cantidad_de_equipos cuando hay reloj
+    // (12 de 12 revisadas 05-sep); la nuestra nacía muda y el relator no sabía
+    // que venían 2 relojes con instalación técnica (caso E7). Se deriva de las
+    // líneas de la cotización: equipos biométricos (sin accesorios) → Box.
+    const filas = Array.isArray(q?.Detalle_Items_Cotizacion) ? q.Detalle_Items_Cotizacion : []
+    const relojes = filas
+      .filter((f) => /equipos biom/i.test(String(f.Categoria_Item || "")) && !/tarjeta/i.test(String(f.Codigo_Item || "")))
+      .reduce((acc, f) => acc + Math.max(0, Number(f.Cantidad) || 0), 0)
+    if (filas.length) {
+      out.metodoMarcaje = relojes > 0 ? ["APP", "Box"] : ["APP"]
+      if (relojes > 0) out.equipos = relojes
+    }
     if (q?.Cuenta_Asociada?.id) out.accountId = String(q.Cuenta_Asociada.id)
     if (q?.Contacto_Asociado?.id) out.contactId = String(q.Contacto_Asociado.id)
     const dealId = String(q?.Deal_Asociado?.id || p.dealId || "")
@@ -161,7 +180,10 @@ export async function crearImplementacionGvAvanzado(
   if (d.contactId) registro.Contacto = { id: d.contactId }
   if (d.ndvId) registro.Nota_de_Venta_Asociada = { id: d.ndvId }
   if (d.usuarios && d.usuarios > 0) registro.Cantidad_de_Usuarios_a_Implementar = d.usuarios
-  if (typeof d.equipos === "number") registro.Cantidad_de_equipos = d.equipos
+  if (typeof d.equipos === "number") {
+    registro.Cantidad_de_equipos = d.equipos
+    registro.Tiene_Hardware = d.equipos > 0
+  }
   if (d.metodoMarcaje?.length) registro.M_doto_Marcaje = d.metodoMarcaje
   if (d.correoSolicitante) registro.Correo_solicitante = d.correoSolicitante
   if (d.ejComercialId) registro.Ej_Comercial = { id: d.ejComercialId }
