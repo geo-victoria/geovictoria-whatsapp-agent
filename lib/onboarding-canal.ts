@@ -520,9 +520,11 @@ export async function armarOnboarding(contact: string): Promise<{
       }
 
       // SIMULACIÓN DEL ALTA (Lalo 25-ago): con la API de Nicolás caída, el
-      // piloto ve la experiencia completa del alta exitosa — cuenta "creada"
-      // + réplica del correo de bienvenida con contraseña temporal FALSA.
+      // piloto ve la experiencia completa del alta exitosa — cuenta "creada".
       // Doble candado: vic_kv alta_simulada=on Y contacto en el piloto.
+      // La réplica del correo de bienvenida (contraseña temporal falsa) se
+      // RETIRÓ el 05-sep por orden de Lalo: ese correo lo manda la plataforma
+      // real y simularlo solo confunde. La simulación ya no envía nada.
       const simulada =
         (await getKvValue("alta_simulada").catch(() => null)) === "on" && (await esContactoPiloto(contact))
       if (altaApiConfigurada()) {
@@ -530,20 +532,12 @@ export async function armarOnboarding(contact: string): Promise<{
         if (existe?.exists) return await responderYaExiste(existe.name)
         if (existe && !existe.exists) {
           const alta = simulada
-            ? await (async () => {
-                const { enviarCorreoBienvenidaSimulado } = await import("./alta-simulada")
-                const correo = await enviarCorreoBienvenidaSimulado({
-                  nombre: b.admin.nombre!,
-                  apellido: b.admin.apellido!,
-                  email: b.admin.email!,
-                })
-                return {
-                  ok: true as const,
-                  companyId: `SIM-${Date.now()}`,
-                  loginUserCreated: correo.ok,
-                  workEmail: b.admin.email!,
-                }
-              })()
+            ? {
+                ok: true as const,
+                companyId: `SIM-${Date.now()}`,
+                loginUserCreated: true,
+                workEmail: b.admin.email!,
+              }
             : await crearEmpresaConAdmin({
             pais: "cl",
             empresa: { nombre: b.empresa.nombre!, identificador: b.empresa.identificador! },

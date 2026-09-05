@@ -43,7 +43,9 @@ function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-/** Réplica del correo de bienvenida de la plataforma (alta real del 02-ago). */
+/** Réplica del correo de bienvenida de la plataforma (alta real del 02-ago).
+ * DESDE EL 05-sep NO LA USA EL ALTA SIMULADA (orden de Lalo: ese correo lo manda
+ * la plataforma real). Queda solo para vic-admin-correo-prueba. */
 export async function enviarCorreoBienvenidaSimulado(admin: {
   nombre: string
   apellido: string
