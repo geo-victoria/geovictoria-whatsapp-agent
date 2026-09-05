@@ -528,7 +528,11 @@ async function procesarEnviosPendientes(sessionId, sock) {
   let rows = []
   try {
     const res = await sb(
-      `vic_kv?key=like.wa_envio_${encodeURIComponent(sessionId)}_%25&select=key,value&limit=5`,
+      // Solo los PENDIENTES (05-sep): con limit=5 y sin orden, cinco trabajos
+      // ya enviados (viven 24 h en el kv) tapaban al sexto y la cola se
+      // quedaba muda para siempre — pasó en la prueba E2E de Lalo al sexto
+      // mensaje. El filtro por estado va en la consulta, no después.
+      `vic_kv?key=like.wa_envio_${encodeURIComponent(sessionId)}_%25&value=like.*%22status%22%3A%22pendiente%22*&select=key,value&order=key.asc&limit=10`,
     )
     rows = await res.json()
   } catch {
