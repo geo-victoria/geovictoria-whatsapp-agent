@@ -576,6 +576,28 @@ export async function armarOnboarding(contact: string): Promise<{
       // cuando lo dice exists como cuando lo atrapa el 409 del propio
       // servicio (carrera entre el exists y el create).
       const responderYaExiste = async (nombreExistente: string | null) => {
+        // CREATE NO ATÓMICO DE LA PLATAFORMA (visto en vivo 05-sep, E12): un
+        // create que falla con 409 user_already_exists deja la EMPRESA creada
+        // y sin administrador; el reintento con otro correo ve exists=true y
+        // caía acá como "cliente actual con plan nuevo" — y nadie creaba el
+        // usuario. Si este mismo contacto acaba de recibir un 409 de correo,
+        // el aviso lo dice derecho: hay que crear el usuario admin a mano.
+        const marca409 = await getKvValue(`alta_409_${contact}`).catch(() => null)
+        if (marca409) {
+          await avisarEquipoInterno(
+            `⚠️ ALTA ONBOARDING CL: la empresa ${nombreExistente || b.empresa.nombre || ""} quedó CREADA SIN ADMINISTRADOR en la plataforma ` +
+              `(el primer create falló por correo ocupado ${marca409} y la plataforma igual creó la empresa). ` +
+              `Crear a mano el usuario administrador con ${b.admin.email} y avisarle. Contacto +${contact}.\n${fichaAlta}`,
+          )
+          await setKvValue(claveAltaSolicitada(contact), new Date().toISOString()).catch(() => {})
+          return {
+            ok: true,
+            mensajeParaProspecto:
+              "Tu empresa quedó creada en GeoVictoria 🙌 El acceso del administrador con " +
+              `${b.admin.email} te lo termina de habilitar nuestro equipo — te confirmo por este chat ` +
+              "dentro de 24 horas hábiles. Cualquier duda mientras tanto, aquí estoy.",
+          }
+        }
         await avisarEquipoInterno(
           `🏢 ALTA ONBOARDING CL: la empresa YA EXISTE en la plataforma (${nombreExistente || "sin nombre"}). ` +
             `Posible cliente actual con plan nuevo — activar sobre la cuenta existente, NO crear otra. ` +
@@ -627,6 +649,8 @@ export async function armarOnboarding(contact: string): Promise<{
           // pide otro correo de acceso — con el nuevo, confirmar_alta_empresa
           // se reintenta completo.
           if (!alta.ok && alta.correoOcupado) {
+            // Marca para el reintento: si después exists=true, fue este 409.
+            await setKvValue(`alta_409_${contact}`, `${b.admin.email} (${new Date().toISOString()})`).catch(() => {})
             await avisarEquipoInterno(
               `📧 ALTA ONBOARDING CL: el correo del admin (${b.admin.email}) YA tiene usuario en la plataforma — se le pidió otro correo. Contacto +${contact}.\n${fichaAlta}`,
             ).catch(() => {})

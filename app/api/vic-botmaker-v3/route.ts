@@ -1647,7 +1647,20 @@ async function processOneTurn(
     // 2.8b. Blindaje de SOPORTE INVENTADO (Lalo 01-sep, caso Jeshu): fijos
     // +56 2 alucinados → fono real de la Mesa de Ayuda; correos
     // @geovictoria.com desconocidos → soporte@. Siempre activo.
-    reply = blindarSoporteInventado(reply, emailsDirectorio())
+    // Los correos @geovictoria.com que el propio CLIENTE escribió en este
+    // turno o dejó en su borrador de alta son suyos, no inventados (E12
+    // 05-sep: el alias egomez+vickydoce@ del admin salía como soporte@).
+    const permitidos = emailsDirectorio()
+    for (const m of String(message || "").match(/[a-z0-9._%+-]+@geovictoria\.com/gi) || []) permitidos.add(m.toLowerCase())
+    if (enOnboarding) {
+      try {
+        const { claveBorrador } = await import("@/lib/onboarding/fase")
+        const raw = (await getKvValue(claveBorrador(contact))) || ""
+        const em = String((JSON.parse(raw || "{}") as { admin?: { email?: string } })?.admin?.email || "").toLowerCase()
+        if (em) permitidos.add(em)
+      } catch { /* sin borrador */ }
+    }
+    reply = blindarSoporteInventado(reply, permitidos)
 
     // 2.9. ANTI-ECO (caso Atcomo 09-ago): el cliente confirmó un supuesto ya
     // cotizado ("la instalan ustedes") y el modelo re-cotizó con los mismos
