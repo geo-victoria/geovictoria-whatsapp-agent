@@ -18,6 +18,13 @@
  *    de cotización que el EDITOR del dashboard encola en vic_kv
  *    (wa_envio_<session>_*) — el vendedor aprieta el botón, su sesión manda
  *    el PDF. Ningún otro sendMessage debe existir ni agregarse.
+ *    EXCEPCIÓN DE PRUEBAS (orden de Lalo 05-sep, "hazlo para que tú mismo
+ *    pruebes el flujo end to end"): las sesiones listadas en vic_kv
+ *    `wa_envio_libre_sesiones` (hoy solo `egomez`, el WhatsApp de Lalo)
+ *    aceptan además trabajos de TEXTO e IMAGEN por la misma cola. Sirve para
+ *    escribirle a Vicky desde un número real y probarla de verdad. Para
+ *    cualquier sesión fuera de esa lista esos trabajos se rechazan: la
+ *    ampliación NO alcanza a los ejecutivos.
  *  - markOnlineOnConnect: false — si el espejo se marcara "en línea", el
  *    celular del ejecutivo dejaría de recibir notificaciones push.
  *
@@ -542,11 +549,42 @@ async function procesarEnviosPendientes(sessionId, sock) {
       job.status = "enviando"
       await kvSet(key, JSON.stringify(job), 24 * 60)
       const telefono = String(job.to || "").replace(/\D/g, "")
-      if (!telefono || !job.pdf_url) throw new Error("trabajo incompleto (to/pdf_url)")
+      if (!telefono) throw new Error("trabajo incompleto (to)")
+      const jid = `${telefono}@s.whatsapp.net`
+      const tipo = String(job.tipo || "pdf")
+      if (tipo === "texto" || tipo === "imagen") {
+        // Solo sesiones de PRUEBA (ver cabecera). La lista se lee en cada
+        // envío: quitar una sesión del kv la apaga al instante.
+        const libres = (await kvGet("wa_envio_libre_sesiones")).split(",").map((x) => x.trim()).filter(Boolean)
+        if (!libres.includes(sessionId)) throw new Error(`sesión ${sessionId} sin permiso de ${tipo}`)
+        if (tipo === "texto") {
+          const text = String(job.text || "").trim()
+          if (!text) throw new Error("trabajo incompleto (text)")
+          await sock.sendMessage(jid, { text })
+        } else {
+          let buf
+          if (job.image_base64) buf = Buffer.from(String(job.image_base64), "base64")
+          else if (job.image_url) {
+            const r = await fetch(job.image_url)
+            if (!r.ok) throw new Error(`descarga imagen ${r.status}`)
+            buf = Buffer.from(await r.arrayBuffer())
+          }
+          if (!buf?.length) throw new Error("trabajo incompleto (image_base64/image_url)")
+          await sock.sendMessage(jid, { image: buf, mimetype: job.mimetype || "image/png", caption: job.caption || "" })
+        }
+        job.status = "enviado"
+        job.sent_at = new Date().toISOString()
+        // El base64 ya cumplió: no se guarda de vuelta en el kv.
+        delete job.image_base64
+        await kvSet(key, JSON.stringify(job), 24 * 60)
+        console.log(`[${sessionId}] ${tipo} de PRUEBA enviado a +${telefono}`)
+        continue
+      }
+      if (!job.pdf_url) throw new Error("trabajo incompleto (pdf_url)")
       const pdfRes = await fetch(job.pdf_url)
       if (!pdfRes.ok) throw new Error(`descarga PDF ${pdfRes.status}`)
       const buf = Buffer.from(await pdfRes.arrayBuffer())
-      await sock.sendMessage(`${telefono}@s.whatsapp.net`, {
+      await sock.sendMessage(jid, {
         document: buf,
         mimetype: "application/pdf",
         fileName: job.filename || "Cotizacion GeoVictoria.pdf",
@@ -799,7 +837,9 @@ async function conectar(sessionId) {
   enviosTimers.set(sessionId, setInterval(() => procesarEnviosPendientes(sessionId, sock).catch(() => {}), 15_000))
 }
 
-console.log(`wa-espejo — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — pasivo + cola de envíos del editor`)
+const WA_ESPEJO_VERSION = "2026-09-05.envio-libre"
+console.log(`wa-espejo ${WA_ESPEJO_VERSION} — ${SESIONES.length} sesión(es): ${SESIONES.join(", ")} — pasivo + cola de envíos del editor`)
+await kvSet("wa_espejo_version", JSON.stringify({ version: WA_ESPEJO_VERSION, at: new Date().toISOString() }))
 await cargarLidPn()
 for (const sessionId of SESIONES) {
   arrancarSesion(sessionId)
