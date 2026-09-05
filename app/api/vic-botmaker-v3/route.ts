@@ -1351,6 +1351,39 @@ async function processOneTurn(
       }
     }
 
+    // 2.6b'. CAPACITACIÓN "AGENDADA" SIN TOOL (05-sep, prueba E1): la reserva
+    // en Bookings falló, la tool devolvió el error con la orden "NO afirmes
+    // que quedó agendada", y el modelo respondió "Déjame confirmarte la hora
+    // por este chat: tu capacitación queda agendada para mañana 08…". Sin
+    // reserva no hay invitación, ni link de Teams, ni correo del jefe, y el
+    // cliente quedó esperando una capacitación que no existe. Gemelo del
+    // cinturón de reuniones, para la fase de onboarding: afirmar agenda de
+    // capacitación exige agendar_capacitacion ok en ESTE turno (o que la
+    // capacitación ya estuviera agendada antes — ahí recordarla es legítimo).
+    if (enOnboarding) {
+      const afirmaCapacitacion =
+        /capacitaci[oó]n[^.\n]{0,80}\b(qued[oó]|queda|est[aá])\s+(agendad|confirmad|reservad|lista)/i.test(reply) ||
+        /\b(qued[oó]|queda)\s+agendad[ao]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply) ||
+        /\bte\s+(la\s+)?agend[eé]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply)
+      const agendoReal = toolCalls.some((c) => c.name === "agendar_capacitacion" && c.ok)
+      let yaEstabaAgendada = false
+      if (afirmaCapacitacion && !agendoReal) {
+        try {
+          const { claveCapacitacion } = await import("@/lib/onboarding/fase")
+          const raw = (await getKvValue(claveCapacitacion(contact))) || ""
+          yaEstabaAgendada = /"bookingId"\s*:\s*"[^"]+"/.test(raw)
+        } catch { /* sin kv, se trata como no agendada */ }
+      }
+      if (afirmaCapacitacion && !agendoReal && !yaEstabaAgendada) {
+        console.warn(`[v3-bg] ALUCINACIÓN_CAPACITACION contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`)
+        reply =
+          "La hora todavía no quedó tomada en la agenda — no te la doy por confirmada hasta que entre. Te la confirmo por este mismo chat en un momento; no necesitas hacer nada 🙌"
+        await avisarEquipoInterno(
+          `⚠️ CAPACITACIÓN sin reserva real — contacto +${contact}: el modelo la dio por agendada sin que agendar_capacitacion tuviera éxito. Revisar el chat y agendar a mano en Bookings.`,
+        ).catch(() => false)
+      }
+    }
+
     // 2.6b''. Guardrail "COTIZACIÓN ACTUALIZADA" SIN TOOL (27-ago, caso
     // Guillermo/Genesys COT956): el cliente pidió la variante solo-app, el
     // modelo anunció "te envío la cotización actualizada solo con app" y

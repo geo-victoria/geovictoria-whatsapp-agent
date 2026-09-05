@@ -189,10 +189,15 @@ export async function armarOnboarding(contact: string): Promise<{
             nota: "Este cliente YA tiene su capacitación agendada. Recuérdasela en vez de ofrecer otra.",
           }
         }
-        const dias: Array<{ fecha: string; horas: string[] }> = []
+        const dias: Array<{ fecha: string; etiqueta: string; horas: string[] }> = []
+        const etiquetaDe = (fechaISO: string) => {
+          const d = new Date(`${fechaISO}T12:00:00-04:00`)
+          const t = new Intl.DateTimeFormat("es-CL", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago" }).format(d)
+          return t.charAt(0).toUpperCase() + t.slice(1)
+        }
         for (const f of fechasAgendables(new Date(), 4)) {
           const horas = await cuposDe(f)
-          if (horas.length) dias.push({ fecha: f, horas })
+          if (horas.length) dias.push({ fecha: f, etiqueta: etiquetaDe(f), horas })
         }
         return {
           ok: true,
@@ -200,7 +205,7 @@ export async function armarOnboarding(contact: string): Promise<{
           duracionMin: 120,
           dias,
           nota: dias.length
-            ? "Ofrece SOLO estos horarios. Son de la agenda real del relator."
+            ? "Ofrece SOLO estos horarios. Son de la agenda real del relator. Nombra cada día con su `etiqueta` TAL CUAL (ej. \"Lunes 8 de septiembre\"): nunca digas \"mañana\" ni \"pasado mañana\" — el primer día disponible casi nunca es mañana."
             : "Sin cupos en los próximos días. Dile que le confirmas la hora por este chat y avisa al equipo.",
         }
       }
@@ -238,9 +243,14 @@ export async function armarOnboarding(contact: string): Promise<{
         nombre: nombreCliente,
         email: b.admin.email || "",
         telefono: `+${contact.replace(/\D/g, "")}`,
+        // El formulario de Diego llama al campo "Numero de implementacion" y
+        // el de Ignacio "Numero de Implementacion" (05-sep, E1: la reserva con
+        // Ignacio murió por "fields are mandatory"). Se mandan las dos
+        // grafías; Bookings ignora la que no exista en ese formulario.
         camposPropios: {
           Empresa: cap.empresa || b.empresa.nombre || "",
           "Numero de implementacion": cap.numero || "",
+          "Numero de Implementacion": cap.numero || "",
         },
         notas: "Agendada por Vicky desde el chat de onboarding.",
       })

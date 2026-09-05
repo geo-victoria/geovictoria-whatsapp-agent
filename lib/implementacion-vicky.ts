@@ -33,7 +33,12 @@ const API = () => (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").tr
 /** Relatores de GV Avanzado. La cuenta de Ignacio es compartida a propósito. */
 export const RELATORES_GV_AVANZADO = [
   { nombre: "Diego Alegre", email: "dalegre@geovictoria.com", zohoId: "3525045000451232212" },
-  { nombre: "Ignacio Salinas", email: "isalinas@geovictoria.com", zohoId: "3525045000440597415" },
+  // OJO (05-sep, prueba E1): el id que estaba acá, 3525045000440597415, es el
+  // usuario "Product Manager" (productmanager@geovictoria.pro, la cuenta
+  // COMPARTIDA). Por eso las implementaciones "de Ignacio" caían ahí aunque el
+  // PUT del Owner respondiera ok. El id real de Ignacio sale de sus propias
+  // implementaciones (IMP-11320, Owner "Ignacio Salinas").
+  { nombre: "Ignacio Salinas", email: "isalinas@geovictoria.com", zohoId: "3525045000655559002" },
 ] as const
 
 /** Turno alternado, persistido — sobrevive a los reinicios de instancia. */

@@ -131,6 +131,25 @@ export async function obtenerLinkOnboarding(quoteId: string): Promise<string> {
 // (pagó el dueño desde su celular), getQuotePointers no encuentra nada y el
 // cliente quedaba sin habilitación aunque dijera "pagué la COT307" en el chat.
 // Acá se resuelve ese número contra Zoho para asociar el pago igual.
+/** Nombre del contacto de la cotización (persona natural sin razón social). */
+async function nombreContactoDeCotizacion(quoteId: string): Promise<string> {
+  try {
+    const token = await getZohoAccessToken()
+    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Contacto_Asociado,Cuenta_Asociada`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    const d = ((await r.json().catch(() => ({}))) as {
+      data?: Array<{ Contacto_Asociado?: { name?: string }; Cuenta_Asociada?: { name?: string } }>
+    }).data?.[0]
+    const cuenta = String(d?.Cuenta_Asociada?.name || "").trim()
+    if (cuenta && cuenta !== "-") return cuenta
+    return String(d?.Contacto_Asociado?.name || "").trim()
+  } catch {
+    return ""
+  }
+}
+
 async function buscarCotizacionPorNumero(
   numero: string,
 ): Promise<import("@/lib/supabase-persistence-v3").QuotePointer | null> {
@@ -514,9 +533,17 @@ export async function registrarComprobanteTransferencia(
       let sembrado = null
       try {
         const previo = parsearBorrador(await getKvValue(claveBorrador(contact)).catch(() => null))
+        // PERSONA NATURAL (05-sep, E1): la cotización sin razón social dejaba
+        // el placeholder "tu empresa" en el arranque, el modelo lo guardaba
+        // como nombre de la empresa y la Implementación nacía "ASISTENCIA -
+        // tu empresa". Sin razón social, el nombre es el del contacto de la
+        // cotización (la cuenta "-" de Zoho cuenta como vacía).
+        const limpio = (s: unknown) => { const t = String(s || "").trim(); return t === "-" ? "" : t }
+        let nombreEmpresa = limpio(pointer.empresa)
+        if (!nombreEmpresa) nombreEmpresa = await nombreContactoDeCotizacion(pointer.quoteId)
         sembrado = sembrarBorrador(
           previo,
-          { empresa: { nombre: pointer.empresa, identificador: pointer.rut } },
+          { empresa: { nombre: nombreEmpresa || undefined, identificador: pointer.rut } },
           "cl",
         )
         await setKvValue(claveBorrador(contact), JSON.stringify(sembrado))
