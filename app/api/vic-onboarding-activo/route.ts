@@ -20,16 +20,28 @@ export const dynamic = "force-dynamic"
  * el comportamiento de siempre.
  */
 const SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
+
+/** Auth: secreto compartido con el cotizador (header) o el secreto admin de
+ *  crones (`?key=` / Bearer) para diagnóstico — p. ej. verificar tras un deploy
+ *  que `VICKY_ONBOARDING_ENABLED` quedó encendido (05-sep). */
+function autorizado(req: Request): boolean {
+  if (SECRET && (req.headers.get("x-vicky-secret") || "").trim() === SECRET) return true
+  const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
+  const key = (new URL(req.url).searchParams.get("key") || "").trim()
+  return Boolean(CRON_SECRET && (bearer === CRON_SECRET || key === CRON_SECRET))
+}
 
 export async function GET(req: Request): Promise<Response> {
-  if (!SECRET || (req.headers.get("x-vicky-secret") || "").trim() !== SECRET) {
+  if (!autorizado(req)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
   const contact = (new URL(req.url).searchParams.get("contact") || "").replace(/\D/g, "")
   if (!/^569\d{8}$/.test(contact)) return NextResponse.json({ ok: true, activo: false, motivo: "no_cl" })
   try {
     const activo = await onboardingActivoPara(contact)
-    return NextResponse.json({ ok: true, activo })
+    const global = (process.env.VICKY_ONBOARDING_ENABLED || "").trim().toLowerCase() === "on"
+    return NextResponse.json({ ok: true, activo, motivo: global ? "flag_global" : activo ? "piloto" : "apagado" })
   } catch (e) {
     console.warn("[onboarding-activo] falló:", e instanceof Error ? e.message : e)
     return NextResponse.json({ ok: true, activo: false, motivo: "error" })
