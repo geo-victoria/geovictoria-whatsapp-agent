@@ -19,6 +19,13 @@ import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-
 // URL de inicio de sesión de la plataforma para el instructivo post-alta.
 // Sin env, el copy dice "la plataforma GeoVictoria" sin link (jamás inventar).
 const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "").trim()
+
+/** "Martes 8 de septiembre" — como lo lee una persona, nunca 2026-09-08. */
+function etiquetaFecha(fechaISO: string): string {
+  const d = new Date(`${fechaISO}T12:00:00-04:00`)
+  const t = new Intl.DateTimeFormat("es-CL", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago" }).format(d)
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
 export { entregarKickoffOnboarding } from "./onboarding-envio"
 import { dispatchTool } from "./tools"
 import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
@@ -197,11 +204,7 @@ export async function armarOnboarding(contact: string): Promise<{
           }
         }
         const dias: Array<{ fecha: string; etiqueta: string; horas: string[] }> = []
-        const etiquetaDe = (fechaISO: string) => {
-          const d = new Date(`${fechaISO}T12:00:00-04:00`)
-          const t = new Intl.DateTimeFormat("es-CL", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago" }).format(d)
-          return t.charAt(0).toUpperCase() + t.slice(1)
-        }
+        const etiquetaDe = etiquetaFecha
         for (const f of fechasAgendables(new Date(), 4)) {
           const horas = await cuposDe(f)
           if (horas.length) dias.push({ fecha: f, etiqueta: etiquetaDe(f), horas })
@@ -311,7 +314,8 @@ export async function armarOnboarding(contact: string): Promise<{
             : "La reserva no entró. Dile que le confirmas la hora por este chat — NO afirmes que quedó agendada.",
         }
       }
-      const cuandoLegible = `${fecha} a las ${hora}`
+      // Fecha legible (E8 05-sep: "quedó agendada para el 2026-09-08" — ISO al cliente).
+      const cuandoLegible = `${etiquetaFecha(fecha).replace(/^./, (c) => c.toLowerCase())} a las ${hora}`
       await setKvValue(
         claveCapacitacion(contact),
         JSON.stringify({ ...cap, bookingId: r.bookingId, cuando: cuandoLegible }),
@@ -715,15 +719,18 @@ export async function armarOnboarding(contact: string): Promise<{
               `Le enviamos un correo a ${alta.workEmail} con su contraseña temporal.`
             const msgNomina =
               "Y si quieres, aquí mismo dejamos cargados a tus trabajadores para que puedan marcar. ¿Lo avanzamos?"
-            const { sendBotmakerMessage } = await import("./botmaker-push-v3")
-            const { appendAssistantV3 } = await import("./supabase-persistence-v3")
-            const empujado = await sendBotmakerMessage(contact, msgAcceso).catch(() => false)
-            if (empujado) await appendAssistantV3(contact, msgAcceso, "cl").catch(() => {})
+            // Antes el del acceso se EMPUJABA aparte y Vicky entregaba solo el
+            // de la nómina — pero el modelo volvía a contar el acceso en su
+            // respuesta y el cliente recibía dos veces lo mismo (E8 05-sep:
+            // "El acceso quedó a nombre de…" + "A egomez@ salió el acceso…").
+            // Ahora van los dos en UN mensajeParaProspecto separados por [---]:
+            // el webhook los parte en dos burbujas, en orden, y nada se repite.
             return {
               ok: true,
-              // Si el push falló (ventana/red), ambos van juntos: jamás se
-              // pierde el aviso del acceso.
-              mensajeParaProspecto: empujado ? msgNomina : `${msgAcceso}\n\n${msgNomina}`,
+              accesoInformado: true,
+              mensajeParaProspecto: `${msgAcceso}\n[---]\n${msgNomina}`,
+              instruccionObligatoria:
+                "Entrega el mensajeParaProspecto TAL CUAL (incluido el marcador [---]). NO agregues tu propio anuncio del acceso, del correo ni de la contraseña: ya viene ahí y repetirlo es doble mensaje.",
             }
           }
           // Creación falló → cae al alta manual (jamás perder un alta).
