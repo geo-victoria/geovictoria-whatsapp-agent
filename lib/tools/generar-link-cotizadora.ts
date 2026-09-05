@@ -974,8 +974,45 @@ export async function generarLinkCotizadora(
     }
   }
 
+  // COMPROBANTE QUE LLEGÓ ANTES DE ESTA FORMAL (05-sep, prueba E6): si el
+  // cliente ya pagó con el precio referencial, la formal recién emitida es a
+  // la que hay que asociarlo. La tool lo dice en su resultado para que el
+  // modelo llame registrar_comprobante_transferencia en ESTE turno y el
+  // cliente no quede esperando una verificación que nadie va a hacer.
+  let comprobantePendiente: { monto: number; bancoOrigen: string; fechaDetectada: string; detalle: string; hace: string } | null = null
+  try {
+    const { getKvValue, setKvValue } = await import("@/lib/supabase-persistence-v3")
+    const fonoPend = String(contactoTelefono || "").replace(/\D/g, "")
+    const raw = fonoPend ? await getKvValue(`comprobante_pendiente_${fonoPend}`).catch(() => null) : null
+    if (raw) {
+      const p = JSON.parse(raw) as { at?: string; monto?: number; bancoOrigen?: string; fechaDetectada?: string; detalle?: string }
+      const edadMs = Date.now() - Date.parse(p.at || "")
+      if (Number.isFinite(edadMs) && edadMs < 48 * 3600_000 && Number(p.monto) > 0) {
+        comprobantePendiente = {
+          monto: Number(p.monto),
+          bancoOrigen: String(p.bancoOrigen || ""),
+          fechaDetectada: String(p.fechaDetectada || ""),
+          detalle: String(p.detalle || ""),
+          hace: `${Math.max(1, Math.round(edadMs / 60000))} min`,
+        }
+        await setKvValue(`comprobante_pendiente_${fonoPend}`, "").catch(() => {})
+      }
+    }
+  } catch { /* best-effort */ }
+
   return {
     ok: true,
+    ...(comprobantePendiente
+      ? {
+          comprobantePendiente,
+          instruccionObligatoria:
+            `El cliente YA mandó un comprobante de transferencia por $${comprobantePendiente.monto.toLocaleString("es-CL")} hace ${comprobantePendiente.hace}, antes de esta cotización formal. ` +
+            `Llama AHORA, en este mismo turno, registrar_comprobante_transferencia con montoDetectado=${comprobantePendiente.monto}` +
+            (comprobantePendiente.bancoOrigen ? `, bancoOrigen="${comprobantePendiente.bancoOrigen}"` : "") +
+            (comprobantePendiente.fechaDetectada ? `, fechaDetectada="${comprobantePendiente.fechaDetectada}"` : "") +
+            ` para asociarlo a esta cotización y activar su cuenta. No le pidas que lo reenvíe.`,
+        }
+      : {}),
     pdfUrl: data.pdfUrl || "",
     acceptanceUrl: data.acceptanceUrl,
     codigoCorto: data.codigoCorto || "",

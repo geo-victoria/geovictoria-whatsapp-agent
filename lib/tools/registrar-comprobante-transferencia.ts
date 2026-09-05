@@ -601,9 +601,29 @@ export async function registrarComprobanteTransferencia(
   // Sin habilitación blanda: comprobante ilegible, o sin cotización formal
   // asociada al contacto. Acá NO hay nada que validar, así que se mantiene el
   // mensaje de verificación con el plazo transparente (decisión Lalo 25-jul).
+  // COMPROBANTE ANTES DE LA FORMAL (05-sep, prueba E6): el cliente transfirió
+  // con el precio referencial y mandó la foto antes de dar RUT y correo. Sin
+  // puntero no había a qué asociarlo, la formal salía después y nadie volvía
+  // a mirar el comprobante: el cliente quedaba "esperando a finanzas" para
+  // siempre, sin alta y sin onboarding. Se guarda 48 h; la emisión de la
+  // formal lo lee y ordena asociarlo en ese mismo turno.
+  if (!pointer && monto > 0) {
+    await setKvValue(
+      `comprobante_pendiente_${contact}`,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        monto,
+        bancoOrigen: input.bancoOrigen || "",
+        fechaDetectada: input.fechaDetectada || "",
+        detalle: input.detalle || "",
+      }),
+    ).catch(() => {})
+  }
   const mensajeParaProspecto = pointer
     ? `Recibí tu comprobante 🙌 Ya quedó asociado a tu cotización — no alcancé a leer el monto, así que lo está revisando nuestro equipo (toma máximo 24 horas hábiles). Apenas quede confirmado te escribo por aquí para partir con la configuración de tu cuenta. Si quieres acelerarlo, mándame el comprobante de nuevo con la imagen más nítida 😊`
-    : `Recibí tu comprobante${monto > 0 ? ` por ${montoFmt}` : ""} 🙌 Lo dejé en manos del equipo para asociarlo a tu cotización — la verificación toma máximo 24 horas hábiles. Apenas se confirme te escribo por aquí para partir con la configuración de tu cuenta. ¡Gracias!`
+    : monto > 0
+      ? `Recibí tu comprobante por ${montoFmt} 🙌 Para dejarlo asociado y activarte la cuenta me falta solo emitir tu cotización formal: pásame el RUT de la empresa y tu correo y en un minuto queda todo ligado 😊`
+      : `Recibí tu comprobante 🙌 Lo dejé en manos del equipo para asociarlo a tu cotización — la verificación toma máximo 24 horas hábiles. Apenas se confirme te escribo por aquí para partir con la configuración de tu cuenta. ¡Gracias!`
 
   return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
 }
