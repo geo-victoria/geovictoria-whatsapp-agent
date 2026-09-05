@@ -724,7 +724,7 @@ async function processOneTurn(
     // onboarding, que vive en NEXT_PUBLIC_BASE_URL de la app de onboarding).
     const urlsDeTools = urlsDeToolsDelTurno(result.toolCalls)
     const DOMINIOS_VICKY =
-      /^https?:\/\/(?:(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|dt\.gob\.cl|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)|geovictoria-demo-agent\.vercel\.app\/?$)/i
+      /^https?:\/\/(?:(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|dt\.gob\.cl|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be|hubspotusercontent-na1\.net)(?:[/?#]|$)|geovictoria-demo-agent\.vercel\.app\/?$)/i
     for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
       if (DOMINIOS_VICKY.test(u)) continue
       if (vieneDeUnaTool(u, urlsDeTools)) {
@@ -1365,8 +1365,12 @@ async function processOneTurn(
         /capacitaci[oó]n[^.\n]{0,80}\b(qued[oó]|queda|est[aá])\s+(agendad|confirmad|reservad|lista)/i.test(reply) ||
         /\b(qued[oó]|queda)\s+agendad[ao]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply) ||
         /\bte\s+(la\s+)?agend[eé]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply)
+      // E10 05-sep: "Listo, cancelé la capacitación del martes…" pasó el filtro
+      // porque solo miraba "quedó cancelada" — la primera persona también cuenta.
       const afirmaCambio = /capacitaci[oó]n[^.\n]{0,80}\bqued[oó]\s+(reagendad|cambiad|movid|cancelad)/i.test(reply) ||
-        /\bqued[oó]\s+(reagendad|cancelad)[ao]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply)
+        /\bqued[oó]\s+(reagendad|cancelad)[ao]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply) ||
+        /\b(?:ya\s+)?(?:la\s+|te\s+la\s+)?(cancel[eé]|reagend[eé]|mov[ií]|cambi[eé])\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply) ||
+        /\bcapacitaci[oó]n[^.\n]{0,60}\b(cancelada|reagendada|anulada)\b/i.test(reply)
       const cambioReal = toolCalls.some((c) => (c.name === "reagendar_capacitacion" || c.name === "cancelar_capacitacion") && c.ok)
       if (afirmaCambio && !cambioReal) {
         console.warn(`[v3-bg] ALUCINACIÓN_REAGENDA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`)

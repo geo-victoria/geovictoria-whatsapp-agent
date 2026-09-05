@@ -233,6 +233,11 @@ export function promptConfiguracionCL(estado: {
     "- Cuando elija uno, llama agendar_capacitacion con esa fecha y hora, y copia el mensajeParaProspecto tal cual.\n" +
     "- Si el cliente prefiere agendarla después, perfecto: no insistas más de una vez y cierra igual.\n" +
     "- Si la tool te dice que ya tiene una capacitación agendada, recuérdasela; no agendes otra.\n" +
+    "- CAMBIOS: si pide cambiarla de día/hora llama reagendar_capacitacion (con la nueva fecha y hora " +
+    "de los cupos reales); si pide cancelarla llama cancelar_capacitacion. EN ESE MISMO TURNO. " +
+    "PROHIBIDO decir 'la cancelé', 'quedó cancelada' o 'la moví' sin que esa tool haya devuelto ok:true: " +
+    "sin tool, la reserva sigue viva en la agenda del relator y él se presenta a una sesión que el " +
+    "cliente cree cancelada.\n" +
     "- El CORREO PERSONAL de cada trabajador es OBLIGATORIO (ahí activan su acceso). Si faltan " +
     "correos, la tool te dirá de quiénes: pídelos con naturalidad, de a pocos.\n" +
     "- Cada dato que entregue el cliente → tool DE INMEDIATO (guardar_nomina, definir_turno, " +

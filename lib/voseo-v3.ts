@@ -171,6 +171,10 @@ const CORREO_GV_RE = /\b([a-z0-9._%+-]+)@geovictoria\.com\b/gi
 const CORREOS_GV_FIJOS = new Set([
   "soporte", "vicky", "cobranza", "info", "vluna", "egomez", "rlewit",
   "soportemx", "soporteco", "ssttperu",
+  // Remitente REAL del correo de contraseña de la plataforma: el instructivo
+  // de ingreso lo nombra y el blindaje lo convertía en soporte@ (E10 05-sep),
+  // mandando al cliente a buscar el correo en el remitente equivocado.
+  "no-reply", "noreply",
 ])
 
 export function blindarSoporteInventado(texto: string, emailsPermitidos?: Set<string>): string {
