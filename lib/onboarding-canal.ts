@@ -588,12 +588,15 @@ export async function armarOnboarding(contact: string): Promise<{
             // aviso para crearla a mano.
             void import("./implementacion-vicky")
               .then(async (m) => {
+                // Cuenta, contacto, deal, ejecutivo, dotación y correo del
+                // solicitante salen de la VENTA (05-sep): antes nacía sin ellos.
+                const ctx = await m.contextoImplementacionDesdeVenta(contact)
                 const imp = await m.crearImplementacionGvAvanzado({
+                  ...ctx,
                   razonSocial: b.empresa.nombre || "",
                   // El identificador del borrador ES el RUT (así lo pide la
                   // API de alta: sin puntos ni guión).
                   rut: b.empresa.identificador || undefined,
-                  correoSolicitante: b.admin.email || undefined,
                   comentarios: `Alta por chat de Vicky (companyId ${alta.companyId}). Empresa YA creada en la plataforma; no requiere creación.`,
                 })
                 if (imp) {

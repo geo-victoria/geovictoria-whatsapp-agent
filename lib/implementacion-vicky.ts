@@ -48,6 +48,56 @@ export async function siguienteRelator(): Promise<(typeof RELATORES_GV_AVANZADO)
   }
 }
 
+/**
+ * LO QUE LA VENTA YA SABE Y LA IMPLEMENTACIÓN NO RECIBÍA (05-sep, brecha
+ * medida contra las 12 GV Avanzado humanas de ago-sep): Cliente, Contacto,
+ * Ej. Comercial y Cantidad de usuarios los llenan 12 de 12; la nuestra nacía
+ * con los cuatro vacíos aunque el puntero de cotización del contacto tiene
+ * la cuenta, el contacto y el deal, y el deal tiene dueño y dotación. Y
+ * `Correo_solicitante` llevaba el correo del COMPRADOR: en las humanas es el
+ * del ejecutivo que pidió la implementación. Best-effort: si Zoho no
+ * responde, la implementación nace igual, solo más pobre.
+ */
+export async function contextoImplementacionDesdeVenta(contact: string): Promise<Partial<DatosImplementacion>> {
+  const out: Partial<DatosImplementacion> = {}
+  try {
+    const { getQuotePointers } = await import("./supabase-persistence-v3")
+    const punteros = await getQuotePointers((contact || "").replace(/\D/g, "")).catch(() => [])
+    const p = punteros.find((x) => (x.quoteId || "").trim())
+    if (!p) return out
+    out.quoteId = p.quoteId
+    const token = await getZohoAccessToken()
+    const H = { Authorization: `Zoho-oauthtoken ${token}` }
+    const modulo = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const rq = await fetch(`${API()}/crm/v3/${modulo}/${p.quoteId}?fields=Cuenta_Asociada,Contacto_Asociado,Deal_Asociado,Owner`, { headers: H, cache: "no-store" })
+    const q = ((await rq.json().catch(() => ({}))) as {
+      data?: Array<{ Cuenta_Asociada?: { id?: string }; Contacto_Asociado?: { id?: string }; Deal_Asociado?: { id?: string }; Owner?: { id?: string; email?: string } }>
+    }).data?.[0]
+    if (q?.Cuenta_Asociada?.id) out.accountId = String(q.Cuenta_Asociada.id)
+    if (q?.Contacto_Asociado?.id) out.contactId = String(q.Contacto_Asociado.id)
+    const dealId = String(q?.Deal_Asociado?.id || p.dealId || "")
+    let owner = q?.Owner
+    if (dealId) {
+      out.dealId = dealId
+      const rd = await fetch(`${API()}/crm/v3/Deals/${dealId}?fields=Owner,N_Empleados_que_marcan`, { headers: H, cache: "no-store" })
+      const d = ((await rd.json().catch(() => ({}))) as {
+        data?: Array<{ Owner?: { id?: string; email?: string }; N_Empleados_que_marcan?: number | string }>
+      }).data?.[0]
+      if (d?.Owner?.id) owner = d.Owner
+      const n = Number(d?.N_Empleados_que_marcan)
+      if (Number.isFinite(n) && n > 0) out.usuarios = n
+    }
+    const correo = String(owner?.email || "").toLowerCase()
+    const esRobot = !correo || /vicky@|info@geovictoria/.test(correo)
+    // Ej. Comercial solo si es una persona; el robot no es un ejecutivo.
+    if (owner?.id && !esRobot) out.ejComercialId = String(owner.id)
+    out.correoSolicitante = esRobot ? "vicky@geovictoria.com" : correo
+  } catch (e) {
+    console.warn("[implementacion] contexto desde la venta falló:", e instanceof Error ? e.message : e)
+  }
+  return out
+}
+
 export type DatosImplementacion = {
   razonSocial: string
   rut?: string
@@ -185,6 +235,15 @@ export async function crearImplementacionGvAvanzado(
  * Best-effort: la cita YA está tomada en Bookings y el cliente ya la tiene
  * confirmada — si el CRM falla, lo que se pierde es el reflejo, no la hora.
  */
+/** Offset de America/Santiago en la fecha dada, como "-04:00" / "-03:00". */
+function offsetChile(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", timeZoneName: "longOffset" }).formatToParts(d)
+  const name = parts.find((p) => p.type === "timeZoneName")?.value || "GMT-4"
+  const mm = name.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/)
+  if (!mm) return "-04:00"
+  return `${mm[1]}${mm[2].padStart(2, "0")}:${mm[3] || "00"}`
+}
+
 export async function registrarCurso1Agendado(
   implementacionId: string,
   d: { desdeBookings: string; relator: string },
@@ -197,8 +256,12 @@ export async function registrarCurso1Agendado(
       Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
     }
     const m = d.desdeBookings.match(/^(\d{2})-([A-Za-z]{3})-(\d{4})\s+(\d{2}:\d{2}):\d{2}$/)
-    const iso = m ? `${m[3]}-${MESES[m[2]] || "01"}-${m[1]}T${m[4]}:00-04:00` : null
-    if (!iso) return false
+    if (!m) return false
+    // OFFSET REAL DE CHILE EN ESA FECHA (05-sep): antes iba "-04:00" fijo y el
+    // 9 de septiembre Chile ya está en horario de verano (-03:00) — la reserva
+    // era a las 09:00 y la Implementación decía 10:00. Se calcula con la zona.
+    const pared = `${m[3]}-${MESES[m[2]] || "01"}-${m[1]}T${m[4]}:00`
+    const iso = `${pared}${offsetChile(new Date(`${pared}Z`))}`
     const r = await fetch(`${API()}/crm/v3/Implementaciones/${implementacionId}`, {
       method: "PUT",
       headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
