@@ -26,7 +26,7 @@ const MANUAL_URL = (
   process.env.VICKY_MANUAL_ADMIN_URL ||
   "https://7742864.fs1.hubspotusercontent-na1.net/hubfs/7742864/Manual_Usuario_GeoVictoria_Demogva21082026.pdf"
 ).trim()
-const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "https://www.geovictoria.com").trim()
+const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "https://advanced.geovictoria.com").trim()
 
 function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -48,7 +48,7 @@ export async function enviarCorreoInstruccionesOnboarding(datos: {
     <p style="margin:0 0 12px;">La cuenta de <b>${esc(datos.empresa)}</b> ya está creada en GeoVictoria 🎉 Estoy feliz de acompañarte en esta etapa: mi objetivo es que uses la plataforma con seguridad y autonomía desde el primer día.</p>
     <p style="margin:0 0 8px;"><b>Para ingresar son 3 pasos:</b></p>
     <p style="margin:0 0 4px;">1&nbsp;&nbsp;Revisa tu correo: te llegó un mensaje de <b>no-reply@geovictoria.com</b> con tu contraseña temporal (si no aparece, mira en Promociones o Spam).</p>
-    <p style="margin:0 0 4px;">2&nbsp;&nbsp;Entra a <a href="${LOGIN_URL}" style="color:#1a7ec2;">www.geovictoria.com</a> → <b>Acceso Usuarios</b> e ingresa con tu correo y esa contraseña.</p>
+    <p style="margin:0 0 4px;">2&nbsp;&nbsp;Entra a <a href="${LOGIN_URL}" style="color:#1a7ec2;">advanced.geovictoria.com</a> con tu correo y esa contraseña.</p>
     <p style="margin:0 0 16px;">3&nbsp;&nbsp;Cambia la contraseña por una tuya — y tu cuenta queda operativa.</p>
     <div style="background:#eef5fb;border-radius:10px;padding:14px 16px;margin:0 0 16px;">
       <p style="margin:0 0 6px;"><b>Tu manual, siempre contigo</b></p>

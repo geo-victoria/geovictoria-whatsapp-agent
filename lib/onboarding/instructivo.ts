@@ -15,10 +15,10 @@ type Opts = { manualUrl?: string; loginUrl?: string }
 /** Solo los pasos + manual (para componer dentro de otros mensajes). */
 export function pasosIngresoWhatsApp(opts: Opts = {}): string {
   const manual = (opts.manualUrl || MANUAL_URL_DEFAULT).trim()
-  const login = (opts.loginUrl || "www.geovictoria.com").trim()
+  const login = (opts.loginUrl || "https://advanced.geovictoria.com").trim()
   return (
     `1. Abre el correo de no-reply@geovictoria.com con la contraseña temporal (si no aparece, revisa Promociones o Spam)\n` +
-    `2. Entra a ${login} → Acceso Usuarios, con el correo del administrador y esa contraseña\n` +
+    `2. Entra a ${login} con el correo del administrador y esa contraseña\n` +
     `3. Cámbiala por una propia — y la cuenta queda operativa\n\n` +
     `📘 Manual del Administrador, para revisar a tu ritmo:\n${manual}`
   )
