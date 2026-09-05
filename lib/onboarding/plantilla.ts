@@ -39,7 +39,7 @@
  * borrar y recrear con el mismo.
  */
 
-import { normalizarRut, rutValido } from "../rut"
+import { normalizarRut, rutValido } from "../rut.ts"
 
 export const PLANTILLA_ONBOARDING_CL = {
   /** ruleNameOrId que espera la API de notificaciones de Botmaker. */

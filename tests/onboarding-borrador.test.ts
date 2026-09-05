@@ -173,15 +173,16 @@ describe("confirmación antes del paso irreversible", () => {
 
   test("el resumen muestra los datos YA NORMALIZADOS, no como los tecleó", () => {
     // El cliente confirma exactamente lo que se va a enviar. Si en pantalla ve
-    // "77.861.333-6" y se manda "77861333-6", no confirmó lo que se mandó.
+    // "77.861.333-6" y se manda "77861333-6", no confirmó lo que se mandó. Desde el 05-sep el
+    // resumen lo muestra con puntos (canónico y legible: 77.861.333-6), nunca pelado.
     const r = resumenParaConfirmar(CL())
-    assert.match(r, /RUT: 77861333-6/)
-    assert.ok(!r.includes("77.861.333-6"), "el resumen no debe mostrar el formato con puntos")
+    assert.match(r, /RUT: 77\.861\.333-6/)
+    assert.ok(!/RUT: 77861333-6/.test(r), "el resumen no debe mostrar el RUT pelado")
   })
 
   test("el resumen trae los seis datos y pide confirmación explícita", () => {
     const r = resumenParaConfirmar(CL())
-    for (const dato of ["Transportes Viig SpA", "77861333-6", "Pablo Soto Vera", "pablo@viig.cl"]) {
+    for (const dato of ["Transportes Viig SpA", "77.861.333-6", "Pablo Soto Vera", "pablo@viig.cl"]) {
       assert.ok(r.includes(dato), `falta en el resumen: ${dato}`)
     }
     assert.match(r, /confirmas/i)

@@ -71,7 +71,7 @@ describe("no re-preguntar lo que el cliente ya dio (regla Eduardo, 26-jul)", () 
   test("el arranque CONFIRMA los datos de la venta en vez de pedirlos", () => {
     const k = renderPlantillaOnboarding(paramsPlantillaOnboarding("Transportes Viig SpA", "77861333-6"))
     assert.match(k, /Transportes Viig SpA/)
-    assert.match(k, /77861333-6/)
+    assert.match(k, /77\.861\.333-6/)
     assert.match(k, /Los usamos tal cual\?/)
     assert.ok(!/me das la razón social/.test(k), "no puede pedir lo que ya tiene")
     assert.match(k, /quién va a administrar/, "pasa directo a lo que SÍ falta")
@@ -100,7 +100,7 @@ describe("EL mensaje de arranque: uno solo para todos los casos", () => {
     // separarse con el tiempo porque no hay dos redacciones.
     const esperado = PLANTILLA_ONBOARDING_CL.body
       .replace("${empresa}", "BluePay Chile SPA")
-      .replace("${rut_empresa}", "78387633-7")
+      .replace("${rut_empresa}", "78.387.633-7")
     assert.equal(RENDER, esperado)
     assert.ok(!/\$\{/.test(RENDER), `quedó una variable sin resolver: ${RENDER}`)
   })
@@ -113,7 +113,7 @@ describe("EL mensaje de arranque: uno solo para todos los casos", () => {
 
   test("confirma empresa y RUT tabulados, y pide solo lo que falta", () => {
     assert.match(RENDER, /Empresa: BluePay Chile SPA/)
-    assert.match(RENDER, /RUT: 78387633-7/)
+    assert.match(RENDER, /RUT: 78\.387\.633-7/)
     assert.match(RENDER, /Los usamos tal cual\?/)
     assert.match(RENDER, /Si hay que cambiar algo, me dices/, "permiso explícito de corregir")
     assert.match(RENDER, /quién va a administrar/)
@@ -256,7 +256,7 @@ describe("prompt de la fase: el estado inyectado manda", () => {
   test("borrador completo: trae el resumen y frena la confirmación prematura", () => {
     const p = promptOnboardingCL(COMPLETO, { altaSolicitada: false })
     assert.match(p, /TODOS los datos están completos/)
-    assert.match(p, /RUT: 77861333-6/, "el resumen va con datos normalizados")
+    assert.match(p, /RUT: 77\.861\.333-6/, "el resumen va con datos normalizados y legibles")
     assert.match(p, /NO llames confirmar_alta_empresa/)
   })
 

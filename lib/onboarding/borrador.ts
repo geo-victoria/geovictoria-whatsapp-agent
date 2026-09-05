@@ -18,6 +18,7 @@
  */
 
 import { rutValido, formatearRut } from "../rut.ts"
+import { rutLegible } from "./plantilla.ts"
 import { nitValido, normalizarNit } from "../paises/co/nit.ts"
 import { rfcValido, normalizarRfc } from "../paises/mx/rfc.ts"
 
@@ -249,8 +250,11 @@ export function sembrarBorrador(
 export function resumenParaConfirmar(b: Borrador): string {
   if (!borradorCompleto(b)) return ""
   const nombreId = NOMBRE_IDENTIFICADOR[b.pais]
-  const idEmpresa = normalizarIdentificador(b.empresa.identificador!, b.pais)
-  const idAdmin = normalizarIdentificador(b.admin.identificador!, b.pais)
+  // CL: el RUT se muestra como lo lee una persona (88.501.006-7); la
+  // normalización sin puntos es para Zoho y la API del alta, no para el chat.
+  const legible = (id: string) => (b.pais === "cl" ? rutLegible(id) : id)
+  const idEmpresa = legible(normalizarIdentificador(b.empresa.identificador!, b.pais))
+  const idAdmin = legible(normalizarIdentificador(b.admin.identificador!, b.pais))
 
   const lineas = [
     "Con esto creo la cuenta:",
