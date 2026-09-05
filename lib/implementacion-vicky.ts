@@ -361,3 +361,40 @@ export async function registrarCurso1Agendado(
     return false
   }
 }
+
+/**
+ * El cliente CANCELÓ su Curso 1 desde el chat: la Implementación suelta la
+ * fecha, el relator y el estado de autoagendamiento (E11 05-sep: la reserva
+ * salía de Bookings pero la IMP seguía diciendo "martes 14:30 con Diego" y el
+ * relator se presentaba a una sesión que no existía). La etapa no retrocede.
+ */
+export async function limpiarCurso1Agendado(implementacionId: string): Promise<boolean> {
+  try {
+    const token = await getZohoAccessToken()
+    const r = await fetch(`${API()}/crm/v3/Implementaciones/${implementacionId}`, {
+      method: "PUT",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [
+          {
+            Fecha_y_Hora_Curso_1: null,
+            Relator_Curso_1: null,
+            Estado_Curso_1_SMB: null,
+            Fecha_hora_agendamiento_Curso_1: null,
+          },
+        ],
+        trigger: ["blueprint"],
+      }),
+    })
+    if (!r.ok) {
+      const cuerpo = await r.text().catch(() => "")
+      console.warn(`[implementacion] no se pudo limpiar el Curso 1 en ${implementacionId}: ${r.status} ${cuerpo.slice(0, 300)}`)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn("[implementacion] excepción limpiando el Curso 1:", e instanceof Error ? e.message : e)
+    return false
+  }
+}

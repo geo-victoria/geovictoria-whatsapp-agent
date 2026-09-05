@@ -233,6 +233,10 @@ export async function armarOnboarding(contact: string): Promise<{
         const anterior = cap.cuando
         const { bookingId: _b, cuando: _c, ...resto } = cap
         await setKvValue(claveCapacitacion(contact), JSON.stringify(resto)).catch(() => {})
+        if (cap.implementacionId) {
+          const { limpiarCurso1Agendado } = await import("./implementacion-vicky")
+          await limpiarCurso1Agendado(cap.implementacionId).catch(() => false)
+        }
         await avisarEquipoInterno(`ℹ️ Capacitación ${cap.bookingId} de ${cap.empresa} (+${contact}) cancelada por el cliente (${anterior}). Relator: ${cap.relator.nombre}.`).catch(() => {})
         return {
           ok: true,
