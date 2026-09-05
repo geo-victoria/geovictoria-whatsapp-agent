@@ -73,6 +73,12 @@ export const registrarComprobanteTransferenciaSchema = {
         description:
           "true cuando el cliente DECLARA que pagó ('el pago está listo', 'ya transferí') pero NO ha enviado el comprobante. Registra el aviso para que finanzas verifique el abono, sin afirmar confirmación.",
       },
+      medio: {
+        type: "string" as const,
+        enum: ["transferencia", "mercado_pago"],
+        description:
+          "Qué es el comprobante: 'transferencia' (banco a banco) o 'mercado_pago' cuando es el comprobante/recibo que entrega Mercado Pago tras pagar con tarjeta (dice Mercado Pago, MercadoPago, 'Comprobante de pago' de MP, número de operación de MP). El pago con tarjeta se confirma solo; este comprobante NO se registra como transferencia.",
+      },
       numeroCotizacion: {
         type: "string" as const,
         description:
@@ -85,6 +91,7 @@ export const registrarComprobanteTransferenciaSchema = {
 
 type Input = {
   montoDetectado?: number
+  medio?: "transferencia" | "mercado_pago"
   bancoOrigen?: string
   fechaDetectada?: string
   detalle?: string
@@ -379,6 +386,28 @@ export async function registrarComprobanteTransferencia(
   }
 
   const declarado = input.pagoDeclarado === true
+
+  // COMPROBANTE DE MERCADO PAGO (Lalo 05-sep, caso Maquinarias Santa Sara):
+  // el cliente pagó con tarjeta y mandó la imagen del recibo de MP ANTES de
+  // que MP nos confirmara el pago (el webhook llegó vacío y el poll lo vio
+  // 90 s después). La tool lo tomaba como transferencia: marcaba Pagada, el
+  // cotizador disparaba el post-pago, y al confirmarse el pago real todo
+  // salía por segunda vez (2 correos PAGADA, 2 bienvenidas). Un recibo de MP
+  // no se registra: el pago con tarjeta se confirma solo.
+  const textoMedio = `${input.bancoOrigen || ""} ${input.detalle || ""}`.toLowerCase()
+  const esMercadoPago = input.medio === "mercado_pago" || /mercado\s*pago|mercadopago|\bmp\b/.test(textoMedio)
+  if (esMercadoPago && !declarado) {
+    await avisarEquipoInterno(
+      `ℹ️ +${contact} mandó el comprobante de MERCADO PAGO (pago con tarjeta)${pointer ? ` de la cotización ${pointer.quoteId}` : ""}. No se registra como transferencia: el pago se confirma solo por MP.`,
+    ).catch(() => false)
+    return {
+      ok: true,
+      mensajeParaProspecto:
+        "¡Gracias! Ese es el comprobante de tu pago con tarjeta: Mercado Pago me lo confirma solo en un par de minutos, no necesitas mandarme nada 🙌 Apenas entre te escribo por aquí para crear tu cuenta.",
+      notaCreada: false,
+      avisoInterno: true,
+    }
+  }
 
   // PAGO CON TARJETA YA REGISTRADO (Lalo 05-sep, caso Maquinarias Santa Sara):
   // el cliente pagó por Mercado Pago y después mandó la imagen del
