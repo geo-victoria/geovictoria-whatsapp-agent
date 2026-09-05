@@ -117,6 +117,24 @@ export async function POST(req: Request): Promise<NextResponse> {
     admin = admin || deal.admin
   }
   if (!contact) return NextResponse.json({ ok: false, error: "falta contact o dealId" }, { status: 400 })
+  // Invocado SOLO con el contacto (caso Sebastian 05-sep): el borrador nacía
+  // VACÍO y el formulario de WhatsApp se abría sin nada prellenado aunque la
+  // cotización pagada ya tenía empresa, RUT, nombre y correo. Si el contacto
+  // tiene puntero de cotización con deal, se siembra desde ese deal igual que
+  // cuando llega dealId.
+  if (!body.dealId && (!empresa || !rutEmpresa || !admin)) {
+    try {
+      const { getQuotePointer } = await import("@/lib/supabase-persistence-v3")
+      const p = await getQuotePointer(contact)
+      const dealId = String(p?.dealId || "").replace(/\D/g, "")
+      const deal = dealId ? await desdeDeal(dealId) : null
+      if (deal) {
+        empresa = empresa || deal.empresa || ""
+        rutEmpresa = rutEmpresa || deal.rutEmpresa || ""
+        admin = admin || deal.admin
+      }
+    } catch { /* sin puntero: sigue con lo que vino */ }
+  }
 
   // 1. Sembrar el borrador (lo que el contacto ya haya dicho en el chat gana).
   const previo = parsearBorrador(await getKvValue(claveBorrador(contact)).catch(() => null))
