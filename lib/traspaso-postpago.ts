@@ -25,7 +25,8 @@ import { PERFIL_CO } from "./paises/co"
 import { ownerDeCotizacion } from "./zoho-quote-owner"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 import { pagoCierraLoop } from "./loop-v2"
-import { onboardingEnabled, claveFase, claveBorrador } from "./onboarding/fase"
+import { claveFase, claveBorrador } from "./onboarding/fase"
+import { onboardingActivoPara } from "./onboarding-piloto"
 import { entregarKickoffOnboarding } from "./onboarding-envio"
 import { parsearBorrador, sembrarBorrador, type Borrador } from "./onboarding/borrador"
 
@@ -311,7 +312,7 @@ export async function cerrarYTraspasarPostPago(
   // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
   // traspaso a ejecutivo humano hasta que la fase se abra para ellos.
   let borradorSembrado: Borrador | null = null
-  if (onboardingEnabled() && esCL) {
+  if (esCL && (await onboardingActivoPara(contact))) {
     await setKvValue(claveFase(contact), "onboarding").catch(() => {})
     // Sembrar el borrador con lo que la VENTA ya sabe (regla de Eduardo,
     // 26-jul: no volver a preguntar lo que el cliente ya dio — confirmarlo o
@@ -448,7 +449,7 @@ export async function cerrarYTraspasarPostPago(
   // presenta a ningún ejecutivo — el mismo mensaje de bienvenida abre el alta
   // por chat, y el gate del webhook atiende las respuestas con el agente de
   // onboarding. Reemplaza al bloque del ejecutivo, no lo suma.
-  if (onboardingEnabled() && esCL) {
+  if (esCL && (await onboardingActivoPara(contact))) {
     // UN solo mensaje de arranque para las dos vías de pago y para dentro y
     // fuera de la ventana. Fuera de ventana el texto libre moriría en silencio
     // (el cliente pudo pagar un domingo tras dos días callado), así que ahí va

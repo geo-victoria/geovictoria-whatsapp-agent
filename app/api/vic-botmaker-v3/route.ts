@@ -2253,6 +2253,24 @@ export async function POST(request: Request): Promise<NextResponse> {
       "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de pagar, habló de transferencia o comprobante), lo más probable es que sea su comprobante: agradécele el envío, llama registrar_comprobante_transferencia con montoDetectado 0 y detalle 'comprobante enviado como archivo adjunto', y sigue el flujo normal sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
     const mediaUrlEntrante = imageUrl || fileUrl
     if (mediaUrlEntrante) {
+      // ANTI-DUPLICADO DE ADJUNTOS (05-sep, prueba E2E de Lalo): el mismo
+      // comprobante entró dos veces —una por el webhook MX (que lo reenvía
+      // acá) y otra por el CL, con 1 s de diferencia— y se procesó COMPLETO
+      // dos veces: dos correos a cobranza, dos "Estado → Pagada". El dedup
+      // por hash del texto no lo atrapa porque cada corrida describe la
+      // imagen con la visión y el texto nunca sale idéntico. La URL del
+      // adjunto sí es la misma: esa es la llave. Ventana de 5 minutos.
+      {
+        const { createHash } = await import("crypto")
+        const llaveMedia = `msgseen_media_${createHash("sha256").update(`${contact}:${mediaUrlEntrante}`).digest("hex").slice(0, 16)}`
+        const vistoMedia = await getKvValue(llaveMedia).catch(() => null)
+        const edadMedia = vistoMedia ? Date.now() - Number(vistoMedia) : Infinity
+        if (Number.isFinite(edadMedia) && edadMedia < 300_000) {
+          console.warn(`[v3-botmaker] adjunto duplicado descartado contact=${contact} edad=${Math.round(edadMedia / 1000)}s`)
+          return NextResponse.json({ reply: "" })
+        }
+        await setKvValue(llaveMedia, String(Date.now())).catch(() => {})
+      }
       // Última URL de media del contacto (best-effort): la lee
       // registrar_comprobante_transferencia para adjuntar el link del
       // comprobante al correo de cobranza (petición Lalo 03-ago).

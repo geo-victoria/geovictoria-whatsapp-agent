@@ -1806,6 +1806,32 @@ export async function sincronizarHitoCrm(
       }
     }
     if (!dealId) {
+      // EL DEAL DEL CONTACTO PUEDE ESTAR A LA VISTA (05-sep, prueba E2E de
+      // Lalo): un comprobante de pago resolvió por teléfono un lead viejo
+      // (2023) cuyo contacto no tenía deals, y "renació" un lead nuevo y lo
+      // mandó a la tómbola SDR — para un cliente que acababa de PAGAR una
+      // cotización con deal propio. Antes de renacer se mira lo que la
+      // conversación ya sabe: el deal del puntero de cotización y el candado
+      // deal_fono_. Si existe, el hito sube ese deal y no crea nada.
+      try {
+        const { getQuotePointers } = await import("./supabase-persistence-v3")
+        const punteros = await getQuotePointers(clean).catch(() => [])
+        const delPuntero = punteros.find((p) => (p.dealId || "").trim())?.dealId || ""
+        const delCandado = delPuntero ? "" : (await dealActivoEnKv(clean)) || ""
+        const conocido = (delPuntero || delCandado).trim()
+        if (conocido && /^\d{10,}$/.test(conocido)) {
+          dealId = conocido
+          console.log(`[crm-hitos] ${clean}: lead ${lead.id} convertido sin deal propio, pero el contacto tiene deal ${dealId} (${delPuntero ? "cotización" : "candado kv"}) — se usa ese, no renace`)
+        }
+      } catch { /* best-effort */ }
+    }
+    if (!dealId && hito === "aceptada") {
+      // Un pago sin deal a la vista no es una oportunidad nueva: es un
+      // registro que falta. Se avisa en log y NO se fabrica un lead.
+      console.warn(`[crm-hitos] ${clean}: hito "aceptada" sin deal conocido — no se renace lead por un pago; revisar puntero de cotización`)
+      return
+    }
+    if (!dealId) {
       // LEAD CONVERTIDO Y SIN DEAL VIVO: el hito se perdía en silencio (caso
       // Eduardo 14-ago, callback de 70 empleados: su solicitud no dejó NADA
       // en el CRM porque su lead de 2023 estaba convertido y su deal ya no

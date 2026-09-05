@@ -30,6 +30,11 @@ export const TOOLS_DE_PRECIO = new Set([
   "consultar_siguiente_descuento",
   "consultar_descuento_referencial",
   "reenviar_cotizacion_correo",
+  // 05-sep (prueba E2E de Lalo): el acuse del comprobante repite el monto que
+  // la tool LEYÓ del comprobante ("Recibí tu comprobante por $48.158"). Sin
+  // esta línea el cinturón pisaba el acuse correcto con "déjame confirmarte
+  // el valor exacto" — a un cliente que acababa de pagar.
+  "registrar_comprobante_transferencia",
 ])
 
 /** Montos en pesos ($ 43.781 / $43781) y en UF (0,98 UF · 1.07 UF). */

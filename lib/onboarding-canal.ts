@@ -22,6 +22,7 @@ const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "").trim()
 export { entregarKickoffOnboarding } from "./onboarding-envio"
 import { dispatchTool } from "./tools"
 import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
+import { esContactoPiloto } from "./onboarding-piloto"
 import {
   onboardingEnabled,
   faseEfectiva,
@@ -75,22 +76,7 @@ import {
  * onboarding. Los enrola vic-onboarding-invocar al invocarlos — así el
  * piloto se maneja sin deploy y sin exponer a ningún cliente real.
  */
-async function esContactoPiloto(contact: string): Promise<boolean> {
-  try {
-    const lista = (await getKvValue("onboarding_piloto")) || ""
-    const fono = contact.replace(/\D/g, "")
-    return lista
-      .split(",")
-      .map((s) => s.replace(/\D/g, ""))
-      .filter(Boolean)
-      .includes(fono)
-  } catch (e) {
-    // Cazador del flip 25-ago (contacto en onboarding atendido por venta):
-    // si esta lectura falla, el gate cae a venta EN SILENCIO — dejar huella.
-    console.warn(`[onboarding-gate] esContactoPiloto FALLÓ para ${contact}:`, e instanceof Error ? e.message : e)
-    return false
-  }
-}
+// esContactoPiloto vive en lib/onboarding-piloto.ts (definición única, 05-sep).
 
 /**
  * Fase del contacto para el gate del webhook. Con el flag apagado devuelve

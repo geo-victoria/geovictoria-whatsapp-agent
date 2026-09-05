@@ -34,7 +34,8 @@
 
 import { getKvValue, getQuotePointers, setKvValue, type QuotePointer } from "@/lib/supabase-persistence-v3"
 import { transicionarDealHacia } from "@/lib/zoho-deals"
-import { onboardingEnabled, claveFase, claveBorrador } from "@/lib/onboarding/fase"
+import { claveFase, claveBorrador } from "@/lib/onboarding/fase"
+import { onboardingActivoPara } from "@/lib/onboarding-piloto"
 import { parsearBorrador, sembrarBorrador } from "@/lib/onboarding/borrador"
 import { acuseComprobanteCL } from "@/lib/onboarding/prompt"
 import {
@@ -509,7 +510,7 @@ export async function registrarComprobanteTransferencia(
     // Acá NO hace falta el fallback a plantilla HSM que sí lleva la vía del
     // pago online: el cliente ACABA de mandar el comprobante, así que la
     // ventana de 24 h está abierta por definición.
-    if (onboardingEnabled() && pais === "cl") {
+    if (pais === "cl" && (await onboardingActivoPara(contact))) {
       let sembrado = null
       try {
         const previo = parsearBorrador(await getKvValue(claveBorrador(contact)).catch(() => null))
