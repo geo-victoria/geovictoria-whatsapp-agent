@@ -259,6 +259,30 @@ async function asignarVentaAutonoma(
  * anuncios y llamadas agendadas) y, si `enviarTraspaso`, le presenta a su
  * ejecutivo humano. Best-effort en cada paso; nunca lanza.
  */
+
+/** ¿La cotización nació en la cotizadora de EJECUTIVOS? (Intervenci_n_Humana
+ *  "Con intervención humana"). Best-effort: si Zoho no responde, false — el
+ *  chequeo con reintentos de más abajo sigue mandando. */
+async function esCanalEjecutivo(quoteId: string): Promise<boolean> {
+  try {
+    const { getZohoAccessToken } = await import("./zoho-token")
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const token = await getZohoAccessToken()
+    const r = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Intervenci_n_Humana`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    if (r.status !== 200) return false
+    const marca = String(
+      ((await r.json().catch(() => ({}))) as { data?: Array<{ Intervenci_n_Humana?: string }> }).data?.[0]?.Intervenci_n_Humana || "",
+    )
+    return /intervenci/i.test(marca)
+  } catch {
+    return false
+  }
+}
+
 export async function cerrarYTraspasarPostPago(
   quoteId: string,
   opts: { enviarTraspaso?: boolean; motivoCierre?: "pagado" | "aceptada" } = {},
@@ -312,7 +336,13 @@ export async function cerrarYTraspasarPostPago(
   // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
   // traspaso a ejecutivo humano hasta que la fase se abra para ellos.
   let borradorSembrado: Borrador | null = null
-  if (esCL && (await onboardingActivoPara(contact))) {
+  // CANAL EJECUTIVO (Lalo 05-sep): una venta de la cotizadora de ejecutivos
+  // ("Con intervención humana") jamás entra al alta por chat — antes este
+  // bloque movía al contacto a fase onboarding y recién más abajo se
+  // descubría el canal y se omitía el mensaje: el cliente quedaba en una
+  // fase sin kickoff y, con el wizard ya frenado en el cotizador, sin nada.
+  const canalEjecutivo = await esCanalEjecutivo(quoteId)
+  if (esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
     await setKvValue(claveFase(contact), "onboarding").catch(() => {})
     // Sembrar el borrador con lo que la VENTA ya sabe (regla de Eduardo,
     // 26-jul: no volver a preguntar lo que el cliente ya dio — confirmarlo o
@@ -449,7 +479,7 @@ export async function cerrarYTraspasarPostPago(
   // presenta a ningún ejecutivo — el mismo mensaje de bienvenida abre el alta
   // por chat, y el gate del webhook atiende las respuestas con el agente de
   // onboarding. Reemplaza al bloque del ejecutivo, no lo suma.
-  if (esCL && (await onboardingActivoPara(contact))) {
+  if (esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
     // UN solo mensaje de arranque para las dos vías de pago y para dentro y
     // fuera de la ventana. Fuera de ventana el texto libre moriría en silencio
     // (el cliente pudo pagar un domingo tras dos días callado), así que ahí va
