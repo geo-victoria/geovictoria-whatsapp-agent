@@ -1365,6 +1365,17 @@ async function processOneTurn(
         /capacitaci[oó]n[^.\n]{0,80}\b(qued[oó]|queda|est[aá])\s+(agendad|confirmad|reservad|lista)/i.test(reply) ||
         /\b(qued[oó]|queda)\s+agendad[ao]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply) ||
         /\bte\s+(la\s+)?agend[eé]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply)
+      const afirmaCambio = /capacitaci[oó]n[^.\n]{0,80}\bqued[oó]\s+(reagendad|cambiad|movid|cancelad)/i.test(reply) ||
+        /\bqued[oó]\s+(reagendad|cancelad)[ao]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply)
+      const cambioReal = toolCalls.some((c) => (c.name === "reagendar_capacitacion" || c.name === "cancelar_capacitacion") && c.ok)
+      if (afirmaCambio && !cambioReal) {
+        console.warn(`[v3-bg] ALUCINACIÓN_REAGENDA contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`)
+        reply =
+          "El cambio de tu capacitación todavía no quedó tomado en la agenda — no te lo doy por hecho hasta que entre. Te lo confirmo por este mismo chat en un momento 🙌"
+        await avisarEquipoInterno(
+          `⚠️ CAPACITACIÓN: el modelo afirmó un cambio/cancelación sin tool — contacto +${contact}. Revisar el chat y la reserva en Bookings.`,
+        ).catch(() => false)
+      }
       const agendoReal = toolCalls.some((c) => c.name === "agendar_capacitacion" && c.ok)
       let yaEstabaAgendada = false
       if (afirmaCapacitacion && !agendoReal) {

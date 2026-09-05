@@ -223,6 +223,44 @@ export const TOOL_VER_CUPOS_CAPACITACION = {
  * horario venga de la disponibilidad real y se niega si el cliente ya tiene
  * su cita tomada.
  */
+/**
+ * REAGENDAR y CANCELAR (05-sep, prueba E5): el cliente pidió mover su
+ * capacitación y Vicky respondió "quedó reagendada" sin que existiera ninguna
+ * herramienta para eso — la reserva siguió en la hora vieja. Cambiar o
+ * cancelar es tan real como reservar: toca la agenda de una persona, y por
+ * eso tiene su tool con su candado (misma verificación de cupo real).
+ */
+export const TOOL_REAGENDAR_CAPACITACION = {
+  name: "reagendar_capacitacion",
+  description:
+    "Cambia la capacitación (Curso 1) YA agendada a otro horario que eligió el cliente. Llámala SOLO con un horario " +
+    "que venga de ver_cupos_capacitacion. Libera la hora anterior y reserva la nueva. Devuelve mensajeParaProspecto: " +
+    "cópialo tal cual. Si no hay capacitación agendada, usa agendar_capacitacion.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      fecha: { type: "string" as const, description: "Nueva fecha en formato YYYY-MM-DD, tal como vino en los cupos." },
+      hora: { type: "string" as const, description: "Nueva hora, tal como vino en los cupos (ej. '02:30 PM' o '14:30')." },
+    },
+    required: ["fecha", "hora"],
+  },
+}
+
+export const TOOL_CANCELAR_CAPACITACION = {
+  name: "cancelar_capacitacion",
+  description:
+    "Cancela la capacitación (Curso 1) YA agendada del cliente, cuando él lo pide expresamente. Libera la hora del " +
+    "relator y avisa al equipo. Devuelve mensajeParaProspecto: cópialo tal cual. Después el cliente puede volver a " +
+    "agendar con ver_cupos_capacitacion + agendar_capacitacion.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      motivo: { type: "string" as const, description: "Motivo breve que dio el cliente (opcional)." },
+    },
+    required: [] as string[],
+  },
+}
+
 export const TOOL_AGENDAR_CAPACITACION = {
   name: "agendar_capacitacion",
   description:

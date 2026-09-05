@@ -67,6 +67,8 @@ import {
   TOOL_CONFIRMAR_CONFIGURACION,
   TOOL_VER_CUPOS_CAPACITACION,
   TOOL_AGENDAR_CAPACITACION,
+  TOOL_REAGENDAR_CAPACITACION,
+  TOOL_CANCELAR_CAPACITACION,
 } from "./onboarding/tools"
 
 /**
@@ -141,7 +143,12 @@ export async function armarOnboarding(contact: string): Promise<{
     // Vicky cierra sola (decisión de Lalo 04-sep). Los candados están acá, no
     // en el prompt: el horario tiene que venir de la disponibilidad REAL, y un
     // cliente que ya tiene su cita no puede tomar otra.
-    if (name === TOOL_VER_CUPOS_CAPACITACION.name || name === TOOL_AGENDAR_CAPACITACION.name) {
+    if (
+      name === TOOL_VER_CUPOS_CAPACITACION.name ||
+      name === TOOL_AGENDAR_CAPACITACION.name ||
+      name === TOOL_REAGENDAR_CAPACITACION.name ||
+      name === TOOL_CANCELAR_CAPACITACION.name
+    ) {
       const crudo = await getKvValue(claveCapacitacion(contact)).catch(() => null)
       const cap = crudo
         ? (JSON.parse(crudo) as {
@@ -210,14 +217,40 @@ export async function armarOnboarding(contact: string): Promise<{
         }
       }
 
-      // ── AGENDAR ──
-      if (cap.bookingId) {
+      // ── CANCELAR ──
+      if (name === TOOL_CANCELAR_CAPACITACION.name) {
+        if (!cap.bookingId) return { ok: false, error: "Este cliente no tiene capacitación agendada; no hay nada que cancelar." }
+        const { cancelarCupo } = await import("./zoho-bookings")
+        const motivo = String((input as { motivo?: string } | null)?.motivo || "").trim()
+        const ok = await cancelarCupo(cap.bookingId, `Cancelada por el cliente desde el chat de Vicky${motivo ? `: ${motivo}` : ""}`).catch(() => false)
+        if (!ok) {
+          await avisarEquipoInterno(`⚠️ No se pudo cancelar en Bookings la capacitación ${cap.bookingId} de +${contact} (${cap.empresa}). Cancelarla a mano.`).catch(() => {})
+          return { ok: false, error: "La cancelación no entró. Dile que la gestionas por este chat — NO afirmes que quedó cancelada." }
+        }
+        const anterior = cap.cuando
+        const { bookingId: _b, cuando: _c, ...resto } = cap
+        await setKvValue(claveCapacitacion(contact), JSON.stringify(resto)).catch(() => {})
+        await avisarEquipoInterno(`ℹ️ Capacitación ${cap.bookingId} de ${cap.empresa} (+${contact}) cancelada por el cliente (${anterior}). Relator: ${cap.relator.nombre}.`).catch(() => {})
+        return {
+          ok: true,
+          mensajeParaProspecto:
+            `Listo, quedó cancelada la capacitación del ${anterior} con ${cap.relator.nombre}. ` +
+            `Cuando quieras retomarla me dices y te muestro los horarios disponibles 😊`,
+        }
+      }
+
+      // ── AGENDAR / REAGENDAR ──
+      const esReagenda = name === TOOL_REAGENDAR_CAPACITACION.name
+      if (!esReagenda && cap.bookingId) {
         return {
           ok: false,
           yaAgendada: true,
           cuando: cap.cuando,
-          error: `Este cliente ya tiene su capacitación agendada (${cap.cuando}). No se agenda otra.`,
+          error: `Este cliente ya tiene su capacitación agendada (${cap.cuando}). No se agenda otra: si quiere cambiarla, usa reagendar_capacitacion.`,
         }
+      }
+      if (esReagenda && !cap.bookingId) {
+        return { ok: false, error: "Este cliente no tiene capacitación agendada; usa agendar_capacitacion." }
       }
       const inp = (input || {}) as { fecha?: string; hora?: string }
       const fecha = String(inp.fecha || "").trim()
@@ -234,8 +267,21 @@ export async function armarOnboarding(contact: string): Promise<{
       if (!desde) return { ok: false, error: "No entendí la fecha o la hora. Pídeselas de nuevo con un horario de la lista." }
 
       const b = await cargarBorrador(contact)
-      const { reservarCupo } = await import("./zoho-bookings")
+      const { reservarCupo, cancelarCupo } = await import("./zoho-bookings")
       const nombreCliente = `${b.admin.nombre || ""} ${b.admin.apellido || ""}`.trim() || cap.empresa || "Cliente"
+      let anteriorLiberada = ""
+      if (esReagenda && cap.bookingId) {
+        const okCancel = await cancelarCupo(cap.bookingId, "Reagendada por el cliente desde el chat de Vicky").catch(() => false)
+        if (!okCancel) {
+          return { ok: false, error: "No pude liberar la hora anterior en Bookings. Dile que el cambio lo confirmas por este chat — NO afirmes que quedó reagendada." }
+        }
+        anteriorLiberada = cap.cuando || ""
+        // Se borra la reserva vieja del estado ANTES de intentar la nueva: si
+        // la nueva falla, el estado dice la verdad (sin cita) y no una hora
+        // que ya fue liberada en Bookings.
+        const { bookingId: _b, cuando: _c, ...resto } = cap
+        await setKvValue(claveCapacitacion(contact), JSON.stringify(resto)).catch(() => {})
+      }
       const r = await reservarCupo({
         servicioId,
         staffId,
@@ -256,11 +302,13 @@ export async function armarOnboarding(contact: string): Promise<{
       })
       if (!r.ok) {
         await avisarEquipoInterno(
-          `⚠️ No se pudo agendar la capacitación de +${contact} (${cap.empresa}) con ${cap.relator.nombre}: ${JSON.stringify(r.detalle).slice(0, 300)}`,
+          `⚠️ No se pudo ${esReagenda ? `REAGENDAR (la anterior ${anteriorLiberada} YA quedó liberada)` : "agendar"} la capacitación de +${contact} (${cap.empresa}) con ${cap.relator.nombre}: ${JSON.stringify(r.detalle).slice(0, 300)}`,
         ).catch(() => {})
         return {
           ok: false,
-          error: "La reserva no entró. Dile que le confirmas la hora por este chat — NO afirmes que quedó agendada.",
+          error: esReagenda
+            ? "La hora anterior quedó liberada pero la nueva NO entró. Dile con honestidad que le confirmas la nueva hora por este chat — NO afirmes que quedó reagendada."
+            : "La reserva no entró. Dile que le confirmas la hora por este chat — NO afirmes que quedó agendada.",
         }
       }
       const cuandoLegible = `${fecha} a las ${hora}`
@@ -288,7 +336,7 @@ export async function armarOnboarding(contact: string): Promise<{
         ok: true,
         bookingId: r.bookingId,
         mensajeParaProspecto:
-          `¡Listo! Tu capacitación quedó agendada para el ${cuandoLegible} con ${cap.relator.nombre} 🎉\n\n` +
+          `¡Listo! Tu capacitación quedó ${esReagenda ? "reagendada" : "agendada"} para el ${cuandoLegible} con ${cap.relator.nombre} 🎉\n\n` +
           `Dura 2 horas y es por videollamada.` +
           (detalle ? `\n\nAcá te conectas el día de la sesión:\n${detalle}` : "") +
           (bienvenidaEnCamino
@@ -734,6 +782,8 @@ export async function armarOnboarding(contact: string): Promise<{
             // sale el relator que le toca.
             TOOL_VER_CUPOS_CAPACITACION,
             TOOL_AGENDAR_CAPACITACION,
+            TOOL_REAGENDAR_CAPACITACION,
+            TOOL_CANCELAR_CAPACITACION,
             consultarAgenteSoporteSchema,
           ]
         : [
