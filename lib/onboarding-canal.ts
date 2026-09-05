@@ -261,12 +261,16 @@ export async function armarOnboarding(contact: string): Promise<{
       // Queda escrita en la implementación con la MISMA convención que usa el
       // auto-onboarding ("Autoagendamiento"), para que el equipo vea nuestras
       // capacitaciones igual que las suyas.
+      let bienvenidaEnCamino = false
       if (cap.implementacionId) {
-        const { registrarCurso1Agendado } = await import("./implementacion-vicky")
+        const { registrarCurso1Agendado, pasarAEnPlanificacion } = await import("./implementacion-vicky")
         await registrarCurso1Agendado(cap.implementacionId, {
           desdeBookings: desde,
           relator: cap.relator.nombre,
         }).catch(() => {})
+        // Curso planificado ⇒ etapa 2 ⇒ Zoho manda al cliente el "Bienvenido"
+        // del jefe de proyectos (acceso + manual), igual que a un humano.
+        bienvenidaEnCamino = await pasarAEnPlanificacion(cap.implementacionId).catch(() => false)
       }
       const detalle = (r.detalle as { response?: { returnvalue?: { meeting_info?: { join_link?: string } } } })?.response
         ?.returnvalue?.meeting_info?.join_link
@@ -277,7 +281,9 @@ export async function armarOnboarding(contact: string): Promise<{
           `¡Listo! Tu capacitación quedó agendada para el ${cuandoLegible} con ${cap.relator.nombre} 🎉\n\n` +
           `Dura 2 horas y es por videollamada.` +
           (detalle ? `\n\nAcá te conectas el día de la sesión:\n${detalle}` : "") +
-          `\n\nTe va a llegar la invitación al correo también. Cualquier cosa me escribes por acá 😊`,
+          (bienvenidaEnCamino
+            ? `\n\nTe va a llegar la invitación al correo, y además un correo de ${cap.relator.nombre} con tu acceso a la plataforma y el manual del administrador. Cualquier cosa me escribes por acá 😊`
+            : `\n\nTe va a llegar la invitación al correo también. Cualquier cosa me escribes por acá 😊`),
       }
     }
 

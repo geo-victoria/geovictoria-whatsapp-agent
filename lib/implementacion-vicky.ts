@@ -235,6 +235,47 @@ export async function crearImplementacionGvAvanzado(
  * Best-effort: la cita YA está tomada en Bookings y el cliente ya la tiene
  * confirmada — si el CRM falla, lo que se pierde es el reflejo, no la hora.
  */
+/**
+ * CAPACITACIÓN AGENDADA ⇒ "2. En Planificación" (05-sep, brecha de correos).
+ *
+ * En una implementación humana el jefe de proyectos mueve la etapa a
+ * "2. En Planificación" cuando deja planificado el curso, y ESO es lo que
+ * dispara en Zoho los dos correos del momento: "¡Bienvenido a GeoVictoria!
+ * Tu primer desafío es…" al CLIENTE (regla "Bienvenida Geoavanzado":
+ * presentación del jefe, URL de ingreso advanced.geovictoria.com, manual del
+ * administrador) y el aviso de cambio de etapa al equipo. La de Vicky se
+ * quedaba en "1. En Traspaso" para siempre y el cliente nunca recibía nada de
+ * eso. Vicky no manda correo propio: mueve la etapa y Zoho hace lo mismo que
+ * para cualquier cliente humano — una sola fuente, cero duplicación.
+ *
+ * Los humanos lo hacen editando el campo (crm_ui), no por blueprint; acá va
+ * con trigger workflow+blueprint porque los correos SON workflows.
+ */
+export async function pasarAEnPlanificacion(implementacionId: string): Promise<boolean> {
+  try {
+    const token = await getZohoAccessToken()
+    const r = await fetch(`${API()}/crm/v3/Implementaciones/${implementacionId}`, {
+      method: "PUT",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ Etapa_Implementaci_n: "2. En Planificación" }],
+        trigger: ["workflow", "blueprint"],
+      }),
+    })
+    if (!r.ok) {
+      const cuerpo = await r.text().catch(() => "")
+      console.warn(`[implementacion] ${implementacionId} no pasó a En Planificación: ${r.status} ${cuerpo.slice(0, 300)}`)
+      return false
+    }
+    console.log(`[implementacion] ${implementacionId} → 2. En Planificación (Zoho manda el Bienvenido al cliente)`)
+    return true
+  } catch (e) {
+    console.warn("[implementacion] excepción pasando a En Planificación:", e instanceof Error ? e.message : e)
+    return false
+  }
+}
+
 /** Offset de America/Santiago en la fecha dada, como "-04:00" / "-03:00". */
 function offsetChile(d: Date): string {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", timeZoneName: "longOffset" }).formatToParts(d)
