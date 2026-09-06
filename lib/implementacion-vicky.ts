@@ -247,6 +247,24 @@ export async function crearImplementacionGvAvanzado(
     } catch {
       /* sin número: el agendamiento lo pedirá por otra vía */
     }
+    // La COTIZACIÓN también debe saber de esta implementación (05-sep, caso
+    // Maquinarias: COT1245 quedó "Pago Pendiente" y sin Implementación
+    // asociada porque el cierre del wizard, que es quien estampa eso, no corre
+    // en el alta por chat). Mismo valor que deja el wizard: "Cerrada".
+    if (d.quoteId) {
+      await fetch(`${API()}/crm/v3/Cotizaciones_GeoVictoria/${d.quoteId}`, {
+        method: "PUT",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          data: [{
+            Implementaci_n_Asociada: { id: fila.details.id },
+            Onboarding_Status: "Cerrada",
+            ...(d.ndvId ? { Nota_de_Venta: { id: d.ndvId } } : {}),
+          }],
+        }),
+      }).catch(() => null)
+    }
     console.log(`[implementacion] creada ${fila.details.id}${numero ? ` (${numero})` : ""} para ${d.razonSocial} → ${relator.nombre}`)
     return {
       id: fila.details.id,
