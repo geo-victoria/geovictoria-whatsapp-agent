@@ -201,3 +201,64 @@ export async function cerrarWizard(
     return { error: e instanceof Error ? e.message : "error de red en el cierre" }
   }
 }
+
+/**
+ * SOLO PLANILLAS (Lalo 08-sep, caso Molinas): el cliente dio la nómina por
+ * chat pero no confirmó la configuración, así que el wizard nunca generó los
+ * Excel. Se asegura la sesión, se escribe la configuración y se pide al
+ * wizard que genere las planillas SIN cerrar ni disparar el Zoho Flow
+ * (`soloExcel`). Las URLs quedan en la sesión y las lee planillasDeSesionWizard.
+ */
+export async function generarPlanillasWizard(
+  contact: string,
+  borrador: Borrador,
+  cfg: Configuracion,
+  opts: { dealId?: string; extras?: ExtrasEmpresa } = {},
+): Promise<{ ok: true; token: string } | { error: string }> {
+  const ses = await asegurarSesionWizard(contact, borrador, opts)
+  if ("error" in ses) return ses
+  const w = await escribirConfiguracionWizard(ses.token, cfg)
+  if ("error" in w) return w
+  try {
+    const rSes = await fetch(`${WIZARD_URL}/api/onboarding/${encodeURIComponent(ses.token)}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) })
+    if (!rSes.ok) return { error: `GET sesión ${rSes.status}` }
+    const sesion = (await rSes.json().catch(() => ({}))) as { formData?: Record<string, unknown>; navigationHistory?: unknown[] }
+    const fd = (sesion.formData || {}) as Record<string, unknown> & { empresa?: Record<string, unknown>; trabajadores?: unknown[] }
+    const totalTrabajadores = Array.isArray(fd.trabajadores) ? fd.trabajadores.length : 0
+    const rSubmit = await fetch(`${WIZARD_URL}/api/submit-to-zoho`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(60_000),
+      body: JSON.stringify({
+        soloExcel: true,
+        accion: "planillas",
+        eventType: "complete",
+        fechaHoraEnvio: new Date().toISOString(),
+        onboardingId: ses.token,
+        currentStep: 9,
+        navigationHistory: sesion.navigationHistory || [],
+        estado: "En progreso",
+        pais: "Chile",
+        totalTrabajadores,
+        formData: fd,
+        metadata: {
+          pais: "Chile",
+          empresaRut: String(fd.empresa?.rut || ""),
+          empresaNombre: String(fd.empresa?.razonSocial || ""),
+          pasoActual: 9,
+          pasoNombre: "Trabajadores",
+          totalPasos: 12,
+          totalTrabajadores,
+          decision: "Planillas generadas desde el chat (Vicky Onboarding, sin cierre)",
+        },
+        excelFile: null,
+      }),
+    })
+    const body = (await rSubmit.json().catch(() => ({}))) as { success?: boolean; error?: string }
+    if (!rSubmit.ok || !body.success) return { error: body.error || `submit-to-zoho soloExcel ${rSubmit.status}` }
+    return { ok: true, token: ses.token }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "error de red generando planillas" }
+  }
+}

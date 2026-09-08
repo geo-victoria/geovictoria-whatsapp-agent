@@ -133,6 +133,25 @@ export async function adjuntarPlanillasImplementacion(
   const fono = (contact || "").replace(/\D/g, "")
   try {
     let planillas = await planillasDeSesionWizard(fono)
+    const hayNomina = (fuente.config?.trabajadores || []).some((t) => String(t?.rut || "").trim())
+    // Interruptor vic_kv `wizard_solo_excel`="on": solo cuando el wizard en
+    // producción ya entiende `soloExcel` (sin eso el POST cerraría el
+    // onboarding y dispararía el Zoho Flow).
+    const wizardListo = (await getKvValue("wizard_solo_excel").catch(() => null)) === "on"
+    if (!planillas.length && hayNomina && fuente.borrador && wizardListo) {
+      // Lalo 08-sep: "usa como base las planillas que ya se han subido a otras
+      // implementaciones" — el formato oficial lo produce el WIZARD (plantilla
+      // PLANTILLA_INGRESO.xlsx + usuarios). Se le pide generarlas sin cerrar.
+      try {
+        const { generarPlanillasWizard } = await import("./wizard-sesion")
+        const { configuracionVacia } = await import("./onboarding/configuracion")
+        const g = await generarPlanillasWizard(fono, fuente.borrador, { ...configuracionVacia(), ...(fuente.config || {}) })
+        if ("error" in g) console.warn(`[imp-planillas] ${fono}: wizard soloExcel falló: ${g.error}`)
+        else planillas = await planillasDeSesionWizard(fono)
+      } catch (e) {
+        console.warn(`[imp-planillas] ${fono}: wizard soloExcel excepción:`, e instanceof Error ? e.message : e)
+      }
+    }
     if (!planillas.length) {
       const propia = planillaDesdeConfiguracion(fuente.config, fuente.borrador)
       if (propia) planillas = [propia]
