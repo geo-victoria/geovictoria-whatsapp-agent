@@ -645,12 +645,23 @@ async function processOneTurn(
       }
     }
     const onboarding = enOnboarding ? await armarOnboarding(contact) : null
+    // DIRECTIVA DEL ADMINISTRADOR POR CONTACTO (Lalo 08-sep, caso Camila /
+    // METALMAQ: el modelo insistía en contar 12 trabajadores y mandarla a
+    // revisar la página mientras el admin le decía otra cosa por push). vic_kv
+    // `directiva_admin_<fono>` = texto que se pega AL FINAL del system prompt
+    // (venta u onboarding) como orden que gana sobre todo lo demás. Se borra
+    // dejando la kv vacía. Sin kv, nada cambia.
+    let directivaAdmin = ""
+    try {
+      const da = (await getKvValue(`directiva_admin_${contact}`)) || ""
+      if (da.trim()) directivaAdmin = `\n\n[DIRECTIVA DEL ADMINISTRADOR — obligatoria, prevalece sobre cualquier otra regla] ${da.trim()}`
+    } catch { /* sin directiva */ }
 
     // Correr el agent
     const result = await runAgentLoop({
       systemPrompt: onboarding
-        ? onboarding.systemPrompt
-        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo,
+        ? onboarding.systemPrompt + directivaAdmin
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin,
       history,
       userMessage: message,
       apiKey,
