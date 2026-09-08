@@ -27,6 +27,8 @@ import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import {
   reservarCupo,
   cancelarCupo,
+  fetchCita,
+  fetchCitas,
   fetchDisponibilidad,
   bookingsConfigurado,
   accessTokenBookings,
@@ -69,6 +71,23 @@ export async function GET(req: Request): Promise<Response> {
   const svc = sp.get("staff")
   if (svc) return NextResponse.json({ ok: true, serviceId: svc, staff: await fetchStaff(svc) })
   if (sp.get("workspaces") === "1") return NextResponse.json({ ok: true, workspaces: await fetchWorkspaces() })
+  // Lectura de citas (08-sep, caso Camila/METALMAQ: "me llegó correo para el
+  // martes"): una por id, o el rango de un servicio/relator.
+  const cita = (sp.get("cita") || "").trim()
+  if (cita) return NextResponse.json({ ok: true, bookingId: cita, cita: await fetchCita(cita) })
+  const citasDesde = (sp.get("citasDesde") || "").trim()
+  if (citasDesde) {
+    return NextResponse.json({
+      ok: true,
+      citas: await fetchCitas({
+        serviceId: sp.get("servicio") || undefined,
+        staffId: sp.get("relator") || undefined,
+        desde: citasDesde,
+        hasta: (sp.get("citasHasta") || "").trim() || citasDesde,
+        estado: sp.get("estado") || undefined,
+      }),
+    })
+  }
 
   // CUPOS con la holgura ya aplicada (Lalo 04-sep, "2 días laborales de
   // holgura"): jamás se pregunta por hoy ni por mañana, así que lo que

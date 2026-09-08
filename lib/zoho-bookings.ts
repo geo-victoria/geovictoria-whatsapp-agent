@@ -185,6 +185,23 @@ export async function cancelarCupo(bookingId: string, motivo = "Cancelada"): Pro
   return r.ok
 }
 
+/** Una cita por su booking_id (p. ej. "#GE-05039"): estado, horario, cliente. */
+export function fetchCita(bookingId: string): Promise<unknown> {
+  return api("getappointment", { booking_id: bookingId })
+}
+
+/**
+ * Citas de un servicio (y opcionalmente un relator) en un rango. Bookings
+ * pide el filtro como JSON en `data`; fechas en "dd-MMM-yyyy HH:mm:ss".
+ */
+export function fetchCitas(args: { serviceId?: string; staffId?: string; desde: string; hasta: string; estado?: string }): Promise<unknown> {
+  const data: Record<string, string> = { from_time: args.desde, to_time: args.hasta }
+  if (args.serviceId) data.service_id = args.serviceId
+  if (args.staffId) data.staff_id = args.staffId
+  if (args.estado) data.status = args.estado
+  return api("fetchappointment", { data: JSON.stringify(data) })
+}
+
 /** Horarios disponibles de un servicio para una fecha (dd-MMM-yyyy). */
 export function fetchDisponibilidad(serviceId: string, fecha: string, staffId?: string): Promise<unknown> {
   return api("availableslots", { service_id: serviceId, selected_date: fecha, ...(staffId ? { staff_id: staffId } : {}) })
