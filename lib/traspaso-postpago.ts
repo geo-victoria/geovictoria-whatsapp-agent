@@ -382,7 +382,13 @@ export async function cerrarYTraspasarPostPago(
   // Las dos puertas del alta son pago online verificado y comprobante legible;
   // aceptar no es ninguna de las dos.
   const pagoReal = (opts.motivoCierre || "pagado") === "pagado"
-  if (pagoReal && esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
+  // YA PROCESADA (08-sep, caso UDES/COT1324): el candado `traspaso_postpago_`
+  // se escribe recién al final, así que el barrido de Pagadas <36 h volvía a
+  // pasar por acá cada tick re-sembrando borrador y `onb_quote_`; y una
+  // cotización cuyo post-pago ya corrió (o que se atribuyó a mano) no debe
+  // abrir la fase onboarding después — el alta la lleva quien la tomó.
+  const yaProcesada = Boolean(await getKvValue(`traspaso_postpago_${quoteId}`).catch(() => null))
+  if (pagoReal && !yaProcesada && esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
     // SEGUNDA EMPRESA POR EL MISMO NÚMERO (08-sep, caso Lorena: pagó dos
     // cotizaciones, una por RUT, con minutos de diferencia). El estado del
     // onboarding vive POR CONTACTO: si el ciclo ya está abierto con OTRA
