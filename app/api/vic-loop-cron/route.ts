@@ -36,6 +36,7 @@ import {
   calcularProximoToque,
   contactosTraspasados,
   loopV2Enabled,
+  mas50CierraLoop,
   tzDePais,
   type LoopRow,
   type LoopStage,
@@ -1010,6 +1011,25 @@ export async function GET(req: Request): Promise<Response> {
 
     let ejecutado = false
 
+    // RECHAZO EXPLÍCITO DEL CLIENTE = CERO TOQUES (08-sep, campaña remk_300):
+    // "no gracias", "quedamos hasta aquí", "ya contratamos", "dejen de
+    // escribirme" — el loop seguía tocando igual (a una clienta le llegaron
+    // dos toques después de decir que no y terminó pidiendo que no le
+    // escribieran más). Se mira el ÚLTIMO mensaje real del cliente antes de
+    // cualquier toque: si es un rechazo, el loop se cierra `no_interesa` y
+    // Vicky queda solo reactiva. Determinista, sin modelo.
+    try {
+      const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
+      const { esRechazoCliente, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
+      const ultimo = ultimoMensajeCliente(await fetchHistoryV3(r.contact, 8))
+      if (esRechazoCliente(ultimo)) {
+        await mas50CierraLoop(r.contact, "no_interesa")
+        console.warn(`[loop-cron] ${r.contact}: rechazo explícito del cliente ("${ultimo.slice(0, 60)}") — loop cerrado, toque ${touch} omitido`)
+        detalle.push({ contact: r.contact, accion: "cerrado_no_interesa", touch })
+        continue
+      }
+    } catch { /* sin lectura: el toque sigue su camino normal */ }
+
     // Primer toque SIEMPRE a los 10 minutos, independiente de la etapa
     // (Rodrigo 10-ago — reemplaza el 35' de la formal y las 2h antiguas):
     // el cliente que acaba de conversar está caliente AHORA.
@@ -1077,6 +1097,19 @@ export async function GET(req: Request): Promise<Response> {
       if (generable && paisKey === "cl" && !esPresentacion && stage !== "aceptada") {
         const { generarToqueContexto } = await import("@/lib/toque-contexto")
         contextoT5 = await generarToqueContexto(r.contact, stage).catch(() => null)
+        // Razonamiento interno del modelo disfrazado de mensaje (08-sep:
+        // "No hay mensaje que escribir en este caso. El cliente se
+        // desvinculó…" le llegó a un cliente): jamás sale; y como el modelo
+        // juzgó que NO corresponde escribir, tampoco sale el texto fijo.
+        if (contextoT5) {
+          const { pareceTextoInterno } = await import("@/lib/rechazo-cliente")
+          if (pareceTextoInterno(contextoT5)) {
+            console.warn(`[loop-cron] ${r.contact}: el generador devolvió texto interno — toque ${touch} omitido y loop cerrado`)
+            await mas50CierraLoop(r.contact, "no_interesa")
+            detalle.push({ contact: r.contact, accion: "cerrado_texto_interno", touch })
+            continue
+          }
+        }
         if (contextoT5) console.log(`[loop-cron] toque ${touch} personalizado ${r.contact} (${contextoT5.length} chars)`)
       }
       // Etapa ACEPTADA (25-ago): los textos llevan el link real de la

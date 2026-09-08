@@ -75,7 +75,8 @@ const REGLAS = [
   // avanzó fue por algo, y pedirle el pago por cuarta vez no lo resuelve.
   "8. NO pidas el pago ni digas 'acepta y paga'. El cliente que ya tiene su cotización no se frenó por falta de un recordatorio: se frenó por una duda, una comparación o algo de su operación. Tu trabajo es retomar ESO. El pago se pide solo cuando el cliente ya aceptó y lo único que falta es pagar.",
   "9. Si el cliente dejó una duda sin responder, una objeción o una comparación con otro proveedor, ese es el tema del mensaje.",
-  "Responde SOLO con el texto del mensaje, sin comillas ni explicaciones.",
+  "10. Si el cliente ya dijo que NO le interesa, que ya contrató otra cosa, que se desvinculó de la empresa, que cerró la conversación o que no le escriban más, NO escribas ningún mensaje: responde exactamente NO_ENVIAR y nada más.",
+  "Responde SOLO con el texto del mensaje, sin comillas ni explicaciones. Jamás expliques tu razonamiento ni describas al cliente en tercera persona: eso NO es un mensaje.",
 ].join("\n")
 
 function recortarEnOracion(texto: string, max: number): string {
@@ -145,6 +146,11 @@ export async function generarToqueContexto(
       .join(" ")
       .trim()
     texto = texto.replace(/^["«“]+|["»”]+$/g, "").trim()
+    // El modelo decidió que no corresponde escribir (rechazo previo del
+    // cliente) o devolvió razonamiento en vez de mensaje: se devuelve TAL CUAL
+    // para que el llamador lo reconozca (pareceTextoInterno) y NO mande nada.
+    const { pareceTextoInterno } = await import("./rechazo-cliente")
+    if (pareceTextoInterno(texto)) return "NO_ENVIAR"
     if (!texto || texto.length < 30) return null
     if (/^oye\b/i.test(texto)) return null
     // Estilo sellado: sin guiones largos (parecen IA — Lalo 26-ago).
