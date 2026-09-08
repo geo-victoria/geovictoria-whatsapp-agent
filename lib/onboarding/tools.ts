@@ -74,7 +74,8 @@ export const TOOL_CONFIRMAR_ALTA_EMPRESA = {
 export const TOOL_GUARDAR_NOMINA = {
   name: "guardar_nomina",
   description:
-    "Guarda trabajadores de la nómina. Acepta las filas TAL CUAL las entregó el cliente (texto " +
+    "Guarda trabajadores de la nómina PARA EL IMPLEMENTADOR (no los crea en la plataforma: los sube " +
+    "el relator en la capacitación, y hasta entonces el cliente no los ve al entrar). Acepta las filas TAL CUAL las entregó el cliente (texto " +
     "pegado, o transcritas por ti desde una foto/planilla/PDF que haya mandado): una línea por " +
     "trabajador con columnas separadas por | en este orden: RUT|Correo personal|Nombres|" +
     "Apellidos|Grupo|Tel1|Tel2|Tel3 (los teléfonos pueden ir vacíos). La tool valida fila por " +

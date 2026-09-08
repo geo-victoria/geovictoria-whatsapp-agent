@@ -157,6 +157,11 @@ export async function armarOnboarding(contact: string): Promise<{
       resumen: resumenConfiguracion(cfg),
       pendientes: faltas.map((f) => f.mensaje),
       listoParaCerrar: faltas.length === 0 && cfg.trabajadores.length > 0,
+      // Lalo 08-sep (caso Lorena: "Subí tus 14 trabajadoras… ya pueden marcar
+      // desde hoy" — falso): lo guardado acá NO está en la plataforma.
+      dondeQueda:
+        "La nómina quedó GUARDADA para el implementador; NO está cargada en la plataforma y el cliente no la verá al entrar. " +
+        "La sube su implementador en la capacitación y recién ahí pueden marcar. Díselo así; jamás 'ya están cargados' ni 'ya pueden marcar'.",
     }
   }
 
@@ -799,7 +804,7 @@ export async function armarOnboarding(contact: string): Promise<{
             // mandó y nadie le ofreció el curso). La capacitación no depende de
             // la nómina.
             const msgNomina =
-              "Y por aquí mismo seguimos con dos cosas: cargar a tus trabajadores para que puedan marcar, y agendar tu capacitación " +
+              "Y por aquí mismo seguimos con dos cosas: recibir tu nómina de trabajadores (yo la guardo y tu implementador la sube en la capacitación, para que queden listos para marcar) y agendar esa capacitación " +
               "(2 horas por videollamada con tu relator). ¿Partimos por la nómina o te muestro los horarios de la capacitación?"
             // Antes el del acceso se EMPUJABA aparte y Vicky entregaba solo el
             // de la nómina — pero el modelo volvía a contar el acceso en su
