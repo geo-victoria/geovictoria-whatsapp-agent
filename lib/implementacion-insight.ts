@@ -335,7 +335,7 @@ export async function sincronizarInsightImplementacion(
     await setKvValue(claveInsightSync(fono), String(Date.now())).catch(() => {})
 
     // Planillas del wizard → nota con los Excel adjuntos (formato de las IMP del wizard, Lalo 08-sep).
-    const planillas = await adjuntarPlanillasImplementacion(fono, impId, d.empresa, detalleParaCapacitacion(d.config))
+    const planillas = await adjuntarPlanillasImplementacion(fono, impId, d.empresa, detalleParaCapacitacion(d.config), { config: d.config, borrador: d.borrador })
     const checklist = checklistInsight(d, planillas)
     const { resumen, insight } = await resumenInsight(d, checklist)
     const transcript = transcripcionInsight(d)

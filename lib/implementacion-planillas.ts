@@ -14,13 +14,68 @@
 import { getZohoAccessToken } from "./zoho-token"
 import { getKvValue, setKvValue } from "./supabase-persistence-v3"
 import { clavePlanillasImp } from "./onboarding/fase"
+import { planillaUsuariosXlsx, rutPlanilla, type FilaPlanillaUsuario } from "./escribir-excel"
+import type { Configuracion } from "./onboarding/configuracion"
+import type { Borrador } from "./onboarding/borrador"
 
 const API = () => (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const WIZARD_URL = (process.env.VICKY_ONBOARDING_WIZARD_URL || "https://onboarding.geovictoria.com").trim().replace(/\/+$/, "")
 export const TITULO_NOTA_PLANILLAS = "Planillas de ingreso (Vicky)"
 
-export type PlanillaWizard = { tipo: "usuarios" | "planificaciones"; filename: string; url: string }
-type Registro = { impId: string; notaId: string; archivos: string[] }
+export type PlanillaWizard = { tipo: "usuarios" | "planificaciones"; filename: string; url?: string; buffer?: Buffer }
+type Registro = { impId: string; notaId: string; archivos: string[]; campo?: string }
+
+/**
+ * PLANILLA DESDE LA NÓMINA DEL CHAT (Lalo 08-sep, caso Molinas IMP-11428:
+ * "vicky le dijo que ya cargó toda su data pero no veo plantillas de ingreso
+ * en la implementación"). El wizard solo genera Excel cuando el cliente
+ * CONFIRMA la configuración; si dio la nómina por chat y no confirmó, la
+ * planilla se arma acá con las mismas 11 columnas (admin primero).
+ */
+export function planillaDesdeConfiguracion(config: Partial<Configuracion> | null | undefined, borrador: Borrador | null | undefined): PlanillaWizard | null {
+  const trabajadores = (config?.trabajadores || []).filter((t) => String(t?.rut || "").trim())
+  if (!trabajadores.length) return null
+  const rutEmpresa = String(borrador?.empresa?.identificador || "").trim()
+  const filas: FilaPlanillaUsuario[] = []
+  const admin = borrador?.admin
+  if (admin?.identificador || admin?.email) {
+    filas.push({ rut: String(admin.identificador || ""), correo: admin.email || "", nombres: admin.nombre || "", apellidos: admin.apellido || "", tipo: "administrador" })
+  }
+  for (const t of trabajadores) {
+    filas.push({ rut: String(t.rut || ""), correo: t.correo, nombres: t.nombres, apellidos: t.apellidos, grupo: t.grupo, telefono1: t.telefono1, telefono2: t.telefono2, telefono3: t.telefono3, tipo: "usuario" })
+  }
+  const rutKey = rutPlanilla(rutEmpresa) || "sin-rut"
+  return {
+    tipo: "usuarios",
+    filename: `usuarios-${rutKey}-vicky-${trabajadores.length}.xlsx`,
+    buffer: planillaUsuariosXlsx(rutEmpresa, filas),
+  }
+}
+
+/** Sube el Excel al campo de archivo `Planilla_de_Ingreso` de la IMP (obligatorio para SMB) si está vacío. */
+async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuffer, filename: string): Promise<boolean> {
+  const H = { Authorization: `Zoho-oauthtoken ${token}` }
+  const actual = await fetch(`${API()}/crm/v3/Implementaciones/${impId}?fields=Planilla_de_Ingreso`, { headers: H, cache: "no-store" })
+  const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: unknown[] }> }).data?.[0]
+  if (Array.isArray(rec?.Planilla_de_Ingreso) && rec!.Planilla_de_Ingreso!.length) return true
+  const form = new FormData()
+  form.append("file", new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename)
+  const up = await fetch(`${API()}/crm/v3/files`, { method: "POST", headers: H, body: form, cache: "no-store" })
+  const uj = (await up.json().catch(() => ({}))) as { data?: Array<{ details?: { id?: string }; code?: string }> }
+  const fileId = uj?.data?.[0]?.details?.id || ""
+  if (!up.ok || !fileId) {
+    console.warn(`[imp-planillas] subida a /files falló ${up.status}: ${JSON.stringify(uj).slice(0, 200)}`)
+    return false
+  }
+  const put = await fetch(`${API()}/crm/v3/Implementaciones`, {
+    method: "PUT", headers: { ...H, "Content-Type": "application/json" }, cache: "no-store",
+    body: JSON.stringify({ data: [{ id: impId, Planilla_de_Ingreso: [{ file_id: fileId }] }], trigger: ["blueprint"] }),
+  })
+  const pj = (await put.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
+  const ok = put.ok && pj?.data?.[0]?.code === "SUCCESS"
+  if (!ok) console.warn(`[imp-planillas] campo Planilla_de_Ingreso no se pudo fijar: ${JSON.stringify(pj).slice(0, 200)}`)
+  return ok
+}
 
 /** Excel disponibles en la sesión del wizard del contacto (vacío si nunca se cerró). */
 export async function planillasDeSesionWizard(contact: string): Promise<PlanillaWizard[]> {
@@ -73,11 +128,16 @@ export async function adjuntarPlanillasImplementacion(
   impId: string,
   empresa: string,
   detalle = "",
-): Promise<{ ok: boolean; archivos: string[]; nuevos: string[]; notaId?: string; motivo?: string }> {
+  fuente: { config?: Partial<Configuracion> | null; borrador?: Borrador | null } = {},
+): Promise<{ ok: boolean; archivos: string[]; nuevos: string[]; notaId?: string; motivo?: string; campo?: string }> {
   const fono = (contact || "").replace(/\D/g, "")
   try {
-    const planillas = await planillasDeSesionWizard(fono)
-    if (!planillas.length) return { ok: false, archivos: [], nuevos: [], motivo: "sin planillas en la sesión del wizard (configuración no cerrada)" }
+    let planillas = await planillasDeSesionWizard(fono)
+    if (!planillas.length) {
+      const propia = planillaDesdeConfiguracion(fuente.config, fuente.borrador)
+      if (propia) planillas = [propia]
+    }
+    if (!planillas.length) return { ok: false, archivos: [], nuevos: [], motivo: "sin nómina en el chat ni planillas del wizard" }
     let reg: Registro | null = null
     try {
       const raw = await getKvValue(clavePlanillasImp(fono))
@@ -88,7 +148,9 @@ export async function adjuntarPlanillasImplementacion(
     if (reg && reg.impId !== impId) reg = null
     const yaEstan = new Set(reg?.archivos || [])
     const pendientes = planillas.filter((p) => !yaEstan.has(p.filename))
-    if (!pendientes.length) return { ok: true, archivos: [...yaEstan], nuevos: [], notaId: reg?.notaId }
+    const usuarios = planillas.find((p) => p.tipo === "usuarios")
+    const faltaCampo = Boolean(usuarios && reg?.campo !== usuarios.filename)
+    if (!pendientes.length && !faltaCampo) return { ok: true, archivos: [...yaEstan], nuevos: [], notaId: reg?.notaId, campo: reg?.campo }
 
     const token = await getZohoAccessToken()
     const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
@@ -112,24 +174,40 @@ export async function adjuntarPlanillasImplementacion(
       if (!notaId) return { ok: false, archivos: [...yaEstan], nuevos: [], motivo: `no se pudo crear la nota (${r.status})` }
     }
     const nuevos: string[] = []
+    let campo = reg?.campo || ""
+    const bytesDe = async (p: PlanillaWizard): Promise<ArrayBuffer | null> => {
+      if (p.buffer) return p.buffer.buffer.slice(p.buffer.byteOffset, p.buffer.byteOffset + p.buffer.byteLength) as ArrayBuffer
+      if (!p.url) return null
+      const d = await fetch(p.url, { cache: "no-store", signal: AbortSignal.timeout(20_000) })
+      if (!d.ok) {
+        console.warn(`[imp-planillas] descarga ${p.filename} falló ${d.status}`)
+        return null
+      }
+      const buf = await d.arrayBuffer()
+      return buf.byteLength ? buf : null
+    }
     for (const p of pendientes) {
       try {
-        const d = await fetch(p.url, { cache: "no-store", signal: AbortSignal.timeout(20_000) })
-        if (!d.ok) {
-          console.warn(`[imp-planillas] descarga ${p.filename} falló ${d.status}`)
-          continue
-        }
-        const buf = await d.arrayBuffer()
-        if (!buf.byteLength) continue
+        const buf = await bytesDe(p)
+        if (!buf) continue
         if (await subirAdjuntoNota(token, notaId, impId, buf, p.filename)) nuevos.push(p.filename)
       } catch (e) {
         console.warn(`[imp-planillas] ${p.filename}:`, e instanceof Error ? e.message : e)
       }
     }
+    // Campo de archivo de la IMP ("OBLIGATORIO para SMB", Lalo 08-sep): la planilla de usuarios.
+    if (usuarios && faltaCampo) {
+      try {
+        const buf = await bytesDe(usuarios)
+        if (buf && (await subirAlCampoPlanilla(token, impId, buf, usuarios.filename))) campo = usuarios.filename
+      } catch (e) {
+        console.warn(`[imp-planillas] campo Planilla_de_Ingreso:`, e instanceof Error ? e.message : e)
+      }
+    }
     const archivos = [...new Set([...yaEstan, ...nuevos])]
-    await setKvValue(clavePlanillasImp(fono), JSON.stringify({ impId, notaId, archivos } satisfies Registro)).catch(() => {})
-    if (nuevos.length) console.log(`[imp-planillas] IMP ${impId}: adjuntos ${nuevos.join(", ")} (nota ${notaId})`)
-    return { ok: archivos.length > 0, archivos, nuevos, notaId, motivo: nuevos.length ? undefined : "descarga o subida fallida" }
+    await setKvValue(clavePlanillasImp(fono), JSON.stringify({ impId, notaId, archivos, campo } satisfies Registro)).catch(() => {})
+    if (nuevos.length) console.log(`[imp-planillas] IMP ${impId}: adjuntos ${nuevos.join(", ")} (nota ${notaId}); campo Planilla_de_Ingreso=${campo || "-"}`)
+    return { ok: archivos.length > 0, archivos, nuevos, notaId, campo, motivo: nuevos.length ? undefined : "descarga o subida fallida" }
   } catch (e) {
     console.warn("[imp-planillas] excepción:", e instanceof Error ? e.message : e)
     return { ok: false, archivos: [], nuevos: [], motivo: e instanceof Error ? e.message : String(e) }
