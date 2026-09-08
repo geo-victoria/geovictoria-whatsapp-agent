@@ -454,6 +454,7 @@ type ConvRow = {
   followup_next_at: string | null
   formal_quote_id: string | null
   pref_escalon: number | null
+  pref_escalon_at: string | null
   pref_params: unknown | null
 }
 
@@ -541,7 +542,6 @@ async function contactosQueVieronPrecio(convs: Map<string, ConvRow>): Promise<Se
   for (const [contact, c] of convs) if (c.id) porId.set(c.id, contact)
   if (porId.size === 0) return new Set()
   try {
-    const ids = [...porId.keys()].map((id) => `"${id}"`).join(",")
     // TRES FIRMAS, no una (02-sep, caso Nicole/Alvarado Castillo): buscar solo
     // "Total mensual" dejaba fuera el formato de recomendación con opciones
     // ("💰 1,23 UF + IVA al mes (aprox. $59.588)"), así que a los 10 minutos el
@@ -551,15 +551,25 @@ async function contactosQueVieronPrecio(convs: Map<string, ConvRow>): Promise<Se
     // repregunta insultante.
     const firmas = ["*Total mensual*", "*UF + IVA al mes*", "*💰*"]
     const orPrecio = `or=(${firmas.map((p) => `content.like.${encodeURIComponent(p)}`).join(",")})`
-    const res = await supa(
-      `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant&${orPrecio}&select=conversation_id`,
-    )
-    if (!res.ok) return new Set()
-    const filas = (await res.json().catch(() => [])) as Array<{ conversation_id?: string }>
+    // EN LOTES (08-sep): un batch grande metía cientos de UUID en la URL y
+    // una sola respuesta no-ok dejaba a TODO el tick como "sin precio", sin
+    // dejar rastro. Lotes de 40 y el fallo se registra por lote.
+    const todos = [...porId.keys()]
     const out = new Set<string>()
-    for (const f of filas) {
-      const contacto = f.conversation_id ? porId.get(f.conversation_id) : undefined
-      if (contacto) out.add(contacto)
+    for (let i = 0; i < todos.length; i += 40) {
+      const ids = todos.slice(i, i + 40).map((id) => `"${id}"`).join(",")
+      const res = await supa(
+        `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant&${orPrecio}&select=conversation_id`,
+      )
+      if (!res.ok) {
+        console.error(`[loop-cron] contactosQueVieronPrecio lote ${i / 40 + 1}: HTTP ${res.status}`)
+        continue
+      }
+      const filas = (await res.json().catch(() => [])) as Array<{ conversation_id?: string }>
+      for (const f of filas) {
+        const contacto = f.conversation_id ? porId.get(f.conversation_id) : undefined
+        if (contacto) out.add(contacto)
+      }
     }
     return out
   } catch (e) {
@@ -739,7 +749,7 @@ export async function GET(req: Request): Promise<Response> {
   // patrón batch que la cadencia outbound).
   const contactsIn = rows.map((r) => `"${r.contact}"`).join(",")
   const convRes = await supa(
-    `vic_v3_conversations?contact=in.(${contactsIn})&select=id,contact,last_user_at,followup_closed_reason,followup_status,followup_next_at,formal_quote_id,pref_escalon,pref_params`,
+    `vic_v3_conversations?contact=in.(${contactsIn})&select=id,contact,last_user_at,followup_closed_reason,followup_status,followup_next_at,formal_quote_id,pref_escalon,pref_escalon_at,pref_params`,
   )
   const convs = new Map<string, ConvRow>()
   for (const c of (convRes.ok ? await convRes.json() : []) as ConvRow[]) convs.set(c.contact, c)
@@ -947,18 +957,36 @@ export async function GET(req: Request): Promise<Response> {
     // en vic_loop de forma confiable): cotización formal emitida → 'formal';
     // precio/preform ya mostrado (puntero pref_*) → 'con_precio'; si no, lo
     // guardado o 'sin_precio'. Así el toque siempre pide el paso correcto.
+    // ETAPA GUARDADA COMO PISO (08-sep): una etapa ya derivada y persistida en
+    // vic_loop no retrocede — si el historial o los punteros fallan un tick,
+    // el toque no vuelve a pedir la dotación que ya tenía.
+    const guardada = (r.stage as LoopStage) || "sin_precio"
     const stage: LoopStage = conv?.formal_quote_id
       ? "formal"
-      : conv?.pref_escalon !== null && conv?.pref_escalon !== undefined
-        ? "con_precio"
-        : conv?.pref_params
+      : guardada === "formal" || guardada === "aceptada"
+        ? guardada
+        : conv?.pref_escalon !== null && conv?.pref_escalon !== undefined
           ? "con_precio"
-          : // El historial manda sobre los punteros: si Vicky ya mostró un
-            // precio, preguntar de nuevo cuántas personas marcarían es
-            // insultante. Ver contactosQueVieronPrecio (caso Ignacia).
-            yaVieronPrecio.has(r.contact)
+          : conv?.pref_params
             ? "con_precio"
-            : (r.stage as LoopStage) || "sin_precio"
+            : // ESTAMPA DEL PRECIO REFERENCIAL (08-sep, casos GSL/Hydrotorc/PLUS):
+              // agent-loop escribe `pref_escalon_at` cuando cotizar_referencial
+              // da precio sin negociación (CL desde el 26-ago), y este cron
+              // NUNCA la leía — solo miraba pref_escalon/pref_params, que se
+              // llenan con descuento negociado. Es la señal determinista; el
+              // detector por texto queda de respaldo.
+              conv?.pref_escalon_at
+              ? "con_precio"
+              : // El historial manda sobre los punteros: si Vicky ya mostró un
+                // precio, preguntar de nuevo cuántas personas marcarían es
+                // insultante. Ver contactosQueVieronPrecio (caso Ignacia).
+                yaVieronPrecio.has(r.contact)
+                ? "con_precio"
+                : guardada
+    // Se persiste la etapa derivada: vic_loop.stage decía "sin_precio" en
+    // conversaciones con precio dado hace días (5 de 5 en la revisión del
+    // 08-sep), y de ahí leen el reloj del PTV y los reportes.
+    if (stage !== r.stage) await patchLoop(r.contact, { stage })
 
     // (e) ANTI-EMPALME con el PTV (doc "Vicky paso a paso", 30-jul): si el
     // traspaso a vendedor está a menos de 1 h de dispararse para este
