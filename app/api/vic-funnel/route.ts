@@ -4682,7 +4682,60 @@ function renderInboundDiario(
     <td style="text-align:center"><b>${pctDe(T.pagada, T.precio)}</b>${cierreInOut("TOTAL")}</td>
   </tr>${subFilasOrigen("TOTAL")}`
   void filaTotal
-  return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
+  // ═══ TARJETA "TASA DE CIERRE SEMANAL · INBOUND vs OUTBOUND" (Lalo 08-sep):
+  // las mismas semanas de la tabla, partidas por tipo de conversación, con
+  // entrantes / vieron precio / formales / pagadas y cierre = pagadas ÷
+  // vieron precio de cada tipo. Outbound = planilla de cadencia + reactivado
+  // por campaña; inbound = el resto. Sin base (0 vieron precio, o más
+  // pagadas que precios porque el precio se vio en semanas anteriores) se
+  // dice explícito en vez de inventar un porcentaje.
+  const cardInOut = (() => {
+    if (!opts.outboundTels?.size) return ""
+    const lunesList = [...semanas.keys()].sort()
+    if (lunesList.length === 0) return ""
+    type Fila = { entrantes: number; precio: number; formal: number; pagada: number }
+    const cuenta = (k: string, lado: "in" | "out"): Fila => {
+      const f: Fila = { entrantes: 0, precio: 0, formal: 0, pagada: 0 }
+      for (const et of ["entrantes", "precio", "formal", "pagada"] as const) {
+        const u = new Set(elementosDe(et, k))
+        let n = 0
+        for (const el of u) {
+          const esOut = opts.outboundTels!.has(telDeElemento(el))
+          if ((lado === "out") === esOut) n++
+        }
+        f[et] = n
+      }
+      return f
+    }
+    const cierre = (f: Fila) => {
+      if (f.precio > 0 && f.pagada <= f.precio) return `<b style="color:#1b5e20">${Math.round((f.pagada * 100) / f.precio)}%</b>`
+      if (f.pagada > 0) return `<span style="color:#9aa0a8" title="Pagadas sin base: el precio se vio en semanas anteriores (reactivaciones)">sin base*</span>`
+      return `<span style="color:#c8cdd3">—</span>`
+    }
+    const tabla = (lado: "in" | "out") => {
+      const T: Fila = { entrantes: 0, precio: 0, formal: 0, pagada: 0 }
+      const filasHtml = lunesList
+        .slice()
+        .reverse()
+        .map((lunes) => {
+          const f = cuenta(claveSemana(lunes), lado)
+          T.entrantes += f.entrantes; T.precio += f.precio; T.formal += f.formal; T.pagada += f.pagada
+          return `<tr><td style="white-space:nowrap">${etiquetaSemana(lunes)}</td><td style="text-align:center">${f.entrantes}</td><td style="text-align:center">${f.precio}</td><td style="text-align:center">${f.formal}</td><td style="text-align:center">${f.pagada}</td><td style="text-align:center">${cierre(f)}</td></tr>`
+        })
+        .join("")
+      return `<table style="width:100%;border-collapse:collapse;font-size:13px;margin:4px 0 12px">
+        <tr><th style="text-align:left">Semana</th><th>Entrantes</th><th>Vieron precio</th><th>Formales</th><th>Pagadas</th><th>Cierre</th></tr>
+        ${filasHtml}
+        <tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700"><td>Total</td><td style="text-align:center">${T.entrantes}</td><td style="text-align:center">${T.precio}</td><td style="text-align:center">${T.formal}</td><td style="text-align:center">${T.pagada}</td><td style="text-align:center">${cierre(T)}</td></tr>
+      </table>`
+    }
+    return `<div class="card"><h2>🎯 Tasa de cierre semanal · inbound vs outbound <span class="pct" style="font-weight:400">— cierre = pagadas ÷ vieron precio de cada tipo</span></h2>
+      <div class="sub" style="margin:2px 0 8px"><b style="color:#075985">INBOUND</b> · WhatsApp directo, sitio web y landings</div>${tabla("in")}
+      <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia y reactivados por campaña (descuento, remarketing)</div>${tabla("out")}
+      <div class="sub">*sin base: hubo pagadas pero el precio se había visto en semanas anteriores (reactivaciones), así que no hay tasa semanal honesta. Los contactos reactivados por campaña cuentan como outbound aunque su primera conversación haya sido inbound.</div>
+    </div>`
+  })()
+  return `${cardInOut}<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
   <div class="sub" style="margin:2px 0 10px"><b>${T.entrantes}</b> conversaciones iniciadas · ${T.ic} con intención comercial (${pctDe(T.ic, T.entrantes)}) · ${T.ce} de clientes existentes (${T.ce_sop} soporte / ${T.ce_pos} postventa / ${T.ce_cob} cobranza) · ${T.nocal} no califican · ${T.noid} sin identificar — Foto: ${T.precio} vieron precio · ${T.formal} formales · ${T.aceptada} aceptadas · <b>${T.pagada} pagadas</b></div>
   ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky, inbound + outbound)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
   ${tasaAcumHtml}
@@ -8636,6 +8689,22 @@ export async function GET(req: Request): Promise<Response> {
             arr.push([`💬 ${String(f.empresa || f.nombre || "").trim() || tel}`, tel])
             outbPorDia.set(dia, arr)
             outbTocPorDia.set(dia, (outbTocPorDia.get(dia) || 0) + 1)
+          }
+          // REACTIVACIONES POR CAMPAÑA = OUTBOUND (Lalo 08-sep, "la definición
+          // que más aumente la tasa"): quien volvió por la campaña de descuento
+          // (`campana_dcto_`), por el remarketing de deals perdidos
+          // (`campana_remk_<campaña>_<fono>`) o por cualquier reactivación
+          // marcada (`reactivar_deal_`) cuenta como outbound en el corte
+          // in/out, aunque su primera conversación haya sido inbound.
+          const rCamp = await fetch(
+            `${SUPABASE_URL}/rest/v1/vic_kv?select=key&or=(key.like.campana_dcto_*,key.like.campana_remk_*,key.like.reactivar_deal_*)&limit=6000`,
+            { headers: hOut, cache: "no-store" },
+          )
+          for (const fila of rCamp.ok ? ((await rCamp.json().catch(() => [])) as Array<{ key: string }>) : []) {
+            const m = String(fila.key || "").match(/(\d{9,15})$/)
+            const tel = m ? m[1] : ""
+            if (!tel || paisDeTelefono(tel) !== pais || isTestContact(tel, metricsContactSet())) continue
+            outbTels.add(tel)
           }
         } catch { /* sin outbound, la columna queda en 0 */ }
         // 📣 CAMPAÑAS COMO ORIGEN (Lalo 27-ago): un entrante que recibió un
