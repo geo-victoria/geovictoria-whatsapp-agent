@@ -1189,6 +1189,98 @@ async function avanzarDealHasta(dealId: string, piso: string, revivirPerdido = f
   }
 }
 
+/**
+ * REGLA DE REACTIVACIÓN DE DEALS (David García, marketing, 08-sep). Cuando
+ * Vicky reactiva un deal que estaba en Cierre Perdido (contacto marcado por
+ * una campaña de remarketing, kv `reactivar_deal_`):
+ *  1) si pasó a Cierre Perdido hace MENOS de 3 meses → vuelve a la etapa en
+ *     la que estaba (Propuesta Enviada, o Listo para Cierre si alcanzó a
+ *     pasar por ahí), y se limpian Razón de Pérdida y Fecha paso a Cierre
+ *     Perdido. Nada más se toca: el avance previo se conserva.
+ *  2) si pasaron 3 meses o MÁS → vuelve a "4. Propuesta Enviada / En
+ *     Negociación" con Fecha/Hora Envío Propuesta = fecha de la reactivación,
+ *     y se limpian Fecha paso a Cierre Perdido, Fecha paso a Piloto y Fecha
+ *     paso a Listo para cierre: recorre el proceso comercial de nuevo.
+ * El dueño NO cambia. Best-effort: si algo falla, el hito sigue su camino.
+ */
+export const MESES_REACTIVACION_DAVID = 3
+export const ETAPA_PROPUESTA = "4. Propuesta Enviada / En Negociación"
+export const ETAPA_LISTO_CIERRE = "6. Listo para Cierre"
+
+export function planReactivacionDavid(
+  deal: { Stage?: string | null; Fecha_paso_a_Cierre_Perdido?: string | null; Fecha_paso_a_Listo_para_cierre_v2?: string | null },
+  ahora = new Date(),
+): { etapa: string; campos: Record<string, unknown>; regla: 1 | 2 } | null {
+  if (String(deal.Stage || "") !== "Cierre Perdido") return null
+  const perdido = deal.Fecha_paso_a_Cierre_Perdido ? new Date(deal.Fecha_paso_a_Cierre_Perdido) : null
+  const meses = perdido && !Number.isNaN(perdido.getTime()) ? (ahora.getTime() - perdido.getTime()) / (30.44 * 24 * 3600_000) : Number.POSITIVE_INFINITY
+  if (meses < MESES_REACTIVACION_DAVID) {
+    return {
+      regla: 1,
+      etapa: deal.Fecha_paso_a_Listo_para_cierre_v2 ? ETAPA_LISTO_CIERRE : ETAPA_PROPUESTA,
+      campos: { Raz_n_de_P_rdida: null, Fecha_paso_a_Cierre_Perdido: null },
+    }
+  }
+  return {
+    regla: 2,
+    etapa: ETAPA_PROPUESTA,
+    campos: {
+      Raz_n_de_P_rdida: null,
+      Fecha_paso_a_Cierre_Perdido: null,
+      Fecha_paso_a_Piloto: null,
+      Fecha_paso_a_Listo_para_cierre_v2: null,
+      Fecha_Hora_Env_o_Propuesta: ahora.toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+    },
+  }
+}
+
+export async function revivirDealDeCampana(dealId: string): Promise<string | null> {
+  try {
+    const { h, api } = await zohoHeaders()
+    const r = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage,Fecha_paso_a_Cierre_Perdido,Fecha_paso_a_Listo_para_cierre_v2`, { headers: h, cache: "no-store" })
+    if (r.status !== 200) return null
+    const deal = ((await r.json().catch(() => ({}))) as { data?: Array<{ Stage?: string; Fecha_paso_a_Cierre_Perdido?: string | null; Fecha_paso_a_Listo_para_cierre_v2?: string | null }> }).data?.[0]
+    if (!deal) return null
+    const plan = planReactivacionDavid(deal)
+    if (!plan) return null
+    // Lalo 08-sep: "es posible que algunos deals estén en blueprint y otros
+    // no". Con blueprint la etapa se mueve por transición (avanzarDealHasta);
+    // un deal FUERA del blueprint responde transitions:[] y ahí el Stage se
+    // escribe directo. Se verifica el resultado y, si la transición no lo
+    // sacó de Cierre Perdido, se cae al PUT directo igual.
+    const bpRes = await fetch(`${api}/crm/v3/Deals/${dealId}/actions/blueprint`, { headers: h, cache: "no-store" })
+    const bp = bpRes.ok ? ((await bpRes.json().catch(() => ({}))) as { blueprint?: { transitions?: unknown[] } }) : {}
+    const enBlueprint = Array.isArray(bp?.blueprint?.transitions) && bp.blueprint!.transitions!.length > 0
+    let via = "directo"
+    if (enBlueprint) {
+      await avanzarDealHasta(dealId, plan.etapa, true)
+      const chk = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage`, { headers: h, cache: "no-store" })
+      const stageAhora = String(((await chk.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }).data?.[0]?.Stage || "")
+      via = stageAhora && stageAhora !== "Cierre Perdido" ? "blueprint" : "blueprint→directo"
+    }
+    const data: Record<string, unknown> = { id: dealId, ...plan.campos }
+    if (via !== "blueprint") data.Stage = plan.etapa
+    const put = await fetch(`${api}/crm/v3/Deals`, {
+      method: "PUT", headers: h, cache: "no-store",
+      body: JSON.stringify({ data: [data], trigger: ["blueprint"] }),
+    })
+    const putBody = (await put.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
+    const okPut = put.ok && putBody?.data?.[0]?.code === "SUCCESS"
+    console.log(`[crm-hitos] deal ${dealId}: reactivado por campaña (regla ${plan.regla} de David → "${plan.etapa}" vía ${via}; campos ${okPut ? "limpiados" : `NO limpiados: ${JSON.stringify(putBody).slice(0, 160)}`})`)
+    return plan.etapa
+  } catch (e) {
+    console.warn(`[crm-hitos] revivirDealDeCampana ${dealId}:`, e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
+/** Sube el deal al piso del hito; si el contacto viene de campaña, primero lo revive con la regla de David. */
+async function avanzarConReactivacion(dealId: string, piso: string, contact: string): Promise<void> {
+  const reactivar = await dealAReactivar(contact)
+  if (reactivar) await revivirDealDeCampana(dealId)
+  await avanzarDealHasta(dealId, piso, Boolean(reactivar))
+}
+
 const TITULO_NOTA_TRANSCRIPCION = "Transcripción WhatsApp Vicky"
 
 /**
@@ -1599,7 +1691,7 @@ export async function sincronizarHitoCrm(
       const dealCruzado = await dealActivoEnKv(clean)
       if (dealCruzado) {
         console.log(`[crm-hitos] ${clean}: deal ${dealCruzado} recién creado por la otra puerta (candado kv) — hito "${hito}" solo sube el piso, sin lead ni deal nuevos`)
-        await avanzarDealHasta(dealCruzado, piso, Boolean(await dealAReactivar(clean)))
+        await avanzarConReactivacion(dealCruzado, piso, clean)
         await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
@@ -1783,7 +1875,7 @@ export async function sincronizarHitoCrm(
       const dealCruzado = await dealActivoEnKv(clean)
       if (dealCruzado) {
         console.log(`[crm-hitos] ${clean}: deal ${dealCruzado} recién creado por la otra puerta (candado kv) — hito "${hito}" sube el piso, lead ${lead.id} no convierte deal propio`)
-        await avanzarDealHasta(dealCruzado, piso, Boolean(await dealAReactivar(clean)))
+        await avanzarConReactivacion(dealCruzado, piso, clean)
         await actualizarNotaTranscripcion(dealCruzado, clean)
         return
       }
@@ -1942,7 +2034,7 @@ export async function sincronizarHitoCrm(
       console.log(`[crm-hitos] ${clean}: lead ${lead.id} convertido sin deal vivo — hito "${hito}" sin destino`)
       return
     }
-    await avanzarDealHasta(dealId, piso, Boolean(await dealAReactivar(clean)))
+    await avanzarConReactivacion(dealId, piso, clean)
     await actualizarNotaTranscripcion(dealId, clean)
     // Umbral 08-ago: si el deal EXISTENTE seguía esperando con Vicky (u otro
     // interino) y este hito promete ejecutivo (sorteoInmediato), la tómbola
