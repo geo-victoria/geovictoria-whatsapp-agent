@@ -1627,6 +1627,20 @@ export async function sincronizarHitoCrm(
       }
     }
   } catch { /* sin señal: sigue */ }
+  // CASUÍSTICA (Lalo 08-sep): un trabajador con problema de marcación, un
+  // cliente pidiendo la baja o alguien buscando empleo no es un hito
+  // comercial. Solo hitos PRE-formales: aceptada/onboarding demuestran compra.
+  if (hito !== "aceptada" && hito !== "onboarding_listo") {
+    try {
+      const { casuisticaDeContacto, aplicarCasuisticaNoProspecto } = await import("./casuistica-runtime")
+      const cas = await casuisticaDeContacto(contact)
+      if (!cas.esProspecto) {
+        console.log(`[crm-hitos] ${contact}: casuística ${cas.tipo} — hito "${hito}" no crea lead ni deal`)
+        void aplicarCasuisticaNoProspecto(contact, cas, `hito:${hito}`).catch(() => undefined)
+        return
+      }
+    } catch { /* sin señal: sigue */ }
+  }
       try {
         const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
         const { rutEnTexto } = await import("./empresas-sii")

@@ -516,6 +516,24 @@ async function processOneTurn(
       const ce = await detectarClienteExistente(contact)
       if (ce) directivaPostPago += directivaClienteExistente(ce)
     } catch { /* sin señal: prospecto */ }
+    // CASUÍSTICA DEL CHAT (Lalo 08-sep): trabajador con problema de marcación,
+    // cliente pidiendo la baja, busca empleo, spam… — directiva determinista
+    // al final del prompt (lib/casuistica-contacto, puro; calibrado con los
+    // 136 "No Calificado" de jun-sep). Los efectos (sin lead, sin traspaso,
+    // loop cerrado) corren después de responder, fuera del camino del cliente.
+    let casuisticaTurno: import("@/lib/casuistica-contacto").Casuistica | null = null
+    try {
+      const { clasificarCasuistica, directivaCasuistica } = await import("@/lib/casuistica-contacto")
+      const mensajesCliente = [
+        ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")).filter((t) => !t.startsWith("[REGISTRO INTERNO")),
+        message || "",
+      ]
+      const cas = clasificarCasuistica(mensajesCliente)
+      if (cas.tipo !== "prospecto") {
+        directivaPostPago += directivaCasuistica(cas)
+        if (!cas.esProspecto) casuisticaTurno = cas
+      }
+    } catch { /* sin señal: prospecto */ }
     try {
       const marcaComprobante = await getKvValue(`comprobante_ok_${contact}`)
       if (marcaComprobante) {
@@ -648,7 +666,12 @@ async function processOneTurn(
     // HITO DE INTENCIÓN SIN TOOL (arreglo 2, Lalo 07-sep, caso Conbes): con
     // RUT del cliente en el chat, el CRM nace ya — no espera a que Vicky
     // llame una tool. Best-effort en paralelo; una vez por conversación.
-    if (!enOnboarding && contact.startsWith("56")) {
+    if (casuisticaTurno) {
+      const cas = casuisticaTurno
+      void import("@/lib/casuistica-runtime")
+        .then((m) => m.aplicarCasuisticaNoProspecto(contact, cas, "webhook"))
+        .catch(() => undefined)
+    } else if (!enOnboarding && contact.startsWith("56")) {
       void import("@/lib/hito-por-chat")
         .then((m) => m.hitoIntencionDesdeChat(contact))
         .catch(() => undefined)

@@ -1010,6 +1010,21 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         }
       }
     } catch { /* sin señal: sigue */ }
+    // CASUÍSTICA (Lalo 08-sep, "estamos fallando al crear leads que son
+    // usuarios"): trabajadores/clientes con soporte, bajas, cobranza, busca
+    // empleo, spam… jamás nacen como lead. Determinista sobre el chat.
+    try {
+      const fonoCas = ((input.telefono || "").trim() || (input.contactoWA || "").trim()).replace(/\D/g, "")
+      if (fonoCas) {
+        const { casuisticaDeContacto, aplicarCasuisticaNoProspecto } = await import("./casuistica-runtime")
+        const cas = await casuisticaDeContacto(fonoCas)
+        if (!cas.esProspecto) {
+          console.log(`[zoho-leads] ${fonoCas}: casuística ${cas.tipo} — no se crea lead (${cas.evidencia.join(", ")})`)
+          void aplicarCasuisticaNoProspecto(fonoCas, cas, "createZohoLead").catch(() => undefined)
+          return { success: false, error: `no_prospecto:${cas.tipo}` }
+        }
+      }
+    } catch { /* sin señal: sigue */ }
     // CANDADO ANTI-DUPLICADOS (casos SYDA/Vélez/Catalina/Mayra, 28-30 jul):
     // el search de Zoho tarda ~2 min en indexar un lead nuevo, así que un
     // reintento o un segundo flujo dentro de esa ventana creaba otro lead

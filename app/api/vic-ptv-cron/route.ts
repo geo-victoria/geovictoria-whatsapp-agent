@@ -1824,6 +1824,20 @@ export async function traspasarAhora(
       return { ok: false, motivo: "cliente_existente" }
     }
   } catch { /* sin señal: sigue el traspaso normal */ }
+  // CASUÍSTICA (Lalo 08-sep): trabajador/cliente con soporte, baja, cobranza,
+  // busca empleo, spam… no se traspasa a nadie del equipo comercial.
+  try {
+    const { casuisticaDeContacto, aplicarCasuisticaNoProspecto } = await import("@/lib/casuistica-runtime")
+    const cas = await casuisticaDeContacto(clean)
+    if (!cas.esProspecto) {
+      await avisarEquipoInterno(
+        `🛠️ NO ES PROSPECTO (${cas.tipo}): +${clean} pidió atención (motivo ${opts.motivo}) pero el chat muestra ${cas.evidencia.join(", ") || cas.tipo}. ` +
+          `No se traspasó a ventas: corresponde soporte/postventa (soporte@ / 600 914 3819).`,
+      ).catch(() => {})
+      void aplicarCasuisticaNoProspecto(clean, cas, "traspasarAhora").catch(() => undefined)
+      return { ok: false, motivo: `no_prospecto:${cas.tipo}` }
+    }
+  } catch { /* sin señal: sigue el traspaso normal */ }
 
   // 0. CANDADO: si ya hay traspaso activo, NO se re-sortea. Se devuelve el
   //    vendedor que ya lo atiende para que Vicky lo repita, en vez de mover al
@@ -2131,6 +2145,15 @@ export async function GET(req: Request) {
     // CLIENTE EXISTENTE (Lalo 08-sep): el reloj tampoco lo traspasa — loop
     // cerrado con motivo propio, Vicky sigue reactiva con la directiva de soporte.
     try {
+      const { casuisticaDeContacto, aplicarCasuisticaNoProspecto } = await import("@/lib/casuistica-runtime")
+      const cas = await casuisticaDeContacto(c.contact)
+      if (!cas.esProspecto) {
+        await aplicarCasuisticaNoProspecto(c.contact, cas, "reloj_etapa").catch(() => undefined)
+        console.log(`[ptv] ${c.contact}: casuística ${cas.tipo} — traspaso omitido, loop cerrado`)
+        continue
+      }
+    } catch { /* sin señal: sigue */ }
+    try {
       const { detectarClienteExistente } = await import("@/lib/cliente-existente")
       const ce = await detectarClienteExistente(c.contact)
       if (ce) {
@@ -2275,6 +2298,16 @@ export async function GET(req: Request) {
         if (reuniones.length) continue
         const llamadas = await supa<{ id: string }>(`vic_scheduled_calls?contact=eq.${encodeURIComponent(r.contact)}&select=id&limit=1`)
         if (llamadas.length) continue
+        // CASUÍSTICA (Lalo 08-sep): "no gracias", "soy trabajador", "busco
+        // pega"… con un solo mensaje también calzan acá; no van a las SDR.
+        try {
+          const { casuisticaDeContacto, aplicarCasuisticaNoProspecto } = await import("@/lib/casuistica-runtime")
+          const cas = await casuisticaDeContacto(r.contact)
+          if (!cas.esProspecto) {
+            await aplicarCasuisticaNoProspecto(r.contact, cas, "reloj_24h").catch(() => undefined)
+            continue
+          }
+        } catch { /* sin señal: sigue */ }
         candidatos.push({ contact: r.contact, origen: "inbound", pais: paisTm })
       }
     }
