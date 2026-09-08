@@ -374,7 +374,15 @@ export async function cerrarYTraspasarPostPago(
   // descubría el canal y se omitía el mensaje: el cliente quedaba en una
   // fase sin kickoff y, con el wizard ya frenado en el cotizador, sin nada.
   const canalEjecutivo = await esCanalEjecutivo(quoteId)
-  if (esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
+  // SOLO CON PAGO REAL (08-sep, caso Sofía/SEGURIDAD PREVENTIVA COT1288): la
+  // ACEPTACIÓN también pasa por acá (vic-quote-notify evento "aceptada",
+  // motivoCierre "aceptada") y este bloque movía al contacto a fase
+  // onboarding sin que hubiera pagado — el vigía le pidió los datos del admin
+  // "para crear tu cuenta" a una clienta con la cotización solo Aceptada.
+  // Las dos puertas del alta son pago online verificado y comprobante legible;
+  // aceptar no es ninguna de las dos.
+  const pagoReal = (opts.motivoCierre || "pagado") === "pagado"
+  if (pagoReal && esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
     // SEGUNDA EMPRESA POR EL MISMO NÚMERO (08-sep, caso Lorena: pagó dos
     // cotizaciones, una por RUT, con minutos de diferencia). El estado del
     // onboarding vive POR CONTACTO: si el ciclo ya está abierto con OTRA
