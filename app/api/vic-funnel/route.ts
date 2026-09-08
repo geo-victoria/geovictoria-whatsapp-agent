@@ -4489,6 +4489,18 @@ function renderInboundDiario(
     for (const el of u) if (opts.outboundTels?.has(telDeElemento(el))) out++
     return { ins: u.size - out, out }
   }
+  // CIERRE POR ORIGEN (Lalo 08-sep, "¿no está en el dash?"): junto a la tasa
+  // de cierre de cada fila, la misma tasa partida en inbound y outbound —
+  // pagadas ÷ vieron precio de cada origen (outbound = contacto con fila en
+  // vic_outbound_cadence, mismo criterio del resto del dash).
+  const cierreInOut = (dia: string): string => {
+    if (!opts.outboundTels?.size) return ""
+    const pr = partirInOut("precio", dia)
+    const pg = partirInOut("pagada", dia)
+    if (pr.ins + pr.out === 0 && pg.ins + pg.out === 0) return ""
+    const t = (n: number, d: number) => (d > 0 ? `${Math.round((n * 100) / d)}%` : n > 0 ? `${n}/0` : "—")
+    return ` <span style="font-size:11px;color:#6b7280;white-space:nowrap;font-weight:400" title="Cierre por origen: pagadas ÷ vieron precio de cada tipo de conversación (inbound · outbound)">(in ${t(pg.ins, pr.ins)} · out ${t(pg.out, pr.out)})</span>`
+  }
   const celda = (dia: string, etapa: EtapaInbound, cls = "") => {
     const v = cnt(etapa, dia)
     if (v <= 0) return `<td class="${cls}" style="text-align:center;color:#c8cdd3">0</td>`
@@ -4612,7 +4624,7 @@ function renderInboundDiario(
       <td style="white-space:nowrap">${flechaOrigen(d)}${nombreDia(d)}</td>
       ${celdaForm(d)}${celdaOutbound(d)}${celda(d, "entrantes")}${celda(d, "ic")}${celda(d, "ce")}${celda(d, "ce_sop", "sube")}${celda(d, "ce_pos", "sube")}${celda(d, "ce_cob", "sube")}${celda(d, "nocal")}${celda(d, "noid")}
       ${celda(d, "precio", "divi")}${celda(d, "formal")}${celda(d, "aceptada")}${celda(d, "pagada")}
-      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}</td>
+      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}${cierreInOut(d)}</td>
     </tr>${subFilasOrigen(d)}`
   }
   // FILA SEMANAL (Lalo 08-sep): bajo los días de cada semana (lunes a
@@ -4626,7 +4638,7 @@ function renderInboundDiario(
       <td style="white-space:nowrap">${flechaOrigen(k)}${etiquetaSemana(lunes)}</td>
       ${celdaForm(k)}${celdaOutbound(k)}${celda(k, "entrantes")}${celda(k, "ic")}${celda(k, "ce")}${celda(k, "ce_sop", "sube")}${celda(k, "ce_pos", "sube")}${celda(k, "ce_cob", "sube")}${celda(k, "nocal")}${celda(k, "noid")}
       ${celda(k, "precio", "divi")}${celda(k, "formal")}${celda(k, "aceptada")}${celda(k, "pagada")}
-      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}"><b>${pctDe(pag, vioPrecio)}</b></td>
+      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}"><b>${pctDe(pag, vioPrecio)}</b>${cierreInOut(k)}</td>
     </tr>${subFilasOrigen(k)}`
   }
   const filas = [...semanas.keys()]
@@ -4667,7 +4679,7 @@ function renderInboundDiario(
     <td>${flechaOrigen("TOTAL")}<b>TOTAL</b></td>
     ${celdaForm("TOTAL")}${celdaOutbound("TOTAL")}${celdaTotal("entrantes")}${celdaTotal("ic")}${celdaTotal("ce")}${celdaTotal("ce_sop", "sube")}${celdaTotal("ce_pos", "sube")}${celdaTotal("ce_cob", "sube")}${celdaTotal("nocal")}${celdaTotal("noid")}
     ${celdaTotal("precio", "divi")}${celdaTotal("formal")}${celdaTotal("aceptada")}${celdaTotal("pagada")}
-    <td style="text-align:center"><b>${pctDe(T.pagada, T.precio)}</b></td>
+    <td style="text-align:center"><b>${pctDe(T.pagada, T.precio)}</b>${cierreInOut("TOTAL")}</td>
   </tr>${subFilasOrigen("TOTAL")}`
   void filaTotal
   return `<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
