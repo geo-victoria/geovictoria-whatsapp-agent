@@ -4239,7 +4239,7 @@ function renderInboundDiario(
   opts: {
     rango: RangoFechas | null
     qs: string
-    caja?: { cantidad: number; monto: number; detalle: string }
+    caja?: { cantidad: number; monto: number; detalle: string; ejecutivo?: { cantidad: number; monto: number } }
     /** Nombre de empresa por teléfono (para las viñetas). */
     nombres: Map<string, string>
     /** Empresa por quoteId — nombra cada cotización en las viñetas del Grupo
@@ -4739,7 +4739,12 @@ function renderInboundDiario(
     return `<div class="card"><h2>🎯 Tasa de cierre semanal · inbound vs outbound <span class="pct" style="font-weight:400">— cierre = pagadas ÷ vieron precio de cada tipo</span></h2>
       <div class="sub" style="margin:2px 0 8px"><b style="color:#075985">INBOUND</b> · WhatsApp directo, sitio web y landings</div>${tabla("in")}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia y reactivados por campaña (descuento, remarketing)</div>${tabla("out")}
-      <div class="sub">*100% topado: hubo más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones). Los contactos reactivados por campaña cuentan como outbound aunque su primera conversación haya sido inbound.</div>
+      <div class="sub">*100% topado: hubo más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones).</div>
+      <div class="sub" style="margin-top:8px;padding:8px 10px;background:#f8fafc;border-radius:8px;line-height:1.5"><b>Cómo se atribuye cada pago.</b> Estas tablas son SOLO el canal Vicky: cotizaciones emitidas por Vicky a contactos que conversaron con ella por WhatsApp, contadas por cotización pagada. <b>Inbound</b> = el contacto llegó solo (WhatsApp directo, sitio web o landing) y no fue tocado por ninguna campaña. <b>Outbound</b> = contacto de la planilla de cadencia o reactivado por una campaña (descuento, remarketing de deals perdidos): si pagó después de un toque de campaña, cuenta acá aunque su primera conversación haya sido inbound.${
+        opts.caja?.ejecutivo && opts.caja.ejecutivo.cantidad > 0
+          ? ` <b>Fuera de estas tablas</b> quedan <b>${opts.caja.ejecutivo.cantidad}</b> pago${opts.caja.ejecutivo.cantidad === 1 ? "" : "s"} del canal ejecutivo en el mismo período (cotizaciones emitidas desde la cotizadora por un ejecutivo, $${opts.caja.ejecutivo.monto.toLocaleString("es-CL")}): no son ventas de Vicky y no entran en ninguna de las dos tasas. Total de la empresa por canal digital = ${opts.caja.cantidad + opts.caja.ejecutivo.cantidad} pagos.`
+          : " Los pagos del canal ejecutivo (cotizaciones emitidas desde la cotizadora por un ejecutivo) no entran en ninguna de las dos tasas."
+      } Una cotización se atribuye por el teléfono de la cotización: si el comprobante llega desde otro número, la venta sigue siendo de quien la emitió.</div>
     </div>`
   })()
   return `${cardInOut}<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
@@ -8499,6 +8504,7 @@ export async function GET(req: Request): Promise<Response> {
           ? {
               cantidad: pagosVicky.length,
               monto: pagosVicky.reduce((a, p) => a + p.monto, 0),
+              ejecutivo: { cantidad: pagosEjecutivo.cantidad, monto: pagosEjecutivo.monto },
               detalle:
                 pagosVicky.slice(0, 8).map((p) => p.txt).join(" · ") +
                 (pagosVicky.length > 8 ? " · …" : "") +
