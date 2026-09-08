@@ -4223,6 +4223,17 @@ function computarCohortesInbound(params: {
   return { dias, porDia }
 }
 
+/** Lunes (YYYY-MM-DD) de la semana ISO a la que pertenece el día. */
+function lunesSemanaDe(d: string): string {
+  const dt = new Date(`${d}T12:00:00Z`)
+  if (Number.isNaN(dt.getTime())) return d
+  dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7))
+  return dt.toISOString().slice(0, 10)
+}
+/** Clave de fila semanal en la tabla inbound: "S" + lunes. */
+const claveSemana = (lunes: string) => `S${lunes}`
+const esClaveSemana = (k: string) => /^S\d{4}-\d{2}-\d{2}$/.test(k)
+
 function renderInboundDiario(
   c: CohortesInbound,
   opts: {
@@ -4277,7 +4288,31 @@ function renderInboundDiario(
     for (const et of ETAPAS_INBOUND) for (const k of [...porDia[et].keys()]) if (k < DESDE_TABLA) porDia[et].delete(k)
     if (opts.formVicky) for (const k of [...opts.formVicky.keys()]) if (k < DESDE_TABLA) opts.formVicky.delete(k)
   }
-  const cnt = (etapa: EtapaInbound, dia: string) => porDia[etapa].get(dia)?.size || 0
+  // ── SEMANAS (Lalo 08-sep): cada 7 días (lunes a domingo) una fila con los
+  // mismos indicadores acumulados. Clave "S<lunes>"; los únicos se cuentan por
+  // semana (un contacto que vio precio dos días de la misma semana cuenta 1).
+  const semanas = new Map<string, string[]>()
+  for (const d of dias) {
+    const l = lunesSemanaDe(d)
+    if (!semanas.has(l)) semanas.set(l, [])
+    semanas.get(l)!.push(d)
+  }
+  const diasDeClave = (k: string): string[] => (esClaveSemana(k) ? semanas.get(k.slice(1)) || [] : [k])
+  /** Elementos (tel o tel~quoteId) de una etapa en un día, una semana ("S<lunes>") o TOTAL. */
+  const elementosDe = (etapa: EtapaInbound, k: string): string[] =>
+    k === "TOTAL"
+      ? [...porDia[etapa].values()].flatMap((sx) => [...sx])
+      : esClaveSemana(k)
+        ? diasDeClave(k).flatMap((d) => [...(porDia[etapa].get(d) || [])])
+        : [...(porDia[etapa].get(k) || [])]
+  const cnt = (etapa: EtapaInbound, dia: string) => (esClaveSemana(dia) ? new Set(elementosDe(etapa, dia)).size : porDia[etapa].get(dia)?.size || 0)
+  const etiquetaSemana = (lunes: string) => {
+    const dom = new Date(`${lunes}T12:00:00Z`)
+    dom.setUTCDate(dom.getUTCDate() + 6)
+    const f = (x: string) => `${x.slice(8, 10)}-${x.slice(5, 7)}`
+    const n = (semanas.get(lunes) || []).length
+    return `📅 Semana ${f(lunes)} → ${f(dom.toISOString().slice(0, 10))}${n < 7 ? ` <span style="font-weight:400;color:#6b7280">(${n} día${n === 1 ? "" : "s"})</span>` : ""}`
+  }
   const totUnico = (etapa: EtapaInbound) => {
     const u = new Set<string>()
     for (const set of porDia[etapa].values()) for (const t of set) u.add(t)
@@ -4357,10 +4392,11 @@ function renderInboundDiario(
   VIN["form"]["TOTAL"] = [...fv.values()].flat().sort((a, b) => a[0].localeCompare(b[0]))
   const fvTotal = VIN["form"]["TOTAL"].length
   const fvConvTotal = [...(opts.formConv || new Map<string, number>()).values()].reduce((a, n) => a + n, 0)
+  const sumaEn = (m: Map<string, number> | undefined, k: string) => diasDeClave(k).reduce((a, d) => a + (m?.get(d) || 0), 0)
   const celdaForm = (d: string) => {
-    const v = d === "TOTAL" ? fvTotal : (fv.get(d) || []).length
+    const v = d === "TOTAL" ? fvTotal : diasDeClave(d).reduce((a, x) => a + (fv.get(x) || []).length, 0)
     if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
-    const conv = d === "TOTAL" ? fvConvTotal : opts.formConv?.get(d) || 0
+    const conv = d === "TOTAL" ? fvConvTotal : sumaEn(opts.formConv, d)
     const sufijo = conv > 0 ? ` <span class="subpop" data-et="formconv" data-dia="${d}" style="font-size:11px;color:#15803d;white-space:nowrap;cursor:pointer">(${conv}💬)</span>` : ""
     return `<td class="conpop" data-et="form" data-dia="${d}" style="text-align:center;white-space:nowrap"><a href="#formlanding" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
   }
@@ -4371,6 +4407,17 @@ function renderInboundDiario(
   VIN["outb"] = {}
   for (const [dia, lista] of ob) VIN["outb"][dia] = [...lista].sort((a, b) => a[0].localeCompare(b[0]))
   VIN["outb"]["TOTAL"] = [...ob.values()].flat().sort((a, b) => a[0].localeCompare(b[0]))
+  // Viñetas de las filas SEMANALES: unión de los días de la semana.
+  for (const [lunes, ds] of semanas) {
+    const k = claveSemana(lunes)
+    for (const et of ETAPAS_INBOUND) {
+      const u = new Map<string, string>()
+      for (const d of ds) for (const t of porDia[et].get(d) || []) u.set(t, nomEl(t))
+      VIN[et][k] = [...u].map(([t, n]) => [n, telDeElemento(t)] as [string, string]).sort((a, b) => a[0].localeCompare(b[0]))
+    }
+    VIN["form"][k] = ds.flatMap((d) => fv.get(d) || []).sort((a, b) => a[0].localeCompare(b[0]))
+    VIN["outb"][k] = ds.flatMap((d) => ob.get(d) || []).sort((a, b) => a[0].localeCompare(b[0]))
+  }
   const obTotal = VIN["outb"]["TOTAL"].length
   const suma = (m?: Map<string, number>) => [...(m || new Map<string, number>()).values()].reduce((a, n) => a + n, 0)
   const obTocTotal = suma(opts.outboundToc)
@@ -4388,10 +4435,10 @@ function renderInboundDiario(
   VIN["convform"] = subLista(VIN["entrantes"], (p) => !!p[1] && !!opts.formTels?.has(p[1]))
   VIN["convoutb"] = subLista(VIN["entrantes"], (p) => !!p[1] && !!opts.outboundTels?.has(p[1]))
   const celdaOutbound = (d: string) => {
-    const v = d === "TOTAL" ? obTotal : (ob.get(d) || []).length
+    const v = d === "TOTAL" ? obTotal : diasDeClave(d).reduce((a, x) => a + (ob.get(x) || []).length, 0)
     if (v <= 0) return `<td style="text-align:center;color:#c8cdd3">0</td>`
-    const toc = d === "TOTAL" ? obTocTotal : opts.outboundToc?.get(d) || 0
-    const reg = d === "TOTAL" ? obRegTotal : opts.outboundReg?.get(d) || 0
+    const toc = d === "TOTAL" ? obTocTotal : sumaEn(opts.outboundToc, d)
+    const reg = d === "TOTAL" ? obRegTotal : sumaEn(opts.outboundReg, d)
     const partes = [
       toc > 0 ? `<span class="subpop" data-et="outbtoc" data-dia="${d}" style="color:#15803d;cursor:pointer" title="Contactados: les salió el toque de Vicky">${toc}💬</span>` : "",
       reg > 0 ? `<span class="subpop" data-et="outbreg" data-dia="${d}" style="color:#b45309;cursor:pointer" title="Entregados a una SDR sin lograr contacto — pasa el mouse para ver a quién">${reg}↪</span>` : "",
@@ -4408,7 +4455,7 @@ function renderInboundDiario(
       return u.size
     }
     let n = 0
-    for (const t of porDia.entrantes.get(d) || []) if (opts.outboundTels.has(t)) n++
+    for (const t of new Set(elementosDe("entrantes", d))) if (opts.outboundTels.has(t)) n++
     return n
   }
   // Entrantes que vinieron del form (🧲): match por teléfono contra TODOS los
@@ -4421,7 +4468,7 @@ function renderInboundDiario(
       return u.size
     }
     let n = 0
-    for (const t of porDia.entrantes.get(d) || []) if (opts.formTels.has(t)) n++
+    for (const t of new Set(elementosDe("entrantes", d))) if (opts.formTels.has(t)) n++
     return n
   }
   const DET: Record<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }> = {}
@@ -4437,8 +4484,7 @@ function renderInboundDiario(
   // únicos partidos por si el CONTACTO nació de un toque outbound
   // (vic_outbound_cadence, criterio inmutable del funnel).
   const partirInOut = (etapa: EtapaInbound, dia: string): { ins: number; out: number } => {
-    const lista = dia === "TOTAL" ? [...porDia[etapa].values()].flatMap((s) => [...s]) : [...(porDia[etapa].get(dia) || [])]
-    const u = new Set(lista)
+    const u = new Set(elementosDe(etapa, dia))
     let out = 0
     for (const el of u) if (opts.outboundTels?.has(telDeElemento(el))) out++
     return { ins: u.size - out, out }
@@ -4477,17 +4523,15 @@ function renderInboundDiario(
   const origenesDelDia = (d: string): string[] => {
     const set = new Set<string>()
     for (const et of ETAPAS_INBOUND) {
-      const tels = d === "TOTAL" ? [...porDia[et].values()].flatMap((s) => [...s]) : [...(porDia[et].get(d) || [])]
-      for (const t of tels) set.add(origenDe(t))
+      for (const t of elementosDe(et, d)) set.add(origenDe(t))
     }
     const rango = (o: string) =>
       o === ORIGEN_WEB ? 0 : o.startsWith("🧲💰") ? 1 : o.startsWith("🧲🌱") ? 2 : o.startsWith("🧲🔗") ? 3 : o.startsWith("🧲") ? 4 : 5
     return [...set].sort((a, b) => rango(a) - rango(b) || a.localeCompare(b))
   }
   const cntOrigen = (etapa: EtapaInbound, d: string, origen: string): number => {
-    const tels = d === "TOTAL" ? [...porDia[etapa].values()].flatMap((s) => [...s]) : [...(porDia[etapa].get(d) || [])]
     const u = new Set<string>()
-    for (const t of tels) if (origenDe(t) === origen) u.add(t)
+    for (const t of elementosDe(etapa, d)) if (origenDe(t) === origen) u.add(t)
     return u.size
   }
   const claseDia = (d: string) => `ofila-${d.replace(/[^0-9A-Za-z-]/g, "")}`
@@ -4512,8 +4556,7 @@ function renderInboundDiario(
     if (!opts.campanas?.size) return []
     const u = new Set<string>()
     for (const et of ETAPAS_INBOUND) {
-      const tels = d === "TOTAL" ? [...porDia[et].values()].flatMap((sx) => [...sx]) : [...(porDia[et].get(d) || [])]
-      for (const t of tels) {
+      for (const t of elementosDe(et, d)) {
         if (origenDe(t) !== origen) continue
         const c = opts.campanas.get(telDeElemento(t))
         if (c) u.add(c)
@@ -4562,7 +4605,7 @@ function renderInboundDiario(
       })
       .join("")
   }
-  const filas = [...dias].reverse().map((d) => {
+  const filaDia = (d: string) => {
     const pag = cnt("pagada", d)
     const vioPrecio = cnt("precio", d)
     return `<tr>
@@ -4571,7 +4614,26 @@ function renderInboundDiario(
       ${celda(d, "precio", "divi")}${celda(d, "formal")}${celda(d, "aceptada")}${celda(d, "pagada")}
       <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}">${pctDe(pag, vioPrecio)}</td>
     </tr>${subFilasOrigen(d)}`
-  }).join("")
+  }
+  // FILA SEMANAL (Lalo 08-sep): bajo los días de cada semana (lunes a
+  // domingo), los mismos indicadores acumulados — únicos por etapa en la
+  // semana, form/outbound sumados, cierre = pagadas ÷ vieron precio.
+  const filaSemana = (lunes: string) => {
+    const k = claveSemana(lunes)
+    const pag = cnt("pagada", k)
+    const vioPrecio = cnt("precio", k)
+    return `<tr style="background:#eef2f7;font-weight:600;border-top:1px solid #d5dbe3;border-bottom:2px solid #c9ced4">
+      <td style="white-space:nowrap">${flechaOrigen(k)}${etiquetaSemana(lunes)}</td>
+      ${celdaForm(k)}${celdaOutbound(k)}${celda(k, "entrantes")}${celda(k, "ic")}${celda(k, "ce")}${celda(k, "ce_sop", "sube")}${celda(k, "ce_pos", "sube")}${celda(k, "ce_cob", "sube")}${celda(k, "nocal")}${celda(k, "noid")}
+      ${celda(k, "precio", "divi")}${celda(k, "formal")}${celda(k, "aceptada")}${celda(k, "pagada")}
+      <td style="text-align:center;color:${pag > 0 ? "#1b5e20" : "#9aa0a8"}"><b>${pctDe(pag, vioPrecio)}</b></td>
+    </tr>${subFilasOrigen(k)}`
+  }
+  const filas = [...semanas.keys()]
+    .sort()
+    .reverse()
+    .map((lunes) => [...(semanas.get(lunes) || [])].sort().reverse().map(filaDia).join("") + filaSemana(lunes))
+    .join("")
   const filaTotal = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
     <td><b>TOTAL</b></td>
     ${celda("TOTAL", "entrantes")}${celda("TOTAL", "ic")}${celda("TOTAL", "ce")}${celda("TOTAL", "ce_sop", "sube")}${celda("TOTAL", "ce_pos", "sube")}${celda("TOTAL", "ce_cob", "sube")}${celda("TOTAL", "nocal")}${celda("TOTAL", "noid")}
@@ -4672,7 +4734,7 @@ function renderInboundDiario(
       clearTimeout(timer);
       var et = td.getAttribute("data-et"), dia = td.getAttribute("data-dia");
       var lista = (VIN[et] || {})[dia] || [];
-      var html = '<div class="t">' + (ETQ[et] || et) + " · " + (dia === "TOTAL" ? "período" : dia) + " · " + lista.length + "</div>";
+      var html = '<div class="t">' + (ETQ[et] || et) + " · " + (dia === "TOTAL" ? "período" : (dia.charAt(0) === "S" && dia.length === 11) ? "semana del " + dia.slice(1) : dia) + " · " + lista.length + "</div>";
       lista.slice(0, 30).forEach(function (par) {
         // Sin teléfono discable (form sin fono) no hay detalle que abrir.
         if (par[1]) html += '<a href="#" data-tel="' + par[1] + '">' + par[0] + "</a>";
@@ -8301,7 +8363,7 @@ export async function GET(req: Request): Promise<Response> {
             ([dia, tels]) => [...tels].map((tel) => [telDeElemento(tel), dia] as [string, string]),
           )
           for (const [tel, dia] of fuente) {
-            if (inbdet !== "TOTAL" && dia !== inbdet) continue
+            if (inbdet !== "TOTAL" && (esClaveSemana(inbdet) ? lunesSemanaDe(dia) !== inbdet.slice(1) : dia !== inbdet)) continue
             if (vistos.has(tel)) continue
             vistos.add(tel)
             const f = porTelListado.get(tel)
@@ -8328,7 +8390,7 @@ export async function GET(req: Request): Promise<Response> {
               zohoUrl: "",
             })
           }
-          const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : `del ${inbdet}`} — ${
+          const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : esClaveSemana(inbdet) ? `de la semana del ${inbdet.slice(1)}` : `del ${inbdet}`} — ${
             etapaQ === "entrantes" ? "entrantes del día" : `${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
           }`
           return renderDetalleEjecutivo({
