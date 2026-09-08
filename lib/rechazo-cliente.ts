@@ -25,7 +25,7 @@ const PATRONES: RegExp[] = [
   /\bdej(a|en|ar)\s+de\s+(escribir|llamar|contactar|molestar|insistir)/i,
   /\bno\s+(me\s+)?(escriban|escribas|llamen|llames|contacten|contactes|insistan|molesten)/i,
   /\bme\s+desvincul/i,
-  /\bya\s+no\s+(trabajo|estoy|administro|pertenezco)/i,
+  /\bya\s+no\s+(trabajo|estoy|admi?nistr|pertenezco)/i,
   /\bno\s+(lo\s+)?vamos\s+a\s+(seguir|avanzar|continuar)/i,
   /\bdescartad[oa]s?\b/i,
   /\besto\s+(ser[ií]a|es)\s+spam/i,
