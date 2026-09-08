@@ -275,6 +275,43 @@ async function kvSet(key: string, value: string, expiresAt?: string): Promise<vo
  * (07-ago) deja Estado_Cotizacion="Pagada" sin pasar por texto "acept" y sin
  * Onboarding_Link garantizado — con el filtro viejo esas ventas desaparecían
  * de "Ventas cerradas" y los KPIs (cazado 11-ago con COT334/COT408). */
+/**
+ * REEMISIONES DEL EJECUTIVO SOBRE VENTAS DE VICKY (Lalo 08-sep, caso
+ * UDES/COT1324): Vicky cotizó (COT1288), traspasó, la clienta aceptó y al
+ * cambiar el RUT el ejecutivo emitió OTRA cotización desde la cotizadora en
+ * vez de actualizar la de Vicky; esa segunda nace "Con intervención humana"
+ * y el pago se caía del dash de Vicky. Regla: una cotización del canal
+ * ejecutivo cuyo DEAL ya tenía una cotización '100% Vicky' emitida ANTES
+ * (fallback: mismo teléfono cuando la del ejecutivo no trae deal) se cuenta
+ * como venta de Vicky — la originó ella; el ejecutivo solo la reemitió.
+ * Devuelve los ids de esas cotizaciones reemitidas.
+ */
+function reemitidasSobreVicky(quotes: RawAceptada[]): Set<string> {
+  const vickyPorDeal = new Map<string, number>()
+  const vickyPorTel = new Map<string, number>()
+  for (const q of quotes) {
+    if (!/100%/.test(String(q.Intervenci_n_Humana || ""))) continue
+    const ms = Date.parse(String(q.Created_Time || ""))
+    if (!Number.isFinite(ms)) continue
+    const deal = String(q["Deal_Asociado.id"] || "")
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    if (deal && (vickyPorDeal.get(deal) ?? Infinity) > ms) vickyPorDeal.set(deal, ms)
+    if (tel && (vickyPorTel.get(tel) ?? Infinity) > ms) vickyPorTel.set(tel, ms)
+  }
+  const out = new Set<string>()
+  if (!vickyPorDeal.size && !vickyPorTel.size) return out
+  for (const q of quotes) {
+    if (!/intervenci/i.test(String(q.Intervenci_n_Humana || ""))) continue
+    const ms = Date.parse(String(q.Created_Time || ""))
+    if (!Number.isFinite(ms)) continue
+    const deal = String(q["Deal_Asociado.id"] || "")
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    const previa = deal ? vickyPorDeal.get(deal) : tel ? vickyPorTel.get(tel) : undefined
+    if (previa !== undefined && previa <= ms) out.add(String(q.id || ""))
+  }
+  return out
+}
+
 function esPagada(q: { Estado_Cotizacion?: string | null; Onboarding_Link?: string | null }): boolean {
   if (String(q.Onboarding_Link || "").trim()) return true
   return String(q.Estado_Cotizacion || "").toLowerCase().includes("pagad")
@@ -4122,10 +4159,11 @@ function computarCohortesInbound(params: {
     const sub = b === "cliente_existente" ? (r.bolsa_sub || "soporte") : null
     bolsaPorTel.set(tel, { b, sub, at })
   }
+  const reemitidas = reemitidasSobreVicky(quotes)
   const telsConQuoteVicky = new Set<string>()
   for (const q of quotes) {
     const marca = String(q.Intervenci_n_Humana || "")
-    if (/intervenci/i.test(marca)) continue
+    if (/intervenci/i.test(marca) && !reemitidas.has(String(q.id || ""))) continue
     telsConQuoteVicky.add(digits(String(q.Tel_fono_Contacto || "")))
   }
   // ═══ PRIMER HITO PARA SIEMPRE (Lalo 26-ago): un contacto ENTRA una sola
@@ -4193,8 +4231,9 @@ function computarCohortesInbound(params: {
     const tel = digits(String(q.Tel_fono_Contacto || ""))
     if (!elegible(tel)) continue
     const marca = String(q.Intervenci_n_Humana || "")
-    if (/intervenci/i.test(marca)) continue
-    if (!/100%/.test(marca)) {
+    const esReemision = reemitidas.has(String(q.id || ""))
+    if (/intervenci/i.test(marca) && !esReemision) continue
+    if (!/100%/.test(marca) && !esReemision) {
       // Histórico sin marca → regla MATER: la conversación debe existir
       // ANTES de la emisión (si nació después, la venta es del ejecutivo).
       const primeraMs = Date.parse(primeraVez.get(tel) || "")
@@ -8352,6 +8391,9 @@ export async function GET(req: Request): Promise<Response> {
           // aceptadas sin pago (caso SYM 19-ago) — solo cuenta como pago lo
           // que HOY es pagada de verdad.
           const pagadasIds = new Set<string>()
+          // Reemisiones del ejecutivo sobre deals que Vicky ya había cotizado
+          // (Lalo 08-sep, caso UDES/COT1324): cuentan para Vicky.
+          const reemitidasPago = reemitidasSobreVicky(cierreZoho?.todasList || cierre?.todasList || [])
           // UNIVERSO COMPLETO, no el filtrado por conversaciones recientes
           // (Lalo 08-sep, "ahí faltan pagos"): `cierre.todasList` pasa por
           // filtrarCierreAVicky, que solo conoce las 2.000 conversaciones
@@ -8365,7 +8407,7 @@ export async function GET(req: Request): Promise<Response> {
             const telQ2 = digits(String(q.Tel_fono_Contacto || ""))
             if (!telQ2 || !primeraVez.has(telQ2)) continue // sin conversación con Vicky: cartera del ejecutivo
             if (esPagada(q)) pagadasIds.add(qid)
-            if (/intervenci/i.test(marca)) marcaEjec.add(qid)
+            if (/intervenci/i.test(marca) && !reemitidasPago.has(qid)) marcaEjec.add(qid)
             // Sin marca (histórico): misma regla del embudo — si la
             // conversación nació DESPUÉS de la emisión, la venta no es de
             // Vicky (caso MATER: solo le mandaron el comprobante).
