@@ -8273,6 +8273,7 @@ export async function GET(req: Request): Promise<Response> {
         // caja. null = lectura fallida → la columna cae al día de aceptación
         // por cotización (solo inbound), como antes.
         let pagosVicky: Array<{ tel: string; t: number; monto: number; txt: string; qid: string }> | null = null
+        const pagosEjecutivo = { cantidad: 0, monto: 0 }
         try {
           const rv = await fetch(
             `${SUPABASE_URL}/rest/v1/vic_kv?select=key,value&key=like.venta_dash_v3_*&limit=3000`,
@@ -8286,10 +8287,18 @@ export async function GET(req: Request): Promise<Response> {
           // aceptadas sin pago (caso SYM 19-ago) — solo cuenta como pago lo
           // que HOY es pagada de verdad.
           const pagadasIds = new Set<string>()
-          for (const q of cierre?.todasList || []) {
+          // UNIVERSO COMPLETO, no el filtrado por conversaciones recientes
+          // (Lalo 08-sep, "ahí faltan pagos"): `cierre.todasList` pasa por
+          // filtrarCierreAVicky, que solo conoce las 2.000 conversaciones
+          // más recientes — una cotización de JULIO pagada en agosto por la
+          // campaña de reactivación (COT227, COT285, COT560…) se caía de la
+          // caja y de la columna Pagada. Criterio "es de Vicky" acá =
+          // el contacto conversó ALGUNA vez con ella (primeraVez cubre todo).
+          for (const q of cierreZoho?.todasList || cierre?.todasList || []) {
             const qid = String(q.id || "")
             const marca = String(q.Intervenci_n_Humana || "")
             const telQ2 = digits(String(q.Tel_fono_Contacto || ""))
+            if (!telQ2 || !primeraVez.has(telQ2)) continue // sin conversación con Vicky: cartera del ejecutivo
             if (esPagada(q)) pagadasIds.add(qid)
             if (/intervenci/i.test(marca)) marcaEjec.add(qid)
             // Sin marca (histórico): misma regla del embudo — si la
@@ -8310,7 +8319,6 @@ export async function GET(req: Request): Promise<Response> {
               const v = JSON.parse(row.value) as { empresa?: string; numero?: string; pagoIso?: string; montoClp?: number }
               const qid = String(row.key).replace("venta_dash_v3_", "")
               if (!pagadasIds.has(qid)) continue // aceptada sin pago o fuera del universo
-              if (marcaEjec.has(qid)) continue // canal ejecutivo (estampado o sin conversación previa)
               if (/geovictoria|prueba/i.test(String(v.empresa || ""))) continue
               // Fuera del universo del país (p. ej. la venta CO en COP que
               // inflaba la caja CL): si el listado no la conoce, no entra.
@@ -8319,6 +8327,14 @@ export async function GET(req: Request): Promise<Response> {
               const t = Date.parse(String(v.pagoIso || ""))
               if (!Number.isFinite(t) || t < iniCaja || t > finCaja) continue
               const m = Number(v.montoClp || 0) || 0
+              if (marcaEjec.has(qid)) {
+                // Canal ejecutivo (estampado o sin conversación previa): no
+                // entra al dash de Vicky, pero se DECLARA en la caja para que
+                // nadie lo busque como pago perdido.
+                pagosEjecutivo.cantidad += 1
+                pagosEjecutivo.monto += m
+                continue
+              }
               pagosVicky.push({ tel: telQ, t, monto: m, txt: `${v.numero || qid} $${m.toLocaleString("es-CL")}`, qid })
             } catch {
               /* fila corrupta: se salta */
@@ -8423,7 +8439,12 @@ export async function GET(req: Request): Promise<Response> {
           ? {
               cantidad: pagosVicky.length,
               monto: pagosVicky.reduce((a, p) => a + p.monto, 0),
-              detalle: pagosVicky.slice(0, 8).map((p) => p.txt).join(" · ") + (pagosVicky.length > 8 ? " · …" : ""),
+              detalle:
+                pagosVicky.slice(0, 8).map((p) => p.txt).join(" · ") +
+                (pagosVicky.length > 8 ? " · …" : "") +
+                (pagosEjecutivo.cantidad > 0
+                  ? ` — además ${pagosEjecutivo.cantidad} pago${pagosEjecutivo.cantidad === 1 ? "" : "s"} del canal EJECUTIVO ($${pagosEjecutivo.monto.toLocaleString("es-CL")}) que no cuentan en este dash`
+                  : ""),
             }
           : undefined
         // Viñetas + detalle EMBEBIDOS: nombres y ficha por teléfono desde el
