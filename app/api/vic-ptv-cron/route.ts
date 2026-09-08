@@ -2177,6 +2177,35 @@ export async function GET(req: Request) {
       continue
     }
 
+    // RECHAZO EXPLÍCITO o AUTORESPUESTA (08-sep, campaña remk_300): el reloj
+    // de etapa traspasó a tres contactos que ya habían dicho que no ("Nada
+    // gracias", "me desvinculé de la empresa", "¿esto sería spam?") — les
+    // presentó a Aleydis y le entregó leads sin ninguna intención; y un
+    // contestador automático llegó a revivir un deal perdido. Misma regla que
+    // el cron de toques: se mira el ÚLTIMO mensaje real del cliente y, si es
+    // rechazo o autorespuesta, no hay nada que traspasar — el loop cierra con
+    // su motivo y Vicky queda solo reactiva.
+    try {
+      const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
+      const { esRechazoCliente, esAutorespuesta, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
+      const ultimoTexto = ultimoMensajeCliente(await fetchHistoryV3(c.contact, 8))
+      const motivoSilencio = esRechazoCliente(ultimoTexto)
+        ? "no_interesa"
+        : esAutorespuesta(ultimoTexto)
+          ? "autorespuesta"
+          : null
+      if (motivoSilencio) {
+        await supa(`vic_loop?contact=eq.${encodeURIComponent(c.contact)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ estado: "cerrado", motivo_cierre: motivoSilencio }),
+        })
+        console.log(
+          `[ptv] ${c.contact}: ${motivoSilencio === "no_interesa" ? "rechazo explícito" : "autorespuesta"} ("${ultimoTexto.slice(0, 60)}") — traspaso omitido, loop cerrado (${motivoSilencio})`,
+        )
+        continue
+      }
+    } catch { /* sin lectura: el traspaso sigue su camino normal */ }
+
     const interno = await siguienteVendedor(pais)
     if (!interno) continue
     // Registro PRIMERO (candado UNIQUE evita carrera de doble traspaso).

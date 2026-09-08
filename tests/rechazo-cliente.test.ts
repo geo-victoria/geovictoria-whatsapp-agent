@@ -1,6 +1,46 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { esRechazoCliente, pareceTextoInterno, ultimoMensajeCliente } from "../lib/rechazo-cliente.ts"
+import {
+  esRechazoCliente,
+  esAutorespuesta,
+  quitarSaludoInicial,
+  pareceTextoInterno,
+  ultimoMensajeCliente,
+} from "../lib/rechazo-cliente.ts"
+
+// Autorespuestas REALES recibidas en la campaña remk_300 (08-sep).
+test("autorespuestas reales se detectan", () => {
+  for (const t of [
+    "Gracias por comunicarte con Lolalash.\n\nPara agendar hora \nMall Vivo Los Trapenses +569 2003 2773 - 229558037",
+    "Gracias por comunicarte con Agua rural las quemas. ¿Cómo podemos ayudarte?",
+    "Gracias por comunicarte con nosotros. Por favor, haznos saber cómo podemos ayudarte.",
+    "Gracias por tu mensaje. En este momento no estamos disponibles por este medio. Por favor utilice los canales de comunicación formal",
+    "Gracias por comunicarte con Veterinaria móvil Amivet.🐾\nEn este contacto solo puedes agendar atención a domicilio",
+    "Hola! Este es un mensaje automático. Te responderemos a la brevedad.",
+  ]) assert.equal(esAutorespuesta(t), true, t)
+})
+
+test("personas reales NO son autorespuesta", () => {
+  for (const t of [
+    "Hola buenas tardes",
+    "si estoy interesada",
+    "Gracias !!☺️",
+    "Gracias de todas formas",
+    "Ok. Depende del precio.",
+    "gracias, te confirmo mañana cuántas personas son",
+    "Hola Buenas tardes, Patricia se encuentra de vacaciones, te puede volver a comunicar la próxima semana???",
+  ]) assert.equal(esAutorespuesta(t), false, t)
+})
+
+test("el saludo duplicado del toque 5 se quita", () => {
+  assert.equal(
+    quitarSaludoInicial("Hola, todo bien? Recordaba que quedamos en que me pasaras la información."),
+    "Recordaba que quedamos en que me pasaras la información.",
+  )
+  assert.equal(quitarSaludoInicial("¡Hola! ¿Cómo estás? vi que Grey te contactó"), "Vi que Grey te contactó")
+  assert.equal(quitarSaludoInicial("Vi que consultaste por las obras menores."), "Vi que consultaste por las obras menores.")
+  assert.equal(quitarSaludoInicial("Hola, todo bien?"), "Hola, todo bien?")
+})
 
 // Casos REALES de la campaña remk_300 (08-sep).
 test("rechazos reales de la campaña", () => {

@@ -170,6 +170,10 @@ export async function generarToqueContexto(
       )
       return null
     }
+    // El marco del llamador ya saluda ("Hola, todo bien? …"): si el modelo
+    // saludó igual, se le quita (08-sep: "Hola, todo bien? Hola, todo bien?").
+    const { quitarSaludoInicial } = await import("./rechazo-cliente")
+    texto = quitarSaludoInicial(texto)
     return recortarEnOracion(texto, MAX_CHARS)
   } catch (e) {
     console.error(`[toque5] generación falló ${contact}:`, e instanceof Error ? e.message : e)

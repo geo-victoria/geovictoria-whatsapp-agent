@@ -46,6 +46,51 @@ export function esRechazoCliente(texto: string): boolean {
   return PATRONES.some((re) => re.test(t))
 }
 
+/**
+ * AUTORESPUESTA del número (08-sep, campaña remk_300): "Gracias por
+ * comunicarte con Lolalash. Para agendar hora…", "En este momento no estamos
+ * disponibles por este medio…" — el número contesta solo y NADIE leyó. Sin
+ * este detector el loop la tomaba como respuesta viva y seguía tocando
+ * (Lolalash recibió dos toques más el mismo día), y el reloj de etapa llegó
+ * a revivir un deal perdido a partir de un contestador automático.
+ */
+const AUTORESPUESTA: RegExp[] = [
+  /\bgracias\s+por\s+(comunicarte|comunicarse|contactarte|contactarnos|contactar|escribirnos|escribir|tu\s+mensaje|su\s+mensaje)\b/i,
+  /\bmensaje\s+autom[aá]tico\b/i,
+  /\brespuesta\s+autom[aá]tica\b/i,
+  /\b(en\s+este\s+momento|por\s+el\s+momento|actualmente)\s+no\s+(estamos|podemos|nos\s+encontramos)\b/i,
+  /\bfuera\s+de\s+(nuestro\s+)?horario\b/i,
+  /\bnuestro\s+horario\s+de\s+atenci[oó]n\b/i,
+  /\b(te|le|les)\s+(responderemos|contactaremos|atenderemos|escribiremos)\s+(a\s+la\s+brevedad|en\s+breve|lo\s+antes\s+posible|pronto|a\s+la\s+mayor\s+brevedad)\b/i,
+  /\b(c[oó]mo|en\s+qu[eé])\s+(podemos|puedo)\s+ayudar(te|le|los|les)\b\s*\??\s*$/i,
+  /\bhaznos\s+saber\s+(c[oó]mo|en\s+qu[eé])\s+podemos\s+ayudarte\b/i,
+  /\bpara\s+agendar\s+(hora|cita)\b/i,
+  /\bbienvenid[oa]s?\s+a\b[\s\S]{0,80}\b(c[oó]mo|en\s+qu[eé])\s+(te|le)\s+(podemos|puedo)\s+ayudar/i,
+]
+
+export function esAutorespuesta(texto: string): boolean {
+  const t = String(texto || "").trim()
+  if (!t) return false
+  if (t.startsWith("[REGISTRO INTERNO") || t.startsWith("[El cliente envió")) return false
+  return AUTORESPUESTA.some((re) => re.test(t))
+}
+
+/** El generador de toques escribe DENTRO de un marco que ya parte con
+ * "Hola, todo bien?" — si el modelo saluda igual, el cliente recibe
+ * "Hola, todo bien? Hola, todo bien? …" (5 casos el 08-sep). Se quita el
+ * saludo inicial del texto generado, dejando la primera letra en mayúscula. */
+export function quitarSaludoInicial(texto: string): string {
+  const t = String(texto || "").trim()
+  const sin = t
+    .replace(
+      /^(¡?\s*hola+[\s,!.]*)?(¿?\s*(todo\s+bien|c[oó]mo\s+est[aá]s|qu[eé]\s+tal|buen[oa]s\s+(d[ií]as|tardes|noches))\s*[?!.,]*\s*)*/i,
+      "",
+    )
+    .trim()
+  if (!sin || sin === t) return t
+  return sin.charAt(0).toUpperCase() + sin.slice(1)
+}
+
 /** Último mensaje "de verdad" del cliente en un historial (ignora registros
  * internos y adjuntos transcritos). */
 export function ultimoMensajeCliente(

@@ -1020,12 +1020,22 @@ export async function GET(req: Request): Promise<Response> {
     // Vicky queda solo reactiva. Determinista, sin modelo.
     try {
       const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
-      const { esRechazoCliente, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
+      const { esRechazoCliente, esAutorespuesta, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
       const ultimo = ultimoMensajeCliente(await fetchHistoryV3(r.contact, 8))
       if (esRechazoCliente(ultimo)) {
         await mas50CierraLoop(r.contact, "no_interesa")
         console.warn(`[loop-cron] ${r.contact}: rechazo explícito del cliente ("${ultimo.slice(0, 60)}") — loop cerrado, toque ${touch} omitido`)
         detalle.push({ contact: r.contact, accion: "cerrado_no_interesa", touch })
+        continue
+      }
+      // AUTORESPUESTA (08-sep): el número contesta solo ("Gracias por
+      // comunicarte con…", "en este momento no estamos disponibles") — nadie
+      // leyó, y seguir tocando es hablarle a un contestador. Loop cerrado
+      // con motivo propio; si una persona real escribe después, Vicky responde.
+      if (esAutorespuesta(ultimo)) {
+        await mas50CierraLoop(r.contact, "autorespuesta")
+        console.warn(`[loop-cron] ${r.contact}: autorespuesta del número ("${ultimo.slice(0, 60)}") — loop cerrado, toque ${touch} omitido`)
+        detalle.push({ contact: r.contact, accion: "cerrado_autorespuesta", touch })
         continue
       }
     } catch { /* sin lectura: el toque sigue su camino normal */ }
