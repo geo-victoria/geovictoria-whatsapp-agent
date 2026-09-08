@@ -4498,7 +4498,7 @@ function renderInboundDiario(
     const pr = partirInOut("precio", dia)
     const pg = partirInOut("pagada", dia)
     if (pr.ins + pr.out === 0 && pg.ins + pg.out === 0) return ""
-    const t = (n: number, d: number) => (d > 0 ? `${Math.round((n * 100) / d)}%` : n > 0 ? `${n}/0` : "—")
+    const t = (n: number, d: number) => (n > 0 || d > 0 ? `${Math.round((n * 100) / Math.max(d, 1))}%` : "—")
     return ` <span style="font-size:11px;color:#6b7280;white-space:nowrap;font-weight:400" title="Cierre por origen: pagadas ÷ vieron precio de cada tipo de conversación (inbound · outbound)">(in ${t(pg.ins, pr.ins)} · out ${t(pg.out, pr.out)})</span>`
   }
   const celda = (dia: string, etapa: EtapaInbound, cls = "") => {
@@ -4707,10 +4707,13 @@ function renderInboundDiario(
       }
       return f
     }
+    // Regla de Lalo (08-sep): el porcentaje se muestra SIEMPRE; si ese tipo
+    // no tuvo "vieron precio" en la semana, el divisor es 1 (5 pagadas y 0
+    // precios = 500%). Sobre 100% marca que el precio se vio antes.
     const cierre = (f: Fila) => {
-      if (f.precio > 0 && f.pagada <= f.precio) return `<b style="color:#1b5e20">${Math.round((f.pagada * 100) / f.precio)}%</b>`
-      if (f.pagada > 0) return `<span style="color:#9aa0a8" title="Pagadas sin base: el precio se vio en semanas anteriores (reactivaciones)">sin base*</span>`
-      return `<span style="color:#c8cdd3">—</span>`
+      if (f.pagada <= 0) return `<span style="color:#c8cdd3">${f.precio > 0 ? "0%" : "—"}</span>`
+      const pct = Math.round((f.pagada * 100) / Math.max(f.precio, 1))
+      return `<b style="color:#1b5e20"${pct > 100 ? ` title="Más pagadas que precios vistos en la semana: el precio se mostró en semanas anteriores (reactivaciones)"` : ""}>${pct}%${pct > 100 ? "*" : ""}</b>`
     }
     const tabla = (lado: "in" | "out") => {
       const T: Fila = { entrantes: 0, precio: 0, formal: 0, pagada: 0 }
@@ -4732,7 +4735,7 @@ function renderInboundDiario(
     return `<div class="card"><h2>🎯 Tasa de cierre semanal · inbound vs outbound <span class="pct" style="font-weight:400">— cierre = pagadas ÷ vieron precio de cada tipo</span></h2>
       <div class="sub" style="margin:2px 0 8px"><b style="color:#075985">INBOUND</b> · WhatsApp directo, sitio web y landings</div>${tabla("in")}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia y reactivados por campaña (descuento, remarketing)</div>${tabla("out")}
-      <div class="sub">*sin base: hubo pagadas pero el precio se había visto en semanas anteriores (reactivaciones), así que no hay tasa semanal honesta. Los contactos reactivados por campaña cuentan como outbound aunque su primera conversación haya sido inbound.</div>
+      <div class="sub">*sobre 100%: más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones); con 0 precios el divisor es 1. Los contactos reactivados por campaña cuentan como outbound aunque su primera conversación haya sido inbound.</div>
     </div>`
   })()
   return `${cardInOut}<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
