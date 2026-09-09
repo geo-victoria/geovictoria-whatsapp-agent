@@ -33,6 +33,14 @@ const PATRONES: RegExp[] = [
   /\belegimos\s+(otro|otra)/i,
   /\bpor\s+ahora\s+no\b/i,
   /\bno\s+por\s+ahora\b/i,
+  // 09-sep (caso Marisol/Bruma → Grey, y "Nada gracias" → Anderson): cierres
+  // corteses que el detector no leía y que el reloj de etapa convirtió en
+  // traspasos, reviviendo deals perdidos.
+  /\bgracias\s+de\s+todas\s+(formas|maneras)\b/i,
+  /\bgracias\s+de\s+todos\s+modos\b/i,
+  /\bya\s+(lo\s+|la\s+)?(solucion|arregl|resolvimos|resolv[ií]|vimos\s+con)/i,
+  /^\s*nada[,.]?\s*(muchas\s+)?gracias\b/i,
+  /\bya\s+no\s+(lo\s+|la\s+)?(necesito|necesitamos|ocupo|ocupamos)/i,
 ]
 
 /** Mensajes cortos que solos ya son un "no" ("no", "no gracias", "nop"). */
@@ -93,6 +101,50 @@ export function quitarSaludoInicial(texto: string): string {
 
 /** Último mensaje "de verdad" del cliente en un historial (ignora registros
  * internos y adjuntos transcritos). */
+/** Mensajes de cortesía que no dicen nada nuevo ("gracias", "ok", "te
+ * agradezco", "👍"): al buscar la ÚLTIMA POSTURA del cliente se saltan, porque
+ * después de "ya lo resolvimos" viene casi siempre un "gracias de todas
+ * formas" y mirar solo ese último mensaje hacía invisible el rechazo. */
+const CORTESIA = /^\s*(muchas\s+gracias|gracias|te\s+agradezco|se\s+agradece|ok(ey|a|as)?|vale|dale|listo|perfecto|bueno|ya|genial|buen[ao]s?\s+(d[ií]as?|tardes|noches)|hasta\s+luego|chao|adi[oó]s|saludos|igualmente)[\s!.,;:]*(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200d|\uFE0F|\s)*$/iu
+const SOLO_EMOJI = /^[\s\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\uFE0F]+$/u
+
+/** Señales de que el mensaje ANTERIOR de Vicky fue un toque o una pregunta
+ * de interés — ahí un "no" pelado sí es rechazo. Fuera de ese contexto
+ * ("¿hay algo más en que pueda ayudarte?" → "no") no lo es. */
+const PREGUNTA_INTERES = /(sigues?\s+interesad|siguen\s+interesad|retomamos|quer[ií]a\s+saber\s+si|te\s+interesa|les\s+interesa|avanzamos|seguimos\s+con|todo\s+bien\?)/i
+
+/**
+ * Postura del cliente en CONTEXTO (09-sep): recorre los mensajes del cliente
+ * de atrás hacia adelante saltando cortesías vacías, y evalúa el primero con
+ * contenido. Un "no" pelado cuenta solo si Vicky acababa de preguntarle por
+ * su interés (toque / reactivación), no si respondía "¿algo más?".
+ * Devuelve "no_interesa" | "autorespuesta" | null.
+ */
+export function posturaRechazoCliente(
+  historial: Array<{ role: string; content?: string | null }>,
+): "no_interesa" | "autorespuesta" | null {
+  let vistos = 0
+  for (let i = historial.length - 1; i >= 0 && vistos < 4; i--) {
+    const m = historial[i]
+    if (m.role !== "user") continue
+    const c = String(m.content || "").trim()
+    if (!c || c.startsWith("[REGISTRO INTERNO")) continue
+    vistos++
+    if (esAutorespuesta(c)) return "autorespuesta"
+    if (CORTESIA.test(c) || SOLO_EMOJI.test(c)) continue
+    if (SOLO_NO.test(c) && !/gracias/i.test(c)) {
+      // "no" pelado: mirar qué preguntó Vicky justo antes.
+      let previo = ""
+      for (let j = i - 1; j >= 0; j--) {
+        if (historial[j].role === "assistant") { previo = String(historial[j].content || ""); break }
+      }
+      return PREGUNTA_INTERES.test(previo) ? "no_interesa" : null
+    }
+    return esRechazoCliente(c) ? "no_interesa" : null
+  }
+  return null
+}
+
 export function ultimoMensajeCliente(
   historial: Array<{ role: string; content?: string | null }>,
 ): string {

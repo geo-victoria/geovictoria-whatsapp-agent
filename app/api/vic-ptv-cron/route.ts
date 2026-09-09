@@ -2254,13 +2254,13 @@ export async function GET(req: Request) {
     // su motivo y Vicky queda solo reactiva.
     try {
       const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
-      const { esRechazoCliente, esAutorespuesta, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
-      const ultimoTexto = ultimoMensajeCliente(await fetchHistoryV3(c.contact, 8))
-      const motivoSilencio = esRechazoCliente(ultimoTexto)
-        ? "no_interesa"
-        : esAutorespuesta(ultimoTexto)
-          ? "autorespuesta"
-          : null
+      const { posturaRechazoCliente, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
+      const hist = await fetchHistoryV3(c.contact, 12)
+      const ultimoTexto = ultimoMensajeCliente(hist)
+      // 09-sep: postura EN CONTEXTO — "ya lo resolvimos" + "gracias de todas
+      // formas" (Marisol → Grey) y "ya no administro" + "nada gracias" (→
+      // Anderson) pasaban porque solo se miraba el último mensaje.
+      const motivoSilencio = posturaRechazoCliente(hist)
       if (motivoSilencio) {
         await supa(`vic_loop?contact=eq.${encodeURIComponent(c.contact)}`, {
           method: "PATCH",

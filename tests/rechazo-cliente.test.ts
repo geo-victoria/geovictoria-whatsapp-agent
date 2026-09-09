@@ -6,6 +6,7 @@ import {
   quitarSaludoInicial,
   pareceTextoInterno,
   ultimoMensajeCliente,
+  posturaRechazoCliente,
 } from "../lib/rechazo-cliente.ts"
 
 // Autorespuestas REALES recibidas en la campaña remk_300 (08-sep).
@@ -84,3 +85,57 @@ test("texto interno del generador se detecta", () => {
 test("último mensaje del cliente ignora registros internos", () => {
   assert.equal(ultimoMensajeCliente([{ role: "user", content: "no gracias" }, { role: "assistant", content: "ok" }, { role: "user", content: "[REGISTRO INTERNO] x" }]), "no gracias")
 })
+
+test("postura en contexto: el rechazo sobrevive a las cortesías posteriores (Marisol / Anderson 09-sep)", () => {
+  const marisol = [
+    { role: "assistant", content: "Hola Marisol! Perfecto, entonces te sigue interesando?" },
+    { role: "user", content: "Ya lo resolvimos" },
+    { role: "assistant", content: "Entiendo! Qué fue lo que eligieron?" },
+    { role: "user", content: "Te agradezco" },
+    { role: "assistant", content: "De nada!" },
+    { role: "user", content: "Gracias de todas formas" },
+    { role: "assistant", content: "De verdad, para eso estamos!" },
+  ]
+  assert.equal(posturaRechazoCliente(marisol), "no_interesa")
+  const parqueMirador = [
+    { role: "user", content: "Hola ya no admnistro ese edificio, por lo que no se en que quedo esa cotizacion" },
+    { role: "assistant", content: "Entiendo, dejamos cerrada esa cotización. Hay algo más?" },
+    { role: "assistant", content: "Para armarte el valor solo me falta saber cuántas personas marcarían" },
+    { role: "user", content: "Nada gracias" },
+    { role: "assistant", content: "Perfecto, cualquier cosa aquí estoy" },
+  ]
+  assert.equal(posturaRechazoCliente(parqueMirador), "no_interesa")
+  const prem = [
+    { role: "user", content: "No gracias" },
+    { role: "assistant", content: "Entendido, sin problema" },
+    { role: "user", content: "Gracias !!☺️" },
+    { role: "assistant", content: "De nada! Un abrazo 👋" },
+  ]
+  assert.equal(posturaRechazoCliente(prem), "no_interesa")
+})
+
+test("postura en contexto: un 'no' a '¿algo más?' y un 'ok gracias' tras la formal NO son rechazo", () => {
+  const gonzalo = [
+    { role: "user", content: "gonzalo.carroza@gcb.cl" },
+    { role: "assistant", content: "Perfecto, Gonzalo! Un ejecutivo te contactará. ¿Hay algo más en lo que pueda ayudarte?" },
+    { role: "user", content: "no" },
+    { role: "assistant", content: "Listo, Gonzalo! Cualquier cosa, aquí estoy" },
+  ]
+  assert.equal(posturaRechazoCliente(gonzalo), null)
+  const capriccio = [
+    { role: "user", content: "78267074-3" },
+    { role: "assistant", content: "Lista tu cotización! Revísala aquí: https://cotizacion.geovictoria.com/q/x" },
+    { role: "user", content: "Aramcoconcepcionbonilla@gmail.com" },
+    { role: "assistant", content: "Perfecto! Ya tengo tu correo" },
+    { role: "user", content: "Ok gracias" },
+    { role: "assistant", content: "De nada!" },
+  ]
+  assert.equal(posturaRechazoCliente(capriccio), null)
+  // "no" pelado DESPUÉS de un toque sí es rechazo.
+  const toque = [
+    { role: "assistant", content: "Hola, todo bien? Sigues interesado en el control de asistencia?" },
+    { role: "user", content: "No" },
+  ]
+  assert.equal(posturaRechazoCliente(toque), "no_interesa")
+})
+

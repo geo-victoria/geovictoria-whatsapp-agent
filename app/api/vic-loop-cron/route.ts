@@ -1055,9 +1055,13 @@ export async function GET(req: Request): Promise<Response> {
     // Vicky queda solo reactiva. Determinista, sin modelo.
     try {
       const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
-      const { esRechazoCliente, esAutorespuesta, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
-      const ultimo = ultimoMensajeCliente(await fetchHistoryV3(r.contact, 8))
-      if (esRechazoCliente(ultimo)) {
+      const { posturaRechazoCliente, ultimoMensajeCliente } = await import("@/lib/rechazo-cliente")
+      const hist = await fetchHistoryV3(r.contact, 12)
+      const ultimo = ultimoMensajeCliente(hist)
+      // 09-sep: postura EN CONTEXTO (salta "gracias"/"ok" y lee el mensaje
+      // con contenido anterior; un "no" pelado solo cuenta tras un toque).
+      const postura = posturaRechazoCliente(hist)
+      if (postura === "no_interesa") {
         await mas50CierraLoop(r.contact, "no_interesa")
         console.warn(`[loop-cron] ${r.contact}: rechazo explícito del cliente ("${ultimo.slice(0, 60)}") — loop cerrado, toque ${touch} omitido`)
         detalle.push({ contact: r.contact, accion: "cerrado_no_interesa", touch })
@@ -1067,7 +1071,7 @@ export async function GET(req: Request): Promise<Response> {
       // comunicarte con…", "en este momento no estamos disponibles") — nadie
       // leyó, y seguir tocando es hablarle a un contestador. Loop cerrado
       // con motivo propio; si una persona real escribe después, Vicky responde.
-      if (esAutorespuesta(ultimo)) {
+      if (postura === "autorespuesta") {
         await mas50CierraLoop(r.contact, "autorespuesta")
         console.warn(`[loop-cron] ${r.contact}: autorespuesta del número ("${ultimo.slice(0, 60)}") — loop cerrado, toque ${touch} omitido`)
         detalle.push({ contact: r.contact, accion: "cerrado_autorespuesta", touch })

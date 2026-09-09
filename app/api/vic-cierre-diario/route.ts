@@ -283,7 +283,9 @@ async function construirFoto(fecha: string): Promise<Foto> {
               body: JSON.stringify({
                 select_query:
                   `select Numero_Cotizacion from ${QUOTE_MODULE} ` +
-                  `where ((${cond}) and (Intervenci_n_Humana = '100% Vicky') and (Created_Time < '${creadaIso}')) limit 1`,
+                  // OJO COQL: con 3 condiciones la forma que acepta es
+                  // "(A and B) and C" — "((A) and (B) and (C))" da SYNTAX_ERROR.
+                  `where ((${cond} and Intervenci_n_Humana = '100% Vicky') and Created_Time < '${creadaIso}') limit 1`,
               }),
             })
             if (r2.status !== 200) continue
