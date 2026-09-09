@@ -4739,25 +4739,18 @@ function renderInboundDiario(
     if (!opts.outboundTels?.size) return ""
     const lunesList = [...semanas.keys()].sort()
     if (lunesList.length === 0) return ""
-    // `pagadaBase` = pagadas cuyo contacto vio precio en una ventana VIVA:
-    // esa semana o hasta VENTANA_BASE_DIAS antes de su lunes (la vigencia de
-    // una cotización); `react` = el resto: reactivaciones cuyo precio se vio
-    // hace más de un mes (campañas sobre cotizaciones viejas). La ventana no
-    // depende del rango del dash, así la primera semana no queda castigada. Lalo 09-sep: "se ve una caída abrupta pero
+    // SIN FECHA DE CORTE (Lalo 09-sep, "quita esa fecha de corte"): toda
+    // pagada de la semana cuenta, venga de una cotización de esa semana o de
+    // una de julio revivida por campaña — igual que la tabla. `pagadaBase` y
+    // `react` quedan como campos para no tocar la estructura, pero react = 0.
+    // La única protección que sigue es la de base: una semana con más pagadas
+    // que precios vistos (o menos de 3 precios) no se grafica como punto. Lalo 09-sep: "se ve una caída abrupta pero
     // también un aumento en la inyección de leads" — separar las dos cosas
     // es lo que evita leer una semana inflada por reactivaciones como
     // "buena" y la siguiente, con el doble de leads nuevos, como "caída".
     type Fila = { entrantes: number; precio: number; formal: number; pagada: number; pagadaBase: number; react: number }
-    const VENTANA_BASE_DIAS = 30
     const cuenta = (k: string, lado: "in" | "out"): Fila => {
       const f: Fila = { entrantes: 0, precio: 0, formal: 0, pagada: 0, pagadaBase: 0, react: 0 }
-      const [desdeBase, finSemana] = (() => {
-        if (!esClaveSemana(k)) return ["0000-01-01", "9999-12-31"]
-        const d = new Date(`${k.slice(1)}T12:00:00Z`)
-        const a = new Date(d); a.setUTCDate(a.getUTCDate() - VENTANA_BASE_DIAS)
-        d.setUTCDate(d.getUTCDate() + 6)
-        return [a.toISOString().slice(0, 10), d.toISOString().slice(0, 10)]
-      })()
       for (const et of ["entrantes", "precio", "formal", "pagada"] as const) {
         const u = new Set(elementosDe(et, k))
         let n = 0
@@ -4766,14 +4759,10 @@ function renderInboundDiario(
           const esOut = opts.outboundTels!.has(tel)
           if ((lado === "out") !== esOut) continue
           n++
-          if (et === "pagada") {
-            const dp = precioDia.get(tel) || ""
-            if (dp && dp >= desdeBase && dp <= finSemana) f.pagadaBase++
-            else f.react++
-          }
         }
         f[et] = n
       }
+      f.pagadaBase = f.pagada
       return f
     }
     // Regla de Lalo (08-sep): el porcentaje se muestra SIEMPRE; si ese tipo
@@ -4821,11 +4810,12 @@ function renderInboundDiario(
       // rompe el gráfico"): son reactivaciones cuyo precio se vio semanas
       // antes, así que la tasa de ESA semana no existe — la línea salta la
       // semana con un tramo punteado y queda un marcador hueco con el detalle.
-      // La LÍNEA usa solo las pagadas con precio dentro del período
-      // (`pagadaBase`): una reactivación de una cotización de julio no es un
-      // cierre de esta semana. Y exige base mínima (BASE_MIN precios vistos):
-      // con 1 o 2 precios el % es ruido (0 % o 100 % por una persona).
-      const BASE_MIN = 3
+      // La LÍNEA usa las mismas pagadas que la tabla (sin fecha de corte,
+      // Lalo 09-sep) y exige base mínima (BASE_MIN precios vistos): con 1 o 2
+      // precios el % es ruido (0 % o 100 % por una persona).
+      // BASE_MIN = 1: la única semana que no se grafica es la del asterisco de
+      // la tabla (más pagadas que precios vistos). Todo lo demás, tal cual.
+      const BASE_MIN = 1
       type V = number | null | "sinbase"
       type P = { etiqueta: string; enCurso: boolean; g: V; i: V; o: V; det: string; fi: Fila; fo: Fila }
       const pct = (f: Fila): V => {
@@ -4845,7 +4835,7 @@ function renderInboundDiario(
           etiqueta: etiquetaSemana(lunes).replace(/<[^>]+>/g, "").replace(/^📅\s*Semana\s*/i, "").replace(/\s*→\s*/, "→").replace(/\s+/g, " ").trim(),
           enCurso: lunes === hoyLunes,
           g: pct(fg), i: pct(fi), o: pct(fo),
-          det: `general ${d(fg)} · inbound ${d(fi)} · outbound ${d(fo)} (pagadas con precio vigente / vieron precio · ↻ reactivaciones con precio de hace más de 30 días)`,
+          det: `general ${d(fg)} · inbound ${d(fi)} · outbound ${d(fo)} (pagadas / vieron precio)`,
           fi, fo,
         }
       })
@@ -4887,7 +4877,7 @@ function renderInboundDiario(
                 for (const si of saltadas) {
                   const t = (si - prev.idx) / (idx - prev.idx)
                   const yi = y(prev.v + (v - prev.v) * t)
-                  huecos.push(`<circle cx="${x(si).toFixed(1)}" cy="${yi.toFixed(1)}" r="4.5" fill="#fff" stroke="${s.color}" stroke-width="2"><title>${esc(puntos[si].etiqueta)} · ${s.nombre}: base insuficiente (menos de ${BASE_MIN} precios vistos esa semana) — ${esc(puntos[si].det)}. La tasa de esta semana no se grafica.</title></circle>`)
+                  huecos.push(`<circle cx="${x(si).toFixed(1)}" cy="${yi.toFixed(1)}" r="4.5" fill="#fff" stroke="${s.color}" stroke-width="2"><title>${esc(puntos[si].etiqueta)} · ${s.nombre}: más pagadas que precios vistos esa semana — ${esc(puntos[si].det)}. La tasa de esta semana no se grafica.</title></circle>`)
                 }
               } else solidos.push(seg)
             }
@@ -4957,8 +4947,8 @@ function renderInboundDiario(
           const react = p.fi.react + p.fo.react
           const c1 = columna(cx - anchoCol * 0.6, p.fi.entrantes, p.fo.entrantes, 1, `${p.etiqueta} · entrantes`)
           const c2 = columna(cx + anchoCol * 0.6, p.fi.precio, p.fo.precio, 0.55, `${p.etiqueta} · vieron precio`)
-          const r = react > 0 ? `<text x="${cx.toFixed(1)}" y="${HV - 5}" text-anchor="middle" font-size="10" fill="#6b7280"><title>${react} pagadas de reactivación esa semana: el precio se vio hace más de 30 días. Suman caja, no suman base.</title>↻ ${react} reactiv.</text>` : ""
-          return c1 + c2 + r
+          void react
+          return c1 + c2
         })
         .join("")
       const ejeXV = puntos
@@ -4966,9 +4956,9 @@ function renderInboundDiario(
         .join("")
       const baseV = `<line x1="${L}" x2="${W - R}" y1="${yv(0).toFixed(1)}" y2="${yv(0).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/>`
       const tituloV = `<text x="${L}" y="13" font-size="11.5" font-weight="700" fill="#374151">Base de cada semana</text>`
-      const leyendaV = `<div class="sub" style="margin:10px 0 0;color:#6b7280"><b style="color:#374151">Volumen</b> · columna llena = entrantes · columna clara = vieron precio · <span style="color:${colIn};font-weight:700">■</span> inbound / <span style="color:${colOut};font-weight:700">■</span> outbound · ↻ = pagadas de reactivación (precio visto hace más de 30 días: suman caja, no suman base)</div>`
+      const leyendaV = `<div class="sub" style="margin:10px 0 0;color:#6b7280"><b style="color:#374151">Volumen</b> · columna llena = entrantes · columna clara = vieron precio · <span style="color:${colIn};font-weight:700">■</span> inbound / <span style="color:${colOut};font-weight:700">■</span> outbound</div>`
       return `<div style="margin:6px 0 14px">
-        <div class="sub" style="margin:0 0 4px;color:#374151">${leyenda}<span style="color:#6b7280">· cierre = pagadas con precio vigente (visto en la semana o hasta 30 días antes) ÷ vieron precio · el último punto es la semana en curso · ○ base insuficiente (menos de ${BASE_MIN} precios vistos): no se grafica, la línea la salta punteada</span></div>
+        <div class="sub" style="margin:0 0 4px;color:#374151">${leyenda}<span style="color:#6b7280">· cierre = pagadas ÷ vieron precio (las mismas de la tabla) · el último punto es la semana en curso · ○ semana con más pagadas que precios vistos (el 100%* de la tabla): no se grafica, la línea la salta punteada</span></div>
         <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block;font-family:inherit" role="img" aria-label="Evolución semanal de la tasa de cierre de Vicky: general, inbound y outbound">${grid}${ejeX}${lineas}${etiquetas}</svg></div>
         ${leyendaV}
         <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${HV}" width="100%" style="max-width:${W}px;display:block;font-family:inherit" role="img" aria-label="Volumen semanal: entrantes y vieron precio, inbound y outbound">${tituloV}${baseV}${volumen}${ejeXV}</svg></div>
@@ -4978,7 +4968,7 @@ function renderInboundDiario(
       ${grafico}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#075985">INBOUND</b> · WhatsApp directo, sitio web y landings</div>${tabla("in")}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia y reactivados por campaña (descuento, remarketing)</div>${tabla("out")}
-      <div class="sub">*100% topado: hubo más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones). (n ↻) en Pagadas = cuántas de esas pagadas son reactivaciones (precio visto hace más de 30 días); el gráfico las deja fuera de la línea y las rotula en el panel de volumen.</div>
+      <div class="sub">*100% topado: hubo más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones); en el gráfico esa semana queda como marcador hueco.</div>
       <div class="sub" style="margin-top:8px;padding:8px 10px;background:#f8fafc;border-radius:8px;line-height:1.5"><b>Cómo se atribuye cada pago.</b> Estas tablas son SOLO el canal Vicky: cotizaciones emitidas por Vicky a contactos que conversaron con ella por WhatsApp, contadas por cotización pagada. <b>Inbound</b> = el contacto llegó solo (WhatsApp directo, sitio web o landing) y no fue tocado por ninguna campaña. <b>Outbound</b> = contacto de la planilla de cadencia o reactivado por una campaña (descuento, remarketing de deals perdidos): si pagó después de un toque de campaña, cuenta acá aunque su primera conversación haya sido inbound.${
         opts.caja?.ejecutivo && opts.caja.ejecutivo.cantidad > 0
           ? ` <b>Fuera de estas tablas</b> quedan <b>${opts.caja.ejecutivo.cantidad}</b> pago${opts.caja.ejecutivo.cantidad === 1 ? "" : "s"} del canal ejecutivo en el mismo período (cotizaciones emitidas desde la cotizadora por un ejecutivo, $${opts.caja.ejecutivo.monto.toLocaleString("es-CL")}): no son ventas de Vicky y no entran en ninguna de las dos tasas. Total de la empresa por canal digital = ${opts.caja.cantidad + opts.caja.ejecutivo.cantidad} pagos.`
