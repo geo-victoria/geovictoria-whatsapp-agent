@@ -4781,10 +4781,18 @@ function renderInboundDiario(
     // tooltip con pagadas/precios; la última semana (en curso) se marca.
     const grafico = (() => {
       const asc = lunesList.slice()
-      type P = { etiqueta: string; enCurso: boolean; g: number | null; i: number | null; o: number | null; det: string }
-      const pct = (f: Fila): number | null => {
+      // Valor de una semana para una serie: número = % graficable; null = sin
+      // datos (ni precio ni pago); "sinbase" = MÁS PAGADAS QUE PRECIOS VISTOS
+      // (el 100%* de la tabla). Ese caso NO se grafica (Lalo 09-sep: "ese 100%
+      // rompe el gráfico"): son reactivaciones cuyo precio se vio semanas
+      // antes, así que la tasa de ESA semana no existe — la línea salta la
+      // semana con un tramo punteado y queda un marcador hueco con el detalle.
+      type V = number | null | "sinbase"
+      type P = { etiqueta: string; enCurso: boolean; g: V; i: V; o: V; det: string }
+      const pct = (f: Fila): V => {
         if (f.pagada <= 0) return f.precio > 0 ? 0 : null
-        return Math.min(100, Math.round((f.pagada * 100) / Math.max(f.precio, 1)))
+        if (f.pagada > f.precio) return "sinbase"
+        return Math.round((f.pagada * 100) / f.precio)
       }
       // Semana en curso en hora de CHILE (mismo criterio de la tabla diaria).
       const hoyLunes = lunesSemanaDe(new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10))
@@ -4818,24 +4826,44 @@ function renderInboundDiario(
         .join("")
       const lineas = series
         .map((s) => {
-          // La línea se corta donde no hay base (null): no se inventa un tramo.
-          const tramos: string[] = []
-          let actual: string[] = []
+          // La línea se corta donde no hay datos (null): no se inventa un tramo.
+          // Una semana "sinbase" se SALTA: el tramo que la cruza va punteado
+          // (interpolado entre las semanas vecinas con base) y el marcador de
+          // esa semana es hueco, sobre ese tramo, con el detalle en el tooltip.
+          const solidos: string[] = []
+          const punteados: string[] = []
+          const huecos: string[] = []
+          let prev: { idx: number; v: number } | null = null
+          let saltadas: number[] = []
           puntos.forEach((p, idx) => {
             const v = p[s.k]
-            if (v === null) { if (actual.length > 1) tramos.push(actual.join(" ")); actual = []; return }
-            actual.push(`${x(idx).toFixed(1)},${y(v).toFixed(1)}`)
+            if (v === null) { prev = null; saltadas = []; return }
+            if (v === "sinbase") { saltadas.push(idx); return }
+            if (prev) {
+              const seg = `${x(prev.idx).toFixed(1)},${y(prev.v).toFixed(1)} ${x(idx).toFixed(1)},${y(v).toFixed(1)}`
+              if (saltadas.length) {
+                punteados.push(seg)
+                for (const si of saltadas) {
+                  const t = (si - prev.idx) / (idx - prev.idx)
+                  const yi = y(prev.v + (v - prev.v) * t)
+                  huecos.push(`<circle cx="${x(si).toFixed(1)}" cy="${yi.toFixed(1)}" r="4.5" fill="#fff" stroke="${s.color}" stroke-width="2"><title>${esc(puntos[si].etiqueta)} · ${s.nombre}: sin base propia — ${esc(puntos[si].det)} (más pagadas que precios vistos: reactivaciones cuyo precio se vio en semanas anteriores; la tasa de esta semana no se grafica)</title></circle>`)
+                }
+              } else solidos.push(seg)
+            }
+            prev = { idx, v }
+            saltadas = []
           })
-          if (actual.length > 1) tramos.push(actual.join(" "))
-          const path = tramos.map((t) => `<polyline points="${t}" fill="none" stroke="${s.color}" stroke-width="${s.ancho}" stroke-linejoin="round" stroke-linecap="round"/>`).join("")
+          const path =
+            solidos.map((t) => `<polyline points="${t}" fill="none" stroke="${s.color}" stroke-width="${s.ancho}" stroke-linejoin="round" stroke-linecap="round"/>`).join("") +
+            punteados.map((t) => `<polyline points="${t}" fill="none" stroke="${s.color}" stroke-width="${s.ancho}" stroke-dasharray="5 4" stroke-linecap="round" opacity=".75"/>`).join("")
           const marcas = puntos
             .map((p, idx) => {
               const v = p[s.k]
-              if (v === null) return ""
+              if (v === null || v === "sinbase") return ""
               return `<circle cx="${x(idx).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${s.color}" stroke="#fff" stroke-width="2"${p.enCurso ? ' stroke-dasharray="2 1"' : ""}><title>${esc(p.etiqueta)}${p.enCurso ? " (semana en curso)" : ""} · ${s.nombre} ${v}% · ${esc(p.det)}</title></circle>`
             })
             .join("")
-          return path + marcas
+          return path + marcas + huecos.join("")
         })
         .join("")
       // Etiquetas directas al final de cada serie (identidad sin depender del
@@ -4844,7 +4872,7 @@ function renderInboundDiario(
       const finales = series
         .map((s) => {
           let ultimo = -1
-          puntos.forEach((p, idx) => { if (p[s.k] !== null) ultimo = idx })
+          puntos.forEach((p, idx) => { if (typeof p[s.k] === "number") ultimo = idx })
           return ultimo >= 0 ? { s, xv: x(ultimo) + 8, yv: y(puntos[ultimo][s.k] as number) + 4, v: puntos[ultimo][s.k] as number } : null
         })
         .filter((e): e is { s: (typeof series)[number]; xv: number; yv: number; v: number } => e !== null)
@@ -4859,7 +4887,7 @@ function renderInboundDiario(
         .map((s) => `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><span style="display:inline-block;width:18px;height:0;border-top:${s.ancho}px solid ${s.color}"></span>${s.nombre}</span>`)
         .join("")
       return `<div style="margin:6px 0 14px">
-        <div class="sub" style="margin:0 0 4px;color:#374151">${leyenda}<span style="color:#6b7280">· cierre = pagadas ÷ vieron precio · el último punto es la semana en curso</span></div>
+        <div class="sub" style="margin:0 0 4px;color:#374151">${leyenda}<span style="color:#6b7280">· cierre = pagadas ÷ vieron precio · el último punto es la semana en curso · ○ semana sin base propia (más pagadas que precios vistos, reactivaciones): no se grafica, la línea la salta punteada</span></div>
         <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block;font-family:inherit" role="img" aria-label="Evolución semanal de la tasa de cierre de Vicky: general, inbound y outbound">${grid}${ejeX}${lineas}${etiquetas}</svg></div>
       </div>`
     })()
