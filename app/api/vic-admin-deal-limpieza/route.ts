@@ -224,7 +224,12 @@ export async function GET(req: Request): Promise<Response> {
         headers: H,
         cache: "no-store",
         body: JSON.stringify({
-          select_query: `select id from Deals where Created_By = 3525045000484500876 and Monda_del_trato = 'UF' limit 100`,
+          // CONVENCIÓN DE VALORES (Lalo 09-sep, confirmada): en Chile todo deal
+          // de Vicky lleva Tipo_de_Cobro "Mensual fijo", Moneda del trato CLP y
+          // Valor_por_usuario vacío; el Valor_fijo lo pone el pase principal
+          // desde la cotización (solo con recurrente). Antes este modo solo
+          // corregía Monda_del_trato = 'UF' y no estaba en JOBS_HUERFANOS.
+          select_query: `select id from Deals where ((Created_By = 3525045000484500876 and Territorio = 'Chile') and (Monda_del_trato != 'CLP' or Tipo_de_Cobro != 'Mensual fijo')) limit 100`,
         }),
       })
       if (rc.status === 204) break // sin más filas
@@ -237,7 +242,7 @@ export async function GET(req: Request): Promise<Response> {
         headers: H,
         cache: "no-store",
         body: JSON.stringify({
-          data: ids.map((f) => ({ id: f.id, Monda_del_trato: "CLP" })),
+          data: ids.map((f) => ({ id: f.id, Monda_del_trato: "CLP", Tipo_de_Cobro: "Mensual fijo", Valor_por_usuario_Global: null })),
           skip_feature_execution: [{ name: "assignment_rules" }],
           trigger: ["blueprint"],
         }),
@@ -253,7 +258,7 @@ export async function GET(req: Request): Promise<Response> {
       method: "POST",
       headers: H,
       cache: "no-store",
-      body: JSON.stringify({ select_query: `select COUNT(id) from Deals where Created_By = 3525045000484500876 and Monda_del_trato = 'UF' group by Monda_del_trato` }),
+      body: JSON.stringify({ select_query: `select COUNT(id) from Deals where ((Created_By = 3525045000484500876 and Territorio = 'Chile') and (Monda_del_trato != 'CLP' or Tipo_de_Cobro != 'Mensual fijo')) group by Created_By` }),
     })
     if (rq.status === 200) {
       const d = (((await rq.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data) || []
