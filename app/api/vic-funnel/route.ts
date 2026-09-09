@@ -4572,7 +4572,11 @@ function renderInboundDiario(
       const tot = x.ins + x.out
       if (tot > 0) {
         const pin = Math.round((x.ins * 100) / tot)
-        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: % inbound · % outbound (suman 100)">(${pin}% in · ${100 - pin}% out)</span>`
+        // Vio precio: CANTIDADES por origen (Lalo 09-sep, "en vez de porcentaje cantidad");
+        // formales y pagadas siguen en % (regla 01-sep).
+        sufijo = etapa === "precio"
+          ? ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: cuántos vieron precio por origen (inbound · outbound)">(in ${x.ins} · out ${x.out})</span>`
+          : ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: % inbound · % outbound (suman 100)">(${pin}% in · ${100 - pin}% out)</span>`
       }
     }
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${sufijo ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
@@ -4721,7 +4725,11 @@ function renderInboundDiario(
       const tot = x.ins + x.out
       if (tot > 0) {
         const pin = Math.round((x.ins * 100) / tot)
-        sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: % inbound · % outbound (suman 100)">(${pin}% in · ${100 - pin}% out)</span>`
+        // Vio precio: CANTIDADES por origen (Lalo 09-sep, "en vez de porcentaje cantidad");
+        // formales y pagadas siguen en % (regla 01-sep).
+        sufijo = etapa === "precio"
+          ? ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: cuántos vieron precio por origen (inbound · outbound)">(in ${x.ins} · out ${x.out})</span>`
+          : ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: % inbound · % outbound (suman 100)">(${pin}% in · ${100 - pin}% out)</span>`
       }
     }
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${partes.length ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
