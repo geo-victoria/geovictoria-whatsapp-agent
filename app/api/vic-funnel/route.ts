@@ -4731,8 +4731,8 @@ function renderInboundDiario(
   // ═══ TARJETA "TASA DE CIERRE SEMANAL · INBOUND vs OUTBOUND" (Lalo 08-sep):
   // las mismas semanas de la tabla, partidas por tipo de conversación, con
   // entrantes / vieron precio / formales / pagadas y cierre = pagadas ÷
-  // vieron precio de cada tipo. Outbound = planilla de cadencia + reactivado
-  // por campaña; inbound = el resto. Sin base (0 vieron precio, o más
+  // vieron precio de cada tipo. Outbound = planilla de cadencia (el origen
+  // manda, Lalo 09-sep); inbound = el resto. Sin base (0 vieron precio, o más
   // pagadas que precios porque el precio se vio en semanas anteriores) se
   // dice explícito en vez de inventar un porcentaje.
   const cardInOut = (() => {
@@ -4967,9 +4967,9 @@ function renderInboundDiario(
     return `<div class="card"><h2>🎯 Tasa de cierre semanal · inbound vs outbound <span class="pct" style="font-weight:400">— cierre = pagadas ÷ vieron precio de cada tipo</span></h2>
       ${grafico}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#075985">INBOUND</b> · WhatsApp directo, sitio web y landings</div>${tabla("in")}
-      <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia y reactivados por campaña (descuento, remarketing)</div>${tabla("out")}
+      <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia (contactos que tocamos nosotros primero)</div>${tabla("out")}
       <div class="sub">*100% topado: hubo más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones); en el gráfico esa semana queda como marcador hueco.</div>
-      <div class="sub" style="margin-top:8px;padding:8px 10px;background:#f8fafc;border-radius:8px;line-height:1.5"><b>Cómo se atribuye cada pago.</b> Estas tablas son SOLO el canal Vicky: cotizaciones emitidas por Vicky a contactos que conversaron con ella por WhatsApp, contadas por cotización pagada. <b>Inbound</b> = el contacto llegó solo (WhatsApp directo, sitio web o landing) y no fue tocado por ninguna campaña. <b>Outbound</b> = contacto de la planilla de cadencia o reactivado por una campaña (descuento, remarketing de deals perdidos): si pagó después de un toque de campaña, cuenta acá aunque su primera conversación haya sido inbound.${
+      <div class="sub" style="margin-top:8px;padding:8px 10px;background:#f8fafc;border-radius:8px;line-height:1.5"><b>Cómo se atribuye cada pago.</b> Estas tablas son SOLO el canal Vicky: cotizaciones emitidas por Vicky a contactos que conversaron con ella por WhatsApp, contadas por cotización pagada. <b>Inbound</b> = el contacto llegó solo (WhatsApp directo, sitio web o landing). <b>Outbound</b> = contacto de la planilla de cadencia, tocado primero por nosotros. Manda el ORIGEN: un inbound que volvió por una campaña (descuento, remarketing) sigue contando como inbound, en la semana en que pagó.${
         opts.caja?.ejecutivo && opts.caja.ejecutivo.cantidad > 0
           ? ` <b>Fuera de estas tablas</b> quedan <b>${opts.caja.ejecutivo.cantidad}</b> pago${opts.caja.ejecutivo.cantidad === 1 ? "" : "s"} del canal ejecutivo en el mismo período (cotizaciones emitidas desde la cotizadora por un ejecutivo, $${opts.caja.ejecutivo.monto.toLocaleString("es-CL")}): no son ventas de Vicky y no entran en ninguna de las dos tasas. Total de la empresa por canal digital = ${opts.caja.cantidad + opts.caja.ejecutivo.cantidad} pagos.`
           : " Los pagos del canal ejecutivo (cotizaciones emitidas desde la cotizadora por un ejecutivo) no entran en ninguna de las dos tasas."
@@ -8935,22 +8935,15 @@ export async function GET(req: Request): Promise<Response> {
             outbPorDia.set(dia, arr)
             outbTocPorDia.set(dia, (outbTocPorDia.get(dia) || 0) + 1)
           }
-          // REACTIVACIONES POR CAMPAÑA = OUTBOUND (Lalo 08-sep, "la definición
-          // que más aumente la tasa"): quien volvió por la campaña de descuento
-          // (`campana_dcto_`), por el remarketing de deals perdidos
-          // (`campana_remk_<campaña>_<fono>`) o por cualquier reactivación
-          // marcada (`reactivar_deal_`) cuenta como outbound en el corte
-          // in/out, aunque su primera conversación haya sido inbound.
-          const rCamp = await fetch(
-            `${SUPABASE_URL}/rest/v1/vic_kv?select=key&or=(key.like.campana_dcto_*,key.like.campana_remk_*,key.like.reactivar_deal_*)&limit=6000`,
-            { headers: hOut, cache: "no-store" },
-          )
-          for (const fila of rCamp.ok ? ((await rCamp.json().catch(() => [])) as Array<{ key: string }>) : []) {
-            const m = String(fila.key || "").match(/(\d{9,15})$/)
-            const tel = m ? m[1] : ""
-            if (!tel || paisDeTelefono(tel) !== pais || isTestContact(tel, metricsContactSet())) continue
-            outbTels.add(tel)
-          }
+          // EL ORIGEN MANDA (Lalo 09-sep, "dale con que el origen mande";
+          // supersede el "reactivado por campaña = outbound" del 08-sep):
+          // outbound es SOLO quien entró por la planilla de cadencia (toque 0
+          // nuestro). Un inbound que volvió por una campaña (descuento,
+          // remarketing, reactivar_deal_) sigue siendo inbound — su precio se
+          // vio como inbound y su pago se cuenta donde nació. Las marcas
+          // `campana_dcto_` / `campana_remk_` / `reactivar_deal_` ya no
+          // reclasifican a nadie (casos Heraldo Moncada COT227 y Francis
+          // Araujo COT560, semana 24-08).
         } catch { /* sin outbound, la columna queda en 0 */ }
         // 📣 CAMPAÑAS COMO ORIGEN (Lalo 27-ago): un entrante que recibió un
         // toque de campaña (WhatsApp/correo/Dapta) en los últimos 14 días es
