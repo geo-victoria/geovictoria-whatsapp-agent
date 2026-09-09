@@ -4565,7 +4565,7 @@ function renderInboundDiario(
     // % DE CIERRE POR ORIGEN (Lalo 01-sep): junto a FORMALES el conteo por
     // origen (in = inbound, out = outbound); junto a PAGADAS el CIERRE de
     // cada origen = pagadas ÷ formales de ese origen en el mismo día.
-    if ((etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
+    if ((etapa === "precio" || etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
       // Composición por tipo de conversación (Lalo 01-sep): dos porcentajes
       // que suman 100 — qué parte del número es inbound y qué parte outbound.
       const x = partirInOut(etapa, dia)
@@ -4716,7 +4716,7 @@ function renderInboundDiario(
     ].filter(Boolean)
     let sufijo = partes.length ? ` <span style="font-size:11px;color:#0e7490;white-space:nowrap">(${partes.join(" · ")})</span>` : ""
     // Mismo desglose in/out del período completo (Lalo 01-sep).
-    if ((etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
+    if ((etapa === "precio" || etapa === "formal" || etapa === "pagada") && opts.outboundTels?.size) {
       const x = partirInOut(etapa, "TOTAL")
       const tot = x.ins + x.out
       if (tot > 0) {
