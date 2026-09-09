@@ -83,9 +83,15 @@ export async function encolarNdvImp(
   let quoteId = (datos.quoteId || "").trim()
   if (!quoteId) {
     try {
-      const { getQuotePointers } = await import("./supabase-persistence-v3")
-      const punteros = await getQuotePointers(c).catch(() => [])
-      quoteId = (punteros.find((x) => (x.quoteId || "").trim())?.quoteId || "").trim()
+      const { getQuotePointers, getKvValue } = await import("./supabase-persistence-v3")
+      // Primero la cotización ANCLADA al alta (onb_quote_), después el puntero
+      // más reciente (09-sep, dos cotizaciones pagadas por el mismo número).
+      const { claveQuoteOnboarding } = await import("./onboarding/fase")
+      quoteId = ((await getKvValue(claveQuoteOnboarding(c)).catch(() => null)) || "").trim()
+      if (!quoteId) {
+        const punteros = await getQuotePointers(c).catch(() => [])
+        quoteId = (punteros.find((x) => (x.quoteId || "").trim())?.quoteId || "").trim()
+      }
     } catch {
       /* sin puntero: la implementación nace sin NDV */
     }

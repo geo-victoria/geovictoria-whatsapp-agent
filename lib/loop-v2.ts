@@ -269,8 +269,33 @@ export type SenalEspera = {
     | "dia_nombrado"
     | "largo_plazo"
     | "espera_tercero"
+    | "fecha_explicita"
+    | "mes_nombrado"
+    | "en_n_semanas"
+    | "en_n_dias"
   cuando: Date
 }
+
+// FECHA CONCRETA DE RETOMA (09-sep, caso Kappes "en octubre" y la revisión de
+// loops del 08-sep): "el 15 de septiembre", "en octubre", "a fines de
+// octubre", "en dos semanas", "en 15 días" no caían en ninguna categoría y el
+// loop seguía con su cadencia normal. Con estas señales el loop se PAUSA
+// hasta esa fecha (resetLoop → pausado_compromiso) en vez de solo re-anclar.
+const MESES: Record<string, number> = {
+  enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8,
+  septiembre: 9, setiembre: 9, octubre: 10, noviembre: 11, diciembre: 12,
+}
+const RE_MES_NOMBRE = "(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)"
+const RE_FECHA_EXPLICITA = new RegExp(`\\b(\\d{1,2})\\s+de\\s+${RE_MES_NOMBRE}\\b`)
+const RE_MES_NOMBRADO = new RegExp(
+  `\\b(?:en|para|hasta|desde|recien en|a (?:principios|inicios|comienzos|mediados|fines|finales) de|la (?:primera|segunda) quincena de)\\s+${RE_MES_NOMBRE}\\b`,
+)
+const NUMEROS_PALABRA: Record<string, number> = {
+  un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, diez: 10, quince: 15, veinte: 20, treinta: 30,
+  "un par de": 2, "unas": 2, "unos": 2,
+}
+const RE_EN_N_SEMANAS = /\b(?:en|dentro de)\s+(\d{1,2}|un par de|unas|una|dos|tres|cuatro|cinco|seis)\s+semanas?\b/
+const RE_EN_N_DIAS = /\b(?:en|dentro de)\s+(\d{1,3}|unos|diez|quince|veinte|treinta)\s+d[i]as\b/
 
 // Los regex corren sobre texto en minúsculas y SIN acentos (NFD + strip de
 // combinantes: "próxima"→"proxima", "mañana"→"manana", "dueño"→"dueno").
@@ -340,6 +365,45 @@ export function clasificarSenalEspera(
   }
   const hoy = partesEn(ahora, tz)
   const hastaLunes = (8 - hoy.weekday) % 7 || 7
+
+  // Fecha o mes CONCRETOS primero (la señal más específica gana). Un mes ya
+  // pasado se entiende del año siguiente; el mes en curso a secas ("en
+  // septiembre" dicho en septiembre) es "más adelante" → 7 días.
+  const alas9Fecha = (y: number, m: number, d: number): Date => {
+    const alas9 = utcDesdeLocal(y, m, d, 9, 0, tz)
+    return ajustarAHabil(new Date(alas9.getTime() + jitterMs(contact)), tz, contact)
+  }
+  const fechaExp = texto.match(RE_FECHA_EXPLICITA)
+  if (fechaExp) {
+    const d = parseInt(fechaExp[1], 10)
+    const m = MESES[fechaExp[2]]
+    if (m && d >= 1 && d <= 31) {
+      let y = hoy.y
+      if (m < hoy.m || (m === hoy.m && d <= hoy.d)) y += 1
+      const cuando = alas9Fecha(y, m, Math.min(d, 28 + (m === 2 ? 0 : 2)))
+      if (cuando.getTime() > ahora.getTime()) return { tipo: "fecha_explicita", cuando }
+    }
+  }
+  const mesNom = texto.match(RE_MES_NOMBRADO)
+  if (mesNom) {
+    const m = MESES[mesNom[1]]
+    if (m) {
+      if (m === hoy.m) return { tipo: "largo_plazo", cuando: alas9En(7) }
+      const y = m < hoy.m ? hoy.y + 1 : hoy.y
+      const dia = /mediados|segunda quincena/.test(mesNom[0]) ? 15 : /fines|finales/.test(mesNom[0]) ? 25 : 1
+      return { tipo: "mes_nombrado", cuando: alas9Fecha(y, m, dia) }
+    }
+  }
+  const enSemanas = texto.match(RE_EN_N_SEMANAS)
+  if (enSemanas) {
+    const n = /^\d+$/.test(enSemanas[1]) ? parseInt(enSemanas[1], 10) : NUMEROS_PALABRA[enSemanas[1]] || 1
+    if (n >= 1 && n <= 12) return { tipo: "en_n_semanas", cuando: alas9En(n * 7) }
+  }
+  const enDias = texto.match(RE_EN_N_DIAS)
+  if (enDias) {
+    const n = /^\d+$/.test(enDias[1]) ? parseInt(enDias[1], 10) : NUMEROS_PALABRA[enDias[1]] || 2
+    if (n >= 2 && n <= 90) return { tipo: "en_n_dias", cuando: alas9En(n) }
+  }
 
   if (RE_PROX_SEMANA.test(texto))
     return { tipo: "proxima_semana", cuando: alas9En(hastaLunes + 1) } // martes
@@ -490,6 +554,26 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
   // espaciado de SU escalón, no a los diez minutos — menos insistente,
   // exactamente lo que el documento describe (offsets medidos desde T0).
   const siguiente = Math.max(1, Number(row.next_touch) || 1)
+  // FECHA DE RETOMA LEJANA (09-sep): si el cliente fijó una fecha a más de 3
+  // días ("en octubre", "el 20 de septiembre", "en dos semanas"), el loop se
+  // PAUSA hasta esa fecha — ni un toque antes. El cron lo despierta ese día
+  // (lee también pausado_compromiso) y retoma la escalera donde iba.
+  if (senal && senal.cuando.getTime() - ahora.getTime() > 3 * 86400e3) {
+    await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        t0: t0.toISOString(),
+        next_touch: siguiente,
+        next_touch_at: senal.cuando.toISOString(),
+        compromiso_at: senal.cuando.toISOString(),
+        estado: "pausado_compromiso",
+        updated_at: ahora.toISOString(),
+      }),
+    })
+    console.log(`[loop-v2] señal '${senal.tipo}' → loop PAUSADO hasta ${senal.cuando.toISOString()} contact=${contact}`)
+    return
+  }
   await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },

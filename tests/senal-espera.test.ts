@@ -149,3 +149,47 @@ describe("todo toque cae en la ventana de seguimiento", () => {
     }
   })
 })
+
+describe("fecha concreta de retoma (09-sep: meses, fechas, 'en N semanas')", () => {
+  // LUNES_10AM = 27-jul-2026.
+  test("'el 15 de septiembre' agenda ese día", () => {
+    const r = clasificar("hablemos el 15 de septiembre")
+    assert.ok(r)
+    assert.equal(r.tipo, "fecha_explicita")
+    assert.equal(partes(r.cuando).fecha, "15-09")
+  })
+  test("'en octubre' agenda el 1 de octubre; 'a fines de octubre' el 25", () => {
+    const a = clasificar("retomamos en octubre")
+    assert.ok(a)
+    assert.equal(a.tipo, "mes_nombrado")
+    assert.equal(partes(a.cuando).fecha, "01-10")
+    const b = clasificar("a fines de octubre te aviso")
+    assert.ok(b)
+    assert.equal(partes(b.cuando).fecha, "25-10")
+  })
+  test("el mes en curso a secas es 'más adelante' (7 días)", () => {
+    const r = clasificar("lo vemos en julio")
+    assert.ok(r)
+    assert.equal(r.tipo, "largo_plazo")
+  })
+  test("un mes ya pasado se entiende del año siguiente", () => {
+    const r = clasificar("en marzo lo retomamos")
+    assert.ok(r)
+    assert.ok(r.cuando.getTime() > LUNES_10AM.getTime())
+    assert.equal(partes(r.cuando).fecha, "01-03")
+  })
+  test("'en dos semanas' y 'en 15 días'", () => {
+    const a = clasificar("en dos semanas te confirmo")
+    assert.ok(a)
+    assert.equal(a.tipo, "en_n_semanas")
+    assert.equal(partes(a.cuando).fecha, "10-08")
+    const b = clasificar("dame 15 días, en 15 dias te escribo")
+    assert.ok(b)
+    assert.equal(b.tipo, "en_n_dias")
+    assert.equal(partes(b.cuando).fecha, "11-08")
+  })
+  test("no confunde 'mañana' ni 'el martes' con fechas", () => {
+    assert.equal(clasificar("mañana te confirmo")?.tipo, "manana")
+    assert.equal(clasificar("el martes lo vemos")?.tipo, "dia_nombrado")
+  })
+})

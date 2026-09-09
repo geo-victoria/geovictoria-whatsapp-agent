@@ -715,7 +715,9 @@ export async function GET(req: Request): Promise<Response> {
 
   const nowIso = new Date().toISOString()
   const res = await supa(
-    `vic_loop?estado=eq.activo&next_touch_at=lte.${nowIso}` +
+    // (09-sep) también los PAUSADOS por compromiso: hasta hoy nadie los volvía
+    // a leer — un loop pausado hasta una fecha quedaba pausado para siempre.
+    `vic_loop?estado=in.(activo,pausado_compromiso)&next_touch_at=lte.${nowIso}` +
       `&select=contact,country,stage,t0,next_touch,next_touch_at,estado,compromiso_at,motivo_cierre` +
       `&order=next_touch_at.asc&limit=${BATCH}`,
   )
@@ -855,6 +857,11 @@ export async function GET(req: Request): Promise<Response> {
       pospuestos++
       detalle.push({ contact: r.contact, accion: "pausado_compromiso", hasta: r.compromiso_at })
       continue
+    }
+    // Llegó la fecha comprometida: el loop despierta y sigue su escalera.
+    if (r.estado === "pausado_compromiso") {
+      await patchLoop(r.contact, { estado: "activo", compromiso_at: null })
+      detalle.push({ contact: r.contact, accion: "despertado_compromiso" })
     }
 
     // (c) Cierres definitivos del ciclo conversacional: si el contacto ya se

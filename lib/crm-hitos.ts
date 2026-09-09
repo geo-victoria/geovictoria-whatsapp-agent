@@ -1692,6 +1692,24 @@ export async function sincronizarHitoCrm(
     const piso = PISO_POR_HITO[hito]
     const res = await resolverPorTelefono(clean)
 
+    // CONTACTO DE CAMPAÑA CON DEAL PERDIDO (09-sep, caso Madaluk: la respuesta
+    // "llámeme" a la plantilla creó un LEAD NUEVO para Ana Paula ignorando el
+    // deal de Anderson en Cierre Perdido). Con la marca `reactivar_deal_` viva
+    // y sin lead/deal vivo de por medio, el hito NO crea nada: revive ESE deal
+    // (regla de David), sube su piso, deja la transcripción y avisa a SU dueño.
+    {
+      const dealCampana = await dealAReactivar(clean)
+      const sinRegistroVivo =
+        res.tipo === "nada" || res.tipo === "contacto_sin_lead" || (res.tipo === "lead" && !res.lead.dealId)
+      if (dealCampana && sinRegistroVivo) {
+        console.log(`[crm-hitos] ${clean}: campaña de reactivación — hito "${hito}" va al deal ${dealCampana} (sin lead nuevo)`)
+        await avanzarConReactivacion(dealCampana, piso, clean)
+        await actualizarNotaTranscripcion(dealCampana, clean).catch(() => {})
+        await notificarTraspasoDeal(dealCampana).catch(() => {})
+        return
+      }
+    }
+
     if (res.tipo === "contacto_sin_lead") {
       // Cliente actual sin lead: no se crea nada (evita duplicar personas).
       console.log(`[crm-hitos] ${clean}: contacto existente ${res.contactId} sin lead — hito "${hito}" solo registrado en log`)

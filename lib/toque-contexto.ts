@@ -31,14 +31,33 @@ const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
  * conversación de vendedor el foco pasa a "¿cómo te fue con X?"). */
 async function transcriptEspejo(
   contact: string,
-): Promise<{ transcript: string; vendedorSesion: string } | null> {
+): Promise<{ transcript: string; vendedorSesion: string; vendedorNombre: string } | null> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null
   try {
-    const nueve = contact.replace(/\D/g, "").slice(-9)
+    const limpio = contact.replace(/\D/g, "")
+    const nueve = limpio.slice(-9)
+    const H = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+    // EL ESPEJO DEL EJECUTIVO ASIGNADO, NO DE CUALQUIERA (09-sep, caso
+    // Sebastián SAIC: el toque le nombró a Paola, el traspaso era de Aleydis
+    // y quien cotizó fue Anderson — tres nombres en 24 h). Si el contacto
+    // tiene traspaso activo, solo cuenta el WhatsApp de ESE vendedor; sin
+    // traspaso, cualquier espejo que haya hablado con el número.
+    let sesionPtv = ""
+    let nombrePtv = ""
+    try {
+      const rp = await fetch(
+        `${SUPABASE_URL}/rest/v1/vic_ptv?contact=eq.${encodeURIComponent(limpio)}&estado=eq.activo&select=vendedor_email,vendedor_nombre&order=traspasado_at.desc&limit=1`,
+        { headers: H, cache: "no-store" },
+      )
+      const fila = rp.ok ? (((await rp.json().catch(() => [])) as Array<{ vendedor_email?: string; vendedor_nombre?: string }>)[0] || null) : null
+      sesionPtv = String(fila?.vendedor_email || "").split("@")[0].trim().toLowerCase()
+      nombrePtv = String(fila?.vendedor_nombre || "").trim()
+    } catch { /* sin traspaso legible: espejo libre */ }
     const desde = new Date(Date.now() - 14 * 86_400_000).toISOString()
+    const filtroSesion = sesionPtv ? `&session_id=eq.${encodeURIComponent(sesionPtv)}` : ""
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=from_me,texto,enviado_at,session_id&telefono_chat=like.*${nueve}&es_grupo=eq.false&enviado_at=gte.${encodeURIComponent(desde)}&order=enviado_at.desc&limit=16`,
-      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+      `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?select=from_me,texto,enviado_at,session_id&telefono_chat=like.*${nueve}&es_grupo=eq.false&enviado_at=gte.${encodeURIComponent(desde)}${filtroSesion}&order=enviado_at.desc&limit=16`,
+      { headers: H, cache: "no-store" },
     )
     if (!r.ok) return null
     const filas = ((await r.json().catch(() => [])) as Array<{
@@ -52,7 +71,11 @@ async function transcriptEspejo(
       .map((f) => `${f.from_me ? "Ejecutivo" : "Cliente"}: ${String(f.texto || "").slice(0, 300)}`)
       .join("\n")
       .slice(-3000)
-    return { transcript, vendedorSesion: filas.find((f) => f.from_me)?.session_id || "" }
+    return {
+      transcript,
+      vendedorSesion: sesionPtv || filas.find((f) => f.from_me)?.session_id || "",
+      vendedorNombre: nombrePtv,
+    }
   } catch {
     return null
   }
@@ -114,8 +137,8 @@ export async function generarToqueContexto(
     // CÓMO LE FUE con el ejecutivo y recoger lo clave de ESA conversación
     // (Vicky nunca se apaga: acompaña como equipo, no compite).
     const espejo = await transcriptEspejo(contact).catch(() => null)
-    let nombreEjecutivo = ""
-    if (espejo?.vendedorSesion) {
+    let nombreEjecutivo = espejo?.vendedorNombre ? espejo.vendedorNombre.split(/\s+/)[0] : ""
+    if (!nombreEjecutivo && espejo?.vendedorSesion) {
       try {
         const { directorioEjecutivos } = await import("./directorio-ejecutivos")
         const ficha = directorioEjecutivos().find((f) =>

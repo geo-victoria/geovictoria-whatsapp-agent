@@ -71,6 +71,39 @@ async function authorized(req: Request): Promise<boolean> {
   return false
 }
 
+/** Llamadas del espejo con `telefono` NULL (chat LID sin resolver al momento
+ * de la llamada) → se estampa el número desde cualquier mensaje espejado del
+ * MISMO chat en la MISMA sesión. Best-effort, máx 60 chats por tick. */
+async function sanarTelefonosLlamadas(): Promise<number> {
+  const desde = new Date(Date.now() - 30 * 86400e3).toISOString()
+  const nulas = await supa<{ id: number; session_id: string; chat_jid: string }>(
+    `vic_wa_espejo_llamadas?telefono=is.null&chat_jid=like.*%40lid&at=gte.${encodeURIComponent(desde)}&select=id,session_id,chat_jid&order=at.desc&limit=200`,
+  )
+  if (!nulas.length) return 0
+  const porChat = new Map<string, { session_id: string; chat_jid: string; ids: number[] }>()
+  for (const n of nulas) {
+    const k = `${n.session_id}|${n.chat_jid}`
+    const g = porChat.get(k) || { session_id: n.session_id, chat_jid: n.chat_jid, ids: [] }
+    g.ids.push(n.id)
+    porChat.set(k, g)
+  }
+  let sanadas = 0
+  for (const g of [...porChat.values()].slice(0, 60)) {
+    const m = await supa<{ telefono_chat?: string | null }>(
+      `vic_wa_espejo_mensajes?session_id=eq.${encodeURIComponent(g.session_id)}&chat_jid=eq.${encodeURIComponent(g.chat_jid)}&telefono_chat=not.is.null&select=telefono_chat&order=enviado_at.desc&limit=1`,
+    ).catch(() => [])
+    const tel = String(m[0]?.telefono_chat || "").replace(/\D/g, "")
+    if (!tel) continue
+    await supa(`vic_wa_espejo_llamadas?id=in.(${g.ids.join(",")})`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ telefono: tel }),
+    }).catch(() => [])
+    sanadas += g.ids.length
+  }
+  return sanadas
+}
+
 async function supa<T>(path: string, init: RequestInit = {}): Promise<T[]> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return []
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -972,7 +1005,7 @@ type VendedorFinal = {
   zohoId: string
   nombre: string
   telefono?: string
-  via: "tombola_zoho" | "tombola_interna" | "dueno_deal" | "dueno_lead_sdr"
+  via: "tombola_zoho" | "tombola_interna" | "dueno_deal" | "dueno_lead_sdr" | "dueno_deal_reactivado"
 }
 
 /** Aviso por correo al vendedor de un traspaso sobre un LEAD (los deals van
@@ -1267,6 +1300,40 @@ async function asignarEnZoho(
         : undefined
       const stage = String(filaDeal?.Stage || "")
       if (/Cierre Perdido|8\. Facturando/.test(stage)) {
+        // CONTACTO DE CAMPAÑA (09-sep): con la marca `reactivar_deal_` viva, un
+        // Cierre Perdido no es "otra negociación" — es el MISMO deal que la
+        // campaña salió a revivir. Se revive (regla de David), se avisa a su
+        // dueño y se le presenta ÉL al cliente; hasta hoy caía en Aleydis (SDR)
+        // y el dueño real ni se enteraba (3 interesados de la campaña del
+        // 08-sep: Galvez, López y Martínez quedaron fuera).
+        if (stage === "Cierre Perdido") {
+          try {
+            const { dealAReactivar, revivirDealDeCampana, notificarTraspasoDeal } = await import("@/lib/crm-hitos")
+            const marca = await dealAReactivar(fono)
+            if (marca) {
+              await revivirDealDeCampana(dealId)
+              const g2 = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage,Owner`, { headers: H, cache: "no-store" })
+              const d2 = g2.ok
+                ? ((await g2.json().catch(() => ({}))) as { data?: Array<{ Stage?: string; Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]
+                : undefined
+              const own = d2?.Owner
+              if (String(d2?.Stage || "") !== "Cierre Perdido" && own?.id && own?.email && own.email.toLowerCase() !== "vicky@geovictoria.com") {
+                const tel = await telefonoDeUsuario(own.id, H, api)
+                await notificarTraspasoDeal(dealId).catch(() => {})
+                console.log(`[ptv] ${fono}: deal ${dealId} de campaña REVIVIDO → se presenta a su dueño ${own.email}`)
+                return {
+                  email: own.email,
+                  zohoId: own.id,
+                  nombre: own.name || own.email.split("@")[0],
+                  telefono: tel || WHATSAPP_VENDEDOR[own.email.toLowerCase()] || "",
+                  via: "dueno_deal_reactivado",
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`[ptv] ${fono}: revivir deal de campaña ${dealId} falló:`, e instanceof Error ? e.message : e)
+          }
+        }
         console.warn(`[ptv] ${fono}: su deal ${dealId} está cerrado (${stage}) — no se reasigna; vendedor solo en vic_ptv`)
         return porDefecto
       }
@@ -2471,6 +2538,17 @@ export async function GET(req: Request) {
     return 0
   })
   if (fonosForm) console.log(`[ptv-cron] fonos form corregidos: ${fonosForm}`)
+
+  // LLAMADAS DEL ESPEJO SIN TELÉFONO (09-sep): el worker registra la llamada
+  // con el chat LID y `telefono` NULL cuando aún no aprendió el número; la
+  // atención real del vendedor (candado v3, panel de traspasos) cruza por
+  // teléfono, así que esas llamadas no existían — 208 en 30 días, 68 de
+  // ellas contestadas. Se sanan desde los mensajes del mismo chat espejado.
+  const llamadasSanadas = await sanarTelefonosLlamadas().catch((e) => {
+    console.warn("[ptv-cron] sanar teléfonos de llamadas falló:", e instanceof Error ? e.message : e)
+    return 0
+  })
+  if (llamadasSanadas) console.log(`[ptv-cron] llamadas del espejo con teléfono sanado: ${llamadasSanadas}`)
 
   // RESCATE DEL FORM-FILL MUDO (Lalo 21-ago): lead del formulario de landing
   // sin conversación a las 24h → entrega al canal humano de su país.

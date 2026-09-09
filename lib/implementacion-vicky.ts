@@ -66,9 +66,18 @@ export async function siguienteRelator(): Promise<(typeof RELATORES_GV_AVANZADO)
 export async function contextoImplementacionDesdeVenta(contact: string): Promise<Partial<DatosImplementacion>> {
   const out: Partial<DatosImplementacion> = {}
   try {
-    const { getQuotePointers } = await import("./supabase-persistence-v3")
-    const punteros = await getQuotePointers((contact || "").replace(/\D/g, "")).catch(() => [])
-    const p = punteros.find((x) => (x.quoteId || "").trim())
+    const { getQuotePointers, getKvValue } = await import("./supabase-persistence-v3")
+    const limpio = (contact || "").replace(/\D/g, "")
+    const punteros = await getQuotePointers(limpio).catch(() => [])
+    // COTIZACIÓN ANCLADA AL ALTA (09-sep, caso Lorena: dos cotizaciones pagadas
+    // por el mismo número y la IMP/NDV se estamparon en la última en vez de la
+    // del alta). Manda `onb_quote_<fono>`; el puntero más reciente es respaldo.
+    const { claveQuoteOnboarding } = await import("./onboarding/fase")
+    const anclada = ((await getKvValue(claveQuoteOnboarding(limpio)).catch(() => null)) || "").trim()
+    const p: { quoteId: string; dealId?: string } | undefined =
+      (anclada ? punteros.find((x) => x.quoteId === anclada) : undefined) ||
+      (anclada ? { quoteId: anclada } : undefined) ||
+      punteros.find((x) => (x.quoteId || "").trim())
     if (!p) return out
     out.quoteId = p.quoteId
     const token = await getZohoAccessToken()

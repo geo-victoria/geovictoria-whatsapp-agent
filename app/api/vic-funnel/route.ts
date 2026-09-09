@@ -4775,7 +4775,85 @@ function renderInboundDiario(
         <tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700"><td>Total</td><td style="text-align:center">${T.entrantes}</td><td style="text-align:center">${T.precio}</td><td style="text-align:center">${T.formal}</td><td style="text-align:center">${T.pagada}</td><td style="text-align:center">${cierre(T)}</td></tr>
       </table>`
     }
+    // ═══ GRÁFICO DE LÍNEA (Lalo 09-sep): evolución semanal de la tasa de
+    // cierre — general (in + out), inbound y outbound — sobre las mismas
+    // semanas de las tablas. SVG inline, sin librerías. Cada punto lleva su
+    // tooltip con pagadas/precios; la última semana (en curso) se marca.
+    const grafico = (() => {
+      const asc = lunesList.slice()
+      type P = { etiqueta: string; enCurso: boolean; g: number | null; i: number | null; o: number | null; det: string }
+      const pct = (f: Fila): number | null => {
+        if (f.pagada <= 0) return f.precio > 0 ? 0 : null
+        return Math.min(100, Math.round((f.pagada * 100) / Math.max(f.precio, 1)))
+      }
+      // Semana en curso en hora de CHILE (mismo criterio de la tabla diaria).
+      const hoyLunes = lunesSemanaDe(new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10))
+      const puntos: P[] = asc.map((lunes) => {
+        const k = claveSemana(lunes)
+        const fi = cuenta(k, "in")
+        const fo = cuenta(k, "out")
+        const fg: Fila = { entrantes: fi.entrantes + fo.entrantes, precio: fi.precio + fo.precio, formal: fi.formal + fo.formal, pagada: fi.pagada + fo.pagada }
+        return {
+          etiqueta: etiquetaSemana(lunes).replace(/^📅\s*Semana\s*/i, "").replace(/\s*→\s*/, "→"),
+          enCurso: lunes === hoyLunes,
+          g: pct(fg), i: pct(fi), o: pct(fo),
+          det: `general ${fg.pagada}/${fg.precio} · inbound ${fi.pagada}/${fi.precio} · outbound ${fo.pagada}/${fo.precio}`,
+        }
+      })
+      if (puntos.length < 2) return ""
+      const W = 720, H = 240, L = 40, R = 118, T = 18, B = 40
+      const n = puntos.length
+      const x = (idx: number) => L + (idx * (W - L - R)) / (n - 1)
+      const y = (v: number) => T + ((100 - v) * (H - T - B)) / 100
+      const series: Array<{ k: "g" | "i" | "o"; nombre: string; color: string; ancho: number }> = [
+        { k: "g", nombre: "General", color: "#2a78d6", ancho: 2.5 },
+        { k: "i", nombre: "Inbound", color: "#1baf7a", ancho: 2 },
+        { k: "o", nombre: "Outbound", color: "#eb6834", ancho: 2 },
+      ]
+      const grid = [0, 25, 50, 75, 100]
+        .map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#e5e7eb" stroke-width="1"/><text x="${L - 6}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#6b7280">${v}%</text>`)
+        .join("")
+      const ejeX = puntos
+        .map((p, idx) => `<text x="${x(idx).toFixed(1)}" y="${H - B + 16}" text-anchor="middle" font-size="10.5" fill="${p.enCurso ? "#374151" : "#6b7280"}"${p.enCurso ? ' font-weight="700"' : ""}>${esc(p.etiqueta.split("→")[0].trim())}</text>`)
+        .join("")
+      const lineas = series
+        .map((s) => {
+          // La línea se corta donde no hay base (null): no se inventa un tramo.
+          const tramos: string[] = []
+          let actual: string[] = []
+          puntos.forEach((p, idx) => {
+            const v = p[s.k]
+            if (v === null) { if (actual.length > 1) tramos.push(actual.join(" ")); actual = []; return }
+            actual.push(`${x(idx).toFixed(1)},${y(v).toFixed(1)}`)
+          })
+          if (actual.length > 1) tramos.push(actual.join(" "))
+          const path = tramos.map((t) => `<polyline points="${t}" fill="none" stroke="${s.color}" stroke-width="${s.ancho}" stroke-linejoin="round" stroke-linecap="round"/>`).join("")
+          const marcas = puntos
+            .map((p, idx) => {
+              const v = p[s.k]
+              if (v === null) return ""
+              return `<circle cx="${x(idx).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${s.color}" stroke="#fff" stroke-width="2"${p.enCurso ? ' stroke-dasharray="2 1"' : ""}><title>${esc(p.etiqueta)}${p.enCurso ? " (semana en curso)" : ""} · ${s.nombre} ${v}% · ${esc(p.det)}</title></circle>`
+            })
+            .join("")
+          // Etiqueta directa al final de la serie (identidad sin depender del color).
+          let ultimo = -1
+          puntos.forEach((p, idx) => { if (p[s.k] !== null) ultimo = idx })
+          const etq = ultimo >= 0
+            ? `<text x="${(x(ultimo) + 8).toFixed(1)}" y="${(y(puntos[ultimo][s.k] as number) + 4).toFixed(1)}" font-size="11.5" font-weight="700" fill="#374151">${s.nombre} ${puntos[ultimo][s.k]}%</text>`
+            : ""
+          return path + marcas + etq
+        })
+        .join("")
+      const leyenda = series
+        .map((s) => `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><span style="display:inline-block;width:18px;height:0;border-top:${s.ancho}px solid ${s.color}"></span>${s.nombre}</span>`)
+        .join("")
+      return `<div style="margin:6px 0 14px">
+        <div class="sub" style="margin:0 0 4px;color:#374151">${leyenda}<span style="color:#6b7280">· cierre = pagadas ÷ vieron precio · el último punto es la semana en curso</span></div>
+        <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block;font-family:inherit" role="img" aria-label="Evolución semanal de la tasa de cierre de Vicky: general, inbound y outbound">${grid}${ejeX}${lineas}</svg></div>
+      </div>`
+    })()
     return `<div class="card"><h2>🎯 Tasa de cierre semanal · inbound vs outbound <span class="pct" style="font-weight:400">— cierre = pagadas ÷ vieron precio de cada tipo</span></h2>
+      ${grafico}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#075985">INBOUND</b> · WhatsApp directo, sitio web y landings</div>${tabla("in")}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia y reactivados por campaña (descuento, remarketing)</div>${tabla("out")}
       <div class="sub">*100% topado: hubo más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones).</div>
