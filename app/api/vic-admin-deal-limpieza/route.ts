@@ -575,7 +575,20 @@ export async function GET(req: Request): Promise<Response> {
       body: JSON.stringify({ select_query: `select id, Phone from Leads where (Created_By = 3525045000484500876 or Owner = 3525045000484500876) and Gesti_n_Vicky is null order by Created_Time desc limit 100` }),
     })
     if (rc.status !== 200 && rc.status !== 204) return NextResponse.json({ ok: false, error: `coql ${rc.status}` }, { status: 500 })
-    const filas = rc.status === 204 ? [] : ((((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> }).data) || [])
+    // `ids=<a,b,c>` (09-sep): pase RETROACTIVO sobre leads explícitos — leads
+    // de otro creador (formulario web de marketing) que Vicky sí trabajó pero
+    // que salieron del universo (creado/dueño Vicky) antes de que el cron los
+    // viera. No amplía el universo automático: solo procesa la lista dada, y
+    // acepta re-marcar los que quedaron "No habló con Vicky" por error.
+    const idsForzados = String(searchParams.get("ids") || "")
+      .split(",")
+      .map((s) => s.replace(/\D/g, ""))
+      .filter((s) => s.length > 10)
+    const filas: Array<{ id: string; Phone?: string | null; Mobile?: string | null; forzado?: boolean }> = idsForzados.length
+      ? []
+      : rc.status === 204
+        ? []
+        : ((((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> }).data) || [])
     // Y los leads que Vicky RECIBIÓ por tómbola para la cadencia outbound
     // (Lalo 20-ago: "no necesariamente ahora es el owner" — pueden estar
     // reasignados): fuente = vic_outbound_cadence.zoho_lead_id. El GET por id
@@ -588,11 +601,15 @@ export async function GET(req: Request): Promise<Response> {
     const revisados = new Set(
       (await supa<{ key: string }>(`vic_kv?key=like.glz_*&select=key&limit=2000`)).map((r) => String(r.key).replace("glz_", "")),
     )
-    const extra: Array<{ id: string; Phone?: string | null; Mobile?: string | null }> = []
-    for (const c of cad) {
-      const lid = String(c.zoho_lead_id || "").replace(/\D/g, "")
-      if (!lid || yaEnPagina.has(lid) || revisados.has(lid)) continue
-      extra.push({ id: lid, Phone: c.contact })
+    const extra: Array<{ id: string; Phone?: string | null; Mobile?: string | null; forzado?: boolean }> = []
+    if (idsForzados.length) {
+      for (const lid of idsForzados) extra.push({ id: lid, forzado: true })
+    } else {
+      for (const c of cad) {
+        const lid = String(c.zoho_lead_id || "").replace(/\D/g, "")
+        if (!lid || yaEnPagina.has(lid) || revisados.has(lid)) continue
+        extra.push({ id: lid, Phone: c.contact })
+      }
     }
     for (const f of [...filas, ...extra].slice(0, limit)) {
       try {
@@ -607,7 +624,11 @@ export async function GET(req: Request): Promise<Response> {
           const rl = await fetch(`${ZOHO_API}/crm/v3/Leads/${f.id}?fields=Gesti_n_Vicky,Phone`, { headers: H, cache: "no-store" })
           if (rl.status !== 200) continue // convertido/borrado
           const lead = ((await rl.json().catch(() => ({}))) as { data?: Array<{ Gesti_n_Vicky?: string | null; Phone?: string | null }> })?.data?.[0]
-          if (!lead || String(lead.Gesti_n_Vicky || "")) continue
+          if (!lead) continue
+          const marcaActual = String(lead.Gesti_n_Vicky || "")
+          // Ya marcado → no se toca; salvo pase forzado sobre un "No habló con
+          // Vicky", que sí se reevalúa (la marca pudo nacer antes del chat).
+          if (marcaActual && !(f.forzado && marcaActual === "No habló con Vicky")) continue
           f.Phone = lead.Phone || f.Phone
         }
         const tel = String(f.Mobile || f.Phone || "").replace(/\D/g, "")
@@ -624,8 +645,54 @@ export async function GET(req: Request): Promise<Response> {
         out.errores.push(`${f.id}: ${e instanceof Error ? e.message.slice(0, 50) : "err"}`)
       }
     }
-    console.log(`[deal-limpieza] gestionleads ${JSON.stringify(out)}`)
-    return NextResponse.json({ ok: true, modo: "gestionleads", quedan_en_pagina: filas.length + extra.length, ...out })
+    // REEVALUACIÓN de "No habló con Vicky" (Lalo 09-sep): la marca se pone en
+    // el instante del pase y no se vuelve a mirar; un lead del formulario que
+    // escribe DESPUÉS quedaba mal marcado para siempre (5 casos medidos). Solo
+    // se revisan leads que ya llevan NUESTRA marca (no amplía el universo),
+    // creados en los últimos 45 días, con candado kv `glr_<id>` 7 d. Si ahora
+    // hay conversación, se recalcula el veredicto y se re-estampa.
+    const reev = { revisados: 0, corregidos: 0 }
+    if (!idsForzados.length) {
+      try {
+        const desde45 = new Date(Date.now() - 45 * 86400e3).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+        const rn = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+          method: "POST", headers: H, cache: "no-store",
+          body: JSON.stringify({ select_query: `select id, Phone from Leads where (Gesti_n_Vicky = 'No habló con Vicky' and Created_Time >= '${desde45}') order by Created_Time desc limit 100` }),
+        })
+        const candidatos = rn.status === 200
+          ? ((((await rn.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null }> }).data) || [])
+          : []
+        const yaRev = new Set(
+          (await supa<{ key: string }>(`vic_kv?key=like.glr_*&select=key&limit=2000`)).map((r) => String(r.key).replace("glr_", "")),
+        )
+        for (const c of candidatos.slice(0, 40)) {
+          if (yaRev.has(c.id)) continue
+          const tel = String(c.Phone || "").replace(/\D/g, "").replace(/^5656/, "56")
+          await supa(`vic_kv?on_conflict=key`, {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify({ key: `glr_${c.id}`, value: new Date().toISOString(), expires_at: new Date(Date.now() + 7 * 86400e3).toISOString() }),
+          }).catch(() => [])
+          reev.revisados++
+          if (!tel) continue
+          const conv = await supa<{ id: string }>(`vic_v3_conversations?contact=eq.${tel}&select=id&limit=1`)
+          if (!conv[0]) continue
+          const veredicto = await veredictoGestion(tel, Date.now(), c.id, H)
+          if (veredicto === "No habló con Vicky") continue
+          const up = await fetch(`${ZOHO_API}/crm/v3/Leads/${c.id}`, {
+            method: "PUT", headers: H, cache: "no-store",
+            body: JSON.stringify({ data: [{ id: c.id, Gesti_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          })
+          const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string }> }
+          if (up.ok && cuerpo?.data?.[0]?.code === "SUCCESS") reev.corregidos++
+          else out.errores.push(`reev ${c.id}: ${cuerpo?.data?.[0]?.code || up.status}`)
+        }
+      } catch (e) {
+        out.errores.push(`reev: ${e instanceof Error ? e.message.slice(0, 60) : "err"}`)
+      }
+    }
+    console.log(`[deal-limpieza] gestionleads ${JSON.stringify({ ...out, reev })}`)
+    return NextResponse.json({ ok: true, modo: "gestionleads", quedan_en_pagina: filas.length + extra.length, forzados: idsForzados.length, reevaluacion: reev, ...out })
   }
 
   // ── MODO GESTIÓN DE HITOS (?gestionhitos=1): deals del robot SIN cotización
