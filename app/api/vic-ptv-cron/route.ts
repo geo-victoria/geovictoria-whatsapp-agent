@@ -354,8 +354,11 @@ async function conciliarStatusLeads(): Promise<number> {
       let momento = ""
       const precioAt = c.pref_escalon_at || ""
       const formalAt = c.formal_quote_at || (c.formal_quote_id ? c.first_user_at || "" : "")
+      // TOPE "3. Contactado" (Lalo 09-sep): "4. Calificado" por API saca al
+      // lead del blueprint y el ejecutivo ya no puede convertirlo. Con precio
+      // o formal el status es el mismo; solo cambia la fecha del primer hito.
       if (precioAt || formalAt) {
-        objetivo = "4. Calificado"
+        objetivo = "3. Contactado"
         const cand = [precioAt, formalAt].filter(Boolean).map((x) => Date.parse(String(x).replace(" ", "T")))
         momento = new Date(Math.min(...cand)).toISOString().replace(/\.\d{3}Z$/, "+00:00")
       } else if ((c.user_msg_count || 0) >= 1 && c.first_user_at) {
@@ -1226,12 +1229,14 @@ async function asignarEnZoho(
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
       } else if (esCL) {
         const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
-        if (calificado) {
-          // Vio precio = lead CALIFICADO (escalera de roles). Lead_Status vive
-          // bajo Blueprint (PUT directo rebota RECORD_IN_BLUEPRINT): va por la
-          // transición, con el helper que ya conoce los campos mandatorios.
-          const { updateZohoLeadStatus } = await import("@/lib/zoho-leads")
-          await updateZohoLeadStatus(creado.leadId, "4. Calificado").catch(() => {})
+        {
+          // El lead recién creado nace "1. No contactado": se entrega en
+          // "3. Contactado" (TOPE, Lalo 09-sep — jamás "4. Calificado" por API:
+          // esa transición del blueprint es la conversión y deja al lead sin
+          // transiciones para el ejecutivo). Lead_Status vive bajo Blueprint:
+          // el helper ejecuta la transición con sus campos mandatorios.
+          const { updateZohoLeadStatus, STATUS_ENTREGA_LEAD } = await import("@/lib/zoho-leads")
+          await updateZohoLeadStatus(creado.leadId, STATUS_ENTREGA_LEAD).catch(() => {})
         }
         const r = await reasignarLeadCalificacionCL(creado.leadId, { calificado }).catch(() => null)
         // TODA entrega CL lleva la nota con el chat (Ana 26-ago) — antes solo MX.
@@ -1434,10 +1439,11 @@ async function asignarEnZoho(
         String(lead.Lead_Status || "").trim().startsWith("4.") ||
         Number(lead.N_Empleados_que_marcan || 0) > 0
       const entregaCalificada = calificado || calificadoPorLead
-      if (calificado && !calificadoPorLead) {
-        // Vio precio pero el status quedó atrás: se sube para que el
-        // ejecutivo reciba el lead ya marcado calificado.
-        await updateZohoLeadStatus(lead.id, "4. Calificado").catch(() => {})
+      if (!/^\s*[34]\./.test(String(lead.Lead_Status || ""))) {
+        // Status atrasado ("1."/"2."): se entrega en "3. Contactado" (TOPE,
+        // Lalo 09-sep — nunca "4. Calificado" por API, ver STATUS_ENTREGA_LEAD).
+        const { STATUS_ENTREGA_LEAD } = await import("@/lib/zoho-leads")
+        await updateZohoLeadStatus(lead.id, STATUS_ENTREGA_LEAD).catch(() => {})
       }
       const r = await reasignarLeadCalificacionCL(lead.id, { calificado: entregaCalificada }).catch(() => null)
       // Nota con el chat en toda entrega CL (Ana 26-ago).
@@ -2966,8 +2972,10 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
         }
       }
       // Sin RUT (o sin deal): lead calificado → tómbola de leads TLMK.
-      const { reasignarLeadCalificacionCL, updateZohoLeadStatus } = await import("@/lib/zoho-leads")
-      if (!status.trim().startsWith("4.")) await updateZohoLeadStatus(l.id, "4. Calificado").catch(() => {})
+      const { reasignarLeadCalificacionCL, updateZohoLeadStatus, STATUS_ENTREGA_LEAD } = await import("@/lib/zoho-leads")
+      // TOPE "3. Contactado" (Lalo 09-sep): calificado = dotación en el
+      // registro, no el status; "4." por API bloquea la conversión.
+      if (!/^\s*[34]\./.test(status)) await updateZohoLeadStatus(l.id, STATUS_ENTREGA_LEAD).catch(() => {})
       if (empleados > 0 && !(Number(l.N_Empleados_que_marcan || 0) > 0)) {
         await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: l.id, N_Empleados_que_marcan: empleados }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }) }).catch(() => null)
       }

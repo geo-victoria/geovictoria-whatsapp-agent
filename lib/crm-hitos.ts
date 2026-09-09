@@ -264,12 +264,17 @@ const ORDEN_LEAD_STATUS: Record<string, number> = {
   "4. Calificado": 4,
 }
 
-/** Lead_Status mínimo que implica cada hito (todos son conversación activa). */
+/** Lead_Status mínimo que implica cada hito (todos son conversación activa).
+ * TOPE "3. Contactado" (Lalo 09-sep): en el blueprint de Leads la transición
+ * "4. Calificado" ES la que convierte — si Vicky la ejecuta por API el lead
+ * queda en Calificado FUERA del blueprint (sin transiciones) y el ejecutivo
+ * ya no puede convertirlo por blueprint. Vicky deja el lead en Contactado y
+ * la conversión la hace el humano desde la ficha. */
 const STATUS_POR_HITO: Partial<Record<Hito, string>> = {
-  intencion: "4. Calificado",
-  discovery: "4. Calificado",
-  preform: "4. Calificado",
-  aceptada: "4. Calificado",
+  intencion: "3. Contactado",
+  discovery: "3. Contactado",
+  preform: "3. Contactado",
+  aceptada: "3. Contactado",
 }
 
 const VICKY_OWNER_ID = "3525045000484500876"

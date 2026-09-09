@@ -303,11 +303,21 @@ export async function updateZohoLeadFields(
  * jul-2026: envío de mensaje = "2. Intento de contacto"; respuesta del cliente
  * = "3. Contactado"). Best-effort: nunca rompe el flujo.
  */
+/** Status máximo que Vicky deja en un lead: la conversión es del ejecutivo. */
+export const STATUS_ENTREGA_LEAD = "3. Contactado"
+
 export async function updateZohoLeadStatus(
   leadId: string,
   status: string,
 ): Promise<{ success: boolean; error?: string }> {
   if (!leadId || !status) return { success: false, error: "leadId o status faltante" }
+  // TOPE "3. Contactado" (Lalo 09-sep, "si se los entregamos en calificado no
+  // pueden convertirlo"): la transición "4. Calificado" del blueprint de Leads
+  // es la de CONVERSIÓN; ejecutada por API deja el lead en Calificado sin
+  // convertir y sin transiciones (verificado 09-sep: lead en "4." responde
+  // process_info vacío; en "3." ofrece "4. Calificado" y "No Calificado"). Toda
+  // entrega de Vicky queda en Contactado; el humano convierte por blueprint.
+  if (/^\s*4\./.test(status)) status = STATUS_ENTREGA_LEAD
   try {
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
