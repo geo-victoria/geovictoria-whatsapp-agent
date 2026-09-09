@@ -269,11 +269,14 @@ async function construirFoto(fecha: string): Promise<Foto> {
           if (!m || !m.creada) continue
           const creadaIso = new Date(m.creada).toISOString().replace(/\.\d{3}Z$/, "+00:00")
           const tel9 = m.tel.slice(-9)
-          const cond = m.deal
-            ? `Deal_Asociado.id = '${m.deal}'`
-            : tel9.length === 9
-              ? `Tel_fono_Contacto like '%${tel9}%'`
-              : ""
+          // Deal O teléfono (Lalo 09-sep, caso Clínica Talca/COT1327: el
+          // ejecutivo emitió en OTRO deal del mismo cliente). Forma COQL
+          // verificada: (((A or B) and C) and D).
+          const partes = [
+            m.deal ? `Deal_Asociado = '${m.deal}'` : "",
+            tel9.length === 9 ? `Tel_fono_Contacto like '%${tel9}%'` : "",
+          ].filter(Boolean)
+          const cond = partes.length === 2 ? `(${partes[0]} or ${partes[1]})` : partes[0] || ""
           if (!cond) continue
           try {
             const r2 = await fetch(`${ZOHO_API}/crm/v8/coql`, {

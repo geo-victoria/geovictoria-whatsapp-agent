@@ -306,7 +306,12 @@ function reemitidasSobreVicky(quotes: RawAceptada[]): Set<string> {
     if (!Number.isFinite(ms)) continue
     const deal = String(q["Deal_Asociado.id"] || "")
     const tel = digits(String(q.Tel_fono_Contacto || ""))
-    const previa = deal ? vickyPorDeal.get(deal) : tel ? vickyPorTel.get(tel) : undefined
+    // Deal O teléfono (Lalo 09-sep, caso Clínica Talca/COT1327: Vicky cotizó
+    // COT407 en un deal y Ana emitió COT806/808/1327 en OTRO deal del mismo
+    // cliente — con el fallback solo-sin-deal la venta se perdía como UDES).
+    const porDeal = deal ? vickyPorDeal.get(deal) : undefined
+    const porTel = tel ? vickyPorTel.get(tel) : undefined
+    const previa = porDeal !== undefined && porDeal <= ms ? porDeal : porTel
     if (previa !== undefined && previa <= ms) out.add(String(q.id || ""))
   }
   return out
