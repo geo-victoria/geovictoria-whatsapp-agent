@@ -286,9 +286,22 @@ async function kvSet(key: string, value: string, expiresAt?: string): Promise<vo
  * como venta de Vicky — la originó ella; el ejecutivo solo la reemitió.
  * Devuelve los ids de esas cotizaciones reemitidas.
  */
-function reemitidasSobreVicky(quotes: RawAceptada[]): Set<string> {
+function reemitidasSobreVicky(quotes: RawAceptada[], preformAt?: Map<string, string>): Set<string> {
   const vickyPorDeal = new Map<string, number>()
   const vickyPorTel = new Map<string, number>()
+  // CASO C (Lalo 09-sep, "agrega Seguridad GSL"): Vicky MOSTRÓ PRECIO en el
+  // chat (preform, sin formal), traspasó, y el ejecutivo cotizó y cerró.
+  // Cuenta para Vicky igual que la reemisión: el precio de Vicky es previo a
+  // la emisión ejecutiva. Supersede la decisión del 08-sep (caso C =
+  // ejecutivo). Señal = sello del preform por teléfono (mismo detector del
+  // dash); la conversación que nace DESPUÉS de la emisión sigue fuera.
+  if (preformAt) {
+    for (const [tel, iso] of preformAt) {
+      const ms = Date.parse(String(iso || ""))
+      if (!tel || !Number.isFinite(ms)) continue
+      if ((vickyPorTel.get(tel) ?? Infinity) > ms) vickyPorTel.set(tel, ms)
+    }
+  }
   for (const q of quotes) {
     if (!/100%/.test(String(q.Intervenci_n_Humana || ""))) continue
     const ms = Date.parse(String(q.Created_Time || ""))
@@ -4171,7 +4184,7 @@ function computarCohortesInbound(params: {
     const sub = b === "cliente_existente" ? (r.bolsa_sub || "soporte") : null
     bolsaPorTel.set(tel, { b, sub, at })
   }
-  const reemitidas = reemitidasSobreVicky(quotes)
+  const reemitidas = reemitidasSobreVicky(quotes, preformAt)
   const telsConQuoteVicky = new Set<string>()
   for (const q of quotes) {
     const marca = String(q.Intervenci_n_Humana || "")
@@ -8590,7 +8603,7 @@ export async function GET(req: Request): Promise<Response> {
           const pagadasIds = new Set<string>()
           // Reemisiones del ejecutivo sobre deals que Vicky ya había cotizado
           // (Lalo 08-sep, caso UDES/COT1324): cuentan para Vicky.
-          const reemitidasPago = reemitidasSobreVicky(cierreZoho?.todasList || cierre?.todasList || [])
+          const reemitidasPago = reemitidasSobreVicky(cierreZoho?.todasList || cierre?.todasList || [], preformAtMap)
           // UNIVERSO COMPLETO, no el filtrado por conversaciones recientes
           // (Lalo 08-sep, "ahí faltan pagos"): `cierre.todasList` pasa por
           // filtrarCierreAVicky, que solo conoce las 2.000 conversaciones

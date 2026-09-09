@@ -300,6 +300,30 @@ async function construirFoto(fecha: string): Promise<Foto> {
           } catch (e) {
             console.warn("[cierre] reemisión:", v.cot, e instanceof Error ? e.message : e)
           }
+          // CASO C (Lalo 09-sep, "agrega Seguridad GSL"): sin formal de Vicky
+          // pero con PRECIO MOSTRADO por ella en el chat antes de la emisión
+          // ejecutiva → también es venta de Vicky (misma señal que el dash:
+          // mensaje de Vicky con el bloque de precio). Supersede el 08-sep.
+          if (!v.reemitida && m.tel) {
+            try {
+              const convs = await sb<{ id: string }>(`vic_v3_conversations?contact=eq.${m.tel}&select=id&limit=5`)
+              if (convs.length) {
+                const ids = convs.map((c) => c.id).join(",")
+                const antesIso = new Date(m.creada).toISOString()
+                const rows = await sb<{ at: string }>(
+                  `vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant` +
+                    `&or=(content.ilike.*Resumen%20mensual*,content.ilike.*Total%20mensual%20con%20IVA*,content.ilike.*UF%20%2B%20IVA%20al%20mes*)` +
+                    `&at=lt.${encodeURIComponent(antesIso)}&select=at&order=at.asc&limit=1`,
+                )
+                if (rows.length) {
+                  v.canal = "100% Vicky (precio mostrado por Vicky, cerró el ejecutivo)"
+                  v.reemitida = true
+                }
+              }
+            } catch (e) {
+              console.warn("[cierre] precio mostrado:", v.cot, e instanceof Error ? e.message : e)
+            }
+          }
         }
       }
     } catch (e) {
