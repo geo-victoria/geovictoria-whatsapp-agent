@@ -107,6 +107,12 @@ function paisDe(tel: string, territorio: string): string {
 function normalizarTel(raw: string): string {
   let tel = String(raw || "").replace(/\D/g, "")
   if (/^(56|57|52|51)\1\d{8,12}$/.test(tel)) tel = tel.slice(2)
+  // Form chileno con celular COLOMBIANO tipeado sin código (caso angela
+  // hurtado 09-sep: "+56" + 3215623093 → 12 dígitos que no son de Chile). Un
+  // móvil CO siempre parte en 3 y tiene 10 dígitos: se re-prefija +57 para
+  // que vaya a Galindo y no a la tómbola chilena.
+  const co = tel.match(/^56(3\d{9})$/)
+  if (co) tel = `57${co[1]}`
   return tel
 }
 
