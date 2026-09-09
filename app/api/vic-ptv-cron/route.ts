@@ -370,8 +370,14 @@ async function conciliarStatusLeads(): Promise<number> {
       const actual = ORDEN_STATUS_LEAD[String(ld.Lead_Status || "").trim()] || 0
       const meta = ORDEN_STATUS_LEAD[objetivo] || 0
       let tocado = false
+      // "No Calificado" entra a esta consulta por la rama `Fecha_de_Primera_
+      // revision_Lead is null` y su orden es 0 → la escalera lo REABRÍA a
+      // "3. Contactado" (09-sep 14:02: tres duplicados cerrados a las 13:55
+      // volvieron a nombre de Vicky en el tick siguiente). Un descarte no se
+      // reabre desde acá: solo se cuadra la fecha del primer hito.
+      const descartado = /no calificado/i.test(String(ld.Lead_Status || ""))
 
-      if (meta > actual) {
+      if (meta > actual && !descartado) {
         // ESCALÓN POR ESCALÓN: el Lead_Status vive bajo Blueprint y solo
         // existen transiciones entre estados CONSECUTIVOS. Pedir el salto de
         // "2. Intento de contacto" a "4. Calificado" de una vez devolvía

@@ -322,6 +322,26 @@ export async function updateZohoLeadStatus(
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
     const moduleName = getEnv("ZOHO_CRM_LEADS_MODULE") || "Leads"
+    // UN DESCARTE NO SE REABRE POR UNA SUBIDA DE STATUS (09-sep): un lead
+    // "No Calificado" por duplicado de otro registro o por motivo terminal
+    // no vuelve a "1./2./3." desde ningún conciliador ni hito pre-formal —
+    // el proceso vive en el otro registro. La regla 3 de marketing (<3 meses
+    // se re-trabaja) sigue valiendo para los demás motivos.
+    if (/^\s*[123]\./.test(status)) {
+      const cur = await fetch(
+        `${apiDomain}/crm/v3/${moduleName}/${leadId}?fields=Lead_Status,Motivo_No_calificado`,
+        { headers: { Authorization: `Zoho-oauthtoken ${accessToken}` }, cache: "no-store" },
+      ).catch(() => null)
+      const c = cur && cur.status === 200
+        ? (((await cur.json().catch(() => ({}))) as { data?: Array<{ Lead_Status?: string; Motivo_No_calificado?: string | null }> }).data?.[0])
+        : undefined
+      if (c && /no calificado/i.test(String(c.Lead_Status || ""))) {
+        const motivo = String(c.Motivo_No_calificado || "")
+        if (/duplicado en otro canal/i.test(motivo) || esMotivoTerminal(String(c.Lead_Status || ""), motivo)) {
+          return { success: false, error: `lead descartado (${motivo || "No Calificado"}): no se reabre` }
+        }
+      }
+    }
     const res = await fetch(`${apiDomain}/crm/v3/${moduleName}/${leadId}`, {
       method: "PUT",
       headers: {

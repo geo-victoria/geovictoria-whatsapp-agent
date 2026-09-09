@@ -176,26 +176,39 @@ async function procesoEnOtroRegistro(H: Record<string, string>, api: string, tel
   const leads = await coql<{ id: string; Full_Name?: string; Lead_Status?: string; "Owner.email"?: string }>(
     H, api,
     `select id, Full_Name, Lead_Status, Owner.email from Leads where ((Phone = '${p}' and Converted__s = false) and Owner != '3525045000484500876') limit 5`,
-  ).catch(() => [])
+  ).catch((e) => {
+    console.warn(`[barrido-leads] COQL leads ${tel} falló:`, e instanceof Error ? e.message : e)
+    return []
+  })
   const otro = leads.find((l) => l.id !== leadId && !OWNERS_ROBOT.test(String(l["Owner.email"] || "")))
   if (otro) return `lead ${otro.id} (${otro.Full_Name || "?"}, ${otro.Lead_Status || "?"}) de ${otro["Owner.email"]}`
   // (2) Contacto (= proceso convertido) con deal o con dueño humano.
-  const contactos = await coql<{ id: string; Full_Name?: string; "Owner.email"?: string; "Account_Name.name"?: string }>(
+  // OJO COQL: `Account_Name.name` es columna INVÁLIDA en Contacts (el lookup
+  // se pide a secas y llega como {name,id}); con ella la consulta moría y la
+  // guarda de duplicados dejaba pasar TODO (dry-run 09-sep: tres leads con
+  // deal vivo salían "entregado"). Un fallo acá se LOGUEA, no se traga.
+  const contactos = await coql<{ id: string; Full_Name?: string; "Owner.email"?: string; Account_Name?: { name?: string } | null }>(
     H, api,
-    `select id, Full_Name, Owner.email, Account_Name.name from Contacts where (Phone = '${p}' or Mobile = '${p}') limit 10`,
-  ).catch(() => [])
+    `select id, Full_Name, Owner.email, Account_Name from Contacts where (Phone = '${p}' or Mobile = '${p}') limit 10`,
+  ).catch((e) => {
+    console.warn(`[barrido-leads] COQL contactos ${tel} falló:`, e instanceof Error ? e.message : e)
+    return []
+  })
   if (!contactos.length) return null
   const ids = contactos.map((c) => `'${c.id}'`).join(",")
   const deals = await coql<{ id: string; Deal_Name?: string; Stage?: string; "Owner.email"?: string }>(
     H, api,
     `select id, Deal_Name, Stage, Owner.email from Deals where Contact_Name in (${ids}) order by Created_Time desc limit 5`,
-  ).catch(() => [])
+  ).catch((e) => {
+    console.warn(`[barrido-leads] COQL deals ${tel} falló:`, e instanceof Error ? e.message : e)
+    return []
+  })
   if (deals.length) {
     const d = deals[0]
     return `deal ${d.id} "${d.Deal_Name || ""}" (${d.Stage || "?"}) de ${d["Owner.email"] || "?"}`
   }
   const humano = contactos.find((c) => !OWNERS_ROBOT.test(String(c["Owner.email"] || "")))
-  if (humano) return `contacto ${humano.id} (${humano.Full_Name || "?"}${humano["Account_Name.name"] ? `, ${humano["Account_Name.name"]}` : ""}) de ${humano["Owner.email"]}`
+  if (humano) return `contacto ${humano.id} (${humano.Full_Name || "?"}${humano.Account_Name?.name ? `, ${humano.Account_Name.name}` : ""}) de ${humano["Owner.email"]}`
   return null
 }
 
