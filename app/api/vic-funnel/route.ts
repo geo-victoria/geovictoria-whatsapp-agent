@@ -4835,21 +4835,32 @@ function renderInboundDiario(
               return `<circle cx="${x(idx).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="${s.color}" stroke="#fff" stroke-width="2"${p.enCurso ? ' stroke-dasharray="2 1"' : ""}><title>${esc(p.etiqueta)}${p.enCurso ? " (semana en curso)" : ""} · ${s.nombre} ${v}% · ${esc(p.det)}</title></circle>`
             })
             .join("")
-          // Etiqueta directa al final de la serie (identidad sin depender del color).
+          return path + marcas
+        })
+        .join("")
+      // Etiquetas directas al final de cada serie (identidad sin depender del
+      // color), separadas al menos 13 px para que no se pisen cuando dos
+      // series terminan casi iguales (08-sep: Outbound 32% sobre General 28%).
+      const finales = series
+        .map((s) => {
           let ultimo = -1
           puntos.forEach((p, idx) => { if (p[s.k] !== null) ultimo = idx })
-          const etq = ultimo >= 0
-            ? `<text x="${(x(ultimo) + 8).toFixed(1)}" y="${(y(puntos[ultimo][s.k] as number) + 4).toFixed(1)}" font-size="11.5" font-weight="700" fill="#374151">${s.nombre} ${puntos[ultimo][s.k]}%</text>`
-            : ""
-          return path + marcas + etq
+          return ultimo >= 0 ? { s, xv: x(ultimo) + 8, yv: y(puntos[ultimo][s.k] as number) + 4, v: puntos[ultimo][s.k] as number } : null
         })
+        .filter((e): e is { s: (typeof series)[number]; xv: number; yv: number; v: number } => e !== null)
+        .sort((a, b) => a.yv - b.yv)
+      for (let i = 1; i < finales.length; i++) {
+        if (finales[i].yv - finales[i - 1].yv < 13) finales[i].yv = finales[i - 1].yv + 13
+      }
+      const etiquetas = finales
+        .map((e) => `<text x="${e.xv.toFixed(1)}" y="${Math.min(e.yv, H - B - 2).toFixed(1)}" font-size="11.5" font-weight="700" fill="#374151">${e.s.nombre} ${e.v}%</text>`)
         .join("")
       const leyenda = series
         .map((s) => `<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px"><span style="display:inline-block;width:18px;height:0;border-top:${s.ancho}px solid ${s.color}"></span>${s.nombre}</span>`)
         .join("")
       return `<div style="margin:6px 0 14px">
         <div class="sub" style="margin:0 0 4px;color:#374151">${leyenda}<span style="color:#6b7280">· cierre = pagadas ÷ vieron precio · el último punto es la semana en curso</span></div>
-        <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block;font-family:inherit" role="img" aria-label="Evolución semanal de la tasa de cierre de Vicky: general, inbound y outbound">${grid}${ejeX}${lineas}</svg></div>
+        <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block;font-family:inherit" role="img" aria-label="Evolución semanal de la tasa de cierre de Vicky: general, inbound y outbound">${grid}${ejeX}${lineas}${etiquetas}</svg></div>
       </div>`
     })()
     return `<div class="card"><h2>🎯 Tasa de cierre semanal · inbound vs outbound <span class="pct" style="font-weight:400">— cierre = pagadas ÷ vieron precio de cada tipo</span></h2>
