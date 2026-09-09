@@ -905,7 +905,15 @@ export async function GET(req: Request): Promise<Response> {
       // Las emisiones de JUNIO marcaban la asistencia fija Es_Recurrente=false
       // (caso TAO COT168) — la asistencia SIEMPRE es recurrente, así que entra
       // por código de ítem aunque el flag venga apagado.
-      const recurrenteNeto = Math.round(
+      // ANUALIDAD (09-sep, casos Proveedora de Bolsas / Consultora Colegios):
+      // la fila "plan_anual" lleva los 12 meses y las recurrentes quedan
+      // ocultas en $0 → el recurrente salía 0 y el Valor_fijo quedaba vacío.
+      // El valor del deal es el equivalente MENSUAL: plan anual ÷ 12 (ya trae
+      // el descuento aplicado, no se vuelve a descontar).
+      const planAnual = items.find((i) => (i.Codigo_Item || "") === "plan_anual")
+      const recurrenteNeto = planAnual && Number(planAnual.Subtotal_CLP) > 0
+        ? Math.round(Number(planAnual.Subtotal_CLP) / 12)
+        : Math.round(
         items
           .filter((i) => i.Es_Recurrente || (i.Codigo_Item || "") === "asistencia")
           .reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0) * (1 - pct / 100),
