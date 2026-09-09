@@ -580,7 +580,9 @@ async function dealActivoEnKv(fono: string): Promise<string | null> {
  * fono, o null. Best-effort: sin puntero, sin deal o Zoho caído → null. */
 /** "78.431353-0" / "784313530" → "78431353-0" (o el texto tal cual si no parsea). */
 function rutCanonico(raw: string): string {
-  const n = normalizarRut(raw)
+  // Inline (misma regla que normalizarRut de lib/rut.ts): node --test no
+  // resuelve imports estáticos sin extensión y este módulo se testea así.
+  const n = String(raw || "").replace(/[.\s-]/g, "").toUpperCase()
   if (!/^\d{7,8}[0-9K]$/.test(n)) return String(raw || "").trim()
   return `${n.slice(0, -1)}-${n.slice(-1)}`
 }
@@ -2132,5 +2134,5 @@ export async function sincronizarHitoCrm(
   } catch (e) {
     console.warn("[crm-hitos] excepción:", e instanceof Error ? e.message : e)
   }
-}import { normalizarRut } from "./rut"
+}
 
