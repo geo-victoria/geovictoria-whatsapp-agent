@@ -93,6 +93,10 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // en el alta y se intenta una vez en línea; acá se empuja cada ~2' hasta
   // que la nota esté confirmada y la implementación enlazada (lib/ndv-alta).
   { nombre: "onb_ndv_imp", path: "/api/vic-onboarding-ndv-imp", cadaMin: 2 },
+  // BARRIDO DE LEADS A NOMBRE DE VICKY (Lalo 09-sep): >24 h con Vicky →
+  // duplicado (cierra), no-prospecto (cierra) o entrega por la regla que
+  // corresponde. Endpoint propio, fuera del ptv-cron que ya toca el timeout.
+  { nombre: "barrido_leads_vicky", path: "/api/vic-leads-vicky-barrido?max=10", cadaMin: 60 },
 ]
 
 /**

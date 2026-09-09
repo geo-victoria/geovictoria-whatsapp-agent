@@ -3594,7 +3594,10 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
       select_query:
         "select id, First_Name, Last_Name, Company, Phone, Email, Territorio, Created_Time from Leads " +
         "where (Form_Vicky = 'Si' and Converted__s = false) and Owner.email = 'vicky@geovictoria.com' " +
-        "order by Created_Time asc limit 50",
+        // 200, no 50 (09-sep): los leads con candado "conversa"/"gemelo"
+        // seguían con Vicky y TAPABAN la ventana de 50 más antiguos — los
+        // form-fills nuevos nunca llegaban a evaluarse (13 varados).
+        "order by Created_Time asc limit 200",
     }),
   })
   if (!q.ok) {
@@ -3658,15 +3661,27 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
           }).data || [])[0]
           if (gemelo?.id) {
             await setKvValue(`rescate_form_${l.id}`, `gemelo:${gemelo.id}`).catch(() => {})
+            // POLÍTICA (Lalo 09-sep): el gemelo ya no queda "omitido" a nombre
+            // de Vicky para siempre — se CIERRA como duplicado del otro
+            // registro. Los leads del form nacen fuera del blueprint, así que
+            // el PUT directo de estado funciona (con blueprint lo re-engancha).
+            const cierre = await fetch(`${api}/crm/v3/Leads`, {
+              method: "PUT", headers: H, cache: "no-store",
+              body: JSON.stringify({
+                data: [{ id: l.id, Lead_Status: "No Calificado", Motivo_No_calificado: "Duplicado en otro canal" }],
+                trigger: ["blueprint"],
+                skip_feature_execution: [{ name: "assignment_rules" }],
+              }),
+            }).then((r) => r.ok).catch(() => false)
             const { agregarNotaLead } = await import("@/lib/zoho-leads")
             await agregarNotaLead(
               l.id,
-              "Form Vicky — posible duplicado, no se entrega",
+              "Form Vicky — duplicado de otro registro, cerrado",
               `Este lead llegó por el formulario de las landing pero su teléfono/correo ya existe como CONTACTO en Zoho ` +
                 `(${gemelo.Last_Name || "contacto"}, dueño ${gemelo["Owner.last_name"] || "?"}, id ${gemelo.id}) — la persona ya fue atendida por otro registro. ` +
-                `Se omite de la tómbola SDR para no duplicar gestión; revisar/fusionar como Recontacto si corresponde.`,
+                `${cierre ? 'Queda "No Calificado / Duplicado en otro canal".' : 'No se pudo cerrar automáticamente: corresponde "No Calificado / Duplicado en otro canal".'}`,
             ).catch(() => {})
-            console.log(`[rescate-form] lead ${l.id} omitido: gemelo contacto ${gemelo.id}`)
+            console.log(`[rescate-form] lead ${l.id} gemelo contacto ${gemelo.id} → cerrado=${cierre}`)
             continue
           }
         }
