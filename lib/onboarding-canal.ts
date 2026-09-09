@@ -91,6 +91,7 @@ import {
   TOOL_AGENDAR_CAPACITACION,
   TOOL_REAGENDAR_CAPACITACION,
   TOOL_CANCELAR_CAPACITACION,
+  TOOL_ESCALAR_A_IMPLEMENTADOR,
 } from "./onboarding/tools"
 
 /**
@@ -173,6 +174,15 @@ export async function armarOnboarding(contact: string): Promise<{
   }
 
   const dispatch = async (name: string, input: unknown): Promise<unknown> => {
+    // ── ESCALAMIENTO AL IMPLEMENTADOR (09-sep, caso Lorena) ──────────────
+    if (name === TOOL_ESCALAR_A_IMPLEMENTADOR.name) {
+      const a = (input || {}) as { motivo?: string; detalle?: string }
+      const { escalarAImplementador } = await import("./onboarding-escalamiento")
+      return escalarAImplementador(contact, {
+        motivo: (a.motivo || "otro") as import("./onboarding-escalamiento").MotivoEscalamiento,
+        detalle: String(a.detalle || ""),
+      })
+    }
     // ── CAPACITACIÓN (Curso 1) ────────────────────────────────────────────
     // Vicky cierra sola (decisión de Lalo 04-sep). Los candados están acá, no
     // en el prompt: el horario tiene que venir de la disponibilidad REAL, y un
@@ -244,7 +254,7 @@ export async function armarOnboarding(contact: string): Promise<{
           duracionMin: 120,
           dias,
           nota: dias.length
-            ? "Ofrece SOLO estos horarios. Son de la agenda real del relator. Nombra cada día con su `etiqueta` TAL CUAL (ej. \"Lunes 8 de septiembre\"): nunca digas \"mañana\" ni \"pasado mañana\" — el primer día disponible casi nunca es mañana."
+            ? "Ofrece SOLO estos horarios. Son de la agenda real del relator. Nombra cada día con su `etiqueta` TAL CUAL (ej. \"Lunes 8 de septiembre\"): nunca digas \"mañana\" ni \"pasado mañana\" — el primer día disponible casi nunca es mañana. Si el cliente dice que necesita ANTES o que le urge partir, no negocies ni repitas la lista: llama escalar_a_implementador (urgencia_capacitacion) en ese mismo turno."
             : "Sin cupos en los próximos días. Dile que le confirmas la hora por este chat y avisa al equipo.",
         }
       }
@@ -887,7 +897,9 @@ export async function armarOnboarding(contact: string): Promise<{
             TOOL_AGENDAR_CAPACITACION,
             TOOL_REAGENDAR_CAPACITACION,
             TOOL_CANCELAR_CAPACITACION,
-            consultarAgenteSoporteSchema,
+            // Vicky NO da soporte de plataforma en onboarding (Lalo 09-sep):
+            // todo problema de uso/acceso y toda urgencia van al implementador.
+            TOOL_ESCALAR_A_IMPLEMENTADOR,
           ]
         : [
             TOOL_GUARDAR_DATOS_ONBOARDING,

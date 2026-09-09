@@ -208,6 +208,34 @@ export const TOOL_ELIMINAR_TRABAJADOR = {
  * de acá es exactamente lo que se le puede ofrecer al cliente. Vicky NUNCA
  * inventa un horario ni lo deduce.
  */
+/**
+ * ESCALAR AL IMPLEMENTADOR (09-sep, caso Lorena Ortiz). Vicky NO da soporte de
+ * plataforma y NO conoce sus menús; cuando el cliente pide un cupo antes de
+ * los disponibles, tiene un problema para entrar/usar la plataforma o se
+ * frustra, la única salida correcta es avisar a su implementador y decírselo.
+ */
+export const TOOL_ESCALAR_A_IMPLEMENTADOR = {
+  name: "escalar_a_implementador",
+  description:
+    "Avisa AHORA al implementador del cliente (su relator) por correo y alerta interna, y te devuelve el texto para el cliente. " +
+    "Úsala EN EL MISMO TURNO cuando: (a) el cliente dice que necesita usar la plataforma hoy/antes o pide una capacitación antes de los cupos que le mostraste; " +
+    "(b) tiene un problema para entrar o usar la plataforma (no ve un menú, no le aparecen sus trabajadores, permisos, pantallas, contraseña); " +
+    "(c) está molesto o frustrado. No lo mandes a la Mesa de Ayuda ni le expliques pasos de la plataforma: eso lo hace su implementador. " +
+    "Copia el mensajeParaProspecto tal cual.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      motivo: {
+        type: "string",
+        enum: ["urgencia_capacitacion", "problema_plataforma", "cliente_molesto", "otro"],
+        description: "urgencia_capacitacion = quiere partir antes / cupo antes; problema_plataforma = no puede entrar o usar algo; cliente_molesto = frustración explícita.",
+      },
+      detalle: { type: "string", description: "Qué dijo el cliente, en sus palabras (1-2 frases)." },
+    },
+    required: ["motivo", "detalle"],
+  },
+}
+
 export const TOOL_VER_CUPOS_CAPACITACION = {
   name: "ver_cupos_capacitacion",
   description:
