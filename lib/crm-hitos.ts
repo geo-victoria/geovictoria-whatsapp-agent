@@ -548,7 +548,20 @@ async function dealActivoEnKv(fono: string): Promise<string | null> {
       return raw ? (JSON.parse(raw) as { at?: string; dealId?: string; creando?: boolean }) : null
     }
     let v = await leer()
-    if (!v?.at || Date.now() - Date.parse(v.at) > DEAL_KV_TTL_MS) return null
+    if (!v?.at || Date.now() - Date.parse(v.at) > DEAL_KV_TTL_MS) {
+      // 09-sep (caso Salumería Tonino / Grey): la formal creó el deal a las
+      // 21:50 y el reloj de traspaso corrió a las 08:40 del día siguiente —
+      // el candado de 6 h ya había vencido y el hito convirtió un lead viejo
+      // del mismo fono en un SEGUNDO deal. El puntero de cotización es el
+      // ancla durable: si el contacto tiene una cotización con deal y ese deal
+      // sigue vivo, ESE es el deal del fono (y se re-siembra el candado).
+      const delPuntero = await dealVivoDesdePuntero(fono)
+      if (delPuntero) {
+        await registrarDealEnKv(fono, delPuntero, "puntero_cotizacion").catch(() => {})
+        return delPuntero
+      }
+      return null
+    }
     // Marca "creando" (anti-carrera 25-ago, gemelos Quilodrán): la otra puerta
     // está pariendo el deal AHORA MISMO — esperar su id real y reusarlo.
     if (!v.dealId && v.creando && Date.now() - Date.parse(v.at) < 120_000) {
@@ -558,6 +571,32 @@ async function dealActivoEnKv(fono: string): Promise<string | null> {
       }
     }
     return v?.dealId ? String(v.dealId) : null
+  } catch {
+    return null
+  }
+}
+
+/** Deal vivo (≠ Cierre Perdido) del puntero de cotización más reciente del
+ * fono, o null. Best-effort: sin puntero, sin deal o Zoho caído → null. */
+/** "78.431353-0" / "784313530" → "78431353-0" (o el texto tal cual si no parsea). */
+function rutCanonico(raw: string): string {
+  const n = normalizarRut(raw)
+  if (!/^\d{7,8}[0-9K]$/.test(n)) return String(raw || "").trim()
+  return `${n.slice(0, -1)}-${n.slice(-1)}`
+}
+
+async function dealVivoDesdePuntero(fono: string): Promise<string | null> {
+  try {
+    const { getQuotePointers } = await import("./supabase-persistence-v3")
+    const punteros = await getQuotePointers(fono).catch(() => [])
+    const dealId = (punteros.find((p) => /^\d{10,}$/.test((p.dealId || "").trim()))?.dealId || "").trim()
+    if (!dealId) return null
+    const { h, api } = await zohoHeaders()
+    const r = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage`, { headers: h, cache: "no-store" })
+    if (r.status !== 200) return null
+    const d = ((await r.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }).data?.[0]
+    if (!d || String(d.Stage || "") === "Cierre Perdido") return null
+    return dealId
   } catch {
     return null
   }
@@ -576,6 +615,8 @@ async function reservarDealEnKv(fono: string, origen: string): Promise<boolean> 
         if (v.creando && Date.now() - Date.parse(v.at) < 120_000) return false
       }
     }
+    // Candado vencido o ausente: el puntero de cotización manda (09-sep).
+    if (await dealVivoDesdePuntero(fono)) return false
     await setKvValue(`deal_fono_${fono}`, JSON.stringify({ at: new Date().toISOString(), creando: true, origen }))
     return true
   } catch {
@@ -605,7 +646,10 @@ async function enriquecerLead(lead: LeadEncontrado, datos: DatosConversacion): P
   const campos: Record<string, unknown> = {}
   if (datos.empresa && esPlaceholder(lead.company)) campos.Company = datos.empresa.slice(0, 200)
   if (datos.email && !lead.email) campos.Email = datos.email
-  if (datos.rut && !lead.rut) campos.RUT_Empresa = datos.rut
+  // RUT en formato canónico "78431353-0" (09-sep: "78.431353-0" con punto
+  // esquivó la unicidad de RUT_Empresa en Cuentas y nació una cuenta gemela
+  // que después no se podía corregir a mano).
+  if (datos.rut && !lead.rut) campos.RUT_Empresa = rutCanonico(datos.rut)
   if (datos.empleados && !lead.empleados) campos.N_Empleados_que_marcan = datos.empleados
   if (datos.nombre && esPlaceholder(lead.lastName)) {
     const partes = datos.nombre.trim().split(/\s+/)
@@ -2088,4 +2132,5 @@ export async function sincronizarHitoCrm(
   } catch (e) {
     console.warn("[crm-hitos] excepción:", e instanceof Error ? e.message : e)
   }
-}
+}import { normalizarRut } from "./rut"
+
