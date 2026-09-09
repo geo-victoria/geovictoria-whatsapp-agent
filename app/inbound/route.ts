@@ -18,7 +18,7 @@
  */
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 60
+export const maxDuration = 300
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
@@ -69,7 +69,9 @@ export async function GET(req: Request): Promise<Response> {
     try {
       await fetch(`${baseUrl(req)}/api/vic-funnel?key=${encodeURIComponent(FUNNEL_KEY)}&vista=inbound&fresh=1`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(50_000),
+        // 240 s (09-sep): con 50 s el render vivo no alcanzaba y ?fresh=1 servía la
+        // foto VIEJA sin avisar — el dash parecía no registrar ventas del día.
+        signal: AbortSignal.timeout(240_000),
       })
     } catch {
       /* si no alcanzó, se sirve la foto que haya */

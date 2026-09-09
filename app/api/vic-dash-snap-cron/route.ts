@@ -16,7 +16,7 @@ import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 120
+export const maxDuration = 300
 
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const FUNNEL_KEY = (process.env.VIC_FUNNEL_KEY || "").trim()
@@ -64,7 +64,7 @@ export async function GET(req: Request): Promise<Response> {
       if (vista) p.set("vista", vista)
       const r = await fetch(`${base}/api/vic-funnel?${p.toString()}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(110_000),
+        signal: AbortSignal.timeout(280_000),
       })
       const cuerpo = await r.text().catch(() => "")
       resultados.push({ vista: vista || "main", status: r.status, bytes: cuerpo.length, ms: Date.now() - inicio })

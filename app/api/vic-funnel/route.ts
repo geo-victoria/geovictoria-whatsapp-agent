@@ -8613,6 +8613,31 @@ export async function GET(req: Request): Promise<Response> {
             }
             telPorQuote.set(qid, telQ2)
           }
+          // PAGO NUEVO SIN CACHE (Lalo 09-sep, "hoy hubieron 4 ventas y no hay
+          // ninguna en el dash"): la kv `venta_dash_v3_` la escribe
+          // construirVentasCerradas MÁS ABAJO en este mismo render, así que la
+          // primera foto tras un pago no lo veía en la Caja ni en la columna
+          // Pagada (caso COT1267/earthchile: Aceptada en la Foto, ausente de la
+          // Caja). Las pagadas del universo sin fila en la kv se construyen
+          // acá mismo (misma función, misma kv) antes de contar.
+          try {
+            const conKv = new Set(filasKv.map((f) => String(f.key).replace("venta_dash_v3_", "")))
+            const faltan = (cierreZoho?.todasList || cierre?.todasList || []).filter((q) => {
+              const id = String(q.id || "")
+              return pagadasIds.has(id) && !conKv.has(id)
+            })
+            if (faltan.length) {
+              const nuevas = await construirVentasCerradas(faltan)
+              for (const v of nuevas) {
+                const q = faltan.find((x) => String(x.Numero_Cotizacion || "") === v.numero)
+                if (!q || !(v.montoClp > 0)) continue
+                filasKv.push({ key: `venta_dash_v3_${String(q.id || "")}`, value: JSON.stringify(v) })
+              }
+              console.log(`[inbound] caja: ${faltan.length} pagada(s) sin kv construidas en línea`)
+            }
+          } catch (e) {
+            console.warn("[inbound] caja sin kv:", e instanceof Error ? e.message : e)
+          }
           const finCaja = rango && rango.hastaMs !== Number.MAX_SAFE_INTEGER ? rango.hastaMs : Date.now()
           const iniCaja = rango && rango.desdeMs > 0 ? rango.desdeMs : finCaja - 29 * 864e5
           pagosVicky = []
