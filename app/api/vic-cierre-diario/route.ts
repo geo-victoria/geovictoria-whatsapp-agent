@@ -71,7 +71,7 @@ type Foto = {
   formales: number
   medInicioFormal: number | null
   /** SOLO canal Vicky. El canal ejecutivo va aparte — ver ventasEjecutivo. */
-  ventas: Array<{ cot: string; empresa: string; monto: number; dueno: string }>
+  ventas: Array<{ cot: string; empresa: string; monto: number; dueno: string; reemitida?: boolean }>
   montoVentas: number
   /** Ventas del día del CANAL EJECUTIVO (cotizadora del dash), informativas. */
   ventasEjecutivo: number
@@ -229,7 +229,7 @@ async function construirFoto(fecha: string): Promise<Foto> {
         cache: "no-store",
         body: JSON.stringify({
           select_query:
-            `select Numero_Cotizacion, Owner.first_name, Owner.last_name, Intervenci_n_Humana from ${QUOTE_MODULE} ` +
+            `select Numero_Cotizacion, Owner.first_name, Owner.last_name, Intervenci_n_Humana, Deal_Asociado.id, Tel_fono_Contacto, Created_Time from ${QUOTE_MODULE} ` +
             `where Numero_Cotizacion in (${nums}) limit 60`,
         }),
       })
@@ -239,15 +239,62 @@ async function construirFoto(fecha: string): Promise<Foto> {
         }
         const por = new Map<string, string>()
         const canalDe = new Map<string, string>()
+        const metaDe = new Map<string, { deal: string; tel: string; creada: string }>()
         for (const q of dd.data || []) {
           const nom = `${String(q["Owner.first_name"] || "")} ${String(q["Owner.last_name"] || "")}`.trim()
           const cot = String(q.Numero_Cotizacion || "")
           por.set(cot, nom)
           canalDe.set(cot, String(q["Intervenci_n_Humana"] || ""))
+          metaDe.set(cot, {
+            deal: String(q["Deal_Asociado.id"] || ""),
+            tel: String(q.Tel_fono_Contacto || "").replace(/\D/g, ""),
+            creada: String(q.Created_Time || ""),
+          })
         }
         for (const v of ventas) {
           v.dueno = por.get(v.cot) || ""
           v.canal = canalDe.get(v.cot) || ""
+        }
+        // REEMISIÓN DEL EJECUTIVO SOBRE UNA VENTA DE VICKY (Lalo 08-sep, caso
+        // UDES/COT1324: "no quiero que estos casos le quiten tasa a Vicky"; el
+        // cierre del 08-sep salió con 6 ventas y eran 7). Misma regla que el
+        // dash (`reemitidasSobreVicky`) y que el correo de PAGADA del cotizador:
+        // una cotización "Con intervención humana" cuyo DEAL (o, sin deal, su
+        // teléfono) ya tenía una cotización 100% Vicky emitida ANTES es una
+        // reemisión — la venta es de Vicky, asistida. Una consulta por venta
+        // ejecutiva del día (son pocas); si Zoho no responde, queda como estaba.
+        for (const v of ventas) {
+          if (!/intervenci/i.test(String(v.canal || ""))) continue
+          const m = metaDe.get(v.cot)
+          if (!m || !m.creada) continue
+          const creadaIso = new Date(m.creada).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+          const tel9 = m.tel.slice(-9)
+          const cond = m.deal
+            ? `Deal_Asociado.id = '${m.deal}'`
+            : tel9.length === 9
+              ? `Tel_fono_Contacto like '%${tel9}%'`
+              : ""
+          if (!cond) continue
+          try {
+            const r2 = await fetch(`${ZOHO_API}/crm/v8/coql`, {
+              method: "POST",
+              headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({
+                select_query:
+                  `select Numero_Cotizacion from ${QUOTE_MODULE} ` +
+                  `where ((${cond}) and (Intervenci_n_Humana = '100% Vicky') and (Created_Time < '${creadaIso}')) limit 1`,
+              }),
+            })
+            if (r2.status !== 200) continue
+            const d2 = (await r2.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
+            if ((d2.data || []).length > 0) {
+              v.canal = "100% Vicky (reemitida por ejecutivo)"
+              v.reemitida = true
+            }
+          } catch (e) {
+            console.warn("[cierre] reemisión:", v.cot, e instanceof Error ? e.message : e)
+          }
         }
       }
     } catch (e) {
@@ -277,7 +324,7 @@ async function construirFoto(fecha: string): Promise<Foto> {
     nuevas,
     formales: formal.length,
     medInicioFormal: m1,
-    ventas: deVicky.map((v) => ({ cot: v.cot, empresa: v.empresa, monto: v.monto, dueno: v.dueno })),
+    ventas: deVicky.map((v) => ({ cot: v.cot, empresa: v.empresa, monto: v.monto, dueno: v.dueno, ...(v.reemitida ? { reemitida: true } : {}) })),
     montoVentas: deVicky.reduce((s, v) => s + v.monto, 0),
     ventasEjecutivo: deEjecutivo.length,
     montoVentasEjecutivo: deEjecutivo.reduce((s, v) => s + v.monto, 0),
@@ -322,7 +369,7 @@ function render(f: Foto, paraCorreo: boolean): string {
     ? `<table style="width:100%;border-collapse:collapse;font-size:13px">${f.ventas
         .map(
           (v) =>
-            `<tr><td style="padding:5px 8px 5px 0;border-bottom:1px solid #eceeec"><b>${esc(v.empresa)}</b> <span style="color:#7d8890">${esc(v.cot)}</span></td>` +
+            `<tr><td style="padding:5px 8px 5px 0;border-bottom:1px solid #eceeec"><b>${esc(v.empresa)}</b> <span style="color:#7d8890">${esc(v.cot)}</span>${v.reemitida ? ` <span style="color:#7d8890;font-size:11px" title="Vicky cotizó primero en este deal; el ejecutivo emitió otra cotización sobre la misma venta">· reemitida por ejecutivo</span>` : ""}</td>` +
             `<td style="padding:5px 0;border-bottom:1px solid #eceeec;text-align:right">${v.monto ? clp(v.monto) : "—"}</td>` +
             `<td style="padding:5px 0 5px 12px;border-bottom:1px solid #eceeec;color:#7d8890">${esc(v.dueno)}</td></tr>`,
         )
