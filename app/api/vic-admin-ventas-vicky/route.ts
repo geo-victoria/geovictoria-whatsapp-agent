@@ -214,6 +214,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   const cero = () => ({ ventas: 0, cobradoClp: 0, mrrClp: 0, unicoClp: 0 })
   const tot = { autonoma: cero(), asistida: cero(), sd: cero() }
   const porMes = new Map<string, { autonoma: number; asistida: number; sd: number }>()
+  // MRR INYECTADO POR MES (pregunta de Lalo 10-sep): el recurrente NUEVO que
+  // entró cada mes, con su corte autónoma/asistida, más el acumulado corrido.
+  const mrrMes = new Map<string, { ventas: number; mrr: number; autonoma: number; asistida: number }>()
   const detalleSd: string[] = []
   for (const q of universo) {
     const id = String(q.id || "")
@@ -229,6 +232,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     const m = porMes.get(mes) || { autonoma: 0, asistida: 0, sd: 0 }
     m[g] += Number(c.montoClp || 0) || 0
     porMes.set(mes, m)
+    const rec = Number(c.recurrenteClp || 0) || 0
+    const mm = mrrMes.get(mes) || { ventas: 0, mrr: 0, autonoma: 0, asistida: 0 }
+    mm.ventas++
+    mm.mrr += rec
+    if (g === "autonoma") mm.autonoma += rec
+    else if (g === "asistida") mm.asistida += rec
+    mrrMes.set(mes, mm)
     if (g === "sd" && detalleSd.length < 25) detalleSd.push(`${q.Numero_Cotizacion || id}`)
     const a = atribucion(q)
     const acc = porAtribucion.get(a) || { ventas: 0, cobradoClp: 0 }
@@ -253,6 +263,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     asistida: tot.asistida,
     sinClasificar: tot.sd,
     porMesCobradoClp: Object.fromEntries([...porMes.entries()].sort()),
+    mrrInyectadoPorMes: (() => {
+      let acum = 0
+      return [...mrrMes.entries()].sort().map(([mes, x]) => {
+        acum += x.mrr
+        return { mes, ventas: x.ventas, mrrNuevoClp: x.mrr, autonomaClp: x.autonoma, asistidaClp: x.asistida, mrrAcumuladoClp: acum }
+      })
+    })(),
     porAtribucion: Object.fromEntries([...porAtribucion.entries()]),
     excluidas: {
       fueraDeChile,
