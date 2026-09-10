@@ -197,6 +197,14 @@ export async function generarToqueContexto(
     // saludó igual, se le quita (08-sep: "Hola, todo bien? Hola, todo bien?").
     const { quitarSaludoInicial } = await import("./rechazo-cliente")
     texto = quitarSaludoInicial(texto)
+    // CINTURÓN DE ESTILO, TAMBIÉN EN LOS TOQUES (Lalo 10-sep: "no puedes decir
+    // 'pasai', es muy informal"). El saneador anti-voseo corría en los cuatro
+    // webhooks y en el canario, pero NO en el loop: el toque generado se
+    // enviaba crudo y salió "¿me pasai el RUT?" — el mapa ya tenía el patrón,
+    // le faltaba pasar por acá. Cubre el texto en ventana y la variable
+    // ${contexto} de la plantilla (las dos salen de esta función).
+    const { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } = await import("./voseo-v3")
+    texto = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(texto)))
     return recortarEnOracion(texto, MAX_CHARS)
   } catch (e) {
     console.error(`[toque5] generación falló ${contact}:`, e instanceof Error ? e.message : e)

@@ -56,7 +56,9 @@ export function sanitizarVoseo(texto: string): string {
   if (!texto) return texto
   let out = texto
   for (const [re, repl] of VOSEO_MAP) {
-    out = out.replace(re, (match) =>
+    // FUERA DE URLs (regla dura del canario, 03-sep): "dale"/"acá"/"po" dentro
+    // de un link romperían el token de la cotización.
+    out = reemplazarFueraDeUrls(out, re, undefined, (match) =>
       match[0] === match[0].toUpperCase()
         ? repl.charAt(0).toUpperCase() + repl.slice(1)
         : repl,
@@ -129,17 +131,23 @@ const SOPORTE_WHATSAPP = "+56 9 4401 3873"
  * cinturones son módulos PUROS y sin dependencias, y así siguen. Ningún
  * cinturón de teléfonos puede tocar el interior de una URL — ahí viven los ids
  * de cotización y los tokens de pago (cicatriz del 03-sep). */
-function reemplazarFueraDeUrls(texto: string, re: RegExp, reemplazo: () => string): string {
+function reemplazarFueraDeUrls(
+  texto: string,
+  re: RegExp,
+  reemplazo?: () => string,
+  porMatch?: (match: string) => string,
+): string {
   const URL_RE = /https?:\/\/\S+/g
+  const fn = (frag: string) => (porMatch ? frag.replace(re, (m) => porMatch(m)) : frag.replace(re, reemplazo as () => string))
   let salida = ""
   let ultimo = 0
   for (const url of texto.matchAll(URL_RE)) {
     const i = url.index ?? 0
-    salida += texto.slice(ultimo, i).replace(re, reemplazo)
+    salida += fn(texto.slice(ultimo, i))
     salida += url[0]
     ultimo = i + url[0].length
   }
-  return salida + texto.slice(ultimo).replace(re, reemplazo)
+  return salida + fn(texto.slice(ultimo))
 }
 
 export function blindarContactoComercial(

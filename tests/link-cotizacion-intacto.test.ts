@@ -12,7 +12,7 @@
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { corregirTelefonosEjecutivos } from "../lib/directorio-ejecutivos.ts"
-import { blindarContactoComercial } from "../lib/voseo-v3.ts"
+import { blindarContactoComercial, sanitizarVoseo } from "../lib/voseo-v3.ts"
 
 const LINK = "https://cotizacion.geovictoria.com/q/3525045000657868552-50234689d5"
 
@@ -54,4 +54,15 @@ describe("el link de la cotización sale intacto", () => {
   test("y el blindaje comercial sigue tapando el número de un ejecutivo suelto", () => {
     assert.ok(blindarContactoComercial("llama al +56 9 3937 2058", false).includes("+56 9 4401 3873"))
   })
+})
+
+// CASO 10-sep (Lalo, "no puedes decir 'pasai', es muy informal"): el toque
+// generado del loop salió crudo con voseo chileno. Al meter sanitizarVoseo en
+// ese camino, el saneador pasó a operar FUERA de URLs — este caso lo fija.
+test("sanitizarVoseo corrige el voseo y no toca el link de la cotización", () => {
+  const link = "https://cotizacion.geovictoria.com/q/aB3dale9acaPO"
+  const t = sanitizarVoseo(`¿me pasai el RUT o confirmo con ese mail? Acá está: ${link} dale`)
+  assert.ok(t.includes("me pasas el RUT"), t)
+  assert.ok(t.includes("Aquí está"), t)
+  assert.ok(t.includes(link), `el link se alteró: ${t}`)
 })
