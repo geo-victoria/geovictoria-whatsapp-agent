@@ -54,7 +54,6 @@ type DealZ = {
   Tipo_de_Cobro?: string | null
   Gesti_n_Vicky?: string | null
   Atribuci_n_Vicky?: string | null
-  RUT_Empresa?: string | null
   "Contact_Name.Phone"?: string | null
   "Contact_Name.Mobile"?: string | null
   Created_Time?: string
@@ -69,9 +68,20 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!token) return NextResponse.json({ ok: false, error: "sin token zoho" }, { status: 502 })
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+  // OJO (cicatriz del 09-sep y otra vez hoy): una COQL con una columna
+  // inválida devuelve 400 y, si el error se traga, el cruce sale VACÍO y el
+  // informe miente. `RUT_Empresa` no existe en Deals: por eso la primera
+  // corrida indexó 0 deals. Los fallos se acumulan y se devuelven.
+  const fallosCoql: string[] = []
   const coql = async <T,>(q: string): Promise<T[]> => {
     const r = await fetch(`${api}/crm/v3/coql`, { method: "POST", headers: H, cache: "no-store", body: JSON.stringify({ select_query: q }) }).catch(() => null)
-    if (!r || r.status === 204 || !r.ok) return []
+    if (!r) { fallosCoql.push("sin respuesta"); return [] }
+    if (r.status === 204) return []
+    if (!r.ok) {
+      const cuerpo = await r.text().catch(() => "")
+      fallosCoql.push(`${r.status} ${cuerpo.slice(0, 160)}`)
+      return []
+    }
     return (((await r.json().catch(() => ({}))) as { data?: T[] }).data) || []
   }
 
@@ -83,7 +93,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   for (let off = 0; off < 12000; off += 200) {
     const lote = await coql<DealZ>(
       `select id, Deal_Name, Stage, Valor_fijo_del_trato_Global, N_Empleados_que_marcan, Monda_del_trato, Tipo_de_Cobro, ` +
-      `Gesti_n_Vicky, Atribuci_n_Vicky, RUT_Empresa, Contact_Name.Phone, Contact_Name.Mobile, Created_Time from Deals ` +
+      `Gesti_n_Vicky, Atribuci_n_Vicky, Contact_Name.Phone, Contact_Name.Mobile, Created_Time from Deals ` +
       `where Created_Time >= '${desde}T00:00:00+00:00' order by Created_Time desc limit ${off}, 200`,
     )
     for (const d of lote) {
@@ -150,6 +160,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     nota: "solo lectura; 'al día' para quien vio precio = stage>=4, valor>1.000 CLP, empleados>0, moneda CLP, tipo Mensual fijo y Gestión Vicky estampada",
     universoPrecioYRut: universo.length,
     dealsIndexados: dealPorNueve.size,
+    fallosCoql: fallosCoql.slice(0, 5),
     leadsIndexados: leadPorNueve.size,
     resumen: {
       alDia,
