@@ -891,9 +891,27 @@ async function convertirConDeal(
   // nadie hubiera hablado con el cliente. El owner sorteado se devuelve para
   // que Vicky pueda presentarlo y ofrecer reunión con él.
   if (entregarComoLead && territorio === "Chile") {
-    if (heredaGestionAlDeal(lead.ownerId, territorio)) {
+    // LAS SDR NO SE QUEDAN CON LO CALIFICADO (Lalo 10-sep): el candado de
+    // "dueño humano previo" protege la cartera de los ejecutivos, pero una SDR
+    // de calificación con un caso YA calificado debe devolverlo a la tómbola
+    // de telemarketing — si no, la derivación sobre umbral se lo dejaba (4
+    // deals de Aleydis en "1. Trato Creado": Patiño, Cancino, MSS, Cafetería).
+    const { destinoTrasCalificar } = await import("./sdr-calificacion")
+    const destinoSdr = destinoTrasCalificar({
+      territorio,
+      ownerId: lead.ownerId,
+      calificado: empleados > 0,
+      rut: lead.rut,
+      // Piso 6+ = la venta ya se cerró (aceptada/onboarding): la asignación de
+      // la SDR ahí es su rol de ventas autónomas y no se toca.
+      ventaCerrada: /^[678]\./.test(piso),
+    })
+    if (heredaGestionAlDeal(lead.ownerId, territorio) && destinoSdr === "sin_cambio") {
       console.log(`[crm-hitos] +${contact}: sobre-umbral con dueño humano previo — se conserva`)
       return null
+    }
+    if (destinoSdr !== "sin_cambio") {
+      console.log(`[crm-hitos] +${contact}: sobre-umbral en manos de SDR con el caso YA calificado — re-entrega (${destinoSdr})`)
     }
     const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
     const r = await reasignarLeadCalificacionCL(lead.id, { calificado: empleados > 0 }).catch(
@@ -1936,7 +1954,49 @@ export async function sincronizarHitoCrm(
       // "el cliente dio el RUT después de entregado el lead calificado".
       let ownerHeredado = ""
       if (!esDeVicky && getEnv("VICKY_CRM_HITOS_CONVERTIR_AJENOS") !== "on") {
-        if (!escaleraExistente) {
+        // SDR DE CALIFICACIÓN (Lalo 10-sep): el lead está con ellas porque
+        // Vicky NO había podido calificar. Si ya lo logró, el caso vuelve a la
+        // tómbola de telemarketing: con RUT nace el deal y lo sortea la
+        // Tómbola de Deals (sus entradas ≤300 son el roster TLMK); sin RUT
+        // cambia de dueño el lead. Heredarlas dejaba el deal a su nombre y
+        // fuera de todo sorteo (casos Haddad/Loumar/Prix con Aracelli).
+        const { destinoTrasCalificar } = await import("./sdr-calificacion")
+        const territorioLead = territorioDeContacto(clean)
+        const calificadoAhora = (datos.empleados || lead.empleados || 0) > 0
+        const destinoSdr = destinoTrasCalificar({
+          territorio: territorioLead,
+          ownerId: lead.ownerId,
+          calificado: calificadoAhora,
+          rut: datos.rut || lead.rut,
+          hito,
+        })
+        if (destinoSdr === "lead_tlmk") {
+          // Calificado SIN RUT: no nace deal, cambia el dueño del lead.
+          const { reasignarLeadCalificacionCL, agregarNotaLead } = await import("./zoho-leads")
+          const r = await reasignarLeadCalificacionCL(lead.id, { calificado: true }).catch(() => null)
+          console.log(
+            `[crm-hitos] ${clean}: lead calificado en manos de SDR — re-entregado a la tómbola TLMK (${r?.ownerEmail || "sin asignar"})`,
+          )
+          if (r?.ownerEmail) {
+            await guardarEjecutivoAsignado(clean, { id: r.ownerId || "", nombre: r.ownerNombre || "", email: r.ownerEmail })
+            const { notificarLeadAsignado } = await import("./notificar-lead-asignado")
+            await notificarLeadAsignado({
+              leadId: lead.id,
+              vendedorEmail: r.ownerEmail,
+              contact: clean,
+              nombre: lead.lastName,
+              empresa: lead.company,
+              empleados: datos.empleados || lead.empleados || 0,
+            }).catch(() => false)
+            await agregarNotaLead(
+              lead.id,
+              "Lead calificado por Vicky — re-entregado a telemarketing",
+              `Estaba en calificación SDR porque Vicky no había logrado calificarlo. La conversación ya trae la dotación (${datos.empleados || lead.empleados || 0} personas), así que la calificación está hecha y el lead pasó a la tómbola de telemarketing.`,
+            ).catch(() => false)
+          }
+          return
+        }
+        if (!escaleraExistente && destinoSdr === "sin_cambio") {
           // Lead de un humano sin escalera: no se pisa su gestión — solo status y nota.
           const { agregarNotaLead } = await import("./zoho-leads")
           await agregarNotaLead(
@@ -1946,7 +2006,8 @@ export async function sincronizarHitoCrm(
           ).catch(() => false)
           return
         }
-        ownerHeredado = lead.ownerId
+        // Con RUT (deal_tombola) el owner NO se hereda: el deal nace y lo sortea la tómbola.
+        if (destinoSdr !== "deal_tombola") ownerHeredado = lead.ownerId
       }
       if (!tieneIdentidadComercial(lead, datos)) {
         console.log(`[crm-hitos] ${clean}: hito "${hito}" sin empresa/RUT — lead ${lead.id} espera identidad para convertir (deal pendiente)`)

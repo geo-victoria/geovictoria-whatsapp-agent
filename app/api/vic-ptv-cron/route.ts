@@ -1420,7 +1420,29 @@ async function asignarEnZoho(
       // interina, ni Anderson"). Un lead de Eddyluz es de Eddyluz: se le
       // presenta ella, no se re-sortea.
       const esInterina = !ownerLead || /vicky@|info@geovictoria/.test(ownerLead)
-      if (!esInterina && lead.Owner?.id) {
+      // SDR DE CALIFICACIÓN CON EL CASO YA CALIFICADO (Lalo 10-sep): el lead
+      // está con Aleydis/Aracelli porque Vicky no había podido calificar. Si
+      // la dotación ya está estampada, la calificación está HECHA y el caso
+      // vuelve a la tómbola de telemarketing en vez de presentarse la SDR
+      // (antes salía por la vía "dueno_lead_sdr" y se quedaba con ella).
+      const { destinoTrasCalificar } = await import("@/lib/sdr-calificacion")
+      const sdrConCalificado =
+        destinoTrasCalificar({
+          territorio: "Chile",
+          ownerEmail: ownerLead,
+          ownerId: lead.Owner?.id,
+          calificado:
+            calificado ||
+            String(lead.Lead_Status || "").trim().startsWith("4.") ||
+            Number(lead.N_Empleados_que_marcan || 0) > 0,
+          rut: lead.RUT_Empresa,
+        }) !== "sin_cambio"
+      if (sdrConCalificado) {
+        console.log(
+          `[ptv] ${fono}: lead de SDR (${ownerLead}) con la calificación ya hecha — no se presenta ella, vuelve a la tómbola TLMK`,
+        )
+      }
+      if (!esInterina && !sdrConCalificado && lead.Owner?.id) {
         await notificarTraspasoLeadEmail(lead.id, ownerLead, fono, H, api)
         const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
         return {
@@ -3000,10 +3022,13 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     }
   }
   // ── Deals vivos del roster SDR (lead calificado que ya convirtió) ──
-  // Deals: solo los de Vicky, de las últimas 48 h y en etapas 1-4 — un deal
-  // en "6. Listo para Cierre" ya aceptó/pagó (venta autónoma → Aleydis es
+  // Deals: solo los de Vicky, recientes y en etapas 1-4 — un deal en
+  // "6. Listo para Cierre" ya aceptó/pagó (venta autónoma → Aleydis es
   // legítima) y los movidos a mano por Lalo (OMEGA/TRAMUS 02-sep) no se tocan.
-  const desde48 = new Date(ahora.getTime() - 48 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+  // VENTANA (Lalo 10-sep): 48 h dejaban fuera lo acumulado (Patiño 24-ago,
+  // Cancino 31-ago) — ahora 14 días, ajustable por env sin deploy.
+  const diasDeals = Number(process.env.VICKY_SDR_RECON_DIAS || 14) || 14
+  const desde48 = new Date(ahora.getTime() - diasDeals * 864e5).toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const deals = await coql<{ id: string; Deal_Name?: string; Stage?: string; N_Empleados_que_marcan?: number; "Owner.email"?: string; "Contact_Name.Phone"?: string; Created_By?: { id?: string } | null }>(
     `select id, Deal_Name, Stage, N_Empleados_que_marcan, Owner.email, Contact_Name.Phone, Created_By from Deals ` +
       `where ((Owner.email in (${lista}) and Created_Time >= '${desde48}') and Stage in ('1. Trato Creado','2. Primera Reunion Realizada','3. En Levantamiento','4. Propuesta Enviada / En Negociación')) limit 40`,
