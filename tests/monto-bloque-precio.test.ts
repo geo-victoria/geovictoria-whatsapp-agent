@@ -25,3 +25,31 @@ test("bloque en pesos sin UF", () => {
 test("texto sin precio no inventa monto", () => {
   assert.deepEqual(montoDelBloque("Te cuento que el plan incluye la app sin costo"), { clp: undefined, uf: undefined })
 })
+
+// CICATRIZ 10-sep: "Subtotal mensual" contiene "total mensual" y la primera
+// versión devolvía el NETO como si fuera con IVA (16 % abajo).
+test("bloque largo: manda el TOTAL con IVA, no el subtotal", () => {
+  const t = [
+    "Resumen mensual recurrente:",
+    "- Control de Asistencia: 50 × 0,055 UF = 2,75 UF/mes",
+    "- Reloj control físico: 1 unidad × 0,35 UF = 0,35 UF/mes",
+    "Subtotal mensual: 3,1 UF",
+    "IVA (19%): 0,59 UF",
+    "Total mensual con IVA: 3,69 UF",
+    "Equivalente: $150.898 CLP/mes (UF del día: $40.894,00)",
+  ].join("\n")
+  assert.equal(montoDelBloque(t).uf, 3.69)
+})
+
+test("solo subtotal en el texto: no se confunde con el total", () => {
+  assert.equal(montoDelBloque("Subtotal mensual: 1,4 UF\nIVA (19%): 0,27 UF").uf, undefined)
+})
+
+test("el CLP de la línea Equivalente cuenta como monto con IVA", () => {
+  const t = [
+    "Subtotal mensual: 3,1 UF",
+    "Total mensual con IVA: 3,69 UF",
+    "Equivalente: $150.898 CLP/mes (UF del día: $40.894,00)",
+  ].join("\n")
+  assert.deepEqual(montoDelBloque(t), { clp: 150898, uf: 3.69 })
+})
