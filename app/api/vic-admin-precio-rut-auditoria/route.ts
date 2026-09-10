@@ -174,13 +174,62 @@ export async function GET(req: Request): Promise<NextResponse> {
     if (lote.length < 200) break
   }
 
+  // FUENTES LOCALES DEL DEAL (fix del 10-sep): cruzar SOLO por el teléfono del
+  // contacto del deal deja fuera los deals cuyo contacto en Zoho no tiene
+  // teléfono — dos de los cinco "sin deal" de la primera corrida (Antrillao,
+  // que además PAGÓ, y Jaime) eran falsos positivos por eso. El puntero de
+  // cotización y el candado `deal_fono_` sí conocen ese vínculo.
+  const SUPA = (process.env.SUPABASE_URL || "").trim()
+  const KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+  const hs = { apikey: KEY, Authorization: `Bearer ${KEY}` }
+  const dealLocalPorTel = new Map<string, string>()
+  {
+    const tels = universo.map((c) => c.tel)
+    for (let i = 0; i < tels.length; i += 100) {
+      const inList = tels.slice(i, i + 100).map((t) => `"${t}"`).join(",")
+      const keys = tels.slice(i, i + 100).map((t) => `"deal_fono_${t}"`).join(",")
+      const [rp, rk] = await Promise.all([
+        fetch(`${SUPA}/rest/v1/vic_v3_quote_pointers?contact=in.(${inList})&select=contact,deal_id`, { headers: hs, cache: "no-store" }).catch(() => null),
+        fetch(`${SUPA}/rest/v1/vic_kv?key=in.(${keys})&select=key,value`, { headers: hs, cache: "no-store" }).catch(() => null),
+      ])
+      if (rp?.ok) for (const f of ((await rp.json().catch(() => [])) as Array<{ contact?: string; deal_id?: string | null }>) || []) {
+        const t = String(f.contact || "").replace(/\D/g, "")
+        if (f.deal_id) dealLocalPorTel.set(t, String(f.deal_id))
+      }
+      if (rk?.ok) for (const f of ((await rk.json().catch(() => [])) as Array<{ key: string; value: string }>) || []) {
+        const t = String(f.key).replace("deal_fono_", "")
+        try {
+          const v = JSON.parse(String(f.value || "{}")) as { dealId?: string }
+          if (v?.dealId && !dealLocalPorTel.has(t)) dealLocalPorTel.set(t, String(v.dealId))
+        } catch { /* marca "creando" u otra cosa */ }
+      }
+    }
+  }
+  // Índice de deals por id, para poder mirar los que llegan por fuente local.
+  const dealPorId = new Map<string, DealZ>()
+  for (const d of dealPorNueve.values()) if (d.id) dealPorId.set(String(d.id), d)
+
   const faltaDeal: Array<Record<string, unknown>> = []
   const incompletos: Array<Record<string, unknown>> = []
   let alDia = 0
   const cuentaFalla = { stage: 0, valor: 0, empleados: 0, moneda: 0, tipo: 0, gestion: 0 }
   for (const c of universo) {
     const nueve = c.tel.slice(-9)
-    const d = dealPorNueve.get(nueve)
+    let d = dealPorNueve.get(nueve)
+    if (!d) {
+      const idLocal = dealLocalPorTel.get(c.tel) || ""
+      if (idLocal) {
+        d = dealPorId.get(idLocal)
+        if (!d) {
+          // El deal existe pero es de otro año o no entró al índice: se lee.
+          const rr = await fetch(
+            `${api}/crm/v3/Deals/${idLocal}?fields=Deal_Name,Stage,Valor_fijo_del_trato_Global,N_Empleados_que_marcan,Monda_del_trato,Tipo_de_Cobro,Gesti_n_Vicky,Atribuci_n_Vicky`,
+            { headers: H, cache: "no-store" },
+          ).catch(() => null)
+          if (rr?.status === 200) d = (((await rr.json().catch(() => ({}))) as { data?: DealZ[] }).data || [])[0]
+        }
+      }
+    }
     const m = montoDelBloque(c.ultimoTexto)
     const netoAprox = m.clp ? Math.round(m.clp / 1.19) : null
     if (!d) {
@@ -208,9 +257,32 @@ export async function GET(req: Request): Promise<NextResponse> {
     })
   }
 
+  // ── ACCIÓN ACOTADA (?aplicar=gestion): estampa SOLO Gesti_n_Vicky donde
+  // falta. Es un campo nuestro y de cero riesgo; valor, moneda y tipo NO se
+  // tocan acá porque varios de esos deals son de otro canal (arriendo de
+  // equipo, "Por usuario" en UF) y ahí la convención de Vicky no aplica.
+  // "Derivado" si la conversación se traspasó, "Gestión Vicky" si no.
+  let estampados = 0
+  if (sp.get("aplicar") === "gestion") {
+    const tope = Math.max(1, Math.min(60, Number(sp.get("limit") || 30)))
+    const candidatos = incompletos.filter((x) => Array.isArray(x.falta) && (x.falta as string[]).includes("sin Gestión Vicky")).slice(0, tope)
+    for (const x of candidatos) {
+      const tel = String(x.tel || "")
+      const rptv = await fetch(`${SUPA}/rest/v1/vic_ptv?contact=eq.${tel}&select=id&limit=1`, { headers: hs, cache: "no-store" }).catch(() => null)
+      const traspasado = rptv?.ok ? (((await rptv.json().catch(() => [])) as unknown[]) || []).length > 0 : false
+      const veredicto = traspasado ? "Derivado" : "Gestión Vicky"
+      const put = await fetch(`${api}/crm/v3/Deals`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({ data: [{ id: x.dealId, Gesti_n_Vicky: veredicto }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
+      }).catch(() => null)
+      if (put?.ok) { estampados++; x.gestionEstampada = veredicto }
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     desde,
+    gestionEstampados: estampados,
     nota: "solo lectura; 'al día' para quien vio precio = stage>=4, valor>1.000 CLP, empleados>0, moneda CLP, tipo Mensual fijo y Gestión Vicky estampada",
     universoPrecioYRut: universo.length,
     dealsIndexados: dealPorNueve.size,
