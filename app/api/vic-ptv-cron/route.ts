@@ -2898,6 +2898,7 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
   if (!roster.length) return out
   const desde = new Date(ahora.getTime() - diasLeads * 24 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const { ownerLoPusoUnHumano } = await import("@/lib/owner-manual")
   const token = await getZohoAccessToken()
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
@@ -2955,6 +2956,15 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     // Con deal vivo del mismo fono (candado deal_fono_, caso Joyce: la formal
     // creó el deal sin convertir el lead) manda el bloque de DEALS de abajo.
     if (await getKvValue(`deal_fono_${fono}`).catch(() => null)) continue
+    // DECISIÓN MANUAL INTOCABLE (10-sep): si el dueño actual lo puso una
+    // PERSONA (UI de Zoho o conector admin) no es brecha de Vicky, es una
+    // decisión — el timeline es lo único que separa OMEGA de Cancino.
+    const vLead = await ownerLoPusoUnHumano("Leads", l.id, api, H)
+    if (vLead.manual) {
+      await setKvValue(`sdr_recon_${l.id}`, `manual:${vLead.motivo}`).catch(() => {})
+      out.detalle.push(`+${fono} lead ${l.id}: dueño puesto por ${vLead.actor || vLead.motivo} — decisión manual, no se toca`)
+      continue
+    }
     out.revisados++
     let empleados = Number(l.N_Empleados_que_marcan || 0) || 0
     let rut = String(l.RUT_Empresa || "").trim()
@@ -3024,7 +3034,9 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
   // ── Deals vivos del roster SDR (lead calificado que ya convirtió) ──
   // Deals: solo los de Vicky, recientes y en etapas 1-4 — un deal en
   // "6. Listo para Cierre" ya aceptó/pagó (venta autónoma → Aleydis es
-  // legítima) y los movidos a mano por Lalo (OMEGA/TRAMUS 02-sep) no se tocan.
+  // legítima). Los movidos a mano por una persona los frena el veredicto del
+  // timeline (ownerLoPusoUnHumano), no la ventana: OMEGA quedó dentro de los
+  // 14 días y sigue intocable porque lo movió GeoVictoria Admin.
   // VENTANA (Lalo 10-sep): 48 h dejaban fuera lo acumulado (Patiño 24-ago,
   // Cancino 31-ago) — ahora 14 días, ajustable por env sin deploy.
   const diasDeals = Number(process.env.VICKY_SDR_RECON_DIAS || 14) || 14
@@ -3039,6 +3051,14 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     if (await getKvValue(`sdr_recon_deal_${d.id}`).catch(() => null)) continue
     const fono = String(d["Contact_Name.Phone"] || "").replace(/\D/g, "")
     if (!fono || !fono.startsWith("56") || isTestContact(fono, tests)) continue
+    // DECISIÓN MANUAL INTOCABLE (10-sep, OMEGA vs Cancino): dueño puesto por
+    // una persona → fuera de la conciliación. Ver lib/owner-manual.ts.
+    const vDeal = await ownerLoPusoUnHumano("Deals", d.id, api, H)
+    if (vDeal.manual) {
+      await setKvValue(`sdr_recon_deal_${d.id}`, `manual:${vDeal.motivo}`).catch(() => {})
+      out.detalle.push(`+${fono} deal ${d.id} (${d.Deal_Name || ""}): dueño puesto por ${vDeal.actor || vDeal.motivo} — decisión manual, no se toca`)
+      continue
+    }
     out.revisados++
     // CLIENTE EXISTENTE (caso Samuel/Onecup 08-sep: cliente con reloj sin
     // marcaciones pidió "un agente", el traspaso lo tomó como venta y esta
