@@ -9140,7 +9140,17 @@ export async function GET(req: Request): Promise<Response> {
           if (qid && (emp || num)) nombresQuote.set(qid, [emp, num].filter(Boolean).join(" · "))
         }
         // Autónoma vs asistida de cada venta pagada (Lalo 10-sep).
-        const gestionQuote = await gestionDeVentas((cierre?.todasList || []).filter((q) => esPagada(q))).catch(() => new Map<string, GestionVenta>())
+        // Solo las pagadas del RANGO que la tabla muestra: classificar el
+        // universo completo (145+ desde junio) gastaría lecturas de Zoho en
+        // ventas que ninguna celda pinta.
+        const enRangoPago = (q: RawAceptada): boolean => {
+          const t = Date.parse(String(q.Fecha_Hora_Cotizacion || q.Modified_Time || ""))
+          if (!Number.isFinite(t)) return false
+          return rango ? t >= rango.desdeMs && t < rango.hastaMs : Date.now() - t <= 45 * 86_400_000
+        }
+        const gestionQuote = await gestionDeVentas(
+          (cierre?.todasList || []).filter((q) => esPagada(q) && enRangoPago(q)),
+        ).catch(() => new Map<string, GestionVenta>())
         inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, gestionQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formConvTels: inbdet ? undefined : formConvTels, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, campanas: inbdet ? undefined : campanaPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
