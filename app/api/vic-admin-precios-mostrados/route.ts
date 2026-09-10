@@ -48,7 +48,10 @@ export async function GET(req: Request): Promise<NextResponse> {
   const desde = (sp.get("desde") || "2026-01-01").trim()
   const paginas = Math.min(60, Math.max(1, Number(sp.get("paginas") || 40)))
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  const orFirmas = FIRMAS.map((f) => `content.ilike.*${encodeURIComponent(f).replace(/%/g, "%25")}*`).join(",")
+  // OJO: encodeURIComponent y NADA MÁS. Escapar además el % ("%20"→"%2520")
+  // deja el patrón sin coincidencias y el conteo en cero (primer intento del
+  // 10-sep). El "+" de "UF + IVA al mes" tiene que viajar como %2B.
+  const orFirmas = FIRMAS.map((f) => `content.ilike.*${encodeURIComponent(f)}*`).join(",")
 
   // Mensajes de Vicky con bloque de precio, paginados de 1.000 en 1.000.
   type Fila = { conversation_id?: string; at?: string; content?: string }
