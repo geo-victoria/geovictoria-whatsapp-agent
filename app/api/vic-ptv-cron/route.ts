@@ -3189,7 +3189,7 @@ async function evaluarRespuestasChequeo(ahora: Date): Promise<{ ok: number; mal:
   )
   if (!filas.length) return { ok: 0, mal: 0 }
   const NEGATIVA =
-    /\b(no me (ha[ns]? )?(llamado|contactado|escrito|hablado)|nadie me|todav[ií]a no|a[uú]n no|aun no|ninguna llamada|no he (hablado|recibido|sabido)|sin noticias|mal[ai]?\b|pesim|nunca me)/i
+    /\b(no me (ha[ns]? )?(llamado|contactado|escrito|hablado)|nadie me|todav[ií]a no|a[uú]n no|aun no|a[uú]n (espero|sigo esperando|no)|sigo esperando|espero que me (contacten|llamen)|ninguna llamada|no he (hablado|recibido|sabido)|sin noticias|mal[ai]?\b|pesim|nunca me)/i
   const POSITIVA = /\b(s[ií]\b|ya (me )?(llam|habl|contact|escrib)|todo (bien|ok|perfecto)|excelente|muy bien|gracias|conversamos|hablamos)/i
   let okCount = 0
   let malCount = 0

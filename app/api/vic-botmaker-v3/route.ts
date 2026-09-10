@@ -1398,6 +1398,13 @@ async function processOneTurn(
         await avisarEquipoInterno(
           `⚠️ Registro de REUNIÓN falló (tras reintento) — contacto +${contact}. El cliente quedó con la promesa de agenda: revisar la conversación en Botmaker y agendar a mano.`,
         )
+        // 10-sep: la alerta sola no persigue a nadie (12 casos en 30 días).
+        // Promesa PENDIENTE en el vigía → vence en 2 h hábiles, alerta con
+        // dueño y cae en la Cartera hasta que alguien la agende.
+        try {
+          const { registrarPromesa } = await import("@/lib/promesas")
+          await registrarPromesa({ contact, tipo: "callback", detalle: "reunión pendiente de registro (el modelo no ejecutó agendar_reunion)", horasHabiles: 2 })
+        } catch { /* best-effort */ }
       }
     }
 
@@ -1517,9 +1524,14 @@ async function processOneTurn(
       // Solo formas ASERTIVAS (contactará / te va a contactar / llamará / se
       // pondrá en contacto), NO la oferta en subjuntivo ("¿quieres que un
       // ejecutivo te contacte?"), que es legítima sin tool.
-      /\b(un\s+ejecutivo|el\s+equipo|nuestro\s+ejecutivo|un\s+asesor|Anderson)\b[^.]{0,45}\b(te\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|contactar[aá])\s+en\s+contacto)/i.test(
+      /\b(un\s+ejecutivo|el\s+ejecutivo|la\s+ejecutiva|tu\s+ejecutiv[oa]|nuestr[oa]\s+ejecutiv[oa]|el\s+equipo|un\s+asesor|Anderson)\b[^.]{0,45}\b(te\s+(contactar[aá]|llamar[aá]|contacta|llama|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|contactar[aá])\s+en\s+contacto)/i.test(
         t,
-      )
+      ) ||
+      // Casos Daniela y Rosa (10-sep): "te conectamos con el ejecutivo que
+      // lleva tu cuenta", "ya está escalado para que Paola te llame HOY".
+      /\bte\s+conect(amos|o)\s+con\b/i.test(t) ||
+      /\b(ya\s+)?(est[aá]|qued[oó])\s+escalad[oa]\b/i.test(t) ||
+      /\bpara\s+que\s+[A-ZÁÉÍÓÚ][\wáéíóú]+\s+te\s+(llame|contacte|escriba)\b/.test(t)
     const afirmaCallbackListo = afirmaCallbackListoEn(reply)
     // derivar_a_soporte cuenta como registro REAL (Eduardo 14-ago, su prueba
     // de callback con 70 empleados "falló"): con el flujo 21+ la rama "que me
@@ -1536,6 +1548,15 @@ async function processOneTurn(
     const realCallback = toolCalls.some((c) => TOOLS_QUE_REGISTRAN.includes(c.name) && c.ok)
     if (!enOnboarding && afirmaCallbackListo && !realCallback) {
       let callbackRecuperado = false
+      // Traspaso ya ACTIVO (caso Rosa 10-sep: "ya está escalado para que
+      // Paola te llame"): forzar la tool volvería a derivar. El rescate lo
+      // resuelve como reclamo al vendedor vigente, sin reintento.
+      let ptvActivo = false
+      try {
+        const { getSupabaseRows } = await import("@/lib/rescate-callback")
+        ptvActivo = (await getSupabaseRows<{ id: string }>(`vic_ptv?contact=eq.${contact}&estado=eq.activo&select=id&limit=1`)).length > 0
+      } catch { /* sin lectura: se reintenta como siempre */ }
+      if (ptvActivo) callbackRecuperado = true
       const FORZAR_TOOL_CALLBACK =
         "\n\n# Instrucción de sistema (este turno)\n" +
         "Estás por confirmarle al cliente que registraste su solicitud o que un ejecutivo lo va a contactar, " +
@@ -1547,7 +1568,7 @@ async function processOneTurn(
         "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
         "Si faltan datos obligatorios (nombre, empresa o teléfono), PÍDESELOS en vez de afirmar que ya quedó registrado. " +
         "JAMÁS digas que tomaste sus datos o que un ejecutivo lo contactará si la tool no tuvo éxito."
-      const retry = await runAgentLoop({
+      const retry = callbackRecuperado ? null : await runAgentLoop({
         systemPrompt: contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_CALLBACK,
         history,
         userMessage: message,
@@ -1581,19 +1602,40 @@ async function processOneTurn(
           callbackRecuperado = true
         }
       }
-      if (!callbackRecuperado) {
+      if (!callbackRecuperado || ptvActivo) {
         console.warn(
-          `[v3-bg] ALUCINACIÓN_CALLBACK contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
+          `[v3-bg] ALUCINACIÓN_CALLBACK contact=${contact} ptvActivo=${ptvActivo} replyOriginal=${JSON.stringify(reply.slice(0, 400))}`,
         )
-        // Auditoría 20-jul (≥7 casos, un cliente urgido tipeó sus datos 3
-        // veces): el fallo técnico NO se le cobra al cliente re-pidiéndole
-        // nombre/empresa (ya están en el historial) ni el teléfono (escribe
-        // por WhatsApp) — se avisa al equipo para completar a mano.
-        reply =
-          "Disculpa, tuve un problema técnico registrando tu solicitud — ya le avisé directamente al equipo para que igual te contacten con los datos que me diste. No necesitas reenviarme nada 🙌"
-        await avisarEquipoInterno(
-          `⚠️ Registro de CALLBACK falló (tras reintento) — contacto +${contact}. El cliente quedó con la promesa de contacto: revisar la conversación en Botmaker y registrar el lead a mano.`,
-        )
+        // RESCATE DETERMINISTA (10-sep, casos Daniela y Rosa; 17 enlatados en
+        // 30 días sin lead ni traspaso detrás): el código hace el traspaso
+        // (escalera + tómbola + vic_ptv + loop cerrado) o, si no se puede,
+        // deja la promesa pendiente en el vigía y cierra el loop. El texto
+        // al cliente es el canónico del traspaso o uno honesto — nunca más
+        // "ya le avisé al equipo" con la bandeja como único rastro.
+        const { rescatarCallback } = await import("@/lib/rescate-callback")
+        const textosCliente = history
+          .filter((m) => m.role === "user")
+          .map((m) => String(m.content || ""))
+          .concat([message])
+        const rescate = await rescatarCallback({
+          contact,
+          pais: "cl",
+          textosCliente,
+          replyModelo: reply,
+        }).catch(() => null)
+        if (rescate?.via === "reafirmacion") {
+          // El vendedor vigente recibió la promesa y la alerta; el texto del
+          // modelo se conserva pero sin prometer horas que no controlamos.
+          reply = reply.replace(/\bHOY\b/g, "hoy").replace(/\s*sin falta\b/gi, "")
+        } else if (rescate?.reply) {
+          reply = rescate.reply
+        } else {
+          reply =
+            "Dejé registrada tu solicitud de contacto con los datos que me diste. Te confirmo por aquí apenas la tome un ejecutivo; no necesitas reenviarme nada 🙌"
+          await avisarEquipoInterno(
+            `⚠️ Registro de CALLBACK falló (tras reintento y rescate) — contacto +${contact}. Revisar la conversación en Botmaker y registrar el lead a mano.`,
+          )
+        }
       }
     }
 
