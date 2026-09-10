@@ -133,6 +133,70 @@ export async function GET(req: Request): Promise<NextResponse> {
     })
   }
 
+  // ── LOS DEALS DE VICKY SIN MONTO ÚTIL (?sinvalor=1) — Lalo 10-sep,
+  // "revisemos esos 117 deals sin monto útil". Clasifica por DE DÓNDE se
+  // podría sacar el valor: de su cotización, del bloque de precio del chat, o
+  // de ninguna parte. Solo lectura.
+  if (sp.get("sinvalor") === "1") {
+    // Índice deal → cotización (una pasada, en vez de una COQL por deal).
+    const cotDeDeal = new Map<string, string>()
+    for (let off = 0; off < 9800; off += 200) {
+      const lote = await coql<{ id?: string; Deal_Asociado?: { id?: string } | null }>(
+        `select id, Deal_Asociado, Created_Time from Cotizaciones_GeoVictoria where Deal_Asociado is not null order by Created_Time desc limit ${off}, 200`,
+      )
+      for (const q of lote) {
+        const d = String(q.Deal_Asociado?.id || "")
+        if (d && q.id && !cotDeDeal.has(d)) cotDeDeal.set(d, String(q.id))
+      }
+      if (lote.length < 200) break
+    }
+    // Teléfonos con precio mostrado (para saber si hay de dónde sacarlo).
+    const conPrecio = new Set((await contactosConPrecioYRut({ desde: "2026-01-01", paisPrefijo: "" })).map((c) => c.tel))
+    const filas: Array<Record<string, unknown>> = []
+    const grupos = { conCotizacion: 0, conPrecioEnChat: 0, sinNinguna: 0, cierrePerdido: 0, otroPais: 0 }
+    for (let off = 0; off < 9800; off += 200) {
+      const lote = await coql<{
+        id?: string; Deal_Name?: string; Stage?: string; Gesti_n_Vicky?: string | null
+        Valor_fijo_del_trato_Global?: number | null; "Owner.email"?: string
+        "Contact_Name.Phone"?: string | null; "Contact_Name.Mobile"?: string | null; Created_Time?: string
+      }>(
+        `select id, Deal_Name, Stage, Gesti_n_Vicky, Valor_fijo_del_trato_Global, Owner.email, Contact_Name.Phone, Contact_Name.Mobile, Created_Time ` +
+        `from Deals where Gesti_n_Vicky is not null order by Created_Time desc limit ${off}, 200`,
+      )
+      for (const d of lote) {
+        const marca = String(d.Gesti_n_Vicky || "")
+        if (/no habló/i.test(marca)) continue // esa etiqueta es justamente "no es de Vicky"
+        const v = Number(d.Valor_fijo_del_trato_Global || 0)
+        if (v > 1000) continue
+        const tel = String(d["Contact_Name.Mobile"] || d["Contact_Name.Phone"] || "").replace(/\D/g, "")
+        const cot = cotDeDeal.get(String(d.id || "")) || ""
+        const perdido = /perdido/i.test(String(d.Stage || ""))
+        const otroPais = Boolean(tel) && !tel.startsWith("56")
+        const via = cot ? "cotizacion" : conPrecio.has(tel) ? "precio_en_chat" : "ninguna"
+        if (via === "cotizacion") grupos.conCotizacion++
+        else if (via === "precio_en_chat") grupos.conPrecioEnChat++
+        else grupos.sinNinguna++
+        if (perdido) grupos.cierrePerdido++
+        if (otroPais) grupos.otroPais++
+        filas.push({
+          dealId: d.id, deal: String(d.Deal_Name || "").slice(0, 46), etapa: d.Stage, marca,
+          valor: d.Valor_fijo_del_trato_Global, dueno: d["Owner.email"], tel, creado: String(d.Created_Time || "").slice(0, 10),
+          via, perdido, otroPais, cotizacion: cot || null,
+        })
+      }
+      if (lote.length < 200) break
+    }
+    const tope = Math.max(10, Math.min(200, Number(sp.get("detalle") || 60)))
+    return NextResponse.json({
+      ok: true, modo: "sinvalor",
+      nota: "deals de Vicky (Gestión Vicky/Derivado/fuera de Rango) con valor nulo o bajo mil pesos; 'via' dice de dónde se podría sacar el monto",
+      total: filas.length, grupos,
+      vivos: filas.filter((x) => !x.perdido).length,
+      detalle: filas.slice(0, tope),
+      fallosCoql: fallosCoql.slice(0, 3),
+    })
+  }
+
   // ── FICHA POR CONTACTO (?tels=a,b,c): para responder "¿por qué no se creó
   // el deal?" con evidencia — conversación, dotación, si llegó a formal,
   // estado del loop, traspaso y qué hay en Zoho.
