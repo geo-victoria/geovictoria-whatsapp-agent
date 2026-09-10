@@ -35,6 +35,8 @@ const FIRMAS = ["Resumen mensual", "Total mensual con IVA", "UF + IVA al mes", "
 const IVA = 1.19
 /** Nombres que delatan un deal interno de prueba (mismo criterio del dash). */
 const ES_PRUEBA = /prueba|test|huellerocompany|grovictoria|tu empresa/i
+/** Usuario del OAuth: todo lo que crea la app aparece a nombre de Vicky. */
+const VICKY_ID = "3525045000484500876"
 
 async function autorizado(req: Request): Promise<boolean> {
   const secreto = await getFollowupCronSecret().catch(() => "")
@@ -48,7 +50,7 @@ async function autorizado(req: Request): Promise<boolean> {
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
-  const body = (await req.json().catch(() => ({}))) as { dealIds?: string[]; dry?: boolean; uf?: number; incluirPruebas?: boolean }
+  const body = (await req.json().catch(() => ({}))) as { dealIds?: string[]; dry?: boolean; uf?: number; incluirPruebas?: boolean; incluirAjenos?: boolean }
   const ids = (body.dealIds || []).map((x) => String(x || "").trim()).filter((x) => /^\d{10,}$/.test(x))
   if (!ids.length) return NextResponse.json({ ok: false, error: "falta dealIds" }, { status: 400 })
   const dry = body.dry !== false
@@ -61,16 +63,32 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const salida: Array<Record<string, unknown>> = []
   for (const dealId of ids) {
-    const rd = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Stage,Owner,Valor_fijo_del_trato_Global,Tipo_de_Cobro,Monda_del_trato,Contact_Name`, { headers: H, cache: "no-store" }).catch(() => null)
+    const rd = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Stage,Owner,Created_By,Valor_fijo_del_trato_Global,Tipo_de_Cobro,Monda_del_trato,Contact_Name`, { headers: H, cache: "no-store" }).catch(() => null)
     const deal = rd?.status === 200
       ? (((await rd.json().catch(() => ({}))) as {
-          data?: Array<{ Deal_Name?: string; Stage?: string; Valor_fijo_del_trato_Global?: number | null; Contact_Name?: { id?: string } | null }>
+          data?: Array<{
+            Deal_Name?: string; Stage?: string; Valor_fijo_del_trato_Global?: number | null
+            Contact_Name?: { id?: string } | null
+            Created_By?: { id?: string; name?: string } | null
+            Owner?: { name?: string } | null
+            Tipo_de_Cobro?: string | null; Monda_del_trato?: string | null
+          }>
         }).data || [])[0]
       : null
     if (!deal) { salida.push({ dealId, omitido: "deal no encontrado" }); continue }
     const nombre = String(deal.Deal_Name || "")
     if (ES_PRUEBA.test(nombre) && !body.incluirPruebas) {
       salida.push({ dealId, deal: nombre, omitido: "parece deal de prueba (usa incluirPruebas)" })
+      continue
+    }
+    if (String(deal.Created_By?.id || "") !== VICKY_ID && !body.incluirAjenos) {
+      salida.push({
+        dealId, deal: nombre, etapa: deal.Stage,
+        creadoPor: deal.Created_By?.name || null, dueno: deal.Owner?.name || null,
+        valorActual: deal.Valor_fijo_del_trato_Global ?? null,
+        convencion: `${deal.Monda_del_trato || "?"}/${deal.Tipo_de_Cobro || "?"}`,
+        omitido: "deal de otro canal: no lo creó Vicky (usa incluirAjenos)",
+      })
       continue
     }
     // Teléfono del contacto del deal.
@@ -104,9 +122,11 @@ export async function POST(req: Request): Promise<NextResponse> {
       dealId, deal: nombre, etapa: deal.Stage, tel,
       precioMostradoAt: msg.at,
       totalConIvaClp: Math.round(conIva),
+      desdeUf: Boolean(m.uf && !m.clp),
       recurrenteNetoClp: neto,
       valorAntes: antes,
     }
+    if (dry) fila.bloque = String(msg.content || "").replace(/\s+/g, " ").slice(0, 260)
     if (!dry) {
       const put = await fetch(`${api}/crm/v3/Deals`, {
         method: "PUT", headers: H, cache: "no-store",
