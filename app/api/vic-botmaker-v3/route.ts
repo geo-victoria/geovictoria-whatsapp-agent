@@ -1761,6 +1761,45 @@ async function processOneTurn(
     }
     reply = blindarSoporteInventado(reply, permitidos)
 
+    // 2.8-bis. PAGO DECLARADO → VERIFICAR, NUNCA CREER (Lalo 10-sep, caso
+    // Eduardo Guzmán): "Ya está pagado" 2 min después de salir al checkout y
+    // el modelo respondió "veo que el pago está procesado" + instructivo de
+    // acceso inventado (app, credenciales, "la contraseña salió por correo").
+    // Orden: "primero confirma que haya pagado y luego invoca a Vicky
+    // Onboarding" y "nunca podemos dar instrucciones como esa". En fase de
+    // VENTA la cuenta no existe: cualquier instrucción de acceso o afirmación
+    // de pago confirmado se reemplaza; si el cliente declara pago, se verifica
+    // contra Mercado Pago (el cotizador deja Pagada y dispara el post-pago,
+    // que manda el kickoff del alta por su propio camino).
+    if (!enOnboarding && reply) {
+      try {
+        const pd = await import("@/lib/pago-declarado")
+        const declara = pd.clienteDeclaraPago(message)
+        const teatro = pd.afirmaPagoConfirmado(reply) || pd.pareceInstruccionDeAcceso(reply)
+        if (declara || teatro) {
+          let pagado = Boolean(directivaPostPago)
+          let motivo = pagado ? "marca_kv" : "sin_cotizacion"
+          if (!pagado && quotePointer?.quoteId) {
+            const v = await pd.verificarPagoDeclarado(quotePointer.quoteId)
+            pagado = v.pagado
+            motivo = v.motivo
+          }
+          if (pagado && (declara || teatro)) {
+            reply = pd.textoPagoConfirmado()
+            console.log(`[pago-declarado] ${contact}: pago verificado (${motivo}) — respuesta canónica, el post-pago manda el kickoff`)
+          } else if (teatro) {
+            console.warn(`[pago-declarado] ${contact}: teatro de pago/acceso sin pago verificado (${motivo}) — respuesta reemplazada`)
+            reply = pd.textoPagoNoVerificado({ link: quotePointer?.acceptanceUrl })
+            void avisarEquipoInterno(
+              `⚠️ +${contact}: Vicky iba a afirmar pago/dar instrucciones de acceso SIN pago verificado (${motivo}). Se reemplazó por el texto de verificación. Cotización ${quotePointer?.quoteId || "sin puntero"}.`,
+            ).catch(() => {})
+          }
+        }
+      } catch (e) {
+        console.warn(`[pago-declarado] ${contact}: error en el cinturón:`, e instanceof Error ? e.message : e)
+      }
+    }
+
     // 2.9. ANTI-ECO (caso Atcomo 09-ago): el cliente confirmó un supuesto ya
     // cotizado ("la instalan ustedes") y el modelo re-cotizó con los mismos
     // parámetros pegando el resumen IDÉNTICO — al cliente le llegó el mismo
