@@ -22,6 +22,7 @@
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { metricsContactSet, isTestContact } from "@/lib/funnel-analysis"
+import { montoDelBloque } from "@/lib/precio-bloque"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -88,6 +89,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   const porFirma = new Map<string, number>()
   const primeraVez = new Map<string, string>() // contacto → fecha del primer precio
   const porPais = new Map<string, Set<string>>()
+  // Monto por contacto: manda el ÚLTIMO precio que vio (es el vigente).
+  const ufDia = Math.max(0, Number(sp.get("uf") || 0)) || 0
+  const ultimo = new Map<string, { at: string; clp?: number; uf?: number }>()
   let descartadosInternos = 0
   let descartadosSinPais = 0
   for (const f of filas) {
@@ -105,7 +109,34 @@ export async function GET(req: Request): Promise<NextResponse> {
     const set = porPais.get(p) || new Set<string>()
     set.add(tel)
     porPais.set(p, set)
+    const prev = ultimo.get(tel)
+    if (!prev || at > prev.at) ultimo.set(tel, { at, ...montoDelBloque(c) })
   }
+
+  // Suma del último precio de cada contacto = MRR MOSTRADO (con IVA).
+  let mrrClp = 0
+  let conClp = 0
+  let ufSola = 0
+  let conUfSola = 0
+  let sinMonto = 0
+  const montos: number[] = []
+  const mrrPorPais = new Map<string, number>()
+  const mrrPorMes = new Map<string, number>()
+  for (const [tel, u] of ultimo.entries()) {
+    let clp = u.clp || 0
+    if (!clp && u.uf && ufDia) clp = Math.round(u.uf * ufDia)
+    if (u.clp) conClp++
+    else if (u.uf) { conUfSola++; ufSola += u.uf }
+    if (!clp) { sinMonto++; continue }
+    mrrClp += clp
+    montos.push(clp)
+    const p = pais(tel)
+    mrrPorPais.set(p, (mrrPorPais.get(p) || 0) + clp)
+    const mes = String(primeraVez.get(tel) || u.at).slice(0, 7)
+    mrrPorMes.set(mes, (mrrPorMes.get(mes) || 0) + clp)
+  }
+  montos.sort((a, b) => a - b)
+  const mediana = montos.length ? montos[Math.floor(montos.length / 2)] : 0
 
   // Contactos NUEVOS con precio por mes (por su primera vez).
   const porMes = new Map<string, number>()
@@ -124,6 +155,19 @@ export async function GET(req: Request): Promise<NextResponse> {
     porMesContactosNuevos: Object.fromEntries([...porMes.entries()].sort()),
     porPaisContactos: Object.fromEntries([...porPais.entries()].map(([k, v]) => [k, v.size])),
     porFirmaMensajes: Object.fromEntries([...porFirma.entries()].sort((a, b) => b[1] - a[1])),
+    monto: {
+      nota: "suma del ÚLTIMO precio mostrado a cada contacto (mensual, CON IVA)",
+      mrrMostradoClp: mrrClp,
+      contactosConMontoClp: conClp,
+      contactosSoloUf: conUfSola,
+      ufSinConvertir: Number(ufSola.toFixed(2)),
+      ufUsadaParaConvertir: ufDia || null,
+      contactosSinMontoLegible: sinMonto,
+      promedioClp: montos.length ? Math.round(mrrClp / montos.length) : 0,
+      medianaClp: mediana,
+      porPaisClp: Object.fromEntries([...mrrPorPais.entries()]),
+      porMesClp: Object.fromEntries([...mrrPorMes.entries()].sort()),
+    },
     descartados: { internos: descartadosInternos, sinPais: descartadosSinPais },
     truncado: filas.length >= paginas * 1000,
   })
