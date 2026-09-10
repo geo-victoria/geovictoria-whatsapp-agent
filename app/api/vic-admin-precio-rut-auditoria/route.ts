@@ -378,6 +378,43 @@ export async function GET(req: Request): Promise<NextResponse> {
     })
   }
 
+  // ── ¿EL PRECIO MOSTRADO ESTÁ REFLEJADO EN LOS DEALS? (?reflejo=1) — Lalo
+  // 10-sep: "esos 21 millones de MRR en precio mostrado, ¿están reflejados en
+  // su totalidad en los deals?". El precio del chat es CON IVA y el campo del
+  // deal es NETO, así que se compara neto contra neto (÷1,19). Solo Chile.
+  let reflejo: Record<string, unknown> | null = null
+  if (sp.get("reflejo") === "1") {
+    const todos = await contactosConPrecioYRut({ desde, paisPrefijo: "56", exigirRut: false })
+    let mostradoNeto = 0, reflejadoNeto = 0, sinDealNeto = 0, sinValorNeto = 0
+    let conDealYValor = 0, conDealSinValor = 0, sinDeal = 0, sinMontoLegible = 0
+    let sobre = 0, bajo = 0
+    for (const c of todos) {
+      const m = montoDelBloque(c.ultimoTexto)
+      const neto = m.clp ? Math.round(m.clp / 1.19) : 0
+      if (!neto) { sinMontoLegible++; continue }
+      mostradoNeto += neto
+      const idLocal = dealLocalPorTel.get(c.tel) || ""
+      const d = dealPorNueve.get(c.tel.slice(-9)) || (idLocal ? dealPorId.get(idLocal) : undefined)
+      if (!d) { sinDeal++; sinDealNeto += neto; continue }
+      const v = Number(d.Valor_fijo_del_trato_Global || 0)
+      if (!(v > 1000)) { conDealSinValor++; sinValorNeto += neto; continue }
+      conDealYValor++
+      reflejadoNeto += v
+      if (v > neto * 1.15) sobre++
+      else if (v < neto * 0.85) bajo++
+    }
+    reflejo = {
+      nota: "neto contra neto: el bloque del chat va CON IVA y el campo del deal es NETO",
+      contactosConPrecioCL: todos.length,
+      sinMontoLegible,
+      mostradoNetoClp: mostradoNeto,
+      reflejadoEnDealsClp: reflejadoNeto,
+      cobertura: mostradoNeto ? `${Math.round((reflejadoNeto * 100) / mostradoNeto)}%` : "—",
+      noReflejado: { sinDeal, montoClp: sinDealNeto, conDealSinValor, montoSinValorClp: sinValorNeto },
+      desviaciones: { dealMayorQueElPrecio: sobre, dealMenorQueElPrecio: bajo, iguales: conDealYValor - sobre - bajo },
+    }
+  }
+
   // ── ACCIÓN ACOTADA (?aplicar=gestion): estampa SOLO Gesti_n_Vicky donde
   // falta. Es un campo nuestro y de cero riesgo; valor, moneda y tipo NO se
   // tocan acá porque varios de esos deals son de otro canal (arriendo de
@@ -404,6 +441,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     ok: true,
     desde,
     gestionEstampados: estampados,
+    reflejo,
     nota: "solo lectura; 'al día' para quien vio precio = stage>=4, valor>1.000 CLP, empleados>0, moneda CLP, tipo Mensual fijo y Gestión Vicky estampada",
     universoPrecioYRut: universo.length,
     dealsIndexados: dealPorNueve.size,

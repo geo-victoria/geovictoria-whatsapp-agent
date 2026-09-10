@@ -75,9 +75,10 @@ export async function contactosConPrecioYRut(opts: { desde?: string; paisPrefijo
       telDe.set(String(c.id), String(c.contact || "").replace(/\D/g, ""))
     }
   }
-  // 3) RUT escrito por el cliente en esas conversaciones.
+  // 3) RUT escrito por el cliente en esas conversaciones (se salta cuando no
+  // se exige: es la pasada más cara y no aporta si solo importa el precio).
   const rutDe = new Map<string, string>()
-  for (let i = 0; i < cids.length; i += 100) {
+  for (let i = 0; opts.exigirRut !== false && i < cids.length; i += 100) {
     const lista = cids.slice(i, i + 100).map((x) => `"${x}"`).join(",")
     for (let p = 0; p < 12; p++) {
       const lote = await sb<{ conversation_id?: string; content?: string }>(
