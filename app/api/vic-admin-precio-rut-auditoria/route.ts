@@ -151,7 +151,15 @@ export async function GET(req: Request): Promise<NextResponse> {
       if (lote.length < 200) break
     }
     // Teléfonos con precio mostrado (para saber si hay de dónde sacarlo).
-    const conPrecio = new Set((await contactosConPrecioYRut({ desde: "2026-01-01", paisPrefijo: "" })).map((c) => c.tel))
+    // SIN exigir RUT: acá la pregunta es solo si existe un precio del que
+    // sacar el monto.
+    const universoPrecio = await contactosConPrecioYRut({ desde: "2026-01-01", paisPrefijo: "", exigirRut: false })
+    const conPrecio = new Set(universoPrecio.map((c) => c.tel))
+    const montoDe = new Map<string, number>()
+    for (const c of universoPrecio) {
+      const m = montoDelBloque(c.ultimoTexto)
+      if (m.clp) montoDe.set(c.tel, Math.round(m.clp / 1.19))
+    }
     const filas: Array<Record<string, unknown>> = []
     const grupos = { conCotizacion: 0, conPrecioEnChat: 0, sinNinguna: 0, cierrePerdido: 0, otroPais: 0 }
     for (let off = 0; off < 9800; off += 200) {
@@ -182,6 +190,7 @@ export async function GET(req: Request): Promise<NextResponse> {
           dealId: d.id, deal: String(d.Deal_Name || "").slice(0, 46), etapa: d.Stage, marca,
           valor: d.Valor_fijo_del_trato_Global, dueno: d["Owner.email"], tel, creado: String(d.Created_Time || "").slice(0, 10),
           via, perdido, otroPais, cotizacion: cot || null,
+          recurrenteNetoDelChat: montoDe.get(tel) ?? null,
         })
       }
       if (lote.length < 200) break

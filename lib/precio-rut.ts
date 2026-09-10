@@ -44,7 +44,7 @@ async function sb<T>(path: string): Promise<T[]> {
  * Devuelve los contactos con precio mostrado y RUT del cliente. `paisPrefijo`
  * acota por país (default Chile: los montos y la escalera son de CL).
  */
-export async function contactosConPrecioYRut(opts: { desde?: string; paisPrefijo?: string } = {}): Promise<ContactoPrecioRut[]> {
+export async function contactosConPrecioYRut(opts: { desde?: string; paisPrefijo?: string; exigirRut?: boolean } = {}): Promise<ContactoPrecioRut[]> {
   if (!SUPABASE_URL || !SUPABASE_KEY) return []
   const desde = (opts.desde || "2026-01-01").trim()
   const prefijo = opts.paisPrefijo ?? "56"
@@ -100,7 +100,10 @@ export async function contactosConPrecioYRut(opts: { desde?: string; paisPrefijo
     const tel = telDe.get(cid) || ""
     if (!tel || (prefijo && !tel.startsWith(prefijo))) continue
     const rut = rutDe.get(tel) || ""
-    if (!rut) continue
+    // `exigirRut: false` sirve para preguntar solo "¿hay un precio del que
+    // sacar el monto?" — ahí el RUT no hace falta y exigirlo subestimaba
+    // (medición del 10-sep sobre los deals sin monto útil).
+    if (!rut && opts.exigirRut !== false) continue
     const prev = out.get(tel)
     if (!prev || x.ultimo > prev.ultimoPrecio) {
       out.set(tel, { tel, rut, primerPrecio: prev?.primerPrecio || x.primero, ultimoPrecio: x.ultimo, ultimoTexto: x.texto })
