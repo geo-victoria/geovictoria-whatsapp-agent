@@ -1,0 +1,332 @@
+/**
+ * RUNNER de la CAMPAÑA DE REACTIVACIÓN (Lalo 10-sep; reglas en
+ * lib/campana-reactivacion.ts).
+ *
+ *   martes 11:00    → WhatsApp (plantilla) a la PRIMERA casilla en falso
+ *   miércoles 11:00 → correo a quien recibió el WhatsApp de esta semana y
+ *                     SIGUE sin actividad
+ *   jueves 11:00    → llamada Dapta, mismo criterio
+ *
+ * GET auth cron (?key= | x-cron-secret):
+ *   ?dry=1            simulación explícita: lista sin enviar (siempre permitido)
+ *   ?dia=wsp|mail|call fuerza el canal (default: el del día local)
+ *   ?max=N            tope de envíos/filas por corrida (default 40)
+ *   ?dias=N           antigüedad del universo (default 90)
+ *   ?contact=569…     evalúa UN contacto y explica el veredicto
+ *   ?forzarHora=1     salta la ventana 11:00-11:59 (solo con dry o pruebas)
+ *
+ * MODO REAL solo con vic_kv `campana_react_enabled`="on" y sin ?dry=1. Sin el
+ * kv, la corrida automática (despachador) responde `apagada` y no evalúa
+ * nada — el primer encendido lo da Lalo después de mirar las listas.
+ *
+ * Registro: casillas en vic_campana_reactivacion (por CLIENTE), evento en
+ * vic_campanas (campana "react_t<N>") y [REGISTRO INTERNO] en el chat al
+ * salir el WhatsApp para que Vicky sepa por qué le escriben.
+ */
+
+import { NextResponse } from "next/server"
+import { appendAssistantV3, getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
+import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { linkCortoDe } from "@/lib/link-cotizacion"
+import {
+  anotarEvaluacion,
+  canalDelDia,
+  casillaAbierta,
+  evaluarGrupo1,
+  feriadosDe,
+  horaLocalDe,
+  leerCasillasLote,
+  marcarCasilla,
+  siguienteCasilla,
+  universoCampana,
+  type Canal,
+  type Casilla,
+  type FilaCasillas,
+} from "@/lib/campana-reactivacion"
+
+export const dynamic = "force-dynamic"
+export const maxDuration = 300
+
+const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
+const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+const ZOHO_API = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
+const TPL_CON_NOMBRE = (process.env.REMK_TEMPLATE_CON_NOMBRE || "vicky_reactivacion_cotizacion_cl_v4").trim()
+const TPL_SIN_NOMBRE = (process.env.REMK_TEMPLATE_SIN_NOMBRE || "vicky_reactivacion_sin_nombre_cl_v4").trim()
+const WA_VICKY = "https://wa.me/56967308227?text=Quiero%20retomar%20mi%20cotizaci%C3%B3n"
+const HORA_CAMPANA = 11
+
+async function autorizado(req: Request): Promise<boolean> {
+  const url = new URL(req.url)
+  const dado =
+    (req.headers.get("x-cron-secret") || "").trim() ||
+    (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim() ||
+    (url.searchParams.get("key") || "").trim()
+  if (!dado) return false
+  if (CRON_SECRET && dado === CRON_SECRET) return true
+  const kv = await getFollowupCronSecret().catch(() => "")
+  return Boolean(kv) && dado === kv
+}
+
+type Fila = {
+  contact: string
+  empresa: string | null
+  quoteId: string | null
+  origen?: string
+  casilla: Casilla | null
+  canal: Canal
+  accion?: string
+  omitido?: string
+  ultimaActividad?: string
+}
+
+function nombrePila(raw: string | null | undefined): string {
+  const s = String(raw || "").trim().split(/\s+/)[0] || ""
+  if (!/^[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}$/.test(s)) return ""
+  if (/^(prospecto|cliente|sr|sra|don|do[ñn]a|gerente|admin|rrhh|spa|ltda|eirl|contacto|usuario)$/i.test(s)) return ""
+  return s[0].toUpperCase() + s.slice(1).toLowerCase()
+}
+
+async function zohoHeaders(): Promise<Record<string, string>> {
+  const { getZohoAccessToken } = await import("@/lib/zoho-token")
+  const token = await getZohoAccessToken()
+  return { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+}
+
+async function datosContacto(H: Record<string, string>, contact: string, quoteId: string | null): Promise<{ nombre: string; email: string; empresa: string }> {
+  const nueve = contact.slice(-9)
+  let nombre = ""
+  let email = ""
+  let empresa = ""
+  try {
+    const r = await fetch(`${ZOHO_API}/crm/v8/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({ select_query: `select First_Name, Email from Contacts where Phone like '%${nueve}%' order by Modified_Time desc limit 1` }),
+    })
+    const c = (((await r.json().catch(() => null)) as { data?: Array<{ First_Name?: string; Email?: string }> } | null)?.data || [])[0]
+    nombre = nombrePila(c?.First_Name)
+    email = String(c?.Email || "").trim()
+  } catch { /* sin contacto */ }
+  if (quoteId) {
+    try {
+      const r = await fetch(`${ZOHO_API}/crm/v8/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select Name, Email_Contacto from ${QUOTE_MODULE} where id = '${quoteId}'` }),
+      })
+      const q = (((await r.json().catch(() => null)) as { data?: Array<{ Name?: string; Email_Contacto?: string }> } | null)?.data || [])[0]
+      empresa = String(q?.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "")
+      if (!email) email = String(q?.Email_Contacto || "").trim()
+    } catch { /* sin cotización */ }
+  }
+  return { nombre, email, empresa }
+}
+
+function esc(s: string): string {
+  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+function htmlCorreo(nombre: string, empresa: string, link: string): string {
+  const saludo = nombre ? `Hola ${esc(nombre)}!` : "Hola!"
+  const cta = link
+    ? `<p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#0087C8;color:#fff;text-decoration:none;font-weight:700;padding:12px 26px;border-radius:10px;display:inline-block;font-size:15px">Ver mi cotización</a></p>`
+    : ""
+  return `<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:'Segoe UI',Arial,sans-serif;color:#2d3748">
+<div style="max-width:560px;margin:0 auto;padding:26px 18px">
+  <div style="background:#fff;border-radius:14px;padding:28px 26px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+    <p style="margin:0 0 14px;font-size:15px">${saludo} Soy <b>Vicky</b>, de GeoVictoria 👋</p>
+    <p style="margin:0 0 14px;font-size:14.5px;line-height:1.6">Ayer te escribí por WhatsApp para retomar la cotización de control de asistencia${empresa ? ` de <b>${esc(empresa)}</b>` : ""}. Sigue vigente y con el mismo valor.</p>
+    <p style="margin:0 0 6px;font-size:14.5px;line-height:1.6">Si quieres partir, se paga en línea y tu cuenta queda activa el mismo día; yo te acompaño con la configuración por WhatsApp.</p>
+    ${cta}
+    <p style="text-align:center;margin:0 0 18px"><a href="${WA_VICKY}" style="color:#25D366;font-weight:700;text-decoration:none;font-size:14px">Escribirme por WhatsApp 💬</a></p>
+    <p style="margin:0;font-size:13px;color:#718096;line-height:1.6">Si ya no lo necesitas o prefieres que no te escribamos más por esta cotización, respóndeme este correo y lo dejo hasta aquí.</p>
+  </div>
+</div></body></html>`
+}
+
+async function enviarCorreo(H: Record<string, string>, quoteId: string | null, to: string, subject: string, html: string): Promise<boolean> {
+  const anchor = quoteId ? `${QUOTE_MODULE}/${quoteId}` : (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+  const r = await fetch(`${ZOHO_API}/crm/v3/${anchor}/actions/send_mail`, {
+    method: "POST",
+    headers: H,
+    body: JSON.stringify({ data: [{ from: { email: FROM_EMAIL }, to: [{ email: to }], subject, content: html, mail_format: "html" }] }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  })
+  return r.ok
+}
+
+async function registrarEvento(contact: string, casilla: Casilla, canal: Canal, quoteId: string | null): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/vic_campanas`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({
+      contact,
+      campana: `react_t${casilla}`,
+      evento: canal === "wsp" ? "enviado" : canal === "mail" ? "enviado_correo" : "enviado_dapta",
+      quote_id: quoteId,
+      at: new Date().toISOString(),
+    }),
+    cache: "no-store",
+  }).catch(() => {})
+}
+
+export async function GET(req: Request): Promise<Response> {
+  if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
+  const url = new URL(req.url)
+  const sp = url.searchParams
+  const ahora = new Date()
+  const pais = "cl"
+  const dryExplicito = sp.get("dry") === "1"
+  const enabled = ((await getKvValue("campana_react_enabled").catch(() => "")) || "").trim().toLowerCase() === "on"
+  const dry = dryExplicito || !enabled
+  const forzarHora = sp.get("forzarHora") === "1"
+  const max = Math.min(Math.max(Number(sp.get("max")) || 40, 1), 150)
+  const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 7), 365)
+  const soloContacto = (sp.get("contact") || "").replace(/\D/g, "")
+  const canalParam = sp.get("dia") as Canal | null
+  const canal: Canal | null = canalParam && ["wsp", "mail", "call"].includes(canalParam) ? canalParam : canalDelDia(pais, ahora)
+
+  // Corrida automática con la campaña apagada: no evalúa nada.
+  if (!dryExplicito && !enabled && !soloContacto) {
+    return NextResponse.json({ ok: true, apagada: true, nota: "vic_kv campana_react_enabled != on — usa ?dry=1 para simular" })
+  }
+  const hora = horaLocalDe(pais, ahora)
+  if (!dry && !forzarHora && hora !== HORA_CAMPANA) {
+    return NextResponse.json({ ok: true, fueraDeHora: true, hora, canal })
+  }
+  if (!canal) return NextResponse.json({ ok: true, sinCanalHoy: true, nota: "la campaña corre martes (wsp), miércoles (mail) y jueves (call)" })
+
+  const H = await zohoHeaders()
+  const feriados = await feriadosDe(pais)
+
+  // Un solo contacto: veredicto explicado (sin enviar salvo modo real explícito con ?contact=).
+  if (soloContacto) {
+    const ev = await evaluarGrupo1(soloContacto, { pais, ahora, H, feriados })
+    const casillas = await leerCasillasLote([soloContacto])
+    const fila = casillas.get(soloContacto) || null
+    return NextResponse.json({
+      ok: true, dry: true, contact: soloContacto, canal, grupo1: ev,
+      casillas: fila, siguiente: siguienteCasilla(fila), abierta: casillaAbierta(fila, ahora),
+    })
+  }
+
+  const filas: Fila[] = []
+  let enviados = 0
+  let evaluados = 0
+  const presupuestoMs = 250_000
+  const t0 = Date.now()
+
+  if (canal === "wsp") {
+    // MARTES: universo → grupo 1 → primera casilla en falso.
+    const universo = await universoCampana({ dias, H })
+    const casillas = await leerCasillasLote(universo.map((u) => u.contact))
+    for (const cand of universo) {
+      if (enviados >= max || filas.length >= max * 3) break
+      if (Date.now() - t0 > presupuestoMs) { filas.push({ contact: "-", empresa: null, quoteId: null, casilla: null, canal, omitido: "presupuesto_de_tiempo" }); break }
+      const fila = casillas.get(cand.contact) || null
+      const casilla = siguienteCasilla(fila)
+      const base: Fila = { contact: cand.contact, empresa: cand.empresa, quoteId: cand.quoteId, origen: cand.origen, casilla, canal }
+      if (!casilla) { base.omitido = "ciclo_completo (4 toques)"; filas.push(base); continue }
+      // Una casilla por semana: si el último WhatsApp salió hace menos de 6 días, esperar.
+      const abierta = casillaAbierta(fila, ahora)
+      if (abierta) { base.omitido = `toque_${abierta}_en_curso`; filas.push(base); continue }
+      evaluados++
+      const ev = await evaluarGrupo1(cand.contact, { pais, ahora, H, feriados })
+      base.ultimaActividad = ev.ultimaActividad.at ? `${ev.ultimaActividad.fuente} ${ev.ultimaActividad.at.toISOString().slice(0, 16)}` : "sin actividad registrada"
+      if (!ev.apto) {
+        base.omitido = ev.detalle ? `${ev.motivo} (${ev.detalle})` : ev.motivo
+        filas.push(base)
+        if (!dry) await anotarEvaluacion(cand.contact, base.omitido, pais)
+        continue
+      }
+      if (dry) { base.accion = `SE ENVIARÍA toque ${casilla} (WhatsApp)`; filas.push(base); continue }
+      const { nombre, empresa } = await datosContacto(H, cand.contact, cand.quoteId)
+      const tpl = nombre ? TPL_CON_NOMBRE : TPL_SIN_NOMBRE
+      const ok = await sendBotmakerTemplate(cand.contact, tpl, nombre ? { nombre } : {}).catch(() => false)
+      if (!ok) { base.accion = "ENVÍO FALLÓ (Botmaker)"; filas.push(base); continue }
+      await marcarCasilla(cand.contact, casilla, "wsp", { pais, quoteId: cand.quoteId, empresa: empresa || cand.empresa, motivo: `toque ${casilla} enviado` })
+      await registrarEvento(cand.contact, casilla, "wsp", cand.quoteId)
+      await appendAssistantV3(
+        cand.contact,
+        `[REGISTRO INTERNO] Campaña de reactivación, toque ${casilla} de 4 (${ahora.toISOString().slice(0, 10)}): se le envió la plantilla de reactivación por su cotización${empresa || cand.empresa ? ` de ${empresa || cand.empresa}` : ""}. Si responde con interés: retomar la cotización desde donde quedó, actualizar dotación si cambió y cerrar con link de pago. Si dice que no: agradecer y cerrar sin insistir. Mañana le llega un correo y el jueves una llamada solo si sigue sin responder.`,
+      ).catch(() => {})
+      enviados++
+      base.accion = `enviado toque ${casilla} (WhatsApp, ${tpl})`
+      filas.push(base)
+      await new Promise((r) => setTimeout(r, 900))
+    }
+  } else {
+    // MIÉRCOLES / JUEVES: casillas abiertas esta semana sin este canal.
+    const campo = canal === "mail" ? "mail" : "call"
+    const desde = new Date(ahora.getTime() - 6 * 86_400_000).toISOString()
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_campana_reactivacion?select=*&or=(toque1_wsp_at.gt.${desde},toque2_wsp_at.gt.${desde},toque3_wsp_at.gt.${desde},toque4_wsp_at.gt.${desde})&limit=500`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+    )
+    const abiertas = ((await r.json().catch(() => [])) as FilaCasillas[]) || []
+    for (const f of abiertas) {
+      if (enviados >= max) break
+      if (Date.now() - t0 > presupuestoMs) break
+      const casilla = casillaAbierta(f, ahora)
+      if (!casilla) continue
+      const base: Fila = { contact: f.contact, empresa: f.empresa, quoteId: f.quote_id, casilla, canal }
+      const yaSalio = f[`toque${casilla}_${campo}_at` as keyof FilaCasillas]
+      if (yaSalio) { base.omitido = `${campo}_ya_enviado`; filas.push(base); continue }
+      if (canal === "call" && !f[`toque${casilla}_mail_at` as keyof FilaCasillas]) {
+        // Sin correo el miércoles (respondió o no se pudo) la llamada tampoco va.
+        base.omitido = "sin_correo_previo"; filas.push(base); continue
+      }
+      evaluados++
+      const ev = await evaluarGrupo1(f.contact, { pais, ahora, H, feriados })
+      base.ultimaActividad = ev.ultimaActividad.at ? `${ev.ultimaActividad.fuente} ${ev.ultimaActividad.at.toISOString().slice(0, 16)}` : "sin actividad registrada"
+      // Actividad posterior al WhatsApp del martes corta la semana.
+      const wspAt = Date.parse(String(f[`toque${casilla}_wsp_at` as keyof FilaCasillas] || ""))
+      const huboActividadDespues = Boolean(ev.ultimaActividad.at) && (ev.ultimaActividad.at as Date).getTime() > wspAt
+      if (!ev.apto || huboActividadDespues) {
+        base.omitido = huboActividadDespues ? `actividad_tras_wsp (${ev.ultimaActividad.fuente})` : (ev.detalle ? `${ev.motivo} (${ev.detalle})` : ev.motivo)
+        filas.push(base)
+        if (!dry) await anotarEvaluacion(f.contact, base.omitido, pais)
+        continue
+      }
+      if (dry) { base.accion = `SE ENVIARÍA toque ${casilla} (${canal === "mail" ? "correo" : "llamada Dapta"})`; filas.push(base); continue }
+      const { nombre, email, empresa } = await datosContacto(H, f.contact, f.quote_id)
+      if (canal === "mail") {
+        if (!email) { base.omitido = "sin_email"; filas.push(base); continue }
+        const link = f.quote_id ? linkCortoDe(f.quote_id) : ""
+        const ok = await enviarCorreo(H, f.quote_id, email, `Tu cotización de control de asistencia sigue vigente${empresa || f.empresa ? ` · ${empresa || f.empresa}` : ""}`, htmlCorreo(nombre, empresa || f.empresa || "", link)).catch(() => false)
+        if (!ok) { base.accion = "ENVÍO FALLÓ (correo)"; filas.push(base); continue }
+        await marcarCasilla(f.contact, casilla, "mail", { pais, motivo: `toque ${casilla} correo` })
+        await registrarEvento(f.contact, casilla, "mail", f.quote_id)
+        enviados++
+        base.accion = `enviado toque ${casilla} (correo a ${email})`
+      } else {
+        // Llamada Dapta por el disparador existente (guardas propias: opt-out, 9-21).
+        const secreto = (await getFollowupCronSecret().catch(() => "")) || CRON_SECRET
+        const rr = await fetch(`${url.origin}/api/vic-admin-llamada`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-cron-secret": secreto },
+          body: JSON.stringify({ contact: f.contact, campana: `react_t${casilla}`, quoteId: f.quote_id || undefined }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(25_000),
+        }).catch(() => null)
+        const j = rr ? ((await rr.json().catch(() => ({}))) as { ok?: boolean; error?: string }) : null
+        if (!rr || !rr.ok || j?.ok === false) { base.accion = `LLAMADA NO SALIÓ (${j?.error || rr?.status || "sin respuesta"})`; filas.push(base); continue }
+        await marcarCasilla(f.contact, casilla, "call", { pais, motivo: `toque ${casilla} llamada` })
+        await registrarEvento(f.contact, casilla, "call", f.quote_id)
+        enviados++
+        base.accion = `disparada toque ${casilla} (llamada Dapta)`
+      }
+      filas.push(base)
+      await new Promise((r) => setTimeout(r, 600))
+    }
+  }
+
+  const resumen: Record<string, number> = {}
+  for (const f of filas) {
+    const k = f.accion ? (f.accion.startsWith("SE ENVIARÍA") ? "se_enviaria" : f.accion.split(" (")[0]) : String(f.omitido || "?").split(" (")[0]
+    resumen[k] = (resumen[k] || 0) + 1
+  }
+  return NextResponse.json({ ok: true, dry, enabled, canal, hora, fecha: ahora.toISOString(), dias, evaluados, enviados, resumen, filas, ms: Date.now() - t0 })
+}
