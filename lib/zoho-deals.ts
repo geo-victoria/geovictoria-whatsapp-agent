@@ -72,8 +72,43 @@ export async function transicionarDealHacia(
       headers,
       cache: "no-store",
     })
-    if (!bpRes.ok) return { dealId, desde: stageActual, resultado: "error", detalle: `blueprint GET ${bpRes.status}` }
-    const bp = (await bpRes.json().catch(() => ({}))) as {
+    // FUERA DEL BLUEPRINT (caso METALMAQ 10-sep, reclamo de Aleydis): un deal
+    // que no está en proceso responde RECORD_NOT_IN_PROCESS y el cron lo dejaba
+    // en "4. Propuesta" para siempre (pagado el 08-sep, NDV e IMP listas). Sin
+    // proceso no hay transiciones: el Stage se escribe DIRECTO (forward-only,
+    // ya verificado arriba), igual que se hizo a mano con Quilodrán/gemelo.
+    const bpJson = (await bpRes
+      .clone()
+      .json()
+      .catch(() => ({}))) as { code?: string; blueprint?: unknown }
+    if (!bpRes.ok || bpJson?.code === "RECORD_NOT_IN_PROCESS") {
+      if (bpJson?.code !== "RECORD_NOT_IN_PROCESS") {
+        return { dealId, desde: stageActual, resultado: "error", detalle: `blueprint GET ${bpRes.status}` }
+      }
+      const stageDirecto = objetivo === "implementando" ? "7. Implementando" : "6. Listo para Cierre"
+      const put = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}`, {
+        method: "PUT",
+        headers,
+        cache: "no-store",
+        body: JSON.stringify({
+          data: [{ id: dealId, Stage: stageDirecto }],
+          trigger: ["blueprint"],
+          skip_feature_execution: [{ name: "assignment_rules" }],
+        }),
+      })
+      const putJson = (await put.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
+      const fila = putJson?.data?.[0]
+      if (!put.ok || fila?.code !== "SUCCESS") {
+        return {
+          dealId,
+          desde: stageActual,
+          resultado: "error",
+          detalle: `fuera de blueprint, PUT directo falló: ${fila?.code || put.status} ${String(fila?.message || "").slice(0, 100)}`,
+        }
+      }
+      return { dealId, desde: stageActual, resultado: "avanzado", detalle: `→ ${stageDirecto} (PUT directo, deal fuera del blueprint)` }
+    }
+    const bp = bpJson as {
       blueprint?: {
         transitions?: Array<{
           id: string

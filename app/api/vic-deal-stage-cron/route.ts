@@ -152,6 +152,22 @@ async function handler(req: Request): Promise<Response> {
     const nombre = String(o.Name || "").toLowerCase()
     if (dealId && !nombre.includes("prueba")) objetivos.set(dealId, "implementando")
   }
+  // 2-bis. ALTA POR CHAT (10-sep, caso METALMAQ / reclamo Aleydis): las ventas
+  // que Vicky da de alta por WhatsApp no pasan por Autoservicio_Onboarding —
+  // su señal de "onboarding listo" es la cotización con Onboarding_Status
+  // "Cerrada" (la estampa el job NDV/IMP al nacer la Implementación). Sin esto
+  // el deal se quedaba en "4. Propuesta" con NDV e IMP ya creadas.
+  const cerradasChat = await coql<{ id?: string; Name?: string; "Deal_Asociado.id"?: string }>(
+    `select id, Name, Deal_Asociado.id from ${QUOTE_MODULE} where ((Created_By = ${VICKY_CREATOR_ID} and Onboarding_Status = 'Cerrada') and Estado_Cotizacion = 'Pagada') limit 200`,
+  ).catch((e) => {
+    console.warn("[deal-stage-cron] COQL cerradas por chat falló:", e instanceof Error ? e.message : e)
+    return [] as Array<{ id?: string; Name?: string; "Deal_Asociado.id"?: string }>
+  })
+  for (const q of cerradasChat) {
+    const dealId = String(q["Deal_Asociado.id"] || "")
+    const nombre = String(q.Name || "").toLowerCase()
+    if (dealId && !nombre.includes("prueba")) objetivos.set(dealId, "implementando")
+  }
 
   const resultados: ResultadoTransicion[] = []
   for (const [dealId, objetivo] of objetivos) {
