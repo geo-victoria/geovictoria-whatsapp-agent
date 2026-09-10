@@ -197,6 +197,44 @@ export async function GET(req: Request): Promise<NextResponse> {
     }
   }
 
+  // ¿PRECIO MOSTRADO **Y** RUT CONOCIDO? (pregunta de Lalo 10-sep) y, de esos,
+  // cuáles NO tienen deal: son los deals que FALTAN, porque con RUT y precio
+  // la escalera manda crear el registro. El RUT se busca en lo que escribió
+  // el CLIENTE (regex + dígito verificador) y no en lo que dijo Vicky.
+  const conRut = new Map<string, string>() // contacto → RUT normalizado
+  let faltanDealConRut: Array<{ tel: string; rut: string; primerPrecio: string }> = []
+  if (sp.get("rut") === "1" && telsPrecio.length) {
+    const { normalizarRut, rutValido } = await import("@/lib/rut")
+    const RUT_RE = /\b(\d{1,2}[.]?\d{3}[.]?\d{3}\s*[-–]?\s*[\dkK])\b/g
+    // conversación → contacto (para atribuir los mensajes).
+    const convDe = new Map<string, string>()
+    for (const [cid, tel] of contactoDe.entries()) if (primeraVez.has(tel)) convDe.set(cid, tel)
+    const cids = [...convDe.keys()]
+    for (let i = 0; i < cids.length; i += 100) {
+      const lote = cids.slice(i, i + 100).map((x) => `"${x}"`).join(",")
+      for (let p = 0; p < 12; p++) {
+        const r = await fetch(
+          `${SUPABASE_URL}/rest/v1/vic_v3_messages?conversation_id=in.(${lote})&role=eq.user&select=conversation_id,content&limit=1000&offset=${p * 1000}`,
+          { headers: h, cache: "no-store" },
+        ).catch(() => null)
+        if (!r?.ok) break
+        const filasM = ((await r.json().catch(() => [])) as Array<{ conversation_id?: string; content?: string }>) || []
+        for (const f of filasM) {
+          const tel = convDe.get(String(f.conversation_id || "")) || ""
+          if (!tel || conRut.has(tel)) continue
+          for (const m of String(f.content || "").matchAll(RUT_RE)) {
+            const cand = normalizarRut(m[1])
+            if (rutValido(cand)) { conRut.set(tel, cand); break }
+          }
+        }
+        if (filasM.length < 1000) break
+      }
+    }
+    faltanDealConRut = [...conRut.entries()]
+      .filter(([tel]) => !conDeal.has(tel) && !conCotizacion.has(tel))
+      .map(([tel, rut]) => ({ tel, rut, primerPrecio: String(primeraVez.get(tel) || "").slice(0, 10) }))
+  }
+
   // Contactos NUEVOS con precio por mes (por su primera vez).
   const porMes = new Map<string, number>()
   for (const at of primeraVez.values()) {
@@ -237,6 +275,15 @@ export async function GET(req: Request): Promise<NextResponse> {
       muestraConRegistroEnZoho: muestraConRegistro,
       muestraSinNingunRegistro: muestraSinNada,
     },
+    rut: sp.get("rut") === "1"
+      ? {
+          nota: "RUT válido (con dígito verificador) escrito por el CLIENTE en el chat",
+          conPrecioYRut: conRut.size,
+          conPrecioSinRut: telsPrecio.length - conRut.size,
+          conRutYSinDeal: faltanDealConRut.length,
+          faltanDeal: faltanDealConRut.slice(0, 60),
+        }
+      : "pasa ?rut=1 para calcularlo",
     descartados: { internos: descartadosInternos, sinPais: descartadosSinPais },
     truncado: filas.length >= paginas * 1000,
   })
