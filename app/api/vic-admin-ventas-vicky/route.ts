@@ -107,11 +107,86 @@ export async function GET(req: Request): Promise<NextResponse> {
     for (const c of ((await r.json().catch(() => [])) as Array<{ contact: string }>) || []) conChat.add(String(c.contact || "").replace(/\D/g, ""))
   }
 
+  // 3-bis) REGLA DE ATRIBUCIÓN (Lalo 08/09-sep). Una cotización del CANAL
+  // EJECUTIVO cuenta para Vicky solo si (a) hubo una 100% Vicky ANTES en el
+  // mismo deal o teléfono (reemisión), o (b) Vicky MOSTRÓ PRECIO en el chat
+  // antes de esa emisión (caso C, "agrega Seguridad GSL"). Un traspaso que
+  // Vicky no alcanzó a cotizar es venta del ejecutivo y NO entra.
+  const vickyPorDeal = new Map<string, number>() // dealId → primera 100% Vicky (ms)
+  const vickyPorTel = new Map<string, number>()
+  for (let off = 0; off < 2000; off += 200) {
+    const r = await fetch(`${api}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        select_query:
+          `select id, Tel_fono_Contacto, Created_Time, Deal_Asociado.id from ${QUOTE_MODULE} ` +
+          `where Intervenci_n_Humana = '100% Vicky' order by Created_Time desc limit ${off}, 200`,
+      }),
+    }).catch(() => null)
+    if (!r?.ok || r.status === 204) break
+    const lote = ((await r.json().catch(() => ({}))) as { data?: Q[] }).data || []
+    for (const q of lote) {
+      const ms = Date.parse(String(q.Created_Time || ""))
+      if (!Number.isFinite(ms)) continue
+      const d = String(q["Deal_Asociado.id"] || "")
+      const t = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
+      if (d && ms < (vickyPorDeal.get(d) ?? Infinity)) vickyPorDeal.set(d, ms)
+      if (t && ms < (vickyPorTel.get(t) ?? Infinity)) vickyPorTel.set(t, ms)
+    }
+    if (lote.length < 200) break
+  }
+  // Primer precio mostrado por contacto (misma señal del dash y del caso C).
+  const FIRMAS = ["Resumen mensual", "Total mensual con IVA", "UF + IVA al mes", "Total mensual"]
+  const orFirmas = FIRMAS.map((f) => `content.ilike.*${encodeURIComponent(f)}*`).join(",")
+  const primerPrecio = new Map<string, number>() // contacto → ms del primer precio
+  {
+    const porConv = new Map<string, number>()
+    for (let p = 0; p < 5; p++) {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/vic_v3_messages?role=eq.assistant&or=(${orFirmas})&select=conversation_id,at&order=at.asc&limit=1000&offset=${p * 1000}`,
+        { headers: h, cache: "no-store" },
+      ).catch(() => null)
+      if (!r?.ok) break
+      const lote = ((await r.json().catch(() => [])) as Array<{ conversation_id?: string; at?: string }>) || []
+      for (const f of lote) {
+        const ms = Date.parse(String(f.at || ""))
+        const cid = String(f.conversation_id || "")
+        if (cid && Number.isFinite(ms) && ms < (porConv.get(cid) ?? Infinity)) porConv.set(cid, ms)
+      }
+      if (lote.length < 1000) break
+    }
+    const cids = [...porConv.keys()]
+    for (let i = 0; i < cids.length; i += 200) {
+      const lote = cids.slice(i, i + 200).map((x) => `"${x}"`).join(",")
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?id=in.(${lote})&select=id,contact`, { headers: h, cache: "no-store" }).catch(() => null)
+      if (!r?.ok) continue
+      for (const c of ((await r.json().catch(() => [])) as Array<{ id: string; contact: string }>) || []) {
+        const tel = String(c.contact || "").replace(/\D/g, "")
+        const ms = porConv.get(String(c.id)) ?? Infinity
+        if (tel && Number.isFinite(ms) && ms < (primerPrecio.get(tel) ?? Infinity)) primerPrecio.set(tel, ms)
+      }
+    }
+  }
+  const atribucion = (q: Q): "vicky" | "reemision" | "precio_mostrado" | "ejecutivo" => {
+    if (/100%/.test(String(q.Intervenci_n_Humana || ""))) return "vicky"
+    const ms = Date.parse(String(q.Created_Time || q.Fecha_Hora_Cotizacion || ""))
+    const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
+    const d = String(q["Deal_Asociado.id"] || "")
+    const antesVicky = Math.min(d ? (vickyPorDeal.get(d) ?? Infinity) : Infinity, tel ? (vickyPorTel.get(tel) ?? Infinity) : Infinity)
+    if (Number.isFinite(ms) && antesVicky < ms) return "reemision"
+    const pp = tel ? (primerPrecio.get(tel) ?? Infinity) : Infinity
+    if (Number.isFinite(ms) && pp < ms) return "precio_mostrado"
+    return "ejecutivo"
+  }
+
   // 4) Universo: pagadas de Vicky, en Chile y desde la fecha pedida.
   const desdeMs = Date.parse(`${desde}T00:00:00Z`)
   let fueraDeChile = 0
   let sinConversacion = 0
   let sinMontoEnCaja = 0
+  let ejecutivoSinAtribucion = 0
+  const ejecutivoDetalle: string[] = []
+  const porAtribucion = new Map<string, { ventas: number; cobradoClp: number }>()
   const universo = pagadas.filter((q) => {
     const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
     const c = caja.get(String(q.id || ""))
@@ -119,6 +194,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     if (Number.isFinite(desdeMs) && Number.isFinite(ms) && ms < desdeMs) return false
     if (!tel.startsWith("56")) { fueraDeChile++; return false }
     if (!conChat.has(tel)) { sinConversacion++; return false }
+    if (atribucion(q) === "ejecutivo") { ejecutivoSinAtribucion++; ejecutivoDetalle.push(q.Numero_Cotizacion || String(q.id || "")); return false }
     return true
   })
 
@@ -154,6 +230,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     m[g] += Number(c.montoClp || 0) || 0
     porMes.set(mes, m)
     if (g === "sd" && detalleSd.length < 25) detalleSd.push(`${q.Numero_Cotizacion || id}`)
+    const a = atribucion(q)
+    const acc = porAtribucion.get(a) || { ventas: 0, cobradoClp: 0 }
+    acc.ventas++
+    acc.cobradoClp += Number(c.montoClp || 0) || 0
+    porAtribucion.set(a, acc)
   }
 
   const suma = (k: "ventas" | "cobradoClp" | "mrrClp" | "unicoClp") => tot.autonoma[k] + tot.asistida[k] + tot.sd[k]
@@ -162,7 +243,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     desde,
     definiciones: {
       venta: "cotización Pagada",
-      deVicky: "el teléfono conversó con Vicky (criterio del dash)",
+      deVicky: "conversó con Vicky Y la cotización le corresponde por la regla de atribución: emitida por Vicky, reemisión del ejecutivo sobre una de Vicky (mismo deal o teléfono), o precio mostrado por Vicky antes de la emisión ejecutiva",
       autonoma: "sin actividad del equipo de telemarketing, aunque haya traspaso; las SDR son postventa",
       montos: "cobradoClp = pago inicial cobrado · mrrClp = recurrente mensual · unicoClp = pagos únicos",
       soloChile: true,
@@ -172,7 +253,14 @@ export async function GET(req: Request): Promise<NextResponse> {
     asistida: tot.asistida,
     sinClasificar: tot.sd,
     porMesCobradoClp: Object.fromEntries([...porMes.entries()].sort()),
-    excluidas: { fueraDeChile, sinConversacionConVicky: sinConversacion, sinMontoEnLaCaja: sinMontoEnCaja },
+    porAtribucion: Object.fromEntries([...porAtribucion.entries()]),
+    excluidas: {
+      fueraDeChile,
+      sinConversacionConVicky: sinConversacion,
+      sinMontoEnLaCaja: sinMontoEnCaja,
+      canalEjecutivoSinAtribucion: ejecutivoSinAtribucion,
+      canalEjecutivoDetalle: ejecutivoDetalle.slice(0, 40),
+    },
     pagadasLeidas: pagadas.length,
     sinClasificarDetalle: detalleSd,
     kvMuestra: (await getKvValue(`venta_dash_v3_${ids[0] || ""}`).catch(() => null)) ? "ok" : "sin muestra",
