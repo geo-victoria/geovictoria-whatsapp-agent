@@ -578,8 +578,13 @@ export async function GET(req: Request): Promise<Response> {
       method: "POST", headers: H, cache: "no-store",
       body: JSON.stringify({
         select_query:
+          // SOLO deals de VICKY: el umbral de mil pesos, aplicado a todo el
+          // CRM, caza deals de otros productos (Planificador, Alertas, Centro
+          // de Operaciones, arriendos de KAM) y de Colombia, donde 300 o 0,5
+          // pueden ser correctos en su moneda. Verificado en el dry del
+          // 10-sep: los 30 primeros eran ajenos y ninguno tenía cotización.
           `select id, Deal_Name, Stage, Valor_fijo_del_trato_Global from Deals ` +
-          `where (Valor_fijo_del_trato_Global > 0 and Valor_fijo_del_trato_Global < 1000) ` +
+          `where ((Valor_fijo_del_trato_Global > 0 and Valor_fijo_del_trato_Global < 1000) and Created_By = 3525045000484500876) ` +
           `order by Created_Time desc limit 200`,
       }),
     })
