@@ -565,6 +565,13 @@ async function dealActivoEnKv(fono: string): Promise<string | null> {
         await registrarDealEnKv(fono, delPuntero, "puntero_cotizacion").catch(() => {})
         return delPuntero
       }
+      // Sin cotización tampoco hay puntero (deals de derivación >20): se
+      // pregunta a Zoho antes de dejar que nazca un gemelo.
+      const deZoho = await dealVivoDesdeZoho(fono)
+      if (deZoho) {
+        await registrarDealEnKv(fono, deZoho, "zoho_por_fono").catch(() => {})
+        return deZoho
+      }
       return null
     }
     // Marca "creando" (anti-carrera 25-ago, gemelos Quilodrán): la otra puerta
@@ -609,6 +616,39 @@ async function dealVivoDesdePuntero(fono: string): Promise<string | null> {
   }
 }
 
+/**
+ * ÚLTIMA RED ANTES DE PARIR UN GEMELO: deal vivo del fono buscado en ZOHO.
+ *
+ * Caso Diego Cubillos / MSS Asesores (10-sep): la derivación del 09-sep dejó
+ * un deal SIN cotización (>20 personas, nunca se emitió formal). Al día
+ * siguiente el candado `deal_fono_` ya había vencido (TTL 6 h) y el puntero de
+ * cotización no existía —no hay cotización— así que el hito por chat convirtió
+ * otro lead del mismo número y nació un SEGUNDO deal ("Cafetería"), con la
+ * conciliación sorteándolos a dos ejecutivos distintos. El puntero solo ancla
+ * a los fonos que llegaron a cotizar; este fallback cubre a los demás.
+ */
+async function dealVivoDesdeZoho(fono: string): Promise<string | null> {
+  try {
+    const nueve = String(fono || "").replace(/\D/g, "").slice(-9)
+    if (nueve.length !== 9) return null
+    const { h, api } = await zohoHeaders()
+    // COQL con 3 condiciones exige la forma ((A or B) and C) (cicatriz 09-sep).
+    const q =
+      `select id, Stage, Created_Time from Deals where ` +
+      `((Contact_Name.Phone like '%${nueve}%' or Contact_Name.Mobile like '%${nueve}%') and Stage != 'Cierre Perdido') ` +
+      `order by Created_Time desc limit 5`
+    const r = await fetch(`${api}/crm/v8/coql`, {
+      method: "POST", headers: h, cache: "no-store", body: JSON.stringify({ select_query: q }),
+    })
+    if (!r.ok || r.status === 204) return null
+    const filas = ((await r.json().catch(() => ({}))) as { data?: Array<{ id?: string }> }).data || []
+    const id = String(filas[0]?.id || "").trim()
+    return /^\d{10,}$/.test(id) ? id : null
+  } catch {
+    return null
+  }
+}
+
 /** Reserva la creación del deal del fono (marca "creando") ANTES de crear.
  * false = otra puerta ya tiene deal o reserva vigente → re-consultar y REUSAR. */
 async function reservarDealEnKv(fono: string, origen: string): Promise<boolean> {
@@ -624,6 +664,11 @@ async function reservarDealEnKv(fono: string, origen: string): Promise<boolean> 
     }
     // Candado vencido o ausente: el puntero de cotización manda (09-sep).
     if (await dealVivoDesdePuntero(fono)) return false
+    const vivoZoho = await dealVivoDesdeZoho(fono)
+    if (vivoZoho) {
+      await registrarDealEnKv(fono, vivoZoho, "zoho_por_fono").catch(() => {})
+      return false
+    }
     await setKvValue(`deal_fono_${fono}`, JSON.stringify({ at: new Date().toISOString(), creando: true, origen }))
     return true
   } catch {

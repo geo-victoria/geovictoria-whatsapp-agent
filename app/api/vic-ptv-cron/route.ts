@@ -2037,7 +2037,11 @@ export async function GET(req: Request) {
   {
     const sp = new URL(req.url).searchParams
     if (sp.get("soloConciliacionSdr") === "1") {
-      const r = await reconciliarSdrCalificados(new Date(), { dias: Number(sp.get("dias")) || 7, max: Number(sp.get("max")) || 4 })
+      const r = await reconciliarSdrCalificados(new Date(), {
+        dias: Number(sp.get("dias")) || 7,
+        max: Number(sp.get("max")) || 4,
+        diasDeals: Number(sp.get("diasDeals")) || 0,
+      })
       return NextResponse.json({ ok: true, modo: "soloConciliacionSdr", ...r })
     }
     if (sp.get("soloPresentaciones") === "1") {
@@ -2889,7 +2893,7 @@ async function reintentarPresentacionesPendientes(
  * se presenta al cliente. Solo abiertos: pagados y perdidos no se tocan.
  * Candado kv `sdr_recon_<id>` (7 d). Máximo 4 por tick.
  */
-async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max?: number } = {}): Promise<{ revisados: number; reenviados: number; detalle: string[] }> {
+async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max?: number; diasDeals?: number } = {}): Promise<{ revisados: number; reenviados: number; detalle: string[] }> {
   const diasLeads = Math.max(1, Math.min(60, Number(opts.dias) || 7))
   const maxReenvios = Math.max(1, Math.min(20, Number(opts.max) || 4))
   const roster = (process.env.VICKY_TM_ROSTER_CALIFICACION_EMAILS || "aaraque@geovictoria.com,asepulveda@geovictoria.com")
@@ -3039,7 +3043,9 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
   // 14 días y sigue intocable porque lo movió GeoVictoria Admin.
   // VENTANA (Lalo 10-sep): 48 h dejaban fuera lo acumulado (Patiño 24-ago,
   // Cancino 31-ago) — ahora 14 días, ajustable por env sin deploy.
-  const diasDeals = Number(process.env.VICKY_SDR_RECON_DIAS || 14) || 14
+  // Ventana de deals: env por defecto, con override por query para alcanzar lo
+  // acumulado (?diasDeals=30 rescató el Patiño del 24-ago).
+  const diasDeals = Math.max(1, Math.min(120, Number(opts.diasDeals) || Number(process.env.VICKY_SDR_RECON_DIAS || 14) || 14))
   const desde48 = new Date(ahora.getTime() - diasDeals * 864e5).toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const deals = await coql<{ id: string; Deal_Name?: string; Stage?: string; N_Empleados_que_marcan?: number; "Owner.email"?: string; "Contact_Name.Phone"?: string; Created_By?: { id?: string } | null }>(
     `select id, Deal_Name, Stage, N_Empleados_que_marcan, Owner.email, Contact_Name.Phone, Created_By from Deals ` +
