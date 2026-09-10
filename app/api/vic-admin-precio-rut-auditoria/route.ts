@@ -85,6 +85,54 @@ export async function GET(req: Request): Promise<NextResponse> {
     return (((await r.json().catch(() => ({}))) as { data?: T[] }).data) || []
   }
 
+  // ── CONTEO DE GESTIÓN VICKY EN DEALS (?conteo=1) — pregunta de Lalo 10-sep:
+  // "¿cuántos deals tienen marcado Gestión Vicky? ¿cuántos de esos ya tienen
+  // el valor conocido?". COQL no cuenta sin group by, así que se pagina y se
+  // cuenta acá. VALOR CONOCIDO = `Valor_fijo_del_trato_Global` > 1.000 CLP:
+  // bajo mil es la tarifa en UF disfrazada, y el forecast la lee como cero.
+  if (sp.get("conteo") === "1") {
+    const porMarca = new Map<string, { deals: number; conValor: number; implausible: number; sinValor: number; sumaClp: number }>()
+    let total = 0
+    for (let off = 0; off < 9800; off += 200) {
+      const lote = await coql<{ Gesti_n_Vicky?: string | null; Valor_fijo_del_trato_Global?: number | null; Stage?: string }>(
+        `select id, Gesti_n_Vicky, Valor_fijo_del_trato_Global, Stage from Deals where Gesti_n_Vicky is not null order by Created_Time desc limit ${off}, 200`,
+      )
+      for (const d of lote) {
+        total++
+        const k = String(d.Gesti_n_Vicky || "(vacío)")
+        const acc = porMarca.get(k) || { deals: 0, conValor: 0, implausible: 0, sinValor: 0, sumaClp: 0 }
+        acc.deals++
+        const v = Number(d.Valor_fijo_del_trato_Global || 0)
+        if (v > 1000) { acc.conValor++; acc.sumaClp += v }
+        else if (v > 0) acc.implausible++
+        else acc.sinValor++
+        porMarca.set(k, acc)
+      }
+      if (lote.length < 200) break
+    }
+    const suma = (f: (x: { deals: number; conValor: number; implausible: number; sinValor: number; sumaClp: number }) => number) =>
+      [...porMarca.values()].reduce((a, x) => a + f(x), 0)
+    const deVicky = [...porMarca.entries()].filter(([k]) => !/no habló/i.test(k))
+    return NextResponse.json({
+      ok: true,
+      modo: "conteo",
+      nota: "valor conocido = Valor_fijo_del_trato_Global > 1.000 CLP; bajo mil es tarifa en UF y el forecast la lee como cero",
+      dealsConMarca: total,
+      conValor: suma((x) => x.conValor),
+      valorImplausible: suma((x) => x.implausible),
+      sinValor: suma((x) => x.sinValor),
+      sumaRecurrenteClp: suma((x) => x.sumaClp),
+      soloGestionadosPorVicky: {
+        deals: deVicky.reduce((a, [, x]) => a + x.deals, 0),
+        conValor: deVicky.reduce((a, [, x]) => a + x.conValor, 0),
+        sinValorNiPlausible: deVicky.reduce((a, [, x]) => a + x.sinValor + x.implausible, 0),
+        sumaRecurrenteClp: deVicky.reduce((a, [, x]) => a + x.sumaClp, 0),
+      },
+      porMarca: Object.fromEntries(porMarca),
+      fallosCoql: fallosCoql.slice(0, 3),
+    })
+  }
+
   // ── FICHA POR CONTACTO (?tels=a,b,c): para responder "¿por qué no se creó
   // el deal?" con evidencia — conversación, dotación, si llegó a formal,
   // estado del loop, traspaso y qué hay en Zoho.
