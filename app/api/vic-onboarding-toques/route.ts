@@ -208,8 +208,17 @@ export async function GET(req: Request): Promise<Response> {
       }
 
       // ── Regla 1: pagó y no completó el alta ──
+      // Las 2 h cuentan desde el PAGO además del silencio (caso Mauricio /
+      // DE LA CUENCA 10-sep: pagó 13:34, el vigía lo tocó 13:57 porque su
+      // último mensaje era de las 11:35 — el formulario llevaba 23 minutos).
+      let desdePagoMs = Number.POSITIVE_INFINITY
+      try {
+        const marca = (await getKvValue(`pago_online_${contact}`).catch(() => null)) || (await getKvValue(`comprobante_ok_${contact}`).catch(() => null))
+        const at = marca ? (JSON.parse(marca) as { at?: string }).at : null
+        if (at && Number.isFinite(Date.parse(at))) desdePagoMs = ahora.getTime() - Date.parse(at)
+      } catch { /* sin marca: solo silencio */ }
       if (!altaAt) {
-        if (ultimo && silencioMs >= 2 * HORA) {
+        if (ultimo && silencioMs >= 2 * HORA && desdePagoMs >= 2 * HORA) {
           await disparar(
             "alta_pendiente",
             `onb_toque_alta_${contact}`,
