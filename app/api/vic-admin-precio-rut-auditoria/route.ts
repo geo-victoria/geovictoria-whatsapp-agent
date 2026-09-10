@@ -385,12 +385,21 @@ export async function GET(req: Request): Promise<NextResponse> {
   let reflejo: Record<string, unknown> | null = null
   if (sp.get("reflejo") === "1") {
     const todos = await contactosConPrecioYRut({ desde, paisPrefijo: "56", exigirRut: false })
+    // La mayoría de los bloques trae el valor en UF y el CLP solo como
+    // aproximación; descartarlos dejaba fuera 272 de 483 contactos y la cifra
+    // NO calzaba con los $21,2 M del contador de precios (Lalo: "esa cifra
+    // debe calzar tanto en las conversaciones como en los deals"). Con ?uf= se
+    // convierten igual que allá.
+    const ufDia = Math.max(0, Number(sp.get("uf") || 0)) || 0
     let mostradoNeto = 0, reflejadoNeto = 0, sinDealNeto = 0, sinValorNeto = 0
+    let desdeUf = 0
     let conDealYValor = 0, conDealSinValor = 0, sinDeal = 0, sinMontoLegible = 0
     let sobre = 0, bajo = 0
     for (const c of todos) {
       const m = montoDelBloque(c.ultimoTexto)
-      const neto = m.clp ? Math.round(m.clp / 1.19) : 0
+      const conIva = m.clp || (m.uf && ufDia ? m.uf * ufDia : 0)
+      if (m.uf && !m.clp && ufDia) desdeUf++
+      const neto = conIva ? Math.round(conIva / 1.19) : 0
       if (!neto) { sinMontoLegible++; continue }
       mostradoNeto += neto
       const idLocal = dealLocalPorTel.get(c.tel) || ""
@@ -407,6 +416,8 @@ export async function GET(req: Request): Promise<NextResponse> {
       nota: "neto contra neto: el bloque del chat va CON IVA y el campo del deal es NETO",
       contactosConPrecioCL: todos.length,
       sinMontoLegible,
+      convertidosDesdeUf: desdeUf,
+      ufUsada: ufDia || null,
       mostradoNetoClp: mostradoNeto,
       reflejadoEnDealsClp: reflejadoNeto,
       cobertura: mostradoNeto ? `${Math.round((reflejadoNeto * 100) / mostradoNeto)}%` : "—",
