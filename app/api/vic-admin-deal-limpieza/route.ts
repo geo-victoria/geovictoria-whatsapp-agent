@@ -562,6 +562,66 @@ export async function GET(req: Request): Promise<Response> {
     })
   }
 
+  // ── MODO VALORES IMPLAUSIBLES (?implausibles=1) — Lalo 10-sep, "accionemos".
+  // El pase normal corrige el valor, pero con el candado semanal `dlz_` y el
+  // límite por corrida los deals viejos nunca se alcanzan, así que quedan con
+  // la TARIFA EN UF que dejó el workflow de Zoho (0,75) o en nulo, y el
+  // forecast los cuenta en cero. Ningún plan cuesta menos de mil pesos al
+  // mes: todo valor entre 0 y 1.000 es una unidad equivocada. Este modo los
+  // busca de frente —de cualquier canal— y los recalcula desde SU cotización
+  // más reciente. `?dry=1` simula.
+  if (searchParams.get("implausibles") === "1") {
+    const dry = searchParams.get("dry") === "1"
+    const tope = Math.max(1, Math.min(60, Number(searchParams.get("limit") || 25)))
+    const out = { revisados: 0, corregidos: 0, sinCotizacion: 0, sinRecurrente: 0, detalle: [] as Array<Record<string, unknown>> }
+    const rq = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        select_query:
+          `select id, Deal_Name, Stage, Valor_fijo_del_trato_Global from Deals ` +
+          `where (Valor_fijo_del_trato_Global > 0 and Valor_fijo_del_trato_Global < 1000) ` +
+          `order by Created_Time desc limit 200`,
+      }),
+    })
+    const sospechosos = rq.status === 200
+      ? (((await rq.json().catch(() => ({}))) as { data?: Array<{ id: string; Deal_Name?: string; Stage?: string; Valor_fijo_del_trato_Global?: number }> }).data || [])
+      : []
+    for (const d of sospechosos) {
+      if (out.revisados >= tope) break
+      out.revisados++
+      // Cotización más reciente del deal.
+      const rc2 = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+        method: "POST", headers: H, cache: "no-store",
+        body: JSON.stringify({ select_query: `select id, Created_Time from Cotizaciones_GeoVictoria where Deal_Asociado = '${d.id}' order by Created_Time desc limit 1` }),
+      }).catch(() => null)
+      const cot = rc2?.status === 200 ? (((await rc2.json().catch(() => ({}))) as { data?: Array<{ id: string }> }).data || [])[0] : null
+      if (!cot) { out.sinCotizacion++; out.detalle.push({ deal: d.Deal_Name, valor: d.Valor_fijo_del_trato_Global, omitido: "sin cotización" }); continue }
+      const rqq = await fetch(`${ZOHO_API}/crm/v3/Cotizaciones_GeoVictoria/${cot.id}`, { headers: H, cache: "no-store" }).catch(() => null)
+      const quote = rqq?.status === 200 ? ((await rqq.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> })?.data?.[0] : null
+      if (!quote) { out.sinCotizacion++; continue }
+      const pct = Number(quote.Descuento_Recurrente_Pct || 0) || 0
+      const items = (quote.Detalle_Items_Cotizacion as Array<{ Subtotal_CLP?: number; Es_Recurrente?: boolean; Codigo_Item?: string }>) || []
+      const anual = items.find((i) => (i.Codigo_Item || "") === "plan_anual")
+      const recurrente = anual && Number(anual.Subtotal_CLP) > 0
+        ? Math.round(Number(anual.Subtotal_CLP) / 12)
+        : Math.round(items.filter((i) => i.Es_Recurrente || (i.Codigo_Item || "") === "asistencia").reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0) * (1 - pct / 100))
+      if (!(recurrente > 0)) { out.sinRecurrente++; out.detalle.push({ deal: d.Deal_Name, valor: d.Valor_fijo_del_trato_Global, omitido: "la cotización no da recurrente" }); continue }
+      out.detalle.push({ deal: d.Deal_Name, etapa: d.Stage, valorAntes: d.Valor_fijo_del_trato_Global, recurrenteNetoClp: recurrente, cotizacion: cot.id })
+      if (!dry) {
+        const put = await fetch(`${ZOHO_API}/crm/v3/Deals`, {
+          method: "PUT", headers: H, cache: "no-store",
+          body: JSON.stringify({
+            data: [{ id: d.id, Valor_fijo_del_trato_Global: recurrente, Tipo_de_Cobro: "Mensual fijo", Monda_del_trato: "CLP", Valor_por_usuario_Global: null }],
+            trigger: ["blueprint"],
+            skip_feature_execution: [{ name: "assignment_rules" }],
+          }),
+        }).catch(() => null)
+        if (put?.ok) out.corregidos++
+      }
+    }
+    return NextResponse.json({ ok: true, modo: "implausibles", dry, ...out })
+  }
+
   // ── MODO GESTIÓN DE LEADS (?gestionleads=1): mismo campo Gesti_n_Vicky
   // creado en el módulo LEADS (Lalo 20-ago, "los leads que se asignaron a
   // Vicky, ¿podemos marcarlos igual?"). Universo: leads CREADOS por Vicky O
@@ -609,6 +669,47 @@ export async function GET(req: Request): Promise<Response> {
         const lid = String(c.zoho_lead_id || "").replace(/\D/g, "")
         if (!lid || yaEnPagina.has(lid) || revisados.has(lid)) continue
         extra.push({ id: lid, Phone: c.contact })
+      }
+      // ── UNIVERSO POR CONVERSACIÓN (Lalo 10-sep, "accionemos"; el punto que
+      // quedó sin VB el 09-sep). El hueco eran los leads del FORMULARIO web:
+      // los crea David García y cambian de dueño en minutos, así que salen del
+      // universo "creado por Vicky o dueño Vicky" y quedan Unknown en el
+      // forecast aunque Vicky los haya trabajado. Se parte de los teléfonos
+      // que SÍ conversaron con Vicky y se cruzan con los leads recientes sin
+      // estampa, por los últimos 9 dígitos. La estampa la decide la misma
+      // función que el resto del modo: si el chat no da para marcar, queda
+      // "No habló con Vicky". Apagable con ?porconversacion=0.
+      if (searchParams.get("porconversacion") !== "0") {
+        const diasConv = Math.max(1, Math.min(180, Number(searchParams.get("diasconv") || 60)))
+        const desdeConv = new Date(Date.now() - diasConv * 864e5).toISOString()
+        const convs = await supa<{ contact: string }>(
+          `vic_v3_conversations?select=contact&updated_at=gte.${encodeURIComponent(desdeConv)}&limit=6000`,
+        ).catch(() => [])
+        const nueveVicky = new Set(
+          convs.map((c) => String(c.contact || "").replace(/\D/g, "")).filter((t) => t.length >= 9).map((t) => t.slice(-9)),
+        )
+        if (nueveVicky.size) {
+          for (let off = 0; off < 800; off += 200) {
+            const rl2 = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+              method: "POST", headers: H, cache: "no-store",
+              body: JSON.stringify({
+                select_query:
+                  `select id, Phone from Leads where (Gesti_n_Vicky is null and Created_Time >= '${desdeConv.replace(/\.\d{3}Z$/, "+00:00")}') ` +
+                  `order by Created_Time desc limit ${off}, 200`,
+              }),
+            }).catch(() => null)
+            if (rl2?.status !== 200) break
+            const lote = (((await rl2.json().catch(() => ({}))) as { data?: Array<{ id: string; Phone?: string | null }> }).data) || []
+            for (const l of lote) {
+              const nueve = String(l.Phone || "").replace(/\D/g, "").slice(-9)
+              if (!nueve || !nueveVicky.has(nueve)) continue
+              if (yaEnPagina.has(l.id) || revisados.has(l.id)) continue
+              if (extra.some((e) => e.id === l.id)) continue
+              extra.push({ id: l.id, Phone: l.Phone || "" })
+            }
+            if (lote.length < 200) break
+          }
+        }
       }
     }
     for (const f of [...filas, ...extra].slice(0, limit)) {
