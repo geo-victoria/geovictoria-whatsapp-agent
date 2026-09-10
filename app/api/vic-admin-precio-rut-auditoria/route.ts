@@ -395,6 +395,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     let desdeUf = 0
     let conDealYValor = 0, conDealSinValor = 0, sinDeal = 0, sinMontoLegible = 0
     let sobre = 0, bajo = 0
+    // Listas para poder ACCIONAR (Lalo 10-sep: "actualiza esos 54 deals sin
+    // valor" y "después veamos los deals que falten"): sin la lista, el conteo
+    // no sirve para nada más que mirarlo.
+    const listaSinValor: Array<Record<string, unknown>> = []
+    const listaSinDeal: Array<Record<string, unknown>> = []
     for (const c of todos) {
       const m = montoDelBloque(c.ultimoTexto)
       const conIva = m.clp || (m.uf && ufDia ? m.uf * ufDia : 0)
@@ -404,9 +409,27 @@ export async function GET(req: Request): Promise<NextResponse> {
       mostradoNeto += neto
       const idLocal = dealLocalPorTel.get(c.tel) || ""
       const d = dealPorNueve.get(c.tel.slice(-9)) || (idLocal ? dealPorId.get(idLocal) : undefined)
-      if (!d) { sinDeal++; sinDealNeto += neto; continue }
+      if (!d) {
+        sinDeal++; sinDealNeto += neto
+        const l = leadPorNueve.get(c.tel.slice(-9))
+        listaSinDeal.push({
+          tel: c.tel, rut: c.rut || null, ultimoPrecio: c.ultimoPrecio.slice(0, 10),
+          recurrenteNetoClp: neto, desdeUf: Boolean(m.uf && !m.clp),
+          lead: l ? { id: l.id, nombre: l.Last_Name, status: l.Lead_Status, dueno: l["Owner.email"] } : null,
+        })
+        continue
+      }
       const v = Number(d.Valor_fijo_del_trato_Global || 0)
-      if (!(v > 1000)) { conDealSinValor++; sinValorNeto += neto; continue }
+      if (!(v > 1000)) {
+        conDealSinValor++; sinValorNeto += neto
+        listaSinValor.push({
+          tel: c.tel, rut: c.rut || null, dealId: d.id, deal: d.Deal_Name, etapa: d.Stage,
+          valorActual: d.Valor_fijo_del_trato_Global ?? null, empleados: d.N_Empleados_que_marcan ?? null,
+          moneda: d.Monda_del_trato || null, tipo: d.Tipo_de_Cobro || null, gestion: d.Gesti_n_Vicky || null,
+          recurrenteNetoClp: neto, desdeUf: Boolean(m.uf && !m.clp),
+        })
+        continue
+      }
       conDealYValor++
       reflejadoNeto += v
       if (v > neto * 1.15) sobre++
@@ -423,6 +446,8 @@ export async function GET(req: Request): Promise<NextResponse> {
       cobertura: mostradoNeto ? `${Math.round((reflejadoNeto * 100) / mostradoNeto)}%` : "—",
       noReflejado: { sinDeal, montoClp: sinDealNeto, conDealSinValor, montoSinValorClp: sinValorNeto },
       desviaciones: { dealMayorQueElPrecio: sobre, dealMenorQueElPrecio: bajo, iguales: conDealYValor - sobre - bajo },
+      listaConDealSinValor: listaSinValor,
+      listaSinDeal,
     }
   }
 
