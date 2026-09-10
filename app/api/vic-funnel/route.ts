@@ -18,7 +18,7 @@ import { createHash } from "node:crypto"
 
 import { esEmailInterno, isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken, getZohoAccessTokenFresco } from "@/lib/zoho-token"
-import { claveGestion, refrescarGestion, type GestionVenta } from "@/lib/gestion-venta"
+import { claveGestion, refrescarGestion, sesionesTelemarketing, esNotaDeTelemarketing, type GestionVenta } from "@/lib/gestion-venta"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
 
@@ -370,22 +370,31 @@ async function gestionDeVentas(
     if (!r?.ok) continue
     const rows = ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) || []
     for (const row of rows) {
-      try { cache.set(String(row.key).replace(/^venta_gestion_/, ""), JSON.parse(String(row.value || "{}"))) } catch { /* fila corrupta */ }
+      try { cache.set(String(row.key).replace(/^venta_gestion_v\d+_/, ""), JSON.parse(String(row.value || "{}"))) } catch { /* fila corrupta */ }
     }
   }
   // (2) Espejo del vendedor en bulk: su WhatsApp o una llamada contestada son
   // actividad aunque la nota-espejo todavía no haya llegado a Zoho (el cron
-  // que las sincroniza corre cada ~15 min).
+  // que las sincroniza corre cada ~15 min). SOLO sesiones de TELEMARKETING
+  // (Lalo 10-sep): el WhatsApp de Aleydis o Aracelli es gestión POSTVENTA de
+  // una venta autónoma, no asistencia — se filtra en código y no con
+  // `session_id=not.in.(…)`, que en Postgres descartaría también los NULL.
+  const sesionesOk = sesionesTelemarketing()
   const tels = [...new Set(filas.map((q) => digits(String(q.Tel_fono_Contacto || ""))).filter((t) => t.length >= 9))]
   const conEspejo = new Set<string>()
   for (let i = 0; i < tels.length; i += 100) {
     const lista = tels.slice(i, i + 100).map((t) => `"${t}"`).join(",")
     const [rm, rl] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=in.(${lista})&from_me=eq.true&es_grupo=eq.false&select=telefono_chat&limit=5000`, { headers: h, cache: "no-store" }).catch(() => null),
-      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?telefono=in.(${lista})&estado=eq.accept&select=telefono&limit=2000`, { headers: h, cache: "no-store" }).catch(() => null),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=in.(${lista})&from_me=eq.true&es_grupo=eq.false&select=telefono_chat,session_id&limit=5000`, { headers: h, cache: "no-store" }).catch(() => null),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?telefono=in.(${lista})&estado=eq.accept&select=telefono,session_id&limit=2000`, { headers: h, cache: "no-store" }).catch(() => null),
     ])
-    if (rm?.ok) for (const f of ((await rm.json().catch(() => [])) as Array<{ telefono_chat?: string }>) || []) conEspejo.add(digits(String(f.telefono_chat || "")))
-    if (rl?.ok) for (const f of ((await rl.json().catch(() => [])) as Array<{ telefono?: string }>) || []) conEspejo.add(digits(String(f.telefono || "")))
+    const deTlmk = (ses: unknown) => sesionesOk.has(String(ses || "").trim().toLowerCase())
+    if (rm?.ok) for (const f of ((await rm.json().catch(() => [])) as Array<{ telefono_chat?: string; session_id?: string }>) || []) {
+      if (deTlmk(f.session_id)) conEspejo.add(digits(String(f.telefono_chat || "")))
+    }
+    if (rl?.ok) for (const f of ((await rl.json().catch(() => [])) as Array<{ telefono?: string; session_id?: string }>) || []) {
+      if (deTlmk(f.session_id)) conEspejo.add(digits(String(f.telefono || "")))
+    }
   }
   // (3) Notas del deal, solo lo que quede sin resolver.
   const maxZoho = Math.max(0, opts.maxZoho ?? 40)
@@ -416,9 +425,18 @@ async function gestionDeVentas(
       H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
     }
     leidas++
-    const { hayGestionEnDeal } = await import("@/lib/traspaso-postpago")
-    const gestiono = await hayGestionEnDeal(dealId, H, api).catch(() => null)
-    const g: GestionVenta = gestiono === null ? "sd" : gestiono ? "asistida" : "autonoma"
+    // Notas del deal con el criterio ANGOSTO: solo telemarketing. No se usa
+    // hayGestionEnDeal (cualquier humano) porque esa función decide otra cosa
+    // —si la venta se le quita al dueño— y ahí el criterio ancho protege a
+    // quien sí trabajó el caso.
+    const rn = await fetch(`${api}/crm/v3/Deals/${dealId}/Notes?fields=Note_Title,Created_By&per_page=100`, { headers: H, cache: "no-store" }).catch(() => null)
+    let g: GestionVenta = "sd"
+    if (rn?.ok || rn?.status === 204) {
+      const notas = rn.status === 204
+        ? []
+        : (((await rn.json().catch(() => ({}))) as { data?: Array<{ Note_Title?: string | null; Created_By?: { id?: string } | null }> }).data || [])
+      g = notas.some(esNotaDeTelemarketing) ? "asistida" : "autonoma"
+    }
     out.set(id, g)
     void guardar(id, g)
   }
