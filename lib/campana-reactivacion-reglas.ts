@@ -5,6 +5,15 @@
  */
 
 export const TOQUES_MAX = 4
+
+/**
+ * "2 días hábiles" (Lalo 10-sep): lunes a viernes menos feriados, de 9:00 a
+ * 18:00 → 2 × 9 h = 1.080 minutos hábiles. OJO: distinto del reloj de
+ * traspaso (8-18); por eso el cálculo pasa HORA_INICIO_CAMPANA explícita.
+ */
+export const HORA_INICIO_CAMPANA = 9
+export const DIAS_HABILES_INACTIVIDAD = Number(process.env.CAMPANA_REACT_DIAS_HABILES || 2)
+export const MINUTOS_HABILES_INACTIVIDAD = DIAS_HABILES_INACTIVIDAD * (18 - HORA_INICIO_CAMPANA) * 60
 export type Casilla = 1 | 2 | 3 | 4
 export type Canal = "wsp" | "mail" | "call"
 

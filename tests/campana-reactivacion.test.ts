@@ -30,3 +30,20 @@ test("canalDelDia: martes wsp, miércoles mail, jueves call, resto null (hora CL
   // Borde de zona: lunes 23:30 CL sigue siendo lunes aunque en UTC ya sea martes.
   assert.equal(canalDelDia("cl", new Date("2026-09-08T02:30:00Z")), null)
 })
+
+test("inactividad: 2 días hábiles = 18 h de 9 a 18, L-V sin feriados (Lalo 10-sep)", async () => {
+  const { minutosHabilesEntre } = await import("../lib/ptv.ts")
+  const { MINUTOS_HABILES_INACTIVIDAD, HORA_INICIO_CAMPANA } = await import("../lib/campana-reactivacion-reglas.ts")
+  assert.equal(MINUTOS_HABILES_INACTIVIDAD, 1080)
+  // Viernes 11-sep 11:00 CL (14:00Z) → martes 15-sep 11:00 CL: vie 7 h + lun 9 h + mar 2 h = 18 h.
+  const min = minutosHabilesEntre(new Date("2026-09-11T14:00:00Z"), new Date("2026-09-15T14:00:00Z"), "cl", new Set(), HORA_INICIO_CAMPANA)
+  assert.equal(min, 1080)
+  // La hora 8-9 NO cuenta para la campaña (sí para el reloj de traspaso).
+  const m8 = minutosHabilesEntre(new Date("2026-09-14T11:00:00Z"), new Date("2026-09-14T12:00:00Z"), "cl", new Set(), HORA_INICIO_CAMPANA)
+  assert.equal(m8, 0)
+  assert.equal(minutosHabilesEntre(new Date("2026-09-14T11:00:00Z"), new Date("2026-09-14T12:00:00Z"), "cl"), 60)
+  // Feriado 18-sep: viernes entero congelado → jueves 17 11:00 a martes 22 11:00 = jue 7 + lun 9 + mar 2 = 18 h.
+  const fer = new Set(["2026-09-18"])
+  const mf = minutosHabilesEntre(new Date("2026-09-17T14:00:00Z"), new Date("2026-09-22T14:00:00Z"), "cl", fer, HORA_INICIO_CAMPANA)
+  assert.equal(mf, 1080)
+})

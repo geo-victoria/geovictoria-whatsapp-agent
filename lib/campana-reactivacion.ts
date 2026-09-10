@@ -35,9 +35,9 @@ import { posturaRechazoCliente } from "./rechazo-cliente"
 import { detectarClienteExistente } from "./cliente-existente"
 import { casuisticaDeContacto } from "./casuistica-runtime"
 import { testContactSet } from "./funnel-analysis"
-import { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, type Canal, type Casilla, type FilaCasillas } from "./campana-reactivacion-reglas"
+import { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, HORA_INICIO_CAMPANA, MINUTOS_HABILES_INACTIVIDAD, type Canal, type Casilla, type FilaCasillas } from "./campana-reactivacion-reglas"
 
-export { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, TOQUES_MAX } from "./campana-reactivacion-reglas"
+export { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, TOQUES_MAX, HORA_INICIO_CAMPANA, DIAS_HABILES_INACTIVIDAD, MINUTOS_HABILES_INACTIVIDAD } from "./campana-reactivacion-reglas"
 export type { Canal, Casilla, FilaCasillas } from "./campana-reactivacion-reglas"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
@@ -48,9 +48,7 @@ const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria
 /** Usuarios robot cuyas notas/actividades NO cuentan como gestión humana. */
 const ROBOTS = new Set(["3525045000484500876", "3525045000000200013"])
 
-/** 2 días hábiles = 2 × (8:00-18:00) = 1.200 minutos hábiles. */
-export const DIAS_HABILES_INACTIVIDAD = Number(process.env.CAMPANA_REACT_DIAS_HABILES || 2)
-export const MINUTOS_HABILES_INACTIVIDAD = DIAS_HABILES_INACTIVIDAD * 600
+
 export const TABLA = "vic_campana_reactivacion"
 
 export type Actividad = { at: Date | null; fuente: string; detalle?: string }
@@ -110,7 +108,9 @@ async function coql<T>(H: Record<string, string>, query: string): Promise<T[]> {
 
 export async function feriadosDe(pais: string): Promise<Set<string>> {
   try {
-    const filas = await sb<{ d: string }>(`vic_holidays?country=eq.${pais}&select=d&limit=500`)
+    // vic_holidays guarda el país en MAYÚSCULA ("CL"); con `eq.cl` el set
+    // salía vacío y los feriados jamás se aplicaban (hallazgo 10-sep).
+    const filas = await sb<{ d: string }>(`vic_holidays?country=ilike.${pais}&select=d&limit=500`)
     return new Set(filas.map((f) => String(f.d).slice(0, 10)))
   } catch {
     return new Set()
@@ -375,7 +375,7 @@ export async function evaluarGrupo1(
   // Inactividad: 2 días hábiles sin nada en ningún canal.
   const { actividad, fallas } = await ultimaActividad(contact, { ahora, H })
   if (fallas.length) return fuera("no_evaluable", fallas.join(" · ").slice(0, 200), actividad)
-  const minutos = actividad.at ? minutosHabilesEntre(actividad.at, ahora, pais, feriados) : Number.POSITIVE_INFINITY
+  const minutos = actividad.at ? minutosHabilesEntre(actividad.at, ahora, pais, feriados, HORA_INICIO_CAMPANA) : Number.POSITIVE_INFINITY
   if (actividad.at && minutos < MINUTOS_HABILES_INACTIVIDAD) {
     return fuera("activo_reciente", `${actividad.fuente} ${actividad.at.toISOString()}`, actividad, minutos)
   }

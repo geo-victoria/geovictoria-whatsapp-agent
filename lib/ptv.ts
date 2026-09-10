@@ -93,10 +93,17 @@ function horaLocal(pais: string, ahora: Date): { hora: number; dia: number } {
  * Horario hábil del doc: L-V no feriado, 8:00-18:00 hora del país. Los
  * feriados los aporta el caller (tabla vic_holidays) como set "YYYY-MM-DD".
  */
-export function esHorarioHabil(pais: string, ahora: Date, feriados: Set<string> = new Set()): boolean {
+export function esHorarioHabil(
+  pais: string,
+  ahora: Date,
+  feriados: Set<string> = new Set(),
+  /** Hora de inicio de la jornada (default 8: relojes de traspaso). La
+   *  campaña de reactivación usa 9 (definición Lalo 10-sep: L-V 9-18). */
+  horaInicio = 8,
+): boolean {
   const { hora, dia } = horaLocal(pais, ahora)
   if (dia === 0 || dia === 6) return false
-  if (hora < 8 || hora >= 18) return false
+  if (hora < horaInicio || hora >= 18) return false
   const tz = TZ_POR_PAIS[pais] || "America/Santiago"
   const fechaLocal = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(ahora)
   if (feriados.has(fechaLocal)) return false
@@ -229,6 +236,7 @@ export function minutosHabilesEntre(
   hasta: Date,
   pais: string,
   feriados: Set<string> = new Set(),
+  horaInicio = 8,
 ): number {
   if (hasta.getTime() <= desde.getTime()) return 0
   let total = 0
@@ -237,7 +245,7 @@ export function minutosHabilesEntre(
   let guardia = 0
   while (cursor.getTime() < hasta.getTime() && guardia < 24 * 60) {
     const finHora = cursor.getTime() + 3600_000
-    if (esHorarioHabil(pais, new Date(cursor.getTime() + 1), feriados)) {
+    if (esHorarioHabil(pais, new Date(cursor.getTime() + 1), feriados, horaInicio)) {
       const ini = Math.max(cursor.getTime(), desde.getTime())
       const fin = Math.min(finHora, hasta.getTime())
       if (fin > ini) total += (fin - ini) / 60000
