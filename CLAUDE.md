@@ -495,3 +495,16 @@
 - **Aplicado el 10-sep**: Gestión Vicky estampada en **13 deals** (`?aplicar=gestion`: Derivado si hubo traspaso, Gestión Vicky si no) · ANTON PAAR 0,55 → **$36.795** por el modo implausibles · antes, 13 deals con valor desde el precio mostrado ($563.973). Universo al cierre: 347 conversaciones con precio+RUT → **328 al día · 15 incompletos · 4 sin deal**.
 - **PENDIENTE TÉCNICO**: el cruce por fuentes locales levantó a Antrillao pero NO a Jaime (su puntero trae deal_id y el deal responde 200) — revisar el lote `vic_v3_quote_pointers?contact=in.(…)` del endpoint. Y quedan 4 deals con valor implausible sin cotización ni bloque de precio en el chat (MSS Asesores, Madaluk, Syl Schlef, CARPIN MASTER): ahí no hay de dónde sacar el monto.
 - **CONTEO DE GESTIÓN VICKY EN DEALS (10-sep, `?conteo=1`)**: **934 deals** tienen el campo estampado (COQL no cuenta sin group by, así que el endpoint pagina y cuenta). Con valor conocido —más de mil pesos, porque bajo eso es tarifa en UF que el forecast lee como cero— **803**; implausibles 12; sin valor 119. Suma del recurrente: **$60,8 M**. Partido: Derivado 382 (312 con valor · $15,9 M) · **No habló con Vicky 380** (366 con valor · $38,4 M) · Gestión Vicky 162 (122 · $5,9 M) · Derivado fuera de Rango 10 (3 · $0,56 M). **Los realmente gestionados por Vicky son 554** (los tres primeros valores del picklist): 437 con valor, 117 sin valor o implausible, **$22,4 M de recurrente**. La mitad del monto marcado cuelga de "No habló con Vicky", que es la etiqueta de lo que NO es de Vicky.
+
+## REGLA (Lalo 10-sep): la data OBLIGATORIA del deal de toda conversación con precio + RUT
+- **Toda conversación que mostró precio Y de la que sabemos el RUT DEBE tener su deal correspondiente**, y ese deal debe llevar SÍ O SÍ:
+  1. **Gestión Vicky**
+  2. **Valor fijo del trato** (recurrente mensual neto en CLP, convención 20-ago / 09-sep)
+  3. **Empleados** (`N_Empleados_que_marcan`)
+  4. **Moneda** (CLP)
+  5. **Stage actualizado hasta el último hito de la conversación**
+  6. **Fecha SQL 2.0** = fecha en que pasa a "En Levantamiento" hacia adelante
+  7. **Fecha/hora de Propuesta Enviada** = fecha y hora en que se MUESTRA el precio
+  8. **Fecha/hora de Listo para Cierre v2** = fecha en que el cliente acepta o paga
+- Las tres FECHAS son la parte nueva (10-sep): hasta ahora el reconciliador miraba stage, valor, empleados, moneda, tipo de cobro y Gestión Vicky, pero NO estampaba `Fecha_SQL_2_0` ni `Fecha_Hora_Env_o_Propuesta` ni `Fecha_paso_a_Listo_para_cierre_v2` desde la conversación. Al implementarlo: la hora de "propuesta enviada" es la del bloque de precio en el chat (`pref_escalon_at` o el mensaje con el bloque), y la de "listo para cierre" es la aceptación o el pago (`venta_dash_v3_`/`pago_online_`/`comprobante_ok_`).
+- Guardado por orden de Lalo SIN implementar todavía.
