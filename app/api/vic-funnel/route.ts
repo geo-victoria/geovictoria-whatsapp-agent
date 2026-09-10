@@ -18,6 +18,7 @@ import { createHash } from "node:crypto"
 
 import { esEmailInterno, isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken, getZohoAccessTokenFresco } from "@/lib/zoho-token"
+import { claveGestion, refrescarGestion, type GestionVenta } from "@/lib/gestion-venta"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
 
@@ -337,6 +338,91 @@ function esPagada(q: { Estado_Cotizacion?: string | null; Onboarding_Link?: stri
 
 function esAceptadaOMas(q: { Estado_Cotizacion?: string | null; Onboarding_Link?: string | null }): boolean {
   return esPagada(q) || String(q.Estado_Cotizacion || "").toLowerCase().includes("acept")
+}
+
+/**
+ * AUTÓNOMA vs ASISTIDA por venta (Lalo 10-sep, para el segundo paréntesis de
+ * la columna Pagada): **autónoma = sin ACTIVIDAD del ejecutivo, aunque la
+ * conversación se haya traspasado** — "puede haber traspaso y que el ejecutivo
+ * no haya hecho nada". Asistida = traspaso MÁS actividad real.
+ *
+ * Criterio idéntico al de `hayGestionEnDeal` y al del correo de PAGADA, para
+ * que dash, correo y asignación de la venta no se contradigan. Orden de costo:
+ * (1) caché en vic_kv por cotización, (2) espejo del vendedor en bulk desde
+ * Supabase, (3) notas del deal en Zoho solo para lo que quede sin resolver,
+ * con tope por render. Lo que no se pudo verificar queda "sd", nunca autónoma.
+ */
+async function gestionDeVentas(
+  pagadas: RawAceptada[],
+  opts: { maxZoho?: number } = {},
+): Promise<Map<string, GestionVenta>> {
+  const out = new Map<string, GestionVenta>()
+  const filas = pagadas.filter((q) => String(q.id || "").trim())
+  if (!filas.length || !SUPABASE_URL || !SUPABASE_KEY) return out
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  const ahora = Date.now()
+  // (1) Caché por cotización — una consulta por lote de 80 claves.
+  const cache = new Map<string, { g?: string; at?: string }>()
+  const ids = [...new Set(filas.map((q) => String(q.id)))]
+  for (let i = 0; i < ids.length; i += 80) {
+    const keys = ids.slice(i, i + 80).map((id) => `"${claveGestion(id)}"`).join(",")
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=in.(${keys})&select=key,value`, { headers: h, cache: "no-store" }).catch(() => null)
+    if (!r?.ok) continue
+    const rows = ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) || []
+    for (const row of rows) {
+      try { cache.set(String(row.key).replace(/^venta_gestion_/, ""), JSON.parse(String(row.value || "{}"))) } catch { /* fila corrupta */ }
+    }
+  }
+  // (2) Espejo del vendedor en bulk: su WhatsApp o una llamada contestada son
+  // actividad aunque la nota-espejo todavía no haya llegado a Zoho (el cron
+  // que las sincroniza corre cada ~15 min).
+  const tels = [...new Set(filas.map((q) => digits(String(q.Tel_fono_Contacto || ""))).filter((t) => t.length >= 9))]
+  const conEspejo = new Set<string>()
+  for (let i = 0; i < tels.length; i += 100) {
+    const lista = tels.slice(i, i + 100).map((t) => `"${t}"`).join(",")
+    const [rm, rl] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?telefono_chat=in.(${lista})&from_me=eq.true&es_grupo=eq.false&select=telefono_chat&limit=5000`, { headers: h, cache: "no-store" }).catch(() => null),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_wa_espejo_llamadas?telefono=in.(${lista})&estado=eq.accept&select=telefono&limit=2000`, { headers: h, cache: "no-store" }).catch(() => null),
+    ])
+    if (rm?.ok) for (const f of ((await rm.json().catch(() => [])) as Array<{ telefono_chat?: string }>) || []) conEspejo.add(digits(String(f.telefono_chat || "")))
+    if (rl?.ok) for (const f of ((await rl.json().catch(() => [])) as Array<{ telefono?: string }>) || []) conEspejo.add(digits(String(f.telefono || "")))
+  }
+  // (3) Notas del deal, solo lo que quede sin resolver.
+  const maxZoho = Math.max(0, opts.maxZoho ?? 40)
+  let leidas = 0
+  let H: Record<string, string> | null = null
+  const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  const guardar = async (id: string, g: GestionVenta) => {
+    if (g === "sd") return
+    await fetch(`${SUPABASE_URL}/rest/v1/vic_kv`, {
+      method: "POST",
+      headers: { ...h, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify({ key: claveGestion(id), value: JSON.stringify({ g, at: new Date(ahora).toISOString() }) }),
+      cache: "no-store",
+    }).catch(() => null)
+  }
+  for (const q of filas) {
+    const id = String(q.id)
+    const tel = digits(String(q.Tel_fono_Contacto || ""))
+    if (tel && conEspejo.has(tel)) { out.set(id, "asistida"); continue }
+    const c = cache.get(id) || null
+    const pagoMs = Date.parse(String(q.Modified_Time || q.Fecha_Hora_Cotizacion || ""))
+    if (c?.g && !refrescarGestion(c, pagoMs, ahora)) { out.set(id, c.g as GestionVenta); continue }
+    const dealId = String(q["Deal_Asociado.id"] || "").trim()
+    if (!dealId || leidas >= maxZoho) { out.set(id, (c?.g as GestionVenta) || "sd"); continue }
+    if (!H) {
+      const token = await getZohoAccessToken().catch(() => "")
+      if (!token) { out.set(id, (c?.g as GestionVenta) || "sd"); continue }
+      H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    }
+    leidas++
+    const { hayGestionEnDeal } = await import("@/lib/traspaso-postpago")
+    const gestiono = await hayGestionEnDeal(dealId, H, api).catch(() => null)
+    const g: GestionVenta = gestiono === null ? "sd" : gestiono ? "asistida" : "autonoma"
+    out.set(id, g)
+    void guardar(id, g)
+  }
+  return out
 }
 
 async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaCerrada[]> {
@@ -4309,6 +4395,10 @@ function renderInboundDiario(
     /** Empresa por quoteId — nombra cada cotización en las viñetas del Grupo
      * Foto (elementos tel~quoteId). */
     nombresQuote?: Map<string, string>
+    /** quoteId → venta autónoma o asistida (Lalo 10-sep): segundo paréntesis
+     * de la columna Pagada. Autónoma = sin ACTIVIDAD del ejecutivo, aunque la
+     * conversación se haya traspasado. */
+    gestionQuote?: Map<string, GestionVenta>
     /** Detalle embebido por teléfono (para el modal instantáneo). */
     detalles: Map<string, { e: string; est: string; ej: string; dot: string; ult: string; acc: string; conv: string; z: string }>
     /** Transcripción embebida por teléfono: [rol c|v, fecha, texto]. */
@@ -4553,6 +4643,22 @@ function renderInboundDiario(
     for (const el of u) if (opts.outboundTels?.has(telDeElemento(el))) out++
     return { ins: u.size - out, out }
   }
+  // AUTÓNOMA vs ASISTIDA de las pagadas de un día, semana o total.
+  const partirGestion = (dia: string): string => {
+    if (!opts.gestionQuote?.size) return ""
+    let aut = 0, asi = 0, sd = 0
+    for (const el of new Set(elementosDe("pagada", dia))) {
+      const g = opts.gestionQuote.get(quoteDeElemento(el))
+      if (g === "asistida") asi++
+      else if (g === "autonoma") aut++
+      else sd++
+    }
+    if (aut + asi + sd === 0) return ""
+    const partes = [`aut ${aut}`, `asis ${asi}`]
+    if (sd > 0) partes.push(`s/d ${sd}`)
+    const ayuda = `Gestión del ejecutivo en la venta: autónoma = no hizo nada (aunque la conversación se haya traspasado) · asistida = traspaso con actividad real (nota en el deal, su WhatsApp espejado o llamada contestada)${sd > 0 ? " · s/d = no se pudo verificar" : ""}`
+    return ` <span style="font-size:11px;color:#7c3aed;white-space:nowrap" title="${ayuda}">(${partes.join(" · ")})</span>`
+  }
   // CIERRE POR ORIGEN (Lalo 08-sep, "¿no está en el dash?"): junto a la tasa
   // de cierre de cada fila, la misma tasa partida en inbound y outbound —
   // pagadas ÷ vieron precio de cada origen (outbound = contacto con fila en
@@ -4589,6 +4695,11 @@ function renderInboundDiario(
         sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: cuántos por origen (inbound · outbound)">(in ${x.ins} · out ${x.out})</span>`
       }
     }
+    // AUTÓNOMA vs ASISTIDA en Pagadas (Lalo 10-sep): segundo paréntesis.
+    // Autónoma = el ejecutivo NO hizo nada, aunque la conversación se haya
+    // traspasado; asistida = traspaso MÁS actividad real (nota suya en el
+    // deal, su WhatsApp espejado o una llamada contestada).
+    if (etapa === "pagada") sufijo += partirGestion(dia)
     return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="${dia}" style="text-align:center${sufijo ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=${encodeURIComponent(dia)}&inbEtapa=${etapa}" style="border-bottom:1px dashed #bcd9ea"><b>${v}</b></a>${sufijo}</td>`
   }
   // ── SUB-FILAS POR ORIGEN (Lalo 26-ago): cada día se despliega con una
@@ -4739,7 +4850,12 @@ function renderInboundDiario(
         sufijo = ` <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="Tipo de conversación: cuántos por origen (inbound · outbound)">(in ${x.ins} · out ${x.out})</span>`
       }
     }
-    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${partes.length ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
+    // AUTÓNOMA vs ASISTIDA en Pagadas (Lalo 10-sep): segundo paréntesis.
+    // Autónoma = el ejecutivo NO hizo nada, aunque la conversación se haya
+    // traspasado; asistida = traspaso MÁS actividad real (nota suya en el
+    // deal, su WhatsApp espejado o una llamada contestada).
+    if (etapa === "pagada") sufijo += partirGestion("TOTAL")
+    return `<td class="conpop ${cls}" data-et="${etapa}" data-dia="TOTAL" style="text-align:center${sufijo ? ";white-space:nowrap" : ""}"><a href="?${opts.qs}&inbdet=TOTAL&inbEtapa=${etapa}"><b>${v}</b></a>${sufijo}</td>`
   }
   const filaTotalOk = `<tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700">
     <td>${flechaOrigen("TOTAL")}<b>TOTAL</b></td>
@@ -9023,7 +9139,9 @@ export async function GET(req: Request): Promise<Response> {
           const num = String(q.Numero_Cotizacion || "").trim()
           if (qid && (emp || num)) nombresQuote.set(qid, [emp, num].filter(Boolean).join(" · "))
         }
-        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formConvTels: inbdet ? undefined : formConvTels, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, campanas: inbdet ? undefined : campanaPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
+        // Autónoma vs asistida de cada venta pagada (Lalo 10-sep).
+        const gestionQuote = await gestionDeVentas((cierre?.todasList || []).filter((q) => esPagada(q))).catch(() => new Map<string, GestionVenta>())
+        inboundHtml = renderInboundDiario(cohortes, { rango, qs: filtrosQS().toString(), caja, nombres: nombresPorTel, nombresQuote, gestionQuote, detalles: detallesPorTel, trans: transPorTel, formVicky: inbdet ? undefined : formPorDia, formConv: inbdet ? undefined : formConvPorDia, formConvTels: inbdet ? undefined : formConvTels, formTels: inbdet ? undefined : formTels, origenes: inbdet ? undefined : origenPorTel, campanas: inbdet ? undefined : campanaPorTel, outbound: inbdet ? undefined : outbPorDia, outboundToc: inbdet ? undefined : outbTocPorDia, outboundReg: inbdet ? undefined : outbRegPorDia, outboundTels: inbdet ? undefined : outbTels })
         // Tabla detalle del form — solo en la vista completa, no en los
         // drill-downs (inbdet).
         if (!inbdet) inboundHtml += await renderFormLanding(primeraVez, formLeads)
