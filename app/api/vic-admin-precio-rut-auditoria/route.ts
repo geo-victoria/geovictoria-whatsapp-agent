@@ -85,6 +85,60 @@ export async function GET(req: Request): Promise<NextResponse> {
     return (((await r.json().catch(() => ({}))) as { data?: T[] }).data) || []
   }
 
+  // ── FICHA POR CONTACTO (?tels=a,b,c): para responder "¿por qué no se creó
+  // el deal?" con evidencia — conversación, dotación, si llegó a formal,
+  // estado del loop, traspaso y qué hay en Zoho.
+  const telsPedidos = String(sp.get("tels") || "").split(",").map((t) => t.replace(/\D/g, "")).filter((t) => t.length >= 9)
+  if (telsPedidos.length) {
+    const SUPA = (process.env.SUPABASE_URL || "").trim()
+    const KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    const hs = { apikey: KEY, Authorization: `Bearer ${KEY}` }
+    const sb = async <T,>(path: string): Promise<T[]> => {
+      const r = await fetch(`${SUPA}/rest/v1/${path}`, { headers: hs, cache: "no-store" }).catch(() => null)
+      return r?.ok ? ((await r.json().catch(() => [])) as T[]) : []
+    }
+    const fichas: Array<Record<string, unknown>> = []
+    for (const tel of telsPedidos) {
+      const convs = await sb<{ id: string; pref_escalon_at?: string | null; user_msg_count?: number | null; first_user_at?: string | null; last_user_at?: string | null }>(
+        `vic_v3_conversations?contact=eq.${tel}&select=id,pref_escalon_at,user_msg_count,first_user_at,last_user_at`,
+      )
+      const cid = convs[0]?.id || ""
+      const msgs = cid
+        ? await sb<{ role: string; content: string; at: string }>(`vic_v3_messages?conversation_id=eq.${cid}&select=role,content,at&order=at.desc&limit=8`)
+        : []
+      const loop = await sb<{ stage?: string; estado?: string; motivo_cierre?: string | null; touch?: number | null }>(
+        `vic_loop?contact=eq.${tel}&select=stage,estado,motivo_cierre,touch&limit=1`,
+      )
+      const ptv = await sb<{ vendedor_email?: string; estado?: string; motivo?: string; traspasado_at?: string }>(
+        `vic_ptv?contact=eq.${tel}&select=vendedor_email,estado,motivo,traspasado_at&order=traspasado_at.desc&limit=1`,
+      )
+      const punteros = await sb<{ quote_id: string; deal_id?: string | null; created_at?: string }>(
+        `vic_v3_quote_pointers?contact=eq.${tel}&select=quote_id,deal_id,created_at&order=created_at.desc&limit=3`,
+      )
+      const kvs = await sb<{ key: string; value: string }>(
+        `vic_kv?key=in.("sobre_umbral_${tel}","mas_de_50_${tel}","zoho_lead_${tel}","deal_fono_${tel}","voz_no_llamar_${tel}","comprobante_ok_${tel}","pago_online_${tel}","casuistica_aplicada_${tel}")&select=key,value`,
+      )
+      // Zoho: lead y contacto por teléfono.
+      const nueve = tel.slice(-9)
+      const rl = await fetch(`${api}/crm/v3/Leads/search?phone=${nueve}&converted=both&per_page=2`, { headers: H, cache: "no-store" }).catch(() => null)
+      const leads = rl?.status === 200 ? (((await rl.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || []) : []
+      const rc = await fetch(`${api}/crm/v3/Contacts/search?phone=${nueve}&per_page=2`, { headers: H, cache: "no-store" }).catch(() => null)
+      const contactos = rc?.status === 200 ? (((await rc.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data || []) : []
+      fichas.push({
+        tel,
+        conversacion: convs[0] ? { mensajesDelCliente: convs[0].user_msg_count, primer: convs[0].first_user_at, ultimo: convs[0].last_user_at, precioEstampadoAt: convs[0].pref_escalon_at } : null,
+        ultimosMensajes: msgs.reverse().map((m) => `${m.at.slice(5, 16)} ${m.role === "user" ? "CLIENTE" : "VICKY"}: ${String(m.content || "").replace(/\s+/g, " ").slice(0, 160)}`),
+        loop: loop[0] || null,
+        traspaso: ptv[0] || null,
+        cotizaciones: punteros,
+        kv: Object.fromEntries(kvs.map((k) => [k.key.replace(`_${tel}`, ""), String(k.value || "").slice(0, 60)])),
+        zohoLeads: leads.map((l) => ({ id: l.id, nombre: l.Last_Name, status: l.Lead_Status, dueno: (l.Owner as { email?: string } | undefined)?.email, empleados: l.N_Empleados_que_marcan, rut: l.RUT_Empresa, convertido: Boolean(l.Converted__s) })),
+        zohoContactos: contactos.map((c) => ({ id: c.id, nombre: c.Full_Name, cuenta: (c.Account_Name as { name?: string } | undefined)?.name })),
+      })
+    }
+    return NextResponse.json({ ok: true, modo: "fichas", fichas })
+  }
+
   const universo = await contactosConPrecioYRut({ desde, paisPrefijo: "56" })
   if (!universo.length) return NextResponse.json({ ok: true, universo: 0, nota: "sin conversaciones con precio y RUT" })
 
