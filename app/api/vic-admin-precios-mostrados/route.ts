@@ -138,6 +138,65 @@ export async function GET(req: Request): Promise<NextResponse> {
   montos.sort((a, b) => a - b)
   const mediana = montos.length ? montos[Math.floor(montos.length / 2)] : 0
 
+  // ¿CADA PRECIO MOSTRADO TIENE REGISTRO EN ZOHO? (pregunta de Lalo 10-sep).
+  // Se mira primero lo que Vicky misma anotó —puntero de cotización, kv
+  // `zoho_lead_` y kv `deal_fono_`/`espejo_deal_`— porque es gratis; a los que
+  // quedan sin nada se les pregunta a Zoho por teléfono, con tope de muestra,
+  // para saber si el registro existe y Vicky no lo anotó (caso típico: lead
+  // del formulario web que ella nunca tocó).
+  const telsPrecio = [...primeraVez.keys()]
+  const conCotizacion = new Set<string>()
+  const conLead = new Set<string>()
+  const conDeal = new Set<string>()
+  for (let i = 0; i < telsPrecio.length; i += 100) {
+    const lote = telsPrecio.slice(i, i + 100)
+    const inList = lote.map((t) => `"${t}"`).join(",")
+    const keysLead = lote.map((t) => `"zoho_lead_${t}"`).join(",")
+    const keysDeal = lote.flatMap((t) => [`"deal_fono_${t}"`, `"espejo_deal_${t}"`]).join(",")
+    const [rp, rl, rd] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/vic_v3_quote_pointers?contact=in.(${inList})&select=contact,quote_id,deal_id`, { headers: h, cache: "no-store" }).catch(() => null),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=in.(${keysLead})&select=key,value`, { headers: h, cache: "no-store" }).catch(() => null),
+      fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=in.(${keysDeal})&select=key,value`, { headers: h, cache: "no-store" }).catch(() => null),
+    ])
+    if (rp?.ok) for (const f of ((await rp.json().catch(() => [])) as Array<{ contact?: string; quote_id?: string; deal_id?: string }>) || []) {
+      const t = String(f.contact || "").replace(/\D/g, "")
+      if (f.quote_id) conCotizacion.add(t)
+      if (f.deal_id) conDeal.add(t)
+    }
+    if (rl?.ok) for (const f of ((await rl.json().catch(() => [])) as Array<{ key: string; value: string }>) || []) {
+      if (String(f.value || "").trim() && !/^creando/.test(String(f.value))) conLead.add(String(f.key).replace(/^zoho_lead_/, ""))
+    }
+    if (rd?.ok) for (const f of ((await rd.json().catch(() => [])) as Array<{ key: string; value: string }>) || []) {
+      if (String(f.value || "").includes("dealId")) conDeal.add(String(f.key).replace(/^(deal_fono_|espejo_deal_)/, ""))
+    }
+  }
+  const sinRegistroConocido = telsPrecio.filter((t) => !conCotizacion.has(t) && !conLead.has(t) && !conDeal.has(t))
+  // Muestra contra Zoho de los que no tienen nada anotado.
+  const muestraN = Math.min(60, Math.max(0, Number(sp.get("muestra") || 30)))
+  let muestraRevisada = 0
+  let muestraConRegistro = 0
+  const muestraSinNada: string[] = []
+  if (muestraN > 0 && sinRegistroConocido.length) {
+    const { getZohoAccessToken } = await import("@/lib/zoho-token")
+    const token = await getZohoAccessToken().catch(() => "")
+    const apiZ = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const HZ = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    if (token) {
+      for (const tel of sinRegistroConocido.slice(0, muestraN)) {
+        muestraRevisada++
+        const nueve = tel.slice(-9)
+        const [rl, rc] = await Promise.all([
+          fetch(`${apiZ}/crm/v3/Leads/search?phone=${nueve}&converted=both&per_page=1`, { headers: HZ, cache: "no-store" }).catch(() => null),
+          fetch(`${apiZ}/crm/v3/Contacts/search?phone=${nueve}&per_page=1`, { headers: HZ, cache: "no-store" }).catch(() => null),
+        ])
+        const hayLead = rl?.status === 200
+        const hayContacto = rc?.status === 200
+        if (hayLead || hayContacto) muestraConRegistro++
+        else if (muestraSinNada.length < 20) muestraSinNada.push(tel)
+      }
+    }
+  }
+
   // Contactos NUEVOS con precio por mes (por su primera vez).
   const porMes = new Map<string, number>()
   for (const at of primeraVez.values()) {
@@ -167,6 +226,16 @@ export async function GET(req: Request): Promise<NextResponse> {
       medianaClp: mediana,
       porPaisClp: Object.fromEntries([...mrrPorPais.entries()]),
       porMesClp: Object.fromEntries([...mrrPorMes.entries()].sort()),
+    },
+    registro: {
+      nota: "cotización/lead/deal que VICKY anotó; a los que no tienen nada se les pregunta a Zoho por teléfono en una muestra",
+      conCotizacion: conCotizacion.size,
+      conLeadAnotado: conLead.size,
+      conDealAnotado: conDeal.size,
+      sinRegistroAnotado: sinRegistroConocido.length,
+      muestraRevisada,
+      muestraConRegistroEnZoho: muestraConRegistro,
+      muestraSinNingunRegistro: muestraSinNada,
     },
     descartados: { internos: descartadosInternos, sinPais: descartadosSinPais },
     truncado: filas.length >= paginas * 1000,
