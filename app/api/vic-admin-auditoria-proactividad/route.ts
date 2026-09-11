@@ -222,24 +222,24 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
   const fallas: string[] = []
   const leer = async (prefijo: string) => {
     try {
-      return await sb<{ key: string; value: string; created_at?: string }>(
-        `vic_kv?key=like.${encodeURIComponent(prefijo + "*")}&select=key,value,created_at&limit=2000`,
+      return await sb<{ key: string; value: string }>(
+        `vic_kv?key=like.${prefijo}*&select=key,value&limit=2000`,
       )
     } catch (e) {
       fallas.push(`${prefijo}: ${e instanceof Error ? e.message : String(e)}`)
-      return [] as Array<{ key: string; value: string; created_at?: string }>
+      return [] as Array<{ key: string; value: string }>
     }
   }
   const [pagosMp, pagosTransf] = await Promise.all([leer("pago_online_"), leer("comprobante_ok_")])
   const pagos = [...pagosMp, ...pagosTransf]
-  // {at} del JSON manda; si no hay, updated_at de la fila.
+  // El pago se fecha con el {at} del JSON; sin él no se puede ubicar y se omite.
   const pagoAt = new Map<string, string>()
   for (const k of pagos) {
     const tel = (String(k.key).match(/(\d{8,15})$/) || [])[1] || ""
     if (!tel || internos.has(tel) || !/^56\d{8,11}$/.test(tel)) continue
     let at = ""
     try { at = String((JSON.parse(String(k.value || "{}")) as { at?: string }).at || "") } catch { /* texto plano */ }
-    if (!at) at = String(k.created_at || "")
+    // sin {at} legible no se puede fechar el pago: se omite
     if (!at || at < desde) continue
     const previo = pagoAt.get(tel)
     if (!previo || at < previo) pagoAt.set(tel, at) // el PRIMER pago: todo lo posterior ya es postventa
