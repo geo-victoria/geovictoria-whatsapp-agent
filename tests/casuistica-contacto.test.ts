@@ -90,3 +90,28 @@ test("directiva existe para todo tipo no prospecto", () => {
   }
   assert.equal(directivaCasuistica({ tipo: "prospecto", esProspecto: true, vende: true, motivoZoho: null, evidencia: [] }), "")
 })
+
+// 11-sep — vocabulario ensanchado con las formas REALES en que un cliente pide
+// ayuda (auditoría del modo ?soporte=1: el modelo acertaba y el clasificador
+// no). Se exige además que un prospecto con intención de compra NO se bloquee.
+test("casuística: formas reales de pedir soporte que antes salían prospecto", () => {
+  const casos: Array<[string[], string]> = [
+    [["Hola", "tengo un pequeño problema", "al entrar a geovictoria", "no se como entrar"], "cliente_soporte"],
+    [["tengo problemas para acceder a la plataforma", "Administrador", "credenciales incorrectas"], "cliente_soporte"],
+    [["Hay un webinar", "Pero el mail no trae el link para conectarse"], "cliente_soporte"],
+    [["yo ingresaba con mi rut y ahora se debe ingresar con el correo, este al parecer no esta registrado"], "cliente_soporte"],
+    [["no me llega el correo de recuperacion de clave"], "cliente_soporte"],
+  ]
+  for (const [msgs, esperado] of casos) {
+    const c = clasificarCasuistica(msgs)
+    assert.equal(c.tipo, esperado, `${msgs.join(" | ")} → ${c.tipo}`)
+    assert.equal(c.esProspecto, false)
+  }
+})
+
+test("casuística: el prospecto que pregunta precio NO se bloquea por el vocabulario nuevo", () => {
+  const c = clasificarCasuistica(["Hola, quiero cotizar control de asistencia para 12 personas", "como entro a la plataforma despues?"])
+  assert.equal(c.esProspecto, true)
+  const d = clasificarCasuistica(["cuanto cuesta?", "y las credenciales las manda el sistema?"])
+  assert.equal(d.esProspecto, true)
+})

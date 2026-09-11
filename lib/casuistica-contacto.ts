@@ -113,6 +113,20 @@ const SENAL_SOPORTE: Regla[] = [
   R("no me aparece / no me deja", /\bno me (aparece|deja|carga|abre|reconoce)\b/),
   R("manual de usuario", /\bmanual (de|para) (usuario|uso)\b|\bpaso a paso\b/),
   R("actualizar datos para desbloquear", /\bdesbloquear\b/),
+  // 11-sep (auditoría del modo ?soporte=1): 72 conversaciones donde el MODELO
+  // acertó al mandar a soporte y el clasificador las leía "prospecto" — su
+  // vocabulario no cubría la forma real en que la gente pide ayuda. Todos
+  // estos patrones viven en SEÑAL_SOPORTE, así que la regla 5 sigue exigiendo
+  // que NO haya intención de compra: un prospecto que pregunta precio jamás
+  // se bloquea por esto.
+  R("no sé cómo entrar", /\bno (se|sabemos|sabia|sabe) como (entrar|ingresar|acceder|iniciar sesion|usar la plataforma)\b/),
+  R("problemas para acceder", /\b(problema|problemas|dificultad|dificultades|lio|inconveniente) (para|al) (entrar|ingresar|acceder|iniciar sesion|conectarme|loguearme)\b/),
+  R("credenciales incorrectas", /\bcredenciales?\b|\b(usuario|clave|contrasena) (incorrect[oa]|erronea|invalida|no valida)\b|\bdatos (incorrectos|erroneos)\b/),
+  R("no me llega el link/código", /\bno (me )?(llega|llegan|llego|recibo|reciben) (el|los|un|ningun) (link|enlace|codigo|mail|email|correo de (recuperacion|acceso|confirmacion))\b/),
+  R("correo no registrado", /\bno (esta|aparece|se encuentra) registrad[oa]\b|\bahora se (debe |hay que |tiene que )?(ingresa|ingresar|entra|entrar) con (el |su |mi )?(correo|mail|email)\b/),
+  R("antes entrábamos con el RUT", /\b(antes|antiguamente|antiguo) (entraba|entrabamos|ingresaba|ingresabamos|se entraba|se ingresaba)\b|\bingresaba con (mi|el) rut\b/),
+  R("link del webinar", /\bwebinar\b/),
+  R("ya me ayudaron", /\bya me (ayudaron|apoyaron|solucionaron)\b/),
 ]
 
 /** Gestión administrativa de un cliente: baja, cobranza, contrato, datos, API. */

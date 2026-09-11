@@ -731,6 +731,10 @@ export async function GET(req: Request): Promise<Response> {
   let llamadas = 0
   let pospuestos = 0
   let cerrados = 0
+  // Tope de consultas a Zoho por tick para la señal de cuenta-cliente: la
+  // caché del detector es de 24 h, así que en régimen casi nunca se gasta.
+  const TOPE_CUENTA_POR_TICK = 10
+  let cuentasConsultadas = 0
   const detalle: Array<Record<string, unknown>> = []
 
   if (rows.length === 0) {
@@ -1078,6 +1082,54 @@ export async function GET(req: Request): Promise<Response> {
         continue
       }
     } catch { /* sin lectura: el toque sigue su camino normal */ }
+
+    // CASUÍSTICA NO-PROSPECTO = CERO TOQUES (11-sep, auditoría de proactividad:
+    // el ÚNICO caso de toque indebido posterior a los fixes del 08/09-sep fue
+    // un CLIENTE pidiendo soporte — 56987640027, casuística `cliente_soporte`,
+    // toque 7 h después). El ptv-cron consultaba la casuística en seis puntos
+    // (relojes de etapa y de 24 h, traspaso) y este cron en NINGUNO: los toques
+    // solo miraban rechazo y autorespuesta, y un trabajador que no puede marcar
+    // nunca dice "no gracias" — no hay nada que rechazar. Se usa la función
+    // canónica (40 mensajes) para que el veredicto sea IDÉNTICO al de los otros
+    // gates. `cliente_ampliacion` es VENTA (regla 07-sep) y por eso NO entra
+    // acá: es prospecto y su loop sigue vivo.
+    try {
+      const { casuisticaDeContacto } = await import("@/lib/casuistica-runtime")
+      const cas = await casuisticaDeContacto(r.contact)
+      if (!cas.esProspecto) {
+        const { aplicarCasuisticaNoProspecto } = await import("@/lib/casuistica-runtime")
+        const { motivoCierreLoop } = await import("@/lib/casuistica-contacto")
+        await aplicarCasuisticaNoProspecto(r.contact, cas, "loop-cron")
+        // aplicarCasuisticaNoProspecto ya cierra el loop (best-effort); este
+        // cierre explícito con el MISMO motivo puro es la red de seguridad.
+        await mas50CierraLoop(r.contact, motivoCierreLoop(cas))
+        console.warn(`[loop-cron] ${r.contact}: casuística ${cas.tipo} (${cas.evidencia.slice(0, 2).join(", ")}) — loop cerrado, toque ${touch} omitido`)
+        detalle.push({ contact: r.contact, accion: `cerrado_casuistica_${cas.tipo}`, touch })
+        continue
+      }
+    } catch { /* sin clasificación: el toque sigue su camino normal */ }
+
+    // CLIENTE EXISTENTE POR CUENTA, no por vocabulario (11-sep): la casuística
+    // depende de lo que el cliente ESCRIBA y su recall es bajo; la señal de
+    // CUENTA en Zoho (Estado_Cuenta "3." o usuarios activos) no depende de las
+    // palabras. Un cliente SIN precio mostrado y sin cotización en el loop es
+    // postventa: no se le toca. Con precio o formal viva NO se cierra — eso es
+    // una AMPLIACIÓN legítima (caso Fernanda/Supermercado Belén, al que le
+    // apagamos la venta por tratarlo como soporte). Tope por tick para no
+    // meterle latencia de Zoho al cron; la caché del detector es de 24 h.
+    if (stage !== "con_precio" && stage !== "formal" && stage !== "aceptada" && cuentasConsultadas < TOPE_CUENTA_POR_TICK) {
+      try {
+        cuentasConsultadas++
+        const { detectarClienteExistente } = await import("@/lib/cliente-existente")
+        const cli = await detectarClienteExistente(r.contact)
+        if (cli) {
+          await mas50CierraLoop(r.contact, "cliente_existente")
+          console.warn(`[loop-cron] ${r.contact}: cuenta cliente ${cli.cuentaNombre} (${cli.estado || "usuarios activos"}) sin precio en el loop — cerrado, toque ${touch} omitido`)
+          detalle.push({ contact: r.contact, accion: "cerrado_cliente_existente", touch, cuenta: cli.cuentaNombre })
+          continue
+        }
+      } catch { /* sin señal de cuenta: el toque sigue su camino normal */ }
+    }
 
     // Primer toque SIEMPRE a los 10 minutos, independiente de la etapa
     // (Rodrigo 10-ago — reemplaza el 35' de la formal y las 2h antiguas):
