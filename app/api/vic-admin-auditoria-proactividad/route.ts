@@ -216,9 +216,9 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
   const desde = new Date(Date.now() - dias * 86_400_000).toISOString()
   const internos = testContactSet()
 
-  const pagos = await sb<{ key: string; value: string; updated_at?: string }>(
+  const pagos = await sb<{ key: string; value: string; created_at?: string }>(
     `vic_kv?or=${encodeURIComponent("(key.like.pago_online_*,key.like.comprobante_ok_*)")}` +
-      `&select=key,value,updated_at&limit=3000`,
+      `&select=key,value,created_at&limit=4000`,
   )
   // {at} del JSON manda; si no hay, updated_at de la fila.
   const pagoAt = new Map<string, string>()
@@ -227,7 +227,7 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
     if (!tel || internos.has(tel) || !/^56\d{8,11}$/.test(tel)) continue
     let at = ""
     try { at = String((JSON.parse(String(k.value || "{}")) as { at?: string }).at || "") } catch { /* texto plano */ }
-    if (!at) at = String(k.updated_at || "")
+    if (!at) at = String(k.created_at || "")
     if (!at || at < desde) continue
     const previo = pagoAt.get(tel)
     if (!previo || at < previo) pagoAt.set(tel, at) // el PRIMER pago: todo lo posterior ya es postventa
