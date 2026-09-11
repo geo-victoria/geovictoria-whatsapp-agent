@@ -508,6 +508,48 @@ async function modoInsistencia(sp: URLSearchParams, t0: number): Promise<Respons
   })
 }
 
+/**
+ * MODO ALTAS (?altas=1) — las empresas que creó el alta por chat, con su
+ * companyId y (desde el 11-sep) el countryCode enviado y el countryId que
+ * devolvió el servicio. Sirve para que Nicolás revise la ZONA HORARIA de las
+ * que nacieron antes del registro: una empresa sin país queda en UTC 0 y las
+ * marcaciones salen corridas.
+ */
+async function modoAltas(t0: number): Promise<Response> {
+  const filas = await sb<{ key: string; value: string }>(
+    `vic_kv?key=like.onboarding_alta_solicitada_*&select=key,value&limit=500`,
+  )
+  const altas: Array<Record<string, unknown>> = []
+  for (const f of filas) {
+    const tel = (String(f.key).match(/(\d{8,15})$/) || [])[1] || ""
+    let j: { at?: string; companyId?: string; via?: string; countryCode?: string; countryId?: string } = {}
+    try { j = JSON.parse(String(f.value || "{}")) } catch { continue }
+    if (!j.companyId) continue
+    altas.push({
+      contact: tel,
+      companyId: j.companyId,
+      at: String(j.at || "").slice(0, 16),
+      via: j.via || "",
+      countryCode: j.countryCode || "(sin registro)",
+      countryId: j.countryId || "(sin registro)",
+    })
+  }
+  altas.sort((a, b) => String(a.at).localeCompare(String(b.at)))
+  const reales = altas.filter((a) => a.via === "api")
+  return NextResponse.json({
+    ok: true,
+    modo: "altas_por_chat",
+    nota:
+      "solo lectura · countryCode/countryId se registran desde el 11-sep; " +
+      "las anteriores hay que revisarlas del lado de la plataforma (zona horaria)",
+    ms: Date.now() - t0,
+    total: altas.length,
+    porApi: reales.length,
+    companyIdsPorApi: reales.map((a) => a.companyId),
+    altas,
+  })
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const sp = new URL(req.url).searchParams
@@ -515,6 +557,7 @@ export async function GET(req: Request): Promise<Response> {
   if (sp.get("postventa") === "1") return modoPostventa(sp, Date.now())
   if (sp.get("loops") === "1") return modoLoops(sp, Date.now())
   if (sp.get("insistencia") === "1") return modoInsistencia(sp, Date.now())
+  if (sp.get("altas") === "1") return modoAltas(Date.now())
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
   const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
   const offset = Math.max(Number(sp.get("offset")) || 0, 0)
