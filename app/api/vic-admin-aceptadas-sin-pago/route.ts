@@ -153,21 +153,33 @@ export async function GET(req: Request): Promise<Response> {
     : []
   const ptvSet = new Set(ptv.map((p) => p.contact))
 
-  // Mensajes desde la aceptación MÁS ANTIGUA del lote: una sola consulta.
+  // Mensajes desde la aceptación MÁS ANTIGUA del lote. CICATRIZ: vic_v3_messages
+  // NO tiene columna `contact` (da 400) — cuelga de `conversation_id`, así que
+  // primero se resuelven las conversaciones de esos teléfonos.
   const minIso = quotes.reduce((a, q) => {
     const t = Date.parse(String(q.Fecha_Hora_Cotizacion || ""))
     return Number.isFinite(t) && t < a ? t : a
   }, Date.now())
-  const msgs = fonos.length
-    ? await sb<{ contact: string; role: string; at: string }>(
-        `vic_v3_messages?contact=in.(${fonos.join(",")})&at=gte.${new Date(minIso).toISOString()}&select=contact,role,at&order=at.asc&limit=20000`,
-      )
+  const convs = fonos.length
+    ? await sb<{ id: string; contact: string }>(`vic_v3_conversations?contact=in.(${fonos.join(",")})&select=id,contact&limit=2000`)
     : []
+  const contactoDeConv = new Map(convs.map((c) => [String(c.id), c.contact]))
   const porContacto = new Map<string, Array<{ role: string; at: number }>>()
-  for (const m of msgs) {
-    const arr = porContacto.get(m.contact) || []
-    arr.push({ role: m.role, at: Date.parse(m.at) })
-    porContacto.set(m.contact, arr)
+  if (convs.length) {
+    const ids = convs.map((c) => String(c.id))
+    for (let i = 0; i < ids.length; i += 60) {
+      const lote = ids.slice(i, i + 60)
+      const msgs = await sb<{ conversation_id: string; role: string; at: string }>(
+        `vic_v3_messages?conversation_id=in.(${lote.join(",")})&at=gte.${new Date(minIso).toISOString()}&select=conversation_id,role,at&order=at.asc&limit=20000`,
+      )
+      for (const m of msgs) {
+        const c = contactoDeConv.get(String(m.conversation_id))
+        if (!c) continue
+        const arr = porContacto.get(c) || []
+        arr.push({ role: m.role, at: Date.parse(m.at) })
+        porContacto.set(c, arr)
+      }
+    }
   }
 
   // 3. Fila por cotización: el monto sale del SUBFORM (la Caja solo guarda pagadas).

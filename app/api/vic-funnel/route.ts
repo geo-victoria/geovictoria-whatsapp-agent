@@ -4802,9 +4802,15 @@ function renderInboundDiario(
     // también un aumento en la inyección de leads" — separar las dos cosas
     // es lo que evita leer una semana inflada por reactivaciones como
     // "buena" y la siguiente, con el doble de leads nuevos, como "caída".
-    type Fila = { entrantes: number; precio: number; formal: number; pagada: number; pagadaBase: number; react: number }
+    type Fila = { entrantes: number; precio: number; formal: number; aceptadaSinPagar: number; pagada: number; pagadaBase: number; react: number }
+    // ACEPTADAS SIN PAGAR (Lalo 11-sep): el cliente firmó la aceptación y no
+    // pagó — la fuga más cara, porque ya dijo sí. La etapa `aceptada` incluye
+    // a las pagadas (esAceptadaOMas), así que hay que restarlas: se descuentan
+    // contra el set de pagadas de TODO el rango, no solo de esa semana (una
+    // aceptada el lunes que pagó el jueves ya no está pendiente).
+    const pagadasGlobal = new Set(elementosDe("pagada", "TOTAL"))
     const cuenta = (k: string, lado: "in" | "out"): Fila => {
-      const f: Fila = { entrantes: 0, precio: 0, formal: 0, pagada: 0, pagadaBase: 0, react: 0 }
+      const f: Fila = { entrantes: 0, precio: 0, formal: 0, aceptadaSinPagar: 0, pagada: 0, pagadaBase: 0, react: 0 }
       for (const et of ["entrantes", "precio", "formal", "pagada"] as const) {
         const u = new Set(elementosDe(et, k))
         let n = 0
@@ -4815,6 +4821,12 @@ function renderInboundDiario(
           n++
         }
         f[et] = n
+      }
+      for (const el of new Set(elementosDe("aceptada", k))) {
+        if (pagadasGlobal.has(el)) continue
+        const esOut = opts.outboundTels!.has(telDeElemento(el))
+        if ((lado === "out") !== esOut) continue
+        f.aceptadaSinPagar++
       }
       f.pagadaBase = f.pagada
       return f
@@ -4832,7 +4844,11 @@ function renderInboundDiario(
       return `<b style="color:#1b5e20"${crudo > 100 ? ` title="${f.pagada} pagadas con ${f.precio} precios vistos en la semana: el resto vio el precio en semanas anteriores (reactivaciones)"` : ""}>${pct}%${crudo > 100 ? "*" : ""}</b>`
     }
     const tabla = (lado: "in" | "out") => {
-      const T: Fila = { entrantes: 0, precio: 0, formal: 0, pagada: 0, pagadaBase: 0, react: 0 }
+      const T: Fila = { entrantes: 0, precio: 0, formal: 0, aceptadaSinPagar: 0, pagada: 0, pagadaBase: 0, react: 0 }
+      const celdaAcepSinPagar = (f: Fila) =>
+        f.aceptadaSinPagar > 0
+          ? `<b style="color:#b45309" title="aceptaron y no han pagado">${f.aceptadaSinPagar}</b>`
+          : `<span style="color:#c8cdd3">0</span>`
       const celdaPagada = (f: Fila) =>
         f.react > 0
           ? `${f.pagada} <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="${f.react} de estas pagadas son reactivaciones: el contacto vio el precio hace más de 30 días (cotización antigua tocada por una campaña). No entran en la línea del gráfico.">(${f.react} ↻)</span>`
@@ -4842,14 +4858,14 @@ function renderInboundDiario(
         .reverse()
         .map((lunes) => {
           const f = cuenta(claveSemana(lunes), lado)
-          T.entrantes += f.entrantes; T.precio += f.precio; T.formal += f.formal; T.pagada += f.pagada; T.pagadaBase += f.pagadaBase; T.react += f.react
-          return `<tr><td style="white-space:nowrap">${etiquetaSemana(lunes)}</td><td style="text-align:center">${f.entrantes}</td><td style="text-align:center">${f.precio}</td><td style="text-align:center">${f.formal}</td><td style="text-align:center">${celdaPagada(f)}</td><td style="text-align:center">${cierre(f)}</td></tr>`
+          T.entrantes += f.entrantes; T.precio += f.precio; T.formal += f.formal; T.aceptadaSinPagar += f.aceptadaSinPagar; T.pagada += f.pagada; T.pagadaBase += f.pagadaBase; T.react += f.react
+          return `<tr><td style="white-space:nowrap">${etiquetaSemana(lunes)}</td><td style="text-align:center">${f.entrantes}</td><td style="text-align:center">${f.precio}</td><td style="text-align:center">${f.formal}</td><td style="text-align:center">${celdaAcepSinPagar(f)}</td><td style="text-align:center">${celdaPagada(f)}</td><td style="text-align:center">${cierre(f)}</td></tr>`
         })
         .join("")
       return `<table style="width:100%;border-collapse:collapse;font-size:13px;margin:4px 0 12px">
-        <tr><th style="text-align:left">Semana</th><th>Entrantes</th><th>Vieron precio</th><th>Formales</th><th>Pagadas</th><th>Cierre</th></tr>
+        <tr><th style="text-align:left">Semana</th><th>Entrantes</th><th>Vieron precio</th><th>Formales</th><th title="Aceptó la cotización (firmó el checkbox) y al día de hoy no ha pagado. No es acumulativo con Pagadas: si pagó después, sale de esta columna.">Aceptadas sin pagar</th><th>Pagadas</th><th>Cierre</th></tr>
         ${filasHtml}
-        <tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700"><td>Total</td><td style="text-align:center">${T.entrantes}</td><td style="text-align:center">${T.precio}</td><td style="text-align:center">${T.formal}</td><td style="text-align:center">${celdaPagada(T)}</td><td style="text-align:center">${cierre(T)}</td></tr>
+        <tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700"><td>Total</td><td style="text-align:center">${T.entrantes}</td><td style="text-align:center">${T.precio}</td><td style="text-align:center">${T.formal}</td><td style="text-align:center">${celdaAcepSinPagar(T)}</td><td style="text-align:center">${celdaPagada(T)}</td><td style="text-align:center">${cierre(T)}</td></tr>
       </table>`
     }
     // ═══ GRÁFICO DE LÍNEA (Lalo 09-sep): evolución semanal de la tasa de
@@ -4883,7 +4899,7 @@ function renderInboundDiario(
         const k = claveSemana(lunes)
         const fi = cuenta(k, "in")
         const fo = cuenta(k, "out")
-        const fg: Fila = { entrantes: fi.entrantes + fo.entrantes, precio: fi.precio + fo.precio, formal: fi.formal + fo.formal, pagada: fi.pagada + fo.pagada, pagadaBase: fi.pagadaBase + fo.pagadaBase, react: fi.react + fo.react }
+        const fg: Fila = { entrantes: fi.entrantes + fo.entrantes, precio: fi.precio + fo.precio, formal: fi.formal + fo.formal, aceptadaSinPagar: fi.aceptadaSinPagar + fo.aceptadaSinPagar, pagada: fi.pagada + fo.pagada, pagadaBase: fi.pagadaBase + fo.pagadaBase, react: fi.react + fo.react }
         const d = (f: Fila) => `${f.pagadaBase}/${f.precio}${f.react > 0 ? ` +${f.react}↻` : ""}`
         return {
           etiqueta: etiquetaSemana(lunes).replace(/<[^>]+>/g, "").replace(/^📅\s*Semana\s*/i, "").replace(/\s*→\s*/, "→").replace(/\s+/g, " ").trim(),
