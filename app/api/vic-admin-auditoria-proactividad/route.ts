@@ -155,18 +155,26 @@ export async function GET(req: Request): Promise<Response> {
     const ultimoUser = [...msgs].reverse().find((m) => m.role === "user")
     const senalAt = ultimoUser ? Date.parse(ultimoUser.at) : 0
 
-    // ── ¿Qué salió DESPUÉS? Proactivo = assistant sin user entremedio ───
-    const proactivos: Msg[] = []
-    let huboUser = false
-    for (const m of msgs.filter((x) => Date.parse(x.at) > senalAt)) {
-      if (m.role === "user") { huboUser = true; continue }
-      if (m.role !== "assistant") continue
+    // ── ¿Qué salió DESPUÉS? ──────────────────────────────────────────────
+    // CUIDADO: la RESPUESTA al mensaje que trae el rechazo es reactiva y
+    // legítima ("gracias, quedo atenta") — la primera versión de esta auditoría
+    // la contaba como proactividad y daba 0 % de acierto con 44 falsos
+    // positivos. El discriminador es el HUECO: el webhook contesta en segundos,
+    // y el toque más temprano del loop es a los 10 minutos.
+    const GAP_PROACTIVO_MIN = 5
+    const proactivos: Array<Msg & { gapMin: number }> = []
+    let ultimoUserAt = 0
+    for (const m of msgs) {
+      const at = Date.parse(m.at)
+      if (m.role === "user") { ultimoUserAt = at; continue }
+      if (m.role !== "assistant" || at <= senalAt) continue
       const txt = String(m.content || "")
+      const gapMin = ultimoUserAt ? Math.round((at - ultimoUserAt) / 60_000) : 9999
       if (txt.startsWith("[REGISTRO INTERNO")) {
-        if (/campa/i.test(txt)) proactivos.push(m)
+        if (/campa/i.test(txt)) proactivos.push({ ...m, gapMin })
         continue
       }
-      if (!huboUser) proactivos.push(m)
+      if (gapMin > GAP_PROACTIVO_MIN) proactivos.push({ ...m, gapMin })
     }
 
     // ── MARCA del sistema ───────────────────────────────────────────────
@@ -194,7 +202,7 @@ export async function GET(req: Request): Promise<Response> {
         kv: kvs,
         proactivosDespues: proactivos.length,
         ejemplo: proactivos[0]
-          ? `${proactivos[0].at.slice(0, 16)} · ${String(proactivos[0].content || "").replace(/\s+/g, " ").slice(0, 130)}`
+          ? `${proactivos[0].at.slice(0, 16)} (+${proactivos[0].gapMin} min) · ${String(proactivos[0].content || "").replace(/\s+/g, " ").slice(0, 130)}`
           : null,
       })
     }
