@@ -307,11 +307,74 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
   })
 }
 
+/**
+ * MODO LOOPS (?loops=1) — qué pasaría HOY con las guardas nuevas del cron de
+ * toques, ANTES de que salga un solo mensaje. Recorre los loops VIVOS y los
+ * clasifica con el mismo clasificador que ahora corre en vic-loop-cron:
+ * `caeria` = la guarda lo va a cerrar en vez de tocarlo (eso es lo que
+ * queremos) · `sigue` = recibe sus toques como siempre.
+ */
+async function modoLoops(sp: URLSearchParams, t0: number): Promise<Response> {
+  const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
+  const loops = await sb<{ contact: string; estado: string; stage: string | null; touch_count: number | null }>(
+    `vic_loop?estado=in.(activo,pausado_compromiso)&select=contact,estado,stage,touch_count&limit=${max}`,
+  )
+  const internos = testContactSet()
+  const vivos = loops.filter((l) => !internos.has(String(l.contact || "")) && /^\d{8,15}$/.test(String(l.contact || "")))
+  const resumen = { loopsVivos: loops.length, revisados: 0, caeria: 0, sigue: 0, truncado: false }
+  const porTipo: Record<string, number> = {}
+  const filas: Array<Record<string, unknown>> = []
+
+  for (const l of vivos) {
+    if (Date.now() - t0 > 235_000) { resumen.truncado = true; break }
+    resumen.revisados++
+    let msgs: Msg[] = []
+    let conv: Array<{ id: string }> = []
+    try {
+      conv = await sb<{ id: string }>(`vic_v3_conversations?contact=eq.${l.contact}&select=id&limit=1`)
+    } catch { continue }
+    if (!conv[0]) continue
+    try {
+      msgs = await sb<Msg>(
+        `vic_v3_messages?conversation_id=eq.${conv[0].id}&select=at,role,content&order=at.desc&limit=40`,
+      )
+    } catch { continue }
+    msgs.reverse()
+    const delCliente = msgs
+      .filter((m) => m.role === "user")
+      .map((m) => String(m.content || ""))
+      .filter((t) => !t.startsWith("[REGISTRO INTERNO"))
+    const cas = clasificarCasuistica(delCliente)
+    if (cas.esProspecto) { resumen.sigue++; continue }
+    resumen.caeria++
+    porTipo[cas.tipo] = (porTipo[cas.tipo] || 0) + 1
+    filas.push({
+      contact: l.contact,
+      estado: l.estado,
+      stage: l.stage || "-",
+      toques: l.touch_count ?? 0,
+      casuistica: cas.tipo,
+      evidencia: cas.evidencia.slice(0, 3),
+      ultimoDelCliente: String(delCliente[delCliente.length - 1] || "").replace(/\s+/g, " ").slice(0, 100),
+    })
+  }
+
+  return NextResponse.json({
+    ok: true,
+    modo: "loops_guarda_nueva",
+    nota: "solo lectura · caeria = la guarda de casuistica lo cierra en vez de tocarlo",
+    ms: Date.now() - t0,
+    resumen, porTipo,
+    filas: filas.slice(0, 120),
+  })
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const sp = new URL(req.url).searchParams
   if (sp.get("soporte") === "1") return modoSoporte(sp, Date.now())
   if (sp.get("postventa") === "1") return modoPostventa(sp, Date.now())
+  if (sp.get("loops") === "1") return modoLoops(sp, Date.now())
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
   const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
   const offset = Math.max(Number(sp.get("offset")) || 0, 0)
