@@ -785,7 +785,26 @@ const TOMBOLA_DEALS_POR_TERRITORIO: Record<string, string> = {
 const TPL_TRASPASO_DEAL = (process.env.VICKY_TPL_TRASPASO_DEAL || "3525045000389574614").trim()
 const CC_TRASPASO_DEAL = (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim()
 
-export async function notificarTraspasoDeal(dealId: string): Promise<void> {
+export async function notificarTraspasoDeal(
+  dealId: string,
+  // RASTRO (Lalo 11-sep): con el teléfono del contacto se estampa el resultado
+  // en kv `notif_traspaso_<fono>`, para que el correo de reclamo pueda saber
+  // si la pelota llegó de verdad al ejecutivo o si la falla fue nuestra.
+  contact?: string,
+): Promise<{ ok: boolean; ownerEmail?: string; motivo?: string }> {
+  const estampar = async (r: { ok: boolean; ownerEmail?: string; motivo?: string }) => {
+    if (contact) {
+      const { estamparNotificacionTraspaso } = await import("./notificacion-traspaso")
+      await estamparNotificacionTraspaso(contact, {
+        tipo: "deal",
+        registro: dealId,
+        ok: r.ok,
+        ownerEmail: r.ownerEmail,
+        error: r.ok ? undefined : r.motivo,
+      })
+    }
+    return r
+  }
   try {
     const { h, api } = await zohoHeaders()
     // La regla de Zoho corre ASÍNCRONA tras el PUT: una sola lectura inmediata
@@ -798,7 +817,7 @@ export async function notificarTraspasoDeal(dealId: string): Promise<void> {
     for (let intento = 0; intento < 4; intento++) {
       if (intento > 0) await new Promise((r) => setTimeout(r, 2500))
       const g = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner,Territorio`, { headers: h, cache: "no-store" })
-      if (!g.ok) return
+      if (!g.ok) return await estampar({ ok: false, motivo: `lectura del deal ${g.status}` })
       fila = ((await g.json().catch(() => ({}))) as {
         data?: Array<{ Owner?: { email?: string }; Territorio?: string }>
       }).data?.[0]
@@ -809,14 +828,16 @@ export async function notificarTraspasoDeal(dealId: string): Promise<void> {
     const owner = fila?.Owner
     if (!owner?.email) {
       console.warn(`[crm-hitos] deal ${dealId} sigue con dueño robot tras el sorteo — nadie fue notificado`)
-      return
+      return await estampar({ ok: false, motivo: "el deal quedó con dueño robot: no había a quién avisarle" })
     }
     // La copia a Victoria Luna es SOLO CHILE (Lalo 31-jul): CO y MX siguen
     // con sus reglas antiguas — el dueño recibe su aviso, sin CC.
     const esChile = /chile/i.test(String(fila?.Territorio || "")) || !fila?.Territorio
     const { correoEntregable } = await import("./correo-alias")
     const destino = await correoEntregable(owner.email)
-    await fetch(`${api}/crm/v3/Deals/${dealId}/actions/send_mail`, {
+    // La respuesta del send_mail NO se miraba: un 400 de Zoho quedaba en
+    // silencio y el traspaso se daba por avisado (11-sep).
+    const env = await fetch(`${api}/crm/v3/Deals/${dealId}/actions/send_mail`, {
       method: "POST",
       headers: h,
       cache: "no-store",
@@ -829,8 +850,15 @@ export async function notificarTraspasoDeal(dealId: string): Promise<void> {
         }],
       }),
     })
+    if (!env.ok) {
+      const cuerpo = await env.text().catch(() => "")
+      console.warn(`[crm-hitos] send_mail del deal ${dealId} respondió ${env.status}: ${cuerpo.slice(0, 200)}`)
+      return await estampar({ ok: false, ownerEmail: destino, motivo: `send_mail ${env.status}` })
+    }
+    return await estampar({ ok: true, ownerEmail: destino })
   } catch (e) {
     console.warn(`[crm-hitos] notificarTraspasoDeal falló:`, e instanceof Error ? e.message : e)
+    return await estampar({ ok: false, motivo: e instanceof Error ? e.message : "error" })
   }
 }
 

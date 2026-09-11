@@ -1030,6 +1030,14 @@ async function notificarTraspasoLeadEmail(
   api: string,
   motivoHtml?: string,
 ): Promise<void> {
+  // RASTRO (Lalo 11-sep): el resultado queda en kv `notif_traspaso_<fono>`.
+  // Antes esta función era `catch {}` puro: llamarla y que Zoho devolviera un
+  // 400 se veían igual desde afuera, así que nadie podía afirmar que el
+  // ejecutivo supo del caso — y sin eso un correo de reclamo lo apura a ciegas.
+  const estampar = async (ok: boolean, ownerEmail?: string, error?: string) => {
+    const { estamparNotificacionTraspaso } = await import("@/lib/notificacion-traspaso")
+    await estamparNotificacionTraspaso(fono, { tipo: "lead", registro: leadId, ok, ownerEmail, error })
+  }
   try {
     const esChile = fono.startsWith("56")
     const cuerpo =
@@ -1037,7 +1045,7 @@ async function notificarTraspasoLeadEmail(
       "el cliente dejó de responder y venció su tiempo de espera. <b>Llámalo en menos de 5 minutos</b> — la conversación completa está en las notas del lead, precio incluido si se le mostró."
     const { correoEntregable } = await import("@/lib/correo-alias")
     const destino = await correoEntregable(vendedorEmail)
-    await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
+    const envio = await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
       method: "POST",
       headers: H,
       cache: "no-store",
@@ -1052,7 +1060,16 @@ async function notificarTraspasoLeadEmail(
         }],
       }),
     })
-  } catch { /* best-effort */ }
+    if (!envio.ok) {
+      const cuerpoErr = await envio.text().catch(() => "")
+      console.warn(`[ptv] send_mail del lead ${leadId} respondió ${envio.status}: ${cuerpoErr.slice(0, 200)}`)
+      await estampar(false, destino, `send_mail ${envio.status}`)
+      return
+    }
+    await estampar(true, destino)
+  } catch (e) {
+    await estampar(false, undefined, e instanceof Error ? e.message : "error").catch(() => {})
+  }
 }
 
 /** Teléfono del vendedor desde su ficha de usuario en Zoho (best-effort). */
@@ -1330,7 +1347,7 @@ async function asignarEnZoho(
               const own = d2?.Owner
               if (String(d2?.Stage || "") !== "Cierre Perdido" && own?.id && own?.email && own.email.toLowerCase() !== "vicky@geovictoria.com") {
                 const tel = await telefonoDeUsuario(own.id, H, api)
-                await notificarTraspasoDeal(dealId).catch(() => {})
+                await notificarTraspasoDeal(dealId, fono).catch(() => {})
                 console.log(`[ptv] ${fono}: deal ${dealId} de campaña REVIVIDO → se presenta a su dueño ${own.email}`)
                 return {
                   email: own.email,
@@ -1358,7 +1375,7 @@ async function asignarEnZoho(
         // El dueño vigente recibe su aviso de traspaso (hallazgo Anáhuac:
         // la alerta central no le llega al asignado — el correo directo sí).
         const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
-        await notificarTraspasoDeal(dealId).catch(() => {})
+        await notificarTraspasoDeal(dealId, fono).catch(() => {})
         return {
           email: ownerActual.email,
           zohoId: ownerActual.id,
@@ -1381,7 +1398,7 @@ async function asignarEnZoho(
             // Notificación de traspaso al dueño sorteado + CC Victoria
             // (template oficial, Lalo 31-jul). Best-effort.
             const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
-            await notificarTraspasoDeal(dealId).catch(() => {})
+            await notificarTraspasoDeal(dealId, fono).catch(() => {})
             return { email: owner.email, zohoId: owner.id, nombre: owner.name || owner.email.split("@")[0], telefono: tel, via: "tombola_zoho" }
           }
         } else {
@@ -1390,7 +1407,7 @@ async function asignarEnZoho(
       }
       await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: dealId, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
-      await notificarTraspasoDeal(dealId).catch(() => {})
+      await notificarTraspasoDeal(dealId, fono).catch(() => {})
     } else if (pais === "co") {
       // CO: lead sin cotización → SDR fijo (Galindo, regla equipo 05-ago).
       // Sin cambios de propietario reales: si ya es de Galindo el PUT es
@@ -1985,6 +2002,20 @@ export async function traspasarAhora(
   //    89% de los casos) y la tómbola sortea. El dueño humano nunca se pisa —
   //    esa guarda vive dentro de asignarEnZoho.
   const vendedor = await asignarEnZoho(clean, pais, interno, Boolean(opts.calificado)).catch(() => null)
+  if (!vendedor) {
+    // LA ASIGNACIÓN EN ZOHO SE CAYÓ y de aquí para abajo Vicky igual presenta
+    // al vendedor de la rotación interna (tormenta de tokens del 01-sep). Sin
+    // esta marca, ese caso es indistinguible de un traspaso bien avisado: el
+    // correo de reclamo apuraría a alguien que nunca supo que tenía el caso.
+    const { estamparNotificacionTraspaso } = await import("@/lib/notificacion-traspaso")
+    await estamparNotificacionTraspaso(clean, {
+      tipo: "lead",
+      registro: "sin-registro",
+      ok: false,
+      ownerEmail: interno.email,
+      error: "la asignación en Zoho falló: no hubo registro ni notificación",
+    })
+  }
   const v = vendedor || {
     ...interno,
     nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
@@ -3023,7 +3054,7 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
           const owner = (((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner)
           if (put.ok && owner?.id && owner?.email && !roster.includes(owner.email.toLowerCase())) {
             const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
-            await notificarTraspasoDeal(dealId).catch(() => {})
+            await notificarTraspasoDeal(dealId, fono).catch(() => {})
             await presentar(fono, owner.email, owner.id, owner.name || owner.email.split("@")[0], "sdr_calificado_deal")
             out.reenviados++
             out.detalle.push(`+${fono} lead ${l.id} (${empleados} pers., RUT) → deal ${dealId} → ${owner.email}`)
@@ -3115,7 +3146,7 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
       const owner = (((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner)
       if (put.ok && owner?.id && owner?.email && !roster.includes(owner.email.toLowerCase())) {
         const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
-        await notificarTraspasoDeal(d.id).catch(() => {})
+        await notificarTraspasoDeal(d.id, fono).catch(() => {})
         await presentar(fono, owner.email, owner.id, owner.name || owner.email.split("@")[0], "sdr_calificado_deal")
         out.reenviados++
         out.detalle.push(`+${fono} deal ${d.id} (${d.Deal_Name || ""}) → ${owner.email}`)
