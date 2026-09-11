@@ -564,3 +564,15 @@
 - **LAS 16 EMPRESAS YA CREADAS POR EL ALTA POR CHAT (todas CL, `?altas=1` del endpoint de auditoría)**: companyId **49 · 51 · 54 · 55 · 56 · 57 · 58 · 59 · 60 · 63 · 64 · 65 · 66 · 67 · 68 · 69**, del 05-sep al 11-sep. Ninguna tiene registro de countryId (el registro empieza hoy) → hay que revisarles la ZONA HORARIA del lado de la plataforma. La 69 es la de hoy 10:54.
 - Dato lateral: el identifier del ejemplo de la doc (965432105, "Analytical Engines") EXISTE en CL — hay empresas de prueba vivas en el ambiente.
 - **PARA CERRARLO HACE FALTA UNA DECISIÓN DE LALO**: crear UNA empresa de prueba marcada (y pedirle a Nicolás borrarla) es lo único que permite leer el `countryId` devuelto y confirmar la zona en la plataforma sin esperar la próxima venta real. Sin eso, el siguiente alta real ya deja el countryId registrado y el aviso lo dice.
+- **PRUEBA EJECUTADA (11-sep, VB de Lalo) — companyId 70 y la EVIDENCIA CONTRA NICOLÁS**: `POST /api/vicky/company` con `countryCode:"CL"` completo respondió **200** con
+  `{"company":{"companyId":70,"name":"PRUEBA VICKY ZONA HORARIA 11SEP - BORRAR","identifier":"771234569"},"user":{"employeeIdentifier":"ZONA11SEP","workEmail":"prueba.zona11sep@geovictoria.com"}}`
+  → **la respuesta NO trae `countryId`** (su propio contrato dice `company:{companyId,name,identifier,countryId}`) **ni `loginUserCreated`**. O sea: el código de país se VALIDA al entrar (un código falso da `country_not_found`) pero no vuelve en la respuesta, señal de que **no se está persistiendo en la empresa** — y eso calza exactamente con nacer en UTC 0 y las marcaciones corridas. Es lo que hay que mostrarle a Nicolás: el payload va completo, el país entra y se resuelve; lo que falta es que quede guardado y con él la zona.
+- **EMPRESAS DE PRUEBA VIVAS EN LA PLATAFORMA (para pedir su desactivación; verificadas una por una con `exists` el 11-sep)**:
+  1. **771234569** — "PRUEBA VICKY ZONA HORARIA 11SEP - BORRAR" · **companyId 70** · creada hoy para este diagnóstico (admin ficticio RUT 11.111.111-1, correo prueba.zona11sep@geovictoria.com)
+  2. **761234560** — "PRUEBA VICKY ONBOARDING - BORRAR" (test del adaptador, 24-28 ago)
+  3. **765432103** — "Empresa Prueba Vicky Adaptador (borrar)"
+  4. **123456785** — "Maria Prueba" (pruebas del flow, 28-ago; es la que en memoria aparecía junto a "PRUEBA DOS")
+  5. **160952210** — "Rodrigo Lewit" (prueba de persona natural del 28-ago, borrador 16095221-0)
+  · NO es nuestra: **965432105 "Analytical Engines"**, el identifier del EJEMPLO de la doc de Nicolás — también está creada en CL (que lo revise él).
+  · "PRUEBA DOS" (nombrada en la memoria del 28-ago) no apareció: `exists` solo busca por identifier y ese no lo tenemos — hay que pedirle a Nicolás el listado por NOMBRE para cazarla.
+  · Las `SIM-*` del modo `alta_simulada` NO existen en la plataforma (nunca tocaron la API).
