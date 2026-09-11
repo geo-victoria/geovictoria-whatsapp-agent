@@ -369,12 +369,151 @@ async function modoLoops(sp: URLSearchParams, t0: number): Promise<Response> {
   })
 }
 
+/**
+ * MODO INSISTENCIA (?insistencia=1) — el tercer eje (pedido de Lalo 11-sep:
+ * "casos donde Vicky sonó demasiado insistente… el cliente pidió recontactar
+ * en fecha específica o se entendía que necesitaba más tiempo y le volvió a
+ * hablar a los 10 minutos preguntando por el pago"; y los reclamos de "muy
+ * insistente" o "los voy a bloquear").
+ *
+ * Dos señales BLANDAS del cliente (no son el "no gracias" duro que ya cubre
+ * `posturaRechazoCliente`):
+ *   · QUEJA     — "muy insistente", "dejen de escribirme", "los bloqueo", "spam"
+ *   · ESPERA    — "lo estamos evaluando", "está en revisión", "te confirmo",
+ *                 "lo veo con mi jefe" + las fechas que entiende
+ *                 `clasificarSenalEspera` ("el 15 de septiembre", "en octubre")
+ *
+ * Y mide lo que Vicky hizo DESPUÉS: cuántos mensajes proactivos, a los cuántos
+ * minutos el primero, y si alguno hablaba de PAGO. Veredictos:
+ *   · `queja`              el cliente se quejó de la insistencia (lo peor)
+ *   · `atropello_fecha`    pidió fecha concreta y se le escribió ANTES
+ *   · `toque_10min`        pidió tiempo y el primer toque salió a ≤60 min
+ *   · `insistente`         3 o más toques proactivos tras el pedido de tiempo
+ *   · `respetado`          nada, o el toque llegó después de la fecha pedida
+ */
+const QUEJA_INSISTENCIA =
+  /(muy insistente|son insistentes|demasiado insistente|deja(r|n)? de (escribir|molestar|insistir)|no me escrib|no escriban|dejen de|los? voy a bloquear|te voy a bloquear|bloquear este numero|es spam|esto es spam|parece spam|ya te dije|ya les dije|cuantas veces|acoso|me estan acosando|basta)/i
+const PIDE_TIEMPO =
+  /(en revision|lo estamos? (revisando|evaluando|viendo|analizando)|estamos evaluando|necesito (mas )?tiempo|dame (unos )?dias|denme (unos )?dias|te confirmo|les confirmo|lo veo con (mi|el|la) (jefe|jefa|socio|gerente|contador|directorio|equipo)|lo tengo que ver con|estoy de vacaciones|mas adelante|despues te|la proxima semana|el proximo mes)/i
+const HABLA_DE_PAGO =
+  /(link de pago|pagar|pago|paga (acá|aca|aquí|aqui)|transferencia|abonar|completar el pago|quedó pendiente el pago|puedes pagar)/i
+
+async function modoInsistencia(sp: URLSearchParams, t0: number): Promise<Response> {
+  const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
+  const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
+  const offset = Math.max(Number(sp.get("offset")) || 0, 0)
+  const desde = new Date(Date.now() - dias * 86_400_000).toISOString()
+  const internos = testContactSet()
+  const { clasificarSenalEspera } = await import("@/lib/loop-v2")
+
+  const convs = await sb<Conv>(
+    `vic_v3_conversations?country=eq.cl&last_user_at=gte.${desde}` +
+      `&select=id,contact,last_user_at,followup_closed_reason,followup_status` +
+      `&order=last_user_at.desc&limit=${max}&offset=${offset}`,
+  )
+  const vivos = convs.filter(
+    (c) => !internos.has(String(c.contact || "")) && /^\d{8,15}$/.test(String(c.contact || "")),
+  )
+
+  const resumen = {
+    revisadas: 0, sin_senal: 0, respetado: 0, toque_10min: 0,
+    atropello_fecha: 0, insistente: 0, queja: 0, truncado: false,
+  }
+  const filas: Array<Record<string, unknown>> = []
+
+  for (const c of vivos) {
+    if (Date.now() - t0 > 235_000) { resumen.truncado = true; break }
+    resumen.revisadas++
+    let msgs: Msg[] = []
+    try {
+      msgs = await sb<Msg>(
+        `vic_v3_messages?conversation_id=eq.${c.id}&select=at,role,content&order=at.desc&limit=40`,
+      )
+    } catch { continue }
+    msgs.reverse()
+
+    // La señal se busca en TODOS los mensajes del cliente, y se toma la
+    // PRIMERA (lo que pasó después de ella es lo que se juzga).
+    let senalAt = 0
+    let senalTxt = ""
+    let tipo: "queja" | "espera" | "" = ""
+    let fechaPedida: Date | null = null
+    for (const m of msgs) {
+      if (m.role !== "user") continue
+      const txt = String(m.content || "")
+      if (txt.startsWith("[REGISTRO INTERNO")) continue
+      const esQueja = QUEJA_INSISTENCIA.test(txt)
+      const esEspera = PIDE_TIEMPO.test(txt)
+      const conFecha = clasificarSenalEspera(txt, "cl", c.contact, new Date(m.at))
+      if (!esQueja && !esEspera && !conFecha) continue
+      senalAt = Date.parse(m.at)
+      senalTxt = txt.replace(/\s+/g, " ").slice(0, 120)
+      tipo = esQueja ? "queja" : "espera"
+      fechaPedida = conFecha ? conFecha.cuando : null
+      break
+    }
+    if (!senalAt) { resumen.sin_senal++; continue }
+
+    // Proactividad posterior: mismo discriminador de hueco que el modo
+    // principal (la respuesta del mismo turno es reactiva y legítima).
+    const proactivos: Array<{ at: string; gapMin: number; pago: boolean; txt: string }> = []
+    let ultimoUserAt = 0
+    for (const m of msgs) {
+      const at = Date.parse(m.at)
+      if (m.role === "user") { ultimoUserAt = at; continue }
+      if (m.role !== "assistant" || at <= senalAt) continue
+      const txt = String(m.content || "")
+      if (txt.startsWith("[REGISTRO INTERNO")) continue
+      const gapMin = ultimoUserAt ? Math.round((at - ultimoUserAt) / 60_000) : 9999
+      if (gapMin <= 5) continue
+      proactivos.push({ at: m.at, gapMin, pago: HABLA_DE_PAGO.test(txt), txt: txt.replace(/\s+/g, " ").slice(0, 120) })
+    }
+
+    const primero = proactivos[0]
+    const antesDeLaFecha = Boolean(fechaPedida && primero && Date.parse(primero.at) < fechaPedida.getTime())
+    let veredicto: keyof typeof resumen
+    if (tipo === "queja") veredicto = "queja"
+    else if (antesDeLaFecha) veredicto = "atropello_fecha"
+    else if (primero && primero.gapMin <= 60) veredicto = "toque_10min"
+    else if (proactivos.length >= 3) veredicto = "insistente"
+    else veredicto = "respetado"
+    resumen[veredicto] = (resumen[veredicto] as number) + 1
+
+    if (veredicto !== "respetado" || sp.get("detalle") === "1") {
+      filas.push({
+        contact: c.contact,
+        veredicto,
+        senal: tipo,
+        senalAt: new Date(senalAt).toISOString().slice(0, 16),
+        loQueDijo: senalTxt,
+        fechaPedida: fechaPedida ? fechaPedida.toISOString().slice(0, 10) : null,
+        toquesDespues: proactivos.length,
+        primerToqueMin: primero ? primero.gapMin : null,
+        hablabaDePago: proactivos.some((p) => p.pago),
+        ejemplo: primero ? `${primero.at.slice(0, 16)} (+${primero.gapMin} min) · ${primero.txt}` : null,
+      })
+    }
+  }
+
+  const conSenal = resumen.revisadas - resumen.sin_senal
+  return NextResponse.json({
+    ok: true,
+    modo: "insistencia",
+    nota: "solo lectura · señal BLANDA del cliente (queja o pedido de tiempo) vs lo que Vicky mandó después",
+    dias, offset, max, ms: Date.now() - t0,
+    resumen, conSenal,
+    tasaRespeto: conSenal ? `${Math.round((resumen.respetado * 100) / conSenal)}%` : "—",
+    filas: filas.slice(0, 120),
+  })
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const sp = new URL(req.url).searchParams
   if (sp.get("soporte") === "1") return modoSoporte(sp, Date.now())
   if (sp.get("postventa") === "1") return modoPostventa(sp, Date.now())
   if (sp.get("loops") === "1") return modoLoops(sp, Date.now())
+  if (sp.get("insistencia") === "1") return modoInsistencia(sp, Date.now())
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
   const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
   const offset = Math.max(Number(sp.get("offset")) || 0, 0)
