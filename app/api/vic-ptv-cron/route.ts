@@ -2459,9 +2459,27 @@ export async function GET(req: Request) {
     `vic_ptv?estado=eq.activo&chequeo_hecho_at=is.null&chequeo_at=lte.${encodeURIComponent(ahora.toISOString())}&select=id,contact,vendedor_email,vendedor_nombre&limit=20`,
   )
   let chequeosEnviados = 0
+  let chequeosRetirados = 0
   for (const ch of chequeos) {
     const conv = convs.find((c) => c.contact === ch.contact)
     const pais = (paisDeContacto(ch.contact) || "cl") as "cl" | "co" | "mx" | "pe"
+    // EL CHEQUEO 9h ES DE LA VENTA, NO DEL SERVICIO (Lalo 11-sep, caso Oscar
+    // de R&H Construcciones): pagó, Vicky le creó la cuenta y lo dejó con su
+    // coordinador de onboarding, y al día siguiente le preguntó "¿cómo te fue
+    // con Ana Paula López?" — una pregunta de prospecto a un cliente que ya
+    // está en implementación. La guarda de "fase onboarding = cero maquinaria
+    // comercial" (25-ago) cubría el loop y los relojes de traspaso, pero este
+    // bloque nunca la consultó. Se retira el chequeo sin mandar nada.
+    const enOnboarding = await enFaseOnboarding(ch.contact).catch(() => false)
+    const yaPago = enOnboarding ? false : await pagoRegistradoReciente(ch.contact).catch(() => false)
+    if (enOnboarding || yaPago) {
+      await supa(`vic_ptv?id=eq.${ch.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ chequeo_hecho_at: ahora.toISOString(), chequeo_resultado: enOnboarding ? "onboarding" : "pagado" }),
+      })
+      chequeosRetirados++
+      continue
+    }
     const ventanaAbierta = Boolean(conv?.last_user_at && ahora.getTime() - new Date(conv.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
       // Jamás un prefijo de correo en la cara del cliente: si no conocemos el
@@ -2667,6 +2685,7 @@ export async function GET(req: Request) {
     tm_traspasados: tmTraspasados,
     chequeos_procesados: chequeos.length,
     chequeos_enviados: chequeosEnviados,
+    chequeos_retirados_onboarding_o_pago: chequeosRetirados,
     loops_reabiertos_sin_atencion: reconciliacion.reabiertos,
     loops_recerrados_por_atencion: reconciliacion.recerrados,
     sla_alertas_60min: slaAlertas,

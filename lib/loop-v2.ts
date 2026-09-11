@@ -475,14 +475,26 @@ export async function pagoRegistradoReciente(contact: string): Promise<boolean> 
   const limpio = (contact || "").replace(/\D/g, "")
   if (!limpio || !SUPABASE_URL || !SUPABASE_KEY) return false
   try {
+    // LAS DOS MARCAS DE PAGO, NO SOLO LA TRANSFERENCIA (11-sep): esta guarda
+    // nació leyendo `comprobante_ok_` y dejó fuera a quien paga con TARJETA,
+    // que es el camino más común — su marca es `pago_online_` (la estampa
+    // traspaso-postpago solo con pago verificado en MP). Un pagador con
+    // tarjeta quedaba sin protección alguna contra la maquinaria de venta.
     const res = await supa(
-      `vic_kv?key=eq.${encodeURIComponent(`comprobante_ok_${limpio}`)}&select=value&limit=1`,
+      `vic_kv?key=in.("comprobante_ok_${limpio}","pago_online_${limpio}")&select=value&limit=2`,
     )
     const rows = res.ok ? (((await res.json().catch(() => [])) as Array<{ value?: string }>) || []) : []
-    const raw = rows[0]?.value
-    if (!raw) return false
-    const at = Date.parse((JSON.parse(raw) as { at?: string })?.at || "")
-    if (!Number.isFinite(at)) return false
+    const ats = rows
+      .map((r) => {
+        try {
+          return Date.parse((JSON.parse(String(r?.value || "")) as { at?: string })?.at || "")
+        } catch {
+          return NaN
+        }
+      })
+      .filter((n) => Number.isFinite(n))
+    if (!ats.length) return false
+    const at = Math.max(...ats)
     const dentroDeVentana = Date.now() - at < 7 * 86400e3
     if (dentroDeVentana) return true
     if ((process.env.VICKY_PAGO_VENTANA_CLASICA || "").trim() === "1") return false
