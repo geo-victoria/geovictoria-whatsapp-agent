@@ -1,6 +1,15 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { canalDelDia, casillaAbierta, siguienteCasilla } from "../lib/campana-reactivacion-reglas.ts"
+import {
+  canalDelDia,
+  casillaAbierta,
+  debeDescansar,
+  ganchoParaToque2,
+  planDeToque,
+  precioTextoClp,
+  siguienteCasilla,
+  DESCANSO_DIAS,
+} from "../lib/campana-reactivacion-reglas.ts"
 
 test("siguienteCasilla: primera en falso, null tras la 4", () => {
   assert.equal(siguienteCasilla(null), 1)
@@ -46,4 +55,48 @@ test("inactividad: 2 días hábiles = 18 h de 9 a 18, L-V sin feriados (Lalo 10-
   const fer = new Set(["2026-09-18"])
   const mf = minutosHabilesEntre(new Date("2026-09-17T14:00:00Z"), new Date("2026-09-22T14:00:00Z"), "cl", fer, HORA_INICIO_CAMPANA)
   assert.equal(mf, 1080)
+})
+
+// ── DESCANSO de 4 semanas (Lalo 10-sep) ─────────────────────────────────────
+
+test("descanso: sin toque previo entra al tiro", () => {
+  const r = debeDescansar(null, new Date("2026-09-11T14:00:00Z"))
+  assert.equal(r.descansa, false)
+  assert.equal(r.diasFaltan, 0)
+})
+
+test("descanso: un toque de hace 10 días espera 18 más", () => {
+  const r = debeDescansar(new Date("2026-09-01T14:00:00Z"), new Date("2026-09-11T14:00:00Z"))
+  assert.equal(r.descansa, true)
+  assert.equal(r.diasDesde, 10)
+  assert.equal(r.diasFaltan, DESCANSO_DIAS - 10)
+})
+
+test("descanso: a los 28 días justos ya puede salir", () => {
+  const r = debeDescansar(new Date("2026-08-14T14:00:00Z"), new Date("2026-09-11T14:00:00Z"))
+  assert.equal(r.descansa, false)
+})
+
+// ── Gancho de cada toque ────────────────────────────────────────────────────
+
+test("planDeToque: cada casilla su plantilla y sus variables", () => {
+  assert.deepEqual(planDeToque(1, true).vars, ["nombre"])
+  assert.deepEqual(planDeToque(1, false).vars, [])
+  assert.notEqual(planDeToque(1, true).tpl, planDeToque(1, false).tpl)
+  assert.deepEqual(planDeToque(2, true).vars, ["nombre", "gancho", "empresa", "link"])
+  assert.equal(planDeToque(3, true).tipo, "dcto")
+  assert.deepEqual(planDeToque(4, true).vars, ["nombre", "empresa", "precio", "link"])
+})
+
+test("gancho del toque 2: usa la objeción cuando la hay y no inventa cuando no", () => {
+  assert.match(ganchoParaToque2("precio"), /permanencia/i)
+  assert.match(ganchoParaToque2("hardware"), /app/i)
+  assert.match(ganchoParaToque2("legal"), /Dirección del Trabajo/i)
+  assert.match(ganchoParaToque2(null), /mismo día|permanencia/i)
+})
+
+test("precio de la plantilla: formato chileno, vacío si no hay monto", () => {
+  assert.equal(precioTextoClp(46175), "46.175")
+  assert.equal(precioTextoClp(0), "")
+  assert.equal(precioTextoClp(null), "")
 })

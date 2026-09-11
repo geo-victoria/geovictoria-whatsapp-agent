@@ -37,7 +37,7 @@ import { casuisticaDeContacto } from "./casuistica-runtime"
 import { testContactSet } from "./funnel-analysis"
 import { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, HORA_INICIO_CAMPANA, MINUTOS_HABILES_INACTIVIDAD, type Canal, type Casilla, type FilaCasillas } from "./campana-reactivacion-reglas"
 
-export { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, TOQUES_MAX, HORA_INICIO_CAMPANA, DIAS_HABILES_INACTIVIDAD, MINUTOS_HABILES_INACTIVIDAD } from "./campana-reactivacion-reglas"
+export { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, TOQUES_MAX, HORA_INICIO_CAMPANA, DIAS_HABILES_INACTIVIDAD, MINUTOS_HABILES_INACTIVIDAD, DESCANSO_DIAS, debeDescansar, planDeToque, ganchoParaToque2, precioTextoClp, type PlanToque } from "./campana-reactivacion-reglas"
 export type { Canal, Casilla, FilaCasillas } from "./campana-reactivacion-reglas"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
@@ -426,4 +426,53 @@ export async function universoCampana(opts: { dias?: number; H?: Record<string, 
     porContacto.set(tel, { contact: tel, quoteId: null, empresa: null, origen: `precio visto (${l.stage})` })
   }
   return [...porContacto.values()]
+}
+
+// ── DESCANSO: último toque de CUALQUIER campaña de Vicky ─────────────────────
+
+/**
+ * El descanso de 4 semanas se mide contra el último toque de campaña, venga de
+ * donde venga: este ciclo (vic_campanas react_t*), la campaña de descuento
+ * (kv campana_dcto_*), el remarketing (kv campana_remk_*) o la voz
+ * (vic_llamadas). El LOOP de seguimiento NO cuenta (Lalo 10-sep, opción B).
+ * Si una fuente falla se anota: el caller decide, y el runner prefiere esperar.
+ */
+export async function ultimoToqueCampana(
+  contact: string,
+): Promise<{ at: Date | null; fuente: string; fallas: string[] }> {
+  const fallas: string[] = []
+  const cands: Actividad[] = []
+
+  try {
+    const ev = await sb<{ at: string; campana: string }>(
+      `vic_campanas?contact=eq.${contact}&select=at,campana&order=at.desc&limit=5`,
+    )
+    if (ev[0]) cands.push({ at: fechaDe(ev[0].at), fuente: `vic_campanas (${ev[0].campana})` })
+  } catch (e) { fallas.push(`vic_campanas: ${e instanceof Error ? e.message : e}`) }
+
+  // Los kv de las campañas viejas: `campana_dcto_<fono>` y
+  // `campana_remk_<campana>_<fono>`. El `_` de LIKE en PostgREST es un comodín
+  // de UN carácter, así que el patrón igual calza con el nombre de campaña.
+  try {
+    const filas = await sb<{ key: string; value: string; created_at?: string }>(
+      `vic_kv?key=like.campana_*${contact}&select=key,value,created_at&limit=20`,
+    )
+    for (const f of filas) {
+      let iso = ""
+      try {
+        const j = JSON.parse(String(f.value || "{}")) as { at?: string; enviadoAt?: string }
+        iso = j.at || j.enviadoAt || ""
+      } catch { iso = String(f.value || "").slice(0, 40) }
+      const d = fechaDe(iso) || fechaDe(f.created_at)
+      if (d) cands.push({ at: d, fuente: `kv ${f.key.replace(contact, "…")}` })
+    }
+  } catch (e) { fallas.push(`kv campanas: ${e instanceof Error ? e.message : e}`) }
+
+  try {
+    const ll = await sb<{ at: string }>(`vic_llamadas?contact=eq.${contact}&select=at&order=at.desc&limit=1`)
+    if (ll[0]) cands.push({ at: fechaDe(ll[0].at), fuente: "vic_llamadas (voz)" })
+  } catch (e) { fallas.push(`vic_llamadas: ${e instanceof Error ? e.message : e}`) }
+
+  const mejor = maxFecha(...cands)
+  return { at: mejor.at, fuente: mejor.fuente, fallas }
 }

@@ -28,9 +28,20 @@ import { NextResponse } from "next/server"
 import { appendAssistantV3, getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { linkCortoDe } from "@/lib/link-cotizacion"
+import { getUFActual } from "@/lib/uf"
+import { evaluarGateProactividad } from "@/lib/gate-proactividad"
+import { montoDelBloque } from "@/lib/precio-bloque"
+import { claveCampana } from "@/lib/campana-descuento"
+import { setKvValue } from "@/lib/supabase-persistence-v3"
 import {
   anotarEvaluacion,
   canalDelDia,
+  debeDescansar,
+  ganchoParaToque2,
+  planDeToque,
+  precioTextoClp,
+  ultimoToqueCampana,
+  DESCANSO_DIAS,
   casillaAbierta,
   evaluarGrupo1,
   feriadosDe,
@@ -123,6 +134,30 @@ async function datosContacto(H: Record<string, string>, contact: string, quoteId
   return { nombre, email, empresa }
 }
 
+/** Último precio mostrado y motivo de no cierre, para las variables de las
+ * plantillas de los toques 2 y 4. Sin monto legible el toque 4 cae al texto
+ * del toque 1: jamás se manda una plantilla con la variable vacía. */
+async function contextoDelChat(contact: string, uf: number): Promise<{ precio: string; motivo: string | null }> {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+  try {
+    const rc = await fetch(`${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${contact}&select=id,motivo_no_cierre&limit=1`, { headers: h, cache: "no-store" })
+    const conv = ((await rc.json().catch(() => [])) as Array<{ id: string; motivo_no_cierre?: string | null }>)[0]
+    if (!conv) return { precio: "", motivo: null }
+    const firmas = ["Resumen mensual", "Total mensual con IVA", "UF + IVA al mes", "Total mensual"]
+    const orFirmas = firmas.map((f) => `content.ilike.*${encodeURIComponent(f)}*`).join(",")
+    const rm = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_messages?conversation_id=eq.${conv.id}&role=eq.assistant&or=(${orFirmas})&select=content&order=at.desc&limit=1`,
+      { headers: h, cache: "no-store" },
+    )
+    const msg = ((await rm.json().catch(() => [])) as Array<{ content?: string }>)[0]
+    const m = montoDelBloque(String(msg?.content || ""))
+    const conIva = m.clp || (m.uf && uf ? Math.round(m.uf * uf) : 0)
+    return { precio: precioTextoClp(conIva), motivo: conv.motivo_no_cierre || null }
+  } catch {
+    return { precio: "", motivo: null }
+  }
+}
+
 function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
@@ -200,6 +235,9 @@ export async function GET(req: Request): Promise<Response> {
 
   const H = await zohoHeaders()
   const feriados = await feriadosDe(pais)
+  // La UF solo se usa para leer un bloque de precio que vino en UF sin su
+  // equivalente en pesos; si la fuente falla, el toque cae al texto del T1.
+  const ufDia = Math.max(0, Number(sp.get("uf") || 0)) || (await getUFActual().catch(() => 0))
 
   // Un solo contacto: veredicto explicado (sin enviar salvo modo real explícito con ?contact=).
   if (soloContacto) {
@@ -232,6 +270,24 @@ export async function GET(req: Request): Promise<Response> {
       // Una casilla por semana: si el último WhatsApp salió hace menos de 6 días, esperar.
       const abierta = casillaAbierta(fila, ahora)
       if (abierta) { base.omitido = `toque_${abierta}_en_curso`; filas.push(base); continue }
+      // DESCANSO (Lalo 10-sep): el toque 1 —de este ciclo o del siguiente— solo
+      // sale si el último toque de CUALQUIER campaña tiene ≥4 semanas. Dentro
+      // del ciclo los toques son semanales, así que no se evalúa.
+      if (casilla === 1) {
+        const ult = await ultimoToqueCampana(cand.contact)
+        if (ult.fallas.length && !ult.at) {
+          base.omitido = `no_evaluable (descanso: ${ult.fallas[0]})`
+          filas.push(base)
+          continue
+        }
+        const d = debeDescansar(ult.at, ahora)
+        if (d.descansa) {
+          base.omitido = `descanso_campana (${ult.fuente}, hace ${d.diasDesde} d, faltan ${d.diasFaltan} de ${DESCANSO_DIAS})`
+          filas.push(base)
+          if (!dry) await anotarEvaluacion(cand.contact, base.omitido, pais)
+          continue
+        }
+      }
       evaluados++
       const ev = await evaluarGrupo1(cand.contact, { pais, ahora, H, feriados })
       base.ultimaActividad = ev.ultimaActividad.at ? `${ev.ultimaActividad.fuente} ${ev.ultimaActividad.at.toISOString().slice(0, 16)}` : "sin actividad registrada"
@@ -241,10 +297,51 @@ export async function GET(req: Request): Promise<Response> {
         if (!dry) await anotarEvaluacion(cand.contact, base.omitido, pais)
         continue
       }
-      if (dry) { base.accion = `SE ENVIARÍA toque ${casilla} (WhatsApp)`; filas.push(base); continue }
       const { nombre, empresa } = await datosContacto(H, cand.contact, cand.quoteId)
-      const tpl = nombre ? TPL_CON_NOMBRE : TPL_SIN_NOMBRE
-      const ok = await sendBotmakerTemplate(cand.contact, tpl, nombre ? { nombre } : {}).catch(() => false)
+      const plan = planDeToque(casilla, Boolean(nombre))
+      const linkQuote = cand.quoteId ? linkCortoDe(cand.quoteId) : ""
+      const ctx = plan.vars.includes("precio") || plan.vars.includes("gancho")
+        ? await contextoDelChat(cand.contact, ufDia)
+        : { precio: "", motivo: null }
+      const nombreEmpresa = empresa || cand.empresa || "tu empresa"
+      const vars: Record<string, string> = {}
+      for (const v of plan.vars) {
+        if (v === "nombre") vars.nombre = nombre || "de nuevo"
+        else if (v === "empresa") vars.empresa = nombreEmpresa
+        else if (v === "link") vars.link = linkQuote
+        else if (v === "precio") vars.precio = ctx.precio
+        else if (v === "gancho") vars.gancho = ganchoParaToque2(ctx.motivo)
+        else if (v === "contexto") vars.contexto = cand.quoteId ? `Sobre tu cotización de ${nombreEmpresa}.` : "Sobre la cotización de control de asistencia que te dejé."
+      }
+      // Una plantilla con variable vacía sale rota: si falta el dato del gancho
+      // (link o precio), el toque cae al texto del toque 1, que no necesita nada.
+      const faltan = plan.vars.filter((v) => v !== "nombre" && !String(vars[v] || "").trim())
+      const planFinal = faltan.length ? planDeToque(1, Boolean(nombre)) : plan
+      const varsFinal = faltan.length ? (nombre ? { nombre } : {}) : vars
+      if (dry) {
+        base.accion = `SE ENVIARÍA toque ${casilla} (WhatsApp ${planFinal.tpl}${faltan.length ? ` · fallback T1, faltaba ${faltan.join("/")}` : ""}) — ${planFinal.descripcion}`
+        filas.push(base)
+        continue
+      }
+      // Toque 3 = la oferta del 10 % de dcto10: el porcentaje lo aplica el TAP
+      // por el camino ya probado (procesarRespuestaCampana), nunca este runner.
+      if (planFinal.tipo === "dcto") {
+        await setKvValue(claveCampana(cand.contact), JSON.stringify({
+          campana: `react_ciclo_t${casilla}`,
+          segmento: cand.quoteId ? "2" : "1",
+          quoteId: cand.quoteId || undefined,
+          at: ahora.toISOString(),
+        })).catch(() => {})
+      }
+      let tpl = planFinal.tpl
+      let ok = await sendBotmakerTemplate(cand.contact, tpl, varsFinal).catch(() => false)
+      if (!ok && tpl !== TPL_CON_NOMBRE && tpl !== TPL_SIN_NOMBRE) {
+        // Plantilla del toque sin aprobar o rechazada por Meta: sale la del
+        // toque 1 (aprobada) antes que no salir nada, y queda dicho en la fila.
+        tpl = nombre ? TPL_CON_NOMBRE : TPL_SIN_NOMBRE
+        ok = await sendBotmakerTemplate(cand.contact, tpl, nombre ? { nombre } : {}).catch(() => false)
+        if (ok) base.omitido = `plantilla_${planFinal.tpl}_no_salio (se envió ${tpl})`
+      }
       if (!ok) { base.accion = "ENVÍO FALLÓ (Botmaker)"; filas.push(base); continue }
       await marcarCasilla(cand.contact, casilla, "wsp", { pais, quoteId: cand.quoteId, empresa: empresa || cand.empresa, motivo: `toque ${casilla} enviado` })
       await registrarEvento(cand.contact, casilla, "wsp", cand.quoteId)
@@ -294,6 +391,10 @@ export async function GET(req: Request): Promise<Response> {
       const { nombre, email, empresa } = await datosContacto(H, f.contact, f.quote_id)
       if (canal === "mail") {
         if (!email) { base.omitido = "sin_email"; filas.push(base); continue }
+        // El correo pasa por el MISMO gate de proactividad que el WhatsApp
+        // (brecha (d) del 10-sep): en sombra solo registra, con GATE_ENFORCE frena.
+        const gate = await evaluarGateProactividad(f.contact, { tipo: "texto" }).catch(() => null)
+        if (gate && !gate.permitir) { base.omitido = `gate (${gate.motivos.join(", ").slice(0, 80)})`; filas.push(base); continue }
         const link = f.quote_id ? linkCortoDe(f.quote_id) : ""
         const ok = await enviarCorreo(H, f.quote_id, email, `Tu cotización de control de asistencia sigue vigente${empresa || f.empresa ? ` · ${empresa || f.empresa}` : ""}`, htmlCorreo(nombre, empresa || f.empresa || "", link)).catch(() => false)
         if (!ok) { base.accion = "ENVÍO FALLÓ (correo)"; filas.push(base); continue }
