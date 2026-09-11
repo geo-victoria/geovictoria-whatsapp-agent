@@ -715,6 +715,9 @@ export async function armarOnboarding(contact: string): Promise<{
             : await crearEmpresaConAdmin({
             pais: "cl",
             empresa: { nombre: b.empresa.nombre!, identificador: b.empresa.identificador! },
+            // VickyAppSession: el WhatsApp es el identificador de la
+            // conversación (pedido de Nicolás, 11-sep).
+            sesion: contact,
             admin: {
               nombre: b.admin.nombre!,
               apellido: b.admin.apellido!,

@@ -114,6 +114,15 @@ export async function existeEmpresa(
 export type AltaEmpresaInput = {
   pais: "cl" | "ar" | "pe" | "co" | "mx" | "br"
   empresa: { nombre: string; identificador: string }
+  /**
+   * IDENTIFICADOR DE LA CONVERSACIÓN que originó el alta (pedido de Nicolás
+   * Hormazábal por Teams, 11-sep: "en la creación de empresa, puedes mandar el
+   * número de la Conversación? o algo para identificar la conversa" → el
+   * parámetro se llama `VickyAppSession`). Va el WhatsApp del cliente, que es
+   * el identificador de la conversación en Vicky y con el que se la encuentra
+   * en Botmaker y en el dash. Opcional: si falta, la clave no viaja.
+   */
+  sesion?: string
   admin: {
     nombre: string
     apellido: string
@@ -148,6 +157,7 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
     console.error(`[alta-empresa] país sin countryCode soportado: "${input.pais}" — alta abortada`)
     return { ok: false, error: `País "${input.pais}" sin countryCode soportado por el servicio de alta` }
   }
+  const sesion = String(input.sesion || "").trim().slice(0, 64)
   try {
     const res = await llamar("/api/vicky/company", {
       company: {
@@ -163,6 +173,10 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
         lastName: input.admin.apellido,
         workEmail: input.admin.email,
       },
+      // La conversación que originó el alta, para que la plataforma pueda
+      // trazarla (nombre del parámetro dado por Nicolás). Solo si la hay: una
+      // clave con string vacío sería peor que no mandarla.
+      ...(sesion ? { VickyAppSession: sesion } : {}),
     })
     const texto = await res.text().catch(() => "")
     if (!res.ok) {
