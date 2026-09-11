@@ -58,6 +58,26 @@ const VENTANA_BARRIDO_MS = 7 * 24 * 3600_000
 const VENTANA_META_MS = 24 * 3600_000
 const MAX_TRASPASOS_POR_TICK = 15
 
+/**
+ * RECONOCER LA SEÑAL BLANDA ANTES DE HABLAR (Lalo 11-sep: "lo que duele es
+ * cuando recibimos la señal pero seguimos hablando como si el cliente no
+ * hubiera dicho nada, y eso es torpeza"). Se aplica a los DOS mensajes que la
+ * auditoría de insistencia señaló —la presentación del traspaso (26 casos) y
+ * el chequeo de 9 h (10 casos)—: el texto sale igual, pero abriendo con lo que
+ * el cliente quedó de hacer. 12 mensajes de historial, best-effort.
+ */
+async function reconocerSenal(contact: string, texto: string): Promise<string> {
+  try {
+    const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
+    const { detectarSenalBlanda, conReconocimiento } = await import("@/lib/senal-blanda")
+    const senal = detectarSenalBlanda(await fetchHistoryV3(contact, 12))
+    if (senal) console.log(`[ptv] ${contact}: señal blanda ${senal.tipo} ("${senal.cita.slice(0, 60)}") — el mensaje la reconoce`)
+    return conReconocimiento(texto, senal)
+  } catch {
+    return texto
+  }
+}
+
 async function authorized(req: Request): Promise<boolean> {
   const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
   if (CRON_SECRET && bearer === CRON_SECRET) return true
@@ -1336,9 +1356,25 @@ async function asignarEnZoho(
         // 08-sep: Galvez, López y Martínez quedaron fuera).
         if (stage === "Cierre Perdido") {
           try {
-            const { dealAReactivar, revivirDealDeCampana, notificarTraspasoDeal } = await import("@/lib/crm-hitos")
+            const { dealAReactivar, revivirDealDeCampana, notificarTraspasoDeal, notaCampanaEnDeal } = await import("@/lib/crm-hitos")
             const marca = await dealAReactivar(fono)
             if (marca) {
+              // SOLO con respuesta POSITIVA del cliente (Lalo 11-sep). Acá era
+              // donde más dolía: el reloj de etapa revivía el deal perdido de
+              // quien ya había dicho que no y le notificaba al dueño. Si no
+              // respondió positivo, el deal se queda como está y solo queda la
+              // nota del toque.
+              const { fetchHistoryV3 } = await import("@/lib/supabase-persistence-v3")
+              const { respuestaPositivaDeCampana } = await import("@/lib/rechazo-cliente")
+              const veredictoCampana = respuestaPositivaDeCampana(
+                await fetchHistoryV3(fono, 12).catch(() => []),
+              )
+              await notaCampanaEnDeal(dealId, fono, veredictoCampana).catch(() => {})
+              if (veredictoCampana !== "positiva") {
+                // Se deja como está y sigue al camino normal de deal cerrado
+                // (vendedor solo en vic_ptv, sin reasignar ni notificar).
+                console.log(`[ptv] ${fono}: deal ${dealId} de campaña NO se revive (respuesta ${veredictoCampana})`)
+              } else {
               await revivirDealDeCampana(dealId)
               const g2 = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Stage,Owner`, { headers: H, cache: "no-store" })
               const d2 = g2.ok
@@ -1356,6 +1392,7 @@ async function asignarEnZoho(
                   telefono: tel || WHATSAPP_VENDEDOR[own.email.toLowerCase()] || "",
                   via: "dueno_deal_reactivado",
                 }
+              }
               }
             }
           } catch (e) {
@@ -2385,7 +2422,10 @@ export async function GET(req: Request) {
     // Presentación al prospecto (solo con ventana Meta abierta).
     const ventanaAbierta = Boolean(c.last_user_at && ahora.getTime() - new Date(c.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
-      const texto = mensajePresentacion(pais, vendedor.nombre, { email: vendedor.email, whatsapp: vendedor.telefono })
+      const texto = await reconocerSenal(
+        c.contact,
+        mensajePresentacion(pais, vendedor.nombre, { email: vendedor.email, whatsapp: vendedor.telefono }),
+      )
       const enviado = await sendBotmakerMessage(c.contact, texto).catch(() => false)
       if (enviado) {
         await appendAssistantV3(c.contact, texto).catch(() => {})
@@ -2516,7 +2556,10 @@ export async function GET(req: Request) {
       // Jamás un prefijo de correo en la cara del cliente: si no conocemos el
       // nombre, el chequeo pregunta por "nuestro ejecutivo" (filas viejas de
       // vic_ptv sin vendedor_nombre — auditoría 31-jul).
-      const texto = mensajeChequeo(pais, ch.vendedor_nombre || NOMBRE_VENDEDOR[ch.vendedor_email] || "nuestro ejecutivo")
+      const texto = await reconocerSenal(
+        ch.contact,
+        mensajeChequeo(pais, ch.vendedor_nombre || NOMBRE_VENDEDOR[ch.vendedor_email] || "nuestro ejecutivo"),
+      )
       const enviado = await sendBotmakerMessage(ch.contact, texto).catch(() => false)
       if (enviado) {
         await appendAssistantV3(ch.contact, texto).catch(() => {})
@@ -2904,7 +2947,10 @@ async function reintentarPresentacionesPendientes(
     let enviado = false
     let registro = ""
     if (ventanaAbierta) {
-      const texto = mensajePresentacion(pais, nombre, { email: emailVig, whatsapp: telefono || undefined })
+      const texto = await reconocerSenal(
+        clean,
+        mensajePresentacion(pais, nombre, { email: emailVig, whatsapp: telefono || undefined }),
+      )
       enviado = await sendBotmakerMessage(clean, texto).catch(() => false)
       registro = texto
     } else if ((pais === "cl" || pais === "pe") && telefono) {

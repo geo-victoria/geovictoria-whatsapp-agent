@@ -1416,11 +1416,91 @@ export async function revivirDealDeCampana(dealId: string): Promise<string | nul
   }
 }
 
-/** Sube el deal al piso del hito; si el contacto viene de campaña, primero lo revive con la regla de David. */
+/**
+ * NOTA DE LA CAMPAÑA EN EL DEAL (Lalo 11-sep: "la nota de la campaña debe
+ * quedar asociada"). Sale SIEMPRE que el contacto venga de campaña, tanto si
+ * el deal revive como si se deja donde está: es el rastro de que lo tocamos y
+ * de qué contestó el cliente. Una sola nota por deal, se actualiza.
+ */
+export async function notaCampanaEnDeal(
+  dealId: string,
+  contact: string,
+  veredicto: string,
+): Promise<void> {
+  try {
+    const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
+    const hist = await fetchHistoryV3(contact, 40).catch(() => [] as Array<{ role: string; content?: string | null }>)
+    const marcador = [...hist]
+      .reverse()
+      .find((m) => String(m.content || "").includes("[REGISTRO INTERNO") && /campa/i.test(String(m.content || "")))
+    const { ultimoMensajeCliente } = await import("./rechazo-cliente")
+    const dijo = ultimoMensajeCliente(hist).slice(0, 300)
+    const lineas = [
+      `Contacto tocado por una campaña de reactivación de Vicky.`,
+      marcador ? `Toque: ${String(marcador.content || "").slice(0, 300)}` : "",
+      `Respuesta del cliente: ${veredicto}${dijo ? ` — "${dijo}"` : " (sin mensaje del cliente)"}`,
+      veredicto === "positiva"
+        ? "El deal se revive con la regla de David porque el cliente respondió positivamente."
+        : "El deal NO se revive: se deja en el estado en que estaba. Esta nota queda como rastro del toque.",
+    ].filter(Boolean)
+    // UNA sola nota por deal, se actualiza (mismo patrón que la de
+    // transcripción): el sub-recurso del registro, no el POST global a /Notes.
+    const TITULO = "Campaña de reactivación (Vicky)"
+    const contenido = lineas.join("\n").slice(0, 32000)
+    const { h, api } = await zohoHeaders()
+    const res = await fetch(`${api}/crm/v3/Deals/${dealId}/Notes?fields=Note_Title&per_page=50`, {
+      headers: h,
+      cache: "no-store",
+    })
+    const previa =
+      res.ok && res.status !== 204
+        ? ((await res.json().catch(() => ({}))) as { data?: Array<{ id?: string; Note_Title?: string }> }).data?.find(
+            (n) => String(n.Note_Title || "") === TITULO,
+          )
+        : undefined
+    if (previa?.id) {
+      await fetch(`${api}/crm/v3/Notes/${previa.id}`, {
+        method: "PUT",
+        headers: h,
+        cache: "no-store",
+        body: JSON.stringify({ data: [{ Note_Content: contenido }] }),
+      })
+    } else {
+      await fetch(`${api}/crm/v3/Deals/${dealId}/Notes`, {
+        method: "POST",
+        headers: h,
+        cache: "no-store",
+        body: JSON.stringify({ data: [{ Note_Title: TITULO, Note_Content: contenido }] }),
+      })
+    }
+  } catch (e) {
+    console.warn(`[crm-hitos] nota de campaña ${dealId}:`, e instanceof Error ? e.message : e)
+  }
+}
+
+/**
+ * Sube el deal al piso del hito. Si el contacto viene de campaña, lo revive
+ * con la regla de David SOLO si el cliente respondió POSITIVAMENTE (Lalo
+ * 11-sep) — un contestador automático o un "no gracias" dejan el deal como
+ * está, y la nota de la campaña queda asociada igual.
+ */
 async function avanzarConReactivacion(dealId: string, piso: string, contact: string): Promise<void> {
   const reactivar = await dealAReactivar(contact)
-  if (reactivar) await revivirDealDeCampana(dealId)
-  await avanzarDealHasta(dealId, piso, Boolean(reactivar))
+  let revivido = false
+  if (reactivar) {
+    const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
+    const { respuestaPositivaDeCampana } = await import("./rechazo-cliente")
+    const hist = await fetchHistoryV3(contact, 12).catch(() => [] as Array<{ role: string; content?: string | null }>)
+    const veredicto = respuestaPositivaDeCampana(hist)
+    if (veredicto === "positiva") {
+      await revivirDealDeCampana(dealId)
+      revivido = true
+    } else {
+      console.log(`[crm-hitos] ${contact}: deal ${dealId} de campaña NO se revive (respuesta ${veredicto})`)
+    }
+    await notaCampanaEnDeal(dealId, contact, veredicto)
+  }
+  await avanzarDealHasta(dealId, piso, revivido)
 }
 
 const TITULO_NOTA_TRANSCRIPCION = "Transcripción WhatsApp Vicky"

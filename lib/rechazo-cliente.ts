@@ -145,6 +145,30 @@ export function posturaRechazoCliente(
   return null
 }
 
+/**
+ * ¿El cliente respondió POSITIVAMENTE a un toque de campaña? (Lalo 11-sep:
+ * "el deal debería revivir siempre y cuando el cliente responda positivamente,
+ * si no dejarlo como está y la nota de la campaña debe quedar asociada").
+ *
+ * Nace de dos casos reales de la campaña remk_300: un CONTESTADOR AUTOMÁTICO
+ * revivió el deal de "comité agua potable las quemas", y el reloj de traspaso
+ * revivió los deals perdidos de tres clientes que ya habían dicho que no. Un
+ * "gracias" solo tampoco es una respuesta positiva: es cortesía.
+ *
+ * Devuelve "positiva" | "rechazo" | "autorespuesta" | "sin_respuesta".
+ */
+export function respuestaPositivaDeCampana(
+  historial: Array<{ role: string; content?: string | null }>,
+): "positiva" | "rechazo" | "autorespuesta" | "sin_respuesta" {
+  const postura = posturaRechazoCliente(historial)
+  if (postura === "no_interesa") return "rechazo"
+  if (postura === "autorespuesta") return "autorespuesta"
+  const ultimo = ultimoMensajeCliente(historial).trim()
+  if (!ultimo) return "sin_respuesta"
+  if (CORTESIA.test(ultimo) || SOLO_EMOJI.test(ultimo)) return "sin_respuesta"
+  return "positiva"
+}
+
 export function ultimoMensajeCliente(
   historial: Array<{ role: string; content?: string | null }>,
 ): string {
