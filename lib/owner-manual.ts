@@ -46,6 +46,8 @@ export type VeredictoOwner = {
   actor?: string
   at?: string
   motivo: "sin_evento" | "app" | "humano" | "humano_superado" | "ilegible"
+  /** Asignación recién hecha (solo si se pidió una ventana). Ver asignacionFresca. */
+  fresca?: { fresca: boolean; at?: string }
 }
 
 const norm = (s: unknown): string =>
@@ -82,6 +84,9 @@ export async function ownerLoPusoUnHumano(
   recordId: string,
   api: string,
   headers: Record<string, string>,
+  // Ventana de "asignación fresca" en minutos: se calcula sobre el MISMO
+  // timeline que ya se leyó, para no pagar una segunda llamada a Zoho.
+  frescaMin?: number,
 ): Promise<VeredictoOwner> {
   try {
     const [rt, ro] = await Promise.all([
@@ -96,8 +101,47 @@ export async function ownerLoPusoUnHumano(
       ro.status === 200
         ? (((await ro.json().catch(() => ({}))) as { data?: Array<{ Owner?: { name?: string } }> }).data?.[0]?.Owner?.name || "")
         : ""
-    return veredictoOwnerDesdeTimeline(j.__timeline, owner || undefined)
+    const v = veredictoOwnerDesdeTimeline(j.__timeline, owner || undefined)
+    return frescaMin
+      ? { ...v, fresca: asignacionFresca(j.__timeline, Date.now(), frescaMin) }
+      : v
   } catch {
     return { manual: true, motivo: "ilegible" }
   }
+}
+
+/**
+ * ¿LA ASIGNACIÓN DEL DUEÑO ES RECIÉN HECHA? (Lalo 11-sep, caso MSS Asesores /
+ * Diego Cubillos — reclamo de Victoria Luna.)
+ *
+ * PURA. Un registro cuyo dueño acaba de salir de la tómbola no es una brecha
+ * que corregir: es el reparto funcionando. Re-sortearlo encima produce el daño
+ * que vio Victoria — dos ejecutivos avisados, los dos llamando al mismo
+ * cliente. Cuenta como asignación el `owner_assigned` de la regla de Zoho (que
+ * NO trae field_history, así que mirar solo los cambios de campo no lo ve) y
+ * cualquier cambio del campo Owner, sin importar el actor.
+ */
+export function asignacionFresca(
+  eventos: EventoTimeline[],
+  ahoraMs: number,
+  minutos: number,
+): { fresca: boolean; at?: string } {
+  if (!Number.isFinite(minutos) || minutos <= 0) return { fresca: false }
+  const ventana = minutos * 60_000
+  let ultima = 0
+  let at: string | undefined
+  for (const e of eventos) {
+    const esAsignacion =
+      String(e.action || "").toLowerCase() === "owner_assigned" ||
+      (e.field_history || []).some((f) => String(f?.api_name || "").toLowerCase() === "owner")
+    if (!esAsignacion) continue
+    const t = Date.parse(String(e.audited_time || ""))
+    if (!Number.isFinite(t)) continue
+    if (t > ultima) {
+      ultima = t
+      at = e.audited_time
+    }
+  }
+  if (!ultima) return { fresca: false }
+  return { fresca: ahoraMs - ultima < ventana, at }
 }

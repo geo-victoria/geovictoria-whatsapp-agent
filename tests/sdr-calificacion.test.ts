@@ -63,3 +63,38 @@ test("la cartera de un ejecutivo y los otros países no se tocan", () => {
     "sin_cambio",
   )
 })
+
+// ── ASIGNACIÓN FRESCA (11-sep, caso MSS Asesores / Diego Cubillos) ──────────
+// El daño que reclamó Victoria: dos deals del mismo cliente pasaron por la
+// conciliación en el mismo minuto, la tómbola sorteó DOS veces y quedaron dos
+// ejecutivos avisados llamando al mismo cliente. Un dueño recién sorteado no
+// es una brecha: es el reparto funcionando.
+test("asignacionFresca: el owner_assigned de la regla cuenta aunque no traiga field_history", async () => {
+  const { asignacionFresca } = await import("../lib/owner-manual.ts")
+  const ahora = Date.parse("2026-09-10T14:53:59-03:00")
+  const eventos = [{ action: "owner_assigned", audited_time: "2026-09-10T14:48:42-03:00", done_by: { id: "3525045000484500876" } }]
+  const r = asignacionFresca(eventos, ahora, 120)
+  assert.equal(r.fresca, true)
+  assert.equal(r.at, "2026-09-10T14:48:42-03:00")
+})
+
+test("asignacionFresca: una asignación vieja NO frena la conciliación", async () => {
+  const { asignacionFresca } = await import("../lib/owner-manual.ts")
+  const ahora = Date.parse("2026-09-10T14:53:59-03:00")
+  const eventos = [
+    { action: "updated", audited_time: "2026-08-31T10:00:00-03:00", field_history: [{ api_name: "Owner", _value: { old: "Vicky", new: "Aleydis Araque" } }] },
+  ]
+  assert.equal(asignacionFresca(eventos, ahora, 120).fresca, false)
+})
+
+test("asignacionFresca: sin eventos de asignación no hay freno", async () => {
+  const { asignacionFresca } = await import("../lib/owner-manual.ts")
+  assert.equal(asignacionFresca([{ action: "added", audited_time: "2026-09-10T14:00:00-03:00" }], Date.now(), 120).fresca, false)
+})
+
+test("asignacionFresca: ventana en cero o inválida nunca frena", async () => {
+  const { asignacionFresca } = await import("../lib/owner-manual.ts")
+  const eventos = [{ action: "owner_assigned", audited_time: new Date().toISOString() }]
+  assert.equal(asignacionFresca(eventos, Date.now(), 0).fresca, false)
+  assert.equal(asignacionFresca(eventos, Date.now(), Number.NaN).fresca, false)
+})

@@ -2990,6 +2990,36 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     await asignarConversacionEnBotmaker(fono, email).catch(() => {})
     await reintentarPresentacionesPendientes(ahora, { max: 3, horas: 24 * 8 }).catch(() => null)
   }
+  // ── UN SOLO RE-SORTEO POR CONTACTO (Lalo 11-sep, caso MSS Asesores / Diego
+  //    Cubillos — reclamo de Victoria Luna) ─────────────────────────────────
+  // El candado era por REGISTRO (`sdr_recon_<id>` / `sdr_recon_deal_<id>`), así
+  // que un contacto con DOS deals pasó dos veces por acá en el mismo minuto: la
+  // tómbola de Zoho sorteó dos veces, quedaron dos ejecutivos avisados y los dos
+  // llamaron al mismo cliente (que además ya había recibido un tercer nombre en
+  // el chequeo 9h). `vic_ptv` es UNA fila por contacto, así que el nombre que ve
+  // el cliente lo decide una carrera. Ahora el contacto es la unidad: se
+  // re-entrega UNA vez por pasada y por ventana, y el registro hermano se
+  // reporta en vez de re-sortearse.
+  const contactosTocados = new Set<string>()
+  // La ventana es DÍAS, no "para siempre": un cliente que vuelve meses después
+  // con otro deal tiene derecho a que la regla lo corrija de nuevo.
+  const RECON_FONO_DIAS = Math.max(1, Number(process.env.VICKY_SDR_RECON_FONO_DIAS || 30) || 30)
+  const contactoYaResuelto = async (fono: string): Promise<string | null> => {
+    if (contactosTocados.has(fono)) return "en esta misma pasada"
+    const marca = await getKvValue(`sdr_recon_fono_${fono}`).catch(() => null)
+    if (!marca) return null
+    const cuando = Date.parse(String(marca).slice(0, 24))
+    if (Number.isFinite(cuando) && Date.now() - cuando > RECON_FONO_DIAS * 864e5) return null
+    return `hace poco (${marca})`
+  }
+  const marcarContactoResuelto = async (fono: string, detalle: string) => {
+    contactosTocados.add(fono)
+    await setKvValue(`sdr_recon_fono_${fono}`, `${ahora.toISOString()} ${detalle}`).catch(() => {})
+  }
+  // Ventana de "asignación fresca": un dueño que la regla de Zoho acaba de
+  // sortear no es una brecha que corregir. Sin lock: el tick siguiente lo
+  // re-evalúa cuando la asignación ya no sea reciente.
+  const FRESCO_MIN = Math.max(0, Number(process.env.VICKY_SDR_RECON_FRESCO_MIN || 30) || 0)
   let chatsLeidos = 0
   // ── Leads vivos del roster SDR ──
   // SOLO registros que NACIERON del canal de Vicky: lo que las SDR crean a
@@ -3007,13 +3037,22 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     const fono = String(l.Phone || "").replace(/\D/g, "")
     if (!fono || !fono.startsWith("56") || isTestContact(fono, tests)) continue
     if (await getKvValue(`sdr_recon_${l.id}`).catch(() => null)) continue
+    const yaContactoL = await contactoYaResuelto(fono)
+    if (yaContactoL) {
+      out.detalle.push(`+${fono} lead ${l.id}: el contacto ya se re-entregó ${yaContactoL} — hermano, no se re-sortea`)
+      continue
+    }
     // Con deal vivo del mismo fono (candado deal_fono_, caso Joyce: la formal
     // creó el deal sin convertir el lead) manda el bloque de DEALS de abajo.
     if (await getKvValue(`deal_fono_${fono}`).catch(() => null)) continue
     // DECISIÓN MANUAL INTOCABLE (10-sep): si el dueño actual lo puso una
     // PERSONA (UI de Zoho o conector admin) no es brecha de Vicky, es una
     // decisión — el timeline es lo único que separa OMEGA de Cancino.
-    const vLead = await ownerLoPusoUnHumano("Leads", l.id, api, H)
+    const vLead = await ownerLoPusoUnHumano("Leads", l.id, api, H, FRESCO_MIN)
+    if (vLead.fresca?.fresca) {
+      out.detalle.push(`+${fono} lead ${l.id}: dueño asignado recién (${vLead.fresca.at || "?"}) — es el reparto funcionando, no se re-sortea`)
+      continue
+    }
     if (vLead.manual) {
       await setKvValue(`sdr_recon_${l.id}`, `manual:${vLead.motivo}`).catch(() => {})
       out.detalle.push(`+${fono} lead ${l.id}: dueño puesto por ${vLead.actor || vLead.motivo} — decisión manual, no se toca`)
@@ -3056,6 +3095,7 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
             const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
             await notificarTraspasoDeal(dealId, fono).catch(() => {})
             await presentar(fono, owner.email, owner.id, owner.name || owner.email.split("@")[0], "sdr_calificado_deal")
+            await marcarContactoResuelto(fono, `lead ${l.id} → deal ${dealId} → ${owner.email}`)
             out.reenviados++
             out.detalle.push(`+${fono} lead ${l.id} (${empleados} pers., RUT) → deal ${dealId} → ${owner.email}`)
             await avisarEquipoInterno(`🔁 CONCILIACIÓN SDR: +${fono} (${l.Company || datosChat.empresa || "?"}, ${empleados || "?"} personas, con RUT) estaba con ${l["Owner.email"]} sin calificar y ya está CALIFICADO → deal ${dealId} sorteado a ${owner.email}.`).catch(() => {})
@@ -3075,6 +3115,7 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
       if (r?.success && r.ownerEmail && r.ownerId && !roster.includes(r.ownerEmail.toLowerCase())) {
         await notificarTraspasoLeadEmail(l.id, r.ownerEmail, fono, H, api, `estaba en calificación SDR y la conversación YA trae la dotación (${empleados || "?"} personas): <b>lead calificado, ahora es tuyo</b>.`).catch(() => {})
         await presentar(fono, r.ownerEmail, r.ownerId, r.ownerNombre || NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0], "sdr_calificado_lead")
+        await marcarContactoResuelto(fono, `lead ${l.id} → TLMK ${r.ownerEmail}`)
         out.reenviados++
         out.detalle.push(`+${fono} lead ${l.id} (${empleados} pers., sin RUT) → TLMK ${r.ownerEmail}`)
         await avisarEquipoInterno(`🔁 CONCILIACIÓN SDR: +${fono} (${l.Company || datosChat.empresa || "?"}, ${empleados || "?"} personas, sin RUT) estaba con ${l["Owner.email"]} y ya está CALIFICADO → tómbola TLMK → ${r.ownerEmail}.`).catch(() => {})
@@ -3107,9 +3148,22 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     if (await getKvValue(`sdr_recon_deal_${d.id}`).catch(() => null)) continue
     const fono = String(d["Contact_Name.Phone"] || "").replace(/\D/g, "")
     if (!fono || !fono.startsWith("56") || isTestContact(fono, tests)) continue
+    const yaContactoD = await contactoYaResuelto(fono)
+    if (yaContactoD) {
+      out.detalle.push(`+${fono} deal ${d.id} (${d.Deal_Name || ""}): el contacto ya se re-entregó ${yaContactoD} — hermano, no se re-sortea`)
+      await avisarEquipoInterno(
+        `⚠️ DOS REGISTROS DEL MISMO CONTACTO en la conciliación SDR: +${fono} tiene el deal "${d.Deal_Name || d.id}" (${d["Owner.email"]}) además del registro que ya se re-entregó. ` +
+          `NO se re-sorteó para no dejar dos ejecutivos sobre el mismo cliente — revisar si es gemelo y cerrarlo.`,
+      ).catch(() => {})
+      continue
+    }
     // DECISIÓN MANUAL INTOCABLE (10-sep, OMEGA vs Cancino): dueño puesto por
     // una persona → fuera de la conciliación. Ver lib/owner-manual.ts.
-    const vDeal = await ownerLoPusoUnHumano("Deals", d.id, api, H)
+    const vDeal = await ownerLoPusoUnHumano("Deals", d.id, api, H, FRESCO_MIN)
+    if (vDeal.fresca?.fresca) {
+      out.detalle.push(`+${fono} deal ${d.id} (${d.Deal_Name || ""}): dueño asignado recién (${vDeal.fresca.at || "?"}) — es el reparto funcionando, no se re-sortea`)
+      continue
+    }
     if (vDeal.manual) {
       await setKvValue(`sdr_recon_deal_${d.id}`, `manual:${vDeal.motivo}`).catch(() => {})
       out.detalle.push(`+${fono} deal ${d.id} (${d.Deal_Name || ""}): dueño puesto por ${vDeal.actor || vDeal.motivo} — decisión manual, no se toca`)
@@ -3148,6 +3202,7 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
         const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
         await notificarTraspasoDeal(d.id, fono).catch(() => {})
         await presentar(fono, owner.email, owner.id, owner.name || owner.email.split("@")[0], "sdr_calificado_deal")
+        await marcarContactoResuelto(fono, `deal ${d.id} → ${owner.email}`)
         out.reenviados++
         out.detalle.push(`+${fono} deal ${d.id} (${d.Deal_Name || ""}) → ${owner.email}`)
         await avisarEquipoInterno(`🔁 CONCILIACIÓN SDR: el deal ${d.Deal_Name || d.id} (+${fono}) estaba con ${d["Owner.email"]} (calificación) y ya está CALIFICADO → Tómbola Deals → ${owner.email}.`).catch(() => {})
