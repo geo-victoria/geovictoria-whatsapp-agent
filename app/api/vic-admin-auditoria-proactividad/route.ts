@@ -27,6 +27,7 @@ import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { posturaRechazoCliente, esAutorespuesta, ultimoMensajeCliente } from "@/lib/rechazo-cliente"
 import { clasificarCasuistica } from "@/lib/casuistica-contacto"
 import { testContactSet } from "@/lib/funnel-analysis"
+import { FIRMAS_PRECIO } from "@/lib/precio-rut"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -71,9 +72,234 @@ type Conv = {
 }
 type Msg = { at: string; role: string; content: string }
 
+/**
+ * MODO INVERSO (?soporte=1) — el OTRO error del mismo clasificador.
+ *
+ * La auditoría de arriba mide el falso NEGATIVO: no marcamos a quien no
+ * debíamos tocar. Este modo mide el falso POSITIVO: le dimos la tarjeta de
+ * SOPORTE (redirección al agente de Foundry) a alguien que era PROSPECTO —
+ * o sea, le apagamos la venta. Señal observable = el mensaje de Vicky con la
+ * tarjeta oficial (+56 9 4401 3873 / 600 914 3819), que es el momento exacto
+ * de la redirección y queda en el chat.
+ *
+ * Veredictos:
+ *   · `cliente_real`      la casuística dice no-prospecto y no pidió precio → correcto
+ *   · `intencion_despues` DESPUÉS de la tarjeta el cliente pidió precio/cotizar
+ *   · `ampliacion`        casuística cliente_ampliacion = VENTA mandada a soporte
+ *   · `prospecto_puro`    el clasificador lo ve prospecto y nunca vio precio
+ *   · `ya_cotizado`       vio precio ANTES de la tarjeta (legítimo: cotizó y luego pidió ayuda)
+ */
+const PIDE_PRECIO =
+  /(cu[aá]nto (cuesta|vale|sale)|precio|cotiza|cotizaci[oó]n|valor(es)?\b|presupuesto|planes?\b|tarifa)/i
+
+async function modoSoporte(sp: URLSearchParams, t0: number): Promise<Response> {
+  const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
+  const max = Math.min(Math.max(Number(sp.get("max")) || 200, 1), 500)
+  const offset = Math.max(Number(sp.get("offset")) || 0, 0)
+  const desde = new Date(Date.now() - dias * 86_400_000).toISOString()
+  const internos = testContactSet()
+
+  // CICATRIZ PostgREST: el `or=` va con encodeURIComponent y NADA más.
+  const or = encodeURIComponent("(content.ilike.*4401 3873*,content.ilike.*600 914 3819*)")
+  const tarjetas = await sb<{ conversation_id: string; at: string }>(
+    `vic_v3_messages?role=eq.assistant&at=gte.${desde}&or=${or}` +
+      `&select=conversation_id,at&order=at.asc&limit=2000`,
+  )
+  const primeraTarjeta = new Map<string, string>()
+  for (const m of tarjetas) if (!primeraTarjeta.has(m.conversation_id)) primeraTarjeta.set(m.conversation_id, m.at)
+
+  const ids = [...primeraTarjeta.keys()].slice(offset, offset + max)
+  const convs: Conv[] = []
+  for (let i = 0; i < ids.length; i += 60) {
+    const lote = await sb<Conv>(
+      `vic_v3_conversations?id=in.(${ids.slice(i, i + 60).join(",")})&country=eq.cl` +
+        `&select=id,contact,last_user_at,followup_closed_reason,followup_status`,
+    ).catch(() => [] as Conv[])
+    convs.push(...lote)
+  }
+  const vivos = convs.filter(
+    (c) => !internos.has(String(c.contact || "")) && /^56\d{8,11}$/.test(String(c.contact || "")),
+  )
+
+  const filas: Array<Record<string, unknown>> = []
+  const resumen = {
+    conTarjeta: primeraTarjeta.size, revisadas: 0, cliente_real: 0, ya_cotizado: 0,
+    intencion_despues: 0, ampliacion: 0, prospecto_puro: 0, truncado: false,
+  }
+  const porTipo: Record<string, number> = {}
+
+  for (const c of vivos) {
+    if (Date.now() - t0 > 235_000) { resumen.truncado = true; break }
+    resumen.revisadas++
+    let msgs: Msg[] = []
+    try {
+      msgs = await sb<Msg>(
+        `vic_v3_messages?conversation_id=eq.${c.id}&select=at,role,content&order=at.asc&limit=80`,
+      )
+    } catch { continue }
+    const tarjetaAt = Date.parse(primeraTarjeta.get(c.id) || "") || 0
+    const delCliente = msgs
+      .filter((m) => m.role === "user")
+      .map((m) => String(m.content || ""))
+      .filter((t) => !t.startsWith("[REGISTRO INTERNO"))
+    const cas = clasificarCasuistica(delCliente)
+    porTipo[cas.tipo] = (porTipo[cas.tipo] || 0) + 1
+
+    const tienePrecio = (t: string) => FIRMAS_PRECIO.some((f) => t.includes(f))
+    const precioAntes = msgs.some(
+      (m) => m.role === "assistant" && Date.parse(m.at) < tarjetaAt && tienePrecio(String(m.content || "")),
+    )
+    const precioDespues = msgs.some(
+      (m) => m.role === "assistant" && Date.parse(m.at) > tarjetaAt && tienePrecio(String(m.content || "")),
+    )
+    const pedidos = msgs.filter(
+      (m) =>
+        m.role === "user" &&
+        Date.parse(m.at) > tarjetaAt &&
+        !String(m.content || "").startsWith("[REGISTRO INTERNO") &&
+        PIDE_PRECIO.test(String(m.content || "")),
+    )
+
+    let veredicto: keyof typeof resumen
+    if (precioAntes) veredicto = "ya_cotizado"
+    else if (pedidos.length) veredicto = "intencion_despues"
+    else if (cas.tipo === "cliente_ampliacion") veredicto = "ampliacion"
+    else if (cas.esProspecto) veredicto = "prospecto_puro"
+    else veredicto = "cliente_real"
+    resumen[veredicto] = (resumen[veredicto] as number) + 1
+
+    if (veredicto !== "cliente_real" || sp.get("detalle") === "1") {
+      filas.push({
+        contact: c.contact,
+        veredicto,
+        casuistica: `${cas.tipo}${cas.esProspecto ? " (prospecto)" : ""}`,
+        evidencia: cas.evidencia.slice(0, 3),
+        tarjetaAt: (primeraTarjeta.get(c.id) || "").slice(0, 16),
+        precioAntes, precioDespues,
+        convCerrada: c.followup_closed_reason || null,
+        pidioDespues: pedidos[0]
+          ? `${pedidos[0].at.slice(0, 16)} · ${String(pedidos[0].content || "").replace(/\s+/g, " ").slice(0, 120)}`
+          : null,
+      })
+    }
+  }
+
+  const dudosos = resumen.intencion_despues + resumen.ampliacion + resumen.prospecto_puro
+  return NextResponse.json({
+    ok: true,
+    modo: "soporte_falsos_positivos",
+    nota: "solo lectura · tarjeta de soporte (Foundry) entregada en el chat · ¿era cliente o era prospecto?",
+    dias, offset, max, ms: Date.now() - t0,
+    resumen, porTipo, dudosos,
+    tasaAciertoSoporte: resumen.revisadas
+      ? `${Math.round(((resumen.cliente_real + resumen.ya_cotizado) * 100) / resumen.revisadas)}%`
+      : "—",
+    filas: filas.slice(0, 120),
+  })
+}
+
+/**
+ * MODO POSTVENTA (?postventa=1) — la otra mitad de la misma confusión de fase.
+ *
+ * El caso que nombró Lalo: "se le escapan mensajes de 'déjame dejarte el mejor
+ * precio posible' a un cliente que YA PAGÓ". Universo = contactos con marca de
+ * pago (`pago_online_` / `comprobante_ok_`, las dos llevan {at}); se leen los
+ * mensajes de Vicky POSTERIORES a ese instante y se busca lenguaje COMERCIAL.
+ * No mira relojes ni gates: mira lo que el cliente LEYÓ.
+ */
+const COMERCIAL_POST_PAGO =
+  /(mejor precio|precio especial|descuento|te cotizo|cotizaci[oó]n actualizada|sigues? interesad|te interesa avanzar|oferta|promoci[oó]n|rebaja|\bdcto\b)/i
+
+async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response> {
+  const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
+  const max = Math.min(Math.max(Number(sp.get("max")) || 200, 1), 500)
+  const desde = new Date(Date.now() - dias * 86_400_000).toISOString()
+  const internos = testContactSet()
+
+  const pagos = await sb<{ key: string; value: string; updated_at?: string }>(
+    `vic_kv?or=${encodeURIComponent("(key.like.pago_online_*,key.like.comprobante_ok_*)")}` +
+      `&select=key,value,updated_at&limit=3000`,
+  )
+  // {at} del JSON manda; si no hay, updated_at de la fila.
+  const pagoAt = new Map<string, string>()
+  for (const k of pagos) {
+    const tel = (String(k.key).match(/(\d{8,15})$/) || [])[1] || ""
+    if (!tel || internos.has(tel) || !/^56\d{8,11}$/.test(tel)) continue
+    let at = ""
+    try { at = String((JSON.parse(String(k.value || "{}")) as { at?: string }).at || "") } catch { /* texto plano */ }
+    if (!at) at = String(k.updated_at || "")
+    if (!at || at < desde) continue
+    const previo = pagoAt.get(tel)
+    if (!previo || at < previo) pagoAt.set(tel, at) // el PRIMER pago: todo lo posterior ya es postventa
+  }
+
+  const tels = [...pagoAt.keys()].slice(0, max)
+  const filas: Array<Record<string, unknown>> = []
+  const resumen = { conPago: pagoAt.size, revisadas: 0, limpios: 0, con_mensaje_comercial: 0, truncado: false }
+  const porTipo: Record<string, number> = {}
+
+  for (let i = 0; i < tels.length; i += 60) {
+    if (Date.now() - t0 > 230_000) { resumen.truncado = true; break }
+    const lote = tels.slice(i, i + 60)
+    const convs = await sb<{ id: string; contact: string }>(
+      `vic_v3_conversations?contact=in.(${lote.join(",")})&select=id,contact`,
+    ).catch(() => [] as Array<{ id: string; contact: string }>)
+    for (const c of convs) {
+      if (Date.now() - t0 > 235_000) { resumen.truncado = true; break }
+      const at = pagoAt.get(String(c.contact)) || ""
+      if (!at) continue
+      resumen.revisadas++
+      let msgs: Msg[] = []
+      try {
+        msgs = await sb<Msg>(
+          `vic_v3_messages?conversation_id=eq.${c.id}&role=eq.assistant&at=gt.${at}` +
+            `&select=at,role,content&order=at.asc&limit=40`,
+        )
+      } catch { continue }
+      const malos = msgs.filter((m) => {
+        const txt = String(m.content || "")
+        if (txt.startsWith("[REGISTRO INTERNO")) return /campa/i.test(txt)
+        return COMERCIAL_POST_PAGO.test(txt) || FIRMAS_PRECIO.some((f) => txt.includes(f))
+      })
+      if (!malos.length) { resumen.limpios++; continue }
+      resumen.con_mensaje_comercial++
+      for (const m of malos) {
+        const t = String(m.content || "")
+        const tipo = /campa/i.test(t) && t.startsWith("[REGISTRO INTERNO")
+          ? "campana"
+          : /descuento|dcto|mejor precio|precio especial|rebaja/i.test(t)
+            ? "descuento"
+            : FIRMAS_PRECIO.some((f) => t.includes(f))
+              ? "bloque_precio"
+              : "reenganche"
+        porTipo[tipo] = (porTipo[tipo] || 0) + 1
+      }
+      filas.push({
+        contact: c.contact,
+        pagoAt: at.slice(0, 16),
+        mensajes: malos.length,
+        horasDespues: Math.round((Date.parse(malos[0].at) - Date.parse(at)) / 3_600_000),
+        ejemplo: `${malos[0].at.slice(0, 16)} · ${String(malos[0].content || "").replace(/\s+/g, " ").slice(0, 150)}`,
+      })
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    modo: "postventa_mensajes_comerciales",
+    nota: "solo lectura · mensajes de Vicky POSTERIORES a la marca de pago con lenguaje comercial",
+    dias, max, ms: Date.now() - t0,
+    resumen, porTipo,
+    tasaLimpia: resumen.revisadas ? `${Math.round((resumen.limpios * 100) / resumen.revisadas)}%` : "—",
+    filas: filas.slice(0, 120),
+  })
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const sp = new URL(req.url).searchParams
+  if (sp.get("soporte") === "1") return modoSoporte(sp, Date.now())
+  if (sp.get("postventa") === "1") return modoPostventa(sp, Date.now())
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
   const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
   const offset = Math.max(Number(sp.get("offset")) || 0, 0)
