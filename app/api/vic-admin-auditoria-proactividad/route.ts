@@ -217,14 +217,20 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
   const internos = testContactSet()
 
   // Dos consultas simples: el `or=` con dos LIKE comodín devolvía 500.
-  const [pagosMp, pagosTransf] = await Promise.all([
-    sb<{ key: string; value: string; created_at?: string }>(
-      `vic_kv?key=like.pago_online_*&select=key,value,created_at&limit=2000`,
-    ).catch(() => [] as Array<{ key: string; value: string; created_at?: string }>),
-    sb<{ key: string; value: string; created_at?: string }>(
-      `vic_kv?key=like.comprobante_ok_*&select=key,value,created_at&limit=2000`,
-    ).catch(() => [] as Array<{ key: string; value: string; created_at?: string }>),
-  ])
+  // REGLA: no tragar el fallo de la consulta — un catch mudo devolvía 0 pagos
+  // y el informe habría dicho "no hay nada que revisar".
+  const fallas: string[] = []
+  const leer = async (prefijo: string) => {
+    try {
+      return await sb<{ key: string; value: string; created_at?: string }>(
+        `vic_kv?key=like.${encodeURIComponent(prefijo + "*")}&select=key,value,created_at&limit=2000`,
+      )
+    } catch (e) {
+      fallas.push(`${prefijo}: ${e instanceof Error ? e.message : String(e)}`)
+      return [] as Array<{ key: string; value: string; created_at?: string }>
+    }
+  }
+  const [pagosMp, pagosTransf] = await Promise.all([leer("pago_online_"), leer("comprobante_ok_")])
   const pagos = [...pagosMp, ...pagosTransf]
   // {at} del JSON manda; si no hay, updated_at de la fila.
   const pagoAt = new Map<string, string>()
@@ -295,7 +301,7 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
     modo: "postventa_mensajes_comerciales",
     nota: "solo lectura · mensajes de Vicky POSTERIORES a la marca de pago con lenguaje comercial",
     dias, max, ms: Date.now() - t0,
-    resumen, porTipo,
+    resumen, porTipo, fallas,
     tasaLimpia: resumen.revisadas ? `${Math.round((resumen.limpios * 100) / resumen.revisadas)}%` : "—",
     filas: filas.slice(0, 120),
   })
