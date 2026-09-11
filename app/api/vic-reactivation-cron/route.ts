@@ -406,10 +406,89 @@ export async function GET(req: Request): Promise<Response> {
   // segmento (tiene cotización formal → quote; si no → preform) y, tras enviar,
   // CIERRA el ciclo (no se repite). El cliente ya engagueó, así que no exige el
   // marcador de preform.
+  // ── GUARDAS DE PROACTIVIDAD (11-sep, orden de Lalo) ───────────────────────
+  // Este cron era el TERCER canal proactivo y el ÚNICO sin guardas: el loop
+  // mira rechazo/autorespuesta/casuística/cliente-existente, el ptv-cron
+  // además pago y onboarding, y acá no se miraba nada. Caso que lo destapó:
+  // Gonzalo (Cond. Los Álamos de Penco) dijo "lo presentaré a la dirección /
+  // cualquier novedad le comento" y siguió recibiendo toques hasta el 09-sep;
+  // al día siguiente Ana Paula tuvo que cerrar el lead a mano. Se cablean las
+  // MISMAS funciones canónicas para que el veredicto sea idéntico en los tres
+  // canales. Un toque omitido CIERRA el ciclo consensuado: es de un solo
+  // disparo, y dejarlo pendiente lo reintenta en cada tick para siempre.
+  const omitidosPorGuarda: Array<{ contact: string; motivo: string }> = []
+  async function cerrarCiclo(r: Row, motivo: string): Promise<void> {
+    await supa(`vic_v3_conversations?id=eq.${r.id}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ followup_status: "cerrado", followup_next_at: null, followup_closed_reason: motivo }),
+    }).catch(() => {})
+    omitidosPorGuarda.push({ contact: r.contact, motivo })
+    console.warn(`[reactivation] consensuado OMITIDO (${motivo}): ${r.contact}`)
+  }
+  // Cotización ya aceptada/pagada/cerrada = nada que reactivar.
+  // `quoteIdsNoAccionables` existía desde la cadencia vieja y quedó HUÉRFANA en
+  // la demolición del 12-ago: el toque consensuado podía salirle a alguien que
+  // ya había aceptado o pagado. Vuelve a aplicarse, en lote.
+  const quotesNoAccionables = await quoteIdsNoAccionables(
+    consensuado.map((r) => String(r.formal_quote_id || "")).filter((q) => /^\d{6,}$/.test(q)),
+  )
+    .then((x) => x.skip)
+    .catch(() => new Set<string>())
+
+  async function motivoDeOmision(r: Row): Promise<string | null> {
+    const q = String(r.formal_quote_id || "")
+    if (q && quotesNoAccionables.has(q)) return "cotizacion_cerrada"
+    // Pago registrado (19-ago) y fase onboarding (25-ago): cero maquinaria
+    // comercial. El pago se lee de las DOS marcas (transferencia y tarjeta).
+    try {
+      const { pagoRegistradoReciente, enFaseOnboarding } = await import("@/lib/loop-v2")
+      if (await enFaseOnboarding(r.contact)) return "onboarding"
+      if (await pagoRegistradoReciente(r.contact)) return "pagado"
+    } catch { /* sin lectura: el toque sigue su camino */ }
+    // Rechazo EN CONTEXTO y autorespuesta (fixes 08 y 09-sep): se lee el
+    // último mensaje del cliente con contenido, saltando cortesías.
+    try {
+      const { posturaRechazoCliente } = await import("@/lib/rechazo-cliente")
+      const postura = posturaRechazoCliente(await fetchHistoryV3(r.contact, 12))
+      if (postura) {
+        const motivo = postura === "autorespuesta" ? "autorespuesta" : "no_interesa"
+        const { mas50CierraLoop } = await import("@/lib/loop-v2")
+        await mas50CierraLoop(r.contact, motivo).catch(() => {})
+        return motivo
+      }
+    } catch { /* sin lectura: el toque sigue su camino */ }
+    // Casuística no-prospecto (trabajador, cliente pidiendo soporte, ex
+    // empleado…). `cliente_ampliacion` NO entra: es VENTA (regla 07-sep).
+    try {
+      const { casuisticaDeContacto, aplicarCasuisticaNoProspecto } = await import("@/lib/casuistica-runtime")
+      const cas = await casuisticaDeContacto(r.contact)
+      if (!cas.esProspecto) {
+        await aplicarCasuisticaNoProspecto(r.contact, cas, "reactivation-cron").catch(() => {})
+        return `casuistica_${cas.tipo}`
+      }
+    } catch { /* sin clasificación: el toque sigue su camino */ }
+    // Cliente existente por CUENTA, SOLO sin cotización formal: con una formal
+    // viva es una AMPLIACIÓN legítima (caso Fernanda / Supermercado Belén).
+    if (!q) {
+      try {
+        const { detectarClienteExistente } = await import("@/lib/cliente-existente")
+        const cli = await detectarClienteExistente(r.contact)
+        if (cli) return "cliente_existente"
+      } catch { /* sin señal de cuenta: el toque sigue su camino */ }
+    }
+    return null
+  }
+
   let enviadosConsensuado = 0
   async function enviarConsensuadoLista(list: Row[]) {
     for (const r of list) {
       if (enviados >= BATCH) break
+      const omision = await motivoDeOmision(r)
+      if (omision) {
+        await cerrarCiclo(r, omision)
+        continue
+      }
       const segmento = r.formal_quote_id ? "cotizacion" : "preform"
       const template = esMX(r)
         ? segmento === "cotizacion" ? TPL_QUOTE_MX : TPL_PREFORM_MX
@@ -452,6 +531,8 @@ export async function GET(req: Request): Promise<Response> {
     sin_nombre_saludo_neutro: omitidosSinNombre,
     saltados_loop_v2: saltadosLoopV2,
     saltados_ptv: saltadosPtv,
+    omitidos_por_guarda: omitidosPorGuarda.length,
+    omitidos: omitidosPorGuarda,
     correos,
   })
 }
