@@ -216,10 +216,16 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
   const desde = new Date(Date.now() - dias * 86_400_000).toISOString()
   const internos = testContactSet()
 
-  const pagos = await sb<{ key: string; value: string; created_at?: string }>(
-    `vic_kv?or=${encodeURIComponent("(key.like.pago_online_*,key.like.comprobante_ok_*)")}` +
-      `&select=key,value,created_at&limit=4000`,
-  )
+  // Dos consultas simples: el `or=` con dos LIKE comodín devolvía 500.
+  const [pagosMp, pagosTransf] = await Promise.all([
+    sb<{ key: string; value: string; created_at?: string }>(
+      `vic_kv?key=like.pago_online_*&select=key,value,created_at&limit=2000`,
+    ).catch(() => [] as Array<{ key: string; value: string; created_at?: string }>),
+    sb<{ key: string; value: string; created_at?: string }>(
+      `vic_kv?key=like.comprobante_ok_*&select=key,value,created_at&limit=2000`,
+    ).catch(() => [] as Array<{ key: string; value: string; created_at?: string }>),
+  ])
+  const pagos = [...pagosMp, ...pagosTransf]
   // {at} del JSON manda; si no hay, updated_at de la fila.
   const pagoAt = new Map<string, string>()
   for (const k of pagos) {
