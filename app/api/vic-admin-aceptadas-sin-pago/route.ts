@@ -94,6 +94,7 @@ type Fila = {
   deal: string | null
   dealStage: string | null
   marcaPago: string | null
+  otraPagada: string | null
   loop: string | null
   traspasoActivo: boolean
   mensajesNuestrosPost: number
@@ -132,6 +133,33 @@ export async function GET(req: Request): Promise<Response> {
   const quotes = (((await rq.json().catch(() => ({}))) as { data?: QuoteRow[] })?.data || []) as QuoteRow[]
 
   const fonos = [...new Set(quotes.map((q) => dig(q.Tel_fono_Contacto)).filter((f) => f.length >= 8))]
+
+  // 1-bis. ¿El MISMO cliente tiene otra cotización PAGADA? Verificado el
+  // 11-sep: de las 4 con marca de pago, 3 eran duplicados (FRIVAR COT890
+  // aceptada y COT891 pagada el mismo día; ARAMOS; VARELA FADIC) — versiones
+  // anteriores que quedaron Aceptadas cuando el cliente pagó otra. Sin esta
+  // consulta la lista alarma por plata que ya entró.
+  const pagadasPorFono = new Map<string, string[]>()
+  if (fonos.length) {
+    const lista = fonos.map((f) => `'${f}'`).join(",")
+    const rp = await fetch(`${ZOHO_API}/crm/v8/coql`, {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ select_query: `select id, Numero_Cotizacion, Tel_fono_Contacto from ${QUOTE_MODULE} where (Tel_fono_Contacto in (${lista}) and Estado_Cotizacion = 'Pagada') limit 200` }),
+      cache: "no-store",
+    })
+    if (rp.ok) {
+      const filas = (((await rp.json().catch(() => ({}))) as { data?: QuoteRow[] })?.data || []) as QuoteRow[]
+      for (const f of filas) {
+        const k = dig(f.Tel_fono_Contacto)
+        const arr = pagadasPorFono.get(k) || []
+        arr.push(String(f.Numero_Cotizacion || f.id))
+        pagadasPorFono.set(k, arr)
+      }
+    } else {
+      fallas.push(`COQL pagadas del contacto → ${rp.status}`)
+    }
+  }
 
   // 2. Marcas de pago, loop, traspaso y mensajes — todo en lote.
   const claves: string[] = []
@@ -218,7 +246,10 @@ export async function GET(req: Request): Promise<Response> {
     const delCliente = hist.filter((m) => m.role === "user")
     const ultimoMensajeCliente = delCliente.length ? new Date(delCliente[delCliente.length - 1].at).toISOString().slice(0, 16) : null
 
-    const veredicto = marcaPago
+    const otraPagada = (pagadasPorFono.get(fono) || []).filter((n) => n !== String(q.Numero_Cotizacion || ""))
+    const veredicto = otraPagada.length
+      ? `duplicado — el cliente pagó ${otraPagada.join(", ")}`
+      : marcaPago
       ? "PAGO MARCADO — la plata puede estar y la cotización sigue Aceptada"
       : ptvSet.has(fono)
         ? "traspasado — el empujón es del ejecutivo"
@@ -242,6 +273,7 @@ export async function GET(req: Request): Promise<Response> {
       deal: q.Deal_Asociado?.name || null,
       dealStage: null,
       marcaPago,
+      otraPagada: otraPagada.length ? otraPagada.join(", ") : null,
       loop,
       traspasoActivo: ptvSet.has(fono),
       mensajesNuestrosPost,
@@ -254,8 +286,10 @@ export async function GET(req: Request): Promise<Response> {
   filas.sort((a, b) => b.diasAceptada - a.diasAceptada)
 
   const suma = (f: Fila[], k: "recurrenteClp" | "unicoClp") => f.reduce((a, x) => a + x[k], 0)
-  const vicky = filas.filter((f) => f.canal === "100% Vicky")
-  const ejec = filas.filter((f) => f.canal !== "100% Vicky")
+  const duplicados = filas.filter((f) => f.otraPagada)
+  const reales = filas.filter((f) => !f.otraPagada)
+  const vicky = reales.filter((f) => f.canal === "100% Vicky")
+  const ejec = reales.filter((f) => f.canal !== "100% Vicky")
   const porVeredicto: Record<string, number> = {}
   for (const f of filas) {
     const k = f.veredicto.split(" —")[0].split(" y no")[0]
@@ -263,10 +297,10 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   if (csv) {
-    const cab = "numero;empresa;canal;dueno;aceptada;dias;recurrente_clp;unico_clp;marca_pago;loop;traspaso;nuestros_msgs_post;ultimo_msg_cliente;veredicto;deal"
+    const cab = "numero;empresa;canal;dueno;aceptada;dias;recurrente_clp;unico_clp;marca_pago;otra_pagada;loop;traspaso;nuestros_msgs_post;ultimo_msg_cliente;veredicto;deal"
     const cuerpo = filas.map((f) =>
       [f.numero, f.empresa.replace(/;/g, ","), f.canal, f.dueno, f.aceptadaIso, f.diasAceptada, f.recurrenteClp, f.unicoClp,
-        f.marcaPago || "", f.loop || "", f.traspasoActivo ? "si" : "", f.mensajesNuestrosPost, f.ultimoMensajeCliente || "",
+        f.marcaPago || "", f.otraPagada || "", f.loop || "", f.traspasoActivo ? "si" : "", f.mensajesNuestrosPost, f.ultimoMensajeCliente || "",
         f.veredicto.replace(/;/g, ","), (f.deal || "").replace(/;/g, ",")].join(";"),
     ).join("\n")
     return new Response(`${cab}\n${cuerpo}\n`, { headers: { "content-type": "text/csv; charset=utf-8" } })
@@ -275,12 +309,16 @@ export async function GET(req: Request): Promise<Response> {
   return NextResponse.json({
     ok: true,
     total: filas.length,
-    mrrEnJuegoClp: suma(filas, "recurrenteClp"),
-    unicosEnJuegoClp: suma(filas, "unicoClp"),
+    // El monto EN JUEGO excluye los duplicados: esa plata ya entró por otra
+    // cotización del mismo cliente.
+    reales: reales.length,
+    mrrEnJuegoClp: suma(reales, "recurrenteClp"),
+    unicosEnJuegoClp: suma(reales, "unicoClp"),
+    duplicados: { casos: duplicados.length, mrrClp: suma(duplicados, "recurrenteClp"), detalle: duplicados.map((f) => `${f.numero} ${f.empresa} → pagó ${f.otraPagada}`) },
     canalVicky: { casos: vicky.length, mrrClp: suma(vicky, "recurrenteClp") },
     canalEjecutivo: { casos: ejec.length, mrrClp: suma(ejec, "recurrenteClp") },
-    conMarcaDePago: filas.filter((f) => f.marcaPago).length,
-    sinSeguimiento: filas.filter((f) => f.mensajesNuestrosPost === 0 && !f.traspasoActivo).length,
+    conMarcaDePago: reales.filter((f) => f.marcaPago).length,
+    sinSeguimiento: reales.filter((f) => f.mensajesNuestrosPost === 0 && !f.traspasoActivo).length,
     porVeredicto,
     masViejas: filas.slice(0, 5).map((f) => `${f.numero} ${f.empresa} · ${f.diasAceptada} d`),
     filas,
