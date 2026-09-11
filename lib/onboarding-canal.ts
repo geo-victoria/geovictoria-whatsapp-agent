@@ -746,12 +746,31 @@ export async function armarOnboarding(contact: string): Promise<{
           // camino que exists=true, jamás alta manual duplicada.
           if (!alta.ok && alta.yaExiste) return await responderYaExiste(null)
           if (alta.ok) {
+            // El `countryId` de la respuesta es la PRUEBA de que el país llegó
+            // y con él la zona horaria (Nicolás 10-sep: "necesito que se envíe
+            // bien para setear la zona horaria por defecto de cada país").
+            // Empresa sin país = UTC 0 = marcaciones corridas, así que se
+            // guarda y, si viene vacío, se avisa fuerte en el mismo acto.
+            const paisAlta = !simulada && "countryCodeEnviado" in alta ? String(alta.countryCodeEnviado || "") : ""
+            const countryIdAlta = !simulada && "countryId" in alta ? String(alta.countryId || "") : ""
             await setKvValue(
               claveAltaSolicitada(contact),
-              JSON.stringify({ at: new Date().toISOString(), companyId: alta.companyId, via: simulada ? "simulada" : "api" }),
+              JSON.stringify({
+                at: new Date().toISOString(),
+                companyId: alta.companyId,
+                via: simulada ? "simulada" : "api",
+                ...(paisAlta ? { countryCode: paisAlta } : {}),
+                ...(countryIdAlta ? { countryId: countryIdAlta } : {}),
+              }),
             ).catch(() => {})
+            const zonaOk = simulada || Boolean(countryIdAlta)
             await avisarEquipoInterno(
-              `✅ ALTA ONBOARDING CL ${simulada ? "SIMULADA (piloto, sin API real)" : "creada POR API"} (companyId ${alta.companyId}) — contacto +${contact}.\n${fichaAlta}`,
+              `✅ ALTA ONBOARDING CL ${simulada ? "SIMULADA (piloto, sin API real)" : "creada POR API"} (companyId ${alta.companyId}) — contacto +${contact}.` +
+                (simulada ? "" : ` · countryCode enviado: ${paisAlta || "(ninguno)"} · countryId devuelto: ${countryIdAlta || "(VACÍO)"}`) +
+                (zonaOk
+                  ? ""
+                  : `\n⚠️ LA EMPRESA PUEDE HABER QUEDADO SIN PAÍS (zona horaria UTC 0 → marcaciones corridas). Revisar con Nicolás la empresa ${alta.companyId} antes de la capacitación.`) +
+                `\n${fichaAlta}`,
             ).catch(() => {})
             // IMPLEMENTACIÓN GV AVANZADO (Lalo 03-sep): "la empresa se crea
             // automáticamente y además se desprende una implementación —

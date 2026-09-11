@@ -57,7 +57,17 @@ export function identificadorParaAlta(valor: string): string {
   return String(valor || "").replace(/[^0-9kK]/g, "").toUpperCase()
 }
 
-const CODIGO_PAIS: Record<string, string> = { cl: "CL", co: "CO", mx: "MX" }
+/**
+ * Códigos que el servicio de Nicolás soporta (mensaje del 10-sep: CL AR PE CO
+ * MX BR). El countryCode NO es cosmético: de él sale la ZONA HORARIA por
+ * defecto de la empresa, y una empresa sin país nace en UTC 0 → todas las
+ * marcaciones quedan corridas. Por eso `crearEmpresaConAdmin` se NIEGA a
+ * crear sin código en vez de omitir la clave en el JSON (que era el modo
+ * silencioso de producir el bug).
+ */
+const CODIGO_PAIS: Record<string, string> = {
+  cl: "CL", ar: "AR", pe: "PE", co: "CO", mx: "MX", br: "BR",
+}
 
 async function llamar(path: string, body?: unknown): Promise<Response> {
   const { host, key } = await credenciales()
@@ -102,7 +112,7 @@ export async function existeEmpresa(
 }
 
 export type AltaEmpresaInput = {
-  pais: "cl" | "co" | "mx"
+  pais: "cl" | "ar" | "pe" | "co" | "mx" | "br"
   empresa: { nombre: string; identificador: string }
   admin: {
     nombre: string
@@ -120,6 +130,10 @@ export type AltaEmpresaResultado =
       companyId: string
       loginUserCreated: boolean
       workEmail: string
+      /** Código de país que se envió (de él sale la zona horaria). */
+      countryCodeEnviado?: string
+      /** `countryId` que devolvió el servicio: vacío = la empresa quedó sin país (UTC 0). */
+      countryId?: string
     }
   | { ok: false; error: string; yaExiste?: boolean; correoOcupado?: boolean }
 
@@ -127,11 +141,18 @@ export type AltaEmpresaResultado =
  * es responsabilidad del caller (consultar-antes-de-crear). */
 export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<AltaEmpresaResultado> {
   if (!altaApiConfigurada()) return { ok: false, error: "API de alta no configurada" }
+  const codigoPais = CODIGO_PAIS[input.pais]
+  if (!codigoPais) {
+    // Sin país no se crea: la empresa nacería en UTC 0 y las marcaciones
+    // quedarían corridas para siempre.
+    console.error(`[alta-empresa] país sin countryCode soportado: "${input.pais}" — alta abortada`)
+    return { ok: false, error: `País "${input.pais}" sin countryCode soportado por el servicio de alta` }
+  }
   try {
     const res = await llamar("/api/vicky/company", {
       company: {
         name: input.empresa.nombre,
-        countryCode: CODIGO_PAIS[input.pais],
+        countryCode: codigoPais,
         identifier: identificadorParaAlta(input.empresa.identificador),
       },
       user: {
@@ -160,15 +181,26 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
         ...(correoOcupado ? { correoOcupado: true } : {}),
       }
     }
+    // El contrato devuelve company:{companyId,name,identifier,countryId} —
+    // `countryId` es la PRUEBA de que el país llegó y la zona horaria quedó
+    // bien. Antes solo se leía companyId, así que un countryId vacío pasaba
+    // inadvertido y la empresa quedaba en UTC 0 (marcaciones corridas).
     const data = JSON.parse(texto || "{}") as {
-      company?: { companyId?: string | number }
+      company?: { companyId?: string | number; name?: string; identifier?: string; countryId?: string | number | null }
       user?: { loginUserCreated?: boolean; workEmail?: string }
     }
     const companyId = String(data?.company?.companyId ?? "")
     if (!companyId) return { ok: false, error: "El alta respondió sin companyId" }
+    const countryId = data?.company?.countryId
+    const countryIdTexto = countryId === null || countryId === undefined ? "" : String(countryId)
+    console.log(
+      `[alta-empresa] empresa ${companyId} creada · countryCode enviado=${codigoPais} · countryId devuelto=${countryIdTexto || "(vacío)"}`,
+    )
     return {
       ok: true,
       companyId,
+      countryCodeEnviado: codigoPais,
+      countryId: countryIdTexto,
       loginUserCreated: data?.user?.loginUserCreated === true,
       workEmail: String(data?.user?.workEmail || input.admin.email),
     }
