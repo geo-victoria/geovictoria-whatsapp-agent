@@ -155,6 +155,16 @@ export async function umbralPrecios(
 ): Promise<{ umbral: number; origen: OrigenConversacion }> {
   if (modoClasico()) return { umbral: SCOPE_MAX_SISTEMA, origen: "inbound" }
   const origen = await origenDeContacto(contact)
+  // EXCEPCIÓN POR CONTACTO (Lalo 11-sep, caso Xiomara/56997002865: "cotízale
+  // igual aunque sea más de 20"): vic_kv `umbral_contacto_<fono>` = 1..50
+  // manda sobre el umbral global para ESA conversación. Es la puerta explícita
+  // para que una orden puntual no obligue a subirle el umbral a todo el mundo
+  // —la regla sigue siendo 20/10— y como el guard determinista del agent-loop
+  // y el bloque del prompt leen los dos esta misma función, con la llave
+  // puesta Vicky cotiza de verdad, no solo "se le pide".
+  const fono = String(contact || "").replace(/\D/g, "")
+  const porContacto = fono ? await umbralKv(`umbral_contacto_${fono}`).catch(() => null) : null
+  if (porContacto) return { umbral: porContacto, origen }
   const clave = origen === "outbound" ? "umbral_outbound" : "umbral_inbound"
   const kv = await umbralKv(clave).catch(() => null)
   const base = origen === "outbound" ? umbralOutbound() : umbralInbound()
