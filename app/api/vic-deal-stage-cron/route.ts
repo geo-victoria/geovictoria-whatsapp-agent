@@ -21,6 +21,8 @@ import { getZohoAccessToken } from "@/lib/zoho-token"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { transicionarDealHacia, type ResultadoTransicion } from "@/lib/zoho-deals"
 import { cerrarYTraspasarPostPago, type ResultadoTraspaso } from "@/lib/traspaso-postpago"
+import { getKvValue } from "@/lib/supabase-persistence-v3"
+import { enFaseOnboarding } from "@/lib/loop-v2"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -101,8 +103,21 @@ async function handler(req: Request): Promise<Response> {
     Estado_Cotizacion?: string
     "Deal_Asociado.id"?: string
     Fecha_Hora_Cotizacion?: string
+    Tel_fono_Contacto?: string
   }>(
-    `select id, Name, Estado_Cotizacion, Deal_Asociado.id, Fecha_Hora_Cotizacion from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID} and Estado_Cotizacion in ('Aceptada', 'Pagada') limit 200`,
+    // ORDEN DESCENDENTE (11-sep). Sin `order by`, Zoho devuelve las más
+    // ANTIGUAS primero y el `limit 200` corta por arriba: medido hoy, el
+    // universo Aceptada+Pagada de Vicky está EXACTAMENTE en 200 (la consulta
+    // sin orden llegaba hasta el 10-sep y `offset 200` ya no trae nada), o sea
+    // el tope está lleno y la PRÓXIMA cotización aceptada se caía del barrido
+    // en silencio. No fue la causa del caso METALMAQ (ese estaba dentro de las
+    // 200 y se corrigió el 10-sep), pero iba a serlo desde mañana. Mirar
+    // primero lo nuevo es lo correcto: lo viejo ya avanzó y la transición es
+    // idempotente y forward-only. Si algún día importa barrer más atrás, hay
+    // que paginar: el límite de una COQL es 200 por página.
+    `select id, Name, Estado_Cotizacion, Deal_Asociado.id, Fecha_Hora_Cotizacion, Tel_fono_Contacto` +
+      ` from ${QUOTE_MODULE} where Created_By = ${VICKY_CREATOR_ID}` +
+      ` and Estado_Cotizacion in ('Aceptada', 'Pagada') order by Created_Time desc limit 200`,
   )
 
   // Red de seguridad del TRASPASO post-pago (caso COT233, 20-jul): si el
@@ -169,6 +184,38 @@ async function handler(req: Request): Promise<Response> {
     if (dealId && !nombre.includes("prueba")) objetivos.set(dealId, "implementando")
   }
 
+  // 2-ter. EL PAGO QUE INVOCA A VICKY ONBOARDING YA ES "IMPLEMENTANDO"
+  // (Lalo 11-sep: "la cotización aceptada debería pasar el deal a listo para
+  // cierre, el pago que invoca a vicky onboarding debería pasarlo a
+  // implementando"). Hasta ahora el salto a 7 esperaba a `Onboarding_Status =
+  // 'Cerrada'`, que el job estampa recién al NACER la Implementación: un
+  // cliente que paga y no completa el formulario se quedaba en 6 para siempre.
+  // La señal correcta es el propio pago cuando ESE contacto va por el alta por
+  // chat (kv `onb_quote_` apuntando a la cotización, o su fase en onboarding).
+  // Solo canal Vicky: el flujo de los ejecutivos no se toca.
+  let implementandoPorPago = 0
+  const pagadasVicky = pagadas.filter((q) => String(q.Estado_Cotizacion || "") === "Pagada")
+  const TOPE_KV = 40
+  let leidas = 0
+  for (const q of pagadasVicky) {
+    if (leidas >= TOPE_KV) break
+    const dealId = String(q["Deal_Asociado.id"] || "")
+    const nombre = String(q.Name || "").toLowerCase()
+    const fono = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
+    if (!dealId || nombre.includes("prueba") || !/^569\d{8}$/.test(fono)) continue
+    if (objetivos.get(dealId) === "implementando") continue
+    leidas++
+    try {
+      const ancla = (await getKvValue(`onb_quote_${fono}`)) || ""
+      const esSuAlta = ancla.trim() === String(q.id || "")
+      const enOnboarding = esSuAlta ? true : await enFaseOnboarding(fono).catch(() => false)
+      if (esSuAlta || enOnboarding) {
+        objetivos.set(dealId, "implementando")
+        implementandoPorPago++
+      }
+    } catch { /* sin kv: se queda en "listo para cierre", como hoy */ }
+  }
+
   const resultados: ResultadoTransicion[] = []
   for (const [dealId, objetivo] of objetivos) {
     resultados.push(await transicionarDealHacia(dealId, objetivo))
@@ -184,7 +231,14 @@ async function handler(req: Request): Promise<Response> {
   console.log(
     `[deal-stage-cron] deals=${objetivos.size} avanzados=${resumen.avanzados} errores=${resumen.errores}`,
   )
-  return NextResponse.json({ ok: true, deals: objetivos.size, resumen, resultados, traspasos })
+  return NextResponse.json({
+    ok: true,
+    deals: objetivos.size,
+    implementando_por_pago: implementandoPorPago,
+    resumen,
+    resultados,
+    traspasos,
+  })
 }
 
 export async function GET(req: Request): Promise<Response> {
