@@ -140,11 +140,12 @@ export async function recalcularCandidatosCampana(): Promise<FotoCandidatos> {
 }
 
 // ── Calendario de campañas (doc v21, Lalo) ──────────────────────────────────
-// Cada campaña = 3 toques en días seguidos: lunes WhatsApp, martes correo,
-// miércoles Dapta. Ideal iniciar el lunes 18 o el lunes 28 del mes (o el lunes
-// MÁS CERCANO a esas anclas), y NINGÚN toque cruza de mes.
+// Cada campaña = 2 toques en días seguidos: lunes WhatsApp, martes correo (la
+// llamada de voz del miércoles salió del plan — Lalo 11-sep). Ideal iniciar el
+// lunes 18 o el lunes 28 del mes (o el lunes MÁS CERCANO a esas anclas), y
+// NINGÚN toque cruza de mes.
 
-export type ToqueProgramado = { canal: "whatsapp" | "correo" | "dapta"; fecha: string }
+export type ToqueProgramado = { canal: "whatsapp" | "correo"; fecha: string }
 export type CampanaProgramada = { inicio: string; toques: ToqueProgramado[] }
 
 const DIA_MS = 86_400_000
@@ -161,12 +162,12 @@ function sumaDias(ymd: string, dias: number): string {
   return new Date(aFecha(ymd).getTime() + dias * DIA_MS).toISOString().slice(0, 10)
 }
 
-/** Lunes del mes (y, m 1-12) más cercano al día `ancla` cuyo miércoles
- * (lunes+2) sigue dentro del mes. */
+/** Lunes del mes (y, m 1-12) más cercano al día `ancla` cuyo martes
+ * (lunes+1) sigue dentro del mes. */
 function lunesAncla(y: number, m: number, ancla: number): string | null {
   const ultimo = new Date(Date.UTC(y, m, 0)).getUTCDate()
   let mejor: { dia: number; dist: number } | null = null
-  for (let d = 1; d + 2 <= ultimo; d++) {
+  for (let d = 1; d + 1 <= ultimo; d++) {
     if (aFecha(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`).getUTCDay() !== 1) continue
     const dist = Math.abs(d - ancla)
     if (!mejor || dist < mejor.dist) mejor = { dia: d, dist }
@@ -191,7 +192,6 @@ export function proximasCampanas(hoyYmd?: string, max = 2): CampanaProgramada[] 
         toques: [
           { canal: "whatsapp", fecha: inicio },
           { canal: "correo", fecha: sumaDias(inicio, 1) },
-          { canal: "dapta", fecha: sumaDias(inicio, 2) },
         ],
       })
     }

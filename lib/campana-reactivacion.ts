@@ -2,9 +2,10 @@
  * CAMPAÑA DE REACTIVACIÓN — diseño cerrado con Lalo el 10-sep.
  *
  * Ciclo de 4 TOQUES MÁXIMO por cliente que recibió cotización o vio precio,
- * hasta nuevo aviso. Un toque = una semana: martes WhatsApp (plantilla),
- * miércoles correo, jueves llamada de Dapta, siempre a las 11:00 hora del
- * país. Tres grupos de condiciones, todos obligatorios:
+ * hasta nuevo aviso. Un toque = una semana: martes WhatsApp (plantilla) y
+ * miércoles correo, siempre a las 11:00 hora del país. La llamada del jueves
+ * SALIÓ del ciclo (Lalo 11-sep: "ya no haremos llamadas de Dapta"). Tres
+ * grupos de condiciones, todos obligatorios:
  *
  *   GRUPO 1 (entrada, se re-evalúa antes de CADA canal):
  *     - 2 días hábiles sin actividad en NINGÚN canal: chat de Vicky (ambos
@@ -16,13 +17,13 @@
  *       fecha "hasta")
  *     - no es cliente (cuenta cliente / usuarios activos / deal 7-8 /
  *       casuística de soporte / pago registrado)
- *   GRUPO 2 (criterios): martes WhatsApp · miércoles correo · jueves Dapta.
+ *   GRUPO 2 (criterios): martes WhatsApp · miércoles correo.
  *   GRUPO 3 (mecánica): 4 casillas por cliente (toque1..toque4). Cada martes
  *     se manda la PRIMERA casilla en falso; el contador NO se reinicia con
  *     actividad — quien respondió y volvió a callar sigue en la casilla
  *     siguiente. Tras la 4, fuera hasta nuevo aviso. La casilla se marca con
- *     el WhatsApp del martes (toque parcial cuenta); miércoles y jueves salen
- *     solo si SIGUE sin actividad.
+ *     el WhatsApp del martes (toque parcial cuenta); el correo del miércoles
+ *     sale solo si SIGUE sin actividad.
  *
  * Este módulo decide; el runner (app/api/vic-campana-reactivacion) envía.
  * Todo best-effort: una fuente caída NO abre la puerta — si no se puede

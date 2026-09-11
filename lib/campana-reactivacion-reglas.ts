@@ -15,7 +15,7 @@ export const HORA_INICIO_CAMPANA = 9
 export const DIAS_HABILES_INACTIVIDAD = Number(process.env.CAMPANA_REACT_DIAS_HABILES || 2)
 export const MINUTOS_HABILES_INACTIVIDAD = DIAS_HABILES_INACTIVIDAD * (18 - HORA_INICIO_CAMPANA) * 60
 export type Casilla = 1 | 2 | 3 | 4
-export type Canal = "wsp" | "mail" | "call"
+export type Canal = "wsp" | "mail"
 
 export type FilaCasillas = {
   contact: string
@@ -59,13 +59,14 @@ export function casillaAbierta(
 }
 
 /** Día de campaña según el calendario local del país: martes → wsp,
- * miércoles → mail, jueves → call; otros días → null. */
+ * miércoles → mail; otros días → null. Las LLAMADAS de voz salieron del ciclo
+ * (Lalo 11-sep: "ya no haremos llamadas de Dapta"), así que el jueves ya no es
+ * día de campaña; las columnas toque*_call_at quedan en la tabla sin uso. */
 export function canalDelDia(pais: string, ahora: Date): Canal | null {
   const tz = pais === "co" ? "America/Bogota" : pais === "mx" ? "America/Mexico_City" : pais === "pe" ? "America/Lima" : "America/Santiago"
   const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(ahora)
   if (wd === "Tue") return "wsp"
   if (wd === "Wed") return "mail"
-  if (wd === "Thu") return "call"
   return null
 }
 

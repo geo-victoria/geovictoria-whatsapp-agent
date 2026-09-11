@@ -101,7 +101,10 @@ export async function verificarPagoDeclarado(quoteId: string, timeoutMs = 25_000
     }).finally(() => clearTimeout(timer))
     if (!r.ok) return { pagado: false, motivo: `http_${r.status}` }
     const j = (await r.json().catch(() => null)) as { resultados?: Array<{ quoteId?: string; finalized?: boolean; reason?: string; error?: string }> } | null
-    const fila = (j?.resultados || []).find((x) => String(x.quoteId || "") === id) || j?.resultados?.[0]
+    // La fila DEBE ser la de esta cotización: el fallback a resultados[0] podía
+    // traer el veredicto de OTRA cotización del barrido y declarar pagado a
+    // quien no pagó.
+    const fila = (j?.resultados || []).find((x) => String(x.quoteId || "") === id)
     if (!fila) return { pagado: false, motivo: "sin_resultado" }
     if (fila.finalized || fila.reason === "ya_finalizada") return { pagado: true, motivo: fila.finalized ? "finalizada" : "pagada" }
     return { pagado: false, motivo: fila.reason || fila.error || "pago_no_aprobado" }

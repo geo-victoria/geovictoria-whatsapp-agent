@@ -509,6 +509,13 @@ async function processOneTurn(
     // para OTRA empresa. (La marca la deja registrar_comprobante_transferencia
     // junto con cerrar el loop del remitente.)
     let directivaPostPago = ""
+    // MARCA DE PAGO REAL, separada del string de directivas (bug del 11-sep,
+    // caso Pabla Solis): `directivaPostPago` acumula TAMBIÉN cliente existente
+    // y casuística, así que un TRABAJADOR preguntando por sus marcaciones dejaba
+    // el string no vacío y el cinturón de pago-declarado leía eso como "pago
+    // verificado" → le respondió "¡Confirmado, tu pago ya quedó registrado!".
+    // Solo las dos marcas kv de pago (comprobante_ok_ / pago_online_) la ponen.
+    let pagoMarcadoReciente = false
     // CLIENTE EXISTENTE (Lalo 08-sep): número de una cuenta que ya es cliente
     // → soporte/postventa, jamás prospecto (lib/cliente-existente, cache 24 h).
     try {
@@ -540,6 +547,7 @@ async function processOneTurn(
         const parsed = JSON.parse(marcaComprobante) as { at?: string; numero?: string }
         const edadMs = parsed.at ? Date.now() - new Date(parsed.at).getTime() : Number.POSITIVE_INFINITY
         if (edadMs < 48 * 60 * 60 * 1000) {
+          pagoMarcadoReciente = true
           directivaPostPago =
             `\n\n[DIRECTIVA POST-VENTA — obligatoria] Este contacto ACABA de enviar el comprobante de pago de su cotización (${parsed.numero || "registrada"}). Estás en MODO POST-VENTA: NO cotices, NO armes valores, NO preguntes dotación ni marcaje y NO emitas ninguna cotización nueva — su compra YA está cerrada. Acompáñalo con el onboarding y responde sus dudas. SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa distinta (con sus palabras, no por iniciativa tuya) puedes volver al flujo de venta.`
         }
@@ -553,6 +561,7 @@ async function processOneTurn(
           const p = JSON.parse(marcaOnline) as { at?: string }
           const edadMs = p.at ? Date.now() - new Date(p.at).getTime() : Number.POSITIVE_INFINITY
           if (edadMs < 48 * 60 * 60 * 1000) {
+            pagoMarcadoReciente = true
             directivaPostPago =
               `\n\n[DIRECTIVA POST-VENTA — obligatoria] Este contacto PAGÓ ONLINE (tarjeta vía MercadoPago) y su pago está CONFIRMADO automáticamente. JAMÁS le pidas comprobante de transferencia ni digas que falta validar el pago. Estás en MODO POST-VENTA: NO cotices ni armes valores nuevos — acompáñalo con el onboarding y responde sus dudas. SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa vuelves al flujo de venta.`
           }
@@ -1771,13 +1780,16 @@ async function processOneTurn(
     // de pago confirmado se reemplaza; si el cliente declara pago, se verifica
     // contra Mercado Pago (el cotizador deja Pagada y dispara el post-pago,
     // que manda el kickoff del alta por su propio camino).
-    if (!enOnboarding && reply) {
+    // El cinturón NO corre con casuística de NO-PROSPECTO (trabajador, cliente
+    // pidiendo soporte, ex empleado…): ahí no hay pago que confirmar ni link que
+    // ofrecer, y hablarle de pagos es exactamente el error del caso Pabla Solis.
+    if (!enOnboarding && reply && !(casuisticaTurno && !casuisticaTurno.esProspecto)) {
       try {
         const pd = await import("@/lib/pago-declarado")
         const declara = pd.clienteDeclaraPago(message)
         const teatro = pd.afirmaPagoConfirmado(reply) || pd.pareceInstruccionDeAcceso(reply)
         if (declara || teatro) {
-          let pagado = Boolean(directivaPostPago)
+          let pagado = pagoMarcadoReciente
           let motivo = pagado ? "marca_kv" : "sin_cotizacion"
           if (!pagado && quotePointer?.quoteId) {
             const v = await pd.verificarPagoDeclarado(quotePointer.quoteId)

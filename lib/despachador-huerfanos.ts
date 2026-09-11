@@ -99,10 +99,17 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // duplicado (cierra), no-prospecto (cierra) o entrega por la regla que
   // corresponde. Endpoint propio, fuera del ptv-cron que ya toca el timeout.
   { nombre: "barrido_leads_vicky", path: "/api/vic-leads-vicky-barrido?max=10", cadaMin: 60 },
-  // Campaña de reactivación (Lalo 10-sep): martes wsp · miércoles correo ·
-  // jueves Dapta a las 11:00 CL. El endpoint responde `apagada` mientras
-  // vic_kv campana_react_enabled != "on" y `fueraDeHora` fuera de las 11.
+  // Campaña de reactivación (Lalo 10-sep): martes wsp · miércoles correo a las
+  // 11:00 CL (la llamada del jueves salió del ciclo, Lalo 11-sep). El endpoint
+  // responde `apagada` mientras vic_kv campana_react_enabled != "on" y
+  // `fueraDeHora` fuera de las 11.
   { nombre: "campana_react", path: "/api/vic-campana-reactivacion", cadaMin: 60 },
+  // PRE-FLIGHT DEL LUNES con freno automático (Lalo 11-sep): simula el toque
+  // del martes, lo compara con la semana pasada y APAGA la campaña si algo se
+  // sale de rango (el 11-sep dos consultas rotas la dejaron muda). Se auto-
+  // gatea a lunes 8-11 CL y es idempotente por semana, así que el tick horario
+  // solo sirve para no depender de nadie despierto.
+  { nombre: "campana_preflight", path: "/api/vic-campana-preflight", cadaMin: 60 },
 ]
 
 /**

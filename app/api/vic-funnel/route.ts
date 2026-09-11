@@ -2604,10 +2604,12 @@ async function renderCampanas(): Promise<string> {
       // "no_texto". Marcadores del vigía ("si_aplicado_vigia") suman al total
       // pero no definen vía: si el contacto no tiene evento de botón, es texto.
       siBoton: Set<string>; noBoton: Set<string>
-      // Cascada de TOQUES (Lalo 27-ago): cada campaña son hasta 3 toques —
-      // WhatsApp → correo → Dapta, en ese orden, y cada uno va SOLO a quienes
-      // no respondieron el anterior. Evento 'enviado' = WhatsApp,
-      // 'enviado_correo' y 'enviado_dapta' = los siguientes.
+      // Cascada de TOQUES (Lalo 27-ago): cada campaña son hasta 2 toques —
+      // WhatsApp → correo, en ese orden, y cada uno va SOLO a quienes no
+      // respondieron el anterior. Evento 'enviado' = WhatsApp, 'enviado_correo'
+      // = el segundo. 'enviado_dapta' solo existe en campañas VIEJAS: las
+      // llamadas de voz salieron del plan (Lalo 11-sep) y la columna queda
+      // para no perder ese histórico.
       toques: Map<string, { n: Set<string>; primerAt: number }>
       // Atribución POR CANAL (Lalo 27-ago, "que quede clara la diferenciación
       // de resultados por canal"): cada respuesta/pago se atribuye al ÚLTIMO
@@ -2738,7 +2740,7 @@ async function renderCampanas(): Promise<string> {
         const ORDEN_TOQUES: Array<{ ev: string; etq: string }> = [
           { ev: "enviado", etq: "📱 WhatsApp" },
           { ev: "enviado_correo", etq: "✉️ Correo" },
-          { ev: "enviado_dapta", etq: "📞 Dapta" },
+          { ev: "enviado_dapta", etq: "📞 Llamada (histórico)" },
         ]
         // ATRIBUCIÓN POR CANAL (Lalo 27-ago): una respuesta o pago pertenece
         // al ÚLTIMO toque que ese contacto recibió antes de ese instante.
@@ -2791,7 +2793,7 @@ async function renderCampanas(): Promise<string> {
       })
     if (!filas.length) return ""
     return `<div class="card" id="campanas"><h2>📣 Campañas de re-encantamiento</h2>
-  <div class="sub" style="margin:2px 0 10px">Resultados por campaña: respuestas por botón y por texto, descuentos aplicados automáticos y pagos POSTERIORES al envío. Cada campaña son hasta 3 toques en cascada — WhatsApp → correo → Dapta — y cada toque va SOLO a quienes no respondieron el anterior. Los contactos internos de prueba quedan fuera. Reglas: máximo 2 campañas por cliente; entra solo quien lleva 48 horas hábiles sin actividad (ni con Vicky ni con un ejecutivo).</div>
+  <div class="sub" style="margin:2px 0 10px">Resultados por campaña: respuestas por botón y por texto, descuentos aplicados automáticos y pagos POSTERIORES al envío. Cada campaña son hasta 2 toques en cascada — WhatsApp → correo — y cada toque va SOLO a quienes no respondieron el anterior (las llamadas de voz salieron del plan el 11-sep; la columna de llamada solo muestra campañas viejas). Los contactos internos de prueba quedan fuera. Reglas: máximo 2 campañas por cliente; entra solo quien lleva 48 horas hábiles sin actividad (ni con Vicky ni con un ejecutivo).</div>
   <div style="overflow-x:auto"><table><thead><tr><th>Campaña · segmentos</th><th>Enviados</th><th>Respondieron</th><th>Sí al descuento</th><th>No</th><th>Dcto aplicado</th><th>Pagos post-envío</th></tr></thead>
   <tbody>${filas.join("")}</tbody></table></div></div>`
   } catch (e) {
@@ -3012,7 +3014,7 @@ async function renderPanelCampanas(quien: string, qsBase: string, recalcular: bo
       ${listaVisible && foto ? `<span class="sub">candidatos: foto de hace ${edadMin} min</span>` : ""}
       ${listaVisible ? `<a class="btn" href="?${qsBase}&vista=campanas&recalcular=1">⟳ Actualizar candidatos</a>` : ""}
     </div>
-    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>Campaña</th><th>📱 WhatsApp</th><th>✉️ Correo</th><th>📞 Dapta</th><th>Candidatos</th></tr></thead>
+    <div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>Campaña</th><th>📱 WhatsApp</th><th>✉️ Correo</th><th>📞 Llamada (histórico)</th><th>Candidatos</th></tr></thead>
     <tbody>${proximas.map((c, i) => `<tr><td><b>${fechaLarga(c.inicio)}</b></td>${c.toques.map((t) => `<td style="text-align:center">${fechaCorta(t.fecha)}</td>`).join("")}
       <td style="text-align:center">${i === 0 && listaVisible && foto ? `<b title="${tipTotal}" style="cursor:help">${foto.aptos.length}</b> <span class="pct">(+ ${foto.excluidos.length} excluidos)</span>` : `<span class="sub">se publica el ${fechaCorta(diaAntes(c.inicio))}</span>`}</td></tr>`).join("")}</tbody></table></div>
     <p class="sub" style="margin:10px 0 0">Cada campaña son 3 toques en cascada y cada toque va solo a quienes no respondieron el anterior. Candidato = cotización formal sin pagar cuyo contacto lleva 48 horas hábiles sin actividad de nadie (ni Vicky ni un ejecutivo por chat, llamada o nota). El listado DETALLADO con nombres se publica el día previo a cada toque — si un cliente suyo aparece, con una nota al deal o un chat por su WhatsApp espejado queda fuera en el próximo recálculo.</p>
@@ -9023,7 +9025,7 @@ export async function GET(req: Request): Promise<Response> {
           // Araujo COT560, semana 24-08).
         } catch { /* sin outbound, la columna queda en 0 */ }
         // 📣 CAMPAÑAS COMO ORIGEN (Lalo 27-ago): un entrante que recibió un
-        // toque de campaña (WhatsApp/correo/Dapta) en los últimos 14 días es
+        // toque de campaña (WhatsApp/correo, y llamada en las viejas) en los últimos 14 días es
         // una REACTIVACIÓN de campaña, no "botón directo" — sin esta fila las
         // respuestas de la campaña ensuciaban la lectura del inbound orgánico.
         // El form (🧲) gana: quien llenó el miniform conserva su landing.

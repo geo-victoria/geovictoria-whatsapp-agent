@@ -26,3 +26,20 @@ test("pareceInstruccionDeAcceso: descarga la app / credenciales / contraseña", 
   assert.equal(pareceInstruccionDeAcceso("Te dejé la cotización en el link, ahí eliges tarjeta o transferencia"), false)
   assert.equal(pareceInstruccionDeAcceso("La app móvil marca con biometría facial y viene incluida en el plan"), false)
 })
+
+// BUG DEL 11-sep (caso Pabla Solis 56982041993): una TRABAJADORA preguntando
+// "me gustaría saber cómo revisar mis registros de asistencia" recibió
+// "¡Confirmado, tu pago ya quedó registrado!". El detector nunca la marcó como
+// pagadora — el cinturón leyó `Boolean(directivaPostPago)`, un string que
+// también acumula la casuística y el cliente existente. Estos casos fijan que
+// el texto de la clienta JAMÁS declara pago.
+test("una consulta de soporte de un trabajador no declara pago", () => {
+  for (const t of [
+    "me gustaria saber como revisar mis registros de asistencia",
+    "no puedo ver mis registros de entrada y salida",
+    "mis marcaciones no quedaron registradas",
+    "quiero saber si quedó registrada mi entrada",
+  ]) {
+    assert.equal(clienteDeclaraPago(t), false, t)
+  }
+})

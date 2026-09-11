@@ -5,11 +5,13 @@
  *   martes 11:00    → WhatsApp (plantilla) a la PRIMERA casilla en falso
  *   miércoles 11:00 → correo a quien recibió el WhatsApp de esta semana y
  *                     SIGUE sin actividad
- *   jueves 11:00    → llamada Dapta, mismo criterio
+ *
+ * La LLAMADA del jueves salió del ciclo (Lalo 11-sep: "ya no haremos llamadas
+ * de Dapta"). Las columnas toque*_call_at siguen en la tabla, sin uso.
  *
  * GET auth cron (?key= | x-cron-secret):
  *   ?dry=1            simulación explícita: lista sin enviar (siempre permitido)
- *   ?dia=wsp|mail|call fuerza el canal (default: el del día local)
+ *   ?dia=wsp|mail    fuerza el canal (default: el del día local)
  *   ?max=N            tope de envíos/filas por corrida (default 40)
  *   ?dias=N           antigüedad del universo (default 90)
  *   ?contact=569…     evalúa UN contacto y explica el veredicto
@@ -221,7 +223,7 @@ export async function GET(req: Request): Promise<Response> {
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 7), 365)
   const soloContacto = (sp.get("contact") || "").replace(/\D/g, "")
   const canalParam = sp.get("dia") as Canal | null
-  const canal: Canal | null = canalParam && ["wsp", "mail", "call"].includes(canalParam) ? canalParam : canalDelDia(pais, ahora)
+  const canal: Canal | null = canalParam && ["wsp", "mail"].includes(canalParam) ? canalParam : canalDelDia(pais, ahora)
 
   // Corrida automática con la campaña apagada: no evalúa nada.
   if (!dryExplicito && !enabled && !soloContacto) {
@@ -231,7 +233,7 @@ export async function GET(req: Request): Promise<Response> {
   if (!dry && !forzarHora && hora !== HORA_CAMPANA) {
     return NextResponse.json({ ok: true, fueraDeHora: true, hora, canal })
   }
-  if (!canal) return NextResponse.json({ ok: true, sinCanalHoy: true, nota: "la campaña corre martes (wsp), miércoles (mail) y jueves (call)" })
+  if (!canal) return NextResponse.json({ ok: true, sinCanalHoy: true, nota: "la campaña corre martes (wsp) y miércoles (mail)" })
 
   const H = await zohoHeaders()
   const feriados = await feriadosDe(pais)
@@ -347,7 +349,7 @@ export async function GET(req: Request): Promise<Response> {
       await registrarEvento(cand.contact, casilla, "wsp", cand.quoteId)
       await appendAssistantV3(
         cand.contact,
-        `[REGISTRO INTERNO] Campaña de reactivación, toque ${casilla} de 4 (${ahora.toISOString().slice(0, 10)}): se le envió la plantilla de reactivación por su cotización${empresa || cand.empresa ? ` de ${empresa || cand.empresa}` : ""}. Si responde con interés: retomar la cotización desde donde quedó, actualizar dotación si cambió y cerrar con link de pago. Si dice que no: agradecer y cerrar sin insistir. Mañana le llega un correo y el jueves una llamada solo si sigue sin responder.`,
+        `[REGISTRO INTERNO] Campaña de reactivación, toque ${casilla} de 4 (${ahora.toISOString().slice(0, 10)}): se le envió la plantilla de reactivación por su cotización${empresa || cand.empresa ? ` de ${empresa || cand.empresa}` : ""}. Si responde con interés: retomar la cotización desde donde quedó, actualizar dotación si cambió y cerrar con link de pago. Si dice que no: agradecer y cerrar sin insistir. Mañana le llega un correo solo si sigue sin responder.`,
       ).catch(() => {})
       enviados++
       base.accion = `enviado toque ${casilla} (WhatsApp, ${tpl})`
@@ -355,8 +357,8 @@ export async function GET(req: Request): Promise<Response> {
       await new Promise((r) => setTimeout(r, 900))
     }
   } else {
-    // MIÉRCOLES / JUEVES: casillas abiertas esta semana sin este canal.
-    const campo = canal === "mail" ? "mail" : "call"
+    // MIÉRCOLES: casillas abiertas esta semana que aún no recibieron el correo.
+    const campo = "mail"
     const desde = new Date(ahora.getTime() - 6 * 86_400_000).toISOString()
     const r = await fetch(
       `${SUPABASE_URL}/rest/v1/vic_campana_reactivacion?select=*&or=(toque1_wsp_at.gt.${desde},toque2_wsp_at.gt.${desde},toque3_wsp_at.gt.${desde},toque4_wsp_at.gt.${desde})&limit=500`,
@@ -371,10 +373,6 @@ export async function GET(req: Request): Promise<Response> {
       const base: Fila = { contact: f.contact, empresa: f.empresa, quoteId: f.quote_id, casilla, canal }
       const yaSalio = f[`toque${casilla}_${campo}_at` as keyof FilaCasillas]
       if (yaSalio) { base.omitido = `${campo}_ya_enviado`; filas.push(base); continue }
-      if (canal === "call" && !f[`toque${casilla}_mail_at` as keyof FilaCasillas]) {
-        // Sin correo el miércoles (respondió o no se pudo) la llamada tampoco va.
-        base.omitido = "sin_correo_previo"; filas.push(base); continue
-      }
       evaluados++
       const ev = await evaluarGrupo1(f.contact, { pais, ahora, H, feriados })
       base.ultimaActividad = ev.ultimaActividad.at ? `${ev.ultimaActividad.fuente} ${ev.ultimaActividad.at.toISOString().slice(0, 16)}` : "sin actividad registrada"
@@ -387,38 +385,20 @@ export async function GET(req: Request): Promise<Response> {
         if (!dry) await anotarEvaluacion(f.contact, base.omitido, pais)
         continue
       }
-      if (dry) { base.accion = `SE ENVIARÍA toque ${casilla} (${canal === "mail" ? "correo" : "llamada Dapta"})`; filas.push(base); continue }
+      if (dry) { base.accion = `SE ENVIARÍA toque ${casilla} (correo)`; filas.push(base); continue }
       const { nombre, email, empresa } = await datosContacto(H, f.contact, f.quote_id)
-      if (canal === "mail") {
-        if (!email) { base.omitido = "sin_email"; filas.push(base); continue }
-        // El correo pasa por el MISMO gate de proactividad que el WhatsApp
-        // (brecha (d) del 10-sep): en sombra solo registra, con GATE_ENFORCE frena.
-        const gate = await evaluarGateProactividad(f.contact, { tipo: "texto" }).catch(() => null)
-        if (gate && !gate.permitir) { base.omitido = `gate (${gate.motivos.join(", ").slice(0, 80)})`; filas.push(base); continue }
-        const link = f.quote_id ? linkCortoDe(f.quote_id) : ""
-        const ok = await enviarCorreo(H, f.quote_id, email, `Tu cotización de control de asistencia sigue vigente${empresa || f.empresa ? ` · ${empresa || f.empresa}` : ""}`, htmlCorreo(nombre, empresa || f.empresa || "", link)).catch(() => false)
-        if (!ok) { base.accion = "ENVÍO FALLÓ (correo)"; filas.push(base); continue }
-        await marcarCasilla(f.contact, casilla, "mail", { pais, motivo: `toque ${casilla} correo` })
-        await registrarEvento(f.contact, casilla, "mail", f.quote_id)
-        enviados++
-        base.accion = `enviado toque ${casilla} (correo a ${email})`
-      } else {
-        // Llamada Dapta por el disparador existente (guardas propias: opt-out, 9-21).
-        const secreto = (await getFollowupCronSecret().catch(() => "")) || CRON_SECRET
-        const rr = await fetch(`${url.origin}/api/vic-admin-llamada`, {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-cron-secret": secreto },
-          body: JSON.stringify({ contact: f.contact, campana: `react_t${casilla}`, quoteId: f.quote_id || undefined }),
-          cache: "no-store",
-          signal: AbortSignal.timeout(25_000),
-        }).catch(() => null)
-        const j = rr ? ((await rr.json().catch(() => ({}))) as { ok?: boolean; error?: string }) : null
-        if (!rr || !rr.ok || j?.ok === false) { base.accion = `LLAMADA NO SALIÓ (${j?.error || rr?.status || "sin respuesta"})`; filas.push(base); continue }
-        await marcarCasilla(f.contact, casilla, "call", { pais, motivo: `toque ${casilla} llamada` })
-        await registrarEvento(f.contact, casilla, "call", f.quote_id)
-        enviados++
-        base.accion = `disparada toque ${casilla} (llamada Dapta)`
-      }
+      if (!email) { base.omitido = "sin_email"; filas.push(base); continue }
+      // El correo pasa por el MISMO gate de proactividad que el WhatsApp
+      // (brecha (d) del 10-sep): en sombra solo registra, con GATE_ENFORCE frena.
+      const gate = await evaluarGateProactividad(f.contact, { tipo: "texto" }).catch(() => null)
+      if (gate && !gate.permitir) { base.omitido = `gate (${gate.motivos.join(", ").slice(0, 80)})`; filas.push(base); continue }
+      const link = f.quote_id ? linkCortoDe(f.quote_id) : ""
+      const ok = await enviarCorreo(H, f.quote_id, email, `Tu cotización de control de asistencia sigue vigente${empresa || f.empresa ? ` · ${empresa || f.empresa}` : ""}`, htmlCorreo(nombre, empresa || f.empresa || "", link)).catch(() => false)
+      if (!ok) { base.accion = "ENVÍO FALLÓ (correo)"; filas.push(base); continue }
+      await marcarCasilla(f.contact, casilla, "mail", { pais, motivo: `toque ${casilla} correo` })
+      await registrarEvento(f.contact, casilla, "mail", f.quote_id)
+      enviados++
+      base.accion = `enviado toque ${casilla} (correo a ${email})`
       filas.push(base)
       await new Promise((r) => setTimeout(r, 600))
     }
