@@ -474,8 +474,14 @@ export async function ultimoToqueCampana(
   } catch (e) { fallas.push(`kv campanas: ${e instanceof Error ? e.message : e}`) }
 
   try {
-    const ll = await sb<{ at: string }>(`vic_llamadas?contact=eq.${contact}&select=at&order=at.desc&limit=1`)
-    if (ll[0]) cands.push({ at: fechaDe(ll[0].at), fuente: "vic_llamadas (voz)" })
+    // La columna de fecha de vic_llamadas es `disparada_at`, no `at` (el select
+    // con `at` daba 400 y volvía a dejar todo en `no_evaluable`).
+    const ll = await sb<{ disparada_at: string | null; campana?: string | null }>(
+      `vic_llamadas?contact=eq.${contact}&select=disparada_at,campana&order=disparada_at.desc&limit=1`,
+    )
+    if (ll[0]?.disparada_at) {
+      cands.push({ at: fechaDe(ll[0].disparada_at), fuente: `vic_llamadas (voz${ll[0].campana ? ` ${ll[0].campana}` : ""})` })
+    }
   } catch (e) { fallas.push(`vic_llamadas: ${e instanceof Error ? e.message : e}`) }
 
   const mejor = maxFecha(...cands)
