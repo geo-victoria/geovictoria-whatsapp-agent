@@ -220,15 +220,19 @@ export const TOOL_ESCALAR_A_IMPLEMENTADOR = {
     "Avisa AHORA al implementador del cliente (su relator) por correo y alerta interna, y te devuelve el texto para el cliente. " +
     "Úsala EN EL MISMO TURNO cuando: (a) el cliente dice que necesita usar la plataforma hoy/antes o pide una capacitación antes de los cupos que le mostraste; " +
     "(b) tiene un problema para entrar o usar la plataforma (no ve un menú, no le aparecen sus trabajadores, permisos, pantallas, contraseña); " +
-    "(c) está molesto o frustrado. No lo mandes a la Mesa de Ayuda ni le expliques pasos de la plataforma: eso lo hace su implementador. " +
+    "(c) está molesto o frustrado; " +
+    "(d) quiere COMPRAR más de lo que ya pagó (sumar trabajadores, otro reloj, otra sucursal, otro módulo) → motivo pedido_comercial, que avisa a la ejecutiva comercial y no al implementador. " +
+    "No lo mandes a la Mesa de Ayuda ni le expliques pasos de la plataforma: eso lo hace su implementador. " +
     "Copia el mensajeParaProspecto tal cual.",
   input_schema: {
     type: "object" as const,
     properties: {
       motivo: {
         type: "string",
-        enum: ["urgencia_capacitacion", "problema_plataforma", "cliente_molesto", "otro"],
-        description: "urgencia_capacitacion = quiere partir antes / cupo antes; problema_plataforma = no puede entrar o usar algo; cliente_molesto = frustración explícita.",
+        enum: ["urgencia_capacitacion", "problema_plataforma", "cliente_molesto", "pedido_comercial", "otro"],
+        description:
+          "urgencia_capacitacion = quiere partir antes / cupo antes; problema_plataforma = no puede entrar o usar algo; " +
+          "cliente_molesto = frustración explícita; pedido_comercial = quiere COMPRAR más (sumar trabajadores, otro reloj, otra sucursal, otro módulo) — eso va a la ejecutiva comercial, no al implementador.",
       },
       detalle: { type: "string", description: "Qué dijo el cliente, en sus palabras (1-2 frases)." },
     },

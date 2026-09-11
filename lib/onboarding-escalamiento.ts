@@ -32,14 +32,28 @@ const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645
 const FROM_EMAIL = "vicky@geovictoria.com"
 const CANDADO_MS = 2 * 60 * 60 * 1000
 
-export type MotivoEscalamiento = "urgencia_capacitacion" | "problema_plataforma" | "cliente_molesto" | "otro"
+export type MotivoEscalamiento =
+  | "urgencia_capacitacion"
+  | "problema_plataforma"
+  | "cliente_molesto"
+  | "pedido_comercial"
+  | "otro"
 
 const TITULOS: Record<MotivoEscalamiento, string> = {
   urgencia_capacitacion: "pide capacitación antes de los cupos disponibles",
   problema_plataforma: "problema para entrar o usar la plataforma",
   cliente_molesto: "cliente molesto o frustrado",
+  // PEDIDO COMERCIAL (Lalo 11-sep): "la venta autónoma es comercialmente de
+  // Aleydis, pero la implementación siempre será o de Ignacio o de Diego
+  // Alegre". Un cliente en onboarding que quiere COMPRAR más (sumar gente,
+  // otro reloj, otra sucursal) no es un tema de implementación: va a la
+  // ejecutiva comercial de las ventas autónomas, no al relator.
+  pedido_comercial: "quiere sumar/comprar más (pedido comercial)",
   otro: "necesita a su implementador",
 }
+
+/** Ejecutiva comercial de las ventas autónomas (dueña del post-venta de Vicky). */
+const COMERCIAL_VENTA_AUTONOMA = { nombre: "Aleydis Araque", email: "aaraque@geovictoria.com" }
 
 const esc = (s: string) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
@@ -55,7 +69,9 @@ export async function escalarAImplementador(
   error?: string
 }> {
   const fono = String(contact || "").replace(/\D/g, "")
-  const motivo: MotivoEscalamiento = (["urgencia_capacitacion", "problema_plataforma", "cliente_molesto", "otro"] as const).includes(args.motivo)
+  const motivo: MotivoEscalamiento = (
+    ["urgencia_capacitacion", "problema_plataforma", "cliente_molesto", "pedido_comercial", "otro"] as const
+  ).includes(args.motivo)
     ? args.motivo
     : "otro"
   const detalle = String(args.detalle || "").trim().slice(0, 600)
@@ -67,11 +83,18 @@ export async function escalarAImplementador(
   } catch {
     cap = null
   }
-  // Sin IMP todavía (alta recién hecha) el aviso va a los DOS relatores: alguien tiene que tomarlo.
-  const destinos = cap?.relator?.email
-    ? [{ nombre: cap.relator.nombre, email: cap.relator.email }]
-    : RELATORES_GV_AVANZADO.map((r) => ({ nombre: r.nombre, email: r.email }))
-  const relatorNombre = cap?.relator?.nombre || "tu implementador"
+  // A QUIÉN LE TOCA (Lalo 11-sep): lo comercial a Aleydis, la implementación
+  // siempre a Diego o Ignacio. Sin IMP todavía (alta recién hecha) el aviso de
+  // implementación va a los DOS relatores: alguien tiene que tomarlo.
+  const esComercial = motivo === "pedido_comercial"
+  const destinos = esComercial
+    ? [COMERCIAL_VENTA_AUTONOMA]
+    : cap?.relator?.email
+      ? [{ nombre: cap.relator.nombre, email: cap.relator.email }]
+      : RELATORES_GV_AVANZADO.map((r) => ({ nombre: r.nombre, email: r.email }))
+  const relatorNombre = esComercial
+    ? COMERCIAL_VENTA_AUTONOMA.nombre
+    : cap?.relator?.nombre || "tu implementador"
   const empresa = cap?.empresa || ""
 
   // Candado por motivo: el cliente insiste 5 veces en 10 minutos y el relator
@@ -155,6 +178,11 @@ export async function escalarAImplementador(
 }
 
 function textoCliente(relator: string, motivo: MotivoEscalamiento): string {
+  // El pedido COMERCIAL no lo ve el implementador: lo toma la ejecutiva
+  // comercial de las ventas autónomas (Lalo 11-sep).
+  if (motivo === "pedido_comercial") {
+    return `Perfecto, te ayudo con eso. Ya le pasé tu pedido a ${relator}, nuestra ejecutiva comercial, para que te llegue el valor hoy mismo. Mientras, seguimos con tu configuración por acá.`
+  }
   const quien = relator === "tu implementador" ? "tu implementador" : `${relator}, tu implementador,`
   if (motivo === "urgencia_capacitacion") {
     return `Entiendo, necesitas partir antes. Ya le avisé a ${quien} para que te contacte hoy y vean cómo adelantarlo. Mientras, yo dejo guardado todo lo que me mandes para que la carga sea inmediata cuando te llame.`
