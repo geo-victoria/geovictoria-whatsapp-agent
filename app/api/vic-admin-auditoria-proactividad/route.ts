@@ -316,8 +316,9 @@ async function modoPostventa(sp: URLSearchParams, t0: number): Promise<Response>
  */
 async function modoLoops(sp: URLSearchParams, t0: number): Promise<Response> {
   const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
-  const loops = await sb<{ contact: string; estado: string; stage: string | null; touch_count: number | null }>(
-    `vic_loop?estado=in.(activo,pausado_compromiso)&select=contact,estado,stage,touch_count&limit=${max}`,
+  // vic_loop NO tiene touch_count: el contador es `next_touch` (LoopRow).
+  const loops = await sb<{ contact: string; estado: string; stage: string | null; next_touch: number | null }>(
+    `vic_loop?estado=in.(activo,pausado_compromiso)&select=contact,estado,stage,next_touch&limit=${max}`,
   )
   const internos = testContactSet()
   const vivos = loops.filter((l) => !internos.has(String(l.contact || "")) && /^\d{8,15}$/.test(String(l.contact || "")))
@@ -352,7 +353,7 @@ async function modoLoops(sp: URLSearchParams, t0: number): Promise<Response> {
       contact: l.contact,
       estado: l.estado,
       stage: l.stage || "-",
-      toques: l.touch_count ?? 0,
+      proximoToque: l.next_touch ?? 0,
       casuistica: cas.tipo,
       evidencia: cas.evidencia.slice(0, 3),
       ultimoDelCliente: String(delCliente[delCliente.length - 1] || "").replace(/\s+/g, " ").slice(0, 100),

@@ -453,9 +453,14 @@ export async function ultimoToqueCampana(
   // Los kv de las campañas viejas: `campana_dcto_<fono>` y
   // `campana_remk_<campana>_<fono>`. El `_` de LIKE en PostgREST es un comodín
   // de UN carácter, así que el patrón igual calza con el nombre de campaña.
+  // CICATRIZ 11-sep: este select pedía `created_at` y vic_kv responde 400 —
+  // el fallo dejaba a la campaña en `no_evaluable` (444 de 450 contactos del
+  // dry run del martes), o sea apagada de hecho. Falla segura pero muda: el
+  // dry run es el único que la delata. La fecha sale del JSON del valor, que
+  // es lo que escriben todas las campañas (`{at}` / `{enviadoAt}`).
   try {
-    const filas = await sb<{ key: string; value: string; created_at?: string }>(
-      `vic_kv?key=like.campana_*${contact}&select=key,value,created_at&limit=20`,
+    const filas = await sb<{ key: string; value: string }>(
+      `vic_kv?key=like.campana_*${contact}&select=key,value&limit=20`,
     )
     for (const f of filas) {
       let iso = ""
@@ -463,7 +468,7 @@ export async function ultimoToqueCampana(
         const j = JSON.parse(String(f.value || "{}")) as { at?: string; enviadoAt?: string }
         iso = j.at || j.enviadoAt || ""
       } catch { iso = String(f.value || "").slice(0, 40) }
-      const d = fechaDe(iso) || fechaDe(f.created_at)
+      const d = fechaDe(iso)
       if (d) cands.push({ at: d, fuente: `kv ${f.key.replace(contact, "…")}` })
     }
   } catch (e) { fallas.push(`kv campanas: ${e instanceof Error ? e.message : e}`) }
