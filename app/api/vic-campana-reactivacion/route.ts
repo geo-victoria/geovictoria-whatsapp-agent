@@ -45,6 +45,7 @@ import {
   ultimoToqueCampana,
   DESCANSO_DIAS,
   MINUTOS_HABILES_INACTIVIDAD,
+  TABLA,
   casillaAbierta,
   contactosConChatReciente,
   evaluarGrupo1,
@@ -212,6 +213,54 @@ async function registrarEvento(contact: string, casilla: Casilla, canal: Canal, 
   }).catch(() => {})
 }
 
+/**
+ * PRUEBA DE ESCRITURA (`?probarEscritura=1&contact=569…`): marca una casilla,
+ * la relee, registra el evento y BORRA todo lo que escribió. Existe porque el
+ * camino de escritura del ciclo nunca había corrido en real —todos los dry
+ * runs solo LEEN la tabla— y si `on_conflict=contact` no tuviera su índice
+ * único, el upsert fallaría y un contacto recibiría el mismo toque cada
+ * semana. Con un número sintético no se toca a ningún cliente.
+ */
+async function probarEscritura(contact: string, pais: string): Promise<Record<string, unknown>> {
+  const pasos: Record<string, unknown> = { contact }
+  try {
+    await marcarCasilla(contact, 1, "wsp", { pais, empresa: "PRUEBA DE ESCRITURA - BORRAR", motivo: "prueba de escritura" })
+    pasos.marcado_toque1_wsp = "ok"
+  } catch (e) {
+    pasos.marcado_toque1_wsp = `FALLÓ: ${e instanceof Error ? e.message : e}`
+    return pasos
+  }
+  // Segunda escritura sobre la MISMA fila: es el upsert por on_conflict el que
+  // podría no existir, y sin él el toque 2 crearía una fila nueva.
+  try {
+    await marcarCasilla(contact, 1, "mail", { pais, motivo: "prueba de escritura (2ª pasada)" })
+    pasos.marcado_toque1_mail = "ok"
+  } catch (e) {
+    pasos.marcado_toque1_mail = `FALLÓ: ${e instanceof Error ? e.message : e}`
+  }
+  const fila = (await leerCasillasLote([contact]).catch(() => new Map())).get(contact) || null
+  pasos.releido = fila ? { toque1_wsp_at: fila.toque1_wsp_at, toque1_mail_at: fila.toque1_mail_at, motivo: fila.ultima_eval_motivo } : "NO SE PUDO RELEER"
+  pasos.siguienteCasilla_tras_toque1 = siguienteCasilla(fila)
+  pasos.casillaAbierta = casillaAbierta(fila, new Date())
+  await registrarEvento(contact, 1, "wsp", null)
+  const ev = await fetch(`${SUPABASE_URL}/rest/v1/vic_campanas?contact=eq.${contact}&select=campana,evento,at`, {
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store",
+  }).then((r) => r.json()).catch(() => null)
+  pasos.evento_registrado = Array.isArray(ev) && ev.length ? ev[ev.length - 1] : "NO SE REGISTRÓ"
+  // Limpieza: la prueba no deja rastro.
+  const borrar = async (ruta: string) =>
+    (await fetch(`${SUPABASE_URL}/rest/v1/${ruta}`, {
+      method: "DELETE",
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, Prefer: "return=minimal" },
+      cache: "no-store",
+    }).catch(() => null))?.status
+  pasos.limpieza_casillas = await borrar(`${TABLA}?contact=eq.${contact}`)
+  pasos.limpieza_eventos = await borrar(`vic_campanas?contact=eq.${contact}`)
+  const quedo = (await leerCasillasLote([contact]).catch(() => new Map())).get(contact) || null
+  pasos.limpio = !quedo
+  return pasos
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const url = new URL(req.url)
@@ -245,6 +294,11 @@ export async function GET(req: Request): Promise<Response> {
   const ufDia = Math.max(0, Number(sp.get("uf") || 0)) || (await getUFActual().catch(() => 0))
 
   // Un solo contacto: veredicto explicado (sin enviar salvo modo real explícito con ?contact=).
+  if (sp.get("probarEscritura") === "1") {
+    if (!soloContacto) return NextResponse.json({ ok: false, error: "falta contact" }, { status: 400 })
+    return NextResponse.json({ ok: true, prueba: await probarEscritura(soloContacto, pais) })
+  }
+
   if (soloContacto) {
     const ev = await evaluarGrupo1(soloContacto, { pais, ahora, H, feriados })
     const casillas = await leerCasillasLote([soloContacto])
