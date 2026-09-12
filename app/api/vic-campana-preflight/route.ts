@@ -56,6 +56,9 @@ const TOPE_ENVIOS = Number(process.env.CAMPANA_PREFLIGHT_TOPE || 60)
 const FACTOR_SALTO = Number(process.env.CAMPANA_PREFLIGHT_FACTOR || 3)
 const PISO_SALTO = Number(process.env.CAMPANA_PREFLIGHT_PISO || 15)
 const PCT_NO_EVALUABLE = Number(process.env.CAMPANA_PREFLIGHT_PCT_CIEGO || 20)
+// Tope de envíos del runner real (su `max` por defecto): el freno se mide
+// contra esto, no contra el potencial que recorre el dry.
+const MAX_REAL = Number(process.env.CAMPANA_REACT_MAX || 40)
 
 const KV_HIST = "campana_preflight_hist"
 const KV_ULTIMO = "campana_preflight_ultimo"
@@ -195,6 +198,7 @@ export async function GET(req: Request): Promise<Response> {
   const sinEvaluar = censo ? Math.max(0, censo.aEvaluar - censo.precalculados) : 0
   const truncado = Boolean(resumen["presupuesto_de_tiempo"]) || sinEvaluar > 0
   const corridaOk = Boolean(rr && rr.ok && j && j.ok !== false)
+  const saldriaReal = Math.min(seEnviaria, MAX_REAL)
 
   // 2. Comparación con la semana pasada.
   const hist = await leerHistorico()
@@ -206,8 +210,15 @@ export async function GET(req: Request): Promise<Response> {
   else {
     if (universo > 0 && evaluados === 0) frenos.push(`universo de ${universo} y CERO evaluados — es el patrón del 11-sep (consulta rota que deja todo en no_evaluable)`)
     if (universo > 0 && noEvaluable * 100 > universo * PCT_NO_EVALUABLE) frenos.push(`${noEvaluable} de ${universo} quedaron en no_evaluable (${Math.round((noEvaluable / universo) * 100)} %, tope ${PCT_NO_EVALUABLE} %) — hay consultas fallando`)
-    if (seEnviaria > TOPE_ENVIOS) frenos.push(`saldrían ${seEnviaria} toques, sobre el tope de ${TOPE_ENVIOS}`)
-    if (previa && seEnviaria > PISO_SALTO && seEnviaria > previa.seEnviaria * FACTOR_SALTO) frenos.push(`saldrían ${seEnviaria} contra ${previa.seEnviaria} de la semana del ${previa.semana} (más de ${FACTOR_SALTO}×)`)
+    // El tope se mide contra lo que el runner REAL alcanza a mandar, no contra
+    // el potencial del dry: el dry recorre el universo con max=150 y el martes
+    // el runner corta en `max` (40 por defecto). Comparar el potencial contra
+    // el tope frenaba la campaña el primer lunes por una masa que nunca iba a
+    // salir.
+    if (saldriaReal > TOPE_ENVIOS) frenos.push(`el martes saldrían ${saldriaReal} toques (potencial ${seEnviaria}, tope del runner ${MAX_REAL}), sobre el tope de ${TOPE_ENVIOS}`)
+    // El salto solo se juzga entre corridas COMPARABLES: si una de las dos
+    // quedó truncada, la diferencia puede ser de cobertura y no de realidad.
+    if (previa && !truncado && !previa.truncado && seEnviaria > PISO_SALTO && seEnviaria > previa.seEnviaria * FACTOR_SALTO) frenos.push(`saldrían ${seEnviaria} contra ${previa.seEnviaria} de la semana del ${previa.semana} (más de ${FACTOR_SALTO}×)`)
   }
 
   // 4. Frenar de verdad: el interruptor que el runner ya respeta.
@@ -264,7 +275,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   return NextResponse.json({
-    ok: true, dry, semana, estado, enabledAntes, corridaOk, truncado, censo, sinEvaluar,
+    ok: true, dry, semana, estado, enabledAntes, corridaOk, truncado, censo, sinEvaluar, saldriaReal,
     universo, evaluados, seEnviaria, noEvaluable,
     previa, frenos, freno, motivos, correoOk,
     seEnviarianA: ejemplos,
