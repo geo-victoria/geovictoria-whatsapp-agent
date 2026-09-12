@@ -383,6 +383,68 @@ export async function evaluarGrupo1(
   return { apto: true, motivo: "apto", ultimaActividad: actividad, minutosHabilesSinActividad: minutos }
 }
 
+/**
+ * PRE-FILTRO EN BLOQUE: quién tuvo actividad RECIENTE en el chat de Vicky.
+ *
+ * Existe por costo: ~7 de cada 10 candidatos de la campaña se caen por
+ * `activo_reciente`, y esa es la ÚLTIMA de las 5 fuentes de `ultimaActividad`,
+ * así que pagaban las otras cuatro (con Zoho de por medio) para nada — el
+ * censo del pre-flight se quedaba sin presupuesto antes de recorrer el
+ * universo. Esto lo resuelve con dos consultas para TODO el universo.
+ *
+ * Solo mira el CHAT: las otras fuentes de actividad las sigue viendo
+ * `evaluarGrupo1`. Este filtro DESCARTA, nunca aprueba — quien no aparece acá
+ * pasa por la evaluación completa igual.
+ */
+export async function contactosConChatReciente(
+  contacts: string[],
+  opts: { ahora?: Date; pais?: string; feriados?: Set<string>; diasVentana?: number } = {},
+): Promise<Map<string, { at: Date; minutos: number }>> {
+  const out = new Map<string, { at: Date; minutos: number }>()
+  if (!contacts.length) return out
+  const ahora = opts.ahora || new Date()
+  const pais = opts.pais || "cl"
+  const feriados = opts.feriados || new Set<string>()
+  // Los 1.080 minutos hábiles caben, con fin de semana y feriados de por
+  // medio, en ~12 días corridos: la ventana ancha se acota después con el
+  // cálculo exacto de minutos hábiles.
+  const corte = new Date(ahora.getTime() - (opts.diasVentana || 12) * 86_400_000).toISOString()
+
+  for (let i = 0; i < contacts.length; i += 200) {
+    const lote = contacts.slice(i, i + 200)
+    const convs = await sb<{ id: string; contact: string }>(
+      `vic_v3_conversations?contact=in.(${lote.join(",")})&select=id,contact`,
+    ).catch(() => [] as Array<{ id: string; contact: string }>)
+    if (!convs.length) continue
+    const dueno = new Map(convs.map((c) => [c.id, c.contact]))
+    for (let k = 0; k < convs.length; k += 100) {
+      const ids = convs.slice(k, k + 100).map((c) => c.id).join(",")
+      const msgs = await sb<{ conversation_id: string; at: string; content: string }>(
+        `vic_v3_messages?conversation_id=in.(${ids})&at=gte.${corte}&select=conversation_id,at,content&order=at.desc&limit=4000`,
+      ).catch(() => [] as Array<{ conversation_id: string; at: string; content: string }>)
+      for (const m of msgs) {
+        // Los "[REGISTRO INTERNO" no son mensajes al cliente y no cuentan como
+        // actividad (mismo criterio que ultimaActividad).
+        if (String(m.content || "").startsWith("[REGISTRO INTERNO")) continue
+        const c = dueno.get(m.conversation_id)
+        if (!c) continue
+        const at = new Date(m.at)
+        if (Number.isNaN(at.getTime())) continue
+        const prev = out.get(c)
+        if (prev && prev.at >= at) continue
+        out.set(c, { at, minutos: 0 })
+      }
+    }
+  }
+
+  for (const [c, v] of Array.from(out.entries())) {
+    const min = minutosHabilesEntre(v.at, ahora, pais, feriados, HORA_INICIO_CAMPANA)
+    if (min >= MINUTOS_HABILES_INACTIVIDAD) out.delete(c)
+    else out.set(c, { at: v.at, minutos: min })
+  }
+  return out
+}
+
 // ── UNIVERSO ────────────────────────────────────────────────────────────────
 
 export type Candidato = { contact: string; quoteId: string | null; empresa: string | null; origen: string }

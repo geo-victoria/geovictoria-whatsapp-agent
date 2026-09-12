@@ -44,7 +44,9 @@ import {
   precioTextoClp,
   ultimoToqueCampana,
   DESCANSO_DIAS,
+  MINUTOS_HABILES_INACTIVIDAD,
   casillaAbierta,
+  contactosConChatReciente,
   evaluarGrupo1,
   feriadosDe,
   horaLocalDe,
@@ -258,33 +260,45 @@ export async function GET(req: Request): Promise<Response> {
   let evaluados = 0
   const presupuestoMs = 250_000
   const t0 = Date.now()
+  let censo: { chatActivo: number; aEvaluar: number; precalculados: number } | null = null
 
   if (canal === "wsp") {
     // MARTES: universo → grupo 1 → primera casilla en falso.
     const universo = await universoCampana({ dias, H })
     const casillas = await leerCasillasLote(universo.map((u) => u.contact))
 
-    // CENSO DEL DRY: evaluarGrupo1 encadena 5 fuentes en serie (~4 s por
-    // candidato), así que en serie el presupuesto se gastaba antes de recorrer
-    // el universo y el volumen del pre-flight salía como un PISO (`truncado`).
-    // En dry no hay envíos ni escrituras, así que se precalcula por tandas
-    // chicas; 4 en paralelo es suave para Zoho (la tormenta de tokens del
-    // 01-sep vino de martillar reintentos, no de cuatro llamadas).
+    // CENSO DEL DRY (cero envíos, cero escrituras): dos cosas para que el
+    // pre-flight informe un volumen REAL y no un piso.
+    //  (1) Pre-filtro en bloque por actividad de chat: descarta de una a la
+    //      mayoría sin tocar Zoho ni vic_kv.
+    //  (2) Lo que queda se evalúa por tandas de 4 en paralelo (suave para
+    //      Zoho: la tormenta de tokens del 01-sep vino de martillar
+    //      reintentos, no de cuatro llamadas), y con presupuesto RESERVADO —
+    //      la primera versión se comió los 250 s completos y el loop de
+    //      reporte quedó sin nada, así que el trabajo se hizo y se botó.
     const evalPrecalc = new Map<string, EvaluacionGrupo1>()
+    const chatActivo = dry
+      ? await contactosConChatReciente(universo.map((u) => u.contact), { ahora, pais, feriados }).catch((e) => {
+          console.error("[campana] pre-filtro de chat falló", e)
+          return new Map<string, { at: Date; minutos: number }>()
+        })
+      : new Map<string, { at: Date; minutos: number }>()
     if (dry) {
       const aEvaluar = universo.filter((u) => {
+        if (chatActivo.has(u.contact)) return false
         const f = casillas.get(u.contact) || null
         return Boolean(siguienteCasilla(f)) && !casillaAbierta(f, ahora)
       })
-      const TANDA = 4
-      for (let i = 0; i < aEvaluar.length; i += TANDA) {
-        if (Date.now() - t0 > presupuestoMs) break
-        const tanda = aEvaluar.slice(i, i + TANDA)
+      const presupuestoCenso = Math.floor(presupuestoMs * 0.55)
+      for (let i = 0; i < aEvaluar.length; i += 4) {
+        if (Date.now() - t0 > presupuestoCenso) break
+        const tanda = aEvaluar.slice(i, i + 4)
         const evs = await Promise.all(
           tanda.map((c) => evaluarGrupo1(c.contact, { pais, ahora, H, feriados }).catch(() => null)),
         )
         tanda.forEach((c, k) => { const e = evs[k]; if (e) evalPrecalc.set(c.contact, e) })
       }
+      censo = { chatActivo: chatActivo.size, aEvaluar: aEvaluar.length, precalculados: evalPrecalc.size }
     }
 
     for (const cand of universo) {
@@ -297,6 +311,15 @@ export async function GET(req: Request): Promise<Response> {
       // Una casilla por semana: si el último WhatsApp salió hace menos de 6 días, esperar.
       const abierta = casillaAbierta(fila, ahora)
       if (abierta) { base.omitido = `toque_${abierta}_en_curso`; filas.push(base); continue }
+      // Del pre-filtro en bloque: ya sabemos que habló hace poco, así que no
+      // se gasta ni el chequeo de descanso ni la evaluación completa.
+      const act = chatActivo.get(cand.contact)
+      if (act) {
+        base.ultimaActividad = `chat ${act.at.toISOString().slice(0, 16)}`
+        base.omitido = `activo_reciente (chat, ${act.minutos} min hábiles de ${MINUTOS_HABILES_INACTIVIDAD})`
+        filas.push(base)
+        continue
+      }
       // DESCANSO (Lalo 10-sep): el toque 1 —de este ciclo o del siguiente— solo
       // sale si el último toque de CUALQUIER campaña tiene ≥4 semanas. Dentro
       // del ciclo los toques son semanales, así que no se evalúa.
@@ -434,5 +457,5 @@ export async function GET(req: Request): Promise<Response> {
     const k = f.accion ? (f.accion.startsWith("SE ENVIARÍA") ? "se_enviaria" : f.accion.split(" (")[0]) : String(f.omitido || "?").split(" (")[0]
     resumen[k] = (resumen[k] || 0) + 1
   }
-  return NextResponse.json({ ok: true, dry, enabled, canal, hora, fecha: ahora.toISOString(), dias, evaluados, enviados, resumen, filas, ms: Date.now() - t0 })
+  return NextResponse.json({ ok: true, dry, enabled, canal, hora, fecha: ahora.toISOString(), dias, universo: filas.length, evaluados, enviados, censo, resumen, filas, ms: Date.now() - t0 })
 }

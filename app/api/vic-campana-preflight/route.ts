@@ -83,6 +83,7 @@ type FilaRunner = {
 type RespuestaRunner = {
   ok?: boolean
   evaluados?: number
+  censo?: { chatActivo: number; aEvaluar: number; precalculados: number } | null
   resumen?: Record<string, number>
   filas?: FilaRunner[]
   apagada?: boolean
@@ -188,7 +189,11 @@ export async function GET(req: Request): Promise<Response> {
   const noEvaluable = Object.entries(resumen)
     .filter(([k]) => k.startsWith("no_evaluable"))
     .reduce((a, [, v]) => a + v, 0)
-  const truncado = Boolean(resumen["presupuesto_de_tiempo"]) || universo >= max * 3
+  // El censo del dry dice cuántos candidatos quedaron SIN evaluar: mientras
+  // eso pase, el volumen informado es un piso y hay que decirlo.
+  const censo = j?.censo || null
+  const sinEvaluar = censo ? Math.max(0, censo.aEvaluar - censo.precalculados) : 0
+  const truncado = Boolean(resumen["presupuesto_de_tiempo"]) || sinEvaluar > 0
   const corridaOk = Boolean(rr && rr.ok && j && j.ok !== false)
 
   // 2. Comparación con la semana pasada.
@@ -237,7 +242,7 @@ export async function GET(req: Request): Promise<Response> {
   </div>` : ""}
   <table style="border-collapse:collapse;font-size:14px;margin-bottom:14px">
     <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Saldrían el martes</td><td style="padding:3px 0"><b>${seEnviaria}</b>${previa ? ` <span style="color:#6b7280">(semana del ${previa.semana}: ${previa.seEnviaria})</span>` : ""}</td></tr>
-    <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Candidatos revisados</td><td style="padding:3px 0">${universo}${truncado ? ' <span style="color:#b45309">· cortado por tiempo, la cifra es un piso</span>' : ""}</td></tr>
+    <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Candidatos revisados</td><td style="padding:3px 0">${universo}${truncado ? ` <span style="color:#b45309">· ${sinEvaluar || "algunos"} sin evaluar por tiempo, la cifra es un piso</span>` : ""}</td></tr>
     <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Pasaron a evaluación</td><td style="padding:3px 0">${evaluados}</td></tr>
     <tr><td style="padding:3px 12px 3px 0;color:#6b7280">No evaluables</td><td style="padding:3px 0">${noEvaluable}</td></tr>
     <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Interruptor</td><td style="padding:3px 0">${enabledAntes ? "encendido" : "apagado"}${freno.aplicado ? " → <b>apagado por el freno</b>" : ""}</td></tr>
@@ -259,7 +264,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   return NextResponse.json({
-    ok: true, dry, semana, estado, enabledAntes, corridaOk, truncado,
+    ok: true, dry, semana, estado, enabledAntes, corridaOk, truncado, censo, sinEvaluar,
     universo, evaluados, seEnviaria, noEvaluable,
     previa, frenos, freno, motivos, correoOk,
     seEnviarianA: ejemplos,
