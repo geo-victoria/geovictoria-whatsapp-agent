@@ -54,6 +54,7 @@ import {
   universoCampana,
   type Canal,
   type Casilla,
+  type EvaluacionGrupo1,
   type FilaCasillas,
 } from "@/lib/campana-reactivacion"
 
@@ -262,6 +263,30 @@ export async function GET(req: Request): Promise<Response> {
     // MARTES: universo → grupo 1 → primera casilla en falso.
     const universo = await universoCampana({ dias, H })
     const casillas = await leerCasillasLote(universo.map((u) => u.contact))
+
+    // CENSO DEL DRY: evaluarGrupo1 encadena 5 fuentes en serie (~4 s por
+    // candidato), así que en serie el presupuesto se gastaba antes de recorrer
+    // el universo y el volumen del pre-flight salía como un PISO (`truncado`).
+    // En dry no hay envíos ni escrituras, así que se precalcula por tandas
+    // chicas; 4 en paralelo es suave para Zoho (la tormenta de tokens del
+    // 01-sep vino de martillar reintentos, no de cuatro llamadas).
+    const evalPrecalc = new Map<string, EvaluacionGrupo1>()
+    if (dry) {
+      const aEvaluar = universo.filter((u) => {
+        const f = casillas.get(u.contact) || null
+        return Boolean(siguienteCasilla(f)) && !casillaAbierta(f, ahora)
+      })
+      const TANDA = 4
+      for (let i = 0; i < aEvaluar.length; i += TANDA) {
+        if (Date.now() - t0 > presupuestoMs) break
+        const tanda = aEvaluar.slice(i, i + TANDA)
+        const evs = await Promise.all(
+          tanda.map((c) => evaluarGrupo1(c.contact, { pais, ahora, H, feriados }).catch(() => null)),
+        )
+        tanda.forEach((c, k) => { const e = evs[k]; if (e) evalPrecalc.set(c.contact, e) })
+      }
+    }
+
     for (const cand of universo) {
       if (enviados >= max || filas.length >= max * 3) break
       if (Date.now() - t0 > presupuestoMs) { filas.push({ contact: "-", empresa: null, quoteId: null, casilla: null, canal, omitido: "presupuesto_de_tiempo" }); break }
@@ -291,7 +316,7 @@ export async function GET(req: Request): Promise<Response> {
         }
       }
       evaluados++
-      const ev = await evaluarGrupo1(cand.contact, { pais, ahora, H, feriados })
+      const ev = evalPrecalc.get(cand.contact) || (await evaluarGrupo1(cand.contact, { pais, ahora, H, feriados }))
       base.ultimaActividad = ev.ultimaActividad.at ? `${ev.ultimaActividad.fuente} ${ev.ultimaActividad.at.toISOString().slice(0, 16)}` : "sin actividad registrada"
       if (!ev.apto) {
         base.omitido = ev.detalle ? `${ev.motivo} (${ev.detalle})` : ev.motivo

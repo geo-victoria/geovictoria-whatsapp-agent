@@ -116,7 +116,13 @@ export type PlanToque = {
 
 const TPL_T1 = (process.env.CAMPANA_REACT_TPL_T1 || "vicky_reactivacion_cotizacion_cl_v4").trim()
 const TPL_T1_SIN_NOMBRE = (process.env.CAMPANA_REACT_TPL_T1_SIN_NOMBRE || "vicky_reactivacion_sin_nombre_cl_v4").trim()
-const TPL_T2 = (process.env.CAMPANA_REACT_TPL_T2 || "vicky_react_t2_cl").trim()
+// OJO: `vicky_react_t2_cl` (la primera versión) quedó RECHAZADA por Botmaker
+// ("Leading or Trailing Params Not Allowed": una variable no puede abrir ni
+// cerrar el texto — la nuestra terminaba en ${link}) y una plantilla creada
+// NO se puede editar ("You cannot change a template"), así que la corrección
+// vive en un nombre nuevo. Jamás borrar la vieja: el nombre queda bloqueado 4
+// semanas.
+const TPL_T2 = (process.env.CAMPANA_REACT_TPL_T2 || "vicky_react_t2_cl_v2").trim()
 const TPL_T3 = (process.env.CAMPANA_REACT_TPL_T3 || "vicky_campana_dcto_v1").trim()
 const TPL_T4 = (process.env.CAMPANA_REACT_TPL_T4 || "vicky_react_t4_cl").trim()
 
