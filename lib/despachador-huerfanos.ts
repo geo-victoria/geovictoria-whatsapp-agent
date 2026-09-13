@@ -118,6 +118,11 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // gatea a lunes 8-11 CL y es idempotente por semana, así que el tick horario
   // solo sirve para no depender de nadie despierto.
   { nombre: "campana_preflight", path: "/api/vic-campana-preflight", cadaMin: 60 },
+  // CADENCIA DE CONTENIDO (estado terminal del ciclo, artefacto 836b5316): una
+  // pieza del blog por correo cada 30 d a quien completó los 4 toques sin
+  // responder. El endpoint se auto-gatea al jueves 11:00 CL, así que la
+  // cadencia horaria solo tiene que garantizar que ese tick exista.
+  { nombre: "campana_contenido", path: "/api/vic-campana-contenido", cadaMin: 60 },
 ]
 
 /**
