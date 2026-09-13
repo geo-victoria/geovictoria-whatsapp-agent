@@ -108,6 +108,24 @@ export async function POST(req: Request): Promise<Response> {
   const fallo =
     /fail|error|undeliver|reject/.test(status) || /\b13\d{4}(\.0)?\b/.test(reason) || /\b131049\b/.test(JSON.stringify(body))
 
+  // HISTÓRICO (13-sep): hasta hoy solo quedaba el ÚLTIMO payload como debug,
+  // así que "qué plantillas fallan y por qué" no se podía responder. Cada
+  // fallo queda guardado con su código de Meta; el nombre de la plantilla no
+  // viaja acá (solo messageId) y se resuelve después contra la API de mensajes.
+  if (contact && fallo) {
+    const { registrarEstadoFallido, codigosDeMeta } = await import("@/lib/estado-entrega")
+    const codigos = codigosDeMeta(body)
+    await registrarEstadoFallido({
+      at: new Date().toISOString(),
+      contacto: contact,
+      linea: pick(body, ["whatsappNumber", "chatChannelId"]),
+      status,
+      codigo: codigos[0],
+      razon: reason || codigos.join(",") || undefined,
+      messageId: pick(body, ["messageId", "id"]),
+    }).catch(() => {})
+  }
+
   if (!contact || !fallo) {
     return NextResponse.json({ ok: true, accion: "registrado", contact: contact || null, fallo })
   }
