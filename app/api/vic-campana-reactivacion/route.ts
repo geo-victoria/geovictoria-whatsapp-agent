@@ -112,11 +112,12 @@ async function zohoHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
 }
 
-async function datosContacto(H: Record<string, string>, contact: string, quoteId: string | null): Promise<{ nombre: string; email: string; empresa: string }> {
+async function datosContacto(H: Record<string, string>, contact: string, quoteId: string | null): Promise<{ nombre: string; email: string; empresa: string; pdfUrl: string }> {
   const nueve = contact.slice(-9)
   let nombre = ""
   let email = ""
   let empresa = ""
+  let pdfUrl = ""
   try {
     const r = await fetch(`${ZOHO_API}/crm/v8/coql`, {
       method: "POST", headers: H, cache: "no-store",
@@ -130,14 +131,15 @@ async function datosContacto(H: Record<string, string>, contact: string, quoteId
     try {
       const r = await fetch(`${ZOHO_API}/crm/v8/coql`, {
         method: "POST", headers: H, cache: "no-store",
-        body: JSON.stringify({ select_query: `select Name, Email_Contacto from ${QUOTE_MODULE} where id = '${quoteId}'` }),
+        body: JSON.stringify({ select_query: `select Name, Email_Contacto, PDF_URL from ${QUOTE_MODULE} where id = '${quoteId}'` }),
       })
-      const q = (((await r.json().catch(() => null)) as { data?: Array<{ Name?: string; Email_Contacto?: string }> } | null)?.data || [])[0]
+      const q = (((await r.json().catch(() => null)) as { data?: Array<{ Name?: string; Email_Contacto?: string; PDF_URL?: string }> } | null)?.data || [])[0]
       empresa = String(q?.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "")
       if (!email) email = String(q?.Email_Contacto || "").trim()
+      pdfUrl = String(q?.PDF_URL || "").trim()
     } catch { /* sin cotización */ }
   }
-  return { nombre, email, empresa }
+  return { nombre, email, empresa, pdfUrl }
 }
 
 /** Último precio mostrado y motivo de no cierre, para las variables de las
@@ -168,11 +170,21 @@ function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
-function htmlCorreo(nombre: string, empresa: string, link: string): string {
+/**
+ * El PDF va como BOTÓN, nunca adjunto (orden de Lalo 13-sep). Además de ser
+ * lo que él quiere, esquiva el OAUTH_SCOPE_MISMATCH que tiene caído el
+ * adjunto del cotizador desde siempre: el link del PDF ya existe en la
+ * cotización (`PDF_URL`) y no necesita el scope ZohoFiles.
+ */
+function htmlCorreo(nombre: string, empresa: string, link: string, pdfUrl = ""): string {
   const saludo = nombre ? `Hola ${esc(nombre)}!` : "Hola!"
-  const cta = link
-    ? `<p style="text-align:center;margin:22px 0"><a href="${link}" style="background:#0087C8;color:#fff;text-decoration:none;font-weight:700;padding:12px 26px;border-radius:10px;display:inline-block;font-size:15px">Ver mi cotización</a></p>`
-    : ""
+  const btn = (href: string, texto: string, fondo: string, borde: string, color: string) =>
+    `<a href="${href}" style="background:${fondo};border:1px solid ${borde};color:${color};text-decoration:none;font-weight:700;padding:12px 24px;border-radius:10px;display:inline-block;font-size:15px;margin:4px 6px">${texto}</a>`
+  const botones = [
+    link ? btn(link, "Ver mi cotización", "#0087C8", "#0087C8", "#ffffff") : "",
+    pdfUrl ? btn(pdfUrl, "Descargar el PDF", "#ffffff", "#0087C8", "#0087C8") : "",
+  ].filter(Boolean).join("")
+  const cta = botones ? `<p style="text-align:center;margin:22px 0">${botones}</p>` : ""
   return `<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:'Segoe UI',Arial,sans-serif;color:#2d3748">
 <div style="max-width:560px;margin:0 auto;padding:26px 18px">
   <div style="background:#fff;border-radius:14px;padding:28px 26px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
@@ -307,7 +319,7 @@ export async function GET(req: Request): Promise<Response> {
     if (!/^[^@\s]+@[^@\s]+$/.test(to)) return NextResponse.json({ ok: false, error: "falta to=<email>" }, { status: 400 })
     const H = await zohoHeaders().catch(() => null)
     if (!H) return NextResponse.json({ ok: false, error: "sin token Zoho" }, { status: 503 })
-    const html = htmlCorreo("Lalo", "GeoVictoria (prueba)", `${WA_VICKY}`)
+    const html = htmlCorreo("Lalo", "GeoVictoria (prueba)", `${WA_VICKY}`, (sp.get("pdf") || "https://cotizacion.geovictoria.com/pdf/assets/ficha-reloj-senseface.pdf").trim())
     const ok = await enviarCorreo(H, null, to, "PRUEBA · Tu cotización de control de asistencia sigue vigente", html).catch((e) => {
       console.error("[campana] prueba de correo falló", e)
       return false
@@ -509,14 +521,14 @@ export async function GET(req: Request): Promise<Response> {
         continue
       }
       if (dry) { base.accion = `SE ENVIARÍA toque ${casilla} (correo)`; filas.push(base); continue }
-      const { nombre, email, empresa } = await datosContacto(H, f.contact, f.quote_id)
+      const { nombre, email, empresa, pdfUrl } = await datosContacto(H, f.contact, f.quote_id)
       if (!email) { base.omitido = "sin_email"; filas.push(base); continue }
       // El correo pasa por el MISMO gate de proactividad que el WhatsApp
       // (brecha (d) del 10-sep): en sombra solo registra, con GATE_ENFORCE frena.
       const gate = await evaluarGateProactividad(f.contact, { tipo: "texto" }).catch(() => null)
       if (gate && !gate.permitir) { base.omitido = `gate (${gate.motivos.join(", ").slice(0, 80)})`; filas.push(base); continue }
       const link = f.quote_id ? linkCortoDe(f.quote_id) : ""
-      const ok = await enviarCorreo(H, f.quote_id, email, `Tu cotización de control de asistencia sigue vigente${empresa || f.empresa ? ` · ${empresa || f.empresa}` : ""}`, htmlCorreo(nombre, empresa || f.empresa || "", link)).catch(() => false)
+      const ok = await enviarCorreo(H, f.quote_id, email, `Tu cotización de control de asistencia sigue vigente${empresa || f.empresa ? ` · ${empresa || f.empresa}` : ""}`, htmlCorreo(nombre, empresa || f.empresa || "", link, pdfUrl)).catch(() => false)
       if (!ok) { base.accion = "ENVÍO FALLÓ (correo)"; filas.push(base); continue }
       await marcarCasilla(f.contact, casilla, "mail", { pais, motivo: `toque ${casilla} correo` })
       await registrarEvento(f.contact, casilla, "mail", f.quote_id)
