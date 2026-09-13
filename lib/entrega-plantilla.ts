@@ -24,7 +24,7 @@
 
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 
-export type MensajeBot = { contacto: string; at: number; esPlantilla: boolean; texto: string }
+export type MensajeBot = { contacto: string; at: number; esPlantilla: boolean; tpl: string; texto: string }
 
 /** Todo lo SALIENTE de la ventana, indexado por contacto. */
 export async function salientesDesde(
@@ -44,7 +44,12 @@ export async function salientesDesde(
     const r = await fetch(url, { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" }).catch(() => null)
     if (!r || !r.ok) { truncado = true; break }
     const data = (await r.json().catch(() => ({}))) as {
-      items?: Array<{ from?: string; creationTime?: string; content?: { text?: string }; chat?: { contactId?: string } }>
+      items?: Array<{
+        from?: string
+        creationTime?: string
+        content?: { text?: string; whatsAppTemplateName?: string }
+        chat?: { contactId?: string }
+      }>
       nextPage?: string
     }
     const items = Array.isArray(data.items) ? data.items : []
@@ -56,7 +61,8 @@ export async function salientesDesde(
       const texto = String(m.content?.text || "")
       const at = Date.parse(String(m.creationTime || "")) || 0
       const arr = porContacto.get(c) || []
-      arr.push({ contacto: c, at, esPlantilla: /^\s*Template:/i.test(texto), texto })
+      const tpl = String(m.content?.whatsAppTemplateName || "")
+      arr.push({ contacto: c, at, esPlantilla: Boolean(tpl) || /^\s*Template:/i.test(texto), tpl, texto })
       porContacto.set(c, arr)
     }
     url = String(data.nextPage || "")
@@ -75,8 +81,18 @@ export type VeredictoEntrega = {
   detalle?: string
 }
 
-/** Margen alrededor del momento del envío donde debe aparecer el saliente. */
-const MARGEN_MIN = Number(process.env.ENTREGA_MARGEN_MIN || 15)
+/**
+ * Margen alrededor del momento del envío donde debe aparecer el saliente.
+ *
+ * AMPLIO A PROPÓSITO (6 h). La primera versión usaba 15 min y dio **0 de 13**
+ * en el rescate del mini-form — falso: el `Template:` de Alicia Farias estaba
+ * ahí, a 69 minutos del `at` anotado. Causa: el `at` de las marcas kv NO es la
+ * hora real del envío (las 13 quedaron con el mismo 19:20:00.000, la hora del
+ * lote). O sea el veredicto colgaba de un timestamp que puede ser aproximado.
+ * Por eso el match FUERTE es contacto + nombre de plantilla, y la hora solo
+ * acota la ventana y mide el desfase.
+ */
+const MARGEN_MIN = Number(process.env.ENTREGA_MARGEN_MIN || 360)
 
 /**
  * Cruza lo que CREEMOS haber enviado contra lo que Botmaker despachó.
@@ -95,11 +111,25 @@ export function veredictosDeEntrega(
     if (!at || at < desdeMs) return { contacto, at: iso, tpl: e.tpl, veredicto: "sin_ventana" as const }
     const msgs = salientes.get(contacto) || []
     const margen = MARGEN_MIN * 60_000
-    const match = msgs.find((m) => m.esPlantilla && Math.abs(m.at - at) <= margen)
-    if (match) return { contacto, at: iso, tpl: e.tpl, veredicto: "salio" as const, detalle: match.texto.slice(0, 80) }
+    const enVentana = msgs.filter((m) => Math.abs(m.at - at) <= margen)
+    // Match FUERTE: misma plantilla al mismo contacto. Si no sabemos qué
+    // plantilla era, basta con que haya salido alguna.
+    const match =
+      (e.tpl ? enVentana.find((m) => m.tpl && m.tpl === e.tpl) : undefined) ||
+      enVentana.find((m) => m.esPlantilla)
+    if (match) {
+      const desfaseMin = Math.round((match.at - at) / 60_000)
+      return {
+        contacto,
+        at: iso,
+        tpl: e.tpl,
+        veredicto: "salio" as const,
+        detalle: `${match.tpl || match.texto.slice(0, 50)}${desfaseMin ? ` (${desfaseMin > 0 ? "+" : ""}${desfaseMin} min)` : ""}`,
+      }
+    }
     // Un saliente NO-plantilla en la ventana igual prueba que el chat estaba
     // vivo: se dice, porque cambia el diagnóstico (no es un contacto muerto).
-    const otro = msgs.find((m) => Math.abs(m.at - at) <= margen)
+    const otro = enVentana[0]
     return {
       contacto,
       at: iso,
