@@ -59,7 +59,12 @@ const PISO_SALTO = Number(process.env.CAMPANA_PREFLIGHT_PISO || 15)
 const PCT_NO_EVALUABLE = Number(process.env.CAMPANA_PREFLIGHT_PCT_CIEGO || 20)
 // Tope de envíos del runner real (su `max` por defecto): el freno se mide
 // contra esto, no contra el potencial que recorre el dry.
-const MAX_REAL = Number(process.env.CAMPANA_REACT_MAX || 40)
+/** Tope de envíos del runner. Misma escalera que él: vic_kv (el piloto se
+ * dimensiona sin deploy) → env → 40. Se lee en cada corrida, no al cargar. */
+async function maxReal(): Promise<number> {
+  const kv = Number(((await getKvValue("campana_react_max").catch(() => "")) || "").trim()) || 0
+  return kv || Number(process.env.CAMPANA_REACT_MAX) || 40
+}
 // FRENO POR DAÑO (13-sep): el freno viejo mide volumen y ceguera; esto mide si
 // la gente se está molestando. Base mínima para no frenar por ruido.
 // El umbral lo fija el documento de diseño (punto 6, aprobado): "si en una
@@ -209,6 +214,7 @@ export async function GET(req: Request): Promise<Response> {
   const sinEvaluar = censo ? Math.max(0, censo.aEvaluar - censo.precalculados) : 0
   const truncado = Boolean(resumen["presupuesto_de_tiempo"]) || sinEvaluar > 0
   const corridaOk = Boolean(rr && rr.ok && j && j.ok !== false)
+  const MAX_REAL = await maxReal()
   const saldriaReal = Math.min(seEnviaria, MAX_REAL)
 
   // 2-bis. Lo que YA salió: la campaña se juzga por su resultado, no solo por

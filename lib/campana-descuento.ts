@@ -27,6 +27,9 @@ import { avisarEquipoInterno } from "./alerta-interna"
 const COTIZADOR = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").replace(/\/$/, "")
 const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
 const TOPE_CAMPANA = 30
+/** Tope de la escalera de cara al CLIENTE (10→20): lo que Vicky puede ofrecer
+ * sin pasar por un ejecutivo. Es el gancho del toque 4 del ciclo. */
+const TOPE_ESCALERA_CLIENTE = Number(process.env.CAMPANA_REACT_TOPE_PCT || 20)
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 
@@ -479,4 +482,54 @@ export async function reintentarDescuentosCampana(): Promise<{ candidatos: numbe
     }
   }
   return { candidatos, aplicados }
+}
+
+/**
+ * TOPE DE LA ESCALERA PARA EL TOQUE 4 DEL CICLO (Lalo 13-sep, "crea la
+ * plantilla nueva del 20%").
+ *
+ * El toque 4 es el último recordatorio y ofrece el TOPE que Vicky maneja de
+ * cara al cliente: 20 % en el plan por 6 meses. A diferencia del toque 3 (que
+ * es la plantilla con quick reply y aplica +10 al TAP), acá la plantilla manda
+ * el link de la cotización — así que el descuento tiene que estar APLICADO
+ * ANTES de enviarla: si no, el cliente abre el link y ve el precio viejo, y la
+ * promesa de la plantilla es falsa.
+ *
+ * Se niega (y el runner cae a la plantilla sin %) cuando: no hay cotización,
+ * la cotización ya está pagada o aceptada, es del canal EJECUTIVO (jamás
+ * repreciar la cotización de un vendedor por automático) o la aplicación
+ * falla. Si ya trae 20 % o más, la promesa está cumplida sin escribir nada.
+ */
+export async function aplicarTopeParaToque4(
+  quoteId: string | null | undefined,
+): Promise<{ ok: boolean; pct: number; linkUrl?: string; motivo: string }> {
+  if (!quoteId) return { ok: false, pct: 0, motivo: "sin_cotizacion" }
+  const q = await leerQuote(quoteId)
+  if (!q) return { ok: false, pct: 0, motivo: "cotizacion_ilegible" }
+  if (/pagada|aceptada/i.test(q.estado)) return { ok: false, pct: q.dcto, motivo: `estado_${q.estado}` }
+  if (/intervención humana/i.test(q.canal)) return { ok: false, pct: q.dcto, motivo: "canal_ejecutivo" }
+  if (q.dcto >= TOPE_ESCALERA_CLIENTE) return { ok: true, pct: q.dcto, motivo: "ya_tenia_el_tope" }
+  try {
+    const r = await fetch(`${COTIZADOR}/api/quote-acceptance/descuento-ejecutivo`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+      },
+      body: JSON.stringify({ quoteId, pct: TOPE_ESCALERA_CLIENTE, meses: 6, regenerarPdf: true }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(45000),
+    })
+    const d = (await r.json().catch(() => ({}))) as { ok?: boolean; pct_aplicado?: number; acceptance_url?: string }
+    if (!r.ok || !d.ok) throw new Error(`descuento-ejecutivo ${r.status}`)
+    return {
+      ok: true,
+      pct: Number(d.pct_aplicado ?? TOPE_ESCALERA_CLIENTE),
+      linkUrl: d.acceptance_url || undefined,
+      motivo: "aplicado",
+    }
+  } catch (e) {
+    console.error(`[campana-t4] fallo aplicando ${TOPE_ESCALERA_CLIENTE}% a ${quoteId}:`, e instanceof Error ? e.message : e)
+    return { ok: false, pct: q.dcto, motivo: "aplicacion_fallo" }
+  }
 }

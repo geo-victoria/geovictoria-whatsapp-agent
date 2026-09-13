@@ -33,7 +33,7 @@ import { linkCortoDe } from "@/lib/link-cotizacion"
 import { getUFActual } from "@/lib/uf"
 import { evaluarGateProactividad } from "@/lib/gate-proactividad"
 import { montoDelBloque } from "@/lib/precio-bloque"
-import { claveCampana } from "@/lib/campana-descuento"
+import { claveCampana, aplicarTopeParaToque4 } from "@/lib/campana-descuento"
 import { setKvValue } from "@/lib/supabase-persistence-v3"
 import {
   anotarEvaluacion,
@@ -283,7 +283,10 @@ export async function GET(req: Request): Promise<Response> {
   const enabled = ((await getKvValue("campana_react_enabled").catch(() => "")) || "").trim().toLowerCase() === "on"
   const dry = dryExplicito || !enabled
   const forzarHora = sp.get("forzarHora") === "1"
-  const max = Math.min(Math.max(Number(sp.get("max")) || 40, 1), 150)
+  // TOPE DE ENVÍOS POR CORRIDA. Orden: ?max= → vic_kv `campana_react_max`
+  // (el piloto se dimensiona sin deploy) → env → 40.
+  const maxKv = Number(((await getKvValue("campana_react_max").catch(() => "")) || "").trim()) || 0
+  const max = Math.min(Math.max(Number(sp.get("max")) || maxKv || Number(process.env.CAMPANA_REACT_MAX) || 40, 1), 150)
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 7), 365)
   const soloContacto = (sp.get("contact") || "").replace(/\D/g, "")
   const canalParam = sp.get("dia") as Canal | null
@@ -435,7 +438,14 @@ export async function GET(req: Request): Promise<Response> {
         continue
       }
       const { nombre, empresa } = await datosContacto(H, cand.contact, cand.quoteId)
-      const plan = planDeToque(casilla, Boolean(nombre))
+      // TOQUE 4 = el tope de la escalera (20 % por 6 meses, Lalo 13-sep). Se
+      // APLICA a la cotización antes de enviar, porque la plantilla manda el
+      // link: prometer un % que el link no muestra sería mentirle al cliente.
+      // Si no se puede aplicar (canal ejecutivo, ya aceptada, falla), sale la
+      // plantilla del toque 4 sin %. En dry no se escribe nada.
+      const topeT4 = casilla === 4 && !dry ? await aplicarTopeParaToque4(cand.quoteId).catch(() => null) : null
+      if (topeT4) base.ultimaActividad = `${base.ultimaActividad || ""} · tope20: ${topeT4.motivo}`.trim()
+      const plan = planDeToque(casilla, Boolean(nombre), { topeAplicado: Boolean(topeT4?.ok) })
       const linkQuote = cand.quoteId ? linkCortoDe(cand.quoteId) : ""
       const ctx = plan.vars.includes("precio") || plan.vars.includes("gancho")
         ? await contextoDelChat(cand.contact, ufDia)
@@ -487,7 +497,7 @@ export async function GET(req: Request): Promise<Response> {
         `[REGISTRO INTERNO] Campaña de reactivación, toque ${casilla} de 4 (${ahora.toISOString().slice(0, 10)}): se le envió la plantilla de reactivación por su cotización${empresa || cand.empresa ? ` de ${empresa || cand.empresa}` : ""}. Si responde con interés: retomar la cotización desde donde quedó, actualizar dotación si cambió y cerrar con link de pago. Si dice que no: agradecer y cerrar sin insistir. Mañana le llega un correo solo si sigue sin responder.`,
       ).catch(() => {})
       enviados++
-      base.accion = `enviado toque ${casilla} (WhatsApp, ${tpl})`
+      base.accion = `enviado toque ${casilla} (WhatsApp, ${tpl})` + (topeT4?.ok ? ` · ${topeT4.pct}% aplicado por 6 meses` : "")
       filas.push(base)
       await new Promise((r) => setTimeout(r, 900))
     }

@@ -125,8 +125,14 @@ const TPL_T1_SIN_NOMBRE = (process.env.CAMPANA_REACT_TPL_T1_SIN_NOMBRE || "vicky
 const TPL_T2 = (process.env.CAMPANA_REACT_TPL_T2 || "vicky_react_t2_cl_v2").trim()
 const TPL_T3 = (process.env.CAMPANA_REACT_TPL_T3 || "vicky_campana_dcto_v1").trim()
 const TPL_T4 = (process.env.CAMPANA_REACT_TPL_T4 || "vicky_react_t4_cl").trim()
+// Variante del toque 4 que OFRECE EL TOPE (20 % por 6 meses, Lalo 13-sep). Sale
+// solo si el descuento quedó APLICADO en la cotización antes del envío
+// (aplicarTopeParaToque4): la plantilla manda el link, así que prometer un %
+// que el link no muestra sería mentirle al cliente. Si no se pudo aplicar, el
+// runner usa TPL_T4, que no promete nada.
+const TPL_T4_TOPE = (process.env.CAMPANA_REACT_TPL_T4_TOPE || "vicky_react_t4_20_cl").trim()
 
-export function planDeToque(casilla: Casilla, conNombre: boolean): PlanToque {
+export function planDeToque(casilla: Casilla, conNombre: boolean, opts: { topeAplicado?: boolean } = {}): PlanToque {
   if (casilla === 2) {
     return { tpl: TPL_T2, tipo: "react", vars: ["nombre", "gancho", "empresa", "link"], descripcion: "objeción o valor que quedó abierto" }
   }
@@ -134,6 +140,9 @@ export function planDeToque(casilla: Casilla, conNombre: boolean): PlanToque {
     return { tpl: TPL_T3, tipo: "dcto", vars: ["nombre", "contexto"], descripcion: "10 % adicional (el tap lo aplica)" }
   }
   if (casilla === 4) {
+    if (opts.topeAplicado) {
+      return { tpl: TPL_T4_TOPE, tipo: "react", vars: ["nombre", "empresa", "link"], descripcion: "último recordatorio con el tope de 20 % ya aplicado" }
+    }
     return { tpl: TPL_T4, tipo: "react", vars: ["nombre", "empresa", "precio", "link"], descripcion: "cierre honesto, último recordatorio" }
   }
   return {
