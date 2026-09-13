@@ -29,7 +29,12 @@ export async function GET(req: Request): Promise<Response> {
   const desde = new Date(Date.now() - horas * 3600e3).toISOString()
 
   const items: Array<Record<string, unknown>> = []
-  let url = `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desde)}&pag=true`
+  // `?extra=clave=valor&otra=1` se pega tal cual a la query — existe para
+  // cazar el parámetro que habilita la búsqueda de largo plazo (Botmaker
+  // responde 400 LONG_TERM_SEARCH_PARAM_REQUIRED más allá de ~72 h) sin
+  // redeployar por cada intento.
+  const extra = (sp.get("extra") || "").trim()
+  let url = `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desde)}&pag=true${extra ? `&${extra}` : ""}`
   const t0 = Date.now()
   for (let page = 0; page < 12 && url && Date.now() - t0 < 40_000; page++) {
     const r = await fetch(url, { headers: { "access-token": token, Accept: "application/json" }, cache: "no-store" })

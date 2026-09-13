@@ -74,10 +74,14 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "nada que verificar — pasa ?prefijo= (marcas kv) o ?campana= (vic_campanas)" }, { status: 400 })
   }
 
-  const { porContacto, total, truncado } = await salientesDesde(desdeIso, { presupuestoMs: 240_000, maxPaginas: 60 })
-  const veredictos = veredictosDeEntrega(envios, porContacto, desdeMs)
+  const { porContacto, total, truncado, error } = await salientesDesde(desdeIso, { presupuestoMs: 240_000, maxPaginas: 60 })
+  // Botmaker NO deja consultar más de ~72 h atrás (400
+  // LONG_TERM_SEARCH_PARAM_REQUIRED). Si no se leyó nada, no hay veredicto que
+  // dar: reportar "no salió" sería inventar un hallazgo con datos ausentes.
+  const lecturaUtil = total > 0
+  const veredictos = veredictosDeEntrega(envios, porContacto, desdeMs, { lecturaUtil })
 
-  const resumen = { salio: 0, no_visto: 0, sin_ventana: 0 }
+  const resumen = { salio: 0, no_visto: 0, sin_ventana: 0, sin_datos: 0 }
   for (const v of veredictos) resumen[v.veredicto]++
   const enVentana = resumen.salio + resumen.no_visto
 
@@ -87,6 +91,9 @@ export async function GET(req: Request): Promise<Response> {
     fuentes,
     mensajesBotLeidos: total,
     truncado,
+    lecturaUtil,
+    errorBotmaker: error || undefined,
+    avisoVentana: lecturaUtil ? undefined : "Botmaker no deja consultar más de ~72 h atrás: verifica DENTRO de ese plazo",
     resumen,
     pctSalio: enVentana ? Math.round((resumen.salio / enVentana) * 100) : null,
     nota: "verifica que BOTMAKER las despachó; el código de error de META no viaja por esta API",

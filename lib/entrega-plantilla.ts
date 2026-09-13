@@ -30,19 +30,24 @@ export type MensajeBot = { contacto: string; at: number; esPlantilla: boolean; t
 export async function salientesDesde(
   desdeIso: string,
   opts: { presupuestoMs?: number; maxPaginas?: number } = {},
-): Promise<{ porContacto: Map<string, MensajeBot[]>; total: number; truncado: boolean }> {
+): Promise<{ porContacto: Map<string, MensajeBot[]>; total: number; truncado: boolean; error?: string }> {
   const porContacto = new Map<string, MensajeBot[]>()
-  if (!BM_TOKEN) return { porContacto, total: 0, truncado: true }
+  if (!BM_TOKEN) return { porContacto, total: 0, truncado: true, error: "sin BOTMAKER_ACCESS_TOKEN" }
   const t0 = Date.now()
   const presupuesto = opts.presupuestoMs ?? 45_000
   const maxPag = opts.maxPaginas ?? 20
   let url = `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desdeIso)}&pag=true`
   let total = 0
   let truncado = false
+  let error = ""
   for (let p = 0; p < maxPag && url; p++) {
     if (Date.now() - t0 > presupuesto) { truncado = true; break }
     const r = await fetch(url, { headers: { "access-token": BM_TOKEN, Accept: "application/json" }, cache: "no-store" }).catch(() => null)
-    if (!r || !r.ok) { truncado = true; break }
+    if (!r || !r.ok) {
+      truncado = true
+      error = r ? `botmaker ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}` : "botmaker sin respuesta"
+      break
+    }
     const data = (await r.json().catch(() => ({}))) as {
       items?: Array<{
         from?: string
@@ -69,7 +74,7 @@ export async function salientesDesde(
     if (items.length === 0) break
     if (p === maxPag - 1 && url) truncado = true
   }
-  return { porContacto, total, truncado }
+  return { porContacto, total, truncado, error: error || undefined }
 }
 
 export type EnvioAVerificar = { contacto: string; at: string | number; tpl?: string }
@@ -77,7 +82,7 @@ export type VeredictoEntrega = {
   contacto: string
   at: string
   tpl?: string
-  veredicto: "salio" | "no_visto" | "sin_ventana"
+  veredicto: "salio" | "no_visto" | "sin_ventana" | "sin_datos"
   detalle?: string
 }
 
@@ -99,11 +104,28 @@ const MARGEN_MIN = Number(process.env.ENTREGA_MARGEN_MIN || 360)
  * `sin_ventana` = el envío es anterior al inicio de la ventana consultada, así
  * que su ausencia no prueba nada (nunca se reporta como fallo).
  */
+/**
+ * CICATRIZ (13-sep, dos veces en el mismo archivo): la ausencia de datos NO es
+ * un hallazgo negativo. La primera corrida sobre la campaña remk_300 devolvió
+ * "247 no vistos" cuando la verdad era que Botmaker había respondido 400
+ * (`LONG_TERM_SEARCH_PARAM_REQUIRED`: no deja consultar más de ~72 h atrás) y
+ * no se leyó ni un mensaje. Sin lectura útil, TODO es `sin_datos`.
+ */
 export function veredictosDeEntrega(
   envios: EnvioAVerificar[],
   salientes: Map<string, MensajeBot[]>,
   desdeMs: number,
+  opts: { lecturaUtil?: boolean } = {},
 ): VeredictoEntrega[] {
+  if (opts.lecturaUtil === false) {
+    return envios.map((e) => ({
+      contacto: String(e.contacto).replace(/\D/g, ""),
+      at: typeof e.at === "number" ? new Date(e.at).toISOString() : String(e.at),
+      tpl: e.tpl,
+      veredicto: "sin_datos" as const,
+      detalle: "no se pudo leer el historial de Botmaker — sin veredicto",
+    }))
+  }
   return envios.map((e) => {
     const contacto = String(e.contacto).replace(/\D/g, "")
     const at = typeof e.at === "number" ? e.at : Date.parse(String(e.at)) || 0
