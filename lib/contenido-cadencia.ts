@@ -44,6 +44,10 @@ export type Pieza = {
   gancho: string
   url: string
   temas: Tema[]
+  /** Año al que la pieza está amarrada (un calendario, una guía "2026").
+   * Pasado ese año NO sale: mandar "Feriados en Chile 2025" en 2026 es peor
+   * que no mandar nada. Si se omite, se deduce del título. */
+  anio?: number
 }
 
 /**
@@ -76,11 +80,42 @@ export const PIEZAS: Pieza[] = [
   { id: "obligaciones", titulo: "Obligaciones del empleador en la legislación laboral chilena", gancho: "el mapa completo, para revisar de una sola pasada", url: `${BLOG}/legislacion-laboral-en-chile-obligaciones-del-empleador/`, temas: ["legal"] },
   { id: "subcontratacion", titulo: "Ley de subcontratación y control de asistencia", gancho: "qué le toca a la empresa principal cuando hay contratistas en faena", url: `${BLOG}/control-de-asistencia-en-el-cumplimiento-de-la-ley-de-subcontratacion/`, temas: ["legal"] },
   { id: "rotacion", titulo: "Rotación de personal en Chile: causas, impacto y qué hacer", gancho: "lo que cuesta que la gente se vaya, y qué se ve en los datos antes de que pase", url: `${BLOG}/rotacion-de-personal-en-chile-causas-impacto-y-estrategias/`, temas: ["costo", "operacion"] },
+  // ENTRADA: la pieza que explica para qué sirve todo esto. Es la única del
+  // catálogo que vale para cualquiera, sin objeción previa.
+  { id: "cinco_razones", titulo: "Las cinco razones para tener control de asistencia", gancho: "para qué sirve de verdad, más allá de cumplir", url: `${BLOG}/control-asistencia-personal/`, temas: ["operacion"] },
+  // DUDAS QUE LLEGAN AL CHAT: cada una es una pregunta real de un empleador.
+  { id: "irrenunciable", titulo: "Cómo se compensa un feriado irrenunciable", gancho: "qué corresponde pagar y qué no cuando el feriado no se puede trabajar", url: `${BLOG}/consejos-practicos-fiesta-patrias/`, temas: ["legal", "horas"] },
+  { id: "colacion", titulo: "El tiempo de colación en Chile, sin vueltas", gancho: "si se registra, si se paga y cómo se pacta", url: `${BLOG}/tiempo-de-colacion-laboral-en-chile-todas-las-dudas-resuelvelas-aqui/`, temas: ["legal"] },
+  { id: "libro_asistencia", titulo: "Cómo se llena un libro de asistencia", gancho: "qué tiene que quedar anotado para que sirva ante una fiscalización", url: `${BLOG}/como-llenar-un-libro-de-asistencia-laboral/`, temas: ["legal", "operacion"] },
+  { id: "derechos_registro", titulo: "Qué derechos tiene el trabajador al registrar asistencia", gancho: "lo que hay que informar y consentir antes de poner a marcar a alguien", url: `${BLOG}/derechos-trabajador-registrar-asistencia/`, temas: ["legal"] },
+  { id: "conservar", titulo: "Cuánto tiempo hay que conservar el registro de asistencia", gancho: "el plazo y el formato que piden si algún día lo revisan", url: `${BLOG}/cuanto-tiempo-el-empleador-debe-conservar-el-registro-de-control-de-asistencia-la-respuesta-aqui/`, temas: ["legal"] },
+  // EQUIPOS: el catálogo tenía dos piezas para una objeción que aparece sola.
+  { id: "tipos_reloj", titulo: "Tipos de reloj control y para qué sirve cada uno", gancho: "qué cambia entre huella, rostro y tarjeta antes de elegir", url: `${BLOG}/tipos-de-reloj-control-gestion-de-personal/`, temas: ["hardware"] },
+  { id: "facial", titulo: "Cómo funciona el control de asistencia con reconocimiento facial", gancho: "qué necesita, qué tan exacto es y dónde conviene", url: `${BLOG}/que-es-el-control-de-asistencia-con-reconocimiento-facial/`, temas: ["hardware"] },
   { id: "tipos_horarios", titulo: "Tipos de horario de trabajo", gancho: "cómo se arman jornadas fijas, rotativas y parciales sin enredarse", url: `${BLOG}/tipos-de-horarios-de-trabajo/`, temas: ["operacion"] },
 ]
 
 /** Cada cuánto sale una pieza (días). */
 export const CONTENIDO_DIAS = Number(process.env.CONTENIDO_DIAS || 30)
+
+/**
+ * VIGENCIA. Una pieza amarrada a un año se vence sola: el catastro del 13-sep
+ * encontró cinco posts vivos con año pasado en el título (Feriados en Chile
+ * 2025, Resolución 38 Exenta 2025, Anexo de Contrato 2025…), y mandarlos hoy
+ * es peor que no mandar nada — dice que nadie miró lo que salió. El año sale
+ * del campo `anio` o, si no se declaró, del propio título: así la guarda
+ * funciona aunque quien agregue la pieza se olvide del campo.
+ */
+export function anioDePieza(p: Pieza): number | null {
+  if (p.anio) return p.anio
+  const m = p.titulo.match(/\b(20\d{2})\b/)
+  return m ? Number(m[1]) : null
+}
+
+export function piezaVigente(p: Pieza, ahora: Date): boolean {
+  const a = anioDePieza(p)
+  return !a || a >= ahora.getFullYear()
+}
 
 /** Tema que mejor responde el motivo de no cierre que guardó el clasificador. */
 export function temaParaMotivo(motivo: string | null | undefined): Tema | null {
@@ -100,9 +135,15 @@ export function temaParaMotivo(motivo: string | null | undefined): Tema | null {
  * clasificador dejó motivo y aún no se la mandamos), si no la siguiente del
  * orden por defecto. `null` = ya recibió todo el catálogo.
  */
-export function siguientePieza(enviadas: string[] | null | undefined, motivo?: string | null): Pieza | null {
+export function siguientePieza(
+  enviadas: string[] | null | undefined,
+  motivo?: string | null,
+  opts: { ahora?: Date; excluir?: string[] } = {},
+): Pieza | null {
+  const ahora = opts.ahora || new Date()
   const ya = new Set((enviadas || []).map((s) => String(s)))
-  const pendientes = PIEZAS.filter((p) => !ya.has(p.id))
+  for (const id of opts.excluir || []) ya.add(String(id))
+  const pendientes = PIEZAS.filter((p) => !ya.has(p.id) && piezaVigente(p, ahora))
   if (!pendientes.length) return null
   const tema = temaParaMotivo(motivo)
   if (tema) {

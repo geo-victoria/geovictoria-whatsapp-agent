@@ -27,6 +27,8 @@
  *   ?forzarDia=1       corre fuera del jueves 11:00 (solo simulación/pruebas)
  *   ?probarCorreo=1&to=<email>[&pieza=<id>]   manda el correo REAL a una
  *                      dirección elegida, sin tocar clientes ni marcar nada
+ *   ?verificar=1       audita el catálogo: URL viva y año no vencido, pieza
+ *                      por pieza, sin enviar nada
  *
  * MODO REAL solo con vic_kv `contenido_enabled`="on".
  */
@@ -38,7 +40,9 @@ import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import {
   CONTENIDO_DIAS,
   PIEZAS,
+  anioDePieza,
   correoDeContenido,
+  piezaVigente,
   siguientePieza,
   tocaContenido,
   type Pieza,
@@ -141,6 +145,26 @@ async function ejecutivoDe(contact: string): Promise<string> {
   } catch { return "" }
 }
 
+/**
+ * ¿LA PIEZA SIGUE VIVA? No basta el 200: un post retirado del blog de
+ * GeoVictoria responde 200 pero REDIRIGE AL ÍNDICE (así se cayeron dos de los
+ * primeros candidatos del catálogo, y así se ve un link roto en un correo que
+ * ya salió). Por eso la condición es 200 **y** que la URL final siga siendo la
+ * del post. Falla de red = no vigente: antes de mandar un link muerto a un
+ * cliente, se salta la pieza.
+ */
+async function piezaViva(pieza: Pieza): Promise<{ ok: boolean; status: number; final: string }> {
+  const slug = pieza.url.replace(/\/+$/, "").split("/").pop() || ""
+  try {
+    const r = await fetch(pieza.url, { redirect: "follow", cache: "no-store", signal: AbortSignal.timeout(8000) })
+    const final = r.url || pieza.url
+    return { ok: r.ok && final.includes(slug), status: r.status, final }
+  } catch (e) {
+    console.error("[contenido] no se pudo verificar", pieza.id, e)
+    return { ok: false, status: 0, final: "" }
+  }
+}
+
 async function enviarCorreo(H: Record<string, string>, to: string, subject: string, html: string): Promise<boolean> {
   const anchor = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
   const r = await fetch(`${ZOHO_API}/crm/v3/${anchor}/actions/send_mail`, {
@@ -196,6 +220,26 @@ export async function GET(req: Request): Promise<Response> {
     const { asunto, html } = correoDeContenido({ nombre: "Lalo", pieza, fromEmail: FROM_EMAIL, waUrl: WA_VICKY })
     const ok = await enviarCorreo(H, to, `PRUEBA · ${asunto}`, html).catch(() => false)
     return NextResponse.json({ ok, to, pieza: pieza.id, asunto, piezas: PIEZAS.map((p) => p.id) })
+  }
+
+  // AUDITORÍA DEL CATÁLOGO (`?verificar=1`): revisa las 29 piezas —URL viva y
+  // año no vencido— sin tocar a nadie. Es lo que hay que correr antes de
+  // cualquier cambio al catálogo, y de vez en cuando: el blog se edita sin
+  // avisarnos.
+  if (sp.get("verificar") === "1") {
+    const filas = await Promise.all(PIEZAS.map(async (pieza) => {
+      const v = await piezaViva(pieza)
+      const anio = anioDePieza(pieza)
+      const vig = piezaVigente(pieza, ahora)
+      return {
+        id: pieza.id, titulo: pieza.titulo, temas: pieza.temas,
+        url: v.ok ? "viva" : `REVISAR (${v.status}${v.final && !v.final.includes(pieza.url.replace(/\/+$/, "").split("/").pop() || "") ? ` → redirige a ${v.final}` : ""})`,
+        vigencia: vig ? (anio ? `${anio}` : "sin año") : `VENCIDA (${anio})`,
+        sirve: v.ok && vig,
+      }
+    }))
+    const malas = filas.filter((f) => !f.sirve)
+    return NextResponse.json({ ok: malas.length === 0, piezas: filas.length, sirven: filas.length - malas.length, problemas: malas, detalle: filas })
   }
 
   if (!dryExplicito && !enabled && !soloContacto) {
@@ -292,8 +336,23 @@ export async function GET(req: Request): Promise<Response> {
       continue
     }
 
-    const pieza = siguientePieza(estado.piezas, await motivoNoCierre(f.contact))
-    if (!pieza) { base.omitido = "catalogo_agotado"; filas.push(base); continue }
+    // La pieza se elige por objeción y se VERIFICA antes de salir: vigente por
+    // año (lo resuelve siguientePieza) y viva en el blog (una consulta). Si el
+    // link está muerto se salta a la siguiente, hasta 3, y se avisa — nunca se
+    // manda un link roto por cumplir la cadencia.
+    const motivo = await motivoNoCierre(f.contact)
+    const descartadas: string[] = []
+    let pieza: Pieza | null = null
+    for (let i = 0; i < 3; i++) {
+      const cand = siguientePieza(estado.piezas, motivo, { ahora, excluir: descartadas })
+      if (!cand) break
+      if (dry) { pieza = cand; break }
+      const v = await piezaViva(cand)
+      if (v.ok) { pieza = cand; break }
+      descartadas.push(cand.id)
+      await avisarEquipoInterno(`📚 Contenido: la pieza "${cand.titulo}" no está viva (${v.status}${v.final ? ` → ${v.final}` : ""}). No salió a nadie; revisar el blog o sacarla del catálogo.`).catch(() => {})
+    }
+    if (!pieza) { base.omitido = descartadas.length ? `sin_pieza_viva (descartadas: ${descartadas.join(", ")})` : "catalogo_agotado"; filas.push(base); continue }
     base.pieza = pieza.id
 
     if (dry) { base.accion = `SE ENVIARÍA "${pieza.titulo}"`; filas.push(base); continue }

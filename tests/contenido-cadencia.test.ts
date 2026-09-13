@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { PIEZAS, correoDeContenido, siguientePieza, temaParaMotivo, tocaContenido } from "../lib/contenido-cadencia.ts"
+import { PIEZAS, anioDePieza, correoDeContenido, piezaVigente, siguientePieza, temaParaMotivo, tocaContenido } from "../lib/contenido-cadencia.ts"
 
 test("el catálogo no tiene ids ni URLs repetidas y todas son del blog CL", () => {
   const ids = new Set(PIEZAS.map((p) => p.id))
@@ -77,4 +77,47 @@ test("ninguna pieza promete un precio NUESTRO ni una oferta comercial", () => {
   // oferta — por eso el patrón busca la oferta comercial, no la palabra suelta.
   const oferta = /% de descuento|descuento en el plan|oferta|promoci[oó]n|\$\s?\d|\bUF\b|barato|precio especial/i
   for (const p of PIEZAS) assert.doesNotMatch(`${p.titulo} ${p.gancho}`, oferta, `pieza ${p.id}`)
+})
+
+test("vigencia: una pieza con año pasado en el título NO sale, aunque nadie declare el campo", () => {
+  const ahora = new Date("2026-09-13T12:00:00Z")
+  const vieja = { id: "x", titulo: "Feriados en Chile 2025: todos los días festivos", gancho: "g", url: "https://x/", temas: ["legal" as const] }
+  const deEsteAnio = { ...vieja, id: "y", titulo: "Feriados en Chile 2026" }
+  const sinAnio = { ...vieja, id: "z", titulo: "Cómo se compensa un feriado irrenunciable" }
+  assert.equal(anioDePieza(vieja), 2025)
+  assert.equal(piezaVigente(vieja, ahora), false)
+  assert.equal(piezaVigente(deEsteAnio, ahora), true)
+  assert.equal(anioDePieza(sinAnio), null)
+  assert.equal(piezaVigente(sinAnio, ahora), true)
+  // El campo explícito manda sobre el título.
+  assert.equal(piezaVigente({ ...sinAnio, anio: 2024 }, ahora), false)
+})
+
+test("ninguna pieza del catálogo está vencida hoy", () => {
+  const ahora = new Date()
+  const vencidas = PIEZAS.filter((p) => !piezaVigente(p, ahora)).map((p) => p.id)
+  assert.deepEqual(vencidas, [])
+})
+
+test("la rotación salta las vencidas y las descartadas por link muerto", () => {
+  const ahora = new Date("2026-09-13T12:00:00Z")
+  const primera = siguientePieza([], null, { ahora })
+  assert.ok(primera)
+  const segunda = siguientePieza([], null, { ahora, excluir: [primera.id] })
+  assert.ok(segunda)
+  assert.notEqual(segunda.id, primera.id)
+})
+
+test("el catálogo cubre las objeciones que más aparecen", () => {
+  const ahora = new Date()
+  for (const motivo of ["precio", "el cliente quería otro reloj", "duda legal", "horas extras"]) {
+    const p = siguientePieza([], motivo, { ahora })
+    assert.ok(p, `sin pieza para ${motivo}`)
+  }
+  // Entrada, equipos y dudas operativas: los huecos que el catastro mostró.
+  const ids = new Set(PIEZAS.map((p) => p.id))
+  for (const id of ["cinco_razones", "tipos_reloj", "facial", "colacion", "derechos_registro", "conservar", "irrenunciable", "libro_asistencia"]) {
+    assert.ok(ids.has(id), `falta ${id}`)
+  }
+  assert.equal(PIEZAS.filter((p) => p.temas.includes("hardware")).length, 4)
 })
