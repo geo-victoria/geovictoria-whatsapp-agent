@@ -36,7 +36,14 @@ export async function salientesDesde(
   const t0 = Date.now()
   const presupuesto = opts.presupuestoMs ?? 45_000
   const maxPag = opts.maxPaginas ?? 20
-  let url = `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desdeIso)}&pag=true`
+  // Más allá de ~72 h Botmaker exige `long-term-search=true` (si no: 400
+  // LONG_TERM_SEARCH_PARAM_REQUIRED). Probado 13-sep: con el parámetro una
+  // ventana de 120 h devuelve miles de mensajes, así que el histórico SÍ se
+  // puede rescatar. Solo se agrega cuando hace falta, para no cambiar el
+  // comportamiento de las consultas cortas.
+  const horasAtras = (Date.now() - (Date.parse(desdeIso) || Date.now())) / 3600e3
+  const largoPlazo = horasAtras > 48 ? "&long-term-search=true" : ""
+  let url = `https://api.botmaker.com/v2.0/messages?chat-platform=whatsapp&limit=250&from=${encodeURIComponent(desdeIso)}&pag=true${largoPlazo}`
   let total = 0
   let truncado = false
   let error = ""

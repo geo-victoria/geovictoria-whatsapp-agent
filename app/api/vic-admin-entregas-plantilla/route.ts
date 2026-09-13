@@ -33,7 +33,7 @@ export async function GET(req: Request): Promise<Response> {
   if (!key || !secreto || key !== secreto) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   if (!SUPABASE_URL || !SUPABASE_KEY) return NextResponse.json({ ok: false, error: "sin supabase" }, { status: 503 })
 
-  const dias = Math.min(Math.max(Number(sp.get("dias")) || 3, 1), 7)
+  const dias = Math.min(Math.max(Number(sp.get("dias")) || 3, 1), 30)
   const desdeMs = Date.now() - dias * 86_400_000
   const desdeIso = new Date(desdeMs).toISOString()
   const H = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
@@ -93,7 +93,7 @@ export async function GET(req: Request): Promise<Response> {
     truncado,
     lecturaUtil,
     errorBotmaker: error || undefined,
-    avisoVentana: lecturaUtil ? undefined : "Botmaker no deja consultar más de ~72 h atrás: verifica DENTRO de ese plazo",
+    avisoVentana: lecturaUtil ? undefined : "sin lectura útil de Botmaker — revisar errorBotmaker",
     resumen,
     pctSalio: enVentana ? Math.round((resumen.salio / enVentana) * 100) : null,
     nota: "verifica que BOTMAKER las despachó; el código de error de META no viaja por esta API",
