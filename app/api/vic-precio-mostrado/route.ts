@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { precioMostradoPorVicky } from "@/lib/atribucion-venta"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -18,8 +19,6 @@ export const dynamic = "force-dynamic"
  * Fail-closed: cualquier falla responde mostrado=false (queda la marca de la
  * emisión, como hasta ahora).
  */
-const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
-const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const SECRET_COTIZADOR = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
 
@@ -43,26 +42,10 @@ export async function GET(req: Request): Promise<Response> {
   const tel = (url.searchParams.get("tel") || "").replace(/\D/g, "").replace(/^5656/, "56")
   const antes = (url.searchParams.get("antes") || "").trim()
   if (tel.length < 9) return NextResponse.json({ ok: false, error: "tel inválido" }, { status: 400 })
-  if (!SUPABASE_URL || !SUPABASE_KEY) return NextResponse.json({ ok: true, mostrado: false, at: null })
-  const H = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-  try {
-    const convs = (await fetch(
-      `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${tel}&select=id&limit=5`,
-      { headers: H, cache: "no-store" },
-    ).then((r) => (r.ok ? r.json() : []))) as Array<{ id: string }>
-    if (!convs.length) return NextResponse.json({ ok: true, mostrado: false, at: null })
-    const ids = convs.map((c) => c.id).join(",")
-    const antesMs = Date.parse(antes)
-    const filtroAntes = Number.isFinite(antesMs) ? `&at=lt.${encodeURIComponent(new Date(antesMs).toISOString())}` : ""
-    const rows = (await fetch(
-      `${SUPABASE_URL}/rest/v1/vic_v3_messages?conversation_id=in.(${ids})&role=eq.assistant` +
-        `&or=(content.ilike.*Resumen%20mensual*,content.ilike.*Total%20mensual%20con%20IVA*,content.ilike.*UF%20%2B%20IVA%20al%20mes*)` +
-        `${filtroAntes}&select=at&order=at.asc&limit=1`,
-      { headers: H, cache: "no-store" },
-    ).then((r) => (r.ok ? r.json() : []))) as Array<{ at: string }>
-    return NextResponse.json({ ok: true, mostrado: rows.length > 0, at: rows[0]?.at || null })
-  } catch (e) {
-    console.warn("[precio-mostrado]", tel, e instanceof Error ? e.message : e)
-    return NextResponse.json({ ok: true, mostrado: false, at: null })
-  }
+  // La consulta vive en lib/atribucion-venta: la comparten este endpoint (que
+  // usa el COTIZADOR para clasificar el canal del correo de PAGADA) y el gate
+  // del alta por chat. Dos copias de la misma señal se habrían separado sin
+  // que nadie lo notara — que es justo el defecto del 13-sep.
+  const r = await precioMostradoPorVicky(tel, antes)
+  return NextResponse.json({ ok: true, mostrado: r.mostrado, at: r.at })
 }

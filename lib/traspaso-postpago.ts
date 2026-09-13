@@ -28,6 +28,7 @@ import { pagoCierraLoop } from "./loop-v2"
 import { claveFase, claveBorrador, claveQuoteOnboarding, claveColaAltas } from "./onboarding/fase"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { onboardingActivoPara } from "./onboarding-piloto"
+import { ventaEsDeVicky } from "./atribucion-venta"
 import { entregarKickoffOnboarding } from "./onboarding-envio"
 
 // Los mensajes POST-PAGO son transaccionales (07-sep): el gate de proactividad
@@ -388,7 +389,22 @@ export async function cerrarYTraspasarPostPago(
   // cotización cuyo post-pago ya corrió (o que se atribuyó a mano) no debe
   // abrir la fase onboarding después — el alta la lleva quien la tomó.
   const yaProcesada = Boolean(await getKvValue(`traspaso_postpago_${quoteId}`).catch(() => null))
-  if (pagoReal && !yaProcesada && esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
+  // CANAL vs ATRIBUCIÓN (13-sep, caso Mila Coffee House): este gate miraba
+  // `Intervenci_n_Humana` pelado, y con eso una REEMISIÓN del ejecutivo sobre
+  // una cotización de Vicky quedaba fuera del alta por chat — mientras el
+  // correo de PAGADA, el dash y el cierre diario contaban esa MISMA venta
+  // como de Vicky. Camila pagó la reemisión de Grey, Vicky le prometió en el
+  // chat que le activaba la cuenta y nadie la iba a crear. Ahora los cuatro
+  // caminos usan el mismo criterio: reemisión sobre Vicky, o precio mostrado
+  // por Vicky antes de la emisión ⇒ la venta es de Vicky y el alta corre.
+  // Fail-closed: sin poder verificar la atribución, sigue siendo del ejecutivo.
+  const atribucion = pagoReal && !yaProcesada && esCL && canalEjecutivo
+    ? await ventaEsDeVicky(quoteId, true).catch(() => ({ deVicky: false, motivo: "no verificable" }))
+    : { deVicky: !canalEjecutivo, motivo: canalEjecutivo ? "canal ejecutivo" : "emitida por Vicky" }
+  if (canalEjecutivo && atribucion.deVicky) {
+    console.log(`[postpago] ${quoteId}: canal ejecutivo pero la venta es de Vicky (${atribucion.motivo}) — el alta por chat SÍ corre`)
+  }
+  if (pagoReal && !yaProcesada && esCL && atribucion.deVicky && (await onboardingActivoPara(contact))) {
     // SEGUNDA EMPRESA POR EL MISMO NÚMERO (08-sep, caso Lorena: pagó dos
     // cotizaciones, una por RUT, con minutos de diferencia). El estado del
     // onboarding vive POR CONTACTO: si el ciclo ya está abierto con OTRA
