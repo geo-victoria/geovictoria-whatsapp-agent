@@ -62,9 +62,14 @@ const PCT_NO_EVALUABLE = Number(process.env.CAMPANA_PREFLIGHT_PCT_CIEGO || 20)
 const MAX_REAL = Number(process.env.CAMPANA_REACT_MAX || 40)
 // FRENO POR DAÑO (13-sep): el freno viejo mide volumen y ceguera; esto mide si
 // la gente se está molestando. Base mínima para no frenar por ruido.
-const PCT_DANO = Number(process.env.CAMPANA_PREFLIGHT_PCT_DANO || 15)
-const PCT_OPTOUT = Number(process.env.CAMPANA_PREFLIGHT_PCT_OPTOUT || 5)
-const BASE_DANO = Number(process.env.CAMPANA_PREFLIGHT_BASE_DANO || 20)
+// El umbral lo fija el documento de diseño (punto 6, aprobado): "si en una
+// semana el opt-out o rechazo explícito supera el 2 % de los enviados, el
+// ciclo se pausa solo y avisa". Es más estricto de lo que yo habría puesto;
+// manda el diseño. La base mínima evita que un solo caso en una semana chica
+// frene la campaña (con 2 % puro, 1 de 30 ya la apagaría).
+const PCT_DANO = Number(process.env.CAMPANA_PREFLIGHT_PCT_DANO || 2)
+const PCT_OPTOUT = Number(process.env.CAMPANA_PREFLIGHT_PCT_OPTOUT || 2)
+const BASE_DANO = Number(process.env.CAMPANA_PREFLIGHT_BASE_DANO || 50)
 
 const KV_HIST = "campana_preflight_hist"
 const KV_ULTIMO = "campana_preflight_ultimo"

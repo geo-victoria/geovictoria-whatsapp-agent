@@ -277,8 +277,10 @@ export async function GET(req: Request): Promise<Response> {
   const canalParam = sp.get("dia") as Canal | null
   const canal: Canal | null = canalParam && ["wsp", "mail"].includes(canalParam) ? canalParam : canalDelDia(pais, ahora)
 
-  // Corrida automática con la campaña apagada: no evalúa nada.
-  if (!dryExplicito && !enabled && !soloContacto) {
+  // Corrida automática con la campaña apagada: no evalúa nada. Las pruebas
+  // explícitas (correo, escritura) SÍ corren apagada — para eso existen: se
+  // verifican antes de encender, no después.
+  if (!dryExplicito && !enabled && !soloContacto && sp.get("probarCorreo") !== "1" && sp.get("probarEscritura") !== "1") {
     return NextResponse.json({ ok: true, apagada: true, nota: "vic_kv campana_react_enabled != on — usa ?dry=1 para simular" })
   }
   const hora = horaLocalDe(pais, ahora)
