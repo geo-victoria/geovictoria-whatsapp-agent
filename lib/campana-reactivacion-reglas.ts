@@ -131,8 +131,22 @@ const TPL_T4 = (process.env.CAMPANA_REACT_TPL_T4 || "vicky_react_t4_cl").trim()
 // que el link no muestra sería mentirle al cliente. Si no se pudo aplicar, el
 // runner usa TPL_T4, que no promete nada.
 const TPL_T4_TOPE = (process.env.CAMPANA_REACT_TPL_T4_TOPE || "vicky_react_t4_20_cl").trim()
+// COTIZACIÓN YA ACEPTADA: el universo de la campaña incluye Enviada Y Aceptada,
+// y a quien YA aceptó decirle "tu cotización sigue vigente con el mismo valor"
+// es hablarle como si no hubiera hecho nada — lo único que le falta es pagar.
+// Plantilla UTILITY ya aprobada ("quedó aceptada y solo queda completar el
+// pago: ${link}"), así que además esquiva los topes de MARKETING de Meta.
+const TPL_COBRO = (process.env.CAMPANA_REACT_TPL_COBRO || "vicky_loop_pago_link_cl").trim()
 
-export function planDeToque(casilla: Casilla, conNombre: boolean, opts: { topeAplicado?: boolean } = {}): PlanToque {
+export function planDeToque(
+  casilla: Casilla,
+  conNombre: boolean,
+  opts: { topeAplicado?: boolean; cotizacionAceptada?: boolean } = {},
+): PlanToque {
+  // Manda sobre el gancho de la casilla: ya aceptó, el toque es de cobro.
+  if (opts.cotizacionAceptada) {
+    return { tpl: TPL_COBRO, tipo: "react", vars: ["nombre", "link"], descripcion: "ya aceptó: solo falta el pago" }
+  }
   if (casilla === 2) {
     return { tpl: TPL_T2, tipo: "react", vars: ["nombre", "gancho", "empresa", "link"], descripcion: "objeción o valor que quedó abierto" }
   }

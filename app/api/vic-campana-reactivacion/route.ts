@@ -428,9 +428,14 @@ export async function GET(req: Request): Promise<Response> {
       // link: prometer un % que el link no muestra sería mentirle al cliente.
       // Si no se puede aplicar (canal ejecutivo, ya aceptada, falla), sale la
       // plantilla del toque 4 sin %. En dry no se escribe nada.
-      const topeT4 = casilla === 4 && !dry ? await aplicarTopeParaToque4(cand.quoteId).catch(() => null) : null
+      const topeT4 = casilla === 4 && !dry && !/aceptada/i.test(String(cand.origen || ""))
+        ? await aplicarTopeParaToque4(cand.quoteId).catch(() => null)
+        : null
       if (topeT4) base.ultimaActividad = `${base.ultimaActividad || ""} · tope20: ${topeT4.motivo}`.trim()
-      const plan = planDeToque(casilla, Boolean(nombre), { topeAplicado: Boolean(topeT4?.ok) })
+      // El estado de la cotización ya viene en `origen` del universo
+      // ("cotizacion Enviada" | "cotizacion Aceptada") — cero llamadas extra.
+      const aceptada = /aceptada/i.test(String(cand.origen || ""))
+      const plan = planDeToque(casilla, Boolean(nombre), { topeAplicado: Boolean(topeT4?.ok), cotizacionAceptada: aceptada })
       const linkQuote = cand.quoteId ? linkCortoDe(cand.quoteId) : ""
       const ctx = plan.vars.includes("precio") || plan.vars.includes("gancho")
         ? await contextoDelChat(cand.contact, ufDia)
@@ -527,8 +532,9 @@ export async function GET(req: Request): Promise<Response> {
       // toque 2 sale del mismo clasificador, y el 20 % del toque 4 solo se
       // nombra si está APLICADO de verdad en la cotización (si la aplicación se
       // negó, el link muestra precio de lista y prometerlo sería mentir).
-      const ctxMail = casilla === 2 ? await contextoDelChat(f.contact, ufDia) : { precio: "", motivo: null }
-      const dctoMail = casilla === 4 ? await descuentoDeCotizacion(f.quote_id).catch(() => null) : null
+      const ctxMail = casilla === 2 ? await contextoDelChat(f.contact, ufDia) : { precio: "", motivo: null as string | null }
+      const dctoMail = await descuentoDeCotizacion(f.quote_id).catch(() => null)
+      const aceptadaMail = /aceptada/i.test(String(dctoMail?.estado || ""))
       const { asunto, html } = correoDeToque({
         casilla,
         nombre,
@@ -537,6 +543,7 @@ export async function GET(req: Request): Promise<Response> {
         pdfUrl,
         gancho: casilla === 2 ? ganchoParaToque2(ctxMail.motivo) : "",
         pctDescuento: dctoMail?.pct ?? 0,
+        aceptada: aceptadaMail,
         waUrl: WA_VICKY,
       })
       const ok = await enviarCorreo(H, f.quote_id, email, asunto, html).catch(() => false)

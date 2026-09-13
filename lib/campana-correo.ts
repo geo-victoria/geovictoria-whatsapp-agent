@@ -31,6 +31,8 @@ export type DatosCorreo = {
   gancho?: string | null
   /** Descuento REAL vigente en la cotización, leído de Zoho. */
   pctDescuento?: number | null
+  /** La cotización ya está ACEPTADA: solo falta el pago. Manda sobre la casilla. */
+  aceptada?: boolean
   /** Link "escríbeme por WhatsApp". */
   waUrl: string
 }
@@ -40,6 +42,7 @@ const esc = (s: string) =>
 
 export function asuntoDeToque(d: DatosCorreo): string {
   const emp = d.empresa ? ` · ${d.empresa}` : ""
+  if (d.aceptada) return `Aceptaste tu cotización — solo falta el pago${emp}`
   if (d.casilla === 2) return `Sobre tu cotización de control de asistencia${emp}`
   if (d.casilla === 3) return `Te dejé un descuento esperándote${emp}`
   if (d.casilla === 4) {
@@ -53,6 +56,15 @@ export function asuntoDeToque(d: DatosCorreo): string {
 /** Párrafos del cuerpo, en el orden en que se pintan. */
 function cuerpoDeToque(d: DatosCorreo): string[] {
   const emp = d.empresa ? ` de <b>${esc(d.empresa)}</b>` : ""
+  // ACEPTADA manda sobre la casilla: a quien ya aceptó no se le dice "sigue
+  // vigente con el mismo valor" ni se le ofrece un descuento nuevo.
+  if (d.aceptada) {
+    return [
+      `Tu cotización${emp} quedó <b>aceptada</b> y solo queda completar el pago.`,
+      "Lo puedes hacer en línea desde el mismo link, y tu cuenta queda activa el mismo día; yo te acompaño con la configuración por WhatsApp.",
+      "Si prefieres pagar por transferencia o necesitas ajustar algo antes, respóndeme y lo vemos.",
+    ]
+  }
   if (d.casilla === 2) {
     const gancho = (d.gancho || "").trim()
     return [

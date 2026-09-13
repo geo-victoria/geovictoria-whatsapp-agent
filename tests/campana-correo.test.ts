@@ -49,3 +49,14 @@ test("sin nombre saluda igual y sin link no pinta el botón", () => {
 test("el asunto lleva la empresa cuando la hay", () => {
   assert.match(asuntoDeToque({ ...base, casilla: 1 }), /· Constructora Avanti/)
 })
+
+test("cotización ACEPTADA: el correo habla de pago, no de vigencia ni de descuento", () => {
+  for (const casilla of [1, 2, 3, 4] as const) {
+    const { asunto, html } = correoDeToque({ ...base, casilla, aceptada: true, pctDescuento: 20 })
+    assert.match(asunto, /solo falta el pago/)
+    assert.match(html, /quedó <b>aceptada<\/b> y solo queda completar el pago/)
+    assert.doesNotMatch(html, /sigue vigente/)
+    assert.doesNotMatch(html, /descuento adicional/)
+    assert.doesNotMatch(html, /20%/)
+  }
+})
