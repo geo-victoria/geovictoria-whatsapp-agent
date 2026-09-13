@@ -392,7 +392,11 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     for (const cand of universo) {
-      if (enviados >= max || filas.length >= max * 3) break
+      // El corte de filas es del REPORTE, no del tope de envíos: la mayoría del
+      // universo se excluye, así que atarlo a max*3 dejaba un piloto de 2 en CERO
+      // envíos (se cerraba en la fila 6 sin haber mandado nada) — visto en el dry
+      // del 13-sep. Piso de 200 filas para que el tope chico no corte el barrido.
+      if (enviados >= max || filas.length >= Math.max(max * 3, 200)) break
       if (Date.now() - t0 > presupuestoMs) { filas.push({ contact: "-", empresa: null, quoteId: null, casilla: null, canal, omitido: "presupuesto_de_tiempo" }); break }
       const fila = casillas.get(cand.contact) || null
       const casilla = siguienteCasilla(fila)
