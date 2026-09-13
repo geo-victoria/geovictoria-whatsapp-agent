@@ -36,9 +36,9 @@ import { posturaRechazoCliente } from "./rechazo-cliente"
 import { detectarClienteExistente } from "./cliente-existente"
 import { casuisticaDeContacto } from "./casuistica-runtime"
 import { testContactSet } from "./funnel-analysis"
-import { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, HORA_INICIO_CAMPANA, MINUTOS_HABILES_INACTIVIDAD, type Canal, type Casilla, type FilaCasillas } from "./campana-reactivacion-reglas"
+import { canalDelDia, casillaAbierta, esToqueComercial, horaLocalDe, siguienteCasilla, HORA_INICIO_CAMPANA, MINUTOS_HABILES_INACTIVIDAD, type Canal, type Casilla, type FilaCasillas } from "./campana-reactivacion-reglas"
 
-export { canalDelDia, casillaAbierta, horaLocalDe, siguienteCasilla, TOQUES_MAX, HORA_INICIO_CAMPANA, DIAS_HABILES_INACTIVIDAD, MINUTOS_HABILES_INACTIVIDAD, DESCANSO_DIAS, debeDescansar, planDeToque, ganchoParaToque2, precioTextoClp, type PlanToque } from "./campana-reactivacion-reglas"
+export { canalDelDia, casillaAbierta, esToqueComercial, horaLocalDe, siguienteCasilla, TOQUES_MAX, HORA_INICIO_CAMPANA, DIAS_HABILES_INACTIVIDAD, MINUTOS_HABILES_INACTIVIDAD, DESCANSO_DIAS, debeDescansar, planDeToque, ganchoParaToque2, precioTextoClp, type PlanToque } from "./campana-reactivacion-reglas"
 export type { Canal, Casilla, FilaCasillas } from "./campana-reactivacion-reglas"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
@@ -507,10 +507,14 @@ export async function ultimoToqueCampana(
   const cands: Actividad[] = []
 
   try {
+    // El límite es holgado a propósito: con una pieza de contenido al mes, las
+    // primeras filas pueden ser todas de contenido y el último toque comercial
+    // —el que de verdad manda el descanso— quedaría fuera de la ventana.
     const ev = await sb<{ at: string; campana: string }>(
-      `vic_campanas?contact=eq.${contact}&select=at,campana&order=at.desc&limit=5`,
+      `vic_campanas?contact=eq.${contact}&select=at,campana&order=at.desc&limit=20`,
     )
-    if (ev[0]) cands.push({ at: fechaDe(ev[0].at), fuente: `vic_campanas (${ev[0].campana})` })
+    const comercial = ev.find((e) => esToqueComercial(e.campana))
+    if (comercial) cands.push({ at: fechaDe(comercial.at), fuente: `vic_campanas (${comercial.campana})` })
   } catch (e) { fallas.push(`vic_campanas: ${e instanceof Error ? e.message : e}`) }
 
   // Los kv de las campañas viejas: `campana_dcto_<fono>` y

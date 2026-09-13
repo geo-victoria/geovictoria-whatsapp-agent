@@ -92,6 +92,21 @@ export function horaLocalDe(pais: string, ahora: Date): number {
  */
 export const DESCANSO_DIAS = Number(process.env.CAMPANA_REACT_DESCANSO_DIAS || 28)
 
+/**
+ * ¿Ese evento de `vic_campanas` es un toque COMERCIAL?
+ *
+ * El descanso de 4 semanas se mide contra el último toque comercial, y el
+ * contenido NO lo es: es el estado terminal del ciclo, no una campaña que pida
+ * algo. Sin esta distinción pasaba algo que nadie decidió — el contenido se
+ * registra como `contenido_<n>`, `ultimoToqueCampana` tomaba la fila más
+ * reciente sin mirar el nombre, y con una pieza al mes SIEMPRE habría un
+ * evento a menos de 28 días: el primer toque de un ciclo nuevo jamás volvería
+ * a dispararse. O sea, el contenido excluía al ciclo siguiente de hecho.
+ */
+export function esToqueComercial(campana: string | null | undefined): boolean {
+  return !/^contenido/i.test(String(campana || "").trim())
+}
+
 export function debeDescansar(
   ultimoToque: Date | null | undefined,
   ahora: Date,
