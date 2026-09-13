@@ -294,6 +294,25 @@ export async function GET(req: Request): Promise<Response> {
   const ufDia = Math.max(0, Number(sp.get("uf") || 0)) || (await getUFActual().catch(() => 0))
 
   // Un solo contacto: veredicto explicado (sin enviar salvo modo real explícito con ?contact=).
+  // PRUEBA DEL CANAL CORREO (`?probarCorreo=1&to=<email>`): el miércoles no se
+  // puede simular con un dry — su universo son los que recibieron el WhatsApp
+  // del martes, así que con la tabla vacía el dry devuelve 0 y no ejecuta NADA
+  // del camino real (buscar el correo en Zoho, el gate, el send_mail). Esto
+  // manda el correo REAL de la campaña a una dirección elegida, sin tocar a
+  // ningún cliente y sin marcar casillas.
+  if (sp.get("probarCorreo") === "1") {
+    const to = (sp.get("to") || "").trim()
+    if (!/^[^@\s]+@[^@\s]+$/.test(to)) return NextResponse.json({ ok: false, error: "falta to=<email>" }, { status: 400 })
+    const H = await zohoHeaders().catch(() => null)
+    if (!H) return NextResponse.json({ ok: false, error: "sin token Zoho" }, { status: 503 })
+    const html = htmlCorreo("Lalo", "GeoVictoria (prueba)", `${WA_VICKY}`)
+    const ok = await enviarCorreo(H, null, to, "PRUEBA · Tu cotización de control de asistencia sigue vigente", html).catch((e) => {
+      console.error("[campana] prueba de correo falló", e)
+      return false
+    })
+    return NextResponse.json({ ok, to, nota: ok ? "correo de campaña enviado — revisa también Promociones/Otros" : "el send_mail de Zoho no aceptó el envío" })
+  }
+
   if (sp.get("probarEscritura") === "1") {
     if (!soloContacto) return NextResponse.json({ ok: false, error: "falta contact" }, { status: 400 })
     return NextResponse.json({ ok: true, prueba: await probarEscritura(soloContacto, pais) })

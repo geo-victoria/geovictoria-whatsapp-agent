@@ -38,6 +38,7 @@
  */
 
 import { NextResponse } from "next/server"
+import { resultadoCampana } from "@/lib/campana-resultado"
 import { getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
@@ -59,6 +60,11 @@ const PCT_NO_EVALUABLE = Number(process.env.CAMPANA_PREFLIGHT_PCT_CIEGO || 20)
 // Tope de envíos del runner real (su `max` por defecto): el freno se mide
 // contra esto, no contra el potencial que recorre el dry.
 const MAX_REAL = Number(process.env.CAMPANA_REACT_MAX || 40)
+// FRENO POR DAÑO (13-sep): el freno viejo mide volumen y ceguera; esto mide si
+// la gente se está molestando. Base mínima para no frenar por ruido.
+const PCT_DANO = Number(process.env.CAMPANA_PREFLIGHT_PCT_DANO || 15)
+const PCT_OPTOUT = Number(process.env.CAMPANA_PREFLIGHT_PCT_OPTOUT || 5)
+const BASE_DANO = Number(process.env.CAMPANA_PREFLIGHT_BASE_DANO || 20)
 
 const KV_HIST = "campana_preflight_hist"
 const KV_ULTIMO = "campana_preflight_ultimo"
@@ -200,6 +206,13 @@ export async function GET(req: Request): Promise<Response> {
   const corridaOk = Boolean(rr && rr.ok && j && j.ok !== false)
   const saldriaReal = Math.min(seEnviaria, MAX_REAL)
 
+  // 2-bis. Lo que YA salió: la campaña se juzga por su resultado, no solo por
+  // su volumen (pregunta de Lalo "¿serán automáticas para siempre?").
+  const resultado = await resultadoCampana(28).catch((e) => {
+    console.error("[preflight] resultado de campaña falló", e)
+    return null
+  })
+
   // 2. Comparación con la semana pasada.
   const hist = await leerHistorico()
   const previa = hist.filter((c) => c.semana !== semana).slice(-1)[0] || null
@@ -219,6 +232,13 @@ export async function GET(req: Request): Promise<Response> {
     // El salto solo se juzga entre corridas COMPARABLES: si una de las dos
     // quedó truncada, la diferencia puede ser de cobertura y no de realidad.
     if (previa && !truncado && !previa.truncado && seEnviaria > PISO_SALTO && seEnviaria > previa.seEnviaria * FACTOR_SALTO) frenos.push(`saldrían ${seEnviaria} contra ${previa.seEnviaria} de la semana del ${previa.semana} (más de ${FACTOR_SALTO}×)`)
+    // DAÑO: rechazos + opt-outs sobre los contactos tocados en 28 días. Con
+    // base chica no se juzga (dos "no" sobre tres envíos no son una señal).
+    if (resultado && resultado.contactos >= BASE_DANO) {
+      if (resultado.tasaDano > PCT_DANO) frenos.push(`${resultado.rechazos} rechazos y ${resultado.optOuts} opt-out sobre ${resultado.contactos} contactos tocados (${resultado.tasaDano} %, tope ${PCT_DANO} %) — la campaña está molestando`)
+      else if (resultado.tasaOptOut > PCT_OPTOUT) frenos.push(`${resultado.optOuts} opt-out sobre ${resultado.contactos} contactos (${resultado.tasaOptOut} %, tope ${PCT_OPTOUT} %) — esa es la señal que mira Meta para la calidad de la línea`)
+    }
+    if (resultado?.fallas.length) frenos.push(`no se pudo leer el resultado de las campañas anteriores (${resultado.fallas[0]}) — se decide a ciegas`)
   }
 
   // 4. Frenar de verdad: el interruptor que el runner ya respeta.
@@ -260,10 +280,20 @@ export async function GET(req: Request): Promise<Response> {
   </table>
   <h3 style="margin:0 0 6px;font-size:15px">Por qué queda fuera el resto</h3>
   <table style="border-collapse:collapse;font-size:13.5px">${motivos.map(([k, v]) => `<tr><td style="padding:2px 12px 2px 0">${esc(k)}</td><td style="padding:2px 0;text-align:right"><b>${v}</b></td></tr>`).join("") || '<tr><td style="color:#6b7280">sin exclusiones</td></tr>'}</table>
+  ${resultado && resultado.enviados ? `<h3 style="margin:16px 0 6px;font-size:15px">Lo que ya salió · últimos ${resultado.dias} días</h3>
+  <table style="border-collapse:collapse;font-size:13.5px;margin-bottom:6px">
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Toques enviados</td><td style="padding:2px 0"><b>${resultado.enviados}</b> a ${resultado.contactos} contactos</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Respondieron</td><td style="padding:2px 0"><b>${resultado.respondieron}</b> (${resultado.tasaRespuesta} %)${resultado.autorespuestas ? ` · ${resultado.autorespuestas} autorespuestas` : ""}</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Ventas después del toque</td><td style="padding:2px 0"><b>${resultado.ventas}</b></td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Rechazos</td><td style="padding:2px 0;color:${resultado.tasaDano > PCT_DANO ? "#b91c1c" : "#2d3748"}">${resultado.rechazos}</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Opt-out</td><td style="padding:2px 0;color:${resultado.tasaOptOut > PCT_OPTOUT ? "#b91c1c" : "#2d3748"}"><b>${resultado.optOuts}</b> (${resultado.tasaOptOut} %)</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Daño total</td><td style="padding:2px 0;color:${resultado.tasaDano > PCT_DANO ? "#b91c1c" : "#2d3748"}"><b>${resultado.tasaDano} %</b> <span style="color:#6b7280">(tope ${PCT_DANO} %)</span></td></tr>
+  </table>
+  ${resultado.porSemana.length > 1 ? `<table style="border-collapse:collapse;font-size:12.5px;color:#4a5568"><tr style="color:#6b7280"><td style="padding:1px 10px 1px 0">semana</td><td style="padding:1px 10px 1px 0">env</td><td style="padding:1px 10px 1px 0">resp</td><td style="padding:1px 10px 1px 0">rech</td><td style="padding:1px 10px 1px 0">opt-out</td><td style="padding:1px 0">ventas</td></tr>${resultado.porSemana.map((w) => `<tr><td style="padding:1px 10px 1px 0">${esc(w.semana)}</td><td style="padding:1px 10px 1px 0">${w.enviados}</td><td style="padding:1px 10px 1px 0">${w.respondieron}</td><td style="padding:1px 10px 1px 0">${w.rechazos}</td><td style="padding:1px 10px 1px 0">${w.optOuts}</td><td style="padding:1px 0">${w.ventas}</td></tr>`).join("")}</table>` : ""}` : `<div style="color:#6b7280;font-size:12.5px;margin-top:14px">Aún no hay toques del ciclo que medir.</div>`}
   ${ejemplos.length ? `<h3 style="margin:16px 0 6px;font-size:15px">A quiénes les llegaría</h3>
   <table style="border-collapse:collapse;font-size:13px">${ejemplos.map((f) => `<tr><td style="padding:2px 12px 2px 0">${esc(f.empresa || "—")}</td><td style="padding:2px 12px 2px 0">+${esc(f.contact)}</td><td style="padding:2px 12px 2px 0">toque ${f.casilla ?? "?"}</td><td style="padding:2px 0;color:#6b7280">${esc(f.ultimaActividad || "")}</td></tr>`).join("")}</table>
   ${seEnviaria > ejemplos.length ? `<div style="color:#6b7280;font-size:12.5px;margin-top:4px">… y ${seEnviaria - ejemplos.length} más.</div>` : ""}` : ""}
-  <div style="color:#8a949c;font-size:12px;margin-top:16px">Umbrales del freno: tope ${TOPE_ENVIOS} envíos · salto ${FACTOR_SALTO}× sobre ${PISO_SALTO} · no evaluables ${PCT_NO_EVALUABLE} %. Simulación, no se envió nada.</div>
+  <div style="color:#8a949c;font-size:12px;margin-top:16px">Umbrales del freno: tope ${TOPE_ENVIOS} envíos · salto ${FACTOR_SALTO}× sobre ${PISO_SALTO} · no evaluables ${PCT_NO_EVALUABLE} % · daño ${PCT_DANO} % · opt-out ${PCT_OPTOUT} %. Simulación, no se envió nada.</div>
 </div>`
 
   let correoOk = false
@@ -275,7 +305,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   return NextResponse.json({
-    ok: true, dry, semana, estado, enabledAntes, corridaOk, truncado, censo, sinEvaluar, saldriaReal,
+    ok: true, dry, semana, estado, enabledAntes, corridaOk, truncado, censo, sinEvaluar, saldriaReal, resultado,
     universo, evaluados, seEnviaria, noEvaluable,
     previa, frenos, freno, motivos, correoOk,
     seEnviarianA: ejemplos,
