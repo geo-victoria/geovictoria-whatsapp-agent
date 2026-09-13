@@ -217,6 +217,21 @@ export async function GET(req: Request): Promise<Response> {
     `${SUPABASE_URL}/rest/v1/vic_campana_reactivacion?select=*&toque4_wsp_at=not.is.null&limit=2000`,
     { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
   )
+  // Un 400 de PostgREST leído con `.catch(() => [])` se ve EXACTAMENTE igual
+  // que "no hay nadie en el estado terminal" — y es el error que ya tuvo a la
+  // campaña de reactivación apagada de hecho (11-sep) y que hizo declarar "247
+  // no vistos" a un verificador que no había leído nada (13-sep). La ausencia
+  // de datos no es un hallazgo: si la consulta falla, se dice.
+  if (!r.ok) {
+    const detalle = (await r.text().catch(() => "")).slice(0, 200)
+    return NextResponse.json({ ok: false, error: `universo ilegible: supabase ${r.status}`, detalle }, { status: 502 })
+  }
+  // `total` separa las dos lecturas: cuántos hay en la tabla del ciclo y
+  // cuántos llegaron al estado terminal.
+  const rTotal = await fetch(`${SUPABASE_URL}/rest/v1/vic_campana_reactivacion?select=contact&limit=1`, {
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, Prefer: "count=exact" }, cache: "no-store",
+  }).catch(() => null)
+  const enCiclo = Number(String(rTotal?.headers.get("content-range") || "").split("/")[1] || "") || 0
   let universo = ((await r.json().catch(() => [])) as FilaCasillas[]) || []
   if (soloContacto) universo = universo.filter((f) => f.contact === soloContacto)
 
@@ -306,5 +321,5 @@ export async function GET(req: Request): Promise<Response> {
     const k = f.accion ? (f.accion.startsWith("SE ENVIARÍA") ? "se_enviaria" : f.accion.split(" (")[0].split(" \"")[0]) : String(f.omitido || "?").split(" (")[0]
     resumen[k] = (resumen[k] || 0) + 1
   }
-  return NextResponse.json({ ok: true, dry, enabled, dia: wd, hora, universo: universo.length, revisados: filas.length, enviados, frecuenciaDias: CONTENIDO_DIAS, piezasCatalogo: PIEZAS.length, resumen, filas, ms: Date.now() - t0 })
+  return NextResponse.json({ ok: true, dry, enabled, dia: wd, hora, enCiclo, universo: universo.length, revisados: filas.length, enviados, frecuenciaDias: CONTENIDO_DIAS, piezasCatalogo: PIEZAS.length, resumen, filas, ms: Date.now() - t0 })
 }
