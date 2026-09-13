@@ -164,6 +164,11 @@ export async function detectarCanalOrigen(contactId: string): Promise<string> {
   }
 }
 
+/** Anota el fallo sin await (best-effort) — ver lib/envio-fallido.ts. */
+function anotarFallo(f: { c: string; tipo: string; tpl?: string; linea?: string; motivo: string; detalle?: string }): void {
+  void import("./envio-fallido").then((m) => m.registrarEnvioFallido(f)).catch(() => undefined)
+}
+
 export async function sendBotmakerMessage(
   contactId: string,
   text: string,
@@ -203,6 +208,7 @@ export async function sendBotmakerMessage(
     console.error(
       "[botmaker-push] BOTMAKER_ACCESS_TOKEN o channelId no configurados",
     )
+    anotarFallo({ c: cleanContact, tipo: "texto", motivo: BM_TOKEN ? "sin_canal" : "sin_token" })
     return false
   }
 
@@ -233,12 +239,14 @@ export async function sendBotmakerMessage(
         `[botmaker-push] send-messages ${res.status} para ${cleanContact}:`,
         body.slice(0, 300),
       )
+      anotarFallo({ c: cleanContact, tipo: "texto", linea: channelNumber(canal), motivo: `http_${res.status}`, detalle: body })
       return false
     }
 
     return true
   } catch (err) {
     console.error("[botmaker-push] Excepción al enviar mensaje:", err)
+    anotarFallo({ c: cleanContact, tipo: "texto", linea: channelNumber(canal), motivo: "excepcion", detalle: err instanceof Error ? err.message : String(err) })
     return false
   }
 }
@@ -427,10 +435,12 @@ export async function sendBotmakerTemplate(
 ): Promise<boolean> {
   if (!BM_TOKEN) {
     console.error("[botmaker-template] BOTMAKER_ACCESS_TOKEN no configurado")
+    anotarFallo({ c: contactId, tipo: "plantilla", tpl: templateName, motivo: "sin_token" })
     return false
   }
   if (!contactId || !templateName) {
     console.error("[botmaker-template] contactId y templateName son requeridos")
+    anotarFallo({ c: contactId, tipo: "plantilla", tpl: templateName, motivo: "sin_datos" })
     return false
   }
   const cleanContact = normalizeContactId(contactId)
@@ -450,6 +460,7 @@ export async function sendBotmakerTemplate(
   }
   if (!chatChannelNumber) {
     console.error("[botmaker-template] no se pudo determinar chatChannelNumber")
+    anotarFallo({ c: cleanContact, tipo: "plantilla", tpl: templateName, motivo: "sin_canal" })
     return false
   }
   // GATE CENTRAL de proactividad (Fase 2 biblia): las plantillas son el envío
@@ -478,6 +489,7 @@ export async function sendBotmakerTemplate(
         `[botmaker-template] notification ${res.status} para ${cleanContact}:`,
         body.slice(0, 400),
       )
+      anotarFallo({ c: cleanContact, tipo: "plantilla", tpl: templateName, linea: chatChannelNumber, motivo: `http_${res.status}`, detalle: body })
       return false
     }
     // Envío ACEPTADO por Botmaker: recién ahora se quema el anti-repetición
@@ -489,6 +501,7 @@ export async function sendBotmakerTemplate(
     return true
   } catch (err) {
     console.error("[botmaker-template] Excepción al enviar plantilla:", err)
+    anotarFallo({ c: cleanContact, tipo: "plantilla", tpl: templateName, linea: chatChannelNumber, motivo: "excepcion", detalle: err instanceof Error ? err.message : String(err) })
     return false
   }
 }

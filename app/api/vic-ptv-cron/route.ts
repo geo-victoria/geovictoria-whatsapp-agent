@@ -2222,8 +2222,49 @@ export async function GET(req: Request) {
   )
   const compromisoPor = new Map(pausas.map((p) => [p.contact, p.compromiso_at]))
 
+  // YA RESUELTO, NO LO VUELVAS A EVALUAR (13-sep, hallazgo de los 504).
+  //
+  // El reloj de etapa itera sobre CONVERSACIONES, y cuando omite un traspaso
+  // por una razón durable (casuística no-prospecto, cliente existente, motivo
+  // terminal del lead, rechazo) marca la fila de vic_loop como cerrada — pero
+  // eso no saca la conversación de esta consulta. Resultado medido: los MISMOS
+  // 7 contactos re-evaluados en cada tick, cada uno costando 40 mensajes de
+  // historial y hasta tres consultas a Zoho, para llegar a la misma conclusión.
+  // Con el cron muriendo a los 120 s en 90 de sus ~144 ticks diarios, ese
+  // trabajo perdido es justo lo que le falta al final del tick.
+  //
+  // La marca guarda el último mensaje del CLIENTE al momento de omitir: si
+  // vuelve a escribir, se re-evalúa igual (un "no gracias" de agosto no puede
+  // dejarnos ciegos ante una intención de octubre).
+  const marcasOmision = new Map<string, { motivo: string; lastUserAt: string | null }>()
+  {
+    const filas = await supa<{ key: string; value: string }>(
+      `vic_kv?key=like.ptv_omitido_*&select=key,value&limit=2000`,
+    ).catch(() => [] as Array<{ key: string; value: string }>)
+    for (const f of filas) {
+      const contacto = String(f.key).replace("ptv_omitido_", "")
+      try {
+        const v = JSON.parse(f.value) as { motivo?: string; lastUserAt?: string | null }
+        marcasOmision.set(contacto, { motivo: String(v.motivo || ""), lastUserAt: v.lastUserAt || null })
+      } catch { /* marca ilegible: se re-evalúa, que es el lado seguro */ }
+    }
+  }
+  /** Estampa la omisión para que el próximo tick no vuelva a pagar el diagnóstico. */
+  const marcarOmision = async (contacto: string, motivo: string, lastUserAt: string | null): Promise<void> => {
+    await supa(`vic_kv?on_conflict=key`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        key: `ptv_omitido_${contacto}`,
+        value: JSON.stringify({ motivo, lastUserAt, at: new Date().toISOString() }),
+        expires_at: new Date(Date.now() + 30 * 24 * 3600e3).toISOString(),
+      }),
+    }).catch(() => undefined)
+  }
+
   const traspasados: Array<{ contact: string; vendedor: string; ttv: number }> = []
   const contactosPrueba = testContactSet()
+  let omitidosPorMarca = 0
   for (const c of convs) {
     if (traspasados.length >= MAX_TRASPASOS_POR_TICK) break
     // Elegibilidad (fix 31-jul, cazado en el primer día encendido):
@@ -2240,6 +2281,14 @@ export async function GET(req: Request) {
     if (c.followup_closed_reason) continue
     // >50: fuera del proceso de traspaso (Lalo 06-ago).
     if (contactosMas50.has(c.contact)) continue
+    // Ya diagnosticado y omitido, y el cliente no ha vuelto a escribir.
+    {
+      const marca = marcasOmision.get(c.contact)
+      if (marca && (!c.last_user_at || !marca.lastUserAt || c.last_user_at <= marca.lastUserAt)) {
+        omitidosPorMarca++
+        continue
+      }
+    }
     // Reloj TTV: el silencio se mide desde el último mensaje del CLIENTE.
     // updated_at se mueve con cada toque del Loop, y usarlo de referencia
     // reiniciaba el TTV en cada toque (brecha 1, 30-jul). Sin mensaje del
@@ -2322,6 +2371,7 @@ export async function GET(req: Request) {
       const cas = await casuisticaDeContacto(c.contact)
       if (!cas.esProspecto) {
         await aplicarCasuisticaNoProspecto(c.contact, cas, "reloj_etapa").catch(() => undefined)
+        await marcarOmision(c.contact, `casuistica:${cas.tipo}`, c.last_user_at || null)
         console.log(`[ptv] ${c.contact}: casuística ${cas.tipo} — traspaso omitido, loop cerrado`)
         continue
       }
@@ -2334,6 +2384,7 @@ export async function GET(req: Request) {
           method: "PATCH",
           body: JSON.stringify({ estado: "cerrado", motivo_cierre: "cliente_existente" }),
         })
+        await marcarOmision(c.contact, "cliente_existente", c.last_user_at || null)
         console.log(`[ptv] ${c.contact}: cliente existente (${ce.cuentaNombre}) — traspaso omitido, loop cerrado (cliente_existente)`)
         continue
       }
@@ -2344,6 +2395,7 @@ export async function GET(req: Request) {
         method: "PATCH",
         body: JSON.stringify({ estado: "cerrado", motivo_cierre: "no_prospecto" }),
       })
+      await marcarOmision(c.contact, `terminal:${motivoTerminal}`, c.last_user_at || null)
       console.log(
         `[ptv] ${c.contact}: lead No Calificado terminal ("${motivoTerminal}") — traspaso omitido, loop cerrado (no_prospecto)`,
       )
@@ -2372,6 +2424,7 @@ export async function GET(req: Request) {
           method: "PATCH",
           body: JSON.stringify({ estado: "cerrado", motivo_cierre: motivoSilencio }),
         })
+        await marcarOmision(c.contact, motivoSilencio, c.last_user_at || null)
         console.log(
           `[ptv] ${c.contact}: ${motivoSilencio === "no_interesa" ? "rechazo explícito" : "autorespuesta"} ("${ultimoTexto.slice(0, 60)}") — traspaso omitido, loop cerrado (${motivoSilencio})`,
         )
@@ -2755,6 +2808,7 @@ export async function GET(req: Request) {
     conversaciones_revisadas_botmaker: asignacionBm.revisadas,
     notas_transcripcion_refrescadas: asignacionBm.notas,
     conversaciones_revisadas: convs.length,
+    omitidos_por_marca_previa: omitidosPorMarca,
     traspasados,
     tm_traspasados: tmTraspasados,
     chequeos_procesados: chequeos.length,
