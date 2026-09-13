@@ -261,17 +261,25 @@ export async function GET(req: Request): Promise<Response> {
   const canalParam = sp.get("dia") as Canal | null
   const canal: Canal | null = canalParam && ["wsp", "mail"].includes(canalParam) ? canalParam : canalDelDia(pais, ahora)
 
+  // MODO PRUEBA: los tres gates de abajo (apagada · fuera de hora · sin canal
+  // hoy) NO aplican. Cuando la campaña estaba apagada solo estorbaba el
+  // primero, así que la exención vivía ahí; al ENCENDERLA (13-sep) el gate de
+  // hora pasó a devolver `fueraDeHora` a toda prueba que no corriera un martes
+  // a las 11 — o sea el modo de verificar el correo quedó muerto justo cuando
+  // más se necesita. La exención es de los tres, no de uno.
+  const modoPrueba = sp.get("probarCorreo") === "1" || sp.get("probarEscritura") === "1"
+
   // Corrida automática con la campaña apagada: no evalúa nada. Las pruebas
   // explícitas (correo, escritura) SÍ corren apagada — para eso existen: se
   // verifican antes de encender, no después.
-  if (!dryExplicito && !enabled && !soloContacto && sp.get("probarCorreo") !== "1" && sp.get("probarEscritura") !== "1") {
+  if (!dryExplicito && !enabled && !soloContacto && !modoPrueba) {
     return NextResponse.json({ ok: true, apagada: true, nota: "vic_kv campana_react_enabled != on — usa ?dry=1 para simular" })
   }
   const hora = horaLocalDe(pais, ahora)
-  if (!dry && !forzarHora && hora !== HORA_CAMPANA) {
+  if (!dry && !forzarHora && !modoPrueba && hora !== HORA_CAMPANA) {
     return NextResponse.json({ ok: true, fueraDeHora: true, hora, canal })
   }
-  if (!canal) return NextResponse.json({ ok: true, sinCanalHoy: true, nota: "la campaña corre martes (wsp) y miércoles (mail)" })
+  if (!canal && !modoPrueba) return NextResponse.json({ ok: true, sinCanalHoy: true, nota: "la campaña corre martes (wsp) y miércoles (mail)" })
 
   const H = await zohoHeaders()
   const feriados = await feriadosDe(pais)
@@ -316,6 +324,9 @@ export async function GET(req: Request): Promise<Response> {
     if (!soloContacto) return NextResponse.json({ ok: false, error: "falta contact" }, { status: 400 })
     return NextResponse.json({ ok: true, prueba: await probarEscritura(soloContacto, pais) })
   }
+
+  // Pasados los modos de prueba, sin canal no hay nada que hacer.
+  if (!canal) return NextResponse.json({ ok: true, sinCanalHoy: true, nota: "la campaña corre martes (wsp) y miércoles (mail)" })
 
   if (soloContacto) {
     const ev = await evaluarGrupo1(soloContacto, { pais, ahora, H, feriados })
