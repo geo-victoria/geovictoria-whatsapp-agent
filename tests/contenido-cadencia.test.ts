@@ -63,3 +63,18 @@ test("sin nombre el saludo no queda cojo", () => {
   const { html } = correoDeContenido({ pieza: PIEZAS[1], fromEmail: "vicky@geovictoria.com", waUrl: "https://wa.me/569" })
   assert.match(html, /Hola! Soy <b>Vicky<\/b>/)
 })
+
+test("la objeción de PRECIO —la más frecuente— trae una pieza de costo, no la primera del orden", () => {
+  const p = siguientePieza([], "precio")
+  assert.ok(p)
+  assert.ok(p.temas.includes("costo"), `salió ${p?.id}`)
+  assert.equal(temaParaMotivo("el cliente lo encontró caro"), "costo")
+  assert.equal(temaParaMotivo("no hay presupuesto este año"), "costo")
+})
+
+test("ninguna pieza promete un precio NUESTRO ni una oferta comercial", () => {
+  // OJO: "Descuentos por atrasos" es un descuento de REMUNERACIONES, no una
+  // oferta — por eso el patrón busca la oferta comercial, no la palabra suelta.
+  const oferta = /% de descuento|descuento en el plan|oferta|promoci[oó]n|\$\s?\d|\bUF\b|barato|precio especial/i
+  for (const p of PIEZAS) assert.doesNotMatch(`${p.titulo} ${p.gancho}`, oferta, `pieza ${p.id}`)
+})

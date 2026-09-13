@@ -35,7 +35,7 @@
 
 const BLOG = "https://www.geovictoria.com/es-cl/blog"
 
-export type Tema = "legal" | "horas" | "hardware" | "operacion" | "comparacion"
+export type Tema = "costo" | "legal" | "horas" | "hardware" | "operacion" | "comparacion"
 
 export type Pieza = {
   id: string
@@ -52,6 +52,14 @@ export type Pieza = {
  * literalmente las dos que más daño hicieron cuando se contestaron mal).
  */
 export const PIEZAS: Pieza[] = [
+  // COSTO primero: el motivo nº1 por el que no cierran es el precio, y estas
+  // cuatro hablan de plata SIN vender — cuánto cuesta NO tener el registro y
+  // dónde está el ahorro. (Existían desde siempre; se me pasaron por barrer
+  // solo 4 de las 9 páginas del índice del blog.)
+  { id: "multas", titulo: "Multas por no tener registro de asistencia: cuánto cuestan", gancho: "el número concreto de lo que arriesga una empresa sin registro, que suele ser varias veces el costo de tenerlo", url: `${BLOG}/multas-por-no-tener-registro-de-asistencia-en-que-consiste-y-cuanto-cuesta/`, temas: ["costo", "legal"] },
+  { id: "reducir_extras", titulo: "Cinco formas de reducir las horas extra", gancho: "dónde se va la plata en horas que nadie autorizó y cómo cortarlas", url: `${BLOG}/5-consejos-reducir-horas-extras/`, temas: ["costo", "horas"] },
+  { id: "ausentismo", titulo: "Ausentismo laboral en Chile: qué cuesta y cómo se mide", gancho: "cuánto pesa en la planilla lo que no se está midiendo", url: `${BLOG}/ausentismo-laboral-chile/`, temas: ["costo", "operacion"] },
+  { id: "atrasos", titulo: "Descuentos por atrasos e inasistencias: cómo proceder", gancho: "qué se puede descontar y qué no, con el respaldo que exige la ley", url: `${BLOG}/descuentos-por-atrasos-e-inasistencias-como-proceder/`, temas: ["costo", "legal"] },
   { id: "art22", titulo: "Artículo 22: quién está obligado a marcar y quién no", gancho: "los excluidos de jornada no están obligados a registrar asistencia, y conviene tenerlo claro antes de contar cuánta gente marca", url: `${BLOG}/nuevas-definiciones-articulo-22/`, temas: ["legal"] },
   { id: "res38", titulo: "Resolución Exenta N°38: qué exige la Dirección del Trabajo", gancho: "qué tiene que cumplir un sistema de asistencia para estar autorizado", url: `${BLOG}/resolucion-exenta-38-en-que-consiste/`, temas: ["legal"] },
   { id: "leyes_asistencia", titulo: "Las leyes de asistencia en Chile, en simple", gancho: "qué obliga la ley a registrar, en lenguaje de persona", url: `${BLOG}/leyes-de-asistencia-chile/`, temas: ["legal"] },
@@ -67,6 +75,7 @@ export const PIEZAS: Pieza[] = [
   { id: "inspeccion", titulo: "Qué revisa la Inspección del Trabajo", gancho: "lo que se mira en terreno y dónde suelen aparecer las multas", url: `${BLOG}/inspeccion-del-trabajo-y-vacaciones-lo-que-deben-saber-las-empresaso/`, temas: ["legal"] },
   { id: "obligaciones", titulo: "Obligaciones del empleador en la legislación laboral chilena", gancho: "el mapa completo, para revisar de una sola pasada", url: `${BLOG}/legislacion-laboral-en-chile-obligaciones-del-empleador/`, temas: ["legal"] },
   { id: "subcontratacion", titulo: "Ley de subcontratación y control de asistencia", gancho: "qué le toca a la empresa principal cuando hay contratistas en faena", url: `${BLOG}/control-de-asistencia-en-el-cumplimiento-de-la-ley-de-subcontratacion/`, temas: ["legal"] },
+  { id: "rotacion", titulo: "Rotación de personal en Chile: causas, impacto y qué hacer", gancho: "lo que cuesta que la gente se vaya, y qué se ve en los datos antes de que pase", url: `${BLOG}/rotacion-de-personal-en-chile-causas-impacto-y-estrategias/`, temas: ["costo", "operacion"] },
   { id: "tipos_horarios", titulo: "Tipos de horario de trabajo", gancho: "cómo se arman jornadas fijas, rotativas y parciales sin enredarse", url: `${BLOG}/tipos-de-horarios-de-trabajo/`, temas: ["operacion"] },
 ]
 
@@ -77,6 +86,7 @@ export const CONTENIDO_DIAS = Number(process.env.CONTENIDO_DIAS || 30)
 export function temaParaMotivo(motivo: string | null | undefined): Tema | null {
   const m = String(motivo || "").toLowerCase()
   if (!m) return null
+  if (m.includes("precio") || m.includes("costo") || m.includes("caro") || m.includes("presupuesto")) return "costo"
   if (m.includes("legal") || m.includes("normativ") || m.includes("multa")) return "legal"
   if (m.includes("hardware") || m.includes("reloj") || m.includes("huellero")) return "hardware"
   if (m.includes("hora")) return "horas"

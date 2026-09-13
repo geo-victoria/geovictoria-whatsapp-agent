@@ -10,7 +10,7 @@ import {
   detectarSenalBlanda,
   reconocimientoSenalBlanda,
   conReconocimiento,
-} from "../lib/senal-blanda"
+} from "../lib/senal-blanda.ts"
 
 const cli = (t: string) => [{ role: "user", content: t }]
 
