@@ -51,7 +51,7 @@ export async function GET(req: Request): Promise<Response> {
     porLinea,
     nota:
       fallos.length === 0
-        ? "sin fallos registrados: el histórico arranca hoy (13-sep) y el webhook NO escucha la línea 56967308227 de Vicky Chile"
+        ? "sin fallos registrados. El histórico arranca el 13-sep, y ese mismo día la línea 56967308227 (Vicky Chile) quedó conectada al webhook de estados — verificado con un payload real de esa línea. Cero fallos acá significa que no hubo, no que no estemos escuchando."
         : "el nombre de la plantilla solo se resuelve dentro de las ~72 h que alcanza la API de mensajes de Botmaker",
     ultimos: fallos.slice(0, 40),
   })
