@@ -344,10 +344,26 @@ export async function GET(req: Request): Promise<Response> {
   const presupuestoMs = 250_000
   const t0 = Date.now()
   let censo: { chatActivo: number; aEvaluar: number; precalculados: number } | null = null
+  let pool: { total: number; canalEjecutivo: number; deVicky: number; cotizacion: number; precioVisto: number } | null = null
 
   if (canal === "wsp") {
     // MARTES: universo → grupo 1 → primera casilla en falso.
     const universo = await universoCampana({ dias, H })
+    // Resumen del universo COMPLETO: el barrido corta en 200 filas, así que
+    // `universo: filas.length` de la respuesta es lo REPORTADO, no el pool.
+    // El canal se decide al armar el universo (no cuesta nada contarlo) y es
+    // el filtro que más recorta: sin este resumen, "cuántos candidatos
+    // quedan" solo se podía proyectar desde la muestra.
+    const poolTotal = universo.length
+    const poolEjecutivo = universo.filter((c) => c.canalEjecutivo).length
+    const poolPrecioVisto = universo.filter((c) => /precio visto/.test(String(c.origen || ""))).length
+    pool = {
+      total: poolTotal,
+      canalEjecutivo: poolEjecutivo,
+      deVicky: poolTotal - poolEjecutivo,
+      cotizacion: poolTotal - poolPrecioVisto,
+      precioVisto: poolPrecioVisto,
+    }
     const casillas = await leerCasillasLote(universo.map((u) => u.contact))
 
     // CENSO DEL DRY (cero envíos, cero escrituras): dos cosas para que el
@@ -579,5 +595,5 @@ export async function GET(req: Request): Promise<Response> {
     const k = f.accion ? (f.accion.startsWith("SE ENVIARÍA") ? "se_enviaria" : f.accion.split(" (")[0]) : String(f.omitido || "?").split(" (")[0]
     resumen[k] = (resumen[k] || 0) + 1
   }
-  return NextResponse.json({ ok: true, dry, enabled, canal, hora, fecha: ahora.toISOString(), dias, universo: filas.length, evaluados, enviados, censo, resumen, filas, ms: Date.now() - t0 })
+  return NextResponse.json({ ok: true, dry, enabled, canal, hora, fecha: ahora.toISOString(), dias, universo: filas.length, pool, evaluados, enviados, censo, resumen, filas, ms: Date.now() - t0 })
 }
