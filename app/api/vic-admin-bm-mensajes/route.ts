@@ -24,6 +24,26 @@ export async function GET(req: Request): Promise<Response> {
   const token = (process.env.BOTMAKER_ACCESS_TOKEN || process.env.BM_ACCESS_TOKEN || "").trim()
   if (!token) return NextResponse.json({ ok: false, error: "sin BOTMAKER_ACCESS_TOKEN" }, { status: 503 })
 
+  // SONDA GENÉRICA DE SOLO LECTURA (`?ruta=/v2.0/...`): sirve para descubrir qué
+  // expone la API de Botmaker sin desplegar un endpoint por cada intento — en
+  // particular si la configuración de WEBHOOKS es accesible con el token que ya
+  // tenemos, que evitaría pedir credenciales del panel. Solo GET, y la ruta
+  // debe empezar con /v2.0/ (nada de escribir ni de salir del host).
+  const ruta = (sp.get("ruta") || "").trim()
+  if (ruta) {
+    if (!/^\/v[0-9.]+\//.test(ruta)) {
+      return NextResponse.json({ ok: false, error: "ruta debe empezar con /v2.0/" }, { status: 400 })
+    }
+    const r = await fetch(`https://api.botmaker.com${ruta}`, {
+      headers: { "access-token": token, Accept: "application/json" },
+      cache: "no-store",
+    })
+    const texto = await r.text().catch(() => "")
+    let json: unknown = null
+    try { json = JSON.parse(texto) } catch { /* no era JSON */ }
+    return NextResponse.json({ ok: r.ok, status: r.status, ruta, json: json ?? undefined, texto: json ? undefined : texto.slice(0, 1500) })
+  }
+
   const contacto = (sp.get("contact") || "").replace(/\D/g, "")
   const horas = Math.min(Math.max(Number(sp.get("horas")) || 24, 1), 168)
   const desde = new Date(Date.now() - horas * 3600e3).toISOString()
