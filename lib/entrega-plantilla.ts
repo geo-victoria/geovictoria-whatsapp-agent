@@ -168,3 +168,93 @@ export function veredictosDeEntrega(
     }
   })
 }
+
+// ── VERIFICACIÓN AUTOMÁTICA Y PERSISTIDA ────────────────────────────────────
+// El veredicto hay que guardarlo CUANDO se puede leer, no cuando se necesita:
+// aunque `long-term-search=true` alcanza semanas atrás, la lectura es cara
+// (7.377 mensajes para verificar una campaña de 247) y el dato no cambia. Con
+// esto el cron verifica los toques recientes una vez y deja el veredicto en
+// vic_kv, de donde el reporte del lunes lo lee gratis.
+
+const SUPA_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "")
+const SUPA_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+
+export type EntregaPersistida = { contacto: string; casilla: string; at: string; veredicto: string; detalle?: string }
+
+const claveEntrega = (contacto: string, campana: string, at: string) =>
+  `entrega_${campana}_${contacto}_${at.slice(0, 16).replace(/[-:T]/g, "")}`
+
+/**
+ * Verifica los envíos de campaña de los últimos `dias` que aún no tienen
+ * veredicto y los persiste. Idempotente: lo ya verificado no se vuelve a leer.
+ */
+export async function verificarYPersistirEntregas(
+  dias = 3,
+): Promise<{ evaluados: number; salio: number; no_visto: number; sin_datos: number; nuevos: number; detalle: EntregaPersistida[]; error?: string }> {
+  const vacio = { evaluados: 0, salio: 0, no_visto: 0, sin_datos: 0, nuevos: 0, detalle: [] as EntregaPersistida[] }
+  if (!SUPA_URL || !SUPA_KEY) return { ...vacio, error: "sin supabase" }
+  const H = { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+  const desdeIso = new Date(Date.now() - dias * 86_400_000).toISOString()
+
+  // 1. Envíos de WhatsApp de la campaña en la ventana.
+  const r = await fetch(
+    `${SUPA_URL}/rest/v1/vic_campanas?campana=like.react_t*&evento=eq.enviado&at=gte.${desdeIso}&select=contact,at,campana&limit=1000`,
+    { headers: H, cache: "no-store" },
+  ).catch(() => null)
+  if (!r || !r.ok) return { ...vacio, error: `vic_campanas ${r ? r.status : "sin respuesta"}` }
+  const filas = ((await r.json().catch(() => [])) as Array<{ contact: string; at: string; campana: string }>) || []
+  if (!filas.length) return vacio
+
+  // 2. Lo ya verificado se salta (una lectura en bloque, no una por fila).
+  const rv = await fetch(`${SUPA_URL}/rest/v1/vic_kv?key=like.entrega_react_t*&select=key&limit=5000`, { headers: H, cache: "no-store" }).catch(() => null)
+  const yaHechos = new Set(
+    (((await rv?.json().catch(() => [])) as Array<{ key: string }>) || []).map((f) => f.key),
+  )
+  const pendientes = filas.filter((f) => !yaHechos.has(claveEntrega(f.contact, f.campana, f.at)))
+  if (!pendientes.length) return { ...vacio, evaluados: filas.length }
+
+  // 3. Una sola lectura de Botmaker para todos los pendientes.
+  const { porContacto, total } = await salientesDesde(desdeIso, { presupuestoMs: 120_000, maxPaginas: 60 })
+  const veredictos = veredictosDeEntrega(
+    pendientes.map((f) => ({ contacto: f.contact, at: f.at, tpl: undefined })),
+    porContacto,
+    Date.parse(desdeIso),
+    { lecturaUtil: total > 0 },
+  )
+
+  const { setKvValue } = await import("./supabase-persistence-v3")
+  const out = { ...vacio, evaluados: filas.length }
+  for (let i = 0; i < veredictos.length; i++) {
+    const v = veredictos[i]
+    const f = pendientes[i]
+    // `sin_datos` NO se persiste: no es un veredicto, es una lectura fallida —
+    // guardarlo congelaría la ignorancia y el reintento nunca ocurriría.
+    if (v.veredicto === "sin_datos") { out.sin_datos++; continue }
+    const fila: EntregaPersistida = { contacto: v.contacto, casilla: f.campana, at: f.at, veredicto: v.veredicto, detalle: v.detalle }
+    await setKvValue(claveEntrega(f.contact, f.campana, f.at), JSON.stringify(fila)).catch(() => {})
+    out.nuevos++
+    if (v.veredicto === "salio") out.salio++
+    else if (v.veredicto === "no_visto") out.no_visto++
+    out.detalle.push(fila)
+  }
+  return out
+}
+
+/** Lee los veredictos ya persistidos (gratis, sin tocar Botmaker). */
+export async function entregasPersistidas(dias = 28): Promise<EntregaPersistida[]> {
+  if (!SUPA_URL || !SUPA_KEY) return []
+  const r = await fetch(`${SUPA_URL}/rest/v1/vic_kv?key=like.entrega_react_t*&select=key,value&limit=5000`, {
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
+    cache: "no-store",
+  }).catch(() => null)
+  if (!r || !r.ok) return []
+  const corte = Date.now() - dias * 86_400_000
+  const out: EntregaPersistida[] = []
+  for (const f of ((await r.json().catch(() => [])) as Array<{ key: string; value: string }>) || []) {
+    try {
+      const e = JSON.parse(f.value) as EntregaPersistida
+      if (Date.parse(e.at || "") >= corte) out.push(e)
+    } catch { /* fila ilegible */ }
+  }
+  return out
+}

@@ -109,6 +109,9 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // responde `apagada` mientras vic_kv campana_react_enabled != "on" y
   // `fueraDeHora` fuera de las 11.
   { nombre: "campana_react", path: "/api/vic-campana-reactivacion", cadaMin: 60 },
+  // Verifica que los toques del martes SALIERON de verdad y persiste el
+  // veredicto (el 202 de Botmaker es "encargo aceptado", no "entregado").
+  { nombre: "campana_entregas", path: "/api/vic-campana-entregas", cadaMin: 360 },
   // PRE-FLIGHT DEL LUNES con freno automático (Lalo 11-sep): simula el toque
   // del martes, lo compara con la semana pasada y APAGA la campaña si algo se
   // sale de rango (el 11-sep dos consultas rotas la dejaron muda). Se auto-

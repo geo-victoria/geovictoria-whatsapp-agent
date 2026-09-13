@@ -39,6 +39,7 @@
 
 import { NextResponse } from "next/server"
 import { resultadoCampana } from "@/lib/campana-resultado"
+import { entregasPersistidas } from "@/lib/entrega-plantilla"
 import { getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 
@@ -219,6 +220,9 @@ export async function GET(req: Request): Promise<Response> {
 
   // 2-bis. Lo que YA salió: la campaña se juzga por su resultado, no solo por
   // su volumen (pregunta de Lalo "¿serán automáticas para siempre?").
+  const entregas = await entregasPersistidas(28).catch(() => [])
+  const entregaSalio = entregas.filter((e) => e.veredicto === "salio").length
+  const entregaNoVisto = entregas.filter((e) => e.veredicto === "no_visto").length
   const resultado = await resultadoCampana(28).catch((e) => {
     console.error("[preflight] resultado de campaña falló", e)
     return null
@@ -248,6 +252,11 @@ export async function GET(req: Request): Promise<Response> {
     if (resultado && resultado.contactos >= BASE_DANO) {
       if (resultado.tasaDano > PCT_DANO) frenos.push(`${resultado.rechazos} rechazos y ${resultado.optOuts} opt-out sobre ${resultado.contactos} contactos tocados (${resultado.tasaDano} %, tope ${PCT_DANO} %) — la campaña está molestando`)
       else if (resultado.tasaOptOut > PCT_OPTOUT) frenos.push(`${resultado.optOuts} opt-out sobre ${resultado.contactos} contactos (${resultado.tasaOptOut} %, tope ${PCT_OPTOUT} %) — esa es la señal que mira Meta para la calidad de la línea`)
+    }
+    // Si una parte grande de los toques no llegó a salir, seguir mandando es
+    // gastar la reputación de la línea sin llegar a nadie.
+    if (entregaSalio + entregaNoVisto >= 20 && entregaNoVisto / (entregaSalio + entregaNoVisto) > 0.2) {
+      frenos.push(`${entregaNoVisto} de ${entregaSalio + entregaNoVisto} toques verificados NO salieron de Botmaker (${Math.round((entregaNoVisto / (entregaSalio + entregaNoVisto)) * 100)} %) — revisar plantilla/línea antes de seguir`)
     }
     if (resultado?.fallas.length) frenos.push(`no se pudo leer el resultado de las campañas anteriores (${resultado.fallas[0]}) — se decide a ciegas`)
   }
@@ -295,6 +304,11 @@ export async function GET(req: Request): Promise<Response> {
   <table style="border-collapse:collapse;font-size:13.5px;margin-bottom:6px">
     <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Toques enviados</td><td style="padding:2px 0"><b>${resultado.enviados}</b> a ${resultado.contactos} contactos</td></tr>
     <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Respondieron</td><td style="padding:2px 0"><b>${resultado.respondieron}</b> (${resultado.tasaRespuesta} %)${resultado.autorespuestas ? ` · ${resultado.autorespuestas} autorespuestas` : ""}</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Salieron de verdad</td><td style="padding:2px 0">${
+      entregaSalio + entregaNoVisto
+        ? `<b>${entregaSalio}</b> de ${entregaSalio + entregaNoVisto} verificados contra Botmaker${entregaNoVisto ? ` · <span style="color:#b91c1c">${entregaNoVisto} NO salieron</span>` : ""}`
+        : `<span style="color:#6b7280">sin verificar aún</span>`
+    }</td></tr>
     <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Ventas después del toque</td><td style="padding:2px 0"><b>${resultado.ventas}</b></td></tr>
     <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Rechazos</td><td style="padding:2px 0;color:${resultado.tasaDano > PCT_DANO ? "#b91c1c" : "#2d3748"}">${resultado.rechazos}</td></tr>
     <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Opt-out</td><td style="padding:2px 0;color:${resultado.tasaOptOut > PCT_OPTOUT ? "#b91c1c" : "#2d3748"}"><b>${resultado.optOuts}</b> (${resultado.tasaOptOut} %)</td></tr>
@@ -317,6 +331,7 @@ export async function GET(req: Request): Promise<Response> {
 
   return NextResponse.json({
     ok: true, dry, semana, estado, enabledAntes, corridaOk, truncado, censo, sinEvaluar, saldriaReal, resultado,
+    entregas: { salio: entregaSalio, no_visto: entregaNoVisto, verificados: entregas.length },
     universo, evaluados, seEnviaria, noEvaluable,
     previa, frenos, freno, motivos, correoOk,
     seEnviarianA: ejemplos,
