@@ -69,7 +69,15 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // 3. Escribir y RELEER (un 200 que no persiste se ve igual que un éxito).
-  const rp = await fetch(`${BM}/v2.0/webhooks`, { method: "PUT", headers: H, body: JSON.stringify(propuesto), cache: "no-store" })
+  //    El PUT sobre /v2.0/webhooks con el objeto completo devuelve 500, así que
+  //    el método, la ruta y la forma del body son tanteables por query — cada
+  //    intento queda verificado por la relectura de abajo y respaldado arriba.
+  const metodo = (sp.get("metodo") || "PUT").toUpperCase()
+  const sufijo = sp.get("sufijo") === "1" ? `/${id}` : ""
+  const cuerpo = sp.get("soloNotif") === "1"
+    ? JSON.stringify({ id, messagesNotifications: notif })
+    : JSON.stringify(propuesto)
+  const rp = await fetch(`${BM}/v2.0/webhooks${sufijo}`, { method: metodo, headers: H, body: cuerpo, cache: "no-store" })
   const respuesta = await rp.text().catch(() => "")
   const rl2 = await fetch(`${BM}/v2.0/webhooks`, { headers: H, cache: "no-store" })
   const lista2 = (await rl2.json().catch(() => ({}))) as { items?: Array<Record<string, unknown>> }
@@ -80,6 +88,7 @@ export async function POST(req: Request): Promise<Response> {
   return NextResponse.json({
     ok: rp.ok && persistio,
     statusPut: rp.status,
+    intento: { metodo, sufijo: sufijo || "(sin id en la ruta)", cuerpo: sp.get("soloNotif") === "1" ? "solo messagesNotifications" : "objeto completo" },
     respuesta: respuesta.slice(0, 400),
     persistio,
     quedo,
