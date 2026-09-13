@@ -33,7 +33,8 @@ import { linkCortoDe } from "@/lib/link-cotizacion"
 import { getUFActual } from "@/lib/uf"
 import { evaluarGateProactividad } from "@/lib/gate-proactividad"
 import { montoDelBloque } from "@/lib/precio-bloque"
-import { claveCampana, aplicarTopeParaToque4 } from "@/lib/campana-descuento"
+import { claveCampana, aplicarTopeParaToque4, descuentoDeCotizacion } from "@/lib/campana-descuento"
+import { correoDeToque } from "@/lib/campana-correo"
 import { setKvValue } from "@/lib/supabase-persistence-v3"
 import {
   anotarEvaluacion,
@@ -166,38 +167,6 @@ async function contextoDelChat(contact: string, uf: number): Promise<{ precio: s
   }
 }
 
-function esc(s: string): string {
-  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-}
-
-/**
- * El PDF va como BOTÓN, nunca adjunto (orden de Lalo 13-sep). Además de ser
- * lo que él quiere, esquiva el OAUTH_SCOPE_MISMATCH que tiene caído el
- * adjunto del cotizador desde siempre: el link del PDF ya existe en la
- * cotización (`PDF_URL`) y no necesita el scope ZohoFiles.
- */
-function htmlCorreo(nombre: string, empresa: string, link: string, pdfUrl = ""): string {
-  const saludo = nombre ? `Hola ${esc(nombre)}!` : "Hola!"
-  const btn = (href: string, texto: string, fondo: string, borde: string, color: string) =>
-    `<a href="${href}" style="background:${fondo};border:1px solid ${borde};color:${color};text-decoration:none;font-weight:700;padding:12px 24px;border-radius:10px;display:inline-block;font-size:15px;margin:4px 6px">${texto}</a>`
-  const botones = [
-    link ? btn(link, "Ver mi cotización", "#0087C8", "#0087C8", "#ffffff") : "",
-    pdfUrl ? btn(pdfUrl, "Descargar el PDF", "#ffffff", "#0087C8", "#0087C8") : "",
-  ].filter(Boolean).join("")
-  const cta = botones ? `<p style="text-align:center;margin:22px 0">${botones}</p>` : ""
-  return `<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:'Segoe UI',Arial,sans-serif;color:#2d3748">
-<div style="max-width:560px;margin:0 auto;padding:26px 18px">
-  <div style="background:#fff;border-radius:14px;padding:28px 26px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-    <p style="margin:0 0 14px;font-size:15px">${saludo} Soy <b>Vicky</b>, de GeoVictoria 👋</p>
-    <p style="margin:0 0 14px;font-size:14.5px;line-height:1.6">Ayer te escribí por WhatsApp para retomar la cotización de control de asistencia${empresa ? ` de <b>${esc(empresa)}</b>` : ""}. Sigue vigente y con el mismo valor.</p>
-    <p style="margin:0 0 6px;font-size:14.5px;line-height:1.6">Si quieres partir, se paga en línea y tu cuenta queda activa el mismo día; yo te acompaño con la configuración por WhatsApp.</p>
-    ${cta}
-    <p style="text-align:center;margin:0 0 18px"><a href="${WA_VICKY}" style="color:#25D366;font-weight:700;text-decoration:none;font-size:14px">Escribirme por WhatsApp 💬</a></p>
-    <p style="margin:0;font-size:13px;color:#718096;line-height:1.6">Si ya no lo necesitas o prefieres que no te escribamos más por esta cotización, respóndeme este correo y lo dejo hasta aquí.</p>
-  </div>
-</div></body></html>`
-}
-
 async function enviarCorreo(H: Record<string, string>, quoteId: string | null, to: string, subject: string, html: string): Promise<boolean> {
   const anchor = quoteId ? `${QUOTE_MODULE}/${quoteId}` : (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
   const r = await fetch(`${ZOHO_API}/crm/v3/${anchor}/actions/send_mail`, {
@@ -322,12 +291,24 @@ export async function GET(req: Request): Promise<Response> {
     if (!/^[^@\s]+@[^@\s]+$/.test(to)) return NextResponse.json({ ok: false, error: "falta to=<email>" }, { status: 400 })
     const H = await zohoHeaders().catch(() => null)
     if (!H) return NextResponse.json({ ok: false, error: "sin token Zoho" }, { status: 503 })
-    const html = htmlCorreo("Lalo", "GeoVictoria (prueba)", `${WA_VICKY}`, (sp.get("pdf") || "https://cotizacion.geovictoria.com/pdf/assets/ficha-reloj-senseface.pdf").trim())
-    const ok = await enviarCorreo(H, null, to, "PRUEBA · Tu cotización de control de asistencia sigue vigente", html).catch((e) => {
+    // `?toque=1..4` prueba el cuerpo de ESE toque (default 1) y `?pct=` simula
+    // el descuento aplicado, para ver el correo del toque 4 en sus dos formas.
+    const casillaPrueba = (Math.min(Math.max(Number(sp.get("toque")) || 1, 1), 4) as 1 | 2 | 3 | 4)
+    const { asunto, html } = correoDeToque({
+      casilla: casillaPrueba,
+      nombre: "Lalo",
+      empresa: "GeoVictoria (prueba)",
+      link: WA_VICKY,
+      pdfUrl: (sp.get("pdf") || "https://cotizacion.geovictoria.com/pdf/assets/ficha-reloj-senseface.pdf").trim(),
+      gancho: ganchoParaToque2(sp.get("motivo")),
+      pctDescuento: Number(sp.get("pct")) || 0,
+      waUrl: WA_VICKY,
+    })
+    const ok = await enviarCorreo(H, null, to, `PRUEBA · ${asunto}`, html).catch((e) => {
       console.error("[campana] prueba de correo falló", e)
       return false
     })
-    return NextResponse.json({ ok, to, nota: ok ? "correo de campaña enviado — revisa también Promociones/Otros" : "el send_mail de Zoho no aceptó el envío" })
+    return NextResponse.json({ ok, to, toque: casillaPrueba, asunto, nota: ok ? "correo de campaña enviado — revisa también Promociones/Otros" : "el send_mail de Zoho no aceptó el envío" })
   }
 
   if (sp.get("probarEscritura") === "1") {
@@ -542,7 +523,23 @@ export async function GET(req: Request): Promise<Response> {
       const gate = await evaluarGateProactividad(f.contact, { tipo: "texto" }).catch(() => null)
       if (gate && !gate.permitir) { base.omitido = `gate (${gate.motivos.join(", ").slice(0, 80)})`; filas.push(base); continue }
       const link = f.quote_id ? linkCortoDe(f.quote_id) : ""
-      const ok = await enviarCorreo(H, f.quote_id, email, `Tu cotización de control de asistencia sigue vigente${empresa || f.empresa ? ` · ${empresa || f.empresa}` : ""}`, htmlCorreo(nombre, empresa || f.empresa || "", link, pdfUrl)).catch(() => false)
+      // El correo dice LO MISMO que dijo la plantilla del martes: el gancho del
+      // toque 2 sale del mismo clasificador, y el 20 % del toque 4 solo se
+      // nombra si está APLICADO de verdad en la cotización (si la aplicación se
+      // negó, el link muestra precio de lista y prometerlo sería mentir).
+      const ctxMail = casilla === 2 ? await contextoDelChat(f.contact, ufDia) : { precio: "", motivo: null }
+      const dctoMail = casilla === 4 ? await descuentoDeCotizacion(f.quote_id).catch(() => null) : null
+      const { asunto, html } = correoDeToque({
+        casilla,
+        nombre,
+        empresa: empresa || f.empresa || "",
+        link,
+        pdfUrl,
+        gancho: casilla === 2 ? ganchoParaToque2(ctxMail.motivo) : "",
+        pctDescuento: dctoMail?.pct ?? 0,
+        waUrl: WA_VICKY,
+      })
+      const ok = await enviarCorreo(H, f.quote_id, email, asunto, html).catch(() => false)
       if (!ok) { base.accion = "ENVÍO FALLÓ (correo)"; filas.push(base); continue }
       await marcarCasilla(f.contact, casilla, "mail", { pais, motivo: `toque ${casilla} correo` })
       await registrarEvento(f.contact, casilla, "mail", f.quote_id)

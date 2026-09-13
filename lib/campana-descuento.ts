@@ -533,3 +533,17 @@ export async function aplicarTopeParaToque4(
     return { ok: false, pct: q.dcto, motivo: "aplicacion_fallo" }
   }
 }
+
+/**
+ * Descuento REAL vigente en la cotización (lectura, sin escribir nada). Lo usa
+ * el correo del toque 4: solo puede nombrar el 20 % si está aplicado de verdad
+ * —si `aplicarTopeParaToque4` se negó, el link muestra el precio de lista y
+ * prometerlo sería mentir—. Devuelve null si la cotización no se puede leer.
+ */
+export async function descuentoDeCotizacion(
+  quoteId: string | null | undefined,
+): Promise<{ pct: number; estado: string; canal: string } | null> {
+  if (!quoteId) return null
+  const q = await leerQuote(quoteId)
+  return q ? { pct: q.dcto, estado: q.estado, canal: q.canal } : null
+}
