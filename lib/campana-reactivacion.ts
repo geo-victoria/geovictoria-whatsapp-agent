@@ -35,6 +35,7 @@ import { getKvValue, getQuotePointers } from "./supabase-persistence-v3"
 import { posturaRechazoCliente } from "./rechazo-cliente"
 import { detectarClienteExistente } from "./cliente-existente"
 import { casuisticaDeContacto } from "./casuistica-runtime"
+import { umbralPrecios } from "./umbral-autonomia"
 import { testContactSet } from "./funnel-analysis"
 import { canalDelDia, casillaAbierta, esToqueComercial, horaLocalDe, siguienteCasilla, HORA_INICIO_CAMPANA, MINUTOS_HABILES_INACTIVIDAD, type Canal, type Casilla, type FilaCasillas } from "./campana-reactivacion-reglas"
 
@@ -246,9 +247,9 @@ export async function ultimaActividad(
   try {
     const H = opts.H || (await zohoHeaders())
     const corte = new Date(ahora.getTime() - (opts.ventanaDias || 10) * 86_400_000).toISOString().slice(0, 19) + "+00:00"
-    const quotes = await coql<{ id: string; Fecha_Hora_Cotizacion?: string | null }>(
+    const quotes = await coql<{ id: string; Fecha_Hora_Cotizacion?: string | null; Created_Time?: string | null }>(
       H,
-      `select id, Fecha_Hora_Cotizacion from ${QUOTE_MODULE} where Tel_fono_Contacto like '%${nueve}%' order by Created_Time desc limit 5`,
+      `select id, Fecha_Hora_Cotizacion, Created_Time from ${QUOTE_MODULE} where Tel_fono_Contacto like '%${nueve}%' order by Created_Time desc limit 5`,
     )
     let acept: Actividad | null = null
     for (const q of quotes) {
@@ -257,6 +258,18 @@ export async function ultimaActividad(
     }
     fuentes.cotizacion_aceptacion = acept?.at?.toISOString() || null
     if (acept) cands.push(acept)
+
+    // La EMISIÓN de una cotización es actividad igual que la aceptación: un
+    // ejecutivo que acaba de cotizar está trabajando el caso aunque no deje
+    // nota. Sin esto, un prospecto con cotización fresca del vendedor le
+    // parecía INACTIVO a la campaña y recibía el toque encima de su gestión.
+    let emitida: Actividad | null = null
+    for (const q of quotes) {
+      const d = fechaDe(q.Created_Time)
+      if (d && (!emitida?.at || d > emitida.at)) emitida = { at: d, fuente: "cotizacion (emitida)" }
+    }
+    fuentes.cotizacion_emision = emitida?.at?.toISOString() || null
+    if (emitida) cands.push(emitida)
 
     const deals = await coql<{ id: string; Last_Activity_Time?: string | null; Fecha_ultima_Nota?: string | null }>(
       H,
@@ -360,17 +373,40 @@ export async function evaluarGrupo1(
   const cas = await casuisticaDeContacto(contact).catch(() => null)
   if (cas && !cas.esProspecto) return fuera("no_prospecto", cas.tipo)
 
-  // Deal en 7/8 = cliente aunque la cuenta no lo diga.
+  // Deal en 7/8 = cliente aunque la cuenta no lo diga; y de la MISMA consulta
+  // sale la dotación, que es el filtro de SEGMENTO (Lalo 13-sep: "esto está
+  // pensado para el segmento que Vicky puede vender"). Un contacto de 30 o
+  // 150 personas está sobre el umbral: si contesta, el guard determinista del
+  // agent-loop le bloquea cotizar_referencial y Vicky no puede atenderlo —
+  // escribirle es prometer una conversación que no existe, y además pisar la
+  // gestión del ejecutivo que sí lo lleva.
   const H = opts.H || (await zohoHeaders())
+  let dotacion = 0
   try {
     const nueve = contact.slice(-9)
-    const deals = await coql<{ id: string; Stage: string }>(
+    const deals = await coql<{ id: string; Stage: string; N_Empleados_que_marcan?: number | string | null }>(
       H,
-      `select id, Stage from Deals where (Contact_Phone like '%${nueve}%' and Stage in ('7. Implementando','8. Facturando')) limit 1`,
+      `select id, Stage, N_Empleados_que_marcan from Deals where Contact_Phone like '%${nueve}%' order by Created_Time desc limit 20`,
     )
-    if (deals[0]) return fuera("cliente", `deal ${deals[0].id} · ${deals[0].Stage}`)
+    const cliente = deals.find((d) => /^(7\.|8\.)/.test(String(d.Stage || "")))
+    if (cliente) return fuera("cliente", `deal ${cliente.id} · ${cliente.Stage}`)
+    for (const d of deals) {
+      const n = Number(d.N_Empleados_que_marcan || 0)
+      if (Number.isFinite(n) && n > dotacion) dotacion = n
+    }
   } catch (e) {
     return fuera("no_evaluable", `zoho deals: ${e instanceof Error ? e.message : e}`)
+  }
+
+  if (dotacion > 0) {
+    try {
+      const { umbral } = await umbralPrecios(contact)
+      if (dotacion > umbral) return fuera("sobre_umbral", `${dotacion} personas · umbral ${umbral}`)
+    } catch (e) {
+      // Fail-closed a propósito: sin poder leer el umbral no sabemos si está
+      // en segmento, y la campaña prefiere no escribir.
+      return fuera("no_evaluable", `umbral: ${e instanceof Error ? e.message : e}`)
+    }
   }
 
   // Inactividad: 2 días hábiles sin nada en ningún canal.
@@ -447,7 +483,16 @@ export async function contactosConChatReciente(
 
 // ── UNIVERSO ────────────────────────────────────────────────────────────────
 
-export type Candidato = { contact: string; quoteId: string | null; empresa: string | null; origen: string }
+export type Candidato = {
+  contact: string
+  quoteId: string | null
+  empresa: string | null
+  origen: string
+  /** La ÚNICA cotización del contacto en la ventana es del canal EJECUTIVO
+   * (`Intervenci_n_Humana` = "Con intervención humana") y Vicky no tiene
+   * ninguna suya. Es cartera del vendedor: la campaña no la toca. */
+  canalEjecutivo?: boolean
+}
 
 /**
  * Universo: quien recibió cotización (Zoho, Enviada/Aceptada, con teléfono
@@ -461,21 +506,26 @@ export async function universoCampana(opts: { dias?: number; H?: Record<string, 
   const porContacto = new Map<string, Candidato>()
 
   for (let offset = 0; offset < 2000; offset += 200) {
-    const filas = await coql<{ id: string; Tel_fono_Contacto?: string | null; Razon_Social?: string | null; Name?: string; Estado_Cotizacion?: string }>(
+    const filas = await coql<{ id: string; Tel_fono_Contacto?: string | null; Razon_Social?: string | null; Name?: string; Estado_Cotizacion?: string; Intervenci_n_Humana?: string | null }>(
       H,
-      `select id, Tel_fono_Contacto, Name, Estado_Cotizacion from ${QUOTE_MODULE} where (Estado_Cotizacion in ('Enviada','Aceptada') and Created_Time > '${corte}') order by Created_Time desc limit ${offset}, 200`,
+      `select id, Tel_fono_Contacto, Name, Estado_Cotizacion, Intervenci_n_Humana from ${QUOTE_MODULE} where (Estado_Cotizacion in ('Enviada','Aceptada') and Created_Time > '${corte}') order by Created_Time desc limit ${offset}, 200`,
     )
     for (const q of filas) {
       const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "").replace(/^5656/, "56")
       if (!/^569\d{8}$/.test(tel)) continue
-      if (!porContacto.has(tel)) {
-        porContacto.set(tel, {
-          contact: tel,
-          quoteId: q.id,
-          empresa: String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "") || null,
-          origen: `cotizacion ${q.Estado_Cotizacion || ""}`.trim(),
-        })
+      const ejecutivo = /intervenci/i.test(String(q.Intervenci_n_Humana || ""))
+      const cand: Candidato = {
+        contact: tel,
+        quoteId: q.id,
+        empresa: String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "") || null,
+        origen: `cotizacion ${q.Estado_Cotizacion || ""}`.trim(),
+        canalEjecutivo: ejecutivo,
       }
+      const previo = porContacto.get(tel)
+      // La cotización de VICKY manda sobre la del ejecutivo: si el contacto
+      // tiene las dos, el caso es de Vicky y el toque va contra la suya.
+      if (!previo) porContacto.set(tel, cand)
+      else if (previo.canalEjecutivo && !ejecutivo) porContacto.set(tel, cand)
     }
     if (filas.length < 200) break
   }

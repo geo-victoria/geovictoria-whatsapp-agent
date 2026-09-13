@@ -395,6 +395,11 @@ export async function GET(req: Request): Promise<Response> {
       const casilla = siguienteCasilla(fila)
       const base: Fila = { contact: cand.contact, empresa: cand.empresa, quoteId: cand.quoteId, origen: cand.origen, casilla, canal }
       if (!casilla) { base.omitido = "ciclo_completo (4 toques)"; filas.push(base); continue }
+      // CARTERA DEL EJECUTIVO: la única cotización del contacto en la ventana
+      // la emitió el canal ejecutivo y Vicky no tiene ninguna suya. No es su
+      // caso — escribirle es meterse encima de la gestión del vendedor (Lalo
+      // 13-sep: "esto está pensado para el segmento que Vicky puede vender").
+      if (cand.canalEjecutivo) { base.omitido = "canal_ejecutivo"; filas.push(base); continue }
       // Una casilla por semana: si el último WhatsApp salió hace menos de 6 días, esperar.
       const abierta = casillaAbierta(fila, ahora)
       if (abierta) { base.omitido = `toque_${abierta}_en_curso`; filas.push(base); continue }
