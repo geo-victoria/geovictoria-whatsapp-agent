@@ -86,6 +86,10 @@
     {
       "path": "/api/vic-canario",
       "schedule": "5 * * * *"
+    },
+    {
+      "path": "/api/vic-cierre-semanal?enviar=1",
+      "schedule": "30 10 * * 1"
     }
   ],
   "functions": {

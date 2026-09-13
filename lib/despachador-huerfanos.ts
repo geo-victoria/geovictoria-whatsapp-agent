@@ -85,6 +85,11 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // endpoint tiene la ventana 07-10 CL y el candado `cierre_enviado_<fecha>`,
   // así que despacharlo cada 30' solo significa "que no se le pase la hora".
   { nombre: "cierre_diario", path: "/api/vic-cierre-diario?enviar=1", cadaMin: 30 },
+  // Cierre SEMANAL (Rodrigo 13-sep): el correo de los lunes temprano con la
+  // semana lunes→domingo agregada + recomendaciones. El endpoint tiene su
+  // ventana (lunes 06-10 CL) y candado `cierre_semanal_enviado_<lunes>` —
+  // acá solo se le da el latido.
+  { nombre: "cierre_semanal", path: "/api/vic-cierre-semanal?enviar=1", cadaMin: 30 },
   // Vigía del onboarding por chat (Lalo 05-sep, punto 8): el cliente que
   // paga y se calla recibe un toque de Vicky (alta pendiente a las 2 h,
   // capacitación a las 24 h hábiles, nómina el día antes del curso) y el
