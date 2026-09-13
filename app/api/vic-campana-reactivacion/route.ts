@@ -302,6 +302,7 @@ export async function GET(req: Request): Promise<Response> {
       pdfUrl: (sp.get("pdf") || "https://cotizacion.geovictoria.com/pdf/assets/ficha-reloj-senseface.pdf").trim(),
       gancho: ganchoParaToque2(sp.get("motivo")),
       pctDescuento: Number(sp.get("pct")) || 0,
+      aceptada: sp.get("aceptada") === "1",
       waUrl: WA_VICKY,
     })
     const ok = await enviarCorreo(H, null, to, `PRUEBA · ${asunto}`, html).catch((e) => {
