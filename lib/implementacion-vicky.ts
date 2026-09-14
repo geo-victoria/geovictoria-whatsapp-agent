@@ -41,15 +41,48 @@ export const RELATORES_GV_AVANZADO = [
   { nombre: "Ignacio Salinas", email: "isalinas@geovictoria.com", zohoId: "3525045000655559002" },
 ] as const
 
-/** Turno alternado, persistido — sobrevive a los reinicios de instancia. */
+const CLAVE_TURNO = "tombola_implementacion_rr"
+
+/**
+ * Turno alternado, persistido — sobrevive a los reinicios de instancia.
+ *
+ * EL TURNO SE PAGA AUNQUE ZOHO RECHACE (14-sep, caso Javiera/COTEL): el
+ * contador se consume ANTES de crear, así que un create fallido (ahí fue el
+ * filtro de lookup del Contacto) se comía el turno de Diego y el cliente
+ * SIGUIENTE heredaba el desfase — ese día Javiera terminó con Ignacio, que
+ * estaba copado hasta el 28, cuando por turno le tocaba Diego (con cupo desde
+ * el 21). Se sigue consumiendo al inicio (así dos altas simultáneas no reciben
+ * el mismo relator), pero si el registro no llega a nacer el turno se
+ * DEVUELVE, y solo si nadie más lo movió entremedio.
+ */
 export async function siguienteRelator(): Promise<(typeof RELATORES_GV_AVANZADO)[number]> {
+  return (await tomarTurnoRelator()).relator
+}
+
+async function tomarTurnoRelator(): Promise<{
+  relator: (typeof RELATORES_GV_AVANZADO)[number]
+  devolver: () => Promise<void>
+}> {
   try {
-    const raw = (await getKvValue("tombola_implementacion_rr")) || ""
-    const idx = (Number(raw) || 0) % RELATORES_GV_AVANZADO.length
-    await setKvValue("tombola_implementacion_rr", String(idx + 1)).catch(() => {})
-    return RELATORES_GV_AVANZADO[idx]
+    const raw = (await getKvValue(CLAVE_TURNO)) || ""
+    const previo = Number(raw) || 0
+    const idx = previo % RELATORES_GV_AVANZADO.length
+    const nuevo = previo + 1
+    await setKvValue(CLAVE_TURNO, String(nuevo)).catch(() => {})
+    return {
+      relator: RELATORES_GV_AVANZADO[idx],
+      devolver: async () => {
+        // Solo si nadie más avanzó el turno entremedio: devolver a ciegas le
+        // quitaría el suyo a una creación concurrente que sí nació.
+        const ahora = (await getKvValue(CLAVE_TURNO).catch(() => "")) || ""
+        if ((Number(ahora) || 0) === nuevo) {
+          await setKvValue(CLAVE_TURNO, String(previo)).catch(() => {})
+          console.warn(`[implementacion] turno devuelto a ${RELATORES_GV_AVANZADO[idx].nombre} (el registro no nació)`)
+        }
+      },
+    }
   } catch {
-    return RELATORES_GV_AVANZADO[0]
+    return { relator: RELATORES_GV_AVANZADO[0], devolver: async () => {} }
   }
 }
 
@@ -265,7 +298,8 @@ export async function crearImplementacionGvAvanzado(
   d: DatosImplementacion,
 ): Promise<{ id: string; numero?: string; relator: { nombre: string; email: string } } | null> {
   if (!d.razonSocial) return null
-  const relator = await siguienteRelator()
+  const turno = await tomarTurnoRelator()
+  const relator = turno.relator
   const registro: Record<string, unknown> = {
     Name: `ASISTENCIA - ${d.razonSocial}`.slice(0, 120),
     Plataforma: "GV Avanzado",
@@ -371,6 +405,7 @@ export async function crearImplementacionGvAvanzado(
     }
     if (!fila || fila.code !== "SUCCESS" || !fila.details?.id) {
       console.warn(`[implementacion] no se creó: ${JSON.stringify(body).slice(0, 300)}`)
+      await turno.devolver()
       return null
     }
     // Segundo paso: el dueño. Sin esto la tómbola no se ve en el Owner y todo

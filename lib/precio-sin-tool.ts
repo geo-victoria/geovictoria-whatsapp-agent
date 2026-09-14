@@ -65,6 +65,33 @@ function yaDicho(monto: number, textos: string[]): boolean {
   return textos.some((t) => montosDe(t).some((v) => Math.abs(v - monto) <= tol))
 }
 
+/**
+ * MONTOS DE POLÍTICA — cifras FIJAS que el prompt autoriza a decir y que
+ * ninguna tool produce (14-sep, caso Dubraska / +56973921898).
+ *
+ * Ella preguntó "el reloj de arriendo a la hora de dar de baja, ¿hay que
+ * devolverlo?" y el modelo respondió EXACTAMENTE lo que el prompt manda: que
+ * el equipo es de GeoVictoria, la dirección de devolución y la multa de 6 UF +
+ * IVA si corta con menos de 6 mensualidades pagadas. El cinturón leyó "6 UF"
+ * como precio inventado, forzó un reintento, el reintento salió con una
+ * muletilla ("déjame confirmarte el valor con el sistema") y el cinturón de
+ * DESCUENTO la reemplazó por "tu cotización ya quedó con el mejor precio…".
+ * La clienta preguntó por logística de devolución y recibió una respuesta de
+ * negociación de precios.
+ *
+ * El propio prompt lo dice: "no son montos que debas calcular, son política".
+ * Cada entrada exige su CONTEXTO: 6 UF pasa hablando de multa/devolución de
+ * arriendo, jamás como precio de un plan.
+ */
+const MONTOS_DE_POLITICA: ReadonlyArray<{ valor: number; contexto: RegExp }> = [
+  // Multa por cortar el arriendo con menos de 6 mensualidades pagadas.
+  { valor: 6000, contexto: /multa|devol|devuelv|retiro|arriendo|mensualidad|termin|cort/i },
+]
+
+function esMontoDePolitica(monto: number, reply: string): boolean {
+  return MONTOS_DE_POLITICA.some((p) => p.valor === monto && p.contexto.test(reply))
+}
+
 export type ChequeoPrecio = {
   /** Montos que el modelo afirmó sin que ninguna tool ni el historial los respalde. */
   inventados: number[]
@@ -91,6 +118,6 @@ export function chequearPreciosDelReply(
   if (toolsOkDelTurno.some((t) => TOOLS_DE_PRECIO.has(t))) {
     return { inventados: [], hayInventado: false }
   }
-  const inventados = montos.filter((m) => !yaDicho(m, historialAsistente))
+  const inventados = montos.filter((m) => !yaDicho(m, historialAsistente) && !esMontoDePolitica(m, reply))
   return { inventados, hayInventado: inventados.length > 0 }
 }

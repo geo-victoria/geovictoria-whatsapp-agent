@@ -1086,12 +1086,25 @@ async function processOneTurn(
     // OJO: NO confundir con "déjame confirmar los DATOS antes de generar la
     // cotización" (confirmación de datos legítima) — por eso exige
     // descuento/porcentaje/sistema, nunca "datos".
-    const pareceMuletillaDescuento =
+    // DOS MULETILLAS DISTINTAS (14-sep, caso Dubraska): la que nombra el
+    // DESCUENTO siempre es de negociación; la genérica ("déjame confirmarte el
+    // valor con el sistema") la produce el cinturón de PRECIO en turnos que no
+    // tienen nada que ver — a ella, que preguntó si hay que devolver el reloj
+    // arrendado, la genérica la mandó al enlatado "tu cotización ya quedó con
+    // el mejor precio… ¿te contacto con un ejecutivo?". La genérica solo cuenta
+    // como muletilla de descuento si el turno REALMENTE trata de descuento.
+    const muletillaDescuentoExplicita =
       /perm[ií]teme\s+procesar\s+el\s+descuento/i.test(reply) ||
-      /d[eé]jame\s+(confirmar(te)?|revisar|procesar|chequear)\b[^.]{0,40}\b(descuento|porcentaje|el\s+sistema)\b/i.test(
-        reply,
-      ) ||
-      /voy\s+a\s+revisar\b[^.]{0,30}\b(el\s+sistema|descuento)\b/i.test(reply)
+      /d[eé]jame\s+(confirmar(te)?|revisar|procesar|chequear)\b[^.]{0,40}\b(descuento|porcentaje)\b/i.test(reply) ||
+      /voy\s+a\s+revisar\b[^.]{0,30}\bdescuento\b/i.test(reply)
+    const muletillaValorGenerica =
+      /d[eé]jame\s+(confirmar(te)?|revisar|procesar|chequear)\b[^.]{0,40}\bel\s+sistema\b/i.test(reply) ||
+      /voy\s+a\s+revisar\b[^.]{0,30}\bel\s+sistema\b/i.test(reply)
+    const turnoHablaDeDescuento =
+      /descuento|dcto|rebaj|m[aá]s\s+barat|precio\s+especial|mejor\s+precio/i.test(String(message || "")) ||
+      /descuento|dcto|rebaj/i.test(reply)
+    const pareceMuletillaDescuento =
+      muletillaDescuentoExplicita || (muletillaValorGenerica && turnoHablaDeDescuento)
     // generar_link_cotizadora también es un commit legítimo: emite la cotización
     // formal CON el descuento ya aplicado (escalonDescuento), así que si fue
     // exitosa, el % que aparece en el reply NO es una alucinación aunque
