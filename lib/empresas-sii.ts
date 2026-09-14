@@ -16,6 +16,7 @@
  */
 
 import { rutValido } from "./rut"
+import { repararMojibake } from "./mojibake"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
@@ -70,16 +71,23 @@ export async function fichaEmpresaSii(rutConDv: string): Promise<FichaSii | null
       ),
     ])
     if (!base) return null
+    // REPARACIÓN EN LA LECTURA (14-sep, caso COTEL / NDV-31863): el padrón
+    // guarda "TECNOLOGÍA" como "TECNOLOGÃA" (UTF-8 leído como Latin-1 y
+    // vuelto a codificar). Como de aquí sale la razón social que la emisión
+    // escribe en la cuenta, la cotización y el espejo de Creator, el nombre
+    // roto llegaba hasta el generador de PDF de la nota de venta y lo colgaba.
+    // Se repara al leer para no tocar 3,3M de filas; la función es pura y
+    // deja intacto lo que ya viene bien.
     return {
       rut: rutConDv,
-      razonSocial: base.razon_social,
+      razonSocial: repararMojibake(base.razon_social),
       inicioGiro: base.inicio_giro,
       terminoGiro: base.termino_giro,
       vigente: Boolean(base.inicio_giro) && !base.termino_giro,
-      direccion: dom?.direccion || undefined,
-      comuna: dom?.comuna || undefined,
-      region: dom?.region || undefined,
-      giro: giro?.giro || undefined,
+      direccion: dom?.direccion ? repararMojibake(dom.direccion) : undefined,
+      comuna: dom?.comuna ? repararMojibake(dom.comuna) : undefined,
+      region: dom?.region ? repararMojibake(dom.region) : undefined,
+      giro: giro?.giro ? repararMojibake(giro.giro) : undefined,
       nActividades: giro?.n_actividades || undefined,
     }
   } catch {
