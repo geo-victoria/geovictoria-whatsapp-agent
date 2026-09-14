@@ -1197,7 +1197,17 @@ export async function GET(req: Request): Promise<Response> {
       const generable = touch >= 1 && touch <= 5 && (touch === 5 || ventanaAbierta)
       if (generable && paisKey === "cl" && !esPresentacion && stage !== "aceptada") {
         const { generarToqueContexto } = await import("@/lib/toque-contexto")
-        contextoT5 = await generarToqueContexto(r.contact, stage).catch(() => null)
+        // TIEMPO REAL al generador (13-sep): sin esto el prompt afirmaba que
+        // el cliente llevaba "días" sin responder y el toque de los 12 minutos
+        // salía diciendo "pasaron los días". Con oferta de descuento viva se
+        // le prohíbe además declararla vencida.
+        const minutosDesdeCliente = conv?.last_user_at
+          ? Math.round((Date.now() - new Date(conv.last_user_at).getTime()) / 60000)
+          : null
+        contextoT5 = await generarToqueContexto(r.contact, stage, {
+          minutosDesdeCliente,
+          ofertaVigente: Boolean(conv?.pref_escalon),
+        }).catch(() => null)
         // Razonamiento interno del modelo disfrazado de mensaje (08-sep:
         // "No hay mensaje que escribir en este caso. El cliente se
         // desvinculó…" le llegó a un cliente): jamás sale; y como el modelo

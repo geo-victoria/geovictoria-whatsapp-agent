@@ -10,7 +10,7 @@
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import { clasificarSenalEspera, tzDePais } from "../lib/loop-v2.ts"
+import { clasificarSenalEspera, tzDePais, PAUSA_MIN_MS } from "../lib/loop-v2.ts"
 
 const TZ_CL = tzDePais("cl")
 const CONTACTO = "56966432322" // Tamara
@@ -192,4 +192,40 @@ describe("fecha concreta de retoma (09-sep: meses, fechas, 'en N semanas')", () 
     assert.equal(clasificar("mañana te confirmo")?.tipo, "manana")
     assert.equal(clasificar("el martes lo vemos")?.tipo, "dia_nombrado")
   })
+})
+
+// HORAS (13-sep, caso +56932011618): "dentro de las 24 horas daré una
+// respuesta" devolvía null y el loop le escribió a los 12 minutos.
+test("señal en HORAS: 'dentro de las 24 horas' agenda a 24 h y pausa el loop", () => {
+  const ahora = new Date("2026-09-13T18:50:00Z")
+  const s = clasificarSenalEspera(
+    "analizaré la cotización y dentro de las 24 horas daré una respuesta",
+    "cl",
+    "56932011618",
+    ahora,
+  )
+  assert.ok(s, "debe detectar la señal")
+  assert.equal(s!.tipo, "en_n_horas")
+  const horas = (s!.cuando.getTime() - ahora.getTime()) / 3600e3
+  assert.ok(horas >= 23 && horas <= 25, `esperaba ~24 h, dio ${horas}`)
+  // Y por sobre el umbral de pausa, así que el loop se detiene.
+  assert.ok(s!.cuando.getTime() - ahora.getTime() > PAUSA_MIN_MS)
+})
+
+test("'necesito 24 horas' también cuenta", () => {
+  const s = clasificarSenalEspera("necesito 24 horas", "cl", "569", new Date("2026-09-13T18:50:00Z"))
+  assert.equal(s?.tipo, "en_n_horas")
+})
+
+test("lo inmediato NO es señal de espera", () => {
+  const ahora = new Date("2026-09-13T18:50:00Z")
+  assert.equal(clasificarSenalEspera("al tiro te digo", "cl", "569", ahora), null)
+  assert.equal(clasificarSenalEspera("en un ratito te confirmo", "cl", "569", ahora), null)
+})
+
+test("'mañana te confirmo' ahora SUPERA el umbral de pausa (antes solo >3 días pausaba)", () => {
+  const ahora = new Date("2026-09-13T18:50:00Z")
+  const s = clasificarSenalEspera("mañana te confirmo", "cl", "56932011618", ahora)
+  assert.ok(s)
+  assert.ok(s!.cuando.getTime() - ahora.getTime() > PAUSA_MIN_MS)
 })

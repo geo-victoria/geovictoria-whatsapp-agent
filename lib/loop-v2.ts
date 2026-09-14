@@ -261,6 +261,17 @@ export function calcularProximoToque(
 // loop v2 cuando se encienda. Un falso positivo solo espacia el seguimiento
 // (dirección conservadora); un falso negativo cae al flujo normal.
 
+/**
+ * ¿Desde cuándo una señal de espera PAUSA el loop? Era 3 DÍAS, y con eso un
+ * cliente que decía "mañana te confirmo" o "dentro de las 24 horas" seguía
+ * recibiendo la cadencia normal: el caso +56932011618 (13-sep) pidió 24 horas,
+ * Vicky contestó "quedamos así" y el loop le escribió a los 12 minutos y a la
+ * hora. Ahora pausa cualquier compromiso a más de 90 minutos — lo inmediato
+ * ("al tiro", "en un ratito") no es señal de espera y ya lo filtra
+ * RE_INMEDIATO. Override: VICKY_LOOP_PAUSA_MIN_MIN.
+ */
+export const PAUSA_MIN_MS = Number(process.env.VICKY_LOOP_PAUSA_MIN_MIN || 90) * 60e3
+
 export type SenalEspera = {
   tipo:
     | "proxima_semana"
@@ -273,6 +284,7 @@ export type SenalEspera = {
     | "mes_nombrado"
     | "en_n_semanas"
     | "en_n_dias"
+    | "en_n_horas"
   cuando: Date
 }
 
@@ -296,6 +308,12 @@ const NUMEROS_PALABRA: Record<string, number> = {
 }
 const RE_EN_N_SEMANAS = /\b(?:en|dentro de)\s+(\d{1,2}|un par de|unas|una|dos|tres|cuatro|cinco|seis)\s+semanas?\b/
 const RE_EN_N_DIAS = /\b(?:en|dentro de)\s+(\d{1,3}|unos|diez|quince|veinte|treinta)\s+d[i]as\b/
+// HORAS (13-sep, caso +56932011618): "analizaré la cotización y DENTRO DE LAS
+// 24 HORAS daré una respuesta" devolvía null — ninguna categoría miraba horas,
+// así que el loop la trató con cadencia normal y le escribió a los 12 minutos
+// y a la hora. Cubre "en/dentro de N horas" y "necesito N horas".
+const RE_EN_N_HORAS =
+  /\b(?:en|dentro de(?: las?)?|necesito|dame|dénos|denos|danos)\s+(\d{1,3}|un par de|unas|una|veinticuatro|cuarenta y ocho)\s+horas?\b/
 
 // Los regex corren sobre texto en minúsculas y SIN acentos (NFD + strip de
 // combinantes: "próxima"→"proxima", "mañana"→"manana", "dueño"→"dueno").
@@ -399,6 +417,23 @@ export function clasificarSenalEspera(
     const n = /^\d+$/.test(enSemanas[1]) ? parseInt(enSemanas[1], 10) : NUMEROS_PALABRA[enSemanas[1]] || 1
     if (n >= 1 && n <= 12) return { tipo: "en_n_semanas", cuando: alas9En(n * 7) }
   }
+  const enHoras = texto.match(RE_EN_N_HORAS)
+  if (enHoras) {
+    const crudo = enHoras[1]
+    const n =
+      crudo === "un par de" || crudo === "unas" ? 2
+        : crudo === "una" ? 1
+          : crudo === "veinticuatro" ? 24
+            : crudo === "cuarenta y ocho" ? 48
+              : Number(crudo)
+    // Menos de 1 h es "al tiro": no es señal de espera. Más de 72 h lo toman
+    // las categorías de días.
+    if (Number.isFinite(n) && n >= 1 && n <= 72) {
+      const cuando = new Date(ahora.getTime() + n * 3600e3)
+      return { tipo: "en_n_horas", cuando: ajustarAHabil(cuando, tz, contact) }
+    }
+  }
+
   const enDias = texto.match(RE_EN_N_DIAS)
   if (enDias) {
     const n = /^\d+$/.test(enDias[1]) ? parseInt(enDias[1], 10) : NUMEROS_PALABRA[enDias[1]] || 2
@@ -570,7 +605,7 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
   // días ("en octubre", "el 20 de septiembre", "en dos semanas"), el loop se
   // PAUSA hasta esa fecha — ni un toque antes. El cron lo despierta ese día
   // (lee también pausado_compromiso) y retoma la escalera donde iba.
-  if (senal && senal.cuando.getTime() - ahora.getTime() > 3 * 86400e3) {
+  if (senal && senal.cuando.getTime() - ahora.getTime() > PAUSA_MIN_MS) {
     await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },

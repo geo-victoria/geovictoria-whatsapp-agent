@@ -81,9 +81,11 @@ async function transcriptEspejo(
   }
 }
 
+import { afirmaTiempoFalso, descripcionTiempo } from "./toque-tiempo"
+
 const REGLAS = [
   "Eres Vicky, la vendedora de GeoVictoria por WhatsApp (control de asistencia y gestión de personal en Chile).",
-  "Vas a escribir UN solo mensaje corto para retomar el contacto con un cliente que dejó de responder hace días.",
+  "Vas a escribir UN solo mensaje corto para retomar el contacto con un cliente que no ha respondido. CUÁNTO tiempo pasó te lo dice el bloque TIEMPO del mensaje: no lo supongas.",
   "Reglas estrictas:",
   "1. Dos o tres frases, máximo 400 caracteres.",
   "2. Menciona la operación o el dolor CONCRETO que el cliente contó (su rubro, su equipo, su problema, con sus palabras) y el punto exacto donde quedó la conversación.",
@@ -98,6 +100,12 @@ const REGLAS = [
   // avanzó fue por algo, y pedirle el pago por cuarta vez no lo resuelve.
   "8. NO pidas el pago ni digas 'acepta y paga'. El cliente que ya tiene su cotización no se frenó por falta de un recordatorio: se frenó por una duda, una comparación o algo de su operación. Tu trabajo es retomar ESO. El pago se pide solo cuando el cliente ya aceptó y lo único que falta es pagar.",
   "9. Si el cliente dejó una duda sin responder, una objeción o una comparación con otro proveedor, ese es el tema del mensaje.",
+  // (13-sep, caso +56932011618) La clienta pidió 24 horas, Vicky dijo
+  // "quedamos así" y el toque de los 12 minutos salió con "pasaron los días";
+  // el de la hora, con "ese precio ya venció". El prompt lo empujaba: su
+  // primera línea afirmaba que el cliente llevaba días sin responder.
+  "11. NO afirmes cuánto tiempo pasó salvo que el bloque TIEMPO lo respalde. Si pasaron menos de 24 horas está PROHIBIDO decir 'pasaron los días', 'hace días', 'hace tiempo' o parecidos.",
+  "12. NUNCA digas que un precio, un descuento o una oferta venció, caducó o dejó de estar disponible. Si el cliente pidió un plazo y todavía no vence, respétalo: el mensaje reconoce lo que quedó de hacer y no lo apura.",
   "10. Si el cliente ya dijo que NO le interesa, que ya contrató otra cosa, que se desvinculó de la empresa, que cerró la conversación o que no le escriban más, NO escribas ningún mensaje: responde exactamente NO_ENVIAR y nada más.",
   "Responde SOLO con el texto del mensaje, sin comillas ni explicaciones. Jamás expliques tu razonamiento ni describas al cliente en tercera persona: eso NO es un mensaje.",
 ].join("\n")
@@ -112,6 +120,7 @@ function recortarEnOracion(texto: string, max: number): string {
 export async function generarToqueContexto(
   contact: string,
   stage: "sin_precio" | "con_precio" | "formal",
+  opts: { minutosDesdeCliente?: number | null; ofertaVigente?: boolean } = {},
 ): Promise<string | null> {
   try {
     const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
@@ -151,6 +160,8 @@ export async function generarToqueContexto(
       ? `\n\nCONVERSACIÓN DEL CLIENTE CON ${nombreEjecutivo ? `SU EJECUTIVO/A ${nombreEjecutivo.toUpperCase()}` : "SU EJECUTIVO/A"} (por el WhatsApp del ejecutivo):\n${espejo.transcript}\n\nINSTRUCCIÓN ESPECIAL: como el cliente ya está conversando con ${nombreEjecutivo || "un ejecutivo del equipo"}, tu mensaje debe centrarse en preguntarle CÓMO LE FUE con ${nombreEjecutivo || "el ejecutivo"} y recoger con naturalidad lo clave que quedó en esa conversación (un acuerdo, una duda, un pendiente). Preséntate como parte del mismo equipo que acompaña, JAMÁS contradigas ni repitas lo que el ejecutivo ya ofreció, y no cites frases textuales.`
       : ""
 
+    const minutos = opts.minutosDesdeCliente == null ? null : Number(opts.minutosDesdeCliente)
+
     const client = new Anthropic({ apiKey })
     const res = await client.messages.create({
       model: MODEL,
@@ -159,7 +170,7 @@ export async function generarToqueContexto(
       messages: [
         {
           role: "user",
-          content: `TRANSCRIPCIÓN DE LA CONVERSACIÓN CON VICKY:\n${transcript}\n\nETAPA EN QUE QUEDÓ: ${etapa}${bloqueEspejo}\n\nEscribe el mensaje de retome.`,
+          content: `TRANSCRIPCIÓN DE LA CONVERSACIÓN CON VICKY:\n${transcript}\n\nETAPA EN QUE QUEDÓ: ${etapa}${bloqueEspejo}\n\nTIEMPO desde el último mensaje del cliente: ${descripcionTiempo(minutos)}.\n\nEscribe el mensaje de retome.`,
         },
       ],
     })
@@ -190,6 +201,16 @@ export async function generarToqueContexto(
     if (chequeo.hayInventado) {
       console.warn(
         `[toque-contexto] ${contact}: PRECIO SIN RESPALDO en el toque generado (${chequeo.inventados.join(", ")}) — se usa el texto fijo`,
+      )
+      return null
+    }
+    // EL TOQUE NO MIENTE SOBRE EL TIEMPO (13-sep). Aunque la regla 11/12 esté
+    // en el prompt, el modelo puede afirmarlo igual: acá se descarta el texto
+    // generado y sale el fijo, como con el precio sin respaldo.
+    const veredictoTiempo = afirmaTiempoFalso(texto, minutos, opts.ofertaVigente)
+    if (!veredictoTiempo.ok) {
+      console.warn(
+        `[toque-contexto] ${contact}: el toque generado afirma ${veredictoTiempo.motivo} ("${veredictoTiempo.frase}") con ${descripcionTiempo(minutos)} transcurridos — se usa el texto fijo`,
       )
       return null
     }
