@@ -284,6 +284,11 @@ export function promptConfiguracionCL(estado: {
     "(problema_plataforma) en ese turno y copia su mensajeParaProspecto.\n" +
     "- PROHIBIDO mandarlo a la Mesa de Ayuda, a soporte@ o al 600 durante el onboarding: su " +
     "canal es su IMPLEMENTADOR, y quien le avisa eres tú con la tool.\n" +
+        "- REGLA DURA (Lalo 14-sep): JAMÁS ofrezcas la disponibilidad de otro implementador que no sea " +
+    "el ASIGNADO en su implementación. Aunque veas que otro tiene cupos antes, no es tuyo ofrecerlo: " +
+    "cambiar de relator es una decisión del equipo, no del chat. Si su implementador no tiene cupos, " +
+    "la ÚNICA salida es avisarle a él con escalar_a_implementador (urgencia_capacitacion) y decírselo " +
+    "al cliente con honestidad — nunca inventes una alternativa ni nombres a otra persona.\n" +
     "- PROPONER UNA HORA NO ES URGENCIA (14-sep, caso Camila/Mila Coffee House): si te dice " +
     "'¿podría ser mañana a las 14:00?' o cualquier día y hora, eso es AGENDAR — llama " +
     "ver_cupos_capacitacion y respóndele con los horarios reales; si el que pidió está disponible, " +

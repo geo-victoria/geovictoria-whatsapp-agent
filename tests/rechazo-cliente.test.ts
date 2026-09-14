@@ -164,3 +164,31 @@ test("evaluar o consultar no es rechazo", () => {
     "Si, me interesa",
   ]) assert.equal(esRechazoCliente(f), false, f)
 })
+
+// Caso Montecosta Travel Spa (+56977741817, 14-sep): el razonamiento interno
+// salió al cliente envuelto en el marco del toque. Tres marcas que el filtro
+// del 08-sep no veía: "no puedo escribir", hablar del cliente en tercera
+// persona, y citar la regla interna.
+test("el razonamiento interno no se envia (caso Montecosta)", () => {
+  const real =
+    "No puedo escribir este mensaje. El cliente acaba de decir \"Avanzaré con el pago durante el día\" hace 1 hora. " +
+    "Está dentro del plazo que él mismo señaló. Retomarlo ahora sería apurarlo sin razón y violaría la regla de " +
+    "respetar los plazos que el cliente ya comunicó. Espera al menos hasta mañana, cuando sea evidente que no " +
+    "cumplió su propia promesa de pagar."
+  assert.equal(pareceTextoInterno(real), true)
+  for (const f of [
+    "No puedo enviar este mensaje todavía",
+    "El cliente dijo que lo veía con su jefe",
+    "Esto violaría la regla de no insistir",
+    "Espera al menos hasta mañana",
+  ]) assert.equal(pareceTextoInterno(f), true, f)
+})
+
+test("un toque normal no se confunde con texto interno", () => {
+  for (const f of [
+    "Hola Javiera! Te quedó alguna duda con la cotización?",
+    "Tu cotización sigue vigente y con el mismo valor",
+    "Quedaste en comentarme, así que no te apuro. ¿Cómo te fue?",
+    "Te dejo el link por si quieres avanzar con el pago",
+  ]) assert.equal(pareceTextoInterno(f), false, f)
+})

@@ -211,6 +211,24 @@ export function pareceTextoInterno(texto: string): boolean {
     /\bel\s+cliente\s+(se\s+desvincul|cerr[oó]|fue\s+claro|ya\s+(dijo|indic[oó]|declin))/i.test(t) ||
     /\bno\s+existe\s+(un\s+)?(dolor|duda|pendiente)/i.test(t) ||
     /\bcerr[oó]\s+(expl[ií]citamente\s+)?la\s+conversaci[oó]n/i.test(t) ||
-    /\b(en\s+este\s+caso|por\s+lo\s+tanto)\b.*\b(no\s+enviar|sin\s+mensaje)/i.test(t)
+    /\b(en\s+este\s+caso|por\s+lo\s+tanto)\b.*\b(no\s+enviar|sin\s+mensaje)/i.test(t) ||
+    // 14-sep, caso Montecosta Travel Spa (+56977741817): salió al CLIENTE
+    // "No puedo escribir este mensaje. El cliente acaba de decir 'Avanzaré con
+    // el pago durante el día' hace 1 hora… violaría la regla de respetar los
+    // plazos que el cliente ya comunicó. Espera al menos hasta mañana." El
+    // filtro del 08-sep no lo vio: el modelo no dijo "no hay mensaje" sino
+    // "NO PUEDO escribir", habló del cliente EN TERCERA PERSONA y CITÓ sus
+    // propias reglas. Esas tres son las marcas de que el texto es para
+    // nosotros, no para el cliente.
+    /\bno\s+(puedo|debo|voy\s+a)\s+(enviar|escribir|mandar|redactar)\b/i.test(t) ||
+    /\b(este|el)\s+mensaje\s+no\s+(se\s+)?(debe|deber[ií]a|corresponde|va)\b/i.test(t) ||
+    // El destinatario JAMÁS se nombra en tercera persona: a él se le habla de tú.
+    /\bel\s+cliente\s+(acaba\s+de|dijo|coment[oó]|se[ñn]al[oó]|indic[oó]|escribi[oó]|pidi[oó])/i.test(t) ||
+    /\bel\s+(prospecto|contacto|usuario)\b/i.test(t) ||
+    // Citar la regla interna, o darse instrucciones a sí misma.
+    /\b(violar[ií]a|incumplir[ií]a|romper[ií]a)\s+(la\s+)?(regla|instrucci[oó]n|pol[ií]tica)/i.test(t) ||
+    /\b(la\s+)?regla\s+de\s+(respetar|no\s+)/i.test(t) ||
+    /\b(espera|esperar)\s+(al\s+menos\s+)?hasta\s+(ma[ñn]ana|el\s+pr[oó]ximo)/i.test(t) ||
+    /\b(est[aá]\s+dentro\s+del\s+plazo|sin\s+raz[oó]n\s+aparente|ser[ií]a\s+apurarlo)/i.test(t)
   )
 }
