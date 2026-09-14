@@ -41,6 +41,23 @@ const PATRONES: RegExp[] = [
   /\bya\s+(lo\s+|la\s+)?(solucion|arregl|resolvimos|resolv[ií]|vimos\s+con)/i,
   /^\s*nada[,.]?\s*(muchas\s+)?gracias\b/i,
   /\bya\s+no\s+(lo\s+|la\s+)?(necesito|necesitamos|ocupo|ocupamos)/i,
+  // 14-sep (caso Valeska / clínica dental, +56976048070): la QUEJA DE
+  // INSISTENCIA no estaba acá. Ella dijo "es spam?", "me han hablado
+  // demasiado", "ya he dicho que voy a analizar", "si decido yo les escribo" y
+  // "ya a cada rato mensaje con lo mismo"; Vicky prometió "no más mensajes
+  // repetidos" y cuatro días después salió otro toque del loop. Ninguna de las
+  // siete frases disparaba ninguna guarda (postura null, rechazo false en
+  // todas). El detector solo tenía "esto es spam" — demasiado literal: ella
+  // preguntó "es spam?" a secas. Pedir que no insistan ES cerrar la
+  // proactividad, aunque el cliente siga evaluando.
+  /\bes\s+spam\b/i,
+  /\bme\s+(han|est[aá]n)\s+(hablado|escrito|contactado|llamando|escribiendo)\s+(demasiado|mucho|much[ií]simo)/i,
+  /\b(a\s+cada\s+rato|todo\s+el\s+rato|todos\s+los\s+d[ií]as)\b.{0,25}\b(mensaje|mensajes|escrib|llam)/i,
+  /\bya\s+(les\s+|te\s+|le\s+)?(he\s+)?(dicho|dije|coment[eé])\s+que\b/i,
+  /\b(si|cuando)\s+(lo\s+)?decid[oa]\b.{0,25}\b(les|te|le)\s+(escribo|aviso|contacto|hablo)/i,
+  /\byo\s+(les|te|le)\s+(escribo|aviso|contacto)\b/i,
+  /\b(muy|demasiado)\s+insistent/i,
+  /\b(los|las|te)\s+voy\s+a\s+bloquear\b/i,
 ]
 
 /** Mensajes cortos que solos ya son un "no" ("no", "no gracias", "nop"). */

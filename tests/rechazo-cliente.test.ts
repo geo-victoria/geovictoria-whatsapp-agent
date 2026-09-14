@@ -139,3 +139,28 @@ test("postura en contexto: un 'no' a '¿algo más?' y un 'ok gracias' tras la fo
   assert.equal(posturaRechazoCliente(toque), "no_interesa")
 })
 
+// Caso Valeska (+56976048070, 14-sep): pidió cuatro veces que no insistieran y
+// el loop le mandó otro toque cuatro días después. Ninguna frase disparaba el
+// detector: "es spam?" fallaba porque el patrón exigía el "esto" delante.
+test("la queja de insistencia cierra la proactividad", () => {
+  for (const f of [
+    "Hola disculpe pero es spam ?",
+    "Me han hablado demasiado desde que hice cotizacion",
+    "Si decido yo les escribo",
+    "Pero ya a cada rato mensaje con la mismo jeje",
+    "Y ya he dicho que voy a analizar",
+    "son muy insistentes",
+    "los voy a bloquear",
+  ]) assert.equal(esRechazoCliente(f), true, f)
+})
+
+// Y lo que NO puede cerrarse: evaluar no es rechazar.
+test("evaluar o consultar no es rechazo", () => {
+  for (const f of [
+    "Voy a analizar bien",
+    "Estoy cotizando",
+    "Lo voy a ver con mi jefe",
+    "Cuantas personas marcan?",
+    "Si, me interesa",
+  ]) assert.equal(esRechazoCliente(f), false, f)
+})
