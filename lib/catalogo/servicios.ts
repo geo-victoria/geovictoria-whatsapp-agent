@@ -35,6 +35,28 @@ export function esInstalacionBonificada(modalidad: "arriendo" | "venta", zona: Z
   return modalidad === "arriendo" && zona === "RM"
 }
 
+/**
+ * UN SOLO SERVICIO TÉCNICO POR PUNTO (regla SSTT — ticket Molinas rechazado
+ * por Ivonne Rojas vía Ana López, 08-sep; reclamo de Lalo 14-sep sobre
+ * COT1443/Francisca, que le mostraba a la clienta envío E instalación juntos).
+ *
+ * Si al punto va una VISITA TÉCNICA, el equipo lo lleva el técnico: la línea
+ * de envío no se cobra ni se muestra. Con auto-instalación el envío SÍ va —
+ * ahí el despacho es el único servicio que ocurre.
+ *
+ * El cotizador ya aplicaba esto al armar la nota de venta
+ * (`filtrarUnSoloServicioTecnico`); acá vive para la cotización que ve el
+ * cliente, que es donde nació el reclamo.
+ */
+export function omitirEnvioPorInstalacionTecnica(opts: {
+  autoInstalada: boolean
+  soloHardwareSinInstalacion: boolean
+  serviciosDelPunto: string[]
+}): boolean {
+  if (opts.autoInstalada || opts.soloHardwareSinInstalacion) return false
+  return opts.serviciosDelPunto.includes("instalacion_reloj")
+}
+
 export const CATALOGO_SERVICIOS: Servicio[] = [
   {
     id: "envio_reloj",

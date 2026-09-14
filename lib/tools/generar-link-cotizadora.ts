@@ -32,7 +32,7 @@ import {
 } from "@/lib/catalogo"
 import { anotarTablaPrecios } from "@/lib/nota-tabla-precios"
 import { clasificarUbicacion } from "@/lib/geografia"
-import { esInstalacionBonificada } from "@/lib/catalogo/servicios"
+import { esInstalacionBonificada, omitirEnvioPorInstalacionTecnica } from "@/lib/catalogo/servicios"
 import { getUFActual } from "@/lib/uf"
 import { rutValido, formatearRut } from "@/lib/rut"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
@@ -619,7 +619,21 @@ export function construirItemsCotizacion(args: ConstruirItemsArgs): ConstruirIte
 
       const esRM = clasificacion.tipo === "RM"
       const zonaPunto = clasificacion.zonaInstalacion
+      // UN SOLO SERVICIO TÉCNICO POR PUNTO (regla SSTT, Ivonne Rojas vía Ana
+      // López 08-sep; reclamo de Lalo 14-sep sobre COT1443/Francisca, que
+      // mostraba envío E instalación juntos): si el reloj lo instala un
+      // técnico, el equipo LO LLEVA EL TÉCNICO — la línea de envío no se
+      // cobra ni se muestra. Con auto-instalación el envío SÍ va: ahí el
+      // despacho es el único servicio que ocurre. El cotizador ya filtraba
+      // esto al armar la nota de venta (`filtrarUnSoloServicioTecnico`), pero
+      // la cotización que ve el cliente mostraba las dos líneas.
+      const hayInstalacionTecnicaEnPunto = omitirEnvioPorInstalacionTecnica({
+        autoInstalada: Boolean(punto.autoInstalada),
+        soloHardwareSinInstalacion,
+        serviciosDelPunto: serviciosAplicables.map((s) => s.id),
+      })
       for (const servicio of serviciosAplicables) {
+        if (servicio.id === "envio_reloj" && hayInstalacionTecnicaEnPunto) continue
         // Instalación auto-gestionada por el cliente, o hardware plug-and-play
         // (huellero USB): no se cobra la instalación (solo el envío se mantiene).
         if ((punto.autoInstalada || soloHardwareSinInstalacion) && servicio.omitirSiAutoInstalada) {
