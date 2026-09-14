@@ -218,7 +218,7 @@ export function ultimoMensajeCliente(
  *    minutos. Cerrarle el loop por un fallo NUESTRO lo castiga dos veces: se
  *    descarta el texto y sale el fijo, pero la cadencia sigue.
  */
-export type VeredictoTextoInterno = "ok" | "no_enviar" | "razonamiento"
+export type VeredictoTextoInterno = "ok" | "no_enviar" | "razonamiento" | "todavia_no"
 
 /** Marcas de que el modelo decidió NO escribir (el cliente cerró la puerta). */
 function decidioNoEnviar(t: string): boolean {
@@ -261,6 +261,12 @@ function esDeliberacion(t: string): boolean {
 export function clasificarTextoInterno(texto: string): VeredictoTextoInterno {
   const t = String(texto || "")
   if (!t.trim()) return "ok"
+  // SALIDA LEGÍTIMA PARA "TODAVÍA NO" (14-sep, VB de Lalo): antes el modelo
+  // solo podía escribir el mensaje o declarar NO_ENVIAR (reservado al rechazo
+  // del cliente). Sin puerta para "es muy pronto" o "su plazo no vence",
+  // objetaba DENTRO del mensaje y esa objeción le llegaba al cliente. Ahora
+  // puede decirlo y el toque se pospone, sin cerrar nada.
+  if (/\bTODAVIA_NO\b/i.test(t) || /\bTODAV[IÍ]A_NO\b/i.test(t)) return "todavia_no"
   if (decidioNoEnviar(t)) return "no_enviar"
   if (esDeliberacion(t)) return "razonamiento"
   return "ok"

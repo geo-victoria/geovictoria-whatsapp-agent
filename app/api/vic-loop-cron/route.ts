@@ -1081,6 +1081,24 @@ export async function GET(req: Request): Promise<Response> {
         detalle.push({ contact: r.contact, accion: "cerrado_autorespuesta", touch })
         continue
       }
+      // NO SE TOCA A QUIEN ESTÁ CONVERSANDO (14-sep, VB de Lalo). Los tres
+      // toques que salieron con el razonamiento del modelo (08-sep, Montecosta
+      // y Luis Rivano) eran toques que NO correspondían, y el modelo fue el
+      // único que se dio cuenta. Luis llevaba 11 minutos y 3 mensajes suyos:
+      // estaba pensando la respuesta, no enfriándose. Medido: 69 de 279 toques
+      // de 14 días (25 %) salieron así. NO se cancela — se POSPONE hasta que
+      // el silencio sea real; si el cliente se enfría, el toque sale igual.
+      const { conversacionViva } = await import("@/lib/conversacion-viva")
+      const viva = conversacionViva(hist, now)
+      if (viva.viva && viva.reintentarEnMs) {
+        await patchLoop(r.contact, { next_touch_at: new Date(viva.reintentarEnMs).toISOString() })
+        pospuestos++
+        console.log(
+          `[loop-cron] ${r.contact}: conversación viva (${viva.mensajesCliente} mensajes del cliente, último hace ${Math.round((now - viva.ultimoClienteMs) / 60000)} min) — toque ${touch} pospuesto`,
+        )
+        detalle.push({ contact: r.contact, accion: "pospuesto_conversacion_viva", touch })
+        continue
+      }
     } catch { /* sin lectura: el toque sigue su camino normal */ }
 
     // CASUÍSTICA NO-PROSPECTO = CERO TOQUES (11-sep, auditoría de proactividad:
@@ -1218,6 +1236,15 @@ export async function GET(req: Request): Promise<Response> {
           // ya devuelve null en ese caso, esto es el cinturón de atrás.
           const { clasificarTextoInterno } = await import("@/lib/rechazo-cliente")
           const veredictoT5 = clasificarTextoInterno(contextoT5)
+          if (veredictoT5 === "todavia_no") {
+            // El modelo dice que aún no corresponde y NO es un rechazo: se
+            // pospone una hora, sin cerrar el loop ni mandar el texto fijo.
+            await patchLoop(r.contact, { next_touch_at: new Date(now + 60 * 60e3).toISOString() })
+            pospuestos++
+            console.log(`[loop-cron] ${r.contact}: el generador dijo TODAVIA_NO — toque ${touch} pospuesto 1 h`)
+            detalle.push({ contact: r.contact, accion: "pospuesto_todavia_no", touch })
+            continue
+          }
           if (veredictoT5 === "razonamiento") {
             console.warn(`[loop-cron] ${r.contact}: deliberación en el toque ${touch} — se descarta y sale el texto fijo`)
             contextoT5 = null

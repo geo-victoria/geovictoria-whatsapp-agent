@@ -106,6 +106,12 @@ const REGLAS = [
   // primera línea afirmaba que el cliente llevaba días sin responder.
   "11. NO afirmes cuánto tiempo pasó salvo que el bloque TIEMPO lo respalde. Si pasaron menos de 24 horas está PROHIBIDO decir 'pasaron los días', 'hace días', 'hace tiempo' o parecidos.",
   "12. NUNCA digas que un precio, un descuento o una oferta venció, caducó o dejó de estar disponible. Si el cliente pidió un plazo y todavía no vence, respétalo: el mensaje reconoce lo que quedó de hacer y no lo apura.",
+  // (14-sep, VB de Lalo) Los tres toques que salieron con el razonamiento del
+  // modelo eran toques que NO correspondían: el cliente estaba en medio de la
+  // conversación o dentro de un plazo que él mismo puso. El modelo tenía
+  // razón y no tenía cómo decirlo: sus únicas salidas eran escribir el
+  // mensaje o NO_ENVIAR, que está reservado al rechazo. Esta es esa puerta.
+  "13. Si el cliente NO se ha negado pero igual crees que AÚN NO corresponde escribir —está en medio de la conversación y no alcanzó a responder, o pidió un plazo que todavía no vence—, responde exactamente TODAVIA_NO y nada más. No expliques por qué: esa explicación NO es un mensaje y no debe salir nunca.",
   "10. Si el cliente ya dijo que NO le interesa, que ya contrató otra cosa, que se desvinculó de la empresa, que cerró la conversación o que no le escriban más, NO escribas ningún mensaje: responde exactamente NO_ENVIAR y nada más.",
   "Responde SOLO con el texto del mensaje, sin comillas ni explicaciones. Jamás expliques tu razonamiento ni describas al cliente en tercera persona: eso NO es un mensaje.",
 ].join("\n")
@@ -189,6 +195,7 @@ export async function generarToqueContexto(
     const { clasificarTextoInterno } = await import("./rechazo-cliente")
     const veredicto = clasificarTextoInterno(texto)
     if (veredicto === "no_enviar") return "NO_ENVIAR"
+    if (veredicto === "todavia_no") return "TODAVIA_NO"
     if (veredicto === "razonamiento") {
       console.warn(`[toque-contexto] ${contact}: el generador devolvió deliberación, se usa el texto fijo`)
       return null

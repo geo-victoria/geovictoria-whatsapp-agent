@@ -223,3 +223,11 @@ test("un toque legítimo no se confunde con texto interno", () => {
     "Te quedó la duda de si el sistema calcula las horas extras solas. Sí lo hace. Seguimos?",
   ]) assert.equal(clasificarTextoInterno(t), "ok", t)
 })
+
+test("TODAVIA_NO es una salida propia: ni rechazo ni divagación", () => {
+  assert.equal(clasificarTextoInterno("TODAVIA_NO"), "todavia_no")
+  assert.equal(clasificarTextoInterno("todavia_no"), "todavia_no")
+  // y sigue distinguiéndose de las otras dos
+  assert.equal(clasificarTextoInterno("NO_ENVIAR"), "no_enviar")
+  assert.equal(clasificarTextoInterno("El cliente no ha respondido todavía."), "razonamiento")
+})
