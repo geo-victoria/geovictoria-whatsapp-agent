@@ -183,8 +183,16 @@ export async function generarToqueContexto(
     // El modelo decidió que no corresponde escribir (rechazo previo del
     // cliente) o devolvió razonamiento en vez de mensaje: se devuelve TAL CUAL
     // para que el llamador lo reconozca (pareceTextoInterno) y NO mande nada.
-    const { pareceTextoInterno } = await import("./rechazo-cliente")
-    if (pareceTextoInterno(texto)) return "NO_ENVIAR"
+    // Decisión del modelo ("el cliente se desvinculó") vs divagación ("el
+    // mensaje de retome sería…"): la primera cierra el loop, la segunda solo
+    // descarta el texto y deja salir el fijo (14-sep, caso Luis Rivano).
+    const { clasificarTextoInterno } = await import("./rechazo-cliente")
+    const veredicto = clasificarTextoInterno(texto)
+    if (veredicto === "no_enviar") return "NO_ENVIAR"
+    if (veredicto === "razonamiento") {
+      console.warn(`[toque-contexto] ${contact}: el generador devolvió deliberación, se usa el texto fijo`)
+      return null
+    }
     if (!texto || texto.length < 30) return null
     if (/^oye\b/i.test(texto)) return null
     // Estilo sellado: sin guiones largos (parecen IA — Lalo 26-ago).

@@ -7,6 +7,7 @@ import {
   pareceTextoInterno,
   ultimoMensajeCliente,
   posturaRechazoCliente,
+  clasificarTextoInterno,
 } from "../lib/rechazo-cliente.ts"
 
 // Autorespuestas REALES recibidas en la campaña remk_300 (08-sep).
@@ -191,4 +192,34 @@ test("un toque normal no se confunde con texto interno", () => {
     "Quedaste en comentarme, así que no te apuro. ¿Cómo te fue?",
     "Te dejo el link por si quieres avanzar con el pago",
   ]) assert.equal(pareceTextoInterno(f), false, f)
+})
+
+/**
+ * Deliberación vs decisión (14-sep, caso Luis Rivano +56930648645): el toque
+ * de los 11 minutos le mandó al cliente el razonamiento del modelo. Cerrarle
+ * el loop por eso sería castigarlo dos veces por un fallo nuestro.
+ */
+test("el razonamiento de Luis Rivano se detecta y NO cierra el loop", () => {
+  const t =
+    "Hola, todo bien? Entiendo que pasaron solo 11 minutos, así que técnicamente el cliente aún está en la " +
+    "conversación inicial. Sin embargo, siguiendo las reglas: el cliente no ha respondido a la pregunta sobre " +
+    "cómo trabaja su equipo. El mensaje de retome sería: Necesito entender un poco más tu operación."
+  assert.equal(clasificarTextoInterno(t), "razonamiento")
+  assert.equal(pareceTextoInterno(t), true)
+})
+
+test("la decisión de no escribir sigue cerrando el loop", () => {
+  for (const t of [
+    "No hay mensaje que escribir en este caso. El cliente se desvinculó de la empresa.",
+    "NO_ENVIAR",
+    "No puedo escribir este mensaje: el cliente acaba de decir que avanzará con el pago.",
+  ]) assert.equal(clasificarTextoInterno(t), "no_enviar", t)
+})
+
+test("un toque legítimo no se confunde con texto interno", () => {
+  for (const t of [
+    "Quedaste en comentarme cómo trabaja tu equipo en el centro cultural. Los 5 están siempre en el mismo lugar o algunos se mueven?",
+    "Vi que quedó pendiente lo del reloj para la sucursal nueva. Lo dejamos andando con app y después sumamos el equipo?",
+    "Te quedó la duda de si el sistema calcula las horas extras solas. Sí lo hace. Seguimos?",
+  ]) assert.equal(clasificarTextoInterno(t), "ok", t)
 })

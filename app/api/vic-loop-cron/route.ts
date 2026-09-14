@@ -1213,8 +1213,15 @@ export async function GET(req: Request): Promise<Response> {
         // desvinculó…" le llegó a un cliente): jamás sale; y como el modelo
         // juzgó que NO corresponde escribir, tampoco sale el texto fijo.
         if (contextoT5) {
-          const { pareceTextoInterno } = await import("@/lib/rechazo-cliente")
-          if (pareceTextoInterno(contextoT5)) {
+          // Solo la DECISIÓN del modelo cierra el loop; su divagación no
+          // (14-sep, caso Luis Rivano: prospecto de 11 minutos). El generador
+          // ya devuelve null en ese caso, esto es el cinturón de atrás.
+          const { clasificarTextoInterno } = await import("@/lib/rechazo-cliente")
+          const veredictoT5 = clasificarTextoInterno(contextoT5)
+          if (veredictoT5 === "razonamiento") {
+            console.warn(`[loop-cron] ${r.contact}: deliberación en el toque ${touch} — se descarta y sale el texto fijo`)
+            contextoT5 = null
+          } else if (veredictoT5 === "no_enviar") {
             console.warn(`[loop-cron] ${r.contact}: el generador devolvió texto interno — toque ${touch} omitido y loop cerrado`)
             await mas50CierraLoop(r.contact, "no_interesa")
             detalle.push({ contact: r.contact, accion: "cerrado_texto_interno", touch })
