@@ -290,7 +290,14 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
     let enviado = false
     if (ventanaViva) {
-      enviado = await sendBotmakerMessage(contact, mensaje).catch(() => false)
+      // TRANSACCIONAL (regla del 07-sep, caso TESLA AUSTRAL): el cliente acaba
+      // de apretar "Enviar" en el formulario — esto no es proactividad, es la
+      // respuesta a lo que hizo. Sin el flag, el gate lo cuenta como ráfaga
+      // porque el kickoff del alta salió minutos antes… y se bloquea a sí
+      // mismo. Pasó el 14-sep con Javiera/COTEL: texto y plantilla BLOQUEADOS
+      // por rafaga_10min a 100 s del kickoff, y Vicky quedó muda con el
+      // formulario ya completo.
+      enviado = await sendBotmakerMessage(contact, mensaje, undefined, { transaccional: true }).catch(() => false)
       if (enviado) await appendAssistantV3(contact, mensaje, "cl").catch(() => {})
     }
     if (!enviado) {
@@ -300,6 +307,8 @@ export async function POST(req: Request): Promise<NextResponse> {
         contact,
         PLANTILLA_ALTA_RESUMEN_CL.name,
         paramsPlantillaAltaFlow(actualizado.admin.nombre, actualizado.empresa.nombre),
+        undefined,
+        { transaccional: true },
       ).catch(() => false)
     }
     if (!enviado) {
