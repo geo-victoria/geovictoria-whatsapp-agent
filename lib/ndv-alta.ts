@@ -263,6 +263,11 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
           import("./cupos-pendientes")
             .then((cp) => cp.ofrecerCuposPendientes(c))
             .catch(() => null)
+          // Notas que el equipo dejó ANTES de que existiera la implementación
+          // (14-sep, caso Peggi: cliente de Nuboox que migra su data).
+          import("./nota-implementacion-pendiente")
+            .then((np) => np.adjuntarNotasPendientes(c, imp.id))
+            .catch(() => null)
           await avisarEquipoInterno(
             `🛠️ IMPLEMENTACIÓN GV Avanzado creada para ${job.empresa} → ${imp.relator.nombre} (${imp.relator.email})${imp.numero ? ` · ${imp.numero}` : ""}` +
               (ndvLista
