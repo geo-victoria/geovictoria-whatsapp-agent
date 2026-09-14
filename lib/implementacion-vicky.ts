@@ -326,8 +326,50 @@ export async function crearImplementacionGvAvanzado(
     const body = (await r.json().catch(() => ({}))) as {
       data?: Array<{ code?: string; details?: { id?: string }; message?: string }>
     }
-    const fila = body?.data?.[0]
-    if (!r.ok || fila?.code !== "SUCCESS" || !fila?.details?.id) {
+    let fila = body?.data?.[0]
+    // FILTRO DE LOOKUP DEL CONTACTO (14-sep, caso Javiera/COTEL): el campo
+    // `Contacto` de Implementaciones tiene filtro de lookup y Zoho rechaza el
+    // registro completo (FILTER_CRITERIA_NOT_SATISFIED en $.data[0].Contacto.id)
+    // cuando el contacto no cuelga de la Cuenta — típico del convert que deja
+    // el contacto con Account_Name vacío. La implementación es lo que destraba
+    // al cliente que YA pagó, así que no puede caerse por eso: se asocia el
+    // contacto a la cuenta y, si aun así no pasa, nace SIN Contacto (el
+    // implementador lo completa) en vez de no nacer.
+    const filtroContacto =
+      !r.ok &&
+      JSON.stringify(body || {}).includes("FILTER_CRITERIA_NOT_SATISFIED") &&
+      JSON.stringify(body || {}).includes("Contacto")
+    if (filtroContacto && d.contactId) {
+      if (d.accountId) {
+        await fetch(`${API()}/crm/v3/Contacts/${d.contactId}`, {
+          method: "PUT",
+          headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            data: [{ Account_Name: { id: d.accountId } }],
+            trigger: ["blueprint"],
+            skip_feature_execution: [{ name: "assignment_rules" }],
+          }),
+        }).catch(() => null)
+      }
+      for (const intento of ["con_contacto", "sin_contacto"] as const) {
+        if (intento === "sin_contacto") delete (registro as Record<string, unknown>).Contacto
+        const r2 = await fetch(`${API()}/crm/v3/Implementaciones`, {
+          method: "POST",
+          headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ data: [registro], trigger: ["workflow", "blueprint"] }),
+        }).catch(() => null)
+        const b2 = (await r2?.json().catch(() => ({}))) as typeof body
+        const f2 = b2?.data?.[0]
+        if (r2?.ok && f2?.code === "SUCCESS" && f2?.details?.id) {
+          console.warn(`[implementacion] creada tras filtro de Contacto (${intento})`)
+          fila = f2
+          break
+        }
+      }
+    }
+    if (!fila || fila.code !== "SUCCESS" || !fila.details?.id) {
       console.warn(`[implementacion] no se creó: ${JSON.stringify(body).slice(0, 300)}`)
       return null
     }

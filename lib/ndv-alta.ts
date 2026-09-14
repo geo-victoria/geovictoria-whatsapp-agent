@@ -38,6 +38,8 @@ export type JobNdvImp = {
   creadoAt: string
   intentos: number
   ultimoIntentoAt?: string
+  /** Intentos REALES de crear la implementación (14-sep). Ver nota en el uso. */
+  intentosImp?: number
   enCursoAt?: string
   ndv?: { ndvId?: string; idNdv?: string; referenciaId?: string; estado?: string; descuadreUF?: number | null }
   ndvPendiente?: string
@@ -54,6 +56,12 @@ export type JobNdvImp = {
 const COTIZADORA_API_BASE = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
 const TOPE_NDV_MIN = Math.max(5, Number(process.env.VICKY_NDV_ALTA_TOPE_MIN || 30) || 30)
 const TOPE_ENLACE_H = 24
+// OJO (14-sep, caso Javiera/COTEL): esto cuenta los intentos REALES de crear
+// la implementación, no las pasadas del job. Antes se medía contra
+// `job.intentos`, que sube en CADA pasada mientras se espera la NDV: con 15
+// pasadas esperando el PDF, el PRIMER intento de crear la IMP ya llegaba
+// pasado el tope y el job se daba por terminado (`imp_fallo`) sin un solo
+// reintento.
 const MAX_INTENTOS_IMP = 12
 
 async function leerJob(contact: string): Promise<JobNdvImp | null> {
@@ -254,7 +262,7 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
                 ? ` · ${job.ndv?.idNdv || "NDV"} confirmada y enlazada.`
                 : ` · SIN nota de venta todavía (${job.ndvPendiente || "pendiente"}${job.ndvError ? `: ${job.ndvError}` : ""}) — se sigue intentando enlazarla.`),
           ).catch(() => {})
-        } else if (job.intentos >= MAX_INTENTOS_IMP) {
+        } else if ((job.intentosImp = (job.intentosImp || 0) + 1) >= MAX_INTENTOS_IMP) {
           await avisarEquipoInterno(
             `⚠️ NO se pudo crear la implementación de ${job.empresa} (companyId ${job.companyId}) tras ${job.intentos} intentos. La empresa SÍ quedó creada — hay que abrir la implementación a mano.`,
           ).catch(() => {})
