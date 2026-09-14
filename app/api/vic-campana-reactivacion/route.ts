@@ -12,7 +12,7 @@
  * GET auth cron (?key= | x-cron-secret):
  *   ?dry=1            simulación explícita: lista sin enviar (siempre permitido)
  *   ?dia=wsp|mail    fuerza el canal (default: el del día local)
- *   ?max=N            tope de envíos/filas por corrida (default 40)
+ *   ?max=N            tope de envíos POR DÍA (default 40; el día se cuenta en vic_kv)
  *   ?dias=N           antigüedad del universo (default 90)
  *   ?contact=569…     evalúa UN contacto y explica el veredicto
  *   ?forzarHora=1     salta la ventana 11:00-11:59 (solo con dry o pruebas)
@@ -49,9 +49,11 @@ import {
   TABLA,
   casillaAbierta,
   contactosConChatReciente,
+  descartesEnBloque,
   evaluarGrupo1,
   feriadosDe,
   horaLocalDe,
+  fechaLocalDe,
   leerCasillasLote,
   marcarCasilla,
   siguienteCasilla,
@@ -74,7 +76,15 @@ const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").tri
 const TPL_CON_NOMBRE = (process.env.REMK_TEMPLATE_CON_NOMBRE || "vicky_reactivacion_cotizacion_cl_v4").trim()
 const TPL_SIN_NOMBRE = (process.env.REMK_TEMPLATE_SIN_NOMBRE || "vicky_reactivacion_sin_nombre_cl_v4").trim()
 const WA_VICKY = "https://wa.me/56967308227?text=Quiero%20retomar%20mi%20cotizaci%C3%B3n"
-const HORA_CAMPANA = 11
+// VENTANA DE LA CAMPAÑA (Lalo 14-sep, "la idea es cuanto antes enviar a todos
+// los candidatos válidos"). Era la hora 11 EXACTA y el job golpea cada 60', así
+// que caía UN solo tick por martes: el tope de la corrida terminaba siendo el
+// tope de la SEMANA y el backlog salía en tandas encadenadas de ~60 semanas.
+// Con la ventana 11-13 y el job cada 10' caen ~12 pasadas, cada una retomando
+// donde quedó la anterior. Es además el horario del borrador original de
+// Rodrigo ("siempre 11-13 h").
+const HORA_CAMPANA_DESDE = 11
+const HORA_CAMPANA_HASTA = 13 // exclusivo: la ventana es 11:00-12:59
 
 async function autorizado(req: Request): Promise<boolean> {
   const url = new URL(req.url)
@@ -252,10 +262,10 @@ export async function GET(req: Request): Promise<Response> {
   const enabled = ((await getKvValue("campana_react_enabled").catch(() => "")) || "").trim().toLowerCase() === "on"
   const dry = dryExplicito || !enabled
   const forzarHora = sp.get("forzarHora") === "1"
-  // TOPE DE ENVÍOS POR CORRIDA. Orden: ?max= → vic_kv `campana_react_max`
+  // TOPE DE ENVÍOS DEL DÍA. Orden: ?max= → vic_kv `campana_react_max`
   // (el piloto se dimensiona sin deploy) → env → 40.
   const maxKv = Number(((await getKvValue("campana_react_max").catch(() => "")) || "").trim()) || 0
-  const max = Math.min(Math.max(Number(sp.get("max")) || maxKv || Number(process.env.CAMPANA_REACT_MAX) || 40, 1), 150)
+  const max = Math.min(Math.max(Number(sp.get("max")) || maxKv || Number(process.env.CAMPANA_REACT_MAX) || 40, 1), 300)
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 7), 365)
   const soloContacto = (sp.get("contact") || "").replace(/\D/g, "")
   const canalParam = sp.get("dia") as Canal | null
@@ -276,10 +286,34 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, apagada: true, nota: "vic_kv campana_react_enabled != on — usa ?dry=1 para simular" })
   }
   const hora = horaLocalDe(pais, ahora)
-  if (!dry && !forzarHora && !modoPrueba && hora !== HORA_CAMPANA) {
-    return NextResponse.json({ ok: true, fueraDeHora: true, hora, canal })
+  if (!dry && !forzarHora && !modoPrueba && (hora < HORA_CAMPANA_DESDE || hora >= HORA_CAMPANA_HASTA)) {
+    return NextResponse.json({ ok: true, fueraDeHora: true, hora, ventana: `${HORA_CAMPANA_DESDE}-${HORA_CAMPANA_HASTA}`, canal })
   }
   if (!canal && !modoPrueba) return NextResponse.json({ ok: true, sinCanalHoy: true, nota: "la campaña corre martes (wsp) y miércoles (mail)" })
+
+  // CANDADO DE TURNO: con el job cada 10' dentro de la ventana pueden caer dos
+  // ticks encima si uno se demora. `casillaAbierta` ya hace imposible el doble
+  // envío al MISMO cliente, pero dos barridos simultáneos leerían el mismo
+  // contador del día y gastarían el tope dos veces. TTL 280 s (el presupuesto
+  // del propio tick) y SIN liberación explícita: el tick siguiente llega 10
+  // minutos después, con el candado vencido hace rato. Fail-open como siempre.
+  if (!dry && !modoPrueba && !soloContacto) {
+    const { reclamarTurno } = await import("@/lib/cron-lock")
+    if (!(await reclamarTurno("campana_react", 280))) {
+      return NextResponse.json({ ok: true, turnoOcupado: true, nota: "otro tick de la campaña está corriendo" })
+    }
+  }
+
+  // EL TOPE ES POR DÍA, NO POR CORRIDA. Mientras hubo un solo tick por martes
+  // daba lo mismo; con ~12 pasadas en la ventana, un tope por corrida se
+  // multiplicaría por 12. El contador se lee al empezar el tick y se escribe
+  // después de CADA envío, así que un tick que muera a la mitad no regala cupo.
+  const claveDia = `campana_react_dia_${fechaLocalDe(pais, ahora)}_${canal || "x"}`
+  const yaHoy = dry ? 0 : Number(((await getKvValue(claveDia).catch(() => "")) || "").trim()) || 0
+  const cupo = dry ? max : Math.max(0, max - yaHoy)
+  if (!dry && cupo === 0) {
+    return NextResponse.json({ ok: true, topeDelDiaAlcanzado: true, max, yaHoy, canal })
+  }
 
   const H = await zohoHeaders()
   const feriados = await feriadosDe(pais)
@@ -366,36 +400,53 @@ export async function GET(req: Request): Promise<Response> {
     }
     const casillas = await leerCasillasLote(universo.map((u) => u.contact))
 
-    // CENSO DEL DRY (cero envíos, cero escrituras): dos cosas para que el
-    // pre-flight informe un volumen REAL y no un piso.
-    //  (1) Pre-filtro en bloque por actividad de chat: descarta de una a la
-    //      mayoría sin tocar Zoho ni vic_kv.
-    //  (2) Lo que queda se evalúa por tandas de 4 en paralelo (suave para
+    // PRE-FILTROS EN BLOQUE + PRE-CÁLCULO. Corren SIEMPRE, no solo en el dry:
+    // el barrido real evaluaba en serie (~8 s por contacto) y con 250 s de
+    // presupuesto no alcanzaba a mandar un tope grande — el tope pasaba a ser
+    // decorativo. Tres capas, de la más barata a la más cara:
+    //  (1) chat reciente: 2 consultas para TODO el universo.
+    //  (2) descartes en bloque (opt-out, pago, loop cerrado, tiempo acotado):
+    //      4 lecturas por prefijo + lotes de 200. Las dos DESCARTAN, jamás
+    //      aprueban — quien no aparece pasa por la evaluación completa.
+    //  (3) lo que queda se evalúa por tandas de 4 en paralelo (suave para
     //      Zoho: la tormenta de tokens del 01-sep vino de martillar
-    //      reintentos, no de cuatro llamadas), y con presupuesto RESERVADO —
-    //      la primera versión se comió los 250 s completos y el loop de
-    //      reporte quedó sin nada, así que el trabajo se hizo y se botó.
+    //      reintentos, no de cuatro llamadas) con presupuesto RESERVADO — la
+    //      primera versión se comió los 250 s y el loop de reporte quedó sin
+    //      nada, así que el trabajo se hizo y se botó.
     const evalPrecalc = new Map<string, EvaluacionGrupo1>()
-    const chatActivo = dry
-      ? await contactosConChatReciente(universo.map((u) => u.contact), { ahora, pais, feriados }).catch((e) => {
-          console.error("[campana] pre-filtro de chat falló", e)
-          return new Map<string, { at: Date; minutos: number }>()
-        })
-      : new Map<string, { at: Date; minutos: number }>()
-    if (dry) {
+    const chatActivo = await contactosConChatReciente(universo.map((u) => u.contact), { ahora, pais, feriados }).catch((e) => {
+      console.error("[campana] pre-filtro de chat falló", e)
+      return new Map<string, { at: Date; minutos: number }>()
+    })
+    const descartes = await descartesEnBloque(universo.map((u) => u.contact), { ahora }).catch((e) => {
+      console.error("[campana] descartes en bloque falló", e)
+      return new Map<string, { motivo: string; detalle?: string }>()
+    })
+    {
       const aEvaluar = universo.filter((u) => {
         if (chatActivo.has(u.contact)) return false
+        if (descartes.has(u.contact)) return false
+        if (u.canalEjecutivo) return false
         const f = casillas.get(u.contact) || null
         return Boolean(siguienteCasilla(f)) && !casillaAbierta(f, ahora)
       })
-      const presupuestoCenso = Math.floor(presupuestoMs * 0.55)
+      // En real se reserva MÁS presupuesto para el pre-cálculo (el envío en sí
+      // es barato) y se corta apenas hay aptos de sobra para el cupo del día.
+      const presupuestoCenso = Math.floor(presupuestoMs * (dry ? 0.55 : 0.7))
+      let aptos = 0
       for (let i = 0; i < aEvaluar.length; i += 4) {
         if (Date.now() - t0 > presupuestoCenso) break
+        if (!dry && aptos >= cupo) break
         const tanda = aEvaluar.slice(i, i + 4)
         const evs = await Promise.all(
           tanda.map((c) => evaluarGrupo1(c.contact, { pais, ahora, H, feriados }).catch(() => null)),
         )
-        tanda.forEach((c, k) => { const e = evs[k]; if (e) evalPrecalc.set(c.contact, e) })
+        tanda.forEach((c, k) => {
+          const e = evs[k]
+          if (!e) return
+          evalPrecalc.set(c.contact, e)
+          if (e.apto) aptos++
+        })
       }
       censo = { chatActivo: chatActivo.size, aEvaluar: aEvaluar.length, precalculados: evalPrecalc.size }
     }
@@ -405,7 +456,7 @@ export async function GET(req: Request): Promise<Response> {
       // universo se excluye, así que atarlo a max*3 dejaba un piloto de 2 en CERO
       // envíos (se cerraba en la fila 6 sin haber mandado nada) — visto en el dry
       // del 13-sep. Piso de 200 filas para que el tope chico no corte el barrido.
-      if (enviados >= max || filas.length >= Math.max(max * 3, 200)) break
+      if (enviados >= cupo || filas.length >= Math.max(cupo * 3, 200)) break
       if (Date.now() - t0 > presupuestoMs) { filas.push({ contact: "-", empresa: null, quoteId: null, casilla: null, canal, omitido: "presupuesto_de_tiempo" }); break }
       const fila = casillas.get(cand.contact) || null
       const casilla = siguienteCasilla(fila)
@@ -421,6 +472,15 @@ export async function GET(req: Request): Promise<Response> {
       if (abierta) { base.omitido = `toque_${abierta}_en_curso`; filas.push(base); continue }
       // Del pre-filtro en bloque: ya sabemos que habló hace poco, así que no
       // se gasta ni el chequeo de descanso ni la evaluación completa.
+      // Descartado en bloque: el veredicto es el mismo que daría
+      // evaluarGrupo1, sin pagar sus ~7 etapas de red.
+      const desc = descartes.get(cand.contact)
+      if (desc) {
+        base.omitido = desc.detalle ? `${desc.motivo} (${desc.detalle})` : desc.motivo
+        filas.push(base)
+        if (!dry) await anotarEvaluacion(cand.contact, base.omitido, pais)
+        continue
+      }
       const act = chatActivo.get(cand.contact)
       if (act) {
         base.ultimaActividad = `chat ${act.at.toISOString().slice(0, 16)}`
@@ -520,6 +580,7 @@ export async function GET(req: Request): Promise<Response> {
         `[REGISTRO INTERNO] Campaña de reactivación, toque ${casilla} de 4 (${ahora.toISOString().slice(0, 10)}): se le envió la plantilla de reactivación por su cotización${empresa || cand.empresa ? ` de ${empresa || cand.empresa}` : ""}. Si responde con interés: retomar la cotización desde donde quedó, actualizar dotación si cambió y cerrar con link de pago. Si dice que no: agradecer y cerrar sin insistir. Mañana le llega un correo solo si sigue sin responder.`,
       ).catch(() => {})
       enviados++
+      await setKvValue(claveDia, String(yaHoy + enviados)).catch(() => {})
       base.accion = `enviado toque ${casilla} (WhatsApp, ${tpl})` + (topeT4?.ok ? ` · ${topeT4.pct}% aplicado por 6 meses` : "")
       filas.push(base)
       await new Promise((r) => setTimeout(r, 900))
@@ -534,7 +595,7 @@ export async function GET(req: Request): Promise<Response> {
     )
     const abiertas = ((await r.json().catch(() => [])) as FilaCasillas[]) || []
     for (const f of abiertas) {
-      if (enviados >= max) break
+      if (enviados >= cupo) break
       if (Date.now() - t0 > presupuestoMs) break
       const casilla = casillaAbierta(f, ahora)
       if (!casilla) continue
@@ -584,6 +645,7 @@ export async function GET(req: Request): Promise<Response> {
       await marcarCasilla(f.contact, casilla, "mail", { pais, motivo: `toque ${casilla} correo` })
       await registrarEvento(f.contact, casilla, "mail", f.quote_id)
       enviados++
+      await setKvValue(claveDia, String(yaHoy + enviados)).catch(() => {})
       base.accion = `enviado toque ${casilla} (correo a ${email})`
       filas.push(base)
       await new Promise((r) => setTimeout(r, 600))
@@ -595,5 +657,5 @@ export async function GET(req: Request): Promise<Response> {
     const k = f.accion ? (f.accion.startsWith("SE ENVIARÍA") ? "se_enviaria" : f.accion.split(" (")[0]) : String(f.omitido || "?").split(" (")[0]
     resumen[k] = (resumen[k] || 0) + 1
   }
-  return NextResponse.json({ ok: true, dry, enabled, canal, hora, fecha: ahora.toISOString(), dias, universo: filas.length, pool, evaluados, enviados, censo, resumen, filas, ms: Date.now() - t0 })
+  return NextResponse.json({ ok: true, dry, enabled, canal, hora, fecha: ahora.toISOString(), dias, universo: filas.length, pool, evaluados, enviados, max, yaHoy, cupo, censo, resumen, filas, ms: Date.now() - t0 })
 }

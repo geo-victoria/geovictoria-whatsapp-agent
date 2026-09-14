@@ -72,9 +72,22 @@ export function canalDelDia(pais: string, ahora: Date): Canal | null {
 
 /** Hora local 0-23 del país. */
 export function horaLocalDe(pais: string, ahora: Date): number {
-  const tz = pais === "co" ? "America/Bogota" : pais === "mx" ? "America/Mexico_City" : pais === "pe" ? "America/Lima" : "America/Santiago"
+  const tz = tzDePaisCampana(pais)
   const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(ahora))
   return h === 24 ? 0 : h
+}
+
+export function tzDePaisCampana(pais: string): string {
+  return pais === "co" ? "America/Bogota" : pais === "mx" ? "America/Mexico_City" : pais === "pe" ? "America/Lima" : "America/Santiago"
+}
+
+/**
+ * El DÍA local del país, "YYYY-MM-DD". El tope de la campaña se cuenta por día
+ * y no por corrida: desde que el job corre cada 10' dentro de la ventana 11-13,
+ * un tope por corrida se multiplicaría por cada pasada.
+ */
+export function fechaLocalDe(pais: string, ahora: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tzDePaisCampana(pais) }).format(ahora)
 }
 
 

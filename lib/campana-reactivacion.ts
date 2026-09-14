@@ -39,7 +39,7 @@ import { umbralPrecios } from "./umbral-autonomia"
 import { testContactSet } from "./funnel-analysis"
 import { canalDelDia, casillaAbierta, esToqueComercial, horaLocalDe, siguienteCasilla, HORA_INICIO_CAMPANA, MINUTOS_HABILES_INACTIVIDAD, type Canal, type Casilla, type FilaCasillas } from "./campana-reactivacion-reglas"
 
-export { canalDelDia, casillaAbierta, esToqueComercial, horaLocalDe, siguienteCasilla, TOQUES_MAX, HORA_INICIO_CAMPANA, DIAS_HABILES_INACTIVIDAD, MINUTOS_HABILES_INACTIVIDAD, DESCANSO_DIAS, debeDescansar, planDeToque, ganchoParaToque2, precioTextoClp, type PlanToque } from "./campana-reactivacion-reglas"
+export { canalDelDia, casillaAbierta, esToqueComercial, horaLocalDe, fechaLocalDe, siguienteCasilla, TOQUES_MAX, HORA_INICIO_CAMPANA, DIAS_HABILES_INACTIVIDAD, MINUTOS_HABILES_INACTIVIDAD, DESCANSO_DIAS, debeDescansar, planDeToque, ganchoParaToque2, precioTextoClp, type PlanToque } from "./campana-reactivacion-reglas"
 export type { Canal, Casilla, FilaCasillas } from "./campana-reactivacion-reglas"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
@@ -478,6 +478,104 @@ export async function contactosConChatReciente(
     if (min >= MINUTOS_HABILES_INACTIVIDAD) out.delete(c)
     else out.set(c, { at: v.at, minutos: min })
   }
+  return out
+}
+
+/**
+ * PRE-FILTRO EN BLOQUE nº2: los descartes que se deciden SIN una consulta por
+ * persona.
+ *
+ * `evaluarGrupo1` encadena ~7 etapas de red por contacto (~8 s), y el
+ * pre-flight se quedaba sin presupuesto tras mirar una fracción del universo:
+ * de ahí el "505 sin evaluar por tiempo" del correo del 14-sep. Las PRIMERAS
+ * etapas —4 marcas de vic_kv, el estado del loop y el opt-out de la
+ * conversación— son las mismas consultas repetidas N veces, y se resuelven en
+ * bloque: 4 lecturas por prefijo + lotes de 200 para las dos tablas.
+ *
+ * Igual que `contactosConChatReciente`: **DESCARTA, jamás aprueba**. Quien no
+ * aparece acá pasa por la evaluación completa como siempre, y un fallo de
+ * consulta simplemente no descarta a nadie (lo resuelve evaluarGrupo1).
+ */
+export async function descartesEnBloque(
+  contacts: string[],
+  opts: { ahora?: Date } = {},
+): Promise<Map<string, { motivo: string; detalle?: string }>> {
+  const out = new Map<string, { motivo: string; detalle?: string }>()
+  if (!contacts.length) return out
+  const ahora = opts.ahora || new Date()
+  const enUniverso = new Set(contacts)
+  const internos = testContactSet()
+
+  const marca = (c: string, motivo: string, detalle?: string) => {
+    if (!out.has(c)) out.set(c, { motivo, detalle })
+  }
+
+  for (const c of contacts) if (internos.has(c)) marca(c, "interno")
+
+  // 1. Las cuatro marcas de vic_kv, por PREFIJO: una consulta para todo el
+  //    universo. (vic_kv no acepta `or=` con dos LIKE comodín — cicatriz 11-sep.)
+  const kvPorPrefijo = new Map<string, Map<string, string>>()
+  for (const pref of ["voz_no_llamar_", "voz_excluir_", "pago_online_", "comprobante_ok_"]) {
+    const filas = await sb<{ key: string; value: string }>(
+      `vic_kv?key=like.${pref}*&select=key,value`,
+    ).catch((e) => {
+      console.error(`[campana] pre-filtro kv ${pref} falló`, e)
+      return null
+    })
+    if (!filas) continue // sin lectura no se descarta: lo ve evaluarGrupo1
+    const m = new Map<string, string>()
+    for (const f of filas) {
+      const c = String(f.key || "").slice(pref.length)
+      if (enUniverso.has(c)) m.set(c, String(f.value ?? ""))
+    }
+    kvPorPrefijo.set(pref, m)
+  }
+
+  for (const [c, v] of kvPorPrefijo.get("voz_no_llamar_") || []) if (v) marca(c, "opt_out", String(v).slice(0, 80))
+  for (const [c, v] of kvPorPrefijo.get("voz_excluir_") || []) {
+    if (!v) continue
+    let hasta = ""
+    let motivo = ""
+    try {
+      const j = JSON.parse(v) as { hasta?: string; motivo?: string }
+      hasta = j.hasta || ""
+      motivo = j.motivo || ""
+    } catch { motivo = String(v).slice(0, 60) }
+    if (!hasta || Date.parse(hasta) > ahora.getTime()) {
+      marca(c, hasta ? "tiempo_acotado" : "excluido_campanas", `${motivo}${hasta ? ` hasta ${hasta}` : ""}`)
+    }
+  }
+  for (const pref of ["pago_online_", "comprobante_ok_"]) {
+    for (const [c, v] of kvPorPrefijo.get(pref) || []) if (v) marca(c, "pago_registrado")
+  }
+
+  // 2. vic_loop y vic_v3_conversations en lotes de 200 (mismo tamaño que el
+  //    pre-filtro de chat: la URL de PostgREST aguanta ese `in.()`).
+  for (let i = 0; i < contacts.length; i += 200) {
+    const lote = contacts.slice(i, i + 200)
+    const [loops, convs] = await Promise.all([
+      sb<{ contact: string; estado: string; compromiso_at: string | null; motivo_cierre: string | null }>(
+        `vic_loop?contact=in.(${lote.join(",")})&select=contact,estado,compromiso_at,motivo_cierre`,
+      ).catch((e) => { console.error("[campana] pre-filtro loop falló", e); return null }),
+      sb<{ contact: string; followup_closed_reason: string | null }>(
+        `vic_v3_conversations?contact=in.(${lote.join(",")})&select=contact,followup_closed_reason`,
+      ).catch((e) => { console.error("[campana] pre-filtro conversaciones falló", e); return null }),
+    ])
+    for (const l of loops || []) {
+      if (l.estado === "pausado_compromiso" && l.compromiso_at && Date.parse(l.compromiso_at) > ahora.getTime()) {
+        marca(l.contact, "tiempo_acotado", `retoma ${l.compromiso_at.slice(0, 10)}`)
+        continue
+      }
+      const mc = l.motivo_cierre || ""
+      if (mc === "opt_out" || mc === "no_interesa" || mc === "no_prospecto" || mc === "cliente_existente") {
+        marca(l.contact, mc === "no_interesa" ? "rechazo" : mc, "loop cerrado")
+      }
+    }
+    for (const cv of convs || []) {
+      if (cv.followup_closed_reason === "opt_out") marca(cv.contact, "opt_out", "conversación")
+    }
+  }
+
   return out
 }
 

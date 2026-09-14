@@ -108,7 +108,11 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // 11:00 CL (la llamada del jueves salió del ciclo, Lalo 11-sep). El endpoint
   // responde `apagada` mientras vic_kv campana_react_enabled != "on" y
   // `fueraDeHora` fuera de las 11.
-  { nombre: "campana_react", path: "/api/vic-campana-reactivacion", cadaMin: 60 },
+  // Cada 10' para que dentro de la ventana 11-13 caigan ~12 pasadas: con una
+  // sola por martes el tope de la corrida era el tope de la SEMANA. El propio
+  // endpoint se auto-gatea (día, hora, candado de turno y tope POR DÍA), así
+  // que fuera de la ventana cada golpe cuesta una respuesta y nada más.
+  { nombre: "campana_react", path: "/api/vic-campana-reactivacion", cadaMin: 10 },
   // Verifica que los toques del martes SALIERON de verdad y persiste el
   // veredicto (el 202 de Botmaker es "encargo aceptado", no "entregado").
   { nombre: "campana_entregas", path: "/api/vic-campana-entregas", cadaMin: 360 },

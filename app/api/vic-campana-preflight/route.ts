@@ -292,7 +292,8 @@ export async function GET(req: Request): Promise<Response> {
     ${freno.nota ? `<div style="color:#6b7280;font-size:12.5px;margin-top:6px">${esc(freno.nota)}</div>` : `<div style="color:#6b7280;font-size:12.5px;margin-top:6px">Para reencender: vic_kv <code>campana_react_enabled</code> = "on" después de revisar.</div>`}
   </div>` : ""}
   <table style="border-collapse:collapse;font-size:14px;margin-bottom:14px">
-    <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Saldrían el martes</td><td style="padding:3px 0"><b>${seEnviaria}</b>${previa ? ` <span style="color:#6b7280">(semana del ${previa.semana}: ${previa.seEnviaria})</span>` : ""}</td></tr>
+    <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Saldrían el martes</td><td style="padding:3px 0"><b>${saldriaReal}</b> <span style="color:#6b7280">de ${seEnviaria} aptos · tope del día ${MAX_REAL}</span>${previa ? ` <span style="color:#6b7280">· semana del ${previa.semana}: ${previa.seEnviaria} aptos</span>` : ""}</td></tr>
+    <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Bolsa disponible</td><td style="padding:3px 0">${seEnviaria} aptos${seEnviaria > MAX_REAL ? ` · ${seEnviaria - MAX_REAL} quedan para las corridas siguientes` : ""}</td></tr>
     <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Candidatos revisados</td><td style="padding:3px 0">${universo}${truncado ? ` <span style="color:#b45309">· ${sinEvaluar || "algunos"} sin evaluar por tiempo, la cifra es un piso</span>` : ""}</td></tr>
     <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Pasaron a evaluación</td><td style="padding:3px 0">${evaluados}</td></tr>
     <tr><td style="padding:3px 12px 3px 0;color:#6b7280">No evaluables</td><td style="padding:3px 0">${noEvaluable}</td></tr>
