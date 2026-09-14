@@ -66,3 +66,11 @@ test("sanitizarVoseo corrige el voseo y no toca el link de la cotización", () =
   assert.ok(t.includes("Aquí está"), t)
   assert.ok(t.includes(link), `el link se alteró: ${t}`)
 })
+
+// REGLA DURA (Lalo 14-sep): nunca "al toque".
+test("al toque se sanea y el link no se toca", () => {
+  const s = sanitizarVoseo("Te los muestro al toque: https://cotizacion.geovictoria.com/q/35250-al-toque-99")
+  assert.ok(!/al toque/i.test(s.split("https")[0]), "el texto ya no dice al toque")
+  assert.ok(s.includes("https://cotizacion.geovictoria.com/q/35250-al-toque-99"), "el link queda intacto")
+  assert.ok(/de inmediato/i.test(s))
+})

@@ -25,6 +25,11 @@ const VOSEO_MAP: [RegExp, string][] = [
   // "¿cachái?"). Se normalizan antes de enviar.
   [/(?<!\p{L})al\s+tiro(?!\p{L})/giu, "de inmediato"],
   [/(?<!\p{L})altiro(?!\p{L})/giu, "de inmediato"],
+  // REGLA DURA (Lalo 14-sep): NUNCA "al toque". Salió dos veces el mismo día —
+  // "te los muestro al toque" a Javiera/COTEL (que respondió "¿al toque?") y
+  // "lo vemos al toque" a Dubraska. Está incluso escrito en el prompt CL, así
+  // que el modelo lo copia con razón: el saneador lo corrige igual.
+  [/(?<!\p{L})al\s+toque(?!\p{L})/giu, "de inmediato"],
   [/(?<!\p{L})cach[aá][iy](?!\p{L})/giu, "sabes"],
   // "po" muletilla al final de frase ("listo po", "claro po,") → se elimina.
   [/\s+po(?=[\s.,!?;:)¿¡]|$)/giu, ""],
