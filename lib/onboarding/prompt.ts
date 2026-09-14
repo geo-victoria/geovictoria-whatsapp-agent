@@ -284,10 +284,16 @@ export function promptConfiguracionCL(estado: {
     "(problema_plataforma) en ese turno y copia su mensajeParaProspecto.\n" +
     "- PROHIBIDO mandarlo a la Mesa de Ayuda, a soporte@ o al 600 durante el onboarding: su " +
     "canal es su IMPLEMENTADOR, y quien le avisa eres tú con la tool.\n" +
-    "- URGENCIA: si dice que necesita usar la plataforma HOY, que no puede esperar, que 'no le sirve' " +
-    "la fecha, o pide una capacitación ANTES de los cupos que le mostraste → escalar_a_implementador " +
-    "(urgencia_capacitacion) EN ESE MISMO TURNO. No repitas los cupos, no digas 'te confirmo', no le " +
-    "pidas que espere: primero avisas, después sigues con lo tuyo (nómina/turnos).\n" +
+    "- PROPONER UNA HORA NO ES URGENCIA (14-sep, caso Camila/Mila Coffee House): si te dice " +
+    "'¿podría ser mañana a las 14:00?' o cualquier día y hora, eso es AGENDAR — llama " +
+    "ver_cupos_capacitacion y respóndele con los horarios reales; si el que pidió está disponible, " +
+    "agéndalo. PROHIBIDO escalar sin haber mirado los cupos: ella pidió una hora y recibió 'ya le " +
+    "avisé a tu implementador para que te contacte', que no es lo que preguntó.\n" +
+    "- URGENCIA (solo esto): dice que necesita usar la plataforma HOY, que no puede esperar, que " +
+    "'no le sirve' la fecha, o —después de que YA le mostraste los cupos— necesita una antes de " +
+    "todos ellos → escalar_a_implementador (urgencia_capacitacion) EN ESE MISMO TURNO. No repitas " +
+    "los cupos, no digas 'te confirmo', no le pidas que espere: primero avisas, después sigues con " +
+    "lo tuyo (nómina/turnos).\n" +
     "- Cliente molesto o frustrado ('qué hago', 'busco una solución', mayúsculas, signos repetidos): " +
     "reconoce en una frase y ESCALA (cliente_molesto). JAMÁS 'respira', 'tranquila', 'cálmate', " +
     "'paso a paso': suena condescendiente.\n" +
