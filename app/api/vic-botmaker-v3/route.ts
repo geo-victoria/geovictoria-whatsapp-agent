@@ -86,6 +86,7 @@ import {
 } from "@/lib/supabase-persistence-v3"
 import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
 import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral } from "@/lib/umbral-autonomia"
+import { prometeContactoSinRegistro } from "@/lib/promesa-contacto"
 
 export const dynamic = "force-dynamic"
 // 300s, igual que los webhooks CO y MX. Estaba en 60 desde el 22-jun, cuando
@@ -1534,26 +1535,25 @@ async function processOneTurn(
     // ejecutivo va a contactar, pero NO hubo un registrar_solicitud_callback (ni
     // un agendar_reunion, que también crea el Lead) exitoso este turno,
     // re-corremos forzando la tool; si aun así no se concreta, NO confirmamos.
+    // CASO FRANCISCA (14-sep, +56956387811): preguntó "cuando podrian
+    // instalarlo?" dos minutos después de recibir su cotización y este
+    // cinturón le tapó la respuesta con el enlatado del rescate — porque el
+    // detector incluía la forma GENÉRICA "el equipo te va a contactar", que
+    // es justo la respuesta CORRECTA a una pregunta de plazo. Y de paso
+    // registró una promesa falsa y le cerró el loop.
+    // La regla vive en lib/promesa-contacto (PURA, con tests): la afirmación
+    // EXPLÍCITA de registro siempre cuenta; la genérica cuenta salvo que el
+    // cliente esté preguntando un plazo operativo y nunca haya pedido que lo
+    // contacten. Mismo patrón que `turnoHablaDeDescuento` del 14-sep.
+    const textosClienteTurno = history
+      .filter((m) => m.role === "user")
+      .map((m) => String(m.content || ""))
+      .concat([String(message || "")])
     const afirmaCallbackListoEn = (t: string) =>
-      // "tomé/dejé/registré/guardé tus datos | tu solicitud | el callback"
-      /\b(tom[eé]|dej[eé]|guard[eé]|registr[eé]|anot[eé])[^.]{0,30}\b(tus\s+datos|tu\s+solicitud|tus\s+antecedentes|el\s+callback|tu\s+contacto)\b/i.test(
-        t,
-      ) ||
-      // "quedaste/quedó registrado" / "te dejé registrado"
-      /\bqued(aste|[oó])\b[^.]{0,20}\bregistrad/i.test(t) ||
-      /\bte\s+(dej[eé]|registr[eé])[^.]{0,15}\bregistrad/i.test(t) ||
-      // Afirmación de contacto futuro por parte de un ejecutivo/equipo/Anderson.
-      // Solo formas ASERTIVAS (contactará / te va a contactar / llamará / se
-      // pondrá en contacto), NO la oferta en subjuntivo ("¿quieres que un
-      // ejecutivo te contacte?"), que es legítima sin tool.
-      /\b(un\s+ejecutivo|el\s+ejecutivo|la\s+ejecutiva|tu\s+ejecutiv[oa]|nuestr[oa]\s+ejecutiv[oa]|el\s+equipo|un\s+asesor|Anderson)\b[^.]{0,45}\b(te\s+(contactar[aá]|llamar[aá]|contacta|llama|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|contactar[aá])\s+en\s+contacto)/i.test(
-        t,
-      ) ||
-      // Casos Daniela y Rosa (10-sep): "te conectamos con el ejecutivo que
-      // lleva tu cuenta", "ya está escalado para que Paola te llame HOY".
-      /\bte\s+conect(amos|o)\s+con\b/i.test(t) ||
-      /\b(ya\s+)?(est[aá]|qued[oó])\s+escalad[oa]\b/i.test(t) ||
-      /\bpara\s+que\s+[A-ZÁÉÍÓÚ][\wáéíóú]+\s+te\s+(llame|contacte|escriba)\b/.test(t)
+      prometeContactoSinRegistro(t, {
+        mensajeCliente: String(message || ""),
+        textosCliente: textosClienteTurno,
+      })
     const afirmaCallbackListo = afirmaCallbackListoEn(reply)
     // derivar_a_soporte cuenta como registro REAL (Eduardo 14-ago, su prueba
     // de callback con 70 empleados "falló"): con el flujo 21+ la rama "que me
@@ -1635,10 +1635,7 @@ async function processOneTurn(
         // al cliente es el canónico del traspaso o uno honesto — nunca más
         // "ya le avisé al equipo" con la bandeja como único rastro.
         const { rescatarCallback } = await import("@/lib/rescate-callback")
-        const textosCliente = history
-          .filter((m) => m.role === "user")
-          .map((m) => String(m.content || ""))
-          .concat([message])
+        const textosCliente = textosClienteTurno
         const rescate = await rescatarCallback({
           contact,
           pais: "cl",
