@@ -1770,6 +1770,28 @@ async function processOneTurn(
     }
     reply = blindarSoporteInventado(reply, permitidos)
 
+    // 2.7-bis. LA CERTIFICACIÓN DE LA DT SE ADJUNTA, NO SE CUENTA (Lalo
+    // 14-sep). Dos veces el mismo punto: el 02-sep Vicky ofreció tres veces
+    // "te envío el documento" sin llamar enviar_certificacion, y hoy (Dubraska,
+    // taller en Antofagasta) el cliente preguntó "¿este sistema está vinculado
+    // con DT?" y la respuesta citó bien la Resolución Exenta N°38 pero llegó
+    // sin el documento. En el prompt la regla es CONDICIONAL ("si pide
+    // respaldo"), así que depende del criterio del modelo — y ya falló dos
+    // veces. Acá solo se ANEXA lo que falta: una respuesta que ya trae el link
+    // no se toca, y el texto del modelo nunca se reemplaza.
+    if (reply) {
+      try {
+        const { conCertificacionSiFalta } = await import("@/lib/certificacion-dt")
+        const cert = conCertificacionSiFalta(message, reply)
+        if (cert.anexado) {
+          reply = cert.texto
+          console.log("[cert-dt] documento anexado", { contact })
+        }
+      } catch (e) {
+        console.error("[cert-dt] falló el cinturón", e)
+      }
+    }
+
     // 2.8-bis. PAGO DECLARADO → VERIFICAR, NUNCA CREER (Lalo 10-sep, caso
     // Eduardo Guzmán): "Ya está pagado" 2 min después de salir al checkout y
     // el modelo respondió "veo que el pago está procesado" + instructivo de
