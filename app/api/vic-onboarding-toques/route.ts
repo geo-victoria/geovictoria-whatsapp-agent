@@ -133,6 +133,12 @@ async function enviarToque(contact: string, texto: string): Promise<boolean> {
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   const dry = new URL(req.url).searchParams.get("dry") === "1"
+  // ?listar=1 (14-sep, pregunta de Lalo "¿a quién falta ofrecer horarios de
+  // capacitación?"): FOTO de los 24 en fase onboarding, sin filtrar por
+  // candado, ventana ni horario — el dry solo muestra a quien HOY dispararía
+  // un toque, que es otra pregunta.
+  const listar = new URL(req.url).searchParams.get("listar") === "1"
+  const foto: Array<Record<string, unknown>> = []
   const ahora = new Date()
   const cl = enChile(ahora)
   const enHorario = cl.hora >= 9 && cl.hora < 20
@@ -173,6 +179,22 @@ export async function GET(req: Request): Promise<Response> {
       try { nombre = borradorRaw ? String((JSON.parse(borradorRaw) as { admin?: { nombre?: string } }).admin?.nombre || "").trim().split(/\s+/)[0] : "" } catch { nombre = "" }
       const saludo = nombre ? `${nombre}, ` : ""
       const relator = cap.relator?.nombre || "tu relator"
+
+      if (listar) {
+        foto.push({
+          contact,
+          nombre: nombre || null,
+          alta: altaAt ? altaAt.toISOString() : null,
+          capacitacion: cap.bookingId ? cap.cuando || "agendada" : null,
+          imp: cap.numero || null,
+          relator: cap.relator?.nombre || null,
+          trabajadores,
+          ultimoMensajeCliente: ultimo ? ultimo.toISOString() : null,
+          ventanaWaAbierta: ventanaAbierta,
+          estado: !altaAt ? "falta el alta" : cap.bookingId ? "capacitación agendada" : "FALTA AGENDAR CAPACITACIÓN",
+        })
+        continue
+      }
 
       const disparar = async (regla: Candidato["regla"], claveToque: string, texto: string) => {
         if (await getKvValue(claveToque).catch(() => null)) return
@@ -272,5 +294,18 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   console.log(`[onboarding-toques] contactos=${contactos.length} toques=${toques} avisos=${avisos} horario=${enHorario ? "si" : "no"} dry=${dry}`)
+  if (listar) {
+    const orden = { "FALTA AGENDAR CAPACITACIÓN": 0, "falta el alta": 1, "capacitación agendada": 2 } as Record<string, number>
+    foto.sort((a, b) => (orden[String(a.estado)] ?? 9) - (orden[String(b.estado)] ?? 9) || String(a.alta || "").localeCompare(String(b.alta || "")))
+    return NextResponse.json({
+      ok: true,
+      listar: true,
+      contactos: contactos.length,
+      faltaAgendar: foto.filter((f) => f.estado === "FALTA AGENDAR CAPACITACIÓN").length,
+      faltaAlta: foto.filter((f) => f.estado === "falta el alta").length,
+      agendadas: foto.filter((f) => f.estado === "capacitación agendada").length,
+      foto,
+    })
+  }
   return NextResponse.json({ ok: true, dry, horaChile: cl.hora, enHorario, contactos: contactos.length, toques, avisos, candidatos })
 }
