@@ -1993,10 +1993,28 @@ async function processOneTurn(
       if (enOnboarding && partes.length > 3) {
         partes = [partes[0], partes[1], partes.slice(2).join("\n\n")]
       }
-      // ¿Este turno ENTREGÓ algo crítico (cotización)? Esas respuestas salen
-      // siempre: descartarlas dejaría al cliente sin su link.
+      // ¿Este turno ENTREGÓ algo crítico? Esas respuestas salen siempre:
+      // descartarlas deja al cliente sin lo que pidió.
+      //
+      // 14-sep (caso Dubraska, taller en Antofagasta): faltaba `cotizar_referencial`
+      // y por eso la clienta ELIGIÓ PLAN SIN VER NINGÚN PRECIO. Escribió
+      // "ANTOFAGASTA" (13:03:29) y "merced 370" diez segundos después; el
+      // bloque con las dos opciones —0,95 UF con reloj y 0,55 UF solo app— se
+      // generó para el primer mensaje y se descartó ENTERO al detectar el
+      // segundo. En Botmaker solo salió la pregunta del turno siguiente,
+      // "¿con cuál de las dos avanzamos?", sin las dos. El precio es
+      // exactamente igual de crítico que el link.
+      const TOOLS_CRITICAS = new Set([
+        "generar_link_cotizadora",
+        "cotizar_referencial",
+        "consultar_descuento_referencial",
+        "aplicar_siguiente_descuento",
+        "enviar_certificacion",
+        "enviar_ficha_reloj",
+        "actualizar_cotizacion",
+      ])
       const turnoEntregaCotizacion = (result.toolCalls || []).some(
-        (c) => c.name === "generar_link_cotizadora" && c.ok,
+        (c) => TOOLS_CRITICAS.has(c.name) && c.ok,
       )
       for (const [i, parte] of partes.entries()) {
         // RESPUESTA OBSOLETA (Eduardo 17-ago, caso "Rodrigo"→"Somos 20"): si
@@ -2007,9 +2025,15 @@ async function processOneTurn(
         // mensaje nuevo con TODO el historial (incluida esta respuesta
         // persistida) y contesta ambas cosas de una. El debounce de 1,5 s
         // cubre las ráfagas inmediatas; esto cubre la ventana de generación.
-        if (!turnoEntregaCotizacion && (await inboxHasPending(contact))) {
+        // Y JAMÁS a mitad de turno (misma cicatriz, 14-sep 12:52): al llegar
+        // "es un taller mecanico" mientras salía la lista de métodos de
+        // marcaje, se envió el encabezado ("las formas más usadas son:") y se
+        // descartaron las opciones — un mensaje partido por la mitad es peor
+        // que uno desactualizado. El descarte solo puede ocurrir ANTES de la
+        // primera burbuja; una vez que el turno empezó a salir, sale entero.
+        if (i === 0 && !turnoEntregaCotizacion && (await inboxHasPending(contact))) {
           console.warn(
-            `[v3-burst] respuesta obsoleta descartada para ${contact} (${partes.length - i} burbuja(s) sin enviar): llegó un mensaje nuevo durante la generación`,
+            `[v3-burst] respuesta obsoleta descartada para ${contact} (${partes.length} burbuja(s) sin enviar): llegó un mensaje nuevo durante la generación`,
           )
           break
         }
