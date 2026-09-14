@@ -43,6 +43,8 @@ export type JobNdvImp = {
   enCursoAt?: string
   ndv?: { ndvId?: string; idNdv?: string; referenciaId?: string; estado?: string; descuadreUF?: number | null }
   ndvPendiente?: string
+  /** ISO del aviso "lleva N minutos sin PDF" — se manda UNA vez por job. */
+  avisoSinPdfAt?: string
   ndvError?: string
   /** El cotizador dijo que no se puede (sin espejo, etc.): no se insiste. */
   ndvImposible?: boolean
@@ -192,6 +194,17 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
       } else {
         job.ndvPendiente = r.pendiente || (r.ok === false ? "error" : "sin_respuesta")
         job.ndvError = r.error
+        // NDV convertida pero SIN PDF pasado el tope (caso COTEL 14-sep: 7 horas y
+        // 188 reintentos mudos hasta que Aleydis intentó descargarla). El PDF lo
+        // genera Creator solo; cuando no llega, lo que ha destrabado los casos
+        // reales es anular la nota y rehacer el espejo, y eso lo decide una
+        // persona — pero tiene que saberlo AHORA, no al día siguiente.
+        if (job.ndvPendiente === "pdf" && edadMin >= TOPE_NDV_MIN && !job.avisoSinPdfAt) {
+          job.avisoSinPdfAt = new Date().toISOString()
+          await avisarEquipoInterno(
+            `⏳ NDV del alta por chat de ${job.empresa} (companyId ${job.companyId}): la nota está convertida pero lleva ${Math.round(edadMin)} min SIN PDF en Creator, así que no se puede confirmar. Receta que ha funcionado: anular la nota, rehacer el espejo desde la cotización (crear-ndv-desde-cot) y reconvertir con ndv-alta-chat cotId=<espejo nuevo>. El job sigue reintentando.`,
+          ).catch(() => {})
+        }
         if (r.reintentable === false) {
           job.ndvImposible = true
           await avisarEquipoInterno(
