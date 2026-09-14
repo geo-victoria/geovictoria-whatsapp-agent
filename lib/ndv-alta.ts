@@ -256,6 +256,13 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
           import("./implementacion-insight")
             .then((mi) => mi.sincronizarInsightImplementacion(c, { force: true, implementacionId: imp.id }))
             .catch(() => null)
+          // HORARIOS QUE QUEDARON EN EL AIRE (14-sep, caso Gianella): pidió
+          // los cupos segundos antes de que existiera la implementación. Ahora
+          // que existe, salen solos — sin esperar a que el cliente escriba de
+          // nuevo ni a las 24 h hábiles del vigía.
+          import("./cupos-pendientes")
+            .then((cp) => cp.ofrecerCuposPendientes(c))
+            .catch(() => null)
           await avisarEquipoInterno(
             `🛠️ IMPLEMENTACIÓN GV Avanzado creada para ${job.empresa} → ${imp.relator.nombre} (${imp.relator.email})${imp.numero ? ` · ${imp.numero}` : ""}` +
               (ndvLista

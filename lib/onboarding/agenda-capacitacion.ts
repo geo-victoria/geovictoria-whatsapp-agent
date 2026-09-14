@@ -152,3 +152,16 @@ export function mismaHora(a: string, b: string): boolean {
   const nb = norm24(b)
   return Boolean(na && nb && na === nb)
 }
+
+/** "Martes 8 de septiembre" — como lo lee una persona, nunca 2026-09-08.
+ *  Vivía duplicada en onboarding-canal; fuente única acá (14-sep). */
+export function etiquetaFechaCL(fechaISO: string): string {
+  const d = new Date(`${fechaISO}T12:00:00-04:00`)
+  const t = new Intl.DateTimeFormat("es-CL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Santiago",
+  }).format(d)
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}

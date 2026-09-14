@@ -20,12 +20,7 @@ import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-
 // Sin env, el copy dice "la plataforma GeoVictoria" sin link (jamás inventar).
 const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "").trim()
 
-/** "Martes 8 de septiembre" — como lo lee una persona, nunca 2026-09-08. */
-function etiquetaFecha(fechaISO: string): string {
-  const d = new Date(`${fechaISO}T12:00:00-04:00`)
-  const t = new Intl.DateTimeFormat("es-CL", { weekday: "long", day: "numeric", month: "long", timeZone: "America/Santiago" }).format(d)
-  return t.charAt(0).toUpperCase() + t.slice(1)
-}
+import { etiquetaFechaCL as etiquetaFecha } from "./onboarding/agenda-capacitacion"
 export { entregarKickoffOnboarding } from "./onboarding-envio"
 import { dispatchTool } from "./tools"
 import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
@@ -205,11 +200,21 @@ export async function armarOnboarding(contact: string): Promise<{
           })
         : null
       if (!cap?.relator?.email) {
+        // PEDIDO EN EL AIRE (14-sep, caso Gianella): pidió los horarios 4
+        // SEGUNDOS antes de que su implementación terminara de escribirse, y
+        // como Vicky solo corre cuando el cliente escribe, nadie volvió a
+        // ofrecérselos: el vigía recién toca a las 24 h hábiles. Se deja la
+        // marca y el job de la IMP se los manda apenas exista.
+        if (name === TOOL_VER_CUPOS_CAPACITACION.name) {
+          await setKvValue(`onb_pidio_cupos_${contact}`, new Date().toISOString()).catch(() => {})
+        }
         return {
           ok: false,
           error:
             "Todavía no hay implementación creada para este cliente, así que no sé qué relator le toca. " +
-            "No ofrezcas capacitación: primero tiene que quedar creada su cuenta.",
+            "No ofrezcas capacitación: primero tiene que quedar creada su cuenta. Dile que se la estás " +
+            "consiguiendo y que le avisas por aquí apenas la tengas — y NO se lo prometas dos veces: " +
+            "queda anotado y los horarios salen solos en cuanto su implementación quede lista.",
         }
       }
       const {
