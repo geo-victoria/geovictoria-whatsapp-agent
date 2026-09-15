@@ -16,7 +16,30 @@ import { getZohoAccessToken } from "./zoho-token"
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
-const COBRANZA_EMAIL = (process.env.COBRANZA_EMAIL || "cobranza@geovictoria.com").trim()
+// DESTINATARIO (Lalo 15-sep: "cambiemos el correo de cobranza@ por el del
+// ejecutivo asignado si es que tiene y si no el de vicky@"): el correo va al
+// DUEÑO humano de la cotización; sin dueño humano (Vicky/Admin) va a vicky@.
+// cobranza@ queda solo en COPIA para Chile (env COBRANZA_CC_CL, "-" la apaga):
+// finanzas CL lo usa para registrar el pago desde el 03-ago; en Perú no aplica.
+const COBRANZA_CC_CL = (process.env.COBRANZA_CC_CL ?? process.env.COBRANZA_EMAIL ?? "cobranza@geovictoria.com").trim()
+const ROBOTS = /vicky@|info@geovictoria|productmanager@/i
+
+async function destinatariosCobranza(quoteId: string, telefono: string, token: string): Promise<{ to: string; cc: string[] }> {
+  let owner = ""
+  try {
+    const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${encodeURIComponent(quoteId)}?fields=Owner`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store",
+    })
+    if (r.ok) {
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<{ Owner?: { email?: string } }> }
+      owner = String(j.data?.[0]?.Owner?.email || "").trim().toLowerCase()
+    }
+  } catch { /* sin dueño legible → vicky@ */ }
+  const to = owner && !ROBOTS.test(owner) ? owner : FROM_EMAIL
+  const esCL = !telefono || String(telefono).replace(/\D/g, "").startsWith("56")
+  const cc = esCL && COBRANZA_CC_CL && COBRANZA_CC_CL !== "-" && COBRANZA_CC_CL.toLowerCase() !== to ? [COBRANZA_CC_CL] : []
+  return { to, cc }
+}
 
 function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -78,6 +101,7 @@ export async function enviarCorreoCobranza(d: DatosCobranza): Promise<{ ok: bool
   try {
     const { subject, html } = buildCorreoCobranza(d)
     const token = await getZohoAccessToken()
+    const dest = await destinatariosCobranza(d.quoteId, d.telefono || "", token)
     const res = await fetch(
       `${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${encodeURIComponent(d.quoteId)}/actions/send_mail`,
       {
@@ -91,7 +115,8 @@ export async function enviarCorreoCobranza(d: DatosCobranza): Promise<{ ok: bool
           data: [
             {
               from: { email: FROM_EMAIL },
-              to: [{ email: COBRANZA_EMAIL }],
+              to: [{ email: dest.to }],
+              ...(dest.cc.length ? { cc: dest.cc.map((email) => ({ email })) } : {}),
               subject,
               content: html,
               mail_format: "html",
@@ -105,7 +130,7 @@ export async function enviarCorreoCobranza(d: DatosCobranza): Promise<{ ok: bool
       console.error(`[cobranza-mail] send_mail ${res.status} quote=${d.quoteId}:`, body.slice(0, 300))
       return { ok: false, error: `${res.status}: ${body.slice(0, 250)}` }
     }
-    console.log(`[cobranza-mail] enviado quote=${d.quoteId} a ${COBRANZA_EMAIL}`)
+    console.log(`[cobranza-mail] enviado quote=${d.quoteId} a ${dest.to}${dest.cc.length ? ` cc ${dest.cc.join(",")}` : ""}`)
     return { ok: true }
   } catch (e) {
     console.error(`[cobranza-mail] excepción quote=${d.quoteId}:`, e)

@@ -183,7 +183,7 @@ export const TOOL_SCHEMAS_PE = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles con IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga en línea con tarjeta vía Mercado Pago. Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, email, RUC válido (11 dígitos) y la configuración (userCount; reloj y puntos si lleva). `conDescuentoCierre=true` SOLO si el cliente aceptó el 20% de las 4 primeras facturas como cierre — el pago inicial sale con ese descuento aplicado. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles con IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, email, RUC válido (11 dígitos) y la configuración (userCount; reloj y puntos si lleva). `conDescuentoCierre=true` SOLO si el cliente aceptó el 20% de las 4 primeras facturas como cierre — el pago inicial sale con ese descuento aplicado. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -489,7 +489,7 @@ export function buildDispatchPE(contact: string) {
           // cotización (anti-amnesia: retomar la formal en turnos futuros).
           acceptanceUrl: data.acceptanceUrl,
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas en línea con tarjeta vía Mercado Pago (se confirma al instante): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialTotal)} (incluye tu primer mes por adelantado${conDescuento ? ", ya con el 20% de descuento" : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualTotalConDescuento : calculo.mensualTotal)}${conDescuento ? ` las primeras 4 facturas (luego ${formatearPEN(calculo.mensualTotal)})` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas: con tarjeta vía Mercado Pago (se confirma al instante) o por transferencia a la cuenta BBVA de GeoVictoria Perú que aparece en la misma página (después me mandas el comprobante por este chat): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialTotal)} (incluye tu primer mes por adelantado${conDescuento ? ", ya con el 20% de descuento" : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualTotalConDescuento : calculo.mensualTotal)}${conDescuento ? ` las primeras 4 facturas (luego ${formatearPEN(calculo.mensualTotal)})` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
         }
       }
 

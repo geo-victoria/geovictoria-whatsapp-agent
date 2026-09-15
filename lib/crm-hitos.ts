@@ -1097,7 +1097,8 @@ async function convertirConDeal(
         ? lead.ownerId
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
-          : ({ Colombia: "3525045000613817111", "México": "3525045000434395001" /* Miguel Guzmán, SDR inbound (Lalo 12-ago) */, "Perú": "3525045000323383015" } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          // PE (Lalo 15-sep, regla chilena): nace con Vicky y lo entrega el traspaso.
+          : ({ Colombia: "3525045000613817111", "México": "3525045000434395001" /* Miguel Guzmán, SDR inbound (Lalo 12-ago) */ } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -1974,9 +1975,8 @@ export async function sincronizarHitoCrm(
       // dueños de siempre.
       const OWNER_INTERINO: Record<string, string> = {
         "México": "3525045000434395001", // Miguel Guzmán — SDR inbound MX (Lalo 12-ago; leads sin formal van a él)
-        // Perú: Mónica Mendoza — NO es interina sino la ejecutiva única real
-        // (sin tómbola): su gestión SÍ se hereda al deal.
-        "Perú": "3525045000323383015",
+        // Perú (Lalo 15-sep: "siempre considera la regla chilena de traspaso"):
+        // igual que Chile, el lead nace con Vicky; Mónica lo recibe al traspasar.
       }
       const { createZohoLead } = await import("./zoho-leads")
       const creado = await createZohoLead({

@@ -1150,6 +1150,56 @@ async function leadTerminalNoProspecto(contact: string): Promise<string | null> 
   }
 }
 
+/**
+ * PERÚ = REGLA CHILENA (Lalo 15-sep). Entrega de un LEAD de Vicky al traspasar:
+ * calificado (dotación conocida o precio mostrado) → telemarketing = Mónica
+ * (roster PE de ptv, `interno`); sin calificar → SDR Inbound PE por rotación.
+ * Status "3. Contactado" (tope), nota con la conversación y notificación al
+ * dueño nuevo. Devuelve el vendedor a presentar, o null si nada asignó.
+ */
+async function entregarLeadPE(
+  leadId: string,
+  calificado: boolean,
+  interno: { email: string; zohoId: string },
+  fono: string,
+  H: Record<string, string>,
+  api: string,
+): Promise<VendedorFinal | null> {
+  const { updateZohoLeadStatus, STATUS_ENTREGA_LEAD, reasignarLeadSdrInboundPE } = await import("@/lib/zoho-leads")
+  await updateZohoLeadStatus(leadId, STATUS_ENTREGA_LEAD).catch(() => {})
+  await notaTraspasoConversacion(leadId, fono).catch(() => {})
+  if (calificado) {
+    const put = await fetch(`${api}/crm/v3/Leads`, {
+      method: "PUT", headers: H, cache: "no-store",
+      body: JSON.stringify({ data: [{ id: leadId, Owner: { id: interno.zohoId } }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
+    }).catch(() => null)
+    if (!put?.ok) console.warn(`[ptv] PE: no pude asignar el lead ${leadId} a ${interno.email} (${put?.status})`)
+    await notificarTraspasoLeadEmail(leadId, interno.email, fono, H, api)
+    const tel = await telefonoDeUsuario(interno.zohoId, H, api)
+    return {
+      email: interno.email,
+      zohoId: interno.zohoId,
+      nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+      telefono: tel || WHATSAPP_VENDEDOR[interno.email] || "",
+      via: "tombola_interna",
+    }
+  }
+  const r = await reasignarLeadSdrInboundPE(leadId).catch(() => null)
+  await notificarTraspasoLeadEmail(leadId, r?.ownerEmail || interno.email, fono, H, api)
+  if (r?.success && r.ownerEmail && r.ownerId) {
+    const tel = await telefonoDeUsuario(r.ownerId, H, api)
+    return {
+      email: r.ownerEmail,
+      zohoId: r.ownerId,
+      nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+      telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+      via: "dueno_lead_sdr",
+    }
+  }
+  console.warn(`[ptv] PE: SDR no asignó el lead ${leadId} (${r?.error || "sin detalle"}) — cae a la rotación interna`)
+  return null
+}
+
 async function asignarEnZoho(
   contact: string,
   pais: string,
@@ -1226,7 +1276,7 @@ async function asignarEnZoho(
       // 12 de los 36 traspasos del primer día no tenían lead y la asignación
       // quedaba solo en vic_ptv.
       const { createZohoLead } = await import("@/lib/zoho-leads")
-      const paisNombre = pais === "co" ? "Colombia" : pais === "mx" ? "México" : "Chile"
+      const paisNombre = pais === "co" ? "Colombia" : pais === "mx" ? "México" : pais === "pe" ? "Perú" : "Chile"
       // CO: el lead sin cotización lo posee el SDR Inbound (acuerdo equipo CO
       // 04-ago) — se crea sin dueño y se asigna por round-robin SDR abajo.
       const esCO = pais === "co"
@@ -1238,6 +1288,12 @@ async function asignarEnZoho(
       // todo lo demás va como LEAD a los SDR Inbound MX, con nota de la
       // conversación (URL directa a Botmaker + transcript).
       const esMX = pais === "mx"
+      // PE (Lalo 15-sep: "siempre considera la regla chilena de traspaso para
+      // definir la de Perú; cambian las personas, la operación y los roles son
+      // los mismos"): el lead nace sin dueño y se entrega como en Chile —
+      // calificado → telemarketing (Mónica, roster PE de ptv) · sin calificar →
+      // SDR Inbound PE (Ana Fiori / Priscila Quispe por rotación).
+      const esPE = pais === "pe"
       // ARREGLO 1 (Lalo 07-sep, casos Conbes y Diego): antes de crear un lead
       // CIEGO se lee lo que el chat YA dijo (nombre, empresa, dotación, RUT,
       // correo) y se pasa por el hito de intención — la MISMA escalera del
@@ -1273,8 +1329,8 @@ async function asignarEnZoho(
         contactoWA: fono,
         pais: paisNombre,
         necesidad: "Traspaso PTV: conversación activa con Vicky sin registro previo en el CRM — lead creado al asignar vendedor.",
-        ownerEmail: esCO || esCL || esMX ? undefined : interno.email,
-        ownerId: esCO || esCL || esMX ? undefined : interno.zohoId,
+        ownerEmail: esCO || esCL || esMX || esPE ? undefined : interno.email,
+        ownerId: esCO || esCL || esMX || esPE ? undefined : interno.zohoId,
       }).catch(() => null)
       if (!creado || !creado.success) {
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
@@ -1339,6 +1395,9 @@ async function asignarEnZoho(
             via: "dueno_lead_sdr",
           }
         }
+      } else if (esPE) {
+        const entrega = await entregarLeadPE(creado.leadId, calificado, interno, fono, H, api)
+        if (entrega) return entrega
       } else {
         await notificarTraspasoLeadEmail(creado.leadId, interno.email, fono, H, api)
       }
@@ -1586,6 +1645,26 @@ async function asignarEnZoho(
       }
       // Sin roster MX (VIC_SDR_INBOUND_MX vacío): comportamiento actual (Yahel).
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
+    } else if (pais === "pe") {
+      // PE = regla chilena (Lalo 15-sep): dueño humano real previo se respeta
+      // y se presenta él; si es del bot, calificado → Mónica, si no → SDR PE.
+      const ownerLeadPe = (lead.Owner?.email || "").toLowerCase()
+      const esInterinaPe = !ownerLeadPe || /vicky@|info@geovictoria/.test(ownerLeadPe)
+      if (!esInterinaPe && lead.Owner?.id) {
+        await notaTraspasoConversacion(lead.id, fono).catch(() => {})
+        await notificarTraspasoLeadEmail(lead.id, ownerLeadPe, fono, H, api)
+        const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
+        return {
+          email: ownerLeadPe,
+          zohoId: lead.Owner.id,
+          nombre: lead.Owner.name || NOMBRE_VENDEDOR[ownerLeadPe] || ownerLeadPe.split("@")[0],
+          telefono: tel || WHATSAPP_VENDEDOR[ownerLeadPe] || "",
+          via: "dueno_lead_sdr",
+        }
+      }
+      const calificadoPe = calificado || Number(lead.N_Empleados_que_marcan || 0) > 0
+      const entrega = await entregarLeadPE(lead.id, calificadoPe, interno, fono, H, api)
+      if (entrega) return entrega
     } else {
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
