@@ -36,7 +36,7 @@ import { NextResponse, after } from "next/server"
 import { createHmac, timingSafeEqual } from "node:crypto"
 import { runAgentLoop } from "@/lib/agent-loop"
 import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
-import { fetchHistoryV3, appendTurnV3, getKvValue } from "@/lib/supabase-persistence-v3"
+import { fetchHistoryV3, appendTurnV3, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { sanitizarVoseo, quitarSignosApertura } from "@/lib/voseo-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 
@@ -143,12 +143,22 @@ async function diagnostico(): Promise<Record<string, unknown>> {
     if (!r) return { error: "sin respuesta" }
     return (await r.json().catch(() => ({ error: `http ${r.status}` }))) as Record<string, unknown>
   }
+  // El token que genera el panel de Messenger trae SOLO `pages_messaging`
+  // (verificado 15-sep con debug_token): `/me` y `/me/subscribed_apps` exigen
+  // pages_read_engagement / pages_manage_metadata y responden #100/#200 aunque
+  // el canal esté sano. La sonda que sí prueba el permiso que importa es
+  // `/me/conversations` — si responde, la página puede recibir y enviar.
   const me = await g("/me?fields=id,name,instagram_business_account{id,username}")
   const subs = await g("/me/subscribed_apps?fields=id,name,subscribed_fields")
+  const conv = await g("/me/conversations?platform=messenger&limit=1")
+  const convOk = !(conv as { error?: unknown }).error
+  const ultimo = (await getKvValue("meta_ultimo_evento").catch(() => null)) || ""
   return {
-    ok: !(me as { error?: unknown }).error,
-    pagina: me,
-    suscripciones: subs,
+    ok: convOk,
+    mensajeria: convOk ? "ok (pages_messaging responde en /me/conversations)" : conv,
+    pagina: (me as { error?: unknown }).error ? "sin permiso pages_read_engagement (esperado con el token del panel)" : me,
+    suscripciones: (subs as { error?: unknown }).error ? "sin permiso pages_manage_metadata (esperado) — verificar con un mensaje real: ver ultimoEvento" : subs,
+    ultimoEvento: ultimo ? (() => { try { return JSON.parse(ultimo) } catch { return ultimo } })() : null,
     envs: { META_VERIFY_TOKEN: Boolean(c.verify), META_APP_SECRET: Boolean(c.secret), META_PAGE_ACCESS_TOKEN: Boolean(c.token) },
     gate: (await getKvValue("meta_canal_enabled").catch(() => null)) || "",
   }
@@ -180,6 +190,12 @@ export async function POST(req: Request): Promise<Response> {
   try { body = JSON.parse(raw) } catch { return NextResponse.json({ ok: false, error: "json" }, { status: 400 }) }
   const eventos = extraerEventos(body)
   const encendido = ((await getKvValue("meta_canal_enabled").catch(() => null)) || "").trim().toLowerCase() === "on"
+  // Rastro del último evento (los runtime logs de Vercel no siempre responden):
+  // así el diag puede decir "sí llegó" sin adivinar. Best-effort.
+  if (eventos.length > 0) {
+    const ev = eventos[eventos.length - 1]
+    setKvValue("meta_ultimo_evento", JSON.stringify({ at: new Date().toISOString(), canal: ev.canal, psid: ev.psid, texto: ev.texto.slice(0, 160), encendido })).catch(() => {})
+  }
   if (!encendido) {
     // Apagado: Meta recibe su 200 (si no, reintenta y termina desactivando el
     // webhook) y queda rastro de lo que llegó para revisar antes de prender.
