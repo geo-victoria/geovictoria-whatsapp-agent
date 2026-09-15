@@ -1680,6 +1680,13 @@ async function pePresentaHabilitado(): Promise<boolean> {
 }
 const TM_FONO_REGEX: Record<string, RegExp> = { cl: /^56\d{8,10}$/, pe: /^51\d{8,10}$/ }
 const TM_TEMPLATE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION || "vicky_traspaso_ejecutivo").trim()
+// PERÚ (15-sep): la presentación sale con la plantilla del bot Vicky Perú
+// (creada por API; una plantilla del bot Chile por la línea +51 arrastra el
+// chat al bot equivocado). Env VICKY_TM_TEMPLATE_PRESENTACION_PE la cambia.
+const TM_TEMPLATE_PE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_PE || "vicky_pe_traspaso_ejecutivo").trim()
+function tmTemplatePara(pais: string): string {
+  return pais === "pe" ? TM_TEMPLATE_PE : TM_TEMPLATE
+}
 const MAX_TM_POR_TICK = 10
 /** Teléfonos de los telemarketers ("email:+56...,email:+56..."). Fallback:
  * campo Phone/Mobile de su ficha de usuario en Zoho. */
@@ -1916,12 +1923,12 @@ async function traspasarATelemarketing(
         telefono_ejecutivo: telefono,
         correoElectronico: owner.email,
       }
-      const enviado = await sendBotmakerTemplate(contact, TM_TEMPLATE, params).catch(() => false)
+      const enviado = await sendBotmakerTemplate(contact, tmTemplatePara(pais), params).catch(() => false)
       if (enviado) {
         await supa(`vic_ptv?id=eq.${fila[0].id}`, { method: "PATCH", body: JSON.stringify({ presentado_al_prospecto: true }) })
         await appendAssistantV3(
           contact,
-          `[Plantilla ${TM_TEMPLATE}]: presenté a ${params.ejecutivo_smb} (${telefono} · ${owner.email}) como tu ejecutivo de acompañamiento.`,
+          `[Plantilla ${tmTemplatePara(pais)}]: presenté a ${params.ejecutivo_smb} (${telefono} · ${owner.email}) como tu ejecutivo de acompañamiento.`,
         ).catch(() => {})
       }
     } else {
@@ -3028,13 +3035,13 @@ async function reintentarPresentacionesPendientes(
       enviado = await sendBotmakerMessage(clean, texto).catch(() => false)
       registro = texto
     } else if ((pais === "cl" || pais === "pe") && telefono) {
-      enviado = await sendBotmakerTemplate(clean, TM_TEMPLATE, {
+      enviado = await sendBotmakerTemplate(clean, tmTemplatePara(pais), {
         nombre: "👋",
         ejecutivo_smb: nombre,
         telefono_ejecutivo: telefono,
         correoElectronico: emailVig,
       }).catch(() => false)
-      registro = `[Plantilla ${TM_TEMPLATE}]: presenté a ${nombre} (${telefono} · ${emailVig}) como tu ejecutivo de acompañamiento.`
+      registro = `[Plantilla ${tmTemplatePara(pais)}]: presenté a ${nombre} (${telefono} · ${emailVig}) como tu ejecutivo de acompañamiento.`
     } else {
       pendientes++
       continue

@@ -69,7 +69,15 @@ const TPL_LEAD_MX = (process.env.OUTBOUND_TEMPLATE_LEAD_MX || "vicky_mx_lead_ape
 // Vicky Perú aún no existe. Sin ella el lead NO se queda mudo con Vicky: se
 // entrega a las SDR Inbound PE (Ana Fiori / Priscila Quispe) para que lo
 // trabajen por otro canal, igual que un número sin prefijo utilizable.
-const TPL_LEAD_PE = (process.env.OUTBOUND_TEMPLATE_LEAD_PE || "").trim()
+const TPL_LEAD_PE_ENV = (process.env.OUTBOUND_TEMPLATE_LEAD_PE || "").trim()
+// `vicky_pe_lead_apertura` (bot Vicky Perú, creada por API el 15-sep) se usa
+// solo con vic_kv `plantillas_pe_enabled`="on" — el mismo interruptor del
+// loop: mientras Meta la revisa, Botmaker acepta el encargo y lo bota.
+async function tplLeadPE(): Promise<string> {
+  if (TPL_LEAD_PE_ENV) return TPL_LEAD_PE_ENV
+  const on = ((await getKvValue("plantillas_pe_enabled").catch(() => null)) || "").trim() === "on"
+  return on ? "vicky_pe_lead_apertura" : ""
+}
 // T0 de FIN DE SEMANA (regla Rodrigo/Lalo 24-jul, parte del loop v2): sábado y
 // domingo la apertura pregunta "¿conversamos ahora o prefieres el lunes?"
 // (plantilla vicky_t0_finde, creada por Lalo el 24-jul). Sin gemela del país
@@ -272,7 +280,7 @@ export async function POST(req: Request): Promise<Response> {
   const esPE = country === "pe"
   const finde = esFinDeSemana(country || "cl")
   const tplPais = esPE
-    ? TPL_LEAD_PE
+    ? await tplLeadPE()
     : esMX
       ? TPL_LEAD_MX
       : esCO

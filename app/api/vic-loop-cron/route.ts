@@ -30,7 +30,7 @@
 
 import { NextResponse } from "next/server"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { appendAssistantV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { appendAssistantV3, getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
 import {
   ajustarAHabil,
   calcularProximoToque,
@@ -46,6 +46,7 @@ import { ptvHabilitado, debeTraspasar } from "@/lib/ptv"
 import { duenoDealVigente, duenoCotizacionVigente } from "@/lib/tools/agendar-reunion"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
+import { PERFIL_PE } from "@/lib/paises/pe"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -70,16 +71,23 @@ const BATCH = 20
 // vicky_loop_pago ("¿te ayudo con el pago?", neutra) para formal, y
 // vicky_loop_despedida (neutra) para el VII. La única gemela de contenido es
 // vicky_loop_con_precio_co (NIT en vez de RUT), creada por API el 25-jul.
+type PaisLoop = "cl" | "co" | "mx" | "pe"
+type CeldaTpl = Record<PaisLoop, string>
 function tplCelda(
   envName: string,
   defaultCl: string,
   defaultCo = "",
   defaultMx = "",
-): { cl: string; co: string; mx: string } {
+  defaultPe = "",
+): CeldaTpl {
   return {
     cl: (process.env[envName] || defaultCl).trim(),
     co: (process.env[`${envName}_CO`] || defaultCo).trim(),
     mx: (process.env[`${envName}_MX`] || defaultMx).trim(),
+    // PERÚ (15-sep): plantillas propias del bot de la línea +51 (creadas por
+    // API, en revisión de Meta). Solo salen con vic_kv plantillas_pe_enabled
+    // = "on"; apagado, la celda PE queda vacía = skip limpio (patrón del repo).
+    pe: (process.env[`${envName}_PE`] || defaultPe).trim(),
   }
 }
 // ENCENDIDA EN CHILE (04-sep): Meta aprobó vicky_loop_pago_link_cl y ya lleva
@@ -94,6 +102,7 @@ const ACEPTADA_CELDA = tplCelda(
   "vicky_loop_pago_link_cl",
   "vicky_loop_pago",
   "vicky_loop_pago",
+  "vicky_pe_loop_pago_link",
 )
 const CO_PREFORM = "vicky_co_react_preform"
 const CO_CON_PRECIO = "vicky_loop_con_precio_co"
@@ -102,9 +111,15 @@ const CO_CON_PRECIO = "vicky_loop_con_precio_co"
 // API); toque VI usa la corta mexicana existente.
 const MX_SIN_PRECIO = "vicky_loop_sin_precio"
 const MX_CON_PRECIO = "vicky_loop_con_precio_mx"
-const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREFORM, "vicky_mx_react_corta")
-const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida", "vicky_loop_despedida", "vicky_loop_despedida")
-const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string; mx: string }>> = {
+const PE_SIN_PRECIO = "vicky_pe_loop_sin_precio"
+const PE_CON_PRECIO = "vicky_pe_loop_con_precio"
+const PE_FORMAL = "vicky_pe_loop_formal"
+// PE toque 6: la plantilla con quick replies no se pudo crear por API (Botmaker
+// exige un intent por botón en el bot Vicky Perú — se crea en el panel). Celda
+// vacía = el toque 6 se salta limpio en Perú; env LOOP_TPL_T6_PE la enciende.
+const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREFORM, "vicky_mx_react_corta", "")
+const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida", "vicky_loop_despedida", "vicky_loop_despedida", "vicky_pe_loop_despedida")
+const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, CeldaTpl>> = {
   1: {
     // NO usar vicky_lead_nudge acá: es la única plantilla de la matriz que NO
     // pertenece a la familia vicky_loop_*, y está DESINCRONIZADA con Meta —
@@ -113,9 +128,9 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
     // el de Meta, y como los conteos de parámetros no calzan sale el #132000.
     // Métricas de Meta del 27-jul: 2 enviadas, 2 entregadas, 100% leídas, 0
     // respuestas. Ver el bloque VARS_PLANTILLA para el detalle.
-    sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO),
-    con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
-    formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
+    sin_precio: tplCelda("LOOP_TPL_T1_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO, PE_SIN_PRECIO),
+    con_precio: tplCelda("LOOP_TPL_T1_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO, PE_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T1_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago", PE_FORMAL),
     aceptada: ACEPTADA_CELDA,
   },
   // Toques 2-3 fuera de ventana: plantillas PROPIAS vicky_loop_toque2/3
@@ -128,9 +143,9 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
   // toque 3 sigue ACCOUNT_PENDING: su celda queda vacía y se enciende con
   // LOOP_TPL_T3=vicky_loop_toque3 (o cambiando el default) al aprobarse.
   2: {
-    sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
-    con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
-    formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2"),
+    sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "", "", "vicky_pe_loop_toque2"),
+    con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "", "", "vicky_pe_loop_toque2"),
+    formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "", "", "vicky_pe_loop_toque2"),
     aceptada: ACEPTADA_CELDA,
   },
   3: {
@@ -140,15 +155,15 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, { cl: string; co: string
     aceptada: ACEPTADA_CELDA,
   },
   4: {
-    sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO),
-    con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO),
-    formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
+    sin_precio: tplCelda("LOOP_TPL_T4_SIN_PRECIO", "vicky_loop_sin_precio", CO_PREFORM, MX_SIN_PRECIO, PE_SIN_PRECIO),
+    con_precio: tplCelda("LOOP_TPL_T4_CON_PRECIO", "vicky_loop_con_precio", CO_CON_PRECIO, MX_CON_PRECIO, PE_CON_PRECIO),
+    formal: tplCelda("LOOP_TPL_T4_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago", PE_FORMAL),
     aceptada: ACEPTADA_CELDA,
   },
   5: {
-    sin_precio: tplCelda("LOOP_TPL_T5_SIN_PRECIO", "vicky_loop_retoma", CO_PREFORM, "vicky_loop_retoma"),
-    con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut", CO_CON_PRECIO, MX_CON_PRECIO),
-    formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago"),
+    sin_precio: tplCelda("LOOP_TPL_T5_SIN_PRECIO", "vicky_loop_retoma", CO_PREFORM, "vicky_loop_retoma", "vicky_pe_loop_retoma"),
+    con_precio: tplCelda("LOOP_TPL_T5_CON_PRECIO", "vicky_loop_retoma_rut", CO_CON_PRECIO, MX_CON_PRECIO, "vicky_pe_loop_retoma_ruc"),
+    formal: tplCelda("LOOP_TPL_T5_FORMAL", "vicky_loop_pago", "vicky_loop_pago", "vicky_loop_pago", PE_FORMAL),
     aceptada: ACEPTADA_CELDA,
   },
   6: { sin_precio: LOOP_TPL_T6, con_precio: LOOP_TPL_T6, formal: LOOP_TPL_T6, aceptada: ACEPTADA_CELDA },
@@ -190,6 +205,16 @@ const VARS_PLANTILLA: Record<string, readonly string[]> = {
   vicky_react_47_razones_v2: ["nombre"],
   vicky_co_react_preform: ["nombre"],
   vicky_mx_react_corta: ["nombre", "empresa"],
+  // Perú (15-sep): espejos de las chilenas en el bot de la línea +51.
+  vicky_pe_loop_sin_precio: [],
+  vicky_pe_loop_con_precio: [],
+  vicky_pe_loop_formal: ["nombre"],
+  vicky_pe_loop_pago_link: ["nombre", "link"],
+  vicky_pe_loop_toque2: ["nombre"],
+  vicky_pe_loop_retoma: ["nombre"],
+  vicky_pe_loop_retoma_ruc: ["nombre"],
+  vicky_pe_react_razones: ["nombre"],
+  vicky_pe_loop_despedida: ["nombre"],
 }
 
 /**
@@ -299,7 +324,7 @@ function telefonoDeEjecutivo(email: string): string {
 }
 
 function textoPresentacion(
-  pais: "cl" | "co" | "mx",
+  pais: PaisLoop,
   duenoReal?: { nombre: string; email: string } | null,
 ): string {
   // El dueño REAL del deal/cotización (tómbola, 31-jul) manda sobre el símil
@@ -314,7 +339,7 @@ function textoPresentacion(
           whatsapp: telefonoDeEjecutivo(duenoReal.email),
           trato: duenoReal.nombre.split(" ")[0],
         }
-      : pais === "cl"
+      : pais === "cl" || pais === "pe"
         ? null
         : EJECUTIVA_LOOP[pais]
   if (!e) {
@@ -337,52 +362,60 @@ function textoPresentacion(
 // Textos de los toques 2 (+60 min) y 3 (+22 h) — cadencia Rodrigo 10-ago.
 // Distintos del toque 1 a propósito: tres toques en 24 horas con el MISMO
 // texto se leen como robot (regla anti-repetición del 09-ago).
-const TEXTOS_T2: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+const TEXTOS_T2: Record<LoopStage, { cl: string; co: string; mx: string; pe: string }> = {
   sin_precio: {
     cl: "¿Retomamos tu cotización? Me faltaba solo un dato para dejarte el valor — me lo confirmas y te lo mando enseguida 😊",
     co: "Retomamos tu cotización? Me faltaba solo un dato para dejarte el valor — me lo confirmas y te lo mando de una 😊",
     mx: "¿Retomamos tu cotización? Me faltaba solo un dato para dejarte el valor — me lo confirmas y te lo mando enseguida 😊",
+    pe: "¿Retomamos tu cotización? Me faltaba solo un dato para dejarte el valor — me lo confirmas y te lo mando enseguida 😊",
   },
   con_precio: {
     cl: "¿Qué te pareció el valor que te pasé? Si te acomoda, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
     co: "Qué te pareció el valor que te pasé? Si te sirve, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
     mx: "¿Qué te pareció el valor que te pasé? Si te acomoda, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
+    pe: "¿Qué te pareció el valor que te pasé? Si te parece bien, te dejo la cotización formal lista en un minuto — y si algo no te convence, lo ajustamos 😊",
   },
   formal: {
     cl: "¿Pudiste revisar tu cotización? Si algo no te calzó, el equipo, la cantidad de personas o cómo van a marcar, lo ajustamos por aquí 😊",
     co: "Pudiste revisar tu cotización? Si algo no te calzó, el equipo, la cantidad de personas o cómo van a marcar, lo ajustamos por aquí 😊",
     mx: "¿Pudiste revisar tu cotización? Si algo no te acomodó, el equipo, la cantidad de personas o cómo van a checar, lo ajustamos por aquí 😊",
+    pe: "¿Pudiste revisar tu cotización? Si algo no te cuadró, el equipo, la cantidad de personas o cómo van a marcar, lo ajustamos por aquí 😊",
   },
   aceptada: {
     cl: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de inmediato por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
     co: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de una por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
     mx: "¿Pudiste avanzar con el pago? Si algo te complica — tarjeta, transferencia o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de inmediato por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
+    pe: "¿Pudiste avanzar con el pago? Si algo te complica — la tarjeta o una duda del plan — lo vemos por aquí, o te contacto con un ejecutivo y lo cierran juntos. Recuerda que pagando activamos tu cuenta de inmediato por este mismo chat, sin trámites extra. El link: {LINK_PAGO}",
   },
 }
-const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+const TEXTOS_T3: Record<LoopStage, { cl: string; co: string; mx: string; pe: string }> = {
   sin_precio: {
     cl: "Ayer quedamos a mitad de camino con tu cotización — ¿la retomamos? Con un par de datos te dejo el valor de inmediato 😊",
     co: "Ayer quedamos a mitad de camino con tu cotización — la retomamos? Con un par de datos te dejo el valor de una 😊",
     mx: "Ayer quedamos a mitad de camino con tu cotización — ¿la retomamos? Con un par de datos te dejo el valor de inmediato 😊",
+    pe: "Ayer quedamos a mitad de camino con tu cotización — ¿la retomamos? Con un par de datos te dejo el valor de inmediato 😊",
   },
   con_precio: {
     cl: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. ¿Avanzamos con la cotización formal o prefieres ajustar algo primero?",
     co: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. Avanzamos con la cotización formal o prefieres ajustar algo primero?",
     mx: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. ¿Avanzamos con la cotización formal o prefieres ajustar algo primero?",
+    pe: "Te escribo para retomar lo de ayer: el valor que te pasé sigue vigente. ¿Avanzamos con la cotización formal o prefieres ajustar algo primero?",
   },
   formal: {
     cl: "Tu cotización sigue vigente 😊 ¿Quedó alguna duda dando vueltas? Dime cuál y la resolvemos; si necesitas ajustar algo, también lo hacemos por aquí.",
     co: "Tu cotización sigue vigente 😊 Quedó alguna duda dando vueltas? Dime cuál y la resolvemos; si necesitas ajustar algo, también lo hacemos por aquí.",
     mx: "Tu cotización sigue vigente 😊 ¿Quedó alguna duda dando vueltas? Dime cuál y la resolvemos; si necesitas ajustar algo, también lo hacemos por aquí.",
+    pe: "Tu cotización sigue vigente 😊 ¿Quedó alguna duda dando vueltas? Dime cuál y la resolvemos; si necesitas ajustar algo, también lo hacemos por aquí.",
   },
   aceptada: {
     cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
     co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
     mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
+    pe: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
   },
 }
 
-const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string; pe: string }> = {
   // REGLA DE ORO (biblia, caso 12-ago +56945820380): Vicky se presenta UNA
   // sola vez por conversación — el t1 cae a los 10 minutos DENTRO de una
   // conversación viva, así que entra directo al tema, sin "Soy Vicky".
@@ -393,6 +426,7 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
       "Para armarte el valor de una solo necesito saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\nMe cuentas y lo dejamos listo?",
     mx:
       "Para armarte el valor de inmediato solo me falta saber cuántas personas registrarían su asistencia y cómo les gustaría checar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
+    pe: "Para armarte el valor de inmediato solo me falta saber cuántas personas marcarían asistencia y cómo les gustaría marcar (app, huella o reconocimiento facial).\n¿Me cuentas y lo dejamos listo?",
   },
   con_precio: {
     cl:
@@ -401,6 +435,7 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
       "Tu valor ya está listo — solo me falta el NIT (o tu ok) para dejarte la cotización formal.\nLa armamos de una?",
     mx:
       "Tu valor ya está listo — solo me falta el RFC (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
+    pe: "Tu valor ya está listo — solo me falta el RUC (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
   },
   formal: {
     cl:
@@ -409,6 +444,7 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
       "Tu cotización quedó lista.\nSi te queda alguna duda o quieres ajustar algo, la resolvemos de una por acá.",
     mx:
       "Tu cotización quedó lista.\nSi te quedó alguna duda o quieres ajustar algo, la resolvemos por aquí.",
+    pe: "Tu cotización quedó lista.\nSi te quedó alguna duda o quieres ajustar algo, la vemos enseguida por acá.",
   },
   aceptada: {
     // Propuesta de valor de INMEDIATEZ (Lalo 25-ago): pagado el plan, la
@@ -417,31 +453,36 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
     cl: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nApenas quede el pago partimos al tiro con la activación de tu cuenta por este mismo chat — sin esperar a nadie. Y si prefieres transferencia, me dices y te paso los datos 😊",
     co: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nApenas quede el pago arrancamos de una con la activación de tu cuenta por este mismo chat — sin esperar a nadie. Y si prefieres transferencia, me dices y te paso los datos 😊",
     mx: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nEn cuanto quede el pago arrancamos enseguida con la activación de tu cuenta por este mismo chat — sin esperar a nadie. Y si prefieres transferencia, me dices y te paso los datos 😊",
+    pe: "Vi que aceptaste tu cotización ✅ ¿Te ayudo a dejar el pago listo? En este mismo link lo haces en un minuto:\n{LINK_PAGO}\nApenas quede el pago partimos de inmediato con la activación de tu cuenta por este mismo chat — sin esperar a nadie.",
   },
 }
 
 // Toques 4-7 dentro de ventana: textos PROPIOS (biblia F3) — antes reusaban
 // el texto del t1 y la regla anti-repetición quedaba rota en la cola larga.
-const TEXTOS_T4PLUS: Record<LoopStage, { cl: string; co: string; mx: string }> = {
+const TEXTOS_T4PLUS: Record<LoopStage, { cl: string; co: string; mx: string; pe: string }> = {
   sin_precio: {
     cl: "Sigo disponible para dejarte el valor cuando quieras — me dices cuántas personas marcarían y lo armo en un minuto 😊",
     co: "Sigo disponible para dejarte el valor cuando quieras — me dices cuántas personas marcarían y lo armo en un minuto 😊",
     mx: "Sigo disponible para dejarte el valor cuando gustes — me dices cuántas personas checarían y lo armo en un minuto 😊",
+    pe: "Sigo disponible para dejarte el valor cuando quieras — me dices cuántas personas marcarían y lo armo en un minuto 😊",
   },
   con_precio: {
     cl: "El valor que te preparé sigue disponible — si quieres lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
     co: "El valor que te preparé sigue disponible — si quieres lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
     mx: "El valor que te preparé sigue disponible — si gustas lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
+    pe: "El valor que te preparé sigue disponible — si quieres lo dejamos en cotización formal, o lo ajusto a lo que necesites 😊",
   },
   formal: {
     cl: "Tu cotización sigue disponible, y si algo cambió en lo que necesitas la ajustamos por aquí 😊 ¿Te quedó alguna duda que no alcanzamos a ver?",
     co: "Tu cotización sigue disponible, y si algo cambió en lo que necesitas la ajustamos por aquí 😊 Te quedó alguna duda que no alcanzamos a ver?",
     mx: "Tu cotización sigue disponible, y si algo cambió en lo que necesitas la ajustamos por aquí 😊 ¿Te quedó alguna duda que no alcanzamos a ver?",
+    pe: "Tu cotización sigue disponible, y si algo cambió en lo que necesitas la ajustamos por aquí 😊 ¿Te quedó alguna duda que no alcanzamos a ver?",
   },
   aceptada: {
     cl: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio tomado a la UF del día — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
     co: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
     mx: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo arrancamos con la activación de tu cuenta por este chat: {LINK_PAGO}",
+    pe: "Te aviso para que no se te pase: tu cotización está vigente hasta el {VIGENCIA} con el precio del día congelado — vencida habría que recotizar. Si la dejamos lista hoy, hoy mismo parto con la activación de tu cuenta por este chat: {LINK_PAGO}",
   },
 }
 
@@ -823,6 +864,9 @@ export async function GET(req: Request): Promise<Response> {
     if (p.contact && Number.isFinite(ms)) traspasadoAtDe.set(p.contact, ms)
   }
 
+  // Interruptor de las plantillas de Perú (bot de la línea +51): sin él la
+  // celda PE va vacía y el toque fuera de ventana se salta limpio.
+  const plantillasPeOn = ((await getKvValue("plantillas_pe_enabled").catch(() => null)) || "").trim() === "on"
   for (const r of rows) {
     procesados++
     const now = Date.now()
@@ -962,8 +1006,14 @@ export async function GET(req: Request): Promise<Response> {
 
     // ── Ejecutar el toque ──────────────────────────────────────────────────
     const esMX = country === "mx"
-    const paisKey: "cl" | "co" | "mx" = esMX ? "mx" : esCO ? "co" : "cl"
-    const canal = esMX ? PERFIL_MX.canal.channelId : esCO ? PERFIL_CO.canal.channelId : undefined
+    const paisKey: PaisLoop = esMX ? "mx" : esCO ? "co" : country === "pe" ? "pe" : "cl"
+    const canal = esMX
+      ? PERFIL_MX.canal.channelId
+      : esCO
+        ? PERFIL_CO.canal.channelId
+        : paisKey === "pe"
+          ? PERFIL_PE.canal.channelId
+          : undefined
     // Etapa DERIVADA del estado real de la conversación (nadie escribe stage
     // en vic_loop de forma confiable): cotización formal emitida → 'formal';
     // precio/preform ya mostrado (puntero pref_*) → 'con_precio'; si no, lo
@@ -1344,7 +1394,10 @@ export async function GET(req: Request): Promise<Response> {
           detalle.push({ contact: r.contact, accion: "plantilla_contexto", touch, tpl: tplCtx, ok: false })
         }
       } else {
-        const tpl = (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][paisKey]
+        // PE: sus plantillas viven en el bot de la línea +51 y salen solo con
+        // el interruptor vic_kv `plantillas_pe_enabled`="on" (mientras Meta
+        // revisa, celda vacía = skip limpio, jamás una chilena por la línea peruana).
+        const tpl = paisKey === "pe" && !plantillasPeOn ? "" : (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][paisKey]
         if (!tpl) {
           // Sin plantilla configurada NO se envía nada (patrón del repo). El
           // toque igual avanza para no reintentar el mismo skip en cada tick.
