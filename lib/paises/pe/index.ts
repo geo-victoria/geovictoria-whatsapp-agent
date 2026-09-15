@@ -76,7 +76,7 @@ export const PERFIL_PE: PerfilPais = {
   entidadLegal: {
     razonSocial: "GEOVICTORIA PERU S.A.C.",
     idTributario: "RUC: 20605842055",
-    direccion: "Av. Juan de Aliaga 425 Int. 612, Magdalena del Mar",
+    direccion: "Av. General Trinidad Morán 1340, Urb. Risso, Lince",
     ciudad: "Lima",
   },
 
