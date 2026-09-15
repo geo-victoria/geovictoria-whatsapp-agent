@@ -43,11 +43,23 @@ import { avisarEquipoInterno } from "@/lib/alerta-interna"
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
 
-const VERIFY_TOKEN = (process.env.META_VERIFY_TOKEN || "").trim()
-const PAGE_TOKEN = (process.env.META_PAGE_ACCESS_TOKEN || "").trim()
-const APP_SECRET = (process.env.META_APP_SECRET || "").trim()
+// CREDENCIALES: env de Vercel manda; si falta, vic_kv (`meta_verify_token`,
+// `meta_page_access_token`, `meta_app_secret`) — así se configura sin deploy
+// y sin pasar por el panel de Vercel (15-sep, Lalo pegó el App Secret por
+// chat y no hay acceso a las envs desde la sesión). Se leen por request.
 const GRAPH = `https://graph.facebook.com/${(process.env.META_GRAPH_VERSION || "v21.0").trim()}`
 const LINEA_VICKY_CL = "56967308227"
+
+type Creds = { verify: string; token: string; secret: string }
+async function credenciales(): Promise<Creds> {
+  const env = (k: string) => (process.env[k] || "").trim()
+  const kv = async (k: string) => ((await getKvValue(k).catch(() => null)) || "").trim()
+  return {
+    verify: env("META_VERIFY_TOKEN") || (await kv("meta_verify_token")),
+    token: env("META_PAGE_ACCESS_TOKEN") || (await kv("meta_page_access_token")),
+    secret: env("META_APP_SECRET") || (await kv("meta_app_secret")),
+  }
+}
 const MAX_TEXTO = 1900
 
 const DIRECTIVA_CANAL = (canal: "messenger" | "instagram") => `
@@ -61,19 +73,19 @@ Reglas de este canal (mandan sobre cualquier otra):
 - Si quien escribe ya es cliente y necesita soporte, dale la Mesa de Ayuda: WhatsApp +56 9 4401 3873 · 600 914 3819 · soporte@geovictoria.com.
 `
 
-function firmaValida(raw: string, header: string | null): boolean {
-  if (!APP_SECRET) return false
+function firmaValida(raw: string, header: string | null, secret: string): boolean {
+  if (!secret) return false
   const h = (header || "").trim()
   if (!h.startsWith("sha256=")) return false
-  const esperado = createHmac("sha256", APP_SECRET).update(raw, "utf8").digest("hex")
+  const esperado = createHmac("sha256", secret).update(raw, "utf8").digest("hex")
   const a = Buffer.from(h.slice(7), "hex")
   const b = Buffer.from(esperado, "hex")
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-async function enviarMeta(psid: string, texto: string): Promise<{ ok: boolean; detalle?: string }> {
-  if (!PAGE_TOKEN) return { ok: false, detalle: "sin META_PAGE_ACCESS_TOKEN" }
-  const r = await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(PAGE_TOKEN)}`, {
+async function enviarMeta(psid: string, texto: string, token: string): Promise<{ ok: boolean; detalle?: string }> {
+  if (!token) return { ok: false, detalle: "sin META_PAGE_ACCESS_TOKEN" }
+  const r = await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(token)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: texto.slice(0, MAX_TEXTO) } }),
@@ -100,7 +112,7 @@ function extraerEventos(body: unknown): Evento[] {
   return out
 }
 
-async function atender(ev: Evento): Promise<void> {
+async function atender(ev: Evento, token: string): Promise<void> {
   const contact = `${ev.canal === "instagram" ? "IG" : "FB"}.${ev.psid}`
   const texto = ev.texto || (ev.adjuntos ? "(el cliente envió un adjunto — por este canal no puedo verlo; pídele que lo escriba en texto)" : "")
   if (!texto) return
@@ -111,7 +123,7 @@ async function atender(ev: Evento): Promise<void> {
   const result = await runAgentLoop({ systemPrompt, history, userMessage: texto, apiKey, contact })
   const reply = quitarSignosApertura(sanitizarVoseo((result.reply || "").trim())).replace(/\*/g, "")
   if (!reply) return
-  const env = await enviarMeta(ev.psid, reply)
+  const env = await enviarMeta(ev.psid, reply, token)
   await appendTurnV3(contact, texto, env.ok ? reply : `${reply}\n[NO ENVIADO: ${env.detalle}]`, "cl").catch(() => {})
   if (!env.ok) await avisarEquipoInterno(`⚠️ Vicky ${ev.canal}: no pude responder a ${contact} — ${env.detalle}`).catch(() => false)
 }
@@ -124,9 +136,10 @@ async function atender(ev: Evento): Promise<void> {
  * configuración del panel sin adivinar.
  */
 async function diagnostico(): Promise<Record<string, unknown>> {
-  if (!PAGE_TOKEN) return { ok: false, error: "sin META_PAGE_ACCESS_TOKEN" }
+  const c = await credenciales()
+  if (!c.token) return { ok: false, error: "sin META_PAGE_ACCESS_TOKEN", envs: { verify: Boolean(c.verify), secret: Boolean(c.secret), token: false } }
   const g = async (path: string) => {
-    const r = await fetch(`${GRAPH}${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(PAGE_TOKEN)}`, { cache: "no-store" }).catch(() => null)
+    const r = await fetch(`${GRAPH}${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(c.token)}`, { cache: "no-store" }).catch(() => null)
     if (!r) return { error: "sin respuesta" }
     return (await r.json().catch(() => ({ error: `http ${r.status}` }))) as Record<string, unknown>
   }
@@ -136,7 +149,7 @@ async function diagnostico(): Promise<Record<string, unknown>> {
     ok: !(me as { error?: unknown }).error,
     pagina: me,
     suscripciones: subs,
-    envs: { META_VERIFY_TOKEN: Boolean(VERIFY_TOKEN), META_APP_SECRET: Boolean(APP_SECRET), META_PAGE_ACCESS_TOKEN: Boolean(PAGE_TOKEN) },
+    envs: { META_VERIFY_TOKEN: Boolean(c.verify), META_APP_SECRET: Boolean(c.secret), META_PAGE_ACCESS_TOKEN: Boolean(c.token) },
     gate: (await getKvValue("meta_canal_enabled").catch(() => null)) || "",
   }
 }
@@ -150,7 +163,8 @@ export async function GET(req: Request): Promise<Response> {
     if (!key || (key !== secreto && key !== kvSecreto)) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
     return NextResponse.json(await diagnostico())
   }
-  if (sp.get("hub.mode") === "subscribe" && VERIFY_TOKEN && sp.get("hub.verify_token") === VERIFY_TOKEN) {
+  const c = await credenciales()
+  if (sp.get("hub.mode") === "subscribe" && c.verify && sp.get("hub.verify_token") === c.verify) {
     return new Response(sp.get("hub.challenge") || "", { status: 200, headers: { "Content-Type": "text/plain" } })
   }
   return NextResponse.json({ ok: false, error: "verificación inválida" }, { status: 403 })
@@ -158,7 +172,8 @@ export async function GET(req: Request): Promise<Response> {
 
 export async function POST(req: Request): Promise<Response> {
   const raw = await req.text()
-  if (!firmaValida(raw, req.headers.get("x-hub-signature-256"))) {
+  const c = await credenciales()
+  if (!firmaValida(raw, req.headers.get("x-hub-signature-256"), c.secret)) {
     return NextResponse.json({ ok: false, error: "firma inválida" }, { status: 401 })
   }
   let body: unknown = null
@@ -172,7 +187,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, recibidos: eventos.length, apagado: true })
   }
   after(async () => {
-    for (const ev of eventos) await atender(ev).catch((e) => console.error("[vic-meta]", e instanceof Error ? e.message : e))
+    for (const ev of eventos) await atender(ev, c.token).catch((e) => console.error("[vic-meta]", e instanceof Error ? e.message : e))
   })
   return NextResponse.json({ ok: true, recibidos: eventos.length })
 }
