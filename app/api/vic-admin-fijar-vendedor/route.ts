@@ -53,6 +53,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     contact?: string
     motivo?: string
     presentado?: boolean
+    /** ASIGNACIÓN A DEDO (15-sep, Lalo "pásalo y notifica a Tamara"): id de
+     * usuario Zoho que pasa a ser el dueño ANTES de leer el registro. Sin
+     * regla ni tómbola: PUT con skip assignment_rules y trigger blueprint. */
+    ownerId?: string
+    /** Avisar al dueño (correo "Asignación Nuevo Deal" + rastro kv). */
+    notificar?: boolean
   }
   const dealId = String(body.dealId || "").trim()
   if (!/^\d{10,}$/.test(dealId)) return NextResponse.json({ ok: false, error: "falta dealId" }, { status: 400 })
@@ -61,6 +67,25 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!token) return NextResponse.json({ ok: false, error: "sin token zoho" }, { status: 502 })
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+
+  const ownerId = String(body.ownerId || "").trim()
+  let asignado: { ok: boolean; detalle?: string } | null = null
+  if (ownerId) {
+    if (!/^\d{10,}$/.test(ownerId)) return NextResponse.json({ ok: false, error: "ownerId inválido" }, { status: 400 })
+    const put = await fetch(`${api}/crm/v3/Deals`, {
+      method: "PUT",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{ id: dealId, Owner: { id: ownerId } }],
+        trigger: ["blueprint"],
+        skip_feature_execution: [{ name: "assignment_rules" }],
+      }),
+    }).catch(() => null)
+    const txt = put ? await put.text().catch(() => "") : ""
+    asignado = { ok: Boolean(put?.ok) && /SUCCESS/.test(txt), detalle: txt.slice(0, 200) }
+    if (!asignado.ok) return NextResponse.json({ ok: false, error: `no se pudo asignar: ${asignado.detalle}` }, { status: 502 })
+  }
 
   const rd = await fetch(
     `${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Owner,Stage,Contact_Name`,
@@ -104,6 +129,46 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const presentado = body.presentado === false ? false : true
   let filaActualizada = false
+  let filaCreada = false
+  if (!previo?.id && ownerId) {
+    // Sin bitácora (el caso nunca pasó por vic_ptv): se crea la fila para que
+    // Vicky sepa a quién remitir al cliente y el chequeo 9h tenga a quién medir.
+    const ins = await fetch(`${SUPABASE_URL}/rest/v1/vic_ptv`, {
+      method: "POST",
+      headers: { ...h, Prefer: "return=minimal" },
+      cache: "no-store",
+      body: JSON.stringify({
+        contact: fono,
+        motivo: "asignacion_manual",
+        ttv_minutos: 0,
+        precio_mostrado: false,
+        vendedor_email: owner.email,
+        vendedor_nombre: owner.name || owner.email.split("@")[0],
+        vendedor_zoho_id: owner.id,
+        traspasado_at: new Date().toISOString(),
+        presentado_al_prospecto: presentado,
+        estado: "activo",
+      }),
+    }).catch(() => null)
+    filaCreada = Boolean(ins?.ok)
+  }
+  let notificacion: { ok: boolean; ownerEmail?: string; motivo?: string } | null = null
+  if (body.notificar === true) {
+    const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
+    notificacion = await notificarTraspasoDeal(dealId, fono).catch((e) => ({ ok: false, motivo: e instanceof Error ? e.message : String(e) }))
+    // Nota en el deal: quién lo asignó y por qué.
+    await fetch(`${api}/crm/v3/Deals/${dealId}/Notes`, {
+      method: "POST",
+      headers: H,
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{
+          Note_Title: `Asignación manual → ${owner.name || owner.email}`,
+          Note_Content: `${body.motivo || "Asignado a mano por el admin"}. Notificación al ejecutivo: ${notificacion?.ok ? "enviada" : `NO salió (${notificacion?.motivo || "?"})`}.`,
+        }],
+      }),
+    }).catch(() => null)
+  }
   if (previo?.id) {
     const up = await fetch(`${SUPABASE_URL}/rest/v1/vic_ptv?id=eq.${previo.id}`, {
       method: "PATCH",
@@ -133,6 +198,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     contacto: fono,
     duenoReal: { nombre: owner.name, email: owner.email, telefono: telefonoVendedor },
     bitacoraAntes: previo ? { email: previo.vendedor_email, nombre: previo.vendedor_nombre } : null,
+    asignado,
+    filaCreada,
+    notificacion,
     filaActualizada,
     presentadoAlProspecto: presentado,
     congelado: sello,
