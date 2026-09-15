@@ -241,6 +241,15 @@ export async function GET(req: Request): Promise<NextResponse> {
     }
   }
   await cargarContexto(contactos)
+  // Deals anclados por el puntero de cotización pero anteriores a la ventana
+  // del índice (una cotización de JULIO traspasada en septiembre): se traen
+  // por id para que el contacto no salga "sin registro".
+  const faltantes = [...new Set([...puntero.values()].map((p) => p.dealId).filter((id) => id && !dealsPorId.has(id)))]
+  for (const lote of lotes(faltantes, 50)) {
+    for (const d of await coql<DealZ>(
+      `select id, Deal_Name, Stage, Created_Time, N_Empleados_que_marcan, Owner.email, Owner.first_name, Owner.last_name, Created_By.email, Contact_Name.Phone, Contact_Name.Mobile from Deals where id in (${lote.map((x) => `'${x}'`).join(",")}) limit 200`,
+    )) dealsPorId.set(String(d.id), d)
+  }
 
   const sesionDe = (email: string) => String(email || "").toLowerCase().split("@")[0]
   const filas: Array<Record<string, unknown>> = []
