@@ -15,6 +15,7 @@
  */
 
 import { createHash } from "node:crypto"
+import { fechaPagoReal } from "@/lib/fecha-pago"
 
 import { esEmailInterno, isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
 import { getZohoAccessToken, getZohoAccessTokenFresco } from "@/lib/zoho-token"
@@ -88,7 +89,10 @@ type VentaCerrada = {
   numero: string
   inicioIso: string
   inicioAprox: boolean
+  /** Fecha del PAGO real (marca kv); si no hay marca, la de aceptación. */
   pagoIso: string
+  /** Fecha de aceptación (`Fecha_Hora_Cotizacion`), declarada aparte. */
+  pagoIsoAceptacion?: string
   montoClp: number
   /** Desglose del pago inicial (pedido Lalo 04-ago): fee que queda como
    * recurrencia mensual vs pagos por una sola vez (reloj/envío/instalación). */
@@ -461,7 +465,15 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
     }
     const inicioAprox = !inicioIso
     if (!inicioIso) inicioIso = String(q.Created_Time || "")
-    const pagoIso = String(q.Fecha_Hora_Cotizacion || q.Modified_Time || "")
+    // FECHA DEL PAGO, NO DE LA ACEPTACIÓN (15-sep, caso Arquiglass COT1303:
+    // aceptada el 09, pagada con tarjeta el 15 — el dash la contaba el 09 y el
+    // cierre del 15 salía sin ella). `Fecha_Hora_Cotizacion` es la aceptación;
+    // el pago real vive en las marcas kv del contacto (pago_online_ /
+    // comprobante_ok_) cuando nombran esta cotización. Sin marca, se conserva
+    // la aceptación como antes y queda declarado en `pagoIsoAceptacion`.
+    const pagoIsoAceptacion = String(q.Fecha_Hora_Cotizacion || q.Modified_Time || "")
+    const pagoIsoReal = esPagada(q) && fono ? await fechaPagoReal(fono, id).catch(() => null) : null
+    const pagoIso = pagoIsoReal && Date.parse(pagoIsoReal) >= Date.parse(pagoIsoAceptacion || "0") ? pagoIsoReal : pagoIsoAceptacion
     const empresa =
       String(q["Cuenta_Asociada.Account_Name"] || "").trim() ||
       String(q.Name || "").replace(/^Cotización\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim() ||
@@ -472,6 +484,7 @@ async function construirVentasCerradas(aceptadas: RawAceptada[]): Promise<VentaC
       inicioIso,
       inicioAprox,
       pagoIso,
+      pagoIsoAceptacion,
       montoClp,
       recurrenteClp,
       unicoClp,

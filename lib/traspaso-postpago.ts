@@ -503,6 +503,7 @@ export async function cerrarYTraspasarPostPago(
   // `pago_online_` hacía que Vicky dijera "pagaste con tarjeta" a quien
   // transfirió. Si hay comprobante registrado para esta cotización, no es MP.
   let fueTransferencia = false
+  let fechaTransferencia = ""
   try {
     const raw = await getKvValue(`comprobante_ok_${contact}`)
     if (raw) {
@@ -510,13 +511,24 @@ export async function cerrarYTraspasarPostPago(
       const edadMs = c.at ? Date.now() - new Date(c.at).getTime() : Number.POSITIVE_INFINITY
       const mismaCot = String(c.quoteId || c.numero || "") === String(quoteId)
       fueTransferencia = mismaCot || edadMs < 6 * 60 * 60 * 1000
+      if (fueTransferencia) fechaTransferencia = String(c.at || "")
     }
   } catch { /* sin marca */ }
+  const ahoraIso = new Date().toISOString()
   if ((opts.motivoCierre || "pagado") === "pagado" && !fueTransferencia) {
     await setKvValue(
       `pago_online_${contact}`,
-      JSON.stringify({ at: new Date().toISOString(), quoteId }),
+      JSON.stringify({ at: ahoraIso, quoteId }),
     ).catch(() => {})
+  }
+  // LA CAJA SE FECHA POR EL PAGO (15-sep, caso Arquiglass COT1303): si el
+  // dash ya escribió `venta_dash_v3_` con la fecha de ACEPTACIÓN (aceptó el
+  // 09, pagó el 15), la venta aparecía el 09 y el cierre del 15 no la traía.
+  // Solo en la PRIMERA pasada real (sin candado): el barrido de Pagadas <36 h
+  // vuelve a entrar acá con motivo "pagado" y no debe correr la fecha a "hoy".
+  if (pagoReal && !yaProcesada) {
+    const { refecharCajaVenta } = await import("./fecha-pago")
+    await refecharCajaVenta(quoteId, fechaTransferencia || ahoraIso).catch(() => "sin_cambio")
   }
 
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
