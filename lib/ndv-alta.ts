@@ -214,6 +214,30 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
       }
     }
 
+    // 1b. RESPALDO del correo de bienvenida (Lalo 15-sep): normalmente sale
+    //     anclado a la implementación en cuanto nace (60-90 s después del
+    //     alta). Si la implementación tarda —NDV sin PDF, Zoho caído, lookup
+    //     rechazado como en COTEL— el cliente no puede quedarse sin sus
+    //     instrucciones: a los 5 minutos sale anclado a su contacto.
+    if (!job.impId && edadMin >= 5) {
+      try {
+        const oc = await import("./onboarding-correos")
+        const { claveCorreoBienvenida } = oc
+        const ya = await getKvValue(claveCorreoBienvenida(c)).catch(() => null)
+        if (!ya) {
+          const mi = await import("./implementacion-vicky")
+          const ctx = await mi.contextoImplementacionDesdeVenta(c).catch(() => ({ contactId: undefined }))
+          const r = await oc.enviarBienvenidaDesdeBorrador(c, {
+            ancla: ctx.contactId ? `Contacts/${ctx.contactId}` : undefined,
+            motivo: "respaldo_sin_imp",
+          })
+          console.log(`[onboarding-correos] bienvenida (respaldo) ${job.empresa}: ${JSON.stringify(r)}`)
+        }
+      } catch (e) {
+        console.warn("[onboarding-correos] respaldo falló:", e instanceof Error ? e.message : e)
+      }
+    }
+
     // 2. Implementación: con la NDV lista, o vencido el tope, o si la NDV es
     //    imposible / no hay cotización.
     const ndvLista = Boolean(job.ndv?.referenciaId)
@@ -263,6 +287,14 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
             claveCapacitacion(c),
             JSON.stringify({ implementacionId: imp.id, numero: imp.numero || "", relator: imp.relator, empresa: job.empresa }),
           ).catch(() => {})
+          // CORREO DE BIENVENIDA anclado a la IMPLEMENTACIÓN (Lalo 15-sep):
+          // así queda en el timeline que mira el relator, no en el contacto
+          // de pruebas del dash. Una sola vez por contacto; si la IMP demora,
+          // el respaldo de abajo lo manda anclado al contacto a los 5 minutos.
+          import("./onboarding-correos")
+            .then((oc) => oc.enviarBienvenidaDesdeBorrador(c, { ancla: `Implementaciones/${imp.id}`, motivo: "imp_creada" }))
+            .then((r) => console.log(`[onboarding-correos] bienvenida ${job.empresa}: ${JSON.stringify(r)}`))
+            .catch((e) => console.warn("[onboarding-correos] bienvenida falló:", e instanceof Error ? e.message : e))
           // Insight de la conversación (Diego/Ignacio, 07-sep): nota + campos
           // Detalles / Dolor / Conversación WhatsApp en la implementación
           // recién nacida. Segundo plano, best-effort.

@@ -811,18 +811,12 @@ export async function armarOnboarding(contact: string): Promise<{
                 await m.procesarNdvImp(contact)
               })
               .catch((e) => console.warn("[onboarding] job NDV/implementación no arrancó:", e instanceof Error ? e.message : e))
-            // Correo de INSTRUCCIONES de ingreso (Lalo 25-ago, referencia
-            // plantillas GeoAvanzado): viaja junto al de la contraseña,
-            // best-effort — jamás bloquea el alta.
-            import("./onboarding-correos")
-              .then((m) =>
-                m.enviarCorreoInstruccionesOnboarding({
-                  adminNombre: `${b.admin.nombre} ${b.admin.apellido}`.trim(),
-                  adminEmail: b.admin.email!,
-                  empresa: b.empresa.nombre!,
-                }),
-              )
-              .catch(() => {})
+            // Correo de INSTRUCCIONES de ingreso (Lalo 25-ago): desde el
+            // 15-sep ya NO sale de aquí. Lo manda el job de NDV/implementación
+            // anclado a la IMPLEMENTACIÓN recién creada (para que quede en su
+            // timeline, Lalo 15-sep caso COTEL), con respaldo anclado al
+            // contacto a los 5 minutos si la implementación se demora. Una
+            // sola vez por contacto (kv onb_correo_bienvenida_).
             // Copy en TERCERA persona sobre el admin (Lalo 02-ago): quien
             // chatea puede ser el admin o el comprador que nombró a otra
             // persona — hablar del admin por nombre y correo sirve en ambos

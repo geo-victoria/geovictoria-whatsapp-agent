@@ -36,6 +36,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     nombre?: string
     apellido?: string
     empresa?: string
+    /** Registro ancla del send_mail ("Implementaciones/<id>" | "Contacts/<id>"); sin él, el de pruebas. */
+    ancla?: string
   }
   const tipo = (body.tipo || "ambos").toLowerCase()
   const email = (body.email || "").trim()
@@ -52,11 +54,16 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   if (tipo === "instrucciones" || tipo === "ambos") {
     const { enviarCorreoInstruccionesOnboarding } = await import("@/lib/onboarding-correos")
-    out.instrucciones = await enviarCorreoInstruccionesOnboarding({
-      adminNombre: `${nombre} ${apellido}`.trim(),
-      adminEmail: email,
-      empresa,
-    })
+    const ancla = (body.ancla || "").trim() || undefined
+    out.instrucciones = await enviarCorreoInstruccionesOnboarding(
+      {
+        adminNombre: `${nombre} ${apellido}`.trim(),
+        adminEmail: email,
+        empresa,
+      },
+      { ancla },
+    )
+    out.ancla = ancla || "(por defecto)"
   }
   return NextResponse.json({ ok: true, ...out })
 }

@@ -32,12 +32,32 @@ function esc(s: string): string {
   return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
+/**
+ * DÓNDE QUEDA COLGADO EL CORREO (Lalo 15-sep, caso COTEL: "no lo veo en el
+ * timeline de la implementación"). `send_mail` de Zoho exige un registro
+ * ancla y el correo aparece en la lista Emails DE ESE registro. Hasta hoy todo
+ * salía anclado al contacto interno de pruebas del dash (MAIL_ANCHOR), así que
+ * el correo de bienvenida del cliente quedaba junto a los cierres diarios y
+ * las alertas, en un contacto que nadie mira. Ahora el ancla se elige por
+ * envío: la IMPLEMENTACIÓN cuando ya existe (es donde el relator mira), el
+ * CONTACTO del cliente como respaldo, y el ancla de pruebas solo si no hay
+ * ninguno de los dos.
+ */
+export type AnclaCorreo = string // "Implementaciones/<id>" | "Contacts/<id>"
+
+/** kv: el correo de bienvenida de un contacto se manda UNA vez. */
+export const claveCorreoBienvenida = (contact: string) => `onb_correo_bienvenida_${contact.replace(/\D/g, "")}`
+
 /** Bienvenida + instrucciones de ingreso, estilo GeoAvanzado, firmada por Vicky. */
-export async function enviarCorreoInstruccionesOnboarding(datos: {
-  adminNombre: string
-  adminEmail: string
-  empresa: string
-}): Promise<boolean> {
+export async function enviarCorreoInstruccionesOnboarding(
+  datos: {
+    adminNombre: string
+    adminEmail: string
+    empresa: string
+  },
+  opts: { ancla?: AnclaCorreo } = {},
+): Promise<boolean> {
+  const ancla = (opts.ancla || MAIL_ANCHOR).replace(/^\/+|\/+$/g, "")
   const nombre = esc(datos.adminNombre || "")
   const html = `<!DOCTYPE html><html lang="es"><body style="margin:0;padding:0;background:#f3f6f9;font-family:Arial,Helvetica,sans-serif;color:#434343;font-size:14px;line-height:20px;">
 <div style="max-width:600px;margin:0 auto;padding:24px 16px;">
@@ -61,33 +81,84 @@ export async function enviarCorreoInstruccionesOnboarding(datos: {
 </div>
 </body></html>`
 
+  const payload = JSON.stringify({
+    data: [
+      {
+        from: { email: FROM_EMAIL },
+        to: [{ email: datos.adminEmail, user_name: datos.adminNombre || datos.adminEmail }],
+        subject: "¡Bienvenido a GeoVictoria! Así ingresas a tu cuenta",
+        content: html,
+        mail_format: "html",
+      },
+    ],
+  })
   try {
     const token = await getZohoAccessToken()
-    const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${MAIL_ANCHOR}/actions/send_mail`, {
-      method: "POST",
-      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        data: [
-          {
-            from: { email: FROM_EMAIL },
-            to: [{ email: datos.adminEmail, user_name: datos.adminNombre || datos.adminEmail }],
-            subject: "¡Bienvenido a GeoVictoria! Así ingresas a tu cuenta",
-            content: html,
-            mail_format: "html",
-          },
-        ],
-      }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!res.ok) {
+    const enviar = async (desde: string): Promise<boolean> => {
+      const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${desde}/actions/send_mail`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        body: payload,
+        cache: "no-store",
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (res.ok) return true
       const body = await res.text().catch(() => "")
-      console.warn(`[onboarding-correos] instrucciones ${res.status} a ${datos.adminEmail}: ${body.slice(0, 200)}`)
+      console.warn(`[onboarding-correos] instrucciones ${res.status} desde ${desde} a ${datos.adminEmail}: ${body.slice(0, 200)}`)
       return false
     }
-    return true
+    if (await enviar(ancla)) return true
+    // El ancla elegida no aceptó el envío (módulo sin correo, id inválido…):
+    // el cliente no puede quedarse sin instrucciones por dónde se cuelga el
+    // correo — cae al ancla de siempre y se deja rastro de que cayó.
+    if (ancla !== MAIL_ANCHOR.replace(/^\/+|\/+$/g, "")) {
+      console.warn(`[onboarding-correos] reintento desde el ancla por defecto para ${datos.adminEmail}`)
+      return await enviar(MAIL_ANCHOR)
+    }
+    return false
   } catch (e) {
     console.warn("[onboarding-correos] instrucciones falló:", e instanceof Error ? e.message : e)
     return false
   }
+}
+
+/**
+ * Manda la bienvenida UNA sola vez por contacto, leyendo admin y empresa del
+ * borrador del alta. Devuelve qué pasó; si ya se había mandado, no repite.
+ * El ancla la decide el llamador (implementación recién creada, o contacto).
+ */
+export async function enviarBienvenidaDesdeBorrador(
+  contact: string,
+  opts: { ancla?: AnclaCorreo; motivo?: string } = {},
+): Promise<{ enviado: boolean; yaEstaba?: boolean; ancla?: string; error?: string }> {
+  const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+  const { claveBorrador } = await import("./onboarding/fase")
+  const c = contact.replace(/\D/g, "")
+  const previo = await getKvValue(claveCorreoBienvenida(c)).catch(() => null)
+  if (previo) return { enviado: false, yaEstaba: true }
+  const raw = await getKvValue(claveBorrador(c)).catch(() => null)
+  let b: { empresa?: { nombre?: string }; admin?: { nombre?: string; apellido?: string; email?: string } } | null = null
+  try {
+    b = raw ? (JSON.parse(raw) as typeof b) : null
+  } catch {
+    b = null
+  }
+  const email = String(b?.admin?.email || "").trim()
+  if (!email) return { enviado: false, error: "sin correo de administrador en el borrador" }
+  const ancla = (opts.ancla || MAIL_ANCHOR).replace(/^\/+|\/+$/g, "")
+  const ok = await enviarCorreoInstruccionesOnboarding(
+    {
+      adminNombre: `${b?.admin?.nombre || ""} ${b?.admin?.apellido || ""}`.trim(),
+      adminEmail: email,
+      empresa: String(b?.empresa?.nombre || ""),
+    },
+    { ancla },
+  )
+  if (ok) {
+    await setKvValue(
+      claveCorreoBienvenida(c),
+      JSON.stringify({ at: new Date().toISOString(), ancla, motivo: opts.motivo || "", email }),
+    ).catch(() => {})
+  }
+  return { enviado: ok, ancla }
 }
