@@ -11,8 +11,22 @@
  * timeout del webhook.
  */
 
+import { channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea } from "./linea-por-pais"
+
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 const BM_CHANNEL_V3 = (process.env.BOTMAKER_CHANNEL_V3 || "").trim()
+
+/**
+ * Línea por DEFECTO para un contacto cuando no hay canal de origen ni
+ * channelId del llamador (15-sep, Perú Fase A): CO/MX/PE salen por SU línea
+ * (antes caían a la chilena, con el bot y las plantillas equivocadas);
+ * CL y "otro" conservan BOTMAKER_CHANNEL_V3, el default histórico.
+ */
+function lineaPorDefecto(contactId: string): string {
+  const pais = paisDeNumero(contactId)
+  if (pais === "co" || pais === "mx" || pais === "pe") return channelIdPorPais(pais)
+  return BM_CHANNEL_V3
+}
 
 const BM_HEADERS = {
   "access-token": BM_TOKEN,
@@ -92,29 +106,52 @@ async function canalDeOrigen(contactId: string): Promise<string> {
  * que todos los pushes salgan por ahí. Best-effort: sin token o sin hallazgo,
  * no hace nada.
  */
-/** País por prefijo de un número WhatsApp (sin "+"): cl | co | mx | otro. */
-function paisDeNumero(num: string): "cl" | "co" | "mx" | "otro" {
-  if (num.startsWith("56")) return "cl"
-  if (num.startsWith("57")) return "co"
-  if (num.startsWith("52")) return "mx"
-  return "otro"
-}
-
 /**
  * ¿El channelId que reporta la acción de código es coherente con el país del
  * contacto? El channelId termina en el número de la línea (ej.
  * "GeoVictoriaEspaol-whatsapp-56967308227"). Un contacto +57 con canal de la
  * línea +56 casi siempre es el master bot ruteando mal (caso María 23-jul):
  * ese canal NO debe persistirse como origen. Contactos de países sin línea
- * propia (Perú, EEUU...) escriben por cualquier línea, así que para ellos
- * cualquier canal es coherente.
+ * propia (EEUU...) escriben por cualquier línea, así que para ellos
+ * cualquier canal es coherente. PERÚ (15-sep) se trata igual que "otro"
+ * mientras su línea esté en contención: un +51 que escribe a la línea
+ * chilena se atiende por ahí (mismo chat), y su canal de origen es válido.
  */
 export function canalCoherenteConContacto(contactId: string, canal: string): boolean {
   const numCanal = (canal.match(/(\d+)\s*$/) || [])[1] || ""
   if (!numCanal) return true
   const paisContacto = paisDeNumero(normalizeContactId(contactId))
-  if (paisContacto === "otro") return true
+  if (paisContacto === "otro" || paisContacto === "pe") return true
   return paisDeNumero(numCanal) === paisContacto
+}
+
+/** Persiste el canal de origen (best-effort, sin await del llamador). */
+function guardarCanalOrigen(clean: string, canal: string): void {
+  if (!SUPABASE_URL_KV || !SUPABASE_KEY_KV || !clean || !canal) return
+  void fetch(`${SUPABASE_URL_KV}/rest/v1/vic_kv?on_conflict=key`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY_KV,
+      Authorization: `Bearer ${SUPABASE_KEY_KV}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({ key: `canal_origen_${clean}`, value: canal }),
+    cache: "no-store",
+  }).catch(() => {})
+}
+
+/**
+ * Tras un envío INICIADO por Vicky (sin canal de origen) por la línea de un
+ * país que no es Chile, se fija esa línea como origen: los mensajes que
+ * siguen —toques, presentación, pago— salen por la misma y no se abren dos
+ * chats. Solo cuando la línea es coherente con el prefijo.
+ */
+function fijarOrigenSiCorresponde(clean: string, canal: string): void {
+  const pais = paisDeNumero(clean)
+  if (pais !== "co" && pais !== "mx" && pais !== "pe") return
+  if (!canalCoherenteConContacto(clean, canal)) return
+  guardarCanalOrigen(clean, canal)
 }
 
 export async function detectarCanalOrigen(contactId: string): Promise<string> {
@@ -144,17 +181,7 @@ export async function detectarCanalOrigen(contactId: string): Promise<string> {
       .sort((a, b) => String(b.creationTime || "").localeCompare(String(a.creationTime || "")))
     const canal = delContacto[0]?.chat?.channelId || ""
     if (canal) {
-      await fetch(`${SUPABASE_URL_KV}/rest/v1/vic_kv?on_conflict=key`, {
-        method: "POST",
-        headers: {
-          apikey: SUPABASE_KEY_KV,
-          Authorization: `Bearer ${SUPABASE_KEY_KV}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal",
-        },
-        body: JSON.stringify({ key: `canal_origen_${clean}`, value: canal }),
-        cache: "no-store",
-      }).catch(() => {})
+      guardarCanalOrigen(clean, canal)
       console.log(`[botmaker-push] canal de origen detectado para ${clean}: ${canal}`)
     }
     return canal
@@ -198,7 +225,7 @@ export async function sendBotmakerMessage(
       .filter(Boolean),
   )
   const origen = internos.has(cleanContact) ? "" : await canalDeOrigen(cleanContact)
-  const canal = (origen || channelId || BM_CHANNEL_V3).trim()
+  const canal = (origen || channelId || lineaPorDefecto(cleanContact)).trim()
   if (origen && origen !== (channelId || BM_CHANNEL_V3).trim()) {
     console.log(
       `[botmaker-push] contact=${cleanContact}: canal de origen ${origen} (override sobre ${channelId || "default"})`,
@@ -243,6 +270,7 @@ export async function sendBotmakerMessage(
       return false
     }
 
+    if (!origen) fijarOrigenSiCorresponde(cleanContact, canal)
     return true
   } catch (err) {
     console.error("[botmaker-push] Excepción al enviar mensaje:", err)
@@ -375,7 +403,7 @@ export async function sendBotmakerMedia(
   }
   const cleanContact = normalizeContactId(contactId)
   const origen = await canalDeOrigen(cleanContact)
-  const canal = (origen || opts.channelId || BM_CHANNEL_V3).trim()
+  const canal = (origen || opts.channelId || lineaPorDefecto(cleanContact)).trim()
   if (!BM_TOKEN || !canal) {
     console.error("[botmaker-push] BOTMAKER_ACCESS_TOKEN o channelId no configurados")
     return false
@@ -454,13 +482,24 @@ export async function sendBotmakerTemplate(
       .filter(Boolean),
   )
   const origenTpl = internosTpl.has(cleanContact) ? "" : await canalDeOrigen(cleanContact)
-  const chatChannelNumber = channelNumber(origenTpl || channelId)
+  // Sin origen ni channelId, la línea del PAÍS del contacto (CO/MX/PE); CL
+  // sigue con BOTMAKER_CHANNEL_NUMBER / la línea chilena (channelNumber).
+  const lineaPais = origenTpl || channelId ? "" : lineaPorDefecto(cleanContact)
+  const chatChannelNumber = channelNumber(origenTpl || channelId || lineaPais)
   if (origenTpl && channelNumber(origenTpl) !== channelNumber(channelId)) {
     console.log(`[botmaker-template] contact=${cleanContact}: canal de origen ${origenTpl} (override sobre ${channelId || "default"})`)
   }
   if (!chatChannelNumber) {
     console.error("[botmaker-template] no se pudo determinar chatChannelNumber")
     anotarFallo({ c: cleanContact, tipo: "plantilla", tpl: templateName, motivo: "sin_canal" })
+    return false
+  }
+  // PLANTILLA DE OTRO BOT (15-sep): una plantilla `_cl` por la línea peruana
+  // (o `_pe` por la chilena) recibe 202 de Botmaker y jamás sale. Se rechaza
+  // acá, con fallo registrado, para que el hueco sea visible y no mudo.
+  if (!plantillaCoherenteConLinea(templateName, chatChannelNumber)) {
+    console.error(`[botmaker-template] ${templateName} no pertenece al bot de la línea ${chatChannelNumber} — no se envía (contact=${cleanContact})`)
+    anotarFallo({ c: cleanContact, tipo: "plantilla", tpl: templateName, linea: chatChannelNumber, motivo: "plantilla_de_otro_pais" })
     return false
   }
   // GATE CENTRAL de proactividad (Fase 2 biblia): las plantillas son el envío
@@ -498,6 +537,7 @@ export async function sendBotmakerTemplate(
       const { sellarPlantillaEnviada } = await import("./gate-proactividad")
       void sellarPlantillaEnviada(cleanContact, templateName)
     }
+    if (!origenTpl && lineaPais) fijarOrigenSiCorresponde(cleanContact, lineaPais)
     return true
   } catch (err) {
     console.error("[botmaker-template] Excepción al enviar plantilla:", err)
@@ -520,9 +560,10 @@ export async function sendTypingIndicator(
   // Multi-país: canal de la línea (default: Chile).
   channelId?: string,
 ): Promise<void> {
-  const canal = (channelId || BM_CHANNEL_V3).trim()
-  if (!BM_TOKEN || !canal || !contactId) return
+  if (!BM_TOKEN || !contactId) return
   const cleanContact = normalizeContactId(contactId)
+  const canal = (channelId || lineaPorDefecto(cleanContact)).trim()
+  if (!canal) return
   try {
     await fetch(TYPING_URL, {
       method: "POST",

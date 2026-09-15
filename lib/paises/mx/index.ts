@@ -17,6 +17,7 @@
  */
 
 import type { PerfilPais } from "../tipos"
+import { channelIdPorPais, NUMERO_LINEA } from "../../linea-por-pais"
 import { CATALOGO_MODULOS_MX, CATALOGO_HARDWARE_MX, CATALOGO_SERVICIOS_MX } from "./catalogo"
 import { rfcValido, normalizarRfc } from "./rfc"
 
@@ -77,10 +78,8 @@ export const PERFIL_MX: PerfilPais = {
 
   canal: {
     // channelId del documento oficial (línea +52 1 56 5977 8486).
-    channelId: (
-      process.env.BOTMAKER_CHANNEL_MX || "GeoVictoriaEspaol-whatsapp-5215659778486"
-    ).trim(),
-    numeroLinea: (process.env.BOTMAKER_CHANNEL_NUMBER_MX || "5215659778486").trim(),
+    channelId: channelIdPorPais("mx"),
+    numeroLinea: NUMERO_LINEA.mx,
     templates: {
       // TODO: crear y aprobar plantillas de la línea MX en Meta.
     },

@@ -40,6 +40,7 @@ import {
   reasignarLeadTelemarketingCL,
   reasignarLeadSdrInboundCO,
   reasignarLeadSdrInboundMX,
+  reasignarLeadSdrInboundPE,
   updateZohoLeadStatus,
   STATUS_ENTREGA_LEAD,
 } from "./zoho-leads"
@@ -308,7 +309,7 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
       const empleados = empleadosLead || Number(chat?.empleados || 0) || 0
       const puntero = hayConv ? await getQuotePointer(tel).catch(() => null) : null
       const calificado = empleados > 0 || Boolean(puntero?.quoteId)
-      const regla = pais !== "cl" ? pais : calificado ? "tlmk" : "sdr"
+      const regla = pais === "cl" ? (calificado ? "tlmk" : "sdr") : pais === "pe" ? (calificado ? "pe_tlmk" : "pe_sdr") : pais
       if (dry) {
         resultados.push({ ...base, accion: "entregado", detalle: `(dry) regla ${regla}${empleados ? ` · ${empleados} personas` : ""}${chat?.rut ? ` · RUT ${chat.rut}` : ""}` })
         continue
@@ -338,11 +339,20 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
         ownerEmail = String((r as { ownerEmail?: string }).ownerEmail || "")
         error = String((r as { error?: string }).error || "")
       } else {
-        const put = await fetch(`${api}/crm/v3/Leads`, {
-          method: "PUT", headers: H, cache: "no-store",
-          body: JSON.stringify({ data: [{ id: l.id, Owner: { id: MONICA_PE_ID } }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
-        }).catch(() => null)
-        if (put?.ok) ownerEmail = "mmendozav@geovictoria.com"
+        // PERÚ (Lalo 15-sep): calificado → Mónica (única telemarketing);
+        // sin calificar → SDR Inbound PE (Ana/Priscila), con Mónica de respaldo.
+        if (!calificado) {
+          const r = await reasignarLeadSdrInboundPE(l.id).catch((e) => ({ success: false, error: String(e) }))
+          ownerEmail = String((r as { ownerEmail?: string }).ownerEmail || "")
+          error = String((r as { error?: string }).error || "")
+        }
+        if (!ownerEmail) {
+          const put = await fetch(`${api}/crm/v3/Leads`, {
+            method: "PUT", headers: H, cache: "no-store",
+            body: JSON.stringify({ data: [{ id: l.id, Owner: { id: MONICA_PE_ID } }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
+          }).catch(() => null)
+          if (put?.ok) ownerEmail = "mmendozav@geovictoria.com"
+        }
       }
       if (!ownerEmail) {
         resultados.push({ ...base, accion: "error", detalle: `la regla ${regla} no asignó dueño${error ? `: ${error}` : ""}` })

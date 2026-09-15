@@ -61,13 +61,13 @@ describe("el reenvío no puede hacer ciclos", () => {
     }
   })
 
-  test("los tres países tienen webhook y secret declarados", () => {
-    for (const pais of ["cl", "co", "mx"] as const) {
+  test("los cuatro países tienen webhook y secret declarados (PE desde el 15-sep)", () => {
+    for (const pais of ["cl", "co", "mx", "pe"] as const) {
       assert.match(WEBHOOK_POR_PAIS[pais], /^\/api\/vic-botmaker/)
       assert.match(SECRET_ENV_POR_PAIS[pais], /^BOTMAKER_SECRET/)
     }
     // Sin colisiones: dos países no pueden compartir destino ni secret.
-    assert.equal(new Set(Object.values(WEBHOOK_POR_PAIS)).size, 3)
-    assert.equal(new Set(Object.values(SECRET_ENV_POR_PAIS)).size, 3)
+    assert.equal(new Set(Object.values(WEBHOOK_POR_PAIS)).size, 4)
+    assert.equal(new Set(Object.values(SECRET_ENV_POR_PAIS)).size, 4)
   })
 })

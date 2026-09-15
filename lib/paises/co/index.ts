@@ -18,6 +18,7 @@
  */
 
 import type { PerfilPais } from "../tipos"
+import { channelIdPorPais, NUMERO_LINEA } from "../../linea-por-pais"
 import { CATALOGO_MODULOS_CO, CATALOGO_HARDWARE_CO, CATALOGO_SERVICIOS_CO } from "./catalogo"
 import { nitValido, normalizarNit } from "./nit"
 
@@ -74,8 +75,11 @@ export const PERFIL_CO: PerfilPais = {
   },
 
   canal: {
-    channelId: (process.env.BOTMAKER_CHANNEL_CO || "").trim(), // TODO: setear al crear el canal en Botmaker
-    numeroLinea: (process.env.BOTMAKER_CHANNEL_NUMBER_CO || "573181070737").trim(),
+    // Fuente única de líneas por país (15-sep): sin env, la forma canónica
+    // `<business>-whatsapp-573181070737` — antes el default era "" y el
+    // push caía en silencio a la línea CHILENA.
+    channelId: channelIdPorPais("co"),
+    numeroLinea: NUMERO_LINEA.co,
     templates: {
       // TODO: crear y aprobar plantillas de la línea CO en Meta.
     },

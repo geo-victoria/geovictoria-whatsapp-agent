@@ -27,7 +27,8 @@
  * y siempre al webhook que sí se queda con ese prefijo.
  */
 
-export type PaisContacto = "cl" | "co" | "mx" | "desconocido"
+export type PaisConLinea = "cl" | "co" | "mx" | "pe"
+export type PaisContacto = PaisConLinea | "desconocido"
 
 /**
  * País del contacto según su prefijo internacional.
@@ -36,6 +37,8 @@ export type PaisContacto = "cl" | "co" | "mx" | "desconocido"
  *   CL → 56  + 9 dígitos  = 11
  *   CO → 57  + 10 dígitos = 12
  *   MX → 521 + 10 dígitos = 13  (WhatsApp antepone el 1; a veces llega 52 pelado = 12)
+ *   PE → 51  + 9 dígitos  = 11  (15-sep, Perú Fase A: antes era "desconocido" y
+ *         lo atendía la línea donde escribiera, con prompt y moneda ajenos)
  *
  * Los criterios son los MISMOS que ya usaba el webhook chileno inline, para no
  * cambiar el comportamiento probado en producción — solo se centralizan.
@@ -44,29 +47,32 @@ export function paisDeContacto(contactRaw: string): PaisContacto {
   // Marcador de línea "CO."/"MX."/"CL." (25-ago, caso GRANIPACK): los
   // contactos LID de WhatsApp no tienen prefijo telefónico — el país lo dice
   // el marcador que les puso el webhook de su línea.
-  const marca = /^\s*(CL|CO|MX)\./i.exec(String(contactRaw || ""))?.[1]?.toLowerCase()
-  if (marca === "cl" || marca === "co" || marca === "mx") return marca
+  const marca = /^\s*(CL|CO|MX|PE)\./i.exec(String(contactRaw || ""))?.[1]?.toLowerCase()
+  if (marca === "cl" || marca === "co" || marca === "mx" || marca === "pe") return marca
   const c = String(contactRaw || "").replace(/\D/g, "")
   if (!c) return "desconocido"
   if (c.startsWith("521") && c.length >= 13) return "mx"
   if (c.startsWith("52") && !c.startsWith("521") && c.length === 12) return "mx"
   if (c.startsWith("57") && c.length >= 12) return "co"
   if (c.startsWith("56") && c.length >= 11) return "cl"
+  if (c.startsWith("51") && c.length === 11) return "pe"
   return "desconocido"
 }
 
 /** Webhook interno que atiende cada país. */
-export const WEBHOOK_POR_PAIS: Record<"cl" | "co" | "mx", string> = {
+export const WEBHOOK_POR_PAIS: Record<PaisConLinea, string> = {
   cl: "/api/vic-botmaker-v3",
   co: "/api/vic-botmaker-co",
   mx: "/api/vic-botmaker-mx",
+  pe: "/api/vic-botmaker-pe",
 }
 
 /** Nombre de la env var con el secret de cada webhook. */
-export const SECRET_ENV_POR_PAIS: Record<"cl" | "co" | "mx", string> = {
+export const SECRET_ENV_POR_PAIS: Record<PaisConLinea, string> = {
   cl: "BOTMAKER_SECRET",
   co: "BOTMAKER_SECRET_CO",
   mx: "BOTMAKER_SECRET_MX",
+  pe: "BOTMAKER_SECRET_PE",
 }
 
 export type ReenvioResultado =
@@ -86,7 +92,7 @@ export type ReenvioResultado =
  */
 export async function reenviarSiNoEsDeEstePais(params: {
   contact: string
-  paisLocal: "cl" | "co" | "mx"
+  paisLocal: PaisConLinea
   requestUrl: string
   body: unknown
   etiquetaLog: string

@@ -57,7 +57,7 @@ import {
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
 import { partirEnBurbujas } from "@/lib/burbujas"
-import { paisDeContacto, WEBHOOK_POR_PAIS, SECRET_ENV_POR_PAIS } from "@/lib/ruteo-pais"
+import { reenviarSiNoEsDeEstePais } from "@/lib/ruteo-pais"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -504,35 +504,20 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     // Ruteo de retorno (espejo del MX): el Master Bot rutea por ID DEL CANAL,
     // así que un +56/+57/+52 que escriba a la LÍNEA peruana aterriza acá. Se
-    // reenvía al webhook de su país (lib/ruteo-pais no conoce "pe" todavía,
-    // así que el forward se arma acá con sus mismos mapas exportados). Un +51
-    // devuelve "desconocido" en paisDeContacto → se atiende localmente, que
-    // es exactamente lo que corresponde.
+    // reenvía al webhook de su país. Desde el 15-sep lib/ruteo-pais conoce
+    // "pe": un +51 es local y se atiende acá (y un +51 que escribe a otra
+    // línea llega reenviado desde ese webhook).
     if (contact && !simulacion) {
-      const paisAjeno = paisDeContacto(contact)
-      if (paisAjeno === "cl" || paisAjeno === "co" || paisAjeno === "mx") {
-        const destino = WEBHOOK_POR_PAIS[paisAjeno]
-        const secretDestino = (process.env[SECRET_ENV_POR_PAIS[paisAjeno]] || "").trim()
-        if (!secretDestino) {
-          console.error(`[vic-pe][ruteo] contact=${contact} es ${paisAjeno.toUpperCase()} pero falta ${SECRET_ENV_POR_PAIS[paisAjeno]} — no se puede reenviar.`)
-          return NextResponse.json({ reply: "" })
-        }
-        const origin = new URL(request.url).origin
-        const r = await fetch(`${origin}${destino}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-secret": secretDestino },
-          body: JSON.stringify(body),
-          cache: "no-store",
-        }).catch(() => null)
-        if (!r) {
-          // Ante fallo del reenvío NO se atiende con flujo PE (cotizar en la
-          // moneda equivocada es peor que un reintento del cliente).
-          console.error(`[vic-pe][ruteo] contact=${contact} es ${paisAjeno.toUpperCase()} y el reenvío falló — no se atiende con flujo PE.`)
-          return NextResponse.json({ reply: "" })
-        }
-        const data = await r.json().catch(() => ({ reply: "" }))
-        console.log(`[vic-pe][ruteo] contact=${contact} es ${paisAjeno.toUpperCase()} → reenviado a ${destino} (${r.status})`)
-        return NextResponse.json(data, { status: r.status })
+      const ruteo = await reenviarSiNoEsDeEstePais({
+        contact,
+        paisLocal: "pe",
+        requestUrl: request.url,
+        body,
+        etiquetaLog: "[vic-pe][ruteo]",
+      })
+      if (ruteo.reenviado) {
+        if ("fallo" in ruteo) return NextResponse.json({ reply: "" })
+        return NextResponse.json(ruteo.data, { status: ruteo.status })
       }
     }
 

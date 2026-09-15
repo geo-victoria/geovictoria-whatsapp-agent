@@ -28,6 +28,7 @@ import type { PerfilPais } from "../tipos.ts"
 import { CATALOGO_MODULOS_PE, CATALOGO_HARDWARE_PE, CATALOGO_SERVICIOS_PE } from "./catalogo.ts"
 import { rucValido } from "../../rut.ts"
 import { formatearPEN } from "./cotizar.ts"
+import { channelIdPorPais, NUMERO_LINEA } from "../../linea-por-pais.ts"
 
 function normalizarRuc(input: string): string {
   return String(input || "").replace(/\D/g, "")
@@ -80,19 +81,28 @@ export const PERFIL_PE: PerfilPais = {
   },
 
   canal: {
-    channelId: (
-      process.env.BOTMAKER_CHANNEL_PE || "GeoVictoriaEspaol-whatsapp-51922067167"
-    ).trim(),
-    numeroLinea: (process.env.BOTMAKER_CHANNEL_NUMBER_PE || "51922067167").trim(),
+    // Fuente única de líneas por país (15-sep): lib/linea-por-pais.ts.
+    channelId: channelIdPorPais("pe"),
+    numeroLinea: NUMERO_LINEA.pe,
     templates: {
       // TODO Fase 3: crear y aprobar plantillas de la línea PE en Meta.
     },
   },
 
   equipo: {
-    // Perú sin SDRs ni tómbola: ejecutiva única (los traspasos v2 ya la
-    // apuntan vía el roster pe de lib/ptv.ts).
-    sdrInbound: [],
+    // ROLES PERÚ (Lalo 15-sep): Mónica Mendoza = única telemarketing (lo
+    // calificado, los deals y las cotizaciones); SDR Inbound = Ana Fiori y
+    // Priscila Quispe (lo que Vicky NO logra calificar, por rotación interna
+    // — Zoho no tiene regla de tómbola para PE); gestora de la venta
+    // autónoma = Cecilia Valverde (lib/traspaso-postpago, kv
+    // owner_venta_autonoma_pe); líder comercial Diego Bendezú, que jamás se
+    // presenta al cliente (homólogo de Victoria Luna en CL). La rotación
+    // real vive en zoho-leads (reasignarLeadSdrInboundPE, roster env
+    // VIC_SDR_INBOUND_PE con este mismo default).
+    sdrInbound: [
+      { email: "afiori@geovictoria.com", zohoUserId: "3525045000299130001" }, // Ana Fiori
+      { email: "pquispef@geovictoria.com", zohoUserId: "3525045000576828001" }, // Priscila Quispe
+    ],
     ejecutivo: {
       nombre: "Mónica Mendoza",
       email: "mmendozav@geovictoria.com",

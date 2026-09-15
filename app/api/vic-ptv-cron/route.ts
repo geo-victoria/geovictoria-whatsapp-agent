@@ -1017,6 +1017,10 @@ const NOMBRE_VENDEDOR: Record<string, string> = {
   "tmartinezq@geovictoria.com": "Tamara Martinez",
   "adiazg@geovictoria.com": "Anderson Diaz",
   "pdiaz@geovictoria.com": "Paola Diaz",
+  // Perú (15-sep): SDR Inbound y gestora de venta autónoma.
+  "afiori@geovictoria.com": "Ana Fiori",
+  "pquispef@geovictoria.com": "Priscila Quispe",
+  "cvalverde@geovictoria.com": "Cecilia Valverde",
 }
 
 /** WhatsApp de los interinos (directorio verificado 27-jul; Mónica desde su
@@ -1027,6 +1031,10 @@ const WHATSAPP_VENDEDOR: Record<string, string> = {
   "agordillo@geovictoria.com": "+57 314 267 7765",
   "ysegura@geovictoria.com": "+52 55 3763 6604",
   "mmendozav@geovictoria.com": "+51 962 277 502",
+  // Perú (15-sep): corporativos entregados por Teams a Lalo.
+  "afiori@geovictoria.com": "+51 936 953 838",
+  "pquispef@geovictoria.com": "+51 960 421 293",
+  "cvalverde@geovictoria.com": "+51 982 446 284",
 }
 
 type VendedorFinal = {
@@ -1820,6 +1828,18 @@ async function traspasarATelemarketing(
     // round-robin interno de ellas dos) — y PE (sin tómbola) asigna directo a
     // la ejecutiva del país (Mónica).
     let owner = lead?.Owner && !ownerBot ? lead.Owner : undefined
+    if (!owner?.id && pais === "pe") {
+      // Reloj de 24h = NO calificó → SDR Inbound PE (Lalo 15-sep). Si la
+      // rotación falla, cae al camino de siempre (Mónica, roster pe de ptv).
+      const { reasignarLeadSdrInboundPE } = await import("@/lib/zoho-leads")
+      await notaTraspasoConversacion(leadId, fono).catch(() => {})
+      const r = await reasignarLeadSdrInboundPE(leadId).catch(() => null)
+      if (r?.success && r.ownerId && r.ownerEmail) {
+        owner = { id: r.ownerId, email: r.ownerEmail, name: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0] }
+      } else {
+        console.warn(`[tm-24h] SDR PE no asignó lead=${leadId}: ${r?.error || "sin detalle"}`)
+      }
+    }
     if (!owner?.id && pais === "cl") {
       const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
       // Nota con el chat en toda entrega CL (Ana 26-ago).
@@ -3962,7 +3982,7 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
     const feriados = await feriadosDePais(pais)
     if (!esHorarioHabil(pais, ahora, feriados)) continue // espera la ventana hábil, sin candado
     await setKvValue(`rescate_form_${l.id}`, "rescatado").catch(() => {})
-    const { reasignarLeadCalificacionCL, reasignarLeadSdrInboundCO, reasignarLeadSdrInboundMX, agregarNotaLead } =
+    const { reasignarLeadCalificacionCL, reasignarLeadSdrInboundCO, reasignarLeadSdrInboundMX, reasignarLeadSdrInboundPE, agregarNotaLead } =
       await import("@/lib/zoho-leads")
     let ownerEmail = ""
     if (pais === "cl") {
@@ -3974,7 +3994,12 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
     } else if (pais === "mx") {
       const r = await reasignarLeadSdrInboundMX(l.id).catch(() => null)
       ownerEmail = r?.ownerEmail || ""
-    } else {
+    } else if (pais === "pe") {
+      // Form-fill mudo = sin calificar → SDR Inbound PE (Lalo 15-sep); Mónica de respaldo.
+      const r = await reasignarLeadSdrInboundPE(l.id).catch(() => null)
+      ownerEmail = r?.ownerEmail || ""
+    }
+    if (!ownerEmail && pais === "pe") {
       const put = await fetch(`${api}/crm/v3/Leads`, {
         method: "PUT", headers: H, cache: "no-store",
         body: JSON.stringify({

@@ -908,13 +908,23 @@ const SDR_INBOUND_MX = (process.env.VIC_SDR_INBOUND_MX || "")
 // Override por env; el RR interno del roster queda solo de fallback.
 const TM_SDR_INBOUND_MX = (process.env.VICKY_TM_SDR_INBOUND_MX_RULE_ID || "3525045000652685096").trim()
 
-/** Reasigna un lead MX vía la tómbola de Zoho de SDR Inbound; fallback RR interno. */
-export async function reasignarLeadSdrInboundMX(
-  leadId: string,
-): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+/**
+ * Entrega GENÉRICA por tómbola de Zoho (lar_id) con fallback a rotación
+ * interna sobre un roster (15-sep: extraída del camino MX para que Perú use
+ * exactamente el mismo mecanismo). Sin regla → directo al RR; sin roster →
+ * success:false y el llamador cae a su comportamiento previo.
+ */
+async function reasignarLeadPorRoster(opts: {
+  leadId: string
+  ruleId: string
+  roster: Array<{ email: string; id: string }>
+  kvTurno: string
+  etiqueta: string
+}): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  const { leadId, ruleId, roster, kvTurno, etiqueta } = opts
   if (!leadId) return { success: false, error: "leadId faltante" }
   // Camino primario: la REGLA de Zoho (lar_id) — mismo patrón que CL.
-  if (TM_SDR_INBOUND_MX) {
+  if (ruleId) {
     try {
       const accessToken = await getZohoAccessToken()
       const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
@@ -923,7 +933,7 @@ export async function reasignarLeadSdrInboundMX(
         method: "PUT",
         headers: H,
         cache: "no-store",
-        body: JSON.stringify({ data: [{ id: leadId }], lar_id: TM_SDR_INBOUND_MX }),
+        body: JSON.stringify({ data: [{ id: leadId }], lar_id: ruleId }),
       })
       if (put.ok) {
         const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
@@ -939,17 +949,17 @@ export async function reasignarLeadSdrInboundMX(
           return { success: true, ownerEmail: owner?.email, ownerId: owner?.id }
         }
       }
-      console.warn(`[zoho-leads] tómbola SDR MX ${TM_SDR_INBOUND_MX} no asignó lead ${leadId} — fallback RR interno`)
+      console.warn(`[zoho-leads] tómbola ${etiqueta} ${ruleId} no asignó lead ${leadId} — fallback RR interno`)
     } catch { /* fallback RR abajo */ }
   }
-  if (SDR_INBOUND_MX.length === 0) {
-    return { success: false, error: "tómbola MX no asignó y sin roster de fallback (VIC_SDR_INBOUND_MX)" }
+  if (roster.length === 0) {
+    return { success: false, error: `tómbola ${etiqueta} no asignó y sin roster de fallback` }
   }
   try {
     const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
-    const last = parseInt((await getKvValue("sdr_inbound_rr_mx").catch(() => null)) || "-1")
-    const idx = (isNaN(last) ? 0 : last + 1) % SDR_INBOUND_MX.length
-    const sdr = SDR_INBOUND_MX[idx]
+    const last = parseInt((await getKvValue(kvTurno).catch(() => null)) || "-1")
+    const idx = (isNaN(last) ? 0 : last + 1) % roster.length
+    const sdr = roster[idx]
 
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
@@ -978,11 +988,43 @@ export async function reasignarLeadSdrInboundMX(
         error: `PUT owner ${res.status}: ${JSON.stringify(data).slice(0, 200)}`,
       }
     }
-    await setKvValue("sdr_inbound_rr_mx", String(idx)).catch(() => {})
+    await setKvValue(kvTurno, String(idx)).catch(() => {})
+    await moverPendientes(leadId, ownerId, sdr.email)
     return { success: true, ownerEmail: sdr.email, ownerId }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "excepción reasignando" }
   }
+}
+
+/** Reasigna un lead MX vía la tómbola de Zoho de SDR Inbound; fallback RR interno. */
+export async function reasignarLeadSdrInboundMX(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  return reasignarLeadPorRoster({ leadId, ruleId: TM_SDR_INBOUND_MX, roster: SDR_INBOUND_MX, kvTurno: "sdr_inbound_rr_mx", etiqueta: "SDR MX" })
+}
+
+// SDR INBOUND PERÚ (Lalo 15-sep): Ana Fiori y Priscila Quispe reciben lo que
+// Vicky NO logra calificar, por rotación interna (Zoho no tiene tómbola para
+// PE; si algún día existe: env VICKY_TM_SDR_INBOUND_PE_RULE_ID). Lo
+// calificado y los deals siguen con Mónica Mendoza (única telemarketing).
+// Roster por env VIC_SDR_INBOUND_PE ("email:zohoUserId,…"), default = ellas dos.
+const SDR_INBOUND_PE = (
+  process.env.VIC_SDR_INBOUND_PE ||
+  "afiori@geovictoria.com:3525045000299130001,pquispef@geovictoria.com:3525045000576828001"
+)
+  .split(",")
+  .map((s) => {
+    const [email, id] = s.split(":").map((x) => x.trim())
+    return { email, id: id || "" }
+  })
+  .filter((s) => s.email)
+const TM_SDR_INBOUND_PE = (process.env.VICKY_TM_SDR_INBOUND_PE_RULE_ID || "").trim()
+
+/** Reasigna un lead PE sin calificar a las SDR Inbound de Perú (RR interno). */
+export async function reasignarLeadSdrInboundPE(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  return reasignarLeadPorRoster({ leadId, ruleId: TM_SDR_INBOUND_PE, roster: SDR_INBOUND_PE, kvTurno: "sdr_inbound_rr_pe", etiqueta: "SDR PE" })
 }
 
 export type CreateZohoLeadInput = {

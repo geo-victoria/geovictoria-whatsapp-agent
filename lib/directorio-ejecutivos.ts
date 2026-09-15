@@ -36,6 +36,7 @@ const DIRECTORIO_BASE: FichaEjecutivo[] = [
   // fichas de usuario de Zoho no tienen teléfono cargado.
   { nombre: "Ana Fiori", email: "afiori@geovictoria.com", telefono: "+51 936 953 838" },
   { nombre: "Priscila Quispe", email: "pquispef@geovictoria.com", telefono: "+51 960 421 293" },
+  { nombre: "Cecilia Valverde", email: "cvalverde@geovictoria.com", telefono: "+51 982 446 284" }, // gestora venta autónoma PE (Teams a Lalo, 15-sep)
 ]
 
 /** Líneas nuestras que SÍ pueden aparecer junto a cualquier nombre (Vicky,

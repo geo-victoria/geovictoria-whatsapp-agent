@@ -46,6 +46,7 @@ import {
 } from "@/lib/zoho-leads"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
+import { PERFIL_PE } from "@/lib/paises/pe"
 import { enrolarEnLoop } from "@/lib/loop-v2"
 
 export const dynamic = "force-dynamic"
@@ -64,6 +65,11 @@ const TPL_LEAD = (process.env.OUTBOUND_TEMPLATE_LEAD || "").trim()
 const TPL_LEAD_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_CO || "vicky_co_solicitud_recibida").trim()
 // México (21-jul): plantilla de apertura propia por la línea +52 1 56 5977 8486.
 const TPL_LEAD_MX = (process.env.OUTBOUND_TEMPLATE_LEAD_MX || "vicky_mx_lead_apertura").trim()
+// Perú (15-sep, Fase A): sin default — la plantilla de apertura del bot
+// Vicky Perú aún no existe. Sin ella el lead NO se queda mudo con Vicky: se
+// entrega a las SDR Inbound PE (Ana Fiori / Priscila Quispe) para que lo
+// trabajen por otro canal, igual que un número sin prefijo utilizable.
+const TPL_LEAD_PE = (process.env.OUTBOUND_TEMPLATE_LEAD_PE || "").trim()
 // T0 de FIN DE SEMANA (regla Rodrigo/Lalo 24-jul, parte del loop v2): sábado y
 // domingo la apertura pregunta "¿conversamos ahora o prefieres el lunes?"
 // (plantilla vicky_t0_finde, creada por Lalo el 24-jul). Sin gemela del país
@@ -75,7 +81,7 @@ const TPL_LEAD_FINDE_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE_CO || "vicky
 
 function esFinDeSemana(country: string): boolean {
   const tz =
-    country === "co" ? "America/Bogota" : country === "mx" ? "America/Mexico_City" : "America/Santiago"
+    country === "co" ? "America/Bogota" : country === "mx" ? "America/Mexico_City" : country === "pe" ? "America/Lima" : "America/Santiago"
   const wd = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(new Date())
   return wd === "Sat" || wd === "Sun"
 }
@@ -223,7 +229,9 @@ export async function POST(req: Request): Promise<Response> {
       ? "mx"
       : /chile|^cl$/.test(territorioRaw)
         ? "cl"
-        : null
+        : /per[uú]|^pe$/.test(territorioRaw)
+          ? "pe"
+          : null
   if (territorio === "cl" && contact.length === 9 && contact.startsWith("9")) {
     contact = `56${contact}`
   } else if (territorio === "co" && contact.length === 10 && contact.startsWith("3")) {
@@ -231,6 +239,9 @@ export async function POST(req: Request): Promise<Response> {
   } else if (territorio === "mx" && contact.length === 10) {
     // Celulares mexicanos: 10 dígitos locales → WhatsApp usa 52 + 1 + número.
     contact = `521${contact}`
+  } else if (territorio === "pe" && contact.length === 9 && contact.startsWith("9")) {
+    // Celulares peruanos: 9 dígitos que parten en 9 → 51 + número.
+    contact = `51${contact}`
   }
   const porPrefijo = contact.startsWith("56")
     ? "cl"
@@ -238,7 +249,9 @@ export async function POST(req: Request): Promise<Response> {
       ? "co"
       : contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
         ? "mx"
-        : null
+        : contact.startsWith("51") && contact.length === 11
+          ? "pe"
+          : null
   // El prefijo del teléfono manda (define la línea por la que se puede escribir);
   // el territorio solo normaliza y deja traza si no calzan.
   const country = porPrefijo || territorio
@@ -250,23 +263,28 @@ export async function POST(req: Request): Promise<Response> {
     // verdad del prefijo, para que reportes y futuras assignment rules no
     // hereden el dato falso (20-jul, a raíz del caso Joys/Perú invertido).
     if (zohoLeadId) {
-      const pais = porPrefijo === "mx" ? "México" : porPrefijo === "co" ? "Colombia" : "Chile"
+      const pais = porPrefijo === "mx" ? "México" : porPrefijo === "co" ? "Colombia" : porPrefijo === "pe" ? "Perú" : "Chile"
       updateZohoLeadFields(zohoLeadId, { Country: pais, Territorio: pais }).catch(() => {})
     }
   }
   const esCO = country === "co"
   const esMX = country === "mx"
+  const esPE = country === "pe"
   const finde = esFinDeSemana(country || "cl")
-  const tplPais = esMX
-    ? TPL_LEAD_MX
-    : esCO
-      ? (finde && TPL_LEAD_FINDE_CO) || TPL_LEAD_CO
-      : (finde && TPL_LEAD_FINDE) || TPL_LEAD
-  const channelId = esMX
-    ? PERFIL_MX.canal.channelId
-    : esCO
-      ? PERFIL_CO.canal.channelId
-      : undefined
+  const tplPais = esPE
+    ? TPL_LEAD_PE
+    : esMX
+      ? TPL_LEAD_MX
+      : esCO
+        ? (finde && TPL_LEAD_FINDE_CO) || TPL_LEAD_CO
+        : (finde && TPL_LEAD_FINDE) || TPL_LEAD
+  const channelId = esPE
+    ? PERFIL_PE.canal.channelId
+    : esMX
+      ? PERFIL_MX.canal.channelId
+      : esCO
+        ? PERFIL_CO.canal.channelId
+        : undefined
 
   // Los números internos no reciben prospección (mismo set que excluye el
   // embudo). OUTBOUND_ALLOW_CONTACTS (coma-separado) permite excepciones
@@ -324,15 +342,31 @@ export async function POST(req: Request): Promise<Response> {
     }
     return NextResponse.json({
       ok: true,
-      skipped: `telefono sin prefijo +56/+57 utilizable${territorio ? ` (territorio ${territorio})` : ""}`,
+      skipped: `telefono sin prefijo +56/+57/+52/+51 utilizable${territorio ? ` (territorio ${territorio})` : ""}`,
       contact,
       reasignado,
     })
   }
+  if (esPE && !tplPais) {
+    // Perú sin plantilla de apertura: el lead va a las SDR Inbound PE ahora
+    // mismo, no se queda con Vicky esperando un env que no existe.
+    let reasignado: string | undefined
+    if (zohoLeadId) {
+      const { reasignarLeadSdrInboundPE } = await import("@/lib/zoho-leads")
+      const r = await reasignarLeadSdrInboundPE(zohoLeadId).catch(() => null)
+      reasignado = r?.ownerEmail
+      await setKvValue(
+        `outb_regalado_${zohoLeadId}`,
+        JSON.stringify({ at: new Date().toISOString(), contact, motivo: "pe_sin_plantilla", a: reasignado || "" }),
+      ).catch(() => {})
+      console.warn(`[outbound-lead] lead PE ${zohoLeadId} (${contact}) sin OUTBOUND_TEMPLATE_LEAD_PE → entregado a SDR PE ${reasignado || "(reasignación falló)"}`)
+    }
+    return NextResponse.json({ ok: true, skipped: "OUTBOUND_TEMPLATE_LEAD_PE no configurada → lead entregado a SDR Inbound PE", contact, reasignado })
+  }
   if (!tplPais) {
     return NextResponse.json({
       ok: true,
-      skipped: `OUTBOUND_TEMPLATE_LEAD${esCO ? "_CO" : ""} no configurada`,
+      skipped: `OUTBOUND_TEMPLATE_LEAD${esCO ? "_CO" : esMX ? "_MX" : ""} no configurada`,
     })
   }
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -418,7 +452,8 @@ export async function POST(req: Request): Promise<Response> {
   // distinguible por prefijo.)
   const esFijo =
     (contact.startsWith("56") && !contact.startsWith("569")) ||
-    (contact.startsWith("57") && !contact.startsWith("573"))
+    (contact.startsWith("57") && !contact.startsWith("573")) ||
+    (contact.startsWith("51") && !contact.startsWith("519"))
   if (esFijo) {
     let reasignado: string | undefined
     if (zohoLeadId) {

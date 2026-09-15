@@ -51,8 +51,25 @@ export type ResultadoTraspaso = {
  * la gestión post-venta). Best-effort: cualquier falla deja todo como estaba.
  */
 const OWNER_VENTA_AUTONOMA_DEFAULT = "3525045000583802005" // Aleydis Araque
+// PERÚ (Lalo 15-sep): la gestora comercial de la venta autónoma es Cecilia
+// Valverde (confirmado por Diego Bendezú). kv `owner_venta_autonoma_pe` /
+// env VICKY_OWNER_VENTA_AUTONOMA_PE, mismo patrón que Chile.
+const OWNER_VENTA_AUTONOMA_DEFAULT_PE = "3525045000521799149" // Cecilia Valverde
 
-async function ownerVentaAutonoma(): Promise<string> {
+type PaisVentaAutonoma = "cl" | "pe"
+
+function paisVentaAutonoma(contact: string): PaisVentaAutonoma | null {
+  const c = String(contact || "").replace(/\D/g, "")
+  if (c.startsWith("56") && c.length >= 11) return "cl"
+  if (c.startsWith("51") && c.length === 11) return "pe"
+  return null
+}
+
+async function ownerVentaAutonoma(pais: PaisVentaAutonoma = "cl"): Promise<string> {
+  if (pais === "pe") {
+    const kv = (await getKvValue("owner_venta_autonoma_pe").catch(() => null)) || ""
+    return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA_PE || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT_PE
+  }
   const kv = (await getKvValue("owner_venta_autonoma").catch(() => null)) || ""
   return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT
 }
@@ -66,12 +83,12 @@ async function datosOwnerAutonoma(
   ownerId: string,
   H: Record<string, string>,
   api: string,
+  pais: PaisVentaAutonoma = "cl",
 ): Promise<EjecutivoAutonoma> {
-  const fallback: EjecutivoAutonoma = {
-    nombre: "Aleydis Araque",
-    email: "aaraque@geovictoria.com",
-    telefono: "+56 9 8291 6868",
-  }
+  const fallback: EjecutivoAutonoma =
+    pais === "pe"
+      ? { nombre: "Cecilia Valverde", email: "cvalverde@geovictoria.com", telefono: "+51 982 446 284" }
+      : { nombre: "Aleydis Araque", email: "aaraque@geovictoria.com", telefono: "+56 9 8291 6868" }
   try {
     const r = await fetch(`${api}/crm/v3/users/${ownerId}`, { headers: H, cache: "no-store" })
     if (!r.ok) return fallback
@@ -128,10 +145,12 @@ async function asignarVentaAutonoma(
   quoteId: string,
 ): Promise<{ autonoma: boolean; ejecutivo?: EjecutivoAutonoma }> {
   try {
-    const owner = await ownerVentaAutonoma()
+    // CHILE (Lalo 31-jul) y PERÚ (Lalo 15-sep, gestora Cecilia Valverde);
+    // CO y MX siguen con sus reglas antiguas (dueños fijos).
+    const paisVenta = paisVentaAutonoma(contact)
+    if (!paisVenta) return { autonoma: false }
+    const owner = await ownerVentaAutonoma(paisVenta)
     if (!owner) return { autonoma: false }
-    // SOLO CHILE (Lalo 31-jul): CO y MX siguen con sus reglas antiguas.
-    if (!contact.startsWith("56")) return { autonoma: false }
     // ¿Intervino un humano? Antes un traspaso PTV activo bastaba para dejarle
     // la venta al vendedor. REGLA NUEVA (Lalo 24-ago, caso Javiera/Tamara:
     // tómbola 11:06, pagos 11:26 y 11:55, cero gestión de la vendedora): el
@@ -256,7 +275,7 @@ async function asignarVentaAutonoma(
         body: JSON.stringify({ data: [{ id: String(dealId), Owner: { id: owner } }], trigger: ["blueprint"], ...skip }),
       }).catch(() => {})
     }
-    const ejecutivo = await datosOwnerAutonoma(owner, H, api)
+    const ejecutivo = await datosOwnerAutonoma(owner, H, api, paisVenta)
     // Traspaso revertido por inactividad: la fila vic_ptv pasa a nombre del
     // dueño autónomo — el chequeo 9h y cualquier flujo posterior hablan de
     // quien de verdad quedó a cargo.
