@@ -31,6 +31,7 @@ import {
   normalizarMensajeEntrante,
 } from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
+import { esContactoCL, esContactoMeta, capturarCelularCL, guardarTelefonoMeta, telefonoAliasDe, canalMetaDe } from "@/lib/origen-canal"
 import { runAgentLoop, type ConversationMessage } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool, curarPlaceholdersDeLink } from "@/lib/links-de-tools"
 import { partirEnBurbujas } from "@/lib/burbujas"
@@ -451,7 +452,7 @@ async function processOneTurn(
     // Umbral de venta autónoma (Lalo 08-ago): el prompt CL recibe el umbral
     // de PRECIOS de esta conversación (inbound 20 / outbound 10). En modo
     // clásico (VICKY_UMBRAL_CLASICO=1) el bloque es vacío y nada cambia.
-    const umbralInfo = contact.replace(/\D/g, "").startsWith("56")
+    const umbralInfo = esContactoCL(contact)
       ? await umbralPrecios(contact).catch(() => null)
       : null
     const contextoUmbral = umbralInfo
@@ -671,7 +672,7 @@ async function processOneTurn(
     const result = await runAgentLoop({
       systemPrompt: onboarding
         ? onboarding.systemPrompt + directivaAdmin
-        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin,
+        : contextoCotizacion + getSystemPromptV3(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + (await directivaCanalMeta(contact)),
       history,
       userMessage: message,
       apiKey,
@@ -692,7 +693,7 @@ async function processOneTurn(
       void import("@/lib/casuistica-runtime")
         .then((m) => m.aplicarCasuisticaNoProspecto(contact, cas, "webhook"))
         .catch(() => undefined)
-    } else if (!enOnboarding && contact.startsWith("56")) {
+    } else if (!enOnboarding && esContactoCL(contact)) {
       void import("@/lib/hito-por-chat")
         .then((m) => m.hitoIntencionDesdeChat(contact))
         .catch(() => undefined)
@@ -1960,6 +1961,13 @@ async function processOneTurn(
     await appendTurnV3(contact, message, reply.replace(/\n\s*\[?-{3,}\]?\s*(?:\n|$)/g, "\n\n")).catch((err) => {
       console.error("[v3-bg] Error persistiendo turno:", err)
     })
+    // TELÉFONO DECLARADO POR UN CONTACTO DE META (Lalo 15-sep: "que se
+    // declare, se valide y se guarde en Phone"): determinista, sin tool —
+    // celular chileno válido en el mensaje del cliente → alias kv + Phone del
+    // lead (si ya existe). El PSID sigue siendo la identidad del chat.
+    if (esContactoMeta(contact)) {
+      void capturarTelefonoDeclarado(contact, message).catch(() => undefined)
+    }
 
     // 4. Enviar reply final vía push (solo si hay reply real)
     if (reply) {
@@ -2773,6 +2781,52 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({
       reply: GENERIC_ERROR_MSG,
     })
+  }
+}
+
+/**
+ * DIRECTIVA DE CANAL para contactos de Messenger/Instagram (15-sep). Misma
+ * Vicky, mismas tools: lo único distinto es que acá NO hay número de teléfono
+ * — se pide y se valida antes de la formal (la tool se niega sin él) — y que
+ * fuera de la ventana de 24 h Meta no deja escribir (nada de "te escribo
+ * mañana": todo lo proactivo posterior sale por WhatsApp).
+ */
+async function directivaCanalMeta(contact: string): Promise<string> {
+  if (!esContactoMeta(contact)) return ""
+  const canal = canalMetaDe(contact) === "instagram" ? "INSTAGRAM (mensaje directo)" : "FACEBOOK MESSENGER"
+  const alias = await telefonoAliasDe(contact).catch(() => "")
+  return `
+
+CANAL DE ESTA CONVERSACIÓN: ${canal} de la página de GeoVictoria Chile — NO es WhatsApp.
+- Vendes exactamente igual que por WhatsApp (mismas herramientas, mismos precios, mismas reglas).
+- ${alias ? `El cliente ya declaró su WhatsApp: +${alias}. Úsalo como su teléfono en toda herramienta.` : "NO TIENES SU NÚMERO DE TELÉFONO. Antes de emitir la cotización formal pídele su WhatsApp (celular chileno +56 9…): explícale que por WhatsApp le llega la cotización formal, el link de pago y el acompañamiento de la activación. Sin ese número la cotización formal no se puede emitir; no lo inventes ni uses otro."}
+- Respuestas cortas (se leen en el celular): máximo 4 oraciones por mensaje, sin negritas ni asteriscos.
+- Por este canal solo puedes escribir dentro de las 24 horas siguientes al último mensaje del cliente; no prometas escribirle tú "mañana" por aquí.`
+}
+
+/** Celular chileno declarado por un contacto Meta → alias kv + Phone del lead. */
+async function capturarTelefonoDeclarado(contact: string, mensaje: string): Promise<void> {
+  const fono = capturarCelularCL(mensaje)
+  if (!fono) return
+  const previo = await telefonoAliasDe(contact).catch(() => "")
+  if (previo === fono) return
+  await guardarTelefonoMeta(contact, fono)
+  console.log(`[v3] contacto Meta ${contact}: WhatsApp declarado +${fono}`)
+  // Phone del lead de Vicky (si ya nació): best-effort, jamás toca la conversación.
+  try {
+    const leadId = ((await getKvValue(`zoho_lead_${contact}`).catch(() => null)) || "").trim()
+    if (leadId && /^\d{15,}$/.test(leadId)) {
+      const { getZohoAccessToken } = await import("@/lib/zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      await fetch(`${api}/crm/v3/Leads/${leadId}`, {
+        method: "PUT",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ data: [{ id: leadId, Phone: `+${fono}` }], trigger: ["blueprint"] }),
+      })
+    }
+  } catch (e) {
+    console.warn("[v3] Phone del lead desde Meta:", e instanceof Error ? e.message : e)
   }
 }
 

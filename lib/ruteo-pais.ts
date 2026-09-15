@@ -49,6 +49,8 @@ export function paisDeContacto(contactRaw: string): PaisContacto {
   // el marcador que les puso el webhook de su línea.
   const marca = /^\s*(CL|CO|MX|PE)\./i.exec(String(contactRaw || ""))?.[1]?.toLowerCase()
   if (marca === "cl" || marca === "co" || marca === "mx" || marca === "pe") return marca
+  // Messenger/Instagram (15-sep): la página es GeoVictoria Chile.
+  if (/^\s*(FB|IG)\./i.test(String(contactRaw || ""))) return "cl"
   const c = String(contactRaw || "").replace(/\D/g, "")
   if (!c) return "desconocido"
   if (c.startsWith("521") && c.length >= 13) return "mx"

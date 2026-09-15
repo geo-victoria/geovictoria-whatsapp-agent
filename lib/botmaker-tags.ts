@@ -29,6 +29,7 @@ export function paisDeContacto(contact: string): "cl" | "co" | "mx" | "pe" | nul
   // Marcador de línea de los contactos LID ("CO.1594...", 25-ago GRANIPACK).
   const marca = /^\s*(CL|CO|MX|PE)\./i.exec(String(contact || ""))?.[1]?.toLowerCase()
   if (marca === "cl" || marca === "co" || marca === "mx" || marca === "pe") return marca
+  if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return "cl" // Messenger/Instagram = página CL
   const c = (contact || "").replace(/\D/g, "")
   if (c.startsWith("56")) return "cl"
   if (c.startsWith("57")) return "co"

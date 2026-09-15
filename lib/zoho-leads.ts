@@ -10,7 +10,7 @@
  *   - agendar_reunion (con ownerEmail = organizerEmail Cal.com → directo)
  */
 
-import { leadSourceParaContacto } from "./origen-canal"
+import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe, psidDe, canalMetaDe } from "./origen-canal"
 import { getZohoAccessToken } from "./zoho-token"
 
 function getEnv(name: string): string {
@@ -1340,7 +1340,17 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     if (email) record.Email = email
     // Teléfono: si el caller no lo pasó, cae al contacto de WhatsApp (siempre lo
     // hay en Vicky). Regla del equipo (jul-2026): ningún lead de Vicky sin fono.
-    const phone = (input.telefono || "").trim() || (input.contactoWA || "").trim()
+    const contactoRaw = (input.telefono || "").trim() || (input.contactoWA || "").trim()
+    // MESSENGER/INSTAGRAM (Lalo 15-sep): el PSID NO es un teléfono — va a
+    // `Social_ID`; Phone solo lleva el WhatsApp que el cliente declaró y
+    // validamos (alias kv). Canal = Messenger/Instagram (campo de texto).
+    const esMeta = esContactoMeta(contactoRaw)
+    const aliasMeta = esMeta ? await telefonoAliasDe(contactoRaw).catch(() => "") : ""
+    const phone = esMeta ? (aliasMeta ? `+${aliasMeta}` : "") : contactoRaw
+    if (esMeta) {
+      record.Social_ID = psidDe(contactoRaw)
+      record.Canal = canalMetaDe(contactoRaw) === "instagram" ? "Instagram" : "Messenger"
+    }
     if (phone) record.Phone = phone.startsWith("+") ? phone : `+${phone.replace(/\D/g, "")}`
     // País/Territorio: deducidos del fono si el caller no los dio. Regla del
     // equipo (jul-2026): los leads deben llegar con territorio para que las
@@ -1356,6 +1366,7 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     const pais =
       sanitize(input.pais, 100) ||
       paisDeMarca ||
+      (esMeta ? "Chile" : "") ||
       (digits.startsWith("56") ? "Chile" : digits.startsWith("57") ? "Colombia" : "")
     if (pais) record.Country = pais
     if (digits.startsWith("56") || pais.toLowerCase() === "chile") record.Territorio = "Chile"

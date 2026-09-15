@@ -1,3 +1,4 @@
+import { esContactoCL } from "./origen-canal"
 /**
  * Sincronización determinista Zoho CRM ← hitos de la conversación de Vicky
  * (Lalo, 30-jul-2026). Regla de marketing: NUNCA crear deals directos — todo
@@ -346,6 +347,7 @@ function territorioDeContacto(contact: string): "Chile" | "Colombia" | "México"
   if (marca === "CO") return "Colombia"
   if (marca === "MX") return "México"
   if (marca === "PE") return "Perú"
+  if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return "Chile" // Messenger/Instagram = página CL
   const c = (contact || "").replace(/\D/g, "")
   if (c.startsWith("56")) return "Chile"
   if (c.startsWith("57")) return "Colombia"
@@ -1834,7 +1836,7 @@ export async function sincronizarHitoCrm(
     // los mensajes recientes del CLIENTE (mismo extractor del enriquecedor).
     // Solo PRE-entrega: el RUT que aparece DESPUÉS de entregado jamás
     // convierte ni re-sortea (decisión Lalo 01-sep — eso es del ejecutivo).
-    if (!datos.rut && clean.startsWith("56")) {
+    if (!datos.rut && esContactoCL(contact)) {
   // CLIENTE EXISTENTE (Lalo 08-sep): un número de una cuenta que ya es
   // cliente NO genera lead ni deal desde Vicky (era la fuente de leads "que
   // son usuarios"). Las ampliaciones las gestiona el humano en la cuenta.
@@ -1883,7 +1885,7 @@ export async function sincronizarHitoCrm(
     // Flujo 21+ (Lalo 13-ago): con RUT y sin nombre de empresa, la razón
     // social se resuelve del padrón SII — el lead/deal nace con nombre real
     // en vez de "Por identificar". Best-effort: sin ficha, sigue igual.
-    if (datos.rut && !datos.empresa && clean.startsWith("56")) {
+    if (datos.rut && !datos.empresa && esContactoCL(contact)) {
       try {
         const { fichaEmpresaSii } = await import("./empresas-sii")
         const ficha = await fichaEmpresaSii(datos.rut.trim().toUpperCase().replace(/\./g, ""))

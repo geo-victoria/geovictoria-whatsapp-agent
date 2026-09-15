@@ -59,6 +59,7 @@ const OWNER_VENTA_AUTONOMA_DEFAULT_PE = "3525045000521799149" // Cecilia Valverd
 type PaisVentaAutonoma = "cl" | "pe"
 
 function paisVentaAutonoma(contact: string): PaisVentaAutonoma | null {
+  if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return "cl" // Messenger/Instagram = CL
   const c = String(contact || "").replace(/\D/g, "")
   if (c.startsWith("56") && c.length >= 11) return "cl"
   if (c.startsWith("51") && c.length === 11) return "pe"

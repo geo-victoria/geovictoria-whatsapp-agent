@@ -20,7 +20,7 @@
 /** Plantilla aprobada por Meta para entregar la cotización con botón. */
 const PLANTILLA_ENTREGA = (process.env.VICKY_PLANTILLA_ENTREGA || "vicky_cotizacion_pago_mkt").trim()
 
-import { leadSourceParaContacto } from "@/lib/origen-canal"
+import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe } from "@/lib/origen-canal"
 import {
   ARRIENDO_RECARGO_REGIONES_UF,
   getModuloDisponibleParaVicky,
@@ -736,7 +736,7 @@ export async function generarLinkCotizadora(
   args: LinkCotizadoraInput,
 ): Promise<LinkCotizadoraResultado> {
   const {
-    empresa, contacto, contactoEmail, contactoTelefono,
+    empresa, contacto, contactoEmail, contactoTelefono: contactoTelefonoIn,
     rutEmpresa, direccionEmpresa, comunaEmpresa, regionEmpresa,
     userCount, sectorEmpresa, modulos = [], hardware = [],
     puntosInstalacion = [],
@@ -745,6 +745,22 @@ export async function generarLinkCotizadora(
     _ownerOverrideId,
   } = args
 
+  let contactoTelefono = contactoTelefonoIn
+  // MESSENGER/INSTAGRAM (Lalo 15-sep): la formal, el pago y el onboarding
+  // viven bajo el WhatsApp del cliente; con el PSID como "teléfono" el lead
+  // nacía con +8028841317181024 (prueba de David). Sin número declarado y
+  // validado, la tool se niega y Vicky lo pide.
+  if (esContactoMeta(String(contactoTelefono || ""))) {
+    const alias = await telefonoAliasDe(String(contactoTelefono || "")).catch(() => "")
+    if (!alias) {
+      return {
+        ok: false,
+        error:
+          "Este cliente escribe por Messenger/Instagram y todavía no dio su número de WhatsApp. Pídele su WhatsApp (celular chileno, +56 9…) ANTES de emitir: la cotización formal, el pago y la activación de la cuenta le llegan también por ahí. No inventes ni reutilices otro número.",
+      }
+    }
+    contactoTelefono = `+${alias}`
+  }
   if (!contacto?.trim() || !rutEmpresa?.trim()) {
     return { ok: false, error: "Faltan campos obligatorios: contacto, rutEmpresa." }
   }

@@ -37,6 +37,7 @@ export type OrigenConversacion = "inbound" | "outbound"
 
 /** Países donde rige el umbral (todos los de Vicky, por prefijo discable). */
 export function paisConUmbral(contact: string): boolean {
+  if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return true // Messenger/Instagram = CL
   return /^(56|57|52|51)\d{8,12}$/.test((contact || "").replace(/\D/g, ""))
 }
 
@@ -46,7 +47,7 @@ export type DerivacionPais = { tool: string; motivo: string; docId: string; agen
 
 export function derivacionDePais(contact: string): DerivacionPais {
   const d = (contact || "").replace(/\D/g, "")
-  if (d.startsWith("56")) {
+  if (d.startsWith("56") || /^\s*(FB|IG)\./i.test(String(contact || ""))) {
     return {
       tool: "derivar_a_soporte",
       motivo: "fuera_de_rango_trabajadores",

@@ -3,12 +3,19 @@
  * orden de Lalo: "usemos la API de Meta Graph para que Vicky responda los
  * chats de la página de GeoVictoria de Facebook (Messenger e Instagram)").
  *
- * PRIMER CORTE, deliberadamente acotado: Vicky conversa, califica y lleva al
- * prospecto a WhatsApp (o le deja el link para escribirle). NO cotiza formal
- * ni cobra por acá: las tools de venta están amarradas al número de WhatsApp
- * (Zoho, cotizador, pago, plantillas), y un PSID de Messenger no es un
- * teléfono. Cuando el prospecto entrega su WhatsApp, la conversación sigue
- * por la línea de Vicky con toda la maquinaria de siempre.
+ * UNA SOLA VICKY (15-sep, orden de Lalo: "yo usaría la misma vicky para este
+ * canal, solo que reemplazaría el id que en whatsapp es la línea telefónica
+ * por un id que designe meta… ideal dejar funcionando la vicky que ya opera
+ * en whatsapp, incluyendo los toques, los relojes, tools, conexiones,
+ * automatizaciones, todo"). Este receptor NO tiene cerebro propio: cada
+ * evento de Meta se traduce al contrato del webhook chileno
+ * (`POST /api/vic-botmaker-v3` con contact `FB.<psid>`/`IG.<igsid>`, message,
+ * imageUrl/fileUrl) y se ENTREGA a esa misma función. Ahí
+ * corren los cinturones, las tools, los hitos de Zoho y el loop; la respuesta
+ * sale por `sendBotmakerMessage`, que reconoce el prefijo FB./IG. y la manda
+ * por la Graph API (lib/meta-graph.ts) en vez de Botmaker. El teléfono lo
+ * pide Vicky en la conversación (directivaCanalMeta) y queda como alias del
+ * contacto (kv `telefono_meta_<FB.x>`) + `Phone`/`Social_ID` del lead.
  *
  * Contrato con Meta:
  *   GET  ?hub.mode=subscribe&hub.verify_token=…&hub.challenge=…  → devuelve el challenge
@@ -34,11 +41,10 @@
 
 import { NextResponse, after } from "next/server"
 import { createHmac, timingSafeEqual } from "node:crypto"
-import { runAgentLoop } from "@/lib/agent-loop"
-import { getSystemPromptV3 } from "@/app/api/vic-sales-agent-v3/prompt"
-import { fetchHistoryV3, appendTurnV3, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
-import { sanitizarVoseo, quitarSignosApertura } from "@/lib/voseo-v3"
+import { POST as webhookVickyCL } from "@/app/api/vic-botmaker-v3/route"
+import { getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
+import { typingMeta } from "@/lib/meta-graph"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -48,7 +54,6 @@ export const maxDuration = 120
 // y sin pasar por el panel de Vercel (15-sep, Lalo pegó el App Secret por
 // chat y no hay acceso a las envs desde la sesión). Se leen por request.
 const GRAPH = `https://graph.facebook.com/${(process.env.META_GRAPH_VERSION || "v21.0").trim()}`
-const LINEA_VICKY_CL = "56967308227"
 
 type Creds = { verify: string; token: string; secret: string }
 async function credenciales(): Promise<Creds> {
@@ -60,19 +65,6 @@ async function credenciales(): Promise<Creds> {
     secret: env("META_APP_SECRET") || (await kv("meta_app_secret")),
   }
 }
-const MAX_TEXTO = 1900
-
-const DIRECTIVA_CANAL = (canal: "messenger" | "instagram") => `
-
-CANAL: ${canal === "instagram" ? "INSTAGRAM (mensaje directo)" : "FACEBOOK MESSENGER"} de la página de GeoVictoria — NO es WhatsApp.
-Reglas de este canal (mandan sobre cualquier otra):
-- Conversa y califica igual que en WhatsApp (nombre, empresa, cuántas personas marcarían, cómo marcan). Puedes dar el precio referencial de palabra si ya tienes dotación y método.
-- NO tienes herramientas acá: no puedes emitir cotización formal, ni mandar PDF, ni link de pago, ni agendar, ni derivar. NUNCA digas que hiciste algo de eso.
-- Para la cotización formal y el pago, lleva al prospecto a WhatsApp: pídele su número de WhatsApp para escribirle, o entrégale el link https://wa.me/${LINEA_VICKY_CL} para que te escriba él. Explica que por WhatsApp le llega la cotización formal en minutos y puede pagar en línea.
-- Respuestas cortas (este canal se lee en el celular): máximo 3 oraciones, sin negritas ni asteriscos, sin emojis de más.
-- Si quien escribe ya es cliente y necesita soporte, dale la Mesa de Ayuda: WhatsApp +56 9 4401 3873 · 600 914 3819 · soporte@geovictoria.com.
-`
-
 function firmaValida(raw: string, header: string | null, secret: string): boolean {
   if (!secret) return false
   const h = (header || "").trim()
@@ -83,19 +75,8 @@ function firmaValida(raw: string, header: string | null, secret: string): boolea
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-async function enviarMeta(psid: string, texto: string, token: string): Promise<{ ok: boolean; detalle?: string }> {
-  if (!token) return { ok: false, detalle: "sin META_PAGE_ACCESS_TOKEN" }
-  const r = await fetch(`${GRAPH}/me/messages?access_token=${encodeURIComponent(token)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: texto.slice(0, MAX_TEXTO) } }),
-    cache: "no-store",
-  }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }) as unknown as Response)
-  if (!r.ok) return { ok: false, detalle: `graph ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}` }
-  return { ok: true }
-}
-
-type Evento = { canal: "messenger" | "instagram"; psid: string; texto: string; mid: string; adjuntos: number }
+type Adjunto = { tipo: string; url: string }
+type Evento = { canal: "messenger" | "instagram"; psid: string; texto: string; mid: string; adjuntos: Adjunto[] }
 
 function extraerEventos(body: unknown): Evento[] {
   const out: Evento[] = []
@@ -103,29 +84,54 @@ function extraerEventos(body: unknown): Evento[] {
   const canal: "messenger" | "instagram" = b?.object === "instagram" ? "instagram" : "messenger"
   for (const e of b?.entry || []) {
     for (const m of e.messaging || []) {
-      const msg = m.message as { mid?: string; text?: string; is_echo?: boolean; attachments?: unknown[] } | undefined
+      const msg = m.message as { mid?: string; text?: string; is_echo?: boolean; attachments?: Array<{ type?: string; payload?: { url?: string } }> } | undefined
       const sender = (m.sender as { id?: string } | undefined)?.id
       if (!msg || msg.is_echo || !sender) continue
-      out.push({ canal, psid: String(sender), texto: String(msg.text || "").trim(), mid: String(msg.mid || ""), adjuntos: Array.isArray(msg.attachments) ? msg.attachments.length : 0 })
+      const adjuntos: Adjunto[] = (Array.isArray(msg.attachments) ? msg.attachments : [])
+        .map((a) => ({ tipo: String(a?.type || ""), url: String(a?.payload?.url || "").trim() }))
+        .filter((a) => a.url)
+      out.push({ canal, psid: String(sender), texto: String(msg.text || "").trim(), mid: String(msg.mid || ""), adjuntos })
     }
   }
   return out
 }
 
-async function atender(ev: Evento, token: string): Promise<void> {
+/**
+ * Entrega el evento a la MISMA Vicky de WhatsApp Chile. El contrato del
+ * webhook (BotmakerRequest) se arma tal cual lo mandaría la acción de código
+ * de Botmaker: `contact` = FB.<psid>/IG.<igsid>, `message`, y el adjunto como
+ * imageUrl (foto) o fileUrl (PDF/otro) — la URL del CDN de Meta es pública
+ * por un rato, suficiente para que la visión la lea. Audio/video de Meta no
+ * se transcriben (no viene como URL de audio compatible): se pasa el
+ * placeholder que el webhook ya entiende.
+ */
+async function atender(ev: Evento): Promise<void> {
   const contact = `${ev.canal === "instagram" ? "IG" : "FB"}.${ev.psid}`
-  const texto = ev.texto || (ev.adjuntos ? "(el cliente envió un adjunto — por este canal no puedo verlo; pídele que lo escriba en texto)" : "")
-  if (!texto) return
-  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
-  if (!apiKey) return
-  const history = await fetchHistoryV3(contact).catch(() => [])
-  const systemPrompt = getSystemPromptV3(contact) + DIRECTIVA_CANAL(ev.canal)
-  const result = await runAgentLoop({ systemPrompt, history, userMessage: texto, apiKey, contact })
-  const reply = quitarSignosApertura(sanitizarVoseo((result.reply || "").trim())).replace(/\*/g, "")
-  if (!reply) return
-  const env = await enviarMeta(ev.psid, reply, token)
-  await appendTurnV3(contact, texto, env.ok ? reply : `${reply}\n[NO ENVIADO: ${env.detalle}]`, "cl").catch(() => {})
-  if (!env.ok) await avisarEquipoInterno(`⚠️ Vicky ${ev.canal}: no pude responder a ${contact} — ${env.detalle}`).catch(() => false)
+  const imagen = ev.adjuntos.find((a) => a.tipo === "image")
+  const archivo = ev.adjuntos.find((a) => a.tipo === "file")
+  const audio = ev.adjuntos.find((a) => a.tipo === "audio" || a.tipo === "video")
+  let message = ev.texto
+  if (!message) {
+    if (imagen) message = "__image__"
+    else if (archivo) message = "__file__"
+    else if (audio) message = "__audio__"
+  }
+  if (!message && !imagen && !archivo) return
+  const body: Record<string, unknown> = { contact, message }
+  if (imagen) body.imageUrl = imagen.url
+  else if (archivo) body.fileUrl = archivo.url
+  typingMeta(contact, true).catch(() => {})
+  const req = new Request("http://vicky.local/api/vic-botmaker-v3", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-secret": (process.env.BOTMAKER_SECRET || "").trim() },
+    body: JSON.stringify(body),
+  })
+  const res = await webhookVickyCL(req)
+  if (!res.ok) {
+    const detalle = (await res.text().catch(() => "")).slice(0, 200)
+    console.error(`[vic-meta] webhook CL respondió ${res.status} para ${contact}: ${detalle}`)
+    await avisarEquipoInterno(`⚠️ Vicky ${ev.canal}: la Vicky de WhatsApp respondió ${res.status} para ${contact} — ${detalle}`).catch(() => false)
+  }
 }
 
 /**
@@ -203,7 +209,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: true, recibidos: eventos.length, apagado: true })
   }
   after(async () => {
-    for (const ev of eventos) await atender(ev, c.token).catch((e) => console.error("[vic-meta]", e instanceof Error ? e.message : e))
+    for (const ev of eventos) await atender(ev).catch((e) => console.error("[vic-meta]", e instanceof Error ? e.message : e))
   })
   return NextResponse.json({ ok: true, recibidos: eventos.length })
 }

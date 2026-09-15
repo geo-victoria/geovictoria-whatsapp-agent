@@ -18,6 +18,7 @@
  *   - Cada iteración queda registrada en el log de la conversación.
  */
 
+import { esContactoCL } from "./origen-canal"
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
 import {
@@ -407,9 +408,18 @@ export async function runAgentLoop(params: {
           contact &&
           !String(toolInput.contactoTelefono || "").trim()
         ) {
-          toolInput.contactoTelefono = `+${String(contact).replace(/\D/g, "")}`
+          // Contacto de Meta (15-sep): el "teléfono del canal" es el WhatsApp
+          // que el cliente DECLARÓ (alias kv); sin él va el contacto crudo
+          // (FB.<psid>) y la tool se niega pidiéndolo — jamás el PSID como fono.
+          const { esContactoMeta, telefonoAliasDe } = await import("./origen-canal")
+          if (esContactoMeta(contact)) {
+            const alias = await telefonoAliasDe(contact).catch(() => "")
+            toolInput.contactoTelefono = alias ? `+${alias}` : String(contact)
+          } else {
+            toolInput.contactoTelefono = `+${String(contact).replace(/\D/g, "")}`
+          }
           console.log(
-            `[agent-loop] Capa 3b2: contactoTelefono inyectado desde el canal (+${contact}) a ${toolName}.`,
+            `[agent-loop] Capa 3b2: contactoTelefono inyectado desde el canal (${toolInput.contactoTelefono}) a ${toolName}.`,
           )
         }
 
@@ -882,7 +892,7 @@ export async function runAgentLoop(params: {
         // dueños fijos de país). Best-effort: jamás toca la conversación.
         if (
           contact &&
-          contact.replace(/\D/g, "").startsWith("56") &&
+          esContactoCL(contact) &&
           toolName === "derivar_a_soporte" &&
           String(toolInput.motivo || "") === "fuera_de_rango_trabajadores"
         ) {
@@ -946,7 +956,7 @@ export async function runAgentLoop(params: {
           // La promesa se sigue registrando como respaldo del vigía, pero YA
           // con el dueño real que devolvió la tómbola.
           let ejecTraspaso: { nombre: string; email: string; telefono: string } | null = null
-          if (contact && prometeContacto && contact.replace(/\D/g, "").startsWith("56")) {
+          if (contact && prometeContacto && esContactoCL(contact)) {
             try {
               const { traspasarAhora } = await import("@/app/api/vic-ptv-cron/route")
               const r = await Promise.race([

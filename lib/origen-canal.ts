@@ -27,6 +27,34 @@ export function esContactoMeta(contact: string): boolean {
   return /^(FB|IG)\./i.test(String(contact || "").trim())
 }
 
+/** PSID/IGSID crudo de un contacto Meta ("FB.123" → "123"), o "" si no lo es. PURO. */
+export function psidDe(contact: string): string {
+  const m = /^(?:FB|IG)\.(\d{5,})$/i.exec(String(contact || "").trim())
+  return m ? m[1] : ""
+}
+
+/** ¿El contacto pertenece a la operación CHILENA? Teléfono +56 o contacto de
+ * Meta (la página de Messenger/Instagram es GeoVictoria Chile). PURO.
+ * Reemplaza a los `startsWith("56")` donde la pregunta real es "¿es CL?". */
+export function esContactoCL(contact: string): boolean {
+  const c = String(contact || "").trim()
+  if (esContactoMeta(c)) return true
+  const d = c.replace(/\D/g, "")
+  return d.startsWith("56") && d.length >= 11
+}
+
+/** Celular chileno escrito por el cliente en un texto ("+56 9 1234 5678",
+ * "912345678", "56912345678"): devuelve "569XXXXXXXX" o "". PURO. */
+export function capturarCelularCL(texto: string): string {
+  const t = String(texto || "")
+  const m = /(?:\+?56\s?)?(?:\(?0?9\)?[\s.-]?)(\d[\s.-]?){8}/.exec(t)
+  if (!m) return ""
+  const d = m[0].replace(/\D/g, "")
+  const nueve = d.length >= 9 ? d.slice(-9) : ""
+  if (!/^9\d{8}$/.test(nueve)) return ""
+  return `56${nueve}`
+}
+
 /** Canal de un contacto Meta. PURO. */
 export function canalMetaDe(contact: string): "messenger" | "instagram" | null {
   const c = String(contact || "").trim()
@@ -56,4 +84,26 @@ export async function leadSourceParaContacto(contact: string): Promise<string | 
   const origen = ((await getKvValue(`origen_canal_${fono}`).catch(() => null)) || "").trim().toLowerCase()
   if (origen === "meta" || origen === "facebook" || origen === "instagram") return leadSourceMeta()
   return null
+}
+
+/**
+ * TELÉFONO DECLARADO POR UN CONTACTO META (Lalo 15-sep: "que se declare, se
+ * valide y se guarde en Phone"). El PSID sigue siendo la identidad del chat;
+ * el WhatsApp que el cliente entrega queda como ALIAS: kv `telefono_meta_<FB.x>`
+ * = 569…, `meta_psid_<569…>` = FB.x y `origen_canal_<569…>` = meta (así lo que
+ * nazca bajo el número conserva la fuente Facebook).
+ */
+export async function telefonoAliasDe(contact: string): Promise<string> {
+  if (!esContactoMeta(contact)) return ""
+  return ((await getKvValue(`telefono_meta_${String(contact).trim()}`).catch(() => null)) || "").trim()
+}
+
+export async function guardarTelefonoMeta(contact: string, fono: string): Promise<void> {
+  const c = String(contact || "").trim()
+  const f = String(fono || "").replace(/\D/g, "")
+  if (!esContactoMeta(c) || !/^569\d{8}$/.test(f)) return
+  const { setKvValue } = await import("./supabase-persistence-v3")
+  await setKvValue(`telefono_meta_${c}`, f)
+  await setKvValue(`meta_psid_${f}`, c)
+  await setKvValue(`origen_canal_${f}`, "meta")
 }

@@ -11,6 +11,7 @@
  * timeout del webhook.
  */
 
+import { esContactoMeta } from "./origen-canal"
 import { channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea } from "./linea-por-pais"
 
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
@@ -212,6 +213,20 @@ export async function sendBotmakerMessage(
   }
 
   const cleanContact = normalizeContactId(contactId)
+  // CONTACTO DE META (Messenger/Instagram, 15-sep): sale por la Graph API,
+  // no por Botmaker. Mismo gate de proactividad; fuera de la ventana de 24 h
+  // Meta rechaza y queda registrado como fallo (no hay plantillas).
+  if (esContactoMeta(cleanContact)) {
+    {
+      const { evaluarGateProactividad } = await import("./gate-proactividad")
+      const gate = await evaluarGateProactividad(cleanContact, { tipo: "texto", transaccional: opts.transaccional })
+      if (!gate.permitir) return false
+    }
+    const { enviarTextoMeta } = await import("./meta-graph")
+    const r = await enviarTextoMeta(cleanContact, text)
+    if (!r.ok) anotarFallo({ c: cleanContact, tipo: "texto", linea: "meta", motivo: "meta_rechazo", detalle: r.detalle })
+    return r.ok
+  }
   // El canal de ORIGEN del contacto (si está registrado) manda sobre el del
   // llamador: se responde por donde el cliente escribió. EXCEPCIÓN (22-jul):
   // los números INTERNOS de aviso (QUOTE_NOTIFY_TO / VICKY_REPORT_PHONE) no
@@ -402,6 +417,14 @@ export async function sendBotmakerMedia(
     return false
   }
   const cleanContact = normalizeContactId(contactId)
+  // Meta (15-sep): Messenger recibe el archivo como adjunto por URL; Instagram
+  // no acepta archivos y recibe la URL en texto (lo decide meta-graph).
+  if (esContactoMeta(cleanContact)) {
+    const { enviarAdjuntoMeta } = await import("./meta-graph")
+    const r = await enviarAdjuntoMeta(cleanContact, url, { caption: opts.caption, mimeType: opts.mimeType })
+    if (!r.ok) anotarFallo({ c: cleanContact, tipo: "media", linea: "meta", motivo: "meta_rechazo", detalle: r.detalle })
+    return r.ok
+  }
   const origen = await canalDeOrigen(cleanContact)
   const canal = (origen || opts.channelId || lineaPorDefecto(cleanContact)).trim()
   if (!BM_TOKEN || !canal) {
@@ -472,6 +495,13 @@ export async function sendBotmakerTemplate(
     return false
   }
   const cleanContact = normalizeContactId(contactId)
+  // Meta NO tiene plantillas (15-sep): fuera de la ventana de 24 h no hay
+  // forma de escribirle; dentro, el llamador debió mandar texto. Se registra
+  // el hueco para que sea visible y se devuelve false sin tocar Botmaker.
+  if (esContactoMeta(cleanContact)) {
+    anotarFallo({ c: cleanContact, tipo: "plantilla", tpl: templateName, linea: "meta", motivo: "meta_sin_plantillas" })
+    return false
+  }
   // El canal de ORIGEN también manda en las PLANTILLAS (fix 11-ago): un
   // contacto que escribió por una línea de otro país recibía los toques por
   // la línea de su prefijo — cruzados y sin entregar. Mismo criterio que
@@ -560,8 +590,14 @@ export async function sendTypingIndicator(
   // Multi-país: canal de la línea (default: Chile).
   channelId?: string,
 ): Promise<void> {
-  if (!BM_TOKEN || !contactId) return
+  if (!contactId) return
   const cleanContact = normalizeContactId(contactId)
+  if (esContactoMeta(cleanContact)) {
+    const { typingMeta } = await import("./meta-graph")
+    await typingMeta(cleanContact, isTyping).catch(() => undefined)
+    return
+  }
+  if (!BM_TOKEN) return
   const canal = (channelId || lineaPorDefecto(cleanContact)).trim()
   if (!canal) return
   try {
