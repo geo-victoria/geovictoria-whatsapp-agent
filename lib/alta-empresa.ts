@@ -120,9 +120,12 @@ export type AltaEmpresaInput = {
    * número de la Conversación? o algo para identificar la conversa" → el
    * parámetro se llama `VickyAppSession`). Va el WhatsApp del cliente, que es
    * el identificador de la conversación en Vicky y con el que se la encuentra
-   * en Botmaker y en el dash. Opcional: si falta, la clave no viaja.
+   * en Botmaker y en el dash. OBLIGATORIO desde el 15-sep: Nicolás dejó el
+   * parámetro requerido en su API ("ese valor siempre lo puedes mandar? para
+   * dejarlo obligatorio" → "para lo que venda Vicky sí"). Sin sesión el
+   * servicio rechazaría el alta, así que acá se exige antes de llamar.
    */
-  sesion?: string
+  sesion: string
   admin: {
     nombre: string
     apellido: string
@@ -157,7 +160,11 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
     console.error(`[alta-empresa] país sin countryCode soportado: "${input.pais}" — alta abortada`)
     return { ok: false, error: `País "${input.pais}" sin countryCode soportado por el servicio de alta` }
   }
-  const sesion = String(input.sesion || "").trim().slice(0, 64)
+  const sesion = String(input.sesion || "").replace(/\D/g, "").slice(0, 64)
+  if (!sesion) {
+    console.error("[alta-empresa] alta sin VickyAppSession — abortada (el servicio la exige)")
+    return { ok: false, error: "Alta sin identificador de conversación (VickyAppSession)" }
+  }
   try {
     const res = await llamar("/api/vicky/company", {
       company: {
@@ -173,10 +180,9 @@ export async function crearEmpresaConAdmin(input: AltaEmpresaInput): Promise<Alt
         lastName: input.admin.apellido,
         workEmail: input.admin.email,
       },
-      // La conversación que originó el alta, para que la plataforma pueda
-      // trazarla (nombre del parámetro dado por Nicolás). Solo si la hay: una
-      // clave con string vacío sería peor que no mandarla.
-      ...(sesion ? { VickyAppSession: sesion } : {}),
+      // La conversación que originó el alta (nombre del parámetro dado por
+      // Nicolás; obligatorio en su API desde el 15-sep). Siempre viaja.
+      VickyAppSession: sesion,
     })
     const texto = await res.text().catch(() => "")
     if (!res.ok) {
