@@ -162,7 +162,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     const mejorDeal = pref && !pref.estado.startsWith("Cierre") ? pref : vivos.sort((a, b) => nivel(b.estado) - nivel(a.estado) || b.creado.localeCompare(a.creado))[0] || pref || deals.sort((a, b) => b.creado.localeCompare(a.creado))[0]
     const leads = todos.filter((r) => r.tipo === "lead")
     const leadVivo = leads.filter((r) => r.estado !== "convertido" && !r.estado.startsWith("No Calificado")).sort((a, b) => b.creado.localeCompare(a.creado))[0]
-    const principal = mejorDeal || leadVivo || leads.sort((a, b) => b.creado.localeCompare(a.creado))[0] || null
+    // El registro que MANDA prefiere al que tiene dueño HUMANO: un deal
+    // gemelo que quedó en el robot no puede tapar al deal vivo del ejecutivo
+    // (Pet Aventura: deal de Vicky + deal de Ana Paula sobre el mismo fono).
+    const humanoPrimero = [...vivos, ...leads.filter((r) => r.estado !== "convertido")]
+      .filter((r) => r.humano)
+      .sort((a, b) => (a.tipo === b.tipo ? nivel(b.estado) - nivel(a.estado) || b.creado.localeCompare(a.creado) : a.tipo === "deal" ? -1 : 1))[0]
+    const principal = humanoPrimero || mejorDeal || leadVivo || leads.sort((a, b) => b.creado.localeCompare(a.creado))[0] || null
     return { principal, todos }
   }
 
@@ -251,8 +257,18 @@ export async function GET(req: Request): Promise<NextResponse> {
     let ev: EvidenciaNotificacion | null = null
     try { const raw = kv.get(`notif_traspaso_${c}`); ev = raw ? (JSON.parse(raw) as EvidenciaNotificacion) : null } catch { ev = null }
     const verNotifKv = veredictoNotificacion(ev, vig.traspasado_at)
+    // La notificación puede vivir en OTRO registro del mismo contacto (el
+    // lead que se entregó por el reloj 24h y después se convirtió en deal):
+    // se miran hasta 3 registros, empezando por el principal.
     let emails: { total: number; notif: Array<{ asunto: string; a: string; cuando: string }> } = { total: 0, notif: [] }
-    if (conEmails && principal) emails = await emailsDe(principal.tipo === "deal" ? "Deals" : "Leads", principal.id, tsTr)
+    if (conEmails && principal) {
+      const aMirar = [principal, ...todos.filter((r) => r.id !== principal.id)].slice(0, 3)
+      for (const r of aMirar) {
+        const e = await emailsDe(r.tipo === "deal" ? "Deals" : "Leads", r.id, tsTr)
+        emails = { total: emails.total + e.total, notif: [...emails.notif, ...e.notif] }
+        if (e.notif.length) break
+      }
+    }
     const notifEmail = emails.notif.length > 0
     const sesAsig = sesionDe(vig.vendedor_email || "")
     const atendidoPor = new Set<string>()
