@@ -144,3 +144,95 @@ export async function typingMeta(contact: string, on: boolean): Promise<void> {
   if (!token) return
   await postMessages({ recipient: { id: psid }, sender_action: on ? "typing_on" : "typing_off" }, token).catch(() => undefined)
 }
+
+// ── PERFIL DE LA PERSONA (15-sep, pedido de Lalo: "me interesa first_name,
+// last_name, profile_pic, y con permisos extra locale, timezone y gender") ──
+// User Profile API: GET /<psid>?fields=… con el token de la Página. Los tres
+// básicos exigen pages_messaging con la app APROBADA (en modo desarrollo el
+// endpoint responde error 100 subcode 33, medido 15-sep); locale/timezone/
+// gender exigen además pages_user_locale / pages_user_timezone /
+// pages_user_gender (App Review). Por eso se pide en cascada: completo →
+// básico → nombre del hilo (`/me/conversations` participants, que SÍ responde
+// con el token del panel). Todo fail-open y cacheado 7 d en vic_kv
+// `meta_perfil_<contact>` — nunca toca la conversación.
+export type PerfilMeta = {
+  firstName: string
+  lastName: string
+  profilePic: string
+  locale: string
+  timezone: number | null
+  gender: string
+  fuente: "perfil_completo" | "perfil_basico" | "hilo" | "ninguna"
+  at: string
+}
+
+const PERFIL_TTL_MS = 7 * 24 * 3600e3
+
+async function graphGet(path: string, token: string): Promise<Record<string, unknown> | null> {
+  const r = await fetch(`${GRAPH}${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(6000),
+  }).catch(() => null)
+  if (!r) return null
+  const j = (await r.json().catch(() => null)) as Record<string, unknown> | null
+  if (!j || (j as { error?: unknown }).error) return null
+  return j
+}
+
+function partirNombre(full: string): { firstName: string; lastName: string } {
+  const partes = String(full || "").trim().split(/\s+/).filter(Boolean)
+  if (!partes.length) return { firstName: "", lastName: "" }
+  if (partes.length === 1) return { firstName: partes[0], lastName: "" }
+  return { firstName: partes.slice(0, -1).join(" "), lastName: partes[partes.length - 1] }
+}
+
+/** Perfil desde Graph (sin caché). Devuelve fuente "ninguna" si nada respondió. */
+export async function perfilMetaDesdeGraph(contact: string): Promise<PerfilMeta> {
+  const vacio: PerfilMeta = { firstName: "", lastName: "", profilePic: "", locale: "", timezone: null, gender: "", fuente: "ninguna", at: new Date().toISOString() }
+  const psid = psidDe(contact)
+  if (!psid) return vacio
+  const { token } = await credencialesMeta()
+  if (!token) return vacio
+  const completo = await graphGet(`/${psid}?fields=first_name,last_name,profile_pic,locale,timezone,gender`, token)
+  const basico = completo || (await graphGet(`/${psid}?fields=first_name,last_name,profile_pic`, token))
+  if (basico) {
+    return {
+      ...vacio,
+      firstName: String(basico.first_name || "").trim(),
+      lastName: String(basico.last_name || "").trim(),
+      profilePic: String(basico.profile_pic || "").trim(),
+      locale: String(basico.locale || "").trim(),
+      timezone: typeof basico.timezone === "number" ? basico.timezone : null,
+      gender: String(basico.gender || "").trim(),
+      fuente: completo ? "perfil_completo" : "perfil_basico",
+    }
+  }
+  // Fallback: el nombre del participante en el hilo (responde con pages_messaging).
+  const plataforma = canalMetaDe(contact) === "instagram" ? "instagram" : "messenger"
+  const conv = await graphGet(`/me/conversations?platform=${plataforma}&user_id=${psid}&fields=participants&limit=1`, token)
+  const data = (conv?.data as Array<{ participants?: { data?: Array<{ id?: string; name?: string }> } }> | undefined) || []
+  const p = data[0]?.participants?.data?.find((x) => String(x.id) === psid)
+  if (p?.name) return { ...vacio, ...partirNombre(String(p.name)), fuente: "hilo" }
+  return vacio
+}
+
+/** Perfil con caché kv (7 d). `forzar` relee Graph. */
+export async function perfilMeta(contact: string, opts: { forzar?: boolean } = {}): Promise<PerfilMeta | null> {
+  if (!psidDe(contact)) return null
+  const llave = `meta_perfil_${String(contact).trim()}`
+  if (!opts.forzar) {
+    const raw = await getKvValue(llave).catch(() => null)
+    if (raw) {
+      try {
+        const p = JSON.parse(raw) as PerfilMeta
+        if (p && p.fuente !== "ninguna" && Date.now() - Date.parse(p.at || "") < PERFIL_TTL_MS) return p
+      } catch { /* ilegible → releer */ }
+    }
+  }
+  const p = await perfilMetaDesdeGraph(contact)
+  if (p.fuente !== "ninguna") {
+    const { setKvValue } = await import("./supabase-persistence-v3")
+    await setKvValue(llave, JSON.stringify(p)).catch(() => undefined)
+  }
+  return p
+}

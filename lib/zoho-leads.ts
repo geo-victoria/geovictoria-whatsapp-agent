@@ -1296,7 +1296,19 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         await setKvValue(kvKeyLead, `creando:${Date.now()}`).catch(() => {})
       } catch { /* sin candado no se bloquea la creación */ }
     }
-    const names = splitName(input.nombre)
+    let names = splitName(input.nombre)
+    // MESSENGER/INSTAGRAM (Lalo 15-sep): sin nombre del chat, el lead nace con
+    // el nombre del perfil de Meta (first_name/last_name; fallback al nombre
+    // del hilo) en vez de "Prospecto". Best-effort, cacheado en kv.
+    if (!(input.nombre || "").trim() && esContactoMeta((input.telefono || "").trim() || (input.contactoWA || "").trim())) {
+      try {
+        const { perfilMeta } = await import("./meta-graph")
+        const perfil = await perfilMeta((input.telefono || "").trim() || (input.contactoWA || "").trim())
+        if (perfil && (perfil.firstName || perfil.lastName)) {
+          names = { firstName: perfil.firstName, lastName: perfil.lastName || perfil.firstName }
+        }
+      } catch { /* sin perfil → Prospecto */ }
+    }
     const transcript = buildTranscript(input.conversacion)
 
     const accessToken = await getZohoAccessToken()

@@ -2795,9 +2795,18 @@ async function directivaCanalMeta(contact: string): Promise<string> {
   if (!esContactoMeta(contact)) return ""
   const canal = canalMetaDe(contact) === "instagram" ? "INSTAGRAM (mensaje directo)" : "FACEBOOK MESSENGER"
   const alias = await telefonoAliasDe(contact).catch(() => "")
+  let lineaPerfil = ""
+  try {
+    const { perfilMeta } = await import("@/lib/meta-graph")
+    const p = await perfilMeta(contact)
+    if (p && (p.firstName || p.lastName)) {
+      const extras = [p.locale ? `idioma/región del perfil ${p.locale}` : "", typeof p.timezone === "number" ? `zona horaria UTC${p.timezone >= 0 ? "+" : ""}${p.timezone}` : ""].filter(Boolean).join(", ")
+      lineaPerfil = `\n- Según su perfil de ${canal === "INSTAGRAM (mensaje directo)" ? "Instagram" : "Facebook"} se llama ${[p.firstName, p.lastName].filter(Boolean).join(" ")}${extras ? ` (${extras})` : ""}. Úsalo para saludar; si en el chat dice otro nombre, manda el del chat.`
+    }
+  } catch { /* sin perfil */ }
   return `
 
-CANAL DE ESTA CONVERSACIÓN: ${canal} de la página de GeoVictoria Chile — NO es WhatsApp.
+CANAL DE ESTA CONVERSACIÓN: ${canal} de la página de GeoVictoria Chile — NO es WhatsApp.${lineaPerfil}
 - Vendes exactamente igual que por WhatsApp (mismas herramientas, mismos precios, mismas reglas).
 - ${alias ? `El cliente ya declaró su WhatsApp: +${alias}. Úsalo como su teléfono en toda herramienta.` : "NO TIENES SU NÚMERO DE TELÉFONO. Antes de emitir la cotización formal pídele su WhatsApp (celular chileno +56 9…): explícale que por WhatsApp le llega la cotización formal, el link de pago y el acompañamiento de la activación. Sin ese número la cotización formal no se puede emitir; no lo inventes ni uses otro."}
 - Respuestas cortas (se leen en el celular): máximo 4 oraciones por mensaje, sin negritas ni asteriscos.

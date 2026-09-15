@@ -44,7 +44,7 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import { POST as webhookVickyCL } from "@/app/api/vic-botmaker-v3/route"
 import { getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
-import { typingMeta } from "@/lib/meta-graph"
+import { typingMeta, perfilMeta } from "@/lib/meta-graph"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -148,6 +148,10 @@ async function atender(ev: Evento): Promise<void> {
   if (imagen) body.imageUrl = imagen.url
   else if (archivo) body.fileUrl = archivo.url
   typingMeta(contact, true).catch(() => {})
+  // Perfil de la persona (nombre/apellido/foto; locale/timezone/gender si
+  // los permisos existen) — se cachea ANTES de entregar el turno para que el
+  // lead nazca con nombre y Vicky pueda saludar. Fail-open, ≤6 s.
+  await perfilMeta(contact).catch(() => null)
   const req = new Request("http://vicky.local/api/vic-botmaker-v3", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-secret": (process.env.BOTMAKER_SECRET || "").trim() },
@@ -204,6 +208,14 @@ export async function GET(req: Request): Promise<Response> {
     const kvSecreto = (await getKvValue("followup_cron_secret").catch(() => null)) || ""
     const key = (sp.get("key") || "").trim()
     if (!key || (key !== secreto && key !== kvSecreto)) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
+    // `&perfil=<psid|FB.psid>[&forzar=1]` → lee el perfil de Meta (cascada
+    // completo → básico → hilo) y lo deja en caché: sirve para ver qué campos
+    // entrega el token vigente sin esperar un mensaje real.
+    const perfil = (sp.get("perfil") || "").trim()
+    if (perfil) {
+      const contact = /^(FB|IG)\./i.test(perfil) ? perfil : `FB.${perfil}`
+      return NextResponse.json({ ok: true, contact, perfil: await perfilMeta(contact, { forzar: sp.get("forzar") === "1" }) })
+    }
     return NextResponse.json(await diagnostico())
   }
   const c = await credenciales()
