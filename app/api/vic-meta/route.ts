@@ -76,13 +76,29 @@ function firmaValida(raw: string, header: string | null, secret: string): boolea
 }
 
 type Adjunto = { tipo: string; url: string }
-type Evento = { canal: "messenger" | "instagram"; psid: string; texto: string; mid: string; adjuntos: Adjunto[] }
+type Evento = { canal: "messenger" | "instagram"; psid: string; texto: string; mid: string; adjuntos: Adjunto[]; pageId: string }
+
+// PAÍS POR PÁGINA (15-sep, pregunta de Lalo "¿desde Messenger tenemos cómo
+// diferenciar el país del usuario?"): Messenger NO trae el país de la persona
+// (pedirle su locale exige el permiso pages_user_locale y App Review). Lo que
+// SÍ viene en cada evento es `entry[].id` = la PÁGINA a la que escribió, y
+// las páginas son por país: GeoVictoria (146240428778861) es Chile; Brasil y
+// España quedaron conectadas sin suscripción. Mapa por defecto acá + override
+// sin deploy en vic_kv `meta_pagina_pais_<pageId>` ("cl"/"co"/"mx"/"pe"/"off").
+// Hoy solo Chile tiene Vicky por este canal: otro país se registra y se
+// descarta con aviso (un solo aviso por página por día).
+const PAIS_POR_PAGINA: Record<string, string> = { "146240428778861": "cl" }
+async function paisDePagina(pageId: string): Promise<string> {
+  const kv = ((await getKvValue(`meta_pagina_pais_${pageId}`).catch(() => null)) || "").trim().toLowerCase()
+  return kv || PAIS_POR_PAGINA[pageId] || "cl"
+}
 
 function extraerEventos(body: unknown): Evento[] {
   const out: Evento[] = []
   const b = body as { object?: string; entry?: Array<{ messaging?: Array<Record<string, unknown>> }> }
   const canal: "messenger" | "instagram" = b?.object === "instagram" ? "instagram" : "messenger"
   for (const e of b?.entry || []) {
+    const pageId = String((e as { id?: string }).id || "")
     for (const m of e.messaging || []) {
       const msg = m.message as { mid?: string; text?: string; is_echo?: boolean; attachments?: Array<{ type?: string; payload?: { url?: string } }> } | undefined
       const sender = (m.sender as { id?: string } | undefined)?.id
@@ -90,7 +106,7 @@ function extraerEventos(body: unknown): Evento[] {
       const adjuntos: Adjunto[] = (Array.isArray(msg.attachments) ? msg.attachments : [])
         .map((a) => ({ tipo: String(a?.type || ""), url: String(a?.payload?.url || "").trim() }))
         .filter((a) => a.url)
-      out.push({ canal, psid: String(sender), texto: String(msg.text || "").trim(), mid: String(msg.mid || ""), adjuntos })
+      out.push({ canal, psid: String(sender), texto: String(msg.text || "").trim(), mid: String(msg.mid || ""), adjuntos, pageId })
     }
   }
   return out
@@ -107,6 +123,17 @@ function extraerEventos(body: unknown): Evento[] {
  */
 async function atender(ev: Evento): Promise<void> {
   const contact = `${ev.canal === "instagram" ? "IG" : "FB"}.${ev.psid}`
+  const pais = await paisDePagina(ev.pageId)
+  if (pais !== "cl") {
+    const dia = new Date().toISOString().slice(0, 10)
+    const llave = `meta_pagina_ajena_${ev.pageId}_${dia}`
+    if (!(await getKvValue(llave).catch(() => null))) {
+      setKvValue(llave, "1").catch(() => {})
+      await avisarEquipoInterno(`ℹ️ Vicky ${ev.canal}: llegó un mensaje a la página ${ev.pageId} (país "${pais}") y por Messenger solo atendemos Chile — no se respondió. PSID ${ev.psid}: "${ev.texto.slice(0, 80)}"`).catch(() => false)
+    }
+    console.log(`[vic-meta] página ${ev.pageId} país=${pais}: evento descartado`)
+    return
+  }
   const imagen = ev.adjuntos.find((a) => a.tipo === "image")
   const archivo = ev.adjuntos.find((a) => a.tipo === "file")
   const audio = ev.adjuntos.find((a) => a.tipo === "audio" || a.tipo === "video")
@@ -200,7 +227,7 @@ export async function POST(req: Request): Promise<Response> {
   // así el diag puede decir "sí llegó" sin adivinar. Best-effort.
   if (eventos.length > 0) {
     const ev = eventos[eventos.length - 1]
-    setKvValue("meta_ultimo_evento", JSON.stringify({ at: new Date().toISOString(), canal: ev.canal, psid: ev.psid, texto: ev.texto.slice(0, 160), encendido })).catch(() => {})
+    setKvValue("meta_ultimo_evento", JSON.stringify({ at: new Date().toISOString(), canal: ev.canal, psid: ev.psid, pageId: ev.pageId, texto: ev.texto.slice(0, 160), encendido })).catch(() => {})
   }
   if (!encendido) {
     // Apagado: Meta recibe su 200 (si no, reintenta y termina desactivando el
