@@ -96,7 +96,33 @@ const programarSeguimientoSchemaPE = {
   },
 }
 
+// COMPROBANTE DE TRANSFERENCIA (15-sep): Perú ya cobra también por
+// transferencia (BBVA de GEOVICTORIA PERU S.A.C. en la aceptación). Espejo del
+// schema chileno con montos en SOLES; la tool devuelve recepción + link de
+// auto-onboarding + presentación de la gestora PE.
+const registrarComprobantePESchema = {
+  name: "registrar_comprobante_transferencia",
+  description:
+    "Registra un comprobante de transferencia bancaria que el cliente envió por el chat (imagen o PDF descrito en el historial). Úsala SIEMPRE que el cliente mande un comprobante de pago de su cotización. Extrae del comprobante lo que se vea: monto transferido (soles), banco y fecha. La tool asocia el comprobante a la cotización vigente, avisa al equipo y devuelve mensajeParaProspecto con la confirmación de recepción, el LINK del auto-onboarding y la presentación de quien lo acompaña — copia el mensajeParaProspecto TAL CUAL, sin agregar ni quitar nada. El pago queda EN VERIFICACIÓN: nunca afirmes tú que el pago ya está confirmado.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      montoDetectado: {
+        type: "number" as const,
+        description: "Monto en soles que muestra el comprobante (solo dígitos, sin puntos ni comas). Si la imagen no deja leer el monto, pasa 0.",
+      },
+      bancoOrigen: { type: "string" as const, description: "Banco emisor si se ve en el comprobante." },
+      fechaDetectada: { type: "string" as const, description: "Fecha de la transferencia como aparece en el comprobante." },
+      numeroCotizacion: { type: "string" as const, description: "Número de cotización si el cliente lo mencionó o aparece en el comprobante." },
+      detalle: { type: "string" as const, description: "Resumen en una frase de lo que muestra el comprobante (destinatario, hora, número de operación)." },
+      pagoDeclarado: { type: "boolean" as const, description: "true si el cliente DECLARA que pagó sin mandar comprobante." },
+    },
+    required: ["montoDetectado"],
+  },
+}
+
 export const TOOL_SCHEMAS_PE = [
+  registrarComprobantePESchema,
   {
     name: "cotizar_referencial",
     description:
@@ -291,6 +317,14 @@ function normalizarPuntosPE(
 export function buildDispatchPE(contact: string) {
   return async function dispatchToolPE(name: string, input: unknown): Promise<unknown> {
     try {
+      if (name === "registrar_comprobante_transferencia") {
+        const { registrarComprobanteTransferencia } = await import("@/lib/tools/registrar-comprobante-transferencia")
+        return await registrarComprobanteTransferencia(
+          contact,
+          (input || {}) as Parameters<typeof registrarComprobanteTransferencia>[1],
+          "pe",
+        )
+      }
       if (name === "cotizar_referencial") {
         const i = (input || {}) as CotizarInputPE
         const userCount = Number(i.userCount || 0)

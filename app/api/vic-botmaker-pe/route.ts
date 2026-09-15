@@ -543,15 +543,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     // Foto/imagen o DOCUMENTO (paridad CL/MX): se "lee" con visión y el texto
-    // sigue el flujo normal. En PE aún no hay flujo de comprobantes (sin pago
-    // en línea): un documento ilegible se pregunta con naturalidad.
+    // sigue el flujo normal. Desde el 15-sep PE cobra también por transferencia:
+    // un comprobante (imagen o PDF) va a registrar_comprobante_transferencia.
     const imageUrl = (body.imageUrl || body.imageURL || body.mediaUrl || body.mediaURL || "").trim()
     const fileUrl = (body.fileUrl || body.fileURL || body.documentUrl || body.documentURL || "").trim()
     const FILE_PLACEHOLDERS = ["__file__", "__document__", "__doc__", "__pdf__"]
     const IMG_PLACEHOLDERS = ["__image__", "__media__", "__photo__"]
     const esArchivoAdjunto = FILE_PLACEHOLDERS.includes(message.trim())
     const CONTEXTO_DOC_ILEGIBLE_PE =
-      "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo: agradécele el envío y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
+      "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de aceptar, habló de transferencia o comprobante), lo más probable es que sea su comprobante: agradécele el envío, llama registrar_comprobante_transferencia con montoDetectado 0 y detalle 'comprobante enviado como archivo adjunto', y sigue el flujo normal sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
     const mediaUrlEntrante = imageUrl || fileUrl
     if (mediaUrlEntrante) {
       sendTypingIndicator(contact, true, CANAL_PE()).catch(() => {})

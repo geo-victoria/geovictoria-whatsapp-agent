@@ -134,6 +134,14 @@ const EJECUTIVA_MX = {
   whatsapp: "+52 55 3763 6604",
   email: "ysegura@geovictoria.com",
 }
+// PERÚ (15-sep, transferencia BBVA habilitada): quien acompaña la venta que
+// cierra por transferencia es la gestora de la venta autónoma (roles Lalo/Diego
+// Bendezú 15-sep), Cecilia Valverde. Override por env sin deploy.
+const GESTORA_PE = {
+  nombre: (process.env.VICKY_PE_GESTORA_NOMBRE || "Cecilia Valverde").trim(),
+  whatsapp: (process.env.VICKY_PE_GESTORA_WHATSAPP || "+51 982 446 284").trim(),
+  email: (process.env.VICKY_PE_GESTORA_EMAIL || "cvalverde@geovictoria.com").trim(),
+}
 
 export async function obtenerLinkOnboarding(quoteId: string): Promise<string> {
   try {
@@ -376,14 +384,18 @@ export async function registrarComprobanteTransferencia(
   input: Input,
   // "mx": monto en MXN y, tras registrar, entrega el link de auto-onboarding y
   // presenta a la ejecutiva (flujo transferencia BANORTE). Default: CL.
-  pais: "cl" | "mx" = "cl",
+  // "pe": monto en SOLES (BBVA de GEOVICTORIA PERU S.A.C., 15-sep) y, tras
+  // registrar, link de auto-onboarding + presentación de la gestora PE.
+  pais: "cl" | "mx" | "pe" = "cl",
 ): Promise<{ ok: boolean; mensajeParaProspecto: string; notaCreada?: boolean; avisoInterno?: boolean }> {
   const monto = Math.max(0, Math.round(Number(input.montoDetectado) || 0))
   const montoFmt =
     monto > 0
       ? pais === "mx"
         ? `$${monto.toLocaleString("es-MX")} MXN`
-        : `$${monto.toLocaleString("es-CL")}`
+        : pais === "pe"
+          ? `S/ ${monto.toLocaleString("es-PE")}`
+          : `$${monto.toLocaleString("es-CL")}`
       : "monto no legible"
 
   const pointers = await getQuotePointers(contact).catch(() => [])
@@ -513,7 +525,10 @@ export async function registrarComprobanteTransferencia(
   const esperadoClp = pointer && comprobanteLegible ? await pagoInicialEsperadoClp(pointer.quoteId) : 0
   const montoInsuficiente = comprobanteLegible && esperadoClp > 0 && monto < Math.round(esperadoClp * 0.98)
   const habilitaBlanda = comprobanteLegible && !!pointer && !montoInsuficiente
-  const fmtClp = (n: number) => `$${Math.round(n).toLocaleString("es-CL")}`
+  // Moneda del país: el "pago inicial esperado" que devuelve el cotizador ya
+  // viene en la moneda de la cotización (PEN en Perú, MXN en México).
+  const fmtClp = (n: number) =>
+    pais === "pe" ? `S/ ${Math.round(n).toLocaleString("es-PE")}` : pais === "mx" ? `$${Math.round(n).toLocaleString("es-MX")} MXN` : `$${Math.round(n).toLocaleString("es-CL")}`
 
   // UN SOLO COMPROBANTE PARA VARIAS COTIZACIONES (Lalo 08-sep, caso Lorena:
   // dos RUT, una transferencia por el total — "no tienen que ser 2
@@ -832,6 +847,18 @@ export async function registrarComprobanteTransferencia(
           `Y te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
         : `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
           `Te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda, me escribes por aquí 😊`
+      return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
+    }
+
+    if (pais === "pe") {
+      // PE: recepción + auto-onboarding + gestora que acompaña (Cecilia).
+      // Tuteo peruano neutro, sin chilenismos ("al tiro", "por acá").
+      const mensajeParaProspecto = linkOnboarding
+        ? `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
+          `Aquí tienes tu acceso al auto-onboarding: ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos.\n${linkOnboarding}\n\n` +
+          `Y te presento a ${GESTORA_PE.nombre}, del equipo GeoVictoria Perú: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${GESTORA_PE.whatsapp}\n✉️ ${GESTORA_PE.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
+        : `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
+          `Te presento a ${GESTORA_PE.nombre}, del equipo GeoVictoria Perú: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${GESTORA_PE.whatsapp}\n✉️ ${GESTORA_PE.email}\n\nCualquier duda, me escribes por aquí 😊`
       return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
     }
 
