@@ -116,8 +116,40 @@ async function atender(ev: Evento): Promise<void> {
   if (!env.ok) await avisarEquipoInterno(`⚠️ Vicky ${ev.canal}: no pude responder a ${contact} — ${env.detalle}`).catch(() => false)
 }
 
+/**
+ * DIAGNÓSTICO (solo lectura, auth cron): `?diag=1&key=…` — con el token de
+ * Página pregunta a Graph qué página es, qué cuenta de Instagram tiene
+ * vinculada y si la página está SUSCRITA a esta app (sin la suscripción el
+ * webhook está verificado pero no llega nada). Sirve para revisar la
+ * configuración del panel sin adivinar.
+ */
+async function diagnostico(): Promise<Record<string, unknown>> {
+  if (!PAGE_TOKEN) return { ok: false, error: "sin META_PAGE_ACCESS_TOKEN" }
+  const g = async (path: string) => {
+    const r = await fetch(`${GRAPH}${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(PAGE_TOKEN)}`, { cache: "no-store" }).catch(() => null)
+    if (!r) return { error: "sin respuesta" }
+    return (await r.json().catch(() => ({ error: `http ${r.status}` }))) as Record<string, unknown>
+  }
+  const me = await g("/me?fields=id,name,instagram_business_account{id,username}")
+  const subs = await g("/me/subscribed_apps?fields=id,name,subscribed_fields")
+  return {
+    ok: !(me as { error?: unknown }).error,
+    pagina: me,
+    suscripciones: subs,
+    envs: { META_VERIFY_TOKEN: Boolean(VERIFY_TOKEN), META_APP_SECRET: Boolean(APP_SECRET), META_PAGE_ACCESS_TOKEN: Boolean(PAGE_TOKEN) },
+    gate: (await getKvValue("meta_canal_enabled").catch(() => null)) || "",
+  }
+}
+
 export async function GET(req: Request): Promise<Response> {
   const sp = new URL(req.url).searchParams
+  if (sp.get("diag") === "1") {
+    const secreto = (process.env.CRON_SECRET || "").trim()
+    const kvSecreto = (await getKvValue("followup_cron_secret").catch(() => null)) || ""
+    const key = (sp.get("key") || "").trim()
+    if (!key || (key !== secreto && key !== kvSecreto)) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
+    return NextResponse.json(await diagnostico())
+  }
   if (sp.get("hub.mode") === "subscribe" && VERIFY_TOKEN && sp.get("hub.verify_token") === VERIFY_TOKEN) {
     return new Response(sp.get("hub.challenge") || "", { status: 200, headers: { "Content-Type": "text/plain" } })
   }
