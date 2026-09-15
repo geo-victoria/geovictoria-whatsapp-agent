@@ -47,6 +47,7 @@ export const LINEAS_OFICIALES = new Set([
   "56927526890",
   "56944013873", // Mesa de Ayuda / soporte (el número del caso RCT)
   "51922067167", // línea Vicky PE
+  "5117085618", // Mesa de Ayuda GeoVictoria Perú (+51 1 7085618)
   "573181070737", // línea Vicky CO
 ])
 

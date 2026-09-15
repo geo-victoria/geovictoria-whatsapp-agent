@@ -49,12 +49,17 @@ const EJECUTIVA_PE_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_PE_ID || "3525045000323
 // Escalamiento de soporte PE (11-ago, orden de Lalo — caso Falabella
 // dvalverde@: un usuario existente pidiendo recuperar su acceso recibió una
 // presentación de VENTA en vez de soporte): Vicky PE atiende con el agente
-// Foundry y, si él escala, entrega el canal humano. Perú no tiene mesa de
-// ayuda propia: el canal es el correo global de soporte (override por env).
-const CORREO_SOPORTE_PE = (process.env.VICKY_SOPORTE_EMAIL_PE || "soporte@geovictoria.com").trim()
+// Foundry y, si él escala, entrega el canal humano. MESA DE AYUDA PERÚ
+// (tarjeta oficial, Lalo 15-sep): soporteperu@geovictoria.com en horario
+// continuado · +51 1 7085618 en horario de oficina L-V 8:30-17:30 · solo los
+// administradores de la empresa tienen soporte directo. Overrides por env.
+const CORREO_SOPORTE_PE = (process.env.VICKY_SOPORTE_EMAIL_PE || "soporteperu@geovictoria.com").trim()
+const TELEFONO_SOPORTE_PE = (process.env.VICKY_SOPORTE_TELEFONO_PE || "+51 1 7085618").trim()
+const HORARIO_SOPORTE_PE = (process.env.VICKY_SOPORTE_HORARIO_PE || "lunes a viernes de 8:30 a 17:30 hrs").trim()
 const MENSAJE_ESCALAMIENTO_SOPORTE_PE =
-  "Para esta consulta te recomiendo contactar directamente a nuestro equipo de soporte:\n" +
-  `📧 Email: *${CORREO_SOPORTE_PE}*\n\n` +
+  "Para esta consulta te recomiendo contactar directamente a nuestra Mesa de Ayuda GeoVictoria Perú:\n" +
+  `📧 Email: *${CORREO_SOPORTE_PE}* (horario continuado)\n` +
+  `📞 Teléfono: *${TELEFONO_SOPORTE_PE}* (${HORARIO_SOPORTE_PE})\n\n` +
   "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria 🙌"
 
 const COTIZADORA_API_BASE = (
@@ -503,8 +508,9 @@ export function buildDispatchPE(contact: string) {
         const { consultarAgenteSoporte } = await import("../../tools/consultar-agente-soporte.ts")
         const sanearCanalesChilenos = (texto: string): string =>
           texto
-            .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, CORREO_SOPORTE_PE)
-            .replace(/600[\s.\-]*914[\s.\-]*3819/g, CORREO_SOPORTE_PE)
+            .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, TELEFONO_SOPORTE_PE)
+            .replace(/600[\s.\-]*914[\s.\-]*3819/g, TELEFONO_SOPORTE_PE)
+            .replace(/\bsoporte@geovictoria\.com\b/g, CORREO_SOPORTE_PE)
         const r = await consultarAgenteSoporte(input as never)
         if (!r.ok) return r
         if (r.accion === "escalar_humano") {
