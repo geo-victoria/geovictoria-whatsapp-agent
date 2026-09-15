@@ -66,6 +66,27 @@ export function directorioEjecutivos(): FichaEjecutivo[] {
 
 const soloDigitos = (s: string): string => s.replace(/\D/g, "")
 
+/** ¿El número (solo dígitos, con o sin prefijo país) es una de nuestras líneas? */
+export function esLineaOficial(digitos: string): boolean {
+  const d = soloDigitos(digitos)
+  if (d.length < 8) return false
+  for (const l of LINEAS_OFICIALES) if (l === d || l.endsWith(d) || d.endsWith(l)) return true
+  return false
+}
+
+/** ¿El número aparece en un contexto de soporte? Se mira la MISMA línea de
+ * texto y los 120 caracteres anteriores a la primera aparición — no la
+ * respuesta entera. */
+export function contextoDeSoporte(texto: string, numero: string): boolean {
+  const i = texto.indexOf(numero)
+  if (i < 0) return false
+  const inicioLinea = texto.lastIndexOf("\n", i) + 1
+  const desde = Math.max(inicioLinea, i - 120)
+  const finLinea = texto.indexOf("\n", i)
+  const ventana = texto.slice(desde, finLinea < 0 ? i + numero.length : Math.max(finLinea, i + numero.length))
+  return /mesa de ayuda|soporte|servicio t[eé]cnico|ayuda t[eé]cnica/i.test(ventana)
+}
+
 const normalizar = (s: string): string =>
   s
     .normalize("NFD")
@@ -141,7 +162,15 @@ export function corregirTelefonosEjecutivos(
     // Línea oficial en contexto de SOPORTE: legítima ("para soporte, la mesa
     // de ayuda: +56 9 4401 3873"). La misma línea SIN ese contexto y junto al
     // nombre de un ejecutivo es exactamente el caso RCT — se corrige.
-    if (LINEAS_OFICIALES.has(d) && /mesa de ayuda|soporte|servicio t[eé]cnico/i.test(reply)) return m
+    // CICATRIZ 15-sep (Juan Manuel/ATTEX, y antes Anderson 01-sep y Tamara
+    // 11-ago): (a) el set guarda "56944013873" y el regex entrega "944013873"
+    // cuando el texto dice "9 4401 3873" — la comparación exacta nunca daba
+    // y la exención era letra muerta; (b) el contexto se miraba en TODA la
+    // respuesta: bastaba la palabra "soporte" en otro párrafo para dejar
+    // pasar el número de la Mesa de Ayuda rotulado como el de Tamara. Ahora
+    // la línea se reconoce por sufijo y el contexto es LOCAL: la misma línea
+    // de texto o los 120 caracteres anteriores al número.
+    if (esLineaOficial(d) && contextoDeSoporte(reply, m)) return m
     if ([...numerosDelCliente].some((n) => n === d || n.endsWith(d) || d.endsWith(n))) return m
     // Número desconocido junto al nombre de un ejecutivo → se reemplaza por
     // el del directorio (sabemos el correcto: corregir gana a censurar).

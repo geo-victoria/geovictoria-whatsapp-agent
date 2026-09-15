@@ -1754,7 +1754,23 @@ async function processOneTurn(
     // siquiera tras la formal: el traspaso post-pago lo envía vic-quote-notify
     // (evento 'pagada'), no el modelo. Si Vicky lo filtra, se reemplaza por el
     // WhatsApp real de soporte.
-    reply = blindarContactoComercial(reply, false)
+    // EXCEPCIÓN (15-sep, caso Juan Manuel/ATTEX; mismo defecto el 11-ago con
+    // Tamara y el 01-sep con Anderson): con el traspaso v2 (03-ago) el
+    // ejecutivo se PRESENTA antes del pago, con nombre y WhatsApp. Cuando el
+    // cliente después pregunta "¿tienen mi número?, ¿quién me llama?", el
+    // modelo responde con el teléfono correcto del directorio (y el cinturón
+    // 2.6b' lo garantiza), y este blindaje lo pisaba con el de la Mesa de
+    // Ayuda: "Tamara Martinez · WhatsApp +56 9 4401 3873". El cliente que
+    // escribía ahí caía en soporte. Con vic_ptv ACTIVO el ejecutivo ya fue
+    // presentado por nosotros mismos: su número puede salir. Sin traspaso, la
+    // regla del 17-jul sigue intacta.
+    let contactoTraspasado = false
+    try {
+      const { getSupabaseRows } = await import("@/lib/rescate-callback")
+      contactoTraspasado =
+        (await getSupabaseRows<{ id: string }>(`vic_ptv?contact=eq.${contact}&estado=eq.activo&select=id&limit=1`)).length > 0
+    } catch { /* sin lectura: se blinda como siempre */ }
+    reply = blindarContactoComercial(reply, contactoTraspasado)
     // 2.8b. Blindaje de SOPORTE INVENTADO (Lalo 01-sep, caso Jeshu): fijos
     // +56 2 alucinados → fono real de la Mesa de Ayuda; correos
     // @geovictoria.com desconocidos → soporte@. Siempre activo.
@@ -1884,7 +1900,7 @@ async function processOneTurn(
             corregirPedidoDeTelefono(
               honestarMencionesDeCorreo(quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))),
             ),
-            false,
+            contactoTraspasado,
           ), emailsDirectorio())
           // El reintento corre DESPUÉS de 2.7c: la cura de placeholders se
           // aplica de nuevo aquí para que no se la salte.
