@@ -31,6 +31,11 @@ const DIRECTORIO_BASE: FichaEjecutivo[] = [
   { nombre: "Daniela Gálvez", email: "dgalvez@geovictoria.com", telefono: "+56 9 2958 7913" },
   { nombre: "Grey Meléndez", email: "gmelendez@geovictoria.com", telefono: "+56 9 3937 2060" },
   { nombre: "Mónica Mendoza", email: "mmendozav@geovictoria.com", telefono: "+51 962 277 502" },
+  // 15-sep (Perú, roles confirmados por Diego Bendezú vía Lalo): SDR Inbound de
+  // la línea +51. Teléfonos pasados por ellas mismas en Teams el 15-sep; sus
+  // fichas de usuario de Zoho no tienen teléfono cargado.
+  { nombre: "Ana Fiori", email: "afiori@geovictoria.com", telefono: "+51 936 953 838" },
+  { nombre: "Priscila Quispe", email: "pquispef@geovictoria.com", telefono: "+51 960 421 293" },
 ]
 
 /** Líneas nuestras que SÍ pueden aparecer junto a cualquier nombre (Vicky,
