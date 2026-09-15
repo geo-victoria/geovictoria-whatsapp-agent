@@ -10,6 +10,7 @@
  *   - agendar_reunion (con ownerEmail = organizerEmail Cal.com → directo)
  */
 
+import { leadSourceParaContacto } from "./origen-canal"
 import { getZohoAccessToken } from "./zoho-token"
 
 function getEnv(name: string): string {
@@ -1320,7 +1321,12 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
       Last_Name: sanitize(names.lastName, 100) || "Prospecto",
       Company: sanitize(input.empresa, 200) || "Prospecto WhatsApp",
       Canal: "WhatsApp",
-      Lead_Source: getEnv("ZOHO_DEFAULT_LEAD_SOURCE") || "SEO",
+      // Contacto de Messenger/Instagram (o teléfono con marca origen_canal_)
+      // → Lead_Source "Facebook" (Lalo 15-sep); el resto, el default de siempre.
+      Lead_Source:
+        (await leadSourceParaContacto(String(input.telefono || input.contactoWA || ""))) ||
+        getEnv("ZOHO_DEFAULT_LEAD_SOURCE") ||
+        "SEO",
       Owner: { id: ownerId },
       // Primera revisión = la atención de Vicky (regla Lalo 10-ago): un lead
       // inbound nace porque Vicky YA respondió la primera pregunta — el

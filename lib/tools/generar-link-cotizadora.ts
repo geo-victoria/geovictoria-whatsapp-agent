@@ -20,6 +20,7 @@
 /** Plantilla aprobada por Meta para entregar la cotización con botón. */
 const PLANTILLA_ENTREGA = (process.env.VICKY_PLANTILLA_ENTREGA || "vicky_cotizacion_pago_mkt").trim()
 
+import { leadSourceParaContacto } from "@/lib/origen-canal"
 import {
   ARRIENDO_RECARGO_REGIONES_UF,
   getModuloDisponibleParaVicky,
@@ -828,7 +829,12 @@ export async function generarLinkCotizadora(
   const totalCLP = Math.round(totalUF * ufActual)
 
   // Cuerpo de la request (constante entre reintentos).
+  // Lead_Source por canal (Lalo 15-sep): lo que nace desde Messenger/Instagram
+  // — o desde un teléfono marcado con origen_canal_ — va "Facebook". El
+  // cotizador lo aplica al lead/contacto/deal que CREA; lo existente hereda.
+  const leadSourceCanal = await leadSourceParaContacto(String(contactoTelefono || "")).catch(() => null)
   const reqBody = JSON.stringify({
+    leadSource: leadSourceCanal || undefined,
     // Canal ejecutivo: la emisión NO manda el correo al cliente (la entrega
     // es un botón humano del editor). Vicky con clientes no pasa el flag y
     // su correo automático sigue igual.
