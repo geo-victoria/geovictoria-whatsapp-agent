@@ -1800,6 +1800,17 @@ async function traspasarATelemarketing(
         method: "PATCH",
         body: JSON.stringify({ estado: "cerrado", motivo_cierre: "tm_no_aplica_deal" }),
       })
+      // Y LA CONVERSACIÓN TAMBIÉN (15-sep): el candidato INBOUND sale de
+      // `vic_v3_conversations` (user_msg_count=1 + followup_closed_reason
+      // null), no del loop, así que cerrar solo el loop no lo sacaba del
+      // radar: 8 contactos de la campaña remk_300 (respondieron "no gracias"
+      // UNA vez y tienen deal en Cierre Perdido) generaron ~98 filas vic_ptv
+      // cada uno en un día — una por tick, con búsqueda en Zoho y casuística
+      // Haiku cada vez. Misma cicatriz del 04-sep, en la otra salida.
+      await supa(`vic_v3_conversations?contact=eq.${encodeURIComponent(contact)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ followup_closed_reason: "tm_no_aplica_deal" }),
+      }).catch(() => [])
       return { ok: false, detalle: "tiene deal — no es sin-calificar" }
     }
 

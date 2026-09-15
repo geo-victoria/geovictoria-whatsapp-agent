@@ -182,12 +182,25 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   // ═══════════════════════════ PARTE A: LOS TRASPASOS ══════════════════════
-  const crudas = await supa<Ptv>(
-    `vic_ptv?traspasado_at=gte.${encodeURIComponent(desdeISO)}&traspasado_at=lte.${encodeURIComponent(hastaISO)}` +
-      `&select=id,contact,vendedor_email,vendedor_nombre,vendedor_zoho_id,traspasado_at,motivo,presentado_al_prospecto,estado,chequeo_resultado&order=traspasado_at.desc&limit=800`,
-    fallos,
-  )
-  const filasCL = crudas.map((f) => ({ ...f, contact: digits(f.contact) })).filter((f) => esCL(f.contact))
+  // Paginado: una sola página de 800 se llenó con ENTREGAS FANTASMA (15-sep:
+  // el reloj 24h insertaba y cerraba una fila por tick para 8 contactos con
+  // deal, ~98 filas cada uno) y tapó las dos semanas. Esas filas —vendedor
+  // vacío y estado cerrado— se cuentan aparte y no se auditan.
+  const crudas: Ptv[] = []
+  for (let off = 0; off < 20000; off += 1000) {
+    const pag = await supa<Ptv>(
+      `vic_ptv?traspasado_at=gte.${encodeURIComponent(desdeISO)}&traspasado_at=lte.${encodeURIComponent(hastaISO)}` +
+        `&select=id,contact,vendedor_email,vendedor_nombre,vendedor_zoho_id,traspasado_at,motivo,presentado_al_prospecto,estado,chequeo_resultado&order=traspasado_at.desc&limit=1000&offset=${off}`,
+      fallos,
+    )
+    crudas.push(...pag)
+    if (pag.length < 1000) break
+  }
+  const esFantasma = (f: Ptv) => !String(f.vendedor_email || "").trim() && f.estado === "cerrado"
+  const fantasmas = crudas.filter(esFantasma)
+  const fantasmasPorContacto: Record<string, number> = {}
+  for (const f of fantasmas) fantasmasPorContacto[digits(f.contact)] = (fantasmasPorContacto[digits(f.contact)] || 0) + 1
+  const filasCL = crudas.filter((f) => !esFantasma(f)).map((f) => ({ ...f, contact: digits(f.contact) })).filter((f) => esCL(f.contact))
   const porContacto = new Map<string, Ptv[]>()
   for (const f of filasCL) porContacto.set(f.contact, [...(porContacto.get(f.contact) || []), f])
   const contactos = [...porContacto.keys()].slice(0, max)
@@ -338,6 +351,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   return NextResponse.json({
     ok: true, rango: { desde, hasta }, indice: { deals: dealsPorId.size, leadsTel: leadsPorNueve.size, dealsTel: dealsPorNueve.size },
+    entregasFantasma: { filas: fantasmas.length, porContacto: fantasmasPorContacto },
     resumen, traspasos: filas, sinTraspaso, fallos, ms: Date.now() - t0,
   })
 }
