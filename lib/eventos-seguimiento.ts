@@ -33,6 +33,11 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // ── Resto de países ──
   "agordillo@geovictoria.com": "6484393", // CO — Alejandro Gordillo
   "ysegura@geovictoria.com": "6484399", // MX — Yahel Segura
+  // ── PERÚ (15-sep, regla chilena: la reunión sigue al dueño del registro) ──
+  // Evento creado por Lalo el 15-sep; verificado contra la API el mismo día
+  // (slots reales en horario -05:00 Lima, 20 min). Faltan Priscila Quispe y
+  // Mónica Mendoza (sin evento aún → round-robin chileno).
+  "afiori@geovictoria.com": "7084716", // PE — Ana Fiori (SDR Inbound)
   // ANDERSON (6616830) NO se cablea: su evento devuelve 0 slots en 14, 30 y
   // 60 días — está sin horario/host utilizable. Cablearlo dejaría a sus
   // clientes sin ninguna hora que elegir; hasta arreglarlo cae al
@@ -40,7 +45,7 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // de 14 días: Paola 226 · Grey 203 · Eddyluz 193 · Tamara 175 · Ana Paula
   // 127 · Anderson 0.
   // SIN evento propio todavía (caen al round-robin): Eddy Galindo (CO),
-  // Mónica Mendoza (PE).
+  // Mónica Mendoza y Priscila Quispe (PE).
 }
 
 /**
