@@ -1,4 +1,4 @@
-import { esContactoCL } from "./origen-canal"
+import { esContactoCL } from "./origen-canal.ts"
 /**
  * Sincronización determinista Zoho CRM ← hitos de la conversación de Vicky
  * (Lalo, 30-jul-2026). Regla de marketing: NUNCA crear deals directos — todo

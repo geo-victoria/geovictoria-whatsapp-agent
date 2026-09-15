@@ -11,7 +11,7 @@
  * timeout del webhook.
  */
 
-import { esContactoMeta } from "./origen-canal"
+import { esContactoMeta } from "./origen-canal.ts"
 import { channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea } from "./linea-por-pais"
 
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()

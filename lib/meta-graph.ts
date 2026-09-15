@@ -21,7 +21,7 @@
  * `meta_verify_token` (se leen por request: rotar sin deploy).
  */
 import { getKvValue } from "./supabase-persistence-v3"
-import { canalMetaDe, psidDe } from "./origen-canal"
+import { canalMetaDe, psidDe } from "./origen-canal.ts"
 
 export const GRAPH = "https://graph.facebook.com/v21.0"
 const MAX_TEXTO = 2000

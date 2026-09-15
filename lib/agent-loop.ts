@@ -18,7 +18,7 @@
  *   - Cada iteración queda registrada en el log de la conversación.
  */
 
-import { esContactoCL } from "./origen-canal"
+import { esContactoCL } from "./origen-canal.ts"
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
 import {
@@ -411,7 +411,7 @@ export async function runAgentLoop(params: {
           // Contacto de Meta (15-sep): el "teléfono del canal" es el WhatsApp
           // que el cliente DECLARÓ (alias kv); sin él va el contacto crudo
           // (FB.<psid>) y la tool se niega pidiéndolo — jamás el PSID como fono.
-          const { esContactoMeta, telefonoAliasDe } = await import("./origen-canal")
+          const { esContactoMeta, telefonoAliasDe } = await import("./origen-canal.ts")
           if (esContactoMeta(contact)) {
             const alias = await telefonoAliasDe(contact).catch(() => "")
             toolInput.contactoTelefono = alias ? `+${alias}` : String(contact)

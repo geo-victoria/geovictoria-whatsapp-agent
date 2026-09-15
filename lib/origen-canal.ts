@@ -18,7 +18,14 @@
  * el TELÉFONO (ancla de toda la tubería), la marca kv `origen_canal_<fono>`
  * = "meta" conserva la fuente para lo que se cree después con ese número.
  */
-import { getKvValue } from "./supabase-persistence-v3"
+// SIN imports estáticos a propósito: lib/crm-hitos.ts y lib/agent-loop.ts
+// importan este módulo y sus tests (node --test) cargan esos archivos directo —
+// un import estático de supabase-persistence-v3 (que trae "@/…") los rompe.
+// El kv se importa dinámicamente dentro de las funciones async.
+async function getKvValue(key: string): Promise<string | null> {
+  const m = await import("./supabase-persistence-v3")
+  return m.getKvValue(key)
+}
 
 export const LEAD_SOURCE_META_DEFAULT = "Facebook"
 
