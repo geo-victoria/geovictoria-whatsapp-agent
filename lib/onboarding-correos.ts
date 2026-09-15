@@ -137,9 +137,10 @@ export async function enviarBienvenidaDesdeBorrador(
   const previo = await getKvValue(claveCorreoBienvenida(c)).catch(() => null)
   if (previo) return { enviado: false, yaEstaba: true }
   const raw = await getKvValue(claveBorrador(c)).catch(() => null)
-  let b: { empresa?: { nombre?: string }; admin?: { nombre?: string; apellido?: string; email?: string } } | null = null
+  type BorradorMin = { empresa?: { nombre?: string }; admin?: { nombre?: string; apellido?: string; email?: string } }
+  let b: BorradorMin | null = null
   try {
-    b = raw ? (JSON.parse(raw) as typeof b) : null
+    b = raw ? (JSON.parse(raw) as BorradorMin) : null
   } catch {
     b = null
   }
