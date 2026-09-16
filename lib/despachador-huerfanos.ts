@@ -28,6 +28,9 @@ const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 /** Endpoints declarados en vercel.json que el scheduler real no dispara. */
 export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: number }> = [
   { nombre: "espejo_notas", path: "/api/vic-espejo-notas-cron", cadaMin: 15 },
+  // Alarma de espejos caídos (16-sep): correo al ejecutivo + copia si su sesión
+  // lleva >1 h sin vincular; el panel 🪞 era solo de consulta.
+  { nombre: "espejo_alerta", path: "/api/vic-espejo-alerta", cadaMin: 60 },
   { nombre: "mudos", path: "/api/vic-mudos-cron", cadaMin: 30 },
   // (El followup viejo se ELIMINÓ en la demolición de la biblia, 12-ago.)
   { nombre: "outbound", path: "/api/vic-outbound-cadence-cron", cadaMin: 15 },

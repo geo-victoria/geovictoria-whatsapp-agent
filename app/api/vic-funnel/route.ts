@@ -9712,7 +9712,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "traspasos"); return p.toString() })()}">🤝 Traspasos</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cierre"); return p.toString() })()}">📅 Cierre diario</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "campanas"); return p.toString() })()}">📣 Campañas</a>
-      ${esAdmin ? `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "espejos"); return p.toString() })()}">🪞 Espejos</a>` : ""}
+      <a href="?${(() => { const p = filtrosQS(); p.set("vista", "espejos"); return p.toString() })()}">🪞 ${esAdmin ? "Espejos" : "Mi espejo"}</a>
       ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>`}
