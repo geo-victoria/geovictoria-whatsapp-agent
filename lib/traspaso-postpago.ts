@@ -535,20 +535,42 @@ export async function cerrarYTraspasarPostPago(
     }
   } catch { /* sin marca */ }
   const ahoraIso = new Date().toISOString()
+  // LA MARCA SE ESCRIBE UNA VEZ POR COTIZACIÓN (16-sep, "el dash se
+  // desordenó": ayer 3 ventas y aparecía 1, hoy 1 y aparecían 2). El barrido
+  // horario de Pagadas <36 h vuelve a entrar acá y esta marca se re-escribía
+  // con `at = ahora` en CADA pasada; como la Caja fecha la venta por esta
+  // marca (`fechaPagoReal`), Naspeclinic, Lo Ovalle y BMG —pagadas el 15—
+  // amanecieron el 16 a las 11:26, la hora del último tick. Si ya hay marca
+  // de ESTA cotización, se conserva su `at` (es la hora real del pago); solo
+  // una cotización distinta del mismo contacto la reemplaza.
+  let fechaPagoOnline = ""
   if ((opts.motivoCierre || "pagado") === "pagado" && !fueTransferencia) {
-    await setKvValue(
-      `pago_online_${contact}`,
-      JSON.stringify({ at: ahoraIso, quoteId }),
-    ).catch(() => {})
+    let previa: { at?: string; quoteId?: string } | null = null
+    try {
+      const raw = await getKvValue(`pago_online_${contact}`)
+      previa = raw ? (JSON.parse(raw) as { at?: string; quoteId?: string }) : null
+    } catch { previa = null }
+    const mismaCot = Boolean(previa && String(previa.quoteId || "") === String(quoteId) && Number.isFinite(Date.parse(String(previa.at || ""))))
+    if (mismaCot) {
+      fechaPagoOnline = String(previa?.at || "")
+    } else {
+      fechaPagoOnline = ahoraIso
+      await setKvValue(
+        `pago_online_${contact}`,
+        JSON.stringify({ at: ahoraIso, quoteId }),
+      ).catch(() => {})
+    }
   }
   // LA CAJA SE FECHA POR EL PAGO (15-sep, caso Arquiglass COT1303): si el
   // dash ya escribió `venta_dash_v3_` con la fecha de ACEPTACIÓN (aceptó el
   // 09, pagó el 15), la venta aparecía el 09 y el cierre del 15 no la traía.
   // Solo en la PRIMERA pasada real (sin candado): el barrido de Pagadas <36 h
   // vuelve a entrar acá con motivo "pagado" y no debe correr la fecha a "hoy".
+  // Y la fecha es la de la MARCA (la primera escritura), no "ahora": si la
+  // primera pasada la hace el barrido horas después, tampoco se corre.
   if (pagoReal && !yaProcesada) {
     const { refecharCajaVenta } = await import("./fecha-pago")
-    await refecharCajaVenta(quoteId, fechaTransferencia || ahoraIso).catch(() => "sin_cambio")
+    await refecharCajaVenta(quoteId, fechaTransferencia || fechaPagoOnline || ahoraIso).catch(() => "sin_cambio")
   }
 
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
@@ -586,6 +608,13 @@ export async function cerrarYTraspasarPostPago(
           )
           if (/intervenci/i.test(marca)) {
             console.log(`[postpago] canal EJECUTIVO en ${quoteId}: sin mensaje de Vicky a ${contact}`)
+            // CANDADO TAMBIÉN ACÁ (16-sep): este retorno salía ANTES de
+            // escribir `traspaso_postpago_<quote>`, así que para el canal
+            // ejecutivo `yaProcesada` era falso en TODAS las pasadas del
+            // barrido: re-fechaba la Caja a "hoy" cada hora y re-sembraba lo
+            // que el gate de arriba protege. Las de Vicky nunca lo sufrieron
+            // porque su bienvenida deja el candado al final.
+            await setKvValue(`traspaso_postpago_${quoteId}`, ahoraIso).catch(() => {})
             return { contact, traspaso: "omitido_canal_ejecutivo" }
           }
           break // marca leída y no es ejecutivo → se envía
