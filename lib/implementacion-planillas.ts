@@ -104,7 +104,7 @@ export async function planillasDeSesionWizard(contact: string): Promise<Planilla
   }
 }
 
-async function subirAdjuntoNota(token: string, notaId: string, impId: string, buf: ArrayBuffer, filename: string): Promise<boolean> {
+export async function subirAdjuntoNota(token: string, notaId: string, impId: string, buf: ArrayBuffer, filename: string): Promise<boolean> {
   const form = new FormData()
   form.append("file", new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename)
   const H = { Authorization: `Zoho-oauthtoken ${token}` }
