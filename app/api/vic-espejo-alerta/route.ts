@@ -50,6 +50,23 @@ const BASE_URL = (
   "https://geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app"
 ).replace(/\/$/, "")
 const PERFILES = new Set(["Ejecutivo Comercial", "Telemarketing"])
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
+const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+
+/** Sesiones que el panel 🪞 ya conoce (kv espejo_link_<sesión>): son las que
+ *  el worker puede tener; los ~60 comerciales de otros países no cuentan. */
+async function sesionesConLink(): Promise<Set<string>> {
+  const out = new Set<string>()
+  if (!SUPABASE_URL || !SUPABASE_KEY) return out
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.espejo_link_*&select=key&limit=500`, {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      cache: "no-store",
+    })
+    for (const f of ((await r.json().catch(() => [])) as Array<{ key: string }>) || []) out.add(String(f.key).replace(/^espejo_link_/, ""))
+  } catch { /* sin kv → roster vacío, el endpoint lo declara */ }
+  return out
+}
 
 async function autorizado(req: Request): Promise<boolean> {
   const key = (new URL(req.url).searchParams.get("key") || "").trim()
@@ -180,8 +197,9 @@ export async function GET(req: Request) {
   } catch (e) {
     return NextResponse.json({ ok: false, error: `zoho token: ${e instanceof Error ? e.message : e}` }, { status: 502 })
   }
-  const roster = await rosterEspejos(token).catch(() => [] as Usuario[])
-  if (!roster.length) return NextResponse.json({ ok: false, error: "roster vacío (Zoho users no respondió)" }, { status: 502 })
+  const [todos, conLink] = await Promise.all([rosterEspejos(token).catch(() => [] as Usuario[]), sesionesConLink()])
+  const roster = todos.filter((u) => conLink.has(u.sesion))
+  if (!roster.length) return NextResponse.json({ ok: false, error: "roster vacío (Zoho users o kv espejo_link_ no respondieron)", zohoUsuarios: todos.length, conLink: conLink.size }, { status: 502 })
 
   const filas: Array<Record<string, unknown>> = []
   let alertas = 0
