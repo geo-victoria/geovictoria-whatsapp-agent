@@ -37,6 +37,40 @@ export async function GET(req: Request): Promise<NextResponse> {
   const dias = Math.min(365, Math.max(1, Number(sp.get("dias") || 90)))
   const desde = new Date(Date.now() - dias * 864e5).toISOString()
 
+  // ?fuente=espejo (16-sep, Lalo "¿no hay comprobantes nuevos en algún espejo
+  // que no tengamos en los indicadores?"): busca en lo que dijeron los CLIENTES
+  // por el WhatsApp de los EJECUTIVOS — texto del mensaje y `media_texto`
+  // (la lectura de fotos/PDF del vic-espejo-media-cron, que antepone
+  // `[comprobante:<resultado>]` cuando la imagen es un comprobante). Solo
+  // lectura; el filtro `from_me=false` deja fuera lo que escribió el vendedor.
+  if ((sp.get("fuente") || "") === "espejo") {
+    const patronE = encodeURIComponent(`%${q}%`)
+    const orE = encodeURIComponent(`(media_texto.ilike.%${q}%,texto.ilike.%${q}%)`)
+    const re = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?or=${orE}&from_me=eq.false&recibido_at=gte.${desde}` +
+        `&select=session_id,telefono_chat,autor,recibido_at,tipo,texto,media_texto&order=recibido_at.desc&limit=${limit}`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
+    )
+    if (!re.ok) return NextResponse.json({ ok: false, error: `supabase espejo ${re.status} ${(await re.text().catch(() => "")).slice(0, 200)}` }, { status: 502 })
+    const filasE = (await re.json().catch(() => [])) as Array<Record<string, unknown>>
+    void patronE
+    return NextResponse.json({
+      ok: true,
+      q,
+      fuente: "espejo",
+      total: filasE.length,
+      filas: filasE.map((f) => ({
+        session: String(f.session_id || ""),
+        telefono: String(f.telefono_chat || ""),
+        autor: String(f.autor || ""),
+        at: f.recibido_at,
+        tipo: f.tipo,
+        texto: String(f.texto || "").slice(0, 300),
+        media: String(f.media_texto || "").slice(0, 500),
+      })),
+    })
+  }
+
   // ilike con comodines; PostgREST exige escapar % como %25 en la URL.
   const patron = encodeURIComponent(`%${q}%`)
   const filtroRol = rol === "user" || rol === "assistant" ? `&role=eq.${rol}` : ""
