@@ -97,8 +97,10 @@ async function rosterEspejos(token: string): Promise<Usuario[]> {
     } | null
     for (const u of cuerpo?.users || []) {
       const email = String(u.email || "").toLowerCase()
-      if (!PERFILES.has(String(u.profile?.name || "")) || !email) continue
-      out.push({ nombre: String(u.full_name || email), email, sesion: email.split("@")[0] })
+      if (!email) continue
+      const sesion = email.split("@")[0]
+      if (!PERFILES.has(String(u.profile?.name || "")) && !SESIONES_EXTRA.includes(sesion)) continue
+      out.push({ nombre: String(u.full_name || email), email, sesion })
     }
     if (!cuerpo?.info?.more_records) break
   }
@@ -234,10 +236,15 @@ export async function GET(req: Request) {
       continue
     }
 
-    const atMs = Date.parse(st.at || "")
-    const caidoMs = Number.isFinite(atMs) ? ahora - atMs : Number.POSITIVE_INFINITY
+    // `at` NO sirve para medir la caída: el auto-rescate del worker (~5 min)
+    // re-estampa "en_pausa_sin_vincular" con hora nueva, así que "hace 1 minuto"
+    // era Eddyluz caída desde el 14-sep. Se mide desde la PRIMERA vez que ESTA
+    // alarma la vio caída (kv espejo_caido_desde_<s>), y se limpia al conectar.
+    const caidaDesdeKey = `espejo_caido_desde_${u.sesion}`
+    let caidaDesde = (await getKvValue(caidaDesdeKey).catch(() => null)) || ""
 
     if (st.estado === "conectado") {
+      if (caidaDesde && !dry) await setKvValue(caidaDesdeKey, "").catch(() => {})
       if (candado) {
         recuperados++
         fila.accion = "recuperado"
@@ -252,7 +259,13 @@ export async function GET(req: Request) {
     }
 
     // Desconectado.
-    fila.caidoHace = Number.isFinite(caidoMs) ? horasTexto(caidoMs) : "sin fecha"
+    if (!Number.isFinite(Date.parse(caidaDesde))) {
+      caidaDesde = st.at && Number.isFinite(Date.parse(st.at)) ? String(st.at) : new Date(ahora).toISOString()
+      if (!dry) await setKvValue(caidaDesdeKey, caidaDesde).catch(() => {})
+    }
+    const caidoMs = ahora - Date.parse(caidaDesde)
+    fila.caidoDesde = caidaDesde
+    fila.caidoHace = horasTexto(caidoMs)
     if (caidoMs < UMBRAL_MIN * 60_000) {
       fila.accion = `caido_reciente_espera_${UMBRAL_MIN}min`
       filas.push(fila)
@@ -275,7 +288,7 @@ export async function GET(req: Request) {
       const link = tokenLink
         ? `${BASE_URL}/api/vic-admin-wa-espejo?session=${encodeURIComponent(u.sesion)}&t=${encodeURIComponent(tokenLink)}`
         : `${BASE_URL}/oportunidades?vista=espejos`
-      const desde = Number.isFinite(caidoMs) ? horasTexto(caidoMs) : "un tiempo"
+      const desde = horasTexto(caidoMs)
       const r = await enviarCorreo(
         token,
         [u.email],
@@ -286,7 +299,7 @@ export async function GET(req: Request) {
       fila.correo = r.ok ? "enviado" : `fallo: ${r.error}`
       // El candado se escribe aunque el correo falle: el aviso interno queda
       // igual y no se martilla a Zoho cada hora con un 400.
-      if (!candado) await setKvValue(`espejo_alerta_${u.sesion}`, st.at || new Date(ahora).toISOString()).catch(() => {})
+      if (!candado) await setKvValue(`espejo_alerta_${u.sesion}`, caidaDesde).catch(() => {})
       await setKvValue(`espejo_alerta_ultimo_${u.sesion}`, new Date(ahora).toISOString()).catch(() => {})
       await avisarEquipoInterno(`🪞 Espejo de ${u.nombre} (${u.sesion}) ${etiquetaEstado(String(st.estado))} hace ${desde}. Correo ${r.ok ? "enviado" : "FALLÓ: " + (r.error || "")}.`).catch(() => false)
     }
