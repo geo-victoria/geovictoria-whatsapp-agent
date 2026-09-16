@@ -53,17 +53,20 @@ const PERFILES = new Set(["Ejecutivo Comercial", "Telemarketing"])
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 
-/** Sesiones que el panel 🪞 ya conoce (kv espejo_link_<sesión>): son las que
- *  el worker puede tener; los ~60 comerciales de otros países no cuentan. */
+/** Sesiones que el WORKER conoce (kv wa_espejo_status_<sesión>) + las que
+ *  deberían existir y no existen (env VICKY_ESPEJO_SESIONES_EXTRA, default las
+ *  dos SDR). OJO: espejo_link_ NO sirve de filtro — el panel admin genera token
+ *  para los ~70 comerciales de todos los países. */
+const SESIONES_EXTRA = (process.env.VICKY_ESPEJO_SESIONES_EXTRA || "aaraque,asepulveda").split(",").map((s) => s.trim()).filter(Boolean)
 async function sesionesConLink(): Promise<Set<string>> {
-  const out = new Set<string>()
+  const out = new Set<string>(SESIONES_EXTRA)
   if (!SUPABASE_URL || !SUPABASE_KEY) return out
   try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.espejo_link_*&select=key&limit=500`, {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.wa_espejo_status_*&select=key&limit=500`, {
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
       cache: "no-store",
     })
-    for (const f of ((await r.json().catch(() => [])) as Array<{ key: string }>) || []) out.add(String(f.key).replace(/^espejo_link_/, ""))
+    for (const f of ((await r.json().catch(() => [])) as Array<{ key: string }>) || []) out.add(String(f.key).replace(/^wa_espejo_status_/, ""))
   } catch { /* sin kv → roster vacío, el endpoint lo declara */ }
   return out
 }
