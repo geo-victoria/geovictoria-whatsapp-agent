@@ -48,7 +48,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     const orE = encodeURIComponent(`(media_texto.ilike.%${q}%,texto.ilike.%${q}%)`)
     const re = await fetch(
       `${SUPABASE_URL}/rest/v1/vic_wa_espejo_mensajes?or=${orE}&from_me=eq.false&recibido_at=gte.${desde}` +
-        `&select=session_id,telefono_chat,autor,recibido_at,tipo,texto,media_texto&order=recibido_at.desc&limit=${limit}`,
+        `&select=id,media_path,session_id,telefono_chat,autor,recibido_at,tipo,texto,media_texto&order=recibido_at.desc&limit=${limit}`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, cache: "no-store" },
     )
     if (!re.ok) return NextResponse.json({ ok: false, error: `supabase espejo ${re.status} ${(await re.text().catch(() => "")).slice(0, 200)}` }, { status: 502 })
@@ -60,6 +60,8 @@ export async function GET(req: Request): Promise<NextResponse> {
       fuente: "espejo",
       total: filasE.length,
       filas: filasE.map((f) => ({
+        id: String(f.id || ""),
+        mediaPath: String(f.media_path || ""),
         session: String(f.session_id || ""),
         telefono: String(f.telefono_chat || ""),
         autor: String(f.autor || ""),
