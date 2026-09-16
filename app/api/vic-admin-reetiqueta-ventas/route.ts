@@ -75,6 +75,7 @@ type Fila = {
   descartada: string[]
   notasHumanas: number
   notasEspejo: number
+  notasDetalle: Array<{ autor: string; at: string; extracto: string; rubrica: string }>
   llamadas: number
   reuniones: number
 }
@@ -87,6 +88,11 @@ export async function GET(req: Request): Promise<NextResponse> {
   const offset = Math.max(0, Number(sp.get("offset") || 0) || 0)
   const max = Math.min(120, Math.max(1, Number(sp.get("max") || 40) || 40))
   const refrescar = sp.get("refrescar") === "1"
+  // Variante "fecha implícita": la nota de Zoho YA trae fecha (Created_Time),
+  // así que "fecha y canal" se da por cumplido con el canal o con la fecha
+  // del registro. Sirve para medir cuánto de lo que cae con la rúbrica
+  // literal cae solo por no escribir "por llamada/WhatsApp" dentro de la nota.
+  const fechaImplicita = sp.get("fechaImplicita") === "1"
   const csv = sp.get("csv") === "1"
   const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
 
@@ -127,17 +133,17 @@ export async function GET(req: Request): Promise<NextResponse> {
       actual: String(actual.get(v.quoteId) || "sd"),
     }
     if (!v.dealId) {
-      filas.push({ ...base, nuevo: "sd", motivo: "sin deal asociado", evidencia: [], descartada: [], notasHumanas: 0, notasEspejo: 0, llamadas: 0, reuniones: 0 })
+      filas.push({ ...base, nuevo: "sd", motivo: "sin deal asociado", evidencia: [], descartada: [], notasHumanas: 0, notasEspejo: 0, notasDetalle: [], llamadas: 0, reuniones: 0 })
       continue
     }
-    if (!refrescar) {
+    if (!refrescar && !fechaImplicita) {
       const c = await getKvValue(claveV3(v.quoteId)).catch(() => null)
       if (c) {
         try {
           const j = JSON.parse(c) as ResultadoV3 & { notasHumanas?: number; notasEspejo?: number; llamadas?: number; reuniones?: number; rubrica?: string }
           if (j?.veredicto && j.rubrica === VERSION_RUBRICA) {
             desdeCache++
-            filas.push({ ...base, nuevo: j.veredicto, motivo: j.motivo, evidencia: j.evidencia || [], descartada: j.descartada || [], notasHumanas: j.notasHumanas || 0, notasEspejo: j.notasEspejo || 0, llamadas: j.llamadas || 0, reuniones: j.reuniones || 0 })
+            filas.push({ ...base, nuevo: j.veredicto, motivo: j.motivo, evidencia: j.evidencia || [], descartada: j.descartada || [], notasHumanas: j.notasHumanas || 0, notasEspejo: j.notasEspejo || 0, notasDetalle: (j as { notasDetalle?: Fila["notasDetalle"] }).notasDetalle || [], llamadas: j.llamadas || 0, reuniones: j.reuniones || 0 })
             continue
           }
         } catch { /* recalcula */ }
@@ -158,9 +164,10 @@ export async function GET(req: Request): Promise<NextResponse> {
       if (!rosterIds.has(autorId)) { notas.push({ id: String(n.id || ""), autorId, autorNombre: n.Created_By?.name || undefined, creadaMs, esEspejo: false, rubrica: null }); continue }
       notasHumanas++
       const contenido = `${titulo}\n${String(n.Note_Content || "")}`.trim()
-      const rubrica = await evaluarNota(String(n.id || ""), contenido, apiKey)
-      if (rubrica && !/^(sgto|segui)/i.test(contenido) && contenido.length >= 12) notasEvaluadasModelo++
-      notas.push({ id: String(n.id || ""), autorId, autorNombre: nombreDe(autorId, n.Created_By?.name || undefined), creadaMs, esEspejo: false, rubrica, extracto: contenido.replace(/\s+/g, " ").slice(0, 110) })
+      const rubricaBase = await evaluarNota(String(n.id || ""), contenido, apiKey)
+      if (rubricaBase && !/^(sgto|segui)/i.test(contenido) && contenido.length >= 12) notasEvaluadasModelo++
+      const rubrica = rubricaBase && fechaImplicita ? { ...rubricaBase, fechaCanal: true } : rubricaBase
+      notas.push({ id: String(n.id || ""), autorId, autorNombre: nombreDe(autorId, n.Created_By?.name || undefined), creadaMs, esEspejo: false, rubrica, extracto: contenido.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 110) })
     }
     // Llamadas y reuniones colgadas del deal.
     const [calls, events] = await Promise.all([
@@ -175,8 +182,14 @@ export async function GET(req: Request): Promise<NextResponse> {
       id: String(e.id || ""), ownerId: String(e.Owner?.id || ""), inicioMs: Date.parse(String(e.Start_DateTime || "")), titulo: e.Event_Title || undefined,
     }))
     const res = clasificarGestionV3({ pagoMs: v.fechaMs, notas, llamadas, reuniones, rosterIds })
-    filas.push({ ...base, nuevo: res.veredicto, motivo: res.motivo, evidencia: res.evidencia, descartada: res.descartada, notasHumanas, notasEspejo, llamadas: llamadas.length, reuniones: reuniones.length })
-    await setKvValue(claveV3(v.quoteId), JSON.stringify({ ...res, notasHumanas, notasEspejo, llamadas: llamadas.length, reuniones: reuniones.length, rubrica: VERSION_RUBRICA, at: new Date().toISOString() })).catch(() => null)
+    const notasDetalle = notas.filter((n) => !n.esEspejo && rosterIds.has(n.autorId)).map((n) => ({
+      autor: n.autorNombre || n.autorId,
+      at: new Date(n.creadaMs).toISOString().slice(0, 16),
+      extracto: n.extracto || "",
+      rubrica: n.rubrica ? Object.entries(n.rubrica).filter(([, v]) => v).map(([k]) => k).join(",") || "nada" : "sin evaluar",
+    }))
+    filas.push({ ...base, nuevo: res.veredicto, motivo: res.motivo, evidencia: res.evidencia, descartada: res.descartada, notasHumanas, notasEspejo, notasDetalle, llamadas: llamadas.length, reuniones: reuniones.length })
+    if (!fechaImplicita) await setKvValue(claveV3(v.quoteId), JSON.stringify({ ...res, notasHumanas, notasEspejo, notasDetalle, llamadas: llamadas.length, reuniones: reuniones.length, rubrica: VERSION_RUBRICA, at: new Date().toISOString() })).catch(() => null)
   }
 
   const cuenta = (k: "actual" | "nuevo") => {
@@ -197,6 +210,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   return NextResponse.json({
     ok: true,
     desde,
+    variante: fechaImplicita ? "fecha implícita (la fecha la pone Zoho; la nota solo debe dejar claro el canal o basta el registro)" : "rúbrica literal de Victoria (fecha y canal dentro de la nota)",
     definicion: {
       asistida: "interacción bidireccional (respuesta del cliente, llamada contestada o reunión) + gestión documentada por TELEMARKETING antes del pago; nota mínima = fecha/canal + resumen + gestión; notas hasta 24 h después del pago si describen algo anterior",
       autonoma: "sin gestión, o solo intentos sin respuesta; las SDR y todo lo posterior al pago son postventa",
