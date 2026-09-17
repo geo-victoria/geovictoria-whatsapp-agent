@@ -83,5 +83,10 @@ export async function POST(req: Request): Promise<Response> {
     },
     { dry: body.dry === true || body.dry === "1", forzar: body.forzar === true || body.forzar === "1", correos: typeof body.correos === "boolean" ? body.correos : undefined },
   )
+  console.log(
+    `[correo-entrante] from=${from} subject="${String(body.subject || "").slice(0, 60)}" adjuntos=${adjuntos.length}` +
+      (adjuntos.length ? ` [${adjuntos.map((a) => `${a.nombre}|${a.tipo || "?"}|${a.bytes}b${a.inline ? "|inline" : ""}`).join(", ")}]` : "") +
+      ` → ${r.veredicto}${r.origen ? ` (${r.origen})` : ""}${r.numero ? ` ${r.numero}` : ""}`,
+  )
   return NextResponse.json({ ok: r.veredicto !== "error", adjuntosRecibidos: adjuntos.length, ...r }, { status: r.veredicto === "error" ? 502 : 200 })
 }
