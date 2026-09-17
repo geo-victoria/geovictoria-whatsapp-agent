@@ -6,8 +6,8 @@
  * modelo copia mensajeParaProspecto, jamás calcula).
  *
  * Capacidades Fase 1b: cotización referencial (IGV 18% incluido en totales;
- * descuento ÚNICO 20% x 4 primeras facturas SOLO como cierre, vía
- * conDescuentoCierre), derivación a la ejecutiva única de Perú (Mónica
+ * descuento = escalera chilena 10 → 20 % en el plan por 6 meses vía
+ * escalonDescuento), derivación a la ejecutiva única de Perú (Mónica
  * Mendoza — sin tómbola ni SDRs), opt-out/perdido (marcar_no_contactar) y
  * seguimiento consensuado (programar_seguimiento, default America/Lima) —
  * las señales las procesa el route.
@@ -31,6 +31,8 @@
  */
 
 import { cotizarPE, formatearPEN, type PuntoInstalacionPE, type ZonaPE } from "./cotizar.ts"
+import { tipoCambioSunat } from "./tc-sunat.ts"
+import { ESCALERA_DESCUENTO_PE } from "./catalogo.ts"
 import { CORREO_SSTT_PE } from "./catalogo.ts"
 import { rucValido, formatearRuc } from "../../rut.ts"
 import {
@@ -126,7 +128,7 @@ export const TOOL_SCHEMAS_PE = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula la cotización referencial de Perú (1 a 50 usuarios) en soles. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (primer mes por adelantado + reloj en compra si aplica; los totales ya incluyen el IGV 18%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad; arriendo por defecto — venta SOLO si el cliente pidió comprar) y `puntosInstalacion` (uno por punto físico, con la ciudad tal como la dijo el cliente y su zona: 'lima' = Lima Metropolitana incluido el Callao, 'provincias' = cualquier otra ciudad del Perú). En Lima Metropolitana el envío va sin costo y la instalación con visita técnica tiene tarifario POR DISTRITO (algunos sin costo, otros con tarifa US$ + IGV que servicio técnico factura aparte) — por eso en Lima la `ubicacion` debe ser el DISTRITO (pregúntalo); a provincia el envío corre por cuenta del cliente y la instalación se coordina aparte con servicio técnico. La tool arma esas notas con los montos exactos, tú solo transcribes la ubicación. `conDescuentoCierre=true` SOLO cuando ofreciste el 20% de las 4 primeras facturas como CIERRE (cliente trabado por precio) y quieres mostrarle el monto exacto — jamás en la primera cotización.",
+      "Calcula la cotización referencial de Perú (1 a 50 usuarios) en soles. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (primer mes por adelantado + reloj en compra si aplica; los totales ya incluyen el IGV 18%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad; arriendo por defecto — venta SOLO si el cliente pidió comprar) y `puntosInstalacion` (uno por punto físico, con la ciudad tal como la dijo el cliente y su zona: 'lima' = Lima Metropolitana incluido el Callao, 'provincias' = cualquier otra ciudad del Perú). En Lima Metropolitana el envío va sin costo y la instalación con visita técnica tiene tarifario POR DISTRITO (algunos sin costo, otros con tarifa US$ + IGV que servicio técnico factura aparte) — por eso en Lima la `ubicacion` debe ser el DISTRITO (pregúntalo); a provincia el envío corre por cuenta del cliente y la instalación se coordina aparte con servicio técnico. La tool arma esas notas con los montos exactos, tú solo transcribes la ubicación. `escalonDescuento` SOLO ante una objeción de PRECIO después de mostrar la lista: 1 = 10% en el plan por 6 meses, 2 = 20% (segunda objeción). Jamás en la primera cotización ni proactivo; NUNCA calcules tú el monto rebajado — la tool lo devuelve.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -171,10 +173,11 @@ export const TOOL_SCHEMAS_PE = [
           description:
             "Un punto por cada lugar físico con reloj. Obligatorio si hay reloj en VENTA; en arriendo pásalo si conoces las ubicaciones (sirve para las notas de envío/instalación fuera de Lima).",
         },
-        conDescuentoCierre: {
-          type: "boolean" as const,
+        escalonDescuento: {
+          type: "number" as const,
+          enum: [0, 1, 2],
           description:
-            "true SOLO al aplicar el 20% de descuento en las 4 primeras facturas como herramienta de CIERRE (el cliente ya vio el precio de lista y duda por precio). Nunca en la primera cotización ni proactivo.",
+            "Escalón de descuento del PLAN (escalera 10% → 20%, 6 meses), SOLO como respuesta a una objeción de precio tras mostrar la lista: 1 la primera vez, 2 si insiste. 0 u omitido = sin descuento. Nunca proactivo.",
         },
       },
       required: ["userCount"],
@@ -183,7 +186,7 @@ export const TOOL_SCHEMAS_PE = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles con IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, email, RUC válido (11 dígitos) y la configuración (userCount; reloj y puntos si lleva). `conDescuentoCierre=true` SOLO si el cliente aceptó el 20% de las 4 primeras facturas como cierre — el pago inicial sale con ese descuento aplicado. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles con IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, email, RUC válido (11 dígitos) y la configuración (userCount; reloj y puntos si lleva). `escalonDescuento` = el mismo escalón (1 o 2) que el cliente ACEPTÓ en cotizar_referencial — la cotización nace con ese % en el plan por 6 meses y el pago inicial ya lo refleja. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -212,9 +215,10 @@ export const TOOL_SCHEMAS_PE = [
             required: ["ubicacion", "zona", "autoInstalada"],
           },
         },
-        conDescuentoCierre: {
-          type: "boolean" as const,
-          description: "true SOLO si el cliente aceptó el 20% de cierre en las 4 primeras facturas.",
+        escalonDescuento: {
+          type: "number" as const,
+          enum: [0, 1, 2],
+          description: "Escalón de descuento del plan que el cliente ACEPTÓ (1 = 10%, 2 = 20%, por 6 meses). 0 u omitido = sin descuento.",
         },
       },
       required: ["empresa", "contacto", "email", "ruc", "userCount"],
@@ -223,7 +227,7 @@ export const TOOL_SCHEMAS_PE = [
   {
     name: "derivar_a_ejecutivo",
     description:
-      "Registra al prospecto como lead en el CRM (territorio Perú) y lo deja en manos de nuestra ejecutiva comercial de GeoVictoria Perú, que lo contactará para continuar (callback pedido, más de 50 usuarios, preguntas fuera de alcance, solicitud explícita de hablar con una persona, o si generar_link_cotizadora falló). Pasa TODO lo que sepas del prospecto; si ya acordó una configuración y precios con cotizar_referencial, inclúyelos en `resumen` (con el RUC si lo dio y si aceptó el 20% de cierre) para que la ejecutiva formalice sin re-preguntar. Devuelve `mensajeParaProspecto` para confirmarle al cliente.",
+      "Registra al prospecto como lead en el CRM (territorio Perú) y lo deja en manos de nuestra ejecutiva comercial de GeoVictoria Perú, que lo contactará para continuar (callback pedido, más de 50 usuarios, preguntas fuera de alcance, solicitud explícita de hablar con una persona, o si generar_link_cotizadora falló). Pasa TODO lo que sepas del prospecto; si ya acordó una configuración y precios con cotizar_referencial, inclúyelos en `resumen` (con el RUC si lo dio y el descuento ofrecido, si hubo) para que la ejecutiva formalice sin re-preguntar. Devuelve `mensajeParaProspecto` para confirmarle al cliente.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -243,7 +247,7 @@ export const TOOL_SCHEMAS_PE = [
         resumen: {
           type: "string" as const,
           description:
-            "Resumen para la ejecutiva: necesidad, configuración acordada, precios cotizados (y si aceptó el 20% de las 4 primeras facturas), zonas de instalación, dolores mencionados.",
+            "Resumen para la ejecutiva: necesidad, configuración acordada, precios cotizados (y el descuento ofrecido, si hubo), zonas de instalación, dolores mencionados.",
         },
       },
       required: ["nombre", "motivo", "resumen"],
@@ -285,7 +289,15 @@ type CotizarInputPE = {
   userCount?: number
   reloj?: { modalidad?: "arriendo" | "venta"; cantidad?: number }
   puntosInstalacion?: Array<{ ubicacion?: string; zona?: string; autoInstalada?: boolean }>
+  escalonDescuento?: number
+  /** Compatibilidad con turnos antiguos: true equivale al escalón 1. */
   conDescuentoCierre?: boolean
+}
+
+function escalonDe(i: CotizarInputPE): number {
+  const e = Math.floor(Number(i.escalonDescuento) || 0)
+  if (e > 0) return Math.min(e, ESCALERA_DESCUENTO_PE.planMensual.length)
+  return i.conDescuentoCierre === true ? 1 : 0
 }
 
 type DerivarInputPE = {
@@ -344,6 +356,7 @@ export function buildDispatchPE(contact: string) {
           // de envío/instalación fuera de Lima.
           puntos = normalizarPuntosPE(Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : [])
         }
+        const tc = await tipoCambioSunat()
         const r = cotizarPE({
           userCount,
           reloj:
@@ -351,8 +364,10 @@ export function buildDispatchPE(contact: string) {
               ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
               : undefined,
           puntos,
-          conDescuentoCierre: i.conDescuentoCierre === true,
+          escalonDescuento: escalonDe(i),
+          tipoCambio: tc.venta,
         })
+        if (i.reloj) console.log(`[pe-tools] reloj cotizado con TC SUNAT ${tc.venta} (${tc.fuente}, ${tc.fecha})`)
         // Punto fuera de Lima con instalación pedida → aviso interno al
         // servicio técnico PE. No hay helper de correo directo reutilizable
         // (todos los envíos del repo son Zoho send_mail SOBRE un registro, y
@@ -374,7 +389,7 @@ export function buildDispatchPE(contact: string) {
             // El aviso interno nunca puede tumbar la cotización.
           }
         }
-        return { ok: true, mensajeParaProspecto: r.mensajeParaProspecto }
+        return { ok: true, escalonDescuento: r.escalonDescuento, mensajeParaProspecto: r.mensajeParaProspecto }
       }
 
       if (name === "generar_link_cotizadora") {
@@ -409,7 +424,8 @@ export function buildDispatchPE(contact: string) {
         if (!SECRET_COTIZADORA_PE) {
           return { ok: false, error: "Cotizadora PE no configurada (secreto faltante). Usa derivar_a_ejecutivo (motivo cotizacion_formal)." }
         }
-        const conDescuento = i.conDescuentoCierre === true
+        const escalon = escalonDe(i)
+        const tc = await tipoCambioSunat()
         const calculo = cotizarPE({
           userCount: Number(i.userCount || 0),
           reloj:
@@ -417,10 +433,14 @@ export function buildDispatchPE(contact: string) {
               ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
               : undefined,
           puntos,
-          conDescuentoCierre: conDescuento,
+          escalonDescuento: escalon,
+          tipoCambio: tc.venta,
         })
+        const conDescuento = calculo.descuentoPct > 0
+        const pctTxt = `${Math.round(calculo.descuentoPct * 100)}%`
+        const mesesTxt = `${ESCALERA_DESCUENTO_PE.meses} meses`
         // ACTIVACIÓN explícita = primer mes por adelantado con la MISMA
-        // matemática del motor (incluye el 20% de cierre si aplica): el
+        // matemática del motor (incluye el descuento del plan si aplica): el
         // endpoint respeta la fila del agente; su fallback es a precio de
         // lista. primerMes = pagoInicialNeto − pagos únicos de catálogo.
         const r2 = (v: number) => Math.round(v * 100) / 100
@@ -435,7 +455,7 @@ export function buildDispatchPE(contact: string) {
             id: "activacion",
             nombre: "Activación",
             descripcion: conDescuento
-              ? "Habilitación del servicio: primer mes del plan por adelantado, con el 20% de descuento de tus 4 primeras facturas."
+              ? `Habilitación del servicio: primer mes del plan por adelantado, ya con el ${pctTxt} de descuento del plan (${mesesTxt}).`
               : undefined,
             modalidad: "Cobro único",
             cantidad: 1,
@@ -456,6 +476,13 @@ export function buildDispatchPE(contact: string) {
             contactoTelefono: `+${contact}`,
             userCount: Number(i.userCount || 0),
             items,
+            // Igual que Chile: el % del plan viaja como escalón y el cotizador
+            // lo estampa en la cotización (los ítems van a precio de lista).
+            escalonDescuento: escalon,
+            // Dólar SUNAT con el que se convirtió el reloj (queda en la
+            // cotización para la nota de venta en USD).
+            tipoCambio: calculo.tipoCambio,
+            tipoCambioFuente: tc.fuente,
           }),
           cache: "no-store",
         })
@@ -489,7 +516,7 @@ export function buildDispatchPE(contact: string) {
           // cotización (anti-amnesia: retomar la formal en turnos futuros).
           acceptanceUrl: data.acceptanceUrl,
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas: con tarjeta vía Mercado Pago (se confirma al instante) o por transferencia a la cuenta BBVA de GeoVictoria Perú que aparece en la misma página (después me mandas el comprobante por este chat): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialTotal)} (incluye tu primer mes por adelantado${conDescuento ? ", ya con el 20% de descuento" : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualTotalConDescuento : calculo.mensualTotal)}${conDescuento ? ` las primeras 4 facturas (luego ${formatearPEN(calculo.mensualTotal)})` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas: con tarjeta vía Mercado Pago (se confirma al instante) o por transferencia a la cuenta BBVA de GeoVictoria Perú que aparece en la misma página (después me mandas el comprobante por este chat): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialTotal)} (incluye tu primer mes por adelantado${conDescuento ? `, ya con el ${pctTxt} de descuento en el plan` : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualTotalConDescuento : calculo.mensualTotal)}${conDescuento ? ` durante ${mesesTxt} (luego ${formatearPEN(calculo.mensualTotal)})` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
         }
       }
 

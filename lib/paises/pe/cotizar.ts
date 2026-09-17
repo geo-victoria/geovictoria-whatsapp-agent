@@ -5,7 +5,10 @@
  *   - Plan asistencia: 1-10 → S/100 fijo · 11-20 → S/200 fijo ·
  *     21-50 → S/5/usuario. (Anomalía 21+ documentada en pe/catalogo.ts:
  *     literal del excel, aprobada.)
- *   - Reloj: arriendo S/70/mes por unidad · venta S/525 por unidad.
+ *   - Reloj: precio de LISTA en USD (RELOJ_PE_USD: arriendo US$24/mes ·
+ *     venta US$90) convertido a SOLES ENTEROS con el dólar venta SUNAT del
+ *     día (`tipoCambio` de la entrada). El tipo de cambio queda en la
+ *     cotización para que el cotizador y la nota de venta lo conozcan.
  *   - Envío: S/0 en LIMA METROPOLITANA. A PROVINCIA lo ASUME EL CLIENTE
  *     (VB Diego 05-ago): sin línea de cobro; se informa en nota.
  *   - Instalación (doc "Políticas de cobro visitas e instalaciones",
@@ -21,18 +24,21 @@
  *     mensual según usuarios activos.
  *   - IMPUESTOS: IGV 18% en TODOS los conceptos (los fijos también). Los
  *     totales al prospecto van CON IGV (neto + IGV = total).
- *   - DESCUENTO (único, herramienta de CIERRE — jamás proactivo): 20% en
- *     las 4 primeras facturas. Con descuento, el primer mes del pago
- *     inicial ya va al 20%; facturas 2-4 con 20%; desde la 5ª, lista.
+ *   - DESCUENTO = CHILE (Lalo 17-sep): escalera 10 % → 20 % sobre el PLAN
+ *     mensual (el arriendo del reloj NO se descuenta), por 6 meses, solo ante
+ *     objeción de precio. `escalonDescuento` 1 = 10 %, 2 = 20 %. El primer
+ *     mes del pago inicial ya va con el descuento; desde el mes 7, lista.
  *
  * El mensajeParaProspecto va en peruano neutro (tuteo cordial) y formato
  * PEN ("S/318.60"). Es la única fuente de precios que Vicky PE comunica.
  *
- * Ejemplo CONFIRMADO por Lalo (04-ago): 15 personas + reloj arriendo Lima =
- * S/270 neto → S/318.60/mes con IGV; con descuento S/254.88 las primeras 4.
+ * Ejemplo (lista 17-sep, TC 3,372): 15 personas + reloj arriendo Lima =
+ * S/82,5 + S/81 = S/163,50 neto → S/192,93/mes con IGV; con 10 % en el plan
+ * S/183,20 los primeros 6 meses.
  */
 
-import { CATALOGO_MODULOS_PE, ESCALERA_DESCUENTO_PE, tarifaVisitaLimaPE } from "./catalogo.ts"
+import { CATALOGO_MODULOS_PE, ESCALERA_DESCUENTO_PE, RELOJ_PE_USD, tarifaVisitaLimaPE } from "./catalogo.ts"
+import { TC_USD_PEN_FALLBACK, usdASoles } from "./tc-sunat.ts"
 
 // IGV peruano: 18% parejo en todos los conceptos. Solo lo escribe este motor.
 const IGV_PE = 0.18
@@ -53,8 +59,13 @@ export type CotizacionPEInput = {
     cantidad: number
   }
   puntos?: PuntoInstalacionPE[]
-  /** true si el cliente ACEPTÓ el 20% de cierre (4 primeras facturas). */
-  conDescuentoCierre?: boolean
+  /**
+   * Escalón de descuento del PLAN (escalera chilena): 0 = sin descuento,
+   * 1 = 10 %, 2 = 20 %. Solo ante objeción de precio.
+   */
+  escalonDescuento?: number
+  /** Dólar venta SUNAT (soles por dólar) para convertir el reloj. */
+  tipoCambio?: number
 }
 
 export type LineaPE = {
@@ -87,10 +98,21 @@ export type ItemCotizadorPE = {
   afectoIgv: boolean
 }
 
-const TARIFAS_PE = {
-  relojArriendoMes: 70,
-  relojVenta: 525,
-} as const
+/** Tarifas del reloj EN SOLES para un tipo de cambio dado (soles enteros). */
+export function tarifasRelojPE(tipoCambio: number) {
+  const tc = Number.isFinite(tipoCambio) && tipoCambio > 0 ? tipoCambio : TC_USD_PEN_FALLBACK
+  return {
+    relojArriendoMes: usdASoles(RELOJ_PE_USD.arriendoMes, tc),
+    relojVenta: usdASoles(RELOJ_PE_USD.venta, tc),
+    tipoCambio: tc,
+  }
+}
+
+/** % de descuento del plan para un escalón (0 → 0, 1 → 0,1, 2 → 0,2). */
+export function pctDescuentoPE(escalonDescuento: number): number {
+  const e = Math.max(0, Math.min(ESCALERA_DESCUENTO_PE.planMensual.length, Math.floor(Number(escalonDescuento) || 0)))
+  return e === 0 ? 0 : ESCALERA_DESCUENTO_PE.planMensual[e - 1]
+}
 
 /** "S/318.60" · "S/270" — soles con 2 decimales solo si hay fracción. */
 export function formatearPEN(monto: number): string {
@@ -127,8 +149,14 @@ export function cotizarPE(input: CotizacionPEInput): {
   mensualNeto: number
   mensualIgv: number
   mensualTotal: number
-  /** Total mensual de las primeras 4 facturas si aplica el 20% (0 si no). */
+  /** % de descuento del plan aplicado (0 · 0,1 · 0,2). */
+  descuentoPct: number
+  /** Escalón aplicado (0, 1 o 2). */
+  escalonDescuento: number
+  /** Total mensual con IGV durante los meses con descuento (0 si no hay). */
   mensualTotalConDescuento: number
+  /** Dólar SUNAT usado para el reloj. */
+  tipoCambio: number
   pagoInicialNeto: number
   pagoInicialIgv: number
   pagoInicialTotal: number
@@ -138,10 +166,14 @@ export function cotizarPE(input: CotizacionPEInput): {
   avisoSsttPeru: boolean
   mensajeParaProspecto: string
 } {
-  const { userCount, reloj, puntos = [], conDescuentoCierre = false } = input
+  const { userCount, reloj, puntos = [] } = input
   if (!Number.isFinite(userCount) || userCount < 1) {
     throw new Error("userCount inválido")
   }
+  const TARIFAS_PE = tarifasRelojPE(Number(input.tipoCambio))
+  const escalonDescuento = Math.max(0, Math.min(ESCALERA_DESCUENTO_PE.planMensual.length, Math.floor(Number(input.escalonDescuento) || 0)))
+  const pctDescuento = pctDescuentoPE(escalonDescuento)
+  const conDescuento = pctDescuento > 0
   const tier = tierPlanPE(userCount)
   const plan = precioPlanPE(userCount)
   const lineas: LineaPE[] = []
@@ -151,7 +183,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     concepto: "Control de Asistencia",
     detalle:
       tier.modalidad === "fijo"
-        ? `Plan mensual (tarifa fija del tramo ${tier.minUsuarios}-${tier.maxUsuarios} usuarios)`
+        ? `Plan mensual (tarifa fija hasta ${tier.maxUsuarios} usuarios)`
         : `Plan mensual: ${userCount} usuarios × ${formatearPEN(tier.precioUF)}`,
     neto: plan,
     igv: plan * IGV_PE,
@@ -247,16 +279,14 @@ export function cotizarPE(input: CotizacionPEInput): {
   const mensualNeto = plan + arriendoNeto
   const mensualIgv = mensualNeto * IGV_PE
   const mensualTotal = mensualNeto + mensualIgv
-  // Descuento de cierre: 20% sobre el plan mensual COMPLETO (plan + arriendo)
-  // en las 4 primeras facturas — el ejemplo confirmado (S/270 → S/254.88)
-  // aplica el 20% al total mensual, arriendo incluido.
-  const pctDescuento = ESCALERA_DESCUENTO_PE.planMensual[0]
-  const mensualTotalConDescuento = conDescuentoCierre
-    ? mensualNeto * (1 - pctDescuento) * (1 + IGV_PE)
-    : 0
-  // Pago inicial = pagos únicos + PRIMER MES por adelantado (con descuento si
-  // el cliente lo aceptó: la primera factura ES parte de las 4).
-  const primerMesNeto = conDescuentoCierre ? mensualNeto * (1 - pctDescuento) : mensualNeto
+  // Descuento = Chile: el % aplica SOLO al plan (el arriendo del reloj va a
+  // lista), durante ESCALERA_DESCUENTO_PE.meses meses.
+  const planConDescuento = plan * (1 - pctDescuento)
+  const mensualNetoConDescuento = planConDescuento + arriendoNeto
+  const mensualTotalConDescuento = conDescuento ? mensualNetoConDescuento * (1 + IGV_PE) : 0
+  // Pago inicial = pagos únicos + PRIMER MES por adelantado (con el descuento
+  // si el cliente lo aceptó: el primer mes es parte de los 6).
+  const primerMesNeto = conDescuento ? mensualNetoConDescuento : mensualNeto
   const pagoInicialNeto = ventaNeto + primerMesNeto
   const pagoInicialIgv = pagoInicialNeto * IGV_PE
   const pagoInicialTotal = pagoInicialNeto + pagoInicialIgv
@@ -277,9 +307,9 @@ export function cotizarPE(input: CotizacionPEInput): {
   filas.push(
     `Total mensual: ${formatearPEN(mensualNeto)} + IGV (18%) = ${formatearPEN(mensualTotal)}/mes`,
   )
-  if (conDescuentoCierre) {
+  if (conDescuento) {
     filas.push(
-      `Con el 20% de descuento en tus 4 primeras facturas: ${formatearPEN(mensualTotalConDescuento)}/mes (desde la 5ª factura, ${formatearPEN(mensualTotal)}/mes)`,
+      `Con el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses: ${formatearPEN(mensualTotalConDescuento)}/mes (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualTotal)}/mes)`,
     )
   }
   filas.push("")
@@ -295,9 +325,10 @@ export function cotizarPE(input: CotizacionPEInput): {
   }
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-pe) ──
-  // Misma matemática que las líneas, en formato del endpoint. La Activación
-  // (primer mes adelantado) la agrega el endpoint (patrón CO). El descuento
-  // viaja por escalonDescuento, no en los items.
+  // Misma matemática que las líneas, en formato del endpoint. El plan va a
+  // precio de LISTA: el % viaja aparte como `escalonDescuento` y el cotizador
+  // lo estampa en la cotización (Descuento_Recurrente_Pct), igual que Chile.
+  // La Activación (primer mes adelantado, ya con descuento) la manda la tool.
   const itemsCotizador: ItemCotizadorPE[] = []
   itemsCotizador.push({
     tipo: "plan",
@@ -318,7 +349,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "reloj_arriendo",
       nombre: "Arriendo de reloj de control",
       descripcion:
-        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana.",
+        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Tarifa de lista US$${RELOJ_PE_USD.arriendoMes}/mes al tipo de cambio SUNAT del día (S/${TARIFAS_PE.tipoCambio}).`,
       modalidad: "Arriendo mensual",
       cantidad: reloj.cantidad,
       precioUnitarioPEN: TARIFAS_PE.relojArriendoMes,
@@ -333,7 +364,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "reloj_venta",
       nombre: "Reloj de control (compra)",
       descripcion:
-        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana.",
+        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Tarifa de lista US$${RELOJ_PE_USD.venta} al tipo de cambio SUNAT del día (S/${TARIFAS_PE.tipoCambio}).`,
       modalidad: "Venta única",
       cantidad: reloj.cantidad,
       precioUnitarioPEN: TARIFAS_PE.relojVenta,
@@ -353,7 +384,10 @@ export function cotizarPE(input: CotizacionPEInput): {
     mensualNeto,
     mensualIgv,
     mensualTotal,
+    descuentoPct: pctDescuento,
+    escalonDescuento,
     mensualTotalConDescuento,
+    tipoCambio: TARIFAS_PE.tipoCambio,
     pagoInicialNeto,
     pagoInicialIgv,
     pagoInicialTotal,

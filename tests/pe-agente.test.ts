@@ -14,6 +14,10 @@
  *     el gate apagado sobrevive la contención del 04-ago.
  */
 
+// Dólar SUNAT fijo para los tests: sin red ni caché.
+process.env.VICKY_PE_TC_USD = "3.372"
+process.env.VICKY_PE_TC_USD_FORZAR = "1"
+
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -47,10 +51,13 @@ describe("prompt PE — legal peruano", () => {
 })
 
 describe("prompt PE — descuento 20% SOLO como cierre", () => {
-  test("la regla existe: 20%, 4 primeras facturas, como CIERRE", () => {
+  test("la regla existe: escalera 10 → 20 % en el plan, 6 meses, solo ante objeción (= Chile)", () => {
+    assert.match(SYSTEM_PROMPT_PE, /10%/)
     assert.match(SYSTEM_PROMPT_PE, /20%/)
-    assert.match(SYSTEM_PROMPT_PE, /4 (PRIMERAS FACTURAS|primeras facturas)/i)
-    assert.match(SYSTEM_PROMPT_PE, /herramienta de CIERRE|como cierre/i)
+    assert.match(SYSTEM_PROMPT_PE, /6 meses/)
+    assert.match(SYSTEM_PROMPT_PE, /objeci[oó]n de PRECIO/i)
+    // Muere el "20 % en las 4 primeras facturas" del 04-ago.
+    assert.doesNotMatch(SYSTEM_PROMPT_PE, /4 primeras facturas/i)
   })
 
   test("y jamás proactivo ni de entrada", () => {
@@ -58,8 +65,8 @@ describe("prompt PE — descuento 20% SOLO como cierre", () => {
   })
 
   test("el monto rebajado lo entrega la tool (nunca el modelo)", () => {
-    assert.match(SYSTEM_PROMPT_PE, /conDescuentoCierre/)
-    assert.match(SYSTEM_PROMPT_PE, /NUNCA calcules t[uú] el 20%/i)
+    assert.match(SYSTEM_PROMPT_PE, /escalonDescuento=1/)
+    assert.match(SYSTEM_PROMPT_PE, /NUNCA calcules t[uú] el 10% ni el 20%/i)
   })
 })
 
@@ -154,19 +161,26 @@ describe("tools PE — superficie Fase 1b", () => {
       puntosInstalacion: [{ ubicacion: "Lima", zona: "lima", autoInstalada: false }],
     })) as { ok: boolean; mensajeParaProspecto?: string }
     assert.equal(r.ok, true)
-    assert.ok(r.mensajeParaProspecto?.includes("S/318.60")) // IGV 18% incluido
+    assert.ok(r.mensajeParaProspecto?.includes("S/192.93")) // IGV 18% incluido (TC fijo 3,372)
   })
 
-  test("cotizar_referencial con conDescuentoCierre entrega el monto del 20%", async () => {
+  test("cotizar_referencial con escalonDescuento=2 entrega el monto con el 20 % del plan", async () => {
     const dispatch = buildDispatchPE("51999999999")
     const r = (await dispatch("cotizar_referencial", {
       userCount: 15,
       reloj: { modalidad: "arriendo", cantidad: 1 },
-      conDescuentoCierre: true,
-    })) as { ok: boolean; mensajeParaProspecto?: string }
+      escalonDescuento: 2,
+    })) as { ok: boolean; escalonDescuento?: number; mensajeParaProspecto?: string }
     assert.equal(r.ok, true)
-    assert.ok(r.mensajeParaProspecto?.includes("S/254.88"))
-    assert.ok(r.mensajeParaProspecto?.includes("4 primeras facturas"))
+    assert.equal(r.escalonDescuento, 2)
+    assert.ok(r.mensajeParaProspecto?.includes("S/173.46"))
+    assert.ok(r.mensajeParaProspecto?.includes("6 meses"))
+    // Compatibilidad: el flag viejo equivale al primer escalón (10 %).
+    const viejo = (await dispatch("cotizar_referencial", {
+      userCount: 15,
+      conDescuentoCierre: true,
+    })) as { ok: boolean; escalonDescuento?: number }
+    assert.equal(viejo.escalonDescuento, 1)
   })
 
   test("reloj en VENTA sin puntos → error accionable (no cotiza a ciegas)", async () => {

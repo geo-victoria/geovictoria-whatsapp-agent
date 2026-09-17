@@ -1,28 +1,36 @@
 /**
- * Catálogo PERÚ (excel oficial Tropicalizacion_Vicky_2, 04-ago-2026 —
- * fuente de verdad).
+ * Catálogo PERÚ.
  *
- * ⚠️ CONVENCIÓN DE UNIDADES: los campos `precioUF`/`arriendoUF`/`ventaUF`
- * guardan el precio en la UNIDAD DE PRICING del país — en Perú es el SOL
- * PERUANO (PEN) directo, sin unidad indexada. El nombre del campo es
- * herencia del catálogo chileno.
+ * ⚠️ CONVENCIÓN DE UNIDADES: los campos `precioUF` guardan el precio en la
+ * UNIDAD DE PRICING del país — en Perú es el SOL PERUANO (PEN) directo, sin
+ * unidad indexada. El nombre del campo es herencia del catálogo chileno.
  *
- * Precios Perú (PEN, netos — el IGV 18% lo aplica el motor):
- *   Asistencia 1-10:  S/100/mes tarifa FIJA
- *   Asistencia 11-20: S/200/mes tarifa FIJA
- *   Asistencia 21-50: S/5 por usuario/mes
- *   ⚠️ ANOMALÍA DEL EXCEL (avisada a Lalo 04-ago y APROBADA tal cual):
- *   21 usuarios pagan S/105 (21×5), MENOS que los S/200 fijos del tramo
- *   11-20. Es literal del excel — no "corregir" sin orden expresa.
- *   Reloj venta:    S/525 pago único · arriendo S/70/mes
+ * LISTA VIGENTE (decisiones de Lalo 17-sep — SUPERSEDE el excel de
+ * tropicalización del 04-ago y el VB de Diego del 05-ago):
+ *   PLAN = "lista de Mónica" (la que telemarketing PE vende de verdad: 200
+ *   notas de venta confirmadas en Creator, S/5,5 por usuario) con PISO de 10
+ *   personas (propuesta aceptada por Lalo; el piso lo valida Diego Bendezú):
+ *     1-10:  S/55/mes tarifa FIJA (= 10 × S/5,5)
+ *     11-50: S/5,5 por usuario/mes
+ *   Cruzado con Chile en dólares: Mónica es Chile −30 % en todo el rango; la
+ *   lista de agosto era Chile +26 % en 1-10 y más del doble en 11-20.
+ *   Sobre 50 la escalera sigue la de Mónica (51-100 S/5 · 101-500 S/4,5) para la
+ *   tabla de cobro de la nota de venta — ese tramo NO lo vende Vicky.
+ *
+ *   RELOJ (ZKTECO Senseface 2A = artículo Books "304 - [PER] Reloj Gama
+ *   Estándar FACIAL LAN WIFI", SKU PER-BIO-SF2A-ZKT-LW-HTF): su precio de LISTA
+ *   es en DÓLARES — arriendo US$24/mes (golden NDV-32020 de Mónica) · venta
+ *   US$90 (rate del artículo en Books) — y así va en la nota de venta (NDV en
+ *   USD aparte, como se maneja desde siempre en Perú). De cara al CLIENTE se
+ *   cotiza en SOLES: USD × dólar venta SUNAT del día (lib/paises/pe/tc-sunat.ts),
+ *   redondeado a soles enteros.
  *   Envío:          S/0 en LIMA METROPOLITANA (ambas modalidades). A
  *                   PROVINCIA lo ASUME EL CLIENTE (VB Diego 05-ago): nosotros
  *                   no lo cobramos ni lo cotizamos — se informa que corre por
  *                   su cuenta. Sin línea de cobro en ningún caso.
- *   Instalación:    Lima Metropolitana S/0 (incluida) · FUERA NO se cotiza:
- *                   "se coordina con servicio técnico, se cotiza aparte" +
- *                   aviso interno a ssttperu@geovictoria.pro. La venta
- *                   nunca se frena por esto.
+ *   Instalación:    Lima Metropolitana según tarifario por distrito (nota,
+ *                   jamás línea); fuera de Lima "se coordina con servicio
+ *                   técnico, se cotiza aparte" + aviso a ssttperu@geovictoria.pro.
  *   Capacitación:   NO se ofrece en Perú (ni cobrada ni de regalo).
  *
  * PAGO INICIAL (patrón CL/CO): pagos únicos + primer mes del plan por
@@ -31,28 +39,37 @@
  * IGV: 18% en TODOS los conceptos — lo aplica el motor (pe/cotizar.ts);
  * este catálogo es neto.
  *
- * DESCUENTO (Lalo 04-ago, tras ida y vuelta — DEFINITIVO): única herramienta
- * de negociación = 20% en las 4 PRIMERAS FACTURAS (escalera de UN escalón).
- * Vicky lo ofrece como CIERRE, nunca proactivo de entrada. El pago inicial
- * con descuento ya lleva el primer mes al 20%; facturas 2-4 con 20%; desde
- * la 5ª, precio de lista.
+ * DESCUENTO = CHILE (Lalo 17-sep, "los descuentos igualémoslos a Chile"):
+ * escalera 10 % → 20 % sobre el PLAN mensual (no sobre el arriendo del reloj),
+ * por 6 meses, SOLO ante objeción de precio (jamás proactivo), un escalón por
+ * objeción. Muere el "20 % en las 4 primeras facturas" del 04-ago.
  */
 
 import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos.ts"
 
 /**
- * Escalera de descuento del plan mensual PE. Un solo escalón (20%), aplica
- * a las 4 PRIMERAS FACTURAS (no a 6 meses como CL/CO/MX).
+ * Escalera de descuento del plan mensual PE = la chilena: 10 % → 20 % sobre el
+ * PLAN, 6 meses, un escalón por objeción. `escalonDescuento` 1 = 10 %, 2 = 20 %.
  */
 export const ESCALERA_DESCUENTO_PE = {
-  /** Un único escalón de descuento del plan mensual. */
-  planMensual: [0.2],
-  /** Sin descuento de instalación (en Lima ya es gratis). */
+  /** Escalones acumulativos del plan mensual (índice = escalón − 1). */
+  planMensual: [0.1, 0.2],
+  /** Sin descuento de instalación (en Lima ya es gratis o va aparte). */
   instalacion: [0],
-  /** El descuento aplica a las primeras 4 FACTURAS (no meses calendario). */
-  facturasConDescuento: 4,
+  /** Meses de vigencia del descuento (misma política que Chile). */
+  meses: 6,
   /** Vigencia de la oferta una vez emitida (horas) — convención de la casa. */
   vigenciaHoras: 72,
+} as const
+
+/** Precios de LISTA del reloj PE en DÓLARES (artículo 304 de Books). */
+export const RELOJ_PE_USD = {
+  /** Arriendo mensual por unidad (golden NDV-32020, Mónica). */
+  arriendoMes: 24,
+  /** Venta por unidad (rate del artículo 304 en Books; confirmar con Diego). */
+  venta: 90,
+  /** Artículo de Books/Creator al que se mapea en la nota de venta. */
+  articulo: "304 - [PER] Reloj Gama Estándar FACIAL LAN WIFI",
 } as const
 
 export const CATALOGO_MODULOS_PE: ModuloSoftware[] = [
@@ -62,10 +79,9 @@ export const CATALOGO_MODULOS_PE: ModuloSoftware[] = [
     descripcion:
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
-      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 100 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "fijo", precioUF: 200 },
-      // Anomalía 21+ documentada arriba: literal del excel, aprobada.
-      { minUsuarios: 21, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 5 },
+      // Piso de 10 personas = 10 × S/5,5 (Lalo 17-sep).
+      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 55 },
+      { minUsuarios: 11, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 5.5 },
     ],
     disponibleParaVicky: true,
   },
@@ -79,8 +95,12 @@ export const CATALOGO_HARDWARE_PE: Hardware[] = [
     modelo: "Senseface 2A",
     displayName: "Reloj de control físico",
     conexion: "WiFi / Ethernet",
-    ventaUF: 525,
-    arriendoUF: 70,
+    // OJO: en Perú el precio de lista es en USD (RELOJ_PE_USD) y se convierte a
+    // soles con el dólar SUNAT al cotizar. Estas celdas son el equivalente al
+    // fallback TC_USD_PEN_FALLBACK y NO son la fuente de precio: la fuente es
+    // pe/cotizar.ts con el tipo de cambio del día.
+    ventaUF: 306,
+    arriendoUF: 82,
     descripcion:
       "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
     modalidadesDisponibles: ["arriendo", "venta"],
