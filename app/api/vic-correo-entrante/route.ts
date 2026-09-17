@@ -69,7 +69,15 @@ export async function POST(req: Request): Promise<Response> {
   if (!from) return NextResponse.json({ ok: false, error: "from requerido" }, { status: 400 })
   const html = String(body.html || body.body || "")
   const text = String(body.text || body.bodyPreview || "")
-  const adjuntos = normalizarAdjuntos(body.attachments ?? body.adjuntos ?? body.Attachments)
+  const rawAdj = body.attachments ?? body.adjuntos ?? body.Attachments
+  const adjuntos = normalizarAdjuntos(rawAdj)
+  // Rastro de la FORMA con que llega el campo (Power Automate manda [] con
+  // "Incluir datos adjuntos" en No; un token entre comillas llega como string).
+  const formaAdj =
+    rawAdj === undefined ? "ausente"
+    : Array.isArray(rawAdj) ? `array(${rawAdj.length})${rawAdj.length ? ` keys=${Object.keys((rawAdj[0] as Record<string, unknown>) || {}).join("|")}` : ""}`
+    : typeof rawAdj === "string" ? `string(${rawAdj.length}) inicio=${JSON.stringify(rawAdj.slice(0, 60))}`
+    : typeof rawAdj
   const r = await procesarCorreoEntrante(
     {
       messageId: String(body.messageId || body.internetMessageId || body.id || ""),
@@ -84,7 +92,7 @@ export async function POST(req: Request): Promise<Response> {
     { dry: body.dry === true || body.dry === "1", forzar: body.forzar === true || body.forzar === "1", correos: typeof body.correos === "boolean" ? body.correos : undefined },
   )
   console.log(
-    `[correo-entrante] from=${from} subject="${String(body.subject || "").slice(0, 60)}" adjuntos=${adjuntos.length}` +
+    `[correo-entrante] from=${from} subject="${String(body.subject || "").slice(0, 60)}" adjuntos=${adjuntos.length} (campo: ${formaAdj})` +
       (adjuntos.length ? ` [${adjuntos.map((a) => `${a.nombre}|${a.tipo || "?"}|${a.bytes}b${a.inline ? "|inline" : ""}`).join(", ")}]` : "") +
       ` → ${r.veredicto}${r.origen ? ` (${r.origen})` : ""}${r.numero ? ` ${r.numero}` : ""}`,
   )
