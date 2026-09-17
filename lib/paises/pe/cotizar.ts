@@ -346,7 +346,9 @@ export function cotizarPE(input: CotizacionPEInput): {
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
     itemsCotizador.push({
       tipo: "hardware",
-      id: "reloj_arriendo",
+      // Mismo id para arriendo y venta: la Modalidad distingue (convención
+      // chilena `senseface_2a`); en Creator/Books es el artículo [PER] 304.
+      id: "reloj_pe",
       nombre: "Arriendo de reloj de control",
       descripcion:
         `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Tarifa de lista US$${RELOJ_PE_USD.arriendoMes}/mes al tipo de cambio SUNAT del día (S/${TARIFAS_PE.tipoCambio}).`,
@@ -361,7 +363,7 @@ export function cotizarPE(input: CotizacionPEInput): {
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
     itemsCotizador.push({
       tipo: "hardware",
-      id: "reloj_venta",
+      id: "reloj_pe",
       nombre: "Reloj de control (compra)",
       descripcion:
         `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Tarifa de lista US$${RELOJ_PE_USD.venta} al tipo de cambio SUNAT del día (S/${TARIFAS_PE.tipoCambio}).`,
