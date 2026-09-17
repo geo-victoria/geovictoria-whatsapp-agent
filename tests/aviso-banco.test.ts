@@ -166,7 +166,7 @@ test("normalizarAdjuntos entiende Power Automate, Graph, manual y string JSON", 
   assert.deepEqual(normalizarAdjuntos([{ Name: "vacio.pdf" }]), [])
 })
 
-test("adjuntosLegibles deja fuera inline, logos chicos, tipos no legibles y tope 3", () => {
+test("adjuntosLegibles deja fuera logos inline chicos, tipos no legibles y tope 3", () => {
   const mk = (nombre: string, tipo: string, bytes: number, inline = false) => ({ nombre, tipo, base64: "x", inline, bytes })
   const lista = [
     mk("logo.png", "image/png", 3000, true),
@@ -180,4 +180,10 @@ test("adjuntosLegibles deja fuera inline, logos chicos, tipos no legibles y tope
   ]
   const ok = adjuntosLegibles(lista)
   assert.deepEqual(ok.map((a) => a.nombre), ["comprobante.pdf", "foto1.jpg", "foto2.jpg"])
+})
+
+test("adjuntosLegibles: un pantallazo PEGADO en el cuerpo (inline, grande) sí se lee; el logo inline no", () => {
+  const mk = (nombre: string, tipo: string, bytes: number, inline = false) => ({ nombre, tipo, base64: "x", inline, bytes })
+  const ok = adjuntosLegibles([mk("image001.png", "image/png", 4000, true), mk("image002.png", "image/png", 180000, true)])
+  assert.deepEqual(ok.map((a) => a.nombre), ["image002.png"])
 })

@@ -323,18 +323,20 @@ export function normalizarAdjuntos(raw: unknown): AdjuntoCorreo[] {
 
 const RE_NOMBRE_LEGIBLE = /\.(pdf|jpe?g|png|webp|gif)$/i
 const MIN_BYTES_COMPROBANTE = 8 * 1024
+/** Un pantallazo PEGADO en el cuerpo (Outlook lo manda inline) pesa mucho más que un logo de firma. */
+const MIN_BYTES_INLINE = 25 * 1024
 const MAX_BYTES_COMPROBANTE = 10 * 1024 * 1024
 
 /**
- * Cuáles adjuntos vale la pena leer con visión: imagen o PDF, no inline (los
- * logos de las firmas y de los correos de los bancos vienen inline y chicos),
- * de tamaño razonable. Máximo `max` (los correos con 10 fotos no son
- * comprobantes).
+ * Cuáles adjuntos vale la pena leer con visión: imagen o PDF de tamaño
+ * razonable. Lo inline (logos de firmas y de los correos de los bancos) se
+ * descarta solo si es chico: un comprobante pegado en el cuerpo del correo
+ * también llega inline y hay que leerlo. Máximo `max` (los correos con 10
+ * fotos no son comprobantes); los adjuntos "de verdad" van primero.
  */
 export function adjuntosLegibles(adjuntos: AdjuntoCorreo[], max = 3): AdjuntoCorreo[] {
-  return adjuntos
-    .filter((a) => !a.inline)
+  const ok = adjuntos
     .filter((a) => /pdf|image\//.test(a.tipo) || RE_NOMBRE_LEGIBLE.test(a.nombre))
-    .filter((a) => a.bytes >= MIN_BYTES_COMPROBANTE && a.bytes <= MAX_BYTES_COMPROBANTE)
-    .slice(0, max)
+    .filter((a) => a.bytes >= (a.inline ? MIN_BYTES_INLINE : MIN_BYTES_COMPROBANTE) && a.bytes <= MAX_BYTES_COMPROBANTE)
+  return [...ok.filter((a) => !a.inline), ...ok.filter((a) => a.inline)].slice(0, max)
 }
