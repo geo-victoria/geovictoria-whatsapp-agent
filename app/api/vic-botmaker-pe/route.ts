@@ -46,7 +46,11 @@ import {
   closeFollowup,
   setKvValue,
   getKvValue,
+  getQuotePointer,
+  scheduleConsensualFollowup,
 } from "@/lib/supabase-persistence-v3"
+import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
+import { blindarSoporteInventadoPE } from "@/lib/paises/pe/tools"
 import {
   hashMessage,
   acquireLock,
@@ -211,7 +215,54 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
   const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
   const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral) : null
   const directivaUmbral = dotacionDetectada && umbralInfo ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral, derivPais) : ""
-  const systemPromptPE = contextoUmbral + getSystemPromptPE(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral
+  // ── APRENDIZAJE DE CHILE (Lalo 17-sep, "todo el aprendizaje de Vicky Chile
+  // que aplique a Perú usémoslo"): las MISMAS directivas deterministas del
+  // webhook chileno, al final del prompt (contexto inmediato gana).
+  // (1) CLIENTE EXISTENTE por cuenta Zoho → soporte/postventa, jamás prospecto.
+  // (2) CASUÍSTICA del chat (trabajador, cliente pidiendo baja, busca empleo,
+  //     spam…) → directiva + efectos post-respuesta fuera del camino del cliente.
+  // (3) POST-VENTA: marca de comprobante o pago online fresca (48 h) → no
+  //     cotizar de nuevo. `pagoMarcadoReciente` es un BOOLEANO aparte (bug
+  //     Pabla Solis 11-sep: un string de directivas no es señal de pago).
+  let directivaExtra = ""
+  let pagoMarcadoReciente = false
+  let casuisticaTurno: import("@/lib/casuistica-contacto").Casuistica | null = null
+  try {
+    const { detectarClienteExistente, directivaClienteExistente } = await import("@/lib/cliente-existente")
+    const ce = await detectarClienteExistente(contact)
+    if (ce) directivaExtra += directivaClienteExistente(ce)
+  } catch { /* sin señal: prospecto */ }
+  try {
+    const { clasificarCasuistica, directivaCasuistica } = await import("@/lib/casuistica-contacto")
+    const mensajesCliente = [
+      ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")).filter((t) => !t.startsWith("[REGISTRO INTERNO")),
+      message || "",
+    ]
+    const cas = clasificarCasuistica(mensajesCliente)
+    if (cas.tipo !== "prospecto") {
+      directivaExtra += directivaCasuistica(cas)
+      if (!cas.esProspecto) casuisticaTurno = cas
+    }
+  } catch { /* sin señal: prospecto */ }
+  try {
+    const fresca = (raw: string | null) => {
+      if (!raw) return null
+      const p = JSON.parse(raw) as { at?: string; numero?: string }
+      const edadMs = p.at ? Date.now() - new Date(p.at).getTime() : Number.POSITIVE_INFINITY
+      return edadMs < 48 * 60 * 60 * 1000 ? p : null
+    }
+    const comprobante = fresca(await getKvValue(`comprobante_ok_${contact}`))
+    const online = comprobante ? null : fresca(await getKvValue(`pago_online_${contact}`))
+    if (comprobante || online) {
+      pagoMarcadoReciente = true
+      directivaExtra +=
+        `\n\n[DIRECTIVA POST-VENTA — obligatoria] Este contacto ${comprobante ? `ACABA de enviar el comprobante de pago de su cotización (${comprobante.numero || "registrada"})` : "PAGÓ EN LÍNEA con tarjeta y su pago está CONFIRMADO automáticamente (jamás le pidas comprobante)"}. ` +
+        `Estás en MODO POST-VENTA: NO cotices, NO armes valores, NO preguntes dotación ni marcaje y NO emitas ninguna cotización nueva — su compra YA está cerrada. ` +
+        `La puesta en marcha la coordina el equipo de GeoVictoria Perú (te presentó a quien lo acompaña): responde sus dudas y, si pregunta por accesos o configuración, dile que el equipo lo contacta para eso — NO improvises instrucciones de acceso. ` +
+        `SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa distinta puedes volver al flujo de venta.`
+    }
+  } catch { /* sin marca, sin directiva */ }
+  const systemPromptPE = contextoUmbral + getSystemPromptPE(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaExtra
   const dispatchPE = buildDispatchPE(contact)
   const result = await runAgentLoop({
     systemPrompt: systemPromptPE,
@@ -229,6 +280,9 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
   // sanear (quitarSignosApertura rompería la igualdad).
   const rawReply = (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
   let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(rawReply)))
+  // SOPORTE INVENTADO (herencia CL, caso Jeshu 01-sep): canales chilenos o
+  // correos @geovictoria.com fuera de la lista blanca → tarjeta oficial PERÚ.
+  reply = await blindarSoporteInventadoPE(reply)
 
   // ALLOWLIST de dominios (herencia caso Transportes Viig CL, 22-jul): en PE
   // las tools NO devuelven links (sin formal, sin agenda) — cualquier URL del
@@ -307,6 +361,58 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
     }
   }
 
+  // PAGO DECLARADO → VERIFICAR, NUNCA CREER (herencia CL 10-sep, caso Eduardo
+  // Guzmán): "ya pagué" no es pago confirmado, y ninguna instrucción de acceso
+  // sale en fase de venta. Se verifica contra Mercado Pago vía el cotizador
+  // (misma tubería que Chile; la cotización PE vive en el mismo módulo). No
+  // corre con casuística de no-prospecto (caso Pabla Solis). Textos PE: en Perú
+  // no hay alta por chat — la puesta en marcha la coordina el equipo.
+  if (reply && !(casuisticaTurno && !casuisticaTurno.esProspecto)) {
+    try {
+      const pd = await import("@/lib/pago-declarado")
+      const declara = pd.clienteDeclaraPago(message)
+      const teatro = pd.afirmaPagoConfirmado(reply) || pd.pareceInstruccionDeAcceso(reply)
+      if (declara || teatro) {
+        const puntero = await getQuotePointer(contact).catch(() => null)
+        let pagado = pagoMarcadoReciente
+        let motivo = pagado ? "marca_kv" : "sin_cotizacion"
+        if (!pagado && puntero?.quoteId) {
+          const v = await pd.verificarPagoDeclarado(puntero.quoteId)
+          pagado = v.pagado
+          motivo = v.motivo
+        }
+        if (pagado && teatro) {
+          reply =
+            "Confirmado, tu pago ya quedó registrado 🎉\n\n" +
+            "Nuestro equipo de GeoVictoria Perú te contacta para la puesta en marcha de tu cuenta y la carga de tu equipo. Cualquier duda mientras tanto, me escribes por aquí 😊"
+          console.log(`[vic-pe][pago-declarado] ${contact}: pago verificado (${motivo}) — respuesta canónica`)
+        } else if (teatro) {
+          console.warn(`[vic-pe][pago-declarado] ${contact}: teatro de pago/acceso sin pago verificado (${motivo}) — respuesta reemplazada`)
+          const link = (puntero?.acceptanceUrl || "").trim()
+          reply =
+            "Gracias por avisarme 🙏 Todavía no me llega la confirmación del pago, así que déjame verificarlo antes de seguir.\n\n" +
+            "Si pagaste con tarjeta, en unos minutos se confirma solo y te aviso por aquí. Si fue por transferencia, mándame el comprobante (foto o PDF) y lo dejo registrado de inmediato." +
+            (link ? `\n\nSi aún no alcanzaste a pagar, el link es este: ${link}` : "") +
+            "\n\nApenas quede confirmado, nuestro equipo de Perú te contacta para la puesta en marcha 😊"
+          void avisarEquipoInterno(
+            `⚠️ 🇵🇪 +${contact}: Vicky PE iba a afirmar pago/dar instrucciones de acceso SIN pago verificado (${motivo}). Se reemplazó por el texto de verificación. Cotización ${puntero?.quoteId || "sin puntero"}.`,
+          ).catch(() => {})
+        }
+      }
+    } catch (e) {
+      console.warn(`[vic-pe][pago-declarado] ${contact}: error en el cinturón:`, e instanceof Error ? e.message : e)
+    }
+  }
+  // Efectos de la casuística no-prospecto (herencia CL 08-sep): sin lead nuevo,
+  // sin traspaso, loop cerrado — corre DESPUÉS de responder, fuera del camino
+  // del cliente.
+  if (casuisticaTurno) {
+    const cas = casuisticaTurno
+    void import("@/lib/casuistica-runtime")
+      .then((m) => m.aplicarCasuisticaNoProspecto(contact, cas, "webhook-pe"))
+      .catch(() => undefined)
+  }
+
   // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
   const callNoContactar = toolCalls.find((c) => c.name === "marcar_no_contactar" && c.ok)
   if (callNoContactar && (!reply.trim() || reply === ERROR_GENERICO_PE)) {
@@ -319,11 +425,12 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
   )
 
   // ── Señales de ciclo de contacto (best-effort) ──
-  // OJO Fase 1b: PE NO se enrola en el loop v2 ni en el followup automático —
-  // esos crons generan textos con identidad chilena para países desconocidos
-  // (identidadPorPais/TEXTOS sin caso "pe") y mandarían copy chileno a un
-  // peruano. Hasta que existan textos PE (Fase 3), la proactividad es del
-  // equipo humano: el seguimiento consensuado se avisa por el canal interno.
+  // Desde el 15-sep el loop v2 tiene columna PE (plantillas del bot "Vicky
+  // Perú" aprobadas, textos en ventana propios, TZ America/Lima) y desde el
+  // 17-sep Perú se enrola IGUAL que Chile/CO (aprendizaje chileno): sin señal
+  // de espera, la conversación comercial entra al loop; con señal, un toque
+  // único en el plazo inferido. El gate `plantillas_pe_enabled` sigue
+  // gobernando qué sale fuera de ventana.
   try {
     const tipoNoContactar =
       (callNoContactar?.output as { tipo?: string } | undefined)?.tipo === "perdido"
@@ -331,20 +438,26 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
         : "opt_out"
     const segConsensuado = toolCalls.find((c) => c.name === "programar_seguimiento" && c.ok)
     const usoCierre = toolCalls.some((c) => FOLLOWUP_CLOSING_TOOLS_PE.has(c.name) && c.ok)
+    const noProspecto = Boolean(casuisticaTurno && !casuisticaTurno.esProspecto)
     if (callNoContactar) {
       await closeFollowup(contact, tipoNoContactar, "pe")
       console.log(`[vic-pe][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
     } else if (segConsensuado) {
       const cuandoIso = (segConsensuado.output as { cuandoIso?: string } | undefined)?.cuandoIso
-      await avisarEquipoInterno(
-        `🇵🇪 SEGUIMIENTO ACORDADO (línea PE, sin push automático en Fase 1b): +${contact} quedó de retomar el ${cuandoIso || "(fecha no legible)"} — agendar el re-contacto a mano (ejecutiva PE).`,
-      ).catch(() => {})
-      console.log(`[vic-pe][followup] consensuado contact=${contact} cuando=${cuandoIso} (aviso interno)`)
-    } else if (usoCierre) {
+      if (cuandoIso) await scheduleConsensualFollowup(contact, cuandoIso, "pe").catch(() => {})
+      console.log(`[vic-pe][followup] consensuado contact=${contact} cuando=${cuandoIso}`)
+    } else if (usoCierre || pagoMarcadoReciente) {
       await closeFollowup(contact, "derivado", "pe")
-      console.log(`[vic-pe][followup] derivado → ciclo cerrado contact=${contact}`)
+      console.log(`[vic-pe][followup] derivado/post-venta → ciclo cerrado contact=${contact}`)
+    } else if (!noProspecto) {
+      const senal = clasificarSenalEspera(message, "pe", contact)
+      if (senal) {
+        await scheduleConsensualFollowup(contact, senal.cuando.toISOString(), "pe")
+        console.log(`[vic-pe][followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`)
+      } else {
+        await enrolarEnLoop(contact, "pe").catch(() => {})
+      }
     }
-    // else: sin cadencia automática que armar en PE (ver comentario de arriba).
   } catch (err) {
     console.error(`[vic-pe][followup] error actualizando seguimiento contact=${contact}:`, err)
   }
@@ -642,6 +755,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     // El cliente habló → pausar cualquier cadencia en curso (best-effort; en
     // Fase 1b PE no arma cadencias, pero la señal de actividad se registra).
     await markUserActivity(contact, "pe").catch(() => {})
+    // Loop v2 (herencia CL/CO): el mensaje entrante re-ancla el loop del
+    // contacto (t0 = ahora; con señal de espera, t0 se corre al plazo).
+    resetLoop(contact, message).catch(() => {})
 
     const msgHash = hashMessage(contact, message)
     await bufferInboundMessage(contact, message, msgHash)

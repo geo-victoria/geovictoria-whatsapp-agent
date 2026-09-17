@@ -123,6 +123,38 @@ const registrarComprobantePESchema = {
   },
 }
 
+/**
+ * SOPORTE INVENTADO, versión Perú (herencia del blindaje chileno del 01-sep):
+ * el modelo alucina mesas de ayuda ("+56 2 2932…", "ayuda@geovictoria.com")
+ * o cita la tarjeta CHILENA. Determinista: fijos +56, la Mesa CL (600 914
+ * 3819 / WhatsApp de soporte CL) y cualquier correo @geovictoria.com fuera
+ * de la lista blanca (equipo PE + usuarios activos de Zoho) pasan a la
+ * tarjeta oficial de Perú. Best-effort: sin Zoho, la lista blanca es la fija.
+ */
+const CORREOS_PE_FIJOS = new Set([
+  "soporteperu", "ssttperu", "mmendozav", "cvalverde", "afiori", "pquispef", "dbendezu", "vicky", "info",
+])
+export async function blindarSoporteInventadoPE(texto: string): Promise<string> {
+  if (!texto) return texto
+  let permitidos = new Set<string>()
+  try {
+    const { emailsEquipoZoho } = await import("../../emails-equipo.ts")
+    permitidos = await emailsEquipoZoho()
+  } catch { /* lista fija */ }
+  let salida = texto
+    // Fijos y celulares chilenos presentados como soporte.
+    .replace(/\+?\s*56\s*[\s.\-]*2[\s.\-]*\d{4}[\s.\-]*\d{4}/g, TELEFONO_SOPORTE_PE)
+    .replace(/\b600\s*914\s*3819\b/g, TELEFONO_SOPORTE_PE)
+    .replace(/\+?\s*56\s*9[\s.\-]*4401[\s.\-]*3873/g, TELEFONO_SOPORTE_PE)
+  salida = salida.replace(/\b([a-z0-9._-]+)@geovictoria\.com\b/gi, (todo, usuario: string) => {
+    const u = usuario.toLowerCase()
+    if (CORREOS_PE_FIJOS.has(u)) return todo
+    if (permitidos.has(`${u}@geovictoria.com`)) return todo
+    return CORREO_SOPORTE_PE
+  })
+  return salida
+}
+
 export const TOOL_SCHEMAS_PE = [
   registrarComprobantePESchema,
   {
