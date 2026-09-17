@@ -32,13 +32,15 @@ async function authorized(req: Request): Promise<boolean> {
     const kv = env ? "" : String((await getKvValue("correo_entrante_secret").catch(() => null)) || "").trim()
     if ((env && xcorreo === env) || (kv && xcorreo === kv)) return true
   }
-  if (CRON_SECRET) {
-    const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
-    if (bearer === CRON_SECRET) return true
-    const key = (new URL(req.url).searchParams.get("key") || "").trim()
-    if (key === CRON_SECRET) return true
-  }
-  return false
+  const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
+  const key = (new URL(req.url).searchParams.get("key") || "").trim()
+  const dado = bearer || key
+  if (!dado) return false
+  if (CRON_SECRET && dado === CRON_SECRET) return true
+  // Mismo patrón que el resto de los admin: el secreto de vic_kv también vale
+  // como ?key= (los scripts de operación lo usan así).
+  const kvSecret = await getFollowupCronSecret().catch(() => "")
+  return Boolean(kvSecret && dado === kvSecret)
 }
 
 export async function GET(req: Request): Promise<Response> {
