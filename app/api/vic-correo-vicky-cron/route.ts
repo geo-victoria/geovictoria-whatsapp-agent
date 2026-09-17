@@ -14,8 +14,9 @@
 
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
-import { credencialesGraph, listarCorreosVicky } from "@/lib/correo-vicky-graph"
+import { credencialesGraph, listarCorreosVicky, adjuntosDeCorreo } from "@/lib/correo-vicky-graph"
 import { procesarCorreoEntrante, type ResultadoCorreoPago } from "@/lib/pago-por-correo"
+import { normalizarAdjuntos } from "@/lib/aviso-banco"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -75,8 +76,10 @@ export async function GET(req: Request): Promise<Response> {
   let masReciente = ultimo
   for (const m of correos) {
     if (Date.now() - inicio > 100_000) break
+    // Los adjuntos se bajan solo cuando el correo los trae (llamada extra a Graph).
+    const adjuntos = m.hasAttachments ? normalizarAdjuntos(await adjuntosDeCorreo(m.id)) : []
     const r = await procesarCorreoEntrante(
-      { messageId: m.internetMessageId || m.id, from: m.from, subject: m.subject, html: m.html, receivedAt: m.receivedDateTime, fuente: "graph" },
+      { messageId: m.internetMessageId || m.id, from: m.from, subject: m.subject, html: m.html, receivedAt: m.receivedDateTime, adjuntos, fuente: "graph" },
       { dry, forzar },
     )
     conteo[r.veredicto] = (conteo[r.veredicto] || 0) + 1

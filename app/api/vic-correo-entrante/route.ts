@@ -2,7 +2,11 @@
  * POST /api/vic-correo-entrante — entrada por PUSH de un correo de la casilla
  * de Vicky (Power Automate "When a new email arrives" → HTTP, Zoho Flow, o
  * reenvío manual). Body JSON:
- *   { messageId?, from, subject?, html? | body? | text?, receivedAt?, dry?, forzar?, correos? }
+ *   { messageId?, from, subject?, html? | body? | text?, receivedAt?, attachments?, dry?, forzar?, correos? }
+ * `attachments` = la lista del desencadenador de Power Automate (Name /
+ * ContentBytes / ContentType / IsInline / Size), la de Graph o
+ * [{nombre, base64, tipo}]; también como string JSON. Imagen/PDF no-inline se
+ * leen con visión como comprobante (17-sep).
  * Auth: header x-cron-secret (kv followup_cron_secret), Bearer/?key= CRON_SECRET,
  * o header x-correo-secret == env VICKY_CORREO_ENTRANTE_SECRET / kv correo_entrante_secret.
  *
@@ -14,6 +18,7 @@
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
 import { procesarCorreoEntrante } from "@/lib/pago-por-correo"
+import { normalizarAdjuntos } from "@/lib/aviso-banco"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -47,7 +52,7 @@ export async function GET(req: Request): Promise<Response> {
   if (!(await authorized(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   return NextResponse.json({
     ok: true,
-    uso: "POST {messageId?, from, subject?, html?|body?|text?, receivedAt?, dry?, forzar?, correos?}",
+    uso: "POST {messageId?, from, subject?, html?|body?|text?, receivedAt?, attachments?, dry?, forzar?, correos?}",
     nota: "dry=true solo parsea y resuelve la cotización, no escribe nada.",
   })
 }
@@ -64,6 +69,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!from) return NextResponse.json({ ok: false, error: "from requerido" }, { status: 400 })
   const html = String(body.html || body.body || "")
   const text = String(body.text || body.bodyPreview || "")
+  const adjuntos = normalizarAdjuntos(body.attachments ?? body.adjuntos ?? body.Attachments)
   const r = await procesarCorreoEntrante(
     {
       messageId: String(body.messageId || body.internetMessageId || body.id || ""),
@@ -72,9 +78,10 @@ export async function POST(req: Request): Promise<Response> {
       html: /<[a-z][\s\S]*>/i.test(html) ? html : undefined,
       text: /<[a-z][\s\S]*>/i.test(html) ? text : html || text,
       receivedAt: String(body.receivedAt || body.receivedDateTime || ""),
+      adjuntos,
       fuente: "push",
     },
     { dry: body.dry === true || body.dry === "1", forzar: body.forzar === true || body.forzar === "1", correos: typeof body.correos === "boolean" ? body.correos : undefined },
   )
-  return NextResponse.json({ ok: r.veredicto !== "error", ...r }, { status: r.veredicto === "error" ? 502 : 200 })
+  return NextResponse.json({ ok: r.veredicto !== "error", adjuntosRecibidos: adjuntos.length, ...r }, { status: r.veredicto === "error" ? 502 : 200 })
 }

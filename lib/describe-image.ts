@@ -63,6 +63,55 @@ const PROMPT_VISION_PDF =
   "No inventes nada: si algo no se distingue, dilo. Máximo ~150 palabras. Responde SOLO con la descripción, sin preámbulos."
 
 /**
+ * Transcripción ESTRUCTURADA de un comprobante de transferencia (17-sep, orden
+ * Lalo "permite que lea imágenes y adjuntos" para la casilla vicky@). Se pide
+ * el formato "Etiqueta: valor" para que `parsearAvisoBanco` lo lea con las
+ * MISMAS expresiones que usa con el HTML de los bancos. Orden expresa de NO
+ * completar lo ilegible: es la cicatriz del 14-sep (la visión inventó RUT y
+ * correos de una nómina rellenando con un patrón plausible).
+ */
+const PROMPT_COMPROBANTE =
+  "Este archivo llegó a la casilla de correo de Vicky (GeoVictoria). Determina si es un COMPROBANTE DE TRANSFERENCIA BANCARIA o un comprobante de pago. " +
+  "Si NO lo es, responde exactamente: NO_ES_COMPROBANTE. " +
+  "Si lo es, responde SOLO con estas líneas (una por línea, deja vacío lo que no se lea, JAMÁS inventes ni completes dígitos):\n" +
+  "Tipo: Comprobante de transferencia\n" +
+  "Banco: <banco emisor>\n" +
+  "Monto transferido: $<monto con separador de miles tal como aparece>\n" +
+  "Titular de la cuenta de origen: <nombre o razón social de quien paga>\n" +
+  "RUT: <RUT de quien paga, tal como aparece>\n" +
+  "Nombre destinatario: <a quién le transfieren>\n" +
+  "Cuenta destino: <número de cuenta destino>\n" +
+  "Fecha: <dd/mm/yyyy>\n" +
+  "Hora: <hh:mm>\n" +
+  "Número de operación: <código>\n" +
+  "Mensaje: <glosa, comentario o asunto de la transferencia>"
+
+export type DescripcionOpts = { prompt?: string; maxTokens?: number; etiqueta?: string }
+
+/**
+ * Describe un archivo que YA tenemos en memoria (adjunto de correo, base64 de
+ * un endpoint). Misma lógica que `describirImagen` sin la descarga. Devuelve
+ * "" ante cualquier problema.
+ */
+export async function describirAdjunto(input: { base64: string; tipo?: string; nombre?: string }, opts: DescripcionOpts = {}): Promise<string> {
+  const limpio = String(input.base64 || "").replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "")
+  if (!limpio) return ""
+  let buf: Buffer
+  try {
+    buf = Buffer.from(limpio, "base64")
+  } catch {
+    return ""
+  }
+  const rawType = `${input.tipo || ""} ${input.nombre || ""}`.toLowerCase()
+  return describirBytes(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), rawType, { ...opts, etiqueta: opts.etiqueta || `adjunto ${input.nombre || ""}`.trim() })
+}
+
+/** Prompt de comprobante, para los llamadores que leen adjuntos de correo. */
+export function promptComprobante(): string {
+  return PROMPT_COMPROBANTE
+}
+
+/**
  * Descarga la imagen de `imageUrl` y devuelve una descripción textual fiel
  * (con el texto visible transcrito). Best-effort: nunca lanza, devuelve ""
  * ante cualquier problema.
@@ -84,16 +133,35 @@ export async function describirImagen(imageUrl: string): Promise<string> {
     }
     const buf = await imgRes.arrayBuffer()
     const rawType = (imgRes.headers.get("content-type") || "").toLowerCase()
-    const bytes = new Uint8Array(buf)
+    return await describirBytes(new Uint8Array(buf), rawType, {})
+  } catch (err) {
+    console.error("[v3-imagen] excepción describiendo:", err)
+    return ""
+  }
+}
+
+/**
+ * Núcleo compartido: bytes → (Excel/CSV transcrito) | (imagen o PDF descrito
+ * por visión). `opts.prompt` reemplaza el prompt de descripción general (p.
+ * ej. la transcripción estructurada de un comprobante).
+ */
+async function describirBytes(bytes: Uint8Array, rawType: string, opts: DescripcionOpts): Promise<string> {
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) {
+    console.warn("[v3-imagen] ANTHROPIC_API_KEY no configurada; no se describe")
+    return ""
+  }
+  const etiqueta = opts.etiqueta ? ` ${opts.etiqueta}` : ""
+  try {
     // PDF por bytes mágicos (%PDF) — el content-type de Botmaker no es fiable.
     const esPdf =
       (bytes.length > 3 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) ||
       rawType.includes("pdf")
-    if (buf.byteLength === 0 || buf.byteLength > (esPdf ? MAX_PDF_BYTES : MAX_IMAGE_BYTES)) {
+    if (bytes.byteLength === 0 || bytes.byteLength > (esPdf ? MAX_PDF_BYTES : MAX_IMAGE_BYTES)) {
       // Un adjunto vacío o más pesado que el tope no es una falla nuestra: es
       // lo que mandó el cliente, y el lector lo rechaza bien (con tope de 3
       // intentos en el cron). Va en warn para no ocupar el panel de errores.
-      console.warn(`[v3-imagen] archivo inválido (bytes=${buf.byteLength}, pdf=${esPdf})`)
+      console.warn(`[v3-imagen]${etiqueta} archivo inválido (bytes=${bytes.byteLength}, pdf=${esPdf})`)
       return ""
     }
     // EXCEL (.xlsx = zip) — 25-ago, F2 nómina multi-modal: la visión no lee
@@ -104,24 +172,24 @@ export async function describirImagen(imageUrl: string): Promise<string> {
       if (esZip(bytes)) {
         const tabla = excelATexto(bytes)
         if (tabla) {
-          console.log(`[v3-imagen] planilla Excel transcrita (${tabla.length} chars)`)
+          console.log(`[v3-imagen]${etiqueta} planilla Excel transcrita (${tabla.length} chars)`)
           return `Planilla Excel adjunta — contenido transcrito fila por fila (columnas separadas por tab):\n${tabla}`
         }
-        console.warn(`[v3-imagen] zip sin hoja de cálculo legible: ${rawType}`)
+        console.warn(`[v3-imagen]${etiqueta} zip sin hoja de cálculo legible: ${rawType}`)
         return ""
       }
       // CSV / texto plano tabular.
       if (rawType.includes("csv") || rawType.startsWith("text/")) {
-        const texto = Buffer.from(buf).toString("utf8").slice(0, 8000).trim()
+        const texto = Buffer.from(bytes).toString("utf8").slice(0, 8000).trim()
         if (texto) return `Archivo de texto adjunto — contenido:\n${texto}`
       }
     }
     const mime = esPdf ? null : pickImageMime(bytes, rawType)
     if (!esPdf && !mime) {
-      console.warn(`[v3-imagen] tipo no soportado como imagen: ${rawType}`)
+      console.warn(`[v3-imagen]${etiqueta} tipo no soportado como imagen: ${rawType}`)
       return ""
     }
-    const b64 = Buffer.from(buf).toString("base64")
+    const b64 = Buffer.from(bytes).toString("base64")
 
     // 2. Describir con visión.
     const res = await fetch(ANTHROPIC_URL, {
@@ -133,7 +201,7 @@ export async function describirImagen(imageUrl: string): Promise<string> {
       },
       body: JSON.stringify({
         model: VISION_MODEL,
-        max_tokens: 400,
+        max_tokens: opts.maxTokens || 400,
         messages: [
           {
             role: "user",
@@ -141,7 +209,7 @@ export async function describirImagen(imageUrl: string): Promise<string> {
               esPdf
                 ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
                 : { type: "image", source: { type: "base64", media_type: mime, data: b64 } },
-              { type: "text", text: esPdf ? PROMPT_VISION_PDF : PROMPT_VISION },
+              { type: "text", text: opts.prompt || (esPdf ? PROMPT_VISION_PDF : PROMPT_VISION) },
             ],
           },
         ],
@@ -150,7 +218,7 @@ export async function describirImagen(imageUrl: string): Promise<string> {
     })
     if (!res.ok) {
       const detail = await res.text().catch(() => "")
-      console.error(`[v3-imagen] visión ${res.status}: ${detail.slice(0, 200)}`)
+      console.error(`[v3-imagen]${etiqueta} visión ${res.status}: ${detail.slice(0, 200)}`)
       return ""
     }
     const data = (await res.json().catch(() => null)) as {
@@ -161,10 +229,10 @@ export async function describirImagen(imageUrl: string): Promise<string> {
       .map((b) => b.text || "")
       .join("")
       .trim()
-    console.log(`[v3-imagen] descrita ok (len=${texto.length}, model=${VISION_MODEL})`)
+    console.log(`[v3-imagen]${etiqueta} descrita ok (len=${texto.length}, model=${VISION_MODEL})`)
     return texto
   } catch (err) {
-    console.error("[v3-imagen] excepción describiendo:", err)
+    console.error(`[v3-imagen]${etiqueta} excepción describiendo:`, err)
     return ""
   }
 }

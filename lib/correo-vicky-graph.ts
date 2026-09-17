@@ -66,6 +66,39 @@ export async function tokenGraph(): Promise<string> {
   return j.access_token
 }
 
+/**
+ * Adjuntos de un correo (Graph `fileAttachment`: name, contentType, size,
+ * isInline, contentBytes en base64). Devuelve [] si algo falla.
+ */
+export async function adjuntosDeCorreo(messageId: string): Promise<Array<{ name: string; contentType: string; size: number; isInline: boolean; contentBytes: string }>> {
+  const c = await credencialesGraph()
+  if (!c || !messageId) return []
+  try {
+    const token = await tokenGraph()
+    const url =
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(c.mailbox)}/messages/${encodeURIComponent(messageId)}/attachments` +
+      `?$select=name,contentType,size,isInline,contentBytes&$top=10`
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal: AbortSignal.timeout(25000) })
+    const j = (await r.json().catch(() => ({}))) as { value?: Array<Record<string, unknown>>; error?: { code?: string; message?: string } }
+    if (!r.ok) {
+      console.warn(`[correo-vicky] adjuntos ${r.status}: ${j.error?.code || ""} ${j.error?.message || ""}`.trim())
+      return []
+    }
+    return (j.value || [])
+      .filter((a) => typeof a.contentBytes === "string" && a.contentBytes)
+      .map((a) => ({
+        name: String(a.name || "adjunto"),
+        contentType: String(a.contentType || ""),
+        size: Number(a.size) || 0,
+        isInline: Boolean(a.isInline),
+        contentBytes: String(a.contentBytes),
+      }))
+  } catch (e) {
+    console.warn("[correo-vicky] adjuntos excepción:", e instanceof Error ? e.message : e)
+    return []
+  }
+}
+
 /** Correos del Inbox recibidos desde `desdeIso` (más nuevos primero). */
 export async function listarCorreosVicky(opts: { desdeIso: string; max?: number }): Promise<CorreoGraph[]> {
   const c = await credencialesGraph()

@@ -33,6 +33,13 @@
  *  - Si el deal ya va en 7/8 (el ejecutivo ya implementó/factura) o el aviso
  *    es viejo (>7 d), el registro es SILENCIOSO: candado `traspaso_postpago_`
  *    para que no salga bienvenida ni alta por chat a destiempo.
+ *  - ADJUNTOS (17-sep, Lalo "permite que lea imágenes y adjuntos"): si el
+ *    cuerpo no es un aviso, cada imagen/PDF no-inline (máx 3) se transcribe
+ *    con visión (prompt estructurado "Etiqueta: valor", orden de no inventar)
+ *    y pasa por el MISMO parser en modo "adjunto", que exige que el destino
+ *    seamos nosotros. El archivo original queda adjunto en la cotización y la
+ *    nota dice que los datos vienen de visión. Misma verificación blanda que
+ *    el comprobante por WhatsApp (05-sep): monto legible ≥ pago inicial.
  */
 
 import { createHash } from "node:crypto"
@@ -47,7 +54,7 @@ import {
   crearNotaEnCotizacion,
   notificarPagadaAlCotizador,
 } from "@/lib/tools/registrar-comprobante-transferencia"
-import { parsearAvisoBanco, type AvisoBanco } from "@/lib/aviso-banco"
+import { parsearAvisoBanco, adjuntosLegibles, type AvisoBanco, type AdjuntoCorreo } from "@/lib/aviso-banco"
 
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -63,6 +70,8 @@ export type CorreoEntrante = {
   html?: string
   text?: string
   receivedAt?: string
+  /** Adjuntos ya normalizados (lib/aviso-banco `normalizarAdjuntos`). */
+  adjuntos?: AdjuntoCorreo[]
   fuente: "graph" | "push" | "manual"
 }
 
@@ -90,6 +99,10 @@ export type ResultadoCorreoPago = {
   candidatos?: Array<{ quoteId: string; numero: string; estado: string; nombre: string }>
   detalle?: string
   hash?: string
+  /** "cuerpo" o "adjunto:<nombre>" — de dónde salió el aviso. */
+  origen?: string
+  /** Adjuntos que se intentaron leer y qué devolvió la visión (recortado). */
+  adjuntosLeidos?: Array<{ nombre: string; bytes: number; resultado: "comprobante" | "no_es_comprobante" | "ilegible" }>
 }
 
 type CotRow = {
@@ -233,8 +246,33 @@ export async function procesarCorreoEntrante(
   c: CorreoEntrante,
   opts: { dry?: boolean; forzar?: boolean; correos?: boolean } = {},
 ): Promise<ResultadoCorreoPago> {
-  const aviso = parsearAvisoBanco({ from: c.from, subject: c.subject, html: c.html, text: c.text })
-  if (!aviso) return { veredicto: "no_es_aviso" }
+  let aviso = parsearAvisoBanco({ from: c.from, subject: c.subject, html: c.html, text: c.text })
+  let origen = "cuerpo"
+  let adjuntoFuente: AdjuntoCorreo | null = null
+  const adjuntosLeidos: NonNullable<ResultadoCorreoPago["adjuntosLeidos"]> = []
+  if (!aviso) {
+    // El cuerpo no es un aviso de banco: ¿viene el comprobante como imagen o
+    // PDF? (cliente que reenvía su comprobante a vicky@, banco que lo adjunta).
+    // Cada adjunto legible pasa por visión con el prompt estructurado y el
+    // MISMO parser, en modo "adjunto" (exige destino nuestro).
+    const legibles = adjuntosLegibles(c.adjuntos || [])
+    if (legibles.length) {
+      const { describirAdjunto, promptComprobante } = await import("./describe-image")
+      for (const a of legibles) {
+        const texto = await describirAdjunto({ base64: a.base64, tipo: a.tipo, nombre: a.nombre }, { prompt: promptComprobante(), maxTokens: 500 })
+        if (!texto) { adjuntosLeidos.push({ nombre: a.nombre, bytes: a.bytes, resultado: "ilegible" }); continue }
+        const parsed = parsearAvisoBanco({ from: c.from, subject: c.subject, text: texto, origen: "adjunto" })
+        if (!parsed) { adjuntosLeidos.push({ nombre: a.nombre, bytes: a.bytes, resultado: "no_es_comprobante" }); continue }
+        adjuntosLeidos.push({ nombre: a.nombre, bytes: a.bytes, resultado: "comprobante" })
+        aviso = parsed
+        origen = `adjunto:${a.nombre}`
+        adjuntoFuente = a
+        console.log(`[correo-pago] comprobante leído desde adjunto ${a.nombre} (${a.bytes} bytes): monto=${parsed.monto} cot=${parsed.numeroCotizacion || "-"} rut=${parsed.rutOrdenante || "-"}`)
+        break
+      }
+    }
+  }
+  if (!aviso) return { veredicto: "no_es_aviso", ...(adjuntosLeidos.length ? { adjuntosLeidos } : {}) }
   const hash = hashCorreo(c, aviso)
   const kvKey = `correo_pago_${hash}`
   const resumen = {
@@ -246,7 +284,7 @@ export async function procesarCorreoEntrante(
     if (previo) {
       let p: Partial<ResultadoCorreoPago> = {}
       try { p = JSON.parse(previo) as Partial<ResultadoCorreoPago> } catch { /* marca vieja */ }
-      return { veredicto: "ya_procesado", aviso: resumen, hash, quoteId: p.quoteId, numero: p.numero, detalle: `procesado antes: ${p.veredicto || "?"}` }
+      return { veredicto: "ya_procesado", aviso: resumen, hash, origen, quoteId: p.quoteId, numero: p.numero, detalle: `procesado antes: ${p.veredicto || "?"}` }
     }
   }
 
@@ -254,7 +292,7 @@ export async function procesarCorreoEntrante(
   try {
     res = await resolverCotizacion(aviso)
   } catch (e) {
-    return { veredicto: "error", aviso: resumen, hash, detalle: e instanceof Error ? e.message : String(e) }
+    return { veredicto: "error", aviso: resumen, hash, origen, detalle: e instanceof Error ? e.message : String(e) }
   }
   const candidatos = res.candidatos.map((r) => ({
     quoteId: String(r.id), numero: String(r.Numero_Cotizacion || ""), estado: String(r.Estado_Cotizacion || ""), nombre: String(r.Name || ""),
@@ -264,12 +302,12 @@ export async function procesarCorreoEntrante(
     if (!opts.dry) {
       await setKvValue(kvKey, JSON.stringify({ veredicto, at: new Date().toISOString(), hash, aviso: resumen, candidatos })).catch(() => {})
       await avisarEquipoInterno(
-        `💳 AVISO DE TRANSFERENCIA EN LA CASILLA DE VICKY sin cotización ${veredicto === "ambiguo" ? "única" : "asociable"}\n${resumenAviso(aviso)}` +
+        `💳 ${origen === "cuerpo" ? "AVISO DE TRANSFERENCIA" : `COMPROBANTE ADJUNTO (${origen.slice(8)})`} EN LA CASILLA DE VICKY sin cotización ${veredicto === "ambiguo" ? "única" : "asociable"}\n${resumenAviso(aviso)}` +
           (candidatos.length ? `\nCandidatas: ${candidatos.map((k) => `${k.numero} (${k.estado}, ${k.nombre})`).join(" · ")}` : "") +
           `\nHay que asociarlo a mano (vic-admin-adjuntar-comprobante + marcar Pagada) — el aviso quedó en vicky@.`,
       ).catch(() => false)
     }
-    return { veredicto, aviso: resumen, hash, candidatos, detalle: `vía ${res.via}` }
+    return { veredicto, aviso: resumen, hash, origen, adjuntosLeidos, candidatos, detalle: `vía ${res.via}` }
   }
 
   const row = res.row
@@ -281,7 +319,7 @@ export async function procesarCorreoEntrante(
 
   if (/pagad/i.test(String(row.Estado_Cotizacion || ""))) {
     if (!opts.dry) await setKvValue(kvKey, JSON.stringify({ veredicto: "ya_pagada", at: new Date().toISOString(), quoteId, numero, aviso: resumen })).catch(() => {})
-    return { veredicto: "ya_pagada", aviso: resumen, hash, quoteId, numero, contact, empresa }
+    return { veredicto: "ya_pagada", aviso: resumen, hash, origen, quoteId, numero, contact, empresa }
   }
 
   const esperadoClp = await pagoInicialEsperadoClp(quoteId).catch(() => 0)
@@ -297,11 +335,11 @@ export async function procesarCorreoEntrante(
       ? opts.correos
       : !silencioso && String((await getKvValue("correo_pago_correos").catch(() => null)) || "").trim().toLowerCase() === "on"
 
-  const base: ResultadoCorreoPago = { veredicto: "dry", aviso: resumen, hash, quoteId, numero, contact, empresa, esperadoClp, silencioso, correos, detalle: `vía ${res.via}${stage ? ` · deal ${stage}` : ""}` }
+  const base: ResultadoCorreoPago = { veredicto: "dry", aviso: resumen, hash, origen, adjuntosLeidos, quoteId, numero, contact, empresa, esperadoClp, silencioso, correos, detalle: `vía ${res.via}${stage ? ` · deal ${stage}` : ""}${origen !== "cuerpo" ? ` · ${origen}` : ""}` }
 
   if (insuficiente) {
     if (opts.dry) return { ...base, veredicto: "dry", detalle: `${base.detalle} · MONTO INSUFICIENTE (${fmtClp(aviso.monto)} < ${fmtClp(esperadoClp)})` }
-    const nota = `⚠️ AVISO DEL BANCO (casilla vicky@) con MONTO INSUFICIENTE — no se marcó Pagada.\n${resumenAviso(aviso)}\nPago inicial esperado: ${fmtClp(esperadoClp)} · faltan ${fmtClp(esperadoClp - aviso.monto)}.`
+    const nota = `⚠️ ${origen === "cuerpo" ? "AVISO DEL BANCO" : `COMPROBANTE ADJUNTO (${origen.slice(8)}, leído por visión)`} (casilla vicky@) con MONTO INSUFICIENTE — no se marcó Pagada.\n${resumenAviso(aviso)}\nPago inicial esperado: ${fmtClp(esperadoClp)} · faltan ${fmtClp(esperadoClp - aviso.monto)}.`
     await crearNotaEnCotizacion(quoteId, nota).catch(() => false)
     await avisarEquipoInterno(`💳 ${numero} ${empresa}: ${nota}`).catch(() => false)
     await setKvValue(kvKey, JSON.stringify({ veredicto: "monto_insuficiente", at: new Date().toISOString(), quoteId, numero, aviso: resumen, esperadoClp })).catch(() => {})
@@ -312,13 +350,23 @@ export async function procesarCorreoEntrante(
 
   try {
     const nota =
-      `💳 PAGO REGISTRADO DESDE EL AVISO DEL BANCO (casilla vicky@, ${c.fuente})\n${resumenAviso(aviso)}` +
+      (origen === "cuerpo"
+        ? `💳 PAGO REGISTRADO DESDE EL AVISO DEL BANCO (casilla vicky@, ${c.fuente})\n`
+        : `💳 PAGO REGISTRADO DESDE UN COMPROBANTE ADJUNTO (${origen.slice(8)}, casilla vicky@, ${c.fuente}) — datos LEÍDOS POR VISIÓN, verificar contra el archivo adjunto\n`) +
+      `${resumenAviso(aviso)}` +
       (esperadoClp ? `\nPago inicial esperado: ${fmtClp(esperadoClp)} ✓` : "") +
       `\nCorreo: ${c.subject || "(sin asunto)"} · ${c.from} · ${c.receivedAt || ""}` +
       (silencioso ? `\nRegistro SILENCIOSO (${yaImplementado ? `deal ya en ${stage}` : `aviso de hace ${Math.round(edadDias)} días`}): sin bienvenida ni alta por chat.` : "") +
       (correos ? "" : "\nSin correo de PAGADA ni de cobranza (interruptor correo_pago_correos apagado).")
     await crearNotaEnCotizacion(quoteId, nota).catch(() => false)
-    if (c.html) {
+    if (adjuntoFuente) {
+      // El archivo ORIGINAL (foto/PDF) va a la cotización; es la evidencia,
+      // la transcripción es solo la lectura.
+      const ext = (adjuntoFuente.nombre.match(/\.[a-z0-9]{2,4}$/i) || [""])[0].toLowerCase() || (/pdf/.test(adjuntoFuente.tipo) ? ".pdf" : ".jpg")
+      const nombre = `comprobante-correo-${(aviso.nroOperacion || hash).replace(/[^A-Za-z0-9_-]/g, "")}${ext}`
+      const ct = adjuntoFuente.tipo || (ext === ".pdf" ? "application/pdf" : "image/jpeg")
+      await adjuntarComprobanteBase64(quoteId, adjuntoFuente.base64, nombre, ct).catch(() => ({ ok: false }))
+    } else if (c.html) {
       const nombre = `aviso-banco-${aviso.banco}-${(aviso.nroOperacion || hash).replace(/[^A-Za-z0-9_-]/g, "")}.html`
       await adjuntarComprobanteBase64(quoteId, Buffer.from(c.html, "utf8").toString("base64"), nombre, "text/html").catch(() => ({ ok: false }))
     }
@@ -326,7 +374,7 @@ export async function procesarCorreoEntrante(
     // post-pago debe saber que fue transferencia y con qué fecha real.
     const atReal = Number.isFinite(fechaMs) ? new Date(fechaMs).toISOString() : new Date().toISOString()
     if (contact) {
-      await setKvValue(`comprobante_ok_${contact}`, JSON.stringify({ at: atReal, numero, quoteId, fuente: "correo_banco", nro: aviso.nroOperacion })).catch(() => {})
+      await setKvValue(`comprobante_ok_${contact}`, JSON.stringify({ at: atReal, numero, quoteId, fuente: origen === "cuerpo" ? "correo_banco" : "correo_adjunto", nro: aviso.nroOperacion })).catch(() => {})
     }
     if (silencioso) {
       await setKvValue(`traspaso_postpago_${quoteId}`, new Date().toISOString()).catch(() => {})
@@ -354,9 +402,9 @@ export async function procesarCorreoEntrante(
         detalle: `Aviso del banco recibido en vicky@ (${aviso.nroOperacion || "sin nº"}). Registrado automáticamente.`,
       }).catch(() => ({ ok: false }))
     }
-    await setKvValue(kvKey, JSON.stringify({ veredicto: "registrado", at: new Date().toISOString(), quoteId, numero, contact, aviso: resumen, silencioso, correos })).catch(() => {})
+    await setKvValue(kvKey, JSON.stringify({ veredicto: "registrado", at: new Date().toISOString(), quoteId, numero, contact, aviso: resumen, silencioso, correos, origen })).catch(() => {})
     await avisarEquipoInterno(
-      `💳 PAGO REGISTRADO desde la casilla de Vicky: ${numero} ${empresa} · ${fmtClp(aviso.monto)} · ${aviso.banco} ${aviso.fechaTexto} ${aviso.hora}` +
+      `💳 PAGO REGISTRADO desde la casilla de Vicky${origen === "cuerpo" ? "" : ` (comprobante adjunto ${origen.slice(8)}, leído por visión)`}: ${numero} ${empresa} · ${fmtClp(aviso.monto)} · ${aviso.banco} ${aviso.fechaTexto} ${aviso.hora}` +
         (silencioso ? " · silencioso" : "") + (correos ? "" : " · sin correo de pago"),
     ).catch(() => false)
     console.log(`[correo-pago] registrado quote=${quoteId} ${numero} monto=${aviso.monto} silencioso=${silencioso} correos=${correos}`)

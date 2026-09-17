@@ -107,3 +107,77 @@ test("htmlATexto separa celdas y decodifica entidades", () => {
   const t = htmlATexto("<table><tr><td>Monto&nbsp;transferido:</td><td>$&nbsp;1.234</td></tr></table>")
   assert.match(t, /Monto transferido: \| \$ 1\.234/)
 })
+
+/* ── Adjuntos (17-sep): comprobante transcrito por visión + normalización ── */
+
+import { normalizarAdjuntos, adjuntosLegibles } from "../lib/aviso-banco.ts"
+
+const TRANSCRITO = `Tipo: Comprobante de transferencia
+Banco: Banco Santander
+Monto transferido: $70.478
+Titular de la cuenta de origen: SOCIEDAD GASES DEL SUR SPA
+RUT: 76.543.210-K
+Nombre destinatario: Victoria S.A.
+Cuenta destino: 8001204108
+Fecha: 06/08/2026
+Hora: 18:23
+Número de operación: 998877
+Mensaje: pago cotizacion 266`
+
+test("adjunto: un comprobante transcrito se parsea con el mismo parser (modo adjunto)", () => {
+  const a = parsearAvisoBanco({ from: "contadora@cliente.cl", subject: "Fwd: comprobante", text: TRANSCRITO, origen: "adjunto" })
+  assert.ok(a)
+  assert.equal(a.origen, "adjunto")
+  assert.equal(a.banco, "santander")
+  assert.equal(a.monto, 70478)
+  assert.equal(a.ordenante, "SOCIEDAD GASES DEL SUR SPA")
+  assert.equal(a.rutOrdenante, "76543210-K")
+  assert.equal(a.numeroCotizacion, "COT266")
+  assert.equal(a.fechaTexto, "06/08/2026")
+  assert.equal(a.hora, "18:23")
+  assert.equal(a.nroOperacion, "998877")
+  assert.equal(a.destinoNuestro, true)
+  assert.equal(a.remitente, "contadora@cliente.cl")
+})
+
+test("adjunto: NO_ES_COMPROBANTE y una transferencia a un tercero se rechazan", () => {
+  assert.equal(parsearAvisoBanco({ from: "x@y.cl", text: "NO_ES_COMPROBANTE", origen: "adjunto" }), null)
+  const tercero = TRANSCRITO.replace("Victoria S.A.", "PROVEEDOR LTDA").replace("8001204108", "1234567890")
+  assert.equal(parsearAvisoBanco({ from: "x@y.cl", text: tercero, origen: "adjunto" }), null)
+})
+
+test("adjunto: un banco no listado pasa como 'otro' si el destino somos nosotros", () => {
+  const a = parsearAvisoBanco({ from: "x@y.cl", text: TRANSCRITO.replace("Banco Santander", "Banco Security"), origen: "adjunto" })
+  assert.ok(a)
+  assert.equal(a.banco, "otro")
+})
+
+test("normalizarAdjuntos entiende Power Automate, Graph, manual y string JSON", () => {
+  const pa = [{ Name: "comprobante.pdf", ContentBytes: "JVBERi0x", ContentType: "application/pdf", IsInline: false, Size: 20000 }]
+  const g = [{ name: "foto.jpg", contentBytes: "/9j/4AAQ", contentType: "image/jpeg", isInline: false, size: 30000 }]
+  const m = [{ nombre: "x.png", base64: "data:image/png;base64,iVBORw0KGgo=", tipo: "image/png" }]
+  assert.equal(normalizarAdjuntos(pa)[0].nombre, "comprobante.pdf")
+  assert.equal(normalizarAdjuntos(pa)[0].bytes, 20000)
+  assert.equal(normalizarAdjuntos(g)[0].tipo, "image/jpeg")
+  assert.equal(normalizarAdjuntos(m)[0].base64, "iVBORw0KGgo=")
+  assert.equal(normalizarAdjuntos(JSON.stringify(pa)).length, 1)
+  assert.deepEqual(normalizarAdjuntos("no es json"), [])
+  assert.deepEqual(normalizarAdjuntos(null), [])
+  assert.deepEqual(normalizarAdjuntos([{ Name: "vacio.pdf" }]), [])
+})
+
+test("adjuntosLegibles deja fuera inline, logos chicos, tipos no legibles y tope 3", () => {
+  const mk = (nombre: string, tipo: string, bytes: number, inline = false) => ({ nombre, tipo, base64: "x", inline, bytes })
+  const lista = [
+    mk("logo.png", "image/png", 3000, true),
+    mk("firma.gif", "image/gif", 2000),
+    mk("comprobante.pdf", "application/pdf", 50000),
+    mk("planilla.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 50000),
+    mk("foto1.jpg", "image/jpeg", 90000),
+    mk("foto2.jpg", "image/jpeg", 90000),
+    mk("foto3.jpg", "", 90000),
+    mk("foto4.jpg", "image/jpeg", 90000),
+  ]
+  const ok = adjuntosLegibles(lista)
+  assert.deepEqual(ok.map((a) => a.nombre), ["comprobante.pdf", "foto1.jpg", "foto2.jpg"])
+})

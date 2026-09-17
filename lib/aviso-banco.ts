@@ -46,6 +46,8 @@ export type AvisoBanco = {
   destinoNuestro: boolean
   /** Texto plano del correo (recortado) para la nota interna. */
   texto: string
+  /** De dónde salió: el cuerpo del correo del banco o un adjunto transcrito por visión. */
+  origen: OrigenAviso
 }
 
 const CUENTA_VICTORIA = "8001204108"
@@ -103,14 +105,24 @@ function normalizarRut(s: string): string {
   return `${t.slice(0, -1)}-${t.slice(-1)}`
 }
 
-function bancoDeRemitente(remitente: string, texto: string): AvisoBanco["banco"] | null {
+function bancoDeRemitente(remitente: string, texto: string, origen: OrigenAviso): AvisoBanco["banco"] | null {
   for (const [re, b] of DOMINIOS_BANCO) if (re.test(remitente)) return b
   // Sin remitente reconocible (p. ej. reenvío): se infiere del cuerpo.
-  if (/banco de chile|bancochile|Fonobank/i.test(texto) && /ha instruido la siguiente transferencia/i.test(texto)) return "bancochile"
+  if (/banco de chile|bancochile|Fonobank/i.test(texto) && (origen === "adjunto" || /ha instruido la siguiente transferencia/i.test(texto))) return "bancochile"
   if (/\bBci\b|BancoBci|Banco de Credito e Inversiones/i.test(texto)) return "bci"
   if (/santander/i.test(texto)) return "santander"
+  if (origen === "adjunto") {
+    // Comprobante transcrito por visión: el banco viene en la línea "Banco:".
+    if (/banco\s*estado/i.test(texto)) return "bancoestado"
+    if (/scotiabank/i.test(texto)) return "scotiabank"
+    if (/ita[uú]/i.test(texto)) return "itau"
+    if (/\bBanco\s*:\s*\S/i.test(texto)) return "otro"
+  }
   return null
 }
+
+/** "cuerpo" = HTML/texto del correo del banco · "adjunto" = comprobante transcrito por visión. */
+export type OrigenAviso = "cuerpo" | "adjunto"
 
 function capturar(texto: string, res: RegExp[]): string {
   for (const re of res) {
@@ -161,13 +173,17 @@ export function numeroCotizacionEn(texto: string): string {
  * ENTRANTE a nuestra cuenta (notificación de Zoho, correo de un cliente,
  * transferencia saliente, etc.).
  */
-export function parsearAvisoBanco(input: { from?: string; subject?: string; html?: string; text?: string }): AvisoBanco | null {
-  const remitente = String(input.from || "").trim().toLowerCase()
+export function parsearAvisoBanco(input: { from?: string; subject?: string; html?: string; text?: string; origen?: OrigenAviso }): AvisoBanco | null {
+  const origen: OrigenAviso = input.origen || "cuerpo"
+  // Con origen "adjunto" el remitente es un CLIENTE (o quien reenvió), no el
+  // banco: no se usa para inferir nada.
+  const remitente = origen === "adjunto" ? "" : String(input.from || "").trim().toLowerCase()
   const asunto = String(input.subject || "").trim()
   const texto = input.html ? htmlATexto(input.html) : String(input.text || "").replace(/\r/g, "")
   if (!texto) return null
-  const banco = bancoDeRemitente(remitente, texto)
-  const habla = /transferencia/i.test(`${asunto}\n${texto}`)
+  if (origen === "adjunto" && /NO_ES_COMPROBANTE/.test(texto)) return null
+  const banco = bancoDeRemitente(remitente, texto, origen)
+  const habla = /transferencia|comprobante de pago/i.test(`${asunto}\n${texto}`)
   if (!habla) return null
   // Saliente (nosotros transfiriendo) o rechazo: no es un abono.
   if (/has realizado una transferencia|realizaste una transferencia|transferencia (?:fue )?rechazada|no pudo ser realizada/i.test(texto)) return null
@@ -196,7 +212,8 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   ])
   const destinoNuestro =
     soloDigitos(cuentaDestino).replace(/^0+/, "") === CUENTA_VICTORIA ||
-    /victoria s\.?\s*a\b/i.test(texto)
+    soloDigitos(texto).includes(CUENTA_VICTORIA) ||
+    /victoria s\.?\s*a\b|geo\s?victoria/i.test(texto)
 
   // RUT del ordenante: el primero que NO sea el nuestro (Santander imprime el
   // RUT de DESTINO, Victoria SA).
@@ -233,10 +250,13 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   // Sin banco reconocido y sin nuestra cuenta como destino, no se acepta: un
   // correo cualquiera con la palabra "transferencia" y un monto no es un abono.
   if (!banco && !destinoNuestro) return null
+  // Un comprobante adjunto además tiene que ir dirigido a NOSOTROS: una foto de
+  // una transferencia a un tercero (proveedor, sueldo) también dice "Banco:".
+  if (origen === "adjunto" && !destinoNuestro) return null
 
   return {
     banco: banco || "otro",
-    remitente,
+    remitente: origen === "adjunto" ? String(input.from || "").trim().toLowerCase() : remitente,
     ordenante,
     rutOrdenante,
     monto,
@@ -250,5 +270,71 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
     cuentaDestino,
     destinoNuestro,
     texto: texto.slice(0, 1500),
+    origen,
   }
+}
+
+/* ── Adjuntos de correo ─────────────────────────────────────────────────── */
+
+export type AdjuntoCorreo = {
+  nombre: string
+  tipo: string
+  base64: string
+  inline: boolean
+  bytes: number
+}
+
+/**
+ * Normaliza la lista de adjuntos tal como la mandan Power Automate (Name /
+ * ContentBytes / ContentType / IsInline / Size), Microsoft Graph (name /
+ * contentBytes / contentType / isInline / size) o un POST manual (nombre /
+ * base64 / tipo). Acepta la lista serializada como string JSON (pasa cuando el
+ * diseñador de Power Automate deja el token entre comillas). Sin red, sin
+ * decodificar el base64 más allá de estimar su tamaño.
+ */
+export function normalizarAdjuntos(raw: unknown): AdjuntoCorreo[] {
+  let lista: unknown = raw
+  if (typeof lista === "string") {
+    const t = lista.trim()
+    if (!t) return []
+    try { lista = JSON.parse(t) } catch { return [] }
+  }
+  if (!Array.isArray(lista)) return []
+  const out: AdjuntoCorreo[] = []
+  for (const it of lista) {
+    if (!it || typeof it !== "object") continue
+    const o = it as Record<string, unknown>
+    const pick = (...ks: string[]) => {
+      for (const k of ks) if (o[k] !== undefined && o[k] !== null && o[k] !== "") return o[k]
+      return undefined
+    }
+    const base64 = String(pick("base64", "contentBytes", "ContentBytes", "contenidoBase64") || "").replace(/^data:[^;]+;base64,/, "").replace(/\s+/g, "")
+    if (!base64) continue
+    const nombre = String(pick("nombre", "name", "Name") || "adjunto")
+    const tipo = String(pick("tipo", "contentType", "ContentType") || "").toLowerCase()
+    const inlineRaw = pick("inline", "isInline", "IsInline")
+    const inline = inlineRaw === true || String(inlineRaw).toLowerCase() === "true"
+    const sizeRaw = Number(pick("bytes", "size", "Size"))
+    const bytes = Number.isFinite(sizeRaw) && sizeRaw > 0 ? sizeRaw : Math.floor((base64.length * 3) / 4)
+    out.push({ nombre, tipo, base64, inline, bytes })
+  }
+  return out
+}
+
+const RE_NOMBRE_LEGIBLE = /\.(pdf|jpe?g|png|webp|gif)$/i
+const MIN_BYTES_COMPROBANTE = 8 * 1024
+const MAX_BYTES_COMPROBANTE = 10 * 1024 * 1024
+
+/**
+ * Cuáles adjuntos vale la pena leer con visión: imagen o PDF, no inline (los
+ * logos de las firmas y de los correos de los bancos vienen inline y chicos),
+ * de tamaño razonable. Máximo `max` (los correos con 10 fotos no son
+ * comprobantes).
+ */
+export function adjuntosLegibles(adjuntos: AdjuntoCorreo[], max = 3): AdjuntoCorreo[] {
+  return adjuntos
+    .filter((a) => !a.inline)
+    .filter((a) => /pdf|image\//.test(a.tipo) || RE_NOMBRE_LEGIBLE.test(a.nombre))
+    .filter((a) => a.bytes >= MIN_BYTES_COMPROBANTE && a.bytes <= MAX_BYTES_COMPROBANTE)
+    .slice(0, max)
 }
