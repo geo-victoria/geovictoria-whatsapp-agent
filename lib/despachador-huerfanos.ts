@@ -130,6 +130,9 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // responder. El endpoint se auto-gatea al jueves 11:00 CL, así que la
   // cadencia horaria solo tiene que garantizar que ese tick exista.
   { nombre: "campana_contenido", path: "/api/vic-campana-contenido", cadaMin: 60 },
+  // Casilla vicky@ (17-sep): avisos de transferencia de los bancos → pago
+  // registrado solo. Sin credenciales de Graph responde sin_credenciales.
+  { nombre: "correo_vicky", path: "/api/vic-correo-vicky-cron", cadaMin: 10 },
 ]
 
 /**

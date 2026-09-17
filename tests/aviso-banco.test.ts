@@ -1,0 +1,109 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+import { parsearAvisoBanco, htmlATexto, numeroCotizacionEn, isoChile } from "../lib/aviso-banco.ts"
+
+// Fragmentos con la MISMA estructura de tablas de los correos reales leídos
+// en la casilla vicky@ (17-sep). Los estilos se omiten: el parser los ignora.
+
+const BANCOCHILE = `<div><h3>Comprobante de Transferencia </h3><p>Te informamos que SOCIEDAD GASES DEL SUR SPA ha instruido la siguiente transferencia: </p>
+<table><tr><td> </td><td><strong>Datos de Destino</strong> </td></tr>
+<tr><td> </td><td>Nombre Beneficiario </td><td>Victoria S.a </td><td> </td></tr>
+<tr><td> </td><td>Cuenta de abono </td><td>8001204108 </td><td> </td></tr></table>
+<table><tr><td> </td><td><strong>Datos de Origen</strong> </td></tr><tr><td> </td><td>Cuenta de cargo </td><td>2701245207 </td></tr></table>
+<table><tr><td> </td><td><strong>Monto Operaci&oacute;n</strong> </td><td>$70.478 </td></tr></table>
+<table><tr><td> </td><td><strong>Mensaje</strong> </td><td>pago cotizacion 266 </td></tr></table>
+<table><tr><td><strong>Fecha y hora: </strong><br />06/08/2026 18:23 <br /><br /><strong>ID de la operaci&oacute;n: </strong><br />INT_EMP2608061823305909863900 <br /></td></tr></table></div>`
+
+const BCI_PERSONAS = `<table><tr><td>Hola<br /><b>Victoria SA</b></td></tr><tr><td>Has <b>recibido</b> una <b>transferencia de fondos</b> de SURCONTROL SPA hacia tu cuenta del BANCO DE CHILE-EDWARDS.</td></tr></table>
+<table><tr><td><b>Origen</b></td></tr></table>
+<table><tr><td>Raz&oacute;n social:</td><td>SURCONTROL SPA</td></tr><tr><td>RUT:</td><td>77742692-3</td></tr><tr><td>Cuenta:</td><td>BCI/TBANC/NOVA</td></tr></table>
+<table><tr><td><b>Destino</b></td></tr></table>
+<table><tr><td>Nombre:</td><td>Victoria SA</td></tr><tr><td>Monto transferido:</td><td>$ 36,459</td></tr><tr><td>N&ordm; de cuenta:</td><td>000000008001204108</td></tr><tr><td>Banco:</td><td>BANCO DE CHILE-EDWARDS</td></tr><tr><td>N&ordm; de comprobante:</td><td>47211082</td></tr><tr><td>Fecha:</td><td>17/08/2026</td></tr><tr><td>Hora:</td><td>20:12</td></tr><tr><td>Correo electr&oacute;nico de contacto:</td><td>vicky@geovictoria.com</td></tr><tr><td>Mensaje:</td><td>COT524</td></tr></table>`
+
+const BCI_EMPRESAS = `<table><tr><td><strong>Comprobante de Transferencia de Fondos</strong></td></tr><tr><td><p><strong>ESTIMADO(A) VICTORIA SA</strong>: </p><p>De acuerdo con lo instruido por nuestro cliente AGRICOLA TODOS LOS SANTOS SPA,  le informamos que con fecha 18/08/2026  se ha realizado una transferencia de fondos hacia su cuenta del banco Banco de Chile. </p>
+<table><tr><td><strong>Monto transferido:</strong></td><td><strong>$56.837</strong></td></tr><tr><td><strong>Titular de la cuenta de origen:</strong></td><td><strong>AGRICOLA TODOS LOS SANTOS SPA</strong></td></tr><tr><td>Banco de origen:</td><td>Banco de Credito e Inversiones</td></tr><tr><td>Comentario para el destinatario:</td><td>COT-656</td></tr><tr><td>Numero de la operacion:</td><td>47282222</td></tr><tr><td>Fecha abono:</td><td>18/08/2026</td></tr></table></td></tr></table>`
+
+const SANTANDER = `<table><tr><td>Comprobante</td></tr><tr><td>Transferencia de fondos</td></tr><tr><td>Estimado(a) Victoria SA:</td></tr><tr><td>Te informamos que, con fecha 10/08/2026, nuestro cliente MARIA TERESA ALLENDE GOMEZ realiz&oacute; una transferencia a tu cuenta. Este es el detalle:</td></tr>
+<tr><td><table><tr><td>Monto transferido</td><td>$ 29.163</td></tr></table></td></tr>
+<tr><td><table><tr><td>Datos de destino</td></tr><tr><td>Nombre</td><td>Victoria SA</td></tr><tr><td>RUT</td><td>76.188.587-1</td></tr><tr><td>Banco</td><td>Banco de Chile / Edwards-Citi</td></tr><tr><td>N&ordm; de cuenta</td><td>0-080-01-20410-8</td></tr><tr><td>Comentario</td><td>COT408</td></tr></table></td></tr></table>`
+
+test("Banco de Chile: monto, ordenante, mensaje con número de cotización, fecha y hora, ID", () => {
+  const a = parsearAvisoBanco({ from: "serviciodetransferencias@bancochile.cl", subject: "pago cotizacion 266", html: BANCOCHILE })
+  assert.ok(a)
+  assert.equal(a.banco, "bancochile")
+  assert.equal(a.monto, 70478)
+  assert.equal(a.ordenante, "SOCIEDAD GASES DEL SUR SPA")
+  assert.equal(a.numeroCotizacion, "COT266")
+  assert.equal(a.fechaTexto, "06/08/2026")
+  assert.equal(a.hora, "18:23")
+  assert.equal(a.fechaIso, "2026-08-06T22:23:00.000Z")
+  assert.equal(a.nroOperacion, "INT_EMP2608061823305909863900")
+  assert.equal(a.cuentaDestino, "8001204108")
+  assert.equal(a.destinoNuestro, true)
+})
+
+test("BCI personas: coma de miles, RUT del ordenante, comprobante, correo de contacto", () => {
+  const a = parsearAvisoBanco({ from: "contacto@bci.cl", subject: "Aviso de transferencia de fondos", html: BCI_PERSONAS })
+  assert.ok(a)
+  assert.equal(a.banco, "bci")
+  assert.equal(a.monto, 36459)
+  assert.equal(a.ordenante, "SURCONTROL SPA")
+  assert.equal(a.rutOrdenante, "77742692-3")
+  assert.equal(a.numeroCotizacion, "COT524")
+  assert.equal(a.nroOperacion, "47211082")
+  assert.equal(a.fechaTexto, "17/08/2026")
+  assert.equal(a.hora, "20:12")
+  assert.equal(a.correoContacto, "vicky@geovictoria.com")
+  assert.equal(a.destinoNuestro, true)
+})
+
+test("BCI empresas: titular de origen, COT con guion, fecha abono", () => {
+  const a = parsearAvisoBanco({ from: "transferencias@bci.cl", subject: "Aviso de Transferencia de Fondos.", html: BCI_EMPRESAS })
+  assert.ok(a)
+  assert.equal(a.monto, 56837)
+  assert.equal(a.ordenante, "AGRICOLA TODOS LOS SANTOS SPA")
+  assert.equal(a.numeroCotizacion, "COT656")
+  assert.equal(a.nroOperacion, "47282222")
+  assert.equal(a.fechaTexto, "18/08/2026")
+})
+
+test("Santander: el RUT impreso es el NUESTRO y no se toma como ordenante", () => {
+  const a = parsearAvisoBanco({ from: "mensajeria@santander.cl", subject: "Comprobante Transferencia de fondos", html: SANTANDER })
+  assert.ok(a)
+  assert.equal(a.banco, "santander")
+  assert.equal(a.monto, 29163)
+  assert.equal(a.ordenante, "MARIA TERESA ALLENDE GOMEZ")
+  assert.equal(a.rutOrdenante, "")
+  assert.equal(a.numeroCotizacion, "COT408")
+  assert.equal(a.fechaTexto, "10/08/2026")
+  assert.equal(a.destinoNuestro, true)
+})
+
+test("una notificación de Zoho o un correo cualquiera NO es un aviso", () => {
+  assert.equal(parsearAvisoBanco({ from: "systemgenerated@zohocrm.com", subject: "Zoho CRM - You Have A New Task", text: "Task assigned to you. Due Date Sep 18, 2026" }), null)
+  assert.equal(parsearAvisoBanco({ from: "cliente@empresa.cl", subject: "consulta", text: "hola, ¿hacen transferencia de datos? cuesta $ 40.000" }), null)
+})
+
+test("una transferencia SALIENTE nuestra no se registra", () => {
+  assert.equal(
+    parsearAvisoBanco({ from: "contacto@bci.cl", subject: "Aviso", text: "Has realizado una transferencia de fondos de $ 100.000 hacia la cuenta de PROVEEDOR SPA. Fecha: 01/09/2026" }),
+    null,
+  )
+})
+
+test("número de cotización: COT, COT-, 'cotizacion 266' y sin falso positivo", () => {
+  assert.equal(numeroCotizacionEn("COT1192"), "COT1192")
+  assert.equal(numeroCotizacionEn("COT-656"), "COT656")
+  assert.equal(numeroCotizacionEn("pago cotizacion 266"), "COT266")
+  assert.equal(numeroCotizacionEn("Pago inicial marcaje"), "")
+})
+
+test("isoChile respeta el horario de verano/invierno de Chile", () => {
+  assert.equal(isoChile("06/08/2026", "18:23"), "2026-08-06T22:23:00.000Z") // invierno, -04
+  assert.equal(isoChile("16/09/2026", "11:53"), "2026-09-16T14:53:00.000Z") // verano, -03
+})
+
+test("htmlATexto separa celdas y decodifica entidades", () => {
+  const t = htmlATexto("<table><tr><td>Monto&nbsp;transferido:</td><td>$&nbsp;1.234</td></tr></table>")
+  assert.match(t, /Monto transferido: \| \$ 1\.234/)
+})

@@ -114,7 +114,7 @@ const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim
  * (`/api/quote-acceptance/pago-inicial`). 0 si no se pudo saber: ahí no se
  * frena nada (fail-open a la validación blanda de siempre).
  */
-async function pagoInicialEsperadoClp(quoteId: string): Promise<number> {
+export async function pagoInicialEsperadoClp(quoteId: string): Promise<number> {
   try {
     if (!VICKY_COTIZADORA_SECRET) return 0
     const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/pago-inicial?quoteId=${encodeURIComponent(quoteId)}`, {
@@ -187,7 +187,7 @@ async function nombreContactoDeCotizacion(quoteId: string): Promise<string> {
   }
 }
 
-async function buscarCotizacionPorNumero(
+export async function buscarCotizacionPorNumero(
   numero: string,
 ): Promise<import("@/lib/supabase-persistence-v3").QuotePointer | null> {
   const digitos = (numero || "").replace(/\D/g, "")
@@ -231,7 +231,7 @@ async function buscarCotizacionPorNumero(
  * "Pagada". Riesgo asumido y documentado en la nota: es pago DECLARADO — si
  * el abono no aparece en el banco, cobranza revierte el estado a mano. */
 /** ¿La cotización ya está Pagada en Zoho? (fail-closed: ante duda, se considera NO pagada). */
-async function cotizacionYaPagada(quoteId: string): Promise<boolean> {
+export async function cotizacionYaPagada(quoteId: string): Promise<boolean> {
   try {
     const token = await getZohoAccessToken()
     const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=Estado_Cotizacion`, {
@@ -312,7 +312,7 @@ export async function notificarPagadaAlCotizador(quoteId: string): Promise<void>
  * retrocede ni toca Cierre Perdido/Congelado); si el blueprint solo ofrece el
  * paso intermedio "6. Listo para Cierre", se avanza y se reintenta el tramo
  * final de inmediato. Best-effort: nunca toca la respuesta al cliente. */
-async function avanzarDealAGanado(pointer: QuotePointer): Promise<void> {
+export async function avanzarDealAGanado(pointer: QuotePointer): Promise<void> {
   try {
     let dealId = (pointer.dealId || "").trim()
     if (!dealId) {
@@ -342,7 +342,7 @@ async function avanzarDealAGanado(pointer: QuotePointer): Promise<void> {
   }
 }
 
-async function crearNotaEnCotizacion(quoteId: string, contenido: string): Promise<boolean> {
+export async function crearNotaEnCotizacion(quoteId: string, contenido: string): Promise<boolean> {
   try {
     const token = await getZohoAccessToken()
     // Endpoint de related records (25-jul): POST /{módulo}/{id}/Notes. El
