@@ -31,6 +31,10 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // Alarma de espejos caídos (16-sep): correo al ejecutivo + copia si su sesión
   // lleva >1 h sin vincular; el panel 🪞 era solo de consulta.
   { nombre: "espejo_alerta", path: "/api/vic-espejo-alerta", cadaMin: 60 },
+  // Vigía de paridad de prompts (21-sep): mide el prompt REAL de los cuatro
+  // países contra el catálogo de reglas globales y avisa si aparece una brecha
+  // no declarada. El test frena el desarrollo; esto vigila la operación.
+  { nombre: "paridad_prompts", path: "/api/vic-paridad-prompts?avisar=1", cadaMin: 1440 },
   { nombre: "mudos", path: "/api/vic-mudos-cron", cadaMin: 30 },
   // (El followup viejo se ELIMINÓ en la demolición de la biblia, 12-ago.)
   { nombre: "outbound", path: "/api/vic-outbound-cadence-cron", cadaMin: 15 },
