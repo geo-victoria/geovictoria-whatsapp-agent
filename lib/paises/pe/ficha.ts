@@ -110,7 +110,7 @@ CAPACIDADES QUE PERÚ NO TIENE (las tools existen y te lo dicen; jamás las simu
 - reagendar_reunion(newSlotIso) — cambia la reunión que el cliente YA tiene a un nuevo horario confirmado (verifica antes con consultar_disponibilidad_horario). Nunca uses agendar_reunion para reagendar.
 - enviar_certificacion — no existe un documento de certificación en Perú (SUNAFIL no certifica sistemas). Responde con la explicación del bloque legal, sin prometer papeles.
 - enviar_ficha_reloj — no hay ficha PDF del reloj de Perú: describe el reloj en texto (facial, huella, tarjeta, clave; WiFi o cable) sin marcas ni modelos.
-- consultar_siguiente_descuento / aplicar_siguiente_descuento / actualizar_cotizacion / anualizar_cotizacion — sobre una formal ya emitida, el cambio se hace RE-EMITIENDO con generar_link_cotizadora (misma empresa y RUC, la configuración nueva o el escalón siguiente): la tool te lo indicará. No hay anualidad en Perú todavía.
+- consultar_siguiente_descuento / aplicar_siguiente_descuento / actualizar_cotizacion / anualizar_cotizacion — sobre una formal ya emitida trabajan EN SITIO (mismo link, PDF nuevo): consultar dice el escalón que corresponde con el precio recalculado, aplicar lo deja en la cotización, actualizar cambia la configuración y anualizar convierte a pago anual (12 meses anticipados al mismo precio; SOLO si el cliente lo pide — jamás proactiva; si objeta el monto, primero la escalera).
 `,
     reloj: `## Venta del reloj físico (regla estricta — Perú)
 

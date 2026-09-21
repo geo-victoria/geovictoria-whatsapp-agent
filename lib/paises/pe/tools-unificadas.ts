@@ -382,8 +382,13 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   },
   {
     name: "anualizar_cotizacion",
-    description: "Perú NO tiene pago anual todavía: esta tool te lo recuerda. Ofrece la mensualidad; si el cliente insiste, derivar_a_soporte (motivo fuera_de_scope).",
-    input_schema: { type: "object" as const, properties: { quote_id: { type: "string" as const } }, required: [] },
+    description:
+      "Convierte la cotización formal vigente a PAGO ANUAL: los 12 meses de todo lo recurrente (plan y arriendo) se cobran por adelantado en un solo pago, al mismo precio (12 × la mensualidad; el descuento comiteado del plan se aplica los meses de su vigencia). SOLO si el cliente lo pide — jamás proactiva. Si objeta el monto, primero la escalera de descuento y después anualizas. La MISMA cotización se actualiza (mismo link, PDF nuevo). Copia `mensajeParaProspecto` tal cual.",
+    input_schema: {
+      type: "object" as const,
+      properties: { quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente de esta conversación)." } },
+      required: [],
+    },
   },
 ]
 
@@ -781,8 +786,12 @@ export function buildDispatchPEUnificado(contact: string) {
         }
         return { ...r, quoteId: f.quoteId }
       }
-      case "anualizar_cotizacion":
-        return sinCapacidad("todavía no existe el pago anual", "Ofrece la mensualidad; si el cliente insiste en pagar el año, deriva con derivar_a_soporte motivo fuera_de_scope para que la ejecutiva lo evalúe.")
+      case "anualizar_cotizacion": {
+        // Anualidad = Chile (Lalo 21-sep): la MISMA edición en sitio con los
+        // montos reales del subform en la moneda del país.
+        const { anualizarCotizacionPais } = await import("../anualizar-pais.ts")
+        return anualizarCotizacionPais(contact, "pe", i.quote_id as string | undefined)
+      }
       default:
         return base(name, input)
     }

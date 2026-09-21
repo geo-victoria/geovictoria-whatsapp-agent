@@ -124,7 +124,7 @@ CAPACIDADES QUE COLOMBIA NO TIENE (las tools existen y te lo dicen; jamás las s
 - enviar_certificacion — no existe un documento de certificación en Colombia (el Ministerio del Trabajo no certifica sistemas). Responde con el bloque legal, sin prometer papeles.
 - enviar_ficha_reloj — no hay ficha PDF del equipo biométrico de Colombia: descríbelo en texto (facial, huella, tarjeta, clave o QR; WiFi o cable) sin marcas ni modelos.
 - consultar_siguiente_descuento / aplicar_siguiente_descuento — sobre una formal ya emitida: consultar dice el escalón que corresponde (10 % → 20 % en el plan, 6 meses) con el precio recalculado, aplicar lo deja en la MISMA cotización (mismo link, PDF nuevo). Solo ante objeción de precio; nunca dos escalones en un turno.
-- actualizar_cotizacion(userCount, hardware?, puntosInstalacion?, resumen_cambio?) — cambia la formal vigente EN SITIO (mismo link, PDF nuevo); llámala en el mismo turno en que el cliente pide el cambio. anualizar_cotizacion — no hay anualidad en Colombia todavía: la tool te lo indicará.
+- actualizar_cotizacion(userCount, hardware?, puntosInstalacion?, resumen_cambio?) — cambia la formal vigente EN SITIO (mismo link, PDF nuevo); llámala en el mismo turno en que el cliente pide el cambio. anualizar_cotizacion — convierte la formal vigente a pago anual (12 meses anticipados al mismo precio, en sitio); SOLO si el cliente lo pide — jamás proactiva; si objeta el monto, primero la escalera de descuento.
 `,
     reloj: `## Venta del equipo biométrico (regla estricta — Colombia)
 

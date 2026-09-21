@@ -188,6 +188,8 @@ type BotmakerBody = {
   documentUrl?: string
   documentURL?: string
   simular?: boolean
+  /** Solo con simular: transcripción del adjunto (reemplaza a la visión). */
+  descripcionAdjunto?: string
   /** Solo con simular: lee el historial real y persiste el turno (E2E multi-turno; sintéticos 57900000xxx y probadores). */
   conHistorial?: boolean
   /** Solo con simular: fuerza el prompt NÚCLEO + tools únicas (true) o el clásico (false) sin tocar el kv. */
@@ -716,10 +718,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     const esArchivoAdjunto = FILE_PLACEHOLDERS.includes(message.trim())
     const CONTEXTO_DOC_ILEGIBLE_CO =
       "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de pagar o habló de transferencia/comprobante), lo más probable es que sea su comprobante: agradécele el envío, dile que quedó recibido y que el equipo de finanzas lo verificará — sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
-    const mediaUrlEntrante = imageUrl || fileUrl
+    // Simulación (E2E): `descripcionAdjunto` = lo que la visión habría leído
+    // (mismo mecanismo que PE): así se prueba el bloque del adjunto y la
+    // directiva del comprobante sin una URL pública.
+    const descripcionSimulada = simulacion ? String(body.descripcionAdjunto || "").trim() : ""
+    const mediaUrlEntrante = imageUrl || fileUrl || (descripcionSimulada ? "simulado://adjunto" : "")
     if (mediaUrlEntrante) {
-      sendTypingIndicator(contact, true, CANAL_CO()).catch(() => {})
-      const descripcion = await describirImagen(mediaUrlEntrante)
+      if (!descripcionSimulada) sendTypingIndicator(contact, true, CANAL_CO()).catch(() => {})
+      const descripcion = descripcionSimulada || (await describirImagen(mediaUrlEntrante))
       const caption = IMG_PLACEHOLDERS.includes(message) || esArchivoAdjunto ? "" : message
       if (descripcion) {
         const bloque = esArchivoAdjunto || (!imageUrl && fileUrl)
