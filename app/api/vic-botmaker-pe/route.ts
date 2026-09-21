@@ -229,7 +229,10 @@ async function turnoOnboardingPE(
   })
   const rawReply = (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
   let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(rawReply)))
-  reply = await blindarSoporteInventadoPE(reply)
+  // SIN blindaje de soporte en onboarding (paridad CL, línea 977 del v3):
+  // ese cinturón reescribe todo correo @geovictoria.com ajeno a la lista
+  // blanca, y en la E2E del 21-sep pisó el correo del ADMIN del resumen
+  // ("Correo: soporteperu@…"). En esta fase Vicky no da soporte: escala.
   // Guardrail de largo del onboarding (Lalo 24-ago): corte limpio en borde de oración.
   try {
     const { acortarParaWhatsApp } = await import("@/lib/onboarding/estilo")
