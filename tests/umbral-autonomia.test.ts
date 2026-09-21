@@ -96,10 +96,13 @@ describe("puntos de decisión del prompt CL reescritos con el umbral", () => {
   // (no importable desde el runner de node), así que se ancla por CONTENIDO:
   // si alguien edita esas líneas del prompt sin actualizar los replace, el
   // replace deja de matchear en silencio — este test lo hace reventar.
-  const fuente = readFileSync(
-    new URL("../app/api/vic-sales-agent-v3/prompt.ts", import.meta.url),
-    "utf8",
-  )
+  // EL NÚCLEO (21-sep): el template vive en lib/prompt-nucleo/texto.ts y los
+  // .replace() en lib/prompt-nucleo/armar.ts — la pareja que este test ancla.
+  // app/api/vic-sales-agent-v3/prompt.ts solo los arma con la ficha de Chile.
+  const fuente =
+    readFileSync(new URL("../lib/prompt-nucleo/texto.ts", import.meta.url), "utf8") +
+    "\n" +
+    readFileSync(new URL("../lib/prompt-nucleo/armar.ts", import.meta.url), "utf8")
 
   test("las cuatro cadenas objetivo del replace siguen en el prompt", () => {
     for (const objetivo of [

@@ -8,7 +8,11 @@ import { REGLAS_UNIVERSALES, PAISES_PROMPT, brechasDe, reglasExigidas, type Pais
 // reglas son texto, así que el archivo es la fuente correcta y no hay que
 // construir el prompt ni tocar la red.
 const ARCHIVO: Record<PaisPrompt, string> = {
-  cl: "app/api/vic-sales-agent-v3/prompt.ts",
+  // EL NÚCLEO (21-sep): el texto de Chile vive en lib/prompt-nucleo/texto.ts y
+  // app/api/vic-sales-agent-v3/prompt.ts solo lo arma con su ficha. Las 21
+  // reglas se leen de ahí; cuando PE/CO/MX consuman el núcleo, sus filas
+  // pasan a apuntar al mismo archivo y la paridad deja de poder romperse.
+  cl: "lib/prompt-nucleo/texto.ts",
   co: "lib/paises/co/prompt.ts",
   mx: "lib/paises/mx/prompt.ts",
   pe: "lib/paises/pe/prompt.ts",
