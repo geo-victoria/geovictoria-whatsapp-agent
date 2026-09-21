@@ -9,6 +9,7 @@ import { promptBaseCONucleo, formatCatalogoParaPromptCO } from "../lib/paises/co
 import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
 import { FICHA_CO } from "../lib/paises/co/ficha.ts"
 import { TOOL_SCHEMAS_CO_UNIFICADAS, aInputCotizarCO, relojDeHardwareCO } from "../lib/paises/co/tools-unificadas.ts"
+import { ESCALERA_DESCUENTO_CO, escalonDescuentoCO, pctDescuentoCO } from "../lib/paises/co/descuento.ts"
 
 const PROHIBIDOS: Array<[string, RegExp]> = [
   ["UF (moneda chilena)", /\bUF\b/],
@@ -81,4 +82,27 @@ test("forma chilena → motor colombiano: hardware y puntos solo en venta", () =
     { userCount: 15, reloj: { modalidad: "venta", cantidad: 1 }, puntosInstalacion: [{ ubicacion: "Neiva", autoInstalada: true }] },
   )
   assert.deepEqual(aInputCotizarCO({ userCount: 8 }), { userCount: 8 })
+})
+
+test("descuento CO = Chile (Lalo 21-sep): escalera 10 → 20 % sobre el plan, 6 meses, y las tools ya no lo niegan", () => {
+  assert.deepEqual([...ESCALERA_DESCUENTO_CO.planMensual], [0.1, 0.2])
+  assert.equal(ESCALERA_DESCUENTO_CO.meses, 6)
+  assert.equal(pctDescuentoCO(0), 0)
+  assert.equal(pctDescuentoCO(1), 0.1)
+  assert.equal(pctDescuentoCO(2), 0.2)
+  assert.equal(pctDescuentoCO(7), 0.2) // tope
+  assert.equal(escalonDescuentoCO("x"), 0)
+  const porNombre = new Map(TOOL_SCHEMAS_CO_UNIFICADAS.map((t) => [t.name, t]))
+  for (const n of ["cotizar_referencial", "consultar_descuento_referencial", "consultar_siguiente_descuento", "aplicar_siguiente_descuento", "generar_link_cotizadora"]) {
+    const t = porNombre.get(n)
+    assert.ok(t, n)
+    assert.doesNotMatch(t!.description, /NO hay (escalera de )?descuento|No existe descuento/i, n)
+  }
+  const props = (porNombre.get("cotizar_referencial")!.input_schema as { properties: Record<string, unknown> }).properties
+  assert.ok("escalonDescuento" in props)
+  const propsLink = (porNombre.get("generar_link_cotizadora")!.input_schema as { properties: Record<string, unknown> }).properties
+  assert.ok("escalonDescuento" in propsLink)
+  const texto = textoNucleo(FICHA_CO, "")
+  assert.doesNotMatch(texto, /no hay descuentos en Colombia|NO hay escalera de descuento/i)
+  assert.match(texto, /10 % → 20 %/)
 })

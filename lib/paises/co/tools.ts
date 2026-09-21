@@ -295,6 +295,8 @@ type CotizarInput = {
   userCount?: number
   reloj?: { modalidad?: "arriendo" | "venta"; cantidad?: number }
   puntosInstalacion?: Array<{ ubicacion?: string; autoInstalada?: boolean }>
+  /** Escalera chilena (Lalo 21-sep): 1 = 10 %, 2 = 20 % sobre el plan, 6 meses. */
+  escalonDescuento?: number
 }
 
 type DerivarInput = {
@@ -346,8 +348,15 @@ export function buildDispatchCO(contact: string) {
               ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
               : undefined,
           puntos,
+          escalonDescuento: Number(i.escalonDescuento || 0),
         })
-        return { ok: true, mensajeParaProspecto: r.mensajeParaProspecto, advertencias }
+        return {
+          ok: true,
+          mensajeParaProspecto: r.mensajeParaProspecto,
+          advertencias,
+          escalonDescuento: r.escalonDescuento,
+          descuentoPct: Math.round(r.descuentoPct * 100),
+        }
       }
 
       if (name === "generar_link_cotizadora") {
@@ -359,6 +368,7 @@ export function buildDispatchCO(contact: string) {
           userCount?: number
           reloj?: { modalidad?: "arriendo" | "venta"; cantidad?: number }
           puntosInstalacion?: Array<{ ubicacion?: string; autoInstalada?: boolean }>
+          escalonDescuento?: number
         }
         if (!SECRET_COTIZADORA_CO) {
           return { ok: false, error: "Cotizadora CO no configurada (secreto faltante). Deriva al ejecutivo." }
@@ -386,6 +396,9 @@ export function buildDispatchCO(contact: string) {
             autoInstalada: p?.autoInstalada === true,
           }))
         }
+        // Escalón aceptado por el cliente (Lalo 21-sep, descuento = Chile): los
+        // ítems van a LISTA y el % viaja aparte; el cálculo local con el escalón
+        // solo alimenta el mensaje de entrega (pago inicial y mensualidad).
         const calculo = cotizarCO({
           userCount: Number(i.userCount || 0),
           reloj:
@@ -393,6 +406,7 @@ export function buildDispatchCO(contact: string) {
               ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
               : undefined,
           puntos,
+          escalonDescuento: Number(i.escalonDescuento || 0),
         })
         const res = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky-co`, {
           method: "POST",
@@ -408,6 +422,7 @@ export function buildDispatchCO(contact: string) {
             contactoTelefono: `+${contact.replace(/^\s*(CL|CO|MX|PE)\./i, "")}`,
             userCount: Number(i.userCount || 0),
             items: calculo.itemsCotizador,
+            ...(calculo.escalonDescuento > 0 ? { escalonDescuento: calculo.escalonDescuento } : {}),
           }),
           cache: "no-store",
         })
@@ -431,7 +446,7 @@ export function buildDispatchCO(contact: string) {
           // cotización (anti-amnesia: retomar la formal en turnos futuros).
           acceptanceUrl: data.acceptanceUrl,
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas en línea con tarjeta vía Mercado Pago (se confirma al instante): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y tu mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente. Con el pago confirmado, yo misma te acompaño con la puesta en marcha de tu cuenta. Cualquier duda me cuentas 😊`,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas en línea con tarjeta vía Mercado Pago (se confirma al instante): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearCOP(calculo.pagoInicialTotal)} y tu mensualidad de ${formatearCOP(calculo.mensualTotal)} desde el mes siguiente${calculo.descuentoPct > 0 ? ` (incluye el ${Math.round(calculo.descuentoPct * 100)}% de descuento en el plan por 6 meses; desde el mes 7, ${formatearCOP(calculo.mensualTotalLista)})` : ""}. Con el pago confirmado, yo misma te acompaño con la puesta en marcha de tu cuenta. Cualquier duda me cuentas 😊`,
         }
       }
 

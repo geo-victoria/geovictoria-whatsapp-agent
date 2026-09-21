@@ -9,6 +9,9 @@
  *     $92.000 resto (0 si auto-instala).
  *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado (equivalente
  *     del "pago inicial incluye el primer mes" chileno).
+ *   - DESCUENTO = CHILE (Lalo 21-sep): escalera 10 → 20 % sobre el plan (y la
+ *     Activación, que es un mes del plan) por 6 meses; el alquiler va a lista.
+ *     Los ítems de la formal salen a LISTA y el % viaja como escalonDescuento.
  *   - IMPUESTOS (decisión 10-jul, refinada): los precios son FINALES en todo
  *     EXCEPTO el hardware — el reloj (arriendo y venta) lleva IVA 19%, único
  *     concepto donde el IVA existe y se muestra. Plan, activación, envío e
@@ -20,6 +23,7 @@
  */
 
 import { CATALOGO_MODULOS_CO } from "./catalogo"
+import { ESCALERA_DESCUENTO_CO, escalonDescuentoCO, pctDescuentoCO } from "./descuento.ts"
 
 // Refinamiento 10-jul (Lalo): precios FINALES en todo, EXCEPTO el hardware
 // (reloj en arriendo y en venta), que lleva IVA 19% — único concepto donde se
@@ -42,6 +46,14 @@ export type CotizacionCOInput = {
     cantidad: number
   }
   puntos?: PuntoInstalacionCO[]
+  /**
+   * Escalón de descuento del PLAN (escalera chilena, Lalo 21-sep): 0 = sin
+   * descuento, 1 = 10 %, 2 = 20 %, por 6 meses. Rebaja el plan y la
+   * Activación (primer mes del plan); el alquiler del equipo va a lista. Los
+   * ítems para la formal salen SIEMPRE a precio de LISTA: el % viaja aparte
+   * como `escalonDescuento` y el cotizador lo estampa en la cotización.
+   */
+  escalonDescuento?: number
 }
 
 export type LineaCO = {
@@ -105,25 +117,38 @@ export function cotizarCO(input: CotizacionCOInput): {
   mensualArriendoNeto: number
   mensualArriendoIva: number
   mensualTotal: number
+  /** Mensualidad a precio de LISTA (= mensualTotal cuando no hay descuento). */
+  mensualTotalLista: number
   pagoInicialNeto: number
   pagoInicialIva: number
   pagoInicialTotal: number
+  /** % de descuento del plan aplicado (0 · 0,1 · 0,2) y su escalón. */
+  descuentoPct: number
+  escalonDescuento: number
   mensajeParaProspecto: string
 } {
   const { userCount, reloj, puntos = [] } = input
   if (!Number.isFinite(userCount) || userCount < 1) {
     throw new Error("userCount inválido")
   }
-  const plan = precioPlanCO(userCount)
+  const planLista = precioPlanCO(userCount)
+  const escalonDescuento = escalonDescuentoCO(input.escalonDescuento)
+  const pctDescuento = pctDescuentoCO(escalonDescuento)
+  const conDescuento = pctDescuento > 0
+  // Plan con el descuento del escalón (COP enteros). La Activación es un mes
+  // del plan, así que lleva el mismo descuento.
+  const plan = conDescuento ? Math.round(planLista * (1 - pctDescuento)) : planLista
+  const mesesDcto = ESCALERA_DESCUENTO_CO.meses
   const lineas: LineaCO[] = []
 
   // ── Recurrente ──
   lineas.push({
     concepto: "Control de Asistencia",
     detalle:
-      userCount <= 10
+      (userCount <= 10
         ? `Plan mensual para hasta 10 usuarios (tarifa fija)`
-        : `Plan mensual: ${userCount} usuarios × ${formatearCOP(13700)}`,
+        : `Plan mensual: ${userCount} usuarios × ${formatearCOP(13700)}`) +
+      (conDescuento ? ` — con ${Math.round(pctDescuento * 100)}% de descuento por ${mesesDcto} meses (lista ${formatearCOP(planLista)}/mes)` : ""),
     neto: plan,
     iva: 0,
     recurrente: true,
@@ -204,6 +229,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   const pagoInicialTotal = pagoInicialNeto + pagoInicialIva
   const mensualArriendoIva = arriendoNeto * IVA_HARDWARE
   const mensualTotal = plan + arriendoNeto + mensualArriendoIva
+  const mensualTotalLista = planLista + arriendoNeto + mensualArriendoIva
 
   // ── Mensaje canónico (registro de usted, COP) ──
   // Solo el hardware muestra "+ IVA"; el resto va con precio final, sin
@@ -212,13 +238,21 @@ export function cotizarCO(input: CotizacionCOInput): {
   filas.push("Te comparto el detalle de tu cotización referencial:")
   filas.push("")
   filas.push("Mensualidad del servicio:")
-  filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(plan)}/mes`)
+  filas.push(
+    `- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(plan)}/mes` +
+      (conDescuento ? ` (con ${Math.round(pctDescuento * 100)}% de descuento en el plan por ${mesesDcto} meses; precio de lista ${formatearCOP(planLista)}/mes)` : ""),
+  )
   if (arriendoNeto > 0) {
     filas.push(
       `- Alquiler de equipo biométrico: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes (envío e instalación incluidos)`,
     )
   }
-  filas.push(`Total mensual: ${formatearCOP(mensualTotal)}`)
+  if (conDescuento) {
+    filas.push(`Total mensual (primeros ${mesesDcto} meses): ${formatearCOP(mensualTotal)}`)
+    filas.push(`Desde el mes ${mesesDcto + 1}: ${formatearCOP(mensualTotalLista)}/mes`)
+  } else {
+    filas.push(`Total mensual: ${formatearCOP(mensualTotal)}`)
+  }
   filas.push("")
   filas.push("Pago inicial (una sola vez):")
   for (const l of unicos) {
@@ -246,8 +280,10 @@ export function cotizarCO(input: CotizacionCOInput): {
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     modalidad: userCount <= 10 ? "Fijo" : "Por usuario",
     cantidad: userCount <= 10 ? 1 : userCount,
-    precioUnitarioCOP: userCount <= 10 ? plan : 13700,
-    subtotalCOP: plan,
+    // A precio de LISTA: el descuento viaja como escalonDescuento y el
+    // cotizador lo estampa (Descuento_Recurrente_Pct) — misma mecánica que CL/PE.
+    precioUnitarioCOP: userCount <= 10 ? planLista : 13700,
+    subtotalCOP: planLista,
     esRecurrente: true,
     afectoIva: false,
   })
@@ -326,9 +362,12 @@ export function cotizarCO(input: CotizacionCOInput): {
     mensualArriendoNeto: arriendoNeto,
     mensualArriendoIva,
     mensualTotal,
+    mensualTotalLista,
     pagoInicialNeto,
     pagoInicialIva,
     pagoInicialTotal,
+    descuentoPct: pctDescuento,
+    escalonDescuento,
     mensajeParaProspecto: filas.join("\n"),
   }
 }

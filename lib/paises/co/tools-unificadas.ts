@@ -8,7 +8,8 @@
  * configurada; reenvío y PDF delegados a la impl chilena), traducción de
  * formas (hardware[] → reloj, contactoEmail → email, rutEmpresa → nit,
  * motivos CL → CO) y respuesta HONESTA donde Colombia no tiene la capacidad
- * (descuentos, transferencia, certificación, ficha PDF, edición/anualidad).
+ * (transferencia, certificación, ficha PDF, anualidad). Descuentos = Chile
+ * desde el 21-sep (escalera 10 → 20 % sobre el plan, memoria `co_pref_`).
  *
  * Imports estáticos solo a módulos que los tests puros cargan (co/tools.ts
  * trae "../../zoho-leads" relativo, igual que ya lo hace el prompt CO).
@@ -132,7 +133,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula el estimado mensual EN PESOS COLOMBIANOS para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL (el plan con precio final; el equipo biométrico con su IVA 19 % ya indicado). Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú. En ALQUILER envío e instalación son gratis (no pidas ciudad); en COMPRA pasa puntosInstalacion. No existe descuento en Colombia.",
+      "Calcula el estimado mensual EN PESOS COLOMBIANOS para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL (el plan con precio final; el equipo biométrico con su IVA 19 % ya indicado). Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú. En ALQUILER envío e instalación son gratis (no pidas ciudad); en COMPRA pasa puntosInstalacion. escalonDescuento (1 = 10 %, 2 = 20 % sobre el plan, 6 meses) SOLO ante una objeción de precio, nunca de entrada.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -140,19 +141,31 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
         modulos: { type: "array" as const, items: { type: "string" as const }, description: "IDs de módulos. En Colombia siempre ['asistencia'] (opcional: se asume)." },
         hardware: HARDWARE_CO,
         puntosInstalacion: PUNTOS_CO,
+        escalonDescuento: { type: "number" as const, enum: [0, 1, 2], description: "Escalón de descuento del plan ya ofrecido (0 sin descuento · 1 = 10 % · 2 = 20 %, por 6 meses). Solo tras una objeción de precio." },
       },
       required: ["userCount"],
     },
   },
   {
     name: "consultar_descuento_referencial",
-    description: "En Colombia NO hay escalera de descuento: esta tool te lo confirma. Ante la objeción de precio destaca lo incluido (capacitación de regalo, envío + instalación gratis en alquiler, sin permanencia) y ofrece la opción sin equipo; si sigue trabado, deriva. JAMÁS inventes un porcentaje.",
-    input_schema: { type: "object" as const, properties: { userCount: { type: "number" as const } }, required: [] },
+    description:
+      "La escalera de descuento sobre el ÚLTIMO estimado (10 % → 20 % sobre el plan, 6 meses; el alquiler del equipo no baja). Llámala cuando el cliente objeta el precio del estimado: avanza UN escalón y devuelve `mensajeParaProspecto` con el precio rebajado (cópialo tal cual) y `topeAlcanzado=true` cuando ya diste el 20 % (ahí no hay más rebaja y lo dices con franqueza). NUNCA calcules tú el porcentaje. Si no hubo estimado previo en esta conversación, pasa la configuración (userCount, hardware, puntosInstalacion).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        userCount: { type: "number" as const, minimum: 1, maximum: 50 },
+        modulos: { type: "array" as const, items: { type: "string" as const } },
+        hardware: HARDWARE_CO,
+        puntosInstalacion: PUNTOS_CO,
+        escalonActual: { type: "number" as const, enum: [0, 1, 2], description: "Escalón ya ofrecido, si lo sabes." },
+      },
+      required: [],
+    },
   },
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Colombia (CRM + PDF en COP + link donde el cliente la revisa, acepta y paga con tarjeta vía Mercado Pago). Úsala cuando el cliente quiere avanzar tras ver el precio. REQUIERE empresa (razón social), contacto, contactoEmail (obligatorio), rutEmpresa = el NIT con dígito de verificación (ej. 900.123.456-7), userCount y la configuración (hardware/puntos si lleva equipo en compra). Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria. Si el NIT no valida, pide SOLO la corrección.",
+      "Genera la COTIZACIÓN FORMAL de Colombia (CRM + PDF en COP + link donde el cliente la revisa, acepta y paga con tarjeta vía Mercado Pago). Úsala cuando el cliente quiere avanzar tras ver el precio. Pasa el MISMO escalonDescuento que el cliente aceptó (o se usa el último ofrecido). REQUIERE empresa (razón social), contacto, contactoEmail (obligatorio), rutEmpresa = el NIT con dígito de verificación (ej. 900.123.456-7), userCount y la configuración (hardware/puntos si lleva equipo en compra). Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria. Si el NIT no valida, pide SOLO la corrección.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -165,6 +178,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
         modulos: { type: "array" as const, items: { type: "string" as const } },
         hardware: HARDWARE_CO,
         puntosInstalacion: PUNTOS_CO,
+        escalonDescuento: { type: "number" as const, enum: [0, 1, 2], description: "El MISMO escalón que el cliente aceptó en el estimado (si lo omites se usa el último ofrecido en esta conversación): la formal nace con ese % en el plan por 6 meses." },
       },
       // Mismo contrato que Chile (Lalo 03-ago / 21-sep): el correo es OPCIONAL.
       required: ["empresa", "contacto", "rutEmpresa", "userCount"],
@@ -252,13 +266,26 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   buscarProspectSchemaPais("NIT", "con o sin dígito de verificación"),
   {
     name: "consultar_siguiente_descuento",
-    description: "En Colombia NO hay descuentos, ni antes ni después de la formal: esta tool te lo recuerda.",
-    input_schema: { type: "object" as const, properties: { quote_id: { type: "string" as const } }, required: [] },
+    description:
+      "Con una cotización FORMAL ya emitida: dice qué escalón de descuento corresponde ofrecer ahora (10 % → 20 % sobre el plan, 6 meses) SIN aplicarlo y devuelve el precio recalculado en `mensajeParaProspecto` (cópialo TAL CUAL; en pesos colombianos, precios finales). Úsala cuando el cliente objeta el precio de la formal; nunca proactiva. Si el cliente acepta, llama aplicar_siguiente_descuento. Con `topeAlcanzado=true` es el último escalón.",
+    input_schema: {
+      type: "object" as const,
+      properties: { quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente de esta conversación)." } },
+      required: [],
+    },
   },
   {
     name: "aplicar_siguiente_descuento",
-    description: "En Colombia NO hay descuentos, ni antes ni después de la formal: esta tool te lo recuerda.",
-    input_schema: { type: "object" as const, properties: { quote_id: { type: "string" as const } }, required: [] },
+    description:
+      "Aplica el escalón siguiente de descuento (10 % → 20 % sobre el plan, 6 meses) a la cotización FORMAL vigente de esta conversación: la MISMA cotización se actualiza (mismo número, nueva versión del PDF, mismo link) y devuelve el link en `mensajeParaProspecto` — cópialo TAL CUAL. Pasa `pct_ofrecido` con el % que ya le comunicaste. Solo ante objeción de precio y nunca dos escalones en un mismo turno. Con `topeAlcanzado=true` no hay más rebaja: dilo con franqueza.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente)." },
+        pct_ofrecido: { type: "number" as const, minimum: 0, maximum: 40, description: "Porcentaje EXACTO sobre el plan que ya le ofreciste (el que devolvió consultar_siguiente_descuento). No lo inventes." },
+      },
+      required: [],
+    },
   },
   {
     name: "actualizar_cotizacion",
@@ -319,6 +346,39 @@ const MOTIVO_CO: Record<string, string> = {
   transferir_soporte_operativo: "otro",
 }
 
+type PrefCO = { userCount: number; hardware?: HardwareIn[]; puntosInstalacion?: PuntoIn[]; escalon: number }
+
+/**
+ * Cotización FORMAL vigente de la conversación (puntero) con la guarda de
+ * Pagada — la misma que Perú, sin leer campos peruanos.
+ */
+async function formalVigenteCO(contact: string, quoteId?: string): Promise<{ quoteId: string } | { error: string }> {
+  let qid = String(quoteId || "").trim()
+  if (!qid) {
+    try {
+      const { getQuotePointer } = await import("../../supabase-persistence-v3.ts")
+      qid = (await getQuotePointer(contact))?.quoteId || ""
+    } catch {
+      /* sin puntero */
+    }
+  }
+  if (!qid) return { error: "No hay una cotización formal vigente en esta conversación: emítela primero con generar_link_cotizadora." }
+  try {
+    const { fetchZoho } = await import("../../zoho-token.ts")
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const res = await fetchZoho(`${api}/crm/v8/${mod}/${qid}?fields=Estado_Cotizacion`)
+    if (res.status === 200) {
+      const data = (await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
+      const estado = String(data.data?.[0]?.Estado_Cotizacion || "")
+      if (/pagad/i.test(estado)) return { error: "Esa cotización ya está PAGADA: no se modifica. Si el cliente quiere cambios, el ejecutivo los coordina (derivar_a_soporte)." }
+    }
+  } catch {
+    /* sin lectura: la tool chilena vuelve a validar */
+  }
+  return { quoteId: qid }
+}
+
 export function buildDispatchCOUnificado(contact: string) {
   // Import dinámico: el motor CO trae Zoho/Cal/Foundry (no puro).
   let basePromise: Promise<(name: string, input: unknown) => Promise<unknown>> | null = null
@@ -326,29 +386,106 @@ export function buildDispatchCOUnificado(contact: string) {
     basePromise ??= import("./tools").then((m) => m.buildDispatchCO(contact))
     return basePromise.then((fn) => fn(name, input))
   }
+  // Memoria del ÚLTIMO estimado (vic_kv `co_pref_<contact>`) para que
+  // consultar_descuento_referencial funcione sin argumentos, igual que en
+  // Chile y Perú (Lalo 21-sep: "descuento en Colombia igual que en Chile").
+  const kvKey = `co_pref_${contact}`
+  async function leerPref(): Promise<PrefCO | null> {
+    try {
+      const { getKvValue } = await import("../../supabase-persistence-v3.ts")
+      const raw = await getKvValue(kvKey)
+      return raw ? (JSON.parse(raw) as PrefCO) : null
+    } catch {
+      return null
+    }
+  }
+  async function guardarPref(p: PrefCO): Promise<void> {
+    try {
+      const { setKvValue } = await import("../../supabase-persistence-v3.ts")
+      await setKvValue(kvKey, JSON.stringify(p))
+    } catch {
+      /* la memoria del estimado es best-effort */
+    }
+  }
   return async function dispatchCOUnificado(name: string, input: unknown): Promise<unknown> {
     const i = (input || {}) as Record<string, unknown>
     switch (name) {
-      case "cotizar_referencial":
-        return base("cotizar_referencial", aInputCotizarCO(i as CotizarIn))
-      case "consultar_descuento_referencial":
-      case "consultar_siguiente_descuento":
-      case "aplicar_siguiente_descuento":
-        return {
-          ok: true,
-          topeAlcanzado: true,
-          sinDescuentoEnPais: "co",
-          mensajeParaProspecto:
-            "En Colombia no manejo descuentos sobre el plan — lo que sí va incluido sin costo: la capacitación online (valorada en $95.000), y en alquiler el envío y la instalación del equipo. Y sin cláusula de permanencia. Si lo que pesa es el equipo, te cotizo solo con la app, que va gratis en el plan 😊",
+      case "cotizar_referencial": {
+        const esc = Math.min(2, Math.max(0, Number(i.escalonDescuento || 0)))
+        const r = await base("cotizar_referencial", { ...aInputCotizarCO(i as CotizarIn), escalonDescuento: esc })
+        if ((r as { ok?: boolean })?.ok) {
+          await guardarPref({
+            userCount: Number(i.userCount || 0),
+            hardware: i.hardware as HardwareIn[] | undefined,
+            puntosInstalacion: i.puntosInstalacion as PuntoIn[] | undefined,
+            escalon: esc,
+          })
         }
-      case "generar_link_cotizadora":
+        return r
+      }
+      case "consultar_descuento_referencial": {
+        const pref = await leerPref()
+        const cfg: CotizarIn = {
+          userCount: Number(i.userCount || pref?.userCount || 0),
+          hardware: (i.hardware as HardwareIn[]) || pref?.hardware,
+          puntosInstalacion: (i.puntosInstalacion as PuntoIn[]) || pref?.puntosInstalacion,
+        }
+        if (!cfg.userCount) {
+          return { ok: false, error: "No hay un estimado previo en esta conversación: llama primero a cotizar_referencial con la dotación y el marcaje." }
+        }
+        const actual = Math.max(Number(i.escalonActual || 0), pref?.escalon || 0)
+        if (actual >= 2) {
+          return {
+            ok: true,
+            topeAlcanzado: true,
+            escalonDescuento: 2,
+            mensajeParaProspecto:
+              "Ese 20 % en el plan por 6 meses ya es el máximo que puedo aplicar — no tengo margen para más, y prefiero decírtelo con franqueza. Con ese valor te dejo la cotización lista cuando quieras avanzar.",
+          }
+        }
+        const escalon = actual + 1
+        const r = (await base("cotizar_referencial", { ...aInputCotizarCO(cfg), escalonDescuento: escalon })) as Record<string, unknown>
+        if (r?.ok) {
+          await guardarPref({ userCount: cfg.userCount, hardware: cfg.hardware, puntosInstalacion: cfg.puntosInstalacion, escalon })
+          return { ...r, escalonDescuento: escalon, topeAlcanzado: escalon >= 2 }
+        }
+        return r
+      }
+      case "consultar_siguiente_descuento": {
+        const f = await formalVigenteCO(contact, i.quote_id as string | undefined)
+        if ("error" in f) return { ok: false, error: f.error }
+        const { consultarSiguienteDescuento } = await import("../../tools/consultar-siguiente-descuento.ts")
+        const r = await consultarSiguienteDescuento({ quote_id: f.quoteId })
+        return { ...r, quoteId: f.quoteId }
+      }
+      case "aplicar_siguiente_descuento": {
+        const f = await formalVigenteCO(contact, i.quote_id as string | undefined)
+        if ("error" in f) return { ok: false, error: f.error }
+        const { aplicarSiguienteDescuento } = await import("../../tools/aplicar-siguiente-descuento.ts")
+        const r = await aplicarSiguienteDescuento({ quote_id: f.quoteId, pct_ofrecido: Number(i.pct_ofrecido) || undefined })
+        if (r.ok) {
+          const pref = await leerPref()
+          const escalon = r.ultimoEscalon?.pct >= 20 ? 2 : r.ultimoEscalon?.pct >= 10 ? 1 : pref?.escalon || 0
+          if (pref) await guardarPref({ ...pref, escalon })
+        }
+        return { ...r, quoteId: f.quoteId }
+      }
+      case "generar_link_cotizadora": {
+        const pref = await leerPref()
+        const esc = Math.min(2, Math.max(0, Number(i.escalonDescuento ?? pref?.escalon ?? 0)))
         return base("generar_link_cotizadora", {
           empresa: i.empresa,
           contacto: i.contacto,
           email: i.contactoEmail || i.email,
           nit: i.rutEmpresa || i.nit,
-          ...aInputCotizarCO(i as CotizarIn),
+          ...aInputCotizarCO({
+            userCount: Number(i.userCount || pref?.userCount || 0),
+            hardware: (i.hardware as HardwareIn[]) || pref?.hardware,
+            puntosInstalacion: (i.puntosInstalacion as PuntoIn[]) || pref?.puntosInstalacion,
+          } as CotizarIn),
+          escalonDescuento: esc,
         })
+      }
       case "derivar_a_soporte": {
         const motivo = MOTIVO_CO[String(i.motivo || "")] || "otro"
         return base("derivar_a_ejecutivo", {

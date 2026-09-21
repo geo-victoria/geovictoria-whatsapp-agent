@@ -166,7 +166,9 @@ export const REGLAS_UNIVERSALES: readonly ReglaUniversal[] = [
     ancla: /(no se ofrece de forma proactiva|SOLO (como respuesta a )?una? objeci[oó]n|JAM[AÁ]S lo ofrezcas de entrada)/i,
     motivo: "Un descuento proactivo baja el ticket sin necesidad y enseña a negociar",
     excepciones: {
-      co: "En Colombia Vicky no tiene descuentos: están prohibidos por política del equipo CO",
+      // CO ya NO es excepción (Lalo 21-sep: "permitamos descuento en Colombia
+      // igual que en Chile"): el núcleo trae la escalera; el prompt legado CO
+      // (sin núcleo) queda como deuda declarada.
       mx: "En México Vicky no tiene descuentos: están prohibidos por política del equipo MX",
     },
   },
@@ -200,6 +202,7 @@ export const DEUDA_DECLARADA: Partial<Record<PaisPrompt, Record<string, string>>
   // prompt de MX es un fork del de CO, así que arrastran las mismas
   // deprecaciones. Cada línea que se borre de acá es una brecha cerrada.
   co: {
+    descuento_solo_por_objecion: "medido 21-sep-2026 — el prompt LEGADO CO (prompt_nucleo_co apagado) sigue sin escalera; el núcleo la trae desde el 21-sep",
     consultiva_una_pregunta: "medido 21-sep-2026",
     empresa_no_se_pregunta: "medido 21-sep-2026",
     puntos_no_se_preguntan: "medido 21-sep-2026",
