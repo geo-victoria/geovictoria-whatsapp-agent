@@ -18,6 +18,7 @@ import { NextResponse } from "next/server"
 import { getKvValue, setKvValue, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { clave, HORAS_PROBADOR, paisProbador } from "@/lib/probador-pais"
 import { metricsContactSet } from "@/lib/funnel-analysis"
+import { channelIdPorPais, paisDeNumero } from "@/lib/linea-por-pais"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -49,6 +50,9 @@ export async function POST(req: Request): Promise<Response> {
 
   if (pais === "off" || pais === "-") {
     await setKvValue(clave(contact), "")
+    // Al desmarcar, la línea de salida vuelve a la del prefijo del número.
+    const propio = paisDeNumero(contact)
+    if (propio !== "otro") await setKvValue(`canal_origen_${contact}`, channelIdPorPais(propio)).catch(() => {})
     return NextResponse.json({ ok: true, contact, marca: null })
   }
   if (!["cl", "co", "mx", "pe"].includes(pais)) {
@@ -67,5 +71,13 @@ export async function POST(req: Request): Promise<Response> {
   const horas = Math.min(168, Math.max(1, Number(body?.horas) || HORAS_PROBADOR))
   const hasta = new Date(Date.now() + horas * 3600e3).toISOString()
   await setKvValue(clave(contact), JSON.stringify({ pais, hasta }))
-  return NextResponse.json({ ok: true, contact, pais, hasta, horas })
+  // LA LÍNEA DE SALIDA TAMBIÉN CAMBIA (21-sep, prueba de Lalo): el probador
+  // cambiaba el país que ATIENDE, pero la respuesta salía por la línea del
+  // prefijo (`canal_origen_` seguía en la chilena). Lalo escribió "Holaa" a la
+  // línea +51, Vicky Perú respondió en el mismo segundo… por la línea de
+  // Chile, y en el chat de Vicky Perú no apareció nada. Además el push
+  // rechaza una plantilla del bot Perú si el canal de origen es el chileno
+  // (plantilla_de_otro_pais), así que el formulario del alta tampoco salía.
+  await setKvValue(`canal_origen_${contact}`, channelIdPorPais(pais as "cl" | "co" | "mx" | "pe")).catch(() => {})
+  return NextResponse.json({ ok: true, contact, pais, hasta, horas, canalOrigen: channelIdPorPais(pais as "cl" | "co" | "mx" | "pe") })
 }

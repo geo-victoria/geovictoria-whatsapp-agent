@@ -15,6 +15,7 @@
  */
 
 import { createHash } from "node:crypto"
+import { formatearMontoPais, tcParaDash } from "@/lib/monto-pais"
 import { fechaPagoReal } from "@/lib/fecha-pago"
 
 import { esEmailInterno, isTestContact, metricsContactSet } from "@/lib/funnel-analysis"
@@ -1918,12 +1919,14 @@ function construirCasosGestion(params: {
   gestionados: Map<string, string>
   montos: Map<string, { uf: number | null; clp: number | null }>
   pais: Pais
+  /** Dólar SUNAT venta (solo Perú): equivalente en US$ al lado del monto. */
+  tcUsdPen?: number
   cots?: Map<string, { quoteId: string; ver: string }>
   usuarios?: Map<string, number>
   /** Contactos con fila en vic_outbound_cadence (lead cargado = formulario). */
   formularioSet?: Set<string>
 }): { casos: CasoGestion[]; nGestionados: number } {
-  const { filas, gestionados, montos, pais, cots = new Map(), usuarios = new Map(), formularioSet = new Set() } = params
+  const { filas, gestionados, montos, pais, tcUsdPen, cots = new Map(), usuarios = new Map(), formularioSet = new Set() } = params
   const conTipo = filas
     // Deal en "Cierre Perdido" en Zoho → fuera de la cola de gestión (pedido
     // Lalo 05-ago): la oportunidad ya se dio por perdida, no hay acción.
@@ -1945,19 +1948,7 @@ function construirCasosGestion(params: {
     // La UF existe solo en Chile (pedido Lalo 04-ago): en CO/MX el monto es
     // moneda local con $, en PE con S/ — venga en el campo que venga (los
     // punteros de esos países guardan el monto local en uf o en clp).
-    const simbolo = pais === "pe" ? "S/ " : "$"
-    const montoTxt =
-      pais === "cl"
-        ? m?.uf
-          ? `UF ${m.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
-          : m?.clp
-            ? `$${Math.round(m.clp).toLocaleString("es-CL")}`
-            : "—"
-        : m?.clp
-          ? `${simbolo}${Math.round(m.clp).toLocaleString("es-CL")}`
-          : m?.uf
-            ? `${simbolo}${Math.round(m.uf).toLocaleString("es-CL")}`
-            : "—"
+    const montoTxt = formatearMontoPais(m, pais, tcUsdPen)
     const montoUF = m?.uf || (m?.clp ? m.clp / 40000 : 0)
     const hl = horaLocalCliente(d, pais)
     return {
@@ -5238,10 +5229,12 @@ function renderTrabajoEjecutivos(params: {
   usuarios: Map<string, number>
   rango: RangoFechas | null
   pais: Pais
+  /** Dólar SUNAT venta (solo Perú): equivalente en US$ al lado del monto. */
+  tcUsdPen?: number
   /** Query string base para los links de detalle de cada número. */
   qsPanel?: string
 }): string {
-  const { filas, quotes, feesPorQuote, usuarios, rango, pais, qsPanel = "" } = params
+  const { filas, quotes, feesPorQuote, usuarios, rango, pais, tcUsdPen, qsPanel = "" } = params
   const ahora = Date.now()
   const vivas = filas.filter((f) => !/perdido/i.test(f.estadoZoho))
   const nombreDe = (p: string) => (p && p !== "—" ? p : "(sin ejecutivo)")
@@ -5272,15 +5265,7 @@ function renderTrabajoEjecutivos(params: {
   }
   const fmtVenta = (v: { uf: number; clp: number; n: number } | undefined): string => {
     if (!v || !v.n) return "—"
-    const simbolo = pais === "pe" ? "S/ " : "$"
-    const monto =
-      pais === "cl" && v.uf
-        ? `UF ${v.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
-        : v.clp
-          ? `${simbolo}${Math.round(v.clp).toLocaleString("es-CL")}`
-          : v.uf
-            ? `${simbolo}${Math.round(v.uf).toLocaleString("es-CL")}`
-            : "—"
+    const monto = formatearMontoPais({ uf: v.uf, clp: v.clp }, pais, tcUsdPen)
     return `<b>${monto}</b><div class="sub" style="margin:0;font-size:11px">${v.n} venta${v.n === 1 ? "" : "s"}/mes</div>`
   }
 
@@ -5369,19 +5354,13 @@ function renderDetalleEjecutivo(params: {
   usuarios: Map<string, number>
   wspSet: Set<string>
   pais: Pais
+  /** Dólar SUNAT venta (solo Perú): equivalente en US$ al lado del monto. */
+  tcUsdPen?: number
   /** Contactos con fila en vic_outbound_cadence (lead cargado = formulario). */
   formularioSet?: Set<string>
 }): Response {
-  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais, formularioSet = new Set() } = params
-  const simbolo = pais === "pe" ? "S/ " : "$"
-  const montoTxt = (tel: string): string => {
-    const m = montos.get(tel)
-    if (!m) return "—"
-    if (pais === "cl" && m.uf) return `UF ${m.uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`
-    if (m.clp) return `${simbolo}${Math.round(m.clp).toLocaleString("es-CL")}`
-    if (m.uf) return `${simbolo}${Math.round(m.uf).toLocaleString("es-CL")}`
-    return "—"
-  }
+  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais, tcUsdPen, formularioSet = new Set() } = params
+  const montoTxt = (tel: string): string => formatearMontoPais(montos.get(tel), pais, tcUsdPen)
   const filasHtml = [...filas]
     .sort((a, b) => horasDesdeFila(b) - horasDesdeFila(a))
     .map((f) => {
@@ -8215,6 +8194,10 @@ export async function GET(req: Request): Promise<Response> {
   // formal_quote_id.
   const paisRaw = (searchParams.get("pais") || "cl").toLowerCase()
   const pais: Pais = (paisRaw in PAISES ? paisRaw : "cl") as Pais
+  // Soles con su equivalente en dólares al lado (Lalo 21-sep): el dólar SUNAT
+  // del día se resuelve UNA vez por request (caché diaria) y viaja a los
+  // renders que pintan montos. En los demás países es undefined.
+  const tcUsdPen = await tcParaDash(pais)
   const rango = parseRango(searchParams)
   // Filtros globales de ESTADO y PROPIETARIO (pedido Lalo 03-ago): aplican a
   // TODAS las secciones. El estado/propietario de cada contacto sale de la
@@ -8542,6 +8525,7 @@ export async function GET(req: Request): Promise<Response> {
           usuarios: usuariosPorContacto,
           rango,
           pais,
+          tcUsdPen,
           qsPanel,
         })
         empresasHtml = renderEmpresasPeriodo({ filas: filasListado, usuarios: usuariosPorContacto, rango, qsPanel })
@@ -8601,6 +8585,7 @@ export async function GET(req: Request): Promise<Response> {
         usuarios: usuariosPorContacto,
         wspSet: wspVendedorSet,
         pais,
+        tcUsdPen,
         formularioSet: llegoPorFormulario,
       })
     }
@@ -8633,6 +8618,7 @@ export async function GET(req: Request): Promise<Response> {
         usuarios: usuariosPorContacto,
         wspSet: wspVendedorSet,
         pais,
+        tcUsdPen,
         formularioSet: llegoPorFormulario,
       })
     }
@@ -8835,6 +8821,7 @@ export async function GET(req: Request): Promise<Response> {
             usuarios: usuariosPorContacto,
             wspSet: wspVendedorSet,
             pais,
+            tcUsdPen,
             formularioSet: llegoPorFormulario,
           })
         }
@@ -9144,7 +9131,7 @@ export async function GET(req: Request): Promise<Response> {
     const filasVisibles = filasListado.filter(
       (f) => coincide(f) && tuvoActividad(f) && (origenF === "todo" || (f.origen || "vicky") === origenF),
     )
-    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, cots: cotPorContacto, usuarios: usuariosPorContacto, formularioSet: llegoPorFormulario })
+    const cola = construirCasosGestion({ filas: filasVisibles, gestionados, montos: montosPorContacto, pais, tcUsdPen, cots: cotPorContacto, usuarios: usuariosPorContacto, formularioSet: llegoPorFormulario })
     casosGestion = cola.casos
     nGestionadosCola = cola.nGestionados
     const qsDescarga = (() => {
