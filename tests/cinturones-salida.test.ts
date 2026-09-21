@@ -131,3 +131,38 @@ test("aplicar_siguiente_descuento ok también respalda 'nueva versión'", () => 
   })
   assert.notEqual(v.cinturon, "actualizada_sin_tool")
 })
+
+
+// ── "descuento aplicado" sin tool (21-sep noche, E2E Perú en sitio) ────────
+test("'ya quedó con el 10% aplicado' sin aplicar_siguiente_descuento → reintento con contención", () => {
+  const v = revisarSalida({
+    reply: "Perfecto, Diego! 🎉\n\nTu cotización ya quedó con el 10% de descuento aplicado. En el mismo link ya está actualizada con el nuevo precio: https://cotizacion.geovictoria.com/quote-acceptance.html?token=abc",
+    toolCalls: [],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.equal(v.accion, "reintento")
+  assert.equal(v.cinturon, "descuento_aplicado_sin_tool")
+  assert.equal(v.siFallaReintento, "contener")
+  assert.match(v.contencion || "", /Todavía no dejé aplicado el descuento/)
+})
+
+test("el mismo anuncio CON aplicar_siguiente_descuento ok pasa", () => {
+  const v = revisarSalida({
+    reply: "Listo! Tu cotización ya quedó con el 10% de descuento aplicado. Aquí revisas, aceptas y pagas: https://cotizacion.geovictoria.com/quote-acceptance.html?token=abc",
+    toolCalls: [{ name: "aplicar_siguiente_descuento", ok: true }],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.notEqual(v.cinturon, "descuento_aplicado_sin_tool")
+})
+
+test("ofrecer el descuento (sin afirmar que quedó aplicado) no dispara el cinturón", () => {
+  const v = revisarSalida({
+    reply: "Puedo ofrecerte un 10% de descuento sobre el plan mensual. Con eso queda en S/59.40 + IGV al mes. ¿Lo cerramos?",
+    toolCalls: [{ name: "consultar_siguiente_descuento", ok: true }],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.notEqual(v.cinturon, "descuento_aplicado_sin_tool")
+})

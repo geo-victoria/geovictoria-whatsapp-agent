@@ -44,7 +44,7 @@ export type Veredicto = {
   /** Para el log y el aviso interno. */
   motivos: string[]
   /** Identificador del cinturón que disparó, para medir cuál actúa más. */
-  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool"
+  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool"
 }
 
 const OK: Veredicto = { accion: "ok", motivos: [] }
@@ -100,6 +100,34 @@ const CONTENCION_ACTUALIZADA: Record<PaisCinturon, string> = {
   co: "Aún no tengo lista la versión actualizada de tu cotización — la estoy generando y te la mando por este mismo chat en un momento, no necesitas confirmarme nada más 🙌",
   mx: "Aún no tengo lista la versión actualizada de tu cotización — la estoy generando y te la mando por este mismo chat en un momento, no necesitas confirmarme nada más 🙌",
   pe: "Aún no tengo lista la versión actualizada de tu cotización — la estoy generando y te la mando por este mismo chat en un momento, no necesitas confirmarme nada más 🙌",
+}
+
+/**
+ * "DESCUENTO APLICADO" SIN TOOL (21-sep noche, E2E Perú en sitio): el cliente
+ * dijo "acepto el 10 %" y el modelo respondió "tu cotización ya quedó con el
+ * 10 % aplicado, en el mismo link…" con CERO tools — el link seguía a precio
+ * de lista. La regex de "actualizada" no lo atrapaba porque el texto no dice
+ * "actualizada", dice "aplicado". El descuento se comitea SOLO con
+ * aplicar_siguiente_descuento (o emitiendo con escalón); anunciarlo sin eso es
+ * prometer un precio que la página no muestra.
+ */
+export const ANUNCIA_DESCUENTO_APLICADO_RE =
+  /(qued[oó]|est[aá]|va)\s+con\s+(el|un|tu)\s+\d{1,2}\s*%(\s+de\s+descuento)?\s+(ya\s+)?aplicad|te\s+apliqu[eé]\s+(el|un)\s+\d{1,2}\s*%|descuento\s+(ya\s+)?(qued[oó]\s+)?aplicad[oa]|(ya\s+)?(le\s+)?apliqu[eé]\s+(el|tu)\s+descuento|con\s+(el|tu)\s+descuento\s+(ya\s+)?(aplicado|incluido|listo)/i
+
+const TOOLS_QUE_APLICAN_DESCUENTO = new Set(["aplicar_siguiente_descuento", "generar_link_cotizadora", "actualizar_cotizacion"])
+
+const FORZAR_TOOL_DESCUENTO =
+  "\n\n# Instrucción de sistema (este turno)\n" +
+  "Tu borrador anterior AFIRMÓ que el descuento ya quedó aplicado en la cotización y NINGUNA tool " +
+  "lo aplicó en este turno: el link sigue a precio de lista. Si el cliente aceptó el descuento, " +
+  "llama AHORA aplicar_siguiente_descuento (con pct_ofrecido = el % que le ofreciste) y entrega " +
+  "SU mensajeParaProspecto tal cual. Si no puedes aplicarlo, dilo con franqueza: no lo des por aplicado."
+
+const CONTENCION_DESCUENTO: Record<PaisCinturon, string> = {
+  cl: "Todavía no dejé aplicado el descuento en tu cotización — lo hago ahora mismo y te confirmo por acá en un momento, no necesitas hacer nada más 🙌",
+  co: "Todavía no dejé aplicado el descuento en tu cotización — lo hago ahora mismo y te confirmo por acá en un momento, no necesitas hacer nada más 🙌",
+  mx: "Todavía no dejé aplicado el descuento en tu cotización — lo hago ahora mismo y te confirmo por acá en un momento, no necesitas hacer nada más 🙌",
+  pe: "Todavía no dejé aplicado el descuento en tu cotización — lo hago ahora mismo y te confirmo por acá en un momento, no necesitas hacer nada más 🙌",
 }
 
 export type EntradaSalida = {
@@ -162,6 +190,19 @@ export function revisarSalida(e: EntradaSalida): Veredicto {
       contencion: CONTENCION_ACTUALIZADA[e.pais] || CONTENCION_ACTUALIZADA.cl,
       motivos: ["actualizada_sin_tool"],
       cinturon: "actualizada_sin_tool",
+    }
+  }
+
+  // (3b) "Descuento aplicado" sin que nadie lo aplicara: mismo daño que (3)
+  // con otro verbo. Reintento con la orden; si insiste, contención honesta.
+  if (ANUNCIA_DESCUENTO_APLICADO_RE.test(reply) && !toolsOk.some((n) => TOOLS_QUE_APLICAN_DESCUENTO.has(n))) {
+    return {
+      accion: "reintento",
+      directiva: FORZAR_TOOL_DESCUENTO,
+      siFallaReintento: "contener",
+      contencion: CONTENCION_DESCUENTO[e.pais] || CONTENCION_DESCUENTO.cl,
+      motivos: ["descuento_aplicado_sin_tool"],
+      cinturon: "descuento_aplicado_sin_tool",
     }
   }
 
