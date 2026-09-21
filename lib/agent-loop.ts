@@ -96,6 +96,8 @@ export async function runAgentLoop(params: {
     schemas: unknown[]
     dispatch: (name: string, input: unknown) => Promise<unknown>
   }
+  /** Interno: el reintento que disparan los cinturones de salida no vuelve a pasar por ellos. */
+  sinCinturonesDeSalida?: boolean
 }): Promise<AgentRunResult> {
   const { systemPrompt, history, userMessage, apiKey, model, contact, tools } = params
   let toolSchemas = (tools?.schemas ?? TOOL_SCHEMAS) as unknown as Anthropic.Messages.Tool[]
@@ -1471,6 +1473,73 @@ export async function runAgentLoop(params: {
 
   if (iteration >= MAX_ITERATIONS) {
     console.warn(`[vicky-v3] Loop alcanzó MAX_ITERATIONS=${MAX_ITERATIONS}.`)
+  }
+
+  // ── CINTURONES DE SALIDA, EN EL MECANISMO COMÚN (21-sep) ─────────────────
+  // Lalo: "los cinturones de Chile también hay que usarlos en los países" y
+  // "¿vas a replicar los cinturones y luego a unificar? no entiendo". Tenía
+  // razón: engancharlos en cada webhook era replicar el enganche cuatro veces.
+  // Este loop es lo que los cuatro webhooks YA llaman, así que el juez único
+  // (lib/cinturones-salida) vive acá y ningún país puede quedarse sin él.
+  //
+  // CHILE NO CAMBIA (orden del mismo día: "no romper nada de Chile mientras"):
+  // su webhook trae su propio cinturón de precio desde julio, así que acá se
+  // salta a menos que vic_kv `cinturones_salida_cl`="on" lo encienda — se
+  // prende cuando lo medido en los otros tres lo justifique.
+  //
+  // El reintento se corre ACÁ (el loop tiene su prompt, historial y tools),
+  // con `sinCinturonesDeSalida` para que no se vuelva a juzgar a sí mismo.
+  if (!params.sinCinturonesDeSalida && finalText && contact) {
+    try {
+      const { paisDeContacto } = await import("./ruteo-pais.ts")
+      // El probador de país manda sobre el prefijo (Lalo y Rodrigo prueban
+      // Perú desde un +56): sin esto, sus pruebas no pasarían por el cinturón.
+      const { paisProbador } = await import("./probador-pais.ts")
+      const override = await paisProbador(contact).catch(() => null)
+      const paisRaw = String(override || paisDeContacto(contact) || "")
+      const pais = (["cl", "co", "mx", "pe"] as const).find((p) => p === paisRaw)
+      let aplica = Boolean(pais && pais !== "cl")
+      if (pais === "cl") {
+        const { getKvValue } = await import("./supabase-persistence-v3.ts")
+        aplica = ((await getKvValue("cinturones_salida_cl").catch(() => null)) || "").trim() === "on"
+      }
+      if (aplica && pais) {
+        const { revisarSalida, reintentoQuedoBien } = await import("./cinturones-salida.ts")
+        const histAsistente = history.filter((h) => h.role === "assistant").map((h) => String(h.content || ""))
+        const v = revisarSalida({ reply: finalText, toolCalls, historialAsistente: histAsistente, pais })
+        if (v.accion === "reemplazo" && v.reply) {
+          console.warn(`[agent-loop] CINTURON_${v.cinturon} ${pais} contact=${contact} motivos=${v.motivos.join(",")} → sale el mensaje de la tool`)
+          finalText = v.reply
+          void avisarEquipoInterno(
+            `🧷 Cinturón ${v.cinturon} (${pais.toUpperCase()}) a +${contact}: el modelo deformó el precio (${v.motivos.join(", ")}); salió el mensaje de la tool.`,
+          ).catch(() => false)
+        } else if (v.accion === "reintento" && v.directiva) {
+          console.warn(`[agent-loop] CINTURON_${v.cinturon} ${pais} contact=${contact} motivos=${v.motivos.join(",")} → reintento`)
+          const retry = await runAgentLoop({ ...params, systemPrompt: systemPrompt + v.directiva, sinCinturonesDeSalida: true }).catch(() => null)
+          const rReply = (retry?.reply || "").trim()
+          const rCalls = retry?.toolCalls || []
+          const bien = Boolean(rReply) && reintentoQuedoBien({ reply: rReply, toolCalls: rCalls, historialAsistente: histAsistente, pais })
+          if (bien && retry) {
+            finalText = rReply
+            toolCalls.splice(0, toolCalls.length, ...rCalls)
+          } else if (v.siFallaReintento === "contener" && v.contencion) {
+            // Un precio sin respaldo a alguien que está por pagar es peor que
+            // una demora (criterio del cinturón de URLs, 03-sep).
+            finalText = v.contencion
+          }
+          // dejar_pasar: sale el borrador original — una pregunta de más es
+          // menos grave que dejar al cliente sin respuesta; queda el aviso.
+          void avisarEquipoInterno(
+            `🧷 Cinturón ${v.cinturon} (${pais.toUpperCase()}) a +${contact}: ${v.motivos.join(", ")}. ${
+              bien ? "Recuperado en el reintento." : v.siFallaReintento === "contener" ? "CONTENIDO — revisar el chat." : "El reintento no lo sacó: salió el original."
+            }`,
+          ).catch(() => false)
+        }
+      }
+    } catch (e) {
+      // El cinturón jamás tumba el turno: si falla, sale el texto del modelo.
+      console.error(`[agent-loop] cinturones de salida fallaron para ${contact}:`, e)
+    }
   }
 
   return {
