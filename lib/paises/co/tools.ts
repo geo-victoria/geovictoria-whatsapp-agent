@@ -401,7 +401,10 @@ export function buildDispatchCO(contact: string) {
             contacto: i.contacto,
             contactoEmail: i.email,
             nit: normalizarNit(i.nit),
-            contactoTelefono: `+${contact}`,
+            // LID con marcador ("CO.4546…", 21-sep caso Arenas Serrano): al
+            // cotizador va sin el prefijo — con "+CO.…" la emisión se caía y
+            // Vicky prometía un link que nunca existió.
+            contactoTelefono: `+${contact.replace(/^\s*(CL|CO|MX|PE)\./i, "")}`,
             userCount: Number(i.userCount || 0),
             items: calculo.itemsCotizador,
           }),

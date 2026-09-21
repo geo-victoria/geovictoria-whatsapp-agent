@@ -1982,6 +1982,11 @@ export async function sincronizarHitoCrm(
       const creado = await createZohoLead({
         contactoWA: clean,
         telefono: clean,
+        // País desde el CONTACTO CRUDO (21-sep, caso Astrid/Arenas Serrano): un
+        // LID "CO.<id>" no tiene prefijo telefónico y `clean` pierde el
+        // marcador → Country vacío → el workflow de Zoho lo dejaba en Chile y
+        // el barrido lo entregaba a telemarketing CL.
+        pais: territorio || undefined,
         nombre: datos.nombre,
         empresa: datos.empresa,
         email: datos.email,
@@ -2082,6 +2087,7 @@ export async function sincronizarHitoCrm(
             const nuevo = await createZohoLead({
               contactoWA: clean, telefono: clean, nombre: datos.nombre,
               empresa: datos.empresa, email: datos.email, trabajadores: datos.empleados,
+              pais: territorioDeContacto(contact) || undefined,
             })
             if (nuevo.success) console.log(`[crm-hitos] ${clean}: lead renacido ${nuevo.leadId} (No Calificado >3 meses, regla 3b)`)
             return
@@ -2225,6 +2231,7 @@ export async function sincronizarHitoCrm(
           const nuevo = await createZohoLead({
             contactoWA: clean, telefono: clean, nombre: datos.nombre,
             empresa: datos.empresa, email: datos.email, trabajadores: datos.empleados,
+            pais: territorioDeContacto(contact) || undefined,
           })
           if (nuevo.success) console.log(`[crm-hitos] ${clean}: lead renacido ${nuevo.leadId} (deal en "${stageActual}", reglas 4/6)`)
           return
@@ -2283,6 +2290,7 @@ export async function sincronizarHitoCrm(
         const renacido = await createZohoLead({
           contactoWA: clean,
           telefono: clean,
+          pais: territorioDeContacto(contact) || undefined,
           nombre: datos.nombre,
           empresa: datos.empresa,
           email: datos.email,

@@ -30,7 +30,8 @@
 
 import { NextResponse } from "next/server"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { appendAssistantV3, getFollowupCronSecret, getKvValue } from "@/lib/supabase-persistence-v3"
+import { appendAssistantV3, getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
+import { paisDeLinea, paisDePlantilla } from "@/lib/linea-por-pais"
 import {
   ajustarAHabil,
   calcularProximoToque,
@@ -1099,6 +1100,25 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     let ejecutado = false
+    // FALLO DE PLANTILLA ACOTADO (21-sep, caso Astrid/Arenas Serrano): un
+    // envío fallido "se reintenta al próximo tick" — y el tick es cada 2 min,
+    // así que una plantilla que Botmaker jamás va a aceptar (bot de otro
+    // país, número sin WhatsApp) se reintentaba para siempre: 204 fallos en
+    // una noche para un solo contacto. Ahora: 1º y 2º fallo posponen el toque
+    // 60 min; al 3º el toque se da por perdido y la cadencia avanza.
+    const falloPlantilla = async (touchN: number, tplName: string, accion: string): Promise<boolean> => {
+      const k = `loop_tpl_fallo_${r.contact}_${touchN}`
+      const n = Number((await getKvValue(k).catch(() => null)) || 0) + 1
+      await setKvValue(k, String(n)).catch(() => {})
+      if (n >= 3) {
+        console.warn(`[loop-cron] ${r.contact}: plantilla ${tplName} falló ${n} veces en el toque ${touchN} — se da por perdido y avanza`)
+        detalle.push({ contact: r.contact, accion, touch: touchN, tpl: tplName, ok: false, skip: `fallo_x${n}` })
+        return true
+      }
+      await patchLoop(r.contact, { next_touch_at: new Date(Date.now() + 60 * 60e3).toISOString() }).catch(() => {})
+      detalle.push({ contact: r.contact, accion, touch: touchN, tpl: tplName, ok: false, reintento_en_min: 60, fallos: n })
+      return false
+    }
 
     // RECHAZO EXPLÍCITO DEL CLIENTE = CERO TOQUES (08-sep, campaña remk_300):
     // "no gracias", "quedamos hasta aquí", "ya contratamos", "dejen de
@@ -1391,14 +1411,44 @@ export async function GET(req: Request): Promise<Response> {
           ejecutado = true
           detalle.push({ contact: r.contact, accion: "plantilla_contexto", touch, tpl: tplCtx })
         } else {
-          detalle.push({ contact: r.contact, accion: "plantilla_contexto", touch, tpl: tplCtx, ok: false })
+          ejecutado = await falloPlantilla(touch, tplCtx, "plantilla_contexto")
         }
       } else {
         // PE: sus plantillas viven en el bot de la línea +51 y salen solo con
         // el interruptor vic_kv `plantillas_pe_enabled`="on" (mientras Meta
         // revisa, celda vacía = skip limpio, jamás una chilena por la línea peruana).
-        const tpl = paisKey === "pe" && !plantillasPeOn ? "" : (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][paisKey]
-        if (!tpl) {
+        let tpl = paisKey === "pe" && !plantillasPeOn ? "" : (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage][paisKey]
+        // LA LÍNEA REAL MANDA SOBRE EL PAÍS DEL LOOP (21-sep, caso Astrid):
+        // una colombiana con número oculto escribió a la línea CHILENA; el
+        // loop quedó `country=co` y elegía `vicky_loop_con_precio_co`, que es
+        // del bot Colombia — por la línea de Chile Botmaker la rechaza
+        // (plantilla_de_otro_pais) y el push nunca sale. Se mira la línea por
+        // la que de verdad va a salir (canal de origen del contacto) y, si la
+        // plantilla es de otro bot, se usa la celda de ESA línea solo cuando es
+        // una plantilla neutra (sin marcador de país en el nombre: pago,
+        // toque2, despedida). Si no hay neutra, el toque se omite y avanza —
+        // jamás se reintenta cada 2 minutos lo que no puede salir.
+        if (tpl) {
+          const origen = ((await getKvValue(`canal_origen_${r.contact}`).catch(() => null)) || "").trim()
+          const lineaSalida = origen || canal || ""
+          const pLinea = lineaSalida ? paisDeLinea(lineaSalida) : "cl"
+          const pTpl = paisDePlantilla(tpl)
+          if (pTpl && pLinea !== "otro" && pTpl !== pLinea) {
+            const alt = (LOOP_TPL_MATRIZ[touch] || LOOP_TPL_MATRIZ[7])[stage]?.[pLinea] || ""
+            if (alt && !paisDePlantilla(alt)) {
+              console.log(`[loop-cron] ${r.contact}: ${tpl} es del bot ${pTpl} y la línea es ${pLinea} — sale ${alt} (neutra)`)
+              tpl = alt
+            } else {
+              console.warn(`[loop-cron] ${r.contact}: ${tpl} (bot ${pTpl}) no puede salir por la línea ${pLinea} y no hay plantilla neutra — toque ${touch} omitido`)
+              ejecutado = true
+              detalle.push({ contact: r.contact, accion: "plantilla", touch, tpl, skip: "plantilla_incompatible_con_linea", linea: lineaSalida || "cl" })
+              tpl = ""
+            }
+          }
+        }
+        if (ejecutado) {
+          // omitido por incompatibilidad con la línea: ya quedó en `detalle`.
+        } else if (!tpl) {
           // Sin plantilla configurada NO se envía nada (patrón del repo). El
           // toque igual avanza para no reintentar el mismo skip en cada tick.
           console.warn(
@@ -1441,7 +1491,7 @@ export async function GET(req: Request): Promise<Response> {
             ejecutado = true
             detalle.push({ contact: r.contact, accion: "plantilla", touch, tpl })
           } else {
-            detalle.push({ contact: r.contact, accion: "plantilla", touch, tpl, ok: false })
+            ejecutado = await falloPlantilla(touch, tpl, "plantilla")
           }
         }
       }

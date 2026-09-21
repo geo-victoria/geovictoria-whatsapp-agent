@@ -117,6 +117,40 @@ function normalizarTel(raw: string): string {
   return tel
 }
 
+// LID DE WHATSAPP (21-sep, caso Astrid/Arenas Serrano): el Phone del lead era
+// "+4546022155642733" — 16 dígitos sin prefijo de país, el id anónimo que Meta
+// entrega cuando el usuario oculta su número. La conversación está guardada
+// con el MARCADOR de la línea que la atendió ("CO.4546022155642733"), así que
+// buscar por dígitos daba "nunca conversó" y el país salía del Territorio del
+// lead (Chile, mal estampado por un workflow): un colombiano calificado de 45
+// personas terminó entregado a telemarketing Chile. Acá se resuelve el
+// contacto REAL de la conversación por sufijo y el país por su marcador.
+const RE_FONO_REAL = /^(56\d{9}|57\d{10}|52\d{10}|51\d{9})$/
+async function contactoDeConversacion(tel: string): Promise<{ contact: string; pais: string }> {
+  if (!tel || RE_FONO_REAL.test(tel)) return { contact: tel, pais: "" }
+  try {
+    const url = (process.env.SUPABASE_URL || "").trim().replace(/\/$/, "")
+    const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    if (!url || !key) return { contact: tel, pais: "" }
+    const r = await fetch(
+      `${url}/rest/v1/vic_v3_conversations?contact=like.*${encodeURIComponent(tel)}&select=contact&order=updated_at.desc&limit=3`,
+      { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" },
+    )
+    if (!r.ok) {
+      console.warn(`[barrido-leads] lookup LID ${tel}: HTTP ${r.status}`)
+      return { contact: tel, pais: "" }
+    }
+    const filas = (await r.json()) as Array<{ contact?: string }>
+    const c = filas.map((f) => String(f.contact || "")).find((x) => x.replace(/\D/g, "") === tel) || ""
+    if (!c) return { contact: tel, pais: "" }
+    const marca = /^\s*(CL|CO|MX|PE)\./i.exec(c)?.[1]?.toLowerCase() || ""
+    return { contact: c, pais: marca }
+  } catch (e) {
+    console.warn(`[barrido-leads] lookup LID ${tel} falló:`, e instanceof Error ? e.message : String(e))
+    return { contact: tel, pais: "" }
+  }
+}
+
 async function feriados(pais: string): Promise<Set<string>> {
   try {
     const url = (process.env.SUPABASE_URL || "").trim().replace(/\/$/, "")
@@ -247,7 +281,11 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
     const nombre = [l.First_Name, l.Last_Name].filter(Boolean).join(" ").trim() || "(sin nombre)"
     const blob = `${nombre} ${l.Company || ""} ${l.Email || ""}`
     const tel = normalizarTel(String(l.Phone || ""))
-    const pais = paisDe(tel, String(l.Territorio || ""))
+    // Conversación real (LID con marcador) y país: el marcador de la línea
+    // manda sobre el Territorio del lead.
+    const conv = await contactoDeConversacion(tel)
+    const telChat = conv.contact || tel
+    const pais = conv.pais || paisDe(tel, String(l.Territorio || ""))
     const base = { leadId: l.id, nombre, telefono: tel, pais, horas }
     if (RE_INTERNO.test(blob) || tel === "56987654321") {
       resultados.push({ ...base, accion: "omitido", detalle: "contacto interno/prueba" })
@@ -284,9 +322,9 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
         continue
       }
       // B) Conversación que no es de un prospecto (cliente/soporte/trabajador).
-      const hayConv = (await fetchHistoryV3(tel, 1).catch(() => [])).length > 0
+      const hayConv = (await fetchHistoryV3(telChat, 1).catch(() => [])).length > 0
       if (hayConv) {
-        const c = await casuisticaDeContacto(tel)
+        const c = await casuisticaDeContacto(telChat)
         if (!c.esProspecto) {
           const motivo = c.motivoZoho || "Es un usuario"
           if (!dry) {
@@ -295,7 +333,7 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
               l.id,
               `Cerrado por Vicky: ${c.tipo} (no es prospecto)`,
               `Por lo que escribió el contacto en WhatsApp no es un prospecto de venta (${c.tipo}). Evidencia: ${c.evidencia.join(", ") || "-"}. ` +
-                `${ok ? `Queda "No Calificado / ${motivo}".` : `No se pudo cambiar el estado: corresponde "No Calificado / ${motivo}".`}\n\nCONVERSACIÓN:\n${await transcript(tel)}`,
+                `${ok ? `Queda "No Calificado / ${motivo}".` : `No se pudo cambiar el estado: corresponde "No Calificado / ${motivo}".`}\n\nCONVERSACIÓN:\n${await transcript(telChat)}`,
             ).catch(() => false)
             await setKvValue(`barrido_lead_${l.id}`, `no_prospecto:${c.tipo}`).catch(() => {})
           }
@@ -304,10 +342,10 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
         }
       }
       // C) Entrega por la regla que corresponde.
-      const chat = hayConv ? await datosDelChat(tel).catch(() => null) : null
+      const chat = hayConv ? await datosDelChat(telChat).catch(() => null) : null
       const empleadosLead = Number(l.N_Empleados_que_marcan || 0) || 0
       const empleados = empleadosLead || Number(chat?.empleados || 0) || 0
-      const puntero = hayConv ? await getQuotePointer(tel).catch(() => null) : null
+      const puntero = hayConv ? await getQuotePointer(telChat).catch(() => null) : null
       const calificado = empleados > 0 || Boolean(puntero?.quoteId)
       const regla = pais === "cl" ? (calificado ? "tlmk" : "sdr") : pais === "pe" ? (calificado ? "pe_tlmk" : "pe_sdr") : pais
       if (dry) {
@@ -361,7 +399,12 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
       await setKvValue(`barrido_lead_${l.id}`, `entregado:${ownerEmail}`).catch(() => {})
       await notificarLeadAsignado({ leadId: l.id, vendedorEmail: ownerEmail, contact: tel, nombre, empresa: String(l.Company || chat?.empresa || ""), empleados }).catch(() => false)
       const resumen = [
-        hayConv ? `Conversó con Vicky por WhatsApp (+${tel}) sin llegar a un hito comercial.` : `Llenó el formulario de la landing hace ${horas} h y nunca conversó por WhatsApp (+${tel}): llamar directo.`,
+        hayConv
+          ? `Conversó con Vicky por WhatsApp (${telChat}) sin llegar a un hito comercial.`
+          : String(l.Form_Vicky || "") === "Si"
+            ? `Llenó el formulario de la landing hace ${horas} h y nunca conversó por WhatsApp (+${tel}): llamar directo.`
+            : `Lead creado hace ${horas} h sin conversación registrada por WhatsApp (+${tel}): llamar directo.`,
+        RE_FONO_REAL.test(tel) ? "" : `OJO: el teléfono es un ID anónimo de WhatsApp (número oculto), no un número marcable — contactar por el chat de Botmaker o por correo.`,
         empleados ? `Dotación: ${empleados} personas.` : "Dotación: no la dio.",
         chat?.rut ? `RUT en el chat: ${chat.rut}.` : "",
         chat?.empresa ? `Empresa: ${chat.empresa}.` : "",
@@ -369,7 +412,7 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
         puntero?.quoteId ? `Vio precio / tiene cotización (${puntero.quoteId}).` : "",
         `Entregado por regla ${regla.toUpperCase()} porque llevaba ${horas} h a nombre de Vicky (barrido automático).`,
       ].filter(Boolean).join(" ")
-      const tx = hayConv ? await transcript(tel) : ""
+      const tx = hayConv ? await transcript(telChat) : ""
       await agregarNotaLead(
         l.id,
         `Entrega de Vicky (barrido) → ${ownerEmail}`,
