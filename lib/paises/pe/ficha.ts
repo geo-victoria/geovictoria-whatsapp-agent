@@ -60,6 +60,14 @@ export const FICHA_PE: FichaPrompt = {
     '- "Huellero" / "lector de huella" → en Perú es el reloj de control con lector de huella: cotízalo como reloj (id `reloj_pe`, 1 por punto). No existe un lector USB aparte.',
   zonaNoSeAsume: "EL DISTRITO O LA CIUDAD JAMÁS SE ASUME (Lalo 13-ago): ni Lima ni ninguna otra por defecto",
   ejemploPresupuesto: "cliente con S/160 de presupuesto y opción ya cotizada en S/149",
+  reglaNombreEmpresa: "La RAZÓN SOCIAL se pide UNA sola vez, al cierre, junto con el RUC y el correo (en Perú no hay padrón que la resuelva desde el RUC): si el cliente ya la mencionó, la usas y no la vuelves a pedir; jamás la pidas antes del precio.",
+  reglaNombreEmpresaPaso1: "El nombre de la EMPRESA no se pregunta acá (si sale solo, lo usas) — al final solo te faltará pedir RUC + razón social + email (regla \"menos es más\").",
+  prohibidoNombreEmpresa: "y el nombre de la empresa se pide recién al cierre, junto con el RUC, nunca acá.",
+  datosCierreParen: "(solo RUC + razón social + email — la razón social va porque en Perú no se resuelve desde el RUC; NO pidas distrito ni rubro)",
+  reglaNombreEmpresaCierre: "la **razón social se pide al cierre junto con el RUC** (si el cliente ya la mencionó, la usas sin volver a preguntar)",
+  pedirDeMas: "Pedir de más (distrito, rubro, etc.)",
+  daDatosCierre: "Da RUC, razón social y correo",
+  datosCierre: "RUC + razón social + email",
   bloques: {
     estiloLocal: `## Estilo peruano permitido
 
