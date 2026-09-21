@@ -17,7 +17,12 @@ const ARCHIVO: Record<PaisPrompt, string> = {
   mx: "lib/paises/mx/prompt.ts",
   pe: "lib/paises/pe/prompt.ts",
 }
-const texto = (p: PaisPrompt) => readFileSync(new URL(`../${ARCHIVO[p]}`, import.meta.url), "utf8")
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
+// Chile = el núcleo ARMADO con su ficha (los bloques locales viven en la ficha,
+// y varias anclas —legal, tools, agenda— están ahí); los demás, su archivo.
+const texto = (p: PaisPrompt) =>
+  p === "cl" ? textoNucleo(FICHA_CL, "") : readFileSync(new URL(`../${ARCHIVO[p]}`, import.meta.url), "utf8")
 
 test("el catálogo de reglas está sano (ids únicos, ancla y motivo)", () => {
   const ids = new Set<string>()

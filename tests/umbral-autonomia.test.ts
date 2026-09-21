@@ -102,7 +102,9 @@ describe("puntos de decisión del prompt CL reescritos con el umbral", () => {
   const fuente =
     readFileSync(new URL("../lib/prompt-nucleo/texto.ts", import.meta.url), "utf8") +
     "\n" +
-    readFileSync(new URL("../lib/prompt-nucleo/armar.ts", import.meta.url), "utf8")
+    readFileSync(new URL("../lib/prompt-nucleo/armar.ts", import.meta.url), "utf8") +
+    "\n" +
+    readFileSync(new URL("../lib/prompt-nucleo/ficha.ts", import.meta.url), "utf8")
 
   test("las cuatro cadenas objetivo del replace siguen en el prompt", () => {
     for (const objetivo of [
