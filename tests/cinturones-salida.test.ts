@@ -97,3 +97,37 @@ test("en onboarding estos cinturones no corren", () => {
   const v = revisarSalida({ reply: "Te queda en S/240 al mes", toolCalls: [], historialAsistente: [], pais: "pe", enOnboarding: true })
   assert.equal(v.accion, "ok")
 })
+
+// ── "actualizada" sin tool (21-sep, caso Lalo en Perú) ─────────────────────
+test("anunciar 'ya actualicé tu cotización' sin tool de emisión pide reintento y contiene", () => {
+  const v = revisarSalida({
+    reply: "Perfecto! Ya actualicé tu cotización con 16 personas y solo app: https://cotizacion.geovictoria.com/q/abc-123",
+    toolCalls: [{ name: "cotizar_referencial", ok: true, output: { mensajeParaProspecto: "" } }],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.equal(v.accion, "reintento")
+  assert.equal(v.cinturon, "actualizada_sin_tool")
+  assert.equal(v.siFallaReintento, "contener")
+  assert.match(String(v.contencion), /Aún no tengo lista/)
+})
+
+test("con actualizar_cotizacion ok en el turno el anuncio pasa", () => {
+  const v = revisarSalida({
+    reply: "Listo!! Tu cotización quedó actualizada 🎉 (este link reemplaza al anterior)",
+    toolCalls: [{ name: "actualizar_cotizacion", ok: true, output: { mensajeParaProspecto: "Listo!! Tu cotización quedó actualizada 🎉 (este link reemplaza al anterior)" } }],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.equal(v.accion, "ok")
+})
+
+test("aplicar_siguiente_descuento ok también respalda 'nueva versión'", () => {
+  const v = revisarSalida({
+    reply: "Te dejo la nueva versión de tu cotización con el 10 %.",
+    toolCalls: [{ name: "aplicar_siguiente_descuento", ok: true, output: {} }],
+    historialAsistente: [],
+    pais: "cl",
+  })
+  assert.notEqual(v.cinturon, "actualizada_sin_tool")
+})

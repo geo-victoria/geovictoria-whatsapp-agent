@@ -44,7 +44,7 @@ export type Veredicto = {
   /** Para el log y el aviso interno. */
   motivos: string[]
   /** Identificador del cinturón que disparó, para medir cuál actúa más. */
-  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida"
+  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool"
 }
 
 const OK: Veredicto = { accion: "ok", motivos: [] }
@@ -68,6 +68,39 @@ const FORZAR_TOOL_PRECIO =
   "precios: el motor es la única fuente. Si el cliente pregunta por un valor nuevo " +
   "(otra dotación, otra configuración), llama AHORA la tool que corresponde y entrega su " +
   "cifra tal cual. Si el precio no cambió, dilo sin inventar una cifra nueva."
+
+/**
+ * "COTIZACIÓN ACTUALIZADA" SIN TOOL (21-sep, caso Lalo en la línea +51 — y
+ * antes Guillermo/Genesys COT956 en Chile, 27-ago): el modelo anuncia "ya
+ * actualicé tu cotización" o "te la envío actualizada" sin que ninguna tool
+ * de emisión haya corrido en el turno, y el cliente queda con el link viejo
+ * creyendo que es el nuevo. En Chile vivía SOLO en su webhook; acá juzga a
+ * los cuatro países. El regex es el chileno tal cual.
+ */
+export const ANUNCIA_ACTUALIZADA_RE =
+  /cotizaci[oó]n\s+(actualizada|modificada|corregida)|actualic[eé]\s+(tu|la)\s+cotizaci[oó]n|te\s+(env[ií]o|mando|mand[eé]|acabo\s+de\s+mandar)\s+la\s+cotizaci[oó]n\s+actualizada|nueva\s+versi[oó]n\s+de\s+(tu|la)\s+cotizaci[oó]n|ya\s+(la\s+)?actualic[eé]/i
+
+const TOOLS_QUE_ACTUALIZAN = new Set([
+  "actualizar_cotizacion",
+  "generar_link_cotizadora",
+  "aplicar_siguiente_descuento",
+  "anualizar_cotizacion",
+])
+
+const FORZAR_TOOL_ACTUALIZAR =
+  "\n\n# Instrucción de sistema (este turno)\n" +
+  "Tu borrador anterior ANUNCIÓ una cotización actualizada/nueva versión que NINGUNA tool " +
+  "generó en este turno. Prohibido anunciar cambios que no ocurrieron. Si el cliente pidió " +
+  "un cambio en su cotización formal, llama AHORA actualizar_cotizacion (o " +
+  "aplicar_siguiente_descuento si fue por precio) y entrega SU mensajeParaProspecto tal cual. " +
+  "Si no puedes actualizarla, dilo con franqueza: no la des por actualizada."
+
+const CONTENCION_ACTUALIZADA: Record<PaisCinturon, string> = {
+  cl: "Aún no tengo lista la versión actualizada de tu cotización — la estoy generando y te la mando por este mismo chat en un momento, no necesitas confirmarme nada más 🙌",
+  co: "Aún no tengo lista la versión actualizada de tu cotización — la estoy generando y te la mando por este mismo chat en un momento, no necesitas confirmarme nada más 🙌",
+  mx: "Aún no tengo lista la versión actualizada de tu cotización — la estoy generando y te la mando por este mismo chat en un momento, no necesitas confirmarme nada más 🙌",
+  pe: "Aún no tengo lista la versión actualizada de tu cotización — la estoy generando y te la mando por este mismo chat en un momento, no necesitas confirmarme nada más 🙌",
+}
 
 export type EntradaSalida = {
   reply: string
@@ -118,7 +151,21 @@ export function revisarSalida(e: EntradaSalida): Veredicto {
     }
   }
 
-  // (3) Preguntas que el flujo chileno retiró. Si el reintento tampoco las
+  // (3) "Actualizada" sin que nada se haya actualizado. Reintento con la
+  // orden de llamar la tool; si vuelve igual, contención honesta — dejar
+  // pasar sería entregarle al cliente el link viejo como nuevo.
+  if (ANUNCIA_ACTUALIZADA_RE.test(reply) && !toolsOk.some((n) => TOOLS_QUE_ACTUALIZAN.has(n))) {
+    return {
+      accion: "reintento",
+      directiva: FORZAR_TOOL_ACTUALIZAR,
+      siFallaReintento: "contener",
+      contencion: CONTENCION_ACTUALIZADA[e.pais] || CONTENCION_ACTUALIZADA.cl,
+      motivos: ["actualizada_sin_tool"],
+      cinturon: "actualizada_sin_tool",
+    }
+  }
+
+  // (4) Preguntas que el flujo chileno retiró. Si el reintento tampoco las
   // saca, el mensaje original SALE: dejar al cliente sin respuesta por una
   // pregunta de más es peor que la pregunta de más. Queda el aviso para medir.
   const pp = preguntasProhibidasEn(reply)

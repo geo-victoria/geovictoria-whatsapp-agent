@@ -1260,8 +1260,13 @@ export async function runAgentLoop(params: {
             }
           } else if (toolName === "aplicar_siguiente_descuento") {
             // Refrescar la vigencia de la formal sobre la que se negocia.
+            // Perú (21-sep): el descuento se aplica RE-EMITIENDO, así que la
+            // tool devuelve un quoteId NUEVO — ese manda sobre el que pasó el
+            // modelo (que es el de la cotización reemplazada).
+            const rq = result as Record<string, unknown>
             const qid =
-              typeof toolInput.quote_id === "string" ? toolInput.quote_id : ""
+              (typeof rq.quoteId === "string" && rq.quoteId) ||
+              (typeof toolInput.quote_id === "string" ? toolInput.quote_id : "")
             if (qid) await setFormalQuote(contact, qid).catch(() => {})
             // Y el PUNTERO: el commit regenera PDF + link de aceptación (token
             // nuevo). Sin esto, el guardrail anti-alucinación compara contra el
@@ -1288,7 +1293,10 @@ export async function runAgentLoop(params: {
             // Puntero al día: mismos quoteId/link, totales nuevos (los usa la
             // llamada de voz y el contexto anti-amnesia).
             const r3 = result as Record<string, unknown>
-            const qid3 = typeof toolInput.quote_id === "string" ? toolInput.quote_id : ""
+            // Mismo criterio: en Perú actualizar = re-emitir con id nuevo.
+            const qid3 =
+              (typeof r3.quoteId === "string" && r3.quoteId) ||
+              (typeof toolInput.quote_id === "string" ? toolInput.quote_id : "")
             if (qid3 && r3.ok === true) {
               await setFormalQuote(contact, qid3).catch(() => {})
               const prevs3 = await getQuotePointers(contact).catch(() => [])

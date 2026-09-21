@@ -105,3 +105,14 @@ test("forma chilena → motor peruano: hardware, zona y autoinstalación", () =>
   // Sin reloj ni puntos ni escalón: solo la dotación (nada inventado).
   assert.deepEqual(aInputCotizarPE({ userCount: 8 }), { userCount: 8 })
 })
+
+// ── actualizar/aplicar descuento con motor REAL en Perú (21-sep) ───────────
+test("actualizar_cotizacion y aplicar_siguiente_descuento ya no son stubs: exponen la config como Chile", () => {
+  const act = TOOL_SCHEMAS_PE_UNIFICADAS.find((t) => t.name === "actualizar_cotizacion")!
+  const props = act.input_schema.properties as Record<string, unknown>
+  for (const k of ["quote_id", "userCount", "hardware", "puntosInstalacion"]) assert.ok(k in props, `falta ${k}`)
+  assert.doesNotMatch(act.description, /te lo recuerda/i)
+  const apl = TOOL_SCHEMAS_PE_UNIFICADAS.find((t) => t.name === "aplicar_siguiente_descuento")!
+  assert.doesNotMatch(apl.description, /te lo (recuerda|indica)/i)
+  assert.match(apl.description, /mensajeParaProspecto/)
+})

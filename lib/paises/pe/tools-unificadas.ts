@@ -13,9 +13,14 @@
  *     comprobante, opt-out, seguimiento);
  *   - delega a la implementación chilena donde es país-neutra (reenvío por
  *     correo, PDF por WhatsApp);
+ *   - RE-EMITE donde Chile edita en sitio (actualizar_cotizacion,
+ *     aplicar_siguiente_descuento): el cotizador de edición es chileno (motor
+ *     UF), así que la paridad se logra generando una cotización NUEVA con la
+ *     config/escalón nuevos, leídos de la formal vigente en Zoho, y expirando
+ *     la anterior (caso Lalo 21-sep: "en Chile eso no pasa, ¿por qué acá?");
  *   - responde HONESTO donde Perú no tiene la capacidad (agenda Cal, ficha
- *     PDF del reloj, certificación DT, escalera sobre formal, anualidad): la
- *     tool existe, dice qué hacer en su lugar y JAMÁS simula el efecto.
+ *     PDF del reloj, certificación DT, anualidad): la tool existe, dice qué
+ *     hacer en su lugar y JAMÁS simula el efecto.
  *
  * Así el prompt no necesita saber qué país tiene qué: el país es la FICHA y
  * el motor, no una copia de las tools. CO y MX pasarán por el mismo molde.
@@ -84,6 +89,9 @@ const ESCALON = {
   description:
     "Escalón de descuento del PLAN (1 = 10 %, 2 = 20 %, por 6 meses) SOLO como respuesta a una objeción de precio tras mostrar la lista. 0 u omitido = sin descuento. Nunca proactivo.",
 }
+
+const TOPE_PE =
+  "Ese 20 % en el plan por 6 meses ya es el máximo que puedo aplicar — no tengo margen para más, y prefiero decírtelo con franqueza. Con ese valor te dejo la cotización lista cuando quieras avanzar."
 
 /** Respuesta honesta de una capacidad que Perú no tiene (la tool existe, no simula). */
 function sinCapacidad(que: string, enSuLugar: string) {
@@ -266,18 +274,40 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   },
   {
     name: "consultar_siguiente_descuento",
-    description: "Sobre una formal YA emitida en Perú el escalón siguiente se aplica RE-EMITIENDO con generar_link_cotizadora (misma empresa y RUC, escalonDescuento + 1): esta tool te devuelve cuál corresponde.",
-    input_schema: { type: "object" as const, properties: { quote_id: { type: "string" as const } }, required: [] },
+    description:
+      "Con una cotización FORMAL ya emitida: dice qué escalón de descuento corresponde ofrecer ahora (10 % → 20 % sobre el plan, 6 meses) SIN aplicarlo. Úsala cuando el cliente objeta el precio de la formal. Devuelve `escalonSiguiente`, `pct` y `topeAlcanzado`. Si el cliente acepta, llama aplicar_siguiente_descuento.",
+    input_schema: {
+      type: "object" as const,
+      properties: { quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente de esta conversación)." } },
+      required: [],
+    },
   },
   {
     name: "aplicar_siguiente_descuento",
-    description: "Igual que consultar_siguiente_descuento: en Perú se re-emite con generar_link_cotizadora y el escalón siguiente. Esta tool te lo indica.",
-    input_schema: { type: "object" as const, properties: { quote_id: { type: "string" as const } }, required: [] },
+    description:
+      "Aplica el escalón siguiente de descuento (10 % → 20 % sobre el plan, 6 meses) a la cotización FORMAL vigente de esta conversación: en Perú eso genera una cotización NUEVA con el descuento (la anterior queda reemplazada) y devuelve el link nuevo en `mensajeParaProspecto` — cópialo TAL CUAL. Solo ante objeción de precio y nunca dos escalones en un mismo turno. Con `topeAlcanzado=true` no hay más rebaja: dilo con franqueza.",
+    input_schema: {
+      type: "object" as const,
+      properties: { quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente)." } },
+      required: [],
+    },
   },
   {
     name: "actualizar_cotizacion",
-    description: "En Perú una formal emitida NO se edita: se RE-EMITE con generar_link_cotizadora con la configuración nueva (misma empresa y RUC). Esta tool te lo recuerda.",
-    input_schema: { type: "object" as const, properties: { quote_id: { type: "string" as const } }, required: [] },
+    description:
+      "Cambia la cotización FORMAL vigente de esta conversación (más o menos personas, agregar o quitar el reloj, cambiar modalidad o puntos). En Perú eso genera una cotización NUEVA con la configuración nueva (misma empresa y RUC, mismo descuento ya ofrecido; la anterior queda reemplazada) y devuelve el link nuevo en `mensajeParaProspecto` — cópialo TAL CUAL, no vuelvas a mostrar opciones ni recalcules nada. Pasa SOLO lo que cambia; lo demás se conserva de la formal. Llámala EN EL MISMO TURNO en que el cliente pide el cambio: jamás anuncies 'te la actualizo' sin llamarla.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente)." },
+        userCount: { type: "number" as const, minimum: 1, maximum: 50, description: "Dotación nueva, solo si cambia." },
+        modulos: { type: "array" as const, items: { type: "string" as const } },
+        hardware: HARDWARE_PE,
+        puntosInstalacion: PUNTOS_PE,
+        resumen_cambio: { type: "string" as const, description: "Qué pidió cambiar el cliente, en una frase." },
+      },
+      required: [],
+    },
   },
   {
     name: "anualizar_cotizacion",
@@ -347,6 +377,90 @@ const MOTIVO_PE: Record<string, string> = {
   transferir_soporte_operativo: "otro",
 }
 
+
+type FormalPE = {
+  quoteId: string
+  numero: string
+  estado: string
+  empresa: string
+  contacto: string
+  email: string
+  ruc: string
+  escalon: number
+  telefono: string
+}
+
+/**
+ * Lee la cotización FORMAL sobre la que se negocia: la que pasó el modelo o,
+ * si no, la vigente del contacto (puntero). Devuelve los datos que la
+ * re-emisión necesita (empresa/contacto/email/RUC/escalón) leídos de Zoho —
+ * nunca de la memoria del modelo — y se niega si ya está Pagada.
+ */
+export async function leerFormalPE(contact: string, quoteId?: string): Promise<FormalPE | { error: string }> {
+  let qid = String(quoteId || "").trim()
+  if (!qid) {
+    try {
+      const { getQuotePointer } = await import("../../supabase-persistence-v3.ts")
+      const p = await getQuotePointer(contact)
+      qid = p?.quoteId || ""
+    } catch {
+      /* sin puntero */
+    }
+  }
+  if (!qid) return { error: "No hay una cotización formal vigente en esta conversación: emítela primero con generar_link_cotizadora." }
+  try {
+    const { fetchZoho } = await import("../../zoho-token.ts")
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const campos = "Name,Estado_Cotizacion,Email_Contacto,RUT_Cliente,Cuenta_Asociada,Contacto_Asociado,Escalon_Descuento,Tel_fono_Contacto"
+    const res = await fetchZoho(`${api}/crm/v8/${mod}/${qid}?fields=${campos}`)
+    if (res.status !== 200) return { error: `No pude leer la cotización ${qid} en el CRM (HTTP ${res.status}).` }
+    const data = (await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
+    const q = data.data?.[0]
+    if (!q) return { error: `La cotización ${qid} no existe en el CRM.` }
+    const estado = String(q.Estado_Cotizacion || "")
+    if (/pagad/i.test(estado)) return { error: "Esa cotización ya está PAGADA: no se modifica. Si el cliente quiere cambios, la ejecutiva los coordina (derivar_a_soporte)." }
+    const nombre = String(q.Name || "")
+    const empresaDeNombre = nombre.replace(/^Cotizaci[oó]n\s+/i, "").replace(/\s+-\s+\d{4}-\d{2}-\d{2}$/, "").trim()
+    const cuenta = (q.Cuenta_Asociada as { name?: string } | null)?.name || ""
+    const contactoZ = (q.Contacto_Asociado as { name?: string } | null)?.name || ""
+    const tel = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
+    if (tel && contact && !tel.endsWith(contact.slice(-9))) {
+      return { error: "Esa cotización no es de este contacto." }
+    }
+    const numero = (nombre.match(/COT-?\d+/i) || [])[0] || ""
+    return {
+      quoteId: qid,
+      numero,
+      estado,
+      empresa: empresaDeNombre || cuenta,
+      contacto: contactoZ,
+      email: String(q.Email_Contacto || ""),
+      ruc: String(q.RUT_Cliente || "").replace(/\D/g, ""),
+      escalon: Math.max(0, Math.min(2, Number(q.Escalon_Descuento || 0) || 0)),
+      telefono: tel,
+    }
+  } catch (e) {
+    return { error: `No pude leer la cotización en el CRM: ${e instanceof Error ? e.message : String(e)}` }
+  }
+}
+
+/** Best-effort: la formal reemplazada queda Expirada para que nadie pague la vieja. */
+async function expirarFormalPE(quoteId: string): Promise<void> {
+  try {
+    const { fetchZoho } = await import("../../zoho-token.ts")
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    await fetchZoho(`${api}/crm/v8/${mod}/${quoteId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: [{ id: quoteId, Estado_Cotizacion: "Expirada" }], trigger: ["blueprint"] }),
+    })
+  } catch (e) {
+    console.warn(`[pe-unificadas] no se pudo expirar ${quoteId}:`, e instanceof Error ? e.message : e)
+  }
+}
+
 type PrefPE = { userCount: number; hardware?: HardwareIn[]; puntosInstalacion?: PuntoIn[]; escalon: number }
 
 /**
@@ -374,6 +488,69 @@ export function buildDispatchPEUnificado(contact: string) {
       await setKvValue(kvKey, JSON.stringify(p))
     } catch {
       /* la memoria del estimado es best-effort */
+    }
+  }
+
+  /**
+   * PERÚ NO EDITA EN SITIO: el cotizador `actualizar-cotizacion` es chileno
+   * (motor UF). La paridad con Chile se logra RE-EMITIENDO: misma empresa,
+   * RUC, contacto y correo leídos de la formal vigente en Zoho; la config
+   * nueva (o la de la memoria del estimado) y el escalón que corresponde; la
+   * cotización anterior queda Expirada y el puntero pasa a la nueva (lo hace
+   * agent-loop con `result.quoteId`). El mensaje al cliente habla de
+   * "actualizada", nunca de "opciones": lo que el modelo tiene que copiar.
+   */
+  async function reemitirPE(a: { quoteId?: string; motivo: "cambio" | "descuento"; cfg?: CotizarIn }): Promise<unknown> {
+    const f = await leerFormalPE(contact, a.quoteId)
+    if ("error" in f) return { ok: false, error: f.error }
+    const pref = await leerPref()
+    const cfg: CotizarIn = {
+      userCount: Number(a.cfg?.userCount || pref?.userCount || 0),
+      hardware: a.cfg?.hardware ?? pref?.hardware,
+      puntosInstalacion: a.cfg?.puntosInstalacion ?? pref?.puntosInstalacion,
+    }
+    if (!cfg.userCount) {
+      return { ok: false, error: "No sé con qué dotación se emitió esa cotización: pásame userCount (y hardware/puntos si lleva reloj) en la llamada." }
+    }
+    const escalonFormal = Math.max(f.escalon, pref?.escalon || 0)
+    let escalon = escalonFormal
+    if (a.motivo === "descuento") {
+      if (escalonFormal >= 2) {
+        return { ok: true, quoteId: f.quoteId, topeAlcanzado: true, escalonDescuento: 2, mensajeParaProspecto: TOPE_PE }
+      }
+      escalon = escalonFormal + 1
+    }
+    if (!f.empresa || !f.ruc) {
+      return { ok: false, error: "La cotización vigente no trae razón social o RUC legibles en el CRM: pídeselos al cliente y emite con generar_link_cotizadora." }
+    }
+    const r = (await base("generar_link_cotizadora", {
+      empresa: f.empresa,
+      contacto: f.contacto || undefined,
+      email: f.email || undefined,
+      ruc: f.ruc,
+      ...aInputCotizarPE({ ...cfg, escalonDescuento: escalon }),
+    })) as Record<string, unknown>
+    if (!r?.ok) return r
+    await guardarPref({ userCount: cfg.userCount, hardware: cfg.hardware, puntosInstalacion: cfg.puntosInstalacion, escalon })
+    await expirarFormalPE(f.quoteId)
+    const link = String(r.acceptanceUrl || "")
+    const msgOriginal = String(r.mensajeParaProspecto || "")
+    // El texto de la tool base abre con "Listo!! Tu cotización formal quedó
+    // generada": acá el cliente pidió un CAMBIO o un DESCUENTO sobre una
+    // formal que ya conocía, así que la apertura dice eso — y el link nuevo
+    // reemplaza al anterior.
+    const cuerpo = msgOriginal.replace(/^Listo!!\s*Tu cotizaci[oó]n formal qued[oó] generada\s*🎉\s*/i, "")
+    const apertura =
+      a.motivo === "descuento"
+        ? `Listo!! Te apliqué el ${escalon === 1 ? "10" : "20"} % en el plan por 6 meses 🎉 (este link reemplaza al anterior)\n\n`
+        : "Listo!! Tu cotización quedó actualizada 🎉 (este link reemplaza al anterior)\n\n"
+    return {
+      ...r,
+      reemplazaQuoteId: f.quoteId,
+      escalonDescuento: escalon,
+      topeAlcanzado: escalon >= 2,
+      acceptanceUrl: link,
+      mensajeParaProspecto: apertura + cuerpo,
     }
   }
 
@@ -496,23 +673,37 @@ export function buildDispatchPEUnificado(contact: string) {
           "no hay ficha PDF del reloj",
           "Describe el reloj en texto: marcación facial, huella, tarjeta o clave; WiFi o cable de red; se conecta a la nube en minutos. Sin marcas ni modelos.",
         )
-      case "consultar_siguiente_descuento":
-      case "aplicar_siguiente_descuento": {
+      case "consultar_siguiente_descuento": {
+        const f = await leerFormalPE(contact, i.quote_id as string | undefined)
+        if ("error" in f) return { ok: false, error: f.error }
         const pref = await leerPref()
-        const actual = pref?.escalon || 0
+        const actual = Math.max(f.escalon, pref?.escalon || 0)
         if (actual >= 2) {
-          return { ok: true, topeAlcanzado: true, escalonDescuento: 2, mensajeParaProspecto: "El 20 % en el plan por 6 meses ya es el máximo — no tengo margen para más, y prefiero decírtelo con franqueza." }
+          return { ok: true, quoteId: f.quoteId, escalonActual: 2, topeAlcanzado: true, mensajeParaProspecto: TOPE_PE }
         }
-        return sinCapacidad(
-          "una cotización formal emitida no se edita en sitio",
-          `El escalón siguiente es ${actual + 1} (${actual + 1 === 1 ? "10" : "20"} % en el plan por 6 meses): re-emite con generar_link_cotizadora (misma empresa, mismo RUC, escalonDescuento=${actual + 1}) y entrega el link nuevo.`,
-        )
+        return {
+          ok: true,
+          quoteId: f.quoteId,
+          escalonActual: actual,
+          escalonSiguiente: actual + 1,
+          pct: actual + 1 === 1 ? 10 : 20,
+          meses: 6,
+          topeAlcanzado: false,
+          nota: "Si el cliente acepta, llama aplicar_siguiente_descuento (genera la cotización nueva con el descuento).",
+        }
       }
+      case "aplicar_siguiente_descuento":
+        return reemitirPE({ quoteId: i.quote_id as string | undefined, motivo: "descuento" })
       case "actualizar_cotizacion":
-        return sinCapacidad(
-          "una cotización formal emitida no se edita en sitio",
-          "Re-emite con generar_link_cotizadora con la configuración nueva (misma empresa y RUC) y entrega el link nuevo.",
-        )
+        return reemitirPE({
+          quoteId: i.quote_id as string | undefined,
+          motivo: "cambio",
+          cfg: {
+            userCount: i.userCount as number | undefined,
+            hardware: i.hardware as HardwareIn[] | undefined,
+            puntosInstalacion: i.puntosInstalacion as PuntoIn[] | undefined,
+          },
+        })
       case "anualizar_cotizacion":
         return sinCapacidad("todavía no existe el pago anual", "Ofrece la mensualidad; si el cliente insiste en pagar el año, deriva con derivar_a_soporte motivo fuera_de_scope para que la ejecutiva lo evalúe.")
       default:
