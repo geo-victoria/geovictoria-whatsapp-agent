@@ -116,3 +116,32 @@ test("actualizar_cotizacion y aplicar_siguiente_descuento ya no son stubs: expon
   assert.doesNotMatch(apl.description, /te lo (recuerda|indica)/i)
   assert.match(apl.description, /mensajeParaProspecto/)
 })
+
+test("agenda PE = las tools chilenas sobre el evento de Mónica (Lalo 21-sep)", async () => {
+  const porNombre = new Map(TOOL_SCHEMAS_PE_UNIFICADAS.map((t) => [t.name, t]))
+  const cons = porNombre.get("consultar_disponibilidad_horario")
+  const agen = porNombre.get("agendar_reunion")
+  const reag = porNombre.get("reagendar_reunion")
+  assert.ok(cons && agen && reag)
+  assert.deepEqual(cons!.input_schema.required, ["fechaPropuesta"])
+  assert.deepEqual(agen!.input_schema.required, ["slotIso", "prospectName", "prospectEmail"])
+  assert.deepEqual(reag!.input_schema.required, ["newSlotIso"])
+  // Ya no son stubs: nada de "NO tiene agenda".
+  for (const t of [cons!, agen!, reag!]) assert.doesNotMatch(t.description, /NO tiene agenda/i)
+  assert.match(cons!.description, /hora de Perú|America\/Lima/)
+  // El evento por defecto es el de Mónica; la env manda sobre el default.
+  const { eventoAgendaPE, EVENTO_AGENDA_PE_DEFAULT } = await import("../lib/paises/pe/tools-unificadas.ts")
+  assert.equal(EVENTO_AGENDA_PE_DEFAULT, "7084664")
+  const prev = process.env.CAL_EVENT_TYPE_ID_PE
+  process.env.CAL_EVENT_TYPE_ID_PE = "1234567"
+  try {
+    assert.equal(await eventoAgendaPE(), "1234567")
+  } finally {
+    if (prev === undefined) delete process.env.CAL_EVENT_TYPE_ID_PE
+    else process.env.CAL_EVENT_TYPE_ID_PE = prev
+  }
+  // La ficha ya no manda a derivar la reunión: la agenda.
+  const texto = textoNucleo(FICHA_PE, "")
+  assert.doesNotMatch(texto, /Perú NO tiene agenda en línea/)
+  assert.match(texto, /consultar_disponibilidad_horario/)
+})

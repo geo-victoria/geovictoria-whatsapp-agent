@@ -127,7 +127,9 @@ async function nucleoPEActivo(): Promise<boolean> {
 }
 /** Con el núcleo, la derivación del umbral nombra la tool ÚNICA (derivar_a_soporte). */
 function derivacionPEUnificada(d: ReturnType<typeof derivacionDePais>): ReturnType<typeof derivacionDePais> {
-  return { ...d, tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores" }
+  // agendaEnLinea: Perú agenda en Cal desde el 21-sep (evento de Mónica) — el
+  // guion 21+ ofrece reunión con consultar_disponibilidad_horario + agendar_reunion.
+  return { ...d, tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: true }
 }
 
 type ToolCallRecordPE = { name: string; ok: boolean; output?: unknown }

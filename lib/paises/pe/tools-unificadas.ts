@@ -19,9 +19,12 @@
  *     cotización (token) y edita con el perfil peruano (soles, PDF PE, escalera
  *     10 → 20 en el plan). Perú solo aporta los ítems de su motor (cotizarPE).
  *     Caso Lalo 21-sep: "en Chile eso no pasa, ¿por qué acá?" — ya no pasa.
- *   - responde HONESTO donde Perú no tiene la capacidad (agenda Cal, ficha
- *     PDF del reloj, certificación DT, anualidad): la tool existe, dice qué
- *     hacer en su lugar y JAMÁS simula el efecto.
+ *   - agenda = las MISMAS tools chilenas (consultar/agendar/reagendar) sobre
+ *     el evento de Cal de Mónica (7084664; Lalo 21-sep "igualemos a Chile"),
+ *     con zona America/Lima y confirmación en hora de Perú.
+ *   - responde HONESTO donde Perú no tiene la capacidad (certificación,
+ *     anualidad): la tool existe, dice qué hacer en su lugar y JAMÁS simula
+ *     el efecto.
  *
  * Así el prompt no necesita saber qué país tiene qué: el país es la FICHA y
  * el motor, no una copia de las tools. CO y MX pasarán por el mismo molde.
@@ -90,6 +93,41 @@ const ESCALON = {
   enum: [0, 1, 2],
   description:
     "Escalón de descuento del PLAN (1 = 10 %, 2 = 20 %, por 6 meses) SOLO como respuesta a una objeción de precio tras mostrar la lista. 0 u omitido = sin descuento. Nunca proactivo.",
+}
+
+const TZ_PE = "America/Lima"
+
+function fechaLegiblePE(slotIso: string): string {
+  return new Date(slotIso).toLocaleString("es-PE", {
+    timeZone: TZ_PE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+}
+
+/** Evento de Cal por defecto para Perú: Mónica Mendoza (Lalo 21-sep). */
+export const EVENTO_AGENDA_PE_DEFAULT = "7084664"
+
+/**
+ * Event type de Cal.com de la agenda peruana: vic_kv `cal_evento_pe` (cambio
+ * sin deploy cuando el host pase de Lalo a Mónica o cambie el evento) → env
+ * `CAL_EVENT_TYPE_ID_PE` → 7084664. Nunca vacío: sin esto la tool chilena
+ * caería al round-robin de Chile.
+ */
+export async function eventoAgendaPE(): Promise<string> {
+  try {
+    const { getKvValue } = await import("../../supabase-persistence-v3.ts")
+    const kv = String((await getKvValue("cal_evento_pe")) || "").trim()
+    if (/^\d{3,}$/.test(kv)) return kv
+  } catch {
+    /* kv caído → env/default */
+  }
+  const env = (process.env.CAL_EVENT_TYPE_ID_PE || "").trim()
+  return /^\d{3,}$/.test(env) ? env : EVENTO_AGENDA_PE_DEFAULT
 }
 
 /** Respuesta honesta de una capacidad que Perú no tiene (la tool existe, no simula). */
@@ -245,22 +283,51 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
       required: ["quote_id"],
     },
   },
-  // ── Capacidades que Perú NO tiene: la tool existe y responde honesta ──
+  // ── Agenda (Lalo 21-sep: "igualemos a Chile; agenda de Mónica =
+  // event type 7084664"): las MISMAS tools chilenas, con el evento peruano ──
   {
     name: "consultar_disponibilidad_horario",
-    description: "Perú NO tiene agenda en línea: esta tool te lo recuerda. Para una reunión usa derivar_a_soporte (motivo solicitud_explicita_persona) con el horario que propuso el cliente.",
-    input_schema: { type: "object" as const, properties: { fechaHoraPropuesta: { type: "string" as const } }, required: [] },
+    description:
+      "Verifica si una fecha y hora propuesta POR EL CLIENTE está disponible en la agenda de la ejecutiva comercial de Perú. Úsala cuando el cliente proponga un horario específico para una reunión (ej. 'el jueves a las 11'). Tú NUNCA propones horarios primero. Interpreta la propuesta en la hora de Perú (America/Lima, UTC-5) usando el HOY del inicio del prompt. Si hay un slot a menos de 15 min de la propuesta devuelve 'disponible_exacto' (pasa ese slotIso a agendar_reunion); si no, devuelve alternativas del mismo día o de días cercanos: preséntaselas en prosa natural y espera a que elija. Para nombrar cada opción usa la 'etiqueta'/'etiquetas' que devuelve la tool TAL CUAL — NUNCA calcules tú el día de la semana.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        fechaPropuesta: { type: "string" as const, description: "Fecha y hora propuesta por el cliente en ISO 8601 con zona (ej. '2026-09-25T15:00:00-05:00'), interpretada en hora de Perú." },
+      },
+      required: ["fechaPropuesta"],
+    },
   },
   {
     name: "agendar_reunion",
-    description: "Perú NO tiene agenda en línea: esta tool te lo recuerda. La reunión la coordina la ejecutiva — usa derivar_a_soporte (motivo solicitud_explicita_persona) con el horario propuesto.",
-    input_schema: { type: "object" as const, properties: { fechaHora: { type: "string" as const }, nombre: { type: "string" as const } }, required: [] },
+    description:
+      "Agenda la reunión con la ejecutiva comercial de Perú: crea la reunión en su calendario, registra el lead en el CRM (territorio Perú) y crea el evento. Llamar SOLO cuando el cliente confirmó explícitamente un horario (idealmente tras consultar_disponibilidad_horario con 'disponible_exacto', usando ese slotIso). Antes captura nombre completo, correo y empresa. Devuelve `mensajeParaProspecto` con la confirmación: cópialo tal cual.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        slotIso: { type: "string" as const, description: "Slot ISO 8601 confirmado por el cliente (el slotIso de consultar_disponibilidad_horario si hubo match exacto)." },
+        prospectName: { type: "string" as const },
+        prospectEmail: { type: "string" as const },
+        empresa: { type: "string" as const },
+        telefono: { type: "string" as const },
+        trabajadores: { type: "string" as const },
+        necesidad: { type: "string" as const },
+        cargo: { type: "string" as const },
+        invitadosExtra: { type: "array" as const, items: { type: "string" as const }, description: "Correos ADICIONALES del lado del cliente que deben recibir la invitación (solo los que dio explícitamente, máx 5)." },
+      },
+      required: ["slotIso", "prospectName", "prospectEmail"],
+    },
   },
   {
     name: "reagendar_reunion",
-    description: "Perú NO tiene agenda en línea: esta tool te lo recuerda. Usa derivar_a_soporte (motivo solicitud_explicita_persona) con el nuevo horario.",
-    input_schema: { type: "object" as const, properties: { nuevaFechaHora: { type: "string" as const } }, required: [] },
+    description:
+      "Reagenda la reunión que el cliente YA tiene a un nuevo horario confirmado, manteniendo a la misma ejecutiva. Úsala cuando un cliente con reunión existente pide cambiarla de día/hora; verifica antes con consultar_disponibilidad_horario. NO uses agendar_reunion para reagendar (crearía otra reunión). Ubica sola la reunión vigente del cliente.",
+    input_schema: {
+      type: "object" as const,
+      properties: { newSlotIso: { type: "string" as const, description: "Nuevo slot ISO 8601 confirmado por el cliente." } },
+      required: ["newSlotIso"],
+    },
   },
+  // ── Capacidades que Perú NO tiene: la tool existe y responde honesta ──
   {
     name: "enviar_certificacion",
     description: "En Perú NO existe un documento de certificación (SUNAFIL no certifica sistemas): esta tool te lo recuerda. Responde con el bloque legal, sin prometer papeles.",
@@ -603,13 +670,56 @@ export function buildDispatchPEUnificado(contact: string) {
         const { enviarCotizacionWhatsapp } = await import("../../tools/enviar-cotizacion-whatsapp.ts")
         return enviarCotizacionWhatsapp({ ...(i as object), _contact: contact } as never)
       }
-      case "consultar_disponibilidad_horario":
-      case "agendar_reunion":
-      case "reagendar_reunion":
-        return sinCapacidad(
-          "no hay agenda en línea: la reunión la coordina la ejecutiva comercial",
-          "Llama a derivar_a_soporte con motivo solicitud_explicita_persona poniendo en el contexto el día y hora que propuso el cliente, y dile que la ejecutiva le confirma el horario.",
-        )
+      // ── Agenda = las tools chilenas con el evento de Cal de Perú ──
+      // El agent-loop inyecta `eventTypeId` cuando el dueño del deal/lead
+      // tiene evento propio (Mónica y las SDR PE están en el mapa de
+      // eventos-seguimiento); si no viene, cae al evento de Mónica por
+      // defecto (kv `cal_evento_pe` → env CAL_EVENT_TYPE_ID_PE → 7084664).
+      // Jamás al round-robin chileno: un peruano no puede caer en la agenda
+      // de Chile.
+      case "consultar_disponibilidad_horario": {
+        const { consultarDisponibilidadHorario } = await import("../../tools/consultar-disponibilidad-horario.ts")
+        const iA = i as { fechaPropuesta?: string; eventTypeId?: string }
+        return consultarDisponibilidadHorario({
+          fechaPropuesta: String(iA.fechaPropuesta || ""),
+          country: "Perú",
+          eventTypeId: (iA.eventTypeId || "").trim() || (await eventoAgendaPE()),
+        })
+      }
+      case "agendar_reunion": {
+        const { agendarReunion } = await import("../../tools/agendar-reunion.ts")
+        const iA = i as { telefono?: string; eventTypeId?: string; prospectEmail?: string }
+        const r = await agendarReunion({
+          ...(i as object),
+          // Teléfono del canal si el modelo no lo pasó: sin él el Lead queda sin Phone.
+          telefono: (iA.telefono || "").trim() || contact,
+          country: "Perú",
+          eventTypeId: (iA.eventTypeId || "").trim() || (await eventoAgendaPE()),
+        } as never)
+        if (!r.ok) return r
+        const email = iA.prospectEmail || "tu correo"
+        return {
+          ...r,
+          // El agent-loop persiste la reunión con esta zona (recordatorios).
+          timezone: TZ_PE,
+          mensajeParaProspecto:
+            `Listo!! Tu reunión quedó agendada para el ${fechaLegiblePE(r.slotIso)} (hora de Perú)${r.atiende ? `, con ${r.atiende.nombre}` : ""} 🎉 ` +
+            `Te llegará la invitación con el link de la reunión a ${email}.` +
+            (r.atiende?.email ? ` Si necesitas algo antes, le escribes a 📧 ${r.atiende.email}${r.atiende.whatsapp ? ` o al 📱 ${r.atiende.whatsapp}` : ""}.` : "") +
+            ` Te puedo ayudar en algo más?`,
+        }
+      }
+      case "reagendar_reunion": {
+        const { reagendarReunion } = await import("../../tools/reagendar-reunion.ts")
+        const r = await reagendarReunion({ ...(i as object), country: "Perú", _contact: contact } as never)
+        if (!r.ok) return r
+        return {
+          ...r,
+          mensajeParaProspecto:
+            `Listo!! Tu reunión quedó reagendada para el ${fechaLegiblePE(r.slotIso)} (hora de Perú) 📅 ` +
+            `Te llegará la nueva invitación por correo. Te puedo ayudar en algo más?`,
+        }
+      }
       case "enviar_certificacion":
         return sinCapacidad(
           "no existe un documento de certificación (SUNAFIL no certifica sistemas)",

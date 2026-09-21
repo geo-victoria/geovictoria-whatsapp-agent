@@ -226,19 +226,23 @@ export function formatDirectivaSobreUmbral(
   // solo lo activa con recencia.
   // PERÚ usa el MISMO guion (Lalo 21-sep: "el flujo del levantamiento comercial
   // igual al de Chile"), con dos diferencias de país: el documento es el RUC y
-  // la reunión la coordina la ejecutiva (Perú no tiene agenda automática).
+  // quien atiende es la ejecutiva (con SU agenda de Cal desde el 21-sep).
   if (d.tool === "derivar_a_soporte" || d.pais === "pe") {
     // Sin agenda en línea (Perú; Colombia sin evento de Cal): la reunión la
     // coordina la persona del equipo — Vicky no agenda. Chile y los países con
     // agenda siguen el guion de Cal.
     const esPE = d.pais === "pe"
-    const sinAgenda = esPE || d.agendaEnLinea === false
+    // Perú tiene agenda en línea desde el 21-sep (evento de Mónica); sin la
+    // marca explícita sigue el camino "la coordina la ejecutiva".
+    const sinAgenda = d.agendaEnLinea === false || (esPE && d.agendaEnLinea !== true)
     const quien = esPE ? "nuestra ejecutiva comercial" : sinAgenda ? "un ejecutivo del equipo comercial" : "un ejecutivo"
     const pron = esPE ? "ella" : "él"
     const ejecArt = esPE ? "la ejecutiva" : "el ejecutivo"
     const paso3 = sinAgenda
       ? `"¿prefieres que te llame ${quien} o coordinamos una reunión con ${pron}?"`
-      : `"¿prefieres que un ejecutivo te llame a este teléfono o agendamos una reunión con él?"`
+      : esPE
+        ? `"¿prefieres que te llame ${quien} o agendamos una reunión con ${pron}?"`
+        : `"¿prefieres que un ejecutivo te llame a este teléfono o agendamos una reunión con él?"`
     // Con la tool ÚNICA (derivar_a_soporte) el documento viaja como rutEmpresa
     // en todos los países; solo la tool clásica de Perú usa `ruc`.
     const campoDoc = d.tool === "derivar_a_soporte" ? "rutEmpresa" : esPE ? "ruc" : "rutEmpresa"
@@ -277,9 +281,10 @@ export function formatUmbralParaPrompt(
   // tiene agenda automática. CO y MX conservan su guion del 08-ago.
   if (d.tool === "derivar_a_soporte" || d.pais === "pe") {
     const esPE = d.pais === "pe"
-    // Sin agenda en línea (Perú; Colombia sin evento de Cal): la reunión la
-    // coordina la persona del equipo. Chile sigue el guion de Cal.
-    const sinAgenda = esPE || d.agendaEnLinea === false
+    // Sin agenda en línea (Colombia sin evento de Cal; Perú si no llega la
+    // marca): la reunión la coordina la persona del equipo. Chile y Perú (con
+    // el evento de Mónica, 21-sep) siguen el guion de Cal.
+    const sinAgenda = d.agendaEnLinea === false || (esPE && d.agendaEnLinea !== true)
     const quien = esPE ? "nuestra ejecutiva comercial" : sinAgenda ? "un ejecutivo del equipo comercial" : "un ejecutivo"
     const pron = esPE ? "ella" : "él"
     const ejecArt = esPE ? "la ejecutiva" : "el ejecutivo"
@@ -288,13 +293,17 @@ export function formatUmbralParaPrompt(
     const motivoReunion = d.tool === "derivar_a_soporte" ? "solicitud_explicita_persona" : "pidio_persona"
     const paso3Pregunta = sinAgenda
       ? `"¿Prefieres que te llame ${quien}, o coordinamos una reunión con ${pron}?"`
-      : `"¿Prefieres que un ejecutivo te llame a este teléfono, o agendamos de una vez una reunión con él?"`
-    const paso4a = sinAgenda
+      : esPE
+        ? `"¿Prefieres que te llame ${quien}, o agendamos de una vez una reunión con ${pron}?"`
+        : `"¿Prefieres que un ejecutivo te llame a este teléfono, o agendamos de una vez una reunión con él?"`
+    const paso4a = sinAgenda || esPE
       ? `  4a. Si elige LLAMADA (o no quiere reunión): llama ${d.tool} motivo "${d.motivo}" AHORA con nombre, ${campoDoc} y trabajadores (email SOLO si ya lo dio), y copia su \`mensajeParaProspecto\` como despedida. NO inventes el nombre ni el teléfono de nadie del equipo: en ${paisNombre} el contacto lo hace ${ejecArt} comercial y tú no lo presentas con nombre.\n`
       : `  4a. Si elige LLAMADA (o no quiere reunión): llama ${d.tool} motivo "${d.motivo}" AHORA con nombre, rutEmpresa y trabajadores (email SOLO si ya lo dio). El caso se entrega como LEAD a la tómbola de ejecutivos comerciales, y la tool te devuelve \`ejecutivoAsignado\` (nombre, teléfono, correo) con una \`instruccionPresentacion\`: PRESÉNTALO en ese mismo mensaje ("te va a contactar {Nombre} — su teléfono es {teléfono} y su correo {correo}") y cierra preguntando si quiere que le dejes AGENDADA una reunión con él; si acepta, pide su correo y agenda con consultar_disponibilidad_horario + agendar_reunion. Si la tool NO trae ejecutivo (Zoho lento), despídete con el mensaje sugerido y JAMÁS inventes un nombre.\n`
     const paso4b = sinAgenda
       ? `  4b. Si elige REUNIÓN: pide su correo y en qué día y horario le acomoda, y llama ${d.tool} motivo "${motivoReunion}" con nombre, ${campoDoc}, email, trabajadores y esa preferencia escrita en el \`${d.tool === "derivar_a_soporte" ? "contexto" : "resumen"}\` — la reunión la coordina ${ejecArt} (en ${paisNombre} TÚ no agendas: prometer un horario que no controlas es una promesa vacía PROHIBIDA).\n`
-      : `  4b. Si elige REUNIÓN: pide su email (para la invitación), llama ${d.tool} motivo "${d.motivo}" con nombre, rutEmpresa, email y trabajadores, y LUEGO agenda: pregunta qué día le acomoda, ofrece horarios con consultar_disponibilidad_horario y agenda con agendar_reunion cuando elija — la disponibilidad corre sobre la agenda del ejecutivo dueño del trato (el que sorteó la tómbola).\n`
+      : esPE
+        ? `  4b. Si elige REUNIÓN: pide su email (para la invitación), llama ${d.tool} motivo "${d.motivo}" con nombre, ${campoDoc}, email y trabajadores, y LUEGO agenda: pregunta qué día le acomoda, verifica con consultar_disponibilidad_horario y agenda con agendar_reunion cuando elija — la disponibilidad corre sobre la agenda de ${ejecArt} comercial de ${paisNombre}, en hora de Perú. Nunca afirmes que quedó agendada sin que agendar_reunion haya devuelto ok:true.\n`
+        : `  4b. Si elige REUNIÓN: pide su email (para la invitación), llama ${d.tool} motivo "${d.motivo}" con nombre, rutEmpresa, email y trabajadores, y LUEGO agenda: pregunta qué día le acomoda, ofrece horarios con consultar_disponibilidad_horario y agenda con agendar_reunion cuando elija — la disponibilidad corre sobre la agenda del ejecutivo dueño del trato (el que sorteó la tómbola).\n`
     return (
       `UMBRAL DE PRECIOS DE ESTA CONVERSACIÓN — FLUJO 21+ (proceso 13-ago; esta regla GANA sobre cualquier mención de "1 a 50" más abajo):\n` +
       `- Esta conversación es ${origen.toUpperCase()}. Puedes DAR PRECIOS (estimados, referenciales, descuentos, cotización formal) SOLO hasta ${umbral} trabajadores.\n` +
