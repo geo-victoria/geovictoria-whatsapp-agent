@@ -43,7 +43,7 @@ export function paisConUmbral(contact: string): boolean {
 
 /** Cómo se deriva sobre el umbral en el país del contacto (tool + motivo +
  * documento tributario que NO se exige antes de derivar). */
-export type DerivacionPais = { tool: string; motivo: string; docId: string; agenda: string }
+export type DerivacionPais = { tool: string; motivo: string; docId: string; agenda: string; pais: "cl" | "co" | "mx" | "pe" }
 
 export function derivacionDePais(contact: string): DerivacionPais {
   const d = (contact || "").replace(/\D/g, "")
@@ -53,14 +53,17 @@ export function derivacionDePais(contact: string): DerivacionPais {
       motivo: "fuera_de_rango_trabajadores",
       docId: "RUT",
       agenda: "ofrece agendar una reunión con agendar_reunion",
+      pais: "cl",
     }
   }
-  const docId = d.startsWith("57") ? "NIT" : d.startsWith("52") ? "RFC" : "RUC"
+  const pais = d.startsWith("57") ? "co" : d.startsWith("52") ? "mx" : "pe"
+  const docId = pais === "co" ? "NIT" : pais === "mx" ? "RFC" : "RUC"
   return {
     tool: "derivar_a_ejecutivo",
     motivo: "mas_de_50",
     docId,
     agenda: "ofrece coordinar una reunión o llamada con el equipo",
+    pais,
   }
 }
 
@@ -213,11 +216,24 @@ export function formatDirectivaSobreUmbral(
   // de ejecutivo o reunión con el dueño del deal. El detalle vive en el
   // bloque del inicio del prompt (formatUmbralParaPrompt); esta directiva
   // solo lo activa con recencia.
-  if (d.tool === "derivar_a_soporte") {
+  // PERÚ usa el MISMO guion (Lalo 21-sep: "el flujo del levantamiento comercial
+  // igual al de Chile"), con dos diferencias de país: el documento es el RUC y
+  // la reunión la coordina la ejecutiva (Perú no tiene agenda automática).
+  if (d.tool === "derivar_a_soporte" || d.pais === "pe") {
+    const quien = d.pais === "pe" ? "nuestra ejecutiva comercial" : "un ejecutivo"
+    const paso3 =
+      d.pais === "pe"
+        ? `"¿prefieres que te llame nuestra ejecutiva comercial o coordinamos una reunión con ella?"`
+        : `"¿prefieres que un ejecutivo te llame a este teléfono o agendamos una reunión con él?"`
+    const campoDoc = d.pais === "pe" ? "ruc" : "rutEmpresa"
+    const cierre =
+      d.pais === "pe"
+        ? `(rama llamada: mensaje sugerido de la tool como despedida; rama reunión: pide el correo y deja su preferencia de día y hora en el \`resumen\` — la ejecutiva la coordina, tú NO agendas)`
+        : `(rama llamada: mensaje sugerido de la tool como despedida; rama reunión: sigue con email y agenda)`
     return (
       `\n\nATENCIÓN (detección automática): este cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). Desde este turno rige el FLUJO 21+ del inicio del prompt: NO sigas el flujo de cotización (nada de marcaje, puntos ni módulos) y NO des ni prometas precios.\n` +
-      `- Si AÚN no has derivado: avanza por el guion 21+ UN PASO POR TURNO, conversacional — (1) pide el RUT de la empresa, (2) pregunta consultiva de operación, (3) parafraseo + "¿prefieres que un ejecutivo te llame a este teléfono o agendamos una reunión con él?", (4) deriva con ${d.tool} motivo "${d.motivo}" pasando nombre, rutEmpresa y trabajadores (email SOLO si eligió reunión o ya lo dio). Los datos que el cliente YA entregó se usan tal cual, sin pedir confirmación. Tras llamar la tool responde SIEMPRE al cliente en ese mismo turno (rama llamada: mensaje sugerido de la tool como despedida; rama reunión: sigue con email y agenda) — JAMÁS dejes la respuesta vacía.\n` +
-      `- Si la derivación ya venía de un turno ANTERIOR (el anuncio del ejecutivo ya está en el historial): NO vuelvas a llamar ${d.tool} ni repitas el anuncio — responde REACTIVO y agenda si el cliente lo pide.\n`
+      `- Si AÚN no has derivado: avanza por el guion 21+ UN PASO POR TURNO, conversacional — (1) pide el ${d.docId} de la empresa, (2) pregunta consultiva de operación, (3) parafraseo + ${paso3}, (4) deriva con ${d.tool} motivo "${d.motivo}" pasando nombre, ${campoDoc} y trabajadores (email SOLO si eligió reunión o ya lo dio). Los datos que el cliente YA entregó se usan tal cual, sin pedir confirmación. Tras llamar la tool responde SIEMPRE al cliente en ese mismo turno ${cierre} — JAMÁS dejes la respuesta vacía.\n` +
+      `- Si la derivación ya venía de un turno ANTERIOR (el anuncio de ${quien} ya está en el historial): NO vuelvas a llamar ${d.tool} ni repitas el anuncio — responde REACTIVO y agenda si el cliente lo pide.\n`
     )
   }
   return (
@@ -241,18 +257,33 @@ export function formatUmbralParaPrompt(
   // CHILE — FLUJO 21+ (orden de Lalo 13-ago, supersede el guion del 08-ago):
   // consultivo, con RUT, y cierre en llamada de ejecutivo o reunión agendada
   // sobre la agenda del dueño del deal que sorteó la tómbola.
-  if (d.tool === "derivar_a_soporte") {
+  // PERÚ entra al MISMO flujo (Lalo 21-sep): lo único que cambia son el
+  // documento (RUC) y que la reunión la coordina la ejecutiva, porque Perú no
+  // tiene agenda automática. CO y MX conservan su guion del 08-ago.
+  if (d.tool === "derivar_a_soporte" || d.pais === "pe") {
+    const esPE = d.pais === "pe"
+    const quien = esPE ? "nuestra ejecutiva comercial" : "un ejecutivo"
+    const campoDoc = esPE ? "ruc" : "rutEmpresa"
+    const paso3Pregunta = esPE
+      ? `"¿Prefieres que te llame nuestra ejecutiva comercial, o coordinamos una reunión con ella?"`
+      : `"¿Prefieres que un ejecutivo te llame a este teléfono, o agendamos de una vez una reunión con él?"`
+    const paso4a = esPE
+      ? `  4a. Si elige LLAMADA (o no quiere reunión): llama ${d.tool} motivo "${d.motivo}" AHORA con nombre, ${campoDoc} y trabajadores (email SOLO si ya lo dio), y copia su \`mensajeParaProspecto\` como despedida. NO inventes el nombre ni el teléfono de nadie del equipo: en Perú el contacto lo hace la ejecutiva comercial y tú no la presentas con nombre.\n`
+      : `  4a. Si elige LLAMADA (o no quiere reunión): llama ${d.tool} motivo "${d.motivo}" AHORA con nombre, rutEmpresa y trabajadores (email SOLO si ya lo dio). El caso se entrega como LEAD a la tómbola de ejecutivos comerciales, y la tool te devuelve \`ejecutivoAsignado\` (nombre, teléfono, correo) con una \`instruccionPresentacion\`: PRESÉNTALO en ese mismo mensaje ("te va a contactar {Nombre} — su teléfono es {teléfono} y su correo {correo}") y cierra preguntando si quiere que le dejes AGENDADA una reunión con él; si acepta, pide su correo y agenda con consultar_disponibilidad_horario + agendar_reunion. Si la tool NO trae ejecutivo (Zoho lento), despídete con el mensaje sugerido y JAMÁS inventes un nombre.\n`
+    const paso4b = esPE
+      ? `  4b. Si elige REUNIÓN: pide su correo y en qué día y horario le acomoda, y llama ${d.tool} motivo "pidio_persona" con nombre, ${campoDoc}, email, trabajadores y esa preferencia escrita en el \`resumen\` — la reunión la coordina la ejecutiva (en Perú TÚ no agendas: prometer un horario que no controlas es una promesa vacía PROHIBIDA).\n`
+      : `  4b. Si elige REUNIÓN: pide su email (para la invitación), llama ${d.tool} motivo "${d.motivo}" con nombre, rutEmpresa, email y trabajadores, y LUEGO agenda: pregunta qué día le acomoda, ofrece horarios con consultar_disponibilidad_horario y agenda con agendar_reunion cuando elija — la disponibilidad corre sobre la agenda del ejecutivo dueño del trato (el que sorteó la tómbola).\n`
     return (
       `UMBRAL DE PRECIOS DE ESTA CONVERSACIÓN — FLUJO 21+ (proceso 13-ago; esta regla GANA sobre cualquier mención de "1 a 50" más abajo):\n` +
       `- Esta conversación es ${origen.toUpperCase()}. Puedes DAR PRECIOS (estimados, referenciales, descuentos, cotización formal) SOLO hasta ${umbral} trabajadores.\n` +
       `- El INICIO no cambia respecto al flujo normal: saludo, nombre y dotación igual que siempre ("Hola {Nombre}! Mucho gusto!").\n` +
       `- APENAS sepas que son MÁS de ${umbral} trabajadores: DETÉN el flujo de cotización en ese mismo turno — NO preguntes cómo marcan, ni puntos, ni módulos, NO prometas "armarte el valor" y NO des precios de memoria. Desde ahí el flujo es ESTE, en orden y UN PASO POR TURNO:\n` +
-      `  1. RUT: pide el RUT de la empresa ("Para dejar lista la ficha de tu empresa, ¿me compartes su RUT?"). Si no lo sabe o no quiere darlo, no insistas — el RUT no es un muro, sigue al paso 2.\n` +
+      `  1. ${d.docId}: pide el ${d.docId} de la empresa ("Para dejar lista la ficha de tu empresa, ¿me compartes su ${d.docId}?"). Si no lo sabe o no quiere darlo, no insistas — el ${d.docId} no es un muro, sigue al paso 2.\n` +
       `  2. OPERACIÓN: haz la MISMA pregunta consultiva del flujo normal: "Para darte la mejor solución, cuéntame un poco de tu operación: a qué se dedican y cómo trabaja tu equipo, por ejemplo si todos están en un mismo lugar o bien si algunos están en terreno".\n` +
-      `  3. PARAFRASEO + CIERRE: en un solo mensaje, parafrasea su operación con tus palabras, conecta cómo GeoVictoria se adapta a lo que describió y menciona que trabajamos con muchas empresas como la suya (JAMÁS inventes nombres de clientes ni casos específicos). Y en ese MISMO mensaje pregunta: "¿Prefieres que un ejecutivo te llame a este teléfono, o agendamos de una vez una reunión con él?".\n` +
-      `  4a. Si elige LLAMADA (o no quiere reunión): llama ${d.tool} motivo "${d.motivo}" AHORA con nombre, rutEmpresa y trabajadores (email SOLO si ya lo dio). El caso se entrega como LEAD a la tómbola de ejecutivos comerciales, y la tool te devuelve \`ejecutivoAsignado\` (nombre, teléfono, correo) con una \`instruccionPresentacion\`: PRESÉNTALO en ese mismo mensaje ("te va a contactar {Nombre} — su teléfono es {teléfono} y su correo {correo}") y cierra preguntando si quiere que le dejes AGENDADA una reunión con él; si acepta, pide su correo y agenda con consultar_disponibilidad_horario + agendar_reunion. Si la tool NO trae ejecutivo (Zoho lento), despídete con el mensaje sugerido y JAMÁS inventes un nombre.\n` +
-      `  4b. Si elige REUNIÓN: pide su email (para la invitación), llama ${d.tool} motivo "${d.motivo}" con nombre, rutEmpresa, email y trabajadores, y LUEGO agenda: pregunta qué día le acomoda, ofrece horarios con consultar_disponibilidad_horario y agenda con agendar_reunion cuando elija — la disponibilidad corre sobre la agenda del ejecutivo dueño del trato (el que sorteó la tómbola).\n` +
-      `- Los datos que el cliente YA entregó se usan tal cual, sin pedirle confirmación. Después de derivar NO haces seguimiento proactivo (la venta es del ejecutivo): respondes REACTIVO cualquier duda y puedes agendar si el cliente lo pide después.\n` +
+      `  3. PARAFRASEO + CIERRE: en un solo mensaje, parafrasea su operación con tus palabras, conecta cómo GeoVictoria se adapta a lo que describió y menciona que trabajamos con muchas empresas como la suya (JAMÁS inventes nombres de clientes ni casos específicos). Y en ese MISMO mensaje pregunta: ${paso3Pregunta}.\n` +
+      paso4a +
+      paso4b +
+      `- Los datos que el cliente YA entregó se usan tal cual, sin pedirle confirmación. Después de derivar NO haces seguimiento proactivo (la venta es de ${quien}): respondes REACTIVO cualquier duda${esPE ? " y, si pide reunión, la coordina la ejecutiva" : " y puedes agendar si el cliente lo pide después"}.\n` +
       `- El flujo de 1 a ${umbral} trabajadores NO cambia en NADA con esta regla.\n\n`
     )
   }

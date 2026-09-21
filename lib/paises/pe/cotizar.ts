@@ -190,12 +190,19 @@ export function cotizarPE(input: CotizacionPEInput): {
     recurrente: true,
   })
 
+  // ENVÍO SEGÚN ZONA REAL (21-sep, caso de prueba con el reloj en Piura): el
+  // texto decía "envío sin costo en Lima Metropolitana" en TODA cotización,
+  // así que a un cliente de provincia le llegaba junto a la nota que dice que
+  // el envío lo asume él — contradicción en el mismo mensaje.
+  const hayProvincia = puntos.some((p) => p.zona === "provincias")
+  const envioIncluidoTxt = hayProvincia ? "" : " (envío incluido)"
+
   let arriendoNeto = 0
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
     arriendoNeto = TARIFAS_PE.relojArriendoMes * reloj.cantidad
     lineas.push({
       concepto: "Arriendo de reloj de control",
-      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes (envío sin costo en Lima Metropolitana)`,
+      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes${envioIncluidoTxt}`,
       neto: arriendoNeto,
       igv: arriendoNeto * IGV_PE,
       recurrente: true,
@@ -293,35 +300,121 @@ export function cotizarPE(input: CotizacionPEInput): {
 
   // ── Mensaje canónico (peruano neutro, PEN) ──
   const filas: string[] = []
-  filas.push("Te comparto el detalle de tu cotización referencial (precios en soles):")
-  filas.push("")
-  filas.push("Mensualidad del servicio:")
-  filas.push(
+  // FORMA DEL BLOQUE DE PRECIO = LA DE CHILE (Lalo 21-sep: "la forma de mostrar
+  // los precios es distinta en Chile"). Tres reglas que allá son duras:
+  //   · la línea que hace la ARITMÉTICA del impuesto no va (Eduardo 14-ago):
+  //     se muestra el total CON IGV, no "neto + IGV (18%) = total";
+  //   · el subtotal sin impuesto aparece SOLO con dos o más líneas (con una
+  //     sola repite el mismo número);
+  //   · SIN PAGOS ÚNICOS NO SE HABLA DE "PAGO INICIAL": si todo es recurrente,
+  //     el primer mes ES la mensualidad y repetirla hace parecer un cobro
+  //     extra. El pago inicial solo aparece cuando hay compra de reloj.
+  const lineasRec: string[] = [
     `- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearPEN(plan)}/mes`,
-  )
+  ]
   if (arriendoNeto > 0) {
-    filas.push(
-      `- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes (envío sin costo en Lima Metropolitana)`,
-    )
+    lineasRec.push(`- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes${envioIncluidoTxt}`)
   }
-  filas.push(
-    `Total mensual: ${formatearPEN(mensualNeto)} + IGV (18%) = ${formatearPEN(mensualTotal)}/mes`,
-  )
+  filas.push("Resumen mensual recurrente:")
+  filas.push("")
+  filas.push(lineasRec.join("\n"))
+  filas.push("")
+  if (lineasRec.length >= 2) filas.push(`Subtotal sin IGV: ${formatearPEN(mensualNeto)}`)
+  filas.push(`Total mensual con IGV: ${formatearPEN(mensualTotal)}`)
   if (conDescuento) {
     filas.push(
       `Con el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses: ${formatearPEN(mensualTotalConDescuento)}/mes (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualTotal)}/mes)`,
     )
   }
-  filas.push("")
-  filas.push("Pago inicial (al aceptar):")
-  if (ventaNeto > 0) filas.push(`- Reloj de control (compra): ${formatearPEN(ventaNeto)}`)
-  filas.push(`- Primer mes del plan por adelantado: ${formatearPEN(primerMesNeto)}`)
-  filas.push(
-    `Total pago inicial: ${formatearPEN(pagoInicialNeto)} + IGV (18%) = ${formatearPEN(pagoInicialTotal)}`,
-  )
-  for (const nota of notasEjecutivo) {
+
+  if (ventaNeto > 0) {
+    const ventaTotal = ventaNeto * (1 + IGV_PE)
     filas.push("")
-    filas.push(`Nota: ${nota}`)
+    filas.push("Pago único:")
+    filas.push("")
+    filas.push(`- Reloj de control (compra): ${formatearPEN(ventaNeto)}`)
+    filas.push("")
+    filas.push(`Total único con IGV: ${formatearPEN(ventaTotal)}`)
+    // Burbuja propia para el pago inicial (patrón chileno): el desglose
+    // primero, lo que paga al aceptar como mensaje aparte.
+    filas.push("")
+    filas.push("[---]")
+    filas.push("")
+    filas.push(
+      `Al aceptar pagas el pago inicial de ${formatearPEN(pagoInicialTotal)}: incluye el reloj + el primer mes del plan por adelantado.`,
+    )
+  }
+
+  // Las notas (envío a provincia, instalación con visita técnica) van en su
+  // propia burbuja, no pegadas al desglose.
+  if (notasEjecutivo.length > 0) {
+    filas.push("")
+    filas.push("[---]")
+    for (const nota of notasEjecutivo) {
+      filas.push("")
+      filas.push(`Nota: ${nota}`)
+    }
+  }
+
+  // ── DOBLE VALOR: con reloj y solo con app (Lalo 21-sep: "lo de mostrar la
+  // opción con app y luego la opción con reloj") ─────────────────────────────
+  // Réplica de la regla chilena (Rodrigo 10-ago, formato compacto de Eduardo
+  // 17-ago): CUALQUIER configuración con reloj muestra las DOS opciones en el
+  // mismo turno, determinista desde la tool — el modelo no arma comparaciones
+  // ni llama dos veces. La app va SIEMPRE incluida: lo que se paga es el
+  // equipo. Si el reloj va en COMPRA el mensual es el MISMO en las dos
+  // opciones, y entonces el encabezado no puede decir "más económica": lo que
+  // cambia es que la app sola no tiene pago inicial (cicatriz CL 03-sep).
+  let mensaje = filas.join("\n")
+  if (reloj && reloj.cantidad > 0) {
+    const planSoloNeto = conDescuento ? planConDescuento : plan
+    const planSoloTotal = planSoloNeto * (1 + IGV_PE)
+    const mensualElegido = conDescuento ? mensualTotalConDescuento : mensualTotal
+    const modalidadLabel = reloj.modalidad === "arriendo" ? "Reloj en arriendo" : "Reloj en compra"
+    const personas = `${userCount} persona${userCount === 1 ? "" : "s"}`
+    const ahorraMensual = planSoloTotal < mensualElegido - 0.01
+    const ahorraEntrada = ventaNeto > 0
+
+    const op1: string[] = [
+      `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
+      `💰 ${formatearPEN(mensualElegido)} al mes, IGV incluido.`,
+      ``,
+      `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.`,
+    ]
+    if (conDescuento) {
+      op1.push(
+        `Incluye el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualTotal)}/mes).`,
+      )
+    }
+    if (ventaNeto > 0) {
+      op1.push(`Se suma un pago inicial único de ${formatearPEN(pagoInicialTotal)} (incluye el reloj y el primer mes del plan).`)
+    }
+    const encabezado2 = ahorraMensual
+      ? `2.- Una alternativa más económica sería si marcan solo mediante nuestra app:`
+      : ahorraEntrada
+        ? `2.- Si prefieres partir sin desembolso inicial, marcando solo con nuestra app (misma mensualidad, sin el pago único):`
+        : `2.- También puedes partir marcando solo con nuestra app:`
+    const partes = [
+      ...op1,
+      "",
+      "[---]",
+      "",
+      encabezado2,
+      `💰 ${formatearPEN(planSoloTotal)} al mes, IGV incluido.`,
+    ]
+    // Las notas (envío a provincia, instalación con visita técnica) siguen
+    // yendo en su propia burbuja, después de las dos opciones.
+    for (const nota of notasEjecutivo) {
+      partes.push("")
+      partes.push("[---]")
+      partes.push("")
+      partes.push(`Nota: ${nota}`)
+    }
+    partes.push("")
+    partes.push("[---]")
+    partes.push("")
+    partes.push("Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato.")
+    mensaje = partes.join("\n")
   }
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-pe) ──
@@ -394,6 +487,6 @@ export function cotizarPE(input: CotizacionPEInput): {
     pagoInicialIgv,
     pagoInicialTotal,
     avisoSsttPeru,
-    mensajeParaProspecto: filas.join("\n"),
+    mensajeParaProspecto: mensaje,
   }
 }
