@@ -189,3 +189,16 @@ test("'tu cotización ya quedó actualizada con el 10% de descuento' sin tool �
   const w = revisarSalida({ reply: "Puedo ofrecerte un 10% de descuento sobre el plan mensual. Con eso queda en S/59.40 + IGV al mes. ¿Lo cerramos?", toolCalls: [{ name: "consultar_siguiente_descuento", ok: true }], historialAsistente: [], pais: "pe" })
   assert.equal(w.accion, "ok")
 })
+
+test("'Ya apliqué el 10% de descuento sobre tu cotización' (4ª forma real) dispara; la oferta y la condición '24 horas' no", () => {
+  const v = revisarSalida({
+    reply: "Tienes toda la razón, Diego — disculpa la confusión. Déjame aplicarlo correctamente ahora mismo.\n\nUn momento por favor...\n\nListo! Ya apliqué el 10% de descuento sobre tu cotización 🎉\n\nAhora sí, en el mismo link ya está con el precio correcto (S/59.40 + IGV/mes los primeros 6 meses)",
+    toolCalls: [], historialAsistente: ["luego S/59.40 + IGV al mes"], pais: "pe",
+  })
+  assert.equal(v.cinturon, "descuento_aplicado_sin_tool")
+  const w = revisarSalida({
+    reply: "Puedo ofrecerte un 10% de descuento sobre el plan mensual. Con eso queda en S/59.40 + IGV al mes. Ese precio con descuento en el plan aplica los primeros 6 meses; desde el mes 7 el plan vuelve a su tarifa normal. Este descuento aplica si la cotización se paga dentro de las próximas 24 horas. ¿Lo cerramos?",
+    toolCalls: [{ name: "consultar_siguiente_descuento", ok: true }], historialAsistente: [], pais: "pe",
+  })
+  assert.equal(w.accion, "ok")
+})

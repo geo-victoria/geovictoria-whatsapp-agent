@@ -111,8 +111,10 @@ const CONTENCION_ACTUALIZADA: Record<PaisCinturon, string> = {
  * aplicar_siguiente_descuento (o emitiendo con escalón); anunciarlo sin eso es
  * prometer un precio que la página no muestra.
  */
+// OJO (4ª vez): `\b` de JS no reconoce la tilde — `apliqu[eé]\b` JAMÁS matchea
+// "apliqué". Por eso el cierre de la palabra va con lookahead, no con \b.
 export const ANUNCIA_DESCUENTO_APLICADO_RE =
-  /\b(ya\s+)?(tiene|qued[oó]|est[aá]|va|sali[oó]|se\s+fue)\s+(ya\s+)?(actualizada\s+)?(con\s+)?(el|un|tu|ese|este)\s+(\d{1,2}\s*%(\s+de\s+descuento)?|descuento)(\s+sobre\s+el\s+plan)?\s*(ya\s+)?(aplicad|incluid|list[oa]\b|actualizad)?|(ya\s+)?est[aá]\s+con\s+(ese|el|tu)\s+(\d{1,2}\s*%|descuento)|te\s+apliqu[eé]\s+(el|un)\s+\d{1,2}\s*%|descuento\s+(ya\s+)?(qued[oó]\s+)?aplicad[oa]|(ya\s+)?(le\s+)?apliqu[eé]\s+(el|tu)\s+descuento/i
+  /\b(apliqu[eé]|aplicad[oa]s?|aplicamos)(?![a-záéíóú])[^.\n!]{0,60}\b(\d{1,2}\s*%|descuento|dcto)|\b(\d{1,2}\s*%|descuento)\b[^.\n!]{0,40}\b(aplicad[oa]s?|ya\s+(qued[oó]|est[aá]|tiene|va))|\b(ya\s+)?(tiene|qued[oó]|est[aá]|va|sali[oó])\s+(ya\s+)?(actualizada\s+)?(con\s+)?(el|un|tu|ese|este)\s+(\d{1,2}\s*%|descuento)|est[aá]\s+con\s+(ese|el|tu)\s+(\d{1,2}\s*%|descuento)/i
 
 const TOOLS_QUE_APLICAN_DESCUENTO = new Set(["aplicar_siguiente_descuento", "generar_link_cotizadora", "actualizar_cotizacion"])
 
