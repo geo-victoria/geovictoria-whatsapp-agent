@@ -50,6 +50,22 @@ async function promptDe(pais: PaisPrompt): Promise<string> {
 
 export async function GET(req: Request) {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  // TEXTO RENDERIZADO (21-sep, partición del prompt en núcleo + ficha): la
+  // prueba de identidad de Chile compara el núcleo armado contra el prompt
+  // REAL de producción, carácter por carácter. Este modo entrega esa verdad
+  // (base = SYSTEM_PROMPT_V3 con el catálogo ya interpolado; catalogo = el
+  // bloque generado; base20 = con el umbral 20 aplicado) para congelarla
+  // como fixture del test. Solo lectura, solo admin.
+  if (new URL(req.url).searchParams.get("texto") === "1") {
+    const mod = await import("@/app/api/vic-sales-agent-v3/prompt")
+    return NextResponse.json({
+      ok: true,
+      pais: "cl",
+      base: mod.SYSTEM_PROMPT_V3,
+      catalogo: mod.formatCatalogoParaPrompt(),
+      base20: mod.getSystemPromptV3("56900000000", 20),
+    })
+  }
   const url = new URL(req.url)
   const avisar = url.searchParams.get("avisar") === "1"
 

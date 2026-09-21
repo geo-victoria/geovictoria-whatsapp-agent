@@ -27,7 +27,7 @@ function formatTiersForPrompt(tiers: TierPrecio[]): string {
     .join(" · ")
 }
 
-function formatCatalogoParaPrompt(): string {
+export function formatCatalogoParaPrompt(): string {
   const modulos = getModulosDisponiblesParaVicky()
   const hardware = getHardwareDisponiblesParaVicky()
 
