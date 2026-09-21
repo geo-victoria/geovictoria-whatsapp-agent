@@ -154,7 +154,9 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
         puntosInstalacion: PUNTOS_PE,
         escalonDescuento: ESCALON,
       },
-      required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount"],
+      // Mismo contrato que Chile (Lalo 03-ago / 21-sep): el correo es OPCIONAL —
+      // con RUC + razón social basta para emitir; sin correo la entrega va por el chat.
+      required: ["empresa", "contacto", "rutEmpresa", "userCount"],
     },
   },
   schemaPE("consultar_agente_soporte"),

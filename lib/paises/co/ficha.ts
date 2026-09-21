@@ -77,9 +77,9 @@ export const FICHA_CO: FichaPrompt = {
   datosCierre: "NIT + razón social + email",
   cierreConFormulario:
     'petición de NIT + razón social + email en dos mensajes). Al cierre normalmente te faltarán el NIT y la razón social (el email ya vino en el formulario: confírmalo en una línea al usarlo, ej. "te la envío a maria@xyz.co, ¿ok?").',
-  peticionNombraAmbos: "(Y la petición nombra SIEMPRE los tres — NIT, razón social y email —",
-  gatilloEmision: "el cliente entregó el NIT, la razón social y el correo tras ver el precio → generas en ese turno.",
-  datosMinimos: "YA tienes los datos mínimos (contacto, NIT, razón social y correo — la ciudad NO es requisito)",
+  peticionNombraAmbos: "(Y la petición nombra SIEMPRE los tres — NIT, razón social y email — aunque el correo no sea imprescindible,",
+  gatilloEmision: "el cliente entregó el NIT y la razón social tras ver el precio → generas en ese turno, tenga correo o no.",
+  datosMinimos: "YA tienes los datos mínimos (contacto, NIT y razón social — el email y la ciudad NO son requisito)",
   equipoNombre: "equipo biométrico",
   equipoNombreCap: "Equipo biométrico",
   bloques: {

@@ -157,7 +157,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
       properties: {
         empresa: { type: "string" as const, description: "Razón social." },
         contacto: { type: "string" as const, description: "Nombre completo de la persona de contacto." },
-        contactoEmail: { type: "string" as const, description: "Correo del contacto (obligatorio)." },
+        contactoEmail: { type: "string" as const, description: "Correo del contacto (opcional: sin correo la entrega va por este chat)." },
         contactoTelefono: { type: "string" as const, description: "Se completa solo con el WhatsApp del cliente; no lo pidas." },
         rutEmpresa: { type: "string" as const, description: "NIT con dígito de verificación." },
         userCount: { type: "number" as const, minimum: 1, maximum: 50 },
@@ -165,7 +165,8 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
         hardware: HARDWARE_CO,
         puntosInstalacion: PUNTOS_CO,
       },
-      required: ["empresa", "contacto", "contactoEmail", "rutEmpresa", "userCount"],
+      // Mismo contrato que Chile (Lalo 03-ago / 21-sep): el correo es OPCIONAL.
+      required: ["empresa", "contacto", "rutEmpresa", "userCount"],
     },
   },
   SOPORTE_SCHEMA,

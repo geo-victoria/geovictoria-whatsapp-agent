@@ -193,7 +193,7 @@ export const TOOL_SCHEMAS_CO = [
           },
         },
       },
-      required: ["empresa", "contacto", "nit", "email", "userCount"],
+      required: ["empresa", "contacto", "nit", "userCount"],
     },
   },
   {
@@ -369,8 +369,9 @@ export function buildDispatchCO(contact: string) {
             error: `El NIT '${i.nit || ""}' no es válido (el dígito de verificación no cuadra). Pídele al cliente confirmar el NIT completo (ej. 900.123.456-7) y vuelve a llamar la tool.`,
           }
         }
-        if (!i.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
-          return { ok: false, error: `El correo '${i.email || ""}' no tiene formato válido. Pídelo de nuevo.` }
+        // Correo OPCIONAL (contrato chileno del 03-ago): solo se valida si vino.
+        if (i.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
+          return { ok: false, error: `El correo '${i.email}' no tiene formato válido. Pídelo de nuevo o emite sin correo.` }
         }
         // Misma clasificación de puntos que la referencial (venta exige puntos).
         let puntos: PuntoInstalacionCO[] = []

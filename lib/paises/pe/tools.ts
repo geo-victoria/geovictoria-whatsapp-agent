@@ -218,13 +218,13 @@ export const TOOL_SCHEMAS_PE = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles, montos netos + IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, email, RUC válido (11 dígitos) y la configuración (userCount; reloj y puntos si lleva). `escalonDescuento` = el mismo escalón (1 o 2) que el cliente ACEPTÓ en cotizar_referencial — la cotización nace con ese % en el plan por 6 meses y el pago inicial ya lo refleja. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles, montos netos + IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, RUC válido (11 dígitos) y la configuración; el email es OPCIONAL (sin correo la entrega va por este chat y el formulario de facturación lo pide al aceptar) (userCount; reloj y puntos si lleva). `escalonDescuento` = el mismo escalón (1 o 2) que el cliente ACEPTÓ en cotizar_referencial — la cotización nace con ese % en el plan por 6 meses y el pago inicial ya lo refleja. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
         empresa: { type: "string" as const, description: "Razón social o nombre de la empresa." },
         contacto: { type: "string" as const, description: "Nombre completo de la persona de contacto." },
-        email: { type: "string" as const, description: "Email del contacto (ahí llega la cotización)." },
+        email: { type: "string" as const, description: "Email del contacto, si lo dio (ahí llega también la cotización)." },
         ruc: { type: "string" as const, description: "RUC de la empresa (11 dígitos)." },
         userCount: { type: "number" as const, minimum: 1, maximum: 50 },
         reloj: {
@@ -253,7 +253,7 @@ export const TOOL_SCHEMAS_PE = [
           description: "Escalón de descuento del plan que el cliente ACEPTÓ (1 = 10%, 2 = 20%, por 6 meses). 0 u omitido = sin descuento.",
         },
       },
-      required: ["empresa", "contacto", "email", "ruc", "userCount"],
+      required: ["empresa", "contacto", "ruc", "userCount"],
     },
   },
   {
@@ -437,8 +437,9 @@ export function buildDispatchPE(contact: string) {
             error: `El RUC '${i.ruc || ""}' no es válido (11 dígitos con dígito verificador SUNAT). Pídele al cliente confirmarlo y vuelve a llamar la tool.`,
           }
         }
-        if (!i.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
-          return { ok: false, error: `El correo '${i.email || ""}' no tiene formato válido. Pídelo de nuevo.` }
+        // Correo OPCIONAL (contrato chileno del 03-ago): solo se valida si vino.
+        if (i.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
+          return { ok: false, error: `El correo '${i.email}' no tiene formato válido. Pídelo de nuevo o emite sin correo.` }
         }
         // Misma regla que la referencial: reloj en VENTA exige puntos.
         let puntos: PuntoInstalacionPE[] = []
@@ -503,7 +504,7 @@ export function buildDispatchPE(contact: string) {
           body: JSON.stringify({
             empresa: i.empresa,
             contacto: i.contacto,
-            contactoEmail: i.email,
+            contactoEmail: i.email?.trim() || undefined,
             ruc: formatearRuc(i.ruc),
             contactoTelefono: `+${contact}`,
             userCount: Number(i.userCount || 0),
