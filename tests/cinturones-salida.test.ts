@@ -1,0 +1,97 @@
+import { test } from "node:test"
+import assert from "node:assert/strict"
+import { revisarSalida } from "../lib/cinturones-salida.ts"
+import { precioDeformado, mensajeCanonicoDe } from "../lib/precio-deformado.ts"
+import { preguntasProhibidasEn } from "../lib/pregunta-prohibida.ts"
+import { montosDe } from "../lib/precio-sin-tool.ts"
+
+// El mensaje que la tool de Perú devolvió el 21-sep (doble valor, total con IGV
+// ya incluido, sin aritmética).
+const CANONICO_PE = `1 - Para 18 personas te recomiendo Reloj en arriendo + App:
+💰 S/212.40 al mes, IGV incluido.
+[---]
+2.- Una alternativa más económica sería si marcan solo mediante nuestra app:
+💰 S/116.82 al mes, IGV incluido.
+[---]
+Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato.`
+
+// Lo que el modelo le mandó de verdad a Rodrigo, con el mismo build.
+const DEFORMADO_PE = `Te comparto el detalle de tu cotización referencial (precios en soles):
+
+Mensualidad del servicio:
+- Control de Asistencia (18 usuarios): S/99/mes
+- Arriendo de reloj de control: S/81/mes
+Total mensual: S/180 + IGV (18%) = S/212.40/mes
+
+Pago inicial (al aceptar):
+- Primer mes del plan por adelantado: S/180`
+
+test("el caso de Rodrigo: pierde el doble valor, agrega aritmética y un pago inicial", () => {
+  const d = precioDeformado(DEFORMADO_PE, CANONICO_PE)
+  assert.equal(d.deformado, true)
+  assert.deepEqual(d.motivos.slice().sort(), ["aritmetica_impuesto", "pago_inicial_inventado", "perdio_doble_valor"])
+})
+
+test("el mensaje de la tool copiado tal cual no es deformación", () => {
+  assert.equal(precioDeformado(CANONICO_PE, CANONICO_PE).deformado, false)
+})
+
+test("una apertura propia antes del bloque de la tool tampoco lo es", () => {
+  const conSaludo = `Perfecto, Ro! Te dejo las dos opciones:\n\n${CANONICO_PE}`
+  assert.equal(precioDeformado(conSaludo, CANONICO_PE).deformado, false)
+})
+
+test("con _descuentoAcordado el cinturón no opina (regla CL del 10-ago)", () => {
+  const calls = [
+    { name: "cotizar_referencial", ok: true, output: { mensajeParaProspecto: CANONICO_PE, _descuentoAcordado: { pct: 20 } } },
+  ]
+  assert.equal(mensajeCanonicoDe(calls), "")
+})
+
+test("veredicto: reemplazo por el texto de la tool", () => {
+  const v = revisarSalida({
+    reply: DEFORMADO_PE,
+    toolCalls: [{ name: "cotizar_referencial", ok: true, output: { mensajeParaProspecto: CANONICO_PE } }],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.equal(v.accion, "reemplazo")
+  assert.equal(v.reply, CANONICO_PE)
+  assert.equal(v.cinturon, "precio_deformado")
+})
+
+test("preguntas que Chile retiró: las tres formas reales", () => {
+  const ids = (t: string) => preguntasProhibidasEn(t).map((h) => h.id)
+  assert.deepEqual(ids("Te consulto: prefieres el reloj en arriendo mensual o en compra? Y en qué ciudad está la casa matriz?"), ["modalidad_reloj"])
+  assert.deepEqual(ids("Y la instalación del reloj en Piura, prefieres que nuestro servicio técnico la coordine contigo o la harías por tu cuenta?"), ["quien_instala"])
+  assert.deepEqual(ids("En cuántos puntos marcarían?"), ["cuantos_puntos"])
+})
+
+test("informar sobre arriendo o instalación NO es preguntar", () => {
+  assert.deepEqual(preguntasProhibidasEn("El arriendo incluye el envío sin costo, y la auto-instalación es gratis: te guiamos paso a paso."), [])
+  assert.deepEqual(preguntasProhibidasEn("Te cotizo el reloj en arriendo, que es lo más conveniente. En qué distrito está la casa matriz?"), [])
+})
+
+test("el precio sin respaldo ahora también se caza en soles", () => {
+  assert.ok(montosDe("son S/212.40 al mes").includes(212))
+  assert.ok(montosDe("el plan queda en S/55").includes(55))
+  const v = revisarSalida({ reply: "Te queda en S/240 al mes", toolCalls: [], historialAsistente: [], pais: "pe" })
+  assert.equal(v.accion, "reintento")
+  assert.equal(v.cinturon, "precio_sin_tool")
+  assert.equal(v.siFallaReintento, "contener")
+})
+
+test("repetir un precio que Vicky ya dijo es legítimo", () => {
+  const v = revisarSalida({
+    reply: "Como te decía, quedan S/212.40 al mes",
+    toolCalls: [],
+    historialAsistente: ["Total: S/212.40 al mes, IGV incluido"],
+    pais: "pe",
+  })
+  assert.equal(v.accion, "ok")
+})
+
+test("en onboarding estos cinturones no corren", () => {
+  const v = revisarSalida({ reply: "Te queda en S/240 al mes", toolCalls: [], historialAsistente: [], pais: "pe", enOnboarding: true })
+  assert.equal(v.accion, "ok")
+})

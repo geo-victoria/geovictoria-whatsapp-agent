@@ -40,6 +40,11 @@ export const TOOLS_DE_PRECIO = new Set([
 /** Montos en pesos ($ 43.781 / $43781) y en UF (0,98 UF · 1.07 UF). */
 const RE_CLP = /\$\s?(\d{1,3}(?:[.\s]\d{3})+|\d{4,9})/g
 const RE_UF = /(\d{1,4}(?:[.,]\d{1,4})?)\s*UF/gi
+// SOLES (21-sep): este cinturón corría SOLO en Chile, y al cablearlo en los
+// cuatro países el símbolo peruano no estaba — un "S/212.40" inventado pasaba
+// entero. Perú escribe montos chicos con decimales (S/55, S/212.40), así que
+// acá el umbral es 2 dígitos, no 4 como en pesos.
+const RE_PEN = /S\/\s?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?|\d{2,9})/g
 
 /** Cifras "de precio" que aparecen en un texto, normalizadas a número. */
 export function montosDe(texto: string): number[] {
@@ -54,6 +59,16 @@ export function montosDe(texto: string): number[] {
     const n = Number(String(m[1]).replace(",", "."))
     // La UF se compara ×1000 para no chocar con los pesos en la misma lista.
     if (Number.isFinite(n) && n > 0) out.push(Math.round(n * 1000))
+  }
+  for (const m of String(texto || "").matchAll(RE_PEN)) {
+    // "S/1,234.50" y "S/1.234,50" conviven según quién escriba: el último
+    // separador con 1-2 decimales es la coma decimal, el resto son miles.
+    const bruto = String(m[1])
+    const dec = /[.,]\d{1,2}$/.test(bruto)
+    const n = dec
+      ? Number(bruto.slice(0, -3).replace(/[.,]/g, "") + "." + bruto.slice(-2))
+      : Number(bruto.replace(/[.,]/g, ""))
+    if (Number.isFinite(n) && n >= 10) out.push(Math.round(n))
   }
   return out
 }
