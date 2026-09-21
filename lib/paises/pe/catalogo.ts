@@ -64,9 +64,9 @@ export const ESCALERA_DESCUENTO_PE = {
 
 /** Precios de LISTA del reloj PE en DÓLARES (artículo 304 de Books). */
 export const RELOJ_PE_USD = {
-  /** Arriendo mensual por unidad (golden NDV-32020, Mónica). */
-  arriendoMes: 24,
-  /** Venta por unidad (rate del artículo 304 en Books; confirmar con Diego). */
+  /** Arriendo mensual por unidad: US$20 + IGV (tabla de hardware de Mónica, 21-sep — Senseface 2A; Lalo: "la opción más barata"). */
+  arriendoMes: 20,
+  /** Venta por unidad: US$90 (rate del artículo 304 en Books; la tabla de Mónica dice US$150 — Lalo 21-sep eligió la más barata). */
   venta: 90,
   /** Artículo de Books/Creator al que se mapea en la nota de venta. */
   articulo: "304 - [PER] Reloj Gama Estándar FACIAL LAN WIFI",

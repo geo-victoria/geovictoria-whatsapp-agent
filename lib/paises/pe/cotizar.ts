@@ -252,7 +252,7 @@ export function cotizarPE(input: CotizacionPEInput): {
         } else if (tarifa.reconocido) {
           avisoSsttPeru = true
           notasEjecutivo.push(
-            `La instalación con visita técnica en ${g.ubicacion} tiene un costo de US$${tarifa.usd} + IGV según el tarifario oficial de servicio técnico — se coordina y factura aparte con ellos (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
+            `La instalación con visita técnica en ${g.ubicacion} tiene un costo de ${formatearPEN(usdASoles(tarifa.usd, TARIFAS_PE.tipoCambio))} + IGV según el tarifario oficial de servicio técnico — se coordina y factura aparte con ellos (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
           )
         } else {
           avisoSsttPeru = true
@@ -282,7 +282,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     })
   }
 
-  // ── Totales (mostrados CON IGV 18%) ──
+  // ── Totales (al cliente se muestran los NETOS "+ IGV"; los totales con IGV van al cotizador) ──
   const mensualNeto = plan + arriendoNeto
   const mensualIgv = mensualNeto * IGV_PE
   const mensualTotal = mensualNeto + mensualIgv
@@ -319,29 +319,30 @@ export function cotizarPE(input: CotizacionPEInput): {
   filas.push("")
   filas.push(lineasRec.join("\n"))
   filas.push("")
-  if (lineasRec.length >= 2) filas.push(`Subtotal sin IGV: ${formatearPEN(mensualNeto)}`)
-  filas.push(`Total mensual con IGV: ${formatearPEN(mensualTotal)}`)
+  // PRESENTACIÓN "+ IGV" (Lalo 21-sep: "respecto a los precios son todos + IGV,
+  // no IGV incluido"): al cliente se le muestran los NETOS con el sufijo
+  // "+ IGV"; los totales con impuesto siguen en el retorno para el cotizador.
+  filas.push(`Total mensual: ${formatearPEN(mensualNeto)} + IGV`)
   if (conDescuento) {
     filas.push(
-      `Con el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses: ${formatearPEN(mensualTotalConDescuento)}/mes (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualTotal)}/mes)`,
+      `Con el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses: ${formatearPEN(mensualNetoConDescuento)} + IGV/mes (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualNeto)} + IGV/mes)`,
     )
   }
 
   if (ventaNeto > 0) {
-    const ventaTotal = ventaNeto * (1 + IGV_PE)
     filas.push("")
     filas.push("Pago único:")
     filas.push("")
     filas.push(`- Reloj de control (compra): ${formatearPEN(ventaNeto)}`)
     filas.push("")
-    filas.push(`Total único con IGV: ${formatearPEN(ventaTotal)}`)
+    filas.push(`Total único: ${formatearPEN(ventaNeto)} + IGV`)
     // Burbuja propia para el pago inicial (patrón chileno): el desglose
     // primero, lo que paga al aceptar como mensaje aparte.
     filas.push("")
     filas.push("[---]")
     filas.push("")
     filas.push(
-      `Al aceptar pagas el pago inicial de ${formatearPEN(pagoInicialTotal)}: incluye el reloj + el primer mes del plan por adelantado.`,
+      `Al aceptar pagas el pago inicial de ${formatearPEN(pagoInicialNeto)} + IGV: incluye el reloj + el primer mes del plan por adelantado.`,
     )
   }
 
@@ -368,26 +369,25 @@ export function cotizarPE(input: CotizacionPEInput): {
   let mensaje = filas.join("\n")
   if (reloj && reloj.cantidad > 0) {
     const planSoloNeto = conDescuento ? planConDescuento : plan
-    const planSoloTotal = planSoloNeto * (1 + IGV_PE)
-    const mensualElegido = conDescuento ? mensualTotalConDescuento : mensualTotal
+    const mensualElegidoNeto = conDescuento ? mensualNetoConDescuento : mensualNeto
     const modalidadLabel = reloj.modalidad === "arriendo" ? "Reloj en arriendo" : "Reloj en compra"
     const personas = `${userCount} persona${userCount === 1 ? "" : "s"}`
-    const ahorraMensual = planSoloTotal < mensualElegido - 0.01
+    const ahorraMensual = planSoloNeto < mensualElegidoNeto - 0.01
     const ahorraEntrada = ventaNeto > 0
 
     const op1: string[] = [
       `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
-      `💰 ${formatearPEN(mensualElegido)} al mes, IGV incluido.`,
+      `💰 ${formatearPEN(mensualElegidoNeto)} + IGV al mes.`,
       ``,
       `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.`,
     ]
     if (conDescuento) {
       op1.push(
-        `Incluye el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualTotal)}/mes).`,
+        `Incluye el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualNeto)} + IGV/mes).`,
       )
     }
     if (ventaNeto > 0) {
-      op1.push(`Se suma un pago inicial único de ${formatearPEN(pagoInicialTotal)} (incluye el reloj y el primer mes del plan).`)
+      op1.push(`Se suma un pago inicial único de ${formatearPEN(pagoInicialNeto)} + IGV (incluye el reloj y el primer mes del plan).`)
     }
     const encabezado2 = ahorraMensual
       ? `2.- Una alternativa más económica sería si marcan solo mediante nuestra app:`
@@ -400,7 +400,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       "[---]",
       "",
       encabezado2,
-      `💰 ${formatearPEN(planSoloTotal)} al mes, IGV incluido.`,
+      `💰 ${formatearPEN(planSoloNeto)} + IGV al mes.`,
     ]
     // Las notas (envío a provincia, instalación con visita técnica) siguen
     // yendo en su propia burbuja, después de las dos opciones.
@@ -444,7 +444,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "reloj_pe",
       nombre: "Arriendo de reloj de control",
       descripcion:
-        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Tarifa de lista US$${RELOJ_PE_USD.arriendoMes}/mes al tipo de cambio SUNAT del día (S/${TARIFAS_PE.tipoCambio}).`,
+        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Precio en soles al tipo de cambio oficial (SUNAT) del día.`,
       modalidad: "Arriendo mensual",
       cantidad: reloj.cantidad,
       precioUnitarioPEN: TARIFAS_PE.relojArriendoMes,
@@ -459,7 +459,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "reloj_pe",
       nombre: "Reloj de control (compra)",
       descripcion:
-        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Tarifa de lista US$${RELOJ_PE_USD.venta} al tipo de cambio SUNAT del día (S/${TARIFAS_PE.tipoCambio}).`,
+        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Precio en soles al tipo de cambio oficial (SUNAT) del día.`,
       modalidad: "Venta única",
       cantidad: reloj.cantidad,
       precioUnitarioPEN: TARIFAS_PE.relojVenta,

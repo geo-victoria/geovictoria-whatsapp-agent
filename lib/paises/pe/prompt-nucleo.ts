@@ -14,7 +14,7 @@ import { anclajeTemporalPE, bloqueTelefonoPE } from "./prompt.ts"
 
 /**
  * Catálogo PE para el prompt. A diferencia del chileno, NO lleva los
- * montos: en Perú la única fuente de precio es la tool (soles con IGV, reloj
+ * montos: en Perú la única fuente de precio es la tool (soles netos "+ IGV", reloj
  * al dólar SUNAT del día) y el núcleo ya prohíbe enunciar precios de memoria.
  */
 export function formatCatalogoParaPromptPE(): string {
@@ -34,7 +34,7 @@ export function formatCatalogoParaPromptPE(): string {
           .join("\n")
   return `# Catálogo disponible (Perú)
 
-## Módulos de software (mensual en soles, IGV incluido en lo que muestra la tool)
+## Módulos de software (mensual en soles, netos "+ IGV" como los muestra la tool)
 
 ${lineasModulos}
 

@@ -27,10 +27,10 @@ export const FICHA_PE: FichaPrompt = {
   zonaTz: "America/Lima",
   gentilicio: "peruana",
   ejemploDudaLegal: "si el personal de confianza debe registrar asistencia",
-  ejemploMonto: "S/64,90/mes",
+  ejemploMonto: "S/55 + IGV/mes",
   ejemploDudaLegalCorto: "el registro del personal de confianza",
   ejemploDudaLegalTema: "el tema del registro del personal de confianza",
-  ejemploMontoApp: "S/64,90/mes",
+  ejemploMontoApp: "S/55 + IGV/mes",
   // En Perú no existe una autorización oficial de relojes (SUNAFIL no
   // certifica): el argumento contra el reloj externo es el respaldo en la nube.
   advertenciaRelojExterno:
@@ -86,11 +86,11 @@ PROHIBIDO: "al tiro", "al toque", "cachai", "po", "dale", "bacán", "fome", "ór
 `,
     tools: `# Tus tools (Perú)
 
-1. cotizar_referencial(userCount, hardware?, puntosInstalacion?, escalonDescuento?) — estimado mensual EN SOLES (totales con IGV 18% incluido) para 1-50 personas. Devuelve mensajeParaProspecto listo para copiar TAL CUAL: cuando lleva reloj trae LAS DOS OPCIONES (reloj + app, y solo app) con la pregunta de cierre. hardware = [{ id: "reloj_pe", modalidad: "arriendo"|"venta", cantidad }] solo si la configuración lleva reloj (modalidad "venta" ÚNICAMENTE si el cliente pidió comprar con esas palabras). puntosInstalacion = [{ ubicacion, zona: "lima"|"provincias", autoInstalada }] un punto por reloj (zona "lima" = Lima Metropolitana incluido el Callao; cualquier otra ciudad = "provincias"; autoInstalada true por defecto — la visita técnica solo si el cliente la pide). El plan hasta 10 personas es tarifa fija mensual (mismo valor con 1 o con 10); desde 11 se cobra por persona. escalonDescuento (1 = 10 %, 2 = 20 % sobre el plan, 6 meses) SOLO ante una objeción de precio, nunca de entrada.
+1. cotizar_referencial(userCount, hardware?, puntosInstalacion?, escalonDescuento?) — estimado mensual EN SOLES (montos netos, siempre presentados "+ IGV") para 1-50 personas. Devuelve mensajeParaProspecto listo para copiar TAL CUAL: cuando lleva reloj trae LAS DOS OPCIONES (reloj + app, y solo app) con la pregunta de cierre. hardware = [{ id: "reloj_pe", modalidad: "arriendo"|"venta", cantidad }] solo si la configuración lleva reloj (modalidad "venta" ÚNICAMENTE si el cliente pidió comprar con esas palabras). puntosInstalacion = [{ ubicacion, zona: "lima"|"provincias", autoInstalada }] un punto por reloj (zona "lima" = Lima Metropolitana incluido el Callao; cualquier otra ciudad = "provincias"; autoInstalada true por defecto — la visita técnica solo si el cliente la pide). El plan hasta 10 personas es tarifa fija mensual (mismo valor con 1 o con 10); desde 11 se cobra por persona. escalonDescuento (1 = 10 %, 2 = 20 % sobre el plan, 6 meses) SOLO ante una objeción de precio, nunca de entrada.
 
 2. consultar_descuento_referencial() — la escalera de descuento sobre el ÚLTIMO estimado (10 % → 20 % sobre el plan, 6 meses): la llamas cuando el cliente objeta el precio del estimado. Devuelve el mensajeParaProspecto con el precio rebajado (cópialo tal cual) y topeAlcanzado=true cuando ya diste el 20 %: ahí no hay más rebaja y lo dices con franqueza. NUNCA calcules tú el 10 % ni el 20 %.
 
-3. generar_link_cotizadora(empresa, contacto, contactoEmail, rutEmpresa, userCount, hardware?, puntosInstalacion?, escalonDescuento?) — cotización FORMAL de Perú: crea la cotización (PDF en soles con IGV) y devuelve el link donde el cliente la revisa, la acepta y paga con tarjeta (Mercado Pago) o transferencia BBVA. rutEmpresa = el RUC de 11 dígitos, tal como lo dio el cliente. contactoEmail es OBLIGATORIO en Perú (ahí llega la cotización). Pasa el MISMO escalonDescuento que el cliente aceptó (o el de la escalera vigente): la formal nace con ese % por 6 meses. Copia su mensajeParaProspecto tal cual. Con reloj en VENTA exige puntosInstalacion.
+3. generar_link_cotizadora(empresa, contacto, contactoEmail, rutEmpresa, userCount, hardware?, puntosInstalacion?, escalonDescuento?) — cotización FORMAL de Perú: crea la cotización (PDF en soles, netos + IGV) y devuelve el link donde el cliente la revisa, la acepta y paga con tarjeta (Mercado Pago) o transferencia BBVA. rutEmpresa = el RUC de 11 dígitos, tal como lo dio el cliente. contactoEmail es OBLIGATORIO en Perú (ahí llega la cotización). Pasa el MISMO escalonDescuento que el cliente aceptó (o el de la escalera vigente): la formal nace con ese % por 6 meses. Copia su mensajeParaProspecto tal cual. Con reloj en VENTA exige puntosInstalacion.
 
 4. consultar_agente_soporte(mensajeProspecto, previousResponseId?) — SOLO para quien YA es usuario de la plataforma y tiene una duda o problema funcional. Un prospecto que pregunta cómo funciona algo que está cotizando NO va acá: se lo respondes tú.
 

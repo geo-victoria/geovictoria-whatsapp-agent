@@ -103,7 +103,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula el estimado mensual EN SOLES (totales con IGV 18 % incluido) para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL — con reloj trae LAS DOS OPCIONES (reloj + app, y solo app) y la pregunta de cierre. Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. En Lima el envío va sin costo y la visita técnica tiene tarifa por DISTRITO (pregúntalo); a provincia el envío corre por cuenta del cliente. `escalonDescuento` SOLO ante objeción de precio.",
+      "Calcula el estimado mensual EN SOLES (montos netos, siempre presentados '+ IGV') para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL — con reloj trae LAS DOS OPCIONES (reloj + app, y solo app) y la pregunta de cierre. Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. En Lima el envío va sin costo y la visita técnica tiene tarifa por DISTRITO (pregúntalo); a provincia el envío corre por cuenta del cliente. `escalonDescuento` SOLO ante objeción de precio.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -139,7 +139,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización (PDF en soles con IGV) y devuelve el link donde el cliente la revisa, la acepta y paga (tarjeta vía Mercado Pago o transferencia BBVA; el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio. REQUIERE empresa (razón social), contacto, contactoEmail (obligatorio en Perú: ahí llega la cotización), rutEmpresa = el RUC de 11 dígitos, userCount y la configuración (hardware/puntos si lleva reloj). Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización (PDF en soles, netos + IGV) y devuelve el link donde el cliente la revisa, la acepta y paga (tarjeta vía Mercado Pago o transferencia BBVA; el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio. REQUIERE empresa (razón social), contacto, contactoEmail (obligatorio en Perú: ahí llega la cotización), rutEmpresa = el RUC de 11 dígitos, userCount y la configuración (hardware/puntos si lleva reloj). Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
