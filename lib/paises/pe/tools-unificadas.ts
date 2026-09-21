@@ -34,6 +34,7 @@ import { TOOL_SCHEMAS_PE, buildDispatchPE } from "./tools.ts"
 import { tarifaVisitaLimaPE } from "./catalogo.ts"
 import { marcarNoContactarSchema } from "../../tools/marcar-no-contactar.ts"
 import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts"
+import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
 
 type Schema = { name: string; description: string; input_schema: Record<string, unknown> }
 
@@ -267,9 +268,11 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   },
   {
     name: "enviar_ficha_reloj",
-    description: "En Perú NO hay ficha PDF del reloj: esta tool te lo recuerda. Describe el reloj en texto (facial, huella, tarjeta, clave; WiFi o cable), sin marcas ni modelos.",
+    description:
+      "Entrega la ficha técnica (PDF) del reloj de control de asistencia: el equipo de Perú es el mismo modelo que en Chile y la ficha es técnica (sin precios ni país). Úsala cuando el cliente pide características, ficha o detalles del equipo. Devuelve `mensajeParaProspecto` con el link: cópialo TAL CUAL en el mismo turno.",
     input_schema: { type: "object" as const, properties: {}, required: [] },
   },
+  buscarProspectSchemaPais("RUC", "11 dígitos"),
   {
     name: "consultar_siguiente_descuento",
     description:
@@ -612,11 +615,17 @@ export function buildDispatchPEUnificado(contact: string) {
           "no existe un documento de certificación (SUNAFIL no certifica sistemas)",
           "Responde con la explicación del bloque legal: el sistema registra la asistencia con respaldo verificable y fiscalizable; sin prometer papeles.",
         )
-      case "enviar_ficha_reloj":
-        return sinCapacidad(
-          "no hay ficha PDF del reloj",
-          "Describe el reloj en texto: marcación facial, huella, tarjeta o clave; WiFi o cable de red; se conecta a la nube en minutos. Sin marcas ni modelos.",
-        )
+      case "enviar_ficha_reloj": {
+        // Mismo equipo que Chile (SenseFace 2A / artículo 304 [PER]) y la ficha
+        // es técnica, sin precios ni país: la tool chilena es la única.
+        const { enviarFichaReloj } = await import("../../tools/enviar-ficha-reloj.ts")
+        return enviarFichaReloj()
+      }
+      case "buscar_prospect_en_zoho": {
+        // Misma búsqueda que Chile: el RUC vive en RUT_Empresa (create-from-vicky-pe).
+        const { buscarProspectEnZoho } = await import("../../tools/buscar-prospect-en-zoho.ts")
+        return buscarProspectEnZoho(input as never)
+      }
       case "consultar_siguiente_descuento": {
         const f = await leerFormalPE(contact, i.quote_id as string | undefined)
         if ("error" in f) return { ok: false, error: f.error }

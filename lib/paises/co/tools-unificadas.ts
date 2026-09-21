@@ -15,6 +15,7 @@
  */
 import { marcarNoContactarSchema } from "../../tools/marcar-no-contactar.ts"
 import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts"
+import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
 
 // Mismo criterio que co/tools.ts (REUNIONES_CO_HABILITADAS), calculado acá
 // para no importar ese módulo en el top-level (su cadena no es pura).
@@ -248,6 +249,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
     description: "En Colombia NO hay ficha PDF del equipo biométrico: esta tool te lo recuerda. Descríbelo en texto (facial, huella, tarjeta, clave o QR; WiFi o cable), sin marcas ni modelos.",
     input_schema: { type: "object" as const, properties: {}, required: [] },
   },
+  buscarProspectSchemaPais("NIT", "con o sin dígito de verificación"),
   {
     name: "consultar_siguiente_descuento",
     description: "En Colombia NO hay descuentos, ni antes ni después de la formal: esta tool te lo recuerda.",
@@ -396,6 +398,11 @@ export function buildDispatchCOUnificado(contact: string) {
         )
       case "enviar_certificacion":
         return sinCapacidad("no existe un documento de certificación (el Ministerio del Trabajo no certifica sistemas)", "Responde con el bloque legal: registro ordenado y trazable; sin prometer papeles.")
+      case "buscar_prospect_en_zoho": {
+        // Misma búsqueda que Chile: el NIT vive en RUT_Empresa (create-from-vicky-co).
+        const { buscarProspectEnZoho } = await import("../../tools/buscar-prospect-en-zoho.ts")
+        return buscarProspectEnZoho(input as never)
+      }
       case "enviar_ficha_reloj":
         return sinCapacidad("no hay ficha PDF del equipo biométrico", "Descríbelo en texto: rostro, huella, tarjeta, clave o QR; WiFi o cable de red; se conecta a la nube en minutos. Sin marcas ni modelos.")
       case "actualizar_cotizacion": {
