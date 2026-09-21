@@ -114,6 +114,13 @@ const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim
  * (`/api/quote-acceptance/pago-inicial`). 0 si no se pudo saber: ahí no se
  * frena nada (fail-open a la validación blanda de siempre).
  */
+/** Soles con centavos cuando los hay: S/70.09 · S/1,234 (es-PE). */
+function fmtPen(n: number): string {
+  const r = Math.round((Number(n) || 0) * 100) / 100
+  const opts = Number.isInteger(r) ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+  return `S/${r.toLocaleString("es-PE", opts)}`
+}
+
 export async function pagoInicialEsperadoClp(quoteId: string): Promise<number> {
   try {
     if (!VICKY_COTIZADORA_SECRET) return 0
@@ -124,7 +131,7 @@ export async function pagoInicialEsperadoClp(quoteId: string): Promise<number> {
     })
     if (!r.ok) return 0
     const j = (await r.json().catch(() => ({}))) as { ok?: boolean; oneShotClp?: number }
-    return j?.ok ? Math.max(0, Math.round(Number(j.oneShotClp) || 0)) : 0
+    return j?.ok ? Math.max(0, Math.round((Number(j.oneShotClp) || 0) * 100) / 100) : 0
   } catch {
     return 0
   }
@@ -388,13 +395,17 @@ export async function registrarComprobanteTransferencia(
   // registrar, link de auto-onboarding + presentación de la gestora PE.
   pais: "cl" | "mx" | "pe" = "cl",
 ): Promise<{ ok: boolean; mensajeParaProspecto: string; notaCreada?: boolean; avisoInterno?: boolean }> {
-  const monto = Math.max(0, Math.round(Number(input.montoDetectado) || 0))
+  // Soles llevan centavos (S/70.09): redondear a entero dejaba el comprobante
+  // "corto" contra el pago inicial y pedía una diferencia de 9 céntimos.
+  const monto = pais === "pe"
+    ? Math.max(0, Math.round((Number(input.montoDetectado) || 0) * 100) / 100)
+    : Math.max(0, Math.round(Number(input.montoDetectado) || 0))
   const montoFmt =
     monto > 0
       ? pais === "mx"
         ? `$${monto.toLocaleString("es-MX")} MXN`
         : pais === "pe"
-          ? `S/ ${monto.toLocaleString("es-PE")}`
+          ? fmtPen(monto)
           : `$${monto.toLocaleString("es-CL")}`
       : "monto no legible"
 
@@ -528,7 +539,7 @@ export async function registrarComprobanteTransferencia(
   // Moneda del país: el "pago inicial esperado" que devuelve el cotizador ya
   // viene en la moneda de la cotización (PEN en Perú, MXN en México).
   const fmtClp = (n: number) =>
-    pais === "pe" ? `S/ ${Math.round(n).toLocaleString("es-PE")}` : pais === "mx" ? `$${Math.round(n).toLocaleString("es-MX")} MXN` : `$${Math.round(n).toLocaleString("es-CL")}`
+    pais === "pe" ? fmtPen(n) : pais === "mx" ? `$${Math.round(n).toLocaleString("es-MX")} MXN` : `$${Math.round(n).toLocaleString("es-CL")}`
 
   // UN SOLO COMPROBANTE PARA VARIAS COTIZACIONES (Lalo 08-sep, caso Lorena:
   // dos RUT, una transferencia por el total — "no tienen que ser 2
