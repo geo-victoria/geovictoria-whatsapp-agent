@@ -472,32 +472,11 @@ export function buildDispatchPE(contact: string) {
         const conDescuento = calculo.descuentoPct > 0
         const pctTxt = `${Math.round(calculo.descuentoPct * 100)}%`
         const mesesTxt = `${ESCALERA_DESCUENTO_PE.meses} meses`
-        // ACTIVACIÓN explícita = primer mes por adelantado con la MISMA
-        // matemática del motor (incluye el descuento del plan si aplica): el
-        // endpoint respeta la fila del agente; su fallback es a precio de
-        // lista. primerMes = pagoInicialNeto − pagos únicos de catálogo.
-        const r2 = (v: number) => Math.round(v * 100) / 100
-        const ventaNeto = calculo.itemsCotizador
-          .filter((it) => !it.esRecurrente)
-          .reduce((a, it) => a + it.subtotalPEN, 0)
-        const primerMesNeto = r2(calculo.pagoInicialNeto - ventaNeto)
-        const items = [
-          ...calculo.itemsCotizador,
-          {
-            tipo: "activacion",
-            id: "activacion",
-            nombre: "Activación",
-            descripcion: conDescuento
-              ? `Habilitación del servicio: primer mes del plan por adelantado, ya con el ${pctTxt} de descuento del plan (${mesesTxt}).`
-              : undefined,
-            modalidad: "Cobro único",
-            cantidad: 1,
-            precioUnitarioPEN: primerMesNeto,
-            subtotalPEN: primerMesNeto,
-            esRecurrente: false,
-            afectoIgv: true,
-          },
-        ]
+        // PATRÓN CHILE (Lalo 21-sep): la cotización NO lleva fila de
+        // Activación. El primer mes adelantado lo calcula el cotizador desde
+        // los recurrentes (computeTotalsPE, con el descuento del plan), igual
+        // que en CL; el mensaje de entrega lo explica con pagoInicialNeto.
+        const items = [...calculo.itemsCotizador]
         const res = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky-pe`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-vicky-secret": SECRET_COTIZADORA_PE },
