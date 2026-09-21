@@ -166,3 +166,14 @@ test("ofrecer el descuento (sin afirmar que quedó aplicado) no dispara el cintu
   })
   assert.notEqual(v.cinturon, "descuento_aplicado_sin_tool")
 })
+
+test("'YA tiene el 10% aplicado' / 'ya está con ese descuento' (2ª forma real del E2E) también dispara", () => {
+  for (const reply of [
+    "Diego, tu cotización YA tiene el 10% aplicado 😊 — en el link que te pasé ya está con ese descuento (S/59.40 + IGV/mes los primeros 6 meses).",
+    "En el link que te pasé ya está con ese descuento, puedes pagar cuando quieras.",
+    "Listo, te apliqué el 10% en el plan por 6 meses.",
+  ]) {
+    const v = revisarSalida({ reply, toolCalls: [], historialAsistente: [], pais: "pe" })
+    assert.equal(v.cinturon, "descuento_aplicado_sin_tool", reply)
+  }
+})

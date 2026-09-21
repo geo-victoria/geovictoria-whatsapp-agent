@@ -112,7 +112,7 @@ const CONTENCION_ACTUALIZADA: Record<PaisCinturon, string> = {
  * prometer un precio que la página no muestra.
  */
 export const ANUNCIA_DESCUENTO_APLICADO_RE =
-  /(qued[oó]|est[aá]|va)\s+con\s+(el|un|tu)\s+\d{1,2}\s*%(\s+de\s+descuento)?\s+(ya\s+)?aplicad|te\s+apliqu[eé]\s+(el|un)\s+\d{1,2}\s*%|descuento\s+(ya\s+)?(qued[oó]\s+)?aplicad[oa]|(ya\s+)?(le\s+)?apliqu[eé]\s+(el|tu)\s+descuento|con\s+(el|tu)\s+descuento\s+(ya\s+)?(aplicado|incluido|listo)/i
+  /\b(ya\s+)?(tiene|qued[oó]|est[aá]|va|sali[oó]|se\s+fue)\s+(ya\s+)?(con\s+)?(el|un|tu|ese|este)\s+(\d{1,2}\s*%(\s+de\s+descuento)?|descuento)\s+(ya\s+)?(aplicad|incluid|list[oa]\b|actualizad)|(ya\s+)?est[aá]\s+con\s+(ese|el|tu)\s+(\d{1,2}\s*%|descuento)|te\s+apliqu[eé]\s+(el|un)\s+\d{1,2}\s*%|descuento\s+(ya\s+)?(qued[oó]\s+)?aplicad[oa]|(ya\s+)?(le\s+)?apliqu[eé]\s+(el|tu)\s+descuento/i
 
 const TOOLS_QUE_APLICAN_DESCUENTO = new Set(["aplicar_siguiente_descuento", "generar_link_cotizadora", "actualizar_cotizacion"])
 
