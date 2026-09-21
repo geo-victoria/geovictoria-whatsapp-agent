@@ -2357,7 +2357,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     // canal (evita chats paralelos cuando el prefijo del número no calza con
     // la línea que eligió el cliente). Best-effort.
     const canalBody = (body.channelId || "").trim()
-    if (contact && canalBody && canalCoherenteConContacto(contact, canalBody)) {
+    const paisProb = contact && canalBody
+      ? await (await import("@/lib/probador-pais")).paisProbador(contact).catch(() => null)
+      : null
+    if (contact && canalBody && canalCoherenteConContacto(contact, canalBody, paisProb)) {
       setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
     } else if (contact && canalBody) {
       // El body trae el canal de OTRO país (ej. contacto +57 con la línea +56):

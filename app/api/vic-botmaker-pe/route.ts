@@ -685,8 +685,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Canal de ORIGEN (espejo CL/MX): si la acción de código PE manda
     // channelId, se persiste — los pushes salen por la línea donde escribió.
     const canalBody = (body.channelId || "").trim()
+    const paisProb = contact && canalBody
+      ? await (await import("@/lib/probador-pais")).paisProbador(contact).catch(() => null)
+      : null
     if (contact && canalBody) {
-      if (canalCoherenteConContacto(contact, canalBody)) {
+      if (canalCoherenteConContacto(contact, canalBody, paisProb)) {
         setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
       } else {
         const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)

@@ -12,7 +12,7 @@
  */
 
 import { esContactoMeta } from "./origen-canal.ts"
-import { NUMERO_LINEA, channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea } from "./linea-por-pais"
+import { NUMERO_LINEA, channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea, type PaisLinea } from "./linea-por-pais"
 
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 const BM_CHANNEL_V3 = (process.env.BOTMAKER_CHANNEL_V3 || "").trim()
@@ -118,9 +118,20 @@ async function canalDeOrigen(contactId: string): Promise<string> {
  * mientras su línea esté en contención: un +51 que escribe a la línea
  * chilena se atiende por ahí (mismo chat), y su canal de origen es válido.
  */
-export function canalCoherenteConContacto(contactId: string, canal: string): boolean {
+export function canalCoherenteConContacto(
+  contactId: string,
+  canal: string,
+  /**
+   * País del PROBADOR (21-sep): con la marca vigente, el país del contacto es
+   * el del override y NO el de su prefijo — sin esto un +56 probando la línea
+   * peruana caía en "incoherente", su canal de origen no se actualizaba y la
+   * respuesta salía por la línea CHILENA (probado con el teléfono de Lalo).
+   */
+  paisOverride?: PaisLinea | null,
+): boolean {
   const numCanal = (canal.match(/(\d+)\s*$/) || [])[1] || ""
   if (!numCanal) return true
+  if (paisOverride) return paisDeNumero(numCanal) === paisOverride
   const paisContacto = paisDeNumero(normalizeContactId(contactId))
   if (paisContacto === "otro" || paisContacto === "pe") return true
   return paisDeNumero(numCanal) === paisContacto

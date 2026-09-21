@@ -589,8 +589,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     // channelId, se persiste — los pushes salen por la línea donde el cliente
     // escribió, aunque el prefijo del número sea de otro país.
     const canalBody = ((body as { channelId?: string }).channelId || "").trim()
+    const paisProb = contact && canalBody
+      ? await (await import("@/lib/probador-pais")).paisProbador(contact).catch(() => null)
+      : null
     if (contact && canalBody) {
-      if (canalCoherenteConContacto(contact, canalBody)) {
+      if (canalCoherenteConContacto(contact, canalBody, paisProb)) {
         setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
       } else {
         // Canal de OTRO país para este contacto: probable misroute del master
