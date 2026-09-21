@@ -173,7 +173,9 @@ test("'YA tiene el 10% aplicado' / 'ya está con ese descuento' (2ª forma real 
     "En el link que te pasé ya está con ese descuento, puedes pagar cuando quieras.",
     "Listo, te apliqué el 10% en el plan por 6 meses.",
   ]) {
-    const v = revisarSalida({ reply, toolCalls: [], historialAsistente: [], pais: "pe" })
+    // El precio ya se le dijo al cliente (viene de consultar_siguiente_descuento):
+    // sin eso el cinturón de precio sin respaldo gana antes, y con razón.
+    const v = revisarSalida({ reply, toolCalls: [], historialAsistente: ["luego S/59.40 + IGV al mes"], pais: "pe" })
     assert.equal(v.cinturon, "descuento_aplicado_sin_tool", reply)
   }
 })
