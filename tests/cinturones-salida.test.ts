@@ -65,6 +65,8 @@ test("preguntas que Chile retiró: las tres formas reales", () => {
   assert.deepEqual(ids("Te consulto: prefieres el reloj en arriendo mensual o en compra? Y en qué ciudad está la casa matriz?"), ["modalidad_reloj"])
   assert.deepEqual(ids("Y la instalación del reloj en Piura, prefieres que nuestro servicio técnico la coordine contigo o la harías por tu cuenta?"), ["quien_instala"])
   assert.deepEqual(ids("En cuántos puntos marcarían?"), ["cuantos_puntos"])
+  // La forma que se le escapó al patrón en la primera corrida con el cinturón desplegado (21-sep):
+  assert.deepEqual(ids("Para dejarte el valor exacto, necesito confirmar: la casa matriz en Piura donde iría el reloj, ustedes lo instalarían o preferirían que nuestro servicio técnico coordine la instalación?"), ["quien_instala"])
 })
 
 test("informar sobre arriendo o instalación NO es preguntar", () => {

@@ -42,7 +42,11 @@ const PROHIBIDAS: readonly Prohibida[] = [
   {
     id: "quien_instala",
     regla: "No se pregunta quién instala: auto-instalación por defecto, técnico opcional",
-    re: /quien[^.?!]{0,30}(lo |la )?instala[^.?!]{0,40}\?|(instalacion|instalarlo|instalarla)[^.?!]{0,80}(por tu cuenta|la harias|lo harias|tu mismo|ustedes mismos)[^.?!]{0,40}\?|prefieres que[^.?!]{0,60}(servicio tecnico|tecnico)[^.?!]{0,60}\?/,
+    // Formas reales vistas el 21-sep en Perú (mismo build, tres corridas):
+    // "…la harías por tu cuenta?" · "ustedes lo instalarían o preferirían que
+    // nuestro servicio técnico coordine la instalación?" — la segunda no la
+    // cubría el patrón (conjugación "preferirían" y "lo instalarían ustedes").
+    re: /quien[^.?!]{0,30}(lo |la )?instala[^.?!]{0,40}\?|(instalacion|instalarlo|instalarla|instalarian|instalarias|instalan)[^.?!]{0,80}(por tu cuenta|la harias|lo harias|tu mismo|ustedes mismos|ustedes|\bo\b)[^.?!]{0,80}(tecnico|instalacion)[^.?!]{0,60}\?|(prefieres|preferirias|preferirian|prefieren) que[^.?!]{0,60}(servicio tecnico|tecnico)[^.?!]{0,60}\?/,
   },
   {
     id: "cuantos_puntos",
