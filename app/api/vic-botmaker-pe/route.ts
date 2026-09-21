@@ -159,6 +159,8 @@ type BotmakerBody = {
   documentURL?: string
   channelId?: string
   simular?: boolean
+  /** Solo con simular: lee el historial real y persiste el turno (E2E multi-turno). */
+  conHistorial?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -805,7 +807,22 @@ export async function POST(request: Request): Promise<NextResponse> {
         const r = await turnoOnboardingPE(contact, message, apiKey, hist, true)
         return NextResponse.json({ reply: r.reply, pais: "pe", simulacion: true, fase: "onboarding", tools: r.toolCalls.map((t) => t.name) })
       }
-      const modeloSim = esFlujoCotizacionPE(message, []) ? MODELO_COTIZACION_PE : MODELO_SIMPLE_PE
+      // SIMULACIÓN CON HISTORIAL (21-sep): la simulación de venta corría con
+      // history [] — o sea era de UN turno, y cualquier prueba de continuidad
+      // (¿re-pregunta la dotación? ¿respeta lo ya dicho?) salía falseada: el
+      // modelo respondía el saludo frío a un mensaje que venía a mitad de la
+      // conversación. Con `conHistorial` lee el historial real y persiste el
+      // turno, así se puede recorrer el flujo completo sin un humano.
+      // ACOTADO a números de prueba y probadores internos: nunca ensucia el
+      // chat de un cliente.
+      const pruebaOk =
+        /^51900000\d{3}$/.test(String(contact || "").replace(/\D/g, "")) ||
+        (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(
+          String(contact || "").replace(/\D/g, ""),
+        )
+      const conHist = body.conHistorial === true && pruebaOk
+      const histSim = conHist ? await fetchHistoryV3(contact).catch(() => []) : []
+      const modeloSim = esFlujoCotizacionPE(message, histSim) ? MODELO_COTIZACION_PE : MODELO_SIMPLE_PE
       const result = await runAgentLoop({
         systemPrompt: await (async () => {
           // Espejo del camino real (umbral 08-ago): la simulación E2E debe
@@ -817,7 +834,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           const dir = dot && uInfo ? formatDirectivaSobreUmbral(dot, uInfo.umbral, dP) : ""
           return cU + getSystemPromptPE(contact, uInfo?.umbral) + cU + dir
         })(),
-        history: [],
+        history: histSim,
         userMessage: message,
         apiKey,
         contact,
@@ -837,12 +854,20 @@ export async function POST(request: Request): Promise<NextResponse> {
         reply = OPTOUT_GOODBYE_PE
       }
       if (!reply.trim()) reply = ERROR_GENERICO_PE
+      if (conHist) {
+        await appendTurnV3(contact, message, reply, "pe").catch((e) =>
+          console.error(`[vic-pe][sim] no se pudo persistir el turno contact=${contact}:`, e),
+        )
+      }
       return NextResponse.json({
         reply,
         handoff: result.handoff,
         pais: "pe",
         simulacion: true,
+        conHistorial: conHist,
+        turnosEnHistorial: histSim.length,
         modelo: modeloSim,
+        tools: (result.toolCalls || []).map((t) => (t as ToolCallRecordPE).name),
       })
     }
 
