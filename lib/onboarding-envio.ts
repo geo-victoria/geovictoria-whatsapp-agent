@@ -54,7 +54,12 @@ export async function entregarKickoffOnboarding(
   const esPE = (overridePais ?? paisDeContacto(contact)) === "pe"
   const paisAlta = esPE ? ("pe" as const) : ("cl" as const)
   const gates = gatesAltaPais(paisAlta)
-  const tplsAlta = plantillasAltaPais(paisAlta)
+  const tplsBase = plantillasAltaPais(paisAlta)
+  // NOMBRE DE LA PLANTILLA FLOW POR KV (21-sep, flow único): una plantilla no
+  // se edita, así que al publicar un flow nuevo hay que crear otra plantilla
+  // que lo apunte. vic_kv `alta_flow_tpl_<pais>` la cambia SIN deploy.
+  const tplFlowOverride = ((await getKvValue(`alta_flow_tpl_${paisAlta}`).catch(() => null)) || "").trim()
+  const tplsAlta = tplFlowOverride ? { ...tplsBase, flow: { ...tplsBase.flow, name: tplFlowOverride } } : tplsBase
   const flowOnGate = ((await getKvValue(gates.flow).catch(() => null)) || "").trim() === "on"
   // ALTA POR FORMULARIO (28-ago): con el gate encendido, el kickoff es la
   // plantilla con botón FLOW (alta_cuenta_v2_flow) — dentro o fuera de
