@@ -797,7 +797,8 @@ export async function registrarComprobanteTransferencia(
       // según la ventana). La marca traspaso_postpago_<quote> evita que el
       // post-pago del cotizador vuelva a mandar el arranque si después llega
       // un pago online de la misma cotización.
-      const flowOn = ((await getKvValue("alta_flow_kickoff").catch(() => null)) || "").trim() === "on"
+      const { gatesAltaPais } = await import("@/lib/onboarding/plantilla")
+      const flowOn = ((await getKvValue(gatesAltaPais(pais === "pe" ? "pe" : "cl").flow).catch(() => null)) || "").trim() === "on"
       if (flowOn) {
         try {
           const { entregarKickoffOnboarding } = await import("@/lib/onboarding-envio")

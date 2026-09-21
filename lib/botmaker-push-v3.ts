@@ -12,7 +12,7 @@
  */
 
 import { esContactoMeta } from "./origen-canal.ts"
-import { channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea } from "./linea-por-pais"
+import { NUMERO_LINEA, channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea } from "./linea-por-pais"
 
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 const BM_CHANNEL_V3 = (process.env.BOTMAKER_CHANNEL_V3 || "").trim()
@@ -318,7 +318,15 @@ export async function triggerBotmakerIntent(
   if (!BM_TOKEN || !contactId || !intentIdOrName) return false
   const clean = normalizeContactId(contactId)
   const origen = await canalDeOrigen(clean)
-  const num = channelNumber(origen || undefined)
+  // Sin canal de origen, CO/MX/PE van por SU línea (21-sep): un +51 sin
+  // `canal_origen_` caía al default chileno y el intent del bot Vicky Perú
+  // no existía en Vicky Chile.
+  const paisNum = paisDeNumero(clean)
+  const num = origen
+    ? channelNumber(origen)
+    : paisNum === "co" || paisNum === "mx" || paisNum === "pe"
+      ? NUMERO_LINEA[paisNum]
+      : channelNumber()
   if (!num) return false
   try {
     const res = await fetch("https://api.botmaker.com/v2.0/chats-actions/trigger-intent", {

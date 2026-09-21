@@ -139,6 +139,55 @@ export const PLANTILLA_ALTA_QR_CL = {
 export const TEXTO_BOTON_ALTA_QR = "Crear mi cuenta"
 
 /**
+ * PERÚ = EL MISMO ARRANQUE HÍBRIDO DE CHILE (21-sep, Lalo "esto tengo que
+ * hacer yo pero para Perú"): plantilla FLOW en ventana viva y quick-reply
+ * fuera de ventana, en el bot "Vicky Perú" y contra el flow `alta_cuenta_pe`.
+ *
+ * - `vicky_pe_alta_qr`: creada POR API el 21-sep (botón "Crear mi cuenta" →
+ *   intent #altaflow del bot Vicky Perú), en revisión de Meta.
+ * - `vicky_pe_alta_flow`: la API de Botmaker NO acepta referencia al flow en
+ *   un botón FLOW (propiedades válidas: intentIdOrName, webhookPayload, type,
+ *   text, url, phoneNumber — probado 21-sep), así que ESTA se crea en el
+ *   PANEL con el flow `alta_cuenta_pe` publicado, igual que la clv4 de Chile.
+ * Gates propios en vic_kv (`alta_flow_kickoff_pe` / `alta_qr_intent_pe`):
+ * hasta que estén en "on", Perú sigue con el alta conversacional.
+ */
+export const PLANTILLA_ALTA_FLOW_PE = {
+  name: "vicky_pe_alta_flow",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky Perú",
+  body:
+    "Felicidades ${nombre}, tu pago quedó registrado 🙌 Ya está todo listo para crear tu cuenta: " +
+    "solo falta confirmar los datos de tu empresa y de quien la administrará. " +
+    "Los completas aquí mismo, en un formulario rápido.",
+} as const
+
+export const PLANTILLA_ALTA_QR_PE = {
+  name: "vicky_pe_alta_qr",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky Perú",
+  body: PLANTILLA_ALTA_FLOW_PE.body,
+} as const
+
+export type PaisAlta = "cl" | "pe"
+
+/** Plantillas FLOW / quick-reply del alta según el bot del país. */
+export function plantillasAltaPais(pais: PaisAlta): { flow: { name: string }; qr: { name: string } } {
+  return pais === "pe"
+    ? { flow: PLANTILLA_ALTA_FLOW_PE, qr: PLANTILLA_ALTA_QR_PE }
+    : { flow: PLANTILLA_ALTA_FLOW_CL, qr: PLANTILLA_ALTA_QR_CL }
+}
+
+/** Llaves vic_kv de los gates del alta por formulario, por país. */
+export function gatesAltaPais(pais: PaisAlta): { flow: string; qr: string } {
+  return pais === "pe"
+    ? { flow: "alta_flow_kickoff_pe", qr: "alta_qr_intent_pe" }
+    : { flow: "alta_flow_kickoff", qr: "alta_qr_intent" }
+}
+
+/**
  * PERÚ (21-sep): el MISMO arranque del alta por chat, en el bot "Vicky Perú"
  * y con RUC. Creada por API (vic-admin-wa-template); mientras Meta la revisa
  * el kickoff PE sale como texto libre en ventana y, fuera de ventana, cae al

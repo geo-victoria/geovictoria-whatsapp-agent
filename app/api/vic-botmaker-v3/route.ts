@@ -608,52 +608,11 @@ async function processOneTurn(
     const enOnboarding = (await faseDelContacto(contact)) === "onboarding"
     // TAP DEL QUICK-REPLY del alta (híbrido 28-ago): "Crear mi cuenta" viene
     // de la plantilla QR — el intent de Botmaker responde con el flow en
-    // sesión (bloque #altaflow), así que Vicky CALLA para no duplicar. Gate
-    // vic_kv `alta_qr_intent`: sin el bloque cableado, el mensaje sigue al
-    // agente como cualquier otro (jamás un tap mudo).
+    // sesión (bloque #altaflow), así que Vicky CALLA para no duplicar. Desde el
+    // 21-sep vive en lib/onboarding-altaflow-tap (compartido con Perú).
     if (enOnboarding) {
-      const { TEXTO_BOTON_ALTA_QR } = await import("@/lib/onboarding/plantilla")
-      const esTapQr =
-        message.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") ===
-        TEXTO_BOTON_ALTA_QR.toLowerCase()
-      if (esTapQr) {
-        const { getKvValue: kvGet } = await import("@/lib/supabase-persistence-v3")
-        const qrOn = ((await kvGet("alta_qr_intent").catch(() => null)) || "").trim() === "on"
-        if (qrOn) {
-          // DISEÑO FINAL 28-ago noche (sin pantalla de teléfono): el tap
-          // dispara por API el intent `#altaflow` seteando en la MISMA llamada
-          // las variables `alta_*` con el prefill fresco del borrador — el
-          // bloque del Bot Designer abre el formulario DIRECTO en "Datos de tu
-          // empresa" prellenada (sin INIT de Meta, sin pantalla del número).
-          console.log(`[v3-botmaker] tap quick-reply del alta de ${contact} — trigger #altaflow con variables frescas`)
-          const { triggerBotmakerIntent } = await import("@/lib/botmaker-push-v3")
-          const { getFollowupCronSecret } = await import("@/lib/supabase-persistence-v3")
-          let prefill: Record<string, unknown> = {}
-          try {
-            const secreto = await getFollowupCronSecret()
-            const base = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app"
-            const r = await fetch(`${base}/api/vic-onboarding-flow?key=${encodeURIComponent(secreto)}&contact=${contact}`, { cache: "no-store" })
-            prefill = ((await r.json().catch(() => ({}))) as { prefill?: Record<string, unknown> }).prefill || {}
-          } catch {}
-          const v = (k: string) => String(prefill[k] ?? "")
-          await triggerBotmakerIntent(contact, "#altaflow", {
-            alta_razon: v("razon_social"),
-            alta_rut: v("rut_empresa"),
-            alta_giro: v("giro"),
-            alta_direccion: v("direccion"),
-            alta_comuna: v("comuna"),
-            alta_campos: String(prefill["mostrar_campos_empresa"] !== false),
-            alta_fono: contact,
-          }).catch(() => false)
-          const { appendTurnV3: append, markUserActivity: marcar } = await import("@/lib/supabase-persistence-v3")
-          await append(contact, message, "[Le enviamos el formulario de alta por WhatsApp]").catch(() => {})
-          // El reloj de ventana (getLastUserAt) lee last_user_at, que solo lo
-          // toca markUserActivity — sin esto, el resumen post-formulario creía
-          // la ventana vencida aunque el tap la acababa de abrir (prueba 28-ago).
-          await marcar(contact).catch(() => {})
-          return
-        }
-      }
+      const { manejarTapAltaQr } = await import("@/lib/onboarding-altaflow-tap")
+      if (await manejarTapAltaQr(contact, message, "cl")) return
     }
     const onboarding = enOnboarding ? await armarOnboarding(contact) : null
     // DIRECTIVA DEL ADMINISTRADOR POR CONTACTO (Lalo 08-sep, caso Camila /

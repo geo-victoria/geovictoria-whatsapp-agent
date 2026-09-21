@@ -266,6 +266,11 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
   // Fase onboarding (post-pago): agente propio y salida temprana — nada de la
   // maquinaria comercial de abajo toca a un cliente que ya pagó.
   if ((await faseDelContacto(contact)) === "onboarding") {
+    // Tap del quick-reply "Crear mi cuenta" (alta por formulario, gate
+    // vic_kv alta_qr_intent_pe): el bloque #altaflow del bot Vicky Perú manda
+    // el flow en sesión y Vicky calla. Sin gate, el tap es un mensaje más.
+    const { manejarTapAltaQr } = await import("@/lib/onboarding-altaflow-tap")
+    if (await manejarTapAltaQr(contact, message, "pe")) return
     await turnoOnboardingPE(contact, message, apiKey, history, false)
     return
   }

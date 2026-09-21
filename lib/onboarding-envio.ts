@@ -12,11 +12,12 @@
 import { getKvValue, getLastUserAt } from "./supabase-persistence-v3"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "./botmaker-push-v3"
 import {
-  PLANTILLA_ALTA_FLOW_CL,
   PLANTILLA_ONBOARDING_CL,
   PLANTILLA_ONBOARDING_PE,
+  gatesAltaPais,
   paramsPlantillaAltaFlow,
   paramsPlantillaOnboarding,
+  plantillasAltaPais,
   renderPlantillaOnboarding,
 } from "./onboarding/plantilla"
 import { paisDeContacto } from "./ruteo-pais"
@@ -44,11 +45,15 @@ export async function entregarKickoffOnboarding(
   rut?: string,
   nombreCliente?: string,
 ): Promise<{ via: "texto" | "plantilla" | "flow" | "fallo"; texto: string }> {
-  // PERÚ (21-sep): el alta es CONVERSACIONAL (sin flow ni QR: esas plantillas
-  // son del bot Vicky Chile y el push las rechaza para un +51). Texto en
-  // ventana; fuera de ventana la plantilla UTILITY del bot Vicky Perú.
+  // PERÚ (21-sep): el MISMO híbrido de Chile con sus plantillas del bot Vicky
+  // Perú y gates propios (`alta_flow_kickoff_pe` / `alta_qr_intent_pe`); con
+  // los gates apagados el alta es CONVERSACIONAL: texto en ventana y, fuera de
+  // ventana, la plantilla UTILITY `vicky_pe_alta_cuenta`.
   const esPE = paisDeContacto(contact) === "pe"
-  const flowOnGate = esPE ? false : ((await getKvValue("alta_flow_kickoff").catch(() => null)) || "").trim() === "on"
+  const paisAlta = esPE ? ("pe" as const) : ("cl" as const)
+  const gates = gatesAltaPais(paisAlta)
+  const tplsAlta = plantillasAltaPais(paisAlta)
+  const flowOnGate = ((await getKvValue(gates.flow).catch(() => null)) || "").trim() === "on"
   // ALTA POR FORMULARIO (28-ago): con el gate encendido, el kickoff es la
   // plantilla con botón FLOW (alta_cuenta_v2_flow) — dentro o fuera de
   // ventana da igual, las plantillas entran siempre. Gate en vic_kv para
@@ -67,7 +72,7 @@ export async function entregarKickoffOnboarding(
     // gate o si la QR falla, cae a la plantilla FLOW de siempre.
     const ultimoMsg = await getLastUserAt(contact).catch(() => null)
     const ventanaViva = !!ultimoMsg && Date.now() - ultimoMsg.getTime() < 23 * 3600e3
-    const qrOn = ((await getKvValue("alta_qr_intent").catch(() => null)) || "").trim() === "on"
+    const qrOn = ((await getKvValue(gates.qr).catch(() => null)) || "").trim() === "on"
     if (!ventanaViva && qrOn) {
       // SIEMBRA de variables alta_* ANTES de la plantilla (28-ago noche): el
       // tap del botón dispara el intent #altaflow directo en Botmaker (no pasa
@@ -76,33 +81,19 @@ export async function entregarKickoffOnboarding(
       // flujo VACÍO #setvars (no manda mensajes; solo aplica las variables).
       try {
         const { triggerBotmakerIntent } = await import("./botmaker-push-v3")
-        const { getFollowupCronSecret } = await import("./supabase-persistence-v3")
-        const secreto = await getFollowupCronSecret()
-        const base = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://geovictoria-whatsapp-agent-git-vicky-v3-geo-victoria.vercel.app"
-        const r = await fetch(`${base}/api/vic-onboarding-flow?key=${encodeURIComponent(secreto)}&contact=${contact}`, { cache: "no-store" })
-        const prefill = ((await r.json().catch(() => ({}))) as { prefill?: Record<string, unknown> }).prefill || {}
-        const v = (k: string) => String(prefill[k] ?? "")
-        await triggerBotmakerIntent(contact, "#setvars", {
-          // Primer nombre para personalizar el MENSAJE del bloque (la entrega
-          // del formulario saluda por nombre — doble paso con progresión, no eco).
-          alta_nombre: (v("admin_nombre").trim().split(/\s+/)[0] || "").trim(),
-          alta_razon: v("razon_social"),
-          alta_rut: v("rut_empresa"),
-          alta_giro: v("giro"),
-          alta_direccion: v("direccion"),
-          alta_comuna: v("comuna"),
-          alta_campos: String(prefill["mostrar_campos_empresa"] !== false),
-          alta_fono: contact,
-        })
+        const { prefillAltaFlow, variablesAltaFlow } = await import("./onboarding-altaflow-tap")
+        const prefill = await prefillAltaFlow(contact)
+        // Con alta_nombre (primer nombre) para personalizar el MENSAJE del
+        // bloque — la entrega del formulario saluda por nombre.
+        await triggerBotmakerIntent(contact, "#setvars", variablesAltaFlow(contact, prefill, true))
       } catch (e) {
         console.warn(`[onboarding-envio] siembra de variables alta_* falló para ${contact}:`, e instanceof Error ? e.message : e)
       }
-      const { PLANTILLA_ALTA_QR_CL } = await import("./onboarding/plantilla")
-      const okQr = await sendBotmakerTemplate(contact, PLANTILLA_ALTA_QR_CL.name, params, undefined, TRANSACCIONAL).catch(() => false)
+      const okQr = await sendBotmakerTemplate(contact, tplsAlta.qr.name, params, undefined, TRANSACCIONAL).catch(() => false)
       if (okQr) return { via: "flow", texto: "" }
       console.warn(`[onboarding-envio] plantilla QR falló para ${contact}; se intenta la plantilla FLOW`)
     }
-    const okFlow = await sendBotmakerTemplate(contact, PLANTILLA_ALTA_FLOW_CL.name, params, undefined, TRANSACCIONAL).catch(() => false)
+    const okFlow = await sendBotmakerTemplate(contact, tplsAlta.flow.name, params, undefined, TRANSACCIONAL).catch(() => false)
     if (okFlow) return { via: "flow", texto: "" }
     console.warn(`[onboarding-envio] plantilla flow falló para ${contact}; kickoff clásico de respaldo`)
   }
