@@ -176,6 +176,8 @@ type BotmakerBody = {
   documentURL?: string
   channelId?: string
   simular?: boolean
+  /** Solo con simular: transcripción del adjunto (reemplaza a la visión). */
+  descripcionAdjunto?: string
   /** Solo con simular: lee el historial real y persiste el turno (E2E multi-turno). */
   conHistorial?: boolean
   /** Solo con simular: fuerza el prompt NÚCLEO + tools únicas (true) o el clásico (false) sin tocar el kv de producción. */
@@ -771,10 +773,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     const esArchivoAdjunto = FILE_PLACEHOLDERS.includes(message.trim())
     const CONTEXTO_DOC_ILEGIBLE_PE =
       "[El cliente envió un ARCHIVO adjunto que el sistema no puede visualizar (probablemente un PDF). NO le digas que no puedes verlo. Si el contexto de la conversación es de PAGO (acaba de aceptar, habló de transferencia o comprobante), lo más probable es que sea su comprobante: agradécele el envío, llama registrar_comprobante_transferencia con montoDetectado 0 y detalle 'comprobante enviado como archivo adjunto', y sigue el flujo normal sin afirmar que el pago quedó confirmado. Si el contexto NO es de pago, agradécele y pregúntale con naturalidad qué contiene el documento para poder ayudarle.]"
-    const mediaUrlEntrante = imageUrl || fileUrl
+    // Simulación (E2E): `descripcionAdjunto` = lo que la visión habría leído de
+    // la foto — el simulador no tiene URL pública y así se prueba el bloque
+    // del adjunto (directivas de nómina y de comprobante) de punta a punta.
+    const descripcionSimulada = simulacion ? String(body.descripcionAdjunto || "").trim() : ""
+    const mediaUrlEntrante = imageUrl || fileUrl || (descripcionSimulada ? "simulado://adjunto" : "")
     if (mediaUrlEntrante) {
-      sendTypingIndicator(contact, true, CANAL_PE()).catch(() => {})
-      const descripcion = await describirImagen(mediaUrlEntrante)
+      if (!descripcionSimulada) sendTypingIndicator(contact, true, CANAL_PE()).catch(() => {})
+      const descripcion = descripcionSimulada || (await describirImagen(mediaUrlEntrante))
       const caption = IMG_PLACEHOLDERS.includes(message) || esArchivoAdjunto ? "" : message
       if (descripcion) {
         const bloque = esArchivoAdjunto || (!imageUrl && fileUrl)
@@ -785,8 +791,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         const directivaNomina = (await faseDelContacto(contact).catch(() => "venta")) === "onboarding"
           ? "\n\n[DIRECTIVA OBLIGATORIA: si este contenido incluye trabajadores (DNI/correo/nombre), llama guardar_nomina AHORA con TODAS las filas transcritas — aunque creas que ya están cargados o el archivo se repita. Tu memoria no cuenta: solo lo guardado por la tool existe.]"
           : ""
-        message = caption ? `${caption}\n\n${bloque}${directivaNomina}` : `${bloque}${directivaNomina}`
-        console.log(`[vic-pe] adjunto descrito contact=${contact} len=${descripcion.length}`)
+        // COMPROBANTE (21-sep, E2E en sitio): la regla del prompt no alcanzó —
+        // el modelo acusó recibo "por S/70" sin llamar la tool. La directiva va
+        // EN el mensaje del adjunto (mismo patrón que la nómina).
+        const { directivaComprobante } = await import("@/lib/comprobante-directiva")
+        const directivaPago = directivaNomina ? "" : directivaComprobante(descripcion)
+        message = caption ? `${caption}\n\n${bloque}${directivaNomina}${directivaPago}` : `${bloque}${directivaNomina}${directivaPago}`
+        console.log(`[vic-pe] adjunto descrito contact=${contact} len=${descripcion.length}${directivaPago ? " comprobante=si" : ""}`)
       } else if (esArchivoAdjunto) {
         message = CONTEXTO_DOC_ILEGIBLE_PE
       } else if (!caption) {
