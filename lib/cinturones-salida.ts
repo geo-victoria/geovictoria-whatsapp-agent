@@ -44,7 +44,7 @@ export type Veredicto = {
   /** Para el log y el aviso interno. */
   motivos: string[]
   /** Identificador del cinturón que disparó, para medir cuál actúa más. */
-  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool"
+  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool" | "link_formal_sin_tool"
 }
 
 const OK: Veredicto = { accion: "ok", motivos: [] }
@@ -177,6 +177,47 @@ function porcentajesYaOfrecidos(historialAsistente: string[] | undefined): Set<n
   return out
 }
 
+/**
+ * LINK DE COTIZACIÓN FORMAL SIN TOOL (21-sep noche, E2E anualidad Perú): tras
+ * un cotizar_referencial correcto el modelo respondió con el TEXTO DE ENTREGA
+ * de la formal ("¡Lista tu cotización, Ana! 🎉 Revísala aquí:
+ * https://cotizacion.geovictoria.com/q/ana-prueba") — un link INVENTADO a una
+ * cotización que no existe, y sin el precio que la tool sí había calculado.
+ * Regla: un link de cotización (/q/ o quote-acceptance) o la frase de entrega
+ * solo pueden salir si una tool de emisión corrió en el turno, o si ese
+ * mismo link ya se le envió antes al cliente (repetírselo es legítimo). Si en
+ * el turno hubo cotizar_referencial, el texto bueno YA existe: sale su
+ * mensajeParaProspecto sin reintento.
+ */
+export const LINK_COTIZACION_RE = /https?:\/\/[^\s)>"']*cotizacion\.geovictoria\.com\/(q\/|quote-acceptance)[^\s)>"']*/gi
+export const FRASE_ENTREGA_FORMAL_RE = /lista\s+tu\s+cotizaci[oó]n|rev[ií]sala\s+aqu[ií]/i
+
+export function linksFormalSinRespaldo(reply: string, historialAsistente: string[]): string[] {
+  const enReply = Array.from(String(reply || "").matchAll(LINK_COTIZACION_RE)).map((m) => m[0])
+  if (!enReply.length) return []
+  const conocidos = new Set<string>()
+  for (const h of historialAsistente || []) {
+    for (const m of String(h || "").matchAll(LINK_COTIZACION_RE)) conocidos.add(m[0].replace(/[.,;:!?]+$/, ""))
+  }
+  return enReply.map((u) => u.replace(/[.,;:!?]+$/, "")).filter((u) => !conocidos.has(u))
+}
+
+const FORZAR_TOOL_EMISION =
+  "\n\n# Instrucción de sistema (este turno)\n" +
+  "Tu borrador anterior entregó un LINK de cotización o anunció 'lista tu cotización' sin que " +
+  "ninguna tool de emisión (generar_link_cotizadora / actualizar_cotizacion / " +
+  "aplicar_siguiente_descuento / anualizar_cotizacion) haya corrido en este turno. PROHIBIDO " +
+  "inventar links o dar por emitida una cotización. Si ya tienes los datos del cierre, llama " +
+  "AHORA generar_link_cotizadora y entrega SU mensajeParaProspecto tal cual; si te faltan " +
+  "datos, entrega el precio que calculó la tool de este turno (si la hubo) y pide solo lo que falta."
+
+const CONTENCION_EMISION: Record<PaisCinturon, string> = {
+  cl: "Todavía no tengo emitida tu cotización formal — apenas la genere te llega el link por este mismo chat 🙌",
+  co: "Todavía no tengo emitida tu cotización formal — apenas la genere te llega el link por este mismo chat 🙌",
+  mx: "Todavía no tengo emitida tu cotización formal — apenas la genere te llega el link por este mismo chat 🙌",
+  pe: "Todavía no tengo emitida tu cotización formal — apenas la genere te llega el link por este mismo chat 🙌",
+}
+
 export type EntradaSalida = {
   reply: string
   toolCalls: readonly LlamadaTool[] | undefined
@@ -270,6 +311,31 @@ export function revisarSalida(e: EntradaSalida): Veredicto {
           motivos: ["descuento_ofrecido_sin_tool"],
           cinturon: "descuento_ofrecido_sin_tool",
         }
+      }
+    }
+  }
+
+  // (3d) Link de cotización formal o frase de entrega SIN tool de emisión
+  // (va después de 3/3b/3c: si el texto además anuncia "actualizada" o un
+  // descuento, ese cinturón es más específico y manda).
+  // Con cotizar_referencial en el turno el texto bueno es el de la tool; sin
+  // ella, reintento y contención honesta (un link inventado no "se deja pasar").
+
+  if (!toolsOk.some((n) => TOOLS_QUE_ACTUALIZAN.has(n))) {
+    const linksSinRespaldo = linksFormalSinRespaldo(reply, e.historialAsistente)
+    const fraseEntrega = FRASE_ENTREGA_FORMAL_RE.test(reply)
+    if (linksSinRespaldo.length || fraseEntrega) {
+      const motivos = [...linksSinRespaldo.map((u) => `link_sin_tool:${u}`), ...(fraseEntrega ? ["frase_entrega_sin_tool"] : [])]
+      if (canonico) {
+        return { accion: "reemplazo", reply: canonico, motivos, cinturon: "link_formal_sin_tool" }
+      }
+      return {
+        accion: "reintento",
+        directiva: FORZAR_TOOL_EMISION,
+        siFallaReintento: "contener",
+        contencion: CONTENCION_EMISION[e.pais] || CONTENCION_EMISION.cl,
+        motivos,
+        cinturon: "link_formal_sin_tool",
       }
     }
   }

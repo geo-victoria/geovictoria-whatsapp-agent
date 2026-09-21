@@ -251,3 +251,51 @@ test("repetir un % que Vicky ya ofreció antes no es inventarlo", () => {
   })
   assert.notEqual(v.cinturon, "descuento_ofrecido_sin_tool")
 })
+
+
+// ── link de cotización formal sin tool (21-sep noche, E2E anualidad Perú) ──
+const REPLY_LINK_FALSO = "Lista tu cotización, Ana! 🎉 Revísala aquí: https://cotizacion.geovictoria.com/q/ana-prueba\nPaga aquí y puedes estar en 5 minutos con la plataforma activa 😊\n\n---\n\nPara armar la cotización formal me falta solo esto:\n• RUC de la empresa\n• Tu email"
+
+test("link /q/ inventado + frase de entrega tras cotizar_referencial → sale el mensaje de la tool", () => {
+  const canon = "Resumen mensual recurrente:\n\n- Control de Asistencia (12 usuarios): S/66/mes\n\nTotal mensual: S/66 + IGV"
+  const v = revisarSalida({
+    reply: REPLY_LINK_FALSO,
+    toolCalls: [{ name: "cotizar_referencial", ok: true, output: { mensajeParaProspecto: canon } }],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.equal(v.accion, "reemplazo")
+  assert.equal(v.cinturon, "link_formal_sin_tool")
+  assert.equal(v.reply, canon)
+  assert.ok(v.motivos.some((m) => m.startsWith("link_sin_tool:https://cotizacion.geovictoria.com/q/ana-prueba")))
+})
+
+test("link inventado sin ninguna tool → reintento con contención honesta", () => {
+  const v = revisarSalida({ reply: REPLY_LINK_FALSO, toolCalls: [], historialAsistente: [], pais: "co" })
+  assert.equal(v.accion, "reintento")
+  assert.equal(v.cinturon, "link_formal_sin_tool")
+  assert.equal(v.siFallaReintento, "contener")
+  assert.match(String(v.contencion), /Todavía no tengo emitida/)
+})
+
+test("repetir un link que Vicky YA envió pasa (sin frase de entrega)", () => {
+  const link = "https://cotizacion.geovictoria.com/q/3525045000663120022-ab12cd"
+  const v = revisarSalida({
+    reply: "Te dejo de nuevo el link para que la revises cuando puedas: " + link + " 😊",
+    toolCalls: [],
+    historialAsistente: ["¡Lista tu cotización, Ro! 🎉 Revísala aquí: " + link],
+    pais: "cl",
+  })
+  assert.notEqual(v.cinturon, "link_formal_sin_tool")
+})
+
+test("la entrega real con generar_link_cotizadora ok pasa tal cual", () => {
+  const link = "https://cotizacion.geovictoria.com/q/3525045000663120022-ab12cd"
+  const v = revisarSalida({
+    reply: "¡Lista tu cotización, Ro! 🎉 Revísala aquí: " + link + "\nPaga acá y puedes estar en 5 minutos con la plataforma activa 😊",
+    toolCalls: [{ name: "generar_link_cotizadora", ok: true, output: { mensajeParaProspecto: "¡Lista tu cotización, Ro! 🎉 Revísala aquí: " + link } }],
+    historialAsistente: [],
+    pais: "pe",
+  })
+  assert.equal(v.accion, "ok")
+})
