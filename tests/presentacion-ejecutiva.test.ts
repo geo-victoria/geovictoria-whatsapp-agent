@@ -25,6 +25,9 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+// El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const leer = (p: string) => readFileSync(join(RAIZ, p), "utf8")
@@ -124,7 +127,7 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
   })
 
   test("los tres prompts declaran la excepción para que el modelo no la contradiga", () => {
-    assert.match(leer("app/api/vic-sales-agent-v3/prompt.ts"), /el sistema presenta automáticamente al ejecutivo a cargo del registro/)
+    assert.match(textoNucleo(FICHA_CL, ""), /el sistema presenta automáticamente al ejecutivo a cargo del registro/)
     assert.match(leer("lib/paises/co/prompt.ts"), /el sistema presenta automáticamente a \$\{PERFIL_CO\.equipo\.ejecutivo\.nombre\}/)
     assert.match(leer("lib/paises/mx/prompt.ts"), /la presentación automática de \$\{PERFIL_MX\.equipo\.ejecutivo\.nombre\}/)
   })

@@ -15,8 +15,11 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
+// El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
 
-const PROMPT = readFileSync("app/api/vic-sales-agent-v3/prompt.ts", "utf8")
+const PROMPT = textoNucleo(FICHA_CL, "")
 
 test("la regla general está en el prompt y prohíbe las fórmulas de duda", () => {
   const i = PROMPT.indexOf("NADA QUE FRENE LA VENTA")

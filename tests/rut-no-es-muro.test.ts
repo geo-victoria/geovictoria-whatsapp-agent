@@ -18,9 +18,12 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+// El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
-const PROMPT = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts"), "utf8")
+const PROMPT = textoNucleo(FICHA_CL, "")
 const TOOL = readFileSync(join(RAIZ, "lib/tools/generar-link-cotizadora.ts"), "utf8")
 
 describe("la escalera del RUT en el prompt CL", () => {

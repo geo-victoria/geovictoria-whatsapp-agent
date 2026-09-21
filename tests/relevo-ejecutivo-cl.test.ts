@@ -14,6 +14,9 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+// El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const leer = (p: string) => readFileSync(join(RAIZ, p), "utf8")
@@ -94,7 +97,7 @@ describe("el traspaso post-pago resuelve al dueño real", () => {
 })
 
 describe("la comunicación al cliente no promete nombres fijos", () => {
-  const PROMPT = leer("app/api/vic-sales-agent-v3/prompt.ts")
+  const PROMPT = textoNucleo(FICHA_CL, "")
   const VOSEO = leer("lib/voseo-v3.ts")
 
   test("el prompt CL atribuye la asignación a la tómbola, no a Eddyluz", () => {

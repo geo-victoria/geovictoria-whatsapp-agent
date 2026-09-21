@@ -22,6 +22,9 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { corregirPedidoDeTelefono, pideTelefono } from "../lib/no-pedir-telefono.ts"
+// El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
 
 /** El texto exacto que salió a producción. */
 const REAL =
@@ -95,7 +98,7 @@ describe("la corrección deja un mensaje que se puede mandar", () => {
 })
 
 const RAIZ = new URL("..", import.meta.url).pathname
-const PROMPT = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts"), "utf8")
+const PROMPT = textoNucleo(FICHA_CL, "")
 const WEBHOOK = readFileSync(join(RAIZ, "app/api/vic-botmaker-v3/route.ts"), "utf8")
 const LOOP = readFileSync(join(RAIZ, "app/api/vic-loop-cron/route.ts"), "utf8")
 

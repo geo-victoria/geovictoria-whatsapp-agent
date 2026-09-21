@@ -16,6 +16,9 @@ import {
   quitarSignosApertura,
   blindarContactoComercial,
 } from "../lib/voseo-v3.ts"
+// El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 
@@ -68,7 +71,7 @@ describe("nada de jerga chilena en texto de cliente", () => {
       //    toque 2…), no jerga.
       //  - voseo-v3: es el sanitizador; contener estas palabras ES su trabajo.
       if (/loop-v2|supabase-persistence|voseo-v3/.test(f)) continue
-      for (const linea of readFileSync(f, "utf8").split("\n")) {
+      for (const linea of textoNucleo(FICHA_CL, "").split("\n")) {
         // Las líneas que ENUNCIAN la prohibición son legítimas: lo que se busca
         // es jerga en lo que Vicky DICE, no en lo que define que no debe decir.
         if (
@@ -160,7 +163,7 @@ describe("arriendo del reloj por zona (caso Aysén 13-ago)", () => {
     // repetirla sin comuna.
     const f = join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts")
     const infractores: string[] = []
-    for (const linea of readFileSync(f, "utf8").split("\n")) {
+    for (const linea of textoNucleo(FICHA_CL, "").split("\n")) {
       const tiene035 = /0,35\s*UF/.test(linea)
       const tiene040 = /0,40?\s*UF/.test(linea)
       if (tiene035 !== tiene040) infractores.push(linea.trim().slice(0, 120))
@@ -180,7 +183,7 @@ describe("punto fijo con supervisor lo cubre la app (Eduardo 17-ago)", () => {
     // mismo caso —planta, obra, local con jefe de turno— se resuelve con la app
     // marcando desde el celular del supervisor, sin una segunda modalidad que
     // explicar. Lo que se conserva es la cobertura del caso, no el nombre.
-    const p = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts"), "utf8")
+    const p = textoNucleo(FICHA_CL, "")
     const bloque = p.slice(p.indexOf("REGLAS DE FIT POR MODALIDAD"), p.indexOf("REGLAS DE FIT POR MODALIDAD") + 2600)
     assert.match(bloque, /SUPERVISOR o RESPONSABLE/i)
     assert.match(bloque, /planta/i)
@@ -190,7 +193,7 @@ describe("punto fijo con supervisor lo cubre la app (Eduardo 17-ago)", () => {
   })
 
   test("la cuadrilla ya no se ofrece como modalidad en el menú de marcaje", () => {
-    const p = readFileSync(join(RAIZ, "app/api/vic-sales-agent-v3/prompt.ts"), "utf8")
+    const p = textoNucleo(FICHA_CL, "")
     assert.ok(!/\d\.\s*\*\*App de marcaje por cuadrilla\*\*/.test(p), "quedó la cuadrilla en la lista de formas de marcar")
     assert.ok(!/^\d\. App de marcaje por cuadrilla/m.test(p), "quedó la cuadrilla en el menú de ejemplo")
     assert.ok(!/CUÁNDO SACAR LA CUADRILLA/.test(p), "quedó el bloque proactivo de cuadrilla")
