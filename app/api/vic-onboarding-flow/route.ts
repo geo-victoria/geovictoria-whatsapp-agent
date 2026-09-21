@@ -157,9 +157,30 @@ export async function GET(req: Request): Promise<NextResponse> {
   // directo en el JSON del Flow sin negaciones.
   const natural = b.pais === "cl" && esPersonaNaturalCl(b.empresa.identificador || "")
   if (natural && (!extras.giro || extras.giro === "Otro")) extras.giro = "Persona Natural"
+  // UN SOLO FLOW PARA TODOS LOS PAÍSES (21-sep, Lalo "¿por qué son 4 WhatsApp
+  // flows?"): el JSON del formulario es uno; las tres etiquetas que cambian por
+  // país (documento de la empresa, documento del administrador, comuna o
+  // distrito) las manda el servidor al abrir, igual que ya manda qué campos
+  // mostrar. Levantar un país es subir el MISMO archivo a su bot, sin tocarlo.
+  // `mostrar_telefono`: sin contacto resuelto por la Code Action, el flow pinta
+  // el campo de respaldo `telefono_wsp` — el peruano se rehízo sin él y por eso
+  // "No pudimos identificar tu WhatsApp".
+  const { NOMBRE_IDENTIFICADOR, nombreIdentificadorAdmin } = await import("@/lib/onboarding/borrador")
+  const etiquetaDoc = NOMBRE_IDENTIFICADOR[b.pais] || "RUT"
+  const etiquetaAdmin = nombreIdentificadorAdmin(b.pais)
+  const ayudaDoc =
+    b.pais === "pe" ? "11 dígitos. Ej: 20123456789" : b.pais === "co" ? "Ej: 900123456-7" : b.pais === "mx" ? "Ej: ABC123456T12" : "Ej: 76.123.456-7"
   return NextResponse.json({
     ok: true,
     prefill: {
+      pais: b.pais,
+      etiqueta_documento: etiquetaDoc,
+      etiqueta_documento_ayuda: ayudaDoc,
+      etiqueta_admin_documento: etiquetaAdmin,
+      etiqueta_admin_documento_ayuda:
+        b.pais === "pe" ? "8 dígitos. Ej: 12345678 (o carné de extranjería)" : b.pais === "cl" ? "Ej: 12.345.678-9" : "",
+      etiqueta_zona: b.pais === "pe" ? "Distrito" : "Comuna",
+      mostrar_telefono: !contact,
       es_persona_natural: natural,
       // PE: giro/dirección/comuna son chilenos (SII/boleta) — el flow peruano
       // los oculta con el mismo flag.
