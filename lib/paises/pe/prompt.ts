@@ -28,7 +28,7 @@ import { calendarioProximosDias } from "../../calendar.ts"
 // reales. TRUNCADO A LA HORA a propósito: si incluyera minutos/segundos, el
 // system prompt cambiaría en cada request y rompería el prefijo del prompt
 // caching (decisión de costos 11-jul).
-function anclajeTemporalPE(): string {
+export function anclajeTemporalPE(): string {
   const now = new Date()
   const fechaLegible = now.toLocaleString("es-PE", {
     timeZone: "America/Lima",
@@ -75,8 +75,13 @@ export function getSystemPromptPE(contact?: string, umbralPrecios?: number): str
       .replace('- Cotizas para empresas de 1 a 50 personas que operan en PERÚ.', `- Cotizas para empresas de 1 a ${u} personas que operan en PERÚ (tu UMBRAL DE PRECIOS en esta conversación; sobre ${u}, el precio lo entrega la ejecutiva).`)
   }
 
+  return anclajeTemporalPE() + bloqueTelefonoPE(contact) + base
+}
+
+/** Bloque del teléfono conocido (compartido por el prompt PE clásico y el núcleo). */
+export function bloqueTelefonoPE(contact?: string): string {
   const telefono = (contact || "").trim()
-  const bloqueTelefono = telefono
+  return telefono
     ? `# Teléfono del cliente — ya lo conoces, NO lo preguntes
 
 El cliente escribe por WhatsApp desde el +${telefono}. Ese ES su teléfono de contacto válido. NUNCA se lo preguntes ni le pidas "un número de contacto": cuando una tool requiera teléfono, usa este automáticamente. Solo si ofrece espontáneamente otro número distinto, usa ese.
@@ -85,7 +90,6 @@ El cliente escribe por WhatsApp desde el +${telefono}. Ese ES su teléfono de co
 
 `
     : ""
-  return anclajeTemporalPE() + bloqueTelefono + base
 }
 
 export const SYSTEM_PROMPT_PE = `${PERFIL_PE.promptBlocks.identidad} Atiendes por WhatsApp desde ${PERFIL_PE.entidadLegal.razonSocial} (Lima), con trato peruano neutro, cordial y profesional — se debe sentir una persona real del equipo, no una IA. Ayudas a resolver el control de asistencia laboral de la empresa del cliente: calificas al prospecto, le muestras el valor y el precio, y cuando quiere avanzar le generas su cotización formal con link de pago en línea (y nuestra ejecutiva comercial en Perú lo acompaña en lo que necesite).

@@ -39,6 +39,8 @@ import { PERFIL_PE } from "@/lib/paises/pe"
 import { getSystemPromptPE } from "@/lib/paises/pe/prompt"
 import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
 import { TOOL_SCHEMAS_PE, buildDispatchPE } from "@/lib/paises/pe/tools"
+import { TOOL_SCHEMAS_PE_UNIFICADAS, buildDispatchPEUnificado } from "@/lib/paises/pe/tools-unificadas"
+import { getSystemPromptPENucleo } from "@/lib/paises/pe/prompt-nucleo"
 import {
   fetchHistoryV3,
   appendTurnV3,
@@ -111,7 +113,22 @@ const SALUDO_PE =
 
 // Tools que cierran el ciclo de contacto: la conversación quedó en manos
 // humanas (la ejecutiva PE la retoma).
-const FOLLOWUP_CLOSING_TOOLS_PE = new Set(["derivar_a_ejecutivo"])
+const FOLLOWUP_CLOSING_TOOLS_PE = new Set(["derivar_a_ejecutivo", "derivar_a_soporte", "registrar_solicitud_callback"])
+// Con el prompt núcleo (kv prompt_nucleo_pe=on) las tools llevan los nombres
+// chilenos: la derivación es derivar_a_soporte / registrar_solicitud_callback.
+const esDerivacionPE = (c: { name: string; ok: boolean }) => FOLLOWUP_CLOSING_TOOLS_PE.has(c.name) && c.ok
+/** Perú sobre el prompt núcleo + tools únicas (vic_kv prompt_nucleo_pe="on"; env VICKY_PROMPT_NUCLEO_PE). */
+async function nucleoPEActivo(): Promise<boolean> {
+  const env = (process.env.VICKY_PROMPT_NUCLEO_PE || "").trim().toLowerCase()
+  if (env === "on" || env === "1") return true
+  if (env === "off" || env === "0") return false
+  const kv = ((await getKvValue("prompt_nucleo_pe").catch(() => null)) || "").trim().toLowerCase()
+  return kv === "on" || kv === "1"
+}
+/** Con el núcleo, la derivación del umbral nombra la tool ÚNICA (derivar_a_soporte). */
+function derivacionPEUnificada(d: ReturnType<typeof derivacionDePais>): ReturnType<typeof derivacionDePais> {
+  return { ...d, tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores" }
+}
 
 type ToolCallRecordPE = { name: string; ok: boolean; output?: unknown }
 
@@ -161,6 +178,8 @@ type BotmakerBody = {
   simular?: boolean
   /** Solo con simular: lee el historial real y persiste el turno (E2E multi-turno). */
   conHistorial?: boolean
+  /** Solo con simular: fuerza el prompt NÚCLEO + tools únicas (true) o el clásico (false) sin tocar el kv de producción. */
+  nucleo?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -291,7 +310,8 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
   // conversación + directiva determinista por dotación declarada, con la
   // tool de derivación de este país. Fail-open: sin datos, no acota nada.
   const umbralInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
-  const derivPais = derivacionDePais(contact)
+  const nucleoPE = await nucleoPEActivo()
+  const derivPais = nucleoPE ? derivacionPEUnificada(derivacionDePais(contact)) : derivacionDePais(contact)
   const contextoUmbral = umbralInfo ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen, derivPais) : ""
   const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
   const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral) : null
@@ -343,8 +363,10 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
         `SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa distinta puedes volver al flujo de venta.`
     }
   } catch { /* sin marca, sin directiva */ }
-  const systemPromptPE = contextoUmbral + getSystemPromptPE(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaExtra
-  const dispatchPE = buildDispatchPE(contact)
+  const systemPromptPE = contextoUmbral + (nucleoPE ? getSystemPromptPENucleo(contact, umbralInfo?.umbral) : getSystemPromptPE(contact, umbralInfo?.umbral)) + contextoUmbral + directivaUmbral + directivaExtra
+  const dispatchPE = nucleoPE ? buildDispatchPEUnificado(contact) : buildDispatchPE(contact)
+  const schemasPE = (nucleoPE ? TOOL_SCHEMAS_PE_UNIFICADAS : TOOL_SCHEMAS_PE) as unknown as unknown[]
+  if (nucleoPE) console.log(`[vic-pe] prompt NÚCLEO + tools únicas contact=${contact}`)
   const result = await runAgentLoop({
     systemPrompt: systemPromptPE,
     history,
@@ -353,7 +375,7 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
     contact,
     model: modelo,
     tools: {
-      schemas: TOOL_SCHEMAS_PE as unknown as unknown[],
+      schemas: schemasPE,
       dispatch: dispatchPE,
     },
   })
@@ -393,7 +415,7 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
     /\breuni[oó]n\b[^.]{0,40}(qued[oó]|est[aá]|fue)[^.]{0,18}\b(agendad|coordinad|confirmad)/i.test(t) ||
     /\bquedaste\s+registrad|\bte\s+dej[eé]\s+registrad/i.test(t)
   const afirmaContactoListo = afirmaContactoListoEn(reply)
-  const realContacto = toolCalls.some((c) => c.name === "derivar_a_ejecutivo" && c.ok)
+  const realContacto = toolCalls.some(esDerivacionPE)
   if (afirmaContactoListo && !realContacto) {
     const FORZAR_TOOL =
       "\n\n# Instrucción de sistema (este turno)\n" +
@@ -407,10 +429,10 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
       apiKey,
       contact,
       model: MODELO_COTIZACION_PE,
-      tools: { schemas: TOOL_SCHEMAS_PE as unknown as unknown[], dispatch: dispatchPE },
+      tools: { schemas: schemasPE, dispatch: dispatchPE },
     }).catch(() => null)
     const retryCalls = ((retry?.toolCalls || []) as ToolCallRecordPE[])
-    const retryOk = retryCalls.some((c) => c.name === "derivar_a_ejecutivo" && c.ok)
+    const retryOk = retryCalls.some(esDerivacionPE)
     const retryReply = (retry?.reply || "").trim()
     if (retryOk && retryReply && retryReply !== AGENT_LOOP_EMPTY_FALLBACK) {
       console.warn(`[vic-pe] ALUCINACION_RECUPERADA contact=${contact}: el reintento forzó la tool.`)
@@ -823,23 +845,28 @@ export async function POST(request: Request): Promise<NextResponse> {
       const conHist = body.conHistorial === true && pruebaOk
       const histSim = conHist ? await fetchHistoryV3(contact).catch(() => []) : []
       const modeloSim = esFlujoCotizacionPE(message, histSim) ? MODELO_COTIZACION_PE : MODELO_SIMPLE_PE
+      // Espejo del camino real: el mismo interruptor decide prompt y tools.
+      const nucleoSim = body.nucleo === true ? true : body.nucleo === false ? false : await nucleoPEActivo()
       const result = await runAgentLoop({
         systemPrompt: await (async () => {
           // Espejo del camino real (umbral 08-ago): la simulación E2E debe
           // ver el mismo prompt que el cliente.
           const uInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
-          const dP = derivacionDePais(contact)
+          const dP = nucleoSim ? derivacionPEUnificada(derivacionDePais(contact)) : derivacionDePais(contact)
           const cU = uInfo ? formatUmbralParaPrompt(uInfo.umbral, uInfo.origen, dP) : ""
           const dot = uInfo ? dotacionSobreUmbral(message, uInfo.umbral) : null
           const dir = dot && uInfo ? formatDirectivaSobreUmbral(dot, uInfo.umbral, dP) : ""
-          return cU + getSystemPromptPE(contact, uInfo?.umbral) + cU + dir
+          return cU + (nucleoSim ? getSystemPromptPENucleo(contact, uInfo?.umbral) : getSystemPromptPE(contact, uInfo?.umbral)) + cU + dir
         })(),
         history: histSim,
         userMessage: message,
         apiKey,
         contact,
         model: modeloSim,
-        tools: { schemas: TOOL_SCHEMAS_PE as unknown as unknown[], dispatch: buildDispatchPE(contact) },
+        tools: {
+          schemas: (nucleoSim ? TOOL_SCHEMAS_PE_UNIFICADAS : TOOL_SCHEMAS_PE) as unknown as unknown[],
+          dispatch: nucleoSim ? buildDispatchPEUnificado(contact) : buildDispatchPE(contact),
+        },
       })
       // Mismos guardrails de texto final del camino real (comparación ANTES
       // de sanear; opt-out sin texto → despedida).
@@ -865,6 +892,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         pais: "pe",
         simulacion: true,
         conHistorial: conHist,
+        nucleo: nucleoSim,
         turnosEnHistorial: histSim.length,
         modelo: modeloSim,
         tools: (result.toolCalls || []).map((t) => (t as ToolCallRecordPE).name),
