@@ -1023,9 +1023,21 @@ export async function GET(req: Request): Promise<Response> {
     // vic_loop no retrocede — si el historial o los punteros fallan un tick,
     // el toque no vuelve a pedir la dotación que ya tenía.
     const guardada = (r.stage as LoopStage) || "sin_precio"
-    const stage: LoopStage = conv?.formal_quote_id
+    // ACEPTADA MANDA SOBRE TODO (21-sep, caso AD PRO COT1503): `formal_quote_id`
+    // se evaluaba PRIMERO, y como toda cotización emitida por Vicky lo tiene,
+    // la etapa `aceptada` que estampa pagoCierraLoop al aceptar volvía a
+    // `formal` en el tick siguiente. Efecto medido: AD PRO aceptó a las 11:20
+    // y una hora después recibió "Tu cotización quedó lista, si te quedó
+    // alguna duda…" — el mensaje de la etapa ANTERIOR a alguien que ya
+    // aceptó, sin el empujón al pago ni el link. Le pasaba SOLO a las
+    // cotizaciones de Vicky: la de un ejecutivo no tiene el puntero y se
+    // salvaba por casualidad (García Áridos el mismo día sí recibió el cobro).
+    // Aceptar es el estado más avanzado del embudo: nada lo pisa.
+    const stage: LoopStage = guardada === "aceptada"
+      ? "aceptada"
+      : conv?.formal_quote_id
       ? "formal"
-      : guardada === "formal" || guardada === "aceptada"
+      : guardada === "formal"
         ? guardada
         : conv?.pref_escalon !== null && conv?.pref_escalon !== undefined
           ? "con_precio"
@@ -1485,7 +1497,14 @@ export async function GET(req: Request): Promise<Response> {
           if (ok) {
             // El toque queda en el historial como turno de Vicky para que
             // retome con continuidad cuando el cliente responda.
-            await appendAssistantV3(r.contact, texto, country).catch(() => {})
+            //
+            // CON EL LINK YA SUSTITUIDO (21-sep): acá iba `texto` crudo, así que
+            // 41 toques de cobro a 34 contactos quedaron registrados con
+            // "{LINK_PAGO}" literal desde el 27-ago. Al cliente le llegó bien (la
+            // plantilla lleva el link en su variable), pero nuestro registro
+            // mentía: ensuciaba la lectura del chat y el anti-repetición
+            // comparaba textoFinal contra un historial con el placeholder.
+            await appendAssistantV3(r.contact, textoFinal || texto, country).catch(() => {})
             void logToque(r.contact, tpl, touch, stage, paisKey)
             enviadosPlantilla++
             ejecutado = true
