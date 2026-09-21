@@ -123,7 +123,10 @@ export async function anualizarCotizacionPais(
 
   // Dotación para el nombre (solo si el plan viaja por usuario).
   const filaPlan = filas.find((f) => f.Es_Recurrente === true && String(f.Codigo_Item || "").toLowerCase().startsWith("plan"))
-  const personas = filaPlan && String(filaPlan.Modalidad || "") === "Recurrente" ? Number(filaPlan.Cantidad || 0) : 0
+  // El subform guarda la modalidad del plan por usuario como "Recurrente" o
+  // "Por usuario" según el camino que la escribió (verificado en la E2E PE
+  // del 21-sep: la edición en sitio deja "Por usuario").
+  const personas = filaPlan && /recurrente|por usuario/i.test(String(filaPlan.Modalidad || "")) ? Number(filaPlan.Cantidad || 0) : 0
 
   // ── 3. Ítems en la forma del país ──
   const pu = pais === "pe" ? "precioUnitarioPEN" : "precioUnitarioCOP"
