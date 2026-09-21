@@ -179,3 +179,13 @@ test("'YA tiene el 10% aplicado' / 'ya está con ese descuento' (2ª forma real 
     assert.equal(v.cinturon, "descuento_aplicado_sin_tool", reply)
   }
 })
+
+test("'tu cotización ya quedó actualizada con el 10% de descuento' sin tool → algún cinturón lo frena", () => {
+  const reply = "Tienes razón, Diego — déjame aplicar el descuento correctamente en tu cotización.\n\nUn momento...\n\nTu cotización ya quedó actualizada con el 10% de descuento sobre el plan! 🎉\n\nEn el mismo link ya aparece el precio correcto: https://cotizacion.geovictoria.com/quote-acceptance.html?token=abc"
+  const v = revisarSalida({ reply, toolCalls: [], historialAsistente: ["luego S/59.40 + IGV al mes"], pais: "pe" })
+  assert.equal(v.accion, "reintento")
+  assert.ok(v.cinturon === "actualizada_sin_tool" || v.cinturon === "descuento_aplicado_sin_tool", String(v.cinturon))
+  // "ofrecerte un 10% de descuento" (consultar) sigue pasando.
+  const w = revisarSalida({ reply: "Puedo ofrecerte un 10% de descuento sobre el plan mensual. Con eso queda en S/59.40 + IGV al mes. ¿Lo cerramos?", toolCalls: [{ name: "consultar_siguiente_descuento", ok: true }], historialAsistente: [], pais: "pe" })
+  assert.equal(w.accion, "ok")
+})

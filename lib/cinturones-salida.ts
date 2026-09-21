@@ -78,7 +78,7 @@ const FORZAR_TOOL_PRECIO =
  * los cuatro países. El regex es el chileno tal cual.
  */
 export const ANUNCIA_ACTUALIZADA_RE =
-  /cotizaci[oó]n\s+(actualizada|modificada|corregida)|actualic[eé]\s+(tu|la)\s+cotizaci[oó]n|te\s+(env[ií]o|mando|mand[eé]|acabo\s+de\s+mandar)\s+la\s+cotizaci[oó]n\s+actualizada|nueva\s+versi[oó]n\s+de\s+(tu|la)\s+cotizaci[oó]n|ya\s+(la\s+)?actualic[eé]/i
+  /cotizaci[oó]n\s+(ya\s+)?((qued[oó]|est[aá]|sali[oó])\s+)?(actualizada|modificada|corregida)|actualic[eé]\s+(tu|la)\s+cotizaci[oó]n|te\s+(env[ií]o|mando|mand[eé]|acabo\s+de\s+mandar)\s+la\s+cotizaci[oó]n\s+actualizada|nueva\s+versi[oó]n\s+de\s+(tu|la)\s+cotizaci[oó]n|ya\s+(la\s+)?actualic[eé]/i
 
 const TOOLS_QUE_ACTUALIZAN = new Set([
   "actualizar_cotizacion",
@@ -112,7 +112,7 @@ const CONTENCION_ACTUALIZADA: Record<PaisCinturon, string> = {
  * prometer un precio que la página no muestra.
  */
 export const ANUNCIA_DESCUENTO_APLICADO_RE =
-  /\b(ya\s+)?(tiene|qued[oó]|est[aá]|va|sali[oó]|se\s+fue)\s+(ya\s+)?(con\s+)?(el|un|tu|ese|este)\s+(\d{1,2}\s*%(\s+de\s+descuento)?|descuento)\s+(ya\s+)?(aplicad|incluid|list[oa]\b|actualizad)|(ya\s+)?est[aá]\s+con\s+(ese|el|tu)\s+(\d{1,2}\s*%|descuento)|te\s+apliqu[eé]\s+(el|un)\s+\d{1,2}\s*%|descuento\s+(ya\s+)?(qued[oó]\s+)?aplicad[oa]|(ya\s+)?(le\s+)?apliqu[eé]\s+(el|tu)\s+descuento/i
+  /\b(ya\s+)?(tiene|qued[oó]|est[aá]|va|sali[oó]|se\s+fue)\s+(ya\s+)?(actualizada\s+)?(con\s+)?(el|un|tu|ese|este)\s+(\d{1,2}\s*%(\s+de\s+descuento)?|descuento)(\s+sobre\s+el\s+plan)?\s*(ya\s+)?(aplicad|incluid|list[oa]\b|actualizad)?|(ya\s+)?est[aá]\s+con\s+(ese|el|tu)\s+(\d{1,2}\s*%|descuento)|te\s+apliqu[eé]\s+(el|un)\s+\d{1,2}\s*%|descuento\s+(ya\s+)?(qued[oó]\s+)?aplicad[oa]|(ya\s+)?(le\s+)?apliqu[eé]\s+(el|tu)\s+descuento/i
 
 const TOOLS_QUE_APLICAN_DESCUENTO = new Set(["aplicar_siguiente_descuento", "generar_link_cotizadora", "actualizar_cotizacion"])
 
