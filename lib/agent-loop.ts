@@ -1259,10 +1259,9 @@ export async function runAgentLoop(params: {
               ).catch(() => 0)
             }
           } else if (toolName === "aplicar_siguiente_descuento") {
-            // Refrescar la vigencia de la formal sobre la que se negocia.
-            // Perú (21-sep): el descuento se aplica RE-EMITIENDO, así que la
-            // tool devuelve un quoteId NUEVO — ese manda sobre el que pasó el
-            // modelo (que es el de la cotización reemplazada).
+            // Refrescar la vigencia de la formal sobre la que se negocia. Si la
+            // tool devuelve quoteId (PE/CO resuelven la formal por puntero), ese
+            // manda sobre el que pasó el modelo.
             const rq = result as Record<string, unknown>
             const qid =
               (typeof rq.quoteId === "string" && rq.quoteId) ||
@@ -1293,7 +1292,7 @@ export async function runAgentLoop(params: {
             // Puntero al día: mismos quoteId/link, totales nuevos (los usa la
             // llamada de voz y el contexto anti-amnesia).
             const r3 = result as Record<string, unknown>
-            // Mismo criterio: en Perú actualizar = re-emitir con id nuevo.
+            // Mismo criterio: el quoteId de la tool manda si viene.
             const qid3 =
               (typeof r3.quoteId === "string" && r3.quoteId) ||
               (typeof toolInput.quote_id === "string" ? toolInput.quote_id : "")

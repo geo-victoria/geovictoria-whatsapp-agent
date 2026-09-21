@@ -97,6 +97,14 @@ export type ActualizarCotizacionInput = {
   /** SOLO canal ejecutivo/admin: la regeneración NO envía el correo al
    * cliente (Lalo 11-ago). Vicky con clientes no lo pasa. */
   _sinCorreoCliente?: boolean
+  /**
+   * ÍTEMS YA CALCULADOS POR EL MOTOR DE OTRO PAÍS (Lalo 21-sep, "pasar las
+   * tools de Chile a global"): PE/CO arman sus ítems en su moneda (cotizarPE /
+   * cotizarCO) y esta MISMA tool los manda al MISMO endpoint, que edita la
+   * cotización en sitio con el perfil de ese país. El catálogo y la UF
+   * chilenos no se tocan.
+   */
+  _itemsPais?: { pais: "pe" | "co"; items: unknown[] }
   quote_id: string
   userCount: number
   modulos: string[]
@@ -150,6 +158,20 @@ export async function actualizarCotizacion(
 ): Promise<ActualizarCotizacionResultado> {
   const quoteId = (args?.quote_id || "").trim()
   if (!quoteId) return { ok: false, error: "Falta quote_id (usa el de la cotización vigente de esta conversación)." }
+
+  if (args._itemsPais) {
+    const { pais, items } = args._itemsPais
+    if (!Array.isArray(items) || items.length === 0) return { ok: false, error: "Sin ítems para actualizar (el motor del país no devolvió líneas)." }
+    return postActualizar({
+      quoteId,
+      resumenCambio: args.resumen_cambio,
+      regenerarPdf: args._regenerarPdf,
+      sinCorreoCliente: args._sinCorreoCliente,
+      cotizacion: { items, pais },
+      totalUF: 0,
+      totalCLP: 0,
+    })
+  }
 
   // Mismo builder que generar_link: catálogo, precios y validaciones idénticos.
   const construccion = construirItemsCotizacion({
@@ -209,6 +231,39 @@ export async function actualizarCotizacion(
       : await getUFActualSafe()
   const totalCLP = Math.round(totalUF * ufActual)
 
+  return postActualizar({
+    quoteId,
+    resumenCambio: args.resumen_cambio,
+    regenerarPdf: args._regenerarPdf,
+    sinCorreoCliente: args._sinCorreoCliente,
+    cotizacion: {
+      items,
+      ufActual: Number(ufActual.toFixed(2)),
+      totalUF: Number(totalUF.toFixed(3)),
+      totalCLP,
+    },
+    totalUF: Number(totalUF.toFixed(3)),
+    totalCLP,
+  })
+}
+
+/**
+ * POST al endpoint ÚNICO de edición: Chile manda ítems en UF; PE/CO mandan
+ * `cotizacion.pais` + sus ítems y el endpoint elige el perfil del país.
+ * Flujo confirmar-una-vez del editor interno (Lalo 07-ago): con
+ * regenerarPdf:false la versión/PDF se generan UNA vez con la confirmación;
+ * Vicky con clientes no manda el flag → regeneración por edición.
+ */
+async function postActualizar(a: {
+  quoteId: string
+  resumenCambio: string
+  regenerarPdf?: boolean
+  sinCorreoCliente?: boolean
+  cotizacion: Record<string, unknown>
+  totalUF: number
+  totalCLP: number
+}): Promise<ActualizarCotizacionResultado> {
+  const { quoteId, totalUF, totalCLP } = a
   try {
     const response = await fetch(
       `${COTIZADORA_API_BASE}/api/quote-acceptance/actualizar-cotizacion`,
@@ -220,19 +275,10 @@ export async function actualizarCotizacion(
         },
         body: JSON.stringify({
           quoteId,
-          resumenCambio: args.resumen_cambio,
-          // Flujo confirmar-una-vez del editor interno (Lalo 07-ago): el
-          // editor pasa _regenerarPdf:false en cada cambio y la versión/PDF
-          // se generan UNA vez con la confirmación. Vicky con clientes no
-          // manda el flag → regeneración por edición, como siempre.
-          ...((args as { _regenerarPdf?: boolean })._regenerarPdf === false ? { regenerarPdf: false } : {}),
-          ...((args as { _sinCorreoCliente?: boolean })._sinCorreoCliente === true ? { sinCorreoCliente: true } : {}),
-          cotizacion: {
-            items,
-            ufActual: Number(ufActual.toFixed(2)),
-            totalUF: Number(totalUF.toFixed(3)),
-            totalCLP,
-          },
+          resumenCambio: a.resumenCambio,
+          ...(a.regenerarPdf === false ? { regenerarPdf: false } : {}),
+          ...(a.sinCorreoCliente === true ? { sinCorreoCliente: true } : {}),
+          cotizacion: a.cotizacion,
         }),
         cache: "no-store",
       },
@@ -261,7 +307,7 @@ export async function actualizarCotizacion(
       ok: true,
       version: Number(data.version || 0),
       acceptanceUrl: data.acceptance_url || "",
-      totalUF: Number(totalUF.toFixed(3)),
+      totalUF,
       totalCLP,
       mensajeParaProspecto: data.mensaje_para_prospecto || "",
     }

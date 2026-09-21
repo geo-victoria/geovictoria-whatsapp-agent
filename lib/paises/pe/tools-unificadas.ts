@@ -13,11 +13,12 @@
  *     comprobante, opt-out, seguimiento);
  *   - delega a la implementación chilena donde es país-neutra (reenvío por
  *     correo, PDF por WhatsApp);
- *   - RE-EMITE donde Chile edita en sitio (actualizar_cotizacion,
- *     aplicar_siguiente_descuento): el cotizador de edición es chileno (motor
- *     UF), así que la paridad se logra generando una cotización NUEVA con la
- *     config/escalón nuevos, leídos de la formal vigente en Zoho, y expirando
- *     la anterior (caso Lalo 21-sep: "en Chile eso no pasa, ¿por qué acá?");
+ *   - EDITA EN SITIO como Chile (actualizar_cotizacion, consultar/aplicar_
+ *     siguiente_descuento): usa las MISMAS tools chilenas contra el MISMO
+ *     endpoint del cotizador, que desde el 21-sep conoce el país de la
+ *     cotización (token) y edita con el perfil peruano (soles, PDF PE, escalera
+ *     10 → 20 en el plan). Perú solo aporta los ítems de su motor (cotizarPE).
+ *     Caso Lalo 21-sep: "en Chile eso no pasa, ¿por qué acá?" — ya no pasa.
  *   - responde HONESTO donde Perú no tiene la capacidad (agenda Cal, ficha
  *     PDF del reloj, certificación DT, anualidad): la tool existe, dice qué
  *     hacer en su lugar y JAMÁS simula el efecto.
@@ -89,9 +90,6 @@ const ESCALON = {
   description:
     "Escalón de descuento del PLAN (1 = 10 %, 2 = 20 %, por 6 meses) SOLO como respuesta a una objeción de precio tras mostrar la lista. 0 u omitido = sin descuento. Nunca proactivo.",
 }
-
-const TOPE_PE =
-  "Ese 20 % en el plan por 6 meses ya es el máximo que puedo aplicar — no tengo margen para más, y prefiero decírtelo con franqueza. Con ese valor te dejo la cotización lista cuando quieras avanzar."
 
 /** Respuesta honesta de una capacidad que Perú no tiene (la tool existe, no simula). */
 function sinCapacidad(que: string, enSuLugar: string) {
@@ -275,7 +273,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   {
     name: "consultar_siguiente_descuento",
     description:
-      "Con una cotización FORMAL ya emitida: dice qué escalón de descuento corresponde ofrecer ahora (10 % → 20 % sobre el plan, 6 meses) SIN aplicarlo. Úsala cuando el cliente objeta el precio de la formal. Devuelve `escalonSiguiente`, `pct` y `topeAlcanzado`. Si el cliente acepta, llama aplicar_siguiente_descuento.",
+      "Con una cotización FORMAL ya emitida: dice qué escalón de descuento corresponde ofrecer ahora (10 % → 20 % sobre el plan, 6 meses) SIN aplicarlo y devuelve el precio recalculado en `mensajeParaProspecto` (cópialo TAL CUAL; en soles netos + IGV). Úsala cuando el cliente objeta el precio de la formal; nunca proactiva. Si el cliente acepta, llama aplicar_siguiente_descuento. Con `topeAlcanzado=true` es el último escalón.",
     input_schema: {
       type: "object" as const,
       properties: { quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente de esta conversación)." } },
@@ -285,17 +283,20 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   {
     name: "aplicar_siguiente_descuento",
     description:
-      "Aplica el escalón siguiente de descuento (10 % → 20 % sobre el plan, 6 meses) a la cotización FORMAL vigente de esta conversación: en Perú eso genera una cotización NUEVA con el descuento (la anterior queda reemplazada) y devuelve el link nuevo en `mensajeParaProspecto` — cópialo TAL CUAL. Solo ante objeción de precio y nunca dos escalones en un mismo turno. Con `topeAlcanzado=true` no hay más rebaja: dilo con franqueza.",
+      "Aplica el escalón siguiente de descuento (10 % → 20 % sobre el plan, 6 meses) a la cotización FORMAL vigente de esta conversación: la MISMA cotización se actualiza (mismo número, nueva versión del PDF) y devuelve el link en `mensajeParaProspecto` — cópialo TAL CUAL. Pasa `pct_ofrecido` con el % que ya le comunicaste. Solo ante objeción de precio y nunca dos escalones en un mismo turno. Con `topeAlcanzado=true` no hay más rebaja: dilo con franqueza.",
     input_schema: {
       type: "object" as const,
-      properties: { quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente)." } },
+      properties: {
+        quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente)." },
+        pct_ofrecido: { type: "number" as const, minimum: 0, maximum: 40, description: "Porcentaje EXACTO sobre el plan que ya le ofreciste (el que devolvió consultar_siguiente_descuento). No lo inventes." },
+      },
       required: [],
     },
   },
   {
     name: "actualizar_cotizacion",
     description:
-      "Cambia la cotización FORMAL vigente de esta conversación (más o menos personas, agregar o quitar el reloj, cambiar modalidad o puntos). En Perú eso genera una cotización NUEVA con la configuración nueva (misma empresa y RUC, mismo descuento ya ofrecido; la anterior queda reemplazada) y devuelve el link nuevo en `mensajeParaProspecto` — cópialo TAL CUAL, no vuelvas a mostrar opciones ni recalcules nada. Pasa SOLO lo que cambia; lo demás se conserva de la formal. Llámala EN EL MISMO TURNO en que el cliente pide el cambio: jamás anuncies 'te la actualizo' sin llamarla.",
+      "Cambia la cotización FORMAL vigente de esta conversación (más o menos personas, agregar o quitar el reloj, cambiar modalidad o puntos). La MISMA cotización se actualiza en sitio: el link NO cambia (en el mismo link ya aparece al día), el descuento ya ofrecido se conserva y el PDF nuevo va a su correo. Copia `mensajeParaProspecto` TAL CUAL; no vuelvas a mostrar opciones ni recalcules nada. Pasa SOLO lo que cambia; lo demás se conserva de la formal. Llámala EN EL MISMO TURNO en que el cliente pide el cambio: jamás anuncies 'te la actualizo' sin llamarla.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -445,22 +446,6 @@ export async function leerFormalPE(contact: string, quoteId?: string): Promise<F
   }
 }
 
-/** Best-effort: la formal reemplazada queda Expirada para que nadie pague la vieja. */
-async function expirarFormalPE(quoteId: string): Promise<void> {
-  try {
-    const { fetchZoho } = await import("../../zoho-token.ts")
-    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
-    await fetchZoho(`${api}/crm/v8/${mod}/${quoteId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: [{ id: quoteId, Estado_Cotizacion: "Expirada" }], trigger: ["blueprint"] }),
-    })
-  } catch (e) {
-    console.warn(`[pe-unificadas] no se pudo expirar ${quoteId}:`, e instanceof Error ? e.message : e)
-  }
-}
-
 type PrefPE = { userCount: number; hardware?: HardwareIn[]; puntosInstalacion?: PuntoIn[]; escalon: number }
 
 /**
@@ -492,66 +477,25 @@ export function buildDispatchPEUnificado(contact: string) {
   }
 
   /**
-   * PERÚ NO EDITA EN SITIO: el cotizador `actualizar-cotizacion` es chileno
-   * (motor UF). La paridad con Chile se logra RE-EMITIENDO: misma empresa,
-   * RUC, contacto y correo leídos de la formal vigente en Zoho; la config
-   * nueva (o la de la memoria del estimado) y el escalón que corresponde; la
-   * cotización anterior queda Expirada y el puntero pasa a la nueva (lo hace
-   * agent-loop con `result.quoteId`). El mensaje al cliente habla de
-   * "actualizada", nunca de "opciones": lo que el modelo tiene que copiar.
+   * EDICIÓN EN SITIO = LA TOOL CHILENA (21-sep). Perú solo resuelve la formal
+   * vigente (puntero + guarda Pagada) y, para cambios de configuración, arma
+   * los ítems con su motor (cotizarPE, soles al dólar SUNAT del día). El
+   * endpoint reconoce el país por el token y edita con el perfil peruano.
    */
-  async function reemitirPE(a: { quoteId?: string; motivo: "cambio" | "descuento"; cfg?: CotizarIn }): Promise<unknown> {
-    const f = await leerFormalPE(contact, a.quoteId)
-    if ("error" in f) return { ok: false, error: f.error }
-    const pref = await leerPref()
-    const cfg: CotizarIn = {
-      userCount: Number(a.cfg?.userCount || pref?.userCount || 0),
-      hardware: a.cfg?.hardware ?? pref?.hardware,
-      puntosInstalacion: a.cfg?.puntosInstalacion ?? pref?.puntosInstalacion,
-    }
-    if (!cfg.userCount) {
-      return { ok: false, error: "No sé con qué dotación se emitió esa cotización: pásame userCount (y hardware/puntos si lleva reloj) en la llamada." }
-    }
-    const escalonFormal = Math.max(f.escalon, pref?.escalon || 0)
-    let escalon = escalonFormal
-    if (a.motivo === "descuento") {
-      if (escalonFormal >= 2) {
-        return { ok: true, quoteId: f.quoteId, topeAlcanzado: true, escalonDescuento: 2, mensajeParaProspecto: TOPE_PE }
-      }
-      escalon = escalonFormal + 1
-    }
-    if (!f.empresa || !f.ruc) {
-      return { ok: false, error: "La cotización vigente no trae razón social o RUC legibles en el CRM: pídeselos al cliente y emite con generar_link_cotizadora." }
-    }
-    const r = (await base("generar_link_cotizadora", {
-      empresa: f.empresa,
-      contacto: f.contacto || undefined,
-      email: f.email || undefined,
-      ruc: f.ruc,
-      ...aInputCotizarPE({ ...cfg, escalonDescuento: escalon }),
-    })) as Record<string, unknown>
-    if (!r?.ok) return r
-    await guardarPref({ userCount: cfg.userCount, hardware: cfg.hardware, puntosInstalacion: cfg.puntosInstalacion, escalon })
-    await expirarFormalPE(f.quoteId)
-    const link = String(r.acceptanceUrl || "")
-    const msgOriginal = String(r.mensajeParaProspecto || "")
-    // El texto de la tool base abre con "Listo!! Tu cotización formal quedó
-    // generada": acá el cliente pidió un CAMBIO o un DESCUENTO sobre una
-    // formal que ya conocía, así que la apertura dice eso — y el link nuevo
-    // reemplaza al anterior.
-    const cuerpo = msgOriginal.replace(/^Listo!!\s*Tu cotizaci[oó]n formal qued[oó] generada\s*🎉\s*/i, "")
-    const apertura =
-      a.motivo === "descuento"
-        ? `Listo!! Te apliqué el ${escalon === 1 ? "10" : "20"} % en el plan por 6 meses 🎉 (este link reemplaza al anterior)\n\n`
-        : "Listo!! Tu cotización quedó actualizada 🎉 (este link reemplaza al anterior)\n\n"
-    return {
-      ...r,
-      reemplazaQuoteId: f.quoteId,
-      escalonDescuento: escalon,
-      topeAlcanzado: escalon >= 2,
-      acceptanceUrl: link,
-      mensajeParaProspecto: apertura + cuerpo,
-    }
+  async function itemsPE(cfg: CotizarIn): Promise<unknown[]> {
+    const { cotizarPE } = await import("./cotizar.ts")
+    const { tipoCambioSunat } = await import("./tc-sunat.ts")
+    const tc = await tipoCambioSunat()
+    const reloj = relojDeHardwarePE(cfg.hardware)
+    const calculo = cotizarPE({
+      userCount: Number(cfg.userCount || 0),
+      reloj,
+      puntos: reloj ? puntosPE(cfg.puntosInstalacion) : [],
+      // Los ítems van a precio de LISTA: el % comiteado ya vive en la cotización.
+      escalonDescuento: 0,
+      tipoCambio: tc.venta,
+    })
+    return calculo.itemsCotizador as unknown[]
   }
 
   return async function dispatchPEUnificado(name: string, input: unknown): Promise<unknown> {
@@ -676,34 +620,48 @@ export function buildDispatchPEUnificado(contact: string) {
       case "consultar_siguiente_descuento": {
         const f = await leerFormalPE(contact, i.quote_id as string | undefined)
         if ("error" in f) return { ok: false, error: f.error }
-        const pref = await leerPref()
-        const actual = Math.max(f.escalon, pref?.escalon || 0)
-        if (actual >= 2) {
-          return { ok: true, quoteId: f.quoteId, escalonActual: 2, topeAlcanzado: true, mensajeParaProspecto: TOPE_PE }
-        }
-        return {
-          ok: true,
-          quoteId: f.quoteId,
-          escalonActual: actual,
-          escalonSiguiente: actual + 1,
-          pct: actual + 1 === 1 ? 10 : 20,
-          meses: 6,
-          topeAlcanzado: false,
-          nota: "Si el cliente acepta, llama aplicar_siguiente_descuento (genera la cotización nueva con el descuento).",
-        }
+        const { consultarSiguienteDescuento } = await import("../../tools/consultar-siguiente-descuento.ts")
+        const r = await consultarSiguienteDescuento({ quote_id: f.quoteId })
+        return { ...r, quoteId: f.quoteId }
       }
-      case "aplicar_siguiente_descuento":
-        return reemitirPE({ quoteId: i.quote_id as string | undefined, motivo: "descuento" })
-      case "actualizar_cotizacion":
-        return reemitirPE({
-          quoteId: i.quote_id as string | undefined,
-          motivo: "cambio",
-          cfg: {
-            userCount: i.userCount as number | undefined,
-            hardware: i.hardware as HardwareIn[] | undefined,
-            puntosInstalacion: i.puntosInstalacion as PuntoIn[] | undefined,
-          },
+      case "aplicar_siguiente_descuento": {
+        const f = await leerFormalPE(contact, i.quote_id as string | undefined)
+        if ("error" in f) return { ok: false, error: f.error }
+        const { aplicarSiguienteDescuento } = await import("../../tools/aplicar-siguiente-descuento.ts")
+        const r = await aplicarSiguienteDescuento({ quote_id: f.quoteId, pct_ofrecido: Number(i.pct_ofrecido) || undefined })
+        if (r.ok) {
+          // La memoria del estimado sigue al % comiteado (10 → 1, 20 → 2).
+          const pref = await leerPref()
+          const escalon = r.ultimoEscalon?.pct >= 20 ? 2 : r.ultimoEscalon?.pct >= 10 ? 1 : pref?.escalon || 0
+          if (pref) await guardarPref({ ...pref, escalon })
+        }
+        return { ...r, quoteId: f.quoteId }
+      }
+      case "actualizar_cotizacion": {
+        const f = await leerFormalPE(contact, i.quote_id as string | undefined)
+        if ("error" in f) return { ok: false, error: f.error }
+        const pref = await leerPref()
+        const cfg: CotizarIn = {
+          userCount: Number(i.userCount || pref?.userCount || 0),
+          hardware: (i.hardware as HardwareIn[] | undefined) ?? pref?.hardware,
+          puntosInstalacion: (i.puntosInstalacion as PuntoIn[] | undefined) ?? pref?.puntosInstalacion,
+        }
+        if (!cfg.userCount) {
+          return { ok: false, error: "No sé con qué dotación se emitió esa cotización: pásame userCount (y hardware/puntos si lleva reloj) en la llamada." }
+        }
+        const { actualizarCotizacion } = await import("../../tools/actualizar-cotizacion.ts")
+        const r = await actualizarCotizacion({
+          quote_id: f.quoteId,
+          userCount: cfg.userCount,
+          modulos: ["asistencia"],
+          resumen_cambio: String(i.resumen_cambio || "cambio de configuración").slice(0, 200),
+          _itemsPais: { pais: "pe", items: await itemsPE(cfg) },
         })
+        if (r.ok) {
+          await guardarPref({ userCount: cfg.userCount, hardware: cfg.hardware, puntosInstalacion: cfg.puntosInstalacion, escalon: Math.max(f.escalon, pref?.escalon || 0) })
+        }
+        return { ...r, quoteId: f.quoteId }
+      }
       case "anualizar_cotizacion":
         return sinCapacidad("todavía no existe el pago anual", "Ofrece la mensualidad; si el cliente insiste en pagar el año, deriva con derivar_a_soporte motivo fuera_de_scope para que la ejecutiva lo evalúe.")
       default:

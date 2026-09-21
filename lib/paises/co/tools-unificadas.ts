@@ -260,8 +260,20 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   },
   {
     name: "actualizar_cotizacion",
-    description: "En Colombia una formal emitida NO se edita: se RE-EMITE con generar_link_cotizadora con la configuración nueva (misma empresa y NIT). Esta tool te lo recuerda.",
-    input_schema: { type: "object" as const, properties: { quote_id: { type: "string" as const } }, required: [] },
+    description:
+      "Cambia la cotización FORMAL vigente de esta conversación (más o menos personas, agregar o quitar el equipo, cambiar modalidad o puntos). La MISMA cotización se actualiza en sitio: el link NO cambia (en el mismo link ya aparece al día) y el PDF nuevo va a su correo. Pasa la configuración COMPLETA nueva (userCount siempre; hardware y puntosInstalacion si lleva equipo). Copia `mensajeParaProspecto` TAL CUAL. Llámala EN EL MISMO TURNO en que el cliente pide el cambio: jamás anuncies 'te la actualizo' sin llamarla.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        quote_id: { type: "string" as const, description: "Id de la cotización formal (si lo omites, se usa la vigente)." },
+        userCount: { type: "number" as const, minimum: 1, maximum: 50, description: "Dotación FINAL tras el cambio." },
+        modulos: { type: "array" as const, items: { type: "string" as const } },
+        hardware: HARDWARE_CO,
+        puntosInstalacion: PUNTOS_CO,
+        resumen_cambio: { type: "string" as const, description: "Qué pidió cambiar el cliente, en una frase." },
+      },
+      required: ["userCount"],
+    },
   },
   {
     name: "anualizar_cotizacion",
@@ -386,8 +398,38 @@ export function buildDispatchCOUnificado(contact: string) {
         return sinCapacidad("no existe un documento de certificación (el Ministerio del Trabajo no certifica sistemas)", "Responde con el bloque legal: registro ordenado y trazable; sin prometer papeles.")
       case "enviar_ficha_reloj":
         return sinCapacidad("no hay ficha PDF del equipo biométrico", "Descríbelo en texto: rostro, huella, tarjeta, clave o QR; WiFi o cable de red; se conecta a la nube en minutos. Sin marcas ni modelos.")
-      case "actualizar_cotizacion":
-        return sinCapacidad("una cotización formal emitida no se edita en sitio", "Re-emite con generar_link_cotizadora con la configuración nueva (misma empresa y NIT) y entrega el link nuevo.")
+      case "actualizar_cotizacion": {
+        // EDICIÓN EN SITIO = LA TOOL CHILENA (21-sep): Colombia solo arma los
+        // ítems con su motor (cotizarCO, COP) y el endpoint edita la MISMA
+        // cotización con el perfil colombiano (PDF CO, fila de Activación).
+        let quoteId = String(i.quote_id || "").trim()
+        if (!quoteId) {
+          try {
+            const { getQuotePointer } = await import("../../supabase-persistence-v3.ts")
+            quoteId = (await getQuotePointer(contact))?.quoteId || ""
+          } catch { /* sin puntero */ }
+        }
+        if (!quoteId) return { ok: false, error: "No hay una cotización formal vigente en esta conversación: emítela primero con generar_link_cotizadora." }
+        const userCount = Number(i.userCount || 0)
+        if (!userCount) return { ok: false, error: "Pásame la configuración COMPLETA nueva (userCount, y hardware/puntos si lleva equipo)." }
+        const { cotizarCO } = await import("./cotizar")
+        const { clasificarUbicacionCO } = await import("./geografia")
+        const cfg = aInputCotizarCO(i as CotizarIn) as { userCount: number; reloj?: { modalidad: "arriendo" | "venta"; cantidad: number }; puntosInstalacion?: Array<{ ubicacion: string; autoInstalada: boolean }> }
+        const calculo = cotizarCO({
+          userCount,
+          reloj: cfg.reloj,
+          puntos: (cfg.puntosInstalacion || []).map((p) => ({ ubicacion: p.ubicacion, zona: clasificarUbicacionCO(p.ubicacion).zona, autoInstalada: p.autoInstalada })),
+        })
+        const { actualizarCotizacion } = await import("../../tools/actualizar-cotizacion.ts")
+        const r = await actualizarCotizacion({
+          quote_id: quoteId,
+          userCount,
+          modulos: ["asistencia"],
+          resumen_cambio: String(i.resumen_cambio || "cambio de configuración").slice(0, 200),
+          _itemsPais: { pais: "co", items: calculo.itemsCotizador as unknown[] },
+        })
+        return { ...r, quoteId }
+      }
       case "anualizar_cotizacion":
         return sinCapacidad("todavía no existe el pago anual", "Ofrece la mensualidad; si el cliente insiste en pagar el año, deriva con derivar_a_soporte motivo fuera_de_scope.")
       default:
