@@ -629,16 +629,33 @@ async function dealVivoDesdePuntero(fono: string): Promise<string | null> {
  * conciliación sorteándolos a dos ejecutivos distintos. El puntero solo ancla
  * a los fonos que llegaron a cotizar; este fallback cubre a los demás.
  */
+// Territorio del deal por prefijo del fono (E2E 21-sep: un +51 900000010 y un
+// +57 900000010 comparten los 9 dígitos y la búsqueda les dio el MISMO deal —
+// la cotización colombiana quedó colgada de un deal peruano. Chile y Perú
+// tienen celulares de 9 dígitos que empiezan en 9: la colisión es posible en
+// producción, no solo en sintéticos). Sin prefijo conocido no se filtra.
+function territorioDeFono(fono: string): string | null {
+  const d = String(fono || "").replace(/\D/g, "")
+  if (/^569\d{8}$/.test(d)) return "Chile"
+  if (/^519\d{8}$/.test(d)) return "Perú"
+  if (/^57\d{10}$/.test(d)) return "Colombia"
+  if (/^52\d{10}$/.test(d)) return "México"
+  return null
+}
+
 async function dealVivoDesdeZoho(fono: string): Promise<string | null> {
   try {
     const nueve = String(fono || "").replace(/\D/g, "").slice(-9)
     if (nueve.length !== 9) return null
     const { h, api } = await zohoHeaders()
-    // COQL con 3 condiciones exige la forma ((A or B) and C) (cicatriz 09-sep).
-    const q =
-      `select id, Stage, Created_Time from Deals where ` +
-      `((Contact_Name.Phone like '%${nueve}%' or Contact_Name.Mobile like '%${nueve}%') and Stage != 'Cierre Perdido') ` +
-      `order by Created_Time desc limit 5`
+    const territorio = territorioDeFono(fono)
+    // COQL con 3 condiciones exige la forma ((A or B) and C) (cicatriz 09-sep);
+    // con 4, (((A or B) and C) and D).
+    const base = `(Contact_Name.Phone like '%${nueve}%' or Contact_Name.Mobile like '%${nueve}%')`
+    const where = territorio
+      ? `((${base} and Stage != 'Cierre Perdido') and Territorio = '${territorio}')`
+      : `(${base} and Stage != 'Cierre Perdido')`
+    const q = `select id, Stage, Created_Time from Deals where ${where} order by Created_Time desc limit 5`
     const r = await fetch(`${api}/crm/v8/coql`, {
       method: "POST", headers: h, cache: "no-store", body: JSON.stringify({ select_query: q }),
     })
