@@ -15,7 +15,7 @@
 
 import { PERFIL_CO } from "./index"
 import { REUNIONES_CO_HABILITADAS } from "./tools"
-import { calendarioProximosDias } from "../../calendar"
+import { anclajeTemporalCO, bloqueTelefonoCO } from "./anclaje"
 
 // Instrucciones de agenda: solo cuando el event type CO de Cal.com existe
 // (env CAL_EVENT_TYPE_ID_CO). Sin él, reunión = derivar a ejecutivo.
@@ -44,31 +44,6 @@ const HERRAMIENTAS_REUNION = REUNIONES_CO_HABILITADAS
 // HORA a propósito: si incluyera minutos/segundos, el system prompt cambiaría
 // en cada request y rompería el prefijo del prompt caching (decisión de
 // costos 11-jul) — para agendar días basta el día y la hora aproximada.
-function anclajeTemporalCO(): string {
-  const now = new Date()
-  const fechaLegible = now.toLocaleString("es-CO", {
-    timeZone: "America/Bogota",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    hour12: false,
-  })
-  const isoHora = now.toISOString().slice(0, 13) + ":00:00Z"
-  return `# Anclaje temporal (CRÍTICO para reuniones y seguimientos)
-
-HOY ES: ${fechaLegible} hrs aprox. (Colombia, America/Bogota, UTC-5)
-FECHA ISO UTC ACTUAL (aprox.): ${isoHora}
-CALENDARIO PRÓXIMOS DÍAS (día de la semana REAL de cada fecha — úsalo TAL CUAL, nunca calcules el día tú): ${calendarioProximosDias("America/Bogota")}
-
-Cuando el cliente proponga un día relativo ("mañana", "el martes", "la próxima semana") — para una reunión o para un seguimiento (programar_seguimiento) — interprétalo con base en el HOY indicado arriba, NO con tu conocimiento de entrenamiento. Usa siempre el AÑO ACTUAL (${now.getFullYear()}). Al mencionar una fecha al cliente (ofrecer horarios, confirmar reuniones o seguimientos), el día de la semana SIEMPRE sale del CALENDARIO de arriba o de la etiqueta/mensajeParaProspecto que devuelva la tool — cópialo TAL CUAL; si dices "lunes" y era martes, el cliente llega el día equivocado a su reunión.
-
----
-
-`
-}
-
 /**
  * Contexto de cotización formal VIGENTE (anti-amnesia, espejo del chileno):
  * si el contacto ya tiene una formal generada, Vicky no parte de cero aunque
@@ -123,18 +98,9 @@ export function getSystemPromptCO(contact?: string, umbralPrecios?: number): str
       .replace('- Cotizas para empresas de 1 a 50 personas que operan en COLOMBIA.', `- Cotizas para empresas de 1 a ${u} personas que operan en COLOMBIA (tu UMBRAL DE PRECIOS en esta conversación; sobre ${u}, el precio lo entrega un ejecutivo).`)
   }
 
-  const telefono = (contact || "").trim()
-  const bloqueTelefono = telefono
-    ? `# Teléfono del cliente — ya lo conoces, NO lo preguntes
-
-El cliente escribe por WhatsApp desde el +${telefono}. Ese ES su teléfono de contacto válido. NUNCA se lo preguntes ni le pidas "un número de contacto": cuando una tool requiera teléfono, usa este automáticamente. Solo si ofrece espontáneamente otro número distinto, usa ese.
-
----
-
-`
-    : ""
-  return anclajeTemporalCO() + bloqueTelefono + base
+  return anclajeTemporalCO() + bloqueTelefonoCO(contact) + base
 }
+
 
 export const SYSTEM_PROMPT_CO = `Eres Vicky, ejecutiva comercial de GeoVictoria COLOMBIA (${PERFIL_CO.entidadLegal.razonSocial}, Bogotá). Atiendes por WhatsApp a empresas que operan en Colombia, con TUTEO colombiano cálido y cercano (tú/tienes/puedes) — se debe sentir una persona real del equipo, no una IA. Ayudas a resolver su control de asistencia laboral: calificas al prospecto, le muestras el valor y el precio, y cierras con la cotización formal en línea o lo dejas en manos del equipo comercial de Colombia.
 

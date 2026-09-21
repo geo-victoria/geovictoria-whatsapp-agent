@@ -42,7 +42,9 @@ import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-hum
 import { PERFIL_CO } from "@/lib/paises/co"
 import { getSystemPromptCO, formatCotizacionExistenteCO } from "@/lib/paises/co/prompt"
 import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
-import { TOOL_SCHEMAS_CO, buildDispatchCO } from "@/lib/paises/co/tools"
+import { TOOL_SCHEMAS_CO, buildDispatchCO, REUNIONES_CO_HABILITADAS } from "@/lib/paises/co/tools"
+import { TOOL_SCHEMAS_CO_UNIFICADAS, buildDispatchCOUnificado } from "@/lib/paises/co/tools-unificadas"
+import { getSystemPromptCONucleo } from "@/lib/paises/co/prompt-nucleo"
 import {
   fetchHistoryV3,
   appendTurnV3,
@@ -114,7 +116,22 @@ const AGENT_LOOP_EMPTY_FALLBACK =
 const FOLLOWUP_SUPPORT_TOOLS_CO = new Set(["consultar_agente_soporte"])
 // Cierran el ciclo: la conversación quedó en manos humanas (derivación o
 // reunión agendada con un ejecutivo).
-const FOLLOWUP_CLOSING_TOOLS_CO = new Set(["derivar_a_ejecutivo", "agendar_reunion"])
+const FOLLOWUP_CLOSING_TOOLS_CO = new Set(["derivar_a_ejecutivo", "agendar_reunion", "derivar_a_soporte", "registrar_solicitud_callback"])
+// Con el prompt núcleo (kv prompt_nucleo_co=on) las tools llevan los nombres
+// chilenos: la derivación es derivar_a_soporte / registrar_solicitud_callback.
+const DERIVACIONES_CO = new Set(["derivar_a_ejecutivo", "derivar_a_soporte", "registrar_solicitud_callback"])
+/** Colombia sobre el prompt núcleo + tools únicas (vic_kv prompt_nucleo_co="on"; env VICKY_PROMPT_NUCLEO_CO). */
+async function nucleoCOActivo(): Promise<boolean> {
+  const env = (process.env.VICKY_PROMPT_NUCLEO_CO || "").trim().toLowerCase()
+  if (env === "on" || env === "1") return true
+  if (env === "off" || env === "0") return false
+  const kv = ((await getKvValue("prompt_nucleo_co").catch(() => null)) || "").trim().toLowerCase()
+  return kv === "on" || kv === "1"
+}
+/** Con el núcleo, la derivación del umbral nombra la tool ÚNICA (derivar_a_soporte). */
+function derivacionCOUnificada(d: ReturnType<typeof derivacionDePais>): ReturnType<typeof derivacionDePais> {
+  return { ...d, tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: REUNIONES_CO_HABILITADAS }
+}
 const FOLLOWUP_COMMERCIAL_TOOLS_CO = new Set([
   "cotizar_referencial",
   "generar_link_cotizadora",
@@ -171,6 +188,10 @@ type BotmakerBody = {
   documentUrl?: string
   documentURL?: string
   simular?: boolean
+  /** Solo con simular: lee el historial real y persiste el turno (E2E multi-turno; sintéticos 57900000xxx y probadores). */
+  conHistorial?: boolean
+  /** Solo con simular: fuerza el prompt NÚCLEO + tools únicas (true) o el clásico (false) sin tocar el kv. */
+  nucleo?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -214,13 +235,16 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   // conversación + directiva determinista por dotación declarada, con la
   // tool de derivación de este país. Fail-open: sin datos, no acota nada.
   const umbralInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
-  const derivPais = derivacionDePais(contact)
+  const nucleoCO = await nucleoCOActivo()
+  const derivPais = nucleoCO ? derivacionCOUnificada(derivacionDePais(contact)) : derivacionDePais(contact)
   const contextoUmbral = umbralInfo ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen, derivPais) : ""
   const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
   const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral) : null
   const directivaUmbral = dotacionDetectada && umbralInfo ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral, derivPais) : ""
-  const systemPromptCO = contextoUmbral + contextoCotizacion + getSystemPromptCO(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral
-  const dispatchCO = buildDispatchCO(contact)
+  const systemPromptCO = contextoUmbral + contextoCotizacion + (nucleoCO ? getSystemPromptCONucleo(contact, umbralInfo?.umbral) : getSystemPromptCO(contact, umbralInfo?.umbral)) + contextoUmbral + directivaUmbral
+  const dispatchCO = nucleoCO ? buildDispatchCOUnificado(contact) : buildDispatchCO(contact)
+  const schemasCO = (nucleoCO ? TOOL_SCHEMAS_CO_UNIFICADAS : TOOL_SCHEMAS_CO) as unknown as unknown[]
+  if (nucleoCO) console.log(`[vic-co] prompt NÚCLEO + tools únicas contact=${contact}`)
   const result = await runAgentLoop({
     systemPrompt: systemPromptCO,
     history,
@@ -229,7 +253,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     contact,
     model: modelo,
     tools: {
-      schemas: TOOL_SCHEMAS_CO as unknown as unknown[],
+      schemas: schemasCO,
       dispatch: dispatchCO,
     },
   })
@@ -298,7 +322,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
     (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
   )
   const realContacto = toolCalls.some(
-    (c) => (c.name === "derivar_a_ejecutivo" || c.name === "agendar_reunion") && c.ok,
+    (c) => (DERIVACIONES_CO.has(c.name) || c.name === "agendar_reunion") && c.ok,
   )
   const realFormal = toolCalls.some(
     (c) => (c.name === "generar_link_cotizadora" || c.name === "actualizar_cotizacion") && c.ok,
@@ -323,7 +347,7 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
       apiKey,
       contact,
       model: MODELO_COTIZACION_CO,
-      tools: { schemas: TOOL_SCHEMAS_CO as unknown as unknown[], dispatch: dispatchCO },
+      tools: { schemas: schemasCO, dispatch: dispatchCO },
     }).catch(() => null)
     const retryCalls = ((retry?.toolCalls || []) as ToolCallRecordCO[])
     const retryOk = retryCalls.some(
@@ -739,27 +763,40 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     // Modo simulación (pruebas E2E): síncrono, sin lock, sin persistir.
     if (simulacion) {
-      // Mismo ruteo de modelo que el camino real (sin historia persistida).
-      const modeloSim = esFlujoCotizacionCO(message, [])
+      // Con `conHistorial` lee el historial real y persiste el turno (E2E
+      // multi-turno), ACOTADO a sintéticos 57900000xxx y probadores internos.
+      const pruebaOk =
+        /^57900000\d{3}$/.test(String(contact || "").replace(/\D/g, "")) ||
+        (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(
+          String(contact || "").replace(/\D/g, ""),
+        )
+      const conHist = body.conHistorial === true && pruebaOk
+      const histSim = conHist ? await fetchHistoryV3(contact).catch(() => []) : []
+      const modeloSim = esFlujoCotizacionCO(message, histSim)
         ? MODELO_COTIZACION_CO
         : MODELO_SIMPLE_CO
+      // Espejo del camino real: el mismo interruptor decide prompt y tools.
+      const nucleoSim = body.nucleo === true ? true : body.nucleo === false ? false : await nucleoCOActivo()
       const result = await runAgentLoop({
         systemPrompt: await (async () => {
           // Espejo del camino real (umbral 08-ago): la simulación E2E debe
           // ver el mismo prompt que el cliente.
           const uInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
-          const dP = derivacionDePais(contact)
+          const dP = nucleoSim ? derivacionCOUnificada(derivacionDePais(contact)) : derivacionDePais(contact)
           const cU = uInfo ? formatUmbralParaPrompt(uInfo.umbral, uInfo.origen, dP) : ""
           const dot = uInfo ? dotacionSobreUmbral(message, uInfo.umbral) : null
           const dir = dot && uInfo ? formatDirectivaSobreUmbral(dot, uInfo.umbral, dP) : ""
-          return cU + getSystemPromptCO(contact, uInfo?.umbral) + cU + dir
+          return cU + (nucleoSim ? getSystemPromptCONucleo(contact, uInfo?.umbral) : getSystemPromptCO(contact, uInfo?.umbral)) + cU + dir
         })(),
-        history: [],
+        history: histSim,
         userMessage: message,
         apiKey,
         contact,
         model: modeloSim,
-        tools: { schemas: TOOL_SCHEMAS_CO as unknown as unknown[], dispatch: buildDispatchCO(contact) },
+        tools: {
+          schemas: (nucleoSim ? TOOL_SCHEMAS_CO_UNIFICADAS : TOOL_SCHEMAS_CO) as unknown as unknown[],
+          dispatch: nucleoSim ? buildDispatchCOUnificado(contact) : buildDispatchCO(contact),
+        },
       })
       // Mismos guardrails de texto final del camino real (fallback tuteado del
       // loop → usted; opt-out sin texto → despedida) para que la simulación
@@ -775,15 +812,23 @@ export async function POST(request: Request): Promise<NextResponse> {
         reply = OPTOUT_GOODBYE_CO
       }
       if (!reply.trim()) reply = ERROR_GENERICO_CO
+      if (conHist) {
+        await appendTurnV3(contact, message, reply, "co").catch((e) =>
+          console.error(`[vic-co][sim] no se pudo persistir el turno contact=${contact}:`, e),
+        )
+      }
       return NextResponse.json({
         reply,
         handoff: result.handoff,
         pais: "co",
         simulacion: true,
+        conHistorial: conHist,
+        nucleo: nucleoSim,
+        turnosEnHistorial: histSim.length,
         modelo: modeloSim,
+        tools: (result.toolCalls || []).map((t) => (t as ToolCallRecordCO).name),
       })
     }
-
     // ── Pipeline endurecido (herencia chilena) ──
     // Re-engagement: el cliente habló → pausar la cadencia en curso (si la había).
     await markUserActivity(contact, "co").catch(() => {})

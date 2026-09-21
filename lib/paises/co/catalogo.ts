@@ -38,7 +38,7 @@
  *      con comercial CO antes de habilitar la negociación.
  */
 
-import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos"
+import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos.ts"
 
 export const CATALOGO_MODULOS_CO: ModuloSoftware[] = [
   {
