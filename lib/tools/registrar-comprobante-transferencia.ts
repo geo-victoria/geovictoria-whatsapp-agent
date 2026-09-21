@@ -393,7 +393,10 @@ export async function registrarComprobanteTransferencia(
   // presenta a la ejecutiva (flujo transferencia BANORTE). Default: CL.
   // "pe": monto en SOLES (BBVA de GEOVICTORIA PERU S.A.C., 15-sep) y, tras
   // registrar, link de auto-onboarding + presentación de la gestora PE.
-  pais: "cl" | "mx" | "pe" = "cl",
+  // "co": monto en PESOS COLOMBIANOS (Bancolombia, GEOVICTORIA COLOMBIA SAS,
+  // 21-sep) y, tras registrar, link de auto-onboarding (wizard) — el equipo
+  // comercial CO (dueño de la cotización) recibe el correo de cobranza.
+  pais: "cl" | "mx" | "pe" | "co" = "cl",
 ): Promise<{ ok: boolean; mensajeParaProspecto: string; notaCreada?: boolean; avisoInterno?: boolean }> {
   // Soles llevan centavos (S/70.09): redondear a entero dejaba el comprobante
   // "corto" contra el pago inicial y pedía una diferencia de 9 céntimos.
@@ -406,7 +409,9 @@ export async function registrarComprobanteTransferencia(
         ? `$${monto.toLocaleString("es-MX")} MXN`
         : pais === "pe"
           ? fmtPen(monto)
-          : `$${monto.toLocaleString("es-CL")}`
+          : pais === "co"
+            ? `$${monto.toLocaleString("es-CO")} COP`
+            : `$${monto.toLocaleString("es-CL")}`
       : "monto no legible"
 
   const pointers = await getQuotePointers(contact).catch(() => [])
@@ -539,7 +544,7 @@ export async function registrarComprobanteTransferencia(
   // Moneda del país: el "pago inicial esperado" que devuelve el cotizador ya
   // viene en la moneda de la cotización (PEN en Perú, MXN en México).
   const fmtClp = (n: number) =>
-    pais === "pe" ? fmtPen(n) : pais === "mx" ? `$${Math.round(n).toLocaleString("es-MX")} MXN` : `$${Math.round(n).toLocaleString("es-CL")}`
+    pais === "pe" ? fmtPen(n) : pais === "mx" ? `$${Math.round(n).toLocaleString("es-MX")} MXN` : pais === "co" ? `$${Math.round(n).toLocaleString("es-CO")} COP` : `$${Math.round(n).toLocaleString("es-CL")}`
 
   // UN SOLO COMPROBANTE PARA VARIAS COTIZACIONES (Lalo 08-sep, caso Lorena:
   // dos RUT, una transferencia por el total — "no tienen que ser 2
@@ -861,6 +866,19 @@ export async function registrarComprobanteTransferencia(
           `Y te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
         : `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
           `Te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda, me escribes por aquí 😊`
+      return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
+    }
+
+    if (pais === "co") {
+      // CO (21-sep): recepción + auto-onboarding (wizard). Sin ejecutivo con
+      // nombre: en Colombia el dueño de la cotización recibe el correo de
+      // cobranza y contacta al cliente. Tuteo cálido colombiano.
+      const mensajeParaProspecto = linkOnboarding
+        ? `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
+          `Aquí tienes tu acceso al auto-onboarding: ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos.\n${linkOnboarding}\n\n` +
+          `Nuestro equipo de Colombia valida la transferencia y te acompaña de aquí en adelante. Cualquier duda del proceso, me escribes por aquí 😊`
+        : `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
+          `Nuestro equipo de Colombia valida la transferencia y te acompaña de aquí en adelante. Cualquier duda, me escribes por aquí 😊`
       return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }
     }
 

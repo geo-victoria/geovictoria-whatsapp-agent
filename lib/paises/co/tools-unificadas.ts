@@ -8,7 +8,7 @@
  * configurada; reenvío y PDF delegados a la impl chilena), traducción de
  * formas (hardware[] → reloj, contactoEmail → email, rutEmpresa → nit,
  * motivos CL → CO) y respuesta HONESTA donde Colombia no tiene la capacidad
- * (transferencia, certificación, ficha PDF, anualidad). Descuentos = Chile
+ * (certificación, ficha PDF, anualidad). Descuentos = Chile
  * desde el 21-sep (escalera 10 → 20 % sobre el plan, memoria `co_pref_`).
  *
  * Imports estáticos solo a módulos que los tests puros cargan (co/tools.ts
@@ -206,8 +206,19 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   },
   {
     name: "registrar_comprobante_transferencia",
-    description: "En Colombia el pago es SOLO con tarjeta vía Mercado Pago y se confirma solo: esta tool te lo recuerda. Si el cliente manda un comprobante de transferencia, deriva al ejecutivo (motivo otro) con el detalle; no confirmes pagos tú.",
-    input_schema: { type: "object" as const, properties: { montoDetectado: { type: "number" as const } }, required: [] },
+    description:
+      "Registra un comprobante de transferencia bancaria (Bancolombia, cuenta de ahorros de GEOVICTORIA COLOMBIA SAS) que el cliente envió por el chat (imagen o PDF descrito en el historial). Úsala SIEMPRE que el cliente mande un comprobante de pago de su cotización. Extrae lo que se vea: monto en pesos colombianos, banco emisor y fecha. La tool lo asocia a la cotización vigente, avisa al equipo y devuelve `mensajeParaProspecto` (con el acceso al onboarding si el comprobante era legible): cópialo TAL CUAL. montoDetectado solo si lo LEÍSTE (si no, 0; nunca lo deduzcas del precio). Nunca afirmes tú que el pago quedó confirmado: se confirma la recepción, no el dinero.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        montoDetectado: { type: "number" as const, description: "Monto transferido en COP tal como se lee en el comprobante; 0 si no se lee." },
+        bancoOrigen: { type: "string" as const, description: "Banco emisor si se ve en el comprobante." },
+        fechaDetectada: { type: "string" as const, description: "Fecha de la transferencia si se ve." },
+        detalle: { type: "string" as const, description: "Resumen en una frase de lo que muestra el comprobante (destinatario, hora, nro de operación)." },
+        pagoDeclarado: { type: "boolean" as const, description: "true si el cliente DECLARA que pagó sin adjuntar comprobante." },
+      },
+      required: [],
+    },
   },
   {
     name: "derivar_a_soporte",
@@ -528,11 +539,12 @@ export function buildDispatchCOUnificado(contact: string) {
         const { enviarCotizacionWhatsapp } = await import("../../tools/enviar-cotizacion-whatsapp.ts")
         return enviarCotizacionWhatsapp({ ...(i as object), _contact: contact } as never)
       }
-      case "registrar_comprobante_transferencia":
-        return sinCapacidad(
-          "el pago es solo con tarjeta vía Mercado Pago y se confirma solo (no hay transferencia)",
-          "Si el cliente mandó un comprobante de transferencia, llama derivar_a_soporte (motivo tool_fallo) con el detalle para que el ejecutivo lo revise; no confirmes el pago tú.",
-        )
+      case "registrar_comprobante_transferencia": {
+        // Transferencia Bancolombia habilitada el 21-sep: la MISMA tool
+        // chilena con el país (montos en COP, correo de cobranza al dueño CO).
+        const { registrarComprobanteTransferencia } = await import("../../tools/registrar-comprobante-transferencia.ts")
+        return registrarComprobanteTransferencia(contact, i as never, "co")
+      }
       case "enviar_certificacion":
         return sinCapacidad("no existe un documento de certificación (el Ministerio del Trabajo no certifica sistemas)", "Responde con el bloque legal: registro ordenado y trazable; sin prometer papeles.")
       case "buscar_prospect_en_zoho": {

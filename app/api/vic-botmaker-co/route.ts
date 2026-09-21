@@ -725,8 +725,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         const bloque = esArchivoAdjunto || (!imageUrl && fileUrl)
           ? `[El cliente envió un DOCUMENTO (PDF) por WhatsApp. Contenido del documento]: ${descripcion}`
           : `[El cliente envió una imagen por WhatsApp. Contenido de la imagen]: ${descripcion}`
-        message = caption ? `${caption}\n\n${bloque}` : bloque
-        console.log(`[vic-co] adjunto descrito contact=${contact} len=${descripcion.length}`)
+        // COMPROBANTE (21-sep, transferencia Bancolombia habilitada): la
+        // directiva va EN el mensaje del adjunto, igual que en PE — sin ella el
+        // modelo acusa recibo sin llamar registrar_comprobante_transferencia.
+        const { directivaComprobante } = await import("@/lib/comprobante-directiva")
+        const directivaPago = directivaComprobante(descripcion)
+        message = caption ? `${caption}\n\n${bloque}${directivaPago}` : `${bloque}${directivaPago}`
+        console.log(`[vic-co] adjunto descrito contact=${contact} len=${descripcion.length}${directivaPago ? " comprobante=si" : ""}`)
       } else if (esArchivoAdjunto) {
         message = CONTEXTO_DOC_ILEGIBLE_CO
       } else if (!caption) {

@@ -17,7 +17,10 @@
 
 const BANCOS = /\b(bbva|bcp|interbank|scotiabank|banco de la naci[oó]n|banco de chile|bci|santander|bancoestado|banco estado|ita[uú]|falabella|ripley|security|bice|bancolombia|davivienda|nequi|banorte|bbva m[eé]xico|banamex|mercado ?pago|fintoc|khipu|yape|plin)\b/i
 const TRANSFERENCIA = /\b(transferencia|constancia|comprobante|operaci[oó]n\s+(exitosa|realizada|n[uú]mero|n[°º])|n[°º]\s*de\s+operaci[oó]n|cuenta\s+de\s+destino|cuenta\s+destino|abono|dep[oó]sito)\b/i
-const NUESTRO = /geo\s*victoria|victoria\s+s\.?a\.?|8001204108|0011[\s-]?0123[\s-]?0100091134|011[\s-]?123[\s-]?000100091134|76188587|20605842055/i
+// Cuentas nuestras: CL Banco de Chile 8001204108 (Victoria S.A 76188587-1) ·
+// PE BBVA 0011-0123-0100091134-75 (RUC 20605842055) · CO Bancolombia
+// ahorros 20200000237 (GEOVICTORIA COLOMBIA SAS, NIT 901367959; 21-sep).
+const NUESTRO = /geo\s*victoria|victoria\s+s\.?a\.?|8001204108|0011[\s-]?0123[\s-]?0100091134|011[\s-]?123[\s-]?000100091134|76188587|20605842055|20200000237|901[\s.]?367[\s.]?959/i
 
 export function pareceComprobanteTransferencia(descripcion: string): boolean {
   const d = String(descripcion || "")

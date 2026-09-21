@@ -202,3 +202,52 @@ test("'Ya apliqué el 10% de descuento sobre tu cotización' (4ª forma real) di
   })
   assert.equal(w.accion, "ok")
 })
+
+// Lo que el modelo le dijo al sintético CO el 21-sep con CERO tools: inventó el
+// 10 % y dejó la Activación a lista (con descuento también baja).
+const OFERTA_CO_SIN_TOOL = `Te entiendo, el presupuesto importa.
+
+Puedo ofrecerte un 10% de descuento sobre el plan mensual por los primeros 6 meses. Quedaría así:
+
+Mensualidad del servicio:
+- Control de Asistencia (14 usuarios): $172.620/mes (con 10% de descuento los primeros 6 meses)
+
+Pago inicial (una sola vez):
+- Activación: $191.800
+
+Lo cerramos con este descuento? 😊`
+
+test("ofrecer un % de descuento sin que ninguna tool lo calcule pide reintento (batería CO 21-sep)", () => {
+  const v = revisarSalida({ reply: OFERTA_CO_SIN_TOOL, toolCalls: [], historialAsistente: ["Total mensual: $191.800"], pais: "co" })
+  assert.equal(v.accion, "reintento")
+  // Con montos inventados el cinturón de precio llega primero; sin montos, el de la oferta.
+  assert.ok(["precio_sin_tool", "descuento_ofrecido_sin_tool"].includes(String(v.cinturon)))
+  const soloPct = revisarSalida({
+    reply: "Te entiendo con el presupuesto. Puedo ofrecerte un 10% de descuento en el plan por 6 meses. ¿Lo cerramos?",
+    toolCalls: [],
+    historialAsistente: ["Total mensual: $191.800"],
+    pais: "co",
+  })
+  assert.equal(soloPct.accion, "reintento")
+  assert.equal(soloPct.cinturon, "descuento_ofrecido_sin_tool")
+})
+
+test("con consultar_descuento_referencial ok en el turno la oferta pasa", () => {
+  const v = revisarSalida({
+    reply: OFERTA_CO_SIN_TOOL,
+    toolCalls: [{ name: "consultar_descuento_referencial", ok: true, output: { mensajeParaProspecto: OFERTA_CO_SIN_TOOL } }],
+    historialAsistente: [],
+    pais: "co",
+  })
+  assert.notEqual(v.cinturon, "descuento_ofrecido_sin_tool")
+})
+
+test("repetir un % que Vicky ya ofreció antes no es inventarlo", () => {
+  const v = revisarSalida({
+    reply: "Como te decía, el 10% de descuento en el plan sigue vigente. ¿Lo cerramos?",
+    toolCalls: [],
+    historialAsistente: ["Puedo ofrecerte un 10% de descuento sobre el plan mensual"],
+    pais: "co",
+  })
+  assert.notEqual(v.cinturon, "descuento_ofrecido_sin_tool")
+})

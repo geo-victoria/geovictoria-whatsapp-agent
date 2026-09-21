@@ -44,7 +44,7 @@ export type Veredicto = {
   /** Para el log y el aviso interno. */
   motivos: string[]
   /** Identificador del cinturón que disparó, para medir cuál actúa más. */
-  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool"
+  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool"
 }
 
 const OK: Veredicto = { accion: "ok", motivos: [] }
@@ -132,6 +132,51 @@ const CONTENCION_DESCUENTO: Record<PaisCinturon, string> = {
   pe: "Todavía no dejé aplicado el descuento en tu cotización — lo hago ahora mismo y te confirmo por acá en un momento, no necesitas hacer nada más 🙌",
 }
 
+/**
+ * DESCUENTO OFRECIDO SIN TOOL (21-sep noche, batería CO tras la escalera
+ * colombiana): "Puedo ofrecerte un 10 % de descuento… quedaría en $172.620/mes
+ * · Pago inicial $191.800" con CERO tools — el modelo calculó la rebaja él
+ * mismo y se equivocó en el pago inicial (la Activación también baja). El
+ * porcentaje y el precio rebajado los decide la tool (consultar_descuento_
+ * referencial antes de la formal / consultar_siguiente_descuento después):
+ * ofrecerlos de memoria es inventar un precio. Un % que YA salió en un turno
+ * anterior de Vicky (lo repite, lo confirma) no se persigue.
+ */
+export const OFRECE_DESCUENTO_RE =
+  /\b(\d{1,2})\s*%\s*(de\s+)?(descuento|dcto|rebaja)|\b(descuento|dcto|rebaja)\s+(de|del)\s+(\d{1,2})\s*%|\b(puedo|podr[ií]a|te)\s+(ofrecer(te)?|dejar(te)?|aplicar(te)?|dar(te)?)\s+(un\s+)?(\d{1,2})\s*%/i
+
+const TOOLS_QUE_OFRECEN_DESCUENTO = new Set([
+  "consultar_descuento_referencial",
+  "consultar_siguiente_descuento",
+  "aplicar_siguiente_descuento",
+  "cotizar_referencial",
+  "generar_link_cotizadora",
+  "actualizar_cotizacion",
+])
+
+const FORZAR_TOOL_OFRECER_DESCUENTO =
+  "\n\n# Instrucción de sistema (este turno)\n" +
+  "Tu borrador anterior OFRECIÓ un porcentaje de descuento con un precio calculado por ti y NINGUNA tool " +
+  "lo calculó en este turno. El % y el precio rebajado los decide la tool: llama AHORA " +
+  "consultar_descuento_referencial (si todavía no hay cotización formal) o consultar_siguiente_descuento " +
+  "(si ya la hay) y entrega SU mensajeParaProspecto tal cual. Si la tool dice que no hay más margen, dilo con franqueza."
+
+const CONTENCION_OFRECER_DESCUENTO: Record<PaisCinturon, string> = {
+  cl: "Te entiendo con el presupuesto. Antes de hablar de porcentajes, déjame revisar qué margen tengo para tu caso y te lo confirmo por acá con el número exacto, no necesitas hacer nada más 🙌",
+  co: "Te entiendo con el presupuesto. Antes de hablar de porcentajes, déjame revisar qué margen tengo para tu caso y te lo confirmo por acá con el número exacto, no necesitas hacer nada más 🙌",
+  mx: "Te entiendo con el presupuesto. Antes de hablar de porcentajes, déjame revisar qué margen tengo para tu caso y te lo confirmo por acá con el número exacto, no necesitas hacer nada más 🙌",
+  pe: "Te entiendo con el presupuesto. Antes de hablar de porcentajes, déjame revisar qué margen tengo para tu caso y te lo confirmo por acá con el número exacto, no necesitas hacer nada más 🙌",
+}
+
+/** Porcentajes de descuento que YA aparecieron en turnos anteriores de Vicky. */
+function porcentajesYaOfrecidos(historialAsistente: string[] | undefined): Set<number> {
+  const out = new Set<number>()
+  for (const t of historialAsistente || []) {
+    for (const x of String(t || "").matchAll(/(\d{1,2})\s*%/g)) out.add(Number(x[1]))
+  }
+  return out
+}
+
 export type EntradaSalida = {
   reply: string
   toolCalls: readonly LlamadaTool[] | undefined
@@ -205,6 +250,27 @@ export function revisarSalida(e: EntradaSalida): Veredicto {
       contencion: CONTENCION_DESCUENTO[e.pais] || CONTENCION_DESCUENTO.cl,
       motivos: ["descuento_aplicado_sin_tool"],
       cinturon: "descuento_aplicado_sin_tool",
+    }
+  }
+
+  // (3c) Porcentaje de descuento OFRECIDO sin que ninguna tool lo calculara
+  // (batería CO 21-sep): el modelo inventa el % y el precio rebajado. Solo
+  // porcentajes NUEVOS en la conversación — repetir uno ya ofrecido no es
+  // inventar.
+  if (!toolsOk.some((n) => TOOLS_QUE_OFRECEN_DESCUENTO.has(n))) {
+    const m = OFRECE_DESCUENTO_RE.exec(reply)
+    if (m) {
+      const pct = Number((/(\d{1,2})\s*%/.exec(m[0]) || [])[1] || 0)
+      if (pct > 0 && pct <= 40 && !porcentajesYaOfrecidos(e.historialAsistente).has(pct)) {
+        return {
+          accion: "reintento",
+          directiva: FORZAR_TOOL_OFRECER_DESCUENTO,
+          siFallaReintento: "contener",
+          contencion: CONTENCION_OFRECER_DESCUENTO[e.pais] || CONTENCION_OFRECER_DESCUENTO.cl,
+          motivos: ["descuento_ofrecido_sin_tool"],
+          cinturon: "descuento_ofrecido_sin_tool",
+        }
+      }
     }
   }
 
