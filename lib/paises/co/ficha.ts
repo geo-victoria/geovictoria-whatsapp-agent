@@ -80,6 +80,8 @@ export const FICHA_CO: FichaPrompt = {
   peticionNombraAmbos: "(Y la petición nombra SIEMPRE los tres — NIT, razón social y email —",
   gatilloEmision: "el cliente entregó el NIT, la razón social y el correo tras ver el precio → generas en ese turno.",
   datosMinimos: "YA tienes los datos mínimos (contacto, NIT, razón social y correo — la ciudad NO es requisito)",
+  equipoNombre: "equipo biométrico",
+  equipoNombreCap: "Equipo biométrico",
   bloques: {
     minimoParaEmitir: `   EN COLOMBIA LOS DATOS MÍNIMOS PARA EMITIR SON TRES: NIT (con dígito de verificación, ej. 900.123.456-7) + razón social + correo — no hay padrón que resuelva la razón social desde el NIT, y la cotización formal colombiana sale con el correo del contacto (la tool los exige). Pides los tres UNA vez, en el mismo mensaje y en UNA frase natural (nunca como lista), y después actúas según lo que llegue — sin repreguntar lo que ya dio:
    · **Da los tres** → emites normal, con \`contactoEmail\`. La cotización sale por correo además del chat.
