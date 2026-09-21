@@ -44,6 +44,11 @@ export function codigosDeMeta(body: unknown): string[] {
 export function glosaCodigo(codigo: string): string {
   const mapa: Record<string, string> = {
     "131049": "Meta frenó el envío por su cap de frecuencia de plantillas MARKETING por receptor",
+    // 131008 (visto 20-21 sep en la línea CL): Meta lo devuelve cuando al
+    // mensaje le falta un parámetro obligatorio — típicamente una variable de
+    // plantilla que viajó vacía. Si aparece en una campaña, el sospechoso es
+    // el nombre o el link sin resolver, no el número del cliente.
+    "131008": "falta un parámetro obligatorio del mensaje (variable de plantilla vacía)",
     "131026": "el número no puede recibir WhatsApp (no tiene cuenta o está bloqueado)",
     "131047": "ventana de 24 h vencida: fuera de sesión solo entra una plantilla",
     "131split": "",
