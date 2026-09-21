@@ -101,6 +101,7 @@ export async function contextoImplementacionDesdeVenta(contact: string): Promise
   try {
     const { getQuotePointers, getKvValue } = await import("./supabase-persistence-v3")
     const limpio = (contact || "").replace(/\D/g, "")
+    out.pais = limpio.startsWith("51") && limpio.length === 11 ? "pe" : "cl"
     const punteros = await getQuotePointers(limpio).catch(() => [])
     // COTIZACIÓN ANCLADA AL ALTA (09-sep, caso Lorena: dos cotizaciones pagadas
     // por el mismo número y la IMP/NDV se estamparon en la última en vez de la
@@ -201,6 +202,13 @@ export type DatosImplementacion = {
   planificaTurnos?: "Sí" | "No sé"
   /** Tipo_de_Planificaci_n: "Fijo" si el chat dejó planificaciones; si no, "Desconocido". */
   tipoPlanificacion?: "Fijo" | "Desconocido"
+  /** País del cliente (21-sep): PE → Pa_s/Territorio "Perú" y facturación en SOL. Default Chile. */
+  pais?: "cl" | "pe"
+}
+
+const PAIS_IMP: Record<"cl" | "pe", { nombre: string; moneda: string }> = {
+  cl: { nombre: "Chile", moneda: "CLP" },
+  pe: { nombre: "Perú", moneda: "SOL" },
 }
 
 /**
@@ -211,7 +219,7 @@ export type DatosImplementacion = {
  * Score_Proyecto quedaba en 5 contra 11. Orden de Lalo: "cierra la brecha y
  * déjalo implementado para las siguientes".
  */
-export function camposBrechaCreacion(d: Pick<DatosImplementacion, "equipos" | "facturacionMensualClp" | "planificaTurnos" | "tipoPlanificacion">): Record<string, unknown> {
+export function camposBrechaCreacion(d: Pick<DatosImplementacion, "equipos" | "facturacionMensualClp" | "planificaTurnos" | "tipoPlanificacion" | "pais">): Record<string, unknown> {
   const out: Record<string, unknown> = {
     Se_debe_planificar_turnos_GV: d.planificaTurnos || "Sí",
     Tipo_de_Planificaci_n: d.tipoPlanificacion || "Desconocido",
@@ -220,7 +228,9 @@ export function camposBrechaCreacion(d: Pick<DatosImplementacion, "equipos" | "f
   }
   if (typeof d.facturacionMensualClp === "number" && d.facturacionMensualClp > 0) {
     out.Facturaci_n_Cliente = d.facturacionMensualClp
-    out.Moneda_Facturaci_n_Futura = "CLP"
+    // En PE el subform guarda soles en los campos *_CLP (convención de
+    // create-from-vicky-pe): el monto es el mismo, la moneda cambia.
+    out.Moneda_Facturaci_n_Futura = PAIS_IMP[d.pais || "cl"].moneda
   }
   return out
 }
@@ -311,8 +321,8 @@ export async function crearImplementacionGvAvanzado(
     Tipo_de_Cliente: "SMB",
     Tipo_de_Implementaci_n: "Standard",
     Servicios_a_Impementar: ["Asistencia"],
-    Pa_s: "Chile",
-    Territorio_Cliente: "Chile",
+    Pa_s: PAIS_IMP[d.pais || "cl"].nombre,
+    Territorio_Cliente: PAIS_IMP[d.pais || "cl"].nombre,
     Es_un_ingreso_nuevo: "Sí",
     Se_debe_realizar_capacitaci_n: "Sí",
     // El alta por chat crea la empresa en la plataforma en el mismo acto, así

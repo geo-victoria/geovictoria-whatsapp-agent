@@ -48,8 +48,10 @@ import {
   type TurnoCfg,
   normalizarFechaDesde,
   hoyChileISO,
+  hoyISOPais,
 } from "./onboarding/configuracion"
 import { promptConfiguracionCL } from "./onboarding/prompt"
+import { paisDeContacto } from "./ruteo-pais"
 import {
   type EsquemaOperacion,
   bloquePromptEsquema,
@@ -69,6 +71,9 @@ import {
   borradorCompleto,
   resumenParaConfirmar,
   normalizarIdentificador,
+  normalizarIdentificadorAdmin,
+  NOMBRE_IDENTIFICADOR,
+  nombreIdentificadorAdmin,
   type DatosParciales,
   type Borrador,
 } from "./onboarding/borrador"
@@ -119,9 +124,19 @@ export async function faseDelContacto(contact: string): Promise<FaseVicky> {
   return faseEfectiva(crudo)
 }
 
+/**
+ * País del alta por chat (21-sep, Perú = misma Vicky): PE por prefijo 51,
+ * todo lo demás Chile (CO/MX no hacen alta por chat; Messenger cuenta como
+ * Chile). Es la única fuente: borrador, ficha, API de alta, prompts y NDV/IMP
+ * lo leen de aquí.
+ */
+export function paisOnboardingDe(contact: string): "cl" | "pe" {
+  return paisDeContacto(contact) === "pe" ? "pe" : "cl"
+}
+
 async function cargarBorrador(contact: string): Promise<Borrador> {
   const json = await getKvValue(claveBorrador(contact)).catch(() => null)
-  return parsearBorrador(json) ?? borradorVacio("cl")
+  return parsearBorrador(json) ?? borradorVacio(paisOnboardingDe(contact))
 }
 
 /**
@@ -135,6 +150,7 @@ export async function armarOnboarding(contact: string): Promise<{
 }> {
   const borrador = await cargarBorrador(contact)
   const altaSolicitada = !!(await getKvValue(claveAltaSolicitada(contact)).catch(() => null))
+  const paisCfg = paisOnboardingDe(contact)
 
   // ── F2: estado de la CONFIGURACIÓN (nómina/turnos/planificaciones) ──
   const cargarConfig = async (): Promise<Configuracion> => {
@@ -148,7 +164,7 @@ export async function armarOnboarding(contact: string): Promise<{
     setKvValue(claveConfiguracion(contact), JSON.stringify(cfg)).catch(() => {})
   /** Respuesta estándar de las tools F2: estado + faltas en cotidiano. */
   const estadoConfig = (cfg: Configuracion) => {
-    const faltas = pendientesConfiguracion(cfg)
+    const faltas = pendientesConfiguracion(cfg, paisCfg)
     return {
       resumen: resumenConfiguracion(cfg),
       pendientes: faltas.map((f) => f.mensaje),
@@ -528,7 +544,7 @@ export async function armarOnboarding(contact: string): Promise<{
         : (a.rutsTrabajadores || []).filter(Boolean)
       if (!ruts.length) return { ok: false, error: "Sin trabajadores a asignar (¿todos=true o lista de RUTs?)." }
       // "desde hoy" tiene que ser HOY (caso Haus 07-sep: quedó 2025-01-07).
-      const { fecha: desde, ajustada } = normalizarFechaDesde(a.desde, hoyChileISO())
+      const { fecha: desde, ajustada } = normalizarFechaDesde(a.desde, hoyISOPais(paisCfg))
       for (const rut of ruts) {
         const idx = cfg.asignaciones.findIndex((x) => compacto(x.rutTrabajador) === compacto(rut))
         const fila = { rutTrabajador: rut, planificacion: a.planificacion, desde, hasta: a.hasta }
@@ -550,7 +566,7 @@ export async function armarOnboarding(contact: string): Promise<{
         return { ok: false, error: "Falta la confirmación explícita del cliente al resumen." }
       }
       const cfg = await cargarConfig()
-      const faltas = pendientesConfiguracion(cfg)
+      const faltas = pendientesConfiguracion(cfg, paisCfg)
       if (faltas.length) {
         // EL CANDADO (Lalo 25-ago): lo compartido se completa entero.
         return { ok: false, pendientes: faltas.map((f) => f.mensaje), instruccion: "Conversa estos puntos de a uno; recién con la lista vacía se puede cerrar." }
@@ -647,11 +663,13 @@ export async function armarOnboarding(contact: string): Promise<{
         }
       }
       // ── Alta AUTOMÁTICA por API (Nicolás), con candado consultar-antes-de-crear ──
+      const paisAltaChat = paisOnboardingDe(contact)
+      const ETQ = paisAltaChat.toUpperCase()
       const fichaAlta =
         `Empresa: ${b.empresa.nombre}\n` +
-        `RUT empresa: ${normalizarIdentificador(b.empresa.identificador!, "cl")}\n` +
+        `${NOMBRE_IDENTIFICADOR[paisAltaChat]} empresa: ${normalizarIdentificador(b.empresa.identificador!, paisAltaChat)}\n` +
         `Admin: ${b.admin.nombre} ${b.admin.apellido}\n` +
-        `RUT admin: ${normalizarIdentificador(b.admin.identificador!, "cl")}\n` +
+        `${nombreIdentificadorAdmin(paisAltaChat)} admin: ${normalizarIdentificadorAdmin(b.admin.identificador!, paisAltaChat)}\n` +
         `Correo admin: ${b.admin.email}` +
         (b.admin.idInterno ? `\nCódigo interno: ${b.admin.idInterno}` : "")
 
@@ -670,7 +688,7 @@ export async function armarOnboarding(contact: string): Promise<{
         const marca409 = await getKvValue(`alta_409_${contact}`).catch(() => null)
         if (marca409) {
           await avisarEquipoInterno(
-            `⚠️ ALTA ONBOARDING CL: la empresa ${nombreExistente || b.empresa.nombre || ""} quedó CREADA SIN ADMINISTRADOR en la plataforma ` +
+            `⚠️ ALTA ONBOARDING ${ETQ}: la empresa ${nombreExistente || b.empresa.nombre || ""} quedó CREADA SIN ADMINISTRADOR en la plataforma ` +
               `(el primer create falló por correo ocupado ${marca409} y la plataforma igual creó la empresa). ` +
               `Crear a mano el usuario administrador con ${b.admin.email} y avisarle. Contacto +${contact}.\n${fichaAlta}`,
           )
@@ -684,7 +702,7 @@ export async function armarOnboarding(contact: string): Promise<{
           }
         }
         await avisarEquipoInterno(
-          `🏢 ALTA ONBOARDING CL: la empresa YA EXISTE en la plataforma (${nombreExistente || "sin nombre"}). ` +
+          `🏢 ALTA ONBOARDING ${ETQ}: la empresa YA EXISTE en la plataforma (${nombreExistente || "sin nombre"}). ` +
             `Posible cliente actual con plan nuevo — activar sobre la cuenta existente, NO crear otra. ` +
             `Contacto +${contact}.\n${fichaAlta}`,
         )
@@ -707,7 +725,7 @@ export async function armarOnboarding(contact: string): Promise<{
       const simulada =
         (await getKvValue("alta_simulada").catch(() => null)) === "on" && (await esContactoPiloto(contact))
       if (altaApiConfigurada()) {
-        const existe = simulada ? { exists: false, name: null } : await existeEmpresa(b.empresa.identificador!, "cl")
+        const existe = simulada ? { exists: false, name: null } : await existeEmpresa(b.empresa.identificador!, paisAltaChat)
         if (existe?.exists) return await responderYaExiste(existe.name)
         if (existe && !existe.exists) {
           const alta = simulada
@@ -718,7 +736,7 @@ export async function armarOnboarding(contact: string): Promise<{
                 workEmail: b.admin.email!,
               }
             : await crearEmpresaConAdmin({
-            pais: "cl",
+            pais: paisAltaChat,
             empresa: { nombre: b.empresa.nombre!, identificador: b.empresa.identificador! },
             // VickyAppSession: el WhatsApp es el identificador de la
             // conversación (pedido de Nicolás, 11-sep).
@@ -740,7 +758,7 @@ export async function armarOnboarding(contact: string): Promise<{
             // Marca para el reintento: si después exists=true, fue este 409.
             await setKvValue(`alta_409_${contact}`, `${b.admin.email} (${new Date().toISOString()})`).catch(() => {})
             await avisarEquipoInterno(
-              `📧 ALTA ONBOARDING CL: el correo del admin (${b.admin.email}) YA tiene usuario en la plataforma — se le pidió otro correo. Contacto +${contact}.\n${fichaAlta}`,
+              `📧 ALTA ONBOARDING ${ETQ}: el correo del admin (${b.admin.email}) YA tiene usuario en la plataforma — se le pidió otro correo. Contacto +${contact}.\n${fichaAlta}`,
             ).catch(() => {})
             return {
               ok: true,
@@ -773,7 +791,7 @@ export async function armarOnboarding(contact: string): Promise<{
             ).catch(() => {})
             const zonaOk = simulada || Boolean(countryIdAlta)
             await avisarEquipoInterno(
-              `✅ ALTA ONBOARDING CL ${simulada ? "SIMULADA (piloto, sin API real)" : "creada POR API"} (companyId ${alta.companyId}) — contacto +${contact}.` +
+              `✅ ALTA ONBOARDING ${ETQ} ${simulada ? "SIMULADA (piloto, sin API real)" : "creada POR API"} (companyId ${alta.companyId}) — contacto +${contact}.` +
                 (simulada ? "" : ` · countryCode enviado: ${paisAlta || "(ninguno)"} · countryId devuelto: ${countryIdAlta || "(VACÍO)"}`) +
                 (zonaOk
                   ? ""
@@ -859,7 +877,7 @@ export async function armarOnboarding(contact: string): Promise<{
 
       // Alta MANUAL: sin API configurada o con el servicio caído, el aviso
       // lleva los datos ya normalizados, listos para pegar en la plataforma.
-      await avisarEquipoInterno(`🆕 ALTA ONBOARDING CL (crear a mano) de +${contact}:\n${fichaAlta}`)
+      await avisarEquipoInterno(`🆕 ALTA ONBOARDING ${ETQ} (crear a mano) de +${contact}:\n${fichaAlta}`)
       await setKvValue(claveAltaSolicitada(contact), new Date().toISOString()).catch(() => {})
       return {
         ok: true,
@@ -883,7 +901,7 @@ export async function armarOnboarding(contact: string): Promise<{
     systemPrompt: altaSolicitada
       ? await (async () => {
           const cfg = await cargarConfig()
-          const faltas = pendientesConfiguracion(cfg)
+          const faltas = pendientesConfiguracion(cfg, paisCfg)
           const altaVia = await getKvValue(claveAltaSolicitada(contact)).catch(() => null)
           const esquema = (await getKvValue(claveEsquema(contact))
             .then((v) => (v ? (JSON.parse(v) as EsquemaOperacion) : {}))
@@ -892,7 +910,8 @@ export async function armarOnboarding(contact: string): Promise<{
           const capRaw = await getKvValue(claveCapacitacion(contact)).catch(() => null)
           const nombreRelator = capRaw ? (JSON.parse(capRaw) as { relator?: { nombre?: string } }).relator?.nombre : undefined
           return promptConfiguracionCL({
-            hoy: hoyChileISO(),
+            pais: paisCfg,
+            hoy: hoyISOPais(paisCfg),
             resumen: resumenConfiguracion(cfg),
             pendientes: faltas.map((f) => f.mensaje),
             nTrabajadores: cfg.trabajadores.length,

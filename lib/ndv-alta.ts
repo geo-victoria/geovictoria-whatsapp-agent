@@ -31,6 +31,8 @@ export const claveJobNdvImp = (contact: string) => `onb_ndvimp_${contact.replace
 
 export type JobNdvImp = {
   contact: string
+  /** País del alta (21-sep): PE → el cotizador convierte las DOS notas (plan PEN + hardware USD). */
+  pais?: "cl" | "pe"
   quoteId?: string
   companyId: string
   empresa: string
@@ -48,6 +50,8 @@ export type JobNdvImp = {
   ndvError?: string
   /** El cotizador dijo que no se puede (sin espejo, etc.): no se insiste. */
   ndvImposible?: boolean
+  /** PE (21-sep): estado de la SEGUNDA nota (hardware en USD). */
+  hardware?: { cotId?: string; ndvId?: string; idNdv?: string; estado?: string; error?: string; intentos?: number }
   impId?: string
   impNumero?: string
   impSinNdv?: boolean
@@ -108,6 +112,7 @@ export async function encolarNdvImp(
   }
   const job: JobNdvImp = {
     contact: c,
+    pais: c.startsWith("51") && c.length === 11 ? "pe" : "cl",
     quoteId: quoteId || undefined,
     companyId: datos.companyId,
     empresa: datos.empresa,
@@ -131,6 +136,8 @@ type RespuestaNdvAlta = {
   estadoReferencia?: string
   descuadreUF?: number | null
   yaEstaba?: boolean
+  /** PE: la segunda nota (hardware en USD), si existía. */
+  hardware?: { cotId?: string; ndvId?: string; idNdv?: string; estado?: string; error?: string }
 }
 
 async function pedirNdvAlta(job: JobNdvImp): Promise<RespuestaNdvAlta> {
@@ -141,7 +148,7 @@ async function pedirNdvAlta(job: JobNdvImp): Promise<RespuestaNdvAlta> {
     const r = await fetch(`${COTIZADORA_API_BASE}/api/creator/ndv-alta-chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(secret ? { "x-vicky-secret": secret } : {}) },
-      body: JSON.stringify({ quoteId: job.quoteId, companyId: job.companyId, empresaNombre: job.empresa, rut: job.rut }),
+      body: JSON.stringify({ quoteId: job.quoteId, companyId: job.companyId, empresaNombre: job.empresa, rut: job.rut, pais: job.pais || "cl" }),
       cache: "no-store",
       signal: ctrl.signal,
     })
@@ -176,6 +183,7 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
     // 1. NDV (solo si hay cotización y aún no tenemos la referencia).
     if (job.quoteId && !job.ndv?.referenciaId && !job.ndvImposible) {
       const r = await pedirNdvAlta(job)
+      if (r.hardware) job.hardware = { ...r.hardware, intentos: (job.hardware?.intentos || 0) + 1 }
       if (r.listo && r.referenciaId) {
         job.ndv = {
           ndvId: r.ndvId,
@@ -186,6 +194,11 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
         }
         job.ndvPendiente = undefined
         job.ndvError = undefined
+        if (job.pais === "pe" && r.hardware?.estado === "CONFIRMADA") {
+          await avisarEquipoInterno(
+            `🇵🇪 NDV de HARDWARE (USD) ${r.hardware.idNdv || r.hardware.ndvId || ""} de ${job.empresa} confirmada junto al plan ${r.idNdv || ""} (dos notas, como siempre en Perú).`,
+          ).catch(() => {})
+        }
         if (typeof r.descuadreUF === "number" && Math.abs(r.descuadreUF) > 0.005) {
           await avisarEquipoInterno(
             `⚠️ NDV ${r.idNdv || ""} de ${job.empresa}: el mensual de la nota difiere de lo vendido en ${r.descuadreUF > 0 ? "+" : ""}${r.descuadreUF} UF — revisar en Creator antes de facturar.`,
@@ -211,6 +224,30 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
             `⚠️ NDV del alta por chat de ${job.empresa} (companyId ${job.companyId}) NO se pudo generar automáticamente: ${r.error || "sin detalle"}. Hay que convertir/confirmar la nota a mano en Creator.`,
           ).catch(() => {})
         }
+      }
+    }
+
+    // 1c. PERÚ: el plan ya tiene referencia pero la nota de HARDWARE (USD)
+    //     quedó pendiente (PDF de Creator, presupuesto) → se sigue pidiendo;
+    //     el cotizador la retoma por la rama "ya enlazada". Tope 10 pasadas.
+    if (
+      job.pais === "pe" &&
+      job.quoteId &&
+      job.ndv?.referenciaId &&
+      job.hardware &&
+      !["CONFIRMADA", "sin_espejo_hardware", "sin_cuenta"].includes(String(job.hardware.estado || "")) &&
+      (job.hardware.intentos || 0) < 10
+    ) {
+      const r = await pedirNdvAlta(job)
+      if (r.hardware) job.hardware = { ...r.hardware, intentos: (job.hardware.intentos || 0) + 1 }
+      if (r.hardware?.estado === "CONFIRMADA") {
+        await avisarEquipoInterno(
+          `🇵🇪 NDV de HARDWARE (USD) ${r.hardware.idNdv || r.hardware.ndvId || ""} de ${job.empresa} confirmada (plan ${job.ndv.idNdv || ""}).`,
+        ).catch(() => {})
+      } else if ((job.hardware.intentos || 0) >= 10) {
+        await avisarEquipoInterno(
+          `⚠️ 🇵🇪 NDV de HARDWARE (USD) de ${job.empresa} (companyId ${job.companyId}) NO se pudo confirmar sola (${job.hardware.estado}: ${job.hardware.error || "sin detalle"}) — revisar en Creator (espejo ${job.hardware.cotId || "?"}).`,
+        ).catch(() => {})
       }
     }
 
@@ -269,6 +306,7 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
         }
         const imp = await m.crearImplementacionGvAvanzado({
           ...ctx,
+          pais: job.pais || ctx.pais || "cl",
           planificaTurnos,
           tipoPlanificacion,
           razonSocial: job.empresa,
@@ -277,7 +315,8 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
           ndvId: job.ndv?.referenciaId,
           comentarios:
             `Alta por chat de Vicky (companyId ${job.companyId}). Empresa YA creada en la plataforma; no requiere creación.` +
-            (job.ndv?.idNdv ? ` Nota de venta ${job.ndv.idNdv} confirmada.` : " Nota de venta pendiente de confirmar."),
+            (job.ndv?.idNdv ? ` Nota de venta ${job.ndv.idNdv} confirmada.` : " Nota de venta pendiente de confirmar.") +
+            (job.pais === "pe" && job.hardware?.idNdv ? ` Nota de venta de HARDWARE (USD) ${job.hardware.idNdv} (${job.hardware.estado || "?"}).` : ""),
         })
         if (imp) {
           job.impId = imp.id
@@ -359,8 +398,14 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
       }
     }
 
-    // 4. Cierre del job.
-    if (job.impId && !job.impSinNdv) {
+    // 4. Cierre del job. PE: no se cierra mientras la nota de HARDWARE siga
+    //    pendiente (tope de 10 pasadas en 1c; después se avisa y se cierra).
+    const hardwarePendientePE =
+      job.pais === "pe" &&
+      Boolean(job.hardware) &&
+      !["CONFIRMADA", "sin_espejo_hardware", "sin_cuenta"].includes(String(job.hardware?.estado || "")) &&
+      (job.hardware?.intentos || 0) < 10
+    if (job.impId && !job.impSinNdv && !hardwarePendientePE) {
       job.terminadoAt = new Date().toISOString()
       job.motivoFin = "completo"
     } else if (job.impId && (job.ndvImposible || !job.quoteId)) {

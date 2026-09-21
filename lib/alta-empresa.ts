@@ -90,7 +90,7 @@ async function llamar(path: string, body?: unknown): Promise<Response> {
  */
 export async function existeEmpresa(
   identificador: string,
-  pais: "cl" | "co" | "mx",
+  pais: "cl" | "ar" | "pe" | "co" | "mx" | "br",
 ): Promise<{ exists: boolean; name: string | null } | null> {
   if (!altaApiConfigurada()) return null
   try {

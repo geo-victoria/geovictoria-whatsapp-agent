@@ -23,7 +23,7 @@ export const TOOL_GUARDAR_DATOS_ONBOARDING = {
         properties: {
           nombre: CAMPO_TEXTO("Razón social de la empresa, tal cual la dio el cliente."),
           identificador: CAMPO_TEXTO(
-            "RUT de la empresa, tal cual lo escribió el cliente (con o sin puntos y guion).",
+            "RUT (Chile) o RUC (Perú) de la empresa, tal cual lo escribió el cliente (con o sin puntos y guion).",
           ),
         },
       },
@@ -35,7 +35,7 @@ export const TOOL_GUARDAR_DATOS_ONBOARDING = {
             "Apellido(s) del administrador. Campo SEPARADO del nombre: si el cliente dio el " +
               "nombre completo junto y no queda claro dónde parte el apellido, pregunta en vez de adivinar.",
           ),
-          identificador: CAMPO_TEXTO("RUT personal del administrador, tal cual lo escribió."),
+          identificador: CAMPO_TEXTO("RUT (Chile) o DNI (Perú) personal del administrador, tal cual lo escribió."),
           email: CAMPO_TEXTO("Correo del administrador (será su acceso a la plataforma)."),
           idInterno: CAMPO_TEXTO(
             "Código interno de trabajador (SAP u otro) SOLO si el cliente lo mencionó espontáneamente. Nunca se pide.",

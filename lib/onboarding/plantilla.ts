@@ -138,13 +138,35 @@ export const PLANTILLA_ALTA_QR_CL = {
  * para callar y dejar que el bloque del Bot Designer responda con el flow). */
 export const TEXTO_BOTON_ALTA_QR = "Crear mi cuenta"
 
+/**
+ * PERÚ (21-sep): el MISMO arranque del alta por chat, en el bot "Vicky Perú"
+ * y con RUC. Creada por API (vic-admin-wa-template); mientras Meta la revisa
+ * el kickoff PE sale como texto libre en ventana y, fuera de ventana, cae al
+ * texto igual (Botmaker bota una plantilla PENDING en silencio). Sin
+ * "Felicitaciones" al inicio para no caer en la recategorización a MARKETING.
+ */
+export const PLANTILLA_ONBOARDING_PE = {
+  name: "vicky_pe_alta_cuenta",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky Perú",
+  body:
+    "Ya eres parte de GeoVictoria 🎉\n\n" +
+    "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n" +
+    "De tu cotización ya tengo estos datos de la empresa:\n" +
+    "Empresa: ${empresa}\n" +
+    "RUC: ${rut_empresa}\n\n" +
+    "Los usamos tal cual? Si hay que cambiar algo, me dices. " +
+    "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, DNI y correo.",
+} as const
+
 export type ParamsOnboarding = { empresa: string; rut_empresa: string }
 
 /** Params de la plantilla. Sin dato, genéricos que no dejan huecos raros. */
-export function paramsPlantillaOnboarding(empresa?: string, rut?: string): ParamsOnboarding {
+export function paramsPlantillaOnboarding(empresa?: string, rut?: string, pais: "cl" | "pe" = "cl"): ParamsOnboarding {
   return {
     empresa: (empresa || "").trim() || "tu empresa",
-    rut_empresa: rutLegible(rut) || "el de tu cotización",
+    rut_empresa: (pais === "pe" ? String(rut || "").replace(/\D/g, "") : rutLegible(rut)) || "el de tu cotización",
   }
 }
 
@@ -166,8 +188,8 @@ export function rutLegible(rut?: string): string {
  * cuando la ventana está abierta. Renderiza desde `body`, así que el texto no
  * puede divergir del de la plantilla aprobada.
  */
-export function renderPlantillaOnboarding(params: ParamsOnboarding): string {
-  return PLANTILLA_ONBOARDING_CL.body.replace(
+export function renderPlantillaOnboarding(params: ParamsOnboarding, pais: "cl" | "pe" = "cl"): string {
+  return (pais === "pe" ? PLANTILLA_ONBOARDING_PE : PLANTILLA_ONBOARDING_CL).body.replace(
     /\$\{(\w+)\}/g,
     (_, k: string) => (params as Record<string, string>)[k] ?? `\${${k}}`,
   )

@@ -11,6 +11,8 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import {
   borradorVacio,
+  aplicarDatos,
+  parsearBorrador,
   borradorCompleto,
   camposPendientes,
   problemas,
@@ -199,5 +201,44 @@ describe("confirmación antes del paso irreversible", () => {
     const r = resumenParaConfirmar(completo("co", "900123456", "830045123"))
     assert.match(r, /NIT: 900123456-8/)
     assert.ok(!r.includes("RUT"))
+  })
+})
+
+// ── PERÚ (21-sep): RUC para la empresa, DNI para el administrador ────────────
+describe("borrador Perú", () => {
+  const PE = (): Borrador =>
+    aplicarDatos(borradorVacio("pe"), {
+      empresa: { nombre: "Prueba Vicky PE SAC", identificador: "20605842055" },
+      admin: { nombre: "Diego", apellido: "Prueba", identificador: "12345678", email: "diego@prueba.pe" },
+    })
+
+  test("un borrador peruano completo no tiene problemas", () => {
+    assert.deepEqual(problemas(PE()), [])
+    assert.ok(borradorCompleto(PE()))
+  })
+
+  test("RUC inválido y DNI inválido se marcan con su nombre", () => {
+    const b = aplicarDatos(PE(), { empresa: { identificador: "20605842050" }, admin: { identificador: "123" } })
+    const det = problemas(b).map((p) => `${p.campo}:${p.detalle}`)
+    assert.ok(det.includes("empresa.identificador:RUC inválido"), det.join(" | "))
+    assert.ok(det.includes("admin.identificador:DNI inválido"), det.join(" | "))
+  })
+
+  test("el carné de extranjería vale como identificador del admin", () => {
+    const b = aplicarDatos(PE(), { admin: { identificador: "001234567" } })
+    assert.deepEqual(problemas(b), [])
+  })
+
+  test("el resumen peruano habla de RUC y DNI, nunca de RUT", () => {
+    const r = resumenParaConfirmar(PE())
+    assert.match(r, /RUC: 20605842055/)
+    assert.match(r, /DNI: 12345678/)
+    assert.ok(!r.includes("RUT"))
+  })
+
+  test("un borrador guardado con país pe se rehidrata", () => {
+    const b = parsearBorrador(JSON.stringify(PE()))
+    assert.equal(b?.pais, "pe")
+    assert.equal(b?.empresa.identificador, "20605842055")
   })
 })

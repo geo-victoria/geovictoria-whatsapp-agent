@@ -14,10 +14,12 @@ import { sendBotmakerMessage, sendBotmakerTemplate } from "./botmaker-push-v3"
 import {
   PLANTILLA_ALTA_FLOW_CL,
   PLANTILLA_ONBOARDING_CL,
+  PLANTILLA_ONBOARDING_PE,
   paramsPlantillaAltaFlow,
   paramsPlantillaOnboarding,
   renderPlantillaOnboarding,
 } from "./onboarding/plantilla"
+import { paisDeContacto } from "./ruteo-pais"
 
 // El kickoff del alta es TRANSACCIONAL (07-sep, caso TESLA AUSTRAL): el
 // cliente acaba de pagar y este mensaje es la consecuencia directa. El gate de
@@ -42,13 +44,18 @@ export async function entregarKickoffOnboarding(
   rut?: string,
   nombreCliente?: string,
 ): Promise<{ via: "texto" | "plantilla" | "flow" | "fallo"; texto: string }> {
+  // PERÚ (21-sep): el alta es CONVERSACIONAL (sin flow ni QR: esas plantillas
+  // son del bot Vicky Chile y el push las rechaza para un +51). Texto en
+  // ventana; fuera de ventana la plantilla UTILITY del bot Vicky Perú.
+  const esPE = paisDeContacto(contact) === "pe"
+  const flowOnGate = esPE ? false : ((await getKvValue("alta_flow_kickoff").catch(() => null)) || "").trim() === "on"
   // ALTA POR FORMULARIO (28-ago): con el gate encendido, el kickoff es la
   // plantilla con botón FLOW (alta_cuenta_v2_flow) — dentro o fuera de
   // ventana da igual, las plantillas entran siempre. Gate en vic_kv para
   // encender SIN deploy recién cuando Meta apruebe la clv4 (una plantilla
   // PENDING se "acepta" y se bota — cicatriz 25-ago). Si el envío falla,
   // sigue el camino clásico conversacional: nadie se queda sin alta.
-  const flowOn = ((await getKvValue("alta_flow_kickoff").catch(() => null)) || "").trim() === "on"
+  const flowOn = flowOnGate
   if (flowOn) {
     const params = paramsPlantillaAltaFlow(nombreCliente, empresa)
     // HÍBRIDO POR VENTANA (Lalo 28-ago): con ventana VENCIDA (designado frío)
@@ -99,8 +106,8 @@ export async function entregarKickoffOnboarding(
     if (okFlow) return { via: "flow", texto: "" }
     console.warn(`[onboarding-envio] plantilla flow falló para ${contact}; kickoff clásico de respaldo`)
   }
-  const params = paramsPlantillaOnboarding(empresa, rut)
-  const texto = renderPlantillaOnboarding(params)
+  const params = paramsPlantillaOnboarding(empresa, rut, esPE ? "pe" : "cl")
+  const texto = renderPlantillaOnboarding(params, esPE ? "pe" : "cl")
 
   const ultimo = await getLastUserAt(contact).catch(() => null)
   const abierta = !!ultimo && Date.now() - ultimo.getTime() < 24 * 3600e3
@@ -112,7 +119,7 @@ export async function entregarKickoffOnboarding(
   }
   const ok = await sendBotmakerTemplate(
     contact,
-    PLANTILLA_ONBOARDING_CL.name,
+    (esPE ? PLANTILLA_ONBOARDING_PE : PLANTILLA_ONBOARDING_CL).name,
     params,
     undefined,
     TRANSACCIONAL,

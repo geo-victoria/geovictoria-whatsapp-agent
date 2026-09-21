@@ -23,6 +23,10 @@
  */
 
 import { rutValido, formatearRut } from "../rut.ts"
+import { dniValido } from "./borrador.ts"
+
+/** País de la configuración (21-sep): en PE el trabajador se identifica por DNI. */
+export type PaisConfig = "cl" | "pe"
 
 // ── Tipos (espejo de las formas del wizard) ─────────────────────────────────
 
@@ -172,7 +176,7 @@ export function parsearNominaPegada(texto: string): TrabajadorCfg[] {
 
 // ── Validaciones (transcripción wizard → lenguaje cotidiano) ────────────────
 
-export function pendientesTrabajador(t: TrabajadorCfg, indice: number): PendienteCfg[] {
+export function pendientesTrabajador(t: TrabajadorCfg, indice: number, pais: PaisConfig = "cl"): PendienteCfg[] {
   const faltas: PendienteCfg[] = []
   const quien = nombreDe(t, indice)
   const p = (mensaje: string) => faltas.push({ ambito: "trabajadores", referencia: quien, mensaje })
@@ -181,7 +185,10 @@ export function pendientesTrabajador(t: TrabajadorCfg, indice: number): Pendient
     p(`a ${quien} le falta el nombre o el apellido`)
   }
   const rut = String(t.rut || "").trim()
-  if (!rut) p(`a ${quien} le falta el RUT`)
+  if (pais === "pe") {
+    if (!rut) p(`a ${quien} le falta el DNI`)
+    else if (!dniValido(rut)) p(`el DNI de ${quien} no parece válido (${rut}) — son 8 dígitos (o el carné de extranjería)`)
+  } else if (!rut) p(`a ${quien} le falta el RUT`)
   else if (!rutValido(rut)) p(`el RUT de ${quien} no cuadra (${rut}) — revisa el dígito verificador`)
 
   const correo = String(t.correo || "").trim()
@@ -314,9 +321,9 @@ export function pendientesAsignaciones(cfg: Configuracion): PendienteCfg[] {
  * en lenguaje cotidiano. Lista vacía = se puede confirmar. La tool de
  * confirmación del canal DEBE negarse mientras esto devuelva algo.
  */
-export function pendientesConfiguracion(cfg: Configuracion): PendienteCfg[] {
+export function pendientesConfiguracion(cfg: Configuracion, pais: PaisConfig = "cl"): PendienteCfg[] {
   const faltas: PendienteCfg[] = []
-  cfg.trabajadores.forEach((t, i) => faltas.push(...pendientesTrabajador(t, i)))
+  cfg.trabajadores.forEach((t, i) => faltas.push(...pendientesTrabajador(t, i, pais)))
   for (const turno of cfg.turnos) faltas.push(...pendientesTurno(turno))
   for (const plan of cfg.planificaciones) faltas.push(...pendientesPlanificacion(plan, cfg.turnos))
   faltas.push(...pendientesAsignaciones(cfg))
@@ -393,6 +400,12 @@ export function normalizarFechaDesde(desde: string | undefined, hoyISO: string):
 
 /** YYYY-MM-DD de hoy en Chile (la única zona que le importa al onboarding CL). */
 export function hoyChileISO(ahora: Date = new Date()): string {
-  const f = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" })
+  return hoyISOPais("cl", ahora)
+}
+
+/** YYYY-MM-DD de hoy en la zona del país del contacto (21-sep: Perú = America/Lima). */
+export function hoyISOPais(pais: PaisConfig, ahora: Date = new Date()): string {
+  const timeZone = pais === "pe" ? "America/Lima" : "America/Santiago"
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
   return f.format(ahora)
 }

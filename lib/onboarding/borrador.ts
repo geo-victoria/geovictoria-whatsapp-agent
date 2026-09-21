@@ -17,18 +17,39 @@
  * Módulo puro: sin red, sin Supabase, sin env. Todo lo de acá es testeable.
  */
 
-import { rutValido, formatearRut } from "../rut.ts"
+import { rutValido, formatearRut, rucValido, formatearRuc } from "../rut.ts"
 import { rutLegible } from "./plantilla.ts"
 import { nitValido, normalizarNit } from "../paises/co/nit.ts"
 import { rfcValido, normalizarRfc } from "../paises/mx/rfc.ts"
 
-export type PaisOnboarding = "cl" | "co" | "mx"
+// PERÚ (21-sep, Lalo "básicamente es lo mismo que hace Vicky de Chile"): el
+// alta por chat corre igual, con RUC para la empresa y DNI para el
+// administrador (la API de Nicolás recibe countryCode PE y el
+// nationalIdentifier del admin tal cual).
+export type PaisOnboarding = "cl" | "co" | "mx" | "pe"
 
 /** Cómo se llama el identificador tributario en cada país, para hablarle al cliente. */
 export const NOMBRE_IDENTIFICADOR: Record<PaisOnboarding, string> = {
   cl: "RUT",
   co: "NIT",
   mx: "RFC",
+  pe: "RUC",
+}
+
+/**
+ * Identificador PERSONAL del administrador. En CL/CO/MX coincide con el
+ * tributario (RUT/NIT/RFC valen para personas); en PE la persona se
+ * identifica con su DNI (8 dígitos) o carné de extranjería (9-12
+ * alfanuméricos), no con RUC.
+ */
+export function nombreIdentificadorAdmin(pais: PaisOnboarding): string {
+  return pais === "pe" ? "DNI" : NOMBRE_IDENTIFICADOR[pais]
+}
+
+/** DNI peruano (8 dígitos) o carné de extranjería (9-12 alfanuméricos). */
+export function dniValido(valor: string): boolean {
+  const v = String(valor || "").replace(/[\s.-]/g, "").toUpperCase()
+  return /^\d{8}$/.test(v) || /^[A-Z0-9]{9,12}$/.test(v)
 }
 
 export type Borrador = {
@@ -95,11 +116,17 @@ export function emailValido(email: string): boolean {
   return e.length <= 254 && EMAIL_RE.test(e)
 }
 
-/** true si el identificador es válido para el país (RUT / NIT / RFC). */
+/** true si el identificador es válido para el país (RUT / NIT / RFC / RUC). */
 export function identificadorValido(valor: string, pais: PaisOnboarding): boolean {
   if (pais === "cl") return rutValido(valor)
   if (pais === "co") return nitValido(valor)
+  if (pais === "pe") return rucValido(valor)
   return rfcValido(valor)
+}
+
+/** true si el identificador PERSONAL del admin es válido para el país. */
+export function identificadorAdminValido(valor: string, pais: PaisOnboarding): boolean {
+  return pais === "pe" ? dniValido(valor) : identificadorValido(valor, pais)
 }
 
 /** Identificador en el formato canónico del país; "" si no es válido. */
@@ -107,7 +134,14 @@ export function normalizarIdentificador(valor: string, pais: PaisOnboarding): st
   if (!identificadorValido(valor, pais)) return ""
   if (pais === "cl") return formatearRut(valor)
   if (pais === "co") return normalizarNit(valor)
+  if (pais === "pe") return formatearRuc(valor)
   return normalizarRfc(valor)
+}
+
+/** Identificador personal del admin canónico; "" si no es válido. */
+export function normalizarIdentificadorAdmin(valor: string, pais: PaisOnboarding): string {
+  if (pais !== "pe") return normalizarIdentificador(valor, pais)
+  return dniValido(valor) ? String(valor || "").replace(/[\s.-]/g, "").toUpperCase() : ""
 }
 
 const vacio = (v?: string) => !String(v || "").trim()
@@ -120,6 +154,7 @@ const vacio = (v?: string) => !String(v || "").trim()
 export function problemas(b: Borrador): Problema[] {
   const out: Problema[] = []
   const nombreId = NOMBRE_IDENTIFICADOR[b.pais]
+  const nombreIdAdmin = nombreIdentificadorAdmin(b.pais)
 
   if (vacio(b.empresa.nombre)) out.push({ campo: "empresa.nombre", detalle: "falta" })
 
@@ -135,9 +170,9 @@ export function problemas(b: Borrador): Problema[] {
   if (vacio(b.admin.apellido)) out.push({ campo: "admin.apellido", detalle: "falta" })
 
   if (vacio(b.admin.identificador))
-    out.push({ campo: "admin.identificador", detalle: `falta el ${nombreId} del administrador` })
-  else if (!identificadorValido(b.admin.identificador!, b.pais))
-    out.push({ campo: "admin.identificador", detalle: `${nombreId} inválido` })
+    out.push({ campo: "admin.identificador", detalle: `falta el ${nombreIdAdmin} del administrador` })
+  else if (!identificadorAdminValido(b.admin.identificador!, b.pais))
+    out.push({ campo: "admin.identificador", detalle: `${nombreIdAdmin} inválido` })
 
   if (vacio(b.admin.email)) out.push({ campo: "admin.email", detalle: "falta" })
   else if (!emailValido(b.admin.email!))
@@ -208,7 +243,7 @@ export function parsearBorrador(json: string | null | undefined): Borrador | nul
   try {
     const raw = JSON.parse(json) as { pais?: unknown; empresa?: unknown; admin?: unknown }
     if (!raw || typeof raw !== "object") return null
-    if (raw.pais !== "cl" && raw.pais !== "co" && raw.pais !== "mx") return null
+    if (raw.pais !== "cl" && raw.pais !== "co" && raw.pais !== "mx" && raw.pais !== "pe") return null
     return aplicarDatos(borradorVacio(raw.pais), {
       empresa: (raw.empresa || {}) as DatosParciales["empresa"],
       admin: (raw.admin || {}) as DatosParciales["admin"],
@@ -250,11 +285,12 @@ export function sembrarBorrador(
 export function resumenParaConfirmar(b: Borrador): string {
   if (!borradorCompleto(b)) return ""
   const nombreId = NOMBRE_IDENTIFICADOR[b.pais]
+  const nombreIdAdmin = nombreIdentificadorAdmin(b.pais)
   // CL: el RUT se muestra como lo lee una persona (88.501.006-7); la
   // normalización sin puntos es para Zoho y la API del alta, no para el chat.
   const legible = (id: string) => (b.pais === "cl" ? rutLegible(id) : id)
   const idEmpresa = legible(normalizarIdentificador(b.empresa.identificador!, b.pais))
-  const idAdmin = legible(normalizarIdentificador(b.admin.identificador!, b.pais))
+  const idAdmin = legible(normalizarIdentificadorAdmin(b.admin.identificador!, b.pais))
 
   const lineas = [
     "Con esto creo la cuenta:",
@@ -263,7 +299,7 @@ export function resumenParaConfirmar(b: Borrador): string {
     `${nombreId}: ${idEmpresa}`,
     "",
     `Administrador: ${b.admin.nombre!.trim()} ${b.admin.apellido!.trim()}`,
-    `${nombreId}: ${idAdmin}`,
+    `${nombreIdAdmin}: ${idAdmin}`,
     `Correo: ${b.admin.email!.trim()}`,
   ]
   if (!vacio(b.admin.idInterno)) lineas.push(`Código interno: ${b.admin.idInterno!.trim()}`)

@@ -21,16 +21,35 @@ import {
   resumenParaConfirmar,
   identificadorValido,
   normalizarIdentificador,
+  NOMBRE_IDENTIFICADOR,
+  nombreIdentificadorAdmin,
+  type PaisOnboarding,
 } from "./borrador.ts"
 
-/** Etiquetas para hablarle al cliente chileno (el genérico dice "identificador"). */
-const ETIQUETA_CL: Record<Campo, string> = {
-  "empresa.nombre": "razón social de la empresa",
-  "empresa.identificador": "RUT de la empresa",
-  "admin.nombre": "nombre del administrador",
-  "admin.apellido": "apellido del administrador",
-  "admin.identificador": "RUT del administrador",
-  "admin.email": "correo del administrador",
+/**
+ * Etiquetas para hablarle al cliente en SU país (el genérico dice
+ * "identificador"). Chile RUT/RUT · Perú RUC/DNI (21-sep, Perú = misma Vicky).
+ */
+function etiquetasPara(pais: PaisOnboarding): Record<Campo, string> {
+  return {
+    "empresa.nombre": "razón social de la empresa",
+    "empresa.identificador": `${NOMBRE_IDENTIFICADOR[pais]} de la empresa`,
+    "admin.nombre": "nombre del administrador",
+    "admin.apellido": "apellido del administrador",
+    "admin.identificador": `${nombreIdentificadorAdmin(pais)} del administrador`,
+    "admin.email": "correo del administrador",
+  }
+}
+/** Compatibilidad: las etiquetas chilenas de siempre. */
+const ETIQUETA_CL: Record<Campo, string> = etiquetasPara("cl")
+
+/** Cómo se le habla en cada país (regla de estilo de Eduardo, por país). */
+function estiloPais(pais: PaisOnboarding): string {
+  if (pais === "pe") return "Peruano neutro y cercano, sin jerga ni chilenismos (nada de UF, RUT, 'al tiro', 'po')"
+  return "Chileno neutro y cercano, sin jerga ni voseo"
+}
+function zonaHorariaPais(pais: PaisOnboarding): string {
+  return pais === "pe" ? "hora de Perú" : "hora de Chile"
 }
 
 function valorDe(b: Borrador, campo: Campo): string | undefined {
@@ -75,6 +94,11 @@ export function promptOnboardingCL(
   b: Borrador,
   opts: { altaSolicitada: boolean },
 ): string {
+  const pais = b.pais
+  const ID_EMP = NOMBRE_IDENTIFICADOR[pais]
+  const ID_ADM = nombreIdentificadorAdmin(pais)
+  const ETIQ = etiquetasPara(pais)
+  const ejemploId = pais === "pe" ? "tu DNI es 12345678, cierto?" : "tu RUT es 12.345.678-5, cierto?"
   const base =
     "Eres Vicky, la asistente de GeoVictoria por WhatsApp. La persona con quien hablas YA PAGÓ " +
     "su plan: dejó de ser prospecto, es un cliente nuevo. Tu única misión en esta fase es dejar " +
@@ -85,8 +109,8 @@ export function promptOnboardingCL(
     "ni correos de personas. Si el cliente pregunta cómo SE USA la plataforma (marcar asistencia, " +
     "reportes, turnos), consulta la tool consultar_agente_soporte y entrega tú misma la respuesta.\n\n" +
     "# Los 6 datos del alta (nada más)\n" +
-    "De la empresa: 1) razón social, 2) RUT de la empresa.\n" +
-    "Del administrador de la cuenta: 3) nombre, 4) apellido, 5) RUT personal, 6) correo.\n" +
+    `De la empresa: 1) razón social, 2) ${ID_EMP} de la empresa.\n` +
+    `Del administrador de la cuenta: 3) nombre, 4) apellido, 5) ${ID_ADM} personal, 6) correo.\n` +
     "OJO: el administrador puede ser la persona con quien hablas U OTRA persona de la empresa — " +
     "quien compra no siempre administra. Antes de pedir sus datos, EXPLICA en una línea qué " +
     "significa el rol, para que el cliente decida bien a quién nombrar: el administrador es " +
@@ -101,8 +125,8 @@ export function promptOnboardingCL(
     "(vienen de la cotización pagada), NO los pidas de nuevo. Pregunta primero si la cuenta la " +
     "va a administrar él/ella u otra persona. Si es él/ella: muestra en UNA línea lo que ya " +
     "tienes (nombre, correo, y su teléfono es este mismo WhatsApp) para que lo confirme, y pide " +
-    "SOLO lo que falte. Si el borrador trae un RUT sugerido (viene del PAGO con tarjeta): " +
-    "ofrécelo como pregunta (tu RUT es 12.345.678-5, cierto?) — la tarjeta puede ser de otra " +
+    `SOLO lo que falte. Si el borrador trae un ${ID_ADM} sugerido (viene del PAGO con tarjeta): ` +
+    `ofrécelo como pregunta (${ejemploId}) — la tarjeta puede ser de otra ` +
     "persona, así que JAMÁS lo des por confirmado sin su sí. Si el admin será OTRA persona: pide " +
     "sus datos desde cero y los sembrados se pisan.\n\n" +
     "# Cómo trabajas\n" +
@@ -111,7 +135,7 @@ export function promptOnboardingCL(
     "te responde qué falta o qué vino inválido.\n" +
     "- Pide los datos agrupados y en orden (primero empresa, luego administrador), máximo 2-3 " +
     "por mensaje. Conversación natural, no interrogatorio.\n" +
-    "- Si la tool marca un dato inválido (un RUT que no cuadra, un correo mal escrito), dilo con " +
+    `- Si la tool marca un dato inválido (un ${ID_EMP} que no cuadra, un correo mal escrito), dilo con ` +
     "simpleza y pide de nuevo SOLO ese dato.\n" +
     "- NUNCA vuelvas a preguntar un dato que ya figure como guardado — incluidos los que vienen " +
     "de la cotización de la venta. Si necesitas certeza, confírmalo de pasada (la cuenta va a " +
@@ -142,7 +166,7 @@ export function promptOnboardingCL(
     "con su relator), pero RECIÉN después de crear la cuenta. Si la pide ahora, JAMÁS digas que " +
     "no necesita agendar nada ni que tú la reemplazas: dile que apenas quede creada la cuenta le " +
     "muestras los horarios, y cierra el alta primero.\n" +
-    '- JAMÁS te dirijas al cliente como "Oye". Chileno neutro y cercano, sin jerga ni voseo. ' +
+    `- JAMÁS te dirijas al cliente como "Oye". ${estiloPais(pais)}. ` +
     "Mensajes cortos de WhatsApp, sin negritas ni signos de apertura.\n" +
     "- MÁXIMO 2-3 oraciones por turno y UNA sola pregunta. No expliques qué es o qué hace un " +
     "administrador (ni ningún concepto) salvo que el cliente lo pregunte — confirma y avanza.\n" +
@@ -162,12 +186,12 @@ export function promptOnboardingCL(
   }
 
   const pendientes = camposPendientes(b)
-  const guardados = (Object.keys(ETIQUETA_CL) as Campo[])
+  const guardados = (Object.keys(ETIQ) as Campo[])
     .filter((c) => !pendientes.includes(c) && valorDe(b, c))
-    .map((c) => `- ${ETIQUETA_CL[c]}: ${valorDe(b, c)}`)
+    .map((c) => `- ${ETIQ[c]}: ${valorDe(b, c)}`)
   const invalidos = problemas(b)
     .filter((p) => p.detalle !== "falta" && !p.detalle.startsWith("falta"))
-    .map((p) => `- ${ETIQUETA_CL[p.campo]}: ${p.detalle}`)
+    .map((p) => `- ${ETIQ[p.campo]}: ${p.detalle}`)
 
   if (borradorCompleto(b)) {
     return (
@@ -184,7 +208,7 @@ export function promptOnboardingCL(
       ? `Datos ya guardados (NO se vuelven a preguntar; solo confirmar o actualizar):\n${guardados.join("\n")}\n`
       : "Aún no hay datos guardados.\n") +
     (invalidos.length ? `Datos que vinieron inválidos (re-pedir):\n${invalidos.join("\n")}\n` : "") +
-    `Datos pendientes: ${pendientes.map((c) => ETIQUETA_CL[c]).join(", ")}.`
+    `Datos pendientes: ${pendientes.map((c) => ETIQ[c]).join(", ")}.`
   )
 }
 
@@ -204,9 +228,12 @@ export function promptConfiguracionCL(estado: {
   bloqueEsquema?: string
   /** YYYY-MM-DD de HOY en Chile: sin esto el modelo inventa el año ("hoy 7 de septiembre" → 2025-01-07, caso Haus). */
   hoy?: string
+  /** País del contacto (21-sep): PE cambia RUT→DNI en la nómina, el estilo y la zona horaria. Default cl. */
+  pais?: PaisOnboarding
 }): string {
+  const pais: PaisOnboarding = estado.pais || "cl"
   const lineaHoy = estado.hoy
-    ? `HOY es ${estado.hoy} (formato año-mes-día, hora de Chile). Toda fecha que el cliente diga en relativo ("desde hoy", "desde el lunes", "el 7 de septiembre") se resuelve contra ESTA fecha y en ESTE año; jamás cambies el mes ni el año por tu cuenta.\n\n`
+    ? `HOY es ${estado.hoy} (formato año-mes-día, ${zonaHorariaPais(pais)}). Toda fecha que el cliente diga en relativo ("desde hoy", "desde el lunes", "el 7 de septiembre") se resuelve contra ESTA fecha y en ESTE año; jamás cambies el mes ni el año por tu cuenta.\n\n`
     : ""
   const base =
     lineaHoy +
@@ -308,7 +335,7 @@ export function promptConfiguracionCL(estado: {
     "contraseña: sin tool ejecutada, nada de eso ocurrió. Si el cliente pide un alta nueva o " +
     "cambiar el correo del administrador, dile que su cuenta ya está creada y que ese cambio lo " +
     "gestiona su implementador, y escálalo con escalar_a_implementador (otro).\n" +
-    '- JAMÁS digas "Oye". Chileno neutro, mensajes cortos (máx 2-3 oraciones), UNA pregunta por ' +
+    `- JAMÁS digas "Oye". ${estiloPais(pais)}, mensajes cortos (máx 2-3 oraciones), UNA pregunta por ` +
     "turno, sin negritas y sin guiones largos (—): usa coma o punto. No partas dos mensajes " +
     "seguidos con la misma palabra.\n\n" +
     "# Estado actual de la configuración\n"
@@ -322,5 +349,8 @@ export function promptConfiguracionCL(estado: {
       : estado.nTrabajadores > 0
         ? "\nSin pendientes: puedes ofrecer cerrar la configuración (resumen + confirmación)."
         : "")
-  return base + cuerpo + (estado.bloqueEsquema || "")
+  const texto = base + cuerpo + (estado.bloqueEsquema || "")
+  // PERÚ: la nómina se identifica por DNI, no por RUT (mismo formato de
+  // columnas; el candado valida DNI). Sustitución de vocabulario, nada más.
+  return pais === "pe" ? texto.replace(/\bRUT\b/g, "DNI") : texto
 }

@@ -45,9 +45,16 @@ async function autorizado(req: Request): Promise<boolean> {
   return Boolean(entregado) && (entregado === secreto || (Boolean(cron) && entregado === cron))
 }
 
+// PERÚ (21-sep): el mismo endpoint sirve al flow peruano (mismos nombres de
+// campo; etiquetas RUC/DNI en el JSON del flow). El país sale del contacto.
+function paisFlow(contact: string): "cl" | "pe" {
+  const c = String(contact || "").replace(/\D/g, "")
+  return c.startsWith("51") && c.length === 11 ? "pe" : "cl"
+}
+
 async function cargar(contact: string): Promise<Borrador> {
   const json = await getKvValue(claveBorrador(contact)).catch(() => null)
-  return parsearBorrador(json) ?? borradorVacio("cl")
+  return parsearBorrador(json) ?? borradorVacio(paisFlow(contact))
 }
 
 /**
@@ -147,7 +154,9 @@ export async function GET(req: Request): Promise<NextResponse> {
     ok: true,
     prefill: {
       es_persona_natural: natural,
-      mostrar_campos_empresa: !natural,
+      // PE: giro/dirección/comuna son chilenos (SII/boleta) — el flow peruano
+      // los oculta con el mismo flag.
+      mostrar_campos_empresa: !natural && b.pais !== "pe",
       razon_social: b.empresa.nombre || "",
       rut_empresa: b.empresa.identificador || "",
       giro: extras.giro,
@@ -234,8 +243,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     const campoFlow = mapa[p.campo]
     // Solo errores de la pantalla que se está validando.
     if (!campoFlow) continue
-    if (pantalla === "EMPRESA" && !campoFlow.startsWith("admin_") ) errores[campoFlow] = mensajeError(p.campo)
-    if (pantalla === "ADMIN" && campoFlow.startsWith("admin_")) errores[campoFlow] = mensajeError(p.campo)
+    if (pantalla === "EMPRESA" && !campoFlow.startsWith("admin_") ) errores[campoFlow] = mensajeError(p.campo, paisFlow(contact))
+    if (pantalla === "ADMIN" && campoFlow.startsWith("admin_")) errores[campoFlow] = mensajeError(p.campo, paisFlow(contact))
   }
 
   if (Object.keys(errores).length > 0) {
@@ -298,7 +307,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       // por rafaga_10min a 100 s del kickoff, y Vicky quedó muda con el
       // formulario ya completo.
       enviado = await sendBotmakerMessage(contact, mensaje, undefined, { transaccional: true }).catch(() => false)
-      if (enviado) await appendAssistantV3(contact, mensaje, "cl").catch(() => {})
+      if (enviado) await appendAssistantV3(contact, mensaje, paisFlow(contact)).catch(() => {})
     }
     if (!enviado) {
       const { PLANTILLA_ALTA_RESUMEN_CL, paramsPlantillaAltaFlow } = await import("@/lib/onboarding/plantilla")
@@ -326,12 +335,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   return NextResponse.json({ ok: true, valido: true, completo: borradorCompleto(actualizado), resumenEnviado: Boolean(mensaje) })
 }
 
-function mensajeError(campo: string): string {
+function mensajeError(campo: string, pais: "cl" | "pe" = "cl"): string {
   switch (campo) {
     case "empresa.identificador":
-      return "RUT inválido — revisa el dígito verificador"
+      return pais === "pe" ? "RUC inválido — son 11 dígitos, revísalo" : "RUT inválido — revisa el dígito verificador"
     case "admin.identificador":
-      return "RUT inválido — revisa el dígito verificador"
+      return pais === "pe" ? "DNI inválido — son 8 dígitos (o tu carné de extranjería)" : "RUT inválido — revisa el dígito verificador"
     case "admin.email":
       return "Correo inválido — revísalo"
     default:

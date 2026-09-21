@@ -740,7 +740,9 @@ export async function registrarComprobanteTransferencia(
     // Acá NO hace falta el fallback a plantilla HSM que sí lleva la vía del
     // pago online: el cliente ACABA de mandar el comprobante, así que la
     // ventana de 24 h está abierta por definición.
-    if (pais === "cl" && (await onboardingActivoPara(contact))) {
+    // PERÚ (21-sep): la misma segunda puerta que Chile — comprobante legible
+    // ⇒ alta por chat, no el wizard web.
+    if ((pais === "cl" || pais === "pe") && (await onboardingActivoPara(contact))) {
       // SEGUNDA EMPRESA con el alta de la primera todavía abierta (08-sep):
       // no se re-siembra ni se manda otro formulario — queda pagada y en
       // cola (el post-pago del cotizador la encola con aviso interno).
@@ -772,7 +774,7 @@ export async function registrarComprobanteTransferencia(
         sembrado = sembrarBorrador(
           previo,
           { empresa: { nombre: nombreEmpresa || undefined, identificador: pointer.rut } },
-          "cl",
+          pais === "pe" ? "pe" : "cl",
         )
         await setKvValue(claveBorrador(contact), JSON.stringify(sembrado))
         await setKvValue(claveFase(contact), "onboarding")

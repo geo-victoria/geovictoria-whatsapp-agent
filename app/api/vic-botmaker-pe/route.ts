@@ -66,6 +66,7 @@ import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
+import { faseDelContacto, armarOnboarding } from "@/lib/onboarding-canal"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -193,8 +194,78 @@ async function capturarPayloadDebug(body: unknown): Promise<void> {
   }
 }
 
+/**
+ * FASE ONBOARDING EN PERÚ (21-sep, Lalo "básicamente es lo mismo que hace
+ * Vicky de Chile"): tras el pago el contacto pasa al agente de onboarding —
+ * prompt y toolset propios (alta por chat con RUC/DNI, nómina, capacitación),
+ * MISMO pipeline de salida. Cero maquinaria comercial: ni guardrails de
+ * venta, ni loop, ni casuística. Antes el webhook PE no conocía la fase y el
+ * "sí" del cliente lo recibía la vendedora, así que confirmar_alta_empresa
+ * jamás corría (brecha 2 del levantamiento 21-sep).
+ * Devuelve el reply YA enviado (o solo calculado en simulación).
+ */
+async function turnoOnboardingPE(
+  contact: string,
+  message: string,
+  apiKey: string,
+  history: Awaited<ReturnType<typeof fetchHistoryV3>>,
+  simulacion: boolean,
+): Promise<{ reply: string; toolCalls: ToolCallRecordPE[] }> {
+  const onboarding = await armarOnboarding(contact)
+  let directivaAdmin = ""
+  try {
+    const da = (await getKvValue(`directiva_admin_${contact}`)) || ""
+    if (da.trim()) directivaAdmin = `\n\n[DIRECTIVA DEL ADMINISTRADOR — obligatoria, prevalece sobre cualquier otra regla] ${da.trim()}`
+  } catch { /* sin directiva */ }
+  const result = await runAgentLoop({
+    systemPrompt: onboarding.systemPrompt + directivaAdmin,
+    history,
+    userMessage: message,
+    apiKey,
+    contact,
+    // Onboarding siempre con el modelo grande: recopila datos de un alta irreversible.
+    model: MODELO_COTIZACION_PE,
+    tools: onboarding.tools,
+  })
+  const rawReply = (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
+  let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(rawReply)))
+  reply = await blindarSoporteInventadoPE(reply)
+  // Guardrail de largo del onboarding (Lalo 24-ago): corte limpio en borde de oración.
+  try {
+    const { acortarParaWhatsApp } = await import("@/lib/onboarding/estilo")
+    const acortado = acortarParaWhatsApp(reply)
+    if (acortado !== reply) reply = acortado
+  } catch { /* sin guardrail */ }
+  if (!reply.trim()) reply = ERROR_GENERICO_PE
+  const toolCalls = (result.toolCalls || []) as ToolCallRecordPE[]
+  await appendTurnV3(contact, message, reply, "pe").catch((e) =>
+    console.error(`[vic-pe][onboarding] error persistiendo turno contact=${contact}:`, e),
+  )
+  // Máximo 3 burbujas por turno (regla CL 25-ago); [---] sigue siendo corte duro.
+  let partes = partirEnBurbujas(reply)
+  if (partes.length > 3) partes = [partes[0], partes[1], partes.slice(2).join("\n\n")]
+  if (!simulacion) {
+    let sent = true
+    for (const [bi, burbuja] of partes.entries()) {
+      if (bi > 0) await sendTypingIndicator(contact, true).catch(() => {})
+      sent = await sendBotmakerMessage(contact, burbuja, CANAL_PE())
+      if (!sent) break
+    }
+    console.log(
+      `[vic-pe][onboarding] turno contact=${contact} iter=${result.iterations} tools=${toolCalls.map((t) => t.name).join(",") || "-"} sent=${sent}`,
+    )
+  }
+  return { reply, toolCalls }
+}
+
 async function processOneTurnPE(contact: string, message: string, apiKey: string): Promise<void> {
   const history = await fetchHistoryV3(contact)
+  // Fase onboarding (post-pago): agente propio y salida temprana — nada de la
+  // maquinaria comercial de abajo toca a un cliente que ya pagó.
+  if ((await faseDelContacto(contact)) === "onboarding") {
+    await turnoOnboardingPE(contact, message, apiKey, history, false)
+    return
+  }
   // PROCESO ÚNICO (espejo CL/MX): conversación nueva con ejecutivo ya
   // trabajando al contacto → directiva informativa en el historial.
   if (history.length === 0) {
@@ -674,7 +745,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         const bloque = esArchivoAdjunto || (!imageUrl && fileUrl)
           ? `[El cliente envió un DOCUMENTO (PDF) por WhatsApp. Contenido del documento]: ${descripcion}`
           : `[El cliente envió una imagen por WhatsApp. Contenido de la imagen]: ${descripcion}`
-        message = caption ? `${caption}\n\n${bloque}` : bloque
+        // ONBOARDING (paridad CL 25-ago): la directiva viaja EN el mensaje del
+        // adjunto — si trae trabajadores, guardar_nomina corre SIEMPRE.
+        const directivaNomina = (await faseDelContacto(contact).catch(() => "venta")) === "onboarding"
+          ? "\n\n[DIRECTIVA OBLIGATORIA: si este contenido incluye trabajadores (DNI/correo/nombre), llama guardar_nomina AHORA con TODAS las filas transcritas — aunque creas que ya están cargados o el archivo se repita. Tu memoria no cuenta: solo lo guardado por la tool existe.]"
+          : ""
+        message = caption ? `${caption}\n\n${bloque}${directivaNomina}` : `${bloque}${directivaNomina}`
         console.log(`[vic-pe] adjunto descrito contact=${contact} len=${descripcion.length}`)
       } else if (esArchivoAdjunto) {
         message = CONTEXTO_DOC_ILEGIBLE_PE
@@ -710,6 +786,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Modo simulación (pruebas E2E): síncrono, sin lock, sin persistir. Corre
     // AUNQUE el gate esté apagado — así se prueba Vicky PE en oscuro.
     if (simulacion) {
+      // E2E del alta por chat: con el contacto en fase onboarding la
+      // simulación corre el agente de onboarding con el historial REAL (las
+      // tools persisten el borrador; el turno se guarda para el siguiente).
+      if ((await faseDelContacto(contact).catch(() => "venta")) === "onboarding") {
+        const hist = await fetchHistoryV3(contact).catch(() => [])
+        const r = await turnoOnboardingPE(contact, message, apiKey, hist, true)
+        return NextResponse.json({ reply: r.reply, pais: "pe", simulacion: true, fase: "onboarding", tools: r.toolCalls.map((t) => t.name) })
+      }
       const modeloSim = esFlujoCotizacionPE(message, []) ? MODELO_COTIZACION_PE : MODELO_SIMPLE_PE
       const result = await runAgentLoop({
         systemPrompt: await (async () => {

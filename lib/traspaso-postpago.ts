@@ -384,7 +384,13 @@ export async function cerrarYTraspasarPostPago(
 
   const esCO = contact.startsWith("57")
   const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
-  const esCL = !esCO && !esMX
+  // PERÚ (21-sep, "básicamente es lo mismo que hace Vicky de Chile"): el alta
+  // por chat corre igual que en CL, con su plantilla y su país. Antes un +51
+  // caía en esCL y el kickoff salía con las plantillas del bot chileno.
+  const esPE = contact.startsWith("51") && contact.length === 11
+  const esCL = !esCO && !esMX && !esPE
+  const altaPorChat = esCL || esPE
+  const paisChat: "cl" | "pe" = esPE ? "pe" : "cl"
   // Vicky onboarding — CHILE PRIMERO (decisión 26-jul): el pago es la ÚNICA
   // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
   // traspaso a ejecutivo humano hasta que la fase se abra para ellos.
@@ -418,13 +424,13 @@ export async function cerrarYTraspasarPostPago(
   // caminos usan el mismo criterio: reemisión sobre Vicky, o precio mostrado
   // por Vicky antes de la emisión ⇒ la venta es de Vicky y el alta corre.
   // Fail-closed: sin poder verificar la atribución, sigue siendo del ejecutivo.
-  const atribucion = pagoReal && !yaProcesada && esCL && canalEjecutivo
+  const atribucion = pagoReal && !yaProcesada && altaPorChat && canalEjecutivo
     ? await ventaEsDeVicky(quoteId, true).catch(() => ({ deVicky: false, motivo: "no verificable" }))
     : { deVicky: !canalEjecutivo, motivo: canalEjecutivo ? "canal ejecutivo" : "emitida por Vicky" }
   if (canalEjecutivo && atribucion.deVicky) {
     console.log(`[postpago] ${quoteId}: canal ejecutivo pero la venta es de Vicky (${atribucion.motivo}) — el alta por chat SÍ corre`)
   }
-  if (pagoReal && !yaProcesada && esCL && atribucion.deVicky && (await onboardingActivoPara(contact))) {
+  if (pagoReal && !yaProcesada && altaPorChat && atribucion.deVicky && (await onboardingActivoPara(contact))) {
     // SEGUNDA EMPRESA POR EL MISMO NÚMERO (08-sep, caso Lorena: pagó dos
     // cotizaciones, una por RUT, con minutos de diferencia). El estado del
     // onboarding vive POR CONTACTO: si el ciclo ya está abierto con OTRA
@@ -504,7 +510,7 @@ export async function cerrarYTraspasarPostPago(
       borradorSembrado = sembrarBorrador(
         previo,
         { empresa: { nombre: pagada?.empresa, identificador: pagada?.rut }, admin: adminSemilla },
-        "cl",
+        paisChat,
       )
       await setKvValue(claveBorrador(contact), JSON.stringify(borradorSembrado))
     } catch {
@@ -649,7 +655,7 @@ export async function cerrarYTraspasarPostPago(
   // presenta a ningún ejecutivo — el mismo mensaje de bienvenida abre el alta
   // por chat, y el gate del webhook atiende las respuestas con el agente de
   // onboarding. Reemplaza al bloque del ejecutivo, no lo suma.
-  if (esCL && !canalEjecutivo && (await onboardingActivoPara(contact))) {
+  if (altaPorChat && atribucion.deVicky && (await onboardingActivoPara(contact))) {
     // UN solo mensaje de arranque para las dos vías de pago y para dentro y
     // fuera de la ventana. Fuera de ventana el texto libre moriría en silencio
     // (el cliente pudo pagar un domingo tras dos días callado), así que ahí va
@@ -664,7 +670,7 @@ export async function cerrarYTraspasarPostPago(
     await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
     // Solo el texto libre entra al historial: la plantilla la despacha Botmaker
     // y meterla le daría al modelo un turno que no dijo.
-    if (via === "texto") await appendAssistantV3(contact, texto, "cl").catch(() => {})
+    if (via === "texto") await appendAssistantV3(contact, texto, paisChat).catch(() => {})
     return { contact, traspaso: "enviado" }
   }
 
