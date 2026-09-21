@@ -130,13 +130,21 @@ export async function faseDelContacto(contact: string): Promise<FaseVicky> {
  * Chile). Es la única fuente: borrador, ficha, API de alta, prompts y NDV/IMP
  * lo leen de aquí.
  */
-export function paisOnboardingDe(contact: string): "cl" | "pe" {
+export async function paisOnboardingDe(contact: string): Promise<"cl" | "pe"> {
+  // El override del PROBADOR manda sobre el prefijo (21-sep): sin esto, un
+  // teléfono chileno del equipo probaba el alta CHILENA aunque el chat lo
+  // estuviera atendiendo Vicky Perú.
+  try {
+    const { paisProbador } = await import("./probador-pais")
+    const override = await paisProbador(contact)
+    if (override) return override === "pe" ? "pe" : "cl"
+  } catch {}
   return paisDeContacto(contact) === "pe" ? "pe" : "cl"
 }
 
 async function cargarBorrador(contact: string): Promise<Borrador> {
   const json = await getKvValue(claveBorrador(contact)).catch(() => null)
-  return parsearBorrador(json) ?? borradorVacio(paisOnboardingDe(contact))
+  return parsearBorrador(json) ?? borradorVacio(await paisOnboardingDe(contact))
 }
 
 /**
@@ -150,7 +158,7 @@ export async function armarOnboarding(contact: string): Promise<{
 }> {
   const borrador = await cargarBorrador(contact)
   const altaSolicitada = !!(await getKvValue(claveAltaSolicitada(contact)).catch(() => null))
-  const paisCfg = paisOnboardingDe(contact)
+  const paisCfg = await paisOnboardingDe(contact)
 
   // ── F2: estado de la CONFIGURACIÓN (nómina/turnos/planificaciones) ──
   const cargarConfig = async (): Promise<Configuracion> => {
@@ -663,7 +671,7 @@ export async function armarOnboarding(contact: string): Promise<{
         }
       }
       // ── Alta AUTOMÁTICA por API (Nicolás), con candado consultar-antes-de-crear ──
-      const paisAltaChat = paisOnboardingDe(contact)
+      const paisAltaChat = await paisOnboardingDe(contact)
       const ETQ = paisAltaChat.toUpperCase()
       const fichaAlta =
         `Empresa: ${b.empresa.nombre}\n` +

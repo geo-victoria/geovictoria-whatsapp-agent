@@ -49,7 +49,9 @@ export async function entregarKickoffOnboarding(
   // Perú y gates propios (`alta_flow_kickoff_pe` / `alta_qr_intent_pe`); con
   // los gates apagados el alta es CONVERSACIONAL: texto en ventana y, fuera de
   // ventana, la plantilla UTILITY `vicky_pe_alta_cuenta`.
-  const esPE = paisDeContacto(contact) === "pe"
+  const { paisProbador } = await import("./probador-pais")
+  const overridePais = await paisProbador(contact).catch(() => null)
+  const esPE = (overridePais ?? paisDeContacto(contact)) === "pe"
   const paisAlta = esPE ? ("pe" as const) : ("cl" as const)
   const gates = gatesAltaPais(paisAlta)
   const tplsAlta = plantillasAltaPais(paisAlta)

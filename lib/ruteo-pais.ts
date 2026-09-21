@@ -100,7 +100,19 @@ export async function reenviarSiNoEsDeEstePais(params: {
   etiquetaLog: string
 }): Promise<ReenvioResultado> {
   const { contact, paisLocal, requestUrl, body, etiquetaLog } = params
-  const pais = paisDeContacto(contact)
+  // PROBADOR (21-sep): un contacto marcado como probador de otro país se rutea
+  // por el override, no por su prefijo — así un +56 del equipo puede probar la
+  // línea peruana de punta a punta. Import dinámico: este módulo lo cargan
+  // tests puros que no deben tocar Supabase.
+  let pais = paisDeContacto(contact)
+  try {
+    const { paisProbador } = await import("./probador-pais")
+    const override = await paisProbador(contact)
+    if (override) {
+      pais = override
+      if (override !== paisLocal) console.log(`${etiquetaLog} contact=${contact} PROBADOR de ${override.toUpperCase()} → se rutea como tal`)
+    }
+  } catch {}
 
   // Prefijo propio o país no reconocido → lo atiende este webhook.
   if (pais === paisLocal || pais === "desconocido") return { reenviado: false }

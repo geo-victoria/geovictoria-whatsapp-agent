@@ -143,7 +143,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     ...(admin ? { admin: { nombre: admin.nombre, apellido: admin.apellido, email: admin.email } } : {}),
   }
   const { paisOnboardingDe } = await import("@/lib/onboarding-canal")
-  const borrador = sembrarBorrador(previo, semilla, paisOnboardingDe(contact))
+  const borrador = sembrarBorrador(previo, semilla, await paisOnboardingDe(contact))
   await setKvValue(claveBorrador(contact), JSON.stringify(borrador))
 
   // 1.5 RESET del ciclo de alta (28-ago, caso "cuenta creada" de mentira): si

@@ -47,14 +47,21 @@ async function autorizado(req: Request): Promise<boolean> {
 
 // PERÚ (21-sep): el mismo endpoint sirve al flow peruano (mismos nombres de
 // campo; etiquetas RUC/DNI en el JSON del flow). El país sale del contacto.
-function paisFlow(contact: string): "cl" | "pe" {
+async function paisFlow(contact: string): Promise<"cl" | "pe"> {
+  // Override del PROBADOR primero (21-sep): un teléfono del equipo marcado
+  // como probador PE debe ver el formulario con RUC/DNI, no con RUT.
+  try {
+    const { paisProbador } = await import("@/lib/probador-pais")
+    const override = await paisProbador(contact)
+    if (override) return override === "pe" ? "pe" : "cl"
+  } catch {}
   const c = String(contact || "").replace(/\D/g, "")
   return c.startsWith("51") && c.length === 11 ? "pe" : "cl"
 }
 
 async function cargar(contact: string): Promise<Borrador> {
   const json = await getKvValue(claveBorrador(contact)).catch(() => null)
-  return parsearBorrador(json) ?? borradorVacio(paisFlow(contact))
+  return parsearBorrador(json) ?? borradorVacio(await paisFlow(contact))
 }
 
 /**
@@ -229,6 +236,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         }
   const actualizado = aplicarDatos(previo, datos)
   const errores: Record<string, string> = {}
+  const paisErr = await paisFlow(contact)
   for (const p of problemas(actualizado)) {
     if (p.detalle === "falta") continue
     // campo del cerebro → nombre del campo en el Flow
@@ -243,8 +251,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     const campoFlow = mapa[p.campo]
     // Solo errores de la pantalla que se está validando.
     if (!campoFlow) continue
-    if (pantalla === "EMPRESA" && !campoFlow.startsWith("admin_") ) errores[campoFlow] = mensajeError(p.campo, paisFlow(contact))
-    if (pantalla === "ADMIN" && campoFlow.startsWith("admin_")) errores[campoFlow] = mensajeError(p.campo, paisFlow(contact))
+    if (pantalla === "EMPRESA" && !campoFlow.startsWith("admin_") ) errores[campoFlow] = mensajeError(p.campo, paisErr)
+    if (pantalla === "ADMIN" && campoFlow.startsWith("admin_")) errores[campoFlow] = mensajeError(p.campo, paisErr)
   }
 
   if (Object.keys(errores).length > 0) {
@@ -307,7 +315,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       // por rafaga_10min a 100 s del kickoff, y Vicky quedó muda con el
       // formulario ya completo.
       enviado = await sendBotmakerMessage(contact, mensaje, undefined, { transaccional: true }).catch(() => false)
-      if (enviado) await appendAssistantV3(contact, mensaje, paisFlow(contact)).catch(() => {})
+      if (enviado) await appendAssistantV3(contact, mensaje, await paisFlow(contact)).catch(() => {})
     }
     if (!enviado) {
       const { PLANTILLA_ALTA_RESUMEN_CL, paramsPlantillaAltaFlow } = await import("@/lib/onboarding/plantilla")

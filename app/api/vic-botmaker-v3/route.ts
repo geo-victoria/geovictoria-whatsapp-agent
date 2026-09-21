@@ -2377,6 +2377,40 @@ export async function POST(request: Request): Promise<NextResponse> {
       await detectarCanalOrigen(contact).catch(() => "")
     }
 
+    // 2.0-bis. PROBADOR DE OTRO PAÍS (21-sep, Lalo "quiero poder probar desde
+    // mi teléfono"): un contacto marcado en vic_kv `probador_pais_<fono>` se
+    // rutea al webhook de ESE país aunque su prefijo sea chileno, así el equipo
+    // puede probar Perú de punta a punta con un +56. Las ramas por prefijo de
+    // abajo quedan intactas: sin marca vigente este bloque no hace nada.
+    {
+      const { paisProbador } = await import("@/lib/probador-pais")
+      const overridePais = await paisProbador(contact).catch(() => null)
+      if (overridePais && overridePais !== "cl") {
+        const { WEBHOOK_POR_PAIS, SECRET_ENV_POR_PAIS } = await import("@/lib/ruteo-pais")
+        const secret =
+          getEnv(SECRET_ENV_POR_PAIS[overridePais]) ||
+          ((await getKvValue(SECRET_ENV_POR_PAIS[overridePais].toLowerCase()).catch(() => null)) || "")
+        const destino = WEBHOOK_POR_PAIS[overridePais]
+        if (!secret) {
+          console.error(`[v3-botmaker] contact=${contact} PROBADOR de ${overridePais.toUpperCase()} pero falta el secret — se atiende con flujo CL`)
+        } else {
+          const r = await fetch(`${new URL(request.url).origin}${destino}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-secret": secret },
+            body: JSON.stringify(body),
+            cache: "no-store",
+          }).catch(() => null)
+          if (r) {
+            const data = await r.json().catch(() => ({ reply: "" }))
+            console.log(`[v3-botmaker] contact=${contact} PROBADOR de ${overridePais.toUpperCase()} → reenviado a ${destino} (${r.status})`)
+            return NextResponse.json(data, { status: r.status })
+          }
+          console.error(`[v3-botmaker] contact=${contact} PROBADOR de ${overridePais.toUpperCase()} y el reenvío a ${destino} falló — NO se atiende con flujo CL`)
+          return NextResponse.json({ reply: "" })
+        }
+      }
+    }
+
     // 2.1. Ruteo multi-país (19-jul): la acción de código de Botmaker es UNA
     // sola para las dos líneas y apunta acá, así que los mensajes colombianos
     // (+57) entran por este webhook. Sin este reenvío los atendía el flujo
