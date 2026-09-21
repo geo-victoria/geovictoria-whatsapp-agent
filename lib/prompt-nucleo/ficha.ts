@@ -18,6 +18,8 @@ export type FichaPrompt = {
   impuestoPct: number
   /** Unidad geográfica que se pregunta con reloj físico (comuna, distrito). */
   zona: string
+  /** La misma unidad en mayúscula inicial (arranque de frase). */
+  zonaCap: string
   zonaTz: string
   gentilicio: string
 }
@@ -30,6 +32,7 @@ export const FICHA_CL: FichaPrompt = {
   impuesto: "IVA",
   impuestoPct: 19,
   zona: "comuna",
+  zonaCap: "Comuna",
   zonaTz: "America/Santiago",
   gentilicio: "chilena",
 }
