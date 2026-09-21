@@ -68,6 +68,8 @@ export const FICHA_PE: FichaPrompt = {
   pedirDeMas: "Pedir de más (distrito, rubro, etc.)",
   daDatosCierre: "Da RUC, razón social y correo",
   datosCierre: "RUC + razón social + email",
+  cierreConFormulario: "petición de RUC + razón social + email en dos mensajes). Al cierre normalmente te faltarán el RUC y la razón social (el email ya vino en el formulario: confírmalo en una línea al usarlo, ej. \"te la envío a maria@xyz.pe, ¿ok?\").",
+  peticionNombraAmbos: "(Y la petición nombra SIEMPRE los tres — RUC, razón social y email —",
   bloques: {
     estiloLocal: `## Estilo peruano permitido
 
