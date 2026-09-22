@@ -648,13 +648,22 @@ export function buildDispatchPEUnificado(contact: string) {
         return r
       }
       case "generar_link_cotizadora": {
+        // LA CONFIGURACIÓN DE LA FORMAL ES LA QUE MANDA EL MODELO, JAMÁS LA
+        // MEMORIA (caso Rodrigo 22-sep, COT ALICORP: eligió "la 2" = solo app y
+        // la formal salió con reloj). `pe_pref_` guarda el ÚLTIMO estimado, y
+        // con el doble valor ese estimado SIEMPRE trae el reloj — la opción
+        // "solo app" es la misma llamada sin hardware. Rellenar hardware/puntos
+        // desde ahí convertía "el modelo no pasó reloj" en "cotiza con reloj",
+        // por detrás del candado chileno de agent-loop (evidenciaEleccionReloj
+        // + comuna dicha por el cliente), que juzga el input ANTES del adaptador.
+        // Igual que Chile: sin hardware en el input = sin hardware. La memoria
+        // solo sostiene la dotación y el escalón (la negociación no retrocede).
         const pref = await leerPref()
         const esc = Number(i.escalonDescuento ?? pref?.escalon ?? 0)
+        const hardware = i.hardware as HardwareIn[] | undefined
+        const puntos = hardware?.length ? (i.puntosInstalacion as PuntoIn[] | undefined) : undefined
         {
-          const errUb = errorUbicacionPE(
-            (i.hardware as HardwareIn[]) || pref?.hardware,
-            (i.puntosInstalacion as PuntoIn[]) || pref?.puntosInstalacion,
-          )
+          const errUb = errorUbicacionPE(hardware, puntos)
           if (errUb) return { ok: false, error: errUb }
         }
         const mapped = {
@@ -664,8 +673,8 @@ export function buildDispatchPEUnificado(contact: string) {
           ruc: i.rutEmpresa || i.ruc,
           ...aInputCotizarPE({
             userCount: Number(i.userCount || pref?.userCount || 0),
-            hardware: (i.hardware as HardwareIn[]) || pref?.hardware,
-            puntosInstalacion: (i.puntosInstalacion as PuntoIn[]) || pref?.puntosInstalacion,
+            hardware,
+            puntosInstalacion: puntos,
             escalonDescuento: esc,
           }),
         }

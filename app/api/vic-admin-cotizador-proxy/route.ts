@@ -58,6 +58,11 @@ const POST_PERMITIDOS = new Set([
   // bienvenida post-pago murió fuera de ventana y hubo que recuperar el link
   // a mano para entregarlo por el ejecutivo). Idempotente en el cotizador.
   "/api/quote-acceptance/onboarding-link",
+  // Edición en sitio por orden admin (22-sep, caso Rodrigo COT ALICORP: la
+  // formal PE salió con reloj y el cliente eligió solo app). Body = el mismo
+  // que manda lib/tools/actualizar-cotizacion ({quoteId, resumenCambio,
+  // cotizacion:{items, pais}}); el cotizador decide el perfil por el país.
+  "/api/quote-acceptance/actualizar-cotizacion",
   // Regenerar el PDF de una cotización (22-sep, caso COT1573 de Lalo: los
   // términos de envío/instalación del PDF quedaron viejos tras el cambio de
   // tarifas y el archivo es estático — se rehace por orden humana).

@@ -44,7 +44,7 @@ export type Veredicto = {
   /** Para el log y el aviso interno. */
   motivos: string[]
   /** Identificador del cinturón que disparó, para medir cuál actúa más. */
-  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool" | "link_formal_sin_tool" | "objecion_precio_sin_tool" | "correo_enviado_sin_tool"
+  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool" | "link_formal_sin_tool" | "objecion_precio_sin_tool" | "correo_enviado_sin_tool" | "formal_no_coincide_sin_tool"
 }
 
 const OK: Veredicto = { accion: "ok", motivos: [] }
@@ -299,6 +299,48 @@ const FORZAR_TOOL_OBJECION =
   "que ya conoces y en el mismo turno la de descuento); si ya hay formal, consultar_siguiente_descuento. Copia su " +
   "`mensajeParaProspecto` TAL CUAL. PROHIBIDO pedir datos de cierre, repreguntar la modalidad o la operación antes de responder la objeción."
 
+/**
+ * LA FORMAL NO COINCIDE CON LO QUE ELIGIÓ (22-sep, caso Rodrigo COT ALICORP):
+ * el cliente eligió "la 2" (solo app), la formal salió con reloj, mandó la
+ * captura y Vicky respondió DOS veces "tu cotización formal tiene la opción 2,
+ * puedes verificarlo" sin llamar ninguna tool — afirmando el contenido de un
+ * documento que nunca leyó. Cuando el cliente dice que la cotización no es lo
+ * que pidió, la única respuesta honesta es DEJARLA como la pidió
+ * (actualizar_cotizacion en el mismo turno); afirmar lo que contiene sin
+ * tocarla es teatro.
+ */
+export const RECLAMO_FORMAL_RE =
+  /(me\s+est[aá]s?\s+cobrando|me\s+cobra(?:ste|ron)?|no\s+es\s+lo\s+que\s+(?:eleg[ií]|ped[ií]|dije|quer[ií]a|escog[ií])|te\s+dije\s+(?:la\s+)?(?:\d|opci[oó]n|primera|segunda|otra)|(?:eleg[ií]|escog[ií]|ped[ií])\s+la\s+(?:\d|primera|segunda|otra)|aparece\s+(?:otra|la\s+otra|con\s+reloj|el\s+reloj|otro\s+(?:precio|valor|monto))|no\s+coincide|(?:cotizaci[oó]n|link|pdf|precio)\s+(?:est[aá]|sali[oó]|qued[oó]|viene|vino)\s+(?:mal|equivocad[oa]|incorrect[oa]|err[oó]ne[oa]|con\s+reloj|con\s+otro)|est[aá]\s+(?:mal|equivocad[oa]|incorrect[oa])\s+(?:la\s+)?(?:cotizaci[oó]n|el\s+precio|el\s+monto|el\s+link))/i
+const TOOLS_QUE_CORRIGEN_FORMAL = new Set([
+  "actualizar_cotizacion",
+  "generar_link_cotizadora",
+  "aplicar_siguiente_descuento",
+  "anualizar_cotizacion",
+  "derivar_a_soporte",
+  "derivar_a_ejecutivo",
+])
+const FORZAR_TOOL_CORREGIR_FORMAL =
+  "\n\n# Instrucción de sistema (este turno)\n" +
+  "El cliente dice que la COTIZACIÓN FORMAL NO COINCIDE con lo que eligió (otra opción, otro precio, un reloj que no pidió). " +
+  "Tú NO has leído la cotización: PROHIBIDO afirmar qué contiene, decir que 'está correcta' o mandarlo a verificar el link. " +
+  "Lo que corresponde es dejarla EXACTAMENTE como la pidió: llama actualizar_cotizacion en ESTE turno con la configuración que el cliente eligió " +
+  "según el historial (dotación, con o sin reloj, ubicación), copia su `mensajeParaProspecto` TAL CUAL y agradécele el aviso. " +
+  "Si no puedes reconstruir lo que eligió, pregúntale UNA cosa concreta en vez de discutir."
+const CONTENCION_FORMAL_NO_COINCIDE: Record<PaisCinturon, string> = {
+  cl: "Tienes razón en revisarlo — voy a dejar la cotización exactamente con la opción que elegiste y te la mando corregida en un momento 🙌",
+  co: "Tienes razón en revisarlo — voy a dejar la cotización exactamente con la opción que elegiste y te la envío corregida en un momento 🙌",
+  mx: "Tienes razón en revisarlo — voy a dejar la cotización exactamente con la opción que elegiste y te la mando corregida en un momento 🙌",
+  pe: "Tienes razón en revisarlo — voy a dejar la cotización exactamente con la opción que elegiste y te la mando corregida en un momento 🙌",
+}
+
+/** ¿El cliente reclamó que la formal no es lo que eligió y el turno no la corrigió con una tool? */
+export function reclamoFormalSinTool(userMessage: string | undefined, toolsOk: string[]): boolean {
+  const u = String(userMessage || "").trim()
+  if (!u || u.length > 300) return false
+  if (!RECLAMO_FORMAL_RE.test(u)) return false
+  return !toolsOk.some((t) => TOOLS_QUE_CORRIGEN_FORMAL.has(t))
+}
+
 /** ¿El cliente objetó el precio en este turno y el borrador no lo resolvió con una tool? */
 export function objecionSinTool(userMessage: string | undefined, toolsOk: string[]): boolean {
   const u = String(userMessage || "").trim()
@@ -333,9 +375,25 @@ export function revisarSalida(e: EntradaSalida): Veredicto {
     }
   }
 
+  const toolsOk = (e.toolCalls || []).filter((c) => c?.ok).map((c) => c.name)
+  // (1b) La formal no coincide con lo que el cliente eligió y el turno no la
+  // corrigió: reintento con la orden de actualizar_cotizacion; si insiste en
+  // afirmar el contenido sin tocarla, contención honesta + aviso. Va ANTES del
+  // precio sin tool: acá el precio que repite suele ser el que ya mostró, y el
+  // daño es afirmar el contenido de un documento que no leyó.
+  if (reclamoFormalSinTool(e.userMessage, toolsOk)) {
+    return {
+      accion: "reintento",
+      directiva: FORZAR_TOOL_CORREGIR_FORMAL,
+      siFallaReintento: "contener",
+      contencion: CONTENCION_FORMAL_NO_COINCIDE[e.pais] || CONTENCION_FORMAL_NO_COINCIDE.cl,
+      motivos: ["formal_no_coincide_sin_tool"],
+      cinturon: "formal_no_coincide_sin_tool",
+    }
+  }
+
   // (2) Un monto que nadie calculó. Lo trae Chile desde el caso del tramo fijo
   // (un cliente bajó de 6 personas a 5 por una cifra que el modelo compuso).
-  const toolsOk = (e.toolCalls || []).filter((c) => c?.ok).map((c) => c.name)
   const cp = chequearPreciosDelReply(reply, toolsOk, e.historialAsistente)
   if (cp.hayInventado) {
     return {

@@ -476,8 +476,13 @@ export function buildDispatchCOUnificado(contact: string) {
         return { ...r, quoteId: f.quoteId }
       }
       case "generar_link_cotizadora": {
+        // La configuración de la formal = la del MODELO, nunca la memoria
+        // `co_pref_` (mismo defecto que PE, caso Rodrigo 22-sep: el último
+        // estimado siempre trae el equipo y "solo app" es la llamada sin
+        // hardware). Sin hardware en el input = sin hardware, como en Chile.
         const pref = await leerPref()
         const esc = Math.min(2, Math.max(0, Number(i.escalonDescuento ?? pref?.escalon ?? 0)))
+        const hardware = i.hardware as HardwareIn[] | undefined
         return base("generar_link_cotizadora", {
           empresa: i.empresa,
           contacto: i.contacto,
@@ -485,8 +490,8 @@ export function buildDispatchCOUnificado(contact: string) {
           nit: i.rutEmpresa || i.nit,
           ...aInputCotizarCO({
             userCount: Number(i.userCount || pref?.userCount || 0),
-            hardware: (i.hardware as HardwareIn[]) || pref?.hardware,
-            puntosInstalacion: (i.puntosInstalacion as PuntoIn[]) || pref?.puntosInstalacion,
+            hardware,
+            puntosInstalacion: hardware?.length ? (i.puntosInstalacion as PuntoIn[] | undefined) : undefined,
           } as CotizarIn),
           escalonDescuento: esc,
         })

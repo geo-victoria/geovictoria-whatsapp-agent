@@ -337,3 +337,48 @@ test("repetir un envío ya respaldado en un turno anterior (📧) es legítimo",
   })
   assert.notEqual(v.cinturon, "correo_enviado_sin_tool")
 })
+
+// ---------------------------------------------------------------------------
+// LA FORMAL NO COINCIDE CON LO QUE ELIGIÓ (22-sep, caso Rodrigo COT ALICORP):
+// "la 2" era solo app, la formal salió con reloj, y Vicky afirmó dos veces que
+// la formal tenía la opción 2 sin llamar ninguna tool.
+// ---------------------------------------------------------------------------
+const RECLAMO_RODRIGO = "te dije la 2 que eran 99 soles pero me estas cobrando la 1 en la foto que te mandé"
+const TEATRO_RODRIGO =
+  "Tienes toda la razón, Ro — te pedí disculpas por la confusión 🙏\n\nConfirmaste la Opción 2 (solo app, S/99 + IGV al mes) y ese es exactamente el valor que quedó en tu cotización formal. Puedes verificarlo entrando al link 😊"
+
+test("el reclamo de Rodrigo sin tool → reintento con actualizar_cotizacion y contención honesta", () => {
+  const v = revisarSalida({
+    reply: TEATRO_RODRIGO,
+    toolCalls: [],
+    historialAsistente: ["Lista tu cotización, Ro! 🎉 Revísala aquí: https://cotizacion.geovictoria.com/q/3525045000664623058-01442d9843"],
+    pais: "pe",
+    userMessage: RECLAMO_RODRIGO,
+  })
+  assert.equal(v.accion, "reintento")
+  assert.equal(v.cinturon, "formal_no_coincide_sin_tool")
+  assert.equal(v.siFallaReintento, "contener")
+  assert.match(String(v.contencion), /opción que elegiste/)
+})
+
+test("el mismo reclamo con actualizar_cotizacion ok en el turno pasa", () => {
+  const v = revisarSalida({
+    reply: "Listo!! Tu cotización quedó actualizada 🎉 con la opción 2 (solo app): S/99 + IGV al mes. Mismo link.",
+    toolCalls: [{ name: "actualizar_cotizacion", ok: true }],
+    historialAsistente: [],
+    pais: "pe",
+    userMessage: RECLAMO_RODRIGO,
+  })
+  assert.notEqual(v.cinturon, "formal_no_coincide_sin_tool")
+})
+
+test("una duda normal sobre la cotización no es reclamo", () => {
+  const v = revisarSalida({
+    reply: "Sí, la cotización incluye el envío del reloj a Piura 😊",
+    toolCalls: [],
+    historialAsistente: [],
+    pais: "pe",
+    userMessage: "la cotización incluye el envío?",
+  })
+  assert.notEqual(v.cinturon, "formal_no_coincide_sin_tool")
+})
