@@ -167,7 +167,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   // "No pudimos identificar tu WhatsApp".
   const { NOMBRE_IDENTIFICADOR, nombreIdentificadorAdmin } = await import("@/lib/onboarding/borrador")
   const etiquetaDoc = NOMBRE_IDENTIFICADOR[b.pais] || "RUT"
-  const etiquetaAdmin = nombreIdentificadorAdmin(b.pais)
+  // CL conserva la etiqueta del flow v2 ("RUT personal"): el mismo JSON sirve a
+  // todos los países y en Chile el cliente ve exactamente lo que veía.
+  const etiquetaAdmin = b.pais === "cl" ? "RUT personal" : nombreIdentificadorAdmin(b.pais)
   const ayudaDoc =
     b.pais === "pe" ? "11 dígitos. Ej: 20123456789" : b.pais === "co" ? "Ej: 900123456-7" : b.pais === "mx" ? "Ej: ABC123456T12" : "Ej: 76.123.456-7"
   return NextResponse.json({
