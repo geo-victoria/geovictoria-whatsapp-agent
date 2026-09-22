@@ -153,6 +153,8 @@ async function construirFoto(fecha: string): Promise<Foto> {
   for (const a of [...delDia, ...analisis]) {
     const k = String(a.motivo_no_cierre || "").trim()
     if (!k || yaVisto.has(a.contact)) continue
+    // Sintéticos y probadores internos tampoco entran a los motivos.
+    if (isTestContact(String(a.contact || ""), setInterno)) continue
     yaVisto.add(a.contact)
     const esDelDia = contactosDia.has(a.contact)
     const clave = esDelDia ? k : `otros:${k}`
