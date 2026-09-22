@@ -4206,9 +4206,39 @@ async function reconciliarLeadsCruzados(): Promise<number> {
       select_query: `select id, Territorio, Phone, N_Empleados_que_marcan, Owner.email from Leads where (Owner.email in (${emails}) and Converted__s = false) and Territorio != 'Chile' limit 10`,
     }),
   })
-  if (!q.ok || q.status === 204) return 0
-  const filas = ((await q.json().catch(() => ({}))) as { data?: Array<{ id?: string; Territorio?: string; Phone?: string; N_Empleados_que_marcan?: number | null }> }).data || []
+  const filas: Array<{ id?: string; Territorio?: string; Phone?: string; N_Empleados_que_marcan?: number | null; "Owner.email"?: string }> =
+    !q.ok || q.status === 204 ? [] : (((await q.json().catch(() => ({}))) as { data?: typeof filas }).data || [])
   let corregidos = 0
+  // TERRITORIO PISADO POR EL WORKFLOW (22-sep): "UPDATE COUNTRY BOTMAKER A"
+  // deja en Chile todo lead creado por Vicky, tenga el prefijo que tenga —
+  // así 14 leads +51 de prueba cayeron con Paola/Ana Paula/Daniela. Se cazan
+  // por prefijo del teléfono: Territorio vuelve al país y, si el dueño es un
+  // humano chileno, el lead se re-entrega por las reglas de su país. Los que
+  // siguen con Vicky solo se corrigen (esperan como en Chile).
+  const PREFIJO_PAIS: Array<[string, string, string]> = [["+51", "Perú", "Perú"], ["+57", "Colombia", "Colombia"], ["+52", "México", "México"]]
+  for (const [pref, terr, country] of PREFIJO_PAIS) {
+    const q2 = await fetch(`${api}/crm/v3/coql`, {
+      method: "POST", headers: H, cache: "no-store",
+      body: JSON.stringify({
+        select_query: `select id, Phone, N_Empleados_que_marcan, Owner.email from Leads where ((Created_By.id = '3525045000484500876' and Converted__s = false) and Territorio = 'Chile') and Phone like '${pref}%' limit 10`,
+      }),
+    }).catch(() => null)
+    if (!q2 || !q2.ok || q2.status === 204) continue
+    const pisados = ((await q2.json().catch(() => ({}))) as { data?: Array<{ id?: string; Phone?: string; N_Empleados_que_marcan?: number | null; "Owner.email"?: string }> }).data || []
+    for (const l of pisados) {
+      if (!l.id) continue
+      const put = await fetch(`${api}/crm/v3/Leads`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({ data: [{ id: l.id, Territorio: terr, Country: country }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
+      }).catch(() => null)
+      if (!put?.ok) continue
+      console.warn(`[leads-cruzados] lead ${l.id} (${l.Phone || "?"}) tenía Territorio Chile por el workflow → ${terr}`)
+      const owner = String(l["Owner.email"] || "").toLowerCase()
+      const esRobot = !owner || /vicky@|info@geovictoria/.test(owner)
+      if (!esRobot) filas.push({ id: l.id, Territorio: terr, Phone: l.Phone, N_Empleados_que_marcan: l.N_Empleados_que_marcan })
+      corregidos++
+    }
+  }
   for (const l of filas) {
     const terr = String(l.Territorio || "").trim().toLowerCase()
     // PERÚ (22-sep): por las reglas de Zoho con entrada "Territorio = Perú" —

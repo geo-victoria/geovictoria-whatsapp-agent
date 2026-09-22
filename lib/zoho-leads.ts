@@ -1134,6 +1134,37 @@ const VICKY_DEFAULT_OWNER_EMAIL = "vicky@geovictoria.com"
 // variable de entorno mal configurada los redirija a otra persona.
 const VICKY_OWNER_ID = "3525045000484500876"
 
+/**
+ * Relee el lead ~3 s después del create y, si el workflow de Zoho "UPDATE
+ * COUNTRY BOTMAKER A" lo movió a Chile, devuelve Territorio/Country al país
+ * real (PUT con blueprint, sin assignment rules). Devuelve true si corrigió.
+ */
+export async function reafirmarTerritorioTrasWorkflow(
+  apiDomain: string,
+  accessToken: string,
+  leadId: string,
+  territorio: string,
+  country: string,
+): Promise<boolean> {
+  await new Promise((r) => setTimeout(r, 3000))
+  const H = { Authorization: `Zoho-oauthtoken ${accessToken}`, "Content-Type": "application/json" }
+  const g = await fetch(`${apiDomain}/crm/v8/Leads/${leadId}?fields=Territorio,Country`, { headers: H, cache: "no-store" })
+  if (!g.ok) return false
+  const fila = ((await g.json().catch(() => ({}))) as { data?: Array<{ Territorio?: string; Country?: string }> }).data?.[0]
+  if (!fila) return false
+  if (String(fila.Territorio || "") === territorio && String(fila.Country || "") === country) return false
+  const put = await fetch(`${apiDomain}/crm/v8/Leads`, {
+    method: "PUT", headers: H, cache: "no-store",
+    body: JSON.stringify({
+      data: [{ id: leadId, Territorio: territorio, Country: country }],
+      trigger: ["blueprint"],
+      skip_feature_execution: [{ name: "assignment_rules" }],
+    }),
+  })
+  console.warn(`[zoho-leads] lead ${leadId}: el workflow de Zoho lo dejó en ${fila.Territorio}/${fila.Country} — re-estampado ${territorio}/${country} (${put.status})`)
+  return put.ok
+}
+
 export async function createZohoLead(input: CreateZohoLeadInput): Promise<CreateZohoLeadResult> {
   try {
     // CLIENTE EXISTENTE (Lalo 08-sep): jamás un lead para un número que ya es
@@ -1516,6 +1547,17 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         `Zoho devolvió status ${createResponse.status}`
       console.error("[zoho-leads] Error creando Lead:", JSON.stringify(createBody).slice(0, 500))
       return { success: false, error: errMsg }
+    }
+
+    // EL WORKFLOW DE ZOHO "UPDATE COUNTRY BOTMAKER A" (3525045000362007543)
+    // pisa a Chile TODO lead creado por Vicky (condición 1: Country = "CL" O
+    // Created_By = Vicky) un segundo después del create — así 14 leads
+    // peruanos de prueba cayeron en la tómbola chilena el 22-sep (Paola, Ana
+    // Paula, Daniela). El arreglo real es de la regla (lado Lalo); mientras,
+    // para todo territorio que no sea Chile se relee el lead y se vuelve a
+    // estampar Territorio/Country si el workflow los cambió. Best-effort.
+    if (record.Territorio && record.Territorio !== "Chile") {
+      await reafirmarTerritorioTrasWorkflow(apiDomain, accessToken, leadId, String(record.Territorio), String(record.Country || record.Territorio)).catch(() => {})
     }
 
     // Cerrar el candado apenas existe el lead (antes de las notas: lo que

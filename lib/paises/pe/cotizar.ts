@@ -15,13 +15,15 @@
  *     regiones en Chile); en VENTA va una línea de pago único de US$30 por
  *     reloj. Ambas en soles al dólar SUNAT. Supersede el "a provincia lo
  *     asume el cliente" (VB Diego 05-ago) y su nota.
- *   - Instalación (doc "Políticas de cobro visitas e instalaciones",
- *     11-ago — supersede el "Lima gratis" del excel): en Lima rige el
- *     TARIFARIO POR DISTRITO (zona azul S/0; resto US$20-50 + IGV, lo
- *     coordina y factura servicio técnico APARTE — sin línea de checkout).
- *     FUERA de Lima no se cotiza: se coordina con servicio técnico. La
- *     auto-instalación es gratis siempre. Aviso a ssttperu@geovictoria.pro
- *     en todo punto con visita técnica. La venta nunca se frena.
+ *   - Instalación (Lalo 22-sep, "que se comporte igual que Chile"): dos
+ *     zonas con precio cerrado — Lima Metropolitana US$43 · provincias
+ *     US$214 (1 y 5 UF chilenas en dólares), en soles al dólar SUNAT. En
+ *     ARRIENDO en Lima va BONIFICADA (línea a lista con descuento 100 %,
+ *     patrón chileno del arriendo en RM); en venta y en provincia se cobra
+ *     como pago único cuando el cliente pide la visita. La auto-instalación
+ *     es gratis siempre y va por defecto. Aviso a ssttperu@geovictoria.pro
+ *     en todo punto con visita técnica pedida (ellos la coordinan). Supersede
+ *     el tarifario por distrito del 11-ago y el "se cotiza aparte".
  *   - Capacitación: NO existe en Perú (ni cobrada ni de regalo).
  *   - PAGO INICIAL (patrón CL/CO): pagos únicos (reloj en venta) + PRIMER
  *     MES del plan por adelantado, todo neto + IGV. Luego facturación
@@ -41,7 +43,7 @@
  * S/183,20 los primeros 6 meses.
  */
 
-import { CATALOGO_MODULOS_PE, ESCALERA_DESCUENTO_PE, RELOJ_PE_USD, tarifaVisitaLimaPE } from "./catalogo.ts"
+import { CATALOGO_MODULOS_PE, ESCALERA_DESCUENTO_PE, RELOJ_PE_USD } from "./catalogo.ts"
 import { TC_USD_PEN_FALLBACK, usdASoles } from "./tc-sunat.ts"
 
 // IGV peruano: 18% parejo en todos los conceptos. Solo lo escribe este motor.
@@ -85,10 +87,10 @@ export type LineaPE = {
 /**
  * Item en el contrato del endpoint create-from-vicky-pe del cotizador
  * (misma forma que CO/MX). El envío viaja SOLO como línea de pago único en
- * venta a provincia (`envio_reloj`, "Cobro único"); la instalación
- * JAMÁS viaja como ítem — su tarifa (US$ + IGV por distrito) la factura
- * servicio técnico aparte y en la cotización va como nota. La fila de
- * ACTIVACIÓN (primer mes por adelantado) la agrega el endpoint, patrón CO.
+ * venta a provincia (`envio_reloj`, "Cobro único"); la instalación viaja
+ * como ítem `instalacion_reloj` cuando el cliente pide la visita (en
+ * arriendo en Lima con `descuentoPct` 100 = bonificada, patrón chileno). La
+ * fila de ACTIVACIÓN (primer mes por adelantado) ya no existe (patrón CL).
  */
 export type ItemCotizadorPE = {
   tipo: "plan" | "hardware" | "servicio"
@@ -101,6 +103,8 @@ export type ItemCotizadorPE = {
   subtotalPEN: number
   esRecurrente: boolean
   afectoIgv: boolean
+  /** % de descuento de la línea (100 = bonificada: se muestra tachada en $0). */
+  descuentoPct?: number
 }
 
 /** Tarifas del reloj EN SOLES para un tipo de cambio dado (soles enteros). */
@@ -113,6 +117,9 @@ export function tarifasRelojPE(tipoCambio: number) {
     relojArriendoMesProvincia: usdASoles(RELOJ_PE_USD.arriendoMesProvincia, tc),
     /** Envío por reloj en VENTA a provincia (US$30, pago único). */
     envioVentaProvincia: usdASoles(RELOJ_PE_USD.envioVentaProvincia, tc),
+    /** Instalación técnica por punto en Lima (US$43) y en provincias (US$214). */
+    instalacionLima: usdASoles(RELOJ_PE_USD.instalacionLima, tc),
+    instalacionProvincias: usdASoles(RELOJ_PE_USD.instalacionProvincias, tc),
     tipoCambio: tc,
   }
 }
@@ -241,45 +248,49 @@ export function cotizarPE(input: CotizacionPEInput): {
     grupos.set(key, g)
   }
 
-  // Instalación: en LIMA rige el tarifario por distrito de servicio técnico
-  // (doc "Políticas de cobro visitas e instalaciones", 11-ago — solo la zona
-  // azul es sin costo; el resto US$ + IGV, se coordina y factura APARTE con
-  // servicio técnico, jamás como línea del checkout en soles). FUERA de Lima
-  // no se cotiza: se coordina con servicio técnico. La auto-instalación es
-  // gratis siempre. Aviso interno a sstt en todo punto con visita técnica
-  // que ellos deban coordinar (Lima con tarifa, Lima no reconocido, o
-  // provincia).
+  // INSTALACIÓN = LA REGLA DE CHILE (Lalo 22-sep): dos zonas con precio
+  // cerrado (Lima US$43 · provincias US$214, en soles del día). En ARRIENDO
+  // en Lima la visita técnica va INCLUIDA (línea bonificada, patrón chileno
+  // del arriendo en RM) y se dice; en el resto el reloj es autoinstalable y
+  // la visita se ofrece con su precio, o se cobra como pago único si el
+  // cliente la pidió. Aviso interno a sstt en todo punto con visita pedida.
+  // Ya no hay "tarifario por distrito", "se cotiza aparte" ni "sstt confirma".
   const notasEjecutivo: string[] = []
+  const frasesInstalacion: string[] = []
+  const lineasInstalacion: Array<{ ubicacion: string; zona: ZonaPE; cantidad: number; unit: number; bonificada: boolean }> = []
   let avisoSsttPeru = false
+  let instalacionNeto = 0
   if (reloj && reloj.cantidad > 0) {
+    const esArriendo = reloj.modalidad === "arriendo"
     for (const g of grupos.values()) {
-      if (g.zona === "provincias") {
-        // Envío a provincia: precio cerrado (arriendo con despacho incluido o
-        // línea única en venta) — ya no hay nota (Lalo 22-sep).
-        if (g.instalaciones > 0) {
-          avisoSsttPeru = true
-          notasEjecutivo.push(
-            `La instalación en ${g.ubicacion} se coordina con nuestro servicio técnico y se cotiza aparte (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
-          )
-        }
-      } else if (g.instalaciones > 0) {
-        const tarifa = tarifaVisitaLimaPE(g.ubicacion)
-        if (tarifa.reconocido && tarifa.usd === 0) {
-          // Zona azul: instalación incluida — no necesita nota ni aviso.
-        } else if (tarifa.reconocido) {
-          avisoSsttPeru = true
-          notasEjecutivo.push(
-            `La instalación con visita técnica en ${g.ubicacion} tiene un costo de ${formatearPEN(usdASoles(tarifa.usd, TARIFAS_PE.tipoCambio))} + IGV según el tarifario oficial de servicio técnico — se coordina y factura aparte con ellos (te contactarán para agendarla). También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
-          )
-        } else {
-          avisoSsttPeru = true
-          notasEjecutivo.push(
-            `La instalación en ${g.ubicacion} la coordina nuestro servicio técnico, que te confirmará si tiene costo según el distrito. También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
-          )
-        }
+      const enLima = g.zona === "lima"
+      const unit = enLima ? TARIFAS_PE.instalacionLima : TARIFAS_PE.instalacionProvincias
+      const bonificada = esArriendo && enLima
+      const pedida = g.instalaciones > 0
+      if (pedida) avisoSsttPeru = true
+      if (bonificada) {
+        // Arriendo en Lima: la visita va incluida aunque el cliente no la
+        // haya pedido (así nace la línea bonificada, como el arriendo RM en CL).
+        lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: Math.max(1, g.instalaciones), unit, bonificada: true })
+        frasesInstalacion.push(
+          pedida
+            ? "La instalación por nuestro equipo técnico va incluida sin costo (arriendo en Lima Metropolitana)."
+            : "La instalación por nuestro equipo técnico va incluida sin costo (arriendo en Lima Metropolitana); si prefieres, el reloj también es autoinstalable.",
+        )
+      } else if (pedida) {
+        lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: g.instalaciones, unit, bonificada: false })
+        instalacionNeto += unit * g.instalaciones
+        frasesInstalacion.push(
+          `La instalación por nuestro equipo técnico en ${g.ubicacion} tiene un costo único de ${formatearPEN(unit * g.instalaciones)} + IGV (va en el pago inicial).`,
+        )
+      } else {
+        frasesInstalacion.push(
+          `El reloj es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional de ${formatearPEN(unit)} + IGV.`,
+        )
       }
     }
   }
+  const fraseInstalacion = [...new Set(frasesInstalacion)].join(" ")
 
   // ── Pago único ──
   // Envío: incluido en Lima; en VENTA a provincia va como línea única (US$30
@@ -311,7 +322,26 @@ export function cotizarPE(input: CotizacionPEInput): {
       })
     }
   }
-  const unicosNeto = ventaNeto + envioNeto
+  for (const li of lineasInstalacion) {
+    if (li.bonificada) {
+      lineas.push({
+        concepto: `Instalación técnica del reloj (${li.ubicacion})`,
+        detalle: `${li.cantidad} × ${formatearPEN(li.unit)} — bonificada en arriendo (Lima Metropolitana)`,
+        neto: 0,
+        igv: 0,
+        recurrente: false,
+      })
+    } else {
+      lineas.push({
+        concepto: `Instalación técnica del reloj (${li.ubicacion})`,
+        detalle: `${li.cantidad} × ${formatearPEN(li.unit)}`,
+        neto: li.unit * li.cantidad,
+        igv: li.unit * li.cantidad * IGV_PE,
+        recurrente: false,
+      })
+    }
+  }
+  const unicosNeto = ventaNeto + envioNeto + instalacionNeto
 
   // ── Totales (al cliente se muestran los NETOS "+ IGV"; los totales con IGV van al cotizador) ──
   const mensualNeto = plan + arriendoNeto
@@ -366,6 +396,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     filas.push("")
     filas.push(`- Reloj de control (compra): ${formatearPEN(ventaNeto)}`)
     if (envioNeto > 0) filas.push(`- Envío del reloj a provincia: ${formatearPEN(envioNeto)}`)
+    if (instalacionNeto > 0) filas.push(`- Instalación técnica: ${formatearPEN(instalacionNeto)}`)
     filas.push("")
     filas.push(`Total único: ${formatearPEN(unicosNeto)} + IGV`)
     // Burbuja propia para el pago inicial (patrón chileno): el desglose
@@ -374,7 +405,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     filas.push("[---]")
     filas.push("")
     filas.push(
-      `Al aceptar pagas el pago inicial de ${formatearPEN(pagoInicialNeto)} + IGV: incluye el reloj${envioNeto > 0 ? ", el envío" : ""} + el primer mes del plan por adelantado.`,
+      `Al aceptar pagas el pago inicial de ${formatearPEN(pagoInicialNeto)} + IGV: incluye el reloj${envioNeto > 0 ? ", el envío" : ""}${instalacionNeto > 0 ? ", la instalación" : ""} + el primer mes del plan por adelantado.`,
     )
   }
 
@@ -405,7 +436,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     const modalidadLabel = reloj.modalidad === "arriendo" ? "Reloj en arriendo" : "Reloj en compra"
     const personas = `${userCount} persona${userCount === 1 ? "" : "s"}`
     const ahorraMensual = planSoloNeto < mensualElegidoNeto - 0.01
-    const ahorraEntrada = ventaNeto > 0
+    const ahorraEntrada = unicosNeto > 0
 
     const op1: string[] = [
       `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
@@ -415,13 +446,17 @@ export function cotizarPE(input: CotizacionPEInput): {
       // del pago único (22-sep, pregunta de Lalo "¿el precio incluye el envío?").
       `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.${envioNeto > 0 ? "" : " El envío del reloj va incluido."}`,
     ]
+    // Frase de instalación en el mismo lugar que Chile (después del marcaje).
+    if (fraseInstalacion) op1.push(fraseInstalacion)
     if (conDescuento) {
       op1.push(
         `Incluye el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${ESCALERA_DESCUENTO_PE.meses} meses (desde el mes ${ESCALERA_DESCUENTO_PE.meses + 1}, ${formatearPEN(mensualNeto)} + IGV/mes).`,
       )
     }
     if (ventaNeto > 0) {
-      op1.push(`Se suma un pago inicial único de ${formatearPEN(pagoInicialNeto)} + IGV (incluye el reloj${envioNeto > 0 ? ", el envío a provincia" : ""} y el primer mes del plan).`)
+      // Como en Chile: el pago inicial único son los ÚNICOS (reloj, envío,
+      // instalación); el primer mes se explica al aceptar, no acá.
+      op1.push(`Se suma un pago inicial único de ${formatearPEN(unicosNeto)} + IGV.`)
     }
     const encabezado2 = ahorraMensual
       ? `2.- Una alternativa más económica sería si marcan solo mediante nuestra app:`
@@ -522,8 +557,25 @@ export function cotizarPE(input: CotizacionPEInput): {
       })
     }
   }
-  // Instalación: sin ítem — Lima S/0 o tarifa por distrito que factura sstt
-  // aparte; fuera de Lima queda en la nota del mensaje + avisoSsttPeru.
+  // Instalación técnica: ítem por punto (bonificada = lista con descuentoPct
+  // 100, como el arriendo RM chileno; cobrada = pago único).
+  for (const li of lineasInstalacion) {
+    itemsCotizador.push({
+      tipo: "servicio",
+      id: "instalacion_reloj",
+      nombre: `Instalación técnica del reloj (${li.ubicacion})`,
+      descripcion: li.bonificada
+        ? "Visita de instalación por nuestro equipo técnico. Bonificada en arriendo en Lima Metropolitana."
+        : "Visita de instalación por nuestro equipo técnico. Pago único, en soles al tipo de cambio oficial (SUNAT) del día.",
+      modalidad: "Cobro único",
+      cantidad: li.cantidad,
+      precioUnitarioPEN: li.unit,
+      subtotalPEN: li.bonificada ? 0 : li.unit * li.cantidad,
+      esRecurrente: false,
+      afectoIgv: true,
+      ...(li.bonificada ? { descuentoPct: 100 } : {}),
+    })
+  }
 
   return {
     lineas,

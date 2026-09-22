@@ -77,6 +77,18 @@ export const RELOJ_PE_USD = {
   arriendoMesProvincia: 23,
   /** Envío del reloj en VENTA a provincia: US$30 por unidad, pago único (Lalo 22-sep). En Lima el envío va incluido. */
   envioVentaProvincia: 30,
+  /**
+   * Instalación técnica por punto = LOS VALORES DE CHILE en dólares (Lalo
+   * 22-sep, "dejemos los valores de Chile en USD pero en su moneda local"):
+   * base (Lima Metropolitana) = 1 UF ≈ US$43 · resto (provincias) = 5 UF ≈
+   * US$214. Misma regla chilena: en ARRIENDO en la zona base va BONIFICADA
+   * (línea a precio de lista tachada en $0); en venta y en provincia se
+   * cobra. La auto-instalación es gratis siempre. Supersede el tarifario por
+   * distrito del 11-ago (la clasificación por distrito sigue viva para
+   * reconocer Lima).
+   */
+  instalacionLima: 43,
+  instalacionProvincias: 214,
   /** Artículo de Books/Creator al que se mapea en la nota de venta. */
   articulo: "304 - [PER] Reloj Gama Estándar FACIAL LAN WIFI",
 } as const
@@ -146,7 +158,7 @@ export const CATALOGO_SERVICIOS_PE: Servicio[] = [
     id: "instalacion_reloj",
     nombre: "Instalación de reloj",
     descripcion:
-      "Instalación del reloj de control. Sin costo en Lima Metropolitana. Fuera de Lima se coordina con servicio técnico y se cotiza aparte.",
+      "Instalación técnica del reloj de control por punto. Lima Metropolitana US$43 (bonificada en arriendo); provincias US$214. En soles al dólar SUNAT. Auto-instalación gratis siempre.",
     // Lima (RM) = 0 → incluida sin costo. Provincias (region) = 0 NO
     // significa gratis: fuera de Lima la instalación NO la cotiza Vicky —
     // "se coordina con servicio técnico, se cotiza aparte" + aviso interno a

@@ -161,7 +161,7 @@ export const TOOL_SCHEMAS_PE = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula la cotización referencial de Perú (1 a 50 usuarios) en soles. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (primer mes por adelantado + reloj en compra si aplica; los totales ya incluyen el IGV 18%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad; arriendo por defecto — venta SOLO si el cliente pidió comprar) y `puntosInstalacion` (uno por punto físico, con la ciudad tal como la dijo el cliente y su zona: 'lima' = Lima Metropolitana incluido el Callao, 'provincias' = cualquier otra ciudad del Perú). En Lima Metropolitana el envío va sin costo y la instalación con visita técnica tiene tarifario POR DISTRITO (algunos sin costo, otros con tarifa US$ + IGV que servicio técnico factura aparte) — por eso en Lima la `ubicacion` debe ser el DISTRITO (pregúntalo); a provincia el envío tiene precio cerrado (incluido en el arriendo; línea única en venta, la tool lo calcula) y la instalación se coordina aparte con servicio técnico. La tool arma esas notas con los montos exactos, tú solo transcribes la ubicación. `escalonDescuento` SOLO ante una objeción de PRECIO después de mostrar la lista: 1 = 10% en el plan por 6 meses, 2 = 20% (segunda objeción). Jamás en la primera cotización ni proactivo; NUNCA calcules tú el monto rebajado — la tool lo devuelve.",
+      "Calcula la cotización referencial de Perú (1 a 50 usuarios) en soles. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (primer mes por adelantado + reloj en compra si aplica; los totales ya incluyen el IGV 18%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad; arriendo por defecto — venta SOLO si el cliente pidió comprar) y `puntosInstalacion` (uno por punto físico, con la ciudad tal como la dijo el cliente y su zona: 'lima' = Lima Metropolitana incluido el Callao, 'provincias' = cualquier otra ciudad del Perú). En Lima Metropolitana el envío va sin costo y la instalación técnica va incluida en arriendo (en venta tiene precio cerrado que la tool informa) — la `ubicacion` es el distrito o la ciudad tal como la dijo el cliente; a provincia el envío tiene precio cerrado (incluido en el arriendo; línea única en venta, la tool lo calcula). La instalación técnica también tiene precio cerrado por zona (incluida en arriendo en Lima; en venta y en provincia la tool la cotiza) y la auto-instalación es gratis siempre. La tool arma esas notas con los montos exactos, tú solo transcribes la ubicación. `escalonDescuento` SOLO ante una objeción de PRECIO después de mostrar la lista: 1 = 10% en el plan por 6 meses, 2 = 20% (segunda objeción). Jamás en la primera cotización ni proactivo; NUNCA calcules tú el monto rebajado — la tool lo devuelve.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -409,14 +409,14 @@ export function buildDispatchPE(contact: string) {
         // reenviar a ssttperu@. Best-effort: JAMÁS bloquea la cotización.
         if (r.avisoSsttPeru) {
           const detalle = puntos
-            .filter((p) => p.zona === "provincias" && !p.autoInstalada)
+            .filter((p) => !p.autoInstalada)
             .map((p) => p.ubicacion || "(ciudad sin especificar)")
             .join(", ")
           try {
             const { avisarEquipoInterno } = await import("../../alerta-interna.ts")
             await avisarEquipoInterno(
-              `🇵🇪 SERVICIO TÉCNICO PERÚ — reenviar a ${CORREO_SSTT_PE}: el prospecto +${contact} cotizó reloj con instalación FUERA de Lima Metropolitana (${detalle}). ` +
-                `La instalación se cotiza aparte: contactarlo para coordinarla. Config: ${userCount} usuarios, reloj ${i.reloj?.modalidad} x${i.reloj?.cantidad}.`,
+              `🇵🇪 SERVICIO TÉCNICO PERÚ — reenviar a ${CORREO_SSTT_PE}: el prospecto +${contact} cotizó reloj con VISITA TÉCNICA de instalación (${detalle}). ` +
+                `La visita ya va cotizada con precio cerrado (Lima US$43, bonificada en arriendo; provincias US$214): solo coordinarla. Config: ${userCount} usuarios, reloj ${i.reloj?.modalidad} x${i.reloj?.cantidad}.`,
             ).catch(() => {})
           } catch {
             // El aviso interno nunca puede tumbar la cotización.

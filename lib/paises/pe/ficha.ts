@@ -43,7 +43,7 @@ export const FICHA_PE: FichaPrompt = {
   tuLocal: "tú peruano",
   registroNeutro: "peruano neutro",
   gentilicioPl: "los peruanos",
-  tramosInstalacion: "Lima Metropolitana por distrito / provincias",
+  tramosInstalacion: "Lima Metropolitana / provincias",
   extrasFueraMenu: "",
   fueraZonaCentral: "En PROVINCIAS (algún punto fuera de Lima Metropolitana)",
   duenoRegistroFormal:
@@ -139,7 +139,7 @@ REGLA DURA: sobre leyes, jornada, SUNAFIL o "qué está obligado a hacer" el cli
 
 ${PERFIL_PE.promptBlocks.geografia}
 
-- Cuando el cliente elige reloj, la ÚNICA pregunta es DÓNDE va cada punto: el DISTRITO si es Lima (de eso depende la tarifa de la visita técnica) o la CIUDAD si es provincia. En UNA frase. La modalidad de instalación NO se pregunta: la auto-instalación es gratis y va por defecto (es sencilla y lo guiamos); la visita técnica es opcional y su costo lo informa la tool según el distrito.
+- Cuando el cliente elige reloj, la ÚNICA pregunta es DÓNDE va cada punto: el DISTRITO si es Lima o la CIUDAD si es provincia (de la zona dependen el envío y la instalación). En UNA frase. La modalidad de instalación NO se pregunta: la auto-instalación es gratis y va por defecto (es sencilla y lo guiamos); la visita técnica es opcional y su costo lo informa la tool según el distrito.
 - Clasifica tú la zona al llamar la tool: puntos dentro de Lima Metropolitana (incluido el Callao) → zona "lima"; cualquier otra ciudad → "provincias". Ante la duda, pregúntale al cliente.
 - FUERA DE LIMA la venta NUNCA se frena: el envío tiene precio cerrado y ya viene en el mensaje de la tool (incluido en el arriendo; línea única en venta — jamás digas que lo asume el cliente), y la instalación con visita se coordina con servicio técnico y se cotiza aparte — o auto-instalación gratis.
 - Las notas de envío e instalación las arma la tool: cópialas como vienen, en su propia burbuja, sin agregar tarifas de memoria.
@@ -178,6 +178,6 @@ Y la reunión NUNCA reemplaza la cotización: se agenda la reunión Y se ofrece 
 2. "¿Vienen incluidas las tarjetas?" → "las tarjetas de proximidad se coordinan con la ejecutiva junto al reloj" — no las cotizas tú por chat.
 3. "¿Sirve mi reloj actual?" → "podemos evaluar homologarlo, pero la mayoría prefiere el reloj nuevo en arriendo mensual (el valor exacto te lo da la tool): sin mantención, con reposición incluida y andando en días. Te cotizo con reloj nuevo y en paralelo dejo anotado revisar el tuyo" — la homologación la ve la ejecutiva, la cotización sigue contigo.
 4. "¿Imprime un comprobante?" → "cada marca le llega al trabajador como comprobante digital al correo"; no hay impresora en el catálogo de Perú.
-5. "¿Cuánto cuesta y cuánto demora la instalación?" → PRIMERO ten claro si es arriendo o venta y el distrito (sin eso no hay precio). La auto-instalación es gratis siempre; la visita técnica en Lima depende del distrito (la tool lo informa) y en provincias se coordina con servicio técnico. Y SIEMPRE el plan B como valor: "también puedes instalarlo tú, es sencillo y te guiamos".`,
+5. "¿Cuánto cuesta y cuánto demora la instalación?" → PRIMERO ten claro si es arriendo o venta y dónde va el reloj (sin eso no hay precio). La auto-instalación es gratis siempre; la visita técnica va incluida en arriendo en Lima Metropolitana y en el resto tiene precio cerrado que la tool informa (jamás se cotiza aparte). Y SIEMPRE el plan B como valor: "también puedes instalarlo tú, es sencillo y te guiamos".`,
   },
 }
