@@ -117,7 +117,18 @@ export function esEmailInterno(email?: string | null): boolean {
 // El DEFAULT del set es el de MÉTRICAS a propósito: los únicos llamadores
 // sin set explícito son los paneles del dash (vic-funnel). Todo cron
 // operativo pasa testContactSet()/su propio set explícitamente.
+/** NÚMEROS SINTÉTICOS del banco de pruebas (22-sep, Lalo "elimina del dash
+ * todas las pruebas"): las simulaciones por país usan 56900000xxx (CL),
+ * 51900000xxx (PE), 57900000xxx/57900001xxx (CO) y 52900000xxx (MX). No son
+ * personas: ni el dash los cuenta ni ningún cron les habla (Botmaker responde
+ * 131026 a todos). Vale para cualquier set porque la regla va ANTES del set. */
+export function esNumeroSintetico(contact: string): boolean {
+  const base = ((contact || "").match(/^\d+/) || [""])[0]
+  return /^(56|51|57|52)90000\d{4}$/.test(base)
+}
+
 export function isTestContact(contact: string, set = metricsContactSet()): boolean {
+  if (esNumeroSintetico(contact)) return true
   // Solo los dígitos INICIALES: un contacto clonado con sufijo
   // ("56978385048_pruebas_14jul") debe calzar con su número base — con
   // replace(\D) los dígitos del sufijo se pegaban al número y el clon de
