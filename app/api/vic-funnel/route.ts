@@ -4849,27 +4849,44 @@ function renderInboundDiario(
     }
     const tabla = (lado: "in" | "out") => {
       const T: Fila = { entrantes: 0, precio: 0, formal: 0, aceptadaSinPagar: 0, pagada: 0, pagadaBase: 0, react: 0 }
-      const celdaAcepSinPagar = (f: Fila) =>
+      // CADA NÚMERO CLICKEABLE (Rodrigo 22-sep): mismo motor de detalle de la
+      // tabla diaria (inbdet + inbEtapa) con dos filtros nuevos que el
+      // manejador entiende — inbLado=in|out (lado de esta tabla) e
+      // inbSinPago=1 (aceptadas menos las pagadas del rango). k = "S<lunes>"
+      // de la fila, o "TOTAL" en la fila Total.
+      const href = (k: string, etapa: string, sinPago = false) =>
+        `?${opts.qs}&inbdet=${encodeURIComponent(k)}&inbEtapa=${etapa}&inbLado=${lado}${sinPago ? "&inbSinPago=1" : ""}`
+      const celdaNum = (k: string, f: Fila, etapa: "entrantes" | "precio" | "formal") =>
+        f[etapa] > 0
+          ? `<td style="text-align:center"><a href="${href(k, etapa)}" style="border-bottom:1px dashed #bcd9ea">${f[etapa]}</a></td>`
+          : `<td style="text-align:center;color:#c8cdd3">0</td>`
+      const celdaAcepSinPagar = (k: string, f: Fila) =>
         f.aceptadaSinPagar > 0
-          ? `<b style="color:#b45309" title="aceptaron y no han pagado">${f.aceptadaSinPagar}</b>`
+          ? `<a href="${href(k, "aceptada", true)}" style="border-bottom:1px dashed #ecd3b0;text-decoration:none"><b style="color:#b45309" title="aceptaron y no han pagado">${f.aceptadaSinPagar}</b></a>`
           : `<span style="color:#c8cdd3">0</span>`
-      const celdaPagada = (f: Fila) =>
-        f.react > 0
-          ? `${f.pagada} <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="${f.react} de estas pagadas son reactivaciones: el contacto vio el precio hace más de 30 días (cotización antigua tocada por una campaña). No entran en la línea del gráfico.">(${f.react} ↻)</span>`
-          : String(f.pagada)
+      const celdaPagada = (k: string, f: Fila) => {
+        const base = f.pagada > 0 ? `<a href="${href(k, "pagada")}" style="border-bottom:1px dashed #bcd9ea">${f.pagada}</a>` : `<span style="color:#c8cdd3">0</span>`
+        return f.react > 0
+          ? `${base} <span style="font-size:11px;color:#6b7280;white-space:nowrap" title="${f.react} de estas pagadas son reactivaciones: el contacto vio el precio hace más de 30 días (cotización antigua tocada por una campaña). No entran en la línea del gráfico.">(${f.react} ↻)</span>`
+          : base
+      }
+      // El % también abre detalle: lista las pagadas (el numerador) del tramo.
+      const celdaCierre = (k: string, f: Fila) =>
+        f.pagada > 0 ? `<a href="${href(k, "pagada")}" style="text-decoration:none">${cierre(f)}</a>` : cierre(f)
       const filasHtml = lunesList
         .slice()
         .reverse()
         .map((lunes) => {
-          const f = cuenta(claveSemana(lunes), lado)
+          const k = claveSemana(lunes)
+          const f = cuenta(k, lado)
           T.entrantes += f.entrantes; T.precio += f.precio; T.formal += f.formal; T.aceptadaSinPagar += f.aceptadaSinPagar; T.pagada += f.pagada; T.pagadaBase += f.pagadaBase; T.react += f.react
-          return `<tr><td style="white-space:nowrap">${etiquetaSemana(lunes)}</td><td style="text-align:center">${f.entrantes}</td><td style="text-align:center">${f.precio}</td><td style="text-align:center">${f.formal}</td><td style="text-align:center">${celdaAcepSinPagar(f)}</td><td style="text-align:center">${celdaPagada(f)}</td><td style="text-align:center">${cierre(f)}</td></tr>`
+          return `<tr><td style="white-space:nowrap">${etiquetaSemana(lunes)}</td>${celdaNum(k, f, "entrantes")}${celdaNum(k, f, "precio")}${celdaNum(k, f, "formal")}<td style="text-align:center">${celdaAcepSinPagar(k, f)}</td><td style="text-align:center">${celdaPagada(k, f)}</td><td style="text-align:center">${celdaCierre(k, f)}</td></tr>`
         })
         .join("")
       return `<table style="width:100%;border-collapse:collapse;font-size:13px;margin:4px 0 12px">
         <tr><th style="text-align:left">Semana</th><th>Entrantes</th><th>Vieron precio</th><th>Formales</th><th title="Aceptó la cotización (firmó el checkbox) y al día de hoy no ha pagado. No es acumulativo con Pagadas: si pagó después, sale de esta columna.">Aceptadas sin pagar</th><th>Pagadas</th><th>Cierre</th></tr>
         ${filasHtml}
-        <tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700"><td>Total</td><td style="text-align:center">${T.entrantes}</td><td style="text-align:center">${T.precio}</td><td style="text-align:center">${T.formal}</td><td style="text-align:center">${celdaAcepSinPagar(T)}</td><td style="text-align:center">${celdaPagada(T)}</td><td style="text-align:center">${cierre(T)}</td></tr>
+        <tr style="border-top:2px solid #c9ced4;background:#fafbfc;font-weight:700"><td>Total</td>${celdaNum("TOTAL", T, "entrantes")}${celdaNum("TOTAL", T, "precio")}${celdaNum("TOTAL", T, "formal")}<td style="text-align:center">${celdaAcepSinPagar("TOTAL", T)}</td><td style="text-align:center">${celdaPagada("TOTAL", T)}</td><td style="text-align:center">${celdaCierre("TOTAL", T)}</td></tr>
       </table>`
     }
     // ═══ GRÁFICO DE LÍNEA (Lalo 09-sep): evolución semanal de la tasa de
@@ -8767,6 +8784,43 @@ export async function GET(req: Request): Promise<Response> {
           // Alias de links viejos (llegaron/comercial/soporte/cobranza/derivada).
           const etapaQ = (ETAPA_ALIAS[etapaCruda] ||
             ((ETAPAS_INBOUND as readonly string[]).includes(etapaCruda) ? etapaCruda : "entrantes")) as EtapaInbound
+          // FILTROS DE LA TARJETA 🎯 (Rodrigo 22-sep, "haz clickeable cada uno
+          // de esos números"): inbLado=in|out corta por tipo de conversación
+          // (outbound = planilla de cadencia, mismas dos fuentes del panel:
+          // marcas outb_asignado_ + filas de vic_outbound_cadence);
+          // inbSinPago=1 es la pseudo-etapa "aceptadas sin pagar" (aceptada
+          // menos las pagadas de TODO el rango, igual que la celda).
+          const ladoQ = (searchParams.get("inbLado") || "").trim()
+          const sinPagoQ = searchParams.get("inbSinPago") === "1"
+          let outbTelsDrill: Set<string> | null = null
+          if (ladoQ === "in" || ladoQ === "out") {
+            try {
+              const drill = new Set<string>()
+              const hOut = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+              const [rAsig, rOut] = await Promise.all([
+                fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=like.outb_asignado_*&select=value&limit=4000`, { headers: hOut, cache: "no-store" }),
+                fetch(`${SUPABASE_URL}/rest/v1/vic_outbound_cadence?select=contact&limit=4000`, { headers: hOut, cache: "no-store" }),
+              ])
+              for (const fila of rAsig.ok ? ((await rAsig.json().catch(() => [])) as Array<{ value: string }>) : []) {
+                try {
+                  const tel = digits(String((JSON.parse(fila.value) as { contact?: string }).contact || ""))
+                  if (tel && paisDeTelefono(tel) === pais && !isTestContact(tel, metricsContactSet())) drill.add(tel)
+                } catch { /* fila corrupta */ }
+              }
+              for (const f of rOut.ok ? ((await rOut.json().catch(() => [])) as Array<{ contact?: string }>) : []) {
+                const tel = digits(String(f.contact || ""))
+                if (tel && paisDeTelefono(tel) === pais && !isTestContact(tel, metricsContactSet())) drill.add(tel)
+              }
+              outbTelsDrill = drill
+            } catch {
+              // Sin el set no se puede cortar por lado: se listan TODOS y el
+              // título lo declara, antes que filtrar mal en silencio.
+              outbTelsDrill = null
+            }
+          }
+          const pagadasRango = sinPagoQ
+            ? new Set([...cohortes.porDia.pagada.values()].flatMap((s) => [...s]))
+            : null
           const porTelListado = new Map(filasListado.map((f) => [digits(f.contacto), f]))
           const sub: FilaListado[] = []
           const vistos = new Set<string>()
@@ -8778,11 +8832,15 @@ export async function GET(req: Request): Promise<Response> {
               for (const tels of cohortes.porDia[et].values()) for (const t of tels) clasePorTel.set(t, ETIQUETA_ETAPA_INBOUND[et])
             }
           }
-          const fuente: Array<[string, string]> = [...(cohortes.porDia[etapaQ] || new Map<string, Set<string>>())].flatMap(
-            ([dia, tels]) => [...tels].map((tel) => [telDeElemento(tel), dia] as [string, string]),
+          const fuente: Array<[string, string, string]> = [...(cohortes.porDia[etapaQ] || new Map<string, Set<string>>())].flatMap(
+            ([dia, tels]) => [...tels].map((el) => [el, telDeElemento(el), dia] as [string, string, string]),
           )
-          for (const [tel, dia] of fuente) {
+          for (const [el, tel, dia] of fuente) {
             if (inbdet !== "TOTAL" && (esClaveSemana(inbdet) ? lunesSemanaDe(dia) !== inbdet.slice(1) : dia !== inbdet)) continue
+            // "Aceptadas sin pagar": si esa MISMA cotización aparece pagada en
+            // el rango, ya no está pendiente (mismo criterio de la celda).
+            if (pagadasRango && pagadasRango.has(el)) continue
+            if (outbTelsDrill && (ladoQ === "out") !== outbTelsDrill.has(tel)) continue
             if (vistos.has(tel)) continue
             vistos.add(tel)
             const f = porTelListado.get(tel)
@@ -8809,9 +8867,12 @@ export async function GET(req: Request): Promise<Response> {
               zohoUrl: "",
             })
           }
-          const titulo = `Inbound ${inbdet === "TOTAL" ? "del período" : esClaveSemana(inbdet) ? `de la semana del ${inbdet.slice(1)}` : `del ${inbdet}`} — ${
-            etapaQ === "entrantes" ? "entrantes del día" : `${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
-          }`
+          const etiquetaEtapa = sinPagoQ && etapaQ === "aceptada" ? "aceptadas SIN pagar" : etapaQ === "entrantes" ? "entrantes del día" : `${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
+          const etiquetaLado =
+            ladoQ === "in" && outbTelsDrill ? " · solo INBOUND" :
+            ladoQ === "out" && outbTelsDrill ? " · solo OUTBOUND (planilla de cadencia)" :
+            ladoQ && !outbTelsDrill ? " · ⚠️ filtro in/out no disponible: se listan todos" : ""
+          const titulo = `${ladoQ ? "Canal Vicky" : "Inbound"} ${inbdet === "TOTAL" ? "del período" : esClaveSemana(inbdet) ? `de la semana del ${inbdet.slice(1)}` : `del ${inbdet}`} — ${etiquetaEtapa}${etiquetaLado}`
           return renderDetalleEjecutivo({
             filas: sub,
             titulo,
