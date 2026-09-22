@@ -923,16 +923,27 @@ async function fetchPaisesConversaciones(): Promise<{
   /** quoteId → contacto del CHAT que emitió esa formal (formal_quote_id). */
   contactoPorQuote: Map<string, string>
 }> {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,country,formal_quote_id&limit=10000`,
-    {
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
-      cache: "no-store",
-    },
-  )
-  const rows = res.ok
-    ? ((await res.json()) as Array<{ id: string; contact: string; country: string | null; formal_quote_id: string | null }>)
-    : []
+  // PAGINADO (22-sep, caso Francisco/COT1536): `limit=10000` NO trae 10.000
+  // filas — PostgREST topa en su max-rows (1.000) y devolvía las primeras
+  // mil conversaciones en orden arbitrario, así que el mapa quote→chat
+  // (formal_quote_id) y el país por cotización quedaban INCOMPLETOS para
+  // ~la mitad del universo (2.255 conversaciones hoy). Mismo paginado que
+  // fetchPrimeraConversacion.
+  type FilaConv = { id: string; contact: string; country: string | null; formal_quote_id: string | null }
+  const rows: FilaConv[] = []
+  for (let offset = 0; offset < 20000; offset += 1000) {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,country,formal_quote_id&order=started_at.asc&limit=1000&offset=${offset}`,
+      {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+        cache: "no-store",
+      },
+    )
+    if (!res.ok) break
+    const page = (await res.json().catch(() => [])) as FilaConv[]
+    rows.push(...page)
+    if (page.length < 1000) break
+  }
   const paisPorConv = new Map<string, Pais>()
   const paisPorContacto = new Map<string, Pais>()
   const paisPorQuote = new Map<string, Pais>()
