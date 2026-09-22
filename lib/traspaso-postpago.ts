@@ -579,6 +579,37 @@ export async function cerrarYTraspasarPostPago(
     await refecharCajaVenta(quoteId, fechaTransferencia || fechaPagoOnline || ahoraIso).catch(() => "sin_cambio")
   }
 
+  // EL DEAL SUBE A "6. Listo para Cierre" EN EL MISMO PAGO (22-sep, caso Mda
+  // servicios spa / COT1563): el pago con tarjeta llegaba por vic-quote-notify
+  // y NADIE movía la etapa — solo el barrido horario de vic-deal-stage-cron,
+  // así que el correo "PAGADA" salía con el deal todavía en "4. Propuesta
+  // Enviada" (43 min en ese caso). La transferencia sí lo hacía
+  // (avanzarDealAGanado en la tool del comprobante). Forward-only, best-effort,
+  // jamás toca la respuesta al cliente; el cron sigue de red de seguridad.
+  if (pagoReal && !yaProcesada) {
+    try {
+      const { getZohoAccessToken } = await import("./zoho-token")
+      const { transicionarDealHacia } = await import("./zoho-deals")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+      const r = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Deal_Asociado`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+        cache: "no-store",
+      })
+      const dealId = String(
+        ((await r.json().catch(() => ({}))) as { data?: Array<{ Deal_Asociado?: { id?: string } }> }).data?.[0]
+          ?.Deal_Asociado?.id || "",
+      )
+      if (dealId) {
+        const t = await transicionarDealHacia(dealId, "listo para cierre")
+        console.log(`[postpago] deal ${dealId} → listo para cierre: ${t.resultado}${t.detalle ? ` (${t.detalle})` : ""}`)
+      }
+    } catch (e) {
+      console.warn("[postpago] avance del deal al pagar falló:", e instanceof Error ? e.message : e)
+    }
+  }
+
   if (!enviarTraspaso) return { contact, traspaso: "omitido" }
 
   // CANAL EJECUTIVO: NADA POR EL WHATSAPP DE VICKY (Lalo 31-ago, casos
