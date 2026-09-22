@@ -501,6 +501,7 @@ export function buildDispatchPE(contact: string) {
         const data = (await res.json().catch(() => ({}))) as {
           ok?: boolean
           acceptanceUrl?: string
+          linkCorto?: string
           quoteId?: string
           error?: string
         }
@@ -527,8 +528,9 @@ export function buildDispatchPE(contact: string) {
           // El agent-loop persiste estos campos en el puntero durable de la
           // cotización (anti-amnesia: retomar la formal en turnos futuros).
           acceptanceUrl: data.acceptanceUrl,
+          linkCorto: data.linkCorto || "",
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas: con tarjeta vía Mercado Pago (se confirma al instante) o por transferencia a la cuenta BBVA de GeoVictoria Perú que aparece en la misma página (después me mandas el comprobante por este chat): ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialNeto)} + IGV (incluye tu primer mes por adelantado${conDescuento ? `, ya con el ${pctTxt} de descuento en el plan` : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualNetoPlan * (1 - calculo.descuentoPct) + calculo.mensualArriendoNeto : calculo.mensualNeto)} + IGV${conDescuento ? ` durante ${mesesTxt} (luego ${formatearPEN(calculo.mensualNeto)} + IGV)` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas: con tarjeta vía Mercado Pago (se confirma al instante) o por transferencia a la cuenta BBVA de GeoVictoria Perú que aparece en la misma página (después me mandas el comprobante por este chat): ${data.linkCorto || data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialNeto)} + IGV (incluye tu primer mes por adelantado${conDescuento ? `, ya con el ${pctTxt} de descuento en el plan` : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualNetoPlan * (1 - calculo.descuentoPct) + calculo.mensualArriendoNeto : calculo.mensualNeto)} + IGV${conDescuento ? ` durante ${mesesTxt} (luego ${formatearPEN(calculo.mensualNeto)} + IGV)` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
         }
       }
 
