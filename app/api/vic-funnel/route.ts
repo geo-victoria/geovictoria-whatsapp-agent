@@ -759,7 +759,7 @@ function filtrarCierreAVicky<T extends {
   }
 }
 
-async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rango: RangoFechas | null): Promise<{
+async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rango: RangoFechas | null, contactoPorQuote: Map<string, string> = new Map()): Promise<{
   total: number
   aceptadas: number
   // Desglose del campo "Intervención Humana" sobre las ACEPTADAS: cierres
@@ -848,6 +848,18 @@ async function fetchCierreZoho(paisPorQuote: Map<string, Pais>, pais: Pais, rang
         }
       }
     }
+    // EL TELÉFONO DE LA COTIZACIÓN ES EL DEL CHAT, NO EL QUE EL CLIENTE
+    // DECLARÓ (22-sep, caso Francisco/COT1532: chateó desde 56987005026 y
+    // puso +56987298350 como contacto; pagó a las 09:29, el alta corrió
+    // entera, y el dash decía 4 ventas en vez de 5 porque TODO el cruce
+    // "conversó con Vicky" —Caja, columna Pagada, foto, cierre diario— va
+    // por Tel_fono_Contacto, y ese número no tiene conversación). La
+    // conversación que emitió la formal (formal_quote_id) es la fuente de
+    // verdad de quién chateó; el número de Zoho queda de respaldo.
+    for (const q of filas) {
+      const c = contactoPorQuote.get(String(q.id || ""))
+      if (c && digits(String(q.Tel_fono_Contacto || "")) !== c) q.Tel_fono_Contacto = c
+    }
     const universo = filas.filter((q) => {
       // País de la cotización: el de su conversación de origen; si no está
       // ligada, por prefijo del teléfono (histórico: Chile por defecto).
@@ -908,6 +920,8 @@ async function fetchPaisesConversaciones(): Promise<{
   paisPorConv: Map<string, Pais>
   paisPorContacto: Map<string, Pais>
   paisPorQuote: Map<string, Pais>
+  /** quoteId → contacto del CHAT que emitió esa formal (formal_quote_id). */
+  contactoPorQuote: Map<string, string>
 }> {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/vic_v3_conversations?select=id,contact,country,formal_quote_id&limit=10000`,
@@ -922,14 +936,19 @@ async function fetchPaisesConversaciones(): Promise<{
   const paisPorConv = new Map<string, Pais>()
   const paisPorContacto = new Map<string, Pais>()
   const paisPorQuote = new Map<string, Pais>()
+  const contactoPorQuote = new Map<string, string>()
   for (const r of rows) {
     const declarado = String(r.country || "").toLowerCase()
     const p: Pais = (declarado in PAISES ? declarado : paisDeTelefono(digits(r.contact)) || "cl") as Pais
     paisPorConv.set(r.id, p)
     paisPorContacto.set(digits(r.contact), p)
-    if (r.formal_quote_id) paisPorQuote.set(r.formal_quote_id, p)
+    if (r.formal_quote_id) {
+      paisPorQuote.set(r.formal_quote_id, p)
+      const c = digits(r.contact)
+      if (c) contactoPorQuote.set(String(r.formal_quote_id), c)
+    }
   }
-  return { paisPorConv, paisPorContacto, paisPorQuote }
+  return { paisPorConv, paisPorContacto, paisPorQuote, contactoPorQuote }
 }
 
 // Mejoras aplicadas al agente (changelog curado, editable a mano — pídeme
@@ -8363,7 +8382,7 @@ export async function GET(req: Request): Promise<Response> {
     const [allRows, hard, cierreZoho, origenData, fechasConv, convsListado] = await Promise.all([
       fetchAnalysis(),
       fetchHardSignals(),
-      fetchCierreZoho(paisesConv.paisPorQuote, pais, rango),
+      fetchCierreZoho(paisesConv.paisPorQuote, pais, rango, paisesConv.contactoPorQuote),
       fetchOrigenFunnel(pais).catch(() => ({ toque0: new Set<string>(), sinContactar: 0, asignadosTotal: 0, convertidos: new Set<string>(), respondio: new Set<string>(), asignados: new Set<string>(), sinContactarTels: new Set<string>() })),
       // Las fechas de inicio solo hacen falta con el filtro activo.
       rango ? fetchFechasConversaciones() : Promise.resolve(new Map<string, string>()),
