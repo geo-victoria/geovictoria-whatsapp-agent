@@ -217,6 +217,8 @@ type CamposFlow = {
    * teléfono (chat frío / sesión vencida), el Flow muestra un campo y el
    * cliente lo escribe. Viaja en los campos y acá se vuelve el contact. */
   telefono_wsp?: string
+  /** v6: el campo de respaldo del flow (visible solo sin número sembrado). */
+  telefono_tipeado?: string
 }
 
 /** POST — valida la pantalla; en ADMIN válida persiste y despierta a Vicky. */
@@ -230,8 +232,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   // el INIT no lo identificó). Solo dígitos, largo de fono real.
   let contact = String(body.contact || "").replace(/\D/g, "")
   if (!contact) {
-    const tipeado = String(campos.telefono_wsp || "").replace(/\D/g, "")
-    if (tipeado.length >= 10 && tipeado.length <= 15) contact = tipeado
+    // v6 (22-sep): `telefono_wsp` es el número que SEMBRÓ el bloque #altaflow
+    // (viaja en data) y `telefono_tipeado` el del campo de respaldo, si se
+    // mostró. Cualquiera de los dos identifica al cliente.
+    for (const cand of [campos.telefono_wsp, campos.telefono_tipeado]) {
+      const tipeado = String(cand || "").replace(/\D/g, "")
+      if (tipeado.length >= 10 && tipeado.length <= 15) { contact = tipeado; break }
+    }
   }
   if (!pantalla) return NextResponse.json({ ok: false, error: "falta pantalla" }, { status: 400 })
   // CHAT FRÍO (caso Diego 25-ago): la Code Action puede no resolver el

@@ -80,7 +80,18 @@ export async function entregarKickoffOnboarding(
     const ultimoMsg = await getLastUserAt(contact).catch(() => null)
     const ventanaViva = !!ultimoMsg && Date.now() - ultimoMsg.getTime() < 23 * 3600e3
     const qrOn = ((await getKvValue(gates.qr).catch(() => null)) || "").trim() === "on"
-    if (!ventanaViva && qrOn) {
+    // QR PRIMERO (22-sep, Lalo "es extraño pedir que confirme el WhatsApp si lo
+    // está haciendo desde su WhatsApp"): la plantilla FLOW abre el formulario
+    // por el INIT de Meta y la Code Action nunca resuelve el número
+    // (`contact=VACIO` en todos los logs), así que el flow parte en la pantalla
+    // de confirmación del número. El tap del quick-reply, en cambio, dispara el
+    // bloque `#altaflow` de Botmaker, que abre el flow v6 en la pantalla EMPRESA
+    // con las variables alta_* ya sembradas (nombre, RUT, teléfono, etiquetas):
+    // cero pantalla de número. Con vic_kv `alta_qr_primero`="on" el QR sale
+    // también con la ventana viva; la plantilla FLOW queda de respaldo si el QR
+    // falla. Sin el gate, conducta de siempre (QR solo en frío).
+    const qrPrimero = ((await getKvValue("alta_qr_primero").catch(() => null)) || "").trim() === "on"
+    if (qrOn && (!ventanaViva || qrPrimero)) {
       // SIEMBRA de variables alta_* ANTES de la plantilla (28-ago noche): el
       // tap del botón dispara el intent #altaflow directo en Botmaker (no pasa
       // por este webhook), así que el bloque interpola ${alta_*} — que deben
