@@ -32,6 +32,7 @@
 
 import { cotizarPE, formatearPEN, type PuntoInstalacionPE, type ZonaPE } from "./cotizar.ts"
 import { tipoCambioSunat } from "./tc-sunat.ts"
+import { fichaRucSunat } from "./sunat-ruc.ts"
 import { ESCALERA_DESCUENTO_PE } from "./catalogo.ts"
 import { CORREO_SSTT_PE } from "./catalogo.ts"
 import { rucValido, formatearRuc } from "../../rut.ts"
@@ -218,11 +219,11 @@ export const TOOL_SCHEMAS_PE = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles, montos netos + IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: empresa (razón social), nombre del contacto, RUC válido (11 dígitos) y la configuración; el email es OPCIONAL (sin correo la entrega va por este chat y el formulario de facturación lo pide al aceptar) (userCount; reloj y puntos si lleva). `escalonDescuento` = el mismo escalón (1 o 2) que el cliente ACEPTÓ en cotizar_referencial — la cotización nace con ese % en el plan por 6 meses y el pago inicial ya lo refleja. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles, montos netos + IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: nombre del contacto, RUC válido (11 dígitos) y la configuración; la RAZÓN SOCIAL sale sola del RUC (padrón SUNAT) — pásala en `empresa` solo si el cliente la dijo, jamás la preguntes; el email es OPCIONAL (sin correo la entrega va por este chat y el formulario de facturación lo pide al aceptar) (userCount; reloj y puntos si lleva). `escalonDescuento` = el mismo escalón (1 o 2) que el cliente ACEPTÓ en cotizar_referencial — la cotización nace con ese % en el plan por 6 meses y el pago inicial ya lo refleja. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
-        empresa: { type: "string" as const, description: "Razón social o nombre de la empresa." },
+        empresa: { type: "string" as const, description: "Razón social, SOLO si el cliente la mencionó; si no, se resuelve desde el RUC." },
         contacto: { type: "string" as const, description: "Nombre completo de la persona de contacto." },
         email: { type: "string" as const, description: "Email del contacto, si lo dio (ahí llega también la cotización)." },
         ruc: { type: "string" as const, description: "RUC de la empresa (11 dígitos)." },
@@ -253,7 +254,7 @@ export const TOOL_SCHEMAS_PE = [
           description: "Escalón de descuento del plan que el cliente ACEPTÓ (1 = 10%, 2 = 20%, por 6 meses). 0 u omitido = sin descuento.",
         },
       },
-      required: ["empresa", "contacto", "ruc", "userCount"],
+      required: ["contacto", "ruc", "userCount"],
     },
   },
   {
@@ -458,6 +459,13 @@ export function buildDispatchPE(contact: string) {
           return { ok: false, error: "Cotizadora PE no configurada (secreto faltante). Usa derivar_a_ejecutivo (motivo cotizacion_formal)." }
         }
         const escalon = escalonDe(i)
+        // RAZÓN SOCIAL = del padrón SUNAT cuando el cliente no la dio (22-sep,
+        // paridad con Chile/SII); último recurso, el nombre del contacto.
+        let empresaFinal = String(i.empresa || "").trim()
+        if (!empresaFinal) {
+          const ficha = await fichaRucSunat(formatearRuc(i.ruc)).catch(() => null)
+          empresaFinal = ficha?.razonSocial || String(i.contacto || "").trim()
+        }
         const tc = await tipoCambioSunat()
         const calculo = cotizarPE({
           userCount: Number(i.userCount || 0),
@@ -481,7 +489,7 @@ export function buildDispatchPE(contact: string) {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-vicky-secret": SECRET_COTIZADORA_PE },
           body: JSON.stringify({
-            empresa: i.empresa,
+            empresa: empresaFinal,
             contacto: i.contacto,
             contactoEmail: i.email?.trim() || undefined,
             ruc: formatearRuc(i.ruc),
@@ -518,7 +526,7 @@ export function buildDispatchPE(contact: string) {
           try {
             const { avisarEquipoInterno } = await import("../../alerta-interna.ts")
             await avisarEquipoInterno(
-              `🇵🇪 SERVICIO TÉCNICO PERÚ — reenviar a ${CORREO_SSTT_PE}: cotización FORMAL con instalación fuera de Lima para +${contact} (${i.empresa}). Coordinar instalación aparte.`,
+              `🇵🇪 SERVICIO TÉCNICO PERÚ — reenviar a ${CORREO_SSTT_PE}: cotización FORMAL con instalación fuera de Lima para +${contact} (${empresaFinal}). Coordinar instalación aparte.`,
             ).catch(() => {})
           } catch { /* jamás bloquea */ }
         }
