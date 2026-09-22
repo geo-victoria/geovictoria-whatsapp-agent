@@ -302,15 +302,6 @@ export async function agendarReunion(
   // dueño humano, ese propietario entra como ASISTENTE invitado del booking
   // de Cal y se le notifica. El deal NO cambia de dueño por la reunión.
   const duenoDeal = await duenoDealVigente(telefono || "")
-  // EL DUEÑO DEL LEAD TAMBIÉN ENTRA COMO INVITADO (22-sep, caso Roberto
-  // Letelier / Edificio Living Urbano, orden de Lalo "la reunión asociada a
-  // este lead agrega a dsalas@"): el lead del formulario web (500-999) era de
-  // Dangela Salas, sin evento propio en Cal → la agenda cayó al round-robin
-  // (Ana Paula) y la dueña ni se enteró. Es la regla del 30-jul ("reunión con
-  // lead activo de OTRO dueño: el dueño se agrega como asistente y se le
-  // notifica; el lead no cambia de dueño"), que solo estaba implementada para
-  // el DEAL. Con deal de la misma persona no se duplica.
-  const duenoLead = duenoDeal ? null : await duenoLeadVigente(telefono || "").catch(() => null)
 
   const booking = await bookMeeting({
     slotIso, prospectName, prospectEmail, timeZone, language: "es",
@@ -319,7 +310,6 @@ export async function agendarReunion(
     // invitar a 3 personas pero el booking solo llevaba al titular).
     guestEmails: [
       ...(duenoDeal ? [duenoDeal.email] : []),
-      ...(duenoLead ? [duenoLead.email] : []),
       ...((args.invitadosExtra || [])
         .map((e) => String(e || "").trim().toLowerCase())
         .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))
@@ -343,15 +333,6 @@ export async function agendarReunion(
   // Notificación al PROPIETARIO del deal (Lalo 31-jul): quedó invitado como
   // asistente en Cal; se le avisa también por el canal interno. La reunión
   // sigue siendo del SDR que la tomó — el deal no cambia de dueño.
-  if (duenoLead && (organizerEmail || "").trim().toLowerCase() !== duenoLead.email) {
-    await avisarEquipoInterno(
-      `📅 Reunión agendada con un cliente cuyo LEAD tiene dueño\n` +
-        `Cliente: ${prospectName}${empresa ? ` — ${empresa}` : ""}\n` +
-        `Cuándo: ${slotIso}\n` +
-        `La toma (round-robin): ${organizerEmail || "por confirmar"}\n` +
-        `Propietario del lead: ${duenoLead.nombre} (${duenoLead.email}) — quedó invitado/a en Cal; el lead no cambia de dueño.`,
-    ).catch(() => {})
-  }
   if (duenoDeal && (organizerEmail || "").trim().toLowerCase() !== duenoDeal.email) {
     await avisarEquipoInterno(
       `📅 Reunión agendada con un cliente que tiene DEAL asignado\n` +
