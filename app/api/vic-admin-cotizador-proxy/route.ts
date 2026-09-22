@@ -58,6 +58,10 @@ const POST_PERMITIDOS = new Set([
   // bienvenida post-pago murió fuera de ventana y hubo que recuperar el link
   // a mano para entregarlo por el ejecutivo). Idempotente en el cotizador.
   "/api/quote-acceptance/onboarding-link",
+  // Regenerar el PDF de una cotización (22-sep, caso COT1573 de Lalo: los
+  // términos de envío/instalación del PDF quedaron viejos tras el cambio de
+  // tarifas y el archivo es estático — se rehace por orden humana).
+  "/api/quote-acceptance/regenerate-pdf",
   // Barrido de correos de cotización pendientes (01-sep, regla Lalo "si el
   // correo existe, el correo sale"): disparo manual del cron determinista.
   "/api/quote-acceptance/correos-pendientes",

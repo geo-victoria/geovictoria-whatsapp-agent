@@ -134,7 +134,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula el estimado mensual EN PESOS COLOMBIANOS para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL (el plan con precio final; el equipo biométrico con su IVA 19 % ya indicado). Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú. En ALQUILER envío e instalación son gratis (no pidas ciudad); en COMPRA pasa puntosInstalacion. escalonDescuento (1 = 10 %, 2 = 20 % sobre el plan, 6 meses) SOLO ante una objeción de precio, nunca de entrada.",
+      "Calcula el estimado mensual EN PESOS COLOMBIANOS para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL (el plan con precio final; el equipo biométrico con su IVA 19 % ya indicado). Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú. Con equipo (alquiler O compra) pasa SIEMPRE puntosInstalacion con la ciudad de cada punto tal como la dijo el cliente: la tool clasifica la zona (Bogotá y alrededores / Cundinamarca-Boyacá-Tolima-Meta / resto del país) y fija el envío y la instalación con precio cerrado — envío incluido en alquiler; instalación técnica incluida en alquiler dentro de Bogotá y alrededores, y con precio único por zona en el resto; auto-instalación gratis siempre. Si no sabes la ciudad, pregúntala (UNA pregunta) antes de llamar. escalonDescuento (1 = 10 %, 2 = 20 % sobre el plan, 6 meses) SOLO ante una objeción de precio, nunca de entrada.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -166,7 +166,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Colombia (CRM + PDF en COP + link donde el cliente la revisa, acepta y paga con tarjeta vía Mercado Pago). Úsala cuando el cliente quiere avanzar tras ver el precio. Pasa el MISMO escalonDescuento que el cliente aceptó (o se usa el último ofrecido). REQUIERE empresa (razón social), contacto, contactoEmail (obligatorio), rutEmpresa = el NIT con dígito de verificación (ej. 900.123.456-7), userCount y la configuración (hardware/puntos si lleva equipo en compra). Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria. Si el NIT no valida, pide SOLO la corrección.",
+      "Genera la COTIZACIÓN FORMAL de Colombia (CRM + PDF en COP + link donde el cliente la revisa, acepta y paga con tarjeta vía Mercado Pago). Úsala cuando el cliente quiere avanzar tras ver el precio. Pasa el MISMO escalonDescuento que el cliente aceptó (o se usa el último ofrecido). REQUIERE empresa (razón social), contacto, contactoEmail (obligatorio), rutEmpresa = el NIT con dígito de verificación (ej. 900.123.456-7), userCount y la configuración (hardware + puntosInstalacion con la ciudad si lleva equipo, en alquiler o compra). Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria. Si el NIT no valida, pide SOLO la corrección.",
     input_schema: {
       type: "object" as const,
       properties: {
