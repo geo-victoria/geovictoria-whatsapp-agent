@@ -37,6 +37,7 @@ import { TOOL_SCHEMAS_PE, buildDispatchPE } from "./tools.ts"
 import { clasificarUbicacionPE, tarifaVisitaLimaPE } from "./catalogo.ts"
 import { marcarNoContactarSchema } from "../../tools/marcar-no-contactar.ts"
 import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts"
+import { reenviarCotizacionCorreoSchema } from "../../tools/reenviar-cotizacion-correo.ts"
 import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
 
 type Schema = { name: string; description: string; input_schema: Record<string, unknown> }
@@ -259,21 +260,12 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   },
   marcarNoContactarSchema as unknown as Schema,
   programarSeguimientoSchema as unknown as Schema,
-  {
-    name: "reenviar_cotizacion_correo",
-    description:
-      "Reenvía la cotización formal por CORREO a quien el cliente designe (o al propio cliente si pide recibirla de nuevo). Devuelve ok:true solo si el correo salió: jamás digas 'te la envié' sin ese ok.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        quote_id: { type: "string" as const, description: "Id de la cotización formal (lo tienes del turno en que se generó)." },
-        destinatarioEmail: { type: "string" as const },
-        destinatarioNombre: { type: "string" as const },
-        esCorreoDelCliente: { type: "boolean" as const, description: "true si el destinatario es el propio cliente." },
-      },
-      required: ["quote_id", "destinatarioEmail"],
-    },
-  },
+  // La MISMA descripción que Chile: la versión corta perdió el uso (b) —
+  // "cuando el cliente entrega SU correo después de emitida la formal, esta
+  // tool es la ÚNICA forma de que la cotización llegue a un correo" — y sin
+  // esa frase el modelo dijo "ya te la envié" sin llamarla (Lalo, línea +51,
+  // 22-sep).
+  reenviarCotizacionCorreoSchema as unknown as Schema,
   {
     name: "enviar_cotizacion_whatsapp",
     description: "Manda el PDF de la cotización formal por ESTE mismo chat. Devuelve ok:true solo si salió.",

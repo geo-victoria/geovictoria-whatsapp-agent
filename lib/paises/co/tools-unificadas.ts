@@ -16,6 +16,7 @@
  */
 import { marcarNoContactarSchema } from "../../tools/marcar-no-contactar.ts"
 import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts"
+import { reenviarCotizacionCorreoSchema } from "../../tools/reenviar-cotizacion-correo.ts"
 import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
 
 // Mismo criterio que co/tools.ts (REUNIONES_CO_HABILITADAS), calculado acá
@@ -244,20 +245,8 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   },
   marcarNoContactarSchema as unknown as Schema,
   programarSeguimientoSchema as unknown as Schema,
-  {
-    name: "reenviar_cotizacion_correo",
-    description: "Reenvía la cotización formal por CORREO a quien el cliente designe (o al propio cliente). Devuelve ok:true solo si el correo salió: jamás digas 'te la envié' sin ese ok.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        quote_id: { type: "string" as const },
-        destinatarioEmail: { type: "string" as const },
-        destinatarioNombre: { type: "string" as const },
-        esCorreoDelCliente: { type: "boolean" as const },
-      },
-      required: ["quote_id", "destinatarioEmail"],
-    },
-  },
+  // La MISMA descripción que Chile (ver el comentario en pe/tools-unificadas).
+  reenviarCotizacionCorreoSchema as unknown as Schema,
   {
     name: "enviar_cotizacion_whatsapp",
     description: "Manda el PDF de la cotización formal por ESTE mismo chat. Devuelve ok:true solo si salió.",

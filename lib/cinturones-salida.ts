@@ -44,7 +44,7 @@ export type Veredicto = {
   /** Para el log y el aviso interno. */
   motivos: string[]
   /** Identificador del cinturón que disparó, para medir cuál actúa más. */
-  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool" | "link_formal_sin_tool" | "objecion_precio_sin_tool"
+  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool" | "link_formal_sin_tool" | "objecion_precio_sin_tool" | "correo_enviado_sin_tool"
 }
 
 const OK: Veredicto = { accion: "ok", motivos: [] }
@@ -218,6 +218,48 @@ const CONTENCION_EMISION: Record<PaisCinturon, string> = {
   pe: "Todavía no tengo emitida tu cotización formal — apenas la genere te llega el link por este mismo chat 🙌",
 }
 
+/**
+ * "TE LA ENVIÉ AL CORREO" SIN TOOL (22-sep, Lalo probando la línea +51: dio su
+ * correo DESPUÉS de emitida la formal y Vicky respondió "Ya te envié la
+ * cotización a egomez@… también" — la cotización quedó sin Email_Contacto y
+ * con CERO correos en Zoho). En Chile la regla vivía solo en el prompt
+ * (anti-teatro del 01-sep, caso METAL ORGÁNICO) y la descripción larga de la
+ * tool; en PE/CO la descripción corta perdió justo esa frase. Acá se hace
+ * cumplir para los cuatro países: afirmar que un correo SALIÓ exige que en el
+ * turno haya corrido reenviar_cotizacion_correo (o una emisión, que manda su
+ * propio correo). Preguntar "¿te la mando al correo?" no es afirmar.
+ */
+// Tildes sin \b (cicatriz repetida): fronteras con lookahead/lookbehind de letra.
+export const AFIRMA_CORREO_ENVIADO_RE =
+  /(?:ya\s+(?:te|le)\s+(?:la\s+|lo\s+)?(?:envi[eé]|mand[eé]|reenvi[eé])(?![a-záéíóú])[^.\n!?]{0,80}?(?:correo|e-?mail|casilla|bandeja|[\w.+-]+@[\w-]+\.[a-z]{2,})|(?<!que\s)(?<![a-záéíóú])(?:te|le)\s+(?:la\s+|lo\s+)?(?:envié|mandé|reenvié)(?![a-záéíóú])[^.\n!?]{0,80}?(?:correo|e-?mail|casilla|bandeja|[\w.+-]+@[\w-]+\.[a-z]{2,})|(?:ya\s+)?(?:sali[oó]|se\s+fue|qued[oó]\s+enviad[ao]|fue\s+enviad[ao]|est[aá]\s+enviad[ao])(?![a-záéíóú])[^.\n!?]{0,40}?(?:correo|e-?mail|casilla|bandeja)|(?:te|le)\s+(?:llega|llegar[aá]|lleg[oó])(?![a-záéíóú])[^.\n!?]{0,40}?(?:al|por|a\s+tu|en\s+tu)\s+(?:correo|e-?mail|casilla|bandeja))/i
+
+const TOOLS_QUE_MANDAN_CORREO = new Set([
+  "reenviar_cotizacion_correo",
+  "generar_link_cotizadora",
+  "actualizar_cotizacion",
+  "aplicar_siguiente_descuento",
+  "anualizar_cotizacion",
+])
+
+const FORZAR_TOOL_CORREO =
+  "\n\n# Instrucción de sistema (este turno)\n" +
+  "Tu borrador anterior AFIRMÓ que la cotización ya salió al correo del cliente y NINGUNA tool la envió en este turno: " +
+  "ningún correo salió. La ÚNICA forma de que llegue a un correo es llamar reenviar_cotizacion_correo con " +
+  "esCorreoDelCliente=true, destinatarioEmail = el correo que dio el cliente y quote_id = la cotización formal vigente. " +
+  "Llámala AHORA y entrega SU mensajeParaProspecto tal cual. Si no puedes enviarla, dilo con franqueza: no la des por enviada."
+
+const CONTENCION_CORREO: Record<PaisCinturon, string> = {
+  cl: "Anoté tu correo, pero todavía no salió la cotización por esa vía — te la mando ahí en un momento. Mientras tanto la tienes en el link de este chat, donde puedes revisarla y aceptarla 🙌",
+  co: "Anoté tu correo, pero todavía no salió la cotización por esa vía — te la mando ahí en un momento. Mientras tanto la tienes en el link de este chat, donde puedes revisarla y aceptarla 🙌",
+  mx: "Anoté tu correo, pero todavía no salió la cotización por esa vía — te la mando ahí en un momento. Mientras tanto la tienes en el link de este chat, donde puedes revisarla y aceptarla 🙌",
+  pe: "Anoté tu correo, pero todavía no salió la cotización por esa vía — te la mando ahí en un momento. Mientras tanto la tienes en el link de este chat, donde puedes revisarla y aceptarla 🙌",
+}
+
+/** ¿Ya hubo un envío por correo respaldado en turnos anteriores (el mensaje canónico de la tool lleva 📧)? */
+function correoYaRespaldadoAntes(historialAsistente: string[] | undefined): boolean {
+  return (historialAsistente || []).some((h) => /📧/.test(String(h || "")))
+}
+
 export type EntradaSalida = {
   reply: string
   toolCalls: readonly LlamadaTool[] | undefined
@@ -343,6 +385,25 @@ export function revisarSalida(e: EntradaSalida): Veredicto {
       contencion: CONTENCION_DESCUENTO[e.pais] || CONTENCION_DESCUENTO.cl,
       motivos: ["descuento_aplicado_sin_tool"],
       cinturon: "descuento_aplicado_sin_tool",
+    }
+  }
+
+  // (3b') "Ya te la envié al correo" sin que ninguna tool la enviara. Reintento
+  // con la orden de llamar reenviar_cotizacion_correo; si insiste, contención
+  // honesta. Un envío respaldado en un turno anterior (📧 en el historial)
+  // legitima repetirlo.
+  if (
+    AFIRMA_CORREO_ENVIADO_RE.test(reply) &&
+    !toolsOk.some((n) => TOOLS_QUE_MANDAN_CORREO.has(n)) &&
+    !correoYaRespaldadoAntes(e.historialAsistente)
+  ) {
+    return {
+      accion: "reintento",
+      directiva: FORZAR_TOOL_CORREO,
+      siFallaReintento: "contener",
+      contencion: CONTENCION_CORREO[e.pais] || CONTENCION_CORREO.cl,
+      motivos: ["correo_enviado_sin_tool"],
+      cinturon: "correo_enviado_sin_tool",
     }
   }
 

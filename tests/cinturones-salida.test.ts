@@ -299,3 +299,41 @@ test("la entrega real con generar_link_cotizadora ok pasa tal cual", () => {
   })
   assert.equal(v.accion, "ok")
 })
+
+// ── "te la envié al correo" sin tool (22-sep, caso Lalo en la línea +51) ──
+const REPLY_LALO =
+  "Perfecto, Eduardo! Ya te envié la cotización a egomez@geovictoria.com también 😊\n\nEl link sigue siendo el mismo: https://cotizacion.geovictoria.com/q/3525045000664569018-8e6e14ac25"
+const HIST_LALO = ["Lista tu cotización, Eduardo! 🎉 Revísala aquí: https://cotizacion.geovictoria.com/q/3525045000664569018-8e6e14ac25"]
+
+test("'ya te envié la cotización a <correo>' sin reenviar_cotizacion_correo → reintento con contención", () => {
+  const v = revisarSalida({ reply: REPLY_LALO, toolCalls: [], historialAsistente: HIST_LALO, pais: "pe", userMessage: "egomez@geovictoria.com" })
+  assert.equal(v.accion, "reintento")
+  assert.equal(v.cinturon, "correo_enviado_sin_tool")
+  assert.equal(v.siFallaReintento, "contener")
+  assert.match(String(v.contencion), /todavía no salió/)
+})
+
+test("con reenviar_cotizacion_correo ok en el turno la afirmación pasa", () => {
+  const v = revisarSalida({
+    reply: "Listo! 📧 Te envié la cotización COT1573 a egomez@geovictoria.com. Igual la tienes en este chat.",
+    toolCalls: [{ name: "reenviar_cotizacion_correo", ok: true }],
+    historialAsistente: HIST_LALO,
+    pais: "pe",
+  })
+  assert.equal(v.accion, "ok")
+})
+
+test("preguntar si quiere recibirla por correo NO es afirmar que salió", () => {
+  const v = revisarSalida({ reply: "Quieres que te la mande también a tu correo? Si me lo das, te la envío ahí.", toolCalls: [], historialAsistente: HIST_LALO, pais: "cl" })
+  assert.notEqual(v.cinturon, "correo_enviado_sin_tool")
+})
+
+test("repetir un envío ya respaldado en un turno anterior (📧) es legítimo", () => {
+  const v = revisarSalida({
+    reply: "Como te comenté, ya te la envié al correo egomez@geovictoria.com — revisa Promociones si no la ves.",
+    toolCalls: [],
+    historialAsistente: [...HIST_LALO, "Listo! 📧 Te envié la cotización COT1573 a egomez@geovictoria.com."],
+    pais: "pe",
+  })
+  assert.notEqual(v.cinturon, "correo_enviado_sin_tool")
+})
