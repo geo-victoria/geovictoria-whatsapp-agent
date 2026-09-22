@@ -1,0 +1,88 @@
+Definiciones 
+*PTV (Proceso de Traspaso a Vendedor): Si el prospecto pide hablar con un vendedor, o bien en 
+el proceso comercial la conversación se enreda*** o bien pasan TTV** minutos sin respuesta, 
+le asignamos un vendedor (se lo presentamos al prospecto + asignamos al vendedor en Zoho 
++ pegamos el script de la conversación en Zoho + vendedor debe llamarlo al toque – ojalá 
+menos de 5 minutos). Vendedor debe tener toda la info de la conversación, incluido precio 
+dado.  
+** TTV (Tiempo d e traspaso a vendedor ): El tiempo TTV depende de la etapa en la cual se 
+encuentre la oportunidad. Si aún no mostramos precios, TTV es de 120 minutos. Si ya 
+mostramos precios, TTV es de 1 5 minutos. Lo anterior es a menos de que el  prospecto haya 
+pedido una pausa, por eje mplo, si dice háblame después, debemos esperar 1 hora antes de 
+aplicar estas reglas. O si dice  háblame mañana, en este caso debemos esperar que pase el 
+tiempo pedido por el cliente antes de volver  a contactarlo, y recién a partir de es e momento 
+corre el tiempo para TTV. Esto ultimo puede parafrasearse como: "si el prospecto anuncia una 
+pausa, Vicky agenda el seguimiento para ese momento y el TTV se suspende hasta entonces”. 
+Si la “conversación se e nreda” independiente de la et apa se debe presen tar al ven dedor 
+inmediatamente. 
+Regla: Cada vez que le asignamos un lead a un vendedor, vamos rotando entre los 
+vendedores disponibles para dicho rango de usuarios (tómbola). 
+Proceso de chequeo: 9 horas hábiles (que es lo mismo que un día hábil) después del traspaso 
+al vende dor, la Vicky le  pregunta al pros pecto cómo le fue con e l vendedor. Si le fue  mal, 
+alertamos internamente y asi gnamos a otr o vendedor  quien lo debe c ontactar 
+inmediatamente. 
+El link de pago debe sobrevivir al PTV: que el vendedor empuje el mismo link online, para no 
+perder el cierre de madrugada/fin de semana. 
+***"Conversación se enreda": 3 turnos sin avanzar de etapa, cliente repite la misma pregunta, 
+o frustración explícita.  
+Horario hábil para cualquier país: de lunes a viernes, que no sea feriado en dicho pais, de 8 am 
+a 6 pm. 
+ 
+ 
+ 
+ 
+I - Prospecto nos habla por el whats app del sitio web  
+1.- Soporte 
+Si quiere soporte, lo conectamos con el whats app de soporte. 
+2.- Venta sobre 50 
+Si quiere venta y tiene más de 50 trabajadores, Vicky lo saluda inmediatamente y ofrece 
+alternativas para agendar reunión.  Deal es creado en Zoho y se le asigna a un vendedor por 
+tómbola en ese mismo momento.  
+Le dice que puede ayudarlo con todas las dudas que tenga, menos dar precios. 
+No le manda mensaje de seguimiento, ya que ejecutivo debe llamarlo lo antes posible (si es 
+horario hábil, llamar al toque, aunque haya agendado reunión para después; y en la siguiente 
+hora hábil en caso de que formulario haya sido en horario no hábil) 
+3.- Intención de compra menor a 50 
+Si el prospecto tiene intención de compra y tiene menos de 50 trabajadores, entonces hay dos 
+alternativas: 
+3.1.- Cliente nos habla en horario NO hábil: 
+Vicky le manda whats app y le preguntamos si quiere hablar ahora o prefiere hacerlo e n la 
+siguiente hora hábil. 
+- Si lo quiere ahora, avanzamos. Si cliente deja de responder, no lo molestamos hasta la 
+siguiente hora hábil, momento en el cual le mandamos un mensaje de seguimiento. 
+- Si quiere en la siguiente hora hábil, le hablamos en la siguiente hora hábil. 
+Luego de ese mensaje de seguimiento → PTV* 
+3.2.- Si cliente nos habla durante horario hábil 
+La Vicky abre proceso comercial al toque mandando wzp.  La Vicky trata de avanzar en el 
+proceso de v enta. Si se cu mple el TT V según la e tapa donde haya qued ado, entonce s 
+aplicamos el PTV. 
+ 
+II - Prospecto nos manda formulario  
+1.- Soporte 
+Si quiere soporte, lo conectamos con el whats app de soporte 
+2.- Venta sobre 50 
+Si quiere venta y tiene más de 50 trabajadores , d eal es creado en Zoho y se le asigna a un 
+vendedor por tómbola  en ese mismo momento. Vicky lo saluda  inmediatamente y ofrece 
+alternativas para agendar reunión.  
+Le dice que puede ayudarlo con todas las dudas que tenga, menos dar precios. 
+No le manda mensaje de seguimiento, ya que ejecutivo debe llamarlo lo antes posible (si es 
+horario hábil, llamar al toque, aunque haya agendado reunión para después; y en la siguiente 
+hora hábil en caso de que formulario haya sido en horario no hábil) 
+3.- Intención de compra menor a 50 
+Si el prospecto tiene intención de compra y tiene menos de 50 trabajadores, entonces hay dos 
+alternativas: 
+3.1.- Formulario llega en horario NO hábil: 
+Vicky le manda whats app y le preguntamos si quiere hablar ahora o prefiere hacerlo en el 
+siguiente horario hábil. 
+- Si lo quiere ahora, avanzamos. Si cliente deja de responder, no lo molestamos la siguiente 
+hora hábil, momento en el cual le mandamos un mensaje de seguimiento. 
+- Si quiere en la siguiente horario hábil, le hablamos en la siguiente hora hábil. 
+Luego de ese mensaje de seguimiento de la siguiente hora hábil → PTV* 
+3.2.- Si cliente nos habla durante horario hábil 
+La Vicky abre proceso comercial al toque mandando wzp. 
+Independiente de la etapa en la cual quedemos, si pasan TTV minutos sin respuesta, y … 
+- ese momento es en horario hábil, le asignamos un vendedor, quien lo debe llamar al toque 
+(PTV). 
+- ese momento es en horario NO hábil, esperamos al sgte día hábil y le mandamos un 
+mensaje de seguimiento en el siguiente horario hábil. Si pasan TTV minutos, le asignamos 
+un vendedor (PTV). 

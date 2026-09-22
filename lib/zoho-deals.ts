@@ -1,0 +1,234 @@
+/**
+ * Transiciones de etapa de DEALS por blueprint (pedido Lalo 20-jul):
+ *   - Cotización PAGADA        → deal a "6. Listo para Cierre"
+ *   - Auto-onboarding COMPLETO → deal a "Implementando"
+ *
+ * Los deals del org viven en un BLUEPRINT: el update directo de Stage devuelve
+ * RECORD_IN_BLUEPRINT, así que se ejecuta la TRANSICIÓN cuyo destino calza con
+ * el objetivo (mismo patrón que updateZohoLeadStatus en zoho-leads).
+ *
+ * Reglas de seguridad:
+ *   - FORWARD-ONLY: nunca retrocede — si el deal ya está en el objetivo o más
+ *     adelante (Implementando/Facturando/Ganado), no se toca.
+ *   - Deals en estados terminales o gestionados a mano (Cierre Perdido,
+ *     Congelado) JAMÁS se tocan.
+ *   - Si el objetivo es "Implementando" pero el blueprint solo ofrece el paso
+ *     intermedio ("6. Listo para Cierre"), se avanza ese paso — la siguiente
+ *     corrida del cron completa el viaje.
+ */
+
+import { getZohoAccessToken } from "./zoho-token"
+
+const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+
+// Orden del pipeline para el candado forward-only. El índice se resuelve por
+// inclusión normalizada (los nombres reales llevan prefijos "4.", "6.", etc.).
+function indiceEtapa(stage: string): number {
+  const s = (stage || "").toLowerCase()
+  if (s.includes("perdido") || s.includes("congelado")) return -1 // intocable
+  if (s.includes("facturando") || s.includes("ganado")) return 8
+  if (s.includes("implement")) return 7
+  if (s.includes("listo para cierre")) return 6
+  if (s.includes("piloto")) return 5
+  if (s.includes("propuesta")) return 4
+  if (s.includes("reuni")) return 3
+  return 2 // etapas tempranas (SQL, contactado, etc.)
+}
+
+export type ResultadoTransicion = {
+  dealId: string
+  desde?: string
+  resultado: "avanzado" | "ya_estaba" | "intocable" | "sin_transicion" | "error"
+  detalle?: string
+}
+
+export async function transicionarDealHacia(
+  dealId: string,
+  objetivo: "listo para cierre" | "implementando",
+  extras?: { fechaPrimeraFactura?: string },
+): Promise<ResultadoTransicion> {
+  const targetIdx = objetivo === "implementando" ? 7 : 6
+  try {
+    const accessToken = await getZohoAccessToken()
+    const headers = {
+      Authorization: `Zoho-oauthtoken ${accessToken}`,
+      "Content-Type": "application/json",
+    }
+
+    // 1. Etapa actual → candado forward-only.
+    const recRes = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}?fields=Stage`, {
+      headers,
+      cache: "no-store",
+    })
+    if (!recRes.ok) return { dealId, resultado: "error", detalle: `GET deal ${recRes.status}` }
+    const rec = (await recRes.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }
+    const stageActual = String(rec?.data?.[0]?.Stage || "")
+    const idxActual = indiceEtapa(stageActual)
+    if (idxActual === -1) return { dealId, desde: stageActual, resultado: "intocable" }
+    if (idxActual >= targetIdx) return { dealId, desde: stageActual, resultado: "ya_estaba" }
+
+    // 2. Transiciones disponibles del blueprint.
+    const bpRes = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Deals/${dealId}/actions/blueprint`, {
+      headers,
+      cache: "no-store",
+    })
+    // FUERA DEL BLUEPRINT (caso METALMAQ 10-sep, reclamo de Aleydis): un deal
+    // que no está en proceso responde RECORD_NOT_IN_PROCESS y el cron lo dejaba
+    // en "4. Propuesta" para siempre (pagado el 08-sep, NDV e IMP listas). Sin
+    // proceso no hay transiciones: el Stage se escribe DIRECTO (forward-only,
+    // ya verificado arriba), igual que se hizo a mano con Quilodrán/gemelo.
+    const bpJson = (await bpRes
+      .clone()
+      .json()
+      .catch(() => ({}))) as { code?: string; blueprint?: unknown }
+    if (!bpRes.ok || bpJson?.code === "RECORD_NOT_IN_PROCESS") {
+      if (bpJson?.code !== "RECORD_NOT_IN_PROCESS") {
+        return { dealId, desde: stageActual, resultado: "error", detalle: `blueprint GET ${bpRes.status}` }
+      }
+      const stageDirecto = objetivo === "implementando" ? "7. Implementando" : "6. Listo para Cierre"
+      const put = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}`, {
+        method: "PUT",
+        headers,
+        cache: "no-store",
+        body: JSON.stringify({
+          data: [{ id: dealId, Stage: stageDirecto }],
+          trigger: ["blueprint"],
+          skip_feature_execution: [{ name: "assignment_rules" }],
+        }),
+      })
+      const putJson = (await put.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
+      const fila = putJson?.data?.[0]
+      if (!put.ok || fila?.code !== "SUCCESS") {
+        return {
+          dealId,
+          desde: stageActual,
+          resultado: "error",
+          detalle: `fuera de blueprint, PUT directo falló: ${fila?.code || put.status} ${String(fila?.message || "").slice(0, 100)}`,
+        }
+      }
+      return { dealId, desde: stageActual, resultado: "avanzado", detalle: `→ ${stageDirecto} (PUT directo, deal fuera del blueprint)` }
+    }
+    const bp = bpJson as {
+      blueprint?: {
+        transitions?: Array<{
+          id: string
+          name?: string
+          next_field_value?: string
+          // Zoho pre-llena el data esperado de la transición (ej. Contact_Name
+          // ya asociado); ejecutarla con {} da INVALID_DATA — hay que devolver
+          // ese mismo objeto.
+          data?: Record<string, unknown>
+          fields?: Array<{ api_name?: string; data_type?: string }>
+        }>
+      }
+    }
+    const transitions = bp?.blueprint?.transitions || []
+    const buscar = (needle: string) =>
+      transitions.find((t) => {
+        const destino = (t.next_field_value || "").toLowerCase()
+        const nombre = (t.name || "").toLowerCase()
+        return destino.includes(needle) || nombre.includes(needle)
+      })
+    // Directa al objetivo; si el objetivo es Implementando y no está disponible
+    // aún, avanza el hito intermedio (Listo para Cierre) — forward-only igual.
+    const match =
+      buscar(objetivo) || (objetivo === "implementando" ? buscar("listo para cierre") : undefined)
+    if (!match) {
+      return {
+        dealId,
+        desde: stageActual,
+        resultado: "sin_transicion",
+        detalle: transitions.map((t) => t.next_field_value || t.name).join(", ").slice(0, 150),
+      }
+    }
+
+    // 3. Ejecutar. El data pre-llenado del GET trae solo los campos que el deal
+    // ya tiene; si falta un campo obligatorio DE LA TRANSICIÓN, Zoho responde
+    // code SUCCESS con "Fields are partially saved with in transition" y NO
+    // mueve el Stage (diagnóstico 20-jul). Para "Listo para Cierre" el faltante
+    // es el picklist "Método de carga de información" — Lalo definió "App de
+    // carga (cliente)" para los deals pagados de Vicky (el cliente se onboardea
+    // solo por la app, igual que en el auto-onboarding que ya corre).
+    // OJO: cada deal puede tener una VARIANTE distinta de la transición (p.ej.
+    // Electrocontrol pide los campos de marcaje, no el de carga): solo se
+    // completa un campo si la transición efectivamente lo declara — mandar un
+    // campo ajeno da INVALID_DATA.
+    const data: Record<string, unknown> = { ...(match.data || {}) }
+    const camposTransicion = match.fields || []
+    const tieneCampo = (api: string) => camposTransicion.some((f) => f.api_name === api)
+    if (tieneCampo("M_todo_de_carga_de_informaci_n") && !data.M_todo_de_carga_de_informaci_n) {
+      data.M_todo_de_carga_de_informaci_n = "App de carga (cliente)"
+    }
+    // Variante "campos de marcaje" (Electrocontrol/Garden, cazada 20-ago):
+    // esta transición exige el cómo/método/con-quién del marcaje y con data
+    // vacío responde INVALID_DATA. Defaults de la venta online de Vicky; la
+    // Fecha_de_Primera_Factura NO se inventa (dato de facturación real).
+    if (tieneCampo("M_todo_de_Marcaje") && !data.M_todo_de_Marcaje) {
+      data.M_todo_de_Marcaje = ["GeoVictoria APP"]
+    }
+    if (tieneCampo("C_mo_marcan") && !data.C_mo_marcan) {
+      data.C_mo_marcan = "Marcaje con GeoVictoria APP (venta online Vicky)"
+    }
+    if (tieneCampo("Con_qui_n_marcan") && !data.Con_qui_n_marcan) {
+      data.Con_qui_n_marcan = "Todos los trabajadores de la dotación contratada"
+    }
+    // Fecha de Primera Factura: obligatoria-en-transición en esta variante
+    // (sin ella Zoho responde "partially saved" y NO mueve el stage). Con ok
+    // de Lalo 20-ago: fecha del PAGO (la factura sale 2-3 días hábiles
+    // después; el ejecutivo la corrige si difiere). Default: hoy — los
+    // llamadores post-pago corren en el momento del pago.
+    if (tieneCampo("Fecha_de_Primera_Factura") && !data.Fecha_de_Primera_Factura) {
+      data.Fecha_de_Primera_Factura = (extras?.fechaPrimeraFactura || new Date().toISOString()).slice(0, 10)
+    }
+    // Los multiselect llegan pre-llenados como string ("GeoVictoria APP") pero
+    // el PUT los exige como array.
+    for (const f of camposTransicion) {
+      const api = f.api_name || ""
+      if (f.data_type === "multiselectpicklist" && api && typeof data[api] === "string") {
+        data[api] = String(data[api])
+          .split(";")
+          .map((v) => v.trim())
+          .filter(Boolean)
+      }
+    }
+    const exec = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Deals/${dealId}/actions/blueprint`, {
+      method: "PUT",
+      headers,
+      cache: "no-store",
+      body: JSON.stringify({ blueprint: [{ transition_id: match.id, data }] }),
+    })
+    const execData = (await exec.json().catch(() => ({}))) as { code?: string; message?: string }
+    if (!exec.ok || (execData?.code && execData.code !== "SUCCESS")) {
+      return {
+        dealId,
+        desde: stageActual,
+        resultado: "error",
+        detalle: `${execData?.code || exec.status}: ${String(execData?.message || "").slice(0, 120)}`,
+      }
+    }
+    // El code SUCCESS del PUT NO garantiza la transición ("partially saved"):
+    // la única verdad es el Stage re-leído.
+    const verRes = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/Deals/${dealId}?fields=Stage`, {
+      headers,
+      cache: "no-store",
+    })
+    const ver = (await verRes.json().catch(() => ({}))) as { data?: Array<{ Stage?: string }> }
+    const stageNuevo = String(ver?.data?.[0]?.Stage || "")
+    if (indiceEtapa(stageNuevo) <= idxActual) {
+      return {
+        dealId,
+        desde: stageActual,
+        resultado: "error",
+        detalle: `PUT ok pero Stage sigue "${stageNuevo}" — ${String(execData?.message || "").slice(0, 100)}`,
+      }
+    }
+    return {
+      dealId,
+      desde: stageActual,
+      resultado: "avanzado",
+      detalle: `→ ${stageNuevo}`,
+    }
+  } catch (e) {
+    return { dealId, resultado: "error", detalle: e instanceof Error ? e.message.slice(0, 150) : "excepción" }
+  }
+}

@@ -1,0 +1,631 @@
+/**
+ * Tools de Vicky PERÚ (Fase 1b) — paridad de patrón con Vicky CO/MX.
+ *
+ * Set independiente — se inyecta a runAgentLoop vía el parámetro `tools` del
+ * loop. Los precios SIEMPRE salen de acá (regla dura heredada de Chile: el
+ * modelo copia mensajeParaProspecto, jamás calcula).
+ *
+ * Capacidades Fase 1b: cotización referencial (IGV 18% incluido en totales;
+ * descuento = escalera chilena 10 → 20 % en el plan por 6 meses vía
+ * escalonDescuento), derivación a la ejecutiva única de Perú (Mónica
+ * Mendoza — sin tómbola ni SDRs), opt-out/perdido (marcar_no_contactar) y
+ * seguimiento consensuado (programar_seguimiento, default America/Lima) —
+ * las señales las procesa el route.
+ *
+ * FASE 2 (11-ago): generar_link_cotizadora YA EXISTE — cotización formal por
+ * create-from-vicky-pe (PEN + IGV 18%, RUC, PDF, aceptación web y pago con
+ * MercadoPago Perú). La derivación sigue disponible como respaldo.
+ *
+ * SOPORTE (11-ago, orden de Lalo — caso Falabella): consultar_agente_soporte
+ * EXPUESTA — el agente Foundry atiende a los usuarios existentes (patrón
+ * CO/MX: canales chilenos saneados, escalamiento con canal PE).
+ *
+ * FUERA a propósito (no exponer):
+ *   - agendar_reunion / consultar_disponibilidad: sin event type de Cal.com
+ *     del equipo PE — las reuniones se coordinan con la ejecutiva (derivar).
+ *
+ * IMPORTABLE POR TESTS PUROS (node --test --experimental-strip-types): los
+ * imports top-level son solo módulos sin dependencias transitivas
+ * (cotizar/catalogo/rut/señales); Zoho y alerta interna van por import
+ * dinámico dentro del dispatch — mismo truco que lib/crm-hitos.ts.
+ */
+
+import { cotizarPE, formatearPEN, type PuntoInstalacionPE, type ZonaPE } from "./cotizar.ts"
+import { tipoCambioSunat } from "./tc-sunat.ts"
+import { fichaRucSunat } from "./sunat-ruc.ts"
+import { ESCALERA_DESCUENTO_PE } from "./catalogo.ts"
+import { CORREO_SSTT_PE } from "./catalogo.ts"
+import { rucValido, formatearRuc } from "../../rut.ts"
+import {
+  marcarNoContactar,
+  marcarNoContactarSchema,
+} from "../../tools/marcar-no-contactar.ts"
+import { programarSeguimiento } from "../../tools/programar-seguimiento.ts"
+
+// Ejecutiva comercial PE (Mónica Mendoza) — ÚNICA dueña de todos los leads
+// derivados (excel de tropicalización: Perú sin tómbola ni SDRs). Override por
+// env para el día en que el equipo PE crezca.
+const EJECUTIVA_PE_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_PE_ID || "3525045000323383015").trim()
+
+// Cotizadora (Fase 2): endpoint formal PE + secreto (dedicado con fallback al
+// compartido — mismo esquema que CO).
+// Escalamiento de soporte PE (11-ago, orden de Lalo — caso Falabella
+// dvalverde@: un usuario existente pidiendo recuperar su acceso recibió una
+// presentación de VENTA en vez de soporte): Vicky PE atiende con el agente
+// Foundry y, si él escala, entrega el canal humano. MESA DE AYUDA PERÚ
+// (tarjeta oficial, Lalo 15-sep): soporteperu@geovictoria.com en horario
+// continuado · +51 1 7085618 en horario de oficina L-V 8:30-17:30 · solo los
+// administradores de la empresa tienen soporte directo. Overrides por env.
+const CORREO_SOPORTE_PE = (process.env.VICKY_SOPORTE_EMAIL_PE || "soporteperu@geovictoria.com").trim()
+const TELEFONO_SOPORTE_PE = (process.env.VICKY_SOPORTE_TELEFONO_PE || "+51 1 7085618").trim()
+const HORARIO_SOPORTE_PE = (process.env.VICKY_SOPORTE_HORARIO_PE || "lunes a viernes de 8:30 a 17:30 hrs").trim()
+const MENSAJE_ESCALAMIENTO_SOPORTE_PE =
+  "Para esta consulta te recomiendo contactar directamente a nuestra Mesa de Ayuda GeoVictoria Perú:\n" +
+  `📧 Email: *${CORREO_SOPORTE_PE}* (horario continuado)\n` +
+  `📞 Teléfono: *${TELEFONO_SOPORTE_PE}* (${HORARIO_SOPORTE_PE})\n\n` +
+  "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria 🙌"
+
+const COTIZADORA_API_BASE = (
+  process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com"
+).trim()
+const SECRET_COTIZADORA_PE = (
+  process.env.VICKY_COTIZADORA_SECRET_PE ||
+  process.env.VICKY_COTIZADORA_SECRET ||
+  ""
+).trim()
+
+// programar_seguimiento con la zona horaria de Perú como default (el resto
+// del schema chileno aplica igual).
+const programarSeguimientoSchemaPE = {
+  name: "programar_seguimiento",
+  description:
+    "Úsala SOLO cuando el cliente da una señal EXPLÍCITA de que la decisión depende de otra persona o de otro factor y hay que esperar (ej. 'lo tengo que revisar con mi jefe', 'lo consulto con mi socio', 'espero la aprobación', 'escríbeme el lunes'), Y acordaron CUÁNDO retomar. ANTES de llamarla, pregúntale al cliente cuándo sería un buen momento para escribirle. Con esto queda registrado UN solo seguimiento a esa fecha. NO la uses si el cliente solo quedó en silencio o se despidió sin dar un motivo de espera.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      cuandoIso: {
+        type: "string" as const,
+        description:
+          "Fecha y hora acordada para retomar, en formato ISO 8601 con zona horaria (ej. '2026-08-10T10:00:00-05:00'). Interpreta lo que dijo el cliente ('el lunes', 'en dos semanas') en SU zona horaria (default Perú/America/Lima, UTC-5) y conviértelo a este formato. Debe ser una fecha futura.",
+      },
+      motivo: {
+        type: "string" as const,
+        description:
+          "Nota breve del factor de decisión (opcional), ej. 'lo consulta con su jefe', 'espera aprobación de presupuesto'.",
+        maxLength: 200,
+      },
+    },
+    required: ["cuandoIso"],
+  },
+}
+
+// COMPROBANTE DE TRANSFERENCIA (15-sep): Perú ya cobra también por
+// transferencia (BBVA de GEOVICTORIA PERU S.A.C. en la aceptación). Espejo del
+// schema chileno con montos en SOLES; la tool devuelve recepción + link de
+// auto-onboarding + presentación de la gestora PE.
+const registrarComprobantePESchema = {
+  name: "registrar_comprobante_transferencia",
+  description:
+    "Registra un comprobante de transferencia bancaria que el cliente envió por el chat (imagen o PDF descrito en el historial). Úsala SIEMPRE que el cliente mande un comprobante de pago de su cotización. Extrae del comprobante lo que se vea: monto transferido (soles), banco y fecha. La tool asocia el comprobante a la cotización vigente, avisa al equipo y devuelve mensajeParaProspecto con la confirmación de recepción, el LINK del auto-onboarding y la presentación de quien lo acompaña — copia el mensajeParaProspecto TAL CUAL, sin agregar ni quitar nada. El pago queda EN VERIFICACIÓN: nunca afirmes tú que el pago ya está confirmado.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      montoDetectado: {
+        type: "number" as const,
+        description: "Monto en soles que muestra el comprobante (solo dígitos, sin puntos ni comas). Si la imagen no deja leer el monto, pasa 0.",
+      },
+      bancoOrigen: { type: "string" as const, description: "Banco emisor si se ve en el comprobante." },
+      fechaDetectada: { type: "string" as const, description: "Fecha de la transferencia como aparece en el comprobante." },
+      numeroCotizacion: { type: "string" as const, description: "Número de cotización si el cliente lo mencionó o aparece en el comprobante." },
+      detalle: { type: "string" as const, description: "Resumen en una frase de lo que muestra el comprobante (destinatario, hora, número de operación)." },
+      pagoDeclarado: { type: "boolean" as const, description: "true si el cliente DECLARA que pagó sin mandar comprobante." },
+    },
+    required: ["montoDetectado"],
+  },
+}
+
+/**
+ * SOPORTE INVENTADO, versión Perú (herencia del blindaje chileno del 01-sep):
+ * el modelo alucina mesas de ayuda ("+56 2 2932…", "ayuda@geovictoria.com")
+ * o cita la tarjeta CHILENA. Determinista: fijos +56, la Mesa CL (600 914
+ * 3819 / WhatsApp de soporte CL) y cualquier correo @geovictoria.com fuera
+ * de la lista blanca (equipo PE + usuarios activos de Zoho) pasan a la
+ * tarjeta oficial de Perú. Best-effort: sin Zoho, la lista blanca es la fija.
+ */
+const CORREOS_PE_FIJOS = new Set([
+  "soporteperu", "ssttperu", "mmendozav", "cvalverde", "afiori", "pquispef", "dbendezu", "vicky", "info",
+])
+export async function blindarSoporteInventadoPE(texto: string): Promise<string> {
+  if (!texto) return texto
+  let permitidos = new Set<string>()
+  try {
+    const { emailsEquipoZoho } = await import("../../emails-equipo.ts")
+    permitidos = await emailsEquipoZoho()
+  } catch { /* lista fija */ }
+  let salida = texto
+    // Fijos y celulares chilenos presentados como soporte.
+    .replace(/\+?\s*56\s*[\s.\-]*2[\s.\-]*\d{4}[\s.\-]*\d{4}/g, TELEFONO_SOPORTE_PE)
+    .replace(/\b600\s*914\s*3819\b/g, TELEFONO_SOPORTE_PE)
+    .replace(/\+?\s*56\s*9[\s.\-]*4401[\s.\-]*3873/g, TELEFONO_SOPORTE_PE)
+  salida = salida.replace(/\b([a-z0-9._-]+)@geovictoria\.com\b/gi, (todo, usuario: string) => {
+    const u = usuario.toLowerCase()
+    if (CORREOS_PE_FIJOS.has(u)) return todo
+    if (permitidos.has(`${u}@geovictoria.com`)) return todo
+    return CORREO_SOPORTE_PE
+  })
+  return salida
+}
+
+export const TOOL_SCHEMAS_PE = [
+  registrarComprobantePESchema,
+  {
+    name: "cotizar_referencial",
+    description:
+      "Calcula la cotización referencial de Perú (1 a 50 usuarios) en soles. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (primer mes por adelantado + reloj en compra si aplica; los totales ya incluyen el IGV 18%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad; arriendo por defecto — venta SOLO si el cliente pidió comprar) y `puntosInstalacion` (uno por punto físico, con la ciudad tal como la dijo el cliente y su zona: 'lima' = Lima Metropolitana incluido el Callao, 'provincias' = cualquier otra ciudad del Perú). En Lima Metropolitana el envío va sin costo y la instalación técnica va incluida en arriendo (en venta tiene precio cerrado que la tool informa) — la `ubicacion` es el distrito o la ciudad tal como la dijo el cliente; a provincia el envío tiene precio cerrado (incluido en el arriendo; línea única en venta, la tool lo calcula). La instalación técnica también tiene precio cerrado por zona (incluida en arriendo en Lima; en venta y en provincia la tool la cotiza) y la auto-instalación es gratis siempre. La tool arma esas notas con los montos exactos, tú solo transcribes la ubicación. `escalonDescuento` SOLO ante una objeción de PRECIO después de mostrar la lista: 1 = 10% en el plan por 6 meses, 2 = 20% (segunda objeción). Jamás en la primera cotización ni proactivo; NUNCA calcules tú el monto rebajado — la tool lo devuelve.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        userCount: {
+          type: "number" as const,
+          description: "Cantidad de personas que marcarán asistencia (1-50).",
+          minimum: 1,
+          maximum: 50,
+        },
+        reloj: {
+          type: "object" as const,
+          properties: {
+            modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+            cantidad: { type: "number" as const, minimum: 1, maximum: 50 },
+          },
+          required: ["modalidad", "cantidad"],
+          description:
+            "Solo si la configuración lleva reloj de control físico. Modalidad 'venta' ÚNICAMENTE si el cliente pidió comprar explícitamente.",
+        },
+        puntosInstalacion: {
+          type: "array" as const,
+          items: {
+            type: "object" as const,
+            properties: {
+              ubicacion: {
+                type: "string" as const,
+                description: "Ciudad/distrito tal como lo dijo el cliente.",
+              },
+              zona: {
+                type: "string" as const,
+                enum: ["lima", "intermedia", "provincias"],
+                description:
+                  "'lima' solo si el punto está en Lima Metropolitana (incluido el Callao); 'intermedia' = Región Lima fuera de la capital (Huacho, Huaral, Cañete, Barranca) e Ica (Ica, Chincha, Pisco, Nazca); cualquier otra ciudad del Perú es 'provincias'. Ante la duda, pregúntale al cliente.",
+              },
+              autoInstalada: {
+                type: "boolean" as const,
+                description: "true si el cliente instalará el reloj por su cuenta.",
+              },
+            },
+            required: ["ubicacion", "zona", "autoInstalada"],
+          },
+          description:
+            "Un punto por cada lugar físico con reloj. Obligatorio si hay reloj en VENTA; en arriendo pásalo si conoces las ubicaciones (sirve para las notas de envío/instalación fuera de Lima).",
+        },
+        escalonDescuento: {
+          type: "number" as const,
+          enum: [0, 1, 2],
+          description:
+            "Escalón de descuento del PLAN (escalera 10% → 20%, 6 meses), SOLO como respuesta a una objeción de precio tras mostrar la lista: 1 la primera vez, 2 si insiste. 0 u omitido = sin descuento. Nunca proactivo.",
+        },
+      },
+      required: ["userCount"],
+    },
+  },
+  {
+    name: "generar_link_cotizadora",
+    description:
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización en el sistema (PDF en soles, montos netos + IGV 18%) y devuelve el link donde el cliente la revisa, la acepta y paga: tarjeta vía Mercado Pago o transferencia a la cuenta BBVA de GeoVictoria Perú (el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio referencial. REQUIERE: nombre del contacto, RUC válido (11 dígitos) y la configuración; la RAZÓN SOCIAL sale sola del RUC (padrón SUNAT) — pásala en `empresa` solo si el cliente la dijo, jamás la preguntes; el email es OPCIONAL (sin correo la entrega va por este chat y el formulario de facturación lo pide al aceptar) (userCount; reloj y puntos si lleva). `escalonDescuento` = el mismo escalón (1 o 2) que el cliente ACEPTÓ en cotizar_referencial — la cotización nace con ese % en el plan por 6 meses y el pago inicial ya lo refleja. Copia `mensajeParaProspecto` TAL CUAL (trae el link y los montos exactos); JAMÁS escribas un link de memoria.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        empresa: { type: "string" as const, description: "Razón social, SOLO si el cliente la mencionó; si no, se resuelve desde el RUC." },
+        contacto: { type: "string" as const, description: "Nombre completo de la persona de contacto." },
+        email: { type: "string" as const, description: "Email del contacto, si lo dio (ahí llega también la cotización)." },
+        ruc: { type: "string" as const, description: "RUC de la empresa (11 dígitos)." },
+        userCount: { type: "number" as const, minimum: 1, maximum: 50 },
+        reloj: {
+          type: "object" as const,
+          properties: {
+            modalidad: { type: "string" as const, enum: ["arriendo", "venta"] },
+            cantidad: { type: "number" as const, minimum: 1, maximum: 50 },
+          },
+          required: ["modalidad", "cantidad"],
+        },
+        puntosInstalacion: {
+          type: "array" as const,
+          items: {
+            type: "object" as const,
+            properties: {
+              ubicacion: { type: "string" as const },
+              zona: { type: "string" as const, enum: ["lima", "provincias"] },
+              autoInstalada: { type: "boolean" as const },
+            },
+            required: ["ubicacion", "zona", "autoInstalada"],
+          },
+        },
+        escalonDescuento: {
+          type: "number" as const,
+          enum: [0, 1, 2],
+          description: "Escalón de descuento del plan que el cliente ACEPTÓ (1 = 10%, 2 = 20%, por 6 meses). 0 u omitido = sin descuento.",
+        },
+      },
+      required: ["contacto", "ruc", "userCount"],
+    },
+  },
+  {
+    name: "derivar_a_ejecutivo",
+    description:
+      "Registra al prospecto como lead en el CRM (territorio Perú) y lo deja en manos de nuestra ejecutiva comercial de GeoVictoria Perú, que lo contactará para continuar (callback pedido, más de 50 usuarios, preguntas fuera de alcance, solicitud explícita de hablar con una persona, o si generar_link_cotizadora falló). Pasa TODO lo que sepas del prospecto; si ya acordó una configuración y precios con cotizar_referencial, inclúyelos en `resumen` (con el RUC si lo dio y el descuento ofrecido, si hubo) para que la ejecutiva formalice sin re-preguntar. Devuelve `mensajeParaProspecto` para confirmarle al cliente.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        nombre: { type: "string" as const, description: "Nombre de la persona." },
+        empresa: { type: "string" as const, description: "Nombre o razón social de la empresa." },
+        email: { type: "string" as const, description: "Email del prospecto (si lo dio)." },
+        ruc: {
+          type: "string" as const,
+          description: "RUC de la empresa (11 dígitos), si lo dio. Pásalo tal como lo escribió.",
+        },
+        trabajadores: { type: "number" as const, description: "Cantidad de personas (si la dio)." },
+        ciudad: { type: "string" as const, description: "Ciudad (si la dio)." },
+        motivo: {
+          type: "string" as const,
+          enum: ["cotizacion_formal", "callback", "fuera_de_alcance", "mas_de_50", "pidio_persona", "otro"],
+        },
+        resumen: {
+          type: "string" as const,
+          description:
+            "Resumen para la ejecutiva: necesidad, configuración acordada, precios cotizados (y el descuento ofrecido, si hubo), zonas de instalación, dolores mencionados.",
+        },
+      },
+      required: ["nombre", "motivo", "resumen"],
+    },
+  },
+  // Soporte operativo con el agente Foundry (11-ago). Schema LOCAL (copia
+  // del chileno, país-neutro): importar el módulo de la tool en el top-level
+  // rompería la pureza de este archivo para los tests (su cadena trae
+  // "@/lib/foundry"); la implementación va por import dinámico en dispatch.
+  {
+    name: "consultar_agente_soporte",
+    description:
+      "Consulta al agente IA especializado en soporte operativo de la plataforma GeoVictoria. Úsala SOLO cuando quien escribe YA ES USUARIO de la plataforma y tiene una duda o problema funcional (recuperar acceso, credenciales, configurar usuarios, generar reportes, problemas técnicos, errores de la app). NO la uses para consultas comerciales (precios, productos, condiciones), callback ni reuniones. El agente puede preguntar el rol del usuario (administrador o colaborador) antes de responder — si lo hace, comunica la pregunta al prospecto literal y espera la respuesta para volver a invocar la tool. Si la conversación continúa con el mismo tema, vuelve a invocarla pasando previousResponseId para mantener contexto. Devuelve uno de tres estados: 'continuar' (pega la respuesta y sigue disponible), 'escalar_humano' (pega mensajeParaProspecto con el canal de soporte), 'cerrar' (pega la respuesta y despide).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        mensajeProspecto: {
+          type: "string" as const,
+          description:
+            "El mensaje literal del cliente con su consulta operativa. Pásalo tal cual lo escribió, sin reformular ni resumir.",
+          minLength: 1,
+          maxLength: 2000,
+        },
+        previousResponseId: {
+          type: "string" as const,
+          description:
+            "ID de la respuesta anterior del agente, devuelto en una invocación previa. Pásalo cuando el cliente sigue con el mismo tema; omítelo en un tema nuevo.",
+        },
+      },
+      required: ["mensajeProspecto"],
+    },
+  },
+  // Señales de ciclo de contacto (mismas de Chile; las procesa el route PE).
+  marcarNoContactarSchema,
+  programarSeguimientoSchemaPE,
+]
+
+type CotizarInputPE = {
+  userCount?: number
+  reloj?: { modalidad?: "arriendo" | "venta"; cantidad?: number }
+  puntosInstalacion?: Array<{ ubicacion?: string; zona?: string; autoInstalada?: boolean }>
+  escalonDescuento?: number
+  /** Compatibilidad con turnos antiguos: true equivale al escalón 1. */
+  conDescuentoCierre?: boolean
+}
+
+function escalonDe(i: CotizarInputPE): number {
+  const e = Math.floor(Number(i.escalonDescuento) || 0)
+  if (e > 0) return Math.min(e, ESCALERA_DESCUENTO_PE.planMensual.length)
+  return i.conDescuentoCierre === true ? 1 : 0
+}
+
+type DerivarInputPE = {
+  nombre?: string
+  empresa?: string
+  email?: string
+  ruc?: string
+  trabajadores?: number
+  ciudad?: string
+  motivo?: string
+  resumen?: string
+}
+
+// Normaliza los puntos que vienen del modelo. Perú no tiene clasificador de
+// geografía propio (Fase 1b): la zona la declara el MODELO con la regla del
+// prompt ('lima' = Lima Metropolitana incluido el Callao); cualquier valor
+// raro cae a "provincias" — el tratamiento conservador (notas de envío e
+// instalación aparte) nunca promete de más.
+function normalizarPuntosPE(
+  entradas: Array<{ ubicacion?: string; zona?: string; autoInstalada?: boolean }>,
+): PuntoInstalacionPE[] {
+  return entradas.map((p) => ({
+    ubicacion: String(p?.ubicacion || ""),
+    zona: (p?.zona === "lima" ? "lima" : "provincias") as ZonaPE,
+    autoInstalada: p?.autoInstalada === true,
+  }))
+}
+
+export function buildDispatchPE(contact: string) {
+  return async function dispatchToolPE(name: string, input: unknown): Promise<unknown> {
+    try {
+      if (name === "registrar_comprobante_transferencia") {
+        const { registrarComprobanteTransferencia } = await import("@/lib/tools/registrar-comprobante-transferencia")
+        return await registrarComprobanteTransferencia(
+          contact,
+          (input || {}) as Parameters<typeof registrarComprobanteTransferencia>[1],
+          "pe",
+        )
+      }
+      if (name === "cotizar_referencial") {
+        const i = (input || {}) as CotizarInputPE
+        const userCount = Number(i.userCount || 0)
+        let puntos: PuntoInstalacionPE[] = []
+        if (i.reloj && i.reloj.modalidad === "venta") {
+          const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
+          if (entradas.length === 0) {
+            return {
+              ok: false,
+              error:
+                "El reloj en VENTA requiere puntosInstalacion (ciudad, zona lima/provincias y autoInstalada por punto). Pregunta la ubicación y si instalan ellos o GeoVictoria, y vuelve a llamar la tool.",
+            }
+          }
+          puntos = normalizarPuntosPE(entradas)
+        } else if (i.reloj && i.reloj.modalidad === "arriendo") {
+          // En arriendo los puntos son opcionales; si vienen, arman las notas
+          // de envío/instalación fuera de Lima.
+          puntos = normalizarPuntosPE(Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : [])
+        }
+        const tc = await tipoCambioSunat()
+        const r = cotizarPE({
+          userCount,
+          reloj:
+            i.reloj && i.reloj.modalidad && Number(i.reloj.cantidad) > 0
+              ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
+              : undefined,
+          puntos,
+          escalonDescuento: escalonDe(i),
+          tipoCambio: tc.venta,
+        })
+        if (i.reloj) console.log(`[pe-tools] reloj cotizado con TC SUNAT ${tc.venta} (${tc.fuente}, ${tc.fecha})`)
+        // Punto fuera de Lima con instalación pedida → aviso interno al
+        // servicio técnico PE. No hay helper de correo directo reutilizable
+        // (todos los envíos del repo son Zoho send_mail SOBRE un registro, y
+        // acá aún no existe ninguno), así que va por avisarEquipoInterno
+        // (durable en vic_v3_inbox + push) con la instrucción explícita de
+        // reenviar a ssttperu@. Best-effort: JAMÁS bloquea la cotización.
+        if (r.avisoSsttPeru) {
+          const detalle = puntos
+            .filter((p) => !p.autoInstalada)
+            .map((p) => p.ubicacion || "(ciudad sin especificar)")
+            .join(", ")
+          try {
+            const { avisarEquipoInterno } = await import("../../alerta-interna.ts")
+            await avisarEquipoInterno(
+              `🇵🇪 SERVICIO TÉCNICO PERÚ — reenviar a ${CORREO_SSTT_PE}: el prospecto +${contact} cotizó reloj con VISITA TÉCNICA de instalación (${detalle}). ` +
+                `La visita ya va cotizada con precio cerrado (Lima US$43, bonificada en arriendo; provincias US$214): solo coordinarla. Config: ${userCount} usuarios, reloj ${i.reloj?.modalidad} x${i.reloj?.cantidad}.`,
+            ).catch(() => {})
+          } catch {
+            // El aviso interno nunca puede tumbar la cotización.
+          }
+        }
+        return { ok: true, escalonDescuento: r.escalonDescuento, mensajeParaProspecto: r.mensajeParaProspecto }
+      }
+
+      if (name === "generar_link_cotizadora") {
+        const i = (input || {}) as CotizarInputPE & {
+          empresa?: string
+          contacto?: string
+          email?: string
+          ruc?: string
+        }
+        if (!i.ruc || !rucValido(i.ruc)) {
+          return {
+            ok: false,
+            error: `El RUC '${i.ruc || ""}' no es válido (11 dígitos con dígito verificador SUNAT). Pídele al cliente confirmarlo y vuelve a llamar la tool.`,
+          }
+        }
+        // Correo OPCIONAL (contrato chileno del 03-ago): solo se valida si vino.
+        if (i.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
+          return { ok: false, error: `El correo '${i.email}' no tiene formato válido. Pídelo de nuevo o emite sin correo.` }
+        }
+        // Misma regla que la referencial: reloj en VENTA exige puntos.
+        let puntos: PuntoInstalacionPE[] = []
+        if (i.reloj?.modalidad === "venta") {
+          const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
+          if (entradas.length === 0) {
+            return { ok: false, error: "El reloj en VENTA requiere puntosInstalacion (ciudad, zona y autoInstalada). Pregúntalos y vuelve a llamar la tool." }
+          }
+          puntos = normalizarPuntosPE(entradas)
+        } else if (i.reloj?.modalidad === "arriendo") {
+          puntos = normalizarPuntosPE(Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : [])
+        }
+        // El secreto se chequea DESPUÉS de validar inputs: los errores de
+        // datos le llegan precisos al modelo aunque falte la config.
+        if (!SECRET_COTIZADORA_PE) {
+          return { ok: false, error: "Cotizadora PE no configurada (secreto faltante). Usa derivar_a_ejecutivo (motivo cotizacion_formal)." }
+        }
+        const escalon = escalonDe(i)
+        // RAZÓN SOCIAL = del padrón SUNAT cuando el cliente no la dio (22-sep,
+        // paridad con Chile/SII); último recurso, el nombre del contacto.
+        let empresaFinal = String(i.empresa || "").trim()
+        if (!empresaFinal) {
+          const ficha = await fichaRucSunat(formatearRuc(i.ruc)).catch(() => null)
+          empresaFinal = ficha?.razonSocial || String(i.contacto || "").trim()
+        }
+        const tc = await tipoCambioSunat()
+        const calculo = cotizarPE({
+          userCount: Number(i.userCount || 0),
+          reloj:
+            i.reloj && i.reloj.modalidad && Number(i.reloj.cantidad) > 0
+              ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
+              : undefined,
+          puntos,
+          escalonDescuento: escalon,
+          tipoCambio: tc.venta,
+        })
+        const conDescuento = calculo.descuentoPct > 0
+        const pctTxt = `${Math.round(calculo.descuentoPct * 100)}%`
+        const mesesTxt = `${ESCALERA_DESCUENTO_PE.meses} meses`
+        // PATRÓN CHILE (Lalo 21-sep): la cotización NO lleva fila de
+        // Activación. El primer mes adelantado lo calcula el cotizador desde
+        // los recurrentes (computeTotalsPE, con el descuento del plan), igual
+        // que en CL; el mensaje de entrega lo explica con pagoInicialNeto.
+        const items = [...calculo.itemsCotizador]
+        const res = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky-pe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-vicky-secret": SECRET_COTIZADORA_PE },
+          body: JSON.stringify({
+            empresa: empresaFinal,
+            contacto: i.contacto,
+            contactoEmail: i.email?.trim() || undefined,
+            ruc: formatearRuc(i.ruc),
+            contactoTelefono: `+${contact}`,
+            userCount: Number(i.userCount || 0),
+            items,
+            // Igual que Chile: el % del plan viaja como escalón y el cotizador
+            // lo estampa en la cotización (los ítems van a precio de lista).
+            escalonDescuento: escalon,
+            // Dólar SUNAT con el que se convirtió el reloj (queda en la
+            // cotización para la nota de venta en USD).
+            tipoCambio: calculo.tipoCambio,
+            tipoCambioFuente: tc.fuente,
+          }),
+          cache: "no-store",
+        })
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean
+          acceptanceUrl?: string
+          linkCorto?: string
+          quoteId?: string
+          error?: string
+        }
+        if (!res.ok || !data.ok || !data.acceptanceUrl) {
+          console.error(`[pe-tools] create-from-vicky-pe falló contact=${contact}:`, JSON.stringify(data).slice(0, 300))
+          return {
+            ok: false,
+            error: `No se pudo generar la cotización formal (${data.error || res.status}). NO insistas: usa derivar_a_ejecutivo (motivo cotizacion_formal) con toda la configuración en el resumen.`,
+          }
+        }
+        // Aviso a servicio técnico si hay instalación fuera de Lima (mismo
+        // criterio que la referencial). Best-effort.
+        if (calculo.avisoSsttPeru) {
+          try {
+            const { avisarEquipoInterno } = await import("../../alerta-interna.ts")
+            await avisarEquipoInterno(
+              `🇵🇪 SERVICIO TÉCNICO PERÚ — reenviar a ${CORREO_SSTT_PE}: cotización FORMAL con instalación fuera de Lima para +${contact} (${empresaFinal}). Coordinar instalación aparte.`,
+            ).catch(() => {})
+          } catch { /* jamás bloquea */ }
+        }
+        return {
+          ok: true,
+          quoteId: data.quoteId,
+          // El agent-loop persiste estos campos en el puntero durable de la
+          // cotización (anti-amnesia: retomar la formal en turnos futuros).
+          acceptanceUrl: data.acceptanceUrl,
+          linkCorto: data.linkCorto || "",
+          totalCLP: calculo.pagoInicialTotal,
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y pagas: con tarjeta vía Mercado Pago (se confirma al instante) o por transferencia a la cuenta BBVA de GeoVictoria Perú que aparece en la misma página (después me mandas el comprobante por este chat): ${data.linkCorto || data.acceptanceUrl}\n\nEl pago inicial es de ${formatearPEN(calculo.pagoInicialNeto)} + IGV (incluye tu primer mes por adelantado${conDescuento ? `, ya con el ${pctTxt} de descuento en el plan` : ""}) y tu mensualidad de ${formatearPEN(conDescuento ? calculo.mensualNetoPlan * (1 - calculo.descuentoPct) + calculo.mensualArriendoNeto : calculo.mensualNeto)} + IGV${conDescuento ? ` durante ${mesesTxt} (luego ${formatearPEN(calculo.mensualNeto)} + IGV)` : ""} desde el mes siguiente. También te la enviamos en PDF a tu correo. Con el pago confirmado, seguimos con la puesta en marcha de tu cuenta 😊`,
+        }
+      }
+
+      if (name === "derivar_a_ejecutivo") {
+        const i = (input || {}) as DerivarInputPE
+        // El RUC jamás bloquea la derivación: si vino, se valida y se anota el
+        // veredicto para la ejecutiva; si no vino o no cuadra, el lead va igual.
+        const rucInfo = i.ruc
+          ? rucValido(i.ruc)
+            ? `RUC ${formatearRuc(i.ruc)} (válido)`
+            : `RUC ${i.ruc} (dígito verificador NO cuadra — confirmar)`
+          : ""
+        // Import dinámico: mantiene este módulo importable por los tests puros.
+        const { createZohoLead } = await import("../../zoho-leads.ts")
+        const res = await createZohoLead({
+          nombre: i.nombre,
+          empresa: i.empresa,
+          email: i.email,
+          telefono: contact,
+          contactoWA: contact,
+          pais: "Perú",
+          ciudad: i.ciudad,
+          trabajadores: i.trabajadores,
+          necesidad: [i.resumen || "", rucInfo].filter(Boolean).join(" · "),
+          // Perú sin tómbola ni SDRs: TODOS los motivos quedan a nombre de la
+          // ejecutiva única (Mónica Mendoza), que retoma con todo el contexto.
+          ownerId: EJECUTIVA_PE_ZOHO_ID,
+        })
+        if (!res || (res as { success?: boolean }).success === false) {
+          return {
+            ok: false,
+            error: "No se pudo registrar el lead. Igual confirma al cliente que el equipo lo contactará.",
+            mensajeParaProspecto:
+              "Listo, dejé tus datos registrados 😊 Nuestra ejecutiva comercial en Perú te contactará muy pronto para continuar.",
+          }
+        }
+        return {
+          ok: true,
+          mensajeParaProspecto:
+            "Listo, quedaste registrado 🎉 Nuestra ejecutiva comercial en Perú te contactará muy pronto para finalizar tu cotización y resolver cualquier duda.",
+        }
+      }
+
+      // Soporte operativo: misma implementación chilena (agente Foundry). El
+      // escalamiento humano reemplaza los canales chilenos por el de PE, y
+      // las respuestas intermedias se sanean por si el agente cuela un
+      // teléfono de soporte CHILENO (base de conocimiento CL). Import
+      // dinámico: mantiene este módulo importable por los tests puros.
+      if (name === "consultar_agente_soporte") {
+        const { consultarAgenteSoporte } = await import("../../tools/consultar-agente-soporte.ts")
+        const sanearCanalesChilenos = (texto: string): string =>
+          texto
+            .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, TELEFONO_SOPORTE_PE)
+            .replace(/600[\s.\-]*914[\s.\-]*3819/g, TELEFONO_SOPORTE_PE)
+            .replace(/\bsoporte@geovictoria\.com\b/g, CORREO_SOPORTE_PE)
+        const r = await consultarAgenteSoporte(input as never)
+        if (!r.ok) return r
+        if (r.accion === "escalar_humano") {
+          return {
+            ...r,
+            respuestaAgente: sanearCanalesChilenos(r.respuestaAgente || ""),
+            mensajeParaProspecto: MENSAJE_ESCALAMIENTO_SOPORTE_PE,
+          }
+        }
+        return { ...r, respuestaAgente: sanearCanalesChilenos(r.respuestaAgente || "") }
+      }
+
+      // Señales (sin efectos externos aquí): el route PE las procesa al ver el
+      // tool_call ok — cierra el ciclo o registra el seguimiento acordado.
+      if (name === "marcar_no_contactar") return marcarNoContactar(input as never)
+      if (name === "programar_seguimiento") {
+        const r = programarSeguimiento(input as never)
+        if (!("ok" in r) || r.ok !== true) return r
+        // Confirmación en peruano neutro cordial. OJO honestidad: en Fase 1b
+        // el seguimiento PE lo retoma el EQUIPO (aviso interno desde el
+        // route), no un push automático — por eso "retomamos", no "te escribo
+        // puntual a esa hora".
+        return {
+          ...r,
+          mensajeParaProspecto:
+            "Claro que sí, lo dejamos así 😊 Retomamos ese día con calma — y si necesitas algo antes, me escribes por aquí 🙌",
+        }
+      }
+
+      return { ok: false, error: `Tool desconocida: ${name}` }
+    } catch (err) {
+      return { ok: false, error: String((err as Error)?.message || err) }
+    }
+  }
+}

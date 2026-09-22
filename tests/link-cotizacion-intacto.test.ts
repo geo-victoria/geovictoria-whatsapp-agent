@@ -1,0 +1,76 @@
+/**
+ * CICATRIZ 03-sep: el cinturón de teléfonos rompía el LINK DE PAGO.
+ *
+ * Todo id de cotización de Zoho empieza en `35250450006…` y lleva un "52" en
+ * la segunda posición. `RE_TELEFONO` podía arrancar ahí, comerse 13 dígitos y
+ * reemplazarlos por el teléfono de un ejecutivo — bastaba que el mensaje
+ * nombrara a UNA persona del directorio, y los clientes se llaman Ana, Paola
+ * o Tamara todo el tiempo, así que el nombre del PROPIO CLIENTE lo disparaba.
+ * Resultado: `/q/3+56 9 4401 387368552-…`, un link muerto. Tres clientes lo
+ * recibieron (COT1105, COT1151 y COT1162) antes de que lo cazáramos.
+ */
+import { test, describe } from "node:test"
+import assert from "node:assert/strict"
+import { corregirTelefonosEjecutivos } from "../lib/directorio-ejecutivos.ts"
+import { blindarContactoComercial, sanitizarVoseo } from "../lib/voseo-v3.ts"
+
+const LINK = "https://cotizacion.geovictoria.com/q/3525045000657868552-50234689d5"
+
+describe("el link de la cotización sale intacto", () => {
+  test("no se toca aunque el cliente se llame como una ejecutiva", () => {
+    const { reply } = corregirTelefonosEjecutivos(
+      `Lista tu cotización, Ana! 🎉 Revísala aquí: ${LINK}`,
+      new Set(),
+    )
+    assert.ok(reply.includes(LINK))
+    assert.ok(blindarContactoComercial(reply, false).includes(LINK))
+  })
+
+  test("tampoco con el id de COT1162 ni con nombre compuesto", () => {
+    const link = "https://cotizacion.geovictoria.com/q/3525045000658072979-f47e3a8833"
+    const { reply } = corregirTelefonosEjecutivos(
+      `Lista tu cotización, Ana Maria! 🎉 Revísala aquí: ${link}`,
+      new Set(),
+    )
+    assert.ok(reply.includes(link))
+  })
+
+  test("el link largo con token JWT tampoco se corrompe", () => {
+    const largo =
+      "https://cotizacion.geovictoria.com/quote-acceptance.html?token=eyJxdW90ZUlkIjoiMzUyNTA0NTAwMDY1NzU2NjE5NyJ9"
+    const { reply } = corregirTelefonosEjecutivos(`Listo, Tamara: ${largo}`, new Set())
+    assert.ok(reply.includes(largo))
+  })
+
+  test("PERO sigue corrigiendo un teléfono mal atribuido fuera de la URL", () => {
+    const { reply, correcciones } = corregirTelefonosEjecutivos(
+      "Te atiende Aleydis Araque, su WhatsApp es +56 9 1111 2222",
+      new Set(),
+    )
+    assert.ok(reply.includes("+56 9 8291 6868"))
+    assert.equal(correcciones.length, 1)
+  })
+
+  test("y el blindaje comercial sigue tapando el número de un ejecutivo suelto", () => {
+    assert.ok(blindarContactoComercial("llama al +56 9 3937 2058", false).includes("+56 9 4401 3873"))
+  })
+})
+
+// CASO 10-sep (Lalo, "no puedes decir 'pasai', es muy informal"): el toque
+// generado del loop salió crudo con voseo chileno. Al meter sanitizarVoseo en
+// ese camino, el saneador pasó a operar FUERA de URLs — este caso lo fija.
+test("sanitizarVoseo corrige el voseo y no toca el link de la cotización", () => {
+  const link = "https://cotizacion.geovictoria.com/q/aB3dale9acaPO"
+  const t = sanitizarVoseo(`¿me pasai el RUT o confirmo con ese mail? Acá está: ${link} dale`)
+  assert.ok(t.includes("me pasas el RUT"), t)
+  assert.ok(t.includes("Aquí está"), t)
+  assert.ok(t.includes(link), `el link se alteró: ${t}`)
+})
+
+// REGLA DURA (Lalo 14-sep): nunca "al toque".
+test("al toque se sanea y el link no se toca", () => {
+  const s = sanitizarVoseo("Te los muestro al toque: https://cotizacion.geovictoria.com/q/35250-al-toque-99")
+  assert.ok(!/al toque/i.test(s.split("https")[0]), "el texto ya no dice al toque")
+  assert.ok(s.includes("https://cotizacion.geovictoria.com/q/35250-al-toque-99"), "el link queda intacto")
+  assert.ok(/de inmediato/i.test(s))
+})

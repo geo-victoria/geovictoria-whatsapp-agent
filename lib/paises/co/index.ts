@@ -1,0 +1,111 @@
+/**
+ * Perfil de país: COLOMBIA (línea +57 318 107 0737).
+ *
+ * Estado: EN CONSTRUCCIÓN — el perfil existe y compila, pero la línea aún no
+ * apunta al agente (falta crear flow + acción de código en Botmaker) y el
+ * cotizador CO no está habilitado. Ver TODOs.
+ *
+ * TODO antes de encender:
+ *   1. channelId real del canal +57 en Botmaker (al crear la acción de código).
+ *   2. Definiciones de catálogo pendientes (ver co/catalogo.ts).
+ *   3. Emails de los SDR CO (los zohoUserId ya están: tómbola Galindo/
+ *      Guerrero/Quiroga observada en Zoho el 09-jul).
+ *   4. Ejecutivo comercial CO para PDF/correos (¿quién acompaña como Anderson
+ *      en Chile?).
+ *   5. Plantillas HSM de la línea CO (apertura/nudge/cierre) aprobadas por Meta.
+ *   6. Cotizador CO (moneda COP sin unidad indexada, entidad legal, pago) →
+ *      recién ahí cotizadorHabilitado = true.
+ */
+
+import type { PerfilPais } from "../tipos"
+import { channelIdPorPais, NUMERO_LINEA } from "../../linea-por-pais"
+import { CATALOGO_MODULOS_CO, CATALOGO_HARDWARE_CO, CATALOGO_SERVICIOS_CO } from "./catalogo"
+import { nitValido, normalizarNit } from "./nit"
+
+function formatearCOP(monto: number): string {
+  return "$" + Math.round(monto).toLocaleString("es-CO") + " COP"
+}
+
+export const PERFIL_CO: PerfilPais = {
+  codigo: "co",
+  nombre: "Colombia",
+  prefijoTelefono: "57",
+  timezone: "America/Bogota",
+
+  moneda: {
+    codigo: "COP",
+    formatear: formatearCOP,
+    // Sin unidad indexada: los precios del catálogo son COP directos.
+    unidadIndexada: null,
+  },
+
+  validarTributario: (input: string) => ({
+    valido: nitValido(input),
+    normalizado: normalizarNit(input),
+    etiqueta: "NIT",
+  }),
+
+  catalogo: {
+    modulos: CATALOGO_MODULOS_CO,
+    hardware: CATALOGO_HARDWARE_CO,
+    servicios: CATALOGO_SERVICIOS_CO,
+  },
+
+  promptBlocks: {
+    identidad:
+      "Eres Vicky, ejecutiva comercial de GeoVictoria COLOMBIA. Atiendes a empresas que operan en Colombia. Todos los precios que comunicas son en pesos colombianos (COP), montos fijos — en Colombia NO existe la UF ni ninguna unidad indexada.",
+    reglasDePrecio:
+      "Los precios del catálogo están directamente en pesos colombianos (COP). Nunca menciones UF, CLP ni precios de otros países. Ventaja comercial del alquiler: el despacho va incluido y, en Bogotá y alrededores, la instalación técnica también; en el resto la instalación tiene precio cerrado que la tool informa (jamás se cotiza aparte) y la auto-instalación es gratis siempre.", // TODO: IVA neto/incluido según definición.
+    geografia:
+      "Con equipo (alquiler o venta) la ubicación de cada punto decide despacho e instalación: BOGOTÁ Y ALREDEDORES (base), CUNDINAMARCA-BOYACÁ-TOLIMA-META (intermedia) y RESTO DEL PAÍS (incluidas Medellín, Cali y Barranquilla). La tool clasifica; tú solo transcribes la ciudad.",
+    legal:
+      "El ente fiscalizador laboral en Colombia es el Ministerio del Trabajo (Dirección de Inspección, Vigilancia, Control y Gestión Territorial). NO existe un documento de certificación equivalente al chileno y NUNCA cites a la Dirección del Trabajo de Chile ni la Resolución 38 (son chilenas, no aplican). Permanencia: sin amarre; el cliente puede cortar avisando con 30 días.",
+    lenguaje:
+      "Español neutro con cortesía colombiana: trato de 'usted' como forma segura por defecto (cambia a tuteo solo si el cliente tutea primero). Nada de chilenismos ni localismos de otros países.",
+  },
+
+  // NIT verificado en registros públicos (informacolombia/RUES) y validado
+  // con el algoritmo DIAN de co/nit.ts. Las cotizaciones de Creator hoy NO
+  // imprimen el NIT propio; el formato de Vicky sí lo llevará.
+  entidadLegal: {
+    razonSocial: "Geovictoria Colombia SAS",
+    idTributario: "NIT: 901.367.959-1",
+    direccion: "Carrera 14 # 89-48, Oficina 201, Edificio Novanta",
+    ciudad: "Bogotá",
+  },
+
+  canal: {
+    // Fuente única de líneas por país (15-sep): sin env, la forma canónica
+    // `<business>-whatsapp-573181070737` — antes el default era "" y el
+    // push caía en silencio a la línea CHILENA.
+    channelId: channelIdPorPais("co"),
+    numeroLinea: NUMERO_LINEA.co,
+    templates: {
+      // TODO: crear y aprobar plantillas de la línea CO en Meta.
+    },
+  },
+
+  equipo: {
+    // REGLA EQUIPO CO (Lalo 05-ago): SIN round-robin — todo hito no-formal va
+    // FIJO a Eddy Galindo (primera entrada); Guerrero/Quiroga quedan listados
+    // solo como referencia (sus leads históricos siguen siendo adoptables).
+    // Este array es informativo: la asignación real vive en zoho-leads
+    // (reasignarLeadSdrInboundCO) y en co/tools.ts (SDR_HITOS_CO_ID).
+    sdrInbound: [
+      { email: "egalindo@geovictoria.com", zohoUserId: "3525045000613817111" }, // Galindo (FIJO)
+      { email: "", zohoUserId: "3525045000619732095" }, // Guerrero (referencia)
+      { email: "", zohoUserId: "3525045000639899035" }, // Quiroga Chia (referencia)
+    ],
+    // Ejecutivo que toma los deals y cotizaciones de Vicky CO (definición
+    // Lalo 16-jul; equivalente a Anderson Díaz en Chile). Teléfono: el de su
+    // ficha de usuario en Zoho (decisión Lalo 17-jul, provisorio hasta que
+    // Alejandro confirme o pida otro).
+    ejecutivo: {
+      nombre: "Alejandro Gordillo",
+      email: "agordillo@geovictoria.com",
+      telefono: "+57 314 267 7765",
+    },
+  },
+
+  cotizadorHabilitado: false,
+}

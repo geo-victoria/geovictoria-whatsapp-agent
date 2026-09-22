@@ -11,10 +11,23 @@ function getEnv(name: string) {
 // POST: ejecutar una transición de Blueprint
 export async function POST(request: Request) {
   try {
-    const { recordId, module = "Leads", transitionId } = await request.json() as {
+    const { recordId, module = "Leads", transitionId, fields, key } = await request.json() as {
       recordId: string
       module?: string
       transitionId?: string
+      /** Campos mandatorios de la transición (van DENTRO del data del PUT). */
+      fields?: Record<string, unknown>
+      key?: string
+    }
+    // Auth cron (25-ago): el endpoint estaba abierto — ejecuta transiciones de
+    // blueprint, eso jamás puede quedar público.
+    const entregado = (key || request.headers.get("x-cron-secret") || "").trim()
+    const { getFollowupCronSecret } = await import("@/lib/supabase-persistence-v3")
+    const kvSecret = await getFollowupCronSecret().catch(() => "")
+    const envSecret = getEnv("CRON_SECRET")
+    const autorizado = Boolean(entregado) && (entregado === envSecret || (Boolean(kvSecret) && entregado === kvSecret))
+    if (!autorizado) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 })
     }
     if (!recordId) return NextResponse.json({ error: "recordId requerido" }, { status: 400 })
 
@@ -35,7 +48,7 @@ export async function POST(request: Request) {
     const res = await fetch(`${apiDomain}/crm/v2/${module}/${recordId}/actions/blueprint`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Zoho-oauthtoken ${token}` },
-      body: JSON.stringify({ blueprint: [{ transition_id: transitionId, data: [{ id: recordId }] }] }),
+      body: JSON.stringify({ blueprint: [{ transition_id: transitionId, ...(fields && Object.keys(fields).length ? { data: fields } : {}) }] }),
       cache: "no-store",
     })
     const data = await res.json()

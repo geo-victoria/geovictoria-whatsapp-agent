@@ -1,0 +1,543 @@
+/**
+ * Cron de REACTIVACIÓN de leads tibios (fuera de la ventana de 24h).
+ *
+ * Distinto del seguimiento normal (vic-followup-cron, que corre DENTRO de 24h con
+ * texto libre): este reactiva a quienes se enfriaron y reabre la conversación con
+ * una PLANTILLA HSM aprobada por Meta (única vía permitida fuera de 24h). Dos
+ * segmentos:
+ *   - "preform": vio un estimado referencial pero NO llegó a cotización formal.
+ *   - "cotizacion": recibió el link + PDF (cotización formal) y NO la aceptó/pagó.
+ *
+ * Salvaguardas: respeta opt-out, no toca ciclos activos, excluye cotizaciones ya
+ * aceptadas/pagadas (consulta Zoho), y tope de frecuencia por conversación.
+ *
+ * SEGURO POR DEFECTO: si no hay nombre de plantilla configurado (REACTIVATION_
+ * TEMPLATE_*), ese segmento NO envía nada. Así se puede desplegar ANTES de tener
+ * las plantillas aprobadas.
+ *
+ * Auth: Authorization: Bearer ${CRON_SECRET} (o ?key=${CRON_SECRET}).
+ */
+
+import { NextResponse } from "next/server"
+import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
+import { PERFIL_CO } from "@/lib/paises/co"
+import { PERFIL_MX } from "@/lib/paises/mx"
+import { appendAssistantV3, fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
+import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
+import { contactosEnLoop, contactosTraspasados } from "@/lib/loop-v2"
+import { getZohoAccessToken } from "@/lib/zoho-token"
+
+export const dynamic = "force-dynamic"
+export const maxDuration = 60
+
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
+const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
+
+// Plantillas HSM aprobadas (nombre/ruleNameOrId en Botmaker). Vacío = segmento off.
+const TPL_PREFORM = (process.env.REACTIVATION_TEMPLATE_PREFORM || "").trim()
+const TPL_QUOTE = (process.env.REACTIVATION_TEMPLATE_QUOTE || "").trim()
+// Cadencia de los toques largos (HSM), en HORAS desde el último mensaje del
+// cliente (silence anchor): 47h, 7 días (168h), 15 días (360h). El toque N se
+// envía cuando reactivation_count == N-1 y ya transcurrió OFFSETS_H[N-1].
+// Configurable por env (REACTIVATION_OFFSETS_H="47,168,360").
+const OFFSETS_H = (process.env.REACTIVATION_OFFSETS_H || "47,168,360")
+  .split(",")
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n) && n > 0)
+// Primer toque = primer offset; tope de toques = cantidad de offsets.
+const COLD_AFTER_H = OFFSETS_H[0] ?? 47
+const MAX_REACT = OFFSETS_H.length || 3
+// Ventana máxima: el último offset (en días) + 1 día de margen.
+const MAX_AGE_D = Number(
+  process.env.REACTIVATION_MAX_AGE_DAYS || Math.ceil((OFFSETS_H[OFFSETS_H.length - 1] || 360) / 24) + 1,
+)
+// Safety anti doble-envío (la cadencia real la marcan los offsets).
+const MIN_GAP_H = Number(process.env.REACTIVATION_MIN_GAP_HOURS || 24)
+const BATCH = Number(process.env.REACTIVATION_BATCH || 25)
+const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+
+// Correo de reactivación (segmento "cotizacion"): se dispara en paralelo al HSM.
+// La cotizadora decide a quién enviar (filtra internos/prueba) y arma el correo
+// con CTA de aceptación online + PDF adjunto. Seguro por defecto: solo se llama
+// si REACTIVATION_EMAIL_ENABLED=true; la cotizadora además se auto-gatea.
+const COTIZADORA_API_BASE = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+const VICKY_COTIZADORA_SECRET = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+const EMAIL_ENABLED = (process.env.REACTIVATION_EMAIL_ENABLED || "").trim().toLowerCase() === "true"
+
+// Texto que se guarda en el historial como turno de Vicky cuando se envía el HSM,
+// para que al responder el cliente, Vicky sepa que ELLA reabrió con la oferta
+// flash y le dé continuidad. NO se reenvía al cliente: es contexto interno.
+// Plantilla por TOQUE (opcional): REACTIVATION_TEMPLATE_PREFORM_1/_2/_3 (y
+// _QUOTE_N) sobreescriben la base para ese toque. Pedido de Rodrigo (13-jul):
+// el toque de la hora 47 pasa a ser el mensaje de "las 3 razones" — se activa
+// creando la plantilla en Botmaker y seteando la env _1, sin tocar código.
+function tplToque(segmento: string, toque: number): string {
+  const base = segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
+  const key = segmento === "cotizacion" ? "REACTIVATION_TEMPLATE_QUOTE" : "REACTIVATION_TEMPLATE_PREFORM"
+  return (process.env[`${key}_${toque}`] || "").trim() || base
+}
+
+const REACT_CONTEXT_MSG: Record<string, string> = {
+  cotizacion:
+    "Hola, soy Vicky 👋 Te escribí para retomar tu cotización, que quedó pendiente. Tengo un precio especial vigente por tiempo limitado para que puedas cerrar. ¿La revisamos antes de que caduque?",
+  preform:
+    "Hola, soy Vicky 👋 Te escribí para retomar tu cotización pendiente. Tengo un precio especial por tiempo limitado para ti. ¿Lo vemos antes de que caduque?",
+}
+
+// Colombia (13-jul): plantillas propias SIN promesa de descuento (no existe
+// escalera CO) y contexto de historial en tuteo cálido. Salen por el canal CO.
+const TPL_QUOTE_CO = (process.env.REACTIVATION_TEMPLATE_QUOTE_CO || "vicky_co_react_cotizacion").trim()
+const TPL_PREFORM_CO = (process.env.REACTIVATION_TEMPLATE_PREFORM_CO || "vicky_co_react_preform").trim()
+const REACT_CONTEXT_MSG_CO: Record<string, string> = {
+  cotizacion:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización, que quedó pendiente y sigue vigente — la puedes revisar, aceptar y pagar en línea cuando quieras. La retomamos?",
+  preform:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización que quedó a mitad de camino — en 2 minutos la terminamos por acá. Seguimos? 😊",
+}
+
+// México (22-jul): plantillas aprobadas por Meta con ${nombre} Y ${empresa}
+// (a diferencia de CL/CO, que solo llevan ${nombre}) — el envío MX resuelve
+// ambas variables. La "final" (breakup) reemplaza a la corta en el último
+// toque de la cadencia. Salen por la línea +52.
+const TPL_QUOTE_MX = (process.env.REACTIVATION_TEMPLATE_QUOTE_MX || "vicky_mx_react_corta").trim()
+const TPL_PREFORM_MX = (process.env.REACTIVATION_TEMPLATE_PREFORM_MX || "vicky_mx_react_corta").trim()
+const TPL_FINAL_MX = (process.env.REACTIVATION_TEMPLATE_FINAL_MX || "vicky_mx_react_final").trim()
+const REACT_CONTEXT_MSG_MX: Record<string, string> = {
+  cotizacion:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización, que quedó a medio camino — en 2 minutos la terminamos por aquí. ¿Seguimos? 😊",
+  preform:
+    "Hola, soy Vicky de GeoVictoria 👋 Te escribí para retomar tu cotización, que quedó a medio camino — en 2 minutos la terminamos por aquí. ¿Seguimos? 😊",
+}
+
+type Row = {
+  id: string
+  contact: string
+  country?: string | null
+  formal_quote_id: string | null
+  reactivation_count: number | null
+  reactivation_at: string | null
+  last_user_at: string | null
+  followup_closed_reason: string | null
+  followup_status: string | null
+}
+
+async function supa(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    cache: "no-store",
+  })
+}
+
+async function authorized(req: Request): Promise<boolean> {
+  // (a) Secreto compartido en vic_kv (mismo que followup/meeting crons): permite
+  // que el pg_cron de Supabase gatille este endpoint con el header x-cron-secret.
+  const xcron = (req.headers.get("x-cron-secret") || "").trim()
+  if (xcron) {
+    const expected = await getFollowupCronSecret().catch(() => "")
+    if (expected && xcron === expected) return true
+  }
+  // (b) CRON_SECRET por env (Bearer o ?key=): para invocación manual/externa.
+  if (!CRON_SECRET) return false
+  const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
+  if (bearer === CRON_SECRET) return true
+  const key = (new URL(req.url).searchParams.get("key") || "").trim()
+  return key === CRON_SECRET
+}
+
+// Devuelve el set de quoteIds que NO se deben reactivar (ya aceptadas/pagadas/
+// cerradas/rechazadas). Conservador: si la consulta a Zoho falla, marca el chunk
+// completo como "no reactivar" para no escribirle a un cliente que ya cerró.
+async function quoteIdsNoAccionables(
+  quoteIds: string[],
+): Promise<{ skip: Set<string>; nombres: Map<string, string>; empresas: Map<string, string> }> {
+  const skip = new Set<string>()
+  const nombres = new Map<string, string>()
+  const empresas = new Map<string, string>()
+  if (!quoteIds.length) return { skip, nombres, empresas }
+  const apiDomain = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+  let token = ""
+  try {
+    token = await getZohoAccessToken()
+  } catch {
+    for (const id of quoteIds) skip.add(id)
+    return { skip, nombres, empresas }
+  }
+  for (let i = 0; i < quoteIds.length; i += 50) {
+    const chunk = quoteIds.slice(i, i + 50)
+    try {
+      const ids = chunk.map((id) => `'${id}'`).join(",")
+      const res = await fetch(`${apiDomain}/crm/v3/coql`, {
+        method: "POST",
+        headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          select_query: `select id, Estado_Cotizacion, Contacto_Asociado, Name from ${QUOTE_MODULE} where id in (${ids}) limit 200`,
+        }),
+        cache: "no-store",
+      })
+      if (!res.ok) {
+        for (const id of chunk) skip.add(id)
+        continue
+      }
+      const data = await res.json()
+      for (const r of data?.data || []) {
+        const e = String(r?.Estado_Cotizacion || "").toLowerCase()
+        if (e.includes("acept") || e.includes("pagad") || e.includes("ganad") || e.includes("cerrad") || e.includes("rechaz")) {
+          skip.add(String(r.id))
+        }
+        // Primer nombre del contacto de la cotización (para el \${nombre} del HSM).
+        const full = String(r?.Contacto_Asociado?.name || "").trim()
+        if (full) nombres.set(String(r.id), full.split(/\s+/)[0])
+        // Empresa (para el \${empresa} de las plantillas MX): el Name de la
+        // cotización se crea como "Cotización {empresa} - {fecha}" en los tres
+        // países — se parsea de ahí (cero llamadas extra).
+        const m = String(r?.Name || "").match(/^Cotizaci[oó]n\s+(.+?)\s+-\s+\d{4}-\d{2}-\d{2}$/)
+        if (m) empresas.set(String(r.id), m[1])
+      }
+    } catch {
+      for (const id of chunk) skip.add(id)
+    }
+  }
+  return { skip, nombres, empresas }
+}
+
+
+// Primer nombre del cliente extraído del historial (para el ${nombre} del HSM
+// cuando no hay cotización formal de la cual sacarlo). Best-effort con el
+// modelo chico; si no hay nombre claro devuelve null y el toque se OMITE (mejor
+// no enviar que enviar "Hola , cómo estás?").
+async function nombreDesdeHistorial(contact: string): Promise<string | null> {
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) return null
+  try {
+    const history = await fetchHistoryV3(contact, 30)
+    const transcript = history
+      .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${m.content}`)
+      .join("\n")
+      .slice(-3500)
+    if (!transcript) return null
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 20,
+        system:
+          "Extrae el PRIMER NOMBRE de pila del CLIENTE desde la conversación (el nombre con que se presentó o con que Vicky lo llama). Responde SOLO el nombre (una palabra, capitalizada). Si no hay un nombre claro del cliente, responde exactamente NO.",
+        messages: [{ role: "user", content: transcript }],
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> }
+    const out = (data.content?.find((b) => b.type === "text")?.text || "").trim()
+    if (!out || out.toUpperCase() === "NO" || out.split(/\s+/).length > 2 || out.length > 25) return null
+    return out.split(/\s+/)[0]
+  } catch {
+    return null
+  }
+}
+
+// Nombre de la EMPRESA extraído del historial (para el ${empresa} de las
+// plantillas MX cuando no hay cotización formal de la cual parsearlo). Mismo
+// patrón best-effort que nombreDesdeHistorial; si no hay empresa clara
+// devuelve null y el envío usa el neutro "tu empresa".
+async function empresaDesdeHistorial(contact: string): Promise<string | null> {
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
+  if (!apiKey) return null
+  try {
+    const history = await fetchHistoryV3(contact, 30)
+    const transcript = history
+      .map((m) => `${m.role === "user" ? "Cliente" : "Vicky"}: ${m.content}`)
+      .join("\n")
+      .slice(-3500)
+    if (!transcript) return null
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 30,
+        system:
+          "Extrae el NOMBRE DE LA EMPRESA del CLIENTE desde la conversación (la empresa para la que pide la cotización). Responde SOLO el nombre de la empresa, tal como la nombró el cliente. Si no hay una empresa clara, responde exactamente NO.",
+        messages: [{ role: "user", content: transcript }],
+      }),
+      cache: "no-store",
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> }
+    const out = (data.content?.find((b) => b.type === "text")?.text || "").trim()
+    if (!out || out.toUpperCase() === "NO" || out.length > 60) return null
+    return out
+  } catch {
+    return null
+  }
+}
+
+export async function GET(req: Request): Promise<Response> {
+  if (!(await authorized(req))) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  }
+
+  if (!TPL_PREFORM && !TPL_QUOTE) {
+    return NextResponse.json({ ok: true, skipped: "sin plantillas configuradas (REACTIVATION_TEMPLATE_*)" })
+  }
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    return NextResponse.json({ ok: false, error: "Supabase no configurado" }, { status: 503 })
+  }
+
+  const now = Date.now()
+
+  // ── DEMOLICIÓN (biblia 12-ago, Fase 1) ────────────────────────────────────
+  // La cadencia vieja 47h/7d/15d (su flag de encendido incluido) y el hook de
+  // prueba ?to= se ELIMINARON: los toques 4-7 del Loop v2 son su reemplazo
+  // oficial. Este cron conserva SOLO el toque CONSENSUADO (promesa acordada
+  // con el cliente vía programar_seguimiento), hasta que la Fase 3 lo absorba
+  // en el loop como único dueño de followup_next_at.
+  const testSet = testContactSet()
+  let saltadosLoopV2 = 0
+  let saltadosPtv = 0
+
+  // ── Seguimiento CONSENSUADO ────────────────────────────────────────────────
+  // Toques ÚNICOS programados a una fecha acordada con el cliente (tool
+  // programar_seguimiento). Se disparan por followup_next_at —no por la cadencia
+  // 47h/7d/15d— y, tras enviarse, cierran el ciclo (un solo toque). Mismo gate de
+  // horario hábil por zona.
+  let consensuado: Row[] = []
+  {
+    const cr = await supa(
+      `vic_v3_conversations?followup_status=eq.consensuado&followup_next_at=lte.${new Date(now).toISOString()}` +
+      `&select=id,contact,country,formal_quote_id,reactivation_count,reactivation_at,last_user_at,followup_closed_reason,followup_status` +
+      `&order=followup_next_at.asc&limit=100`,
+    )
+    let crows = (cr.ok ? ((await cr.json()) as Row[]) : []).filter(
+      (r) => r.contact && !isTestContact(r.contact, testSet),
+    )
+    // Migrados al Loop v2: tampoco reciben el toque consensuado viejo (batch propio,
+    // los consensuados vienen de otra query que la cadencia 47h/7d/15d).
+    // Solo loops ACTIVOS excluyen (biblia F3): el loop vivo es el dueño de la
+    // fecha consensuada (su supresor c-ter la respeta); un loop cerrado no va
+    // a tocar nunca — ahí el toque consensuado sale por acá.
+    const enLoopCons = await contactosEnLoop(crows.map((r) => r.contact), { soloActivos: true }).catch(() => new Set<string>())
+    saltadosLoopV2 += crows.filter((r) => enLoopCons.has(r.contact)).length
+    crows = crows.filter((r) => !enLoopCons.has(r.contact))
+    // Traspasados a vendedor: el toque consensuado lo hace el VENDEDOR, no
+    // Vicky (mismo criterio que el batch de arriba).
+    const trasCons = await contactosTraspasados(crows.map((r) => r.contact)).catch(() => new Set<string>())
+    saltadosPtv += crows.filter((r) => trasCons.has(r.contact)).length
+    crows = crows.filter((r) => !trasCons.has(r.contact))
+    if (crows.length) {
+      const elegibles = await supa(`rpc/vic_filter_business_now`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ p_contacts: crows.map((r) => r.contact) }),
+      })
+        .then((r) => (r.ok ? (r.json() as Promise<string[]>) : Promise.resolve([] as string[])))
+        .catch(() => [] as string[])
+      const okSet = new Set(elegibles)
+      consensuado = crows.filter((r) => okSet.has(r.contact))
+    }
+  }
+
+  // (paramsDe usa este mapa para la empresa MX; sin cadencia vieja queda vacío
+  // y el fallback por historial resuelve.)
+  const empresasPorQuote = new Map<string, string>()
+
+  // Correo de reactivación: best-effort, no bloquea ni afecta el conteo del HSM.
+  // La cotizadora self-gatea y filtra internos/prueba; aquí solo evitamos la
+  // llamada si el flag está apagado.
+  let correos = 0
+  async function dispararCorreo(quoteId: string | null): Promise<void> {
+    if (!EMAIL_ENABLED || !quoteId) return
+    try {
+      const r = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/send-reactivation-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(VICKY_COTIZADORA_SECRET ? { "x-vicky-secret": VICKY_COTIZADORA_SECRET } : {}),
+        },
+        body: JSON.stringify({ quoteId }),
+        cache: "no-store",
+      })
+      const data = await r.json().catch(() => null)
+      if (data?.sent) correos++
+    } catch (e) {
+      console.warn(`[reactivation] correo falló quote=${quoteId}:`, e)
+    }
+  }
+
+  let enviados = 0
+  let omitidosSinNombre = 0
+  const esCO = (r: Row) => (r.country || "cl").toLowerCase() === "co"
+  const esMX = (r: Row) => (r.country || "cl").toLowerCase() === "mx"
+  const tagPais = (r: Row) => (esMX(r) ? "(mx)" : esCO(r) ? "(co)" : "")
+  const canalDe = (r: Row) =>
+    esMX(r) ? PERFIL_MX.canal.channelId : esCO(r) ? PERFIL_CO.canal.channelId : undefined
+  const contextoDe = (r: Row, segmento: string) => {
+    const msgs = esMX(r) ? REACT_CONTEXT_MSG_MX : esCO(r) ? REACT_CONTEXT_MSG_CO : REACT_CONTEXT_MSG
+    return msgs[segmento] ?? msgs.preform
+  }
+  // Variables del HSM: CL/CO llevan solo ${nombre}; las plantillas MX llevan
+  // además ${empresa} (Zoho vía el Name de la cotización; historial como
+  // fallback; neutro "tu empresa" si nada resuelve — Meta exige la variable).
+  const paramsDe = async (r: Row, nombre: string): Promise<Record<string, string>> => {
+    if (!esMX(r)) return { nombre }
+    const empresa =
+      (r.formal_quote_id ? empresasPorQuote.get(String(r.formal_quote_id)) : undefined) ||
+      (await empresaDesdeHistorial(r.contact)) ||
+      "tu empresa"
+    return { nombre, empresa }
+  }
+  // Toque consensuado: UN solo envío a la fecha acordada. Elige la plantilla por
+  // segmento (tiene cotización formal → quote; si no → preform) y, tras enviar,
+  // CIERRA el ciclo (no se repite). El cliente ya engagueó, así que no exige el
+  // marcador de preform.
+  // ── GUARDAS DE PROACTIVIDAD (11-sep, orden de Lalo) ───────────────────────
+  // Este cron era el TERCER canal proactivo y el ÚNICO sin guardas: el loop
+  // mira rechazo/autorespuesta/casuística/cliente-existente, el ptv-cron
+  // además pago y onboarding, y acá no se miraba nada. Caso que lo destapó:
+  // Gonzalo (Cond. Los Álamos de Penco) dijo "lo presentaré a la dirección /
+  // cualquier novedad le comento" y siguió recibiendo toques hasta el 09-sep;
+  // al día siguiente Ana Paula tuvo que cerrar el lead a mano. Se cablean las
+  // MISMAS funciones canónicas para que el veredicto sea idéntico en los tres
+  // canales. Un toque omitido CIERRA el ciclo consensuado: es de un solo
+  // disparo, y dejarlo pendiente lo reintenta en cada tick para siempre.
+  const omitidosPorGuarda: Array<{ contact: string; motivo: string }> = []
+  async function cerrarCiclo(r: Row, motivo: string): Promise<void> {
+    await supa(`vic_v3_conversations?id=eq.${r.id}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ followup_status: "cerrado", followup_next_at: null, followup_closed_reason: motivo }),
+    }).catch(() => {})
+    omitidosPorGuarda.push({ contact: r.contact, motivo })
+    console.warn(`[reactivation] consensuado OMITIDO (${motivo}): ${r.contact}`)
+  }
+  // Cotización ya aceptada/pagada/cerrada = nada que reactivar.
+  // `quoteIdsNoAccionables` existía desde la cadencia vieja y quedó HUÉRFANA en
+  // la demolición del 12-ago: el toque consensuado podía salirle a alguien que
+  // ya había aceptado o pagado. Vuelve a aplicarse, en lote.
+  const quotesNoAccionables = await quoteIdsNoAccionables(
+    consensuado.map((r) => String(r.formal_quote_id || "")).filter((q) => /^\d{6,}$/.test(q)),
+  )
+    .then((x) => x.skip)
+    .catch(() => new Set<string>())
+
+  async function motivoDeOmision(r: Row): Promise<string | null> {
+    const q = String(r.formal_quote_id || "")
+    if (q && quotesNoAccionables.has(q)) return "cotizacion_cerrada"
+    // Pago registrado (19-ago) y fase onboarding (25-ago): cero maquinaria
+    // comercial. El pago se lee de las DOS marcas (transferencia y tarjeta).
+    try {
+      const { pagoRegistradoReciente, enFaseOnboarding } = await import("@/lib/loop-v2")
+      if (await enFaseOnboarding(r.contact)) return "onboarding"
+      if (await pagoRegistradoReciente(r.contact)) return "pagado"
+    } catch { /* sin lectura: el toque sigue su camino */ }
+    // Rechazo EN CONTEXTO y autorespuesta (fixes 08 y 09-sep): se lee el
+    // último mensaje del cliente con contenido, saltando cortesías.
+    try {
+      const { posturaRechazoCliente } = await import("@/lib/rechazo-cliente")
+      const postura = posturaRechazoCliente(await fetchHistoryV3(r.contact, 12))
+      if (postura) {
+        const motivo = postura === "autorespuesta" ? "autorespuesta" : "no_interesa"
+        const { mas50CierraLoop } = await import("@/lib/loop-v2")
+        await mas50CierraLoop(r.contact, motivo).catch(() => {})
+        return motivo
+      }
+    } catch { /* sin lectura: el toque sigue su camino */ }
+    // Casuística no-prospecto (trabajador, cliente pidiendo soporte, ex
+    // empleado…). `cliente_ampliacion` NO entra: es VENTA (regla 07-sep).
+    try {
+      const { casuisticaDeContacto, aplicarCasuisticaNoProspecto } = await import("@/lib/casuistica-runtime")
+      const cas = await casuisticaDeContacto(r.contact)
+      if (!cas.esProspecto) {
+        await aplicarCasuisticaNoProspecto(r.contact, cas, "reactivation-cron").catch(() => {})
+        return `casuistica_${cas.tipo}`
+      }
+    } catch { /* sin clasificación: el toque sigue su camino */ }
+    // Cliente existente por CUENTA, SOLO sin cotización formal: con una formal
+    // viva es una AMPLIACIÓN legítima (caso Fernanda / Supermercado Belén).
+    if (!q) {
+      try {
+        const { detectarClienteExistente } = await import("@/lib/cliente-existente")
+        const cli = await detectarClienteExistente(r.contact)
+        if (cli) return "cliente_existente"
+      } catch { /* sin señal de cuenta: el toque sigue su camino */ }
+    }
+    return null
+  }
+
+  let enviadosConsensuado = 0
+  async function enviarConsensuadoLista(list: Row[]) {
+    for (const r of list) {
+      if (enviados >= BATCH) break
+      const omision = await motivoDeOmision(r)
+      if (omision) {
+        await cerrarCiclo(r, omision)
+        continue
+      }
+      const segmento = r.formal_quote_id ? "cotizacion" : "preform"
+      const template = esMX(r)
+        ? segmento === "cotizacion" ? TPL_QUOTE_MX : TPL_PREFORM_MX
+        : esCO(r)
+          ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
+          : segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
+      if (!template) continue
+      let nombre = await nombreDesdeHistorial(r.contact)
+      if (!nombre) {
+        omitidosSinNombre++
+        nombre = "de nuevo"
+        console.warn(`[reactivation] consensuado sin nombre resoluble, va con saludo neutro: ${r.contact}`)
+      }
+      const ok = await sendBotmakerTemplate(r.contact, template, await paramsDe(r, nombre), canalDe(r)).catch(() => false)
+      if (!ok) continue
+      await supa(`vic_v3_conversations?id=eq.${r.id}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          followup_status: "cerrado",
+          followup_next_at: null,
+          followup_closed_reason: "consensuado_enviado",
+        }),
+      }).catch(() => {})
+      enviados++
+      enviadosConsensuado++
+      console.log(`[reactivation] consensuado(${segmento})${tagPais(r)} → ${r.contact}`)
+      await appendAssistantV3(r.contact, contextoDe(r, segmento)).catch(() => {})
+      if (segmento === "cotizacion" && !esCO(r) && !esMX(r)) await dispararCorreo(r.formal_quote_id)
+    }
+  }
+
+  await enviarConsensuadoLista(consensuado)
+
+  return NextResponse.json({
+    ok: true,
+    consensuado: consensuado.length,
+    enviados,
+    enviados_consensuado: enviadosConsensuado,
+    sin_nombre_saludo_neutro: omitidosSinNombre,
+    saltados_loop_v2: saltadosLoopV2,
+    saltados_ptv: saltadosPtv,
+    omitidos_por_guarda: omitidosPorGuarda.length,
+    omitidos: omitidosPorGuarda,
+    correos,
+  })
+}
+
+// pg_cron invoca con net.http_post → aceptar POST además de GET (mismo handler).
+export async function POST(req: Request): Promise<Response> {
+  return GET(req)
+}

@@ -1,5 +1,7 @@
 {
-  "regions": ["gru1"],
+  "regions": [
+    "gru1"
+  ],
   "crons": [
     {
       "path": "/api/reengagement",
@@ -24,6 +26,70 @@
     {
       "path": "/api/reengagement?mode=zoho-sync",
       "schedule": "0 20 * * 1-5"
+    },
+    {
+      "path": "/api/vic-funnel-cron?limit=60",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/vic-wa-espejo-lector",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/vic-zoho-calls-sync",
+      "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/vic-reactivation-cron",
+      "schedule": "0 14 * * 1-5"
+    },
+    {
+      "path": "/api/vic-reactivation-cron",
+      "schedule": "0 18 * * 1-5"
+    },
+    {
+      "path": "/api/vic-deal-stage-cron",
+      "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/vic-crm-hitos-cron",
+      "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/vic-ptv-cron",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/vic-resumen-diario",
+      "schedule": "0 12 * * 1-5"
+    },
+    {
+      "path": "/api/vic-espejo-notas-cron",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/vic-mudos-cron",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/vic-outbound-cadence-cron",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/vic-tombola-audit-cron",
+      "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/vic-espejo-media-cron?limit=8",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/vic-canario",
+      "schedule": "5 * * * *"
+    },
+    {
+      "path": "/api/vic-cierre-semanal?enviar=1",
+      "schedule": "30 10 * * 1"
     }
   ],
   "functions": {
@@ -41,6 +107,15 @@
     },
     "app/api/reengagement/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/vic-meeting-reminders/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/vic-funnel-cron/route.ts": {
+      "maxDuration": 120
+    },
+    "app/api/vic-resumen-diario/route.ts": {
+      "maxDuration": 120
     }
   }
 }

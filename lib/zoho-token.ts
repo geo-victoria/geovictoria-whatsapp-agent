@@ -5,17 +5,28 @@ function getEnv(name: string) {
   return (process.env[name] || "").trim()
 }
 
-async function readTokenFromSupabase(): Promise<string | null> {
+/**
+ * Devuelve el token cacheado JUNTO CON SU VENCIMIENTO REAL.
+ *
+ * Antes devolvía solo el string, y quien lo llamaba le inventaba 50 minutos de
+ * vida contados desde ese instante. Ver getZohoAccessToken para el destrozo
+ * que eso causaba.
+ */
+async function readTokenFromSupabase(): Promise<{ token: string; expiresAt: number } | null> {
   const url = getEnv("SUPABASE_URL")
   const key = getEnv("SUPABASE_SERVICE_ROLE_KEY")
   if (!url || !key) return null
   try {
     const res = await fetch(
-      `${url}/rest/v1/vic_kv?key=eq.zoho_access_token&expires_at=gt.${new Date().toISOString()}&select=value&limit=1`,
+      `${url}/rest/v1/vic_kv?key=eq.zoho_access_token&expires_at=gt.${new Date().toISOString()}&select=value,expires_at&limit=1`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` }, cache: "no-store" }
     )
-    const rows = await res.json() as Array<{ value: string }>
-    return rows?.[0]?.value || null
+    const rows = await res.json() as Array<{ value: string; expires_at: string }>
+    const row = rows?.[0]
+    if (!row?.value) return null
+    const expiresAt = Date.parse(row.expires_at)
+    if (!Number.isFinite(expiresAt)) return null
+    return { token: row.value, expiresAt }
   } catch { return null }
 }
 
@@ -38,6 +49,19 @@ async function saveTokenToSupabase(token: string): Promise<void> {
   } catch { /* ignorar */ }
 }
 
+/**
+ * Renovación FORZADA: ignora ambos cachés y acuña un token nuevo contra Zoho.
+ * Para el camino de recuperación tras un 401 INVALID_TOKEN — Zoho revoca los
+ * access tokens más viejos cuando conviven más de 10 vivos por refresh token
+ * (agente + cotizador + conectores acuñan del mismo), así que un token del
+ * caché puede morir ANTES de su expires_at.
+ */
+export async function renovarZohoAccessToken(): Promise<string> {
+  _cache.token = undefined
+  _cache.expiresAt = undefined
+  return refrescarToken(Date.now())
+}
+
 export async function getZohoAccessToken(): Promise<string> {
   const now = Date.now()
 
@@ -46,15 +70,78 @@ export async function getZohoAccessToken(): Promise<string> {
     return _cache.token
   }
 
-  // 2. Cache persistente en Supabase (entre instancias)
+  // 2. Cache persistente en Supabase (entre instancias).
+  //
+  // CASO REAL (27-jul 14:19, Andirent +573112895086): la reunión se creó en
+  // Cal.com y crear el Lead en Zoho devolvió 401 INVALID_TOKEN. Siete minutos
+  // antes, otra función del mismo deploy había hecho un update de Lead sin
+  // problema con el MISMO token. No era el refresh token: era este caché.
+  //
+  // El bug: se tomaba el token de Supabase y se le estampaba `now + 50 min`
+  // de vida en el caché de proceso, sin mirar cuánto le quedaba de verdad. La
+  // query filtra `expires_at > now()`, así que puede devolver un token con 10
+  // segundos de vida — y la instancia lo daba por bueno durante 50 minutos
+  // más. Como cada función serverless (vic-botmaker-v3, vic-botmaker-co, los
+  // crons) tiene su propio caché en memoria y sus propias instancias
+  // calientes, el resultado era intermitente y sin patrón: una función con
+  // token fresco funcionando al lado de otra sirviendo uno muerto. De ahí que
+  // pareciera "un problema de Colombia" cuando no tenía nada de colombiano.
+  //
+  // Ahora se respeta el vencimiento REAL. Si le quedan menos de 2 minutos, se
+  // ignora y se renueva.
   const cached = await readTokenFromSupabase()
-  if (cached) {
-    _cache.token = cached
-    _cache.expiresAt = now + 50 * 60 * 1000
-    return cached
+  if (cached && cached.expiresAt - now > 2 * 60 * 1000) {
+    _cache.token = cached.token
+    _cache.expiresAt = cached.expiresAt
+    return cached.token
   }
 
   // 3. Renovar token
+  return refrescarToken(now)
+}
+
+/**
+ * Refresco FORZADO, saltándose ambos cachés (proceso y Supabase).
+ *
+ * CASO REAL (17-ago ~13:00 UTC): Zoho REVOCÓ un access token ~1,5 h antes de
+ * su vencimiento declarado (probable tope de tokens vivos por refresh token —
+ * el cotizador y el agente comparten credenciales). getZohoAccessToken confía
+ * en el expires_at guardado, así que TODO el agente quedó ciego a Zoho por
+ * más de una hora (dash sin aceptadas/pagadas, crm-hitos mudo) sin
+ * auto-repararse. Regla nueva: cuando un caller reciba 401 de Zoho, llama
+ * esto UNA vez y reintenta — el refresco además repara el kv para el resto
+ * de los consumidores.
+ */
+export async function getZohoAccessTokenFresco(): Promise<string> {
+  return refrescarToken(Date.now())
+}
+
+/**
+ * fetch a Zoho con Authorization puesto y UN reintento ante 401.
+ *
+ * CASO REAL (17-ago tarde, reporte de Lalo por los ejecutivos): el token
+ * revocado del incidente de la mañana dejó ciego al EDITOR del dash — el
+ * buscador de deals devolvía lista vacía, el prellenado de la calculadora no
+ * cargaba y "¿actualizar o crear nueva?" nunca aparecía (cero cotizaciones
+ * visibles), así que los vendedores terminaron en la calculadora pelada con
+ * el PDF nativo de 4 páginas. El sanador de vic-ptv-cron repara el kv, pero
+ * cada instancia caliente guarda el token muerto en su caché de proceso hasta
+ * 55 min y estos endpoints no reintentaban. Regla: todo camino Zoho
+ * interactivo (un humano esperando la respuesta) pasa por acá.
+ */
+export async function fetchZoho(url: string, init?: RequestInit): Promise<Response> {
+  const armar = (token: string): RequestInit => ({
+    ...init,
+    cache: "no-store",
+    headers: { ...(init?.headers as Record<string, string> | undefined), Authorization: `Zoho-oauthtoken ${token}` },
+  })
+  const res = await fetch(url, armar(await getZohoAccessToken()))
+  if (res.status !== 401) return res
+  console.warn("[fetchZoho] 401 de Zoho — token revocado en caché; refrescando y reintentando")
+  return fetch(url, armar(await getZohoAccessTokenFresco()))
+}
+
+async function refrescarToken(now: number): Promise<string> {
   const domain = getEnv("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
   const res = await fetch(`${domain}/oauth/v2/token`, {
     method: "POST",

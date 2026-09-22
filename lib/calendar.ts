@@ -1,5 +1,3 @@
-import * as chrono from "chrono-node"
-
 const CAL_API_KEY = (process.env.CAL_API_KEY || "").trim()
 const CAL_EVENT_TYPE_ID = (process.env.CAL_EVENT_TYPE_ID || "3188650").trim()
 const CAL_BASE = "https://api.cal.com/v2"
@@ -9,7 +7,6 @@ const CAL_HEADERS = {
   "Content-Type": "application/json",
 }
 
-// Country name → IANA timezone
 const COUNTRY_TIMEZONES: Record<string, string> = {
   Chile: "America/Santiago",
   Argentina: "America/Argentina/Buenos_Aires",
@@ -37,7 +34,6 @@ const COUNTRY_TIMEZONES: Record<string, string> = {
   "United Kingdom": "Europe/London",
 }
 
-// Country name → ISO 3166-1 alpha-2 (for holidays API)
 const COUNTRY_CODES: Record<string, string> = {
   Chile: "CL", Argentina: "AR", Colombia: "CO", México: "MX", Mexico: "MX",
   Perú: "PE", Peru: "PE", Brasil: "BR", Brazil: "BR", Venezuela: "VE",
@@ -51,14 +47,97 @@ export function getTimezone(country: string): string {
   return COUNTRY_TIMEZONES[country] || "America/Santiago"
 }
 
+// Offset (en minutos) de una zona horaria en un instante dado. Positivo al este
+// de UTC, negativo al oeste (ej. America/Santiago en invierno → -240).
+function tzOffsetMinutes(timeZone: string, date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date)
+  const map: Record<string, string> = {}
+  for (const p of parts) map[p.type] = p.value
+  const asUTC = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second),
+  )
+  return (asUTC - date.getTime()) / 60000
+}
+
+/**
+ * Calcula CUÁNDO enviar el recordatorio de una reunión.
+ *   - MEETING_REMINDER_MODE="morning" (default): a las HH:00 (MEETING_REMINDER_HOUR,
+ *     default 8) hora LOCAL del día de la reunión.
+ *   - MEETING_REMINDER_MODE="hours_before": N horas antes del inicio
+ *     (MEETING_REMINDER_LEAD_HOURS, default 3).
+ * Devuelve null si la fecha es inválida.
+ */
+export function computeMeetingReminderAt(startIso: string, timeZone: string): Date | null {
+  const start = new Date(startIso)
+  if (isNaN(start.getTime())) return null
+
+  const mode = (process.env.MEETING_REMINDER_MODE || "morning").trim()
+  if (mode === "hours_before") {
+    const lead = Number(process.env.MEETING_REMINDER_LEAD_HOURS || "3")
+    return new Date(start.getTime() - lead * 60 * 60 * 1000)
+  }
+
+  // "morning": HH:00 hora local del día de la reunión.
+  const hour = Number(process.env.MEETING_REMINDER_HOUR || "8")
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(start) // "YYYY-MM-DD"
+  // Wall time HH:00 de ese día tratada como UTC, corregida por el offset del tz.
+  const wallUTC = new Date(`${ymd}T${String(hour).padStart(2, "0")}:00:00Z`)
+  const offsetMin = tzOffsetMinutes(timeZone, wallUTC)
+  return new Date(wallUTC.getTime() - offsetMin * 60000)
+}
+
 async function getPublicHolidays(year: number, countryCode: string): Promise<string[]> {
   try {
-    const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/${countryCode}`, {
+    const res = await fetch(
+      `https://date.nager.at/api/v3/PublicHolidays/${year}/${countryCode}`,
+      { cache: "no-store" },
+    )
+    if (!res.ok) return []
+    const data = (await res.json()) as Array<{ date: string }>
+    return data.map((h) => h.date)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Segunda fuente de feriados: la tabla vic_holidays (la misma que congela los
+ * relojes de traspaso). Nager.Date es best-effort — si se cae, devolvía [] en
+ * silencio y un feriado se colaba como día agendable (revisión Lalo 07-ago,
+ * Batalla de Boyacá CO). Las dos fuentes se UNEN: basta que una conozca el
+ * feriado para bloquear el día.
+ */
+async function feriadosDeTabla(countryCode: string): Promise<string[]> {
+  try {
+    const url = (process.env.SUPABASE_URL || "").trim()
+    const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+    if (!url || !key) return []
+    const r = await fetch(`${url}/rest/v1/vic_holidays?country=eq.${countryCode}&select=d`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
       cache: "no-store",
     })
-    if (!res.ok) return []
-    const data = await res.json() as Array<{ date: string }>
-    return data.map((h) => h.date) // "2026-01-01" format
+    if (!r.ok) return []
+    const rows = (await r.json().catch(() => [])) as Array<{ d?: string }>
+    return rows.map((x) => String(x.d || "").slice(0, 10)).filter(Boolean)
   } catch {
     return []
   }
@@ -70,131 +149,55 @@ function isWeekend(date: Date): boolean {
 }
 
 export async function getAvailableSlots(country: string): Promise<string[]> {
-  const countryCode = COUNTRY_CODES[country] || "CL"
+  if (!CAL_API_KEY) return []
+
   const tz = getTimezone(country)
-
-  const now = new Date()
-  // Min start: 25h from now — ensures slots are always bookable by Cal.com
-  const minStart = new Date(now.getTime() + 25 * 60 * 60 * 1000)
-  const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) // 2 weeks ahead
-
-  const year = now.getFullYear()
-  const nextYear = year + 1
-  const [holidays, holidaysNext] = await Promise.all([
+  const countryCode = COUNTRY_CODES[country] || "CL"
+  const year = new Date().getFullYear()
+  const [holidays, holidaysNext, holidaysTabla] = await Promise.all([
     getPublicHolidays(year, countryCode),
-    getPublicHolidays(nextYear, countryCode),
+    getPublicHolidays(year + 1, countryCode),
+    feriadosDeTabla(countryCode),
   ])
-  const allHolidays = new Set([...holidays, ...holidaysNext])
+  const allHolidays = new Set([...holidays, ...holidaysNext, ...holidaysTabla])
 
-  const res = await fetch(
-    `${CAL_BASE}/slots/available?eventTypeId=${CAL_EVENT_TYPE_ID}&startTime=${minStart.toISOString()}&endTime=${end.toISOString()}&timeZone=${encodeURIComponent(tz)}`,
-    { headers: CAL_HEADERS, cache: "no-store" }
-  )
+  // Cal.com decide el "minimum booking notice" por su Event Type — no aplicamos
+  // buffer manual aquí. Pedimos slots desde ahora; Cal.com filtra los inválidos.
+  const now = new Date()
+  const start = now
+  const end = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000)
 
-  if (!res.ok) {
-    console.error("[calendar] Cal.com slots error:", await res.text())
+  const url =
+    `${CAL_BASE}/slots/available?eventTypeId=${CAL_EVENT_TYPE_ID}` +
+    `&startTime=${start.toISOString()}&endTime=${end.toISOString()}` +
+    `&timeZone=${encodeURIComponent(tz)}`
+
+  try {
+    const res = await fetch(url, { headers: CAL_HEADERS, cache: "no-store" })
+    if (!res.ok) {
+      console.error("[calendar] slots/available error:", res.status, await res.text().catch(() => ""))
+      return []
+    }
+    const data = (await res.json()) as { data?: { slots?: Record<string, Array<{ time: string }>> } }
+    const slotsByDay = data.data?.slots || {}
+
+    const valid: string[] = []
+    for (const day of Object.keys(slotsByDay).sort()) {
+      if (isWeekend(new Date(day + "T12:00:00Z"))) continue
+      if (allHolidays.has(day)) continue
+      for (const s of slotsByDay[day]) valid.push(s.time)
+    }
+
+    if (valid.length === 0) return []
+
+    // Devuelve 3 slots: el primero, uno medio, y uno cercano al final
+    const indices = [0, Math.floor(valid.length / 2), valid.length - 1]
+    const unique = Array.from(new Set(indices.map((i) => valid[i])))
+    return unique
+  } catch (e) {
+    console.error("[calendar] getAvailableSlots exception:", e)
     return []
   }
-
-  const data = await res.json() as { data?: { slots?: Record<string, Array<{ time: string }>> } }
-  const slotsByDay = data.data?.slots || {}
-
-  const validDays: Array<{ day: string; slots: Array<{ time: string }> }> = []
-  const days = Object.keys(slotsByDay).sort()
-
-  for (const day of days) {
-    if (isWeekend(new Date(day + "T12:00:00Z"))) continue
-    if (allHolidays.has(day)) continue
-    const daySlots = slotsByDay[day]
-    if (!daySlots?.length) continue
-    validDays.push({ day, slots: daySlots })
-    if (validDays.length >= 5) break
-  }
-
-  if (validDays.length === 0) return []
-
-  // Elegir slots variando la hora del día (mañana/tarde) para no mostrar siempre las 09:00
-  function pickSlotNearHour(slots: Array<{ time: string }>, targetHour: number): string {
-    let best = slots[0]
-    let bestDiff = Infinity
-    for (const s of slots) {
-      const localHour = parseInt(
-        new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(new Date(s.time))
-      )
-      const diff = Math.abs(localHour - targetHour)
-      if (diff < bestDiff) { bestDiff = diff; best = s }
-    }
-    return best.time
-  }
-
-  // Alterna: día 1 → mañana (9h), día 2 → tarde (15h), día 3 → mañana (11h)
-  const targetHours = [9, 15, 11, 14, 10]
-  const result: string[] = []
-  for (let i = 0; i < validDays.length && result.length < 3; i++) {
-    result.push(pickSlotNearHour(validDays[i].slots, targetHours[i] ?? 9))
-  }
-
-  // Si hay menos de 3 días, completar con slots adicionales del primer día
-  if (result.length < 3 && validDays.length > 0) {
-    for (const s of validDays[0].slots) {
-      if (result.length >= 3) break
-      if (!result.includes(s.time)) result.push(s.time)
-    }
-  }
-
-  return result
-}
-
-// Detecta qué slot eligió el usuario usando número explícito o lenguaje natural (chrono-node)
-export function matchSlotFromMessage(message: string, pendingSlots: string[], tz: string): number | null {
-  const lower = message.toLowerCase()
-
-  // Selección por número explícito
-  if (/\b1\b|primer[ao]/.test(lower) && pendingSlots[0]) return 1
-  if (/\b2\b|segund[ao]/.test(lower) && pendingSlots[1]) return 2
-  if (/\b3\b|tercer[ao]/.test(lower) && pendingSlots[2]) return 3
-
-  // Si el mensaje es una pregunta o negación, dejarlo al LLM
-  if (
-    message.includes("?") ||
-    /\b(puedes|tienes|hay|puede|tiene|podrías|podría|será|sería|no puede|no hay|no tienen)\b/i.test(lower) ||
-    /^(pero|no |si |¿|oye|oiga|acaso)/i.test(lower.trim())
-  ) {
-    return null
-  }
-
-  // Parseo de lenguaje natural con chrono-node en español
-  const parsed = chrono.es.parse(message, new Date(), { forwardDate: true })
-  if (!parsed.length) return null
-
-  const referenceDate = parsed[0].start.date()
-
-  // Encontrar el slot más cercano al tiempo de referencia
-  let bestIndex = -1
-  let bestDiffMs = Infinity
-
-  for (let i = 0; i < pendingSlots.length; i++) {
-    const diffMs = Math.abs(new Date(pendingSlots[i]).getTime() - referenceDate.getTime())
-    if (diffMs < bestDiffMs) {
-      bestDiffMs = diffMs
-      bestIndex = i
-    }
-  }
-
-  if (bestIndex < 0 || bestDiffMs > 72 * 60 * 60 * 1000) return null
-
-  // Si el usuario especificó una hora concreta, verificar que el slot coincida (±3h)
-  // Evita confirmar "martes a las 15h" cuando el slot disponible es a las 9h
-  if (parsed[0].start.isCertain("hour")) {
-    const userHour = parsed[0].start.get("hour") ?? 0
-    const slotLocalHour = parseInt(
-      new Intl.DateTimeFormat("en-US", { timeZone: tz || "America/Santiago", hour: "numeric", hour12: false })
-        .format(new Date(pendingSlots[bestIndex]))
-    )
-    if (Math.abs(userHour - slotLocalHour) > 3) return null
-  }
-
-  return bestIndex + 1
 }
 
 const DAYS_ES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
@@ -204,113 +207,235 @@ const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July
 const DAYS_PT = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"]
 const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
 
-function formatSlotLabel(isoTime: string, tz: string, language: string): string {
-  const date = new Date(isoTime)
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    weekday: "short", day: "numeric", month: "numeric",
-    hour: "numeric", minute: "2-digit", hour12: false,
-  }).formatToParts(date)
+/** Offset (en minutos) de una zona horaria en un instante dado. */
+function offsetEnMinutos(tz: string, d: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(d)
+  const name = parts.find((p) => p.type === "timeZoneName")?.value || "GMT+0"
+  const m = name.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/)
+  if (!m) return 0
+  const hh = parseInt(m[1], 10)
+  const mm = m[2] ? parseInt(m[2], 10) : 0
+  return hh * 60 + (hh < 0 ? -mm : mm)
+}
 
-  const get = (type: string) => parts.find(p => p.type === type)?.value || ""
-  const dow = new Date(date.toLocaleString("en-US", { timeZone: tz })).getDay()
-  const month = parseInt(get("month")) - 1
-  const day = get("day")
-  const hour = get("hour").padStart(2, "0")
-  const min = get("minute")
+/**
+ * Normaliza un slot ISO escrito por el MODELO: la HORA DE PARED manda.
+ *
+ * CASO QUE ORIGINA ESTO (Valeska / Tri-Stone, 28-jul): la tool ofreció slots
+ * correctos (15:00/15:20/15:40 de Chile), la clienta eligió "15:40" y el
+ * modelo construyó el slotIso A MANO como 2026-07-31T15:40:00-03:00 —
+ * asumiendo el offset de VERANO de Chile. En julio Chile es -04, así que ese
+ * string es el instante 14:40 local: el slot de las 14:40 también estaba
+ * libre, la verificación dio "disponible_exacto" y la reunión nació una hora
+ * antes de lo que la clienta confirmó.
+ *
+ * Regla: si el string declara un offset distinto al REAL de la zona en esa
+ * fecha, la hora escrita (lo que el cliente leyó y confirmó) se reinterpreta
+ * en la zona correcta. Los ISO en Z o sin offset (vienen de la tool de
+ * slots, son instantes confiables) y los de offset correcto pasan intactos.
+ */
+export function normalizarSlotIso(iso: string, tz: string): string {
+  const m = String(iso || "")
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})$/)
+  if (!m) return iso
+  const [, y, mo, d, h, mi, s, off] = m
+  if (off === "Z") return iso
+  const declarado = new Date(iso)
+  if (isNaN(declarado.getTime())) return iso
+  const offM = off.match(/([+-])(\d{2}):?(\d{2})/)
+  const offDeclarado = offM ? (offM[1] === "-" ? -1 : 1) * (+offM[2] * 60 + +offM[3]) : 0
+  const offReal = offsetEnMinutos(tz, declarado)
+  if (offDeclarado === offReal) return iso
+  const wallUtc = Date.UTC(+y, +mo - 1, +d, +h, +mi, +(s || 0))
+  let instante = wallUtc - offReal * 60000
+  // Segunda pasada por si la fecha cae justo en un cambio de horario.
+  const offReal2 = offsetEnMinutos(tz, new Date(instante))
+  if (offReal2 !== offReal) instante = wallUtc - offReal2 * 60000
+  const normalizado = new Date(instante).toISOString()
+  console.warn(
+    `[calendar] slotIso con offset ${off} ≠ ${tz} (real ${offReal / -60 >= 0 ? "-" : "+"}${Math.abs(offReal / 60)}): ${iso} → ${normalizado} (la hora de pared manda)`,
+  )
+  return normalizado
+}
+
+function formatSlotLabel(iso: string, country: string, language = "es"): string {
+  const tz = getTimezone(country)
+  const d = new Date(iso)
+  const dayName = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" })
+    .format(d)
+    .toLowerCase()
+  const dayIndex = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"].indexOf(dayName)
+  const dayNum = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, day: "numeric" }).format(d))
+  const monthName = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "long" })
+    .format(d)
+    .toLowerCase()
+  const monthIndex = ["january","february","march","april","may","june","july","august","september","october","november","december"].indexOf(monthName)
+
+  const timeStr = new Intl.DateTimeFormat("es-CL", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false }).format(d)
 
   if (language === "en") {
-    return `${DAYS_EN[dow]} ${MONTHS_EN[month]} ${day} at ${hour}:${min}`
+    return `${DAYS_EN[dayIndex]} ${dayNum} ${MONTHS_EN[monthIndex]} at ${timeStr} hrs`
+  } else if (language === "pt") {
+    return `${DAYS_PT[dayIndex]} ${dayNum} de ${MONTHS_PT[monthIndex]} às ${timeStr} hrs`
   }
-  if (language === "pt") {
-    return `${DAYS_PT[dow]}, ${day} de ${MONTHS_PT[month]} às ${hour}h${min !== "00" ? min : ""}`
+  return `${DAYS_ES[dayIndex]} ${dayNum} de ${MONTHS_ES[monthIndex]} a las ${timeStr} hrs`
+}
+
+export function matchSlotFromMessage(message: string, pendingSlots: string[], tz: string): number | null {
+  if (!message || pendingSlots.length === 0) return null
+  const m = message.toLowerCase().trim()
+
+  const ordinals: Record<string, number> = {
+    "primero": 0, "primera": 0, "el primero": 0, "uno": 0, "1": 0, "el 1": 0,
+    "segundo": 1, "segunda": 1, "el segundo": 1, "dos": 1, "2": 1, "el 2": 1,
+    "tercero": 2, "tercera": 2, "el tercero": 2, "tres": 2, "3": 2, "el 3": 2,
   }
-  return `${DAYS_ES[dow]} ${day} de ${MONTHS_ES[month]} a las ${hour}:${min} hrs`
+  for (const [key, idx] of Object.entries(ordinals)) {
+    if (m === key || m.includes(` ${key} `) || m.endsWith(` ${key}`) || m.startsWith(`${key} `)) {
+      if (idx < pendingSlots.length) return idx
+    }
+  }
+
+  const daysInMessage: number[] = []
+  DAYS_ES.forEach((d, i) => { if (m.includes(d)) daysInMessage.push(i) })
+  if (daysInMessage.length > 0) {
+    for (let i = 0; i < pendingSlots.length; i++) {
+      const slotDate = new Date(pendingSlots[i])
+      const slotDayName = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(slotDate).toLowerCase()
+      const slotDayIndex = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"].indexOf(slotDayName)
+      if (daysInMessage.includes(slotDayIndex)) return i
+    }
+  }
+
+  const hourMatch = m.match(/(\d{1,2})(?:\s*hrs?|\s*h|:\d{2})?/)
+  if (hourMatch) {
+    const hour = parseInt(hourMatch[1])
+    for (let i = 0; i < pendingSlots.length; i++) {
+      const slotHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).format(new Date(pendingSlots[i])))
+      if (slotHour === hour) return i
+    }
+  }
+
+  if (pendingSlots.length === 1) {
+    if (/(sí|si|ok|dale|listo|vale|perfecto|confirmo|me sirve|me funciona)/i.test(m)) {
+      return 0
+    }
+  }
+
+  return null
+}
+
+/** Etiqueta legible de un slot ("martes 21 de julio a las 09:00 hrs"). */
+export function etiquetaSlot(iso: string, country: string, language = "es"): string {
+  return formatSlotLabel(iso, country, language)
+}
+
+/**
+ * Calendario de los próximos N días ("vie 17-jul, sáb 18-jul, ...") para el
+ * anclaje temporal del prompt. Motivo (bug 17-jul, agenda CO): el modelo
+ * calcula MAL los días de la semana ("lunes 21" cuando el 21 es martes) y un
+ * cliente que anota el día errado no llega a su reunión. Con la tabla en el
+ * prompt no hay aritmética de calendario que hacer.
+ */
+export function calendarioProximosDias(timeZone: string, dias = 14): string {
+  const fmt = new Intl.DateTimeFormat("es-CL", {
+    timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  })
+  const out: string[] = []
+  for (let i = 0; i < dias; i++) {
+    const d = new Date(Date.now() + i * 24 * 60 * 60 * 1000)
+    out.push(fmt.format(d))
+  }
+  return out.join(" · ")
 }
 
 export function formatSlotsForProspect(slots: string[], country: string, language = "es"): string {
-  const tz = getTimezone(country)
-  const bullets = ["•", "•", "•"]
-  return slots.map((isoTime, i) => `${bullets[i]} ${formatSlotLabel(isoTime, tz, language)}`).join("\n")
+  if (slots.length === 0) return ""
+  return slots.map((s, i) => `${i + 1}. ${formatSlotLabel(s, country, language)}`).join("\n")
 }
 
-// Busca slots en Cal.com cerca de la fecha/hora preferida por el usuario
 export async function getSlotsByPreference(
   preferredDate: Date,
   country: string,
-  preferredLocalHour?: number
+  preferredHour?: number,
 ): Promise<string[]> {
+  if (!CAL_API_KEY) return []
+
   const tz = getTimezone(country)
   const countryCode = COUNTRY_CODES[country] || "CL"
-  const now = new Date()
-  const minStart = new Date(now.getTime() + 25 * 60 * 60 * 1000)
-
-  // Ventana: desde el día anterior a la fecha preferida hasta 5 días después
-  const windowStart = new Date(Math.max(minStart.getTime(), preferredDate.getTime() - 24 * 60 * 60 * 1000))
-  const windowEnd = new Date(preferredDate.getTime() + 6 * 24 * 60 * 60 * 1000)
-
-  const year = now.getFullYear()
-  const [holidays, holidaysNext] = await Promise.all([
+  const year = new Date().getFullYear()
+  const [holidays, holidaysNext, holidaysTabla] = await Promise.all([
     getPublicHolidays(year, countryCode),
     getPublicHolidays(year + 1, countryCode),
+    feriadosDeTabla(countryCode),
   ])
-  const allHolidays = new Set([...holidays, ...holidaysNext])
+  const allHolidays = new Set([...holidays, ...holidaysNext, ...holidaysTabla])
 
-  const res = await fetch(
-    `${CAL_BASE}/slots/available?eventTypeId=${CAL_EVENT_TYPE_ID}&startTime=${windowStart.toISOString()}&endTime=${windowEnd.toISOString()}&timeZone=${encodeURIComponent(tz)}`,
-    { headers: CAL_HEADERS, cache: "no-store" }
-  )
-  if (!res.ok) return []
+  // Cal.com decide el "minimum booking notice" — no aplicamos buffer manual.
+  const now = new Date()
+  const start = new Date(Math.max(now.getTime(), preferredDate.getTime() - 24 * 60 * 60 * 1000))
+  const end = new Date(preferredDate.getTime() + 6 * 24 * 60 * 60 * 1000)
 
-  const data = await res.json() as { data?: { slots?: Record<string, Array<{ time: string }>> } }
-  const slotsByDay = data.data?.slots || {}
+  const url =
+    `${CAL_BASE}/slots/available?eventTypeId=${CAL_EVENT_TYPE_ID}` +
+    `&startTime=${start.toISOString()}&endTime=${end.toISOString()}` +
+    `&timeZone=${encodeURIComponent(tz)}`
 
-  const allSlots: string[] = []
-  for (const day of Object.keys(slotsByDay).sort()) {
-    if (isWeekend(new Date(day + "T12:00:00Z"))) continue
-    if (allHolidays.has(day)) continue
-    for (const s of slotsByDay[day]) allSlots.push(s.time)
-  }
-  if (!allSlots.length) return []
+  try {
+    const res = await fetch(url, { headers: CAL_HEADERS, cache: "no-store" })
+    if (!res.ok) return []
+    const data = (await res.json()) as { data?: { slots?: Record<string, Array<{ time: string }>> } }
+    const slotsByDay = data.data?.slots || {}
 
-  // Ordenar por proximidad: primero por diferencia de hora del día, luego por fecha
-  allSlots.sort((a, b) => {
-    const getHour = (iso: string) => parseInt(
-      new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(new Date(iso))
-    )
-    const dateDiffA = Math.abs(new Date(a).getTime() - preferredDate.getTime())
-    const dateDiffB = Math.abs(new Date(b).getTime() - preferredDate.getTime())
-    if (preferredLocalHour !== undefined) {
-      const hourDiffA = Math.abs(getHour(a) - preferredLocalHour)
-      const hourDiffB = Math.abs(getHour(b) - preferredLocalHour)
-      if (hourDiffA !== hourDiffB) return hourDiffA - hourDiffB
+    const valid: string[] = []
+    for (const day of Object.keys(slotsByDay).sort()) {
+      if (isWeekend(new Date(day + "T12:00:00Z"))) continue
+      if (allHolidays.has(day)) continue
+      for (const s of slotsByDay[day]) valid.push(s.time)
     }
-    return dateDiffA - dateDiffB
-  })
+    if (valid.length === 0) return []
 
-  // Retornar hasta 3 slots, prefiriendo días distintos
-  const result: string[] = []
-  const usedDays = new Set<string>()
-  for (const slot of allSlots) {
-    if (result.length >= 3) break
-    const day = slot.split("T")[0]
-    if (!usedDays.has(day)) { result.push(slot); usedDays.add(day) }
+    if (preferredHour !== undefined) {
+      const scored = valid.map((slot) => {
+        const slotHour = parseInt(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).format(new Date(slot)))
+        const distance = Math.abs(slotHour - preferredHour)
+        return { slot, distance }
+      })
+      scored.sort((a, b) => a.distance - b.distance)
+      return scored.slice(0, 3).map((s) => s.slot)
+    }
+
+    if (valid.length <= 3) return valid
+    const indices = [0, Math.floor(valid.length / 2), valid.length - 1]
+    return indices.map((i) => valid[i])
+  } catch {
+    return []
   }
-  for (const slot of allSlots) {
-    if (result.length >= 3) break
-    if (!result.includes(slot)) result.push(slot)
-  }
-  return result.slice(0, 3)
 }
 
-// Extrae fecha y hora preferida de un mensaje en lenguaje natural
 export function parsePreferredTime(message: string): { date: Date; hour?: number } | null {
-  const parsed = chrono.es.parse(message, new Date(), { forwardDate: true })
-  if (!parsed.length) return null
-  return {
-    date: parsed[0].start.date(),
-    hour: parsed[0].start.isCertain("hour") ? (parsed[0].start.get("hour") ?? undefined) : undefined,
-  }
+  // Stub legacy. V3 ya no la usa. V1/V2 podría seguir invocándola desde
+  // vic-botmaker/route.ts; devolvemos null para no romper imports existentes.
+  if (!message) return null
+  return null
+}
+
+/** Persona (organizer u host) tal como viene en los payloads de bookings v2. */
+type CalPerson = { name?: string; email?: string; displayEmail?: string }
+
+/**
+ * Email del ejecutivo asignado a un booking. Prioriza hosts[0] (en eventos de
+ * team round-robin ES el host asignado; el organizer puede ser el dueño de la
+ * cuenta de la API) y acepta displayEmail como fallback de email (Cal.com no
+ * siempre manda ambos).
+ */
+function extractHostEmail(d?: { organizer?: CalPerson; hosts?: CalPerson[] }): string | undefined {
+  const h = d?.hosts?.[0]
+  return h?.email || h?.displayEmail || d?.organizer?.email || d?.organizer?.displayEmail || undefined
 }
 
 export async function bookMeeting(params: {
@@ -319,93 +444,377 @@ export async function bookMeeting(params: {
   prospectEmail: string
   language?: string
   timeZone?: string
-}): Promise<{ success: boolean; bookingId?: string; meetingUrl?: string; organizerEmail?: string; error?: string }> {
-  const { slotIso, prospectName, prospectEmail, language = "es", timeZone = "America/Santiago" } = params
+  /**
+   * Event type de Cal.com donde agendar (default: el chileno CAL_EVENT_TYPE_ID).
+   *
+   * NOTA (28-jul): NO existe forma de forzar un host dentro de un evento
+   * round-robin por la API 2024-08-13 — se probó `teamMemberEmail` de primer
+   * nivel con la key real y la API lo rechaza con 400 "property
+   * teamMemberEmail should not exist" (solo existe dentro de `routing`, que
+   * exige formularios de ruteo). El camino para "la reunión es del dueño de
+   * la cotización" es agendar en el EVENT TYPE PERSONAL/managed del dueño,
+   * pasando su eventTypeId aquí.
+   */
+  eventTypeId?: string
+  /** Invitados adicionales (guests de Cal): p. ej. el PROPIETARIO del deal
+   * (Lalo 31-jul — la reunión queda con el SDR del round-robin y el dueño
+   * del deal asiste como invitado). Se dedupe contra el prospecto. */
+  guestEmails?: string[]
+}): Promise<{ success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string } | { success: false; error: string }> {
+  if (!CAL_API_KEY) {
+    return { success: false, error: "CAL_API_KEY no configurada en el entorno." }
+  }
+
+  const {
+    prospectName,
+    prospectEmail,
+    language = "es",
+    timeZone = "America/Santiago",
+  } = params
+  // La hora de pared manda: corrige offsets inventados por el modelo.
+  const slotIso = normalizarSlotIso(params.slotIso, timeZone)
 
   const meetingGuest = (process.env.CAL_MEETING_GUEST_EMAIL || "egomez@geovictoria.com").trim()
+  const guests = [
+    ...new Set(
+      [meetingGuest, ...(params.guestEmails || [])]
+        .map((g) => (g || "").trim().toLowerCase())
+        .filter((g) => g && g !== prospectEmail.trim().toLowerCase()),
+    ),
+  ]
   const body = {
-    eventTypeId: Number(CAL_EVENT_TYPE_ID),
+    eventTypeId: Number(params.eventTypeId || CAL_EVENT_TYPE_ID),
     start: slotIso,
-    attendee: {
-      name: prospectName,
-      email: prospectEmail,
-      timeZone,
-      language,
-    },
-    guests: meetingGuest && meetingGuest !== prospectEmail ? [meetingGuest] : [],
-    metadata: {
-      source: "whatsapp_vicky",
-    },
+    attendee: { name: prospectName, email: prospectEmail, timeZone, language },
+    guests,
+    metadata: { source: "whatsapp_vicky_v3" },
   }
 
-  const res = await fetch(`${CAL_BASE}/bookings`, {
-    method: "POST",
-    headers: CAL_HEADERS,
-    body: JSON.stringify(body),
-    cache: "no-store",
-  })
+  try {
+    const res = await fetch(`${CAL_BASE}/bookings`, {
+      method: "POST",
+      headers: CAL_HEADERS,
+      body: JSON.stringify(body),
+      cache: "no-store",
+    })
 
-  const data = await res.json() as {
-    status?: string
-    data?: {
-      uid?: string
-      meetingUrl?: string
-      id?: number
-      start?: string
+    const data = (await res.json()) as {
       status?: string
-      organizer?: { name?: string; email?: string }
-      hosts?: Array<{ name?: string; email?: string }>
+      data?: {
+        uid?: string
+        meetingUrl?: string
+        id?: number
+        start?: string
+        status?: string
+        organizer?: CalPerson
+        hosts?: CalPerson[]
+      }
+      error?: unknown
+      message?: string
+      statusCode?: number
     }
-    error?: unknown
-    message?: string
-    statusCode?: number
-  }
 
-  // Consideramos éxito solo si hay uid y el booking no quedó en estado inválido
-  const uid = data.data?.uid || data.data?.id
-  const bookingStatus = data.data?.status
-  if (!res.ok || data.status === "error" || data.statusCode || !uid) {
-    const errMsg = data.message || JSON.stringify(data.error || data).slice(0, 200)
-    console.error("[calendar] booking failed:", res.status, errMsg)
-    return { success: false, error: errMsg }
-  }
-  if (bookingStatus && !["accepted", "pending"].includes(String(bookingStatus).toLowerCase())) {
-    console.error("[calendar] booking unexpected status:", bookingStatus)
-    return { success: false, error: `Booking status: ${bookingStatus}` }
-  }
-  console.log("[calendar] booking created:", uid, "status:", bookingStatus)
+    const uid = data.data?.uid || data.data?.id
+    const bookingStatus = data.data?.status
+    if (!res.ok || data.status === "error" || data.statusCode || !uid) {
+      const errMsg = data.message || JSON.stringify(data.error || data).slice(0, 300)
+      console.error("[calendar] booking failed:", res.status, errMsg)
+      return { success: false, error: errMsg }
+    }
+    if (bookingStatus && !["accepted", "pending"].includes(String(bookingStatus).toLowerCase())) {
+      console.error("[calendar] booking unexpected status:", bookingStatus)
+      return { success: false, error: `Booking status: ${bookingStatus}` }
+    }
+    console.log("[calendar] booking created:", uid, "status:", bookingStatus)
 
-  let organizerEmail =
-    data.data?.organizer?.email ||
-    data.data?.hosts?.[0]?.email ||
-    undefined
+    let organizerEmail = extractHostEmail(data.data)
 
-  // Cal.com Round Robin no siempre devuelve el host en la respuesta de creación
-  // Si falta, consultamos el booking por UID para obtener el organizer asignado
-  if (!organizerEmail && uid) {
-    try {
-      const bookingRes = await fetch(`${CAL_BASE}/bookings/${uid}`, {
-        headers: CAL_HEADERS,
-        cache: "no-store",
-      })
-      if (bookingRes.ok) {
-        const bookingData = await bookingRes.json() as {
-          data?: { organizer?: { email?: string }; hosts?: Array<{ email?: string }> }
+    // Refetch con reintento: en bookings de team round-robin la respuesta del
+    // POST puede venir sin el email del host (o solo con displayEmail), y el
+    // GET inmediato a veces llega antes de que el host quede materializado.
+    // Sin este email, el Lead en Zoho cae al owner default (bug prueba CO 13-jul).
+    for (let intento = 0; !organizerEmail && uid && intento < 2; intento++) {
+      if (intento > 0) await new Promise((r) => setTimeout(r, 2000))
+      try {
+        const bookingRes = await fetch(`${CAL_BASE}/bookings/${uid}`, {
+          headers: CAL_HEADERS,
+          cache: "no-store",
+        })
+        if (bookingRes.ok) {
+          const bookingData = (await bookingRes.json()) as {
+            data?: { organizer?: CalPerson; hosts?: CalPerson[] }
+          }
+          organizerEmail = extractHostEmail(bookingData.data)
         }
-        organizerEmail =
-          bookingData.data?.organizer?.email ||
-          bookingData.data?.hosts?.[0]?.email ||
-          undefined
+      } catch {
+        // Fallo silencioso — el Lead quedará con owner default
+      }
+    }
+    if (!organizerEmail) {
+      console.error(
+        `[calendar] booking ${uid}: sin email de host — organizer/hosts:`,
+        JSON.stringify({ organizer: data.data?.organizer, hosts: data.data?.hosts }).slice(0, 400),
+      )
+    }
+
+    return {
+      success: true,
+      bookingId: String(uid),
+      meetingUrl: data.data?.meetingUrl,
+      organizerEmail,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "error de red contactando Cal.com"
+    console.error("[calendar] bookMeeting exception:", e)
+    return { success: false, error: msg }
+  }
+}
+
+/**
+ * Reagenda un booking existente a un nuevo slot, MANTENIENDO el mismo host.
+ * Usa el endpoint dedicado de Cal.com (POST /bookings/{uid}/reschedule), que NO
+ * re-corre el Round Robin: conserva el ejecutivo asignado y cancela la reunión
+ * vieja automáticamente. (Para garantizar el mismo host en un event type Round
+ * Robin, este debe tener activado "reschedule with same round-robin host".)
+ */
+export async function rescheduleMeeting(params: {
+  bookingUid: string
+  newSlotIso: string
+  reason?: string
+}): Promise<
+  | { success: true; bookingId: string; meetingUrl?: string; organizerEmail?: string; startIso: string }
+  | { success: false; error: string }
+> {
+  if (!CAL_API_KEY) return { success: false, error: "CAL_API_KEY no configurada en el entorno." }
+  const { bookingUid, newSlotIso, reason } = params
+
+  try {
+    const res = await fetch(`${CAL_BASE}/bookings/${encodeURIComponent(bookingUid)}/reschedule`, {
+      method: "POST",
+      headers: CAL_HEADERS,
+      body: JSON.stringify({
+        start: newSlotIso,
+        reschedulingReason: reason || "Reagendado por el cliente vía WhatsApp",
+      }),
+      cache: "no-store",
+    })
+
+    const data = (await res.json()) as {
+      status?: string
+      data?: {
+        uid?: string
+        id?: number
+        start?: string
+        status?: string
+        meetingUrl?: string
+        organizer?: CalPerson
+        hosts?: CalPerson[]
+      }
+      message?: string
+      error?: unknown
+      statusCode?: number
+    }
+
+    const uid = data.data?.uid || data.data?.id
+    if (!res.ok || data.status === "error" || data.statusCode || !uid) {
+      const errMsg = data.message || JSON.stringify(data.error || data).slice(0, 300)
+      console.error("[calendar] reschedule failed:", res.status, errMsg)
+      return { success: false, error: errMsg }
+    }
+
+    console.log("[calendar] reschedule ok:", bookingUid, "→", uid, "start:", data.data?.start)
+
+    // El organizer de la respuesta del reschedule no es confiable (devuelve el
+    // host viejo). Re-consultamos el booking nuevo para obtener el host REAL
+    // asignado (Cal.com re-corre el round-robin al reagendar por API).
+    let organizerEmail = extractHostEmail(data.data)
+    try {
+      const fresh = await fetch(`${CAL_BASE}/bookings/${uid}`, { headers: CAL_HEADERS, cache: "no-store" })
+      if (fresh.ok) {
+        const fd = (await fresh.json()) as {
+          data?: { organizer?: CalPerson; hosts?: CalPerson[] }
+        }
+        organizerEmail = extractHostEmail(fd.data) || organizerEmail
       }
     } catch {
-      // fallo silencioso — el lead quedará sin owner hasta que el cron lo corrija
+      // si falla el re-fetch, queda el de la respuesta (mejor que nada)
+    }
+
+    return {
+      success: true,
+      bookingId: String(uid),
+      meetingUrl: data.data?.meetingUrl,
+      organizerEmail,
+      startIso: data.data?.start || newSlotIso,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "error de red contactando Cal.com"
+    console.error("[calendar] rescheduleMeeting exception:", e)
+    return { success: false, error: msg }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Addendum V3: checkSlotAvailability para flujo cliente-propone
+// ─────────────────────────────────────────────────────────────────────────────
+// En V3 el cliente propone día/hora y Vicky verifica disponibilidad. Si el
+// slot exacto no está, Vicky ofrece alternativas cercanas (no propone primero).
+// Reusa COUNTRY_CODES, isWeekend y getPublicHolidays definidos arriba.
+//
+// Cal.com decide el "minimum booking notice" por su Event Type — no aplicamos
+// validación local de cuán pronto puede ser la fecha. Solo rechazamos fechas
+// pasadas (estrictamente menores a now). El resto lo decide Cal.com.
+
+export type CheckSlotResult =
+  | { ok: true; estado: "disponible_exacto"; slotIso: string }
+  | { ok: true; estado: "alternativas_mismo_dia"; alternativas: string[] }
+  | { ok: true; estado: "alternativas_dias_cercanos"; alternativas: string[] }
+  | { ok: true; estado: "sin_disponibilidad" }
+  | { ok: false; error: string }
+
+const MATCH_TOLERANCE_MS_V3 = 15 * 60 * 1000 // ±15 min
+
+async function fetchSlotsRawV3(
+  startTime: Date,
+  endTime: Date,
+  tz: string,
+  eventTypeId: string = CAL_EVENT_TYPE_ID,
+): Promise<Record<string, Array<{ time: string }>>> {
+  const url =
+    `${CAL_BASE}/slots/available?eventTypeId=${eventTypeId}` +
+    `&startTime=${startTime.toISOString()}&endTime=${endTime.toISOString()}` +
+    `&timeZone=${encodeURIComponent(tz)}`
+  const res = await fetch(url, { headers: CAL_HEADERS, cache: "no-store" })
+  if (!res.ok) {
+    console.error("[calendar v3] Cal.com slots error:", res.status, await res.text().catch(() => ""))
+    return {}
+  }
+  const data = (await res.json()) as { data?: { slots?: Record<string, Array<{ time: string }>> } }
+  return data.data?.slots || {}
+}
+
+async function filterValidSlotsV3(
+  slotsByDay: Record<string, Array<{ time: string }>>,
+  country: string,
+): Promise<string[]> {
+  const countryCode = COUNTRY_CODES[country] || "CL"
+  const year = new Date().getFullYear()
+  const [holidays, holidaysNext, holidaysTabla] = await Promise.all([
+    getPublicHolidays(year, countryCode),
+    getPublicHolidays(year + 1, countryCode),
+    feriadosDeTabla(countryCode),
+  ])
+  const allHolidays = new Set([...holidays, ...holidaysNext, ...holidaysTabla])
+
+  const result: string[] = []
+  for (const day of Object.keys(slotsByDay).sort()) {
+    if (isWeekend(new Date(day + "T12:00:00Z"))) continue
+    if (allHolidays.has(day)) continue
+    for (const s of slotsByDay[day]) result.push(s.time)
+  }
+  return result
+}
+
+/**
+ * Verifica si una fecha/hora propuesta por el cliente está disponible en Cal.com.
+ * Tolerancia ±15 min para match exacto. Si no calza:
+ *   - Busca alternativas el MISMO día → "alternativas_mismo_dia"
+ *   - Si nada ese día, busca en los 5 días siguientes → "alternativas_dias_cercanos"
+ *   - Si nada en la ventana → "sin_disponibilidad"
+ *
+ * Solo rechaza la propuesta si está estrictamente en el pasado. El minimum
+ * booking notice lo decide Cal.com vía su Event Type config.
+ */
+export async function checkSlotAvailability(params: {
+  slotIso: string
+  country: string
+  /** Event type de Cal.com a consultar (default: el chileno CAL_EVENT_TYPE_ID). */
+  eventTypeId?: string
+}): Promise<CheckSlotResult> {
+  if (!CAL_API_KEY) {
+    return { ok: false, error: "CAL_API_KEY no configurada en el entorno." }
+  }
+
+  const { country, eventTypeId = CAL_EVENT_TYPE_ID } = params
+  const tz = getTimezone(country)
+  // La hora de pared manda: corrige offsets inventados por el modelo, para
+  // que la verificación y el booking hablen del MISMO instante que el
+  // cliente confirmó.
+  const slotIso = normalizarSlotIso(params.slotIso, tz)
+  const propuesta = new Date(slotIso)
+  if (isNaN(propuesta.getTime())) {
+    return { ok: false, error: `slotIso no es una fecha ISO válida: ${slotIso}` }
+  }
+  const now = new Date()
+
+  if (propuesta.getTime() < now.getTime()) {
+    return {
+      ok: false,
+      error: "La fecha propuesta ya pasó. Propón una fecha futura.",
     }
   }
 
-  return {
-    success: true,
-    bookingId: String(uid),
-    meetingUrl: data.data?.meetingUrl,
-    organizerEmail,
+  try {
+    const propuestaLocalDay = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(propuesta)
+    const dayStart = new Date(propuestaLocalDay + "T00:00:00.000Z")
+    const dayEnd = new Date(propuestaLocalDay + "T23:59:59.999Z")
+
+    const slotsByDay = await fetchSlotsRawV3(dayStart, dayEnd, tz, eventTypeId)
+    const sameDaySlots = await filterValidSlotsV3(slotsByDay, country)
+
+    const exact = sameDaySlots.find(
+      (s) => Math.abs(new Date(s).getTime() - propuesta.getTime()) <= MATCH_TOLERANCE_MS_V3,
+    )
+    if (exact) {
+      return { ok: true, estado: "disponible_exacto", slotIso: exact }
+    }
+
+    if (sameDaySlots.length > 0) {
+      const alternativasMismoDia = [...sameDaySlots]
+        .sort(
+          (a, b) =>
+            Math.abs(new Date(a).getTime() - propuesta.getTime()) -
+            Math.abs(new Date(b).getTime() - propuesta.getTime()),
+        )
+        .slice(0, 3)
+      return { ok: true, estado: "alternativas_mismo_dia", alternativas: alternativasMismoDia }
+    }
+
+    const wideStart = new Date(
+      Math.max(now.getTime(), propuesta.getTime() - 1 * 24 * 60 * 60 * 1000),
+    )
+    const wideEnd = new Date(propuesta.getTime() + 5 * 24 * 60 * 60 * 1000)
+    const wideSlots = await fetchSlotsRawV3(wideStart, wideEnd, tz, eventTypeId)
+    const allWideSlots = await filterValidSlotsV3(wideSlots, country)
+
+    if (allWideSlots.length > 0) {
+      const ordenados = [...allWideSlots].sort(
+        (a, b) =>
+          Math.abs(new Date(a).getTime() - propuesta.getTime()) -
+          Math.abs(new Date(b).getTime() - propuesta.getTime()),
+      )
+      const usedDays = new Set<string>()
+      const result: string[] = []
+      for (const slot of ordenados) {
+        if (result.length >= 3) break
+        const day = slot.split("T")[0]
+        if (!usedDays.has(day)) {
+          result.push(slot)
+          usedDays.add(day)
+        }
+      }
+      return { ok: true, estado: "alternativas_dias_cercanos", alternativas: result }
+    }
+
+    return { ok: true, estado: "sin_disponibilidad" }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "error inesperado consultando Cal.com"
+    console.error("[calendar v3] checkSlotAvailability exception:", e)
+    return { ok: false, error: msg }
   }
 }

@@ -1,0 +1,451 @@
+/**
+ * NDV ANTES DE LA IMPLEMENTACIÓN — el trabajo post-alta del onboarding por chat.
+ *
+ * Orden de Lalo (07-sep): "la nota de venta la confirmamos NOSOTROS en el
+ * flujo, antes de crear la implementación, para tener el ID desde antes". El
+ * alta crea la empresa en la plataforma (companyId) y desde ahí:
+ *
+ *   1. el COTIZADOR (`/api/creator/ndv-alta-chat`) convierte el espejo de la
+ *      cotización pagada en Nota de Venta con la empresa YA creada, la
+ *      confirma cuando su PDF existe y devuelve la Referencia NDV del CRM;
+ *   2. recién con ese id nace la Implementación GV Avanzado enlazada a la NDV
+ *      (Nota_de_Venta_Asociada) y la cotización queda con NDV + IMP.
+ *
+ * Nada de esto cabe con certeza en el turno del webhook (la confirmación
+ * espera un PDF que Creator genera en background), así que es un JOB en
+ * vic_kv (`onb_ndvimp_<contacto>`) que se intenta una vez en línea y que el
+ * cron `vic-onboarding-ndv-imp` (cada ~2', vía despachador) sigue empujando
+ * hasta terminar. Idempotente: el estado vive en el propio job.
+ *
+ * Tope (env VICKY_NDV_ALTA_TOPE_MIN, default 30'): si la NDV no se logra en
+ * ese plazo, la Implementación nace IGUAL (el cliente ya pagó y ya tiene su
+ * cuenta; el relator no puede esperar a Creator) con aviso interno, y el job
+ * sigue intentando enlazar la NDV hasta 24 h.
+ */
+
+import { getKvValue, setKvValue } from "./supabase-persistence-v3"
+import { avisarEquipoInterno } from "./alerta-interna"
+import { claveCapacitacion } from "./onboarding/fase"
+
+export const claveJobNdvImp = (contact: string) => `onb_ndvimp_${contact.replace(/\D/g, "")}`
+
+export type JobNdvImp = {
+  contact: string
+  /** País del alta (21-sep): PE → el cotizador convierte las DOS notas (plan PEN + hardware USD). */
+  pais?: "cl" | "pe"
+  quoteId?: string
+  companyId: string
+  empresa: string
+  rut?: string
+  creadoAt: string
+  intentos: number
+  ultimoIntentoAt?: string
+  /** Intentos REALES de crear la implementación (14-sep). Ver nota en el uso. */
+  intentosImp?: number
+  enCursoAt?: string
+  ndv?: { ndvId?: string; idNdv?: string; referenciaId?: string; estado?: string; descuadreUF?: number | null }
+  ndvPendiente?: string
+  /** ISO del aviso "lleva N minutos sin PDF" — se manda UNA vez por job. */
+  avisoSinPdfAt?: string
+  ndvError?: string
+  /** El cotizador dijo que no se puede (sin espejo, etc.): no se insiste. */
+  ndvImposible?: boolean
+  /** PE (21-sep): estado de la SEGUNDA nota (hardware en USD). */
+  hardware?: { cotId?: string; ndvId?: string; idNdv?: string; estado?: string; error?: string; intentos?: number }
+  impId?: string
+  impNumero?: string
+  impSinNdv?: boolean
+  terminadoAt?: string
+  motivoFin?: string
+}
+
+const COTIZADORA_API_BASE = (process.env.COTIZADORA_API_BASE || "https://cotizacion.geovictoria.com").trim()
+const TOPE_NDV_MIN = Math.max(5, Number(process.env.VICKY_NDV_ALTA_TOPE_MIN || 30) || 30)
+const TOPE_ENLACE_H = 24
+// OJO (14-sep, caso Javiera/COTEL): esto cuenta los intentos REALES de crear
+// la implementación, no las pasadas del job. Antes se medía contra
+// `job.intentos`, que sube en CADA pasada mientras se espera la NDV: con 15
+// pasadas esperando el PDF, el PRIMER intento de crear la IMP ya llegaba
+// pasado el tope y el job se daba por terminado (`imp_fallo`) sin un solo
+// reintento.
+const MAX_INTENTOS_IMP = 12
+
+async function leerJob(contact: string): Promise<JobNdvImp | null> {
+  const crudo = await getKvValue(claveJobNdvImp(contact)).catch(() => null)
+  if (!crudo) return null
+  try {
+    const j = JSON.parse(crudo) as JobNdvImp
+    return j && j.companyId ? j : null
+  } catch {
+    return null
+  }
+}
+
+async function guardarJob(job: JobNdvImp): Promise<void> {
+  await setKvValue(claveJobNdvImp(job.contact), JSON.stringify(job)).catch(() => {})
+}
+
+/** Encola (o refresca) el job tras un alta exitosa. No pisa un job vivo del
+ * mismo contacto con la misma empresa (reintentos del alta). */
+export async function encolarNdvImp(
+  contact: string,
+  datos: { companyId: string; empresa: string; rut?: string; quoteId?: string },
+): Promise<JobNdvImp> {
+  const c = contact.replace(/\D/g, "")
+  const previo = await leerJob(c)
+  if (previo && !previo.terminadoAt && previo.companyId === datos.companyId) return previo
+  let quoteId = (datos.quoteId || "").trim()
+  if (!quoteId) {
+    try {
+      const { getQuotePointers, getKvValue } = await import("./supabase-persistence-v3")
+      // Primero la cotización ANCLADA al alta (onb_quote_), después el puntero
+      // más reciente (09-sep, dos cotizaciones pagadas por el mismo número).
+      const { claveQuoteOnboarding } = await import("./onboarding/fase")
+      quoteId = ((await getKvValue(claveQuoteOnboarding(c)).catch(() => null)) || "").trim()
+      if (!quoteId) {
+        const punteros = await getQuotePointers(c).catch(() => [])
+        quoteId = (punteros.find((x) => (x.quoteId || "").trim())?.quoteId || "").trim()
+      }
+    } catch {
+      /* sin puntero: la implementación nace sin NDV */
+    }
+  }
+  const job: JobNdvImp = {
+    contact: c,
+    pais: c.startsWith("51") && c.length === 11 ? "pe" : "cl",
+    quoteId: quoteId || undefined,
+    companyId: datos.companyId,
+    empresa: datos.empresa,
+    rut: datos.rut,
+    creadoAt: new Date().toISOString(),
+    intentos: 0,
+  }
+  await guardarJob(job)
+  return job
+}
+
+type RespuestaNdvAlta = {
+  ok?: boolean
+  listo?: boolean
+  reintentable?: boolean
+  pendiente?: string
+  error?: string
+  ndvId?: string
+  idNdv?: string
+  referenciaId?: string
+  estadoReferencia?: string
+  descuadreUF?: number | null
+  yaEstaba?: boolean
+  /** PE: la segunda nota (hardware en USD), si existía. */
+  hardware?: { cotId?: string; ndvId?: string; idNdv?: string; estado?: string; error?: string }
+}
+
+async function pedirNdvAlta(job: JobNdvImp): Promise<RespuestaNdvAlta> {
+  const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
+  const ctrl = new AbortController()
+  const corte = setTimeout(() => ctrl.abort(), 58_000)
+  try {
+    const r = await fetch(`${COTIZADORA_API_BASE}/api/creator/ndv-alta-chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(secret ? { "x-vicky-secret": secret } : {}) },
+      body: JSON.stringify({ quoteId: job.quoteId, companyId: job.companyId, empresaNombre: job.empresa, rut: job.rut, pais: job.pais || "cl" }),
+      cache: "no-store",
+      signal: ctrl.signal,
+    })
+    const j = (await r.json().catch(() => ({}))) as RespuestaNdvAlta
+    if (!r.ok && !j.error) j.error = `HTTP ${r.status}`
+    return j
+  } catch (e) {
+    return { ok: false, reintentable: true, error: e instanceof Error ? e.message : String(e) }
+  } finally {
+    clearTimeout(corte)
+  }
+}
+
+/**
+ * Una pasada del job: avanza NDV → Implementación → enlace. Devuelve el
+ * estado para el log del cron. Segura de llamar en paralelo (candado
+ * `enCursoAt` de 90 s) y de repetir (cada paso mira lo ya hecho).
+ */
+export async function procesarNdvImp(contact: string): Promise<{ estado: string; job?: JobNdvImp }> {
+  const c = contact.replace(/\D/g, "")
+  const job = await leerJob(c)
+  if (!job) return { estado: "sin_job" }
+  if (job.terminadoAt) return { estado: "terminado", job }
+  if (job.enCursoAt && Date.now() - Date.parse(job.enCursoAt) < 90_000) return { estado: "en_curso", job }
+  job.enCursoAt = new Date().toISOString()
+  job.intentos = (job.intentos || 0) + 1
+  job.ultimoIntentoAt = job.enCursoAt
+  await guardarJob(job)
+
+  const edadMin = (Date.now() - Date.parse(job.creadoAt)) / 60e3
+  try {
+    // 1. NDV (solo si hay cotización y aún no tenemos la referencia).
+    if (job.quoteId && !job.ndv?.referenciaId && !job.ndvImposible) {
+      const r = await pedirNdvAlta(job)
+      if (r.hardware) job.hardware = { ...r.hardware, intentos: (job.hardware?.intentos || 0) + 1 }
+      if (r.listo && r.referenciaId) {
+        job.ndv = {
+          ndvId: r.ndvId,
+          idNdv: r.idNdv,
+          referenciaId: r.referenciaId,
+          estado: r.estadoReferencia,
+          descuadreUF: r.descuadreUF ?? null,
+        }
+        job.ndvPendiente = undefined
+        job.ndvError = undefined
+        if (job.pais === "pe" && r.hardware?.estado === "CONFIRMADA") {
+          await avisarEquipoInterno(
+            `🇵🇪 NDV de HARDWARE (USD) ${r.hardware.idNdv || r.hardware.ndvId || ""} de ${job.empresa} confirmada junto al plan ${r.idNdv || ""} (dos notas, como siempre en Perú).`,
+          ).catch(() => {})
+        }
+        if (typeof r.descuadreUF === "number" && Math.abs(r.descuadreUF) > 0.005) {
+          await avisarEquipoInterno(
+            `⚠️ NDV ${r.idNdv || ""} de ${job.empresa}: el mensual de la nota difiere de lo vendido en ${r.descuadreUF > 0 ? "+" : ""}${r.descuadreUF} UF — revisar en Creator antes de facturar.`,
+          ).catch(() => {})
+        }
+      } else {
+        job.ndvPendiente = r.pendiente || (r.ok === false ? "error" : "sin_respuesta")
+        job.ndvError = r.error
+        // NDV convertida pero SIN PDF pasado el tope (caso COTEL 14-sep: 7 horas y
+        // 188 reintentos mudos hasta que Aleydis intentó descargarla). El PDF lo
+        // genera Creator solo; cuando no llega, lo que ha destrabado los casos
+        // reales es anular la nota y rehacer el espejo, y eso lo decide una
+        // persona — pero tiene que saberlo AHORA, no al día siguiente.
+        if (job.ndvPendiente === "pdf" && edadMin >= TOPE_NDV_MIN && !job.avisoSinPdfAt) {
+          job.avisoSinPdfAt = new Date().toISOString()
+          await avisarEquipoInterno(
+            `⏳ NDV del alta por chat de ${job.empresa} (companyId ${job.companyId}): la nota está convertida pero lleva ${Math.round(edadMin)} min SIN PDF en Creator, así que no se puede confirmar. Receta que ha funcionado: anular la nota, rehacer el espejo desde la cotización (crear-ndv-desde-cot) y reconvertir con ndv-alta-chat cotId=<espejo nuevo>. El job sigue reintentando.`,
+          ).catch(() => {})
+        }
+        if (r.reintentable === false) {
+          job.ndvImposible = true
+          await avisarEquipoInterno(
+            `⚠️ NDV del alta por chat de ${job.empresa} (companyId ${job.companyId}) NO se pudo generar automáticamente: ${r.error || "sin detalle"}. Hay que convertir/confirmar la nota a mano en Creator.`,
+          ).catch(() => {})
+        }
+      }
+    }
+
+    // 1c. PERÚ: el plan ya tiene referencia pero la nota de HARDWARE (USD)
+    //     quedó pendiente (PDF de Creator, presupuesto) → se sigue pidiendo;
+    //     el cotizador la retoma por la rama "ya enlazada". Tope 10 pasadas.
+    if (
+      job.pais === "pe" &&
+      job.quoteId &&
+      job.ndv?.referenciaId &&
+      job.hardware &&
+      !["CONFIRMADA", "sin_espejo_hardware", "sin_cuenta"].includes(String(job.hardware.estado || "")) &&
+      (job.hardware.intentos || 0) < 10
+    ) {
+      const r = await pedirNdvAlta(job)
+      if (r.hardware) job.hardware = { ...r.hardware, intentos: (job.hardware.intentos || 0) + 1 }
+      if (r.hardware?.estado === "CONFIRMADA") {
+        await avisarEquipoInterno(
+          `🇵🇪 NDV de HARDWARE (USD) ${r.hardware.idNdv || r.hardware.ndvId || ""} de ${job.empresa} confirmada (plan ${job.ndv.idNdv || ""}).`,
+        ).catch(() => {})
+      } else if ((job.hardware.intentos || 0) >= 10) {
+        await avisarEquipoInterno(
+          `⚠️ 🇵🇪 NDV de HARDWARE (USD) de ${job.empresa} (companyId ${job.companyId}) NO se pudo confirmar sola (${job.hardware.estado}: ${job.hardware.error || "sin detalle"}) — revisar en Creator (espejo ${job.hardware.cotId || "?"}).`,
+        ).catch(() => {})
+      }
+    }
+
+    // 1b. RESPALDO del correo de bienvenida (Lalo 15-sep): normalmente sale
+    //     anclado a la implementación en cuanto nace (60-90 s después del
+    //     alta). Si la implementación tarda —NDV sin PDF, Zoho caído, lookup
+    //     rechazado como en COTEL— el cliente no puede quedarse sin sus
+    //     instrucciones: a los 5 minutos sale anclado a su contacto.
+    if (!job.impId && edadMin >= 5) {
+      try {
+        const oc = await import("./onboarding-correos")
+        const { claveCorreoBienvenida } = oc
+        const ya = await getKvValue(claveCorreoBienvenida(c)).catch(() => null)
+        if (!ya) {
+          const mi = await import("./implementacion-vicky")
+          const ctx = await mi.contextoImplementacionDesdeVenta(c).catch(() => ({ contactId: undefined }))
+          const r = await oc.enviarBienvenidaDesdeBorrador(c, {
+            ancla: ctx.contactId ? `Contacts/${ctx.contactId}` : undefined,
+            motivo: "respaldo_sin_imp",
+          })
+          console.log(`[onboarding-correos] bienvenida (respaldo) ${job.empresa}: ${JSON.stringify(r)}`)
+        }
+      } catch (e) {
+        console.warn("[onboarding-correos] respaldo falló:", e instanceof Error ? e.message : e)
+      }
+    }
+
+    // 2. Implementación: con la NDV lista, o vencido el tope, o si la NDV es
+    //    imposible / no hay cotización.
+    const ndvLista = Boolean(job.ndv?.referenciaId)
+    const puedeCrearImp = ndvLista || job.ndvImposible || !job.quoteId || edadMin >= TOPE_NDV_MIN
+    if (!job.impId && puedeCrearImp) {
+      // Idempotencia extra: si otra vía ya dejó implementación en la
+      // capacitación del contacto, se adopta en vez de crear otra.
+      const capCruda = await getKvValue(claveCapacitacion(c)).catch(() => null)
+      const cap = capCruda ? (JSON.parse(capCruda) as { implementacionId?: string; numero?: string }) : null
+      if (cap?.implementacionId) {
+        job.impId = cap.implementacionId
+        job.impNumero = cap.numero || undefined
+      } else {
+        const m = await import("./implementacion-vicky")
+        const ctx = await m.contextoImplementacionDesdeVenta(c)
+        // Si el chat ya dejó planificaciones, la implementación nace diciéndolo.
+        let planificaTurnos: "Sí" | "No sé" | undefined
+        let tipoPlanificacion: "Fijo" | "Desconocido" | undefined
+        try {
+          const { claveConfiguracion } = await import("./onboarding/fase")
+          const raw = await getKvValue(claveConfiguracion(c))
+          const cfg = raw ? (JSON.parse(raw) as { planificaciones?: unknown[] }) : null
+          if (Array.isArray(cfg?.planificaciones) && cfg!.planificaciones!.length > 0) {
+            planificaTurnos = "Sí"
+            tipoPlanificacion = "Fijo"
+          }
+        } catch {
+          /* defaults */
+        }
+        const imp = await m.crearImplementacionGvAvanzado({
+          ...ctx,
+          pais: job.pais || ctx.pais || "cl",
+          planificaTurnos,
+          tipoPlanificacion,
+          razonSocial: job.empresa,
+          rut: job.rut,
+          companyId: job.companyId,
+          ndvId: job.ndv?.referenciaId,
+          comentarios:
+            `Alta por chat de Vicky (companyId ${job.companyId}). Empresa YA creada en la plataforma; no requiere creación.` +
+            (job.ndv?.idNdv ? ` Nota de venta ${job.ndv.idNdv} confirmada.` : " Nota de venta pendiente de confirmar.") +
+            (job.pais === "pe" && job.hardware?.idNdv ? ` Nota de venta de HARDWARE (USD) ${job.hardware.idNdv} (${job.hardware.estado || "?"}).` : ""),
+        })
+        if (imp) {
+          job.impId = imp.id
+          job.impNumero = imp.numero
+          job.impSinNdv = !ndvLista
+          await setKvValue(
+            claveCapacitacion(c),
+            JSON.stringify({ implementacionId: imp.id, numero: imp.numero || "", relator: imp.relator, empresa: job.empresa }),
+          ).catch(() => {})
+          // CORREO DE BIENVENIDA anclado a la IMPLEMENTACIÓN (Lalo 15-sep):
+          // así queda en el timeline que mira el relator, no en el contacto
+          // de pruebas del dash. Una sola vez por contacto; si la IMP demora,
+          // el respaldo de abajo lo manda anclado al contacto a los 5 minutos.
+          import("./onboarding-correos")
+            .then((oc) => oc.enviarBienvenidaDesdeBorrador(c, { ancla: `Implementaciones/${imp.id}`, motivo: "imp_creada" }))
+            .then((r) => console.log(`[onboarding-correos] bienvenida ${job.empresa}: ${JSON.stringify(r)}`))
+            .catch((e) => console.warn("[onboarding-correos] bienvenida falló:", e instanceof Error ? e.message : e))
+          // Insight de la conversación (Diego/Ignacio, 07-sep): nota + campos
+          // Detalles / Dolor / Conversación WhatsApp en la implementación
+          // recién nacida. Segundo plano, best-effort.
+          import("./implementacion-insight")
+            .then((mi) => mi.sincronizarInsightImplementacion(c, { force: true, implementacionId: imp.id }))
+            .catch(() => null)
+          // HORARIOS QUE QUEDARON EN EL AIRE (14-sep, caso Gianella): pidió
+          // los cupos segundos antes de que existiera la implementación. Ahora
+          // que existe, salen solos — sin esperar a que el cliente escriba de
+          // nuevo ni a las 24 h hábiles del vigía.
+          import("./cupos-pendientes")
+            .then((cp) => cp.ofrecerCuposPendientes(c))
+            .catch(() => null)
+          // Notas que el equipo dejó ANTES de que existiera la implementación
+          // (14-sep, caso Peggi: cliente de Nuboox que migra su data).
+          import("./nota-implementacion-pendiente")
+            .then((np) => np.adjuntarNotasPendientes(c, imp.id))
+            .catch(() => null)
+          await avisarEquipoInterno(
+            `🛠️ IMPLEMENTACIÓN GV Avanzado creada para ${job.empresa} → ${imp.relator.nombre} (${imp.relator.email})${imp.numero ? ` · ${imp.numero}` : ""}` +
+              (ndvLista
+                ? ` · ${job.ndv?.idNdv || "NDV"} confirmada y enlazada.`
+                : ` · SIN nota de venta todavía (${job.ndvPendiente || "pendiente"}${job.ndvError ? `: ${job.ndvError}` : ""}) — se sigue intentando enlazarla.`),
+          ).catch(() => {})
+        } else if ((job.intentosImp = (job.intentosImp || 0) + 1) >= MAX_INTENTOS_IMP) {
+          await avisarEquipoInterno(
+            `⚠️ NO se pudo crear la implementación de ${job.empresa} (companyId ${job.companyId}) tras ${job.intentos} intentos. La empresa SÍ quedó creada — hay que abrir la implementación a mano.`,
+          ).catch(() => {})
+          job.terminadoAt = new Date().toISOString()
+          job.motivoFin = "imp_fallo"
+        }
+      }
+    }
+
+    // 3. Enlace tardío: la implementación nació sin NDV y la NDV llegó después.
+    if (job.impId && job.impSinNdv && job.ndv?.referenciaId) {
+      const { getZohoAccessToken } = await import("./zoho-token")
+      const token = await getZohoAccessToken()
+      const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+      const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+      const ok = await fetch(`${api}/crm/v3/Implementaciones/${job.impId}`, {
+        method: "PUT",
+        headers: H,
+        cache: "no-store",
+        body: JSON.stringify({ data: [{ Nota_de_Venta_Asociada: { id: job.ndv.referenciaId } }], trigger: ["blueprint"] }),
+      })
+        .then((r) => r.ok)
+        .catch(() => false)
+      if (job.quoteId) {
+        await fetch(`${api}/crm/v3/Cotizaciones_GeoVictoria/${job.quoteId}`, {
+          method: "PUT",
+          headers: H,
+          cache: "no-store",
+          body: JSON.stringify({ data: [{ Nota_de_Venta: { id: job.ndv.referenciaId } }] }),
+        }).catch(() => null)
+      }
+      if (ok) {
+        job.impSinNdv = false
+        await avisarEquipoInterno(
+          `🔗 ${job.ndv.idNdv || "NDV"} de ${job.empresa} quedó confirmada y enlazada a ${job.impNumero || "la implementación"}.`,
+        ).catch(() => {})
+      }
+    }
+
+    // 4. Cierre del job. PE: no se cierra mientras la nota de HARDWARE siga
+    //    pendiente (tope de 10 pasadas en 1c; después se avisa y se cierra).
+    const hardwarePendientePE =
+      job.pais === "pe" &&
+      Boolean(job.hardware) &&
+      !["CONFIRMADA", "sin_espejo_hardware", "sin_cuenta"].includes(String(job.hardware?.estado || "")) &&
+      (job.hardware?.intentos || 0) < 10
+    if (job.impId && !job.impSinNdv && !hardwarePendientePE) {
+      job.terminadoAt = new Date().toISOString()
+      job.motivoFin = "completo"
+    } else if (job.impId && (job.ndvImposible || !job.quoteId)) {
+      job.terminadoAt = new Date().toISOString()
+      job.motivoFin = job.ndvImposible ? "ndv_imposible" : "sin_cotizacion"
+    } else if (job.impId && edadMin >= TOPE_ENLACE_H * 60) {
+      job.terminadoAt = new Date().toISOString()
+      job.motivoFin = "ndv_no_llego"
+      await avisarEquipoInterno(
+        `⚠️ La NDV de ${job.empresa} (${job.impNumero || job.impId}) no se logró en ${TOPE_ENLACE_H} h (${job.ndvPendiente || "pendiente"}${job.ndvError ? `: ${job.ndvError}` : ""}). Convertir/confirmar a mano en Creator y enlazarla.`,
+      ).catch(() => {})
+    }
+  } catch (e) {
+    job.ndvError = e instanceof Error ? e.message : String(e)
+    console.warn(`[ndv-alta] ${c}: pasada falló:`, job.ndvError)
+  } finally {
+    job.enCursoAt = undefined
+    await guardarJob(job)
+  }
+  return { estado: job.terminadoAt ? `terminado:${job.motivoFin}` : job.impId ? "imp_creada_ndv_pendiente" : "esperando_ndv", job }
+}
+
+/** Contactos con job vivo (para el cron). */
+export async function contactosConJobNdvImp(): Promise<string[]> {
+  const url = (process.env.SUPABASE_URL || "").trim()
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
+  if (!url || !key) return []
+  const filas = (await fetch(`${url}/rest/v1/vic_kv?key=like.onb_ndvimp_*&select=key,value&limit=200`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+    cache: "no-store",
+  })
+    .then((r) => (r.ok ? r.json() : []))
+    .catch(() => [])) as Array<{ key: string; value: string }>
+  return filas
+    .filter((f) => {
+      try {
+        return !(JSON.parse(f.value) as JobNdvImp).terminadoAt
+      } catch {
+        return false
+      }
+    })
+    .map((f) => f.key.replace(/^onb_ndvimp_/, ""))
+}
