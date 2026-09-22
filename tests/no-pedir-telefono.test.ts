@@ -99,7 +99,8 @@ describe("la corrección deja un mensaje que se puede mandar", () => {
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const PROMPT = textoNucleo(FICHA_CL, "")
-const WEBHOOK = readFileSync(join(RAIZ, "app/api/vic-botmaker-v3/route.ts"), "utf8")
+// La salida del turno chileno vive en el orquestador único (22-sep).
+const WEBHOOK = readFileSync(join(RAIZ, "lib/orquestador-turno.ts"), "utf8")
 const LOOP = readFileSync(join(RAIZ, "app/api/vic-loop-cron/route.ts"), "utf8")
 
 describe("el guardrail está cableado en la salida real", () => {

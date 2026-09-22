@@ -244,9 +244,16 @@ describe("cinturón de precios sobre el umbral (Lalo 18-ago, caso David Oviedo)"
   })
 
   test("los cuatro webhooks pasan la respuesta por el cinturón", () => {
-    for (const pais of ["v3", "co", "mx", "pe"]) {
-      const src = readFileSync(new URL(`../app/api/vic-botmaker-${pais}/route.ts`, import.meta.url), "utf8")
-      assert.match(src, /cinturonPrecioSobreUmbral/, `falta el cinturón en vic-botmaker-${pais}`)
+    // v3 delega el turno en el orquestador único (22-sep): ahí vive su cinturón.
+    const fuentes: Record<string, string> = {
+      v3: "../lib/orquestador-turno.ts",
+      co: "../app/api/vic-botmaker-co/route.ts",
+      mx: "../app/api/vic-botmaker-mx/route.ts",
+      pe: "../app/api/vic-botmaker-pe/route.ts",
+    }
+    for (const [pais, ruta] of Object.entries(fuentes)) {
+      const src = readFileSync(new URL(ruta, import.meta.url), "utf8")
+      assert.match(src, /cinturonPrecioSobreUmbral/, `falta el cinturón en ${pais} (${ruta})`)
     }
   })
 })

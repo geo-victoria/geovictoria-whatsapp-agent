@@ -40,6 +40,8 @@ import { runAgentLoop } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_MX } from "@/lib/paises/mx"
+import { procesarTurno, simularTurno, orquestadorActivo } from "@/lib/orquestador-turno"
+import { PERFIL_TURNO_MX } from "@/lib/paises/mx/turno"
 import { getSystemPromptMX, formatCotizacionExistenteMX } from "@/lib/paises/mx/prompt"
 import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
 import { TOOL_SCHEMAS_MX, buildDispatchMX } from "@/lib/paises/mx/tools"
@@ -518,7 +520,11 @@ async function processBurstCO(contact: string, apiKey: string, seedMessage?: str
 
       const combinado = pending.map((p) => p.message).join("\n").slice(0, MAX_INPUT_CHARS)
       try {
-        await processOneTurnCO(contact, combinado, apiKey)
+        // ORQUESTADOR ÚNICO (22-sep, paso 3): con vic_kv `orquestador_mx`="on" el
+        // turno corre por lib/orquestador-turno (el pipeline chileno completo con
+        // el perfil MX); apagado, sigue el procesador propio de este webhook.
+        if (await orquestadorActivo("mx")) await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_MX)
+        else await processOneTurnCO(contact, combinado, apiKey)
       } catch (err) {
         console.error(`[vic-mx] error en turno contact=${contact}:`, err)
         // Circuit-breaker (espejo CL): si los últimos turnos ya fueron errores,
@@ -713,6 +719,22 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     // Modo simulación (pruebas E2E): síncrono, sin lock, sin persistir.
     if (simulacion) {
+      // ORQUESTADOR ÚNICO en simulación: `orquestador:true` (o el kv encendido)
+      // corre la tubería completa —prompt, tools, cinturones, hitos, persistencia—
+      // y captura la respuesta. Acotado a sintéticos 52900000xxx y probadores.
+      {
+        const b = body as { orquestador?: boolean }
+        const limpio = String(contact || "").replace(/\D/g, "")
+        const pruebaOrq =
+          /^52900000\d{3}$/.test(limpio) ||
+          (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(limpio)
+        const usarOrq = b.orquestador === true || (b.orquestador !== false && (await orquestadorActivo("mx")))
+        if (usarOrq && pruebaOrq) {
+          const cap = await simularTurno(contact, message, apiKey, PERFIL_TURNO_MX)
+          const hist = await fetchHistoryV3(contact).catch(() => [])
+          return NextResponse.json({ reply: cap.reply, tools: cap.tools, pais: "mx", simulacion: true, orquestador: true, conHistorial: true, turnosEnHistorial: hist.length })
+        }
+      }
       // Mismo ruteo de modelo que el camino real (sin historia persistida).
       const modeloSim = esFlujoCotizacionCO(message, [])
         ? MODELO_COTIZACION_CO

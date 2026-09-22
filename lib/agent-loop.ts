@@ -98,6 +98,14 @@ export async function runAgentLoop(params: {
   }
   /** Interno: el reintento que disparan los cinturones de salida no vuelve a pasar por ellos. */
   sinCinturonesDeSalida?: boolean
+  /**
+   * AVISO PREVIO A UNA TOOL LENTA (Lalo 22-sep, "que el cliente no reciba
+   * silencio incómodo sino un aviso de que estoy preparando tu cotización"):
+   * el orquestador lo usa para mandar "te preparo la cotización, dame un
+   * momento" JUSTO cuando arranca la emisión (10-20 s). Se llama con el
+   * nombre de la tool antes de despacharla; best-effort, jamás bloquea.
+   */
+  alIniciarTool?: (toolName: string) => Promise<void>
 }): Promise<AgentRunResult> {
   const { systemPrompt, history, userMessage, apiKey, model, contact, tools } = params
   let toolSchemas = (tools?.schemas ?? TOOL_SCHEMAS) as unknown as Anthropic.Messages.Tool[]
@@ -784,6 +792,7 @@ export async function runAgentLoop(params: {
           } as Awaited<ReturnType<typeof dispatchTool>>
         } else {
           if (toolName === "generar_link_cotizadora") generarLinkEnEsteTurno++
+          if (params.alIniciarTool) await params.alIniciarTool(toolName).catch(() => undefined)
           result = await toolDispatch(toolName, toolInput)
         }
 

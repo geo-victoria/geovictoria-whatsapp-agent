@@ -37,6 +37,8 @@ import { runAgentLoop } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_PE } from "@/lib/paises/pe"
+import { procesarTurno, simularTurno, orquestadorActivo } from "@/lib/orquestador-turno"
+import { PERFIL_TURNO_PE } from "@/lib/paises/pe/turno"
 import { getSystemPromptPE } from "@/lib/paises/pe/prompt"
 import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
 import { TOOL_SCHEMAS_PE, buildDispatchPE } from "@/lib/paises/pe/tools"
@@ -650,7 +652,11 @@ async function processBurstPE(contact: string, apiKey: string, seedMessage?: str
 
       const combinado = pending.map((p) => p.message).join("\n").slice(0, MAX_INPUT_CHARS)
       try {
-        await processOneTurnPE(contact, combinado, apiKey)
+        // ORQUESTADOR ÚNICO (22-sep, paso 3): con vic_kv `orquestador_pe`="on" el
+        // turno corre por lib/orquestador-turno (el pipeline chileno completo con
+        // el perfil PE); apagado, sigue el procesador propio de este webhook.
+        if (await orquestadorActivo("pe")) await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_PE)
+        else await processOneTurnPE(contact, combinado, apiKey)
       } catch (err) {
         console.error(`[vic-pe] error en turno contact=${contact}:`, err)
         // Circuit-breaker (espejo CL): si los últimos turnos ya fueron errores,
@@ -867,6 +873,22 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Modo simulación (pruebas E2E): síncrono, sin lock, sin persistir. Corre
     // AUNQUE el gate esté apagado — así se prueba Vicky PE en oscuro.
     if (simulacion) {
+      // ORQUESTADOR ÚNICO en simulación: `orquestador:true` (o el kv encendido)
+      // corre la tubería completa —prompt, tools, cinturones, hitos, persistencia—
+      // y captura la respuesta. Acotado a sintéticos 51900000xxx y probadores.
+      {
+        const b = body as { orquestador?: boolean }
+        const limpio = String(contact || "").replace(/\D/g, "")
+        const pruebaOrq =
+          /^51900000\d{3}$/.test(limpio) ||
+          (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(limpio)
+        const usarOrq = b.orquestador === true || (b.orquestador !== false && (await orquestadorActivo("pe")))
+        if (usarOrq && pruebaOrq) {
+          const cap = await simularTurno(contact, message, apiKey, PERFIL_TURNO_PE)
+          const hist = await fetchHistoryV3(contact).catch(() => [])
+          return NextResponse.json({ reply: cap.reply, tools: cap.tools, pais: "pe", simulacion: true, orquestador: true, conHistorial: true, turnosEnHistorial: hist.length })
+        }
+      }
       // E2E del alta por chat: con el contacto en fase onboarding la
       // simulación corre el agente de onboarding con el historial REAL (las
       // tools persisten el borrador; el turno se guarda para el siguiente).

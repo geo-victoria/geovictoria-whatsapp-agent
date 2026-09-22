@@ -117,9 +117,14 @@ describe("clasificación de los tres botones reales", () => {
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const LOOP = readFileSync(join(RAIZ, "app/api/vic-loop-cron/route.ts"), "utf8")
+// v3: la ENTRADA (normalización) sigue en el route y el TURNO (rechazo, cierre
+// por botón) vive en el orquestador único desde el 22-sep — se leen los dos.
+const ORQUESTADOR = readFileSync(join(RAIZ, "lib/orquestador-turno.ts"), "utf8")
 const WEBHOOKS = ["v3", "co", "mx"].map((p) => ({
   pais: p,
-  src: readFileSync(join(RAIZ, `app/api/vic-botmaker-${p}/route.ts`), "utf8"),
+  src:
+    readFileSync(join(RAIZ, `app/api/vic-botmaker-${p}/route.ts`), "utf8") +
+    (p === "v3" ? "\n" + ORQUESTADOR : ""),
 }))
 
 describe("el cableado en producción", () => {
@@ -135,7 +140,7 @@ describe("el cableado en producción", () => {
 
   test("v3 cierra el ciclo como 'perdido', no lo deja agotarse", () => {
     assert.match(WEBHOOKS[0].src, /const perdidaPorBoton = cierrePorBoton\(message\) === "perdido"/)
-    assert.match(WEBHOOKS[0].src, /if \(perdidaPorBoton\) \{\s*(\n\s*\/\/.*)*\s*await closeFollowup\(contact, "perdido"\)/)
+    assert.match(WEBHOOKS[0].src, /if \(perdidaPorBoton\) \{\s*(\n\s*\/\/.*)*\s*await closeFollowup\(contact, "perdido"(, perfil\.pais)?\)/)
   })
 
   test("y marca la cotización pendiente como Rechazada en Zoho", () => {

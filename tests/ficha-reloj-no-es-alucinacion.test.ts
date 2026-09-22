@@ -21,7 +21,9 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const RAIZ = new URL("..", import.meta.url).pathname
-const V3 = readFileSync(join(RAIZ, "app/api/vic-botmaker-v3/route.ts"), "utf8")
+// El turno chileno vive en el orquestador único (lib/orquestador-turno.ts) desde el 22-sep;
+// el route solo es la puerta (auth, ráfaga, simulación).
+const V3 = readFileSync(join(RAIZ, "lib/orquestador-turno.ts"), "utf8")
 
 describe("guardrail ALUCINACIÓN_URL con procedencia (webhook v3)", () => {
   test("calcula si las URLs del reply vienen de tools del turno", () => {

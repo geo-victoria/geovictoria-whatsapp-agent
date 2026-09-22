@@ -57,7 +57,8 @@ test("un mensaje sin links no reporta nada", () => {
 // que salieron los links de Andrea (el reintento anti-eco no re-verificaba).
 
 import { readFileSync } from "node:fs"
-const WEBHOOK = readFileSync("app/api/vic-botmaker-v3/route.ts", "utf8")
+// El turno (reintentos, filtro de links, persistencia) vive en el orquestador único.
+const WEBHOOK = readFileSync("lib/orquestador-turno.ts", "utf8")
 
 test("el chequeo corre después de TODOS los reintentos y antes de persistir", () => {
   const eco = WEBHOOK.indexOf("ECO_DETECTADO")
