@@ -1513,7 +1513,7 @@ export async function runAgentLoop(params: {
       if (aplica && pais) {
         const { revisarSalida, reintentoQuedoBien } = await import("./cinturones-salida.ts")
         const histAsistente = history.filter((h) => h.role === "assistant").map((h) => String(h.content || ""))
-        const v = revisarSalida({ reply: finalText, toolCalls, historialAsistente: histAsistente, pais })
+        const v = revisarSalida({ reply: finalText, toolCalls, historialAsistente: histAsistente, pais, userMessage })
         if (v.accion === "reemplazo" && v.reply) {
           console.warn(`[agent-loop] CINTURON_${v.cinturon} ${pais} contact=${contact} motivos=${v.motivos.join(",")} → sale el mensaje de la tool`)
           finalText = v.reply
@@ -1525,7 +1525,7 @@ export async function runAgentLoop(params: {
           const retry = await runAgentLoop({ ...params, systemPrompt: systemPrompt + v.directiva, sinCinturonesDeSalida: true }).catch(() => null)
           const rReply = (retry?.reply || "").trim()
           const rCalls = retry?.toolCalls || []
-          const bien = Boolean(rReply) && reintentoQuedoBien({ reply: rReply, toolCalls: rCalls, historialAsistente: histAsistente, pais })
+          const bien = Boolean(rReply) && reintentoQuedoBien({ reply: rReply, toolCalls: rCalls, historialAsistente: histAsistente, pais, userMessage })
           if (bien && retry) {
             finalText = rReply
             toolCalls.splice(0, toolCalls.length, ...rCalls)

@@ -66,6 +66,11 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
+import {
+  CONTEXTO_REENGANCHE as CONTEXTO_REENGANCHE_COMPARTIDO,
+  directivaConsultiva as directivaConsultivaCompartida,
+  directivaMarcaje as directivaMarcajeCompartida,
+} from "@/lib/directivas-turno"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { consumirCotizacionPendiente } from "@/lib/enviar-cotizacion-wa"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blindarContactoComercial, blindarSoporteInventado } from "@/lib/voseo-v3"
@@ -340,18 +345,8 @@ function extractPdfUrl(
 // un toque de reactivación. Refuerza la excepción "REENGANCHE POR OFERTA" para que
 // Vicky retome con continuidad: ofrecer el máximo si no lo tenía / recordar el
 // plazo si ya estaba en el tope, siempre con sentido de caducidad.
-const CONTEXTO_REENGANCHE =
-  "[CONTEXTO — REENGANCHE ACTIVO] Tú (Vicky) reabriste esta conversación con un toque de " +
-  "reactivación: le ofreciste al cliente un precio especial por tiempo limitado, y este mensaje " +
-  "es su respuesta a ese toque. Aplica la regla 'REENGANCHE POR OFERTA': si el cliente todavía " +
-  "NO está en el descuento máximo del plan, ofrécele el máximo de forma proactiva con la tool de " +
-  "descuento que corresponda; si YA estaba en el máximo, recuérdale que ese precio caduca pronto. " +
-  "ADEMÁS, si el precio que vio llevaba RELOJ control (arriendo), acompaña la oferta con la " +
-  "alternativa más económica sin reloj usando los marcajes sin costo adicional (la app: cada persona marca " +
-  "desde su propio celular o todo el equipo desde el celular del supervisor): cotízala con " +
-  "cotizar_referencial sin hardware y muestra ambos caminos para que elija. " +
-  "En todos los casos transmite urgencia (la oferta tiene caducidad). No inventes cifras: usa solo " +
-  "los textos que devuelven las tools.\n\n"
+// Texto único en lib/directivas-turno (22-sep): lo comparten los cuatro países.
+const CONTEXTO_REENGANCHE = CONTEXTO_REENGANCHE_COMPARTIDO
 
 async function processOneTurn(
   contact: string,
@@ -488,15 +483,9 @@ async function processOneTurn(
     // cantidades ni sedes, la orden imperativa entra al FINAL del prompt
     // (recencia, igual que la del umbral): 1 punto y 1 reloj asumidos, la
     // única pregunta permitida es la comuna.
-    const msgCorto = (message || "").trim()
-    const eligeReloj =
-      msgCorto.length <= 40 &&
-      /\b(mixt[oa]s?|combinad[oa]s?|combinaci[oó]n|reloj(?:es)?|ambos|ambas|los dos|las dos)\b/i.test(msgCorto)
-    const declaraCantidadOSedes = /\d|sucursal|sede|punto|local/i.test(msgCorto)
-    const directivaMarcaje =
-      eligeReloj && !declaraCantidadOSedes
-        ? "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de elegir un marcaje que INCLUYE reloj (o dijo 'mixto'). PROHIBIDO preguntarle cuántos relojes o cuántos puntos necesita: ASUME 1 punto y 1 reloj y decláralo en tu mensaje. Si aún no sabes la comuna de ese punto, tu ÚNICA pregunta de este turno es la comuna; si ya la sabes, cotiza AHORA con cotizar_referencial (1 punto, autoInstalada: true) presentando el doble valor (con y sin reloj)."
-        : ""
+    // Texto único en lib/directivas-turno (22-sep): Chile pasa "comuna" y el
+    // string es byte a byte el que tenía inline.
+    const directivaMarcaje = directivaMarcajeCompartida(message || "", "comuna")
 
     // Directiva determinista RUT-SIN-CORREO (Lalo 31-ago, prueba en vivo): la
     // regla de los tres escenarios del prompt no aguantó el primer caso real
@@ -577,20 +566,7 @@ async function processOneTurn(
     // volvió a preguntar lo mismo con otras palabras. Si en el historial YA
     // hay una pregunta consultiva suya y este mensaje es la respuesta del
     // cliente, se prohíbe repreguntar: toca parafrasear y mostrar el menú.
-    const RE_PREGUNTA_OPERACION =
-      /(sobre tu operaci[oó]n|c[oó]mo trabaja tu equipo|a qu[eé] se dedican|una sola oficina o varias|cu[eé]ntame un poco (m[aá]s )?de tu operaci[oó]n)/i
-    const yaPregunto = (history || []).some(
-      (h) => h.role === "assistant" && RE_PREGUNTA_OPERACION.test(String(h.content || "")),
-    )
-    const yaMostroMenu = (history || []).some(
-      (h) =>
-        h.role === "assistant" &&
-        /formas m[aá]s usadas para marcar|te acomoda m[aá]s para tu operaci[oó]n/i.test(String(h.content || "")),
-    )
-    const directivaConsultiva =
-      yaPregunto && !yaMostroMenu
-        ? "\n\n[DIRECTIVA DEL TURNO — obligatoria] YA hiciste la pregunta consultiva sobre la operación y el cliente acaba de responderla. PROHIBIDO volver a preguntar por su operación, su rubro o cómo trabaja su equipo (aunque su respuesta te parezca corta o incompleta): con lo que dijo, PARAFRASEA en una frase y presenta AHORA el menú de modalidades de marcaje que calzan con su caso, cerrando con la pregunta de cuál le acomoda. Si te falta algún dato para cotizar, pídelo DENTRO de ese mismo mensaje, nunca en un turno aparte."
-        : ""
+    const directivaConsultiva = directivaConsultivaCompartida(history || [])
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)

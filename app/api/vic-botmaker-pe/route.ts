@@ -368,7 +368,11 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
         `SOLO si pide EXPLÍCITAMENTE cotizar para OTRA empresa distinta puedes volver al flujo de venta.`
     }
   } catch { /* sin marca, sin directiva */ }
-  const systemPromptPE = contextoUmbral + (nucleoPE ? getSystemPromptPENucleo(contact, umbralInfo?.umbral) : getSystemPromptPE(contact, umbralInfo?.umbral)) + contextoUmbral + directivaUmbral + directivaExtra
+  // ORQUESTADOR ÚNICO (22-sep): el mismo contexto de ejecutivo/reenganche y las
+  // mismas directivas por turno que Chile (marcaje → consultiva → RUC sin
+  // correo), con la ficha del país.
+  const turnoPE = await (await import("@/lib/contexto-turno")).contextoDeTurno(contact, message, history, { zona: "distrito", documento: "RUC" }).catch(() => ({ contexto: "", directivas: "" }))
+  const systemPromptPE = contextoUmbral + turnoPE.contexto + (nucleoPE ? getSystemPromptPENucleo(contact, umbralInfo?.umbral) : getSystemPromptPE(contact, umbralInfo?.umbral)) + contextoUmbral + directivaUmbral + directivaExtra + turnoPE.directivas
   const dispatchPE = nucleoPE ? buildDispatchPEUnificado(contact) : buildDispatchPE(contact)
   const schemasPE = (nucleoPE ? TOOL_SCHEMAS_PE_UNIFICADAS : TOOL_SCHEMAS_PE) as unknown as unknown[]
   if (nucleoPE) console.log(`[vic-pe] prompt NÚCLEO + tools únicas contact=${contact}`)
@@ -898,7 +902,8 @@ export async function POST(request: Request): Promise<NextResponse> {
           const cU = uInfo ? formatUmbralParaPrompt(uInfo.umbral, uInfo.origen, dP) : ""
           const dot = uInfo ? dotacionSobreUmbral(message, uInfo.umbral) : null
           const dir = dot && uInfo ? formatDirectivaSobreUmbral(dot, uInfo.umbral, dP) : ""
-          return cU + (nucleoSim ? getSystemPromptPENucleo(contact, uInfo?.umbral) : getSystemPromptPE(contact, uInfo?.umbral)) + cU + dir
+          const t = await (await import("@/lib/contexto-turno")).contextoDeTurno(contact, message, histSim, { zona: "distrito", documento: "RUC" }).catch(() => ({ contexto: "", directivas: "" }))
+          return cU + t.contexto + (nucleoSim ? getSystemPromptPENucleo(contact, uInfo?.umbral) : getSystemPromptPE(contact, uInfo?.umbral)) + cU + dir + t.directivas
         })(),
         history: histSim,
         userMessage: message,

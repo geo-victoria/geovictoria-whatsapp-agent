@@ -243,7 +243,8 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
   const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral) : null
   const directivaUmbral = dotacionDetectada && umbralInfo ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral, derivPais) : ""
-  const systemPromptCO = contextoUmbral + contextoCotizacion + (nucleoCO ? getSystemPromptCONucleo(contact, umbralInfo?.umbral) : getSystemPromptCO(contact, umbralInfo?.umbral)) + contextoUmbral + directivaUmbral
+  const turnoCO = await (await import("@/lib/contexto-turno")).contextoDeTurno(contact, message, history, { zona: "ciudad", documento: "NIT" }).catch(() => ({ contexto: "", directivas: "" }))
+  const systemPromptCO = contextoUmbral + turnoCO.contexto + contextoCotizacion + (nucleoCO ? getSystemPromptCONucleo(contact, umbralInfo?.umbral) : getSystemPromptCO(contact, umbralInfo?.umbral)) + contextoUmbral + directivaUmbral + turnoCO.directivas
   const dispatchCO = nucleoCO ? buildDispatchCOUnificado(contact) : buildDispatchCO(contact)
   const schemasCO = (nucleoCO ? TOOL_SCHEMAS_CO_UNIFICADAS : TOOL_SCHEMAS_CO) as unknown as unknown[]
   if (nucleoCO) console.log(`[vic-co] prompt NÚCLEO + tools únicas contact=${contact}`)
@@ -797,7 +798,8 @@ export async function POST(request: Request): Promise<NextResponse> {
           const cU = uInfo ? formatUmbralParaPrompt(uInfo.umbral, uInfo.origen, dP) : ""
           const dot = uInfo ? dotacionSobreUmbral(message, uInfo.umbral) : null
           const dir = dot && uInfo ? formatDirectivaSobreUmbral(dot, uInfo.umbral, dP) : ""
-          return cU + (nucleoSim ? getSystemPromptCONucleo(contact, uInfo?.umbral) : getSystemPromptCO(contact, uInfo?.umbral)) + cU + dir
+          const t = await (await import("@/lib/contexto-turno")).contextoDeTurno(contact, message, histSim, { zona: "ciudad", documento: "NIT" }).catch(() => ({ contexto: "", directivas: "" }))
+          return cU + t.contexto + (nucleoSim ? getSystemPromptCONucleo(contact, uInfo?.umbral) : getSystemPromptCO(contact, uInfo?.umbral)) + cU + dir + t.directivas
         })(),
         history: histSim,
         userMessage: message,

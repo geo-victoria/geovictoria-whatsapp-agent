@@ -16,7 +16,7 @@
  * Módulo PURO: sin red ni base, para poder testearlo.
  */
 
-import { rutValido } from "./rut.ts"
+import { rucValido, rutValido } from "./rut.ts"
 
 export type TurnoHistorial = { role: string; content: unknown }
 
@@ -40,7 +40,7 @@ export function clienteDioCorreo(mensaje: string, history: TurnoHistorial[]): bo
 /** ¿Ya se le mostró un precio? (marca de moneda o UF en algo que dijo Vicky) */
 function yaVioPrecio(history: TurnoHistorial[]): boolean {
   return history.some(
-    (m) => m.role === "assistant" && /(\$\s?\d|\bUF\b)/i.test(String(m.content || "")),
+    (m) => m.role === "assistant" && /(\$\s?\d|\bUF\b|S\/\s?\d|\+\s*IGV\b)/i.test(String(m.content || "")),
   )
 }
 
@@ -48,16 +48,33 @@ function yaVioPrecio(history: TurnoHistorial[]): boolean {
  * Devuelve la directiva del turno, o "" si no corresponde.
  * El llamador la concatena al FINAL del system prompt.
  */
+const RE_RUC = /(?<!\d)(\d{2}[\s.\-]?\d{8}[\s.\-]?\d)(?!\d)/g
+
+/** ¿El texto trae un RUC peruano con dígito verificador correcto? */
+export function traeRucValido(texto: string): boolean {
+  for (const m of String(texto || "").matchAll(RE_RUC)) {
+    if (rucValido(m[1].replace(/\D/g, ""))) return true
+  }
+  return false
+}
+
+export type DocumentoEmpresa = "RUT" | "RUC" | "NIT" | "RFC"
+
 export function directivaRutSinCorreo(
   mensaje: string,
   history: TurnoHistorial[],
+  opts: { documento?: DocumentoEmpresa } = {},
 ): string {
-  if (!traeRutValido(mensaje)) return ""
+  const documento = opts.documento || "RUT"
+  // Solo los documentos con dígito verificador conocido se reconocen en el
+  // texto; NIT/RFC no gatillan (sin validador, una cifra suelta no es evidencia).
+  const trae = documento === "RUT" ? traeRutValido(mensaje) : documento === "RUC" ? traeRucValido(mensaje) : false
+  if (!trae) return ""
   if (clienteDioCorreo(mensaje, history)) return ""
   if (!yaVioPrecio(history)) return ""
   return (
-    "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de entregarte el RUT y en toda la conversación " +
-    "NO te ha dado un correo. Con el RUT basta: llama generar_link_cotizadora AHORA, en este mismo turno, " +
+    `\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de entregarte el ${documento} y en toda la conversación ` +
+    `NO te ha dado un correo. Con el ${documento} basta: llama generar_link_cotizadora AHORA, en este mismo turno, ` +
     "OMITIENDO `contactoEmail`. PROHIBIDO volver a pedirle el email, mencionarlo o explicar que no puedes " +
     "enviárselo — su correo se lo pide el formulario de facturación cuando acepte. Entregas con las dos líneas " +
     "de siempre (saludo + link); el PDF lo adjunta el sistema solo."

@@ -44,7 +44,7 @@ export type Veredicto = {
   /** Para el log y el aviso interno. */
   motivos: string[]
   /** Identificador del cinturón que disparó, para medir cuál actúa más. */
-  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool" | "link_formal_sin_tool"
+  cinturon?: "precio_deformado" | "precio_sin_tool" | "pregunta_prohibida" | "actualizada_sin_tool" | "descuento_aplicado_sin_tool" | "descuento_ofrecido_sin_tool" | "link_formal_sin_tool" | "objecion_precio_sin_tool"
 }
 
 const OK: Veredicto = { accion: "ok", motivos: [] }
@@ -226,6 +226,45 @@ export type EntradaSalida = {
   pais: PaisCinturon
   /** En la fase de onboarding no hay venta: estos cinturones no aplican. */
   enOnboarding?: boolean
+  /** El mensaje del cliente en este turno (para juzgar la objeción de precio). */
+  userMessage?: string
+}
+
+/**
+ * OBJECIÓN DE PRECIO SIN TOOL (22-sep, batería CL vs PE, E2 "es muy caro,
+ * ¿tienen descuento?"): Chile 3/3 llamaba la tool de descuento porque su
+ * webhook fuerza un reintento; Perú 0/4 (pedía RUC y correo antes del precio,
+ * repreguntaba la modalidad). La regla del núcleo ("una objeción = UNA llamada
+ * a la tool de descuento") es global: acá se hace cumplir para todos.
+ */
+export const OBJECION_PRECIO_RE =
+  /\b(car[oa]s?|car[ií]sim[oa]s?|descuento|dcto|rebaj[ae]s?|rebajar|m[aá]s barat[oa]|muy alto|precio alto|promoci[oó]n|no me alcanza|presupuesto|mucha plata|muy elevado)\b/i
+const TOOLS_QUE_RESPONDEN_OBJECION = new Set([
+  "consultar_descuento_referencial",
+  "consultar_siguiente_descuento",
+  "aplicar_siguiente_descuento",
+  "generar_link_cotizadora",
+  "actualizar_cotizacion",
+  "anualizar_cotizacion",
+  "derivar_a_soporte",
+  "derivar_a_ejecutivo",
+])
+const FORZAR_TOOL_OBJECION =
+  "\n\n# Instrucción de sistema (este turno)\n" +
+  "El cliente acaba de OBJETAR EL PRECIO o pedir descuento, y tu borrador no llamó ninguna tool de descuento. " +
+  "Regla del flujo: una objeción = UNA llamada a la tool de descuento en ESTE turno. Si aún no hay cotización formal, " +
+  "llama consultar_descuento_referencial (si todavía no mostraste precio, primero cotizar_referencial con la dotación y el marcaje " +
+  "que ya conoces y en el mismo turno la de descuento); si ya hay formal, consultar_siguiente_descuento. Copia su " +
+  "`mensajeParaProspecto` TAL CUAL. PROHIBIDO pedir datos de cierre, repreguntar la modalidad o la operación antes de responder la objeción."
+
+/** ¿El cliente objetó el precio en este turno y el borrador no lo resolvió con una tool? */
+export function objecionSinTool(userMessage: string | undefined, toolsOk: string[]): boolean {
+  const u = String(userMessage || "").trim()
+  if (!u || u.length > 200) return false
+  if (!OBJECION_PRECIO_RE.test(u)) return false
+  // "descuento" dentro de una pregunta de cierre ("¿el descuento aplica al reloj?") con formal
+  // vigente también merece la tool: el criterio es simple a propósito.
+  return !toolsOk.some((t) => TOOLS_QUE_RESPONDEN_OBJECION.has(t))
 }
 
 /**
@@ -264,6 +303,19 @@ export function revisarSalida(e: EntradaSalida): Veredicto {
       contencion: CONTENCION[e.pais] || CONTENCION.cl,
       motivos: cp.inventados.map(String),
       cinturon: "precio_sin_tool",
+    }
+  }
+
+  // (2b) Objeción de precio sin tool: reintento forzado; si el reintento
+  // tampoco la llama, sale el borrador (una pregunta de más es menos grave que
+  // dejar al cliente sin respuesta) y queda el aviso.
+  if (objecionSinTool(e.userMessage, toolsOk)) {
+    return {
+      accion: "reintento",
+      directiva: FORZAR_TOOL_OBJECION,
+      siFallaReintento: "dejar_pasar",
+      motivos: ["objeción de precio del cliente sin tool de descuento en el turno"],
+      cinturon: "objecion_precio_sin_tool",
     }
   }
 
