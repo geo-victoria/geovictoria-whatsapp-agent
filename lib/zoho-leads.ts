@@ -1005,10 +1005,12 @@ export async function reasignarLeadSdrInboundMX(
 }
 
 // SDR INBOUND PERÚ (Lalo 15-sep): Ana Fiori y Priscila Quispe reciben lo que
-// Vicky NO logra calificar, por rotación interna (Zoho no tiene tómbola para
-// PE; si algún día existe: env VICKY_TM_SDR_INBOUND_PE_RULE_ID). Lo
-// calificado y los deals siguen con Mónica Mendoza (única telemarketing).
-// Roster por env VIC_SDR_INBOUND_PE ("email:zohoUserId,…"), default = ellas dos.
+// Vicky NO logra calificar. Desde el 22-sep la regla chilena "Asignación
+// Leads Sin calificar Vicky SDR" (…043111) tiene la entrada "Territorio =
+// Perú → Ana Fiori / Priscila", así que el sorteo lo hace ZOHO (misma regla
+// que Chile, lar_id) y la rotación interna queda solo de fallback. Override:
+// env VICKY_TM_SDR_INBOUND_PE_RULE_ID. Roster de fallback por env
+// VIC_SDR_INBOUND_PE ("email:zohoUserId,…"), default = ellas dos.
 const SDR_INBOUND_PE = (
   process.env.VIC_SDR_INBOUND_PE ||
   "afiori@geovictoria.com:3525045000299130001,pquispef@geovictoria.com:3525045000576828001"
@@ -1019,7 +1021,7 @@ const SDR_INBOUND_PE = (
     return { email, id: id || "" }
   })
   .filter((s) => s.email)
-const TM_SDR_INBOUND_PE = (process.env.VICKY_TM_SDR_INBOUND_PE_RULE_ID || "").trim()
+const TM_SDR_INBOUND_PE = (process.env.VICKY_TM_SDR_INBOUND_PE_RULE_ID || TM_TOMBOLA_SIN_CALIFICAR_CL).trim()
 
 // TELEMARKETING PERÚ (Lalo 22-sep): la regla "Asignación Leads Vicky TLMK"
 // (…066001) ganó la entrada "Territorio = Perú → Mónica Mendoza", así que el

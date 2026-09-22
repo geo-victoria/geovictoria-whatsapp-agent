@@ -382,3 +382,9 @@ test("Perú: el lead CALIFICADO pasa por la regla TLMK de Zoho (entrada Territor
   assert.match(BARRIDO, /calificado \? reasignarLeadCalificadoPE\(l\.id\) : reasignarLeadSdrInboundPE\(l\.id\)/)
 })
 
+test("Perú: el lead SIN calificar pasa por la regla SDR de Zoho (entrada Territorio = Perú → Ana Fiori/Priscila); la rotación interna queda de fallback", () => {
+  const LEADS = readFileSync(join(RAIZ, "lib/zoho-leads.ts"), "utf8")
+  assert.match(LEADS, /VICKY_TM_SDR_INBOUND_PE_RULE_ID \|\| TM_TOMBOLA_SIN_CALIFICAR_CL/)
+  assert.match(LEADS, /reasignarLeadPorRoster\(\{ leadId, ruleId: TM_SDR_INBOUND_PE, roster: SDR_INBOUND_PE/)
+})
+
