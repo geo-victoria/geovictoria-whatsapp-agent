@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { destinoTrasCalificar, esSdrCalificacionCL } from "../lib/sdr-calificacion.ts"
+import { destinoTrasCalificar, esSdrCalificacionCL, rosterSdrPorTerritorio } from "../lib/sdr-calificacion.ts"
 
 const ALEYDIS = "3525045000583802005"
 const ARACELLI = "3525045000594735052"
@@ -97,4 +97,30 @@ test("asignacionFresca: ventana en cero o inválida nunca frena", async () => {
   const eventos = [{ action: "owner_assigned", audited_time: new Date().toISOString() }]
   assert.equal(asignacionFresca(eventos, Date.now(), 0).fresca, false)
   assert.equal(asignacionFresca(eventos, Date.now(), Number.NaN).fresca, false)
+})
+
+// ── PERÚ (22-sep): las SDR peruanas entran a la misma regla ──────────────
+test("Perú: SDR peruana con caso calificado y RUC → deal_tombola; sin RUC → lead_tlmk", () => {
+  const ANA = "3525045000299130001"
+  assert.equal(
+    destinoTrasCalificar({ territorio: "Perú", ownerId: ANA, calificado: true, rut: "20605842055" }),
+    "deal_tombola",
+  )
+  assert.equal(
+    destinoTrasCalificar({ territorio: "Perú", ownerEmail: "pquispef@geovictoria.com", calificado: true }),
+    "lead_tlmk",
+  )
+})
+
+test("Perú: SDR peruana sin calificar, o Mónica (telemarketing), o SDR chilena en territorio Perú → sin_cambio", () => {
+  assert.equal(destinoTrasCalificar({ territorio: "Perú", ownerId: "3525045000299130001", calificado: false }), "sin_cambio")
+  assert.equal(destinoTrasCalificar({ territorio: "Perú", ownerEmail: "mmendozav@geovictoria.com", calificado: true, rut: "20605842055" }), "sin_cambio")
+  assert.equal(destinoTrasCalificar({ territorio: "Perú", ownerId: ALEYDIS, calificado: true, rut: "20605842055" }), "sin_cambio")
+})
+
+test("rosterSdrPorTerritorio: Chile y Perú tienen roster; Colombia no", () => {
+  assert.equal(rosterSdrPorTerritorio("Chile").length, 2)
+  assert.equal(rosterSdrPorTerritorio(null).length, 2)
+  assert.equal(rosterSdrPorTerritorio("Perú").length, 2)
+  assert.equal(rosterSdrPorTerritorio("Colombia").length, 0)
 })

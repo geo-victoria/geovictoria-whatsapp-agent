@@ -74,6 +74,12 @@ export async function datosDelChat(contact: string, opts: { soloSiHayRut?: boole
     if (clean.startsWith("56")) {
       const { rutEnTexto } = await import("./empresas-sii")
       rut = rutEnTexto(soloCliente) || undefined
+    } else if (clean.startsWith("51")) {
+      // Perú (22-sep): el documento es el RUC (11 dígitos con DV módulo 11);
+      // viaja en el mismo campo `rut` — crm-hitos lo escribe en RUT_Empresa
+      // sin canonizarlo como RUT chileno y la escalera RUC + >20 → deal.
+      const { rucEnTexto } = await import("./rut")
+      rut = rucEnTexto(soloCliente) || undefined
     }
     if (opts.soloSiHayRut && !rut) return vacio
     const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()

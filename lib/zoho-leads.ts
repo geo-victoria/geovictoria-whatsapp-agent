@@ -1047,6 +1047,46 @@ export async function reasignarLeadCalificadoPE(
   return reasignarLeadPorRoster({ leadId, ruleId: TM_CALIFICACION_PE, roster: TLMK_PE_FALLBACK, kvTurno: "tlmk_rr_pe", etiqueta: "TLMK PE" })
 }
 
+/**
+ * ENTREGA DE UN LEAD POR TERRITORIO (22-sep, brecha Chile↔Perú). Un solo punto
+ * de decisión para crm-hitos y los crons: Chile → la escalera chilena
+ * (`reasignarLeadCalificacionCL`: calificado → TLMK, sin calificar → SDR,
+ * >300 → SDR con misión); Perú → las MISMAS dos reglas de Zoho con sus
+ * entradas "Territorio = Perú" (calificado → TLMK/Mónica, sin calificar →
+ * SDR Ana Fiori/Priscila). Sin territorio se asume Chile (Messenger e
+ * históricos). Colombia/México no tienen tómbola de leads de este tipo:
+ * responde `success:false` y el llamador conserva la conducta de siempre.
+ */
+export async function reasignarLeadPorTerritorio(
+  territorio: string | null | undefined,
+  leadId: string,
+  opts: { calificado?: boolean } = {},
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string }> {
+  const t = String(territorio || "Chile").trim().toLowerCase()
+  if (t === "chile") return reasignarLeadCalificacionCL(leadId, opts)
+  if (t === "perú" || t === "peru") {
+    const r = opts.calificado ? await reasignarLeadCalificadoPE(leadId) : await reasignarLeadSdrInboundPE(leadId)
+    if (!r.success || !r.ownerId) return r
+    // La rotación por regla devuelve email+id; el nombre se lee del lead
+    // para que la presentación al cliente no salga con el local-part.
+    try {
+      const accessToken = await getZohoAccessToken()
+      const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+      const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, {
+        headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+        cache: "no-store",
+      })
+      const owner = g.ok
+        ? ((await g.json().catch(() => ({}))) as { data?: Array<{ Owner?: { name?: string } }> }).data?.[0]?.Owner
+        : undefined
+      return { ...r, ownerNombre: owner?.name || undefined }
+    } catch {
+      return r
+    }
+  }
+  return { success: false, error: `sin tómbola de leads para territorio ${territorio || "?"}` }
+}
+
 /** Reasigna un lead PE sin calificar a las SDR Inbound de Perú (RR interno). */
 export async function reasignarLeadSdrInboundPE(
   leadId: string,

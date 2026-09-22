@@ -519,6 +519,13 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
     void import("@/lib/casuistica-runtime")
       .then((m) => m.aplicarCasuisticaNoProspecto(contact, cas, "webhook-pe"))
       .catch(() => undefined)
+  } else {
+    // HITO DE INTENCIÓN POR CHAT (22-sep, herencia CL 07-sep): con RUC del
+    // cliente en la conversación se dispara el hito una vez; la escalera
+    // decide (RUC + >20 → deal + "Deals 2026"; ≤20 → lead pre-formal).
+    void import("@/lib/hito-por-chat")
+      .then((m) => m.hitoIntencionDesdeChat(contact))
+      .catch(() => undefined)
   }
 
   // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.

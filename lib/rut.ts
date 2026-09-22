@@ -84,3 +84,15 @@ export function formatearRuc(rucRaw: string): string {
   const ruc = String(rucRaw || "").replace(/\D/g, "")
   return rucValido(ruc) ? ruc : String(rucRaw || "").trim()
 }
+
+/** Primer RUC VÁLIDO escrito en un texto (11 dígitos seguidos, con o sin
+ * espacios/puntos/guiones entre medio). Homólogo de `rutEnTexto` para Perú:
+ * lo usa la extracción del chat para disparar el hito de intención. */
+export function rucEnTexto(texto: string): string | null {
+  const re = /(?<!\d)(\d{2}[\s.\-]?\d{8}[\s.\-]?\d)(?!\d)/g
+  for (const m of String(texto || "").matchAll(re)) {
+    const candidato = m[1].replace(/\D/g, "")
+    if (rucValido(candidato)) return candidato
+  }
+  return null
+}

@@ -1661,7 +1661,23 @@ async function asignarEnZoho(
       // y se presenta él; si es del bot, calificado → Mónica, si no → SDR PE.
       const ownerLeadPe = (lead.Owner?.email || "").toLowerCase()
       const esInterinaPe = !ownerLeadPe || /vicky@|info@geovictoria/.test(ownerLeadPe)
-      if (!esInterinaPe && lead.Owner?.id) {
+      // SDR PE con el caso YA calificado (22-sep, misma regla del 10-sep en
+      // Chile): Ana Fiori/Priscila lo recibieron porque Vicky no había podido
+      // calificar; con la dotación estampada la calificación está hecha y el
+      // lead vuelve a Mónica por la regla TLMK en vez de presentarse la SDR.
+      const { destinoTrasCalificar: destinoPe } = await import("@/lib/sdr-calificacion")
+      const sdrPeConCalificado =
+        destinoPe({
+          territorio: "Perú",
+          ownerEmail: ownerLeadPe,
+          ownerId: lead.Owner?.id,
+          calificado: calificado || Number(lead.N_Empleados_que_marcan || 0) > 0,
+          rut: lead.RUT_Empresa,
+        }) !== "sin_cambio"
+      if (sdrPeConCalificado) {
+        console.log(`[ptv] ${fono}: lead PE de SDR (${ownerLeadPe}) con la calificación ya hecha — vuelve a la tómbola TLMK PE`)
+      }
+      if (!esInterinaPe && !sdrPeConCalificado && lead.Owner?.id) {
         await notaTraspasoConversacion(lead.id, fono).catch(() => {})
         await notificarTraspasoLeadEmail(lead.id, ownerLeadPe, fono, H, api)
         const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
@@ -3174,10 +3190,18 @@ async function reintentarPresentacionesPendientes(
 async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max?: number; diasDeals?: number } = {}): Promise<{ revisados: number; reenviados: number; detalle: string[] }> {
   const diasLeads = Math.max(1, Math.min(60, Number(opts.dias) || 7))
   const maxReenvios = Math.max(1, Math.min(20, Number(opts.max) || 4))
-  const roster = (process.env.VICKY_TM_ROSTER_CALIFICACION_EMAILS || "aaraque@geovictoria.com,asepulveda@geovictoria.com")
+  const rosterCL = (process.env.VICKY_TM_ROSTER_CALIFICACION_EMAILS || "aaraque@geovictoria.com,asepulveda@geovictoria.com")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+  // PERÚ (22-sep): las SDR peruanas entran a la misma conciliación con su
+  // roster (fuente única: lib/sdr-calificacion, env VIC_SDR_INBOUND_PE).
+  const { rosterSdrPorTerritorio } = await import("@/lib/sdr-calificacion")
+  const rosterPE = rosterSdrPorTerritorio("Perú").map((d) => d.email).filter(Boolean)
+  const roster = Array.from(new Set([...rosterCL, ...rosterPE]))
   const out = { revisados: 0, reenviados: 0, detalle: [] as string[] }
   if (!roster.length) return out
+  // País del contacto por prefijo: decide la regla de deals y la de leads.
+  const paisDeFono = (f: string): "cl" | "pe" | null => (f.startsWith("56") ? "cl" : f.startsWith("51") ? "pe" : null)
+  const territorioDe = (f: string): "Chile" | "Perú" => (f.startsWith("51") ? "Perú" : "Chile")
   const desde = new Date(ahora.getTime() - diasLeads * 24 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
   const { ownerLoPusoUnHumano } = await import("@/lib/owner-manual")
@@ -3263,7 +3287,11 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     const status = String(l.Lead_Status || "")
     if (/no calificado/i.test(status)) continue
     const fono = String(l.Phone || "").replace(/\D/g, "")
-    if (!fono || !fono.startsWith("56") || isTestContact(fono, tests)) continue
+    const paisL = paisDeFono(fono)
+    if (!fono || !paisL || isTestContact(fono, tests)) continue
+    // La SDR debe ser del roster de SU país (una peruana con un lead chileno es
+    // el caso "leads cruzados", no esta conciliación).
+    if (!rosterSdrPorTerritorio(territorioDe(fono)).some((d) => d.email === String(l["Owner.email"] || "").toLowerCase())) continue
     if (await getKvValue(`sdr_recon_${l.id}`).catch(() => null)) continue
     const yaContactoL = await contactoYaResuelto(fono)
     if (yaContactoL) {
@@ -3315,8 +3343,9 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
         const rs = await fetch(`${api}/crm/v3/Leads/search?phone=${fono}&converted=both&per_page=3`, { headers: H, cache: "no-store" })
         const filas = rs.ok && rs.status !== 204 ? (((await rs.json().catch(() => ({}))) as { data?: Array<{ Converted_Deal?: { id?: string } | null }> }).data || []) : []
         const dealId = filas.find((x) => x.Converted_Deal?.id)?.Converted_Deal?.id || ""
-        if (dealId && TOMBOLA_DEALS_RULE.cl) {
-          const put = await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: dealId }], lar_id: TOMBOLA_DEALS_RULE.cl }) })
+        const reglaDealsL = TOMBOLA_DEALS_RULE[paisL] || ""
+        if (dealId && reglaDealsL) {
+          const put = await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: dealId }], lar_id: reglaDealsL }) })
           const get = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: H, cache: "no-store" })
           const owner = (((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner)
           if (put.ok && owner?.id && owner?.email && !roster.includes(owner.email.toLowerCase())) {
@@ -3332,14 +3361,16 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
         }
       }
       // Sin RUT (o sin deal): lead calificado → tómbola de leads TLMK.
-      const { reasignarLeadCalificacionCL, updateZohoLeadStatus, STATUS_ENTREGA_LEAD } = await import("@/lib/zoho-leads")
+      const { reasignarLeadPorTerritorio, updateZohoLeadStatus, STATUS_ENTREGA_LEAD } = await import("@/lib/zoho-leads")
       // TOPE "3. Contactado" (Lalo 09-sep): calificado = dotación en el
       // registro, no el status; "4." por API bloquea la conversión.
       if (!/^\s*[34]\./.test(status)) await updateZohoLeadStatus(l.id, STATUS_ENTREGA_LEAD).catch(() => {})
       if (empleados > 0 && !(Number(l.N_Empleados_que_marcan || 0) > 0)) {
         await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: l.id, N_Empleados_que_marcan: empleados }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }) }).catch(() => null)
       }
-      const r = await reasignarLeadCalificacionCL(l.id, { calificado: true }).catch(() => null)
+      // Por territorio (22-sep): CL → regla TLMK chilena; PE → la misma regla
+      // con su entrada "Territorio = Perú" (Mónica).
+      const r = await reasignarLeadPorTerritorio(territorioDe(fono), l.id, { calificado: true }).catch(() => null)
       if (r?.success && r.ownerEmail && r.ownerId && !roster.includes(r.ownerEmail.toLowerCase())) {
         await notificarTraspasoLeadEmail(l.id, r.ownerEmail, fono, H, api, `estaba en calificación SDR y la conversación YA trae la dotación (${empleados || "?"} personas): <b>lead calificado, ahora es tuyo</b>.`).catch(() => {})
         await presentar(fono, r.ownerEmail, r.ownerId, r.ownerNombre || NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0], "sdr_calificado_lead")
@@ -3375,7 +3406,9 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     if (String(d.Created_By?.id || "") !== VICKY_ID) continue
     if (await getKvValue(`sdr_recon_deal_${d.id}`).catch(() => null)) continue
     const fono = String(d["Contact_Name.Phone"] || "").replace(/\D/g, "")
-    if (!fono || !fono.startsWith("56") || isTestContact(fono, tests)) continue
+    const paisD = paisDeFono(fono)
+    if (!fono || !paisD || isTestContact(fono, tests)) continue
+    if (!rosterSdrPorTerritorio(territorioDe(fono)).some((x) => x.email === String(d["Owner.email"] || "").toLowerCase())) continue
     const yaContactoD = await contactoYaResuelto(fono)
     if (yaContactoD) {
       out.detalle.push(`+${fono} deal ${d.id} (${d.Deal_Name || ""}): el contacto ya se re-entregó ${yaContactoD} — hermano, no se re-sortea`)
@@ -3422,8 +3455,9 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
     }
     await setKvValue(`sdr_recon_deal_${d.id}`, ahora.toISOString()).catch(() => {})
     try {
-      if (!TOMBOLA_DEALS_RULE.cl) break
-      const put = await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: d.id }], lar_id: TOMBOLA_DEALS_RULE.cl }) })
+      const reglaDealsD = TOMBOLA_DEALS_RULE[paisD] || ""
+      if (!reglaDealsD) { out.detalle.push(`+${fono} deal ${d.id}: sin tómbola de deals para ${paisD}`); continue }
+      const put = await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: d.id }], lar_id: reglaDealsD }) })
       const get = await fetch(`${api}/crm/v3/Deals/${d.id}?fields=Owner`, { headers: H, cache: "no-store" })
       const owner = (((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner)
       if (put.ok && owner?.id && owner?.email && !roster.includes(owner.email.toLowerCase())) {
@@ -4169,14 +4203,27 @@ async function reconciliarLeadsCruzados(): Promise<number> {
   const q = await fetch(`${api}/crm/v3/coql`, {
     method: "POST", headers: H, cache: "no-store",
     body: JSON.stringify({
-      select_query: `select id, Territorio, Phone, Owner.email from Leads where (Owner.email in (${emails}) and Converted__s = false) and Territorio != 'Chile' limit 10`,
+      select_query: `select id, Territorio, Phone, N_Empleados_que_marcan, Owner.email from Leads where (Owner.email in (${emails}) and Converted__s = false) and Territorio != 'Chile' limit 10`,
     }),
   })
   if (!q.ok || q.status === 204) return 0
-  const filas = ((await q.json().catch(() => ({}))) as { data?: Array<{ id?: string; Territorio?: string; Phone?: string }> }).data || []
+  const filas = ((await q.json().catch(() => ({}))) as { data?: Array<{ id?: string; Territorio?: string; Phone?: string; N_Empleados_que_marcan?: number | null }> }).data || []
   let corregidos = 0
   for (const l of filas) {
-    const destino = destinoPorTerritorio[String(l.Territorio || "").trim().toLowerCase()]
+    const terr = String(l.Territorio || "").trim().toLowerCase()
+    // PERÚ (22-sep): por las reglas de Zoho con entrada "Territorio = Perú" —
+    // calificado → TLMK (Mónica), sin calificar → SDR PE (Ana/Priscila) —
+    // en vez del PUT directo a Mónica; Mónica queda de fallback dentro.
+    if ((terr === "perú" || terr === "peru") && l.id) {
+      const { reasignarLeadPorTerritorio } = await import("@/lib/zoho-leads")
+      const r = await reasignarLeadPorTerritorio("Perú", l.id, { calificado: Number(l.N_Empleados_que_marcan || 0) > 0 }).catch(() => null)
+      if (r?.success) {
+        corregidos++
+        console.warn(`[leads-cruzados] lead ${l.id} (Perú, ${l.Phone || "?"}) roster CL → ${r.ownerEmail} (regla)`)
+        continue
+      }
+    }
+    const destino = destinoPorTerritorio[terr]
     if (!destino || !l.id) continue
     const put = await fetch(`${api}/crm/v3/Leads`, {
       method: "PUT", headers: H, cache: "no-store",

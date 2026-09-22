@@ -58,7 +58,10 @@ const HITOS_PRE_FORMALES: ReadonlySet<Hito> = new Set([
 
 function dealSoloConFormal(territorio: string | null, hito: Hito): boolean {
   if ((process.env.VICKY_DEAL_CLASICO || "").trim() === "1") return false
-  return territorio === "Chile" && HITOS_PRE_FORMALES.has(hito)
+  // Chile y todo territorio con tómbola de deals en Zoho (Perú desde el
+  // 22-sep): bajo el umbral el deal nace con la FORMAL; antes de eso el
+  // registro es un lead que la escalera entrega (TLMK / SDR del país).
+  return territorioConTombola(territorio) && HITOS_PRE_FORMALES.has(hito)
 }
 
 /** ESCALERA 18-ago (Lalo): "si hay intención comercial y RUT debemos crear
@@ -597,6 +600,8 @@ function rutCanonico(raw: string): string {
   // Inline (misma regla que normalizarRut de lib/rut.ts): node --test no
   // resuelve imports estáticos sin extensión y este módulo se testea así.
   const n = String(raw || "").replace(/[.\s-]/g, "").toUpperCase()
+  // RUC peruano (11 dígitos): canónico = solo dígitos, sin guion (22-sep).
+  if (/^\d{11}$/.test(n)) return n
   if (!/^\d{7,8}[0-9K]$/.test(n)) return String(raw || "").trim()
   return `${n.slice(0, -1)}-${n.slice(-1)}`
 }
@@ -962,7 +967,7 @@ async function convertirConDeal(
   const companyLead = String(lead.company || "").trim()
   if (!companyLead || /^[-–—\s]*$/.test(companyLead) || /^prospecto whatsapp$/i.test(companyLead) || /^no declarado$/i.test(companyLead)) {
     let nombreCuenta = ""
-    if (lead.rut) {
+    if (lead.rut && territorio === "Chile") {
       try {
         const { fichaEmpresaSii } = await import("./empresas-sii")
         nombreCuenta = (await fichaEmpresaSii(lead.rut.trim().toUpperCase().replace(/\./g, "")))?.razonSocial || ""
@@ -993,7 +998,7 @@ async function convertirConDeal(
   // después el ejecutivo cuando corresponda. Antes nacía un trato aunque
   // nadie hubiera hablado con el cliente. El owner sorteado se devuelve para
   // que Vicky pueda presentarlo y ofrecer reunión con él.
-  if (entregarComoLead && territorio === "Chile") {
+  if (entregarComoLead && territorioConTombola(territorio)) {
     // LAS SDR NO SE QUEDAN CON LO CALIFICADO (Lalo 10-sep): el candado de
     // "dueño humano previo" protege la cartera de los ejecutivos, pero una SDR
     // de calificación con un caso YA calificado debe devolverlo a la tómbola
@@ -1016,12 +1021,14 @@ async function convertirConDeal(
     if (destinoSdr !== "sin_cambio") {
       console.log(`[crm-hitos] +${contact}: sobre-umbral en manos de SDR con el caso YA calificado — re-entrega (${destinoSdr})`)
     }
-    const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
-    const r = await reasignarLeadCalificacionCL(lead.id, { calificado: empleados > 0 }).catch(
+    // Por territorio (22-sep): Chile → escalera CL; Perú → las mismas reglas
+    // de Zoho con su entrada "Territorio = Perú" (TLMK Mónica / SDR PE).
+    const { reasignarLeadPorTerritorio } = await import("./zoho-leads")
+    const r = await reasignarLeadPorTerritorio(territorio, lead.id, { calificado: empleados > 0 }).catch(
       () => null,
     )
     console.log(
-      `[crm-hitos] +${contact}: sobre-umbral → tómbola de LEADS (${r?.ownerEmail || "sin asignar"}), sin crear trato`,
+      `[crm-hitos] +${contact}: sobre-umbral → tómbola de LEADS ${territorio} (${r?.ownerEmail || "sin asignar"}), sin crear trato`,
     )
     if (r?.ownerId || r?.ownerEmail) {
       await guardarEjecutivoAsignado(contact, {
@@ -1046,7 +1053,7 @@ async function convertirConDeal(
     }
     return null
   }
-  if (territorio === "Chile" && empleados <= 0) {
+  if (territorioConTombola(territorio) && empleados <= 0) {
     if (ownerForzadoId) {
       await fetch(`${api}/crm/v3/Leads`, {
         method: "PUT",
@@ -1061,9 +1068,9 @@ async function convertirConDeal(
         `[crm-hitos] +${contact}: hito sin N° de trabajadores CON reunión — deal NO creado; lead ${lead.id} forzado al host de la reunión`,
       )
     } else if (!heredaGestionAlDeal(lead.ownerId, territorio)) {
-      const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
-      // Hito SIN N° de trabajadores = lead sin calificar → tómbola SDR.
-      const r = await reasignarLeadCalificacionCL(lead.id, { calificado: false }).catch(() => null)
+      const { reasignarLeadPorTerritorio } = await import("./zoho-leads")
+      // Hito SIN N° de trabajadores = lead sin calificar → tómbola SDR del país.
+      const r = await reasignarLeadPorTerritorio(territorio, lead.id, { calificado: false }).catch(() => null)
       console.log(
         `[crm-hitos] +${contact}: hito sin N° de trabajadores — deal NO creado; lead ${lead.id} → tómbola de calificación (${r?.ownerEmail || "sin asignar"})`,
       )
@@ -1756,8 +1763,10 @@ async function dejarLeadPreFormal(
       return
     }
     if (sorteoInmediato && lead.id) {
-      const { reasignarLeadCalificacionCL } = await import("./zoho-leads")
-      const r = await reasignarLeadCalificacionCL(lead.id, { calificado: true }).catch(() => null)
+      // Por territorio (22-sep): un lead peruano jamás entra al roster
+      // chileno — va por la entrada "Territorio = Perú" de la misma regla.
+      const { reasignarLeadPorTerritorio } = await import("./zoho-leads")
+      const r = await reasignarLeadPorTerritorio(territorioDeContacto(clean), lead.id, { calificado: true }).catch(() => null)
       // Doc regla general 5a: "con el ejecutivo ya asignado, Vicky lo PRESENTA
       // en ese mismo mensaje". La entrega como LEAD no guardaba el ejecutivo
       // sorteado y la tool despedía sin presentar a nadie (18-ago: Instituto,
@@ -2161,8 +2170,8 @@ export async function sincronizarHitoCrm(
         })
         if (destinoSdr === "lead_tlmk") {
           // Calificado SIN RUT: no nace deal, cambia el dueño del lead.
-          const { reasignarLeadCalificacionCL, agregarNotaLead } = await import("./zoho-leads")
-          const r = await reasignarLeadCalificacionCL(lead.id, { calificado: true }).catch(() => null)
+          const { reasignarLeadPorTerritorio, agregarNotaLead } = await import("./zoho-leads")
+          const r = await reasignarLeadPorTerritorio(territorioLead, lead.id, { calificado: true }).catch(() => null)
           console.log(
             `[crm-hitos] ${clean}: lead calificado en manos de SDR — re-entregado a la tómbola TLMK (${r?.ownerEmail || "sin asignar"})`,
           )
