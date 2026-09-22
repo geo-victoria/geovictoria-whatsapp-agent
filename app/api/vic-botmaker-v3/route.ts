@@ -47,6 +47,7 @@ import {
 } from "@/app/api/vic-sales-agent-v3/prompt"
 import {
   fetchHistoryV3,
+  getFollowupCronSecret,
   appendTurnV3,
   getPrefEscalon,
   getQuotePointer,
@@ -2009,7 +2010,14 @@ async function processOneTurn(
       const turnoEntregaCotizacion = (result.toolCalls || []).some(
         (c) => TOOLS_CRITICAS.has(c.name) && c.ok,
       )
+      if (simulando(contact)) {
+        SIM_CAPTURA.set(contact, {
+          reply,
+          tools: (result.toolCalls || []).map((c) => String(c.name)),
+        })
+      }
       for (const [i, parte] of partes.entries()) {
+        if (simulando(contact)) break
         // RESPUESTA OBSOLETA (Eduardo 17-ago, caso "Rodrigo"→"Somos 20"): si
         // mientras se generaba (o durante la cadencia humana) llegó OTRO
         // mensaje del cliente, esta respuesta quedó vieja — mandar "¿y cuántas
@@ -2054,7 +2062,7 @@ async function processOneTurn(
         const entregaCot = (result.toolCalls || []).some(
           (c) => (c.name === "generar_link_cotizadora" || c.name === "actualizar_cotizacion") && c.ok,
         )
-        if (entregaCot) {
+        if (entregaCot && !simulando(contact)) {
           let pdfUrl = extractPdfUrl(result.toolCalls as ToolCallRecord[] | undefined) || ""
           let numero = ""
           if (!pdfUrl) {
@@ -2257,7 +2265,8 @@ async function processOneTurn(
       // Persistimos el mensaje de error para que el próximo turno pueda detectar
       // el loop (antes no se persistía y el contador nunca avanzaba).
       await appendTurnV3(contact, message, errReply).catch(() => {})
-      await sendBotmakerMessage(contact, errReply).catch(() => {})
+      if (simulando(contact)) SIM_CAPTURA.set(contact, { reply: errReply, tools: [] })
+      else await sendBotmakerMessage(contact, errReply).catch(() => {})
     } catch {
       // No-op
     }
@@ -2326,21 +2335,40 @@ async function processBurst(
   }
 }
 
+// ── SIMULACIÓN (22-sep, banco de pruebas por país) ────────────────────
+// Perú tiene `simular:true` desde el 15-sep y Chile no tenía ninguno: para
+// comparar los flujos con los MISMOS datos hacía falta correr la tubería
+// chilena REAL (prompt, tools, cinturones, hitos, persistencia) sin mandar
+// nada por Botmaker. El contacto en simulación se marca acá y processOneTurn
+// captura la respuesta en vez de enviarla. Acotado a números sintéticos
+// 56900000xxx y a los probadores internos; auth = secreto de Botmaker o el
+// secreto admin del cron (header x-cron-secret).
+const SIM_CONTACTOS = new Set<string>()
+const SIM_CAPTURA = new Map<string, { reply: string; tools: string[] }>()
+function simulando(contact: string): boolean {
+  return SIM_CONTACTOS.has(contact)
+}
+
 // ── Webhook entrypoint ────────────────────────────────────────────────
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     // 1. Validar secret
     const secret = request.headers.get("x-secret") || ""
     const expected = getEnv("BOTMAKER_SECRET")
-    if (expected && secret !== expected) {
+    // 2. Validar body
+    const body = (await request.json()) as BotmakerRequest & { simular?: boolean }
+    let authSim = false
+    if (body.simular === true) {
+      const cronHdr = request.headers.get("x-cron-secret") || ""
+      const cronSec = cronHdr ? await getFollowupCronSecret().catch(() => "") : ""
+      authSim = Boolean(cronHdr && cronSec && cronHdr === cronSec)
+    }
+    if (expected && secret !== expected && !authSim) {
       return NextResponse.json(
         { reply: "Unauthorized" },
         { status: 401 },
       )
     }
-
-    // 2. Validar body
-    const body = (await request.json()) as BotmakerRequest
     const contact = normalizeContact(body.contact || "")
     let message = (body.message || "").trim()
 
@@ -2351,6 +2379,36 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Ver lib/respuesta-boton.ts (caso 56992047070).
     const cierreBoton = cierrePorBoton(message)
     message = normalizarMensajeEntrante(message)
+
+    if (body.simular === true) {
+      const sintetico = /^56900000\d{3}$/.test(contact)
+      const interno = sintetico
+        ? true
+        : (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(contact)
+      if (!contact || !message || !interno) {
+        return NextResponse.json({ ok: false, error: "simulación solo para números sintéticos 56900000xxx o probadores internos" }, { status: 403 })
+      }
+      const apiKeySim = getEnv("ANTHROPIC_API_KEY")
+      if (!apiKeySim) return NextResponse.json({ ok: false, error: "sin ANTHROPIC_API_KEY" }, { status: 500 })
+      SIM_CONTACTOS.add(contact)
+      SIM_CAPTURA.delete(contact)
+      try {
+        await processOneTurn(contact, message, apiKeySim)
+      } finally {
+        SIM_CONTACTOS.delete(contact)
+      }
+      const cap = SIM_CAPTURA.get(contact)
+      SIM_CAPTURA.delete(contact)
+      const hist = await fetchHistoryV3(contact, 40).catch(() => [])
+      return NextResponse.json({
+        reply: cap?.reply || "",
+        tools: cap?.tools || [],
+        pais: "cl",
+        simulacion: true,
+        conHistorial: true,
+        turnosEnHistorial: hist.length,
+      })
+    }
 
     // Canal de ORIGEN: si la acción de código nos dice por qué línea entró el
     // mensaje, lo persistimos — sendBotmakerMessage responde SIEMPRE por ese
