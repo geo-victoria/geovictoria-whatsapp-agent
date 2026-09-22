@@ -62,6 +62,13 @@ export function variablesAltaFlow(
     alta_comuna: v("comuna"),
     alta_campos: String(prefill["mostrar_campos_empresa"] !== false),
     alta_fono: contact,
+    // FLOW ÚNICO v5 (22-sep): las etiquetas por país viven en `data` de la
+    // pantalla EMPRESA y el bloque #altaflow arranca ahí (sin pasar por el
+    // endpoint), así que también viajan como variables. Sin ellas los labels
+    // saldrían vacíos. Defaults = Chile.
+    alta_etq_doc: v("etiqueta_documento") || "RUT",
+    alta_etq_doc_ayuda: v("etiqueta_documento_ayuda") || "Ej: 76123456-0",
+    alta_etq_zona: v("etiqueta_zona") || "Comuna",
   }
   if (conNombre) vars.alta_nombre = (v("admin_nombre").trim().split(/\s+/)[0] || "").trim()
   return vars
