@@ -624,7 +624,7 @@ export async function POST(req: Request): Promise<Response> {
       `${paginaInteres ? ` · convirtió en la página ${paginaInteres} (úsalo como pista de qué le interesa, sin citar la URL)` : ""}` +
       `${zohoLeadId ? ` · zohoLeadId ${zohoLeadId}` : ""}]`,
   ].join("\n")
-  await appendAssistantV3(contact, ctx, esMX ? "mx" : esCO ? "co" : "cl").catch(() => {})
+  await appendAssistantV3(contact, ctx, country || "cl").catch(() => {})
 
   // Primera respuesta del lead OUTBOUND = el toque 0 (regla Lalo 10-ago): la
   // métrica del equipo mide desde que salió la primera plantilla, no desde
@@ -659,7 +659,10 @@ export async function POST(req: Request): Promise<Response> {
   // enrolado en el loop de toques — la cadencia del paso 3 lo salta mientras
   // tenga fila en vic_loop (contactosEnLoop), así no hay doble toque. MX
   // entra desde el 25-jul (número +52 conectado y flujo de voz creado).
-  await enrolarEnLoop(contact, esMX ? "mx" : esCO ? "co" : "cl").catch(() => {})
+  // El país es el MISMO que eligió la plantilla del toque 0 (22-sep): antes
+  // PE caía a "cl" y el loop peruano quedaba con hora de Santiago y la
+  // columna chilena de plantillas.
+  await enrolarEnLoop(contact, country || "cl").catch(() => {})
 
   console.log(`[outbound-lead] toque 0 → ${contact} (${empresa}${rango ? `, ${rango}` : ""})`)
   return NextResponse.json({ ok: true, contact, empresa, template: tplPais, cadencia: "iniciada" })
