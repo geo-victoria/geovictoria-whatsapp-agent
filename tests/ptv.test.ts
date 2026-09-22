@@ -369,3 +369,16 @@ test("la tómbola de Zoho que deja el deal en el ROBOT (ninguna entrada calzó) 
   assert.match(bloque, /\} else if \(owner\?\.id && owner\?\.email\) \{/)
 })
 
+test("Perú: el lead CALIFICADO pasa por la regla TLMK de Zoho (entrada Territorio = Perú), no por un PUT directo de Owner — misma mecánica que Chile", () => {
+  const CRON = readFileSync(join(RAIZ, "app/api/vic-ptv-cron/route.ts"), "utf8")
+  const LEADS = readFileSync(join(RAIZ, "lib/zoho-leads.ts"), "utf8")
+  const BARRIDO = readFileSync(join(RAIZ, "lib/barrido-leads-vicky.ts"), "utf8")
+  assert.match(LEADS, /export async function reasignarLeadCalificadoPE\(/)
+  assert.match(LEADS, /VICKY_TM_CALIFICACION_PE_RULE_ID \|\| TM_TOMBOLA_LEADS_CL/)
+  const i = CRON.indexOf("async function entregarLeadPE(")
+  const cuerpo = CRON.slice(i, i + 2500)
+  assert.match(cuerpo, /reasignarLeadCalificadoPE\(leadId\)/)
+  assert.doesNotMatch(cuerpo, /Owner: \{ id: interno\.zohoId \}/, "el calificado PE no debe ir por PUT directo de Owner")
+  assert.match(BARRIDO, /calificado \? reasignarLeadCalificadoPE\(l\.id\) : reasignarLeadSdrInboundPE\(l\.id\)/)
+})
+

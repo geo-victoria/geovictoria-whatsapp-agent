@@ -41,6 +41,7 @@ import {
   reasignarLeadSdrInboundCO,
   reasignarLeadSdrInboundMX,
   reasignarLeadSdrInboundPE,
+  reasignarLeadCalificadoPE,
   updateZohoLeadStatus,
   STATUS_ENTREGA_LEAD,
 } from "./zoho-leads"
@@ -379,8 +380,10 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
       } else {
         // PERÚ (Lalo 15-sep): calificado → Mónica (única telemarketing);
         // sin calificar → SDR Inbound PE (Ana/Priscila), con Mónica de respaldo.
-        if (!calificado) {
-          const r = await reasignarLeadSdrInboundPE(l.id).catch((e) => ({ success: false, error: String(e) }))
+        {
+          // Calificado → regla TLMK de Zoho (entrada Perú, Lalo 22-sep); sin
+          // calificar → SDR Inbound PE. Mónica directo queda de respaldo.
+          const r = await (calificado ? reasignarLeadCalificadoPE(l.id) : reasignarLeadSdrInboundPE(l.id)).catch((e) => ({ success: false, error: String(e) }))
           ownerEmail = String((r as { ownerEmail?: string }).ownerEmail || "")
           error = String((r as { error?: string }).error || "")
         }

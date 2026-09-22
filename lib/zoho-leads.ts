@@ -1021,6 +1021,30 @@ const SDR_INBOUND_PE = (
   .filter((s) => s.email)
 const TM_SDR_INBOUND_PE = (process.env.VICKY_TM_SDR_INBOUND_PE_RULE_ID || "").trim()
 
+// TELEMARKETING PERÚ (Lalo 22-sep): la regla "Asignación Leads Vicky TLMK"
+// (…066001) ganó la entrada "Territorio = Perú → Mónica Mendoza", así que el
+// lead CALIFICADO peruano pasa por la MISMA regla que en Chile en vez de un
+// PUT directo de Owner; los ejecutivos nuevos se agregan en la entrada de la
+// regla, no acá. Override: VICKY_TM_CALIFICACION_PE_RULE_ID. Fallback si la
+// regla no asigna (o queda en el robot): Mónica directo, como hasta hoy.
+const TM_CALIFICACION_PE = (process.env.VICKY_TM_CALIFICACION_PE_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+const TLMK_PE_FALLBACK = (
+  process.env.VICKY_PTV_VENDEDORES_PE || "mmendozav@geovictoria.com:3525045000323383015"
+)
+  .split(",")
+  .map((s) => {
+    const [email, id] = s.split(":").map((x) => x.trim())
+    return { email, id: id || "" }
+  })
+  .filter((s) => s.email)
+
+/** Reasigna un lead PE CALIFICADO por la regla TLMK de Zoho (entrada Perú); fallback Mónica. */
+export async function reasignarLeadCalificadoPE(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  return reasignarLeadPorRoster({ leadId, ruleId: TM_CALIFICACION_PE, roster: TLMK_PE_FALLBACK, kvTurno: "tlmk_rr_pe", etiqueta: "TLMK PE" })
+}
+
 /** Reasigna un lead PE sin calificar a las SDR Inbound de Perú (RR interno). */
 export async function reasignarLeadSdrInboundPE(
   leadId: string,

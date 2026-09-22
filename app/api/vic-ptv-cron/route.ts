@@ -1168,23 +1168,23 @@ async function entregarLeadPE(
   H: Record<string, string>,
   api: string,
 ): Promise<VendedorFinal | null> {
-  const { updateZohoLeadStatus, STATUS_ENTREGA_LEAD, reasignarLeadSdrInboundPE } = await import("@/lib/zoho-leads")
+  const { updateZohoLeadStatus, STATUS_ENTREGA_LEAD, reasignarLeadSdrInboundPE, reasignarLeadCalificadoPE } = await import("@/lib/zoho-leads")
   await updateZohoLeadStatus(leadId, STATUS_ENTREGA_LEAD).catch(() => {})
   await notaTraspasoConversacion(leadId, fono).catch(() => {})
   if (calificado) {
-    const put = await fetch(`${api}/crm/v3/Leads`, {
-      method: "PUT", headers: H, cache: "no-store",
-      body: JSON.stringify({ data: [{ id: leadId, Owner: { id: interno.zohoId } }], trigger: ["blueprint"], skip_feature_execution: [{ name: "assignment_rules" }] }),
-    }).catch(() => null)
-    if (!put?.ok) console.warn(`[ptv] PE: no pude asignar el lead ${leadId} a ${interno.email} (${put?.status})`)
-    await notificarTraspasoLeadEmail(leadId, interno.email, fono, H, api)
-    const tel = await telefonoDeUsuario(interno.zohoId, H, api)
+    // Calificado → regla TLMK de Zoho (entrada "Territorio = Perú", Lalo
+    // 22-sep) = la misma mecánica chilena; Mónica directo solo de fallback.
+    const r = await reasignarLeadCalificadoPE(leadId).catch(() => null)
+    const dueno = r?.success && r.ownerEmail && r.ownerId ? { email: r.ownerEmail, zohoId: r.ownerId } : interno
+    if (!r?.success) console.warn(`[ptv] PE: la regla TLMK no asignó el lead ${leadId} (${r?.error || "sin detalle"}) — se presenta ${interno.email}`)
+    await notificarTraspasoLeadEmail(leadId, dueno.email, fono, H, api)
+    const tel = await telefonoDeUsuario(dueno.zohoId, H, api)
     return {
-      email: interno.email,
-      zohoId: interno.zohoId,
-      nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
-      telefono: tel || WHATSAPP_VENDEDOR[interno.email] || "",
-      via: "tombola_interna",
+      email: dueno.email,
+      zohoId: dueno.zohoId,
+      nombre: NOMBRE_VENDEDOR[dueno.email] || dueno.email.split("@")[0],
+      telefono: tel || WHATSAPP_VENDEDOR[dueno.email] || "",
+      via: r?.success ? "tombola_zoho" : "tombola_interna",
     }
   }
   const r = await reasignarLeadSdrInboundPE(leadId).catch(() => null)
