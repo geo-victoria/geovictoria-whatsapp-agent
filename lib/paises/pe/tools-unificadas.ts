@@ -148,7 +148,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula el estimado mensual EN SOLES (montos netos, siempre presentados '+ IGV') para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL — con reloj trae LAS DOS OPCIONES (reloj + app, y solo app) y la pregunta de cierre. Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. En Lima el envío va sin costo y la visita técnica tiene tarifa por DISTRITO (pregúntalo); a provincia el envío corre por cuenta del cliente. `escalonDescuento` SOLO ante objeción de precio.",
+      "Calcula el estimado mensual EN SOLES (montos netos, siempre presentados '+ IGV') para 1 a 50 personas y devuelve `mensajeParaProspecto` listo para copiar TAL CUAL — con reloj trae LAS DOS OPCIONES (reloj + app, y solo app) y la pregunta de cierre. Úsalo apenas tengas la dotación y el marcaje. NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. En Lima el envío va incluido y la visita técnica tiene tarifa por DISTRITO (pregúntalo); a provincia el envío tiene precio cerrado (incluido en el arriendo; línea única en venta, la tool lo calcula). `escalonDescuento` SOLO ante objeción de precio.",
     input_schema: {
       type: "object" as const,
       properties: {

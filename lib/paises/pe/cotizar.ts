@@ -9,8 +9,12 @@
  *     venta US$90) convertido a SOLES ENTEROS con el dólar venta SUNAT del
  *     día (`tipoCambio` de la entrada). El tipo de cambio queda en la
  *     cotización para que el cotizador y la nota de venta lo conozcan.
- *   - Envío: S/0 en LIMA METROPOLITANA. A PROVINCIA lo ASUME EL CLIENTE
- *     (VB Diego 05-ago): sin línea de cobro; se informa en nota.
+ *   - Envío (Lalo 22-sep, precio cerrado en toda zona): incluido en LIMA
+ *     METROPOLITANA en ambas modalidades. A PROVINCIA: en ARRIENDO la tarifa
+ *     sube a US$23/mes con el despacho incluido (homólogo del +0,05 UF de
+ *     regiones en Chile); en VENTA va una línea de pago único de US$30 por
+ *     reloj. Ambas en soles al dólar SUNAT. Supersede el "a provincia lo
+ *     asume el cliente" (VB Diego 05-ago) y su nota.
  *   - Instalación (doc "Políticas de cobro visitas e instalaciones",
  *     11-ago — supersede el "Lima gratis" del excel): en Lima rige el
  *     TARIFARIO POR DISTRITO (zona azul S/0; resto US$20-50 + IGV, lo
@@ -80,7 +84,8 @@ export type LineaPE = {
 
 /**
  * Item en el contrato del endpoint create-from-vicky-pe del cotizador
- * (misma forma que CO/MX). El envío nunca viaja (S/0); la instalación
+ * (misma forma que CO/MX). El envío viaja SOLO como línea de pago único en
+ * venta a provincia (`envio_reloj`, "Cobro único"); la instalación
  * JAMÁS viaja como ítem — su tarifa (US$ + IGV por distrito) la factura
  * servicio técnico aparte y en la cotización va como nota. La fila de
  * ACTIVACIÓN (primer mes por adelantado) la agrega el endpoint, patrón CO.
@@ -104,6 +109,10 @@ export function tarifasRelojPE(tipoCambio: number) {
   return {
     relojArriendoMes: usdASoles(RELOJ_PE_USD.arriendoMes, tc),
     relojVenta: usdASoles(RELOJ_PE_USD.venta, tc),
+    /** Arriendo mensual a PROVINCIA, despacho incluido (US$23). */
+    relojArriendoMesProvincia: usdASoles(RELOJ_PE_USD.arriendoMesProvincia, tc),
+    /** Envío por reloj en VENTA a provincia (US$30, pago único). */
+    envioVentaProvincia: usdASoles(RELOJ_PE_USD.envioVentaProvincia, tc),
     tipoCambio: tc,
   }
 }
@@ -190,19 +199,30 @@ export function cotizarPE(input: CotizacionPEInput): {
     recurrente: true,
   })
 
-  // ENVÍO SEGÚN ZONA REAL (21-sep, caso de prueba con el reloj en Piura): el
-  // texto decía "envío sin costo en Lima Metropolitana" en TODA cotización,
-  // así que a un cliente de provincia le llegaba junto a la nota que dice que
-  // el envío lo asume él — contradicción en el mismo mensaje.
-  const hayProvincia = puntos.some((p) => p.zona === "provincias")
-  const envioIncluidoTxt = hayProvincia ? "" : " (envío incluido)"
+  // ENVÍO CON PRECIO CERRADO EN TODA ZONA (Lalo 22-sep): en Lima va incluido;
+  // a provincia el ARRIENDO sube a la tarifa con despacho (US$23/mes) y la
+  // VENTA lleva una línea única de envío (US$30 por reloj). Los relojes que
+  // van a provincia son los puntos declarados como "provincias" (tope: la
+  // cantidad de relojes); sin puntos declarados se cotiza como Lima. Murió
+  // la nota "el envío corre por cuenta del cliente".
+  const puntosProvincia = puntos.filter((p) => p.zona === "provincias")
+  const hayProvincia = puntosProvincia.length > 0
+  const relojesProvincia = reloj ? Math.min(reloj.cantidad, puntosProvincia.length) : 0
 
   let arriendoNeto = 0
+  let arriendoLimaCant = 0
+  let arriendoProvCant = 0
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
-    arriendoNeto = TARIFAS_PE.relojArriendoMes * reloj.cantidad
+    arriendoProvCant = relojesProvincia
+    arriendoLimaCant = reloj.cantidad - arriendoProvCant
+    arriendoNeto =
+      TARIFAS_PE.relojArriendoMes * arriendoLimaCant + TARIFAS_PE.relojArriendoMesProvincia * arriendoProvCant
+    const partes: string[] = []
+    if (arriendoLimaCant > 0) partes.push(`${arriendoLimaCant} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes`)
+    if (arriendoProvCant > 0) partes.push(`${arriendoProvCant} × ${formatearPEN(TARIFAS_PE.relojArriendoMesProvincia)}/mes a provincia`)
     lineas.push({
       concepto: "Arriendo de reloj de control",
-      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes${envioIncluidoTxt}`,
+      detalle: `${partes.join(" + ")} (despacho incluido)`,
       neto: arriendoNeto,
       igv: arriendoNeto * IGV_PE,
       recurrente: true,
@@ -234,11 +254,8 @@ export function cotizarPE(input: CotizacionPEInput): {
   if (reloj && reloj.cantidad > 0) {
     for (const g of grupos.values()) {
       if (g.zona === "provincias") {
-        // Envío a provincia: lo asume el CLIENTE (VB Diego 05-ago; Lalo
-        // 11-ago: "normalmente se los entregan en Lima y ellos los llevan").
-        notasEjecutivo.push(
-          `El envío del reloj a ${g.ubicacion} corre por cuenta del cliente (lo usual: te lo entregamos en Lima y tú lo llevas — también coordinamos el despacho si lo prefieres).`,
-        )
+        // Envío a provincia: precio cerrado (arriendo con despacho incluido o
+        // línea única en venta) — ya no hay nota (Lalo 22-sep).
         if (g.instalaciones > 0) {
           avisoSsttPeru = true
           notasEjecutivo.push(
@@ -265,22 +282,36 @@ export function cotizarPE(input: CotizacionPEInput): {
   }
 
   // ── Pago único ──
-  // Envío: sin línea de cobro (Lima Metropolitana gratis; provincia lo asume
-  // el cliente — queda en nota). Instalación Lima: S/0 (incluida) → sin
-  // línea. Capacitación: no existe en Perú. Solo el reloj en VENTA genera
-  // pago único de catálogo; la ACTIVACIÓN (primer mes adelantado) se suma
-  // como concepto del pago inicial (patrón CL/CO).
+  // Envío: incluido en Lima; en VENTA a provincia va como línea única (US$30
+  // por reloj en soles). Instalación Lima: S/0 (incluida) → sin línea.
+  // Capacitación: no existe en Perú. La ACTIVACIÓN (primer mes adelantado)
+  // se suma como concepto del pago inicial (patrón CL/CO).
   let ventaNeto = 0
+  let envioNeto = 0
+  let envioCant = 0
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
     ventaNeto = TARIFAS_PE.relojVenta * reloj.cantidad
     lineas.push({
       concepto: "Reloj de control (compra)",
-      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojVenta)} (envío sin costo en Lima Metropolitana)`,
+      detalle: `${reloj.cantidad} × ${formatearPEN(TARIFAS_PE.relojVenta)}${hayProvincia ? "" : " (envío incluido)"}`,
       neto: ventaNeto,
       igv: ventaNeto * IGV_PE,
       recurrente: false,
     })
+    envioCant = relojesProvincia
+    if (envioCant > 0) {
+      envioNeto = TARIFAS_PE.envioVentaProvincia * envioCant
+      const destinos = [...new Set(puntosProvincia.map((p) => p.ubicacion))].join(", ")
+      lineas.push({
+        concepto: `Envío de reloj a ${destinos}`,
+        detalle: `${envioCant} × ${formatearPEN(TARIFAS_PE.envioVentaProvincia)}`,
+        neto: envioNeto,
+        igv: envioNeto * IGV_PE,
+        recurrente: false,
+      })
+    }
   }
+  const unicosNeto = ventaNeto + envioNeto
 
   // ── Totales (al cliente se muestran los NETOS "+ IGV"; los totales con IGV van al cotizador) ──
   const mensualNeto = plan + arriendoNeto
@@ -294,7 +325,7 @@ export function cotizarPE(input: CotizacionPEInput): {
   // Pago inicial = pagos únicos + PRIMER MES por adelantado (con el descuento
   // si el cliente lo aceptó: el primer mes es parte de los 6).
   const primerMesNeto = conDescuento ? mensualNetoConDescuento : mensualNeto
-  const pagoInicialNeto = ventaNeto + primerMesNeto
+  const pagoInicialNeto = unicosNeto + primerMesNeto
   const pagoInicialIgv = pagoInicialNeto * IGV_PE
   const pagoInicialTotal = pagoInicialNeto + pagoInicialIgv
 
@@ -313,7 +344,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     `- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearPEN(plan)}/mes`,
   ]
   if (arriendoNeto > 0) {
-    lineasRec.push(`- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes${envioIncluidoTxt}`)
+    lineasRec.push(`- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes (despacho incluido)`)
   }
   filas.push("Resumen mensual recurrente:")
   filas.push("")
@@ -334,15 +365,16 @@ export function cotizarPE(input: CotizacionPEInput): {
     filas.push("Pago único:")
     filas.push("")
     filas.push(`- Reloj de control (compra): ${formatearPEN(ventaNeto)}`)
+    if (envioNeto > 0) filas.push(`- Envío del reloj a provincia: ${formatearPEN(envioNeto)}`)
     filas.push("")
-    filas.push(`Total único: ${formatearPEN(ventaNeto)} + IGV`)
+    filas.push(`Total único: ${formatearPEN(unicosNeto)} + IGV`)
     // Burbuja propia para el pago inicial (patrón chileno): el desglose
     // primero, lo que paga al aceptar como mensaje aparte.
     filas.push("")
     filas.push("[---]")
     filas.push("")
     filas.push(
-      `Al aceptar pagas el pago inicial de ${formatearPEN(pagoInicialNeto)} + IGV: incluye el reloj + el primer mes del plan por adelantado.`,
+      `Al aceptar pagas el pago inicial de ${formatearPEN(pagoInicialNeto)} + IGV: incluye el reloj${envioNeto > 0 ? ", el envío" : ""} + el primer mes del plan por adelantado.`,
     )
   }
 
@@ -379,9 +411,9 @@ export function cotizarPE(input: CotizacionPEInput): {
       `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
       `💰 ${formatearPEN(mensualElegidoNeto)} + IGV al mes.`,
       ``,
-      // Lima: el envío ya va incluido y se dice (22-sep, pregunta de Lalo
-      // "¿el precio incluye el envío?"); a provincia la nota aparte lo explica.
-      `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.${hayProvincia ? "" : " El envío del reloj va incluido."}`,
+      // El envío va incluido salvo en VENTA a provincia, donde es una línea
+      // del pago único (22-sep, pregunta de Lalo "¿el precio incluye el envío?").
+      `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.${envioNeto > 0 ? "" : " El envío del reloj va incluido."}`,
     ]
     if (conDescuento) {
       op1.push(
@@ -389,7 +421,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       )
     }
     if (ventaNeto > 0) {
-      op1.push(`Se suma un pago inicial único de ${formatearPEN(pagoInicialNeto)} + IGV (incluye el reloj y el primer mes del plan).`)
+      op1.push(`Se suma un pago inicial único de ${formatearPEN(pagoInicialNeto)} + IGV (incluye el reloj${envioNeto > 0 ? ", el envío a provincia" : ""} y el primer mes del plan).`)
     }
     const encabezado2 = ahorraMensual
       ? `2.- Una alternativa más económica sería si marcan solo mediante nuestra app:`
@@ -439,21 +471,27 @@ export function cotizarPE(input: CotizacionPEInput): {
     afectoIgv: true,
   })
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
-    itemsCotizador.push({
-      tipo: "hardware",
-      // Mismo id para arriendo y venta: la Modalidad distingue (convención
-      // chilena `senseface_2a`); en Creator/Books es el artículo [PER] 304.
-      id: "reloj_pe",
-      nombre: "Arriendo de reloj de control",
-      descripcion:
-        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Precio en soles al tipo de cambio oficial (SUNAT) del día.`,
-      modalidad: "Arriendo mensual",
-      cantidad: reloj.cantidad,
-      precioUnitarioPEN: TARIFAS_PE.relojArriendoMes,
-      subtotalPEN: arriendoNeto,
-      esRecurrente: true,
-      afectoIgv: true,
-    })
+    // Una fila por tarifa: Lima (US$20) y provincia con despacho (US$23).
+    const filasArriendo: Array<{ cant: number; unit: number; sufijo: string }> = []
+    if (arriendoLimaCant > 0) filasArriendo.push({ cant: arriendoLimaCant, unit: TARIFAS_PE.relojArriendoMes, sufijo: "" })
+    if (arriendoProvCant > 0) filasArriendo.push({ cant: arriendoProvCant, unit: TARIFAS_PE.relojArriendoMesProvincia, sufijo: " (provincia, despacho incluido)" })
+    for (const f of filasArriendo) {
+      itemsCotizador.push({
+        tipo: "hardware",
+        // Mismo id para arriendo y venta: la Modalidad distingue (convención
+        // chilena `senseface_2a`); en Creator/Books es el artículo [PER] 304.
+        id: "reloj_pe",
+        nombre: `Arriendo de reloj de control${f.sufijo}`,
+        descripcion:
+          `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido. Precio en soles al tipo de cambio oficial (SUNAT) del día.`,
+        modalidad: "Arriendo mensual",
+        cantidad: f.cant,
+        precioUnitarioPEN: f.unit,
+        subtotalPEN: f.unit * f.cant,
+        esRecurrente: true,
+        afectoIgv: true,
+      })
+    }
   }
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
     itemsCotizador.push({
@@ -461,7 +499,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "reloj_pe",
       nombre: "Reloj de control (compra)",
       descripcion:
-        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío sin costo en Lima Metropolitana. Precio en soles al tipo de cambio oficial (SUNAT) del día.`,
+        `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío incluido en Lima Metropolitana. Precio en soles al tipo de cambio oficial (SUNAT) del día.`,
       modalidad: "Venta única",
       cantidad: reloj.cantidad,
       precioUnitarioPEN: TARIFAS_PE.relojVenta,
@@ -469,9 +507,23 @@ export function cotizarPE(input: CotizacionPEInput): {
       esRecurrente: false,
       afectoIgv: true,
     })
+    if (envioCant > 0) {
+      itemsCotizador.push({
+        tipo: "servicio",
+        id: "envio_reloj",
+        nombre: "Envío de reloj a provincia",
+        descripcion: `Despacho del reloj fuera de Lima Metropolitana (${[...new Set(puntosProvincia.map((p) => p.ubicacion))].join(", ")}). Pago único, en soles al tipo de cambio oficial (SUNAT) del día.`,
+        modalidad: "Cobro único",
+        cantidad: envioCant,
+        precioUnitarioPEN: TARIFAS_PE.envioVentaProvincia,
+        subtotalPEN: envioNeto,
+        esRecurrente: false,
+        afectoIgv: true,
+      })
+    }
   }
-  // Envío S/0 e instalación Lima S/0: sin ítems. Fuera de Lima: sin ítem —
-  // queda en la nota del mensaje + avisoSsttPeru para el correo interno.
+  // Instalación: sin ítem — Lima S/0 o tarifa por distrito que factura sstt
+  // aparte; fuera de Lima queda en la nota del mensaje + avisoSsttPeru.
 
   return {
     lineas,

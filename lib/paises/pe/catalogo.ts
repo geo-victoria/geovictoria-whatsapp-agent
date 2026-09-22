@@ -68,6 +68,15 @@ export const RELOJ_PE_USD = {
   arriendoMes: 20,
   /** Venta por unidad: US$90 (rate del artículo 304 en Books; la tabla de Mónica dice US$150 — Lalo 21-sep eligió la más barata). */
   venta: 90,
+  /**
+   * Arriendo mensual por unidad cuando el reloj va a PROVINCIA: US$23 con el
+   * despacho INCLUIDO (Lalo 22-sep, homólogo del +0,05 UF de regiones en
+   * Chile). Supersede el "a provincia el envío lo asume el cliente" del
+   * VB Diego 05-ago: toda zona tiene su número desde el inicio.
+   */
+  arriendoMesProvincia: 23,
+  /** Envío del reloj en VENTA a provincia: US$30 por unidad, pago único (Lalo 22-sep). En Lima el envío va incluido. */
+  envioVentaProvincia: 30,
   /** Artículo de Books/Creator al que se mapea en la nota de venta. */
   articulo: "304 - [PER] Reloj Gama Estándar FACIAL LAN WIFI",
 } as const
@@ -114,11 +123,12 @@ export const CATALOGO_SERVICIOS_PE: Servicio[] = [
     id: "envio_reloj",
     nombre: "Envío de reloj",
     descripcion:
-      "Despacho del reloj. Sin costo en Lima Metropolitana (ambas modalidades); a provincia el envío corre por cuenta del cliente.",
-    // RM ≡ "lima" (Metropolitana) · region ≡ provincias. Celdas en 0 porque
-    // GeoVictoria nunca cobra el envío: en Lima Metropolitana es gratis y a
-    // provincia lo asume el CLIENTE (VB Diego 05-ago) — el motor lo informa
-    // como nota, sin línea de cobro.
+      "Despacho del reloj. Incluido en Lima Metropolitana (ambas modalidades) y en el arriendo a provincia (tarifa US$23/mes con despacho). En venta a provincia: US$30 por reloj, pago único, en soles al dólar SUNAT.",
+    // RM ≡ "lima" (Metropolitana) · region ≡ provincias. Las celdas quedan en
+    // 0 porque la tarifa real vive en RELOJ_PE_USD (dólares → soles del día):
+    // pe/cotizar.ts arma la línea de envío en venta a provincia y el arriendo
+    // a provincia con despacho incluido (Lalo 22-sep; antes "lo asume el
+    // cliente", VB Diego 05-ago).
     tarifa: {
       modelo: "modalidad_zona",
       arriendo: { RM: 0, region: 0 },

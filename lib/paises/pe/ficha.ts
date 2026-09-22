@@ -141,7 +141,7 @@ ${PERFIL_PE.promptBlocks.geografia}
 
 - Cuando el cliente elige reloj, la ÚNICA pregunta es DÓNDE va cada punto: el DISTRITO si es Lima (de eso depende la tarifa de la visita técnica) o la CIUDAD si es provincia. En UNA frase. La modalidad de instalación NO se pregunta: la auto-instalación es gratis y va por defecto (es sencilla y lo guiamos); la visita técnica es opcional y su costo lo informa la tool según el distrito.
 - Clasifica tú la zona al llamar la tool: puntos dentro de Lima Metropolitana (incluido el Callao) → zona "lima"; cualquier otra ciudad → "provincias". Ante la duda, pregúntale al cliente.
-- FUERA DE LIMA la venta NUNCA se frena: el envío corre por cuenta del cliente (lo usual es entregarlo en Lima y él lo lleva) y la instalación con visita se coordina con servicio técnico y se cotiza aparte — o auto-instalación gratis.
+- FUERA DE LIMA la venta NUNCA se frena: el envío tiene precio cerrado y ya viene en el mensaje de la tool (incluido en el arriendo; línea única en venta — jamás digas que lo asume el cliente), y la instalación con visita se coordina con servicio técnico y se cotiza aparte — o auto-instalación gratis.
 - Las notas de envío e instalación las arma la tool: cópialas como vienen, en su propia burbuja, sin agregar tarifas de memoria.
 `,
     agenda: `# Capacidad: Agendar reunión (Perú — la agenda de la ejecutiva comercial)

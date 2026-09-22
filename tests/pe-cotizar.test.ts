@@ -40,7 +40,7 @@ test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima (zona azul)", () =>
 })
 
 test("reloj en soles = USD × dólar SUNAT, redondeado a soles enteros", () => {
-  assert.deepEqual(tarifasRelojPE(TC), { relojArriendoMes: 67, relojVenta: 303, tipoCambio: TC })
+  assert.deepEqual(tarifasRelojPE(TC), { relojArriendoMes: 67, relojVenta: 303, relojArriendoMesProvincia: 78, envioVentaProvincia: 101, tipoCambio: TC })
   assert.equal(usdASoles(24, 3.5), 84)
   // Sin tipo de cambio válido cae al fallback (nunca lanza).
   assert.ok(tarifasRelojPE(NaN).relojArriendoMes > 0)
@@ -123,7 +123,7 @@ test("lista de Mónica con piso de 10: 1-10 S/55 fijo · 11+ S/5,5 por persona",
   assert.throws(() => precioPlanPE(51)) // sobre 50 no cotiza Vicky
 })
 
-test("provincia: envío por cuenta del cliente + instalación aparte, sin líneas de cobro", () => {
+test("provincia en VENTA: envío como línea única US$30 en soles; instalación sigue aparte (Lalo 22-sep)", () => {
   const r = cotizarPE({
     userCount: 10,
     reloj: { modalidad: "venta", cantidad: 1 },
@@ -131,13 +131,40 @@ test("provincia: envío por cuenta del cliente + instalación aparte, sin línea
     tipoCambio: TC,
   })
   assert.equal(r.avisoSsttPeru, true)
-  // VB Diego 05-ago: el envío a provincia lo asume el CLIENTE — se informa.
-  assert.ok(r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
+  // Murió la nota "el envío corre por cuenta del cliente": ahora tiene precio.
+  assert.ok(!r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
+  // Al cliente (doble valor) el envío va dentro del pago inicial; el desglose por línea vive en `lineas`.
+  assert.ok(r.mensajeParaProspecto.includes("incluye el reloj, el envío a provincia y el primer mes"))
+  assert.ok(r.lineas.some((l) => /^Envío de reloj a Arequipa$/.test(l.concepto) && l.neto === 101)) // US$30 × 3,372 = 101,16 → 101
   assert.ok(r.mensajeParaProspecto.includes("servicio técnico"))
-  // Pago único = solo el reloj (US$90 × 3,372 = 303) + primer mes (55): sin envío ni instalación.
-  assert.equal(r.pagoInicialNeto, 358)
-  // Ningún ítem de envío ni instalación viaja al cotizador.
-  assert.ok(!r.itemsCotizador.some((i) => i.id === "envio_reloj" || i.id === "instalacion_reloj"))
+  // Pago único = reloj (US$90 × 3,372 = 303) + envío 101 + primer mes (55).
+  assert.equal(r.pagoInicialNeto, 459)
+  const envio = r.itemsCotizador.find((i) => i.id === "envio_reloj")
+  assert.ok(envio && envio.tipo === "servicio" && envio.modalidad === "Cobro único" && envio.subtotalPEN === 101)
+  assert.ok(!r.itemsCotizador.some((i) => i.id === "instalacion_reloj"))
+})
+
+test("provincia en ARRIENDO: tarifa US$23/mes con despacho incluido, sin línea de envío", () => {
+  const r = cotizarPE({
+    userCount: 10,
+    reloj: { modalidad: "arriendo", cantidad: 2 },
+    puntos: [
+      { ubicacion: "Miraflores", zona: "lima", autoInstalada: true },
+      { ubicacion: "Piura", zona: "provincias", autoInstalada: true },
+    ],
+    tipoCambio: TC,
+  })
+  // 1 reloj Lima (US$20 → 67) + 1 reloj provincia (US$23 → 78) = 145; plan 55.
+  assert.equal(r.mensualArriendoNeto, 145)
+  assert.equal(r.mensualNeto, 200)
+  assert.ok(r.mensajeParaProspecto.includes("El envío del reloj va incluido"))
+  assert.ok(r.lineas.some((l) => l.concepto === "Arriendo de reloj de control" && /a provincia \(despacho incluido\)/.test(l.detalle)))
+  assert.ok(!r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
+  assert.equal(r.avisoSsttPeru, false)
+  assert.ok(!r.itemsCotizador.some((i) => i.id === "envio_reloj"))
+  const arriendos = r.itemsCotizador.filter((i) => i.id === "reloj_pe")
+  assert.equal(arriendos.length, 2)
+  assert.deepEqual(arriendos.map((i) => i.precioUnitarioPEN), [67, 78])
 })
 
 test("RUC peruano: el de la entidad valida; basuras no", () => {
