@@ -94,9 +94,17 @@ async function construirFoto(fecha: string): Promise<Foto> {
     `vic_v3_messages?select=conversation_id,role,at&${rango("at")}&limit=8000`,
   )
   const convsDia = new Set(msgs.filter((m) => m.role === "user").map((m) => m.conversation_id))
-  const convs = await sb<{ id: string; contact: string; first_user_at: string; pref_escalon_at: string; formal_quote_at: string }>(
+  const convsCrudas = await sb<{ id: string; contact: string; first_user_at: string; pref_escalon_at: string; formal_quote_at: string }>(
     `vic_v3_conversations?select=id,contact,first_user_at,pref_escalon_at,formal_quote_at&limit=4000&order=updated_at.desc`,
   )
+  // MISMA EXCLUSIÓN QUE EL DASH (22-sep, Lalo "se está desplomando la tasa de
+  // hoy"): el cierre contaba a los números sintéticos del banco de pruebas y
+  // a los probadores internos como conversaciones y formales del día — el
+  // 22-sep, 36 de 75 conversaciones eran simulaciones. Una sola regla
+  // (`isTestContact` con el set de métricas) para el dash y para este correo.
+  const { isTestContact, metricsContactSet } = await import("@/lib/funnel-analysis")
+  const setInterno = metricsContactSet()
+  const convs = convsCrudas.filter((c) => !isTestContact(String(c.contact || ""), setInterno))
   // El día es el día de CHILE, no el UTC: comparar el prefijo del ISO metía en
   // el día siguiente todo lo ocurrido después de las 20:00.
   const enDia = (iso?: string) => {
@@ -349,7 +357,7 @@ async function construirFoto(fecha: string): Promise<Foto> {
 
   return {
     fecha,
-    conversaciones: convsDia.size,
+    conversaciones: convs.filter((c) => convsDia.has(c.id)).length,
     nuevas,
     formales: formal.length,
     medInicioFormal: m1,
