@@ -240,3 +240,57 @@ export function tarifaVisitaLimaPE(ubicacion: string): { usd: number; reconocido
   }
   return { usd: 0, reconocido: false }
 }
+
+// ── Clasificación de la UBICACIÓN de un punto (22-sep, caso Rodrigo) ────────
+// Chile tiene `clasificarUbicacion` con el padrón completo de comunas y se
+// NIEGA a cotizar con un texto que no es un lugar ("casa matriz" →
+// no_clasificable → la tool pide la comuna). Perú deducía la zona con
+// "todo lo que no es Lima = provincias", así que "casa matriz" pasaba como
+// provincia y el precio salía sin preguntar dónde estará el reloj. Este
+// clasificador es el equivalente peruano: Lima/Callao y sus distritos →
+// "lima"; departamentos, capitales y ciudades conocidas → "provincias";
+// cualquier otra cosa → "no_clasificable" y la tool pregunta, igual que en Chile.
+export const CIUDADES_PE: readonly string[] = [
+  // Departamentos / regiones
+  "amazonas", "ancash", "apurimac", "arequipa", "ayacucho", "cajamarca", "cusco", "cuzco",
+  "huancavelica", "huanuco", "ica", "junin", "la libertad", "lambayeque", "loreto",
+  "madre de dios", "moquegua", "pasco", "piura", "puno", "san martin", "tacna", "tumbes",
+  "ucayali",
+  // Capitales y ciudades frecuentes
+  "chachapoyas", "huaraz", "chimbote", "abancay", "andahuaylas", "camana", "mollendo",
+  "huamanga", "jaen", "chota", "sicuani", "quillabamba", "chincha", "pisco", "nazca", "nasca",
+  "huancayo", "tarma", "jauja", "la oroya", "satipo", "trujillo", "chepen", "pacasmayo",
+  "chiclayo", "lambayeque", "ferrenafe", "iquitos", "yurimaguas", "puerto maldonado", "ilo",
+  "cerro de pasco", "sullana", "talara", "paita", "sechura", "juliaca", "moyobamba",
+  "tarapoto", "pucallpa", "huacho", "barranca", "canete", "san vicente de canete", "huaral",
+  "chosica", "cajabamba", "bagua", "tingo maria", "huanta", "puquio",
+]
+
+// Palabras que describen el TIPO de lugar, no el lugar: con ellas la tool no
+// puede clasificar aunque el modelo insista con una zona explícita.
+const NO_ES_LUGAR_PE = /\b(casa matriz|matriz|oficina|oficinas|sucursal|sucursales|sede|planta|bodega|almacen|local|tienda|central|empresa|fabrica|taller|obra|mina|campo|fundo|punto|puntos|terreno)\b/
+
+export type UbicacionPE =
+  | { tipo: "lima"; razon?: undefined }
+  | { tipo: "provincias"; razon?: undefined }
+  | { tipo: "no_clasificable"; razon: string }
+
+/**
+ * Clasifica la ubicación de un punto tal como la dijo el cliente.
+ * `zonaDeclarada` es la que el modelo mandó explícita: se acepta como
+ * respaldo SOLO cuando el texto no es un tipo de lugar (así una ciudad chica
+ * fuera del catálogo pasa como provincia y "casa matriz" no).
+ */
+export function clasificarUbicacionPE(ubicacion: string, zonaDeclarada?: string): UbicacionPE {
+  const norm = normalizarDistrito(ubicacion)
+  if (!norm) return { tipo: "no_clasificable", razon: "ubicación vacía" }
+  if (NO_ES_LUGAR_PE.test(norm)) {
+    return { tipo: "no_clasificable", razon: `"${ubicacion}" describe un tipo de lugar, no una ciudad o distrito` }
+  }
+  if (/\b(lima|callao)\b/.test(norm) || tarifaVisitaLimaPE(ubicacion).reconocido) return { tipo: "lima" }
+  for (const c of CIUDADES_PE) {
+    if (norm === c || new RegExp(`(^| )${c}( |$)`).test(norm)) return { tipo: "provincias" }
+  }
+  if (zonaDeclarada === "lima" || zonaDeclarada === "provincias") return { tipo: zonaDeclarada }
+  return { tipo: "no_clasificable", razon: `"${ubicacion}" no es una ciudad ni un distrito que reconozca` }
+}

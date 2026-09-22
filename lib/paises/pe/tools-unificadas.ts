@@ -34,7 +34,7 @@
  * lo que trae "@/…" va por import dinámico.
  */
 import { TOOL_SCHEMAS_PE, buildDispatchPE } from "./tools.ts"
-import { tarifaVisitaLimaPE } from "./catalogo.ts"
+import { clasificarUbicacionPE, tarifaVisitaLimaPE } from "./catalogo.ts"
 import { marcarNoContactarSchema } from "../../tools/marcar-no-contactar.ts"
 import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts"
 import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
@@ -419,6 +419,37 @@ export function relojDeHardwarePE(hardware?: HardwareIn[]): { modalidad: "arrien
   return { modalidad, cantidad }
 }
 
+/**
+ * Guarda de UBICACIÓN (22-sep, caso Rodrigo "reloj para casa matriz" → precio
+ * sin preguntar dónde). Es la misma guarda que Chile aplica en código
+ * (`clasificarUbicacion` → no_clasificable → la tool pide la comuna): con
+ * reloj, cada punto debe ser una ciudad o distrito reconocible; si no, la
+ * tool se niega y guía a PREGUNTAR, jamás asume provincia por descarte.
+ * Devuelve el texto del error o null si todo clasifica.
+ */
+export function errorUbicacionPE(hardware?: HardwareIn[], puntos?: PuntoIn[]): string | null {
+  if (!relojDeHardwarePE(hardware)) return null
+  const lista = (Array.isArray(puntos) ? puntos : []).filter((p) => p && typeof p === "object")
+  if (lista.length === 0) {
+    return (
+      "La cotización incluye reloj pero no se entregó 'puntosInstalacion'. " +
+      "Por cada punto donde irá un reloj pasa { ubicacion, zona, autoInstalada }. " +
+      "Si el cliente aún no dijo dónde, pregúntale en qué distrito (Lima) o ciudad estará el reloj antes de cotizar."
+    )
+  }
+  for (const p of lista) {
+    const c = clasificarUbicacionPE(String(p.ubicacion || ""), p.zona)
+    if (c.tipo === "no_clasificable") {
+      return (
+        `No pude clasificar la ubicación '${p.ubicacion || ""}' (${c.razon}). ` +
+        "Pregúntale al cliente en qué distrito (si es Lima) o en qué ciudad estará el reloj y vuelve a llamar la tool. " +
+        "No asumas la ubicación por contexto."
+      )
+    }
+  }
+  return null
+}
+
 export function puntosPE(puntos?: PuntoIn[]): Array<{ ubicacion: string; zona: "lima" | "provincias"; autoInstalada: boolean }> {
   return (Array.isArray(puntos) ? puntos : [])
     .filter((p) => p && typeof p === "object")
@@ -577,6 +608,8 @@ export function buildDispatchPEUnificado(contact: string) {
     const i = (input || {}) as Record<string, unknown>
     switch (name) {
       case "cotizar_referencial": {
+        const errUb = errorUbicacionPE(i.hardware as HardwareIn[] | undefined, i.puntosInstalacion as PuntoIn[] | undefined)
+        if (errUb) return { ok: false, error: errUb }
         const r = await base("cotizar_referencial", aInputCotizarPE(i as CotizarIn))
         if ((r as { ok?: boolean })?.ok) {
           await guardarPref({
@@ -597,6 +630,10 @@ export function buildDispatchPEUnificado(contact: string) {
         }
         if (!cfg.userCount) {
           return { ok: false, error: "No hay un estimado previo en esta conversación: llama primero a cotizar_referencial con la dotación y el marcaje." }
+        }
+        {
+          const errUb = errorUbicacionPE(cfg.hardware, cfg.puntosInstalacion)
+          if (errUb) return { ok: false, error: errUb }
         }
         const actual = Math.max(Number(i.escalonActual || 0), pref?.escalon || 0)
         if (actual >= 2) {
@@ -619,6 +656,13 @@ export function buildDispatchPEUnificado(contact: string) {
       case "generar_link_cotizadora": {
         const pref = await leerPref()
         const esc = Number(i.escalonDescuento ?? pref?.escalon ?? 0)
+        {
+          const errUb = errorUbicacionPE(
+            (i.hardware as HardwareIn[]) || pref?.hardware,
+            (i.puntosInstalacion as PuntoIn[]) || pref?.puntosInstalacion,
+          )
+          if (errUb) return { ok: false, error: errUb }
+        }
         const mapped = {
           empresa: i.empresa,
           contacto: i.contacto,
@@ -772,6 +816,10 @@ export function buildDispatchPEUnificado(contact: string) {
         }
         if (!cfg.userCount) {
           return { ok: false, error: "No sé con qué dotación se emitió esa cotización: pásame userCount (y hardware/puntos si lleva reloj) en la llamada." }
+        }
+        {
+          const errUb = errorUbicacionPE(cfg.hardware, cfg.puntosInstalacion)
+          if (errUb) return { ok: false, error: errUb }
         }
         const { actualizarCotizacion } = await import("../../tools/actualizar-cotizacion.ts")
         const r = await actualizarCotizacion({
