@@ -115,10 +115,11 @@ const MX_CON_PRECIO = "vicky_loop_con_precio_mx"
 const PE_SIN_PRECIO = "vicky_pe_loop_sin_precio"
 const PE_CON_PRECIO = "vicky_pe_loop_con_precio"
 const PE_FORMAL = "vicky_pe_loop_formal"
-// PE toque 6: la plantilla con quick replies no se pudo crear por API (Botmaker
-// exige un intent por botón en el bot Vicky Perú — se crea en el panel). Celda
-// vacía = el toque 6 se salta limpio en Perú; env LOOP_TPL_T6_PE la enciende.
-const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREFORM, "vicky_mx_react_corta", "")
+// PE toque 6 = la MISMA plantilla chilena (22-sep): los bots de Botmaker están
+// unificados y vicky_react_47_razones_v2 (sin marcador de país en el nombre)
+// salió de verdad por la línea +51 en la prueba con el probador. Muere la
+// espera por vicky_pe_react_razones. Override: env LOOP_TPL_T6_PE.
+const LOOP_TPL_T6 = tplCelda("LOOP_TPL_T6", "vicky_react_47_razones_v2", CO_PREFORM, "vicky_mx_react_corta", "vicky_react_47_razones_v2")
 const LOOP_TPL_T7 = tplCelda("LOOP_TPL_T7", "vicky_loop_despedida", "vicky_loop_despedida", "vicky_loop_despedida", "vicky_pe_loop_despedida")
 const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, CeldaTpl>> = {
   1: {

@@ -30,7 +30,8 @@
  * (misma validación que la contención — la kv permite rotar sin deploy).
  */
 
-import { normalizarMensajeEntrante } from "@/lib/respuesta-boton"
+import { normalizarMensajeEntrante, esTextoDeBotonDeCierre } from "@/lib/respuesta-boton"
+import { marcarCotizacionRechazada } from "@/lib/zoho-quote-status"
 import { NextResponse, after } from "next/server"
 import { runAgentLoop } from "@/lib/agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
@@ -546,7 +547,26 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
     const segConsensuado = toolCalls.find((c) => c.name === "programar_seguimiento" && c.ok)
     const usoCierre = toolCalls.some((c) => FOLLOWUP_CLOSING_TOOLS_PE.has(c.name) && c.ok)
     const noProspecto = Boolean(casuisticaTurno && !casuisticaTurno.esProspecto)
-    if (callNoContactar) {
+    // Botón de cierre de la plantilla de reactivación ("Elegimos otro
+    // proveedor" / "Ya no lo necesitamos"): desde el 22-sep el toque 6 PE usa
+    // la MISMA plantilla chilena (vicky_react_47_razones_v2 — Botmaker la
+    // despacha por la línea +51: bots unificados), así que el tap llega acá
+    // normalizado. Es la declaración de pérdida más explícita que existe y
+    // cierra el ciclo igual que en CL/CO (caso 56992047070).
+    const perdidaPorBoton = esTextoDeBotonDeCierre(message)
+    // Rechazo explícito en texto libre (espejo CL/CO): no re-armar el loop.
+    const esRechazo =
+      perdidaPorBoton ||
+      (message.trim().length <= 60 &&
+        /\b(no\s+gracias|no\s+(me|nos)\s+interesa|no\s+estoy\s+interesad\w+|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+necesito\s+(nada|informaci[oó]\w*|cotiz\w+|el\s+servicio)|no\s+insist\w+|dej\w+\s+de\s+(escribir\w*|hablar\w*|insistir\w*)|no\s+me\s+escrib\w+)\b/i.test(
+          message,
+        ))
+    if (perdidaPorBoton) {
+      await closeFollowup(contact, "perdido", "pe")
+      const ptr = await getQuotePointer(contact).catch(() => null)
+      if (ptr?.quoteId) await marcarCotizacionRechazada(ptr.quoteId).catch(() => {})
+      console.log(`[vic-pe][followup] botón de pérdida → ciclo cerrado contact=${contact}`)
+    } else if (callNoContactar) {
       await closeFollowup(contact, tipoNoContactar, "pe")
       console.log(`[vic-pe][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
     } else if (segConsensuado) {
@@ -556,6 +576,8 @@ async function processOneTurnPE(contact: string, message: string, apiKey: string
     } else if (usoCierre || pagoMarcadoReciente) {
       await closeFollowup(contact, "derivado", "pe")
       console.log(`[vic-pe][followup] derivado/post-venta → ciclo cerrado contact=${contact}`)
+    } else if (esRechazo) {
+      console.log(`[vic-pe][followup] rechazo explícito → no se re-arma contact=${contact}`)
     } else if (!noProspecto) {
       const senal = clasificarSenalEspera(message, "pe", contact)
       if (senal) {
