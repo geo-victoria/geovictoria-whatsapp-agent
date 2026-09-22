@@ -379,7 +379,9 @@ export function cotizarPE(input: CotizacionPEInput): {
       `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
       `💰 ${formatearPEN(mensualElegidoNeto)} + IGV al mes.`,
       ``,
-      `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.`,
+      // Lima: el envío ya va incluido y se dice (22-sep, pregunta de Lalo
+      // "¿el precio incluye el envío?"); a provincia la nota aparte lo explica.
+      `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.${hayProvincia ? "" : " El envío del reloj va incluido."}`,
     ]
     if (conDescuento) {
       op1.push(
