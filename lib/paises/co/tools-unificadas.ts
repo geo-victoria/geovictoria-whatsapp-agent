@@ -99,12 +99,12 @@ const PUNTOS_CO = {
   items: {
     type: "object" as const,
     properties: {
-      ubicacion: { type: "string" as const, description: "Ciudad o municipio tal como lo dijo el cliente (la tool clasifica capital/resto)." },
+      ubicacion: { type: "string" as const, description: "Ciudad o municipio tal como lo dijo el cliente (la tool clasifica la zona: Bogotá y alrededores / Cundinamarca-Boyacá-Tolima-Meta / resto del país)." },
       autoInstalada: { type: "boolean" as const, description: "true por defecto (el cliente instala). false SOLO si pidió visita técnica." },
     },
     required: ["ubicacion"],
   },
-  description: "Un punto por cada lugar físico con equipo. Obligatorio SOLO con equipo en VENTA (en alquiler envío e instalación son gratis y no se pide ubicación).",
+  description: "Un punto por cada lugar físico con equipo. Obligatorio siempre que la configuración lleve equipo (alquiler o venta): de la ciudad dependen el despacho y la instalación.",
 }
 
 function sinCapacidad(que: string, enSuLugar: string) {
@@ -339,7 +339,7 @@ export function relojDeHardwareCO(hardware?: HardwareIn[]): { modalidad: "arrien
   return { modalidad, cantidad }
 }
 
-/** Forma chilena de cotizar → input de la tool base CO (puntos solo con equipo en venta). */
+/** Forma chilena de cotizar → input de la tool base CO (puntos con equipo, en ambas modalidades). */
 export function aInputCotizarCO(i: CotizarIn) {
   const reloj = relojDeHardwareCO(i.hardware)
   const out: Record<string, unknown> = { userCount: Number(i.userCount || 0) }
@@ -347,7 +347,7 @@ export function aInputCotizarCO(i: CotizarIn) {
   const puntos = (Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : [])
     .filter((p) => p && typeof p === "object")
     .map((p) => ({ ubicacion: String(p.ubicacion || ""), autoInstalada: p.autoInstalada === false ? false : true }))
-  if (reloj?.modalidad === "venta" && puntos.length > 0) out.puntosInstalacion = puntos
+  if (reloj && puntos.length > 0) out.puntosInstalacion = puntos
   return out
 }
 

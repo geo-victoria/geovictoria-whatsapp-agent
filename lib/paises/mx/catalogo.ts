@@ -46,7 +46,7 @@
  * aceptación), no Vicky: en el chat los descuentos siguen prohibidos.
  */
 
-import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos"
+import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos.ts"
 
 /**
  * Escalera de descuento del plan mensual MX (dato para el cotizador; Vicky
@@ -100,13 +100,13 @@ export const CATALOGO_SERVICIOS_MX: Servicio[] = [
     id: "envio_reloj",
     nombre: "Envío de reloj",
     descripcion:
-      "Despacho del reloj de control al punto del cliente. Cobro único por punto, misma tarifa en todo México. Gratis en modalidad renta.",
-    // RM ≡ "cdmx_metro" · region ≡ resto. El envío MX NO depende de la zona:
-    // $400 parejo en venta (por eso ambas celdas van iguales), $0 en renta.
+      "Envío del reloj al punto del cliente. Incluido en renta (fuera de CDMX la renta mensual ya trae el envío); en venta $400 en CDMX y Zona Metropolitana / $560 en el resto del país.",
+    // RM ≡ "cdmx_metro" (base) · region ≡ fuera de la base (Lalo 22-sep). La
+    // tarifa vigente vive en TARIFAS_MX (mx/cotizar.ts); estas celdas son espejo.
     tarifa: {
       modelo: "modalidad_zona",
       arriendo: { RM: 0, region: 0 },
-      venta: { RM: 400, region: 400 },
+      venta: { RM: 400, region: 560 },
     },
     descontable: false,
     omitirSiAutoInstalada: false,
@@ -120,15 +120,13 @@ export const CATALOGO_SERVICIOS_MX: Servicio[] = [
     id: "instalacion_reloj",
     nombre: "Instalación de reloj",
     descripcion:
-      "Visita técnica para instalación on-site del reloj de control. Cobro único por punto, disponible SOLO en CDMX y Zona Metropolitana del Valle de México. Gratis en modalidad renta dentro de esa zona.",
-    // region = 0 NO significa "gratis": fuera de CDMX/Zona Metropolitana la
-    // instalación profesional NO la cotiza Vicky (la cotiza el ejecutivo
-    // aparte, o el cliente auto-instala gratis). La lógica vive en
-    // mx/cotizar.ts; esta celda queda en 0 porque no hay tarifa publicable.
+      "Visita técnica de instalación por punto: CDMX y Zona Metropolitana $800 (bonificada en renta) · Edomex, Morelos, Puebla, Tlaxcala, Hidalgo y Querétaro $2,400 · resto del país $4,000. Auto-instalación gratis siempre.",
+    // Tres zonas (la intermedia vive en TARIFAS_MX de mx/cotizar.ts; este
+    // modelo solo tiene dos celdas — espejo informativo).
     tarifa: {
       modelo: "modalidad_zona",
-      arriendo: { RM: 0, region: 0 },
-      venta: { RM: 700, region: 0 },
+      arriendo: { RM: 0, region: 4000 },
+      venta: { RM: 800, region: 4000 },
     },
     // SIN descuento de instalación en México (escalera solo del plan).
     descontable: false,

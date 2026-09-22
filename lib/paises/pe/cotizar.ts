@@ -49,7 +49,10 @@ import { TC_USD_PEN_FALLBACK, usdASoles } from "./tc-sunat.ts"
 // IGV peruano: 18% parejo en todos los conceptos. Solo lo escribe este motor.
 const IGV_PE = 0.18
 
-export type ZonaPE = "lima" | "provincias"
+/** lima = Lima Metropolitana + Callao (base) · intermedia = Región Lima fuera
+ *  de la capital + Ica · provincias = todo lo demás. Envío y arriendo solo
+ *  distinguen base / fuera de base; la instalación usa las tres. */
+export type ZonaPE = "lima" | "intermedia" | "provincias"
 
 export type PuntoInstalacionPE = {
   /** Ciudad/distrito como lo dijo el cliente (se transcribe, no se clasifica acá). */
@@ -119,6 +122,7 @@ export function tarifasRelojPE(tipoCambio: number) {
     envioVentaProvincia: usdASoles(RELOJ_PE_USD.envioVentaProvincia, tc),
     /** Instalación técnica por punto en Lima (US$43) y en provincias (US$214). */
     instalacionLima: usdASoles(RELOJ_PE_USD.instalacionLima, tc),
+    instalacionIntermedia: usdASoles(RELOJ_PE_USD.instalacionIntermedia, tc),
     instalacionProvincias: usdASoles(RELOJ_PE_USD.instalacionProvincias, tc),
     tipoCambio: tc,
   }
@@ -212,7 +216,8 @@ export function cotizarPE(input: CotizacionPEInput): {
   // van a provincia son los puntos declarados como "provincias" (tope: la
   // cantidad de relojes); sin puntos declarados se cotiza como Lima. Murió
   // la nota "el envío corre por cuenta del cliente".
-  const puntosProvincia = puntos.filter((p) => p.zona === "provincias")
+  // "Fuera de Lima" para envío y arriendo = intermedia + provincias.
+  const puntosProvincia = puntos.filter((p) => p.zona !== "lima")
   const hayProvincia = puntosProvincia.length > 0
   const relojesProvincia = reloj ? Math.min(reloj.cantidad, puntosProvincia.length) : 0
 
@@ -264,7 +269,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     const esArriendo = reloj.modalidad === "arriendo"
     for (const g of grupos.values()) {
       const enLima = g.zona === "lima"
-      const unit = enLima ? TARIFAS_PE.instalacionLima : TARIFAS_PE.instalacionProvincias
+      const unit = enLima ? TARIFAS_PE.instalacionLima : g.zona === "intermedia" ? TARIFAS_PE.instalacionIntermedia : TARIFAS_PE.instalacionProvincias
       const bonificada = esArriendo && enLima
       const pedida = g.instalaciones > 0
       if (pedida) avisoSsttPeru = true

@@ -13,9 +13,11 @@
  *   Asistencia 11-50: $13.700/usuario/mes ("la más competitiva": el rango fijo
  *                     corta en 10, NO en 20 como muestra Creator hoy)
  *   Reloj venta:      $620.000 pago único · arriendo $86.000/mes
- *   Envío:      arriendo $0/$0 · venta $42.000 (capital) / $69.000 (resto)
- *   Instalación: arriendo $0/$0 · venta $67.000 (capital) / $92.000 (resto)
- *   → El ARRIENDO va con envío e instalación GRATIS (argumento de venta CO).
+ *   ENVÍO/INSTALACIÓN (SUPERSEDIDO 22-sep, propuesta aprobada por Lalo —
+ *   los números vigentes viven en TARIFAS_CO de co/cotizar.ts): alquiler
+ *   $86.000 base / $98.000 fuera con despacho · envío venta $42.000 / $69.000
+ *   · instalación $175.000 / $530.000 / $875.000 (Bogotá / intermedia /
+ *   resto = 1/3/5 UF chilenas), bonificada en alquiler en Bogotá.
  *
  * ACTIVACIÓN (pago inicial CO, patrón de las cotizaciones reales de Creator):
  *   = 1 mes del plan cobrado por adelantado, facturado como concepto
@@ -75,8 +77,9 @@ export const CATALOGO_SERVICIOS_CO: Servicio[] = [
     id: "envio_reloj",
     nombre: "Envío de reloj",
     descripcion:
-      "Despacho del reloj de control al punto del cliente. Cobro único por punto. Gratis en modalidad arriendo.",
-    // RM ≡ "capital" (TODO 1: definir cobertura exacta) · region ≡ resto del país.
+      "Despacho del equipo al punto del cliente. Incluido en alquiler (fuera de Bogotá la tarifa mensual ya trae el despacho); en venta $42.000 en Bogotá y alrededores / $69.000 en el resto del país.",
+    // RM ≡ "capital" = Bogotá y conurbados · region ≡ fuera de la base. La
+    // tarifa vigente vive en TARIFAS_CO (co/cotizar.ts); estas celdas son espejo.
     tarifa: {
       modelo: "modalidad_zona",
       arriendo: { RM: 0, region: 0 },
@@ -94,11 +97,13 @@ export const CATALOGO_SERVICIOS_CO: Servicio[] = [
     id: "instalacion_reloj",
     nombre: "Instalación de reloj",
     descripcion:
-      "Visita técnica para instalación on-site del reloj de control. Cobro único por punto. Gratis en modalidad arriendo.",
+      "Visita técnica de instalación por punto: Bogotá y alrededores $175.000 (bonificada en alquiler) · Cundinamarca, Boyacá, Tolima y Meta $530.000 · resto del país $875.000. Auto-instalación gratis siempre.",
+    // Tres zonas (la intermedia vive en TARIFAS_CO de co/cotizar.ts; este
+    // modelo solo tiene dos celdas — espejo informativo).
     tarifa: {
       modelo: "modalidad_zona",
-      arriendo: { RM: 0, region: 0 },
-      venta: { RM: 67000, region: 92000 },
+      arriendo: { RM: 0, region: 875000 },
+      venta: { RM: 175000, region: 875000 },
     },
     // TODO 4: la tabla CO indica escalera de descuento de instalación 20%/20%
     // (a diferencia de Chile, que la eliminó). Se activa cuando el cotizador

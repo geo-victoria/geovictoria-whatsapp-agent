@@ -76,7 +76,7 @@ const PUNTOS_PE = {
         type: "string" as const,
         enum: ["lima", "provincias"],
         description:
-          "'lima' = Lima Metropolitana (incluido el Callao); cualquier otra ciudad del Perú = 'provincias'. Si lo omites, la tool lo deduce de la ubicación.",
+          "'lima' = Lima Metropolitana (incluido el Callao); 'intermedia' = Región Lima fuera de la capital e Ica; cualquier otra ciudad del Perú = 'provincias'. Si lo omites, la tool lo deduce de la ubicación.",
       },
       autoInstalada: {
         type: "boolean" as const,
@@ -404,7 +404,9 @@ type CotizarIn = {
 }
 
 /** Zona PE deducida de la ubicación cuando el modelo no la declaró. */
-export function zonaDeUbicacionPE(ubicacion: string): "lima" | "provincias" {
+export function zonaDeUbicacionPE(ubicacion: string): "lima" | "intermedia" | "provincias" {
+  const c = clasificarUbicacionPE(ubicacion || "")
+  if (c.tipo === "lima" || c.tipo === "intermedia" || c.tipo === "provincias") return c.tipo
   const u = (ubicacion || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
   if (/\b(lima|callao)\b/.test(u)) return "lima"
   return tarifaVisitaLimaPE(ubicacion || "").reconocido ? "lima" : "provincias"
@@ -450,7 +452,7 @@ export function errorUbicacionPE(hardware?: HardwareIn[], puntos?: PuntoIn[]): s
   return null
 }
 
-export function puntosPE(puntos?: PuntoIn[]): Array<{ ubicacion: string; zona: "lima" | "provincias"; autoInstalada: boolean }> {
+export function puntosPE(puntos?: PuntoIn[]): Array<{ ubicacion: string; zona: "lima" | "intermedia" | "provincias"; autoInstalada: boolean }> {
   return (Array.isArray(puntos) ? puntos : [])
     .filter((p) => p && typeof p === "object")
     .map((p) => ({

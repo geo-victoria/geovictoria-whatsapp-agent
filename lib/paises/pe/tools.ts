@@ -192,9 +192,9 @@ export const TOOL_SCHEMAS_PE = [
               },
               zona: {
                 type: "string" as const,
-                enum: ["lima", "provincias"],
+                enum: ["lima", "intermedia", "provincias"],
                 description:
-                  "'lima' solo si el punto está en Lima Metropolitana (incluido el Callao); cualquier otra ciudad del Perú es 'provincias'. Ante la duda, pregúntale al cliente.",
+                  "'lima' solo si el punto está en Lima Metropolitana (incluido el Callao); 'intermedia' = Región Lima fuera de la capital (Huacho, Huaral, Cañete, Barranca) e Ica (Ica, Chincha, Pisco, Nazca); cualquier otra ciudad del Perú es 'provincias'. Ante la duda, pregúntale al cliente.",
               },
               autoInstalada: {
                 type: "boolean" as const,

@@ -4,15 +4,17 @@
  * Reglas de negocio (documento oficial de tropicalización MX):
  *   - Plan asistencia: 1-10 → $1,000 fijo · 11-20 → $83/usuario ·
  *     21-30 → $79/usuario · 31-50 → $75/usuario.
- *   - Reloj: renta $350/mes por unidad · venta $2,100 por unidad.
- *   - Envío (por punto, solo VENTA): $400, MISMA tarifa en todo México, no
- *     descontable. En renta $0.
- *   - Instalación (por punto): $700 SOLO si el punto está en CDMX o Zona
- *     Metropolitana del Valle de México ("cdmx_metro"); en RENTA dentro de
- *     esa zona es GRATIS (mismo trato que CO: renta = cero costos por
- *     punto en zona cubierta). FUERA de la zona la instalación profesional NO
- *     se cotiza acá: se deja NOTA de que el ejecutivo la cotiza aparte (o el
- *     cliente auto-instala gratis) — la venta nunca se frena.
+ *   - Reloj: renta $350/mes por unidad en la zona base (CDMX y Zona
+ *     Metropolitana) · $400/mes fuera de ella CON EL ENVÍO INCLUIDO
+ *     (homólogo del +0,05 UF de regiones en Chile) · venta $2,100.
+ *   - ENVÍO en venta (por punto): $400 base / $560 fuera de la base. En
+ *     renta va incluido. (Lalo 22-sep, propuesta aprobada.)
+ *   - INSTALACIÓN técnica (por punto) = LOS VALORES DE CHILE en pesos:
+ *     base $800 (1 UF) · intermedia $2,400 (3 UF) · resto $4,000 (5 UF). En
+ *     RENTA en la base va BONIFICADA (línea a lista con descuento 100 %,
+ *     patrón chileno del arriendo en RM). La auto-instalación es gratis
+ *     siempre y va por defecto; la visita se cobra si el cliente la pide.
+ *     Precio cerrado en toda zona: nunca "el ejecutivo la cotiza aparte".
  *   - CAPACITACIÓN online: incluida sin costo (Lalo 13-ago, sin mencionar $600) — ítem de
  *     servicio en TODA cotización (nunca "de regalo" como Chile/Colombia).
  *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado (mismo patrón
@@ -25,13 +27,13 @@
  * comunicar (misma regla dura de Chile).
  */
 
-import { CATALOGO_MODULOS_MX } from "./catalogo"
+import { CATALOGO_MODULOS_MX } from "./catalogo.ts"
+import type { ZonaMX } from "./geografia.ts"
+export type { ZonaMX } from "./geografia.ts"
 
 // IVA mexicano: 16% parejo en todos los conceptos (plan, activación,
 // capacitación, hardware, envío e instalación). Solo lo escribe este motor.
 const IVA_MX = 0.16
-
-export type ZonaMX = "cdmx_metro" | "resto"
 
 export type PuntoInstalacionMX = {
   /** Ciudad/alcaldía/municipio como lo dijo el cliente (se transcribe, no se clasifica acá). */
@@ -76,19 +78,27 @@ export type ItemCotizadorMX = {
   subtotalMXN: number
   esRecurrente: boolean
   afectoIva: boolean
+  /** % de descuento de la línea (100 = bonificada: se muestra tachada en $0). */
+  descuentoPct?: number
 }
 
-const TARIFAS_MX = {
+export const TARIFAS_MX = {
   relojArriendoMes: 350,
+  /** Renta fuera de la base (intermedia y resto), envío incluido. */
+  relojArriendoMesFuera: 400,
   relojVenta: 2100,
-  /** Envío por punto en VENTA — tarifa única nacional (no depende de zona). */
-  envioVentaPunto: 400,
-  /** Instalación por punto — SOLO CDMX/Zona Metropolitana. */
-  instalacionCdmxMetro: 700,
+  /** Envío por reloj en VENTA: base / fuera de la base. */
+  envioVenta: { base: 400, fuera: 560 },
+  /** Instalación técnica por punto = 1 / 3 / 5 UF chilenas en pesos. */
+  instalacion: { base: 800, intermedia: 2400, resto: 4000 },
   /** Capacitación online — se cobra $0 y desde el 13-ago (Lalo) el valor de
    * lista ya NO se menciona (ni tachado). Constante conservada por historia. */
   capacitacionOnline: 600,
 } as const
+
+function unitInstalacionMX(zona: ZonaMX): number {
+  return zona === "cdmx_metro" ? TARIFAS_MX.instalacion.base : zona === "intermedia" ? TARIFAS_MX.instalacion.intermedia : TARIFAS_MX.instalacion.resto
+}
 
 export function formatearMXN(monto: number): string {
   return "$" + Math.round(monto).toLocaleString("es-MX")
@@ -148,12 +158,24 @@ export function cotizarMX(input: CotizacionMXInput): {
     recurrente: true,
   })
 
+  // Relojes FUERA de la base (intermedia + resto): renta con envío y envío
+  // cobrado en venta. Sin puntos declarados se cotiza como base.
+  const puntosFuera = puntos.filter((p) => p.zona !== "cdmx_metro")
+  const relojesFuera = reloj ? Math.min(reloj.cantidad, puntosFuera.length) : 0
+
   let arriendoNeto = 0
+  let arriendoBaseCant = 0
+  let arriendoFueraCant = 0
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
-    arriendoNeto = TARIFAS_MX.relojArriendoMes * reloj.cantidad
+    arriendoFueraCant = relojesFuera
+    arriendoBaseCant = reloj.cantidad - arriendoFueraCant
+    arriendoNeto = TARIFAS_MX.relojArriendoMes * arriendoBaseCant + TARIFAS_MX.relojArriendoMesFuera * arriendoFueraCant
+    const partes: string[] = []
+    if (arriendoBaseCant > 0) partes.push(`${arriendoBaseCant} × ${formatearMXN(TARIFAS_MX.relojArriendoMes)}/mes`)
+    if (arriendoFueraCant > 0) partes.push(`${arriendoFueraCant} × ${formatearMXN(TARIFAS_MX.relojArriendoMesFuera)}/mes fuera de CDMX`)
     lineas.push({
       concepto: "Renta de reloj checador",
-      detalle: `${reloj.cantidad} × ${formatearMXN(TARIFAS_MX.relojArriendoMes)}/mes (envío incluido sin costo; instalación sin costo en CDMX y Zona Metropolitana)`,
+      detalle: `${partes.join(" + ")} (envío incluido)`,
       neto: arriendoNeto,
       iva: arriendoNeto * IVA_MX,
       recurrente: true,
@@ -175,19 +197,37 @@ export function cotizarMX(input: CotizacionMXInput): {
     grupos.set(key, g)
   }
 
-  // Notas de instalación fuera de zona (venta o renta): la instalación
-  // profesional NO se cotiza acá — la cotiza el ejecutivo aparte, o el
-  // cliente auto-instala gratis. La venta nunca se frena por esto.
+  // INSTALACIÓN = LA REGLA DE CHILE (Lalo 22-sep): en renta en la base la
+  // visita va INCLUIDA (línea bonificada) y se dice; en el resto el reloj es
+  // autoinstalable y la visita se ofrece con su precio cerrado, o se cobra si
+  // el cliente la pidió. Murió la nota "el ejecutivo la cotiza aparte".
   const notasEjecutivo: string[] = []
+  const frasesInstalacion: string[] = []
+  const lineasInstalacion: Array<{ ubicacion: string; zona: ZonaMX; cantidad: number; unit: number; bonificada: boolean }> = []
+  let instalacionNeto = 0
   if (reloj && reloj.cantidad > 0) {
+    const esRenta = reloj.modalidad === "arriendo"
     for (const g of grupos.values()) {
-      if (g.zona === "resto" && g.instalaciones > 0) {
-        notasEjecutivo.push(
-          `La instalación profesional en ${g.ubicacion} queda fuera de CDMX y su Zona Metropolitana: tu ejecutivo te la cotiza aparte. También puedes instalarlo tú sin costo — es sencillo y te guiamos.`,
+      const unit = unitInstalacionMX(g.zona)
+      const bonificada = esRenta && g.zona === "cdmx_metro"
+      const pedida = g.instalaciones > 0
+      if (bonificada) {
+        lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: Math.max(1, g.instalaciones), unit, bonificada: true })
+        frasesInstalacion.push(
+          pedida
+            ? "La instalación por nuestro equipo técnico va incluida sin costo (renta en CDMX y Zona Metropolitana)."
+            : "La instalación por nuestro equipo técnico va incluida sin costo (renta en CDMX y Zona Metropolitana); si prefieres, el reloj también es autoinstalable.",
         )
+      } else if (pedida) {
+        lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: g.instalaciones, unit, bonificada: false })
+        instalacionNeto += unit * g.instalaciones
+        frasesInstalacion.push(`La instalación por nuestro equipo técnico en ${g.ubicacion} tiene un costo único de ${formatearMXN(unit * g.instalaciones)} + IVA (va en el pago inicial).`)
+      } else {
+        frasesInstalacion.push(`El reloj es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional de ${formatearMXN(unit)} + IVA.`)
       }
     }
   }
+  const fraseInstalacion = [...new Set(frasesInstalacion)].join(" ")
 
   // ── Pago único ──
   // SIN Activación: en la tropicalización MX no existe el primer mes por
@@ -217,32 +257,29 @@ export function cotizarMX(input: CotizacionMXInput): {
       recurrente: false,
     })
     for (const g of grupos.values()) {
-      const envio = TARIFAS_MX.envioVentaPunto
+      const enBase = g.zona === "cdmx_metro"
+      const envio = enBase ? TARIFAS_MX.envioVenta.base : TARIFAS_MX.envioVenta.fuera
       lineas.push({
         concepto: `Envío de reloj (${g.ubicacion})${g.envios > 1 ? ` × ${g.envios}` : ""}`,
         detalle:
           g.envios > 1
-            ? `Tarifa única nacional — ${g.envios} × ${formatearMXN(envio)}`
-            : "Tarifa única nacional",
+            ? `${enBase ? "CDMX y Zona Metropolitana" : "Fuera de CDMX"} — ${g.envios} × ${formatearMXN(envio)}`
+            : enBase ? "CDMX y Zona Metropolitana" : "Fuera de CDMX",
         neto: envio * g.envios,
         iva: envio * g.envios * IVA_MX,
         recurrente: false,
       })
-      if (g.zona === "cdmx_metro" && g.instalaciones > 0) {
-        const inst = TARIFAS_MX.instalacionCdmxMetro
-        lineas.push({
-          concepto: `Instalación de reloj (${g.ubicacion})${g.instalaciones > 1 ? ` × ${g.instalaciones}` : ""}`,
-          detalle:
-            g.instalaciones > 1
-              ? `CDMX / Zona Metropolitana — ${g.instalaciones} × ${formatearMXN(inst)}`
-              : "CDMX / Zona Metropolitana",
-          neto: inst * g.instalaciones,
-          iva: inst * g.instalaciones * IVA_MX,
-          recurrente: false,
-        })
-      }
-      // zona "resto" con instalación pedida → sin línea (nota del ejecutivo).
     }
+  }
+  // Instalación técnica (ambas modalidades): bonificada en $0 o cobrada.
+  for (const li of lineasInstalacion) {
+    lineas.push({
+      concepto: `Instalación técnica del reloj (${li.ubicacion})`,
+      detalle: li.bonificada ? `${li.cantidad} × ${formatearMXN(li.unit)} — bonificada en renta (CDMX y Zona Metropolitana)` : `${li.cantidad} × ${formatearMXN(li.unit)}`,
+      neto: li.bonificada ? 0 : li.unit * li.cantidad,
+      iva: li.bonificada ? 0 : li.unit * li.cantidad * IVA_MX,
+      recurrente: false,
+    })
   }
 
   // ── Totales (los mostrados van CON IVA 16% incluido) ──
@@ -263,19 +300,27 @@ export function cotizarMX(input: CotizacionMXInput): {
   filas.push("Mensualidad del servicio:")
   filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearMXN(plan)}/mes`)
   if (arriendoNeto > 0) {
-    filas.push(
-      `- Renta de reloj checador: ${formatearMXN(arriendoNeto)}/mes (envío incluido sin costo; instalación sin costo en CDMX y Zona Metropolitana)`,
-    )
+    filas.push(`- Renta de reloj checador: ${formatearMXN(arriendoNeto)}/mes (envío incluido)`)
   }
   filas.push(`Total mensual: ${formatearMXN(mensualNeto)} + IVA (16%) = ${formatearMXN(mensualTotal)} MXN`)
   filas.push("")
   filas.push("Pago inicial (una sola vez):")
   for (const l of unicos) {
+    if (l.neto === 0 && /Instalación técnica/.test(l.concepto)) {
+      filas.push(`- ${l.concepto}: incluida sin costo`)
+      continue
+    }
     filas.push(`- ${l.concepto}: ${formatearMXN(l.neto)}`)
   }
   filas.push(
     `Total pago inicial: ${formatearMXN(pagoInicialNeto)} + IVA (16%) = ${formatearMXN(pagoInicialTotal)} MXN`,
   )
+  // Frase de instalación con la forma de Chile (autoinstalable / incluida /
+  // costo único cerrado), después del desglose.
+  if (fraseInstalacion) {
+    filas.push("")
+    filas.push(fraseInstalacion)
+  }
   for (const nota of notasEjecutivo) {
     filas.push("")
     filas.push(`Nota: ${nota}`)
@@ -300,19 +345,24 @@ export function cotizarMX(input: CotizacionMXInput): {
     afectoIva: true,
   })
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
-    itemsCotizador.push({
-      tipo: "hardware",
-      id: "reloj_arriendo",
-      nombre: "Renta de reloj checador",
-      descripcion:
-        "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío incluido sin costo; instalación sin costo en CDMX y Zona Metropolitana.",
-      modalidad: "Renta mensual",
-      cantidad: reloj.cantidad,
-      precioUnitarioMXN: TARIFAS_MX.relojArriendoMes,
-      subtotalMXN: arriendoNeto,
-      esRecurrente: true,
-      afectoIva: true,
-    })
+    const filasArr: Array<{ cant: number; unit: number; sufijo: string }> = []
+    if (arriendoBaseCant > 0) filasArr.push({ cant: arriendoBaseCant, unit: TARIFAS_MX.relojArriendoMes, sufijo: "" })
+    if (arriendoFueraCant > 0) filasArr.push({ cant: arriendoFueraCant, unit: TARIFAS_MX.relojArriendoMesFuera, sufijo: " (fuera de CDMX, envío incluido)" })
+    for (const f of filasArr) {
+      itemsCotizador.push({
+        tipo: "hardware",
+        id: "reloj_arriendo",
+        nombre: `Renta de reloj checador${f.sufijo}`,
+        descripcion:
+          "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío incluido.",
+        modalidad: "Renta mensual",
+        cantidad: f.cant,
+        precioUnitarioMXN: f.unit,
+        subtotalMXN: f.unit * f.cant,
+        esRecurrente: true,
+        afectoIva: true,
+      })
+    }
   }
   // Capacitación online: incluida sin costo (Lalo 13-ago — sin nombrar el $600)
   // viaja como unitario para que PDF y aceptación lo muestren TACHADO, y el
@@ -343,9 +393,9 @@ export function cotizarMX(input: CotizacionMXInput): {
       esRecurrente: false,
       afectoIva: true,
     })
-    // Misma totalización por ubicación/zona que en las líneas del mensaje.
+    // Envío por ubicación (tarifa base / fuera de la base).
     for (const g of grupos.values()) {
-      const envio = TARIFAS_MX.envioVentaPunto
+      const envio = g.zona === "cdmx_metro" ? TARIFAS_MX.envioVenta.base : TARIFAS_MX.envioVenta.fuera
       itemsCotizador.push({
         tipo: "servicio",
         id: "envio_reloj",
@@ -357,23 +407,26 @@ export function cotizarMX(input: CotizacionMXInput): {
         esRecurrente: false,
         afectoIva: true,
       })
-      if (g.zona === "cdmx_metro" && g.instalaciones > 0) {
-        const inst = TARIFAS_MX.instalacionCdmxMetro
-        itemsCotizador.push({
-          tipo: "servicio",
-          id: "instalacion_reloj",
-          nombre: `Instalación de reloj (${g.ubicacion})`,
-          modalidad: "Cobro único",
-          cantidad: g.instalaciones,
-          precioUnitarioMXN: inst,
-          subtotalMXN: inst * g.instalaciones,
-          esRecurrente: false,
-          afectoIva: true,
-        })
-      }
-      // zona "resto": la instalación profesional NO viaja como ítem — la
-      // cotiza el ejecutivo aparte (queda en la nota del mensaje).
     }
+  }
+  // Instalación técnica: ítem por punto (bonificada = lista con descuentoPct
+  // 100, como el arriendo RM chileno; cobrada = pago único).
+  for (const li of lineasInstalacion) {
+    itemsCotizador.push({
+      tipo: "servicio",
+      id: "instalacion_reloj",
+      nombre: `Instalación técnica del reloj (${li.ubicacion})`,
+      descripcion: li.bonificada
+        ? "Visita de instalación por nuestro equipo técnico. Bonificada en renta en CDMX y Zona Metropolitana."
+        : "Visita de instalación por nuestro equipo técnico. Pago único.",
+      modalidad: "Cobro único",
+      cantidad: li.cantidad,
+      precioUnitarioMXN: li.unit,
+      subtotalMXN: li.bonificada ? 0 : li.unit * li.cantidad,
+      esRecurrente: false,
+      afectoIva: true,
+      ...(li.bonificada ? { descuentoPct: 100 } : {}),
+    })
   }
 
   return {

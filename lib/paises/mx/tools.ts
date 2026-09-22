@@ -146,7 +146,7 @@ export const TOOL_SCHEMAS_MX = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula la cotización referencial de México (1 a 50 usuarios) en pesos mexicanos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (SIN activación — en México no se cobra el primer mes por adelantado; capacitación online incluida sin costo; equipos/envío/instalación si aplican; los totales ya incluyen el IVA 16%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/alcaldía/municipio tal como la dijo el cliente). En renta el envío es GRATIS en todo México y la instalación es GRATIS en CDMX/Zona Metropolitana; en venta el envío tiene tarifa única nacional y la instalación profesional solo se cotiza en CDMX/Zona Metropolitana (fuera de esa zona la cotiza el ejecutivo aparte, o el cliente auto-instala gratis) — la tool clasifica la zona, tú solo transcribes la ubicación.",
+      "Calcula la cotización referencial de México (1 a 50 usuarios) en pesos mexicanos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (SIN activación — en México no se cobra el primer mes por adelantado; capacitación online incluida sin costo; equipos/envío/instalación si aplican; los totales ya incluyen el IVA 16%). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/alcaldía/municipio tal como la dijo el cliente). Con reloj (renta o venta) incluye `puntosInstalacion` con la ciudad/alcaldía de cada punto: el envío va incluido en renta (fuera de CDMX la renta ya trae el envío) y se cobra en venta según zona; la instalación técnica va incluida en renta en CDMX y Zona Metropolitana y en el resto tiene precio cerrado por zona (CDMX-ZM / Edomex-Morelos-Puebla-Tlaxcala-Hidalgo-Querétaro / resto del país) que la tool informa. La auto-instalación es gratis siempre — la tool clasifica la zona, tú solo transcribes la ubicación.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -352,7 +352,7 @@ function clasificarPuntosMX(
     const c = clasificarUbicacionMX(String(p?.ubicacion || ""))
     if (!c.reconocida && advertencias) {
       advertencias.push(
-        `Ubicación '${p?.ubicacion}' no reconocida como CDMX/Zona Metropolitana: se trató como resto del país (instalación profesional a cotizar por el ejecutivo; el envío no cambia).`,
+        `Ubicación '${p?.ubicacion}' no reconocida: se aplicó la tarifa de resto del país.`,
       )
     }
     return {
@@ -382,21 +382,17 @@ export function buildDispatchMX(contact: string) {
         const userCount = Number(i.userCount || 0)
         const advertencias: string[] = []
         let puntos: PuntoInstalacionMX[] = []
-        if (i.reloj && i.reloj.modalidad === "venta") {
+        if (i.reloj && Number(i.reloj.cantidad) > 0) {
+          // Con reloj (renta o venta) la ubicación decide el envío y la
+          // instalación (regla chilena: la comuna solo con reloj).
           const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
           if (entradas.length === 0) {
             return {
               ok: false,
               error:
-                "El reloj en VENTA requiere puntosInstalacion (ciudad y autoInstalada por punto). Pregunta la ubicación y si instalan ellos o GeoVictoria, y vuelve a llamar la tool.",
+                "La cotización lleva reloj y falta puntosInstalacion (ciudad/alcaldía por punto). Pregunta en qué ciudad va cada reloj y vuelve a llamar la tool.",
             }
           }
-          puntos = clasificarPuntosMX(entradas, advertencias)
-        } else if (i.reloj && i.reloj.modalidad === "arriendo") {
-          // En renta los puntos son opcionales (todo va sin costo en zona
-          // cubierta); si vienen, se clasifican para la nota de instalación
-          // fuera de CDMX/Zona Metropolitana.
-          const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
           puntos = clasificarPuntosMX(entradas, advertencias)
         }
         const r = cotizarMX({
@@ -434,17 +430,21 @@ export function buildDispatchMX(contact: string) {
         }
         // Misma clasificación de puntos que la referencial (venta exige puntos;
         // renta los acepta si vienen).
+
         let puntos: PuntoInstalacionMX[] = []
-        if (i.reloj?.modalidad === "venta") {
+
+        if (i.reloj && Number(i.reloj.cantidad) > 0) {
+
           const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
+
           if (entradas.length === 0) {
-            return { ok: false, error: "El reloj en VENTA requiere puntosInstalacion. Pregunta ciudad y quién instala." }
+
+            return { ok: false, error: "La cotización lleva reloj y falta puntosInstalacion (ciudad/alcaldía por punto). Pregunta en qué ciudad va cada reloj." }
+
           }
+
           puntos = clasificarPuntosMX(entradas)
-        } else if (i.reloj?.modalidad === "arriendo") {
-          puntos = clasificarPuntosMX(
-            Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : [],
-          )
+
         }
         const calculo = cotizarMX({
           userCount: Number(i.userCount || 0),

@@ -120,7 +120,7 @@ export const TOOL_SCHEMAS_CO = [
   {
     name: "cotizar_referencial",
     description:
-      "Calcula la cotización referencial de Colombia (1 a 50 usuarios) en pesos colombianos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (activación = primer mes por adelantado; equipos/envío/instalación si aplican; el IVA del reloj ya viene indicado donde corresponde). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/municipio tal como la dijo el cliente). En arriendo el envío y la instalación son GRATIS; en venta se cobran según zona (capital de departamento vs resto) — la tool clasifica la zona, tú solo transcribes la ubicación.",
+      "Calcula la cotización referencial de Colombia (1 a 50 usuarios) en pesos colombianos. Devuelve un `mensajeParaProspecto` listo para copiar TAL CUAL al prospecto — con la mensualidad y el pago inicial (activación = primer mes por adelantado; equipos/envío/instalación si aplican; el IVA del reloj ya viene indicado donde corresponde). NUNCA calcules ni enuncies precios tú: esta tool es la única fuente. Si la configuración lleva reloj, incluye `reloj` (modalidad y cantidad) y `puntosInstalacion` (uno por punto físico, con la ciudad/municipio tal como la dijo el cliente). Con equipo (alquiler o venta) incluye `puntosInstalacion` con la ciudad de cada punto: el envío va incluido en alquiler (fuera de Bogotá la tarifa mensual ya trae el despacho) y se cobra en venta según zona; la instalación técnica va incluida en alquiler en Bogotá y alrededores y en el resto tiene precio cerrado por zona (Bogotá / Cundinamarca-Boyacá-Tolima-Meta / resto del país) que la tool informa. La auto-instalación es gratis siempre — la tool clasifica la zona, tú solo transcribes la ubicación.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -318,20 +318,22 @@ export function buildDispatchCO(contact: string) {
         const userCount = Number(i.userCount || 0)
         const advertencias: string[] = []
         let puntos: PuntoInstalacionCO[] = []
-        if (i.reloj && i.reloj.modalidad === "venta") {
+        if (i.reloj && Number(i.reloj.cantidad) > 0) {
+          // Con equipo (alquiler o venta) la ubicación decide el despacho y la
+          // instalación (regla chilena: la comuna solo con reloj).
           const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
           if (entradas.length === 0) {
             return {
               ok: false,
               error:
-                "El reloj en VENTA requiere puntosInstalacion (ciudad y autoInstalada por punto). Pregunta la ubicación y si instalan ellos o GeoVictoria, y vuelve a llamar la tool.",
+                "La cotización lleva equipo y falta puntosInstalacion (ciudad por punto). Pregunta en qué ciudad va cada equipo y vuelve a llamar la tool.",
             }
           }
           puntos = entradas.map((p) => {
             const c = clasificarUbicacionCO(String(p?.ubicacion || ""))
             if (!c.reconocida) {
               advertencias.push(
-                `Ubicación '${p?.ubicacion}' no reconocida como capital de departamento: se aplicó tarifa de resto del país.`,
+                `Ubicación '${p?.ubicacion}' no reconocida: se aplicó la tarifa de resto del país.`,
               )
             }
             return {
@@ -383,12 +385,12 @@ export function buildDispatchCO(contact: string) {
         if (i.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
           return { ok: false, error: `El correo '${i.email}' no tiene formato válido. Pídelo de nuevo o emite sin correo.` }
         }
-        // Misma clasificación de puntos que la referencial (venta exige puntos).
+        // Misma clasificación de puntos que la referencial (todo equipo exige puntos).
         let puntos: PuntoInstalacionCO[] = []
-        if (i.reloj?.modalidad === "venta") {
+        if (i.reloj && Number(i.reloj.cantidad) > 0) {
           const entradas = Array.isArray(i.puntosInstalacion) ? i.puntosInstalacion : []
           if (entradas.length === 0) {
-            return { ok: false, error: "El reloj en VENTA requiere puntosInstalacion. Pregunta ciudad y quién instala." }
+            return { ok: false, error: "La cotización lleva equipo y falta puntosInstalacion (ciudad por punto). Pregunta en qué ciudad va cada equipo." }
           }
           puntos = entradas.map((p) => ({
             ubicacion: String(p?.ubicacion || ""),

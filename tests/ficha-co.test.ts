@@ -69,13 +69,15 @@ test("toda tool que el núcleo nombra existe en el set único de Colombia", () =
   assert.equal(nombres.size, TOOL_SCHEMAS_CO_UNIFICADAS.length)
 })
 
-test("forma chilena → motor colombiano: hardware y puntos solo en venta", () => {
+test("forma chilena → motor colombiano: hardware y puntos con equipo (ambas modalidades)", () => {
   assert.deepEqual(relojDeHardwareCO([{ id: "reloj_co" }]), { modalidad: "arriendo", cantidad: 1 })
   assert.deepEqual(relojDeHardwareCO([{ id: "reloj_co", cantidad: 2, modalidad: "venta" }]), { modalidad: "venta", cantidad: 2 })
-  // En alquiler los puntos no viajan (envío e instalación gratis, la base no los necesita).
+  // Desde el 22-sep (regla chilena) la ciudad viaja también en alquiler: de
+  // ella dependen el despacho y la instalación bonificada.
   assert.deepEqual(aInputCotizarCO({ userCount: 15, hardware: [{ id: "reloj_co" }], puntosInstalacion: [{ ubicacion: "Bogotá" }] }), {
     userCount: 15,
     reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntosInstalacion: [{ ubicacion: "Bogotá", autoInstalada: true }],
   })
   assert.deepEqual(
     aInputCotizarCO({ userCount: 15, hardware: [{ id: "reloj_co", modalidad: "venta" }], puntosInstalacion: [{ ubicacion: "Neiva" }] }),

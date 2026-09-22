@@ -3,10 +3,18 @@
  *
  * Reglas de negocio (cerradas con Lalo 09/10-jul):
  *   - Plan asistencia: 1-10 → $315.000 fijo · 11-50 → $13.700 por usuario.
- *   - Reloj: arriendo $86.000/mes por unidad · venta $620.000 por unidad.
- *   - Envío e instalación (por punto): GRATIS en arriendo. En venta: envío
- *     $42.000 capital / $69.000 resto · instalación $67.000 capital /
- *     $92.000 resto (0 si auto-instala).
+ *   - Reloj: alquiler $86.000/mes por unidad en la zona base (Bogotá y
+ *     conurbados) · $98.000/mes fuera de ella CON EL DESPACHO INCLUIDO
+ *     (homólogo del +0,05 UF de regiones en Chile) · venta $620.000.
+ *   - ENVÍO en venta (por punto): $42.000 base / $69.000 fuera de la base.
+ *     En alquiler va incluido.
+ *   - INSTALACIÓN técnica (por punto) = LOS VALORES DE CHILE en pesos
+ *     (Lalo 22-sep): base $175.000 (1 UF) · intermedia $530.000 (3 UF) ·
+ *     resto $875.000 (5 UF). En ALQUILER en la base va BONIFICADA (línea a
+ *     lista con descuento 100 %, patrón chileno del arriendo en RM). La
+ *     auto-instalación es gratis siempre y va por defecto; la visita se
+ *     cobra si el cliente la pide. Precio cerrado en toda zona: nunca "se
+ *     cotiza aparte". Supersede las tarifas del 09-jul.
  *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado (equivalente
  *     del "pago inicial incluye el primer mes" chileno).
  *   - DESCUENTO = CHILE (Lalo 21-sep): escalera 10 → 20 % sobre el plan (y la
@@ -22,15 +30,15 @@
  * fuente de precios que Vicky CO puede comunicar (misma regla dura de Chile).
  */
 
-import { CATALOGO_MODULOS_CO } from "./catalogo"
+import { CATALOGO_MODULOS_CO } from "./catalogo.ts"
+import type { ZonaCO } from "./geografia.ts"
+export type { ZonaCO } from "./geografia.ts"
 import { ESCALERA_DESCUENTO_CO, escalonDescuentoCO, pctDescuentoCO } from "./descuento.ts"
 
 // Refinamiento 10-jul (Lalo): precios FINALES en todo, EXCEPTO el hardware
 // (reloj en arriendo y en venta), que lleva IVA 19% — único concepto donde se
 // menciona IVA, y solo como lo escribe este motor.
 const IVA_HARDWARE = 0.19
-
-export type ZonaCO = "capital" | "resto"
 
 export type PuntoInstalacionCO = {
   /** Ciudad/departamento como lo dijo el cliente (se transcribe, no se clasifica acá). */
@@ -82,14 +90,24 @@ export type ItemCotizadorCO = {
   subtotalCOP: number
   esRecurrente: boolean
   afectoIva: boolean
+  /** % de descuento de la línea (100 = bonificada: se muestra tachada en $0). */
+  descuentoPct?: number
 }
 
-const TARIFAS_CO = {
+export const TARIFAS_CO = {
   relojArriendoMes: 86000,
+  /** Alquiler fuera de la base (intermedia y resto), despacho incluido. */
+  relojArriendoMesFuera: 98000,
   relojVenta: 620000,
-  envioVenta: { capital: 42000, resto: 69000 },
-  instalacionVenta: { capital: 67000, resto: 92000 },
+  /** Envío por equipo en VENTA: base / fuera de la base. */
+  envioVenta: { capital: 42000, fuera: 69000 },
+  /** Instalación técnica por punto = 1 / 3 / 5 UF chilenas en pesos. */
+  instalacion: { capital: 175000, intermedia: 530000, resto: 875000 },
 } as const
+
+function unitInstalacionCO(zona: ZonaCO): number {
+  return zona === "capital" ? TARIFAS_CO.instalacion.capital : zona === "intermedia" ? TARIFAS_CO.instalacion.intermedia : TARIFAS_CO.instalacion.resto
+}
 
 export function formatearCOP(monto: number): string {
   return "$" + Math.round(monto).toLocaleString("es-CO")
@@ -154,17 +172,68 @@ export function cotizarCO(input: CotizacionCOInput): {
     recurrente: true,
   })
 
+  // Equipos FUERA de la base (intermedia + resto): alquiler con despacho y
+  // envío cobrado en venta. Sin puntos declarados se cotiza como base.
+  const puntosFuera = puntos.filter((p) => p.zona !== "capital")
+  const relojesFuera = reloj ? Math.min(reloj.cantidad, puntosFuera.length) : 0
+
   let arriendoNeto = 0
+  let arriendoBaseCant = 0
+  let arriendoFueraCant = 0
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
-    arriendoNeto = TARIFAS_CO.relojArriendoMes * reloj.cantidad
+    arriendoFueraCant = relojesFuera
+    arriendoBaseCant = reloj.cantidad - arriendoFueraCant
+    arriendoNeto = TARIFAS_CO.relojArriendoMes * arriendoBaseCant + TARIFAS_CO.relojArriendoMesFuera * arriendoFueraCant
+    const partes: string[] = []
+    if (arriendoBaseCant > 0) partes.push(`${arriendoBaseCant} × ${formatearCOP(TARIFAS_CO.relojArriendoMes)}/mes`)
+    if (arriendoFueraCant > 0) partes.push(`${arriendoFueraCant} × ${formatearCOP(TARIFAS_CO.relojArriendoMesFuera)}/mes fuera de Bogotá`)
     lineas.push({
       concepto: "Alquiler de equipo biométrico",
-      detalle: `${reloj.cantidad} × ${formatearCOP(TARIFAS_CO.relojArriendoMes)}/mes (envío e instalación incluidos sin costo)`,
+      detalle: `${partes.join(" + ")} (despacho incluido)`,
       neto: arriendoNeto,
       iva: arriendoNeto * IVA_HARDWARE,
       recurrente: true,
     })
   }
+
+  // ── Agrupación de puntos por ubicación/zona (para instalación en ambas
+  // modalidades y envío en venta) ──
+  const grupos = new Map<string, { ubicacion: string; zona: ZonaCO; envios: number; instalaciones: number }>()
+  for (const punto of puntos) {
+    const key = `${punto.ubicacion}|${punto.zona}`
+    const g = grupos.get(key) || { ubicacion: punto.ubicacion, zona: punto.zona, envios: 0, instalaciones: 0 }
+    g.envios++
+    if (!punto.autoInstalada) g.instalaciones++
+    grupos.set(key, g)
+  }
+
+  // INSTALACIÓN = LA REGLA DE CHILE: en alquiler en la base va INCLUIDA (línea
+  // bonificada) y se dice; en el resto el equipo es autoinstalable y la visita
+  // se ofrece con su precio cerrado, o se cobra si el cliente la pidió.
+  const frasesInstalacion: string[] = []
+  const lineasInstalacion: Array<{ ubicacion: string; zona: ZonaCO; cantidad: number; unit: number; bonificada: boolean }> = []
+  if (reloj && reloj.cantidad > 0) {
+    const esArriendo = reloj.modalidad === "arriendo"
+    for (const g of grupos.values()) {
+      const unit = unitInstalacionCO(g.zona)
+      const bonificada = esArriendo && g.zona === "capital"
+      const pedida = g.instalaciones > 0
+      if (bonificada) {
+        lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: Math.max(1, g.instalaciones), unit, bonificada: true })
+        frasesInstalacion.push(
+          pedida
+            ? "La instalación por nuestro equipo técnico va incluida sin costo (alquiler en Bogotá y alrededores)."
+            : "La instalación por nuestro equipo técnico va incluida sin costo (alquiler en Bogotá y alrededores); si prefieres, el equipo también es autoinstalable.",
+        )
+      } else if (pedida) {
+        lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: g.instalaciones, unit, bonificada: false })
+        frasesInstalacion.push(`La instalación por nuestro equipo técnico en ${g.ubicacion} tiene un costo único de ${formatearCOP(unit * g.instalaciones)} (va en el pago inicial).`)
+      } else {
+        frasesInstalacion.push(`El equipo es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional de ${formatearCOP(unit)}.`)
+      }
+    }
+  }
+  const fraseInstalacion = [...new Set(frasesInstalacion)].join(" ")
 
   // ── Pago único ──
   // Activación: primer mes del plan por adelantado.
@@ -185,41 +254,36 @@ export function cotizarCO(input: CotizacionCOInput): {
       iva: ventaNeto * IVA_HARDWARE,
       recurrente: false,
     })
-    // Feedback Lalo (23-jul, caso 12 sedes): en el MENSAJE los envíos e
-    // instalaciones se agrupan por ZONA TARIFARIA (lo único que cambia el
-    // precio), no por ubicación — 12 sedes generaban 24 filas repetidas.
-    // Con un solo punto se conserva la ubicación en el rótulo (más claro).
-    const zonas = new Map<"capital" | "resto", { envios: number; instalaciones: number }>()
+    // Envío en venta: base / fuera de la base, agrupado por ZONA TARIFARIA
+    // (feedback Lalo 23-jul, caso 12 sedes: no una fila por sede).
+    const zonasEnvio = new Map<"base" | "fuera", number>()
     for (const punto of puntos) {
-      const g = zonas.get(punto.zona) || { envios: 0, instalaciones: 0 }
-      g.envios++
-      if (!punto.autoInstalada) g.instalaciones++
-      zonas.set(punto.zona, g)
+      const k = punto.zona === "capital" ? "base" : "fuera"
+      zonasEnvio.set(k, (zonasEnvio.get(k) || 0) + 1)
     }
     const unSoloPunto = puntos.length === 1 ? puntos[0] : null
-    for (const [zona, g] of zonas.entries()) {
-      const zonaTxt = zona === "capital" ? "Zona capital" : "Resto del país"
-      const rotulo = unSoloPunto ? ` (${unSoloPunto.ubicacion})` : ` (${g.envios} sede${g.envios === 1 ? "" : "s"}, ${zonaTxt.toLowerCase()})`
-      const envio = TARIFAS_CO.envioVenta[zona]
+    for (const [k, n] of zonasEnvio.entries()) {
+      const zonaTxt = k === "base" ? "Bogotá y alrededores" : "Fuera de Bogotá"
+      const rotulo = unSoloPunto ? ` (${unSoloPunto.ubicacion})` : ` (${n} sede${n === 1 ? "" : "s"}, ${zonaTxt.toLowerCase()})`
+      const envio = k === "base" ? TARIFAS_CO.envioVenta.capital : TARIFAS_CO.envioVenta.fuera
       lineas.push({
-        concepto: `Envío de equipo${g.envios > 1 ? "s" : ""} biométrico${g.envios > 1 ? "s" : ""}${rotulo}`,
-        detalle: g.envios > 1 ? `${g.envios} × ${formatearCOP(envio)}` : zonaTxt,
-        neto: envio * g.envios,
+        concepto: `Envío de equipo${n > 1 ? "s" : ""} biométrico${n > 1 ? "s" : ""}${rotulo}`,
+        detalle: n > 1 ? `${n} × ${formatearCOP(envio)}` : zonaTxt,
+        neto: envio * n,
         iva: 0,
         recurrente: false,
       })
-      if (g.instalaciones > 0) {
-        const inst = TARIFAS_CO.instalacionVenta[zona]
-        const rotuloInst = unSoloPunto ? ` (${unSoloPunto.ubicacion})` : ` (${g.instalaciones} sede${g.instalaciones === 1 ? "" : "s"}, ${zonaTxt.toLowerCase()})`
-        lineas.push({
-          concepto: `Instalación de equipo${g.instalaciones > 1 ? "s" : ""} biométrico${g.instalaciones > 1 ? "s" : ""}${rotuloInst}`,
-          detalle: g.instalaciones > 1 ? `${g.instalaciones} × ${formatearCOP(inst)}` : zonaTxt,
-          neto: inst * g.instalaciones,
-          iva: 0,
-          recurrente: false,
-        })
-      }
     }
+  }
+  // Instalación técnica (ambas modalidades): bonificada en $0 o cobrada.
+  for (const li of lineasInstalacion) {
+    lineas.push({
+      concepto: `Instalación técnica del equipo (${li.ubicacion})`,
+      detalle: li.bonificada ? `${li.cantidad} × ${formatearCOP(li.unit)} — bonificada en alquiler (Bogotá y alrededores)` : `${li.cantidad} × ${formatearCOP(li.unit)}`,
+      neto: li.bonificada ? 0 : li.unit * li.cantidad,
+      iva: 0,
+      recurrente: false,
+    })
   }
 
   // ── Totales ──
@@ -244,7 +308,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   )
   if (arriendoNeto > 0) {
     filas.push(
-      `- Alquiler de equipo biométrico: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes (envío e instalación incluidos)`,
+      `- Alquiler de equipo biométrico: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes (despacho incluido)`,
     )
   }
   if (conDescuento) {
@@ -256,6 +320,10 @@ export function cotizarCO(input: CotizacionCOInput): {
   filas.push("")
   filas.push("Pago inicial (una sola vez):")
   for (const l of unicos) {
+    if (l.neto === 0 && /Instalación técnica/.test(l.concepto)) {
+      filas.push(`- ${l.concepto}: incluida sin costo`)
+      continue
+    }
     filas.push(
       l.iva > 0
         ? `- ${l.concepto}: ${formatearCOP(l.neto)} + IVA = ${formatearCOP(l.neto + l.iva)}`
@@ -263,6 +331,12 @@ export function cotizarCO(input: CotizacionCOInput): {
     )
   }
   filas.push(`Total pago inicial: ${formatearCOP(pagoInicialTotal)}`)
+  // Frase de instalación con la forma de Chile (autoinstalable / incluida /
+  // costo único cerrado), después del desglose.
+  if (fraseInstalacion) {
+    filas.push("")
+    filas.push(fraseInstalacion)
+  }
   filas.push("")
   filas.push(
     "Y la capacitación online, valorada en $95.000, va incluida de regalo (100% de descuento) 🎁",
@@ -288,19 +362,24 @@ export function cotizarCO(input: CotizacionCOInput): {
     afectoIva: false,
   })
   if (reloj && reloj.modalidad === "arriendo" && reloj.cantidad > 0) {
-    itemsCotizador.push({
-      tipo: "hardware",
-      id: "reloj_arriendo",
-      nombre: "Alquiler de equipo biométrico",
-      descripcion:
-        "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío e instalación incluidos sin costo.",
-      modalidad: "Arriendo mensual",
-      cantidad: reloj.cantidad,
-      precioUnitarioCOP: TARIFAS_CO.relojArriendoMes,
-      subtotalCOP: arriendoNeto,
-      esRecurrente: true,
-      afectoIva: true,
-    })
+    const filasArr: Array<{ cant: number; unit: number; sufijo: string }> = []
+    if (arriendoBaseCant > 0) filasArr.push({ cant: arriendoBaseCant, unit: TARIFAS_CO.relojArriendoMes, sufijo: "" })
+    if (arriendoFueraCant > 0) filasArr.push({ cant: arriendoFueraCant, unit: TARIFAS_CO.relojArriendoMesFuera, sufijo: " (fuera de Bogotá, despacho incluido)" })
+    for (const f of filasArr) {
+      itemsCotizador.push({
+        tipo: "hardware",
+        id: "reloj_arriendo",
+        nombre: `Alquiler de equipo biométrico${f.sufijo}`,
+        descripcion:
+          "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido.",
+        modalidad: "Arriendo mensual",
+        cantidad: f.cant,
+        precioUnitarioCOP: f.unit,
+        subtotalCOP: f.unit * f.cant,
+        esRecurrente: true,
+        afectoIva: true,
+      })
+    }
   }
   if (reloj && reloj.modalidad === "venta" && reloj.cantidad > 0) {
     itemsCotizador.push({
@@ -316,21 +395,13 @@ export function cotizarCO(input: CotizacionCOInput): {
       esRecurrente: false,
       afectoIva: true,
     })
-    // Misma totalización por ubicación/zona que en las líneas del mensaje.
-    const gruposItems = new Map<string, { ubicacion: string; zona: "capital" | "resto"; envios: number; instalaciones: number }>()
-    for (const punto of puntos) {
-      const key = `${punto.ubicacion}|${punto.zona}`
-      const g = gruposItems.get(key) || { ubicacion: punto.ubicacion, zona: punto.zona, envios: 0, instalaciones: 0 }
-      g.envios++
-      if (!punto.autoInstalada) g.instalaciones++
-      gruposItems.set(key, g)
-    }
-    for (const g of gruposItems.values()) {
-      const envio = TARIFAS_CO.envioVenta[g.zona]
+    // Envío por ubicación (tarifa base / fuera de la base).
+    for (const g of grupos.values()) {
+      const envio = g.zona === "capital" ? TARIFAS_CO.envioVenta.capital : TARIFAS_CO.envioVenta.fuera
       itemsCotizador.push({
         tipo: "servicio",
         id: "envio_reloj",
-        nombre: `Envío de reloj (${g.ubicacion})`,
+        nombre: `Envío de equipo biométrico (${g.ubicacion})`,
         modalidad: "Cobro único",
         cantidad: g.envios,
         precioUnitarioCOP: envio,
@@ -338,21 +409,26 @@ export function cotizarCO(input: CotizacionCOInput): {
         esRecurrente: false,
         afectoIva: false,
       })
-      if (g.instalaciones > 0) {
-        const inst = TARIFAS_CO.instalacionVenta[g.zona]
-        itemsCotizador.push({
-          tipo: "servicio",
-          id: "instalacion_reloj",
-          nombre: `Instalación de reloj (${g.ubicacion})`,
-          modalidad: "Cobro único",
-          cantidad: g.instalaciones,
-          precioUnitarioCOP: inst,
-          subtotalCOP: inst * g.instalaciones,
-          esRecurrente: false,
-          afectoIva: false,
-        })
-      }
     }
+  }
+  // Instalación técnica: ítem por punto (bonificada = lista con descuentoPct
+  // 100, como el arriendo RM chileno; cobrada = pago único).
+  for (const li of lineasInstalacion) {
+    itemsCotizador.push({
+      tipo: "servicio",
+      id: "instalacion_reloj",
+      nombre: `Instalación técnica del equipo (${li.ubicacion})`,
+      descripcion: li.bonificada
+        ? "Visita de instalación por nuestro equipo técnico. Bonificada en alquiler en Bogotá y alrededores."
+        : "Visita de instalación por nuestro equipo técnico. Pago único.",
+      modalidad: "Cobro único",
+      cantidad: li.cantidad,
+      precioUnitarioCOP: li.unit,
+      subtotalCOP: li.bonificada ? 0 : li.unit * li.cantidad,
+      esRecurrente: false,
+      afectoIva: false,
+      ...(li.bonificada ? { descuentoPct: 100 } : {}),
+    })
   }
 
   return {

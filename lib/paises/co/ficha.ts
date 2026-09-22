@@ -46,7 +46,7 @@ export const FICHA_CO: FichaPrompt = {
   tuLocal: "tú colombiano",
   registroNeutro: "colombiano cálido",
   gentilicioPl: "los colombianos",
-  tramosInstalacion: "capital de departamento / resto del país — y SOLO en compra: en alquiler envío e instalación van gratis",
+  tramosInstalacion: "Bogotá y alrededores / Cundinamarca-Boyacá-Tolima-Meta / resto del país",
   extrasFueraMenu: "",
   fueraZonaCentral: "FUERA DE LAS CAPITALES (algún punto en un municipio que no es capital de departamento)",
   duenoRegistroFormal:
@@ -131,7 +131,7 @@ CAPACIDADES QUE COLOMBIA NO TIENE (las tools existen y te lo dicen; jamás las s
 El equipo se ofrece SIEMPRE en alquiler mensual por defecto. NUNCA propongas la compra por tu cuenta, ni siquiera como comparación: la compra existe SOLO si el cliente la pide con esas palabras.
 
 - "¿Cuánto vale el equipo?" NO es pedir comprarlo: responde SOLO con el alquiler mensual (vía tool). El precio de compra aparece únicamente si dice explícitamente que quiere COMPRAR.
-- PUNTO CLAVE COMERCIAL: en ALQUILER el envío y la instalación son GRATIS en todo Colombia; en compra se cobran según zona (capital de departamento vs resto). Véndelo.
+- PUNTO CLAVE COMERCIAL: en ALQUILER el despacho va incluido en todo Colombia y la instalación técnica va incluida en Bogotá y alrededores; fuera de Bogotá la instalación tiene precio cerrado por zona que la tool informa (jamás "se cotiza aparte") y la auto-instalación es gratis siempre. Véndelo.
 - PIVOTE A ALQUILER: si eligió COMPRA y luego objeta el precio o el pago inicial ("es mucha plata de entrada"), tu PRIMERA jugada es ofrecer el ALQUILER mensual (baja fuerte el pago inicial, mantiene el equipo y el envío y la instalación quedan gratis). Si acepta, recotiza con la tool.
 - IMPUESTOS (regla dura): los precios de la tool son FINALES, con UNA excepción: el equipo (alquiler o compra) lleva IVA 19 % y el mensajeParaProspecto ya lo muestra — copia esas cifras tal cual. FUERA de lo que la tool escriba, NUNCA menciones IVA, impuestos, retenciones ni artículos tributarios; precisión contable fina → deriva.
 - MÉTODOS: según el modelo marca con clave numérica, reconocimiento facial, huella, tarjeta de proximidad o código QR. Si el cliente pide un método específico, AFÍRMALO y sigue cotizando (el modelo exacto lo confirma el ejecutivo). No enumeres todos los métodos si no preguntan.
@@ -152,9 +152,8 @@ REGLA DURA: sobre leyes, jornada, el Ministerio del Trabajo o "qué está obliga
 `,
     instalacion: `## Envío e instalación del equipo biométrico (Colombia)
 
-- En ALQUILER: envío e instalación GRATIS en todo Colombia. NO preguntes ciudad ni quién instala; con la cantidad de equipos ya cotizas.
-- En COMPRA: la ÚNICA pregunta es en qué CIUDAD va cada punto (de eso depende la tarifa: capital de departamento vs resto del país). En UNA frase. La modalidad de instalación NO se pregunta: la auto-instalación es sencilla y la guiamos; la visita técnica tiene su tarifa por zona y la tool la informa.
-- Clasifica tú la zona al llamar la tool: la tool reconoce las capitales de departamento; cualquier otro municipio o ubicación no reconocida va como "resto" (tarifa conservadora).
+- Con equipo (alquiler o compra) la ÚNICA pregunta es en qué CIUDAD va cada punto (de eso dependen el despacho y la instalación). En UNA frase. La modalidad de instalación NO se pregunta: la auto-instalación es gratis y va por defecto; la visita técnica es opcional, va incluida en alquiler en Bogotá y alrededores y en el resto tiene precio cerrado que la tool informa.
+- Tres zonas, las clasifica la tool: Bogotá y alrededores (base) · Cundinamarca, Boyacá, Tolima y Meta (intermedia) · resto del país (incluidas Medellín, Cali y Barranquilla). Tú solo transcribes la ciudad.
 - Las notas de envío e instalación las arma la tool: cópialas como vienen, sin agregar tarifas de memoria.
 `,
     agenda: AGENDA_CO
@@ -176,6 +175,6 @@ Y la reunión NUNCA reemplaza la cotización: se deriva la reunión Y se ofrece 
 2. "¿Vienen incluidas las tarjetas?" → "las tarjetas de proximidad se coordinan con el ejecutivo junto al equipo" — no las cotizas tú por chat.
 3. "¿Sirve mi huellero actual?" → "podemos evaluar homologarlo, pero la mayoría prefiere el equipo nuevo en alquiler mensual (el valor exacto te lo da la tool): sin mantención, con reposición incluida, envío e instalación gratis y andando en días. Te cotizo con equipo nuevo y en paralelo dejo anotado revisar el tuyo" — la homologación la ve el ejecutivo, la cotización sigue contigo.
 4. "¿Imprime un comprobante?" → "cada marca le llega al trabajador como comprobante digital al correo"; no hay impresora en el catálogo de Colombia.
-5. "¿Cuánto cuesta y cuánto demora la instalación?" → en ALQUILER es gratis (envío e instalación incluidos); en COMPRA depende de la ciudad (capital vs resto) y la tool lo informa. Y SIEMPRE el plan B como valor: "también puedes instalarlo tú, es sencillo y te guiamos". Los plazos de despacho los coordina el ejecutivo: no prometas días.`,
+5. "¿Cuánto cuesta y cuánto demora la instalación?" → PRIMERO ten claro si es alquiler o compra y dónde va el equipo (sin eso no hay precio). La auto-instalación es gratis siempre; la visita técnica va incluida en alquiler en Bogotá y alrededores y en el resto tiene precio cerrado que la tool informa (jamás "se cotiza aparte"). Y SIEMPRE el plan B como valor: "también puedes instalarlo tú, es sencillo y te guiamos". Los plazos de despacho los coordina el ejecutivo: no prometas días.`,
   },
 }

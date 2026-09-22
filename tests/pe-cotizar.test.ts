@@ -15,6 +15,7 @@ import { parsearTxtSunat, usdASoles } from "../lib/paises/pe/tc-sunat.ts"
 
 const TC = 3.372 // dólar venta SUNAT del 17-sep-2026
 import { rucValido } from "../lib/rut.ts"
+import * as catalogoPE from "../lib/paises/pe/catalogo.ts"
 import { PERFIL_PE } from "../lib/paises/pe/index.ts"
 
 test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima (instalación bonificada)", () => {
@@ -43,7 +44,7 @@ test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima (instalación bonif
 })
 
 test("reloj en soles = USD × dólar SUNAT, redondeado a soles enteros", () => {
-  assert.deepEqual(tarifasRelojPE(TC), { relojArriendoMes: 67, relojVenta: 303, relojArriendoMesProvincia: 78, envioVentaProvincia: 101, instalacionLima: 145, instalacionProvincias: 722, tipoCambio: TC })
+  assert.deepEqual(tarifasRelojPE(TC), { relojArriendoMes: 67, relojVenta: 303, relojArriendoMesProvincia: 78, envioVentaProvincia: 101, instalacionLima: 145, instalacionIntermedia: 435, instalacionProvincias: 722, tipoCambio: TC })
   assert.equal(usdASoles(24, 3.5), 84)
   // Sin tipo de cambio válido cae al fallback (nunca lanza).
   assert.ok(tarifasRelojPE(NaN).relojArriendoMes > 0)
@@ -84,6 +85,23 @@ test("instalación = Chile: arriendo Lima bonificada en cualquier distrito; vent
   assert.equal(auto.avisoSsttPeru, false)
   assert.ok(auto.mensajeParaProspecto.includes("El reloj es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional de S/145 + IGV."))
   assert.ok(!auto.itemsCotizador.some((i) => i.id === "instalacion_reloj"))
+})
+
+test("zona intermedia PE (Región Lima fuera de la capital + Ica): visita técnica US$129 (3 UF chilenas); envío y arriendo como fuera de Lima", () => {
+  const { clasificarUbicacionPE } = catalogoPE
+  assert.equal(clasificarUbicacionPE("Ica").tipo, "intermedia")
+  assert.equal(clasificarUbicacionPE("Huacho").tipo, "intermedia")
+  assert.equal(clasificarUbicacionPE("Región Lima").tipo, "intermedia")
+  assert.equal(clasificarUbicacionPE("Miraflores").tipo, "lima")
+  assert.equal(clasificarUbicacionPE("Arequipa").tipo, "provincias")
+  const r = cotizarPE({
+    userCount: 10,
+    reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntos: [{ ubicacion: "Ica", zona: "intermedia", autoInstalada: true }],
+    tipoCambio: TC,
+  })
+  assert.equal(r.mensualArriendoNeto, 78) // US$23 × 3,372: fuera de Lima, despacho incluido
+  assert.ok(r.mensajeParaProspecto.includes("costo único adicional de S/435 + IGV")) // US$129 × 3,372 = 435
 })
 
 test("instalación en provincia: precio cerrado US$214 (5 UF chilenas), nunca 'se cotiza aparte'", () => {

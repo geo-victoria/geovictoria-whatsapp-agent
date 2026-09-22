@@ -88,6 +88,8 @@ export const RELOJ_PE_USD = {
    * reconocer Lima).
    */
   instalacionLima: 43,
+  /** Intermedia (Región Lima fuera de la capital + Ica) = 3 UF ≈ US$129. */
+  instalacionIntermedia: 129,
   instalacionProvincias: 214,
   /** Artículo de Books/Creator al que se mapea en la nota de venta. */
   articulo: "304 - [PER] Reloj Gama Estándar FACIAL LAN WIFI",
@@ -288,12 +290,23 @@ export const CIUDADES_PE: readonly string[] = [
   "chosica", "cajabamba", "bagua", "tingo maria", "huanta", "puquio",
 ]
 
+// ZONA INTERMEDIA (Lalo 22-sep, "y si fueran 3 zonas como en Chile"): lo que
+// el técnico alcanza por tierra en el día — Región Lima fuera de la capital
+// e Ica. Solo cambia el precio de la VISITA técnica (US$129 = 3 UF); envío y
+// arriendo la tratan como "fuera de Lima" (tarifa con despacho / línea única).
+export const CIUDADES_INTERMEDIA_PE: readonly string[] = [
+  "region lima", "lima provincias", "lima region", "huacho", "huaura", "barranca", "supe", "paramonga",
+  "huaral", "chancay", "canete", "san vicente de canete", "mala", "asia", "imperial",
+  "ica", "chincha", "chincha alta", "pisco", "nazca", "nasca", "palpa", "marcona",
+]
+
 // Palabras que describen el TIPO de lugar, no el lugar: con ellas la tool no
 // puede clasificar aunque el modelo insista con una zona explícita.
 const NO_ES_LUGAR_PE = /\b(casa matriz|matriz|oficina|oficinas|sucursal|sucursales|sede|planta|bodega|almacen|local|tienda|central|empresa|fabrica|taller|obra|mina|campo|fundo|punto|puntos|terreno)\b/
 
 export type UbicacionPE =
   | { tipo: "lima"; razon?: undefined }
+  | { tipo: "intermedia"; razon?: undefined }
   | { tipo: "provincias"; razon?: undefined }
   | { tipo: "no_clasificable"; razon: string }
 
@@ -309,10 +322,15 @@ export function clasificarUbicacionPE(ubicacion: string, zonaDeclarada?: string)
   if (NO_ES_LUGAR_PE.test(norm)) {
     return { tipo: "no_clasificable", razon: `"${ubicacion}" describe un tipo de lugar, no una ciudad o distrito` }
   }
+  // La intermedia va ANTES que el genérico "lima": "Región Lima" y "Lima
+  // provincias" no son Lima Metropolitana.
+  for (const c of CIUDADES_INTERMEDIA_PE) {
+    if (norm === c || new RegExp(`(^| )${c}( |$)`).test(norm)) return { tipo: "intermedia" }
+  }
   if (/\b(lima|callao)\b/.test(norm) || tarifaVisitaLimaPE(ubicacion).reconocido) return { tipo: "lima" }
   for (const c of CIUDADES_PE) {
     if (norm === c || new RegExp(`(^| )${c}( |$)`).test(norm)) return { tipo: "provincias" }
   }
-  if (zonaDeclarada === "lima" || zonaDeclarada === "provincias") return { tipo: zonaDeclarada }
+  if (zonaDeclarada === "lima" || zonaDeclarada === "intermedia" || zonaDeclarada === "provincias") return { tipo: zonaDeclarada }
   return { tipo: "no_clasificable", razon: `"${ubicacion}" no es una ciudad ni un distrito que reconozca` }
 }
