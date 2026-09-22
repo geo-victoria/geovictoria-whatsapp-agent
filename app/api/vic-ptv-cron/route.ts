@@ -1500,7 +1500,15 @@ async function asignarEnZoho(
         if (put.ok) {
           const get = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: H, cache: "no-store" })
           const owner = ((await get.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner
-          if (owner?.id && owner?.email) {
+          // REGLA QUE NO CALZA (22-sep, Perú "Deals 2026" por TRAMOS de
+          // N_Empleados y default "Logged in User" = el usuario Vicky): si
+          // tras el PUT el dueño sigue siendo el ROBOT, ninguna entrada
+          // matcheó (deal sin dotación) — jamás se presenta a "Vicky" como
+          // ejecutiva: cae a la rotación interna del país (PE = Mónica).
+          // Chile no lo sufre porque su regla tiene default humano (Leiva).
+          if (owner?.email && /^(vicky@|info@geovictoria|productmanager@)/i.test(owner.email)) {
+            console.warn(`[ptv] ${fono}: la regla ${regla} dejó el deal ${dealId} en ${owner.email} (ninguna entrada calzó, ¿sin N_Empleados?) — fallback a rotación interna ${interno.email}`)
+          } else if (owner?.id && owner?.email) {
             const tel = await telefonoDeUsuario(owner.id, H, api)
             // Notificación de traspaso al dueño sorteado + CC Victoria
             // (template oficial, Lalo 31-jul). Best-effort.

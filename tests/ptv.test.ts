@@ -359,3 +359,13 @@ describe("relojes v2 con-precio son de SILENCIO (orden Lalo 08-ago)", () => {
     assert.equal(d.motivo, "etapa_sin_preform")
   })
 })
+
+test("la tómbola de Zoho que deja el deal en el ROBOT (ninguna entrada calzó) cae a la rotación interna — jamás se presenta a Vicky como ejecutiva (Perú, regla por tramos)", () => {
+  const CRON = readFileSync(join(RAIZ, "app/api/vic-ptv-cron/route.ts"), "utf8")
+  const i = CRON.indexOf("ninguna entrada calzó")
+  assert.ok(i > 0, "falta la guarda de dueño robot tras el PUT con lar_id")
+  const bloque = CRON.slice(i - 900, i + 400)
+  assert.match(bloque, /\/\^\(vicky@\|info@geovictoria\|productmanager@\)\/i\.test\(owner\.email\)/)
+  assert.match(bloque, /\} else if \(owner\?\.id && owner\?\.email\) \{/)
+})
+
