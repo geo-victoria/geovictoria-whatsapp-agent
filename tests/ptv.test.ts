@@ -208,6 +208,19 @@ describe("cableado del cron", () => {
     // Deal con dueño humano vigente → se presenta a ESE dueño, sin re-sorteo.
     assert.match(CRON, /via: "dueno_deal"/)
   })
+
+  test("Perú tiene su regla de tómbola de deals (Deals 2026) en el cron y en crm-hitos — misma mecánica que Chile", () => {
+    // Lalo 22-sep: regla Zoho "Deals 2026" (Territorio = Perú → Mónica). Sin la
+    // llave `pe` el deal peruano caía a la rotación interna y el país nuevo
+    // quedaba fuera de Zoho aunque la regla existiera.
+    assert.match(CRON, /pe: \(process\.env\.VICKY_PTV_TOMBOLA_DEALS_PE \|\| "3525045000635322005"\)/)
+    const HITOS = readFileSync(join(RAIZ, "lib", "crm-hitos.ts"), "utf8")
+    assert.match(HITOS, /"Perú": \(process\.env\.VICKY_PTV_TOMBOLA_DEALS_PE \|\| "3525045000635322005"\)/)
+    // La espera del deal con Vicky y la escalera RUT/RUC + >20 se deciden por
+    // "territorio con regla", no por el literal "Chile".
+    assert.match(HITOS, /territorioConTombola\(territorio\) && empleados > 0 && empleados <= 50/)
+    assert.match(HITOS, /if \(!territorioConTombola\(territorio\)\) return false/)
+  })
 })
 
 describe("relojes v2 con-precio son de SILENCIO (orden Lalo 08-ago)", () => {

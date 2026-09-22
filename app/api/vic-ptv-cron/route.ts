@@ -993,6 +993,9 @@ const TOMBOLA_DEALS_RULE: Record<string, string> = {
   cl: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
   co: (process.env.VICKY_PTV_TOMBOLA_DEALS_CO || "").trim(),
   mx: (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
+  // PE (Lalo 22-sep): regla "Deals 2026" (entrada Territorio = Perú → Mónica;
+  // los ejecutivos nuevos se agregan en la regla, no acá).
+  pe: (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim(),
 }
 
 /** Nombre real para la presentación al prospecto (la tómbola interna solo

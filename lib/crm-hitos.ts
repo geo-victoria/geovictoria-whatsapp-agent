@@ -74,7 +74,7 @@ function escaleraDealConRut(
   lead: { rut?: string; empleados?: number },
   datos: { rut?: string; empleados?: number },
 ): boolean {
-  if (territorio !== "Chile") return false
+  if (!territorioConTombola(territorio)) return false
   const n = datos.empleados || lead.empleados || 0
   const rut = String(datos.rut || lead.rut || "").trim()
   return Boolean(rut) && n > 20
@@ -795,6 +795,17 @@ const TOMBOLA_DEALS_POR_TERRITORIO: Record<string, string> = {
   Chile: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
   Colombia: (process.env.VICKY_PTV_TOMBOLA_DEALS_CO || "").trim(),
   "México": (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
+  // Perú (Lalo 22-sep): regla "Deals 2026" — entrada Territorio = Perú →
+  // Mónica Mendoza. Con regla, Perú entra a la MISMA mecánica que Chile:
+  // el deal nace con Vicky y espera al traspaso; la escalera RUC + >20 → deal.
+  "Perú": (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim(),
+}
+
+/** Territorio con tómbola de deals en Zoho (Chile, Perú). Lo que en Chile se
+ * decidía con `territorio === "Chile"` se decide por "tiene regla": un país
+ * nuevo entra a la mecánica chilena creando su regla, sin tocar código. */
+function territorioConTombola(territorio: string | null | undefined): boolean {
+  return Boolean(territorio && TOMBOLA_DEALS_POR_TERRITORIO[territorio])
 }
 
 /** Notificación de traspaso (Lalo 31-jul): tras el sorteo, el template
@@ -1252,7 +1263,7 @@ async function convertirConDeal(
         // Umbral 08-ago: sorteoInmediato (derivación sobre-umbral) también
         // sortea al nacer, con cualquier N — al cliente ya se le prometió
         // que un ejecutivo le entrega el precio.
-        if (!sorteoInmediato && territorio === "Chile" && empleados > 0 && empleados <= 50) {
+        if (!sorteoInmediato && territorioConTombola(territorio) && empleados > 0 && empleados <= 50) {
           console.log(
             `[crm-hitos] deal ${dealCreado} (${empleados} empleados) queda en Vicky — sorteo y notificación al traspaso, no en caliente`,
           )
