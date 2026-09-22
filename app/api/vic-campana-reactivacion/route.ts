@@ -374,6 +374,7 @@ export async function GET(req: Request): Promise<Response> {
 
   const filas: Fila[] = []
   let enviados = 0
+  let evaluadasCaras = 0
   let evaluados = 0
   const presupuestoMs = 250_000
   const t0 = Date.now()
@@ -456,7 +457,15 @@ export async function GET(req: Request): Promise<Response> {
       // universo se excluye, así que atarlo a max*3 dejaba un piloto de 2 en CERO
       // envíos (se cerraba en la fila 6 sin haber mandado nada) — visto en el dry
       // del 13-sep. Piso de 200 filas para que el tope chico no corte el barrido.
-      if (enviados >= cupo || filas.length >= Math.max(cupo * 3, 200)) break
+      // EL TOPE DE FILAS CUENTA SOLO LO QUE DE VERDAD SE EVALUÓ (22-sep): el
+      // universo va de lo más reciente a lo más viejo, y en las 200 primeras
+      // filas caían 90 de cartera del ejecutivo + 70 con chat activo — el
+      // barrido se cerraba en la fila 200 con 17 envíos sobre un cupo de 60,
+      // y como CADA pasada del martes vuelve a empezar por arriba, el backlog
+      // viejo (los ~480 de Vicky del pool de 900) jamás se alcanzaba. Los
+      // descartes baratos (ejecutivo, ciclo completo, chat activo, casilla en
+      // curso) no gastan tope; solo las filas que llegaron a evaluación.
+      if (enviados >= cupo || evaluadasCaras >= Math.max(cupo * 3, 200)) break
       if (Date.now() - t0 > presupuestoMs) { filas.push({ contact: "-", empresa: null, quoteId: null, casilla: null, canal, omitido: "presupuesto_de_tiempo" }); break }
       const fila = casillas.get(cand.contact) || null
       const casilla = siguienteCasilla(fila)
@@ -467,6 +476,12 @@ export async function GET(req: Request): Promise<Response> {
       // caso — escribirle es meterse encima de la gestión del vendedor (Lalo
       // 13-sep: "esto está pensado para el segmento que Vicky puede vender").
       if (cand.canalEjecutivo) { base.omitido = "canal_ejecutivo"; filas.push(base); continue }
+      if (chatActivo.has(cand.contact) || descartes.has(cand.contact)) {
+        // Se reporta con su motivo real más abajo; acá solo se declara que no
+        // gasta tope. (El flag se evalúa antes de las lecturas caras.)
+      } else {
+        evaluadasCaras++
+      }
       // Una casilla por semana: si el último WhatsApp salió hace menos de 6 días, esperar.
       const abierta = casillaAbierta(fila, ahora)
       if (abierta) { base.omitido = `toque_${abierta}_en_curso`; filas.push(base); continue }
