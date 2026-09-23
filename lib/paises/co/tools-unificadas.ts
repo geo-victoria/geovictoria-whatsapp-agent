@@ -166,7 +166,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Colombia (CRM + PDF en COP + link donde el cliente la revisa, acepta y paga con tarjeta vía Mercado Pago). Úsala cuando el cliente quiere avanzar tras ver el precio. Pasa el MISMO escalonDescuento que el cliente aceptó (o se usa el último ofrecido). REQUIERE empresa (razón social), contacto, contactoEmail (obligatorio), rutEmpresa = el NIT con dígito de verificación (ej. 900.123.456-7), userCount y la configuración (hardware + puntosInstalacion con la ciudad si lleva equipo, en alquiler o compra). Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria. Si el NIT no valida, pide SOLO la corrección.",
+      "Genera la COTIZACIÓN FORMAL de Colombia (CRM + PDF en COP + link donde el cliente la revisa, acepta y paga con tarjeta vía Mercado Pago o por transferencia a Bancolombia). Úsala cuando el cliente quiere avanzar tras ver el precio. Pasa el MISMO escalonDescuento que el cliente aceptó (o se usa el último ofrecido). REQUIERE empresa (razón social), contacto, rutEmpresa = el NIT con dígito de verificación (ej. 900.123.456-7), userCount y la configuración (hardware + puntosInstalacion con la ciudad si lleva equipo, en alquiler o compra). Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria. Si el NIT no valida, pide SOLO la corrección.",
     input_schema: {
       type: "object" as const,
       properties: {

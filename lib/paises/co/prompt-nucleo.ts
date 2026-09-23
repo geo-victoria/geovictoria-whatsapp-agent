@@ -20,7 +20,7 @@ export function formatCatalogoParaPromptCO(): string {
       ? "  (ningún dispositivo de marcaje habilitado actualmente)"
       : hardware
           .map((h) => {
-            const mods = (h.modalidadesDisponibles || []).map((m) => (m === "arriendo" ? "alquiler mensual (envío e instalación gratis)" : "compra (pago único; envío e instalación según zona)")).join(" o ")
+            const mods = (h.modalidadesDisponibles || []).map((m) => (m === "arriendo" ? "alquiler mensual (envío incluido; instalación técnica incluida en Bogotá y alrededores, precio cerrado por zona en el resto)" : "compra (pago único; envío e instalación según zona)")).join(" o ")
             return `  - ${h.id}: ${h.displayName} — ${mods}; el monto en COP (con su IVA 19 %) lo entrega cotizar_referencial. Cantidad sugerida: ${h.cantidadSugerida}. ${h.descripcion || ""}`.trimEnd()
           })
           .join("\n")

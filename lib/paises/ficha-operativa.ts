@@ -249,7 +249,6 @@ const FICHA_CO: FichaOperativa = {
     "Gestor/a de la venta autónoma (quién se queda con la venta que cierra Vicky sola).",
     "Líder comercial (recibe alertas de espejos y traspasos).",
     "Sesiones de espejo del equipo en el worker (agordillo, egalindo).",
-    "Confirmar que la transferencia a Bancolombia se acepta como medio de pago (hoy el cotizador CO cobra solo con tarjeta).",
   ],
 }
 
