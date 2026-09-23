@@ -13,6 +13,8 @@
  * IDs verificados contra las páginas públicas (host correcto en cada una):
  * cal.com/team/onboardinggv/seguimiento-cotizacion-{cl,co,mx}
  */
+import { EVENTOS_AGENDA_CO } from "./paises/co/agenda.ts"
+
 export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // ── Ejecutivos de la TÓMBOLA CL (eventos creados por Lalo el 10-ago) ──
   // Verificados el mismo día contra la API: los cuatro responden 200 y cada
@@ -43,6 +45,12 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // luego lo cambiamos a Mónica"). Es también el evento POR DEFECTO de toda
   // reunión peruana (lib/paises/pe/tools-unificadas → eventoAgendaPE).
   "mmendozav@geovictoria.com": "7084664", // PE — Mónica Mendoza (host interino: Lalo)
+  // ── COLOMBIA (23-sep, telemarketing del tramo 1-199 de "Deals 2026") ──
+  // Eventos creados por Lalo con él como host interino hasta que cada una
+  // conecte su calendario (el id no cambia). Verificados el 23-sep: 101 slots
+  // en 6 días cada uno. Correos e ids salen de la FICHA OPERATIVA
+  // (`calEventoId` de cada persona) vía lib/paises/co/agenda.ts — fuente única.
+  ...EVENTOS_AGENDA_CO,
   // ANDERSON (6616830) NO se cablea: su evento devuelve 0 slots en 14, 30 y
   // 60 días — está sin horario/host utilizable. Cablearlo dejaría a sus
   // clientes sin ninguna hora que elegir; hasta arreglarlo cae al

@@ -93,3 +93,54 @@ export async function GET(req: Request): Promise<Response> {
     })),
   })
 }
+
+/**
+ * ESCRITURA ACOTADA: alta de AGENTES (personas del panel) en Botmaker.
+ * Nace el 23-sep con la orden de Lalo "crear los usuarios que falten por api"
+ * (equipo de Colombia y Cecilia Valverde de Perú). La API pública documenta
+ * GET /v2.0/agents; el POST se PRUEBA acá y su respuesta se devuelve tal cual —
+ * si Botmaker responde 500/405 como con los webhooks, el alta va por el panel
+ * y este endpoint lo dice con datos, no con suposición.
+ *
+ * POST {ruta?: "/v2.0/agents", body: {email, name, role}, dry?: true}
+ * Solo se permite `/v2.0/agents` (y `/v2.0/agents/<id>` con method PUT).
+ * Si el correo YA existe como agente, no se crea (idempotente).
+ */
+export async function POST(req: Request): Promise<Response> {
+  const sp = new URL(req.url).searchParams
+  const key = (sp.get("key") || req.headers.get("x-cron-secret") || "").trim()
+  const secreto = (process.env.FOLLOWUP_CRON_SECRET || "").trim() || (await getFollowupCronSecret().catch(() => "")) || ""
+  if (!key || !secreto || key !== secreto) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
+  const token = (process.env.BOTMAKER_ACCESS_TOKEN || process.env.BM_ACCESS_TOKEN || "").trim()
+  if (!token) return NextResponse.json({ ok: false, error: "sin BOTMAKER_ACCESS_TOKEN" }, { status: 503 })
+
+  const b = (await req.json().catch(() => ({}))) as { ruta?: string; body?: Record<string, unknown>; dry?: boolean; method?: string }
+  const ruta = (b.ruta || "/v2.0/agents").trim()
+  if (!/^\/v2\.0\/agents(\/[A-Za-z0-9_-]+)?$/.test(ruta)) {
+    return NextResponse.json({ ok: false, error: "solo /v2.0/agents" }, { status: 400 })
+  }
+  const method = String(b.method || "POST").toUpperCase()
+  if (!["POST", "PUT", "PATCH"].includes(method)) return NextResponse.json({ ok: false, error: "method inválido" }, { status: 400 })
+  const body = b.body && typeof b.body === "object" ? b.body : {}
+  const email = String(body.email || "").trim().toLowerCase()
+
+  // Idempotencia: si ya existe un agente con ese correo, no se crea otro.
+  if (method === "POST" && email) {
+    const r0 = await fetch("https://api.botmaker.com/v2.0/agents", { headers: { "access-token": token, Accept: "application/json" }, cache: "no-store" })
+    const d0 = (await r0.json().catch(() => ({}))) as { items?: Array<{ id?: string; email?: string; role?: string }> }
+    const ya = (d0.items || []).find((a) => String(a.email || "").toLowerCase() === email)
+    if (ya) return NextResponse.json({ ok: true, yaExistia: true, agente: ya })
+  }
+  if (b.dry) return NextResponse.json({ ok: true, dry: true, ruta, method, body })
+
+  const r = await fetch(`https://api.botmaker.com${ruta}`, {
+    method,
+    headers: { "access-token": token, Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  })
+  const texto = await r.text().catch(() => "")
+  let json: unknown = null
+  try { json = JSON.parse(texto) } catch { /* no era JSON */ }
+  return NextResponse.json({ ok: r.ok, status: r.status, ruta, method, enviado: body, json: json ?? undefined, texto: json ? undefined : texto.slice(0, 1500) })
+}

@@ -57,6 +57,8 @@ export type PersonaEquipo = {
   /** Sesión del worker de espejos (default: parte local del correo; "" = no lleva espejo). */
   sesion: string
   telefono?: string
+  /** Evento de host único en Cal.com (eventTypeId). Solo quien agenda reuniones lo lleva. */
+  calEventoId?: string
 }
 
 export type FichaOperativa = {
@@ -249,9 +251,11 @@ const FICHA_CO: FichaOperativa = {
     // (lib/paises/co/tombola-zoho.ts) la formal nace a su nombre (regla 05-ago).
     // Ids y correos de los usuarios activos de Zoho; ninguno trae teléfono.
     telemarketing: [
-      persona("mcorredor@geovictoria.com", "3525045000276182050", "María Paula Corredor"),
-      persona("snavarrob@geovictoria.com", "3525045000649997017", "Silvana Navarro Builes"),
-      persona("dcrodriguez@geovictoria.com", "3525045000650077001", "Diana Carolina Rodríguez"),
+      // Evento de Cal.com por telemarketera (Lalo 23-sep, él como host interino
+      // hasta que cada una conecte su calendario; el id sobrevive al cambio).
+      { ...persona("mcorredor@geovictoria.com", "3525045000276182050", "María Paula Corredor"), calEventoId: "7199950" },
+      { ...persona("snavarrob@geovictoria.com", "3525045000649997017", "Silvana Navarro Builes"), calEventoId: "7199960" },
+      { ...persona("dcrodriguez@geovictoria.com", "3525045000650077001", "Diana Carolina Rodríguez"), calEventoId: "7199966" },
       persona("agordillo@geovictoria.com", "3525045000203758005", "Alejandro Gordillo", "+57 314 267 7765"),
     ],
     // Lalo 23-sep ("esos son los 3 SDR que reciben leads"): la entrada 34 de la

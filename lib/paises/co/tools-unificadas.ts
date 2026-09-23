@@ -19,9 +19,23 @@ import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts
 import { reenviarCotizacionCorreoSchema } from "../../tools/reenviar-cotizacion-correo.ts"
 import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
 
-// Mismo criterio que co/tools.ts (REUNIONES_CO_HABILITADAS), calculado acá
-// para no importar ese módulo en el top-level (su cadena no es pura).
-const REUNIONES_CO_HABILITADAS = Boolean((process.env.CAL_EVENT_TYPE_ID_CO || "").trim())
+import { agendaCoActiva, eventoAgendaCO } from "./agenda.ts"
+
+// Agenda en línea de Colombia (23-sep): activa salvo env VICKY_AGENDA_CO=off.
+const REUNIONES_CO_HABILITADAS = agendaCoActiva()
+const TZ_CO = "America/Bogota"
+
+function fechaLegibleCO(slotIso: string): string {
+  return new Date(slotIso).toLocaleString("es-CO", {
+    timeZone: TZ_CO,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+}
 
 type Schema = { name: string; description: string; input_schema: Record<string, unknown> }
 
@@ -533,11 +547,57 @@ export function buildDispatchCOUnificado(contact: string) {
       case "marcar_no_contactar":
       case "programar_seguimiento":
       case "reenviar_cotizacion_correo":
-      case "consultar_disponibilidad_horario":
-      case "agendar_reunion":
-      case "reagendar_reunion":
-        // La base ya responde honesta cuando la agenda CO no está configurada.
         return base(name, input)
+      // ── Agenda = las tools chilenas con los eventos de Cal de Colombia ──
+      // El agent-loop inyecta `eventTypeId` cuando el dueño del deal/lead
+      // tiene evento propio (las tres telemarketeras están en el mapa de
+      // eventos-seguimiento); si no viene, `eventoAgendaCO()` rota entre
+      // ellas (kv `cal_evento_co` / env CAL_EVENT_TYPE_ID_CO lo fijan). Jamás
+      // al round-robin chileno.
+      case "consultar_disponibilidad_horario": {
+        if (!REUNIONES_CO_HABILITADAS) return base(name, input)
+        const { consultarDisponibilidadHorario } = await import("../../tools/consultar-disponibilidad-horario.ts")
+        const iA = i as { fechaPropuesta?: string; eventTypeId?: string }
+        return consultarDisponibilidadHorario({
+          fechaPropuesta: String(iA.fechaPropuesta || ""),
+          country: "Colombia",
+          eventTypeId: (iA.eventTypeId || "").trim() || (await eventoAgendaCO()),
+        })
+      }
+      case "agendar_reunion": {
+        if (!REUNIONES_CO_HABILITADAS) return base(name, input)
+        const { agendarReunion } = await import("../../tools/agendar-reunion.ts")
+        const iA = i as { telefono?: string; eventTypeId?: string; prospectEmail?: string }
+        const r = await agendarReunion({
+          ...(i as object),
+          telefono: (iA.telefono || "").trim() || contact,
+          country: "Colombia",
+          eventTypeId: (iA.eventTypeId || "").trim() || (await eventoAgendaCO()),
+        } as never)
+        if (!r.ok) return r
+        const email = iA.prospectEmail || "tu correo"
+        return {
+          ...r,
+          timezone: TZ_CO,
+          mensajeParaProspecto:
+            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia)${r.atiende ? `, con ${r.atiende.nombre}` : ""} 🎉 ` +
+            `Te llegará la invitación con el link de la reunión a ${email}.` +
+            (r.atiende?.email ? ` Si necesitas algo antes, le escribes a 📧 ${r.atiende.email}${r.atiende.whatsapp ? ` o al 📱 ${r.atiende.whatsapp}` : ""}.` : "") +
+            ` Te puedo ayudar en algo más?`,
+        }
+      }
+      case "reagendar_reunion": {
+        if (!REUNIONES_CO_HABILITADAS) return base(name, input)
+        const { reagendarReunion } = await import("../../tools/reagendar-reunion.ts")
+        const r = await reagendarReunion({ ...(i as object), country: "Colombia", _contact: contact } as never)
+        if (!r.ok) return r
+        return {
+          ...r,
+          mensajeParaProspecto:
+            `Listo!! Tu reunión quedó reagendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia) 📅 ` +
+            `Te llegará la nueva invitación por correo. Te puedo ayudar en algo más?`,
+        }
+      }
       case "enviar_cotizacion_whatsapp": {
         const { enviarCotizacionWhatsapp } = await import("../../tools/enviar-cotizacion-whatsapp.ts")
         return enviarCotizacionWhatsapp({ ...(i as object), _contact: contact } as never)

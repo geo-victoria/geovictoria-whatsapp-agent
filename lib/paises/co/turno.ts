@@ -9,7 +9,7 @@ import type { ConversationMessage } from "../../agent-loop"
 import { PERFIL_CO } from "./index"
 import { getSystemPromptCONucleo } from "./prompt-nucleo"
 import { TOOL_SCHEMAS_CO_UNIFICADAS, buildDispatchCOUnificado } from "./tools-unificadas"
-import { REUNIONES_CO_HABILITADAS } from "./tools"
+import { agendaCoActiva } from "./agenda"
 import { derivacionDePais } from "../../umbral-autonomia"
 
 const COTIZ_MSG_RE_CO =
@@ -35,7 +35,7 @@ export const PERFIL_TURNO_CO: PerfilTurno = {
   channelId: PERFIL_CO.canal.channelId,
   systemPrompt: (contact, umbral) => getSystemPromptCONucleo(contact, umbral),
   tools: (contact) => ({ schemas: TOOL_SCHEMAS_CO_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchCOUnificado(contact) }),
-  derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: REUNIONES_CO_HABILITADAS }),
+  derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: agendaCoActiva() }),
   esFlujoCotizacion: esFlujoCotizacionCO,
   blindarSoporte: (reply) => reply,
   certificacionDT: false,

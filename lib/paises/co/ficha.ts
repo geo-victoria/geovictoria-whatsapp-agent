@@ -11,14 +11,17 @@
  * se indica): (a) escalera de descuento = CHILE (Lalo 21-sep: 10 → 20 % sobre
  * el plan, 6 meses; el cotizador CO lo lleva al PDF, la aceptación y el
  * checkout); (b) la reunión la coordina el ejecutivo salvo que exista el
- * evento de Cal (env CAL_EVENT_TYPE_ID_CO); (c) plazos de activación/despacho
+ * evento de Cal (desde el 23-sep existen los tres: lib/paises/co/agenda.ts,
+ * apagable con VICKY_AGENDA_CO=off); (c) plazos de activación/despacho
  * y política de devolución: no se prometen (se "coordinan con el ejecutivo").
  *
  * PURO: sin red, sin "@/". NOMBRES DE TOOLS: los del núcleo.
  */
 import type { FichaPrompt } from "../../prompt-nucleo/ficha.ts"
+import { agendaCoActiva } from "./agenda.ts"
 
-const AGENDA_CO = Boolean((process.env.CAL_EVENT_TYPE_ID_CO || "").trim())
+// Agenda en línea de Colombia (23-sep): tres eventos de Cal (lib/paises/co/agenda.ts).
+const AGENDA_CO = agendaCoActiva()
 
 export const FICHA_CO: FichaPrompt = {
   pais: "co",

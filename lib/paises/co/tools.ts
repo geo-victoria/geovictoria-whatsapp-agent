@@ -16,6 +16,7 @@
 
 import { cotizarCO, formatearCOP, type PuntoInstalacionCO } from "./cotizar"
 import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
+import { agendaCoActiva, EVENTOS_AGENDA_CO } from "@/lib/paises/co/agenda"
 import { clasificarUbicacionCO } from "./geografia"
 import { nitValido, normalizarNit } from "./nit"
 import { createZohoLead } from "../../zoho-leads"
@@ -61,7 +62,9 @@ const EJECUTIVO_CO_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_CO_ID || "3525045000203
 // comercial de Colombia (event type 6292070, round robin CO). Sin la env,
 // las tools de agenda NO se exponen al modelo y el prompt instruye derivar.
 // Cuando el equipo cree el event type, basta setear la env + redeploy.
-const CAL_EVENT_TYPE_ID_CO = (process.env.CAL_EVENT_TYPE_ID_CO || "").trim()
+// 23-sep: con los eventos de las telemarketeras (lib/paises/co/agenda.ts) la
+// agenda queda activa por defecto; el env sigue mandando si está seteado.
+const CAL_EVENT_TYPE_ID_CO = (process.env.CAL_EVENT_TYPE_ID_CO || "").trim() || (agendaCoActiva() ? Object.values(EVENTOS_AGENDA_CO)[0] : "")
 export const REUNIONES_CO_HABILITADAS = Boolean(CAL_EVENT_TYPE_ID_CO)
 
 const TZ_CO = "America/Bogota"
