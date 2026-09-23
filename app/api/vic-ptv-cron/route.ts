@@ -1243,7 +1243,7 @@ async function asignarEnZoho(
     // calificado sin RUT → tómbola de leads TLMK; sin calificar → SDR. Sin
     // esto, un lead nacido "1." con 18 personas iba a SDR (caso Joyce) y un
     // "40 app" sin RUT también (caso Diego).
-    if (lead?.id && !lead.Converted_Deal?.id && pais === "cl" && !segundaPasada) {
+    if (lead?.id && !lead.Converted_Deal?.id && (pais === "cl" || pais === "pe") && !segundaPasada) {
       try {
         const { datosDelChat } = await import("@/lib/extraer-datos-chat")
         const chat = await datosDelChat(fono)
@@ -1303,7 +1303,7 @@ async function asignarEnZoho(
       // CRM: RUT + >20 → deal + Tómbola Deals; dotación conocida → lead
       // calificado (la segunda pasada lo encuentra y lo entrega a la regla
       // TLMK, no a las SDR); sin nada → lead ciego como siempre.
-      if (esCL && !segundaPasada) {
+      if ((esCL || esPE) && !segundaPasada) {
         try {
           const { datosDelChat } = await import("@/lib/extraer-datos-chat")
           const chat = await datosDelChat(fono)
@@ -1406,8 +1406,24 @@ async function asignarEnZoho(
       }
       return porDefecto
     }
-    if (lead.Converted_Deal?.id) {
-      const dealId = lead.Converted_Deal.id
+    // LEAD SIN CONVERTIR PERO CON DEAL VIVO (23-sep, caso El Trebol PE): la
+    // emisión peruana creaba el deal aparte y el lead quedaba abierto, así que
+    // el traspaso entregaba el LEAD (regla TLMK) y el DEAL se quedaba con el
+    // usuario Vicky sin pasar por la tómbola "Deals 2026". Si el contacto ya
+    // tiene deal vivo (candado kv → puntero de cotización → Zoho), manda el deal.
+    let dealVivoId = lead.Converted_Deal?.id || ""
+    if (!dealVivoId) {
+      try {
+        const { dealActivoEnKv } = await import("@/lib/crm-hitos")
+        const d = await dealActivoEnKv(fono)
+        if (d && /^\d{10,}$/.test(d)) {
+          dealVivoId = d
+          console.log(`[ptv] ${fono}: lead ${lead.id} sin convertir pero con deal vivo ${d} — se entrega el DEAL, no el lead`)
+        }
+      } catch { /* sin deal vivo: sigue como lead */ }
+    }
+    if (dealVivoId) {
+      const dealId = dealVivoId
       // Deal CERRADO = OTRA negociación (Lalo 31-jul): no se toca — el primer
       // barrido le quitó a Grey Meléndez un Cierre Perdido de 2023 y pisó
       // otro de Admin. La dedup/asignación es de procesos ABIERTOS; el

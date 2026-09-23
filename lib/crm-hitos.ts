@@ -550,7 +550,7 @@ async function reglasRecontactoActivas(): Promise<boolean> {
  */
 const DEAL_KV_TTL_MS = 6 * 60 * 60 * 1000
 
-async function dealActivoEnKv(fono: string): Promise<string | null> {
+export async function dealActivoEnKv(fono: string): Promise<string | null> {
   try {
     const { getKvValue } = await import("./supabase-persistence-v3")
     const leer = async (): Promise<{ at?: string; dealId?: string; creando?: boolean } | null> => {
