@@ -142,6 +142,7 @@ test("la ficha declara pendientes solo donde faltan datos y tiene lo mínimo en 
     assert.ok(f.equipo.telemarketing.length >= 1, `${f.pais} sin telemarketing`)
     assert.ok(f.tz.includes("/"), `${f.pais} sin zona horaria IANA`)
     if (!f.equipo.ventaAutonoma) assert.ok(f.pendientes.some((p) => /aut[oó]noma/i.test(p)), `${f.pais}: sin gestor de venta autónoma y no lo declara pendiente`)
-    if (!f.cobranzaCc) assert.ok(f.pendientes.some((p) => /finanzas|cobranza/i.test(p)), `${f.pais}: sin correo de cobranza y no lo declara pendiente`)
+    // El correo del comprobante es GLOBAL (CORREO_COMPROBANTE = vicky@, Lalo 23-sep): ningún país lo declara pendiente.
+    assert.ok(!f.pendientes.some((p) => /correo de finanzas/i.test(p)), `${f.pais}: declara un correo de finanzas pendiente y el comprobante va siempre a vicky@`)
   }
 })

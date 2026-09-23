@@ -12,10 +12,12 @@
  */
 
 import { getZohoAccessToken } from "./zoho-token"
+import { CORREO_COMPROBANTE } from "./paises/ficha-operativa.ts"
 
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
+// Remitente y destinatario de respaldo = el correo ÚNICO del comprobante (ficha).
+const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || CORREO_COMPROBANTE).trim()
 // DESTINATARIO (Lalo 15-sep: "cambiemos el correo de cobranza@ por el del
 // ejecutivo asignado si es que tiene y si no el de vicky@"): el correo va al
 // DUEÑO humano de la cotización; sin dueño humano (Vicky/Admin) va a vicky@.

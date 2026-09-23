@@ -93,7 +93,13 @@ export type FichaOperativa = {
   }
   /** Ventana local de los toques proactivos (hora de inicio y fin). */
   horarioToques: { desde: number; hasta: number }
-  /** Correo de finanzas/cobranza que recibe copia del aviso de comprobante ("" = ninguno). */
+  /**
+   * COPIA adicional del aviso interno de comprobante ("" = ninguna). NO es el
+   * correo del comprobante: ese es SIEMPRE `CORREO_COMPROBANTE` (vicky@) en
+   * los 4 países — Lalo 23-sep: "el correo para el comprobante siempre es el
+   * de vicky, independiente el país". Chile conserva cobranza@ en copia porque
+   * finanzas CL registra el pago desde ahí (03-ago).
+   */
   cobranzaCc: string
   /** Lo que la ficha declara que FALTA para este país (texto para una persona). */
   pendientes: string[]
@@ -201,7 +207,6 @@ const FICHA_PE: FichaOperativa = {
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
   pendientes: [
-    "Correo de finanzas Perú para copiar el aviso de comprobante (hoy ninguno).",
     "Sesiones de espejo del equipo en el worker (WA_SESSION_IDS en Railway): mmendozav, afiori, pquispef, cvalverde.",
     "Un aviso REAL de BBVA/BCP/Interbank en la casilla vicky@ para calibrar el parser (hoy formato genérico).",
   ],
@@ -243,7 +248,6 @@ const FICHA_CO: FichaOperativa = {
   pendientes: [
     "Gestor/a de la venta autónoma (quién se queda con la venta que cierra Vicky sola).",
     "Líder comercial (recibe alertas de espejos y traspasos).",
-    "Correo de finanzas Colombia para el aviso de comprobante.",
     "Sesiones de espejo del equipo en el worker (agordillo, egalindo).",
     "Confirmar que la transferencia a Bancolombia se acepta como medio de pago (hoy el cotizador CO cobra solo con tarjeta).",
   ],
@@ -286,7 +290,6 @@ const FICHA_MX: FichaOperativa = {
     "Roster SDR Inbound México (emails + ids de Zoho) para la rotación de leads.",
     "Gestor/a de la venta autónoma.",
     "Líder comercial.",
-    "Correo de finanzas México para el aviso de comprobante.",
     "Sesiones de espejo del equipo en el worker (ysegura).",
   ],
 }
@@ -294,6 +297,15 @@ const FICHA_MX: FichaOperativa = {
 const FICHAS: Record<CodigoPaisOperativo, FichaOperativa> = { cl: FICHA_CL, pe: FICHA_PE, co: FICHA_CO, mx: FICHA_MX }
 
 export const PAISES_OPERATIVOS: CodigoPaisOperativo[] = ["cl", "pe", "co", "mx"]
+
+/**
+ * El correo al que el cliente manda el comprobante y donde el banco avisa la
+ * transferencia: UNO para los cuatro países (Lalo 23-sep, "independiente el
+ * país"). Es la casilla que Power Automate lee y el agente registra solo
+ * (`vic-correo-entrante`); el cotizador lo muestra en el modal de transferencia
+ * (`TRANSFER_CONTACT_EMAIL`). Un país nuevo NO define correo de finanzas.
+ */
+export const CORREO_COMPROBANTE = "vicky@geovictoria.com"
 
 export function fichaOperativa(pais: string | null | undefined): FichaOperativa {
   const k = String(pais || "").toLowerCase() as CodigoPaisOperativo
@@ -483,7 +495,8 @@ export function resumenFicha(f: FichaOperativa): Record<string, unknown> {
     ventaAutonoma: f.equipo.ventaAutonoma ? `${f.equipo.ventaAutonoma.nombre} <${f.equipo.ventaAutonoma.email}>` : "(sin definir)",
     lider: f.equipo.lider || "(sin definir)",
     horarioToques: `${f.horarioToques.desde}:00–${f.horarioToques.hasta}:00 ${f.tz}`,
-    cobranzaCc: f.cobranzaCc || "(sin definir)",
+    correoComprobante: CORREO_COMPROBANTE,
+    copiaAvisoComprobante: f.cobranzaCc || "(ninguna)",
     pendientes: f.pendientes,
   }
 }
