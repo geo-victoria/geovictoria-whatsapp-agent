@@ -31,6 +31,7 @@ import { appendAssistantV3, getFollowupCronSecret, getKvValue } from "@/lib/supa
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { linkCortoDe } from "@/lib/link-cotizacion"
 import { getUFActual } from "@/lib/uf"
+import { fichaRelojUrlDe } from "@/lib/tools/enviar-ficha-reloj"
 import { evaluarGateProactividad } from "@/lib/gate-proactividad"
 import { montoDelBloque } from "@/lib/precio-bloque"
 import { claveCampana, aplicarTopeParaToque4, descuentoDeCotizacion } from "@/lib/campana-descuento"
@@ -341,7 +342,7 @@ export async function GET(req: Request): Promise<Response> {
       nombre: "Lalo",
       empresa: "GeoVictoria (prueba)",
       link: WA_VICKY,
-      pdfUrl: (sp.get("pdf") || "https://cotizacion.geovictoria.com/pdf/assets/ficha-reloj-senseface.pdf").trim(),
+      pdfUrl: (sp.get("pdf") || fichaRelojUrlDe("cl") || "").trim(),
       gancho: ganchoParaToque2(sp.get("motivo")),
       pctDescuento: Number(sp.get("pct")) || 0,
       aceptada: sp.get("aceptada") === "1",

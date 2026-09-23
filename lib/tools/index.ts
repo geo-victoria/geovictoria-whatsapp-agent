@@ -229,7 +229,8 @@ export async function dispatchTool(name: string, input: Record<string, unknown>)
       case "enviar_certificacion":
         return await enviarCertificacion()
       case "enviar_ficha_reloj":
-        return await enviarFichaReloj()
+        // El país sale del contacto (_contact lo inyecta el agent-loop).
+        return await enviarFichaReloj(input as { _contact?: string })
       case "actualizar_cotizacion":
         return await actualizarCotizacion(input as ActualizarCotizacionInput)
 

@@ -785,7 +785,7 @@ export function buildDispatchPEUnificado(contact: string) {
         // Mismo equipo que Chile (SenseFace 2A / artículo 304 [PER]) y la ficha
         // es técnica, sin precios ni país: la tool chilena es la única.
         const { enviarFichaReloj } = await import("../../tools/enviar-ficha-reloj.ts")
-        return enviarFichaReloj()
+        return enviarFichaReloj({ pais: "pe" })
       }
       case "buscar_prospect_en_zoho": {
         // Misma búsqueda que Chile: el RUC vive en RUT_Empresa (create-from-vicky-pe).

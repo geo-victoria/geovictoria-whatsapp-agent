@@ -73,6 +73,9 @@ const POST_PERMITIDOS = new Set([
   // NDV del alta por chat (07-sep): convertir+confirmar con la empresa creada
   // y enlazar la Referencia NDV — reintento manual del job de lib/ndv-alta.
   "/api/creator/ndv-alta-chat",
+  // Subir/actualizar un asset público del cotizador (23-sep, ficha del Senseface
+  // 4A): el endpoint acepta x-vicky-secret además de su clave admin.
+  "/api/admin/upload-asset",
 ])
 
 export async function POST(req: Request): Promise<Response> {

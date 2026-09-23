@@ -24,15 +24,22 @@ import type { Hardware } from "./tipos"
 
 export const CATALOGO_HARDWARE: Hardware[] = [
   // ─── HABILITADO PARA VICKY ──────────────────────────────────────────────
+  // EL RELOJ ESTÁNDAR DE VICKY CHILE. El id `senseface_2a` es el SLOT (queda
+  // estampado en subforms de Zoho, espejos Creator, editor y tests) y NO se
+  // renombra; el MODELO físico que va detrás cambia con el stock: desde el
+  // 23-sep-2026 es el Senseface 4A (correo de Valeria Barbano 22-sep "Nuevos
+  // Precios HARDWARE — hasta agotar stock": "debe ser su primera alternativa en
+  // clientes pequeños"; orden de Lalo: cambiar equipo, ficha y descripción,
+  // MANTENER el precio de Vicky). Perú sigue con su propio slot (reloj_pe).
   {
     id: "senseface_2a",
-    modelo: "Senseface 2A",
+    modelo: "Senseface 4A",
     displayName: "Reloj control físico",
-    conexion: "WiFi",
+    conexion: "WiFi / LAN",
     ventaUF: 6,
     arriendoUF: 0.35,
     descripcion:
-      "Reloj control físico de marcaje en punto fijo, conexión WiFi. Según el modelo admite varios métodos de marcaje (clave numérica, reconocimiento facial, huella dactilar, tarjeta de proximidad, código QR y lector de cédula). Funciona SOLO (autónomo), no necesita un computador. Recomendado para puntos de trabajo con más de 10 personas o cuando los empleados no cuentan con smartphone propio.",
+      "Reloj control físico de marcaje en punto fijo, conexión WiFi o cable de red (LAN). Marca por reconocimiento facial, huella dactilar, tarjeta de proximidad o clave numérica, a elección de cada persona; capacidad para 8.000 usuarios (6.000 rostros). Funciona SOLO (autónomo), no necesita un computador; no incluye batería (opcional Mini UPS de 3 h). QR o lector de cédula van en el reloj con lector QR (kit_qr). Recomendado para puntos de trabajo con más de 10 personas o cuando los empleados no cuentan con smartphone propio.",
     modalidadesDisponibles: ["arriendo","venta"],
     cantidadSugerida: 1,
     requiereInstalacionOnsite: true,
