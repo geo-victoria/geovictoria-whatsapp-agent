@@ -2046,7 +2046,10 @@ export async function sincronizarHitoCrm(
         console.warn(`[crm-hitos] ${clean}: no se pudo crear lead (${creado.error})`)
         return
       }
-      if (esCO) {
+      // CO con el interruptor de la tómbola encendido (Lalo 23-sep) = Chile: el
+      // lead nace con el usuario Vicky y ESPERA; lo entrega la escalera o el
+      // reloj de traspaso por las reglas de Zoho. Apagado: SDR fijo (05-ago).
+      if (esCO && !tombolaZohoCoActiva()) {
         const { reasignarLeadSdrInboundCO } = await import("./zoho-leads")
         await reasignarLeadSdrInboundCO(creado.leadId).catch(() => {})
       }
