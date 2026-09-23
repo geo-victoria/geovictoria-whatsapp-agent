@@ -159,7 +159,8 @@ export function cotizarCO(input: CotizacionCOInput): {
   }
   const planLista = precioPlanCO(userCount)
   // Precio por usuario del tramo (11-20): sale del catálogo, nunca literal
-  // (23-sep: el software bajó a la mitad y el literal 13.700 mentía).
+  // (23-sep: un cambio de lista dejó al literal 13.700 mintiendo; el precio
+  // vive SOLO en el catálogo).
   const precioUsuario = tierPlanCO(userCount).precioUF
   const escalonDescuento = escalonDescuentoCO(input.escalonDescuento)
   const pctDescuento = pctDescuentoCO(escalonDescuento)

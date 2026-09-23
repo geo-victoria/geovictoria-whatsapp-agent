@@ -8,15 +8,15 @@
  * en el perfil, no hay conversión). El nombre del campo es herencia del
  * catálogo chileno.
  *
- * Precios Colombia (COP) — SOFTWARE A LA MITAD (Colombia aprobó, Lalo 23-sep:
- * "bajar los precios de software a la mitad, todos los tramos que vende Vicky"):
- *   Asistencia 1-10:  $157.500/mes fijo (antes $315.000; sin micro-plan de 1)
- *   Asistencia 11-20: $6.850/usuario/mes (antes $13.700; el rango fijo corta
- *                     en 10, NO en 20 como muestra Creator hoy).
+ * Precios Colombia (COP) — DEFINICIONES CERRADAS (Lalo, 09-jul):
+ *   Asistencia 1-10:  $315.000/mes fijo (sin micro-plan de 1 persona)
+ *   Asistencia 11-20: $13.700/usuario/mes ("la más competitiva": el rango fijo
+ *                     corta en 10, NO en 20 como muestra Creator hoy).
  *                     RANGO DE VICKY = 1-20, igual que Chile (Lalo 23-sep);
- *                     21-50 NO es rango de Vicky y queda a $13.700 (la orden
- *                     cubre solo los tramos que vende Vicky — si el país
- *                     confirma la rebaja para 21+, cambiar ese tier).
+ *                     21-50 sigue a $13.700 solo como excepción por contacto.
+ *   OJO 23-sep: la rebaja "software a la mitad" se aplicó y se REVIRTIÓ el
+ *   mismo día (Lalo: "los precios deben volver a lo que estaba, mañana lo
+ *   definirán Juanpa con Rodrigo"). Cuando se defina, cambian SOLO los tiers.
  *   Reloj venta:      $620.000 pago único · arriendo $86.000/mes
  *   ENVÍO/INSTALACIÓN (SUPERSEDIDO 22-sep, propuesta aprobada por Lalo —
  *   los números vigentes viven en TARIFAS_CO de co/cotizar.ts): alquiler
@@ -54,8 +54,8 @@ export const CATALOGO_MODULOS_CO: ModuloSoftware[] = [
     descripcion:
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
-      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 157500 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 6850 },
+      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 315000 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 13700 },
       // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
       // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
       // queda, como el 21-50 de Chile, solo para la excepción por contacto
