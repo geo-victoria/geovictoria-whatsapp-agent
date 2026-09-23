@@ -78,3 +78,47 @@ test("venta en Bogotá sin visita: envío 42.000 y la visita se ofrece a 175.000
   assert.ok(r.mensajeParaProspecto.includes("costo único adicional de $175.000"))
   assert.ok(!r.itemsCotizador.some((i) => i.id === "instalacion_reloj"))
 })
+
+// ── FORMA DE PRECIO DE CHILE + DOBLE VALOR (Lalo 23-sep, "cerremos Colombia") ──
+test("solo app: sin 'pago inicial' (la Activación es el primer mes), sin aritmética de IVA", () => {
+  const r = cotizarCO({ userCount: 15 })
+  assert.ok(r.mensajeParaProspecto.includes("Resumen mensual recurrente:"))
+  assert.ok(r.mensajeParaProspecto.includes("Total mensual: $205.500"))
+  assert.ok(!/pago inicial/i.test(r.mensajeParaProspecto))
+  assert.ok(!/\+ IVA =/.test(r.mensajeParaProspecto))
+  assert.ok(!/Qué opción prefieres/.test(r.mensajeParaProspecto))
+})
+
+test("con equipo en alquiler: doble valor (equipo + app vs solo app) y cierre presuntivo", () => {
+  const r = cotizarCO({
+    userCount: 15,
+    reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntos: [{ ubicacion: "Bogotá", zona: "capital", autoInstalada: true }],
+    escalonDescuento: 1,
+  })
+  const m = r.mensajeParaProspecto
+  assert.ok(m.includes("1 - Para 15 personas te recomiendo Equipo biométrico en alquiler + App:"))
+  assert.ok(m.includes("💰 $287.290 al mes (incluye el IVA del equipo)."))
+  assert.ok(m.includes("2.- Una alternativa más económica sería si marcan solo mediante nuestra app:"))
+  assert.ok(m.includes("💰 $184.950 al mes."))
+  assert.ok(m.includes("Incluye el 10% de descuento en el plan durante 6 meses (desde el mes 7, $307.840 al mes)."))
+  assert.ok(m.trim().endsWith("Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato."))
+  assert.ok(!/pago inicial/i.test(m))
+  assert.ok(!/\+ IVA =/.test(m) && !/Pago inicial \(una sola vez\)/.test(m))
+})
+
+test("con equipo en compra: misma mensualidad en las dos opciones → encabezado 'sin desembolso inicial' y pago único aparte", () => {
+  const r = cotizarCO({
+    userCount: 10,
+    reloj: { modalidad: "venta", cantidad: 1 },
+    puntos: [{ ubicacion: "Ibagué", zona: "intermedia", autoInstalada: false }],
+  })
+  const m = r.mensajeParaProspecto
+  assert.ok(m.includes("Equipo biométrico en compra + App"))
+  // 620.000 × 1,19 + 69.000 + 530.000 = 1.336.800 (sin la Activación, que es el primer mes)
+  assert.ok(m.includes("Se suma un pago inicial único de $1.336.800 (equipo con IVA, envío e instalación)."))
+  assert.ok(m.includes("2.- Si prefieres partir sin desembolso inicial, marcando solo con nuestra app (misma mensualidad, sin el pago único):"))
+  assert.ok(!/más económica/.test(m))
+  // El retorno para el cotizador sigue trayendo la Activación dentro del pago inicial.
+  assert.equal(r.pagoInicialNeto, 315000 + 620000 + 69000 + 530000)
+})

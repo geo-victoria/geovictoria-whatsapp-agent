@@ -295,52 +295,125 @@ export function cotizarCO(input: CotizacionCOInput): {
   const mensualTotal = plan + arriendoNeto + mensualArriendoIva
   const mensualTotalLista = planLista + arriendoNeto + mensualArriendoIva
 
-  // ── Mensaje canónico (registro de usted, COP) ──
-  // Solo el hardware muestra "+ IVA"; el resto va con precio final, sin
-  // mención de impuestos.
+  // ── Mensaje canónico (tuteo colombiano, COP) — LA FORMA DE CHILE ──
+  // (Lalo 21-sep para Perú, 23-sep para Colombia: "hazlo igual de simple que
+  // el flujo chileno"). Tres reglas que allá son duras:
+  //   · la línea que hace la ARITMÉTICA del impuesto no va (Eduardo 14-ago):
+  //     se muestra el total, nunca "neto + IVA = total". En Colombia solo el
+  //     equipo lleva IVA, así que el total mensual se dice con el IVA del
+  //     equipo ya adentro y se declara entre paréntesis;
+  //   · SIN PAGOS ÚNICOS NO SE HABLA DE "PAGO INICIAL": la Activación es el
+  //     primer mes del plan, así que con solo plan (o plan + alquiler) el
+  //     primer pago ES la mensualidad. El pago inicial aparece solo con
+  //     compra de equipo (equipo, envío, instalación);
+  //   · con equipo, DOBLE VALOR determinista (opción con equipo y opción solo
+  //     app) y cierre "Qué opción prefieres?" — el modelo no arma comparaciones.
+  const mensualListaTotal = planLista + arriendoNeto + mensualArriendoIva
+  const mensualConDctoTotal = plan + arriendoNeto + mensualArriendoIva
+  const unicosSinActivacion = unicos.filter((l) => l.concepto !== "Activación")
+  const unicosSinActivacionTotal = unicosSinActivacion.reduce((s, l) => s + l.neto + l.iva, 0)
+  const envioTotal = unicosSinActivacion.filter((l) => /^Envío/.test(l.concepto)).reduce((s, l) => s + l.neto, 0)
+  const instalacionCobrada = lineasInstalacion.some((li) => !li.bonificada)
+  const notaIvaEquipo = arriendoNeto > 0 ? " (incluye el IVA del equipo)" : ""
+  const notasFinales: string[] = [
+    "La capacitación online (valorada en $95.000) va incluida sin costo 🎁",
+  ]
+
   const filas: string[] = []
-  filas.push("Te comparto el detalle de tu cotización referencial:")
+  filas.push("Resumen mensual recurrente:")
   filas.push("")
-  filas.push("Mensualidad del servicio:")
-  filas.push(
-    `- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(plan)}/mes` +
-      (conDescuento ? ` (con ${Math.round(pctDescuento * 100)}% de descuento en el plan por ${mesesDcto} meses; precio de lista ${formatearCOP(planLista)}/mes)` : ""),
-  )
+  filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearCOP(planLista)}/mes`)
   if (arriendoNeto > 0) {
-    filas.push(
-      `- Alquiler de equipo biométrico: ${formatearCOP(arriendoNeto)} + IVA = ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes (despacho incluido)`,
-    )
-  }
-  if (conDescuento) {
-    filas.push(`Total mensual (primeros ${mesesDcto} meses): ${formatearCOP(mensualTotal)}`)
-    filas.push(`Desde el mes ${mesesDcto + 1}: ${formatearCOP(mensualTotalLista)}/mes`)
-  } else {
-    filas.push(`Total mensual: ${formatearCOP(mensualTotal)}`)
+    filas.push(`- Alquiler de equipo biométrico: ${formatearCOP(arriendoNeto + mensualArriendoIva)}/mes con IVA (despacho incluido)`)
   }
   filas.push("")
-  filas.push("Pago inicial (una sola vez):")
-  for (const l of unicos) {
-    if (l.neto === 0 && /Instalación técnica/.test(l.concepto)) {
-      filas.push(`- ${l.concepto}: incluida sin costo`)
-      continue
-    }
+  filas.push(`Total mensual: ${formatearCOP(mensualListaTotal)}${notaIvaEquipo}`)
+  if (conDescuento) {
     filas.push(
-      l.iva > 0
-        ? `- ${l.concepto}: ${formatearCOP(l.neto)} + IVA = ${formatearCOP(l.neto + l.iva)}`
-        : `- ${l.concepto}: ${formatearCOP(l.neto)}`,
+      `Con el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${mesesDcto} meses: ${formatearCOP(mensualConDctoTotal)}/mes (desde el mes ${mesesDcto + 1}, ${formatearCOP(mensualListaTotal)}/mes)`,
     )
   }
-  filas.push(`Total pago inicial: ${formatearCOP(pagoInicialTotal)}`)
-  // Frase de instalación con la forma de Chile (autoinstalable / incluida /
-  // costo único cerrado), después del desglose.
+  if (unicosSinActivacion.length > 0) {
+    filas.push("")
+    filas.push("Pago único:")
+    filas.push("")
+    for (const l of unicosSinActivacion) {
+      if (l.neto === 0 && /Instalación técnica/.test(l.concepto)) {
+        filas.push(`- ${l.concepto}: incluida sin costo`)
+        continue
+      }
+      filas.push(`- ${l.concepto}: ${formatearCOP(l.neto + l.iva)}${l.iva > 0 ? " con IVA" : ""}`)
+    }
+    filas.push("")
+    filas.push(`Total único: ${formatearCOP(unicosSinActivacionTotal)}`)
+    filas.push("")
+    filas.push("[---]")
+    filas.push("")
+    filas.push(
+      `Al aceptar pagas el pago inicial de ${formatearCOP(pagoInicialTotal)}: incluye el equipo${envioTotal > 0 ? ", el envío" : ""}${instalacionCobrada ? ", la instalación" : ""} + el primer mes del plan por adelantado.`,
+    )
+  }
   if (fraseInstalacion) {
+    filas.push("")
+    filas.push("[---]")
     filas.push("")
     filas.push(fraseInstalacion)
   }
-  filas.push("")
-  filas.push(
-    "Y la capacitación online, valorada en $95.000, va incluida de regalo (100% de descuento) 🎁",
-  )
+  for (const nota of notasFinales) {
+    filas.push("")
+    filas.push("[---]")
+    filas.push("")
+    filas.push(nota)
+  }
+
+  // ── DOBLE VALOR: con equipo y solo con app (misma regla de Chile/Perú:
+  // cualquier configuración con equipo muestra las DOS opciones en el mismo
+  // turno). La app va SIEMPRE incluida: lo que se paga es el equipo. Con el
+  // equipo en COMPRA el mensual es el MISMO en las dos, y el encabezado no
+  // puede decir "más económica": lo que cambia es el desembolso inicial.
+  let mensaje = filas.join("\n")
+  if (reloj && reloj.cantidad > 0) {
+    const planSolo = conDescuento ? plan : planLista
+    const mensualElegido = conDescuento ? mensualConDctoTotal : mensualListaTotal
+    const modalidadLabel = reloj.modalidad === "arriendo" ? "Equipo biométrico en alquiler" : "Equipo biométrico en compra"
+    const personas = `${userCount} persona${userCount === 1 ? "" : "s"}`
+    const ahorraMensual = planSolo < mensualElegido - 1
+    const ahorraEntrada = unicosSinActivacionTotal > 0
+    const op1: string[] = [
+      `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
+      `💰 ${formatearCOP(mensualElegido)} al mes${notaIvaEquipo}.`,
+      ``,
+      `Tus trabajadores pueden marcar desde el equipo o desde el celular, como les acomode.${envioTotal > 0 ? "" : " El despacho del equipo va incluido."}`,
+    ]
+    if (fraseInstalacion) op1.push(fraseInstalacion)
+    if (conDescuento) {
+      op1.push(
+        `Incluye el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${mesesDcto} meses (desde el mes ${mesesDcto + 1}, ${formatearCOP(mensualListaTotal)} al mes).`,
+      )
+    }
+    if (ahorraEntrada) {
+      op1.push(
+        `Se suma un pago inicial único de ${formatearCOP(unicosSinActivacionTotal)} (equipo con IVA${envioTotal > 0 ? ", envío" : ""}${instalacionCobrada ? " e instalación" : ""}).`,
+      )
+    }
+    const encabezado2 = ahorraMensual
+      ? `2.- Una alternativa más económica sería si marcan solo mediante nuestra app:`
+      : ahorraEntrada
+        ? `2.- Si prefieres partir sin desembolso inicial, marcando solo con nuestra app (misma mensualidad, sin el pago único):`
+        : `2.- También puedes partir marcando solo con nuestra app:`
+    const partes = [...op1, "", "[---]", "", encabezado2, `💰 ${formatearCOP(planSolo)} al mes.`]
+    for (const nota of notasFinales) {
+      partes.push("")
+      partes.push("[---]")
+      partes.push("")
+      partes.push(nota)
+    }
+    partes.push("")
+    partes.push("[---]")
+    partes.push("")
+    partes.push("Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato.")
+    mensaje = partes.join("\n")
+  }
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-co) ──
   // Misma matemática que las líneas de arriba, en formato del endpoint. La
@@ -444,6 +517,6 @@ export function cotizarCO(input: CotizacionCOInput): {
     pagoInicialTotal,
     descuentoPct: pctDescuento,
     escalonDescuento,
-    mensajeParaProspecto: filas.join("\n"),
+    mensajeParaProspecto: mensaje,
   }
 }
