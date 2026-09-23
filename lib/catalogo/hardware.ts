@@ -36,7 +36,10 @@ export const CATALOGO_HARDWARE: Hardware[] = [
     modelo: "Senseface 4A",
     displayName: "Reloj control físico",
     conexion: "WiFi / LAN",
-    ventaUF: 6,
+    // VENTA 4 UF (Lalo 23-sep, "si es más barato y es solo equipo lo dejaría en 4"):
+    // igual a la lista de ejecutivos del correo de Valeria 22-sep. Envío e
+    // instalación de la venta se cobran aparte, como siempre.
+    ventaUF: 4,
     arriendoUF: 0.35,
     descripcion:
       "Reloj control físico de marcaje en punto fijo, conexión WiFi o cable de red (LAN). Marca por reconocimiento facial, huella dactilar, tarjeta de proximidad o clave numérica, a elección de cada persona; capacidad para 8.000 usuarios (6.000 rostros). Funciona SOLO (autónomo), no necesita un computador; no incluye batería (opcional Mini UPS de 3 h). QR o lector de cédula van en el reloj con lector QR (kit_qr). Recomendado para puntos de trabajo con más de 10 personas o cuando los empleados no cuentan con smartphone propio.",

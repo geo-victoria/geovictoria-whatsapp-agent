@@ -147,7 +147,7 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
     assert.ok(conTecnico.some((p2) => p2.includes("sin zona")))
   })
 
-  test("SF2A en venta habilitado a 6 UF (Lalo 12-ago: la calculadora debe permitir venta de equipos)", () => {
+  test("reloj estándar (slot senseface_2a, hoy 4A) en venta a 4 UF (Lalo 12-ago venta habilitada; 23-sep precio 4)", () => {
     const pendientes = validarPropuesta({
       usuarios: 10,
       equipos: [{ id: "senseface_2a", modalidad: "venta", cantidad: 1 }],
@@ -161,8 +161,8 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
       equipos: [{ id: "senseface_2a", modalidad: "venta", cantidad: 1 }],
     })
     const sf = r.lineas.find((l) => l.id === "senseface_2a")
-    assert.strictEqual(sf?.subtotalUF, 6)
-    assert.strictEqual(r.totalPagoUnicoUF >= 6, true)
+    assert.strictEqual(sf?.subtotalUF, 4)
+    assert.strictEqual(r.totalPagoUnicoUF >= 4, true)
   })
 
   test("bundle IN01 y kit QR con precio propio", () => {
