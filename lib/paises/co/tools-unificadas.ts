@@ -180,11 +180,11 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y, SI hay correo, se lo envía al cliente. `contactoEmail` es OPCIONAL (Lalo 31-ago): con el NIT basta para emitir — sin correo la entrega corre por este mismo WhatsApp (tu mensaje con el link + el PDF que adjunta el sistema) y el correo se lo pide el formulario de facturación al aceptar. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala apenas el cliente entregue el NIT tras mostrar el precio (con o sin correo): esa entrega ES la confirmación implícita (política 24-jul) — no hagas preguntas de confirmación adicionales. NO la uses si el cliente está rechazando ni antes de que haya visto un precio. Si la cotización incluye hardware, requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un equipo biométrico). Normalmente NO necesitas pasar IDs de Zoho: el backend deduplica por NIT — si la empresa ya existe asocia la cotización a su cuenta, y si no la crea. En Colombia: NIT con dígito de verificación (ej. 900.123.456-7) en `rutEmpresa`, `empresa` = razón social (no hay padrón que la deduzca), PDF y link en COP con pago por tarjeta (Mercado Pago) o transferencia a Bancolombia. Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
+      "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y, SI hay correo, se lo envía al cliente. `contactoEmail` es OPCIONAL (Lalo 31-ago): con el NIT basta para emitir — sin correo la entrega corre por este mismo WhatsApp (tu mensaje con el link + el PDF que adjunta el sistema) y el correo se lo pide el formulario de facturación al aceptar. Devuelve dos enlaces: pdfUrl (el PDF descargable) y acceptanceUrl (la página web para aceptar). Úsala apenas el cliente entregue el NIT tras mostrar el precio (con o sin correo): esa entrega ES la confirmación implícita (política 24-jul) — no hagas preguntas de confirmación adicionales. NO la uses si el cliente está rechazando ni antes de que haya visto un precio. Si la cotización incluye hardware, requiere el array 'puntosInstalacion' (uno por punto físico donde se instalará un equipo biométrico). Normalmente NO necesitas pasar IDs de Zoho: el backend deduplica por NIT — si la empresa ya existe asocia la cotización a su cuenta, y si no la crea. En Colombia: NIT con dígito de verificación (ej. 900.123.456-7) en `rutEmpresa`, la RAZÓN SOCIAL sale sola del NIT (padrón RUES de Confecámaras) — pásala en `empresa` solo si el cliente la dijo, jamás la preguntes; PDF y link en COP con pago por tarjeta (Mercado Pago) o transferencia a Bancolombia. Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
-        empresa: { type: "string" as const, description: "Razón social." },
+        empresa: { type: "string" as const, description: "Razón social, SOLO si el cliente la mencionó; si no, se resuelve desde el NIT (padrón RUES de Confecámaras)." },
         contacto: { type: "string" as const, description: "Nombre completo de la persona de contacto." },
         contactoEmail: { type: "string" as const, description: "Correo del contacto (opcional: sin correo la entrega va por este chat)." },
         contactoTelefono: { type: "string" as const, description: "Se completa solo con el WhatsApp del cliente; no lo pidas." },
@@ -196,7 +196,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
         escalonDescuento: { type: "number" as const, enum: [0, 1, 2], description: "El MISMO escalón que el cliente aceptó en el estimado (si lo omites se usa el último ofrecido en esta conversación): la formal nace con ese % en el plan por 6 meses." },
       },
       // Mismo contrato que Chile (Lalo 03-ago / 21-sep): el correo es OPCIONAL.
-      required: ["empresa", "contacto", "rutEmpresa", "userCount"],
+      required: ["contacto", "rutEmpresa", "userCount"],
     },
   },
   SOPORTE_SCHEMA,

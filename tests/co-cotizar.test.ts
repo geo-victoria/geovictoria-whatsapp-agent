@@ -6,7 +6,7 @@
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { cotizarCO, TARIFAS_CO } from "../lib/paises/co/cotizar.ts"
+import { cotizarCO, TARIFAS_CO, precioPlanCO } from "../lib/paises/co/cotizar.ts"
 import { clasificarUbicacionCO } from "../lib/paises/co/geografia.ts"
 
 test("geografía CO: tres zonas; Bogotá y conurbados = base; Medellín/Cali = resto", () => {
@@ -33,7 +33,7 @@ test("alquiler en Bogotá: 86.000 + instalación técnica bonificada (línea a l
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
   assert.ok(inst && inst.descuentoPct === 100 && inst.subtotalCOP === 0 && inst.precioUnitarioCOP === TARIFAS_CO.instalacion.capital)
   // La bonificada no suma al pago inicial: solo la activación (un mes del plan).
-  assert.equal(r.pagoInicialNeto, 15 * 13700)
+  assert.equal(r.pagoInicialNeto, 15 * 6850)
   assert.ok(!r.itemsCotizador.some((i) => i.id === "envio_reloj"))
 })
 
@@ -59,8 +59,8 @@ test("venta en Ibagué (intermedia) con visita pedida: envío 69.000 + instalaci
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
   assert.ok(envio && envio.subtotalCOP === TARIFAS_CO.envioVenta.fuera)
   assert.ok(inst && inst.subtotalCOP === TARIFAS_CO.instalacion.intermedia && inst.descuentoPct === undefined)
-  // Pago inicial = activación (315.000) + equipo 620.000 (+IVA aparte) + envío 69.000 + instalación 530.000.
-  assert.equal(r.pagoInicialNeto, 315000 + 620000 + 69000 + 530000)
+  // Pago inicial = activación (157.500) + equipo 620.000 (+IVA aparte) + envío 69.000 + instalación 530.000.
+  assert.equal(r.pagoInicialNeto, 157500 + 620000 + 69000 + 530000)
   assert.ok(r.mensajeParaProspecto.includes("tiene un costo único de $530.000 (va en el pago inicial)"))
 })
 
@@ -83,7 +83,7 @@ test("venta en Bogotá sin visita: envío 42.000 y la visita se ofrece a 175.000
 test("solo app: sin 'pago inicial' (la Activación es el primer mes), sin aritmética de IVA", () => {
   const r = cotizarCO({ userCount: 15 })
   assert.ok(r.mensajeParaProspecto.includes("Resumen mensual recurrente:"))
-  assert.ok(r.mensajeParaProspecto.includes("Total mensual: $205.500"))
+  assert.ok(r.mensajeParaProspecto.includes("Total mensual: $102.750"))
   assert.ok(!/pago inicial/i.test(r.mensajeParaProspecto))
   assert.ok(!/\+ IVA =/.test(r.mensajeParaProspecto))
   assert.ok(!/Qué opción prefieres/.test(r.mensajeParaProspecto))
@@ -98,10 +98,10 @@ test("con equipo en alquiler: doble valor (equipo + app vs solo app) y cierre pr
   })
   const m = r.mensajeParaProspecto
   assert.ok(m.includes("1 - Para 15 personas te recomiendo Equipo biométrico en alquiler + App:"))
-  assert.ok(m.includes("💰 $287.290 al mes (incluye el IVA del equipo)."))
+  assert.ok(m.includes("💰 $194.815 al mes (incluye el IVA del equipo)."))
   assert.ok(m.includes("2.- Una alternativa más económica sería si marcan solo mediante nuestra app:"))
-  assert.ok(m.includes("💰 $184.950 al mes."))
-  assert.ok(m.includes("Incluye el 10% de descuento en el plan durante 6 meses (desde el mes 7, $307.840 al mes)."))
+  assert.ok(m.includes("💰 $92.475 al mes."))
+  assert.ok(m.includes("Incluye el 10% de descuento en el plan durante 6 meses (desde el mes 7, $205.090 al mes)."))
   assert.ok(m.trim().endsWith("Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato."))
   assert.ok(!/pago inicial/i.test(m))
   assert.ok(!/\+ IVA =/.test(m) && !/Pago inicial \(una sola vez\)/.test(m))
@@ -120,5 +120,19 @@ test("con equipo en compra: misma mensualidad en las dos opciones → encabezado
   assert.ok(m.includes("2.- Si prefieres partir sin desembolso inicial, marcando solo con nuestra app (misma mensualidad, sin el pago único):"))
   assert.ok(!/más económica/.test(m))
   // El retorno para el cotizador sigue trayendo la Activación dentro del pago inicial.
-  assert.equal(r.pagoInicialNeto, 315000 + 620000 + 69000 + 530000)
+  assert.equal(r.pagoInicialNeto, 157500 + 620000 + 69000 + 530000)
+})
+
+// ── SOFTWARE A LA MITAD (Colombia aprobó, Lalo 23-sep: "todos los tramos que vende Vicky") ──
+test("precios CO: 1-10 $157.500 fijo · 11-20 $6.850/persona; el 21-50 no es rango de Vicky y no cambió", () => {
+  assert.equal(precioPlanCO(1), 157500)
+  assert.equal(precioPlanCO(10), 157500)
+  assert.equal(precioPlanCO(11), 11 * 6850)
+  assert.equal(precioPlanCO(20), 20 * 6850)
+  assert.equal(precioPlanCO(21), 21 * 13700)
+  const r = cotizarCO({ userCount: 12 })
+  const plan = r.itemsCotizador.find((i) => i.id === "plan_asistencia")
+  assert.ok(plan && plan.precioUnitarioCOP === 6850 && plan.subtotalCOP === 12 * 6850)
+  assert.ok(r.mensajeParaProspecto.includes("Control de Asistencia (12 usuarios): $82.200/mes"))
+  assert.equal(r.mensualTotal, 12 * 6850)
 })

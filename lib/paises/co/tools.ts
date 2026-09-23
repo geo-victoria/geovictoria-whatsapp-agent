@@ -19,6 +19,7 @@ import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { agendaCoActiva, EVENTOS_AGENDA_CO } from "@/lib/paises/co/agenda"
 import { clasificarUbicacionCO } from "./geografia"
 import { nitValido, normalizarNit } from "./nit"
+import { fichaNitRues } from "./rues-nit"
 import { createZohoLead } from "../../zoho-leads"
 import {
   consultarAgenteSoporte,
@@ -209,7 +210,7 @@ export const TOOL_SCHEMAS_CO = [
     input_schema: {
       type: "object" as const,
       properties: {
-        empresa: { type: "string" as const, description: "Razón social de la empresa." },
+        empresa: { type: "string" as const, description: "Razón social, SOLO si el cliente la mencionó; si no, se resuelve desde el NIT (padrón RUES)." },
         contacto: { type: "string" as const, description: "Nombre completo de la persona." },
         nit: { type: "string" as const, description: "NIT con dígito de verificación (ej. 900.123.456-7)." },
         email: { type: "string" as const, description: "Correo del contacto." },
@@ -234,7 +235,7 @@ export const TOOL_SCHEMAS_CO = [
           },
         },
       },
-      required: ["empresa", "contacto", "nit", "userCount"],
+      required: ["contacto", "nit", "userCount"],
     },
   },
   {
@@ -451,11 +452,18 @@ export function buildDispatchCO(contact: string) {
           puntos,
           escalonDescuento: Number(i.escalonDescuento || 0),
         })
+        // RAZÓN SOCIAL = del padrón RUES cuando el cliente no la dio (23-sep,
+        // paridad con Chile/SII y Perú/SUNAT); último recurso, el contacto.
+        let empresaFinal = String(i.empresa || "").trim()
+        if (!empresaFinal) {
+          const ficha = await fichaNitRues(i.nit).catch(() => null)
+          empresaFinal = ficha?.razonSocial || String(i.contacto || "").trim()
+        }
         const res = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky-co`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-vicky-secret": SECRET_COTIZADORA_CO },
           body: JSON.stringify({
-            empresa: i.empresa,
+            empresa: empresaFinal,
             contacto: i.contacto,
             contactoEmail: i.email,
             nit: normalizarNit(i.nit),

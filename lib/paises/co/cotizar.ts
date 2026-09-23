@@ -116,7 +116,8 @@ export function formatearCOP(monto: number): string {
 }
 
 /** Precio mensual del plan de asistencia (COP, sin IVA). Lanza fuera de 1-50. */
-export function precioPlanCO(userCount: number): number {
+/** Tramo del plan de asistencia CO para una dotación (fuente única: el catálogo). */
+export function tierPlanCO(userCount: number): { modalidad: "fijo" | "por_usuario"; precioUF: number } {
   const asistencia = CATALOGO_MODULOS_CO.find((m) => m.id === "asistencia")
   if (!asistencia) throw new Error("Catálogo CO sin módulo asistencia")
   const tier = asistencia.tiers.find(
@@ -127,6 +128,11 @@ export function precioPlanCO(userCount: number): number {
       `El catálogo de Colombia cubre de 1 a 50 usuarios (pedidos: ${userCount}); Vicky cotiza solo hasta 20 (umbral, igual que Chile). Sobre eso, derivar a un ejecutivo.`,
     )
   }
+  return { modalidad: tier.modalidad as "fijo" | "por_usuario", precioUF: tier.precioUF }
+}
+
+export function precioPlanCO(userCount: number): number {
+  const tier = tierPlanCO(userCount)
   return tier.modalidad === "fijo" ? tier.precioUF : tier.precioUF * userCount
 }
 
@@ -152,6 +158,9 @@ export function cotizarCO(input: CotizacionCOInput): {
     throw new Error("userCount inválido")
   }
   const planLista = precioPlanCO(userCount)
+  // Precio por usuario del tramo (11-20): sale del catálogo, nunca literal
+  // (23-sep: el software bajó a la mitad y el literal 13.700 mentía).
+  const precioUsuario = tierPlanCO(userCount).precioUF
   const escalonDescuento = escalonDescuentoCO(input.escalonDescuento)
   const pctDescuento = pctDescuentoCO(escalonDescuento)
   const conDescuento = pctDescuento > 0
@@ -167,7 +176,7 @@ export function cotizarCO(input: CotizacionCOInput): {
     detalle:
       (userCount <= 10
         ? `Plan mensual para hasta 10 usuarios (tarifa fija)`
-        : `Plan mensual: ${userCount} usuarios × ${formatearCOP(13700)}`) +
+        : `Plan mensual: ${userCount} usuarios × ${formatearCOP(precioUsuario)}`) +
       (conDescuento ? ` — con ${Math.round(pctDescuento * 100)}% de descuento por ${mesesDcto} meses (lista ${formatearCOP(planLista)}/mes)` : ""),
     neto: plan,
     iva: 0,
@@ -431,7 +440,7 @@ export function cotizarCO(input: CotizacionCOInput): {
     cantidad: userCount <= 10 ? 1 : userCount,
     // A precio de LISTA: el descuento viaja como escalonDescuento y el
     // cotizador lo estampa (Descuento_Recurrente_Pct) — misma mecánica que CL/PE.
-    precioUnitarioCOP: userCount <= 10 ? planLista : 13700,
+    precioUnitarioCOP: userCount <= 10 ? planLista : precioUsuario,
     subtotalCOP: planLista,
     esRecurrente: true,
     afectoIva: false,
