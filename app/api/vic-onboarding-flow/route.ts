@@ -47,16 +47,18 @@ async function autorizado(req: Request): Promise<boolean> {
 
 // PERÚ (21-sep): el mismo endpoint sirve al flow peruano (mismos nombres de
 // campo; etiquetas RUC/DNI en el JSON del flow). El país sale del contacto.
-async function paisFlow(contact: string): Promise<"cl" | "pe"> {
+async function paisFlow(contact: string): Promise<"cl" | "pe" | "co"> {
   // Override del PROBADOR primero (21-sep): un teléfono del equipo marcado
   // como probador PE debe ver el formulario con RUC/DNI, no con RUT.
   try {
     const { paisProbador } = await import("@/lib/probador-pais")
     const override = await paisProbador(contact)
-    if (override) return override === "pe" ? "pe" : "cl"
+    if (override) return override === "pe" ? "pe" : override === "co" ? "co" : "cl"
   } catch {}
   const c = String(contact || "").replace(/\D/g, "")
-  return c.startsWith("51") && c.length === 11 ? "pe" : "cl"
+  if (c.startsWith("51") && c.length === 11) return "pe"
+  if (c.startsWith("57") && c.length >= 12) return "co"
+  return "cl"
 }
 
 async function cargar(contact: string): Promise<Borrador> {
@@ -180,13 +182,14 @@ export async function GET(req: Request): Promise<NextResponse> {
       etiqueta_documento_ayuda: ayudaDoc,
       etiqueta_admin_documento: etiquetaAdmin,
       etiqueta_admin_documento_ayuda:
-        b.pais === "pe" ? "8 dígitos. Ej: 12345678 (o carné de extranjería)" : b.pais === "cl" ? "Ej: 12.345.678-9" : "",
-      etiqueta_zona: b.pais === "pe" ? "Distrito" : "Comuna",
+        b.pais === "pe" ? "8 dígitos. Ej: 12345678 (o carné de extranjería)" : b.pais === "co" ? "Cédula de ciudadanía. Ej: 1234567890" : b.pais === "cl" ? "Ej: 12.345.678-9" : "",
+      etiqueta_zona: b.pais === "pe" ? "Distrito" : b.pais === "co" ? "Ciudad" : "Comuna",
       mostrar_telefono: !contact,
       es_persona_natural: natural,
       // PE: giro/dirección/comuna son chilenos (SII/boleta) — el flow peruano
       // los oculta con el mismo flag.
-      mostrar_campos_empresa: !natural && b.pais !== "pe",
+      // PE/CO: giro/dirección/comuna son chilenos (SII/boleta) — se ocultan.
+      mostrar_campos_empresa: !natural && b.pais !== "pe" && b.pais !== "co",
       razon_social: b.empresa.nombre || "",
       rut_empresa: b.empresa.identificador || "",
       giro: extras.giro,
@@ -373,12 +376,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   return NextResponse.json({ ok: true, valido: true, completo: borradorCompleto(actualizado), resumenEnviado: Boolean(mensaje) })
 }
 
-function mensajeError(campo: string, pais: "cl" | "pe" = "cl"): string {
+function mensajeError(campo: string, pais: "cl" | "pe" | "co" = "cl"): string {
   switch (campo) {
     case "empresa.identificador":
-      return pais === "pe" ? "RUC inválido — son 11 dígitos, revísalo" : "RUT inválido — revisa el dígito verificador"
+      return pais === "pe" ? "RUC inválido — son 11 dígitos, revísalo" : pais === "co" ? "NIT inválido — revísalo (ej: 900123456-7)" : "RUT inválido — revisa el dígito verificador"
     case "admin.identificador":
-      return pais === "pe" ? "DNI inválido — son 8 dígitos (o tu carné de extranjería)" : "RUT inválido — revisa el dígito verificador"
+      return pais === "pe" ? "DNI inválido — son 8 dígitos (o tu carné de extranjería)" : pais === "co" ? "Cédula inválida — revísala" : "RUT inválido — revisa el dígito verificador"
     case "admin.email":
       return "Correo inválido — revísalo"
     default:

@@ -40,7 +40,8 @@ export const PERFIL_TURNO_CO: PerfilTurno = {
   esFlujoCotizacion: esFlujoCotizacionCO,
   blindarSoporte: (reply) => blindarSoporteInventadoCO(reply),
   certificacionDT: false,
-  hitoPorChat: false,
+  // NIT en el chat → hito de intención (23-sep): la escalera NIT + >20 → deal.
+  hitoPorChat: true,
   contextoCotizacionExistente: (punteros) => {
     const p = punteros[0]
     if (!p?.quoteId) return ""

@@ -32,7 +32,7 @@ export const claveJobNdvImp = (contact: string) => `onb_ndvimp_${contact.replace
 export type JobNdvImp = {
   contact: string
   /** País del alta (21-sep): PE → el cotizador convierte las DOS notas (plan PEN + hardware USD). */
-  pais?: "cl" | "pe"
+  pais?: "cl" | "pe" | "co"
   quoteId?: string
   companyId: string
   empresa: string
@@ -112,7 +112,7 @@ export async function encolarNdvImp(
   }
   const job: JobNdvImp = {
     contact: c,
-    pais: c.startsWith("51") && c.length === 11 ? "pe" : "cl",
+    pais: c.startsWith("51") && c.length === 11 ? "pe" : c.startsWith("57") && c.length >= 12 ? "co" : "cl",
     quoteId: quoteId || undefined,
     companyId: datos.companyId,
     empresa: datos.empresa,

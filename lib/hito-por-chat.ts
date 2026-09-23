@@ -19,7 +19,7 @@ export async function hitoIntencionDesdeChat(contact: string): Promise<"disparad
   const clean = (contact || "").replace(/\D/g, "")
   // Chile (RUT) y Perú (RUC, 22-sep: misma escalera con su tómbola "Deals
   // 2026"). CO/MX quedan fuera hasta que tengan regla de deals en Zoho.
-  if (!clean.startsWith("56") && !clean.startsWith("51")) return "omitido"
+  if (!clean.startsWith("56") && !clean.startsWith("51") && !clean.startsWith("57")) return "omitido"
   const candado = `hito_chat_${clean}`
   try {
     if (await getKvValue(candado)) return "ya"
@@ -36,7 +36,7 @@ export async function hitoIntencionDesdeChat(contact: string): Promise<"disparad
       empleados: datos.empleados,
     })
     console.log(
-      `[hito-por-chat] ${clean}: hito intencion por ${clean.startsWith("51") ? "RUC" : "RUT"} en el chat (empleados=${datos.empleados ?? "?"}, empresa=${datos.empresa || "?"})`,
+      `[hito-por-chat] ${clean}: hito intencion por ${clean.startsWith("51") ? "RUC" : clean.startsWith("57") ? "NIT" : "RUT"} en el chat (empleados=${datos.empleados ?? "?"}, empresa=${datos.empresa || "?"})`,
     )
     return "disparado"
   } catch (e) {

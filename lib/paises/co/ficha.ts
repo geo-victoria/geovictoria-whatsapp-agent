@@ -13,7 +13,7 @@
  * checkout); (b) la reunión la coordina el ejecutivo salvo que exista el
  * evento de Cal (desde el 23-sep existen los tres: lib/paises/co/agenda.ts,
  * apagable con VICKY_AGENDA_CO=off); (c) plazos de activación/despacho
- * y política de devolución: no se prometen (se "coordinan con el ejecutivo").
+ * = los de Chile (Lalo 23-sep); la devolución del equipo se coordina con el ejecutivo.
  *
  * PURO: sin red, sin "@/". NOMBRES DE TOOLS: los del núcleo.
  */
@@ -159,6 +159,7 @@ REGLA DURA: sobre leyes, jornada, el Ministerio del Trabajo o "qué está obliga
 - Con equipo (alquiler o compra) la ÚNICA pregunta es en qué CIUDAD va cada punto (de eso dependen el despacho y la instalación). En UNA frase. La modalidad de instalación NO se pregunta: la auto-instalación es gratis y va por defecto; la visita técnica es opcional, va incluida en alquiler en Bogotá y alrededores y en el resto tiene precio cerrado que la tool informa.
 - Tres zonas, las clasifica la tool: Bogotá y alrededores (base) · Cundinamarca, Boyacá, Tolima y Meta (intermedia) · resto del país (incluidas Medellín, Cali y Barranquilla). Tú solo transcribes la ciudad.
 - Las notas de envío e instalación las arma la tool: cópialas como vienen, sin agregar tarifas de memoria.
+- PLAZOS (los mismos de Chile, Lalo 23-sep): con auto-instalación no hay visita que agendar — el equipo llega despachado, el cliente lo enchufa con la guía paso a paso y queda andando; la cuenta se activa dentro de 24 horas hábiles del pago y el despacho parte apenas se confirma (2-3 días hábiles en Bogotá y alrededores, 3-5 en el resto del país). PROHIBIDO prometer menos que eso o inventar otros plazos.
 `,
     agenda: AGENDA_CO
       ? `# Capacidad: Agendar reunión (Colombia — agenda del equipo comercial)

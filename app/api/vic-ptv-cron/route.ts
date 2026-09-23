@@ -1255,7 +1255,7 @@ async function asignarEnZoho(
     // calificado sin RUT → tómbola de leads TLMK; sin calificar → SDR. Sin
     // esto, un lead nacido "1." con 18 personas iba a SDR (caso Joyce) y un
     // "40 app" sin RUT también (caso Diego).
-    if (lead?.id && !lead.Converted_Deal?.id && (pais === "cl" || pais === "pe") && !segundaPasada) {
+    if (lead?.id && !lead.Converted_Deal?.id && (pais === "cl" || pais === "pe" || pais === "co") && !segundaPasada) {
       try {
         const { datosDelChat } = await import("@/lib/extraer-datos-chat")
         const chat = await datosDelChat(fono)
@@ -1821,14 +1821,17 @@ async function pePresentaHabilitado(): Promise<boolean> {
     return false
   }
 }
-const TM_FONO_REGEX: Record<string, RegExp> = { cl: /^56\d{8,10}$/, pe: /^51\d{8,10}$/ }
+const TM_FONO_REGEX: Record<string, RegExp> = { cl: /^56\d{8,10}$/, pe: /^51\d{8,10}$/, co: /^57\d{10}$/ }
 const TM_TEMPLATE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION || "vicky_traspaso_ejecutivo").trim()
 // PERÚ (15-sep): la presentación sale con la plantilla del bot Vicky Perú
 // (creada por API; una plantilla del bot Chile por la línea +51 arrastra el
 // chat al bot equivocado). Env VICKY_TM_TEMPLATE_PRESENTACION_PE la cambia.
 const TM_TEMPLATE_PE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_PE || "vicky_pe_traspaso_ejecutivo").trim()
+// COLOMBIA (23-sep, bots unificados): la plantilla chilena sin marcador de país
+// sale por la línea +57 (verificado con vicky_react_47_razones_v2 por la +51).
+const TM_TEMPLATE_CO = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_CO || TM_TEMPLATE).trim()
 function tmTemplatePara(pais: string): string {
-  return pais === "pe" ? TM_TEMPLATE_PE : TM_TEMPLATE
+  return pais === "pe" ? TM_TEMPLATE_PE : pais === "co" ? TM_TEMPLATE_CO : TM_TEMPLATE
 }
 const MAX_TM_POR_TICK = 10
 /** Teléfonos de los telemarketers ("email:+56...,email:+56..."). Fallback:
@@ -1842,7 +1845,7 @@ function telefonoTmPorEmail(email: string): string {
   return ""
 }
 
-type CandidatoTM = { contact: string; origen: "outbound" | "inbound"; pais: "cl" | "pe" }
+type CandidatoTM = { contact: string; origen: "outbound" | "inbound"; pais: "cl" | "pe" | "co" }
 
 /**
  * LA ENTREGA A TELEMARKETING QUE FALLA NO PUEDE REINTENTARSE PARA SIEMPRE
@@ -1902,7 +1905,7 @@ async function traspasarATelemarketing(
   origen: string,
   ahora: Date,
   feriados: Set<string>,
-  pais: "cl" | "pe" = "cl",
+  pais: "cl" | "pe" | "co" = "cl",
 ): Promise<{ ok: boolean; vendedor?: string; detalle?: string }> {
   // Candado primero (UNIQUE contact+activo evita dobles).
   const fila = await supa<{ id: string }>(`vic_ptv`, {
@@ -2693,7 +2696,9 @@ export async function GET(req: Request) {
     // ANTES de que Vicky PE venda).
     // PE autónoma (Lalo 11-ago): el reloj de calificación PE también queda
     // en pausa — sin presentaciones en Perú hasta nueva orden.
-    const paisesTm: Array<"cl" | "pe"> = (await pePresentaHabilitado()) ? ["cl", "pe"] : ["cl"]
+    // COLOMBIA (Lalo 23-sep, "3 y 4: bots unificados ok"): el reloj de
+    // calificación 24 h corre también en CO, entregando por las reglas de Zoho.
+    const paisesTm: Array<"cl" | "pe" | "co"> = (await pePresentaHabilitado()) ? ["cl", "pe", "co"] : ["cl", "co"]
     for (const paisTm of paisesTm) {
       const feriados = await feriadosDePais(paisTm)
       feriadosPorPais[paisTm] = feriados
@@ -3188,7 +3193,7 @@ async function reintentarPresentacionesPendientes(
       )
       enviado = await sendBotmakerMessage(clean, texto).catch(() => false)
       registro = texto
-    } else if ((pais === "cl" || pais === "pe") && telefono) {
+    } else if ((pais === "cl" || pais === "pe" || pais === "co") && telefono) {
       enviado = await sendBotmakerTemplate(clean, tmTemplatePara(pais), {
         nombre: "👋",
         ejecutivo_smb: nombre,

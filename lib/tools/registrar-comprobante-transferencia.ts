@@ -760,7 +760,7 @@ export async function registrarComprobanteTransferencia(
     // ventana de 24 h está abierta por definición.
     // PERÚ (21-sep): la misma segunda puerta que Chile — comprobante legible
     // ⇒ alta por chat, no el wizard web.
-    if ((pais === "cl" || pais === "pe") && (await onboardingActivoPara(contact))) {
+    if ((pais === "cl" || pais === "pe" || pais === "co") && (await onboardingActivoPara(contact))) {
       // SEGUNDA EMPRESA con el alta de la primera todavía abierta (08-sep):
       // no se re-siembra ni se manda otro formulario — queda pagada y en
       // cola (el post-pago del cotizador la encola con aviso interno).

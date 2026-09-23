@@ -39,6 +39,7 @@
  * borrar y recrear con el mismo.
  */
 
+import { normalizarNit } from "../paises/co/nit.ts"
 import { normalizarRut, rutValido } from "../rut.ts"
 
 export const PLANTILLA_ONBOARDING_CL = {
@@ -171,20 +172,24 @@ export const PLANTILLA_ALTA_QR_PE = {
   body: PLANTILLA_ALTA_FLOW_PE.body,
 } as const
 
-export type PaisAlta = "cl" | "pe"
+export type PaisAlta = "cl" | "pe" | "co"
 
-/** Plantillas FLOW / quick-reply del alta según el bot del país. */
+/** Plantillas FLOW / quick-reply del alta según el bot del país.
+ * COLOMBIA (23-sep, Lalo "bots unificados ok"): la QR es la CHILENA — su texto
+ * es neutro (sin RUT ni UF) y el tap dispara el MISMO bloque #altaflow con el
+ * flow v6 de etiquetas dinámicas (NIT/Cédula/Ciudad las manda el endpoint).
+ * Sin plantilla FLOW propia: si la QR falla cae al kickoff conversacional. */
 export function plantillasAltaPais(pais: PaisAlta): { flow: { name: string }; qr: { name: string } } {
-  return pais === "pe"
-    ? { flow: PLANTILLA_ALTA_FLOW_PE, qr: PLANTILLA_ALTA_QR_PE }
-    : { flow: PLANTILLA_ALTA_FLOW_CL, qr: PLANTILLA_ALTA_QR_CL }
+  if (pais === "pe") return { flow: PLANTILLA_ALTA_FLOW_PE, qr: PLANTILLA_ALTA_QR_PE }
+  if (pais === "co") return { flow: { name: "" }, qr: PLANTILLA_ALTA_QR_CL }
+  return { flow: PLANTILLA_ALTA_FLOW_CL, qr: PLANTILLA_ALTA_QR_CL }
 }
 
 /** Llaves vic_kv de los gates del alta por formulario, por país. */
 export function gatesAltaPais(pais: PaisAlta): { flow: string; qr: string } {
-  return pais === "pe"
-    ? { flow: "alta_flow_kickoff_pe", qr: "alta_qr_intent_pe" }
-    : { flow: "alta_flow_kickoff", qr: "alta_qr_intent" }
+  if (pais === "pe") return { flow: "alta_flow_kickoff_pe", qr: "alta_qr_intent_pe" }
+  if (pais === "co") return { flow: "alta_flow_kickoff_co", qr: "alta_qr_intent_co" }
+  return { flow: "alta_flow_kickoff", qr: "alta_qr_intent" }
 }
 
 /**
@@ -209,13 +214,37 @@ export const PLANTILLA_ONBOARDING_PE = {
     "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, DNI y correo.",
 } as const
 
+/**
+ * COLOMBIA (23-sep): el mismo arranque conversacional con NIT y cédula. Creada
+ * por API en el bot "Vicky Colombia"; mientras Meta la revisa el kickoff sale
+ * como texto en ventana (y fuera de ventana cae al aviso interno).
+ */
+export const PLANTILLA_ONBOARDING_CO = {
+  name: "vicky_co_alta_cuenta",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky Colombia",
+  body:
+    "Ya eres parte de GeoVictoria 🎉\n\n" +
+    "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n" +
+    "De tu cotización ya tengo estos datos de la empresa:\n" +
+    "Empresa: ${empresa}\n" +
+    "NIT: ${rut_empresa}\n\n" +
+    "Los usamos tal cual? Si hay que cambiar algo, me dices. " +
+    "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, cédula y correo.",
+} as const
+
 export type ParamsOnboarding = { empresa: string; rut_empresa: string }
 
 /** Params de la plantilla. Sin dato, genéricos que no dejan huecos raros. */
-export function paramsPlantillaOnboarding(empresa?: string, rut?: string, pais: "cl" | "pe" = "cl"): ParamsOnboarding {
+export function paramsPlantillaOnboarding(empresa?: string, rut?: string, pais: PaisAlta = "cl"): ParamsOnboarding {
+  const doc =
+    pais === "pe" ? String(rut || "").replace(/\D/g, "")
+    : pais === "co" ? (normalizarNit(String(rut || "")) || String(rut || "").trim())
+    : rutLegible(rut)
   return {
     empresa: (empresa || "").trim() || "tu empresa",
-    rut_empresa: (pais === "pe" ? String(rut || "").replace(/\D/g, "") : rutLegible(rut)) || "el de tu cotización",
+    rut_empresa: doc || "el de tu cotización",
   }
 }
 
@@ -237,8 +266,8 @@ export function rutLegible(rut?: string): string {
  * cuando la ventana está abierta. Renderiza desde `body`, así que el texto no
  * puede divergir del de la plantilla aprobada.
  */
-export function renderPlantillaOnboarding(params: ParamsOnboarding, pais: "cl" | "pe" = "cl"): string {
-  return (pais === "pe" ? PLANTILLA_ONBOARDING_PE : PLANTILLA_ONBOARDING_CL).body.replace(
+export function renderPlantillaOnboarding(params: ParamsOnboarding, pais: PaisAlta = "cl"): string {
+  return (pais === "pe" ? PLANTILLA_ONBOARDING_PE : pais === "co" ? PLANTILLA_ONBOARDING_CO : PLANTILLA_ONBOARDING_CL).body.replace(
     /\$\{(\w+)\}/g,
     (_, k: string) => (params as Record<string, string>)[k] ?? `\${${k}}`,
   )

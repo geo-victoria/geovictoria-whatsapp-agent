@@ -88,7 +88,16 @@ export function paisDePlantilla(nombre: string): PaisLinea | null {
  * otra línea Botmaker acepta el 202 y no entrega nada. Sin marcador de país
  * en el nombre no se puede afirmar nada: se deja pasar.
  */
+/**
+ * Plantillas con marcador de país cuyo TEXTO es neutro (sin RUT/UF/comuna) y
+ * que, con los bots de Botmaker UNIFICADOS (verificado 22-sep: una plantilla
+ * "Vicky Chile" salió de verdad por la línea +51), sirven a cualquier línea.
+ * Lalo 23-sep ("bots unificados ok"): Colombia las usa tal cual.
+ */
+export const PLANTILLAS_MULTILINEA = new Set<string>(["vicky_alta_qr_cl", "vicky_loop_pago_link_cl"])
+
 export function plantillaCoherenteConLinea(nombrePlantilla: string, canalONumero: string): boolean {
+  if (PLANTILLAS_MULTILINEA.has(String(nombrePlantilla || "").trim().toLowerCase())) return true
   const pTpl = paisDePlantilla(nombrePlantilla)
   if (!pTpl) return true
   const pLinea = paisDeLinea(canalONumero)

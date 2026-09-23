@@ -101,7 +101,8 @@ function tplCelda(
 const ACEPTADA_CELDA = tplCelda(
   "LOOP_TPL_ACEPTADA",
   "vicky_loop_pago_link_cl",
-  "vicky_loop_pago",
+  // CO (23-sep): la misma con link — bots unificados, texto neutro (PLANTILLAS_MULTILINEA).
+  "vicky_loop_pago_link_cl",
   "vicky_loop_pago",
   "vicky_pe_loop_pago_link",
 )

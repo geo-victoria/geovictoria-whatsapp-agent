@@ -23,10 +23,10 @@
  */
 
 import { rutValido, formatearRut } from "../rut.ts"
-import { dniValido } from "./borrador.ts"
+import { dniValido, cedulaValida } from "./borrador.ts"
 
 /** País de la configuración (21-sep): en PE el trabajador se identifica por DNI. */
-export type PaisConfig = "cl" | "pe"
+export type PaisConfig = "cl" | "pe" | "co"
 
 // ── Tipos (espejo de las formas del wizard) ─────────────────────────────────
 
@@ -188,6 +188,9 @@ export function pendientesTrabajador(t: TrabajadorCfg, indice: number, pais: Pai
   if (pais === "pe") {
     if (!rut) p(`a ${quien} le falta el DNI`)
     else if (!dniValido(rut)) p(`el DNI de ${quien} no parece válido (${rut}) — son 8 dígitos (o el carné de extranjería)`)
+  } else if (pais === "co") {
+    if (!rut) p(`a ${quien} le falta la cédula`)
+    else if (!cedulaValida(rut)) p(`la cédula de ${quien} no parece válida (${rut}) — son 6 a 10 dígitos`)
   } else if (!rut) p(`a ${quien} le falta el RUT`)
   else if (!rutValido(rut)) p(`el RUT de ${quien} no cuadra (${rut}) — revisa el dígito verificador`)
 

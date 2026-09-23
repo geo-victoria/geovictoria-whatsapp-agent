@@ -43,7 +43,17 @@ export const NOMBRE_IDENTIFICADOR: Record<PaisOnboarding, string> = {
  * alfanuméricos), no con RUC.
  */
 export function nombreIdentificadorAdmin(pais: PaisOnboarding): string {
-  return pais === "pe" ? "DNI" : NOMBRE_IDENTIFICADOR[pais]
+  if (pais === "pe") return "DNI"
+  // COLOMBIA (23-sep, alta por chat): la persona se identifica con su cédula de
+  // ciudadanía (6-10 dígitos) o de extranjería; el NIT es de la empresa.
+  if (pais === "co") return "Cédula"
+  return NOMBRE_IDENTIFICADOR[pais]
+}
+
+/** Cédula colombiana: 6-10 dígitos (ciudadanía) o cédula de extranjería (6-7 dígitos, a veces con letra). */
+export function cedulaValida(valor: string): boolean {
+  const v = String(valor || "").replace(/[\s.-]/g, "").toUpperCase()
+  return /^\d{6,10}$/.test(v) || /^[A-Z]?\d{6,7}$/.test(v)
 }
 
 /** DNI peruano (8 dígitos) o carné de extranjería (9-12 alfanuméricos). */
@@ -126,7 +136,9 @@ export function identificadorValido(valor: string, pais: PaisOnboarding): boolea
 
 /** true si el identificador PERSONAL del admin es válido para el país. */
 export function identificadorAdminValido(valor: string, pais: PaisOnboarding): boolean {
-  return pais === "pe" ? dniValido(valor) : identificadorValido(valor, pais)
+  if (pais === "pe") return dniValido(valor)
+  if (pais === "co") return cedulaValida(valor)
+  return identificadorValido(valor, pais)
 }
 
 /** Identificador en el formato canónico del país; "" si no es válido. */
@@ -140,8 +152,9 @@ export function normalizarIdentificador(valor: string, pais: PaisOnboarding): st
 
 /** Identificador personal del admin canónico; "" si no es válido. */
 export function normalizarIdentificadorAdmin(valor: string, pais: PaisOnboarding): string {
-  if (pais !== "pe") return normalizarIdentificador(valor, pais)
-  return dniValido(valor) ? String(valor || "").replace(/[\s.-]/g, "").toUpperCase() : ""
+  if (pais === "pe") return dniValido(valor) ? String(valor || "").replace(/[\s.-]/g, "").toUpperCase() : ""
+  if (pais === "co") return cedulaValida(valor) ? String(valor || "").replace(/[\s.-]/g, "").toUpperCase() : ""
+  return normalizarIdentificador(valor, pais)
 }
 
 const vacio = (v?: string) => !String(v || "").trim()

@@ -61,3 +61,25 @@ export function normalizarNit(nitRaw: string): string {
 export function nitValido(nitRaw: string): boolean {
   return cuerpoNit(nitRaw) !== ""
 }
+
+/**
+ * Primer NIT de EMPRESA escrito en un texto libre (homólogo de rutEnTexto /
+ * rucEnTexto): "900.123.456-7", "900123456-7", "NIT 800123456". Para no
+ * confundirlo con un celular (10 dígitos que empiezan en 3) se exige UNA de
+ * dos señales: dígito de verificación explícito con guion y correcto, o un
+ * cuerpo de 9 dígitos que empiece en 8 o 9 (los NIT de persona jurídica).
+ */
+export function nitEnTexto(texto: string): string | null {
+  const re = /(?<![\d.])(\d{3}[.\s]?\d{3}[.\s]?\d{3}|\d{8,10})(?:\s*-\s*(\d))?(?![\d.])/g
+  for (const m of String(texto || "").matchAll(re)) {
+    const cuerpo = m[1].replace(/\D/g, "")
+    const dv = m[2]
+    if (!/^\d{8,10}$/.test(cuerpo)) continue
+    if (dv !== undefined) {
+      if (digitoVerificacionNit(cuerpo) === Number(dv)) return `${cuerpo}-${dv}`
+      continue
+    }
+    if (/^[89]\d{8}$/.test(cuerpo)) return `${cuerpo}-${digitoVerificacionNit(cuerpo)}`
+  }
+  return null
+}

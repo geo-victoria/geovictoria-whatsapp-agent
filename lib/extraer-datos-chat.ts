@@ -80,6 +80,11 @@ export async function datosDelChat(contact: string, opts: { soloSiHayRut?: boole
       // sin canonizarlo como RUT chileno y la escalera RUC + >20 → deal.
       const { rucEnTexto } = await import("./rut")
       rut = rucEnTexto(soloCliente) || undefined
+    } else if (clean.startsWith("57")) {
+      // Colombia (23-sep): NIT de empresa con DV calculado (cuerpo-DV); viaja
+      // en `rut` como el RUC — crm-hitos lo deja tal cual en RUT_Empresa.
+      const { nitEnTexto } = await import("./paises/co/nit")
+      rut = nitEnTexto(soloCliente) || undefined
     }
     if (opts.soloSiHayRut && !rut) return vacio
     const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()

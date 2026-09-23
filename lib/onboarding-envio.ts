@@ -51,8 +51,10 @@ export async function entregarKickoffOnboarding(
   // ventana, la plantilla UTILITY `vicky_pe_alta_cuenta`.
   const { paisProbador } = await import("./probador-pais")
   const overridePais = await paisProbador(contact).catch(() => null)
-  const esPE = (overridePais ?? paisDeContacto(contact)) === "pe"
-  const paisAlta = esPE ? ("pe" as const) : ("cl" as const)
+  const paisEf = overridePais ?? paisDeContacto(contact)
+  const esPE = paisEf === "pe"
+  // COLOMBIA (23-sep): mismo híbrido; QR chilena (neutra) + kickoff conversacional con NIT.
+  const paisAlta: "cl" | "pe" | "co" = esPE ? "pe" : paisEf === "co" ? "co" : "cl"
   const gates = gatesAltaPais(paisAlta)
   const tplsBase = plantillasAltaPais(paisAlta)
   // NOMBRE DE LA PLANTILLA FLOW POR KV (21-sep, flow único): una plantilla no
@@ -111,12 +113,12 @@ export async function entregarKickoffOnboarding(
       if (okQr) return { via: "flow", texto: "" }
       console.warn(`[onboarding-envio] plantilla QR falló para ${contact}; se intenta la plantilla FLOW`)
     }
-    const okFlow = await sendBotmakerTemplate(contact, tplsAlta.flow.name, params, undefined, TRANSACCIONAL).catch(() => false)
+    const okFlow = tplsAlta.flow.name ? await sendBotmakerTemplate(contact, tplsAlta.flow.name, params, undefined, TRANSACCIONAL).catch(() => false) : false
     if (okFlow) return { via: "flow", texto: "" }
     console.warn(`[onboarding-envio] plantilla flow falló para ${contact}; kickoff clásico de respaldo`)
   }
-  const params = paramsPlantillaOnboarding(empresa, rut, esPE ? "pe" : "cl")
-  const texto = renderPlantillaOnboarding(params, esPE ? "pe" : "cl")
+  const params = paramsPlantillaOnboarding(empresa, rut, paisAlta)
+  const texto = renderPlantillaOnboarding(params, paisAlta)
 
   const ultimo = await getLastUserAt(contact).catch(() => null)
   const abierta = !!ultimo && Date.now() - ultimo.getTime() < 24 * 3600e3

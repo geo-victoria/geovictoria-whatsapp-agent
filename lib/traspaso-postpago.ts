@@ -403,8 +403,10 @@ export async function cerrarYTraspasarPostPago(
   // caía en esCL y el kickoff salía con las plantillas del bot chileno.
   const esPE = contact.startsWith("51") && contact.length === 11
   const esCL = !esCO && !esMX && !esPE
-  const altaPorChat = esCL || esPE
-  const paisChat: "cl" | "pe" = esPE ? "pe" : "cl"
+  // COLOMBIA (Lalo 23-sep, "la alta debe ser por chat para GV Avanzado"): entra
+  // al mismo bloque con NIT/cédula, IMP Colombia/COP y espejo Creator en COP.
+  const altaPorChat = esCL || esPE || esCO
+  const paisChat: "cl" | "pe" | "co" = esPE ? "pe" : esCO ? "co" : "cl"
   // Vicky onboarding — CHILE PRIMERO (decisión 26-jul): el pago es la ÚNICA
   // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
   // traspaso a ejecutivo humano hasta que la fase se abra para ellos.
