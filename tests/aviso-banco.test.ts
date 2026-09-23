@@ -191,7 +191,7 @@ test("adjuntosLegibles: un pantallazo PEGADO en el cuerpo (inline, grande) sí s
 /* ── Multi-país (23-sep): la ficha operativa manda, no Chile ─────────────── */
 
 import { normalizarDocumento } from "../lib/aviso-banco.ts"
-import { parsearMontoOperativo, destinoNuestroEn, fichaPorTelefono, sesionesEspejoOperativas, rosterTelemarketingOperativo } from "../lib/paises/ficha-operativa.ts"
+import { fichaOperativa, parsearMontoOperativo, destinoNuestroEn, fichaPorTelefono, sesionesEspejoOperativas, rosterTelemarketingOperativo } from "../lib/paises/ficha-operativa.ts"
 
 // Formato genérico de constancia BBVA Perú (no hay muestra real en la casilla
 // todavía: se calibra con el primer aviso real, la ficha lo declara pendiente).
@@ -270,7 +270,12 @@ test("ficha operativa: montos, documentos, destino y equipo por país", () => {
   assert.equal(fichaPorTelefono("56912345678").pais, "cl")
   assert.equal(fichaPorTelefono("573001234567").pais, "co")
   const sesiones = sesionesEspejoOperativas()
-  for (const s of ["emujica", "aaraque", "mmendozav", "afiori", "pquispef", "cvalverde"]) assert.ok(sesiones.includes(s), `falta sesión ${s}`)
+  for (const s of ["emujica", "aaraque", "mmendozav", "afiori", "pquispef"]) assert.ok(sesiones.includes(s), `falta sesión ${s}`)
+  // Las gestoras de la venta autónoma de PE y CO no llevan espejo (Lalo 23-sep: Cecilia; Gabriela igual).
+  for (const s of ["cvalverde", "glinares"]) assert.ok(!sesiones.includes(s), `${s} no lleva espejo`)
+  assert.equal(fichaOperativa("co").equipo.ventaAutonoma?.email, "glinares@geovictoria.com")
+  assert.equal(fichaOperativa("co").equipo.lider, "mcelyv@geovictoria.com")
+  assert.equal(fichaOperativa("co").equipo.liderSdr, "amorenom@geovictoria.com")
   assert.ok(rosterTelemarketingOperativo("pe").some((p) => p.email === "mmendozav@geovictoria.com"))
   assert.ok(!rosterTelemarketingOperativo("cl").some((p) => /aaraque|asepulveda/.test(p.email)), "las SDR no son telemarketing")
 })

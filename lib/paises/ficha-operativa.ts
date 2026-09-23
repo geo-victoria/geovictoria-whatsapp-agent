@@ -89,7 +89,10 @@ export type FichaOperativa = {
     telemarketing: PersonaEquipo[]
     sdr: PersonaEquipo[]
     ventaAutonoma?: PersonaEquipo
+    /** Líder comercial de los ejecutivos (alertas de espejos y traspasos). */
     lider?: string
+    /** Líder de las SDR cuando es una persona distinta (CO); vacío = el mismo `lider`. */
+    liderSdr?: string
   }
   /** Ventana local de los toques proactivos (hora de inicio y fin). */
   horarioToques: { desde: number; hasta: number }
@@ -241,14 +244,21 @@ const FICHA_CO: FichaOperativa = {
   equipo: {
     telemarketing: [persona("agordillo@geovictoria.com", "3525045000203758005", "Alejandro Gordillo", "+57 314 267 7765")],
     sdr: [persona("egalindo@geovictoria.com", "3525045000613817111", "Eddy Galindo")],
-    lider: "",
+    // Lalo 23-sep: gestora comercial (venta autónoma) Gabriela Linares; líder de
+    // los ejecutivos María Fernanda Cely Villamil; líder de las SDR Ana María
+    // Moreno. Ids y correos leídos de los usuarios activos de Zoho ese día
+    // (ninguna tiene teléfono en su ficha). Gabriela sin espejo, como Cecilia en
+    // PE, hasta que Lalo diga lo contrario.
+    ventaAutonoma: persona("glinares@geovictoria.com", "3525045000279036001", "Gabriela Linares", undefined, "-"),
+    lider: "mcelyv@geovictoria.com",
+    liderSdr: "amorenom@geovictoria.com",
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
   pendientes: [
-    "Gestor/a de la venta autónoma (quién se queda con la venta que cierra Vicky sola).",
-    "Líder comercial (recibe alertas de espejos y traspasos).",
     "Sesiones de espejo del equipo en el worker (agordillo, egalindo).",
+    "Teléfonos de Gabriela Linares, María Fernanda Cely y Ana María Moreno (sus fichas de Zoho no lo traen).",
+    "Cablear la venta autónoma CO a Gabriela en traspaso-postpago (hoy CO conserva al primer dueño, regla 05-ago) — exige VB de Lalo.",
   ],
 }
 
@@ -493,6 +503,7 @@ export function resumenFicha(f: FichaOperativa): Record<string, unknown> {
     sdr: f.equipo.sdr.map((p) => `${p.nombre} <${p.email}> espejo:${p.sesion}`),
     ventaAutonoma: f.equipo.ventaAutonoma ? `${f.equipo.ventaAutonoma.nombre} <${f.equipo.ventaAutonoma.email}>` : "(sin definir)",
     lider: f.equipo.lider || "(sin definir)",
+    liderSdr: f.equipo.liderSdr || f.equipo.lider || "(sin definir)",
     horarioToques: `${f.horarioToques.desde}:00–${f.horarioToques.hasta}:00 ${f.tz}`,
     correoComprobante: CORREO_COMPROBANTE,
     copiaAvisoComprobante: f.cobranzaCc || "(ninguna)",
