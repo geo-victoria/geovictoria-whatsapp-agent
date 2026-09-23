@@ -39,7 +39,7 @@ export const PERFIL_TURNO_PE: PerfilTurno = {
   // Perú agenda en Cal desde el 21-sep (evento de Mónica): el guion 21+ ofrece reunión.
   derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: true }),
   esFlujoCotizacion: esFlujoCotizacionPE,
-  blindarSoporte: (reply) => blindarSoporteInventadoPE(reply),
+  blindarSoporte: (reply, permitidos) => blindarSoporteInventadoPE(reply, permitidos),
   certificacionDT: false,
   hitoPorChat: true,
   // La cotización PE guarda soles en los campos del puntero: el contexto no habla de UF.

@@ -14,6 +14,7 @@ import { sendBotmakerMessage, sendBotmakerTemplate } from "./botmaker-push-v3"
 import {
   PLANTILLA_ONBOARDING_CL,
   PLANTILLA_ONBOARDING_PE,
+  PLANTILLA_ONBOARDING_CO,
   gatesAltaPais,
   paramsPlantillaAltaFlow,
   paramsPlantillaOnboarding,
@@ -130,7 +131,7 @@ export async function entregarKickoffOnboarding(
   }
   const ok = await sendBotmakerTemplate(
     contact,
-    (esPE ? PLANTILLA_ONBOARDING_PE : PLANTILLA_ONBOARDING_CL).name,
+    (paisAlta === "pe" ? PLANTILLA_ONBOARDING_PE : paisAlta === "co" ? PLANTILLA_ONBOARDING_CO : PLANTILLA_ONBOARDING_CL).name,
     params,
     undefined,
     TRANSACCIONAL,

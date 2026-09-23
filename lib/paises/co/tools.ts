@@ -99,7 +99,7 @@ function fechaLegibleCO(slotIso: string): string {
 const CORREOS_CO_FIJOS = new Set([
   "soporte.co", "vicky", "info", "agordillo", "egalindo", "glinares", "mcelyv", "amorenom", "mcorredor", "snavarrob", "dcrodriguez", "msanabriat", "jnarinoch",
 ])
-export async function blindarSoporteInventadoCO(texto: string): Promise<string> {
+export async function blindarSoporteInventadoCO(texto: string, permitidosExtra?: Set<string>): Promise<string> {
   if (!texto) return texto
   const { fichaOperativa } = await import("../ficha-operativa")
   const sop = fichaOperativa("co").soporte
@@ -110,6 +110,9 @@ export async function blindarSoporteInventadoCO(texto: string): Promise<string> 
     const { emailsEquipoZoho } = await import("../../emails-equipo")
     permitidos = await emailsEquipoZoho()
   } catch { /* lista fija */ }
+  // Correos que el orquestador declara legítimos (el del admin del borrador en
+  // fase onboarding): jamás se pisan — cicatriz PE 21-sep, resumen del alta.
+  for (const e of permitidosExtra || []) permitidos.add(String(e).toLowerCase())
   let salida = texto
     .replace(/\+?\s*56\s*[\s.\-]*2[\s.\-]*\d{4}[\s.\-]*\d{4}/g, tel)
     .replace(/\b600\s*914\s*3819\b/g, tel)

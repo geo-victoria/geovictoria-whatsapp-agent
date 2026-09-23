@@ -38,7 +38,7 @@ export const PERFIL_TURNO_CO: PerfilTurno = {
   tools: (contact) => ({ schemas: TOOL_SCHEMAS_CO_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchCOUnificado(contact) }),
   derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: agendaCoActiva() }),
   esFlujoCotizacion: esFlujoCotizacionCO,
-  blindarSoporte: (reply) => blindarSoporteInventadoCO(reply),
+  blindarSoporte: (reply, permitidos) => blindarSoporteInventadoCO(reply, permitidos),
   certificacionDT: false,
   // NIT en el chat → hito de intención (23-sep): la escalera NIT + >20 → deal.
   hitoPorChat: true,

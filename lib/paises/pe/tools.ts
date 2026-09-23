@@ -135,13 +135,15 @@ const registrarComprobantePESchema = {
 const CORREOS_PE_FIJOS = new Set([
   "soporteperu", "ssttperu", "mmendozav", "cvalverde", "afiori", "pquispef", "dbendezu", "vicky", "info",
 ])
-export async function blindarSoporteInventadoPE(texto: string): Promise<string> {
+export async function blindarSoporteInventadoPE(texto: string, permitidosExtra?: Set<string>): Promise<string> {
   if (!texto) return texto
   let permitidos = new Set<string>()
   try {
     const { emailsEquipoZoho } = await import("../../emails-equipo.ts")
     permitidos = await emailsEquipoZoho()
   } catch { /* lista fija */ }
+  // Correos legítimos declarados por el orquestador (admin del borrador): no se pisan.
+  for (const e of permitidosExtra || []) permitidos.add(String(e).toLowerCase())
   let salida = texto
     // Fijos y celulares chilenos presentados como soporte.
     .replace(/\+?\s*56\s*[\s.\-]*2[\s.\-]*\d{4}[\s.\-]*\d{4}/g, TELEFONO_SOPORTE_PE)
