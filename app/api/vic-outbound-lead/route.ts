@@ -651,6 +651,10 @@ export async function POST(req: Request): Promise<Response> {
       email: email || null,
       nombre,
       empresa,
+      // País de la LÍNEA por la que salió el toque 0 (23-sep): la columna
+      // defaulteaba a "cl" y los 4 primeros leads peruanos quedaron marcados
+      // como chilenos en la cadencia aunque conversación y loop iban en "pe".
+      country: country || "cl",
     }),
     cache: "no-store",
   }).catch(() => {})
