@@ -55,11 +55,21 @@ import {
   notificarPagadaAlCotizador,
 } from "@/lib/tools/registrar-comprobante-transferencia"
 import { parsearAvisoBanco, adjuntosLegibles, type AvisoBanco, type AdjuntoCorreo } from "@/lib/aviso-banco"
+import { fichaOperativa, formatearMontoOperativo, paisDeTelefonoOperativo, type CodigoPaisOperativo } from "@/lib/paises/ficha-operativa"
 
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-/** Tolerancia del cruce de monto contra el pago inicial esperado (CLP). */
-const TOLERANCIA_CLP = Number(process.env.VICKY_CORREO_PAGO_TOLERANCIA_CLP || 1500)
+/**
+ * Tolerancia del cruce de monto contra el pago inicial esperado, en la moneda
+ * del país de la cotización (ficha operativa: CL 1.500 · PE 2 · CO 1.000 ·
+ * MX 20). Override por país: env VICKY_CORREO_PAGO_TOLERANCIA_<CC>; el env
+ * chileno histórico VICKY_CORREO_PAGO_TOLERANCIA_CLP sigue valiendo para CL.
+ */
+function toleranciaMonto(pais: CodigoPaisOperativo): number {
+  const env = process.env[`VICKY_CORREO_PAGO_TOLERANCIA_${pais.toUpperCase()}`] || (pais === "cl" ? process.env.VICKY_CORREO_PAGO_TOLERANCIA_CLP : "")
+  const n = Number(env)
+  return Number.isFinite(n) && n > 0 ? n : fichaOperativa(pais).toleranciaMonto
+}
 /** Avisos más viejos que esto se registran en silencio (sin bienvenida ni alta). */
 const DIAS_FRESCO = Number(process.env.VICKY_CORREO_PAGO_DIAS_FRESCO || 7)
 
@@ -88,7 +98,7 @@ export type Veredicto =
 
 export type ResultadoCorreoPago = {
   veredicto: Veredicto
-  aviso?: Pick<AvisoBanco, "banco" | "ordenante" | "rutOrdenante" | "monto" | "fechaIso" | "nroOperacion" | "mensaje" | "numeroCotizacion">
+  aviso?: Pick<AvisoBanco, "banco" | "pais" | "moneda" | "ordenante" | "rutOrdenante" | "monto" | "fechaIso" | "nroOperacion" | "mensaje" | "numeroCotizacion">
   quoteId?: string
   numero?: string
   contact?: string
@@ -139,13 +149,22 @@ async function coql(select_query: string): Promise<CotRow[]> {
   return Array.isArray(j.data) ? j.data : []
 }
 
-function rutVariantes(rut: string): string[] {
-  const t = rut.toUpperCase().replace(/[^0-9K]/g, "")
+/**
+ * Formas con que un documento de empresa puede estar guardado en RUT_Cliente:
+ * RUT chileno (con/sin puntos, DV en mayúscula o minúscula), RUC peruano (11
+ * dígitos tal cual), NIT colombiano (con/sin DV, con/sin puntos).
+ */
+function rutVariantes(doc: string): string[] {
+  const t = doc.toUpperCase().replace(/[^0-9K]/g, "")
+  if (/^\d{11}$/.test(t)) return [t]
   if (t.length < 8) return []
   const cuerpo = t.slice(0, -1)
   const dv = t.slice(-1)
   const conPuntos = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
-  return Array.from(new Set([`${cuerpo}-${dv}`, `${conPuntos}-${dv}`, `${cuerpo}${dv}`, `${cuerpo}-${dv.toLowerCase()}`, `${conPuntos}-${dv.toLowerCase()}`]))
+  const out = [`${cuerpo}-${dv}`, `${conPuntos}-${dv}`, `${cuerpo}${dv}`, `${cuerpo}-${dv.toLowerCase()}`, `${conPuntos}-${dv.toLowerCase()}`]
+  // NIT sin DV (9-10 dígitos puros): también como está.
+  if (/^\d{9,10}$/.test(t)) out.push(t, t.replace(/\B(?=(\d{3})+(?!\d))/g, "."))
+  return Array.from(new Set(out))
 }
 
 function esc(s: string): string {
@@ -221,15 +240,13 @@ async function marcarPagadaSinAviso(quoteId: string): Promise<boolean> {
   return r.ok
 }
 
-function fmtClp(n: number): string {
-  return `$${Math.round(n).toLocaleString("es-CL")}`
-}
-
 function resumenAviso(a: AvisoBanco): string {
+  const pais = a.pais || "cl"
+  const etiquetaDoc = fichaOperativa(pais).documento.etiqueta
   return [
-    `Banco: ${a.banco}`,
-    `Ordenante: ${a.ordenante || "-"}${a.rutOrdenante ? ` (RUT ${a.rutOrdenante})` : ""}`,
-    `Monto: ${fmtClp(a.monto)}`,
+    `Banco: ${a.banco}${a.pais ? ` (${fichaOperativa(a.pais).nombre})` : ""}`,
+    `Ordenante: ${a.ordenante || "-"}${a.rutOrdenante ? ` (${etiquetaDoc} ${a.rutOrdenante})` : ""}`,
+    `Monto: ${formatearMontoOperativo(a.monto, pais)}`,
     `Fecha: ${a.fechaTexto || "-"}${a.hora ? ` ${a.hora}` : ""}`,
     `Nº operación: ${a.nroOperacion || "-"}`,
     `Mensaje: ${a.mensaje || "-"}`,
@@ -276,7 +293,7 @@ export async function procesarCorreoEntrante(
   const hash = hashCorreo(c, aviso)
   const kvKey = `correo_pago_${hash}`
   const resumen = {
-    banco: aviso.banco, ordenante: aviso.ordenante, rutOrdenante: aviso.rutOrdenante, monto: aviso.monto,
+    banco: aviso.banco, pais: aviso.pais, moneda: aviso.moneda, ordenante: aviso.ordenante, rutOrdenante: aviso.rutOrdenante, monto: aviso.monto,
     fechaIso: aviso.fechaIso, nroOperacion: aviso.nroOperacion, mensaje: aviso.mensaje, numeroCotizacion: aviso.numeroCotizacion,
   }
   if (!opts.forzar) {
@@ -316,14 +333,32 @@ export async function procesarCorreoEntrante(
   const contact = String(row.Tel_fono_Contacto || "").replace(/\D/g, "")
   const empresa = String(row.Cuenta_Asociada?.name || row.Name || "")
   const dealId = String(row.Deal_Asociado?.id || "")
+  // País de la COTIZACIÓN (por el teléfono del cliente; si no, el del aviso):
+  // manda en la moneda con que se escribe el monto y en la tolerancia.
+  const pais: CodigoPaisOperativo = paisDeTelefonoOperativo(contact) || aviso.pais || "cl"
+  const fmt = (n: number) => formatearMontoOperativo(n, pais)
+  // Un aviso de un país resuelto por documento/razón social a una cotización
+  // de OTRO país es un cruce falso (celulares de 9 dígitos colisionan entre CL
+  // y PE): solo el NÚMERO de cotización es explícito.
+  if (aviso.pais && aviso.pais !== pais && res.via !== "numero") {
+    const veredicto: Veredicto = "sin_cotizacion"
+    if (!opts.dry) {
+      await setKvValue(kvKey, JSON.stringify({ veredicto, at: new Date().toISOString(), hash, aviso: resumen, candidatos, detalle: `pais del aviso ${aviso.pais} ≠ pais de la cotización ${pais}` })).catch(() => {})
+      await avisarEquipoInterno(`💳 AVISO DE TRANSFERENCIA (${fichaOperativa(aviso.pais).nombre}) EN LA CASILLA DE VICKY cruzó por ${res.via} con ${numero} ${empresa}, que es de ${fichaOperativa(pais).nombre} — no se registró. Revisar a mano.\n${resumenAviso(aviso)}`).catch(() => false)
+    }
+    return { veredicto, aviso: resumen, hash, origen, adjuntosLeidos, candidatos, quoteId, numero, detalle: `pais del aviso ${aviso.pais} ≠ pais de la cotización ${pais} (vía ${res.via})` }
+  }
 
   if (/pagad/i.test(String(row.Estado_Cotizacion || ""))) {
     if (!opts.dry) await setKvValue(kvKey, JSON.stringify({ veredicto: "ya_pagada", at: new Date().toISOString(), quoteId, numero, aviso: resumen })).catch(() => {})
     return { veredicto: "ya_pagada", aviso: resumen, hash, origen, quoteId, numero, contact, empresa }
   }
 
+  // `pagoInicialEsperadoClp` devuelve el pago inicial en la MONEDA de la
+  // cotización (el cotizador decide por el token del país; el nombre es
+  // histórico de Chile).
   const esperadoClp = await pagoInicialEsperadoClp(quoteId).catch(() => 0)
-  const insuficiente = esperadoClp > 0 && aviso.monto + TOLERANCIA_CLP < esperadoClp
+  const insuficiente = esperadoClp > 0 && aviso.monto + toleranciaMonto(pais) < esperadoClp
 
   const fechaMs = Date.parse(aviso.fechaIso || c.receivedAt || "")
   const edadDias = Number.isFinite(fechaMs) ? (Date.now() - fechaMs) / 86400000 : 0
@@ -338,8 +373,8 @@ export async function procesarCorreoEntrante(
   const base: ResultadoCorreoPago = { veredicto: "dry", aviso: resumen, hash, origen, adjuntosLeidos, quoteId, numero, contact, empresa, esperadoClp, silencioso, correos, detalle: `vía ${res.via}${stage ? ` · deal ${stage}` : ""}${origen !== "cuerpo" ? ` · ${origen}` : ""}` }
 
   if (insuficiente) {
-    if (opts.dry) return { ...base, veredicto: "dry", detalle: `${base.detalle} · MONTO INSUFICIENTE (${fmtClp(aviso.monto)} < ${fmtClp(esperadoClp)})` }
-    const nota = `⚠️ ${origen === "cuerpo" ? "AVISO DEL BANCO" : `COMPROBANTE ADJUNTO (${origen.slice(8)}, leído por visión)`} (casilla vicky@) con MONTO INSUFICIENTE — no se marcó Pagada.\n${resumenAviso(aviso)}\nPago inicial esperado: ${fmtClp(esperadoClp)} · faltan ${fmtClp(esperadoClp - aviso.monto)}.`
+    if (opts.dry) return { ...base, veredicto: "dry", detalle: `${base.detalle} · MONTO INSUFICIENTE (${fmt(aviso.monto)} < ${fmt(esperadoClp)})` }
+    const nota = `⚠️ ${origen === "cuerpo" ? "AVISO DEL BANCO" : `COMPROBANTE ADJUNTO (${origen.slice(8)}, leído por visión)`} (casilla vicky@) con MONTO INSUFICIENTE — no se marcó Pagada.\n${resumenAviso(aviso)}\nPago inicial esperado: ${fmt(esperadoClp)} · faltan ${fmt(esperadoClp - aviso.monto)}.`
     await crearNotaEnCotizacion(quoteId, nota).catch(() => false)
     await avisarEquipoInterno(`💳 ${numero} ${empresa}: ${nota}`).catch(() => false)
     await setKvValue(kvKey, JSON.stringify({ veredicto: "monto_insuficiente", at: new Date().toISOString(), quoteId, numero, aviso: resumen, esperadoClp })).catch(() => {})
@@ -354,7 +389,7 @@ export async function procesarCorreoEntrante(
         ? `💳 PAGO REGISTRADO DESDE EL AVISO DEL BANCO (casilla vicky@, ${c.fuente})\n`
         : `💳 PAGO REGISTRADO DESDE UN COMPROBANTE ADJUNTO (${origen.slice(8)}, casilla vicky@, ${c.fuente}) — datos LEÍDOS POR VISIÓN, verificar contra el archivo adjunto\n`) +
       `${resumenAviso(aviso)}` +
-      (esperadoClp ? `\nPago inicial esperado: ${fmtClp(esperadoClp)} ✓` : "") +
+      (esperadoClp ? `\nPago inicial esperado: ${fmt(esperadoClp)} ✓` : "") +
       `\nCorreo: ${c.subject || "(sin asunto)"} · ${c.from} · ${c.receivedAt || ""}` +
       (silencioso ? `\nRegistro SILENCIOSO (${yaImplementado ? `deal ya en ${stage}` : `aviso de hace ${Math.round(edadDias)} días`}): sin bienvenida ni alta por chat.` : "") +
       (correos ? "" : "\nSin correo de PAGADA ni de cobranza (interruptor correo_pago_correos apagado).")
@@ -398,13 +433,13 @@ export async function procesarCorreoEntrante(
     if (correos) {
       await enviarCorreoCobranza({
         quoteId, numeroCotizacion: numero, empresa, rut: String(row.RUT_Cliente || ""), telefono: contact,
-        monto: fmtClp(aviso.monto), banco: aviso.banco, fecha: `${aviso.fechaTexto} ${aviso.hora}`.trim(),
+        monto: fmt(aviso.monto), banco: aviso.banco, fecha: `${aviso.fechaTexto} ${aviso.hora}`.trim(),
         detalle: `Aviso del banco recibido en vicky@ (${aviso.nroOperacion || "sin nº"}). Registrado automáticamente.`,
       }).catch(() => ({ ok: false }))
     }
     await setKvValue(kvKey, JSON.stringify({ veredicto: "registrado", at: new Date().toISOString(), quoteId, numero, contact, aviso: resumen, silencioso, correos, origen })).catch(() => {})
     await avisarEquipoInterno(
-      `💳 PAGO REGISTRADO desde la casilla de Vicky${origen === "cuerpo" ? "" : ` (comprobante adjunto ${origen.slice(8)}, leído por visión)`}: ${numero} ${empresa} · ${fmtClp(aviso.monto)} · ${aviso.banco} ${aviso.fechaTexto} ${aviso.hora}` +
+      `💳 PAGO REGISTRADO desde la casilla de Vicky${origen === "cuerpo" ? "" : ` (comprobante adjunto ${origen.slice(8)}, leído por visión)`}: ${numero} ${empresa} · ${fmt(aviso.monto)} · ${aviso.banco} ${aviso.fechaTexto} ${aviso.hora}` +
         (silencioso ? " · silencioso" : "") + (correos ? "" : " · sin correo de pago"),
     ).catch(() => false)
     console.log(`[correo-pago] registrado quote=${quoteId} ${numero} monto=${aviso.monto} silencioso=${silencioso} correos=${correos}`)

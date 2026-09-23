@@ -10,6 +10,7 @@
  *   - agendar_reunion (con ownerEmail = organizerEmail Cal.com → directo)
  */
 
+import { rosterSdrOperativo, rosterTelemarketingOperativo } from "@/lib/paises/ficha-operativa"
 import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe, psidDe, canalMetaDe } from "./origen-canal.ts"
 import { getZohoAccessToken } from "./zoho-token"
 
@@ -1013,7 +1014,7 @@ export async function reasignarLeadSdrInboundMX(
 // VIC_SDR_INBOUND_PE ("email:zohoUserId,…"), default = ellas dos.
 const SDR_INBOUND_PE = (
   process.env.VIC_SDR_INBOUND_PE ||
-  "afiori@geovictoria.com:3525045000299130001,pquispef@geovictoria.com:3525045000576828001"
+  rosterSdrOperativo("pe").map((p) => `${p.email}:${p.zohoId}`).join(",")
 )
   .split(",")
   .map((s) => {
@@ -1031,7 +1032,7 @@ const TM_SDR_INBOUND_PE = (process.env.VICKY_TM_SDR_INBOUND_PE_RULE_ID || TM_TOM
 // regla no asigna (o queda en el robot): Mónica directo, como hasta hoy.
 const TM_CALIFICACION_PE = (process.env.VICKY_TM_CALIFICACION_PE_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
 const TLMK_PE_FALLBACK = (
-  process.env.VICKY_PTV_VENDEDORES_PE || "mmendozav@geovictoria.com:3525045000323383015"
+  process.env.VICKY_PTV_VENDEDORES_PE || rosterTelemarketingOperativo("pe").map((p) => `${p.email}:${p.zohoId}`).join(",")
 )
   .split(",")
   .map((s) => {

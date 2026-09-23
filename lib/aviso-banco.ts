@@ -25,16 +25,32 @@
  * null cuando no es un aviso de transferencia ENTRANTE.
  */
 
+import {
+  bancosConocidos,
+  destinoNuestroEn,
+  fichaOperativa,
+  identificadoresNuestros,
+  paisPorSimboloMoneda,
+  parsearMontoOperativo,
+  type CodigoPaisOperativo,
+} from "./paises/ficha-operativa.ts"
+
 export type AvisoBanco = {
-  banco: "bancochile" | "bci" | "santander" | "bancoestado" | "scotiabank" | "itau" | "otro"
+  /** id del banco según la ficha operativa ("bancochile", "bci", "bbva", "bancolombia"…) u "otro". */
+  banco: string
+  /** País del aviso: por el banco, por nuestra cuenta de destino o por el símbolo de la moneda. "" si no se pudo saber. */
+  pais: CodigoPaisOperativo | ""
+  /** Código de la moneda del monto (CLP, PEN, COP, MXN) según el país; "" sin país. */
+  moneda: string
   remitente: string
   ordenante: string
+  /** Documento tributario del ordenante normalizado (RUT "76543210-K", RUC "20123456789", NIT "900123456-7"). Nombre histórico: nació con Chile. */
   rutOrdenante: string
   monto: number
   /** dd/mm/yyyy tal como venía. */
   fechaTexto: string
   hora: string
-  /** ISO con offset de Chile, o "" si la fecha no se pudo leer. */
+  /** ISO con el offset del país del aviso (Chile si no se sabe), o "" si la fecha no se pudo leer. */
   fechaIso: string
   nroOperacion: string
   mensaje: string
@@ -42,7 +58,7 @@ export type AvisoBanco = {
   numeroCotizacion: string
   correoContacto: string
   cuentaDestino: string
-  /** true cuando la cuenta de abono es la de Victoria S.A. (Banco de Chile 8001204108). */
+  /** true cuando la cuenta de abono es una de las NUESTRAS (cualquier país, lib/paises/ficha-operativa). */
   destinoNuestro: boolean
   /** Texto plano del correo (recortado) para la nota interna. */
   texto: string
@@ -50,17 +66,8 @@ export type AvisoBanco = {
   origen: OrigenAviso
 }
 
-const CUENTA_VICTORIA = "8001204108"
-const RUT_VICTORIA = "761885871"
-
-const DOMINIOS_BANCO: Array<[RegExp, AvisoBanco["banco"]]> = [
-  [/bancochile\.cl|bancodechile\.cl|bch\./i, "bancochile"],
-  [/\bbci\.cl/i, "bci"],
-  [/santander\.cl/i, "santander"],
-  [/bancoestado\.cl/i, "bancoestado"],
-  [/scotiabank\.cl/i, "scotiabank"],
-  [/itau\.cl/i, "itau"],
-]
+/** Nuestros identificadores tributarios (dígitos) en todos los países: un aviso los imprime como DESTINO. */
+const IDS_NUESTROS = identificadoresNuestros()
 
 const ENTIDADES: Record<string, string> = {
   nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'",
@@ -99,25 +106,59 @@ function soloDigitos(s: string): string {
   return String(s || "").replace(/\D/g, "")
 }
 
-function normalizarRut(s: string): string {
+/**
+ * Normaliza el documento tributario de una empresa según su forma: RUT
+ * chileno (7-8 dígitos + DV → "76543210-K"), RUC peruano (11 dígitos), NIT
+ * colombiano (9-10 dígitos, DV opcional → "900123456-7"). "" si no calza.
+ */
+export function normalizarDocumento(s: string, etiqueta = ""): string {
   const t = String(s || "").toUpperCase().replace(/[^0-9K]/g, "")
+  const e = etiqueta.toUpperCase()
+  if (e === "RUC" || (!e && /^\d{11}$/.test(t))) return /^\d{11}$/.test(t) ? t : ""
+  if (e === "NIT" || (!e && /^\d{9,10}$/.test(t) && !t.includes("K"))) {
+    if (/^\d{9,10}$/.test(t)) return t.length === 10 ? `${t.slice(0, 9)}-${t.slice(9)}` : t
+    if (/^\d{9,10}[0-9]$/.test(t)) return `${t.slice(0, -1)}-${t.slice(-1)}`
+    return ""
+  }
   if (t.length < 8 || t.length > 9) return ""
   return `${t.slice(0, -1)}-${t.slice(-1)}`
 }
 
-function bancoDeRemitente(remitente: string, texto: string, origen: OrigenAviso): AvisoBanco["banco"] | null {
-  for (const [re, b] of DOMINIOS_BANCO) if (re.test(remitente)) return b
+type BancoDetectado = { id: string; pais: CodigoPaisOperativo } | { id: "otro"; pais: "" } | null
+
+/**
+ * Banco del aviso: primero por el DOMINIO del remitente (cualquier país de la
+ * ficha operativa), después por cómo se nombra en el cuerpo. Los bancos
+ * chilenos conservan las guardas que nacieron de los formatos reales; para el
+ * resto basta el nombre. Devuelve el país del banco, que es la primera pista
+ * del país del aviso.
+ */
+function bancoDeRemitente(
+  remitente: string,
+  texto: string,
+  origen: OrigenAviso,
+  paisPista: CodigoPaisOperativo | null,
+  paisDestino: CodigoPaisOperativo | null,
+): BancoDetectado {
+  const todos = bancosConocidos()
+  for (const { pais, banco } of todos) if (remitente && banco.dominios.test(remitente)) return { id: banco.id, pais }
   // Sin remitente reconocible (p. ej. reenvío): se infiere del cuerpo.
-  if (/banco de chile|bancochile|Fonobank/i.test(texto) && (origen === "adjunto" || /ha instruido la siguiente transferencia/i.test(texto))) return "bancochile"
-  if (/\bBci\b|BancoBci|Banco de Credito e Inversiones/i.test(texto)) return "bci"
-  if (/santander/i.test(texto)) return "santander"
-  if (origen === "adjunto") {
-    // Comprobante transcrito por visión: el banco viene en la línea "Banco:".
-    if (/banco\s*estado/i.test(texto)) return "bancoestado"
-    if (/scotiabank/i.test(texto)) return "scotiabank"
-    if (/ita[uú]/i.test(texto)) return "itau"
-    if (/\bBanco\s*:\s*\S/i.test(texto)) return "otro"
+  if (/banco de chile|bancochile|Fonobank/i.test(texto) && (origen === "adjunto" || /ha instruido la siguiente transferencia/i.test(texto))) return { id: "bancochile", pais: "cl" }
+  if (/\bBci\b|BancoBci|Banco de Credito e Inversiones/i.test(texto)) return { id: "bci", pais: "cl" }
+  // Bancos con el mismo nombre en dos países (Santander, Scotiabank, BBVA): la
+  // pista del país (cuenta de destino o moneda) desempata; sin pista, Chile.
+  const porNombre = todos.filter(({ banco }) => !/^(bancochile|bci)$/.test(banco.id) && banco.nombres.test(texto))
+  if (porNombre.length) {
+    const pref = porNombre.find((b) => b.pais === (paisPista || "cl")) || porNombre[0]
+    // En el CUERPO de un correo solo se acepta por nombre lo que ya se aceptaba
+    // (Santander, formato real de la casilla) o lo que va a NUESTRA cuenta de
+    // ese país (un reenvío del cliente sin dominio del banco); el símbolo de
+    // la moneda solo desempata, no acredita — una constancia a un tercero
+    // reenviada por un cliente también dice "BBVA" y "S/". En un comprobante
+    // transcrito (línea "Banco:") vale cualquiera: ahí el destino se exige aparte.
+    if (origen === "adjunto" || pref.banco.id === "santander" || (paisDestino && pref.pais === paisDestino)) return { id: pref.banco.id, pais: pref.pais }
   }
+  if (origen === "adjunto" && /\bBanco\s*:\s*\S/i.test(texto)) return { id: "otro", pais: "" }
   return null
 }
 
@@ -132,22 +173,23 @@ function capturar(texto: string, res: RegExp[]): string {
   return ""
 }
 
-/** Offset de Chile para un instante dado, probando -03/-04 contra Intl. */
-export function isoChile(fechaTexto: string, hora: string): string {
-  const m = fechaTexto.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+/** Fecha local de un país → ISO, probando sus offsets posibles contra Intl. */
+export function isoPais(fechaTexto: string, hora: string, pais: string | null | undefined): string {
+  const ficha = fichaOperativa(pais)
+  const m = fechaTexto.match(/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/)
   if (!m) return ""
   const [, dd, mm, yyyy] = m
   const hh = (hora.match(/^(\d{1,2}):(\d{2})/) || [])
   const H = hh[1] ? hh[1].padStart(2, "0") : "12"
   const M = hh[2] || "00"
   const local = `${yyyy}-${mm}-${dd}T${H}:${M}:00`
-  for (const off of ["-03:00", "-04:00"]) {
+  for (const off of ficha.offsets) {
     const iso = `${local}${off}`
     const d = new Date(iso)
     if (Number.isNaN(d.getTime())) continue
     try {
       const f = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "America/Santiago",
+        timeZone: ficha.tz,
         hour12: false,
         year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
       }).formatToParts(d)
@@ -158,7 +200,12 @@ export function isoChile(fechaTexto: string, hora: string): string {
       return d.toISOString()
     }
   }
-  return new Date(`${local}-03:00`).toISOString()
+  return new Date(`${local}${ficha.offsets[0]}`).toISOString()
+}
+
+/** Compatibilidad: la firma chilena original. */
+export function isoChile(fechaTexto: string, hora: string): string {
+  return isoPais(fechaTexto, hora, "cl")
 }
 
 export function numeroCotizacionEn(texto: string): string {
@@ -182,17 +229,34 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   const texto = input.html ? htmlATexto(input.html) : String(input.text || "").replace(/\r/g, "")
   if (!texto) return null
   if (origen === "adjunto" && /NO_ES_COMPROBANTE/.test(texto)) return null
-  const banco = bancoDeRemitente(remitente, texto, origen)
-  const habla = /transferencia|comprobante de pago/i.test(`${asunto}\n${texto}`)
+  const habla = /transferencia|comprobante de pago|constancia de (?:operaci[oó]n|transferencia)/i.test(`${asunto}\n${texto}`)
   if (!habla) return null
   // Saliente (nosotros transfiriendo) o rechazo: no es un abono.
   if (/has realizado una transferencia|realizaste una transferencia|transferencia (?:fue )?rechazada|no pudo ser realizada/i.test(texto)) return null
 
-  const montoTxt = capturar(texto, [
-    /Monto\s+(?:transferido|Operaci[oó]n|abonado)\s*:?\s*\|?\s*\$?\s*([\d][\d.,]*)/i,
-    /Monto\s*:?\s*\|?\s*\$\s*([\d][\d.,]*)/i,
+  const cuentaDestino = capturar(texto, [
+    /Cuenta de abono\s*:?\s*\|?\s*([\d-]{6,})/i,
+    /N[º°o]?\.?\s*de cuenta\s*:?\s*\|?\s*([\d-]{6,})/i,
+    /Cuenta destino\s*:?\s*\|?\s*([\d-]{6,})/i,
+    /Cuenta de destino\s*:?\s*\|?\s*([\d-]{6,})/i,
+    /CCI\s*(?:destino)?\s*:?\s*\|?\s*([\d-]{6,})/i,
   ])
-  const monto = Number(soloDigitos(montoTxt)) || 0
+  // ¿A quién va? Nuestra cuenta (de cualquier país) o nuestro nombre.
+  const paisDestino = destinoNuestroEn(texto, cuentaDestino)
+  const destinoNuestro = paisDestino !== null
+
+  // El monto se captura CON su símbolo: "S/ 118.00" ya dice que es Perú.
+  const montoTxt = capturar(texto, [
+    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de la transferencia)\s*:?\s*\|?\s*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*[\d][\d.,]*)/i,
+    /(?:Monto|Importe)\s*:?\s*\|?\s*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)\s*[\d][\d.,]*)/i,
+  ])
+  const paisMoneda = paisPorSimboloMoneda(montoTxt)
+
+  const banco = bancoDeRemitente(remitente, texto, origen, paisDestino || paisMoneda, paisDestino)
+  // País del aviso: banco → cuenta de destino → símbolo de la moneda. Un banco
+  // "otro" no trae país.
+  const pais: CodigoPaisOperativo | "" = (banco && banco.pais) || paisDestino || paisMoneda || (destinoNuestro ? "cl" : "")
+  const monto = parsearMontoOperativo(montoTxt, pais || "cl")
   if (monto <= 0) return null
 
   const ordenante = capturar(texto, [
@@ -203,46 +267,41 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
     /Te informamos que\s+(.+?)\s+ha instruido/i,
     /transferencia de fondos de\s+(.+?)\s+hacia tu cuenta/i,
     /Ordenante\s*:?\s*\|?\s*([^\n|]+)/i,
+    /Nombre del ordenante\s*:?\s*\|?\s*([^\n|]+)/i,
+    /Titular\s*(?:de )?origen\s*:?\s*\|?\s*([^\n|]+)/i,
   ]).replace(/\s+/g, " ").trim()
 
-  const cuentaDestino = capturar(texto, [
-    /Cuenta de abono\s*:?\s*\|?\s*([\d-]{6,})/i,
-    /N[º°o]?\.?\s*de cuenta\s*:?\s*\|?\s*([\d-]{6,})/i,
-    /Cuenta destino\s*:?\s*\|?\s*([\d-]{6,})/i,
-  ])
-  const destinoNuestro =
-    soloDigitos(cuentaDestino).replace(/^0+/, "") === CUENTA_VICTORIA ||
-    soloDigitos(texto).includes(CUENTA_VICTORIA) ||
-    /victoria s\.?\s*a\b|geo\s?victoria/i.test(texto)
-
-  // RUT del ordenante: el primero que NO sea el nuestro (Santander imprime el
-  // RUT de DESTINO, Victoria SA).
+  // Documento del ordenante: el primero que NO sea el nuestro (Santander
+  // imprime el RUT de DESTINO, Victoria SA; un aviso peruano trae nuestro RUC).
   let rutOrdenante = ""
-  for (const m of texto.matchAll(/RUT\s*:?\s*\|?\s*([\d][\d.]{5,10}\s*-?\s*[\dkK])\b/gi)) {
-    const r = normalizarRut(m[1])
-    if (r && soloDigitos(r) !== RUT_VICTORIA) { rutOrdenante = r; break }
+  for (const m of texto.matchAll(/\b(RUT|RUC|NIT|RFC)\s*:?\s*\|?\s*([\dA-Z][\d.\-A-Z]{6,14}?)(?=\s|\||$)/gi)) {
+    const r = normalizarDocumento(m[2], m[1])
+    if (r && !IDS_NUESTROS.has(soloDigitos(r))) { rutOrdenante = r; break }
   }
 
-  const fechaHora = texto.match(/Fecha\s+y\s+hora\s*:?\s*\|?\s*(\d{2}\/\d{2}\/\d{4})\s+(\d{1,2}:\d{2})/i)
-  const fechaTexto = fechaHora
+  const fechaHora = texto.match(/Fecha\s+y\s+hora\s*:?\s*\|?\s*(\d{2}[\/-]\d{2}[\/-]\d{4})\s+(\d{1,2}:\d{2})/i)
+  const fechaTexto = (fechaHora
     ? fechaHora[1]
     : capturar(texto, [
-        /Fecha(?:\s+abono)?\s*:?\s*\|?\s*(\d{2}\/\d{2}\/\d{4})/i,
-        /con fecha\s+(\d{2}\/\d{2}\/\d{4})/i,
-        /(\d{2}\/\d{2}\/\d{4})/,
-      ])
-  const hora = fechaHora ? fechaHora[2] : capturar(texto, [/\bHora\s*:?\s*\|?\s*(\d{1,2}:\d{2})/i])
+        /Fecha(?:\s+(?:abono|de operaci[oó]n|y hora de operaci[oó]n))?\s*:?\s*\|?\s*(\d{2}[\/-]\d{2}[\/-]\d{4})/i,
+        /con fecha\s+(\d{2}[\/-]\d{2}[\/-]\d{4})/i,
+        /(\d{2}[\/-]\d{2}[\/-]\d{4})/,
+      ])).replace(/-/g, "/")
+  const hora = fechaHora ? fechaHora[2] : capturar(texto, [/\bHora\s*(?:de operaci[oó]n)?\s*:?\s*\|?\s*(\d{1,2}:\d{2})/i, /\d{2}\/\d{2}\/\d{4}\s+(\d{1,2}:\d{2})/])
   const nroOperacion = capturar(texto, [
     /N[º°o]?\.?\s*de\s+comprobante\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
     /N[uú]mero de (?:la )?operaci[oó]n\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
     /ID de la operaci[oó]n\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
     /N[º°o]?\.?\s*(?:de\s+)?operaci[oó]n\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
+    /(?:Referencia|Clave de rastreo|Folio)\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
   ])
   const mensaje = capturar(texto, [
     /Comentario para el destinatario\s*:?\s*\|?\s*([^\n|]+)/i,
     /\bMensaje\s*:?\s*\|?\s*([^\n|]+)/i,
     /\bComentario\s*:?\s*\|?\s*([^\n|]+)/i,
     /\bGlosa\s*:?\s*\|?\s*([^\n|]+)/i,
+    /\bConcepto\s*:?\s*\|?\s*([^\n|]+)/i,
+    /\bDescripci[oó]n\s*:?\s*\|?\s*([^\n|]+)/i,
   ])
   const correoContacto = capturar(texto, [/Correo electr[oó]nico de contacto\s*:?\s*\|?\s*([^\s|]+@[^\s|]+)/i])
   const numeroCotizacion = numeroCotizacionEn(`${mensaje}\n${asunto}`)
@@ -255,14 +314,16 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   if (origen === "adjunto" && !destinoNuestro) return null
 
   return {
-    banco: banco || "otro",
+    banco: banco ? banco.id : "otro",
+    pais,
+    moneda: pais ? fichaOperativa(pais).moneda.codigo : "",
     remitente: origen === "adjunto" ? String(input.from || "").trim().toLowerCase() : remitente,
     ordenante,
     rutOrdenante,
     monto,
     fechaTexto,
     hora,
-    fechaIso: fechaTexto ? isoChile(fechaTexto, hora) : "",
+    fechaIso: fechaTexto ? isoPais(fechaTexto, hora, pais || "cl") : "",
     nroOperacion,
     mensaje,
     numeroCotizacion,

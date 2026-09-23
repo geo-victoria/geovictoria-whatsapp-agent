@@ -32,6 +32,7 @@
  *      quedó confirmado — se confirma la recepción, no el dinero.
  */
 
+import { fichaOperativa } from "@/lib/paises/ficha-operativa"
 import { getKvValue, getQuotePointers, setKvValue, type QuotePointer } from "@/lib/supabase-persistence-v3"
 import { transicionarDealHacia } from "@/lib/zoho-deals"
 import { claveFase, claveBorrador, claveQuoteOnboarding } from "@/lib/onboarding/fase"
@@ -144,10 +145,11 @@ const EJECUTIVA_MX = {
 // PERÚ (15-sep, transferencia BBVA habilitada): quien acompaña la venta que
 // cierra por transferencia es la gestora de la venta autónoma (roles Lalo/Diego
 // Bendezú 15-sep), Cecilia Valverde. Override por env sin deploy.
+// Default desde la ficha operativa de Perú (lib/paises/ficha-operativa).
 const GESTORA_PE = {
-  nombre: (process.env.VICKY_PE_GESTORA_NOMBRE || "Cecilia Valverde").trim(),
-  whatsapp: (process.env.VICKY_PE_GESTORA_WHATSAPP || "+51 982 446 284").trim(),
-  email: (process.env.VICKY_PE_GESTORA_EMAIL || "cvalverde@geovictoria.com").trim(),
+  nombre: (process.env.VICKY_PE_GESTORA_NOMBRE || fichaOperativa("pe").equipo.ventaAutonoma?.nombre || "Cecilia Valverde").trim(),
+  whatsapp: (process.env.VICKY_PE_GESTORA_WHATSAPP || fichaOperativa("pe").equipo.ventaAutonoma?.telefono || "+51 982 446 284").trim(),
+  email: (process.env.VICKY_PE_GESTORA_EMAIL || fichaOperativa("pe").equipo.ventaAutonoma?.email || "cvalverde@geovictoria.com").trim(),
 }
 
 export async function obtenerLinkOnboarding(quoteId: string): Promise<string> {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { personaPorEmail, sesionesEspejoOperativas } from "@/lib/paises/ficha-operativa"
 import { getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
@@ -57,7 +58,11 @@ const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
  *  deberían existir y no existen (env VICKY_ESPEJO_SESIONES_EXTRA, default las
  *  dos SDR). OJO: espejo_link_ NO sirve de filtro — el panel admin genera token
  *  para los ~70 comerciales de todos los países. */
-const SESIONES_EXTRA = (process.env.VICKY_ESPEJO_SESIONES_EXTRA || "aaraque,asepulveda").split(",").map((s) => s.trim()).filter(Boolean)
+// Default = TODO el equipo comercial declarado en la ficha operativa de cada
+// país (telemarketing + SDR + venta autónoma): una persona nueva o un país
+// nuevo entra a la alarma por su ficha, sin tocar este archivo. Mientras su
+// sesión no exista en el worker, la alarma lo declara todos los días.
+const SESIONES_EXTRA = (process.env.VICKY_ESPEJO_SESIONES_EXTRA || sesionesEspejoOperativas().join(",")).split(",").map((s) => s.trim()).filter(Boolean)
 async function sesionesConLink(): Promise<Set<string>> {
   const out = new Set<string>(SESIONES_EXTRA)
   if (!SUPABASE_URL || !SUPABASE_KEY) return out
@@ -81,7 +86,7 @@ async function autorizado(req: Request): Promise<boolean> {
   return Boolean(kvSecret && dado === kvSecret)
 }
 
-type Usuario = { nombre: string; email: string; sesion: string }
+type Usuario = { nombre: string; email: string; sesion: string; pais?: string }
 
 async function rosterEspejos(token: string): Promise<Usuario[]> {
   const out: Usuario[] = []
@@ -100,7 +105,7 @@ async function rosterEspejos(token: string): Promise<Usuario[]> {
       if (!email) continue
       const sesion = email.split("@")[0]
       if (!PERFILES.has(String(u.profile?.name || "")) && !SESIONES_EXTRA.includes(sesion)) continue
-      out.push({ nombre: String(u.full_name || email), email, sesion })
+      out.push({ nombre: String(u.full_name || email), email, sesion, pais: personaPorEmail(email)?.pais })
     }
     if (!cuerpo?.info?.more_records) break
   }
@@ -228,7 +233,7 @@ export async function GET(req: Request) {
       if (marca.slice(0, 10) !== hoy) {
         fila.accion = "aviso_interno_sin_sesion"
         if (!dry) {
-          await avisarEquipoInterno(`🪞 ${u.nombre} (${u.sesion}) no tiene sesión de espejo en el worker. Hay que crearla en Railway (WA_SESSION_IDS) y mandarle su link del QR.`).catch(() => false)
+          await avisarEquipoInterno(`🪞 ${u.nombre} (${u.sesion}${u.pais ? `, ${u.pais.toUpperCase()}` : ""}) no tiene sesión de espejo en el worker. Hay que crearla en Railway (WA_SESSION_IDS += "${u.sesion}") y mandarle su link del QR. Sin espejo su gestión no cuenta (candado v3, panel de traspasos, ventas asistidas).`).catch(() => false)
           await setKvValue(`espejo_alerta_sinsesion_${u.sesion}`, new Date(ahora).toISOString()).catch(() => {})
         }
       } else fila.accion = "sin_sesion_ya_avisado_hoy"

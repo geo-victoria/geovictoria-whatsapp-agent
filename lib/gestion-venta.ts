@@ -29,21 +29,21 @@
  * retroactivo de owner hay que resolver ese borde con Lalo.
  */
 
+// Import relativo con extensión: este módulo es PURO y lo cargan los tests con node --test.
+import { rosterComoEnv, rosterTelemarketingOperativo } from "./paises/ficha-operativa.ts"
+
 /** Roster de TELEMARKETING: los únicos cuya actividad hace ASISTIDA una
  * venta. Formato "email:zohoId:Nombre,..." (ids verificados en Zoho el
  * 10-sep); override sin deploy con env `VICKY_TLMK_ACTIVIDAD`. La sesión de
  * espejo es la parte local del correo (emujica, alopez, …). */
-const ROSTER_TLMK_DEFAULT = [
-  "emujica@geovictoria.com:3525045000000211283:Eddyluz Mujica",
-  "adiazg@geovictoria.com:3525045000426432190:Anderson Díaz",
-  "tmartinezq@geovictoria.com:3525045000223766001:Tamara Martínez",
-  "alopez@geovictoria.com:3525045000126464001:Ana Paula López",
-  "pdiaz@geovictoria.com:3525045000000211651:Paola Díaz",
-  "dgalvez@geovictoria.com:3525045000124240013:Daniela Gálvez",
-  "gmelendez@geovictoria.com:3525045000146108001:Grey Meléndez",
-].join(",")
+// FUENTE ÚNICA desde el 23-sep: la ficha operativa por país
+// (lib/paises/ficha-operativa) — Chile (7) + Perú (Mónica) + Colombia
+// (Gordillo) + México (Yahel). Un país nuevo entra por su ficha, no acá.
+const ROSTER_TLMK_DEFAULT = rosterComoEnv(rosterTelemarketingOperativo())
 
 export type EjecutivoTlmk = { email: string; id: string; nombre: string; sesion: string }
+
+
 
 export function rosterTelemarketing(): EjecutivoTlmk[] {
   return (process.env.VICKY_TLMK_ACTIVIDAD || ROSTER_TLMK_DEFAULT)

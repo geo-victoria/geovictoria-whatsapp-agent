@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { fichaOperativa, fichaPorTelefono } from "@/lib/paises/ficha-operativa"
 import { getFollowupCronSecret, getKvValue, setKvValue, getLastUserAt, appendAssistantV3 } from "@/lib/supabase-persistence-v3"
 import { claveAltaSolicitada, claveCapacitacion, claveConfiguracion, claveBorrador } from "@/lib/onboarding/fase"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
@@ -56,10 +57,12 @@ async function autorizado(req: Request): Promise<boolean> {
   return false
 }
 
-/** Hora local de Chile (0-23) y día de la semana (0 dom … 6 sáb) de una fecha. */
-function enChile(d: Date): { hora: number; dia: number; fecha: string } {
+/** Hora local (0-23), día de la semana (0 dom … 6 sáb) y fecha de una fecha
+ *  en la ZONA DEL PAÍS (ficha operativa; default Chile). El nombre es
+ *  histórico: desde el 23-sep recibe la zona y sirve para los cuatro países. */
+function enChile(d: Date, tz: string = fichaOperativa("cl").tz): { hora: number; dia: number; fecha: string } {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santiago",
+    timeZone: tz,
     hour: "numeric",
     hour12: false,
     weekday: "short",
@@ -74,12 +77,12 @@ function enChile(d: Date): { hora: number; dia: number; fecha: string } {
 
 /** Horas transcurridas desde `desde` descontando sábados y domingos (Chile):
  *  24 = un día hábil completo, 72 = tres. Un alta del sábado cuenta desde el lunes. */
-function horasHabilesDesde(desde: Date, hasta = new Date()): number {
+function horasHabilesDesde(desde: Date, hasta = new Date(), tz?: string): number {
   let n = 0
   const cursor = new Date(desde.getTime())
   // Paso de 1 hora; suficiente para umbrales de 24/72 h.
   while (cursor.getTime() + HORA <= hasta.getTime()) {
-    const c = enChile(cursor)
+    const c = enChile(cursor, tz)
     if (c.dia >= 1 && c.dia <= 5) n++
     cursor.setTime(cursor.getTime() + HORA)
   }
@@ -87,13 +90,13 @@ function horasHabilesDesde(desde: Date, hasta = new Date()): number {
 }
 
 /** "martes, 8 de septiembre a las 08:30 AM" → fecha YYYY-MM-DD (año actual o siguiente). */
-function fechaDeCuando(cuando: string, ahora = new Date()): string | null {
+function fechaDeCuando(cuando: string, ahora = new Date(), tz?: string): string | null {
   const m = /(\d{1,2})\s+de\s+([a-záéíóú]+)/i.exec(cuando || "")
   if (!m) return null
   const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
   const mes = meses.indexOf(m[2].toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace("setiembre", "septiembre"))
   if (mes < 0) return null
-  const hoy = enChile(ahora)
+  const hoy = enChile(ahora, tz)
   let anio = Number(hoy.fecha.slice(0, 4))
   const dia = Number(m[1])
   const md = `${String(mes + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`
@@ -101,8 +104,8 @@ function fechaDeCuando(cuando: string, ahora = new Date()): string | null {
   return `${anio}-${md}`
 }
 
-function manana(ahora = new Date()): string {
-  return enChile(new Date(ahora.getTime() + 24 * HORA)).fecha
+function manana(ahora = new Date(), tz?: string): string {
+  return enChile(new Date(ahora.getTime() + 24 * HORA), tz).fecha
 }
 
 type Candidato = {
@@ -141,7 +144,14 @@ export async function GET(req: Request): Promise<Response> {
   const foto: Array<Record<string, unknown>> = []
   const ahora = new Date()
   const cl = enChile(ahora)
-  const enHorario = cl.hora >= 9 && cl.hora < 20
+  // El horario 9-20 se evalúa en la zona de CADA contacto (ficha operativa por
+  // prefijo): un peruano en fase onboarding no se juzga con la hora de Santiago.
+  const enHorarioDe = (contact: string): boolean => {
+    const f = fichaPorTelefono(contact)
+    const h = enChile(ahora, f.tz).hora
+    return h >= 9 && h < 20
+  }
+  const enHorario = enHorarioDe("569")
   const internos = testContactSet()
   const contactos = await contactosEnOnboarding()
   const candidatos: Candidato[] = []
@@ -200,7 +210,7 @@ export async function GET(req: Request): Promise<Response> {
         if (await getKvValue(claveToque).catch(() => null)) return
         if (conversando) return
         if (dry) { candidatos.push({ contact, regla, accion: "dry", detalle: texto.slice(0, 80) }); return }
-        if (!enHorario) { candidatos.push({ contact, regla, accion: "fuera_horario" }); return }
+        if (!enHorarioDe(contact)) { candidatos.push({ contact, regla, accion: "fuera_horario" }); return }
         if (!ventanaAbierta) {
           // Fuera de ventana el texto libre no llega; el aviso interno sale
           // igual (una vez) y el toque queda para cuando el cliente escriba.
@@ -259,7 +269,7 @@ export async function GET(req: Request): Promise<Response> {
 
       // ── Regla 2: alta creada y sin capacitación ──
       if (!cap.bookingId) {
-        const hh = horasHabilesDesde(altaAt, ahora)
+        const hh = horasHabilesDesde(altaAt, ahora, fichaPorTelefono(contact).tz)
         if (hh >= 24) {
           await disparar(
             "capacitacion_pendiente",
@@ -279,8 +289,9 @@ export async function GET(req: Request): Promise<Response> {
 
       // ── Regla 3: capacitación mañana y sin nómina ──
       if (cap.bookingId && cap.cuando && trabajadores === 0) {
-        const fecha = fechaDeCuando(cap.cuando, ahora)
-        if (fecha && fecha === manana(ahora)) {
+        const tzC = fichaPorTelefono(contact).tz
+        const fecha = fechaDeCuando(cap.cuando, ahora, tzC)
+        if (fecha && fecha === manana(ahora, tzC)) {
           await disparar(
             "nomina_pre_capacitacion",
             `onb_toque_nomina_${contact}_${fecha}`,

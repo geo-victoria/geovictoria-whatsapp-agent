@@ -12,6 +12,7 @@
  * traspaso_postpago_<quoteId>), venga por la vía que venga.
  */
 
+import { fichaOperativa } from "@/lib/paises/ficha-operativa"
 import {
   appendAssistantV3,
   closeFollowup,
@@ -54,7 +55,7 @@ const OWNER_VENTA_AUTONOMA_DEFAULT = "3525045000583802005" // Aleydis Araque
 // PERÚ (Lalo 15-sep): la gestora comercial de la venta autónoma es Cecilia
 // Valverde (confirmado por Diego Bendezú). kv `owner_venta_autonoma_pe` /
 // env VICKY_OWNER_VENTA_AUTONOMA_PE, mismo patrón que Chile.
-const OWNER_VENTA_AUTONOMA_DEFAULT_PE = "3525045000521799149" // Cecilia Valverde
+const OWNER_VENTA_AUTONOMA_DEFAULT_PE = fichaOperativa("pe").equipo.ventaAutonoma?.zohoId || "3525045000521799149" // Cecilia Valverde
 
 type PaisVentaAutonoma = "cl" | "pe"
 

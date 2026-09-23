@@ -54,11 +54,12 @@ test("sin señales legibles = sd, jamás autónoma por omisión", () => {
   assert.equal(clasificarGestion({}), "sd")
 })
 
-test("las sesiones de espejo que cuentan son las 7 de telemarketing, sin SDR", () => {
+test("las sesiones de espejo que cuentan son las de telemarketing de la ficha operativa (4 países), sin SDR", () => {
   const s = sesionesTelemarketing()
-  assert.equal(s.size, 7)
-  assert.ok(s.has("tmartinezq") && s.has("alopez") && s.has("adiazg"))
-  assert.ok(!s.has("aaraque") && !s.has("asepulveda"))
+  // 23-sep: el roster sale de lib/paises/ficha-operativa — 7 de Chile + Mónica (PE) + Gordillo (CO) + Yahel (MX).
+  assert.equal(s.size, 10)
+  assert.ok(s.has("tmartinezq") && s.has("alopez") && s.has("adiazg") && s.has("mmendozav"))
+  assert.ok(!s.has("aaraque") && !s.has("asepulveda") && !s.has("afiori") && !s.has("pquispef") && !s.has("cvalverde"))
 })
 
 test("refresco: venta vieja ya clasificada no se relee; recién pagada sí", () => {

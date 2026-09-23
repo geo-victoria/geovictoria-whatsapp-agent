@@ -187,3 +187,90 @@ test("adjuntosLegibles: un pantallazo PEGADO en el cuerpo (inline, grande) sí s
   const ok = adjuntosLegibles([mk("image001.png", "image/png", 4000, true), mk("image002.png", "image/png", 180000, true)])
   assert.deepEqual(ok.map((a) => a.nombre), ["image002.png"])
 })
+
+/* ── Multi-país (23-sep): la ficha operativa manda, no Chile ─────────────── */
+
+import { normalizarDocumento } from "../lib/aviso-banco.ts"
+import { parsearMontoOperativo, destinoNuestroEn, fichaPorTelefono, sesionesEspejoOperativas, rosterTelemarketingOperativo } from "../lib/paises/ficha-operativa.ts"
+
+// Formato genérico de constancia BBVA Perú (no hay muestra real en la casilla
+// todavía: se calibra con el primer aviso real, la ficha lo declara pendiente).
+const BBVA_PE = `<table><tr><td>Constancia de transferencia</td></tr>
+<tr><td>Banco:</td><td>BBVA</td></tr>
+<tr><td>Ordenante:</td><td>EMPRESA PRUEBA SAC</td></tr>
+<tr><td>RUC:</td><td>20123456789</td></tr>
+<tr><td>Cuenta de destino:</td><td>0011-0123-0100091134-75</td></tr>
+<tr><td>Beneficiario:</td><td>GEOVICTORIA PERU S.A.C.</td></tr>
+<tr><td>Importe:</td><td>S/ 118.00</td></tr>
+<tr><td>Fecha de operaci&oacute;n:</td><td>22/09/2026</td></tr>
+<tr><td>Hora de operaci&oacute;n:</td><td>10:15</td></tr>
+<tr><td>N&uacute;mero de operaci&oacute;n:</td><td>00123456</td></tr>
+<tr><td>Concepto:</td><td>COT1468</td></tr></table>`
+
+test("Perú: aviso BBVA a nuestra cuenta → pais pe, soles con decimales, RUC del ordenante, nuestro RUC no se toma", () => {
+  const a = parsearAvisoBanco({ from: "notificaciones@bbva.pe", subject: "Constancia de transferencia", html: BBVA_PE })
+  assert.ok(a)
+  assert.equal(a.pais, "pe")
+  assert.equal(a.moneda, "PEN")
+  assert.equal(a.banco, "bbva")
+  assert.equal(a.monto, 118)
+  assert.equal(a.rutOrdenante, "20123456789")
+  assert.equal(a.ordenante, "EMPRESA PRUEBA SAC")
+  assert.equal(a.numeroCotizacion, "COT1468")
+  assert.equal(a.destinoNuestro, true)
+  assert.equal(a.fechaTexto, "22/09/2026")
+  assert.equal(a.hora, "10:15")
+  // 10:15 Lima (-05) = 15:15Z
+  assert.equal(a.fechaIso, "2026-09-22T15:15:00.000Z")
+  assert.equal(a.nroOperacion, "00123456")
+})
+
+test("Perú: el mismo aviso reenviado por el cliente (sin dominio del banco) se resuelve por la cuenta de destino", () => {
+  const a = parsearAvisoBanco({ from: "contador@cliente.pe", subject: "Fwd: pago", html: BBVA_PE })
+  assert.ok(a)
+  assert.equal(a.pais, "pe")
+  assert.equal(a.monto, 118)
+})
+
+test("Perú: una constancia a la cuenta de un TERCERO no se acepta aunque diga BBVA", () => {
+  const tercero = BBVA_PE.replace("0011-0123-0100091134-75", "0011-0999-0100000000-11").replace("GEOVICTORIA PERU S.A.C.", "OTRA EMPRESA SAC")
+  assert.equal(parsearAvisoBanco({ from: "contador@cliente.pe", subject: "Fwd: pago", html: tercero }), null)
+})
+
+test("Colombia: Bancolombia a la cuenta de ahorros → pais co, pesos sin decimales, NIT del ordenante", () => {
+  const html = `<table><tr><td>Bancolombia te informa</td></tr><tr><td>Transferencia recibida</td></tr>
+<tr><td>Ordenante:</td><td>SERVICIOS ANDINOS SAS</td></tr><tr><td>NIT:</td><td>900123456-7</td></tr>
+<tr><td>Cuenta destino:</td><td>20200000237</td></tr><tr><td>Monto:</td><td>$ 1.150.000</td></tr>
+<tr><td>Fecha:</td><td>22/09/2026</td></tr><tr><td>Referencia:</td><td>ABC12345</td></tr><tr><td>Descripci&oacute;n:</td><td>COT 1600</td></tr></table>`
+  const a = parsearAvisoBanco({ from: "alertasynotificaciones@bancolombia.com", subject: "Transferencia recibida", html })
+  assert.ok(a)
+  assert.equal(a.pais, "co")
+  assert.equal(a.moneda, "COP")
+  assert.equal(a.banco, "bancolombia")
+  assert.equal(a.monto, 1150000)
+  assert.equal(a.rutOrdenante, "900123456-7")
+  assert.equal(a.numeroCotizacion, "COT1600")
+  assert.equal(a.destinoNuestro, true)
+})
+
+test("ficha operativa: montos, documentos, destino y equipo por país", () => {
+  assert.equal(parsearMontoOperativo("$ 36,459", "cl"), 36459)
+  assert.equal(parsearMontoOperativo("S/ 1,234.50", "pe"), 1234.5)
+  assert.equal(parsearMontoOperativo("118.00", "pe"), 118)
+  assert.equal(parsearMontoOperativo("1.150.000", "co"), 1150000)
+  assert.equal(parsearMontoOperativo("2,500.00", "mx"), 2500)
+  assert.equal(normalizarDocumento("76.543.210-K"), "76543210-K")
+  assert.equal(normalizarDocumento("20123456789", "RUC"), "20123456789")
+  assert.equal(normalizarDocumento("900.123.456-7", "NIT"), "900123456-7")
+  assert.equal(destinoNuestroEn("abono a la cuenta 8001204108"), "cl")
+  assert.equal(destinoNuestroEn("CCI 011-123-000100091134-75"), "pe")
+  assert.equal(destinoNuestroEn("GEOVICTORIA COLOMBIA SAS"), "co")
+  assert.equal(destinoNuestroEn("a favor de PROVEEDOR LTDA"), null)
+  assert.equal(fichaPorTelefono("51987654321").pais, "pe")
+  assert.equal(fichaPorTelefono("56912345678").pais, "cl")
+  assert.equal(fichaPorTelefono("573001234567").pais, "co")
+  const sesiones = sesionesEspejoOperativas()
+  for (const s of ["emujica", "aaraque", "mmendozav", "afiori", "pquispef", "cvalverde"]) assert.ok(sesiones.includes(s), `falta sesión ${s}`)
+  assert.ok(rosterTelemarketingOperativo("pe").some((p) => p.email === "mmendozav@geovictoria.com"))
+  assert.ok(!rosterTelemarketingOperativo("cl").some((p) => /aaraque|asepulveda/.test(p.email)), "las SDR no son telemarketing")
+})

@@ -29,15 +29,16 @@ const ROSTER_DEFAULT =
   "aaraque@geovictoria.com:3525045000583802005:Aleydis Araque," +
   "asepulveda@geovictoria.com:3525045000594735052:Aracelli Sepúlveda"
 
+// Ficha operativa por país (PURA, import con extensión: este módulo lo cargan los tests).
+import { rosterComoEnv, rosterSdrOperativo } from "./paises/ficha-operativa.ts"
+
 /** Roster SDR de PERÚ (Lalo 15-sep: Ana Fiori y Priscila Quispe reciben lo
  * que Vicky no logra calificar). Mismo env que la rotación de zoho-leads
  * (VIC_SDR_INBOUND_PE, "email:zohoId,…") para que haya UNA fuente. La regla
  * es la de Chile con otras personas (Lalo 22-sep): lo que la SDR peruana
  * recibió sin calificar y Vicky calificó después vuelve a Mónica por la
  * tómbola TLMK (sin RUC) o nace deal + "Deals 2026" (con RUC). */
-const ROSTER_DEFAULT_PE =
-  "afiori@geovictoria.com:3525045000299130001:Ana Fiori," +
-  "pquispef@geovictoria.com:3525045000576828001:Priscila Quispe"
+const ROSTER_DEFAULT_PE = rosterComoEnv(rosterSdrOperativo("pe"))
 
 type Sdr = { email: string; id: string }
 
