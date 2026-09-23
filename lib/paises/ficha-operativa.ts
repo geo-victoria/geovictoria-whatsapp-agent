@@ -275,7 +275,6 @@ const FICHA_CO: FichaOperativa = {
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
   pendientes: [
-    "Entradas 'Territorio = Colombia' en las tres reglas globales (Deals 2026 1-199 + resto · TLMK · SDR) y luego prender VICKY_TOMBOLA_ZOHO_CO (lib/paises/co/tombola-zoho.ts); hasta entonces CO sigue con Galindo/Gordillo fijos.",
     "Entrada 'Colombia + rango 1-10/11-20/1-19 → Vicky' ANTES de la 34 en la regla global de marketing, para que el form ≤20 le llegue a Vicky (como la 36 de Perú).",
     "Sesiones de espejo del equipo CO en el worker (decidir quiénes: telemarketing mcorredor/snavarrob/dcrodriguez, SDR msanabriat/jnarinoch/egalindo).",
     "Teléfonos del equipo CO (ninguno de los seis ni las líderes lo tienen en su ficha de Zoho).",

@@ -24,7 +24,10 @@
  * ("on"/"off") y, sin env, esta constante. Encender = env en Vercel + deploy,
  * o cambiar la constante y desplegar.
  */
-export const TOMBOLA_ZOHO_CO_DEFAULT = false
+// 23-sep 18:xx UTC: ENCENDIDO. Lalo creó las tres entradas Colombia el mismo
+// día — Deals 2026 (6: 1-199 → Corredor/Navarro Builes/Rodríguez · 7: ≥200 →
+// 13 ejecutivos · 8: resto → los tres del 6), TLMK (3) y SDR (3).
+export const TOMBOLA_ZOHO_CO_DEFAULT = true
 
 export function tombolaZohoCoActiva(): boolean {
   const v = String(process.env.VICKY_TOMBOLA_ZOHO_CO || "").trim().toLowerCase()
