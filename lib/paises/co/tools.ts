@@ -15,6 +15,7 @@
  */
 
 import { cotizarCO, formatearCOP, type PuntoInstalacionCO } from "./cotizar"
+import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { clasificarUbicacionCO } from "./geografia"
 import { nitValido, normalizarNit } from "./nit"
 import { createZohoLead } from "../../zoho-leads"
@@ -473,8 +474,18 @@ export function buildDispatchCO(contact: string) {
           necesidad: [i.resumen || "", nitInfo].filter(Boolean).join(" · "),
           // Regla equipo CO (05-ago): fallback de cotización FORMAL → Gordillo;
           // cualquier otro motivo (callback, fuera de alcance, >50) → Galindo fijo.
-          ownerId: i.motivo === "cotizacion_formal" ? EJECUTIVO_CO_ZOHO_ID : SDR_HITOS_CO_ID,
+          // Con el interruptor de Colombia encendido (Lalo 23-sep) el lead nace
+          // sin dueño y lo entregan las reglas de Zoho (abajo), como en Perú.
+          ownerId: tombolaZohoCoActiva() ? undefined : i.motivo === "cotizacion_formal" ? EJECUTIVO_CO_ZOHO_ID : SDR_HITOS_CO_ID,
         })
+        if (res && (res as { success?: boolean; leadId?: string }).success && tombolaZohoCoActiva()) {
+          const leadId = (res as { leadId?: string }).leadId || ""
+          const n = parseInt(String(i.trabajadores || "").replace(/\D/g, ""), 10)
+          if (leadId) {
+            const { reasignarLeadPorTerritorio } = await import("@/lib/zoho-leads")
+            await reasignarLeadPorTerritorio("Colombia", leadId, { calificado: Number.isFinite(n) && n > 0 }).catch(() => null)
+          }
+        }
         if (!res || (res as { ok?: boolean }).ok === false) {
           return {
             ok: false,

@@ -11,6 +11,7 @@
  */
 
 import { rosterSdrOperativo, rosterTelemarketingOperativo } from "@/lib/paises/ficha-operativa"
+import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe, psidDe, canalMetaDe } from "./origen-canal.ts"
 import { getZohoAccessToken } from "./zoho-token"
 
@@ -832,14 +833,34 @@ export async function reasignarLeadCalificacionCL(
   }
 }
 
-// SDR de Colombia — REGLA EQUIPO CO (Lalo 05-ago: "para colombia no hay round
-// robin por el momento, son fijos"): TODO hito que no sea la cotización formal
-// va a Eddy Galindo, fijo. Se conserva el formato env "email_o_label:user_id"
-// (VIC_SDR_INBOUND_CO) por si vuelve una rotación: HOY solo se usa la PRIMERA
-// entrada; las demás se ignoran.
+// SDR de Colombia. DOS MUNDOS, decididos por `tombolaZohoCoActiva()`:
+//  · apagado (hoy) — REGLA EQUIPO CO (Lalo 05-ago: "para colombia no hay round
+//    robin por el momento, son fijos"): TODO hito que no sea la cotización
+//    formal va a Eddy Galindo, fijo;
+//  · encendido (Lalo 23-sep) — el lead SIN calificar va por la regla global
+//    "Asignación Leads Sin calificar Vicky SDR" con su entrada Colombia
+//    (Sanabria Torres · Nariño Chavarro · Galindo), y el CALIFICADO por la
+//    regla TLMK (Corredor · Navarro Builes · Rodríguez): la MISMA mecánica de
+//    Chile y Perú. El roster de la ficha queda de fallback si la regla no asigna.
+// Formato env VIC_SDR_INBOUND_CO "email:user_id,…"; default = ficha operativa.
 const SDR_INBOUND_CO = (
   process.env.VIC_SDR_INBOUND_CO ||
-  "egalindo@geovictoria.com:3525045000613817111"
+  rosterSdrOperativo("co").map((p) => `${p.email}:${p.zohoId}`).join(",")
+)
+  .split(",")
+  .map((s) => {
+    const [email, id] = s.split(":").map((x) => x.trim())
+    return { email, id: id || "" }
+  })
+  .filter((s) => s.email)
+const TM_SDR_INBOUND_CO = (process.env.VICKY_TM_SDR_INBOUND_CO_RULE_ID || TM_TOMBOLA_SIN_CALIFICAR_CL).trim()
+const TM_CALIFICACION_CO = (process.env.VICKY_TM_CALIFICACION_CO_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+const TLMK_CO_FALLBACK = (
+  process.env.VICKY_PTV_VENDEDORES_CO ||
+  rosterTelemarketingOperativo("co")
+    .filter((p) => !/agordillo@/i.test(p.email)) // Gordillo no está en el tramo 1-199 de la tómbola CO
+    .map((p) => `${p.email}:${p.zohoId}`)
+    .join(",")
 )
   .split(",")
   .map((s) => {
@@ -848,9 +869,18 @@ const SDR_INBOUND_CO = (
   })
   .filter((s) => s.email)
 
+/** Reasigna un lead CO CALIFICADO por la regla TLMK de Zoho (entrada Colombia);
+ * fallback = rotación interna sobre los telemarketeros de la ficha. */
+export async function reasignarLeadCalificadoCO(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  return reasignarLeadPorRoster({ leadId, ruleId: TM_CALIFICACION_CO, roster: TLMK_CO_FALLBACK, kvTurno: "tlmk_rr_co", etiqueta: "TLMK CO" })
+}
+
 /**
- * Reasigna un lead CO al SDR colombiano FIJO (Eddy Galindo — regla equipo CO
- * 05-ago, sin round-robin). El turno vic_kv `sdr_inbound_rr_co` quedó sin uso.
+ * Reasigna un lead CO sin calificar. Interruptor encendido → regla SDR de
+ * Zoho (entrada Colombia) con la rotación de la ficha de fallback. Apagado →
+ * SDR colombiano FIJO (Eddy Galindo — regla equipo CO 05-ago, sin round-robin).
  */
 export async function reasignarLeadSdrInboundCO(
   leadId: string,
@@ -858,8 +888,12 @@ export async function reasignarLeadSdrInboundCO(
   if (!leadId || SDR_INBOUND_CO.length === 0) {
     return { success: false, error: "leadId faltante o sin SDRs CO configuradas" }
   }
+  if (tombolaZohoCoActiva()) {
+    return reasignarLeadPorRoster({ leadId, ruleId: TM_SDR_INBOUND_CO, roster: SDR_INBOUND_CO, kvTurno: "sdr_inbound_rr_co", etiqueta: "SDR CO" })
+  }
   try {
-    const sdr = SDR_INBOUND_CO[0] // fijo: primera entrada (Galindo)
+    // fijo: Galindo (regla 05-ago) — se busca por correo para no depender del orden del roster
+    const sdr = SDR_INBOUND_CO.find((x) => /egalindo@/i.test(x.email)) || SDR_INBOUND_CO[0]
 
     const accessToken = await getZohoAccessToken()
     const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
@@ -1065,11 +1099,10 @@ export async function reasignarLeadPorTerritorio(
 ): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string }> {
   const t = String(territorio || "Chile").trim().toLowerCase()
   if (t === "chile") return reasignarLeadCalificacionCL(leadId, opts)
-  if (t === "perú" || t === "peru") {
-    const r = opts.calificado ? await reasignarLeadCalificadoPE(leadId) : await reasignarLeadSdrInboundPE(leadId)
+  // La rotación por regla devuelve email+id; el nombre se lee del lead
+  // para que la presentación al cliente no salga con el local-part.
+  const conNombre = async (r: { success: boolean; ownerEmail?: string; ownerId?: string; error?: string }) => {
     if (!r.success || !r.ownerId) return r
-    // La rotación por regla devuelve email+id; el nombre se lee del lead
-    // para que la presentación al cliente no salga con el local-part.
     try {
       const accessToken = await getZohoAccessToken()
       const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
@@ -1084,6 +1117,15 @@ export async function reasignarLeadPorTerritorio(
     } catch {
       return r
     }
+  }
+  if (t === "perú" || t === "peru") {
+    return conNombre(opts.calificado ? await reasignarLeadCalificadoPE(leadId) : await reasignarLeadSdrInboundPE(leadId))
+  }
+  // COLOMBIA (Lalo 23-sep): mismas reglas con su entrada "Territorio =
+  // Colombia" — solo con el interruptor encendido; apagado, el llamador
+  // conserva los fijos del 05-ago.
+  if (t === "colombia" && tombolaZohoCoActiva()) {
+    return conNombre(opts.calificado ? await reasignarLeadCalificadoCO(leadId) : await reasignarLeadSdrInboundCO(leadId))
   }
   return { success: false, error: `sin tómbola de leads para territorio ${territorio || "?"}` }
 }

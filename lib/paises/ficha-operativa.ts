@@ -242,8 +242,27 @@ const FICHA_CO: FichaOperativa = {
   ],
   toleranciaMonto: 1000,
   equipo: {
-    telemarketing: [persona("agordillo@geovictoria.com", "3525045000203758005", "Alejandro Gordillo", "+57 314 267 7765")],
-    sdr: [persona("egalindo@geovictoria.com", "3525045000613817111", "Eddy Galindo")],
+    // Lalo 23-sep, leído del workflow "SF. TOMBOLA DEALS COLOMBIA 2024"
+    // (condición 8: no partner, 1-199 personas) — es el roster SMB de Colombia
+    // y el que va a la entrada Colombia de "Deals 2026" y de la regla TLMK.
+    // Gordillo sigue en la lista porque hasta que se prenda `tombolaZohoCoActiva`
+    // (lib/paises/co/tombola-zoho.ts) la formal nace a su nombre (regla 05-ago).
+    // Ids y correos de los usuarios activos de Zoho; ninguno trae teléfono.
+    telemarketing: [
+      persona("mcorredor@geovictoria.com", "3525045000276182050", "María Paula Corredor"),
+      persona("snavarrob@geovictoria.com", "3525045000649997017", "Silvana Navarro Builes"),
+      persona("dcrodriguez@geovictoria.com", "3525045000650077001", "Diana Carolina Rodríguez"),
+      persona("agordillo@geovictoria.com", "3525045000203758005", "Alejandro Gordillo", "+57 314 267 7765"),
+    ],
+    // Lalo 23-sep ("esos son los 3 SDR que reciben leads"): la entrada 34 de la
+    // regla global de marketing manda todo lead de Colombia a estos tres.
+    // Galindo va último porque el camino viejo (interruptor apagado) lo usa
+    // como SDR fijo.
+    sdr: [
+      persona("msanabriat@geovictoria.com", "3525045000654443071", "Mauricio Sanabria Torres"),
+      persona("jnarinoch@geovictoria.com", "3525045000639927045", "Jhon Nariño Chavarro"),
+      persona("egalindo@geovictoria.com", "3525045000613817111", "Eddy Galindo"),
+    ],
     // Lalo 23-sep: gestora comercial (venta autónoma) Gabriela Linares; líder de
     // los ejecutivos María Fernanda Cely Villamil; líder de las SDR Ana María
     // Moreno. Ids y correos leídos de los usuarios activos de Zoho ese día
@@ -256,8 +275,10 @@ const FICHA_CO: FichaOperativa = {
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
   pendientes: [
-    "Sesiones de espejo del equipo en el worker (agordillo, egalindo).",
-    "Teléfonos de Gabriela Linares, María Fernanda Cely y Ana María Moreno (sus fichas de Zoho no lo traen).",
+    "Entradas 'Territorio = Colombia' en las tres reglas globales (Deals 2026 1-199 + resto · TLMK · SDR) y luego prender VICKY_TOMBOLA_ZOHO_CO (lib/paises/co/tombola-zoho.ts); hasta entonces CO sigue con Galindo/Gordillo fijos.",
+    "Entrada 'Colombia + rango 1-10/11-20/1-19 → Vicky' ANTES de la 34 en la regla global de marketing, para que el form ≤20 le llegue a Vicky (como la 36 de Perú).",
+    "Sesiones de espejo del equipo CO en el worker (decidir quiénes: telemarketing mcorredor/snavarrob/dcrodriguez, SDR msanabriat/jnarinoch/egalindo).",
+    "Teléfonos del equipo CO (ninguno de los seis ni las líderes lo tienen en su ficha de Zoho).",
     "Cablear la venta autónoma CO a Gabriela en traspaso-postpago (hoy CO conserva al primer dueño, regla 05-ago) — exige VB de Lalo.",
   ],
 }

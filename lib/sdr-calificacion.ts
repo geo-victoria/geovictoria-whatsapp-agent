@@ -31,6 +31,7 @@ const ROSTER_DEFAULT =
 
 // Ficha operativa por país (PURA, import con extensión: este módulo lo cargan los tests).
 import { rosterComoEnv, rosterSdrOperativo } from "./paises/ficha-operativa.ts"
+import { tombolaZohoCoActiva } from "./paises/co/tombola-zoho.ts"
 
 /** Roster SDR de PERÚ (Lalo 15-sep: Ana Fiori y Priscila Quispe reciben lo
  * que Vicky no logra calificar). Mismo env que la rotación de zoho-leads
@@ -60,13 +61,24 @@ function rosterPE(): Sdr[] {
   return parseRoster(process.env.VIC_SDR_INBOUND_PE || ROSTER_DEFAULT_PE)
 }
 
+/** Roster SDR de COLOMBIA (Lalo 23-sep: Sanabria Torres, Nariño Chavarro y
+ * Galindo reciben los leads). Solo cuenta como "SDR de calificación" cuando
+ * Colombia se entrega por las reglas de Zoho (`tombolaZohoCoActiva`): con el
+ * interruptor apagado rige la regla del 05-ago (el primero se lo queda) y no
+ * hay re-entrega que hacer. Mismo env que zoho-leads (VIC_SDR_INBOUND_CO). */
+function rosterCO(): Sdr[] {
+  if (!tombolaZohoCoActiva()) return []
+  return parseRoster(process.env.VIC_SDR_INBOUND_CO || rosterComoEnv(rosterSdrOperativo("co")))
+}
+
 /** Roster SDR del territorio. Sin territorio se asume Chile (los llamadores
- * viejos no lo pasaban); Colombia/México no tienen SDR de calificación en
- * este sentido (sus dueños son fijos/RR y no se re-entregan) → roster vacío. */
+ * viejos no lo pasaban); México no tiene SDR de calificación en este sentido
+ * (sus dueños son RR y no se re-entregan) → roster vacío. */
 export function rosterSdrPorTerritorio(territorio?: string | null): Sdr[] {
   const t = String(territorio || "Chile").trim().toLowerCase()
   if (t === "chile") return roster()
   if (t === "perú" || t === "peru") return rosterPE()
+  if (t === "colombia") return rosterCO()
   return []
 }
 
@@ -82,7 +94,7 @@ export function esSdrCalificacionCL(o: { ownerId?: string | null; ownerEmail?: s
   return enRoster(roster(), o)
 }
 
-/** ¿Este dueño es una SDR de calificación del territorio dado (Chile o Perú)? */
+/** ¿Este dueño es una SDR de calificación del territorio dado (Chile, Perú o Colombia con el interruptor)? */
 export function esSdrCalificacion(
   territorio: string | null | undefined,
   o: { ownerId?: string | null; ownerEmail?: string | null },

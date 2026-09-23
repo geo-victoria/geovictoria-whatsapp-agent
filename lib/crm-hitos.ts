@@ -1,4 +1,6 @@
 import { esContactoCL } from "./origen-canal.ts"
+import { rosterSdrOperativo } from "./paises/ficha-operativa.ts"
+import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "./paises/co/tombola-zoho.ts"
 /**
  * Sincronización determinista Zoho CRM ← hitos de la conversación de Vicky
  * (Lalo, 30-jul-2026). Regla de marketing: NUNCA crear deals directos — todo
@@ -309,6 +311,9 @@ const SDR_CO_IDS = new Set([
   "3525045000613817111", // Eddy Galindo
   "3525045000619732095", // Guerrero
   "3525045000639899035", // Quiroga
+  // Lalo 23-sep: las SDR que hoy reciben los leads de Colombia (entrada 34
+  // de la regla global de marketing), leídas de la ficha operativa.
+  ...rosterSdrOperativo("co").map((p) => p.zohoId),
 ])
 
 /** ¿El dueño del lead es un HUMANO REAL cuya gestión se hereda al deal? No lo
@@ -798,7 +803,10 @@ function tieneIdentidadComercial(lead: LeadEncontrado, datos: DatosConversacion)
  * jamás queda en la bandeja de nadie. */
 const TOMBOLA_DEALS_POR_TERRITORIO: Record<string, string> = {
   Chile: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
-  Colombia: (process.env.VICKY_PTV_TOMBOLA_DEALS_CO || "").trim(),
+  // Colombia (Lalo 23-sep): la misma regla "Deals 2026" con su entrada
+  // Colombia (1-199 → Corredor/Navarro Builes/Rodríguez), SOLO con el
+  // interruptor encendido; apagado, Colombia sigue sin tómbola (fijos 05-ago).
+  Colombia: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "",
   "México": (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
   // Perú (Lalo 22-sep): regla "Deals 2026" — entrada Territorio = Perú →
   // Mónica Mendoza. Con regla, Perú entra a la MISMA mecánica que Chile:
@@ -1237,7 +1245,9 @@ async function convertirConDeal(
     // hito no-formal nace y SE QUEDA con Galindo — un vic_ptv del TTV viejo
     // (Gordillo, muchas veces ni siquiera presentado al cliente) no lo pisa.
     let asignadoPorTraspaso = false
-    if (!heredaDuenoHumano && territorio !== "Colombia") {
+    // Con el interruptor de Colombia encendido, CO entra a la mecánica chilena
+    // y el traspaso vigente también manda ahí.
+    if (!heredaDuenoHumano && (territorio !== "Colombia" || tombolaZohoCoActiva())) {
       try {
         const { vendedorTraspasado } = await import("./loop-v2")
         const v = await vendedorTraspasado(contact.replace(/\D/g, ""))

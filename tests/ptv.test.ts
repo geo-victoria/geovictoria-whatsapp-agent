@@ -375,10 +375,15 @@ test("Perú: el lead CALIFICADO pasa por la regla TLMK de Zoho (entrada Territor
   const BARRIDO = readFileSync(join(RAIZ, "lib/barrido-leads-vicky.ts"), "utf8")
   assert.match(LEADS, /export async function reasignarLeadCalificadoPE\(/)
   assert.match(LEADS, /VICKY_TM_CALIFICACION_PE_RULE_ID \|\| TM_TOMBOLA_LEADS_CL/)
-  const i = CRON.indexOf("async function entregarLeadPE(")
+  // 23-sep: la entrega por reglas es UNA función para Perú y Colombia
+  // (entregarLeadPorReglas → reasignarLeadPorTerritorio), y la rama Perú de
+  // reasignarLeadPorTerritorio es la que llama a la regla TLMK.
+  const i = CRON.indexOf("async function entregarLeadPorReglas(")
+  assert.ok(i > 0, "entregarLeadPorReglas debe existir en el cron")
   const cuerpo = CRON.slice(i, i + 2500)
-  assert.match(cuerpo, /reasignarLeadCalificadoPE\(leadId\)/)
+  assert.match(cuerpo, /reasignarLeadPorTerritorio\(territorio, leadId, \{ calificado \}\)/)
   assert.doesNotMatch(cuerpo, /Owner: \{ id: interno\.zohoId \}/, "el calificado PE no debe ir por PUT directo de Owner")
+  assert.match(LEADS, /opts\.calificado \? await reasignarLeadCalificadoPE\(leadId\) : await reasignarLeadSdrInboundPE\(leadId\)/)
   assert.match(BARRIDO, /calificado \? reasignarLeadCalificadoPE\(l\.id\) : reasignarLeadSdrInboundPE\(l\.id\)/)
 })
 

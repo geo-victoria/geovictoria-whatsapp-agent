@@ -33,12 +33,14 @@
  */
 
 import { getZohoAccessToken } from "./zoho-token"
+import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { fetchHistoryV3, getKvValue, setKvValue, getQuotePointer } from "./supabase-persistence-v3"
 import {
   agregarNotaLead,
   reasignarLeadCalificacionCL,
   reasignarLeadTelemarketingCL,
   reasignarLeadSdrInboundCO,
+  reasignarLeadCalificadoCO,
   reasignarLeadSdrInboundMX,
   reasignarLeadSdrInboundPE,
   reasignarLeadCalificadoPE,
@@ -370,7 +372,10 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
         ownerEmail = String((r as { ownerEmail?: string }).ownerEmail || "")
         error = String((r as { error?: string }).error || "")
       } else if (pais === "co") {
-        const r = await reasignarLeadSdrInboundCO(l.id).catch((e) => ({ success: false, error: String(e) }))
+        // Colombia (Lalo 23-sep): con el interruptor `tombolaZohoCoActiva` el
+        // calificado va a la regla TLMK (Corredor/Navarro Builes/Rodríguez) y
+        // el resto a la regla SDR; apagado, ambas caen en Galindo fijo (05-ago).
+        const r = await (calificado && tombolaZohoCoActiva() ? reasignarLeadCalificadoCO(l.id) : reasignarLeadSdrInboundCO(l.id)).catch((e) => ({ success: false, error: String(e) }))
         ownerEmail = String((r as { ownerEmail?: string }).ownerEmail || "")
         error = String((r as { error?: string }).error || "")
       } else if (pais === "mx") {

@@ -124,3 +124,26 @@ test("rosterSdrPorTerritorio: Chile y Perú tienen roster; Colombia no", () => {
   assert.equal(rosterSdrPorTerritorio("Perú").length, 2)
   assert.equal(rosterSdrPorTerritorio("Colombia").length, 0)
 })
+
+// COLOMBIA (Lalo 23-sep): las SDR son Sanabria Torres, Nariño Chavarro y
+// Galindo, pero solo cuentan como "SDR de calificación" con el interruptor
+// `tombolaZohoCoActiva` encendido; apagado rige la regla del 05-ago (el
+// primero se lo queda) y no hay re-entrega.
+test("Colombia: sin interruptor no hay roster SDR; con interruptor son los tres de la ficha", () => {
+  const prev = process.env.VICKY_TOMBOLA_ZOHO_CO
+  try {
+    process.env.VICKY_TOMBOLA_ZOHO_CO = "off"
+    assert.deepEqual(rosterSdrPorTerritorio("Colombia"), [])
+    assert.equal(destinoTrasCalificar({ territorio: "Colombia", ownerEmail: "egalindo@geovictoria.com", calificado: true, rut: "" }), "sin_cambio")
+    process.env.VICKY_TOMBOLA_ZOHO_CO = "on"
+    const r = rosterSdrPorTerritorio("Colombia")
+    assert.deepEqual(r.map((x) => x.email).sort(), ["egalindo@geovictoria.com", "jnarinoch@geovictoria.com", "msanabriat@geovictoria.com"])
+    assert.equal(destinoTrasCalificar({ territorio: "Colombia", ownerEmail: "msanabriat@geovictoria.com", calificado: true, rut: "" }), "lead_tlmk")
+    assert.equal(destinoTrasCalificar({ territorio: "Colombia", ownerEmail: "jnarinoch@geovictoria.com", calificado: true, rut: "901367959-1" }), "deal_tombola")
+    // Un telemarketero colombiano no es SDR: su cartera se respeta.
+    assert.equal(destinoTrasCalificar({ territorio: "Colombia", ownerEmail: "mcorredor@geovictoria.com", calificado: true, rut: "901367959-1" }), "sin_cambio")
+  } finally {
+    if (prev === undefined) delete process.env.VICKY_TOMBOLA_ZOHO_CO
+    else process.env.VICKY_TOMBOLA_ZOHO_CO = prev
+  }
+})
