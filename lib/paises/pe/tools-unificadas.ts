@@ -177,7 +177,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
         modulos: { type: "array" as const, items: { type: "string" as const } },
         hardware: HARDWARE_PE,
         puntosInstalacion: PUNTOS_PE,
-        escalonActual: { type: "number" as const, enum: [0, 1, 2], description: "Escalón ya ofrecido, si lo sabes." },
+        escalonActual: { type: "number" as const, enum: [0, 1, 2], description: "Cuántos escalones ya ofreciste en ESTA negociación: 0 en la primera objeción. El servidor lleva la cuenta y avanza UN escalón por llamada." },
       },
       required: [],
     },
@@ -629,7 +629,11 @@ export function buildDispatchPEUnificado(contact: string) {
           const errUb = errorUbicacionPE(cfg.hardware, cfg.puntosInstalacion)
           if (errUb) return { ok: false, error: errUb }
         }
-        const actual = Math.max(Number(i.escalonActual || 0), pref?.escalon || 0)
+        // La MEMORIA del estimado manda (Chile, Capa 3): el escalón del modelo
+        // solo cuenta cuando no hay estimado guardado — si el modelo pasa
+        // escalonActual=1 en la PRIMERA objeción, la escalera saltaba al 20 %
+        // (batería CO 23-sep). Un escalón por objeción, siempre desde lo ofrecido.
+        const actual = pref ? Math.max(0, Math.min(2, pref.escalon || 0)) : Math.max(0, Math.min(2, Number(i.escalonActual || 0)))
         if (actual >= 2) {
           return {
             ok: true,
@@ -643,7 +647,7 @@ export function buildDispatchPEUnificado(contact: string) {
         const r = (await base("cotizar_referencial", aInputCotizarPE({ ...cfg, escalonDescuento: escalon }))) as Record<string, unknown>
         if (r?.ok) {
           await guardarPref({ userCount: cfg.userCount, hardware: cfg.hardware, puntosInstalacion: cfg.puntosInstalacion, escalon })
-          return { ...r, escalonDescuento: escalon, topeAlcanzado: escalon >= 2 }
+          return { ...r, escalonDescuento: escalon, escalonActual: escalon, topeAlcanzado: escalon >= 2 }
         }
         return r
       }
