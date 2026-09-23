@@ -54,7 +54,7 @@ export type PersonaEquipo = {
   email: string
   zohoId: string
   nombre: string
-  /** Sesión del worker de espejos (default: parte local del correo). */
+  /** Sesión del worker de espejos (default: parte local del correo; "" = no lleva espejo). */
   sesion: string
   telefono?: string
 }
@@ -109,7 +109,7 @@ const persona = (email: string, zohoId: string, nombre: string, telefono?: strin
   email: email.toLowerCase(),
   zohoId,
   nombre,
-  sesion: (sesion || email.split("@")[0]).toLowerCase(),
+  sesion: sesion === "-" ? "" : (sesion || email.split("@")[0]).toLowerCase(),
   ...(telefono ? { telefono } : {}),
 })
 
@@ -201,13 +201,13 @@ const FICHA_PE: FichaOperativa = {
       persona("afiori@geovictoria.com", "3525045000299130001", "Ana Fiori", "+51 936 953 838"),
       persona("pquispef@geovictoria.com", "3525045000576828001", "Priscila Quispe", "+51 960 421 293"),
     ],
-    ventaAutonoma: persona("cvalverde@geovictoria.com", "3525045000521799149", "Cecilia Valverde", "+51 982 446 284"),
+    ventaAutonoma: persona("cvalverde@geovictoria.com", "3525045000521799149", "Cecilia Valverde", "+51 982 446 284", "-"),
     lider: "dbendezu@geovictoria.com",
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
   pendientes: [
-    "Sesiones de espejo del equipo en el worker (WA_SESSION_IDS en Railway): mmendozav, afiori, pquispef, cvalverde.",
+    "Sesiones de espejo del equipo en el worker (WA_SESSION_IDS en Railway): mmendozav, afiori, pquispef. Cecilia (venta autónoma) no lleva espejo (Lalo 23-sep).",
     "Un aviso REAL de BBVA/BCP/Interbank en la casilla vicky@ para calibrar el parser (hoy formato genérico).",
   ],
 }
