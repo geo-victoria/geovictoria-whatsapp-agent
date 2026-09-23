@@ -22,7 +22,7 @@
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
-import { esSdrCalificacionCL } from "@/lib/sdr-calificacion"
+import { esSdrCalificacion, esSdrCalificacionCL } from "@/lib/sdr-calificacion"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -30,6 +30,9 @@ export const maxDuration = 60
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const REGLA_CL = (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim()
+// Perú: regla "Deals 2026" (Lalo 22-sep; entradas por tramo + "Territorio = Perú" → Mónica).
+const REGLA_PE = (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim()
+const REGLAS: Record<string, string> = { cl: REGLA_CL, pe: REGLA_PE }
 
 async function autorizado(req: Request): Promise<boolean> {
   const secreto = await getFollowupCronSecret().catch(() => "")
@@ -43,10 +46,9 @@ async function autorizado(req: Request): Promise<boolean> {
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
-  const body = (await req.json().catch(() => ({}))) as { dealId?: string; motivo?: string }
+  const body = (await req.json().catch(() => ({}))) as { dealId?: string; motivo?: string; pais?: string }
   const dealId = String(body.dealId || "").trim()
   if (!/^\d{10,}$/.test(dealId)) return NextResponse.json({ ok: false, error: "falta dealId" }, { status: 400 })
-  if (!REGLA_CL) return NextResponse.json({ ok: false, error: "sin regla de tómbola" }, { status: 503 })
 
   const token = await getZohoAccessToken().catch(() => "")
   if (!token) return NextResponse.json({ ok: false, error: "sin token zoho" }, { status: 502 })
@@ -54,18 +56,23 @@ export async function POST(req: Request): Promise<NextResponse> {
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
 
   const leer = async () => {
-    const r = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Owner,Stage,Contact_Name,N_Empleados_que_marcan`, { headers: H, cache: "no-store" })
+    const r = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Owner,Stage,Contact_Name,N_Empleados_que_marcan,Territorio`, { headers: H, cache: "no-store" })
     if (r.status !== 200) return null
     return (((await r.json().catch(() => ({}))) as {
-      data?: Array<{ Deal_Name?: string; Stage?: string; N_Empleados_que_marcan?: number; Owner?: { id?: string; name?: string; email?: string }; Contact_Name?: { id?: string } | null }>
+      data?: Array<{ Deal_Name?: string; Stage?: string; Territorio?: string; N_Empleados_que_marcan?: number; Owner?: { id?: string; name?: string; email?: string }; Contact_Name?: { id?: string } | null }>
     }).data || [])[0] || null
   }
   const antes = await leer()
   if (!antes) return NextResponse.json({ ok: false, error: "deal no encontrado" }, { status: 404 })
+  // La regla es la del PAÍS del deal (23-sep): antes solo existía la chilena.
+  const pais = String(body.pais || "").toLowerCase() || (/per/i.test(String(antes.Territorio || "")) ? "pe" : "cl")
+  const regla = REGLAS[pais] || ""
+  if (!regla) return NextResponse.json({ ok: false, error: `sin regla de tómbola para ${pais}` }, { status: 503 })
+  const nombreRegla = pais === "pe" ? '"Deals 2026" (Perú)' : '"Tómbola Deals 2026 Chile"'
 
   const put = await fetch(`${api}/crm/v3/Deals`, {
     method: "PUT", headers: H, cache: "no-store",
-    body: JSON.stringify({ data: [{ id: dealId }], lar_id: REGLA_CL }),
+    body: JSON.stringify({ data: [{ id: dealId }], lar_id: regla }),
   })
   if (!put.ok) return NextResponse.json({ ok: false, error: `put ${put.status}` }, { status: 502 })
   // La regla corre ASÍNCRONA: se relee con un par de intentos.
@@ -76,7 +83,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const ownerNuevo = despues?.Owner || null
   const cambio = Boolean(ownerNuevo?.id && ownerNuevo.id !== antes.Owner?.id)
-  const sigueEnSdr = esSdrCalificacionCL({ ownerId: ownerNuevo?.id, ownerEmail: ownerNuevo?.email })
+  const sigueEnSdr = pais === "pe"
+    ? esSdrCalificacion("Perú", { ownerId: ownerNuevo?.id, ownerEmail: ownerNuevo?.email })
+    : esSdrCalificacionCL({ ownerId: ownerNuevo?.id, ownerEmail: ownerNuevo?.email })
 
   if (cambio && !sigueEnSdr) {
     const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
@@ -106,7 +115,7 @@ export async function POST(req: Request): Promise<NextResponse> {
           Note_Title: "Re-entrega a telemarketing (Tómbola Deals)",
           Note_Content:
             `${body.motivo || "Caso ya calificado por Vicky que estaba a nombre de una SDR de calificación."}\n` +
-            `Dueño anterior: ${antes.Owner?.name || "?"} (${antes.Owner?.email || "?"}). Nuevo dueño por la regla "Tómbola Deals 2026 Chile": ${ownerNuevo?.name} (${ownerNuevo?.email}).\n` +
+            `Dueño anterior: ${antes.Owner?.name || "?"} (${antes.Owner?.email || "?"}). Nuevo dueño por la regla ${nombreRegla}: ${ownerNuevo?.name} (${ownerNuevo?.email}).\n` +
             `Etapa ${antes.Stage || "?"} · ${antes.N_Empleados_que_marcan || "?"} personas. Al cliente no se le avisó del cambio: la presentación queda pendiente.`,
           Parent_Id: { module: { api_name: "Deals" }, id: dealId },
         }],
@@ -118,6 +127,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   return NextResponse.json({
     ok: true,
     dealId,
+    pais,
+    regla,
     deal: antes.Deal_Name || "",
     etapa: antes.Stage || "",
     duenoAntes: { nombre: antes.Owner?.name, email: antes.Owner?.email },

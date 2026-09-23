@@ -17,7 +17,7 @@
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
-import { reasignarLeadCalificacionCL, reasignarLeadTelemarketingCL, updateZohoLeadStatus, STATUS_ENTREGA_LEAD } from "@/lib/zoho-leads"
+import { reasignarLeadCalificacionCL, reasignarLeadTelemarketingCL, reasignarLeadPorTerritorio, updateZohoLeadStatus, STATUS_ENTREGA_LEAD } from "@/lib/zoho-leads"
 import { notificarLeadAsignado } from "@/lib/notificar-lead-asignado"
 
 export const dynamic = "force-dynamic"
@@ -51,7 +51,7 @@ export async function POST(req: Request): Promise<Response> {
   const token = await getZohoAccessToken()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
   const r = await fetch(
-    `${ZOHO_API}/crm/v3/Leads/${leadId}?fields=First_Name,Last_Name,Company,Phone,Lead_Status,Owner,N_Empleados_que_marcan,Converted__s`,
+    `${ZOHO_API}/crm/v3/Leads/${leadId}?fields=First_Name,Last_Name,Company,Phone,Lead_Status,Owner,N_Empleados_que_marcan,Converted__s,Territorio`,
     { headers: H, cache: "no-store" },
   )
   const lead = ((await r.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data?.[0]
@@ -66,8 +66,13 @@ export async function POST(req: Request): Promise<Response> {
   // Tope de entrega: "3. Contactado" (nunca "4." por API — cierra el blueprint).
   if (!/^\s*[3]\./.test(status)) await updateZohoLeadStatus(leadId, STATUS_ENTREGA_LEAD).catch(() => {})
 
-  const entrega =
-    regla === "tlmk"
+  // Perú (23-sep): las mismas reglas de Zoho con su entrada "Territorio = Perú"
+  // (calificado → TLMK/Mónica · sin calificar → SDR Ana/Priscila).
+  const territorio = String(lead.Territorio || "Chile")
+  const esPeru = /per/i.test(territorio)
+  const entrega = esPeru
+    ? await reasignarLeadPorTerritorio("Perú", leadId, { calificado: regla === "tlmk" }).catch((e) => ({ success: false, error: String(e) }))
+    : regla === "tlmk"
       ? await reasignarLeadCalificacionCL(leadId, { calificado: true }).catch((e) => ({ success: false, error: String(e) }))
       : await reasignarLeadTelemarketingCL(leadId).catch((e) => ({ success: false, error: String(e) }))
   const ownerEmail = String((entrega as { ownerEmail?: string }).ownerEmail || "")
@@ -87,5 +92,5 @@ export async function POST(req: Request): Promise<Response> {
     body: JSON.stringify({ data: [{ Note_Title: "Entrega manual del lead de Vicky", Note_Content: notaTexto }] }),
   }).catch(() => null)
   console.log(`[entregar-lead] ${leadId} regla=${regla} ok=${entrega.success} owner=${ownerEmail} avisado=${avisado}`)
-  return NextResponse.json({ ok: entrega.success, leadId, regla, statusAntes: status, duenoAntes, ownerEmail, avisado, error: (entrega as { error?: string }).error })
+  return NextResponse.json({ ok: entrega.success, leadId, regla, territorio, statusAntes: status, duenoAntes, ownerEmail, avisado, error: (entrega as { error?: string }).error })
 }

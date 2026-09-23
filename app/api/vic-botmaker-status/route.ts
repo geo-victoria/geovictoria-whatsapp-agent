@@ -188,6 +188,59 @@ export async function POST(req: Request): Promise<Response> {
     }).catch(() => null)
   }
 
+  // CAP DE MARKETING EN EL TOQUE 0 (131049, Lalo 23-sep, caso SOJHEBIENESTAR PE):
+  // Meta rechazó la plantilla de apertura porque el receptor ya está al tope
+  // de mensajes de marketing (de cualquier empresa). Si el cliente NUNCA
+  // escribió, no hay canal: el lead pasa a una persona (misma regla de país
+  // que el 131026) y el loop se cierra — seguir sumando toques que también
+  // van a fallar solo gasta la reputación de la línea.
+  const capMarketing = !noEntregable && /\b131049(\.0)?\b/.test(JSON.stringify(body))
+  if (capMarketing) {
+    try {
+      const rc = await fetch(
+        `${SUPABASE_URL}/rest/v1/vic_v3_conversations?contact=eq.${contact}&select=user_msg_count&limit=1`,
+        { headers: HEADERS, cache: "no-store" },
+      )
+      const conv = rc.ok ? (((await rc.json().catch(() => [])) as Array<{ user_msg_count?: number }>)[0] || null) : null
+      const nuncaEscribio = !conv || !(Number(conv.user_msg_count) > 0)
+      if (nuncaEscribio) {
+        const { getZohoAccessToken } = await import("@/lib/zoho-token")
+        const token = await getZohoAccessToken()
+        const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+        const s = await fetch(`${api}/crm/v3/Leads/search?phone=${contact}&converted=both&per_page=3`, {
+          headers: { Authorization: `Zoho-oauthtoken ${token}` },
+          cache: "no-store",
+        })
+        const leads = s.ok && s.status !== 204
+          ? ((await s.json().catch(() => ({}))) as {
+              data?: Array<{ id?: string; Owner?: { email?: string }; Converted_Deal?: { id?: string } | null; Territorio?: string }>
+            }).data || []
+          : []
+        const lead = leads.find((l) => !l.Converted_Deal?.id && /vicky@|info@geovictoria/.test((l.Owner?.email || "").toLowerCase()))
+        if (lead?.id) {
+          const { reasignarLeadPorTerritorio, reasignarLeadSdrInbound, reasignarLeadSdrInboundCO, agregarNotaLead } =
+            await import("@/lib/zoho-leads")
+          const territorio = contact.startsWith("51") ? "Perú" : contact.startsWith("56") ? "Chile" : ""
+          let r: { success: boolean; ownerEmail?: string } | null = null
+          if (territorio) r = await reasignarLeadPorTerritorio(territorio, String(lead.id), { calificado: false }).catch(() => null)
+          else r = await (contact.startsWith("57") ? reasignarLeadSdrInboundCO(String(lead.id)) : reasignarLeadSdrInbound(String(lead.id))).catch(() => null)
+          await agregarNotaLead(
+            String(lead.id),
+            "Vicky: WhatsApp de apertura NO entregado (tope de Meta)",
+            `Meta rechazó la plantilla de apertura para +${contact} con el código 131049 (tope de mensajes de marketing por receptor). El cliente no recibió ningún WhatsApp de Vicky y no ha escrito. El lead pasa a una persona: contactar por teléfono o por el correo del lead.`,
+          ).catch(() => false)
+          console.warn(`[botmaker-status] ${contact} CAP MARKETING 131049 en el toque 0 → lead ${lead.id} a ${r?.ownerEmail || "(falló)"} + loop cerrado`)
+        }
+        await fetch(`${SUPABASE_URL}/rest/v1/vic_loop?contact=eq.${contact}&estado=eq.activo`, {
+          method: "PATCH",
+          headers: { ...HEADERS, Prefer: "return=minimal" },
+          body: JSON.stringify({ estado: "cerrado", motivo_cierre: "wsp_cap_marketing" }),
+          cache: "no-store",
+        }).catch(() => null)
+      }
+    } catch { /* best-effort */ }
+  }
+
   // Cadencia outbound activa con e1 pendiente → adelantar el correo (started_at
   // retro-datado 2h; el filtro del cron (hrs >= 2) lo toma en el próximo tick).
   const res = await fetch(
