@@ -788,7 +788,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         const b = body as { orquestador?: boolean }
         const limpio = String(contact || "").replace(/\D/g, "")
         const pruebaOrq =
-          /^57900000\d{3}$/.test(limpio) ||
+          /^57900000\d{3,4}$/.test(limpio) ||
           (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(limpio)
         const usarOrq = b.orquestador === true || (b.orquestador !== false && (await orquestadorActivo("co")))
         if (usarOrq && pruebaOrq) {
@@ -800,7 +800,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       // Con `conHistorial` lee el historial real y persiste el turno (E2E
       // multi-turno), ACOTADO a sintéticos 57900000xxx y probadores internos.
       const pruebaOk =
-        /^57900000\d{3}$/.test(String(contact || "").replace(/\D/g, "")) ||
+        /^57900000\d{3,4}$/.test(String(contact || "").replace(/\D/g, "")) ||
         (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(
           String(contact || "").replace(/\D/g, ""),
         )
