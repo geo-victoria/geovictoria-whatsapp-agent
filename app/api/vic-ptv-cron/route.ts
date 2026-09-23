@@ -18,6 +18,7 @@
  * Auth: misma del resto de los crons del repo.
  */
 
+import { ccLiderTraspaso } from "@/lib/cc-lider"
 import { NextResponse } from "next/server"
 import { extraerDatosLeadDeChat } from "@/lib/extraer-datos-chat"
 import {
@@ -1088,7 +1089,7 @@ async function notificarTraspasoLeadEmail(
         data: [{
           from: { email: "vicky@geovictoria.com" },
           to: [{ email: destino }],
-          ...(esChile ? { cc: [{ email: (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim() }] } : {}),
+          ...(ccLiderTraspaso(fono).length ? { cc: ccLiderTraspaso(fono).map((email) => ({ email })) } : {}),
           subject: fono ? `Traspaso PTV: llamar YA a +${fono}` : "Nuevo lead de formulario web para contactar",
           content: `<html><body style="font-family:Segoe UI,Arial,sans-serif;color:#2d3748;"><p>Vicky te traspasó esta conversación de WhatsApp: ${cuerpo}</p><p><a href="https://crm.zoho.com/crm/org685875245/tab/Leads/${leadId}">Ver el Lead en Zoho</a></p></body></html>`,
           mail_format: "html",

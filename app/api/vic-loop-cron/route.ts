@@ -145,9 +145,11 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, CeldaTpl>> = {
   // toque 3 sigue ACCOUNT_PENDING: su celda queda vacía y se enciende con
   // LOOP_TPL_T3=vicky_loop_toque3 (o cambiando el default) al aprobarse.
   2: {
-    sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "", "", "vicky_pe_loop_toque2"),
-    con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "", "", "vicky_pe_loop_toque2"),
-    formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "", "", "vicky_pe_loop_toque2"),
+    // CO (23-sep): la misma vicky_loop_toque2 — los bots están unificados y el
+    // nombre no lleva marcador de país (la guarda del push lo deja pasar).
+    sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2", "", "vicky_pe_loop_toque2"),
+    con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2", "", "vicky_pe_loop_toque2"),
+    formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2", "", "vicky_pe_loop_toque2"),
     aceptada: ACEPTADA_CELDA,
   },
   3: {

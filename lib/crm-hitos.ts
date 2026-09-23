@@ -1,3 +1,4 @@
+import { ccLiderTraspaso } from "./cc-lider"
 import { esContactoCL } from "./origen-canal.ts"
 import { rosterSdrOperativo } from "./paises/ficha-operativa.ts"
 import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "./paises/co/tombola-zoho.ts"
@@ -826,7 +827,6 @@ function territorioConTombola(territorio: string | null | undefined): boolean {
  * Luna — la misma alerta del workflow de Zoho, gatillada por API porque el
  * sorteo ocurre DESPUÉS del create (el workflow on-create no la ve). */
 const TPL_TRASPASO_DEAL = (process.env.VICKY_TPL_TRASPASO_DEAL || "3525045000389574614").trim()
-const CC_TRASPASO_DEAL = (process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim()
 
 export async function notificarTraspasoDeal(
   dealId: string,
@@ -876,6 +876,8 @@ export async function notificarTraspasoDeal(
     // La copia a Victoria Luna es SOLO CHILE (Lalo 31-jul): CO y MX siguen
     // con sus reglas antiguas — el dueño recibe su aviso, sin CC.
     const esChile = /chile/i.test(String(fila?.Territorio || "")) || !fila?.Territorio
+    // Copia al líder del país (CL Victoria Luna · CO María Fernanda Cely, Lalo 23-sep).
+    const ccLider = ccLiderTraspaso(String(contact || ""), esChile ? "Chile" : String(fila?.Territorio || ""))
     const { correoEntregable } = await import("./correo-alias")
     const destino = await correoEntregable(owner.email)
     // La respuesta del send_mail NO se miraba: un 400 de Zoho quedaba en
@@ -888,7 +890,7 @@ export async function notificarTraspasoDeal(
         data: [{
           from: { email: "vicky@geovictoria.com" },
           to: [{ email: destino }],
-          ...(esChile && CC_TRASPASO_DEAL ? { cc: [{ email: CC_TRASPASO_DEAL }] } : {}),
+          ...(ccLider.length ? { cc: ccLider.map((email) => ({ email })) } : {}),
           template: { id: TPL_TRASPASO_DEAL },
         }],
       }),

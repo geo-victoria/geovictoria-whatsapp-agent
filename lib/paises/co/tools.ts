@@ -89,6 +89,40 @@ function fechaLegibleCO(slotIso: string): string {
 // oficina L-V 7:30-18:30, y la política de la mesa: los COLABORADORES se
 // atienden con el administrador de su empresa — solo los administradores
 // tienen soporte directo de GeoVictoria.
+/**
+ * SOPORTE INVENTADO, versión Colombia (23-sep; herencia del blindaje chileno
+ * del 01-sep y del peruano del 15-sep): fijos +56, la Mesa CL (600 914 3819 /
+ * WhatsApp de soporte CL) y cualquier correo @geovictoria.com fuera de la
+ * lista blanca (equipo CO + usuarios activos de Zoho) pasan a la tarjeta
+ * oficial de Colombia (ficha operativa). Best-effort.
+ */
+const CORREOS_CO_FIJOS = new Set([
+  "soporte.co", "vicky", "info", "agordillo", "egalindo", "glinares", "mcelyv", "amorenom", "mcorredor", "snavarrob", "dcrodriguez", "msanabriat", "jnarinoch",
+])
+export async function blindarSoporteInventadoCO(texto: string): Promise<string> {
+  if (!texto) return texto
+  const { fichaOperativa } = await import("../ficha-operativa")
+  const sop = fichaOperativa("co").soporte
+  const tel = sop?.telefono || "+57 601 508 8941"
+  const mail = sop?.email || "soporte.co@geovictoria.com"
+  let permitidos = new Set<string>()
+  try {
+    const { emailsEquipoZoho } = await import("../../emails-equipo")
+    permitidos = await emailsEquipoZoho()
+  } catch { /* lista fija */ }
+  let salida = texto
+    .replace(/\+?\s*56\s*[\s.\-]*2[\s.\-]*\d{4}[\s.\-]*\d{4}/g, tel)
+    .replace(/\b600\s*914\s*3819\b/g, tel)
+    .replace(/\+?\s*56\s*9[\s.\-]*4401[\s.\-]*3873/g, tel)
+  salida = salida.replace(/\b([a-z0-9._-]+)@geovictoria\.com\b/gi, (todo, usuario: string) => {
+    const u = usuario.toLowerCase()
+    if (CORREOS_CO_FIJOS.has(u)) return todo
+    if (permitidos.has(`${u}@geovictoria.com`)) return todo
+    return mail
+  })
+  return salida
+}
+
 const MENSAJE_ESCALAMIENTO_SOPORTE_CO =
   "Para esta consulta te recomiendo contactar directamente a nuestra Mesa de Ayuda de Colombia:\n" +
   "📧 Email: *soporte.co@geovictoria.com* (horario continuado)\n" +

@@ -61,6 +61,20 @@ const RAZON_POR_MOTIVO: Record<string, string> = {
   no_prospecto: "11. Lead mal Calificado",
   wsp_no_entregable: "5. Cierre por Inactividad",
 }
+/**
+ * La razón de pérdida es un picklist POR LAYOUT: Chile numera ("5. Cierre por
+ * Inactividad"); Perú y Colombia NO ("Cierre por Inactividad", "Otro") y no
+ * tienen "Lead mal Calificado" (verificado en las transiciones de sus
+ * blueprints el 23-sep). Además esas dos exigen `Contratar_n_otro_Proveedor`.
+ */
+function razonParaPais(pais: string, razonCL: string): { razon: string; extra: Record<string, unknown> } {
+  if (pais === "pe" || pais === "co") {
+    const sinNumero = razonCL.replace(/^\d+\.\s*/, "")
+    const razon = /Lead mal Calificado/i.test(sinNumero) ? "Otro" : sinNumero
+    return { razon, extra: { Contratar_n_otro_Proveedor: "No" } }
+  }
+  return { razon: razonCL, extra: {} }
+}
 
 export type ResultadoDeal = {
   dealId: string
@@ -191,7 +205,8 @@ async function leerOwner(H: Record<string, string>, api: string, modulo: "Deals"
 }
 
 /** Cierre Perdido por transición del blueprint; sin proceso, PUT directo. Verifica el Stage releído. */
-async function cerrarPerdido(H: Record<string, string>, api: string, dealId: string, razon: string): Promise<{ ok: boolean; detalle: string }> {
+async function cerrarPerdido(H: Record<string, string>, api: string, dealId: string, razonCL: string, pais = "cl"): Promise<{ ok: boolean; detalle: string }> {
+  const { razon, extra } = razonParaPais(pais, razonCL)
   try {
     const bpRes = await fetch(`${api}/crm/v3/Deals/${dealId}/actions/blueprint`, { headers: H, cache: "no-store" })
     const bp = (await bpRes.json().catch(() => ({}))) as {
@@ -203,7 +218,7 @@ async function cerrarPerdido(H: Record<string, string>, api: string, dealId: str
     if (bpRes.ok && bp?.code !== "RECORD_NOT_IN_PROCESS") {
       const trans = (bp?.blueprint?.transitions || []).find((t) => /cierre perdido/i.test(String(t.next_field_value || t.name || "")))
       if (trans) {
-        const data: Record<string, unknown> = { Raz_n_de_P_rdida: razon }
+        const data: Record<string, unknown> = { Raz_n_de_P_rdida: razon, ...extra }
         const exec = await fetch(`${api}/crm/v3/Deals/${dealId}/actions/blueprint`, {
           method: "PUT",
           headers: H,
@@ -229,7 +244,7 @@ async function cerrarPerdido(H: Record<string, string>, api: string, dealId: str
     headers: H,
     cache: "no-store",
     body: JSON.stringify({
-      data: [{ id: dealId, Stage: "Cierre Perdido", Raz_n_de_P_rdida: razon }],
+      data: [{ id: dealId, Stage: "Cierre Perdido", Raz_n_de_P_rdida: razon, ...extra }],
       trigger: ["blueprint"],
       skip_feature_execution: [{ name: "assignment_rules" }],
     }),
@@ -389,7 +404,7 @@ export async function barrerDealsVicky(
         const razon = RAZON_POR_MOTIVO[motivoCierre]
         const detalle = `conversación cerrada (${motivoCierre}) → Cierre Perdido "${razon}"`
         if (!dry) {
-          const r = await cerrarPerdido(H, api, d.id, razon)
+          const r = await cerrarPerdido(H, api, d.id, razon, pais)
           await nota(
             H,
             api,

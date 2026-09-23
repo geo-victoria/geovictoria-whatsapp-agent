@@ -1,14 +1,15 @@
 /**
  * PERFIL DE TURNO DE COLOMBIA para el orquestador único (22-sep): prompt
  * núcleo + tools únicas, ciudad/NIT, la línea +57 y la agenda solo si existe
- * el evento de Cal. Sin tarjeta de soporte propia todavía (no se blinda con
- * números chilenos: identidad).
+ * el evento de Cal. Tarjeta de soporte propia (Mesa de Ayuda CO, 23-sep):
+ * el blindaje reemplaza los canales chilenos por los colombianos.
  */
 import type { PerfilTurno } from "../../orquestador-turno"
 import type { ConversationMessage } from "../../agent-loop"
 import { PERFIL_CO } from "./index"
 import { getSystemPromptCONucleo } from "./prompt-nucleo"
 import { TOOL_SCHEMAS_CO_UNIFICADAS, buildDispatchCOUnificado } from "./tools-unificadas"
+import { blindarSoporteInventadoCO } from "./tools"
 import { agendaCoActiva } from "./agenda"
 import { derivacionDePais } from "../../umbral-autonomia"
 
@@ -37,7 +38,7 @@ export const PERFIL_TURNO_CO: PerfilTurno = {
   tools: (contact) => ({ schemas: TOOL_SCHEMAS_CO_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchCOUnificado(contact) }),
   derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: agendaCoActiva() }),
   esFlujoCotizacion: esFlujoCotizacionCO,
-  blindarSoporte: (reply) => reply,
+  blindarSoporte: (reply) => blindarSoporteInventadoCO(reply),
   certificacionDT: false,
   hitoPorChat: false,
   contextoCotizacionExistente: (punteros) => {

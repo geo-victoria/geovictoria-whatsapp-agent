@@ -57,13 +57,20 @@ const OWNER_VENTA_AUTONOMA_DEFAULT = "3525045000583802005" // Aleydis Araque
 // env VICKY_OWNER_VENTA_AUTONOMA_PE, mismo patrón que Chile.
 const OWNER_VENTA_AUTONOMA_DEFAULT_PE = fichaOperativa("pe").equipo.ventaAutonoma?.zohoId || "3525045000521799149" // Cecilia Valverde
 
-type PaisVentaAutonoma = "cl" | "pe"
+// COLOMBIA (Lalo 23-sep, "la venta autónoma pasa a Gabriela"): la gestora
+// comercial es Gabriela Linares (ficha operativa CO). Supersede el "CO conserva
+// al primer dueño" del 05-ago SOLO para la venta autónoma post-pago. kv
+// `owner_venta_autonoma_co` / env VICKY_OWNER_VENTA_AUTONOMA_CO.
+const OWNER_VENTA_AUTONOMA_DEFAULT_CO = fichaOperativa("co").equipo.ventaAutonoma?.zohoId || "3525045000279036001" // Gabriela Linares
+
+type PaisVentaAutonoma = "cl" | "pe" | "co"
 
 function paisVentaAutonoma(contact: string): PaisVentaAutonoma | null {
   if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return "cl" // Messenger/Instagram = CL
   const c = String(contact || "").replace(/\D/g, "")
   if (c.startsWith("56") && c.length >= 11) return "cl"
   if (c.startsWith("51") && c.length === 11) return "pe"
+  if (c.startsWith("57") && c.length >= 12) return "co"
   return null
 }
 
@@ -71,6 +78,10 @@ async function ownerVentaAutonoma(pais: PaisVentaAutonoma = "cl"): Promise<strin
   if (pais === "pe") {
     const kv = (await getKvValue("owner_venta_autonoma_pe").catch(() => null)) || ""
     return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA_PE || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT_PE
+  }
+  if (pais === "co") {
+    const kv = (await getKvValue("owner_venta_autonoma_co").catch(() => null)) || ""
+    return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA_CO || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT_CO
   }
   const kv = (await getKvValue("owner_venta_autonoma").catch(() => null)) || ""
   return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT
@@ -90,7 +101,9 @@ async function datosOwnerAutonoma(
   const fallback: EjecutivoAutonoma =
     pais === "pe"
       ? { nombre: "Cecilia Valverde", email: "cvalverde@geovictoria.com", telefono: "+51 982 446 284" }
-      : { nombre: "Aleydis Araque", email: "aaraque@geovictoria.com", telefono: "+56 9 8291 6868" }
+      : pais === "co"
+        ? { nombre: "Gabriela Linares", email: "glinares@geovictoria.com", telefono: "" }
+        : { nombre: "Aleydis Araque", email: "aaraque@geovictoria.com", telefono: "+56 9 8291 6868" }
   try {
     const r = await fetch(`${api}/crm/v3/users/${ownerId}`, { headers: H, cache: "no-store" })
     if (!r.ok) return fallback
@@ -147,8 +160,8 @@ async function asignarVentaAutonoma(
   quoteId: string,
 ): Promise<{ autonoma: boolean; ejecutivo?: EjecutivoAutonoma }> {
   try {
-    // CHILE (Lalo 31-jul) y PERÚ (Lalo 15-sep, gestora Cecilia Valverde);
-    // CO y MX siguen con sus reglas antiguas (dueños fijos).
+    // CHILE (Lalo 31-jul), PERÚ (Lalo 15-sep, Cecilia Valverde) y COLOMBIA
+    // (Lalo 23-sep, Gabriela Linares); MX sigue con su regla antigua (dueño fijo).
     const paisVenta = paisVentaAutonoma(contact)
     if (!paisVenta) return { autonoma: false }
     const owner = await ownerVentaAutonoma(paisVenta)

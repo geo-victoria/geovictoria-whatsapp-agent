@@ -106,6 +106,8 @@ export type FichaOperativa = {
    * finanzas CL registra el pago desde ahí (03-ago).
    */
   cobranzaCc: string
+  /** Mesa de ayuda del país (tarjeta oficial); vacío = sin tarjeta propia. */
+  soporte?: { email: string; telefono: string; horario: string }
   /** Lo que la ficha declara que FALTA para este país (texto para una persona). */
   pendientes: string[]
 }
@@ -278,11 +280,13 @@ const FICHA_CO: FichaOperativa = {
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
+  // Mesa de Ayuda GeoVictoria Colombia (tarjeta oficial, Lalo 23-sep): correo
+  // con horario continuado, fijo de oficina L-V 7:30-18:30; solo los
+  // administradores tienen soporte directo.
+  soporte: { email: "soporte.co@geovictoria.com", telefono: "+57 601 508 8941", horario: "lunes a viernes de 7:30 a 18:30" },
   pendientes: [
-    "Entrada 'Colombia + rango 1-10/11-20/1-19 → Vicky' ANTES de la 34 en la regla global de marketing, para que el form ≤20 le llegue a Vicky (como la 36 de Perú).",
     "Sesiones de espejo del equipo CO en el worker (decidir quiénes: telemarketing mcorredor/snavarrob/dcrodriguez, SDR msanabriat/jnarinoch/egalindo).",
     "Teléfonos del equipo CO (ninguno de los seis ni las líderes lo tienen en su ficha de Zoho).",
-    "Cablear la venta autónoma CO a Gabriela en traspaso-postpago (hoy CO conserva al primer dueño, regla 05-ago) — exige VB de Lalo.",
   ],
 }
 

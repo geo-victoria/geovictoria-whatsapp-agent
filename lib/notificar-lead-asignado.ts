@@ -19,6 +19,7 @@
  * Best-effort puro: jamás lanza ni bloquea la conversación (principio 24-jul).
  */
 
+import { ccLiderTraspaso } from "./cc-lider"
 import { getZohoAccessToken } from "./zoho-token"
 
 export type LeadAsignadoInfo = {
@@ -82,7 +83,7 @@ export async function notificarLeadAsignado(info: LeadAsignadoInfo): Promise<boo
 
     // La copia de la acción oficial (fija) más la de traspaso chilena, sin
     // repetir a nadie ni copiarse al propio destinatario.
-    const cc = [...ccFijos, ...(esChile ? [(process.env.VICKY_TRASPASO_CC || "vluna@geovictoria.com").trim()] : [])]
+    const cc = [...ccFijos, ...ccLiderTraspaso(fono || "")]
       .filter((e, i, a) => e && e.toLowerCase() !== destino.toLowerCase() && a.indexOf(e) === i)
 
     const res = await fetch(`${api}/crm/v3/Leads/${leadId}/actions/send_mail`, {
