@@ -2,8 +2,9 @@
  * Motor de cotización referencial de MÉXICO.
  *
  * Reglas de negocio (documento oficial de tropicalización MX):
- *   - Plan asistencia: 1-10 → $1,000 fijo · 11-20 → $83/usuario ·
- *     21-30 → $79/usuario · 31-50 → $75/usuario.
+ *   - Plan asistencia: 1-10 → $1,000 fijo · 11-20 → $83/usuario.
+ *     RANGO DE VICKY = 1-20 (igual que Chile, Lalo 23-sep); 21-30 $79 y
+ *     31-50 $75 quedan solo como excepción por contacto.
  *   - Reloj: renta $350/mes por unidad en la zona base (CDMX y Zona
  *     Metropolitana) · $400/mes fuera de ella CON EL ENVÍO INCLUIDO
  *     (homólogo del +0,05 UF de regiones en Chile) · venta $2,100.
@@ -113,7 +114,7 @@ function tierPlanMX(userCount: number) {
   )
   if (!tier) {
     throw new Error(
-      `El plan de México cubre de 1 a 50 usuarios (pedidos: ${userCount}). Sobre 50, derivar a un ejecutivo.`,
+      `El catálogo de México cubre de 1 a 50 usuarios (pedidos: ${userCount}); Vicky cotiza solo hasta 20 (umbral, igual que Chile). Sobre eso, derivar a un ejecutivo.`,
     )
   }
   return tier

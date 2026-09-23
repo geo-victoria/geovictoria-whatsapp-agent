@@ -11,7 +11,8 @@
  *   notas de venta confirmadas en Creator, S/5,5 por usuario) con PISO de 10
  *   personas (propuesta aceptada por Lalo; el piso lo valida Diego Bendezú):
  *     1-10:  S/55/mes tarifa FIJA (= 10 × S/5,5)
- *     11-50: S/5,5 por usuario/mes
+ *     11-20: S/5,5 por usuario/mes  ← RANGO DE VICKY = 1-20, igual que Chile
+ *            (Lalo 23-sep). 21-50 sigue a S/5,5 solo como excepción por contacto.
  *   Cruzado con Chile en dólares: Mónica es Chile −30 % en todo el rango; la
  *   lista de agosto era Chile +26 % en 1-10 y más del doble en 11-20.
  *   Sobre 50 la escalera sigue la de Mónica (51-100 S/5 · 101-500 S/4,5) para la
@@ -104,7 +105,13 @@ export const CATALOGO_MODULOS_PE: ModuloSoftware[] = [
     tiers: [
       // Piso de 10 personas = 10 × S/5,5 (Lalo 17-sep).
       { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 55 },
-      { minUsuarios: 11, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 5.5 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 5.5 },
+      // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
+      // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
+      // queda, como el 21-50 de Chile, solo para la excepción por contacto
+      // (umbral_contacto_) y como referencia de la tabla de cobro. La guarda del
+      // umbral (lib/umbral-autonomia + agent-loop) rechaza la tool sobre 20/10.
+      { minUsuarios: 21, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 5.5 },
     ],
     disponibleParaVicky: true,
   },

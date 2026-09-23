@@ -11,9 +11,9 @@
  * Precios México (MXN) — plan mensual asistencia:
  *   Asistencia 1-10:  $1,000/mes tarifa FIJA (no existe el micro-plan de 1
  *                     usuario de Chile: el tramo 1-10 parte en 1)
- *   Asistencia 11-20: $83/usuario/mes
- *   Asistencia 21-30: $79/usuario/mes
- *   Asistencia 31-50: $75/usuario/mes
+ *   Asistencia 11-20: $83/usuario/mes   ← RANGO DE VICKY = 1-20, igual que Chile (Lalo 23-sep)
+ *   Asistencia 21-30: $79/usuario/mes   (fuera del rango de Vicky: solo excepción por contacto)
+ *   Asistencia 31-50: $75/usuario/mes   (ídem)
  *   Reloj venta:      $2,100 pago único · renta $350/mes
  *   Envío:      renta $0 · venta $400 por punto (MISMA tarifa todo México,
  *               no descontable — el envío no depende de la zona)
@@ -72,6 +72,11 @@ export const CATALOGO_MODULOS_MX: ModuloSoftware[] = [
     tiers: [
       { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 1000 },
       { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 83 },
+      // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
+      // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
+      // queda, como el 21-50 de Chile, solo para la excepción por contacto
+      // (umbral_contacto_) y como referencia de la tabla de cobro. La guarda del
+      // umbral (lib/umbral-autonomia + agent-loop) rechaza la tool sobre 20/10.
       { minUsuarios: 21, maxUsuarios: 30, modalidad: "por_usuario", precioUF: 79 },
       { minUsuarios: 31, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 75 },
     ],

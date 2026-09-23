@@ -2,7 +2,9 @@
  * Motor de cotización referencial de COLOMBIA.
  *
  * Reglas de negocio (cerradas con Lalo 09/10-jul):
- *   - Plan asistencia: 1-10 → $315.000 fijo · 11-50 → $13.700 por usuario.
+ *   - Plan asistencia: 1-10 → $315.000 fijo · 11-20 → $13.700 por usuario.
+ *     RANGO DE VICKY = 1-20 (igual que Chile, Lalo 23-sep); el 21-50 del
+ *     catálogo es solo excepción por contacto.
  *   - Reloj: alquiler $86.000/mes por unidad en la zona base (Bogotá y
  *     conurbados) · $98.000/mes fuera de ella CON EL DESPACHO INCLUIDO
  *     (homólogo del +0,05 UF de regiones en Chile) · venta $620.000.
@@ -122,7 +124,7 @@ export function precioPlanCO(userCount: number): number {
   )
   if (!tier) {
     throw new Error(
-      `El plan de Colombia cubre de 1 a 50 usuarios (pedidos: ${userCount}). Sobre 50, derivar a un ejecutivo.`,
+      `El catálogo de Colombia cubre de 1 a 50 usuarios (pedidos: ${userCount}); Vicky cotiza solo hasta 20 (umbral, igual que Chile). Sobre eso, derivar a un ejecutivo.`,
     )
   }
   return tier.modalidad === "fijo" ? tier.precioUF : tier.precioUF * userCount

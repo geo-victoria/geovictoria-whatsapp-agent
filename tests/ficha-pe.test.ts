@@ -145,3 +145,16 @@ test("agenda PE = las tools chilenas sobre el evento de Mónica (Lalo 21-sep)", 
   assert.doesNotMatch(texto, /Perú NO tiene agenda en línea/)
   assert.match(texto, /consultar_disponibilidad_horario/)
 })
+
+// RANGO DE VICKY = 1-20 igual que Chile (Lalo 23-sep): la línea de la tool en la
+// ficha usa la frase ANCLA del núcleo para que aplicarUmbral la reescriba al
+// umbral vivo. Si alguien la vuelve a redactar "para 1-50 personas", el prompt
+// de Perú declara 50 mientras Chile declara 20.
+test("PE: la tool cotizar_referencial declara el umbral vivo, no 50", async () => {
+  const { armarPromptBase } = await import("../lib/prompt-nucleo/armar.ts")
+  const t20 = armarPromptBase(FICHA_PE, "(catalogo)", 20)
+  assert.match(t20, /Solo funciona para 1-20 trabajadores/)
+  assert.doesNotMatch(t20, /1-50 personas/)
+  const t10 = armarPromptBase(FICHA_PE, "(catalogo)", 10)
+  assert.match(t10, /Solo funciona para 1-10 trabajadores/)
+})

@@ -2,9 +2,9 @@
  * Motor de cotización referencial de PERÚ.
  *
  * Reglas de negocio (excel Tropicalizacion_Vicky_2, 04-ago):
- *   - Plan asistencia: 1-10 → S/100 fijo · 11-20 → S/200 fijo ·
- *     21-50 → S/5/usuario. (Anomalía 21+ documentada en pe/catalogo.ts:
- *     literal del excel, aprobada.)
+ *   - Plan asistencia (lista de Mónica, 17-sep): 1-10 → S/55 fijo ·
+ *     11-20 → S/5,5/usuario. RANGO DE VICKY = 1-20 (igual que Chile, Lalo
+ *     23-sep); el 21-50 del catálogo es solo excepción por contacto.
  *   - Reloj: precio de LISTA en USD (RELOJ_PE_USD: arriendo US$24/mes ·
  *     venta US$90) convertido a SOLES ENTEROS con el dólar venta SUNAT del
  *     día (`tipoCambio` de la entrada). El tipo de cambio queda en la
@@ -149,7 +149,7 @@ function tierPlanPE(userCount: number) {
   )
   if (!tier) {
     throw new Error(
-      `El plan de Perú cubre de 1 a 50 usuarios (pedidos: ${userCount}). Sobre 50, derivar a un ejecutivo.`,
+      `El catálogo de Perú cubre de 1 a 50 usuarios (pedidos: ${userCount}); Vicky cotiza solo hasta 20 (umbral, igual que Chile). Sobre eso, derivar a un ejecutivo.`,
     )
   }
   return tier

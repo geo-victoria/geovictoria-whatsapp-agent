@@ -10,8 +10,10 @@
  *
  * Precios Colombia (COP) — DEFINICIONES CERRADAS (Lalo, 09-jul):
  *   Asistencia 1-10:  $315.000/mes fijo (sin micro-plan de 1 persona)
- *   Asistencia 11-50: $13.700/usuario/mes ("la más competitiva": el rango fijo
- *                     corta en 10, NO en 20 como muestra Creator hoy)
+ *   Asistencia 11-20: $13.700/usuario/mes ("la más competitiva": el rango fijo
+ *                     corta en 10, NO en 20 como muestra Creator hoy).
+ *                     RANGO DE VICKY = 1-20, igual que Chile (Lalo 23-sep);
+ *                     21-50 sigue a $13.700 solo como excepción por contacto.
  *   Reloj venta:      $620.000 pago único · arriendo $86.000/mes
  *   ENVÍO/INSTALACIÓN (SUPERSEDIDO 22-sep, propuesta aprobada por Lalo —
  *   los números vigentes viven en TARIFAS_CO de co/cotizar.ts): alquiler
@@ -50,7 +52,13 @@ export const CATALOGO_MODULOS_CO: ModuloSoftware[] = [
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
       { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 315000 },
-      { minUsuarios: 11, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 13700 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 13700 },
+      // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
+      // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
+      // queda, como el 21-50 de Chile, solo para la excepción por contacto
+      // (umbral_contacto_) y como referencia de la tabla de cobro. La guarda del
+      // umbral (lib/umbral-autonomia + agent-loop) rechaza la tool sobre 20/10.
+      { minUsuarios: 21, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 13700 },
     ],
     disponibleParaVicky: true,
   },

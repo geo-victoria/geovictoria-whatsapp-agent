@@ -108,3 +108,12 @@ test("descuento CO = Chile (Lalo 21-sep): escalera 10 → 20 % sobre el plan, 6 
   assert.doesNotMatch(texto, /no hay descuentos en Colombia|NO hay escalera de descuento/i)
   assert.match(texto, /10 % → 20 %/)
 })
+
+// RANGO DE VICKY = 1-20 igual que Chile (Lalo 23-sep): ver el test gemelo de PE.
+test("CO: la tool cotizar_referencial declara el umbral vivo, no 50", async () => {
+  const { armarPromptBase } = await import("../lib/prompt-nucleo/armar.ts")
+  const { FICHA_CO } = await import("../lib/paises/co/ficha.ts")
+  const t20 = armarPromptBase(FICHA_CO, "(catalogo)", 20)
+  assert.match(t20, /Solo funciona para 1-20 trabajadores/)
+  assert.doesNotMatch(t20, /1-50 personas/)
+})
