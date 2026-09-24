@@ -66,7 +66,7 @@ export function variablesAltaFlow(
     // pantalla EMPRESA y el bloque #altaflow arranca ahí (sin pasar por el
     // endpoint), así que también viajan como variables. Sin ellas los labels
     // saldrían vacíos. Defaults = Chile.
-    alta_etq_doc: v("etiqueta_documento") || "RUT",
+    alta_etq_doc: v("etiqueta_documento") || "RUT de la empresa",
     alta_etq_doc_ayuda: v("etiqueta_documento_ayuda") || "Ej: 76123456-0",
     alta_etq_zona: v("etiqueta_zona") || "Comuna",
   }

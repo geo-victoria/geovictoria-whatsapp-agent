@@ -179,7 +179,8 @@ export async function GET(req: Request): Promise<NextResponse> {
     ok: true,
     prefill: {
       pais: b.pais,
-      etiqueta_documento: etiquetaDoc,
+      // Etiqueta del campo (Lalo 24-sep): "RUT de la empresa", no "RUT" a secas.
+      etiqueta_documento: natural ? etiquetaDoc : `${etiquetaDoc} de la empresa`,
       etiqueta_documento_ayuda: ayudaDoc,
       etiqueta_admin_documento: etiquetaAdmin,
       etiqueta_admin_documento_ayuda:
