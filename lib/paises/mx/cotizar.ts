@@ -36,6 +36,7 @@
  */
 
 import { CATALOGO_MODULOS_MX } from "./catalogo.ts"
+import { nombreEquipoMX } from "./nombre-equipo.ts"
 import { ESCALERA_DESCUENTO_MX, escalonDescuentoMX, pctDescuentoMX } from "./descuento.ts"
 import type { ZonaMX } from "./geografia.ts"
 export type { ZonaMX } from "./geografia.ts"
@@ -290,7 +291,7 @@ export function cotizarMX(input: CotizacionMXInput): {
       const enBase = g.zona === "cdmx_metro"
       const envio = enBase ? TARIFAS_MX.envioVenta.base : TARIFAS_MX.envioVenta.fuera
       lineas.push({
-        concepto: `Envío de reloj (${g.ubicacion})${g.envios > 1 ? ` × ${g.envios}` : ""}`,
+        concepto: `Envío de reloj checador (${g.ubicacion})${g.envios > 1 ? ` × ${g.envios}` : ""}`,
         detalle:
           g.envios > 1
             ? `${enBase ? "CDMX y Zona Metropolitana" : "Fuera de CDMX"} — ${g.envios} × ${formatearMXN(envio)}`
@@ -304,7 +305,7 @@ export function cotizarMX(input: CotizacionMXInput): {
   // Instalación técnica (ambas modalidades): bonificada en $0 o cobrada.
   for (const li of lineasInstalacion) {
     lineas.push({
-      concepto: `Instalación técnica del reloj (${li.ubicacion})`,
+      concepto: `Instalación técnica del reloj checador (${li.ubicacion})`,
       detalle: li.bonificada ? `${li.cantidad} × ${formatearMXN(li.unit)} — bonificada en renta (CDMX y Zona Metropolitana)` : `${li.cantidad} × ${formatearMXN(li.unit)}`,
       neto: li.bonificada ? 0 : li.unit * li.cantidad,
       iva: li.bonificada ? 0 : li.unit * li.cantidad * IVA_MX,
@@ -550,6 +551,7 @@ export function cotizarMX(input: CotizacionMXInput): {
     pagoInicialTotal: redondear2(pagoInicialTotal),
     descuentoPct: pctDescuento,
     escalonDescuento,
-    mensajeParaProspecto: mensaje,
+    // "reloj" a secas jamás en México (Lalo 24-sep): "reloj checador" o "checador".
+    mensajeParaProspecto: nombreEquipoMX(mensaje),
   }
 }

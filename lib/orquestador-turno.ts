@@ -1674,6 +1674,7 @@ export async function procesarTurno(
     // las reglas del prompt): anti-voseo (incl. voseo chileno -ái/-ís), quitar
     // negritas y quitar signos de apertura ¡/¿.
     reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(reply)))
+    if (perfil.pais === "mx") reply = (await import("./paises/mx/nombre-equipo")).nombreEquipoMX(reply)
 
     // 2.7b. HONESTIDAD DE ENTREGA DE CORREO (26-jul). Casos +56983757162 y
     // +56922041679: Vicky afirmó que la cotización "ya te llegó al correo"
@@ -1980,6 +1981,11 @@ export async function procesarTurno(
           )
           replyFinal = cinturon.reemplazo
         }
+      }
+      // MÉXICO (Lalo 24-sep): "reloj" a secas jamás — "reloj checador" o "checador".
+      if (perfil.pais === "mx" && replyFinal) {
+        const { nombreEquipoMX } = await import("./paises/mx/nombre-equipo")
+        replyFinal = nombreEquipoMX(replyFinal)
       }
       let partes = partirEnBurbujas(replyFinal)
       // ONBOARDING: máximo 3 burbujas por turno (tope 2 del 24-ago, piloto

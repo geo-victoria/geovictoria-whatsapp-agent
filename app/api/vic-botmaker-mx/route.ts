@@ -71,6 +71,7 @@ import { reenviarSiNoEsDeEstePais } from "@/lib/ruteo-pais"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { clasificarSenalEspera, resetLoop, enrolarEnLoop } from "@/lib/loop-v2"
 import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
+import { nombreEquipoMX } from "@/lib/paises/mx/nombre-equipo"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
 
@@ -484,6 +485,8 @@ async function processOneTurnCO(contact: string, message: string, apiKey: string
   }
   // Burbujas por punto aparte (Rodrigo 09-ago, paridad CL): cada párrafo
   // es un mensaje; los bloques estructurados no se fragmentan.
+  // "reloj" a secas jamás en México (Lalo 24-sep).
+  reply = nombreEquipoMX(reply)
   let sent = true
   for (const [bi, burbuja] of partirEnBurbujas(reply).entries()) {
     if (bi > 0) await sendTypingIndicator(contact, true).catch(() => {})
@@ -767,7 +770,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       // refleje lo que vería el cliente. La comparación va ANTES de sanear.
       const simRaw =
         (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
-      let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(simRaw)))
+      let reply = nombreEquipoMX(quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(simRaw))))
       const simToolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
       if (
         simToolCalls.some((c) => c.name === "marcar_no_contactar" && c.ok) &&

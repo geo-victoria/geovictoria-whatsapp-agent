@@ -44,7 +44,7 @@ export const FICHA_MX: FichaPrompt = {
   vendedoraLocal: "vendedora mexicana",
   whatsappLocal: "WhatsApp mexicano",
   reglaTuteo:
-    '- TUTEO mexicano neutro y cálido SIEMPRE ("tú tienes / puedes / cuéntame / mira"), desde el PRIMER mensaje hasta el último. JAMÁS voseo ("vos", "tenés", "podés") ni usted sostenido, ni chilenismos, colombianismos o peruanismos.',
+    '- TUTEO mexicano neutro y cálido SIEMPRE ("tú tienes / puedes / cuéntame / mira"), desde el PRIMER mensaje hasta el último. JAMÁS voseo ("vos", "tenés", "podés") ni usted sostenido, ni chilenismos, colombianismos o peruanismos.\n- EL EQUIPO SE LLAMA "reloj checador" o "checador" (Lalo 24-sep): JAMÁS "reloj" a secas — ni "el reloj", ni "app y reloj", ni "dónde va el reloj". Di "el checador", "app y checador", "dónde va el checador".',
   equipoComercialLocal: "equipo comercial de México",
   tuLocal: "tú mexicano",
   registroNeutro: "mexicano neutro",
