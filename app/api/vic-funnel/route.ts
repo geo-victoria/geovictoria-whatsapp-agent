@@ -4854,7 +4854,10 @@ function renderInboundDiario(
     // contra el set de pagadas de TODO el rango, no solo de esa semana (una
     // aceptada el lunes que pagó el jueves ya no está pendiente).
     const pagadasGlobal = new Set(elementosDe("pagada", "TOTAL"))
-    const cuenta = (k: string, lado: "in" | "out"): Fila => {
+    // "all" = inbound + outbound sin filtrar (Rodrigo 24-sep, "una tabla que
+    // agrupe inbound + outbound"): cada elemento es de un lado o del otro,
+    // así que sin filtro la fila es exactamente la suma de las dos tablas.
+    const cuenta = (k: string, lado: "in" | "out" | "all"): Fila => {
       const f: Fila = { entrantes: 0, precio: 0, formal: 0, aceptadaSinPagar: 0, pagada: 0, pagadaBase: 0, react: 0 }
       for (const et of ["entrantes", "precio", "formal", "pagada"] as const) {
         const u = new Set(elementosDe(et, k))
@@ -4862,7 +4865,7 @@ function renderInboundDiario(
         for (const el of u) {
           const tel = telDeElemento(el)
           const esOut = opts.outboundTels!.has(tel)
-          if ((lado === "out") !== esOut) continue
+          if (lado !== "all" && (lado === "out") !== esOut) continue
           n++
         }
         f[et] = n
@@ -4870,7 +4873,7 @@ function renderInboundDiario(
       for (const el of new Set(elementosDe("aceptada", k))) {
         if (pagadasGlobal.has(el)) continue
         const esOut = opts.outboundTels!.has(telDeElemento(el))
-        if ((lado === "out") !== esOut) continue
+        if (lado !== "all" && (lado === "out") !== esOut) continue
         f.aceptadaSinPagar++
       }
       f.pagadaBase = f.pagada
@@ -4888,15 +4891,16 @@ function renderInboundDiario(
       const pct = Math.min(100, crudo)
       return `<b style="color:#1b5e20"${crudo > 100 ? ` title="${f.pagada} pagadas con ${f.precio} precios vistos en la semana: el resto vio el precio en semanas anteriores (reactivaciones)"` : ""}>${pct}%${crudo > 100 ? "*" : ""}</b>`
     }
-    const tabla = (lado: "in" | "out") => {
+    const tabla = (lado: "in" | "out" | "all") => {
       const T: Fila = { entrantes: 0, precio: 0, formal: 0, aceptadaSinPagar: 0, pagada: 0, pagadaBase: 0, react: 0 }
       // CADA NÚMERO CLICKEABLE (Rodrigo 22-sep): mismo motor de detalle de la
       // tabla diaria (inbdet + inbEtapa) con dos filtros nuevos que el
       // manejador entiende — inbLado=in|out (lado de esta tabla) e
       // inbSinPago=1 (aceptadas menos las pagadas del rango). k = "S<lunes>"
-      // de la fila, o "TOTAL" en la fila Total.
+      // de la fila, o "TOTAL" en la fila Total. En la tabla GENERAL el link
+      // va SIN inbLado: el manejador sin lado lista los dos.
       const href = (k: string, etapa: string, sinPago = false) =>
-        `?${opts.qs}&inbdet=${encodeURIComponent(k)}&inbEtapa=${etapa}&inbLado=${lado}${sinPago ? "&inbSinPago=1" : ""}`
+        `?${opts.qs}&inbdet=${encodeURIComponent(k)}&inbEtapa=${etapa}${lado === "all" ? "" : `&inbLado=${lado}`}${sinPago ? "&inbSinPago=1" : ""}`
       const celdaNum = (k: string, f: Fila, etapa: "entrantes" | "precio" | "formal") =>
         f[etapa] > 0
           ? `<td style="text-align:center"><a href="${href(k, etapa)}" style="border-bottom:1px dashed #bcd9ea">${f[etapa]}</a></td>`
@@ -5098,6 +5102,7 @@ function renderInboundDiario(
     })()
     return `<div class="card"><h2>🎯 Tasa de cierre semanal · inbound vs outbound <span class="pct" style="font-weight:400">— cierre = pagadas ÷ vieron precio de cada tipo</span></h2>
       ${grafico}
+      <div class="sub" style="margin:2px 0 8px"><b style="color:#2a78d6">GENERAL</b> · inbound + outbound agrupados (la suma de las dos tablas de abajo)</div>${tabla("all")}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#075985">INBOUND</b> · WhatsApp directo, sitio web y landings</div>${tabla("in")}
       <div class="sub" style="margin:2px 0 8px"><b style="color:#92400e">OUTBOUND</b> · planilla de cadencia (contactos que tocamos nosotros primero)</div>${tabla("out")}
       <div class="sub">*100% topado: hubo más pagadas que precios vistos esa semana, porque el precio se mostró en semanas anteriores (reactivaciones); en el gráfico esa semana queda como marcador hueco.</div>
