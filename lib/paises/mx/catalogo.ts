@@ -8,10 +8,10 @@
  * en el perfil, no hay conversión). El nombre del campo es herencia del
  * catálogo chileno.
  *
- * Precios México (MXN) — plan mensual asistencia:
- *   Asistencia 1-10:  $1,000/mes tarifa FIJA (no existe el micro-plan de 1
- *                     usuario de Chile: el tramo 1-10 parte en 1)
- *   Asistencia 11-20: $83/usuario/mes   ← RANGO DE VICKY = 1-20, igual que Chile (Lalo 23-sep)
+ * Precios México (MXN, netos + IVA) — plan mensual asistencia:
+ *   Asistencia 1-15:  $1,200/mes tarifa FIJA (Karen De la Garza, VB Lalo
+ *                     24-sep; antes 1-10 a $1,000)
+ *   Asistencia 16-20: $83/usuario/mes   ← RANGO DE VICKY = 1-20, igual que Chile (Lalo 23-sep)
  *   Asistencia 21-30: $79/usuario/mes   (fuera del rango de Vicky: solo excepción por contacto)
  *   Asistencia 31-50: $75/usuario/mes   (ídem)
  *   Reloj venta:      $2,100 pago único · renta $350/mes
@@ -40,10 +40,9 @@
  * (TARIFAS_MX.capacitacionOnline en mx/cotizar.ts), que la agrega como ítem
  * de servicio cobrado en TODA cotización.
  *
- * ESCALERA DE DESCUENTO (plan mensual): 10% → 15%, dos escalones, aplica a
- * los primeros 6 meses, vigencia 72h — misma mecánica que CO pero con tope
- * 15%. SIN descuento de instalación (0). La aplica el COTIZADOR (página de
- * aceptación), no Vicky: en el chat los descuentos siguen prohibidos.
+ * ESCALERA DE DESCUENTO (plan mensual) = CHILE (Lalo 24-sep): 10 % → 20 %,
+ * dos escalones, 6 meses, un escalón por objeción y jamás proactivo. Vive en
+ * mx/descuento.ts; ESCALERA_DESCUENTO_MX de abajo queda como espejo.
  */
 
 import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos.ts"
@@ -53,8 +52,8 @@ import type { ModuloSoftware, Hardware, Servicio } from "../../catalogo/tipos.ts
  * NUNCA la ofrece ni la menciona en el chat).
  */
 export const ESCALERA_DESCUENTO_MX = {
-  /** Escalones sucesivos de descuento del plan mensual (tope 15%). */
-  planMensual: [0.1, 0.15],
+  /** Escalones sucesivos de descuento del plan mensual (tope 20 %, = Chile). */
+  planMensual: [0.1, 0.2],
   /** Sin descuento de instalación en México. */
   instalacion: [0, 0],
   /** El descuento aplica a los primeros 6 meses del plan. */
@@ -70,8 +69,10 @@ export const CATALOGO_MODULOS_MX: ModuloSoftware[] = [
     descripcion:
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
-      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 1000 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 83 },
+      // Karen De la Garza (VB Lalo 24-sep): 1-15 a $1,200 fijo. Con 16
+      // personas × $83 = $1,328: la escalera sigue subiendo, sin salto hacia abajo.
+      { minUsuarios: 1, maxUsuarios: 15, modalidad: "fijo", precioUF: 1200 },
+      { minUsuarios: 16, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 83 },
       // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
       // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
       // queda, como el 21-50 de Chile, solo para la excepción por contacto

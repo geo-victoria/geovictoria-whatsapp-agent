@@ -104,7 +104,7 @@ export type ActualizarCotizacionInput = {
    * cotización en sitio con el perfil de ese país. El catálogo y la UF
    * chilenos no se tocan.
    */
-  _itemsPais?: { pais: "pe" | "co"; items: unknown[] }
+  _itemsPais?: { pais: "pe" | "co" | "mx"; items: unknown[] }
   quote_id: string
   userCount: number
   modulos: string[]

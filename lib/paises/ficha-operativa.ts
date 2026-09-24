@@ -361,12 +361,23 @@ const FICHA_MX: FichaOperativa = {
   ],
   toleranciaMonto: 20,
   equipo: {
-    telemarketing: [persona("ysegura@geovictoria.com", "3525045000308323003", "Yahel Segura", "+52 55 3763 6604")],
-    sdr: [],
+    // Lalo 24-sep: el tramo 1-99 del workflow "SF. TOMBOLA DEALS MÉXICO 2024"
+    // (3525045000341943001) es Laura Medina + Yahel Segura.
+    telemarketing: [
+      persona("lmedina@geovictoria.com", "3525045000291701001", "Laura Medina", "+52 55 4571 1905"),
+      persona("ysegura@geovictoria.com", "3525045000308323003", "Yahel Segura", "+52 55 3763 6604"),
+    ],
+    // Lalo 24-sep: "el único SDR en México es Pablo Rodríguez" (reemplaza a
+    // Miguel Guzmán, fijo desde el 12-ago).
+    sdr: [persona("prodriguez@geovictoria.com", "3525045000391904256", "Pablo Rodríguez")],
     lider: "",
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
+  // Mesa de Ayuda GeoVictoria México (tarjeta oficial, Lalo 24-sep): correo con
+  // horario continuado, fijo L-V 9:00-18:00; solo los administradores tienen
+  // soporte directo.
+  soporte: { email: "soportemx@geovictoria.com", telefono: "+52 33 4160 5435", horario: "lunes a viernes de 9:00 a 18:00" },
   solicitudes: {
     facturacionLayoutId: "3525045000429077619",
     facturacionNombre: "SE SOLICITA FACTURA - {empresa}",
@@ -376,10 +387,10 @@ const FICHA_MX: FichaOperativa = {
   },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en México y la plantilla de equipos del país.",
-    "Roster SDR Inbound México (emails + ids de Zoho) para la rotación de leads.",
+    "Entradas \"Territorio = México\" en las reglas Deals 2026 / TLMK / SDR de Zoho (hoy el sorteo MX es un flujo de trabajo que solo corre al crear).",
     "Gestor/a de la venta autónoma.",
     "Líder comercial.",
-    "Sesiones de espejo del equipo en el worker (ysegura).",
+    "Sesiones de espejo del equipo en el worker (lmedina, ysegura, prodriguez).",
   ],
 }
 

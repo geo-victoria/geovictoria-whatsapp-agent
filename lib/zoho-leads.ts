@@ -932,7 +932,10 @@ export async function reasignarLeadSdrInboundCO(
 // "email:zohoUserId,email:zohoUserId". SIN roster configurado la función
 // devuelve success:false y el llamador cae al comportamiento actual (Yahel) —
 // deployable antes de tener los nombres.
-const SDR_INBOUND_MX = (process.env.VIC_SDR_INBOUND_MX || "")
+const SDR_INBOUND_MX = (
+  process.env.VIC_SDR_INBOUND_MX ||
+  rosterSdrOperativo("mx").map((p) => `${p.email}:${p.zohoId}`).join(",")
+)
   .split(",")
   .map((s) => {
     const [email, id] = s.split(":").map((x) => x.trim())

@@ -42,7 +42,7 @@ test("renta en CDMX: $350 + instalación bonificada; renta en Guadalajara: $400 
   assert.ok(!fuera.itemsCotizador.some((i) => i.id === "envio_reloj" || i.id === "instalacion_reloj"))
 })
 
-test("venta en Toluca (intermedia) con visita pedida: envío $560 + instalación $2,400; sin activación en MX", () => {
+test("venta en Toluca (intermedia) con visita pedida: envío $560 + instalación $2,400 + primer mes (24-sep)", () => {
   const r = cotizarMX({
     userCount: 10,
     reloj: { modalidad: "venta", cantidad: 1 },
@@ -52,8 +52,9 @@ test("venta en Toluca (intermedia) con visita pedida: envío $560 + instalación
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
   assert.ok(envio && envio.subtotalMXN === 560)
   assert.ok(inst && inst.subtotalMXN === 2400 && inst.descuentoPct === undefined)
-  // reloj 2,100 + envío 560 + instalación 2,400 (capacitación en 0).
-  assert.equal(r.pagoInicialNeto, 2100 + 560 + 2400)
+  // reloj 2,100 + envío 560 + instalación 2,400 (capacitación en 0) + primer
+  // mes del plan ($1,200 fijo hasta 15) — patrón CL/PE/CO desde el 24-sep.
+  assert.equal(r.pagoInicialNeto, 2100 + 560 + 2400 + 1200)
   assert.ok(r.mensajeParaProspecto.includes("tiene un costo único de $2,400 + IVA (va en el pago inicial)"))
 })
 
@@ -66,5 +67,38 @@ test("venta en CDMX sin visita: envío $400 y la visita se ofrece a $800", () =>
   const envio = r.itemsCotizador.find((i) => i.id === "envio_reloj")
   assert.ok(envio && envio.subtotalMXN === 400)
   assert.ok(r.mensajeParaProspecto.includes("costo único adicional de $800 + IVA"))
-  assert.equal(r.pagoInicialNeto, 2500)
+  assert.equal(r.pagoInicialNeto, 2500 + 1200)
+})
+
+test("precio de Karen (24-sep): 1-15 a $1,200 fijo, 16-20 a $83 por persona", () => {
+  assert.equal(cotizarMX({ userCount: 1 }).mensualNetoPlan, 1200)
+  assert.equal(cotizarMX({ userCount: 15 }).mensualNetoPlan, 1200)
+  assert.equal(cotizarMX({ userCount: 16 }).mensualNetoPlan, 16 * 83)
+  const item = cotizarMX({ userCount: 12 }).itemsCotizador.find((i) => i.id === "plan_asistencia")
+  assert.ok(item && item.modalidad === "Fijo" && item.subtotalMXN === 1200)
+})
+
+test("descuento = Chile: 10 % → 20 % solo en el plan, 6 meses; la formal va a lista", () => {
+  const r = cotizarMX({
+    userCount: 16,
+    reloj: { modalidad: "arriendo", cantidad: 1 },
+    puntos: [{ ubicacion: "CDMX", zona: "cdmx_metro", autoInstalada: true }],
+    escalonDescuento: 1,
+  })
+  assert.equal(r.descuentoPct, 0.1)
+  assert.equal(r.mensualNetoPlan, 1195.2)
+  assert.equal(r.mensualArriendoNeto, 350) // la renta no baja
+  assert.ok(r.mensajeParaProspecto.includes("$1,545.20 + IVA al mes"))
+  assert.ok(r.mensajeParaProspecto.includes("2.- Una alternativa más económica"))
+  const plan = r.itemsCotizador.find((i) => i.id === "plan_asistencia")
+  assert.equal(plan?.subtotalMXN, 16 * 83)
+  assert.equal(cotizarMX({ userCount: 5, escalonDescuento: 2 }).mensualNetoPlan, 960)
+  assert.equal(cotizarMX({ userCount: 5, escalonDescuento: 9 }).descuentoPct, 0.2)
+})
+
+test("solo software: sin pagos únicos no se habla de pago inicial y el primer pago es la mensualidad", () => {
+  const r = cotizarMX({ userCount: 8 })
+  assert.ok(!/pago inicial/i.test(r.mensajeParaProspecto))
+  assert.equal(r.pagoInicialNeto, 1200)
+  assert.ok(!/= \$/.test(r.mensajeParaProspecto)) // sin aritmética del IVA
 })

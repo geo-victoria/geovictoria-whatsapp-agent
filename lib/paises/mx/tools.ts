@@ -20,6 +20,7 @@ import { cotizarMX, formatearMXN, type PuntoInstalacionMX } from "./cotizar"
 import { clasificarUbicacionMX } from "./geografia"
 import { rfcValido, normalizarRfc } from "./rfc"
 import { createZohoLead } from "../../zoho-leads"
+import { rosterSdrOperativo } from "../ficha-operativa"
 import {
   consultarAgenteSoporte,
   consultarAgenteSoporteSchema,
@@ -51,9 +52,10 @@ const SECRET_COTIZADORA_MX = (
 // equipo MX defina SDRs para round-robin, agregar acá el reparto.
 const EJECUTIVO_MX_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_MX_ID || "3525045000308323003").trim()
 // SDR INBOUND MX (Lalo 12-ago): las oportunidades que NO llegan a cotización
-// formal se asignan como LEAD a Miguel Guzmán (mguzmanr@) — la formal conserva
+// formal se asignan como LEAD al SDR de la ficha (Pablo Rodríguez desde el
+// 24-sep; antes Miguel Guzmán) — la formal conserva
 // su dueño propio (Yahel/interina).
-const SDR_INBOUND_MX_ID = (process.env.ZOHO_SDR_INBOUND_MX_ID || "3525045000434395001").trim()
+const SDR_INBOUND_MX_ID = (process.env.ZOHO_SDR_INBOUND_MX_ID || rosterSdrOperativo("mx")[0]?.zohoId || "").trim()
 
 // ── Reuniones MX (Cal.com) ──────────────────────────────────────────────────
 // Event type 6101466 (Lalo, 27-jul): agendamiento SIN cotización — la llamada
@@ -328,6 +330,7 @@ type CotizarInput = {
   userCount?: number
   reloj?: { modalidad?: "arriendo" | "venta"; cantidad?: number }
   puntosInstalacion?: Array<{ ubicacion?: string; autoInstalada?: boolean }>
+  escalonDescuento?: number
 }
 
 type DerivarInput = {
@@ -402,8 +405,15 @@ export function buildDispatchMX(contact: string) {
               ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
               : undefined,
           puntos,
+          escalonDescuento: Number(i.escalonDescuento || 0),
         })
-        return { ok: true, mensajeParaProspecto: r.mensajeParaProspecto, advertencias }
+        return {
+          ok: true,
+          mensajeParaProspecto: r.mensajeParaProspecto,
+          advertencias,
+          escalonDescuento: r.escalonDescuento,
+          descuentoPct: Math.round(r.descuentoPct * 100),
+        }
       }
 
       if (name === "generar_link_cotizadora") {
@@ -415,6 +425,7 @@ export function buildDispatchMX(contact: string) {
           userCount?: number
           reloj?: { modalidad?: "arriendo" | "venta"; cantidad?: number }
           puntosInstalacion?: Array<{ ubicacion?: string; autoInstalada?: boolean }>
+          escalonDescuento?: number
         }
         if (!SECRET_COTIZADORA_MX) {
           return { ok: false, error: "Cotizadora MX no configurada (secreto faltante). Deriva al ejecutivo." }
@@ -425,7 +436,9 @@ export function buildDispatchMX(contact: string) {
             error: `El RFC '${i.rfc || ""}' no tiene un formato válido (12 caracteres persona moral o 13 persona física, ej. CEC2005286R4). Pídele al cliente confirmarlo — sirve con o sin guiones o espacios — y vuelve a llamar la tool.`,
           }
         }
-        if (!i.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
+        // El correo es OPCIONAL (mismo contrato que Chile, Perú y Colombia):
+        // se valida solo si vino; sin correo la entrega va por este chat.
+        if (i.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
           return { ok: false, error: `El correo '${i.email || ""}' no tiene formato válido. Pídelo de nuevo.` }
         }
         // Misma clasificación de puntos que la referencial (venta exige puntos;
@@ -453,6 +466,7 @@ export function buildDispatchMX(contact: string) {
               ? { modalidad: i.reloj.modalidad, cantidad: Number(i.reloj.cantidad) }
               : undefined,
           puntos,
+          escalonDescuento: Number(i.escalonDescuento || 0),
         })
         const res = await fetch(`${COTIZADORA_API_BASE}/api/quote-acceptance/create-from-vicky-mx`, {
           method: "POST",
@@ -460,17 +474,19 @@ export function buildDispatchMX(contact: string) {
           body: JSON.stringify({
             empresa: i.empresa,
             contacto: i.contacto,
-            contactoEmail: i.email,
+            contactoEmail: i.email || undefined,
             rfc: normalizarRfc(i.rfc),
             contactoTelefono: `+${contact}`,
             userCount: Number(i.userCount || 0),
             items: calculo.itemsCotizador,
+            ...(calculo.escalonDescuento > 0 ? { escalonDescuento: calculo.escalonDescuento } : {}),
           }),
           cache: "no-store",
         })
         const data = (await res.json().catch(() => ({}))) as {
           ok?: boolean
           acceptanceUrl?: string
+          linkCorto?: string
           quoteId?: string
           error?: string
         }
@@ -489,8 +505,12 @@ export function buildDispatchMX(contact: string) {
           // La clave se llama totalCLP por herencia chilena: acá viaja el
           // total MXN del pago inicial.
           acceptanceUrl: data.acceptanceUrl,
+          linkCorto: data.linkCorto || "",
           totalCLP: calculo.pagoInicialTotal,
-          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas y la aceptas en línea: ${data.acceptanceUrl}\n\nEl pago inicial es de ${formatearMXN(calculo.pagoInicialTotal)} MXN (IVA incluido) y tu mensualidad de ${formatearMXN(calculo.mensualTotal)} MXN (IVA incluido) desde el mes siguiente. El pago es por transferencia bancaria y se verifica en máximo 24 horas hábiles; con el pago confirmado, yo misma te acompaño con la puesta en marcha de tu cuenta. Cualquier duda me dices y con gusto la resolvemos 😊`,
+          // Precios netos "+ IVA" (misma presentación del estimado). La forma
+          // de pago la muestra la página: transferencia, y tarjeta vía Mercado
+          // Pago cuando la cuenta de México está habilitada.
+          mensajeParaProspecto: `Listo!! Tu cotización formal quedó generada 🎉\n\nAquí la revisas, la aceptas y ves las formas de pago: ${data.linkCorto || data.acceptanceUrl}\n\nEl pago inicial es de ${formatearMXN(calculo.pagoInicialNeto)} + IVA (incluye el primer mes) y tu mensualidad de ${formatearMXN(calculo.mensualNeto)} + IVA desde el mes siguiente${calculo.descuentoPct > 0 ? ` (incluye el ${Math.round(calculo.descuentoPct * 100)}% de descuento en el plan por 6 meses; desde el mes 7, ${formatearMXN(calculo.mensualNetoLista)} + IVA)` : ""}. Con el pago confirmado, yo misma te acompaño con la puesta en marcha de tu cuenta. Cualquier duda me dices y con gusto la resolvemos 😊`,
         }
       }
 

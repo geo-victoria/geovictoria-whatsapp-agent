@@ -2,7 +2,8 @@
  * Motor de cotización referencial de MÉXICO.
  *
  * Reglas de negocio (documento oficial de tropicalización MX):
- *   - Plan asistencia: 1-10 → $1,000 fijo · 11-20 → $83/usuario.
+ *   - Plan asistencia: 1-15 → $1,200 fijo · 16-20 → $83/usuario (Karen De la
+ *     Garza, VB Lalo 24-sep).
  *     RANGO DE VICKY = 1-20 (igual que Chile, Lalo 23-sep); 21-30 $79 y
  *     31-50 $75 quedan solo como excepción por contacto.
  *   - Reloj: renta $350/mes por unidad en la zona base (CDMX y Zona
@@ -18,10 +19,16 @@
  *     Precio cerrado en toda zona: nunca "el ejecutivo la cotiza aparte".
  *   - CAPACITACIÓN online: incluida sin costo (Lalo 13-ago, sin mencionar $600) — ítem de
  *     servicio en TODA cotización (nunca "de regalo" como Chile/Colombia).
- *   - ACTIVACIÓN: primer mes del plan cobrado por adelantado (mismo patrón
- *     CL/CO).
- *   - IMPUESTOS: IVA 16% (¡no 19!) en TODOS los conceptos. Los totales
- *     mostrados al prospecto van CON el IVA incluido (neto + IVA = total).
+ *   - PAGO INICIAL = pagos únicos + PRIMER MES del plan (y renta) por
+ *     adelantado — patrón de Chile, Perú y Colombia (24-sep; antes en MX eran
+ *     solo los pagos únicos). Sin fila de Activación: el primer mes lo arma
+ *     el cotizador desde los recurrentes.
+ *   - DESCUENTO = CHILE (Lalo 24-sep): escalera 10 → 20 % SOLO sobre el plan,
+ *     6 meses, un escalón por objeción (mx/descuento.ts). Los ítems de la
+ *     formal van a LISTA y el % viaja como escalonDescuento.
+ *   - IMPUESTOS: IVA 16% (¡no 19!) en TODOS los conceptos. Al cliente se le
+ *     muestran los NETOS con "+ IVA" (misma presentación que Perú: sin la
+ *     aritmética del impuesto); los totales con IVA van al cotizador.
  *
  * El mensajeParaProspecto va en TUTEO mexicano cálido y formato MXN
  * (es-MX: miles con coma). Es la única fuente de precios que Vicky MX puede
@@ -29,6 +36,7 @@
  */
 
 import { CATALOGO_MODULOS_MX } from "./catalogo.ts"
+import { ESCALERA_DESCUENTO_MX, escalonDescuentoMX, pctDescuentoMX } from "./descuento.ts"
 import type { ZonaMX } from "./geografia.ts"
 export type { ZonaMX } from "./geografia.ts"
 
@@ -50,6 +58,8 @@ export type CotizacionMXInput = {
     cantidad: number
   }
   puntos?: PuntoInstalacionMX[]
+  /** Escalón de la escalera de descuento del plan (0 · 1 = 10 % · 2 = 20 %). */
+  escalonDescuento?: number
 }
 
 export type LineaMX = {
@@ -101,8 +111,15 @@ function unitInstalacionMX(zona: ZonaMX): number {
   return zona === "cdmx_metro" ? TARIFAS_MX.instalacion.base : zona === "intermedia" ? TARIFAS_MX.instalacion.intermedia : TARIFAS_MX.instalacion.resto
 }
 
+/** MXN con centavos solo cuando los hay ($1,200 · $1,195.20). */
 export function formatearMXN(monto: number): string {
-  return "$" + Math.round(monto).toLocaleString("es-MX")
+  const n = Math.round(Number(monto || 0) * 100) / 100
+  const conCentavos = Math.abs(n - Math.round(n)) > 0.004
+  return "$" + n.toLocaleString("es-MX", { minimumFractionDigits: conCentavos ? 2 : 0, maximumFractionDigits: 2 })
+}
+
+function redondear2(n: number): number {
+  return Math.round(Number(n || 0) * 100) / 100
 }
 
 /** Tier del plan aplicable a un userCount (para detalle e items). */
@@ -134,9 +151,17 @@ export function cotizarMX(input: CotizacionMXInput): {
   mensualArriendoIva: number
   mensualIva: number
   mensualTotal: number
+  /** Mensualidad con IVA a precio de LISTA (= mensualTotal sin descuento). */
+  mensualTotalLista: number
+  /** Mensualidad NETA (con el descuento del escalón) y a lista — lo que ve el cliente. */
+  mensualNeto: number
+  mensualNetoLista: number
   pagoInicialNeto: number
   pagoInicialIva: number
   pagoInicialTotal: number
+  /** % de descuento del plan aplicado (0 · 0,1 · 0,2) y su escalón. */
+  descuentoPct: number
+  escalonDescuento: number
   mensajeParaProspecto: string
 } {
   const { userCount, reloj, puntos = [] } = input
@@ -144,16 +169,24 @@ export function cotizarMX(input: CotizacionMXInput): {
     throw new Error("userCount inválido")
   }
   const tier = tierPlanMX(userCount)
-  const plan = precioPlanMX(userCount)
+  const planLista = precioPlanMX(userCount)
+  const escalonDescuento = escalonDescuentoMX(input.escalonDescuento)
+  const pctDescuento = pctDescuentoMX(escalonDescuento)
+  const conDescuento = pctDescuento > 0
+  const mesesDcto = ESCALERA_DESCUENTO_MX.meses
+  // Plan con el descuento del escalón (MXN a centavos).
+  const plan = conDescuento ? redondear2(planLista * (1 - pctDescuento)) : planLista
+  const tope = tier.maxUsuarios
   const lineas: LineaMX[] = []
 
   // ── Recurrente ──
   lineas.push({
     concepto: "Control de Asistencia",
     detalle:
-      tier.modalidad === "fijo"
-        ? `Plan mensual para hasta 10 usuarios (tarifa fija)`
-        : `Plan mensual: ${userCount} usuarios × ${formatearMXN(tier.precioUF)}`,
+      (tier.modalidad === "fijo"
+        ? `Plan mensual para hasta ${tope} usuarios (tarifa fija)`
+        : `Plan mensual: ${userCount} usuarios × ${formatearMXN(tier.precioUF)}`) +
+      (conDescuento ? ` — con ${Math.round(pctDescuento * 100)}% de descuento por ${mesesDcto} meses (lista ${formatearMXN(planLista)}/mes)` : ""),
     neto: plan,
     iva: plan * IVA_MX,
     recurrente: true,
@@ -231,13 +264,9 @@ export function cotizarMX(input: CotizacionMXInput): {
   const fraseInstalacion = [...new Set(frasesInstalacion)].join(" ")
 
   // ── Pago único ──
-  // SIN Activación: en la tropicalización MX no existe el primer mes por
-  // adelantado (a diferencia de CL/CO) — el documento oficial no la lista y la
-  // cotización formal tampoco la cobra ("la mensualidad se factura desde la
-  // activación del servicio"). Detectado 22-jul: el preform del chat la
-  // cobraba y contradecía al PDF formal.
-  // Capacitación online: ítem COBRADO en toda cotización (diferencia con
-  // Chile/Colombia — acá nunca es de regalo).
+  // SIN fila de Activación: el primer mes adelantado lo suman los totales de
+  // abajo (y el cotizador desde los recurrentes), patrón CL/PE/CO (24-sep).
+  // Capacitación online: incluida sin costo en toda cotización.
   lineas.push({
     concepto: "Capacitación online",
     // Lalo 13-ago: el $600 desaparece del discurso — ni cobrado ni tachado.
@@ -283,48 +312,121 @@ export function cotizarMX(input: CotizacionMXInput): {
     })
   }
 
-  // ── Totales (los mostrados van CON IVA 16% incluido) ──
+  // ── Totales ──
+  // Pago inicial = pagos únicos + PRIMER MES (plan con su descuento + renta),
+  // patrón de Chile, Perú y Colombia.
   const unicos = lineas.filter((l) => !l.recurrente)
-  const pagoInicialNeto = unicos.reduce((s, l) => s + l.neto, 0)
-  const pagoInicialIva = unicos.reduce((s, l) => s + l.iva, 0)
-  const pagoInicialTotal = pagoInicialNeto + pagoInicialIva
+  const unicosNeto = unicos.reduce((s, l) => s + l.neto, 0)
   const mensualArriendoIva = arriendoNeto * IVA_MX
   const mensualNeto = plan + arriendoNeto
   const mensualIva = mensualNeto * IVA_MX
   const mensualTotal = mensualNeto + mensualIva
+  const mensualNetoLista = planLista + arriendoNeto
+  const mensualTotalLista = mensualNetoLista * (1 + IVA_MX)
+  const pagoInicialNeto = unicosNeto + mensualNeto
+  const pagoInicialIva = pagoInicialNeto * IVA_MX
+  const pagoInicialTotal = pagoInicialNeto + pagoInicialIva
+  const ventaNeto = unicos.filter((l) => /compra/i.test(l.concepto)).reduce((s, l) => s + l.neto, 0)
+  const envioNeto = unicos.filter((l) => /^Envío/.test(l.concepto)).reduce((s, l) => s + l.neto, 0)
+  const instalacionNetoCobrada = unicos.filter((l) => /Instalación técnica/.test(l.concepto)).reduce((s, l) => s + l.neto, 0)
+  const notasFinales = ["La capacitación online va incluida sin costo 🎁"]
 
-  // ── Mensaje canónico (tuteo mexicano, MXN es-MX) ──
-  // Cada línea va en neto; los TOTALES muestran el IVA 16% incluido.
+  // ── Mensaje canónico (tuteo mexicano, MXN) — LA FORMA DE CHILE ──
+  // Mismas reglas que Perú y Colombia: precios NETOS con "+ IVA" (sin la
+  // aritmética del impuesto); sin pagos únicos NO se habla de "pago inicial"
+  // (el primer pago ES la mensualidad); con reloj, DOBLE VALOR determinista
+  // (opción con reloj y opción solo app) y cierre "Qué opción prefieres?".
   const filas: string[] = []
-  filas.push("Te comparto el detalle de tu cotización referencial (precios en pesos mexicanos):")
+  filas.push("Resumen mensual recurrente:")
   filas.push("")
-  filas.push("Mensualidad del servicio:")
-  filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearMXN(plan)}/mes`)
+  filas.push(`- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearMXN(planLista)}/mes`)
   if (arriendoNeto > 0) {
     filas.push(`- Renta de reloj checador: ${formatearMXN(arriendoNeto)}/mes (envío incluido)`)
   }
-  filas.push(`Total mensual: ${formatearMXN(mensualNeto)} + IVA (16%) = ${formatearMXN(mensualTotal)} MXN`)
   filas.push("")
-  filas.push("Pago inicial (una sola vez):")
-  for (const l of unicos) {
-    if (l.neto === 0 && /Instalación técnica/.test(l.concepto)) {
-      filas.push(`- ${l.concepto}: incluida sin costo`)
-      continue
-    }
-    filas.push(`- ${l.concepto}: ${formatearMXN(l.neto)}`)
+  filas.push(`Total mensual: ${formatearMXN(mensualNetoLista)} + IVA`)
+  if (conDescuento) {
+    filas.push(
+      `Con el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${mesesDcto} meses: ${formatearMXN(mensualNeto)} + IVA/mes (desde el mes ${mesesDcto + 1}, ${formatearMXN(mensualNetoLista)} + IVA/mes)`,
+    )
   }
-  filas.push(
-    `Total pago inicial: ${formatearMXN(pagoInicialNeto)} + IVA (16%) = ${formatearMXN(pagoInicialTotal)} MXN`,
-  )
-  // Frase de instalación con la forma de Chile (autoinstalable / incluida /
-  // costo único cerrado), después del desglose.
+  const unicosCobrados = unicos.filter((l) => !/Capacitación/.test(l.concepto))
+  if (unicosNeto > 0 || unicosCobrados.some((l) => /Instalación técnica/.test(l.concepto))) {
+    filas.push("")
+    filas.push("Pago único:")
+    filas.push("")
+    for (const l of unicosCobrados) {
+      if (l.neto === 0 && /Instalación técnica/.test(l.concepto)) {
+        filas.push(`- ${l.concepto}: incluida sin costo`)
+        continue
+      }
+      filas.push(`- ${l.concepto}: ${formatearMXN(l.neto)}`)
+    }
+    if (unicosNeto > 0) {
+      filas.push("")
+      filas.push(`Total único: ${formatearMXN(unicosNeto)} + IVA`)
+      filas.push("")
+      filas.push("[---]")
+      filas.push("")
+      filas.push(
+        `Al aceptar pagas el pago inicial de ${formatearMXN(pagoInicialNeto)} + IVA: incluye ${ventaNeto > 0 ? "el reloj" : "los pagos únicos"}${envioNeto > 0 ? ", el envío" : ""}${instalacionNetoCobrada > 0 ? ", la instalación" : ""} + el primer mes del plan por adelantado.`,
+      )
+    }
+  }
   if (fraseInstalacion) {
+    filas.push("")
+    filas.push("[---]")
     filas.push("")
     filas.push(fraseInstalacion)
   }
-  for (const nota of notasEjecutivo) {
+  for (const nota of [...notasEjecutivo, ...notasFinales]) {
     filas.push("")
-    filas.push(`Nota: ${nota}`)
+    filas.push("[---]")
+    filas.push("")
+    filas.push(nota)
+  }
+
+  // ── DOBLE VALOR: con reloj y solo con app (regla de Chile/Perú/Colombia).
+  // Con el reloj en COMPRA el mensual es el MISMO en las dos: el encabezado
+  // no puede decir "más económica"; lo que cambia es el desembolso inicial.
+  let mensaje = filas.join("\n")
+  if (reloj && reloj.cantidad > 0) {
+    const modalidadLabel = reloj.modalidad === "arriendo" ? "Reloj checador en renta" : "Reloj checador en compra"
+    const personas = `${userCount} persona${userCount === 1 ? "" : "s"}`
+    const ahorraMensual = plan < mensualNeto - 0.01
+    const ahorraEntrada = unicosNeto > 0
+    const op1: string[] = [
+      `1 - Para ${personas} te recomiendo ${modalidadLabel} + App:`,
+      `💰 ${formatearMXN(mensualNeto)} + IVA al mes.`,
+      ``,
+      `Tus trabajadores pueden marcar desde el reloj o desde el celular, como les acomode.${reloj.modalidad === "arriendo" ? " El envío del reloj va incluido." : ""}`,
+    ]
+    if (fraseInstalacion) op1.push(fraseInstalacion)
+    if (conDescuento) {
+      op1.push(
+        `Incluye el ${Math.round(pctDescuento * 100)}% de descuento en el plan durante ${mesesDcto} meses (desde el mes ${mesesDcto + 1}, ${formatearMXN(mensualNetoLista)} + IVA/mes).`,
+      )
+    }
+    if (ahorraEntrada) {
+      op1.push(`Se suma un pago inicial único de ${formatearMXN(unicosNeto)} + IVA (reloj${envioNeto > 0 ? ", envío" : ""}${instalacionNetoCobrada > 0 ? " e instalación" : ""}).`)
+    }
+    const encabezado2 = ahorraMensual
+      ? `2.- Una alternativa más económica sería si marcan solo mediante nuestra app:`
+      : ahorraEntrada
+        ? `2.- Si prefieres partir sin desembolso inicial, marcando solo con nuestra app (misma mensualidad, sin el pago único):`
+        : `2.- También puedes partir marcando solo con nuestra app:`
+    const partes = [...op1, "", "[---]", "", encabezado2, `💰 ${formatearMXN(plan)} + IVA al mes.`]
+    for (const nota of notasFinales) {
+      partes.push("")
+      partes.push("[---]")
+      partes.push("")
+      partes.push(nota)
+    }
+    partes.push("")
+    partes.push("[---]")
+    partes.push("")
+    partes.push("Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato.")
+    mensaje = partes.join("\n")
   }
 
   // ── Items para la cotización FORMAL (contrato create-from-vicky-mx) ──
@@ -340,8 +442,10 @@ export function cotizarMX(input: CotizacionMXInput): {
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     modalidad: tier.modalidad === "fijo" ? "Fijo" : "Por usuario",
     cantidad: tier.modalidad === "fijo" ? 1 : userCount,
-    precioUnitarioMXN: tier.modalidad === "fijo" ? plan : tier.precioUF,
-    subtotalMXN: plan,
+    // A precio de LISTA: el descuento viaja como escalonDescuento y el
+    // cotizador lo estampa (Descuento_Recurrente_Pct) — misma mecánica que CL/PE/CO.
+    precioUnitarioMXN: tier.modalidad === "fijo" ? planLista : tier.precioUF,
+    subtotalMXN: planLista,
     esRecurrente: true,
     afectoIva: true,
   })
@@ -436,11 +540,16 @@ export function cotizarMX(input: CotizacionMXInput): {
     mensualNetoPlan: plan,
     mensualArriendoNeto: arriendoNeto,
     mensualArriendoIva,
-    mensualIva,
-    mensualTotal,
-    pagoInicialNeto,
-    pagoInicialIva,
-    pagoInicialTotal,
-    mensajeParaProspecto: filas.join("\n"),
+    mensualIva: redondear2(mensualIva),
+    mensualTotal: redondear2(mensualTotal),
+    mensualTotalLista: redondear2(mensualTotalLista),
+    mensualNeto: redondear2(mensualNeto),
+    mensualNetoLista: redondear2(mensualNetoLista),
+    pagoInicialNeto: redondear2(pagoInicialNeto),
+    pagoInicialIva: redondear2(pagoInicialIva),
+    pagoInicialTotal: redondear2(pagoInicialTotal),
+    descuentoPct: pctDescuento,
+    escalonDescuento,
+    mensajeParaProspecto: mensaje,
   }
 }

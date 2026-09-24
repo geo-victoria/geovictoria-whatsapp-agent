@@ -41,7 +41,7 @@ import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { despacharHuerfanos } from "@/lib/despachador-huerfanos"
 import { fichaEmpresaSii, rutEnTexto } from "@/lib/empresas-sii"
-import { personaPorEmail } from "@/lib/paises/ficha-operativa"
+import { personaPorEmail, rosterSdrOperativo } from "@/lib/paises/ficha-operativa"
 import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "@/lib/paises/co/tombola-zoho"
 
 export const dynamic = "force-dynamic"
@@ -1228,7 +1228,7 @@ async function asignarEnZoho(
 ): Promise<VendedorFinal> {
   const porDefecto: VendedorFinal = {
     ...interno,
-    nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+    nombre: nombreVendedor(interno.email),
     telefono: WHATSAPP_VENDEDOR[interno.email] || "",
     via: "tombola_interna",
   }
@@ -1369,7 +1369,7 @@ async function asignarEnZoho(
           return {
             email: r.ownerEmail,
             zohoId: r.ownerId,
-            nombre: r.ownerNombre || NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+            nombre: r.ownerNombre || nombreVendedor(r.ownerEmail),
             telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
             via: "tombola_zoho",
           }
@@ -1386,7 +1386,7 @@ async function asignarEnZoho(
           return {
             email: r.ownerEmail,
             zohoId: r.ownerId,
-            nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+            nombre: nombreVendedor(r.ownerEmail),
             telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
             via: "dueno_lead_sdr",
           }
@@ -1409,7 +1409,7 @@ async function asignarEnZoho(
           return {
             email: r.ownerEmail,
             zohoId: r.ownerId,
-            nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+            nombre: nombreVendedor(r.ownerEmail),
             telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
             via: "dueno_lead_sdr",
           }
@@ -1569,7 +1569,7 @@ async function asignarEnZoho(
         return {
           email: r.ownerEmail,
           zohoId: r.ownerId,
-          nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+          nombre: nombreVendedor(r.ownerEmail),
           telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
           via: "dueno_lead_sdr",
         }
@@ -1614,7 +1614,7 @@ async function asignarEnZoho(
         return {
           email: ownerLead,
           zohoId: lead.Owner.id,
-          nombre: lead.Owner.name || NOMBRE_VENDEDOR[ownerLead] || ownerLead.split("@")[0],
+          nombre: lead.Owner.name || nombreVendedor(ownerLead),
           telefono: tel || WHATSAPP_VENDEDOR[ownerLead] || "",
           via: "dueno_lead_sdr",
         }
@@ -1648,7 +1648,7 @@ async function asignarEnZoho(
         return {
           email: r.ownerEmail,
           zohoId: r.ownerId,
-          nombre: r.ownerNombre || NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+          nombre: r.ownerNombre || nombreVendedor(r.ownerEmail),
           telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
           via: "tombola_zoho",
         }
@@ -1669,7 +1669,7 @@ async function asignarEnZoho(
         return {
           email: ownerLeadMx,
           zohoId: lead.Owner.id,
-          nombre: lead.Owner.name || NOMBRE_VENDEDOR[ownerLeadMx] || ownerLeadMx.split("@")[0],
+          nombre: lead.Owner.name || nombreVendedor(ownerLeadMx),
           telefono: tel || WHATSAPP_VENDEDOR[ownerLeadMx] || "",
           via: "dueno_lead_sdr",
         }
@@ -1683,7 +1683,7 @@ async function asignarEnZoho(
         return {
           email: r.ownerEmail,
           zohoId: r.ownerId,
-          nombre: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0],
+          nombre: nombreVendedor(r.ownerEmail),
           telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
           via: "dueno_lead_sdr",
         }
@@ -1721,7 +1721,7 @@ async function asignarEnZoho(
         return {
           email: ownerLeadPe,
           zohoId: lead.Owner.id,
-          nombre: lead.Owner.name || NOMBRE_VENDEDOR[ownerLeadPe] || ownerLeadPe.split("@")[0],
+          nombre: lead.Owner.name || nombreVendedor(ownerLeadPe),
           telefono: tel || WHATSAPP_VENDEDOR[ownerLeadPe] || "",
           via: "dueno_lead_sdr",
         }
@@ -1999,7 +1999,7 @@ async function traspasarATelemarketing(
       await notaTraspasoConversacion(leadId, fono).catch(() => {})
       const r = await reasignarLeadSdrInboundPE(leadId).catch(() => null)
       if (r?.success && r.ownerId && r.ownerEmail) {
-        owner = { id: r.ownerId, email: r.ownerEmail, name: NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0] }
+        owner = { id: r.ownerId, email: r.ownerEmail, name: nombreVendedor(r.ownerEmail) }
       } else {
         console.warn(`[tm-24h] SDR PE no asignó lead=${leadId}: ${r?.error || "sin detalle"}`)
       }
@@ -2037,7 +2037,7 @@ async function traspasarATelemarketing(
               skip_feature_execution: [{ name: "assignment_rules" }],
             }),
           }).catch(() => {})
-          owner = { id: interno.zohoId, email: interno.email, name: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0] }
+          owner = { id: interno.zohoId, email: interno.email, name: nombreVendedor(interno.email) }
         }
       }
     }
@@ -2190,7 +2190,7 @@ export async function traspasarAhora(
       ok: true,
       yaTeniaVendedor: true,
       vendedor: {
-        nombre: activo[0].vendedor_nombre || NOMBRE_VENDEDOR[email] || email.split("@")[0],
+        nombre: activo[0].vendedor_nombre || nombreVendedor(email),
         email,
         telefono: WHATSAPP_VENDEDOR[email] || "",
       },
@@ -2213,7 +2213,7 @@ export async function traspasarAhora(
       precio_mostrado: Boolean(opts.calificado),
       vendedor_email: interno.email,
       vendedor_zoho_id: interno.zohoId,
-      vendedor_nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+      vendedor_nombre: nombreVendedor(interno.email),
       chequeo_at: sumarHorasHabiles(ahora, 9, pais, feriados).toISOString(),
     }),
   }).catch(() => [])
@@ -2239,7 +2239,7 @@ export async function traspasarAhora(
   }
   const v = vendedor || {
     ...interno,
-    nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+    nombre: nombreVendedor(interno.email),
     telefono: WHATSAPP_VENDEDOR[interno.email] || "",
     via: "fallback",
   }
@@ -2628,7 +2628,7 @@ export async function GET(req: Request) {
         precio_mostrado: Boolean(c.pref_escalon_at || c.pref_escalon !== null || c.pref_quote_id || c.formal_quote_id),
         vendedor_email: interno.email,
         vendedor_zoho_id: interno.zohoId,
-        vendedor_nombre: NOMBRE_VENDEDOR[interno.email] || interno.email.split("@")[0],
+        vendedor_nombre: nombreVendedor(interno.email),
         chequeo_at: sumarHorasHabiles(ahora, 9, pais, feriados).toISOString(),
       }),
     })
@@ -3156,7 +3156,7 @@ async function reintentarPresentacionesPendientes(
         zohoIdVig = d.zohoId || ""
         await supa(`vic_ptv?id=eq.${f.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ vendedor_email: emailVig, vendedor_zoho_id: zohoIdVig, vendedor_nombre: nombreVig || NOMBRE_VENDEDOR[emailVig] || emailVig.split("@")[0] }),
+          body: JSON.stringify({ vendedor_email: emailVig, vendedor_zoho_id: zohoIdVig, vendedor_nombre: nombreVig || nombreVendedor(emailVig) }),
         }).catch(() => {})
         await asignarConversacionEnBotmaker(clean, emailVig).catch(() => {})
         detalle.push(`+${clean}: dueño en Zoho es ${emailVig} (bitácora decía ${email}) — se presenta al de Zoho`)
@@ -3166,7 +3166,7 @@ async function reintentarPresentacionesPendientes(
     // solo entran los que quedaron mudos.
     if (ahora.getTime() - new Date(f.traspasado_at).getTime() < 5 * 60_000) continue
     const pais = (paisDeContacto(clean) || "cl") as "cl" | "co" | "mx" | "pe"
-    const nombre = nombreVig || (emailVig === email ? (f.vendedor_nombre || "").trim() : "") || NOMBRE_VENDEDOR[emailVig] || emailVig.split("@")[0]
+    const nombre = nombreVig || (emailVig === email ? (f.vendedor_nombre || "").trim() : "") || nombreVendedor(emailVig)
     let telefono = WHATSAPP_VENDEDOR[emailVig] || telefonoTmPorEmail(emailVig)
     if (!telefono && zohoIdVig) {
       try {
@@ -3415,7 +3415,7 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
       const r = await reasignarLeadPorTerritorio(territorioDe(fono), l.id, { calificado: true }).catch(() => null)
       if (r?.success && r.ownerEmail && r.ownerId && !roster.includes(r.ownerEmail.toLowerCase())) {
         await notificarTraspasoLeadEmail(l.id, r.ownerEmail, fono, H, api, `estaba en calificación SDR y la conversación YA trae la dotación (${empleados || "?"} personas): <b>lead calificado, ahora es tuyo</b>.`).catch(() => {})
-        await presentar(fono, r.ownerEmail, r.ownerId, r.ownerNombre || NOMBRE_VENDEDOR[r.ownerEmail] || r.ownerEmail.split("@")[0], "sdr_calificado_lead")
+        await presentar(fono, r.ownerEmail, r.ownerId, r.ownerNombre || nombreVendedor(r.ownerEmail), "sdr_calificado_lead")
         await marcarContactoResuelto(fono, `lead ${l.id} → TLMK ${r.ownerEmail}`)
         out.reenviados++
         out.detalle.push(`+${fono} lead ${l.id} (${empleados} pers., sin RUT) → TLMK ${r.ownerEmail}`)
@@ -4233,8 +4233,9 @@ async function reconciliarLeadsCruzados(): Promise<number> {
   const destinoPorTerritorio: Record<string, { id: string; email: string }> = {
     "perú": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" }, // Mónica
     "peru": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" },
-    "méxico": { id: "3525045000434395001", email: "mguzmanr@geovictoria.com" }, // Miguel Guzmán (SDR inbound, Lalo 12-ago)
-    "mexico": { id: "3525045000308323003", email: "ysegura@geovictoria.com" },
+    // México: el SDR de la ficha operativa (Pablo Rodríguez desde el 24-sep).
+    "méxico": { id: rosterSdrOperativo("mx")[0]?.zohoId || "", email: rosterSdrOperativo("mx")[0]?.email || "" },
+    "mexico": { id: rosterSdrOperativo("mx")[0]?.zohoId || "", email: rosterSdrOperativo("mx")[0]?.email || "" },
     // COLOMBIA faltaba en este mapa (cazado 21-ago con el lead CO del form
     // que quedó con Sepúlveda): leads CO → SDR fijo Galindo (regla equipo CO
     // 05-ago; el roster Araceli/Aleydis es SOLO calificación Chile).

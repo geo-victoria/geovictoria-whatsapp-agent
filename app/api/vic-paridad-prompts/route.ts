@@ -56,7 +56,12 @@ async function promptDe(pais: PaisPrompt): Promise<string> {
     if (await sobreNucleo("co")) return (await import("@/lib/paises/co/prompt-nucleo")).getSystemPromptCONucleo(c, 20)
     return (await import("@/lib/paises/co/prompt")).getSystemPromptCO(c, 20)
   }
-  if (pais === "mx") return (await import("@/lib/paises/mx/prompt")).getSystemPromptMX(c, 20)
+  if (pais === "mx") {
+    // México corre sobre el núcleo cuando su orquestador está encendido (24-sep).
+    const orq = await import("@/lib/orquestador-turno").then((m) => m.orquestadorActivo("mx")).catch(() => false)
+    if (orq || (await sobreNucleo("mx"))) return (await import("@/lib/paises/mx/prompt-nucleo")).getSystemPromptMXNucleo(c, 20)
+    return (await import("@/lib/paises/mx/prompt")).getSystemPromptMX(c, 20)
+  }
   if (await sobreNucleo("pe")) return (await import("@/lib/paises/pe/prompt-nucleo")).getSystemPromptPENucleo(c, 20)
   return (await import("@/lib/paises/pe/prompt")).getSystemPromptPE(c, 20)
 }

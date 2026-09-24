@@ -1143,7 +1143,7 @@ async function convertirConDeal(
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
           // PE (Lalo 15-sep, regla chilena): nace con Vicky y lo entrega el traspaso.
-          : ({ Colombia: "3525045000613817111", "México": "3525045000434395001" /* Miguel Guzmán, SDR inbound (Lalo 12-ago) */ } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
+          : ({ Colombia: "3525045000613817111", "México": rosterSdrOperativo("mx")[0]?.zohoId || "" /* SDR MX de la ficha: Pablo Rodríguez (24-sep) */ } as Record<string, string>)[territorio] || VICKY_OWNER_ID,
     },
     Description: `Deal creado automáticamente por Vicky al detectar el hito en la conversación de WhatsApp (+${contact.replace(/\D/g, "")}).`,
   }
@@ -2023,7 +2023,9 @@ export async function sincronizarHitoCrm(
       // CL sin interina — nace con el usuario Vicky. CO/MX/PE conservan sus
       // dueños de siempre.
       const OWNER_INTERINO: Record<string, string> = {
-        "México": "3525045000434395001", // Miguel Guzmán — SDR inbound MX (Lalo 12-ago; leads sin formal van a él)
+        // SDR MX de la ficha operativa (Pablo Rodríguez desde el 24-sep; antes
+        // Miguel Guzmán fijo, 12-ago). Leads sin formal van a él.
+        "México": rosterSdrOperativo("mx")[0]?.zohoId || "",
         // Perú (Lalo 15-sep: "siempre considera la regla chilena de traspaso"):
         // igual que Chile, el lead nace con Vicky; Mónica lo recibe al traspasar.
       }

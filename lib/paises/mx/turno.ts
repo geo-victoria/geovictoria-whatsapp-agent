@@ -1,15 +1,17 @@
 /**
- * PERFIL DE TURNO DE MÉXICO para el orquestador único (22-sep). México NO
- * está sobre el prompt núcleo todavía: entra con su prompt y sus tools
- * clásicas (derivar_a_ejecutivo), y recibe igual todos los cinturones y la
- * maquinaria de seguimiento del turno chileno.
+ * PERFIL DE TURNO DE MÉXICO para el orquestador único (22-sep; desde el
+ * 24-sep sobre el prompt núcleo + tools únicas, como Perú y Colombia). Se
+ * enciende con vic_kv `orquestador_mx`="on"; apagado, el webhook MX sigue con
+ * su procesador y su prompt propios. Tarjeta de soporte propia (Mesa de Ayuda
+ * MX): el blindaje reemplaza los canales chilenos por los mexicanos.
  */
 import type { PerfilTurno } from "../../orquestador-turno"
 import type { ConversationMessage } from "../../agent-loop"
 import { PERFIL_MX } from "./index"
-import { getSystemPromptMX } from "./prompt"
-import { TOOL_SCHEMAS_MX, buildDispatchMX } from "./tools"
+import { getSystemPromptMXNucleo } from "./prompt-nucleo"
+import { TOOL_SCHEMAS_MX_UNIFICADAS, buildDispatchMXUnificado } from "./tools-unificadas"
 import { derivacionDePais } from "../../umbral-autonomia"
+import { blindarSoporteInventadoPais } from "../blindaje-soporte"
 
 const COTIZ_MSG_RE_MX =
   /cotiz|precio|cu[aá]nto|cuesta|\bvale\b|\bvalor\b|\bcaro\b|barat|descuento|rebaj|presupuesto|plan|oferta|pago inicial|mensualidad|\bpesos?\b|reloj|checador|\bRFC\b|\d+\s*(trabajador|persona|emplead|colaborador|usuario)|somos\s+\d+/i
@@ -28,11 +30,11 @@ export const PERFIL_TURNO_MX: PerfilTurno = {
   zona: "ciudad",
   documento: "RFC",
   channelId: PERFIL_MX.canal.channelId,
-  systemPrompt: (contact, umbral) => getSystemPromptMX(contact, umbral),
-  tools: (contact) => ({ schemas: TOOL_SCHEMAS_MX as unknown as unknown[], dispatch: buildDispatchMX(contact) }),
-  derivacion: (contact) => derivacionDePais(contact),
+  systemPrompt: (contact, umbral) => getSystemPromptMXNucleo(contact, umbral),
+  tools: (contact) => ({ schemas: TOOL_SCHEMAS_MX_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchMXUnificado(contact) }),
+  derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: Boolean((process.env.CAL_EVENT_TYPE_ID_MX ?? "6101466").trim()) }),
   esFlujoCotizacion: esFlujoCotizacionMX,
-  blindarSoporte: (reply) => reply,
+  blindarSoporte: (reply, permitidos) => blindarSoporteInventadoPais("mx", reply, permitidos),
   certificacionDT: false,
   hitoPorChat: false,
   contextoCotizacionExistente: (punteros) => {
@@ -43,7 +45,8 @@ export const PERFIL_TURNO_MX: PerfilTurno = {
     return (
       `ESTADO DE ESTE CONTACTO — LÉELO ANTES DE ACTUAR:\n` +
       `Este contacto YA tiene una cotización formal generada anteriormente${monto}.${link}\n` +
-      `Por lo tanto NO partes de cero con este cliente: no le vuelvas a pedir datos que ya entregó ni rehagas el estimado desde el principio.\n\n`
+      `Por lo tanto NO partes de cero con este cliente: no le vuelvas a pedir datos que ya entregó (razón social, RFC, cantidad de trabajadores) ni rehagas el estimado desde el principio; ` +
+      `si quiere cambiar algo, usa actualizar_cotizacion sobre ESA cotización.\n\n`
     )
   },
 }
