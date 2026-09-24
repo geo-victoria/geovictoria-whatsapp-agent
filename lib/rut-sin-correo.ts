@@ -17,6 +17,7 @@
  */
 
 import { rucValido, rutValido } from "./rut.ts"
+import { nitEnTexto } from "./paises/co/nit.ts"
 
 export type TurnoHistorial = { role: string; content: unknown }
 
@@ -60,18 +61,64 @@ export function traeRucValido(texto: string): boolean {
 
 export type DocumentoEmpresa = "RUT" | "RUC" | "NIT" | "RFC"
 
+/** RFC mexicano: 3 letras (persona moral) o 4 (física) + fecha AAMMDD + homoclave. */
+const RE_RFC = /(?<![A-Za-zÑñ&])[A-Za-zÑñ&]{3,4}[\s-]?\d{6}[\s-]?[A-Za-z0-9]{3}(?![A-Za-z0-9])/
+
+/** ¿El texto trae el documento tributario de la empresa de ese país? */
+export function traeDocumento(texto: string, documento: DocumentoEmpresa): boolean {
+  const t = String(texto || "")
+  if (documento === "RUT") return traeRutValido(t)
+  if (documento === "RUC") return traeRucValido(t)
+  if (documento === "NIT") return Boolean(nitEnTexto(t))
+  return RE_RFC.test(t)
+}
+
+/** ¿Vicky ya entregó una cotización formal en esta conversación? */
+function yaEmitioFormal(history: TurnoHistorial[]): boolean {
+  return history.some(
+    (m) => m.role === "assistant" && /\/q\/|quote-acceptance|lista tu cotizaci/i.test(String(m.content || "")),
+  )
+}
+
+/**
+ * EL CORREO NO SE VUELVE A PEDIR (Lalo 24-sep, regla GLOBAL; caso Rodrigo MX:
+ * Vicky pidió "RFC · razón social · tu email", él mandó solo el RFC y Vicky
+ * respondió "Y me confirmas la razón social de la empresa y tu email?" — un
+ * turno quemado por un dato que no hace falta para emitir). El documento puede
+ * llegar en ESTE mensaje o en uno anterior: mientras la formal no esté
+ * emitida y el cliente nunca haya dado correo, el correo no se menciona más.
+ * En México (RFC) la razón social SÍ es obligatoria (no hay padrón que la
+ * resuelva): si falta, es la ÚNICA pregunta del turno.
+ */
 export function directivaRutSinCorreo(
   mensaje: string,
   history: TurnoHistorial[],
   opts: { documento?: DocumentoEmpresa } = {},
 ): string {
   const documento = opts.documento || "RUT"
-  // Solo los documentos con dígito verificador conocido se reconocen en el
-  // texto; NIT/RFC no gatillan (sin validador, una cifra suelta no es evidencia).
-  const trae = documento === "RUT" ? traeRutValido(mensaje) : documento === "RUC" ? traeRucValido(mensaje) : false
-  if (!trae) return ""
+  const enMensaje = traeDocumento(mensaje, documento)
+  const antes = !enMensaje && history.some((m) => m.role === "user" && traeDocumento(String(m.content || ""), documento))
+  if (!enMensaje && !antes) return ""
   if (clienteDioCorreo(mensaje, history)) return ""
   if (!yaVioPrecio(history)) return ""
+  if (yaEmitioFormal(history)) return ""
+  if (documento === "RFC") {
+    return (
+      `\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente ya te entregó el RFC y en toda la conversación NO te ha ` +
+      "dado un correo. El correo NO es necesario para emitir: PROHIBIDO volver a pedirlo o mencionarlo. " +
+      "Si ya tienes la RAZÓN SOCIAL (la dijo en este mensaje o antes), llama generar_link_cotizadora AHORA, en este " +
+      "mismo turno, OMITIENDO `contactoEmail`. Si todavía no la tienes, tu ÚNICA pregunta de este turno es la razón " +
+      "social, en una sola línea (\"Me confirmas la razón social de la empresa?\"), sin nombrar el correo."
+    )
+  }
+  if (!enMensaje) {
+    return (
+      `\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente YA te entregó el ${documento} en un mensaje anterior y en ` +
+      "toda la conversación NO te ha dado un correo. Con el " + documento + " basta: PROHIBIDO volver a pedirle el " +
+      "email o mencionarlo. Si este mensaje no cambia la configuración, llama generar_link_cotizadora AHORA, en " +
+      "este mismo turno, OMITIENDO `contactoEmail` (si hace una pregunta, respóndela y emite en el mismo turno)."
+    )
+  }
   return (
     `\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de entregarte el ${documento} y en toda la conversación ` +
     `NO te ha dado un correo. Con el ${documento} basta: llama generar_link_cotizadora AHORA, en este mismo turno, ` +
