@@ -217,52 +217,57 @@ export async function GET(req: Request): Promise<Response> {
   // CLP". UF solo existe en Chile → todo deal de Vicky con UF pasa a CLP;
   // CO/MX/PE (COP/MXN/SOL) no se tocan. Pagina hasta agotar o `limit`.
   if (searchParams.get("moneda") === "1") {
-    const out = { actualizados: 0, errores: [] as string[], quedan: 0 }
-    for (let vuelta = 0; vuelta < 10 && out.actualizados < limit; vuelta++) {
-      const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+    // CONVENCIÓN DE VALORES (Lalo 09-sep; extendida a los 4 países 24-sep por
+    // el pedido de David "confirmar que se estén colocando todos los valores
+    // de los Deals"): todo deal de Vicky lleva Tipo_de_Cobro "Mensual fijo",
+    // la moneda de SU país y Valor_por_usuario vacío; el Valor_fijo lo pone el
+    // pase principal desde la cotización. Antes solo corría para Chile y los
+    // deals de Perú quedaban con CLP y los de Colombia/México sin corregir.
+    const MONEDAS: Array<[string, string]> = [["Chile", "CLP"], ["Perú", "SOL"], ["Colombia", "COP"], ["México", "MXN"]]
+    const out = { actualizados: 0, errores: [] as string[], quedan: 0, porPais: {} as Record<string, number> }
+    for (const [territorio, moneda] of MONEDAS) {
+      const donde = `((Created_By = 3525045000484500876 and Territorio = '${territorio}') and (Monda_del_trato != '${moneda}' or Tipo_de_Cobro != 'Mensual fijo'))`
+      for (let vuelta = 0; vuelta < 10 && out.actualizados < limit; vuelta++) {
+        const rc = await fetch(`${ZOHO_API}/crm/v3/coql`, {
+          method: "POST",
+          headers: H,
+          cache: "no-store",
+          body: JSON.stringify({ select_query: `select id from Deals where ${donde} limit 100` }),
+        })
+        if (rc.status === 204) break // sin más filas
+        if (rc.status !== 200) { out.errores.push(`coql ${territorio} ${rc.status}`); break }
+        const filas = (((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string }> }).data) || []
+        if (!filas.length) break
+        const ids = filas.slice(0, Math.max(1, limit - out.actualizados))
+        const up = await fetch(`${ZOHO_API}/crm/v3/Deals`, {
+          method: "PUT",
+          headers: H,
+          cache: "no-store",
+          body: JSON.stringify({
+            data: ids.map((f) => ({ id: f.id, Monda_del_trato: moneda, Tipo_de_Cobro: "Mensual fijo", Valor_por_usuario_Global: null })),
+            skip_feature_execution: [{ name: "assignment_rules" }],
+            trigger: ["blueprint"],
+          }),
+        })
+        const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string; details?: { id?: string } }> }
+        for (const r of cuerpo?.data || []) {
+          if (r.code === "SUCCESS") {
+            out.actualizados++
+            out.porPais[territorio] = (out.porPais[territorio] || 0) + 1
+          } else out.errores.push(`${r.details?.id || "?"}: ${r.code}`)
+        }
+        if (!up.ok && !cuerpo?.data?.length) { out.errores.push(`put ${up.status}`); break }
+      }
+      const rq = await fetch(`${ZOHO_API}/crm/v3/coql`, {
         method: "POST",
         headers: H,
         cache: "no-store",
-        body: JSON.stringify({
-          // CONVENCIÓN DE VALORES (Lalo 09-sep, confirmada): en Chile todo deal
-          // de Vicky lleva Tipo_de_Cobro "Mensual fijo", Moneda del trato CLP y
-          // Valor_por_usuario vacío; el Valor_fijo lo pone el pase principal
-          // desde la cotización (solo con recurrente). Antes este modo solo
-          // corregía Monda_del_trato = 'UF' y no estaba en JOBS_HUERFANOS.
-          select_query: `select id from Deals where ((Created_By = 3525045000484500876 and Territorio = 'Chile') and (Monda_del_trato != 'CLP' or Tipo_de_Cobro != 'Mensual fijo')) limit 100`,
-        }),
+        body: JSON.stringify({ select_query: `select COUNT(id) from Deals where ${donde} group by Created_By` }),
       })
-      if (rc.status === 204) break // sin más filas
-      if (rc.status !== 200) { out.errores.push(`coql ${rc.status}`); break }
-      const filas = (((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string }> }).data) || []
-      if (!filas.length) break
-      const ids = filas.slice(0, Math.max(1, limit - out.actualizados))
-      const up = await fetch(`${ZOHO_API}/crm/v3/Deals`, {
-        method: "PUT",
-        headers: H,
-        cache: "no-store",
-        body: JSON.stringify({
-          data: ids.map((f) => ({ id: f.id, Monda_del_trato: "CLP", Tipo_de_Cobro: "Mensual fijo", Valor_por_usuario_Global: null })),
-          skip_feature_execution: [{ name: "assignment_rules" }],
-          trigger: ["blueprint"],
-        }),
-      })
-      const cuerpo = (await up.json().catch(() => ({}))) as { data?: Array<{ code?: string; details?: { id?: string } }> }
-      for (const r of cuerpo?.data || []) {
-        if (r.code === "SUCCESS") out.actualizados++
-        else out.errores.push(`${r.details?.id || "?"}: ${r.code}`)
+      if (rq.status === 200) {
+        const d = (((await rq.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data) || []
+        out.quedan += Number(Object.values(d[0] || {}).find((v) => typeof v === "number") || 0)
       }
-      if (!up.ok && !cuerpo?.data?.length) { out.errores.push(`put ${up.status}`); break }
-    }
-    const rq = await fetch(`${ZOHO_API}/crm/v3/coql`, {
-      method: "POST",
-      headers: H,
-      cache: "no-store",
-      body: JSON.stringify({ select_query: `select COUNT(id) from Deals where ((Created_By = 3525045000484500876 and Territorio = 'Chile') and (Monda_del_trato != 'CLP' or Tipo_de_Cobro != 'Mensual fijo')) group by Created_By` }),
-    })
-    if (rq.status === 200) {
-      const d = (((await rq.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }).data) || []
-      out.quedan = Number(Object.values(d[0] || {}).find((v) => typeof v === "number") || 0)
     }
     console.log(`[deal-limpieza] moneda ${JSON.stringify(out)}`)
     return NextResponse.json({ ok: true, modo: "moneda", ...out })
