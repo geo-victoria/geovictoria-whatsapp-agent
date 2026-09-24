@@ -3,6 +3,7 @@ import { fichaOperativa, fichaPorTelefono } from "@/lib/paises/ficha-operativa"
 import { getFollowupCronSecret, getKvValue, setKvValue, getLastUserAt, appendAssistantV3 } from "@/lib/supabase-persistence-v3"
 import { claveAltaSolicitada, claveCapacitacion, claveConfiguracion, claveBorrador } from "@/lib/onboarding/fase"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
+import { nombreIdentificadorAdmin, type PaisOnboarding } from "@/lib/onboarding/borrador"
 import { testContactSet } from "@/lib/funnel-analysis"
 
 export const runtime = "nodejs"
@@ -188,6 +189,18 @@ export async function GET(req: Request): Promise<Response> {
       let nombre = ""
       try { nombre = borradorRaw ? String((JSON.parse(borradorRaw) as { admin?: { nombre?: string } }).admin?.nombre || "").trim().split(/\s+/)[0] : "" } catch { nombre = "" }
       const saludo = nombre ? `${nombre}, ` : ""
+      // Documento de la PERSONA según el país del alta (caso Rodrigo MX 24-sep:
+      // el toque pedía "RUT" a un cliente mexicano). Borrador → país del contacto.
+      let paisAlta: PaisOnboarding = "cl"
+      try {
+        const p = borradorRaw ? String((JSON.parse(borradorRaw) as { pais?: string }).pais || "") : ""
+        if (p === "cl" || p === "pe" || p === "co" || p === "mx") paisAlta = p
+        else {
+          const { paisOnboardingDe } = await import("@/lib/onboarding-canal")
+          paisAlta = await paisOnboardingDe(contact)
+        }
+      } catch { /* Chile por defecto */ }
+      const docPersona = nombreIdentificadorAdmin(paisAlta)
       const relator = cap.relator?.nombre || "tu relator"
 
       if (listar) {
@@ -254,7 +267,7 @@ export async function GET(req: Request): Promise<Response> {
           await disparar(
             "alta_pendiente",
             `onb_toque_alta_${contact}`,
-            `${saludo}te quedó pendiente crear tu cuenta 🙂 Solo me falta que me confirmes los datos del administrador (nombre, apellido, RUT y correo) y en un minuto queda andando. ¿Seguimos?`,
+            `${saludo}te quedó pendiente crear tu cuenta 🙂 Solo me falta que me confirmes los datos del administrador (nombre, apellido, ${docPersona} y correo) y en un minuto queda andando. ¿Seguimos?`,
           )
         }
         if (ultimo && silencioMs >= 24 * HORA) {
@@ -295,7 +308,7 @@ export async function GET(req: Request): Promise<Response> {
           await disparar(
             "nomina_pre_capacitacion",
             `onb_toque_nomina_${contact}_${fecha}`,
-            `${saludo}mañana tienes tu capacitación con ${relator} 🙌 Para aprovecharla al máximo conviene llegar con tus trabajadores ya cargados: si me mandas la lista (nombre, apellido, RUT, correo personal y grupo) los dejo listos hoy mismo.`,
+            `${saludo}mañana tienes tu capacitación con ${relator} 🙌 Para aprovecharla al máximo conviene llegar con tus trabajadores ya cargados: si me mandas la lista (nombre, apellido, ${docPersona}, correo personal y grupo) los dejo listos hoy mismo.`,
           )
         }
       }

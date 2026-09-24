@@ -93,6 +93,13 @@ function pareceComprobante(texto: string): boolean {
 async function procesarComprobanteEspejo(f: Fila, texto: string): Promise<string> {
   const fono = (f.telefono_chat || "").replace(/\D/g, "")
   if (!fono) return "sin_telefono"
+  const { motivoDescarteComprobanteEspejo } = await import("@/lib/comprobante-espejo")
+  const { metricsContactSet } = await import("@/lib/funnel-analysis")
+  const descarte = motivoDescarteComprobanteEspejo(texto, fono, metricsContactSet())
+  if (descarte) {
+    console.warn(`[espejo] comprobante de +${fono} descartado: ${descarte}`)
+    return `descartado_${descarte}`
+  }
   const pointers = await getQuotePointers(fono).catch(() => [])
   const pointer = pointers[0]
   if (!pointer?.quoteId) return "sin_cotizacion_vigente"
