@@ -12,6 +12,13 @@ import { getZohoAccessToken } from "./zoho-token"
 
 export const ETAPA_TRATO_CREADO = "1. Trato Creado"
 const STATUS_CALIFICADO = "4. Calificado"
+// Campos de las transiciones de Deals que el hito no conoce: sin valor la
+// transición responde "partially saved" y NO mueve la etapa (medido 24-sep).
+const DEFAULTS_TRANSICION: Record<string, unknown> = {
+  Tipo_de_soluci_n_actual: "No se sabe",
+  Producto_Soluci_n: "Control de Asistencia",
+  Tipo_de_Cobro: "Mensual fijo",
+}
 const API = () => (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 
 export function embudoActivo(): boolean {
@@ -137,8 +144,9 @@ export async function avanzarDealDesdeTratoCreado(
       for (const f of t.fields || []) {
         const api = f.api_name || ""
         if (!api) continue
+        if (valores[api] !== undefined && valores[api] !== null && valores[api] !== "") data[api] = valores[api]
         const vacio = data[api] === undefined || data[api] === null || data[api] === ""
-        if (vacio && valores[api] !== undefined && valores[api] !== null && valores[api] !== "") data[api] = valores[api]
+        if (vacio && DEFAULTS_TRANSICION[api] !== undefined) data[api] = DEFAULTS_TRANSICION[api]
         if (f.data_type === "multiselectpicklist" && typeof data[api] === "string") {
           data[api] = String(data[api]).split(";").map((v) => v.trim()).filter(Boolean)
         }
@@ -151,7 +159,7 @@ export async function avanzarDealDesdeTratoCreado(
       })
       const ej = await json(exec)
       console.warn(`[embudo] deal ${dealId}: ${stage} → ${t.next_field_value} (${exec.status} ${String(ej.code || "")} ${String(ej.message || "").slice(0, 80)})`)
-      if (!exec.ok) return false
+      if (!exec.ok || /partial/i.test(String(ej.message || ""))) return false
     }
     return false
   } catch (e) {
