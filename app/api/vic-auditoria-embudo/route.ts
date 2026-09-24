@@ -192,14 +192,17 @@ export async function GET(req: Request): Promise<Response> {
     return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
   }
   const to = (url.searchParams.get("to") || "egomez@geovictoria.com").split(",").map((s) => s.trim()).filter(Boolean)
+  // Copia a Dave (David García, marketing) por defecto — Lalo 24-sep. `cc=-` la apaga.
+  const ccParam = url.searchParams.get("cc") ?? "dgarciat@geovictoria.com"
+  const cc = ccParam === "-" ? [] : ccParam.split(",").map((s) => s.trim()).filter(Boolean)
   const fallas = (["p1", "p2", "p3", "p4"] as const).reduce((a, k) => a + (resumen[k].total - resumen[k].ok), 0)
   const asunto = `Vicky · auditoría embudo de campañas: ${reales.length} deals, ${fallas ? `${fallas} fallas` : "sin fallas"}`
   const r = await fetch(`${ZOHO_API}/crm/v3/${MAIL_ANCHOR}/actions/send_mail`, {
     method: "POST",
     headers: H,
     cache: "no-store",
-    body: JSON.stringify({ data: [{ from: { email: FROM_EMAIL }, to: to.map((email) => ({ email })), subject: asunto, content: html, mail_format: "html" }] }),
+    body: JSON.stringify({ data: [{ from: { email: FROM_EMAIL }, to: to.map((email) => ({ email })), ...(cc.length ? { cc: cc.map((email) => ({ email })) } : {}), subject: asunto, content: html, mail_format: "html" }] }),
   })
   const detalle = r.ok ? "" : (await r.text().catch(() => "")).slice(0, 300)
-  return NextResponse.json({ ok: r.ok, enviado: r.ok, to, asunto, resumen, detalle })
+  return NextResponse.json({ ok: r.ok, enviado: r.ok, to, cc, asunto, resumen, detalle })
 }
