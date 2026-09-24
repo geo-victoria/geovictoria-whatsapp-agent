@@ -92,6 +92,9 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // endpoint tiene la ventana 07-10 CL y el candado `cierre_enviado_<fecha>`,
   // así que despacharlo cada 30' solo significa "que no se le pase la hora".
   { nombre: "cierre_diario", path: "/api/vic-cierre-diario?enviar=1", cadaMin: 30 },
+  // Auditoría diaria de los 4 puntos de David (embudo de campañas, Lalo 24-sep):
+  // 8-11 CL, una vez por día, con copia a David García.
+  { nombre: "auditoria_embudo", path: "/api/vic-auditoria-embudo?diario=1", cadaMin: 60 },
   // Cierre SEMANAL (Rodrigo 13-sep): el correo de los lunes temprano con la
   // semana lunes→domingo agregada + recomendaciones. El endpoint tiene su
   // ventana (lunes 06-10 CL) y candado `cierre_semanal_enviado_<lunes>` —

@@ -62,8 +62,33 @@ type Fila = {
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const url = new URL(req.url)
-  const hasta = new Date(url.searchParams.get("hasta") || Date.now())
-  const desde = new Date(url.searchParams.get("desde") || hasta.getTime() - 24 * 3600 * 1000)
+  // MODO DIARIO (Lalo 24-sep, "¿ese correo puede ser diario?"): lo despacha
+  // JOBS_HUERFANOS; sale una vez por día entre 8 y 11 CL con el día anterior
+  // de Chile, nunca antes del último arreglo (AUDITORIA_EMBUDO_DESDE).
+  const diario = url.searchParams.get("diario") === "1"
+  let hasta = new Date(url.searchParams.get("hasta") || Date.now())
+  let desde = new Date(url.searchParams.get("desde") || hasta.getTime() - 24 * 3600 * 1000)
+  let claveDia = ""
+  if (diario) {
+    const ahora = new Date()
+    const horaCL = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(ahora)) % 24
+    if (horaCL < 8 || horaCL >= 11) return NextResponse.json({ ok: true, enviado: false, motivo: `fuera de ventana (hora CL ${horaCL})` })
+    const hoyCL = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(ahora)
+    claveDia = `auditoria_embudo_enviada_${hoyCL}`
+    const { getKvValue } = await import("@/lib/supabase-persistence-v3")
+    if (await getKvValue(claveDia).catch(() => null)) return NextResponse.json({ ok: true, enviado: false, motivo: "ya se envió hoy" })
+    // Medianoche de Chile de hoy y de ayer (offset real del día, DST incluido).
+    const off = (d: Date) => {
+      const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(d)
+      const v = (t: string) => Number(p.find((x) => x.type === t)?.value || 0)
+      return Date.UTC(v("year"), v("month") - 1, v("day"), v("hour") % 24, v("minute")) - d.getTime()
+    }
+    const medianocheHoy = new Date(Date.parse(`${hoyCL}T00:00:00Z`) - off(ahora))
+    hasta = medianocheHoy
+    desde = new Date(medianocheHoy.getTime() - 24 * 3600 * 1000)
+    const piso = Date.parse(process.env.AUDITORIA_EMBUDO_DESDE || "2026-09-24T19:00:00Z")
+    if (desde.getTime() < piso) desde = new Date(piso)
+  }
   const token = await getZohoAccessToken()
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
   const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "+00:00")
@@ -150,7 +175,7 @@ export async function GET(req: Request): Promise<Response> {
   const cuenta = (k: "p1" | "p2" | "p3" | "p4") => ({ ok: reales.filter((f) => f[k].ok).length, total: reales.length })
   const resumen = { p1: cuenta("p1"), p2: cuenta("p2"), p3: cuenta("p3"), p4: cuenta("p4") }
 
-  if (url.searchParams.get("json") === "1" || url.searchParams.get("enviar") !== "1") {
+  {
     if (url.searchParams.get("json") === "1") {
       return NextResponse.json({ ok: true, desde: desde.toISOString(), hasta: hasta.toISOString(), deals: filas.length, pruebas: filas.length - reales.length, resumen, filas: filas.map((f) => ({ deal: f.deal.Deal_Name, id: f.deal.id, territorio: f.deal.Territorio, prueba: f.prueba, p1: f.p1, p2: f.p2, p3: f.p3, p4: f.p4 })) })
     }
@@ -188,7 +213,7 @@ export async function GET(req: Request): Promise<Response> {
       : `<p>No hubo deals nuevos de Vicky en la ventana.</p>`) +
     `<p style="margin-top:16px;color:#888;font-size:11px">Punto 3: el valor fijo solo se exige a deals con cotización (los que nacen sin cotización no tienen precio). Fuente: Zoho CRM, solo lectura.</p></div>`
 
-  if (url.searchParams.get("enviar") !== "1") {
+  if (url.searchParams.get("enviar") !== "1" && !diario) {
     return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } })
   }
   const to = (url.searchParams.get("to") || "egomez@geovictoria.com").split(",").map((s) => s.trim()).filter(Boolean)
@@ -204,5 +229,9 @@ export async function GET(req: Request): Promise<Response> {
     body: JSON.stringify({ data: [{ from: { email: FROM_EMAIL }, to: to.map((email) => ({ email })), ...(cc.length ? { cc: cc.map((email) => ({ email })) } : {}), subject: asunto, content: html, mail_format: "html" }] }),
   })
   const detalle = r.ok ? "" : (await r.text().catch(() => "")).slice(0, 300)
+  if (r.ok && claveDia) {
+    const { setKvValue } = await import("@/lib/supabase-persistence-v3")
+    await setKvValue(claveDia, new Date().toISOString()).catch(() => {})
+  }
   return NextResponse.json({ ok: r.ok, enviado: r.ok, to, cc, asunto, resumen, detalle })
 }
