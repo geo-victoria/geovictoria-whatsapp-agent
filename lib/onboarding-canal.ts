@@ -21,6 +21,7 @@ import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-
 const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "").trim()
 
 import { etiquetaFechaCL as etiquetaFecha, convertirHoraAgenda, TZ_AGENDA } from "./onboarding/agenda-capacitacion"
+import { lineaZonaHoraria } from "./paises/ficha-operativa"
 
 /** Zona horaria del cliente del onboarding (ficha del país del alta). */
 async function tzClienteDe(contact: string): Promise<string> {
@@ -960,9 +961,10 @@ export async function armarOnboarding(contact: string): Promise<{
             nTrabajadores: cfg.trabajadores.length,
             altaCreada: /companyId/.test(String(altaVia || "")),
             bloqueEsquema: bloquePromptEsquema(esquema, { yaOfrecido, nombreRelator }),
+            zonaHoraria: lineaZonaHoraria(paisCfg),
           })
         })()
-      : promptOnboardingCL(borrador, { altaSolicitada }),
+      : promptOnboardingCL(borrador, { altaSolicitada, zonaHoraria: lineaZonaHoraria(borrador.pais) }),
     tools: {
       schemas: (altaSolicitada
         ? [

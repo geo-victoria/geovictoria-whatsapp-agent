@@ -19,6 +19,7 @@ import { runAgentLoop, type ConversationMessage } from "./agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool, curarPlaceholdersDeLink } from "./links-de-tools"
 import { partirEnBurbujas } from "./burbujas"
 import { faseDelContacto, armarOnboarding } from "./onboarding-canal"
+import { lineaZonaHoraria } from "./paises/ficha-operativa"
 import { honestarMencionesDeCorreo } from "./honestidad-entrega"
 import { corregirPedidoDeTelefono } from "./no-pedir-telefono"
 import { detectarProcesoHumano, directivaProcesoHumano } from "./proceso-humano"
@@ -622,7 +623,7 @@ export async function procesarTurno(
       alIniciarTool,
       systemPrompt: onboarding
         ? onboarding.systemPrompt + directivaAdmin
-        : contextoCotizacion + perfil.systemPrompt(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + (await directivaCanalMeta(contact)),
+        : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + (await directivaCanalMeta(contact)),
       history,
       userMessage: message,
       apiKey,
@@ -834,7 +835,7 @@ export async function procesarTurno(
         "por el cliente, y entrega EXACTAMENTE su mensajeParaProspecto."
       const retry = await runAgentLoop({
         systemPrompt:
-          contextoCotizacion + perfil.systemPrompt(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_COTIZACION,
+          contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_COTIZACION,
         history,
         userMessage: message,
         apiKey,
@@ -940,7 +941,7 @@ export async function procesarTurno(
           "precio no cambió, dilo sin inventar una cifra nueva."
         const retryP = await runAgentLoop({
           systemPrompt:
-            contextoCotizacion + perfil.systemPrompt(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_PRECIO,
+            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_PRECIO,
           history,
           userMessage: message,
           apiKey,
@@ -1176,7 +1177,7 @@ export async function procesarTurno(
             : "")
         const retry = await runAgentLoop({
           systemPrompt:
-            contextoCotizacion + perfil.systemPrompt(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_DESCUENTO,
+            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_DESCUENTO,
           history,
           userMessage: message,
           apiKey,
@@ -1344,7 +1345,7 @@ export async function procesarTurno(
         "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
         "Si la tool falla o no hay disponibilidad, díselo con honestidad y ofrece otro horario — JAMÁS afirmes que la reunión quedó agendada si la tool no tuvo éxito."
       const retry = await runAgentLoop({
-        systemPrompt: contextoCotizacion + perfil.systemPrompt(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_AGENDA,
+        systemPrompt: contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_AGENDA,
         history,
         userMessage: message,
         apiKey,
@@ -1550,7 +1551,7 @@ export async function procesarTurno(
         "Si faltan datos obligatorios (nombre, empresa o teléfono), PÍDESELOS en vez de afirmar que ya quedó registrado. " +
         "JAMÁS digas que tomaste sus datos o que un ejecutivo lo contactará si la tool no tuvo éxito."
       const retry = callbackRecuperado ? null : await runAgentLoop({
-        systemPrompt: contextoCotizacion + perfil.systemPrompt(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_TOOL_CALLBACK,
+        systemPrompt: contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_CALLBACK,
         history,
         userMessage: message,
         apiKey,
@@ -1849,7 +1850,7 @@ export async function procesarTurno(
           "Si confirmó un supuesto que tu cotización vigente ya incluía, dilo en una frase (los números no cambian, NO vuelvas a pegar el resumen) y avanza al paso siguiente."
         const retryEco = await runAgentLoop({
           systemPrompt:
-            contextoCotizacion + perfil.systemPrompt(contact, umbralInfo?.umbral) + contextoUmbral + directivaUmbral + FORZAR_NO_ECO,
+            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_NO_ECO,
           history,
           userMessage: message,
           apiKey,

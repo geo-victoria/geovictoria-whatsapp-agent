@@ -51,7 +51,7 @@ function estiloPais(pais: PaisOnboarding): string {
   return "Chileno neutro y cercano, sin jerga ni voseo"
 }
 function zonaHorariaPais(pais: PaisOnboarding): string {
-  return pais === "pe" ? "hora de Perú" : pais === "co" ? "hora de Colombia" : pais === "mx" ? "hora de México" : "hora de Chile"
+  return pais === "pe" ? "hora de Perú" : pais === "co" ? "hora de Colombia" : pais === "mx" ? "hora del centro de México" : "hora de Chile"
 }
 
 function valorDe(b: Borrador, campo: Campo): string | undefined {
@@ -94,9 +94,15 @@ export function acuseComprobanteCL(montoFmt: string): string {
  */
 export function promptOnboardingCL(
   b: Borrador,
-  opts: { altaSolicitada: boolean },
+  opts: {
+    altaSolicitada: boolean
+    /** Bloque "Zona horaria del cliente" de la ficha del país (Lalo 24-sep). Lo arma el
+     *  canal con lineaZonaHoraria: el cerebro no importa la ficha (frontera). */
+    zonaHoraria?: string
+  },
 ): string {
   const pais = b.pais
+  const zonaCliente = opts.zonaHoraria || ""
   const ID_EMP = NOMBRE_IDENTIFICADOR[pais]
   const ID_ADM = nombreIdentificadorAdmin(pais)
   const ETIQ = etiquetasPara(pais)
@@ -200,7 +206,8 @@ export function promptOnboardingCL(
       base +
       "TODOS los datos están completos. Muestra este resumen tal cual y pide la confirmación " +
       "explícita del cliente (aún NO llames confirmar_alta_empresa):\n\n" +
-      resumenParaConfirmar(b)
+      resumenParaConfirmar(b) +
+      zonaCliente
     )
   }
 
@@ -210,7 +217,8 @@ export function promptOnboardingCL(
       ? `Datos ya guardados (NO se vuelven a preguntar; solo confirmar o actualizar):\n${guardados.join("\n")}\n`
       : "Aún no hay datos guardados.\n") +
     (invalidos.length ? `Datos que vinieron inválidos (re-pedir):\n${invalidos.join("\n")}\n` : "") +
-    `Datos pendientes: ${pendientes.map((c) => ETIQ[c]).join(", ")}.`
+    `Datos pendientes: ${pendientes.map((c) => ETIQ[c]).join(", ")}.` +
+    zonaCliente
   )
 }
 
@@ -232,6 +240,8 @@ export function promptConfiguracionCL(estado: {
   hoy?: string
   /** País del contacto (21-sep): PE cambia RUT→DNI en la nómina, el estilo y la zona horaria. Default cl. */
   pais?: PaisOnboarding
+  /** Bloque "Zona horaria del cliente" de la ficha del país (lo arma el canal). */
+  zonaHoraria?: string
 }): string {
   const pais: PaisOnboarding = estado.pais || "cl"
   const lineaHoy = estado.hoy
@@ -354,8 +364,9 @@ export function promptConfiguracionCL(estado: {
   const texto = base + cuerpo + (estado.bloqueEsquema || "")
   // PERÚ: la nómina se identifica por DNI, no por RUT (mismo formato de
   // columnas; el candado valida DNI). Sustitución de vocabulario, nada más.
-  if (pais === "pe") return texto.replace(/\bRUT\b/g, "DNI")
-  if (pais === "co") return texto.replace(/\bRUT\b/g, "Cédula")
-  if (pais === "mx") return texto.replace(/\bRUT\b/g, "CURP")
-  return texto
+  const zona = estado.zonaHoraria || ""
+  if (pais === "pe") return texto.replace(/\bRUT\b/g, "DNI") + zona
+  if (pais === "co") return texto.replace(/\bRUT\b/g, "Cédula") + zona
+  if (pais === "mx") return texto.replace(/\bRUT\b/g, "CURP") + zona
+  return texto + zona
 }

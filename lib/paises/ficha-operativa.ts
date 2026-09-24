@@ -69,6 +69,9 @@ export type FichaOperativa = {
   /** Largo del celular sin prefijo (para reconocer un teléfono del país). */
   digitosCelular: number
   tz: string
+  /** Nombre legible de la zona para el cliente ("hora de Perú"). Lalo 24-sep:
+   *  la zona del cliente se declara en el contexto de CADA turno. */
+  zonaNombre: string
   /** Offsets UTC posibles del país (para fechar avisos sin zona). */
   offsets: string[]
   moneda: { codigo: string; simbolo: string; decimales: number; locale: string; nombre: string }
@@ -147,6 +150,7 @@ const FICHA_CL: FichaOperativa = {
   prefijo: "56",
   digitosCelular: 9,
   tz: "America/Santiago",
+  zonaNombre: "hora de Chile",
   offsets: ["-03:00", "-04:00"],
   moneda: { codigo: "CLP", simbolo: "$", decimales: 0, locale: "es-CL", nombre: "pesos chilenos" },
   impuesto: { nombre: "IVA", pct: 19 },
@@ -205,6 +209,7 @@ const FICHA_PE: FichaOperativa = {
   prefijo: "51",
   digitosCelular: 9,
   tz: "America/Lima",
+  zonaNombre: "hora de Perú",
   offsets: ["-05:00"],
   moneda: { codigo: "PEN", simbolo: "S/", decimales: 2, locale: "es-PE", nombre: "soles" },
   impuesto: { nombre: "IGV", pct: 18 },
@@ -261,6 +266,7 @@ const FICHA_CO: FichaOperativa = {
   prefijo: "57",
   digitosCelular: 10,
   tz: "America/Bogota",
+  zonaNombre: "hora de Colombia",
   offsets: ["-05:00"],
   moneda: { codigo: "COP", simbolo: "$", decimales: 0, locale: "es-CO", nombre: "pesos colombianos" },
   impuesto: { nombre: "IVA", pct: 19 },
@@ -340,6 +346,7 @@ const FICHA_MX: FichaOperativa = {
   prefijo: "52",
   digitosCelular: 10,
   tz: "America/Mexico_City",
+  zonaNombre: "hora del centro de México",
   offsets: ["-06:00", "-05:00"],
   moneda: { codigo: "MXN", simbolo: "$", decimales: 2, locale: "es-MX", nombre: "pesos mexicanos" },
   impuesto: { nombre: "IVA", pct: 16 },
@@ -608,4 +615,20 @@ export function resumenFicha(f: FichaOperativa): Record<string, unknown> {
     ticketST: `layout ${f.solicitudes.stLayoutId}`,
     pendientes: f.pendientes,
   }
+}
+
+/**
+ * Bloque de contexto con la zona horaria del cliente (Lalo 24-sep: "tiene que
+ * quedar claro en el contexto de la conversación y ser un parámetro global
+ * arrastrado por la ficha del país"). Lo pegan el orquestador de venta y el
+ * agente de onboarding en cada turno.
+ */
+export function lineaZonaHoraria(pais: string): string {
+  const f = fichaOperativa(pais)
+  return (
+    `\n\n# Zona horaria del cliente\n` +
+    `Este cliente está en ${f.zonaNombre} (${f.tz}). Toda fecha u hora que le digas (reuniones, capacitación, ` +
+    `plazos, seguimientos) va en SU hora local, y toda hora que él te diga está en su hora local. Las horas que ` +
+    `devuelven tus tools YA vienen en su hora: dilas tal cual, sin convertir ni aclarar otra zona.`
+  )
 }
