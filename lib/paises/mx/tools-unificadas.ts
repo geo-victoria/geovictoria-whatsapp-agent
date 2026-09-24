@@ -500,7 +500,13 @@ export function buildDispatchMXUnificado(contact: string) {
         const esc = Math.min(2, Math.max(0, Number(i.escalonDescuento ?? pref?.escalon ?? 0)))
         const hardware = i.hardware as HardwareIn[] | undefined
         // México no tiene padrón que resuelva la razón social desde el RFC.
-        if (!String(i.empresa || "").trim()) {
+        // Tampoco vale rellenarla con el RFC o con el nombre del contacto
+        // (batería MX 24-sep: la formal salió con razón social "XAXX010101000").
+        const compacto = (v: unknown) => String(v || "").replace(/[\s.\-_]/g, "").toUpperCase()
+        const empresaTxt = String(i.empresa || "").trim()
+        const empresaEsRfc = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(compacto(empresaTxt)) || compacto(empresaTxt) === compacto(i.rutEmpresa || i.rfc)
+        const empresaEsContacto = !!empresaTxt && compacto(empresaTxt) === compacto(i.contacto)
+        if (!empresaTxt || empresaEsRfc || empresaEsContacto) {
           return { ok: false, error: "Falta la RAZÓN SOCIAL: en México no se resuelve desde el RFC. Pídesela al cliente en una frase corta (junto con el RFC si también falta) y vuelve a llamar la tool." }
         }
         return base("generar_link_cotizadora", {

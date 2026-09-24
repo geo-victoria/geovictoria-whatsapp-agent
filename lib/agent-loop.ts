@@ -19,6 +19,7 @@
  */
 
 import { esContactoCL } from "./origen-canal.ts"
+import { ultimaEleccionEsSoloApp } from "./eleccion-marcaje.ts"
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
 import {
@@ -564,7 +565,23 @@ export async function runAgentLoop(params: {
               /reloj|mixt/i.test(String(ultimoAsistente?.content || ""))
             eleccionRespaldada = RE_RELOJ.test(textosClienteEv) || afirmoRelojPreguntado
           }
-          if (!eleccionRespaldada) {
+          // LA ÚLTIMA ELECCIÓN MANDA (24-sep, batería MX, y el caso Rodrigo PE
+          // 22-sep): la clienta dijo "reloj y app" y después, frente al doble
+          // valor, "me quedo con la opción 2, solo app" — el respaldo de arriba
+          // encontraba "reloj" en el historial y la formal salió con reloj. Si
+          // el mensaje más reciente del cliente que elige algo elige solo app
+          // (o la opción 2 del doble valor, que siempre es "solo app"), no hay
+          // reloj que cotizar, haya cita vieja o no.
+          if (eleccionRespaldada && ultimaEleccionEsSoloApp([
+            ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
+            userMessage || "",
+          ])) {
+            eleccionRespaldada = false
+            bloqueoUmbral =
+              "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): la última elección del cliente fue SOLO APP (o la opción 2 del doble valor, que es solo app). Cotiza SIN hardware y sin puntosInstalacion. Si el cliente vuelve a pedir el reloj más adelante, recién ahí lo incluyes."
+            console.warn(`[agent-loop] candado reloj: ${toolName} con hardware bloqueado — última elección del cliente = solo app (contacto ${contact}).`)
+          }
+          if (!eleccionRespaldada && !bloqueoUmbral) {
             bloqueoUmbral =
               "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): para cotizar CON reloj debes pasar `evidenciaEleccionReloj` = la frase TEXTUAL del cliente (copiada literal de su mensaje) donde eligió el reloj o el mixto — y esa frase debe existir en la conversación. " +
               "Si el cliente YA eligió, vuelve a llamar la tool citando su frase exacta. Si aún NO ha elegido o su respuesta fue ambigua, NO asumas: re-pregunta corto ('¿Y cómo prefieren marcar: app (sin costo adicional), reloj físico, o mixto?') y cotiza cuando responda. Si eligió app/web/telefónico, cotiza SIN hardware."
