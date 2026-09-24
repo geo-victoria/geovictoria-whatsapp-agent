@@ -5417,8 +5417,12 @@ function renderDetalleEjecutivo(params: {
   /** Solo detalle de PAGADAS (Rodrigo 24-sep): tel → tiempo total desde el
    * primer mensaje con Vicky hasta el pago registrado. Presente = columna. */
   tiempoPago?: Map<string, { label: string; title: string; ms: number }>
+  /** Solo detalle de PAGADAS (Rodrigo 24-sep): tel → venta 100% autónoma
+   * (cero actividad de un ejecutivo de telemarketing) o asistida — misma
+   * regla de la tarjeta (lib/gestion-venta, Lalo 10-sep). Presente = columna. */
+  gestionVenta?: Map<string, GestionVenta>
 }): Response {
-  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais, tcUsdPen, formularioSet = new Set(), tiempoPago } = params
+  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais, tcUsdPen, formularioSet = new Set(), tiempoPago, gestionVenta } = params
   const montoTxt = (tel: string): string => formatearMontoPais(montos.get(tel), pais, tcUsdPen)
   const celdaTiempoPago = (tel: string): string => {
     if (!tiempoPago) return ""
@@ -5427,6 +5431,15 @@ function renderDetalleEjecutivo(params: {
       ? `<td style="white-space:nowrap;text-align:center" title="${esc(t.title)}"><b>${esc(t.label)}</b></td>`
       : `<td style="text-align:center;color:#c8cdd3">s/d</td>`
   }
+  const celdaGestion = (tel: string): string => {
+    if (!gestionVenta) return ""
+    const g = gestionVenta.get(tel)
+    if (g === "autonoma")
+      return `<td style="text-align:center;white-space:nowrap"><span class="tag" style="background:#e8f7ee;color:#1b5e20" title="El cliente no tuvo contacto con un vendedor humano: toda la venta la hizo Vicky (cero actividad de un ejecutivo de telemarketing, aunque la conversación se haya traspasado)">🤖 100% autónoma</span></td>`
+    if (g === "asistida")
+      return `<td style="text-align:center;white-space:nowrap"><span class="tag" style="background:#f3e8ff;color:#7c3aed" title="Hubo actividad real de un ejecutivo de telemarketing: nota en el deal, mensaje por su WhatsApp espejado o llamada contestada">🧑‍💼 Asistida</span></td>`
+    return `<td style="text-align:center;color:#c8cdd3" title="No se pudo verificar la gestión — nunca se declara autónoma sin señal">s/d</td>`
+  }
   // Mediana del tramo mostrado (solo filas con dato): lectura rápida arriba.
   const medianaTiempo = (() => {
     if (!tiempoPago) return ""
@@ -5434,6 +5447,17 @@ function renderDetalleEjecutivo(params: {
     if (!vals.length) return ""
     const m = vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2
     return ` · mediana chat → pago: <b>${esc(duracionLegible(m))}</b>`
+  })()
+  const resumenGestion = (() => {
+    if (!gestionVenta) return ""
+    let aut = 0, asi = 0, sd = 0
+    for (const f of filas) {
+      const g = gestionVenta.get(digits(f.contacto))
+      if (g === "autonoma") aut++
+      else if (g === "asistida") asi++
+      else sd++
+    }
+    return ` · <b style="color:#1b5e20">${aut}</b> 100% autónoma${aut === 1 ? "" : "s"} · <b style="color:#7c3aed">${asi}</b> asistida${asi === 1 ? "" : "s"}${sd > 0 ? ` · ${sd} s/d` : ""}`
   })()
   const filasHtml = [...filas]
     .sort((a, b) => horasDesdeFila(b) - horasDesdeFila(a))
@@ -5453,6 +5477,7 @@ function renderDetalleEjecutivo(params: {
         <td style="text-align:center">${usuarios.get(tel) || "s/d"}</td>
         <td style="white-space:nowrap">${haceTexto(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}<div class="sub" style="margin:0;font-size:11px">${fmtSantiago(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}</div></td>
         ${celdaTiempoPago(tel)}
+        ${celdaGestion(tel)}
         <td style="text-align:right;white-space:nowrap">${montoTxt(tel)}</td>
         <td style="max-width:320px">${esc(f.accionable)}</td>
       </tr>`
@@ -5475,10 +5500,10 @@ function renderDetalleEjecutivo(params: {
 </style></head><body><div class="wrap">
   <p><a href="${volverQS}">← Volver al análisis</a></p>
   <h1>${esc(titulo)}</h1>
-  <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto${medianaTiempo}</div>
+  <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto${medianaTiempo}${resumenGestion}</div>
   <div class="card">${
     filas.length
-      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th style="text-align:center">Dotación</th><th>Última actividad</th>${tiempoPago ? `<th style="text-align:center" title="Tiempo total desde el primer mensaje de la conversación con Vicky hasta el momento en que se registró el pago">⏱ Chat → pago</th>` : ""}<th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th style="text-align:center">Dotación</th><th>Última actividad</th>${tiempoPago ? `<th style="text-align:center" title="Tiempo total desde el primer mensaje de la conversación con Vicky hasta el momento en que se registró el pago">⏱ Chat → pago</th>` : ""}${gestionVenta ? `<th style="text-align:center" title="100% autónoma = el cliente no tuvo contacto con un vendedor humano, toda la venta la hizo Vicky · Asistida = hubo actividad real de un ejecutivo de telemarketing (nota en el deal, WhatsApp espejado o llamada contestada)">Venta</th>` : ""}<th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
       : `<p class="sub" style="margin:0">Sin empresas para este corte.</p>`
   }</div>
 </div></body></html>`
@@ -8899,6 +8924,10 @@ export async function GET(req: Request): Promise<Response> {
             etapaQ === "pagada" ? new Map() : undefined
           const pagoPorQuote = new Map<string, number>()
           const pagoPorTel = new Map<string, number>()
+          // VENTA 100% AUTÓNOMA vs ASISTIDA por fila (Rodrigo 24-sep): la
+          // cotización que sostiene cada fila pagada, para clasificarla con la
+          // MISMA regla y caché de la tarjeta (lib/gestion-venta, Lalo 10-sep).
+          const quoteDeFila = new Map<string, string>()
           if (tiempoPago) {
             for (const p of pagosVicky || []) {
               if (p.qid) pagoPorQuote.set(p.qid, p.t)
@@ -8925,6 +8954,7 @@ export async function GET(req: Request): Promise<Response> {
                 })
               }
             }
+            if (tiempoPago && quoteDeElemento(el) && !quoteDeFila.has(tel)) quoteDeFila.set(tel, quoteDeElemento(el))
             if (vistos.has(tel)) continue
             vistos.add(tel)
             const f = porTelListado.get(tel)
@@ -8951,6 +8981,31 @@ export async function GET(req: Request): Promise<Response> {
               zohoUrl: "",
             })
           }
+          // Clasificación autónoma/asistida de las filas pagadas: metadata de
+          // la cotización (deal, tel, fecha) desde el universo ya leído y la
+          // función compartida con la tarjeta (caché kv + tope de Zoho).
+          let gestionVenta: Map<string, GestionVenta> | undefined
+          if (tiempoPago && quoteDeFila.size) {
+            try {
+              const metaQuote = new Map<string, { tel: string; dealId: string; fechaMs: number }>()
+              for (const q of cierreZoho?.todasList || cierre?.todasList || []) {
+                const qid = String(q.id || "")
+                if (qid) metaQuote.set(qid, {
+                  tel: digits(String(q.Tel_fono_Contacto || "")),
+                  dealId: String(q["Deal_Asociado.id"] || ""),
+                  fechaMs: Date.parse(String(q.Fecha_Hora_Cotizacion || q.Modified_Time || "")),
+                })
+              }
+              const porQuote = await gestionDeVentas(
+                [...quoteDeFila.entries()].map(([tel, qid]) => {
+                  const m = metaQuote.get(qid)
+                  return { quoteId: qid, tel: m?.tel || tel, dealId: m?.dealId || "", fechaMs: m?.fechaMs || Date.now() }
+                }),
+              )
+              gestionVenta = new Map()
+              for (const [tel, qid] of quoteDeFila) gestionVenta.set(tel, porQuote.get(qid) || "sd")
+            } catch { gestionVenta = undefined }
+          }
           const etiquetaEtapa = sinPagoQ && etapaQ === "aceptada" ? "aceptadas SIN pagar" : etapaQ === "entrantes" ? "entrantes del día" : `${ETIQUETA_ETAPA_INBOUND[etapaQ] || etapaQ}`
           const etiquetaLado =
             ladoQ === "in" && outbTelsDrill ? " · solo INBOUND" :
@@ -8969,6 +9024,7 @@ export async function GET(req: Request): Promise<Response> {
             tcUsdPen,
             formularioSet: llegoPorFormulario,
             tiempoPago,
+            gestionVenta,
           })
         }
         // 💰 CAJA DEL PERÍODO: misma lectura de pagos que la columna Pagada
