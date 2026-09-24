@@ -5459,6 +5459,36 @@ function renderDetalleEjecutivo(params: {
     }
     return ` · <b style="color:#1b5e20">${aut}</b> 100% autónoma${aut === 1 ? "" : "s"} · <b style="color:#7c3aed">${asi}</b> asistida${asi === 1 ? "" : "s"}${sd > 0 ? ` · ${sd} s/d` : ""}`
   })()
+  // Suma del RECURRENTE de las empresas vendidas (Rodrigo 24-sep) — solo en
+  // el detalle de pagadas. Chile suma en UF (y aparte lo que solo tiene CLP);
+  // los demás países en su moneda local, Perú con el US$ al lado.
+  const totalRecurrente = (() => {
+    if (!tiempoPago) return ""
+    let uf = 0, clp = 0, sin = 0
+    for (const f of filas) {
+      const m = montos.get(digits(f.contacto))
+      const u = Number(m?.uf) || 0
+      const c = Number(m?.clp) || 0
+      if (pais === "cl") {
+        if (u) uf += u
+        else if (c) clp += c
+        else sin++
+      } else {
+        const local = c || u
+        if (local) clp += local
+        else sin++
+      }
+    }
+    const partes: string[] = []
+    if (pais === "cl") {
+      if (uf) partes.push(`UF ${uf.toLocaleString("es-CL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`)
+      if (clp) partes.push(`$${Math.round(clp).toLocaleString("es-CL")}`)
+    } else if (clp) {
+      partes.push(formatearMontoPais({ clp }, pais, tcUsdPen))
+    }
+    if (!partes.length) return ""
+    return ` · recurrente total: <b>${partes.join(" + ")}</b>/mes${sin > 0 ? ` <span title="filas sin dato de recurrente, no suman">(${sin} s/d)</span>` : ""}`
+  })()
   const filasHtml = [...filas]
     .sort((a, b) => horasDesdeFila(b) - horasDesdeFila(a))
     .map((f) => {
@@ -5500,7 +5530,7 @@ function renderDetalleEjecutivo(params: {
 </style></head><body><div class="wrap">
   <p><a href="${volverQS}">← Volver al análisis</a></p>
   <h1>${esc(titulo)}</h1>
-  <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto${medianaTiempo}${resumenGestion}</div>
+  <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto${medianaTiempo}${resumenGestion}${totalRecurrente}</div>
   <div class="card">${
     filas.length
       ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th style="text-align:center">Dotación</th><th>Última actividad</th>${tiempoPago ? `<th style="text-align:center" title="Tiempo total desde el primer mensaje de la conversación con Vicky hasta el momento en que se registró el pago">⏱ Chat → pago</th>` : ""}${gestionVenta ? `<th style="text-align:center" title="100% autónoma = el cliente no tuvo contacto con un vendedor humano, toda la venta la hizo Vicky · Asistida = hubo actividad real de un ejecutivo de telemarketing (nota en el deal, WhatsApp espejado o llamada contestada)">Venta</th>` : ""}<th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
