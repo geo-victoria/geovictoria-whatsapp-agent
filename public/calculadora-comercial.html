@@ -178,6 +178,9 @@
         .cantidad-input:focus { outline: none; border-color: var(--primary-blue); }
         .equipo-item-actions { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
         .equipo-subtotal { font-weight: 600; font-size: 13px; color: var(--gray); }
+        .cantidad-input.bajo-lista { border-color: #cc0000; color: #cc0000; background: #fff5f5; }
+        .bajo-lista-tag { display: block; font-size: 10px; font-weight: 700; color: #cc0000; margin-top: 2px; white-space: nowrap; }
+        .total-card .bajo-lista-aviso { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; background: #cc0000; color: #fff; font-size: 12px; font-weight: 700; text-align: center; }
         .remove-btn { width: 24px; height: 24px; border: none; border-radius: 50%; background: #ff4444; color: white; font-size: 16px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; }
         .remove-btn:hover { background: #cc0000; }
         .equipos-total-row { background: #f5f5f5; }
@@ -258,6 +261,7 @@
                         <div class="breakdown-clp" id="totalCLP">$0 CLP</div>
                     </div>
                 </div>
+                <div class="bajo-lista-aviso" id="bajoListaAviso" style="display:none;"></div>
                 <div class="uf-info" id="ufInfo">Cargando valor UF...</div>
             </div>
         </div>
@@ -1140,6 +1144,10 @@
         // Solo el hash de la clave de descuento viaja al navegador (nunca el texto plano).
         const UNLOCK_HASH = '2bd1082980d95a905613e7497cdb461657dff58704cbe14084e230c929a15e81';
         const IVA_RATE = 0.19;
+        // Oportunidad temporal (Ignacio 23-sep-2026): los EQUIPOS se pueden cotizar bajo precio de lista
+        // hasta agotar stock. Se marca en rojo y se avisa en totales; el PDF sale sin marca.
+        // Para volver al piso de lista: EQUIPOS_BAJO_LISTA = false y regenerar (CL y SMB salen juntos).
+        const EQUIPOS_BAJO_LISTA = true;
 
         function formatCLP(value) { return '$' + Math.round(value).toLocaleString('es-CL') + ' CLP'; }
         function formatUF(value) { return value.toFixed(3) + ' UF'; }
@@ -1707,6 +1715,12 @@
             document.getElementById('iva').textContent = formatUF(displayIva);
             document.getElementById('totalUF').textContent = formatUF(displayTotal);
 
+            // Aviso de equipos cotizados bajo precio de lista (solo con EQUIPOS_BAJO_LISTA)
+            const nBajoLista = EQUIPOS_BAJO_LISTA ? addedEquipments.filter(e => e.customPrice < e.minPrice[e.tipo] - 1e-9).length : 0;
+            const avisoBL = document.getElementById('bajoListaAviso');
+            avisoBL.style.display = nBajoLista ? 'block' : 'none';
+            avisoBL.textContent = nBajoLista ? (nBajoLista === 1 ? '1 equipo bajo precio de lista' : nBajoLista + ' equipos bajo precio de lista') : '';
+
             // Totales CLP estilo Zoho: suma de secciones enteras; IVA recalculado sobre el subtotal CLP
             const allSecs = clpSecs.slice();
             if (equiposArriendoCLP) allSecs.push({ clp: equiposArriendoCLP });
@@ -1948,7 +1962,9 @@
 
         function updateEquipoPrice(index, price) {
             const minPrice = addedEquipments[index].minPrice[addedEquipments[index].tipo];
-            const newPrice = Math.max(minPrice, parseFloat(price) || minPrice);
+            const floor = EQUIPOS_BAJO_LISTA ? 0 : minPrice;
+            const parsed = parseFloat(price);
+            const newPrice = isNaN(parsed) ? minPrice : Math.max(floor, parsed);
             addedEquipments[index].customPrice = newPrice;
             renderEquiposList();
             updateCalculator();
@@ -1966,6 +1982,10 @@
                 const minPrice = item.minPrice[item.tipo];
                 const subtotal = precio * item.cantidad;
                 const tipoLabel = item.tipo === 'arriendo' ? '/mes' : '';
+                const bajoLista = EQUIPOS_BAJO_LISTA && precio < minPrice - 1e-9;
+                const inputMin = EQUIPOS_BAJO_LISTA ? 0 : minPrice;
+                const inputTitle = EQUIPOS_BAJO_LISTA ? `Precio de lista: ${minPrice.toFixed(2)}${tipoLabel}` : `Precio minimo: ${minPrice.toFixed(2)}${tipoLabel}`;
+                const bajoListaTag = bajoLista ? `<small class="bajo-lista-tag">bajo lista: ${minPrice.toFixed(2)}</small>` : '';
 
                 // Check if venta is available (disable if price is 0)
                 const ventaOption = item.minPrice.venta === 0 ?
@@ -1987,7 +2007,7 @@
                             <input type="number" class="cantidad-input" value="${item.cantidad}" min="1" onchange="updateEquipoCantidad(${index}, this.value)">
                         </td>
                         <td>
-                            <input type="number" class="cantidad-input" value="${precio.toFixed(2)}" min="${minPrice}" step="0.01" onchange="updateEquipoPrice(${index}, this.value)" style="width:70px;" title="Precio minimo: ${minPrice.toFixed(2)}${tipoLabel}">
+                            <input type="number" class="cantidad-input${bajoLista ? ' bajo-lista' : ''}" value="${precio.toFixed(2)}" min="${inputMin}" step="0.01" onchange="updateEquipoPrice(${index}, this.value)" style="width:70px;" title="${inputTitle}">${bajoListaTag}
                         </td>
                         <td>
                             <div class="equipo-item-actions">
