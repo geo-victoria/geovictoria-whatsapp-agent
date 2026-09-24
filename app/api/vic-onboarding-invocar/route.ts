@@ -153,6 +153,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     soloDigitos(previo?.empresa.identificador) !== soloDigitos(rutEmpresa)
   const heredable = previo && previo.pais === paisAlta && !otraEmpresa ? previo : null
   const borrador = sembrarBorrador(heredable, semilla, paisAlta)
+  // Lo tipeado en el formulario de un alta ANTERIOR (giro/dirección/comuna)
+  // tampoco se hereda: el giro "Otro" de Chile aparecía en el de Colombia.
+  if (!heredable) await setKvValue(`onboarding_flow_extras_${contact}`, "").catch(() => {})
   await setKvValue(claveBorrador(contact), JSON.stringify(borrador))
 
   // 1.5 RESET del ciclo de alta (28-ago, caso "cuenta creada" de mentira): si
