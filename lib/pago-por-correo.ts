@@ -184,7 +184,11 @@ async function resolverCotizacion(aviso: AvisoBanco): Promise<{ row?: CotRow; ca
   if (aviso.rutOrdenante) {
     const vs = rutVariantes(aviso.rutOrdenante)
     if (vs.length) {
-      const or = vs.map((v) => `RUT_Cliente = '${esc(v)}'`).join(" or ")
+      // COQL rechaza 3+ condiciones en un mismo paréntesis (SYNTAX_ERROR, visto
+      // 24-sep con el aviso de BICE): se anidan de a dos, ((a or b) or c)…
+      const or = vs
+        .map((v) => `RUT_Cliente = '${esc(v)}'`)
+        .reduce((acc, c) => (acc ? `(${acc} or ${c})` : c), "")
       const rows = await coql(`select ${CAMPOS} from ${QUOTE_MODULE} where ((${or}) and ${VIVAS}) and Created_Time > '${desde}' order by Created_Time desc limit 10`)
       const aceptadas = rows.filter((r) => /acept/i.test(String(r.Estado_Cotizacion || "")))
       const pool = aceptadas.length ? aceptadas : rows
