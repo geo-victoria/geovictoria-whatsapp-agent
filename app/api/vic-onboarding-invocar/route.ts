@@ -143,7 +143,16 @@ export async function POST(req: Request): Promise<NextResponse> {
     ...(admin ? { admin: { nombre: admin.nombre, apellido: admin.apellido, email: admin.email } } : {}),
   }
   const { paisOnboardingDe } = await import("@/lib/onboarding-canal")
-  const borrador = sembrarBorrador(previo, semilla, await paisOnboardingDe(contact))
+  const paisAlta = await paisOnboardingDe(contact)
+  // Invocar = alta NUEVA (E2E 24-sep): un borrador de OTRO país o de OTRA
+  // empresa (otro documento) es de un alta anterior y no se hereda — si no,
+  // el formulario de Perú abría con la razón social y el RUT chilenos.
+  const soloDigitos = (x?: string) => String(x || "").replace(/[^0-9kK]/g, "").toUpperCase()
+  const otraEmpresa =
+    Boolean(rutEmpresa) && Boolean(previo?.empresa.identificador) &&
+    soloDigitos(previo?.empresa.identificador) !== soloDigitos(rutEmpresa)
+  const heredable = previo && previo.pais === paisAlta && !otraEmpresa ? previo : null
+  const borrador = sembrarBorrador(heredable, semilla, paisAlta)
   await setKvValue(claveBorrador(contact), JSON.stringify(borrador))
 
   // 1.5 RESET del ciclo de alta (28-ago, caso "cuenta creada" de mentira): si
