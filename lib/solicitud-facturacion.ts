@@ -26,12 +26,13 @@
  * Best-effort: jamás toca la conversación ni frena el alta.
  */
 import { getZohoAccessToken } from "./zoho-token"
-import { getKvValue, setKvValue } from "./supabase-persistence-v3"
+import { getKvValue, setKvValue, fetchHistoryV3 } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { fichaPorTelefono, type CodigoPaisOperativo } from "./paises/ficha-operativa"
 import { leerDatosFacturacion, guardarDatosFacturacion, type DatosFacturacion } from "./datos-facturacion"
 import { claveBorrador, claveCapacitacion } from "./onboarding/fase"
 import { parsearBorrador } from "./onboarding/borrador"
+import { parsearCertificadoTributario } from "./certificado-tributario"
 import {
   faltantesFacturacion,
   registroSolicitudFacturacion,
@@ -388,6 +389,31 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
   if (!limpio(d.razonSocial)) d.razonSocial = limpio(ref?.Nombre_Empresa) || limpio(q.Cuenta_Asociada?.name) || limpio(q.Name).replace(/^Cotizaci[oó]n\s+/i, "").replace(/\s+-\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}.*$/, "")
   if (!limpio(d.telefono)) d.telefono = limpio(q.Tel_fono_Contacto) || `+${c}`
   if (!limpio(d.correo)) d.correo = limpio(q.Email_Contacto)
+  // CERTIFICADO TRIBUTARIO EN EL CHAT (24-sep, caso HSEQTECH): si el cliente
+  // mandó su e-RUT / ficha RUC / RUT DIAN / constancia SAT por WhatsApp, la
+  // visión ya lo transcribió en el historial. Rellena SOLO lo vacío y solo si
+  // el documento del certificado es el de la venta (no el de un proveedor).
+  if (!limpio(d.giro) || !limpio(d.direccion) || !limpio(d.comuna)) {
+    try {
+      const hist = await fetchHistoryV3(c, 200)
+      const digs = (x: unknown) => String(x ?? "").replace(/[^\dkK]/g, "").toUpperCase()
+      for (const m of [...hist].reverse()) {
+        if (m.role !== "user") continue
+        const cert = parsearCertificadoTributario(String(m.content || ""))
+        if (!cert) continue
+        if (cert.documento && limpio(d.documento) && digs(cert.documento) !== digs(d.documento)) continue
+        if (!limpio(d.giro) && cert.giro) d.giro = cert.giro
+        if (!limpio(d.direccion) && cert.direccion) d.direccion = cert.direccion
+        if (!limpio(d.comuna) && cert.comuna) d.comuna = cert.comuna
+        if (!limpio(d.ciudad) && cert.ciudad) d.ciudad = cert.ciudad
+        if (!limpio(d.razonSocial) && cert.razonSocial) d.razonSocial = cert.razonSocial
+        if (!limpio(d.documento) && cert.documento) d.documento = cert.documento
+        break
+      }
+    } catch (e) {
+      console.warn(`[solicitud-facturacion] certificado del chat ilegible contact=${c}: ${e instanceof Error ? e.message : e}`)
+    }
+  }
   d = await completarDesdePadron(pais, limpio(d.documento), d)
   if ((!limpio(d.contactoNombre) || !limpio(d.correo)) && q.Contacto_Asociado?.id) {
     const ct = await getZoho<{ First_Name?: string; Last_Name?: string; Email?: string }>(H, `/crm/v3/Contacts/${q.Contacto_Asociado.id}?fields=First_Name,Last_Name,Email`)
