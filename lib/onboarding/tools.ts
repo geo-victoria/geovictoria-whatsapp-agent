@@ -244,7 +244,9 @@ export const TOOL_VER_CUPOS_CAPACITACION = {
   name: "ver_cupos_capacitacion",
   description:
     "Consulta los horarios disponibles para la capacitación (Curso 1) del cliente, con el relator que ya tiene asignado. " +
-    "Úsala cuando el cliente diga que quiere agendar, o cuando le vayas a ofrecer horarios. " +
+    "Úsala cuando el cliente diga que quiere agendar, o cuando le vayas a ofrecer horarios — y llámala OTRA VEZ " +
+    "cada vez que pregunte por horarios aunque ya se los hayas mostrado: la agenda cambia y las horas vienen " +
+    "convertidas a la hora local del cliente. Nunca repitas horarios del historial sin llamarla. " +
     "No recibe parámetros. Devuelve el nombre del relator y las fechas con sus horas libres. " +
     "Ofrece SOLO estos horarios: no propongas ninguno que no venga en esta lista.",
   input_schema: { type: "object" as const, properties: {}, required: [] as string[] },
