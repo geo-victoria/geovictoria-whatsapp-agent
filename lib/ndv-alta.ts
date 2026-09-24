@@ -156,11 +156,20 @@ async function pedirNdvAlta(job: JobNdvImp): Promise<RespuestaNdvAlta> {
   const secret = (process.env.VICKY_COTIZADORA_SECRET || "").trim()
   const ctrl = new AbortController()
   const corte = setTimeout(() => ctrl.abort(), 58_000)
+  // Correo del administrador como respaldo del "Correo de contacto" que exige
+  // Creator (24-sep, TRANSPORT MINING COT1653: la cotización nació sin correo y
+  // nunca tuvo espejo, así que la NDV del alta era imposible).
+  let correoContacto = ""
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const raw = await getKvValue(`onboarding_borrador_${job.contact}`)
+    correoContacto = String((JSON.parse(raw || "{}") as { admin?: { email?: string } })?.admin?.email || "").trim()
+  } catch { /* sin borrador */ }
   try {
     const r = await fetch(`${COTIZADORA_API_BASE}/api/creator/ndv-alta-chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(secret ? { "x-vicky-secret": secret } : {}) },
-      body: JSON.stringify({ quoteId: job.quoteId, companyId: job.companyId, empresaNombre: job.empresa, rut: job.rut, pais: job.pais || "cl" }),
+      body: JSON.stringify({ quoteId: job.quoteId, companyId: job.companyId, empresaNombre: job.empresa, rut: job.rut, pais: job.pais || "cl", ...(correoContacto ? { correoContacto } : {}) }),
       cache: "no-store",
       signal: ctrl.signal,
     })
