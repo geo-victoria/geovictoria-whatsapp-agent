@@ -35,6 +35,7 @@ import { parsearBorrador } from "./onboarding/borrador"
 import { parsearCertificadoTributario } from "./certificado-tributario"
 import {
   faltantesFacturacion,
+  mesInicioFacturacion,
   registroSolicitudFacturacion,
   type DatosSolicitudFacturacion,
 } from "./solicitud-facturacion-payload"
@@ -100,19 +101,34 @@ async function coql<T = Record<string, unknown>>(H: Record<string, string>, sele
   }
 }
 
-/** Fecha de pago (kv de la marca) o hoy, como YYYY-MM-DD. */
-async function mesInicioDe(contact: string): Promise<string> {
+/** Fecha de pago en la hora local del país (YYYY-MM-DD). */
+function fechaLocal(iso: string, tz: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10)
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d)
+}
+
+/**
+ * Mes de inicio de facturación: fecha de pago (kv de la marca, o hoy) en la
+ * hora del país, corrida al mes siguiente si cae del día 15 en adelante
+ * (`mesInicioFacturacion`).
+ */
+async function mesInicioDe(contact: string, tz: string): Promise<string> {
+  let iso = new Date().toISOString()
   for (const k of [`pago_online_${contact}`, `comprobante_ok_${contact}`]) {
     try {
       const raw = await getKvValue(k)
       if (!raw) continue
       const j = JSON.parse(raw) as { at?: string }
-      if (j?.at && /^\d{4}-\d{2}-\d{2}/.test(j.at)) return j.at.slice(0, 10)
+      if (j?.at && /^\d{4}-\d{2}-\d{2}/.test(j.at)) {
+        iso = j.at
+        break
+      }
     } catch {
       /* siguiente */
     }
   }
-  return new Date().toISOString().slice(0, 10)
+  return mesInicioFacturacion(fechaLocal(iso, tz))
 }
 
 /** Padrón del país: solo rellena lo VACÍO (regla SII: el padrón no manda). */
@@ -427,7 +443,7 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
 
   const cuentaId = limpio(q.Cuenta_Asociada?.id) || limpio(ref?.Account_CRM?.id)
   const solicitante = await solicitanteDe(H, limpio(q.Deal_Asociado?.id), pais)
-  const mesInicio = await mesInicioDe(c)
+  const mesInicio = await mesInicioDe(c, ficha.tz)
 
   const datos: DatosSolicitudFacturacion = {
     pais,

@@ -131,3 +131,12 @@ test("fusión de datos de facturación: lo nuevo gana, el vacío nunca pisa", ()
   assert.equal(b.fuentes?.giro, "flow")
   assert.equal(b.fuentes?.comuna, "aceptacion")
 })
+
+test("mes de facturación: desde el día 15 parte el mes siguiente (Victoria/Nailliw 24-sep)", async () => {
+  const { mesInicioFacturacion, etiquetaMes } = await import("../lib/solicitud-facturacion-payload.ts")
+  assert.equal(mesInicioFacturacion("2026-09-14"), "2026-09-14")
+  assert.equal(mesInicioFacturacion("2026-09-15"), "2026-10-01")
+  assert.equal(mesInicioFacturacion("2026-09-24"), "2026-10-01")
+  assert.equal(mesInicioFacturacion("2026-12-20"), "2027-01-01")
+  assert.equal(etiquetaMes(mesInicioFacturacion("2026-09-24")), "Octubre 2026")
+})

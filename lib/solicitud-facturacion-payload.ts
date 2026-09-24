@@ -54,6 +54,25 @@ export type FaltanteFacturacion = "giro" | "direccion" | "comuna" | "telefono" |
 
 const limpio = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim()
 
+/**
+ * Mes desde el que se factura (Victoria Luna / Nailliw 24-sep): del día 15 en
+ * adelante Vicky "regala" el resto del mes y la facturación parte el mes
+ * SIGUIENTE — las metas de telemarketing se proyectan por el mes del producto
+ * facturado. Recibe la fecha de pago YA en la hora local del país (YYYY-MM-DD)
+ * y devuelve YYYY-MM-DD: la misma fecha antes del 15, o el día 1 del mes
+ * siguiente desde el 15.
+ */
+export const DIA_CORTE_FACTURACION = 15
+export function mesInicioFacturacion(fechaPagoLocal: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(fechaPagoLocal || "")
+  if (!m) return fechaPagoLocal
+  const [a, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  if (dia < DIA_CORTE_FACTURACION) return `${m[1]}-${m[2]}-${m[3]}`
+  const sigA = mes === 12 ? a + 1 : a
+  const sigM = mes === 12 ? 1 : mes + 1
+  return `${sigA}-${String(sigM).padStart(2, "0")}-01`
+}
+
 /** Nombre del mes en español para "Favor facturar Septiembre 2026". */
 export function etiquetaMes(iso: string): string {
   const m = /^(\d{4})-(\d{2})/.exec(iso || "")
