@@ -24,6 +24,7 @@ import { type GestionVenta } from "@/lib/gestion-venta"
 import { gestionDeVentas } from "@/lib/gestion-ventas-datos"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
+import { registrarUso, leerUso, agregarUso, EVENTOS_USO, ETIQUETA_EVENTO, fechaCL as fechaClUso } from "@/lib/uso-dash"
 
 export const dynamic = "force-dynamic"
 // El chat de Vicky Cotizaciones corre un loop de tool use contra la cotizadora
@@ -6502,6 +6503,75 @@ async function renderVickyCotizacionesPreform(contact: string, key: string): Pro
 /** Selector de OPORTUNIDAD para crear una cotización (pedido Lalo 07-ago):
  * lista los deals activos de Zoho con búsqueda en vivo — escribes el nombre y
  * la lista se acorta; eliges uno y se abre el chat de creación. */
+/** USO DEL DASH POR PERSONA (Ignacio 24-sep, acordado con Lalo): quién eligió
+ * oportunidad, abrió la calculadora, bajó PDF, emitió o usó el editor, por
+ * persona y por día. Solo Administrador (o acceso máquina). Datos en vic_kv
+ * uso_* (lib/uso-dash), 30 días por defecto (?dias=7|30|90). */
+async function renderUsoDash(quien: string, key: string, sp: URLSearchParams): Promise<Response> {
+  if (quien && quien !== "Administrador") {
+    return paginaAviso("Solo administradores", `<p>Esta vista es solo para administradores.</p>`, 403)
+  }
+  const diasP = Number(sp.get("dias") || 30)
+  const dias = Number.isFinite(diasP) && diasP >= 1 && diasP <= 180 ? Math.floor(diasP) : 30
+  const hasta = fechaClUso()
+  const desde = fechaClUso(new Date(Date.now() - (dias - 1) * 86_400_000))
+  const { personas, dias: porDia } = agregarUso(await leerUso(desde, hasta))
+  const fmtHora = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+  const hora = (iso: string) => {
+    const d = new Date(iso)
+    return Number.isNaN(d.getTime()) ? "—" : fmtHora.format(d)
+  }
+  const qs = (d: number) => `?key=${encodeURIComponent(key)}&vista=uso&dias=${d}`
+  const n = (x: number) => (x ? String(x) : `<span class="sub">·</span>`)
+  const cabEventos = EVENTOS_USO.map((e) => `<th>${esc(ETIQUETA_EVENTO[e])}</th>`).join("")
+  const filasPersonas = personas
+    .map(
+      (p) => `<tr><td><b>${esc(p.quien)}</b></td><td>${p.total}</td>${EVENTOS_USO.map((e) => `<td>${n(p.porEvento[e])}</td>`).join("")}<td>${p.dias}</td><td style="white-space:nowrap">${esc(hora(p.ultimo))}</td></tr>`,
+    )
+    .join("")
+  const filasDias = porDia
+    .map(
+      (d) => `<tr><td style="white-space:nowrap">${esc(d.fecha)}</td><td>${d.personas}</td><td>${d.total}</td>${EVENTOS_USO.map((e) => `<td>${n(d.porEvento[e])}</td>`).join("")}</tr>`,
+    )
+    .join("")
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Uso del dash — Vicky</title>
+<style>
+  ${GV_FONT_CSS}
+  body{font-family:${GV_BODY_FONT};margin:0;background:#f7f8fa;color:#4e4e4e}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  h1{font-family:${GV_TITLE_FONT};font-weight:700;font-size:20px;margin:0;color:#4e4e4e}
+  h2{font-family:${GV_TITLE_FONT};font-weight:700;font-size:15px;margin:0 0 10px;color:#4e4e4e}
+  .sub{color:#646464;font-size:13px}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-top:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef0f2;vertical-align:top}
+  th{color:#6b7280;font-weight:600;font-size:12px}
+  a{color:#00aff2;text-decoration:none;font-weight:600} a:hover{text-decoration:underline}
+  .rango a{margin-right:10px} .rango b{margin-right:10px}
+</style></head><body><div class="wrap">
+  <p style="margin:0 0 10px"><a href="?key=${encodeURIComponent(key)}">← Volver al dash</a></p>
+  <h1><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:28px;vertical-align:middle;margin-right:10px">Uso del dash por persona</h1>
+  <div class="sub" style="margin-top:4px">Quién eligió oportunidad, abrió la calculadora comercial, bajó PDF, emitió o usó el editor. Solo sesiones con login; el acceso por llave no cuenta.</div>
+  <div class="sub rango" style="margin-top:8px">Rango: ${[7, 30, 90].map((d) => (d === dias ? `<b>${d} días</b>` : `<a href="${qs(d)}">${d} días</a>`)).join("")} <span class="sub">(${esc(desde)} → ${esc(hasta)})</span></div>
+  <div class="card">
+    <h2>Por persona</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Persona</th><th>Total</th>${cabEventos}<th>Días activos</th><th>Último uso</th></tr></thead>
+      <tbody>${filasPersonas || `<tr><td colspan="${EVENTOS_USO.length + 4}" class="sub">Sin uso registrado en el rango.</td></tr>`}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>Por día</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Fecha</th><th>Personas</th><th>Total</th>${cabEventos}</tr></thead>
+      <tbody>${filasDias || `<tr><td colspan="${EVENTOS_USO.length + 3}" class="sub">Sin uso registrado en el rango.</td></tr>`}</tbody>
+    </table></div>
+  </div>
+</div></body></html>`
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
+}
+
 async function renderSelectorDeal(key: string): Promise<Response> {
   const deals = (await fetchDealsEquipo(true).catch(() => [])) as DealEquipo[]
   const filas = deals
@@ -7344,6 +7414,17 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
   const accion = accionPre
+  // USO DEL DASH (Ignacio 24-sep): identidad humana de la sesión para el
+  // marcador de uso (lib/uso-dash). El acceso máquina (?key= sin cookie)
+  // no se cuenta. Best-effort: nunca afecta la acción.
+  const quienUso = (() => {
+    try {
+      const q = decodeURIComponent(cookieDe(req, "vic_quien") || "")
+      return cookieDe(req, "vic_auth") === authToken() && q ? q : ""
+    } catch {
+      return ""
+    }
+  })()
   // Creación de cotización sobre un deal (no requiere contact: el teléfono
   // sale de la ficha del deal en Zoho).
   if (accion === "cotpreform_chat") {
@@ -7442,6 +7523,7 @@ export async function POST(req: Request): Promise<Response> {
       if (!info) {
         return new Response(JSON.stringify({ ok: false, error: "deal no encontrado" }), { status: 404, headers: { "content-type": "application/json" } })
       }
+      void registrarUso(quienUso, "calc_abrio", dealId)
       return new Response(JSON.stringify({ ok: true, info: { nombre: info.nombre, accountNombre: info.accountNombre, rut: info.rut, contactoNombre: info.contactoNombre, ownerNombre: info.ownerNombre } }), { headers: { "content-type": "application/json" } })
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
@@ -7506,6 +7588,7 @@ export async function POST(req: Request): Promise<Response> {
       const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
       const r = await fetchZoho(`${api}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Numero_Cotizacion,Version_PDF`)
       const rec = ((await r.json().catch(() => ({}))) as { data?: Array<{ PDF_URL?: string; Numero_Cotizacion?: string; Version_PDF?: number }> }).data?.[0]
+      void registrarUso(quienUso, "calc_pdf", quoteId)
       return new Response(JSON.stringify({ ok: true, pdfUrl: String(rec?.PDF_URL || ""), numero: String(rec?.Numero_Cotizacion || ""), version: Number(rec?.Version_PDF || 1) }), { headers: { "content-type": "application/json" } })
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
@@ -7582,6 +7665,7 @@ export async function POST(req: Request): Promise<Response> {
             empresa: (String(data.empresa || "").trim() || info.accountNombre || undefined) as string | undefined,
           }).catch(() => {})
         }
+        void registrarUso(quienUso, "calc_emitio", actualizarQuoteId)
         return new Response(JSON.stringify({
           ok: true,
           actualizada: true,
@@ -7645,6 +7729,7 @@ export async function POST(req: Request): Promise<Response> {
           empresa: (String(data.empresa || "").trim() || info.accountNombre || undefined) as string | undefined,
         }).catch(() => {})
       }
+      void registrarUso(quienUso, "calc_emitio", quoteId)
       return new Response(JSON.stringify({
         ok: true,
         quoteId,
@@ -8254,13 +8339,22 @@ export async function GET(req: Request): Promise<Response> {
   }
   // Pestaña "Editor de cotizaciones" (pedido Lalo 07-ago): buscador por número
   // + cotizaciones recientes. Rama temprana: no necesita el pipeline pesado.
-  if (searchParams.get("vista") === "editor") return renderEditorCotizaciones(key)
+  // USO DEL DASH (Ignacio 24-sep): reporte por persona (solo Administrador)
+  // y marcas de uso del editor y del selector. Ver lib/uso-dash.
+  if (searchParams.get("vista") === "uso") return renderUsoDash(quien, key, searchParams)
+  if (searchParams.get("vista") === "editor") {
+    void registrarUso(quien, "editor")
+    return renderEditorCotizaciones(key)
+  }
   if (searchParams.get("vista") === "cotfunnel") return renderFunnelCotizaciones(key)
   if (searchParams.get("vista") === "tombolas") return renderAuditoriaTombolas(key, searchParams.get("solo") === "bordes")
   // Crear cotización (pedido Lalo 07-ago): primero se elige a qué oportunidad
   // de Zoho se asigna (lista de deals activos con búsqueda), y luego el chat
   // de creación emite la formal amarrada a ese deal.
-  if (searchParams.get("cotnueva")) return renderSelectorDeal(key)
+  if (searchParams.get("cotnueva")) {
+    void registrarUso(quien, "selector")
+    return renderSelectorDeal(key)
+  }
   const cotcrear = (searchParams.get("cotcrear") || "").replace(/\D/g, "").trim()
   // EL CHAT DE CREACIÓN QUEDÓ FUERA DEL FLUJO (Lalo 27-ago, "el chat para
   // cotizar nunca funcionó"): la puerta oficial es la CALCULADORA con el deal
@@ -9925,6 +10019,7 @@ export async function GET(req: Request): Promise<Response> {
     ${vista === "inbound" ? "" : `<div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
+      ${esAdmin ? `<a href="?key=${encodeURIComponent(key)}&vista=uso">👣 Uso del dash</a>` : ""}
       <a href="?key=${encodeURIComponent(key)}&vista=cotfunnel">🧭 Funnel cotizaciones</a>
       <a href="?key=${encodeURIComponent(key)}&vista=tombolas">🎰 Auditoría tómbolas</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cartera"); return p.toString() })()}">📋 Cartera</a>
