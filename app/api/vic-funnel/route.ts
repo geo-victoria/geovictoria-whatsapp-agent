@@ -4153,6 +4153,15 @@ const ETAPA_ALIAS: Record<string, EtapaInbound> = {
  * por teléfono). */
 const telDeElemento = (el: string): string => el.split("~")[0]
 const quoteDeElemento = (el: string): string => el.split("~")[1] || ""
+/** Duración legible entre dos instantes ("3 d 4 h" · "2 h 15 min" · "45 min"). */
+const duracionLegible = (ms: number): string => {
+  const min = Math.max(0, Math.round(ms / 60000))
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h} h ${min % 60} min`
+  const d = Math.floor(h / 24)
+  return `${d} d ${h % 24} h`
+}
 
 type CohortesInbound = {
   dias: string[]
@@ -5405,9 +5414,27 @@ function renderDetalleEjecutivo(params: {
   tcUsdPen?: number
   /** Contactos con fila en vic_outbound_cadence (lead cargado = formulario). */
   formularioSet?: Set<string>
+  /** Solo detalle de PAGADAS (Rodrigo 24-sep): tel → tiempo total desde el
+   * primer mensaje con Vicky hasta el pago registrado. Presente = columna. */
+  tiempoPago?: Map<string, { label: string; title: string; ms: number }>
 }): Response {
-  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais, tcUsdPen, formularioSet = new Set() } = params
+  const { filas, titulo, key, volverQS, montos, usuarios, wspSet, pais, tcUsdPen, formularioSet = new Set(), tiempoPago } = params
   const montoTxt = (tel: string): string => formatearMontoPais(montos.get(tel), pais, tcUsdPen)
+  const celdaTiempoPago = (tel: string): string => {
+    if (!tiempoPago) return ""
+    const t = tiempoPago.get(tel)
+    return t
+      ? `<td style="white-space:nowrap;text-align:center" title="${esc(t.title)}"><b>${esc(t.label)}</b></td>`
+      : `<td style="text-align:center;color:#c8cdd3">s/d</td>`
+  }
+  // Mediana del tramo mostrado (solo filas con dato): lectura rápida arriba.
+  const medianaTiempo = (() => {
+    if (!tiempoPago) return ""
+    const vals = [...filas].map((f) => tiempoPago.get(digits(f.contacto))?.ms).filter((v): v is number => typeof v === "number").sort((a, b) => a - b)
+    if (!vals.length) return ""
+    const m = vals.length % 2 ? vals[(vals.length - 1) / 2] : (vals[vals.length / 2 - 1] + vals[vals.length / 2]) / 2
+    return ` · mediana chat → pago: <b>${esc(duracionLegible(m))}</b>`
+  })()
   const filasHtml = [...filas]
     .sort((a, b) => horasDesdeFila(b) - horasDesdeFila(a))
     .map((f) => {
@@ -5425,6 +5452,7 @@ function renderDetalleEjecutivo(params: {
         <td style="white-space:nowrap">${chipLlegoPor(formularioSet.has(tel))}</td>
         <td style="text-align:center">${usuarios.get(tel) || "s/d"}</td>
         <td style="white-space:nowrap">${haceTexto(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}<div class="sub" style="margin:0;font-size:11px">${fmtSantiago(f.ultimoContactoIso || f.updatedIso || f.fechaIso)}</div></td>
+        ${celdaTiempoPago(tel)}
         <td style="text-align:right;white-space:nowrap">${montoTxt(tel)}</td>
         <td style="max-width:320px">${esc(f.accionable)}</td>
       </tr>`
@@ -5447,10 +5475,10 @@ function renderDetalleEjecutivo(params: {
 </style></head><body><div class="wrap">
   <p><a href="${volverQS}">← Volver al análisis</a></p>
   <h1>${esc(titulo)}</h1>
-  <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto</div>
+  <div class="sub">${filas.length} empresa${filas.length === 1 ? "" : "s"} · ordenadas de más a menos tiempo sin contacto${medianaTiempo}</div>
   <div class="card">${
     filas.length
-      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th style="text-align:center">Dotación</th><th>Última actividad</th><th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
+      ? `<div style="overflow-x:auto"><table><thead><tr><th>Empresa / contacto</th><th>Ejecutivo</th><th>Estado</th><th title="Cómo llegó el contacto: nos escribió directo por WhatsApp, o entró como lead cargado (formulario web / base) a la cadencia outbound">Llegó por</th><th style="text-align:center">Dotación</th><th>Última actividad</th>${tiempoPago ? `<th style="text-align:center" title="Tiempo total desde el primer mensaje de la conversación con Vicky hasta el momento en que se registró el pago">⏱ Chat → pago</th>` : ""}<th style="text-align:right">Recurrente</th><th>Accionable</th></tr></thead><tbody>${filasHtml}</tbody></table></div>`
       : `<p class="sub" style="margin:0">Sin empresas para este corte.</p>`
   }</div>
 </div></body></html>`
@@ -8862,6 +8890,21 @@ export async function GET(req: Request): Promise<Response> {
               for (const tels of cohortes.porDia[et].values()) for (const t of tels) clasePorTel.set(t, ETIQUETA_ETAPA_INBOUND[et])
             }
           }
+          // TIEMPO CONVERSACIÓN → PAGO (Rodrigo 24-sep, "agrega una columna con
+          // el tiempo total desde que empezó la conversación hasta el pago"):
+          // solo en el detalle de PAGADAS. Inicio = primera conversación del
+          // contacto con Vicky (primeraVez); pago = hora real registrada en la
+          // Caja (venta_dash pagoIso), por cotización con respaldo por teléfono.
+          const tiempoPago: Map<string, { label: string; title: string; ms: number }> | undefined =
+            etapaQ === "pagada" ? new Map() : undefined
+          const pagoPorQuote = new Map<string, number>()
+          const pagoPorTel = new Map<string, number>()
+          if (tiempoPago) {
+            for (const p of pagosVicky || []) {
+              if (p.qid) pagoPorQuote.set(p.qid, p.t)
+              pagoPorTel.set(p.tel, Math.max(pagoPorTel.get(p.tel) || 0, p.t))
+            }
+          }
           const fuente: Array<[string, string, string]> = [...(cohortes.porDia[etapaQ] || new Map<string, Set<string>>())].flatMap(
             ([dia, tels]) => [...tels].map((el) => [el, telDeElemento(el), dia] as [string, string, string]),
           )
@@ -8871,6 +8914,17 @@ export async function GET(req: Request): Promise<Response> {
             // el rango, ya no está pendiente (mismo criterio de la celda).
             if (pagadasRango && pagadasRango.has(el)) continue
             if (outbTelsDrill && (ladoQ === "out") !== outbTelsDrill.has(tel)) continue
+            if (tiempoPago && !tiempoPago.has(tel)) {
+              const inicioMs = Date.parse(primeraVez.get(tel) || "")
+              const pagoMs = pagoPorQuote.get(quoteDeElemento(el)) ?? pagoPorTel.get(tel)
+              if (Number.isFinite(inicioMs) && pagoMs && pagoMs > inicioMs) {
+                tiempoPago.set(tel, {
+                  label: duracionLegible(pagoMs - inicioMs),
+                  title: `Primer mensaje: ${fmtSantiago(new Date(inicioMs).toISOString())} · Pago: ${fmtSantiago(new Date(pagoMs).toISOString())}`,
+                  ms: pagoMs - inicioMs,
+                })
+              }
+            }
             if (vistos.has(tel)) continue
             vistos.add(tel)
             const f = porTelListado.get(tel)
@@ -8914,6 +8968,7 @@ export async function GET(req: Request): Promise<Response> {
             pais,
             tcUsdPen,
             formularioSet: llegoPorFormulario,
+            tiempoPago,
           })
         }
         // 💰 CAJA DEL PERÍODO: misma lectura de pagos que la columna Pagada
