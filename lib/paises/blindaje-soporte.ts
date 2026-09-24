@@ -34,7 +34,7 @@ export async function blindarSoporteInventadoPais(
     .replace(/\+?\s*56\s*[\s.\-]*2[\s.\-]*\d{4}[\s.\-]*\d{4}/g, sop.telefono)
     .replace(/\b600\s*914\s*3819\b/g, sop.telefono)
     .replace(/\+?\s*56\s*9[\s.\-]*4401[\s.\-]*3873/g, sop.telefono)
-  return salida.replace(/\b([a-z0-9._-]+)@geovictoria\.com\b/gi, (todo, usuario: string) =>
+  return salida.replace(/\b([a-z0-9._%+-]+)@geovictoria\.com\b/gi, (todo, usuario: string) =>
     permitidos.has(`${usuario.toLowerCase()}@geovictoria.com`) ? todo : sop.email,
   )
 }

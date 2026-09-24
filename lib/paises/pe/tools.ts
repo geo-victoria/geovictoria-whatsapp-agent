@@ -149,7 +149,7 @@ export async function blindarSoporteInventadoPE(texto: string, permitidosExtra?:
     .replace(/\+?\s*56\s*[\s.\-]*2[\s.\-]*\d{4}[\s.\-]*\d{4}/g, TELEFONO_SOPORTE_PE)
     .replace(/\b600\s*914\s*3819\b/g, TELEFONO_SOPORTE_PE)
     .replace(/\+?\s*56\s*9[\s.\-]*4401[\s.\-]*3873/g, TELEFONO_SOPORTE_PE)
-  salida = salida.replace(/\b([a-z0-9._-]+)@geovictoria\.com\b/gi, (todo, usuario: string) => {
+  salida = salida.replace(/\b([a-z0-9._%+-]+)@geovictoria\.com\b/gi, (todo, usuario: string) => {
     const u = usuario.toLowerCase()
     if (CORREOS_PE_FIJOS.has(u)) return todo
     if (permitidos.has(`${u}@geovictoria.com`)) return todo
