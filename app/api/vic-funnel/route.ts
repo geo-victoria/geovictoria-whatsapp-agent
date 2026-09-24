@@ -24,6 +24,7 @@ import { type GestionVenta } from "@/lib/gestion-venta"
 import { gestionDeVentas } from "@/lib/gestion-ventas-datos"
 import { estadoCotizacion, chatVickyCotizaciones, buscarCotizacionPorNumero, enviarCotizacionAlClienteDirecto, infoDeal, chatVickyCotizacionesCrear, chatVickyCotizacionesPreform, type EstadoCotizacion, type InfoDeal } from "@/lib/cotizaciones-editor"
 import { chatVickyPropuestas, propuestaGuardada, renderPropuestaHtml } from "@/lib/propuestas-editor"
+import { after } from "next/server"
 import { registrarUso, leerUso, agregarUso, EVENTOS_USO, ETIQUETA_EVENTO, fechaCL as fechaClUso } from "@/lib/uso-dash"
 
 export const dynamic = "force-dynamic"
@@ -7523,7 +7524,7 @@ export async function POST(req: Request): Promise<Response> {
       if (!info) {
         return new Response(JSON.stringify({ ok: false, error: "deal no encontrado" }), { status: 404, headers: { "content-type": "application/json" } })
       }
-      void registrarUso(quienUso, "calc_abrio", dealId)
+      after(() => registrarUso(quienUso, "calc_abrio", dealId))
       return new Response(JSON.stringify({ ok: true, info: { nombre: info.nombre, accountNombre: info.accountNombre, rut: info.rut, contactoNombre: info.contactoNombre, ownerNombre: info.ownerNombre } }), { headers: { "content-type": "application/json" } })
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
@@ -7588,7 +7589,7 @@ export async function POST(req: Request): Promise<Response> {
       const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
       const r = await fetchZoho(`${api}/crm/v3/${QUOTE_MODULE}/${quoteId}?fields=PDF_URL,Numero_Cotizacion,Version_PDF`)
       const rec = ((await r.json().catch(() => ({}))) as { data?: Array<{ PDF_URL?: string; Numero_Cotizacion?: string; Version_PDF?: number }> }).data?.[0]
-      void registrarUso(quienUso, "calc_pdf", quoteId)
+      after(() => registrarUso(quienUso, "calc_pdf", quoteId))
       return new Response(JSON.stringify({ ok: true, pdfUrl: String(rec?.PDF_URL || ""), numero: String(rec?.Numero_Cotizacion || ""), version: Number(rec?.Version_PDF || 1) }), { headers: { "content-type": "application/json" } })
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, error: String((e as Error)?.message || e).slice(0, 200) }), { status: 502, headers: { "content-type": "application/json" } })
@@ -7665,7 +7666,7 @@ export async function POST(req: Request): Promise<Response> {
             empresa: (String(data.empresa || "").trim() || info.accountNombre || undefined) as string | undefined,
           }).catch(() => {})
         }
-        void registrarUso(quienUso, "calc_emitio", actualizarQuoteId)
+        after(() => registrarUso(quienUso, "calc_emitio", actualizarQuoteId))
         return new Response(JSON.stringify({
           ok: true,
           actualizada: true,
@@ -7729,7 +7730,7 @@ export async function POST(req: Request): Promise<Response> {
           empresa: (String(data.empresa || "").trim() || info.accountNombre || undefined) as string | undefined,
         }).catch(() => {})
       }
-      void registrarUso(quienUso, "calc_emitio", quoteId)
+      after(() => registrarUso(quienUso, "calc_emitio", quoteId))
       return new Response(JSON.stringify({
         ok: true,
         quoteId,
@@ -8343,7 +8344,7 @@ export async function GET(req: Request): Promise<Response> {
   // y marcas de uso del editor y del selector. Ver lib/uso-dash.
   if (searchParams.get("vista") === "uso") return renderUsoDash(quien, key, searchParams)
   if (searchParams.get("vista") === "editor") {
-    void registrarUso(quien, "editor")
+    after(() => registrarUso(quien, "editor"))
     return renderEditorCotizaciones(key)
   }
   if (searchParams.get("vista") === "cotfunnel") return renderFunnelCotizaciones(key)
@@ -8352,7 +8353,7 @@ export async function GET(req: Request): Promise<Response> {
   // de Zoho se asigna (lista de deals activos con búsqueda), y luego el chat
   // de creación emite la formal amarrada a ese deal.
   if (searchParams.get("cotnueva")) {
-    void registrarUso(quien, "selector")
+    after(() => registrarUso(quien, "selector"))
     return renderSelectorDeal(key)
   }
   const cotcrear = (searchParams.get("cotcrear") || "").replace(/\D/g, "").trim()
