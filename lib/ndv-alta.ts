@@ -114,7 +114,17 @@ export async function encolarNdvImp(
   }
   const job: JobNdvImp = {
     contact: c,
-    pais: c.startsWith("51") && c.length === 11 ? "pe" : c.startsWith("57") && c.length >= 12 ? "co" : c.startsWith("52") && c.length >= 12 ? "mx" : "cl",
+    // País del ALTA (borrador/probador/prefijo), no solo del prefijo: con el
+    // prefijo a secas un probador +56 dando de alta una empresa de México
+    // hacía nacer la implementación como Chile (E2E 24-sep, IMP-11722).
+    pais: await (async () => {
+      try {
+        const { paisOnboardingDe } = await import("./onboarding-canal")
+        return await paisOnboardingDe(c)
+      } catch {
+        return c.startsWith("51") && c.length === 11 ? "pe" : c.startsWith("57") && c.length >= 12 ? "co" : c.startsWith("52") && c.length >= 12 ? "mx" : "cl"
+      }
+    })(),
     quoteId: quoteId || undefined,
     companyId: datos.companyId,
     empresa: datos.empresa,
