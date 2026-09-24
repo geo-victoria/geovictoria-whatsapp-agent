@@ -171,6 +171,7 @@ const FICHA_CL: FichaOperativa = {
     { id: "bancoestado", dominios: /bancoestado\.cl/i, nombres: /banco\s*estado/i },
     { id: "scotiabank", dominios: /scotiabank\.cl/i, nombres: /scotiabank/i },
     { id: "itau", dominios: /itau\.cl/i, nombres: /ita[uú]/i },
+    { id: "bice", dominios: /bice\.cl/i, nombres: /banco bice|\bbice\b/i },
   ],
   toleranciaMonto: 1500,
   equipo: {

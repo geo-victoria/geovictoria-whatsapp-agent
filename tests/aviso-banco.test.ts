@@ -279,3 +279,20 @@ test("ficha operativa: montos, documentos, destino y equipo por país", () => {
   assert.ok(rosterTelemarketingOperativo("pe").some((p) => p.email === "mmendozav@geovictoria.com"))
   assert.ok(!rosterTelemarketingOperativo("cl").some((p) => /aaraque|asepulveda/.test(p.email)), "las SDR no son telemarketing")
 })
+
+test("Itaú empresas y BICE (avisos reales 24-sep): 'Monto de transferencia' y 'ha instruido realizar'", () => {
+  const itau = `<p>Comprobante de transferencia a terceros</p><p>Hola <strong>VICTORIA SA</strong>, adjuntamos el detalle de la transferencia realizada por <strong>DECO CHILE SPA</strong>. </p><p>Monto de transferencia</p><p>$ 123.464</p><p>Mensaje de DECO CHILE SPA:</p><p>PAGO INICIAL GEO VICTORIA </p><table><tr><td>Destinatario: </td><td>VICTORIA SA </td></tr><tr><td>RUT destinatario: </td><td>76.188.587-1 </td></tr><tr><td>Número de cuenta: </td><td>8001204108 </td></tr></table><p>Fecha de la transacción: 24/09/2026 - 15:57:45</p>`
+  const a = parsearAvisoBanco({ from: "itauempresas@itau.cl", subject: "Comprobante de Transferencia a Terceros", html: itau })
+  assert.ok(a)
+  assert.equal(a!.monto, 123464)
+  assert.equal(a!.banco, "itau")
+  assert.equal(a!.ordenante, "DECO CHILE SPA")
+  assert.match(a!.mensaje, /PAGO INICIAL/)
+  const bice = `<div>Victoria S.A<br /><b>BUSMATICK ANDINA SPA ha instruido realizar una transferencia a su cuenta por:</b></div><div><b>Monto:</b><br /><b>$ 40684</b></div><div><b>Tu cuenta:<br />Banco de Chile-Edwards-Citi<br />Cuenta Corriente N° 8001204108</b><br />RUT: 76.188.587-1</div><div>Detalle: Servicio de septiembre<br /><b>Enviada por:<br />BUSMATICK ANDINA SPA</b><br />RUT: 76.701.534-8</div>`
+  const b = parsearAvisoBanco({ from: "reply@info.bice.cl", subject: "Aviso de transferencia de fondos", html: bice })
+  assert.ok(b)
+  assert.equal(b!.monto, 40684)
+  assert.equal(b!.ordenante, "BUSMATICK ANDINA SPA")
+  assert.equal(b!.rutOrdenante, "76701534-8")
+  assert.match(b!.mensaje, /Servicio de septiembre/)
+})

@@ -247,7 +247,7 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
 
   // El monto se captura CON su símbolo: "S/ 118.00" ya dice que es Perú.
   const montoTxt = capturar(texto, [
-    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de la transferencia)\s*:?\s*\|?\s*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*[\d][\d.,]*)/i,
+    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de (?:la )?transferencia)\s*:?\s*\|?\s*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*[\d][\d.,]*)/i,
     /(?:Monto|Importe)\s*:?\s*\|?\s*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)\s*[\d][\d.,]*)/i,
   ])
   const paisMoneda = paisPorSimboloMoneda(montoTxt)
@@ -265,6 +265,9 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
     /instruido por nuestro cliente\s+([^,\n]+?)\s*,/i,
     /nuestro cliente\s+(.+?)\s+realiz[oó]/i,
     /Te informamos que\s+(.+?)\s+ha instruido/i,
+    // Itaú: "transferencia realizada por DECO CHILE SPA." · BICE: "X ha instruido realizar una transferencia".
+    /transferencia realizada por\s+(.+?)\s*\.?\s*$/im,
+    /^\s*(.+?)\s+ha instruido realizar una transferencia/im,
     /transferencia de fondos de\s+(.+?)\s+hacia tu cuenta/i,
     /Ordenante\s*:?\s*\|?\s*([^\n|]+)/i,
     /Nombre del ordenante\s*:?\s*\|?\s*([^\n|]+)/i,
@@ -297,11 +300,14 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   ])
   const mensaje = capturar(texto, [
     /Comentario para el destinatario\s*:?\s*\|?\s*([^\n|]+)/i,
+    // Itaú: "Mensaje de DECO CHILE SPA:\nPAGO INICIAL…"
+    /\bMensaje de [^\n:]+:\s*\|?\s*([^\n|]+)/i,
     /\bMensaje\s*:?\s*\|?\s*([^\n|]+)/i,
     /\bComentario\s*:?\s*\|?\s*([^\n|]+)/i,
     /\bGlosa\s*:?\s*\|?\s*([^\n|]+)/i,
     /\bConcepto\s*:?\s*\|?\s*([^\n|]+)/i,
     /\bDescripci[oó]n\s*:?\s*\|?\s*([^\n|]+)/i,
+    /\bDetalle\s*:\s*\|?\s*([^\n|]+)/i,
   ])
   const correoContacto = capturar(texto, [/Correo electr[oó]nico de contacto\s*:?\s*\|?\s*([^\s|]+@[^\s|]+)/i])
   const numeroCotizacion = numeroCotizacionEn(`${mensaje}\n${asunto}`)
