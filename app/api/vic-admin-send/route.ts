@@ -84,6 +84,20 @@ export async function POST(req: Request): Promise<Response> {
   const contact = (body.contact || "").trim()
   const text = (body.text || "").trim()
 
+  // Modo FORMULARIO DEL ALTA EN SESIÓN (24-sep): body = { via:"altaflow", contact }.
+  // Dispara el bloque #altaflow con las variables frescas del borrador, SIN
+  // plantilla — sirve con la ventana de 24 h abierta cuando la plantilla de
+  // alta choca con el tope de Meta (131049) o para re-enviar el formulario.
+  if ((body.via || "").toLowerCase() === "altaflow") {
+    if (!contact) return NextResponse.json({ ok: false, error: "contact requerido" }, { status: 400 })
+    const { prefillAltaFlow, variablesAltaFlow } = await import("@/lib/onboarding-altaflow-tap")
+    const { triggerBotmakerIntent } = await import("@/lib/botmaker-push-v3")
+    const fono = contact.replace(/\D/g, "")
+    const variables = variablesAltaFlow(fono, await prefillAltaFlow(fono), true)
+    const ok = await triggerBotmakerIntent(fono, "#altaflow", variables).catch(() => false)
+    return NextResponse.json({ ok, via: "altaflow", contact: fono, variables }, { status: ok ? 200 : 502 })
+  }
+
   // Modo PLANTILLA (HSM vía Botmaker): body = { via:"template", contact, template, params }.
   // Para pruebas de plantillas aprobadas y rescates proactivos fuera de 24h.
   if ((body.via || "").toLowerCase() === "template") {
