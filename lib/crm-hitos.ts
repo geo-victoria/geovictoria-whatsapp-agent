@@ -1111,7 +1111,10 @@ async function convertirConDeal(
     // lead aún no lo tiene (hito temprano), la emisión formal lo completa
     // después (create-from-vicky rellena Rut_ID_Account del deal reusado).
     ...(lead.rut ? { Rut_ID_Account: lead.rut } : {}),
-    Stage: piso,
+    // EMBUDO DE CAMPAÑAS (David 24-sep): el deal NACE en "1. Trato Creado" y
+    // se avanza a `piso` apenas convierte — si nace directo en 3/4, Google Ads
+    // no recibe la señal de trato creado. Kill switch VICKY_EMBUDO_CAMPANAS=off.
+    Stage: (process.env.VICKY_EMBUDO_CAMPANAS || "").trim().toLowerCase() === "off" ? piso : "1. Trato Creado",
     Pipeline: "Standard (Standard)",
     Territorio: territorio,
     Tombola: "Mantener propietario",
@@ -1123,7 +1126,9 @@ async function convertirConDeal(
     Monda_del_trato:
       territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : territorio === "Perú" ? "SOL" : "CLP",
     Producto_Soluci_n: "Control de Asistencia",
-    Tipo_de_Cobro: empleados > 0 && empleados <= 10 ? "Mensual fijo" : "Por usuario",
+    // Convención de valores del deal (Lalo 20-ago / 09-sep, David 24-sep):
+    // siempre "Mensual fijo" con el recurrente neto en la moneda del país.
+    Tipo_de_Cobro: "Mensual fijo",
     ...(empleados > 0 ? { N_Empleados_que_marcan: empleados } : {}),
     Closing_Date: HOY_MAS_30(),
     // Dueño humano del lead → lo hereda el deal. Sin dueño humano:
@@ -1183,6 +1188,12 @@ async function convertirConDeal(
       }>
     }
   }
+  // EMBUDO DE CAMPAÑAS (David 24-sep): el lead pasa por "4. Calificado"
+  // justo antes de convertirse (best-effort, jamás bloquea el convert).
+  try {
+    const { calificarLeadAntesDeConvertir } = await import("./embudo-zoho")
+    await calificarLeadAntesDeConvertir(lead.id)
+  } catch { /* la conversión sigue */ }
   let r = await convertir()
   let fila = r?.data?.[0]
   if (fila?.code !== "SUCCESS") {
@@ -1199,7 +1210,13 @@ async function convertirConDeal(
   // deal quedaba creado con la interina y la tómbola JAMÁS corría.
   const dealCreado = fila?.Deals?.id || fila?.details?.Deals?.id
   if (fila?.code === "SUCCESS" && dealCreado) {
-    console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${piso}"`)
+    console.log(`[crm-hitos] lead ${lead.id} convertido → deal ${dealCreado} en "${deal.Stage}" (objetivo "${piso}")`)
+    if (deal.Stage !== piso) {
+      try {
+        const { avanzarDealDesdeTratoCreado } = await import("./embudo-zoho")
+        await avanzarDealDesdeTratoCreado(String(dealCreado), piso, deal as unknown as Record<string, unknown>)
+      } catch { /* queda en Trato Creado; el cron de etapas lo sube */ }
+    }
     // El vínculo durable en la conversación + la marca del chat en el trato
     // (Lalo 15-ago). Best-effort: no se espera ni bloquea la conversión.
     void (async () => {

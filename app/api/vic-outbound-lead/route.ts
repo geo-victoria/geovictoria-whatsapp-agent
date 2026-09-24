@@ -130,6 +130,23 @@ type LeadBody = {
   landingPage?: string
 }
 
+// DEDUP DEL FORMULARIO (caso FABRICIO RENGIFO / AYL FRIOCORP 23-sep, pregunta
+// de Dave "¿de dónde salen los leads que crea Vicky?"): el lead que dispara
+// este toque 0 NO quedaba anotado como "el lead de este teléfono", así que
+// cuando el cliente contestaba, createZohoLead dependía de la búsqueda por
+// teléfono de Zoho — y el formulario guarda el número con espacios
+// ("+51957 732 010"), que la búsqueda no encuentra → lead DUPLICADO a los
+// 4 minutos. Se siembra el candado kv con el lead del formulario (sin pisar
+// uno existente): Vicky reutiliza ESE lead en toda la conversación.
+async function sembrarLeadDelFormulario(contact: string, zohoLeadId: string): Promise<void> {
+  const fono = (contact || "").replace(/\D/g, "")
+  if (!fono || !zohoLeadId) return
+  const k = `zoho_lead_${fono}`
+  const actual = (await getKvValue(k).catch(() => null)) || ""
+  if (actual && !actual.startsWith("creando:")) return
+  await setKvValue(k, zohoLeadId).catch(() => {})
+}
+
 export async function POST(req: Request): Promise<Response> {
   if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
@@ -196,6 +213,7 @@ export async function POST(req: Request): Promise<Response> {
         })?.data?.[0]
         const fv = String(dl?.Form_Vicky || "")
         if (/^si$/i.test(fv.trim())) {
+          await sembrarLeadDelFormulario(contact, zohoLeadId)
           console.log(`[outbound-lead] lead ${zohoLeadId} viene del botón WhatsApp de landing (Form_Vicky=Si) — inbound puro, sin toque 0`)
           return NextResponse.json({ ok: true, skipped: "form_vicky_inbound" })
         }
@@ -251,6 +269,7 @@ export async function POST(req: Request): Promise<Response> {
     // Celulares peruanos: 9 dígitos que parten en 9 → 51 + número.
     contact = `51${contact}`
   }
+  if (zohoLeadId) await sembrarLeadDelFormulario(contact, zohoLeadId)
   const porPrefijo = contact.startsWith("56")
     ? "cl"
     : contact.startsWith("57")

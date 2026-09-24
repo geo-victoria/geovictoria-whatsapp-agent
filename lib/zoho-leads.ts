@@ -1211,8 +1211,19 @@ export async function reafirmarTerritorioTrasWorkflow(
   return put.ok
 }
 
+// NÚMEROS SINTÉTICOS DE LAS BATERÍAS (56/51/52/57 + 900000 + 3-6 dígitos):
+// no son personas. Pregunta de Dave 24-sep ("¿de dónde salen estos leads?"):
+// 33 de los 51 leads que Vicky creó del 17 al 24-sep eran de pruebas, y las
+// tómbolas se los entregaron a ejecutivos reales con aviso. Nunca más.
+export function esContactoSintetico(fono: string): boolean {
+  return /^(56|51|52|57)900000\d{3,6}$/.test((fono || "").replace(/\D/g, ""))
+}
+
 export async function createZohoLead(input: CreateZohoLeadInput): Promise<CreateZohoLeadResult> {
   try {
+    if (esContactoSintetico((input.telefono || "").trim() || (input.contactoWA || "").trim())) {
+      return { success: false, error: "contacto_sintetico" }
+    }
     // CLIENTE EXISTENTE (Lalo 08-sep): jamás un lead para un número que ya es
     // cliente (cuenta 3. Cliente/Facturando o con usuarios activos).
     try {
