@@ -117,3 +117,11 @@ describe("el relator y su calendario", () => {
     assert.equal(staffDe("cualquiera@geovictoria.com"), null)
   })
 })
+
+test("cupos del relator (hora de Chile) en la hora local del cliente y de vuelta (Lalo 24-sep)", async () => {
+  const { convertirHoraAgenda, TZ_AGENDA } = await import("../lib/onboarding/agenda-capacitacion.ts")
+  assert.equal(convertirHoraAgenda("2026-09-29", "04:30 PM", TZ_AGENDA, "America/Lima"), "02:30 PM")
+  assert.equal(convertirHoraAgenda("2026-10-01", "08:30 AM", TZ_AGENDA, "America/Mexico_City"), "05:30 AM")
+  assert.equal(convertirHoraAgenda("2026-09-29", "02:30 PM", "America/Lima", TZ_AGENDA), "04:30 PM")
+  assert.equal(convertirHoraAgenda("2026-09-29", "04:30 PM", TZ_AGENDA, TZ_AGENDA), "04:30 PM")
+})

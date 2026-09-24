@@ -47,9 +47,15 @@ export async function ofrecerCuposPendientes(contact: string): Promise<{ enviado
     }
     if (!cap?.relator?.email) return { enviado: false, motivo: "sin_relator" }
 
-    const { servicioCurso1De, staffDe, fechasAgendables, aFormatoBookings, etiquetaFechaCL } = await import(
-      "./onboarding/agenda-capacitacion"
-    )
+    const { servicioCurso1De, staffDe, fechasAgendables, aFormatoBookings, etiquetaFechaCL, convertirHoraAgenda, TZ_AGENDA } =
+      await import("./onboarding/agenda-capacitacion")
+    // Horas en la zona del cliente (Lalo 24-sep), igual que ver_cupos_capacitacion.
+    let tzCliente = TZ_AGENDA
+    try {
+      const { paisOnboardingDe } = await import("./onboarding-canal")
+      const { fichaOperativa } = await import("./paises/ficha-operativa")
+      tzCliente = fichaOperativa(await paisOnboardingDe(c)).tz || TZ_AGENDA
+    } catch { /* hora de la agenda */ }
     const servicioId = servicioCurso1De(cap.relator.email)
     const staffId = staffDe(cap.relator.email)
     if (!servicioId || !staffId) return { enviado: false, motivo: "sin_calendario" }
@@ -63,7 +69,19 @@ export async function ofrecerCuposPendientes(contact: string): Promise<{ enviado
       const d = r?.response?.returnvalue?.data
       const lista = Array.isArray(d) ? d : d ? [d] : []
       // Bookings responde el TEXTO "Slots Not Available" cuando no hay cupo.
-      const horas = lista.flat().map((x) => String(x).trim()).filter((x) => /\d{1,2}:\d{2}/.test(x))
+      const horas = lista
+        .flat()
+        .map((x) => String(x).trim())
+        .filter((x) => /\d{1,2}:\d{2}/.test(x))
+        .map((h) => convertirHoraAgenda(f, h, TZ_AGENDA, tzCliente))
+        .filter((h) => {
+          const m = h.toUpperCase().match(/^(\d{1,2}):\d{2}\s*(AM|PM)?$/)
+          if (!m) return true
+          let hh = Number(m[1])
+          if (m[2] === "PM" && hh < 12) hh += 12
+          if (m[2] === "AM" && hh === 12) hh = 0
+          return hh >= 8 && hh < 19
+        })
       if (horas.length) dias.push({ etiqueta: etiquetaFechaCL(f), horas })
       if (dias.length >= 2) break
     }

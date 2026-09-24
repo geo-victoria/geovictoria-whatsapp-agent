@@ -20,7 +20,27 @@ import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-
 // Sin env, el copy dice "la plataforma GeoVictoria" sin link (jamás inventar).
 const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "").trim()
 
-import { etiquetaFechaCL as etiquetaFecha } from "./onboarding/agenda-capacitacion"
+import { etiquetaFechaCL as etiquetaFecha, convertirHoraAgenda, TZ_AGENDA } from "./onboarding/agenda-capacitacion"
+
+/** Zona horaria del cliente del onboarding (ficha del país del alta). */
+async function tzClienteDe(contact: string): Promise<string> {
+  try {
+    const { fichaOperativa } = await import("./paises/ficha-operativa")
+    return fichaOperativa(await paisOnboardingDe(contact)).tz || TZ_AGENDA
+  } catch {
+    return TZ_AGENDA
+  }
+}
+
+/** Cupo dentro de 8:00-19:00 de la hora del cliente. */
+function horaRazonable(h: string): boolean {
+  const m = String(h).trim().toUpperCase().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/)
+  if (!m) return true
+  let hh = Number(m[1])
+  if (m[3] === "PM" && hh < 12) hh += 12
+  if (m[3] === "AM" && hh === 12) hh = 0
+  return hh >= 8 && hh < 19
+}
 export { entregarKickoffOnboarding } from "./onboarding-envio"
 import { dispatchTool } from "./tools"
 import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
@@ -276,8 +296,15 @@ export async function armarOnboarding(contact: string): Promise<{
         }
         const dias: Array<{ fecha: string; etiqueta: string; horas: string[] }> = []
         const etiquetaDe = etiquetaFecha
+        // Horas en la zona del CLIENTE (Lalo 24-sep): la agenda del relator
+        // está en hora de Chile; a un cliente de Perú/Colombia/México se le
+        // muestra convertida, y se descartan las que caen fuera de 8:00-19:00
+        // de su hora (08:30 de Chile son 05:30 en Ciudad de México).
+        const tzCliente = await tzClienteDe(contact)
         for (const f of fechasAgendables(new Date(), 4)) {
-          const horas = await cuposDe(f)
+          const horas = (await cuposDe(f))
+            .map((h) => convertirHoraAgenda(f, h, TZ_AGENDA, tzCliente))
+            .filter((h) => horaRazonable(h))
           if (horas.length) dias.push({ fecha: f, etiqueta: etiquetaDe(f), horas })
         }
         return {
@@ -285,8 +312,9 @@ export async function armarOnboarding(contact: string): Promise<{
           relator: cap.relator.nombre,
           duracionMin: 120,
           dias,
+          zonaHoraria: tzCliente,
           nota: dias.length
-            ? "Ofrece SOLO estos horarios. Son de la agenda real del relator. Nombra cada día con su `etiqueta` TAL CUAL (ej. \"Lunes 8 de septiembre\"): nunca digas \"mañana\" ni \"pasado mañana\" — el primer día disponible casi nunca es mañana. Si el cliente dice que necesita ANTES o que le urge partir, no negocies ni repitas la lista: llama escalar_a_implementador (urgencia_capacitacion) en ese mismo turno."
+            ? `Las horas YA están en la hora local del cliente (${tzCliente}); dilas tal cual, sin convertir. ` + "Ofrece SOLO estos horarios. Son de la agenda real del relator. Nombra cada día con su `etiqueta` TAL CUAL (ej. \"Lunes 8 de septiembre\"): nunca digas \"mañana\" ni \"pasado mañana\" — el primer día disponible casi nunca es mañana. Si el cliente dice que necesita ANTES o que le urge partir, no negocies ni repitas la lista: llama escalar_a_implementador (urgencia_capacitacion) en ese mismo turno."
             : "Sin cupos en los próximos días. Dile que le confirmas la hora por este chat y avisa al equipo.",
         }
       }
@@ -333,15 +361,19 @@ export async function armarOnboarding(contact: string): Promise<{
       const inp = (input || {}) as { fecha?: string; hora?: string }
       const fecha = String(inp.fecha || "").trim()
       const hora = String(inp.hora || "").trim()
+      // La hora que eligió el cliente está en SU zona: se vuelve a la de la
+      // agenda (Chile) para verificar el cupo y reservar.
+      const tzCli = await tzClienteDe(contact)
+      const horaAgenda = convertirHoraAgenda(fecha, hora, tzCli, TZ_AGENDA)
       const libres = await cuposDe(fecha)
-      if (!libres.some((h) => mismaHora(h, hora))) {
+      if (!libres.some((h) => mismaHora(h, horaAgenda))) {
         return {
           ok: false,
           error: `El ${fecha} a las ${hora} no está disponible. Vuelve a mirar los cupos y ofrécele uno de los que salgan.`,
-          disponibles: libres,
+          disponibles: libres.map((h) => convertirHoraAgenda(fecha, h, TZ_AGENDA, tzCli)),
         }
       }
-      const desde = momentoBookings(fecha, hora)
+      const desde = momentoBookings(fecha, horaAgenda)
       if (!desde) return { ok: false, error: "No entendí la fecha o la hora. Pídeselas de nuevo con un horario de la lista." }
 
       const b = await cargarBorrador(contact)

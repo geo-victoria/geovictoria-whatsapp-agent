@@ -165,3 +165,49 @@ export function etiquetaFechaCL(fechaISO: string): string {
   }).format(d)
   return t.charAt(0).toUpperCase() + t.slice(1)
 }
+
+/** Zona horaria de la agenda de los relatores (el workspace de Bookings vive en Chile). */
+export const TZ_AGENDA = "America/Santiago"
+
+/** Minutos de desfase de `tz` respecto de UTC en el instante `d` (DST incluido). */
+function desfaseMin(tz: string, d: Date): number {
+  const p = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(d)
+  const v = (t: string) => Number(p.find((x) => x.type === t)?.value || 0)
+  const comoUtc = Date.UTC(v("year"), v("month") - 1, v("day"), v("hour") % 24, v("minute"))
+  return Math.round((comoUtc - d.getTime()) / 60000)
+}
+
+/**
+ * Convierte una hora de agenda ("04:30 PM" o "16:30") de la fecha `fechaISO`
+ * desde la zona `desde` a la zona `hacia`, devolviendo el MISMO formato de
+ * Bookings ("02:30 PM"). Lalo 24-sep: los cupos del relator (hora de Chile) se
+ * muestran en la hora local del cliente, y la que elige el cliente vuelve a
+ * la hora de Chile para reservar. Misma zona → la hora tal cual.
+ */
+export function convertirHoraAgenda(fechaISO: string, hora: string, desde: string, hacia: string): string {
+  if (!desde || !hacia || desde === hacia) return hora
+  const m = String(hora || "").trim().toUpperCase().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/)
+  if (!m || !/^\d{4}-\d{2}-\d{2}$/.test(fechaISO)) return hora
+  let hh = Number(m[1])
+  const mm = Number(m[2])
+  if (m[3] === "PM" && hh < 12) hh += 12
+  if (m[3] === "AM" && hh === 12) hh = 0
+  const [y, mo, da] = fechaISO.split("-").map(Number)
+  const aprox = new Date(Date.UTC(y, mo - 1, da, hh, mm))
+  const instante = new Date(aprox.getTime() - desfaseMin(desde, aprox) * 60000)
+  const out = new Intl.DateTimeFormat("en-US", {
+    timeZone: hacia,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(instante)
+  return out.replace(/ | /g, " ").toUpperCase()
+}
