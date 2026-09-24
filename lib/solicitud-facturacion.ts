@@ -322,13 +322,32 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
   }>(H, `/crm/v3/Cotizaciones_GeoVictoria/${quoteId}?fields=Name,Numero_Cotizacion,Cuenta_Asociada,Contacto_Asociado,Deal_Asociado,Tel_fono_Contacto,Email_Contacto,RUT_Cliente,RUT_Empresa,Nota_de_Venta,Estado_Cotizacion`)
   if (!q) return { ok: false, estado: "error", detalle: "cotización ilegible", pais }
 
-  const referenciaId = String(opts.referenciaNdvId || q.Nota_de_Venta?.id || "").trim()
+  // La NDV VIGENTE vive en la IMPLEMENTACIÓN (regla 11-sep: cuando una nota se
+  // rehace el reapuntado va a la IMP y la cotización se queda atrás — Mila:
+  // cotización en NDV-31857, IMP en NDV-31862, la SF de Grey colgaba de la
+  // segunda). Orden: lo que pasa el llamador → IMP → cotización.
+  const impIdConocido =
+    limpio(opts.impId) ||
+    (await getKvValue(claveCapacitacion(c)).then((raw) => (raw ? (JSON.parse(raw) as { implementacionId?: string }).implementacionId || "" : "")).catch(() => ""))
+  const impNdv = impIdConocido
+    ? await getZoho<{ Nota_de_Venta_Asociada?: { id?: string } }>(H, `/crm/v3/Implementaciones/${impIdConocido}?fields=Nota_de_Venta_Asociada`)
+    : null
+  const referenciaId = String(opts.referenciaNdvId || impNdv?.Nota_de_Venta_Asociada?.id || q.Nota_de_Venta?.id || "").trim()
+  const cuentaIdTemprana = limpio(q.Cuenta_Asociada?.id)
 
-  // 2. ¿Ya existe una solicitud (humana o nuestra) con esa NDV? Se adopta.
-  if (referenciaId && !opts.dry) {
+  // 2. ¿Ya existe una solicitud (humana o nuestra) para esta venta? Se ADOPTA.
+  //    Por la NDV vigente O por la CUENTA (una "Nueva empresa" reciente de la
+  //    misma cuenta es la misma venta aunque la NDV se haya rehecho después).
+  if (!opts.dry && (referenciaId || cuentaIdTemprana)) {
+    const desde = new Date(Date.now() - 120 * 86400e3).toISOString().replace(/\.\d{3}Z$/, "+00:00")
+    const condiciones = [
+      referenciaId ? `ID_NDV = '${referenciaId}'` : "",
+      cuentaIdTemprana ? `(Cuenta = '${cuentaIdTemprana}' and nombre_por_colocar = 'Nueva empresa' and Created_Time >= '${desde}')` : "",
+    ].filter(Boolean)
+    const donde = condiciones.length === 2 ? `(${condiciones[0]} or ${condiciones[1]})` : condiciones[0]
     const ya = await coql<{ id: string; Nro_Solicitud?: string; Estado?: string }>(
       H,
-      `select id, Nro_Solicitud, Estado from ${MODULO} where (ID_NDV = '${referenciaId}' and Solicitud = 'Facturación') limit 1`,
+      `select id, Nro_Solicitud, Estado from ${MODULO} where (${donde} and Solicitud = 'Facturación') order by Created_Time desc limit 1`,
     )
     if (ya[0]?.id) {
       await setKvValue(clave, JSON.stringify({ sfId: ya[0].id, numero: ya[0].Nro_Solicitud || "", adoptada: true, at: new Date().toISOString() })).catch(() => {})
@@ -431,7 +450,7 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
   await setKvValue(clave, JSON.stringify({ sfId, numero, at: new Date().toISOString(), faltantes })).catch(() => {})
 
   // 6. Cuenta CRM + comprobante + nota en la IMP (best-effort, en paralelo).
-  const impId = limpio(opts.impId) || (await getKvValue(claveCapacitacion(c)).then((raw) => (raw ? (JSON.parse(raw) as { implementacionId?: string }).implementacionId || "" : "")).catch(() => ""))
+  const impId = impIdConocido
   const descripcion = String(registro.Descripci_n || "")
   const [cuenta, adjunto, nota] = await Promise.all([
     completarCuenta(H, cuentaId, d),
