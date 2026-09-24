@@ -380,6 +380,10 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
   } catch {
     /* sin borrador */
   }
+  // "Otro" es el giro por DEFECTO que el prellenado del flow escribe cuando no
+  // encontró fuente (25-ago): no es un dato del cliente, así que no le gana al
+  // padrón (Alba Campos salía "Otro" teniendo giro en el SII).
+  if (/^otro$/i.test(limpio(d.giro))) d.giro = ""
   if (!limpio(d.documento)) d.documento = limpio(q.RUT_Cliente) || limpio(q.RUT_Empresa)
   if (!limpio(d.razonSocial)) d.razonSocial = limpio(ref?.Nombre_Empresa) || limpio(q.Cuenta_Asociada?.name) || limpio(q.Name).replace(/^Cotizaci[oó]n\s+/i, "").replace(/\s+-\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}.*$/, "")
   if (!limpio(d.telefono)) d.telefono = limpio(q.Tel_fono_Contacto) || `+${c}`
