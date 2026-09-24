@@ -2353,10 +2353,20 @@ export const PERFIL_TURNO_CL: PerfilTurno = {
   hitoPorChat: true,
 }
 
-/** Interruptor por país para que un webhook delegue acá (vic_kv `orquestador_<cc>` / env VICKY_ORQUESTADOR_<CC>). */
-export async function orquestadorActivo(pais: PaisTurno): Promise<boolean> {
+/**
+ * Interruptor por país para que un webhook delegue acá (vic_kv `orquestador_<cc>` /
+ * env VICKY_ORQUESTADOR_<CC>). Con `contact`, un PROBADOR interno marcado para
+ * ese país (vic-admin-probador) pasa por el orquestador aunque el interruptor
+ * esté apagado: se prueba la experiencia nueva desde un teléfono real sin
+ * cambiar lo que ven los clientes (Lalo 24-sep, Rodrigo probando México).
+ */
+export async function orquestadorActivo(pais: PaisTurno, contact?: string): Promise<boolean> {
   const env = (process.env[`VICKY_ORQUESTADOR_${pais.toUpperCase()}`] || "").trim().toLowerCase()
   if (env === "on" || env === "1") return true
+  if (contact) {
+    const { paisProbador } = await import("./probador-pais")
+    if ((await paisProbador(contact).catch(() => null)) === pais) return true
+  }
   if (env === "off" || env === "0") return false
   const kv = ((await getKvValue(`orquestador_${pais}`).catch(() => null)) || "").trim().toLowerCase()
   return kv === "on" || kv === "1"

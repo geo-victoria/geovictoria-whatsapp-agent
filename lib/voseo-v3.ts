@@ -39,6 +39,15 @@ const VOSEO_MAP: [RegExp, string][] = [
   // deporte). Por eso cada verbo va explícito y con límites Unicode \p{L}.
   // (Caso real: "Me los pasai?" — sonaba demasiado informal para venta.)
   [/(?<!\p{L})pas[aá]i(?!\p{L})/giu, "pasas"],
+  // "Vosotros" de España (24-sep, batería México: "un equipo en un punto fijo
+  // como el vuestro"). Latinoamérica usa "ustedes": posesivos a "su/suyo".
+  [/(?<!\p{L})el\s+vuestro(?!\p{L})/giu, "el suyo"],
+  [/(?<!\p{L})la\s+vuestra(?!\p{L})/giu, "la suya"],
+  [/(?<!\p{L})los\s+vuestros(?!\p{L})/giu, "los suyos"],
+  [/(?<!\p{L})las\s+vuestras(?!\p{L})/giu, "las suyas"],
+  [/(?<!\p{L})vuestr[oa]s(?!\p{L})/giu, "sus"],
+  [/(?<!\p{L})vuestr[oa](?!\p{L})/giu, "su"],
+  [/(?<!\p{L})vosotr[oa]s(?!\p{L})/giu, "ustedes"],
   [/(?<!\p{L})tom[aá]i(?!\p{L})/giu, "tomas"],
   [/(?<!\p{L})marc[aá]i(?!\p{L})/giu, "marcas"],
   [/(?<!\p{L})and[aá]i(?!\p{L})/giu, "andas"],

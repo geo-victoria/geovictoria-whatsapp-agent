@@ -523,7 +523,7 @@ async function processBurstCO(contact: string, apiKey: string, seedMessage?: str
         // ORQUESTADOR ÚNICO (22-sep, paso 3): con vic_kv `orquestador_mx`="on" el
         // turno corre por lib/orquestador-turno (el pipeline chileno completo con
         // el perfil MX); apagado, sigue el procesador propio de este webhook.
-        if (await orquestadorActivo("mx")) await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_MX)
+        if (await orquestadorActivo("mx", contact)) await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_MX)
         else await processOneTurnCO(contact, combinado, apiKey)
       } catch (err) {
         console.error(`[vic-mx] error en turno contact=${contact}:`, err)
