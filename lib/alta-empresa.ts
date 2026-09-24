@@ -52,9 +52,15 @@ export function altaApiConfigurada(): boolean {
   return true
 }
 
-/** Identificador en el formato del servicio: solo dígitos y K, sin puntos ni guion. */
+/**
+ * Identificador en el formato del servicio: sin puntos, guiones ni espacios,
+ * en mayúsculas. Conserva LETRAS (E2E 24-sep): la regla vieja "solo dígitos y
+ * K" era la del RUT chileno y en México convertía el RFC "PEE240924AB1" en
+ * "2409241" (y cortaba el CURP del administrador). RUT/RUC/NIT/DNI/cédula no
+ * cambian: solo traen dígitos y K.
+ */
 export function identificadorParaAlta(valor: string): string {
-  return String(valor || "").replace(/[^0-9kK]/g, "").toUpperCase()
+  return String(valor || "").replace(/[^0-9a-zA-Z]/g, "").toUpperCase()
 }
 
 /**

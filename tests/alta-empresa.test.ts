@@ -122,3 +122,9 @@ describe("el canal del onboarding usa el adaptador con candado", () => {
     assert.match(CANAL, /opts\.loginUrl \|\| "www\.geovictoria\.com"/)
   })
 })
+
+test("identificadorParaAlta conserva las letras del RFC y del CURP (E2E 24-sep, México)", () => {
+  assert.equal(identificadorParaAlta("PEE240924AB1"), "PEE240924AB1")
+  assert.equal(identificadorParaAlta("goee900101hdfmrd09"), "GOEE900101HDFMRD09")
+  assert.equal(identificadorParaAlta("909999871-3"), "9099998713")
+})
