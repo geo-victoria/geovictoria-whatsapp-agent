@@ -157,7 +157,10 @@ const SENAL_NO_PROSPECTO: Array<{ tipo: TipoCasuistica; reglas: Regla[] }> = [
     tipo: "busca_empleo",
     reglas: [
       R("necesito trabajar", /\bnecesito (urgente )?trabajar\b|\bbusco (trabajo|empleo|pega)\b|\bbuscando (trabajo|empleo)\b/),
-      R("vacante / postular", /\b(vacante|vacantes|postular|postulacion|curriculum|cv|reclutar|reclutamiento|me contraten|oferta laboral|hay trabajo)\b/),
+      // "cv" suelto NO: es la terminación de las razones sociales mexicanas
+      // ("S.A. de C.V.") — batería MX 24-sep, "Abarrotes Ana SA de CV" salía
+      // como busca_empleo. Solo cuenta como currículum ("mi cv", "envío mi cv").
+      R("vacante / postular", /\b(vacante|vacantes|postular|postulacion|curriculum|(mi|el|un|envio|adjunto|mando|dejo|te envio)\s+cv|reclutar|reclutamiento|me contraten|oferta laboral|hay trabajo)\b/),
       R("no me renovaron el contrato", /\bno me renovaron\b/),
     ],
   },

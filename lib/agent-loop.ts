@@ -358,9 +358,24 @@ export async function runAgentLoop(params: {
               })
               if (typeof p.userCount === "number") toolInput.userCount = p.userCount
               if (Array.isArray(p.modulos)) toolInput.modulos = p.modulos
-              if (Array.isArray(p.hardware)) toolInput.hardware = p.hardware
-              if (Array.isArray(p.puntosInstalacion))
-                toolInput.puntosInstalacion = p.puntosInstalacion
+              // EXCEPCIÓN — el cliente eligió la opción SIN reloj (24-sep, batería
+              // MX; muy probablemente también el caso Rodrigo PE 22-sep): con el
+              // doble valor el estimado negociado SIEMPRE trae el reloj (opción 1)
+              // y el anclaje se lo devolvía a una formal que el cliente pidió
+              // "opción 2, solo app". El escalón y la dotación se anclan igual; el
+              // reloj, solo si la última elección del cliente no fue solo app.
+              const soloAppCliente = ultimaEleccionEsSoloApp([
+                ...history.filter((m) => m.role === "user").map((m) => String(m.content || "")),
+                userMessage || "",
+              ])
+              if (soloAppCliente) {
+                delete toolInput.hardware
+                delete toolInput.puntosInstalacion
+              } else {
+                if (Array.isArray(p.hardware)) toolInput.hardware = p.hardware
+                if (Array.isArray(p.puntosInstalacion))
+                  toolInput.puntosInstalacion = p.puntosInstalacion
+              }
               const despues = JSON.stringify({
                 userCount: toolInput.userCount,
                 modulos: toolInput.modulos,

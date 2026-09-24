@@ -115,3 +115,9 @@ test("casuística: el prospecto que pregunta precio NO se bloquea por el vocabul
   const d = clasificarCasuistica(["cuanto cuesta?", "y las credenciales las manda el sistema?"])
   assert.equal(d.esProspecto, true)
 })
+
+test("México: la razón social 'SA de CV' no es un currículum (batería MX 24-sep)", () => {
+  assert.equal(clasificarCasuistica(["Abarrotes Ana SA de CV, correo no tengo a mano"]).tipo, "prospecto")
+  assert.equal(clasificarCasuistica(["Comercializadora del Norte S.A. de C.V."]).tipo, "prospecto")
+  assert.equal(clasificarCasuistica(["hola, les dejo mi cv por si hay vacante"]).tipo, "busca_empleo")
+})
