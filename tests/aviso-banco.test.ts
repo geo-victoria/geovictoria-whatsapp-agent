@@ -296,3 +296,12 @@ test("Itaú empresas y BICE (avisos reales 24-sep): 'Monto de transferencia' y '
   assert.equal(b!.rutOrdenante, "76701534-8")
   assert.match(b!.mensaje, /Servicio de septiembre/)
 })
+
+test("Scotiabank empresas (real 24-sep): celda vacía entre 'Mensaje:' y el número de cotización", () => {
+  const html = `<table><tr><td>Aviso de Transferencia </td></tr><tr><td>de fondos recibida </td></tr></table><table><tr><td>Le informamos que nuestro(a) cliente <strong>ITALSE SPA.</strong>, con fecha <strong>24/09/26 08:25:03</strong> ha efectuado una transferencia de fondos hacia su cuenta con el siguiente detalle: </td></tr><tr><td>Monto <strong>$ 246.390</strong></td></tr></table><table><tr><td> </td><td>Cuenta:</td><td></td><td><strong>8001204108</strong></td><td> </td></tr><tr><td> </td><td>Mensaje:</td><td></td><td><strong>COT1654</strong></td><td> </td></tr></table>`
+  const a = parsearAvisoBanco({ from: "avisos.empresa.info@scotiabank.cl", subject: "Transferencia otros Bancos - Transacción Realizada", html })
+  assert.ok(a)
+  assert.equal(a!.monto, 246390)
+  assert.equal(a!.numeroCotizacion, "COT1654")
+  assert.equal(a!.ordenante, "ITALSE SPA.")
+})

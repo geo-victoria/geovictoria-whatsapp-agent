@@ -235,11 +235,11 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   if (/has realizado una transferencia|realizaste una transferencia|transferencia (?:fue )?rechazada|no pudo ser realizada/i.test(texto)) return null
 
   const cuentaDestino = capturar(texto, [
-    /Cuenta de abono\s*:?\s*\|?\s*([\d-]{6,})/i,
-    /N[º°o]?\.?\s*de cuenta\s*:?\s*\|?\s*([\d-]{6,})/i,
-    /Cuenta destino\s*:?\s*\|?\s*([\d-]{6,})/i,
-    /Cuenta de destino\s*:?\s*\|?\s*([\d-]{6,})/i,
-    /CCI\s*(?:destino)?\s*:?\s*\|?\s*([\d-]{6,})/i,
+    /Cuenta de abono\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
+    /N[º°o]?\.?\s*de cuenta\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
+    /Cuenta destino\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
+    /Cuenta de destino\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
+    /CCI\s*(?:destino)?\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
   ])
   // ¿A quién va? Nuestra cuenta (de cualquier país) o nuestro nombre.
   const paisDestino = destinoNuestroEn(texto, cuentaDestino)
@@ -247,8 +247,8 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
 
   // El monto se captura CON su símbolo: "S/ 118.00" ya dice que es Perú.
   const montoTxt = capturar(texto, [
-    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de (?:la )?transferencia)\s*:?\s*\|?\s*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*[\d][\d.,]*)/i,
-    /(?:Monto|Importe)\s*:?\s*\|?\s*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)\s*[\d][\d.,]*)/i,
+    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de (?:la )?transferencia)\s*:?\s*(?:\|\s*)*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*[\d][\d.,]*)/i,
+    /(?:Monto|Importe)\s*:?\s*(?:\|\s*)*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)\s*[\d][\d.,]*)/i,
   ])
   const paisMoneda = paisPorSimboloMoneda(montoTxt)
 
@@ -260,56 +260,58 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   if (monto <= 0) return null
 
   const ordenante = capturar(texto, [
-    /Titular de la cuenta de origen\s*:?\s*\|?\s*([^\n|]+)/i,
-    /Raz[oó]n social\s*:?\s*\|?\s*([^\n|]+)/i,
+    /Titular de la cuenta de origen\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /Raz[oó]n social\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
     /instruido por nuestro cliente\s+([^,\n]+?)\s*,/i,
     /nuestro cliente\s+(.+?)\s+realiz[oó]/i,
     /Te informamos que\s+(.+?)\s+ha instruido/i,
+    // Scotiabank empresas: "nuestro(a) cliente ITALSE SPA., con fecha …"
+    /nuestro\(a\) cliente\s+(.+?)\s*,\s*con fecha/i,
     // Itaú: "transferencia realizada por DECO CHILE SPA." · BICE: "X ha instruido realizar una transferencia".
     /transferencia realizada por\s+(.+?)\s*\.?\s*$/im,
     /^\s*(.+?)\s+ha instruido realizar una transferencia/im,
     /transferencia de fondos de\s+(.+?)\s+hacia tu cuenta/i,
-    /Ordenante\s*:?\s*\|?\s*([^\n|]+)/i,
-    /Nombre del ordenante\s*:?\s*\|?\s*([^\n|]+)/i,
-    /Titular\s*(?:de )?origen\s*:?\s*\|?\s*([^\n|]+)/i,
+    /Ordenante\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /Nombre del ordenante\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /Titular\s*(?:de )?origen\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
   ]).replace(/\s+/g, " ").trim()
 
   // Documento del ordenante: el primero que NO sea el nuestro (Santander
   // imprime el RUT de DESTINO, Victoria SA; un aviso peruano trae nuestro RUC).
   let rutOrdenante = ""
-  for (const m of texto.matchAll(/\b(RUT|RUC|NIT|RFC)\s*:?\s*\|?\s*([\dA-Z][\d.\-A-Z]{6,14}?)(?=\s|\||$)/gi)) {
+  for (const m of texto.matchAll(/\b(RUT|RUC|NIT|RFC)\s*:?\s*(?:\|\s*)*([\dA-Z][\d.\-A-Z]{6,14}?)(?=\s|\||$)/gi)) {
     const r = normalizarDocumento(m[2], m[1])
     if (r && !IDS_NUESTROS.has(soloDigitos(r))) { rutOrdenante = r; break }
   }
 
-  const fechaHora = texto.match(/Fecha\s+y\s+hora\s*:?\s*\|?\s*(\d{2}[\/-]\d{2}[\/-]\d{4})\s+(\d{1,2}:\d{2})/i)
+  const fechaHora = texto.match(/Fecha\s+y\s+hora\s*:?\s*(?:\|\s*)*(\d{2}[\/-]\d{2}[\/-]\d{4})\s+(\d{1,2}:\d{2})/i)
   const fechaTexto = (fechaHora
     ? fechaHora[1]
     : capturar(texto, [
-        /Fecha(?:\s+(?:abono|de operaci[oó]n|y hora de operaci[oó]n))?\s*:?\s*\|?\s*(\d{2}[\/-]\d{2}[\/-]\d{4})/i,
+        /Fecha(?:\s+(?:abono|de operaci[oó]n|y hora de operaci[oó]n))?\s*:?\s*(?:\|\s*)*(\d{2}[\/-]\d{2}[\/-]\d{4})/i,
         /con fecha\s+(\d{2}[\/-]\d{2}[\/-]\d{4})/i,
         /(\d{2}[\/-]\d{2}[\/-]\d{4})/,
       ])).replace(/-/g, "/")
-  const hora = fechaHora ? fechaHora[2] : capturar(texto, [/\bHora\s*(?:de operaci[oó]n)?\s*:?\s*\|?\s*(\d{1,2}:\d{2})/i, /\d{2}\/\d{2}\/\d{4}\s+(\d{1,2}:\d{2})/])
+  const hora = fechaHora ? fechaHora[2] : capturar(texto, [/\bHora\s*(?:de operaci[oó]n)?\s*:?\s*(?:\|\s*)*(\d{1,2}:\d{2})/i, /\d{2}\/\d{2}\/\d{4}\s+(\d{1,2}:\d{2})/])
   const nroOperacion = capturar(texto, [
-    /N[º°o]?\.?\s*de\s+comprobante\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
-    /N[uú]mero de (?:la )?operaci[oó]n\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
-    /ID de la operaci[oó]n\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
-    /N[º°o]?\.?\s*(?:de\s+)?operaci[oó]n\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
-    /(?:Referencia|Clave de rastreo|Folio)\s*:?\s*\|?\s*([A-Z0-9_-]{4,})/i,
+    /N[º°o]?\.?\s*de\s+comprobante\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
+    /N[uú]mero de (?:la )?operaci[oó]n\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
+    /ID de la operaci[oó]n\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
+    /N[º°o]?\.?\s*(?:de\s+)?operaci[oó]n\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
+    /(?:Referencia|Clave de rastreo|Folio)\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
   ])
   const mensaje = capturar(texto, [
-    /Comentario para el destinatario\s*:?\s*\|?\s*([^\n|]+)/i,
+    /Comentario para el destinatario\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
     // Itaú: "Mensaje de DECO CHILE SPA:\nPAGO INICIAL…"
-    /\bMensaje de [^\n:]+:\s*\|?\s*([^\n|]+)/i,
-    /\bMensaje\s*:?\s*\|?\s*([^\n|]+)/i,
-    /\bComentario\s*:?\s*\|?\s*([^\n|]+)/i,
-    /\bGlosa\s*:?\s*\|?\s*([^\n|]+)/i,
-    /\bConcepto\s*:?\s*\|?\s*([^\n|]+)/i,
-    /\bDescripci[oó]n\s*:?\s*\|?\s*([^\n|]+)/i,
-    /\bDetalle\s*:\s*\|?\s*([^\n|]+)/i,
+    /\bMensaje de [^\n:]+:\s*(?:\|\s*)*([^\n|]+)/i,
+    /\bMensaje\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /\bComentario\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /\bGlosa\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /\bConcepto\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /\bDescripci[oó]n\s*:?\s*(?:\|\s*)*([^\n|]+)/i,
+    /\bDetalle\s*:\s*(?:\|\s*)*([^\n|]+)/i,
   ])
-  const correoContacto = capturar(texto, [/Correo electr[oó]nico de contacto\s*:?\s*\|?\s*([^\s|]+@[^\s|]+)/i])
+  const correoContacto = capturar(texto, [/Correo electr[oó]nico de contacto\s*:?\s*(?:\|\s*)*([^\s|]+@[^\s|]+)/i])
   const numeroCotizacion = numeroCotizacionEn(`${mensaje}\n${asunto}`)
 
   // Sin banco reconocido y sin nuestra cuenta como destino, no se acepta: un
