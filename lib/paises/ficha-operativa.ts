@@ -108,6 +108,27 @@ export type FichaOperativa = {
   cobranzaCc: string
   /** Mesa de ayuda del país (tarjeta oficial); vacío = sin tarjeta propia. */
   soporte?: { email: string; telefono: string; horario: string }
+  /**
+   * Solicitudes internas que nacen de una venta (24-sep, orden de Lalo "que
+   * nosotros creemos esos registros automáticamente… sin brecha con las que se
+   * reciben correctamente"). Los módulos Solicitud_Adm_y_Finanzas y TicketsST
+   * son UNO para toda la empresa con un LAYOUT por país y convenciones de
+   * nombre distintas (verificado en Zoho el 24-sep: PE/CO/MX exigen giro,
+   * dirección, comuna y contacto como campos; Chile los pega en la
+   * Descripción). El mecanismo es único; lo local vive acá.
+   */
+  solicitudes: {
+    /** Layout del módulo Solicitud_Adm_y_Finanzas para este país. */
+    facturacionLayoutId: string
+    /** Convención de nombre que usa el equipo del país; `{empresa}` se sustituye. */
+    facturacionNombre: string
+    /** Valor del picklist `rea_solicitante` que usa el equipo del país. */
+    facturacionArea: string
+    /** Quién revisa la solicitud (correo); vacío = sin definir. */
+    revisorFacturacion: string
+    /** Layout del módulo TicketsST para este país. */
+    stLayoutId: string
+  }
   /** Lo que la ficha declara que FALTA para este país (texto para una persona). */
   pendientes: string[]
 }
@@ -168,6 +189,13 @@ const FICHA_CL: FichaOperativa = {
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "cobranza@geovictoria.com",
+  solicitudes: {
+    facturacionLayoutId: "3525045000411885140",
+    facturacionNombre: "FACTURA - GEOAVANZADO - {empresa}",
+    facturacionArea: "Telemarketing",
+    revisorFacturacion: "ssilva@geovictoria.com",
+    stLayoutId: "3525045000282855283",
+  },
   pendientes: [],
 }
 
@@ -213,7 +241,15 @@ const FICHA_PE: FichaOperativa = {
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
+  solicitudes: {
+    facturacionLayoutId: "3525045000429077325",
+    facturacionNombre: "FACTURACION - ASISTENCIA - {empresa}",
+    facturacionArea: "Ejec. comercial",
+    revisorFacturacion: "",
+    stLayoutId: "3525045000325663062",
+  },
   pendientes: [
+    "Quién revisa la Solicitud de Facturación en Perú (en Chile es Sebastián Silva): correo del revisor para avisarle y para el ticket ST la plantilla de equipos del país.",
     "Sesiones de espejo del equipo en el worker (WA_SESSION_IDS en Railway): mmendozav, afiori, pquispef. Cecilia (venta autónoma) no lleva espejo (Lalo 23-sep).",
     "Un aviso REAL de BBVA/BCP/Interbank en la casilla vicky@ para calibrar el parser (hoy formato genérico).",
   ],
@@ -284,7 +320,15 @@ const FICHA_CO: FichaOperativa = {
   // con horario continuado, fijo de oficina L-V 7:30-18:30; solo los
   // administradores tienen soporte directo.
   soporte: { email: "soporte.co@geovictoria.com", telefono: "+57 601 508 8941", horario: "lunes a viernes de 7:30 a 18:30" },
+  solicitudes: {
+    facturacionLayoutId: "3525045000429077001",
+    facturacionNombre: "INICIO DE FACTURACIÓN - {empresa}",
+    facturacionArea: "Ejec. comercial",
+    revisorFacturacion: "",
+    stLayoutId: "3525045000325513660",
+  },
   pendientes: [
+    "Quién revisa la Solicitud de Facturación en Colombia (su ST valida contra la Sales Order de Books, no contra la NDV) y la plantilla de equipos del país.",
     "Sesiones de espejo del equipo CO en el worker (decidir quiénes: telemarketing mcorredor/snavarrob/dcrodriguez, SDR msanabriat/jnarinoch/egalindo).",
     "Teléfonos del equipo CO (ninguno de los seis ni las líderes lo tienen en su ficha de Zoho).",
   ],
@@ -323,7 +367,15 @@ const FICHA_MX: FichaOperativa = {
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
+  solicitudes: {
+    facturacionLayoutId: "3525045000429077619",
+    facturacionNombre: "SE SOLICITA FACTURA - {empresa}",
+    facturacionArea: "Ejec. comercial",
+    revisorFacturacion: "",
+    stLayoutId: "3525045000331434179",
+  },
   pendientes: [
+    "Quién revisa la Solicitud de Facturación en México y la plantilla de equipos del país.",
     "Roster SDR Inbound México (emails + ids de Zoho) para la rotación de leads.",
     "Gestor/a de la venta autónoma.",
     "Líder comercial.",
@@ -502,6 +554,12 @@ export function sesionesEspejoOperativas(pais?: string): string[] {
   return Array.from(new Set(equipoOperativo(pais).map((p) => p.sesion).filter(Boolean)))
 }
 
+/** Nombre de la Solicitud de Facturación con la convención del país. */
+export function nombreSolicitudFacturacion(pais: string | null | undefined, empresa: string): string {
+  const f = fichaOperativa(pais)
+  return f.solicitudes.facturacionNombre.replace("{empresa}", String(empresa || "").trim().toUpperCase() || "EMPRESA")
+}
+
 export function personaPorEmail(email: string): (PersonaEquipo & { pais: CodigoPaisOperativo }) | null {
   const e = String(email || "").toLowerCase().trim()
   if (!e) return null
@@ -535,6 +593,8 @@ export function resumenFicha(f: FichaOperativa): Record<string, unknown> {
     horarioToques: `${f.horarioToques.desde}:00–${f.horarioToques.hasta}:00 ${f.tz}`,
     correoComprobante: CORREO_COMPROBANTE,
     copiaAvisoComprobante: f.cobranzaCc || "(ninguna)",
+    solicitudFacturacion: `${f.solicitudes.facturacionNombre} · área ${f.solicitudes.facturacionArea} · layout ${f.solicitudes.facturacionLayoutId} · revisa ${f.solicitudes.revisorFacturacion || "(sin definir)"}`,
+    ticketST: `layout ${f.solicitudes.stLayoutId}`,
     pendientes: f.pendientes,
   }
 }

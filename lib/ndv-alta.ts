@@ -55,6 +55,8 @@ export type JobNdvImp = {
   impId?: string
   impNumero?: string
   impSinNdv?: boolean
+  /** Solicitud de Facturación creada sola con la NDV confirmada (24-sep). */
+  sf?: { sfId?: string; numero?: string; estado?: string; faltantes?: string[]; intentos?: number; at?: string }
   terminadoAt?: string
   motivoFin?: string
 }
@@ -398,6 +400,30 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
       }
     }
 
+    // 3-bis. SOLICITUD DE FACTURACIÓN (24-sep, ok de Lalo "punto 1"): con la
+    //   NDV confirmada y enlazada nace la SF que finanzas espera, en la forma
+    //   de las que aceptan a la primera (lib/solicitud-facturacion). Hasta 3
+    //   intentos por job; PE espera además la nota de hardware (dos notas).
+    if (job.ndv?.referenciaId && !job.sf?.sfId && (job.sf?.intentos || 0) < 3) {
+      const hwListaOPendiente = job.pais !== "pe" || !job.hardware || ["CONFIRMADA", "sin_espejo_hardware", "sin_cuenta"].includes(String(job.hardware?.estado || "")) || (job.hardware?.intentos || 0) >= 10
+      if (hwListaOPendiente) {
+        try {
+          const { crearSolicitudFacturacion } = await import("./solicitud-facturacion")
+          const r = await crearSolicitudFacturacion(c, {
+            quoteId: job.quoteId || "",
+            referenciaNdvId: job.ndv.referenciaId,
+            impId: job.impId,
+            notaHardware: job.pais === "pe" && job.hardware?.idNdv ? `${job.hardware.idNdv} (${job.hardware.estado || "?"})` : undefined,
+          })
+          job.sf = { sfId: r.sfId, numero: r.numero, estado: r.estado, faltantes: r.faltantes, intentos: (job.sf?.intentos || 0) + 1, at: new Date().toISOString() }
+          if (!r.ok) console.warn(`[ndv-alta] ${c}: SF no creada (${r.detalle || r.estado})`)
+        } catch (e) {
+          job.sf = { ...(job.sf || {}), estado: "error", intentos: (job.sf?.intentos || 0) + 1, at: new Date().toISOString() }
+          console.warn(`[ndv-alta] ${c}: SF falló:`, e instanceof Error ? e.message : e)
+        }
+      }
+    }
+
     // 4. Cierre del job. PE: no se cierra mientras la nota de HARDWARE siga
     //    pendiente (tope de 10 pasadas en 1c; después se avisa y se cierra).
     const hardwarePendientePE =
@@ -405,7 +431,8 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
       Boolean(job.hardware) &&
       !["CONFIRMADA", "sin_espejo_hardware", "sin_cuenta"].includes(String(job.hardware?.estado || "")) &&
       (job.hardware?.intentos || 0) < 10
-    if (job.impId && !job.impSinNdv && !hardwarePendientePE) {
+    const sfPendiente = Boolean(job.ndv?.referenciaId) && !job.sf?.sfId && (job.sf?.intentos || 0) < 3
+    if (job.impId && !job.impSinNdv && !hardwarePendientePE && !sfPendiente) {
       job.terminadoAt = new Date().toISOString()
       job.motivoFin = "completo"
     } else if (job.impId && (job.ndvImposible || !job.quoteId)) {

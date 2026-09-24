@@ -95,6 +95,10 @@ function literalesDeLaFicha(): Array<{ que: string; re: RegExp }> {
     // rompe a un país nuevo; la de los OTROS países sí delata un mapa por país
     // escrito a mano fuera de la ficha (así se coló el vigía en hora de Santiago).
     if (f.pais !== "cl") out.push({ que: `tz ${f.pais}`, re: new RegExp(esc(f.tz)) })
+    // Layouts por país de las solicitudes internas (24-sep): un id de layout
+    // suelto en el código es un `if (pais === …)` escondido.
+    out.push({ que: `layout SF ${f.pais}`, re: new RegExp(f.solicitudes.facturacionLayoutId) })
+    out.push({ que: `layout ST ${f.pais}`, re: new RegExp(f.solicitudes.stLayoutId) })
   }
   for (const p of equipoOperativo()) {
     out.push({ que: `email ${p.email}`, re: new RegExp(esc(p.email), "i") })

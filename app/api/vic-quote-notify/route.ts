@@ -75,6 +75,8 @@ async function handle(req: Request): Promise<Response> {
     monto?: string
     to?: string
     quoteId?: string
+    /** Datos del pop-up de aceptación (cotizador, 24-sep): giro/comuna/dirección/etc. */
+    facturacion?: { rut?: string; giro?: string; comuna?: string; direccion?: string; telefono?: string; email?: string; razonSocial?: string }
   } = {}
   if (req.method === "POST") p = (await req.json().catch(() => ({}))) as typeof p
 
@@ -102,6 +104,22 @@ async function handle(req: Request): Promise<Response> {
     console.log(
       `[quote-notify] cadencia cerrada contact=${r.contact || "?"} quote=${quoteId} traspaso=${r.traspaso}`,
     )
+    // DATOS DE FACTURACIÓN DEL POP-UP (24-sep): antes se descartaban porque el
+    // módulo de cotizaciones no tiene esos campos; ahora quedan en la fuente
+    // única y de ahí salen la Solicitud de Facturación y la cuenta CRM.
+    if (r.contact && p.facturacion && typeof p.facturacion === "object") {
+      const f = p.facturacion
+      import("@/lib/datos-facturacion")
+        .then((m) =>
+          m.guardarDatosFacturacion(
+            r.contact!,
+            { documento: f.rut, giro: f.giro, comuna: f.comuna, direccion: f.direccion, telefono: f.telefono, correo: f.email, razonSocial: f.razonSocial },
+            "aceptacion",
+          ),
+        )
+        .then((d) => console.log(`[quote-notify] datos de facturación guardados contact=${r.contact} campos=${Object.keys(d?.fuentes || {}).join(",")}`))
+        .catch((e) => console.warn("[quote-notify] datos de facturación no guardados:", e instanceof Error ? e.message : e))
+    }
   }
   const evento = (p.evento || url.searchParams.get("evento") || "aceptada").toLowerCase()
   const empresa = (p.empresa || url.searchParams.get("empresa") || "").trim() || "—"

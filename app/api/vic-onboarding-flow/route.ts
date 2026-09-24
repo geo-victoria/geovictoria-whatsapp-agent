@@ -308,6 +308,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     // giro/dirección/comuna: para la planilla/registro, no para el alta.
     const extras = { giro: campos.giro || "", direccion: campos.direccion || "", comuna: campos.comuna || "" }
     await setKvValue(`onboarding_flow_extras_${contact}`, JSON.stringify(extras)).catch(() => {})
+    // Fuente única de datos de facturación (24-sep): de acá salen la Solicitud
+    // de Facturación automática y la cuenta CRM — lo que el cliente escribe
+    // en el formulario ya no se descarta.
+    import("@/lib/datos-facturacion")
+      .then((m) => m.guardarDatosFacturacion(contact, { ...extras, razonSocial: campos.razon_social || "", documento: campos.rut_empresa || "" }, "flow"))
+      .catch(() => {})
     return NextResponse.json({ ok: true, valido: true })
   }
 
