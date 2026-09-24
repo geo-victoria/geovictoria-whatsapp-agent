@@ -122,6 +122,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   const montos: number[] = []
   const mrrPorPais = new Map<string, number>()
   const mrrPorMes = new Map<string, number>()
+  // Chile por mes (24-sep): el total por mes mezcla monedas de otros países.
+  const mrrPorMesChile = new Map<string, { clp: number; contactos: number }>()
   for (const [tel, u] of ultimo.entries()) {
     let clp = u.clp || 0
     if (!clp && u.uf && ufDia) clp = Math.round(u.uf * ufDia)
@@ -134,6 +136,10 @@ export async function GET(req: Request): Promise<NextResponse> {
     mrrPorPais.set(p, (mrrPorPais.get(p) || 0) + clp)
     const mes = String(primeraVez.get(tel) || u.at).slice(0, 7)
     mrrPorMes.set(mes, (mrrPorMes.get(mes) || 0) + clp)
+    if (p === "Chile") {
+      const a = mrrPorMesChile.get(mes) || { clp: 0, contactos: 0 }
+      mrrPorMesChile.set(mes, { clp: a.clp + clp, contactos: a.contactos + 1 })
+    }
   }
   montos.sort((a, b) => a - b)
   const mediana = montos.length ? montos[Math.floor(montos.length / 2)] : 0
@@ -264,6 +270,7 @@ export async function GET(req: Request): Promise<NextResponse> {
       medianaClp: mediana,
       porPaisClp: Object.fromEntries([...mrrPorPais.entries()]),
       porMesClp: Object.fromEntries([...mrrPorMes.entries()].sort()),
+      porMesChileClp: Object.fromEntries([...mrrPorMesChile.entries()].sort()),
     },
     registro: {
       nota: "cotización/lead/deal que VICKY anotó; a los que no tienen nada se les pregunta a Zoho por teléfono en una muestra",
