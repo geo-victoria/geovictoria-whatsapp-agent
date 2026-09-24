@@ -231,6 +231,55 @@ async function notaEnImplementacion(H: Record<string, string>, impId: string, ti
   }
 }
 
+/** Placeholder por campo para los obligatorios de otro tipo de solicitud. */
+function placeholderObligatorio(apiName: string, empresa: string): unknown {
+  switch (apiName) {
+    case "N_Factura":
+      return 0
+    case "Fecha_comprometida_para_desactivar":
+      return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00")
+    case "Nombre_empresa_plataforma":
+    case "Nombre_empresa_en_platafora":
+      return empresa.toUpperCase() || "EMPRESA"
+    case "Motivo":
+    case "ltimo_mes_de_servicio_a_facturar":
+    default:
+      return "No aplica (solicitud de facturación)"
+  }
+}
+
+async function crearConObligatoriosDeOtroTipo(
+  H: Record<string, string>,
+  registro: Record<string, unknown>,
+  empresa: string,
+): Promise<{ ok: true; id: string; rellenados: string[] } | { ok: false; detalle: string }> {
+  const rec = { ...registro }
+  const rellenados: string[] = []
+  for (let intento = 0; intento < 8; intento++) {
+    const r = await fetch(`${API()}/crm/v8/${MODULO}`, { method: "POST", headers: H, body: JSON.stringify({ data: [rec], trigger: ["workflow", "blueprint"] }), cache: "no-store" })
+    const j = (await r.json().catch(() => ({}))) as { data?: Array<{ code?: string; details?: { id?: string; api_name?: string; expected_data_type?: string }; message?: string }> }
+    const fila = j?.data?.[0]
+    if (r.ok && fila?.code === "SUCCESS" && fila?.details?.id) {
+      if (rellenados.length) console.log(`[sf] creada rellenando obligatorios de otro tipo: ${rellenados.join(", ")}`)
+      return { ok: true, id: String(fila.details.id), rellenados }
+    }
+    const campo = String(fila?.details?.api_name || "")
+    if (fila?.code === "MANDATORY_NOT_FOUND" && campo && !(campo in rec)) {
+      rec[campo] = placeholderObligatorio(campo, empresa)
+      rellenados.push(campo)
+      continue
+    }
+    if (fila?.code === "INVALID_DATA" && campo && campo in rec && rellenados.includes(campo)) {
+      // El placeholder no calzó con el tipo: se prueba el otro formato una vez.
+      rec[campo] = typeof rec[campo] === "number" ? "0" : rec[campo] === "No aplica (solicitud de facturación)" ? new Date().toISOString().slice(0, 10) : "-"
+      rellenados.push(`${campo}*`)
+      continue
+    }
+    return { ok: false, detalle: `${r.status} ${fila?.code || ""} ${fila?.message || ""} ${campo}`.trim() }
+  }
+  return { ok: false, detalle: "demasiados reintentos de obligatorios" }
+}
+
 /**
  * Crea (o adopta) la Solicitud de Facturación de una venta por chat.
  * `contact` = teléfono del cliente (decide el país por la ficha).
@@ -358,18 +407,21 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
 
   if (opts.dry) return { ok: true, estado: "dry", registro, faltantes, pais, detalle: `solicitante ${solicitante.email}` }
 
-  // 5. Crear.
+  // 5. Crear. OJO (24-sep, primera creación real): el layout marca como
+  //    obligatorios campos de OTROS tipos de solicitud (N_Factura, Motivo,
+  //    Fecha_comprometida_para_desactivar, ltimo_mes_de_servicio_a_facturar,
+  //    Nombre_empresa_plataforma) que la UI oculta con reglas de layout — por
+  //    eso los humanos los dejan null y la API responde MANDATORY_NOT_FOUND.
+  //    Se rellenan con un "No aplica" explícito SOLO cuando Zoho los exige,
+  //    campo por campo, y quedan ocultos igual para quien lee la solicitud.
   let sfId = ""
   try {
-    const r = await fetch(`${API()}/crm/v3/${MODULO}`, { method: "POST", headers: H, body: JSON.stringify({ data: [registro], trigger: ["workflow", "blueprint"] }), cache: "no-store" })
-    const j = (await r.json().catch(() => ({}))) as { data?: Array<{ code?: string; details?: { id?: string; api_name?: string }; message?: string }> }
-    const fila = j?.data?.[0]
-    if (!r.ok || fila?.code !== "SUCCESS" || !fila?.details?.id) {
-      const det = `${r.status} ${fila?.code || ""} ${fila?.message || ""} ${fila?.details?.api_name || ""}`.trim()
-      await avisarEquipoInterno(`⚠️ SOLICITUD DE FACTURACIÓN de ${datos.empresa || quoteId} (${ficha.nombre}) NO se pudo crear: ${det}. Hay que hacerla a mano.`).catch(() => {})
-      return { ok: false, estado: "error", detalle: det, registro, faltantes, pais }
+    const creado = await crearConObligatoriosDeOtroTipo(H, registro, datos.empresa)
+    if (!creado.ok) {
+      await avisarEquipoInterno(`⚠️ SOLICITUD DE FACTURACIÓN de ${datos.empresa || quoteId} (${ficha.nombre}) NO se pudo crear: ${creado.detalle}. Hay que hacerla a mano.`).catch(() => {})
+      return { ok: false, estado: "error", detalle: creado.detalle, registro, faltantes, pais }
     }
-    sfId = String(fila.details.id)
+    sfId = creado.id
   } catch (e) {
     return { ok: false, estado: "error", detalle: e instanceof Error ? e.message : String(e), registro, faltantes, pais }
   }
