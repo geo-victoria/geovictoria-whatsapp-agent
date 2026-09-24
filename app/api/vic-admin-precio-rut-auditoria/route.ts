@@ -268,7 +268,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   for (let off = 0; off < 12000; off += 200) {
     const lote = await coql<DealZ>(
       `select id, Deal_Name, Stage, Valor_fijo_del_trato_Global, N_Empleados_que_marcan, Monda_del_trato, Tipo_de_Cobro, ` +
-      `Gesti_n_Vicky, Atribuci_n_Vicky, Contact_Name.Phone, Contact_Name.Mobile, Created_Time from Deals ` +
+      `Gesti_n_Vicky, Atribuci_n_Vicky, Owner.email, Contact_Name.Phone, Contact_Name.Mobile, Created_Time from Deals ` +
       `where Created_Time >= '${desde}T00:00:00+00:00' order by Created_Time desc limit ${off}, 200`,
     )
     for (const d of lote) {
@@ -435,7 +435,29 @@ export async function GET(req: Request): Promise<NextResponse> {
       if (v > neto * 1.15) sobre++
       else if (v < neto * 0.85) bajo++
     }
+    // ?lista=1 (24-sep, Lalo "dame el listado de esos deals, todo lo que vio
+    // precio en adelante"): una fila por contacto con precio, con su deal.
+    const listaDeals: Array<Record<string, unknown>> = []
+    if (sp.get("lista") === "1") {
+      for (const c of todos) {
+        const idLocal = dealLocalPorTel.get(c.tel) || ""
+        const d = dealPorNueve.get(c.tel.slice(-9)) || (idLocal ? dealPorId.get(idLocal) : undefined)
+        const m = montoDelBloque(c.ultimoTexto)
+        const conIva = m.clp || (m.uf && ufDia ? m.uf * ufDia : 0)
+        const l = d ? undefined : leadPorNueve.get(c.tel.slice(-9))
+        listaDeals.push({
+          tel: c.tel, rut: c.rut || null, ultimoPrecio: c.ultimoPrecio.slice(0, 10),
+          precioNetoClp: conIva ? Math.round(conIva / 1.19) : null,
+          dealId: d?.id || null, deal: d?.Deal_Name || null, etapa: d?.Stage || null,
+          valorDeal: d?.Valor_fijo_del_trato_Global ?? null, moneda: d?.Monda_del_trato || null, tipo: d?.Tipo_de_Cobro || null,
+          empleados: d?.N_Empleados_que_marcan ?? null, gestion: d?.Gesti_n_Vicky || null,
+          dueno: (d as Record<string, unknown> | undefined)?.["Owner.email"] || null,
+          leadId: l?.id || null, leadStatus: l?.Lead_Status || null, leadDueno: l?.["Owner.email"] || null,
+        })
+      }
+    }
     reflejo = {
+      ...(listaDeals.length ? { listaDeals } : {}),
       nota: "neto contra neto: el bloque del chat va CON IVA y el campo del deal es NETO",
       contactosConPrecioCL: todos.length,
       sinMontoLegible,
