@@ -67,6 +67,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   // entró cada mes, con su corte autónoma/asistida, más el acumulado corrido.
   const mrrMes = new Map<string, { ventas: number; mrr: number; autonoma: number; asistida: number }>()
   const detalleSd: string[] = []
+  // ?detalle=1 (24-sep, pedido de Lalo "dame el listado de todos los IDs"): una fila por venta.
+  const conDetalle = sp.get("detalle") === "1"
+  const filas: Array<Record<string, unknown>> = []
   for (const q of universo) {
     const id = q.quoteId
     const c = q.caja
@@ -89,6 +92,13 @@ export async function GET(req: Request): Promise<NextResponse> {
     else if (g === "asistida") mm.asistida += rec
     mrrMes.set(mes, mm)
     if (g === "sd" && detalleSd.length < 25) detalleSd.push(q.numero)
+    if (conDetalle) {
+      filas.push({
+        quoteId: id, numero: q.numero, empresa: q.empresa, tel: q.tel, dealId: q.dealId, dealNombre: q.dealNombre,
+        pagoIso: c.pagoIso || q.fechaIso, cobradoClp: Number(c.montoClp || 0) || 0, mrrClp: rec,
+        unicoClp: Number(c.unicoClp || 0) || 0, gestion: g, atribucion: q.atribucion,
+      })
+    }
     const a = q.atribucion
     const acc = porAtribucion.get(a) || { ventas: 0, cobradoClp: 0 }
     acc.ventas++
@@ -112,6 +122,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     asistida: tot.asistida,
     sinClasificar: tot.sd,
     porMesCobradoClp: Object.fromEntries([...porMes.entries()].sort()),
+    ...(conDetalle ? { filas } : {}),
     mrrInyectadoPorMes: (() => {
       let acum = 0
       return [...mrrMes.entries()].sort().map(([mes, x]) => {
