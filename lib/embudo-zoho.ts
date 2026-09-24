@@ -18,6 +18,12 @@ const DEFAULTS_TRANSICION: Record<string, unknown> = {
   Tipo_de_soluci_n_actual: "No se sabe",
   Producto_Soluci_n: "Control de Asistencia",
   Tipo_de_Cobro: "Mensual fijo",
+  // Perú y México (medido 24-sep): sus blueprints piden además estos dos.
+  Proveedor_actual_new: "Otro",
+}
+/** Fecha estimada de cierre (blueprint Perú): 30 días desde hoy. */
+function fechaEstimadaCierre(): string {
+  return new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
 }
 const API = () => (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 
@@ -147,6 +153,7 @@ export async function avanzarDealDesdeTratoCreado(
         if (valores[api] !== undefined && valores[api] !== null && valores[api] !== "") data[api] = valores[api]
         const vacio = data[api] === undefined || data[api] === null || data[api] === ""
         if (vacio && DEFAULTS_TRANSICION[api] !== undefined) data[api] = DEFAULTS_TRANSICION[api]
+        if (vacio && f.data_type === "date") data[api] = fechaEstimadaCierre()
         if (f.data_type === "multiselectpicklist" && typeof data[api] === "string") {
           data[api] = String(data[api]).split(";").map((v) => v.trim()).filter(Boolean)
         }

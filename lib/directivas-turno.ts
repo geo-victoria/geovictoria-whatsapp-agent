@@ -50,8 +50,28 @@ function zonaConArticulo(zona: string): string {
   return /^(distrito|municipio|barrio|departamento)$/.test(z) ? `el ${z}` : `la ${z}`
 }
 
+/**
+ * Ubicación que el cliente YA dijo en el mismo mensaje en que eligió reloj
+ * (E2E 24-sep, CL/CO/MX: "Quiero la app y un reloj, estamos en Providencia" →
+ * "¿En qué comuna estará el reloj?"). Devuelve la frase textual o "".
+ */
+export function ubicacionEnMensaje(message: string): string {
+  const m = String(message || "")
+  const eligeReloj = /\b(reloj(es)?|equipos?\b|biom[eé]tric[oa]|checador(es)?|ambos|ambas|mixt[oa]|los dos|las dos)/i.test(m)
+  if (!eligeReloj) return ""
+  const r =
+    /\b(?:estamos|estoy|quedamos|queda|est[aá]|somos de|la oficina (?:est[aá]|queda))\s+(?:ubicad[oa]s?\s+)?en\s+(?:la\s+)?(?:comuna|ciudad|distrito)?\s*(?:de\s+)?([^\s,.;!?]+(?:\s+[^\s,.;!?]+){0,2})/i.exec(m) ||
+    /\b(?:comuna|ciudad|distrito|municipio)\s+de\s+([^\s,.;!?]+(?:\s+[^\s,.;!?]+){0,2})/i.exec(m) ||
+    /\ben\s+([A-ZÁÉÍÓÚÑ][\wáéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][\wáéíóúñ]+){0,2})/.exec(m)
+  return r ? r[0].trim() : ""
+}
+
 export function directivaMarcaje(message: string, zona = "comuna"): string {
   const zonaArt = zonaConArticulo(zona)
+  const ubicacion = ubicacionEnMensaje(message)
+  if (ubicacion) {
+    return `\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente eligió un marcaje que incluye reloj Y en el MISMO mensaje dijo dónde está: "${ubicacion}". Esa ES ${zonaArt} del punto (1 punto, 1 reloj). PROHIBIDO volver a preguntar ${zonaArt}: cotiza AHORA con cotizar_referencial (usa como evidenciaUbicacion la frase textual del cliente) y presenta el doble valor (con y sin reloj).`
+  }
   const msgCorto = (message || "").trim()
   const eligeReloj =
     msgCorto.length <= 40 &&

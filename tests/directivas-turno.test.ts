@@ -53,3 +53,13 @@ test("cinturón objeción de precio: sin tool → reintento; con tool de descuen
   assert.equal(v.cinturon, "objecion_precio_sin_tool")
   assert.equal(v.siFallaReintento, "dejar_pasar")
 })
+
+test("reloj + ubicación en el mismo mensaje → cotizar sin repreguntar (E2E 24-sep)", async () => {
+  const { directivaMarcaje, ubicacionEnMensaje } = await import("../lib/directivas-turno.ts")
+  assert.equal(ubicacionEnMensaje("Quiero la app y un reloj, estamos en Providencia"), "estamos en Providencia")
+  assert.equal(ubicacionEnMensaje("Quiero la app y un equipo biométrico, estamos en Bogotá"), "estamos en Bogotá")
+  assert.equal(ubicacionEnMensaje("reloj, en CDMX"), "en CDMX")
+  assert.equal(ubicacionEnMensaje("con reloj"), "")
+  assert.equal(ubicacionEnMensaje("estamos en Providencia"), "")
+  assert.match(directivaMarcaje("Quiero la app y un reloj, estamos en Providencia"), /PROHIBIDO volver a preguntar la comuna/)
+})
