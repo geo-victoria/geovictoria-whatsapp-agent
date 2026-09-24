@@ -47,6 +47,8 @@ import { getZohoAccessToken } from "@/lib/zoho-token"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { enviarCorreoCobranza } from "@/lib/correo-cobranza"
 import { adjuntarComprobanteACotizacion, mediaEntranteReciente } from "@/lib/comprobante-adjunto"
+import { intentosMercadoPago } from "@/lib/pago-declarado"
+import { destinoNuestroEn } from "@/lib/paises/ficha-operativa"
 
 const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -78,7 +80,7 @@ export const registrarComprobanteTransferenciaSchema = {
         type: "string" as const,
         enum: ["transferencia", "mercado_pago"],
         description:
-          "Qué es el comprobante: 'transferencia' (banco a banco) o 'mercado_pago' cuando es el comprobante/recibo que entrega Mercado Pago tras pagar con tarjeta (dice Mercado Pago, MercadoPago, 'Comprobante de pago' de MP, número de operación de MP). El pago con tarjeta se confirma solo; este comprobante NO se registra como transferencia.",
+          "Qué es el comprobante: 'transferencia' (banco a banco, INCLUIDA la transferencia hecha desde una cuenta o billetera Mercado Pago hacia nuestra cuenta bancaria — destino Victoria S.A / Banco de Chile) o 'mercado_pago' SOLO cuando es el recibo de un pago con TARJETA en el checkout de Mercado Pago. El pago con tarjeta se confirma solo; ese recibo NO se registra como transferencia. En `detalle` copia SIEMPRE el destinatario y la cuenta de destino que muestra el comprobante.",
       },
       numeroCotizacion: {
         type: "string" as const,
@@ -460,7 +462,32 @@ export async function registrarComprobanteTransferencia(
   // salía por segunda vez (2 correos PAGADA, 2 bienvenidas). Un recibo de MP
   // no se registra: el pago con tarjeta se confirma solo.
   const textoMedio = `${input.bancoOrigen || ""} ${input.detalle || ""}`.toLowerCase()
-  const esMercadoPago = input.medio === "mercado_pago" || /mercado\s*pago|mercadopago|\bmp\b/.test(textoMedio)
+  let esMercadoPago = input.medio === "mercado_pago" || /mercado\s*pago|mercadopago|\bmp\b/.test(textoMedio)
+  // TRANSFERENCIA DESDE UNA CUENTA MERCADO PAGO (24-sep, caso B-ram COT1660):
+  // el cliente eligió transferencia, la hizo desde su billetera MP a nuestra
+  // cuenta del Banco de Chile y el comprobante dice "Mercado Pago" arriba. La
+  // regla del 05-sep la tomó por recibo de tarjeta y le dijo "MP me lo
+  // confirma solo" — nada iba a confirmarse porque nunca pasó por el checkout.
+  // Un recibo de TARJETA jamás tiene como destino nuestra cuenta bancaria, y
+  // sin ningún intento en MP ni salida al checkout no hay tarjeta posible.
+  if (esMercadoPago && !declarado) {
+    const destinoNuestro =
+      Boolean(destinoNuestroEn(textoMedio)) || /victoria\s*s\.?\s*a\b|8001204108|banco\s+de\s+chile/i.test(textoMedio)
+    let sinTarjeta = false
+    if (!destinoNuestro && pointer?.quoteId) {
+      const [intentos, salidaMp] = await Promise.all([
+        intentosMercadoPago(pointer.quoteId),
+        getKvValue(`pf_${pointer.quoteId}_salida_mp`).catch(() => null),
+      ])
+      sinTarjeta = intentos === 0 && !salidaMp
+    }
+    if (destinoNuestro || sinTarjeta) {
+      console.warn(
+        `[comprobante] +${contact}: comprobante con 'Mercado Pago' tratado como TRANSFERENCIA (${destinoNuestro ? "destino = cuenta nuestra" : "sin intentos en MP ni salida al checkout"})`,
+      )
+      esMercadoPago = false
+    }
+  }
   if (esMercadoPago && !declarado) {
     await avisarEquipoInterno(
       `ℹ️ +${contact} mandó el comprobante de MERCADO PAGO (pago con tarjeta)${pointer ? ` de la cotización ${pointer.quoteId}` : ""}. No se registra como transferencia: el pago se confirma solo por MP.`,

@@ -112,3 +112,27 @@ export async function verificarPagoDeclarado(quoteId: string, timeoutMs = 25_000
     return { pagado: false, motivo: e instanceof Error && e.name === "AbortError" ? "timeout" : "error" }
   }
 }
+
+/**
+ * ¿Cuántos intentos de pago tiene la cotización en Mercado Pago? (24-sep, caso
+ * B-ram). Lee `payments/admin-lookup` del cotizador. null = no se pudo leer
+ * (el llamador NO debe concluir nada de un null).
+ */
+export async function intentosMercadoPago(quoteId: string, timeoutMs = 12_000): Promise<number | null> {
+  const id = (quoteId || "").trim()
+  if (!id || !VICKY_COTIZADORA_SECRET) return null
+  try {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), timeoutMs)
+    const r = await fetch(`${COTIZADOR}/api/payments/admin-lookup?quoteId=${encodeURIComponent(id)}`, {
+      headers: { "x-vicky-secret": VICKY_COTIZADORA_SECRET },
+      cache: "no-store",
+      signal: ctl.signal,
+    }).finally(() => clearTimeout(timer))
+    if (!r.ok) return null
+    const j = (await r.json().catch(() => null)) as { count?: number } | null
+    return typeof j?.count === "number" ? j.count : null
+  } catch {
+    return null
+  }
+}
