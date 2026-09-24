@@ -130,18 +130,19 @@ export async function faseDelContacto(contact: string): Promise<FaseVicky> {
  * Chile). Es la única fuente: borrador, ficha, API de alta, prompts y NDV/IMP
  * lo leen de aquí.
  */
-export async function paisOnboardingDe(contact: string): Promise<"cl" | "pe" | "co"> {
+export async function paisOnboardingDe(contact: string): Promise<"cl" | "pe" | "co" | "mx"> {
   // El override del PROBADOR manda sobre el prefijo (21-sep): sin esto, un
   // teléfono chileno del equipo probaba el alta CHILENA aunque el chat lo
   // estuviera atendiendo Vicky Perú.
   try {
     const { paisProbador } = await import("./probador-pais")
     const override = await paisProbador(contact)
-    if (override) return override === "pe" ? "pe" : override === "co" ? "co" : "cl"
+    if (override) return override === "pe" ? "pe" : override === "co" ? "co" : override === "mx" ? "mx" : "cl"
   } catch {}
   const p = paisDeContacto(contact)
   // COLOMBIA (Lalo 23-sep, "la alta debe ser por chat para GV Avanzado").
-  return p === "pe" ? "pe" : p === "co" ? "co" : "cl"
+  // MÉXICO (Lalo 24-sep).
+  return p === "pe" ? "pe" : p === "co" ? "co" : p === "mx" ? "mx" : "cl"
 }
 
 async function cargarBorrador(contact: string): Promise<Borrador> {

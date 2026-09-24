@@ -110,7 +110,12 @@ describe("identificador por país", () => {
   test("el onboarding funciona en los tres países", () => {
     assert.ok(borradorCompleto(completo("cl", "77861333-6", "12345678-5")))
     assert.ok(borradorCompleto(completo("co", "900123456", "830045123")))
-    assert.ok(borradorCompleto(completo("mx", "CEC200528XX4", "GOMA850101XY9")))
+    assert.ok(borradorCompleto(completo("mx", "CEC200528XX4", "GOMA850101HDFRRN09")))
+  })
+
+  test("México: el administrador se identifica con CURP, no con RFC (24-sep)", () => {
+    assert.ok(!borradorCompleto(completo("mx", "CEC200528XX4", "GOMA850101XY9")))
+    assert.ok(borradorCompleto(completo("mx", "CEC200528XX4", "goma850101hdfrrn09")))
   })
 })
 

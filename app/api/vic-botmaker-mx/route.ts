@@ -41,6 +41,7 @@ import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
 import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_MX } from "@/lib/paises/mx"
 import { procesarTurno, simularTurno, orquestadorActivo } from "@/lib/orquestador-turno"
+import { faseDelContacto } from "@/lib/onboarding-canal"
 import { PERFIL_TURNO_MX } from "@/lib/paises/mx/turno"
 import { getSystemPromptMX, formatCotizacionExistenteMX } from "@/lib/paises/mx/prompt"
 import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
@@ -523,7 +524,11 @@ async function processBurstCO(contact: string, apiKey: string, seedMessage?: str
         // ORQUESTADOR ÚNICO (22-sep, paso 3): con vic_kv `orquestador_mx`="on" el
         // turno corre por lib/orquestador-turno (el pipeline chileno completo con
         // el perfil MX); apagado, sigue el procesador propio de este webhook.
-        if (await orquestadorActivo("mx", contact)) await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_MX)
+        // ALTA POR CHAT (24-sep): un contacto en fase onboarding va SIEMPRE por el
+        // orquestador (es el único que arma el agente de onboarding), aunque el
+        // interruptor comercial `orquestador_mx` siga apagado.
+        const enOnboardingMx = (await faseDelContacto(contact).catch(() => "venta")) === "onboarding"
+        if (enOnboardingMx || (await orquestadorActivo("mx", contact))) await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_MX)
         else await processOneTurnCO(contact, combinado, apiKey)
       } catch (err) {
         console.error(`[vic-mx] error en turno contact=${contact}:`, err)
@@ -726,7 +731,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         const b = body as { orquestador?: boolean }
         const limpio = String(contact || "").replace(/\D/g, "")
         const pruebaOrq =
-          /^52900000\d{3}$/.test(limpio) ||
+          /^52900000\d{3,4}$/.test(limpio) ||
           (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(limpio)
         const usarOrq = b.orquestador === true || (b.orquestador !== false && (await orquestadorActivo("mx")))
         if (usarOrq && pruebaOrq) {

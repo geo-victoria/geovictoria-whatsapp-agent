@@ -101,7 +101,7 @@ export async function contextoImplementacionDesdeVenta(contact: string): Promise
   try {
     const { getQuotePointers, getKvValue } = await import("./supabase-persistence-v3")
     const limpio = (contact || "").replace(/\D/g, "")
-    out.pais = limpio.startsWith("51") && limpio.length === 11 ? "pe" : limpio.startsWith("57") && limpio.length >= 12 ? "co" : "cl"
+    out.pais = limpio.startsWith("51") && limpio.length === 11 ? "pe" : limpio.startsWith("57") && limpio.length >= 12 ? "co" : limpio.startsWith("52") && limpio.length >= 12 ? "mx" : "cl"
     const punteros = await getQuotePointers(limpio).catch(() => [])
     // COTIZACIÓN ANCLADA AL ALTA (09-sep, caso Lorena: dos cotizaciones pagadas
     // por el mismo número y la IMP/NDV se estamparon en la última en vez de la
@@ -203,15 +203,17 @@ export type DatosImplementacion = {
   /** Tipo_de_Planificaci_n: "Fijo" si el chat dejó planificaciones; si no, "Desconocido". */
   tipoPlanificacion?: "Fijo" | "Desconocido"
   /** País del cliente (21-sep): PE → Pa_s/Territorio "Perú" y facturación en SOL. Default Chile. */
-  pais?: "cl" | "pe" | "co"
+  pais?: "cl" | "pe" | "co" | "mx"
 }
 
 // Picklists de Implementaciones verificados el 21-sep (PE) y 23-sep (CO):
 // Pa_s trae "Colombia" y Moneda_Facturaci_n_Futura trae "COP".
-const PAIS_IMP: Record<"cl" | "pe" | "co", { nombre: string; moneda: string }> = {
+// México: Pa_s "México" y Moneda "MXN" verificados en los picklists el 24-sep.
+const PAIS_IMP: Record<"cl" | "pe" | "co" | "mx", { nombre: string; moneda: string }> = {
   cl: { nombre: "Chile", moneda: "CLP" },
   pe: { nombre: "Perú", moneda: "SOL" },
   co: { nombre: "Colombia", moneda: "COP" },
+  mx: { nombre: "México", moneda: "MXN" },
 }
 
 /**

@@ -405,8 +405,14 @@ export async function cerrarYTraspasarPostPago(
   const esCL = !esCO && !esMX && !esPE
   // COLOMBIA (Lalo 23-sep, "la alta debe ser por chat para GV Avanzado"): entra
   // al mismo bloque con NIT/cédula, IMP Colombia/COP y espejo Creator en COP.
-  const altaPorChat = esCL || esPE || esCO
-  const paisChat: "cl" | "pe" | "co" = esPE ? "pe" : esCO ? "co" : "cl"
+  // MÉXICO (Lalo 24-sep, "sí, conéctalo"): mismo bloque con RFC/CURP, IMP
+  // México/MXN y espejo Creator en MXN.
+  const altaPorChat = esCL || esPE || esCO || esMX
+  // El PROBADOR de país manda sobre el prefijo (24-sep): Rodrigo prueba el
+  // alta mexicana desde su +56 y el borrador debe nacer con RFC/CURP.
+  const paisChat: "cl" | "pe" | "co" | "mx" = await import("./onboarding-canal")
+    .then((m) => m.paisOnboardingDe(contact))
+    .catch(() => (esPE ? "pe" : esCO ? "co" : esMX ? "mx" : "cl"))
   // Vicky onboarding — CHILE PRIMERO (decisión 26-jul): el pago es la ÚNICA
   // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
   // traspaso a ejecutivo humano hasta que la fase se abra para ellos.

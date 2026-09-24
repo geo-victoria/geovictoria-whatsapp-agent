@@ -103,7 +103,8 @@ const ACEPTADA_CELDA = tplCelda(
   "vicky_loop_pago_link_cl",
   // CO (23-sep): la misma con link — bots unificados, texto neutro (PLANTILLAS_MULTILINEA).
   "vicky_loop_pago_link_cl",
-  "vicky_loop_pago",
+  // MX (24-sep): la misma con link, como CO (texto neutro, multi-línea).
+  "vicky_loop_pago_link_cl",
   "vicky_pe_loop_pago_link",
 )
 const CO_PREFORM = "vicky_co_react_preform"

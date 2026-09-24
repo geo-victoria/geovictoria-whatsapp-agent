@@ -172,7 +172,7 @@ export const PLANTILLA_ALTA_QR_PE = {
   body: PLANTILLA_ALTA_FLOW_PE.body,
 } as const
 
-export type PaisAlta = "cl" | "pe" | "co"
+export type PaisAlta = "cl" | "pe" | "co" | "mx"
 
 /** Plantillas FLOW / quick-reply del alta según el bot del país.
  * COLOMBIA (23-sep, Lalo "bots unificados ok"): la QR es la CHILENA — su texto
@@ -181,7 +181,7 @@ export type PaisAlta = "cl" | "pe" | "co"
  * Sin plantilla FLOW propia: si la QR falla cae al kickoff conversacional. */
 export function plantillasAltaPais(pais: PaisAlta): { flow: { name: string }; qr: { name: string } } {
   if (pais === "pe") return { flow: PLANTILLA_ALTA_FLOW_PE, qr: PLANTILLA_ALTA_QR_PE }
-  if (pais === "co") return { flow: { name: "" }, qr: PLANTILLA_ALTA_QR_CL }
+  if (pais === "co" || pais === "mx") return { flow: { name: "" }, qr: PLANTILLA_ALTA_QR_CL }
   return { flow: PLANTILLA_ALTA_FLOW_CL, qr: PLANTILLA_ALTA_QR_CL }
 }
 
@@ -189,6 +189,7 @@ export function plantillasAltaPais(pais: PaisAlta): { flow: { name: string }; qr
 export function gatesAltaPais(pais: PaisAlta): { flow: string; qr: string } {
   if (pais === "pe") return { flow: "alta_flow_kickoff_pe", qr: "alta_qr_intent_pe" }
   if (pais === "co") return { flow: "alta_flow_kickoff_co", qr: "alta_qr_intent_co" }
+  if (pais === "mx") return { flow: "alta_flow_kickoff_mx", qr: "alta_qr_intent_mx" }
   return { flow: "alta_flow_kickoff", qr: "alta_qr_intent" }
 }
 
@@ -234,6 +235,26 @@ export const PLANTILLA_ONBOARDING_CO = {
     "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, cédula y correo.",
 } as const
 
+/**
+ * MÉXICO (24-sep): el mismo arranque conversacional con RFC y CURP. Creada por
+ * API en el bot "Vicky México"; mientras Meta la revisa, el kickoff sale como
+ * texto en ventana.
+ */
+export const PLANTILLA_ONBOARDING_MX = {
+  name: "vicky_mx_alta_cuenta",
+  category: "UTILITY" as const,
+  locale: "es",
+  botName: "Vicky México",
+  body:
+    "Ya eres parte de GeoVictoria 🎉\n\n" +
+    "Ahora te creo la cuenta por este mismo chat, toma un par de minutos.\n\n" +
+    "De tu cotización ya tengo estos datos de la empresa:\n" +
+    "Empresa: ${empresa}\n" +
+    "RFC: ${rut_empresa}\n\n" +
+    "Los usamos tal cual? Si hay que cambiar algo, me dices. " +
+    "Y cuéntame quién va a administrar la cuenta: su nombre, apellido, CURP y correo.",
+} as const
+
 export type ParamsOnboarding = { empresa: string; rut_empresa: string }
 
 /** Params de la plantilla. Sin dato, genéricos que no dejan huecos raros. */
@@ -241,6 +262,7 @@ export function paramsPlantillaOnboarding(empresa?: string, rut?: string, pais: 
   const doc =
     pais === "pe" ? String(rut || "").replace(/\D/g, "")
     : pais === "co" ? (normalizarNit(String(rut || "")) || String(rut || "").trim())
+    : pais === "mx" ? String(rut || "").replace(/[\s.-]/g, "").toUpperCase()
     : rutLegible(rut)
   return {
     empresa: (empresa || "").trim() || "tu empresa",
@@ -267,7 +289,7 @@ export function rutLegible(rut?: string): string {
  * puede divergir del de la plantilla aprobada.
  */
 export function renderPlantillaOnboarding(params: ParamsOnboarding, pais: PaisAlta = "cl"): string {
-  return (pais === "pe" ? PLANTILLA_ONBOARDING_PE : pais === "co" ? PLANTILLA_ONBOARDING_CO : PLANTILLA_ONBOARDING_CL).body.replace(
+  return (pais === "pe" ? PLANTILLA_ONBOARDING_PE : pais === "co" ? PLANTILLA_ONBOARDING_CO : pais === "mx" ? PLANTILLA_ONBOARDING_MX : PLANTILLA_ONBOARDING_CL).body.replace(
     /\$\{(\w+)\}/g,
     (_, k: string) => (params as Record<string, string>)[k] ?? `\${${k}}`,
   )

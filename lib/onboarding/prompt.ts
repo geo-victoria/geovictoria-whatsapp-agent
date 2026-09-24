@@ -47,10 +47,11 @@ const ETIQUETA_CL: Record<Campo, string> = etiquetasPara("cl")
 function estiloPais(pais: PaisOnboarding): string {
   if (pais === "pe") return "Peruano neutro y cercano, sin jerga ni chilenismos (nada de UF, RUT, 'al tiro', 'po')"
   if (pais === "co") return "Tuteo cálido colombiano, sin jerga ni chilenismos (nada de UF, RUT, comuna, 'al tiro', 'po')"
+  if (pais === "mx") return "Neutro mexicano suave, de tú, sin jerga ni chilenismos ni 'vosotros' (nada de UF, RUT, comuna, 'al tiro', 'po')"
   return "Chileno neutro y cercano, sin jerga ni voseo"
 }
 function zonaHorariaPais(pais: PaisOnboarding): string {
-  return pais === "pe" ? "hora de Perú" : pais === "co" ? "hora de Colombia" : "hora de Chile"
+  return pais === "pe" ? "hora de Perú" : pais === "co" ? "hora de Colombia" : pais === "mx" ? "hora de México" : "hora de Chile"
 }
 
 function valorDe(b: Borrador, campo: Campo): string | undefined {
@@ -99,7 +100,7 @@ export function promptOnboardingCL(
   const ID_EMP = NOMBRE_IDENTIFICADOR[pais]
   const ID_ADM = nombreIdentificadorAdmin(pais)
   const ETIQ = etiquetasPara(pais)
-  const ejemploId = pais === "pe" ? "tu DNI es 12345678, cierto?" : pais === "co" ? "tu cédula es 1234567890, cierto?" : "tu RUT es 12.345.678-5, cierto?"
+  const ejemploId = pais === "pe" ? "tu DNI es 12345678, cierto?" : pais === "co" ? "tu cédula es 1234567890, cierto?" : pais === "mx" ? "tu CURP es GOMA800101HDFRRN09, cierto?" : "tu RUT es 12.345.678-5, cierto?"
   const base =
     "Eres Vicky, la asistente de GeoVictoria por WhatsApp. La persona con quien hablas YA PAGÓ " +
     "su plan: dejó de ser prospecto, es un cliente nuevo. Tu única misión en esta fase es dejar " +
@@ -355,5 +356,6 @@ export function promptConfiguracionCL(estado: {
   // columnas; el candado valida DNI). Sustitución de vocabulario, nada más.
   if (pais === "pe") return texto.replace(/\bRUT\b/g, "DNI")
   if (pais === "co") return texto.replace(/\bRUT\b/g, "Cédula")
+  if (pais === "mx") return texto.replace(/\bRUT\b/g, "CURP")
   return texto
 }

@@ -15,6 +15,7 @@ import {
   PLANTILLA_ONBOARDING_CL,
   PLANTILLA_ONBOARDING_PE,
   PLANTILLA_ONBOARDING_CO,
+  PLANTILLA_ONBOARDING_MX,
   gatesAltaPais,
   paramsPlantillaAltaFlow,
   paramsPlantillaOnboarding,
@@ -55,7 +56,7 @@ export async function entregarKickoffOnboarding(
   const paisEf = overridePais ?? paisDeContacto(contact)
   const esPE = paisEf === "pe"
   // COLOMBIA (23-sep): mismo híbrido; QR chilena (neutra) + kickoff conversacional con NIT.
-  const paisAlta: "cl" | "pe" | "co" = esPE ? "pe" : paisEf === "co" ? "co" : "cl"
+  const paisAlta: "cl" | "pe" | "co" | "mx" = esPE ? "pe" : paisEf === "co" ? "co" : paisEf === "mx" ? "mx" : "cl"
   const gates = gatesAltaPais(paisAlta)
   const tplsBase = plantillasAltaPais(paisAlta)
   // NOMBRE DE LA PLANTILLA FLOW POR KV (21-sep, flow único): una plantilla no
@@ -131,7 +132,7 @@ export async function entregarKickoffOnboarding(
   }
   const ok = await sendBotmakerTemplate(
     contact,
-    (paisAlta === "pe" ? PLANTILLA_ONBOARDING_PE : paisAlta === "co" ? PLANTILLA_ONBOARDING_CO : PLANTILLA_ONBOARDING_CL).name,
+    (paisAlta === "pe" ? PLANTILLA_ONBOARDING_PE : paisAlta === "co" ? PLANTILLA_ONBOARDING_CO : paisAlta === "mx" ? PLANTILLA_ONBOARDING_MX : PLANTILLA_ONBOARDING_CL).name,
     params,
     undefined,
     TRANSACCIONAL,

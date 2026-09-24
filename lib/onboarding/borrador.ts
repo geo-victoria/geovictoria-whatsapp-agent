@@ -47,6 +47,9 @@ export function nombreIdentificadorAdmin(pais: PaisOnboarding): string {
   // COLOMBIA (23-sep, alta por chat): la persona se identifica con su cédula de
   // ciudadanía (6-10 dígitos) o de extranjería; el NIT es de la empresa.
   if (pais === "co") return "Cédula"
+  // MÉXICO (24-sep, alta por chat): el admin se identifica con su CURP (18
+  // caracteres); el RFC es de la empresa.
+  if (pais === "mx") return "CURP"
   return NOMBRE_IDENTIFICADOR[pais]
 }
 
@@ -54,6 +57,12 @@ export function nombreIdentificadorAdmin(pais: PaisOnboarding): string {
 export function cedulaValida(valor: string): boolean {
   const v = String(valor || "").replace(/[\s.-]/g, "").toUpperCase()
   return /^\d{6,10}$/.test(v) || /^[A-Z]?\d{6,7}$/.test(v)
+}
+
+/** CURP mexicana: 4 letras + 6 dígitos (fecha) + H/M/X + 5 letras + homoclave + dígito. */
+export function curpValida(valor: string): boolean {
+  const v = String(valor || "").replace(/[\s.-]/g, "").toUpperCase()
+  return /^[A-Z][AEIOUX][A-Z]{2}\d{6}[HMX][A-Z]{5}[A-Z0-9]\d$/.test(v)
 }
 
 /** DNI peruano (8 dígitos) o carné de extranjería (9-12 alfanuméricos). */
@@ -138,6 +147,7 @@ export function identificadorValido(valor: string, pais: PaisOnboarding): boolea
 export function identificadorAdminValido(valor: string, pais: PaisOnboarding): boolean {
   if (pais === "pe") return dniValido(valor)
   if (pais === "co") return cedulaValida(valor)
+  if (pais === "mx") return curpValida(valor)
   return identificadorValido(valor, pais)
 }
 
@@ -154,6 +164,7 @@ export function normalizarIdentificador(valor: string, pais: PaisOnboarding): st
 export function normalizarIdentificadorAdmin(valor: string, pais: PaisOnboarding): string {
   if (pais === "pe") return dniValido(valor) ? String(valor || "").replace(/[\s.-]/g, "").toUpperCase() : ""
   if (pais === "co") return cedulaValida(valor) ? String(valor || "").replace(/[\s.-]/g, "").toUpperCase() : ""
+  if (pais === "mx") return curpValida(valor) ? String(valor || "").replace(/[\s.-]/g, "").toUpperCase() : ""
   return normalizarIdentificador(valor, pais)
 }
 
