@@ -136,15 +136,17 @@ async function completarDesdePadron(pais: CodigoPaisOperativo, documento: string
         // sirve como giro "por defecto" solo si el cliente no dijo nada.
         if (!limpio(out.giro) && f.ciiu) out.giro = `CIIU ${f.ciiu}`
       }
-    } else if (pais === "cl" && documento && !limpio(out.razonSocial)) {
-      const base = (process.env.VICKY_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || "").trim()
-      if (base) {
-        const r = await fetch(`${base}/api/vic-sii-ficha?rut=${encodeURIComponent(documento)}`, { cache: "no-store" })
-        const j = r.ok ? ((await r.json().catch(() => ({}))) as { razonSocial?: string; razon_social?: string; giro?: string; comuna?: string; direccion?: string }) : {}
-        if (j.razonSocial || j.razon_social) out.razonSocial = j.razonSocial || j.razon_social
-        if (!limpio(out.giro) && j.giro) out.giro = j.giro
-        if (!limpio(out.comuna) && j.comuna) out.comuna = j.comuna
-        if (!limpio(out.direccion) && j.direccion) out.direccion = j.direccion
+    } else if (pais === "cl" && documento && (!limpio(out.razonSocial) || !limpio(out.giro) || !limpio(out.direccion) || !limpio(out.comuna))) {
+      // El padrón SII SÍ entrega giro, dirección y comuna (verificado 24-sep:
+      // Fibravives, Andariego, Alba Campos) — la nota del 10-ago que lo daba
+      // por muerto quedó vencida. Misma función que usa el prellenado del flow.
+      const { fichaEmpresaSii } = await import("./empresas-sii")
+      const f = await fichaEmpresaSii(documento)
+      if (f) {
+        if (!limpio(out.razonSocial) && f.razonSocial) out.razonSocial = f.razonSocial
+        if (!limpio(out.giro) && f.giro) out.giro = f.giro
+        if (!limpio(out.direccion) && f.direccion) out.direccion = f.direccion
+        if (!limpio(out.comuna) && f.comuna) out.comuna = f.comuna
       }
     }
   } catch (e) {
@@ -342,7 +344,7 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
     const desde = new Date(Date.now() - 120 * 86400e3).toISOString().replace(/\.\d{3}Z$/, "+00:00")
     const condiciones = [
       referenciaId ? `ID_NDV = '${referenciaId}'` : "",
-      cuentaIdTemprana ? `(Cuenta = '${cuentaIdTemprana}' and nombre_por_colocar = 'Nueva empresa' and Created_Time >= '${desde}')` : "",
+      cuentaIdTemprana ? `((Cuenta = '${cuentaIdTemprana}' and nombre_por_colocar = 'Nueva empresa') and Created_Time >= '${desde}')` : "",
     ].filter(Boolean)
     const donde = condiciones.length === 2 ? `(${condiciones[0]} or ${condiciones[1]})` : condiciones[0]
     const ya = await coql<{ id: string; Nro_Solicitud?: string; Estado?: string }>(
