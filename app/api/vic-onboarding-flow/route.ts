@@ -82,6 +82,7 @@ async function cargar(contact: string): Promise<Borrador> {
 async function extrasParaPrefill(
   contact: string,
   rutEmpresa: string,
+  pais = "cl",
 ): Promise<{ giro: string; direccion: string; comuna: string }> {
   const out = { giro: "", direccion: "", comuna: "" }
   const toma = (src: Partial<typeof out>) => {
@@ -118,8 +119,17 @@ async function extrasParaPrefill(
       }
     } catch {}
   }
+  // 3-PE. Padrón SUNAT por el RUC (E2E 24-sep: el formulario peruano abría
+  //       con dirección y distrito vacíos teniendo el padrón a mano).
+  if (pais === "pe" && (!out.direccion || !out.comuna) && rutEmpresa) {
+    try {
+      const { fichaRucSunat } = await import("@/lib/paises/pe/sunat-ruc")
+      const f = await fichaRucSunat(rutEmpresa)
+      if (f) toma({ direccion: f.direccion || "", comuna: f.distrito || "" })
+    } catch {}
+  }
   // 3. Padrón SII por el RUT de la empresa.
-  if ((!out.giro || !out.direccion || !out.comuna) && rutEmpresa && rutValido(rutEmpresa)) {
+  if (pais === "cl" && (!out.giro || !out.direccion || !out.comuna) && rutEmpresa && rutValido(rutEmpresa)) {
     try {
       const ficha = await fichaEmpresaSii(rutEmpresa)
       if (ficha) toma({ giro: ficha.giro || "", direccion: ficha.direccion || "", comuna: ficha.comuna || "" })
@@ -128,7 +138,9 @@ async function extrasParaPrefill(
   // Giro sin fuente → "Otro" (Lalo 25-ago: "no debe ser un stopper; si no lo
   // tenemos, no lo pidamos o un giro Otro"). Dirección/comuna no se inventan:
   // van vacías y el Flow las tiene como opcionales.
-  if (!out.giro) out.giro = "Otro"
+  // Solo Chile: el "Otro" es convención del SII; en los demás países el campo
+  // queda vacío (opcional) en vez de un giro chileno.
+  if (!out.giro && pais === "cl") out.giro = "Otro"
   return out
 }
 
@@ -153,7 +165,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   // Sin contacto (chat frío: la Code Action no logró resolver el teléfono —
   // caso Diego 25-ago) el Flow igual debe abrir: prefill vacío, nunca 400.
   const b = await cargar(contact || "sin-contacto")
-  const extras = await extrasParaPrefill(contact, b.empresa.identificador || "")
+  const extras = await extrasParaPrefill(contact, b.empresa.identificador || "", b.pais)
   // Persona natural: giro "Persona Natural" (si ninguna fuente dio uno mejor)
   // y flags para que el Flow oculte giro/dirección/comuna — no aplican a la
   // boleta. `mostrar_campos_empresa` va en positivo para bindear `visible`
