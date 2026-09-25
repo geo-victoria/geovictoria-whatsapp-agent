@@ -83,6 +83,9 @@ export const FICHA_CO: FichaPrompt = {
   gatilloEmision: "el cliente entregó el NIT tras ver el precio → generas en ese turno, tenga correo o no.",
   datosMinimos: "YA tienes los datos mínimos (contacto y NIT — el email, la razón social y la ciudad NO son requisito)",
   equipoNombre: "equipo biométrico",
+  arriendoNombre: "alquiler",
+  arrendando: "alquilando",
+  arrendados: "alquilados",
   equipoNombreCap: "Equipo biométrico",
   fichaRelojUrl: null,
   bloques: {

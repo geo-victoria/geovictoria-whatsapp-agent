@@ -65,6 +65,10 @@ export type FichaPrompt = {
   datosMinimos: string
   /** Cómo se llama el aparato físico de cara al cliente (CL "reloj control físico", CO "equipo biométrico"). */
   equipoNombre: string
+  /** Cómo se dice la modalidad de renta del equipo al cliente: CL/PE "arriendo", CO "alquiler", MX "renta". */
+  arriendoNombre: string
+  arrendando: string
+  arrendados: string
   equipoNombreCap: string
   /** URL pública de la ficha técnica PDF del reloj estándar del país (enviar_ficha_reloj); null = el país no tiene ficha. */
   fichaRelojUrl: string | null
@@ -145,6 +149,9 @@ export const FICHA_CL: FichaPrompt = {
   gatilloEmision: "el cliente entregó el RUT tras ver el precio → generas en ese turno, tenga correo o no.",
   datosMinimos: "YA tienes los datos mínimos (contacto y RUT — el email, la empresa y la comuna NO son requisito)",
   equipoNombre: "reloj control físico",
+  arriendoNombre: "arriendo",
+  arrendando: "arrendando",
+  arrendados: "arrendados",
   equipoNombreCap: "Reloj control físico",
   // Ficha del Senseface 4A (23-sep; la del 2A sigue en ficha-reloj-senseface.pdf para Perú).
   fichaRelojUrl: "https://cotizacion.geovictoria.com/pdf/assets/ficha-reloj-senseface-4a.pdf",

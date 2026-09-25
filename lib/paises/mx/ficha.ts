@@ -83,6 +83,9 @@ export const FICHA_MX: FichaPrompt = {
   gatilloEmision: "el cliente entregó el RFC y la razón social tras ver el precio → generas en ese turno, tenga correo o no.",
   datosMinimos: "YA tienes los datos mínimos (contacto, RFC y razón social — el email y la ciudad NO son requisito)",
   equipoNombre: "reloj checador",
+  arriendoNombre: "renta",
+  arrendando: "rentando",
+  arrendados: "rentados",
   equipoNombreCap: "Reloj checador",
   fichaRelojUrl: null,
   bloques: {

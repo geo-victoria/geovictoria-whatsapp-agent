@@ -73,6 +73,9 @@ export const FICHA_PE: FichaPrompt = {
   gatilloEmision: "el cliente entregó el RUC tras ver el precio → generas en ese turno, tenga correo o no.",
   datosMinimos: "YA tienes los datos mínimos (contacto y RUC — la razón social sale del padrón, el email y el distrito NO son requisito)",
   equipoNombre: "reloj de control físico",
+  arriendoNombre: "arriendo",
+  arrendando: "arrendando",
+  arrendados: "arrendados",
   equipoNombreCap: "Reloj de control físico",
   // Perú vende el Senseface 2A ([PER] 304): conserva la ficha del 2A.
   fichaRelojUrl: "https://cotizacion.geovictoria.com/pdf/assets/ficha-reloj-senseface.pdf",
