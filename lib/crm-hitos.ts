@@ -1,3 +1,4 @@
+import { monedaDealDeTerritorio } from "./convencion-deal.ts"
 import { ccLiderTraspaso } from "./cc-lider"
 import { esContactoCL } from "./origen-canal.ts"
 import { rosterSdrOperativo } from "./paises/ficha-operativa.ts"
@@ -1123,8 +1124,9 @@ async function convertirConDeal(
     // "PEN") — verificado contra el metadata del campo el 05-ago. Chile es
     // CLP desde el 20-ago (convención de montos de marketing: el recurrente
     // del trato va en pesos, no en UF).
-    Monda_del_trato:
-      territorio === "Colombia" ? "COP" : territorio === "México" ? "MXN" : territorio === "Perú" ? "SOL" : "CLP",
+    // Chile en UF desde el 25-sep (Lalo: "en el deal para chile mantengamos
+    // todo en UF"), lib única de convención.
+    Monda_del_trato: monedaDealDeTerritorio(territorio),
     Producto_Soluci_n: "Control de Asistencia",
     // Convención de valores del deal (Lalo 20-ago / 09-sep, David 24-sep):
     // siempre "Mensual fijo" con el recurrente neto en la moneda del país.

@@ -23,7 +23,8 @@ const QUOTE_MODULE = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria
 const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
 const VICKY_ID = "3525045000484500876"
-const MONEDA: Record<string, string> = { Chile: "CLP", "Perú": "SOL", Colombia: "COP", "México": "MXN" }
+// Chile en UF desde el 25-sep (Lalo).
+const MONEDA: Record<string, string> = { Chile: "UF", "Perú": "SOL", Colombia: "COP", "México": "MXN" }
 const esPrueba = (n: string) => /\bprueba\b|\btest\b|e2e/i.test(n)
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 

@@ -116,7 +116,11 @@ export async function POST(req: Request): Promise<NextResponse> {
     const m = montoDelBloque(String(msg.content || ""))
     const conIva = m.clp || (m.uf && uf ? m.uf * uf : 0)
     if (!conIva) { salida.push({ dealId, deal: nombre, tel, omitido: `bloque sin monto legible${m.uf ? " (solo UF, pasa ?uf=)" : ""}` }); continue }
-    const neto = Math.round(conIva / IVA)
+    // Chile en UF desde el 25-sep: el recurrente neto se escribe en UF (2
+    // decimales), desde el bloque en UF si lo trae o convirtiendo con la UF.
+    const netoClp = Math.round(conIva / IVA)
+    const neto = m.uf ? Math.round((m.uf / IVA) * 100) / 100 : uf ? Math.round((netoClp / uf) * 100) / 100 : 0
+    if (!neto) { salida.push({ dealId, deal: nombre, tel, omitido: "sin UF para convertir (pasa ?uf=)" }); continue }
     const antes = Number(deal.Valor_fijo_del_trato_Global || 0)
     const fila: Record<string, unknown> = {
       dealId, deal: nombre, etapa: deal.Stage, tel,
@@ -135,7 +139,7 @@ export async function POST(req: Request): Promise<NextResponse> {
             id: dealId,
             Valor_fijo_del_trato_Global: neto,
             Tipo_de_Cobro: "Mensual fijo",
-            Monda_del_trato: "CLP",
+            Monda_del_trato: "UF",
             Valor_por_usuario_Global: null,
           }],
           trigger: ["blueprint"],

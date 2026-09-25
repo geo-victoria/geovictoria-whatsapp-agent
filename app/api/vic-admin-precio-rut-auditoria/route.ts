@@ -366,7 +366,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     const v = Number(d.Valor_fijo_del_trato_Global || 0)
     if (!(v > 1000)) { falla.push(v > 0 ? `valor implausible ${v}` : "sin valor"); cuentaFalla.valor++ }
     if (!(Number(d.N_Empleados_que_marcan || 0) > 0)) { falla.push("sin empleados"); cuentaFalla.empleados++ }
-    if (String(d.Monda_del_trato || "") !== "CLP") { falla.push(`moneda ${d.Monda_del_trato || "vacía"}`); cuentaFalla.moneda++ }
+    if (String(d.Monda_del_trato || "") !== "UF") { falla.push(`moneda ${d.Monda_del_trato || "vacía"}`); cuentaFalla.moneda++ }
     if (String(d.Tipo_de_Cobro || "") !== "Mensual fijo") { falla.push(`tipo ${d.Tipo_de_Cobro || "vacío"}`); cuentaFalla.tipo++ }
     if (!String(d.Gesti_n_Vicky || "").trim()) { falla.push("sin Gestión Vicky"); cuentaFalla.gestion++ }
     if (!falla.length) { alDia++; continue }

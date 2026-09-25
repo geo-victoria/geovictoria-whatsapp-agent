@@ -26,6 +26,8 @@
  * Auth: x-cron-secret == vic_kv.followup_cron_secret, o Bearer/?key=CRON_SECRET.
  */
 
+import { monedaDealDeTelefono, recurrenteNetoDeItems, toleranciaValor } from "@/lib/convencion-deal"
+import { getUFActual } from "@/lib/uf"
 import { NextResponse } from "next/server"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { transicionarDealHacia } from "@/lib/zoho-deals"
@@ -223,7 +225,10 @@ export async function GET(req: Request): Promise<Response> {
     // la moneda de SU país y Valor_por_usuario vacío; el Valor_fijo lo pone el
     // pase principal desde la cotización. Antes solo corría para Chile y los
     // deals de Perú quedaban con CLP y los de Colombia/México sin corregir.
-    const MONEDAS: Array<[string, string]> = [["Chile", "CLP"], ["Perú", "SOL"], ["Colombia", "COP"], ["México", "MXN"]]
+    const MONEDAS: Array<[string, string]> = [["Chile", "UF"], ["Perú", "SOL"], ["Colombia", "COP"], ["México", "MXN"]]
+    // Chile pasa a UF (25-sep): un valor en PESOS (> 50) se convierte con la UF
+    // del día al cambiar la moneda — jamás queda "24.516 UF" (caso BRKR).
+    const ufHoy = await getUFActual()
     const out = { actualizados: 0, errores: [] as string[], quedan: 0, porPais: {} as Record<string, number> }
     for (const [territorio, moneda] of MONEDAS) {
       const donde = `((Created_By = 3525045000484500876 and Territorio = '${territorio}') and (Monda_del_trato != '${moneda}' or Tipo_de_Cobro != 'Mensual fijo'))`
@@ -232,11 +237,11 @@ export async function GET(req: Request): Promise<Response> {
           method: "POST",
           headers: H,
           cache: "no-store",
-          body: JSON.stringify({ select_query: `select id from Deals where ${donde} limit 100` }),
+          body: JSON.stringify({ select_query: `select id, Valor_fijo_del_trato_Global from Deals where ${donde} limit 100` }),
         })
         if (rc.status === 204) break // sin más filas
         if (rc.status !== 200) { out.errores.push(`coql ${territorio} ${rc.status}`); break }
-        const filas = (((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string }> }).data) || []
+        const filas = (((await rc.json().catch(() => ({}))) as { data?: Array<{ id: string; Valor_fijo_del_trato_Global?: number | null }> }).data) || []
         if (!filas.length) break
         const ids = filas.slice(0, Math.max(1, limit - out.actualizados))
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals`, {
@@ -244,7 +249,12 @@ export async function GET(req: Request): Promise<Response> {
           headers: H,
           cache: "no-store",
           body: JSON.stringify({
-            data: ids.map((f) => ({ id: f.id, Monda_del_trato: moneda, Tipo_de_Cobro: "Mensual fijo", Valor_por_usuario_Global: null })),
+            data: ids.map((f) => {
+              const fila: Record<string, unknown> = { id: f.id, Monda_del_trato: moneda, Tipo_de_Cobro: "Mensual fijo", Valor_por_usuario_Global: null }
+              const v = Number(f.Valor_fijo_del_trato_Global || 0)
+              if (moneda === "UF" && v > 50 && ufHoy > 0) fila.Valor_fijo_del_trato_Global = Math.round((v / ufHoy) * 100) / 100
+              return fila
+            }),
             skip_feature_execution: [{ name: "assignment_rules" }],
             trigger: ["blueprint"],
           }),
@@ -589,7 +599,7 @@ export async function GET(req: Request): Promise<Response> {
           // pueden ser correctos en su moneda. Verificado en el dry del
           // 10-sep: los 30 primeros eran ajenos y ninguno tenía cotización.
           `select id, Deal_Name, Stage, Valor_fijo_del_trato_Global from Deals ` +
-          `where ((Valor_fijo_del_trato_Global > 0 and Valor_fijo_del_trato_Global < 1000) and Created_By = 3525045000484500876) ` +
+          `where (((Valor_fijo_del_trato_Global > 0 and Valor_fijo_del_trato_Global < 1000) and Created_By = 3525045000484500876) and Territorio != 'Chile') ` +
           `order by Created_Time desc limit 200`,
       }),
     })
@@ -621,7 +631,7 @@ export async function GET(req: Request): Promise<Response> {
         const put = await fetch(`${ZOHO_API}/crm/v3/Deals`, {
           method: "PUT", headers: H, cache: "no-store",
           body: JSON.stringify({
-            data: [{ id: d.id, Valor_fijo_del_trato_Global: recurrente, Tipo_de_Cobro: "Mensual fijo", Monda_del_trato: "CLP", Valor_por_usuario_Global: null }],
+            data: [{ id: d.id, Valor_fijo_del_trato_Global: recurrente, Tipo_de_Cobro: "Mensual fijo", Valor_por_usuario_Global: null }],
             trigger: ["blueprint"],
             skip_feature_execution: [{ name: "assignment_rules" }],
           }),
@@ -1089,14 +1099,10 @@ export async function GET(req: Request): Promise<Response> {
       // ocultas en $0 → el recurrente salía 0 y el Valor_fijo quedaba vacío.
       // El valor del deal es el equivalente MENSUAL: plan anual ÷ 12 (ya trae
       // el descuento aplicado, no se vuelve a descontar).
-      const planAnual = items.find((i) => (i.Codigo_Item || "") === "plan_anual")
-      const recurrenteNeto = planAnual && Number(planAnual.Subtotal_CLP) > 0
-        ? Math.round(Number(planAnual.Subtotal_CLP) / 12)
-        : Math.round(
-        items
-          .filter((i) => i.Es_Recurrente || (i.Codigo_Item || "") === "asistencia")
-          .reduce((a, i) => a + (Number(i.Subtotal_CLP) || 0), 0) * (1 - pct / 100),
-      )
+      // Moneda del trato por prefijo del teléfono (Chile en UF desde el 25-sep;
+      // el recurrente sale de Subtotal_UF con 2 decimales). Lib única.
+      const monedaEsperadaDeal = monedaDealDeTelefono(p.contact) || "UF"
+      const recurrenteNeto = recurrenteNetoDeItems(items as Parameters<typeof recurrenteNetoDeItems>[0], pct, monedaEsperadaDeal)
 
       // 3. Deal actual.
       const rd = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}?fields=Stage,Owner,Tipo_de_Cobro,Valor_fijo_del_trato_Global,Valor_por_usuario_Global,N_Empleados_que_marcan,Currency,Monda_del_trato,Gesti_n_Vicky,Created_By`, { headers: H, cache: "no-store" })
@@ -1125,7 +1131,7 @@ export async function GET(req: Request): Promise<Response> {
       const modalidadPorUsuario = String(asistencia?.Modalidad || "").toLowerCase().includes("usuario")
       const usuariosCot = modalidadPorUsuario ? Number(asistencia?.Cantidad) || 0 : 0
       const cambios: Record<string, unknown> = {}
-      if (recurrenteNeto > 0 && Math.abs(Number(deal.Valor_fijo_del_trato_Global || 0) - valorFijoUsd) > 1) {
+      if (recurrenteNeto > 0 && Math.abs(Number(deal.Valor_fijo_del_trato_Global || 0) - valorFijoUsd) > toleranciaValor(monedaEsperadaDeal)) {
         cambios.Valor_fijo_del_trato_Global = valorFijoUsd
       }
       if (recurrenteNeto > 0 && String(deal.Tipo_de_Cobro || "") !== "Mensual fijo") {
@@ -1143,16 +1149,14 @@ export async function GET(req: Request): Promise<Response> {
       }
       // Moneda del trato → CLP (Lalo 20-ago) — SOLO deals de Chile; CO/MX/PE
       // conservan la suya.
+      // Moneda del trato (campo VISIBLE Monda_del_trato): la del país. Chile =
+      // UF desde el 25-sep (Lalo: "en el deal para chile mantengamos todo en
+      // UF, valor y moneda" — supersede el CLP del 20-ago). El Currency del
+      // sistema no se toca (no existe UF como moneda del sistema).
       const telDeal = (p.contact || "").replace(/\D/g, "")
-      if (telDeal.startsWith("56") && String(deal.Currency || "") !== "CLP") {
-        cambios.Currency = "CLP"
-      }
-      // Y el campo VISIBLE "Moneda del trato" (custom Monda_del_trato — el que
-      // sale en las vistas de Zoho; Lalo 20-ago "la moneda del trato sigue
-      // diciendo UF"). CL → CLP; UF de cualquier origen también cae acá.
       const monedaTrato = String(deal.Monda_del_trato || "")
-      if ((telDeal.startsWith("56") || monedaTrato === "UF") && monedaTrato !== "CLP") {
-        cambios.Monda_del_trato = "CLP"
+      if (monedaTrato !== monedaEsperadaDeal) {
+        cambios.Monda_del_trato = monedaEsperadaDeal
       }
       // SOLO DEALS DE VICKY (25-sep, reclamo Christian/Juan Carlos): el
       // barrido desde Zoho recorre TODA cotización con Deal_Asociado, también
