@@ -51,12 +51,9 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // en 6 días cada uno. Correos e ids salen de la FICHA OPERATIVA
   // (`calEventoId` de cada persona) vía lib/paises/co/agenda.ts — fuente única.
   ...EVENTOS_AGENDA_CO,
-  // ANDERSON (6616830) NO se cablea: su evento devuelve 0 slots en 14, 30 y
-  // 60 días — está sin horario/host utilizable. Cablearlo dejaría a sus
-  // clientes sin ninguna hora que elegir; hasta arreglarlo cae al
-  // round-robin, que sí ofrece agenda. Medición 10-ago en la MISMA ventana
-  // de 14 días: Paola 226 · Grey 203 · Eddyluz 193 · Tamara 175 · Ana Paula
-  // 127 · Anderson 0.
+  // ANDERSON (6616830): sin horario del 10-ago al 24-sep (0 slots); el 25-sep
+  // responde 118 slots en 5 días con su agenda → cableado.
+  "adiazg@geovictoria.com": "6616830", // CL — Anderson Díaz
   // SIN evento propio todavía (caen al round-robin): Eddy Galindo (CO).
 }
 
