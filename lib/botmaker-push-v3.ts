@@ -12,7 +12,7 @@
  */
 
 import { esContactoMeta } from "./origen-canal.ts"
-import { NUMERO_LINEA, channelIdPorPais, paisDeNumero, plantillaCoherenteConLinea, type PaisLinea } from "./linea-por-pais"
+import { NUMERO_LINEA, channelIdPorPais, paisDeNumero, paisLineaDeContacto, plantillaCoherenteConLinea, type PaisLinea } from "./linea-por-pais"
 
 const BM_TOKEN = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
 const BM_CHANNEL_V3 = (process.env.BOTMAKER_CHANNEL_V3 || "").trim()
@@ -132,7 +132,10 @@ export function canalCoherenteConContacto(
   const numCanal = (canal.match(/(\d+)\s*$/) || [])[1] || ""
   if (!numCanal) return true
   if (paisOverride) return paisDeNumero(numCanal) === paisOverride
-  const paisContacto = paisDeNumero(normalizeContactId(contactId))
+  // Identificador de WhatsApp sin número (BSUID "PE.4635…", 25-sep, prueba de
+  // Ana Fiori): el prefijo es el país. Sin esto se leía como número desconocido
+  // ("otro") y la respuesta salía por la línea chilena → 131047.
+  const paisContacto = paisLineaDeContacto(normalizeContactId(contactId))
   // PERÚ ya no es "otro" (25-sep, caso Fernando +51986892263): desde que Perú
   // tiene línea propia, un +51 con el canal de la línea CHILENA es el bot que
   // reporta mal la línea — persistirlo manda las respuestas por la línea
@@ -164,7 +167,7 @@ function guardarCanalOrigen(clean: string, canal: string): void {
  * chats. Solo cuando la línea es coherente con el prefijo.
  */
 function fijarOrigenSiCorresponde(clean: string, canal: string): void {
-  const pais = paisDeNumero(clean)
+  const pais = paisLineaDeContacto(clean)
   if (pais !== "co" && pais !== "mx" && pais !== "pe") return
   if (!canalCoherenteConContacto(clean, canal)) return
   guardarCanalOrigen(clean, canal)

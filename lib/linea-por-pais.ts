@@ -46,6 +46,17 @@ export function channelIdPorPais(pais: PaisLinea): string {
  * País por prefijo de un número (sin "+"). Mismos criterios que
  * lib/ruteo-pais: CL 56+9 · CO 57+10 · MX 521+10 (o 52+10) · PE 51+9.
  */
+/**
+ * País de la línea que corresponde a un CONTACTO: respeta el prefijo de país de
+ * los identificadores de WhatsApp sin número (BSUID "PE.4635…", "CO.1594…") y
+ * cae al prefijo telefónico para los números. 25-sep, prueba de Ana Fiori.
+ */
+export function paisLineaDeContacto(contact: string): PaisLinea | "otro" {
+  const marca = /^\s*(CL|CO|MX|PE)\./i.exec(String(contact || ""))?.[1]?.toLowerCase()
+  if (marca === "cl" || marca === "co" || marca === "mx" || marca === "pe") return marca
+  return paisDeNumero(contact)
+}
+
 export function paisDeNumero(num: string): PaisLinea | "otro" {
   const c = String(num || "").replace(/\D/g, "")
   if (!c) return "otro"

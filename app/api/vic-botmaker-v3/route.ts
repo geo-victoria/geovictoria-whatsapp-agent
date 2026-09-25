@@ -183,8 +183,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       // mal por la regla vieja de Perú, 25-sep) se reemplaza por la línea del
       // país: sin esto las respuestas seguían saliendo por la línea chilena.
       if (conocido && !canalCoherenteConContacto(contact, conocido, paisProb)) {
-        const { channelIdPorPais, paisDeNumero } = await import("@/lib/linea-por-pais")
-        const p = paisDeNumero(contact.replace(/\D/g, ""))
+        const { channelIdPorPais, paisLineaDeContacto } = await import("@/lib/linea-por-pais")
+        const p = paisLineaDeContacto(contact)
         if (p === "pe" || p === "co" || p === "mx" || p === "cl") {
           await setKvValue(`canal_origen_${contact}`, channelIdPorPais(p)).catch(() => {})
           console.warn(`[canal-origen] ${contact}: origen guardado ${conocido} no calza con su país — repuesto a la línea de ${p.toUpperCase()}`)

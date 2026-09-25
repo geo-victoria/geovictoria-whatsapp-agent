@@ -56,3 +56,14 @@ test("channelId por país: PE y CO tienen default canónico, CL usa la env hist�
   assert.equal(channelIdPorPais("mx"), "GeoVictoriaEspaol-whatsapp-5215659778486")
   assert.equal(channelIdPorPais("cl"), (process.env.BOTMAKER_CHANNEL_V3 || "").trim())
 })
+
+// 25-sep (prueba de Ana Fiori con el número oculto): el identificador de
+// WhatsApp sin número trae el país como prefijo y manda sobre los dígitos.
+test("paisLineaDeContacto: BSUID con prefijo de país y números", async () => {
+  const { paisLineaDeContacto } = await import("../lib/linea-por-pais.ts")
+  assert.equal(paisLineaDeContacto("PE.4635395106744525"), "pe")
+  assert.equal(paisLineaDeContacto("CO.1594422999071237"), "co")
+  assert.equal(paisLineaDeContacto("51986892263"), "pe")
+  assert.equal(paisLineaDeContacto("56912345678"), "cl")
+  assert.equal(paisLineaDeContacto("4635395106744525"), "otro")
+})
