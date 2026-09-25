@@ -378,6 +378,9 @@ const FICHA_MX: FichaOperativa = {
     // Lalo 24-sep: "el único SDR en México es Pablo Rodríguez" (reemplaza a
     // Miguel Guzmán, fijo desde el 12-ago).
     sdr: [persona("prodriguez@geovictoria.com", "3525045000391904256", "Pablo Rodríguez")],
+    // Lalo 25-sep: la gestión comercial de la venta autónoma en México es de
+    // Andrea Fuentes Swain (perfil Gestión Comercial en Zoho; sin espejo).
+    ventaAutonoma: persona("afuentess@geovictoria.com", "3525045000645183642", "Andrea Fuentes Swain", undefined, "-"),
     lider: "",
   },
   horarioToques: { desde: 9, hasta: 21 },
@@ -396,7 +399,6 @@ const FICHA_MX: FichaOperativa = {
   pendientes: [
     "Quién revisa la Solicitud de Facturación en México y la plantilla de equipos del país.",
     "Entradas \"Territorio = México\" en las reglas Deals 2026 / TLMK / SDR de Zoho (hoy el sorteo MX es un flujo de trabajo que solo corre al crear).",
-    "Gestor/a de la venta autónoma.",
     "Líder comercial.",
     "Sesiones de espejo del equipo en el worker (lmedina, ysegura, prodriguez).",
   ],

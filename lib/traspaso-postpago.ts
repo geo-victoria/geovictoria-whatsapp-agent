@@ -52,18 +52,15 @@ export type ResultadoTraspaso = {
  * la gestión post-venta). Best-effort: cualquier falla deja todo como estaba.
  */
 const OWNER_VENTA_AUTONOMA_DEFAULT = "3525045000583802005" // Aleydis Araque
-// PERÚ (Lalo 15-sep): la gestora comercial de la venta autónoma es Cecilia
-// Valverde (confirmado por Diego Bendezú). kv `owner_venta_autonoma_pe` /
-// env VICKY_OWNER_VENTA_AUTONOMA_PE, mismo patrón que Chile.
-const OWNER_VENTA_AUTONOMA_DEFAULT_PE = fichaOperativa("pe").equipo.ventaAutonoma?.zohoId || "3525045000521799149" // Cecilia Valverde
 
-// COLOMBIA (Lalo 23-sep, "la venta autónoma pasa a Gabriela"): la gestora
-// comercial es Gabriela Linares (ficha operativa CO). Supersede el "CO conserva
-// al primer dueño" del 05-ago SOLO para la venta autónoma post-pago. kv
-// `owner_venta_autonoma_co` / env VICKY_OWNER_VENTA_AUTONOMA_CO.
-const OWNER_VENTA_AUTONOMA_DEFAULT_CO = fichaOperativa("co").equipo.ventaAutonoma?.zohoId || "3525045000279036001" // Gabriela Linares
-
-type PaisVentaAutonoma = "cl" | "pe" | "co"
+// UN SOLO CAMINO PARA LOS 4 PAÍSES (25-sep, México se sumó con Andrea Fuentes
+// Swain): la gestora de la venta autónoma de cada país vive en la FICHA
+// OPERATIVA (`equipo.ventaAutonoma`) — PE Cecilia Valverde (15-sep), CO Gabriela
+// Linares (23-sep), MX Andrea Fuentes Swain (25-sep). Override sin deploy:
+// vic_kv `owner_venta_autonoma_<cc>` → env VICKY_OWNER_VENTA_AUTONOMA_<CC>.
+// Chile conserva sus llaves históricas sin sufijo (`owner_venta_autonoma`,
+// VICKY_OWNER_VENTA_AUTONOMA). Un país nuevo = su ficha, no otra rama acá.
+type PaisVentaAutonoma = "cl" | "pe" | "co" | "mx"
 
 function paisVentaAutonoma(contact: string): PaisVentaAutonoma | null {
   if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return "cl" // Messenger/Instagram = CL
@@ -71,20 +68,16 @@ function paisVentaAutonoma(contact: string): PaisVentaAutonoma | null {
   if (c.startsWith("56") && c.length >= 11) return "cl"
   if (c.startsWith("51") && c.length === 11) return "pe"
   if (c.startsWith("57") && c.length >= 12) return "co"
+  if (c.startsWith("52") && c.length >= 12) return "mx"
   return null
 }
 
 async function ownerVentaAutonoma(pais: PaisVentaAutonoma = "cl"): Promise<string> {
-  if (pais === "pe") {
-    const kv = (await getKvValue("owner_venta_autonoma_pe").catch(() => null)) || ""
-    return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA_PE || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT_PE
-  }
-  if (pais === "co") {
-    const kv = (await getKvValue("owner_venta_autonoma_co").catch(() => null)) || ""
-    return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA_CO || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT_CO
-  }
-  const kv = (await getKvValue("owner_venta_autonoma").catch(() => null)) || ""
-  return kv.trim() || (process.env.VICKY_OWNER_VENTA_AUTONOMA || "").trim() || OWNER_VENTA_AUTONOMA_DEFAULT
+  const sufijo = pais === "cl" ? "" : `_${pais}`
+  const kv = (await getKvValue(`owner_venta_autonoma${sufijo}`).catch(() => null)) || ""
+  const env = (process.env[`VICKY_OWNER_VENTA_AUTONOMA${sufijo.toUpperCase()}`] || "").trim()
+  const ficha = fichaOperativa(pais).equipo.ventaAutonoma?.zohoId || ""
+  return kv.trim() || env || ficha || OWNER_VENTA_AUTONOMA_DEFAULT
 }
 
 export type EjecutivoAutonoma = { nombre: string; email: string; telefono: string }
@@ -98,12 +91,10 @@ async function datosOwnerAutonoma(
   api: string,
   pais: PaisVentaAutonoma = "cl",
 ): Promise<EjecutivoAutonoma> {
-  const fallback: EjecutivoAutonoma =
-    pais === "pe"
-      ? { nombre: "Cecilia Valverde", email: "cvalverde@geovictoria.com", telefono: "+51 982 446 284" }
-      : pais === "co"
-        ? { nombre: "Gabriela Linares", email: "glinares@geovictoria.com", telefono: "" }
-        : { nombre: "Aleydis Araque", email: "aaraque@geovictoria.com", telefono: "+56 9 8291 6868" }
+  const p = fichaOperativa(pais).equipo.ventaAutonoma
+  const fallback: EjecutivoAutonoma = p
+    ? { nombre: p.nombre, email: p.email, telefono: p.telefono || "" }
+    : { nombre: "Aleydis Araque", email: "aaraque@geovictoria.com", telefono: "+56 9 8291 6868" }
   try {
     const r = await fetch(`${api}/crm/v3/users/${ownerId}`, { headers: H, cache: "no-store" })
     if (!r.ok) return fallback
@@ -160,8 +151,10 @@ async function asignarVentaAutonoma(
   quoteId: string,
 ): Promise<{ autonoma: boolean; ejecutivo?: EjecutivoAutonoma }> {
   try {
-    // CHILE (Lalo 31-jul), PERÚ (Lalo 15-sep, Cecilia Valverde) y COLOMBIA
-    // (Lalo 23-sep, Gabriela Linares); MX sigue con su regla antigua (dueño fijo).
+    // CHILE (Lalo 31-jul), PERÚ (15-sep, Cecilia Valverde), COLOMBIA (23-sep,
+    // Gabriela Linares) y MÉXICO (25-sep, Andrea Fuentes Swain). OJO MX: sus
+    // cotizaciones aún nacen con Yahel (dueña humana), así que la guarda de
+    // abajo las deja intactas hasta que el cotizador MX nazca con Vicky.
     const paisVenta = paisVentaAutonoma(contact)
     if (!paisVenta) return { autonoma: false }
     const owner = await ownerVentaAutonoma(paisVenta)
