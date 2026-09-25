@@ -1174,7 +1174,7 @@ function nombreVendedor(email: string): string {
 }
 
 async function entregarLeadPorReglas(
-  territorio: "Perú" | "Colombia",
+  territorio: "Perú" | "Colombia" | "México",
   leadId: string,
   calificado: boolean,
   interno: { email: string; zohoId: string },
@@ -1376,25 +1376,10 @@ async function asignarEnZoho(
           }
         }
       } else if (esMX) {
-        const { reasignarLeadSdrInboundMX } = await import("@/lib/zoho-leads")
-        const r = await reasignarLeadSdrInboundMX(creado.leadId).catch(() => null)
-        // Nota con la conversación + URL directa a Botmaker (best-effort).
-        await notaTraspasoConversacion(creado.leadId, fono).catch(() => {})
-        // La MISMA notificación de "nuevo lead" que ya reciben los dueños.
-        await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
-        if (r?.success && r.ownerEmail && r.ownerId) {
-          const tel = await telefonoDeUsuario(r.ownerId, H, api)
-          return {
-            email: r.ownerEmail,
-            zohoId: r.ownerId,
-            nombre: nombreVendedor(r.ownerEmail),
-            telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
-            via: "dueno_lead_sdr",
-          }
-        }
-        // Sin roster MX configurado (o RR falló): el lead queda con la
-        // interina como siempre — fallback explícito, no silencioso.
-        await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: creado.leadId, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
+        // México por las reglas globales de Zoho (Lalo 25-sep): calificado →
+        // TLMK (Laura/Yahel), sin calificar → SDR (Pablo). Misma mecánica que Perú.
+        const entrega = await entregarLeadPorReglas("México", creado.leadId, calificado, interno, fono, H, api)
+        if (entrega) return entrega
       } else if (esCO && tombolaZohoCoActiva()) {
         // CO por las reglas de Zoho (Lalo 23-sep) = misma mecánica que Perú.
         const entrega = await entregarLeadPorReglas("Colombia", creado.leadId, calificado, interno, fono, H, api)
@@ -1657,46 +1642,12 @@ async function asignarEnZoho(
       // Fallback (regla y RR fallaron): rotación interna como siempre.
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
-    } else if (pais === "mx") {
-      // MX (Lalo 13-ago): lead vivo sin formal → SDR Inbound MX por round-robin,
-      // con nota de conversación (URL a Botmaker + transcript) y la notificación
-      // de nuevo lead al dueño. Dueño humano real previo NO se pisa (se presenta él).
-      const ownerLeadMx = (lead.Owner?.email || "").toLowerCase()
-      const esInterinaMx = !ownerLeadMx || /vicky@|info@geovictoria|ysegura@/.test(ownerLeadMx)
-      if (!esInterinaMx && lead.Owner?.id) {
-        await notaTraspasoConversacion(lead.id, fono).catch(() => {})
-        await notificarTraspasoLeadEmail(lead.id, ownerLeadMx, fono, H, api)
-        const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
-        return {
-          email: ownerLeadMx,
-          zohoId: lead.Owner.id,
-          nombre: lead.Owner.name || nombreVendedor(ownerLeadMx),
-          telefono: tel || WHATSAPP_VENDEDOR[ownerLeadMx] || "",
-          via: "dueno_lead_sdr",
-        }
-      }
-      const { reasignarLeadSdrInboundMX } = await import("@/lib/zoho-leads")
-      const r = await reasignarLeadSdrInboundMX(lead.id).catch(() => null)
-      await notaTraspasoConversacion(lead.id, fono).catch(() => {})
-      await notificarTraspasoLeadEmail(lead.id, r?.ownerEmail || interno.email, fono, H, api)
-      if (r?.success && r.ownerEmail && r.ownerId) {
-        const tel = await telefonoDeUsuario(r.ownerId, H, api)
-        return {
-          email: r.ownerEmail,
-          zohoId: r.ownerId,
-          nombre: nombreVendedor(r.ownerEmail),
-          telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
-          via: "dueno_lead_sdr",
-        }
-      }
-      // Sin roster MX (VIC_SDR_INBOUND_MX vacío): comportamiento actual (Yahel).
-      await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
-    } else if (pais === "pe" || pais === "co") {
+    } else if (pais === "pe" || pais === "co" || pais === "mx") {
       // PE = regla chilena (Lalo 15-sep): dueño humano real previo se respeta
       // y se presenta él; si es del bot, calificado → Mónica, si no → SDR PE.
       // CO entra acá solo con `tombolaZohoCoActiva()` (Lalo 23-sep): mismas
       // reglas con su entrada "Territorio = Colombia".
-      const territorioReglas: "Perú" | "Colombia" = pais === "co" ? "Colombia" : "Perú"
+      const territorioReglas: "Perú" | "Colombia" | "México" = pais === "co" ? "Colombia" : pais === "mx" ? "México" : "Perú"
       const ownerLeadPe = (lead.Owner?.email || "").toLowerCase()
       const esInterinaPe = !ownerLeadPe || /vicky@|info@geovictoria/.test(ownerLeadPe)
       // SDR PE con el caso YA calificado (22-sep, misma regla del 10-sep en
@@ -4291,7 +4242,7 @@ async function reconciliarLeadsCruzados(): Promise<number> {
     // PERÚ (22-sep): por las reglas de Zoho con entrada "Territorio = Perú" —
     // calificado → TLMK (Mónica), sin calificar → SDR PE (Ana/Priscila) —
     // en vez del PUT directo a Mónica; Mónica queda de fallback dentro.
-    const porReglas = (terr === "perú" || terr === "peru") ? "Perú" : terr === "colombia" && tombolaZohoCoActiva() ? "Colombia" : ""
+    const porReglas = (terr === "perú" || terr === "peru") ? "Perú" : terr === "colombia" && tombolaZohoCoActiva() ? "Colombia" : (terr === "méxico" || terr === "mexico") ? "México" : ""
     if (porReglas && l.id) {
       const { reasignarLeadPorTerritorio } = await import("@/lib/zoho-leads")
       const r = await reasignarLeadPorTerritorio(porReglas, l.id, { calificado: Number(l.N_Empleados_que_marcan || 0) > 0 }).catch(() => null)

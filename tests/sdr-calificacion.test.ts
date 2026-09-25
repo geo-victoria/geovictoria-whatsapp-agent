@@ -118,12 +118,12 @@ test("Perú: SDR peruana sin calificar, o Mónica (telemarketing), o SDR chilena
   assert.equal(destinoTrasCalificar({ territorio: "Perú", ownerId: ALEYDIS, calificado: true, rut: "20605842055" }), "sin_cambio")
 })
 
-test("rosterSdrPorTerritorio: Chile y Perú tienen roster; Colombia solo con el interruptor (encendido desde el 23-sep); México no", () => {
+test("rosterSdrPorTerritorio: Chile y Perú tienen roster; Colombia solo con el interruptor (encendido desde el 23-sep); México = Pablo Rodríguez (25-sep)", () => {
   assert.equal(rosterSdrPorTerritorio("Chile").length, 2)
   assert.equal(rosterSdrPorTerritorio(null).length, 2)
   assert.equal(rosterSdrPorTerritorio("Perú").length, 2)
   assert.equal(rosterSdrPorTerritorio("Colombia").length, 3)
-  assert.equal(rosterSdrPorTerritorio("México").length, 0)
+  assert.equal(rosterSdrPorTerritorio("México").length, 1)
 })
 
 // COLOMBIA (Lalo 23-sep): las SDR son Sanabria Torres, Nariño Chavarro y

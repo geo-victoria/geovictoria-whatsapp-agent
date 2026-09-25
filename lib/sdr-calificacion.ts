@@ -79,6 +79,8 @@ export function rosterSdrPorTerritorio(territorio?: string | null): Sdr[] {
   if (t === "chile") return roster()
   if (t === "perú" || t === "peru") return rosterPE()
   if (t === "colombia") return rosterCO()
+  // México (25-sep): Pablo Rodríguez, SDR de la regla global con entrada México.
+  if (t === "méxico" || t === "mexico") return parseRoster(process.env.VIC_SDR_INBOUND_MX || rosterComoEnv(rosterSdrOperativo("mx")))
   return []
 }
 

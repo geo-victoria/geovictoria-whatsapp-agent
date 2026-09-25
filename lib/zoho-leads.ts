@@ -945,7 +945,25 @@ const SDR_INBOUND_MX = (
 
 // Tómbola de SDR Inbound MX en ZOHO (Lalo 13-ago): la regla decide el sorteo.
 // Override por env; el RR interno del roster queda solo de fallback.
-const TM_SDR_INBOUND_MX = (process.env.VICKY_TM_SDR_INBOUND_MX_RULE_ID || "3525045000652685096").trim()
+// Desde el 25-sep (Lalo) la regla global "Asignación Leads Sin calificar Vicky
+// SDR" (…043111) tiene la entrada "Territorio = México → Pablo Rodríguez": se
+// usa esa, igual que Chile/Perú/Colombia. La regla MX anterior (…685096, que
+// entregaba a Miguel Guzmán) queda solo por env.
+const TM_SDR_INBOUND_MX = (process.env.VICKY_TM_SDR_INBOUND_MX_RULE_ID || TM_TOMBOLA_SIN_CALIFICAR_CL).trim()
+
+// TELEMARKETING MÉXICO (Lalo 25-sep): entrada "Territorio = México → Laura
+// Medina / Yahel Segura" en la regla TLMK global. Fallback: su rotación.
+const TM_CALIFICACION_MX = (process.env.VICKY_TM_CALIFICACION_MX_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+const TLMK_MX_FALLBACK = rosterTelemarketingOperativo("mx")
+  .map((p) => ({ email: p.email, id: p.zohoId || "" }))
+  .filter((s) => s.email)
+
+/** Reasigna un lead MX CALIFICADO por la regla TLMK de Zoho (entrada México). */
+export async function reasignarLeadCalificadoMX(
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  return reasignarLeadPorRoster({ leadId, ruleId: TM_CALIFICACION_MX, roster: TLMK_MX_FALLBACK, kvTurno: "tlmk_rr_mx", etiqueta: "TLMK MX" })
+}
 
 /**
  * Entrega GENÉRICA por tómbola de Zoho (lar_id) con fallback a rotación
@@ -1129,6 +1147,10 @@ export async function reasignarLeadPorTerritorio(
   // conserva los fijos del 05-ago.
   if (t === "colombia" && tombolaZohoCoActiva()) {
     return conNombre(opts.calificado ? await reasignarLeadCalificadoCO(leadId) : await reasignarLeadSdrInboundCO(leadId))
+  }
+  // MÉXICO (Lalo 25-sep): las mismas dos reglas con su entrada "Territorio = México".
+  if (t === "méxico" || t === "mexico") {
+    return conNombre(opts.calificado ? await reasignarLeadCalificadoMX(leadId) : await reasignarLeadSdrInboundMX(leadId))
   }
   return { success: false, error: `sin tómbola de leads para territorio ${territorio || "?"}` }
 }
