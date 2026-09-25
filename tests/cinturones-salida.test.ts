@@ -382,3 +382,16 @@ test("una duda normal sobre la cotización no es reclamo", () => {
   })
   assert.notEqual(v.cinturon, "formal_no_coincide_sin_tool")
 })
+
+// Fernando (+51986892263, 25-sep): una duda sobre la suscripción mensual que
+// compara con otras empresas NO es un reclamo de que la formal no coincide.
+test("'otras empresas no me cobran este pago mensual' no es reclamo de formal", () => {
+  const v = revisarSalida({
+    reply: "Sí, el plan es una suscripción mensual: incluye la plataforma, la app, reportes y soporte 😊",
+    toolCalls: [],
+    historialAsistente: [],
+    pais: "pe",
+    userMessage: "ah disculpen, me quedo la duda, tengo que pagar las suscripción mensual de todas maneras?. porque otras empresa n me cobran este pago mensual",
+  })
+  assert.notEqual(v.cinturon, "formal_no_coincide_sin_tool")
+})

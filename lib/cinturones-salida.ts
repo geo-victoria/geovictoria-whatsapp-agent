@@ -310,7 +310,7 @@ const FORZAR_TOOL_OBJECION =
  * tocarla es teatro.
  */
 export const RECLAMO_FORMAL_RE =
-  /(me\s+est[aá]s?\s+cobrando|me\s+cobra(?:ste|ron)?|no\s+es\s+lo\s+que\s+(?:eleg[ií]|ped[ií]|dije|quer[ií]a|escog[ií])|te\s+dije\s+(?:la\s+)?(?:\d|opci[oó]n|primera|segunda|otra)|(?:eleg[ií]|escog[ií]|ped[ií])\s+la\s+(?:\d|primera|segunda|otra)|aparece\s+(?:otra|la\s+otra|con\s+reloj|el\s+reloj|otro\s+(?:precio|valor|monto))|no\s+coincide|(?:cotizaci[oó]n|link|pdf|precio)\s+(?:est[aá]|sali[oó]|qued[oó]|viene|vino)\s+(?:mal|equivocad[oa]|incorrect[oa]|err[oó]ne[oa]|con\s+reloj|con\s+otro)|est[aá]\s+(?:mal|equivocad[oa]|incorrect[oa])\s+(?:la\s+)?(?:cotizaci[oó]n|el\s+precio|el\s+monto|el\s+link))/i
+  /(me\s+est[aá]s?\s+cobrando|me\s+cobra(?:ste|ron)\b|no\s+es\s+lo\s+que\s+(?:eleg[ií]|ped[ií]|dije|quer[ií]a|escog[ií])|te\s+dije\s+(?:la\s+)?(?:\d|opci[oó]n|primera|segunda|otra)|(?:eleg[ií]|escog[ií]|ped[ií])\s+la\s+(?:\d|primera|segunda|otra)|aparece\s+(?:otra|la\s+otra|con\s+reloj|el\s+reloj|otro\s+(?:precio|valor|monto))|no\s+coincide|(?:cotizaci[oó]n|link|pdf|precio)\s+(?:est[aá]|sali[oó]|qued[oó]|viene|vino)\s+(?:mal|equivocad[oa]|incorrect[oa]|err[oó]ne[oa]|con\s+reloj|con\s+otro)|est[aá]\s+(?:mal|equivocad[oa]|incorrect[oa])\s+(?:la\s+)?(?:cotizaci[oó]n|el\s+precio|el\s+monto|el\s+link))/i
 const TOOLS_QUE_CORRIGEN_FORMAL = new Set([
   "actualizar_cotizacion",
   "generar_link_cotizadora",
