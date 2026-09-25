@@ -157,3 +157,48 @@ export function registroSolicitudFacturacion(d: DatosSolicitudFacturacion): Reco
   if (limpio(d.urlPdfNdv)) rec.PDF_NDV = limpio(d.urlPdfNdv)
   return rec
 }
+
+/** Datos mínimos del bloque (subconjunto de DatosFacturacion; sin imports). */
+export type DatosBloqueFacturacion = {
+  razonSocial?: string
+  documento?: string
+  giro?: string
+  direccion?: string
+  comuna?: string
+  ciudad?: string
+  telefono?: string
+  correo?: string
+  contactoNombre?: string
+}
+
+/** El bloque en la forma que administración acepta (verificado en SF10187/10186/10183). */
+export function bloqueDatosFacturacion(d: DatosBloqueFacturacion, etiquetaDocumento = "RUT"): { texto: string; faltantes: string[] } {
+  const limpio = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim()
+  const o = (v: unknown) => limpio(v) || "por confirmar"
+  const faltantes: string[] = []
+  for (const [k, nombre] of [
+    ["razonSocial", "razón social"],
+    ["documento", etiquetaDocumento],
+    ["giro", "giro"],
+    ["direccion", "dirección (calle y número)"],
+    ["comuna", "comuna"],
+    ["correo", "correo DTE"],
+  ] as const) {
+    if (!limpio(d[k])) faltantes.push(nombre)
+  }
+  const texto = [
+    "DATOS DE FACTURACIÓN",
+    "",
+    `Razón social: ${o(d.razonSocial)}`,
+    `${etiquetaDocumento}: ${o(d.documento)}`,
+    `Giro: ${o(d.giro)}`,
+    `Dirección: ${o(d.direccion)}`,
+    `Comuna: ${o(d.comuna)}`,
+    ...(limpio(d.ciudad) && limpio(d.ciudad).toLowerCase() !== limpio(d.comuna).toLowerCase() ? [`Ciudad: ${limpio(d.ciudad)}`] : []),
+    `Correo DTE: ${o(d.correo)}`,
+    `Teléfono: ${o(d.telefono)}`,
+    ...(limpio(d.contactoNombre) ? [`Contacto: ${limpio(d.contactoNombre)}`] : []),
+  ].join("\n")
+  return { texto, faltantes }
+}
+

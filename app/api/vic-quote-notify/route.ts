@@ -16,7 +16,7 @@
  * Auth: x-cron-secret == vic_kv.followup_cron_secret, o Bearer/?key=CRON_SECRET.
  */
 
-import { NextResponse } from "next/server"
+import { NextResponse, after } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { cerrarYTraspasarPostPago } from "@/lib/traspaso-postpago"
 
@@ -107,19 +107,51 @@ async function handle(req: Request): Promise<Response> {
     // DATOS DE FACTURACIÓN DEL POP-UP (24-sep): antes se descartaban porque el
     // módulo de cotizaciones no tiene esos campos; ahora quedan en la fuente
     // única y de ahí salen la Solicitud de Facturación y la cuenta CRM.
-    if (r.contact && p.facturacion && typeof p.facturacion === "object") {
-      const f = p.facturacion
-      import("@/lib/datos-facturacion")
+    //
+    // DATOS DE FACTURACIÓN VISIBLES (25-sep): después de guardar el pop-up se
+    // publican en la cuenta y en notas de cuenta y deal, en TODO canal (las
+    // ventas del ejecutivo no pasan por la solicitud automática y la persona
+    // que la arma iba al SII). Corre DESPUÉS de responder (after) para no
+    // demorar al cotizador; en el pago vuelve a correr y solo escribe si cambió.
+    const contactoFact = r.contact || undefined
+    const facturacion = p.facturacion && typeof p.facturacion === "object" ? p.facturacion : null
+    after(async () => {
+      if (contactoFact && facturacion) {
+        const f = facturacion
+        await import("@/lib/datos-facturacion")
+          .then((m) =>
+            m.guardarDatosFacturacion(
+              contactoFact,
+              { documento: f.rut, giro: f.giro, comuna: f.comuna, direccion: f.direccion, telefono: f.telefono, correo: f.email, razonSocial: f.razonSocial },
+              "aceptacion",
+            ),
+          )
+          .then((d) => console.log(`[quote-notify] datos de facturación guardados contact=${contactoFact} campos=${Object.keys(d?.fuentes || {}).join(",")}`))
+          .catch((e) => console.warn("[quote-notify] datos de facturación no guardados:", e instanceof Error ? e.message : e))
+      }
+      await import("@/lib/solicitud-facturacion")
         .then((m) =>
-          m.guardarDatosFacturacion(
-            r.contact!,
-            { documento: f.rut, giro: f.giro, comuna: f.comuna, direccion: f.direccion, telefono: f.telefono, correo: f.email, razonSocial: f.razonSocial },
-            "aceptacion",
-          ),
+          m.publicarDatosFacturacion(quoteId, {
+            contact: contactoFact,
+            // Sin conversación con Vicky (canal ejecutivo) el pop-up se guarda
+            // con el teléfono de la cotización, dentro de la publicación.
+            nuevos:
+              !contactoFact && facturacion
+                ? {
+                    documento: facturacion.rut,
+                    giro: facturacion.giro,
+                    comuna: facturacion.comuna,
+                    direccion: facturacion.direccion,
+                    telefono: facturacion.telefono,
+                    correo: facturacion.email,
+                    razonSocial: facturacion.razonSocial,
+                  }
+                : undefined,
+          }),
         )
-        .then((d) => console.log(`[quote-notify] datos de facturación guardados contact=${r.contact} campos=${Object.keys(d?.fuentes || {}).join(",")}`))
-        .catch((e) => console.warn("[quote-notify] datos de facturación no guardados:", e instanceof Error ? e.message : e))
-    }
+        .then((x) => console.log(`[quote-notify] datos de facturación publicados quote=${quoteId} ${x.ok ? x.cuenta || x.detalle || "ok" : x.detalle}`))
+        .catch((e) => console.warn("[quote-notify] publicación de datos de facturación falló:", e instanceof Error ? e.message : e))
+    })
   }
   const evento = (p.evento || url.searchParams.get("evento") || "aceptada").toLowerCase()
   const empresa = (p.empresa || url.searchParams.get("empresa") || "").trim() || "—"

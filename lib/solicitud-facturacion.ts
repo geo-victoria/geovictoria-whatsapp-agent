@@ -37,6 +37,7 @@ import {
   faltantesFacturacion,
   mesInicioFacturacion,
   registroSolicitudFacturacion,
+  bloqueDatosFacturacion,
   type DatosSolicitudFacturacion,
 } from "./solicitud-facturacion-payload"
 
@@ -299,6 +300,101 @@ async function crearConObligatoriosDeOtroTipo(
   return { ok: false, detalle: "demasiados reintentos de obligatorios" }
 }
 
+/** Cotización tal como la leen la solicitud y la publicación de datos. */
+type CotizacionFacturacion = {
+  Name?: string
+  Cuenta_Asociada?: { id?: string; name?: string }
+  Contacto_Asociado?: { id?: string; name?: string }
+  Deal_Asociado?: { id?: string }
+  Tel_fono_Contacto?: string
+  Email_Contacto?: string
+  RUT_Cliente?: string
+  RUT_Empresa?: string
+}
+
+/**
+ * Datos de facturación CONSOLIDADOS de una venta, en orden: kv
+ * `datos_facturacion_` (pop-up de aceptación) → pantalla EMPRESA del flow →
+ * borrador del alta → cotización → certificado tributario del chat → padrón
+ * del país → contacto de Zoho. Cada fuente rellena SOLO lo vacío.
+ */
+async function consolidarDatos(
+  H: Record<string, string>,
+  c: string,
+  pais: CodigoPaisOperativo,
+  q: CotizacionFacturacion,
+  ref?: { Nombre_Empresa?: string } | null,
+): Promise<DatosFacturacion> {
+  let d: DatosFacturacion = (await leerDatosFacturacion(c)) || {}
+  // Pantalla EMPRESA del formulario del alta (caso Panadería Omar Hernández
+  // 25-sep: la calle estaba ahí y en ningún otro lado).
+  try {
+    const rawX = await getKvValue(`onboarding_flow_extras_${c}`)
+    const x = rawX ? (JSON.parse(rawX) as { giro?: string; direccion?: string; comuna?: string }) : null
+    if (x) {
+      if (!limpio(d.giro) && limpio(x.giro)) d.giro = limpio(x.giro)
+      if (!limpio(d.direccion) && limpio(x.direccion)) d.direccion = limpio(x.direccion)
+      if (!limpio(d.comuna) && limpio(x.comuna)) d.comuna = limpio(x.comuna)
+    }
+  } catch {
+    /* sin flow */
+  }
+  try {
+    const rawB = await getKvValue(claveBorrador(c))
+    const b = rawB ? parsearBorrador(JSON.parse(rawB)) : null
+    if (b) {
+      if (!limpio(d.razonSocial) && limpio(b.empresa?.nombre)) d.razonSocial = b.empresa!.nombre
+      if (!limpio(d.documento) && limpio(b.empresa?.identificador)) d.documento = b.empresa!.identificador
+      const adminNombre = [b.admin?.nombre, b.admin?.apellido].map(limpio).filter(Boolean).join(" ")
+      if (!limpio(d.contactoNombre) && adminNombre) d.contactoNombre = adminNombre
+      if (!limpio(d.correo) && limpio(b.admin?.email)) d.correo = b.admin!.email
+    }
+  } catch {
+    /* sin borrador */
+  }
+  // "Otro" es el giro por DEFECTO que el prellenado del flow escribe cuando no
+  // encontró fuente (25-ago): no es un dato del cliente, así que no le gana al
+  // padrón (Alba Campos salía "Otro" teniendo giro en el SII).
+  if (/^otro$/i.test(limpio(d.giro))) d.giro = ""
+  if (!limpio(d.documento)) d.documento = limpio(q.RUT_Cliente) || limpio(q.RUT_Empresa)
+  if (!limpio(d.razonSocial)) d.razonSocial = limpio(ref?.Nombre_Empresa) || limpio(q.Cuenta_Asociada?.name) || limpio(q.Name).replace(/^Cotizaci[oó]n\s+/i, "").replace(/\s+-\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}.*$/, "")
+  if (!limpio(d.telefono)) d.telefono = limpio(q.Tel_fono_Contacto) || `+${c}`
+  if (!limpio(d.correo)) d.correo = limpio(q.Email_Contacto)
+  // CERTIFICADO TRIBUTARIO EN EL CHAT (24-sep, caso HSEQTECH): si el cliente
+  // mandó su e-RUT / ficha RUC / RUT DIAN / constancia SAT por WhatsApp, la
+  // visión ya lo transcribió en el historial. Rellena SOLO lo vacío y solo si
+  // el documento del certificado es el de la venta (no el de un proveedor).
+  if (!limpio(d.giro) || !limpio(d.direccion) || !limpio(d.comuna)) {
+    try {
+      const hist = await fetchHistoryV3(c, 200)
+      const digs = (x: unknown) => String(x ?? "").replace(/[^\dkK]/g, "").toUpperCase()
+      for (const m of [...hist].reverse()) {
+        if (m.role !== "user") continue
+        const cert = parsearCertificadoTributario(String(m.content || ""))
+        if (!cert) continue
+        if (cert.documento && limpio(d.documento) && digs(cert.documento) !== digs(d.documento)) continue
+        if (!limpio(d.giro) && cert.giro) d.giro = cert.giro
+        if (!limpio(d.direccion) && cert.direccion) d.direccion = cert.direccion
+        if (!limpio(d.comuna) && cert.comuna) d.comuna = cert.comuna
+        if (!limpio(d.ciudad) && cert.ciudad) d.ciudad = cert.ciudad
+        if (!limpio(d.razonSocial) && cert.razonSocial) d.razonSocial = cert.razonSocial
+        if (!limpio(d.documento) && cert.documento) d.documento = cert.documento
+        break
+      }
+    } catch (e) {
+      console.warn(`[solicitud-facturacion] certificado del chat ilegible contact=${c}: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+  d = await completarDesdePadron(pais, limpio(d.documento), d)
+  if ((!limpio(d.contactoNombre) || !limpio(d.correo)) && q.Contacto_Asociado?.id) {
+    const ct = await getZoho<{ First_Name?: string; Last_Name?: string; Email?: string }>(H, `/crm/v3/Contacts/${q.Contacto_Asociado.id}?fields=First_Name,Last_Name,Email`)
+    const n = [ct?.First_Name, ct?.Last_Name].map(limpio).filter((x) => x && !/^prospecto$/i.test(x)).join(" ")
+    if (!limpio(d.contactoNombre) && n) d.contactoNombre = n
+    if (!limpio(d.correo) && limpio(ct?.Email)) d.correo = ct!.Email
+  }
+  return d
+}
+
 /**
  * Crea (o adopta) la Solicitud de Facturación de una venta por chat.
  * `contact` = teléfono del cliente (decide el país por la ficha).
@@ -382,61 +478,8 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
       )
     : null
 
-  // 4. Datos de facturación: kv → borrador → cotización → padrón → contacto.
-  let d: DatosFacturacion = (await leerDatosFacturacion(c)) || {}
-  try {
-    const rawB = await getKvValue(claveBorrador(c))
-    const b = rawB ? parsearBorrador(JSON.parse(rawB)) : null
-    if (b) {
-      if (!limpio(d.razonSocial) && limpio(b.empresa?.nombre)) d.razonSocial = b.empresa!.nombre
-      if (!limpio(d.documento) && limpio(b.empresa?.identificador)) d.documento = b.empresa!.identificador
-      const adminNombre = [b.admin?.nombre, b.admin?.apellido].map(limpio).filter(Boolean).join(" ")
-      if (!limpio(d.contactoNombre) && adminNombre) d.contactoNombre = adminNombre
-      if (!limpio(d.correo) && limpio(b.admin?.email)) d.correo = b.admin!.email
-    }
-  } catch {
-    /* sin borrador */
-  }
-  // "Otro" es el giro por DEFECTO que el prellenado del flow escribe cuando no
-  // encontró fuente (25-ago): no es un dato del cliente, así que no le gana al
-  // padrón (Alba Campos salía "Otro" teniendo giro en el SII).
-  if (/^otro$/i.test(limpio(d.giro))) d.giro = ""
-  if (!limpio(d.documento)) d.documento = limpio(q.RUT_Cliente) || limpio(q.RUT_Empresa)
-  if (!limpio(d.razonSocial)) d.razonSocial = limpio(ref?.Nombre_Empresa) || limpio(q.Cuenta_Asociada?.name) || limpio(q.Name).replace(/^Cotizaci[oó]n\s+/i, "").replace(/\s+-\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}.*$/, "")
-  if (!limpio(d.telefono)) d.telefono = limpio(q.Tel_fono_Contacto) || `+${c}`
-  if (!limpio(d.correo)) d.correo = limpio(q.Email_Contacto)
-  // CERTIFICADO TRIBUTARIO EN EL CHAT (24-sep, caso HSEQTECH): si el cliente
-  // mandó su e-RUT / ficha RUC / RUT DIAN / constancia SAT por WhatsApp, la
-  // visión ya lo transcribió en el historial. Rellena SOLO lo vacío y solo si
-  // el documento del certificado es el de la venta (no el de un proveedor).
-  if (!limpio(d.giro) || !limpio(d.direccion) || !limpio(d.comuna)) {
-    try {
-      const hist = await fetchHistoryV3(c, 200)
-      const digs = (x: unknown) => String(x ?? "").replace(/[^\dkK]/g, "").toUpperCase()
-      for (const m of [...hist].reverse()) {
-        if (m.role !== "user") continue
-        const cert = parsearCertificadoTributario(String(m.content || ""))
-        if (!cert) continue
-        if (cert.documento && limpio(d.documento) && digs(cert.documento) !== digs(d.documento)) continue
-        if (!limpio(d.giro) && cert.giro) d.giro = cert.giro
-        if (!limpio(d.direccion) && cert.direccion) d.direccion = cert.direccion
-        if (!limpio(d.comuna) && cert.comuna) d.comuna = cert.comuna
-        if (!limpio(d.ciudad) && cert.ciudad) d.ciudad = cert.ciudad
-        if (!limpio(d.razonSocial) && cert.razonSocial) d.razonSocial = cert.razonSocial
-        if (!limpio(d.documento) && cert.documento) d.documento = cert.documento
-        break
-      }
-    } catch (e) {
-      console.warn(`[solicitud-facturacion] certificado del chat ilegible contact=${c}: ${e instanceof Error ? e.message : e}`)
-    }
-  }
-  d = await completarDesdePadron(pais, limpio(d.documento), d)
-  if ((!limpio(d.contactoNombre) || !limpio(d.correo)) && q.Contacto_Asociado?.id) {
-    const ct = await getZoho<{ First_Name?: string; Last_Name?: string; Email?: string }>(H, `/crm/v3/Contacts/${q.Contacto_Asociado.id}?fields=First_Name,Last_Name,Email`)
-    const n = [ct?.First_Name, ct?.Last_Name].map(limpio).filter((x) => x && !/^prospecto$/i.test(x)).join(" ")
-    if (!limpio(d.contactoNombre) && n) d.contactoNombre = n
-    if (!limpio(d.correo) && limpio(ct?.Email)) d.correo = ct!.Email
-  }
+  // 4. Datos de facturación consolidados (ver consolidarDatos).
+  let d: DatosFacturacion = await consolidarDatos(H, c, pais, q, ref)
   // Lo consolidado se guarda como fuente única (la próxima solicitud del
   // mismo cliente, o el ticket ST, parte de acá).
   if (!opts.dry) await guardarDatosFacturacion(c, d, "consolidado").catch(() => {})
@@ -520,4 +563,124 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
   await avisarEquipoInterno(aviso).catch(() => {})
   console.log(`[sf] ${aviso}`)
   return { ok: true, estado: "creada", sfId, numero, faltantes, pais, detalle: `${cuenta} · ${adjunto}` }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DATOS DE FACTURACIÓN VISIBLES (25-sep, orden de Lalo "Dalee!!!" sobre el
+// reclamo de Nailliw). Las ventas del canal EJECUTIVO no pasan por la
+// solicitud automática, así que los datos que el cliente dio al aceptar
+// quedaban solo en nuestra base y la persona que arma la solicitud iba al SII.
+// Administración rechazó 10 solicitudes de septiembre por "faltan datos
+// fiscales"; las que pasaron llevaban un bloque con CALLE y número, comuna,
+// giro y correo. Este paso deja ese mismo bloque donde se lo busca:
+//  · la CUENTA recibe Comuna y Dirección (solo si estaban vacías);
+//  · la CUENTA y el DEAL reciben la nota "Datos de facturación" (una por
+//    registro; se actualiza, no se duplica).
+// Todos los canales y países. Best-effort: jamás frena la aceptación.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ResultadoPublicacion = {
+  ok: boolean
+  quoteId: string
+  contact?: string
+  empresa?: string
+  faltantes?: string[]
+  cuenta?: string
+  notas?: string[]
+  bloque?: string
+  detalle?: string
+}
+
+export { bloqueDatosFacturacion }
+
+export const claveNotaFacturacion = (quoteId: string) => `nota_facturacion_${String(quoteId || "").replace(/\D/g, "")}`
+
+async function upsertNota(
+  H: Record<string, string>,
+  modulo: "Accounts" | "Deals",
+  parentId: string,
+  notaId: string,
+  titulo: string,
+  contenido: string,
+): Promise<string> {
+  const data = { Note_Title: titulo, Note_Content: contenido.slice(0, 30000) }
+  try {
+    if (notaId) {
+      const r = await fetch(`${API()}/crm/v3/Notes/${notaId}`, { method: "PUT", headers: H, body: JSON.stringify({ data: [data] }), cache: "no-store" })
+      if (r.ok) return notaId
+      // Nota borrada a mano: se crea de nuevo.
+    }
+    const r = await fetch(`${API()}/crm/v3/Notes`, {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ data: [{ ...data, Parent_Id: parentId, $se_module: modulo }] }),
+      cache: "no-store",
+    })
+    const j = (await r.json().catch(() => ({}))) as { data?: Array<{ code?: string; details?: { id?: string } }> }
+    return j?.data?.[0]?.code === "SUCCESS" ? String(j.data[0].details?.id || "") : ""
+  } catch {
+    return ""
+  }
+}
+
+/**
+ * Publica los datos de facturación de una cotización en la cuenta y el deal.
+ * `contact` es opcional: sin él se usa el teléfono de la cotización.
+ */
+export async function publicarDatosFacturacion(
+  quoteIdRaw: string,
+  opts: { contact?: string; dry?: boolean; nuevos?: Partial<DatosFacturacion> } = {},
+): Promise<ResultadoPublicacion> {
+  const quoteId = String(quoteIdRaw || "").replace(/\D/g, "")
+  if (!quoteId) return { ok: false, quoteId, detalle: "sin cotización" }
+  const H = await headers()
+  const q = await getZoho<CotizacionFacturacion>(
+    H,
+    `/crm/v3/Cotizaciones_GeoVictoria/${quoteId}?fields=Name,Cuenta_Asociada,Contacto_Asociado,Deal_Asociado,Tel_fono_Contacto,Email_Contacto,RUT_Cliente,RUT_Empresa`,
+  )
+  if (!q) return { ok: false, quoteId, detalle: "cotización ilegible" }
+  const c = String(opts.contact || q.Tel_fono_Contacto || "").replace(/\D/g, "")
+  if (!c) return { ok: false, quoteId, detalle: "sin teléfono para leer los datos" }
+  const ficha = fichaPorTelefono(c)
+  // Pop-up de una venta SIN conversación con Vicky (canal ejecutivo): el
+  // teléfono sale de la cotización y los datos se guardan acá mismo.
+  if (opts.nuevos && !opts.dry) await guardarDatosFacturacion(c, opts.nuevos, "aceptacion").catch(() => {})
+  const d = await consolidarDatos(H, c, ficha.pais, q, null)
+  const { texto, faltantes } = bloqueDatosFacturacion(d, ficha.documento.etiqueta)
+  const empresa = limpio(d.razonSocial)
+  const cuentaId = limpio(q.Cuenta_Asociada?.id)
+  const dealId = limpio(q.Deal_Asociado?.id)
+  const nombreCot = limpio(q.Name).replace(/^Cotizaci[oó]n\s+/i, "")
+  const contenido = `${texto}\n\nCotización: ${nombreCot || quoteId}. Datos que dio el cliente al aceptar, completados con el padrón donde faltaban.`
+  if (opts.dry) return { ok: true, quoteId, contact: c, empresa, faltantes, bloque: contenido, detalle: `cuenta ${cuentaId || "—"} · deal ${dealId || "—"}` }
+  if (!limpio(d.documento) && !limpio(d.direccion) && !limpio(d.giro)) {
+    return { ok: false, quoteId, contact: c, empresa, faltantes, detalle: "sin datos que publicar" }
+  }
+
+  let previas: { cuenta?: string; deal?: string; hash?: string } = {}
+  try {
+    const raw = await getKvValue(claveNotaFacturacion(quoteId))
+    if (raw) previas = JSON.parse(raw)
+  } catch {
+    /* primera vez */
+  }
+  const hash = contenido
+  if (previas.hash === hash && (previas.cuenta || previas.deal)) {
+    return { ok: true, quoteId, contact: c, empresa, faltantes, detalle: "sin cambios" }
+  }
+
+  await guardarDatosFacturacion(c, d, "consolidado").catch(() => {})
+  const titulo = `Datos de facturación · ${empresa || nombreCot || quoteId}`
+  const [cuenta, notaCuenta, notaDeal] = await Promise.all([
+    completarCuenta(H, cuentaId, d),
+    cuentaId ? upsertNota(H, "Accounts", cuentaId, previas.cuenta || "", titulo, contenido) : Promise.resolve(""),
+    dealId ? upsertNota(H, "Deals", dealId, previas.deal || "", titulo, contenido) : Promise.resolve(""),
+  ])
+  await setKvValue(
+    claveNotaFacturacion(quoteId),
+    JSON.stringify({ cuenta: notaCuenta || previas.cuenta || "", deal: notaDeal || previas.deal || "", hash, at: new Date().toISOString() }),
+  ).catch(() => {})
+  const notas = [notaCuenta ? "nota en la cuenta" : "", notaDeal ? "nota en el deal" : ""].filter(Boolean)
+  console.log(`[datos-facturacion] ${quoteId} ${empresa}: ${cuenta} · ${notas.join(" · ") || "sin notas"}${faltantes.length ? ` · FALTA ${faltantes.join(", ")}` : ""}`)
+  return { ok: true, quoteId, contact: c, empresa, faltantes, cuenta, notas }
 }
