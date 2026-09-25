@@ -971,24 +971,23 @@
             { min: 8001, max: Infinity, uf: 0.002, maxDiscount: 25 },
         ];
         const casinoTiers = [
-            { min: 1, max: 20, type: 'fijo', uf: 1.261, maxDiscount: 25 },
-            { min: 21, max: 50, type: 'fijo', uf: 2.101, maxDiscount: 25 },
-            { min: 51, max: 100, type: 'fijo', uf: 2.941, maxDiscount: 25 },
-            { min: 101, max: 200, type: 'fijo', uf: 3.782, maxDiscount: 25 },
-            { min: 201, max: 500, type: 'fijo', uf: 4.622, maxDiscount: 25 },
-            { min: 501, max: 1000, type: 'fijo', uf: 5.462, maxDiscount: 25 },
-            { min: 1001, max: 1500, type: 'fijo', uf: 6.303, maxDiscount: 25 },
-            { min: 1501, max: 2000, type: 'fijo', uf: 7.143, maxDiscount: 25 },
-            { min: 2001, max: 2500, type: 'fijo', uf: 7.983, maxDiscount: 25 },
-            { min: 2501, max: 3000, type: 'fijo', uf: 8.824, maxDiscount: 25 },
-            { min: 3001, max: 3500, type: 'fijo', uf: 9.664, maxDiscount: 25 },
-            { min: 3501, max: 4000, type: 'fijo', uf: 10.504, maxDiscount: 25 },
-            { min: 4001, max: 4500, type: 'fijo', uf: 11.345, maxDiscount: 25 },
-            { min: 4501, max: 5000, type: 'fijo', uf: 12.185, maxDiscount: 25 },
+            { min: 1, max: 20, type: 'fijo', uf: 1.5, maxDiscount: 25 },
+            { min: 21, max: 50, type: 'fijo', uf: 2.5, maxDiscount: 25 },
+            { min: 51, max: 100, type: 'fijo', uf: 3.5, maxDiscount: 25 },
+            { min: 101, max: 200, type: 'fijo', uf: 4.5, maxDiscount: 25 },
+            { min: 201, max: 500, type: 'fijo', uf: 5.5, maxDiscount: 25 },
+            { min: 501, max: 1000, type: 'fijo', uf: 6.5, maxDiscount: 25 },
+            { min: 1001, max: 1500, type: 'fijo', uf: 7.5, maxDiscount: 25 },
+            { min: 1501, max: 2000, type: 'fijo', uf: 8.5, maxDiscount: 25 },
+            { min: 2001, max: 2500, type: 'fijo', uf: 9.5, maxDiscount: 25 },
+            { min: 2501, max: 3000, type: 'fijo', uf: 10.5, maxDiscount: 25 },
+            { min: 3001, max: 3500, type: 'fijo', uf: 11.5, maxDiscount: 25 },
+            { min: 3501, max: 4000, type: 'fijo', uf: 12.5, maxDiscount: 25 },
+            { min: 4001, max: 4500, type: 'fijo', uf: 13.5, maxDiscount: 25 },
+            { min: 4501, max: 5000, type: 'fijo', uf: 14.5, maxDiscount: 25 },
         ];
         const dashboardTiers = [
-            { min: 1, max: 50, type: 'fijo', uf: 1.25, maxDiscount: 25 },
-            { min: 51, max: 100, type: 'fijo', uf: 2.5, maxDiscount: 25 },
+            { min: 1, max: 100, type: 'fijo', uf: 2.5, maxDiscount: 25 },
             { min: 101, max: 200, type: 'fijo', uf: 5.5, maxDiscount: 25 },
             { min: 201, max: 500, type: 'fijo', uf: 9.6, maxDiscount: 25 },
             { min: 501, max: 1000, type: 'fijo', uf: 14.4, maxDiscount: 25 },
@@ -1024,17 +1023,17 @@
         const IN01_BUNDLE_UF = { venta: 27.0, arriendo: 3.4 };
         const catalogoEquipos = [
             { id: 'armorpad', modelo: 'ARMORPAD', conexion: '-', displayName: 'ARMORPAD', venta: 8, arriendo: 1 },
-            { id: 'ct58', modelo: 'CT58', conexion: '4G/Wifi', displayName: 'CT58 (4G/Wifi)', venta: 8, arriendo: 1 },
+            { id: 'ct58', modelo: 'CT58', conexion: '4G/Wifi', displayName: 'CT58 (4G/Wifi)', venta: 9, arriendo: 1.125 },
             { id: 'in01a_4glan', modelo: 'IN01-A', conexion: '4G/LAN', displayName: 'IN01-A (4G/LAN)', venta: 12, arriendo: 1.5 },
             { id: 'in01a_lan', modelo: 'IN01-A', conexion: 'LAN', displayName: 'IN01-A (LAN)', venta: 7, arriendo: 0.88 },
             { id: 'in01a_lanwifi', modelo: 'IN01-A', conexion: 'LAN/WIFI', displayName: 'IN01-A (LAN/WIFI)', venta: 8, arriendo: 1 },
             { id: 'mb10vl', modelo: 'MB10-VL', conexion: 'WIFI/LAN', displayName: 'MB10-VL (WIFI/LAN)', venta: 3.5, arriendo: 0.5 },
             { id: 'mb560vl', modelo: 'MB560-vl', conexion: 'WIFI/LAN', displayName: 'MB560-vl (WIFI/LAN)', venta: 5, arriendo: 0.6 },
             { id: 's922', modelo: 'S922', conexion: '4G', displayName: 'S922 (4G)', venta: 20, arriendo: 2.5 },
-            { id: 'senseface_2a', modelo: 'Senseface 2A', conexion: '-', displayName: 'Senseface 2A', venta: 6, arriendo: 0.35 }, // venta habilitada (Lalo 12-ago): 6 UF lista Vicky, editable como todo precio
+            { id: 'senseface_2a', modelo: 'Senseface 2A', conexion: '-', displayName: 'Senseface 2A', venta: 5, arriendo: 0.35 }, // venta 5 UF = consolidado 2025 CHILE (Valeria 25-sep; antes 6, Lalo 12-ago)
             { id: 'senseface_3a', modelo: 'Senseface 3A', conexion: 'WIFI/LAN', displayName: 'Senseface 3A (WIFI/LAN)', venta: 7, arriendo: 0.65 },
             { id: 'senseface_4a', modelo: 'Senseface 4A', conexion: '-', displayName: 'Senseface 4A', venta: 8.5, arriendo: 0.75 },
-            { id: 'senseface_7a', modelo: 'Senseface 7A', conexion: 'WIFI/LAN', displayName: 'Senseface 7A (WIFI/LAN)', venta: 10, arriendo: 0.8 },
+            { id: 'senseface_7a', modelo: 'Senseface 7A', conexion: 'WIFI/LAN', displayName: 'Senseface 7A (WIFI/LAN)', venta: 10, arriendo: 0.85 },
             { id: 'speedface_v4l', modelo: 'SpeedFace V4L', conexion: 'WIFI/LAN', displayName: 'SpeedFace V4L (WIFI/LAN)', venta: 5, arriendo: 0.6 },
             { id: 'speedface_v5l', modelo: 'SpeedFace V5L', conexion: 'WIFI/LAN', displayName: 'SpeedFace V5L (WIFI/LAN)', venta: 12, arriendo: 1.5 },
             { id: 'uru4500', modelo: 'URU4500', conexion: 'USB', displayName: 'URU4500 (USB)', venta: 3, arriendo: 0.25 },
@@ -1048,7 +1047,7 @@
             { id: 'gabinete_chico', modelo: 'Gabinete chico nueva generación', displayName: 'Gabinete chico nueva generación', venta: 4, arriendo: 0.3 },
             { id: 'lector_mifare', modelo: 'Lector Tarjetas MIFARE', displayName: 'Lector Tarjetas MIFARE', venta: 3, arriendo: 0 },
             { id: 'vuquest_3320g', modelo: 'Lector de CI/Barra - Vuquest 3320g', displayName: 'Lector de CI/Barra - Vuquest 3320g', venta: 7, arriendo: 1.2 },
-            { id: 'lector_hid_kr10', modelo: 'Lector de tarjetas HID Wiegand KR10', displayName: 'Lector de tarjetas HID Wiegand KR10', venta: 2, arriendo: 0 },
+            { id: 'lector_hid_kr10', modelo: 'Lector de tarjetas HID Wiegand KR10', displayName: 'Lector de tarjetas HID Wiegand KR10', venta: 2, arriendo: 0.2 },
             { id: 'mini_ups_12v', modelo: 'Mini UPS 12V', displayName: 'Mini UPS 12V', venta: 2, arriendo: 0.3 },
             { id: 'mini_ups_5v', modelo: 'Mini UPS 5V', displayName: 'Mini UPS 5V', venta: 2, arriendo: 0.3 },
             { id: 'router_industrial', modelo: 'Router Industrial', displayName: 'Router Industrial', venta: 5, arriendo: 0.3 },
@@ -1080,6 +1079,15 @@
         ];
 
         const REPORTE_MIN = 5;
+        const REPORTE_MIN_UF = 2;
+        // Precio por usuario del Reporte a Medida con el cobro mínimo aplicado:
+        // si usuarios x tramo x (1 - dcto) queda bajo REPORTE_MIN_UF, sube lo justo.
+        function reporteUnitUF(users, tier, disc) {
+            if (!tier) return 0;
+            const f = 1 - (disc || 0) / 100;
+            if (users <= 0 || f <= 0) return tier.uf;
+            return Math.max(tier.uf, REPORTE_MIN_UF / (users * f));
+        }
         const VICTORIA_MIN = 5;
         const CASINO_MIN = 1;
         const DASHBOARD_MIN = 1;
@@ -1396,15 +1404,16 @@
             document.getElementById('discountReporte').classList.toggle('has-discount', reporteDiscount > 0);
 
             if (reporteCheck.checked && reporteUsers >= REPORTE_MIN && reporteTier) {
-                const reporteSubtotalBase = reporteUsers * reporteTier.uf;
+                const reporteUnit = reporteUnitUF(reporteUsers, reporteTier, reporteDiscount);
+                const reporteSubtotalBase = reporteUsers * reporteUnit;
                 const reporteSubtotal = reporteSubtotalBase * (1 - reporteDiscount / 100);
                 totalSubtotal += reporteSubtotal;
-                const reporteCLP = clpLine(reporteTier.uf, reporteUsers, reporteDiscount);
+                const reporteCLP = clpLine(reporteUnit, reporteUsers, reporteDiscount);
                 clpSecs.push({ clp: reporteCLP });
 
                 const maxText = reporteTier.max === Infinity ? '+' : '-' + reporteTier.max;
-                document.getElementById('reporteTierInfo').textContent = 'Tramo ' + reporteTier.min + maxText;
-                setUnitPriceWithDiscount(document.getElementById('reportePriceLabel'), reporteTier.uf, reporteDiscount, v => formatUF(v) + '/u');
+                document.getElementById('reporteTierInfo').textContent = 'Tramo ' + reporteTier.min + maxText + (reporteUnit > reporteTier.uf ? ' · mín. ' + REPORTE_MIN_UF + ' UF' : '');
+                setUnitPriceWithDiscount(document.getElementById('reportePriceLabel'), reporteUnit, reporteDiscount, v => formatUF(v) + '/u');
                 document.getElementById('subtotalReporte').textContent = formatUF(reporteSubtotal);
                 if (currentUFValue > 0) {
                     document.getElementById('subtotalReporteCLP').textContent = formatCLPn(reporteCLP);
@@ -2441,7 +2450,7 @@
 
             // Other services
             const otherSvcs = [
-                { name: 'Reporte a Medida', checkId: 'reporteCheck', usersId: 'reporteUsers', discId: 'discountReporte', tierFn: getReporteTier, min: REPORTE_MIN, tiersArr: reporteTiers },
+                { name: 'Reporte a Medida', checkId: 'reporteCheck', usersId: 'reporteUsers', discId: 'discountReporte', tierFn: getReporteTier, min: REPORTE_MIN, tiersArr: reporteTiers, unitFn: reporteUnitUF },
                 { name: 'Victoria Connect', checkId: 'victoriaCheck', usersId: 'victoriaUsers', discId: 'discountVictoria', tierFn: getVictoriaTier, min: VICTORIA_MIN, tiersArr: victoriaTiers },
             ];
             for (const s of otherSvcs) {
@@ -2451,9 +2460,10 @@
                 if (checked && users >= s.min) {
                     const tier = s.tierFn(users);
                     if (tier) {
-                        const base = users * tier.uf;
+                        const unit = s.unitFn ? s.unitFn(users, tier, disc) : tier.uf;
+                        const base = users * unit;
                         const sub = base * (1 - disc / 100);
-                        servicios.push({ nombre: s.name, cantidad: users, precioUnit: tier.uf, tipo: 'Por usuario', descuento: disc, subtotalUF: sub, rango: fmtRango(tier), tiers: s.tiersArr, clp: clpLine(tier.uf, users, disc) });
+                        servicios.push({ nombre: s.name, cantidad: users, precioUnit: unit, tipo: 'Por usuario', descuento: disc, subtotalUF: sub, rango: fmtRango(tier), tiers: s.tiersArr, clp: clpLine(unit, users, disc) });
                     }
                 }
             }

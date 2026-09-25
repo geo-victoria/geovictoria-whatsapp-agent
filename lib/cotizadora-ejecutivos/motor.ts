@@ -221,14 +221,21 @@ export function cotizarPropuesta(config: ConfigPropuesta): ResultadoPropuesta {
       continue
     }
     const d = clampDescuento(o.descuentoPct, def.nombre, advertencias)
-    const bruto = t.tipo === "fijo" ? t.uf : uServ * t.uf
+    // Cobro mínimo (Reporte a Medida, Valeria 25-sep): el precio por usuario
+    // sube lo justo para que el subtotal CON descuento no baje de minUF —
+    // misma regla que reporteUnitUF de la calculadora comercial.
+    const minUF = "minUF" in def ? def.minUF : 0
+    const f = 1 - d / 100
+    const unit = t.tipo === "fijo" || !minUF || f <= 0 ? t.uf : Math.max(t.uf, minUF / (uServ * f))
+    const conMinimo = unit > t.uf
+    const bruto = t.tipo === "fijo" ? t.uf : uServ * unit
     lineas.push({
       tipo: "otro_servicio",
       id: o.id,
       nombre: def.nombre,
-      detalle: t.tipo === "fijo" ? `Tramo ${t.min}-${t.max} (fijo)` : `${uServ} usuarios × ${t.uf} UF`,
+      detalle: t.tipo === "fijo" ? `Tramo ${t.min}-${t.max} (fijo)` : `${uServ} usuarios × ${t.uf} UF${conMinimo ? ` (mínimo ${minUF} UF)` : ""}`,
       cantidad: t.tipo === "fijo" ? 1 : uServ,
-      precioUnitarioUF: t.uf,
+      precioUnitarioUF: unit,
       descuentoPct: d,
       subtotalUF: r3(bruto * (1 - d / 100)),
       recurrencia: "mensual",

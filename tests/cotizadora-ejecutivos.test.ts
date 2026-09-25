@@ -85,8 +85,18 @@ describe("cotizadora-ejecutivos · paridad con la calculadora de Nacho", () => {
       otrosServicios: [{ id: "casino" }, { id: "reporte" }],
       firmante: "x",
     })
-    // Asistencia 5,2 + casino 51-100 fijo 2,941 + reporte 80 × 0,01 = 0,8 → 8,941
-    assert.strictEqual(r.totalMensualUF, 8.941)
+    // Asistencia 5,2 + casino 51-100 fijo 3,5 + reporte 80 × 0,01 = 0,8 → sube al mínimo 2 → 10,7
+    // (Valeria 25-sep: Casino = consolidado sin ÷1,19 y Reporte a Medida con cobro mínimo de 2 UF)
+    assert.strictEqual(r.totalMensualUF, 10.7)
+    const rep = r.lineas.find((l) => l.id === "reporte")
+    assert.strictEqual(rep?.subtotalUF, 2)
+    assert.ok(rep?.detalle.includes("mínimo 2 UF"))
+
+    // Sobre el mínimo no cambia nada: 300 × 0,008 = 2,4; con 25 % queda 1,8 → sube a 2
+    const grande = cotizarPropuesta({ usuarios: 300, otrosServicios: [{ id: "reporte" }], firmante: "x" })
+    assert.strictEqual(grande.lineas.find((l) => l.id === "reporte")?.subtotalUF, 2.4)
+    const grandeDcto = cotizarPropuesta({ usuarios: 300, otrosServicios: [{ id: "reporte", descuentoPct: 25 }], firmante: "x" })
+    assert.strictEqual(grandeDcto.lineas.find((l) => l.id === "reporte")?.subtotalUF, 2)
 
     const chico = cotizarPropuesta({ usuarios: 3, otrosServicios: [{ id: "reporte" }], firmante: "x" })
     assert.ok(chico.advertencias.some((a) => a.includes("mínimo 5")))

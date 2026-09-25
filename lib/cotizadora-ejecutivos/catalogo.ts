@@ -53,6 +53,8 @@ export type AddonId = keyof typeof ADDONS
 
 // ── Otros servicios (tramos propios) ─────────────────────────────────────
 export const REPORTE_MIN_USUARIOS = 5
+/** Cobro mínimo del Reporte a Medida, ya con descuento (Valeria 25-sep, consolidado «Mínimo 2 uf por RAM»). */
+export const REPORTE_MIN_UF = 2
 export const TRAMOS_REPORTE: TramoUF[] = [
   { min: 5, max: 10, tipo: "por_usuario", uf: 0.015 },
   { min: 11, max: 20, tipo: "por_usuario", uf: 0.013 },
@@ -78,26 +80,26 @@ export const TRAMOS_VICTORIA_CONNECT: TramoUF[] = [
   { min: 3001, max: 8000, tipo: "por_usuario", uf: 0.003 },
 ]
 
+// Casino = consolidado 2025 CHILE (Valeria 25-sep): el cotizador traía el consolidado ÷ 1,19.
 export const TRAMOS_CASINO: TramoUF[] = [
-  { min: 1, max: 20, tipo: "fijo", uf: 1.261 },
-  { min: 21, max: 50, tipo: "fijo", uf: 2.101 },
-  { min: 51, max: 100, tipo: "fijo", uf: 2.941 },
-  { min: 101, max: 200, tipo: "fijo", uf: 3.782 },
-  { min: 201, max: 500, tipo: "fijo", uf: 4.622 },
-  { min: 501, max: 1000, tipo: "fijo", uf: 5.462 },
-  { min: 1001, max: 1500, tipo: "fijo", uf: 6.303 },
-  { min: 1501, max: 2000, tipo: "fijo", uf: 7.143 },
-  { min: 2001, max: 2500, tipo: "fijo", uf: 7.983 },
-  { min: 2501, max: 3000, tipo: "fijo", uf: 8.824 },
-  { min: 3001, max: 3500, tipo: "fijo", uf: 9.664 },
-  { min: 3501, max: 4000, tipo: "fijo", uf: 10.504 },
-  { min: 4001, max: 4500, tipo: "fijo", uf: 11.345 },
-  { min: 4501, max: 5000, tipo: "fijo", uf: 12.185 },
+  { min: 1, max: 20, tipo: "fijo", uf: 1.5 },
+  { min: 21, max: 50, tipo: "fijo", uf: 2.5 },
+  { min: 51, max: 100, tipo: "fijo", uf: 3.5 },
+  { min: 101, max: 200, tipo: "fijo", uf: 4.5 },
+  { min: 201, max: 500, tipo: "fijo", uf: 5.5 },
+  { min: 501, max: 1000, tipo: "fijo", uf: 6.5 },
+  { min: 1001, max: 1500, tipo: "fijo", uf: 7.5 },
+  { min: 1501, max: 2000, tipo: "fijo", uf: 8.5 },
+  { min: 2001, max: 2500, tipo: "fijo", uf: 9.5 },
+  { min: 2501, max: 3000, tipo: "fijo", uf: 10.5 },
+  { min: 3001, max: 3500, tipo: "fijo", uf: 11.5 },
+  { min: 3501, max: 4000, tipo: "fijo", uf: 12.5 },
+  { min: 4001, max: 4500, tipo: "fijo", uf: 13.5 },
+  { min: 4501, max: 5000, tipo: "fijo", uf: 14.5 },
 ]
 
 export const TRAMOS_DASHBOARD_BI: TramoUF[] = [
-  { min: 1, max: 50, tipo: "fijo", uf: 1.25 },
-  { min: 51, max: 100, tipo: "fijo", uf: 2.5 },
+  { min: 1, max: 100, tipo: "fijo", uf: 2.5 }, // Valeria 25-sep: sale el tramo 1-50 a 1,25
   { min: 101, max: 200, tipo: "fijo", uf: 5.5 },
   { min: 201, max: 500, tipo: "fijo", uf: 9.6 },
   { min: 501, max: 1000, tipo: "fijo", uf: 14.4 },
@@ -113,7 +115,7 @@ export const TRAMOS_DASHBOARD_BI: TramoUF[] = [
 ]
 
 export const OTROS_SERVICIOS = {
-  reporte: { nombre: "Reporte a Medida", tramos: TRAMOS_REPORTE, minUsuarios: REPORTE_MIN_USUARIOS },
+  reporte: { nombre: "Reporte a Medida", tramos: TRAMOS_REPORTE, minUsuarios: REPORTE_MIN_USUARIOS, minUF: REPORTE_MIN_UF },
   victoria: { nombre: "Victoria Connect", tramos: TRAMOS_VICTORIA_CONNECT, minUsuarios: VICTORIA_MIN_USUARIOS },
   casino: { nombre: "Casino", tramos: TRAMOS_CASINO, minUsuarios: 1 },
   dashboard: { nombre: "Dashboard BI", tramos: TRAMOS_DASHBOARD_BI, minUsuarios: 1 },
@@ -124,7 +126,7 @@ export type OtroServicioId = keyof typeof OTROS_SERVICIOS
 export type Equipo = { id: string; nombre: string; venta: number; arriendo: number }
 export const EQUIPOS: Equipo[] = [
   { id: "armorpad", nombre: "ARMORPAD", venta: 8, arriendo: 1 },
-  { id: "ct58", nombre: "CT58 (4G/Wifi)", venta: 8, arriendo: 1 },
+  { id: "ct58", nombre: "CT58 (4G/Wifi)", venta: 9, arriendo: 1.125 },
   { id: "in01a_4glan", nombre: "IN01-A (4G/LAN)", venta: 12, arriendo: 1.5 },
   { id: "in01a_lan", nombre: "IN01-A (LAN)", venta: 7, arriendo: 0.88 },
   { id: "in01a_lanwifi", nombre: "IN01-A (LAN/WIFI)", venta: 8, arriendo: 1 },
@@ -134,7 +136,7 @@ export const EQUIPOS: Equipo[] = [
   { id: "senseface_2a", nombre: "Senseface 4A", venta: 4, arriendo: 0.35 }, // venta habilitada (Lalo 12-ago); 4 UF = lista Vicky y lista ejecutivos (correo Valeria 22-sep); modelo 4A desde el 23-sep
   { id: "senseface_3a", nombre: "Senseface 3A (WIFI/LAN)", venta: 7, arriendo: 0.65 },
   { id: "senseface_4a", nombre: "Senseface 4A", venta: 8.5, arriendo: 0.75 },
-  { id: "senseface_7a", nombre: "Senseface 7A (WIFI/LAN)", venta: 10, arriendo: 0.8 },
+  { id: "senseface_7a", nombre: "Senseface 7A (WIFI/LAN)", venta: 10, arriendo: 0.85 },
   { id: "speedface_v4l", nombre: "SpeedFace V4L (WIFI/LAN)", venta: 5, arriendo: 0.6 },
   { id: "speedface_v5l", nombre: "SpeedFace V5L (WIFI/LAN)", venta: 12, arriendo: 1.5 },
   { id: "uru4500", nombre: "URU4500 (USB)", venta: 3, arriendo: 0.25 },
@@ -149,7 +151,7 @@ export const ACCESORIOS: Equipo[] = [
   { id: "gabinete_chico", nombre: "Gabinete chico nueva generación", venta: 4, arriendo: 0.3 },
   { id: "lector_mifare", nombre: "Lector Tarjetas MIFARE", venta: 3, arriendo: 0 },
   { id: "vuquest_3320g", nombre: "Lector de CI/Barra - Vuquest 3320g", venta: 7, arriendo: 1.2 },
-  { id: "lector_hid_kr10", nombre: "Lector de tarjetas HID Wiegand KR10", venta: 2, arriendo: 0 },
+  { id: "lector_hid_kr10", nombre: "Lector de tarjetas HID Wiegand KR10", venta: 2, arriendo: 0.2 },
   { id: "mini_ups_12v", nombre: "Mini UPS 12V", venta: 2, arriendo: 0.3 },
   { id: "mini_ups_5v", nombre: "Mini UPS 5V", venta: 2, arriendo: 0.3 },
   { id: "router_industrial", nombre: "Router Industrial", venta: 5, arriendo: 0.3 },
