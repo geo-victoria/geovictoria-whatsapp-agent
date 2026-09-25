@@ -1881,6 +1881,25 @@ export async function leerEjecutivoAsignado(contact: string): Promise<EjecutivoA
   }
 }
 
+/**
+ * Re-notificación "El cliente volvió a escribirle a Vicky": UNA vez cada 24 h
+ * por registro (25-sep, deals de Perú con 17 notas iguales — el hito corre en
+ * casi cada turno). Candado kv `renotif_<id>`; fail-open.
+ */
+async function renotificarPermitido(registroId: string): Promise<boolean> {
+  if (!registroId) return false
+  try {
+    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+    const previo = String((await getKvValue(`renotif_${registroId}`).catch(() => null)) || "")
+    const ms = Date.parse(previo)
+    if (Number.isFinite(ms) && Date.now() - ms < 24 * 3600e3) return false
+    await setKvValue(`renotif_${registroId}`, new Date().toISOString()).catch(() => {})
+    return true
+  } catch {
+    return true
+  }
+}
+
 export async function sincronizarHitoCrm(
   contact: string,
   hito: Hito,
@@ -2173,7 +2192,7 @@ export async function sincronizarHitoCrm(
         // Regla 2: lead activo de dueño humano → re-notificar (nota; el flujo
         // de abajo ya evita convertir leads ajenos).
         const { agregarNotaLead } = await import("./zoho-leads")
-        await agregarNotaLead(
+        if (await renotificarPermitido(lead.id)) await agregarNotaLead(
           lead.id,
           "El cliente volvió a escribirle a Vicky",
           `Re-contacto por WhatsApp (hito: ${hito}). El cliente retomó la conversación con Vicky; este lead es tuyo y no se creó ninguno nuevo. Revisa la transcripción en las notas para el contexto.`,
@@ -2313,7 +2332,7 @@ export async function sincronizarHitoCrm(
         }
         // Regla 5: deal ACTIVO → re-notificar al dueño del deal, sin crear nada.
         const { agregarNotaLead } = await import("./zoho-leads")
-        await fetch(`${api}/crm/v3/Notes`, {
+        if (await renotificarPermitido(String(idParaEstado))) await fetch(`${api}/crm/v3/Notes`, {
           method: "POST", headers: h, cache: "no-store",
           body: JSON.stringify({ data: [{
             Note_Title: "El cliente volvió a escribirle a Vicky",
