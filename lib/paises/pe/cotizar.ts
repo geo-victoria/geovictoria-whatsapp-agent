@@ -2,8 +2,8 @@
  * Motor de cotización referencial de PERÚ.
  *
  * Reglas de negocio (excel Tropicalizacion_Vicky_2, 04-ago):
- *   - Plan asistencia (lista de Mónica, 17-sep): 1-10 → S/55 fijo ·
- *     11-20 → S/5,5/usuario. RANGO DE VICKY = 1-20 (igual que Chile, Lalo
+ *   - Plan asistencia (lista de Lalo 25-sep): 1-10 → S/100 fijo ·
+ *     11-20 → S/9/usuario. RANGO DE VICKY = 1-20 (igual que Chile, Lalo
  *     23-sep); el 21-50 del catálogo es solo excepción por contacto.
  *   - Reloj: precio de LISTA en USD (RELOJ_PE_USD: arriendo US$24/mes ·
  *     venta US$90) convertido a SOLES ENTEROS con el dólar venta SUNAT del
@@ -233,7 +233,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     if (arriendoLimaCant > 0) partes.push(`${arriendoLimaCant} × ${formatearPEN(TARIFAS_PE.relojArriendoMes)}/mes`)
     if (arriendoProvCant > 0) partes.push(`${arriendoProvCant} × ${formatearPEN(TARIFAS_PE.relojArriendoMesProvincia)}/mes a provincia`)
     lineas.push({
-      concepto: "Arriendo de reloj de control",
+      concepto: "Alquiler de reloj de control",
       detalle: `${partes.join(" + ")} (despacho incluido)`,
       neto: arriendoNeto,
       igv: arriendoNeto * IGV_PE,
@@ -279,8 +279,8 @@ export function cotizarPE(input: CotizacionPEInput): {
         lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: Math.max(1, g.instalaciones), unit, bonificada: true })
         frasesInstalacion.push(
           pedida
-            ? "La instalación por nuestro equipo técnico va incluida sin costo (arriendo en Lima Metropolitana)."
-            : "La instalación por nuestro equipo técnico va incluida sin costo (arriendo en Lima Metropolitana); si prefieres, el reloj también es autoinstalable.",
+            ? "La instalación por nuestro equipo técnico va incluida sin costo (alquiler en Lima Metropolitana)."
+            : "La instalación por nuestro equipo técnico va incluida sin costo (alquiler en Lima Metropolitana); si prefieres, el reloj también es autoinstalable.",
         )
       } else if (pedida) {
         lineasInstalacion.push({ ubicacion: g.ubicacion, zona: g.zona, cantidad: g.instalaciones, unit, bonificada: false })
@@ -331,7 +331,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     if (li.bonificada) {
       lineas.push({
         concepto: `Instalación técnica del reloj (${li.ubicacion})`,
-        detalle: `${li.cantidad} × ${formatearPEN(li.unit)} — bonificada en arriendo (Lima Metropolitana)`,
+        detalle: `${li.cantidad} × ${formatearPEN(li.unit)} — bonificada en alquiler (Lima Metropolitana)`,
         neto: 0,
         igv: 0,
         recurrente: false,
@@ -379,7 +379,7 @@ export function cotizarPE(input: CotizacionPEInput): {
     `- Control de Asistencia (${userCount} usuario${userCount === 1 ? "" : "s"}): ${formatearPEN(plan)}/mes`,
   ]
   if (arriendoNeto > 0) {
-    lineasRec.push(`- Arriendo de reloj de control: ${formatearPEN(arriendoNeto)}/mes (despacho incluido)`)
+    lineasRec.push(`- Alquiler de reloj de control: ${formatearPEN(arriendoNeto)}/mes (despacho incluido)`)
   }
   filas.push("Resumen mensual recurrente:")
   filas.push("")
@@ -438,7 +438,7 @@ export function cotizarPE(input: CotizacionPEInput): {
   if (reloj && reloj.cantidad > 0) {
     const planSoloNeto = conDescuento ? planConDescuento : plan
     const mensualElegidoNeto = conDescuento ? mensualNetoConDescuento : mensualNeto
-    const modalidadLabel = reloj.modalidad === "arriendo" ? "Reloj en arriendo" : "Reloj en compra"
+    const modalidadLabel = reloj.modalidad === "arriendo" ? "Reloj en alquiler" : "Reloj en compra"
     const personas = `${userCount} persona${userCount === 1 ? "" : "s"}`
     const ahorraMensual = planSoloNeto < mensualElegidoNeto - 0.01
     const ahorraEntrada = unicosNeto > 0
@@ -521,7 +521,7 @@ export function cotizarPE(input: CotizacionPEInput): {
         // Mismo id para arriendo y venta: la Modalidad distingue (convención
         // chilena `senseface_2a`); en Creator/Books es el artículo [PER] 304.
         id: "reloj_pe",
-        nombre: `Arriendo de reloj de control${f.sufijo}`,
+        nombre: `Alquiler de reloj de control${f.sufijo}`,
         descripcion:
           `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido. Precio en soles al tipo de cambio oficial (SUNAT) del día.`,
         modalidad: "Arriendo mensual",
@@ -570,7 +570,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       id: "instalacion_reloj",
       nombre: `Instalación técnica del reloj (${li.ubicacion})`,
       descripcion: li.bonificada
-        ? "Visita de instalación por nuestro equipo técnico. Bonificada en arriendo en Lima Metropolitana."
+        ? "Visita de instalación por nuestro equipo técnico. Bonificada en alquiler en Lima Metropolitana."
         : "Visita de instalación por nuestro equipo técnico. Pago único, en soles al tipo de cambio oficial (SUNAT) del día.",
       modalidad: "Cobro único",
       cantidad: li.cantidad,

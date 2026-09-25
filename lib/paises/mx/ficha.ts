@@ -84,6 +84,7 @@ export const FICHA_MX: FichaPrompt = {
   datosMinimos: "YA tienes los datos mínimos (contacto, RFC y razón social — el email y la ciudad NO son requisito)",
   equipoNombre: "reloj checador",
   arriendoNombre: "renta",
+  geoNombre: "georeferenciación",
   arrendando: "rentando",
   arrendados: "rentados",
   equipoNombreCap: "Reloj checador",

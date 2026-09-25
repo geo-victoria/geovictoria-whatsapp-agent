@@ -5,7 +5,11 @@
  * UNIDAD DE PRICING del país — en Perú es el SOL PERUANO (PEN) directo, sin
  * unidad indexada. El nombre del campo es herencia del catálogo chileno.
  *
- * LISTA VIGENTE (decisiones de Lalo 17-sep — SUPERSEDE el excel de
+ * LISTA VIGENTE DEL PLAN (Lalo 25-sep): 1-10 S/100 fijo · 11-20 S/9 por persona
+ * (21-50 igual, solo excepción). Lo de abajo sobre la "lista de Mónica" es la
+ * historia del 17-sep; el reloj, el envío y la instalación siguen vigentes.
+ *
+ * LISTA ANTERIOR (decisiones de Lalo 17-sep — SUPERSEDE el excel de
  * tropicalización del 04-ago y el VB de Diego del 05-ago):
  *   PLAN = "lista de Mónica" (la que telemarketing PE vende de verdad: 200
  *   notas de venta confirmadas en Creator, S/5,5 por usuario) con PISO de 10
@@ -103,15 +107,17 @@ export const CATALOGO_MODULOS_PE: ModuloSoftware[] = [
     descripcion:
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
-      // Piso de 10 personas = 10 × S/5,5 (Lalo 17-sep).
-      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 55 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 5.5 },
+      // Lista de Lalo 25-sep (SUPERSEDE la de Mónica del 17-sep): 1-10 S/100 fijo ·
+      // 11-20 S/9 por persona.
+      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 100 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 9 },
       // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
       // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
       // queda, como el 21-50 de Chile, solo para la excepción por contacto
       // (umbral_contacto_) y como referencia de la tabla de cobro. La guarda del
       // umbral (lib/umbral-autonomia + agent-loop) rechaza la tool sobre 20/10.
-      { minUsuarios: 21, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 5.5 },
+      // 21-50 sigue la tarifa de 11-20 para que crecer no baje la mensualidad.
+      { minUsuarios: 21, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 9 },
     ],
     disponibleParaVicky: true,
   },

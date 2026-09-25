@@ -84,6 +84,7 @@ export const FICHA_CO: FichaPrompt = {
   datosMinimos: "YA tienes los datos mínimos (contacto y NIT — el email, la razón social y la ciudad NO son requisito)",
   equipoNombre: "equipo biométrico",
   arriendoNombre: "alquiler",
+  geoNombre: "georeferenciación",
   arrendando: "alquilando",
   arrendados: "alquilados",
   equipoNombreCap: "Equipo biométrico",

@@ -67,6 +67,8 @@ export type FichaPrompt = {
   equipoNombre: string
   /** Cómo se dice la modalidad de renta del equipo al cliente: CL/PE "arriendo", CO "alquiler", MX "renta". */
   arriendoNombre: string
+  /** Cómo se nombra la ubicación del marcaje en la app ("georeferenciación" CL · "geolocalización" PE). */
+  geoNombre: string
   arrendando: string
   arrendados: string
   equipoNombreCap: string
@@ -150,6 +152,7 @@ export const FICHA_CL: FichaPrompt = {
   datosMinimos: "YA tienes los datos mínimos (contacto y RUT — el email, la empresa y la comuna NO son requisito)",
   equipoNombre: "reloj control físico",
   arriendoNombre: "arriendo",
+  geoNombre: "georeferenciación",
   arrendando: "arrendando",
   arrendados: "arrendados",
   equipoNombreCap: "Reloj control físico",
