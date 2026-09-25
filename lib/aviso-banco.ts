@@ -247,7 +247,9 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
 
   // El monto se captura CON su símbolo: "S/ 118.00" ya dice que es Perú.
   const montoTxt = capturar(texto, [
-    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de (?:la )?transferencia)\s*:?\s*(?:\|\s*)*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*[\d][\d.,]*)/i,
+    // Santander 25-sep: "Monto transferido | 25-09-2026 | $ 48.293" — una FECHA
+    // puede ir entre la etiqueta y el monto; se salta (antes se leía "$25").
+    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de (?:la )?transferencia)\s*:?\s*(?:\|\s*)*(?:\d{2}[\/-]\d{2}[\/-]\d{4}\s*(?:\|\s*)*)?((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*\d[\d.,]*)(?![\d.,]*[\/-]\d)/i,
     /(?:Monto|Importe)\s*:?\s*(?:\|\s*)*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)\s*[\d][\d.,]*)/i,
   ])
   const paisMoneda = paisPorSimboloMoneda(montoTxt)
@@ -295,7 +297,9 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   const hora = fechaHora ? fechaHora[2] : capturar(texto, [/\bHora\s*(?:de operaci[oó]n)?\s*:?\s*(?:\|\s*)*(\d{1,2}:\d{2})/i, /\d{2}\/\d{2}\/\d{4}\s+(\d{1,2}:\d{2})/])
   const nroOperacion = capturar(texto, [
     /N[º°o]?\.?\s*de\s+comprobante\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
-    /N[uú]mero de (?:la )?operaci[oó]n\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
+    // Santander en columnas: "Banco de Origen | Numero de la operacion | Santander | 2026…" —
+    // el identificador exige al menos un dígito (antes se leía "Santander").
+    /N[uú]mero de (?:la )?operaci[oó]n\s*:?\s*(?:\|\s*)*(?:[A-Za-zÁ-úñÑ .]+\s*\|\s*)?((?=[A-Z_-]*\d)[A-Z0-9_-]{4,})/i,
     /ID de la operaci[oó]n\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
     /N[º°o]?\.?\s*(?:de\s+)?operaci[oó]n\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,
     /(?:Referencia|Clave de rastreo|Folio)\s*:?\s*(?:\|\s*)*([A-Z0-9_-]{4,})/i,

@@ -305,3 +305,20 @@ test("Scotiabank empresas (real 24-sep): celda vacía entre 'Mensaje:' y el núm
   assert.equal(a!.numeroCotizacion, "COT1654")
   assert.equal(a!.ordenante, "ITALSE SPA.")
 })
+
+// Santander 25-sep (COT1566 SG VIAJES): la fecha va entre "Monto transferido" y
+// el monto, y el número de operación viene en columnas junto al banco de origen.
+const SANTANDER_COLUMNAS = `<table><tr><td><h1>Aviso de Transferencia de Fondos</h1></td></tr><tr><td>Victoria S.A, ha recibido una transferencia</td></tr>
+<tr><td><p>De acuerdo con lo instruido por nuestro cliente SG VIAJES SPA, le informamos que con Fecha: 25-09-2026 se ha realizado una transferencia de fondos hacia su cuenta del banco BANCO CHILE nro. 000-000080-0120410-8.</p></td></tr>
+<tr><td><table><thead><tr><td>Rut cuenta origen</td><td>Titular cuenta origen</td></tr></thead><tbody><tr><td>76.483.155-1</td><td>SG VIAJES SPA</td></tr></tbody>
+<thead><tr><td>Banco de Origen</td><td>Numero de la operacion</td></tr></thead><tbody><tr><td>Santander</td><td>20260925120490568128</td></tr></tbody>
+<thead><tr><td>Comentario para el destinatario</td></tr></thead><tbody><tr><td>COT1566</td></tr></tbody></table></td></tr></table>
+<table><tr><td><p><strong>Monto transferido</strong></p><p>25-09-2026</p></td><td><p>$ 48.293</p></td></tr></table>`
+
+test("Santander en columnas: la fecha antes del monto no se lee como monto; la operación exige dígitos", () => {
+  const a = parsearAvisoBanco({ from: "mensajeria@santander.cl", subject: "Aviso de Transferencia de Fondos", html: SANTANDER_COLUMNAS })
+  assert.ok(a)
+  assert.equal(a!.monto, 48293)
+  assert.equal(a!.nroOperacion, "20260925120490568128")
+  assert.equal(numeroCotizacionEn(a!.mensaje || ""), "COT1566")
+})
