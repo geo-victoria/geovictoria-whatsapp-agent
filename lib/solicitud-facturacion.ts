@@ -357,7 +357,6 @@ async function consolidarDatos(
   // padrón (Alba Campos salía "Otro" teniendo giro en el SII).
   if (/^otro$/i.test(limpio(d.giro))) d.giro = ""
   if (!limpio(d.documento)) d.documento = limpio(q.RUT_Cliente) || limpio(q.RUT_Empresa)
-  if (!limpio(d.razonSocial)) d.razonSocial = limpio(ref?.Nombre_Empresa) || limpio(q.Cuenta_Asociada?.name) || limpio(q.Name).replace(/^Cotizaci[oó]n\s+/i, "").replace(/\s+-\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}.*$/, "")
   if (!limpio(d.telefono)) d.telefono = limpio(q.Tel_fono_Contacto) || `+${c}`
   if (!limpio(d.correo)) d.correo = limpio(q.Email_Contacto)
   // CERTIFICADO TRIBUTARIO EN EL CHAT (24-sep, caso HSEQTECH): si el cliente
@@ -386,6 +385,10 @@ async function consolidarDatos(
     }
   }
   d = await completarDesdePadron(pais, limpio(d.documento), d)
+  // La razón social LEGAL del padrón gana al nombre de la cuenta (que suele ir
+  // abreviado: "Panaderia y Pasteleria Omar Hernandez" sin el E.I.R.L.); el
+  // nombre de la cuenta/cotización queda solo de respaldo.
+  if (!limpio(d.razonSocial)) d.razonSocial = limpio(ref?.Nombre_Empresa) || limpio(q.Cuenta_Asociada?.name) || limpio(q.Name).replace(/^Cotizaci[oó]n\s+/i, "").replace(/\s+-\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}.*$/, "")
   if ((!limpio(d.contactoNombre) || !limpio(d.correo)) && q.Contacto_Asociado?.id) {
     const ct = await getZoho<{ First_Name?: string; Last_Name?: string; Email?: string }>(H, `/crm/v3/Contacts/${q.Contacto_Asociado.id}?fields=First_Name,Last_Name,Email`)
     const n = [ct?.First_Name, ct?.Last_Name].map(limpio).filter((x) => x && !/^prospecto$/i.test(x)).join(" ")
