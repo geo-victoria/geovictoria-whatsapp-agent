@@ -34,7 +34,9 @@ const REGLA_CL = (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541
 // Perú: regla "Deals 2026" (Lalo 22-sep; entradas por tramo + "Territorio = Perú" → Mónica).
 const REGLA_PE = (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim()
 // Colombia (Lalo 23-sep): la misma "Deals 2026" con sus entradas Colombia, solo con el interruptor.
-const REGLAS: Record<string, string> = { cl: REGLA_CL, pe: REGLA_PE, co: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "" }
+// México (Lalo 25-sep): la misma "Deals 2026" con sus entradas México por tramo.
+const REGLA_MX = (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || REGLA_DEALS_GLOBAL).trim()
+const REGLAS: Record<string, string> = { cl: REGLA_CL, pe: REGLA_PE, co: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "", mx: REGLA_MX }
 
 async function autorizado(req: Request): Promise<boolean> {
   const secreto = await getFollowupCronSecret().catch(() => "")
@@ -68,10 +70,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!antes) return NextResponse.json({ ok: false, error: "deal no encontrado" }, { status: 404 })
   // La regla es la del PAÍS del deal (23-sep): antes solo existía la chilena.
   const terr = String(antes.Territorio || "")
-  const pais = String(body.pais || "").toLowerCase() || (/per/i.test(terr) ? "pe" : /colombia/i.test(terr) ? "co" : "cl")
+  const pais = String(body.pais || "").toLowerCase() || (/per/i.test(terr) ? "pe" : /colombia/i.test(terr) ? "co" : /m[eé]xico/i.test(terr) ? "mx" : "cl")
   const regla = REGLAS[pais] || ""
   if (!regla) return NextResponse.json({ ok: false, error: `sin regla de tómbola para ${pais}` }, { status: 503 })
-  const nombreRegla = pais === "pe" ? '"Deals 2026" (Perú)' : pais === "co" ? '"Deals 2026" (Colombia)' : '"Tómbola Deals 2026 Chile"'
+  const nombreRegla = pais === "pe" ? '"Deals 2026" (Perú)' : pais === "co" ? '"Deals 2026" (Colombia)' : pais === "mx" ? '"Deals 2026" (México)' : '"Tómbola Deals 2026 Chile"'
 
   const put = await fetch(`${api}/crm/v3/Deals`, {
     method: "PUT", headers: H, cache: "no-store",
@@ -86,8 +88,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const ownerNuevo = despues?.Owner || null
   const cambio = Boolean(ownerNuevo?.id && ownerNuevo.id !== antes.Owner?.id)
-  const sigueEnSdr = pais === "pe" || pais === "co"
-    ? esSdrCalificacion(pais === "pe" ? "Perú" : "Colombia", { ownerId: ownerNuevo?.id, ownerEmail: ownerNuevo?.email })
+  const sigueEnSdr = pais === "pe" || pais === "co" || pais === "mx"
+    ? esSdrCalificacion(pais === "pe" ? "Perú" : pais === "co" ? "Colombia" : "México", { ownerId: ownerNuevo?.id, ownerEmail: ownerNuevo?.email })
     : esSdrCalificacionCL({ ownerId: ownerNuevo?.id, ownerEmail: ownerNuevo?.email })
 
   if (cambio && !sigueEnSdr) {
