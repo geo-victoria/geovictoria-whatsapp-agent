@@ -659,6 +659,17 @@ export async function POST(request: Request): Promise<NextResponse> {
         // bot (caso María 23-jul). No pisar el origen; si no lo conocemos,
         // resolverlo contra la API de Botmaker.
         const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
+      // Un origen guardado que TAMPOCO calza con el país del contacto (quedó
+      // mal por la regla vieja de Perú, 25-sep) se reemplaza por la línea del
+      // país: sin esto las respuestas seguían saliendo por la línea chilena.
+      if (conocido && !canalCoherenteConContacto(contact, conocido, paisProb)) {
+        const { channelIdPorPais, paisDeNumero } = await import("@/lib/linea-por-pais")
+        const p = paisDeNumero(contact.replace(/\D/g, ""))
+        if (p === "pe" || p === "co" || p === "mx" || p === "cl") {
+          await setKvValue(`canal_origen_${contact}`, channelIdPorPais(p)).catch(() => {})
+          console.warn(`[canal-origen] ${contact}: origen guardado ${conocido} no calza con su país — repuesto a la línea de ${p.toUpperCase()}`)
+        }
+      }
         if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
       }
     }

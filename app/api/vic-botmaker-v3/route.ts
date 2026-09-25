@@ -179,6 +179,17 @@ export async function POST(request: Request): Promise<NextResponse> {
       // No pisamos el origen; si aún no lo conocemos, lo resolvemos contra la
       // API de Botmaker (cubre también al +57 que legítimamente escribe al +56).
       const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
+      // Un origen guardado que TAMPOCO calza con el país del contacto (quedó
+      // mal por la regla vieja de Perú, 25-sep) se reemplaza por la línea del
+      // país: sin esto las respuestas seguían saliendo por la línea chilena.
+      if (conocido && !canalCoherenteConContacto(contact, conocido, paisProb)) {
+        const { channelIdPorPais, paisDeNumero } = await import("@/lib/linea-por-pais")
+        const p = paisDeNumero(contact.replace(/\D/g, ""))
+        if (p === "pe" || p === "co" || p === "mx" || p === "cl") {
+          await setKvValue(`canal_origen_${contact}`, channelIdPorPais(p)).catch(() => {})
+          console.warn(`[canal-origen] ${contact}: origen guardado ${conocido} no calza con su país — repuesto a la línea de ${p.toUpperCase()}`)
+        }
+      }
       if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
     } else if ((contact.startsWith("57") && contact.length >= 12) || contact.startsWith("CO.")) {
       // Fallback (caso +573172822429): un +57 escribiendo SIN channelId puede

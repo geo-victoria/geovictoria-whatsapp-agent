@@ -133,7 +133,11 @@ export function canalCoherenteConContacto(
   if (!numCanal) return true
   if (paisOverride) return paisDeNumero(numCanal) === paisOverride
   const paisContacto = paisDeNumero(normalizeContactId(contactId))
-  if (paisContacto === "otro" || paisContacto === "pe") return true
+  // PERÚ ya no es "otro" (25-sep, caso Fernando +51986892263): desde que Perú
+  // tiene línea propia, un +51 con el canal de la línea CHILENA es el bot que
+  // reporta mal la línea — persistirlo manda las respuestas por la línea
+  // chilena y Meta las rechaza (131047). Mismo trato que Colombia y México.
+  if (paisContacto === "otro") return true
   return paisDeNumero(numCanal) === paisContacto
 }
 
