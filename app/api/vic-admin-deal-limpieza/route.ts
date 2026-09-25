@@ -1011,6 +1011,7 @@ export async function GET(req: Request): Promise<Response> {
     owner_cotizacion_alineado: 0,
     stage_subido: 0,
     punteros_backfilleados: 0,
+    omitidos_deal_humano: 0,
     pagadas_en_perdido: [] as string[],
     errores: [] as string[],
   }
@@ -1152,6 +1153,17 @@ export async function GET(req: Request): Promise<Response> {
       const monedaTrato = String(deal.Monda_del_trato || "")
       if ((telDeal.startsWith("56") || monedaTrato === "UF") && monedaTrato !== "CLP") {
         cambios.Monda_del_trato = "CLP"
+      }
+      // SOLO DEALS DE VICKY (25-sep, reclamo Christian/Juan Carlos): el
+      // barrido desde Zoho recorre TODA cotización con Deal_Asociado, también
+      // las del canal ejecutivo, y desde el 21-sep convertía tratos creados por
+      // ejecutivos ("Por usuario" en UF, su convención) a Mensual fijo CLP —
+      // 61 tratos en 4 días, el forecast de marketing cambió. La convención
+      // CLP/Mensual fijo es solo de Vicky: un deal creado por una persona no
+      // se toca en montos, moneda ni tipo de cobro.
+      if (deal.Created_By?.id && !ROBOT_OWNER_IDS.has(String(deal.Created_By.id))) {
+        for (const k of Object.keys(cambios)) delete cambios[k]
+        res.omitidos_deal_humano = (res.omitidos_deal_humano || 0) + 1
       }
       if (Object.keys(cambios).length) {
         const up = await fetch(`${ZOHO_API}/crm/v3/Deals/${dealId}`, {
