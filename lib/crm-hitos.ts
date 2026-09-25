@@ -809,7 +809,9 @@ const TOMBOLA_DEALS_POR_TERRITORIO: Record<string, string> = {
   // Colombia (1-199 → Corredor/Navarro Builes/Rodríguez), SOLO con el
   // interruptor encendido; apagado, Colombia sigue sin tómbola (fijos 05-ago).
   Colombia: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "",
-  "México": (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
+  // México (Lalo 25-sep): la misma "Deals 2026" con sus entradas México por
+  // tramo (9-14). El deal nace con Vicky y lo sortea el traspaso, igual que Chile.
+  "México": (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || REGLA_DEALS_GLOBAL).trim(),
   // Perú (Lalo 22-sep): regla "Deals 2026" — entrada Territorio = Perú →
   // Mónica Mendoza. Con regla, Perú entra a la MISMA mecánica que Chile:
   // el deal nace con Vicky y espera al traspaso; la escalera RUC + >20 → deal.

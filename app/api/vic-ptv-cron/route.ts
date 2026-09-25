@@ -997,7 +997,8 @@ const TOMBOLA_DEALS_RULE: Record<string, string> = {
   // CO (Lalo 23-sep): la misma "Deals 2026" con su entrada Colombia, solo con
   // el interruptor encendido; apagado, Colombia sigue con los fijos del 05-ago.
   co: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "",
-  mx: (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
+  // MX (Lalo 25-sep): "Deals 2026" con sus entradas México por tramo.
+  mx: (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || REGLA_DEALS_GLOBAL).trim(),
   // PE (Lalo 22-sep): regla "Deals 2026" (entrada Territorio = Perú → Mónica;
   // los ejecutivos nuevos se agregan en la regla, no acá).
   pe: (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim(),
