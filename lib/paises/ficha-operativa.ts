@@ -408,9 +408,13 @@ const FICHA_MX: FichaOperativa = {
       persona("lmedina@geovictoria.com", "3525045000291701001", "Laura Medina", "+52 55 4571 1905"),
       persona("ysegura@geovictoria.com", "3525045000308323003", "Yahel Segura", "+52 55 3763 6604"),
     ],
-    // Lalo 24-sep: "el único SDR en México es Pablo Rodríguez" (reemplaza a
-    // Miguel Guzmán, fijo desde el 12-ago).
-    sdr: [persona("prodriguez@geovictoria.com", "3525045000391904256", "Pablo Rodríguez")],
+    // SDR de México = Pablo Rodríguez + Miguel Guzmán (Lalo 26-sep: "Miguel
+    // sigue siendo SDR" — corrige el "único SDR es Pablo" del 24-sep; los dos
+    // están en la entrada 39 de la regla de marketing y Miguel recibe leads a diario).
+    sdr: [
+      persona("prodriguez@geovictoria.com", "3525045000391904256", "Pablo Rodríguez"),
+      persona("mguzmanr@geovictoria.com", "3525045000434395001", "Miguel Guzmán"),
+    ],
     // Lalo 25-sep: la gestión comercial de la venta autónoma en México es de
     // Andrea Fuentes Swain (perfil Gestión Comercial en Zoho; sin espejo).
     ventaAutonoma: persona("afuentess@geovictoria.com", "3525045000645183642", "Andrea Fuentes Swain", undefined, "-"),
@@ -440,7 +444,7 @@ const FICHA_MX: FichaOperativa = {
     "Plantilla de equipos del país para el ticket ST.",
     "Espejos de Laura, Yahel y Pablo: la sesión ya existe en el worker (26-sep); falta que cada uno escanee su QR.",
     "Teléfono corporativo de Pablo Rodríguez y Andrea Fuentes (se registra al vincular el espejo o respondiendo el correo).",
-    "Confirmar que la línea +52 esté respondiendo (VICKY_MX_ENABLED en Vercel) y crear la entrada de marketing 'México ≤20 → Vicky' + botón de WhatsApp.",
+    "Espejo de Miguel Guzmán (sesión mguzmanr) y su teléfono corporativo.",
   ],
 }
 

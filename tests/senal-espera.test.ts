@@ -165,7 +165,8 @@ describe("fecha concreta de retoma (09-sep: meses, fechas, 'en N semanas')", () 
     assert.equal(partes(a.cuando).fecha, "01-10")
     const b = clasificar("a fines de octubre te aviso")
     assert.ok(b)
-    assert.equal(partes(b.cuando).fecha, "25-10")
+    // 25-oct-2026 es DOMINGO: el mes lo nombró el cliente, el día no → lunes 26 (regla finde 26-sep).
+    assert.equal(partes(b.cuando).fecha, "26-10")
   })
   test("el mes en curso a secas es 'más adelante' (7 días)", () => {
     const r = clasificar("lo vemos en julio")

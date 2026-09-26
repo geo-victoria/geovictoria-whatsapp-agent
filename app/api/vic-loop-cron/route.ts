@@ -941,13 +941,13 @@ export async function GET(req: Request): Promise<Response> {
       continue
     }
 
-    // (c-bis) GATE DE VENTANA AL EJECUTAR (fix 25-jul; ventana ampliada 09-ago
-    // a TODOS los días 9-21, Rodrigo: el finde también se hace seguimiento):
+    // (c-bis) GATE DE VENTANA AL EJECUTAR (fix 25-jul; ventana 9-21; el finde
+    // SOLO para quien escribió ese finde — Lalo 26-sep, caso AT Contabilidad):
     // una fila con next_touch_at vencido (migración vieja, cron detenido) NO
     // puede disparar un toque a las 23:00 — si AHORA está fuera de la ventana,
     // el toque se pospone al próximo bloque. ajustarAHabil devuelve el mismo
     // instante cuando ya estamos dentro.
-    const ahoraHabil = ajustarAHabil(new Date(now), tzDePais(country), r.contact)
+    const ahoraHabil = ajustarAHabil(new Date(now), tzDePais(country), r.contact, { t0: conv?.last_user_at || t0 })
     if (ahoraHabil.getTime() > now + 60_000) {
       await patchLoop(r.contact, { next_touch_at: ahoraHabil.toISOString() })
       pospuestos++
@@ -978,7 +978,7 @@ export async function GET(req: Request): Promise<Response> {
     // encima del lead; el loop solo POSPONE 48h (corrido a hábil) y sigue
     // activo. Simple a propósito: sin estado intermedio persistido.
     if (conOperador.has(r.contact) || (await tieneReunionCercana(r.contact))) {
-      const en48h = ajustarAHabil(new Date(now + 48 * 3600e3), tzDePais(country), r.contact)
+      const en48h = ajustarAHabil(new Date(now + 48 * 3600e3), tzDePais(country), r.contact, { t0: conv?.last_user_at || t0 })
       await patchLoop(r.contact, {
         estado: "activo",
         next_touch_at: en48h.toISOString(),
@@ -1245,7 +1245,7 @@ export async function GET(req: Request): Promise<Response> {
       const espera = 10 * 60e3
       const objetivo = new Date(new Date(t0).getTime() + espera)
       if (now < objetivo.getTime()) {
-        const habil = ajustarAHabil(objetivo, tzDePais(country), r.contact)
+        const habil = ajustarAHabil(objetivo, tzDePais(country), r.contact, { t0 })
         await patchLoop(r.contact, { next_touch_at: habil.toISOString() })
         pospuestos++
         detalle.push({ contact: r.contact, accion: "pospuesto_10m", hasta: habil.toISOString() })

@@ -6,11 +6,10 @@
  * salieron 12 mensajes a medianoche. El gate de horario existía al AGENDAR pero
  * no al EJECUTAR.
  *
- * VENTANA VIGENTE (Rodrigo 09-ago): TODOS los días 9:00-21:00 de la zona del
- * país — "si nos cotiza el fin de semana, está bien que le hagamos seguimiento
- * durante el fin de semana". Antes era L-V 9-19 y una formal del domingo
- * esperaba al lunes. La garantía que fijan estos casos: nada sale entre las
- * 21:00 y las 9:00, ningún día.
+ * VENTANA VIGENTE: 9:00-21:00 de la zona del país. Fin de semana (Lalo 26-sep,
+ * caso Juan / AT Contabilidad, "es sábado 17:15, realmente molestan"): sábado y
+ * domingo SOLO para quien nos escribió ESE fin de semana — la lectura de Rodrigo
+ * 09-ago ("si nos cotiza el fin de semana…"). El resto espera al lunes 9:00.
  */
 
 import { test, describe } from "node:test"
@@ -35,12 +34,39 @@ function partes(d: Date, tz: string) {
 describe("ajustarAHabil (ventana 9-21 todos los días)", () => {
   const TZ = tzDePais("cl")
 
-  test("las 23:20 de un viernes van al SÁBADO 9am (ya no al lunes)", () => {
+  test("las 23:20 de un viernes sin conversación de finde van al LUNES 9am", () => {
     const incidente = new Date("2026-07-25T03:20:00Z") // vie 24-jul 23:20 CL
     const p = partes(ajustarAHabil(incidente, TZ, CONTACTO), TZ)
-    assert.equal(p.dia, "Sat")
-    assert.equal(p.fecha, "25-07")
+    assert.equal(p.dia, "Mon")
+    assert.equal(p.fecha, "27-07")
     assert.ok(p.hora >= 9 && p.hora < 10, `esperado ~9am, fue ${p.hora}h`)
+  })
+
+  test("caso Juan / AT Contabilidad: habló el miércoles, el toque de 72 h NO sale el sábado", () => {
+    const t0 = "2026-09-23T20:14:13Z" // mié 23-sep 17:14 CL
+    const p = partes(calcularProximoToque(t0, 4, "cl", CONTACTO), TZ)
+    assert.equal(p.dia, "Mon")
+    assert.equal(p.fecha, "28-09")
+  })
+
+  test("quien escribió el SÁBADO sí recibe toques ese fin de semana", () => {
+    const t0 = "2026-09-26T15:00:00Z" // sáb 26-sep 12:00 CL
+    const p = partes(calcularProximoToque(t0, 3, "cl", CONTACTO), TZ) // +23h → dom
+    assert.equal(p.dia, "Sun")
+    assert.equal(p.fecha, "27-09")
+  })
+
+  test("el finde siguiente ya no vale: escribió un sábado, el toque de 7 días espera al lunes", () => {
+    const t0 = "2026-09-26T15:00:00Z"
+    const sabadoSiguiente = new Date("2026-10-03T15:00:00Z")
+    const p = partes(ajustarAHabil(sabadoSiguiente, TZ, CONTACTO, { t0 }), TZ)
+    assert.equal(p.dia, "Mon")
+    assert.equal(p.fecha, "05-10")
+  })
+
+  test("un día que el cliente NOMBRÓ ('el sábado') se respeta", () => {
+    const sabado = new Date("2026-10-03T15:00:00Z")
+    assert.equal(ajustarAHabil(sabado, TZ, CONTACTO, { finde: true }).getTime(), sabado.getTime())
   })
 
   test("un instante dentro de la ventana NO se mueve", () => {
@@ -48,9 +74,11 @@ describe("ajustarAHabil (ventana 9-21 todos los días)", () => {
     assert.equal(ajustarAHabil(lunes10, TZ, CONTACTO).getTime(), lunes10.getTime())
   })
 
-  test("un DOMINGO a las 16:00 tampoco se mueve (el finde se toca)", () => {
+  test("un DOMINGO a las 16:00 se mueve solo si el cliente no escribió ese finde", () => {
     const domingo16 = new Date("2026-07-26T20:00:00Z") // dom 26-jul 16:00 CL
-    assert.equal(ajustarAHabil(domingo16, TZ, CONTACTO).getTime(), domingo16.getTime())
+    assert.equal(partes(ajustarAHabil(domingo16, TZ, CONTACTO), TZ).dia, "Mon")
+    const t0 = new Date("2026-07-25T18:00:00Z") // sáb 25-jul
+    assert.equal(ajustarAHabil(domingo16, TZ, CONTACTO, { t0 }).getTime(), domingo16.getTime())
   })
 
   test("antes de las 9 va a ese mismo día a las 9", () => {
@@ -60,9 +88,9 @@ describe("ajustarAHabil (ventana 9-21 todos los días)", () => {
     assert.ok(p.hora >= 9 && p.hora < 10)
   })
 
-  test("después de las 21 va al día siguiente a las 9 (finde incluido)", () => {
+  test("después de las 21 va al día siguiente a las 9 (finde si escribió ese finde)", () => {
     const sabado22 = new Date("2026-07-26T02:00:00Z") // sáb 25-jul 22:00 CL
-    const p = partes(ajustarAHabil(sabado22, TZ, CONTACTO), TZ)
+    const p = partes(ajustarAHabil(sabado22, TZ, CONTACTO, { t0: "2026-07-25T20:00:00Z" }), TZ)
     assert.equal(p.dia, "Sun")
     assert.equal(p.fecha, "26-07")
     assert.ok(p.hora >= 9 && p.hora < 10)

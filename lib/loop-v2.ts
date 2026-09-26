@@ -157,28 +157,62 @@ function jitterMs(contact: string): number {
 }
 
 /**
- * Corre un instante a la VENTANA DE SEGUIMIENTO: TODOS los días, 9:00-21:00
- * de la zona (Rodrigo 09-ago: "si nos cotiza el fin de semana, está bien que
- * le hagamos seguimiento durante el fin de semana, entre 9 am y 9 pm" — antes
- * era L-V 9-19 y una formal emitida el domingo esperaba hasta el lunes). Las
- * pausas anunciadas por el cliente y el opt-out se respetan igual que siempre.
- * Si ya cae dentro, queda igual; antes de las 9 → hoy mismo 9:00 + jitter;
- * después de las 21 → MAÑANA 9:00 + jitter.
+ * Corre un instante a la VENTANA DE SEGUIMIENTO: 9:00-21:00 de la zona.
+ *
+ * FIN DE SEMANA (Lalo 26-sep, caso Juan / AT Contabilidad: "Es sábado 17:15,
+ * realmente molestan, no compraré su software"): sábado y domingo SOLO se toca
+ * a quien nos escribió ESE fin de semana. Es la lectura correcta de Rodrigo
+ * 09-ago ("si nos cotiza el fin de semana, está bien hacerle seguimiento
+ * durante el fin de semana"): el finde es para el que cotizó en el finde, no
+ * para el que conversó el miércoles y recibe su toque de 72 h un sábado. Sin
+ * `t0` en ese finde, el toque se corre al LUNES 9:00 + jitter.
+ *
+ *   - `opts.t0`: último mensaje del cliente (ancla del loop).
+ *   - `opts.finde`: el cliente PIDIÓ explícitamente ese día ("el sábado",
+ *     "el 3 de octubre") — se respeta aunque caiga en finde.
  *
  * El nombre se conserva por historia (todos los agendamientos del loop pasan
- * por aquí); la ventana ya no distingue día hábil de finde.
+ * por aquí).
  */
-export function ajustarAHabil(date: Date, timeZone: string, contact = ""): Date {
+export function ajustarAHabil(
+  date: Date,
+  timeZone: string,
+  contact = "",
+  opts: { t0?: Date | string | null; finde?: boolean } = {},
+): Date {
+  let out = date
   const p = partesEn(date, timeZone)
-  if (p.hh >= 9 && p.hh < 21) return date
-
-  let pp = p
-  // Después de las 21 → avanzar al día siguiente; antes de las 9 → hoy mismo.
-  if (p.hh >= 21) {
-    pp = partesEn(new Date(date.getTime() + 24 * 3600e3), timeZone)
+  if (!(p.hh >= 9 && p.hh < 21)) {
+    let pp = p
+    // Después de las 21 → avanzar al día siguiente; antes de las 9 → hoy mismo.
+    if (p.hh >= 21) {
+      pp = partesEn(new Date(date.getTime() + 24 * 3600e3), timeZone)
+    }
+    const alas9 = utcDesdeLocal(pp.y, pp.m, pp.d, 9, 0, timeZone)
+    out = new Date(alas9.getTime() + jitterMs(contact))
   }
-  const alas9 = utcDesdeLocal(pp.y, pp.m, pp.d, 9, 0, timeZone)
-  return new Date(alas9.getTime() + jitterMs(contact))
+  if (opts.finde) return out
+  const po = partesEn(out, timeZone)
+  if (po.weekday !== 0 && po.weekday !== 6) return out
+  if (mismoFinde(opts.t0, out, timeZone)) return out
+  // Al lunes siguiente, 9:00 + jitter.
+  const dias = po.weekday === 6 ? 2 : 1
+  const lunes = partesEn(new Date(out.getTime() + dias * 24 * 3600e3), timeZone)
+  return new Date(utcDesdeLocal(lunes.y, lunes.m, lunes.d, 9, 0, timeZone).getTime() + jitterMs(contact))
+}
+
+/** ¿`t0` cae en el MISMO fin de semana (sáb-dom) que `destino`, y antes de él? */
+export function mismoFinde(t0: Date | string | null | undefined, destino: Date, timeZone: string): boolean {
+  if (!t0) return false
+  const t = typeof t0 === "string" ? new Date(t0) : t0
+  if (!Number.isFinite(t.getTime()) || t.getTime() > destino.getTime() + 60_000) return false
+  const pt = partesEn(t, timeZone)
+  if (pt.weekday !== 0 && pt.weekday !== 6) return false
+  // Sábado del fin de semana de t0 (fecha local), comparado por día calendario.
+  const dia = (x: { y: number; m: number; d: number }) => Date.UTC(x.y, x.m - 1, x.d) / 86400e3
+  const sabadoT0 = dia(pt) - (pt.weekday === 6 ? 0 : 1)
+  const dd = dia(partesEn(destino, timeZone))
+  return dd >= sabadoT0 && dd <= sabadoT0 + 1
 }
 
 /** Suma N días hábiles (L-V en la zona) a un instante, conservando la hora. */
@@ -217,7 +251,7 @@ export function calcularProximoToque(
         : touchIdx === 2
           ? new Date(base.getTime() + 24 * h)
           : new Date(base.getTime() + 72 * h)
-    return ajustarAHabil(objetivoA, tz, contact)
+    return ajustarAHabil(objetivoA, tz, contact, { t0: base })
   }
   // Toques 5-7 se miden desde el toque 4 (t0+72h) en días hábiles.
   const base4 = new Date(base.getTime() + 72 * h)
@@ -246,7 +280,7 @@ export function calcularProximoToque(
       objetivo = sumarDiasHabiles(base4, 7, tz)
       break
   }
-  return ajustarAHabil(objetivo, tz, contact)
+  return ajustarAHabil(objetivo, tz, contact, { t0: base })
 }
 
 // ── Clasificador de señal de espera ─────────────────────────────────────────
@@ -376,10 +410,11 @@ export function clasificarSenalEspera(
   const tz = tzDePais(country)
 
   // "Día D a las 9:00 locales + jitter", corrido a hábil si cae en finde.
-  const alas9En = (diasCorridos: number): Date => {
+  // `finde`: el cliente NOMBRÓ ese día — se respeta aunque sea sábado o domingo.
+  const alas9En = (diasCorridos: number, finde = false): Date => {
     const p = partesEn(new Date(ahora.getTime() + diasCorridos * 24 * 3600e3), tz)
     const alas9 = utcDesdeLocal(p.y, p.m, p.d, 9, 0, tz)
-    return ajustarAHabil(new Date(alas9.getTime() + jitterMs(contact)), tz, contact)
+    return ajustarAHabil(new Date(alas9.getTime() + jitterMs(contact)), tz, contact, { t0: ahora, finde })
   }
   const hoy = partesEn(ahora, tz)
   const hastaLunes = (8 - hoy.weekday) % 7 || 7
@@ -387,9 +422,9 @@ export function clasificarSenalEspera(
   // Fecha o mes CONCRETOS primero (la señal más específica gana). Un mes ya
   // pasado se entiende del año siguiente; el mes en curso a secas ("en
   // septiembre" dicho en septiembre) es "más adelante" → 7 días.
-  const alas9Fecha = (y: number, m: number, d: number): Date => {
+  const alas9Fecha = (y: number, m: number, d: number, finde = false): Date => {
     const alas9 = utcDesdeLocal(y, m, d, 9, 0, tz)
-    return ajustarAHabil(new Date(alas9.getTime() + jitterMs(contact)), tz, contact)
+    return ajustarAHabil(new Date(alas9.getTime() + jitterMs(contact)), tz, contact, { t0: ahora, finde })
   }
   const fechaExp = texto.match(RE_FECHA_EXPLICITA)
   if (fechaExp) {
@@ -398,7 +433,7 @@ export function clasificarSenalEspera(
     if (m && d >= 1 && d <= 31) {
       let y = hoy.y
       if (m < hoy.m || (m === hoy.m && d <= hoy.d)) y += 1
-      const cuando = alas9Fecha(y, m, Math.min(d, 28 + (m === 2 ? 0 : 2)))
+      const cuando = alas9Fecha(y, m, Math.min(d, 28 + (m === 2 ? 0 : 2)), true)
       if (cuando.getTime() > ahora.getTime()) return { tipo: "fecha_explicita", cuando }
     }
   }
@@ -430,7 +465,7 @@ export function clasificarSenalEspera(
     // las categorías de días.
     if (Number.isFinite(n) && n >= 1 && n <= 72) {
       const cuando = new Date(ahora.getTime() + n * 3600e3)
-      return { tipo: "en_n_horas", cuando: ajustarAHabil(cuando, tz, contact) }
+      return { tipo: "en_n_horas", cuando: ajustarAHabil(cuando, tz, contact, { t0: ahora }) }
     }
   }
 
@@ -447,13 +482,13 @@ export function clasificarSenalEspera(
   // Día nombrado ("el martes", "hasta el jueves"): próxima ocurrencia, 1..7 días
   // adelante. Si el cliente nombra el día de HOY se entiende la semana siguiente
   // — quien dice "hablamos el martes" un martes no habla del rato que viene.
-  // Desde el 09-ago la ventana de seguimiento incluye el finde (9-21 todos los
-  // días): "el sábado" cae el sábado mismo, ya no se corre al lunes.
+  // "El sábado" dicho por el cliente cae el sábado mismo (lo pidió él): el
+  // bloqueo de finde (26-sep) no aplica a un día que el cliente nombró.
   const diaNombrado = texto.match(RE_DIA_SEMANA)?.[1]
   if (diaNombrado) {
     const objetivo = DIAS_SEMANA[diaNombrado]
     const faltan = (objetivo - hoy.weekday + 7) % 7 || 7
-    return { tipo: "dia_nombrado", cuando: alas9En(faltan) }
+    return { tipo: "dia_nombrado", cuando: alas9En(faltan, true) }
   }
   if (RE_MANANA.test(texto) || (/\bhoy\b/.test(texto) && RE_HOY_DEFINE.test(texto)))
     return { tipo: "manana", cuando: alas9En(1) }
@@ -464,7 +499,7 @@ export function clasificarSenalEspera(
   ) {
     return {
       tipo: "espera_tercero",
-      cuando: ajustarAHabil(sumarDiasHabiles(ahora, 2, tz), tz, contact),
+      cuando: ajustarAHabil(sumarDiasHabiles(ahora, 2, tz), tz, contact, { t0: ahora }),
     }
   }
   return null
@@ -694,7 +729,7 @@ export async function adelantarPrimerToqueFormal(contact: string, country?: stri
   const d = contact.replace(/\D/g, "")
   const pais =
     country || (d.startsWith("57") ? "co" : d.startsWith("52") ? "mx" : d.startsWith("51") ? "pe" : "cl")
-  const objetivo = ajustarAHabil(new Date(Date.now() + 10 * 60_000), tzDePais(pais), contact)
+  const objetivo = ajustarAHabil(new Date(Date.now() + 10 * 60_000), tzDePais(pais), contact, { t0: new Date() })
   await supa(
     `vic_loop?contact=eq.${encodeURIComponent(contact)}&estado=eq.activo&next_touch=eq.1`,
     {
