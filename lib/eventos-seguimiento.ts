@@ -38,6 +38,10 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // Lalo 26-sep: calendario de Pablo Rodríguez (SDR MX). Verificado el mismo día:
   // 28 horarios en 5 días.
   "prodriguez@geovictoria.com": "7234317", // MX — Pablo Rodríguez (SDR)
+  // CO — Eddy Galindo (SDR): su evento es la "llamada exploratoria" de Colombia (6292070,
+  // horario Colombia, verificado 26-sep 9:00-16:40 Bogotá). Antes le llegaban las reuniones
+  // solo porque es el respaldo del país (CAL_EVENT_TYPE_ID_CO).
+  "egalindo@geovictoria.com": "6292070",
   // Lalo 26-sep: calendario de Laura Medina (host interino: Lalo; horario "México" 9-17 CDMX).
   "lmedina@geovictoria.com": "7235403", // MX — Laura Medina
   // ── PERÚ (15-sep, regla chilena: la reunión sigue al dueño del registro) ──

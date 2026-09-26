@@ -123,11 +123,13 @@ export async function pendientesDelPais(pais: string): Promise<{
       const link = token ? `${BASE}/api/vic-admin-wa-espejo?session=${encodeURIComponent(p.sesion)}&t=${encodeURIComponent(token)}` : ""
       espejo = { pendiente: estado !== "conectado", link, estado }
     }
-    // Calendario: telemarketing siempre lo necesita (las reuniones siguen al dueño del trato);
-    // SDR solo si ya tiene un evento asignado.
+    // Calendario: toda persona que recibe leads o tratos lo necesita — la reunión se agenda en
+    // el evento del DUEÑO del caso (trato → cotización → lead); sin evento cae al respaldo del
+    // país y la toma otra persona (26-sep, Lalo: los SDR también, como Aleydis y Aracelli).
+    // La gestora de venta autónoma no agenda reuniones.
     let calendario: PendientePersona["calendario"] = null
     const evento = eventoSeguimientoDe(p.email)
-    if (evento || p.rol === "telemarketing") {
+    if (evento || p.rol === "telemarketing" || p.rol === "sdr") {
       // Host interino aceptado a propósito (Lalo 26-sep con Laura: "después lo reemplazamos"):
       // vic_kv cal_interino_ok_<correo> = no se le pide nada del calendario todavía.
       const interinoOk = Boolean(await getKvValue(`cal_interino_ok_${p.email}`).catch(() => null))
