@@ -550,6 +550,108 @@ async function modoAltas(t0: number): Promise<Response> {
   })
 }
 
+/**
+ * MODO FIN DE SEMANA (?finde=1) — caso Juan / AT Contabilidad (26-sep, "es
+ * sábado 17:15, realmente molestan"): mensajes PROACTIVOS de Vicky en sábado o
+ * domingo (hora del país) a quien NO escribió ese mismo fin de semana, y qué
+ * contestó el cliente en las 48 h siguientes. Proactivo = hueco > 5 min desde
+ * el último mensaje del cliente (mismo discriminador de los otros modos).
+ * Solo lectura. `pais=cl|pe|co|mx|todos` (default todos), `dias` (default 60).
+ * Límite declarado: mira las conversaciones con mensaje del cliente dentro de
+ * la ventana y sus últimos 60 mensajes.
+ */
+async function modoFinde(sp: URLSearchParams, t0: number): Promise<Response> {
+  const dias = Math.min(Math.max(Number(sp.get("dias")) || 60, 1), 400)
+  const max = Math.min(Math.max(Number(sp.get("max")) || 600, 1), 2000)
+  const offset = Math.max(Number(sp.get("offset")) || 0, 0)
+  const paisQ = (sp.get("pais") || "todos").toLowerCase()
+  const desde = new Date(Date.now() - dias * 86_400_000).toISOString()
+  const internos = testContactSet()
+  const { mismoFinde, tzDePais } = await import("@/lib/loop-v2")
+  const { esRechazoCliente, esAutorespuesta } = await import("@/lib/rechazo-cliente")
+
+  const filtroPais = paisQ === "todos" ? "" : `country=eq.${paisQ}&`
+  const convs = await sb<Conv & { country: string | null }>(
+    `vic_v3_conversations?${filtroPais}last_user_at=gte.${desde}` +
+      `&select=id,contact,country,last_user_at,followup_closed_reason,followup_status` +
+      `&order=last_user_at.desc&limit=${max}&offset=${offset}`,
+  )
+  const vivos = convs.filter(
+    (c) => !internos.has(String(c.contact || "")) && /^\d{8,15}$/.test(String(c.contact || "")),
+  )
+  const diaSemana = (d: Date, tz: string) =>
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(d)
+  const tipoDe = (t: string): string =>
+    /desde ahora te atiende|te presento a/i.test(t) ? "presentacion_traspaso"
+      : /c[oó]mo te fue con/i.test(t) ? "chequeo_9h"
+        : /^Template:/i.test(t) ? "plantilla"
+          : "toque_o_texto"
+
+  const resumen = {
+    revisadas: 0, contactosTocados: 0, mensajes: 0,
+    respondio: 0, reclamo_o_rechazo: 0, autorespuesta: 0, sin_respuesta: 0,
+    porTipo: {} as Record<string, number>, porPais: {} as Record<string, number>, truncado: false,
+  }
+  const filas: Array<Record<string, unknown>> = []
+
+  for (const c of vivos) {
+    if (Date.now() - t0 > 235_000) { resumen.truncado = true; break }
+    resumen.revisadas++
+    const pais = String(c.country || "cl").toLowerCase()
+    const tz = tzDePais(pais)
+    let msgs: Msg[] = []
+    try {
+      msgs = await sb<Msg>(`vic_v3_messages?conversation_id=eq.${c.id}&select=at,role,content&order=at.desc&limit=60`)
+    } catch { continue }
+    msgs.reverse()
+    let ultimoUser: Date | null = null
+    let tocado = false
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i]
+      const at = new Date(m.at)
+      const txt = String(m.content || "")
+      if (m.role === "user") { if (!txt.startsWith("[REGISTRO INTERNO")) ultimoUser = at; continue }
+      if (m.role !== "assistant" || txt.startsWith("[REGISTRO INTERNO")) continue
+      if (at.toISOString() < desde) continue
+      const dia = diaSemana(at, tz)
+      if (dia !== "Sat" && dia !== "Sun") continue
+      const gapMin = ultimoUser ? (at.getTime() - ultimoUser.getTime()) / 60_000 : 99999
+      if (gapMin <= 5) continue // respuesta del turno: reactiva
+      if (mismoFinde(ultimoUser, at, tz)) continue // escribió ese finde: legítimo
+      // Qué contestó el cliente en las 48 h siguientes.
+      let respuesta = ""
+      for (let j = i + 1; j < msgs.length; j++) {
+        const r = msgs[j]
+        if (new Date(r.at).getTime() - at.getTime() > 48 * 3600e3) break
+        if (r.role === "user" && !String(r.content || "").startsWith("[REGISTRO INTERNO")) { respuesta = String(r.content || ""); break }
+      }
+      const reaccion = !respuesta ? "sin_respuesta"
+        : esAutorespuesta(respuesta) ? "autorespuesta"
+          : esRechazoCliente(respuesta) ? "reclamo_o_rechazo" : "respondio"
+      resumen.mensajes++
+      resumen[reaccion]++
+      const tipo = tipoDe(txt)
+      resumen.porTipo[tipo] = (resumen.porTipo[tipo] || 0) + 1
+      resumen.porPais[pais] = (resumen.porPais[pais] || 0) + 1
+      tocado = true
+      if (reaccion !== "sin_respuesta" || sp.get("detalle") === "1") {
+        filas.push({
+          contact: c.contact, pais, enviado: m.at.slice(0, 16), dia,
+          ultimoMensajeCliente: ultimoUser ? ultimoUser.toISOString().slice(0, 16) : null,
+          tipo, reaccion, mensaje: txt.replace(/\s+/g, " ").slice(0, 110),
+          respuesta: respuesta.replace(/\s+/g, " ").slice(0, 140) || null,
+        })
+      }
+    }
+    if (tocado) resumen.contactosTocados++
+  }
+  return NextResponse.json({
+    ok: true, modo: "finde",
+    nota: "solo lectura · proactivo en sábado/domingo a quien no escribió ese mismo fin de semana",
+    dias, pais: paisQ, offset, max, ms: Date.now() - t0, resumen, filas: filas.slice(0, 200),
+  })
+}
+
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const sp = new URL(req.url).searchParams
@@ -558,6 +660,7 @@ export async function GET(req: Request): Promise<Response> {
   if (sp.get("loops") === "1") return modoLoops(sp, Date.now())
   if (sp.get("insistencia") === "1") return modoInsistencia(sp, Date.now())
   if (sp.get("altas") === "1") return modoAltas(Date.now())
+  if (sp.get("finde") === "1") return modoFinde(sp, Date.now())
   const dias = Math.min(Math.max(Number(sp.get("dias")) || 90, 1), 400)
   const max = Math.min(Math.max(Number(sp.get("max")) || 300, 1), 1000)
   const offset = Math.max(Number(sp.get("offset")) || 0, 0)
