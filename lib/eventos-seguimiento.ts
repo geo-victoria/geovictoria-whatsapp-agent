@@ -34,7 +34,7 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   "aaraque@geovictoria.com": "6723118", // CL — Aleydis Araque
   // ── Resto de países ──
   "agordillo@geovictoria.com": "6484393", // CO — Alejandro Gordillo
-  "ysegura@geovictoria.com": "6484399", // MX — Yahel Segura
+  "ysegura@geovictoria.com": "7234434", // MX — Yahel Segura (Lalo 26-sep: calendario nuevo; verificado 28 horarios en 5 días)
   // Lalo 26-sep: calendario de Pablo Rodríguez (SDR MX). Verificado el mismo día:
   // 28 horarios en 5 días.
   "prodriguez@geovictoria.com": "7234317", // MX — Pablo Rodríguez (SDR)
