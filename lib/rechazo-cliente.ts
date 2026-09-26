@@ -58,6 +58,14 @@ const PATRONES: RegExp[] = [
   /\byo\s+(les|te|le)\s+(escribo|aviso|contacto)\b/i,
   /\b(muy|demasiado)\s+insistent/i,
   /\b(los|las|te)\s+voy\s+a\s+bloquear\b/i,
+  // 26-sep (caso Juan / AT Contabilidad, +56994390656): el miércoles dijo "lo
+  // veré y cuando tenga dudas me comunicaré por este medio" y siguieron cinco
+  // mensajes; el sábado, "realmente molestan, no compraré su software si
+  // molestan de esta manera". Ninguna de las dos frases disparaba la guarda.
+  /\bcuando\s+(tenga|tengamos|necesite|necesitemos|quiera|queramos)\b.{0,40}\b(me|nos)\s+(comunic|contact|pongo|ponemos|escrib)/i,
+  // Solo "molestan / molestando": "disculpa la molestia" es cortesía de prospecto.
+  /\bmolest(an|ando)\b/i,
+  /\bno\s+(les\s+|le\s+)?(comprar[eé]|compraremos|contratar[eé]|contrataremos)\b/i,
 ]
 
 /** Mensajes cortos que solos ya son un "no" ("no", "no gracias", "nop"). */

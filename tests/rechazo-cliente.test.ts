@@ -1,4 +1,4 @@
-import { test } from "node:test"
+import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import {
   esRechazoCliente,
@@ -230,4 +230,21 @@ test("TODAVIA_NO es una salida propia: ni rechazo ni divagación", () => {
   // y sigue distinguiéndose de las otras dos
   assert.equal(clasificarTextoInterno("NO_ENVIAR"), "no_enviar")
   assert.equal(clasificarTextoInterno("El cliente no ha respondido todavía."), "razonamiento")
+})
+
+// Caso Juan / AT Contabilidad (+56994390656, 26-sep): el miércoles "cuando tenga
+// dudas me comunicaré" y el sábado 17:15 el reclamo por insistencia. Ninguna
+// frase disparaba la guarda y el loop siguió.
+describe("caso Juan / AT Contabilidad (26-sep)", () => {
+  test("sus dos frases cierran la proactividad", () => {
+    assert.equal(esRechazoCliente("ok lo vere y cuando tenga dudas me comunicare por este medio"), true)
+    assert.equal(
+      esRechazoCliente("Es sabado 17:15 hrs realmente molestan, no comprare su software si molestan de esta manera me imagino despues"),
+      true,
+    )
+  })
+  test("la cortesía de prospecto NO cuenta como rechazo", () => {
+    assert.equal(esRechazoCliente("disculpa la molestia, cuánto cuesta para 8 personas?"), false)
+    assert.equal(esRechazoCliente("no es molestia, cuéntame"), false)
+  })
 })
