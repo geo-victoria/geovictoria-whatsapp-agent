@@ -560,6 +560,37 @@ export async function procesarTurno(
       }
     } catch { /* sin marca, sin directiva */ }
 
+    // LA PRIMERA SEÑAL CIERRA EL PAGO (Lalo 26-sep, caso NelNav COT1649): además
+    // de las dos marcas de arriba, un pago APROBADO en Mercado Pago cierra el
+    // pago en este mismo turno aunque todavía no se haya registrado. Se consulta
+    // MP solo si el cliente declara pago, manda un adjunto o salió al checkout.
+    // Si el cierre viene de MP, el registro (post-pago + alta) se lanza en
+    // paralelo y el modelo ya responde como post-venta: nunca pide comprobante.
+    let registroPagoEnCurso: Promise<unknown> | null = null
+    try {
+      const { senalDePago, directivaPagoCerrado } = await import("@/lib/pago-cerrado")
+      const pd = await import("@/lib/pago-declarado")
+      const adjunto = /^\[El cliente envi[oó] (una imagen|un documento|un archivo)/i.test(String(message || ""))
+      let salioAlCheckout = false
+      if (quotePointer?.quoteId && !pagoMarcadoReciente) {
+        salioAlCheckout = Boolean(await getKvValue(`pf_${quotePointer.quoteId}_salida_mp`).catch(() => null))
+      }
+      const senal = await senalDePago(contact, {
+        quoteId: quotePointer?.quoteId,
+        consultarMP: pd.clienteDeclaraPago(message) || adjunto || salioAlCheckout,
+      })
+      if (senal) {
+        pagoMarcadoReciente = true
+        directivaPostPago = directivaPagoCerrado(senal)
+        console.log(`[pago-cerrado] ${contact}: pago cerrado por ${senal.fuente} (${senal.at})`)
+        if (senal.fuente === "mercado_pago" && quotePointer?.quoteId) {
+          registroPagoEnCurso = pd.verificarPagoDeclarado(quotePointer.quoteId, 55_000).catch(() => null)
+        }
+      }
+    } catch (e) {
+      console.warn(`[pago-cerrado] ${contact}: no se pudo evaluar la señal de pago:`, e instanceof Error ? e.message : e)
+    }
+
     // Directiva determinista de la ETAPA CONSULTIVA (Eduardo 14-ago, caso
     // Rodrigo): Vicky preguntó por la operación, el cliente respondió, y ella
     // volvió a preguntar lo mismo con otras palabras. Si en el historial YA
@@ -1886,6 +1917,30 @@ export async function procesarTurno(
       }
     }
 
+    // 2.8-bis. PAGO CERRADO = JAMÁS PEDIR COMPROBANTE (Lalo 26-sep, "que la
+    // primera señal cierre el pago"): con cualquier señal de pago (marca kv o
+    // pago aprobado en MP), una respuesta que pida comprobante, transferencia o
+    // que pague se reemplaza por la confirmación canónica. Se relee la marca
+    // fresca: el registro puede haber terminado MIENTRAS el modelo respondía.
+    if (!enOnboarding && reply) {
+      try {
+        const pc = await import("@/lib/pago-cerrado")
+        if (pc.pideComprobanteOPago(reply)) {
+          const registroTool = ((result.toolCalls || []) as ToolCallRecord[]).some(
+            (c) => c.ok && c.name === "registrar_comprobante_transferencia",
+          )
+          const senal = pagoMarcadoReciente ? true : Boolean(await pc.senalDePago(contact, { quoteId: quotePointer?.quoteId }))
+          if (senal && !registroTool) {
+            const pd = await import("@/lib/pago-declarado")
+            console.warn(`[pago-cerrado] ${contact}: la respuesta pedía comprobante/pago con el pago cerrado — reemplazada`)
+            reply = pd.textoPagoConfirmado()
+          }
+        }
+      } catch (e) {
+        console.warn(`[pago-cerrado] ${contact}: error en el cinturón:`, e instanceof Error ? e.message : e)
+      }
+    }
+
     // 2.9. ANTI-ECO (caso Atcomo 09-ago): el cliente confirmó un supuesto ya
     // cotizado ("la instalan ustedes") y el modelo re-cotizó con los mismos
     // parámetros pegando el resumen IDÉNTICO — al cliente le llegó el mismo
@@ -2310,6 +2365,9 @@ export async function procesarTurno(
     }
 
     const pdfUrl = extractPdfUrl(result.toolCalls as ToolCallRecord[])
+    // El registro del pago aprobado en MP (post-pago + alta) se lanzó antes del
+    // modelo; se espera acá, DESPUÉS de responder, para que no quede a medias.
+    if (registroPagoEnCurso) await Promise.race([registroPagoEnCurso, new Promise((r) => setTimeout(r, 30_000))])
     console.log(
       `[v3-bg] DONE pais=${perfil.pais} contact=${contact} iters=${result.iterations} tools=${result.toolCalls?.length || 0} pdf=${!!pdfUrl}`,
     )

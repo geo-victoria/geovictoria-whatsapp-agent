@@ -515,8 +515,10 @@ export async function pagoRegistradoReciente(contact: string): Promise<boolean> 
     // que es el camino más común — su marca es `pago_online_` (la estampa
     // traspaso-postpago solo con pago verificado en MP). Un pagador con
     // tarjeta quedaba sin protección alguna contra la maquinaria de venta.
+    // + `pago_cerrado_` (26-sep, "que la primera señal cierre el pago"): un pago
+    // aprobado en Mercado Pago cierra el cobro aunque aún no se haya registrado.
     const res = await supa(
-      `vic_kv?key=in.("comprobante_ok_${limpio}","pago_online_${limpio}")&select=value&limit=2`,
+      `vic_kv?key=in.("comprobante_ok_${limpio}","pago_online_${limpio}","pago_cerrado_${limpio}")&select=value&limit=3`,
     )
     const rows = res.ok ? (((await res.json().catch(() => [])) as Array<{ value?: string }>) || []) : []
     const ats = rows
