@@ -502,11 +502,10 @@ export function buildDispatchMXUnificado(contact: string) {
         // México no tiene padrón que resuelva la razón social desde el RFC.
         // Tampoco vale rellenarla con el RFC o con el nombre del contacto
         // (batería MX 24-sep: la formal salió con razón social "XAXX010101000").
-        const compacto = (v: unknown) => String(v || "").replace(/[\s.\-_]/g, "").toUpperCase()
+        // Batería 26-sep: tampoco un PEDAZO del RFC ("GEO" de GEO150101AB1).
+        const { razonSocialInvalidaMX } = await import("./razon-social.ts")
         const empresaTxt = String(i.empresa || "").trim()
-        const empresaEsRfc = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(compacto(empresaTxt)) || compacto(empresaTxt) === compacto(i.rutEmpresa || i.rfc)
-        const empresaEsContacto = !!empresaTxt && compacto(empresaTxt) === compacto(i.contacto)
-        if (!empresaTxt || empresaEsRfc || empresaEsContacto) {
+        if (!empresaTxt || razonSocialInvalidaMX(empresaTxt, i.rutEmpresa || i.rfc, i.contacto)) {
           return { ok: false, error: "Falta la RAZÓN SOCIAL: en México no se resuelve desde el RFC. Pídesela al cliente en una frase corta (junto con el RFC si también falta) y vuelve a llamar la tool." }
         }
         return base("generar_link_cotizadora", {
