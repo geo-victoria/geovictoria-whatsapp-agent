@@ -275,3 +275,9 @@ export function clasificarTextoInterno(texto: string): VeredictoTextoInterno {
 export function pareceTextoInterno(texto: string): boolean {
   return clasificarTextoInterno(texto) !== "ok"
 }
+
+/** ¿El mensaje es SOLO cortesía o cierre ("gracias", "ok", "perfecto", un emoji)? */
+export function esCortesia(texto: string): boolean {
+  const c = String(texto || "").trim()
+  return Boolean(c) && (CORTESIA.test(c) || SOLO_EMOJI.test(c))
+}

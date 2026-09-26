@@ -636,6 +636,38 @@ export async function procesarTurno(
 
     let reply = (result.reply || "").trim()
 
+    // TURNO VACÍO SIN TOOLS (26-sep): el modelo cerró sin texto y el agent-loop
+    // lo convirtió en "tuve un problema procesando tu mensaje" — seis casos en
+    // dos semanas, tres después de una pregunta real ("me acomoda la opción 2…",
+    // "Iquique, Tarapacá", una planilla). Un reintento con la orden explícita
+    // de contestar; si el cliente solo agradeció o se despidió y sigue vacío,
+    // un cierre cordial en vez del error.
+    if (reply === AGENT_LOOP_EMPTY_FALLBACK && !((result.toolCalls || []) as ToolCallRecord[]).some((c) => c.ok)) {
+      console.warn(`[v3-bg] TURNO_VACIO contact=${contact}: reintento con orden de contestar`)
+      const retryVacio = await runAgentLoop({
+        alIniciarTool,
+        systemPrompt:
+          (onboarding
+            ? onboarding.systemPrompt + directivaAdmin
+            : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin) +
+          "\n\n# Instrucción de sistema (este turno)\nTu turno anterior quedó VACÍO. Responde en texto al ÚLTIMO mensaje del cliente, breve y concreto; si corresponde una tool, úsala y entrega su mensajeParaProspecto. Nunca cierres el turno sin texto.",
+        history,
+        userMessage: message,
+        apiKey,
+        contact,
+        model: onboarding ? MODELO_COTIZACION : modelo,
+        ...(onboarding ? { tools: onboarding.tools } : toolsPais ? { tools: toolsPais } : {}),
+      }).catch(() => null)
+      const r2 = (retryVacio?.reply || "").trim()
+      if (retryVacio && r2 && r2 !== AGENT_LOOP_EMPTY_FALLBACK) {
+        reply = r2
+        result.toolCalls = retryVacio.toolCalls
+      } else {
+        const { esCortesia } = await import("@/lib/rechazo-cliente")
+        if (esCortesia(message)) reply = "Quedo atenta por aquí para lo que necesites 😊"
+      }
+    }
+
     // HITO DE INTENCIÓN SIN TOOL (arreglo 2, Lalo 07-sep, caso Conbes): con
     // RUT del cliente en el chat, el CRM nace ya — no espera a que Vicky
     // llame una tool. Best-effort en paralelo; una vez por conversación.
@@ -2247,6 +2279,9 @@ export async function procesarTurno(
     )
   } catch (err) {
     console.error(`[v3-bg] Error procesando ${contact}:`, err)
+    // Límite de gasto / credencial de la API del modelo → correo inmediato
+    // (26-sep, ráfaga muda del 22-sep).
+    void import("@/lib/alarma-api-modelo").then((m) => m.alarmarErrorApiModelo(err, contact)).catch(() => undefined)
     // Circuit-breaker (C): si los turnos anteriores ya fueron mensajes de error,
     // no repitas el mismo fallback en loop (en producción llegó a 60×). Tras 2
     // errores seguidos, escala a un humano UNA vez y luego silencia.

@@ -1493,9 +1493,24 @@ export async function runAgentLoop(params: {
       c.ok &&
       (c.output as { plantillaEnviada?: boolean } | undefined)?.plantillaEnviada === true,
   )
+  // TURNO VACÍO TRAS UNA TOOL EXITOSA (26-sep, casos Katherine/COT del 25-sep
+  // y otros 5 desde el 14-sep): el modelo emite la cotización y cierra con
+  // 2 tokens de texto. Sin esto el cliente recibía "tuve un problema" pegado
+  // al link de la cotización recién hecha. Si una tool exitosa dejó su
+  // mensajeParaProspecto, ESE es el turno (el más reciente gana).
+  const mensajeDeTool = (() => {
+    for (let i = toolCalls.length - 1; i >= 0; i--) {
+      const c = toolCalls[i]
+      const m = c.ok ? (c.output as { mensajeParaProspecto?: unknown } | undefined)?.mensajeParaProspecto : undefined
+      if (typeof m === "string" && m.trim()) return m.trim()
+    }
+    return ""
+  })()
   if (!finalText && !plantillaEntregoElTurno) {
+    if (!mensajeHandoffRespaldo && mensajeDeTool) console.warn(`[agent-loop] turno vacío tras tool exitosa — se entrega el mensajeParaProspecto de la tool`)
     finalText =
       mensajeHandoffRespaldo ||
+      mensajeDeTool ||
       "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"
   }
 
