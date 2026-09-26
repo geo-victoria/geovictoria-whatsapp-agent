@@ -287,7 +287,6 @@ const FICHA_PE: FichaOperativa = {
   procesos: { relojCalificacion24h: true, tombolaZoho: true },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Perú (en Chile es Sebastián Silva): correo del revisor para avisarle y para el ticket ST la plantilla de equipos del país.",
-    "Sesiones de espejo del equipo en el worker (WA_SESSION_IDS en Railway): mmendozav, afiori, pquispef. Cecilia (venta autónoma) no lleva espejo (Lalo 23-sep).",
     "Un aviso REAL de BBVA/BCP/Interbank en la casilla vicky@ para calibrar el parser (hoy formato genérico).",
   ],
 }
@@ -369,7 +368,8 @@ const FICHA_CO: FichaOperativa = {
   procesos: { relojCalificacion24h: true, tombolaZoho: true },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Colombia (su ST valida contra la Sales Order de Books, no contra la NDV) y la plantilla de equipos del país.",
-    "Sesiones de espejo del equipo CO en el worker (decidir quiénes: telemarketing mcorredor/snavarrob/dcrodriguez, SDR msanabriat/jnarinoch/egalindo).",
+    "Espejos del equipo CO: las 7 sesiones ya existen en el worker (26-sep); falta que cada uno escanee su QR.",
+    "Gabriela Linares en Botmaker: su usuario está en OTRA cuenta de Botmaker (TOKEN_AGENT_MISMATCH); eliminarla allá o pedir a soporte que la mueva.",
     "Teléfonos del equipo CO (ninguno de los seis ni las líderes lo tienen en su ficha de Zoho).",
   ],
 }
@@ -438,7 +438,9 @@ const FICHA_MX: FichaOperativa = {
   procesos: { relojCalificacion24h: false, tombolaZoho: true },
   pendientes: [
     "Plantilla de equipos del país para el ticket ST.",
-    "Sesiones de espejo del equipo en el worker (lmedina, ysegura, prodriguez).",
+    "Espejos de Laura, Yahel y Pablo: la sesión ya existe en el worker (26-sep); falta que cada uno escanee su QR.",
+    "Teléfono corporativo de Pablo Rodríguez y Andrea Fuentes (se registra al vincular el espejo o respondiendo el correo).",
+    "Confirmar que la línea +52 esté respondiendo (VICKY_MX_ENABLED en Vercel) y crear la entrada de marketing 'México ≤20 → Vicky' + botón de WhatsApp.",
   ],
 }
 
