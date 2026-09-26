@@ -86,6 +86,9 @@ const TPL_LEAD_FINDE = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE || "vicky_t0_fi
 // El texto de vicky_t0_finde es neutro (sin chilenismos) y las plantillas del
 // workspace sirven en todas las líneas → CO la reutiliza tal cual (25-jul).
 const TPL_LEAD_FINDE_CO = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE_CO || "vicky_t0_finde").trim()
+// MÉXICO (26-sep): la misma neutra — antes el T0 de fin de semana en México caía a la
+// apertura normal ("¿cuántas personas…?") un sábado o domingo.
+const TPL_LEAD_FINDE_MX = (process.env.OUTBOUND_TEMPLATE_LEAD_FINDE_MX || "vicky_t0_finde").trim()
 
 function esFinDeSemana(country: string): boolean {
   const tz =
@@ -301,7 +304,7 @@ export async function POST(req: Request): Promise<Response> {
   const tplPais = esPE
     ? await tplLeadPE()
     : esMX
-      ? TPL_LEAD_MX
+      ? (finde && TPL_LEAD_FINDE_MX) || TPL_LEAD_MX
       : esCO
         ? (finde && TPL_LEAD_FINDE_CO) || TPL_LEAD_CO
         : (finde && TPL_LEAD_FINDE) || TPL_LEAD
@@ -620,8 +623,9 @@ export async function POST(req: Request): Promise<Response> {
   // vicky_mx_lead_apertura (21-jul, vocabulario es-mx: "registrarían su
   // asistencia").
   // CL finde → espejo de vicky_t0_finde ("¿ahora o el lunes?").
+  // Fin de semana (CL/CO/MX usan vicky_t0_finde) → espejo de esa plantilla.
   const saludoApertura =
-    !esMX && !esCO && finde
+    !esPE && finde
       ? `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Recibimos tu solicitud de cotización para ${empresa}. ¿Quieres conversar ahora o prefieres que te contacte el lunes?`
       : esMX
         ? `Hola ${nombre} 👋 Soy Vicky de GeoVictoria. Recibimos tu solicitud de cotización para ${empresa}. ¿Cuántas personas registrarían su asistencia? Con ese dato te armo el valor de inmediato.`
