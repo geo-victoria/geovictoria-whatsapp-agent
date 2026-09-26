@@ -398,7 +398,6 @@ const FICHA_MX: FichaOperativa = {
   },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en México y la plantilla de equipos del país.",
-    "Entradas \"Territorio = México\" en las reglas Deals 2026 / TLMK / SDR de Zoho (hoy el sorteo MX es un flujo de trabajo que solo corre al crear).",
     "Líder comercial.",
     "Sesiones de espejo del equipo en el worker (lmedina, ysegura, prodriguez).",
   ],
