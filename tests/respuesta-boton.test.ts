@@ -117,14 +117,16 @@ describe("clasificación de los tres botones reales", () => {
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const LOOP = readFileSync(join(RAIZ, "app/api/vic-loop-cron/route.ts"), "utf8")
-// v3: la ENTRADA (normalización) sigue en el route y el TURNO (rechazo, cierre
-// por botón) vive en el orquestador único desde el 22-sep — se leen los dos.
+// La ENTRADA (normalización) sigue en cada route y el TURNO (rechazo, cierre
+// por botón) vive en el orquestador único: v3 desde el 22-sep, PE/CO/MX desde
+// el 26-sep (se retiró su procesador propio) — se leen los dos.
 const ORQUESTADOR = readFileSync(join(RAIZ, "lib/orquestador-turno.ts"), "utf8")
-const WEBHOOKS = ["v3", "co", "mx"].map((p) => ({
+const WEBHOOKS = ["v3", "co", "mx", "pe"].map((p) => ({
   pais: p,
   src:
     readFileSync(join(RAIZ, `app/api/vic-botmaker-${p}/route.ts`), "utf8") +
-    (p === "v3" ? "\n" + ORQUESTADOR : ""),
+    "\n" +
+    ORQUESTADOR,
 }))
 
 describe("el cableado en producción", () => {

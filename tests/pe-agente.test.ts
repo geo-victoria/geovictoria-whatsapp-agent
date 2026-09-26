@@ -22,7 +22,12 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { SYSTEM_PROMPT_PE, getSystemPromptPE } from "../lib/paises/pe/prompt.ts"
+// Perú es el núcleo armado con su ficha desde el 26-sep (el prompt propio se
+// retiró): las reglas se verifican sobre lo que ve el cliente.
+import { getSystemPromptPENucleo } from "../lib/paises/pe/prompt-nucleo.ts"
+import { FICHA_PE } from "../lib/paises/pe/ficha.ts"
+const SYSTEM_PROMPT_PE = getSystemPromptPENucleo("51999999999")
+const getSystemPromptPE = (c: string) => getSystemPromptPENucleo(c)
 import { TOOL_SCHEMAS_PE, buildDispatchPE } from "../lib/paises/pe/tools.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
@@ -33,16 +38,13 @@ describe("prompt PE — legal peruano", () => {
     assert.match(SYSTEM_PROMPT_PE, /SUNAFIL/)
   })
 
-  test("prohíbe la Resolución 38 y la DT chilena (no basta con omitirlas)", () => {
-    // La línea que las menciona debe ser una PROHIBICIÓN explícita.
-    const linea = SYSTEM_PROMPT_PE.split("\n").find((l) => /Resoluci[oó]n 38/.test(l)) || ""
-    assert.ok(linea, "el prompt debe prohibir explícitamente la Resolución 38")
-    assert.match(linea, /NUNCA|PROHIBIDO|jam[aá]s/i)
-    const lineaDT = SYSTEM_PROMPT_PE.split("\n").find((l) => /Direcci[oó]n del Trabajo/.test(l)) || ""
-    assert.ok(lineaDT, "el prompt debe prohibir explícitamente la DT chilena")
-    assert.match(lineaDT, /NUNCA|PROHIBIDO|jam[aá]s/i)
-    // Y nada de prometer certificaciones (no existen en Perú).
-    assert.match(SYSTEM_PROMPT_PE, /PROHIBIDO prometer o insinuar/i)
+  test("no cita normas chilenas y prohíbe prometer certificación", () => {
+    // Ninguna línea puede citar la Resolución 38 ni la DT chilena salvo para prohibirlas.
+    for (const l of SYSTEM_PROMPT_PE.split("\n").filter((x) => /Resoluci[oó]n 38|Direcci[oó]n del Trabajo/.test(x))) {
+      assert.match(l, /NUNCA|PROHIBIDO|jam[aá]s/i, l.slice(0, 120))
+    }
+    assert.match(SYSTEM_PROMPT_PE, /SUNAFIL no certifica ni aprueba sistemas/)
+    assert.match(SYSTEM_PROMPT_PE, /jam[aá]s cites normas extranjeras/i)
   })
 
   test("protección de datos: Ley 29733, sin asesoría legal", () => {
@@ -60,14 +62,9 @@ describe("prompt PE — descuento 20% SOLO como cierre", () => {
     assert.doesNotMatch(SYSTEM_PROMPT_PE, /4 primeras facturas/i)
   })
 
-  test("y jamás proactivo ni de entrada", () => {
-    assert.match(SYSTEM_PROMPT_PE, /JAM[ÁA]S lo ofrezcas de entrada/i)
-  })
-
-  test("el monto rebajado lo entrega la tool (nunca el modelo)", () => {
-    assert.match(SYSTEM_PROMPT_PE, /escalonDescuento=1/)
-    assert.match(SYSTEM_PROMPT_PE, /NUNCA calcules t[uú] el 10% ni el 20%/i)
-  })
+  // "Jamás de entrada" y "el monto lo entrega la tool" son reglas GLOBALES del
+  // núcleo (descuento_solo_por_objecion en lib/paridad-prompt): las mide
+  // tests/paridad-prompt para los cuatro países.
 })
 
 describe("prompt PE — estilo", () => {
@@ -83,20 +80,15 @@ describe("prompt PE — estilo", () => {
 
   test("sin precios hardcodeados en el prompt (los montos viven en las tools)", () => {
     // Ningún monto en soles escrito a mano: ni S/70, ni S/525, ni S/100.
-    assert.doesNotMatch(SYSTEM_PROMPT_PE, /S\/\s?\d/)
+    // Excepción: los ejemplos de la ficha (FICHA_PE.ejemploMonto*), texto
+    // ilustrativo con el precio vigente del tramo 1-10, no una tarifa.
+    let resto = SYSTEM_PROMPT_PE
+    for (const ej of [FICHA_PE.ejemploMonto, FICHA_PE.ejemploMontoApp, FICHA_PE.ejemploPresupuesto]) resto = resto.split(ej).join("")
+    assert.doesNotMatch(resto, /S\/\s?\d/)
   })
 
-  test("sin capacitación como oferta (en Perú no existe)", () => {
-    // La única mención permitida es la regla que ordena NO mencionarla.
-    const lineas = SYSTEM_PROMPT_PE.split("\n").filter((l) => /capacitaci[oó]n/i.test(l))
-    for (const l of lineas) {
-      assert.match(
-        l,
-        /NO existe|no la menciones|Sin capacitaci[oó]n/i,
-        `capacitación ofrecida en: ${l.slice(0, 120)}`,
-      )
-    }
-  })
+  // Desde el 21-sep Perú SÍ capacita (alta por chat con los relatores de
+  // Chile): el test "sin capacitación como oferta" se retiró el 26-sep.
 })
 
 describe("tools PE — superficie Fase 1b", () => {
@@ -213,9 +205,9 @@ describe("webhook PE — gate de encendido y contención", () => {
     assert.match(ROUTE_PE, /botmaker_secret_pe/)
   })
 
-  test("el agente real corre con prompt y tools PE, country 'pe'", () => {
-    assert.match(ROUTE_PE, /getSystemPromptPE/)
-    assert.match(ROUTE_PE, /buildDispatchPE/)
-    assert.match(ROUTE_PE, /appendTurnV3\(contact, message, reply, "pe"\)/)
+  test("el agente real corre por el orquestador con el perfil PE, country 'pe'", () => {
+    // El turno corre por el orquestador único con el perfil PE (26-sep).
+    assert.match(ROUTE_PE, /procesarTurno\(contact, combinado, apiKey, PERFIL_TURNO_PE\)/)
+    assert.match(ROUTE_PE, /appendTurnV3\([^)]*"pe"\)/)
   })
 })

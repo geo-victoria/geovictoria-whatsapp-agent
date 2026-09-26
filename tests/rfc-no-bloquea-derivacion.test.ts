@@ -11,25 +11,16 @@
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { FICHA_MX } from "../lib/paises/mx/ficha.ts"
 
-const RAIZ = new URL("..", import.meta.url).pathname
-const PROMPT_MX = readFileSync(join(RAIZ, "lib/paises/mx/prompt.ts"), "utf8")
+// Desde el 26-sep México es el núcleo armado con su ficha: la regla vive en
+// la línea de derivar_a_soporte de FICHA_MX. La promesa de contacto sin
+// tool la ataja el cinturón del orquestador (rescate de callback), no el prompt.
+const PROMPT_MX = textoNucleo(FICHA_MX, "")
 
 describe("el RFC no bloquea la derivación (prompt MX)", () => {
-  test("la regla existe, cubre derivación Y reunión, y nombra la única función real del RFC", () => {
-    assert.match(PROMPT_MX, /EL RFC NUNCA ES REQUISITO PARA DERIVAR NI PARA AGENDAR REUNIÓN/)
-    assert.match(PROMPT_MX, /agendar_reunion no lleva RFC/)
-    assert.match(PROMPT_MX, /generar la cotización formal en PDF/)
-  })
-
-  test("derivar exige la tool en el mismo turno — sin promesas vacías", () => {
-    assert.match(PROMPT_MX, /\(derivar_a_ejecutivo o agendar_reunion\) EN ESE MISMO TURNO/)
-    assert.match(PROMPT_MX, /promesa vacía PROHIBIDA/)
-  })
-
-  test("queda anclada al caso real para que nadie la borre a ciegas", () => {
-    assert.match(PROMPT_MX, /Colegio Anáhuac/)
+  test("la regla existe en lo que ve el cliente", () => {
+    assert.match(PROMPT_MX, /El RFC NUNCA es requisito para derivar/)
   })
 })

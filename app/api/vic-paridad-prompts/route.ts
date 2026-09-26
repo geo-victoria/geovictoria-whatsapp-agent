@@ -40,30 +40,14 @@ const EJEMPLO: Record<PaisPrompt, string> = {
   pe: "51900000000",
 }
 
-/** El país corre sobre el NÚCLEO (kv prompt_nucleo_<pais>="on" o env VICKY_PROMPT_NUCLEO_<CC>): la medición es sobre lo que ve el cliente. */
-async function sobreNucleo(pais: PaisPrompt): Promise<boolean> {
-  const env = (process.env[`VICKY_PROMPT_NUCLEO_${pais.toUpperCase()}`] || "").trim().toLowerCase()
-  if (env === "on" || env === "1") return true
-  if (env === "off" || env === "0") return false
-  const kv = ((await getKvValue(`prompt_nucleo_${pais}`).catch(() => null)) || "").trim().toLowerCase()
-  return kv === "on" || kv === "1"
-}
-
+/** Los cuatro países corren sobre el NÚCLEO desde el 26-sep (los prompts
+ * propios de PE/CO/MX se retiraron): la medición es sobre lo que ve el cliente. */
 async function promptDe(pais: PaisPrompt): Promise<string> {
   const c = EJEMPLO[pais]
   if (pais === "cl") return (await import("@/app/api/vic-sales-agent-v3/prompt")).getSystemPromptV3(c, 20)
-  if (pais === "co") {
-    if (await sobreNucleo("co")) return (await import("@/lib/paises/co/prompt-nucleo")).getSystemPromptCONucleo(c, 20)
-    return (await import("@/lib/paises/co/prompt")).getSystemPromptCO(c, 20)
-  }
-  if (pais === "mx") {
-    // México corre sobre el núcleo cuando su orquestador está encendido (24-sep).
-    const orq = await import("@/lib/orquestador-turno").then((m) => m.orquestadorActivo("mx")).catch(() => false)
-    if (orq || (await sobreNucleo("mx"))) return (await import("@/lib/paises/mx/prompt-nucleo")).getSystemPromptMXNucleo(c, 20)
-    return (await import("@/lib/paises/mx/prompt")).getSystemPromptMX(c, 20)
-  }
-  if (await sobreNucleo("pe")) return (await import("@/lib/paises/pe/prompt-nucleo")).getSystemPromptPENucleo(c, 20)
-  return (await import("@/lib/paises/pe/prompt")).getSystemPromptPE(c, 20)
+  if (pais === "co") return (await import("@/lib/paises/co/prompt-nucleo")).getSystemPromptCONucleo(c, 20)
+  if (pais === "mx") return (await import("@/lib/paises/mx/prompt-nucleo")).getSystemPromptMXNucleo(c, 20)
+  return (await import("@/lib/paises/pe/prompt-nucleo")).getSystemPromptPENucleo(c, 20)
 }
 
 export async function GET(req: Request) {

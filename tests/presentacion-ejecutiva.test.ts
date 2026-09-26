@@ -28,6 +28,9 @@ import { join } from "node:path"
 // El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
 import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
 import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
+import { FICHA_PE } from "../lib/paises/pe/ficha.ts"
+import { FICHA_CO } from "../lib/paises/co/ficha.ts"
+import { FICHA_MX } from "../lib/paises/mx/ficha.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
 const leer = (p: string) => readFileSync(join(RAIZ, p), "utf8")
@@ -128,8 +131,8 @@ describe("el toque de las 2 horas presenta a la ejecutiva", () => {
 
   test("los tres prompts declaran la excepción para que el modelo no la contradiga", () => {
     assert.match(textoNucleo(FICHA_CL, ""), /el sistema presenta automáticamente al ejecutivo a cargo del registro/)
-    assert.match(leer("lib/paises/co/prompt.ts"), /el sistema presenta automáticamente a \$\{PERFIL_CO\.equipo\.ejecutivo\.nombre\}/)
-    assert.match(leer("lib/paises/mx/prompt.ts"), /la presentación automática de \$\{PERFIL_MX\.equipo\.ejecutivo\.nombre\}/)
+    // PE/CO/MX son el mismo núcleo con su ficha desde el 26-sep: la regla es una sola.
+    for (const f of [FICHA_PE, FICHA_CO, FICHA_MX]) assert.match(textoNucleo(f, ""), /el sistema presenta automáticamente al ejecutivo a cargo del registro/)
   })
 })
 

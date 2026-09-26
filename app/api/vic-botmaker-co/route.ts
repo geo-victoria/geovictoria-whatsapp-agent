@@ -11,7 +11,9 @@
  * (prompt, moneda, NIT/RUT/RFC); el canal de origen decide POR QUÉ LÍNEA se
  * responde. Antes de abrir las líneas CO/MX esto sí era imposible por config.
  *
- * HEREDA EL ESQUELETO ENDURECIDO DE CHILE (mismas piezas, misma razón):
+ * El TURNO corre por lib/orquestador-turno con el perfil del país — el mismo
+ * pipeline de Chile (el procesador propio de este archivo se retiró el 26-sep).
+ * Acá queda la PUERTA, con el esqueleto endurecido de Chile:
  *   - ASÍNCRONO: responde {reply:""} de inmediato y procesa con after();
  *     el reply llega por push por el CANAL CO. (Chile aprendió que los turnos
  *     largos superaban el timeout del webhook → chat sin respuesta + retries
@@ -25,35 +27,24 @@
  *
  * Modos:
  *   - VICKY_CO_ENABLED != "on": OBSERVACIÓN — registra y no responde.
- *   - body.simular === true: SÍNCRONO sin persistir ni lock — pruebas E2E.
+ *   - body.simular === true: SÍNCRONO — corre el MISMO turno del cliente
+ *     (lib/orquestador-turno) y persiste; solo sintéticos y probadores.
  *
  * Auth: header x-secret == BOTMAKER_SECRET_CO.
  */
 
 import {
   cierrePorBoton,
-  esTextoDeBotonDeCierre,
   normalizarMensajeEntrante,
 } from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
-import { runAgentLoop } from "@/lib/agent-loop"
-import { urlsDeToolsDelTurno, vieneDeUnaTool } from "@/lib/links-de-tools"
-import { detectarProcesoHumano, directivaProcesoHumano } from "@/lib/proceso-humano"
 import { PERFIL_CO } from "@/lib/paises/co"
-import { procesarTurno, simularTurno, orquestadorActivo } from "@/lib/orquestador-turno"
+import { procesarTurno, simularTurno } from "@/lib/orquestador-turno"
 import { PERFIL_TURNO_CO } from "@/lib/paises/co/turno"
-import { getSystemPromptCO, formatCotizacionExistenteCO } from "@/lib/paises/co/prompt"
-import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, derivacionDePais, paisConUmbral } from "@/lib/umbral-autonomia"
-import { TOOL_SCHEMAS_CO, buildDispatchCO, REUNIONES_CO_HABILITADAS } from "@/lib/paises/co/tools"
-import { TOOL_SCHEMAS_CO_UNIFICADAS, buildDispatchCOUnificado } from "@/lib/paises/co/tools-unificadas"
-import { getSystemPromptCONucleo } from "@/lib/paises/co/prompt-nucleo"
 import {
   fetchHistoryV3,
   appendTurnV3,
   markUserActivity,
-  closeFollowup,
-  scheduleConsensualFollowup,
-  getQuotePointer,
   setKvValue,
   getKvValue,
 } from "@/lib/supabase-persistence-v3"
@@ -66,11 +57,8 @@ import {
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
 import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
-import { partirEnBurbujas } from "@/lib/burbujas"
 import { reenviarSiNoEsDeEstePais } from "@/lib/ruteo-pais"
-import { resetLoop, clasificarSenalEspera, enrolarEnLoop } from "@/lib/loop-v2"
-import { avisarEquipoInterno } from "@/lib/alerta-interna"
-import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura } from "@/lib/voseo-v3"
+import { resetLoop } from "@/lib/loop-v2"
 import { transcribirAudio } from "@/lib/transcribe-audio"
 import { describirImagen } from "@/lib/describe-image"
 
@@ -96,83 +84,11 @@ const PIDE_TEXTO_IMAGEN_CO =
   "Uy, no pude ver bien la imagen 🙈 Me lo cuentas por texto porfa?"
 const ERROR_GENERICO_CO =
   "Disculpa, tuve un inconveniente para procesar tu mensaje. Me lo repites porfa? 🙏"
-// Despedida limpia si el modelo registró un opt-out y el turno quedó sin texto
-// (herencia del guardrail 2.6d chileno — caso real de Rodrigo en CL).
-const OPTOUT_GOODBYE_CO =
-  "Entendido, no te contactaremos más. Si en el futuro lo necesitas, aquí estaré. Que te vaya muy bien!! 🙌"
 // Circuit-breaker (espejo del chileno): tras 2 errores seguidos en la misma
 // conversación, se escala a humano UNA vez y luego se silencia (en CL este
 // loop llegó a 60 mensajes idénticos en producción).
 const ESCALADA_ERROR_CO =
   "Disculpa, sigo teniendo un problema técnico. Ya le avisé a un ejecutivo para que se comunique contigo a la brevedad 🙏"
-// Fallback que emite lib/agent-loop.ts cuando el turno termina SIN texto final.
-// Está TUTEADO (herencia chilena): en CO hay que detectarlo y reemplazarlo por
-// el genérico en usted (visto en simulación: un opt-out sin texto final lo
-// habría enviado tal cual). Copia literal — mantener en sync con agent-loop.
-const AGENT_LOOP_EMPTY_FALLBACK =
-  "Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo o decirme con qué te puedo ayudar?"
-
-// ── Re-engagement CO (mismo modelo de estados que Chile) ────────────────────
-// La cadencia se arma SOLO en conversaciones COMERCIALES; soporte/FAQ no
-// reciben nudges; despedidas naturales tampoco.
-const FOLLOWUP_SUPPORT_TOOLS_CO = new Set(["consultar_agente_soporte"])
-// Cierran el ciclo: la conversación quedó en manos humanas (derivación o
-// reunión agendada con un ejecutivo).
-const FOLLOWUP_CLOSING_TOOLS_CO = new Set(["derivar_a_ejecutivo", "agendar_reunion", "derivar_a_soporte", "registrar_solicitud_callback"])
-// Con el prompt núcleo (kv prompt_nucleo_co=on) las tools llevan los nombres
-// chilenos: la derivación es derivar_a_soporte / registrar_solicitud_callback.
-const DERIVACIONES_CO = new Set(["derivar_a_ejecutivo", "derivar_a_soporte", "registrar_solicitud_callback"])
-/** Colombia sobre el prompt núcleo + tools únicas (vic_kv prompt_nucleo_co="on"; env VICKY_PROMPT_NUCLEO_CO). */
-async function nucleoCOActivo(): Promise<boolean> {
-  const env = (process.env.VICKY_PROMPT_NUCLEO_CO || "").trim().toLowerCase()
-  if (env === "on" || env === "1") return true
-  if (env === "off" || env === "0") return false
-  const kv = ((await getKvValue("prompt_nucleo_co").catch(() => null)) || "").trim().toLowerCase()
-  return kv === "on" || kv === "1"
-}
-/** Con el núcleo, la derivación del umbral nombra la tool ÚNICA (derivar_a_soporte). */
-function derivacionCOUnificada(d: ReturnType<typeof derivacionDePais>): ReturnType<typeof derivacionDePais> {
-  return { ...d, tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: REUNIONES_CO_HABILITADAS }
-}
-const FOLLOWUP_COMMERCIAL_TOOLS_CO = new Set([
-  "cotizar_referencial",
-  "generar_link_cotizadora",
-])
-const FAREWELL_RE_CO =
-  /\b(gracias|chao|chau|nos vemos|hasta luego|adi[oó]s|que est[eé] bien|feliz d[ií]a)\b/iu
-
-type ToolCallRecordCO = { name: string; ok: boolean; output?: unknown }
-
-// ── Ruteo de modelo por turno (paridad con Chile, decisión de costos 11-jul) ──
-// Sonnet SOLO en el flujo de cotización (precios/configuración/cotización
-// formal), donde la calidad es crítica; Haiku para el resto (saludos, FAQ,
-// soporte) — 3× más barato en el mismo pipeline que Chile ya validó.
-const MODELO_COTIZACION_CO = (
-  process.env.ANTHROPIC_SALES_AGENT_MODEL_V3 || "claude-sonnet-4-5-20250929"
-).trim()
-const MODELO_SIMPLE_CO = (
-  process.env.ANTHROPIC_SALES_AGENT_MODEL_SIMPLE || "claude-haiku-4-5-20251001"
-).trim()
-
-// El mensaje entrante pinta cotización/precio (marcadores CO: COP, NIT,
-// mensualidad; sin UF ni chilenismos).
-const COTIZ_MSG_RE_CO =
-  /cotiz|precio|cu[aá]nto|cuesta|\bvale\b|\bvalor\b|\bcaro\b|barat|descuento|rebaj|presupuesto|plan|oferta|pago inicial|mensualidad|reloj|\bNIT\b|\d+\s*(trabajador|persona|emplead|colaborador|usuario)|somos\s+\d+/i
-// La ÚLTIMA respuesta de Vicky ya estaba cotizando (sigue el flujo aunque el
-// cliente solo conteste "sí"/"listo"/un dato suelto como el correo o el NIT).
-const COTIZ_HIST_RE_CO =
-  /cotiz|\/mes|pago inicial|mensualidad|activaci[oó]n|instalaci[oó]n|\bplan\b|\bpunto|marca|reloj|\bNIT\b|correo|cu[aá]nt[ao]s?\s+person|trabajador|usuario/i
-
-function esFlujoCotizacionCO(
-  message: string,
-  history: Array<{ role: string; content: string }>,
-): boolean {
-  if (COTIZ_MSG_RE_CO.test(message)) return true
-  const lastAssistant =
-    [...history].reverse().find((m) => m.role === "assistant")?.content || ""
-  return COTIZ_HIST_RE_CO.test(lastAssistant)
-}
-
 type BotmakerBody = {
   contact?: string
   message?: string
@@ -192,10 +108,6 @@ type BotmakerBody = {
   simular?: boolean
   /** Solo con simular: transcripción del adjunto (reemplaza a la visión). */
   descripcionAdjunto?: string
-  /** Solo con simular: lee el historial real y persiste el turno (E2E multi-turno; sintéticos 57900000xxx y probadores). */
-  conHistorial?: boolean
-  /** Solo con simular: fuerza el prompt NÚCLEO + tools únicas (true) o el clásico (false) sin tocar el kv. */
-  nucleo?: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -215,337 +127,6 @@ async function capturarPayloadDebug(body: unknown): Promise<void> {
   }
 }
 
-async function processOneTurnCO(contact: string, message: string, apiKey: string): Promise<void> {
-  const history = await fetchHistoryV3(contact)
-  // PROCESO ÚNICO (espejo CL, 20-jul): conversación nueva con ejecutivo ya
-  // trabajando al contacto → candado comercial + directiva.
-  if (history.length === 0) {
-    const proceso = await detectarProcesoHumano(contact, "co").catch(() => null)
-    if (proceso) history.push({ role: "assistant", content: directivaProcesoHumano(proceso) })
-  }
-  // Anti-amnesia (espejo CL): si ya existe una cotización formal, se inyecta
-  // su estado al prompt (no re-pedir datos, no regenerar, reenviar el link).
-  const quotePointer = await getQuotePointer(contact).catch(() => null)
-  const contextoCotizacion = formatCotizacionExistenteCO(quotePointer || undefined)
-  // Con formal vigente el turno ES de cotización aunque el mensaje no lo diga.
-  const modelo =
-    quotePointer || esFlujoCotizacionCO(message, history)
-      ? MODELO_COTIZACION_CO
-      : MODELO_SIMPLE_CO
-  console.log(
-    `[vic-co-modelo] contact=${contact} modelo=${modelo} flujoCotizacion=${modelo === MODELO_COTIZACION_CO} formal=${!!quotePointer}`,
-  )
-  // Umbral de venta autónoma (Lalo 08-ago, replicado de CL): bloque por
-  // conversación + directiva determinista por dotación declarada, con la
-  // tool de derivación de este país. Fail-open: sin datos, no acota nada.
-  const umbralInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
-  const nucleoCO = await nucleoCOActivo()
-  const derivPais = nucleoCO ? derivacionCOUnificada(derivacionDePais(contact)) : derivacionDePais(contact)
-  const contextoUmbral = umbralInfo ? formatUmbralParaPrompt(umbralInfo.umbral, umbralInfo.origen, derivPais) : ""
-  const textoCliente = [message, ...history.filter((m) => m.role === "user").map((m) => String(m.content || ""))].join("\n")
-  const dotacionDetectada = umbralInfo ? dotacionSobreUmbral(textoCliente, umbralInfo.umbral) : null
-  const directivaUmbral = dotacionDetectada && umbralInfo ? formatDirectivaSobreUmbral(dotacionDetectada, umbralInfo.umbral, derivPais) : ""
-  const turnoCO = await (await import("@/lib/contexto-turno")).contextoDeTurno(contact, message, history, { zona: "ciudad", documento: "NIT" }).catch(() => ({ contexto: "", directivas: "" }))
-  const systemPromptCO = contextoUmbral + turnoCO.contexto + contextoCotizacion + (nucleoCO ? getSystemPromptCONucleo(contact, umbralInfo?.umbral) : getSystemPromptCO(contact, umbralInfo?.umbral)) + contextoUmbral + directivaUmbral + turnoCO.directivas
-  const dispatchCO = nucleoCO ? buildDispatchCOUnificado(contact) : buildDispatchCO(contact)
-  const schemasCO = (nucleoCO ? TOOL_SCHEMAS_CO_UNIFICADAS : TOOL_SCHEMAS_CO) as unknown as unknown[]
-  if (nucleoCO) console.log(`[vic-co] prompt NÚCLEO + tools únicas contact=${contact}`)
-  const result = await runAgentLoop({
-    systemPrompt: systemPromptCO,
-    history,
-    userMessage: message,
-    apiKey,
-    contact,
-    model: modelo,
-    tools: {
-      schemas: schemasCO,
-      dispatch: dispatchCO,
-    },
-  })
-  // El fallback del agent-loop viene tuteado (Chile): en CO se trata como
-  // "turno sin texto". OJO: comparar ANTES de sanear — quitarSignosApertura
-  // le quita el '¿' y la igualdad ya no calzaría.
-  const rawReply = (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
-  let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(rawReply)))
-
-  // Guardrail anti-link ALUCINADO de documentos (espejo del 2.4b chileno,
-  // caso Cynthia 21-jul): Vicky no tiene documentos en Drive/Dropbox — todo
-  // link a esos dominios es fabricado. En CO no existe la certificación DT,
-  // así que siempre se elimina el link.
-  const LINK_FABRICADO_CO =
-    /https?:\/\/(?:drive|docs)\.google\.com\/\S+|https?:\/\/(?:www\.)?(?:dropbox|wetransfer|mega)\.[a-z]+\/\S+/gi
-  if (LINK_FABRICADO_CO.test(reply)) {
-    console.error(`[vic-co] LINK_FABRICADO contact=${contact} reply=${JSON.stringify(reply.slice(0, 300))}`)
-    reply = reply.replace(LINK_FABRICADO_CO, "(te lo hago llegar enseguida)").trim()
-  }
-  // ALLOWLIST de dominios (caso Transportes Viig CL, 22-jul): todo link cuyo
-  // dominio no esté en la lista blanca se considera fabricado y se retira.
-  // PROCEDENCIA ANTES QUE DOMINIO (26-jul, espejo del webhook CL): una URL que
-  // salió textual de una tool OK de este turno la produjo nuestro backend — se
-  // respeta aunque su dominio no esté enumerado.
-  const urlsDeToolsCo = urlsDeToolsDelTurno(result.toolCalls)
-  // El dominio de la DEMO solo vale en su raíz (caso VMW Ingeniería 04-ago:
-  // el modelo fabricó /checkout?quote=... sobre el dominio legítimo de la
-  // demo y pasó el allowlist). Cualquier path/query en ese dominio que no
-  // venga de una tool es fabricado.
-  const DOMINIOS_VICKY_CO =
-    /^https?:\/\/(?:(?:[a-z0-9-]+\.)*(?:geovictoria\.com|supabase\.co|wa\.me|cal\.com|mercadopago\.[a-z.]+|mpago\.[a-z]+|youtube\.com|youtu\.be)(?:[/?#]|$)|geovictoria-demo-agent\.vercel\.app\/?$)/i
-  for (const u of reply.match(/https?:\/\/[^\s)]+/gi) || []) {
-    if (DOMINIOS_VICKY_CO.test(u)) continue
-    if (vieneDeUnaTool(u, urlsDeToolsCo)) {
-      console.log(`[vic-co] LINK_DE_TOOL_RESCATADO contact=${contact} url=${u.slice(0, 140)}`)
-      continue
-    }
-    console.error(`[vic-co] LINK_FUERA_DE_ALLOWLIST contact=${contact} url=${u.slice(0, 140)}`)
-    reply = reply.split(u).join("(te lo hago llegar enseguida)").trim()
-  }
-
-  let toolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
-
-  // ── Guardrails anti-alucinación (espejo de 2.6b/2.6c chilenos) ──
-  // Si el reply AFIRMA que una reunión quedó agendada o que el equipo lo va a
-  // contactar, pero NINGUNA tool lo respalda este turno, se re-corre el loop
-  // forzando la tool; si tampoco se concreta, NO se confirma en falso.
-  // Como FUNCIONES de texto: se evalúan sobre el reply original Y sobre el del
-  // reintento — si el reintento ya no afirma nada, ESA es la respuesta buena.
-  const afirmaReunionListaEn = (t: string) =>
-    /\breuni[oó]n\b[^.]{0,40}(qued[oó]|est[aá]|fue)[^.]{0,18}\b(agendad|reagendad|confirmad|coordinad)/i.test(t) ||
-    /\b(agend[eé]|reagend[eé])(?![a-záéíóúñ])[^.]{0,25}\breuni[oó]n\b/i.test(t) ||
-    /\bse\s+l[ao]\s+(agend[eé]|reagend[eé])/i.test(t)
-  const afirmaContactoListoEn = (t: string) =>
-    /\b(un\s+ejecutiv[oa]|el\s+equipo|nuestro\s+equipo|un\s+asesor|Laura)\b[^.]{0,50}\b(l[oe]\s+(contactar[aá]|llamar[aá]|va\s+a\s+(contactar|llamar))|se\s+(pondr[aá]|comunicar[aá]|contactar[aá]))/i.test(t)
-  // Caso VMW Ingeniería (04-ago): el modelo afirmó "aquí pagas tu cotización"
-  // + "te llegó el PDF a tu correo" con un link FABRICADO, sin llamar la tool.
-  const afirmaCotizacionListaEn = (t: string) =>
-    /\bcotizaci[oó]n\b[^.]{0,60}\b(formal|en\s+pdf)\b[^.]{0,50}\b(list[ao]|generad[ao]|enviad[ao]|qued[oó])/i.test(t) ||
-    /\b(aqu[ií]|en\s+este\s+(link|enlace))\b[^.]{0,60}\b(pagas?|aceptas?)\b[^.]{0,40}\bcotizaci[oó]n\b/i.test(t) ||
-    /\b(te\s+(lleg[oó]|envi[eé]|mand[eé])|ya\s+(te\s+)?(lleg[oó]|sali[oó]))\b[^.]{0,40}\b(pdf|cotizaci[oó]n)\b/i.test(t)
-  const afirmaReunionLista = afirmaReunionListaEn(reply)
-  const afirmaContactoListo = afirmaContactoListoEn(reply)
-  const afirmaCotizacionLista = afirmaCotizacionListaEn(reply)
-  const realAgenda = toolCalls.some(
-    (c) => (c.name === "agendar_reunion" || c.name === "reagendar_reunion") && c.ok,
-  )
-  const realContacto = toolCalls.some(
-    (c) => (DERIVACIONES_CO.has(c.name) || c.name === "agendar_reunion") && c.ok,
-  )
-  const realFormal = toolCalls.some(
-    (c) => (c.name === "generar_link_cotizadora" || c.name === "actualizar_cotizacion") && c.ok,
-  )
-  const alucinacion =
-    (afirmaReunionLista && !realAgenda) ||
-    (!afirmaReunionLista && afirmaContactoListo && !realContacto) ||
-    (afirmaCotizacionLista && !realFormal)
-  if (alucinacion) {
-    const FORZAR_TOOL =
-      "\n\n# Instrucción de sistema (este turno)\n" +
-      "Estás por confirmarle al cliente algo que NO puedes afirmar sin EJECUTAR la tool correspondiente. " +
-      "Si confirmó un horario de reunión, llama agendar_reunion (o reagendar_reunion si ya tenía una). " +
-      "Si pidió que lo contacten, llama derivar_a_ejecutivo con los datos que ya entregó. " +
-      "Si le estás entregando la cotización formal o un link de pago, llama generar_link_cotizadora con los datos que ya te dio — JAMÁS escribas un link de memoria: el único link válido es el que devuelve la tool. " +
-      "SOLO después de que la tool devuelva ok confirma, usando su mensajeParaProspecto. " +
-      "Si faltan datos obligatorios, PÍDELOS en vez de afirmar que ya quedó listo."
-    const retry = await runAgentLoop({
-      systemPrompt: systemPromptCO + FORZAR_TOOL,
-      history,
-      userMessage: message,
-      apiKey,
-      contact,
-      model: MODELO_COTIZACION_CO,
-      tools: { schemas: schemasCO, dispatch: dispatchCO },
-    }).catch(() => null)
-    const retryCalls = ((retry?.toolCalls || []) as ToolCallRecordCO[])
-    const retryOk = retryCalls.some(
-      (c) =>
-        (c.name === "agendar_reunion" ||
-          c.name === "reagendar_reunion" ||
-          c.name === "derivar_a_ejecutivo" ||
-          c.name === "generar_link_cotizadora" ||
-          c.name === "actualizar_cotizacion") &&
-        c.ok,
-    )
-    const retryReply = (retry?.reply || "").trim()
-    if (retryOk && retryReply && retryReply !== AGENT_LOOP_EMPTY_FALLBACK) {
-      console.warn(`[vic-co] ALUCINACION_RECUPERADA contact=${contact}: el reintento forzó la tool.`)
-      reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))
-      toolCalls = retryCalls
-    } else if (
-      retryReply &&
-      retryReply !== AGENT_LOOP_EMPTY_FALLBACK &&
-      !afirmaReunionListaEn(retryReply) &&
-      !afirmaContactoListoEn(retryReply) &&
-      !afirmaCotizacionListaEn(retryReply)
-    ) {
-      // El reintento corrigió SIN tool: la afirmación original era ESPURIA —
-      // no había ninguna reunión ni contacto en juego. Caso Juan Angel
-      // (+573138157184, 24-jul): preguntó "Anual?" por el precio, el modelo
-      // alucinó un contacto, y el enlatado de abajo le inventó una reunión
-      // ("tu reunión quedó pendiente de registro") — respuesta del cliente:
-      // "Cual reunión". El reintento que responde SIN agendar nada es el
-      // resultado correcto, no un fallo.
-      console.warn(
-        `[vic-co] ALUCINACION_CORREGIDA_SIN_TOOL contact=${contact}: la afirmación era espuria; va la respuesta del reintento.`,
-      )
-      reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(retryReply)))
-      toolCalls = retryCalls
-    } else {
-      console.error(
-        `[vic-co] ALUCINACION_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
-      )
-      // Auditoría 20-jul: el fallo técnico NO se le cobra al cliente
-      // re-pidiéndole datos que ya están en el historial — se avisa al
-      // equipo para completar el registro a mano.
-      reply = afirmaReunionLista
-        ? "Disculpa, tuve un problema técnico y tu reunión quedó pendiente de registro — ya avisé al equipo para dejarla agendada con lo que me indicaste. Te confirmo apenas esté lista, no necesitas reenviarme nada 🙌"
-        : afirmaCotizacionLista
-          ? "Disculpa, tu cotización formal quedó pendiente por un problema técnico — la estoy preparando con los datos que ya me diste y te la envío por aquí apenas esté lista. No necesitas reenviarme nada 🙌"
-          : "Disculpa, tuve un problema técnico registrando tu solicitud — ya avisé al equipo para que igual te contacten con los datos que me diste. No necesitas reenviarme nada 🙌"
-      await avisarEquipoInterno(
-        `⚠️ Registro de ${afirmaReunionLista ? "REUNIÓN" : afirmaCotizacionLista ? "COTIZACIÓN FORMAL" : "CALLBACK"} falló (tras reintento, línea CO) — contacto +${contact}. El cliente quedó con la promesa: revisar la conversación en Botmaker y completar a mano.`,
-      )
-    }
-  }
-  // Telemetría de diagnóstico: si el turno tocó tools de agenda, dejar el
-  // detalle exacto (input/output de cada tool) legible desde Supabase
-  // (vic_kv.debug_last_co_tools) — los runtime logs de Vercel no siempre son
-  // accesibles y estos flujos han tenido éxitos falsos difíciles de rastrear.
-  if (toolCalls.some((c) => /reunion|disponibilidad/.test(c.name))) {
-    setKvValue(
-      "debug_last_co_tools",
-      JSON.stringify({
-        at: new Date().toISOString(),
-        contact,
-        reply: reply.slice(0, 200),
-        tools: toolCalls.map((c) => ({
-          name: c.name,
-          ok: c.ok,
-          input: (c as unknown as { input?: unknown }).input,
-          output: c.output,
-        })),
-      }).slice(0, 8000),
-    ).catch(() => {})
-  }
-
-  // Opt-out con turno sin texto → despedida limpia, no un mensaje de error.
-  const callNoContactar = toolCalls.find((c) => c.name === "marcar_no_contactar" && c.ok)
-  if (callNoContactar && (!reply.trim() || reply === ERROR_GENERICO_CO)) {
-    reply = OPTOUT_GOODBYE_CO
-  }
-  if (!reply.trim()) reply = ERROR_GENERICO_CO
-
-  await appendTurnV3(contact, message, reply, "co").catch((e) =>
-    console.error(`[vic-co] error persistiendo turno contact=${contact}:`, e),
-  )
-
-  // Estado del ciclo de re-engagement según cómo terminó el turno (espejo del
-  // bloque 5 chileno, con el set de tools CO). Best-effort.
-  try {
-    const tipoNoContactar =
-      (callNoContactar?.output as { tipo?: string } | undefined)?.tipo === "perdido"
-        ? "perdido"
-        : "opt_out"
-    const segConsensuado = toolCalls.find((c) => c.name === "programar_seguimiento" && c.ok)
-    const usoCierre = toolCalls.some((c) => FOLLOWUP_CLOSING_TOOLS_CO.has(c.name) && c.ok)
-    const esSoporte = toolCalls.some((c) => FOLLOWUP_SUPPORT_TOOLS_CO.has(c.name) && c.ok)
-    const esDespedida = message.trim().length <= 30 && FAREWELL_RE_CO.test(message)
-    // Espejo del chileno (caso Rodrigo 17-jul): rechazo explícito → no re-armar.
-    // Un botón de cierre ("Elegimos otro proveedor" / "Ya no lo
-    // necesitamos") ES un rechazo, aunque su texto no tenga ninguna de
-    // las palabras del patrón. Ver lib/respuesta-boton.ts.
-    const esRechazo =
-      esTextoDeBotonDeCierre(message) ||
-      (message.trim().length <= 60 &&
-      /\b(no\s+gracias|no\s+(me|nos)\s+interesa|no\s+estoy\s+interesad\w+|ya\s+no\s+(lo\s+)?quiero|no\s+lo\s+quiero|no\s+quiero\s+(nada|seguir|avanzar)|no\s+necesito\s+(nada|informaci[oó]\w*|cotiz\w+|el\s+servicio)|no\s+insist\w+|dej\w+\s+de\s+(escribir\w*|hablar\w*|insistir\w*)|no\s+me\s+escrib\w+)\b/i.test(
-        message,
-      ))
-    const comercialEsteTurno = toolCalls.some(
-      (c) => FOLLOWUP_COMMERCIAL_TOOLS_CO.has(c.name) && c.ok,
-    )
-    // Conversación ya comercial: hubo un estimado/cotización antes (marcadores
-    // del mensaje canónico CO: "/mes", "pago inicial", "cotización").
-    const yaHuboEstimacion = history.some(
-      (m) => m.role === "assistant" && /\/mes|pago inicial|cotizaci[oó]n/i.test(m.content || ""),
-    )
-    // Captura de lead EN CURSO (feedback CO 15-jul, caso María Fernanda):
-    // Vicky está pidiendo datos para derivar a ejecutivo (ej. >50 personas) y
-    // el cliente se queda en visto. Eso ES comercial — un lead enterprise sin
-    // seguimiento es la peor fuga. Marcador: Vicky pidió nombre/empresa/correo
-    // o mencionó al equipo comercial/ejecutivo en sus últimos mensajes.
-    const capturaLeadEnCurso = history.slice(-6).some(
-      (m) =>
-        m.role === "assistant" &&
-        /(correo|nombre de tu empresa|me confirmas tu nombre|equipo comercial|ejecutivo te contactar|consultor)/i.test(
-          m.content || "",
-        ),
-    )
-    const esComercial =
-      comercialEsteTurno || yaHuboEstimacion || !!quotePointer || capturaLeadEnCurso
-    // Señal de espera implícita ("lo veo con mi jefe", "la próxima semana"…):
-    // UN toque único en el plazo inferido. Sin señal: la conversación
-    // comercial se ENROLA AL LOOP V2 (decisión Lalo 25-jul: el loop reemplaza
-    // TODOS los toques anteriores — la escalera armFollowup queda muerta).
-    const armarSegunSenal = async () => {
-      const senal = clasificarSenalEspera(message, "co", contact)
-      if (senal) {
-        await scheduleConsensualFollowup(contact, senal.cuando.toISOString(), "co")
-        console.log(
-          `[vic-co][followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
-        )
-      } else {
-        await enrolarEnLoop(contact, "co").catch(() => {})
-      }
-    }
-    if (callNoContactar) {
-      await closeFollowup(contact, tipoNoContactar, "co")
-      console.log(`[vic-co][followup] ${tipoNoContactar} (tool) → ciclo cerrado contact=${contact}`)
-    } else if (segConsensuado) {
-      const cuandoIso = (segConsensuado.output as { cuandoIso?: string } | undefined)?.cuandoIso
-      if (cuandoIso) {
-        await scheduleConsensualFollowup(contact, cuandoIso, "co")
-        console.log(`[vic-co][followup] consensuado contact=${contact} cuando=${cuandoIso}`)
-      } else {
-        await armarSegunSenal()
-      }
-    } else if (usoCierre) {
-      await closeFollowup(contact, "derivado", "co")
-    } else if (esSoporte) {
-      // Pidió soporte → cero seguimiento/proactividad aunque la conversación
-      // sea comercial (decisión de costos 11-jul, igual que Chile).
-      await closeFollowup(contact, "soporte", "co")
-    } else if (reply && (!esDespedida || !!quotePointer) && esComercial) {
-      // Espejo del chileno (caso Constanza 17-jul): con cotización FORMAL
-      // vigente, la despedida corta ("muchas gracias") no frena la cadencia —
-      // es recibo cortés, no cierre.
-      await armarSegunSenal()
-    }
-    // else: conversación no comercial → sin nudges.
-  } catch (err) {
-    console.error(`[vic-co][followup] error actualizando seguimiento contact=${contact}:`, err)
-  }
-  // CINTURÓN DE PRECIOS SOBRE EL UMBRAL (Lalo 18-ago, paridad CL — caso
-  // David Oviedo): con dotación declarada sobre el umbral, ningún mensaje
-  // con precio sale al cliente aunque el modelo lo escriba a mano.
-  if (dotacionDetectada && reply) {
-    const cinturon = cinturonPrecioSobreUmbral(reply)
-    if (cinturon.habiaPrecio) {
-      console.warn(`[umbral-cinturon] precio en texto con dotación ${dotacionDetectada} sobre el umbral para ${contact} — respuesta reemplazada`)
-      reply = cinturon.reemplazo
-    }
-  }
-  // Burbujas por punto aparte (Rodrigo 09-ago, paridad CL): cada párrafo
-  // es un mensaje; los bloques estructurados no se fragmentan.
-  let sent = true
-  for (const [bi, burbuja] of partirEnBurbujas(reply).entries()) {
-    if (bi > 0) await sendTypingIndicator(contact, true).catch(() => {})
-    sent = await sendBotmakerMessage(contact, burbuja, CANAL_CO())
-    if (!sent) break
-  }
-  console.log(
-    `[vic-co] turno contact=${contact} iter=${result.iterations} tools=${result.toolCalls.map((t) => t.name).join(",") || "-"} sent=${sent}`,
-  )
-}
-
-// Espejo de processBurst chileno (misma semántica de lock/carrera/tope).
 async function processBurstCO(contact: string, apiKey: string, seedMessage?: string): Promise<void> {
   let holdsLock = true
   let turns = 0
@@ -571,11 +152,10 @@ async function processBurstCO(contact: string, apiKey: string, seedMessage?: str
 
       const combinado = pending.map((p) => p.message).join("\n").slice(0, MAX_INPUT_CHARS)
       try {
-        // ORQUESTADOR ÚNICO (22-sep, paso 3): con vic_kv `orquestador_co`="on" el
-        // turno corre por lib/orquestador-turno (el pipeline chileno completo con
-        // el perfil CO); apagado, sigue el procesador propio de este webhook.
-        if (await orquestadorActivo("co")) await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_CO)
-        else await processOneTurnCO(contact, combinado, apiKey)
+        // Orquestador único: el turno corre SIEMPRE por lib/orquestador-turno
+        // (el mismo pipeline de Chile con el perfil del país). El procesador
+        // propio de este webhook se retiró el 26-sep.
+        await procesarTurno(contact, combinado, apiKey, PERFIL_TURNO_CO)
       } catch (err) {
         console.error(`[vic-co] error en turno contact=${contact}:`, err)
         // Circuit-breaker (espejo CL): si los últimos turnos ya fueron errores,
@@ -790,91 +370,23 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({ reply: "" })
     }
 
-    // Modo simulación (pruebas E2E): síncrono, sin lock, sin persistir.
+    // Modo simulación (pruebas E2E): corre el MISMO turno que el cliente —
+    // lib/orquestador-turno con el perfil del país: prompt, tools, cinturones,
+    // hitos y persistencia— y captura la respuesta. Acotado a sintéticos y
+    // probadores internos: nunca ensucia el chat de un cliente real.
     if (simulacion) {
-      // ORQUESTADOR ÚNICO en simulación: `orquestador:true` (o el kv encendido)
-      // corre la tubería completa —prompt, tools, cinturones, hitos, persistencia—
-      // y captura la respuesta. Acotado a sintéticos 57900000xxx y probadores.
-      {
-        const b = body as { orquestador?: boolean }
-        const limpio = String(contact || "").replace(/\D/g, "")
-        const pruebaOrq =
-          /^57900000\d{3,4}$/.test(limpio) ||
-          (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(limpio)
-        const usarOrq = b.orquestador === true || (b.orquestador !== false && (await orquestadorActivo("co")))
-        if (usarOrq && pruebaOrq) {
-          const cap = await simularTurno(contact, message, apiKey, PERFIL_TURNO_CO)
-          const hist = await fetchHistoryV3(contact).catch(() => [])
-          return NextResponse.json({ reply: cap.reply, tools: cap.tools, pais: "co", simulacion: true, orquestador: true, conHistorial: true, turnosEnHistorial: hist.length })
-        }
+      const limpio = String(contact || "").replace(/\D/g, "")
+      const prueba =
+        /^57900000\d{3,4}$/.test(limpio) ||
+        (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(limpio)
+      if (!prueba) {
+        return NextResponse.json({ ok: false, error: "simulación solo para números de prueba y probadores internos", pais: "co" }, { status: 403 })
       }
-      // Con `conHistorial` lee el historial real y persiste el turno (E2E
-      // multi-turno), ACOTADO a sintéticos 57900000xxx y probadores internos.
-      const pruebaOk =
-        /^57900000\d{3,4}$/.test(String(contact || "").replace(/\D/g, "")) ||
-        (await import("@/lib/funnel-analysis").then((m) => m.metricsContactSet()).catch(() => new Set<string>())).has(
-          String(contact || "").replace(/\D/g, ""),
-        )
-      const conHist = body.conHistorial === true && pruebaOk
-      const histSim = conHist ? await fetchHistoryV3(contact).catch(() => []) : []
-      const modeloSim = esFlujoCotizacionCO(message, histSim)
-        ? MODELO_COTIZACION_CO
-        : MODELO_SIMPLE_CO
-      // Espejo del camino real: el mismo interruptor decide prompt y tools.
-      const nucleoSim = body.nucleo === true ? true : body.nucleo === false ? false : await nucleoCOActivo()
-      const result = await runAgentLoop({
-        systemPrompt: await (async () => {
-          // Espejo del camino real (umbral 08-ago): la simulación E2E debe
-          // ver el mismo prompt que el cliente.
-          const uInfo = paisConUmbral(contact) ? await umbralPrecios(contact).catch(() => null) : null
-          const dP = nucleoSim ? derivacionCOUnificada(derivacionDePais(contact)) : derivacionDePais(contact)
-          const cU = uInfo ? formatUmbralParaPrompt(uInfo.umbral, uInfo.origen, dP) : ""
-          const dot = uInfo ? dotacionSobreUmbral(message, uInfo.umbral) : null
-          const dir = dot && uInfo ? formatDirectivaSobreUmbral(dot, uInfo.umbral, dP) : ""
-          const t = await (await import("@/lib/contexto-turno")).contextoDeTurno(contact, message, histSim, { zona: "ciudad", documento: "NIT" }).catch(() => ({ contexto: "", directivas: "" }))
-          return cU + t.contexto + (nucleoSim ? getSystemPromptCONucleo(contact, uInfo?.umbral) : getSystemPromptCO(contact, uInfo?.umbral)) + cU + dir + t.directivas
-        })(),
-        history: histSim,
-        userMessage: message,
-        apiKey,
-        contact,
-        model: modeloSim,
-        tools: {
-          schemas: (nucleoSim ? TOOL_SCHEMAS_CO_UNIFICADAS : TOOL_SCHEMAS_CO) as unknown as unknown[],
-          dispatch: nucleoSim ? buildDispatchCOUnificado(contact) : buildDispatchCO(contact),
-        },
-      })
-      // Mismos guardrails de texto final del camino real (fallback tuteado del
-      // loop → usted; opt-out sin texto → despedida) para que la simulación
-      // refleje lo que vería el cliente. La comparación va ANTES de sanear.
-      const simRaw =
-        (result.reply || "").trim() === AGENT_LOOP_EMPTY_FALLBACK ? "" : result.reply || ""
-      let reply = quitarSignosApertura(normalizarFormatoWhatsApp(sanitizarVoseo(simRaw)))
-      const simToolCalls = (result.toolCalls || []) as ToolCallRecordCO[]
-      if (
-        simToolCalls.some((c) => c.name === "marcar_no_contactar" && c.ok) &&
-        (!reply.trim() || reply === ERROR_GENERICO_CO)
-      ) {
-        reply = OPTOUT_GOODBYE_CO
-      }
-      if (!reply.trim()) reply = ERROR_GENERICO_CO
-      if (conHist) {
-        await appendTurnV3(contact, message, reply, "co").catch((e) =>
-          console.error(`[vic-co][sim] no se pudo persistir el turno contact=${contact}:`, e),
-        )
-      }
-      return NextResponse.json({
-        reply,
-        handoff: result.handoff,
-        pais: "co",
-        simulacion: true,
-        conHistorial: conHist,
-        nucleo: nucleoSim,
-        turnosEnHistorial: histSim.length,
-        modelo: modeloSim,
-        tools: (result.toolCalls || []).map((t) => (t as ToolCallRecordCO).name),
-      })
+      const cap = await simularTurno(contact, message, apiKey, PERFIL_TURNO_CO)
+      const hist = await fetchHistoryV3(contact).catch(() => [])
+      return NextResponse.json({ reply: cap.reply, tools: cap.tools, pais: "co", simulacion: true, orquestador: true, conHistorial: true, turnosEnHistorial: hist.length })
     }
+
     // ── Pipeline endurecido (herencia chilena) ──
     // Re-engagement: el cliente habló → pausar la cadencia en curso (si la había).
     await markUserActivity(contact, "co").catch(() => {})
@@ -904,7 +416,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
       await setKvValue(`msgseen_${msgHash}`, String(Date.now())).catch(() => {})
     }
-
 
     const lockResult = await acquireLock(contact, msgHash)
     if (!lockResult.acquired) {

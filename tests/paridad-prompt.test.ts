@@ -1,28 +1,17 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import { REGLAS_UNIVERSALES, PAISES_PROMPT, brechasDe, reglasExigidas, type PaisPrompt } from "../lib/paridad-prompt.ts"
 
-// Se lee el TEXTO FUENTE de cada prompt, no el módulo: (1) los prompts de CO y
-// MX importan su índice sin extensión y node --test no lo resuelve; (2) las
-// reglas son texto, así que el archivo es la fuente correcta y no hay que
-// construir el prompt ni tocar la red.
-const ARCHIVO: Record<PaisPrompt, string> = {
-  // EL NÚCLEO (21-sep): el texto de Chile vive en lib/prompt-nucleo/texto.ts y
-  // app/api/vic-sales-agent-v3/prompt.ts solo lo arma con su ficha. Las 21
-  // reglas se leen de ahí; cuando PE/CO/MX consuman el núcleo, sus filas
-  // pasan a apuntar al mismo archivo y la paridad deja de poder romperse.
-  cl: "lib/prompt-nucleo/texto.ts",
-  co: "lib/paises/co/prompt.ts",
-  mx: "lib/paises/mx/prompt.ts",
-  pe: "lib/paises/pe/prompt.ts",
-}
+// Los CUATRO países son el núcleo (lib/prompt-nucleo/texto.ts) armado con su
+// ficha: los prompts propios de PE/CO/MX se retiraron el 26-sep. Se arma con
+// catálogo vacío (las reglas son texto; el catálogo no aporta anclas).
 import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
 import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
-// Chile = el núcleo ARMADO con su ficha (los bloques locales viven en la ficha,
-// y varias anclas —legal, tools, agenda— están ahí); los demás, su archivo.
-const texto = (p: PaisPrompt) =>
-  p === "cl" ? textoNucleo(FICHA_CL, "") : readFileSync(new URL(`../${ARCHIVO[p]}`, import.meta.url), "utf8")
+import { FICHA_PE } from "../lib/paises/pe/ficha.ts"
+import { FICHA_CO } from "../lib/paises/co/ficha.ts"
+import { FICHA_MX } from "../lib/paises/mx/ficha.ts"
+const FICHAS = { cl: FICHA_CL, pe: FICHA_PE, co: FICHA_CO, mx: FICHA_MX } as const
+const texto = (p: PaisPrompt) => textoNucleo(FICHAS[p], "")
 
 test("el catálogo de reglas está sano (ids únicos, ancla y motivo)", () => {
   const ids = new Set<string>()

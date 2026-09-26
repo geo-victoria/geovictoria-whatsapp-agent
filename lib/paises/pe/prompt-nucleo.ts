@@ -1,8 +1,8 @@
 /**
  * PROMPT DE PERÚ DESDE EL NÚCLEO (21-sep): el mismo texto que Chile
- * (lib/prompt-nucleo/texto.ts) con la ficha peruana como parámetros. Se
- * enciende por vic_kv `prompt_nucleo_pe`="on" en el webhook PE; apagado, PE
- * sigue con su prompt propio (lib/paises/pe/prompt.ts).
+ * (lib/prompt-nucleo/texto.ts) con la ficha peruana como parámetros. Es el
+ * ÚNICO prompt del país: el propio se retiró el 26-sep y el turno lo arma el
+ * orquestador único con el perfil del país.
  *
  * PURO (imports relativos .ts, sin red): tests/ficha-pe.test.ts lo carga con
  * node --test para verificar que el render peruano no arrastre chilenismos.
@@ -10,7 +10,7 @@
 import { armarPromptBase } from "../../prompt-nucleo/armar.ts"
 import { FICHA_PE } from "./ficha.ts"
 import { CATALOGO_MODULOS_PE, CATALOGO_HARDWARE_PE } from "./catalogo.ts"
-import { anclajeTemporalPE, bloqueTelefonoPE } from "./prompt.ts"
+import { anclajeTemporalPE, bloqueTelefonoPE } from "./anclaje.ts"
 
 /**
  * Catálogo PE para el prompt. A diferencia del chileno, NO lleva los
@@ -50,7 +50,7 @@ export function promptBasePENucleo(umbralPrecios?: number): string {
   return armarPromptBase(FICHA_PE, formatCatalogoParaPromptPE(), umbralPrecios)
 }
 
-/** Reemplazo 1:1 de getSystemPromptPE cuando el núcleo está encendido. */
+/** Prompt del país: el núcleo armado con su ficha (único prompt desde el 26-sep). */
 export function getSystemPromptPENucleo(contact?: string, umbralPrecios?: number): string {
   return anclajeTemporalPE() + bloqueTelefonoPE(contact) + promptBasePENucleo(umbralPrecios)
 }

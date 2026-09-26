@@ -79,7 +79,7 @@ export const REGLAS_UNIVERSALES: readonly ReglaUniversal[] = [
   {
     id: "reloj_modalidad_no_se_pregunta",
     regla: "El arriendo es el default del reloj y no se pregunta; la compra solo si el cliente la pide",
-    ancla: /(arriendo.{0,30}(por defecto|default)|SIEMPRE en arriendo)/i,
+    ancla: /((arriendo|alquiler|renta).{0,30}(por defecto|default)|SIEMPRE en (arriendo|alquiler|renta))/i,
     motivo: "Regla estricta de venta del reloj: ofrecer la compra sube el pago inicial y enfría la venta",
   },
   {
@@ -197,37 +197,10 @@ export const REGLAS_UNIVERSALES: readonly ReglaUniversal[] = [
  * test vigile solo lo NUEVO. Sacar una línea de acá = cerrar esa brecha.
  */
 export const DEUDA_DECLARADA: Partial<Record<PaisPrompt, Record<string, string>>> = {
-  // Medición del 21-sep-2026 (test de paridad): CL 21/21 · PE 21/21 · CO 9/21 ·
-  // MX 9/21. Colombia y México están en la generación de julio de Chile: el
-  // prompt de MX es un fork del de CO, así que arrastran las mismas
-  // deprecaciones. Cada línea que se borre de acá es una brecha cerrada.
-  co: {
-    descuento_solo_por_objecion: "medido 21-sep-2026 — el prompt LEGADO CO (prompt_nucleo_co apagado) sigue sin escalera; el núcleo la trae desde el 21-sep",
-    consultiva_una_pregunta: "medido 21-sep-2026",
-    empresa_no_se_pregunta: "medido 21-sep-2026",
-    puntos_no_se_preguntan: "medido 21-sep-2026",
-    instalacion_no_se_pregunta: "medido 21-sep-2026",
-    doble_valor: "medido 21-sep-2026",
-    cierre_presuntivo: "medido 21-sep-2026",
-    anti_teatro: "medido 21-sep-2026",
-    no_instructivo_acceso: "medido 21-sep-2026",
-    objeciones_que_cierran: "medido 21-sep-2026",
-    orden_negociacion: "medido 21-sep-2026",
-    cliente_amplia_es_venta: "medido 21-sep-2026",
-  },
-  mx: {
-    consultiva_una_pregunta: "medido 21-sep-2026",
-    empresa_no_se_pregunta: "medido 21-sep-2026",
-    puntos_no_se_preguntan: "medido 21-sep-2026",
-    reloj_modalidad_no_se_pregunta: "medido 21-sep-2026",
-    doble_valor: "medido 21-sep-2026",
-    cierre_presuntivo: "medido 21-sep-2026",
-    anti_teatro: "medido 21-sep-2026",
-    no_instructivo_acceso: "medido 21-sep-2026",
-    objeciones_que_cierran: "medido 21-sep-2026",
-    orden_negociacion: "medido 21-sep-2026",
-    cliente_amplia_es_venta: "medido 21-sep-2026",
-  },
+  // 26-sep-2026: los cuatro países son el núcleo armado con su ficha (los
+  // prompts propios de PE/CO/MX se retiraron) y la medición sobre ese render
+  // da CL 21/21 · PE 21/21 · CO 21/21 · MX 20/20. Sin deuda: una brecha nueva
+  // rompe el test y hay que cerrarla en la ficha del país o declararla acá.
 }
 
 /** Reglas que un país debe cumplir (las universales menos sus excepciones). */

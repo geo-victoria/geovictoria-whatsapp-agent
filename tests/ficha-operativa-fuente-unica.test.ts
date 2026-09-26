@@ -23,7 +23,6 @@ const FICHA = "lib/paises/ficha-operativa.ts"
 const DEUDA_DECLARADA: Record<string, string> = {
   // "ruta": "por qué sigue ahí" — al tocar el archivo, leer de la ficha y borrar la línea.
   "app/api/vic-admin-calcom/route.ts": "23-sep, anterior al candado: tz co",
-  "app/api/vic-botmaker-pe/route.ts": "23-sep, anterior al candado: tz pe",
   "app/api/vic-chats/route.ts": "23-sep, anterior al candado: tz co · tz mx",
   "app/api/vic-dapta-postcall/route.ts": "23-sep, anterior al candado: tz co",
   "app/api/vic-funnel/route.ts": "23-sep, anterior al candado: email emujica@geovictoria.com · email adiazg@geovictoria.com · email tmartinezq@geovictoria.com · email alopez@geovictoria.com · email pdiaz@geovictoria.com · email dgalvez@geovictoria.com",
@@ -50,15 +49,12 @@ const DEUDA_DECLARADA: Record<string, string> = {
   "lib/paises/co/anclaje.ts": "23-sep, anterior al candado: tz co",
   "lib/paises/co/ficha.ts": "23-sep, anterior al candado: tz co",
   "lib/paises/co/index.ts": "23-sep, anterior al candado: tz co · email agordillo@geovictoria.com · email egalindo@geovictoria.com · zohoId Eddy Galindo",
-  "lib/paises/co/prompt.ts": "23-sep, anterior al candado: tz co",
   "lib/paises/co/tools-unificadas.ts": "23-sep, anterior al candado: tz co",
   "lib/paises/co/tools.ts": "23-sep, anterior al candado: tz co · zohoId Alejandro Gordillo · zohoId Eddy Galindo",
   "lib/paises/mx/index.ts": "23-sep, anterior al candado: identificador entidad mx · tz mx · email ysegura@geovictoria.com",
-  "lib/paises/mx/prompt.ts": "23-sep, anterior al candado: cuenta mx 1161438886 · interbancario mx · identificador entidad mx · tz mx",
   "lib/paises/mx/tools.ts": "23-sep, anterior al candado: identificador entidad mx · tz mx · zohoId Yahel Segura",
   "lib/paises/pe/ficha.ts": "23-sep, anterior al candado: tz pe",
   "lib/paises/pe/index.ts": "23-sep, anterior al candado: identificador entidad pe · tz pe · email mmendozav@geovictoria.com · email afiori@geovictoria.com · zohoId Ana Fiori · email pquispef@geovictoria.com",
-  "lib/paises/pe/prompt.ts": "23-sep, anterior al candado: tz pe",
   "lib/paises/pe/tools-unificadas.ts": "23-sep, anterior al candado: tz pe",
   "lib/paises/pe/tools.ts": "23-sep, anterior al candado: tz pe · zohoId Mónica Mendoza",
   "lib/paises/tipos.ts": "23-sep, anterior al candado: tz co",

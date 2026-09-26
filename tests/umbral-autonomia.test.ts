@@ -10,6 +10,10 @@ import { test, describe, beforeEach } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 
+import { armarPromptBase } from "../lib/prompt-nucleo/armar.ts"
+import { FICHA_PE } from "../lib/paises/pe/ficha.ts"
+import { FICHA_CO } from "../lib/paises/co/ficha.ts"
+import { FICHA_MX } from "../lib/paises/mx/ficha.ts"
 import {
   SCOPE_MAX_SISTEMA,
   umbralInbound,
@@ -188,27 +192,13 @@ describe("multi-país (réplica del 08-ago PM, orden de Lalo)", () => {
     assert.match(formatUmbralParaPrompt(20, "inbound"), /derivar_a_soporte/)
   })
 
-  test("las cadenas ancla de los replace siguen en los prompts CO/MX/PE", () => {
-    const comunes = [
-      "1 a 50 → cotizas tú (Modo Cotización); más de 50 → NO cotizas",
-      "- MODO COTIZACIÓN (1-50 personas):",
-      "El ÚNICO tope es la cantidad de PERSONAS (1-50):",
-      "- MODO LEAD (contacto pedido, reunión, o >50):",
-    ]
-    const porPais: Record<string, string[]> = {
-      "co": [...comunes, "- Cotizas para empresas de 1 a 50 personas que operan en COLOMBIA."],
-      "mx": [...comunes, "- Cotizas para empresas de 1 a 50 personas que operan en MÉXICO."],
-      "pe": [...comunes, "- Cotizas para empresas de 1 a 50 personas que operan en PERÚ."],
-    }
-    for (const [pais, objetivos] of Object.entries(porPais)) {
-      const fuente = readFileSync(new URL(`../lib/paises/${pais}/prompt.ts`, import.meta.url), "utf8")
-      for (const objetivo of objetivos) {
-        const veces = fuente.split(objetivo).length - 1
-        assert.ok(
-          veces >= 2,
-          `${pais}: la ancla "${objetivo.slice(0, 40)}…" aparece ${veces} vez/veces — replace desincronizado`,
-        )
-      }
+  test("CO/MX/PE: el núcleo armado con umbral 20 declara 1-20, no 50", () => {
+    // Desde el 26-sep los tres países son el núcleo + su ficha: los replace del
+    // umbral son los de lib/prompt-nucleo/armar.ts (los mismos de Chile).
+    for (const f of [FICHA_CO, FICHA_MX, FICHA_PE]) {
+      const t = armarPromptBase(f, "", 20)
+      assert.match(t, /Solo funciona para 1-20 trabajadores/)
+      assert.doesNotMatch(t, /Solo funciona para 1-50 trabajadores/)
     }
   })
 })
@@ -244,16 +234,13 @@ describe("cinturón de precios sobre el umbral (Lalo 18-ago, caso David Oviedo)"
   })
 
   test("los cuatro webhooks pasan la respuesta por el cinturón", () => {
-    // v3 delega el turno en el orquestador único (22-sep): ahí vive su cinturón.
-    const fuentes: Record<string, string> = {
-      v3: "../lib/orquestador-turno.ts",
-      co: "../app/api/vic-botmaker-co/route.ts",
-      mx: "../app/api/vic-botmaker-mx/route.ts",
-      pe: "../app/api/vic-botmaker-pe/route.ts",
-    }
-    for (const [pais, ruta] of Object.entries(fuentes)) {
-      const src = readFileSync(new URL(ruta, import.meta.url), "utf8")
-      assert.match(src, /cinturonPrecioSobreUmbral/, `falta el cinturón en ${pais} (${ruta})`)
+    // Los cuatro delegan el turno en el orquestador único (v3 desde el 22-sep,
+    // PE/CO/MX desde el 26-sep): el cinturón vive ahí, una sola vez.
+    const orq = readFileSync(new URL("../lib/orquestador-turno.ts", import.meta.url), "utf8")
+    assert.match(orq, /cinturonPrecioSobreUmbral\(replyFinal\)/)
+    for (const [pais, perfil] of [["co", "PERFIL_TURNO_CO"], ["mx", "PERFIL_TURNO_MX"], ["pe", "PERFIL_TURNO_PE"]]) {
+      const src = readFileSync(new URL(`../app/api/vic-botmaker-${pais}/route.ts`, import.meta.url), "utf8")
+      assert.match(src, new RegExp(`procesarTurno\\(contact, combinado, apiKey, ${perfil}\\)`), `${pais} no delega el turno`)
     }
   })
 })

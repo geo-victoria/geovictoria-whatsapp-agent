@@ -1,8 +1,8 @@
 /**
  * PROMPT DE COLOMBIA DESDE EL NÚCLEO (21-sep): el mismo texto que Chile
- * (lib/prompt-nucleo/texto.ts) con la ficha colombiana como parámetros. Se
- * enciende por vic_kv `prompt_nucleo_co`="on" en el webhook CO; apagado, CO
- * sigue con su prompt propio (lib/paises/co/prompt.ts).
+ * (lib/prompt-nucleo/texto.ts) con la ficha colombiana como parámetros. Es el
+ * ÚNICO prompt del país: el propio se retiró el 26-sep y el turno lo arma el
+ * orquestador único con el perfil del país.
  */
 import { armarPromptBase } from "../../prompt-nucleo/armar.ts"
 import { FICHA_CO } from "./ficha.ts"
@@ -41,7 +41,7 @@ export function promptBaseCONucleo(umbralPrecios?: number): string {
   return armarPromptBase(FICHA_CO, formatCatalogoParaPromptCO(), umbralPrecios)
 }
 
-/** Reemplazo 1:1 de getSystemPromptCO cuando el núcleo está encendido. */
+/** Prompt del país: el núcleo armado con su ficha (único prompt desde el 26-sep). */
 export function getSystemPromptCONucleo(contact?: string, umbralPrecios?: number): string {
   return anclajeTemporalCO() + bloqueTelefonoCO(contact) + promptBaseCONucleo(umbralPrecios)
 }

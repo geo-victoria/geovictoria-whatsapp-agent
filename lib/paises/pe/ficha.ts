@@ -28,10 +28,10 @@ export const FICHA_PE: FichaPrompt = {
   zonaTz: "America/Lima",
   gentilicio: "peruana",
   ejemploDudaLegal: "si el personal de confianza debe registrar asistencia",
-  ejemploMonto: "S/100 + IGV/mes",
+  ejemploMonto: "S/55 + IGV/mes",
   ejemploDudaLegalCorto: "el registro del personal de confianza",
   ejemploDudaLegalTema: "el tema del registro del personal de confianza",
-  ejemploMontoApp: "S/100 + IGV/mes",
+  ejemploMontoApp: "S/55 + IGV/mes",
   // En Perú no existe una autorización oficial de relojes (SUNAFIL no
   // certifica): el argumento contra el reloj externo es el respaldo en la nube.
   advertenciaRelojExterno:

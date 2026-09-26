@@ -1,8 +1,8 @@
 /**
  * PROMPT DE MÉXICO DESDE EL NÚCLEO (24-sep): el mismo texto que Chile
- * (lib/prompt-nucleo/texto.ts) con la ficha mexicana como parámetros. Lo usa
- * el perfil de turno MX del orquestador único (vic_kv `orquestador_mx`="on");
- * apagado, México sigue con su prompt propio (lib/paises/mx/prompt.ts).
+ * (lib/prompt-nucleo/texto.ts) con la ficha mexicana como parámetros. Es el
+ * ÚNICO prompt del país: el propio se retiró el 26-sep y el turno lo arma el
+ * orquestador único con el perfil del país.
  */
 import { armarPromptBase } from "../../prompt-nucleo/armar.ts"
 import { FICHA_MX } from "./ficha.ts"
@@ -41,7 +41,7 @@ export function promptBaseMXNucleo(umbralPrecios?: number): string {
   return armarPromptBase(FICHA_MX, formatCatalogoParaPromptMX(), umbralPrecios)
 }
 
-/** Reemplazo 1:1 de getSystemPromptMX cuando el orquestador MX está encendido. */
+/** Prompt del país: el núcleo armado con su ficha (único prompt desde el 26-sep). */
 export function getSystemPromptMXNucleo(contact?: string, umbralPrecios?: number): string {
   return anclajeTemporalMX() + bloqueTelefonoMX(contact) + promptBaseMXNucleo(umbralPrecios)
 }
