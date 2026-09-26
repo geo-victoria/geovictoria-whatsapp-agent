@@ -50,6 +50,40 @@ export async function POST(req: Request): Promise<Response> {
     scheduleId?: number
     teamId?: number
     crearHorario?: { nombre?: string; timeZone?: string }
+    /** Suelta el horario del evento: vuelve a mandar el horario por defecto de cada anfitrión. */
+    usarHorarioDelHost?: boolean
+    /** Crea un evento de un solo anfitrión copiando la configuración de otro (duración, lugar, avisos). */
+    crearEvento?: { titulo?: string; slug?: string; copiarDe?: number; hostUserId?: number; scheduleId?: number }
+  }
+  if (body.crearEvento) {
+    const c = body.crearEvento
+    const teamId0 = Number(body.teamId || 91540)
+    if (!c.titulo || !c.slug || !c.copiarDe || !c.hostUserId) {
+      return NextResponse.json({ ok: false, error: "crearEvento requiere titulo, slug, copiarDe y hostUserId" }, { status: 400 })
+    }
+    const ref = (await cal(`/teams/${teamId0}/event-types/${c.copiarDe}`, "2024-06-14")) as {
+      data?: { data?: Record<string, unknown> }
+    }
+    const r0 = ref.data?.data
+    if (!r0) return NextResponse.json({ ok: false, error: "no se pudo leer el evento de referencia" }, { status: 502 })
+    const cuerpo: Record<string, unknown> = {
+      title: c.titulo,
+      slug: c.slug,
+      lengthInMinutes: r0.lengthInMinutes,
+      locations: r0.locations,
+      minimumBookingNotice: r0.minimumBookingNotice,
+      schedulingType: "roundRobin",
+      hosts: [{ userId: Number(c.hostUserId), mandatory: false, priority: "medium" }],
+      ...(c.scheduleId ? { scheduleId: Number(c.scheduleId) } : {}),
+    }
+    const rc = await fetch(`${CAL_BASE}/teams/${teamId0}/event-types`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-06-14", "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(cuerpo),
+    })
+    const jc = (await rc.json().catch(() => null)) as { data?: { id?: number; slug?: string } } | null
+    return NextResponse.json({ ok: rc.ok, status: rc.status, id: jc?.data?.id ?? null, slug: jc?.data?.slug ?? null, respuesta: rc.ok ? undefined : jc })
   }
   // { crearHorario: { nombre, timeZone } } (26-sep, evento de Laura Medina en hora de Chile):
   // crea un horario L-V 9:00-17:00 en esa zona para el dueño de la API key (el host interino)
@@ -73,10 +107,10 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ ok: r.ok, status: r.status, respuesta: await r.json().catch(() => null) })
   }
   const eventTypeId = Number(body.eventTypeId)
-  const scheduleId = Number(body.scheduleId)
+  const scheduleId = body.usarHorarioDelHost ? null : Number(body.scheduleId)
   const teamId = Number(body.teamId || 91540)
-  if (!eventTypeId || !scheduleId) {
-    return NextResponse.json({ ok: false, error: "faltan eventTypeId y scheduleId" }, { status: 400 })
+  if (!eventTypeId || (!body.usarHorarioDelHost && !scheduleId)) {
+    return NextResponse.json({ ok: false, error: "faltan eventTypeId y scheduleId (o usarHorarioDelHost)" }, { status: 400 })
   }
   const res = await fetch(`${CAL_BASE}/teams/${teamId}/event-types/${eventTypeId}`, {
     method: "PATCH",
