@@ -73,12 +73,20 @@ export function directivaCotizarYa(message: string, history: Turno[], umbral = 2
   for (const t of deCliente) dotacion = dotacionEnTexto(t) ?? dotacion
   const marcaje = deCliente.some((t) => RE_MARCAJE_ELEGIDO.test(t))
   if (!dotacion || dotacion > umbral || !marcaje) return ""
+  // Lalo 26-sep: la pregunta abierta sirve "para que el cliente se explaye"
+  // aunque ya haya dado los empleados → va UNA vez, DESPUÉS del precio.
+  const yaPregunto = (history || []).some(
+    (h) => h.role === "assistant" && RE_PREGUNTA_OPERACION.test(String(h.content || "")),
+  )
   return (
     "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente YA te dijo cuántas personas son (" +
     dotacion +
-    ") y cómo quieren marcar. PROHIBIDO preguntar por su operación, su rubro o el nombre de su empresa: " +
-    "cotiza AHORA con cotizar_referencial y muéstrale el valor en este mismo mensaje. " +
-    "Única excepción: si eligió reloj y todavía no sabes dónde queda el punto, esa ubicación es la ÚNICA pregunta permitida."
+    ") y cómo quieren marcar: cotiza AHORA con cotizar_referencial y muéstrale el valor en este mismo mensaje. " +
+    "PROHIBIDO preguntar el nombre de su empresa (sale de su documento). " +
+    (yaPregunto
+      ? "Ya le preguntaste por su operación: PROHIBIDO repetir esa pregunta. "
+      : "Después del precio, al final del MISMO mensaje, deja UNA vez la pregunta abierta sobre su operación (a qué se dedican y cómo trabaja su equipo) como invitación a contarte más — nunca antes del precio. ") +
+    "Si eligió reloj y todavía no sabes dónde queda el punto, esa ubicación es la ÚNICA pregunta previa permitida."
   )
 }
 

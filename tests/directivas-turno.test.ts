@@ -69,13 +69,13 @@ test("reloj + ubicación en el mismo mensaje → cotizar sin repreguntar (E2E 24
 // ¿cuánto cuesta?" recibió "¿cuál es el nombre de tu empresa?".
 test("cotiza ya: dotación + marcaje sin precio mostrado → directiva", async () => {
   const { directivaCotizarYa } = await import("../lib/directivas-turno.ts")
-  assert.match(directivaCotizarYa("hola soy Luis, somos 6 y queremos solo la app", []), /cotiza AHORA/)
+  assert.match(directivaCotizarYa("hola soy Luis, somos 6 y queremos solo la app", []), /cotiza AHORA[\s\S]*pregunta abierta sobre su operación/)
   assert.match(
     directivaCotizarYa("mi RUT es 76.543.210-3 y mi correo es x@y.cl", [
       { role: "user", content: "hola soy Luis, somos 6 y queremos solo la app" },
       { role: "assistant", content: "Para darte la mejor solución, cuéntame un poco de tu operación" },
     ]),
-    /\(6\)/,
+    /PROHIBIDO repetir esa pregunta/,
   )
 })
 test("cotiza ya: no aplica sin marcaje, sobre el umbral o con precio ya mostrado", async () => {
