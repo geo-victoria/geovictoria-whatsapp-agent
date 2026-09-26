@@ -381,7 +381,9 @@ const FICHA_MX: FichaOperativa = {
     // Lalo 25-sep: la gestión comercial de la venta autónoma en México es de
     // Andrea Fuentes Swain (perfil Gestión Comercial en Zoho; sin espejo).
     ventaAutonoma: persona("afuentess@geovictoria.com", "3525045000645183642", "Andrea Fuentes Swain", undefined, "-"),
-    lider: "",
+    // Teams "SDR Inbound México" (25-sep): María Velásquez (perfil Líder
+    // Comercial en Zoho) es quien asigna los tratos del equipo mexicano.
+    lider: "mvelasquez@geovictoria.com",
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
@@ -393,12 +395,14 @@ const FICHA_MX: FichaOperativa = {
     facturacionLayoutId: "3525045000429077619",
     facturacionNombre: "SE SOLICITA FACTURA - {empresa}",
     facturacionArea: "Ejec. comercial",
-    revisorFacturacion: "",
+    // Teams "SDR Inbound México" (María Velásquez, 25-sep): Andrea Fuentes Swain
+    // ve contratos, tickets de baja y tickets para facturar; las NDV y los
+    // tickets de ST los hacen los ejecutivos.
+    revisorFacturacion: "afuentess@geovictoria.com",
     stLayoutId: "3525045000331434179",
   },
   pendientes: [
-    "Quién revisa la Solicitud de Facturación en México y la plantilla de equipos del país.",
-    "Líder comercial.",
+    "Plantilla de equipos del país para el ticket ST.",
     "Sesiones de espejo del equipo en el worker (lmedina, ysegura, prodriguez).",
   ],
 }

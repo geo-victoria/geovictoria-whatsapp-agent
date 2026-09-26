@@ -3,8 +3,9 @@
  *
  * Chile: Victoria Luna (env VICKY_TRASPASO_CC, regla 31-jul). Colombia (Lalo
  * 23-sep, "Victoria Luna allá es María Fernanda Cely Villamil"): la líder de
- * la ficha operativa CO. Perú y México: sin copia (nadie lo ha decidido; el
- * líder PE, Diego Bendezú, no quiso figurar en la operación diaria).
+ * la ficha operativa CO. México (26-sep): María Velásquez, líder comercial de
+ * la ficha MX. Perú: sin copia (el líder PE, Diego Bendezú, no quiso figurar
+ * en la operación diaria).
  * PURO: lo consumen crm-hitos, ptv-cron y notificar-lead-asignado.
  */
 import { fichaOperativa, paisDeTelefonoOperativo } from "./paises/ficha-operativa"
@@ -18,6 +19,10 @@ export function ccLiderTraspaso(contact: string, territorio?: string): string[] 
   }
   if (pais === "co") {
     const cc = (process.env.VICKY_TRASPASO_CC_CO || fichaOperativa("co").equipo.lider || "").trim()
+    return cc ? [cc] : []
+  }
+  if (pais === "mx") {
+    const cc = (process.env.VICKY_TRASPASO_CC_MX || fichaOperativa("mx").equipo.lider || "").trim()
     return cc ? [cc] : []
   }
   return []
