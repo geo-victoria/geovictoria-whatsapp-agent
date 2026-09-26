@@ -45,7 +45,7 @@ type Pendiente = { nombre: string; email: string; sesion: string; estado: string
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
-async function armar(pais: string) {
+async function armar(pais: string, firma = "Vicky · GeoVictoria") {
   const ficha = fichaOperativa(pais)
   const pendientes: Pendiente[] = []
   for (const p of equipoOperativo(pais)) {
@@ -95,11 +95,11 @@ async function armar(pais: string) {
     `</table>` +
     `<p style="color:#6b7280;font-size:13px">Usa solo tu propio link: cada uno queda asociado a tu nombre. ` +
     `El link abre únicamente tu código QR; nadie ve tus chats desde ahí. Si el QR expira, recarga la página.</p>` +
-    `<p>Cualquier duda, respondan este correo.<br>Vicky · GeoVictoria</p></div>`
+    `<p>Cualquier duda, respondan este correo.<br>${esc(firma)}</p></div>`
   return { pais: ficha.pais, nombrePais, asunto, to, cc, pendientes, html }
 }
 
-async function enviar(to: string[], cc: string[], asunto: string, html: string): Promise<{ ok: boolean; status: number; detalle?: string }> {
+async function enviar(to: string[], cc: string[], asunto: string, html: string, de = FROM_EMAIL, deNombre = ""): Promise<{ ok: boolean; status: number; detalle?: string }> {
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
   const token = await getZohoAccessToken()
   const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v3/${MAIL_ANCHOR}/actions/send_mail`, {
@@ -109,7 +109,8 @@ async function enviar(to: string[], cc: string[], asunto: string, html: string):
     body: JSON.stringify({
       data: [
         {
-          from: { email: FROM_EMAIL },
+          from: deNombre ? { user_name: deNombre, email: de } : { email: de },
+          reply_to: { email: de },
           to: to.map((email) => ({ email })),
           ...(cc.length ? { cc: cc.map((email) => ({ email })) } : {}),
           subject: asunto,
@@ -138,11 +139,16 @@ export async function POST(req: Request): Promise<Response> {
   const pais = (sp.get("pais") || "").toLowerCase()
   if (!pais) return NextResponse.json({ ok: false, error: "falta pais" }, { status: 400 })
   if (sp.get("confirmo") !== "1") return NextResponse.json({ ok: false, error: "falta confirmo=1" }, { status: 400 })
-  const c = await armar(pais)
+  // ?de=<correo>&deNombre=<nombre> (Lalo 26-sep: "¿los puedes mandar a nombre mío?"): remitente,
+  // responder-a y firma a nombre de esa persona. Zoho solo acepta remitentes habilitados para el
+  // usuario de la API; si lo rechaza, el error vuelve tal cual.
+  const de = (sp.get("de") || FROM_EMAIL).trim()
+  const deNombre = (sp.get("deNombre") || "").trim()
+  const c = await armar(pais, deNombre ? `${deNombre} · GeoVictoria` : undefined)
   if (!c.pendientes.length) return NextResponse.json({ ok: true, nada: "todos los espejos del país están conectados" })
   const soloA = (sp.get("soloA") || "").trim()
   if (soloA) {
-    const r = await enviar([soloA], [], `[PRUEBA] ${c.asunto}`, c.html)
+    const r = await enviar([soloA], [], `[PRUEBA] ${c.asunto}`, c.html, de, deNombre)
     return NextResponse.json({ prueba: soloA, ...r })
   }
   const sinWorker = c.pendientes.filter((p) => p.estado === "sin_sesion_en_worker").map((p) => p.sesion)
@@ -157,6 +163,6 @@ export async function POST(req: Request): Promise<Response> {
       { status: 409 },
     )
   }
-  const r = await enviar(c.to, c.cc, c.asunto, c.html)
+  const r = await enviar(c.to, c.cc, c.asunto, c.html, de, deNombre)
   return NextResponse.json({ pais: c.pais, to: c.to, cc: c.cc, ...r })
 }
