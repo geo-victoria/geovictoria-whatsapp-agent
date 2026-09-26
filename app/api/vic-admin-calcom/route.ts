@@ -76,14 +76,25 @@ export async function POST(req: Request): Promise<Response> {
       hosts: [{ userId: Number(c.hostUserId), mandatory: false, priority: "medium" }],
       ...(c.scheduleId ? { scheduleId: Number(c.scheduleId) } : {}),
     }
-    const rc = await fetch(`${CAL_BASE}/teams/${teamId0}/event-types`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-06-14", "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify(cuerpo),
-    })
-    const jc = (await rc.json().catch(() => null)) as { data?: { id?: number; slug?: string } } | null
-    return NextResponse.json({ ok: rc.ok, status: rc.status, id: jc?.data?.id ?? null, slug: jc?.data?.slug ?? null, respuesta: rc.ok ? undefined : jc })
+    const crear = (b: Record<string, unknown>) =>
+      fetch(`${CAL_BASE}/teams/${teamId0}/event-types`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-06-14", "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(b),
+      })
+    let rc = await crear(cuerpo)
+    let jc = (await rc.json().catch(() => null)) as { data?: { id?: number; slug?: string }; error?: { message?: string } } | null
+    // La integración de video del evento de referencia (Teams) puede no estar conectada en la
+    // cuenta de la API: se crea sin lugar fijo y rige el lugar por defecto del anfitrión.
+    let sinLugar = false
+    if (!rc.ok && /not connected/i.test(String(jc?.error?.message || ""))) {
+      const { locations: _l, ...resto } = cuerpo
+      rc = await crear(resto)
+      jc = (await rc.json().catch(() => null)) as typeof jc
+      sinLugar = true
+    }
+    return NextResponse.json({ ok: rc.ok, status: rc.status, id: jc?.data?.id ?? null, slug: jc?.data?.slug ?? null, sinLugar, respuesta: rc.ok ? undefined : jc })
   }
   // { crearHorario: { nombre, timeZone } } (26-sep, evento de Laura Medina en hora de Chile):
   // crea un horario L-V 9:00-17:00 en esa zona para el dueño de la API key (el host interino)
