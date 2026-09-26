@@ -35,10 +35,10 @@ function cuerpoNit(nitRaw: string): string {
   // (lo recalculamos) y el cuerpo manda.
   if (raw.includes("-")) {
     const cuerpo = raw.split("-")[0].replace(/\D/g, "")
-    return /^\d{8,10}$/.test(cuerpo) ? cuerpo : ""
+    return /^\d{6,10}$/.test(cuerpo) ? cuerpo : ""
   }
   const digitos = raw.replace(/\D/g, "")
-  if (digitos.length < 8 || digitos.length > 11) return ""
+  if (digitos.length < 6 || digitos.length > 11) return ""
   // 8-9 dígitos: es el cuerpo pelado (el caso más común: NIT sin DV).
   if (digitos.length <= 9) return digitos
   // 10-11 dígitos: ambiguo — puede ser cuerpo largo o cuerpo + DV pegado.
@@ -57,7 +57,8 @@ export function normalizarNit(nitRaw: string): string {
   return `${cuerpo}-${digitoVerificacionNit(cuerpo)}`
 }
 
-/** Válido = tiene un cuerpo de 8-10 dígitos. El DV nunca es requisito. */
+/** Válido = cuerpo de 6-10 dígitos (el NIT de una PERSONA NATURAL es su cédula,
+ * y las cédulas antiguas tienen 6-7 dígitos — Lalo 26-sep). El DV nunca es requisito. */
 export function nitValido(nitRaw: string): boolean {
   return cuerpoNit(nitRaw) !== ""
 }

@@ -12,3 +12,9 @@ test("razón social MX: una razón social real pasa", () => {
   assert.equal(razonSocialInvalidaMX("Geo Soluciones SA de CV", "GEO150101AB1", "Luis"), false)
   assert.equal(razonSocialInvalidaMX("PRUEBA BATERIA VICKY NO USAR", "GEO150101AB1", "Luis"), false)
 })
+
+test("persona física (RFC 13): su nombre es su razón social", () => {
+  assert.equal(razonSocialInvalidaMX("Juan Pérez López", "PELJ800101AB1", "Juan Pérez López"), false)
+  // persona moral (RFC 12) con el nombre del contacto como empresa: sigue rechazado
+  assert.equal(razonSocialInvalidaMX("Juan Pérez", "GEO150101AB1", "Juan Pérez"), true)
+})

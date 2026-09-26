@@ -504,12 +504,14 @@ export function buildDispatchMXUnificado(contact: string) {
         // (batería MX 24-sep: la formal salió con razón social "XAXX010101000").
         // Batería 26-sep: tampoco un PEDAZO del RFC ("GEO" de GEO150101AB1).
         const { razonSocialInvalidaMX } = await import("./razon-social.ts")
-        const empresaTxt = String(i.empresa || "").trim()
+        // Persona física (RFC 13): sin razón social declarada, factura a su nombre.
+        const rfcCompacto = String(i.rutEmpresa || i.rfc || "").replace(/[\s.\-_,]/g, "")
+        const empresaTxt = String(i.empresa || "").trim() || (rfcCompacto.length === 13 ? String(i.contacto || "").trim() : "")
         if (!empresaTxt || razonSocialInvalidaMX(empresaTxt, i.rutEmpresa || i.rfc, i.contacto)) {
           return { ok: false, error: "Falta la RAZÓN SOCIAL: en México no se resuelve desde el RFC. Pídesela al cliente en una frase corta (junto con el RFC si también falta) y vuelve a llamar la tool." }
         }
         return base("generar_link_cotizadora", {
-          empresa: i.empresa,
+          empresa: empresaTxt,
           contacto: i.contacto,
           email: i.contactoEmail || i.email,
           rfc: i.rutEmpresa || i.rfc,
