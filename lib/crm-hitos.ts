@@ -1618,6 +1618,9 @@ export async function sincronizarNotaTranscripcion(
       })
       .join("\n")
       .slice(0, 30000)
+    // La nota abre SIEMPRE con el link al chat de Botmaker (Lalo 26-sep).
+    const { urlChatDeContacto, cabeceraEnlaceChat } = await import("./enlace-conversacion")
+    const cabecera = cabeceraEnlaceChat(await urlChatDeContacto(contact).catch(() => ""))
     const { h, api } = await zohoHeaders()
     for (const reg of registros) {
       if (!reg.id) continue
@@ -1645,7 +1648,7 @@ export async function sincronizarNotaTranscripcion(
           headers: h,
           cache: "no-store",
           body: JSON.stringify({
-            data: [{ Note_Title: TITULO_NOTA_TRANSCRIPCION, Note_Content: transcript }],
+            data: [{ Note_Title: TITULO_NOTA_TRANSCRIPCION, Note_Content: `${cabecera}${transcript}` }],
           }),
         })
         if (creada.ok) {
@@ -1659,10 +1662,14 @@ export async function sincronizarNotaTranscripcion(
         // conserva y se reemplaza SOLO el diálogo que va debajo de la marca.
         const previo = String(n.Note_Content || "")
         const corte = previo.indexOf(MARCA_TRANSCRIPCION)
+        // Cabecera de traspaso (si la hay) se conserva; si no trae el link al
+        // chat, se le antepone.
+        const cabezaPrevia = corte >= 0 ? previo.slice(0, corte) : ""
+        const conLink = /go\.botmaker\.com\/#\/chats\//.test(cabezaPrevia) ? cabezaPrevia : `${cabecera}${cabezaPrevia}`
         const contenido =
           corte >= 0
-            ? `${previo.slice(0, corte)}${MARCA_TRANSCRIPCION}\n${transcript}`
-            : transcript
+            ? `${conLink}${MARCA_TRANSCRIPCION}\n${transcript}`
+            : `${cabecera}${transcript}`
         if (contenido.trim() === previo.trim()) continue
         const put = await fetch(`${api}/crm/v3/Notes/${n.id}`, {
           method: "PUT",
@@ -1692,6 +1699,8 @@ export async function actualizarNotaTranscripcion(dealId: string, contact: strin
       })
       .join("\n")
       .slice(0, 30000)
+    const { urlChatDeContacto, cabeceraEnlaceChat } = await import("./enlace-conversacion")
+    const cabecera = cabeceraEnlaceChat(await urlChatDeContacto(contact).catch(() => ""))
     const { h, api } = await zohoHeaders()
     const res = await fetch(
       `${api}/crm/v3/Deals/${dealId}/Notes?fields=Note_Title&per_page=50`,
@@ -1711,7 +1720,7 @@ export async function actualizarNotaTranscripcion(dealId: string, contact: strin
         method: "PUT",
         headers: h,
         cache: "no-store",
-        body: JSON.stringify({ data: [{ Note_Content: transcript }] }),
+        body: JSON.stringify({ data: [{ Note_Content: `${cabecera}${transcript}` }] }),
       })
     } else {
       await fetch(`${api}/crm/v3/Notes`, {
@@ -1722,7 +1731,7 @@ export async function actualizarNotaTranscripcion(dealId: string, contact: strin
           data: [
             {
               Note_Title: TITULO_NOTA_TRANSCRIPCION,
-              Note_Content: transcript,
+              Note_Content: `${cabecera}${transcript}`,
               Parent_Id: dealId,
               $se_module: "Deals",
             },

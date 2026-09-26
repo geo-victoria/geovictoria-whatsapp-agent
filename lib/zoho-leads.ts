@@ -1667,6 +1667,12 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     }
 
     if (transcript) {
+      // La nota abre con el link al chat de Botmaker (Lalo 26-sep).
+      const cabecera = fonoCandado
+        ? await import("./enlace-conversacion")
+            .then(async (m) => m.cabeceraEnlaceChat(await m.urlChatDeContacto(fonoCandado)))
+            .catch(() => "")
+        : ""
       fetch(`${apiDomain}/crm/v2/Notes`, {
         method: "POST",
         headers: {
@@ -1677,7 +1683,7 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
           data: [
             {
               Note_Title: "Transcripción WhatsApp Vicky",
-              Note_Content: transcript,
+              Note_Content: `${cabecera}${transcript}`,
               Parent_Id: leadId,
               $se_module: moduleName,
             },

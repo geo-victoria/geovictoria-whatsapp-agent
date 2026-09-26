@@ -1275,6 +1275,13 @@ export async function runAgentLoop(params: {
                 rut: typeof toolInput.rutEmpresa === "string" ? toolInput.rutEmpresa : undefined,
                 empresa: typeof toolInput.empresa === "string" ? toolInput.empresa : undefined,
               }).catch(() => {})
+              // El trato queda con el link a esta conversación (Lalo 26-sep): el
+              // deal lo crea el cotizador y no heredaba el enlace del lead.
+              if (str("dealId")) {
+                import("./enlace-conversacion")
+                  .then((m) => m.marcarRegistroConChat("Deals", String(str("dealId")), contact))
+                  .catch(() => {})
+              }
               // CAMPAÑA 10% (26-ago): si el contacto aceptó la oferta de la
               // campaña ANTES de tener formal (segmento vio-precio), la
               // emisión recién creada recibe su % exacto por fuera del chat
