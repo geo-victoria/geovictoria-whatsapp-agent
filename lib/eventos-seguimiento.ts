@@ -42,6 +42,11 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // horario Colombia, verificado 26-sep 9:00-16:40 Bogotá). Antes le llegaban las reuniones
   // solo porque es el respaldo del país (CAL_EVENT_TYPE_ID_CO).
   "egalindo@geovictoria.com": "6292070",
+  // CO — SDR (Lalo 26-sep, "como Aleydis y Aracelli"): eventos creados por API copiando el de
+  // Corredor; host interino Lalo + horario "Colombia" (2095795) hasta que acepten la invitación.
+  // Verificados: 109 horarios 9:00-16:40 Bogotá en 7 días cada uno.
+  "msanabriat@geovictoria.com": "7235555", // CO — Mauricio Sanabria Torres
+  "jnarinoch@geovictoria.com": "7235556", // CO — Jhon Nariño Chavarro
   // Lalo 26-sep: calendario de Laura Medina (host interino: Lalo; horario "México" 9-17 CDMX).
   "lmedina@geovictoria.com": "7235403", // MX — Laura Medina
   // ── PERÚ (15-sep, regla chilena: la reunión sigue al dueño del registro) ──
