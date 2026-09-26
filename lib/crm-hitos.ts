@@ -1,7 +1,7 @@
 import { monedaDealDeTerritorio } from "./convencion-deal.ts"
 import { ccLiderTraspaso } from "./cc-lider"
 import { esContactoCL } from "./origen-canal.ts"
-import { rosterSdrOperativo } from "./paises/ficha-operativa.ts"
+import { rosterSdrOperativo, reglaZoho } from "./paises/ficha-operativa.ts"
 import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "./paises/co/tombola-zoho.ts"
 /**
  * Sincronización determinista Zoho CRM ← hitos de la conversación de Vicky
@@ -803,19 +803,12 @@ function tieneIdentidadComercial(lead: LeadEncontrado, datos: DatosConversacion)
  * "Tómbola Deals 2026 Chile" (lar_id en el PUT). CO/MX aún sin regla (se
  * suman por env). Si la regla falla, el deal conserva el interino del país:
  * jamás queda en la bandeja de nadie. */
+// 26-sep: los lar_id por país salen de la ficha operativa (reglaZoho).
 const TOMBOLA_DEALS_POR_TERRITORIO: Record<string, string> = {
-  Chile: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
-  // Colombia (Lalo 23-sep): la misma regla "Deals 2026" con su entrada
-  // Colombia (1-199 → Corredor/Navarro Builes/Rodríguez), SOLO con el
-  // interruptor encendido; apagado, Colombia sigue sin tómbola (fijos 05-ago).
-  Colombia: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "",
-  // México (Lalo 25-sep): la misma "Deals 2026" con sus entradas México por
-  // tramo (9-14). El deal nace con Vicky y lo sortea el traspaso, igual que Chile.
-  "México": (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || REGLA_DEALS_GLOBAL).trim(),
-  // Perú (Lalo 22-sep): regla "Deals 2026" — entrada Territorio = Perú →
-  // Mónica Mendoza. Con regla, Perú entra a la MISMA mecánica que Chile:
-  // el deal nace con Vicky y espera al traspaso; la escalera RUC + >20 → deal.
-  "Perú": (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim(),
+  Chile: reglaZoho("cl", "deals"),
+  "Perú": reglaZoho("pe", "deals"),
+  Colombia: reglaZoho("co", "deals"),
+  "México": reglaZoho("mx", "deals"),
 }
 
 /** Territorio con tómbola de deals en Zoho (Chile, Perú). Lo que en Chile se

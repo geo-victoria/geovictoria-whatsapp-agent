@@ -32,17 +32,20 @@
 import { getZohoAccessToken } from "./zoho-token"
 import { getKvValue, setKvValue, getQuotePointer } from "./supabase-persistence-v3"
 import { esHorarioHabil } from "./ptv"
+import { reglaZoho } from "./paises/ficha-operativa"
 
 const VICKY_ID = "3525045000484500876"
 const OWNERS_ROBOT = /^(vicky@|info@geovictoria|ventas@geovictoria|productmanager@)/i
 const RE_INTERNO = /prueba|no usar|\btest\b|huellerocompany|pruebasmkt/i
 const RE_SINTETICO = /^(56|51|57|52)9000\d{5}$/
 const PROBADORES = new Set(["56944668823", "56978385048"])
+// 26-sep: las reglas por país salen de la ficha operativa (antes CO y MX
+// estaban vacías acá y el barrido no sorteaba sus tratos).
 const REGLAS_TOMBOLA: Record<string, string> = {
-  cl: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
-  pe: (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim(),
-  co: (process.env.VICKY_PTV_TOMBOLA_DEALS_CO || "").trim(),
-  mx: (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || "").trim(),
+  cl: reglaZoho("cl", "deals"),
+  pe: reglaZoho("pe", "deals"),
+  co: reglaZoho("co", "deals"),
+  mx: reglaZoho("mx", "deals"),
 }
 const ETAPAS_ABIERTAS = [
   "1. Trato Creado",

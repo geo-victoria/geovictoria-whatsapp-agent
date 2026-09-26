@@ -21,12 +21,12 @@ const RAIZ = new URL("..", import.meta.url).pathname
 const TOOLS = readFileSync(join(RAIZ, "lib/paises/mx/tools.ts"), "utf8")
 
 describe("event type de reuniones MX", () => {
-  test("default 6101466 con override por env", () => {
-    assert.match(TOOLS, /process\.env\.CAL_EVENT_TYPE_ID_MX \?\? "6101466"/)
+  test("default 7234317 (Pablo, 26-sep) con override por env", () => {
+    assert.match(TOOLS, /process\.env\.CAL_EVENT_TYPE_ID_MX \?\? "7234317"/)
   })
 
   test("usa ?? y no ||: un env vacío APAGA la agenda, no la re-activa", () => {
-    assert.doesNotMatch(TOOLS, /CAL_EVENT_TYPE_ID_MX \|\| "6101466"/)
+    assert.doesNotMatch(TOOLS, /CAL_EVENT_TYPE_ID_MX \|\| "7234317"/)
   })
 
   test("el gate sigue derivando del valor efectivo", () => {

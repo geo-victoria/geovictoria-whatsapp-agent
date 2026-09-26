@@ -21,6 +21,7 @@
  */
 
 import { fetchZoho } from "@/lib/zoho-token"
+import { reglaZoho } from "@/lib/paises/ficha-operativa"
 import { getKvValue, setKvValue, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 
 export const dynamic = "force-dynamic"
@@ -30,9 +31,10 @@ const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const VICKY_CREATOR_ID = "3525045000484500876"
 const ROBOT_EMAILS = new Set(["vicky@geovictoria.com", "info@geovictoria.com"])
-const REGLA_DEALS = "3525045000595568541"
-const REGLA_SDR_NUEVA = "3525045000652043111"
-const REGLA_TLMK_VIEJA = "3525045000649066001"
+// 26-sep: ids desde la ficha operativa (auditoría de Chile).
+const REGLA_DEALS = reglaZoho("cl", "deals")
+const REGLA_SDR_NUEVA = reglaZoho("cl", "leadsSinCalificar")
+const REGLA_TLMK_VIEJA = reglaZoho("cl", "leadsCalificado")
 const MAX_TIMELINES_POR_TICK = 25
 const DIAS_VENTANA = 7
 

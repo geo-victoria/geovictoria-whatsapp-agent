@@ -7,6 +7,7 @@
  * bandeja de nadie — la regla de leads de Zoho no dispara por API).
  */
 
+import { reglaZoho } from "@/lib/paises/ficha-operativa"
 import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
 import { vendedoresDePais } from "@/lib/ptv"
 
@@ -32,11 +33,11 @@ function paisDeTelefono(tel: string): "cl" | "co" | "mx" | "pe" {
  * rotación interna decide dueños. Se aplica por lar_id sobre el lead ya
  * creado (las reglas no corren solas en creates por API) y se lee el dueño
  * sorteado. undefined = la regla no asignó (fallback: rotación interna). */
-const TM_TOMBOLA_LEADS_CL = (process.env.VICKY_TM_TOMBOLA_LEADS_CL || "3525045000649066001").trim()
+const TM_TOMBOLA_LEADS_CL = reglaZoho("cl", "leadsCalificado")
 // ESCALERA 18-ago (Lalo): calificado (dotación conocida) → tómbola de leads
 // de ejecutivos (TLMK …6001); "si Vicky no logra calificar pasa a leads de
 // los SDR" → regla SDR (…3111). Antes TODO callback iba a la de ejecutivos.
-const TM_TOMBOLA_SDR_CL = (process.env.VICKY_TM_SIN_CALIFICAR_RULE_ID || "3525045000652043111").trim()
+const TM_TOMBOLA_SDR_CL = reglaZoho("cl", "leadsSinCalificar")
 
 async function asignarLeadPorReglaCL(leadId: string, calificado: boolean): Promise<string | undefined> {
   try {

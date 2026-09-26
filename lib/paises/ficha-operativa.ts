@@ -132,9 +132,36 @@ export type FichaOperativa = {
     /** Layout del módulo TicketsST para este país. */
     stLayoutId: string
   }
+  /**
+   * Reglas de asignación de Zoho que usa el país (26-sep, Lalo: "es un proceso
+   * global con variables para que sea escalable"). Una sola fuente: crm-hitos,
+   * ptv-cron, barridos y endpoints admin las leen de acá (envs como override).
+   * Vacío = el país no tiene esa regla y el código cae a su rotación interna.
+   */
+  zoho: {
+    /** Tómbola de TRATOS ("Deals 2026" con entrada por país; Chile usa la suya). */
+    reglaDeals: string
+    /** Lead CALIFICADO → telemarketing ("Asignación Leads Vicky TLMK"). */
+    reglaLeadsCalificado: string
+    /** Lead SIN calificar → SDR ("Asignación Leads Sin calificar Vicky SDR"). */
+    reglaLeadsSinCalificar: string
+  }
+  /** Procesos globales que el país tiene ENCENDIDOS (mismo código, interruptor por país). */
+  procesos: {
+    /** Reloj de calificación de 24 h hábiles (lead que no contestó la 1ª pregunta → reglas de Zoho). */
+    relojCalificacion24h: boolean
+    /** Leads y tratos se entregan por las REGLAS de Zoho (apagado = rotación interna / fijos del país). */
+    tombolaZoho: boolean
+  }
   /** Lo que la ficha declara que FALTA para este país (texto para una persona). */
   pendientes: string[]
 }
+
+/** Reglas de Zoho compartidas entre países (cada una tiene su entrada por país en la UI). */
+const REGLA_DEALS_CHILE = "3525045000595568541"
+const REGLA_DEALS_2026 = "3525045000635322005"
+const REGLA_LEADS_TLMK = "3525045000649066001"
+const REGLA_LEADS_SDR = "3525045000652043111"
 
 const persona = (email: string, zohoId: string, nombre: string, telefono?: string, sesion?: string): PersonaEquipo => ({
   email: email.toLowerCase(),
@@ -201,6 +228,8 @@ const FICHA_CL: FichaOperativa = {
     revisorFacturacion: "ssilva@geovictoria.com",
     stLayoutId: "3525045000282855283",
   },
+  zoho: { reglaDeals: REGLA_DEALS_CHILE, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true },
   pendientes: [],
 }
 
@@ -254,6 +283,8 @@ const FICHA_PE: FichaOperativa = {
     revisorFacturacion: "",
     stLayoutId: "3525045000325663062",
   },
+  zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Perú (en Chile es Sebastián Silva): correo del revisor para avisarle y para el ticket ST la plantilla de equipos del país.",
     "Sesiones de espejo del equipo en el worker (WA_SESSION_IDS en Railway): mmendozav, afiori, pquispef. Cecilia (venta autónoma) no lleva espejo (Lalo 23-sep).",
@@ -334,6 +365,8 @@ const FICHA_CO: FichaOperativa = {
     revisorFacturacion: "",
     stLayoutId: "3525045000325513660",
   },
+  zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Colombia (su ST valida contra la Sales Order de Books, no contra la NDV) y la plantilla de equipos del país.",
     "Sesiones de espejo del equipo CO en el worker (decidir quiénes: telemarketing mcorredor/snavarrob/dcrodriguez, SDR msanabriat/jnarinoch/egalindo).",
@@ -401,6 +434,8 @@ const FICHA_MX: FichaOperativa = {
     revisorFacturacion: "afuentess@geovictoria.com",
     stLayoutId: "3525045000331434179",
   },
+  zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
+  procesos: { relojCalificacion24h: false, tombolaZoho: true },
   pendientes: [
     "Plantilla de equipos del país para el ticket ST.",
     "Sesiones de espejo del equipo en el worker (lmedina, ysegura, prodriguez).",
@@ -637,4 +672,57 @@ export function lineaZonaHoraria(pais: string): string {
     `plazos, seguimientos) va en SU hora local, y toda hora que él te diga está en su hora local. Las horas que ` +
     `devuelven tus tools YA vienen en su hora: dilas tal cual, sin convertir ni aclarar otra zona.`
   )
+}
+
+export type TipoReglaZoho = "deals" | "leadsCalificado" | "leadsSinCalificar"
+
+/** Envs históricas que siguen mandando sobre la ficha (sin deploy). */
+function envReglaZoho(pais: CodigoPaisOperativo, tipo: TipoReglaZoho): string {
+  const cc = pais.toUpperCase()
+  const e = process.env
+  if (tipo === "deals") return (e[`VICKY_PTV_TOMBOLA_DEALS_${cc}`] || "").trim()
+  if (tipo === "leadsCalificado")
+    return ((pais === "cl" ? e.VICKY_TM_TOMBOLA_LEADS_CL : e[`VICKY_TM_CALIFICACION_${cc}_RULE_ID`]) || "").trim()
+  return ((pais === "cl" ? e.VICKY_TM_SIN_CALIFICAR_RULE_ID : e[`VICKY_TM_SDR_INBOUND_${cc}_RULE_ID`]) || "").trim()
+}
+
+/**
+ * Regla de asignación de Zoho del país para `tipo` (env → ficha). Vacío = el
+ * país no tiene esa regla. ÚNICA fuente de los lar_id: ningún archivo escribe
+ * un id de regla (lo vigila tests/ficha-operativa-fuente-unica).
+ */
+export function reglaZoho(pais: string | null | undefined, tipo: TipoReglaZoho): string {
+  const cc = (String(pais || "").toLowerCase() as CodigoPaisOperativo)
+  if (!(cc in FICHAS)) return ""
+  if (!paisTieneProceso(cc, "tombolaZoho")) return ""
+  const env = envReglaZoho(cc, tipo)
+  if (env) return env
+  const z = FICHAS[cc].zoho
+  return tipo === "deals" ? z.reglaDeals : tipo === "leadsCalificado" ? z.reglaLeadsCalificado : z.reglaLeadsSinCalificar
+}
+
+/** Países con un proceso global encendido (env VICKY_<PROCESO>_<CC>=on|off manda sobre la ficha). */
+export function paisesConProceso(proceso: keyof FichaOperativa["procesos"]): CodigoPaisOperativo[] {
+  return (Object.keys(FICHAS) as CodigoPaisOperativo[]).filter((cc) => paisTieneProceso(cc, proceso))
+}
+
+const ENV_PROCESO: Record<keyof FichaOperativa["procesos"], string> = {
+  relojCalificacion24h: "VICKY_RELOJ24H",
+  tombolaZoho: "VICKY_TOMBOLA_ZOHO",
+}
+
+/** ¿El país tiene el proceso encendido? env `<PROCESO>_<CC>`=on|off manda sobre la ficha. */
+export function paisTieneProceso(pais: string | null | undefined, proceso: keyof FichaOperativa["procesos"]): boolean {
+  const cc = String(pais || "").toLowerCase() as CodigoPaisOperativo
+  if (!(cc in FICHAS)) return false
+  const v = (process.env[`${ENV_PROCESO[proceso]}_${cc.toUpperCase()}`] || "").trim().toLowerCase()
+  if (v === "on" || v === "1" || v === "true") return true
+  if (v === "off" || v === "0" || v === "false") return false
+  return FICHAS[cc].procesos[proceso]
+}
+
+/** Territorio de Zoho → código de país ("Chile" → "cl"). */
+export function paisDeTerritorio(territorio: string | null | undefined): CodigoPaisOperativo | "" {
+  const t = String(territorio || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
+  return t === "chile" ? "cl" : t === "peru" ? "pe" : t === "colombia" ? "co" : t === "mexico" ? "mx" : ""
 }

@@ -99,6 +99,9 @@ function literalesDeLaFicha(): Array<{ que: string; re: RegExp }> {
     // suelto en el código es un `if (pais === …)` escondido.
     out.push({ que: `layout SF ${f.pais}`, re: new RegExp(f.solicitudes.facturacionLayoutId) })
     out.push({ que: `layout ST ${f.pais}`, re: new RegExp(f.solicitudes.stLayoutId) })
+    // Reglas de asignación de Zoho (26-sep, Lalo "proceso global con variables"):
+    // un lar_id escrito fuera de la ficha es un mapa por país escondido.
+    for (const [tipo, id] of Object.entries(f.zoho)) if (id) out.push({ que: `regla Zoho ${tipo}`, re: new RegExp(id) })
   }
   for (const p of equipoOperativo()) {
     out.push({ que: `email ${p.email}`, re: new RegExp(esc(p.email), "i") })

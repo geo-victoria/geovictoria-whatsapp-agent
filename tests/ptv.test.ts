@@ -213,9 +213,9 @@ describe("cableado del cron", () => {
     // Lalo 22-sep: regla Zoho "Deals 2026" (Territorio = Perú → Mónica). Sin la
     // llave `pe` el deal peruano caía a la rotación interna y el país nuevo
     // quedaba fuera de Zoho aunque la regla existiera.
-    assert.match(CRON, /pe: \(process\.env\.VICKY_PTV_TOMBOLA_DEALS_PE \|\| "3525045000635322005"\)/)
+    assert.match(CRON, /pe: reglaZoho\("pe", "deals"\)/)
     const HITOS = readFileSync(join(RAIZ, "lib", "crm-hitos.ts"), "utf8")
-    assert.match(HITOS, /"Perú": \(process\.env\.VICKY_PTV_TOMBOLA_DEALS_PE \|\| "3525045000635322005"\)/)
+    assert.match(HITOS, /"Perú": reglaZoho\("pe", "deals"\)/)
     // La espera del deal con Vicky y la escalera RUT/RUC + >20 se deciden por
     // "territorio con regla", no por el literal "Chile".
     assert.match(HITOS, /territorioConTombola\(territorio\) && empleados > 0 && empleados <= 50/)
@@ -374,7 +374,7 @@ test("Perú: el lead CALIFICADO pasa por la regla TLMK de Zoho (entrada Territor
   const LEADS = readFileSync(join(RAIZ, "lib/zoho-leads.ts"), "utf8")
   const BARRIDO = readFileSync(join(RAIZ, "lib/barrido-leads-vicky.ts"), "utf8")
   assert.match(LEADS, /export async function reasignarLeadCalificadoPE\(/)
-  assert.match(LEADS, /VICKY_TM_CALIFICACION_PE_RULE_ID \|\| TM_TOMBOLA_LEADS_CL/)
+  assert.match(LEADS, /TM_CALIFICACION_PE = reglaZoho\("pe", "leadsCalificado"\)/)
   // 23-sep: la entrega por reglas es UNA función para Perú y Colombia
   // (entregarLeadPorReglas → reasignarLeadPorTerritorio), y la rama Perú de
   // reasignarLeadPorTerritorio es la que llama a la regla TLMK.
@@ -389,7 +389,7 @@ test("Perú: el lead CALIFICADO pasa por la regla TLMK de Zoho (entrada Territor
 
 test("Perú: el lead SIN calificar pasa por la regla SDR de Zoho (entrada Territorio = Perú → Ana Fiori/Priscila); la rotación interna queda de fallback", () => {
   const LEADS = readFileSync(join(RAIZ, "lib/zoho-leads.ts"), "utf8")
-  assert.match(LEADS, /VICKY_TM_SDR_INBOUND_PE_RULE_ID \|\| TM_TOMBOLA_SIN_CALIFICAR_CL/)
+  assert.match(LEADS, /TM_SDR_INBOUND_PE = reglaZoho\("pe", "leadsSinCalificar"\)/)
   assert.match(LEADS, /reasignarLeadPorRoster\(\{ leadId, ruleId: TM_SDR_INBOUND_PE, roster: SDR_INBOUND_PE/)
 })
 

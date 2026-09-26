@@ -23,20 +23,20 @@ import { NextResponse } from "next/server"
 import { getFollowupCronSecret, getKvValue, setKvValue } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { esSdrCalificacion, esSdrCalificacionCL } from "@/lib/sdr-calificacion"
-import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "@/lib/paises/co/tombola-zoho"
+import { reglaZoho } from "@/lib/paises/ficha-operativa"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
-const REGLA_CL = (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim()
-// Perú: regla "Deals 2026" (Lalo 22-sep; entradas por tramo + "Territorio = Perú" → Mónica).
-const REGLA_PE = (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim()
-// Colombia (Lalo 23-sep): la misma "Deals 2026" con sus entradas Colombia, solo con el interruptor.
-// México (Lalo 25-sep): la misma "Deals 2026" con sus entradas México por tramo.
-const REGLA_MX = (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || REGLA_DEALS_GLOBAL).trim()
-const REGLAS: Record<string, string> = { cl: REGLA_CL, pe: REGLA_PE, co: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "", mx: REGLA_MX }
+// 26-sep: las reglas por país salen de la ficha operativa (reglaZoho).
+const REGLAS: Record<string, string> = {
+  cl: reglaZoho("cl", "deals"),
+  pe: reglaZoho("pe", "deals"),
+  co: reglaZoho("co", "deals"),
+  mx: reglaZoho("mx", "deals"),
+}
 
 async function autorizado(req: Request): Promise<boolean> {
   const secreto = await getFollowupCronSecret().catch(() => "")

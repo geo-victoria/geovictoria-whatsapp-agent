@@ -27,14 +27,14 @@
 // 23-sep 18:xx UTC: ENCENDIDO. Lalo creó las tres entradas Colombia el mismo
 // día — Deals 2026 (6: 1-199 → Corredor/Navarro Builes/Rodríguez · 7: ≥200 →
 // 13 ejecutivos · 8: resto → los tres del 6), TLMK (3) y SDR (3).
+import { paisTieneProceso, reglaZoho } from "../ficha-operativa.ts"
+
 export const TOMBOLA_ZOHO_CO_DEFAULT = true
 
 export function tombolaZohoCoActiva(): boolean {
-  const v = String(process.env.VICKY_TOMBOLA_ZOHO_CO || "").trim().toLowerCase()
-  if (v === "on" || v === "1" || v === "true") return true
-  if (v === "off" || v === "0" || v === "false") return false
-  return TOMBOLA_ZOHO_CO_DEFAULT
+  // 26-sep: el interruptor es un PROCESO de la ficha operativa (env VICKY_TOMBOLA_ZOHO_CO manda igual).
+  return paisTieneProceso("co", "tombolaZoho")
 }
 
 /** Ids de las tres reglas globales (las mismas de Chile/Perú), con override por env. */
-export const REGLA_DEALS_GLOBAL = (process.env.VICKY_PTV_TOMBOLA_DEALS_CO || "3525045000635322005").trim()
+export const REGLA_DEALS_GLOBAL = reglaZoho("mx", "deals")

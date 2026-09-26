@@ -10,7 +10,7 @@
  *   - agendar_reunion (con ownerEmail = organizerEmail Cal.com → directo)
  */
 
-import { rosterSdrOperativo, rosterTelemarketingOperativo } from "@/lib/paises/ficha-operativa"
+import { rosterSdrOperativo, rosterTelemarketingOperativo, reglaZoho } from "@/lib/paises/ficha-operativa"
 import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe, psidDe, canalMetaDe } from "./origen-canal.ts"
 import { getZohoAccessToken } from "./zoho-token"
@@ -646,14 +646,14 @@ export function esMotivoTerminal(status: string, motivo: string | null | undefin
  * Misma filosofía que la tómbola de deals y los callbacks: la regla decide.
  * Devuelve el email del dueño sorteado, o undefined si la regla no asignó.
  */
-const TM_TOMBOLA_LEADS_CL = (process.env.VICKY_TM_TOMBOLA_LEADS_CL || "3525045000649066001").trim()
+const TM_TOMBOLA_LEADS_CL = reglaZoho("cl", "leadsCalificado") // ficha operativa (env VICKY_TM_TOMBOLA_LEADS_CL manda)
 // ESCALERA DE ROLES (biblia, reglas de Lalo 12-ago): dos tómbolas de Zoho.
 // Lead CALIFICADO (precio mostrado / dotación conocida) → "Asignación Leads
 // Vicky TLMK" 3525045000649066001, cuyo roster Lalo cambió a EJECUTIVOS el
 // 12-ago 17:11. Lead SIN calificar → "Asignación Leads Sin calificar Vicky
 // SDR" 3525045000652043111 (creada 12-ago). El RR interno Araceli/Aleydis
 // queda de fallback SOLO para el camino sin calificar (es el roster SDR).
-const TM_TOMBOLA_SIN_CALIFICAR_CL = (process.env.VICKY_TM_SIN_CALIFICAR_RULE_ID || "3525045000652043111").trim()
+const TM_TOMBOLA_SIN_CALIFICAR_CL = reglaZoho("cl", "leadsSinCalificar") // ficha operativa (env VICKY_TM_SIN_CALIFICAR_RULE_ID manda)
 
 export async function reasignarLeadTelemarketingCL(
   leadId: string,
@@ -853,8 +853,8 @@ const SDR_INBOUND_CO = (
     return { email, id: id || "" }
   })
   .filter((s) => s.email)
-const TM_SDR_INBOUND_CO = (process.env.VICKY_TM_SDR_INBOUND_CO_RULE_ID || TM_TOMBOLA_SIN_CALIFICAR_CL).trim()
-const TM_CALIFICACION_CO = (process.env.VICKY_TM_CALIFICACION_CO_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+const TM_SDR_INBOUND_CO = reglaZoho("co", "leadsSinCalificar")
+const TM_CALIFICACION_CO = reglaZoho("co", "leadsCalificado")
 const TLMK_CO_FALLBACK = (
   process.env.VICKY_PTV_VENDEDORES_CO ||
   rosterTelemarketingOperativo("co")
@@ -949,11 +949,11 @@ const SDR_INBOUND_MX = (
 // SDR" (…043111) tiene la entrada "Territorio = México → Pablo Rodríguez": se
 // usa esa, igual que Chile/Perú/Colombia. La regla MX anterior (…685096, que
 // entregaba a Miguel Guzmán) queda solo por env.
-const TM_SDR_INBOUND_MX = (process.env.VICKY_TM_SDR_INBOUND_MX_RULE_ID || TM_TOMBOLA_SIN_CALIFICAR_CL).trim()
+const TM_SDR_INBOUND_MX = reglaZoho("mx", "leadsSinCalificar")
 
 // TELEMARKETING MÉXICO (Lalo 25-sep): entrada "Territorio = México → Laura
 // Medina / Yahel Segura" en la regla TLMK global. Fallback: su rotación.
-const TM_CALIFICACION_MX = (process.env.VICKY_TM_CALIFICACION_MX_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+const TM_CALIFICACION_MX = reglaZoho("mx", "leadsCalificado")
 const TLMK_MX_FALLBACK = rosterTelemarketingOperativo("mx")
   .map((p) => ({ email: p.email, id: p.zohoId || "" }))
   .filter((s) => s.email)
@@ -1077,7 +1077,7 @@ const SDR_INBOUND_PE = (
     return { email, id: id || "" }
   })
   .filter((s) => s.email)
-const TM_SDR_INBOUND_PE = (process.env.VICKY_TM_SDR_INBOUND_PE_RULE_ID || TM_TOMBOLA_SIN_CALIFICAR_CL).trim()
+const TM_SDR_INBOUND_PE = reglaZoho("pe", "leadsSinCalificar")
 
 // TELEMARKETING PERÚ (Lalo 22-sep): la regla "Asignación Leads Vicky TLMK"
 // (…066001) ganó la entrada "Territorio = Perú → Mónica Mendoza", así que el
@@ -1085,7 +1085,7 @@ const TM_SDR_INBOUND_PE = (process.env.VICKY_TM_SDR_INBOUND_PE_RULE_ID || TM_TOM
 // PUT directo de Owner; los ejecutivos nuevos se agregan en la entrada de la
 // regla, no acá. Override: VICKY_TM_CALIFICACION_PE_RULE_ID. Fallback si la
 // regla no asigna (o queda en el robot): Mónica directo, como hasta hoy.
-const TM_CALIFICACION_PE = (process.env.VICKY_TM_CALIFICACION_PE_RULE_ID || TM_TOMBOLA_LEADS_CL).trim()
+const TM_CALIFICACION_PE = reglaZoho("pe", "leadsCalificado")
 const TLMK_PE_FALLBACK = (
   process.env.VICKY_PTV_VENDEDORES_PE || rosterTelemarketingOperativo("pe").map((p) => `${p.email}:${p.zohoId}`).join(",")
 )

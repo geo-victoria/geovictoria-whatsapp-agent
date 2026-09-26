@@ -41,7 +41,7 @@ import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { despacharHuerfanos } from "@/lib/despachador-huerfanos"
 import { fichaEmpresaSii, rutEnTexto } from "@/lib/empresas-sii"
-import { personaPorEmail, rosterSdrOperativo } from "@/lib/paises/ficha-operativa"
+import { personaPorEmail, rosterSdrOperativo, reglaZoho, paisesConProceso } from "@/lib/paises/ficha-operativa"
 import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "@/lib/paises/co/tombola-zoho"
 
 export const dynamic = "force-dynamic"
@@ -992,16 +992,13 @@ async function siguienteVendedor(pais: "cl" | "co" | "mx" | "pe") {
  * misma tómbola que usa el equipo ("Tómbola Deals 2026 Chile") — y no la
  * rotación interna. La rotación interna queda para leads sin deal, para
  * países sin regla configurada y como fallback si la regla falla. */
+// 26-sep (Lalo "proceso global con variables"): los lar_id viven en la FICHA
+// OPERATIVA de cada país (reglaZoho, env como override) — acá solo se leen.
 const TOMBOLA_DEALS_RULE: Record<string, string> = {
-  cl: (process.env.VICKY_PTV_TOMBOLA_DEALS_CL || "3525045000595568541").trim(),
-  // CO (Lalo 23-sep): la misma "Deals 2026" con su entrada Colombia, solo con
-  // el interruptor encendido; apagado, Colombia sigue con los fijos del 05-ago.
-  co: tombolaZohoCoActiva() ? REGLA_DEALS_GLOBAL : "",
-  // MX (Lalo 25-sep): "Deals 2026" con sus entradas México por tramo.
-  mx: (process.env.VICKY_PTV_TOMBOLA_DEALS_MX || REGLA_DEALS_GLOBAL).trim(),
-  // PE (Lalo 22-sep): regla "Deals 2026" (entrada Territorio = Perú → Mónica;
-  // los ejecutivos nuevos se agregan en la regla, no acá).
-  pe: (process.env.VICKY_PTV_TOMBOLA_DEALS_PE || "3525045000635322005").trim(),
+  cl: reglaZoho("cl", "deals"),
+  pe: reglaZoho("pe", "deals"),
+  co: reglaZoho("co", "deals"),
+  mx: reglaZoho("mx", "deals"),
 }
 
 /** Nombre real para la presentación al prospecto (la tómbola interna solo
@@ -1750,14 +1747,15 @@ async function cotizacionAceptada(contact: string): Promise<boolean> {
 // telemarketing); PE no tiene tómbola — regla vacía = asignación DIRECTA a la
 // ejecutiva del país (vendedoresDePais). Extensible por env.
 const TM_REGLA: Record<string, string> = {
-  // ESCALERA 18-ago (Lalo): "si Vicky no logra calificar pasa a leads de los
-  // SDR" — el reloj de 24h dispara justamente cuando NO hubo calificación,
-  // así que entrega por la regla SDR "Asignación Leads Sin calificar Vicky
-  // SDR" (…3111), ya no por la TLMK de ejecutivos (…6001).
-  cl: (process.env.VICKY_TM_REASIGNACION_RULE_CL || "3525045000652043111").trim(),
-  pe: (process.env.VICKY_TM_REASIGNACION_RULE_PE || "").trim(),
+  // ESCALERA 18-ago (Lalo): el reloj de 24h dispara cuando NO hubo calificación
+  // → regla SDR "Asignación Leads Sin calificar Vicky SDR" con la entrada del país.
+  // 26-sep: el id sale de la ficha operativa (VICKY_TM_REASIGNACION_RULE_CL sigue mandando en CL).
+  cl: (process.env.VICKY_TM_REASIGNACION_RULE_CL || reglaZoho("cl", "leadsSinCalificar")).trim(),
+  pe: (process.env.VICKY_TM_REASIGNACION_RULE_PE || reglaZoho("pe", "leadsSinCalificar")).trim(),
+  co: reglaZoho("co", "leadsSinCalificar"),
+  mx: reglaZoho("mx", "leadsSinCalificar"),
 }
-const TM_PAIS_NOMBRE: Record<string, string> = { cl: "Chile", pe: "Perú" }
+const TM_PAIS_NOMBRE: Record<string, string> = { cl: "Chile", pe: "Perú", co: "Colombia", mx: "México" }
 // VICKY PE AUTÓNOMA (orden de Lalo 11-ago, pre-encendido): en Perú NO se
 // presenta a nadie por ahora — sin traspasos de etapa ni de calificación
 // mientras Vicky PE sea autónoma (Mónica igual recibe los LEADS por los
@@ -1773,7 +1771,7 @@ async function pePresentaHabilitado(): Promise<boolean> {
     return false
   }
 }
-const TM_FONO_REGEX: Record<string, RegExp> = { cl: /^56\d{8,10}$/, pe: /^51\d{8,10}$/, co: /^57\d{10}$/ }
+const TM_FONO_REGEX: Record<string, RegExp> = { cl: /^56\d{8,10}$/, pe: /^51\d{8,10}$/, co: /^57\d{10}$/, mx: /^52\d{10,11}$/ }
 const TM_TEMPLATE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION || "vicky_traspaso_ejecutivo").trim()
 // PERÚ (15-sep): la presentación sale con la plantilla del bot Vicky Perú
 // (creada por API; una plantilla del bot Chile por la línea +51 arrastra el
@@ -1797,7 +1795,7 @@ function telefonoTmPorEmail(email: string): string {
   return ""
 }
 
-type CandidatoTM = { contact: string; origen: "outbound" | "inbound"; pais: "cl" | "pe" | "co" }
+type CandidatoTM = { contact: string; origen: "outbound" | "inbound"; pais: "cl" | "pe" | "co" | "mx" }
 
 /**
  * LA ENTREGA A TELEMARKETING QUE FALLA NO PUEDE REINTENTARSE PARA SIEMPRE
@@ -1857,7 +1855,7 @@ async function traspasarATelemarketing(
   origen: string,
   ahora: Date,
   feriados: Set<string>,
-  pais: "cl" | "pe" | "co" = "cl",
+  pais: "cl" | "pe" | "co" | "mx" = "cl",
 ): Promise<{ ok: boolean; vendedor?: string; detalle?: string }> {
   // Candado primero (UNIQUE contact+activo evita dobles).
   const fila = await supa<{ id: string }>(`vic_ptv`, {
@@ -2650,7 +2648,11 @@ export async function GET(req: Request) {
     // en pausa — sin presentaciones en Perú hasta nueva orden.
     // COLOMBIA (Lalo 23-sep, "3 y 4: bots unificados ok"): el reloj de
     // calificación 24 h corre también en CO, entregando por las reglas de Zoho.
-    const paisesTm: Array<"cl" | "pe" | "co"> = (await pePresentaHabilitado()) ? ["cl", "pe", "co"] : ["cl", "co"]
+    // 26-sep: los países del reloj salen de la ficha operativa (proceso
+    // relojCalificacion24h; env VICKY_RELOJ24H_<CC>=on|off). Perú además
+    // respeta el gate de presentaciones.
+    const peOk = await pePresentaHabilitado()
+    const paisesTm = paisesConProceso("relojCalificacion24h").filter((p) => p !== "pe" || peOk) as Array<"cl" | "pe" | "co" | "mx">
     for (const paisTm of paisesTm) {
       const feriados = await feriadosDePais(paisTm)
       feriadosPorPais[paisTm] = feriados
