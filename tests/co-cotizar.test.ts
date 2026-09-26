@@ -32,8 +32,8 @@ test("alquiler en Bogotá: 86.000 + instalación técnica bonificada (línea a l
   assert.ok(r.mensajeParaProspecto.includes("va incluida sin costo (alquiler en Bogotá y alrededores); si prefieres, el equipo también es autoinstalable"))
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
   assert.ok(inst && inst.descuentoPct === 100 && inst.subtotalCOP === 0 && inst.precioUnitarioCOP === TARIFAS_CO.instalacion.capital)
-  // La bonificada no suma al pago inicial: solo la activación (un mes del plan).
-  assert.equal(r.pagoInicialNeto, 15 * 13700)
+  // La bonificada no suma al pago inicial: solo el primer mes (plan + alquiler), como el cotizador.
+  assert.equal(r.pagoInicialNeto, 15 * 13700 + 86000)
   assert.ok(!r.itemsCotizador.some((i) => i.id === "envio_reloj"))
 })
 
@@ -101,7 +101,7 @@ test("con equipo en alquiler: doble valor (equipo + app vs solo app) y cierre pr
   assert.ok(m.includes("💰 $287.290 al mes (incluye el IVA del equipo)."))
   assert.ok(m.includes("2.- Una alternativa más económica sería si marcan solo mediante nuestra app:"))
   assert.ok(m.includes("💰 $184.950 al mes."))
-  assert.ok(m.includes("Incluye el 10% de descuento en el plan durante 6 meses (desde el mes 7, $307.840 al mes)."))
+  assert.ok(m.includes("Incluye el 10% de descuento en el plan durante 6 meses (desde el mes 7, $307.840/mes)."))
   assert.ok(m.trim().endsWith("Qué opción prefieres? Con la que elijas te genero la cotización formal de inmediato."))
   assert.ok(!/pago inicial/i.test(m))
   assert.ok(!/\+ IVA =/.test(m) && !/Pago inicial \(una sola vez\)/.test(m))

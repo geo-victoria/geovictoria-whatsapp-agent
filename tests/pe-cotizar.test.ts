@@ -121,7 +121,7 @@ test("instalación en provincia: precio cerrado US$214 (5 UF chilenas), nunca 's
   })
   assert.equal(p.avisoSsttPeru, true)
   assert.equal(p.pagoInicialNeto, 303 + 101 + 722 + 100) // reloj + envío + instalación + primer mes
-  assert.ok(p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,126 + IGV.") || p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1126 + IGV."))
+  assert.ok(p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,126 + IGV (reloj, envío e instalación).") || p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1126 + IGV (reloj, envío e instalación)."))
 })
 
 test("descuento = Chile: escalera 10 → 20 % SOLO sobre el plan, 6 meses", () => {
@@ -165,7 +165,7 @@ test("provincia en VENTA: envío US$30 e instalación US$214 como líneas única
   // Murió la nota "el envío corre por cuenta del cliente": ahora tiene precio.
   assert.ok(!r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
   // Al cliente (doble valor) el envío va dentro del pago inicial; el desglose por línea vive en `lineas`.
-  assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,126 + IGV.") || r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1126 + IGV."))
+  assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,126 + IGV (reloj, envío e instalación).") || r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1126 + IGV (reloj, envío e instalación)."))
   assert.ok(r.lineas.some((l) => /^Envío de reloj a Arequipa$/.test(l.concepto) && l.neto === 101)) // US$30 × 3,372 = 101,16 → 101
   // Pago único = reloj (US$90 × 3,372 = 303) + envío 101 + instalación pedida en provincia 722 + primer mes (100).
   assert.equal(r.pagoInicialNeto, 504 + 722)
