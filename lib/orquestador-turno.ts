@@ -1839,9 +1839,40 @@ export async function procesarTurno(
             pagado = v.pagado
             motivo = v.motivo
           }
+          // CARRERA (26-sep, caso NelNav COT1649): el cliente escribió "ya pagué"
+          // 3 min después de un débito aprobado; la verificación no alcanzó a
+          // verlo, el post-pago estampó `pago_online_` 22 s ANTES de que saliera
+          // esta respuesta, y el modelo le pidió "el comprobante de transferencia"
+          // justo después de la plantilla "tu pago quedó registrado". Se relee la
+          // marca fresca antes de responder.
+          if (!pagado) {
+            const marca = String((await getKvValue(`pago_online_${contact}`).catch(() => null)) || "")
+            const comp = String((await getKvValue(`comprobante_ok_${contact}`).catch(() => null)) || "")
+            if (marca && (!quotePointer?.quoteId || marca.includes(quotePointer.quoteId))) {
+              pagado = true
+              motivo = "marca_kv_fresca"
+            } else if (comp && Date.now() - Date.parse(String((() => { try { return JSON.parse(comp).at } catch { return "" } })())) < 60 * 60_000) {
+              // Comprobante registrado en ESTE turno (la tool lo estampa al instante).
+              pagado = true
+              motivo = "comprobante_fresco"
+            }
+          }
           if (pagado && (declara || teatro)) {
             reply = pd.textoPagoConfirmado()
             console.log(`[pago-declarado] ${contact}: pago verificado (${motivo}) — respuesta canónica, el post-pago manda el kickoff`)
+          } else if (
+            declara &&
+            !teatro &&
+            // Si en el turno se registró el comprobante (tool ok), la respuesta del
+            // modelo es la correcta y no se toca.
+            !((result.toolCalls || []) as ToolCallRecord[]).some((c) => c.ok && c.name === "registrar_comprobante_transferencia")
+          ) {
+            // El cliente dice que pagó y no se ve el pago: sale el texto canónico
+            // (tarjeta se confirma sola / transferencia → comprobante), nunca lo
+            // que improvise el modelo (NelNav: pidió comprobante de transferencia
+            // a quien había pagado con débito por Mercado Pago).
+            console.warn(`[pago-declarado] ${contact}: el cliente declara pago sin pago verificado (${motivo}) — texto canónico`)
+            reply = pd.textoPagoNoVerificado({ link: quotePointer?.acceptanceUrl })
           } else if (teatro) {
             console.warn(`[pago-declarado] ${contact}: teatro de pago/acceso sin pago verificado (${motivo}) — respuesta reemplazada`)
             reply = pd.textoPagoNoVerificado({ link: quotePointer?.acceptanceUrl })
