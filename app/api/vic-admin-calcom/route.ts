@@ -45,7 +45,33 @@ export async function POST(req: Request): Promise<Response> {
   if (!expected || xcron !== expected) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
-  const body = (await req.json().catch(() => ({}))) as { eventTypeId?: number; scheduleId?: number; teamId?: number }
+  const body = (await req.json().catch(() => ({}))) as {
+    eventTypeId?: number
+    scheduleId?: number
+    teamId?: number
+    crearHorario?: { nombre?: string; timeZone?: string }
+  }
+  // { crearHorario: { nombre, timeZone } } (26-sep, evento de Laura Medina en hora de Chile):
+  // crea un horario L-V 9:00-17:00 en esa zona para el dueño de la API key (el host interino)
+  // y lo devuelve; no toca ningún evento. La zona debe ser de las 4 de la operación.
+  if (body.crearHorario) {
+    const tz = String(body.crearHorario.timeZone || "")
+    if (!["America/Santiago", "America/Lima", "America/Bogota", "America/Mexico_City"].includes(tz)) {
+      return NextResponse.json({ ok: false, error: "timeZone fuera de los 4 países" }, { status: 400 })
+    }
+    const r = await fetch(`${CAL_BASE}/schedules`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-06-11", "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        name: String(body.crearHorario.nombre || tz),
+        timeZone: tz,
+        isDefault: false,
+        availability: [{ days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], startTime: "09:00", endTime: "17:00" }],
+      }),
+    })
+    return NextResponse.json({ ok: r.ok, status: r.status, respuesta: await r.json().catch(() => null) })
+  }
   const eventTypeId = Number(body.eventTypeId)
   const scheduleId = Number(body.scheduleId)
   const teamId = Number(body.teamId || 91540)
