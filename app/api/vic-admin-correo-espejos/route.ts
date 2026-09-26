@@ -143,7 +143,7 @@ export async function POST(req: Request): Promise<Response> {
   const soloA = (sp.get("soloA") || "").trim()
   if (soloA) {
     const r = await enviar([soloA], [], `[PRUEBA] ${c.asunto}`, c.html)
-    return NextResponse.json({ ok: r.ok, prueba: soloA, ...r })
+    return NextResponse.json({ prueba: soloA, ...r })
   }
   const sinWorker = c.pendientes.filter((p) => p.estado === "sin_sesion_en_worker").map((p) => p.sesion)
   if (sinWorker.length && sp.get("forzar") !== "1") {
@@ -158,5 +158,5 @@ export async function POST(req: Request): Promise<Response> {
     )
   }
   const r = await enviar(c.to, c.cc, c.asunto, c.html)
-  return NextResponse.json({ ok: r.ok, pais: c.pais, to: c.to, cc: c.cc, ...r })
+  return NextResponse.json({ pais: c.pais, to: c.to, cc: c.cc, ...r })
 }
