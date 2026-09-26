@@ -32,7 +32,7 @@ export const PERFIL_TURNO_MX: PerfilTurno = {
   channelId: PERFIL_MX.canal.channelId,
   systemPrompt: (contact, umbral) => getSystemPromptMXNucleo(contact, umbral),
   tools: (contact) => ({ schemas: TOOL_SCHEMAS_MX_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchMXUnificado(contact) }),
-  derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: Boolean((process.env.CAL_EVENT_TYPE_ID_MX ?? "6101466").trim()) }),
+  derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: Boolean((process.env.CAL_EVENT_TYPE_ID_MX ?? "7234317").trim()) }),
   esFlujoCotizacion: esFlujoCotizacionMX,
   blindarSoporte: (reply, permitidos) => blindarSoporteInventadoPais("mx", reply, permitidos),
   certificacionDT: false,

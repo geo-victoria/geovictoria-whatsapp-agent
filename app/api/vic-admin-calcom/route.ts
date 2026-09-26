@@ -32,6 +32,44 @@ async function cal(path: string, version = "2024-08-13"): Promise<unknown> {
   return { status: res.status, data }
 }
 
+/**
+ * POST {eventTypeId, scheduleId, teamId?}: fija el HORARIO (y con él la zona
+ * horaria) de un evento de equipo. Única escritura permitida (26-sep: los tres
+ * eventos de Colombia con Lalo de host interino heredaban su horario por
+ * defecto "Chile" y ofrecían 7:00–14:40 hora de Bogotá). Responde el evento
+ * releído para confirmar que persistió.
+ */
+export async function POST(req: Request): Promise<Response> {
+  const xcron = (req.headers.get("x-cron-secret") || "").trim()
+  const expected = await getFollowupCronSecret().catch(() => "")
+  if (!expected || xcron !== expected) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
+  }
+  const body = (await req.json().catch(() => ({}))) as { eventTypeId?: number; scheduleId?: number; teamId?: number }
+  const eventTypeId = Number(body.eventTypeId)
+  const scheduleId = Number(body.scheduleId)
+  const teamId = Number(body.teamId || 91540)
+  if (!eventTypeId || !scheduleId) {
+    return NextResponse.json({ ok: false, error: "faltan eventTypeId y scheduleId" }, { status: 400 })
+  }
+  const res = await fetch(`${CAL_BASE}/teams/${teamId}/event-types/${eventTypeId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-06-14", "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ scheduleId }),
+  })
+  const patch = await res.json().catch(() => ({}))
+  const releido = (await cal(`/teams/${teamId}/event-types/${eventTypeId}`, "2024-06-14")) as {
+    data?: { data?: { scheduleId?: number } }
+  }
+  return NextResponse.json({
+    ok: res.ok,
+    status: res.status,
+    scheduleIdAhora: releido.data?.data?.scheduleId ?? null,
+    patch: res.ok ? undefined : patch,
+  })
+}
+
 export async function GET(req: Request): Promise<Response> {
   const xcron = (req.headers.get("x-cron-secret") || "").trim()
   const expected = await getFollowupCronSecret().catch(() => "")

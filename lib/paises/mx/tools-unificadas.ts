@@ -19,7 +19,7 @@ import { fichaOperativa } from "../ficha-operativa.ts"
 const TZ_MX_FICHA = fichaOperativa("mx").tz
 
 // Agenda en línea de México: el evento de Cal del equipo MX (env CAL_EVENT_TYPE_ID_MX; vacío = apagada).
-const CAL_EVENT_TYPE_ID_MX = (process.env.CAL_EVENT_TYPE_ID_MX ?? "6101466").trim()
+const CAL_EVENT_TYPE_ID_MX = (process.env.CAL_EVENT_TYPE_ID_MX ?? "7234317").trim()
 const REUNIONES_MX_HABILITADAS = Boolean(CAL_EVENT_TYPE_ID_MX)
 const TZ_MX = TZ_MX_FICHA
 
@@ -57,7 +57,7 @@ const AGENDA_MX_SCHEMAS: Schema[] = [
   {
     name: "consultar_disponibilidad_horario",
     description:
-      "Verifica si una fecha y hora propuesta POR EL CLIENTE está disponible en el calendario del equipo comercial de México. Úsala cuando el cliente proponga un horario específico para una reunión. Tú NUNCA propones horarios primero. Interpreta la propuesta en la zona horaria de Colombia (${TZ_MX_FICHA}, UTC-6). Si hay un slot a menos de 15 min de la propuesta, devuelve 'disponible_exacto' (pasa ese slotIso a agendar_reunion). Si no, devuelve alternativas: preséntaselas en prosa natural y espera a que elija.",
+      `Verifica si una fecha y hora propuesta POR EL CLIENTE está disponible en el calendario del equipo comercial de México. Úsala cuando el cliente proponga un horario específico para una reunión. Tú NUNCA propones horarios primero. Interpreta la propuesta en la hora de México (${TZ_MX_FICHA}, UTC-6). Si hay un slot a menos de 15 min de la propuesta, devuelve 'disponible_exacto' (pasa ese slotIso a agendar_reunion). Si no, devuelve alternativas: preséntaselas en prosa natural y espera a que elija.`,
     input_schema: {
       type: "object" as const,
       properties: { fechaPropuesta: { type: "string" as const, description: `ISO 8601 con timezone, interpretada en ${TZ_MX_FICHA}.` } },

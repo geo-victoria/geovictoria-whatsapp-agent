@@ -58,13 +58,14 @@ const EJECUTIVO_MX_ZOHO_ID = (process.env.ZOHO_EJECUTIVO_MX_ID || "3525045000308
 const SDR_INBOUND_MX_ID = (process.env.ZOHO_SDR_INBOUND_MX_ID || rosterSdrOperativo("mx")[0]?.zohoId || "").trim()
 
 // ── Reuniones MX (Cal.com) ──────────────────────────────────────────────────
-// Event type 6101466 (Lalo, 27-jul): agendamiento SIN cotización — la llamada
-// exploratoria del equipo MX (espejo del 3188650 chileno). Default en código
+// Event type por defecto de México (26-sep): el de Pablo Rodríguez (SDR MX, 7234317, hora de CDMX).
+// Antes 6101466 (Lalo, 27-jul): su horario estaba en hora de Chile y ofrecía 6:00–13:40 hora de México.
+// Es la llamada exploratoria del equipo MX (espejo del 3188650 chileno). Default en código
 // con override por env, mismo patrón que CAL_EVENT_TYPE_ID en lib/calendar.
 // El Lead queda a nombre del ejecutivo que Cal.com asigne en ese event type
-// (hoy: Yahel). Vaciar CAL_EVENT_TYPE_ID_MX="" en Vercel apaga la agenda y
+// (hoy: Pablo). Vaciar CAL_EVENT_TYPE_ID_MX="" en Vercel apaga la agenda y
 // vuelve al fallback de derivar_a_ejecutivo.
-const CAL_EVENT_TYPE_ID_MX = (process.env.CAL_EVENT_TYPE_ID_MX ?? "6101466").trim()
+const CAL_EVENT_TYPE_ID_MX = (process.env.CAL_EVENT_TYPE_ID_MX ?? "7234317").trim()
 export const REUNIONES_MX_HABILITADAS = Boolean(CAL_EVENT_TYPE_ID_MX)
 
 const TZ_MX = "America/Mexico_City"

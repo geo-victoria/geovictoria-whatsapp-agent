@@ -21,7 +21,7 @@ import { fichaOperativa } from "../ficha-operativa.ts"
 
 const TZ_MX_FICHA = fichaOperativa("mx").tz
 
-const AGENDA_MX = Boolean((process.env.CAL_EVENT_TYPE_ID_MX ?? "6101466").trim())
+const AGENDA_MX = Boolean((process.env.CAL_EVENT_TYPE_ID_MX ?? "7234317").trim())
 
 export const FICHA_MX: FichaPrompt = {
   pais: "mx",
