@@ -149,9 +149,11 @@ const LOOP_TPL_MATRIZ: Record<number, Record<LoopStage, CeldaTpl>> = {
   2: {
     // CO (23-sep): la misma vicky_loop_toque2 — los bots están unificados y el
     // nombre no lleva marcador de país (la guarda del push lo deja pasar).
-    sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2", "", "vicky_pe_loop_toque2"),
-    con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2", "", "vicky_pe_loop_toque2"),
-    formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2", "", "vicky_pe_loop_toque2"),
+    // CO y MX (26-sep): vicky_loop_toque2_neutro (APPROVED) — la chilena cierra con "al tiro";
+    // antes la celda MX estaba vacía y el toque 2 fuera de ventana se saltaba en México.
+    sin_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2_neutro", "vicky_loop_toque2_neutro", "vicky_pe_loop_toque2"),
+    con_precio: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2_neutro", "vicky_loop_toque2_neutro", "vicky_pe_loop_toque2"),
+    formal: tplCelda("LOOP_TPL_T2", "vicky_loop_toque2", "vicky_loop_toque2_neutro", "vicky_loop_toque2_neutro", "vicky_pe_loop_toque2"),
     aceptada: ACEPTADA_CELDA,
   },
   3: {
