@@ -84,8 +84,8 @@ export async function POST(req: Request): Promise<Response> {
       { status: 409 },
     )
   }
-  if (!d.calLeido && sp.get("forzar") !== "1") {
-    return NextResponse.json({ ok: false, error: "no se pudo leer Cal.com: la columna de calendario no sería confiable" }, { status: 409 })
+  if ((!d.calLeido || !d.botmakerLeido) && sp.get("forzar") !== "1") {
+    return NextResponse.json({ ok: false, error: "no se pudo leer Cal.com o Botmaker: las columnas no serían confiables" }, { status: 409 })
   }
   return NextResponse.json({ pais: d.pais, to: d.to, cc: d.cc, ...(await enviar(d.to, d.cc, asunto, html, deNombre, responderA)) })
 }

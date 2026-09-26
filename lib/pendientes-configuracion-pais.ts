@@ -29,7 +29,8 @@ export type PendientePersona = {
   rol: string
   espejo: { pendiente: boolean; link: string; estado: string } | null
   calendario: { pendiente: boolean; motivo: string } | null
-  telefono: { pendiente: boolean } | null
+  telefono: { pendiente: boolean; conEspejo: boolean } | null
+  botmaker: { pendiente: boolean; motivo: "sin_usuario" | "sin_confirmar" | "ok" } | null
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -56,6 +57,27 @@ async function hostsPorEvento(): Promise<Map<string, string[]> | null> {
   return out
 }
 
+/** Agentes de Botmaker por correo. Botmaker no informa el último acceso: un agente que
+ * creamos nosotros (desde el 20-sep) y sigue en el estado inicial cuenta como "sin
+ * confirmar" hasta que la persona confirme su ingreso (vic_kv bm_ingreso_ok_<correo>). */
+async function agentesBotmaker(): Promise<Map<string, { status?: string; isOnline?: boolean; creationTime?: string }> | null> {
+  const token = (process.env.BOTMAKER_ACCESS_TOKEN || "").trim()
+  if (!token) return null
+  const out = new Map<string, { status?: string; isOnline?: boolean; creationTime?: string }>()
+  let url: string | null = "https://api.botmaker.com/v2.0/agents"
+  for (let i = 0; url && i < 10; i++) {
+    const r: Response | null = await fetch(url, { headers: { "access-token": token, Accept: "application/json" }, cache: "no-store" }).catch(() => null)
+    if (!r?.ok) return out.size ? out : null
+    const d = (await r.json().catch(() => ({}))) as { items?: Array<Record<string, unknown>>; nextPage?: string }
+    for (const a of d.items || []) {
+      const e = String(a.email || "").toLowerCase()
+      if (e) out.set(e, { status: String(a.status || ""), isOnline: Boolean(a.isOnline), creationTime: String(a.creationTime || "") })
+    }
+    url = d.nextPage || null
+  }
+  return out
+}
+
 async function telefonoZoho(zohoId: string): Promise<string> {
   if (!zohoId) return ""
   try {
@@ -79,9 +101,10 @@ export async function pendientesDelPais(pais: string): Promise<{
   cc: string[]
   sinWorker: string[]
   calLeido: boolean
+  botmakerLeido: boolean
 }> {
   const ficha = fichaOperativa(pais)
-  const hosts = await hostsPorEvento()
+  const [hosts, agentes] = await Promise.all([hostsPorEvento(), agentesBotmaker()])
   const personas: PendientePersona[] = []
   const sinWorker: string[] = []
   for (const p of equipoOperativo(pais)) {
@@ -113,16 +136,26 @@ export async function pendientesDelPais(pais: string): Promise<{
     }
     // Teléfono corporativo (sin él Vicky no puede presentar a la persona al cliente).
     const tel = p.telefono || (await telefonoZoho(p.zohoId))
-    const telefono = { pendiente: !tel }
-    if (espejo?.pendiente || calendario?.pendiente || telefono.pendiente) {
-      personas.push({ nombre: p.nombre, email: p.email, rol: p.rol, espejo, calendario, telefono })
+    const telefono = { pendiente: !tel, conEspejo: Boolean(p.sesion) }
+    // Botmaker: acceso a la bandeja donde ve las conversaciones que Vicky le traspasa.
+    let botmaker: PendientePersona["botmaker"] = null
+    if (agentes) {
+      const a = agentes.get(p.email)
+      const confirmado = Boolean(await getKvValue(`bm_ingreso_ok_${p.email}`).catch(() => null))
+      if (!a) botmaker = { pendiente: true, motivo: "sin_usuario" }
+      else if (!confirmado && String(a.creationTime || "") >= "2026-09-20" && a.status === "online" && !a.isOnline)
+        botmaker = { pendiente: true, motivo: "sin_confirmar" }
+      else botmaker = { pendiente: false, motivo: "ok" }
+    }
+    if (espejo?.pendiente || calendario?.pendiente || telefono.pendiente || botmaker?.pendiente) {
+      personas.push({ nombre: p.nombre, email: p.email, rol: p.rol, espejo, calendario, telefono, botmaker })
     }
   }
   const lideres = [ficha.equipo.lider, ficha.equipo.liderSdr].filter(Boolean).map((e) => String(e).toLowerCase())
   const to = personas.map((p) => p.email)
   const cc = Array.from(new Set([...lideres, ...CC_FIJA])).filter((e) => !to.includes(e))
   const nombrePais = { cl: "Chile", pe: "Perú", co: "Colombia", mx: "México" }[ficha.pais] || ficha.pais
-  return { pais: ficha.pais, nombrePais, personas, to, cc, sinWorker, calLeido: Boolean(hosts) }
+  return { pais: ficha.pais, nombrePais, personas, to, cc, sinWorker, calLeido: Boolean(hosts), botmakerLeido: Boolean(agentes) }
 }
 
 export function correoPendientes(d: Awaited<ReturnType<typeof pendientesDelPais>>, firma: string): { asunto: string; html: string } {
@@ -145,8 +178,19 @@ export function correoPendientes(d: Awaited<ReturnType<typeof pendientesDelPais>
           : p.calendario.motivo === "sin_evento"
             ? "Pendiente: crear tu cuenta en Cal.com y conectar tu calendario (te llegará la invitación)"
             : "Pendiente: acepta la invitación de Cal.com y conecta tu calendario de Outlook"
-      const telTxt = p.telefono?.pendiente ? "Pendiente: se registra solo al vincular tu WhatsApp" : ok
-      return `<tr>${celda(esc(p.nombre))}${celda(esp)}${celda(calTxt)}${celda(telTxt)}</tr>`
+      const telTxt = !p.telefono?.pendiente
+        ? ok
+        : p.telefono.conEspejo
+          ? "Pendiente: se registra solo al vincular tu WhatsApp"
+          : "Pendiente: respóndenos este correo con tu número corporativo"
+      const bmTxt = !p.botmaker
+        ? na
+        : !p.botmaker.pendiente
+          ? ok
+          : p.botmaker.motivo === "sin_usuario"
+            ? "Pendiente: estamos creando tu usuario (te avisamos)"
+            : "Pendiente: entra y confírmanos (ver paso 4)"
+      return `<tr>${celda(esc(p.nombre))}${celda(esp)}${celda(calTxt)}${celda(telTxt)}${celda(bmTxt)}</tr>`
     })
     .join("")
   const asunto = `Vicky ${d.nombrePais}: lo que te falta configurar`
@@ -159,7 +203,8 @@ export function correoPendientes(d: Awaited<ReturnType<typeof pendientesDelPais>
     `<tr style="background:#f3f4f6"><th style="padding:8px 10px;text-align:left">Ejecutivo</th>` +
     `<th style="padding:8px 10px;text-align:left">WhatsApp (espejo)</th>` +
     `<th style="padding:8px 10px;text-align:left">Calendario (Cal.com)</th>` +
-    `<th style="padding:8px 10px;text-align:left">Teléfono corporativo</th></tr>` +
+    `<th style="padding:8px 10px;text-align:left">Teléfono corporativo</th>` +
+    `<th style="padding:8px 10px;text-align:left">Botmaker</th></tr>` +
     filas +
     `</table>` +
     `<p><strong>1. WhatsApp (espejo).</strong> Es como Samu, pero para WhatsApp: tus conversaciones y llamadas con clientes quedan ` +
@@ -169,8 +214,14 @@ export function correoPendientes(d: Awaited<ReturnType<typeof pendientesDelPais>
     `<p><strong>2. Calendario (Cal.com).</strong> Cuando un cliente pide reunión, Vicky la agenda en <strong>tu</strong> calendario ` +
     `con tu disponibilidad real. Acepta la invitación de Cal.com que te llegó por correo, entra y conecta tu calendario de Outlook ` +
     `(Configuración → Calendarios). Mientras no lo hagas, esas reuniones no quedan en tu agenda.</p>` +
-    `<p><strong>3. Teléfono corporativo.</strong> Vicky te presenta al cliente con tu nombre y tu número. Se registra solo al ` +
-    `vincular tu WhatsApp (paso 1).</p>` +
+    `<p><strong>3. Teléfono corporativo.</strong> Vicky te presenta al cliente con tu nombre y tu número. Si tienes espejo, ` +
+    `se registra solo al vincular tu WhatsApp (paso 1); si no, respóndenos este correo con tu número.</p>` +
+    `<p><strong>4. Botmaker.</strong> Ahí ves completa la conversación que Vicky tuvo con cada cliente que te traspasa. ` +
+    `Si aún no has entrado:</p><ol style="margin-top:0">` +
+    `<li>Entra a <a href="https://go.botmaker.com" style="color:#1d4ed8">go.botmaker.com</a>.</li>` +
+    `<li>Escribe tu correo corporativo y elige <em>"¿Olvidaste tu contraseña?"</em>: te llega un correo para crear tu contraseña.</li>` +
+    `<li>Crea tu contraseña e ingresa. Deberías ver la bandeja de chats.</li>` +
+    `<li>Respóndenos este correo con <strong>"Listo Botmaker"</strong> para marcarlo como hecho.</li></ol>` +
     `<p style="color:#6b7280;font-size:13px">Usa solo tu propio link: cada uno queda asociado a tu nombre y abre únicamente tu código QR ` +
     `(nadie ve tus chats desde ahí). Si el QR expira, recarga la página.</p>` +
     `<p>Cualquier duda, respondan este correo.<br>${esc(firma)}</p></div>`
