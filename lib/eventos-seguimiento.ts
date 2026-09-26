@@ -35,6 +35,9 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   // ── Resto de países ──
   "agordillo@geovictoria.com": "6484393", // CO — Alejandro Gordillo
   "ysegura@geovictoria.com": "6484399", // MX — Yahel Segura
+  // Lalo 26-sep: calendario de Pablo Rodríguez (SDR MX). Verificado el mismo día:
+  // 28 horarios en 5 días.
+  "prodriguez@geovictoria.com": "7234317", // MX — Pablo Rodríguez (SDR)
   // ── PERÚ (15-sep, regla chilena: la reunión sigue al dueño del registro) ──
   // Evento creado por Lalo el 15-sep; verificado contra la API el mismo día
   // (slots reales en horario -05:00 Lima, 20 min).
