@@ -104,6 +104,19 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: res2.ok, cancelBooking: cancelUid, status: res2.status, data: data2 })
   }
 
+  // ?raw=/v2-path&v=<cal-api-version>: GET de SOLO LECTURA a cualquier ruta de
+  // la API de Cal (26-sep, auditoría de zonas horarias: los eventos de host
+  // único no traen scheduleId y la zona vive en el horario por defecto de cada
+  // host — /schedules, /me, /organizations/...). Nunca escribe.
+  const raw = new URL(req.url).searchParams.get("raw")
+  if (raw) {
+    if (!raw.startsWith("/") || raw.includes("..")) {
+      return NextResponse.json({ ok: false, error: "raw debe ser una ruta /..." }, { status: 400 })
+    }
+    const version = new URL(req.url).searchParams.get("v") || "2024-06-11"
+    return NextResponse.json({ ok: true, raw, version, respuesta: await cal(raw, version) })
+  }
+
   // ?slotsFor=<eventTypeId>: disponibilidad de los próximos 7 días para ese
   // event type (verificar que un event type nuevo tiene hosts/horario activos
   // sin crear ningún booking).
@@ -113,7 +126,7 @@ export async function GET(req: Request): Promise<Response> {
     const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000)
     const slots = await cal(
       `/slots/available?eventTypeId=${encodeURIComponent(slotsFor)}` +
-        `&startTime=${start.toISOString()}&endTime=${end.toISOString()}&timeZone=America/Bogota`,
+        `&startTime=${start.toISOString()}&endTime=${end.toISOString()}&timeZone=${encodeURIComponent(new URL(req.url).searchParams.get("tz") || "America/Bogota")}`,
     )
     return NextResponse.json({ ok: true, slotsFor, slots })
   }
