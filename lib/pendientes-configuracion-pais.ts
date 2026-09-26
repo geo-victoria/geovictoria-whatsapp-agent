@@ -128,7 +128,11 @@ export async function pendientesDelPais(pais: string): Promise<{
     let calendario: PendientePersona["calendario"] = null
     const evento = eventoSeguimientoDe(p.email)
     if (evento || p.rol === "telemarketing") {
+      // Host interino aceptado a propósito (Lalo 26-sep con Laura: "después lo reemplazamos"):
+      // vic_kv cal_interino_ok_<correo> = no se le pide nada del calendario todavía.
+      const interinoOk = Boolean(await getKvValue(`cal_interino_ok_${p.email}`).catch(() => null))
       if (!evento) calendario = { pendiente: true, motivo: "sin_evento" }
+      else if (interinoOk) calendario = { pendiente: false, motivo: "ok" }
       else if (hosts) {
         const h = hosts.get(evento) || []
         calendario = h.includes(p.email) ? { pendiente: false, motivo: "ok" } : { pendiente: true, motivo: "host_interino" }
