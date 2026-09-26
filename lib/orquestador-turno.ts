@@ -2077,6 +2077,11 @@ export async function procesarTurno(
           console.warn(
             `[v3-burst] respuesta obsoleta descartada para ${contact} (${partes.length} burbuja(s) sin enviar): llegó un mensaje nuevo durante la generación`,
           )
+          // El historial no puede decir que se envió (26-sep, pruebas de
+          // Priscila): sin esto el turno siguiente daba por contestadas las
+          // preguntas anteriores.
+          const { marcarUltimaRespuestaNoEnviada } = await import("@/lib/supabase-persistence-v3")
+          await marcarUltimaRespuestaNoEnviada(contact, perfil.pais)
           break
         }
         if (HUMAN_DELAY_ON) {

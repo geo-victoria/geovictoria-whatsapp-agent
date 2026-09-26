@@ -135,6 +135,37 @@ export async function appendTurnV3(
   )
 }
 
+/**
+ * RESPUESTA DESCARTADA (26-sep, pruebas de Priscila en la línea +51): cuando el
+ * cliente escribe de nuevo mientras Vicky genera, la respuesta en curso se
+ * descarta — pero ya estaba persistida, así que el turno siguiente "creía"
+ * haberla enviado y contestaba solo el último mensaje ("¿arriendo es
+ * alquiler?" y "¿cuál me recomiendas?" quedaron sin respuesta). Se reemplaza
+ * el texto por una marca explícita: el modelo sabe que el cliente NO la vio y
+ * los detectores (precio mostrado, etc.) dejan de contarla.
+ */
+export const MARCA_RESPUESTA_NO_ENVIADA =
+  "[Respuesta NO enviada: el cliente escribió de nuevo antes de que saliera. En tu próximo turno contesta TAMBIÉN este mensaje suyo.]"
+
+export async function marcarUltimaRespuestaNoEnviada(contact: string, country: string = "cl"): Promise<void> {
+  try {
+    const conversationId = await getOrCreateConversationId(contact, country)
+    if (!conversationId) return
+    const filas = await supabaseFetch<Array<{ id: string }>>(
+      `vic_v3_messages?conversation_id=eq.${conversationId}&role=eq.assistant&order=at.desc&limit=1&select=id`,
+    )
+    const id = filas?.[0]?.id
+    if (!id) return
+    await supabaseFetch(`vic_v3_messages?id=eq.${id}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ content: MARCA_RESPUESTA_NO_ENVIADA }),
+    })
+  } catch (e) {
+    console.warn("[v3-persist] marcarUltimaRespuestaNoEnviada falló:", e instanceof Error ? e.message : e)
+  }
+}
+
 // ── Puntero del Borrador negociado en el preform (pref_*) ──────────────
 //
 // El descuento del preform se negocia en un turno y se acepta en otro. Entre
