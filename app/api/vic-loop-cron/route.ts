@@ -1543,8 +1543,11 @@ export async function GET(req: Request): Promise<Response> {
       // el reloj del siguiente toque ya venció, se reprograma al FUTURO con el
       // espaciado NATURAL entre ambos toques (mínimo 30 min) — jamás se
       // "reponen" toques atrasados de golpe.
-      const ntBase = calcularProximoToque(t0, touch + 1, country, r.contact)
-      const toqueActualAt = calcularProximoToque(t0, touch, country, r.contact)
+      // La etapa entra al cálculo (26-sep, caso URBANOVA/COT1313): sin ella una
+      // ACEPTADA usaba la cadencia normal (t2 = t0+70') y, con el t1 corrido a
+      // las 9:00, el t2 salía 31 minutos después en vez de a las 24 h.
+      const ntBase = calcularProximoToque(t0, touch + 1, country, r.contact, stage)
+      const toqueActualAt = calcularProximoToque(t0, touch, country, r.contact, stage)
       const gapMs = Math.max(ntBase.getTime() - toqueActualAt.getTime(), 30 * 60e3)
       const nt = ntBase.getTime() > Date.now() ? ntBase : new Date(Date.now() + gapMs)
       await patchLoop(r.contact, {
