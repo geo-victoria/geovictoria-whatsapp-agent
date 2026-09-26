@@ -127,7 +127,7 @@ async function enviar(to: string[], cc: string[], asunto: string, html: string, 
 export async function GET(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   const pais = (new URL(req.url).searchParams.get("pais") || "").toLowerCase()
-  if (!pais) return NextResponse.json({ ok: false, error: "falta pais" }, { status: 400 })
+  if (!["cl", "pe", "co", "mx"].includes(pais)) return NextResponse.json({ ok: false, error: "pais debe ser cl, pe, co o mx" }, { status: 400 })
   const c = await armar(pais)
   const sinWorker = c.pendientes.filter((p) => p.estado === "sin_sesion_en_worker").map((p) => p.sesion)
   return NextResponse.json({ ok: true, ...c, sinWorker })
@@ -137,7 +137,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!(await autorizado(req))) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   const sp = new URL(req.url).searchParams
   const pais = (sp.get("pais") || "").toLowerCase()
-  if (!pais) return NextResponse.json({ ok: false, error: "falta pais" }, { status: 400 })
+  if (!["cl", "pe", "co", "mx"].includes(pais)) return NextResponse.json({ ok: false, error: "pais debe ser cl, pe, co o mx" }, { status: 400 })
   if (sp.get("confirmo") !== "1") return NextResponse.json({ ok: false, error: "falta confirmo=1" }, { status: 400 })
   // ?de=<correo>&deNombre=<nombre> (Lalo 26-sep: "¿los puedes mandar a nombre mío?"): remitente,
   // responder-a y firma a nombre de esa persona. Zoho solo acepta remitentes habilitados para el
