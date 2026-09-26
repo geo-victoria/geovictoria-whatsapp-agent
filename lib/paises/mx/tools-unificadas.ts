@@ -272,7 +272,7 @@ export const TOOL_SCHEMAS_MX_UNIFICADAS: Schema[] = [
   },
   {
     name: "enviar_ficha_reloj",
-    description: "En México NO hay ficha PDF del reloj checador: esta tool te lo recuerda. Descríbelo en texto (rostro, huella, tarjeta o clave; WiFi o cable), sin marcas ni modelos.",
+    description: "Entrega la ficha técnica (PDF) del reloj checador (SenseFace 2A). SOLO REACTIVA: cuando el cliente pide información, especificaciones o la ficha ('¿qué reloj es?', '¿tiene huella?', '¿me mandas la ficha?'). Responde con la ficha canónica y llama esta tool en el MISMO turno. Nunca para el precio. Sin parámetros. Copia su mensajeParaProspecto TAL CUAL, sin tocar el link.",
     input_schema: { type: "object" as const, properties: {}, required: [] },
   },
   buscarProspectSchemaPais("RFC", "con o sin guiones o espacios"),
@@ -620,8 +620,11 @@ export function buildDispatchMXUnificado(contact: string) {
         const { buscarProspectEnZoho } = await import("../../tools/buscar-prospect-en-zoho.ts")
         return buscarProspectEnZoho(input as never)
       }
-      case "enviar_ficha_reloj":
-        return sinCapacidad("no hay ficha PDF del reloj checador", "Descríbelo en texto: rostro, huella, tarjeta o clave; WiFi o cable de red; se conecta a la nube en minutos. Sin marcas ni modelos.")
+      case "enviar_ficha_reloj": {
+        // Mismo SenseFace 2A que Perú (Books 26-sep): la tool chilena es la única.
+        const { enviarFichaReloj } = await import("../../tools/enviar-ficha-reloj.ts")
+        return enviarFichaReloj({ pais: "mx" })
+      }
       case "actualizar_cotizacion": {
         // EDICIÓN EN SITIO = LA TOOL CHILENA: México solo arma los ítems con su
         // motor (cotizarMX, MXN) y el endpoint edita la MISMA cotización con

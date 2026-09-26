@@ -17,6 +17,7 @@
 import { FICHA_CL } from "../prompt-nucleo/ficha.ts"
 import { FICHA_PE } from "../paises/pe/ficha.ts"
 import { FICHA_CO } from "../paises/co/ficha.ts"
+import { FICHA_MX } from "../paises/mx/ficha.ts"
 
 export type PaisFicha = "cl" | "pe" | "co" | "mx"
 
@@ -25,7 +26,7 @@ export function fichaRelojUrlDe(pais: PaisFicha | string | null | undefined): st
   const p = String(pais || "cl").toLowerCase()
   if (p === "pe") return FICHA_PE.fichaRelojUrl
   if (p === "co") return FICHA_CO.fichaRelojUrl
-  if (p === "mx") return null
+  if (p === "mx") return FICHA_MX.fichaRelojUrl
   return (process.env.FICHA_RELOJ_URL || "").trim() || FICHA_CL.fichaRelojUrl
 }
 
@@ -64,8 +65,9 @@ export async function enviarFichaReloj(input?: { _contact?: string; pais?: PaisF
       queHacer: "Descríbelo en texto: rostro, huella, tarjeta o clave; WiFi o cable de red; se conecta a la nube en minutos. Sin marcas ni modelos.",
     }
   }
+  const equipo = pais === "co" ? "del equipo biométrico" : pais === "mx" ? "del reloj checador" : "del reloj de asistencia"
   const mensajeParaProspecto =
-    `Te dejo la ficha técnica del reloj de asistencia para que veas todos los detalles: ${url}\n` +
+    `Te dejo la ficha técnica ${equipo} para que veas todos los detalles: ${url}\n` +
     `Cualquier duda que te quede del equipo, me dices 😊`
 
   return { ok: true, url, mensajeParaProspecto }

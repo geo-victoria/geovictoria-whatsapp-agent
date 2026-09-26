@@ -328,7 +328,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   {
     name: "enviar_ficha_reloj",
     description:
-      "Entrega la ficha técnica (PDF) del reloj de control de asistencia: el equipo de Perú es el mismo modelo que en Chile y la ficha es técnica (sin precios ni país). Úsala cuando el cliente pide características, ficha o detalles del equipo. Devuelve `mensajeParaProspecto` con el link: cópialo TAL CUAL en el mismo turno.",
+      "Entrega la ficha técnica (PDF) del reloj de control (SenseFace 2A). SOLO REACTIVA: cuando el cliente pide información, especificaciones o la ficha ('¿qué reloj es?', '¿tiene huella?', '¿me mandas la ficha?'). Responde con la ficha canónica y llama esta tool en el MISMO turno. Nunca para el precio. Sin parámetros. Copia su mensajeParaProspecto TAL CUAL, sin tocar el link.",
     input_schema: { type: "object" as const, properties: {}, required: [] },
   },
   buscarProspectSchemaPais("RUC", "11 dígitos"),

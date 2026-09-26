@@ -274,7 +274,7 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
   },
   {
     name: "enviar_ficha_reloj",
-    description: "En Colombia NO hay ficha PDF del equipo biométrico: esta tool te lo recuerda. Descríbelo en texto (facial, huella, tarjeta, clave o QR; WiFi o cable), sin marcas ni modelos.",
+    description: "Entrega la ficha técnica (PDF) del equipo biométrico (SenseFace 2A). SOLO REACTIVA: cuando el cliente pide información, especificaciones o la ficha ('¿qué equipo es?', '¿tiene huella?', '¿me mandas la ficha?'). Responde con la ficha canónica y llama esta tool en el MISMO turno. Nunca para el precio. Sin parámetros. Copia su mensajeParaProspecto TAL CUAL, sin tocar el link.",
     input_schema: { type: "object" as const, properties: {}, required: [] },
   },
   buscarProspectSchemaPais("NIT", "con o sin dígito de verificación"),
@@ -615,8 +615,11 @@ export function buildDispatchCOUnificado(contact: string) {
         const { buscarProspectEnZoho } = await import("../../tools/buscar-prospect-en-zoho.ts")
         return buscarProspectEnZoho(input as never)
       }
-      case "enviar_ficha_reloj":
-        return sinCapacidad("no hay ficha PDF del equipo biométrico", "Descríbelo en texto: rostro, huella, tarjeta, clave o QR; WiFi o cable de red; se conecta a la nube en minutos. Sin marcas ni modelos.")
+      case "enviar_ficha_reloj": {
+        // Mismo SenseFace 2A que Perú (Books 26-sep): la tool chilena es la única.
+        const { enviarFichaReloj } = await import("../../tools/enviar-ficha-reloj.ts")
+        return enviarFichaReloj({ pais: "co" })
+      }
       case "actualizar_cotizacion": {
         // EDICIÓN EN SITIO = LA TOOL CHILENA (21-sep): Colombia solo arma los
         // ítems con su motor (cotizarCO, COP) y el endpoint edita la MISMA
