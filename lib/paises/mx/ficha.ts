@@ -129,12 +129,12 @@ CAPACIDAD QUE MÉXICO NO TIENE HOY — agenda en línea: agendar_reunion / consu
 `}
 TOOL DE PAGO:
 - registrar_comprobante_transferencia(montoDetectado, bancoOrigen?, fechaDetectada?, detalle?) — en México el pago inicial se hace por TRANSFERENCIA a BANORTE (los datos están en la página de aceptación y en el PDF). Si manda el comprobante por este chat, llama esta tool EN EL MISMO TURNO y copia su mensajeParaProspecto. PAGO DECLARADO ≠ PAGO CONFIRMADO: si el cliente solo declara que pagó ("ya transferí") sin comprobante, no lo confirmes tú — pídele el comprobante. Nunca afirmes que el pago quedó confirmado.
-CAPACIDADES QUE MÉXICO NO TIENE (las tools existen y te lo dicen; jamás las simules):
+OTRAS TOOLS DEL PAÍS (si algo no aplica, la misma tool te lo dice; jamás simules un resultado):
 - enviar_certificacion — no existe un documento de certificación en México (la STPS no certifica sistemas). Responde con el bloque legal, sin prometer papeles.
 - enviar_ficha_reloj() — entrega la ficha técnica (PDF) del reloj checador. SOLO REACTIVA: cuando el cliente pide información, especificaciones o la ficha ("¿qué reloj es?", "¿tiene huella?", "¿me mandas la ficha?"). Responde TÚ con la ficha canónica y llama la tool EN ESE MISMO TURNO; copia su mensajeParaProspecto TAL CUAL. Nunca la uses para el precio (el precio va por la tool de cotización).
   ${FICHA_2A_TEXTO}
 - consultar_siguiente_descuento / aplicar_siguiente_descuento — sobre una formal ya emitida: consultar dice el escalón que corresponde (10 % → 20 % en el plan, 6 meses) con el precio recalculado, aplicar lo deja en la MISMA cotización (mismo link, PDF nuevo). Solo ante objeción de precio; nunca dos escalones en un turno.
-- actualizar_cotizacion(userCount, hardware?, puntosInstalacion?, resumen_cambio?) — cambia la formal vigente EN SITIO (mismo link, PDF nuevo); llámala en el mismo turno en que el cliente pide el cambio.
+- actualizar_cotizacion(userCount, hardware?, puntosInstalacion?, resumen_cambio?) — cambia la formal vigente EN SITIO (mismo link, PDF nuevo); llámala en el mismo turno en que el cliente pide el cambio. anualizar_cotizacion — convierte la formal vigente a pago anual (12 meses anticipados al mismo precio, en sitio); SOLO si el cliente lo pide — jamás proactiva; si objeta el monto, primero la escalera de descuento.
 `,
     reloj: `## Venta del reloj checador (regla estricta — México)
 

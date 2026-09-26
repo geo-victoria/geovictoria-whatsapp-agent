@@ -1,5 +1,5 @@
 /**
- * anualizar_cotizacion para PERÚ y COLOMBIA = la regla chilena (Lalo 21-sep:
+ * anualizar_cotizacion para PERÚ, COLOMBIA y MÉXICO (MX desde el 26-sep) = la regla chilena (Lalo 21-sep:
  * "anualidad: sí ofrezcamos, igualemos a Chile"), sobre la MISMA tool
  * chilena de edición en sitio (actualizar_cotizacion con `_itemsPais`): el
  * cotizador reconoce el país por el token y reescribe la cotización con el
@@ -17,7 +17,7 @@
  */
 import { calcularAnualPais, type FilaRecurrente } from "./anualizar-calculo.ts"
 
-type Pais = "pe" | "co"
+type Pais = "pe" | "co" | "mx"
 
 type FilaZoho = {
   Codigo_Item?: string | null
@@ -51,6 +51,10 @@ function fmt(pais: Pais, n: number): string {
   if (pais === "pe") {
     const r = Math.round(n * 100) / 100
     return "S/" + (Number.isInteger(r) ? r.toLocaleString("es-PE") : r.toFixed(2))
+  }
+  if (pais === "mx") {
+    const r = Math.round(n * 100) / 100
+    return "$" + r.toLocaleString("es-MX", { minimumFractionDigits: Number.isInteger(r) ? 0 : 2, maximumFractionDigits: 2 }) + " MXN"
   }
   return "$" + Math.round(n).toLocaleString("es-CO") + " COP"
 }
@@ -117,7 +121,7 @@ export async function anualizarCotizacionPais(
       modalidad: String(f.Modalidad || ""),
       esRecurrente: true,
     }))
-  const dec: 0 | 2 = pais === "pe" ? 2 : 0
+  const dec: 0 | 2 = pais === "co" ? 0 : 2
   const a = calcularAnualPais(recurrentes, pct, meses, dec)
   if (a.planAnual + a.arriendoAnual <= 0) return { ok: false, error: "La cotización no tiene componentes recurrentes que anualizar." }
 
@@ -129,10 +133,10 @@ export async function anualizarCotizacionPais(
   const personas = filaPlan && /recurrente|por usuario/i.test(String(filaPlan.Modalidad || "")) ? Number(filaPlan.Cantidad || 0) : 0
 
   // ── 3. Ítems en la forma del país ──
-  const pu = pais === "pe" ? "precioUnitarioPEN" : "precioUnitarioCOP"
-  const st = pais === "pe" ? "subtotalPEN" : "subtotalCOP"
+  const pu = pais === "pe" ? "precioUnitarioPEN" : pais === "mx" ? "precioUnitarioMXN" : "precioUnitarioCOP"
+  const st = pais === "pe" ? "subtotalPEN" : pais === "mx" ? "subtotalMXN" : "subtotalCOP"
   const afecto = pais === "pe" ? "afectoIgv" : "afectoIva"
-  const equipo = pais === "co" ? "alquiler del equipo biométrico" : "arriendo del reloj"
+  const equipo = pais === "co" ? "alquiler del equipo biométrico" : pais === "mx" ? "renta del reloj checador" : "arriendo del reloj"
   const detalleDcto = a.pct > 0 ? ` (incluye tu ${a.pct}% de descuento por ${a.meses === 12 ? "los 12 meses" : `${a.meses} meses`})` : ""
   const items: Array<Record<string, unknown>> = []
   if (a.planAnual > 0) {
@@ -146,22 +150,22 @@ export async function anualizarCotizacionPais(
       [pu]: a.planAnual,
       [st]: a.planAnual,
       esRecurrente: false,
-      // PE: todo afecto a IGV. CO: el plan es precio final (sin IVA).
-      [afecto]: pais === "pe",
+      // PE y MX: todo afecto a impuesto (IGV 18 / IVA 16). CO: el plan es precio final.
+      [afecto]: pais !== "co",
     })
   }
   if (a.arriendoAnual > 0) {
     items.push({
       tipo: "hardware",
       id: "arriendo_anual",
-      nombre: `${pais === "co" ? "Alquiler" : "Arriendo"} anual del equipo — 12 meses anticipados`,
+      nombre: `${pais === "co" ? "Alquiler" : pais === "mx" ? "Renta" : "Arriendo"} anual del equipo — 12 meses anticipados`,
       descripcion: `Los 12 meses del ${equipo} pagados por adelantado, al mismo valor mensual.`,
       modalidad: "Cobro único",
       cantidad: 1,
       [pu]: a.arriendoAnual,
       [st]: a.arriendoAnual,
       esRecurrente: false,
-      // El equipo lleva impuesto en los dos países.
+      // El equipo lleva impuesto en los tres países.
       [afecto]: true,
     })
   }
@@ -200,7 +204,7 @@ export async function anualizarCotizacionPais(
     return { ok: false, error: err || "No se pudo anualizar la cotización." }
   }
   const total = a.planAnual + a.arriendoAnual
-  const imp = pais === "pe" ? " + IGV" : a.arriendoAnual > 0 ? " (el equipo lleva IVA, ya indicado en la cotización)" : ""
+  const imp = pais === "pe" ? " + IGV" : pais === "mx" ? " + IVA" : a.arriendoAnual > 0 ? " (el equipo lleva IVA, ya indicado en la cotización)" : ""
   const url = String((r as { acceptanceUrl?: string }).acceptanceUrl || "")
   return {
     ok: true,

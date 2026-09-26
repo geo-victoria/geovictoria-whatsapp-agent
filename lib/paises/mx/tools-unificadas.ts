@@ -657,9 +657,12 @@ export function buildDispatchMXUnificado(contact: string) {
         })
         return { ...r, quoteId }
       }
-      case "anualizar_cotizacion":
-        // La anualidad aún no está habilitada en México (sin decisión de Lalo).
-        return sinCapacidad("el pago anual aún no está habilitado", "Si el cliente lo pide, dile que lo reviso con el ejecutivo y sigue con el pago mensual; o deriva con derivar_a_soporte (motivo solicitud_explicita_persona).")
+      case "anualizar_cotizacion": {
+        // Anualidad = Chile/PE/CO (26-sep): la MISMA edición en sitio con los
+        // montos reales del subform en MXN.
+        const { anualizarCotizacionPais } = await import("../anualizar-pais.ts")
+        return anualizarCotizacionPais(contact, "mx", i.quote_id as string | undefined)
+      }
       default:
         return base(name, input)
     }
