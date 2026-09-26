@@ -204,7 +204,7 @@ const FICHA_CL: FichaOperativa = {
   equipo: {
     // ids verificados en Zoho el 10-sep; la sesión de espejo es la parte local del correo.
     telemarketing: [
-      persona("emujica@geovictoria.com", "3525045000000211283", "Eddyluz Mujica"),
+      persona("emujica@geovictoria.com", "3525045000000211283", "Eddyluz Mujica", "+56 9 3932 1687"),
       persona("adiazg@geovictoria.com", "3525045000426432190", "Anderson Díaz"),
       persona("tmartinezq@geovictoria.com", "3525045000223766001", "Tamara Martínez"),
       persona("alopez@geovictoria.com", "3525045000126464001", "Ana Paula López"),
@@ -214,7 +214,7 @@ const FICHA_CL: FichaOperativa = {
     ],
     sdr: [
       persona("aaraque@geovictoria.com", "3525045000583802005", "Aleydis Araque", "+56 9 8291 6868"),
-      persona("asepulveda@geovictoria.com", "", "Aracelli Sepúlveda", "+56 9 3212 5672"),
+      persona("asepulveda@geovictoria.com", "3525045000594735052", "Aracelli Sepúlveda", "+56 9 3212 5672"),
     ],
     ventaAutonoma: persona("aaraque@geovictoria.com", "3525045000583802005", "Aleydis Araque", "+56 9 8291 6868"),
     lider: "vluna@geovictoria.com",

@@ -1029,18 +1029,12 @@ const NOMBRE_VENDEDOR: Record<string, string> = {
   "cvalverde@geovictoria.com": "Cecilia Valverde",
 }
 
-/** WhatsApp de los interinos (directorio verificado 27-jul; Mónica desde su
- * ficha Zoho, 04-ago). Los vendedores sorteados por Zoho traen su teléfono
- * desde su ficha de usuario. */
-const WHATSAPP_VENDEDOR: Record<string, string> = {
-  "emujica@geovictoria.com": "+56 9 3932 1687",
-  "agordillo@geovictoria.com": "+57 314 267 7765",
-  "ysegura@geovictoria.com": "+52 55 3763 6604",
-  "mmendozav@geovictoria.com": "+51 962 277 502",
-  // Perú (15-sep): corporativos entregados por Teams a Lalo.
-  "afiori@geovictoria.com": "+51 936 953 838",
-  "pquispef@geovictoria.com": "+51 960 421 293",
-  "cvalverde@geovictoria.com": "+51 982 446 284",
+/** WhatsApp del vendedor para presentarlo al cliente (26-sep, Lalo "proceso
+ * global con variables"): el teléfono vive en la FICHA OPERATIVA del país
+ * (antes, un mapa escrito a mano acá); sin él, los caminos caen a la ficha de
+ * usuario de Zoho. */
+function telefonoFicha(email: string | null | undefined): string {
+  return personaPorEmail(String(email || ""))?.telefono || ""
 }
 
 type VendedorFinal = {
@@ -1195,7 +1189,7 @@ async function entregarLeadPorReglas(
       email: dueno.email,
       zohoId: dueno.zohoId,
       nombre: (r?.success && r.ownerNombre) || nombreVendedor(dueno.email),
-      telefono: tel || WHATSAPP_VENDEDOR[dueno.email] || "",
+      telefono: tel || telefonoFicha(dueno.email) || "",
       via: r?.success ? "tombola_zoho" : "tombola_interna",
     }
   }
@@ -1206,7 +1200,7 @@ async function entregarLeadPorReglas(
       email: r.ownerEmail,
       zohoId: r.ownerId,
       nombre: r.ownerNombre || nombreVendedor(r.ownerEmail),
-      telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+      telefono: tel || telefonoFicha(r.ownerEmail) || "",
       via: "dueno_lead_sdr",
     }
   }
@@ -1227,7 +1221,7 @@ async function asignarEnZoho(
   const porDefecto: VendedorFinal = {
     ...interno,
     nombre: nombreVendedor(interno.email),
-    telefono: WHATSAPP_VENDEDOR[interno.email] || "",
+    telefono: telefonoFicha(interno.email) || "",
     via: "tombola_interna",
   }
   try {
@@ -1368,7 +1362,7 @@ async function asignarEnZoho(
             email: r.ownerEmail,
             zohoId: r.ownerId,
             nombre: r.ownerNombre || nombreVendedor(r.ownerEmail),
-            telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+            telefono: tel || telefonoFicha(r.ownerEmail) || "",
             via: "tombola_zoho",
           }
         }
@@ -1393,7 +1387,7 @@ async function asignarEnZoho(
             email: r.ownerEmail,
             zohoId: r.ownerId,
             nombre: nombreVendedor(r.ownerEmail),
-            telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+            telefono: tel || telefonoFicha(r.ownerEmail) || "",
             via: "dueno_lead_sdr",
           }
         }
@@ -1474,7 +1468,7 @@ async function asignarEnZoho(
                   email: own.email,
                   zohoId: own.id,
                   nombre: own.name || own.email.split("@")[0],
-                  telefono: tel || WHATSAPP_VENDEDOR[own.email.toLowerCase()] || "",
+                  telefono: tel || telefonoFicha(own.email.toLowerCase()) || "",
                   via: "dueno_deal_reactivado",
                 }
               }
@@ -1502,7 +1496,7 @@ async function asignarEnZoho(
           email: ownerActual.email,
           zohoId: ownerActual.id,
           nombre: ownerActual.name || ownerActual.email.split("@")[0],
-          telefono: tel || WHATSAPP_VENDEDOR[ownerActual.email.toLowerCase()] || "",
+          telefono: tel || telefonoFicha(ownerActual.email.toLowerCase()) || "",
           via: "dueno_deal",
         }
       }
@@ -1553,7 +1547,7 @@ async function asignarEnZoho(
           email: r.ownerEmail,
           zohoId: r.ownerId,
           nombre: nombreVendedor(r.ownerEmail),
-          telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+          telefono: tel || telefonoFicha(r.ownerEmail) || "",
           via: "dueno_lead_sdr",
         }
       }
@@ -1598,7 +1592,7 @@ async function asignarEnZoho(
           email: ownerLead,
           zohoId: lead.Owner.id,
           nombre: lead.Owner.name || nombreVendedor(ownerLead),
-          telefono: tel || WHATSAPP_VENDEDOR[ownerLead] || "",
+          telefono: tel || telefonoFicha(ownerLead) || "",
           via: "dueno_lead_sdr",
         }
       }
@@ -1632,7 +1626,7 @@ async function asignarEnZoho(
           email: r.ownerEmail,
           zohoId: r.ownerId,
           nombre: r.ownerNombre || nombreVendedor(r.ownerEmail),
-          telefono: tel || WHATSAPP_VENDEDOR[r.ownerEmail] || "",
+          telefono: tel || telefonoFicha(r.ownerEmail) || "",
           via: "tombola_zoho",
         }
       }
@@ -1671,7 +1665,7 @@ async function asignarEnZoho(
           email: ownerLeadPe,
           zohoId: lead.Owner.id,
           nombre: lead.Owner.name || nombreVendedor(ownerLeadPe),
-          telefono: tel || WHATSAPP_VENDEDOR[ownerLeadPe] || "",
+          telefono: tel || telefonoFicha(ownerLeadPe) || "",
           via: "dueno_lead_sdr",
         }
       }
@@ -2022,7 +2016,7 @@ async function traspasarATelemarketing(
 
     // 4. Presentación por PLANTILLA (regla dura: ejecutivo, teléfono y correo
     // son obligatorios — sin teléfono no sale, antes que presentar a medias).
-    const telefono = telefonoTmPorEmail(owner.email) || (await telefonoDeUsuario(owner.id, H, api))
+    const telefono = telefonoTmPorEmail(owner.email) || telefonoFicha(owner.email) || (await telefonoDeUsuario(owner.id, H, api))
     if (telefono) {
       const params: Record<string, string> = {
         nombre: (lead?.First_Name || "").trim() || "👋",
@@ -2142,7 +2136,7 @@ export async function traspasarAhora(
       vendedor: {
         nombre: activo[0].vendedor_nombre || nombreVendedor(email),
         email,
-        telefono: WHATSAPP_VENDEDOR[email] || "",
+        telefono: telefonoFicha(email) || "",
       },
     }
   }
@@ -2190,7 +2184,7 @@ export async function traspasarAhora(
   const v = vendedor || {
     ...interno,
     nombre: nombreVendedor(interno.email),
-    telefono: WHATSAPP_VENDEDOR[interno.email] || "",
+    telefono: telefonoFicha(interno.email) || "",
     via: "fallback",
   }
   if (v.email !== interno.email || v.zohoId !== interno.zohoId) {
@@ -3121,7 +3115,7 @@ async function reintentarPresentacionesPendientes(
     if (ahora.getTime() - new Date(f.traspasado_at).getTime() < 5 * 60_000) continue
     const pais = (paisDeContacto(clean) || "cl") as "cl" | "co" | "mx" | "pe"
     const nombre = nombreVig || (emailVig === email ? (f.vendedor_nombre || "").trim() : "") || nombreVendedor(emailVig)
-    let telefono = WHATSAPP_VENDEDOR[emailVig] || telefonoTmPorEmail(emailVig)
+    let telefono = telefonoFicha(emailVig) || telefonoTmPorEmail(emailVig)
     if (!telefono && zohoIdVig) {
       try {
         if (!H) {
