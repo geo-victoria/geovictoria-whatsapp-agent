@@ -39,6 +39,50 @@ export function directivaConsultiva(history: Turno[]): string {
 }
 
 /**
+ * Directiva COTIZA YA (batería MX vs CL 26-sep): el cliente ya dijo CUÁNTAS
+ * personas son y CÓMO quieren marcar, y todavía no vio precio. La regla del
+ * núcleo ("si ya tiene dotación + marcaje, COTIZA sin preguntar") no bastaba:
+ * en Chile, "somos 6 y queremos solo la app" recibió la pregunta sobre la
+ * operación CUATRO veces, aun después de que el cliente dio su RUT y su correo;
+ * y "somos 8, queremos la app, ¿cuánto cuesta?" recibió "¿cuál es el nombre de
+ * tu empresa?" (prohibido: sale del padrón). Solo para dotaciones que Vicky
+ * cotiza (1-20); sobre eso manda el guion del umbral.
+ */
+const RE_PRECIO_MOSTRADO =
+  /(\+\s*(IVA|IGV)\s+al\s+mes|total mensual|resumen mensual|uf\s*\+\s*iva|💰)/i
+const RE_MARCAJE_ELEGIDO =
+  /\b(app|aplicaci[oó]n|celular(es)?|reloj(es)?|checador(es)?|biom[eé]tric[oa]|huellero|ambos|ambas|mixt[oa]|los dos|las dos)\b/i
+
+/** Dotación declarada por el cliente en un texto (1..500) o null. */
+export function dotacionEnTexto(texto: string): number | null {
+  const t = String(texto || "").toLowerCase()
+  const m =
+    /\bsomos\s+(\d{1,3})\b/.exec(t) ||
+    /\b(\d{1,3})\s+(personas|trabajadores|colaboradores|empleados|usuarios|funcionarios)\b/.exec(t)
+  if (!m) return null
+  const n = Number(m[1])
+  return n >= 1 && n <= 500 ? n : null
+}
+
+export function directivaCotizarYa(message: string, history: Turno[], umbral = 20): string {
+  const deCliente = [...(history || []).filter((h) => h.role === "user").map((h) => String(h.content || "")), String(message || "")]
+    .filter((t) => !t.startsWith("[REGISTRO INTERNO"))
+  const yaPrecio = (history || []).some((h) => h.role === "assistant" && RE_PRECIO_MOSTRADO.test(String(h.content || "")))
+  if (yaPrecio) return ""
+  let dotacion: number | null = null
+  for (const t of deCliente) dotacion = dotacionEnTexto(t) ?? dotacion
+  const marcaje = deCliente.some((t) => RE_MARCAJE_ELEGIDO.test(t))
+  if (!dotacion || dotacion > umbral || !marcaje) return ""
+  return (
+    "\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente YA te dijo cuántas personas son (" +
+    dotacion +
+    ") y cómo quieren marcar. PROHIBIDO preguntar por su operación, su rubro o el nombre de su empresa: " +
+    "cotiza AHORA con cotizar_referencial y muéstrale el valor en este mismo mensaje. " +
+    "Única excepción: si eligió reloj y todavía no sabes dónde queda el punto, esa ubicación es la ÚNICA pregunta permitida."
+  )
+}
+
+/**
  * Directiva del MARCAJE (biblia 12-ago; caso "Mixto" 13-ago): eligió reloj o
  * mixto en una respuesta corta sin cantidades ni sedes → 1 punto y 1 reloj
  * asumidos, la única pregunta permitida es la ubicación (comuna/distrito/ciudad
@@ -108,9 +152,11 @@ export type FichaTurno = {
  * suyo con las funciones sueltas (identidad byte a byte).
  */
 export function directivasDeTurno(message: string, history: Turno[], ficha: FichaTurno): string {
+  // "Cotiza ya" manda sobre la consultiva: con dotación + marcaje no hay menú que mostrar.
+  const cotizarYa = directivaCotizarYa(message, history)
   return (
     directivaMarcaje(message, ficha.zona) +
-    directivaConsultiva(history) +
+    (cotizarYa || directivaConsultiva(history)) +
     directivaRutSinCorreo(message, history, { documento: ficha.documento })
   )
 }

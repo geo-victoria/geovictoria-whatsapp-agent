@@ -63,3 +63,30 @@ test("reloj + ubicación en el mismo mensaje → cotizar sin repreguntar (E2E 24
   assert.equal(ubicacionEnMensaje("estamos en Providencia"), "")
   assert.match(directivaMarcaje("Quiero la app y un reloj, estamos en Providencia"), /PROHIBIDO volver a preguntar la comuna/)
 })
+
+// Batería MX vs CL (26-sep): en Chile "somos 6 y queremos solo la app" recibió
+// la pregunta sobre la operación cuatro veces, y "somos 8, queremos la app,
+// ¿cuánto cuesta?" recibió "¿cuál es el nombre de tu empresa?".
+test("cotiza ya: dotación + marcaje sin precio mostrado → directiva", async () => {
+  const { directivaCotizarYa } = await import("../lib/directivas-turno.ts")
+  assert.match(directivaCotizarYa("hola soy Luis, somos 6 y queremos solo la app", []), /cotiza AHORA/)
+  assert.match(
+    directivaCotizarYa("mi RUT es 76.543.210-3 y mi correo es x@y.cl", [
+      { role: "user", content: "hola soy Luis, somos 6 y queremos solo la app" },
+      { role: "assistant", content: "Para darte la mejor solución, cuéntame un poco de tu operación" },
+    ]),
+    /\(6\)/,
+  )
+})
+test("cotiza ya: no aplica sin marcaje, sobre el umbral o con precio ya mostrado", async () => {
+  const { directivaCotizarYa } = await import("../lib/directivas-turno.ts")
+  assert.equal(directivaCotizarYa("soy Diego, somos 12", []), "")
+  assert.equal(directivaCotizarYa("somos 35 personas y queremos la app", []), "")
+  assert.equal(
+    directivaCotizarYa("es muy caro", [
+      { role: "user", content: "somos 8 y queremos la app" },
+      { role: "assistant", content: "Total mensual: $1,200 + IVA" },
+    ]),
+    "",
+  )
+})

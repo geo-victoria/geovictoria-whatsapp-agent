@@ -47,6 +47,7 @@ import { sendBotmakerMessage, sendTypingIndicator } from "./botmaker-push-v3"
 import {
   CONTEXTO_REENGANCHE as CONTEXTO_REENGANCHE_COMPARTIDO,
   directivaConsultiva as directivaConsultivaCompartida,
+  directivaCotizarYa,
   directivaMarcaje as directivaMarcajeCompartida,
   type FichaTurno,
 } from "./directivas-turno"
@@ -596,7 +597,11 @@ export async function procesarTurno(
     // volvió a preguntar lo mismo con otras palabras. Si en el historial YA
     // hay una pregunta consultiva suya y este mensaje es la respuesta del
     // cliente, se prohíbe repreguntar: toca parafrasear y mostrar el menú.
-    const directivaConsultiva = directivaConsultivaCompartida(history || [])
+    // "Cotiza ya" (batería MX vs CL 26-sep): con dotación + marcaje ya dichos y
+    // sin precio mostrado, manda sobre la consultiva — no hay menú que mostrar.
+    const directivaConsultiva =
+      directivaCotizarYa(message, history || [], umbralInfo?.umbral ?? 20) ||
+      directivaConsultivaCompartida(history || [])
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)

@@ -282,6 +282,9 @@ export async function anualizarCotizacion(
       return { ok: false, error: err }
     }
     const url = data.acceptance_url || ""
+    // Al cliente, el link CORTO (/q/) como en toda entrega; el largo queda en acceptanceUrl.
+    const { linkCortoDe } = await import("../link-cotizacion")
+    const urlCliente = linkCortoDe(quoteId) || url
     const totalFmt = `$${totalCLP.toLocaleString("es-CL")}`
     return {
       ok: true,
@@ -293,7 +296,7 @@ export async function anualizarCotizacion(
         `¡Listo! 🎉 Tu cotización quedó en modalidad de PAGO ANUAL: los 12 meses del servicio` +
         `${arriendoMensualUF > 0 ? " (plan y arriendo de equipos)" : ""} en un solo pago de ${totalFmt} IVA incluido` +
         `${detalleDcto}. Sin mensualidades durante el año.\n` +
-        `${url ? `Aquí la revisas, aceptas y pagas: ${url}\n` : ""}` +
+        `${urlCliente ? `Aquí la revisas, aceptas y pagas: ${urlCliente}\n` : ""}` +
         `El PDF actualizado va en camino a tu correo.`,
     }
   } catch (err) {

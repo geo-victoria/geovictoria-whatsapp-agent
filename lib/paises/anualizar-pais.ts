@@ -205,7 +205,10 @@ export async function anualizarCotizacionPais(
   }
   const total = a.planAnual + a.arriendoAnual
   const imp = pais === "pe" ? " + IGV" : pais === "mx" ? " + IVA" : a.arriendoAnual > 0 ? " (el equipo lleva IVA, ya indicado en la cotización)" : ""
-  const url = String((r as { acceptanceUrl?: string }).acceptanceUrl || "")
+  const urlLargo = String((r as { acceptanceUrl?: string }).acceptanceUrl || "")
+  // Al cliente, el link CORTO (/q/) como en toda entrega.
+  const { linkCortoDe } = await import("../link-cotizacion.ts")
+  const url = linkCortoDe(qid) || urlLargo
   return {
     ok: true,
     quoteId: qid,
