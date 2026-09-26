@@ -185,7 +185,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización (PDF en soles, netos + IGV) y devuelve el link donde el cliente la revisa, la acepta y paga (tarjeta vía Mercado Pago o transferencia BBVA; el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio. REQUIERE contacto y rutEmpresa = el RUC de 11 dígitos (la razón social sale sola del RUC vía padrón SUNAT: pásala solo si el cliente la dijo, jamás la preguntes); contactoEmail es OPCIONAL, userCount y la configuración (hardware/puntos si lleva reloj). Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
+      "Genera la COTIZACIÓN FORMAL de Perú: crea la cotización (PDF en soles, netos + IGV) y devuelve el link donde el cliente la revisa, la acepta y paga (tarjeta vía Mercado Pago o transferencia BBVA; el comprobante llega por este chat). Úsala cuando el cliente quiere avanzar tras ver el precio. REQUIERE contacto y rutEmpresa = el RUC de 11 dígitos o, si el cliente no tiene RUC o prefiere boleta, su DNI de 8 dígitos (se valida contra RENIEC; NO existe el «DNI de 11 dígitos»). La razón social sale sola del documento (padrón SUNAT; con DNI, el nombre de RENIEC): pásala solo si el cliente la dijo, jamás la preguntes; contactoEmail es OPCIONAL, userCount y la configuración (hardware/puntos si lleva reloj). Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -193,7 +193,7 @@ export const TOOL_SCHEMAS_PE_UNIFICADAS: Schema[] = [
         contacto: { type: "string" as const, description: "Nombre de la persona de contacto." },
         contactoEmail: { type: "string" as const, description: "Correo del contacto (obligatorio)." },
         contactoTelefono: { type: "string" as const, description: "Se completa solo con el WhatsApp del cliente; no lo pidas." },
-        rutEmpresa: { type: "string" as const, description: "RUC de la empresa (11 dígitos)." },
+        rutEmpresa: { type: "string" as const, description: "RUC (11 dígitos) o, si no tiene RUC o prefiere boleta, DNI (8 dígitos)." },
         userCount: { type: "number" as const, minimum: 1, maximum: 50 },
         modulos: { type: "array" as const, items: { type: "string" as const } },
         hardware: HARDWARE_PE,

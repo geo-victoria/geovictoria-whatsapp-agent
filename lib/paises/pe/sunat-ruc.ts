@@ -81,3 +81,51 @@ export async function fichaRucSunat(rucIn: string): Promise<FichaRuc | null> {
   }
   return ficha
 }
+
+/**
+ * RENIEC por DNI (26-sep): misma fuente pública (apis.net.pe v1, sin token).
+ * Devuelve la ficha, `{ noExiste: true }` si el servicio dice que el DNI no es
+ * válido (HTTP 422), o null si el servicio no respondió (el llamador decide).
+ */
+export async function fichaDniReniec(
+  dniIn: string,
+): Promise<import("./documento.ts").FichaDni | { noExiste: true } | null> {
+  const dni = String(dniIn || "").replace(/\D/g, "")
+  if (!/^\d{8}$/.test(dni)) return { noExiste: true }
+  const key = `reniec_dni_${dni}`
+  try {
+    const { getKvValue } = await import("../../supabase-persistence-v3.ts")
+    const raw = await getKvValue(key)
+    if (raw) {
+      const c = JSON.parse(raw) as { nombre?: string; at?: string }
+      const edad = c.at ? Date.now() - new Date(c.at).getTime() : Number.POSITIVE_INFINITY
+      if (c.nombre && edad < CACHE_DIAS * 86400e3) return c as import("./documento.ts").FichaDni
+    }
+  } catch { /* sin caché */ }
+  try {
+    const ctl = new AbortController()
+    const t = setTimeout(() => ctl.abort(), TIMEOUT_MS)
+    const r = await fetch(`https://api.apis.net.pe/v1/dni?numero=${dni}`, {
+      signal: ctl.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (vicky)" },
+      cache: "no-store",
+    })
+    clearTimeout(t)
+    if (r.status === 422 || r.status === 404) return { noExiste: true }
+    if (!r.ok) {
+      console.warn(`[reniec-dni] ${dni} → HTTP ${r.status}`)
+      return null
+    }
+    const { parsearFichaDni } = await import("./documento.ts")
+    const ficha = parsearFichaDni(dni, await r.json())
+    if (!ficha) return { noExiste: true }
+    try {
+      const { setKvValue } = await import("../../supabase-persistence-v3.ts")
+      await setKvValue(key, JSON.stringify({ ...ficha, at: new Date().toISOString() }))
+    } catch { /* best-effort */ }
+    return ficha
+  } catch (e) {
+    console.warn(`[reniec-dni] ${dni} falló:`, e instanceof Error ? e.message : e)
+    return null
+  }
+}

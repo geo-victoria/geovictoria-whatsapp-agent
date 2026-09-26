@@ -32,7 +32,8 @@
 
 import { cotizarPE, formatearPEN, type PuntoInstalacionPE, type ZonaPE } from "./cotizar.ts"
 import { tipoCambioSunat } from "./tc-sunat.ts"
-import { fichaRucSunat } from "./sunat-ruc.ts"
+import { fichaRucSunat, fichaDniReniec } from "./sunat-ruc.ts"
+import { normalizarDocumentoPE } from "./documento.ts"
 import { ESCALERA_DESCUENTO_PE } from "./catalogo.ts"
 import { CORREO_SSTT_PE } from "./catalogo.ts"
 import { rucValido, formatearRuc } from "../../rut.ts"
@@ -434,11 +435,27 @@ export function buildDispatchPE(contact: string) {
           email?: string
           ruc?: string
         }
-        if (!i.ruc || !rucValido(i.ruc)) {
+        // RUC o DNI (Lalo 26-sep): quien no tiene RUC o prefiere boleta cotiza
+        // con su DNI de 8 dígitos, validado contra RENIEC. NO existe el "DNI de
+        // 11 dígitos" (caso Ana 25-sep: Vicky lo pidió siete veces).
+        const doc = normalizarDocumentoPE(i.ruc)
+        if (!doc) {
           return {
             ok: false,
-            error: `El RUC '${i.ruc || ""}' no es válido (11 dígitos con dígito verificador SUNAT). Pídele al cliente confirmarlo y vuelve a llamar la tool.`,
+            error: `'${i.ruc || ""}' no es un RUC (11 dígitos con dígito verificador) ni un DNI (8 dígitos). Pídele al cliente revisarlo; si no tiene RUC o prefiere boleta, su DNI de 8 dígitos sirve igual. Vuelve a llamar la tool.`,
           }
+        }
+        let titularDni = ""
+        if (doc.tipo === "DNI") {
+          const f = await fichaDniReniec(doc.numero).catch(() => null)
+          if (f && "noExiste" in f) {
+            return {
+              ok: false,
+              error: `El DNI ${doc.numero} no aparece en RENIEC. Pídele al cliente revisarlo (8 dígitos) o, si prefiere, su RUC. Vuelve a llamar la tool.`,
+            }
+          }
+          // Servicio caído = no se frena la venta: se emite con el DNI tal cual.
+          titularDni = f?.nombre || ""
         }
         // Correo OPCIONAL (contrato chileno del 03-ago): solo se valida si vino.
         if (i.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.email)) {
@@ -463,9 +480,11 @@ export function buildDispatchPE(contact: string) {
         const escalon = escalonDe(i)
         // RAZÓN SOCIAL = del padrón SUNAT cuando el cliente no la dio (22-sep,
         // paridad con Chile/SII); último recurso, el nombre del contacto.
+        // Con DNI el titular es la persona (nombre de RENIEC).
         let empresaFinal = String(i.empresa || "").trim()
+        if (!empresaFinal && doc.tipo === "DNI") empresaFinal = titularDni || String(i.contacto || "").trim()
         if (!empresaFinal) {
-          const ficha = await fichaRucSunat(formatearRuc(i.ruc)).catch(() => null)
+          const ficha = await fichaRucSunat(doc.numero).catch(() => null)
           empresaFinal = ficha?.razonSocial || String(i.contacto || "").trim()
         }
         const tc = await tipoCambioSunat()
@@ -494,7 +513,8 @@ export function buildDispatchPE(contact: string) {
             empresa: empresaFinal,
             contacto: i.contacto,
             contactoEmail: i.email?.trim() || undefined,
-            ruc: formatearRuc(i.ruc),
+            ruc: doc.tipo === "RUC" ? formatearRuc(doc.numero) : doc.numero,
+            tipoDocumento: doc.tipo,
             contactoTelefono: `+${contact}`,
             userCount: Number(i.userCount || 0),
             items,
