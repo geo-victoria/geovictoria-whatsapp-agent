@@ -108,7 +108,7 @@ export const PERFIL_PE: PerfilPais = {
     ejecutivo: {
       nombre: "Mónica Mendoza",
       email: "mmendozav@geovictoria.com",
-      telefono: "+51 962 277 502", // Ficha de usuario en Zoho, verificada 04-ago.
+      telefono: "+51 906 239 544", // WhatsApp corporativo (espejo conectado + ficha Zoho, 26-sep; antes 962 277 502).
     },
   },
 
