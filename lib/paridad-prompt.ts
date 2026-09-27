@@ -189,7 +189,19 @@ export const REGLAS_UNIVERSALES: readonly ReglaUniversal[] = [
     regla: "Nunca inventar nombres de clientes, casos ni cifras de la competencia",
     ancla: /(JAM[AÁ]S inventes nombres|NO inventes NUNCA nombres|sin inventar cifras)/i,
     motivo: "Una referencia inventada se cae en la primera pregunta del cliente",
+  },  {
+    id: "objecion_solo_equipo",
+    regla: "Objeción 'solo quiero el equipo / no quiero pagar mensual': reconocer, traducir la mensualidad a ahorro y ofrecer compra o pago anual",
+    ancla: /solo quiero el equipo/i,
+    motivo: "Perú 22-26 sep: la objeción más repetida de la campaña Hardware; Vicky la discutía en vez de ofrecer compra o pago anual",
   },
+  {
+    id: "ficha_equipo_si_preguntan",
+    regla: "Si preguntan modelo o foto del equipo, se responde con la ficha y enviar_ficha_reloj",
+    ancla: /no tengo foto para enviarte/i,
+    motivo: "Perú 24-25 sep: 'no manejo modelos' y 'no tengo foto' teniendo la ficha",
+  },
+
 ]
 
 /**

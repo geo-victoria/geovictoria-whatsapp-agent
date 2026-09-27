@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { directivaConsultiva, directivaMarcaje, directivasDeTurno } from "../lib/directivas-turno.ts"
+import { directivaConsultiva, directivaDatosYaDichos, directivaMarcaje, directivasDeTurno } from "../lib/directivas-turno.ts"
 import { objecionSinTool, revisarSalida } from "../lib/cinturones-salida.ts"
 
 // Chile consume el módulo compartido: el texto tiene que ser BYTE A BYTE el
@@ -89,4 +89,30 @@ test("cotiza ya: no aplica sin marcaje, sobre el umbral o con precio ya mostrado
     ]),
     "",
   )
+})
+
+test("datos ya dichos: World Motors — las sedes ya estaban, no se piden los distritos", () => {
+  const h = [
+    { role: "assistant", content: "¿Cuántas personas marcarían asistencia?" },
+    { role: "user", content: "Tenemos aproximadamente 25 colaboradores en dos sedes.\nLima 2 sedes (los olivos y Carabayllo)" },
+    { role: "assistant", content: "Cuál te acomoda más para tu operación?" },
+    { role: "user", content: "Podría ser ambas, ya que hay ocasiones que los colaboradores viajan" },
+  ]
+  const d = directivaDatosYaDichos("ok", h, "distrito")
+  assert.match(d, /los olivos y Carabayllo/)
+  assert.match(d, /Podría ser ambas/)
+})
+
+test("datos ya dichos: Ana eligió reloj → no se vuelve a preguntar cómo marcan", () => {
+  const h = [
+    { role: "user", content: "en celular no, solo huellero" },
+    { role: "assistant", content: "Perfecto, con reloj entonces." },
+    { role: "user", content: "cieneguilla" },
+  ]
+  assert.match(directivaDatosYaDichos("10719515431", h, "distrito"), /solo huellero/)
+})
+
+test("datos ya dichos: sin nada dicho no agrega directiva; una pregunta no cuenta como elección", () => {
+  assert.equal(directivaDatosYaDichos("hola", [], "comuna"), "")
+  assert.equal(directivaDatosYaDichos("ok", [{ role: "user", content: "¿el app movil es con un equipo en físico?" }], "comuna"), "")
 })

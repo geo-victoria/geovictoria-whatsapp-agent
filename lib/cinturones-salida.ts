@@ -50,15 +50,18 @@ export type Veredicto = {
 const OK: Veredicto = { accion: "ok", motivos: [] }
 
 /**
- * Contención cuando ni el reintento consigue un precio con respaldo. Un precio
+ * Contención cuando ni el reintento consigue un precio con respaldo. NO promete un
+ * seguimiento que nadie manda ("te lo digo en un momento" dejó esperando a
+ * Fernando y Carlos en Perú, 25-sep): devuelve la pregunta al cliente y el
+ * turno siguiente sí pasa por la tool. Un precio
  * equivocado a alguien que está por pagar es peor que una demora (criterio del
  * cinturón de URLs, 03-sep).
  */
 const CONTENCION: Record<PaisCinturon, string> = {
-  cl: "Déjame confirmarte el valor exacto con el sistema para no darte una cifra equivocada — te lo digo en un momento 🙌",
-  co: "Déjame confirmarte el valor exacto con el sistema para no darte una cifra equivocada — te cuento en un momento 🙌",
-  mx: "Déjame confirmarte el valor exacto con el sistema para no darte una cifra equivocada — te digo en un momento 🙌",
-  pe: "Déjame confirmarte el valor exacto con el sistema para no darte una cifra equivocada — te digo en un momento 🙌",
+  cl: "Para no darte una cifra equivocada, prefiero calcularla con el sistema: ¿me confirmas cuántas personas y cómo marcarían, y te la dejo de inmediato? 🙌",
+  co: "Para no darte una cifra equivocada, prefiero calcularla con el sistema: ¿me confirmas cuántas personas y cómo marcarían, y te la dejo de inmediato? 🙌",
+  mx: "Para no darte una cifra equivocada, prefiero calcularla con el sistema: ¿me confirmas cuántas personas y cómo marcarían, y te la dejo de inmediato? 🙌",
+  pe: "Para no darte una cifra equivocada, prefiero calcularla con el sistema: ¿me confirmas cuántas personas y cómo marcarían, y te la dejo de inmediato? 🙌",
 }
 
 const FORZAR_TOOL_PRECIO =

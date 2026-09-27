@@ -132,6 +132,48 @@ export function directivaMarcaje(message: string, zona = "comuna"): string {
   return eligeReloj && !declaraCantidadOSedes ? `\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente acaba de elegir un marcaje que INCLUYE reloj (o dijo 'mixto'). PROHIBIDO preguntarle cuántos relojes o cuántos puntos necesita: ASUME 1 punto y 1 reloj y decláralo en tu mensaje. Si aún no sabes ${zonaArt} de ese punto, tu ÚNICA pregunta de este turno es ${zonaArt}; si ya la sabes, cotiza AHORA con cotizar_referencial (1 punto, autoInstalada: true) presentando el doble valor (con y sin reloj).` : ""
 }
 
+/**
+ * DATOS QUE EL CLIENTE YA DIO (Lalo 27-sep, conversaciones reales de Perú):
+ * a World Motors le pidió "los distritos exactos" que ya había escrito (Los
+ * Olivos y Carabayllo); a Ana le volvió a preguntar cómo marcarían después de
+ * que eligió reloj tres veces. Busca en los mensajes ANTERIORES del cliente
+ * (no en el actual) su elección de marcaje y la ubicación que dio, y los
+ * devuelve como hechos que no se vuelven a pedir.
+ */
+const RE_ELIGE_MARCAJE =
+  /\b(reloj(es)?|huellero(s)?|biom[eé]tric[oa]s?|checador(es)?|app|aplicaci[oó]n|celular(es)?|ambos|ambas|mixt[oa]|los dos|las dos|solo (el )?equipo)\b/i
+
+function ubicacionEnTexto(m: string): string {
+  const r =
+    /\b(?:estamos|estoy|quedamos|queda|est[aá]n?|somos de|ubicad[oa]s?)\s+(?:ubicad[oa]s?\s+)?en\s+(?:la\s+)?(?:comuna|ciudad|distrito)?\s*(?:de\s+)?([^\s,.;!?]+(?:\s+[^\s,.;!?]+){0,2})/i.exec(m) ||
+    /\b(?:comuna|ciudad|distrito|municipio)\s+de\s+([^\s,.;!?]+(?:\s+[^\s,.;!?]+){0,2})/i.exec(m) ||
+    /\b(?:sedes?|locales?|sucursal(?:es)?|oficinas?)\b[^.\n]{0,30}\(([^)]{3,60})\)/i.exec(m) ||
+    /\ben\s+([A-ZÁÉÍÓÚÑ][\wáéíóúñ]+(?:\s+(?:de\s+)?[A-ZÁÉÍÓÚÑ][\wáéíóúñ]+){0,2})/.exec(m)
+  return r ? r[0].trim() : ""
+}
+
+export function directivaDatosYaDichos(message: string, history: Turno[], zona = "comuna"): string {
+  const previos = (history || [])
+    .filter((t) => t.role === "user")
+    .map((t) => String(t.content || "").trim())
+    .filter((c) => c && !c.startsWith("[El cliente envió") && !/\?\s*$/.test(c))
+  if (!previos.length) return ""
+  let marcaje = ""
+  let ubicacion = ""
+  for (let i = previos.length - 1; i >= 0; i--) {
+    const c = previos[i]
+    if (!marcaje && c.length <= 160 && RE_ELIGE_MARCAJE.test(c)) marcaje = c.replace(/\s+/g, " ").slice(0, 120)
+    if (!ubicacion) ubicacion = ubicacionEnTexto(c)
+    if (marcaje && ubicacion) break
+  }
+  const hechos = [
+    marcaje ? `cómo quiere marcar: «${marcaje}»` : "",
+    ubicacion ? `dónde está (${zonaConArticulo(zona)} o sedes): «${ubicacion}»` : "",
+  ].filter(Boolean)
+  if (!hechos.length) return ""
+  return `\n\n[DATOS QUE EL CLIENTE YA TE DIO — obligatoria] En mensajes anteriores ya te dijo ${hechos.join(" y ")}. PROHIBIDO volver a preguntárselo (ni con otras palabras, ni "para confirmar"): úsalo tal cual. Si el mensaje de ahora lo cambia, manda el mensaje de ahora.`
+}
+
 /** Reenganche: primera respuesta del cliente a un toque de reactivación. */
 export const CONTEXTO_REENGANCHE =
   "[CONTEXTO — REENGANCHE ACTIVO] Tú (Vicky) reabriste esta conversación con un toque de " +
@@ -164,6 +206,7 @@ export function directivasDeTurno(message: string, history: Turno[], ficha: Fich
   const cotizarYa = directivaCotizarYa(message, history)
   return (
     directivaMarcaje(message, ficha.zona) +
+    directivaDatosYaDichos(message, history, ficha.zona) +
     (cotizarYa || directivaConsultiva(history)) +
     directivaRutSinCorreo(message, history, { documento: ficha.documento })
   )

@@ -64,6 +64,16 @@ const VOSEO_MAP: [RegExp, string][] = [
   [/(?<!\p{L})erís(?!\p{L})/giu, "eres"],
   [/(?<!\p{L})soi(?!\p{L})/giu, "eres"],
   [/(?<!\p{L})vení(?!\p{L})/giu, "ven"],
+  // Voseo rioplatense de verbos REGULARES (Perú 25-sep: "descargás la info en
+  // USB", "si algún día necesitás exportar"). Lista CERRADA de raíces: una regla
+  // genérica "-ás" rompería "más", "jamás", "atrás" y el tuteo correcto "estás".
+  [/(?<!\p{L})(descarg|necesit|us|pag|revis|mand|cotiz|trabaj|registr|instal|configur|export|agend|cambi|elimin|mir|avis|cuent|compr|arriend|alquil|ajust|prob|termin|empez|ocup|busc|pregunt|confirm|acept|complet|llen|carg|sum|elig|arm)ás(?!\p{L})/giu, "$1as"],
+  [/(?<!\p{L})(entend|cre|le|pon|respond|com|vend|aprend)és(?!\p{L})/giu, "$1es"],
+  [/(?<!\p{L})(escrib|recib|viv|decid|abr|sub|permit|exig|compart|reun)ís(?!\p{L})/giu, "$1es"],
+  [/(?<!\p{L})prefer[ií]s(?!\p{L})/giu, "prefieres"],
+  [/(?<!\p{L})eleg[ií]s(?!\p{L})/giu, "eliges"],
+  [/(?<!\p{L})segu[ií]s(?!\p{L})/giu, "sigues"],
+  [/(?<!\p{L})ped[ií]s(?!\p{L})/giu, "pides"],
 ]
 
 export function sanitizarVoseo(texto: string): string {
@@ -72,11 +82,14 @@ export function sanitizarVoseo(texto: string): string {
   for (const [re, repl] of VOSEO_MAP) {
     // FUERA DE URLs (regla dura del canario, 03-sep): "dale"/"acá"/"po" dentro
     // de un link romperían el token de la cotización.
-    out = reemplazarFueraDeUrls(out, re, undefined, (match) =>
-      match[0] === match[0].toUpperCase()
-        ? repl.charAt(0).toUpperCase() + repl.slice(1)
-        : repl,
-    )
+    // "$1" = la raíz capturada (verbos regulares); el resto son literales.
+    const uno = new RegExp(re.source, re.flags.replace("g", ""))
+    out = reemplazarFueraDeUrls(out, re, undefined, (match) => {
+      const r = repl.includes("$1") ? String(match).replace(uno, repl) : repl
+      return match[0][0] === match[0][0].toUpperCase() && /\p{Lu}/u.test(match[0][0])
+        ? r.charAt(0).toUpperCase() + r.slice(1)
+        : r
+    })
   }
   return out
 }

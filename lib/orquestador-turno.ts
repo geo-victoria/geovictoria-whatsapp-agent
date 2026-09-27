@@ -48,6 +48,7 @@ import {
   CONTEXTO_REENGANCHE as CONTEXTO_REENGANCHE_COMPARTIDO,
   directivaConsultiva as directivaConsultivaCompartida,
   directivaCotizarYa,
+  directivaDatosYaDichos,
   directivaMarcaje as directivaMarcajeCompartida,
   type FichaTurno,
 } from "./directivas-turno"
@@ -602,6 +603,9 @@ export async function procesarTurno(
     const directivaConsultiva =
       directivaCotizarYa(message, history || [], umbralInfo?.umbral ?? 20) ||
       directivaConsultivaCompartida(history || [])
+    // Datos que el cliente ya dio (marcaje, ubicación): no se vuelven a pedir
+    // (Lalo 27-sep, World Motors y Ana en Perú). Global, 4 países.
+    const directivaYaDicho = directivaDatosYaDichos(message || "", history || [], perfil.zona)
 
     // 2. Ruteo de modelo: Sonnet SOLO para el flujo de cotización; Haiku el resto.
     const prefEscalonPre = await getPrefEscalon(contact).catch(() => 0)
@@ -659,7 +663,7 @@ export async function procesarTurno(
       alIniciarTool,
       systemPrompt: onboarding
         ? onboarding.systemPrompt + directivaAdmin
-        : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + (await directivaCanalMeta(contact)),
+        : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaYaDicho + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + (await directivaCanalMeta(contact)),
       history,
       userMessage: message,
       apiKey,
@@ -685,7 +689,7 @@ export async function procesarTurno(
         systemPrompt:
           (onboarding
             ? onboarding.systemPrompt + directivaAdmin
-            : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin) +
+            : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaYaDicho + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin) +
           "\n\n# Instrucción de sistema (este turno)\nTu turno anterior quedó VACÍO. Responde en texto al ÚLTIMO mensaje del cliente, breve y concreto; si corresponde una tool, úsala y entrega su mensajeParaProspecto. Nunca cierres el turno sin texto.",
         history,
         userMessage: message,
@@ -1030,7 +1034,7 @@ export async function procesarTurno(
           // una demora: se contiene y el equipo se entera (mismo criterio que
           // el cinturón de URLs).
           reply =
-            "Déjame confirmarte el valor exacto con el sistema para no darte una cifra equivocada — te lo digo en un momento 🙌"
+            `Para no darte una cifra equivocada, prefiero calcularla con el sistema: ¿me confirmas cuántas personas y cómo marcarían, y te la dejo de inmediato? 🙌`
         }
         void avisarEquipoInterno(
           `⚠️ PRECIO SIN RESPALDO a +${contact}: el modelo afirmó ${chequeo.inventados.join(", ")} sin tool. ` +
