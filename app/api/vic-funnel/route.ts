@@ -5113,9 +5113,9 @@ function renderInboundDiario(
       } Una cotización se atribuye por el teléfono de la cotización: si el comprobante llega desde otro número, la venta sigue siendo de quien la emitió.</div>
     </div>`
   })()
-  return `${cardInOut}<div class="card"><h2>📥 Actividad inbound por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
+  return `${cardInOut}<div class="card"><h2>📥 Actividad por día <span class="pct" style="font-weight:400">— ${opts.rango ? esc(opts.rango.etiqueta) : "últimos 30 días"} · Bolsa y Foto</span></h2>
   <div class="sub" style="margin:2px 0 10px"><b>${T.entrantes}</b> conversaciones iniciadas · ${T.ic} con intención comercial (${pctDe(T.ic, T.entrantes)}) · ${T.ce} de clientes existentes (${T.ce_sop} soporte / ${T.ce_pos} postventa / ${T.ce_cob} cobranza) · ${T.nocal} no califican · ${T.noid} sin identificar — Foto: ${T.precio} vieron precio · ${T.formal} formales · ${T.aceptada} aceptadas · <b>${T.pagada} pagadas</b></div>
-  ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky, inbound + outbound)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
+  ${opts.caja ? `<div class="sub" style="margin:0 0 10px;padding:8px 10px;background:#f0faf4;border-radius:8px">💰 <b>Caja del período (canal Vicky)</b>: ${opts.caja.cantidad} pago${opts.caja.cantidad === 1 ? "" : "s"} · <b>$${opts.caja.monto.toLocaleString("es-CL")}</b>${opts.caja.detalle ? ` — ${opts.caja.detalle}` : ""}</div>` : ""}
   ${tasaAcumHtml}
   <style>
     th.sube,td.sube{background:#fbf9ff}
@@ -5149,17 +5149,17 @@ function renderInboundDiario(
   <div style="overflow-x:auto;margin-top:8px"><table><thead>
   <tr><th></th><th colspan="10" class="gb">🎒 Grupo Bolsa · llegadas del día (nueva o reactivada tras ≥7 días de silencio)</th><th colspan="5" class="gf divi">📸 Grupo Foto · hitos del día</th></tr>
   <tr>
-    <th>Día</th><th style="text-align:center">🧲 Form Inbound</th><th style="text-align:center">📋 Form Outbound</th><th style="text-align:center">Conversaciones iniciadas</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
+    <th>Día</th><th style="text-align:center">🧲 Form Vicky</th><th style="text-align:center">📋 Form Outbound</th><th style="text-align:center">Conversaciones iniciadas</th><th style="text-align:center">Intención comercial</th><th style="text-align:center">Cliente existente</th><th style="text-align:center" class="sube">· Soporte</th><th style="text-align:center" class="sube">· PostVenta</th><th style="text-align:center" class="sube">· Cobranza</th><th style="text-align:center">No califica</th><th style="text-align:center">No identificado</th>
     <th style="text-align:center" class="divi">Vio precio</th><th style="text-align:center">Formal enviada</th><th style="text-align:center">Aceptada</th><th style="text-align:center">💰 Pagada</th><th style="text-align:center">Cierre del día</th>
   </tr></thead><tbody>${filas}${filaTotalOk}</tbody></table></div>
-  <div class="sub" style="margin:8px 0 0">FORM INBOUND: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORM OUTBOUND: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el paréntesis desglosa en qué terminó cada uno: 💬 contactados (les salió el toque) y ↪ entregados a una SDR sin lograr contacto — al pasar el mouse por el número se ve cada empresa y, en los ↪, a qué ejecutiva se entregó. Cuántos RESPONDIERON se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas — los números de los PARÉNTESIS también tienen su viñeta con el detalle; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
+  <div class="sub" style="margin:8px 0 0">FORM VICKY: llenaron el miniform (landing o sitio web) ese día, con o sin conversación después — el (n💬) es cuántos de esos llegaron al chat; clic en el número lleva al detalle del form, más abajo. FORM OUTBOUND: leads del formulario web grande que la tómbola ASIGNÓ a Vicky por el tramo 1-20 ese día (foto inmutable al asignarse) — el paréntesis desglosa en qué terminó cada uno: 💬 contactados (les salió el toque) y ↪ entregados a una SDR sin lograr contacto — al pasar el mouse por el número se ve cada empresa y, en los ↪, a qué ejecutiva se entregó. Cuántos RESPONDIERON se lee en el (n📋) de Conversaciones iniciadas. CONVERSACIONES INICIADAS: las que NACIERON ese día, las abriera el cliente o las abriera Vicky; el paréntesis dice de qué formulario venían (n🧲 · n📋) y lo que no aparece llegó por su cuenta. Un toque que nadie respondió no cuenta acá: no hay conversación que clasificar. BOLSA: los 4 grupos son excluyentes y suman EXACTAMENTE las Conversaciones iniciadas del día; los 3 subgrupos (· morados) suman Cliente existente. El PRIMER hito por contacto es para siempre: reactivaciones, campañas, precios re-mostrados o cotizaciones re-enviadas NO vuelven a contar en un día nuevo. La clasificación puede moverse de grupo mientras la conversación se enriquece (el total de Conversaciones iniciadas no cambia). FOTO: hitos del día venga de donde venga la conversación (outbound incluido); pagada = pago confirmado en Zoho. Canal ejecutivo y contactos internos quedan fuera. Cierre del día = pagadas ÷ vieron precio ese día. Hora de Chile. Pasa el MOUSE por un número para ver sus empresas — los números de los PARÉNTESIS también tienen su viñeta con el detalle; clic en una empresa = detalle al instante; clic en el número = listado completo.</div>
   <div id="inbdet-modal"><div class="m"><button class="x" onclick="document.getElementById('inbdet-modal').style.display='none'">✕ cerrar</button><div id="inbdet-cuerpo"></div></div></div>
   <script>
   (function () {
     var VIN = ${jsonSeguro(VIN)};
     var DET = ${jsonSeguro(DET)};
     var TRS = ${jsonSeguro(TRS)};
-    var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Inbound (llenaron el miniform)", outb: "📋 Form Outbound · tramo Vicky (toque 0 de Vicky)", formconv: "🧲💬 Form Inbound que llegaron al chat", outbtoc: "📋💬 Form Outbound contactados (les salió el toque)", outbreg: "📋↪ Form Outbound entregados a una SDR", convform: "Conversaciones venidas del Form Inbound 🧲", convoutb: "Conversaciones venidas del Form Outbound 📋" })};
+    var ETQ = ${jsonSeguro({ ...ETIQUETA_ETAPA_INBOUND, form: "🧲 Form Vicky (llenaron el miniform)", outb: "📋 Form Outbound · tramo Vicky (toque 0 de Vicky)", formconv: "🧲💬 Form Vicky que llegaron al chat", outbtoc: "📋💬 Form Outbound contactados (les salió el toque)", outbreg: "📋↪ Form Outbound entregados a una SDR", convform: "Conversaciones venidas del Form Vicky 🧲", convoutb: "Conversaciones venidas del Form Outbound 📋" })};
     var pop = document.createElement("div"); pop.id = "inbpop"; document.body.appendChild(pop);
     // Flechitas de origen (Lalo 26-ago): despliegan las sub-filas por origen
     // (sitio web vs cada landing) del día.
@@ -9141,7 +9141,7 @@ export async function GET(req: Request): Promise<Response> {
             ladoQ === "in" && outbTelsDrill ? " · solo INBOUND" :
             ladoQ === "out" && outbTelsDrill ? " · solo OUTBOUND (planilla de cadencia)" :
             ladoQ && !outbTelsDrill ? " · ⚠️ filtro in/out no disponible: se listan todos" : ""
-          const titulo = `${ladoQ ? "Canal Vicky" : "Inbound"} ${inbdet === "TOTAL" ? "del período" : esClaveSemana(inbdet) ? `de la semana del ${inbdet.slice(1)}` : `del ${inbdet}`} — ${etiquetaEtapa}${etiquetaLado}`
+          const titulo = `${ladoQ ? "Canal Vicky" : "Actividad"} ${inbdet === "TOTAL" ? "del período" : esClaveSemana(inbdet) ? `de la semana del ${inbdet.slice(1)}` : `del ${inbdet}`} — ${etiquetaEtapa}${etiquetaLado}`
           return renderDetalleEjecutivo({
             filas: sub,
             titulo,
@@ -9227,7 +9227,21 @@ export async function GET(req: Request): Promise<Response> {
         } catch { /* sin transcripciones: el pop-up muestra solo la ficha */ }
         // 🧲 Leads del formulario de landing (Lalo 21-ago): alimentan la
         // columna "Form Vicky" del Grupo Bolsa y la tabla detalle de abajo.
-        const formLeads = inbdet ? [] : await fetchLeadsFormVicky().catch(() => [] as FilaFormVicky[])
+        // Solo los fills del PAÍS del dash (Lalo 27-sep: la columna del dash de
+        // Perú contaba los formularios de los 4 países). País = prefijo del
+        // teléfono; sin teléfono discable, el Territorio del lead; sin nada, Chile.
+        const TERR_PAIS: Record<string, Pais> = { chile: "cl", peru: "pe", colombia: "co", mexico: "mx" }
+        const paisDeFormLead = (f: FilaFormVicky): Pais => {
+          let t = digits(String(f.Phone || ""))
+          if (/^(56|57|52|51)\1\d{8,12}$/.test(t)) t = t.slice(2)
+          const porTel = /^(56|57|52|51)\d{8,12}$/.test(t) ? paisDeTelefono(t) : ""
+          if (porTel) return porTel
+          const terr = String(f.Territorio || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
+          return TERR_PAIS[terr] || "cl"
+        }
+        const formLeads = inbdet
+          ? []
+          : (await fetchLeadsFormVicky().catch(() => [] as FilaFormVicky[])).filter((f) => paisDeFormLead(f) === pais)
         const formPorDia = new Map<string, Array<[string, string]>>()
         // Cruces del embudo web→chat (Lalo 21-ago "OK!"): cuántos del form
         // llegaron al chat, y qué entrantes vinieron del form (por teléfono).
@@ -9431,7 +9445,7 @@ export async function GET(req: Request): Promise<Response> {
         if (!inbdet) inboundHtml += await renderCampanas()
       } catch (e) {
         console.warn("[vic-funnel] inbound diario falló:", e instanceof Error ? e.message : e)
-        inboundHtml = `<div class="card"><h2>📥 Oportunidades inbound por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`
+        inboundHtml = `<div class="card"><h2>📥 Actividad por día</h2><p class="sub">No se pudo calcular en este momento — recarga la página.</p></div>`
       }
     }
     propietariosAll = [...new Set(filasListado.map((f) => f.propietario).filter((p) => p && p !== "—"))].sort()
@@ -10021,7 +10035,7 @@ export async function GET(req: Request): Promise<Response> {
   }
 </style></head><body><div class="wrap">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : vista === "inbound" ? "Inbound diario" : "Análisis y KPIs"}</h1></div>
+    <div style="display:flex;align-items:center;gap:16px"><img src="/gv/logo-full-color.svg" alt="GeoVictoria" style="height:30px"><h1 style="margin:0">${vista === "gestion" ? "Gestión de oportunidades" : vista === "inbound" ? "Actividad diaria" : "Análisis y KPIs"}</h1></div>
     ${vista === "inbound" ? "" : `<div style="font-size:14px;white-space:nowrap;display:flex;gap:14px;flex-wrap:wrap">
       ${vista === "gestion" ? `<b>📞 Gestión</b>` : `<a href="?${(() => { const p = filtrosQS(); p.delete("vista"); return p.toString() })()}">📞 Gestión</a>`}
       <a href="?key=${encodeURIComponent(key)}&vista=editor">🧾 Editor de cotizaciones</a>
@@ -10033,7 +10047,7 @@ export async function GET(req: Request): Promise<Response> {
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "cierre"); return p.toString() })()}">📅 Cierre diario</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "campanas"); return p.toString() })()}">📣 Campañas</a>
       <a href="?${(() => { const p = filtrosQS(); p.set("vista", "espejos"); return p.toString() })()}">🪞 ${esAdmin ? "Espejos" : "Mi espejo"}</a>
-      ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Inbound diario</a>` : ""}
+      ${inboundLinkKey ? `<a href="/inbound?k=${encodeURIComponent(inboundLinkKey)}">📥 Actividad diaria</a>` : ""}
       ${vista === "analisis" ? `<b>📊 Análisis y KPIs</b>` : `<a href="?${(() => { const p = filtrosQS(); p.set("vista", "analisis"); return p.toString() })()}">📊 Análisis y KPIs</a>`}
     </div>`}
   </div>

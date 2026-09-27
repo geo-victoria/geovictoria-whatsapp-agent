@@ -196,6 +196,10 @@ const SENAL_NO_PROSPECTO: Array<{ tipo: TipoCasuistica; reglas: Regla[] }> = [
   },
 ]
 
+/** Señales de que quien escribe es un prospecto (dotación, documento tributario,
+ * sedes, intención de compra): desactivan la lectura de "link ajeno" como spam. */
+const SENAL_PROSPECTO = /\b\d{1,5}\s*(personas|colaboradores|trabajadores|empleados|usuarios|operarios)\b|\b(ruc|rut|nit|rfc)\b|\b\d{11}\b|\b\d{1,2}\.?\d{3}\.?\d{3}-?[\dk]\b|\bsedes?\b|\bsucursal(es)?\b|\b(cotizar|cotizacion|presupuesto|precio|precios|contratar|control de asistencia|marcaje|marcacion|reloj|app)\b/
+
 /** Intención de compra explícita (anula lecturas de soporte cuando no hay señal de cliente). */
 const INTENCION_COMPRA = /\b(cotizar|cotizacion|cotizaciones|presupuesto|precio|precios|valor|valores|cuanto (sale|cuesta|vale)|contratar|comprar|me interesa|quiero (el|un) (plan|servicio|reloj|control)|control de asistencia para|implementar)\b/
 
@@ -226,6 +230,10 @@ export function clasificarCasuistica(mensajesCliente: string[]): Casuistica {
     if (!h.length) continue
     // Una consulta laboral suelta de alguien que además quiere cotizar es pre-venta.
     if (bloque.tipo === "consulta_ajena" && /\b(cotizar|cotizacion|presupuesto|contratar|control de asistencia|marcaje|marcacion)\b/.test(texto)) continue
+    // Un link ajeno de alguien que habla como prospecto es la web de SU empresa,
+    // no spam (caso World Motors 24-sep: dio 25 colaboradores y su RUC, mandó
+    // https://worldmotorsac.com/ y quedó cerrado como spam sin seguimiento).
+    if (bloque.tipo === "spam" && h.every((t) => t === "link ajeno") && SENAL_PROSPECTO.test(texto)) continue
     return { tipo: bloque.tipo, esProspecto: false, vende: false, motivoZoho: MOTIVO_ZOHO[bloque.tipo], evidencia: h }
   }
 

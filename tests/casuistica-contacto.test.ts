@@ -121,3 +121,18 @@ test("México: la razón social 'SA de CV' no es un currículum (batería MX 24-
   assert.equal(clasificarCasuistica(["Comercializadora del Norte S.A. de C.V."]).tipo, "prospecto")
   assert.equal(clasificarCasuistica(["hola, les dejo mi cv por si hay vacante"]).tipo, "busca_empleo")
 })
+
+test("link a la web propia de un prospecto NO es spam (World Motors 24-sep)", () => {
+  const c = clasificarCasuistica([
+    "Tenemos aproximadamente 25 colaboradores en dos sedes.\nLima 2 sedes (los olivos y Carabayllo)",
+    "20508306831",
+    "https://worldmotorsac.com/",
+    "La asistencia en la sede de los olivos es mayor",
+  ])
+  assert.equal(c.tipo, "prospecto")
+})
+
+test("un link ajeno suelto sin señales de prospecto sigue siendo spam", () => {
+  const c = clasificarCasuistica(["mira esto https://ganadinero-rapido.xyz/promo"])
+  assert.equal(c.tipo, "spam")
+})
