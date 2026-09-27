@@ -19,6 +19,12 @@
  */
 
 import { esContactoCL } from "./origen-canal.ts"
+
+/** Contacto de cualquiera de los 4 países (o Meta, que opera como CL): la
+ * maquinaria comercial —traspaso, hitos, tómbola— corre para todos. */
+function contactoOperable(contact: string): boolean {
+  return esContactoCL(contact) || /^(51|57|52)\d{8,11}$/.test(String(contact || "").replace(/\D/g, ""))
+}
 import { ultimaEleccionEsSoloApp } from "./eleccion-marcaje.ts"
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
@@ -931,11 +937,14 @@ export async function runAgentLoop(params: {
         // no-op de CRM: "un ejecutivo te contactará" sin lead ni deal (casos
         // Grupo Euskadi/Veltis/Safran — nadie los recibió). El hito
         // "intencion" crea el lead si falta, lo convierte con deal y aplica
-        // la tómbola. Solo CL (CO/MX/PE derivan con derivar_a_ejecutivo y
-        // dueños fijos de país). Best-effort: jamás toca la conversación.
+        // la tómbola. LOS CUATRO PAÍSES (27-sep): crm-hitos ya es país-aware
+        // (territorioConTombola + reasignarLeadPorTerritorio con las reglas de
+        // la ficha operativa); antes era solo CL y en PE/CO/MX el >20 quedaba
+        // con el lead que armara la tool del país, sin tómbola ni aviso.
+        // Best-effort: jamás toca la conversación.
         if (
           contact &&
-          esContactoCL(contact) &&
+          contactoOperable(contact) &&
           toolName === "derivar_a_soporte" &&
           String(toolInput.motivo || "") === "fuera_de_rango_trabajadores"
         ) {
@@ -999,7 +1008,12 @@ export async function runAgentLoop(params: {
           // La promesa se sigue registrando como respaldo del vigía, pero YA
           // con el dueño real que devolvió la tómbola.
           let ejecTraspaso: { nombre: string; email: string; telefono: string } | null = null
-          if (contact && prometeContacto && esContactoCL(contact)) {
+          // LOS CUATRO PAÍSES (Lalo 27-sep, caso Carlos/Blessed Consulting PE):
+          // esta guarda era solo-Chile y en Perú el cliente que pidió que lo
+          // llamaran quedó con la promesa y SIN traspaso, sin dueño y sin
+          // aviso. traspasarAhora ya es país-aware (tómbola y reglas de Zoho de
+          // la ficha operativa, horario hábil del país).
+          if (contact && prometeContacto && contactoOperable(contact)) {
             try {
               const { traspasarAhora } = await import("@/app/api/vic-ptv-cron/route")
               const r = await Promise.race([

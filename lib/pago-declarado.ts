@@ -50,6 +50,24 @@ export function afirmaPagoConfirmado(reply: string): boolean {
   )
 }
 
+/** Vicky afirma que la CUENTA del cliente ya existe o que ya se le mandó el
+ * acceso: eso es teatro aunque el cliente no haya declarado pago. Explicar
+ * cómo funciona el producto ("cada persona entra con su usuario y
+ * contraseña") NO lo es — caso Katherine/ABL Alpstein 25-sep: la explicación
+ * de la app se reemplazó dos veces por "todavía no me llega la confirmación
+ * del pago" a quien ni siquiera tenía cotización. */
+export function afirmaCuentaExistente(reply: string): boolean {
+  const t = norm(reply)
+  return (
+    /\b(tus|sus)\s+credenciales\b/.test(t) ||
+    /\b(ya\s+)?(te\s+)?(llego|salio|enviamos|envie|mande)\s+(tu|la|el)\s+(contrasena|clave|acceso|usuario)\b/.test(t) ||
+    /\b(contrasena|clave)\s+(ya\s+)?(te\s+)?(llego|salio|va)\s+(por|al)\s+correo\b/.test(t) ||
+    /\bempezamos\s+a\s+cargar\s+(a\s+)?tus\b/.test(t) ||
+    /\bconfiguracion\s+inicial\s+de\s+tu\s+cuenta\b/.test(t) ||
+    /\bingres(a|es|ar)\s+a\s+tu\s+cuenta\b/.test(t)
+  )
+}
+
 /** Instrucciones de ACCESO a la plataforma: prohibidas en fase de venta. */
 export function pareceInstruccionDeAcceso(reply: string): boolean {
   const t = norm(reply)

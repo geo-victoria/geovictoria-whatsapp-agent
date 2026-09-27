@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { afirmaPagoConfirmado, clienteDeclaraPago, pareceInstruccionDeAcceso } from "../lib/pago-declarado.ts"
+import { afirmaCuentaExistente, afirmaPagoConfirmado, clienteDeclaraPago, pareceInstruccionDeAcceso } from "../lib/pago-declarado.ts"
 
 test("clienteDeclaraPago: las formas reales del chat", () => {
   for (const t of ["Ya esta pagado", "Y hice el pago\nAhora que sigue", "ya pagué", "Listo, ya transferí", "El pago está listo", "pagué con tarjeta recién"]) {
@@ -42,4 +42,14 @@ test("una consulta de soporte de un trabajador no declara pago", () => {
   ]) {
     assert.equal(clienteDeclaraPago(t), false, t)
   }
+})
+
+// Caso Katherine / ABL Alpstein (25-sep): explicar cómo funciona la app en
+// fase de venta NO es afirmar una cuenta existente.
+test("explicar el producto no afirma una cuenta existente", () => {
+  const explicacion =
+    "Cada persona descarga la app en su celular, ingresa con su usuario y contraseña y marca con reconocimiento facial. Tú ves todo en la plataforma web."
+  assert.equal(afirmaCuentaExistente(explicacion), false)
+  assert.equal(afirmaCuentaExistente("Ya te llegó la contraseña al correo, ingresa a tu cuenta con tus credenciales"), true)
+  assert.equal(afirmaCuentaExistente("Empezamos a cargar a tus 2 trabajadores"), true)
 })

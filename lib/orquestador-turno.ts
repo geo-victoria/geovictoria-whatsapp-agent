@@ -1870,7 +1870,14 @@ export async function procesarTurno(
       try {
         const pd = await import("@/lib/pago-declarado")
         const declara = pd.clienteDeclaraPago(message)
-        const teatro = pd.afirmaPagoConfirmado(reply) || pd.pareceInstruccionDeAcceso(reply)
+        // Instrucciones de acceso genéricas ("descarga la app", "usuario y
+        // contraseña") son TEATRO solo si el cliente declara haber pagado; sin
+        // eso son explicación del producto (caso Katherine 25-sep). Afirmar
+        // pago confirmado o una cuenta que ya existe es teatro siempre.
+        const teatro =
+          pd.afirmaPagoConfirmado(reply) ||
+          pd.afirmaCuentaExistente(reply) ||
+          (declara && pd.pareceInstruccionDeAcceso(reply))
         if (declara || teatro) {
           let pagado = pagoMarcadoReciente
           let motivo = pagado ? "marca_kv" : "sin_cotizacion"
