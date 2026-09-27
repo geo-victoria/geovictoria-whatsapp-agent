@@ -68,7 +68,7 @@ export async function POST(req: Request): Promise<Response> {
     const texto = (body.text || "").trim()
       ? (body.text || "").replace("{link}", link)
       : `Ya quedó habilitada la configuración de tu cuenta — no tienes que esperar la verificación 🙌\n\n` +
-        `Aquí tienes tu acceso: en unos 15 minutos dejas configurada tu empresa y cargados a tus trabajadores.\n${link}\n\n` +
+        `Aquí tienes tu acceso: en unos 15 minutos dejas los datos de tu empresa y tu nómina; tus trabajadores quedan cargados y marcando desde tu capacitación.\n${link}\n\n` +
         `Cualquier duda mientras lo llenas, me escribes por acá y lo vemos juntos 😊`
     const enviado = await sendBotmakerMessage(contact, texto).catch(() => false)
     if (enviado) await appendAssistantV3(contact, texto).catch(() => {})

@@ -891,7 +891,7 @@ export async function registrarComprobanteTransferencia(
       // ejecutivo antes del pago": acá el cliente ya pagó).
       const mensajeParaProspecto = linkOnboarding
         ? `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
-          `Aquí tienes tu acceso al auto-onboarding: ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos.\n${linkOnboarding}\n\n` +
+          `Aquí tienes tu acceso al auto-onboarding: ahí dejas los datos de tu empresa y tu nómina en unos 15 minutos; tus colaboradores quedan cargados y marcando desde tu capacitación.\n${linkOnboarding}\n\n` +
           `Y te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
         : `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
           `Te presento a ${EJECUTIVA_MX.nombre}, tu ejecutiva comercial: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${EJECUTIVA_MX.whatsapp}\n✉️ ${EJECUTIVA_MX.email}\n\nCualquier duda, me escribes por aquí 😊`
@@ -904,7 +904,7 @@ export async function registrarComprobanteTransferencia(
       // cobranza y contacta al cliente. Tuteo cálido colombiano.
       const mensajeParaProspecto = linkOnboarding
         ? `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
-          `Aquí tienes tu acceso al auto-onboarding: ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos.\n${linkOnboarding}\n\n` +
+          `Aquí tienes tu acceso al auto-onboarding: ahí dejas los datos de tu empresa y tu nómina en unos 15 minutos; tus colaboradores quedan cargados y marcando desde tu capacitación.\n${linkOnboarding}\n\n` +
           `Nuestro equipo de Colombia valida la transferencia y te acompaña de aquí en adelante. Cualquier duda del proceso, me escribes por aquí 😊`
         : `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
           `Nuestro equipo de Colombia valida la transferencia y te acompaña de aquí en adelante. Cualquier duda, me escribes por aquí 😊`
@@ -916,7 +916,7 @@ export async function registrarComprobanteTransferencia(
       // Tuteo peruano neutro, sin chilenismos ("al tiro", "por acá").
       const mensajeParaProspecto = linkOnboarding
         ? `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
-          `Aquí tienes tu acceso al auto-onboarding: ahí configuras tu empresa y cargas a tus colaboradores en unos 15 minutos.\n${linkOnboarding}\n\n` +
+          `Aquí tienes tu acceso al auto-onboarding: ahí dejas los datos de tu empresa y tu nómina en unos 15 minutos; tus colaboradores quedan cargados y marcando desde tu capacitación.\n${linkOnboarding}\n\n` +
           `Y te presento a ${GESTORA_PE.nombre}, del equipo GeoVictoria Perú: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${GESTORA_PE.whatsapp}\n✉️ ${GESTORA_PE.email}\n\nCualquier duda del proceso, me escribes por aquí 😊`
         : `¡Recibí tu comprobante por ${montoFmt}! 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por aquí en unos minutos.\n\n` +
           `Te presento a ${GESTORA_PE.nombre}, del equipo GeoVictoria Perú: ella te acompaña de aquí en adelante.\n📱 WhatsApp: ${GESTORA_PE.whatsapp}\n✉️ ${GESTORA_PE.email}\n\nCualquier duda, me escribes por aquí 😊`
@@ -926,7 +926,7 @@ export async function registrarComprobanteTransferencia(
     // CL: recepción + habilitación inmediata, acompañada por Vicky.
     const mensajeParaProspecto = linkOnboarding
       ? `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te dejo habilitada la configuración de tu cuenta — no tienes que esperar nada.\n\n` +
-        `Aquí tienes tu acceso: en unos 15 minutos dejas configurada tu empresa y cargados a tus trabajadores.\n${linkOnboarding}\n\n` +
+        `Aquí tienes tu acceso: en unos 15 minutos dejas los datos de tu empresa y tu nómina; tus trabajadores quedan cargados y marcando desde tu capacitación.\n${linkOnboarding}\n\n` +
         `Cualquier duda mientras lo llenas, me escribes por acá y lo vemos juntos 😊`
       : `Recibí tu comprobante por ${montoFmt} 🙌 Quedó asociado a tu cotización y ya te estoy habilitando la configuración de tu cuenta — te paso el acceso por acá en unos minutos. Cualquier duda, me escribes 😊`
     return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno }

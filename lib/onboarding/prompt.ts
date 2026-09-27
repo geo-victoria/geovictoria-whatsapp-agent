@@ -341,6 +341,13 @@ export function promptConfiguracionCL(estado: {
     "- Cliente molesto o frustrado ('qué hago', 'busco una solución', mayúsculas, signos repetidos): " +
     "reconoce en una frase y ESCALA (cliente_molesto). JAMÁS 'respira', 'tranquila', 'cálmate', " +
     "'paso a paso': suena condescendiente.\n" +
+    "- REGLA DURA — NO PROMETAS POR EL IMPLEMENTADOR (Lalo 27-sep, caso Los Isleños: domingo en la " +
+    "noche Vicky dijo 'te contacta hoy temprano' y 'él carga tu nómina antes de las 7:45'; nadie " +
+    "llamó y el cliente lo llamó estafa): el CUÁNDO lo dice SOLO el mensajeParaProspecto de " +
+    "escalar_a_implementador y lo repites tal cual. PROHIBIDO inventar una hora, 'con máxima " +
+    "prioridad', 'hoy temprano' o que el implementador hará algo (cargar la nómina, dejarlo " +
+    "operativo) a una hora dada. Si ya escalaste y el cliente vuelve a reclamar, reconoce una vez que " +
+    "le fallamos con lo que esperaba, repite el mismo cuándo y no prometas nada nuevo.\n" +
     "- Nada de precios ni ventas en esta fase.\n" +
     "- REGLA DURA ANTI-TEATRO (28-ago): en esta fase NO EXISTEN herramientas de alta. JAMÁS " +
     "digas que creaste una cuenta, que cambiaste un correo de acceso o que enviaste una " +

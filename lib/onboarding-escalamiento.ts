@@ -139,7 +139,7 @@ export async function escalarAImplementador(
             `<p><b>${esc(empresa || `+${fono}`)}</b> necesita a su implementador hoy: <b>${esc(TITULOS[motivo])}</b>.</p>` +
             (detalle ? `<p>Lo que dijo el cliente por WhatsApp: <i>"${esc(detalle)}"</i></p>` : "") +
             `<p>WhatsApp del cliente: <b>+${fono}</b>${cap?.numero ? ` · Implementación ${esc(cap.numero)}` : ""}${cap?.cuando ? ` · capacitación agendada ${esc(cap.cuando)}` : " · sin capacitación agendada"}.</p>` +
-            `<p>Vicky le dijo que lo contactas <b>hoy</b>. Lo que ya está guardado (nómina, turnos) va en las notas de la Implementación.</p>` +
+            `<p>Vicky le dijo que lo contactas <b>${esc(cuandoContactaImplementador())}</b>. Lo que ya está guardado (nómina, turnos) va en las notas de la Implementación.</p>` +
             `<p><a href="${linkChat}">Ver el chat</a>${cap?.numero ? ` · busca ${esc(cap.numero)} en Implementaciones` : ""}</p>` +
             `</body></html>`,
         }],
@@ -177,7 +177,31 @@ export async function escalarAImplementador(
   return { ok: true, relator: relatorNombre, canales, mensajeParaProspecto: textoCliente(relatorNombre, motivo) }
 }
 
+/**
+ * CUÁNDO puede contactar el implementador (Lalo 27-sep, caso Los Isleños): el
+ * domingo a medianoche Vicky le prometió "te contacta hoy temprano" y "carga tu
+ * nómina antes de las 7:45" — nadie trabaja el fin de semana y el cliente pasó
+ * la mañana esperando. Los relatores trabajan L-V en horario de Chile, así que
+ * el compromiso sale de ahí, a nivel de DÍA (sin hora: el cliente puede estar en
+ * otro país). Feriados no se consideran: en un feriado la promesa queda corta.
+ */
+export function cuandoContactaImplementador(ahora: Date = new Date()): string {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Santiago",
+    hour12: false,
+    weekday: "short",
+    hour: "2-digit",
+  }).formatToParts(ahora)
+  const dia = partes.find((p) => p.type === "weekday")?.value || ""
+  const hora = Number(partes.find((p) => p.type === "hour")?.value || "0") % 24
+  const habil = !["Sat", "Sun"].includes(dia)
+  if (habil && hora < 16) return "hoy"
+  if (dia === "Fri" || dia === "Sat" || dia === "Sun") return "el lunes"
+  return "mañana"
+}
+
 function textoCliente(relator: string, motivo: MotivoEscalamiento): string {
+  const cuando = cuandoContactaImplementador()
   // El pedido COMERCIAL no lo ve el implementador: lo toma la ejecutiva
   // comercial de las ventas autónomas (Lalo 11-sep).
   if (motivo === "pedido_comercial") {
@@ -185,10 +209,10 @@ function textoCliente(relator: string, motivo: MotivoEscalamiento): string {
   }
   const quien = relator === "tu implementador" ? "tu implementador" : `${relator}, tu implementador,`
   if (motivo === "urgencia_capacitacion") {
-    return `Entiendo, necesitas partir antes. Ya le avisé a ${quien} para que te contacte hoy y vean cómo adelantarlo. Mientras, yo dejo guardado todo lo que me mandes para que la carga sea inmediata cuando te llame.`
+    return `Entiendo, necesitas partir antes. Ya le avisé a ${quien} para que te contacte ${cuando} y vean cómo adelantarlo. Mientras, yo dejo guardado todo lo que me mandes para que la carga sea rápida cuando te llame.`
   }
   if (motivo === "problema_plataforma") {
-    return `Eso lo revisa directamente ${quien}: ya le avisé para que te contacte hoy y lo vea contigo en la plataforma.`
+    return `Eso lo revisa directamente ${quien}: ya le avisé para que te contacte ${cuando} y lo vea contigo en la plataforma.`
   }
-  return `Ya le avisé a ${quien} para que te contacte hoy y lo resuelvan juntos.`
+  return `Ya le avisé a ${quien} para que te contacte ${cuando} y lo resuelvan juntos.`
 }
