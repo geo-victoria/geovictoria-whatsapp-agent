@@ -54,6 +54,12 @@ export async function POST(req: Request): Promise<Response> {
     usarHorarioDelHost?: boolean
     /** Crea un evento de un solo anfitrión copiando la configuración de otro (duración, lugar, avisos). */
     crearEvento?: { titulo?: string; slug?: string; copiarDe?: number; hostUserId?: number; scheduleId?: number }
+    /**
+     * Cambia el anfitrión de un evento de host único (27-sep: el host interino era Lalo
+     * hasta que el ejecutivo entrara al equipo). Va junto con eventTypeId; combina con
+     * usarHorarioDelHost para que rija el horario por defecto del anfitrión nuevo.
+     */
+    hostUserId?: number
   }
   if (body.crearEvento) {
     const c = body.crearEvento
@@ -119,24 +125,29 @@ export async function POST(req: Request): Promise<Response> {
   }
   const eventTypeId = Number(body.eventTypeId)
   const scheduleId = body.usarHorarioDelHost ? null : Number(body.scheduleId)
+  const hostUserId = Number(body.hostUserId || 0)
   const teamId = Number(body.teamId || 91540)
-  if (!eventTypeId || (!body.usarHorarioDelHost && !scheduleId)) {
-    return NextResponse.json({ ok: false, error: "faltan eventTypeId y scheduleId (o usarHorarioDelHost)" }, { status: 400 })
+  if (!eventTypeId || (!body.usarHorarioDelHost && !scheduleId && !hostUserId)) {
+    return NextResponse.json({ ok: false, error: "faltan eventTypeId y scheduleId (o usarHorarioDelHost, o hostUserId)" }, { status: 400 })
   }
+  const cambios: Record<string, unknown> = {}
+  if (body.usarHorarioDelHost || scheduleId) cambios.scheduleId = scheduleId
+  if (hostUserId) cambios.hosts = [{ userId: hostUserId, mandatory: false, priority: "medium" }]
   const res = await fetch(`${CAL_BASE}/teams/${teamId}/event-types/${eventTypeId}`, {
     method: "PATCH",
     headers: { Authorization: `Bearer ${CAL_API_KEY}`, "cal-api-version": "2024-06-14", "Content-Type": "application/json" },
     cache: "no-store",
-    body: JSON.stringify({ scheduleId }),
+    body: JSON.stringify(cambios),
   })
   const patch = await res.json().catch(() => ({}))
   const releido = (await cal(`/teams/${teamId}/event-types/${eventTypeId}`, "2024-06-14")) as {
-    data?: { data?: { scheduleId?: number } }
+    data?: { data?: { scheduleId?: number; hosts?: Array<{ userId?: number; name?: string }> } }
   }
   return NextResponse.json({
     ok: res.ok,
     status: res.status,
     scheduleIdAhora: releido.data?.data?.scheduleId ?? null,
+    hostsAhora: (releido.data?.data?.hosts || []).map((h) => ({ userId: h.userId, name: h.name })),
     patch: res.ok ? undefined : patch,
   })
 }
