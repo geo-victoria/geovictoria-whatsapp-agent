@@ -49,6 +49,10 @@ export const EVENTO_SEGUIMIENTO_POR_DUENO: Record<string, string> = {
   "jnarinoch@geovictoria.com": "7235556", // CO — Jhon Nariño Chavarro
   // Lalo 26-sep: calendario de Laura Medina (host interino: Lalo; horario "México" 9-17 CDMX).
   "lmedina@geovictoria.com": "7235403", // MX — Laura Medina
+  // Lalo 27-sep: evento de Miguel Guzmán (SDR MX) creado por API copiando el de Pablo; host
+  // interino Lalo + horario "México" (2417708) hasta que Miguel acepte la invitación de Cal.com.
+  // Verificado: 32 horarios en hora de CDMX.
+  "mguzmanr@geovictoria.com": "7243033", // MX — Miguel Guzmán (SDR)
   // ── PERÚ (15-sep, regla chilena: la reunión sigue al dueño del registro) ──
   // Evento creado por Lalo el 15-sep; verificado contra la API el mismo día
   // (slots reales en horario -05:00 Lima, 20 min).
