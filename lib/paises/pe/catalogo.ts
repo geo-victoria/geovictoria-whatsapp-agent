@@ -71,8 +71,14 @@ export const ESCALERA_DESCUENTO_PE = {
 export const RELOJ_PE_USD = {
   /** Arriendo mensual por unidad: US$20 + IGV (tabla de hardware de Mónica, 21-sep — Senseface 2A; Lalo: "la opción más barata"). */
   arriendoMes: 20,
-  /** Venta por unidad: US$90 (rate del artículo 304 en Books; la tabla de Mónica dice US$150 — Lalo 21-sep eligió la más barata). */
-  venta: 90,
+  /**
+   * Venta por unidad: US$150 + IGV (Lalo 27-sep: "en Lima Metropolitana el
+   * costo de venta del reloj con instalación incluida es de 150 USD + IGV";
+   * es el valor de la tabla de Mónica). En Lima la instalación técnica va
+   * incluida también en la venta; en provincia se suman envío e instalación.
+   * Supersede los US$90 del 21-sep (rate del artículo 304 en Books).
+   */
+  venta: 150,
   /**
    * Arriendo mensual por unidad cuando el reloj va a PROVINCIA: US$23 con el
    * despacho INCLUIDO (Lalo 22-sep, homólogo del +0,05 UF de regiones en

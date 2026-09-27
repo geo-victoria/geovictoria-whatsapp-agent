@@ -69,6 +69,13 @@ export type ReglasMotor = {
   /** Redondeo del plan con descuento: Colombia a enteros, México a centavos, Perú sin redondear. */
   redondearPlanConDescuento: boolean
   formatear: (monto: number) => string
+  /**
+   * true = en la zona base la instalación técnica va incluida también con el
+   * equipo en VENTA, no solo en arriendo (Perú, Lalo 27-sep: "en Lima
+   * Metropolitana la venta del reloj es US$150 + IGV con instalación
+   * incluida"). Sin el campo, la regla de Chile: solo en arriendo.
+   */
+  bonificaInstalacionBaseEnVenta?: boolean
   impuesto: {
     tasa: number
     /** true = solo el equipo (arriendo y venta) lleva impuesto (Colombia). */
@@ -98,7 +105,7 @@ export type ReglasMotor = {
     modalidadVenta: string
     /** Frase cuando el envío no se cobra: " El envío del reloj va incluido." */
     envioIncluido: string
-    /** "(alquiler en Lima Metropolitana)" — la instalación bonificada. */
+    /** "en Lima Metropolitana" / "(alquiler en Bogotá y alrededores)" — dónde va bonificada la instalación. */
     bonificadaEn: string
     /** Paréntesis del pago inicial único con el detalle ("" = sin paréntesis). */
     detallePagoInicial: (hayVenta: boolean, hayEnvio: boolean, hayInstalacion: boolean) => string
@@ -300,7 +307,7 @@ export function cotizar(reglas: ReglasMotor, input: EntradaMotor): ResultadoMoto
   if (hayEquipo) {
     for (const g of grupos.values()) {
       const unit = R.tarifas.instalacion[g.zona]
-      const bonificada = esArriendo && g.zona === "base"
+      const bonificada = g.zona === "base" && (esArriendo || R.bonificaInstalacionBaseEnVenta === true)
       const pedida = g.instalaciones > 0
       if (pedida) visitaTecnicaPedida = true
       if (bonificada) {

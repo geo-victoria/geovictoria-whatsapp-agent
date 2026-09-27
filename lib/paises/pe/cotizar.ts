@@ -10,7 +10,7 @@
  *     excepción por contacto.
  *   - Reloj: precio de LISTA en USD (RELOJ_PE_USD) convertido a SOLES ENTEROS
  *     con el dólar venta SUNAT del día (`tipoCambio`). Arriendo US$20 en Lima,
- *     US$23 fuera (despacho incluido); venta US$90 + envío US$30 por punto
+ *     US$23 fuera (despacho incluido); venta US$150 (instalación incluida en Lima) + envío US$30 por punto
  *     fuera de Lima (en Lima va incluido).
  *   - Instalación por punto: Lima US$43 · intermedia · provincias US$214; en
  *     ALQUILER en Lima va BONIFICADA. Aviso a ssttperu@ si hay visita pedida.
@@ -128,6 +128,8 @@ export function reglasPE(tipoCambio?: number): ReglasMotor {
     redondearPlanConDescuento: false,
     formatear: formatearPEN,
     impuesto: { tasa: IGV_PE, soloEquipo: false },
+    // En Lima la instalación va incluida también en la venta (Lalo 27-sep).
+    bonificaInstalacionBaseEnVenta: true,
     presentacion: "neto",
     sufijo: " + IGV",
     tarifas: {
@@ -142,7 +144,7 @@ export function reglasPE(tipoCambio?: number): ReglasMotor {
       modalidadArriendo: "Reloj en alquiler",
       modalidadVenta: "Reloj en compra",
       envioIncluido: " El envío del reloj va incluido.",
-      bonificadaEn: "(alquiler en Lima Metropolitana)",
+      bonificadaEn: "en Lima Metropolitana",
       detallePagoInicial: (v, e, i) => {
         const partes = [v ? "reloj" : "", e ? "envío" : "", i ? "instalación" : ""].filter(Boolean)
         return partes.length ? ` (${unirPartes(partes)})` : ""
@@ -156,7 +158,7 @@ export function reglasPE(tipoCambio?: number): ReglasMotor {
       lineaInstalacion: (u) => `Instalación técnica del reloj (${u})`,
       zonaBaseEnvio: "Lima Metropolitana",
       zonaFueraEnvio: "provincia",
-      bonificadaDetalle: "bonificada en alquiler (Lima Metropolitana)",
+      bonificadaDetalle: "bonificada en Lima Metropolitana",
       // Mismo id para arriendo y venta: la Modalidad distingue; en Creator/Books
       // es el artículo [PER] 304.
       idArriendo: "reloj_pe",
@@ -166,11 +168,11 @@ export function reglasPE(tipoCambio?: number): ReglasMotor {
       itemArriendoFuera: "Alquiler de reloj de control (provincia, despacho incluido)",
       descArriendo: `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido. Precio ${tcTxt}.`,
       itemVenta: "Reloj de control (compra)",
-      descVenta: `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío incluido en Lima Metropolitana. Precio ${tcTxt}.`,
+      descVenta: `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío e instalación incluidos en Lima Metropolitana. Precio ${tcTxt}.`,
       itemEnvio: () => "Envío de reloj a provincia",
       descEnvio: (u) => `Despacho del reloj fuera de Lima Metropolitana (${u}). Pago único, ${tcTxt}.`,
       itemInstalacion: (u) => `Instalación técnica del reloj (${u})`,
-      descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Bonificada en alquiler en Lima Metropolitana.",
+      descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Incluida en Lima Metropolitana.",
       descInstalacionCobrada: `Visita de instalación por nuestro equipo técnico. Pago único, ${tcTxt}.`,
     },
   }

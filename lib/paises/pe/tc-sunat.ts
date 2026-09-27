@@ -2,7 +2,7 @@
  * Tipo de cambio USD → PEN según SUNAT (decisión Lalo 17-sep: "dejemos el dólar
  * según SUNAT"). Se usa para cotizar EN SOLES, de cara al cliente, el hardware
  * cuyo precio de lista está en DÓLARES (artículos [PER] de Books: reloj 304
- * arriendo US$24/mes · venta US$90). Los documentos internos (NDV, Books)
+ * arriendo US$20/mes · venta US$150). Los documentos internos (NDV, Books)
  * siguen en USD como siempre; la conversión existe solo para el chat, el PDF
  * y el checkout del cliente.
  *

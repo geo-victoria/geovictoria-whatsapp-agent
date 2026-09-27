@@ -1,7 +1,7 @@
 /**
  * Motor de cotización PERÚ — plan de Lalo 25-sep (1-10 S/100 fijo · 11-20
  * S/9 por persona), reloj en
- * USD (arriendo 24 · venta 90) convertido a soles con el dólar SUNAT, y
+ * USD (arriendo 20 · venta 150) convertido a soles con el dólar SUNAT, y
  * descuento = escalera chilena (10 → 20 % en el plan, 6 meses).
  *
  * Ancla: 15 personas + reloj arriendo Lima con TC 3,372 = S/135 + S/67 =
@@ -31,7 +31,7 @@ test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima (instalación bonif
   assert.ok(r.mensajeParaProspecto.includes("S/202 + IGV")) // al cliente: neto + IGV
   assert.ok(!r.mensajeParaProspecto.includes("IGV incluido"))
   assert.equal(r.avisoSsttPeru, true) // pidió la visita: sstt la coordina (ya cotizada, bonificada)
-  assert.ok(r.mensajeParaProspecto.includes("La instalación por nuestro equipo técnico va incluida sin costo (alquiler en Lima Metropolitana)"))
+  assert.ok(r.mensajeParaProspecto.includes("La instalación por nuestro equipo técnico va incluida sin costo en Lima Metropolitana"))
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
   assert.ok(inst && inst.descuentoPct === 100 && inst.subtotalPEN === 0 && inst.precioUnitarioPEN === 145) // US$43 × 3,372 = 145
   // Sin descuento, el pago inicial es el primer mes por adelantado (sin únicos).
@@ -44,7 +44,7 @@ test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima (instalación bonif
 })
 
 test("reloj en soles = USD × dólar SUNAT, redondeado a soles enteros", () => {
-  assert.deepEqual(tarifasRelojPE(TC), { relojArriendoMes: 67, relojVenta: 303, relojArriendoMesProvincia: 78, envioVentaProvincia: 101, instalacionLima: 145, instalacionIntermedia: 435, instalacionProvincias: 722, tipoCambio: TC })
+  assert.deepEqual(tarifasRelojPE(TC), { relojArriendoMes: 67, relojVenta: 506, relojArriendoMesProvincia: 78, envioVentaProvincia: 101, instalacionLima: 145, instalacionIntermedia: 435, instalacionProvincias: 722, tipoCambio: TC })
   assert.equal(usdASoles(24, 3.5), 84)
   // Sin tipo de cambio válido cae al fallback (nunca lanza).
   assert.ok(tarifasRelojPE(NaN).relojArriendoMes > 0)
@@ -52,7 +52,7 @@ test("reloj en soles = USD × dólar SUNAT, redondeado a soles enteros", () => {
   assert.equal(parsearTxtSunat("basura"), null)
 })
 
-test("instalación = Chile: arriendo Lima bonificada en cualquier distrito; venta Lima US$43 cobrada si la piden", () => {
+test("instalación en Lima: incluida en arriendo y en venta (Lalo 27-sep: venta US$150 + IGV con instalación)", () => {
   // Comas en arriendo: antes tarifario por distrito (US$50 aparte); ahora incluida.
   const r = cotizarPE({
     userCount: 10,
@@ -61,21 +61,21 @@ test("instalación = Chile: arriendo Lima bonificada en cualquier distrito; vent
     tipoCambio: TC,
   })
   assert.equal(r.avisoSsttPeru, true)
-  assert.ok(r.mensajeParaProspecto.includes("va incluida sin costo (alquiler en Lima Metropolitana)"))
+  assert.ok(r.mensajeParaProspecto.includes("va incluida sin costo en Lima Metropolitana"))
   assert.ok(!r.mensajeParaProspecto.includes("factura aparte") && !r.mensajeParaProspecto.includes("US$"))
   assert.equal(r.pagoInicialNeto, 167) // plan 100 (fijo 1-10) + arriendo 67: la bonificada no suma
-  // Venta en Lima con visita pedida: S/145 como pago único (US$43 × 3,372).
+  // Venta en Lima: US$150 × 3,372 = 506 con la instalación incluida (línea tachada en $0).
   const v = cotizarPE({
     userCount: 10,
     reloj: { modalidad: "venta", cantidad: 1 },
     puntos: [{ ubicacion: "Breña", zona: "lima", autoInstalada: false }],
     tipoCambio: TC,
   })
-  assert.ok(v.mensajeParaProspecto.includes("tiene un costo único de S/145 + IGV"))
-  assert.equal(v.pagoInicialNeto, 303 + 145 + 100)
+  assert.ok(v.mensajeParaProspecto.includes("va incluida sin costo en Lima Metropolitana"))
+  assert.equal(v.pagoInicialNeto, 506 + 100)
   const inst = v.itemsCotizador.find((i) => i.id === "instalacion_reloj")
-  assert.ok(inst && inst.subtotalPEN === 145 && inst.descuentoPct === undefined)
-  // Venta en Lima sin pedirla: autoinstalable + oferta con precio (frase chilena).
+  assert.ok(inst && inst.subtotalPEN === 0 && inst.descuentoPct === 100)
+  // Venta en Lima sin pedirla: la instalación sigue incluida y se ofrece la autoinstalación.
   const auto = cotizarPE({
     userCount: 10,
     reloj: { modalidad: "venta", cantidad: 1 },
@@ -83,8 +83,8 @@ test("instalación = Chile: arriendo Lima bonificada en cualquier distrito; vent
     tipoCambio: TC,
   })
   assert.equal(auto.avisoSsttPeru, false)
-  assert.ok(auto.mensajeParaProspecto.includes("El reloj es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional de S/145 + IGV."))
-  assert.ok(!auto.itemsCotizador.some((i) => i.id === "instalacion_reloj"))
+  assert.ok(auto.mensajeParaProspecto.includes("va incluida sin costo en Lima Metropolitana; si prefieres, el reloj también es autoinstalable."))
+  assert.equal(auto.pagoInicialNeto, 506 + 100)
 })
 
 test("zona intermedia PE (Región Lima fuera de la capital + Ica): visita técnica US$129 (3 UF chilenas); envío y arriendo como fuera de Lima", () => {
@@ -120,8 +120,8 @@ test("instalación en provincia: precio cerrado US$214 (5 UF chilenas), nunca 's
     tipoCambio: TC,
   })
   assert.equal(p.avisoSsttPeru, true)
-  assert.equal(p.pagoInicialNeto, 303 + 101 + 722 + 100) // reloj + envío + instalación + primer mes
-  assert.ok(p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,126 + IGV (reloj, envío e instalación).") || p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1126 + IGV (reloj, envío e instalación)."))
+  assert.equal(p.pagoInicialNeto, 506 + 101 + 722 + 100) // reloj + envío + instalación + primer mes
+  assert.ok(p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV (reloj, envío e instalación).") || p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1329 + IGV (reloj, envío e instalación)."))
 })
 
 test("descuento = Chile: escalera 10 → 20 % SOLO sobre el plan, 6 meses", () => {
@@ -165,10 +165,10 @@ test("provincia en VENTA: envío US$30 e instalación US$214 como líneas única
   // Murió la nota "el envío corre por cuenta del cliente": ahora tiene precio.
   assert.ok(!r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
   // Al cliente (doble valor) el envío va dentro del pago inicial; el desglose por línea vive en `lineas`.
-  assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,126 + IGV (reloj, envío e instalación).") || r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1126 + IGV (reloj, envío e instalación)."))
+  assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV (reloj, envío e instalación).") || r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1329 + IGV (reloj, envío e instalación)."))
   assert.ok(r.lineas.some((l) => /^Envío de reloj a Arequipa$/.test(l.concepto) && l.neto === 101)) // US$30 × 3,372 = 101,16 → 101
-  // Pago único = reloj (US$90 × 3,372 = 303) + envío 101 + instalación pedida en provincia 722 + primer mes (100).
-  assert.equal(r.pagoInicialNeto, 504 + 722)
+  // Pago único = reloj (US$150 × 3,372 = 506) + envío 101 + instalación pedida en provincia 722 + primer mes (100).
+  assert.equal(r.pagoInicialNeto, 707 + 722)
   const envio = r.itemsCotizador.find((i) => i.id === "envio_reloj")
   assert.ok(envio && envio.tipo === "servicio" && envio.modalidad === "Cobro único" && envio.subtotalPEN === 101)
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
