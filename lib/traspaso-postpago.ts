@@ -12,7 +12,7 @@
  * traspaso_postpago_<quoteId>), venga por la vía que venga.
  */
 
-import { fichaOperativa } from "@/lib/paises/ficha-operativa"
+import { fichaOperativa, paisDeCelularOperativo, paisTieneProceso } from "@/lib/paises/ficha-operativa"
 import {
   appendAssistantV3,
   closeFollowup,
@@ -63,12 +63,9 @@ type PaisVentaAutonoma = "cl" | "pe" | "co" | "mx"
 
 function paisVentaAutonoma(contact: string): PaisVentaAutonoma | null {
   if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return "cl" // Messenger/Instagram = CL
-  const c = String(contact || "").replace(/\D/g, "")
-  if (c.startsWith("56") && c.length >= 11) return "cl"
-  if (c.startsWith("51") && c.length === 11) return "pe"
-  if (c.startsWith("57") && c.length >= 12) return "co"
-  if (c.startsWith("52") && c.length >= 12) return "mx"
-  return null
+  // Celular completo del país según la ficha operativa (28-sep, paso 4);
+  // un fijo o un prefijo ajeno no tiene gestora de venta autónoma.
+  return paisDeCelularOperativo(contact)
 }
 
 async function ownerVentaAutonoma(pais: PaisVentaAutonoma = "cl"): Promise<string> {
@@ -390,23 +387,18 @@ export async function cerrarYTraspasarPostPago(
       ? await asignarVentaAutonoma(contact, quoteId)
       : { autonoma: false as const }
 
-  const esCO = contact.startsWith("57")
-  const esMX = contact.startsWith("521") || (contact.startsWith("52") && contact.length === 12)
-  // PERÚ (21-sep, "básicamente es lo mismo que hace Vicky de Chile"): el alta
-  // por chat corre igual que en CL, con su plantilla y su país. Antes un +51
-  // caía en esCL y el kickoff salía con las plantillas del bot chileno.
-  const esPE = contact.startsWith("51") && contact.length === 11
-  const esCL = !esCO && !esMX && !esPE
-  // COLOMBIA (Lalo 23-sep, "la alta debe ser por chat para GV Avanzado"): entra
-  // al mismo bloque con NIT/cédula, IMP Colombia/COP y espejo Creator en COP.
-  // MÉXICO (Lalo 24-sep, "sí, conéctalo"): mismo bloque con RFC/CURP, IMP
-  // México/MXN y espejo Creator en MXN.
-  const altaPorChat = esCL || esPE || esCO || esMX
-  // El PROBADOR de país manda sobre el prefijo (24-sep): Rodrigo prueba el
-  // alta mexicana desde su +56 y el borrador debe nacer con RFC/CURP.
+  // PAÍS DEL CONTACTO (28-sep, paso 4): el prefijo lo resuelve la ficha
+  // operativa (celular completo; FB/IG y prefijos ajenos = Chile) y queda de
+  // RESPALDO del probador de país, que manda sobre el prefijo (24-sep: Rodrigo
+  // prueba el alta mexicana desde su +56 y el borrador debe nacer con RFC/CURP).
+  const paisPrefijo: "cl" | "pe" | "co" | "mx" = paisDeCelularOperativo(contact) || "cl"
   const paisChat: "cl" | "pe" | "co" | "mx" = await import("./onboarding-canal")
     .then((m) => m.paisOnboardingDe(contact))
-    .catch(() => (esPE ? "pe" : esCO ? "co" : esMX ? "mx" : "cl"))
+    .catch(() => paisPrefijo)
+  // El alta por chat es un PROCESO de la ficha (`altaPorChat`): CL desde el
+  // 26-jul, PE 21-sep, CO 23-sep ("la alta debe ser por chat para GV
+  // Avanzado"), MX 24-sep ("sí, conéctalo"). Un país nuevo lo enciende ahí.
+  const altaPorChat = paisTieneProceso(paisChat, "altaPorChat")
   // Vicky onboarding — CHILE PRIMERO (decisión 26-jul): el pago es la ÚNICA
   // puerta que mueve al contacto de venta a onboarding. CO y MX siguen con el
   // traspaso a ejecutivo humano hasta que la fase se abra para ellos.
