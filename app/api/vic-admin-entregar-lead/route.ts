@@ -68,10 +68,11 @@ export async function POST(req: Request): Promise<Response> {
 
   // Perú (23-sep): las mismas reglas de Zoho con su entrada "Territorio = Perú"
   // (calificado → TLMK/Mónica · sin calificar → SDR Ana/Priscila).
+  // Los 4 países (28-sep): fuera de Chile, las reglas del territorio.
   const territorio = String(lead.Territorio || "Chile")
-  const esPeru = /per/i.test(territorio)
-  const entrega = esPeru
-    ? await reasignarLeadPorTerritorio("Perú", leadId, { calificado: regla === "tlmk" }).catch((e) => ({ success: false, error: String(e) }))
+  const esChile = /chile/i.test(territorio) || !territorio.trim()
+  const entrega = !esChile
+    ? await reasignarLeadPorTerritorio(territorio, leadId, { calificado: regla === "tlmk" }).catch((e) => ({ success: false, error: String(e) }))
     : regla === "tlmk"
       ? await reasignarLeadCalificacionCL(leadId, { calificado: true }).catch((e) => ({ success: false, error: String(e) }))
       : await reasignarLeadTelemarketingCL(leadId).catch((e) => ({ success: false, error: String(e) }))

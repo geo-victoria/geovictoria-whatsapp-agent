@@ -1890,15 +1890,15 @@ export async function leerEjecutivoAsignado(contact: string): Promise<EjecutivoA
  */
 async function renotificarPermitido(registroId: string): Promise<boolean> {
   if (!registroId) return false
+  // CANDADO ATÓMICO (28-sep): el de leer-y-escribir dejaba pasar notas en
+  // carrera (dos en el mismo minuto) y ante cualquier error de lectura (el
+  // deal de Martín, Colombia, juntó 10 notas iguales en 2 días). Ahora es un
+  // INSERT sin upsert con vencimiento de 24 h: la unicidad de la llave decide.
   try {
-    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
-    const previo = String((await getKvValue(`renotif_${registroId}`).catch(() => null)) || "")
-    const ms = Date.parse(previo)
-    if (Number.isFinite(ms) && Date.now() - ms < 24 * 3600e3) return false
-    await setKvValue(`renotif_${registroId}`, new Date().toISOString()).catch(() => {})
-    return true
+    const { reclamarTurno } = await import("./cron-lock")
+    return await reclamarTurno(`renotif_${registroId}`, 24 * 3600)
   } catch {
-    return true
+    return false
   }
 }
 
