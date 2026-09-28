@@ -612,6 +612,16 @@ export async function runAgentLoop(params: {
           }
         }
 
+        // CANDADO PREGUNTA ≠ ORDEN (28-sep, caso Irene): "¿también tienen en
+        // venta?" no autoriza cambiar la formal. Global (los 4 países).
+        if (!bloqueoUmbral && toolName === "actualizar_cotizacion") {
+          const { esPreguntaSinOrden, GUIA_PREGUNTA_SIN_ORDEN } = await import("./pregunta-vs-orden.ts")
+          if (esPreguntaSinOrden(userMessage || "")) {
+            bloqueoUmbral = GUIA_PREGUNTA_SIN_ORDEN
+            console.warn(`[agent-loop] candado pregunta≠orden: actualizar_cotizacion bloqueado (contacto ${contact}).`)
+          }
+        }
+
         // CANDADO COMUNA ASUMIDA (Lalo 13-ago, caso Rodrigo AM: el modelo
         // cotizó asumiendo Región Metropolitana sin preguntar). Regla dura:
         // la ubicación de CADA punto debe haber sido dicha por el CLIENTE en

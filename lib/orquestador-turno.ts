@@ -463,8 +463,16 @@ export async function procesarTurno(
       const { contextoEjecutivoAsignado } = await import("@/lib/ejecutivo-contexto")
       return contextoEjecutivoAsignado(contact)
     })().catch(() => "")
+    // Líneas REALES de la cotización vigente (caso Irene 28-sep): sin ellas el
+    // modelo inventaba qué incluía ("la instalación está desglosada"). Global.
+    const contenidoCotizacion = quotePointer?.acceptanceUrl
+      ? await (async () => {
+          const { contenidoCotizacionParaPrompt } = await import("./contenido-cotizacion")
+          return contenidoCotizacionParaPrompt(quotePointer.acceptanceUrl, perfil.pais)
+        })().catch(() => "")
+      : ""
     const contextoCotizacion =
-      contextoUmbral + contextoEjecutivo + (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente
+      contextoUmbral + contextoEjecutivo + (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente + contenidoCotizacion
     // Directiva determinista (umbral 08-ago): si la CONVERSACIÓN declaró una
     // dotación sobre el umbral ("30 trabajadores" — en este mensaje o en
     // cualquiera anterior del cliente), la directiva va al FINAL del prompt
