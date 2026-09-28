@@ -64,6 +64,8 @@ type Opts = {
   referenciaNdvId?: string
   impId?: string
   notaHardware?: string
+  /** Id de la empresa en la plataforma (alta por chat) → ID_GeoVictoria de la Referencia NDV. */
+  companyId?: string
   dry?: boolean
   /** Vuelve a crear aunque exista candado (solo diagnóstico). */
   forzar?: boolean
@@ -211,6 +213,56 @@ async function subirComprobanteDesdeCotizacion(H: Record<string, string>, quoteI
     return subidos.length ? `adjuntos: ${subidos.join(", ")}` : "adjunto_no_subido"
   } catch (e) {
     return `adjunto_error: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
+/**
+ * Referencia NDV: los datos de facturación que ConfirmNDV NO puebla (Nombre_Empresa,
+ * ID_GeoVictoria, giro, dirección, comuna, ciudad, contacto de facturación) — hasta
+ * hoy se rellenaban a MANO en cada alta (Carlos/BLESSED 28-sep, Cecilia). Solo
+ * campos VACÍOS: nunca pisa lo que escribió una persona.
+ */
+async function completarReferenciaNdv(
+  H: Record<string, string>,
+  referenciaId: string,
+  d: DatosFacturacion,
+  extra: { companyId?: string; paisNombre?: string },
+): Promise<string> {
+  if (!referenciaId) return "sin_referencia"
+  const campos = [
+    "Nombre_Empresa", "ID_GeoVictoria", "RUT_Empresa", "Giro", "Direccion", "Comuna", "Ciudad", "Pa_s",
+    "Nombre_Contacto_Facturacion", "Correo_Contacto_Facturacion", "Telefono_Contacto_Facturacion",
+  ]
+  const ref = await getZoho<Record<string, unknown>>(H, `/crm/v3/Referencias_NDV/${referenciaId}?fields=${campos.join(",")}`)
+  if (!ref) return "referencia_ilegible"
+  const deseado: Record<string, string> = {
+    Nombre_Empresa: limpio(d.razonSocial).slice(0, 255),
+    ID_GeoVictoria: String(extra.companyId || "").replace(/\D/g, ""),
+    RUT_Empresa: limpio(d.documento).slice(0, 100),
+    Giro: limpio(d.giro).slice(0, 255),
+    Direccion: limpio(d.direccion).slice(0, 255),
+    Comuna: limpio(d.comuna).slice(0, 255),
+    Ciudad: limpio(d.ciudad).slice(0, 255),
+    Pa_s: limpio(extra.paisNombre),
+    Nombre_Contacto_Facturacion: limpio(d.contactoNombre).slice(0, 255),
+    Correo_Contacto_Facturacion: limpio(d.correo).slice(0, 255),
+    Telefono_Contacto_Facturacion: limpio(d.telefono).slice(0, 50),
+  }
+  const put: Record<string, string> = {}
+  for (const [k, v] of Object.entries(deseado)) {
+    if (v && !limpio(ref[k])) put[k] = v
+  }
+  if (!Object.keys(put).length) return "referencia_ya_tenia"
+  try {
+    const r = await fetch(`${API()}/crm/v3/Referencias_NDV/${referenciaId}`, {
+      method: "PUT",
+      headers: H,
+      body: JSON.stringify({ data: [put], trigger: ["blueprint"] }),
+      cache: "no-store",
+    })
+    return r.ok ? `referencia: ${Object.keys(put).join("+")}` : `referencia_put_${r.status}`
+  } catch {
+    return "referencia_put_error"
   }
 }
 
@@ -546,9 +598,10 @@ export async function crearSolicitudFacturacion(contact: string, opts: Opts): Pr
   // 6. Cuenta CRM + comprobante + nota en la IMP (best-effort, en paralelo).
   const impId = impIdConocido
   const descripcion = String(registro.Descripci_n || "")
-  const [cuenta, adjunto, nota] = await Promise.all([
+  const [cuenta, adjunto, nota, referencia] = await Promise.all([
     completarCuenta(H, cuentaId, d),
     subirComprobanteDesdeCotizacion(H, quoteId, sfId),
+    completarReferenciaNdv(H, referenciaId, d, { companyId: opts.companyId, paisNombre: ficha.nombre }),
     notaEnImplementacion(
       H,
       impId,

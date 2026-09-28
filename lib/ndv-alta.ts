@@ -432,6 +432,7 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
             quoteId: job.quoteId || "",
             referenciaNdvId: job.ndv.referenciaId,
             impId: job.impId,
+            companyId: job.companyId,
             notaHardware: job.pais === "pe" && job.hardware?.idNdv ? `${job.hardware.idNdv} (${job.hardware.estado || "?"})` : undefined,
           })
           job.sf = { sfId: r.sfId, numero: r.numero, estado: r.estado, faltantes: r.faltantes, intentos: (job.sf?.intentos || 0) + 1, at: new Date().toISOString() }

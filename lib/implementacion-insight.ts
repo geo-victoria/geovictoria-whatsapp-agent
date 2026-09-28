@@ -35,6 +35,7 @@ import {
   claveInsightNota,
   claveInsightSync,
   claveQuoteOnboarding,
+  claveAltaSolicitada,
 } from "./onboarding/fase"
 import { configuracionVacia, type Configuracion } from "./onboarding/configuracion"
 import { parsearBorrador, type Borrador } from "./onboarding/borrador"
@@ -282,15 +283,22 @@ export async function resumenInsight(d: DatosInsight, checklist: string): Promis
   }
 }
 
-async function upsertNota(token: string, impId: string, contact: string, titulo: string, contenido: string): Promise<string> {
+async function upsertNota(
+  token: string,
+  impId: string,
+  contact: string,
+  titulo: string,
+  contenido: string,
+  ref: { clave: (c: string) => string; prefijo: string } = { clave: claveInsightNota, prefijo: TITULO_NOTA_INSIGHT },
+): Promise<string> {
   const H = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
-  let notaId = (await getKvValue(claveInsightNota(contact)).catch(() => null)) || ""
+  let notaId = (await getKvValue(ref.clave(contact)).catch(() => null)) || ""
   if (!notaId) {
     // Sin id guardado: buscar por título para no duplicar (p. ej. tras un reset de kv).
     const r = await fetch(`${API()}/crm/v3/Implementaciones/${impId}/Notes?fields=Note_Title&per_page=50`, { headers: H, cache: "no-store" })
     if (r.ok && r.status !== 204) {
       const j = (await r.json().catch(() => ({}))) as { data?: Array<{ id?: string; Note_Title?: string }> }
-      notaId = j?.data?.find((n) => String(n.Note_Title || "").startsWith(TITULO_NOTA_INSIGHT))?.id || ""
+      notaId = j?.data?.find((n) => String(n.Note_Title || "").startsWith(ref.prefijo))?.id || ""
     }
   }
   if (notaId) {
@@ -311,8 +319,70 @@ async function upsertNota(token: string, impId: string, contact: string, titulo:
   })
   const j = (await r.json().catch(() => ({}))) as { data?: Array<{ details?: { id?: string } }> }
   const nuevo = j?.data?.[0]?.details?.id || ""
-  if (nuevo) await setKvValue(claveInsightNota(contact), nuevo).catch(() => {})
+  if (nuevo) await setKvValue(ref.clave(contact), nuevo).catch(() => {})
   return nuevo
+}
+
+// ─── NOTA PARA EL IMPLEMENTADOR (28-sep, caso Carlos/BLESSED — Cecilia y Mónica
+// no conocían el alta por chat y buscaban la Planilla de Ingreso del wizard).
+// Una nota fija, en lenguaje de persona, que dice de frente por qué esta IMP
+// no trae planilla, qué ya existe en la plataforma y qué le toca hacer al
+// relator. Se escribe UNA vez por IMP (kv `onb_nota_impl_`) y se actualiza.
+export const TITULO_NOTA_IMPLEMENTADOR = "Para el implementador: cómo sigue este onboarding (alta por chat)"
+export const claveNotaImplementador = (contact: string) => `onb_nota_impl_${contact}`
+// Mismo formato que lib/ndv-alta (no se importa para no acoplar los dos módulos).
+const claveJobNdvImp = (contact: string) => `onb_ndvimp_${contact.replace(/\D/g, "")}`
+
+export function notaParaImplementador(
+  d: DatosInsight,
+  extra: { companyId?: string; countryCode?: string; ndv?: string; ndvHardware?: string; planillas?: string[] },
+): string {
+  const admin = d.borrador?.admin
+  const nombreAdmin = [admin?.nombre, admin?.apellido].filter(Boolean).join(" ").trim()
+  const n = d.config.trabajadores.length
+  const L: string[] = []
+  L.push(
+    "Esta venta NO pasó por el formulario web (GV Portal): Vicky hizo el alta por WhatsApp. " +
+      "Por eso el campo Planilla de Ingreso está vacío y no existe Autoservicio_Onboarding.",
+  )
+  L.push("")
+  L.push(
+    `Empresa creada en la plataforma${extra.companyId ? `: companyId ${extra.companyId}` : " (id en el chat)"}` +
+      `${d.empresa ? ` (${d.empresa}${d.borrador?.empresa?.identificador ? `, ${d.borrador.empresa.identificador}` : ""})` : ""}` +
+      `${extra.countryCode ? ` · país ${extra.countryCode}` : ""}.`,
+  )
+  L.push(
+    nombreAdmin || admin?.email
+      ? `Administrador creado (perfil admin): ${nombreAdmin || "(sin nombre)"}${admin?.email ? ` · ${admin.email}` : ""}. La contraseña temporal le llegó a ese correo.`
+      : "Administrador: sin datos en el chat — revisar antes de la capacitación.",
+  )
+  L.push(`Vendido${d.numeroCotizacion ? ` (${d.numeroCotizacion})` : ""}: ${equiposVendidos(d.items)}.`)
+  if (extra.ndv) L.push(`Nota de venta: ${extra.ndv}${extra.ndvHardware ? ` (+ hardware ${extra.ndvHardware})` : ""}.`)
+  L.push("")
+  if (n > 0) {
+    L.push(
+      `NÓMINA: el cliente entregó ${n} trabajador${n === 1 ? "" : "es"} por el chat. ` +
+        (extra.planillas?.length
+          ? `Están en los Excel adjuntos a la nota "${TITULO_NOTA_PLANILLAS}" (${extra.planillas.join(" · ")}), en el mismo formato del wizard.`
+          : "Van en texto en el checklist de la nota de insight (aún sin Excel: el cliente no confirmó la configuración)."),
+    )
+    L.push("Vicky NO crea usuarios en la plataforma: la nómina la carga el implementador en la capacitación.")
+  } else {
+    L.push(
+      "NÓMINA: Vicky se la pidió al cliente por WhatsApp (nombre, apellido, documento, correo personal y grupo). A la fecha no la ha enviado.",
+    )
+    L.push(`- Si la envía por el chat, Vicky la guarda y queda como Excel adjunto en la nota "${TITULO_NOTA_PLANILLAS}" de esta implementación.`)
+    L.push("- Si no la envía, hay que pedirla y cargarla en la capacitación.")
+  }
+  L.push("")
+  L.push(
+    d.cap?.bookingId
+      ? `Capacitación agendada: ${d.cap.cuando || "fecha en Bookings"}${d.cap.relator ? ` con ${d.cap.relator.nombre}` : ""}.`
+      : `Capacitación: sin agendar${d.cap?.relator ? ` (relator asignado: ${d.cap.relator.nombre})` : ""}. Vicky le ofrece cupos al cliente por el chat; si no agenda, el vigía avisa a las 72 h hábiles.`,
+  )
+  L.push("Vicky no da soporte de la plataforma: si el cliente pide algo urgente, ella escala al relator por correo y nota acá.")
+  if (d.chatUrl) L.push(`Chat completo: ${d.chatUrl}`)
+  return L.join("\n")
 }
 
 /**
@@ -384,6 +454,21 @@ export async function sincronizarInsightImplementacion(
       `${checklist}\n\nRESUMEN DE LA CONVERSACIÓN\n${resumen}\n\nINSIGHT\n${insight}\n\n` +
       `TRANSCRIPCIÓN (WhatsApp con Vicky${d.chatUrl ? `, chat completo: ${d.chatUrl}` : ""})\n${transcript || "(sin mensajes)"}`
     const notaId = await upsertNota(token, impId, fono, `${TITULO_NOTA_INSIGHT} · ${d.empresa || fono}`.slice(0, 120), contenido.slice(0, 60000))
+    // Nota fija para el relator (28-sep): qué es un alta por chat y qué le toca.
+    try {
+      const alta = await leerJson<{ companyId?: string; countryCode?: string }>(claveAltaSolicitada(fono))
+      const job = await leerJson<{ ndv?: { idNdv?: string }; hardware?: { idNdv?: string } }>(claveJobNdvImp(fono))
+      const texto = notaParaImplementador(d, {
+        companyId: alta?.companyId,
+        countryCode: alta?.countryCode,
+        ndv: job?.ndv?.idNdv,
+        ndvHardware: job?.hardware?.idNdv,
+        planillas: planillas.archivos,
+      })
+      await upsertNota(token, impId, fono, TITULO_NOTA_IMPLEMENTADOR, texto, { clave: claveNotaImplementador, prefijo: TITULO_NOTA_IMPLEMENTADOR })
+    } catch (e) {
+      console.warn("[imp-insight] nota para el implementador falló:", e instanceof Error ? e.message : e)
+    }
     console.log(`[imp-insight] ${impId} sincronizado (nota ${notaId || "∅"}): ${insight.slice(0, 120)}`)
     return { ok: true, implementacionId: impId, notaId: notaId || undefined, insight, planillas: planillas.archivos, planillasMotivo: planillas.motivo }
   } catch (e) {
