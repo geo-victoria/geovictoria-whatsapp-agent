@@ -194,16 +194,16 @@ export function matrizLoopDesdeTexto(src: string): Array<{ env: string; cl: stri
   return out
 }
 
+/**
+ * Plantilla de presentación del traspaso fuera de ventana. 28-sep (paso 4):
+ * vive en la FICHA OPERATIVA (`plantillas.presentacionTraspaso`; vacío = la
+ * neutra de Chile) y el cron solo la lee — se exige además que el cron siga
+ * resolviéndola por `tmTemplatePara` (la lectura única), no por constantes.
+ */
 function textoPlantillaPresentacion(src: string, pais: PaisCert): string | null {
-  const re =
-    pais === "cl"
-      ? /VICKY_TM_TEMPLATE_PRESENTACION\s*\|\|\s*"([^"]*)"/
-      : new RegExp(`VICKY_TM_TEMPLATE_PRESENTACION_${pais.toUpperCase()}\\s*\\|\\|\\s*(?:"([^"]*)"|TM_TEMPLATE)`)
-  const m = src.match(re)
-  if (!m) return null
-  if (m[1] !== undefined) return m[1]
-  const base = src.match(/VICKY_TM_TEMPLATE_PRESENTACION\s*\|\|\s*"([^"]*)"/)
-  return base ? base[1] : null
+  if (!/function tmTemplatePara\(/.test(src)) return null
+  const propia = fichaOperativa(pais).plantillas.presentacionTraspaso
+  return propia || fichaOperativa("cl").plantillas.presentacionTraspaso || null
 }
 
 function textoPlantillaToque0(src: string, pais: PaisCert): string | null {
