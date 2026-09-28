@@ -23,6 +23,7 @@
  */
 
 import { callFirstResponseAgent } from "@/lib/foundry"
+import { fichaOperativa } from "@/lib/paises/ficha-operativa"
 
 export const consultarAgenteSoporteSchema = {
   name: "consultar_agente_soporte",
@@ -51,6 +52,8 @@ export const consultarAgenteSoporteSchema = {
 export type ConsultarAgenteSoporteInput = {
   mensajeProspecto: string
   previousResponseId?: string
+  /** País del contacto (lo inyecta el despacho, no el modelo). Sin él = Chile. */
+  _pais?: string
 }
 
 export type ConsultarAgenteSoporteResultado =
@@ -85,19 +88,61 @@ const MENSAJE_ESCALAMIENTO_HUMANO =
   "Atienden de lunes a viernes de 08:30 a 18:00 — y fuera de horario les escribes al correo y retoman tu caso a primera hora del día hábil siguiente 🙌\n\n" +
   "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria."
 
+/**
+ * TARJETA DE LA MESA DEL PAÍS (27-sep, orden de Lalo "todas las tools deben ser
+ * UNA implementación global: la de Chile"). Esta es la ÚNICA tool de soporte:
+ * fuera de Chile cambian solo los DATOS de la tarjeta, que salen de la ficha
+ * operativa del país (correo, teléfono, horario y cómo se nombra la mesa) —
+ * antes cada país envolvía esta tool con su propia copia del mensaje y de su
+ * saneador. Chile no la usa: su tarjeta (con el WhatsApp de la mesa) es la
+ * constante de arriba. Env `VICKY_SOPORTE_{EMAIL,TELEFONO,HORARIO}_<CC>` la
+ * pisan sin deploy (herencia de Perú).
+ */
+export function tarjetaSoportePais(
+  pais?: string,
+): { mensaje: string; email: string; telefono: string } | null {
+  const cc = String(pais || "").trim().toLowerCase()
+  if (!cc || cc === "cl") return null
+  const sop = fichaOperativa(cc).soporte
+  if (!sop) return null
+  const up = cc.toUpperCase()
+  const email = (process.env[`VICKY_SOPORTE_EMAIL_${up}`] || sop.email).trim()
+  const telefono = (process.env[`VICKY_SOPORTE_TELEFONO_${up}`] || sop.telefono).trim()
+  const horario = (process.env[`VICKY_SOPORTE_HORARIO_${up}`] || sop.horario).trim()
+  const mensaje =
+    `Para esta consulta te recomiendo contactar directamente a nuestra Mesa de Ayuda ${sop.mesa || ""}:\n` +
+    `📧 Email: *${email}* (horario continuado)\n` +
+    `📞 Teléfono: *${telefono}* (${horario})\n\n` +
+    "Un dato importante: si eres colaborador, el primer paso es contactar al administrador de tu empresa — solo los administradores tienen soporte directo de GeoVictoria 🙌"
+  return { mensaje, email, telefono }
+}
+
+/** El agente de soporte se entrenó con la base CHILENA: fuera de Chile se
+ * reemplazan sus canales (celular +56 9, 600 914 3819, soporte@) por los del
+ * país antes de que el texto llegue al cliente. */
+export function sanearCanalesChilenos(texto: string, t: { email: string; telefono: string }): string {
+  return String(texto || "")
+    .replace(/\+?\s*56\s*9[\s.\-]*\d{4}[\s.\-]*\d{4}/g, t.telefono)
+    .replace(/600[\s.\-]*914[\s.\-]*3819/g, t.telefono)
+    .replace(/\bsoporte@geovictoria\.com\b/g, t.email)
+}
+
 export async function consultarAgenteSoporte(
   args: ConsultarAgenteSoporteInput,
 ): Promise<ConsultarAgenteSoporteResultado> {
   try {
     const { mensajeProspecto, previousResponseId } = args
     const result = await callFirstResponseAgent(mensajeProspecto, previousResponseId)
+    // Fuera de Chile: tarjeta y canales del país (datos de la ficha). Chile: null.
+    const tarjeta = tarjetaSoportePais(args._pais)
+    const respuestaAgente = tarjeta ? sanearCanalesChilenos(result.reply, tarjeta) : result.reply
 
     if (result.marker === "ESCALAR") {
       return {
         ok: true,
         accion: "escalar_humano",
-        respuestaAgente: result.reply,
-        mensajeParaProspecto: MENSAJE_ESCALAMIENTO_HUMANO,
+        respuestaAgente,
+        mensajeParaProspecto: tarjeta ? tarjeta.mensaje : MENSAJE_ESCALAMIENTO_HUMANO,
         previousResponseId: result.responseId,
       }
     }
@@ -106,7 +151,7 @@ export async function consultarAgenteSoporte(
       return {
         ok: true,
         accion: "cerrar",
-        respuestaAgente: result.reply,
+        respuestaAgente,
         previousResponseId: result.responseId,
       }
     }
@@ -114,7 +159,7 @@ export async function consultarAgenteSoporte(
     return {
       ok: true,
       accion: "continuar",
-      respuestaAgente: result.reply,
+      respuestaAgente,
       previousResponseId: result.responseId,
     }
   } catch (error) {

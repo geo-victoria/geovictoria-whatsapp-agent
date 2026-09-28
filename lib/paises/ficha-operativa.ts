@@ -77,7 +77,8 @@ export type FichaOperativa = {
   moneda: { codigo: string; simbolo: string; decimales: number; locale: string; nombre: string }
   impuesto: { nombre: string; pct: number }
   /** Documento tributario de la EMPRESA cliente: cómo se llama y qué forma tiene. */
-  documento: { etiqueta: string; patron: RegExp; ejemplo: string }
+  /** `padron` = registro público del que sale la razón social por el documento ("" = no hay). */
+  documento: { etiqueta: string; patron: RegExp; ejemplo: string; padron: string }
   entidad: {
     razonSocial: string
     identificador: string
@@ -109,8 +110,14 @@ export type FichaOperativa = {
    * finanzas CL registra el pago desde ahí (03-ago).
    */
   cobranzaCc: string
-  /** Mesa de ayuda del país (tarjeta oficial); vacío = sin tarjeta propia. */
-  soporte?: { email: string; telefono: string; horario: string }
+  /**
+   * Mesa de ayuda del país (tarjeta oficial); vacío = sin tarjeta propia.
+   * `mesa` es cómo se nombra al cliente ("de Colombia", "GeoVictoria Perú")
+   * en la tarjeta que entrega consultar_agente_soporte al escalar (27-sep: la
+   * tarjeta sale de acá, no de una copia por país). Chile no la declara: su
+   * tarjeta lleva además el WhatsApp de la mesa y vive en la tool chilena.
+   */
+  soporte?: { email: string; telefono: string; horario: string; mesa?: string }
   /**
    * Solicitudes internas que nacen de una venta (24-sep, orden de Lalo "que
    * nosotros creemos esos registros automáticamente… sin brecha con las que se
@@ -181,7 +188,7 @@ const FICHA_CL: FichaOperativa = {
   offsets: ["-03:00", "-04:00"],
   moneda: { codigo: "CLP", simbolo: "$", decimales: 0, locale: "es-CL", nombre: "pesos chilenos" },
   impuesto: { nombre: "IVA", pct: 19 },
-  documento: { etiqueta: "RUT", patron: /^\d{7,8}-[\dkK]$/, ejemplo: "76.188.587-1" },
+  documento: { etiqueta: "RUT", patron: /^\d{7,8}-[\dkK]$/, ejemplo: "76.188.587-1", padron: "SII" },
   entidad: {
     razonSocial: "Victoria S.A.",
     identificador: "76.188.587-1",
@@ -243,7 +250,7 @@ const FICHA_PE: FichaOperativa = {
   offsets: ["-05:00"],
   moneda: { codigo: "PEN", simbolo: "S/", decimales: 2, locale: "es-PE", nombre: "soles" },
   impuesto: { nombre: "IGV", pct: 18 },
-  documento: { etiqueta: "RUC", patron: /^\d{11}$/, ejemplo: "20605842055" },
+  documento: { etiqueta: "RUC", patron: /^\d{11}$/, ejemplo: "20605842055", padron: "SUNAT" },
   entidad: {
     razonSocial: "GEOVICTORIA PERU S.A.C.",
     identificador: "20605842055",
@@ -276,6 +283,10 @@ const FICHA_PE: FichaOperativa = {
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
+  // Mesa de Ayuda GeoVictoria Perú (tarjeta oficial, Lalo 15-sep): correo con
+  // horario continuado, fijo de oficina L-V 8:30-17:30; solo los
+  // administradores tienen soporte directo. Env VICKY_SOPORTE_*_PE la pisan.
+  soporte: { email: "soporteperu@geovictoria.com", telefono: "+51 1 7085618", horario: "lunes a viernes de 8:30 a 17:30 hrs", mesa: "GeoVictoria Perú" },
   solicitudes: {
     facturacionLayoutId: "3525045000429077325",
     facturacionNombre: "FACTURACION - ASISTENCIA - {empresa}",
@@ -301,7 +312,7 @@ const FICHA_CO: FichaOperativa = {
   offsets: ["-05:00"],
   moneda: { codigo: "COP", simbolo: "$", decimales: 0, locale: "es-CO", nombre: "pesos colombianos" },
   impuesto: { nombre: "IVA", pct: 19 },
-  documento: { etiqueta: "NIT", patron: /^\d{9,10}(-\d)?$/, ejemplo: "901367959-1" },
+  documento: { etiqueta: "NIT", patron: /^\d{9,10}(-\d)?$/, ejemplo: "901367959-1", padron: "RUES" },
   entidad: {
     razonSocial: "GEOVICTORIA COLOMBIA SAS",
     identificador: "901367959",
@@ -356,7 +367,7 @@ const FICHA_CO: FichaOperativa = {
   // Mesa de Ayuda GeoVictoria Colombia (tarjeta oficial, Lalo 23-sep): correo
   // con horario continuado, fijo de oficina L-V 7:30-18:30; solo los
   // administradores tienen soporte directo.
-  soporte: { email: "soporte.co@geovictoria.com", telefono: "+57 601 508 8941", horario: "lunes a viernes de 7:30 a 18:30" },
+  soporte: { email: "soporte.co@geovictoria.com", telefono: "+57 601 508 8941", horario: "lunes a viernes de 7:30 a 18:30", mesa: "de Colombia" },
   solicitudes: {
     facturacionLayoutId: "3525045000429077001",
     facturacionNombre: "INICIO DE FACTURACIÓN - {empresa}",
@@ -384,7 +395,7 @@ const FICHA_MX: FichaOperativa = {
   offsets: ["-06:00", "-05:00"],
   moneda: { codigo: "MXN", simbolo: "$", decimales: 2, locale: "es-MX", nombre: "pesos mexicanos" },
   impuesto: { nombre: "IVA", pct: 16 },
-  documento: { etiqueta: "RFC", patron: /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i, ejemplo: "CEC2005286R4" },
+  documento: { etiqueta: "RFC", patron: /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/i, ejemplo: "CEC2005286R4", padron: "" },
   entidad: {
     razonSocial: "CHECADOR, S.A. de C.V.",
     identificador: "CEC2005286R4",
@@ -427,7 +438,7 @@ const FICHA_MX: FichaOperativa = {
   // Mesa de Ayuda GeoVictoria México (tarjeta oficial, Lalo 24-sep): correo con
   // horario continuado, fijo L-V 9:00-18:00; solo los administradores tienen
   // soporte directo.
-  soporte: { email: "soportemx@geovictoria.com", telefono: "+52 33 4160 5435", horario: "lunes a viernes de 9:00 a 18:00" },
+  soporte: { email: "soportemx@geovictoria.com", telefono: "+52 33 4160 5435", horario: "lunes a viernes de 9:00 a 18:00", mesa: "de México" },
   solicitudes: {
     facturacionLayoutId: "3525045000429077619",
     facturacionNombre: "SE SOLICITA FACTURA - {empresa}",

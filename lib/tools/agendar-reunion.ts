@@ -22,6 +22,7 @@ import { sendBotmakerMessage } from "@/lib/botmaker-push-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { getQuotePointers } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
+import { fichaOperativa, paisDeTerritorio } from "@/lib/paises/ficha-operativa"
 
 const ZOHO_API_DOMAIN_REU = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const QUOTE_MODULE_REU = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
@@ -276,6 +277,17 @@ export type AgendarReunionResultado =
       bookingId?: string
     }
 
+/**
+ * Zona legible del país para la confirmación ("hora de Perú"), leída de la
+ * ficha operativa (27-sep, tools únicas: antes cada país reescribía el mensaje
+ * de esta tool para decir su zona). Chile no la declara — su mensaje queda
+ * idéntico.
+ */
+export function zonaLegibleAgenda(country?: string): string {
+  const cc = paisDeTerritorio(country || "Chile")
+  return cc && cc !== "cl" ? fichaOperativa(cc).zonaNombre : ""
+}
+
 export async function agendarReunion(
   args: AgendarReunionInput,
 ): Promise<AgendarReunionResultado> {
@@ -481,6 +493,7 @@ export async function agendarReunion(
       : ""
   const mensajeParaProspecto =
     `¡Listo! Tu reunión quedó agendada para el ${fechaLegible}` +
+    (zonaLegibleAgenda(country) ? ` (${zonaLegibleAgenda(country)})` : "") +
     (atiende ? `, con ${atiende.nombre}` : organizerEmail ? `, con un ejecutivo de nuestro equipo` : "") +
     (meetingUrl ? `. Te llegará el link de la reunión por email a ${prospectEmail}${(args.invitadosExtra || []).length ? ` (y la invitación también a ${(args.invitadosExtra || []).join(", ")})` : ""}` : ` (te enviaremos el link por email)`) +
     datosAtiende +

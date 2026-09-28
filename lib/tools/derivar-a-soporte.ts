@@ -22,6 +22,8 @@
  *       operativa de plataforma (futuro: tool al agente de Foundry).
  */
 
+import { fichaOperativa } from "../paises/ficha-operativa.ts"
+
 export const derivarASoporteSchema = {
   name: "derivar_a_soporte",
   description:
@@ -100,6 +102,8 @@ export type DerivarASoporteInput = {
   email?: string
   empresa?: string
   trabajadores?: string
+  /** País del contacto (lo inyecta el despacho, no el modelo). Sin él = Chile. */
+  _pais?: string
 }
 
 export type DerivarASoporteResultado = {
@@ -115,9 +119,9 @@ export type DerivarASoporteResultado = {
  * hábil de Chile (L-V 8-18). El equipo recibe la alerta con sorteo inmediato,
  * así que la promesa es cumplible.
  */
-export function compromisoLlamadaCL(ahora: Date = new Date()): string {
+export function compromisoLlamadaCL(ahora: Date = new Date(), timeZone = "America/Santiago"): string {
   const partes = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santiago",
+    timeZone,
     hour12: false,
     weekday: "short",
     hour: "2-digit",
@@ -160,6 +164,48 @@ export function derivarASoporte(args: DerivarASoporteInput): DerivarASoporteResu
     ok: true,
     handoff: true,
     motivo,
-    mensajeSugeridoUsuario: MENSAJES_POR_MOTIVO[motivo].replace("{CUANDO}", compromisoLlamadaCL()),
+    // El CUÁNDO se calcula en la hora hábil del PAÍS del contacto (ficha
+    // operativa); sin país, Chile — idéntico a siempre.
+    mensajeSugeridoUsuario: MENSAJES_POR_MOTIVO[motivo].replace(
+      "{CUANDO}",
+      args._pais && args._pais !== "cl" ? compromisoLlamadaCL(new Date(), fichaOperativa(args._pais).tz) : compromisoLlamadaCL(),
+    ),
+  }
+}
+
+/**
+ * El MISMO schema para los cuatro países (27-sep, tools únicas). Fuera de
+ * Chile cambian solo los DATOS: el nombre del documento tributario, su
+ * ejemplo y el padrón del que sale la razón social (ficha operativa). Chile
+ * recibe el objeto de siempre.
+ */
+export function derivarASoporteSchemaPais(pais?: string) {
+  const cc = String(pais || "").trim().toLowerCase()
+  if (!cc || cc === "cl") return derivarASoporteSchema
+  const f = fichaOperativa(cc)
+  const doc = f.documento.etiqueta
+  const padron = f.documento.padron
+  const props = derivarASoporteSchema.input_schema.properties
+  return {
+    ...derivarASoporteSchema,
+    input_schema: {
+      ...derivarASoporteSchema.input_schema,
+      properties: {
+        ...props,
+        rutEmpresa: {
+          ...props.rutEmpresa,
+          description: props.rutEmpresa.description
+            .replace("RUT de la empresa (formato 76123456-7)", `${doc} de la empresa (formato ${f.documento.ejemplo})`)
+            .replace("en Chile (flujo 21+, Lalo 13-ago)", `en ${f.nombre} (flujo 21+)`)
+            .replace("con el RUT el registro nace con la razón social real del SII", padron ? `con el ${doc} el registro nace con la razón social real (${padron})` : `con el ${doc} el registro queda identificado`),
+        },
+        empresa: {
+          ...props.empresa,
+          description: padron
+            ? props.empresa.description.replace("(la razón social sale del SII)", `(la razón social sale de ${padron})`)
+            : "Nombre de la empresa. Pásalo si el cliente lo dijo.",
+        },
+      },
+    },
   }
 }

@@ -1,21 +1,21 @@
 /**
- * TOOLS ÚNICAS — Colombia (21-sep, mismo molde que lib/paises/pe/tools-unificadas.ts:
- * "una sola tool por herramienta para todos los países, no se replican").
+ * TOOLS ÚNICAS — Colombia (21-sep; 27-sep: implementación = la de Chile).
  *
- * Expone los 20 nombres del núcleo. Por debajo: motor real donde existe
- * (buildDispatchCO: cotizarCO en COP, create-from-vicky-co, lead a
- * Galindo/Gordillo, Foundry, opt-out, seguimiento, agenda Cal si está
- * configurada; reenvío y PDF delegados a la impl chilena), traducción de
- * formas (hardware[] → reloj, contactoEmail → email, rutEmpresa → nit,
- * motivos CL → CO) y respuesta HONESTA donde Colombia no tiene la capacidad
- * (certificación, ficha PDF, anualidad). Descuentos = Chile
- * desde el 21-sep (escalera 10 → 20 % sobre el plan, memoria `co_pref_`).
+ * Expone los nombres del núcleo. Las tools GLOBALES corren en
+ * lib/paises/tools-globales.ts (la implementación chilena de lib/tools/* con
+ * los datos de Colombia: ficha operativa, eventos de Cal de las ejecutivas,
+ * ítems del motor colombiano). Acá queda solo lo propio: motor de precios
+ * (motor único con datos de CO, memoria `co_pref_`), emisión contra
+ * create-from-vicky-co, anualidad (lib/paises/anualizar-pais.ts) y la
+ * respuesta honesta de enviar_certificacion. tests/tools-globales.test.ts
+ * vigila que este archivo no vuelva a atender una tool global.
  *
- * Imports estáticos solo a módulos que los tests puros cargan (co/tools.ts
- * trae "../../zoho-leads" relativo, igual que ya lo hace el prompt CO).
+ * Imports estáticos solo a módulos que los tests puros cargan.
  */
 import { marcarNoContactarSchema } from "../../tools/marcar-no-contactar.ts"
-import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts"
+import { programarSeguimientoSchemaPais } from "../../tools/programar-seguimiento.ts"
+import { derivarASoporteSchemaPais } from "../../tools/derivar-a-soporte.ts"
+import { despacharToolGlobal, esToolGlobal, guardarPrefPais, leerPrefPais, type ConfigFormal, type PrefPais } from "../tools-globales.ts"
 import { reenviarCotizacionCorreoSchema } from "../../tools/reenviar-cotizacion-correo.ts"
 import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
 
@@ -23,19 +23,7 @@ import { agendaCoActiva, eventoAgendaCO } from "./agenda.ts"
 
 // Agenda en línea de Colombia (23-sep): activa salvo env VICKY_AGENDA_CO=off.
 const REUNIONES_CO_HABILITADAS = agendaCoActiva()
-const TZ_CO = "America/Bogota"
 
-function fechaLegibleCO(slotIso: string): string {
-  return new Date(slotIso).toLocaleString("es-CO", {
-    timeZone: TZ_CO,
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
-}
 
 type Schema = { name: string; description: string; input_schema: Record<string, unknown> }
 
@@ -235,30 +223,9 @@ export const TOOL_SCHEMAS_CO_UNIFICADAS: Schema[] = [
       required: [],
     },
   },
-  {
-    name: "derivar_a_soporte",
-    description:
-      "Registra al prospecto como lead en el CRM (territorio Colombia) y lo deja en manos del equipo comercial de Colombia, que lo contacta. Motivos: fuera_de_rango_trabajadores (más personas de las que cotizas), solicitud_explicita_persona (pide hablar con una persona o una reunión — pon en contexto el día/hora que propuso), callback, fuera_de_scope, cliente_existente_problema, tool_fallo, transferir_soporte_operativo, agendar_reunion. El NIT NUNCA es requisito. `contexto` = necesidad, configuración y precios cotizados. Devuelve `mensajeParaProspecto`.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        motivo: {
-          type: "string" as const,
-          enum: ["fuera_de_rango_trabajadores", "cliente_existente_problema", "solicitud_explicita_persona", "tool_fallo", "fuera_de_scope", "agendar_reunion", "callback", "transferir_soporte_operativo"],
-        },
-        contexto: { type: "string" as const, description: "Resumen para el ejecutivo." },
-        nombre: { type: "string" as const },
-        rutEmpresa: { type: "string" as const, description: "NIT, si lo dio." },
-        email: { type: "string" as const },
-        empresa: { type: "string" as const },
-        trabajadores: { type: "number" as const },
-        ciudad: { type: "string" as const },
-      },
-      required: ["motivo", "contexto"],
-    },
-  },
+  derivarASoporteSchemaPais("co") as unknown as Schema,
   marcarNoContactarSchema as unknown as Schema,
-  programarSeguimientoSchema as unknown as Schema,
+  programarSeguimientoSchemaPais("co") as unknown as Schema,
   // La MISMA descripción que Chile (ver el comentario en pe/tools-unificadas).
   reenviarCotizacionCorreoSchema as unknown as Schema,
   {
@@ -354,50 +321,6 @@ export function aInputCotizarCO(i: CotizarIn) {
   return out
 }
 
-const MOTIVO_CO: Record<string, string> = {
-  fuera_de_rango_trabajadores: "mas_de_50",
-  solicitud_explicita_persona: "pidio_persona",
-  agendar_reunion: "pidio_persona",
-  callback: "pidio_persona",
-  tool_fallo: "cotizacion_formal",
-  fuera_de_scope: "fuera_de_alcance",
-  cliente_existente_problema: "otro",
-  transferir_soporte_operativo: "otro",
-}
-
-type PrefCO = { userCount: number; hardware?: HardwareIn[]; puntosInstalacion?: PuntoIn[]; escalon: number }
-
-/**
- * Cotización FORMAL vigente de la conversación (puntero) con la guarda de
- * Pagada — la misma que Perú, sin leer campos peruanos.
- */
-async function formalVigenteCO(contact: string, quoteId?: string): Promise<{ quoteId: string } | { error: string }> {
-  let qid = String(quoteId || "").trim()
-  if (!qid) {
-    try {
-      const { getQuotePointer } = await import("../../supabase-persistence-v3.ts")
-      qid = (await getQuotePointer(contact))?.quoteId || ""
-    } catch {
-      /* sin puntero */
-    }
-  }
-  if (!qid) return { error: "No hay una cotización formal vigente en esta conversación: emítela primero con generar_link_cotizadora." }
-  try {
-    const { fetchZoho } = await import("../../zoho-token.ts")
-    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
-    const res = await fetchZoho(`${api}/crm/v8/${mod}/${qid}?fields=Estado_Cotizacion`)
-    if (res.status === 200) {
-      const data = (await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
-      const estado = String(data.data?.[0]?.Estado_Cotizacion || "")
-      if (/pagad/i.test(estado)) return { error: "Esa cotización ya está PAGADA: no se modifica. Si el cliente quiere cambios, el ejecutivo los coordina (derivar_a_soporte)." }
-    }
-  } catch {
-    /* sin lectura: la tool chilena vuelve a validar */
-  }
-  return { quoteId: qid }
-}
-
 export function buildDispatchCOUnificado(contact: string) {
   // Import dinámico: el motor CO trae Zoho/Cal/Foundry (no puro).
   let basePromise: Promise<(name: string, input: unknown) => Promise<unknown>> | null = null
@@ -405,28 +328,29 @@ export function buildDispatchCOUnificado(contact: string) {
     basePromise ??= import("./tools").then((m) => m.buildDispatchCO(contact))
     return basePromise.then((fn) => fn(name, input))
   }
-  // Memoria del ÚLTIMO estimado (vic_kv `co_pref_<contact>`) para que
-  // consultar_descuento_referencial funcione sin argumentos, igual que en
-  // Chile y Perú (Lalo 21-sep: "descuento en Colombia igual que en Chile").
-  const kvKey = `co_pref_${contact}`
-  async function leerPref(): Promise<PrefCO | null> {
-    try {
-      const { getKvValue } = await import("../../supabase-persistence-v3.ts")
-      const raw = await getKvValue(kvKey)
-      return raw ? (JSON.parse(raw) as PrefCO) : null
-    } catch {
-      return null
-    }
+  const leerPref = () => leerPrefPais("co", contact) as Promise<(PrefPais & { hardware?: HardwareIn[]; puntosInstalacion?: PuntoIn[] }) | null>
+  const guardarPref = (p: PrefPais) => guardarPrefPais("co", contact, p)
+
+  /** Ítems de la formal con el motor del país (a LISTA: el % vive en la cotización). */
+  async function itemsFormal(cfg: ConfigFormal): Promise<{ ok: true; items: unknown[] } | { ok: false; error: string }> {
+    const { cotizarCO } = await import("./cotizar")
+    const { clasificarUbicacionCO } = await import("./geografia")
+    const c = aInputCotizarCO(cfg as CotizarIn) as { userCount: number; reloj?: { modalidad: "arriendo" | "venta"; cantidad: number }; puntosInstalacion?: Array<{ ubicacion: string; autoInstalada: boolean }> }
+    const calculo = cotizarCO({
+      userCount: Number(cfg.userCount || 0),
+      reloj: c.reloj,
+      puntos: (c.puntosInstalacion || []).map((p) => ({ ubicacion: p.ubicacion, zona: clasificarUbicacionCO(p.ubicacion).zona, autoInstalada: p.autoInstalada })),
+    })
+    return { ok: true, items: calculo.itemsCotizador as unknown[] }
   }
-  async function guardarPref(p: PrefCO): Promise<void> {
-    try {
-      const { setKvValue } = await import("../../supabase-persistence-v3.ts")
-      await setKvValue(kvKey, JSON.stringify(p))
-    } catch {
-      /* la memoria del estimado es best-effort */
-    }
-  }
+
+  const ctx = { pais: "co" as const, contact, eventoAgenda: async () => (agendaCoActiva() ? await eventoAgendaCO() : ""), itemsFormal }
+
   return async function dispatchCOUnificado(name: string, input: unknown): Promise<unknown> {
+    // Las tools GLOBALES corren en lib/paises/tools-globales.ts (la
+    // implementación chilena con los datos del país). Acá: el motor de
+    // precios, la emisión contra create-from-vicky-co y la anualidad.
+    if (esToolGlobal(name)) return despacharToolGlobal(ctx, name, input)
     const i = (input || {}) as Record<string, unknown>
     switch (name) {
       case "cotizar_referencial": {
@@ -474,25 +398,6 @@ export function buildDispatchCOUnificado(contact: string) {
         }
         return r
       }
-      case "consultar_siguiente_descuento": {
-        const f = await formalVigenteCO(contact, i.quote_id as string | undefined)
-        if ("error" in f) return { ok: false, error: f.error }
-        const { consultarSiguienteDescuento } = await import("../../tools/consultar-siguiente-descuento.ts")
-        const r = await consultarSiguienteDescuento({ quote_id: f.quoteId })
-        return { ...r, quoteId: f.quoteId }
-      }
-      case "aplicar_siguiente_descuento": {
-        const f = await formalVigenteCO(contact, i.quote_id as string | undefined)
-        if ("error" in f) return { ok: false, error: f.error }
-        const { aplicarSiguienteDescuento } = await import("../../tools/aplicar-siguiente-descuento.ts")
-        const r = await aplicarSiguienteDescuento({ quote_id: f.quoteId, pct_ofrecido: Number(i.pct_ofrecido) || undefined })
-        if (r.ok) {
-          const pref = await leerPref()
-          const escalon = r.ultimoEscalon?.pct >= 20 ? 2 : r.ultimoEscalon?.pct >= 10 ? 1 : pref?.escalon || 0
-          if (pref) await guardarPref({ ...pref, escalon })
-        }
-        return { ...r, quoteId: f.quoteId }
-      }
       case "generar_link_cotizadora": {
         // La configuración de la formal = la del MODELO, nunca la memoria
         // `co_pref_` (mismo defecto que PE, caso Rodrigo 22-sep: el último
@@ -514,144 +419,8 @@ export function buildDispatchCOUnificado(contact: string) {
           escalonDescuento: esc,
         })
       }
-      case "derivar_a_soporte": {
-        const motivo = MOTIVO_CO[String(i.motivo || "")] || "otro"
-        return base("derivar_a_ejecutivo", {
-          nombre: String(i.nombre || "Prospecto WhatsApp"),
-          empresa: i.empresa,
-          email: i.email,
-          nit: i.rutEmpresa,
-          trabajadores: i.trabajadores,
-          ciudad: i.ciudad,
-          motivo,
-          resumen: `[${String(i.motivo || "")}] ${String(i.contexto || "")}`.trim(),
-        })
-      }
-      case "registrar_solicitud_callback": {
-        const partes = [
-          i.necesidad ? `Necesidad: ${i.necesidad}` : "",
-          i.preferenciaHorario ? `Prefiere que lo llamen: ${i.preferenciaHorario}` : "",
-          i.cargo ? `Cargo: ${i.cargo}` : "",
-        ].filter(Boolean)
-        return base("derivar_a_ejecutivo", {
-          nombre: String(i.nombre || "Prospecto WhatsApp"),
-          empresa: i.empresa,
-          email: i.email,
-          trabajadores: i.trabajadores,
-          ciudad: i.ciudad,
-          motivo: "pidio_persona",
-          resumen: `[callback] ${partes.join(" · ") || "Pidió que lo llamen."}`,
-        })
-      }
-      case "consultar_agente_soporte":
-      case "marcar_no_contactar":
-      case "programar_seguimiento":
-      case "reenviar_cotizacion_correo":
-        return base(name, input)
-      // ── Agenda = las tools chilenas con los eventos de Cal de Colombia ──
-      // El agent-loop inyecta `eventTypeId` cuando el dueño del deal/lead
-      // tiene evento propio (las tres telemarketeras están en el mapa de
-      // eventos-seguimiento); si no viene, `eventoAgendaCO()` rota entre
-      // ellas (kv `cal_evento_co` / env CAL_EVENT_TYPE_ID_CO lo fijan). Jamás
-      // al round-robin chileno.
-      case "consultar_disponibilidad_horario": {
-        if (!REUNIONES_CO_HABILITADAS) return base(name, input)
-        const { consultarDisponibilidadHorario } = await import("../../tools/consultar-disponibilidad-horario.ts")
-        const iA = i as { fechaPropuesta?: string; eventTypeId?: string }
-        return consultarDisponibilidadHorario({
-          fechaPropuesta: String(iA.fechaPropuesta || ""),
-          country: "Colombia",
-          eventTypeId: (iA.eventTypeId || "").trim() || (await eventoAgendaCO()),
-        })
-      }
-      case "agendar_reunion": {
-        if (!REUNIONES_CO_HABILITADAS) return base(name, input)
-        const { agendarReunion } = await import("../../tools/agendar-reunion.ts")
-        const iA = i as { telefono?: string; eventTypeId?: string; prospectEmail?: string }
-        const r = await agendarReunion({
-          ...(i as object),
-          telefono: (iA.telefono || "").trim() || contact,
-          country: "Colombia",
-          eventTypeId: (iA.eventTypeId || "").trim() || (await eventoAgendaCO()),
-        } as never)
-        if (!r.ok) return r
-        const email = iA.prospectEmail || "tu correo"
-        return {
-          ...r,
-          timezone: TZ_CO,
-          mensajeParaProspecto:
-            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia)${r.atiende ? `, con ${r.atiende.nombre}` : ""} 🎉 ` +
-            `Te llegará la invitación con el link de la reunión a ${email}.` +
-            (r.atiende?.email ? ` Si necesitas algo antes, le escribes a 📧 ${r.atiende.email}${r.atiende.whatsapp ? ` o al 📱 ${r.atiende.whatsapp}` : ""}.` : "") +
-            ` Te puedo ayudar en algo más?`,
-        }
-      }
-      case "reagendar_reunion": {
-        if (!REUNIONES_CO_HABILITADAS) return base(name, input)
-        const { reagendarReunion } = await import("../../tools/reagendar-reunion.ts")
-        const r = await reagendarReunion({ ...(i as object), country: "Colombia", _contact: contact } as never)
-        if (!r.ok) return r
-        return {
-          ...r,
-          mensajeParaProspecto:
-            `Listo!! Tu reunión quedó reagendada para el ${fechaLegibleCO(r.slotIso)} (hora de Colombia) 📅 ` +
-            `Te llegará la nueva invitación por correo. Te puedo ayudar en algo más?`,
-        }
-      }
-      case "enviar_cotizacion_whatsapp": {
-        const { enviarCotizacionWhatsapp } = await import("../../tools/enviar-cotizacion-whatsapp.ts")
-        return enviarCotizacionWhatsapp({ ...(i as object), _contact: contact } as never)
-      }
-      case "registrar_comprobante_transferencia": {
-        // Transferencia Bancolombia habilitada el 21-sep: la MISMA tool
-        // chilena con el país (montos en COP, correo de cobranza al dueño CO).
-        const { registrarComprobanteTransferencia } = await import("../../tools/registrar-comprobante-transferencia.ts")
-        return registrarComprobanteTransferencia(contact, i as never, "co")
-      }
       case "enviar_certificacion":
         return sinCapacidad("no existe un documento de certificación (el Ministerio del Trabajo no certifica sistemas)", "Responde con el bloque legal: registro ordenado y trazable; sin prometer papeles.")
-      case "buscar_prospect_en_zoho": {
-        // Misma búsqueda que Chile: el NIT vive en RUT_Empresa (create-from-vicky-co).
-        const { buscarProspectEnZoho } = await import("../../tools/buscar-prospect-en-zoho.ts")
-        return buscarProspectEnZoho(input as never)
-      }
-      case "enviar_ficha_reloj": {
-        // Mismo SenseFace 2A que Perú (Books 26-sep): la tool chilena es la única.
-        const { enviarFichaReloj } = await import("../../tools/enviar-ficha-reloj.ts")
-        return enviarFichaReloj({ pais: "co" })
-      }
-      case "actualizar_cotizacion": {
-        // EDICIÓN EN SITIO = LA TOOL CHILENA (21-sep): Colombia solo arma los
-        // ítems con su motor (cotizarCO, COP) y el endpoint edita la MISMA
-        // cotización con el perfil colombiano (PDF CO, fila de Activación).
-        let quoteId = String(i.quote_id || "").trim()
-        if (!quoteId) {
-          try {
-            const { getQuotePointer } = await import("../../supabase-persistence-v3.ts")
-            quoteId = (await getQuotePointer(contact))?.quoteId || ""
-          } catch { /* sin puntero */ }
-        }
-        if (!quoteId) return { ok: false, error: "No hay una cotización formal vigente en esta conversación: emítela primero con generar_link_cotizadora." }
-        const userCount = Number(i.userCount || 0)
-        if (!userCount) return { ok: false, error: "Pásame la configuración COMPLETA nueva (userCount, y hardware/puntos si lleva equipo)." }
-        const { cotizarCO } = await import("./cotizar")
-        const { clasificarUbicacionCO } = await import("./geografia")
-        const cfg = aInputCotizarCO(i as CotizarIn) as { userCount: number; reloj?: { modalidad: "arriendo" | "venta"; cantidad: number }; puntosInstalacion?: Array<{ ubicacion: string; autoInstalada: boolean }> }
-        const calculo = cotizarCO({
-          userCount,
-          reloj: cfg.reloj,
-          puntos: (cfg.puntosInstalacion || []).map((p) => ({ ubicacion: p.ubicacion, zona: clasificarUbicacionCO(p.ubicacion).zona, autoInstalada: p.autoInstalada })),
-        })
-        const { actualizarCotizacion } = await import("../../tools/actualizar-cotizacion.ts")
-        const r = await actualizarCotizacion({
-          quote_id: quoteId,
-          userCount,
-          modulos: ["asistencia"],
-          resumen_cambio: String(i.resumen_cambio || "cambio de configuración").slice(0, 200),
-          _itemsPais: { pais: "co", items: calculo.itemsCotizador as unknown[] },
-        })
-        return { ...r, quoteId }
-      }
       case "anualizar_cotizacion": {
         // Anualidad = Chile (Lalo 21-sep): la MISMA edición en sitio con los
         // montos reales del subform en la moneda del país.

@@ -1,39 +1,30 @@
 /**
- * TOOLS ÚNICAS — México (24-sep, mismo molde que Perú y Colombia: "una sola
- * tool por herramienta para todos los países, no se replican").
+ * TOOLS ÚNICAS — México (24-sep; 27-sep: implementación = la de Chile).
  *
- * Expone los nombres del núcleo. Por debajo: motor real de México
- * (buildDispatchMX: cotizarMX en MXN, create-from-vicky-mx, lead al equipo MX,
- * Foundry, comprobante BANORTE, agenda Cal si está configurada), traducción de
- * formas (hardware[] → reloj, contactoEmail → email, rutEmpresa → rfc, motivos
- * CL → MX) y respuesta HONESTA donde México no tiene la capacidad
- * (certificación, ficha PDF). Descuentos = Chile desde el 24-sep (escalera
- * 10 → 20 % sobre el plan, memoria `mx_pref_`).
+ * Expone los nombres del núcleo. Las tools GLOBALES corren en
+ * lib/paises/tools-globales.ts (la implementación chilena de lib/tools/* con
+ * los datos de México: ficha operativa, evento de Cal del equipo MX, ítems
+ * del motor mexicano). Acá queda solo lo propio: motor de precios (motor
+ * único con datos de MX, memoria `mx_pref_`), emisión contra
+ * create-from-vicky-mx, anualidad (lib/paises/anualizar-pais.ts) y la
+ * respuesta honesta de enviar_certificacion. tests/tools-globales.test.ts
+ * vigila que este archivo no vuelva a atender una tool global.
  */
 import { marcarNoContactarSchema } from "../../tools/marcar-no-contactar.ts"
-import { programarSeguimientoSchema } from "../../tools/programar-seguimiento.ts"
+import { programarSeguimientoSchemaPais } from "../../tools/programar-seguimiento.ts"
+import { derivarASoporteSchemaPais } from "../../tools/derivar-a-soporte.ts"
+import { despacharToolGlobal, esToolGlobal, guardarPrefPais, leerPrefPais, type ConfigFormal, type PrefPais } from "../tools-globales.ts"
 import { reenviarCotizacionCorreoSchema } from "../../tools/reenviar-cotizacion-correo.ts"
 import { buscarProspectSchemaPais } from "../buscar-prospect-schema.ts"
 import { fichaOperativa } from "../ficha-operativa.ts"
+
 
 const TZ_MX_FICHA = fichaOperativa("mx").tz
 
 // Agenda en línea de México: el evento de Cal del equipo MX (env CAL_EVENT_TYPE_ID_MX; vacío = apagada).
 const CAL_EVENT_TYPE_ID_MX = (process.env.CAL_EVENT_TYPE_ID_MX ?? "7234317").trim()
 const REUNIONES_MX_HABILITADAS = Boolean(CAL_EVENT_TYPE_ID_MX)
-const TZ_MX = TZ_MX_FICHA
 
-function fechaLegibleMX(slotIso: string): string {
-  return new Date(slotIso).toLocaleString("es-MX", {
-    timeZone: TZ_MX,
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
-}
 
 type Schema = { name: string; description: string; input_schema: Record<string, unknown> }
 
@@ -233,30 +224,9 @@ export const TOOL_SCHEMAS_MX_UNIFICADAS: Schema[] = [
       required: [],
     },
   },
-  {
-    name: "derivar_a_soporte",
-    description:
-      "Registra al prospecto como lead en el CRM (territorio México) y lo deja en manos del equipo comercial de México, que lo contacta. Motivos: fuera_de_rango_trabajadores (más personas de las que cotizas), solicitud_explicita_persona (pide hablar con una persona o una reunión — pon en contexto el día/hora que propuso), callback, fuera_de_scope, cliente_existente_problema, tool_fallo, transferir_soporte_operativo, agendar_reunion. El RFC NUNCA es requisito. `contexto` = necesidad, configuración y precios cotizados. Devuelve `mensajeParaProspecto`.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        motivo: {
-          type: "string" as const,
-          enum: ["fuera_de_rango_trabajadores", "cliente_existente_problema", "solicitud_explicita_persona", "tool_fallo", "fuera_de_scope", "agendar_reunion", "callback", "transferir_soporte_operativo"],
-        },
-        contexto: { type: "string" as const, description: "Resumen para el ejecutivo." },
-        nombre: { type: "string" as const },
-        rutEmpresa: { type: "string" as const, description: "RFC, si lo dio." },
-        email: { type: "string" as const },
-        empresa: { type: "string" as const },
-        trabajadores: { type: "number" as const },
-        ciudad: { type: "string" as const },
-      },
-      required: ["motivo", "contexto"],
-    },
-  },
+  derivarASoporteSchemaPais("mx") as unknown as Schema,
   marcarNoContactarSchema as unknown as Schema,
-  programarSeguimientoSchema as unknown as Schema,
+  programarSeguimientoSchemaPais("mx") as unknown as Schema,
   // La MISMA descripción que Chile (ver el comentario en pe/tools-unificadas).
   reenviarCotizacionCorreoSchema as unknown as Schema,
   {
@@ -352,50 +322,6 @@ export function aInputCotizarMX(i: CotizarIn) {
   return out
 }
 
-const MOTIVO_MX: Record<string, string> = {
-  fuera_de_rango_trabajadores: "mas_de_50",
-  solicitud_explicita_persona: "pidio_persona",
-  agendar_reunion: "pidio_persona",
-  callback: "pidio_persona",
-  tool_fallo: "cotizacion_formal",
-  fuera_de_scope: "fuera_de_alcance",
-  cliente_existente_problema: "otro",
-  transferir_soporte_operativo: "otro",
-}
-
-type PrefMX = { userCount: number; hardware?: HardwareIn[]; puntosInstalacion?: PuntoIn[]; escalon: number }
-
-/**
- * Cotización FORMAL vigente de la conversación (puntero) con la guarda de
- * Pagada — la misma que Perú, sin leer campos peruanos.
- */
-async function formalVigenteMX(contact: string, quoteId?: string): Promise<{ quoteId: string } | { error: string }> {
-  let qid = String(quoteId || "").trim()
-  if (!qid) {
-    try {
-      const { getQuotePointer } = await import("../../supabase-persistence-v3.ts")
-      qid = (await getQuotePointer(contact))?.quoteId || ""
-    } catch {
-      /* sin puntero */
-    }
-  }
-  if (!qid) return { error: "No hay una cotización formal vigente en esta conversación: emítela primero con generar_link_cotizadora." }
-  try {
-    const { fetchZoho } = await import("../../zoho-token.ts")
-    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
-    const res = await fetchZoho(`${api}/crm/v8/${mod}/${qid}?fields=Estado_Cotizacion`)
-    if (res.status === 200) {
-      const data = (await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
-      const estado = String(data.data?.[0]?.Estado_Cotizacion || "")
-      if (/pagad/i.test(estado)) return { error: "Esa cotización ya está PAGADA: no se modifica. Si el cliente quiere cambios, el ejecutivo los coordina (derivar_a_soporte)." }
-    }
-  } catch {
-    /* sin lectura: la tool chilena vuelve a validar */
-  }
-  return { quoteId: qid }
-}
-
 export function buildDispatchMXUnificado(contact: string) {
   // Import dinámico: el motor MX trae Zoho/Cal/Foundry (no puro).
   let basePromise: Promise<(name: string, input: unknown) => Promise<unknown>> | null = null
@@ -403,28 +329,29 @@ export function buildDispatchMXUnificado(contact: string) {
     basePromise ??= import("./tools").then((m) => m.buildDispatchMX(contact))
     return basePromise.then((fn) => fn(name, input))
   }
-  // Memoria del ÚLTIMO estimado (vic_kv `co_pref_<contact>`) para que
-  // consultar_descuento_referencial funcione sin argumentos, igual que en
-  // Chile, Perú y Colombia (Lalo 24-sep: "descuento igualemos con Chile").
-  const kvKey = `mx_pref_${contact}`
-  async function leerPref(): Promise<PrefMX | null> {
-    try {
-      const { getKvValue } = await import("../../supabase-persistence-v3.ts")
-      const raw = await getKvValue(kvKey)
-      return raw ? (JSON.parse(raw) as PrefMX) : null
-    } catch {
-      return null
-    }
+  const leerPref = () => leerPrefPais("mx", contact) as Promise<(PrefPais & { hardware?: HardwareIn[]; puntosInstalacion?: PuntoIn[] }) | null>
+  const guardarPref = (p: PrefPais) => guardarPrefPais("mx", contact, p)
+
+  /** Ítems de la formal con el motor del país (a LISTA: el % vive en la cotización). */
+  async function itemsFormal(cfg: ConfigFormal): Promise<{ ok: true; items: unknown[] } | { ok: false; error: string }> {
+    const { cotizarMX } = await import("./cotizar")
+    const { clasificarUbicacionMX } = await import("./geografia")
+    const c = aInputCotizarMX(cfg as CotizarIn) as { userCount: number; reloj?: { modalidad: "arriendo" | "venta"; cantidad: number }; puntosInstalacion?: Array<{ ubicacion: string; autoInstalada: boolean }> }
+    const calculo = cotizarMX({
+      userCount: Number(cfg.userCount || 0),
+      reloj: c.reloj,
+      puntos: (c.puntosInstalacion || []).map((p) => ({ ubicacion: p.ubicacion, zona: clasificarUbicacionMX(p.ubicacion).zona, autoInstalada: p.autoInstalada })),
+    })
+    return { ok: true, items: calculo.itemsCotizador as unknown[] }
   }
-  async function guardarPref(p: PrefMX): Promise<void> {
-    try {
-      const { setKvValue } = await import("../../supabase-persistence-v3.ts")
-      await setKvValue(kvKey, JSON.stringify(p))
-    } catch {
-      /* la memoria del estimado es best-effort */
-    }
-  }
+
+  const ctx = { pais: "mx" as const, contact, eventoAgenda: async () => CAL_EVENT_TYPE_ID_MX, itemsFormal }
+
   return async function dispatchMXUnificado(name: string, input: unknown): Promise<unknown> {
+    // Las tools GLOBALES corren en lib/paises/tools-globales.ts (la
+    // implementación chilena con los datos del país). Acá: el motor de
+    // precios, la emisión contra create-from-vicky-mx y la anualidad.
+    if (esToolGlobal(name)) return despacharToolGlobal(ctx, name, input)
     const i = (input || {}) as Record<string, unknown>
     switch (name) {
       case "cotizar_referencial": {
@@ -472,25 +399,6 @@ export function buildDispatchMXUnificado(contact: string) {
         }
         return r
       }
-      case "consultar_siguiente_descuento": {
-        const f = await formalVigenteMX(contact, i.quote_id as string | undefined)
-        if ("error" in f) return { ok: false, error: f.error }
-        const { consultarSiguienteDescuento } = await import("../../tools/consultar-siguiente-descuento.ts")
-        const r = await consultarSiguienteDescuento({ quote_id: f.quoteId })
-        return { ...r, quoteId: f.quoteId }
-      }
-      case "aplicar_siguiente_descuento": {
-        const f = await formalVigenteMX(contact, i.quote_id as string | undefined)
-        if ("error" in f) return { ok: false, error: f.error }
-        const { aplicarSiguienteDescuento } = await import("../../tools/aplicar-siguiente-descuento.ts")
-        const r = await aplicarSiguienteDescuento({ quote_id: f.quoteId, pct_ofrecido: Number(i.pct_ofrecido) || undefined })
-        if (r.ok) {
-          const pref = await leerPref()
-          const escalon = r.ultimoEscalon?.pct >= 20 ? 2 : r.ultimoEscalon?.pct >= 10 ? 1 : pref?.escalon || 0
-          if (pref) await guardarPref({ ...pref, escalon })
-        }
-        return { ...r, quoteId: f.quoteId }
-      }
       case "generar_link_cotizadora": {
         // La configuración de la formal = la del MODELO, nunca la memoria
         // `mx_pref_` (mismo defecto que PE, caso Rodrigo 22-sep: el último
@@ -523,141 +431,8 @@ export function buildDispatchMXUnificado(contact: string) {
           escalonDescuento: esc,
         })
       }
-      case "derivar_a_soporte": {
-        const motivo = MOTIVO_MX[String(i.motivo || "")] || "otro"
-        return base("derivar_a_ejecutivo", {
-          nombre: String(i.nombre || "Prospecto WhatsApp"),
-          empresa: i.empresa,
-          email: i.email,
-          rfc: i.rutEmpresa,
-          trabajadores: i.trabajadores,
-          ciudad: i.ciudad,
-          motivo,
-          resumen: `[${String(i.motivo || "")}] ${String(i.contexto || "")}`.trim(),
-        })
-      }
-      case "registrar_solicitud_callback": {
-        const partes = [
-          i.necesidad ? `Necesidad: ${i.necesidad}` : "",
-          i.preferenciaHorario ? `Prefiere que lo llamen: ${i.preferenciaHorario}` : "",
-          i.cargo ? `Cargo: ${i.cargo}` : "",
-        ].filter(Boolean)
-        return base("derivar_a_ejecutivo", {
-          nombre: String(i.nombre || "Prospecto WhatsApp"),
-          empresa: i.empresa,
-          email: i.email,
-          trabajadores: i.trabajadores,
-          ciudad: i.ciudad,
-          motivo: "pidio_persona",
-          resumen: `[callback] ${partes.join(" · ") || "Pidió que lo llamen."}`,
-        })
-      }
-      case "consultar_agente_soporte":
-      case "marcar_no_contactar":
-      case "programar_seguimiento":
-      case "reenviar_cotizacion_correo":
-        return base(name, input)
-      // ── Agenda = las tools chilenas con el evento de Cal del equipo MX ──
-      // El agent-loop inyecta `eventTypeId` cuando el dueño del deal/lead
-      // tiene evento propio; si no viene, el evento MX por defecto. Jamás al
-      // round-robin chileno.
-      case "consultar_disponibilidad_horario": {
-        if (!REUNIONES_MX_HABILITADAS) return base(name, input)
-        const { consultarDisponibilidadHorario } = await import("../../tools/consultar-disponibilidad-horario.ts")
-        const iA = i as { fechaPropuesta?: string; eventTypeId?: string }
-        return consultarDisponibilidadHorario({
-          fechaPropuesta: String(iA.fechaPropuesta || ""),
-          country: "México",
-          eventTypeId: (iA.eventTypeId || "").trim() || CAL_EVENT_TYPE_ID_MX,
-        })
-      }
-      case "agendar_reunion": {
-        if (!REUNIONES_MX_HABILITADAS) return base(name, input)
-        const { agendarReunion } = await import("../../tools/agendar-reunion.ts")
-        const iA = i as { telefono?: string; eventTypeId?: string; prospectEmail?: string }
-        const r = await agendarReunion({
-          ...(i as object),
-          telefono: (iA.telefono || "").trim() || contact,
-          country: "México",
-          eventTypeId: (iA.eventTypeId || "").trim() || CAL_EVENT_TYPE_ID_MX,
-        } as never)
-        if (!r.ok) return r
-        const email = iA.prospectEmail || "tu correo"
-        return {
-          ...r,
-          timezone: TZ_MX,
-          mensajeParaProspecto:
-            `Listo!! Tu reunión quedó agendada para el ${fechaLegibleMX(r.slotIso)} (hora del centro de México)${r.atiende ? `, con ${r.atiende.nombre}` : ""} 🎉 ` +
-            `Te llegará la invitación con el link de la reunión a ${email}.` +
-            (r.atiende?.email ? ` Si necesitas algo antes, le escribes a 📧 ${r.atiende.email}${r.atiende.whatsapp ? ` o al 📱 ${r.atiende.whatsapp}` : ""}.` : "") +
-            ` Te puedo ayudar en algo más?`,
-        }
-      }
-      case "reagendar_reunion": {
-        if (!REUNIONES_MX_HABILITADAS) return base(name, input)
-        const { reagendarReunion } = await import("../../tools/reagendar-reunion.ts")
-        const r = await reagendarReunion({ ...(i as object), country: "México", _contact: contact } as never)
-        if (!r.ok) return r
-        return {
-          ...r,
-          mensajeParaProspecto:
-            `Listo!! Tu reunión quedó reagendada para el ${fechaLegibleMX(r.slotIso)} (hora del centro de México) 📅 ` +
-            `Te llegará la nueva invitación por correo. Te puedo ayudar en algo más?`,
-        }
-      }
-      case "enviar_cotizacion_whatsapp": {
-        const { enviarCotizacionWhatsapp } = await import("../../tools/enviar-cotizacion-whatsapp.ts")
-        return enviarCotizacionWhatsapp({ ...(i as object), _contact: contact } as never)
-      }
-      case "registrar_comprobante_transferencia": {
-        // Transferencia BANORTE: la MISMA tool chilena con el país (montos en MXN).
-        const { registrarComprobanteTransferencia } = await import("../../tools/registrar-comprobante-transferencia.ts")
-        return registrarComprobanteTransferencia(contact, i as never, "mx")
-      }
       case "enviar_certificacion":
         return sinCapacidad("no existe un documento de certificación (la STPS no certifica sistemas)", "Responde con el bloque legal: registro ordenado y trazable; sin prometer papeles.")
-      case "buscar_prospect_en_zoho": {
-        // Misma búsqueda que Chile: el RFC vive en RUT_Empresa (create-from-vicky-mx).
-        const { buscarProspectEnZoho } = await import("../../tools/buscar-prospect-en-zoho.ts")
-        return buscarProspectEnZoho(input as never)
-      }
-      case "enviar_ficha_reloj": {
-        // Mismo SenseFace 2A que Perú (Books 26-sep): la tool chilena es la única.
-        const { enviarFichaReloj } = await import("../../tools/enviar-ficha-reloj.ts")
-        return enviarFichaReloj({ pais: "mx" })
-      }
-      case "actualizar_cotizacion": {
-        // EDICIÓN EN SITIO = LA TOOL CHILENA: México solo arma los ítems con su
-        // motor (cotizarMX, MXN) y el endpoint edita la MISMA cotización con
-        // el perfil mexicano (PDF MX). Ítems a LISTA: el % vive en la cotización.
-        let quoteId = String(i.quote_id || "").trim()
-        if (!quoteId) {
-          try {
-            const { getQuotePointer } = await import("../../supabase-persistence-v3.ts")
-            quoteId = (await getQuotePointer(contact))?.quoteId || ""
-          } catch { /* sin puntero */ }
-        }
-        if (!quoteId) return { ok: false, error: "No hay una cotización formal vigente en esta conversación: emítela primero con generar_link_cotizadora." }
-        const userCount = Number(i.userCount || 0)
-        if (!userCount) return { ok: false, error: "Pásame la configuración COMPLETA nueva (userCount, y hardware/puntos si lleva equipo)." }
-        const { cotizarMX } = await import("./cotizar")
-        const { clasificarUbicacionMX } = await import("./geografia")
-        const cfg = aInputCotizarMX(i as CotizarIn) as { userCount: number; reloj?: { modalidad: "arriendo" | "venta"; cantidad: number }; puntosInstalacion?: Array<{ ubicacion: string; autoInstalada: boolean }> }
-        const calculo = cotizarMX({
-          userCount,
-          reloj: cfg.reloj,
-          puntos: (cfg.puntosInstalacion || []).map((p) => ({ ubicacion: p.ubicacion, zona: clasificarUbicacionMX(p.ubicacion).zona, autoInstalada: p.autoInstalada })),
-        })
-        const { actualizarCotizacion } = await import("../../tools/actualizar-cotizacion.ts")
-        const r = await actualizarCotizacion({
-          quote_id: quoteId,
-          userCount,
-          modulos: ["asistencia"],
-          resumen_cambio: String(i.resumen_cambio || "cambio de configuración").slice(0, 200),
-          _itemsPais: { pais: "mx", items: calculo.itemsCotizador as unknown[] },
-        })
-        return { ...r, quoteId }
-      }
       case "anualizar_cotizacion": {
         // Anualidad = Chile/PE/CO (26-sep): la MISMA edición en sitio con los
         // montos reales del subform en MXN.

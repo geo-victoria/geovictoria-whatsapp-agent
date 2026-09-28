@@ -7,7 +7,7 @@
  * bandeja de nadie — la regla de leads de Zoho no dispara por API).
  */
 
-import { reglaZoho } from "@/lib/paises/ficha-operativa"
+import { fichaOperativa, reglaZoho } from "@/lib/paises/ficha-operativa"
 import { createZohoLead, updateZohoLeadOwner } from "@/lib/zoho-leads"
 import { vendedoresDePais } from "@/lib/ptv"
 
@@ -39,7 +39,11 @@ const TM_TOMBOLA_LEADS_CL = reglaZoho("cl", "leadsCalificado")
 // los SDR" → regla SDR (…3111). Antes TODO callback iba a la de ejecutivos.
 const TM_TOMBOLA_SDR_CL = reglaZoho("cl", "leadsSinCalificar")
 
-async function asignarLeadPorReglaCL(leadId: string, calificado: boolean): Promise<string | undefined> {
+async function asignarLeadPorReglaCL(
+  leadId: string,
+  calificado: boolean,
+  reglas: { calificado: string; sinCalificar: string } = { calificado: TM_TOMBOLA_LEADS_CL, sinCalificar: TM_TOMBOLA_SDR_CL },
+): Promise<string | undefined> {
   try {
     const { getZohoAccessToken } = await import("@/lib/zoho-token")
     const token = await getZohoAccessToken()
@@ -49,7 +53,7 @@ async function asignarLeadPorReglaCL(leadId: string, calificado: boolean): Promi
       method: "PUT",
       headers: H,
       cache: "no-store",
-      body: JSON.stringify({ data: [{ id: leadId }], lar_id: calificado ? TM_TOMBOLA_LEADS_CL : TM_TOMBOLA_SDR_CL }),
+      body: JSON.stringify({ data: [{ id: leadId }], lar_id: calificado ? reglas.calificado : reglas.sinCalificar }),
     })
     if (!put.ok) return undefined
     const g = await fetch(`${api}/crm/v3/Leads/${leadId}?fields=Owner`, { headers: H, cache: "no-store" })
@@ -160,6 +164,8 @@ export type RegistrarSolicitudCallbackInput = {
   preferenciaHorario?: string
   seguimientoCotizacion?: boolean
   zohoLeadId?: string
+  /** País del contacto (lo inyecta el despacho, no el modelo). Sin él = el del teléfono. */
+  _pais?: "cl" | "co" | "mx" | "pe"
 }
 
 export type RegistrarSolicitudCallbackResultado =
@@ -184,8 +190,15 @@ export async function registrarSolicitudCallback(
   //   forzó 20+ leads; caso Javier Vidal). Fallback si la regla no asigna:
   //   la rotación interna de siempre.
   // - CO/MX: rotación interna (el "roster" es el dueño real del país).
-  const pais = paisDeTelefono(args.telefono)
-  const usaReglaCL = pais === "cl"
+  const pais = args._pais || paisDeTelefono(args.telefono)
+  // LAS REGLAS DE ZOHO DEL PAÍS (27-sep, tools únicas): la misma tool para los
+  // cuatro países; el lar_id sale de la ficha operativa. Chile: las mismas
+  // constantes de siempre. Un país sin regla declarada cae a la rotación.
+  const reglasPais =
+    pais === "cl"
+      ? { calificado: TM_TOMBOLA_LEADS_CL, sinCalificar: TM_TOMBOLA_SDR_CL }
+      : { calificado: reglaZoho(pais, "leadsCalificado"), sinCalificar: reglaZoho(pais, "leadsSinCalificar") }
+  const usaReglaCL = pais === "cl" || Boolean(reglasPais.calificado && reglasPais.sinCalificar)
   const ownerRotacion = await vendedorPorTombola(pais)
 
   // Lead PRE-EXISTENTE en Zoho (outbound del formulario): NO crear duplicado.
@@ -194,7 +207,7 @@ export async function registrarSolicitudCallback(
   const existingLeadId = (args.zohoLeadId || "").trim()
   if (existingLeadId && (usaReglaCL || ownerRotacion)) {
     let ownerEmail = usaReglaCL
-      ? await asignarLeadPorReglaCL(existingLeadId, Boolean((args.trabajadores || "").trim()))
+      ? await asignarLeadPorReglaCL(existingLeadId, Boolean((args.trabajadores || "").trim()), reglasPais)
       : undefined
     if (!ownerEmail && ownerRotacion) {
       const upd = await updateZohoLeadOwner(existingLeadId, ownerRotacion)
@@ -225,7 +238,7 @@ export async function registrarSolicitudCallback(
     email: args.email,
     telefono: args.telefono,
     cargo: args.cargo,
-    pais: args.pais || "Chile",
+    pais: args.pais || fichaOperativa(pais).nombre,
     ciudad: args.ciudad,
     trabajadores: args.trabajadores,
     necesidad: args.necesidad,
@@ -246,7 +259,7 @@ export async function registrarSolicitudCallback(
   // — un lead REUSADO por el dedup puede traer gestión humana y no se pisa.
   let ownerFinal = result.ownerEmail
   if (usaReglaCL && result.entraATombola) {
-    const porRegla = await asignarLeadPorReglaCL(result.leadId, Boolean((args.trabajadores || "").trim()))
+    const porRegla = await asignarLeadPorReglaCL(result.leadId, Boolean((args.trabajadores || "").trim()), reglasPais)
     if (porRegla) ownerFinal = porRegla
     else if (ownerRotacion) {
       const upd = await updateZohoLeadOwner(result.leadId, ownerRotacion).catch(() => ({ success: false as const }))

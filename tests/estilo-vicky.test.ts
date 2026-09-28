@@ -18,6 +18,14 @@ import {
 } from "../lib/voseo-v3.ts"
 // El prompt de Chile se ARMA desde el núcleo (21-sep): se lee el RENDER, no el archivo.
 import { textoNucleo } from "../lib/prompt-nucleo/texto.ts"
+import { cotizarReferencialConReglas } from "../lib/cotizacion-unica/motor.ts"
+import { REGLAS_CL, resultadoChile } from "../lib/cotizacion-unica/reglas-cl.ts"
+
+/** El mensaje REAL de cotizar_referencial de Chile (motor único + datos de Chile). */
+function mensajeChile(args: Parameters<typeof cotizarReferencialConReglas>[1]): string {
+  const r = resultadoChile(cotizarReferencialConReglas(REGLAS_CL, args, 40000), 40000) as { mensajeParaProspecto?: string }
+  return String(r.mensajeParaProspecto || "")
+}
 import { FICHA_CL } from "../lib/prompt-nucleo/ficha.ts"
 
 const RAIZ = new URL("..", import.meta.url).pathname
@@ -206,12 +214,16 @@ describe("UF primero, pesos entre paréntesis (Eduardo 18-ago — supersede el '
     // el cobro real es en UF y el peso es aproximación; mostrarlo al revés
     // generaba reclamos cuando el cargo no calzaba con el peso prometido.
     // El VALOR de la UF del día sigue sin mostrarse (regla 17-ago intacta).
-    const t = readFileSync(join(RAIZ, "lib/tools/cotizar-referencial.ts"), "utf8")
-    assert.match(t, /Total mensual con IVA: \$\{fmtUF\(totalRecurrenteUF\)\} UF \(aprox\. \$\$\{fmtNumCL\(totalRecurrenteCLP, 0\)\}\)/)
-    assert.match(t, /Total único con IVA: \$\{fmtUF\(totalUnicoUF\)\} UF \(aprox\./)
-    assert.match(t, /pago inicial de \$\{fmtUF\(totalUnicoUF \+ totalRecurrenteUF\)\} UF \(aprox\./)
-    assert.ok(!/Equivalente: \$\$\{fmtNumCL/.test(t), "quedó la línea 'Equivalente' CLP-primero del 17-ago")
-    assert.ok(!/UF del día: \$\$\{fmtNumCL\(ufActual/.test(t), "quedó el valor de la UF en el mensaje al prospecto")
+    // 27-sep: la lógica de cotizar_referencial vive en el motor único
+    // (lib/cotizacion-unica) — se prueba el MENSAJE REAL de Chile, no el fuente.
+    const solo = mensajeChile({ userCount: 12, modulos: ["asistencia"] })
+    assert.match(solo, /Total mensual con IVA: [\d,]+ UF \(aprox\. \$[\d.]+\)/)
+    const venta = mensajeChile({ userCount: 12, modulos: ["asistencia"], hardware: [{ id: "senseface_2a", cantidad: 1, modalidad: "venta" }], puntosInstalacion: [{ ubicacion: "Concepción", autoInstalada: true }] })
+    assert.match(venta, /Se suma un pago inicial único de [\d,]+ UF \+ IVA \(aprox\. \$[\d.]+\)\./)
+    for (const t of [solo, venta]) {
+      assert.ok(!/Equivalente: \$/.test(t), "quedó la línea 'Equivalente' CLP-primero del 17-ago")
+      assert.ok(!/UF del día/.test(t), "quedó el valor de la UF en el mensaje al prospecto")
+    }
   })
 })
 
@@ -221,14 +233,15 @@ describe("doble valor compacto (Eduardo 17-ago; precio en UF desde 18-ago)", () 
     // 18-ago (propuesta literal de Eduardo) el mensual va en UF + IVA con el
     // aprox. en pesos, una línea fija explica el cobro en UF, y la
     // instalación se ofrece como "El reloj es autoinstalable…".
-    const t = readFileSync(join(RAIZ, "lib/tools/cotizar-referencial.ts"), "utf8")
-    assert.match(t, /te recomiendo \$\{modalidadLabel\} \+ App/)
-    assert.match(t, /UF \+ IVA al mes \(aprox\. \$\$\{fmtNumCL\(totalRecurrenteCLP, 0\)\}\)/)
-    assert.match(t, /El cobro se realiza en UF, por lo que el valor en pesos puede variar mes a mes/)
-    assert.match(t, /marcar desde el reloj o desde el celular/)
-    assert.match(t, /El reloj es autoinstalable\. Si prefieres que nosotros lo instalemos/)
-    assert.match(t, /2\.- Una alternativa más económica sería si marcan solo mediante nuestra app/)
-    assert.match(t, /Qué opción prefieres\? Con la que elijas te genero la cotización formal de inmediato/)
-    assert.ok(!/al mes, IVA incluido/.test(t), "quedó el formato CLP-primero del 17-ago")
+    const venta = mensajeChile({ userCount: 12, modulos: ["asistencia"], hardware: [{ id: "senseface_2a", cantidad: 1, modalidad: "venta" }], puntosInstalacion: [{ ubicacion: "Concepción", autoInstalada: true }] })
+    const arriendo = mensajeChile({ userCount: 12, modulos: ["asistencia"], hardware: [{ id: "senseface_2a", cantidad: 1, modalidad: "arriendo" }], puntosInstalacion: [{ ubicacion: "Concepción", autoInstalada: true }] })
+    assert.match(venta, /te recomiendo Reloj en venta \+ App/)
+    assert.match(venta, /UF \+ IVA al mes \(aprox\. \$[\d.]+\)/)
+    assert.match(venta, /El cobro se realiza en UF, por lo que el valor en pesos puede variar mes a mes/)
+    assert.match(venta, /marcar desde el reloj o desde el celular/)
+    assert.match(venta, /El reloj es autoinstalable\. Si prefieres que nosotros lo instalemos/)
+    assert.match(arriendo, /2\.- Una alternativa más económica sería si marcan solo mediante nuestra app/)
+    assert.match(venta, /Qué opción prefieres\? Con la que elijas te genero la cotización formal de inmediato/)
+    for (const t of [venta, arriendo]) assert.ok(!/al mes, IVA incluido/.test(t), "quedó el formato CLP-primero del 17-ago")
   })
 })

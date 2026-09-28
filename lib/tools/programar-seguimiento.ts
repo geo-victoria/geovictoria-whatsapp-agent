@@ -14,6 +14,8 @@
  * 1h/23h ni la reactivación 47h/7d/15d la tocan).
  */
 
+import { fichaOperativa } from "../paises/ficha-operativa.ts"
+
 export const programarSeguimientoSchema = {
   name: "programar_seguimiento",
   description:
@@ -35,6 +37,32 @@ export const programarSeguimientoSchema = {
     },
     required: ["cuandoIso"],
   },
+}
+
+/**
+ * El MISMO schema para los cuatro países (27-sep, tools únicas): fuera de
+ * Chile cambia solo el DATO de la zona horaria por defecto con que el modelo
+ * interpreta "el lunes a las 10" (ficha operativa). Chile recibe el objeto de
+ * siempre, idéntico.
+ */
+export function programarSeguimientoSchemaPais(pais?: string) {
+  const cc = String(pais || "").trim().toLowerCase()
+  if (!cc || cc === "cl") return programarSeguimientoSchema
+  const f = fichaOperativa(cc)
+  const base = programarSeguimientoSchema.input_schema.properties.cuandoIso
+  return {
+    ...programarSeguimientoSchema,
+    input_schema: {
+      ...programarSeguimientoSchema.input_schema,
+      properties: {
+        ...programarSeguimientoSchema.input_schema.properties,
+        cuandoIso: {
+          ...base,
+          description: base.description.replace("(default Chile/America/Santiago)", `(default ${f.nombre}/${f.tz})`),
+        },
+      },
+    },
+  }
 }
 
 export type ProgramarSeguimientoInput = { cuandoIso: string; motivo?: string }

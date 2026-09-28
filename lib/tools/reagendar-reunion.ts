@@ -13,6 +13,7 @@
 import { rescheduleMeeting, getTimezone, computeMeetingReminderAt } from "@/lib/calendar"
 import { getUpcomingMeeting, updateMeetingByUid } from "@/lib/supabase-persistence-v3"
 import { updateZohoLeadOwner } from "@/lib/zoho-leads"
+import { zonaLegibleAgenda } from "./agendar-reunion"
 
 export const reagendarReunionSchema = {
   name: "reagendar_reunion",
@@ -117,7 +118,7 @@ export async function reagendarReunion(
     hour12: false,
   })
   const mensajeParaProspecto =
-    `¡Listo! Reagendé tu reunión para el ${fechaLegible} hrs. ` +
+    `¡Listo! Reagendé tu reunión para el ${fechaLegible} hrs${zonaLegibleAgenda(country) ? ` (${zonaLegibleAgenda(country)})` : ""}. ` +
     `Te llegará la nueva invitación por correo con los datos del ejecutivo. ` +
     `¿Hay algo más en lo que pueda ayudarte?`
 
