@@ -1,8 +1,7 @@
 import { monedaDealDeTerritorio } from "./convencion-deal.ts"
 import { ccLiderTraspaso } from "./cc-lider"
 import { esContactoCL } from "./origen-canal.ts"
-import { rosterSdrOperativo, reglaZoho } from "./paises/ficha-operativa.ts"
-import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "./paises/co/tombola-zoho.ts"
+import { rosterSdrOperativo, reglaZoho, fichaOperativa, paisDeTelefonoOperativo, paisDeTerritorio, paisTieneProceso, paisesConProceso } from "./paises/ficha-operativa.ts"
 /**
  * Sincronización determinista Zoho CRM ← hitos de la conversación de Vicky
  * (Lalo, 30-jul-2026). Regla de marketing: NUNCA crear deals directos — todo
@@ -309,21 +308,29 @@ const INTERINOS = new Set([
 // el LEAD sin cotización lo posee el SDR (Galindo y cía), y al emitir la formal
 // el DEAL pasa al EJECUTIVO (Gordillo). Por eso un lead de un SDR CO NO se
 // hereda al deal: es un handoff SDR→ejecutivo, no gestión que preservar.
-const SDR_CO_IDS = new Set([
+// 28-sep (paso 4): el país con esta regla es un PROCESO de la ficha operativa
+// (`sdrEntregaAlCotizar`, hoy solo Colombia); los ids históricos de CO se
+// conservan porque ya no están en el roster vigente.
+const SDR_HANDOFF_IDS = new Set([
   "3525045000613817111", // Eddy Galindo
   "3525045000619732095", // Guerrero
   "3525045000639899035", // Quiroga
   // Lalo 23-sep: las SDR que hoy reciben los leads de Colombia (entrada 34
   // de la regla global de marketing), leídas de la ficha operativa.
-  ...rosterSdrOperativo("co").map((p) => p.zohoId),
+  ...paisesConProceso("sdrEntregaAlCotizar").flatMap((cc) => rosterSdrOperativo(cc).map((p) => p.zohoId)),
 ])
 
+/** ¿El lead está con una SDR cuyo país entrega al cotizar (handoff SDR→ejecutivo)? */
+function esSdrHandoff(territorio: string | null | undefined, ownerId: string): boolean {
+  return Boolean(ownerId) && paisTieneProceso(paisDeTerritorio(territorio), "sdrEntregaAlCotizar") && SDR_HANDOFF_IDS.has(ownerId)
+}
+
 /** ¿El dueño del lead es un HUMANO REAL cuya gestión se hereda al deal? No lo
- * son los interinos ni —en Colombia— los SDR (esos entregan el deal al
- * ejecutivo al cotizar). */
+ * son los interinos ni —en los países con handoff (Colombia)— los SDR (esos
+ * entregan el deal al ejecutivo al cotizar). */
 function heredaGestionAlDeal(ownerId: string, territorio: string): boolean {
   if (!ownerId || INTERINOS.has(ownerId)) return false
-  if (territorio === "Colombia" && SDR_CO_IDS.has(ownerId)) return false
+  if (esSdrHandoff(territorio, ownerId)) return false
   return true
 }
 const HOY_MAS_30 = () => new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
@@ -358,14 +365,10 @@ function territorioDeContacto(contact: string): "Chile" | "Colombia" | "México"
   if (marca === "MX") return "México"
   if (marca === "PE") return "Perú"
   if (/^\s*(FB|IG)\./i.test(String(contact || ""))) return "Chile" // Messenger/Instagram = página CL
-  const c = (contact || "").replace(/\D/g, "")
-  if (c.startsWith("56")) return "Chile"
-  if (c.startsWith("57")) return "Colombia"
-  if (c.startsWith("52")) return "México"
-  // Perú (Fase 1b, 05-ago): sin este caso, un +51 caía al default "Chile" en
-  // la creación del deal (Territorio y moneda equivocados).
-  if (c.startsWith("51")) return "Perú"
-  return null
+  // 28-sep (paso 4): el prefijo lo resuelve la ficha operativa (un país nuevo
+  // se declara ahí); el Territorio de Zoho es el `nombre` de la ficha.
+  const pais = paisDeTelefonoOperativo(contact)
+  return pais ? (fichaOperativa(pais).nombre as "Chile" | "Colombia" | "México" | "Perú") : null
 }
 
 type ZohoHeaders = { Authorization: string; "Content-Type": string }
@@ -869,11 +872,9 @@ export async function notificarTraspasoDeal(
       console.warn(`[crm-hitos] deal ${dealId} sigue con dueño robot tras el sorteo — nadie fue notificado`)
       return await estampar({ ok: false, motivo: "el deal quedó con dueño robot: no había a quién avisarle" })
     }
-    // La copia a Victoria Luna es SOLO CHILE (Lalo 31-jul): CO y MX siguen
-    // con sus reglas antiguas — el dueño recibe su aviso, sin CC.
-    const esChile = /chile/i.test(String(fila?.Territorio || "")) || !fila?.Territorio
-    // Copia al líder del país (CL Victoria Luna · CO María Fernanda Cely, Lalo 23-sep).
-    const ccLider = ccLiderTraspaso(String(contact || ""), esChile ? "Chile" : String(fila?.Territorio || ""))
+    // Copia al líder del país (CL Victoria Luna · CO María Fernanda Cely, Lalo
+    // 23-sep) — lo decide `ccLiderTraspaso` por territorio (sin territorio = Chile).
+    const ccLider = ccLiderTraspaso(String(contact || ""), String(fila?.Territorio || "Chile"))
     const { correoEntregable } = await import("./correo-alias")
     const destino = await correoEntregable(owner.email)
     // La respuesta del send_mail NO se miraba: un 400 de Zoho quedaba en
@@ -973,11 +974,11 @@ async function convertirConDeal(
   const companyLead = String(lead.company || "").trim()
   if (!companyLead || /^[-–—\s]*$/.test(companyLead) || /^prospecto whatsapp$/i.test(companyLead) || /^no declarado$/i.test(companyLead)) {
     let nombreCuenta = ""
-    if (lead.rut && territorio === "Chile") {
-      try {
-        const { fichaEmpresaSii } = await import("./empresas-sii")
-        nombreCuenta = (await fichaEmpresaSii(lead.rut.trim().toUpperCase().replace(/\./g, "")))?.razonSocial || ""
-      } catch { nombreCuenta = "" }
+    if (lead.rut) {
+      // Razón social del PADRÓN del país (SII/SUNAT/RUES, según la ficha; MX
+      // no tiene) — 28-sep, alcance global: antes solo Chile la resolvía acá.
+      const { razonSocialPorPadron } = await import("./paises/razon-social-padron")
+      nombreCuenta = await razonSocialPorPadron(paisDeTerritorio(territorio) || "cl", lead.rut)
     }
     if (!nombreCuenta) nombreCuenta = `Por identificar (WhatsApp +${contact.replace(/\D/g, "")})`
     await fetch(`${api}/crm/v3/Leads/${lead.id}`, {
@@ -1261,9 +1262,12 @@ async function convertirConDeal(
     // hito no-formal nace y SE QUEDA con Galindo — un vic_ptv del TTV viejo
     // (Gordillo, muchas veces ni siquiera presentado al cliente) no lo pisa.
     let asignadoPorTraspaso = false
-    // Con el interruptor de Colombia encendido, CO entra a la mecánica chilena
-    // y el traspaso vigente también manda ahí.
-    if (!heredaDuenoHumano && (territorio !== "Colombia" || tombolaZohoCoActiva())) {
+    // Con la tómbola de Zoho encendida (proceso `tombolaZoho` de la ficha) el
+    // país entra a la mecánica chilena y el traspaso vigente también manda ahí;
+    // solo un país con la tómbola APAGADA conserva sus fijos.
+    const paisTraspaso = paisDeTerritorio(territorio)
+    const conservaFijos = Boolean(paisTraspaso) && !paisTieneProceso(paisTraspaso, "tombolaZoho")
+    if (!heredaDuenoHumano && !conservaFijos) {
       try {
         const { vendedorTraspasado } = await import("./loop-v2")
         const v = await vendedorTraspasado(contact.replace(/\D/g, ""))
@@ -1965,13 +1969,9 @@ export async function sincronizarHitoCrm(
           .filter((m) => m.role === "user")
           .map((m) => String(m.content || ""))
           .join("\n")
-        const rutChat = clean.startsWith("51")
-          ? (await import("./rut")).rucEnTexto(soloCliente)
-          : clean.startsWith("57")
-            ? (await import("./paises/co/nit")).nitEnTexto(soloCliente)
-            : clean.startsWith("52")
-              ? (await import("./paises/mx/rfc")).rfcEnTexto(soloCliente)
-              : (await import("./empresas-sii")).rutEnTexto(soloCliente)
+        // Documento del país (RUT · RUC · NIT · RFC) elegido por la ficha (28-sep).
+        const { documentoDeContactoEnTexto } = await import("./paises/documento-en-texto")
+        const rutChat = documentoDeContactoEnTexto(clean, soloCliente)
         if (rutChat) {
           datos = { ...datos, rut: rutChat }
           console.log(`[crm-hitos] ${clean}: RUT ${rutChat} recuperado del historial para clasificar el hito "${hito}"`)
@@ -2066,17 +2066,12 @@ export async function sincronizarHitoCrm(
       // Perú es la excepción deliberada: Mónica NO es interina sino la
       // ejecutiva única real (sin tómbola) — su gestión SÍ se hereda al deal.
       const territorio = territorioDeContacto(clean)
-      const esCO = territorio === "Colombia"
-      // SOLO CHILE cambia (Lalo 18-ago: "en los países no toques nada"):
-      // CL sin interina — nace con el usuario Vicky. CO/MX/PE conservan sus
-      // dueños de siempre.
-      const OWNER_INTERINO: Record<string, string> = {
-        // SDR MX de la ficha operativa (Pablo Rodríguez desde el 24-sep; antes
-        // Miguel Guzmán fijo, 12-ago). Leads sin formal van a él.
-        "México": rosterSdrOperativo("mx")[0]?.zohoId || "",
-        // Perú (Lalo 15-sep: "siempre considera la regla chilena de traspaso"):
-        // igual que Chile, el lead nace con Vicky; Mónica lo recibe al traspasar.
-      }
+      const paisLead = paisDeTerritorio(territorio)
+      // 28-sep (paso 4): ¿con quién NACE el lead? Proceso `leadNaceConSdr` de la
+      // ficha (hoy solo México, Lalo 13-ago: leads sin formal al SDR MX); los
+      // demás nacen con el usuario Vicky y esperan a la tómbola o al reloj
+      // (CL 18-ago · PE 15-sep · CO 23-sep).
+      const ownerInterino = paisTieneProceso(paisLead, "leadNaceConSdr") ? rosterSdrOperativo(paisLead)[0]?.zohoId || "" : ""
       const { createZohoLead } = await import("./zoho-leads")
       const creado = await createZohoLead({
         contactoWA: clean,
@@ -2090,20 +2085,21 @@ export async function sincronizarHitoCrm(
         empresa: datos.empresa,
         email: datos.email,
         trabajadores: datos.empleados,
-        // CO: round-robin SDR abajo, no acá. CHILE: usuario Vicky (sin
-        // interina) hasta que la tómbola/reloj entregue al dueño real.
-        ownerId: esCO ? undefined : territorio ? OWNER_INTERINO[territorio] : undefined,
+        // Sin dueño = usuario Vicky (sin interina) hasta que la tómbola/reloj
+        // entregue al dueño real; con `leadNaceConSdr` nace con el SDR del país.
+        ownerId: ownerInterino || undefined,
       })
       if (!creado.success) {
         console.warn(`[crm-hitos] ${clean}: no se pudo crear lead (${creado.error})`)
         return
       }
-      // CO con el interruptor de la tómbola encendido (Lalo 23-sep) = Chile: el
-      // lead nace con el usuario Vicky y ESPERA; lo entrega la escalera o el
-      // reloj de traspaso por las reglas de Zoho. Apagado: SDR fijo (05-ago).
-      if (esCO && !tombolaZohoCoActiva()) {
-        const { reasignarLeadSdrInboundCO } = await import("./zoho-leads")
-        await reasignarLeadSdrInboundCO(creado.leadId).catch(() => {})
+      // País con la tómbola de Zoho APAGADA (Colombia hasta el 23-sep, regla
+      // 05-ago "el primero se lo queda"): el lead va al SDR fijo del país al
+      // nacer. Con la tómbola encendida = Chile: nace con Vicky y ESPERA a la
+      // escalera o al reloj de traspaso.
+      if (paisLead && !paisTieneProceso(paisLead, "tombolaZoho")) {
+        const { reasignarLeadSdrInboundDePais } = await import("./zoho-leads")
+        await reasignarLeadSdrInboundDePais(paisLead, creado.leadId).catch(() => {})
       }
       const lead: LeadEncontrado = {
         id: creado.leadId,
@@ -2147,8 +2143,7 @@ export async function sincronizarHitoCrm(
     // handoff SDR→ejecutivo — el lead debe convertirse (el deal no hereda al
     // SDR: heredaGestionAlDeal lo excluye y el dueño sale del mapa CO).
     // Tratarlo como "dueño humano" dejaba los leads SDR CO sin convertir nunca.
-    const esSdrCO =
-      territorioDeContacto(clean) === "Colombia" && SDR_CO_IDS.has(lead.ownerId)
+    const esSdrCO = esSdrHandoff(territorioDeContacto(clean), lead.ownerId)
     const esDeVicky = !lead.ownerId || INTERINOS.has(lead.ownerId) || esSdrCO
 
     // ── EXCEPCIÓN POR MOTIVO TERMINAL (Lalo 21-ago, catastro de traspasos) ──
