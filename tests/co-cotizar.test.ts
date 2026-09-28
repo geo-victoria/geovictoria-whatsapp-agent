@@ -62,8 +62,8 @@ test("venta en Ibagué (intermedia) con visita pedida: envío 69.000 + instalaci
   assert.ok(inst && inst.subtotalCOP === TARIFAS_CO.instalacion.intermedia && inst.descuentoPct === undefined)
   // Pago inicial = activación (315.000) + equipo 620.000 (+IVA aparte) + envío 69.000 + instalación 530.000.
   assert.equal(r.pagoInicialNeto, 315000 + 620000 + 69000 + 530000)
-  // Forma de Chile (28-sep): la visita pedida "ya viene incluida" y su monto va en el pago inicial.
-  assert.ok(r.mensajeParaProspecto.includes("En este caso la instalación por nuestro equipo técnico ya viene incluida."))
+  // Forma de Chile (28-sep): la visita pedida "va incluida en el pago inicial" y su monto va en el pago inicial.
+  assert.ok(r.mensajeParaProspecto.includes("En este caso la instalación por nuestro equipo técnico va incluida en el pago inicial."))
 })
 
 test("venta en Bogotá sin visita: envío 42.000 y la visita se ofrece a 175.000", () => {

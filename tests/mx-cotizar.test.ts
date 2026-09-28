@@ -56,8 +56,8 @@ test("venta en Toluca (intermedia) con visita pedida: envío $560 + instalación
   // reloj 2,100 + envío 560 + instalación 2,400 (capacitación en 0) + primer
   // mes del plan ($1,200 fijo hasta 15) — patrón CL/PE/CO desde el 24-sep.
   assert.equal(r.pagoInicialNeto, 2100 + 560 + 2400 + 1200)
-  // Forma de Chile (28-sep): la visita pedida "ya viene incluida" y su monto va en el pago inicial.
-  assert.ok(r.mensajeParaProspecto.includes("En este caso la instalación por nuestro equipo técnico ya viene incluida."))
+  // Forma de Chile (28-sep): la visita pedida "va incluida en el pago inicial" y su monto va en el pago inicial.
+  assert.ok(r.mensajeParaProspecto.includes("En este caso la instalación por nuestro equipo técnico va incluida en el pago inicial."))
   assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de $5,060 + IVA."))
 })
 

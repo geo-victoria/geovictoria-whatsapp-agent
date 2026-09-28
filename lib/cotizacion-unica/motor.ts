@@ -659,7 +659,7 @@ export function cotizarReferencialConReglas(
       if (instalacionCotizada) {
         fraseInstalacion = instalacionCotizadaBonificada
           ? `La instalación por nuestro equipo técnico va incluida sin costo ${T.bonificadaEn}.`
-          : "En este caso la instalación por nuestro equipo técnico ya viene incluida."
+          : "En este caso la instalación por nuestro equipo técnico va incluida en el pago inicial."
       } else if (instalacionGratisTotal) {
         fraseInstalacion = `La instalación por nuestro equipo técnico va incluida sin costo ${T.bonificadaEn}; si prefieres, el ${T.equipo} también es autoinstalable.`
       } else if (!todoPlugAndPlay) {
