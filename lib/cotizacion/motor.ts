@@ -324,7 +324,10 @@ export function cotizar(reglas: ReglasMotor, input: EntradaMotor): ResultadoMoto
         )
       } else {
         frases.push(
-          `El ${T.equipo} es autoinstalable. Si prefieres que nosotros lo instalemos, tiene un costo único adicional de ${fmt(unit)}${R.sufijo}.`,
+          // Como en Chile (Lalo 28-sep, "no se muestra el precio de instalación
+          // porque espanta, solo se menciona que podríamos hacerlo"): el precio
+          // de la visita técnica sale solo si el cliente la pide.
+          `El ${T.equipo} es autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.`,
         )
       }
     }
