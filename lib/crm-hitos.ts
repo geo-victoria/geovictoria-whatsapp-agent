@@ -1980,14 +1980,16 @@ export async function sincronizarHitoCrm(
         /* best-effort: sin historial, clasifica con lo que trajo la tool */
       }
     }
-    // Flujo 21+ (Lalo 13-ago): con RUT y sin nombre de empresa, la razón
-    // social se resuelve del padrón SII — el lead/deal nace con nombre real
-    // en vez de "Por identificar". Best-effort: sin ficha, sigue igual.
-    if (datos.rut && !datos.empresa && esContactoCL(contact)) {
+    // Flujo 21+ (Lalo 13-ago): con documento y sin nombre de empresa, la
+    // razón social se resuelve del PADRÓN del país — SII por RUT, SUNAT por
+    // RUC, RUES por NIT (28-sep, caso Edwin/CTEM: solo Chile la resolvía acá y
+    // el trato peruano nació "Por identificar" con el RUC en la mano). El
+    // lead/deal nace con nombre real. Best-effort: sin ficha, sigue igual.
+    if (datos.rut && !datos.empresa) {
       try {
-        const { fichaEmpresaSii } = await import("./empresas-sii")
-        const ficha = await fichaEmpresaSii(datos.rut.trim().toUpperCase().replace(/\./g, ""))
-        if (ficha?.razonSocial) datos = { ...datos, empresa: ficha.razonSocial }
+        const { razonSocialPorPadron } = await import("./paises/razon-social-padron")
+        const razon = await razonSocialPorPadron(paisDeTelefonoOperativo(clean) || "cl", datos.rut)
+        if (razon) datos = { ...datos, empresa: razon }
       } catch {
         /* best-effort */
       }

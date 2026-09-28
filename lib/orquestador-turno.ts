@@ -577,6 +577,7 @@ export async function procesarTurno(
     // Si el cierre viene de MP, el registro (post-pago + alta) se lanza en
     // paralelo y el modelo ya responde como post-venta: nunca pide comprobante.
     let registroPagoEnCurso: Promise<unknown> | null = null
+    let hitoEnCurso: Promise<unknown> | null = null
     try {
       const { senalDePago, directivaPagoCerrado } = await import("@/lib/pago-cerrado")
       const pd = await import("@/lib/pago-declarado")
@@ -725,7 +726,11 @@ export async function procesarTurno(
         .then((m) => m.aplicarCasuisticaNoProspecto(contact, cas, "webhook"))
         .catch(() => undefined)
     } else if (!enOnboarding && perfil.hitoPorChat) {
-      void import("@/lib/hito-por-chat")
+      // Se guarda la promesa y se ESPERA al final del turno (caso Edwin/CTEM
+      // 28-sep): lanzado a la deriva, la función terminaba con el lead creado
+      // y la conversión a trato a medias — "antes de convertir" era la última
+      // línea del log y el trato apareció solo con una corrida manual.
+      hitoEnCurso = import("@/lib/hito-por-chat")
         .then(async (m) => {
           await m.hitoIntencionDesdeChat(contact)
           // Perú: el trato lleva el RUC al inicio apenas el cliente lo da (Lalo 28-sep).
@@ -2396,6 +2401,9 @@ export async function procesarTurno(
     // El registro del pago aprobado en MP (post-pago + alta) se lanzó antes del
     // modelo; se espera acá, DESPUÉS de responder, para que no quede a medias.
     if (registroPagoEnCurso) await Promise.race([registroPagoEnCurso, new Promise((r) => setTimeout(r, 30_000))])
+    // El hito por chat (lead → trato + tómbola) también se espera acá, con
+    // tope: Zoho tarda 5-15 s por conversión y el turno ya respondió.
+    if (hitoEnCurso) await Promise.race([hitoEnCurso, new Promise((r) => setTimeout(r, 40_000))])
     console.log(
       `[v3-bg] DONE pais=${perfil.pais} contact=${contact} iters=${result.iterations} tools=${result.toolCalls?.length || 0} pdf=${!!pdfUrl}`,
     )
