@@ -79,7 +79,6 @@ export const REGLAS_CL: ReglasCotizacion = {
   // El descuento de Chile lo calcula el cotizador (consultar_descuento_referencial).
   escalera: null,
   redondearPlanConDescuento: (n) => n,
-  mostrarPrecioInstalacionOpcional: true,
   presentacion: {
     monto: (n) => `${fmtUF(n)} UF`,
     unitario: (n) => `${fmtUFUnit(n)} UF`,
@@ -103,7 +102,6 @@ export const REGLAS_CL: ReglasCotizacion = {
     notaMicroPlan: () =>
       "Este plan base cubre 2 usuarios: el trabajador que marca + 1 administrador para gestionar la plataforma.",
     notasFinales: [],
-    instalacionOpcionalSinPrecio: "",
   },
 }
 

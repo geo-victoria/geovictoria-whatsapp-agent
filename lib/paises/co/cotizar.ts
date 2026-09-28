@@ -149,7 +149,6 @@ export const REGLAS_CO: ReglasCotizacion = {
   redondeoLinea: (n) => n,
   escalera: ESCALERA_DESCUENTO_CO,
   redondearPlanConDescuento: (n) => Math.round(n),
-  mostrarPrecioInstalacionOpcional: false,
   presentacion: {
     monto: formatearCOP,
     unitario: formatearCOP,
@@ -172,8 +171,6 @@ export const REGLAS_CO: ReglasCotizacion = {
     envioIncluido: " El despacho del equipo va incluido.",
     notaMicroPlan: null,
     notasFinales: ["La capacitación online (valorada en $95.000) va incluida sin costo 🎁"],
-    instalacionOpcionalSinPrecio:
-      "El equipo es autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.",
   },
 }
 

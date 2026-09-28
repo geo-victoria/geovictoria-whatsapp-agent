@@ -111,8 +111,6 @@ export type ReglasCotizacion = {
   /** Escalera sobre el PLAN (fuera de Chile; en Chile la negocia el cotizador). */
   escalera: { planMensual: readonly number[]; meses: number } | null
   redondearPlanConDescuento: (n: number) => number
-  /** Precio de la instalación técnica opcional en el doble valor (Chile lo muestra; PE/CO/MX no desde el 28-sep). */
-  mostrarPrecioInstalacionOpcional: boolean
   presentacion: {
     /** "0,55 UF" · "S/100" · "$315.000" */
     monto: (n: number) => string
@@ -151,7 +149,6 @@ export type ReglasCotizacion = {
     /** Notas al final del mensaje, cada una en su burbuja ([] en Chile). */
     notasFinales: readonly string[]
     /** Frase de la visita técnica cuando NO se muestra su precio. */
-    instalacionOpcionalSinPrecio: string
   }
 }
 
@@ -663,9 +660,7 @@ export function cotizarReferencialConReglas(
       } else if (instalacionGratisTotal) {
         fraseInstalacion = `La instalación por nuestro equipo técnico va incluida sin costo ${T.bonificadaEn}; si prefieres, el ${T.equipo} también es autoinstalable.`
       } else if (!todoPlugAndPlay) {
-        if (!R.mostrarPrecioInstalacionOpcional) {
-          fraseInstalacion = T.instalacionOpcionalSinPrecio
-        } else if (instalacionTecnico > 0 && instalacionPorPunto.length >= 2) {
+        if (instalacionTecnico > 0 && instalacionPorPunto.length >= 2) {
           const partesInst = instalacionPorPunto.map(
             (pp, i) => `${P.montoCorto(monto(pp.valor, 0))} ${i === 0 ? "por la" : "la"} de ${pp.ubicacion}`,
           )

@@ -156,7 +156,6 @@ export function reglasPE(tipoCambio?: number): ReglasCotizacion {
     redondeoLinea: (n) => n,
     escalera: ESCALERA_DESCUENTO_PE,
     redondearPlanConDescuento: (n) => n,
-    mostrarPrecioInstalacionOpcional: false,
     presentacion: {
       monto: formatearPEN,
       unitario: formatearPEN,
@@ -179,8 +178,6 @@ export function reglasPE(tipoCambio?: number): ReglasCotizacion {
       envioIncluido: " El envío del reloj va incluido.",
       notaMicroPlan: null,
       notasFinales: [],
-      instalacionOpcionalSinPrecio:
-        "El reloj es autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.",
     },
   }
 }

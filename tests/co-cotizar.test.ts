@@ -44,8 +44,8 @@ test("alquiler en Medellín (resto): 98.000 con despacho, sin línea de envío, 
     puntos: [{ ubicacion: "Medellín", zona: "resto", autoInstalada: true }],
   })
   assert.equal(r.mensualArriendoNeto, TARIFAS_CO.relojArriendoMesFuera)
-  assert.ok(r.mensajeParaProspecto.includes("autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.")) // sin precio, como Chile (28-sep)
-  assert.ok(!r.mensajeParaProspecto.includes("$875.000"))
+  assert.match(r.mensajeParaProspecto, /autoinstalables?\. Si prefieres que nosotros lo[s]? instalemos, tiene un costo único adicional de /) // alternativa con precio, fuera de los totales (= Chile, 28-sep)
+  assert.ok(r.mensajeParaProspecto.includes("$875.000"))
   assert.ok(!r.itemsCotizador.some((i) => i.id === "envio_reloj" || i.id === "instalacion_reloj"))
   assert.ok(!/cotiza aparte/.test(r.mensajeParaProspecto))
 })
@@ -77,8 +77,8 @@ test("venta en Bogotá sin visita: envío 42.000 y la visita se ofrece a 175.000
   })
   const envio = r.itemsCotizador.find((i) => i.id === "envio_reloj")
   assert.ok(envio && envio.cantidad === 2 && envio.subtotalCOP === 2 * TARIFAS_CO.envioVenta.capital)
-  assert.ok(r.mensajeParaProspecto.includes("autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.")) // sin precio, como Chile (28-sep)
-  assert.ok(!r.mensajeParaProspecto.includes("$175.000"))
+  assert.match(r.mensajeParaProspecto, /autoinstalables?\. Si prefieres que nosotros lo[s]? instalemos, tiene un costo único adicional de /) // alternativa con precio, fuera de los totales (= Chile, 28-sep)
+  assert.ok(r.mensajeParaProspecto.includes("$175.000"))
   assert.ok(!r.itemsCotizador.some((i) => i.id === "instalacion_reloj"))
 })
 

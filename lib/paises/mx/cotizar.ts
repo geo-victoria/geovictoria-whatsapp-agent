@@ -155,7 +155,6 @@ export const REGLAS_MX: ReglasCotizacion = {
   redondeoLinea: (n) => n,
   escalera: ESCALERA_DESCUENTO_MX,
   redondearPlanConDescuento: redondear2,
-  mostrarPrecioInstalacionOpcional: false,
   presentacion: {
     monto: formatearMXN,
     unitario: formatearMXN,
@@ -180,8 +179,6 @@ export const REGLAS_MX: ReglasCotizacion = {
     envioIncluido: " El envío del reloj va incluido.",
     notaMicroPlan: null,
     notasFinales: ["La capacitación online va incluida sin costo 🎁"],
-    instalacionOpcionalSinPrecio:
-      "El reloj es autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.",
   },
 }
 

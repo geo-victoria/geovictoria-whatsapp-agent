@@ -101,8 +101,8 @@ test("zona intermedia PE (Región Lima fuera de la capital + Ica): visita técni
     tipoCambio: TC,
   })
   assert.equal(r.mensualArriendoNeto, 78) // US$23 × 3,372: fuera de Lima, despacho incluido
-  assert.ok(r.mensajeParaProspecto.includes("autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.")) // sin precio, como Chile (28-sep)
-  assert.ok(!r.mensajeParaProspecto.includes("S/435"))
+  assert.match(r.mensajeParaProspecto, /autoinstalables?\. Si prefieres que nosotros lo[s]? instalemos, tiene un costo único adicional de /) // alternativa con precio, fuera de los totales (= Chile, 28-sep)
+  assert.ok(r.mensajeParaProspecto.includes("S/435"))
 })
 
 test("instalación en provincia: precio cerrado US$214 (5 UF chilenas), nunca 'se cotiza aparte'", () => {
@@ -112,8 +112,8 @@ test("instalación en provincia: precio cerrado US$214 (5 UF chilenas), nunca 's
     puntos: [{ ubicacion: "Cusco", zona: "provincias", autoInstalada: true }],
     tipoCambio: TC,
   })
-  assert.ok(r.mensajeParaProspecto.includes("autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.")) // sin precio, como Chile (28-sep)
-  assert.ok(!r.mensajeParaProspecto.includes("S/722"))
+  assert.match(r.mensajeParaProspecto, /autoinstalables?\. Si prefieres que nosotros lo[s]? instalemos, tiene un costo único adicional de /) // alternativa con precio, fuera de los totales (= Chile, 28-sep)
+  assert.ok(r.mensajeParaProspecto.includes("S/722"))
   assert.ok(!/cotiza aparte|confirmar[aá] si tiene costo/.test(r.mensajeParaProspecto))
   const p = cotizarPE({
     userCount: 10,
