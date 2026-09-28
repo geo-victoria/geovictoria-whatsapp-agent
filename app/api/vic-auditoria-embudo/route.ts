@@ -136,12 +136,18 @@ export async function GET(req: Request): Promise<Response> {
       const r = await fetch(`${ZOHO_API}/crm/v8/Deals/${d.id}/Stage_History?fields=Stage,Last_Modified_Time`, { headers: H, cache: "no-store" })
       if (r.status === 200) {
         const filas = (((await r.json()) as { data?: Array<{ Stage?: string; Last_Modified_Time?: string }> }).data || [])
-        etapas = filas
-          .sort((a, b) => String(a.Last_Modified_Time).localeCompare(String(b.Last_Modified_Time)))
-          .map((x) => String(x.Stage || ""))
+        // Zoho devuelve el historial del MÁS RECIENTE al más antiguo y
+        // Last_Modified_Time viene vacío (28-sep): ordenar por ese campo no
+        // hacía nada y la auditoría leía la etapa ACTUAL como "nació en" —
+        // 11 falsas fallas el 27-sep. Se invierte el orden de la API.
+        const conFecha = filas.every((x) => x.Last_Modified_Time)
+        etapas = (conFecha
+          ? filas.sort((a, b) => String(a.Last_Modified_Time).localeCompare(String(b.Last_Modified_Time)))
+          : filas.slice().reverse()
+        ).map((x) => String(x.Stage || ""))
       }
     } catch { /* sin historial */ }
-    const p2 = /^1\./.test(etapas[0] || "")
+    const p2 = /^1\./.test(etapas[0] || "") || etapas.some((e) => /^1\./.test(e))
       ? { ok: true, detalle: etapas.join(" → ") }
       : { ok: false, detalle: etapas.length ? `nació en "${etapas[0]}"` : "sin historial de etapas" }
     // 3: valores.
