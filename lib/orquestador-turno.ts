@@ -726,7 +726,11 @@ export async function procesarTurno(
         .catch(() => undefined)
     } else if (!enOnboarding && perfil.hitoPorChat) {
       void import("@/lib/hito-por-chat")
-        .then((m) => m.hitoIntencionDesdeChat(contact))
+        .then(async (m) => {
+          await m.hitoIntencionDesdeChat(contact)
+          // Perú: el trato lleva el RUC al inicio apenas el cliente lo da (Lalo 28-sep).
+          if (perfil.pais === "pe") await m.rucEnTratoDesdeChat(contact)
+        })
         .catch(() => undefined)
     }
 
