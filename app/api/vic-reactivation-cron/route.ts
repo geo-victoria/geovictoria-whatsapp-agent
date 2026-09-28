@@ -22,6 +22,7 @@ import { NextResponse } from "next/server"
 import { sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
+import { channelIdPorPais } from "@/lib/linea-por-pais"
 import { appendAssistantV3, fetchHistoryV3, getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { testContactSet, isTestContact } from "@/lib/funnel-analysis"
 import { contactosEnLoop, contactosTraspasados } from "@/lib/loop-v2"
@@ -100,6 +101,14 @@ const REACT_CONTEXT_MSG_CO: Record<string, string> = {
 // (a diferencia de CL/CO, que solo llevan ${nombre}) — el envío MX resuelve
 // ambas variables. La "final" (breakup) reemplaza a la corta en el último
 // toque de la cadencia. Salen por la línea +52.
+// Perú (27-sep, cierre de brechas): antes el toque consensuado peruano salía
+// con la plantilla CHILENA por la línea chilena. Plantillas del loop PE.
+const TPL_QUOTE_PE = (process.env.REACTIVATION_TEMPLATE_QUOTE_PE || "vicky_pe_loop_formal").trim()
+const TPL_PREFORM_PE = (process.env.REACTIVATION_TEMPLATE_PREFORM_PE || "vicky_pe_loop_retoma").trim()
+const REACT_CONTEXT_MSG_PE: Record<string, string> = {
+  cotizacion: "Hola, ¿pudiste revisar tu cotización? Si algo no te cuadra —el equipo, la cantidad de personas o cómo van a marcar— lo ajustamos por aquí 😊",
+  preform: "Hola, ¿tienes unos minutos para que armemos la cotización?",
+}
 const TPL_QUOTE_MX = (process.env.REACTIVATION_TEMPLATE_QUOTE_MX || "vicky_mx_react_corta").trim()
 const TPL_PREFORM_MX = (process.env.REACTIVATION_TEMPLATE_PREFORM_MX || "vicky_mx_react_corta").trim()
 const TPL_FINAL_MX = (process.env.REACTIVATION_TEMPLATE_FINAL_MX || "vicky_mx_react_final").trim()
@@ -384,11 +393,12 @@ export async function GET(req: Request): Promise<Response> {
   let omitidosSinNombre = 0
   const esCO = (r: Row) => (r.country || "cl").toLowerCase() === "co"
   const esMX = (r: Row) => (r.country || "cl").toLowerCase() === "mx"
-  const tagPais = (r: Row) => (esMX(r) ? "(mx)" : esCO(r) ? "(co)" : "")
+  const esPE = (r: Row) => (r.country || "cl").toLowerCase() === "pe" || /^51\d{9}$/.test(r.contact)
+  const tagPais = (r: Row) => (esMX(r) ? "(mx)" : esCO(r) ? "(co)" : esPE(r) ? "(pe)" : "")
   const canalDe = (r: Row) =>
-    esMX(r) ? PERFIL_MX.canal.channelId : esCO(r) ? PERFIL_CO.canal.channelId : undefined
+    esMX(r) ? PERFIL_MX.canal.channelId : esCO(r) ? PERFIL_CO.canal.channelId : esPE(r) ? channelIdPorPais("pe") : undefined
   const contextoDe = (r: Row, segmento: string) => {
-    const msgs = esMX(r) ? REACT_CONTEXT_MSG_MX : esCO(r) ? REACT_CONTEXT_MSG_CO : REACT_CONTEXT_MSG
+    const msgs = esMX(r) ? REACT_CONTEXT_MSG_MX : esCO(r) ? REACT_CONTEXT_MSG_CO : esPE(r) ? REACT_CONTEXT_MSG_PE : REACT_CONTEXT_MSG
     return msgs[segmento] ?? msgs.preform
   }
   // Variables del HSM: CL/CO llevan solo ${nombre}; las plantillas MX llevan
@@ -492,6 +502,8 @@ export async function GET(req: Request): Promise<Response> {
       const segmento = r.formal_quote_id ? "cotizacion" : "preform"
       const template = esMX(r)
         ? segmento === "cotizacion" ? TPL_QUOTE_MX : TPL_PREFORM_MX
+        : esPE(r)
+          ? segmento === "cotizacion" ? TPL_QUOTE_PE : TPL_PREFORM_PE
         : esCO(r)
           ? segmento === "cotizacion" ? TPL_QUOTE_CO : TPL_PREFORM_CO
           : segmento === "cotizacion" ? TPL_QUOTE : TPL_PREFORM
@@ -516,8 +528,8 @@ export async function GET(req: Request): Promise<Response> {
       enviados++
       enviadosConsensuado++
       console.log(`[reactivation] consensuado(${segmento})${tagPais(r)} → ${r.contact}`)
-      await appendAssistantV3(r.contact, contextoDe(r, segmento)).catch(() => {})
-      if (segmento === "cotizacion" && !esCO(r) && !esMX(r)) await dispararCorreo(r.formal_quote_id)
+      await appendAssistantV3(r.contact, contextoDe(r, segmento), esMX(r) ? "mx" : esCO(r) ? "co" : esPE(r) ? "pe" : "cl").catch(() => {})
+      if (segmento === "cotizacion" && !esCO(r) && !esMX(r) && !esPE(r)) await dispararCorreo(r.formal_quote_id)
     }
   }
 
