@@ -1247,7 +1247,7 @@ async function asignarEnZoho(
     // calificado sin RUT → tómbola de leads TLMK; sin calificar → SDR. Sin
     // esto, un lead nacido "1." con 18 personas iba a SDR (caso Joyce) y un
     // "40 app" sin RUT también (caso Diego).
-    if (lead?.id && !lead.Converted_Deal?.id && (pais === "cl" || pais === "pe" || pais === "co") && !segundaPasada) {
+    if (lead?.id && !lead.Converted_Deal?.id && (pais === "cl" || pais === "pe" || pais === "co" || pais === "mx") && !segundaPasada) {
       try {
         const { datosDelChat } = await import("@/lib/extraer-datos-chat")
         const chat = await datosDelChat(fono)
@@ -1307,7 +1307,8 @@ async function asignarEnZoho(
       // CRM: RUT + >20 → deal + Tómbola Deals; dotación conocida → lead
       // calificado (la segunda pasada lo encuentra y lo entrega a la regla
       // TLMK, no a las SDR); sin nada → lead ciego como siempre.
-      if ((esCL || esPE) && !segundaPasada) {
+      // Los 4 países (27-sep): antes CO y MX creaban el lead ciego sin leer el chat.
+      if (!segundaPasada) {
         try {
           const { datosDelChat } = await import("@/lib/extraer-datos-chat")
           const chat = await datosDelChat(fono)
@@ -1774,8 +1775,11 @@ const TM_TEMPLATE_PE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_PE || "vicky_
 // COLOMBIA (23-sep, bots unificados): la plantilla chilena sin marcador de país
 // sale por la línea +57 (verificado con vicky_react_47_razones_v2 por la +51).
 const TM_TEMPLATE_CO = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_CO || TM_TEMPLATE).trim()
+// México (27-sep): la plantilla es neutra (sin RUT/UF) y los bots están
+// unificados, así que sirve la misma.
+const TM_TEMPLATE_MX = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_MX || TM_TEMPLATE).trim()
 function tmTemplatePara(pais: string): string {
-  return pais === "pe" ? TM_TEMPLATE_PE : pais === "co" ? TM_TEMPLATE_CO : TM_TEMPLATE
+  return pais === "pe" ? TM_TEMPLATE_PE : pais === "co" ? TM_TEMPLATE_CO : pais === "mx" ? TM_TEMPLATE_MX : TM_TEMPLATE
 }
 const MAX_TM_POR_TICK = 10
 /** Teléfonos de los telemarketers ("email:+56...,email:+56..."). Fallback:
@@ -3141,7 +3145,7 @@ async function reintentarPresentacionesPendientes(
       )
       enviado = await sendBotmakerMessage(clean, texto).catch(() => false)
       registro = texto
-    } else if ((pais === "cl" || pais === "pe" || pais === "co") && telefono) {
+    } else if ((pais === "cl" || pais === "pe" || pais === "co" || pais === "mx") && telefono) {
       enviado = await sendBotmakerTemplate(clean, tmTemplatePara(pais), {
         nombre: "👋",
         ejecutivo_smb: nombre,
@@ -3185,13 +3189,15 @@ async function reconciliarSdrCalificados(ahora: Date, opts: { dias?: number; max
   // PERÚ (22-sep): las SDR peruanas entran a la misma conciliación con su
   // roster (fuente única: lib/sdr-calificacion, env VIC_SDR_INBOUND_PE).
   const { rosterSdrPorTerritorio } = await import("@/lib/sdr-calificacion")
-  const rosterPE = rosterSdrPorTerritorio("Perú").map((d) => d.email).filter(Boolean)
-  const roster = Array.from(new Set([...rosterCL, ...rosterPE]))
+  // Los 4 países (27-sep): cada roster SDR sale de lib/sdr-calificacion.
+  const rosterOtros = ["Perú", "Colombia", "México"].flatMap((t) => rosterSdrPorTerritorio(t).map((d) => d.email)).filter(Boolean)
+  const roster = Array.from(new Set([...rosterCL, ...rosterOtros]))
   const out = { revisados: 0, reenviados: 0, detalle: [] as string[] }
   if (!roster.length) return out
   // País del contacto por prefijo: decide la regla de deals y la de leads.
-  const paisDeFono = (f: string): "cl" | "pe" | null => (f.startsWith("56") ? "cl" : f.startsWith("51") ? "pe" : null)
-  const territorioDe = (f: string): "Chile" | "Perú" => (f.startsWith("51") ? "Perú" : "Chile")
+  const { paisDeTelefonoOperativo, fichaOperativa } = await import("@/lib/paises/ficha-operativa")
+  const paisDeFono = (f: string) => paisDeTelefonoOperativo(f)
+  const territorioDe = (f: string): string => fichaOperativa(paisDeTelefonoOperativo(f) || "cl").nombre
   const desde = new Date(ahora.getTime() - diasLeads * 24 * 3600_000).toISOString().replace(/\.\d{3}Z$/, "+00:00")
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
   const { ownerLoPusoUnHumano } = await import("@/lib/owner-manual")

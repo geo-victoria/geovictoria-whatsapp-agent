@@ -15,6 +15,7 @@ const WA_LINK = "https://wa.me/56967308227"
 // Línea CO (+57) para leads colombianos (paridad de proactividad, 17-jul).
 const WA_LINK_CO = `https://wa.me/${(process.env.BOTMAKER_CHANNEL_NUMBER_CO || "573181070737").trim()}`
 // Línea MX (+52 1) para leads mexicanos (22-jul).
+const WA_LINK_PE = `https://wa.me/${(process.env.BOTMAKER_CHANNEL_NUMBER_PE || "51922067167").trim()}`
 const WA_LINK_MX = `https://wa.me/${(process.env.BOTMAKER_CHANNEL_NUMBER_MX || "5215659778486").trim()}`
 
 function esc(s: string): string {
@@ -76,6 +77,41 @@ ${botonWhatsApp("Retomar mi cotización", WA_LINK_MX)}`),
 <p>Tu solicitud para <b>${e}</b> queda guardada — cuando el momento sea el correcto, me escribes por WhatsApp y la armamos de una vez, sin empezar de cero.</p>
 ${botonWhatsApp("Retomar cuando quieras", WA_LINK_MX)}
 <p>¡Que te vaya muy bien!</p>`),
+    }
+  }
+  // Perú (27-sep): copy neutro como CO, su línea y sin la promesa de
+  // capacitación incluida (en Perú no la hay).
+  if (country === "pe") {
+    if (touch === "e1") {
+      return {
+        subject: "Tu cotización GeoVictoria está a un mensaje de distancia",
+        html: shell(`<p>Hola ${n}!</p>
+<p>Recibimos tu solicitud de cotización para <b>${e}</b> — gracias por el interés 🙌. Te escribí también por WhatsApp para armarla de una vez: son 2 minutos y sales con el valor exacto para tu equipo.</p>
+${botonWhatsApp("Armar mi cotización por WhatsApp", WA_LINK_PE)}
+<p style="color:#4a5568;">Somos especialistas en control de asistencia, con presencia en toda Latinoamérica. Sin permanencia mínima.</p>`),
+      }
+    }
+    if (touch === "e2") {
+      return {
+        subject: `${nombre ? `${nombre}, tu` : "Tu"} cotización sigue lista para armar`,
+        html: shell(`<p>Hola ${n}!</p>
+<p>Sigo teniendo pendiente tu cotización para <b>${e}</b>. Te cuento lo que resuelve GeoVictoria desde el día uno:</p>
+<ul style="padding-left:20px;">
+  <li><b>Adiós hojas de cálculo</b>: la asistencia se registra sola (app con biometría facial, web o reloj).</li>
+  <li><b>Reportes que se arman solos</b>: tardanzas, horas extras y ausencias en un clic.</li>
+  <li><b>Datos seguros</b>: información encriptada y alojada en Azure.</li>
+</ul>
+<p>Armarla toma 2 minutos por WhatsApp:</p>
+${botonWhatsApp("Retomar mi cotización", WA_LINK_PE)}`),
+      }
+    }
+    return {
+      subject: "Dejamos tu cotización guardada",
+      html: shell(`<p>Hola ${n}!</p>
+<p>No te quiero llenar el correo: este es mi último mensaje por ahora 😊.</p>
+<p>Tu solicitud para <b>${e}</b> queda guardada — cuando el momento sea el correcto, me escribes por WhatsApp y la armamos de una vez, sin empezar de cero.</p>
+${botonWhatsApp("Retomar cuando quieras", WA_LINK_PE)}
+<p>Que te vaya muy bien!</p>`),
     }
   }
   if (country === "co") {

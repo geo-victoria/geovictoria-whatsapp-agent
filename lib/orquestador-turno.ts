@@ -628,7 +628,7 @@ export async function procesarTurno(
     // 21-sep vive en lib/onboarding-altaflow-tap (compartido con Perú).
     if (enOnboarding) {
       const { manejarTapAltaQr } = await import("@/lib/onboarding-altaflow-tap")
-      if (await manejarTapAltaQr(contact, message, perfil.pais === "pe" ? "pe" : "cl")) return
+      if (await manejarTapAltaQr(contact, message, perfil.pais)) return
     }
     const onboarding = enOnboarding ? await armarOnboarding(contact) : null
     // DIRECTIVA DEL ADMINISTRADOR POR CONTACTO (Lalo 08-sep, caso Camila /

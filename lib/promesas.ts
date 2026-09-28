@@ -14,6 +14,7 @@
  */
 
 import { avisarEquipoInterno } from "./alerta-interna"
+import { fichaPorTelefono } from "./paises/ficha-operativa"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
@@ -35,11 +36,12 @@ export type Promesa = {
   estado: string
 }
 
-/** Suma `horas` HÁBILES (L-V 8-18 Chile) desde `desde`, caminando hora a
- * hora — una promesa hecha un viernes 17:30 vence el lunes, no el sábado. */
-export function sumarHorasHabiles(desde: Date, horas: number): Date {
+/** Suma `horas` HÁBILES (L-V 8-18 en la zona del país; default Chile) desde
+ * `desde`, caminando hora a hora — una promesa hecha un viernes 17:30 vence
+ * el lunes, no el sábado. */
+export function sumarHorasHabiles(desde: Date, horas: number, tz: string = "America/Santiago"): Date {
   const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santiago",
+    timeZone: tz,
     weekday: "short",
     hour: "numeric",
     hour12: false,
@@ -77,7 +79,8 @@ export async function registrarPromesa(p: {
     )
     const dup = rDup.ok ? ((await rDup.json().catch(() => [])) as unknown[]) : []
     if (dup.length > 0) return true
-    const deadline = sumarHorasHabiles(new Date(), p.horasHabiles ?? 4)
+    // Zona del país del contacto (27-sep): un peruano no se mide en hora de Santiago.
+    const deadline = sumarHorasHabiles(new Date(), p.horasHabiles ?? 4, fichaPorTelefono(contact).tz)
     const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_promesas`, {
       method: "POST",
       headers: H(),
@@ -198,7 +201,7 @@ export async function vigilarPromesas(max = 15): Promise<{ revisadas: number; cu
     // el mismo grito cada 10 minutos.
     if (p.estado === "alertada") {
       const desdeAlerta = Date.parse(String((p as { alertado_at?: string }).alertado_at || p.deadline_at))
-      const vence = Number.isFinite(desdeAlerta) ? sumarHorasHabiles(new Date(desdeAlerta), HORAS_PARA_ESCALAR) : null
+      const vence = Number.isFinite(desdeAlerta) ? sumarHorasHabiles(new Date(desdeAlerta), HORAS_PARA_ESCALAR, fichaPorTelefono(p.contact).tz) : null
       if (!vence || vence.getTime() > Date.now()) continue
       await avisarEquipoInterno(
         `🚨 ESCALAMIENTO — promesa incumplida hace ${HORAS_PARA_ESCALAR} h hábiles: ${etiqueta} a +${p.contact}` +

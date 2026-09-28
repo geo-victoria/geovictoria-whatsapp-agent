@@ -535,10 +535,19 @@ export function buildDispatchMX(contact: string) {
           ciudad: i.ciudad,
           trabajadores: i.trabajadores,
           necesidad: [i.resumen || "", rfcInfo].filter(Boolean).join(" · "),
-          // v1 MX sin tómbola SDR: TODOS los motivos quedan a nombre del
-          // ejecutivo (Yahel Segura), que retoma con todo el contexto.
-          ownerId: SDR_INBOUND_MX_ID,
+          // UN SOLO CAMINO (27-sep): el lead nace sin dueño fijo. Si el turno
+          // promete contacto, el traspaso inmediato (agent-loop) lo entrega
+          // por las reglas del país; si no (cotización formal fallida), se
+          // entrega aquí mismo — y nunca se re-sortea un lead con dueño humano.
         })
+        if (res && (res as { success?: boolean }).success && i.motivo === "cotizacion_formal") {
+          const leadId = (res as { leadId?: string }).leadId || ""
+          const n = parseInt(String(i.trabajadores || "").replace(/\D/g, ""), 10)
+          if (leadId) {
+            const { entregarLeadDeRobotPorTerritorio } = await import("../../zoho-leads.ts")
+            await entregarLeadDeRobotPorTerritorio("México", leadId, { calificado: Number.isFinite(n) && n > 0, contact }).catch(() => null)
+          }
+        }
         if (!res || (res as { success?: boolean }).success === false) {
           return {
             ok: false,

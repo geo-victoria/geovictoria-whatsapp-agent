@@ -10,7 +10,7 @@
  *   - agendar_reunion (con ownerEmail = organizerEmail Cal.com → directo)
  */
 
-import { rosterSdrOperativo, rosterTelemarketingOperativo, reglaZoho } from "@/lib/paises/ficha-operativa"
+import { fichaOperativa, paisDeTelefonoOperativo, rosterSdrOperativo, rosterTelemarketingOperativo, reglaZoho } from "@/lib/paises/ficha-operativa"
 import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe, psidDe, canalMetaDe } from "./origen-canal.ts"
 import { getZohoAccessToken } from "./zoho-token"
@@ -1113,6 +1113,42 @@ export async function reasignarLeadCalificadoPE(
  * históricos). Colombia/México no tienen tómbola de leads de este tipo:
  * responde `success:false` y el llamador conserva la conducta de siempre.
  */
+/**
+ * Entrega un lead por las reglas del territorio SOLO si sigue a nombre del
+ * robot (27-sep, cierre de brechas): un lead reutilizado por el dedup que ya
+ * tiene dueño humano JAMÁS se re-sortea (regla 18-ago). La usan las tools de
+ * derivación de PE/CO/MX cuando el turno no dispara el traspaso inmediato.
+ */
+export async function entregarLeadDeRobotPorTerritorio(
+  territorio: string,
+  leadId: string,
+  opts: { calificado?: boolean; contact?: string } = {},
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string; yaTeniaDueno?: boolean }> {
+  try {
+    const accessToken = await getZohoAccessToken()
+    const apiDomain = getEnv("ZOHO_API_DOMAIN") || "https://www.zohoapis.com"
+    const g = await fetch(`${apiDomain}/crm/v3/Leads/${leadId}?fields=Owner`, {
+      headers: { Authorization: `Zoho-oauthtoken ${accessToken}` },
+      cache: "no-store",
+    })
+    const owner = g.ok
+      ? ((await g.json().catch(() => ({}))) as { data?: Array<{ Owner?: { email?: string; id?: string; name?: string } }> }).data?.[0]?.Owner
+      : undefined
+    const email = String(owner?.email || "")
+    if (email && !/^(vicky@|info@geovictoria|ventas@geovictoria|productmanager@)/i.test(email)) {
+      return { success: true, ownerEmail: email, ownerId: owner?.id, ownerNombre: owner?.name, yaTeniaDueno: true }
+    }
+  } catch { /* sin lectura: se intenta entregar igual */ }
+  const r = await reasignarLeadPorTerritorio(territorio, leadId, { calificado: opts.calificado })
+  if (r.success && r.ownerEmail) {
+    try {
+      const { notificarLeadAsignado } = await import("./notificar-lead-asignado")
+      await notificarLeadAsignado({ leadId, vendedorEmail: r.ownerEmail, contact: opts.contact })
+    } catch { /* aviso best-effort */ }
+  }
+  return r
+}
+
 export async function reasignarLeadPorTerritorio(
   territorio: string | null | undefined,
   leadId: string,
@@ -1153,6 +1189,40 @@ export async function reasignarLeadPorTerritorio(
     return conNombre(opts.calificado ? await reasignarLeadCalificadoMX(leadId) : await reasignarLeadSdrInboundMX(leadId))
   }
   return { success: false, error: `sin tómbola de leads para territorio ${territorio || "?"}` }
+}
+
+/**
+ * ENTREGA ÚNICA de un lead que Vicky NO pudo atender (número sin WhatsApp,
+ * tope de Meta, cadencia agotada, fijo): el país sale del teléfono y la regla
+ * de la ficha operativa decide — nunca más un peruano o un mexicano con las
+ * SDR chilenas (auditoría 27-sep). Chile conserva su escalera de siempre
+ * (telemarketing por regla, SDR de respaldo). Avisa al dueño nuevo.
+ */
+export async function entregarLeadSinCalificarPorPais(
+  contact: string,
+  leadId: string,
+  extra: { nombre?: string; empresa?: string } = {},
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  const pais = paisDeTelefonoOperativo(contact) || "cl"
+  let r: { success: boolean; ownerEmail?: string; ownerId?: string; error?: string }
+  if (pais === "cl") {
+    r = await reasignarLeadTelemarketingCL(leadId).catch((e) => ({ success: false, error: String(e) }))
+    if (!r.success) r = await reasignarLeadSdrInbound(leadId).catch((e) => ({ success: false, error: String(e) }))
+  } else if (pais === "co" && !tombolaZohoCoActiva()) {
+    r = await reasignarLeadSdrInboundCO(leadId).catch((e) => ({ success: false, error: String(e) }))
+  } else {
+    r = await reasignarLeadPorTerritorio(fichaOperativa(pais).nombre, leadId, { calificado: false }).catch((e) => ({
+      success: false,
+      error: String(e),
+    }))
+  }
+  if (r.success && r.ownerEmail) {
+    try {
+      const { notificarLeadAsignado } = await import("./notificar-lead-asignado")
+      await notificarLeadAsignado({ leadId, vendedorEmail: r.ownerEmail, contact, ...extra })
+    } catch { /* aviso best-effort */ }
+  }
+  return r
 }
 
 /** Reasigna un lead PE sin calificar a las SDR Inbound de Perú (RR interno). */
@@ -1250,7 +1320,7 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
     // cliente (cuenta 3. Cliente/Facturando o con usuarios activos).
     try {
       const fonoCE = ((input.telefono || "").trim() || (input.contactoWA || "").trim()).replace(/\D/g, "")
-      if (fonoCE.startsWith("56")) {
+      if (fonoCE) {
         const { detectarClienteExistente } = await import("./cliente-existente")
         const ce = await detectarClienteExistente(fonoCE)
         if (ce) {

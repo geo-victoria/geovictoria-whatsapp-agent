@@ -22,7 +22,6 @@ import {
   setKvValue,
 } from "./supabase-persistence-v3"
 import { sendBotmakerMessage } from "./botmaker-push-v3"
-import { PERFIL_CO } from "./paises/co"
 import { ownerDeCotizacion } from "./zoho-quote-owner"
 import { obtenerLinkOnboarding } from "./tools/registrar-comprobante-transferencia"
 import { pagoCierraLoop } from "./loop-v2"
@@ -369,7 +368,9 @@ export async function cerrarYTraspasarPostPago(
               ?.Tel_fono_Contacto || "",
           ).replace(/\D/g, "")
         : ""
-      if (/^569\d{8}$/.test(tel)) contact = tel
+      // Los 4 países (27-sep): antes solo celulares chilenos.
+      const { paisDeTelefonoOperativo } = await import("./paises/ficha-operativa")
+      if (paisDeTelefonoOperativo(tel)) contact = tel
     } catch { /* sin teléfono utilizable: sin_contacto como siempre */ }
   }
   if (!contact) return { traspaso: "sin_contacto" }
@@ -731,7 +732,11 @@ export async function cerrarYTraspasarPostPago(
   const { directorioEjecutivos } = await import("./directorio-ejecutivos")
   const EJECUTIVOS_CL: Record<string, { nombre: string; email: string; telefono: string }> = {}
   for (const f of directorioEjecutivos()) EJECUTIVOS_CL[f.email] = f
-  const duenoCL = !esMX && !esCO ? await ownerDeCotizacion(quoteId).catch(() => null) : null
+  // Los 4 países (27-sep): se presenta al DUEÑO REAL de la cotización (antes
+  // MX nombraba siempre a Yahel y CO al ejecutivo fijo del perfil). Un dueño
+  // robot no es persona: sin humano se presenta al equipo.
+  const duenoCrudo = await ownerDeCotizacion(quoteId).catch(() => null)
+  const duenoCL = duenoCrudo && !/^(vicky@|info@geovictoria|ventas@geovictoria|productmanager@)/i.test(duenoCrudo.email) ? duenoCrudo : null
   // Teléfono del dueño: directorio local primero; si no lo conocemos, su
   // ficha de usuario en Zoho (mismo dato que usa el modal de transferencia).
   let telefonoDuenoCL = duenoCL ? EJECUTIVOS_CL[duenoCL.email.toLowerCase()]?.telefono || "" : ""
@@ -754,11 +759,7 @@ export async function cerrarYTraspasarPostPago(
   // equivocada es peor que presentar al equipo (caso Moncada 27-ago — el
   // resolver COQL roto hacía caer TODOS los pagos al fallback Eddyluz
   // mientras el deal era de Anderson). El fallback con nombre murió.
-  const ejecutivo = esMX
-    ? { nombre: "Yahel Segura", email: "ysegura@geovictoria.com", telefono: "+52 55 3763 6604" }
-    : esCO
-      ? PERFIL_CO.equipo.ejecutivo
-      : duenoCL
+  const ejecutivo = duenoCL
         ? {
             // Nombre real desde Zoho (jamás un prefijo de correo); el teléfono
             // sale del directorio o de su ficha Zoho.
@@ -790,17 +791,18 @@ export async function cerrarYTraspasarPostPago(
     const abierta2 = Boolean(ultimo2) && Date.now() - (ultimo2 as Date).getTime() < 24 * 3600e3
     let salio = false
     if (abierta2) {
-      salio = await sendBotmakerMessage(contact, corto, undefined, TRANSACCIONAL).catch(() => false)
-      if (salio) await appendAssistantV3(contact, corto, "cl").catch(() => {})
+      const { channelIdPorPais } = await import("./linea-por-pais")
+      salio = await sendBotmakerMessage(contact, corto, paisChat === "cl" ? undefined : channelIdPorPais(paisChat), TRANSACCIONAL).catch(() => false)
+      if (salio) await appendAssistantV3(contact, corto, paisChat).catch(() => {})
     }
-    if (!salio && !esCO && !esMX) {
+    if (!salio) {
       const { sendBotmakerTemplate } = await import("./botmaker-push-v3")
       const { PLANTILLA_BIENVENIDA_PAGO_CL, paramsBienvenidaPago } = await import("./plantilla-bienvenida-pago")
       salio = await sendBotmakerTemplate(
         contact,
         PLANTILLA_BIENVENIDA_PAGO_CL.name,
         paramsBienvenidaPago(linkNuevo, null),
-        undefined,
+        paisChat === "cl" ? undefined : (await import("./linea-por-pais")).channelIdPorPais(paisChat),
         TRANSACCIONAL,
       ).catch(() => false)
     }
@@ -834,22 +836,19 @@ export async function cerrarYTraspasarPostPago(
   const { getLastUserAt } = await import("./supabase-persistence-v3")
   const ultimoUsuario = await getLastUserAt(contact).catch(() => null)
   const ventanaAbierta = Boolean(ultimoUsuario) && Date.now() - (ultimoUsuario as Date).getTime() < 24 * 3600e3
-  if (ventanaAbierta || esCO || esMX) {
-    const pushed = await sendBotmakerMessage(
-      contact,
-      traspaso,
-      esCO ? PERFIL_CO.canal.channelId : undefined,
-      TRANSACCIONAL,
-    ).catch(() => false)
+  // Los 4 países (27-sep): texto libre SOLO con ventana (antes CO/MX lo
+  // mandaban igual y moría en silencio) y la plantilla de respaldo —texto
+  // neutro, bots unificados— por la línea del país.
+  const { channelIdPorPais } = await import("./linea-por-pais")
+  const canalPais = paisChat === "cl" ? undefined : channelIdPorPais(paisChat)
+  if (ventanaAbierta) {
+    const pushed = await sendBotmakerMessage(contact, traspaso, canalPais, TRANSACCIONAL).catch(() => false)
     if (pushed) {
       await setKvValue(kvKey, new Date().toISOString()).catch(() => {})
       await setKvValue(kvContacto, JSON.stringify({ at: new Date().toISOString(), link: (linkOnboarding || "").trim() })).catch(() => {})
-      await appendAssistantV3(contact, traspaso, esCO ? "co" : "cl").catch(() => {})
+      await appendAssistantV3(contact, traspaso, paisChat).catch(() => {})
       return { contact, traspaso: "enviado" }
     }
-    // La ventana pudo cerrarse entre la consulta y el envío: CL sigue al
-    // respaldo de plantilla antes de darlo por perdido.
-    if (esCO || esMX) return { contact, traspaso: "push_fallo" }
   }
   // SIN LINK NO SALE LA PLANTILLA (31-ago, caso COMERCIAL PEREA): el cuerpo
   // del HSM es fijo y dice "completa tu auto-onboarding en este link: 👉
@@ -868,7 +867,7 @@ export async function cerrarYTraspasarPostPago(
     contact,
     PLANTILLA_BIENVENIDA_PAGO_CL.name,
     paramsBienvenidaPago(linkOnboarding, quienPresenta),
-    undefined,
+    canalPais,
     TRANSACCIONAL,
   ).catch(() => false)
   if (okTpl) {

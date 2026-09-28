@@ -83,8 +83,16 @@ async function transcriptEspejo(
 
 import { afirmaTiempoFalso, descripcionTiempo } from "./toque-tiempo"
 
-const REGLAS = [
-  "Eres Vicky, la vendedora de GeoVictoria por WhatsApp (control de asistencia y gestión de personal en Chile).",
+// Tono por país (27-sep, el toque contextual pasó de solo Chile a los 4).
+const ESTILO_PAIS: Record<string, string> = {
+  cl: "6. Tuteo chileno neutro y cercano, sin jerga.",
+  pe: "6. Tuteo peruano neutro y cercano, sin jerga ni chilenismos.",
+  co: "6. Tuteo cálido colombiano, sin jerga ni chilenismos.",
+  mx: "6. Tuteo mexicano neutro y suave, sin jerga ni chilenismos.",
+}
+
+const reglasPara = (pais: string, paisNombre: string): string => [
+  `Eres Vicky, la vendedora de GeoVictoria por WhatsApp (control de asistencia y gestión de personal en ${paisNombre}).`,
   "Vas a escribir UN solo mensaje corto para retomar el contacto con un cliente que no ha respondido. CUÁNTO tiempo pasó te lo dice el bloque TIEMPO del mensaje: no lo supongas.",
   "Reglas estrictas:",
   "1. Dos o tres frases, máximo 400 caracteres.",
@@ -92,7 +100,7 @@ const REGLAS = [
   "3. UNA sola pregunta, al final del mensaje.",
   "4. NO saludes ni te presentes: tu texto va DENTRO de un mensaje que ya parte con 'Hola, todo bien?' — entra directo al tema.",
   "5. Prohibido partir con 'Oye'. Prohibido usar guiones largos, negritas o listas.",
-  "6. Tuteo chileno neutro y cercano, sin jerga.",
+  ESTILO_PAIS[pais] || ESTILO_PAIS.cl,
   "7. No inventes datos, precios ni promesas que no estén en la conversación. No ofrezcas descuentos.",
   // (Lalo 04-sep) "Los toques son muy malos en contenido, son apelando al pago,
   // y deberían apelar a cómo resolvemos los dolores que levantó durante la
@@ -140,11 +148,13 @@ export async function generarToqueContexto(
       .join("\n")
       .slice(-6000)
 
+    const { fichaPorTelefono } = await import("./paises/ficha-operativa")
+    const ficha = fichaPorTelefono(contact)
     const etapa =
       stage === "sin_precio"
         ? "aún no ve precio; falta saber cuántas personas marcarían y cómo"
         : stage === "con_precio"
-          ? "ya vio el valor referencial; solo falta el RUT (o su ok) para dejarle la cotización formal"
+          ? `ya vio el valor referencial; solo falta el ${ficha.documento.etiqueta} (o su ok) para dejarle la cotización formal`
           : "tiene la cotización formal lista para aceptar y pagar en línea"
 
     // ESPEJO DEL EJECUTIVO (Lalo 27-ago): si el cliente ya conversó con un
@@ -172,7 +182,7 @@ export async function generarToqueContexto(
     const res = await client.messages.create({
       model: MODEL,
       max_tokens: 300,
-      system: REGLAS,
+      system: reglasPara(ficha.pais, ficha.nombre),
       messages: [
         {
           role: "user",

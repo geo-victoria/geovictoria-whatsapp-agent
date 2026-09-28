@@ -29,16 +29,10 @@ import {
   getKvValue,
 } from "@/lib/supabase-persistence-v3"
 import { buildCorreoCadencia, sendLeadEmail } from "@/lib/zoho-lead-mail"
-import {
-  agregarNotaLead,
-  reasignarLeadSdrInbound,
-  reasignarLeadSdrInboundCO,
-  updateZohoLeadOwner,
-} from "@/lib/zoho-leads"
+import { agregarNotaLead, entregarLeadSinCalificarPorPais } from "@/lib/zoho-leads"
+import { channelIdPorPais, paisLineaDeContacto } from "@/lib/linea-por-pais"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { contactosEnLoop } from "@/lib/loop-v2"
-import { PERFIL_CO } from "@/lib/paises/co"
-import { PERFIL_MX } from "@/lib/paises/mx"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -62,6 +56,11 @@ const TPL_CIERRE_CO = (process.env.OUTBOUND_TEMPLATE_CIERRE_CO || "vicky_co_lead
 // setear las envs.
 const TPL_NUDGE_MX = (process.env.OUTBOUND_TEMPLATE_NUDGE_MX || "vicky_mx_react_corta").trim()
 const TPL_CIERRE_MX = (process.env.OUTBOUND_TEMPLATE_CIERRE_MX || "vicky_mx_react_final").trim()
+// Perú (27-sep, cierre de brechas): antes caía a las plantillas y al correo
+// CHILENOS ("al tiro", Dirección del Trabajo) y a las tómbolas chilenas. Usa
+// las del loop peruano, ya aprobadas (solo ${nombre}).
+const TPL_NUDGE_PE = (process.env.OUTBOUND_TEMPLATE_NUDGE_PE || "vicky_pe_loop_toque2").trim()
+const TPL_CIERRE_PE = (process.env.OUTBOUND_TEMPLATE_CIERRE_PE || "vicky_pe_loop_despedida").trim()
 const BATCH = Number(process.env.OUTBOUND_CADENCE_BATCH || 30)
 
 // Texto que queda en el historial de la conversación por cada HSM (contexto
@@ -70,6 +69,10 @@ const CONTEXT_NUDGE = (nombre: string, empresa: string) =>
   `Hola ${nombre}, soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu cotización toma 2 minutos por acá. ¿Hay algo que te falte para avanzar o alguna duda que te pueda resolver?`
 const CONTEXT_CIERRE = (nombre: string, empresa: string) =>
   `Hola ${nombre}! Soy Vicky de GeoVictoria. No te quiero molestar más: dejo tu cotización para ${empresa} lista para retomarla cuando tú quieras — me escribes por acá y la armamos de inmediato. ¡Que te vaya súper! 👋`
+const CONTEXT_NUDGE_PE = (nombre: string) =>
+  `¿Seguimos con tu cotización, ${nombre}? Quedó a un paso de estar lista — me escribes por aquí y la terminamos de inmediato 😊`
+const CONTEXT_CIERRE_PE = (nombre: string) =>
+  `Hola ${nombre}, no te escribo más para no molestarte 🙌 Cuando quieras retomar tu cotización, me mandas un mensaje por aquí y seguimos donde quedamos. ¡Que te vaya muy bien!`
 // Versión CO: tuteo cálido colombiano, sin chilenismos (feedback equipo CO).
 const CONTEXT_NUDGE_CO = (nombre: string, empresa: string) =>
   `Hola ${nombre}! Soy Vicky de GeoVictoria 👋 Te escribí ayer por tu solicitud para ${empresa}. Armar tu cotización toma 2 minutos por acá. Hay algo que te falte para avanzar o alguna duda que te pueda resolver? 😊`
@@ -260,9 +263,11 @@ export async function GET(req: Request): Promise<Response> {
     const empresa = /^[\d\s.\-]*$/.test(empresaRow) ? "tu empresa" : empresaRow
 
     // País por prefijo: define línea de salida, plantillas, tono y SDRs.
-    const esCO = p.row.contact.startsWith("57")
-    const esMX =
-      p.row.contact.startsWith("521") || (p.row.contact.startsWith("52") && p.row.contact.length === 12)
+    const paisLinea = paisLineaDeContacto(p.row.contact)
+    const pais: "cl" | "pe" | "co" | "mx" = paisLinea === "otro" ? "cl" : paisLinea
+    const esCO = pais === "co"
+    const esMX = pais === "mx"
+    const esPE = pais === "pe"
 
     if (p.accion === "agotar") {
       // Cadencia agotada sin respuesta → el lead vuelve a un humano (acuerdo
@@ -271,37 +276,21 @@ export async function GET(req: Request): Promise<Response> {
       let reasignado: string | undefined
       let errorReasignacion: string | undefined
       if (p.row.zoho_lead_id) {
-        if (esMX) {
-          const yahel = "ysegura@geovictoria.com"
-          const rr = await updateZohoLeadOwner(p.row.zoho_lead_id, yahel).catch(() => null)
-          reasignado = rr?.success ? yahel : undefined
-          errorReasignacion = rr?.success ? undefined : rr?.error || "reasignación MX falló"
-          await agregarNotaLead(
-            p.row.zoho_lead_id,
-            "Vicky: cadencia agotada",
-            "El lead no respondió la cadencia outbound (WhatsApp + correos). Requiere contacto manual.",
-          ).catch(() => {})
-        } else if (esCO) {
-          const rr = await reasignarLeadSdrInboundCO(p.row.zoho_lead_id).catch((e) => ({
-            success: false as const,
-            error: e instanceof Error ? e.message : "excepción",
-          }))
-          reasignado = rr && "ownerEmail" in rr ? rr.ownerEmail : undefined
-          errorReasignacion = rr?.error
-        } else {
-          // CL: cadencia agotada → telemarketing por la regla de Zoho (Lalo
-          // 04-ago); SDR de fallback si la regla no asigna.
-          const { reasignarLeadTelemarketingCL } = await import("@/lib/zoho-leads")
-          let rr = await reasignarLeadTelemarketingCL(p.row.zoho_lead_id).catch(() => ({ success: false as const }))
-          if (!rr.success) {
-            rr = await reasignarLeadSdrInbound(p.row.zoho_lead_id).catch((e) => ({
-              success: false as const,
-              error: e instanceof Error ? e.message : "excepción",
-            }))
-          }
-          reasignado = rr && "ownerEmail" in rr ? rr.ownerEmail : undefined
-          errorReasignacion = "error" in rr ? rr.error : undefined
-        }
+        // UN SOLO CAMINO para los 4 países (27-sep): el lead que no respondió
+        // la cadencia va a un humano por las reglas de Zoho del país (CL
+        // telemarketing → SDR de respaldo; PE/MX/CO sus reglas o rotación).
+        // Antes: MX fijo a Yahel, PE caía a las tómbolas chilenas.
+        const rr = await entregarLeadSinCalificarPorPais(p.row.contact, p.row.zoho_lead_id, {
+          nombre: p.row.nombre || undefined,
+          empresa: empresa !== "tu empresa" ? empresa : undefined,
+        }).catch((e) => ({ success: false as const, error: e instanceof Error ? e.message : "excepción" }))
+        reasignado = rr?.success ? rr.ownerEmail : undefined
+        errorReasignacion = rr?.success ? undefined : (rr as { error?: string })?.error || "reasignación falló"
+        await agregarNotaLead(
+          p.row.zoho_lead_id,
+          "Vicky: cadencia agotada",
+          "El lead no respondió la cadencia outbound (WhatsApp + correos). Requiere contacto manual.",
+        ).catch(() => {})
       }
       await cerrar(p.row.contact, "agotada")
       detalle.push({
@@ -326,7 +315,7 @@ export async function GET(req: Request): Promise<Response> {
         p.accion,
         p.row.nombre || "",
         empresa,
-        esMX ? "mx" : esCO ? "co" : "cl",
+        pais,
       )
       const envio = await sendLeadEmail(p.row.zoho_lead_id, p.row.email, subject, html)
       if (envio.ok) {
@@ -360,6 +349,8 @@ export async function GET(req: Request): Promise<Response> {
     const esNudge = p.accion === "waNudge"
     const tpl = esMX
       ? esNudge ? TPL_NUDGE_MX : TPL_CIERRE_MX
+      : esPE
+        ? esNudge ? TPL_NUDGE_PE : TPL_CIERRE_PE
       : esCO
         ? esNudge ? TPL_NUDGE_CO : TPL_CIERRE_CO
         : esNudge ? TPL_NUDGE : TPL_CIERRE
@@ -373,14 +364,18 @@ export async function GET(req: Request): Promise<Response> {
     const ok = await sendBotmakerTemplate(
       p.row.contact,
       tpl,
-      { nombre, empresa },
-      esMX ? PERFIL_MX.canal.channelId : esCO ? PERFIL_CO.canal.channelId : undefined,
+      esPE ? { nombre } : { nombre, empresa },
+      pais === "cl" ? undefined : channelIdPorPais(pais),
     ).catch(() => false)
     if (ok) {
       await marcarToque(p.row.contact, esNudge ? "wa_nudge_sent_at" : "wa_cierre_sent_at")
       await appendAssistantV3(
         p.row.contact,
-        esMX
+        esPE
+          ? esNudge
+            ? CONTEXT_NUDGE_PE(nombre)
+            : CONTEXT_CIERRE_PE(nombre)
+          : esMX
           ? esNudge
             ? CONTEXT_NUDGE_MX(nombre, empresa)
             : CONTEXT_CIERRE_MX(nombre, empresa)
@@ -391,7 +386,7 @@ export async function GET(req: Request): Promise<Response> {
             : esNudge
               ? CONTEXT_NUDGE(nombre, empresa)
               : CONTEXT_CIERRE(nombre, empresa),
-        esMX ? "mx" : esCO ? "co" : "cl",
+        pais,
       ).catch(() => {})
       enviados++
       detalle.push({ contact: p.row.contact, accion: p.accion, ok: true, tpl })

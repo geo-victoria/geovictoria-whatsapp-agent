@@ -1302,7 +1302,9 @@ export async function GET(req: Request): Promise<Response> {
       // ya tiene la suya con variable `contexto`). Si la generación falla o la
       // conversación no da material, cae al texto fijo: el toque no se pierde.
       const generable = touch >= 1 && touch <= 5 && (touch === 5 || ventanaAbierta)
-      if (generable && paisKey === "cl" && !esPresentacion && stage !== "aceptada") {
+      // Los 4 países (27-sep): fuera de Chile solo DENTRO de la ventana (el
+      // toque 5 de plantilla con variable `contexto` existe solo en CL).
+      if (generable && (paisKey === "cl" || ventanaAbierta) && !esPresentacion && stage !== "aceptada") {
         const { generarToqueContexto } = await import("@/lib/toque-contexto")
         // TIEMPO REAL al generador (13-sep): sin esto el prompt afirmaba que
         // el cliente llevaba "días" sin responder y el toque de los 12 minutos

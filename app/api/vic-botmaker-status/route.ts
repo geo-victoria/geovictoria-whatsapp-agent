@@ -157,21 +157,10 @@ export async function POST(req: Request): Promise<Response> {
         : undefined
       const ownerBot = /vicky@|info@geovictoria/.test((lead?.Owner?.email || "").toLowerCase())
       if (lead?.id && !lead.Converted_Deal?.id && ownerBot) {
-        const { reasignarLeadTelemarketingCL, reasignarLeadSdrInbound, reasignarLeadSdrInboundCO, agregarNotaLead } =
-          await import("@/lib/zoho-leads")
-        // CL: telemarketing por la REGLA de Zoho (Lalo 04-ago). CO/MX: SDR
-        // como antes (sin regla de telemarketing todavía).
-        const esCL = contact.startsWith("56")
-        const esCO = contact.startsWith("57")
-        let r: { success: boolean; ownerEmail?: string } | null = null
-        if (esCL) {
-          r = await reasignarLeadTelemarketingCL(String(lead.id)).catch(() => null)
-          if (!r?.success) r = await reasignarLeadSdrInbound(String(lead.id)).catch(() => null)
-        } else {
-          r = await (esCO ? reasignarLeadSdrInboundCO(String(lead.id)) : reasignarLeadSdrInbound(String(lead.id))).catch(
-            () => null,
-          )
-        }
+        const { entregarLeadSinCalificarPorPais, agregarNotaLead } = await import("@/lib/zoho-leads")
+        // Regla del país por la ficha operativa (auditoría 27-sep: PE y MX caían
+        // con las SDR chilenas) + aviso al dueño nuevo.
+        const r = await entregarLeadSinCalificarPorPais(contact, String(lead.id)).catch(() => null)
         await agregarNotaLead(
           String(lead.id),
           "Vicky: el número NO recibe WhatsApp",
@@ -218,12 +207,8 @@ export async function POST(req: Request): Promise<Response> {
           : []
         const lead = leads.find((l) => !l.Converted_Deal?.id && /vicky@|info@geovictoria/.test((l.Owner?.email || "").toLowerCase()))
         if (lead?.id) {
-          const { reasignarLeadPorTerritorio, reasignarLeadSdrInbound, reasignarLeadSdrInboundCO, agregarNotaLead } =
-            await import("@/lib/zoho-leads")
-          const territorio = contact.startsWith("51") ? "Perú" : contact.startsWith("56") ? "Chile" : ""
-          let r: { success: boolean; ownerEmail?: string } | null = null
-          if (territorio) r = await reasignarLeadPorTerritorio(territorio, String(lead.id), { calificado: false }).catch(() => null)
-          else r = await (contact.startsWith("57") ? reasignarLeadSdrInboundCO(String(lead.id)) : reasignarLeadSdrInbound(String(lead.id))).catch(() => null)
+          const { entregarLeadSinCalificarPorPais, agregarNotaLead } = await import("@/lib/zoho-leads")
+          const r = await entregarLeadSinCalificarPorPais(contact, String(lead.id)).catch(() => null)
           await agregarNotaLead(
             String(lead.id),
             "Vicky: WhatsApp de apertura NO entregado (tope de Meta)",

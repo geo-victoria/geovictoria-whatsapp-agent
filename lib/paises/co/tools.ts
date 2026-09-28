@@ -496,21 +496,20 @@ export function buildDispatchCO(contact: string) {
           ciudad: i.ciudad,
           trabajadores: i.trabajadores,
           necesidad: [i.resumen || "", nitInfo].filter(Boolean).join(" · "),
-          // Regla equipo CO (05-ago): fallback de cotización FORMAL → Gordillo;
-          // cualquier otro motivo (callback, fuera de alcance, >50) → Galindo fijo.
-          // Con el interruptor de Colombia encendido (Lalo 23-sep) el lead nace
-          // sin dueño y lo entregan las reglas de Zoho (abajo), como en Perú.
+          // Regla equipo CO (05-ago) con el interruptor apagado: formal →
+          // Gordillo, resto → Galindo. Encendido (23-sep): nace sin dueño y lo
+          // entrega el traspaso inmediato o, si el turno no lo dispara, abajo.
           ownerId: tombolaZohoCoActiva() ? undefined : i.motivo === "cotizacion_formal" ? EJECUTIVO_CO_ZOHO_ID : SDR_HITOS_CO_ID,
         })
-        if (res && (res as { success?: boolean; leadId?: string }).success && tombolaZohoCoActiva()) {
+        if (res && (res as { success?: boolean }).success && tombolaZohoCoActiva() && i.motivo === "cotizacion_formal") {
           const leadId = (res as { leadId?: string }).leadId || ""
           const n = parseInt(String(i.trabajadores || "").replace(/\D/g, ""), 10)
           if (leadId) {
-            const { reasignarLeadPorTerritorio } = await import("@/lib/zoho-leads")
-            await reasignarLeadPorTerritorio("Colombia", leadId, { calificado: Number.isFinite(n) && n > 0 }).catch(() => null)
+            const { entregarLeadDeRobotPorTerritorio } = await import("@/lib/zoho-leads")
+            await entregarLeadDeRobotPorTerritorio("Colombia", leadId, { calificado: Number.isFinite(n) && n > 0, contact }).catch(() => null)
           }
         }
-        if (!res || (res as { ok?: boolean }).ok === false) {
+        if (!res || (res as { success?: boolean }).success === false) {
           return {
             ok: false,
             error: "No se pudo registrar el lead. Igual confirma al cliente que el equipo lo contactará.",

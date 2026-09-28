@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { fichaOperativa, fichaPorTelefono } from "@/lib/paises/ficha-operativa"
+import { fichaOperativa, fichaPorTelefono, paisDeTelefonoOperativo } from "@/lib/paises/ficha-operativa"
 import { getFollowupCronSecret, getKvValue, setKvValue, getLastUserAt, appendAssistantV3 } from "@/lib/supabase-persistence-v3"
 import { claveAltaSolicitada, claveCapacitacion, claveConfiguracion, claveBorrador } from "@/lib/onboarding/fase"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
@@ -124,13 +124,13 @@ async function contactosEnOnboarding(): Promise<string[]> {
   )
     .then((r) => (r.ok ? r.json() : []))
     .catch(() => [])) as Array<{ key: string }>
-  return filas.map((f) => f.key.replace(/^fase_vicky_/, "")).filter((c) => /^569\d{8}$/.test(c))
+  return filas.map((f) => f.key.replace(/^fase_vicky_/, "")).filter((c) => Boolean(paisDeTelefonoOperativo(c)))
 }
 
 async function enviarToque(contact: string, texto: string): Promise<boolean> {
   const { sendBotmakerMessage } = await import("@/lib/botmaker-push-v3")
   const ok = await sendBotmakerMessage(contact, texto).catch(() => false)
-  if (ok) await appendAssistantV3(contact, texto, "cl").catch(() => {})
+  if (ok) await appendAssistantV3(contact, texto, paisDeTelefonoOperativo(contact) || "cl").catch(() => {})
   return ok
 }
 

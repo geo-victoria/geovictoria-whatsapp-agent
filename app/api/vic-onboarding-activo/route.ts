@@ -44,7 +44,9 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 })
   }
   const contact = (new URL(req.url).searchParams.get("contact") || "").replace(/\D/g, "")
-  if (!/^569\d{8}$/.test(contact)) return NextResponse.json({ ok: true, activo: false, motivo: "no_cl" })
+  // Los 4 países (27-sep): el alta por chat corre en CL/PE/CO/MX.
+  const { paisDeTelefonoOperativo } = await import("@/lib/paises/ficha-operativa")
+  if (!paisDeTelefonoOperativo(contact)) return NextResponse.json({ ok: true, activo: false, motivo: "pais_no_operativo" })
   try {
     const activo = await onboardingActivoPara(contact)
     const global = (process.env.VICKY_ONBOARDING_ENABLED || "").trim().toLowerCase() === "on"

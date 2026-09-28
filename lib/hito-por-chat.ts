@@ -17,9 +17,9 @@ import { getKvValue, setKvValue } from "./supabase-persistence-v3"
 
 export async function hitoIntencionDesdeChat(contact: string): Promise<"disparado" | "sin_rut" | "ya" | "omitido"> {
   const clean = (contact || "").replace(/\D/g, "")
-  // Chile (RUT) y Perú (RUC, 22-sep: misma escalera con su tómbola "Deals
-  // 2026"). CO/MX quedan fuera hasta que tengan regla de deals en Zoho.
-  if (!clean.startsWith("56") && !clean.startsWith("51") && !clean.startsWith("57")) return "omitido"
+  // Los 4 países (27-sep): RUT · RUC · NIT · RFC, cada uno con su tómbola
+  // "Deals 2026" por territorio.
+  if (!["56", "51", "57", "52"].some((p) => clean.startsWith(p))) return "omitido"
   const candado = `hito_chat_${clean}`
   try {
     if (await getKvValue(candado)) return "ya"

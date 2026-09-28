@@ -71,7 +71,9 @@ const RAZON_POR_MOTIVO: Record<string, string> = {
  * blueprints el 23-sep). Además esas dos exigen `Contratar_n_otro_Proveedor`.
  */
 function razonParaPais(pais: string, razonCL: string): { razon: string; extra: Record<string, unknown> } {
-  if (pais === "pe" || pais === "co") {
+  // México (27-sep, verificado en sus deals perdidos: "Otro", "Cierre por
+  // Inactividad") usa el mismo picklist sin numerar.
+  if (pais === "pe" || pais === "co" || pais === "mx") {
     const sinNumero = razonCL.replace(/^\d+\.\s*/, "")
     const razon = /Lead mal Calificado/i.test(sinNumero) ? "Otro" : sinNumero
     return { razon, extra: { Contratar_n_otro_Proveedor: "No" } }

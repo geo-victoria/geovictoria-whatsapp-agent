@@ -105,7 +105,7 @@ export function paisDePlantilla(nombre: string): PaisLinea | null {
  * "Vicky Chile" salió de verdad por la línea +51), sirven a cualquier línea.
  * Lalo 23-sep ("bots unificados ok"): Colombia las usa tal cual.
  */
-export const PLANTILLAS_MULTILINEA = new Set<string>(["vicky_alta_qr_cl", "vicky_loop_pago_link_cl"])
+export const PLANTILLAS_MULTILINEA = new Set<string>(["vicky_alta_qr_cl", "vicky_loop_pago_link_cl", "vicky_bienvenida_pago_cl"])
 
 export function plantillaCoherenteConLinea(nombrePlantilla: string, canalONumero: string): boolean {
   if (PLANTILLAS_MULTILINEA.has(String(nombrePlantilla || "").trim().toLowerCase())) return true

@@ -36,7 +36,7 @@ export const PERFIL_TURNO_MX: PerfilTurno = {
   esFlujoCotizacion: esFlujoCotizacionMX,
   blindarSoporte: (reply, permitidos) => blindarSoporteInventadoPais("mx", reply, permitidos),
   certificacionDT: false,
-  hitoPorChat: false,
+  hitoPorChat: true,
   contextoCotizacionExistente: (punteros) => {
     const p = punteros[0]
     if (!p?.quoteId) return ""

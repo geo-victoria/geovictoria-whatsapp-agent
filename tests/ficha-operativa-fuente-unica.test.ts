@@ -27,7 +27,6 @@ const DEUDA_DECLARADA: Record<string, string> = {
   "app/api/vic-dapta-postcall/route.ts": "23-sep, anterior al candado: tz co",
   "app/api/vic-funnel/route.ts": "23-sep, anterior al candado: email emujica@geovictoria.com · email adiazg@geovictoria.com · email tmartinezq@geovictoria.com · email alopez@geovictoria.com · email pdiaz@geovictoria.com · email dgalvez@geovictoria.com",
   "app/api/vic-loop-cron/route.ts": "23-sep, anterior al candado: email emujica@geovictoria.com · email adiazg@geovictoria.com · email tmartinezq@geovictoria.com · email alopez@geovictoria.com · email agordillo@geovictoria.com · email ysegura@geovictoria.com",
-  "app/api/vic-outbound-cadence-cron/route.ts": "23-sep, anterior al candado: email ysegura@geovictoria.com",
   "app/api/vic-outbound-lead/route.ts": "23-sep, anterior al candado: tz pe · tz co · tz mx · email ysegura@geovictoria.com",
   "app/api/vic-ptv-cron/route.ts": "23-sep, anterior al candado: tz pe · tz co · tz mx · email emujica@geovictoria.com · email adiazg@geovictoria.com · email tmartinezq@geovictoria.com",
   "lib/agent-loop.ts": "23-sep, anterior al candado: tz co",

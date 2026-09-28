@@ -85,6 +85,11 @@ export async function datosDelChat(contact: string, opts: { soloSiHayRut?: boole
       // en `rut` como el RUC — crm-hitos lo deja tal cual en RUT_Empresa.
       const { nitEnTexto } = await import("./paises/co/nit")
       rut = nitEnTexto(soloCliente) || undefined
+    } else if (clean.startsWith("52")) {
+      // México (27-sep): RFC (formato SAT, sin DV estricto); viaja en `rut`
+      // como RUC/NIT y crm-hitos lo deja tal cual en RUT_Empresa.
+      const { rfcEnTexto } = await import("./paises/mx/rfc")
+      rut = rfcEnTexto(soloCliente) || undefined
     }
     if (opts.soloSiHayRut && !rut) return vacio
     const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()

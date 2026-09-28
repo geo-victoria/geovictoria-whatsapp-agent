@@ -39,3 +39,20 @@ export function rfcValido(rfcRaw: string): boolean {
   // preferible aceptar de más que rechazar un RFC real).
   return mes >= 1 && mes <= 12 && dia >= 1 && dia <= 31
 }
+
+/**
+ * Primer RFC con formato válido dentro de un texto libre del cliente (27-sep,
+ * escalera RFC + dotación → trato como el RUT/RUC/NIT). Acepta separadores
+ * entre bloques y minúsculas; devuelve el RFC normalizado o null. Un número
+ * de teléfono jamás calza (exige 3-4 letras al inicio).
+ */
+export function rfcEnTexto(texto: string): string | null {
+  const t = String(texto || "").toUpperCase()
+  const re = /(?:^|[^A-ZÑ&0-9])([A-ZÑ&]{3,4}[\s.\-]?\d{6}[\s.\-]?[A-Z0-9]{3})(?![A-Z0-9])/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(t))) {
+    const cand = normalizarRfc(m[1])
+    if (rfcValido(cand)) return cand
+  }
+  return null
+}

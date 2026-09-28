@@ -17,6 +17,7 @@
  */
 
 import { NextResponse } from "next/server"
+import { paisDeTelefonoOperativo } from "@/lib/paises/ficha-operativa"
 import { getZohoAccessToken } from "@/lib/zoho-token"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { transicionarDealHacia, type ResultadoTransicion } from "@/lib/zoho-deals"
@@ -202,7 +203,7 @@ async function handler(req: Request): Promise<Response> {
     const dealId = String(q["Deal_Asociado.id"] || "")
     const nombre = String(q.Name || "").toLowerCase()
     const fono = String(q.Tel_fono_Contacto || "").replace(/\D/g, "")
-    if (!dealId || nombre.includes("prueba") || !/^569\d{8}$/.test(fono)) continue
+    if (!dealId || nombre.includes("prueba") || !paisDeTelefonoOperativo(fono)) continue
     if (objetivos.get(dealId) === "implementando") continue
     leidas++
     try {

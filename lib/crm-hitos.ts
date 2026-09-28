@@ -1928,13 +1928,14 @@ export async function sincronizarHitoCrm(
     // los mensajes recientes del CLIENTE (mismo extractor del enriquecedor).
     // Solo PRE-entrega: el RUT que aparece DESPUÉS de entregado jamás
     // convierte ni re-sortea (decisión Lalo 01-sep — eso es del ejecutivo).
-    if (!datos.rut && esContactoCL(contact)) {
+    // Los 4 países (27-sep): el documento de cada país (RUT · RUC · NIT · RFC).
+    if (!datos.rut && (esContactoCL(contact) || /^(51|57|52)\d{8,11}$/.test(clean))) {
   // CLIENTE EXISTENTE (Lalo 08-sep): un número de una cuenta que ya es
   // cliente NO genera lead ni deal desde Vicky (era la fuente de leads "que
   // son usuarios"). Las ampliaciones las gestiona el humano en la cuenta.
   try {
     const clean0 = (contact || "").replace(/\D/g, "")
-    if (clean0.startsWith("56")) {
+    if (clean0) {
       const { detectarClienteExistente } = await import("./cliente-existente")
       const ce = await detectarClienteExistente(clean0)
       if (ce) {
@@ -1959,13 +1960,18 @@ export async function sincronizarHitoCrm(
   }
       try {
         const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
-        const { rutEnTexto } = await import("./empresas-sii")
         const historial = await fetchHistoryV3(clean, 40)
         const soloCliente = historial
           .filter((m) => m.role === "user")
           .map((m) => String(m.content || ""))
           .join("\n")
-        const rutChat = rutEnTexto(soloCliente)
+        const rutChat = clean.startsWith("51")
+          ? (await import("./rut")).rucEnTexto(soloCliente)
+          : clean.startsWith("57")
+            ? (await import("./paises/co/nit")).nitEnTexto(soloCliente)
+            : clean.startsWith("52")
+              ? (await import("./paises/mx/rfc")).rfcEnTexto(soloCliente)
+              : (await import("./empresas-sii")).rutEnTexto(soloCliente)
         if (rutChat) {
           datos = { ...datos, rut: rutChat }
           console.log(`[crm-hitos] ${clean}: RUT ${rutChat} recuperado del historial para clasificar el hito "${hito}"`)

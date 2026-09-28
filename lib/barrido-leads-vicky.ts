@@ -379,7 +379,10 @@ export async function barrerLeadsVicky(opts: { dry?: boolean; max?: number; ahor
         ownerEmail = String((r as { ownerEmail?: string }).ownerEmail || "")
         error = String((r as { error?: string }).error || "")
       } else if (pais === "mx") {
-        const r = await reasignarLeadSdrInboundMX(l.id).catch((e) => ({ success: false, error: String(e) }))
+        // México (27-sep): calificado → regla TLMK (entrada México); sin
+        // calificar → SDR. Antes TODO iba a SDR aunque tuviera dotación.
+        const { reasignarLeadPorTerritorio } = await import("./zoho-leads")
+        const r = await reasignarLeadPorTerritorio("México", l.id, { calificado }).catch((e) => ({ success: false, error: String(e) }))
         ownerEmail = String((r as { ownerEmail?: string }).ownerEmail || "")
         error = String((r as { error?: string }).error || "")
       } else {

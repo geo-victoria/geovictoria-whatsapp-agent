@@ -41,8 +41,6 @@ import {
   updateZohoLeadStatus,
   updateZohoLeadFields,
   reasignarLeadSdrInbound,
-  reasignarLeadSdrInboundCO,
-  updateZohoLeadOwner,
 } from "@/lib/zoho-leads"
 import { PERFIL_CO } from "@/lib/paises/co"
 import { PERFIL_MX } from "@/lib/paises/mx"
@@ -382,9 +380,9 @@ export async function POST(req: Request): Promise<Response> {
     // mismo, no se queda con Vicky esperando un env que no existe.
     let reasignado: string | undefined
     if (zohoLeadId) {
-      const { reasignarLeadSdrInboundPE } = await import("@/lib/zoho-leads")
-      const r = await reasignarLeadSdrInboundPE(zohoLeadId).catch(() => null)
-      reasignado = r?.ownerEmail
+      const { entregarLeadSinCalificarPorPais } = await import("@/lib/zoho-leads")
+      const r = await entregarLeadSinCalificarPorPais(contact, zohoLeadId).catch(() => null)
+      reasignado = r?.success ? r.ownerEmail : undefined
       await setKvValue(
         `outb_regalado_${zohoLeadId}`,
         JSON.stringify({ at: new Date().toISOString(), contact, motivo: "pe_sin_plantilla", a: reasignado || "" }),
@@ -492,19 +490,11 @@ export async function POST(req: Request): Promise<Response> {
         "Vicky: número FIJO — contactar por LLAMADA",
         `El teléfono del formulario (+${contact}) es un número fijo: no recibe WhatsApp, así que Vicky no envió la plantilla. Contactar por llamada telefónica${email ? ` o al correo ${email}` : ""}.`,
       ).catch(() => {})
-      if (esMX) {
-        const yahel = "ysegura@geovictoria.com"
-        const r = await updateZohoLeadOwner(zohoLeadId, yahel).catch(() => null)
-        reasignado = r?.success ? yahel : undefined
-      } else if (esCO) {
-        const r = await reasignarLeadSdrInboundCO(zohoLeadId).catch(() => null)
-        reasignado = r?.ownerEmail
-      } else {
-        const { reasignarLeadTelemarketingCL } = await import("@/lib/zoho-leads")
-        let r = await reasignarLeadTelemarketingCL(zohoLeadId).catch(() => null)
-        if (!r?.success) r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
-        reasignado = r?.ownerEmail
-      }
+      // UN SOLO CAMINO (27-sep): reglas de Zoho del país (antes MX fijo a
+      // Yahel y PE caía a las tómbolas chilenas).
+      const { entregarLeadSinCalificarPorPais } = await import("@/lib/zoho-leads")
+      const r = await entregarLeadSinCalificarPorPais(contact, zohoLeadId).catch(() => null)
+      reasignado = r?.success ? r.ownerEmail : undefined
     }
 
     if (zohoLeadId) {
@@ -569,27 +559,15 @@ export async function POST(req: Request): Promise<Response> {
     // vuelve a un humano (round-robin SDR Inbound del país correspondiente).
     let reasignado: string | undefined
     if (zohoLeadId) {
-      if (esMX) {
-        // México v1: sin round-robin SDR — el lead va directo al ejecutivo MX
-        // (Yahel Segura) para contacto manual.
-        const yahel = "ysegura@geovictoria.com"
-        const r = await updateZohoLeadOwner(zohoLeadId, yahel).catch(() => null)
-        reasignado = r?.success ? yahel : undefined
-        await agregarNotaLead(
-          zohoLeadId,
-          "Vicky: WhatsApp de apertura falló",
-          "No se pudo enviar la plantilla de apertura por la línea MX. El lead requiere contacto manual.",
-        ).catch(() => {})
-      } else if (esCO) {
-        const r = await reasignarLeadSdrInboundCO(zohoLeadId).catch(() => null)
-        reasignado = r?.ownerEmail
-      } else {
-        // CL: telemarketing por la regla de Zoho (Lalo 04-ago); SDR de fallback.
-        const { reasignarLeadTelemarketingCL } = await import("@/lib/zoho-leads")
-        let r = await reasignarLeadTelemarketingCL(zohoLeadId).catch(() => null)
-        if (!r?.success) r = await reasignarLeadSdrInbound(zohoLeadId).catch(() => null)
-        reasignado = r?.ownerEmail
-      }
+      // UN SOLO CAMINO (27-sep): reglas de Zoho del país.
+      const { entregarLeadSinCalificarPorPais } = await import("@/lib/zoho-leads")
+      const r = await entregarLeadSinCalificarPorPais(contact, zohoLeadId).catch(() => null)
+      reasignado = r?.success ? r.ownerEmail : undefined
+      await agregarNotaLead(
+        zohoLeadId,
+        "Vicky: WhatsApp de apertura falló",
+        "No se pudo enviar la plantilla de apertura por WhatsApp. El lead requiere contacto manual.",
+      ).catch(() => {})
       console.warn(`[outbound-lead] envío falló → lead ${zohoLeadId} reasignado a ${reasignado || "(reasignación falló)"}`)
     }
 

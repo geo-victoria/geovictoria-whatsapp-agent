@@ -12,6 +12,7 @@
 
 import { getZohoAccessToken } from "./zoho-token"
 import { getKvValue, setKvValue } from "./supabase-persistence-v3"
+import { paisDeTelefonoOperativo } from "./paises/ficha-operativa"
 
 export type ClienteExistente = {
   cuentaId: string
@@ -29,7 +30,9 @@ export function claveClienteExistente(fono: string): string {
 
 export async function detectarClienteExistente(contact: string): Promise<ClienteExistente | null> {
   const fono = (contact || "").replace(/\D/g, "")
-  if (!fono || !/^569\d{8}$/.test(fono)) return null
+  // Los 4 países (27-sep): Estado_Cuenta/UsuariosActivos existen en todas las
+  // cuentas del org (verificado con cuentas colombianas).
+  if (!fono || !paisDeTelefonoOperativo(fono)) return null
   try {
     const raw = await getKvValue(claveClienteExistente(fono))
     if (raw) {
