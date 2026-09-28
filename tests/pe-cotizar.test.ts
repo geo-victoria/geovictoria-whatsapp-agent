@@ -123,7 +123,7 @@ test("instalación en provincia: precio cerrado US$214 (5 UF chilenas), nunca 's
   })
   assert.equal(p.avisoSsttPeru, true)
   assert.equal(p.pagoInicialNeto, 506 + 101 + 722 + 100) // reloj + envío + instalación + primer mes
-  assert.ok(p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV (reloj, envío e instalación).") || p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1329 + IGV (reloj, envío e instalación)."))
+  assert.ok(p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV.")) // forma de Chile: sin el detalle entre paréntesis
 })
 
 test("descuento = Chile: escalera 10 → 20 % SOLO sobre el plan, 6 meses", () => {
@@ -167,8 +167,8 @@ test("provincia en VENTA: envío US$30 e instalación US$214 como líneas única
   // Murió la nota "el envío corre por cuenta del cliente": ahora tiene precio.
   assert.ok(!r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
   // Al cliente (doble valor) el envío va dentro del pago inicial; el desglose por línea vive en `lineas`.
-  assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV (reloj, envío e instalación).") || r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1329 + IGV (reloj, envío e instalación)."))
-  assert.ok(r.lineas.some((l) => /^Envío de reloj a Arequipa$/.test(l.concepto) && l.neto === 101)) // US$30 × 3,372 = 101,16 → 101
+  assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV."))
+  assert.ok(r.lineas.some((l) => /^Envío de reloj \(Arequipa\)$/.test(l.concepto) && l.neto === 101)) // US$30 × 3,372 = 101,16 → 101
   // Pago único = reloj (US$150 × 3,372 = 506) + envío 101 + instalación pedida en provincia 722 + primer mes (100).
   assert.equal(r.pagoInicialNeto, 707 + 722)
   const envio = r.itemsCotizador.find((i) => i.id === "envio_reloj")
@@ -191,7 +191,7 @@ test("provincia en ARRIENDO: tarifa US$23/mes con despacho incluido, sin línea 
   assert.equal(r.mensualArriendoNeto, 145)
   assert.equal(r.mensualNeto, 245)
   assert.ok(r.mensajeParaProspecto.includes("El envío del reloj va incluido"))
-  assert.ok(r.lineas.some((l) => l.concepto === "Alquiler de reloj de control" && /a provincia \(despacho incluido\)/.test(l.detalle)))
+  assert.ok(r.lineas.some((l) => l.concepto === "Reloj de control (provincia)" && l.neto === 78)) // arriendo fuera de Lima, despacho incluido
   assert.ok(!r.mensajeParaProspecto.includes("corre por cuenta del cliente"))
   assert.equal(r.avisoSsttPeru, false)
   assert.ok(!r.itemsCotizador.some((i) => i.id === "envio_reloj"))

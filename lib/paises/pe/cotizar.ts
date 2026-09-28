@@ -1,7 +1,7 @@
 /**
- * Cotización referencial de PERÚ = el MOTOR ÚNICO (lib/cotizacion/motor.ts)
- * con los datos de Perú (26-sep, paso 2 de la unificación). La lógica ya no
- * vive acá: este archivo solo declara las reglas del país y traduce la forma
+ * Cotización referencial de PERÚ = el MOTOR ÚNICO, que es el código de CHILE
+ * (lib/cotizacion-unica/motor.ts, 28-sep), con los datos de Perú. La lógica
+ * no vive acá: este archivo solo declara los datos del país y traduce la forma
  * del resultado a la que esperan las tools y el cotizador (campos en PEN).
  *
  * Datos de Perú:
@@ -21,15 +21,8 @@
 
 import { CATALOGO_MODULOS_PE, ESCALERA_DESCUENTO_PE, RELOJ_PE_USD } from "./catalogo.ts"
 import { TC_USD_PEN_FALLBACK, usdASoles } from "./tc-sunat.ts"
-import {
-  cotizar,
-  pctDescuento,
-  precioPlan,
-  unirPartes,
-  type ReglasMotor,
-  type TierPlan,
-  type ZonaMotor,
-} from "../../cotizacion/motor.ts"
+import type { ReglasCotizacion, TierCot, ZonaCot } from "../../cotizacion-unica/motor.ts"
+import { cotizarPais, pctDescuentoPais, precioPlanPais, ID_EQUIPO, type TextosFormal } from "../../cotizacion-unica/pais.ts"
 
 // IGV peruano: 18% parejo en todos los conceptos. Solo lo escribe este archivo.
 const IGV_PE = 0.18
@@ -108,84 +101,119 @@ export function formatearPEN(monto: number): string {
   return "S/" + (Number.isInteger(r) ? r.toLocaleString("es-PE") : r.toFixed(2))
 }
 
-function tiersPE(): readonly TierPlan[] {
+function tiersPE(): readonly TierCot[] {
   const asistencia = CATALOGO_MODULOS_PE.find((m) => m.id === "asistencia")
   if (!asistencia) throw new Error("Catálogo PE sin módulo asistencia")
-  return asistencia.tiers as TierPlan[]
+  return asistencia.tiers as TierCot[]
 }
 
-const ZONA_MOTOR: Record<ZonaPE, ZonaMotor> = { lima: "base", intermedia: "intermedia", provincias: "resto" }
+const ZONA_MOTOR: Record<ZonaPE, ZonaCot> = { lima: "base", intermedia: "intermedia", provincias: "resto" }
 
-/** Reglas del motor único para Perú (dependen del dólar del día). */
-export function reglasPE(tipoCambio?: number): ReglasMotor {
+const conIGV = (n: number) => `${formatearPEN(n)} + IGV`
+
+/** Datos de Perú para el motor único (dependen del dólar del día). */
+export function reglasPE(tipoCambio?: number): ReglasCotizacion {
   const t = tarifasRelojPE(Number(tipoCambio))
-  const tcTxt = "en soles al tipo de cambio oficial (SUNAT) del día"
   return {
-    nombrePais: "de Perú",
-    tiers: tiersPE(),
-    escalera: ESCALERA_DESCUENTO_PE,
-    decimales: 2,
-    redondearPlanConDescuento: false,
-    formatear: formatearPEN,
-    impuesto: { tasa: IGV_PE, soloEquipo: false },
+    scopeMaxUsuarios: 50,
+    modulos: [{ id: "asistencia", nombre: "Control de Asistencia", tiers: tiersPE(), disponibleParaVicky: true }],
+    hardware: [
+      {
+        id: ID_EQUIPO,
+        displayName: "Reloj de control",
+        arriendoUF: t.relojArriendoMes,
+        arriendoFueraUF: t.relojArriendoMesProvincia,
+        ventaUF: t.relojVenta,
+        modalidadesDisponibles: ["arriendo", "venta"],
+        cantidadSugerida: 1,
+        requiereInstalacionOnsite: true,
+        disponibleParaVicky: true,
+      },
+    ],
+    servicios: [
+      {
+        id: "envio_reloj",
+        nombre: "Envío de reloj",
+        tarifa: { modelo: "modalidad_zona", arriendo: { base: 0, fuera: 0 }, venta: { base: 0, fuera: t.envioVentaProvincia } },
+        omitirSiAutoInstalada: false,
+        advertenciasAutoInstalacion: [],
+      },
+      {
+        id: "instalacion_reloj",
+        nombre: "Instalación de reloj",
+        tarifa: { modelo: "zona", base: t.instalacionLima, intermedia: t.instalacionIntermedia, resto: t.instalacionProvincias },
+        omitirSiAutoInstalada: true,
+        advertenciasAutoInstalacion: [],
+      },
+    ],
+    esRelojDePared: (id) => id === ID_EQUIPO,
+    clasificar: (p) => ({ tipo: "zona", zona: p.zona ?? "base", reconocida: true }),
+    recargoArriendoFuera: 0,
     // En Lima la instalación va incluida también en la venta (Lalo 27-sep).
-    bonificaInstalacionBaseEnVenta: true,
-    presentacion: "neto",
-    sufijo: " + IGV",
-    tarifas: {
-      arriendoBase: t.relojArriendoMes,
-      arriendoFuera: t.relojArriendoMesProvincia,
-      venta: t.relojVenta,
-      envioVenta: { base: 0, fuera: t.envioVentaProvincia },
-      instalacion: { base: t.instalacionLima, intermedia: t.instalacionIntermedia, resto: t.instalacionProvincias },
+    instalacionBonificada: (_modalidad, zona) => zona === "base",
+    exigePuntosConHardware: false,
+    impuesto: { tasa: IGV_PE, soloEquipo: false, agregacion: "por_concepto" },
+    redondeoLinea: (n) => n,
+    escalera: ESCALERA_DESCUENTO_PE,
+    redondearPlanConDescuento: (n) => n,
+    mostrarPrecioInstalacionOpcional: false,
+    presentacion: {
+      monto: formatearPEN,
+      unitario: formatearPEN,
+      lineaTotalMensual: (m) => `Total mensual: ${conIGV(m.neto)}`,
+      lineaSubtotal: (neto) => `Subtotal sin IGV: ${formatearPEN(neto)}`,
+      opcionMensual: (m) => `${conIGV(m.neto)} al mes`,
+      pagoUnico: (m) => conIGV(m.neto),
+      montoCorto: (m) => conIGV(m.neto),
+      notaUnidad: null,
     },
     textos: {
       equipo: "reloj",
+      equipoPlural: "relojes",
       modalidadArriendo: "Reloj en alquiler",
       modalidadVenta: "Reloj en compra",
-      envioIncluido: " El envío del reloj va incluido.",
+      modalidadMixta: "Reloj",
       bonificadaEn: "en Lima Metropolitana",
-      detallePagoInicial: (v, e, i) => {
-        const partes = [v ? "reloj" : "", e ? "envío" : "", i ? "instalación" : ""].filter(Boolean)
-        return partes.length ? ` (${unirPartes(partes)})` : ""
-      },
+      segunZona: "según el distrito",
+      sufijoArriendoFuera: " (provincia)",
+      envioIncluido: " El envío del reloj va incluido.",
+      notaMicroPlan: null,
       notasFinales: [],
-      lineaArriendo: "Alquiler de reloj de control",
-      lineaArriendoFuera: "a provincia",
-      lineaDespacho: "despacho",
-      lineaVenta: "Reloj de control (compra)",
-      lineaEnvio: (u) => `Envío de reloj a ${u}`,
-      lineaInstalacion: (u) => `Instalación técnica del reloj (${u})`,
-      zonaBaseEnvio: "Lima Metropolitana",
-      zonaFueraEnvio: "provincia",
-      bonificadaDetalle: "bonificada en Lima Metropolitana",
-      // Mismo id para arriendo y venta: la Modalidad distingue; en Creator/Books
-      // es el artículo [PER] 304.
-      idArriendo: "reloj_pe",
-      idVenta: "reloj_pe",
-      modalidadItemArriendo: "Arriendo mensual",
-      itemArriendo: "Alquiler de reloj de control",
-      itemArriendoFuera: "Alquiler de reloj de control (provincia, despacho incluido)",
-      descArriendo: `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido. Precio ${tcTxt}.`,
-      itemVenta: "Reloj de control (compra)",
-      descVenta: `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío e instalación incluidos en Lima Metropolitana. Precio ${tcTxt}.`,
-      itemEnvio: () => "Envío de reloj a provincia",
-      descEnvio: (u) => `Despacho del reloj fuera de Lima Metropolitana (${u}). Pago único, ${tcTxt}.`,
-      itemInstalacion: (u) => `Instalación técnica del reloj (${u})`,
-      descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Incluida en Lima Metropolitana.",
-      descInstalacionCobrada: `Visita de instalación por nuestro equipo técnico. Pago único, ${tcTxt}.`,
+      instalacionOpcionalSinPrecio:
+        "El reloj es autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.",
     },
   }
 }
 
+const TC_TXT = "en soles al tipo de cambio oficial (SUNAT) del día"
+
+/** Ítems de la formal de Perú (contrato de create-from-vicky-pe). */
+const FORMAL_PE: TextosFormal = {
+  // Mismo id para arriendo y venta: la Modalidad distingue; en Creator/Books
+  // es el artículo [PER] 304.
+  idArriendo: "reloj_pe",
+  idVenta: "reloj_pe",
+  modalidadItemArriendo: "Arriendo mensual",
+  itemArriendo: "Alquiler de reloj de control",
+  itemArriendoFuera: "Alquiler de reloj de control (provincia, despacho incluido)",
+  descArriendo: `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido. Precio ${TC_TXT}.`,
+  itemVenta: "Reloj de control (compra)",
+  descVenta: `Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío e instalación incluidos en Lima Metropolitana. Precio ${TC_TXT}.`,
+  itemEnvio: () => "Envío de reloj a provincia",
+  descEnvio: (u) => `Despacho del reloj fuera de Lima Metropolitana (${u}). Pago único, ${TC_TXT}.`,
+  itemInstalacion: (u) => `Instalación técnica del reloj (${u})`,
+  descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Incluida en Lima Metropolitana.",
+  descInstalacionCobrada: `Visita de instalación por nuestro equipo técnico. Pago único, ${TC_TXT}.`,
+}
+
 /** % de descuento del plan para un escalón (0 → 0, 1 → 0,1, 2 → 0,2). */
 export function pctDescuentoPE(escalonDescuento: number): number {
-  return pctDescuento(reglasPE(), escalonDescuento)
+  return pctDescuentoPais(reglasPE(), escalonDescuento)
 }
 
 /** Precio mensual del plan (PEN neto, sin IGV). Lanza fuera de 1-50. */
 export function precioPlanPE(userCount: number): number {
-  return precioPlan(reglasPE(), userCount)
+  return precioPlanPais(reglasPE(), "de Perú", userCount)
 }
 
 export function cotizarPE(input: CotizacionPEInput): {
@@ -212,7 +240,7 @@ export function cotizarPE(input: CotizacionPEInput): {
   mensajeParaProspecto: string
 } {
   const tipoCambio = tarifasRelojPE(Number(input.tipoCambio)).tipoCambio
-  const r = cotizar(reglasPE(tipoCambio), {
+  const r = cotizarPais(reglasPE(tipoCambio), FORMAL_PE, "de Perú", {
     userCount: input.userCount,
     reloj: input.reloj,
     puntos: (input.puntos || []).map((p) => ({ ubicacion: p.ubicacion, zona: ZONA_MOTOR[p.zona] || "resto", autoInstalada: p.autoInstalada })),

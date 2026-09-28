@@ -1,7 +1,7 @@
 /**
- * Cotización referencial de MÉXICO = el MOTOR ÚNICO (lib/cotizacion/motor.ts)
- * con los datos de México (26-sep, paso 2 de la unificación). La lógica ya no
- * vive acá: este archivo declara las reglas del país y traduce la forma del
+ * Cotización referencial de MÉXICO = el MOTOR ÚNICO, que es el código de CHILE
+ * (lib/cotizacion-unica/motor.ts, 28-sep), con los datos de México. La lógica
+ * no vive acá: este archivo declara los datos del país y traduce la forma del
  * resultado a la que esperan las tools y el cotizador (campos en MXN).
  *
  * Datos de México:
@@ -24,7 +24,8 @@ import { nombreEquipoMX } from "./nombre-equipo.ts"
 import { ESCALERA_DESCUENTO_MX } from "./descuento.ts"
 import type { ZonaMX } from "./geografia.ts"
 export type { ZonaMX } from "./geografia.ts"
-import { cotizar, precioPlan, unirPartes, type ReglasMotor, type TierPlan, type ZonaMotor } from "../../cotizacion/motor.ts"
+import type { ReglasCotizacion, TierCot, ZonaCot } from "../../cotizacion-unica/motor.ts"
+import { cotizarPais, precioPlanPais, ID_EQUIPO, type TextosFormal } from "../../cotizacion-unica/pais.ts"
 
 const IVA_MX = 0.16
 
@@ -96,82 +97,119 @@ function redondear2(n: number): number {
   return Math.round(Number(n || 0) * 100) / 100
 }
 
-function tiersMX(): readonly TierPlan[] {
+function tiersMX(): readonly TierCot[] {
   const asistencia = CATALOGO_MODULOS_MX.find((m) => m.id === "asistencia")
   if (!asistencia) throw new Error("Catálogo MX sin módulo asistencia")
-  return asistencia.tiers as TierPlan[]
+  return asistencia.tiers as TierCot[]
 }
 
-const ZONA_MOTOR: Record<ZonaMX, ZonaMotor> = { cdmx_metro: "base", intermedia: "intermedia", resto: "resto" }
+const ZONA_MOTOR: Record<ZonaMX, ZonaCot> = { cdmx_metro: "base", intermedia: "intermedia", resto: "resto" }
 
-export const REGLAS_MX: ReglasMotor = {
-  nombrePais: "de México",
-  get tiers() {
-    return tiersMX()
+const conIVA = (n: number) => `${formatearMXN(n)} + IVA`
+
+/** Datos de México para el motor único. */
+export const REGLAS_MX: ReglasCotizacion = {
+  scopeMaxUsuarios: 50,
+  get modulos() {
+    return [{ id: "asistencia", nombre: "Control de Asistencia", tiers: tiersMX(), disponibleParaVicky: true }]
   },
+  hardware: [
+    {
+      id: ID_EQUIPO,
+      displayName: "Reloj checador",
+      arriendoUF: TARIFAS_MX.relojArriendoMes,
+      arriendoFueraUF: TARIFAS_MX.relojArriendoMesFuera,
+      ventaUF: TARIFAS_MX.relojVenta,
+      modalidadesDisponibles: ["arriendo", "venta"],
+      cantidadSugerida: 1,
+      requiereInstalacionOnsite: true,
+      disponibleParaVicky: true,
+    },
+  ],
+  servicios: [
+    {
+      id: "envio_reloj",
+      nombre: "Envío de reloj checador",
+      tarifa: {
+        modelo: "modalidad_zona",
+        arriendo: { base: 0, fuera: 0 },
+        venta: { base: TARIFAS_MX.envioVenta.base, fuera: TARIFAS_MX.envioVenta.fuera },
+      },
+      omitirSiAutoInstalada: false,
+      advertenciasAutoInstalacion: [],
+    },
+    {
+      id: "instalacion_reloj",
+      nombre: "Instalación del reloj checador",
+      tarifa: { modelo: "zona", base: TARIFAS_MX.instalacion.base, intermedia: TARIFAS_MX.instalacion.intermedia, resto: TARIFAS_MX.instalacion.resto },
+      omitirSiAutoInstalada: true,
+      advertenciasAutoInstalacion: [],
+    },
+  ],
+  esRelojDePared: (id) => id === ID_EQUIPO,
+  clasificar: (p) => ({ tipo: "zona", zona: p.zona ?? "base", reconocida: true }),
+  recargoArriendoFuera: 0,
+  instalacionBonificada: (modalidad, zona) => modalidad === "arriendo" && zona === "base",
+  exigePuntosConHardware: false,
+  impuesto: { tasa: IVA_MX, soloEquipo: false, agregacion: "por_concepto" },
+  redondeoLinea: (n) => n,
   escalera: ESCALERA_DESCUENTO_MX,
-  decimales: 2,
-  redondearPlanConDescuento: true,
-  formatear: formatearMXN,
-  impuesto: { tasa: IVA_MX, soloEquipo: false },
-  presentacion: "neto",
-  sufijo: " + IVA",
-  tarifas: {
-    arriendoBase: TARIFAS_MX.relojArriendoMes,
-    arriendoFuera: TARIFAS_MX.relojArriendoMesFuera,
-    venta: TARIFAS_MX.relojVenta,
-    envioVenta: { base: TARIFAS_MX.envioVenta.base, fuera: TARIFAS_MX.envioVenta.fuera },
-    instalacion: { base: TARIFAS_MX.instalacion.base, intermedia: TARIFAS_MX.instalacion.intermedia, resto: TARIFAS_MX.instalacion.resto },
+  redondearPlanConDescuento: redondear2,
+  mostrarPrecioInstalacionOpcional: false,
+  presentacion: {
+    monto: formatearMXN,
+    unitario: formatearMXN,
+    lineaTotalMensual: (m) => `Total mensual: ${conIVA(m.neto)}`,
+    lineaSubtotal: (neto) => `Subtotal sin IVA: ${formatearMXN(neto)}`,
+    opcionMensual: (m) => `${conIVA(m.neto)} al mes`,
+    pagoUnico: (m) => conIVA(m.neto),
+    montoCorto: (m) => conIVA(m.neto),
+    notaUnidad: null,
+    // "reloj" a secas jamás en México (Lalo 24-sep): "reloj checador" o "checador".
+    postMensaje: nombreEquipoMX,
   },
   textos: {
     equipo: "reloj",
+    equipoPlural: "relojes",
     modalidadArriendo: "Reloj checador en renta",
     modalidadVenta: "Reloj checador en compra",
-    envioIncluido: " El envío del reloj va incluido.",
+    modalidadMixta: "Reloj checador",
     bonificadaEn: "(renta en CDMX y Zona Metropolitana)",
-    detallePagoInicial: (v, e, i) => {
-      const partes = [v ? "reloj" : "", e ? "envío" : "", i ? "instalación" : ""].filter(Boolean)
-      return partes.length ? ` (${unirPartes(partes)})` : ""
-    },
+    segunZona: "según la ciudad",
+    sufijoArriendoFuera: " (fuera de CDMX)",
+    envioIncluido: " El envío del reloj va incluido.",
+    notaMicroPlan: null,
     notasFinales: ["La capacitación online va incluida sin costo 🎁"],
-    lineaArriendo: "Renta de reloj checador",
-    lineaArriendoFuera: "fuera de CDMX",
-    lineaDespacho: "envío",
-    lineaVenta: "Reloj checador (compra)",
-    lineaEnvio: (u) => `Envío de reloj checador (${u})`,
-    lineaInstalacion: (u) => `Instalación técnica del reloj checador (${u})`,
-    zonaBaseEnvio: "CDMX y Zona Metropolitana",
-    zonaFueraEnvio: "Fuera de CDMX",
-    bonificadaDetalle: "bonificada en renta (CDMX y Zona Metropolitana)",
-    idArriendo: "reloj_arriendo",
-    idVenta: "reloj_venta",
-    modalidadItemArriendo: "Renta mensual",
-    itemArriendo: "Renta de reloj checador",
-    itemArriendoFuera: "Renta de reloj checador (fuera de CDMX, envío incluido)",
-    descArriendo: "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío incluido.",
-    itemVenta: "Reloj checador (compra)",
-    descVenta: "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
-    itemEnvio: (u) => `Envío de reloj (${u})`,
-    itemInstalacion: (u) => `Instalación técnica del reloj (${u})`,
-    descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Bonificada en renta en CDMX y Zona Metropolitana.",
-    descInstalacionCobrada: "Visita de instalación por nuestro equipo técnico. Pago único.",
+    instalacionOpcionalSinPrecio:
+      "El reloj es autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.",
   },
+}
+
+/** Ítems de la formal de México (contrato de create-from-vicky-mx). */
+const FORMAL_MX: TextosFormal = {
+  idArriendo: "reloj_arriendo",
+  idVenta: "reloj_venta",
+  modalidadItemArriendo: "Renta mensual",
+  itemArriendo: "Renta de reloj checador",
+  itemArriendoFuera: "Renta de reloj checador (fuera de CDMX, envío incluido)",
+  descArriendo: "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Envío incluido.",
+  itemVenta: "Reloj checador (compra)",
+  descVenta: "Reloj biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
+  itemEnvio: (u) => `Envío de reloj (${u})`,
+  itemInstalacion: (u) => `Instalación técnica del reloj (${u})`,
+  descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Bonificada en renta en CDMX y Zona Metropolitana.",
+  descInstalacionCobrada: "Visita de instalación por nuestro equipo técnico. Pago único.",
   capacitacion: {
-    linea: { concepto: "Capacitación online", detalle: "Curso online de uso de la plataforma — incluida sin costo" },
-    item: {
-      id: "capacitacion_online",
-      nombre: "Capacitación online",
-      descripcion: "Curso online de uso de la plataforma — incluida sin costo.",
-      precioLista: TARIFAS_MX.capacitacionOnline,
-    },
+    id: "capacitacion_online",
+    nombre: "Capacitación online",
+    descripcion: "Curso online de uso de la plataforma — incluida sin costo.",
+    precioLista: TARIFAS_MX.capacitacionOnline,
   },
-  // "reloj" a secas jamás en México (Lalo 24-sep): "reloj checador" o "checador".
-  postMensaje: nombreEquipoMX,
 }
 
 /** Precio mensual del plan de asistencia (MXN neto, sin IVA). Lanza fuera de 1-50. */
 export function precioPlanMX(userCount: number): number {
-  return precioPlan(REGLAS_MX, userCount)
+  return precioPlanPais(REGLAS_MX, "de México", userCount)
 }
 
 export function cotizarMX(input: CotizacionMXInput): {
@@ -195,7 +233,7 @@ export function cotizarMX(input: CotizacionMXInput): {
   escalonDescuento: number
   mensajeParaProspecto: string
 } {
-  const r = cotizar(REGLAS_MX, {
+  const r = cotizarPais(REGLAS_MX, FORMAL_MX, "de México", {
     userCount: input.userCount,
     reloj: input.reloj,
     puntos: (input.puntos || []).map((p) => ({ ubicacion: p.ubicacion, zona: ZONA_MOTOR[p.zona] || "resto", autoInstalada: p.autoInstalada })),

@@ -1,8 +1,8 @@
 /**
- * Cotización referencial de COLOMBIA = el MOTOR ÚNICO (lib/cotizacion/motor.ts)
- * con los datos de Colombia (26-sep, paso 2 de la unificación). La lógica ya
- * no vive acá: este archivo declara las reglas del país y traduce la forma del
- * resultado a la que esperan las tools y el cotizador (campos en COP).
+ * Cotización referencial de COLOMBIA = el MOTOR ÚNICO, que es el código de
+ * CHILE (lib/cotizacion-unica/motor.ts, 28-sep), con los datos de Colombia.
+ * La lógica no vive acá: este archivo declara los datos del país y traduce la
+ * forma del resultado a la que esperan las tools y el cotizador (campos en COP).
  *
  * Datos de Colombia:
  *   - Plan: 1-10 → $315.000 fijo · 11-20 → $13.700 por usuario (catálogo).
@@ -24,7 +24,8 @@ import { CATALOGO_MODULOS_CO } from "./catalogo.ts"
 import type { ZonaCO } from "./geografia.ts"
 export type { ZonaCO } from "./geografia.ts"
 import { ESCALERA_DESCUENTO_CO } from "./descuento.ts"
-import { cotizar, precioPlan, tierPlan, unirPartes, type ReglasMotor, type TierPlan, type ZonaMotor } from "../../cotizacion/motor.ts"
+import type { ReglasCotizacion, TierCot, ZonaCot } from "../../cotizacion-unica/motor.ts"
+import { cotizarPais, precioPlanPais, tierPlanPais, ID_EQUIPO, type TextosFormal } from "../../cotizacion-unica/pais.ts"
 
 // Solo el hardware (equipo en alquiler y en venta) lleva IVA 19 %.
 const IVA_HARDWARE = 0.19
@@ -88,77 +89,119 @@ export function formatearCOP(monto: number): string {
   return "$" + Math.round(monto).toLocaleString("es-CO")
 }
 
-function tiersCO(): readonly TierPlan[] {
+function tiersCO(): readonly TierCot[] {
   const asistencia = CATALOGO_MODULOS_CO.find((m) => m.id === "asistencia")
   if (!asistencia) throw new Error("Catálogo CO sin módulo asistencia")
-  return asistencia.tiers as TierPlan[]
+  return asistencia.tiers as TierCot[]
 }
 
-const ZONA_MOTOR: Record<ZonaCO, ZonaMotor> = { capital: "base", intermedia: "intermedia", resto: "resto" }
+const ZONA_MOTOR: Record<ZonaCO, ZonaCot> = { capital: "base", intermedia: "intermedia", resto: "resto" }
 
-export const REGLAS_CO: ReglasMotor = {
-  nombrePais: "de Colombia",
-  get tiers() {
-    return tiersCO()
+/** Precio FINAL: solo el equipo suma su IVA, y se declara. */
+const conIvaEquipo = (total: number, impuesto: number) =>
+  `${formatearCOP(total)}${impuesto > 0 ? " (incluye el IVA del equipo)" : ""}`
+
+/** Datos de Colombia para el motor único. */
+export const REGLAS_CO: ReglasCotizacion = {
+  scopeMaxUsuarios: 50,
+  get modulos() {
+    return [{ id: "asistencia", nombre: "Control de Asistencia", tiers: tiersCO(), disponibleParaVicky: true }]
   },
+  hardware: [
+    {
+      id: ID_EQUIPO,
+      displayName: "Equipo biométrico",
+      arriendoUF: TARIFAS_CO.relojArriendoMes,
+      arriendoFueraUF: TARIFAS_CO.relojArriendoMesFuera,
+      ventaUF: TARIFAS_CO.relojVenta,
+      modalidadesDisponibles: ["arriendo", "venta"],
+      cantidadSugerida: 1,
+      requiereInstalacionOnsite: true,
+      disponibleParaVicky: true,
+    },
+  ],
+  servicios: [
+    {
+      id: "envio_reloj",
+      nombre: "Envío de equipo biométrico",
+      tarifa: {
+        modelo: "modalidad_zona",
+        arriendo: { base: 0, fuera: 0 },
+        venta: { base: TARIFAS_CO.envioVenta.capital, fuera: TARIFAS_CO.envioVenta.fuera },
+      },
+      omitirSiAutoInstalada: false,
+      advertenciasAutoInstalacion: [],
+    },
+    {
+      id: "instalacion_reloj",
+      nombre: "Instalación del equipo",
+      tarifa: { modelo: "zona", base: TARIFAS_CO.instalacion.capital, intermedia: TARIFAS_CO.instalacion.intermedia, resto: TARIFAS_CO.instalacion.resto },
+      omitirSiAutoInstalada: true,
+      advertenciasAutoInstalacion: [],
+    },
+  ],
+  esRelojDePared: (id) => id === ID_EQUIPO,
+  clasificar: (p) => ({ tipo: "zona", zona: p.zona ?? "base", reconocida: true }),
+  recargoArriendoFuera: 0,
+  instalacionBonificada: (modalidad, zona) => modalidad === "arriendo" && zona === "base",
+  exigePuntosConHardware: false,
+  impuesto: { tasa: IVA_HARDWARE, soloEquipo: true, agregacion: "por_concepto" },
+  redondeoLinea: (n) => n,
   escalera: ESCALERA_DESCUENTO_CO,
-  decimales: 0,
-  redondearPlanConDescuento: true,
-  formatear: formatearCOP,
-  impuesto: { tasa: IVA_HARDWARE, soloEquipo: true },
-  presentacion: "final",
-  sufijo: "",
-  tarifas: {
-    arriendoBase: TARIFAS_CO.relojArriendoMes,
-    arriendoFuera: TARIFAS_CO.relojArriendoMesFuera,
-    venta: TARIFAS_CO.relojVenta,
-    envioVenta: { base: TARIFAS_CO.envioVenta.capital, fuera: TARIFAS_CO.envioVenta.fuera },
-    instalacion: { base: TARIFAS_CO.instalacion.capital, intermedia: TARIFAS_CO.instalacion.intermedia, resto: TARIFAS_CO.instalacion.resto },
+  redondearPlanConDescuento: (n) => Math.round(n),
+  mostrarPrecioInstalacionOpcional: false,
+  presentacion: {
+    monto: formatearCOP,
+    unitario: formatearCOP,
+    lineaTotalMensual: (m) => `Total mensual: ${conIvaEquipo(m.total, m.impuesto)}`,
+    lineaSubtotal: (neto) => `Subtotal: ${formatearCOP(neto)}`,
+    opcionMensual: (m) => `${formatearCOP(m.total)} al mes${m.impuesto > 0 ? " (incluye el IVA del equipo)" : ""}`,
+    pagoUnico: (m) => conIvaEquipo(m.total, m.impuesto),
+    montoCorto: (m) => formatearCOP(m.total),
+    notaUnidad: null,
   },
   textos: {
     equipo: "equipo",
+    equipoPlural: "equipos",
     modalidadArriendo: "Equipo biométrico en alquiler",
     modalidadVenta: "Equipo biométrico en compra",
-    envioIncluido: " El despacho del equipo va incluido.",
+    modalidadMixta: "Equipo biométrico",
     bonificadaEn: "(alquiler en Bogotá y alrededores)",
-    detallePagoInicial: (v, e, i) => {
-      const partes = [v ? "equipo con IVA" : "", e ? "envío" : "", i ? "instalación" : ""].filter(Boolean)
-      return partes.length ? ` (${unirPartes(partes)})` : ""
-    },
+    segunZona: "según la ciudad",
+    sufijoArriendoFuera: " (fuera de Bogotá)",
+    envioIncluido: " El despacho del equipo va incluido.",
+    notaMicroPlan: null,
     notasFinales: ["La capacitación online (valorada en $95.000) va incluida sin costo 🎁"],
-    lineaArriendo: "Alquiler de equipo biométrico",
-    lineaArriendoFuera: "fuera de Bogotá",
-    lineaDespacho: "despacho",
-    lineaVenta: "Equipo biométrico (compra)",
-    lineaEnvio: (u) => `Envío de equipo biométrico (${u})`,
-    lineaInstalacion: (u) => `Instalación técnica del equipo (${u})`,
-    zonaBaseEnvio: "Bogotá y alrededores",
-    zonaFueraEnvio: "fuera de Bogotá",
-    bonificadaDetalle: "bonificada en alquiler (Bogotá y alrededores)",
-    idArriendo: "reloj_arriendo",
-    idVenta: "reloj_venta",
-    modalidadItemArriendo: "Arriendo mensual",
-    itemArriendo: "Alquiler de equipo biométrico",
-    itemArriendoFuera: "Alquiler de equipo biométrico (fuera de Bogotá, despacho incluido)",
-    descArriendo: "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido.",
-    itemVenta: "Equipo biométrico (compra)",
-    descVenta: "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
-    itemEnvio: (u) => `Envío de equipo biométrico (${u})`,
-    itemInstalacion: (u) => `Instalación técnica del equipo (${u})`,
-    descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Bonificada en alquiler en Bogotá y alrededores.",
-    descInstalacionCobrada: "Visita de instalación por nuestro equipo técnico. Pago único.",
+    instalacionOpcionalSinPrecio:
+      "El equipo es autoinstalable y te guiamos paso a paso. Si prefieres que lo instale nuestro equipo técnico, también lo podemos coordinar.",
   },
+}
+
+/** Ítems de la formal de Colombia (contrato de create-from-vicky-co). */
+const FORMAL_CO: TextosFormal = {
+  idArriendo: "reloj_arriendo",
+  idVenta: "reloj_venta",
+  modalidadItemArriendo: "Arriendo mensual",
+  itemArriendo: "Alquiler de equipo biométrico",
+  itemArriendoFuera: "Alquiler de equipo biométrico (fuera de Bogotá, despacho incluido)",
+  descArriendo: "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet. Despacho incluido.",
+  itemVenta: "Equipo biométrico (compra)",
+  descVenta: "Equipo biométrico de control de asistencia (facial y huella), con conexión WiFi y Ethernet.",
+  itemEnvio: (u) => `Envío de equipo biométrico (${u})`,
+  itemInstalacion: (u) => `Instalación técnica del equipo (${u})`,
+  descInstalacionBonificada: "Visita de instalación por nuestro equipo técnico. Bonificada en alquiler en Bogotá y alrededores.",
+  descInstalacionCobrada: "Visita de instalación por nuestro equipo técnico. Pago único.",
 }
 
 /** Tramo del plan de asistencia CO para una dotación (fuente única: el catálogo). */
 export function tierPlanCO(userCount: number): { modalidad: "fijo" | "por_usuario"; precioUF: number } {
-  const t = tierPlan(REGLAS_CO, userCount)
+  const t = tierPlanPais(REGLAS_CO, "de Colombia", userCount)
   return { modalidad: t.modalidad, precioUF: t.precioUF }
 }
 
 /** Precio mensual del plan de asistencia (COP, sin IVA). Lanza fuera de 1-50. */
 export function precioPlanCO(userCount: number): number {
-  return precioPlan(REGLAS_CO, userCount)
+  return precioPlanPais(REGLAS_CO, "de Colombia", userCount)
 }
 
 export function cotizarCO(input: CotizacionCOInput): {
@@ -179,7 +222,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   escalonDescuento: number
   mensajeParaProspecto: string
 } {
-  const r = cotizar(REGLAS_CO, {
+  const r = cotizarPais(REGLAS_CO, FORMAL_CO, "de Colombia", {
     userCount: input.userCount,
     reloj: input.reloj,
     puntos: (input.puntos || []).map((p) => ({ ubicacion: p.ubicacion, zona: ZONA_MOTOR[p.zona] || "resto", autoInstalada: p.autoInstalada })),
