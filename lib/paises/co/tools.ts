@@ -15,6 +15,7 @@
  */
 
 import { cotizarCO, formatearCOP, type PuntoInstalacionCO } from "./cotizar"
+import { tramoLegadoCO } from "./tramo-legado"
 import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { agendaCoActiva, EVENTOS_AGENDA_CO } from "@/lib/paises/co/agenda"
 import { clasificarUbicacionCO } from "./geografia"
@@ -362,6 +363,7 @@ export function buildDispatchCO(contact: string) {
           })
         }
         const r = cotizarCO({
+          tramoLegado: await tramoLegadoCO(contact),
           userCount,
           reloj:
             i.reloj && i.reloj.modalidad && Number(i.reloj.cantidad) > 0
@@ -420,6 +422,7 @@ export function buildDispatchCO(contact: string) {
         // ítems van a LISTA y el % viaja aparte; el cálculo local con el escalón
         // solo alimenta el mensaje de entrega (pago inicial y mensualidad).
         const calculo = cotizarCO({
+          tramoLegado: await tramoLegadoCO(contact),
           userCount: Number(i.userCount || 0),
           reloj:
             i.reloj && i.reloj.modalidad && Number(i.reloj.cantidad) > 0

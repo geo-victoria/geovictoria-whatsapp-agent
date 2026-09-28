@@ -5,7 +5,8 @@
  * forma del resultado a la que esperan las tools y el cotizador (campos en COP).
  *
  * Datos de Colombia:
- *   - Plan: 1-10 → $315.000 fijo · 11-20 → $13.700 por usuario (catálogo).
+ *   - Plan: 1-20 → $315.000 fijo · 21+ → $13.700 por usuario (catálogo, 28-sep);
+ *     `tramoLegado` = tabla anterior (1-10 fijo) para quien ya vio precio con ella.
  *     RANGO DE VICKY = 1-20; el 21-50 del catálogo es solo excepción.
  *   - Equipo biométrico: alquiler $86.000/mes en la base (Bogotá y
  *     conurbados), $98.000/mes fuera (despacho incluido); venta $620.000.
@@ -20,7 +21,7 @@
  *     alquiler), igual que el cotizador. La fila "Activación" ya no existe.
  */
 
-import { CATALOGO_MODULOS_CO } from "./catalogo.ts"
+import { CATALOGO_MODULOS_CO, TIERS_ASISTENCIA_CO_LEGADO } from "./catalogo.ts"
 import type { ZonaCO } from "./geografia.ts"
 export type { ZonaCO } from "./geografia.ts"
 import { ESCALERA_DESCUENTO_CO } from "./descuento.ts"
@@ -46,6 +47,8 @@ export type CotizacionCOInput = {
   puntos?: PuntoInstalacionCO[]
   /** Escalón de descuento del PLAN: 0 = sin descuento, 1 = 10 %, 2 = 20 %. */
   escalonDescuento?: number
+  /** Contacto que ya vio precio con la tabla anterior (1-10 fijo · 11+ por usuario). */
+  tramoLegado?: boolean
 }
 
 export type LineaCO = {
@@ -190,6 +193,12 @@ const FORMAL_CO: TextosFormal = {
   descInstalacionCobrada: "Visita de instalación por nuestro equipo técnico. Pago único.",
 }
 
+/** Mismas reglas con la tabla anterior al 28-sep (clientes que ya vieron ese precio). */
+export const REGLAS_CO_LEGADO: ReglasCotizacion = {
+  ...REGLAS_CO,
+  modulos: [{ id: "asistencia", nombre: "Control de Asistencia", tiers: TIERS_ASISTENCIA_CO_LEGADO as unknown as readonly TierCot[], disponibleParaVicky: true }],
+}
+
 /** Tramo del plan de asistencia CO para una dotación (fuente única: el catálogo). */
 export function tierPlanCO(userCount: number): { modalidad: "fijo" | "por_usuario"; precioUF: number } {
   const t = tierPlanPais(REGLAS_CO, "de Colombia", userCount)
@@ -219,7 +228,7 @@ export function cotizarCO(input: CotizacionCOInput): {
   escalonDescuento: number
   mensajeParaProspecto: string
 } {
-  const r = cotizarPais(REGLAS_CO, FORMAL_CO, "de Colombia", {
+  const r = cotizarPais(input.tramoLegado ? REGLAS_CO_LEGADO : REGLAS_CO, FORMAL_CO, "de Colombia", {
     userCount: input.userCount,
     reloj: input.reloj,
     puntos: (input.puntos || []).map((p) => ({ ubicacion: p.ubicacion, zona: ZONA_MOTOR[p.zona] || "resto", autoInstalada: p.autoInstalada })),

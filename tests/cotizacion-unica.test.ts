@@ -37,7 +37,10 @@ test("Perú, Colombia y México: mismos números e ítems de la formal que el mo
   for (const p of ["pe", "co", "mx"]) {
     assert.ok(fx[p].length > 50)
     for (const { caso, r: esperado } of fx[p]) {
-      const r = clon(fns[p](clon(caso) as never))
+      // Colombia: el motor anterior tenía la tabla 1-10 fijo; hoy esa es la
+      // tabla LEGADO (28-sep), así que el congelado se compara contra ella.
+      const entrada = p === "co" ? { ...clon(caso), tramoLegado: true } : clon(caso)
+      const r = clon(fns[p](entrada as never))
       delete r.mensajeParaProspecto
       delete r.lineas
       assert.deepEqual(r, esperado, `${p} ${JSON.stringify(caso)}`)
@@ -87,7 +90,7 @@ test("pago inicial = pagos únicos + primer mes (plan con descuento + arriendo) 
   const pe = cotizarPE({ userCount: 15, reloj: { modalidad: "arriendo", cantidad: 1 }, puntos: [{ ubicacion: "Miraflores", zona: "lima", autoInstalada: true }], escalonDescuento: 1, tipoCambio: 3.372 })
   assert.ok(Math.abs(pe.pagoInicialNeto - (135 * 0.9 + 67)) < 0.01)
   const co = cotizarCO({ userCount: 15, reloj: { modalidad: "arriendo", cantidad: 1 }, puntos: [{ ubicacion: "Bogotá", zona: "capital", autoInstalada: true }] })
-  assert.equal(co.pagoInicialNeto, 15 * 13700 + 86000)
+  assert.equal(co.pagoInicialNeto, 315000 + 86000)
   const mx = cotizarMX({ userCount: 10, reloj: { modalidad: "arriendo", cantidad: 1 }, puntos: [{ ubicacion: "Coyoacán", zona: "cdmx_metro", autoInstalada: true }] })
   assert.equal(mx.pagoInicialNeto, 1200 + 350)
 })

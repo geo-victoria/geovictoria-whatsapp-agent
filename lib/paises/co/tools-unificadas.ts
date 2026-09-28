@@ -336,7 +336,9 @@ export function buildDispatchCOUnificado(contact: string) {
     const { cotizarCO } = await import("./cotizar")
     const { clasificarUbicacionCO } = await import("./geografia")
     const c = aInputCotizarCO(cfg as CotizarIn) as { userCount: number; reloj?: { modalidad: "arriendo" | "venta"; cantidad: number }; puntosInstalacion?: Array<{ ubicacion: string; autoInstalada: boolean }> }
+    const { tramoLegadoCO } = await import("./tramo-legado")
     const calculo = cotizarCO({
+      tramoLegado: await tramoLegadoCO(contact),
       userCount: Number(cfg.userCount || 0),
       reloj: c.reloj,
       puntos: (c.puntosInstalacion || []).map((p) => ({ ubicacion: p.ubicacion, zona: clasificarUbicacionCO(p.ubicacion).zona, autoInstalada: p.autoInstalada })),

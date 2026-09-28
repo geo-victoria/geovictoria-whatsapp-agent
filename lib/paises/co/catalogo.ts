@@ -9,9 +9,10 @@
  * catálogo chileno.
  *
  * Precios Colombia (COP) — DEFINICIONES CERRADAS (Lalo, 09-jul):
- *   Asistencia 1-10:  $315.000/mes fijo (sin micro-plan de 1 persona)
- *   Asistencia 11-20: $13.700/usuario/mes ("la más competitiva": el rango fijo
- *                     corta en 10, NO en 20 como muestra Creator hoy).
+ *   Asistencia 1-20:  $315.000/mes FIJO (regla del equipo CO, Lalo 28-sep;
+ *                     SUPERSEDE el "fijo solo hasta 10" del 09-jul, que dejaba
+ *                     11-22 personas más baratas que 10 — ver TIERS_..._LEGADO).
+ *   Asistencia 21+:   $13.700/usuario/mes.
  *                     RANGO DE VICKY = 1-20, igual que Chile (Lalo 23-sep);
  *                     21-50 sigue a $13.700 solo como excepción por contacto.
  *   OJO 23-sep: la rebaja "software a la mitad" se aplicó y se REVIRTIÓ el
@@ -54,8 +55,12 @@ export const CATALOGO_MODULOS_CO: ModuloSoftware[] = [
     descripcion:
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
-      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 315000 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 13700 },
+      // REGLA DEL EQUIPO COLOMBIA (Lalo 28-sep, reclamo de María Fernanda Cely
+      // por COT1742): $315.000 FIJO de 1 a 20 personas; desde 21, por usuario.
+      // La tabla del 09-jul (fijo solo hasta 10) dejaba 11-22 personas MÁS
+      // BARATAS que 10; queda en TIERS_ASISTENCIA_CO_LEGADO solo para los
+      // contactos a los que ya se les dio precio con ella.
+      { minUsuarios: 1, maxUsuarios: 20, modalidad: "fijo", precioUF: 315000 },
       // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
       // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
       // queda, como el 21-50 de Chile, solo para la excepción por contacto
@@ -66,6 +71,17 @@ export const CATALOGO_MODULOS_CO: ModuloSoftware[] = [
     disponibleParaVicky: true,
   },
 ]
+
+/**
+ * Tabla anterior al 28-sep (1-10 fijo · 11-50 por usuario). SOLO para contactos
+ * que ya recibieron precio con ella (vic_kv `co_tramo_legado_<fono>`; Lalo
+ * 28-sep: "no le cambiemos los precios a los que ya dimos precios"): si vuelven
+ * a pedir su formal o la actualizan, siguen con el precio que vieron.
+ */
+export const TIERS_ASISTENCIA_CO_LEGADO = [
+  { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 315000 },
+  { minUsuarios: 11, maxUsuarios: 50, modalidad: "por_usuario", precioUF: 13700 },
+] as const
 
 export const CATALOGO_HARDWARE_CO: Hardware[] = [
   {

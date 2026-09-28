@@ -12,7 +12,7 @@ import { anclajeTemporalCO, bloqueTelefonoCO } from "./anclaje.ts"
 /** Catálogo CO para el prompt, SIN montos: la tool es la única fuente de precio. */
 export function formatCatalogoParaPromptCO(): string {
   const lineasModulos = CATALOGO_MODULOS_CO.filter((m) => m.disponibleParaVicky !== false)
-    .map((m) => `  - ${m.id}: ${m.nombre} — tarifa fija mensual hasta 10 personas, por persona desde 11 (el monto exacto lo entrega cotizar_referencial; precio final, sin IVA). ${m.descripcion || ""}`.trimEnd())
+    .map((m) => `  - ${m.id}: ${m.nombre} — tarifa fija mensual hasta 20 personas, por persona desde 21 (el monto exacto lo entrega cotizar_referencial; precio final, sin IVA). ${m.descripcion || ""}`.trimEnd())
     .join("\n")
   const hardware = CATALOGO_HARDWARE_CO.filter((h) => h.disponibleParaVicky !== false)
   const lineasHardware =
