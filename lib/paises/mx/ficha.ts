@@ -90,6 +90,7 @@ export const FICHA_MX: FichaPrompt = {
   arrendados: "rentados",
   equipoNombreCap: "Reloj checador",
   fichaRelojUrl: FICHA_2A_URL,
+  sitioPais: "es-mx",
   bloques: {
     minimoParaEmitir: `   EL RFC Y LA RAZÓN SOCIAL SON LOS IMPRESCINDIBLES (en México no hay padrón público que resuelva la razón social desde el RFC). Pides los datos UNA vez, en el mismo mensaje y en UNA frase natural (nunca como lista), y después actúas según lo que llegue — ninguno de estos escenarios admite repreguntar el correo:
    · **Da RFC, razón social y correo** → emites normal, con \`contactoEmail\`. La cotización sale por correo además del chat.

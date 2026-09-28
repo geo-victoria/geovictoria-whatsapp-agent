@@ -2717,8 +2717,8 @@ export async function GET(req: Request) {
   }
 
   // 3. Chequeos de calidad vencidos.
-  const chequeos = await supa<{ id: string; contact: string; vendedor_email: string; vendedor_nombre: string | null }>(
-    `vic_ptv?estado=eq.activo&chequeo_hecho_at=is.null&chequeo_at=lte.${encodeURIComponent(ahora.toISOString())}&select=id,contact,vendedor_email,vendedor_nombre&limit=20`,
+  const chequeos = await supa<{ id: string; contact: string; vendedor_email: string; vendedor_nombre: string | null; presentado_al_prospecto: boolean | null }>(
+    `vic_ptv?estado=eq.activo&chequeo_hecho_at=is.null&chequeo_at=lte.${encodeURIComponent(ahora.toISOString())}&select=id,contact,vendedor_email,vendedor_nombre,presentado_al_prospecto&limit=20`,
   )
   let chequeosEnviados = 0
   let chequeosRetirados = 0
@@ -2740,6 +2740,18 @@ export async function GET(req: Request) {
         body: JSON.stringify({ chequeo_hecho_at: ahora.toISOString(), chequeo_resultado: enOnboarding ? "onboarding" : "pagado" }),
       })
       chequeosRetirados++
+      continue
+    }
+    // NO SE PREGUNTA POR ALGUIEN QUE EL CLIENTE NO CONOCE (28-sep, análisis
+    // Perú: "¿cómo te fue con Mónica?" a clientes a los que nunca se les
+    // presentó). Sin presentación el chequeo se corre 9 h hábiles; cuando la
+    // presentación salga, el chequeo llega después de ella.
+    if (ch.presentado_al_prospecto === false) {
+      const fer = await feriadosDePais(pais).catch(() => new Set<string>())
+      await supa(`vic_ptv?id=eq.${ch.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ chequeo_at: sumarHorasHabiles(ahora, 9, pais, fer).toISOString() }),
+      })
       continue
     }
     const ventanaAbierta = Boolean(conv?.last_user_at && ahora.getTime() - new Date(conv.last_user_at).getTime() < VENTANA_META_MS)

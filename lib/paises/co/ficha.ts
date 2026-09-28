@@ -90,6 +90,7 @@ export const FICHA_CO: FichaPrompt = {
   arrendados: "alquilados",
   equipoNombreCap: "Equipo biométrico",
   fichaRelojUrl: FICHA_2A_URL,
+  sitioPais: "es-co",
   bloques: {
     minimoParaEmitir: `   EL NIT ES EL ÚNICO IMPRESCINDIBLE (regla dura, misma que Chile y Perú — 23-sep: la razón social sale del NIT vía el padrón RUES de Confecámaras, así que NO se pide). Pides los dos datos UNA vez, en el mismo mensaje y en UNA frase natural (nunca como lista), y después actúas según lo que llegue — son tres escenarios y ninguno admite repreguntar el correo:
    · **Da NIT y correo** → emites normal, con \`contactoEmail\`. La cotización sale por correo además del chat.
