@@ -70,27 +70,12 @@ export async function datosDelChat(contact: string, opts: { soloSiHayRut?: boole
       .map((m) => String(m.content || ""))
       .join("\n")
     if (!soloCliente.trim()) return vacio
-    let rut: string | undefined
-    if (clean.startsWith("56")) {
-      const { rutEnTexto } = await import("./empresas-sii")
-      rut = rutEnTexto(soloCliente) || undefined
-    } else if (clean.startsWith("51")) {
-      // Perú (22-sep): el documento es el RUC (11 dígitos con DV módulo 11);
-      // viaja en el mismo campo `rut` — crm-hitos lo escribe en RUT_Empresa
-      // sin canonizarlo como RUT chileno y la escalera RUC + >20 → deal.
-      const { rucEnTexto } = await import("./rut")
-      rut = rucEnTexto(soloCliente) || undefined
-    } else if (clean.startsWith("57")) {
-      // Colombia (23-sep): NIT de empresa con DV calculado (cuerpo-DV); viaja
-      // en `rut` como el RUC — crm-hitos lo deja tal cual en RUT_Empresa.
-      const { nitEnTexto } = await import("./paises/co/nit")
-      rut = nitEnTexto(soloCliente) || undefined
-    } else if (clean.startsWith("52")) {
-      // México (27-sep): RFC (formato SAT, sin DV estricto); viaja en `rut`
-      // como RUC/NIT y crm-hitos lo deja tal cual en RUT_Empresa.
-      const { rfcEnTexto } = await import("./paises/mx/rfc")
-      rut = rfcEnTexto(soloCliente) || undefined
-    }
+    // Documento de la empresa por PAÍS (RUT · RUC · NIT · RFC): el extractor
+    // lo decide la ficha operativa (28-sep). Viaja en `rut` para todos —
+    // crm-hitos lo escribe en RUT_Empresa tal cual y la escalera "documento +
+    // >20 → deal" corre en los cuatro países.
+    const { documentoDeContactoEnTexto } = await import("./paises/documento-en-texto")
+    const rut: string | undefined = documentoDeContactoEnTexto(clean, soloCliente) || undefined
     if (opts.soloSiHayRut && !rut) return vacio
     const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim()
     const dialogo = filas

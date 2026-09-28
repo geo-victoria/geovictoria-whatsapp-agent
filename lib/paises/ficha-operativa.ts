@@ -153,12 +153,50 @@ export type FichaOperativa = {
     /** Lead SIN calificar → SDR ("Asignación Leads Sin calificar Vicky SDR"). */
     reglaLeadsSinCalificar: string
   }
-  /** Procesos globales que el país tiene ENCENDIDOS (mismo código, interruptor por país). */
+  /**
+   * Plantillas HSM que usan los PROCESOS automáticos (traspaso, post-pago);
+   * el consumidor conserva su env de override. 28-sep (paso 4): antes cada
+   * cron tenía su `TM_TEMPLATE_<CC>` a mano.
+   */
+  plantillas: {
+    /** Presentación del ejecutivo fuera de la ventana de 24 h. Vacío = la neutra de Chile (misma env). */
+    presentacionTraspaso: string
+  }
+  /**
+   * Procesos globales que el país tiene ENCENDIDOS (mismo código, interruptor
+   * por país). 28-sep (paso 4, Lalo "un país nuevo se habilita EN LA FICHA"):
+   * lo que en ptv-cron, traspaso-postpago y crm-hitos era `if (pais === …)`
+   * pasa a ser un flag acá. Cada flag conserva la DECISIÓN de negocio que lo
+   * originó; la mecánica es una sola para los cuatro países.
+   */
   procesos: {
     /** Reloj de calificación de 24 h hábiles (lead que no contestó la 1ª pregunta → reglas de Zoho). */
     relojCalificacion24h: boolean
     /** Leads y tratos se entregan por las REGLAS de Zoho (apagado = rotación interna / fijos del país). */
     tombolaZoho: boolean
+    /**
+     * La presentación al cliente y los relojes de traspaso de la CONVERSACIÓN
+     * exigen un gate (vic_kv `<cc>_presentacion` / env VICKY_<CC>_PRESENTACION
+     * = on). Perú: Lalo 11-ago "no presentes a nadie todavía", reencendido el
+     * 21-sep — el gate sigue existiendo para poder apagarlo sin deploy.
+     */
+    presentacionConGate: boolean
+    /** Tras el pago, el alta de la empresa corre POR CHAT (GV Avanzado): CL 26-jul · PE 21-sep · CO 23-sep · MX 24-sep. */
+    altaPorChat: boolean
+    /**
+     * El lead que nace de un hito SIN formal nace con el SDR del país en vez
+     * de con el usuario Vicky (México, Lalo 13-ago: "todo lo que no sea la
+     * formal va como LEAD a los SDR Inbound MX"). Los demás nacen con Vicky y
+     * esperan a la tómbola o al reloj.
+     */
+    leadNaceConSdr: boolean
+    /**
+     * El lead de un SDR es un HANDOFF, no gestión: al cotizar se convierte y
+     * el deal NO hereda al SDR (Colombia, acuerdo del equipo CO 04/05-ago:
+     * el lead sin cotización vive con el SDR por diseño). En los demás países
+     * el lead de una SDR es de una persona y se respeta como el de cualquiera.
+     */
+    sdrEntregaAlCotizar: boolean
   }
   /** Lo que la ficha declara que FALTA para este país (texto para una persona). */
   pendientes: string[]
@@ -235,8 +273,9 @@ const FICHA_CL: FichaOperativa = {
     revisorFacturacion: "ssilva@geovictoria.com",
     stLayoutId: "3525045000282855283",
   },
+  plantillas: { presentacionTraspaso: "vicky_traspaso_ejecutivo" },
   zoho: { reglaDeals: REGLA_DEALS_CHILE, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: true, tombolaZoho: true },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: false },
   pendientes: [],
 }
 
@@ -294,8 +333,9 @@ const FICHA_PE: FichaOperativa = {
     revisorFacturacion: "",
     stLayoutId: "3525045000325663062",
   },
+  plantillas: { presentacionTraspaso: "vicky_pe_traspaso_ejecutivo" },
   zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: true, tombolaZoho: true },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: true, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: false },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Perú (en Chile es Sebastián Silva): correo del revisor para avisarle y para el ticket ST la plantilla de equipos del país.",
     "Un aviso REAL de BBVA/BCP/Interbank en la casilla vicky@ para calibrar el parser (hoy formato genérico).",
@@ -375,8 +415,10 @@ const FICHA_CO: FichaOperativa = {
     revisorFacturacion: "",
     stLayoutId: "3525045000325513660",
   },
+  // Sin plantilla propia: los bots están unificados (22-sep) y la chilena es neutra (sin RUT/UF).
+  plantillas: { presentacionTraspaso: "" },
   zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: true, tombolaZoho: true },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: true },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Colombia (su ST valida contra la Sales Order de Books, no contra la NDV) y la plantilla de equipos del país.",
     "Espejos del equipo CO: las 7 sesiones ya existen en el worker (26-sep); falta que cada uno escanee su QR.",
@@ -449,8 +491,10 @@ const FICHA_MX: FichaOperativa = {
     revisorFacturacion: "afuentess@geovictoria.com",
     stLayoutId: "3525045000331434179",
   },
+  // Sin plantilla propia: los bots están unificados (22-sep) y la chilena es neutra (sin RUT/UF).
+  plantillas: { presentacionTraspaso: "" },
   zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: false, tombolaZoho: true },
+  procesos: { relojCalificacion24h: false, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: true, sdrEntregaAlCotizar: false },
   pendientes: [
     "Plantilla de equipos del país para el ticket ST.",
     "Espejos de Laura, Yahel y Pablo: la sesión ya existe en el worker (26-sep); falta que cada uno escanee su QR.",
@@ -495,6 +539,21 @@ export function paisDeTelefonoOperativo(fono: string | null | undefined): Codigo
 /** Ficha del país de un teléfono; Chile si el prefijo no se reconoce. */
 export function fichaPorTelefono(fono: string | null | undefined): FichaOperativa {
   return fichaOperativa(paisDeTelefonoOperativo(fono) || "cl")
+}
+
+/**
+ * País de un CELULAR completo: prefijo + al menos los dígitos del celular del
+ * país (los +52 llegan con un "1" extra). null si es corto (fijo) o de otro
+ * país — a diferencia de `paisDeTelefonoOperativo`, que cae al prefijo. Es la
+ * regla que el post-pago aplicaba a mano por país (28-sep, paso 4).
+ */
+export function paisDeCelularOperativo(fono: string | null | undefined): CodigoPaisOperativo | null {
+  const d = String(fono || "").replace(/\D/g, "")
+  if (!d) return null
+  for (const f of todasLasFichas()) {
+    if (d.startsWith(f.prefijo) && d.length >= f.prefijo.length + f.digitosCelular) return f.pais
+  }
+  return null
 }
 
 function soloDigitos(s: string): string {
@@ -726,6 +785,10 @@ export function paisesConProceso(proceso: keyof FichaOperativa["procesos"]): Cod
 const ENV_PROCESO: Record<keyof FichaOperativa["procesos"], string> = {
   relojCalificacion24h: "VICKY_RELOJ24H",
   tombolaZoho: "VICKY_TOMBOLA_ZOHO",
+  presentacionConGate: "VICKY_PRESENTACION_CON_GATE",
+  altaPorChat: "VICKY_ALTA_POR_CHAT",
+  leadNaceConSdr: "VICKY_LEAD_NACE_CON_SDR",
+  sdrEntregaAlCotizar: "VICKY_SDR_ENTREGA_AL_COTIZAR",
 }
 
 /** ¿El país tiene el proceso encendido? env `<PROCESO>_<CC>`=on|off manda sobre la ficha. */
@@ -736,6 +799,17 @@ export function paisTieneProceso(pais: string | null | undefined, proceso: keyof
   if (v === "on" || v === "1" || v === "true") return true
   if (v === "off" || v === "0" || v === "false") return false
   return FICHAS[cc].procesos[proceso]
+}
+
+/**
+ * Gate de PRESENTACIÓN del país (proceso `presentacionConGate`): nombres de la
+ * llave vic_kv y de la env que lo encienden ("on"); null = el país presenta
+ * siempre. El consumidor (ptv-cron) lee el kv: la ficha es pura.
+ */
+export function gatePresentacion(pais: string | null | undefined): { kv: string; env: string } | null {
+  const cc = String(pais || "").toLowerCase() as CodigoPaisOperativo
+  if (!(cc in FICHAS) || !paisTieneProceso(cc, "presentacionConGate")) return null
+  return { kv: `${cc}_presentacion`, env: `VICKY_${cc.toUpperCase()}_PRESENTACION` }
 }
 
 /** Territorio de Zoho → código de país ("Chile" → "cl"). */

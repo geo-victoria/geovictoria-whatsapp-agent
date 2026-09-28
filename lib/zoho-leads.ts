@@ -1225,6 +1225,30 @@ export async function entregarLeadSinCalificarPorPais(
   return r
 }
 
+/**
+ * Rotación SDR de un país SIN pasar por la tómbola de leads de Zoho — lo que
+ * cada país usa cuando su proceso `tombolaZoho` está APAGADO (Colombia hasta
+ * el 23-sep: "el primero se lo queda", Galindo fijo) o como último respaldo.
+ * Cada función ya cae a su round-robin interno si la regla no existe. Una
+ * sola tabla por país (28-sep, paso 4): antes ptv-cron elegía la función con
+ * `if (pais === "co")` en tres lugares.
+ */
+const SDR_INBOUND_POR_PAIS: Record<string, (leadId: string) => Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }>> = {
+  cl: (leadId) => reasignarLeadSdrInbound(leadId),
+  pe: (leadId) => reasignarLeadSdrInboundPE(leadId),
+  co: (leadId) => reasignarLeadSdrInboundCO(leadId),
+  mx: (leadId) => reasignarLeadSdrInboundMX(leadId),
+}
+
+export async function reasignarLeadSdrInboundDePais(
+  pais: string | null | undefined,
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; error?: string }> {
+  const fn = SDR_INBOUND_POR_PAIS[String(pais || "cl").toLowerCase()]
+  if (!fn) return { success: false, error: `sin rotación SDR para el país ${pais || "?"}` }
+  return fn(leadId)
+}
+
 /** Reasigna un lead PE sin calificar a las SDR Inbound de Perú (RR interno). */
 export async function reasignarLeadSdrInboundPE(
   leadId: string,

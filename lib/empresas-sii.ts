@@ -15,7 +15,6 @@
  * formulario queda como siempre (vacío) y nadie lo nota.
  */
 
-import { rutValido } from "./rut"
 import { repararMojibake } from "./mojibake"
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
@@ -36,16 +35,10 @@ export type FichaSii = {
   nActividades?: number
 }
 
-/** Primer RUT VÁLIDO (dígito verificador correcto) en un texto. Exige guión o
- * puntos — un número pelado de 8-9 dígitos es indistinguible de un teléfono. */
-export function rutEnTexto(texto: string): string | null {
-  const re = /\b(\d{1,3}(?:\.\d{3}){2}|\d{7,8})\s*-\s*(\d|[kK])\b/g
-  for (const m of (texto || "").matchAll(re)) {
-    const candidato = `${m[1].replace(/\./g, "")}-${m[2]}`
-    if (rutValido(candidato)) return candidato.toUpperCase()
-  }
-  return null
-}
+// `rutEnTexto` vive en lib/rut.ts desde el 28-sep (módulo PURO, para que
+// `documentoEnTexto` lo comparta con RUC/NIT/RFC); acá se re-exporta por
+// compatibilidad con quien lo importaba de este archivo.
+export { rutEnTexto } from "./rut"
 
 async function una<T>(path: string): Promise<T | null> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: H, cache: "no-store" })

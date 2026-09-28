@@ -60,6 +60,18 @@ export function formatearRut(rutRaw: string): string {
   return `${cuerpo}-${dv}`
 }
 
+/** Primer RUT VÁLIDO (dígito verificador correcto) en un texto. Exige guión o
+ * puntos — un número pelado de 8-9 dígitos es indistinguible de un teléfono.
+ * (Vivía en lib/empresas-sii; movido acá el 28-sep para que sea PURO.) */
+export function rutEnTexto(texto: string): string | null {
+  const re = /\b(\d{1,3}(?:\.\d{3}){2}|\d{7,8})\s*-\s*(\d|[kK])\b/g
+  for (const m of (texto || "").matchAll(re)) {
+    const candidato = `${m[1].replace(/\./g, "")}-${m[2]}`
+    if (rutValido(candidato)) return candidato.toUpperCase()
+  }
+  return null
+}
+
 // ── PERÚ: RUC (Registro Único de Contribuyentes) ────────────────────────────
 //
 // 11 dígitos: los dos primeros indican el tipo (10 = persona natural con
