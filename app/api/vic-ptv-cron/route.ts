@@ -40,9 +40,23 @@ import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
 import { isTestContact, testContactSet } from "@/lib/funnel-analysis"
 import { despacharHuerfanos } from "@/lib/despachador-huerfanos"
-import { fichaEmpresaSii, rutEnTexto } from "@/lib/empresas-sii"
-import { personaPorEmail, rosterSdrOperativo, reglaZoho, paisesConProceso } from "@/lib/paises/ficha-operativa"
-import { tombolaZohoCoActiva, REGLA_DEALS_GLOBAL } from "@/lib/paises/co/tombola-zoho"
+import {
+  personaPorEmail,
+  rosterSdrOperativo,
+  rosterTelemarketingOperativo,
+  reglaZoho,
+  paisesConProceso,
+  paisTieneProceso,
+  fichaOperativa,
+  paisDeTelefonoOperativo,
+  paisDeTerritorio,
+  gatePresentacion,
+  todasLasFichas,
+  PAISES_OPERATIVOS,
+  type CodigoPaisOperativo,
+} from "@/lib/paises/ficha-operativa"
+import { documentoEnTexto } from "@/lib/paises/documento-en-texto"
+import { razonSocialPorPadron } from "@/lib/paises/razon-social-padron"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 120
@@ -845,12 +859,13 @@ async function enriquecerLeadsDeChat(): Promise<number> {
         .split("\n")
         .filter((l) => l.startsWith("CLIENTE:"))
         .join("\n")
-      const rutChat = fono.startsWith("56") ? rutEnTexto(soloCliente) : null
+      // 28-sep (paso 4): documento del PAÍS (RUT · RUC · NIT · RFC) y razón
+      // social de su padrón (SII · SUNAT · RUES), los dos por ficha operativa.
+      // Alcance: global — antes solo Chile (prefijo 56) recuperaba el RUT.
+      const paisLead = paisDeTelefonoOperativo(fono) || "cl"
+      const rutChat = documentoEnTexto(paisLead, soloCliente)
       let razonSii = ""
-      if (rutChat) {
-        const ficha = await fichaEmpresaSii(rutChat).catch(() => null)
-        razonSii = ficha?.razonSocial || ""
-      }
+      if (rutChat) razonSii = await razonSocialPorPadron(paisLead, rutChat)
       if (!ex && !rutChat) continue
       const empresaNueva = (ex?.empresa || razonSii || "").slice(0, 200)
       const nombreCliente = ex?.nombre || ""
@@ -1067,7 +1082,6 @@ async function notificarTraspasoLeadEmail(
     await estamparNotificacionTraspaso(fono, { tipo: "lead", registro: leadId, ok, ownerEmail, error })
   }
   try {
-    const esChile = fono.startsWith("56")
     const cuerpo =
       motivoHtml ||
       "el cliente dejó de responder y venció su tiempo de espera. <b>Llámalo en menos de 5 minutos</b> — la conversación completa está en las notas del lead, precio incluido si se le mostró."
@@ -1165,16 +1179,19 @@ function nombreVendedor(email: string): string {
 }
 
 async function entregarLeadPorReglas(
-  territorio: "Perú" | "Colombia" | "México",
+  territorio: string,
   leadId: string,
   calificado: boolean,
   interno: { email: string; zohoId: string },
   fono: string,
   H: Record<string, string>,
   api: string,
+  // Status actual del lead (si se conoce): ya en "3." o "4." no se toca —
+  // TOPE "3. Contactado" (Lalo 09-sep), jamás "4. Calificado" por API.
+  statusActual?: string,
 ): Promise<VendedorFinal | null> {
   const { updateZohoLeadStatus, STATUS_ENTREGA_LEAD, reasignarLeadPorTerritorio } = await import("@/lib/zoho-leads")
-  await updateZohoLeadStatus(leadId, STATUS_ENTREGA_LEAD).catch(() => {})
+  if (!/^\s*[34]\./.test(String(statusActual || ""))) await updateZohoLeadStatus(leadId, STATUS_ENTREGA_LEAD).catch(() => {})
   await notaTraspasoConversacion(leadId, fono).catch(() => {})
   // Calificado → regla TLMK de Zoho (entrada del territorio, Lalo 22/23-sep)
   // = la misma mecánica chilena; sin calificar → regla SDR. La rotación
@@ -1205,6 +1222,77 @@ async function entregarLeadPorReglas(
     }
   }
   return null
+}
+
+/**
+ * ENTREGA ÚNICA de un lead de este traspaso para los cuatro países (28-sep,
+ * paso 4 — antes eran cuatro ramas `if (pais === …)`): con la tómbola de Zoho
+ * ENCENDIDA (proceso `tombolaZoho` de la ficha) → las reglas del país vía
+ * entregarLeadPorReglas (Chile = su escalera de siempre, reasignarLeadCalificacionCL);
+ * con la tómbola APAGADA el país conserva sus fijos (Colombia 05-ago, "el
+ * primero se lo queda"): el lead va a la rotación SDR interna del país y al
+ * prospecto se le presenta ESE dueño, jamás un nombre distinto.
+ */
+async function entregarLeadDelPais(
+  pais: string,
+  leadId: string,
+  calificado: boolean,
+  interno: { email: string; zohoId: string },
+  fono: string,
+  H: Record<string, string>,
+  api: string,
+  statusActual?: string,
+): Promise<VendedorFinal | null> {
+  if (paisTieneProceso(pais, "tombolaZoho")) {
+    return entregarLeadPorReglas(fichaOperativa(pais).nombre, leadId, calificado, interno, fono, H, api, statusActual)
+  }
+  const { reasignarLeadSdrInboundDePais } = await import("@/lib/zoho-leads")
+  const r = await reasignarLeadSdrInboundDePais(pais, leadId).catch(() => null)
+  await notificarTraspasoLeadEmail(leadId, r?.ownerEmail || interno.email, fono, H, api)
+  if (r?.ownerEmail && r?.ownerId) {
+    const tel = await telefonoDeUsuario(r.ownerId, H, api)
+    return {
+      email: r.ownerEmail,
+      zohoId: r.ownerId,
+      nombre: nombreVendedor(r.ownerEmail),
+      telefono: tel || telefonoFicha(r.ownerEmail) || "",
+      via: "dueno_lead_sdr",
+    }
+  }
+  return null
+}
+
+/** Lead SIN calificar → regla SDR del país (tómbola encendida) o rotación SDR interna (apagada). */
+async function reasignarLeadSinCalificarDelPais(
+  pais: string,
+  leadId: string,
+): Promise<{ success: boolean; ownerEmail?: string; ownerId?: string; ownerNombre?: string; error?: string } | null> {
+  const { reasignarLeadPorTerritorio, reasignarLeadSdrInboundDePais } = await import("@/lib/zoho-leads")
+  return paisTieneProceso(pais, "tombolaZoho")
+    ? reasignarLeadPorTerritorio(fichaOperativa(pais).nombre, leadId, { calificado: false }).catch(() => null)
+    : reasignarLeadSdrInboundDePais(pais, leadId).catch(() => null)
+}
+
+/** ¿Es uno de los países que opera Vicky? (la ficha operativa es la lista). */
+function esPaisOperativo(pais: string | null | undefined): boolean {
+  return PAISES_OPERATIVOS.includes(String(pais || "") as CodigoPaisOperativo)
+}
+
+/**
+ * ¿Se puede TRASPASAR la conversación y presentar al ejecutivo en este país?
+ * Proceso `presentacionConGate` de la ficha operativa (hoy solo Perú: vic_kv
+ * `pe_presentacion` / env VICKY_PE_PRESENTACION = "on" — Lalo 11-ago "no
+ * presentes a nadie todavía", reencendido el 21-sep). Sin gate → siempre.
+ */
+async function presentacionHabilitada(pais: string): Promise<boolean> {
+  const gate = gatePresentacion(pais)
+  if (!gate) return true
+  if ((process.env[gate.env] || "").trim().toLowerCase() === "on") return true
+  try {
+    return ((await getKvValue(gate.kv)) || "").trim().toLowerCase() === "on"
+  } catch {
+    return false
+  }
 }
 
 async function asignarEnZoho(
@@ -1247,7 +1335,7 @@ async function asignarEnZoho(
     // calificado sin RUT → tómbola de leads TLMK; sin calificar → SDR. Sin
     // esto, un lead nacido "1." con 18 personas iba a SDR (caso Joyce) y un
     // "40 app" sin RUT también (caso Diego).
-    if (lead?.id && !lead.Converted_Deal?.id && (pais === "cl" || pais === "pe" || pais === "co" || pais === "mx") && !segundaPasada) {
+    if (lead?.id && !lead.Converted_Deal?.id && esPaisOperativo(pais) && !segundaPasada) {
       try {
         const { datosDelChat } = await import("@/lib/extraer-datos-chat")
         const chat = await datosDelChat(fono)
@@ -1283,24 +1371,8 @@ async function asignarEnZoho(
       // 12 de los 36 traspasos del primer día no tenían lead y la asignación
       // quedaba solo en vic_ptv.
       const { createZohoLead } = await import("@/lib/zoho-leads")
-      const paisNombre = pais === "co" ? "Colombia" : pais === "mx" ? "México" : pais === "pe" ? "Perú" : "Chile"
-      // CO: el lead sin cotización lo posee el SDR Inbound (acuerdo equipo CO
-      // 04-ago) — se crea sin dueño y se asigna por round-robin SDR abajo.
-      const esCO = pais === "co"
-      // CL (Lalo 06-ago): el lead nuevo de un traspaso NO nace con la
-      // rotación interna (roster de una sola persona = todo a Eddyluz) —
-      // nace sin dueño y lo sortea la regla de calificación (Araceli/Aleydis).
-      const esCL = pais === "cl"
-      // MX (Lalo 13-ago): solo la FORMAL queda con Yahel (rama del deal);
-      // todo lo demás va como LEAD a los SDR Inbound MX, con nota de la
-      // conversación (URL directa a Botmaker + transcript).
-      const esMX = pais === "mx"
-      // PE (Lalo 15-sep: "siempre considera la regla chilena de traspaso para
-      // definir la de Perú; cambian las personas, la operación y los roles son
-      // los mismos"): el lead nace sin dueño y se entrega como en Chile —
-      // calificado → telemarketing (Mónica, roster PE de ptv) · sin calificar →
-      // SDR Inbound PE (Ana Fiori / Priscila Quispe por rotación).
-      const esPE = pais === "pe"
+      // Territorio del lead = nombre de la ficha del país (28-sep, paso 4).
+      const paisNombre = fichaOperativa(pais).nombre
       // ARREGLO 1 (Lalo 07-sep, casos Conbes y Diego): antes de crear un lead
       // CIEGO se lee lo que el chat YA dijo (nombre, empresa, dotación, RUT,
       // correo) y se pasa por el hito de intención — la MISMA escalera del
@@ -1330,6 +1402,9 @@ async function asignarEnZoho(
           console.warn(`[ptv] ${fono}: lectura del chat para el traspaso falló — lead ciego:`, e instanceof Error ? e.message : e)
         }
       }
+      // El lead nace SIN dueño en los cuatro países (CL 06-ago: no a la rotación
+      // interna; CO 04-ago: lo posee el SDR; MX 13-ago: SDR Inbound; PE 15-sep:
+      // regla chilena) — el dueño lo decide la entrega de abajo.
       const creado = await createZohoLead({
         nombre: "Prospecto WhatsApp",
         empresa: `Por identificar (WhatsApp +${fono})`,
@@ -1337,66 +1412,18 @@ async function asignarEnZoho(
         contactoWA: fono,
         pais: paisNombre,
         necesidad: "Traspaso PTV: conversación activa con Vicky sin registro previo en el CRM — lead creado al asignar vendedor.",
-        ownerEmail: esCO || esCL || esMX || esPE ? undefined : interno.email,
-        ownerId: esCO || esCL || esMX || esPE ? undefined : interno.zohoId,
+        ownerEmail: undefined,
+        ownerId: undefined,
       }).catch(() => null)
       if (!creado || !creado.success) {
         console.warn(`[ptv] ${fono}: sin lead en Zoho y la creación falló — asignación solo en vic_ptv`)
-      } else if (esCL) {
-        const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
-        {
-          // El lead recién creado nace "1. No contactado": se entrega en
-          // "3. Contactado" (TOPE, Lalo 09-sep — jamás "4. Calificado" por API:
-          // esa transición del blueprint es la conversión y deja al lead sin
-          // transiciones para el ejecutivo). Lead_Status vive bajo Blueprint:
-          // el helper ejecuta la transición con sus campos mandatorios.
-          const { updateZohoLeadStatus, STATUS_ENTREGA_LEAD } = await import("@/lib/zoho-leads")
-          await updateZohoLeadStatus(creado.leadId, STATUS_ENTREGA_LEAD).catch(() => {})
-        }
-        const r = await reasignarLeadCalificacionCL(creado.leadId, { calificado }).catch(() => null)
-        // TODA entrega CL lleva la nota con el chat (Ana 26-ago) — antes solo MX.
-        await notaTraspasoConversacion(creado.leadId, fono).catch(() => {})
-        await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
-        if (r?.success && r.ownerEmail && r.ownerId) {
-          const tel = await telefonoDeUsuario(r.ownerId, H, api)
-          return {
-            email: r.ownerEmail,
-            zohoId: r.ownerId,
-            nombre: r.ownerNombre || nombreVendedor(r.ownerEmail),
-            telefono: tel || telefonoFicha(r.ownerEmail) || "",
-            via: "tombola_zoho",
-          }
-        }
-      } else if (esMX) {
-        // México por las reglas globales de Zoho (Lalo 25-sep): calificado →
-        // TLMK (Laura/Yahel), sin calificar → SDR (Pablo). Misma mecánica que Perú.
-        const entrega = await entregarLeadPorReglas("México", creado.leadId, calificado, interno, fono, H, api)
-        if (entrega) return entrega
-      } else if (esCO && tombolaZohoCoActiva()) {
-        // CO por las reglas de Zoho (Lalo 23-sep) = misma mecánica que Perú.
-        const entrega = await entregarLeadPorReglas("Colombia", creado.leadId, calificado, interno, fono, H, api)
-        if (entrega) return entrega
-      } else if (esCO) {
-        const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
-        const r = await reasignarLeadSdrInboundCO(creado.leadId).catch(() => null)
-        await notificarTraspasoLeadEmail(creado.leadId, r?.ownerEmail || interno.email, fono, H, api)
-        // Regla equipo CO (05-ago): al prospecto se le presenta el DUEÑO del
-        // lead (el SDR, Galindo) — jamás un nombre distinto al dueño.
-        if (r?.ownerEmail && r?.ownerId) {
-          const tel = await telefonoDeUsuario(r.ownerId, H, api)
-          return {
-            email: r.ownerEmail,
-            zohoId: r.ownerId,
-            nombre: nombreVendedor(r.ownerEmail),
-            telefono: tel || telefonoFicha(r.ownerEmail) || "",
-            via: "dueno_lead_sdr",
-          }
-        }
-      } else if (esPE) {
-        const entrega = await entregarLeadPorReglas("Perú", creado.leadId, calificado, interno, fono, H, api)
-        if (entrega) return entrega
       } else {
-        await notificarTraspasoLeadEmail(creado.leadId, interno.email, fono, H, api)
+        // ENTREGA ÚNICA (28-sep): calificado → TLMK del país · sin calificar →
+        // SDR del país, por las reglas de Zoho o por la rotación fija si la
+        // tómbola del país está apagada. El lead recién creado nace "1. No
+        // contactado" y se entrega en "3. Contactado" (TOPE, Lalo 09-sep).
+        const entrega = await entregarLeadDelPais(pais, creado.leadId, calificado, interno, fono, H, api)
+        if (entrega) return entrega
       }
       return porDefecto
     }
@@ -1533,52 +1560,49 @@ async function asignarEnZoho(
       await fetch(`${api}/crm/v3/Deals`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: dealId, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
       const { notificarTraspasoDeal } = await import("@/lib/crm-hitos")
       await notificarTraspasoDeal(dealId, fono).catch(() => {})
-    } else if (pais === "co" && !tombolaZohoCoActiva()) {
-      // CO: lead sin cotización → SDR fijo (Galindo, regla equipo 05-ago).
-      // Con el interruptor encendido esta rama no corre: CO cae a la de
-      // abajo junto con Perú (reglas de Zoho por territorio).
-      // Sin cambios de propietario reales: si ya es de Galindo el PUT es
-      // no-op; el prospecto conoce al DUEÑO del lead, no al roster.
-      const { reasignarLeadSdrInboundCO } = await import("@/lib/zoho-leads")
-      const r = await reasignarLeadSdrInboundCO(lead.id).catch(() => null)
-      await notificarTraspasoLeadEmail(lead.id, r?.ownerEmail || interno.email, fono, H, api)
-      if (r?.ownerEmail && r?.ownerId) {
-        const tel = await telefonoDeUsuario(r.ownerId, H, api)
-        return {
-          email: r.ownerEmail,
-          zohoId: r.ownerId,
-          nombre: nombreVendedor(r.ownerEmail),
-          telefono: tel || telefonoFicha(r.ownerEmail) || "",
-          via: "dueno_lead_sdr",
-        }
+    } else {
+      // LEAD VIVO SIN DEAL alcanzado por un reloj — UN camino para los cuatro
+      // países (28-sep, paso 4; antes cuatro ramas por país).
+      const territorio = fichaOperativa(pais).nombre
+      if (!paisTieneProceso(pais, "tombolaZoho")) {
+        // Tómbola del país APAGADA (Colombia 05-ago): lead sin cotización →
+        // SDR fijo, sin cambios de propietario reales (si ya es suyo el PUT es
+        // no-op); el prospecto conoce al DUEÑO del lead, no al roster.
+        const entrega = await entregarLeadDelPais(pais, lead.id, calificado, interno, fono, H, api)
+        if (entrega) return entrega
+        return porDefecto
       }
-    } else if (pais === "cl") {
-      // Lead vivo SIN deal alcanzado por un reloj = Vicky no logró calificarlo
-      // a tiempo (Lalo 06-ago): va a la tómbola de leads de calificación
-      // (regla Araceli/Aleydis), NO a la rotación interna — el roster interno
-      // CL es una sola persona y le llovía todo a Eddyluz (caso Veltis).
-      // Dueño humano real no se pisa: se presenta ÉL. Eddyluz cuenta como
-      // interina (marcador de "sin dueño real"), igual que Vicky.
+      // Vicky no logró calificarlo a tiempo (Lalo 06-ago): va a la tómbola de
+      // leads del país (regla de calificación), NO a la rotación interna — el
+      // roster interno CL es una sola persona y le llovía todo a Eddyluz (caso
+      // Veltis). Dueño humano real no se pisa: se presenta ÉL. emujica@ salió
+      // de este patrón el 03-sep (orden de Lalo: "ella no es interina, ni
+      // Anderson"): un lead de Eddyluz es de Eddyluz.
       const ownerLead = (lead.Owner?.email || "").toLowerCase()
-      // emujica@ salió de este patrón el 03-sep (orden de Lalo: "ella no es
-      // interina, ni Anderson"). Un lead de Eddyluz es de Eddyluz: se le
-      // presenta ella, no se re-sortea.
       const esInterina = !ownerLead || /vicky@|info@geovictoria/.test(ownerLead)
-      // SDR DE CALIFICACIÓN CON EL CASO YA CALIFICADO (Lalo 10-sep): el lead
-      // está con Aleydis/Aracelli porque Vicky no había podido calificar. Si
-      // la dotación ya está estampada, la calificación está HECHA y el caso
-      // vuelve a la tómbola de telemarketing en vez de presentarse la SDR
-      // (antes salía por la vía "dueno_lead_sdr" y se quedaba con ella).
+      // CALIFICADO SIN PRECIO (Lalo 25-ago, caso Lisandra): "si se logra
+      // calificar no debería volver al proceso de calificación de las SDR —
+      // entregarlo como lead a telemarketing con toda la información". El flag
+      // `calificado` del reloj solo mira PRECIO mostrado; si la conversación
+      // ya dejó la dotación (lead en "4. Calificado" o N° de empleados
+      // llenado), la calificación está HECHA → tómbola TLMK de ejecutivos.
+      // OJO campo real: `N_Empleados_que_marcan` (08-sep: se leía
+      // `N_de_empleados`, que no existe — caso Joyce).
+      const calificadoPorLead =
+        String(lead.Lead_Status || "").trim().startsWith("4.") ||
+        Number(lead.N_Empleados_que_marcan || 0) > 0
+      const entregaCalificada = calificado || calificadoPorLead
+      // SDR DE CALIFICACIÓN CON EL CASO YA CALIFICADO (Lalo 10-sep; PE 22-sep):
+      // el lead está con la SDR porque Vicky no había podido calificar. Con la
+      // dotación estampada la calificación está HECHA y el caso vuelve a la
+      // tómbola de telemarketing en vez de presentarse la SDR.
       const { destinoTrasCalificar } = await import("@/lib/sdr-calificacion")
       const sdrConCalificado =
         destinoTrasCalificar({
-          territorio: "Chile",
+          territorio,
           ownerEmail: ownerLead,
           ownerId: lead.Owner?.id,
-          calificado:
-            calificado ||
-            String(lead.Lead_Status || "").trim().startsWith("4.") ||
-            Number(lead.N_Empleados_que_marcan || 0) > 0,
+          calificado: entregaCalificada,
           rut: lead.RUT_Empresa,
         }) !== "sin_cambio"
       if (sdrConCalificado) {
@@ -1587,6 +1611,8 @@ async function asignarEnZoho(
         )
       }
       if (!esInterina && !sdrConCalificado && lead.Owner?.id) {
+        // Nota con el chat en toda entrega (Ana 26-ago; 28-sep también acá).
+        await notaTraspasoConversacion(lead.id, fono).catch(() => {})
         await notificarTraspasoLeadEmail(lead.id, ownerLead, fono, H, api)
         const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
         return {
@@ -1597,85 +1623,15 @@ async function asignarEnZoho(
           via: "dueno_lead_sdr",
         }
       }
-      const { reasignarLeadCalificacionCL, updateZohoLeadStatus } = await import("@/lib/zoho-leads")
-      // CALIFICADO SIN PRECIO (Lalo 25-ago, caso Lisandra): "si se logra
-      // calificar no debería volver al proceso de calificación de las SDR —
-      // entregarlo como lead a telemarketing con toda la información". El flag
-      // `calificado` del reloj solo mira PRECIO mostrado; si la conversación
-      // ya dejó la dotación (lead en "4. Calificado" o N° de empleados
-      // llenado), la calificación está HECHA → tómbola TLMK de ejecutivos.
-      // OJO campo real: `N_Empleados_que_marcan` (08-sep: se leía
-      // `N_de_empleados`, que no existe — un lead con 18 personas estampadas y
-      // status "1." se trataba como no calificado y caía en SDR; caso Joyce).
-      const calificadoPorLead =
-        String(lead.Lead_Status || "").trim().startsWith("4.") ||
-        Number(lead.N_Empleados_que_marcan || 0) > 0
-      const entregaCalificada = calificado || calificadoPorLead
-      if (!/^\s*[34]\./.test(String(lead.Lead_Status || ""))) {
-        // Status atrasado ("1."/"2."): se entrega en "3. Contactado" (TOPE,
-        // Lalo 09-sep — nunca "4. Calificado" por API, ver STATUS_ENTREGA_LEAD).
-        const { STATUS_ENTREGA_LEAD } = await import("@/lib/zoho-leads")
-        await updateZohoLeadStatus(lead.id, STATUS_ENTREGA_LEAD).catch(() => {})
-      }
-      const r = await reasignarLeadCalificacionCL(lead.id, { calificado: entregaCalificada }).catch(() => null)
-      // Nota con el chat en toda entrega CL (Ana 26-ago).
-      await notaTraspasoConversacion(lead.id, fono).catch(() => {})
-      if (r?.success && r.ownerEmail && r.ownerId) {
-        await notificarTraspasoLeadEmail(lead.id, r.ownerEmail, fono, H, api)
-        const tel = await telefonoDeUsuario(r.ownerId, H, api)
-        return {
-          email: r.ownerEmail,
-          zohoId: r.ownerId,
-          nombre: r.ownerNombre || nombreVendedor(r.ownerEmail),
-          telefono: tel || telefonoFicha(r.ownerEmail) || "",
-          via: "tombola_zoho",
-        }
-      }
-      // Fallback (regla y RR fallaron): rotación interna como siempre.
+      // Reglas del país (Chile: reasignarLeadCalificacionCL; PE/CO/MX: la misma
+      // regla de Zoho con su entrada de territorio). Status atrasado ("1."/"2.")
+      // se entrega en "3. Contactado" (dentro de entregarLeadPorReglas).
+      const entrega = await entregarLeadPorReglas(territorio, lead.id, entregaCalificada, interno, fono, H, api, String(lead.Lead_Status || ""))
+      if (entrega && entrega.via !== "tombola_interna") return entrega
+      // Fallback (regla y RR fallaron): rotación interna como siempre — el
+      // aviso al interno ya salió dentro de entregarLeadPorReglas.
       await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
-      await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
-    } else if (pais === "pe" || pais === "co" || pais === "mx") {
-      // PE = regla chilena (Lalo 15-sep): dueño humano real previo se respeta
-      // y se presenta él; si es del bot, calificado → Mónica, si no → SDR PE.
-      // CO entra acá solo con `tombolaZohoCoActiva()` (Lalo 23-sep): mismas
-      // reglas con su entrada "Territorio = Colombia".
-      const territorioReglas: "Perú" | "Colombia" | "México" = pais === "co" ? "Colombia" : pais === "mx" ? "México" : "Perú"
-      const ownerLeadPe = (lead.Owner?.email || "").toLowerCase()
-      const esInterinaPe = !ownerLeadPe || /vicky@|info@geovictoria/.test(ownerLeadPe)
-      // SDR PE con el caso YA calificado (22-sep, misma regla del 10-sep en
-      // Chile): Ana Fiori/Priscila lo recibieron porque Vicky no había podido
-      // calificar; con la dotación estampada la calificación está hecha y el
-      // lead vuelve a Mónica por la regla TLMK en vez de presentarse la SDR.
-      const { destinoTrasCalificar: destinoPe } = await import("@/lib/sdr-calificacion")
-      const sdrPeConCalificado =
-        destinoPe({
-          territorio: territorioReglas,
-          ownerEmail: ownerLeadPe,
-          ownerId: lead.Owner?.id,
-          calificado: calificado || Number(lead.N_Empleados_que_marcan || 0) > 0,
-          rut: lead.RUT_Empresa,
-        }) !== "sin_cambio"
-      if (sdrPeConCalificado) {
-        console.log(`[ptv] ${fono}: lead PE de SDR (${ownerLeadPe}) con la calificación ya hecha — vuelve a la tómbola TLMK PE`)
-      }
-      if (!esInterinaPe && !sdrPeConCalificado && lead.Owner?.id) {
-        await notaTraspasoConversacion(lead.id, fono).catch(() => {})
-        await notificarTraspasoLeadEmail(lead.id, ownerLeadPe, fono, H, api)
-        const tel = await telefonoDeUsuario(lead.Owner.id, H, api)
-        return {
-          email: ownerLeadPe,
-          zohoId: lead.Owner.id,
-          nombre: lead.Owner.name || nombreVendedor(ownerLeadPe),
-          telefono: tel || telefonoFicha(ownerLeadPe) || "",
-          via: "dueno_lead_sdr",
-        }
-      }
-      const calificadoPe = calificado || Number(lead.N_Empleados_que_marcan || 0) > 0
-      const entrega = await entregarLeadPorReglas(territorioReglas, lead.id, calificadoPe, interno, fono, H, api)
       if (entrega) return entrega
-    } else {
-      await fetch(`${api}/crm/v3/Leads`, { method: "PUT", headers: H, cache: "no-store", body: JSON.stringify({ data: [{ id: lead.id, Owner: { id: interno.zohoId } }], skip_feature_execution: [{ name: "assignment_rules" }] }) })
-      await notificarTraspasoLeadEmail(lead.id, interno.email, fono, H, api)
     }
     return porDefecto
   } catch (e) {
@@ -1738,48 +1694,37 @@ async function cotizacionAceptada(contact: string): Promise<boolean> {
 // calificación. La notificación al ejecutivo la da Zoho (regla); Vicky
 // presenta al ejecutivo por la plantilla HSM (la ventana está cerrada por
 // definición: el cliente no responde hace 24 h hábiles). ────────────────────
-// Regla de re-asignación por país: CL usa la regla de Zoho (tómbola de
-// telemarketing); PE no tiene tómbola — regla vacía = asignación DIRECTA a la
-// ejecutiva del país (vendedoresDePais). Extensible por env.
-const TM_REGLA: Record<string, string> = {
-  // ESCALERA 18-ago (Lalo): el reloj de 24h dispara cuando NO hubo calificación
-  // → regla SDR "Asignación Leads Sin calificar Vicky SDR" con la entrada del país.
-  // 26-sep: el id sale de la ficha operativa (VICKY_TM_REASIGNACION_RULE_CL sigue mandando en CL).
-  cl: (process.env.VICKY_TM_REASIGNACION_RULE_CL || reglaZoho("cl", "leadsSinCalificar")).trim(),
-  pe: (process.env.VICKY_TM_REASIGNACION_RULE_PE || reglaZoho("pe", "leadsSinCalificar")).trim(),
-  co: reglaZoho("co", "leadsSinCalificar"),
-  mx: reglaZoho("mx", "leadsSinCalificar"),
-}
-const TM_PAIS_NOMBRE: Record<string, string> = { cl: "Chile", pe: "Perú", co: "Colombia", mx: "México" }
-// VICKY PE AUTÓNOMA (orden de Lalo 11-ago, pre-encendido): en Perú NO se
-// presenta a nadie por ahora — sin traspasos de etapa ni de calificación
-// mientras Vicky PE sea autónoma (Mónica igual recibe los LEADS por los
-// caminos de registro; lo que se apaga es el traspaso de la CONVERSACIÓN y
-// la presentación al prospecto). Reencender sin deploy: vic_kv
-// pe_presentacion=on (o env VICKY_PE_PRESENTACION=on).
-async function pePresentaHabilitado(): Promise<boolean> {
-  if ((process.env.VICKY_PE_PRESENTACION || "").trim().toLowerCase() === "on") return true
-  try {
-    const { getKvValue } = await import("@/lib/supabase-persistence-v3")
-    return ((await getKvValue("pe_presentacion")) || "").trim().toLowerCase() === "on"
-  } catch {
-    return false
-  }
-}
+// Regla de re-asignación por país (respaldo del reloj de 24 h cuando la entrega
+// por territorio no asignó): sale de la FICHA OPERATIVA, env como override.
+// ESCALERA 18-ago (Lalo): el reloj de 24h dispara cuando NO hubo calificación →
+// regla SDR "Asignación Leads Sin calificar Vicky SDR" con la entrada del país.
+// CL: VICKY_TM_CALIFICACION_RULE_ID → VICKY_TM_REASIGNACION_RULE_CL → ficha (el
+// orden histórico, plegado acá el 28-sep).
+const TM_REGLA: Record<string, string> = Object.fromEntries(
+  PAISES_OPERATIVOS.map((cc) => [
+    cc,
+    (
+      (cc === "cl" ? process.env.VICKY_TM_CALIFICACION_RULE_ID || "" : "") ||
+      process.env[`VICKY_TM_REASIGNACION_RULE_${cc.toUpperCase()}`] ||
+      reglaZoho(cc, "leadsSinCalificar")
+    ).trim(),
+  ]),
+)
+// Forma del celular por país para el reloj de 24 h (tolerancias históricas:
+// CL/PE 8-10 dígitos, CO 10, MX 10-11 por el "1" extra de WhatsApp). Es DATA
+// por país — el prefijo sale de la ficha, la tolerancia se conserva tal cual.
 const TM_FONO_REGEX: Record<string, RegExp> = { cl: /^56\d{8,10}$/, pe: /^51\d{8,10}$/, co: /^57\d{10}$/, mx: /^52\d{10,11}$/ }
-const TM_TEMPLATE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION || "vicky_traspaso_ejecutivo").trim()
-// PERÚ (15-sep): la presentación sale con la plantilla del bot Vicky Perú
-// (creada por API; una plantilla del bot Chile por la línea +51 arrastra el
-// chat al bot equivocado). Env VICKY_TM_TEMPLATE_PRESENTACION_PE la cambia.
-const TM_TEMPLATE_PE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_PE || "vicky_pe_traspaso_ejecutivo").trim()
-// COLOMBIA (23-sep, bots unificados): la plantilla chilena sin marcador de país
-// sale por la línea +57 (verificado con vicky_react_47_razones_v2 por la +51).
-const TM_TEMPLATE_CO = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_CO || TM_TEMPLATE).trim()
-// México (27-sep): la plantilla es neutra (sin RUT/UF) y los bots están
-// unificados, así que sirve la misma.
-const TM_TEMPLATE_MX = (process.env.VICKY_TM_TEMPLATE_PRESENTACION_MX || TM_TEMPLATE).trim()
+// Plantilla de PRESENTACIÓN fuera de la ventana de 24 h: la de Chile con su
+// env histórica; los demás países la declaran en la ficha operativa
+// (`plantillas.presentacionTraspaso`, vacío = la neutra de Chile — los bots
+// están unificados desde el 22-sep) con env VICKY_TM_TEMPLATE_PRESENTACION_<CC>
+// como override. 28-sep: antes cuatro constantes a mano.
+const TM_TEMPLATE = (process.env.VICKY_TM_TEMPLATE_PRESENTACION || fichaOperativa("cl").plantillas.presentacionTraspaso).trim()
 function tmTemplatePara(pais: string): string {
-  return pais === "pe" ? TM_TEMPLATE_PE : pais === "co" ? TM_TEMPLATE_CO : pais === "mx" ? TM_TEMPLATE_MX : TM_TEMPLATE
+  const cc = String(pais || "cl").toLowerCase()
+  if (cc === "cl") return TM_TEMPLATE
+  const propia = (process.env[`VICKY_TM_TEMPLATE_PRESENTACION_${cc.toUpperCase()}`] || "").trim()
+  return propia || fichaOperativa(cc).plantillas.presentacionTraspaso || TM_TEMPLATE
 }
 const MAX_TM_POR_TICK = 10
 /** Teléfonos de los telemarketers ("email:+56...,email:+56..."). Fallback:
@@ -1920,7 +1865,7 @@ async function traspasarATelemarketing(
         empresa: `Por identificar (WhatsApp +${fono})`,
         telefono: fono,
         contactoWA: fono,
-        pais: TM_PAIS_NOMBRE[pais] || "Chile",
+        pais: fichaOperativa(pais).nombre,
         necesidad: `Traspaso a telemarketing: ${origen === "outbound" ? "outbound sin respuesta" : "inbound sin responder la primera pregunta"} en 24 horas hábiles — el ejecutivo califica.`,
       }).catch(() => null)
       if (!creado || !creado.success) {
@@ -1940,32 +1885,22 @@ async function traspasarATelemarketing(
     // round-robin interno de ellas dos) — y PE (sin tómbola) asigna directo a
     // la ejecutiva del país (Mónica).
     let owner = lead?.Owner && !ownerBot ? lead.Owner : undefined
-    if (!owner?.id && pais === "pe") {
-      // Reloj de 24h = NO calificó → SDR Inbound PE (Lalo 15-sep). Si la
-      // rotación falla, cae al camino de siempre (Mónica, roster pe de ptv).
-      const { reasignarLeadSdrInboundPE } = await import("@/lib/zoho-leads")
+    if (!owner?.id) {
+      // Reloj de 24 h = NO calificó → por definición va a la tómbola SDR del
+      // país (Chile: reasignarLeadCalificacionCL sin calificar; PE/CO/MX: la
+      // misma regla de Zoho con su entrada de territorio, o la rotación fija si
+      // la tómbola del país está apagada). Nota con el chat en toda entrega
+      // (Ana 26-ago). 28-sep: UN camino en vez de una rama por país.
       await notaTraspasoConversacion(leadId, fono).catch(() => {})
-      const r = await reasignarLeadSdrInboundPE(leadId).catch(() => null)
+      const r = await reasignarLeadSinCalificarDelPais(pais, leadId)
       if (r?.success && r.ownerId && r.ownerEmail) {
-        owner = { id: r.ownerId, email: r.ownerEmail, name: nombreVendedor(r.ownerEmail) }
+        owner = { id: r.ownerId, email: r.ownerEmail, name: r.ownerNombre || nombreVendedor(r.ownerEmail) }
       } else {
-        console.warn(`[tm-24h] SDR PE no asignó lead=${leadId}: ${r?.error || "sin detalle"}`)
-      }
-    }
-    if (!owner?.id && pais === "cl") {
-      const { reasignarLeadCalificacionCL } = await import("@/lib/zoho-leads")
-      // Nota con el chat en toda entrega CL (Ana 26-ago).
-      await notaTraspasoConversacion(leadId, fono).catch(() => {})
-      // Reloj de 24h sin calificar: por definición va a la tómbola SDR.
-      const r = await reasignarLeadCalificacionCL(leadId, { calificado: false })
-      if (r.success && r.ownerId && r.ownerEmail) {
-        owner = { id: r.ownerId, email: r.ownerEmail, name: r.ownerNombre }
-      } else {
-        console.warn(`[tm-24h] tómbola de calificación falló lead=${leadId}: ${r.error || "sin detalle"}`)
+        console.warn(`[tm-24h] la entrega del país no asignó lead=${leadId} (${pais}): ${r?.error || "sin detalle"}`)
       }
     }
     if (!owner?.id) {
-      const regla = (pais === "cl" ? (process.env.VICKY_TM_CALIFICACION_RULE_ID || "").trim() : "") || TM_REGLA[pais] || ""
+      const regla = TM_REGLA[pais] || ""
       if (regla) {
         const put = await fetch(`${api}/crm/v3/Leads`, {
           method: "PUT", headers: H, cache: "no-store",
@@ -2448,8 +2383,9 @@ export async function GET(req: Request) {
     // MX en v2 desde el 08-ago (réplica ordenada por Lalo); con flag apagado, todos vuelven al TTV clásico.
     // PE autónoma (Lalo 11-ago): sin presentación, la conversación peruana
     // no se traspasa por relojes — Vicky la sigue atendiendo.
-    if (pais === "pe" && !(await pePresentaHabilitado())) continue
-    const usaV2 = v2Activo && (pais === "cl" || pais === "pe" || pais === "co" || pais === "mx")
+    // Gate de presentación del país (ficha: `presentacionConGate`, hoy Perú).
+    if (!(await presentacionHabilitada(pais))) continue
+    const usaV2 = v2Activo && esPaisOperativo(pais)
     const decision = usaV2
       ? debeTraspasarEtapa({
           firstUserAt: c.first_user_at ? new Date(c.first_user_at) : null,
@@ -2649,8 +2585,8 @@ export async function GET(req: Request) {
     // 26-sep: los países del reloj salen de la ficha operativa (proceso
     // relojCalificacion24h; env VICKY_RELOJ24H_<CC>=on|off). Perú además
     // respeta el gate de presentaciones.
-    const peOk = await pePresentaHabilitado()
-    const paisesTm = paisesConProceso("relojCalificacion24h").filter((p) => p !== "pe" || peOk) as Array<"cl" | "pe" | "co" | "mx">
+    const paisesTm: CodigoPaisOperativo[] = []
+    for (const p of paisesConProceso("relojCalificacion24h")) if (await presentacionHabilitada(p)) paisesTm.push(p)
     for (const paisTm of paisesTm) {
       const feriados = await feriadosDePais(paisTm)
       feriadosPorPais[paisTm] = feriados
@@ -2992,8 +2928,7 @@ export async function GET(req: Request) {
  * (Las alertas INTERNAS al equipo no se gatean: esas corren a toda hora.) */
 function enVentanaProactiva(fono: string, ahora: Date): boolean {
   const pais = paisDeContacto(fono) || "cl"
-  const tz =
-    pais === "co" ? "America/Bogota" : pais === "mx" ? "America/Mexico_City" : pais === "pe" ? "America/Lima" : "America/Santiago"
+  const tz = fichaOperativa(pais).tz
   const hora =
     Number(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hour12: false }).format(ahora)) % 24
   return hora >= 9 && hora < 21
@@ -3157,7 +3092,7 @@ async function reintentarPresentacionesPendientes(
       )
       enviado = await sendBotmakerMessage(clean, texto).catch(() => false)
       registro = texto
-    } else if ((pais === "cl" || pais === "pe" || pais === "co" || pais === "mx") && telefono) {
+    } else if (esPaisOperativo(pais) && telefono) {
       enviado = await sendBotmakerTemplate(clean, tmTemplatePara(pais), {
         nombre: "👋",
         ejecutivo_smb: nombre,
@@ -4119,11 +4054,8 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
         }
       }
     } catch { /* sin señal de gemelo: sigue el rescate normal */ }
-    // País: prefijo del teléfono; sin teléfono, el Territorio del lead.
-    const terr = String(l.Territorio || "").trim().toLowerCase()
-    const pais = telOk
-      ? tel.startsWith("56") ? "cl" : tel.startsWith("57") ? "co" : tel.startsWith("52") ? "mx" : "pe"
-      : terr === "chile" ? "cl" : terr === "colombia" ? "co" : terr === "méxico" || terr === "mexico" ? "mx" : terr === "perú" || terr === "peru" ? "pe" : ""
+    // País: prefijo del teléfono (ficha operativa); sin teléfono, el Territorio del lead.
+    const pais = telOk ? paisDeTelefonoOperativo(tel) || "" : paisDeTerritorio(l.Territorio)
     if (!pais) {
       console.warn(`[rescate-form] lead ${l.id}: sin teléfono válido ni Territorio — revisar a mano`)
       await setKvValue(`rescate_form_${l.id}`, "sin_pais").catch(() => {})
@@ -4132,36 +4064,12 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
     const feriados = await feriadosDePais(pais)
     if (!esHorarioHabil(pais, ahora, feriados)) continue // espera la ventana hábil, sin candado
     await setKvValue(`rescate_form_${l.id}`, "rescatado").catch(() => {})
-    const { reasignarLeadCalificacionCL, reasignarLeadSdrInboundCO, reasignarLeadSdrInboundMX, reasignarLeadSdrInboundPE, agregarNotaLead } =
-      await import("@/lib/zoho-leads")
-    let ownerEmail = ""
-    if (pais === "cl") {
-      const r = await reasignarLeadCalificacionCL(l.id, { calificado: false }).catch(() => null)
-      ownerEmail = r?.ownerEmail || ""
-    } else if (pais === "co") {
-      // Form-fill mudo = sin calificar → regla SDR con entrada Colombia si el
-      // interruptor está encendido (Lalo 23-sep); si no, Galindo fijo (05-ago).
-      // reasignarLeadSdrInboundCO decide por el mismo interruptor.
-      const r = await reasignarLeadSdrInboundCO(l.id).catch(() => null)
-      ownerEmail = r?.ownerEmail || ""
-    } else if (pais === "mx") {
-      const r = await reasignarLeadSdrInboundMX(l.id).catch(() => null)
-      ownerEmail = r?.ownerEmail || ""
-    } else if (pais === "pe") {
-      // Form-fill mudo = sin calificar → SDR Inbound PE (Lalo 15-sep); Mónica de respaldo.
-      const r = await reasignarLeadSdrInboundPE(l.id).catch(() => null)
-      ownerEmail = r?.ownerEmail || ""
-    }
-    if (!ownerEmail && pais === "pe") {
-      const put = await fetch(`${api}/crm/v3/Leads`, {
-        method: "PUT", headers: H, cache: "no-store",
-        body: JSON.stringify({
-          data: [{ id: l.id, Owner: { id: "3525045000323383015" } }],
-          skip_feature_execution: [{ name: "assignment_rules" }],
-        }),
-      }).catch(() => null)
-      if (put?.ok) ownerEmail = "mmendozav@geovictoria.com"
-    }
+    const { agregarNotaLead } = await import("@/lib/zoho-leads")
+    // Form-fill mudo = sin calificar → regla SDR del país (Chile: la escalera
+    // de calificación sin calificar = SDR; PE/CO/MX: su entrada de territorio,
+    // o la rotación fija con la tómbola apagada). 28-sep: UN camino por ficha.
+    const r = await reasignarLeadSinCalificarDelPais(pais, l.id)
+    let ownerEmail = r?.ownerEmail || ""
     if (!ownerEmail) {
       console.warn(`[rescate-form] lead ${l.id} (${pais}): la entrega no asignó dueño`)
       continue
@@ -4192,21 +4100,9 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
 }
 
 async function reconciliarLeadsCruzados(): Promise<number> {
-  const rosterCL = (process.env.VICKY_TM_ROSTER_CALIFICACION_EMAILS ||
-    "aaraque@geovictoria.com,asepulveda@geovictoria.com")
+  // Roster SDR de calificación de Chile (ficha operativa; env de override).
+  const rosterCL = (process.env.VICKY_TM_ROSTER_CALIFICACION_EMAILS || rosterSdrOperativo("cl").map((p) => p.email).join(","))
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
-  // Destino por territorio (mismos dueños fijos del canal de cada país).
-  const destinoPorTerritorio: Record<string, { id: string; email: string }> = {
-    "perú": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" }, // Mónica
-    "peru": { id: "3525045000323383015", email: "mmendozav@geovictoria.com" },
-    // México: el SDR de la ficha operativa (Pablo Rodríguez desde el 24-sep).
-    "méxico": { id: rosterSdrOperativo("mx")[0]?.zohoId || "", email: rosterSdrOperativo("mx")[0]?.email || "" },
-    "mexico": { id: rosterSdrOperativo("mx")[0]?.zohoId || "", email: rosterSdrOperativo("mx")[0]?.email || "" },
-    // COLOMBIA faltaba en este mapa (cazado 21-ago con el lead CO del form
-    // que quedó con Sepúlveda): leads CO → SDR fijo Galindo (regla equipo CO
-    // 05-ago; el roster Araceli/Aleydis es SOLO calificación Chile).
-    "colombia": { id: "3525045000613817111", email: "egalindo@geovictoria.com" },
-  }
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
   const token = await getZohoAccessToken()
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
@@ -4227,7 +4123,10 @@ async function reconciliarLeadsCruzados(): Promise<number> {
   // por prefijo del teléfono: Territorio vuelve al país y, si el dueño es un
   // humano chileno, el lead se re-entrega por las reglas de su país. Los que
   // siguen con Vicky solo se corrigen (esperan como en Chile).
-  const PREFIJO_PAIS: Array<[string, string, string]> = [["+51", "Perú", "Perú"], ["+57", "Colombia", "Colombia"], ["+52", "México", "México"]]
+  // Prefijo → Territorio de cada país que NO es Chile, desde la ficha operativa.
+  const PREFIJO_PAIS: Array<[string, string, string]> = todasLasFichas()
+    .filter((f) => f.pais !== "cl")
+    .map((f) => [`+${f.prefijo}`, f.nombre, f.nombre])
   for (const [pref, terr, country] of PREFIJO_PAIS) {
     const q2 = await fetch(`${api}/crm/v3/coql`, {
       method: "POST", headers: H, cache: "no-store",
@@ -4252,32 +4151,22 @@ async function reconciliarLeadsCruzados(): Promise<number> {
     }
   }
   for (const l of filas) {
-    const terr = String(l.Territorio || "").trim().toLowerCase()
-    // PERÚ (22-sep): por las reglas de Zoho con entrada "Territorio = Perú" —
-    // calificado → TLMK (Mónica), sin calificar → SDR PE (Ana/Priscila) —
-    // en vez del PUT directo a Mónica; Mónica queda de fallback dentro.
-    const porReglas = (terr === "perú" || terr === "peru") ? "Perú" : terr === "colombia" && tombolaZohoCoActiva() ? "Colombia" : (terr === "méxico" || terr === "mexico") ? "México" : ""
-    if (porReglas && l.id) {
+    const paisLead = paisDeTerritorio(l.Territorio)
+    if (!paisLead || paisLead === "cl" || !l.id) continue
+    // Por las reglas de Zoho con la entrada de su territorio (PE 22-sep, CO
+    // 23-sep, MX 25-sep) — calificado → TLMK, sin calificar → SDR; con la
+    // tómbola del país apagada, su rotación SDR fija. 28-sep: por ficha, sin
+    // mapa de dueños fijos a mano.
+    const calificado = Number(l.N_Empleados_que_marcan || 0) > 0
+    let r: { success: boolean; ownerEmail?: string; error?: string } | null = null
+    if (paisTieneProceso(paisLead, "tombolaZoho")) {
       const { reasignarLeadPorTerritorio } = await import("@/lib/zoho-leads")
-      const r = await reasignarLeadPorTerritorio(porReglas, l.id, { calificado: Number(l.N_Empleados_que_marcan || 0) > 0 }).catch(() => null)
-      if (r?.success) {
-        corregidos++
-        console.warn(`[leads-cruzados] lead ${l.id} (${porReglas}, ${l.Phone || "?"}) roster CL → ${r.ownerEmail} (regla)`)
-        continue
-      }
+      r = await reasignarLeadPorTerritorio(fichaOperativa(paisLead).nombre, l.id, { calificado }).catch(() => null)
     }
-    const destino = destinoPorTerritorio[terr]
-    if (!destino || !l.id) continue
-    const put = await fetch(`${api}/crm/v3/Leads`, {
-      method: "PUT", headers: H, cache: "no-store",
-      body: JSON.stringify({
-        data: [{ id: l.id, Owner: { id: destino.id } }],
-        skip_feature_execution: [{ name: "assignment_rules" }],
-      }),
-    }).catch(() => null)
-    if (put?.ok) {
+    if (!r?.success) r = await reasignarLeadSinCalificarDelPais(paisLead, l.id)
+    if (r?.success) {
       corregidos++
-      console.warn(`[leads-cruzados] lead ${l.id} (${l.Territorio}, ${l.Phone || "?"}) roster CL → ${destino.email}`)
+      console.warn(`[leads-cruzados] lead ${l.id} (${l.Territorio}, ${l.Phone || "?"}) roster CL → ${r.ownerEmail}`)
     }
   }
   return corregidos
@@ -4295,9 +4184,8 @@ async function reconciliarLeadsCruzados(): Promise<number> {
  */
 async function reencaminarEnterpriseTlmk(): Promise<number> {
   const umbral = Number(process.env.VICKY_ENTERPRISE_UMBRAL || 300) || 300
-  const rosterTlmk = (process.env.VICKY_TLMK_ROSTER_EMAILS ||
-    "emujica@geovictoria.com,pdiaz@geovictoria.com,gmelendez@geovictoria.com," +
-    "tmartinezq@geovictoria.com,alopez@geovictoria.com,dgalvez@geovictoria.com,adiazg@geovictoria.com")
+  // Roster de telemarketing de Chile (ficha operativa; env de override).
+  const rosterTlmk = (process.env.VICKY_TLMK_ROSTER_EMAILS || rosterTelemarketingOperativo("cl").map((p) => p.email).join(","))
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
   if (!rosterTlmk.length) return 0
   const { getZohoAccessToken } = await import("@/lib/zoho-token")
