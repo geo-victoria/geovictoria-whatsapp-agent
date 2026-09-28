@@ -15,16 +15,33 @@ import { certificarPais, PAISES_CERT, DIMENSIONES, matrizLoopDesdeTexto, TOOLS_C
 
 const leer = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8")
 
-// Tools de Chile: los nombres reales de lib/tools/*.ts (index.ts importa red; se lee el texto).
-const toolsCL = [...new Set([...leer("lib/tools/index.ts").matchAll(/^\s*name:\s*"([a-z_]+)"/gm)].map((m) => m[1]))]
-const toolsCLdesdeArchivos = [...new Set([...TOOLS_CANONICAS].filter((n) => leer(`lib/tools/${n.replace(/_/g, "-")}.ts`).includes(`"${n}"`)))]
+// Tools de Chile EXACTAMENTE como las expone producción: los schemas listados en
+// TOOL_SCHEMAS de lib/tools/index.ts (el módulo importa red, así que se lee el texto),
+// cada uno resuelto al `name` de su archivo.
+function toolsChileDesdeIndex(): string[] {
+  const idx = leer("lib/tools/index.ts")
+  const bloque = idx.match(/export const TOOL_SCHEMAS = \[([\s\S]*?)\] as const/)?.[1] || ""
+  const vars = [...bloque.replace(/\/\/[^\n]*/g, "").matchAll(/\b([a-zA-Z]+Schema)\b/g)].map((m) => m[1])
+  const out = new Set<string>()
+  for (const v of vars) {
+    const archivo = v.replace(/Schema$/, "").replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
+    const name = leer(`lib/tools/${archivo}.ts`).match(/name:\s*"([a-z_]+)"/)?.[1]
+    if (name) out.add(name)
+  }
+  return [...out]
+}
+const toolsCL = toolsChileDesdeIndex()
 
 const FUENTES: Fuentes = {
   loopCron: leer("app/api/vic-loop-cron/route.ts"),
   ptvCron: leer("app/api/vic-ptv-cron/route.ts"),
   outboundLead: leer("app/api/vic-outbound-lead/route.ts"),
-  toolsCL: toolsCL.length >= 15 ? toolsCL : toolsCLdesdeArchivos,
+  toolsCL,
 }
+
+test("las tools canónicas son exactamente las que expone Chile (la referencia)", () => {
+  assert.deepEqual([...toolsCL].sort(), [...TOOLS_CANONICAS].sort())
+})
 
 test("el catálogo de dimensiones son las 15 del 21-sep, numeradas y sin repetir", () => {
   assert.equal(DIMENSIONES.length, 15)

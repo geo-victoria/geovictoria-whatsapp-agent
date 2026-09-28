@@ -124,7 +124,9 @@ export type Fuentes = {
 
 const FICHAS_PROMPT: Record<PaisCert, FichaPrompt> = { cl: FICHA_CL, pe: FICHA_PE, co: FICHA_CO, mx: FICHA_MX }
 
-/** Los 21 nombres canónicos (chilenos) que todo país expone (21-sep: "una sola tool por herramienta"). */
+/** Los 20 nombres canónicos = el set que expone CHILE (lib/tools/index.ts), la referencia
+ *  (21-sep: "una sola tool por herramienta"). buscar_prospect_en_zoho no está: Chile la
+ *  retiró de su set y el núcleo no la nombra; PE/CO/MX la conservan como extra. */
 export const TOOLS_CANONICAS = [
   "cotizar_referencial",
   "consultar_descuento_referencial",
@@ -146,7 +148,6 @@ export const TOOLS_CANONICAS = [
   "consultar_agente_soporte",
   "programar_seguimiento",
   "marcar_no_contactar",
-  "buscar_prospect_en_zoho",
 ] as const
 
 function toolsDe(pais: PaisCert, f: Fuentes): string[] {
