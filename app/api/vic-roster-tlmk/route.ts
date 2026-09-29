@@ -17,7 +17,7 @@
 
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
-import { PAISES_OPERATIVOS, fichaOperativa, type PersonaEquipo } from "@/lib/paises/ficha-operativa"
+import { PAISES_OPERATIVOS, fichaOperativa, equipoOperativo, type PersonaEquipo } from "@/lib/paises/ficha-operativa"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 10
@@ -32,7 +32,10 @@ async function autorizado(req: Request): Promise<boolean> {
 }
 
 function persona(p: PersonaEquipo) {
-  return { email: p.email, zohoId: p.zohoId, nombre: p.nombre, sesion: p.sesion || "" }
+  // teléfono (29-sep): el cotizador firma PDF y correo con el dueño humano del
+  // trato y necesita su número; es el mismo dato con que Vicky presenta al
+  // ejecutivo al cliente.
+  return { email: p.email, zohoId: p.zohoId, nombre: p.nombre, sesion: p.sesion || "", telefono: p.telefono || "" }
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
@@ -46,8 +49,11 @@ export async function GET(req: Request): Promise<NextResponse> {
       telemarketing: tlmk,
       sdr: (f.equipo.sdr || []).map(persona),
       ventaAutonoma: f.equipo.ventaAutonoma ? persona(f.equipo.ventaAutonoma) : null,
+      lider: f.equipo.lider ? { email: f.equipo.lider, liderSdr: f.equipo.liderSdr || f.equipo.lider } : null,
     }
     for (const p of tlmk) telemarketing.push({ ...p, pais })
   }
-  return NextResponse.json({ ok: true, generadoAt: new Date().toISOString(), paises, telemarketing })
+  // Equipo plano (todos los roles, 4 países) para resolver un dueño por zohoId.
+  const equipo = equipoOperativo().map((p) => ({ ...persona(p), pais: p.pais, rol: p.rol }))
+  return NextResponse.json({ ok: true, generadoAt: new Date().toISOString(), paises, telemarketing, equipo })
 }
