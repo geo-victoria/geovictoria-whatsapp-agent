@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { afirmaCuentaExistente, afirmaPagoConfirmado, clienteDeclaraPago, pareceInstruccionDeAcceso } from "../lib/pago-declarado.ts"
+import { afirmaCuentaExistente, afirmaPagoConfirmado, clienteDeclaraPago, pareceInstruccionDeAcceso, textoProcesoSinPago } from "../lib/pago-declarado.ts"
 
 test("clienteDeclaraPago: las formas reales del chat", () => {
   for (const t of ["Ya esta pagado", "Y hice el pago\nAhora que sigue", "ya pagué", "Listo, ya transferí", "El pago está listo", "pagué con tarjeta recién"]) {
@@ -52,4 +52,19 @@ test("explicar el producto no afirma una cuenta existente", () => {
   assert.equal(afirmaCuentaExistente(explicacion), false)
   assert.equal(afirmaCuentaExistente("Ya te llegó la contraseña al correo, ingresa a tu cuenta con tus credenciales"), true)
   assert.equal(afirmaCuentaExistente("Empezamos a cargar a tus 2 trabajadores"), true)
+})
+
+// Caso Montajes Eléctricos / F (29-sep, reclamo de Mónica): "¿cómo se procede
+// para contratar?" → el modelo explica los pasos en futuro. No es teatro y el
+// cliente jamás declaró pago.
+test("explicar los pasos de contratación en futuro no afirma una cuenta existente", () => {
+  const pasos =
+    "Es muy simple: 1) Aceptas la cotización en el link, 2) pagas con tarjeta o transferencia, 3) apenas se confirme el pago te llega un formulario para crear tu cuenta y recibes tu contraseña por correo para ingresar a tu cuenta."
+  assert.equal(afirmaCuentaExistente(pasos), false)
+  assert.equal(clienteDeclaraPago("Buenas tardes Cómo se procede para contratar el servicio"), false)
+  assert.equal(afirmaCuentaExistente("Listo, ya te llegó la contraseña al correo para ingresar a tu cuenta"), true)
+  assert.equal(afirmaCuentaExistente("Una vez que pagues te enviamos tu acceso; ya te llegó la contraseña, ingresa a tu cuenta"), true)
+  const txt = textoProcesoSinPago({ link: "https://cotizacion.geovictoria.com/q/x" })
+  assert.ok(!/avisarme|confirmaci[oó]n del pago/.test(txt))
+  assert.ok(txt.includes("/q/x"))
 })

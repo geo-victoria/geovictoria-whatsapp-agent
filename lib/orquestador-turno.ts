@@ -1938,8 +1938,13 @@ export async function procesarTurno(
             console.warn(`[pago-declarado] ${contact}: el cliente declara pago sin pago verificado (${motivo}) — texto canónico`)
             reply = pd.textoPagoNoVerificado({ link: quotePointer?.acceptanceUrl })
           } else if (teatro) {
-            console.warn(`[pago-declarado] ${contact}: teatro de pago/acceso sin pago verificado (${motivo}) — respuesta reemplazada`)
-            reply = pd.textoPagoNoVerificado({ link: quotePointer?.acceptanceUrl })
+            console.warn(`[pago-declarado] ${contact}: teatro de pago/acceso sin pago verificado (${motivo}, declara=${declara}) — respuesta reemplazada`)
+            // Sin pago declarado, "gracias por avisarme, no me llega la confirmación"
+            // presume un aviso que el cliente no dio (Montajes Eléctricos 29-sep):
+            // se explica el proceso y se deja el link.
+            reply = declara
+              ? pd.textoPagoNoVerificado({ link: quotePointer?.acceptanceUrl })
+              : pd.textoProcesoSinPago({ link: quotePointer?.acceptanceUrl })
             void avisarEquipoInterno(
               `⚠️ +${contact}: Vicky iba a afirmar pago/dar instrucciones de acceso SIN pago verificado (${motivo}). Se reemplazó por el texto de verificación. Cotización ${quotePointer?.quoteId || "sin puntero"}.`,
             ).catch(() => {})

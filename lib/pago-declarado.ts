@@ -58,14 +58,31 @@ export function afirmaPagoConfirmado(reply: string): boolean {
  * del pago" a quien ni siquiera tenía cotización. */
 export function afirmaCuentaExistente(reply: string): boolean {
   const t = norm(reply)
-  return (
+  const marca =
     /\b(tus|sus)\s+credenciales\b/.test(t) ||
     /\b(ya\s+)?(te\s+)?(llego|salio|enviamos|envie|mande)\s+(tu|la|el)\s+(contrasena|clave|acceso|usuario)\b/.test(t) ||
     /\b(contrasena|clave)\s+(ya\s+)?(te\s+)?(llego|salio|va)\s+(por|al)\s+correo\b/.test(t) ||
     /\bempezamos\s+a\s+cargar\s+(a\s+)?tus\b/.test(t) ||
     /\bconfiguracion\s+inicial\s+de\s+tu\s+cuenta\b/.test(t) ||
     /\bingres(a|es|ar)\s+a\s+tu\s+cuenta\b/.test(t)
-  )
+  if (!marca) return false
+  // Caso Montajes Eléctricos (29-sep, reclamo de Mónica): a "¿cómo se procede
+  // para contratar?" el modelo explicó los PASOS ("aceptas, pagas, apenas se
+  // confirme te llega el formulario y tu contraseña para ingresar a tu cuenta")
+  // y el cinturón lo leyó como cuenta existente → le respondió "todavía no me
+  // llega la confirmación del pago" a alguien que nunca habló de pagar. Una
+  // explicación del proceso en futuro/condicional NO es teatro; teatro es
+  // afirmar en pasado/presente que el acceso ya existe.
+  const explicaProceso =
+    /\b(apenas|cuando|una\s+vez(\s+que)?|despues\s+de|luego\s+de|tras)\s+(se\s+)?(confirm|pag|acept|complet|quede|este)/.test(t) ||
+    /\b(te\s+)?(llega|llegara|enviamos|enviaremos|mando|mandare|envio|enviare)\s+(un|el)\s+formulario\b/.test(t) ||
+    /\b(podras|vas\s+a\s+poder|recibiras|recibes)\b/.test(t) ||
+    /\b(el\s+proceso|los\s+pasos|para\s+contratar|asi\s+funciona)\b/.test(t)
+  const afirmaPasado =
+    /\bya\s+(te\s+)?(llego|salio|quedo|esta|enviamos|envie|mande)\b/.test(t) ||
+    /\bempezamos\s+a\s+cargar\b/.test(t) ||
+    /\bquedo\s+(creada|activa|lista)\b/.test(t)
+  return !(explicaProceso && !afirmaPasado)
 }
 
 /** Instrucciones de ACCESO a la plataforma: prohibidas en fase de venta. */
@@ -90,6 +107,17 @@ export function textoPagoNoVerificado(opts: { link?: string | null } = {}): stri
     "Si pagaste con tarjeta, en unos minutos se confirma solo y te aviso por aquí. Si fue por transferencia, mándame el comprobante (foto o PDF) y lo dejo registrado de inmediato." +
     (link ? `\n\nSi aún no alcanzaste a pagar, el link es este: ${link}` : "") +
     "\n\nApenas quede confirmado te mando un formulario cortito para crear tu cuenta — ahí nace tu acceso, no antes 😊"
+  )
+}
+
+/** El modelo iba a hacer teatro de acceso pero el cliente NO declaró pago:
+ * se le explica el proceso real, sin agradecerle un aviso que no dio. */
+export function textoProcesoSinPago(opts: { link?: string | null } = {}): string {
+  const link = (opts.link || "").trim()
+  return (
+    "Es simple 😊 Aceptas la cotización en el link y ahí mismo pagas, con tarjeta o transferencia." +
+    (link ? `\n\nEste es el link: ${link}` : "") +
+    "\n\nApenas se confirme el pago te mando un formulario cortito (2 minutos) para crear tu cuenta con los datos de tu empresa — ahí nace tu acceso, no antes. Y te acompaño yo con la configuración por este mismo chat."
   )
 }
 
