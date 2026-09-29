@@ -19,6 +19,7 @@
  */
 
 import { ccLiderTraspaso } from "@/lib/cc-lider"
+import { nombreDealVicky } from "@/lib/nombre-deal"
 import { NextResponse } from "next/server"
 import { extraerDatosLeadDeChat } from "@/lib/extraer-datos-chat"
 import {
@@ -922,7 +923,7 @@ async function enriquecerLeadsDeChat(): Promise<number> {
       if (dealId || accountId || contactId) {
         let tocados = 0
         if (dealId && (campos.Company || campos.RUT_Empresa)) {
-          const dealActual = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Rut_ID_Account`, {
+          const dealActual = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Deal_Name,Rut_ID_Account,Territorio`, {
             headers: H,
             cache: "no-store",
           })
@@ -932,7 +933,7 @@ async function enriquecerLeadsDeChat(): Promise<number> {
           const nombreDeal = String(d.Deal_Name || "")
           const campoDeal: Record<string, unknown> = {}
           if (campos.Company && RE_EMPRESA_PLACEHOLDER.test(nombreDeal)) {
-            campoDeal.Deal_Name = `${campos.Company} (Control de Asistencia)`
+            campoDeal.Deal_Name = nombreDealVicky(String(d.Territorio || ({ pe: "Perú", co: "Colombia", mx: "México" } as Record<string, string>)[paisLead] || "Chile"), String(campos.Company || ""), { documento: String(campos.RUT_Empresa || d.Rut_ID_Account || "") })
           }
           if (campos.RUT_Empresa && !String(d.Rut_ID_Account || "").trim()) {
             campoDeal.Rut_ID_Account = campos.RUT_Empresa

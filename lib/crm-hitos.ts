@@ -1,4 +1,5 @@
 import { monedaDealDeTerritorio } from "./convencion-deal.ts"
+import { nombreDealVicky } from "./nombre-deal.ts"
 import { ccLiderTraspaso } from "./cc-lider.ts"
 import { esContactoCL } from "./origen-canal.ts"
 import { rosterSdrOperativo, reglaZoho, fichaOperativa, paisDeTelefonoOperativo, paisDeTerritorio, paisTieneProceso, paisesConProceso } from "./paises/ficha-operativa.ts"
@@ -1167,7 +1168,8 @@ async function convertirConDeal(
     return null
   })(lead.company || "")
   const deal = {
-    Deal_Name: `${lead.company || "Prospecto WhatsApp"} (Control de Asistencia)`,
+    // Perú va "RUC - RAZÓN - Control de Asistencia" (Mónica/finanzas 29-sep); Chile y el resto, "RAZÓN (Control de Asistencia)".
+    Deal_Name: nombreDealVicky(territorio, lead.company || "", { documento: lead.rut }),
     // RUT en el DEAL, no solo en la cuenta (Lalo 10-ago, caso Embajada de
     // Bélgica): el equipo comercial lo necesita en ambos registros. Si el
     // lead aún no lo tiene (hito temprano), la emisión formal lo completa
