@@ -109,9 +109,21 @@ type VentaCerrada = {
 
 /** PANEL SLA DE LLAMADA POST-TRASPASO (punto 1, Lalo 08-ago): el proceso
  * asume que el vendedor llama en <5 minutos y nadie lo medía. Por vendedor,
- * últimos 7 días: traspasos, contactados (WhatsApp espejado, llamada
- * contestada o marca manual 🤝), mediana de minutos al primer contacto y %
- * dentro de 5/60 min. La escalada automática avisa a los 60 min hábiles. */
+ * últimos 7 días: traspasos, contactados, mediana de minutos al primer
+ * contacto y % dentro de 5/60 min.
+ *
+ * EL DASH CONVERSA CON ZOHO (Lalo 29-sep, "igual el dash debe conversar con
+ * zoho"; caso Paola/Ninoska): hasta hoy la tabla medía SOLO el WhatsApp
+ * espejado y agrupaba por el nombre de la bitácora `vic_ptv`. Con eso una
+ * ejecutiva que llamó por teléfono y dejó nota en el trato salía "sin
+ * contacto", y un traspaso re-sorteado se le cargaba a quien ya no era dueña.
+ * Ahora: (1) el RESPONSABLE es el dueño del trato en Zoho (la bitácora solo
+ * si no hay trato o sigue en el robot); (2) CONTACTO = WhatsApp espejado o
+ * llamada de WhatsApp contestada o marca manual 🤝 O nota humana en el trato
+ * O llamada registrada como "Completado" en Zoho, todo posterior al traspaso;
+ * (3) los tratos ya CERRADOS (7/8/Cierre Perdido) no se juzgan por SLA.
+ * Límite declarado: correos de Outlook y llamadas no registradas siguen sin
+ * verse — la fila lo dice. Minutos CORRIDOS, no hábiles. */
 async function renderPanelSla(): Promise<string> {
   const desde = new Date(Date.now() - 7 * 24 * 3600e3).toISOString()
   const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
@@ -125,40 +137,114 @@ async function renderPanelSla(): Promise<string> {
     `vic_ptv?traspasado_at=gte.${encodeURIComponent(desde)}&select=contact,vendedor_email,vendedor_nombre,traspasado_at&order=traspasado_at.desc&limit=400`,
   )
   if (!ptv.length) return ""
-  // Última fila por contacto (vienen ordenadas desc) y tope de URL.
+  // Última fila por contacto (vienen ordenadas desc) y tope de URL. Las filas
+  // fantasma del reloj de 24 h (vendedor vacío, 15-sep) no cuentan.
   const porContacto = new Map<string, (typeof ptv)[number]>()
-  for (const r of ptv) if (!porContacto.has(r.contact)) porContacto.set(r.contact, r)
+  for (const r of ptv) if (!porContacto.has(r.contact) && (r.vendedor_email || r.vendedor_nombre)) porContacto.set(r.contact, r)
   const contactos = [...porContacto.keys()].slice(0, 150)
+  if (!contactos.length) return ""
   const lista = contactos.map((c) => `"${c}"`).join(",")
   const listaKv = contactos.map((c) => `"atencion_manual_${c}"`).join(",")
-  const [msjs, llams, kvs] = await Promise.all([
+  const [msjs, llams, kvs, punteros] = await Promise.all([
     q<{ telefono_chat: string; enviado_at: string }>(`vic_wa_espejo_mensajes?telefono_chat=in.(${lista})&from_me=eq.true&es_grupo=eq.false&select=telefono_chat,enviado_at&limit=5000`),
     q<{ telefono: string; at: string }>(`vic_wa_espejo_llamadas?telefono=in.(${lista})&estado=eq.accept&select=telefono,at&limit=2000`),
     q<{ key: string; value: string }>(`vic_kv?key=in.(${listaKv})&select=key,value&limit=500`),
+    q<{ contact: string; deal_id: string | null }>(`vic_v3_quote_pointers?contact=in.(${lista})&select=contact,deal_id&limit=400`),
   ])
-  const eventos = new Map<string, number[]>()
-  const evt = (tel: string, iso: string) => {
+  // evento = { t, via } para poder decir por dónde se vio el contacto.
+  type Evento = { t: number; via: "wa" | "zoho" }
+  const eventos = new Map<string, Evento[]>()
+  const evt = (tel: string, iso: string, via: Evento["via"]) => {
     const t = Date.parse(iso)
     if (!Number.isFinite(t)) return
     const arr = eventos.get(tel) || []
-    arr.push(t)
+    arr.push({ t, via })
     eventos.set(tel, arr)
   }
-  for (const m of msjs) evt(m.telefono_chat, m.enviado_at)
-  for (const l of llams) evt(l.telefono, l.at)
-  for (const k of kvs) evt(String(k.key).replace("atencion_manual_", ""), k.value)
-  type Agg = { n: number; atendidos: number; minutos: number[]; d5: number; d60: number }
+  for (const m of msjs) evt(m.telefono_chat, m.enviado_at, "wa")
+  for (const l of llams) evt(l.telefono, l.at, "wa")
+  for (const k of kvs) evt(String(k.key).replace("atencion_manual_", ""), k.value, "wa")
+
+  // ── ZOHO: dueño del trato + notas humanas + llamadas completadas ─────────
+  const dealDe = new Map<string, string>()
+  for (const p of punteros) if (p.contact && p.deal_id && !dealDe.has(p.contact)) dealDe.set(p.contact, String(p.deal_id))
+  const dealIds = [...new Set(dealDe.values())]
+  const duenoDeal = new Map<string, { email: string; nombre: string; stage: string }>()
+  const dealsPorContacto = new Map<string, string[]>()
+  for (const [c, d] of dealDe) dealsPorContacto.set(d, [...(dealsPorContacto.get(d) || []), c])
+  const ROBOTS = new Set(["3525045000484500876", "3525045000000200013"])
+  let zohoOk = true
+  if (dealIds.length) {
+    try {
+      const token = await getZohoAccessToken()
+      const HZ = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+      const coql = async (select_query: string): Promise<Array<Record<string, unknown>>> => {
+        const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, { method: "POST", headers: HZ, cache: "no-store", body: JSON.stringify({ select_query }) }).catch(() => null)
+        if (!r) throw new Error("coql sin respuesta")
+        if (r.status === 204) return []
+        if (!r.ok) throw new Error(`coql ${r.status}`)
+        const j = (await r.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
+        return j.data || []
+      }
+      for (let i = 0; i < dealIds.length; i += 40) {
+        const lote = dealIds.slice(i, i + 40).map((d) => `'${d}'`).join(",")
+        // `Owner` a secas trae solo el APELLIDO (dos "Diaz" en el roster).
+        for (const f of await coql(`select id, Stage, Owner.email, Owner.first_name, Owner.last_name from Deals where id in (${lote}) limit 200`)) {
+          const em = String(f["Owner.email"] || "").toLowerCase()
+          const nom = `${String(f["Owner.first_name"] || "").trim()} ${String(f["Owner.last_name"] || "").trim()}`.trim()
+          if (f.id && em && !/^(vicky@|info@geovictoria|ventas@geovictoria|productmanager@)/i.test(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: String(f.Stage || "") })
+        }
+      }
+      for (let i = 0; i < dealIds.length; i += 20) {
+        const lote = dealIds.slice(i, i + 20).map((d) => `'${d}'`).join(",")
+        const [notas, llamadas] = await Promise.all([
+          coql(`select id, Parent_Id, Created_Time, Created_By from Notes where Parent_Id in (${lote}) order by Created_Time desc limit 200`).catch(() => []),
+          // Las llamadas del workflow "TASK Y CALL NO CONTACTADO" quedan
+          // "Vencido"/sin duración; una llamada REAL lleva Outgoing_Call_Status
+          // "Completado" (verificado 29-sep contra Calls).
+          coql(`select id, What_Id, Call_Start_Time, Owner from Calls where What_Id in (${lote}) and Outgoing_Call_Status = 'Completado' limit 200`).catch(() => []),
+        ])
+        for (const n of notas) {
+          const deal = String((n.Parent_Id as { id?: string } | null)?.id || "")
+          const autor = String((n.Created_By as { id?: string } | null)?.id || "")
+          const at = String(n.Created_Time || "")
+          if (!deal || !at || ROBOTS.has(autor)) continue
+          for (const c of dealsPorContacto.get(deal) || []) evt(c, at, "zoho")
+        }
+        for (const l of llamadas) {
+          const deal = String((l.What_Id as { id?: string } | null)?.id || "")
+          const autor = String((l.Owner as { id?: string } | null)?.id || "")
+          const at = String(l.Call_Start_Time || "")
+          if (!deal || !at || ROBOTS.has(autor)) continue
+          for (const c of dealsPorContacto.get(deal) || []) evt(c, at, "zoho")
+        }
+      }
+    } catch (e) {
+      zohoOk = false
+      console.warn("[sla] zoho:", e instanceof Error ? e.message : e)
+    }
+  }
+  const CERRADO = /^(7\.|8\.|Cierre Perdido)/
+
+  type Agg = { n: number; atendidos: number; viaZoho: number; minutos: number[]; d5: number; d60: number; sinTrato: number }
   const porVendedor = new Map<string, Agg>()
+  let cerrados = 0
   for (const c of contactos) {
     const r = porContacto.get(c)!
-    const key = r.vendedor_nombre || r.vendedor_email || "(sin vendedor)"
-    const a = porVendedor.get(key) || { n: 0, atendidos: 0, minutos: [], d5: 0, d60: 0 }
+    const dueno = duenoDeal.get(dealDe.get(c) || "")
+    if (dueno && CERRADO.test(dueno.stage)) { cerrados++; continue }
+    // El responsable es el DUEÑO del trato; la bitácora solo si no hay trato o
+    // sigue en el robot.
+    const key = dueno?.nombre || r.vendedor_nombre || r.vendedor_email || "(sin vendedor)"
+    const a = porVendedor.get(key) || { n: 0, atendidos: 0, viaZoho: 0, minutos: [], d5: 0, d60: 0, sinTrato: 0 }
     a.n++
+    if (!dueno) a.sinTrato++
     const t0 = Date.parse(r.traspasado_at) - 5 * 60_000
-    const primero = (eventos.get(c) || []).filter((t) => t >= t0).sort((x, y) => x - y)[0]
+    const primero = (eventos.get(c) || []).filter((e) => e.t >= t0).sort((x, y) => x.t - y.t)[0]
     if (primero !== undefined) {
       a.atendidos++
-      const min = Math.max(0, (primero - Date.parse(r.traspasado_at)) / 60_000)
+      if (primero.via === "zoho") a.viaZoho++
+      const min = Math.max(0, (primero.t - Date.parse(r.traspasado_at)) / 60_000)
       a.minutos.push(min)
       if (min <= 5) a.d5++
       if (min <= 60) a.d60++
@@ -173,15 +259,21 @@ async function renderPanelSla(): Promise<string> {
         : null
       const sin = a.n - a.atendidos
       const pct = (v: number) => (a.n ? `${Math.round((v / a.n) * 100)}%` : "—")
-      return `<tr><td>${nombre}</td><td style="text-align:center">${a.n}</td><td style="text-align:center">${a.atendidos}</td><td style="text-align:center;font-weight:600;color:${sin ? "#b91c1c" : "#166534"}">${sin}</td><td style="text-align:center">${med === null ? "—" : `${med} min`}</td><td style="text-align:center">${pct(a.d5)}</td><td style="text-align:center">${pct(a.d60)}</td></tr>`
+      const sinTrato = a.sinTrato ? ` <span class="pct" title="${a.sinTrato} traspaso(s) sin trato en Zoho o con el trato aún en el robot: ahí manda la bitácora del traspaso.">(${a.sinTrato} por bitácora)</span>` : ""
+      return `<tr><td>${nombre}${sinTrato}</td><td style="text-align:center">${a.n}</td><td style="text-align:center">${a.atendidos}${a.viaZoho ? ` <span class="pct" title="Contactados cuya primera señal fue una nota o llamada registrada en Zoho (no el WhatsApp espejado).">(${a.viaZoho} vía Zoho)</span>` : ""}</td><td style="text-align:center;font-weight:600;color:${sin ? "#b91c1c" : "#166534"}">${sin}</td><td style="text-align:center">${med === null ? "—" : `${med} min`}</td><td style="text-align:center">${pct(a.d5)}</td><td style="text-align:center">${pct(a.d60)}</td></tr>`
     })
     .join("")
+  const p = new URLSearchParams(); p.set("vista", "traspasos")
+  const aviso = zohoOk ? "" : `<div style="font-size:12px;color:#b45309;margin:4px 0">⚠️ Zoho no respondió: esta corrida mide solo el WhatsApp espejado y agrupa por la bitácora del traspaso.</div>`
+  const pie = `<div style="font-size:12px;color:#6b7280;margin-top:6px">Responsable = dueño del trato en Zoho. Contacto = WhatsApp espejado, llamada de WhatsApp contestada, marca manual 🤝, nota humana en el trato o llamada registrada como completada en Zoho, posteriores al traspaso. No se ven: correos de Outlook ni llamadas no registradas. Minutos corridos (no hábiles). ${cerrados ? `${cerrados} traspaso(s) con trato ya cerrado (ganado o perdido) no se juzgan. ` : ""}Detalle por contacto en <a href="?${p.toString()}">🤝 Traspasos</a>.</div>`
   return `
-  <div class="kgroup">SLA de llamada post-traspaso · últimos 7 días <span class="pct" title="Contacto = mensaje desde el WhatsApp espejado del vendedor, llamada de WhatsApp contestada, o marca manual 🤝 del dashboard. La escalada automática alerta a los 60 min hábiles sin contacto.">¿cómo se mide?</span></div>
+  <div class="kgroup">SLA de llamada post-traspaso · últimos 7 días <span class="pct" title="Responsable = dueño del trato en Zoho. Contacto = WhatsApp espejado, llamada contestada, marca manual, nota humana o llamada completada en Zoho después del traspaso. La escalada automática alerta a los 60 min hábiles sin contacto.">¿cómo se mide?</span></div>
+  ${aviso}
   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left"><th>Vendedor</th><th style="text-align:center">Traspasos</th><th style="text-align:center">Contactados</th><th style="text-align:center">Sin contacto</th><th style="text-align:center">Mediana 1er contacto</th><th style="text-align:center">≤ 5 min</th><th style="text-align:center">≤ 60 min</th></tr></thead>
     <tbody>${filas}</tbody>
-  </table></div>`
+  </table></div>
+  ${pie}`
 }
 
 /** PANEL RESPUESTA POR PLANTILLA (punto 4 de la segunda tanda, Lalo 08-ago):
