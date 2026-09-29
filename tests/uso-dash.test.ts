@@ -8,6 +8,7 @@ import {
   sumarUso,
   agregarUso,
   EVENTOS_USO,
+  cuerpoAvisoPortal,
 } from "../lib/uso-dash.ts"
 
 test("slugPersona: sin tildes, minúsculas, guiones, sin guiones sobrantes", () => {
@@ -65,4 +66,14 @@ test("agregarUso: por persona y por día, ignorando basura", () => {
   assert.equal(dias[0].total, 4)
   assert.equal(dias[1].fecha, "2026-09-23")
   assert.equal(dias[1].total, 3)
+})
+
+test("cuerpoAvisoPortal: app cotizador, nombre limpio y detalle corto", () => {
+  assert.deepEqual(cuerpoAvisoPortal("  Ana Paula López ", "calc_pdf", "x".repeat(60)), {
+    app: "cotizador",
+    quien: "Ana Paula López",
+    evento: "calc_pdf",
+    detalle: "x".repeat(40),
+  })
+  assert.equal(cuerpoAvisoPortal("Ana", "selector").detalle, "")
 })

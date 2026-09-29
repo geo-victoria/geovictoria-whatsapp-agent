@@ -23,6 +23,39 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim()
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()
 const TTL_DIAS = 180
 
+/** Copia al portal comercial (Ignacio 29-sep-2026): cada evento se avisa
+ * también a /uso/externo del portal, que lo junta con el uso del portal en su
+ * reporte /uso. El token (env GV_USO_EXTERNO_TOKEN, el mismo valor que el
+ * secret del Repl del portal) SOLO sirve para anotar eventos del cotizador;
+ * no lee nada. Sin el env no se avisa y todo sigue igual en vic_kv. */
+const PORTAL_USO_URL = "https://gv-data-comercial.replit.app/uso/externo"
+const PORTAL_USO_TOKEN = (process.env.GV_USO_EXTERNO_TOKEN || "").trim()
+
+/** Cuerpo del aviso al portal. Puro: lo vigila tests/uso-dash.test.ts. */
+export function cuerpoAvisoPortal(quien: string, evento: EventoUso, detalle?: string) {
+  return {
+    app: "cotizador",
+    quien: String(quien || "").trim(),
+    evento,
+    detalle: detalle ? String(detalle).slice(0, 40) : "",
+  }
+}
+
+async function avisarPortal(quien: string, evento: EventoUso, detalle?: string): Promise<void> {
+  if (!PORTAL_USO_TOKEN) return
+  try {
+    await fetch(PORTAL_USO_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-GV-Uso": PORTAL_USO_TOKEN },
+      body: JSON.stringify(cuerpoAvisoPortal(quien, evento, detalle)),
+      cache: "no-store",
+      signal: AbortSignal.timeout(4000),
+    })
+  } catch {
+    // best-effort: si el portal no responde, el evento igual queda en vic_kv
+  }
+}
+
 export const EVENTOS_USO = ["selector", "calc_abrio", "calc_pdf", "calc_emitio", "editor"] as const
 export type EventoUso = (typeof EVENTOS_USO)[number]
 
@@ -182,9 +215,11 @@ const cab = () => ({
 
 /** Estampa un uso. `quien` vacío (acceso máquina) no se registra. */
 export async function registrarUso(quien: string, evento: EventoUso, detalle?: string): Promise<void> {
+  const slug = slugPersona(quien)
+  if (!slug) return
+  const aviso = avisarPortal(quien, evento, detalle)
   try {
-    const slug = slugPersona(quien)
-    if (!slug || !SUPABASE_URL || !SUPABASE_KEY) return
+    if (!SUPABASE_URL || !SUPABASE_KEY) return await aviso
     const key = claveUso(fechaCL(), slug, evento)
     const r = await fetch(`${SUPABASE_URL}/rest/v1/vic_kv?key=eq.${encodeURIComponent(key)}&select=value&limit=1`, {
       headers: cab(),
@@ -206,6 +241,7 @@ export async function registrarUso(quien: string, evento: EventoUso, detalle?: s
   } catch {
     // best-effort
   }
+  await aviso
 }
 
 /** Filas uso_* entre dos fechas YYYY-MM-DD (inclusive). Las claves ordenan
