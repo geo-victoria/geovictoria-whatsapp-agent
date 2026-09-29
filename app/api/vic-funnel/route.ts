@@ -168,31 +168,56 @@ async function renderPanelSla(): Promise<string> {
   // ── ZOHO: dueño del trato + notas humanas + llamadas completadas ─────────
   const dealDe = new Map<string, string>()
   for (const p of punteros) if (p.contact && p.deal_id && !dealDe.has(p.contact)) dealDe.set(p.contact, String(p.deal_id))
-  const dealIds = [...new Set(dealDe.values())]
   const duenoDeal = new Map<string, { email: string; nombre: string; stage: string }>()
   const dealsPorContacto = new Map<string, string[]>()
-  for (const [c, d] of dealDe) dealsPorContacto.set(d, [...(dealsPorContacto.get(d) || []), c])
   const ROBOTS = new Set(["3525045000484500876", "3525045000000200013"])
+  const esRobot = (em: string) => /^(vicky@|info@geovictoria|ventas@geovictoria|productmanager@)/i.test(em)
+  // COQL exige paréntesis anidados con 3+ condiciones: ((A or B) or C).
+  const orAnidado = (conds: string[]) => conds.reduce((acc, c) => (acc ? `(${acc} or ${c})` : c), "")
   let zohoOk = true
-  if (dealIds.length) {
-    try {
-      const token = await getZohoAccessToken()
-      const HZ = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
-      const coql = async (select_query: string): Promise<Array<Record<string, unknown>>> => {
-        const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, { method: "POST", headers: HZ, cache: "no-store", body: JSON.stringify({ select_query }) }).catch(() => null)
-        if (!r) throw new Error("coql sin respuesta")
-        if (r.status === 204) return []
-        if (!r.ok) throw new Error(`coql ${r.status}`)
-        const j = (await r.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
-        return j.data || []
+  try {
+    const token = await getZohoAccessToken()
+    const HZ = { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }
+    const coql = async (select_query: string): Promise<Array<Record<string, unknown>>> => {
+      const r = await fetch(`${ZOHO_API_DOMAIN}/crm/v8/coql`, { method: "POST", headers: HZ, cache: "no-store", body: JSON.stringify({ select_query }) }).catch(() => null)
+      if (!r) throw new Error("coql sin respuesta")
+      if (r.status === 204) return []
+      if (!r.ok) throw new Error(`coql ${r.status}`)
+      const j = (await r.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> }
+      return j.data || []
+    }
+    // ── SIN PUNTERO DE VICKY, EL TRATO SE BUSCA POR TELÉFONO (29-sep, caso
+    // Anita/Paola): cuando la cotización la emitió el EJECUTIVO desde el
+    // editor, `vic_v3_quote_pointers` no ancla al trato y el panel no veía ni
+    // el dueño ni sus notas. El contacto de Zoho lleva el celular: se busca el
+    // trato vivo más reciente por los últimos 9 dígitos (lotes de 10).
+    const sinPuntero = contactos.filter((c) => !dealDe.has(c))
+    const porFono = new Map<string, { id: string; stage: string }>()
+    for (let i = 0; i < sinPuntero.length; i += 10) {
+      const lote = sinPuntero.slice(i, i + 10)
+      const cond = orAnidado(lote.map((c) => `Contact_Name.Phone like '%${c.slice(-9)}%'`))
+      const filas = await coql(`select id, Stage, Created_Time, Contact_Name.Phone from Deals where ${cond} order by Created_Time desc limit 200`).catch(() => [])
+      for (const f of filas) {
+        const fono = String(f["Contact_Name.Phone"] || "").replace(/\D/g, "")
+        const c = lote.find((x) => fono.endsWith(x.slice(-9)))
+        if (!c || !f.id) continue
+        const prev = porFono.get(c)
+        const stage = String(f.Stage || "")
+        // Prefiere un trato NO perdido; entre iguales, el más reciente (vienen desc).
+        if (!prev || (/^Cierre Perdido/.test(prev.stage) && !/^Cierre Perdido/.test(stage))) porFono.set(c, { id: String(f.id), stage })
       }
+    }
+    for (const c of sinPuntero) { const d = porFono.get(c); if (d) dealDe.set(c, d.id) }
+    for (const [c, d] of dealDe) dealsPorContacto.set(d, [...(dealsPorContacto.get(d) || []), c])
+    const dealIds = [...new Set(dealDe.values())]
+    if (dealIds.length) {
       for (let i = 0; i < dealIds.length; i += 40) {
         const lote = dealIds.slice(i, i + 40).map((d) => `'${d}'`).join(",")
         // `Owner` a secas trae solo el APELLIDO (dos "Diaz" en el roster).
         for (const f of await coql(`select id, Stage, Owner.email, Owner.first_name, Owner.last_name from Deals where id in (${lote}) limit 200`)) {
           const em = String(f["Owner.email"] || "").toLowerCase()
           const nom = `${String(f["Owner.first_name"] || "").trim()} ${String(f["Owner.last_name"] || "").trim()}`.trim()
-          if (f.id && em && !/^(vicky@|info@geovictoria|ventas@geovictoria|productmanager@)/i.test(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: String(f.Stage || "") })
+          if (f.id && em && !esRobot(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: String(f.Stage || "") })
         }
       }
       for (let i = 0; i < dealIds.length; i += 20) {
@@ -219,10 +244,10 @@ async function renderPanelSla(): Promise<string> {
           for (const c of dealsPorContacto.get(deal) || []) evt(c, at, "zoho")
         }
       }
-    } catch (e) {
-      zohoOk = false
-      console.warn("[sla] zoho:", e instanceof Error ? e.message : e)
     }
+  } catch (e) {
+    zohoOk = false
+    console.warn("[sla] zoho:", e instanceof Error ? e.message : e)
   }
   const CERRADO = /^(7\.|8\.|Cierre Perdido)/
 
