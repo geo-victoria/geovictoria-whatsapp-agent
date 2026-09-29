@@ -10,7 +10,7 @@
  * no prellena el formulario.
  *
  * GET /api/vic-sii-ficha?rut=76123456-0            (Chile, SII: razón social, giro, comuna, dirección)
- * GET /api/vic-sii-ficha?pais=pe&rut=20605842055   (Perú, SUNAT: razón social, dirección, distrito)
+ * GET /api/vic-sii-ficha?pais=pe&rut=20123456781   (Perú, SUNAT: razón social, dirección, distrito)
  * GET /api/vic-sii-ficha?pais=co&rut=900123456-8   (Colombia, RUES: razón social, CIIU como giro)
  * México no tiene padrón público consultable: responde ok:false.
  *
