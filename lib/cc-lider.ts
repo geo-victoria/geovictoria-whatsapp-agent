@@ -8,7 +8,7 @@
  * en la operación diaria).
  * PURO: lo consumen crm-hitos, ptv-cron y notificar-lead-asignado.
  */
-import { fichaOperativa, paisDeTelefonoOperativo } from "./paises/ficha-operativa"
+import { fichaOperativa, paisDeTelefonoOperativo } from "./paises/ficha-operativa.ts"
 
 export function ccLiderTraspaso(contact: string, territorio?: string): string[] {
   const t = String(territorio || "").toLowerCase()

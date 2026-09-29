@@ -1,5 +1,5 @@
 import { monedaDealDeTerritorio } from "./convencion-deal.ts"
-import { ccLiderTraspaso } from "./cc-lider"
+import { ccLiderTraspaso } from "./cc-lider.ts"
 import { esContactoCL } from "./origen-canal.ts"
 import { rosterSdrOperativo, reglaZoho, fichaOperativa, paisDeTelefonoOperativo, paisDeTerritorio, paisTieneProceso, paisesConProceso } from "./paises/ficha-operativa.ts"
 /**
