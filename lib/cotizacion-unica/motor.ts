@@ -162,6 +162,8 @@ export type ItemCot = {
   subtotal: number
   tierAplicado?: string
   descuentoPct?: number
+  /** Zona tarifaria del punto (solo líneas de servicio): viaja al subform como Zona_Tarifa para que la nota de venta elija el artículo del país (Lima/provincia, Bogotá/regiones…). */
+  zona?: ZonaCot
 }
 
 export type EntradaCot = {
@@ -500,6 +502,7 @@ export function cotizarReferencialConReglas(
           precioUnitario: precio,
           subtotal: bonificada ? 0 : rd(precio),
           ...(bonificada ? { descuentoPct: 100 } : {}),
+          zona: zonaPunto,
         })
       }
     }

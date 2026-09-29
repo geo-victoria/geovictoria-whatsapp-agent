@@ -43,6 +43,10 @@ test("Perú, Colombia y México: mismos números e ítems de la formal que el mo
       const r = clon(fns[p](entrada as never))
       delete r.mensajeParaProspecto
       delete r.lineas
+      // `zonaTarifa` (29-sep) es un campo NUEVO de las líneas de servicio: el
+      // motor congelado no lo tenía. Se quita de la comparación; números,
+      // ids y cantidades siguen congelados.
+      for (const it of (r.itemsCotizador as Array<Record<string, unknown>>) || []) delete it.zonaTarifa
       assert.deepEqual(r, esperado, `${p} ${JSON.stringify(caso)}`)
     }
   }
@@ -98,4 +102,25 @@ test("pago inicial = pagos únicos + primer mes (plan con descuento + arriendo) 
 test("el envío en venta se cobra por punto", () => {
   const co = cotizarCO({ userCount: 5, reloj: { modalidad: "venta", cantidad: 2 }, puntos: [{ ubicacion: "Medellín", zona: "resto", autoInstalada: true }, { ubicacion: "Cali", zona: "resto", autoInstalada: true }] })
   assert.equal(co.itemsCotizador.filter((i) => i.id === "envio_reloj").reduce((s, i) => s + i.subtotalCOP, 0), 2 * 69000)
+})
+
+test("las líneas de servicio llevan la zona del punto (Zona_Tarifa del subform: base | intermedia | resto)", () => {
+  const pe = cotizarPE({ userCount: 12, reloj: { modalidad: "venta", cantidad: 2 }, puntos: [
+    { ubicacion: "Miraflores", zona: "lima", autoInstalada: false },
+    { ubicacion: "Trujillo", zona: "provincias", autoInstalada: false },
+  ], escalonDescuento: 0, tipoCambio: 3.372 } as never) as unknown as { itemsCotizador: Array<{ tipo: string; id: string; nombre: string; zonaTarifa?: string }> }
+  const serv = pe.itemsCotizador.filter((i) => i.tipo === "servicio")
+  assert.ok(serv.length >= 2)
+  for (const s of serv) assert.ok(["base", "intermedia", "resto"].includes(String(s.zonaTarifa)), JSON.stringify(s))
+  assert.equal(serv.find((s) => s.nombre.includes("Miraflores") && s.id === "instalacion_reloj")?.zonaTarifa, "base")
+  assert.equal(serv.find((s) => s.nombre.includes("Trujillo") && s.id === "instalacion_reloj")?.zonaTarifa, "resto")
+  // Las líneas que no son servicio no llevan zona.
+  for (const i of pe.itemsCotizador.filter((i) => i.tipo !== "servicio")) assert.equal(i.zonaTarifa, undefined)
+  const co = cotizarCO({ userCount: 12, reloj: { modalidad: "venta", cantidad: 1 }, puntos: [{ ubicacion: "Medellín", zona: "resto", autoInstalada: false }], escalonDescuento: 0 } as never) as unknown as { itemsCotizador: Array<{ tipo: string; zonaTarifa?: string }> }
+  assert.ok(co.itemsCotizador.filter((i) => i.tipo === "servicio").every((i) => i.zonaTarifa === "resto"))
+  const mx = cotizarMX({ userCount: 12, reloj: { modalidad: "venta", cantidad: 1 }, puntos: [{ ubicacion: "CDMX", zona: "cdmx_metro", autoInstalada: false }], escalonDescuento: 0 } as never) as unknown as { itemsCotizador: Array<{ tipo: string; id?: string; zonaTarifa?: string }> }
+  // La capacitación MX es un servicio SIN punto (no lleva zona); solo envío e instalación la llevan.
+  const conZona = (i: { tipo: string; id?: string }) => i.tipo === "servicio" && ["envio_reloj", "instalacion_reloj"].includes(String(i.id))
+  assert.ok(mx.itemsCotizador.filter(conZona).length >= 1)
+  assert.ok(mx.itemsCotizador.filter(conZona).every((i) => i.zonaTarifa === "base"))
 })

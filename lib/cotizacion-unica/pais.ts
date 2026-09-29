@@ -69,6 +69,8 @@ export type ItemFormal = {
   esRecurrente: boolean
   afectoImpuesto: boolean
   descuentoPct?: number
+  /** Zona tarifaria del punto (solo servicios): base | intermedia | resto. Viaja al subform como Zona_Tarifa para que la nota de venta elija el artículo de servicio del país. */
+  zona?: ZonaCot
 }
 
 export type LineaPais = { concepto: string; detalle: string; neto: number; impuesto: number; recurrente: boolean }
@@ -201,6 +203,7 @@ function itemsFormal(R: ReglasCotizacion, F: TextosFormal, tier: TierCot, input:
         subtotal: unit * g.puntos,
         esRecurrente: false,
         afectoImpuesto: impServicio > 0,
+        zona: g.zona,
       })
     }
   }
@@ -223,6 +226,7 @@ function itemsFormal(R: ReglasCotizacion, F: TextosFormal, tier: TierCot, input:
         esRecurrente: false,
         afectoImpuesto: impServicio > 0,
         ...(bonificada ? { descuentoPct: 100 } : {}),
+        zona: g.zona,
       })
     }
   }

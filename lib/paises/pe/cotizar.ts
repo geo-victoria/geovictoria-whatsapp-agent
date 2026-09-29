@@ -75,6 +75,8 @@ export type ItemCotizadorPE = {
   afectoIgv: boolean
   /** % de descuento de la línea (100 = bonificada: se muestra tachada en $0). */
   descuentoPct?: number
+  /** Zona tarifaria del punto (líneas de servicio): base | intermedia | resto. Va a Zona_Tarifa del subform. */
+  zonaTarifa?: "base" | "intermedia" | "resto"
 }
 
 /** Tarifas del reloj EN SOLES para un tipo de cambio dado (soles enteros). */
@@ -257,6 +259,7 @@ export function cotizarPE(input: CotizacionPEInput): {
       esRecurrente: it.esRecurrente,
       afectoIgv: it.afectoImpuesto,
       ...(it.descuentoPct !== undefined ? { descuentoPct: it.descuentoPct } : {}),
+      ...(it.zona !== undefined ? { zonaTarifa: it.zona } : {}),
     })),
     // Los totales "mensual*" van a LISTA (sin descuento), como siempre en Perú;
     // la mensualidad con descuento viaja en mensualTotalConDescuento.

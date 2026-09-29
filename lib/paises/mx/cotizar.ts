@@ -71,6 +71,8 @@ export type ItemCotizadorMX = {
   afectoIva: boolean
   /** % de descuento de la línea (100 = bonificada: se muestra tachada en $0). */
   descuentoPct?: number
+  /** Zona tarifaria del punto (líneas de servicio): base | intermedia | resto. Va a Zona_Tarifa del subform. */
+  zonaTarifa?: "base" | "intermedia" | "resto"
 }
 
 export const TARIFAS_MX = {
@@ -250,6 +252,7 @@ export function cotizarMX(input: CotizacionMXInput): {
       esRecurrente: it.esRecurrente,
       afectoIva: it.afectoImpuesto,
       ...(it.descuentoPct !== undefined ? { descuentoPct: it.descuentoPct } : {}),
+      ...(it.zona !== undefined ? { zonaTarifa: it.zona } : {}),
     })),
     mensualNetoPlan: r.plan,
     mensualArriendoNeto: r.arriendoNeto,
