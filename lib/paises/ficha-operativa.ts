@@ -250,12 +250,12 @@ const FICHA_CL: FichaOperativa = {
     // ids verificados en Zoho el 10-sep; la sesión de espejo es la parte local del correo.
     telemarketing: [
       persona("emujica@geovictoria.com", "3525045000000211283", "Eddyluz Mujica", "+56 9 3932 1687"),
-      persona("adiazg@geovictoria.com", "3525045000426432190", "Anderson Díaz"),
-      persona("tmartinezq@geovictoria.com", "3525045000223766001", "Tamara Martínez"),
-      persona("alopez@geovictoria.com", "3525045000126464001", "Ana Paula López"),
-      persona("pdiaz@geovictoria.com", "3525045000000211651", "Paola Díaz"),
-      persona("dgalvez@geovictoria.com", "3525045000124240013", "Daniela Gálvez"),
-      persona("gmelendez@geovictoria.com", "3525045000146108001", "Grey Meléndez"),
+      persona("adiazg@geovictoria.com", "3525045000426432190", "Anderson Díaz", "+56 9 3937 2058"),
+      persona("tmartinezq@geovictoria.com", "3525045000223766001", "Tamara Martínez", "+56 9 3452 9937"),
+      persona("alopez@geovictoria.com", "3525045000126464001", "Ana Paula López", "+56 9 6647 4270"),
+      persona("pdiaz@geovictoria.com", "3525045000000211651", "Paola Díaz", "+56 9 3932 1686"),
+      persona("dgalvez@geovictoria.com", "3525045000124240013", "Daniela Gálvez", "+56 9 2958 7913"),
+      persona("gmelendez@geovictoria.com", "3525045000146108001", "Grey Meléndez", "+56 9 3937 2060"),
     ],
     sdr: [
       persona("aaraque@geovictoria.com", "3525045000583802005", "Aleydis Araque", "+56 9 8291 6868"),
