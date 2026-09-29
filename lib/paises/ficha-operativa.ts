@@ -471,9 +471,14 @@ const FICHA_MX: FichaOperativa = {
     // Lalo 25-sep: la gestión comercial de la venta autónoma en México es de
     // Andrea Fuentes Swain (perfil Gestión Comercial en Zoho; sin espejo).
     ventaAutonoma: persona("afuentess@geovictoria.com", "3525045000645183642", "Andrea Fuentes Swain", undefined, "-"),
-    // Teams "SDR Inbound México" (25-sep): María Velásquez (perfil Líder
-    // Comercial en Zoho) es quien asigna los tratos del equipo mexicano.
-    lider: "mvelasquez@geovictoria.com",
+    // Lalo 29-sep: la líder de telemarketing en México (la Victoria Luna de
+    // allá) es Karen De la Garza — copia de los avisos de traspaso y de los
+    // correos de aceptación/pago. Como líder NO cuenta como telemarketing
+    // para autónoma/asistida (misma regla que Victoria en Chile). María
+    // Velásquez (Líder Comercial en Zoho) asigna los tratos del equipo
+    // mexicano y queda como líder de las SDR.
+    lider: "kdelagarza@geovictoria.com",
+    liderSdr: "mvelasquez@geovictoria.com",
   },
   horarioToques: { desde: 9, hasta: 21 },
   cobranzaCc: "",
