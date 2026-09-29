@@ -1490,10 +1490,11 @@ export async function procesarTurno(
     // capacitación exige agendar_capacitacion ok en ESTE turno (o que la
     // capacitación ya estuviera agendada antes — ahí recordarla es legítimo).
     if (enOnboarding) {
-      const afirmaCapacitacion =
-        /capacitaci[oó]n[^.\n]{0,80}\b(qued[oó]|queda|est[aá])\s+(agendad|confirmad|reservad|lista)/i.test(reply) ||
-        /\b(qued[oó]|queda)\s+agendad[ao]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply) ||
-        /\bte\s+(la\s+)?agend[eé]\b[^.\n]{0,60}\bcapacitaci[oó]n/i.test(reply)
+      // 29-sep (TESLA AUSTRAL): la detección vive en lib/onboarding/afirma-capacitacion
+      // (pura, con test) y ahora también atrapa "te confirmo: martes 29 a las
+      // 09:15 con Diego Alegre" — la forma que se escapó cuando Bookings falló.
+      const { afirmaCapacitacionAgendada } = await import("@/lib/onboarding/afirma-capacitacion")
+      const afirmaCapacitacion = afirmaCapacitacionAgendada(reply)
       // E10 05-sep: "Listo, cancelé la capacitación del martes…" pasó el filtro
       // porque solo miraba "quedó cancelada" — la primera persona también cuenta.
       const afirmaCambio = /capacitaci[oó]n[^.\n]{0,80}\bqued[oó]\s+(reagendad|cambiad|movid|cancelad)/i.test(reply) ||

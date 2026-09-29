@@ -151,24 +151,56 @@ export async function reservarCupo(args: {
     email: args.email,
     phone_number: args.telefono || "",
   }
-  const propios = args.camposPropios || {}
-  const r = await apiPost("appointment", {
-    service_id: args.servicioId,
-    staff_id: args.staffId,
-    from_time: args.desde,
-    timezone: "America/Santiago",
-    customer_details: JSON.stringify(cliente),
-    ...(Object.keys(propios).length ? { additional_fields: JSON.stringify(propios) } : {}),
-    ...(args.notas ? { notes: args.notas } : {}),
-  })
-  const data = (r.body as { response?: { returnvalue?: Record<string, unknown> } })?.response?.returnvalue
-  const bookingId = data ? String(data.booking_id || "") : ""
+  // CASO TESLA AUSTRAL (23-sep): Bookings rechazó la reserva con "Custom field
+  // [Empresa] Character limit exceeded" porque la razón social tenía 52
+  // caracteres, y el cliente quedó con una hora que nunca existió. Los campos
+  // propios del formulario son de texto CORTO: se acotan antes de mandar y, si
+  // Bookings igual reclama por largo, se reintenta UNA vez más corto todavía.
+  const propios = acotarCamposPropios(args.camposPropios || {}, LARGO_CAMPO_PROPIO)
+  const intentar = (campos: Record<string, string>) =>
+    apiPost("appointment", {
+      service_id: args.servicioId,
+      staff_id: args.staffId,
+      from_time: args.desde,
+      timezone: "America/Santiago",
+      customer_details: JSON.stringify(cliente),
+      ...(Object.keys(campos).length ? { additional_fields: JSON.stringify(campos) } : {}),
+      ...(args.notas ? { notes: args.notas } : {}),
+    })
+  let r = await intentar(propios)
+  const leer = (body: unknown) => {
+    const data = (body as { response?: { returnvalue?: Record<string, unknown> } })?.response?.returnvalue
+    return { data, bookingId: data ? String(data.booking_id || "") : "" }
+  }
+  let { data, bookingId } = leer(r.body)
+  if (!bookingId && esErrorDeLargo(r.body) && Object.keys(propios).length) {
+    r = await intentar(acotarCamposPropios(propios, LARGO_CAMPO_PROPIO_MINIMO))
+    ;({ data, bookingId } = leer(r.body))
+  }
   return {
     ok: r.ok && Boolean(bookingId),
     bookingId: bookingId || undefined,
     estado: data ? String(data.status || "") : undefined,
     detalle: r.body,
   }
+}
+
+/** Largo con el que la reserva de TESLA AUSTRAL (52 caracteres) habría entrado. */
+export const LARGO_CAMPO_PROPIO = 40
+export const LARGO_CAMPO_PROPIO_MINIMO = 25
+
+export function acotarCamposPropios(campos: Record<string, string>, largo: number): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(campos)) {
+    const texto = String(v ?? "").replace(/\s+/g, " ").trim()
+    out[k] = texto.length > largo ? texto.slice(0, largo).trimEnd() : texto
+  }
+  return out
+}
+
+export function esErrorDeLargo(body: unknown): boolean {
+  const msg = String((body as { response?: { returnvalue?: { message?: unknown } } })?.response?.returnvalue?.message || "")
+  return /character limit exceeded/i.test(msg)
 }
 
 /**

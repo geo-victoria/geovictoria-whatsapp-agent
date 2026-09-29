@@ -37,6 +37,7 @@ export type MotivoEscalamiento =
   | "problema_plataforma"
   | "cliente_molesto"
   | "pedido_comercial"
+  | "reserva_fallida"
   | "otro"
 
 const TITULOS: Record<MotivoEscalamiento, string> = {
@@ -49,6 +50,11 @@ const TITULOS: Record<MotivoEscalamiento, string> = {
   // otro reloj, otra sucursal) no es un tema de implementación: va a la
   // ejecutiva comercial de las ventas autónomas, no al relator.
   pedido_comercial: "quiere sumar/comprar más (pedido comercial)",
+  // RESERVA FALLIDA (caso TESLA AUSTRAL 23-sep): el cliente ELIGIÓ una hora de
+  // los cupos y Bookings la rechazó. No es "necesita a su implementador": es
+  // "agéndala tú, con esta fecha y hora, y confírmale". El relator recibe el
+  // pedido exacto y el cliente una frase honesta, no una confirmación falsa.
+  reserva_fallida: "eligió hora de capacitación y la reserva FALLÓ: agendarla a mano",
   otro: "necesita a su implementador",
 }
 
@@ -70,7 +76,7 @@ export async function escalarAImplementador(
 }> {
   const fono = String(contact || "").replace(/\D/g, "")
   const motivo: MotivoEscalamiento = (
-    ["urgencia_capacitacion", "problema_plataforma", "cliente_molesto", "pedido_comercial", "otro"] as const
+    ["urgencia_capacitacion", "problema_plataforma", "cliente_molesto", "pedido_comercial", "reserva_fallida", "otro"] as const
   ).includes(args.motivo)
     ? args.motivo
     : "otro"
@@ -213,6 +219,9 @@ function textoCliente(relator: string, motivo: MotivoEscalamiento): string {
   }
   if (motivo === "problema_plataforma") {
     return `Eso lo revisa directamente ${quien}: ya le avisé para que te contacte ${cuando} y lo vea contigo en la plataforma.`
+  }
+  if (motivo === "reserva_fallida") {
+    return `La hora que elegiste todavía NO quedó tomada en la agenda: tuve un problema al reservarla. Ya le pasé tu horario a ${quien} para que te la confirme ${cuando} por este mismo chat o por correo. No la des por agendada hasta que te llegue esa confirmación.`
   }
   return `Ya le avisé a ${quien} para que te contacte ${cuando} y lo resuelvan juntos.`
 }

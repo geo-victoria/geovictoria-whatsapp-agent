@@ -412,14 +412,34 @@ export async function armarOnboarding(contact: string): Promise<{
         notas: "Agendada por Vicky desde el chat de onboarding.",
       })
       if (!r.ok) {
+        const motivoBookings = String(
+          (r.detalle as { response?: { returnvalue?: { message?: unknown } } })?.response?.returnvalue?.message || JSON.stringify(r.detalle).slice(0, 200),
+        )
         await avisarEquipoInterno(
           `⚠️ No se pudo ${esReagenda ? `REAGENDAR (la anterior ${anteriorLiberada} YA quedó liberada)` : "agendar"} la capacitación de +${contact} (${cap.empresa}) con ${cap.relator.nombre}: ${JSON.stringify(r.detalle).slice(0, 300)}`,
         ).catch(() => {})
+        // CASO TESLA AUSTRAL (23-sep): la reserva falló, el modelo escaló con
+        // motivo "otro" y de todos modos le "confirmó" la hora al cliente, que
+        // se presentó a una capacitación que no existía. El escalamiento sale
+        // desde acá, con la fecha y la hora EXACTAS que eligió el cliente y el
+        // error de Bookings, y la tool entrega el texto honesto ya redactado.
+        let mensajeParaProspecto = ""
+        try {
+          const { escalarAImplementador } = await import("./onboarding-escalamiento")
+          const esc = await escalarAImplementador(contact, {
+            motivo: "reserva_fallida",
+            detalle: `El cliente eligió ${etiquetaFecha(fecha)} a las ${hora} (hora del cliente) para su capacitación y Bookings rechazó la reserva: ${motivoBookings}. Agéndala tú en ese horario (o el más cercano) y confírmale.`,
+          })
+          mensajeParaProspecto = esc.mensajeParaProspecto || ""
+        } catch { /* sin escalamiento, el error igual frena la confirmación falsa */ }
         return {
           ok: false,
           error: esReagenda
-            ? "La hora anterior quedó liberada pero la nueva NO entró. Dile con honestidad que le confirmas la nueva hora por este chat — NO afirmes que quedó reagendada."
-            : "La reserva no entró. Dile que le confirmas la hora por este chat — NO afirmes que quedó agendada.",
+            ? "La hora anterior quedó liberada pero la nueva NO entró. Copia mensajeParaProspecto tal cual — NO afirmes que quedó reagendada ni repitas la hora como confirmada."
+            : "La reserva no entró. Copia mensajeParaProspecto tal cual — NO afirmes que quedó agendada ni repitas la hora como confirmada.",
+          reservaFallida: true,
+          detalleBookings: motivoBookings.slice(0, 200),
+          ...(mensajeParaProspecto ? { mensajeParaProspecto } : {}),
         }
       }
       // Fecha legible (E8 05-sep: "quedó agendada para el 2026-09-08" — ISO al cliente).
