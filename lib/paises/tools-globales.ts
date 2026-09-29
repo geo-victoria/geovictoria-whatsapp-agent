@@ -22,6 +22,7 @@
  * dinámico dentro del despacho.
  */
 import { fichaOperativa } from "./ficha-operativa.ts"
+import { rucValido } from "../rut.ts"
 
 export type PaisGlobal = "pe" | "co" | "mx"
 
@@ -271,6 +272,16 @@ export async function despacharToolGlobal(ctx: ContextoGlobal, name: ToolGlobal,
     //    traspaso, tómbola de la ficha) lo hace el agent-loop, igual en los
     //    cuatro países. ──
     case "derivar_a_soporte": {
+      // DOCUMENTO MAL FORMADO → la tool se niega y el modelo lo pide de nuevo
+      // (29-sep, caso Dariel/NATALY PERU: "2060778786", 10 dígitos, aceptado
+      // con un "ya quedó el RUC" y guardado en Zoho con formato chileno).
+      const doc = String(i.rutEmpresa || "").replace(/[.\s-]/g, "")
+      if (pais === "pe" && doc && !/^\d{8}$/.test(doc) && !rucValido(doc)) {
+        return {
+          ok: false,
+          error: `El documento "${i.rutEmpresa}" no es un RUC válido: el RUC peruano tiene 11 dígitos y empieza en 10 o 20 (el DNI tiene 8). Pídele al cliente que lo revise antes de derivar; no lo des por registrado.`,
+        }
+      }
       const { derivarASoporte } = await import("../tools/derivar-a-soporte.ts")
       return derivarASoporte({ ...(i as object), _pais: pais } as never)
     }

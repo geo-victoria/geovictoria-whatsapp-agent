@@ -616,6 +616,36 @@ function rutCanonico(raw: string): string {
   return `${n.slice(0, -1)}-${n.slice(-1)}`
 }
 
+/** ¿El documento tiene la forma del país del teléfono? (29-sep, caso Dariel /
+ * NATALY PERU: el cliente escribió un RUC de 10 dígitos, el modelo lo aceptó
+ * y el hito lo guardó como RUT_Empresa "20-60778786" con formato chileno y
+ * trato "Por identificar"). Un documento que no valida NO entra a Zoho: el
+ * hito sigue como "sin documento". Inline por la misma razón que rutCanonico. */
+function documentoPlausible(fono: string, raw: string): boolean {
+  const n = String(raw || "").replace(/[.\s-]/g, "").toUpperCase()
+  if (!n) return false
+  if (fono.startsWith("56")) {
+    if (!/^\d{7,8}[0-9K]$/.test(n)) return false
+    const cuerpo = n.slice(0, -1), dv = n.slice(-1)
+    let suma = 0, m = 2
+    for (let i = cuerpo.length - 1; i >= 0; i--) { suma += Number(cuerpo[i]) * m; m = m === 7 ? 2 : m + 1 }
+    const r = 11 - (suma % 11)
+    return (r === 11 ? "0" : r === 10 ? "K" : String(r)) === dv
+  }
+  if (fono.startsWith("51")) {
+    if (/^\d{8}$/.test(n)) return true // DNI
+    if (!/^(10|15|16|17|20)\d{9}$/.test(n)) return false
+    const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+    const suma = pesos.reduce((acc, p, i) => acc + p * Number(n[i]), 0)
+    const resto = 11 - (suma % 11)
+    const dv = resto === 10 ? 0 : resto === 11 ? 1 : resto
+    return dv === Number(n[10])
+  }
+  if (fono.startsWith("57")) return /^\d{9,10}$/.test(n) // NIT (con o sin DV)
+  if (fono.startsWith("52")) return /^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$/.test(n) // RFC
+  return true
+}
+
 async function dealVivoDesdePuntero(fono: string): Promise<string | null> {
   try {
     const { getQuotePointers } = await import("./supabase-persistence-v3")
@@ -1959,6 +1989,10 @@ export async function sincronizarHitoCrm(
     if (!habilitado()) return
     const clean = (contact || "").replace(/\D/g, "")
     if (!clean || esTelefonoDePrueba(clean)) return
+    if (datos.rut && !documentoPlausible(clean, datos.rut)) {
+      console.warn(`[crm-hitos] ${clean}: documento "${datos.rut}" no valida para el país — el hito sigue sin documento`)
+      datos = { ...datos, rut: undefined }
+    }
     // RUT DESDE EL HISTORIAL (Lalo 01-sep, caso Avilés/Centro de Desarrollo):
     // el cliente dio el RUT en el chat 3 minutos antes de la derivación, pero
     // el modelo no lo pasó en la tool → la escalera clasificó "calificado sin
