@@ -170,6 +170,7 @@ async function renderPanelSla(): Promise<string> {
   for (const p of punteros) if (p.contact && p.deal_id && !dealDe.has(p.contact)) dealDe.set(p.contact, String(p.deal_id))
   const duenoDeal = new Map<string, { email: string; nombre: string; stage: string }>()
   const dealsPorContacto = new Map<string, string[]>()
+  const leadIds = new Set<string>()
   const ROBOTS = new Set(["3525045000484500876", "3525045000000200013"])
   const esRobot = (em: string) => /^(vicky@|info@geovictoria|ventas@geovictoria|productmanager@)/i.test(em)
   // COQL exige paréntesis anidados con 3+ condiciones: ((A or B) or C).
@@ -208,8 +209,37 @@ async function renderPanelSla(): Promise<string> {
       }
     }
     for (const c of sinPuntero) { const d = porFono.get(c); if (d) dealDe.set(c, d.id) }
+    // ── SIN TRATO, EL LEAD ES REGISTRO VÁLIDO (Lalo 29-sep, "lead y deal son
+    // registros válidos para ese dash"): un traspaso ≤20 sin formal, o el de
+    // Perú entregado a las SDR, vive como LEAD. Su dueño es el responsable y
+    // sus notas/llamadas son contacto. COQL de Leads solo devuelve los NO
+    // convertidos — si se convirtió, el trato ya se encontró arriba.
+    const sinTrato = contactos.filter((c) => !dealDe.has(c))
+    const leadPorFono = new Map<string, { id: string; status: string }>()
+    for (let i = 0; i < sinTrato.length; i += 10) {
+      const lote = sinTrato.slice(i, i + 10)
+      const cond = orAnidado(lote.map((c) => `Phone like '%${c.slice(-9)}%'`))
+      const filas = await coql(`select id, Lead_Status, Phone, Created_Time, Owner.email, Owner.first_name, Owner.last_name from Leads where ${cond} order by Created_Time desc limit 200`).catch(() => [])
+      for (const f of filas) {
+        const fono = String(f.Phone || "").replace(/\D/g, "")
+        const c = lote.find((x) => fono.endsWith(x.slice(-9)))
+        if (!c || !f.id) continue
+        const prev = leadPorFono.get(c)
+        const status = String(f.Lead_Status || "")
+        // Prefiere un lead NO descartado; entre iguales, el más reciente.
+        if (!prev || (/^No Calificado/.test(prev.status) && !/^No Calificado/.test(status))) {
+          leadPorFono.set(c, { id: String(f.id), status })
+          const em = String(f["Owner.email"] || "").toLowerCase()
+          const nom = `${String(f["Owner.first_name"] || "").trim()} ${String(f["Owner.last_name"] || "").trim()}`.trim()
+          // Un lead "No Calificado" se juzga como caso cerrado (lo trabajó y lo descartó).
+          if (em && !esRobot(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: /^No Calificado/.test(status) ? "Cierre Perdido (lead)" : status })
+          else duenoDeal.delete(String(f.id))
+        }
+      }
+    }
+    for (const c of sinTrato) { const l = leadPorFono.get(c); if (l) { dealDe.set(c, l.id); leadIds.add(l.id) } }
     for (const [c, d] of dealDe) dealsPorContacto.set(d, [...(dealsPorContacto.get(d) || []), c])
-    const dealIds = [...new Set(dealDe.values())]
+    const dealIds = [...new Set(dealDe.values())].filter((id) => !leadIds.has(id))
     if (dealIds.length) {
       for (let i = 0; i < dealIds.length; i += 40) {
         const lote = dealIds.slice(i, i + 40).map((d) => `'${d}'`).join(",")
@@ -220,14 +250,19 @@ async function renderPanelSla(): Promise<string> {
           if (f.id && em && !esRobot(em)) duenoDeal.set(String(f.id), { email: em, nombre: nom || em, stage: String(f.Stage || "") })
         }
       }
-      for (let i = 0; i < dealIds.length; i += 20) {
-        const lote = dealIds.slice(i, i + 20).map((d) => `'${d}'`).join(",")
+    }
+    // Notas humanas y llamadas completadas, sobre tratos Y leads. Las llamadas
+    // del workflow cuelgan del lead por What_Id (Who_Id null): se piden ambos.
+    const registros = [...dealIds, ...leadIds]
+    if (registros.length) {
+      for (let i = 0; i < registros.length; i += 20) {
+        const lote = registros.slice(i, i + 20).map((d) => `'${d}'`).join(",")
         const [notas, llamadas] = await Promise.all([
           coql(`select id, Parent_Id, Created_Time, Created_By from Notes where Parent_Id in (${lote}) order by Created_Time desc limit 200`).catch(() => []),
           // Las llamadas del workflow "TASK Y CALL NO CONTACTADO" quedan
           // "Vencido"/sin duración; una llamada REAL lleva Outgoing_Call_Status
           // "Completado" (verificado 29-sep contra Calls).
-          coql(`select id, What_Id, Call_Start_Time, Owner from Calls where What_Id in (${lote}) and Outgoing_Call_Status = 'Completado' limit 200`).catch(() => []),
+          coql(`select id, What_Id, Who_Id, Call_Start_Time, Owner from Calls where (What_Id in (${lote}) or Who_Id in (${lote})) and Outgoing_Call_Status = 'Completado' limit 200`).catch(() => []),
         ])
         for (const n of notas) {
           const deal = String((n.Parent_Id as { id?: string } | null)?.id || "")
@@ -237,7 +272,7 @@ async function renderPanelSla(): Promise<string> {
           for (const c of dealsPorContacto.get(deal) || []) evt(c, at, "zoho")
         }
         for (const l of llamadas) {
-          const deal = String((l.What_Id as { id?: string } | null)?.id || "")
+          const deal = String((l.What_Id as { id?: string } | null)?.id || (l.Who_Id as { id?: string } | null)?.id || "")
           const autor = String((l.Owner as { id?: string } | null)?.id || "")
           const at = String(l.Call_Start_Time || "")
           if (!deal || !at || ROBOTS.has(autor)) continue
@@ -284,15 +319,15 @@ async function renderPanelSla(): Promise<string> {
         : null
       const sin = a.n - a.atendidos
       const pct = (v: number) => (a.n ? `${Math.round((v / a.n) * 100)}%` : "—")
-      const sinTrato = a.sinTrato ? ` <span class="pct" title="${a.sinTrato} traspaso(s) sin trato en Zoho o con el trato aún en el robot: ahí manda la bitácora del traspaso.">(${a.sinTrato} por bitácora)</span>` : ""
+      const sinTrato = a.sinTrato ? ` <span class="pct" title="${a.sinTrato} traspaso(s) sin trato ni lead en Zoho, o con el registro aún en el robot: ahí manda la bitácora del traspaso.">(${a.sinTrato} por bitácora)</span>` : ""
       return `<tr><td>${nombre}${sinTrato}</td><td style="text-align:center">${a.n}</td><td style="text-align:center">${a.atendidos}${a.viaZoho ? ` <span class="pct" title="Contactados cuya primera señal fue una nota o llamada registrada en Zoho (no el WhatsApp espejado).">(${a.viaZoho} vía Zoho)</span>` : ""}</td><td style="text-align:center;font-weight:600;color:${sin ? "#b91c1c" : "#166534"}">${sin}</td><td style="text-align:center">${med === null ? "—" : `${med} min`}</td><td style="text-align:center">${pct(a.d5)}</td><td style="text-align:center">${pct(a.d60)}</td></tr>`
     })
     .join("")
   const p = new URLSearchParams(); p.set("vista", "traspasos")
   const aviso = zohoOk ? "" : `<div style="font-size:12px;color:#b45309;margin:4px 0">⚠️ Zoho no respondió: esta corrida mide solo el WhatsApp espejado y agrupa por la bitácora del traspaso.</div>`
-  const pie = `<div style="font-size:12px;color:#6b7280;margin-top:6px">Responsable = dueño del trato en Zoho. Contacto = WhatsApp espejado, llamada de WhatsApp contestada, marca manual 🤝, nota humana en el trato o llamada registrada como completada en Zoho, posteriores al traspaso. No se ven: correos de Outlook ni llamadas no registradas. Minutos corridos (no hábiles). ${cerrados ? `${cerrados} traspaso(s) con trato ya cerrado (ganado o perdido) no se juzgan. ` : ""}Detalle por contacto en <a href="?${p.toString()}">🤝 Traspasos</a>.</div>`
+  const pie = `<div style="font-size:12px;color:#6b7280;margin-top:6px">Responsable = dueño del trato (o del lead, si no hay trato) en Zoho. Contacto = WhatsApp espejado, llamada de WhatsApp contestada, marca manual 🤝, nota humana en el trato o lead, o llamada registrada como completada en Zoho, posteriores al traspaso. No se ven: correos de Outlook ni llamadas no registradas. Minutos corridos (no hábiles). ${cerrados ? `${cerrados} traspaso(s) con trato ya cerrado (ganado o perdido) o lead descartado no se juzgan. ` : ""}Detalle por contacto en <a href="?${p.toString()}">🤝 Traspasos</a>.</div>`
   return `
-  <div class="kgroup">SLA de llamada post-traspaso · últimos 7 días <span class="pct" title="Responsable = dueño del trato en Zoho. Contacto = WhatsApp espejado, llamada contestada, marca manual, nota humana o llamada completada en Zoho después del traspaso. La escalada automática alerta a los 60 min hábiles sin contacto.">¿cómo se mide?</span></div>
+  <div class="kgroup">SLA de llamada post-traspaso · últimos 7 días <span class="pct" title="Responsable = dueño del trato o del lead en Zoho. Contacto = WhatsApp espejado, llamada contestada, marca manual, nota humana o llamada completada en Zoho (trato o lead) después del traspaso. La escalada automática alerta a los 60 min hábiles sin contacto.">¿cómo se mide?</span></div>
   ${aviso}
   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr style="text-align:left"><th>Vendedor</th><th style="text-align:center">Traspasos</th><th style="text-align:center">Contactados</th><th style="text-align:center">Sin contacto</th><th style="text-align:center">Mediana 1er contacto</th><th style="text-align:center">≤ 5 min</th><th style="text-align:center">≤ 60 min</th></tr></thead>
