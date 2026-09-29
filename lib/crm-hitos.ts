@@ -904,9 +904,44 @@ export async function notificarTraspasoDeal(
   }
 }
 
+/**
+ * CANDADO "UNA TÓMBOLA POR DEAL" (29-sep, caso Ninoska Ibarra): el hito de
+ * derivación sobre-umbral y `traspasarAhora` (asignarEnZoho del ptv-cron)
+ * corrían en la MISMA respuesta y los dos hacían el PUT con lar_id sobre el
+ * mismo deal — y como la regla de Zoho se aplica ASÍNCRONA, la guarda "dueño
+ * humano vigente → no re-sortear" leía todavía a vicky@ y sorteaba de nuevo:
+ * dos owner_assigned en el mismo segundo (Paola y Grey), un turno de la
+ * rotación consumido en vano y dos correos al que quedó. La marca vive en
+ * vic_kv `tombola_deal_<id>` (ISO del PUT) y vale TOMBOLA_VENTANA_S segundos:
+ * quien llegue segundo NO vuelve a sortear, espera a que la regla aterrice y
+ * se queda con el dueño que salió.
+ */
+export const TOMBOLA_VENTANA_S = Number(process.env.VICKY_TOMBOLA_VENTANA_S || 180)
+export async function tombolaRecienteDe(dealId: string): Promise<boolean> {
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const v = await getKvValue(`tombola_deal_${dealId}`)
+    const t = v ? Date.parse(v) : NaN
+    return Number.isFinite(t) && Date.now() - t < TOMBOLA_VENTANA_S * 1000
+  } catch {
+    return false
+  }
+}
+export async function marcarTombolaDeal(dealId: string): Promise<void> {
+  try {
+    const { setKvValue } = await import("./supabase-persistence-v3")
+    await setKvValue(`tombola_deal_${dealId}`, new Date().toISOString())
+  } catch { /* best-effort */ }
+}
+
 export async function aplicarTombolaDeals(dealId: string, territorio: string): Promise<void> {
   const regla = TOMBOLA_DEALS_POR_TERRITORIO[territorio] || ""
   if (!regla) return
+  if (await tombolaRecienteDe(dealId)) {
+    console.log(`[crm-hitos] tómbola del deal ${dealId} ya corrió hace <${TOMBOLA_VENTANA_S}s — no se re-sortea`)
+    return
+  }
+  await marcarTombolaDeal(dealId)
   try {
     const { h, api } = await zohoHeaders()
     const res = await fetch(`${api}/crm/v3/Deals`, {

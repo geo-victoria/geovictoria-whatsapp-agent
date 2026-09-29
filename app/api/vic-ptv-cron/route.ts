@@ -1057,7 +1057,7 @@ type VendedorFinal = {
   zohoId: string
   nombre: string
   telefono?: string
-  via: "tombola_zoho" | "tombola_interna" | "dueno_deal" | "dueno_lead_sdr" | "dueno_deal_reactivado"
+  via: "tombola_zoho" | "tombola_interna" | "dueno_deal" | "dueno_lead_sdr" | "dueno_deal_reactivado" | "tombola_reciente"
 }
 
 /** Aviso por correo al vendedor de un traspaso sobre un LEAD (los deals van
@@ -1529,7 +1529,31 @@ async function asignarEnZoho(
         }
       }
       const regla = TOMBOLA_DEALS_RULE[pais] || ""
+      // CANDADO "UNA TÓMBOLA POR DEAL" (29-sep, caso Ninoska): si otro camino
+      // (el hito de derivación con sorteoInmediato) acaba de pasar este deal
+      // por la regla, la lectura de Owner de arriba todavía puede ver a vicky@
+      // porque Zoho aplica la regla asíncrona. No se vuelve a sortear: se
+      // espera a que aterrice y se presenta al dueño que salió. El hito ya
+      // notificó a ese dueño — acá no se manda un segundo correo.
       if (regla) {
+        const { tombolaRecienteDe } = await import("@/lib/crm-hitos")
+        if (await tombolaRecienteDe(dealId)) {
+          for (let i = 0; i < 5; i++) {
+            if (i > 0) await new Promise((r) => setTimeout(r, 2000))
+            const g = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: H, cache: "no-store" })
+            const own = ((await g.json().catch(() => ({}))) as { data?: Array<{ Owner?: { id?: string; name?: string; email?: string } }> }).data?.[0]?.Owner
+            if (own?.id && own?.email && !/^(vicky@|info@geovictoria|productmanager@)/i.test(own.email)) {
+              const tel = await telefonoDeUsuario(own.id, H, api)
+              console.log(`[ptv] ${fono}: deal ${dealId} ya sorteado por otro camino hace <3 min → ${own.email} (sin re-sortear)`)
+              return { email: own.email, zohoId: own.id, nombre: own.name || own.email.split("@")[0], telefono: tel || telefonoFicha(own.email.toLowerCase()) || "", via: "tombola_reciente" }
+            }
+          }
+          console.warn(`[ptv] ${fono}: deal ${dealId} tenía tómbola reciente pero el dueño sigue robot tras 8 s — se sortea igual`)
+        }
+      }
+      if (regla) {
+        const { marcarTombolaDeal } = await import("@/lib/crm-hitos")
+        await marcarTombolaDeal(dealId)
         const put = await fetch(`${api}/crm/v3/Deals`, {
           method: "PUT", headers: H, cache: "no-store",
           body: JSON.stringify({ data: [{ id: dealId }], lar_id: regla }),
