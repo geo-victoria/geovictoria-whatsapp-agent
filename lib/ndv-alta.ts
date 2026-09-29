@@ -45,6 +45,11 @@ export type JobNdvImp = {
   enCursoAt?: string
   ndv?: { ndvId?: string; idNdv?: string; referenciaId?: string; estado?: string; descuadreUF?: number | null }
   ndvPendiente?: string
+  /** Pasadas seguidas en que el cotizador regeneró el espejo sin llegar a
+   * convertir. Un espejo que nace con el MISMO defecto (ítem sin artículo en
+   * Creator, por ejemplo) se regenera para siempre: GASTRONOMICA LA FUENTE
+   * quemó 199 correlativos COT-64xxx entre el 28 y el 29-sep. */
+  regeneraciones?: number
   /** ISO del aviso "lleva N minutos sin PDF" — se manda UNA vez por job. */
   avisoSinPdfAt?: string
   ndvError?: string
@@ -71,6 +76,9 @@ const TOPE_ENLACE_H = 24
 // pasado el tope y el job se daba por terminado (`imp_fallo`) sin un solo
 // reintento.
 const MAX_INTENTOS_IMP = 12
+/** Tope de regeneraciones SEGUIDAS del espejo antes de declarar la NDV
+ * imposible y avisar (env `VICKY_NDV_MAX_REGENERACIONES`). */
+const MAX_REGENERACIONES = Number(process.env.VICKY_NDV_MAX_REGENERACIONES || 4)
 
 async function leerJob(contact: string): Promise<JobNdvImp | null> {
   const crudo = await getKvValue(claveJobNdvImp(contact)).catch(() => null)
@@ -228,6 +236,16 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
       } else {
         job.ndvPendiente = r.pendiente || (r.ok === false ? "error" : "sin_respuesta")
         job.ndvError = r.error
+        // BUCLE DE REGENERACIÓN: cada pasada anula el espejo y crea otro con el
+        // mismo defecto. Tras MAX_REGENERACIONES seguidas se frena y se avisa;
+        // seguir no arregla nada y quema correlativos en Creator.
+        job.regeneraciones = job.ndvPendiente === "espejo_regenerado" ? (job.regeneraciones || 0) + 1 : 0
+        if (job.regeneraciones >= MAX_REGENERACIONES && !job.ndvImposible) {
+          job.ndvImposible = true
+          await avisarEquipoInterno(
+            `⛔ NDV del alta por chat de ${job.empresa} (companyId ${job.companyId}, cotización ${job.quoteId}): el cotizador regeneró el espejo de Creator ${job.regeneraciones} veces seguidas sin poder convertirlo — el espejo nace con el mismo defecto (típico: un ítem de la cotización sin artículo en creator-articulos). Se frenó el job; hay que revisar los ítems de la cotización y convertir a mano.`,
+          ).catch(() => {})
+        }
         // NDV convertida pero SIN PDF pasado el tope (caso COTEL 14-sep: 7 horas y
         // 188 reintentos mudos hasta que Aleydis intentó descargarla). El PDF lo
         // genera Creator solo; cuando no llega, lo que ha destrabado los casos
