@@ -237,8 +237,14 @@ export async function adjuntarPlanillasImplementacion(
         console.warn(`[imp-planillas] ${p.filename}:`, e instanceof Error ? e.message : e)
       }
     }
-    // Campo de archivo de la IMP ("OBLIGATORIO para SMB", Lalo 08-sep): la planilla de usuarios.
-    if (usuarios && faltaCampo) {
+    // Campo de archivo de la IMP ("OBLIGATORIO para SMB", Lalo 08-sep).
+    // EN PAUSA (30-sep, Lalo "la planilla de ingreso no va así"): los
+    // implementadores ponen ahí la PLANILLA DE INGRESO (plantilla "Planilla sin
+    // planificación", ~110 KB), no el usuarios-*.xlsx del wizard. Hasta
+    // replicar ese formato el campo no se toca; los Excel siguen en la nota.
+    // Reencender: vic_kv `planilla_campo_imp`="on".
+    const campoOn = (await getKvValue("planilla_campo_imp").catch(() => null)) === "on"
+    if (campoOn && usuarios && faltaCampo) {
       try {
         const buf = await bytesDe(usuarios)
         if (buf && (await subirAlCampoPlanilla(token, impId, buf, usuarios.filename, reg?.campo || ""))) campo = usuarios.filename
