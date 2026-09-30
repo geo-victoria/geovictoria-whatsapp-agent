@@ -56,29 +56,33 @@ const ETAPAS_ABIERTAS = [
   "6. Listo para Cierre",
 ]
 // Motivos de cierre de conversación que cierran el deal (regla 2) y su razón de pérdida.
+// Los valores son los del picklist SIN prefijo numérico: el layout de Chile
+// dejó de numerar el 30-sep (verificado en la transición "Cierre Perdido" del
+// blueprint "Stages de los deals Chile": "Cierre por Inactividad", "Precio",
+// "Deal Duplicado"… y sin "Lead mal Calificado"), igual que Perú, Colombia y
+// México. Con el valor numerado Zoho respondía "Fields are partially saved"
+// y el Stage NO se movía — el barrido estuvo cojo hasta este cambio.
 const RAZON_POR_MOTIVO: Record<string, string> = {
-  no_interesa: "5. Cierre por Inactividad",
-  autorespuesta: "5. Cierre por Inactividad",
-  opt_out: "5. Cierre por Inactividad",
-  soporte: "11. Lead mal Calificado",
-  no_prospecto: "11. Lead mal Calificado",
-  wsp_no_entregable: "5. Cierre por Inactividad",
+  no_interesa: "Cierre por Inactividad",
+  autorespuesta: "Cierre por Inactividad",
+  opt_out: "Cierre por Inactividad",
+  soporte: "Otro",
+  no_prospecto: "Otro",
+  wsp_no_entregable: "Cierre por Inactividad",
 }
 /**
- * La razón de pérdida es un picklist POR LAYOUT: Chile numera ("5. Cierre por
- * Inactividad"); Perú y Colombia NO ("Cierre por Inactividad", "Otro") y no
- * tienen "Lead mal Calificado" (verificado en las transiciones de sus
- * blueprints el 23-sep). Además esas dos exigen `Contratar_n_otro_Proveedor`.
+ * La razón de pérdida es un picklist POR LAYOUT, pero desde el 30-sep los
+ * cuatro países comparten los mismos valores (sin numerar) y las cuatro
+ * transiciones exigen además `Contratar_n_otro_Proveedor` — sin ese campo la
+ * transición queda "partially saved" y el Stage no cambia. Se conserva la
+ * función por si algún layout vuelve a divergir: hoy solo normaliza un
+ * prefijo numérico heredado y mapea "Lead mal Calificado" (que ya no existe en
+ * ningún layout) a "Otro".
  */
-function razonParaPais(pais: string, razonCL: string): { razon: string; extra: Record<string, unknown> } {
-  // México (27-sep, verificado en sus deals perdidos: "Otro", "Cierre por
-  // Inactividad") usa el mismo picklist sin numerar.
-  if (pais === "pe" || pais === "co" || pais === "mx") {
-    const sinNumero = razonCL.replace(/^\d+\.\s*/, "")
-    const razon = /Lead mal Calificado/i.test(sinNumero) ? "Otro" : sinNumero
-    return { razon, extra: { Contratar_n_otro_Proveedor: "No" } }
-  }
-  return { razon: razonCL, extra: {} }
+function razonParaPais(_pais: string, razonCL: string): { razon: string; extra: Record<string, unknown> } {
+  const sinNumero = razonCL.replace(/^\d+\.\s*/, "")
+  const razon = /Lead mal Calificado/i.test(sinNumero) ? "Otro" : sinNumero
+  return { razon, extra: { Contratar_n_otro_Proveedor: "No" } }
 }
 
 export type ResultadoDeal = {
