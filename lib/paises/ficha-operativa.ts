@@ -244,6 +244,8 @@ const FICHA_CL: FichaOperativa = {
     { id: "scotiabank", dominios: /scotiabank\.cl/i, nombres: /scotiabank/i },
     { id: "itau", dominios: /itau\.cl/i, nombres: /ita[uú]/i },
     { id: "bice", dominios: /bice\.cl/i, nombres: /banco bice|\bbice\b/i },
+    // 29-sep: aviso real de Isabel Rojas (SNKRWASH) — remitente notificaciones@cl.bancofalabella.com.
+    { id: "falabella", dominios: /bancofalabella\.(?:com|cl)/i, nombres: /banco falabella/i },
   ],
   toleranciaMonto: 1500,
   equipo: {

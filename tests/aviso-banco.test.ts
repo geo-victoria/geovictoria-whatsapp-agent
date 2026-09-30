@@ -322,3 +322,24 @@ test("Santander en columnas: la fecha antes del monto no se lee como monto; la o
   assert.equal(a!.nroOperacion, "20260925120490568128")
   assert.equal(numeroCotizacionEn(a!.mensaje || ""), "COT1566")
 })
+
+// Banco Falabella, aviso REAL del 29-sep (Isabel Rojas / SNKRWASH): antes el
+// parser devolvía null ("Monto transferencia" no calzaba y el banco no existía).
+const FALABELLA = `<div><div class="header"><h2>Victoria SA </h2><h2>Le informamos que hoy, 29-09-2026, nuestro(a) cliente ISABEL MARGARITA ROJAS ha instruido una transferencia de fondos a su cuenta con el siguiente detalle: </h2></div><div class="body"><div class="content"><br /><h5><strong class="green">Detalle</strong> </h5><table style="width:100%"><tbody><tr><td class="label-cell">Banco de destino</td><td class="value-cell">Banco de Chile - Edwards Citi</td></tr><tr><td class="label-cell">Cuenta de destino</td><td class="value-cell">Cuenta Corriente 8001204108</td></tr><tr><td class="label-cell">Rut destinatario</td><td class="value-cell">761885871</td></tr><tr><td class="label-cell">Asunto</td><td class="value-cell">Transferencia realizada</td></tr><tr><td class="label-cell">Monto transferencia</td><td class="value-cell">$12.212</td></tr><tr><td style="padding:12px 0"><hr /></td></tr><tr><td class="label-cell">Fecha</td><td class="value-cell">29-09-2026</td></tr><tr><td class="label-cell">Hora</td><td class="value-cell">20:48</td></tr><tr><td class="label-cell">Número de operación</td><td class="value-cell">152064652193</td></tr></tbody></table></div></div><div class="footer"><h4>Consejos para evitar fraudes: </h4><ul><li>Accede a nuestro sitio web (bancofalabella.cl) digitando la dirección directamente en tu navegador. </li></ul><p>Nunca te enviaremos e-mail con link a nuestro sitio web. Descarga nuestra App Banco Falabella y activa/desactiva tus compras por Internet, retiros o compras en el extranjero. </p></div></div>`
+
+test("Banco Falabella: ordenante, monto, cuenta destino con prefijo 'Cuenta Corriente', fecha y hora, operación", () => {
+  const a = parsearAvisoBanco({ from: "notificaciones@cl.bancofalabella.com", subject: "Aviso de transferencia de fondos recibida", html: FALABELLA })
+  assert.ok(a)
+  assert.equal(a.banco, "falabella")
+  assert.equal(a.pais, "cl")
+  assert.equal(a.monto, 12212)
+  assert.equal(a.ordenante, "ISABEL MARGARITA ROJAS")
+  assert.equal(a.rutOrdenante, "")
+  assert.equal(a.cuentaDestino, "8001204108")
+  assert.equal(a.destinoNuestro, true)
+  assert.equal(a.fechaTexto, "29/09/2026")
+  assert.equal(a.hora, "20:48")
+  assert.equal(a.fechaIso, "2026-09-29T23:48:00.000Z")
+  assert.equal(a.nroOperacion, "152064652193")
+  assert.equal(a.numeroCotizacion, "")
+})

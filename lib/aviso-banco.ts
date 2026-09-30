@@ -20,6 +20,11 @@
  *  - Santander (mensajeria@santander.cl): "nuestro cliente X realizó una
  *    transferencia" · Monto transferido $ 29.163 · Comentario · "con fecha
  *    10/08/2026". OJO: el RUT que aparece es el de DESTINO (Victoria SA).
+ *  - Banco Falabella (notificaciones@cl.bancofalabella.com, 29-sep): "nuestro(a)
+ *    cliente X ha instruido una transferencia de fondos a su cuenta" · Cuenta de
+ *    destino "Cuenta Corriente <nuestra cuenta>" · Rut destinatario (el NUESTRO) ·
+ *    Monto transferencia $12.212 · Fecha 29-09-2026 · Hora 20:48 · Número de
+ *    operación. No trae RUT ni mensaje del ordenante.
  *
  * Sin red, sin Zoho: recibe el correo (HTML o texto) y devuelve los datos o
  * null cuando no es un aviso de transferencia ENTRANTE.
@@ -239,6 +244,8 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
     /N[º°o]?\.?\s*de cuenta\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
     /Cuenta destino\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
     /Cuenta de destino\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
+    // Falabella: "Cuenta de destino | Cuenta Corriente <número>".
+    /Cuenta de destino\s*:?\s*(?:\|\s*)*Cuenta\s+(?:Corriente|Vista|de Ahorros?|RUT)\s+([\d-]{6,})/i,
     /CCI\s*(?:destino)?\s*:?\s*(?:\|\s*)*([\d-]{6,})/i,
   ])
   // ¿A quién va? Nuestra cuenta (de cualquier país) o nuestro nombre.
@@ -249,7 +256,7 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
   const montoTxt = capturar(texto, [
     // Santander 25-sep: "Monto transferido | 25-09-2026 | $ 48.293" — una FECHA
     // puede ir entre la etiqueta y el monto; se salta (antes se leía "$25").
-    /(?:Monto|Importe)\s+(?:transferido|Operaci[oó]n|abonado|total|de (?:la )?transferencia)\s*:?\s*(?:\|\s*)*(?:\d{2}[\/-]\d{2}[\/-]\d{4}\s*(?:\|\s*)*)?((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*\d[\d.,]*)(?![\d.,]*[\/-]\d)/i,
+    /(?:Monto|Importe)\s+(?:transferido|transferencia|Operaci[oó]n|abonado|total|de (?:la )?transferencia)\s*:?\s*(?:\|\s*)*(?:\d{2}[\/-]\d{2}[\/-]\d{4}\s*(?:\|\s*)*)?((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)?\s*\d[\d.,]*)(?![\d.,]*[\/-]\d)/i,
     /(?:Monto|Importe)\s*:?\s*(?:\|\s*)*((?:\$|S\/\.?|US\$|COP|MXN|PEN|CLP)\s*[\d][\d.,]*)/i,
   ])
   const paisMoneda = paisPorSimboloMoneda(montoTxt)
@@ -269,6 +276,8 @@ export function parsearAvisoBanco(input: { from?: string; subject?: string; html
     /Te informamos que\s+(.+?)\s+ha instruido/i,
     // Scotiabank empresas: "nuestro(a) cliente ITALSE SPA., con fecha …"
     /nuestro\(a\) cliente\s+(.+?)\s*,\s*con fecha/i,
+    // Falabella: "nuestro(a) cliente ISABEL MARGARITA ROJAS ha instruido una transferencia de fondos a su cuenta".
+    /nuestro\(a\) cliente\s+(.+?)\s+ha instruido una transferencia/i,
     // Itaú: "transferencia realizada por DECO CHILE SPA." · BICE: "X ha instruido realizar una transferencia".
     /transferencia realizada por\s+(.+?)\s*\.?\s*$/im,
     /^\s*(.+?)\s+ha instruido realizar una transferencia/im,
