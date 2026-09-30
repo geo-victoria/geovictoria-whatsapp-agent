@@ -1554,6 +1554,46 @@ export async function procesarTurno(
       console.warn(
         `[v3-bg] ACTUALIZADA_SIN_TOOL contact=${contact} replyOriginal=${JSON.stringify(reply.slice(0, 300))}`,
       )
+      // REINTENTO FORZADO PRIMERO (30-sep, caso Daniela/Skinestetic): la clienta
+      // dijo "queríamos este de la app" con la formal recién emitida con reloj;
+      // el modelo ANUNCIÓ la actualización sin llamar la tool y esta guarda le
+      // devolvió la pregunta enlatada — una vuelta de más con una instrucción
+      // inequívoca. Mismo patrón que el descuento y la agenda: UNA corrida más
+      // del loop con la orden de llamar actualizar_cotizacion; si la tool corre
+      // de verdad, va ESA respuesta (que trae el link real). Si no, la
+      // contención de siempre.
+      let actualizadaRecuperada = false
+      if (formalQuoteId || quotePointer?.quoteId) {
+        const FORZAR_ACTUALIZAR =
+          "\n\n# Instrucción de sistema (este turno)\n" +
+          "El cliente está pidiendo un CAMBIO sobre su cotización formal vigente (quote_id " +
+          `${formalQuoteId || quotePointer?.quoteId}). DEBES llamar actualizar_cotizacion con la configuración ` +
+          "nueva completa (dotación, módulos, hardware, puntos) EN ESTE TURNO y responder con su mensajeParaProspecto. " +
+          "PROHIBIDO anunciar que la actualizaste o pedir confirmación: la instrucción del cliente ya es la confirmación."
+        const retryA = await runAgentLoop({
+          systemPrompt:
+            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_ACTUALIZAR,
+          history,
+          userMessage: message,
+          apiKey,
+          contact,
+          model: MODELO_COTIZACION,
+          alIniciarTool,
+          ...(toolsPais ? { tools: toolsPais } : {}),
+        }).catch((e) => {
+          console.error(`[v3-bg] Reintento forzado de actualización falló:`, e)
+          return null
+        })
+        const rTools = ((retryA?.toolCalls || []) as ToolCallRecord[])
+        const rReal = rTools.some((c) => (c.name === "actualizar_cotizacion" || c.name === "generar_link_cotizadora") && c.ok)
+        if (retryA && rReal && (retryA.reply || "").trim()) {
+          console.warn(`[v3-bg] ACTUALIZADA_RECUPERADA contact=${contact}: el reintento forzó la tool.`)
+          reply = (retryA.reply || "").trim()
+          result.toolCalls = retryA.toolCalls
+          actualizadaRecuperada = true
+        }
+      }
+      if (!actualizadaRecuperada) {
       // ESCAPE DEL BUCLE (01-sep, caso Lalo post-llamada): el cliente dijo
       // "sí" DOS veces y esta guarda le repitió la misma pregunta enlatada —
       // la tool seguía sin correr bien y no había salida. A la segunda vez en
@@ -1573,6 +1613,7 @@ export async function procesarTurno(
         await setKvValue(kvLoop, String(Date.now())).catch(() => {})
         reply =
           "Ojo conmigo, para ser bien precisa: tu cotización formal sigue siendo la vigente — todavía no la he actualizado. ¿Quieres que la deje con esta nueva configuración? Me confirmas y la actualizo al tiro, y te llega el documento corregido 😊"
+      }
       }
     }
 

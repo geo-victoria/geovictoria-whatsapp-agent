@@ -62,6 +62,8 @@ export type JobNdvImp = {
   impSinNdv?: boolean
   /** Solicitud de Facturación creada sola con la NDV confirmada (24-sep). */
   sf?: { sfId?: string; numero?: string; estado?: string; faltantes?: string[]; intentos?: number; at?: string }
+  /** Ticket de Servicio Técnico (envío/instalación) creado solo con la NDV confirmada (30-sep). */
+  ticket?: { ticketId?: string; numero?: string; estado?: string; categoria?: string; faltantes?: string[]; intentos?: number; at?: string }
   terminadoAt?: string
   motivoFin?: string
 }
@@ -459,6 +461,23 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
           job.sf = { ...(job.sf || {}), estado: "error", intentos: (job.sf?.intentos || 0) + 1, at: new Date().toISOString() }
           console.warn(`[ndv-alta] ${c}: SF falló:`, e instanceof Error ? e.message : e)
         }
+      }
+    }
+
+    // 3-ter. TICKET DE SERVICIO TÉCNICO (30-sep, orden de Lalo): con la NDV
+    //   confirmada y equipos en la referencia nace el ticket ST (envío o
+    //   instalación) con la forma de los que Nailliw crea a mano. Sin equipos
+    //   se marca `sin_hardware` y no se insiste. Hasta 3 intentos por job.
+    //   Chile por ahora (lib/ticket-st decide). No bloquea el cierre del job.
+    if (job.ndv?.referenciaId && !job.ticket?.ticketId && job.ticket?.estado !== "sin_hardware" && (job.ticket?.intentos || 0) < 3 && job.pais !== "pe") {
+      try {
+        const { crearTicketST } = await import("./ticket-st")
+        const t = await crearTicketST(c, { quoteId: job.quoteId || "", referenciaNdvId: job.ndv.referenciaId, impId: job.impId, companyId: job.companyId })
+        job.ticket = { ticketId: t.ticketId, numero: t.numero, estado: t.estado, categoria: t.categoria, faltantes: t.faltantes, intentos: (job.ticket?.intentos || 0) + 1, at: new Date().toISOString() }
+        if (!t.ok) console.warn(`[ndv-alta] ${c}: ticket ST no creado (${t.detalle || t.estado})`)
+      } catch (e) {
+        job.ticket = { ...(job.ticket || {}), estado: "error", intentos: (job.ticket?.intentos || 0) + 1, at: new Date().toISOString() }
+        console.warn(`[ndv-alta] ${c}: ticket ST falló:`, e instanceof Error ? e.message : e)
       }
     }
 
