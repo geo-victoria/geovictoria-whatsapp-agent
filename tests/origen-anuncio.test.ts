@@ -15,7 +15,7 @@ test("referral en camelCase (acción de código) y snake_case (Meta crudo)", () 
 test("sin anuncio no hay origen: vacío, post orgánico o basura", () => {
   assert.equal(normalizarReferral(undefined), null)
   assert.equal(normalizarReferral({}), null)
-  assert.equal(normalizarReferral({ source_id: "5", source_type: "post" }), null)
+  assert.equal(normalizarReferral({ source_id: "5", source_type: "story" }), null)
   assert.equal(normalizarReferral("no es json"), null)
 })
 
@@ -31,4 +31,11 @@ test("lead existente: solo lo vacío, un Lead_Source con origen no se pisa", () 
   const deseados = { Lead_Source: LEAD_SOURCE_META_ADS, Medium: "whatsapp_ads", Meta_Ad_ID: "1" }
   assert.deepEqual(camposFaltantes({ Lead_Source: "14. Google Ads", Medium: null, Meta_Ad_ID: "" }, deseados), { Medium: "whatsapp_ads", Meta_Ad_ID: "1" })
   assert.deepEqual(camposFaltantes({ Lead_Source: "-None-" }, { Lead_Source: LEAD_SOURCE_META_ADS }), { Lead_Source: LEAD_SOURCE_META_ADS })
+})
+
+test("forma real de Botmaker 30-sep: message.referralInfo con sourceType post y clic vacío", () => {
+  const msg = { MESSAGE: "¡Hola! Quiero más información", referralInfo: { sourceId: "1717365150390756", sourceURL: "https://fb.me/eaLcgPadl", ctwaClid: "", sourceType: "post", type: "whatsapp", body: "", headline: "Chatea con nosotros" } }
+  const o = normalizarReferral({ sourceId: msg.referralInfo.sourceId, sourceType: "post", sourceUrl: msg.referralInfo.sourceURL, headline: msg.referralInfo.headline, ctwaClid: "" }, "T")!
+  assert.equal(o.sourceId, "1717365150390756")
+  assert.deepEqual(camposDeOrigen(o, "Meta_Click_ID"), { Lead_Source: LEAD_SOURCE_META_ADS, Medium: "whatsapp_ads", Meta_Ad_ID: "1717365150390756", Campaign: "Chatea con nosotros" })
 })

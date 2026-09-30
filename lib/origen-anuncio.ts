@@ -78,9 +78,11 @@ export function normalizarReferral(raw: unknown, ahoraIso = new Date().toISOStri
     ctwaClid: g("ctwaClid", "ctwa_clid", "clickId", "click_id"),
     at: ahoraIso,
   }
-  // Solo anuncios: un referral de otro tipo (post orgánico) no es Meta Ads.
+  // Meta manda source_type "ad" o "post": los DOS son anuncios ("post" = el
+  // anuncio se armó desde una publicación de la página). Primera prueba real
+  // 30-sep llegó "post" con ctwa_clid vacío. Otro tipo, se descarta.
   const tipo = origen.sourceType.toLowerCase()
-  if (tipo && tipo !== "ad") return null
+  if (tipo && tipo !== "ad" && tipo !== "post") return null
   if (!origen.sourceId && !origen.ctwaClid) return null
   return origen
 }
