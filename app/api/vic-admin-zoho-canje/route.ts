@@ -16,10 +16,16 @@
  *   → { ok, scope[], faltan[], prueba_files: "ok"|"fallo:…", guardado }
  *
  * `dry:true` canjea y prueba pero NO guarda (el código igual se consume).
+ *
+ * MODO ANALYTICS (30-sep): body { code, modo: "analytics" } canjea un grant con
+ * `ZohoAnalytics.metadata.read,ZohoAnalytics.data.read` (solo lectura), lo prueba
+ * contra GET /orgs de la API de Analytics y guarda el refresh en vic_kv
+ * `zoho_analytics_refresh_token` + el id de organización en `zoho_analytics_org_id`.
  */
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret, setKvValue } from "@/lib/supabase-persistence-v3"
 import { KV_FILES_REFRESH } from "@/lib/zoho-files-token"
+import { KV_ANALYTICS_REFRESH, KV_ANALYTICS_ORG, SCOPES_ANALYTICS, analyticsGet } from "@/lib/zoho-analytics"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -66,7 +72,7 @@ export async function POST(req: Request): Promise<Response> {
   const secreto = await getFollowupCronSecret()
   const dado = req.headers.get("x-cron-secret") || url.searchParams.get("key") || ""
   if (!secreto || dado !== secreto) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
-  const body = (await req.json().catch(() => ({}))) as { code?: string; redirect_uri?: string; dry?: boolean }
+  const body = (await req.json().catch(() => ({}))) as { code?: string; redirect_uri?: string; dry?: boolean; modo?: string }
   const code = String(body.code || "").trim()
   if (!code) return NextResponse.json({ ok: false, error: "falta code" }, { status: 400 })
   if (!env("ZOHO_CLIENT_ID") || !env("ZOHO_CLIENT_SECRET")) return NextResponse.json({ ok: false, error: "sin ZOHO_CLIENT_ID/SECRET en el entorno" }, { status: 500 })
@@ -82,6 +88,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!res.ok || !access) {
     return NextResponse.json({ ok: false, error: "canje rechazado por Zoho", detalle: j.error || j, pista: "el código dura 3-10 min y es de un solo uso; el client debe ser el MISMO del token principal" }, { status: 502 })
   }
+  if (body.modo === "analytics") return canjeAnalytics(scope, access, refresh, Boolean(body.dry))
   const faltan = SCOPES_REQUERIDOS.filter((r) => !cubre(scope, r))
 
   // Prueba real: subir 20 bytes a Zoho Files. Si el scope no alcanza, acá se ve.
@@ -116,5 +123,37 @@ export async function POST(req: Request): Promise<Response> {
       : apto
         ? (body.dry ? "dry: no se guardó" : "guardado en vic_kv; el principal sigue intacto")
         : "NO se guardó: falta scope o la subida de prueba falló",
+  })
+}
+
+async function canjeAnalytics(scope: string[], access: string, refresh: string, dry: boolean): Promise<Response> {
+  const faltan = SCOPES_ANALYTICS.filter((r) => !cubre(scope, r))
+  // Prueba real: listar las organizaciones de Analytics (no necesita org id).
+  const r = await analyticsGet("/orgs", { token: access, orgId: "" })
+  const orgs = ((r.json as { data?: { orgs?: Array<{ orgId?: string | number; orgName?: string; isDefault?: boolean }> } })?.data?.orgs) || []
+  const org = orgs.find((o) => o.isDefault) || orgs[0]
+  const prueba = r.status === 200 && org?.orgId ? "ok" : `fallo:${r.status} ${JSON.stringify(r.json || r.texto || "").slice(0, 160)}`
+  const apto = !faltan.length && prueba === "ok" && Boolean(refresh)
+  let guardado = false
+  if (apto && !dry) {
+    await setKvValue(KV_ANALYTICS_REFRESH, refresh)
+    await setKvValue(KV_ANALYTICS_ORG, String(org!.orgId))
+    guardado = true
+  }
+  console.log(`[zoho-canje analytics] scope=${scope.join(",")} faltan=${faltan.length} prueba=${prueba} orgs=${orgs.length} guardado=${guardado}`)
+  return NextResponse.json({
+    ok: apto,
+    modo: "analytics",
+    scope,
+    faltan,
+    prueba_orgs: prueba,
+    orgs: orgs.map((o) => ({ orgId: String(o.orgId), nombre: o.orgName, porDefecto: Boolean(o.isDefault) })),
+    refresh_recibido: Boolean(refresh),
+    guardado,
+    nota: !refresh
+      ? "Zoho no devolvió refresh_token: el código ya fue canjeado o venía sin acceso offline."
+      : apto
+        ? (dry ? "dry: no se guardó" : "guardado en vic_kv; el token del CRM sigue intacto")
+        : "NO se guardó: falta scope o la prueba contra Analytics falló",
   })
 }
