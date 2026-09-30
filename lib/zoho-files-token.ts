@@ -47,7 +47,8 @@ export async function getZohoFilesToken(): Promise<string | null> {
   const refresh = await refreshTokenFiles()
   if (!refresh || !env("ZOHO_CLIENT_ID") || !env("ZOHO_CLIENT_SECRET")) return null
   const now = Date.now()
-  if (_cache.token && _cache.expiresAt && _cache.expiresAt - now > 2 * 60 * 1000) return _cache.token
+  // El caché se ata al refresh vigente: un canje nuevo (otros scopes) invalida el access anterior.
+  if (_cache.token && _cache.refresh === refresh && _cache.expiresAt && _cache.expiresAt - now > 2 * 60 * 1000) return _cache.token
   const domain = env("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
   try {
     const res = await fetch(`${domain}/oauth/v2/token`, {
@@ -67,6 +68,7 @@ export async function getZohoFilesToken(): Promise<string | null> {
       return null
     }
     _cache.token = j.access_token
+    _cache.refresh = refresh
     _cache.expiresAt = now + Math.max(300, Number(j.expires_in || 3600) - 120) * 1000
     return j.access_token
   } catch (e) {

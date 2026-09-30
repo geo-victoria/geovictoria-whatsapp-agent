@@ -39,6 +39,9 @@ export const SCOPES_REQUERIDOS = [
   // Zoho responde OAUTH_SCOPE_MISMATCH (verificado 30-sep). El scope que exige
   // es el de archivos del CRM (docs v8 "Upload Files to ZFS": ZohoCRM.Files.CREATE).
   "ZohoCRM.Files.CREATE",
+  // Lectura del almacén de archivos (30-sep): bajar la Planilla de Ingreso que
+  // suben los implementadores para replicar su formato exacto.
+  "ZohoCRM.Files.READ",
 ]
 
 const env = (n: string) => (process.env[n] || "").trim()

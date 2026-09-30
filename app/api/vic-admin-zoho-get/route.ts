@@ -17,7 +17,15 @@ export async function GET(req: Request): Promise<Response> {
   if (!secreto || dado !== secreto) return NextResponse.json({ ok: false, error: "no autorizado" }, { status: 401 })
   const path = (url.searchParams.get("path") || "").trim()
   if (!path.startsWith("/crm/")) return NextResponse.json({ ok: false, error: "path debe empezar con /crm/" }, { status: 400 })
-  const token = await getZohoAccessToken()
+  // `?token=files` usa el grant de archivos (ZohoCRM.Files.*) para /crm/v*/files.
+  let token = ""
+  if (url.searchParams.get("token") === "files") {
+    const { getZohoFilesToken } = await import("@/lib/zoho-files-token")
+    token = (await getZohoFilesToken()) || ""
+    if (!token) return new Response(JSON.stringify({ ok: false, error: "token de archivos no configurado" }), { status: 409, headers: { "content-type": "application/json" } })
+  } else {
+    token = await getZohoAccessToken()
+  }
   const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
   const r = await fetch(`${api}${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` }, cache: "no-store" })
   const ct = r.headers.get("content-type") || "application/octet-stream"
