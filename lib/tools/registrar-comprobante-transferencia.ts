@@ -819,7 +819,10 @@ export async function registrarComprobanteTransferencia(
         sembrado = sembrarBorrador(
           previo,
           { empresa: { nombre: nombreEmpresa || undefined, identificador: pointer.rut } },
-          pais === "pe" ? "pe" : "cl",
+          // El borrador nace con el PAÍS del pago (23-sep: CO/MX también tienen
+          // alta por chat) — antes un colombiano que transfería quedaba con
+          // borrador chileno y Vicky le pedía RUT.
+          pais,
         )
         await setKvValue(claveBorrador(contact), JSON.stringify(sembrado))
         await setKvValue(claveFase(contact), "onboarding")
