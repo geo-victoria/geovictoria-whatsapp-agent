@@ -20,7 +20,7 @@
  * registro humano? Ahí no hay bitácora que leer, así que la verdad es Zoho
  * (lead/deal por los 9 dígitos del teléfono).
  *
- * GET ?key=&desde=YYYY-MM-DD&hasta=YYYY-MM-DD[&max=200][&sinTraspaso=1][&emails=0]
+ * GET ?key=&desde=YYYY-MM-DD&hasta=YYYY-MM-DD[&max=200][&sinTraspaso=1][&emails=0][&pais=cl|pe|co|mx]
  * Auth: x-cron-secret / Bearer / ?key= (kv followup_cron_secret o env CRON_SECRET).
  * No escribe nada.
  */
@@ -85,7 +85,12 @@ export async function GET(req: Request): Promise<NextResponse> {
   const hastaISO = `${hasta}T23:59:59-04:00`
   const fallos: string[] = []
   const setMetricas = metricsContactSet()
-  const esCL = (c: string) => /^56\d{9}$/.test(c) && !isTestContact(c, setMetricas)
+  // País (30-sep): `?pais=pe|co|mx` audita otro país con el mismo cruce; sin
+  // parámetro, Chile como siempre. El nombre `esCL` se conserva por historia.
+  const PREFIJO_PAIS: Record<string, RegExp> = { cl: /^56\d{9}$/, pe: /^51\d{9}$/, co: /^57\d{10}$/, mx: /^52\d{10}$/ }
+  const paisAud = (sp.get("pais") || "cl").toLowerCase()
+  const rePais = PREFIJO_PAIS[paisAud] || PREFIJO_PAIS.cl
+  const esCL = (c: string) => rePais.test(c) && !isTestContact(c, setMetricas)
 
   // ── ZOHO: índice de deals y leads por los 9 dígitos del teléfono ─────────
   // Se bajan por COQL paginada desde 60 días antes del rango (un traspaso de
