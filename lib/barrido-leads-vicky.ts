@@ -174,17 +174,26 @@ async function feriados(pais: string): Promise<Set<string>> {
   }
 }
 
+/** Transición "No Calificado" de cada blueprint de Leads: Chile y Latam no Chile. */
+const TRANSICIONES_NO_CALIFICADO = ["3525045000350997005", "3525045000351550301"]
+
 async function cerrarNoCalificado(H: Record<string, string>, api: string, leadId: string, motivo: string): Promise<boolean> {
   // Un lead en "3." está EN blueprint → transición "No Calificado"; en "1."/"2."
   // no está en proceso → PUT directo. Se intenta la transición y se cae al PUT.
-  try {
-    const t = await fetch(`${api}/crm/v2/Leads/${leadId}/actions/blueprint`, {
-      method: "PUT", headers: H, cache: "no-store",
-      body: JSON.stringify({ blueprint: [{ transition_id: "3525045000350997005", data: { Motivo_No_calificado: motivo } }] }),
-    })
-    const tb = (await t.json().catch(() => ({}))) as { code?: string }
-    if (t.ok && tb?.code === "SUCCESS") return true
-  } catch { /* cae al PUT */ }
+  // Dos blueprints de Leads (verificado 30-sep, lead ABL Alpstein de Perú):
+  // "Status de los Leads" (Chile, transición …997005) y "Status de los Leads
+  // Latam No Chile" (Perú/Colombia/México, transición …1550301). Se prueban
+  // las dos: la que no corresponde responde "invalid transition".
+  for (const transicion of TRANSICIONES_NO_CALIFICADO) {
+    try {
+      const t = await fetch(`${api}/crm/v2/Leads/${leadId}/actions/blueprint`, {
+        method: "PUT", headers: H, cache: "no-store",
+        body: JSON.stringify({ blueprint: [{ transition_id: transicion, data: { Motivo_No_calificado: motivo } }] }),
+      })
+      const tb = (await t.json().catch(() => ({}))) as { code?: string }
+      if (t.ok && tb?.code === "SUCCESS") return true
+    } catch { /* prueba la siguiente o cae al PUT */ }
+  }
   const put = await fetch(`${api}/crm/v3/Leads`, {
     method: "PUT", headers: H, cache: "no-store",
     body: JSON.stringify({
