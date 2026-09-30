@@ -73,7 +73,15 @@ export type ConversationMessage = {
 }
 
 /** Tokens consumidos por el turno (suma de todas las llamadas a la API, reintentos incluidos). */
-export type UsoTokens = { llamadas: number; input: number; cacheWrite: number; cacheRead: number; output: number }
+export type UsoTokens = {
+  llamadas: number
+  input: number
+  cacheWrite: number
+  cacheRead: number
+  output: number
+  /** Una fila por llamada a la API, en orden (diagnóstico del caché). */
+  detalle?: Array<{ input: number; cacheWrite: number; cacheRead: number; output: number }>
+}
 
 export type AgentRunResult = {
   reply: string
@@ -240,7 +248,7 @@ export async function runAgentLoop(params: {
           cache_control: { type: "ephemeral" },
         },
       ]
-  const uso: UsoTokens = { llamadas: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }
+  const uso: UsoTokens = { llamadas: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0, detalle: [] }
 
   // Segundo breakpoint (11-jul, decisión de costos): también se cachea el
   // HISTORIAL marcando el último bloque del último mensaje de cada request.
@@ -303,6 +311,7 @@ export async function runAgentLoop(params: {
     uso.cacheWrite += u.cache_creation_input_tokens ?? 0
     uso.cacheRead += u.cache_read_input_tokens ?? 0
     uso.output += u.output_tokens || 0
+    uso.detalle?.push({ input: u.input_tokens || 0, cacheWrite: u.cache_creation_input_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, output: u.output_tokens || 0 })
     console.log(
       `[agent-loop] usage iter=${iteration} model=${effectiveModel} in=${u.input_tokens} cache_write=${u.cache_creation_input_tokens ?? 0} cache_read=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens}`,
     )
@@ -1647,6 +1656,7 @@ export async function runAgentLoop(params: {
             uso.cacheWrite += retry.usage.cacheWrite
             uso.cacheRead += retry.usage.cacheRead
             uso.output += retry.usage.output
+            uso.detalle?.push(...(retry.usage.detalle || []))
           }
           const rReply = (retry?.reply || "").trim()
           const rCalls = retry?.toolCalls || []
