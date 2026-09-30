@@ -22,7 +22,7 @@ const API = () => (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").tr
 const WIZARD_URL = (process.env.VICKY_ONBOARDING_WIZARD_URL || "https://onboarding.geovictoria.com").trim().replace(/\/+$/, "")
 export const TITULO_NOTA_PLANILLAS = "Planillas de ingreso (Vicky)"
 
-export type PlanillaWizard = { tipo: "usuarios" | "planificaciones"; filename: string; url?: string; buffer?: Buffer }
+export type PlanillaWizard = { tipo: "usuarios" | "planificaciones" | "ingreso"; filename: string; url?: string; buffer?: Buffer }
 type Registro = { impId: string; notaId: string; archivos: string[]; campo?: string }
 
 /**
@@ -53,6 +53,58 @@ export function planillaDesdeConfiguracion(config: Partial<Configuracion> | null
     tipo: "usuarios",
     filename: `usuarios-${rutKey}-vicky-${trabajadores.length}.xlsx`,
     buffer: planillaUsuariosXlsx(rutEmpresa, filas),
+  }
+}
+
+/**
+ * PLANILLA DE INGRESO en el formato de los implementadores (30-sep): la
+ * plantilla "INGRESO EMPRESA" rellenada con empresa (padrón SII + lo que dijo
+ * el cliente), administrador y nómina. Es la que va al campo
+ * Planilla_de_Ingreso. Solo Chile (RUT, giro SII, comuna).
+ */
+export async function planillaIngresoDe(
+  contact: string,
+  fuente: { config?: Partial<Configuracion> | null; borrador?: Borrador | null },
+): Promise<PlanillaWizard | null> {
+  const fono = (contact || "").replace(/\D/g, "")
+  const b = fuente.borrador
+  if ((b?.pais && b.pais !== "cl") || (!b?.pais && !fono.startsWith("56"))) return null
+  const limpio = (x: unknown) => String(x ?? "").trim()
+  try {
+    const { leerDatosFacturacion } = await import("./datos-facturacion")
+    const { completarDesdePadron } = await import("./solicitud-facturacion")
+    let d = (await leerDatosFacturacion(fono).catch(() => null)) || {}
+    try {
+      const rawX = await getKvValue(`onboarding_flow_extras_${fono}`)
+      const x = rawX ? (JSON.parse(rawX) as { giro?: string; direccion?: string; comuna?: string }) : null
+      if (x) {
+        if (!limpio(d.giro) && limpio(x.giro)) d.giro = limpio(x.giro)
+        if (!limpio(d.direccion) && limpio(x.direccion)) d.direccion = limpio(x.direccion)
+        if (!limpio(d.comuna) && limpio(x.comuna)) d.comuna = limpio(x.comuna)
+      }
+    } catch { /* sin flow */ }
+    if (/^otro$/i.test(limpio(d.giro))) d.giro = ""
+    if (!limpio(d.razonSocial) && limpio(b?.empresa?.nombre)) d.razonSocial = limpio(b?.empresa?.nombre)
+    if (!limpio(d.documento) && limpio(b?.empresa?.identificador)) d.documento = limpio(b?.empresa?.identificador)
+    d = await completarDesdePadron("cl", limpio(d.documento), d)
+    const admin = b?.admin
+    const { armarPlanillaIngreso } = await import("./planilla-ingreso")
+    const trabajadores = (fuente.config?.trabajadores || []).filter((t) => limpio(t?.rut) || limpio(t?.correo))
+    const r = armarPlanillaIngreso({
+      razonSocial: limpio(d.razonSocial) || limpio(b?.empresa?.nombre),
+      rut: limpio(d.documento),
+      giro: limpio(d.giro),
+      direccion: limpio(d.direccion),
+      comuna: limpio(d.comuna),
+      admins: admin && (admin.nombre || admin.email || admin.identificador)
+        ? [{ nombre: admin.nombre, apellido: admin.apellido, rut: admin.identificador, telefono: fono, correo: admin.email }]
+        : [],
+      trabajadores: trabajadores.map((t) => ({ rut: t.rut, correo: t.correo, nombres: t.nombres, apellidos: t.apellidos, grupo: t.grupo })),
+    })
+    return { tipo: "ingreso", filename: r.filename, buffer: r.buffer }
+  } catch (e) {
+    console.warn(`[imp-planillas] planilla de ingreso ${fono}:`, e instanceof Error ? e.message : e)
+    return null
   }
 }
 
@@ -189,8 +241,12 @@ export async function adjuntarPlanillasImplementacion(
     }
     if (reg && reg.impId !== impId) reg = null
     const yaEstan = new Set(reg?.archivos || [])
+    // La Planilla de Ingreso (formato de los implementadores) acompaña a los
+    // Excel del wizard en la nota y es la ÚNICA que va al campo de la IMP.
+    const ingreso = await planillaIngresoDe(fono, fuente)
+    if (ingreso) planillas = [...planillas, ingreso]
     const pendientes = planillas.filter((p) => !yaEstan.has(p.filename))
-    const usuarios = planillas.find((p) => p.tipo === "usuarios")
+    const usuarios = ingreso
     const faltaCampo = Boolean(usuarios && reg?.campo !== usuarios.filename)
     if (!pendientes.length && !faltaCampo) return { ok: true, archivos: [...yaEstan], nuevos: [], notaId: reg?.notaId, campo: reg?.campo }
 

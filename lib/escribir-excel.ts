@@ -58,7 +58,7 @@ function crc32(buf: Buffer): number {
 }
 
 /** Zip "store/deflate" mínimo: entradas locales + directorio central + EOCD. */
-function zip(entradas: Array<{ nombre: string; datos: Buffer }>): Buffer {
+export function zip(entradas: Array<{ nombre: string; datos: Buffer }>): Buffer {
   const locales: Buffer[] = []
   const centrales: Buffer[] = []
   let offset = 0

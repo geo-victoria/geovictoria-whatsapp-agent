@@ -135,7 +135,7 @@ async function mesInicioDe(contact: string, tz: string): Promise<string> {
 }
 
 /** Padrón del país: solo rellena lo VACÍO (regla SII: el padrón no manda). */
-async function completarDesdePadron(pais: CodigoPaisOperativo, documento: string, d: DatosFacturacion): Promise<DatosFacturacion> {
+export async function completarDesdePadron(pais: CodigoPaisOperativo, documento: string, d: DatosFacturacion): Promise<DatosFacturacion> {
   const out = { ...d }
   try {
     if (pais === "pe" && documento) {

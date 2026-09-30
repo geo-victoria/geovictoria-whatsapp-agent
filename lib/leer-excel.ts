@@ -24,7 +24,7 @@ export function esZip(bytes: Uint8Array): boolean {
 
 type Entrada = { nombre: string; data: Buffer }
 
-function descomprimirZip(buf: Buffer): Map<string, Buffer> {
+export function descomprimirZip(buf: Buffer): Map<string, Buffer> {
   const out = new Map<string, Buffer>()
   // EOCD (0x06054b50) — buscar desde el final (máx 64KB de comentario).
   let eocd = -1
