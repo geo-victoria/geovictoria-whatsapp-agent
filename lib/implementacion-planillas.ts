@@ -23,7 +23,9 @@ const WIZARD_URL = (process.env.VICKY_ONBOARDING_WIZARD_URL || "https://onboardi
 export const TITULO_NOTA_PLANILLAS = "Planillas de ingreso (Vicky)"
 
 /** Sube al cambiar el contenido de la Planilla de Ingreso (fuerza renovar el archivo del campo). */
-const VERSION_PLANILLA_INGRESO = "v2-rubro"
+const VERSION_PLANILLA_INGRESO = "v3-rubro"
+/** Usuario Zoho de Vicky (vicky@): autor de los archivos que subió el agente. */
+const VICKY_USUARIO_ZOHO_ID = (process.env.VICKY_ZOHO_USER_ID || "3525045000484500876").trim()
 
 export type PlanillaWizard = { tipo: "usuarios" | "planificaciones" | "ingreso"; filename: string; url?: string; buffer?: Buffer }
 type Registro = { impId: string; notaId: string; archivos: string[]; campo?: string }
@@ -115,11 +117,15 @@ export async function planillaIngresoDe(
 async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuffer, filename: string, nuestraAnterior = ""): Promise<boolean> {
   const H = { Authorization: `Zoho-oauthtoken ${token}` }
   const actual = await fetch(`${API()}/crm/v3/Implementaciones/${impId}?fields=Planilla_de_Ingreso`, { headers: H, cache: "no-store" })
-  const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: Array<{ id?: string; File_Name__s?: string; Created_By__s?: { email?: string } }> }> }).data?.[0]
+  const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: Array<{ id?: string; File_Name__s?: string; Created_By__s?: { email?: string; id?: string; name?: string } }> }> }).data?.[0]
   const existentes = Array.isArray(rec?.Planilla_de_Ingreso) ? rec!.Planilla_de_Ingreso! : []
   // Un archivo que subió una PERSONA no se pisa jamás. Los que subió Vicky
   // (usuario del OAuth) se reemplazan: la planilla creció o cambió el formato.
-  const esDeVicky = (f: { Created_By__s?: { email?: string } }) => /^vicky@/i.test(String(f?.Created_By__s?.email || ""))
+  // v3 no siempre trae el email del autor: se reconoce a Vicky por email, id o nombre.
+  const esDeVicky = (f: { Created_By__s?: { email?: string; id?: string; name?: string } }) =>
+    /^vicky@/i.test(String(f?.Created_By__s?.email || "")) ||
+    String(f?.Created_By__s?.id || "") === VICKY_USUARIO_ZOHO_ID ||
+    /^vicky geovictoria$/i.test(String(f?.Created_By__s?.name || "").trim())
   if (existentes.some((f) => !esDeVicky(f))) return true
   const aBorrar = existentes.filter(esDeVicky).map((f) => ({ id: String(f.id || ""), _delete: null })).filter((f) => f.id)
   void nuestraAnterior
