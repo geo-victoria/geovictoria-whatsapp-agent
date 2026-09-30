@@ -50,9 +50,13 @@ export type DatosTicketST = {
   equipos: EquipoTicket[]
   /** Líneas de servicio de la NDV (envío/instalación), para la descripción. */
   servicios: string[]
+  /** Dirección CONFIRMADA por el cliente para el envío/instalación (kv onb_direccion_equipo_). */
   direccion: string
   comuna: string
   region: string
+  /** Dirección de facturación / padrón: SOLO referencia en la descripción, jamás la del ticket
+   *  (Lizbeth y Fibravives: facturan en Providencia/San Miguel y el reloj iba a otra comuna). */
+  direccionFacturacion?: string
   relojPagado: boolean
   /** "Octubre 2026": mes desde el que finanzas provisiona el arriendo. */
   mesFacturacion: string
@@ -92,7 +96,9 @@ export function nombreTicketST(d: Pick<DatosTicketST, "categoria" | "empresa">):
 
 /** Texto exacto de Nailliw + la línea de GV Avanzado (motivo de rechazo nº 1). */
 export function descripcionTicketST(d: DatosTicketST): string {
-  const dir = [limpio(d.direccion) || "dirección por confirmar", limpio(d.comuna), limpio(d.region)].filter(Boolean).join("\t")
+  const dir = limpio(d.direccion)
+    ? [limpio(d.direccion), limpio(d.comuna), limpio(d.region)].filter(Boolean).join("\t")
+    : `POR CONFIRMAR CON EL CLIENTE${limpio(d.direccionFacturacion) ? ` (dirección de facturación, solo referencia: ${limpio(d.direccionFacturacion)})` : ""}`
   const gva = `Empresa creada en plataforma GV Avanzado${d.companyId ? ` (ID ${d.companyId})` : ""} — alta por chat de Vicky, no está en la plataforma GV clásica.`
   const equipos = d.equipos.length ? `Equipos según NDV ${d.ndvNombre}: ${d.equipos.map((e) => `${e.cantidad} × ${e.nombre}`).join(" · ")}.` : ""
   const cuerpo =

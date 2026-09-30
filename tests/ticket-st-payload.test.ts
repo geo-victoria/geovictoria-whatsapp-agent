@@ -150,3 +150,9 @@ test("arriendo: el reloj se reconstruye desde la cotización con el nombre de Bo
   assert.deepEqual(eq.map((e) => [e.nombre, e.cantidad]), [["006.11 - Reloj Gama Media Facial WIFI/LAN", 1], ["026.1 - Tarjeta ID (delgada)", 20]])
   assert.equal(cantidadDispositivos(eq), 1)
 })
+
+test("sin dirección confirmada la descripción lo dice y la de facturación va solo como referencia", () => {
+  const d = descripcionTicketST({ ...BASE, direccion: "", comuna: "", region: "", direccionFacturacion: "SANTA MAGDALENA 75 OF 304, PROVIDENCIA" })
+  assert.match(d, /POR CONFIRMAR CON EL CLIENTE \(dirección de facturación, solo referencia: SANTA MAGDALENA 75 OF 304, PROVIDENCIA\)/)
+  assert.deepEqual(faltantesTicketST({ ...BASE, direccion: "", comuna: "", region: "" }), ["direccion", "comuna", "region"])
+})

@@ -27,7 +27,7 @@ import { fichaPorTelefono, personaPorEmail } from "./paises/ficha-operativa"
 import { leerDatosFacturacion } from "./datos-facturacion"
 import { claveCapacitacion, claveAltaSolicitada } from "./onboarding/fase"
 import { escribirXlsx } from "./escribir-excel"
-import { regionDeUbicacion, regionDesdePadron } from "./regiones-cl"
+import { regionDeUbicacion } from "./regiones-cl"
 import { mesInicioFacturacion, etiquetaMes } from "./solicitud-facturacion-payload"
 import {
   categoriaDesdeItems,
@@ -49,10 +49,12 @@ const OWNERS_ROBOT = /^(vicky@|info@geovictoria|ventas@geovictoria|productmanage
 const limpio = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim()
 
 export const claveTicketST = (quoteId: string) => `ticket_st_${String(quoteId || "").replace(/\D/g, "")}`
+/** Dirección del equipo confirmada por el cliente en el chat: {direccion, comuna, contacto, telefono, correo, horario, at}. */
+export const claveDireccionEquipo = (contact: string) => `onb_direccion_equipo_${String(contact || "").replace(/\D/g, "")}`
 
 export type ResultadoTicketST = {
   ok: boolean
-  estado: "creado" | "adoptado" | "ya_existia" | "sin_hardware" | "sin_ndv" | "dry" | "error"
+  estado: "creado" | "adoptado" | "ya_existia" | "sin_hardware" | "sin_ndv" | "sin_direccion" | "dry" | "error"
   ticketId?: string
   numero?: string
   categoria?: string
@@ -234,20 +236,35 @@ export async function crearTicketST(contact: string, opts: Opts): Promise<Result
   }
 
   // Datos del lugar y del contacto.
+  //
+  // LA DIRECCIÓN DEL TICKET ES LA QUE EL CLIENTE CONFIRMÓ PARA EL EQUIPO
+  // (30-sep, dry contra ventas reales): la de facturación/padrón NO sirve —
+  // Lizbeth factura en Providencia y el reloj fue a San Miguel; Fibravives
+  // factura en San Miguel y el reloj fue a La Pintana. Mandar al técnico a la
+  // dirección de la factura es peor que no crear el ticket. Fuente única: kv
+  // `onb_direccion_equipo_<contacto>` (la pregunta del onboarding cuando la
+  // venta trae reloj); la de facturación va solo como referencia en el texto.
   const df = (await leerDatosFacturacion(c).catch(() => null)) || {}
   const rut = limpio(q.RUT_Empresa || q.RUT_Cliente || df.documento)
-  let direccion = limpio(df.direccion)
-  let comuna = limpio(df.comuna)
+  let direccion = ""
+  let comuna = ""
+  let contactoLugar: { nombre?: string; telefono?: string; correo?: string } = {}
+  try {
+    const raw = await getKvValue(claveDireccionEquipo(c))
+    if (raw) {
+      const j = JSON.parse(raw) as { direccion?: string; comuna?: string; contacto?: string; telefono?: string; correo?: string }
+      direccion = limpio(j.direccion)
+      comuna = limpio(j.comuna)
+      contactoLugar = { nombre: limpio(j.contacto) || undefined, telefono: limpio(j.telefono) || undefined, correo: limpio(j.correo) || undefined }
+    }
+  } catch { /* sin dirección confirmada */ }
   let region = regionDeUbicacion(comuna || direccion)
-  if ((!direccion || !comuna || !region) && rut) {
+  let direccionFacturacion = [limpio(df.direccion), limpio(df.comuna)].filter(Boolean).join(", ")
+  if (!direccionFacturacion && rut) {
     try {
       const { fichaEmpresaSii } = await import("./empresas-sii")
       const sii = await fichaEmpresaSii(rut)
-      if (sii) {
-        if (!direccion) direccion = limpio(sii.direccion)
-        if (!comuna) comuna = limpio(sii.comuna)
-        if (!region) region = regionDesdePadron(String(sii.region || "")) || regionDeUbicacion(comuna)
-      }
+      if (sii) direccionFacturacion = [limpio(sii.direccion), limpio(sii.comuna)].filter(Boolean).join(", ")
     } catch { /* sin padrón */ }
   }
   if (!region && comuna) region = regionDeUbicacion(comuna)
@@ -272,9 +289,9 @@ export async function crearTicketST(contact: string, opts: Opts): Promise<Result
     companyId: companyId || undefined,
     cuentaId,
     contactoId: limpio(q.Contacto_Asociado?.id) || undefined,
-    contactoNombre: limpio(df.contactoNombre) || limpio(q.Contacto_Asociado?.name),
-    contactoTelefono: limpio(q.Tel_fono_Contacto) || (c ? `+${c}` : "") || limpio(df.telefono),
-    contactoCorreo: limpio(q.Email_Contacto) || limpio(df.correo),
+    contactoNombre: contactoLugar.nombre || limpio(df.contactoNombre) || limpio(q.Contacto_Asociado?.name),
+    contactoTelefono: contactoLugar.telefono || limpio(q.Tel_fono_Contacto) || (c ? `+${c}` : "") || limpio(df.telefono),
+    contactoCorreo: contactoLugar.correo || limpio(q.Email_Contacto) || limpio(df.correo),
     ejecutivoId: ejecutivoId || undefined,
     ejecutivoNombre: ejecutivo.nombre,
     ejecutivoEmail: ejecutivo.email,
@@ -290,6 +307,7 @@ export async function crearTicketST(contact: string, opts: Opts): Promise<Result
     direccion,
     comuna,
     region,
+    direccionFacturacion: direccionFacturacion || undefined,
     relojPagado: pagoMarcado,
     mesFacturacion: await mesFacturacionDe(c, ficha.tz),
     cotizacionNumero: limpio(q.Numero_Cotizacion),
@@ -297,6 +315,18 @@ export async function crearTicketST(contact: string, opts: Opts): Promise<Result
   const faltantes = faltantesTicketST(d)
   const registro = registroTicketST(d)
   if (opts.dry) return { ok: true, estado: "dry", categoria, faltantes, registro }
+  // Sin dirección confirmada NO se crea (ni con forzar): se avisa UNA vez y el
+  // job reintenta en la pasada siguiente, cuando el chat la haya pedido.
+  if (!direccion) {
+    const kAviso = `ticket_st_sin_direccion_${quoteId}`
+    if (!(await getKvValue(kAviso).catch(() => null))) {
+      await setKvValue(kAviso, new Date().toISOString()).catch(() => {})
+      await avisarEquipoInterno(
+        `📍 Ticket ST de ${d.empresa} (${d.ndvNombre || "NDV"}, ${categoria}) a la espera: el cliente +${c} todavía no confirma la DIRECCIÓN del ${categoria === "Instalación" ? "punto de instalación" : "envío"}${direccionFacturacion ? ` (facturación: ${direccionFacturacion}, no sirve como sitio del equipo)` : ""}. Se crea solo cuando quede registrada.`,
+      ).catch(() => {})
+    }
+    return { ok: false, estado: "sin_direccion", categoria, faltantes, registro, detalle: "sin dirección confirmada por el cliente" }
+  }
 
   const r = await fetch(`${API()}/crm/v3/${MODULO}`, { method: "POST", headers: H, cache: "no-store", body: JSON.stringify({ data: [registro] }) })
   const j = (await r.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string; details?: { id?: string; api_name?: string } }> }
