@@ -324,7 +324,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   let sinTraspaso: Record<string, unknown> | null = null
   if (modoSinTraspaso && Date.now() - t0 < PRESUPUESTO_MS * 0.8) {
     const convsRango = await supa<{ contact: string; last_user_at?: string; first_user_at?: string; user_msg_count?: number; pref_escalon_at?: string; formal_quote_at?: string }>(
-      `vic_v3_conversations?contact=like.56*&last_user_at=gte.${encodeURIComponent(desdeISO)}&last_user_at=lte.${encodeURIComponent(hastaISO)}&select=contact,last_user_at,first_user_at,user_msg_count,pref_escalon_at,formal_quote_at&order=last_user_at.desc&limit=2000`,
+      `vic_v3_conversations?contact=like.${({ cl: "56", pe: "51", co: "57", mx: "52" } as Record<string, string>)[paisAud] || "56"}*&last_user_at=gte.${encodeURIComponent(desdeISO)}&last_user_at=lte.${encodeURIComponent(hastaISO)}&select=contact,last_user_at,first_user_at,user_msg_count,pref_escalon_at,formal_quote_at&order=last_user_at.desc&limit=2000`,
       fallos,
     )
     const candidatos = convsRango.map((r) => ({ ...r, contact: digits(r.contact) })).filter((r) => esCL(r.contact) && (r.user_msg_count || 0) >= 1)
