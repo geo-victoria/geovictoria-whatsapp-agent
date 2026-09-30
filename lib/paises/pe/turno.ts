@@ -7,7 +7,8 @@
 import type { PerfilTurno } from "../../orquestador-turno"
 import type { ConversationMessage } from "../../agent-loop"
 import { PERFIL_PE } from "./index"
-import { getSystemPromptPENucleo } from "./prompt-nucleo"
+import { anclajeTemporalPE, bloqueTelefonoPE } from "./anclaje"
+import { getSystemPromptPENucleo, promptBasePENucleo } from "./prompt-nucleo"
 import { TOOL_SCHEMAS_PE_UNIFICADAS, buildDispatchPEUnificado } from "./tools-unificadas"
 import { blindarSoporteInventadoPE } from "./tools"
 import { derivacionDePais } from "../../umbral-autonomia"
@@ -35,6 +36,8 @@ export const PERFIL_TURNO_PE: PerfilTurno = {
   documento: "RUC",
   channelId: PERFIL_PE.canal.channelId,
   systemPrompt: (contact, umbral) => getSystemPromptPENucleo(contact, umbral),
+  systemEstatico: (umbral) => promptBasePENucleo(umbral),
+  contextoTurno: (contact) => anclajeTemporalPE() + bloqueTelefonoPE(contact),
   tools: (contact) => ({ schemas: TOOL_SCHEMAS_PE_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchPEUnificado(contact) }),
   // Perú agenda en Cal desde el 21-sep (evento de Mónica): el guion 21+ ofrece reunión.
   derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: true }),

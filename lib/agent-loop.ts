@@ -72,16 +72,31 @@ export type ConversationMessage = {
   content: string
 }
 
+/** Tokens consumidos por el turno (suma de todas las llamadas a la API, reintentos incluidos). */
+export type UsoTokens = { llamadas: number; input: number; cacheWrite: number; cacheRead: number; output: number }
+
 export type AgentRunResult = {
   reply: string
   handoff: boolean
   iterations: number
   toolCalls: Array<{ name: string; input: unknown; ok: boolean; output?: unknown }>
   rawTrace: Anthropic.Messages.MessageParam[]
+  usage?: UsoTokens
 }
 
 export async function runAgentLoop(params: {
+  /**
+   * System prompt. Con `systemEstatico` presente, este es SOLO el bloque
+   * DINÁMICO del turno (fecha, teléfono, contextos, directivas) y va sin caché.
+   */
   systemPrompt: string
+  /**
+   * PREFIJO ESTÁTICO del system (30-sep, costo): el núcleo del país, idéntico
+   * byte a byte entre contactos y turnos. Va como PRIMER bloque con
+   * cache_control, así el caché sirve entre conversaciones distintas. Sin él,
+   * `systemPrompt` entero lleva la marca (conducta anterior).
+   */
+  systemEstatico?: string
   history: ConversationMessage[]
   userMessage: string
   apiKey: string
@@ -208,13 +223,24 @@ export async function runAgentLoop(params: {
   // caché a ~0,1× del precio tras la primera llamada. No cambia el modelo ni la
   // calidad; solo recorta el costo de input. Se construye UNA vez para que los
   // bytes sean idénticos entre llamadas (cualquier cambio invalida la caché).
-  const systemBlocks: Anthropic.Messages.TextBlockParam[] = [
-    {
-      type: "text",
-      text: systemPrompt,
-      cache_control: { type: "ephemeral" },
-    },
-  ]
+  // 30-sep: con `systemEstatico` el prefijo cacheado es SOLO el núcleo del
+  // país (idéntico para todos los contactos) y lo variable del turno va en un
+  // segundo bloque sin marca. Antes la fecha/hora y el teléfono iban DENTRO
+  // del único bloque marcado, al inicio, y el prefijo cambiaba cada minuto y
+  // cada contacto: el caché solo servía dentro del mismo turno.
+  const systemBlocks: Anthropic.Messages.TextBlockParam[] = params.systemEstatico
+    ? [
+        { type: "text", text: params.systemEstatico, cache_control: { type: "ephemeral" } },
+        ...(systemPrompt.trim() ? [{ type: "text" as const, text: systemPrompt }] : []),
+      ]
+    : [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" },
+        },
+      ]
+  const uso: UsoTokens = { llamadas: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }
 
   // Segundo breakpoint (11-jul, decisión de costos): también se cachea el
   // HISTORIAL marcando el último bloque del último mensaje de cada request.
@@ -272,6 +298,11 @@ export async function runAgentLoop(params: {
     // Verificación de prompt caching: si cache_read se mantiene en 0 entre
     // llamadas con el mismo prefijo, algún invalidador silencioso está activo.
     const u = response.usage
+    uso.llamadas += 1
+    uso.input += u.input_tokens || 0
+    uso.cacheWrite += u.cache_creation_input_tokens ?? 0
+    uso.cacheRead += u.cache_read_input_tokens ?? 0
+    uso.output += u.output_tokens || 0
     console.log(
       `[agent-loop] usage iter=${iteration} model=${effectiveModel} in=${u.input_tokens} cache_write=${u.cache_creation_input_tokens ?? 0} cache_read=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens}`,
     )
@@ -1610,6 +1641,13 @@ export async function runAgentLoop(params: {
         } else if (v.accion === "reintento" && v.directiva) {
           console.warn(`[agent-loop] CINTURON_${v.cinturon} ${pais} contact=${contact} motivos=${v.motivos.join(",")} → reintento`)
           const retry = await runAgentLoop({ ...params, systemPrompt: systemPrompt + v.directiva, sinCinturonesDeSalida: true }).catch(() => null)
+          if (retry?.usage) {
+            uso.llamadas += retry.usage.llamadas
+            uso.input += retry.usage.input
+            uso.cacheWrite += retry.usage.cacheWrite
+            uso.cacheRead += retry.usage.cacheRead
+            uso.output += retry.usage.output
+          }
           const rReply = (retry?.reply || "").trim()
           const rCalls = retry?.toolCalls || []
           const bien = Boolean(rReply) && reintentoQuedoBien({ reply: rReply, toolCalls: rCalls, historialAsistente: histAsistente, pais, userMessage })
@@ -1642,5 +1680,6 @@ export async function runAgentLoop(params: {
     iterations: iteration,
     toolCalls,
     rawTrace: messages,
+    usage: uso,
   }
 }

@@ -384,7 +384,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
       const cap = await simularTurno(contact, message, apiKey, PERFIL_TURNO_CO)
       const hist = await fetchHistoryV3(contact).catch(() => [])
-      return NextResponse.json({ reply: cap.reply, tools: cap.tools, pais: "co", simulacion: true, orquestador: true, conHistorial: true, turnosEnHistorial: hist.length })
+      return NextResponse.json({ reply: cap.reply, tools: cap.tools, usage: cap.usage, pais: "co", simulacion: true, orquestador: true, conHistorial: true, turnosEnHistorial: hist.length })
     }
 
     // ── Pipeline endurecido (herencia chilena) ──

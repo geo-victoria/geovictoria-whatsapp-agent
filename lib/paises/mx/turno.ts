@@ -8,7 +8,8 @@
 import type { PerfilTurno } from "../../orquestador-turno"
 import type { ConversationMessage } from "../../agent-loop"
 import { PERFIL_MX } from "./index"
-import { getSystemPromptMXNucleo } from "./prompt-nucleo"
+import { anclajeTemporalMX, bloqueTelefonoMX } from "./anclaje"
+import { getSystemPromptMXNucleo, promptBaseMXNucleo } from "./prompt-nucleo"
 import { TOOL_SCHEMAS_MX_UNIFICADAS, buildDispatchMXUnificado } from "./tools-unificadas"
 import { derivacionDePais } from "../../umbral-autonomia"
 import { blindarSoporteInventadoPais } from "../blindaje-soporte"
@@ -31,6 +32,8 @@ export const PERFIL_TURNO_MX: PerfilTurno = {
   documento: "RFC",
   channelId: PERFIL_MX.canal.channelId,
   systemPrompt: (contact, umbral) => getSystemPromptMXNucleo(contact, umbral),
+  systemEstatico: (umbral) => promptBaseMXNucleo(umbral),
+  contextoTurno: (contact) => anclajeTemporalMX() + bloqueTelefonoMX(contact),
   tools: (contact) => ({ schemas: TOOL_SCHEMAS_MX_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchMXUnificado(contact) }),
   derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: Boolean((process.env.CAL_EVENT_TYPE_ID_MX ?? "7234317").trim()) }),
   esFlujoCotizacion: esFlujoCotizacionMX,

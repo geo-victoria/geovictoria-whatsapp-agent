@@ -26,6 +26,9 @@ import { detectarProcesoHumano, directivaProcesoHumano } from "./proceso-humano"
 import { directivaRutSinCorreo } from "./rut-sin-correo"
 import {
   getSystemPromptV3,
+  getSystemPromptBaseV3,
+  formatFechaActualParaPrompt,
+  formatTelefonoCanalParaPrompt,
   formatCotizacionExistenteParaPrompt,
   formatCotizacionesMultiplesParaPrompt,
 } from "@/app/api/vic-sales-agent-v3/prompt"
@@ -83,6 +86,14 @@ export type PerfilTurno = {
   channelId?: string
   /** System prompt base del país (ANTES de contextos y directivas del turno). */
   systemPrompt: (contact: string, umbral?: number) => string
+  /**
+   * Núcleo ESTÁTICO del país (30-sep, caché): el mismo texto para todos los
+   * contactos, solo varía con el umbral. Con `contextoTurno` reemplaza a
+   * `systemPrompt` cuando el split de caché está activo.
+   */
+  systemEstatico?: (umbral?: number) => string
+  /** Lo variable por contacto que antes abría el prompt: fecha/hora y teléfono. */
+  contextoTurno?: (contact: string) => string
   /** Set de tools del país; undefined = el set chileno por defecto de runAgentLoop. */
   tools?: (contact: string) => Promise<ToolsTurno> | ToolsTurno
   /** Derivación del umbral 21+ (tool y documento del país); undefined = Chile. */
@@ -320,7 +331,7 @@ const CONTEXTO_REENGANCHE = CONTEXTO_REENGANCHE_COMPARTIDO
 // El contacto en simulación se marca acá y procesarTurno captura la respuesta
 // en vez de enviarla por Botmaker. Un solo mecanismo para los cuatro países.
 const SIM_CONTACTOS = new Set<string>()
-const SIM_CAPTURA = new Map<string, { reply: string; tools: string[] }>()
+const SIM_CAPTURA = new Map<string, { reply: string; tools: string[]; usage?: unknown }>()
 function simulando(contact: string): boolean {
   return SIM_CONTACTOS.has(contact)
 }
@@ -331,7 +342,7 @@ export async function simularTurno(
   message: string,
   apiKey: string,
   perfil: PerfilTurno = PERFIL_TURNO_CL,
-): Promise<{ reply: string; tools: string[] }> {
+): Promise<{ reply: string; tools: string[]; usage?: unknown }> {
   SIM_CONTACTOS.add(contact)
   SIM_CAPTURA.delete(contact)
   try {
@@ -341,7 +352,45 @@ export async function simularTurno(
   }
   const cap = SIM_CAPTURA.get(contact)
   SIM_CAPTURA.delete(contact)
-  return { reply: cap?.reply || "", tools: cap?.tools || [] }
+  return { reply: cap?.reply || "", tools: cap?.tools || [], usage: cap?.usage }
+}
+
+/**
+ * SPLIT DE CACHÉ DEL SYSTEM PROMPT (30-sep, costo): env VICKY_PROMPT_CACHE_SPLIT
+ * on|off manda; si no está, vic_kv `prompt_cache_split`="on". Apagado = la
+ * conducta anterior (un solo bloque con la fecha y el teléfono al inicio).
+ */
+export async function cacheSplitActivo(): Promise<boolean> {
+  const env = (process.env.VICKY_PROMPT_CACHE_SPLIT || "").trim().toLowerCase()
+  if (env === "on") return true
+  if (env === "off") return false
+  const kv = await getKvValue("prompt_cache_split").catch(() => null)
+  return String(kv || "").trim().toLowerCase() === "on"
+}
+
+/**
+ * Arma el system del turno. Con el split: el NÚCLEO del país va como bloque
+ * estático cacheable y todo lo variable (fecha/hora, teléfono, zona horaria,
+ * contextos de la conversación y directivas) va DESPUÉS, en un bloque propio
+ * encabezado como "Contexto de este turno". Sin split: la concatenación de
+ * siempre (contextos + prompt del país + directivas) en un solo bloque.
+ */
+export function armarSistemaTurno(
+  perfil: PerfilTurno,
+  contact: string,
+  umbral: number | undefined,
+  split: boolean,
+  cabecera: string,
+  cola: string,
+): { systemEstatico?: string; systemPrompt: string } {
+  if (split && perfil.systemEstatico) {
+    const turno = perfil.contextoTurno ? perfil.contextoTurno(contact) : ""
+    return {
+      systemEstatico: perfil.systemEstatico(umbral),
+      systemPrompt: "\n\n# Contexto de este turno\n\n" + turno + lineaZonaHoraria(perfil.pais) + cabecera + cola,
+    }
+  }
+  return { systemPrompt: cabecera + (perfil.systemPrompt(contact, umbral) + lineaZonaHoraria(perfil.pais)) + cola }
 }
 
 export async function procesarTurno(
@@ -473,6 +522,8 @@ export async function procesarTurno(
       : ""
     const contextoCotizacion =
       contextoUmbral + contextoEjecutivo + (reengaged ? CONTEXTO_REENGANCHE : "") + contextoCotizacionExistente + contenidoCotizacion
+    const splitCache = await cacheSplitActivo()
+    const sistema = (cola: string) => armarSistemaTurno(perfil, contact, umbralInfo?.umbral, splitCache, contextoCotizacion, cola)
     // Directiva determinista (umbral 08-ago): si la CONVERSACIÓN declaró una
     // dotación sobre el umbral ("30 trabajadores" — en este mensaje o en
     // cualquiera anterior del cliente), la directiva va al FINAL del prompt
@@ -670,9 +721,7 @@ export async function procesarTurno(
     // Correr el agent
     const result = await runAgentLoop({
       alIniciarTool,
-      systemPrompt: onboarding
-        ? onboarding.systemPrompt + directivaAdmin
-        : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaYaDicho + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + (await directivaCanalMeta(contact)),
+      ...(onboarding ? { systemPrompt: onboarding.systemPrompt + directivaAdmin } : sistema(contextoUmbral + directivaUmbral + directivaMarcaje + directivaYaDicho + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + (await directivaCanalMeta(contact)))),
       history,
       userMessage: message,
       apiKey,
@@ -695,11 +744,9 @@ export async function procesarTurno(
       console.warn(`[v3-bg] TURNO_VACIO contact=${contact}: reintento con orden de contestar`)
       const retryVacio = await runAgentLoop({
         alIniciarTool,
-        systemPrompt:
-          (onboarding
-            ? onboarding.systemPrompt + directivaAdmin
-            : contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + directivaMarcaje + directivaYaDicho + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin) +
-          "\n\n# Instrucción de sistema (este turno)\nTu turno anterior quedó VACÍO. Responde en texto al ÚLTIMO mensaje del cliente, breve y concreto; si corresponde una tool, úsala y entrega su mensajeParaProspecto. Nunca cierres el turno sin texto.",
+        ...(onboarding
+          ? { systemPrompt: onboarding.systemPrompt + directivaAdmin + "\n\n# Instrucción de sistema (este turno)\nTu turno anterior quedó VACÍO. Responde en texto al ÚLTIMO mensaje del cliente, breve y concreto; si corresponde una tool, úsala y entrega su mensajeParaProspecto. Nunca cierres el turno sin texto." }
+          : sistema(contextoUmbral + directivaUmbral + directivaMarcaje + directivaYaDicho + directivaConsultiva + directivaPostPago + directivaRutSolo + directivaAdmin + "\n\n# Instrucción de sistema (este turno)\nTu turno anterior quedó VACÍO. Responde en texto al ÚLTIMO mensaje del cliente, breve y concreto; si corresponde una tool, úsala y entrega su mensajeParaProspecto. Nunca cierres el turno sin texto.")),
         history,
         userMessage: message,
         apiKey,
@@ -923,8 +970,7 @@ export async function procesarTurno(
         "la vigente; aplicar_siguiente_descuento para el descuento acordado) con los datos ya confirmados " +
         "por el cliente, y entrega EXACTAMENTE su mensajeParaProspecto."
       const retry = await runAgentLoop({
-        systemPrompt:
-          contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_COTIZACION,
+        ...sistema(contextoUmbral + directivaUmbral + FORZAR_TOOL_COTIZACION),
         history,
         userMessage: message,
         apiKey,
@@ -1029,8 +1075,7 @@ export async function procesarTurno(
           "(cotizar_referencial o actualizar_cotizacion) y entrega su cifra tal cual. Si el " +
           "precio no cambió, dilo sin inventar una cifra nueva."
         const retryP = await runAgentLoop({
-          systemPrompt:
-            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_PRECIO,
+          ...sistema(contextoUmbral + directivaUmbral + FORZAR_TOOL_PRECIO),
           history,
           userMessage: message,
           apiKey,
@@ -1265,8 +1310,7 @@ export async function procesarTurno(
             ? ` YA existe una cotización formal en esta conversación (quote_id ${formalQuoteId || quotePointer?.quoteId || "vigente"}): usa consultar_siguiente_descuento sobre ELLA.`
             : "")
         const retry = await runAgentLoop({
-          systemPrompt:
-            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_DESCUENTO,
+          ...sistema(contextoUmbral + directivaUmbral + FORZAR_TOOL_DESCUENTO),
           history,
           userMessage: message,
           apiKey,
@@ -1434,7 +1478,7 @@ export async function procesarTurno(
         "SOLO después de que la tool devuelva ok, confirma usando EXACTAMENTE su mensajeParaProspecto. " +
         "Si la tool falla o no hay disponibilidad, díselo con honestidad y ofrece otro horario — JAMÁS afirmes que la reunión quedó agendada si la tool no tuvo éxito."
       const retry = await runAgentLoop({
-        systemPrompt: contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_AGENDA,
+        ...sistema(contextoUmbral + directivaUmbral + FORZAR_TOOL_AGENDA),
         history,
         userMessage: message,
         apiKey,
@@ -1571,8 +1615,7 @@ export async function procesarTurno(
           "nueva completa (dotación, módulos, hardware, puntos) EN ESTE TURNO y responder con su mensajeParaProspecto. " +
           "PROHIBIDO anunciar que la actualizaste o pedir confirmación: la instrucción del cliente ya es la confirmación."
         const retryA = await runAgentLoop({
-          systemPrompt:
-            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_ACTUALIZAR,
+          ...sistema(contextoUmbral + directivaUmbral + FORZAR_ACTUALIZAR),
           history,
           userMessage: message,
           apiKey,
@@ -1682,7 +1725,7 @@ export async function procesarTurno(
         "Si faltan datos obligatorios (nombre, empresa o teléfono), PÍDESELOS en vez de afirmar que ya quedó registrado. " +
         "JAMÁS digas que tomaste sus datos o que un ejecutivo lo contactará si la tool no tuvo éxito."
       const retry = callbackRecuperado ? null : await runAgentLoop({
-        systemPrompt: contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_TOOL_CALLBACK,
+        ...sistema(contextoUmbral + directivaUmbral + FORZAR_TOOL_CALLBACK),
         history,
         userMessage: message,
         apiKey,
@@ -2047,8 +2090,7 @@ export async function procesarTurno(
           "Tu borrador REPITE EXACTAMENTE tu mensaje anterior. El cliente acaba de decirte algo nuevo: respóndele a ESO, corto y natural. " +
           "Si confirmó un supuesto que tu cotización vigente ya incluía, dilo en una frase (los números no cambian, NO vuelvas a pegar el resumen) y avanza al paso siguiente."
         const retryEco = await runAgentLoop({
-          systemPrompt:
-            contextoCotizacion + (perfil.systemPrompt(contact, umbralInfo?.umbral) + lineaZonaHoraria(perfil.pais)) + contextoUmbral + directivaUmbral + FORZAR_NO_ECO,
+          ...sistema(contextoUmbral + directivaUmbral + FORZAR_NO_ECO),
           history,
           userMessage: message,
           apiKey,
@@ -2221,6 +2263,7 @@ export async function procesarTurno(
         SIM_CAPTURA.set(contact, {
           reply,
           tools: (result.toolCalls || []).map((c) => String(c.name)),
+          usage: result.usage,
         })
       }
       for (const [i, parte] of partes.entries()) {
@@ -2566,6 +2609,8 @@ export const PERFIL_TURNO_CL: PerfilTurno = {
   zona: "comuna",
   documento: "RUT",
   systemPrompt: (contact, umbral) => getSystemPromptV3(contact, umbral),
+  systemEstatico: (umbral) => getSystemPromptBaseV3(umbral),
+  contextoTurno: (contact) => formatFechaActualParaPrompt() + formatTelefonoCanalParaPrompt(contact),
   esFlujoCotizacion,
   blindarSoporte: (reply, permitidos) => blindarSoporteInventado(reply, permitidos),
   certificacionDT: true,

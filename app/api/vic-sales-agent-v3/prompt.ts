@@ -70,7 +70,7 @@ ${lineasHardware}
 ⚠️ IMPORTANTE: Solo puedes ofrecer productos que aparezcan en estas dos listas. Si un prospecto te pregunta por un módulo o dispositivo que no está aquí, deriva con un ejecutivo (usa derivar_a_soporte motivo "fuera_de_scope"). Los tiers de precio son información interna para tu razonamiento — NO los menciones al prospecto. Tampoco menciones rangos de usuarios ni "brackets".`
 }
 
-function formatFechaActualParaPrompt(): string {
+export function formatFechaActualParaPrompt(): string {
   const now = new Date()
   const tz = "America/Santiago"
   const isoUTC = now.toISOString()
@@ -107,6 +107,14 @@ Cal.com tiene configurado su propio "minimum booking notice" (mínima anticipaci
  * @param contact - Número del cliente normalizado a dígitos (ej. "56944668823").
  *                  Vendrá del campo `contact` del webhook de Botmaker.
  */
+/**
+ * Núcleo ESTÁTICO de Chile con el umbral aplicado: idéntico para todos los
+ * contactos (solo cambia con el umbral 20/10), es el bloque que se cachea.
+ */
+export function getSystemPromptBaseV3(umbralPreciosCL?: number): string {
+  return aplicarUmbral(SYSTEM_PROMPT_V3, umbralPreciosCL)
+}
+
 export function getSystemPromptV3(contact?: string, umbralPreciosCL?: number): string {
   // El ajuste de umbral (Lalo 08-ago) vive en lib/prompt-nucleo/armar para
   // que los cuatro países usen el MISMO; acá solo se delega.
@@ -197,7 +205,7 @@ export function formatCotizacionesMultiplesParaPrompt(
  * El número viene como dígitos puros del webhook (ej. "56944668823") y se
  * presenta a Vicky en formato E.164 con + delante.
  */
-function formatTelefonoCanalParaPrompt(contact?: string): string {
+export function formatTelefonoCanalParaPrompt(contact?: string): string {
   const digits = (contact || "").replace(/\D/g, "")
   if (!digits) return ""
   return `Teléfono del cliente (este es el número desde el que te está escribiendo por WhatsApp): +${digits}\n\n`

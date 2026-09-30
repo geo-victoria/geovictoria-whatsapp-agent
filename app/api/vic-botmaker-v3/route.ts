@@ -155,6 +155,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json({
         reply: cap?.reply || "",
         tools: cap?.tools || [],
+        usage: cap?.usage,
         pais: "cl",
         simulacion: true,
         conHistorial: true,

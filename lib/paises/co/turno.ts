@@ -7,7 +7,8 @@
 import type { PerfilTurno } from "../../orquestador-turno"
 import type { ConversationMessage } from "../../agent-loop"
 import { PERFIL_CO } from "./index"
-import { getSystemPromptCONucleo } from "./prompt-nucleo"
+import { anclajeTemporalCO, bloqueTelefonoCO } from "./anclaje"
+import { getSystemPromptCONucleo, promptBaseCONucleo } from "./prompt-nucleo"
 import { TOOL_SCHEMAS_CO_UNIFICADAS, buildDispatchCOUnificado } from "./tools-unificadas"
 import { blindarSoporteInventadoCO } from "./tools"
 import { agendaCoActiva } from "./agenda"
@@ -35,6 +36,8 @@ export const PERFIL_TURNO_CO: PerfilTurno = {
   documento: "NIT",
   channelId: PERFIL_CO.canal.channelId,
   systemPrompt: (contact, umbral) => getSystemPromptCONucleo(contact, umbral),
+  systemEstatico: (umbral) => promptBaseCONucleo(umbral),
+  contextoTurno: (contact) => anclajeTemporalCO() + bloqueTelefonoCO(contact),
   tools: (contact) => ({ schemas: TOOL_SCHEMAS_CO_UNIFICADAS as unknown as unknown[], dispatch: buildDispatchCOUnificado(contact) }),
   derivacion: (contact) => ({ ...derivacionDePais(contact), tool: "derivar_a_soporte", motivo: "fuera_de_rango_trabajadores", agendaEnLinea: agendaCoActiva() }),
   esFlujoCotizacion: esFlujoCotizacionCO,
