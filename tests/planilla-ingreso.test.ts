@@ -39,3 +39,15 @@ test("la plantilla base no trae datos de ningún cliente", () => {
   for (const x of ["Dolce", "Mattarello", "lafuentereina", "78259205", "Roa Romero"]) assert.ok(!todo.includes(x), x)
   assert.ok(partes.has("xl/media/image1.png"))
 })
+
+test("rubro: se deduce del giro del SII y cae a Servicios si no calza", async () => {
+  const { rubroDesdeGiro, RUBRO_POR_DEFECTO } = await import("../lib/planilla-ingreso.ts")
+  assert.equal(rubroDesdeGiro("ACTIVIDADES DE RESTAURANTES Y DE SERVICIO MOVIL DE COMIDAS"), "22. Turismo, Hotelería y Gastronomía")
+  assert.equal(rubroDesdeGiro("REPARACION DE EQUIPO ELECTRICO (ASCENSORES Y EQUIPOS DE ELEVACION)"), "3. Construcción")
+  assert.equal(rubroDesdeGiro("Centros médicos privados ( establecimientos de atención ambulatoria)"), "19. Salud")
+  assert.equal(rubroDesdeGiro("REPARACION DE CALZADO Y DE ARTICULOS DE CUERO"), "")
+  assert.equal(RUBRO_POR_DEFECTO, "20. Servicios")
+  const r = armarPlanillaIngreso({ razonSocial: "X", rut: "1-9", giro: "REPARACION DE CALZADO", admins: [], trabajadores: [] })
+  const xml = descomprimirZip(r.buffer).get("xl/worksheets/sheet1.xml")!.toString("utf8")
+  assert.match(xml, /<c r="C20"[^>]*t="inlineStr"><is><t xml:space="preserve">20\. Servicios</)
+})

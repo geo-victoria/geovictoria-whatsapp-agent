@@ -56,6 +56,40 @@ export function rubroDeLista(texto: string | undefined): string {
   return ""
 }
 
+/**
+ * Rubro deducido del GIRO del SII (Lalo 30-sep: la lista no tiene "Otro" ni
+ * "Desconocido"; se deduce del giro y, si no calza, "20. Servicios"). Reglas
+ * en orden: la primera palabra clave que aparece en el giro manda.
+ */
+const RUBRO_POR_GIRO: Array<[RegExp, string]> = [
+  [/restaur|comida|aliment|gastronom|cafe|cafeteria|panader|pasteler|hotel|hostal|turis|bar\b|banquet|casino|catering|empanad/, "22. Turismo, Hotelería y Gastronomía"],
+  [/salud|medic|clinic|odontol|dental|hospital|enfermer|kinesiol|veterinar|farmac|laboratorio clinico|psicolog/, "19. Salud"],
+  [/condominio|comunidad de copropietarios|edificio|administracion de edificios/, "2. Condominio"],
+  [/construc|obras? (civiles|menores)|ingenieria|montaje|electric|instalacion|ascensor|gasfiter|carpinter|arquitect|demolic|pavimento/, "3. Construcción"],
+  [/inmobiliar|arriendo de inmuebles|bienes raices|corretaje de propiedades/, "4. Inmobilaria"],
+  [/transporte|flete|camion|carga|taxi|buses|pasajeros/, "21. Transporte"],
+  [/logistic|bodega|almacenamiento|distribucion|courier|despacho/, "16. Logistica"],
+  [/agric|agropecuari|fruti|vitivin|forestal|ganader|avicol|vivero|cultivo/, "1. Agricola"],
+  [/educa|colegio|escuela|jardin infantil|capacitacion|universidad|instituto|academia/, "7. Educación"],
+  [/banco|financ|credito|seguros|inversion|cooperativa de ahorro/, "6. Banca y Finanzas"],
+  [/mineri|minera|extraccion de|canteras/, "10. Mineria"],
+  [/navier|maritim|portuari|pesca/, "11. Naviera"],
+  [/segurid|vigilancia|guardias/, "12. Outsourcing Seguridad"],
+  [/aseo|limpieza|outsourcing|suministro de personal|servicios generales/, "13. Outsourcing General"],
+  [/fabric|manufactur|elaboracion|industri|planta|produccion de/, "15. Planta Productiva"],
+  [/municipal/, "8. Municipio"],
+  [/consult|asesor|contab|auditor|abogad|juridic|marketing|publicidad|software|informatic|tecnolog/, "5. Consultoria"],
+  [/comercio|venta al por menor|minorista|tienda|almacen|supermercado|ferreteri|botiller|minimarket|venta al por mayor|mayorista|importad|distribuidora/, "18. Retail SMB"],
+]
+export const RUBRO_POR_DEFECTO = "20. Servicios"
+
+export function rubroDesdeGiro(giro: string | undefined): string {
+  const g = sinTildes(String(giro || ""))
+  if (!g) return ""
+  for (const [re, rubro] of RUBRO_POR_GIRO) if (re.test(g)) return rubro
+  return ""
+}
+
 /** RUT como lo pide la plantilla: sin puntos ni guión, con DV ("17739019K", "177390194"). */
 export function rutSinFormato(rut: string | undefined): string {
   return String(rut || "").replace(/[^0-9kK]/g, "").toUpperCase()
@@ -124,7 +158,7 @@ export function armarPlanillaIngreso(d: DatosPlanillaIngreso): { buffer: Buffer;
   xml = escribirCelda(xml, "C17", d.giro)
   xml = escribirCelda(xml, "C18", d.direccion)
   xml = escribirCelda(xml, "C19", d.comuna)
-  xml = escribirCelda(xml, "C20", rubroDeLista(d.rubro) || d.rubro)
+  xml = escribirCelda(xml, "C20", rubroDeLista(d.rubro) || rubroDesdeGiro(d.giro) || RUBRO_POR_DEFECTO)
 
   const admins = d.admins.filter((a) => a.nombre || a.correo || a.rut).slice(0, MAX_ADMINS)
   admins.forEach((a, i) => {

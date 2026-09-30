@@ -22,6 +22,9 @@ const API = () => (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").tr
 const WIZARD_URL = (process.env.VICKY_ONBOARDING_WIZARD_URL || "https://onboarding.geovictoria.com").trim().replace(/\/+$/, "")
 export const TITULO_NOTA_PLANILLAS = "Planillas de ingreso (Vicky)"
 
+/** Sube al cambiar el contenido de la Planilla de Ingreso (fuerza renovar el archivo del campo). */
+const VERSION_PLANILLA_INGRESO = "v2-rubro"
+
 export type PlanillaWizard = { tipo: "usuarios" | "planificaciones" | "ingreso"; filename: string; url?: string; buffer?: Buffer }
 type Registro = { impId: string; notaId: string; archivos: string[]; campo?: string }
 
@@ -112,14 +115,14 @@ export async function planillaIngresoDe(
 async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuffer, filename: string, nuestraAnterior = ""): Promise<boolean> {
   const H = { Authorization: `Zoho-oauthtoken ${token}` }
   const actual = await fetch(`${API()}/crm/v3/Implementaciones/${impId}?fields=Planilla_de_Ingreso`, { headers: H, cache: "no-store" })
-  const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: Array<{ File_Name__s?: string }> }> }).data?.[0]
+  const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: Array<{ id?: string; File_Name__s?: string; Created_By__s?: { email?: string } }> }> }).data?.[0]
   const existentes = Array.isArray(rec?.Planilla_de_Ingreso) ? rec!.Planilla_de_Ingreso! : []
-  if (existentes.length) {
-    // Un archivo que subió una persona no se pisa. El nuestro sí se renueva
-    // cuando la planilla creció (admin solo → admin + nómina).
-    const esNuestro = nuestraAnterior && existentes.some((f) => String(f?.File_Name__s || "") === nuestraAnterior)
-    if (!esNuestro) return true
-  }
+  // Un archivo que subió una PERSONA no se pisa jamás. Los que subió Vicky
+  // (usuario del OAuth) se reemplazan: la planilla creció o cambió el formato.
+  const esDeVicky = (f: { Created_By__s?: { email?: string } }) => /^vicky@/i.test(String(f?.Created_By__s?.email || ""))
+  if (existentes.some((f) => !esDeVicky(f))) return true
+  const aBorrar = existentes.filter(esDeVicky).map((f) => ({ id: String(f.id || ""), _delete: null })).filter((f) => f.id)
+  void nuestraAnterior
   // El campo fileupload exige un file_id de /crm/v3/files, que a su vez exige
   // el scope ZohoFiles.files.ALL: primero el token de Files (grant aparte,
   // lib/zoho-files-token), y si no está configurado se intenta con el principal.
@@ -142,7 +145,7 @@ async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuff
   }
   const put = await fetch(`${API()}/crm/v3/Implementaciones`, {
     method: "PUT", headers: { ...H, "Content-Type": "application/json" }, cache: "no-store",
-    body: JSON.stringify({ data: [{ id: impId, Planilla_de_Ingreso: [{ file_id: fileId }] }], trigger: ["blueprint"] }),
+    body: JSON.stringify({ data: [{ id: impId, Planilla_de_Ingreso: [...aBorrar, { file_id: fileId }] }], trigger: ["blueprint"] }),
   })
   const pj = (await put.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
   const ok = put.ok && pj?.data?.[0]?.code === "SUCCESS"
@@ -247,7 +250,10 @@ export async function adjuntarPlanillasImplementacion(
     if (ingreso) planillas = [...planillas, ingreso]
     const pendientes = planillas.filter((p) => !yaEstan.has(p.filename))
     const usuarios = ingreso
-    const faltaCampo = Boolean(usuarios && reg?.campo !== usuarios.filename)
+    // La marca lleva la VERSIÓN del formato: al cambiar el contenido (p. ej.
+    // el rubro, 30-sep) el archivo del campo se renueva aunque el nombre sea igual.
+    const marcaCampo = usuarios ? `${usuarios.filename}|${VERSION_PLANILLA_INGRESO}` : ""
+    const faltaCampo = Boolean(usuarios && reg?.campo !== marcaCampo)
     if (!pendientes.length && !faltaCampo) return { ok: true, archivos: [...yaEstan], nuevos: [], notaId: reg?.notaId, campo: reg?.campo }
 
     const token = await getZohoAccessToken()
@@ -303,7 +309,7 @@ export async function adjuntarPlanillasImplementacion(
     if (campoOn && usuarios && faltaCampo) {
       try {
         const buf = await bytesDe(usuarios)
-        if (buf && (await subirAlCampoPlanilla(token, impId, buf, usuarios.filename, reg?.campo || ""))) campo = usuarios.filename
+        if (buf && (await subirAlCampoPlanilla(token, impId, buf, usuarios.filename))) campo = marcaCampo
       } catch (e) {
         console.warn(`[imp-planillas] campo Planilla_de_Ingreso:`, e instanceof Error ? e.message : e)
       }
