@@ -43,6 +43,8 @@ export type OrigenAnuncio = {
 /** Valor real del picklist Lead_Source (display "Meta Ads"). */
 export const LEAD_SOURCE_META_ADS = "16. Meta Ads"
 export const MEDIUM_META_ADS = "whatsapp_ads"
+/** Etiqueta del chat en Botmaker para todo lo que llega de un anuncio de Meta (Lalo 30-sep). */
+export const TAG_META_ADS = "meta_ads"
 /** Campo de texto creado en Leads el 30-sep (id 3525045000667467572); kv `meta_click_field` o env lo cambian ("-" lo apaga). */
 export const CAMPO_CLIC_DEFAULT = "Meta_Click_ID"
 
@@ -91,12 +93,16 @@ const fonoDe = (contact: string) => String(contact || "").replace(/\D/g, "")
 const llave = (fono: string) => `origen_anuncio_${fono}`
 
 /** Guarda el origen si el contacto aún no tiene uno. Best-effort, no lanza. */
-export async function guardarOrigenAnuncio(contact: string, raw: unknown): Promise<"guardado" | "ya_existia" | "sin_referral" | "error"> {
+export async function guardarOrigenAnuncio(contact: string, raw: unknown, canal?: string): Promise<"guardado" | "ya_existia" | "sin_referral" | "error"> {
   try {
     const origen = normalizarReferral(raw)
     if (!origen) return "sin_referral"
     const fono = fonoDe(contact)
     if (!fono) return "sin_referral"
+    // Etiqueta en Botmaker en CADA llegada desde un anuncio (idempotente), así
+    // el equipo filtra la bandeja "Por tag" aunque el origen ya estuviera guardado.
+    const { tagearChat } = await import("./botmaker-tags")
+    await tagearChat(fono, TAG_META_ADS, canal).catch(() => false)
     const previo = await kvGet(llave(fono)).catch(() => null)
     if (previo) return "ya_existia"
     await kvSet(llave(fono), JSON.stringify(origen))

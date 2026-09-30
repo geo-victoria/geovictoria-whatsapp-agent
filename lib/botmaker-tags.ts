@@ -52,15 +52,19 @@ const yaTagueados = new Set<string>()
  * Mismo PATCH que el tag comercial, sin el guard de memoria — acá el llamador
  * decide cuándo. Poner un tag dos veces es idempotente en Botmaker.
  */
-export async function tagearChat(contact: string, tag: string): Promise<boolean> {
+export async function tagearChat(contact: string, tag: string, canal?: string): Promise<boolean> {
   try {
     const clean = (contact || "").replace(/\D/g, "")
     const limpio = String(tag || "").trim()
     if (!clean || !limpio || !BM_TOKEN) return false
+    // Línea REAL del chat si el llamador la sabe ("…-whatsapp-<número>");
+    // si no, la del país del teléfono.
+    const lineaCanal = /-whatsapp-(\d{8,15})$/.exec(String(canal || ""))?.[1] || ""
     const pais = paisDeContacto(clean)
-    if (!pais) return false
+    const linea = lineaCanal || (pais ? LINEA_POR_PAIS[pais] : "")
+    if (!linea) return false
     const res = await fetch(
-      `https://api.botmaker.com/v2.0/chats/${encodeURIComponent(`${LINEA_POR_PAIS[pais]}:${clean}`)}`,
+      `https://api.botmaker.com/v2.0/chats/${encodeURIComponent(`${linea}:${clean}`)}`,
       {
         method: "PATCH",
         headers: { "access-token": BM_TOKEN, "Content-Type": "application/json", Accept: "application/json" },

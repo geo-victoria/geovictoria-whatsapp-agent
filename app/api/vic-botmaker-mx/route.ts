@@ -216,7 +216,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // Clic a WhatsApp de Meta Ads (Lalo 30-sep): la acción de código reenvía el
     // `referral` del anuncio en el primer mensaje. Se guarda en segundo plano
     // (solo si el contacto no tenía origen) y jamás toca la respuesta.
-    if (body.referral && !body.simular) after(() => guardarOrigenAnuncio(contact, body.referral).then(() => undefined))
+    if (body.referral && !body.simular) after(() => guardarOrigenAnuncio(contact, body.referral, (body as { channelId?: string }).channelId).then(() => undefined))
     if (body.bsuid && !body.simular) after(() => guardarBsuid(contact, body.bsuid))
 
     let message = (body.message || "").trim()
