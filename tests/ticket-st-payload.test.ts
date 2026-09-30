@@ -138,3 +138,15 @@ test("regiones del picklist ST desde comuna, ciudad, región o padrón", () => {
   assert.equal(regionDesdePadron("REGION METROPOLITANA DE SANTIAGO"), "Metropolitana")
   assert.equal(regionDesdePadron("REGION DEL BIOBIO"), "Biobío")
 })
+
+test("arriendo: el reloj se reconstruye desde la cotización con el nombre de Books de la NDV", async () => {
+  const { equiposDesdeCotizacion } = await import("../lib/ticket-st-payload.ts")
+  const eq = equiposDesdeCotizacion([
+    { Codigo_Item: "asistencia", Cantidad: 5, Subtotal_UF: 0.55 },
+    { Codigo_Item: "senseface_2a", Modalidad: "Arriendo", Cantidad: 1, Subtotal_UF: 0.35 },
+    { Codigo_Item: "envio_reloj", Cantidad: 1, Subtotal_UF: 0 },
+    { Codigo_Item: "tarjeta_id", Cantidad: 20, Subtotal_UF: 0.6 },
+  ])
+  assert.deepEqual(eq.map((e) => [e.nombre, e.cantidad]), [["006.11 - Reloj Gama Media Facial WIFI/LAN", 1], ["026.1 - Tarjeta ID (delgada)", 20]])
+  assert.equal(cantidadDispositivos(eq), 1)
+})

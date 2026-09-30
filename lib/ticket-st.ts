@@ -36,6 +36,7 @@ import {
   filasPlanillaEquipos,
   registroTicketST,
   nombreTicketST,
+  equiposDesdeCotizacion,
   type DatosTicketST,
   type EquipoTicket,
 } from "./ticket-st-payload"
@@ -182,7 +183,7 @@ export async function crearTicketST(contact: string, opts: Opts): Promise<Result
     Deal_Asociado?: { id?: string }
     Tel_fono_Contacto?: string; Email_Contacto?: string; RUT_Cliente?: string; RUT_Empresa?: string
     Nota_de_Venta?: { id?: string; name?: string }
-    Detalle_Items_Cotizacion?: Array<{ Codigo_Item?: string; Nombre_Item?: string; Modalidad?: string; Cantidad?: number }>
+    Detalle_Items_Cotizacion?: Array<{ Codigo_Item?: string; Nombre_Item?: string; Modalidad?: string; Cantidad?: number; Subtotal_UF?: number }>
   }>(H, `/crm/v3/${QUOTE_MOD}/${quoteId}?fields=Name,Numero_Cotizacion,Cuenta_Asociada,Contacto_Asociado,Deal_Asociado,Tel_fono_Contacto,Email_Contacto,RUT_Cliente,RUT_Empresa,Nota_de_Venta,Detalle_Items_Cotizacion`)
   if (!q) return { ok: false, estado: "error", detalle: "cotización ilegible" }
 
@@ -198,9 +199,13 @@ export async function crearTicketST(contact: string, opts: Opts): Promise<Result
 
   const filas = Array.isArray(ref.Equipos_Referencias_NV) ? ref.Equipos_Referencias_NV : []
   const nombres = filas.map((f) => limpio(f.NOMBRE))
-  const equipos: EquipoTicket[] = filas
+  let equipos: EquipoTicket[] = filas
     .filter((f) => esEquipoDeCampo(limpio(f.NOMBRE)))
     .map((f) => ({ nombre: limpio(f.NOMBRE), cantidad: Number(f.CANTIDAD || 1) || 1, precio: Number(f.PRECIO || 0) || 0 }))
+  // ARRIENDO: el reloj va en el bloque recurrente de la NDV, no en la lista de
+  // equipos de la referencia (ahí solo aparecen envío/instalación). Se
+  // reconstruye desde la cotización con el MISMO nombre de Books.
+  if (!equipos.length) equipos = equiposDesdeCotizacion(q.Detalle_Items_Cotizacion || [])
   if (!equipos.length) {
     if (!opts.dry) await setKvValue(clave, JSON.stringify({ estado: "sin_hardware", at: new Date().toISOString(), referenciaId })).catch(() => {})
     return { ok: true, estado: "sin_hardware", detalle: `NDV ${ref.Name || ""} sin equipos de campo (${nombres.join(" · ") || "sin ítems"})` }

@@ -192,3 +192,34 @@ export function filasPlanillaEquipos(d: DatosTicketST): Array<Array<string | num
   }
   return filas
 }
+
+/**
+ * Nombre del ítem de Books/Creator para cada código de hardware del catálogo
+ * de Vicky — ESPEJO de creator-articulos.js del cotizador (es lo que la NDV
+ * imprime). En las notas de ARRIENDO el reloj vive en el bloque recurrente y
+ * no en Equipos_Referencias_NV (ahí solo van los únicos: envío, instalación),
+ * así que el equipo se reconstruye desde los ítems de la cotización con este
+ * mismo nombre — el que SSTT compara contra la NDV.
+ */
+export const ITEM_BOOKS_POR_CODIGO: Record<string, string> = {
+  senseface_2a: "006.11 - Reloj Gama Media Facial WIFI/LAN",
+  senseface_4a: "006.11 - Reloj Gama Media Facial WIFI/LAN",
+  kit_qr: "006.9 - Reloj Gama Estándar Facial WIFI/LAN",
+  impresora_termica: "013 - Impresora Termica (Fiscal)",
+  tarjeta_id: "026.1 - Tarjeta ID (delgada)",
+}
+
+export type ItemCotizacionMin = { Codigo_Item?: string | null; Nombre_Item?: string | null; Modalidad?: string | null; Cantidad?: number | null; Subtotal_UF?: number | null }
+
+/** Equipos de campo desde los ítems de la cotización (fallback cuando la referencia NDV no los lista). */
+export function equiposDesdeCotizacion(items: ItemCotizacionMin[]): EquipoTicket[] {
+  const out: EquipoTicket[] = []
+  for (const f of items || []) {
+    const cod = limpio(f.Codigo_Item).toLowerCase()
+    const nombre = ITEM_BOOKS_POR_CODIGO[cod]
+    if (!nombre) continue
+    out.push({ nombre, cantidad: Math.max(1, Number(f.Cantidad || 1) || 1), precio: Number(f.Subtotal_UF || 0) || 0 })
+  }
+  return out
+}
+
