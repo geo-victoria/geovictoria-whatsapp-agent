@@ -8,20 +8,44 @@
  * funciona) — este módulo devuelve null y nadie se cae.
  *
  * Emisión del token (lado Lalo): self-client en api-console.zoho.com con los
- * 9 scopes del principal + ZohoFiles.files.ALL, guardado como
- * ZOHO_FILES_REFRESH_TOKEN en Vercel (agente y cotizador). Verificación:
- * GET /api/vic-admin-zoho-scope?key=<cron>&cual=files.
+ * 9 scopes del principal + ZohoFiles.files.ALL → el CÓDIGO de un solo uso se
+ * canjea con POST /api/vic-admin-zoho-canje, que verifica el scope, prueba una
+ * subida real y guarda el refresh token en vic_kv `zoho_files_refresh_token`
+ * (o env ZOHO_FILES_REFRESH_TOKEN, que manda si existe). El token principal
+ * NO se toca ni se revoca. Verificación: GET /api/vic-admin-zoho-scope?cual=files.
+ * El cotizador no guarda el refresh: pide un ACCESS token corto a
+ * GET /api/vic-zoho-files-access (x-vicky-secret).
  */
 
-const _cache: { token?: string; expiresAt?: number } = {}
+const _cache: { token?: string; expiresAt?: number; refresh?: string; refreshAt?: number } = {}
 const env = (k: string) => (process.env[k] || "").trim()
 
-export function filesTokenConfigurado(): boolean {
-  return Boolean(env("ZOHO_FILES_REFRESH_TOKEN") && env("ZOHO_CLIENT_ID") && env("ZOHO_CLIENT_SECRET"))
+/** vic_kv donde `vic-admin-zoho-canje` deja el refresh token de archivos (nunca viaja por el chat). */
+export const KV_FILES_REFRESH = "zoho_files_refresh_token"
+
+/** El refresh token de archivos: env `ZOHO_FILES_REFRESH_TOKEN` o vic_kv (canje). */
+export async function refreshTokenFiles(): Promise<string> {
+  if (env("ZOHO_FILES_REFRESH_TOKEN")) return env("ZOHO_FILES_REFRESH_TOKEN")
+  const now = Date.now()
+  if (_cache.refresh && _cache.refreshAt && now - _cache.refreshAt < 10 * 60 * 1000) return _cache.refresh
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const v = ((await getKvValue(KV_FILES_REFRESH)) || "").trim()
+    _cache.refresh = v
+    _cache.refreshAt = now
+    return v
+  } catch {
+    return ""
+  }
+}
+
+export async function filesTokenConfigurado(): Promise<boolean> {
+  return Boolean((await refreshTokenFiles()) && env("ZOHO_CLIENT_ID") && env("ZOHO_CLIENT_SECRET"))
 }
 
 export async function getZohoFilesToken(): Promise<string | null> {
-  if (!filesTokenConfigurado()) return null
+  const refresh = await refreshTokenFiles()
+  if (!refresh || !env("ZOHO_CLIENT_ID") || !env("ZOHO_CLIENT_SECRET")) return null
   const now = Date.now()
   if (_cache.token && _cache.expiresAt && _cache.expiresAt - now > 2 * 60 * 1000) return _cache.token
   const domain = env("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
@@ -31,7 +55,7 @@ export async function getZohoFilesToken(): Promise<string | null> {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "refresh_token",
-        refresh_token: env("ZOHO_FILES_REFRESH_TOKEN"),
+        refresh_token: refresh,
         client_id: env("ZOHO_CLIENT_ID"),
         client_secret: env("ZOHO_CLIENT_SECRET"),
       }),

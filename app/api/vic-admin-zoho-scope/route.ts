@@ -37,12 +37,19 @@ export async function GET(req: Request): Promise<Response> {
   const c = CREDENCIALES[cual]
   if (!c) return NextResponse.json({ ok: false, error: "cual debe ser principal | files | bookings" }, { status: 400 })
   const env = (n: string) => (process.env[n] || "").trim()
-  if (!env(c.refresh)) return NextResponse.json({ ok: true, cual, configurado: false, env: c.refresh })
+  let refresh = env(c.refresh)
+  let fuente = c.refresh
+  if (!refresh && cual === "files") {
+    const { refreshTokenFiles, KV_FILES_REFRESH } = await import("@/lib/zoho-files-token")
+    refresh = await refreshTokenFiles()
+    fuente = `vic_kv ${KV_FILES_REFRESH}`
+  }
+  if (!refresh) return NextResponse.json({ ok: true, cual, configurado: false, env: c.refresh })
   const domain = env("ZOHO_ACCOUNTS_DOMAIN") || "https://accounts.zoho.com"
   const res = await fetch(`${domain}/oauth/v2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ refresh_token: env(c.refresh), client_id: env(c.id), client_secret: env(c.secret), grant_type: "refresh_token" }),
+    body: new URLSearchParams({ refresh_token: refresh, client_id: env(c.id), client_secret: env(c.secret), grant_type: "refresh_token" }),
     cache: "no-store",
   })
   const j = (await res.json().catch(() => ({}))) as Record<string, unknown>
@@ -51,7 +58,7 @@ export async function GET(req: Request): Promise<Response> {
     ok: Boolean(j.access_token),
     cual,
     configurado: true,
-    env: c.refresh,
+    env: fuente,
     scope: scope ? scope.split(/[ ,]+/).filter(Boolean).sort() : [],
     api_domain: j.api_domain || null,
     expires_in: j.expires_in || null,
