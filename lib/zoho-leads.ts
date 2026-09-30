@@ -14,6 +14,7 @@ import { fichaOperativa, paisDeTelefonoOperativo, rosterSdrOperativo, rosterTele
 import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe, psidDe, canalMetaDe } from "./origen-canal.ts"
 import { getZohoAccessToken } from "./zoho-token"
+import { leerOrigenAnuncio, camposDeOrigen, campoClicMeta, completarLeadConOrigen, LEAD_SOURCE_META_ADS } from "./origen-anuncio.ts"
 
 function getEnv(name: string): string {
   return (process.env[name] || "").trim()
@@ -1335,7 +1336,23 @@ export function esContactoSintetico(fono: string): boolean {
   return /^(56|51|52|57)900000\d{3,6}$/.test((fono || "").replace(/\D/g, ""))
 }
 
+/**
+ * Crea (o adopta) el lead y, si el contacto llegó por un anuncio de Meta
+ * (vic_kv `origen_anuncio_<fono>`, Lalo 30-sep), completa en el lead ADOPTADO
+ * los campos de origen que estén vacíos — el lead nuevo ya nace con ellos.
+ */
 export async function createZohoLead(input: CreateZohoLeadInput): Promise<CreateZohoLeadResult> {
+  const res = await createZohoLeadBase(input)
+  if (res.success && res.leadId) {
+    const contacto = (input.telefono || "").trim() || (input.contactoWA || "").trim()
+    if (contacto && !esContactoMeta(contacto)) {
+      await completarLeadConOrigen(String(res.leadId), contacto).catch(() => null)
+    }
+  }
+  return res
+}
+
+async function createZohoLeadBase(input: CreateZohoLeadInput): Promise<CreateZohoLeadResult> {
   try {
     if (esContactoSintetico((input.telefono || "").trim() || (input.contactoWA || "").trim())) {
       return { success: false, error: "contacto_sintetico" }
@@ -1598,6 +1615,9 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
         ? input.trabajadores
         : parseInt(String(input.trabajadores || "").replace(/\D/g, ""))
 
+    // Clic a WhatsApp de Meta Ads (Lalo 30-sep): el origen lo guardó el webhook.
+    const contactoOrigen = String(input.telefono || input.contactoWA || "")
+    const origenAnuncio = esContactoMeta(contactoOrigen) ? null : await leerOrigenAnuncio(contactoOrigen).catch(() => null)
     const record: Record<string, unknown> = {
       First_Name: sanitize(names.firstName, 100),
       Last_Name: sanitize(names.lastName, 100) || "Prospecto",
@@ -1606,6 +1626,7 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
       // Contacto de Messenger/Instagram (o teléfono con marca origen_canal_)
       // → Lead_Source "Facebook" (Lalo 15-sep); el resto, el default de siempre.
       Lead_Source:
+        (origenAnuncio ? LEAD_SOURCE_META_ADS : "") ||
         (await leadSourceParaContacto(String(input.telefono || input.contactoWA || ""))) ||
         getEnv("ZOHO_DEFAULT_LEAD_SOURCE") ||
         "SEO",
@@ -1617,6 +1638,7 @@ export async function createZohoLead(input: CreateZohoLeadInput): Promise<Create
       // miles de horas por esta brecha).
       Fecha_de_Primera_revision_Lead: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
     }
+    if (origenAnuncio) Object.assign(record, camposDeOrigen(origenAnuncio, await campoClicMeta().catch(() => "")))
 
     const email = (input.email || "").trim()
     if (email) record.Email = email

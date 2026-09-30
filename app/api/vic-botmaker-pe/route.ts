@@ -33,6 +33,7 @@
 
 import { normalizarMensajeEntrante } from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
+import { guardarOrigenAnuncio } from "@/lib/origen-anuncio"
 import { PERFIL_PE } from "@/lib/paises/pe"
 import { procesarTurno, simularTurno } from "@/lib/orquestador-turno"
 import { PERFIL_TURNO_PE } from "@/lib/paises/pe/turno"
@@ -108,6 +109,8 @@ type BotmakerBody = {
   simular?: boolean
   /** Solo con simular: transcripción del adjunto (reemplaza a la visión). */
   descripcionAdjunto?: string
+  /** Meta Ads "Clic a WhatsApp": bloque referral del anuncio (Lalo 30-sep). */
+  referral?: unknown
 }
 
 function sleep(ms: number): Promise<void> {
@@ -266,6 +269,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     // IDs anónimos de Meta ("CO.…"): conservar CRUDOS o la respuesta se va a un
   // chat fantasma (caso CIMA 30-jul; reincidencia CO 08-ago). Igual que CL.
   const contact = (body.contact || "").trim().replace(/^\+/, "")
+  // Clic a WhatsApp de Meta Ads (Lalo 30-sep): la acción de código reenvía el
+  // `referral` del anuncio en el primer mensaje. Se guarda en segundo plano
+  // (solo si el contacto no tenía origen) y jamás toca la respuesta.
+  if (body.referral && !body.simular) after(() => guardarOrigenAnuncio(contact, body.referral).then(() => undefined))
+
     let message = (body.message || "").trim()
 
     // Respuesta por BOTÓN: Botmaker manda el payload del intent, no el texto.
