@@ -34,13 +34,17 @@ type Registro = { impId: string; notaId: string; archivos: string[]; campo?: str
  */
 export function planillaDesdeConfiguracion(config: Partial<Configuracion> | null | undefined, borrador: Borrador | null | undefined): PlanillaWizard | null {
   const trabajadores = (config?.trabajadores || []).filter((t) => String(t?.rut || "").trim())
-  if (!trabajadores.length) return null
   const rutEmpresa = String(borrador?.empresa?.identificador || "").trim()
   const filas: FilaPlanillaUsuario[] = []
   const admin = borrador?.admin
   if (admin?.identificador || admin?.email) {
     filas.push({ rut: String(admin.identificador || ""), correo: admin.email || "", nombres: admin.nombre || "", apellidos: admin.apellido || "", tipo: "administrador" })
   }
+  // REGLA DE ORO (Lalo 30-sep): toda Implementación nace con su planilla de
+  // usuarios, aunque el cliente todavía no haya dado la nómina — con el
+  // administrador basta. Si algún día hay que migrar la empresa de GV
+  // Avanzado a GV Portal, la planilla ya existe en el formato del wizard.
+  if (!filas.length && !trabajadores.length) return null
   for (const t of trabajadores) {
     filas.push({ rut: String(t.rut || ""), correo: t.correo, nombres: t.nombres, apellidos: t.apellidos, grupo: t.grupo, telefono1: t.telefono1, telefono2: t.telefono2, telefono3: t.telefono3, tipo: "usuario" })
   }
@@ -53,19 +57,36 @@ export function planillaDesdeConfiguracion(config: Partial<Configuracion> | null
 }
 
 /** Sube el Excel al campo de archivo `Planilla_de_Ingreso` de la IMP (obligatorio para SMB) si está vacío. */
-async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuffer, filename: string): Promise<boolean> {
+async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuffer, filename: string, nuestraAnterior = ""): Promise<boolean> {
   const H = { Authorization: `Zoho-oauthtoken ${token}` }
   const actual = await fetch(`${API()}/crm/v3/Implementaciones/${impId}?fields=Planilla_de_Ingreso`, { headers: H, cache: "no-store" })
-  const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: unknown[] }> }).data?.[0]
-  if (Array.isArray(rec?.Planilla_de_Ingreso) && rec!.Planilla_de_Ingreso!.length) return true
-  const form = new FormData()
-  form.append("file", new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename)
-  const up = await fetch(`${API()}/crm/v3/files`, { method: "POST", headers: H, body: form, cache: "no-store" })
-  const uj = (await up.json().catch(() => ({}))) as { data?: Array<{ details?: { id?: string }; code?: string }> }
-  const fileId = uj?.data?.[0]?.details?.id || ""
-  if (!up.ok || !fileId) {
-    console.warn(`[imp-planillas] subida a /files falló ${up.status}: ${JSON.stringify(uj).slice(0, 200)}`)
-    return false
+  const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: Array<{ File_Name__s?: string }> }> }).data?.[0]
+  const existentes = Array.isArray(rec?.Planilla_de_Ingreso) ? rec!.Planilla_de_Ingreso! : []
+  if (existentes.length) {
+    // Un archivo que subió una persona no se pisa. El nuestro sí se renueva
+    // cuando la planilla creció (admin solo → admin + nómina).
+    const esNuestro = nuestraAnterior && existentes.some((f) => String(f?.File_Name__s || "") === nuestraAnterior)
+    if (!esNuestro) return true
+  }
+  // El campo fileupload exige un file_id de /crm/v3/files, que a su vez exige
+  // el scope ZohoFiles.files.ALL: primero el token de Files (grant aparte,
+  // lib/zoho-files-token), y si no está configurado se intenta con el principal.
+  const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  let fileId = ""
+  try {
+    const { subirArchivoZohoFiles } = await import("./zoho-files-token")
+    fileId = (await subirArchivoZohoFiles(buf, filename, mime)) || ""
+  } catch { /* sin token de Files */ }
+  if (!fileId) {
+    const form = new FormData()
+    form.append("file", new Blob([buf], { type: mime }), filename)
+    const up = await fetch(`${API()}/crm/v3/files`, { method: "POST", headers: H, body: form, cache: "no-store" })
+    const uj = (await up.json().catch(() => ({}))) as { data?: Array<{ details?: { id?: string }; code?: string }> }
+    fileId = uj?.data?.[0]?.details?.id || ""
+    if (!up.ok || !fileId) {
+      console.warn(`[imp-planillas] subida a /files falló ${up.status}: ${JSON.stringify(uj).slice(0, 200)}`)
+      return false
+    }
   }
   const put = await fetch(`${API()}/crm/v3/Implementaciones`, {
     method: "PUT", headers: { ...H, "Content-Type": "application/json" }, cache: "no-store",
@@ -133,7 +154,9 @@ export async function adjuntarPlanillasImplementacion(
   const fono = (contact || "").replace(/\D/g, "")
   try {
     let planillas = await planillasDeSesionWizard(fono)
-    const hayNomina = (fuente.config?.trabajadores || []).some((t) => String(t?.rut || "").trim())
+    // La nómina NO es requisito (regla de oro 30-sep): el wizard genera la
+    // planilla con el administrador y lo que haya; la nómina la completa después.
+    const hayNomina = Boolean(fuente.borrador?.admin?.email || fuente.borrador?.admin?.identificador || (fuente.config?.trabajadores || []).some((t) => String(t?.rut || "").trim()))
     // Interruptor vic_kv `wizard_solo_excel`="on": solo cuando el wizard en
     // producción ya entiende `soloExcel` (sin eso el POST cerraría el
     // onboarding y dispararía el Zoho Flow).
@@ -218,7 +241,7 @@ export async function adjuntarPlanillasImplementacion(
     if (usuarios && faltaCampo) {
       try {
         const buf = await bytesDe(usuarios)
-        if (buf && (await subirAlCampoPlanilla(token, impId, buf, usuarios.filename))) campo = usuarios.filename
+        if (buf && (await subirAlCampoPlanilla(token, impId, buf, usuarios.filename, reg?.campo || ""))) campo = usuarios.filename
       } catch (e) {
         console.warn(`[imp-planillas] campo Planilla_de_Ingreso:`, e instanceof Error ? e.message : e)
       }
