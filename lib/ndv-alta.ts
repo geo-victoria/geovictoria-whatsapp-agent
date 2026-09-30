@@ -469,7 +469,11 @@ export async function procesarNdvImp(contact: string): Promise<{ estado: string;
     //   instalación) con la forma de los que Nailliw crea a mano. Sin equipos
     //   se marca `sin_hardware` y no se insiste. Hasta 3 intentos por job.
     //   Chile por ahora (lib/ticket-st decide). No bloquea el cierre del job.
-    if (job.ndv?.referenciaId && !job.ticket?.ticketId && job.ticket?.estado !== "sin_hardware" && (job.ticket?.intentos || 0) < 3 && job.pais !== "pe") {
+    //   INTERRUPTOR vic_kv `ticket_st_auto`="on" (apagado por defecto hasta el VB
+    //   de Lalo sobre el primer ticket en dry): mientras, el endpoint admin
+    //   vic-admin-ticket-st sirve para crearlos a mano o en dry.
+    const ticketAuto = ((await getKvValue("ticket_st_auto").catch(() => null)) || "").trim() === "on"
+    if (ticketAuto && job.ndv?.referenciaId && !job.ticket?.ticketId && job.ticket?.estado !== "sin_hardware" && (job.ticket?.intentos || 0) < 3 && job.pais !== "pe") {
       try {
         const { crearTicketST } = await import("./ticket-st")
         const t = await crearTicketST(c, { quoteId: job.quoteId || "", referenciaNdvId: job.ndv.referenciaId, impId: job.impId, companyId: job.companyId })
