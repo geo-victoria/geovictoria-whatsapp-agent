@@ -38,7 +38,7 @@ import {
   normalizarMensajeEntrante,
 } from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
-import { guardarOrigenAnuncio } from "@/lib/origen-anuncio"
+import { guardarOrigenAnuncio, guardarBsuid } from "@/lib/origen-anuncio"
 import { PERFIL_MX } from "@/lib/paises/mx"
 import { procesarTurno, simularTurno } from "@/lib/orquestador-turno"
 import { PERFIL_TURNO_MX } from "@/lib/paises/mx/turno"
@@ -109,6 +109,8 @@ type BotmakerBody = {
   simular?: boolean
   /** Meta Ads "Clic a WhatsApp": bloque referral del anuncio (Lalo 30-sep). */
   referral?: unknown
+  /** BSUID de WhatsApp (userData.bsuid) → Social_ID del lead (Lalo 30-sep). */
+  bsuid?: string
 }
 
 function sleep(ms: number): Promise<void> {
@@ -215,6 +217,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // `referral` del anuncio en el primer mensaje. Se guarda en segundo plano
     // (solo si el contacto no tenía origen) y jamás toca la respuesta.
     if (body.referral && !body.simular) after(() => guardarOrigenAnuncio(contact, body.referral).then(() => undefined))
+    if (body.bsuid && !body.simular) after(() => guardarBsuid(contact, body.bsuid))
 
     let message = (body.message || "").trim()
 

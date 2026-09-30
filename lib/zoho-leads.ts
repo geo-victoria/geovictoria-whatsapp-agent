@@ -14,7 +14,7 @@ import { fichaOperativa, paisDeTelefonoOperativo, rosterSdrOperativo, rosterTele
 import { tombolaZohoCoActiva } from "@/lib/paises/co/tombola-zoho"
 import { leadSourceParaContacto, esContactoMeta, telefonoAliasDe, psidDe, canalMetaDe } from "./origen-canal.ts"
 import { getZohoAccessToken } from "./zoho-token"
-import { leerOrigenAnuncio, camposDeOrigen, campoClicMeta, completarLeadConOrigen, LEAD_SOURCE_META_ADS } from "./origen-anuncio.ts"
+import { leerOrigenAnuncio, leerBsuid, camposDeOrigen, campoClicMeta, completarLeadConOrigen, LEAD_SOURCE_META_ADS } from "./origen-anuncio.ts"
 
 function getEnv(name: string): string {
   return (process.env[name] || "").trim()
@@ -1651,6 +1651,11 @@ async function createZohoLeadBase(input: CreateZohoLeadInput): Promise<CreateZoh
     const esMeta = esContactoMeta(contactoRaw)
     const aliasMeta = esMeta ? await telefonoAliasDe(contactoRaw).catch(() => "") : ""
     const phone = esMeta ? (aliasMeta ? `+${aliasMeta}` : "") : contactoRaw
+    // WhatsApp: el BSUID de la persona ("CL.1574…") va a Social_ID (Lalo 30-sep).
+    if (!esMeta) {
+      const bsuid = await leerBsuid(contactoRaw).catch(() => "")
+      if (bsuid) record.Social_ID = bsuid
+    }
     if (esMeta) {
       record.Social_ID = psidDe(contactoRaw)
       record.Canal = canalMetaDe(contactoRaw) === "instagram" ? "Instagram" : "Messenger"

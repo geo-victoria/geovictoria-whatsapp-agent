@@ -121,6 +121,36 @@ export async function leerOrigenAnuncio(contact: string): Promise<OrigenAnuncio 
   }
 }
 
+/**
+ * BSUID de WhatsApp (Business-Scoped User ID, "CL.1574…"): el identificador de
+ * la persona en WhatsApp que Botmaker expone en userData.bsuid. Va al campo
+ * Social_ID del lead (Lalo 30-sep) en TODO contacto de WhatsApp, venga o no de
+ * un anuncio. vic_kv `wa_bsuid_<fono>`; se reescribe solo si cambia.
+ */
+export function normalizarBsuid(raw: unknown): string {
+  const v = str(raw, 120)
+  return /^[A-Z]{2}\.[A-Za-z0-9_-]{6,}$/.test(v) ? v : ""
+}
+
+export async function guardarBsuid(contact: string, raw: unknown): Promise<void> {
+  try {
+    const b = normalizarBsuid(raw)
+    const fono = fonoDe(contact)
+    if (!b || !fono) return
+    const previo = await kvGet(`wa_bsuid_${fono}`).catch(() => null)
+    if (previo === b) return
+    await kvSet(`wa_bsuid_${fono}`, b)
+  } catch (e) {
+    console.warn("[origen-anuncio] bsuid:", e instanceof Error ? e.message : e)
+  }
+}
+
+export async function leerBsuid(contact: string): Promise<string> {
+  const fono = fonoDe(contact)
+  if (!fono) return ""
+  return normalizarBsuid(await kvGet(`wa_bsuid_${fono}`).catch(() => null))
+}
+
 /** api_name del campo de Leads para el id del clic ("" = no existe aún). */
 export async function campoClicMeta(): Promise<string> {
   const kv = ((await kvGet("meta_click_field").catch(() => null)) || "").trim()
@@ -150,12 +180,15 @@ export function camposFaltantes(actual: Record<string, unknown>, deseados: Recor
   return out
 }
 
-/** Completa un lead existente con el origen (solo campos vacíos). Best-effort. */
+/** Completa un lead existente con el origen del anuncio y el BSUID (solo campos vacíos). Best-effort. */
 export async function completarLeadConOrigen(leadId: string, contact: string): Promise<Record<string, string> | null> {
   try {
+    if (!leadId) return null
     const o = await leerOrigenAnuncio(contact)
-    if (!o || !leadId) return null
-    const deseados = camposDeOrigen(o, await campoClicMeta())
+    const bsuid = await leerBsuid(contact)
+    if (!o && !bsuid) return null
+    const deseados: Record<string, string> = o ? camposDeOrigen(o, await campoClicMeta()) : {}
+    if (bsuid) deseados.Social_ID = bsuid
     const { getZohoAccessToken } = await import("./zoho-token")
     const token = await getZohoAccessToken()
     const api = (process.env.ZOHO_API_DOMAIN || "").trim() || "https://www.zohoapis.com"

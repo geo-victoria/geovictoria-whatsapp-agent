@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { normalizarReferral, camposDeOrigen, camposFaltantes, LEAD_SOURCE_META_ADS } from "../lib/origen-anuncio.ts"
+import { normalizarReferral, normalizarBsuid, camposDeOrigen, camposFaltantes, LEAD_SOURCE_META_ADS } from "../lib/origen-anuncio.ts"
 
 test("referral en camelCase (acción de código) y snake_case (Meta crudo)", () => {
   const a = normalizarReferral({ sourceId: "120212", sourceType: "ad", headline: "Control de asistencia", ctwaClid: "ARAk1" }, "T")
@@ -38,4 +38,11 @@ test("forma real de Botmaker 30-sep: message.referralInfo con sourceType post y 
   const o = normalizarReferral({ sourceId: msg.referralInfo.sourceId, sourceType: "post", sourceUrl: msg.referralInfo.sourceURL, headline: msg.referralInfo.headline, ctwaClid: "" }, "T")!
   assert.equal(o.sourceId, "1717365150390756")
   assert.deepEqual(camposDeOrigen(o, "Meta_Click_ID"), { Lead_Source: LEAD_SOURCE_META_ADS, Medium: "whatsapp_ads", Meta_Ad_ID: "1717365150390756", Campaign: "Chatea con nosotros" })
+})
+
+test("BSUID de WhatsApp: forma CL.<id>, basura fuera", () => {
+  assert.equal(normalizarBsuid("CL.1574091260476692"), "CL.1574091260476692")
+  assert.equal(normalizarBsuid(""), "")
+  assert.equal(normalizarBsuid("56975994653"), "")
+  assert.equal(normalizarBsuid(undefined), "")
 })
