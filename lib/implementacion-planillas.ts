@@ -23,7 +23,7 @@ const WIZARD_URL = (process.env.VICKY_ONBOARDING_WIZARD_URL || "https://onboardi
 export const TITULO_NOTA_PLANILLAS = "Planillas de ingreso (Vicky)"
 
 /** Sube al cambiar el contenido de la Planilla de Ingreso (fuerza renovar el archivo del campo). */
-const VERSION_PLANILLA_INGRESO = "v3-rubro"
+const VERSION_PLANILLA_INGRESO = "v4-rubro"
 /** Usuario Zoho de Vicky (vicky@): autor de los archivos que subió el agente. */
 const VICKY_USUARIO_ZOHO_ID = (process.env.VICKY_ZOHO_USER_ID || "3525045000484500876").trim()
 
@@ -116,7 +116,8 @@ export async function planillaIngresoDe(
 /** Sube el Excel al campo de archivo `Planilla_de_Ingreso` de la IMP (obligatorio para SMB) si está vacío. */
 async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuffer, filename: string, nuestraAnterior = ""): Promise<boolean> {
   const H = { Authorization: `Zoho-oauthtoken ${token}` }
-  const actual = await fetch(`${API()}/crm/v3/Implementaciones/${impId}?fields=Planilla_de_Ingreso`, { headers: H, cache: "no-store" })
+  // v8 (no v3): v3 entrega el campo en otra forma (attachment_Id, creator_Id, sin Created_By__s).
+  const actual = await fetch(`${API()}/crm/v8/Implementaciones/${impId}?fields=Planilla_de_Ingreso`, { headers: H, cache: "no-store" })
   const rec = ((await actual.json().catch(() => ({}))) as { data?: Array<{ Planilla_de_Ingreso?: Array<{ id?: string; File_Name__s?: string; Created_By__s?: { email?: string; id?: string; name?: string } }> }> }).data?.[0]
   const existentes = Array.isArray(rec?.Planilla_de_Ingreso) ? rec!.Planilla_de_Ingreso! : []
   // Un archivo que subió una PERSONA no se pisa jamás. Los que subió Vicky
@@ -149,7 +150,7 @@ async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuff
       return false
     }
   }
-  const put = await fetch(`${API()}/crm/v3/Implementaciones`, {
+  const put = await fetch(`${API()}/crm/v8/Implementaciones`, {
     method: "PUT", headers: { ...H, "Content-Type": "application/json" }, cache: "no-store",
     body: JSON.stringify({ data: [{ id: impId, Planilla_de_Ingreso: [...aBorrar, { file_id: fileId }] }], trigger: ["blueprint"] }),
   })
