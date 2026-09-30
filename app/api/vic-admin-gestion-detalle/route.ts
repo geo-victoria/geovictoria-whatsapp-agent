@@ -116,7 +116,16 @@ export async function GET(req: Request): Promise<Response> {
     const ejecutivos = new Set<string>()
     for (const m of deEjec) ejecutivos.add(nombreSesion(String(m.session_id || "").toLowerCase()))
     for (const l of llam) ejecutivos.add(nombreSesion(String(l.session_id || "").toLowerCase()))
-    for (const n of notasTlmk) ejecutivos.add(roster.find((r) => r.id === n.Created_By?.id)?.nombre || n.Created_By?.name || "espejo")
+    // Nota humana → su autor del roster; nota-espejo (la crea el robot) → la
+    // sesión o el nombre que trae el título "WhatsApp <sesión> ↔ cliente (espejo…)".
+    const sinTilde = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    for (const n of notasTlmk) {
+      const porAutor = roster.find((r) => r.id === n.Created_By?.id)
+      const titulo = sinTilde(String(n.Note_Title || ""))
+      const porTitulo = roster.find((r) => (r.sesion && titulo.includes(r.sesion)) || (r.nombre && titulo.includes(sinTilde(r.nombre))))
+      const quien = porAutor || porTitulo
+      if (quien) ejecutivos.add(quien.nombre)
+    }
 
     const senales: string[] = []
     if (deEjec.length) senales.push("whatsapp_espejo")
