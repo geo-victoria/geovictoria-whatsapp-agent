@@ -23,7 +23,7 @@ const WIZARD_URL = (process.env.VICKY_ONBOARDING_WIZARD_URL || "https://onboardi
 export const TITULO_NOTA_PLANILLAS = "Planillas de ingreso (Vicky)"
 
 /** Sube al cambiar el contenido de la Planilla de Ingreso (fuerza renovar el archivo del campo). */
-const VERSION_PLANILLA_INGRESO = "v5-rubro"
+const VERSION_PLANILLA_INGRESO = "v6-rubro"
 /** Usuario Zoho de Vicky (vicky@): autor de los archivos que subió el agente. */
 const VICKY_USUARIO_ZOHO_ID = (process.env.VICKY_ZOHO_USER_ID || "3525045000484500876").trim()
 
@@ -154,15 +154,18 @@ async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuff
   // campo VACÍO. Primero se agrega el nuevo; recién con el nuevo adentro se
   // borran los anteriores de Vicky. Si el borrado falla, quedan dos archivos
   // (visible y corregible), nunca cero.
-  const putCampo = async (valor: unknown[]) => {
-    const r = await fetch(`${API()}/crm/v8/Implementaciones`, {
+  // Alta por v3 (un {file_id} por v8 responde SUCCESS y no agrega nada —
+  // verificado 30-sep); borrado por v8 con {id, _delete} (el formato que
+  // sí funcionó al retirar los Excel de carga masiva).
+  const putCampo = async (valor: unknown[], version: "v3" | "v8") => {
+    const r = await fetch(`${API()}/crm/${version}/Implementaciones`, {
       method: "PUT", headers: { ...H, "Content-Type": "application/json" }, cache: "no-store",
       body: JSON.stringify({ data: [{ id: impId, Planilla_de_Ingreso: valor }], trigger: ["blueprint"] }),
     })
     const pj = (await r.json().catch(() => ({}))) as { data?: Array<{ code?: string; message?: string }> }
     return { ok: r.ok && pj?.data?.[0]?.code === "SUCCESS", pj }
   }
-  const add = await putCampo([{ file_id: fileId }])
+  const add = await putCampo([{ file_id: fileId }], "v3")
   if (!add.ok) {
     console.warn(`[imp-planillas] campo Planilla_de_Ingreso no se pudo fijar: ${JSON.stringify(add.pj).slice(0, 200)}`)
     return false
@@ -176,7 +179,7 @@ async function subirAlCampoPlanilla(token: string, impId: string, buf: ArrayBuff
   }
   const borrar = aBorrar.filter((b) => ahora.some((f) => String(f?.id || "") === b.id))
   if (borrar.length) {
-    const del = await putCampo(borrar)
+    const del = await putCampo(borrar, "v8")
     if (!del.ok) console.warn(`[imp-planillas] IMP ${impId}: no se pudo retirar la planilla anterior: ${JSON.stringify(del.pj).slice(0, 200)}`)
   }
   const ok = true
