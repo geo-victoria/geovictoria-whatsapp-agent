@@ -35,7 +35,10 @@ export const SCOPES_REQUERIDOS = [
   "ZohoCRM.settings.ALL",
   "ZohoCRM.templates.email.READ",
   "ZohoCRM.users.ALL",
-  "ZohoFiles.files.ALL",
+  // La subida a /crm/v3/files (campo fileupload) NO la cubre ZohoFiles.files.ALL:
+  // Zoho responde OAUTH_SCOPE_MISMATCH (verificado 30-sep). El scope que exige
+  // es el de archivos del CRM (docs v8 "Upload Files to ZFS": ZohoCRM.Files.CREATE).
+  "ZohoCRM.Files.CREATE",
 ]
 
 const env = (n: string) => (process.env[n] || "").trim()
