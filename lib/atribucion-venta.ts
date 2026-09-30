@@ -116,3 +116,81 @@ export async function ventaEsDeVicky(
     return { deVicky: false, motivo: "no verificable" }
   }
 }
+
+/** ¿La cotización nació en la cotizadora de EJECUTIVOS? (Intervenci_n_Humana
+ *  "Con intervención humana"). Best-effort: si Zoho no responde, false. Vive
+ *  acá (y no en traspaso-postpago) para que la puerta del comprobante por
+ *  WhatsApp use la MISMA lectura sin importar el post-pago (ciclo de imports). */
+export async function esCanalEjecutivo(quoteId: string): Promise<boolean> {
+  try {
+    const { getZohoAccessToken } = await import("./zoho-token")
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const token = await getZohoAccessToken()
+    const r = await fetch(`${api}/crm/v3/${mod}/${quoteId}?fields=Intervenci_n_Humana`, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      cache: "no-store",
+    })
+    if (r.status !== 200) return false
+    const marca = String(
+      ((await r.json().catch(() => ({}))) as { data?: Array<{ Intervenci_n_Humana?: string }> }).data?.[0]?.Intervenci_n_Humana || "",
+    )
+    return /intervenci/i.test(marca)
+  } catch {
+    return false
+  }
+}
+
+/** Canal + atribución en una sola llamada: `deVicky` manda el alta por chat. */
+export async function atribucionDeCotizacion(quoteId: string): Promise<Atribucion & { canalEjecutivo: boolean }> {
+  const canalEjecutivo = await esCanalEjecutivo(quoteId)
+  const a = canalEjecutivo
+    ? await ventaEsDeVicky(quoteId, true).catch(() => ({ deVicky: false, motivo: "no verificable" }))
+    : { deVicky: true, motivo: "emitida por Vicky" }
+  return { ...a, canalEjecutivo }
+}
+
+export type DuenoCotizacion = { id: string; email: string; nombre: string; telefono: string }
+
+/**
+ * Dueño HUMANO de la cotización (para presentarlo cuando la venta es del
+ * ejecutivo): nombre y correo del Owner en Zoho; teléfono desde la ficha
+ * operativa y, si no está ahí, desde la ficha de usuario de Zoho. Robots
+ * (vicky@, info@, productmanager@) → null.
+ */
+export async function duenoHumanoDeCotizacion(quoteId: string): Promise<DuenoCotizacion | null> {
+  try {
+    const { getZohoAccessToken } = await import("./zoho-token")
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const mod = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
+    const token = await getZohoAccessToken()
+    const H = { Authorization: `Zoho-oauthtoken ${token}` }
+    const r = await fetch(`${api}/crm/v3/coql`, {
+      method: "POST",
+      headers: { ...H, "Content-Type": "application/json" },
+      body: JSON.stringify({ select_query: `select Owner.email, Owner.full_name, Owner.id from ${mod} where id = '${quoteId}'` }),
+      cache: "no-store",
+    })
+    if (r.status !== 200) return null
+    const row = (((await r.json().catch(() => ({}))) as { data?: Array<Record<string, string>> }).data || [])[0]
+    const email = String(row?.["Owner.email"] || "").trim().toLowerCase()
+    const id = String(row?.["Owner.id"] || "").trim()
+    if (!email || /^(vicky|info|productmanager)@/i.test(email)) return null
+    const nombre = String(row?.["Owner.full_name"] || "").trim() || email.split("@")[0]
+    let telefono = ""
+    try {
+      const { personaPorEmail } = await import("./paises/ficha-operativa")
+      telefono = String(personaPorEmail(email)?.telefono || "").trim()
+    } catch { /* sin ficha */ }
+    if (!telefono && id) {
+      const u = await fetch(`${api}/crm/v3/users/${id}`, { headers: H, cache: "no-store" })
+      if (u.status === 200) {
+        const d = ((await u.json().catch(() => ({}))) as { users?: Array<{ phone?: string; mobile?: string }> }).users?.[0]
+        telefono = String(d?.phone || d?.mobile || "").trim()
+      }
+    }
+    return { id, email, nombre, telefono }
+  } catch {
+    return null
+  }
+}

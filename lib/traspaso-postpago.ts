@@ -28,7 +28,7 @@ import { pagoCierraLoop } from "./loop-v2"
 import { claveFase, claveBorrador, claveQuoteOnboarding, claveColaAltas } from "./onboarding/fase"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { onboardingActivoPara } from "./onboarding-piloto"
-import { ventaEsDeVicky } from "./atribucion-venta"
+import { ventaEsDeVicky, esCanalEjecutivo } from "./atribucion-venta"
 import { entregarKickoffOnboarding } from "./onboarding-envio"
 
 // Los mensajes POST-PAGO son transaccionales (07-sep): el gate de proactividad
@@ -316,28 +316,6 @@ async function asignarVentaAutonoma(
  * ejecutivo humano. Best-effort en cada paso; nunca lanza.
  */
 
-/** ¿La cotización nació en la cotizadora de EJECUTIVOS? (Intervenci_n_Humana
- *  "Con intervención humana"). Best-effort: si Zoho no responde, false — el
- *  chequeo con reintentos de más abajo sigue mandando. */
-async function esCanalEjecutivo(quoteId: string): Promise<boolean> {
-  try {
-    const { getZohoAccessToken } = await import("./zoho-token")
-    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-    const quoteModule = (process.env.ZOHO_QUOTE_MODULE || "Cotizaciones_GeoVictoria").trim()
-    const token = await getZohoAccessToken()
-    const r = await fetch(`${api}/crm/v3/${quoteModule}/${quoteId}?fields=Intervenci_n_Humana`, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      cache: "no-store",
-    })
-    if (r.status !== 200) return false
-    const marca = String(
-      ((await r.json().catch(() => ({}))) as { data?: Array<{ Intervenci_n_Humana?: string }> }).data?.[0]?.Intervenci_n_Humana || "",
-    )
-    return /intervenci/i.test(marca)
-  } catch {
-    return false
-  }
-}
 
 export async function cerrarYTraspasarPostPago(
   quoteId: string,

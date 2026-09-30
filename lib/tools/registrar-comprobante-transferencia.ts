@@ -44,6 +44,7 @@ import {
   renderPlantillaOnboarding,
 } from "@/lib/onboarding/plantilla"
 import { getZohoAccessToken } from "@/lib/zoho-token"
+import { atribucionDeCotizacion, duenoHumanoDeCotizacion } from "@/lib/atribucion-venta"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { enviarCorreoCobranza } from "@/lib/correo-cobranza"
 import { adjuntarComprobanteACotizacion, mediaEntranteReciente } from "@/lib/comprobante-adjunto"
@@ -787,6 +788,30 @@ export async function registrarComprobanteTransferencia(
     // ventana de 24 h está abierta por definición.
     // PERÚ (21-sep): la misma segunda puerta que Chile — comprobante legible
     // ⇒ alta por chat, no el wizard web.
+    // LA VENTA TIENE QUE SER DE VICKY (Lalo 30-sep, caso Rojas Cohen COT1560):
+    // esta puerta abría el alta por chat a CUALQUIER pagador, también a la
+    // cotización que un ejecutivo armó desde cero — el comprobante llega acá
+    // porque la página de aceptación mostraba el WhatsApp de Vicky. La puerta
+    // del pago online respeta `ventaEsDeVicky` desde el 13-sep; ahora las dos.
+    // Venta del ejecutivo ⇒ se registra el pago (ya hecho arriba), se presenta
+    // al dueño de la cotización y el onboarding es SUYO (wizard/excel). Candado
+    // `traspaso_postpago_` para que el barrido del cotizador no lo reabra.
+    // Fail-closed igual que el post-pago: sin poder verificar, es del ejecutivo.
+    const atribucion = await atribucionDeCotizacion(pointer.quoteId).catch(() => ({ deVicky: false, motivo: "no verificable", canalEjecutivo: true }))
+    if (!atribucion.deVicky) {
+      const dueno = await duenoHumanoDeCotizacion(pointer.quoteId).catch(() => null)
+      await setKvValue(`traspaso_postpago_${pointer.quoteId}`, new Date().toISOString()).catch(() => {})
+      avisarEquipoInterno(
+        `💳 Comprobante ${pais.toUpperCase()} de +${contact} para la cotización ${pointer.quoteId} (${pointer.empresa || "?"}): venta del EJECUTIVO (${atribucion.motivo}) — ` +
+          `pago registrado, SIN alta por chat. Dueño: ${dueno ? `${dueno.nombre} <${dueno.email}>` : "sin dueño humano legible"}. El onboarding lo lleva el ejecutivo.`,
+      ).catch(() => {})
+      const fono = dueno?.telefono ? `\n📱 WhatsApp: ${dueno.telefono}` : ""
+      const mensajeParaProspecto = dueno
+        ? `${acuse(montoFmt)}\n\nTu cotización la lleva ${dueno.nombre}, de nuestro equipo comercial: ya le llegó el aviso de tu pago y te acompaña con la activación de tu cuenta.${fono}\n\nCualquier duda, me escribes por aquí 😊`
+        : `${acuse(montoFmt)}\n\nNuestro equipo comercial ya recibió el aviso de tu pago y te contacta para la activación de tu cuenta. Cualquier duda, me escribes por aquí 😊`
+      return { ok: true, mensajeParaProspecto, notaCreada, avisoInterno: true }
+    }
+
     if ((pais === "cl" || pais === "pe" || pais === "co" || pais === "mx") && (await onboardingActivoPara(contact))) {
       // SEGUNDA EMPRESA con el alta de la primera todavía abierta (08-sep):
       // no se re-siembra ni se manda otro formulario — queda pagada y en
