@@ -210,6 +210,52 @@ export async function detectarCanalOrigen(contactId: string): Promise<string> {
   }
 }
 
+/**
+ * Canal de ORIGEN de un mensaje entrante — UNA regla para los 4 webhooks
+ * (01-oct, caso Eduardo +51972813566): un +51 escribió a la línea CHILENA,
+ * el channelId del body era la línea chilena, la regla vieja lo descartó por
+ * "incoherente con el prefijo" y conservó la línea peruana guardada → las dos
+ * respuestas salieron por la línea +51, donde no había ventana, y Meta las
+ * rechazó (131047): el cliente escribió dos veces y nadie le contestó.
+ *
+ * Con los bots unificados (22-sep) un canal "de otro país" ya no prueba que
+ * el bot reporte mal la línea. La verdad es la API de mensajes de Botmaker:
+ * el chat.channelId del último mensaje DEL CLIENTE. Orden:
+ *   1. canal coherente con el país del contacto → se guarda tal cual;
+ *   2. incoherente → se consulta Botmaker y manda lo que diga (aunque sea la
+ *      línea de otro país: se responde por donde el cliente escribió);
+ *   3. Botmaker no lo encuentra → la regla vieja: un origen guardado que no
+ *      calza con el país se repone a la línea del país.
+ */
+export async function resolverCanalOrigen(
+  contactId: string,
+  canalBody: string,
+  paisOverride?: PaisLinea | null,
+): Promise<string> {
+  const clean = normalizeContactId(contactId)
+  const canal = (canalBody || "").trim()
+  if (!clean || !canal) return ""
+  if (canalCoherenteConContacto(clean, canal, paisOverride)) {
+    guardarCanalOrigen(clean, canal)
+    return canal
+  }
+  const real = await detectarCanalOrigen(clean).catch(() => "")
+  if (real) {
+    if (real !== canal) console.warn(`[canal-origen] ${clean}: body dice ${canal}, Botmaker dice ${real} — manda Botmaker`)
+    return real
+  }
+  const conocido = await canalDeOrigen(clean)
+  if (conocido && !canalCoherenteConContacto(clean, conocido, paisOverride)) {
+    const p = paisLineaDeContacto(clean)
+    if (p === "pe" || p === "co" || p === "mx" || p === "cl") {
+      guardarCanalOrigen(clean, channelIdPorPais(p))
+      console.warn(`[canal-origen] ${clean}: sin dato de Botmaker; origen guardado ${conocido} no calza con su país — repuesto a la línea de ${p.toUpperCase()}`)
+      return channelIdPorPais(p)
+    }
+  }
+  return conocido
+}
+
 /** Anota el fallo sin await (best-effort) — ver lib/envio-fallido.ts. */
 function anotarFallo(f: { c: string; tipo: string; tpl?: string; linea?: string; motivo: string; detalle?: string }): void {
   void import("./envio-fallido").then((m) => m.registrarEnvioFallido(f)).catch(() => undefined)

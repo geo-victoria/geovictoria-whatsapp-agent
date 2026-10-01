@@ -53,7 +53,7 @@ import {
   drainInbox,
   inboxHasPending,
 } from "@/lib/processing-lock-v3"
-import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendTypingIndicator, resolverCanalOrigen } from "@/lib/botmaker-push-v3"
 import { reenviarSiNoEsDeEstePais } from "@/lib/ruteo-pais"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { transcribirAudio } from "@/lib/transcribe-audio"
@@ -293,23 +293,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       ? await (await import("@/lib/probador-pais")).paisProbador(contact).catch(() => null)
       : null
     if (contact && canalBody) {
-      if (canalCoherenteConContacto(contact, canalBody, paisProb)) {
-        setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
-      } else {
-        const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
-      // Un origen guardado que TAMPOCO calza con el país del contacto (quedó
-      // mal por la regla vieja de Perú, 25-sep) se reemplaza por la línea del
-      // país: sin esto las respuestas seguían saliendo por la línea chilena.
-      if (conocido && !canalCoherenteConContacto(contact, conocido, paisProb)) {
-        const { channelIdPorPais, paisLineaDeContacto } = await import("@/lib/linea-por-pais")
-        const p = paisLineaDeContacto(contact)
-        if (p === "pe" || p === "co" || p === "mx" || p === "cl") {
-          await setKvValue(`canal_origen_${contact}`, channelIdPorPais(p)).catch(() => {})
-          console.warn(`[canal-origen] ${contact}: origen guardado ${conocido} no calza con su país — repuesto a la línea de ${p.toUpperCase()}`)
-        }
-      }
-        if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
-      }
+      // UNA regla para los 4 webhooks (01-oct, caso Eduardo): coherente → se
+      // guarda; incoherente → manda lo que diga Botmaker. Ver lib/botmaker-push-v3.
+      await resolverCanalOrigen(contact, canalBody, paisProb).catch(() => "")
     }
 
     // Ruteo de retorno (espejo del MX): el Master Bot rutea por ID DEL CANAL,

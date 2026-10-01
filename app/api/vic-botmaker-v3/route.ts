@@ -33,7 +33,7 @@ import { faseDelContacto } from "@/lib/onboarding-canal"
 
 import { fetchHistoryV3, getFollowupCronSecret, appendTurnV3, setKvValue, getKvValue } from "@/lib/supabase-persistence-v3"
 import { acquireLock, hashMessage, bufferInboundMessage, drainInbox } from "@/lib/processing-lock-v3"
-import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, canalCoherenteConContacto } from "@/lib/botmaker-push-v3"
+import { sendBotmakerMessage, sendTypingIndicator, detectarCanalOrigen, resolverCanalOrigen } from "@/lib/botmaker-push-v3"
 
 import { consumirCotizacionPendiente } from "@/lib/enviar-cotizacion-wa"
 
@@ -182,27 +182,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     const paisProb = contact && canalBody
       ? await (await import("@/lib/probador-pais")).paisProbador(contact).catch(() => null)
       : null
-    if (contact && canalBody && canalCoherenteConContacto(contact, canalBody, paisProb)) {
-      setKvValue(`canal_origen_${contact}`, canalBody).catch(() => {})
-    } else if (contact && canalBody) {
-      // El body trae el canal de OTRO país (ej. contacto +57 con la línea +56):
-      // el master bot de Botmaker ruteó el mensaje al bot equivocado (caso
-      // María 23-jul, respuestas por la línea CL a una clienta de la línea CO).
-      // No pisamos el origen; si aún no lo conocemos, lo resolvemos contra la
-      // API de Botmaker (cubre también al +57 que legítimamente escribe al +56).
-      const conocido = await getKvValue(`canal_origen_${contact}`).catch(() => null)
-      // Un origen guardado que TAMPOCO calza con el país del contacto (quedó
-      // mal por la regla vieja de Perú, 25-sep) se reemplaza por la línea del
-      // país: sin esto las respuestas seguían saliendo por la línea chilena.
-      if (conocido && !canalCoherenteConContacto(contact, conocido, paisProb)) {
-        const { channelIdPorPais, paisLineaDeContacto } = await import("@/lib/linea-por-pais")
-        const p = paisLineaDeContacto(contact)
-        if (p === "pe" || p === "co" || p === "mx" || p === "cl") {
-          await setKvValue(`canal_origen_${contact}`, channelIdPorPais(p)).catch(() => {})
-          console.warn(`[canal-origen] ${contact}: origen guardado ${conocido} no calza con su país — repuesto a la línea de ${p.toUpperCase()}`)
-        }
-      }
-      if (!conocido) await detectarCanalOrigen(contact).catch(() => "")
+    if (contact && canalBody) {
+      // UNA regla para los 4 webhooks (01-oct, caso Eduardo): coherente → se
+      // guarda; incoherente → manda lo que diga Botmaker. Ver lib/botmaker-push-v3.
+      await resolverCanalOrigen(contact, canalBody, paisProb).catch(() => "")
     } else if ((contact.startsWith("57") && contact.length >= 12) || contact.startsWith("CO.")) {
       // Fallback (caso +573172822429): un +57 escribiendo SIN channelId puede
       // venir por la línea CHILENA — si respondemos por la línea CO, Meta
