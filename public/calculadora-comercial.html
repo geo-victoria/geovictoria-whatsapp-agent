@@ -267,7 +267,11 @@
         </div>
 
         <div class="card asistencia-section">
-            <div class="section-title">Asistencia <span id="unlockBadge" class="unlock-badge" style="display:none;">Dcto. desbloqueado</span></div>
+            <div class="section-title">Asistencia <span id="unlockBadge" class="unlock-badge" style="display:none;">Dcto. desbloqueado</span>
+                <label for="listaVickyCheck" style="float:right;font-size:13px;font-weight:500;cursor:pointer;" title="Precios con los que Vicky cotiza por WhatsApp: 1-2 personas 0,25 UF fijo · 3-10 0,55 UF fijo · 11-20 0,055 UF por persona. Sobre 20 rige la lista comercial.">
+                    <input type="checkbox" id="listaVickyCheck" style="margin-right:6px;vertical-align:middle;">Lista Vicky (1-20)
+                </label>
+            </div>
             <table class="service-table">
                 <thead>
                     <tr>
@@ -932,7 +936,11 @@
             });
         });
 
-        const pricingTiers = [
+        // LISTA VICKY (Lalo 01-oct, pedido de Paola y Victoria): interruptor que
+        // cambia la tabla de Asistencia a la lista con la que Vicky cotiza por
+        // WhatsApp (1-2 fijo 0,25 · 3-10 fijo 0,55 · 11-20 0,055/u), para emitir
+        // al toque el precio que el cliente ya vio. Sobre 20 rige la comercial.
+        const PRICING_TIERS_COMERCIAL = [
             { min: 1, max: 10, type: 'fijo', uf: 0.75, maxDiscount: 25 },
             { min: 11, max: 20, type: 'por_usuario', uf: 0.09, maxDiscount: 25 },
             { min: 21, max: 30, type: 'por_usuario', uf: 0.08, maxDiscount: 25 },
@@ -946,6 +954,14 @@
             { min: 5001, max: 8000, type: 'por_usuario', uf: 0.035, maxDiscount: 25 },
             { min: 8001, max: Infinity, type: 'por_usuario', uf: 0.03, maxDiscount: 25 },
         ];
+        const PRICING_TIERS_VICKY = [
+            { min: 1, max: 2, type: 'fijo', uf: 0.25, maxDiscount: 25 },
+            { min: 3, max: 10, type: 'fijo', uf: 0.55, maxDiscount: 25 },
+            { min: 11, max: 20, type: 'por_usuario', uf: 0.055, maxDiscount: 25 },
+            ...PRICING_TIERS_COMERCIAL.filter(t => t.min > 20),
+        ];
+        let pricingTiers = PRICING_TIERS_COMERCIAL;
+        let listaVicky = false;
         const reporteTiers = [
             { min: 5, max: 10, uf: 0.015, maxDiscount: 25 },
             { min: 11, max: 20, uf: 0.013, maxDiscount: 25 },
@@ -1367,12 +1383,13 @@
                 tierInfo.textContent = 'Incluido en promo';
                 unitPriceLabel.textContent = '— (promo 1 UF)';
             } else if (asistenciaResult.tier) {
+                const sufijoLista = listaVicky && asistenciaResult.tier.max <= 20 ? ' · Lista Vicky' : '';
                 if (asistenciaResult.tier.type === 'fijo') {
-                    tierInfo.textContent = 'Tramo 1-10';
+                    tierInfo.textContent = `Tramo ${asistenciaResult.tier.min}-${asistenciaResult.tier.max}` + sufijoLista;
                     setUnitPriceWithDiscount(unitPriceLabel, asistenciaResult.tier.uf, asistenciaDiscount, v => 'Fijo: ' + formatUF(v));
                 } else {
                     const maxText = asistenciaResult.tier.max === Infinity ? '+' : '-' + asistenciaResult.tier.max;
-                    tierInfo.textContent = `Tramo ${asistenciaResult.tier.min}${maxText}`;
+                    tierInfo.textContent = `Tramo ${asistenciaResult.tier.min}${maxText}` + sufijoLista;
                     setUnitPriceWithDiscount(unitPriceLabel, asistenciaResult.tier.uf, asistenciaDiscount, v => formatUF(v) + '/u');
                 }
             }
@@ -1835,6 +1852,11 @@
             updateCalculator();
         });
         document.getElementById('userCount').addEventListener('input', updateCalculator);
+        document.getElementById('listaVickyCheck').addEventListener('change', function() {
+            listaVicky = this.checked;
+            pricingTiers = listaVicky ? PRICING_TIERS_VICKY : PRICING_TIERS_COMERCIAL;
+            updateCalculator();
+        });
         document.getElementById('discountAsistencia').addEventListener('input', function() { handleDiscountInput(this); });
 
         // Reporte a Medida
