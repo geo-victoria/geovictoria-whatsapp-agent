@@ -92,9 +92,10 @@ export const PERFIL_PE: PerfilPais = {
   },
 
   equipo: {
-    // ROLES PERÚ (Lalo 15-sep): Mónica Mendoza = única telemarketing (lo
-    // calificado, los deals y las cotizaciones); SDR Inbound = Ana Fiori y
-    // Priscila Quispe (lo que Vicky NO logra calificar, por rotación interna
+    // ROLES PERÚ (Lalo 15-sep; 01-oct Priscila Quispe pasa a telemarketing junto a
+    // Mónica): Mónica Mendoza = telemarketing (lo
+    // calificado, los deals y las cotizaciones); SDR Inbound = Ana Fiori
+    // (lo que Vicky NO logra calificar, por rotación interna
     // — Zoho no tiene regla de tómbola para PE); gestora de la venta
     // autónoma = Cecilia Valverde (lib/traspaso-postpago, kv
     // owner_venta_autonoma_pe); líder comercial Diego Bendezú, que jamás se
@@ -103,7 +104,6 @@ export const PERFIL_PE: PerfilPais = {
     // VIC_SDR_INBOUND_PE con este mismo default).
     sdrInbound: [
       { email: "afiori@geovictoria.com", zohoUserId: "3525045000299130001" }, // Ana Fiori
-      { email: "pquispef@geovictoria.com", zohoUserId: "3525045000576828001" }, // Priscila Quispe
     ],
     ejecutivo: {
       nombre: "Mónica Mendoza",

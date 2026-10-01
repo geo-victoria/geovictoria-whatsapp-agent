@@ -314,10 +314,14 @@ const FICHA_PE: FichaOperativa = {
   ],
   toleranciaMonto: 2,
   equipo: {
-    telemarketing: [persona("mmendozav@geovictoria.com", "3525045000323383015", "Mónica Mendoza", "+51 906 239 544")],
+    // 01-oct (Lalo): Priscila Quispe pasa de SDR a telemarketing, igual que
+    // Mónica, y las oportunidades se reparten entre ambas. SDR queda Ana Fiori.
+    telemarketing: [
+      persona("mmendozav@geovictoria.com", "3525045000323383015", "Mónica Mendoza", "+51 906 239 544"),
+      persona("pquispef@geovictoria.com", "3525045000576828001", "Priscila Quispe", "+51 960 421 293"),
+    ],
     sdr: [
       persona("afiori@geovictoria.com", "3525045000299130001", "Ana Fiori", "+51 936 953 838"),
-      persona("pquispef@geovictoria.com", "3525045000576828001", "Priscila Quispe", "+51 960 421 293"),
     ],
     ventaAutonoma: persona("cvalverde@geovictoria.com", "3525045000521799149", "Cecilia Valverde", "+51 982 446 284", "-"),
     lider: "dbendezu@geovictoria.com",

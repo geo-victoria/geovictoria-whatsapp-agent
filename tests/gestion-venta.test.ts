@@ -56,10 +56,9 @@ test("sin señales legibles = sd, jamás autónoma por omisión", () => {
 
 test("las sesiones de espejo que cuentan son las de telemarketing de la ficha operativa (4 países), sin SDR", () => {
   const s = sesionesTelemarketing()
-  // 23-sep: el roster sale de lib/paises/ficha-operativa — 7 de Chile + Mónica (PE) + Gordillo (CO) + Yahel (MX).
-  assert.equal(s.size, 10)
-  assert.ok(s.has("tmartinezq") && s.has("alopez") && s.has("adiazg") && s.has("mmendozav"))
-  assert.ok(!s.has("aaraque") && !s.has("asepulveda") && !s.has("afiori") && !s.has("pquispef") && !s.has("cvalverde"))
+  // 01-oct: Priscila pasó a telemarketing PE junto a Mónica.
+  assert.ok(s.has("tmartinezq") && s.has("alopez") && s.has("adiazg") && s.has("mmendozav") && s.has("pquispef"))
+  assert.ok(!s.has("aaraque") && !s.has("asepulveda") && !s.has("afiori") && !s.has("cvalverde"))
 })
 
 test("refresco: venta vieja ya clasificada no se relee; recién pagada sí", () => {

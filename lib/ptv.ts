@@ -46,8 +46,8 @@ const VENDEDORES_DEFAULT: Record<string, string> = {
   cl: "aaraque@geovictoria.com:3525045000583802005",
   co: "agordillo@geovictoria.com:3525045000203758005",
   mx: "ysegura@geovictoria.com:3525045000308323003",
-  // Perú (04-ago): Mónica Mendoza, única ejecutiva — sin tómbola.
-  pe: "mmendozav@geovictoria.com:3525045000323383015",
+  // Perú (01-oct): Mónica Mendoza y Priscila Quispe, telemarketing por turno.
+  pe: "mmendozav@geovictoria.com:3525045000323383015,pquispef@geovictoria.com:3525045000576828001",
 }
 
 export function ptvHabilitado(): boolean {

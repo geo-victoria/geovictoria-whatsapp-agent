@@ -107,9 +107,13 @@ test("Perú: SDR peruana con caso calificado y RUC → deal_tombola; sin RUC →
     "deal_tombola",
   )
   assert.equal(
-    destinoTrasCalificar({ territorio: "Perú", ownerEmail: "pquispef@geovictoria.com", calificado: true }),
+    destinoTrasCalificar({ territorio: "Perú", ownerEmail: "afiori@geovictoria.com", calificado: true }),
     "lead_tlmk",
   )
+})
+
+test("Perú (01-oct): Priscila es telemarketing — un caso calificado suyo NO se re-sortea", () => {
+  assert.equal(destinoTrasCalificar({ territorio: "Perú", ownerEmail: "pquispef@geovictoria.com", calificado: true, rut: "20605842055" }), "sin_cambio")
 })
 
 test("Perú: SDR peruana sin calificar, o Mónica (telemarketing), o SDR chilena en territorio Perú → sin_cambio", () => {
@@ -121,7 +125,7 @@ test("Perú: SDR peruana sin calificar, o Mónica (telemarketing), o SDR chilena
 test("rosterSdrPorTerritorio: Chile y Perú tienen roster; Colombia solo con el interruptor (encendido desde el 23-sep); México = Pablo Rodríguez + Miguel Guzmán (26-sep)", () => {
   assert.equal(rosterSdrPorTerritorio("Chile").length, 2)
   assert.equal(rosterSdrPorTerritorio(null).length, 2)
-  assert.equal(rosterSdrPorTerritorio("Perú").length, 2)
+  assert.equal(rosterSdrPorTerritorio("Perú").length, 1) // 01-oct: solo Ana Fiori (Priscila pasó a telemarketing)
   assert.equal(rosterSdrPorTerritorio("Colombia").length, 3)
   assert.equal(rosterSdrPorTerritorio("México").length, 2)
 })
