@@ -9,6 +9,7 @@
  *        &deNombre=<nombre>&responderA=<correo> → nombre visible, firma y respuestas de esa persona
  *        &soloA=<correo>          → prueba a una sola casilla
  *        &forzar=1                → envía aunque el worker no conozca alguna sesión
+ *        &seguimiento=1           → "RE:" del mismo asunto + apertura de seguimiento (01-oct)
  */
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
@@ -61,7 +62,8 @@ export async function GET(req: Request): Promise<Response> {
   const pais = (new URL(req.url).searchParams.get("pais") || "").toLowerCase()
   if (!PAISES.includes(pais)) return NextResponse.json({ ok: false, error: "pais debe ser cl, pe, co o mx" }, { status: 400 })
   const d = await pendientesDelPais(pais)
-  const { asunto, html } = correoPendientes(d, "Vicky · GeoVictoria")
+  const seguimiento = new URL(req.url).searchParams.get("seguimiento") === "1"
+  const { asunto, html } = correoPendientes(d, "Vicky · GeoVictoria", { seguimiento })
   return NextResponse.json({ ok: true, ...d, asunto, html })
 }
 
@@ -75,7 +77,9 @@ export async function POST(req: Request): Promise<Response> {
   const responderA = (sp.get("responderA") || "").trim()
   const d = await pendientesDelPais(pais)
   if (!d.personas.length) return NextResponse.json({ ok: true, nada: "nadie tiene pendientes en este país" })
-  const { asunto, html } = correoPendientes(d, deNombre ? `${deNombre} · GeoVictoria` : "Vicky · GeoVictoria")
+  const { asunto, html } = correoPendientes(d, deNombre ? `${deNombre} · GeoVictoria` : "Vicky · GeoVictoria", {
+    seguimiento: sp.get("seguimiento") === "1",
+  })
   const soloA = (sp.get("soloA") || "").trim()
   if (soloA) return NextResponse.json({ prueba: soloA, ...(await enviar([soloA], [], `[PRUEBA] ${asunto}`, html, deNombre, responderA)) })
   if (d.sinWorker.length && sp.get("forzar") !== "1") {

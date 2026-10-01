@@ -164,7 +164,14 @@ export async function pendientesDelPais(pais: string): Promise<{
   return { pais: ficha.pais, nombrePais, personas, to, cc, sinWorker, calLeido: Boolean(hosts), botmakerLeido: Boolean(agentes) }
 }
 
-export function correoPendientes(d: Awaited<ReturnType<typeof pendientesDelPais>>, firma: string): { asunto: string; html: string } {
+export function correoPendientes(
+  d: Awaited<ReturnType<typeof pendientesDelPais>>,
+  firma: string,
+  // Seguimiento (Lalo 01-oct, "respondamos el mismo correo indicando qué falta de cada uno"):
+  // mismo asunto con "RE:" (Outlook y Gmail lo agrupan en la misma conversación) y una
+  // apertura que reconoce a quien ya avanzó. La tabla es la misma: se recalcula en vivo.
+  opciones: { seguimiento?: boolean } = {},
+): { asunto: string; html: string } {
   const celda = (s: string) => `<td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;vertical-align:top">${s}</td>`
   const ok = `<span style="color:#15803d">✓ listo</span>`
   const na = `<span style="color:#9ca3af">—</span>`
@@ -199,12 +206,21 @@ export function correoPendientes(d: Awaited<ReturnType<typeof pendientesDelPais>
       return `<tr>${celda(esc(p.nombre))}${celda(esp)}${celda(calTxt)}${celda(telTxt)}${celda(bmTxt)}</tr>`
     })
     .join("")
-  const asunto = `Vicky ${d.nombrePais}: lo que te falta configurar`
+  const asuntoBase = `Vicky ${d.nombrePais}: lo que te falta configurar`
+  const asunto = opciones.seguimiento ? `RE: ${asuntoBase}` : asuntoBase
+  const avanzaron = d.personas.filter((p) => p.espejo && !p.espejo.pendiente).map((p) => p.nombre.split(" ")[0])
+  const apertura = opciones.seguimiento
+    ? `<p>Hola equipo 👋</p>` +
+      `<p>Retomo este correo para ver cómo vamos. ` +
+      (avanzaron.length ? `Gracias ${esc(avanzaron.join(", ").replace(/, ([^,]*)$/, " y $1"))} por vincular su WhatsApp. ` : "") +
+      `Abajo está, actualizado a hoy, lo que todavía le falta a cada uno; lo que ya quedó listo aparece con ✓. ` +
+      `Mientras falte el espejo o el teléfono, Vicky no puede presentarte al cliente cuando te lo traspasa.</p>`
+    : `<p>Hola equipo 👋</p>` +
+      `<p>Para que Vicky trabaje con ustedes en ${esc(d.nombrePais)} nos faltan algunas configuraciones. ` +
+      `Abajo está lo pendiente de cada uno; lo que ya está listo aparece con ✓.</p>`
   const html =
     `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#1f2937;max-width:720px">` +
-    `<p>Hola equipo 👋</p>` +
-    `<p>Para que Vicky trabaje con ustedes en ${esc(d.nombrePais)} nos faltan algunas configuraciones. ` +
-    `Abajo está lo pendiente de cada uno; lo que ya está listo aparece con ✓.</p>` +
+    apertura +
     `<table style="border-collapse:collapse;margin:12px 0;border:1px solid #e5e7eb;font-size:13px">` +
     `<tr style="background:#f3f4f6"><th style="padding:8px 10px;text-align:left">Ejecutivo</th>` +
     `<th style="padding:8px 10px;text-align:left">WhatsApp (espejo)</th>` +
