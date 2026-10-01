@@ -16,11 +16,12 @@ import { getKvValue, setKvValue } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-empresa"
 
-// URL de inicio de sesión de la plataforma (GV Avanzado). Lalo 01-oct, caso
+// URL de inicio de sesión de la plataforma (GV Avanzado): users.geovictoria.com
+// desde el 01-oct (desarrollo, vía Lalo). Lalo 01-oct, caso
 // Franco: el mensaje de "cuenta creada" no traía dirección y el cliente entró
 // por costumbre a clients.geovictoria.com (la vieja). Es la MISMA que usan el
 // correo de bienvenida y el instructivo; env la pisa sin deploy.
-const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "https://advanced.geovictoria.com").trim()
+const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "https://users.geovictoria.com").trim()
 
 import { etiquetaFechaCL as etiquetaFecha, convertirHoraAgenda, TZ_AGENDA } from "./onboarding/agenda-capacitacion"
 import { lineaZonaHoraria } from "./paises/ficha-operativa"

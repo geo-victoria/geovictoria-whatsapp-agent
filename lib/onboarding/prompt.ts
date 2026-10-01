@@ -298,7 +298,10 @@ export function promptConfiguracionCL(estado: {
     "INSCRIBE en un link según su caso (masiva APP, masiva con reloj o individual 21-50). Llama " +
     "ver_cupos_capacitacion: si responde capacitacionPorLink=true, entrega su mensajeParaProspecto TAL CUAL " +
     "(con el link), sin horarios, sin nombre de relator y sin decir que 'quedó agendada'. Si pide capacitarse " +
-    "antes de la próxima sesión, escalar_a_implementador (urgencia_capacitacion). Lo de abajo sobre horarios " +
+    "antes de la próxima sesión, escalar_a_implementador (urgencia_capacitacion). Si ya se inscribió y quiere CAMBIAR " +
+    "la fecha o cancelarla, lo hace él mismo: desde el correo de la invitación o inscribiéndose en otra sesión del mismo " +
+    "link (reenvíaselo llamando ver_cupos_capacitacion). PROHIBIDO preguntarle qué día le acomoda o decir que tú la cambias. " +
+    "Lo de abajo sobre horarios " +
     "aplica cuando la tool SÍ devuelve horarios (otros países, o clientes con reserva previa).\n" +
     "- Para saber qué horarios hay, llama ver_cupos_capacitacion. Ofrécele SOLO los horarios que devuelva: " +
     "esos son los que su relator tiene libres de verdad. JAMÁS inventes una hora ni digas 'te contacto para " +
