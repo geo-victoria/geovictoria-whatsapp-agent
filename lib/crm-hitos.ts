@@ -411,7 +411,26 @@ function esTelefonoDePrueba(contact: string): boolean {
   return lista.includes(clean)
 }
 
+// BSUID → país (01-oct, caso Corfeinco): sincronizarHitoCrm trabaja con los
+// DÍGITOS del contacto ("CO.1560600928694523" → "1560600928694523") y con eso
+// se perdía el marcador de línea: territorioDeContacto no calzaba ningún
+// prefijo, el trato de un colombiano nacía Territorio "Chile" y lo sorteaba la
+// tómbola chilena. Al entrar al hito se recuerda el país de esos dígitos.
+const TERRITORIO_POR_DIGITOS = new Map<string, "Chile" | "Colombia" | "México" | "Perú">()
+
+function recordarMarcaDeLinea(contact: string): void {
+  const marca = /^\s*(CL|CO|MX|PE)\./i.exec(String(contact || ""))?.[1]?.toUpperCase()
+  if (!marca) return
+  const digitos = String(contact).replace(/\D/g, "")
+  if (!digitos) return
+  const t = marca === "CL" ? "Chile" : marca === "CO" ? "Colombia" : marca === "MX" ? "México" : "Perú"
+  if (TERRITORIO_POR_DIGITOS.size > 5000) TERRITORIO_POR_DIGITOS.clear()
+  TERRITORIO_POR_DIGITOS.set(digitos, t)
+}
+
 function territorioDeContacto(contact: string): "Chile" | "Colombia" | "México" | "Perú" | null {
+  const recordado = TERRITORIO_POR_DIGITOS.get(String(contact || "").trim())
+  if (recordado) return recordado
   // Marcador de línea (25-ago, caso GRANIPACK): los contactos LID de WhatsApp
   // (número real oculto por Meta) llegan como "CO.1594..." — el webhook del
   // país los prefija. Sin esto el LID no calza con ningún prefijo telefónico,
@@ -2072,6 +2091,7 @@ export async function sincronizarHitoCrm(
 ): Promise<void> {
   try {
     if (!habilitado()) return
+    recordarMarcaDeLinea(contact)
     const clean = (contact || "").replace(/\D/g, "")
     if (!clean || esTelefonoDePrueba(clean)) return
     if (datos.rut && !documentoPlausible(clean, datos.rut)) {
