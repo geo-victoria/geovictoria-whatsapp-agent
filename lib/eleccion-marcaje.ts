@@ -28,3 +28,47 @@ export function ultimaEleccionEsSoloApp(mensajesCliente: string[]): boolean {
   }
   return false
 }
+
+/**
+ * ELECCIÓN POR NÚMERO (01-oct, caso Productora Disco Sur): el cliente elige
+ * con un dígito pelado ("2" frente al menú, "1" frente al doble valor). La
+ * cita de un solo carácter no sirve como evidencia y el texto del cliente no
+ * dice "reloj", así que el candado bloqueaba la emisión una y otra vez. Este
+ * respaldo lee la opción N en el mensaje de Vicky inmediatamente anterior a
+ * la respuesta numérica: true si esa opción incluye reloj, false si no,
+ * null si la última elección del cliente no fue un número.
+ */
+const RE_NUMERO_SOLO =
+  /^(?:la|el|opcion|op\.?|numero|n[o°º]\.?)?\s*([1-4])\s*[.!)]?\s*$/
+const RE_OPCION_RELOJ = /reloj|checador|huellero|biometrico|equipo (fisico|biometrico)|mixt/
+
+export function eleccionNumericaConReloj(
+  mensajes: Array<{ role: string; content: unknown }>,
+): boolean | null {
+  for (let i = mensajes.length - 1; i >= 0; i--) {
+    const m = mensajes[i]
+    if (m.role !== "user") continue
+    const t = norm(String(m.content || ""))
+    if (!t) continue
+    const num = t.match(RE_NUMERO_SOLO)
+    if (!num) {
+      // Un mensaje con texto de elección explícita manda sobre un número viejo.
+      if (SOLO_APP.test(t) || CON_RELOJ.test(t)) return null
+      continue
+    }
+    const n = num[1]
+    const previo = [...mensajes.slice(0, i)].reverse().find((x) => x.role === "assistant")
+    if (!previo) return null
+    const lineas = String(previo.content || "").split(/\n/).map(norm)
+    const ini = lineas.findIndex((l) => new RegExp(`^\\s*(?:opcion\\s*)?${n}\\s*[-.)–:]`).test(l))
+    if (ini < 0) return null
+    const bloque: string[] = [lineas[ini]]
+    for (let j = ini + 1; j < lineas.length; j++) {
+      if (/^\s*(?:opcion\s*)?[1-4]\s*[-.)–:]/.test(lineas[j])) break
+      bloque.push(lineas[j])
+    }
+    const texto = bloque.join(" ").replace(/\bsin (el |un )?(reloj|checador|equipo|biometrico|huellero)\b/g, "")
+    return RE_OPCION_RELOJ.test(texto)
+  }
+  return null
+}

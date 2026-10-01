@@ -25,7 +25,7 @@ import { esContactoCL } from "./origen-canal.ts"
 function contactoOperable(contact: string): boolean {
   return esContactoCL(contact) || /^(51|57|52)\d{8,11}$/.test(String(contact || "").replace(/\D/g, ""))
 }
-import { ultimaEleccionEsSoloApp } from "./eleccion-marcaje.ts"
+import { ultimaEleccionEsSoloApp, eleccionNumericaConReloj } from "./eleccion-marcaje.ts"
 import Anthropic from "@anthropic-ai/sdk"
 import { TOOL_SCHEMAS, dispatchTool } from "./tools"
 import {
@@ -625,6 +625,19 @@ export async function runAgentLoop(params: {
               /^\s*(s[ií]|claro|dale|ok(?:ay)?|perfecto|correcto|exacto|as[ií] es)\b/i.test(userMessage || "") &&
               /reloj|mixt/i.test(String(ultimoAsistente?.content || ""))
             eleccionRespaldada = RE_RELOJ.test(textosClienteEv) || afirmoRelojPreguntado
+          }
+          // Elección por número ("1", "la 2") frente a un menú numerado: se
+          // lee la opción en el mensaje de Vicky anterior (caso Disco Sur).
+          const porNumero = eleccionNumericaConReloj([
+            ...history.map((m) => ({ role: m.role, content: m.content })),
+            ...(userMessage ? [{ role: "user", content: userMessage }] : []),
+          ])
+          if (porNumero === true) eleccionRespaldada = true
+          if (porNumero === false && !bloqueoUmbral) {
+            eleccionRespaldada = false
+            bloqueoUmbral =
+              "REGLA DE PROCESO (no es un error técnico — no se lo menciones al cliente): el cliente eligió por número una opción SIN reloj (solo app). Cotiza SIN hardware y sin puntosInstalacion."
+            console.warn(`[agent-loop] candado reloj: ${toolName} con hardware bloqueado — elección por número = sin reloj (contacto ${contact}).`)
           }
           // LA ÚLTIMA ELECCIÓN MANDA (24-sep, batería MX, y el caso Rodrigo PE
           // 22-sep): la clienta dijo "reloj y app" y después, frente al doble
