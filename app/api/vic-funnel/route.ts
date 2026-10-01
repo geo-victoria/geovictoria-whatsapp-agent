@@ -6673,7 +6673,15 @@ async function renderUsoDash(quien: string, key: string, sp: URLSearchParams): P
   const dias = Number.isFinite(diasP) && diasP >= 1 && diasP <= 180 ? Math.floor(diasP) : 30
   const hasta = fechaClUso()
   const desde = fechaClUso(new Date(Date.now() - (dias - 1) * 86_400_000))
-  const { personas, dias: porDia } = agregarUso(await leerUso(desde, hasta))
+  const filasUso = await leerUso(desde, hasta)
+  // ?formato=json: las filas crudas (día × persona × evento) para cargarlas
+  // como base al /uso del portal comercial (Ignacio 1-oct). Mismo permiso.
+  if (sp.get("formato") === "json") {
+    return new Response(JSON.stringify({ desde, hasta, filas: filasUso }), {
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    })
+  }
+  const { personas, dias: porDia } = agregarUso(filasUso)
   const fmtHora = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
   const hora = (iso: string) => {
     const d = new Date(iso)
