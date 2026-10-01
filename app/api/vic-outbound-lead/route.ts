@@ -270,6 +270,11 @@ export async function POST(req: Request): Promise<Response> {
     // Celulares peruanos: 9 dígitos que parten en 9 → 51 + número.
     contact = `51${contact}`
   }
+  // México con código de país pero sin el 1 (el formulario guarda "+52 55…",
+  // 12 dígitos): WhatsApp entrega al cliente como 521 + número, así que la
+  // respuesta abría OTRA conversación y la cadencia seguía tocando el número
+  // pelado a clientes que ya conversaban (01-oct: 10 de 14 leads MX).
+  if (/^52\d{10}$/.test(contact)) contact = `521${contact.slice(2)}`
   if (zohoLeadId) await sembrarLeadDelFormulario(contact, zohoLeadId)
   const porPrefijo = contact.startsWith("56")
     ? "cl"
