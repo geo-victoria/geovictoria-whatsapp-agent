@@ -26,20 +26,20 @@ test("ejemplo confirmado por Lalo: 15p + reloj arriendo Lima (instalación bonif
     puntos: [{ ubicacion: "Miraflores", zona: "lima", autoInstalada: false }],
     tipoCambio: TC,
   })
-  assert.equal(r.mensualNeto, 202) // 15 × 9 = 135 + arriendo 67 (US$20 × 3,372)
-  assert.equal(Math.round(r.mensualTotal * 100) / 100, 238.36) // +IGV 18% (para el cotizador)
-  assert.ok(r.mensajeParaProspecto.includes("S/202 + IGV")) // al cliente: neto + IGV
+  assert.equal(r.mensualNeto, 157) // 15 × 6 = 90 + arriendo 67 (US$20 × 3,372)
+  assert.equal(Math.round(r.mensualTotal * 100) / 100, 185.26) // +IGV 18% (para el cotizador)
+  assert.ok(r.mensajeParaProspecto.includes("S/157 + IGV")) // al cliente: neto + IGV
   assert.ok(!r.mensajeParaProspecto.includes("IGV incluido"))
   assert.equal(r.avisoSsttPeru, true) // pidió la visita: sstt la coordina (ya cotizada, bonificada)
   assert.ok(r.mensajeParaProspecto.includes("La instalación por nuestro equipo técnico va incluida sin costo en Lima Metropolitana"))
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
   assert.ok(inst && inst.descuentoPct === 100 && inst.subtotalPEN === 0 && inst.precioUnitarioPEN === 145) // US$43 × 3,372 = 145
   // Sin descuento, el pago inicial es el primer mes por adelantado (sin únicos).
-  assert.equal(Math.round(r.pagoInicialTotal * 100) / 100, 238.36)
+  assert.equal(Math.round(r.pagoInicialTotal * 100) / 100, 185.26)
   assert.equal(r.tipoCambio, TC)
   // El plan viaja al cotizador a precio de LISTA (el % va aparte).
   const plan = r.itemsCotizador.find((i) => i.id === "plan_asistencia")
-  assert.equal(plan?.subtotalPEN, 135)
+  assert.equal(plan?.subtotalPEN, 90)
   assert.equal(plan?.modalidad, "Por usuario")
 })
 
@@ -63,7 +63,7 @@ test("instalación en Lima: incluida en arriendo y en venta (Lalo 27-sep: venta 
   assert.equal(r.avisoSsttPeru, true)
   assert.ok(r.mensajeParaProspecto.includes("va incluida sin costo en Lima Metropolitana"))
   assert.ok(!r.mensajeParaProspecto.includes("factura aparte") && !r.mensajeParaProspecto.includes("US$"))
-  assert.equal(r.pagoInicialNeto, 167) // plan 100 (fijo 1-10) + arriendo 67: la bonificada no suma
+  assert.equal(r.pagoInicialNeto, 132) // plan 65 (fijo 3-10) + arriendo 67: la bonificada no suma
   // Venta en Lima: US$150 × 3,372 = 506 con la instalación incluida (línea tachada en $0).
   const v = cotizarPE({
     userCount: 10,
@@ -72,7 +72,7 @@ test("instalación en Lima: incluida en arriendo y en venta (Lalo 27-sep: venta 
     tipoCambio: TC,
   })
   assert.ok(v.mensajeParaProspecto.includes("va incluida sin costo en Lima Metropolitana"))
-  assert.equal(v.pagoInicialNeto, 506 + 100)
+  assert.equal(v.pagoInicialNeto, 506 + 65)
   const inst = v.itemsCotizador.find((i) => i.id === "instalacion_reloj")
   assert.ok(inst && inst.subtotalPEN === 0 && inst.descuentoPct === 100)
   // Venta en Lima sin pedirla: la instalación sigue incluida y se ofrece la autoinstalación.
@@ -84,7 +84,7 @@ test("instalación en Lima: incluida en arriendo y en venta (Lalo 27-sep: venta 
   })
   assert.equal(auto.avisoSsttPeru, false)
   assert.ok(auto.mensajeParaProspecto.includes("va incluida sin costo en Lima Metropolitana; si prefieres, el reloj también es autoinstalable."))
-  assert.equal(auto.pagoInicialNeto, 506 + 100)
+  assert.equal(auto.pagoInicialNeto, 506 + 65)
 })
 
 test("zona intermedia PE (Región Lima fuera de la capital + Ica): visita técnica US$129 (3 UF chilenas); envío y arriendo como fuera de Lima", () => {
@@ -122,36 +122,37 @@ test("instalación en provincia: precio cerrado US$214 (5 UF chilenas), nunca 's
     tipoCambio: TC,
   })
   assert.equal(p.avisoSsttPeru, true)
-  assert.equal(p.pagoInicialNeto, 506 + 101 + 722 + 100) // reloj + envío + instalación + primer mes
+  assert.equal(p.pagoInicialNeto, 506 + 101 + 722 + 65) // reloj + envío + instalación + primer mes
   assert.ok(p.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV.")) // forma de Chile: sin el detalle entre paréntesis
 })
 
 test("descuento = Chile: escalera 10 → 20 % SOLO sobre el plan, 6 meses", () => {
   const base = { userCount: 15, reloj: { modalidad: "arriendo" as const, cantidad: 1 }, tipoCambio: TC }
   const e2 = cotizarPE({ ...base, escalonDescuento: 2 })
-  // Plan 135 × 0,8 = 108 + arriendo 67 (sin descuento) = 175 → ×1,18 = 206,5
+  // Plan 90 × 0,8 = 72 + arriendo 67 (sin descuento) = 139 → ×1,18 = 164,02
   assert.equal(e2.descuentoPct, 0.2)
-  assert.equal(Math.round(e2.mensualTotalConDescuento * 100) / 100, 206.5)
+  assert.equal(Math.round(e2.mensualTotalConDescuento * 100) / 100, 164.02)
   // El primer mes del pago inicial YA va con el descuento (es parte de los 6).
-  assert.equal(Math.round(e2.pagoInicialTotal * 100) / 100, 206.5) // (108 + 67) × 1,18
+  assert.equal(Math.round(e2.pagoInicialTotal * 100) / 100, 164.02) // (72 + 67) × 1,18
   assert.ok(e2.mensajeParaProspecto.includes("20% de descuento en el plan durante 6 meses"))
   assert.ok(e2.mensajeParaProspecto.includes("desde el mes 7"))
   // Escalón 1 = 10 %: 121,5 + 67 = 188,5 → 222,43 con IGV.
   const e1 = cotizarPE({ ...base, escalonDescuento: 1 })
   assert.equal(e1.descuentoPct, 0.1)
-  assert.ok(Math.abs(e1.mensualTotalConDescuento - 222.43) < 0.001)
+  assert.ok(Math.abs(e1.mensualTotalConDescuento - 174.64) < 0.001)
   // Sobre el tope se recorta al tope; 0 u omitido = sin descuento.
   assert.equal(cotizarPE({ ...base, escalonDescuento: 5 }).escalonDescuento, 2)
   assert.equal(cotizarPE(base).descuentoPct, 0)
   assert.equal(cotizarPE(base).mensualTotalConDescuento, 0)
 })
 
-test("lista de Lalo 25-sep: 1-10 S/100 fijo · 11-20 S/9 por persona", () => {
-  assert.equal(precioPlanPE(1), 100) // tarifa fija 1-10
-  assert.equal(precioPlanPE(5), 100)
-  assert.equal(precioPlanPE(10), 100)
-  assert.equal(precioPlanPE(11), 99) // 11 × 9 (queda S/1 bajo el fijo, tal como vino la lista)
-  assert.equal(precioPlanPE(20), 180)
+test("lista del 01-oct: 1-2 S/29 fijo · 3-10 S/65 fijo · 11-20 S/6 por persona", () => {
+  assert.equal(precioPlanPE(1), 29) // tarifa fija 1-2
+  assert.equal(precioPlanPE(2), 29)
+  assert.equal(precioPlanPE(3), 65) // tarifa fija 3-10
+  assert.equal(precioPlanPE(10), 65)
+  assert.equal(precioPlanPE(11), 66) // 11 × 6: la escalera no baja al pasar de 10 a 11
+  assert.equal(precioPlanPE(20), 120)
   assert.equal(precioPlanPE(50), 450)
   assert.throws(() => precioPlanPE(51)) // sobre 50 no cotiza Vicky
 })
@@ -169,8 +170,8 @@ test("provincia en VENTA: envío US$30 e instalación US$214 como líneas única
   // Al cliente (doble valor) el envío va dentro del pago inicial; el desglose por línea vive en `lineas`.
   assert.ok(r.mensajeParaProspecto.includes("Se suma un pago inicial único de S/1,329 + IGV."))
   assert.ok(r.lineas.some((l) => /^Envío de reloj \(Arequipa\)$/.test(l.concepto) && l.neto === 101)) // US$30 × 3,372 = 101,16 → 101
-  // Pago único = reloj (US$150 × 3,372 = 506) + envío 101 + instalación pedida en provincia 722 + primer mes (100).
-  assert.equal(r.pagoInicialNeto, 707 + 722)
+  // Pago único = reloj (US$150 × 3,372 = 506) + envío 101 + instalación pedida en provincia 722 + primer mes (65).
+  assert.equal(r.pagoInicialNeto, 672 + 722)
   const envio = r.itemsCotizador.find((i) => i.id === "envio_reloj")
   assert.ok(envio && envio.tipo === "servicio" && envio.modalidad === "Cobro único" && envio.subtotalPEN === 101)
   const inst = r.itemsCotizador.find((i) => i.id === "instalacion_reloj")
@@ -187,9 +188,9 @@ test("provincia en ARRIENDO: tarifa US$23/mes con despacho incluido, sin línea 
     ],
     tipoCambio: TC,
   })
-  // 1 reloj Lima (US$20 → 67) + 1 reloj provincia (US$23 → 78) = 145; plan 100.
+  // 1 reloj Lima (US$20 → 67) + 1 reloj provincia (US$23 → 78) = 145; plan 65.
   assert.equal(r.mensualArriendoNeto, 145)
-  assert.equal(r.mensualNeto, 245)
+  assert.equal(r.mensualNeto, 210)
   assert.ok(r.mensajeParaProspecto.includes("El envío del reloj va incluido"))
   assert.ok(r.lineas.some((l) => l.concepto === "Reloj de control (provincia)" && l.neto === 78)) // arriendo fuera de Lima, despacho incluido
   assert.ok(!r.mensajeParaProspecto.includes("corre por cuenta del cliente"))

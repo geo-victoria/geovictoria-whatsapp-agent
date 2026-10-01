@@ -153,7 +153,7 @@ describe("tools PE — superficie Fase 1b", () => {
       puntosInstalacion: [{ ubicacion: "Lima", zona: "lima", autoInstalada: false }],
     })) as { ok: boolean; mensajeParaProspecto?: string }
     assert.equal(r.ok, true)
-    assert.ok(r.mensajeParaProspecto?.includes("S/202 + IGV")) // neto + IGV (TC fijo 3,372, arriendo US$20; plan 15 × S/9)
+    assert.ok(r.mensajeParaProspecto?.includes("S/157 + IGV")) // neto + IGV (TC fijo 3,372, arriendo US$20; plan 15 × S/6)
   })
 
   test("cotizar_referencial con escalonDescuento=2 entrega el monto con el 20 % del plan", async () => {
@@ -165,7 +165,7 @@ describe("tools PE — superficie Fase 1b", () => {
     })) as { ok: boolean; escalonDescuento?: number; mensajeParaProspecto?: string }
     assert.equal(r.ok, true)
     assert.equal(r.escalonDescuento, 2)
-    assert.ok(r.mensajeParaProspecto?.includes("S/175 + IGV"))
+    assert.ok(r.mensajeParaProspecto?.includes("S/139 + IGV")) // plan 90 × 0,8 = 72 + arriendo 67
     assert.ok(r.mensajeParaProspecto?.includes("6 meses"))
     // Compatibilidad: el flag viejo equivale al primer escalón (10 %).
     const viejo = (await dispatch("cotizar_referencial", {

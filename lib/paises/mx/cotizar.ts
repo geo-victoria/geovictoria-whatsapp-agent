@@ -5,7 +5,7 @@
  * resultado a la que esperan las tools y el cotizador (campos en MXN).
  *
  * Datos de México:
- *   - Plan: 1-15 → $1,200 fijo · 16-20 → $83/usuario (Karen, VB Lalo 24-sep).
+ *   - Plan (lista del 01-oct): 1-2 → $229 fijo · 3-10 → $499 fijo · 11-20 → $49/usuario.
  *     RANGO DE VICKY = 1-20; 21-50 solo como excepción por contacto.
  *   - Reloj checador: renta $350/mes en la base (CDMX y Zona Metropolitana),
  *     $400/mes fuera (envío incluido); venta $2,100.

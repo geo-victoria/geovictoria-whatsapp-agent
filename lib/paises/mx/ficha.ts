@@ -3,8 +3,8 @@
  * Colombia: "un solo código global con parámetros / ficha local").
  *
  * Deducida del prompt MX clásico (lib/paises/mx/prompt.ts, tropicalización
- * jul-ago) y de las decisiones de Lalo del 24-sep: plan de Karen (1-15 a
- * $1,200 fijo, 16-20 a $83 por persona), descuento = Chile (10 → 20 % sobre el
+ * jul-ago) y de las decisiones de Lalo del 24-sep: plan vigente desde el
+ * 01-oct (1-2 $229 · 3-10 $499 fijos · 11-20 $49 por persona), descuento = Chile (10 → 20 % sobre el
  * plan, 6 meses), Mesa de Ayuda MX, pago inicial = pagos únicos + primer mes.
  * Todo lo GLOBAL vive en lib/prompt-nucleo/texto.ts y NO se repite acá.
  *
@@ -36,10 +36,10 @@ export const FICHA_MX: FichaPrompt = {
   zonaTz: TZ_MX_FICHA,
   gentilicio: "mexicana",
   ejemploDudaLegal: "cómo se paga el tiempo extra doble y triple",
-  ejemploMonto: "$1,200/mes + IVA",
+  ejemploMonto: "$499/mes + IVA",
   ejemploDudaLegalCorto: "el tiempo extra doble y triple",
   ejemploDudaLegalTema: "el tema del tiempo extra",
-  ejemploMontoApp: "$1,200/mes + IVA",
+  ejemploMontoApp: "$499/mes + IVA",
   advertenciaRelojExterno:
     ", y recuérdale que un checador suelto sin respaldo en la nube deja las marcas atrapadas en el aparato — si se daña, se pierde o se lo roban, el registro se pierde con él.",
   vendedoraLocal: "vendedora mexicana",

@@ -39,6 +39,9 @@ test("Perú, Colombia y México: mismos números e ítems de la formal que el mo
     for (const { caso, r: esperado } of fx[p]) {
       // Colombia: el motor anterior tenía la tabla 1-10 fijo; hoy esa es la
       // tabla LEGADO (28-sep), así que el congelado se compara contra ella.
+      // Perú y México se re-congelaron el 01-oct con la lista nueva (1-2 · 3-10 ·
+      // 11-20): antes de re-congelar se verificó que en los 287 casos SOLO cambiaba
+      // la línea del plan (y los totales que de ella dependen).
       const entrada = p === "co" ? { ...clon(caso), tramoLegado: true } : clon(caso)
       const r = clon(fns[p](entrada as never))
       delete r.mensajeParaProspecto
@@ -87,16 +90,16 @@ test("sin equipo: el resumen de Chile (línea del plan con cantidad × unitario)
   const pe = cotizarPE({ userCount: 12, tipoCambio: 3.372 })
   assert.ok(pe.mensajeParaProspecto.startsWith("Resumen mensual recurrente:\n\n- Control de Asistencia: 12 × S/"))
   const mx = cotizarMX({ userCount: 5 })
-  assert.ok(mx.mensajeParaProspecto.includes("- Control de Asistencia: $1,200/mes"))
+  assert.ok(mx.mensajeParaProspecto.includes("- Control de Asistencia: $499/mes"))
 })
 
 test("pago inicial = pagos únicos + primer mes (plan con descuento + arriendo) en los tres países", () => {
   const pe = cotizarPE({ userCount: 15, reloj: { modalidad: "arriendo", cantidad: 1 }, puntos: [{ ubicacion: "Miraflores", zona: "lima", autoInstalada: true }], escalonDescuento: 1, tipoCambio: 3.372 })
-  assert.ok(Math.abs(pe.pagoInicialNeto - (135 * 0.9 + 67)) < 0.01)
+  assert.ok(Math.abs(pe.pagoInicialNeto - (90 * 0.9 + 67)) < 0.01)
   const co = cotizarCO({ userCount: 15, reloj: { modalidad: "arriendo", cantidad: 1 }, puntos: [{ ubicacion: "Bogotá", zona: "capital", autoInstalada: true }] })
-  assert.equal(co.pagoInicialNeto, 315000 + 86000)
+  assert.equal(co.pagoInicialNeto, 15 * 7700 + 86000)
   const mx = cotizarMX({ userCount: 10, reloj: { modalidad: "arriendo", cantidad: 1 }, puntos: [{ ubicacion: "Coyoacán", zona: "cdmx_metro", autoInstalada: true }] })
-  assert.equal(mx.pagoInicialNeto, 1200 + 350)
+  assert.equal(mx.pagoInicialNeto, 499 + 350)
 })
 
 test("el envío en venta se cobra por punto", () => {

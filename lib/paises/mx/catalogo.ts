@@ -9,6 +9,8 @@
  * catálogo chileno.
  *
  * Precios México (MXN, netos + IVA) — plan mensual asistencia:
+ *   Asistencia (01-oct, VIGENTE): 1-2 $229 fijo · 3-10 $499 fijo · 11-20 $49
+ *                     por persona. Lo de abajo es historia (24-sep).
  *   Asistencia 1-15:  $1,200/mes tarifa FIJA (Karen De la Garza, VB Lalo
  *                     24-sep; antes 1-10 a $1,000)
  *   Asistencia 16-20: $83/usuario/mes   ← RANGO DE VICKY = 1-20, igual que Chile (Lalo 23-sep)
@@ -69,10 +71,12 @@ export const CATALOGO_MODULOS_MX: ModuloSoftware[] = [
     descripcion:
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
-      // Karen De la Garza (VB Lalo 24-sep): 1-15 a $1,200 fijo. Con 16
-      // personas × $83 = $1,328: la escalera sigue subiendo, sin salto hacia abajo.
-      { minUsuarios: 1, maxUsuarios: 15, modalidad: "fijo", precioUF: 1200 },
-      { minUsuarios: 16, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 83 },
+      // Lista del 01-oct (Rodrigo, VB Lalo — SUPERSEDE la de Karen del 24-sep:
+      // 1-15 $1,200 fijo · 16-20 $83): misma forma que Chile.
+      // 1-2 $229 fijo · 3-10 $499 fijo · 11-20 $49 por persona (11 × 49 = $539).
+      { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 229 },
+      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: 499 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 49 },
       // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
       // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
       // queda, como el 21-50 de Chile, solo para la excepción por contacto

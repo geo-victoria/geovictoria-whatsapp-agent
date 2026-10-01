@@ -5,8 +5,9 @@
  * UNIDAD DE PRICING del país — en Perú es el SOL PERUANO (PEN) directo, sin
  * unidad indexada. El nombre del campo es herencia del catálogo chileno.
  *
- * LISTA VIGENTE DEL PLAN (Lalo 25-sep): 1-10 S/100 fijo · 11-20 S/9 por persona
- * (21-50 igual, solo excepción). Lo de abajo sobre la "lista de Mónica" es la
+ * LISTA VIGENTE DEL PLAN (01-oct, Rodrigo con VB de Lalo): 1-2 S/29 fijo ·
+ * 3-10 S/65 fijo · 11-20 S/6 por persona (21-50 a S/9, solo excepción; no es
+ * rango de Vicky). Lista anterior (25-sep): 1-10 S/100 fijo · 11-20 S/9. Lo de abajo sobre la "lista de Mónica" es la
  * historia del 17-sep; el reloj, el envío y la instalación siguen vigentes.
  *
  * LISTA ANTERIOR (decisiones de Lalo 17-sep — SUPERSEDE el excel de
@@ -113,10 +114,11 @@ export const CATALOGO_MODULOS_PE: ModuloSoftware[] = [
     descripcion:
       "Marcaje web, app móvil con GPS y biometría. Gestión de turnos, vacaciones y horas extra. Reportería en línea.",
     tiers: [
-      // Lista de Lalo 25-sep (SUPERSEDE la de Mónica del 17-sep): 1-10 S/100 fijo ·
-      // 11-20 S/9 por persona.
-      { minUsuarios: 1, maxUsuarios: 10, modalidad: "fijo", precioUF: 100 },
-      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 9 },
+      // Lista del 01-oct (Rodrigo, VB Lalo — SUPERSEDE la del 25-sep): misma forma
+      // que Chile. 1-2 S/29 fijo · 3-10 S/65 fijo · 11-20 S/6 por persona.
+      { minUsuarios: 1, maxUsuarios: 2, modalidad: "fijo", precioUF: 29 },
+      { minUsuarios: 3, maxUsuarios: 10, modalidad: "fijo", precioUF: 65 },
+      { minUsuarios: 11, maxUsuarios: 20, modalidad: "por_usuario", precioUF: 6 },
       // ── RANGO DE VICKY = 1-20 (Lalo 23-sep: "iguala el rango de cotización de los
       // países al de Chile, solo hasta 20"). El tramo 21-50 NO es rango de Vicky:
       // queda, como el 21-50 de Chile, solo para la excepción por contacto

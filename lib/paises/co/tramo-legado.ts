@@ -9,6 +9,11 @@
  * Sin lectura (Supabase caído) → tabla vigente: nunca frena la conversación.
  */
 export async function tramoLegadoCO(contact: string): Promise<boolean> {
+  // RETIRADA el 01-oct: la lista nueva (1-2 $35.000 · 3-10 $77.000 · 11-20
+  // $7.700/persona) es MÁS BARATA que la tabla legada en todo el rango, así que
+  // "no cambiarle el precio a quien ya lo vio" ya no protege a nadie: lo dejaría
+  // pagando más. Para reactivarla, `VICKY_CO_TRAMO_LEGADO=on`.
+  if (process.env.VICKY_CO_TRAMO_LEGADO !== "on") return false
   const fono = String(contact || "").replace(/\D/g, "")
   if (!fono) return false
   try {

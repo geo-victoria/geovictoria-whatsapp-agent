@@ -5,7 +5,7 @@
  * del resultado a la que esperan las tools y el cotizador (campos en PEN).
  *
  * Datos de Perú:
- *   - Plan (lista del 25-sep): 1-10 → S/100 fijo · 11-20 → S/9/usuario.
+ *   - Plan (lista del 01-oct): 1-2 → S/29 fijo · 3-10 → S/65 fijo · 11-20 → S/6/usuario.
  *     RANGO DE VICKY = 1-20 (igual que Chile); el 21-50 del catálogo es solo
  *     excepción por contacto.
  *   - Reloj: precio de LISTA en USD (RELOJ_PE_USD) convertido a SOLES ENTEROS
