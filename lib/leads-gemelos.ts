@@ -82,7 +82,6 @@ type FilaLead = {
   Full_Name?: string | null
   Company?: string | null
   Phone?: string | null
-  Mobile?: string | null
   Lead_Status?: string | null
   Owner?: { id?: string } | null
   "Owner.email"?: string | null
@@ -108,7 +107,8 @@ async function coql<T>(H: Record<string, string>, api: string, select_query: str
 
 /**
  * Leads SIN convertir y no descartados del teléfono, creados en los últimos
- * `dias`. COQL por los 3 últimos dígitos (el formulario guarda el número con
+ * `dias`. COQL por los 3 últimos dígitos del Phone (OJO: en Leads la columna `Mobile` es
+ * INVÁLIDA para COQL — con ella la consulta moría entera; el formulario guarda el número con
  * espacios "+51957 732 010" — los 3 finales siempre quedan juntos) y el calce
  * exacto se hace en código. Un fallo de la consulta se LOGUEA y devuelve [].
  */
@@ -125,13 +125,13 @@ export async function leadsAbiertosPorTelefono(
     const filas = await coql<FilaLead>(
       H,
       api,
-      `select id, Full_Name, Company, Phone, Mobile, Lead_Status, Owner, Owner.email, Owner.first_name, Owner.last_name, Created_Time, Territorio from Leads where ((Converted__s = false and Created_Time >= '${desde}') and (Phone like '%${fin}' or Mobile like '%${fin}')) limit 200`,
+      `select id, Full_Name, Company, Phone, Lead_Status, Owner, Owner.email, Owner.first_name, Owner.last_name, Created_Time, Territorio from Leads where ((Converted__s = false and Created_Time >= '${desde}') and Phone like '%${fin}') limit 200`,
     )
     const excluir = new Set(opts.excluir || [])
     return filas
       .filter((l) => !excluir.has(String(l.id)))
       .filter((l) => !/^no calificado/i.test(String(l.Lead_Status || "")))
-      .filter((l) => telCalza(String(l.Phone || ""), d, String(l.Territorio || "")) || telCalza(String(l.Mobile || ""), d, String(l.Territorio || "")))
+      .filter((l) => telCalza(String(l.Phone || ""), d, String(l.Territorio || "")))
       .map((l) => ({
         id: String(l.id),
         nombre: String(l.Full_Name || ""),
