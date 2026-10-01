@@ -383,7 +383,7 @@ const FICHA_CO: FichaOperativa = {
       // hasta que cada una conecte su calendario; el id sobrevive al cambio).
       { ...persona("mcorredor@geovictoria.com", "3525045000276182050", "María Paula Corredor"), calEventoId: "7199950" },
       { ...persona("snavarrob@geovictoria.com", "3525045000649997017", "Silvana Navarro Builes"), calEventoId: "7199960" },
-      { ...persona("dcrodriguez@geovictoria.com", "3525045000650077001", "Diana Carolina Rodríguez"), calEventoId: "7199966" },
+      { ...persona("dcrodriguez@geovictoria.com", "3525045000650077001", "Diana Carolina Rodríguez", "+57 317 366 4969"), calEventoId: "7199966" },
       persona("agordillo@geovictoria.com", "3525045000203758005", "Alejandro Gordillo", "+57 314 267 7765"),
     ],
     // Lalo 23-sep ("esos son los 3 SDR que reciben leads"): la entrada 34 de la
@@ -392,7 +392,7 @@ const FICHA_CO: FichaOperativa = {
     // como SDR fijo.
     sdr: [
       persona("msanabriat@geovictoria.com", "3525045000654443071", "Mauricio Sanabria Torres"),
-      persona("jnarinoch@geovictoria.com", "3525045000639927045", "Jhon Nariño Chavarro"),
+      persona("jnarinoch@geovictoria.com", "3525045000639927045", "Jhon Nariño Chavarro", "+57 315 048 3473"),
       persona("egalindo@geovictoria.com", "3525045000613817111", "Eddy Galindo"),
     ],
     // Lalo 23-sep: gestora comercial (venta autónoma) Gabriela Linares; líder de
