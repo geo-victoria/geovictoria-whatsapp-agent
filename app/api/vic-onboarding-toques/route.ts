@@ -159,8 +159,13 @@ export async function GET(req: Request): Promise<Response> {
   let toques = 0
   let avisos = 0
 
+  // Presupuesto de tiempo: el cron corre cada 30' y retoma desde el principio;
+  // cortar limpio antes del límite de la función es mejor que morir a medias.
+  const inicio = Date.now()
+  let cortadoPorTiempo = false
   for (const contact of contactos) {
     if (internos.has(contact)) continue
+    if (!listar && Date.now() - inicio > 45_000) { cortadoPorTiempo = true; break }
     try {
       const [altaRaw, capRaw, cfgRaw, borradorRaw, ultimo] = await Promise.all([
         getKvValue(claveAltaSolicitada(contact)).catch(() => null),
@@ -304,7 +309,14 @@ export async function GET(req: Request): Promise<Response> {
           const ya = await getKvValue(claveCapacitacionLink(contact)).catch(() => null)
           if (!ya && hh >= 24) {
             const { resolverLinkCapacitacion, registrarLinkEntregado } = await import("@/lib/onboarding-canal")
-            const l = await resolverLinkCapacitacion(contact).catch(() => null)
+            // Resolver el link cuesta lecturas de Zoho (trato + cotización): solo
+            // se paga cuando el toque de verdad puede salir. Antes se resolvía
+            // para todos y el cron pasaba los 60 s antes de llegar a los clientes
+            // con ventana abierta (01-oct: 6 clientes sin link).
+            const saldria =
+              !dry && !conversando && ventanaAbierta && enHorarioDe(contact) &&
+              !(await getKvValue(`onb_toque_cap_${contact}`).catch(() => null))
+            const l = saldria ? await resolverLinkCapacitacion(contact).catch(() => null) : null
             const tipo = l?.tipo || tipoCapacitacion({ usuarios: null, conEquipo: false })
             const salio = await disparar(
               "capacitacion_pendiente",
@@ -363,5 +375,5 @@ export async function GET(req: Request): Promise<Response> {
       foto,
     })
   }
-  return NextResponse.json({ ok: true, dry, horaChile: cl.hora, enHorario, contactos: contactos.length, toques, avisos, candidatos })
+  return NextResponse.json({ ok: true, dry, horaChile: cl.hora, enHorario, contactos: contactos.length, toques, avisos, cortadoPorTiempo, candidatos })
 }
