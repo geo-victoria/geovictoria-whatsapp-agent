@@ -1577,6 +1577,21 @@ async function createZohoLeadBase(input: CreateZohoLeadInput): Promise<CreateZoh
             return { success: true, leadId: String(adoptable.id), entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
           }
         } catch { /* best-effort: si la búsqueda falla, la creación sigue */ }
+        // ÚLTIMA BÚSQUEDA POR LA BASE (Lalo 01-oct, carrera formulario-vs-chat):
+        // el buscador de Zoho tarda ~2 min en indexar un lead nuevo, así que el
+        // del formulario web llenado segundos antes no aparece arriba y nacía un
+        // gemelo. COQL lee la base directo: si ya hay un lead abierto con este
+        // teléfono, se reutiliza.
+        try {
+          const { leadsAbiertosPorTelefono } = await import("./leads-gemelos")
+          const recientes = await leadsAbiertosPorTelefono(fonoCandado, { dias: 30 })
+          if (recientes[0]?.id) {
+            const { setKvValue } = await import("./supabase-persistence-v3")
+            await setKvValue(kvKeyLead, recientes[0].id).catch(() => {})
+            console.log(`[zoho-leads] dedup por COQL: ${fonoCandado} ya tiene lead ${recientes[0].id} (${recientes[0].ownerEmail}) — se reutiliza`)
+            return { success: true, leadId: recientes[0].id, entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+          }
+        } catch { /* best-effort: la creación sigue */ }
         // Reservar el candado ANTES de crear: la ventana de carrera baja de
         // varios segundos (lo que tarda el POST) a milisegundos.
         const { setKvValue } = await import("./supabase-persistence-v3")

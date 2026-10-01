@@ -1303,6 +1303,15 @@ async function convertirConDeal(
       const { marcarRegistroConChat } = await import("./enlace-conversacion")
       await marcarRegistroConChat("Deals", String(dealCreado), contact)
     })().catch(() => undefined)
+    // LEADS GEMELOS (Lalo 01-oct): cuando el trato ya tiene dueño humano, los
+    // leads abiertos del mismo teléfono (formulario vs chat) se cierran como
+    // duplicados y su dueño recibe aviso. Se espera ~1 min a que corra la
+    // asignación; si el trato sigue con Vicky, lo resuelve el barrido horario.
+    void (async () => {
+      await new Promise((res) => setTimeout(res, 60_000))
+      const { cerrarLeadsGemelos } = await import("./leads-gemelos")
+      await cerrarLeadsGemelos({ fono: contact, dealId: String(dealCreado), leadConvertidoId: lead.id })
+    })().catch(() => undefined)
     // REUNIÓN MANDA (Lalo 06-ago): con reunión agendada el deal se fuerza al
     // HOST — una sola cara ante el cliente. Gana sobre tómbola y traspaso.
     if (ownerForzadoId) {

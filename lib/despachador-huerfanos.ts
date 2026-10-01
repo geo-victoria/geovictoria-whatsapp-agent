@@ -118,6 +118,9 @@ export const JOBS_HUERFANOS: Array<{ nombre: string; path: string; cadaMin: numb
   // corresponde. Endpoint propio, fuera del ptv-cron que ya toca el timeout.
   { nombre: "barrido_leads_vicky", path: "/api/vic-leads-vicky-barrido?max=10", cadaMin: 60 },
   { nombre: "barrido_deals_vicky", path: "/api/vic-deals-vicky-barrido?max=10", cadaMin: 60 },
+  // LEADS GEMELOS (Lalo 01-oct): trato con dueño humano → se cierran los leads
+  // abiertos del mismo teléfono y se avisa a su dueño (cubre agente y cotizador).
+  { nombre: "leads_gemelos", path: "/api/vic-leads-gemelos-barrido?max=40", cadaMin: 60 },
   // Link a la conversación de Botmaker en tratos y leads de Vicky (Lalo 26-sep).
   { nombre: "links_chat", path: "/api/vic-links-chat-barrido?max=40", cadaMin: 30 },
   // Campaña de reactivación (Lalo 10-sep): martes wsp · miércoles correo a las
