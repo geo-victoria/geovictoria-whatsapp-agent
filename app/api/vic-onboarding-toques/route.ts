@@ -229,11 +229,12 @@ export async function GET(req: Request): Promise<Response> {
         continue
       }
 
-      const disparar = async (regla: Candidato["regla"], claveToque: string, texto: string) => {
-        if (await getKvValue(claveToque).catch(() => null)) return
-        if (conversando) return
-        if (dry) { candidatos.push({ contact, regla, accion: "dry", detalle: texto.slice(0, 80) }); return }
-        if (!enHorarioDe(contact)) { candidatos.push({ contact, regla, accion: "fuera_horario" }); return }
+      // Devuelve true SOLO si el toque salió de verdad.
+      const disparar = async (regla: Candidato["regla"], claveToque: string, texto: string): Promise<boolean> => {
+        if (await getKvValue(claveToque).catch(() => null)) return false
+        if (conversando) return false
+        if (dry) { candidatos.push({ contact, regla, accion: "dry", detalle: texto.slice(0, 80) }); return false }
+        if (!enHorarioDe(contact)) { candidatos.push({ contact, regla, accion: "fuera_horario" }); return false }
         if (!ventanaAbierta) {
           // Fuera de ventana el texto libre no llega; el aviso interno sale
           // igual (una vez) y el toque queda para cuando el cliente escriba.
@@ -244,7 +245,7 @@ export async function GET(req: Request): Promise<Response> {
             avisos++
           }
           candidatos.push({ contact, regla, accion: "sin_ventana" })
-          return
+          return false
         }
         const ok = await enviarToque(contact, texto)
         if (ok) {
@@ -252,6 +253,7 @@ export async function GET(req: Request): Promise<Response> {
           toques++
           candidatos.push({ contact, regla, accion: "toque" })
         }
+        return Boolean(ok)
       }
       const avisar = async (regla: Candidato["regla"], claveAviso: string, texto: string) => {
         if (await getKvValue(claveAviso).catch(() => null)) return
@@ -301,16 +303,15 @@ export async function GET(req: Request): Promise<Response> {
           const { claveCapacitacionLink, linkCapacitacion, tipoCapacitacion, nombreTipo } = await import("@/lib/onboarding/capacitacion-link")
           const ya = await getKvValue(claveCapacitacionLink(contact)).catch(() => null)
           if (!ya && hh >= 24) {
-            let tipo = tipoCapacitacion({ usuarios: null, conEquipo: false })
-            if (!dry) {
-              const { entregarLinkCapacitacion } = await import("@/lib/onboarding-canal")
-              tipo = (await entregarLinkCapacitacion(contact).catch(() => null))?.tipo || tipo
-            }
-            await disparar(
+            const { resolverLinkCapacitacion, registrarLinkEntregado } = await import("@/lib/onboarding-canal")
+            const l = await resolverLinkCapacitacion(contact).catch(() => null)
+            const tipo = l?.tipo || tipoCapacitacion({ usuarios: null, conEquipo: false })
+            const salio = await disparar(
               "capacitacion_pendiente",
               `onb_toque_cap_${contact}`,
               `${saludo}tu cuenta ya está creada y nos falta tu capacitación: es la ${nombreTipo(tipo)}, por videollamada, y es lo que deja a tu equipo usando la plataforma de verdad. Te inscribes en la sesión que te acomode acá:\n${linkCapacitacion(tipo)}`,
             )
+            if (salio && l) await registrarLinkEntregado(contact, l).catch(() => {})
           }
           continue
         }

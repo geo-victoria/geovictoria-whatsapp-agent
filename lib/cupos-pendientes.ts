@@ -47,12 +47,15 @@ export async function ofrecerCuposPendientes(contact: string): Promise<{ enviado
     }
     // Chile: capacitación por LINK (Sofía 01-oct) — sale el link, no horarios.
     try {
-      const { capacitacionPorLinkActiva, entregarLinkCapacitacion } = await import("./onboarding-canal")
+      const { capacitacionPorLinkActiva, resolverLinkCapacitacion, registrarLinkEntregado } = await import("./onboarding-canal")
       if (await capacitacionPorLinkActiva(c)) {
-        const l = await entregarLinkCapacitacion(c)
+        const l = await resolverLinkCapacitacion(c)
         const { sendBotmakerMessage } = await import("./botmaker-push-v3")
         const ok = await sendBotmakerMessage(c, `Ya quedó lista tu implementación 🙌\n\n${l.mensajeParaProspecto}`, undefined, { transaccional: true }).catch(() => false)
-        if (ok) await setKvValue(CLAVE(c), "").catch(() => {})
+        if (ok) {
+          await setKvValue(CLAVE(c), "").catch(() => {})
+          await registrarLinkEntregado(c, l).catch(() => {})
+        }
         return { enviado: Boolean(ok), motivo: "link" }
       }
     } catch { /* cae al camino de Bookings */ }

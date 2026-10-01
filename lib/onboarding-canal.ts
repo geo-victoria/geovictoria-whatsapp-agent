@@ -48,19 +48,24 @@ export async function capacitacionPorLinkActiva(contact: string): Promise<boolea
   return gate !== "off"
 }
 
-/**
- * Entrega el link de inscripción que corresponde (masiva APP / masiva BOX /
- * individual) según la venta: dotación del trato y reloj en la cotización. Lo
- * deja anotado en vic_kv para el insight de la implementación y el vigía.
- */
-export async function entregarLinkCapacitacion(contact: string): Promise<{
+type LinkCapacitacion = {
   tipo: import("./onboarding/capacitacion-link").TipoCapacitacion
   url: string
   mensajeParaProspecto: string
-}> {
+  usuarios: number | null
+  conEquipo: boolean
+}
+
+/**
+ * Qué link de inscripción le corresponde (masiva APP / masiva BOX / individual)
+ * según la venta: dotación del trato y reloj en la cotización. SIN efectos: la
+ * marca de "entregado" la escribe registrarLinkEntregado, y solo cuando el
+ * mensaje salió de verdad (01-oct: el vigía marcó a 15 clientes con la ventana
+ * de WhatsApp cerrada y no les llegó nada).
+ */
+export async function resolverLinkCapacitacion(contact: string): Promise<LinkCapacitacion> {
   const c = contact.replace(/\D/g, "")
   const m = await import("./onboarding/capacitacion-link")
-  const previo = await getKvValue(m.claveCapacitacionLink(c)).catch(() => null)
   let usuarios: number | null = null
   let conEquipo = false
   try {
@@ -71,13 +76,28 @@ export async function entregarLinkCapacitacion(contact: string): Promise<{
   } catch { /* sin Zoho: masiva APP, el caso por defecto de un alta por chat */ }
   const tipo = m.tipoCapacitacion({ usuarios, conEquipo })
   const url = m.linkCapacitacion(tipo)
+  return { tipo, url, usuarios, conEquipo, mensajeParaProspecto: m.mensajeCapacitacionLink(tipo, url) }
+}
+
+/** Deja anotado que el link SE ENTREGÓ (insight de la IMP, vigía) + aviso interno la primera vez. */
+export async function registrarLinkEntregado(contact: string, l: LinkCapacitacion): Promise<void> {
+  const c = contact.replace(/\D/g, "")
+  const m = await import("./onboarding/capacitacion-link")
+  const { tipo, url, usuarios, conEquipo } = l
+  const previo = await getKvValue(m.claveCapacitacionLink(c)).catch(() => null)
   if (!previo) {
     await avisarEquipoInterno(
       `🔗 Capacitación por link: a +${c} se le entregó la ${m.nombreTipo(tipo)} (${usuarios ?? "?"} usuarios${conEquipo ? ", con reloj" : ", solo app"}): ${url}`,
     ).catch(() => {})
   }
   await setKvValue(m.claveCapacitacionLink(c), JSON.stringify({ tipo, url, usuarios, conEquipo, at: new Date().toISOString() })).catch(() => {})
-  return { tipo, url, mensajeParaProspecto: m.mensajeCapacitacionLink(tipo, url) }
+}
+
+/** Resolver + registrar: para el turno del chat, donde la respuesta sale en ese mismo turno. */
+export async function entregarLinkCapacitacion(contact: string): Promise<LinkCapacitacion> {
+  const l = await resolverLinkCapacitacion(contact)
+  await registrarLinkEntregado(contact, l)
+  return l
 }
 
 /** Cupo dentro de 8:00-19:00 de la hora del cliente. */
@@ -299,8 +319,8 @@ export async function armarOnboarding(contact: string): Promise<{
       // de inscripción que corresponde. Quien YA tiene una reserva hecha por
       // Vicky la conserva (reagendar/cancelar siguen por Bookings).
       if (!cap?.bookingId && (await capacitacionPorLinkActiva(contact))) {
-        const l = await entregarLinkCapacitacion(contact)
         if (name === TOOL_REAGENDAR_CAPACITACION.name || name === TOOL_CANCELAR_CAPACITACION.name) {
+          const l = await resolverLinkCapacitacion(contact)
           return {
             ok: false,
             capacitacionPorLink: true,
@@ -311,6 +331,7 @@ export async function armarOnboarding(contact: string): Promise<{
               "NO afirmes que la moviste ni que la cancelaste. Si necesita ayuda con eso, escalar_a_implementador.",
           }
         }
+        const l = await entregarLinkCapacitacion(contact)
         sincronizarInsight(true)
         return {
           ok: true,
