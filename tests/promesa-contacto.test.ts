@@ -82,3 +82,16 @@ test("preguntaOperativaDePlazo exige plazo Y tema operativo", () => {
   assert.equal(preguntaOperativaDePlazo("cuando me llaman?"), false)
   assert.equal(preguntaOperativaDePlazo("me instalan el reloj"), false)
 })
+
+test("escalar sin escalar cuenta como afirmación de registro (Lalo 01-oct)", () => {
+  for (const t of [
+    "Acabo de ESCALAR tu caso con prioridad alta directamente a Mónica Mendoza.",
+    "Perfecto, Bladimir — déjame escalar tu solicitud con urgencia para que un ejecutivo te contacte hoy mismo.",
+    "Ronny, acabo de escalar nuevamente con Ignacio para que te contacte de inmediato.",
+    "Lo que acabo de hacer fue dejar tu caso REGISTRADO Y PRIORIZADO para que ella te contacte.",
+  ]) assert.equal(afirmaRegistroExplicito(t), true, t)
+  for (const t of [
+    "¿Quieres que le avise a tu ejecutiva para que te llame?",
+    "Si prefieres, coordinamos una reunión hoy.",
+  ]) assert.equal(afirmaRegistroExplicito(t), false, t)
+})

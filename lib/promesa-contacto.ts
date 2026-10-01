@@ -42,7 +42,13 @@ export function afirmaRegistroExplicito(t: string): boolean {
     /\bte\s+conect(amos|o)\s+con\b/i.test(s) ||
     /\b(ya\s+)?(est[aá]|qued[oó])\s+escalad[oa]\b/i.test(s) ||
     /\bpara\s+que\s+[A-ZÁÉÍÓÚ][\wáéíóú]+\s+te\s+(llame|contacte|escriba)\b/.test(s) ||
-    /\ble\s+pas[eé]\s+tus\s+datos\b/i.test(s)
+    /\ble\s+pas[eé]\s+tus\s+datos\b/i.test(s) ||
+    // ESCALAR SIN ESCALAR (Lalo 01-oct, casos Ernesto PE, Bladimir/Karen/Rosa
+    // CL): "acabo de escalar tu caso", "déjame escalarlo", "lo dejé
+    // priorizado", "le avisé al equipo" — sin tool no hay nada detrás.
+    /\b(acabo\s+de\s+escalar|escal[eé]\s+(tu|el|nuevamente|de\s+nuevo)|lo\s+escal[eé]|d[eé]jame\s+escalar|voy\s+a\s+escalar|escalarlo\s+(de\s+nuevo|de\s+inmediato|con))/i.test(s) ||
+    /\b(dej[eé]|dejar|qued[oó])\s+(tu\s+caso\s+)?(registrado\s+y\s+)?priorizad/i.test(s) ||
+    /\b(le\s+)?avisé\s+(al\s+equipo|a\s+tu\s+ejecutiv|a\s+[A-ZÁÉÍÓÚ][\wáéíóú]+\b)/.test(s)
   )
 }
 

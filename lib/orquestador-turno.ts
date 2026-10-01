@@ -1782,6 +1782,12 @@ export async function procesarTurno(
           // El vendedor vigente recibió la promesa y la alerta; el texto del
           // modelo se conserva pero sin prometer horas que no controlamos.
           reply = reply.replace(/\bHOY\b/g, "hoy").replace(/\s*sin falta\b/gi, "")
+          // Plazos que no controlamos (Lalo 01-oct, caso Ernesto: "antes de
+          // las 18:00", "en los próximos 15 minutos"): fuera.
+          reply = reply
+            .replace(/\s*(hoy\s+mismo\s+)?antes\s+de\s+las\s+\d{1,2}(:\d{2})?\s*(hrs?|horas)?/gi, "")
+            .replace(/\s*en\s+los\s+pr[oó]ximos\s+\d+\s+minutos/gi, " a la brevedad")
+            .replace(/\bm[aá]xima\s+prioridad\b/gi, "prioridad")
         } else if (rescate?.reply) {
           reply = rescate.reply
         } else {

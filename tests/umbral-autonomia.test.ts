@@ -227,6 +227,28 @@ describe("cinturón de precios sobre el umbral (Lalo 18-ago, caso David Oviedo)"
     }
   })
 
+  test("caza la moneda de cada país y la promesa de un estimado (Lalo 01-oct, caso Ernesto)", () => {
+    for (const texto of [
+      "Para 420 personas serían aprox. S/ 2.310 + IGV al mes",
+      "el plan queda en S/.2310 mensuales",
+      "serían 150.000 COP al mes",
+      "unos 2.310 soles mensuales",
+      "MXN $1,200 al mes",
+      "Te armo un estimado de REFERENCIA AHORA para que tengas un número para tu presupuesto",
+      "Dame 30 segundos y te lo dejo listo 👍",
+      "te preparo un estimado de REFERENCIA basado en tu operación",
+    ]) {
+      assert.equal(cinturonPrecioSobreUmbral(texto).habiaPrecio, true, `no cazó: ${texto}`)
+    }
+    for (const texto of [
+      "Son 420 personas en 21 sedes (19 Lima, 1 Ica, 1 Piura)",
+      "El RUC 20600444531 quedó registrado",
+      "La propuesta te la arma la ejecutiva con descuento por volumen",
+    ]) {
+      assert.equal(cinturonPrecioSobreUmbral(texto).habiaPrecio, false, `falso positivo: ${texto}`)
+    }
+  })
+
   test("el reemplazo no promete precio ni nombra a nadie", () => {
     const r = cinturonPrecioSobreUmbral("$1").reemplazo
     assert.ok(!/\$\s*\d|\d\s*UF/.test(r))

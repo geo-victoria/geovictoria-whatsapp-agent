@@ -252,7 +252,12 @@ export function formatDirectivaSobreUmbral(
     return (
       `\n\nATENCIÓN (detección automática): este cliente declaró ${n} trabajadores, MÁS que tu umbral de precios (${umbral}). Desde este turno rige el FLUJO 21+ del inicio del prompt: NO sigas el flujo de cotización (nada de marcaje, puntos ni módulos) y NO des ni prometas precios.\n` +
       `- Si AÚN no has derivado: avanza por el guion 21+ UN PASO POR TURNO, conversacional — (1) pide el ${d.docId} de la empresa, (2) pregunta consultiva de operación, (3) parafraseo + ${paso3}, (4) deriva con ${d.tool} motivo "${d.motivo}" pasando nombre, ${campoDoc} y trabajadores (email SOLO si eligió reunión o ya lo dio). Los datos que el cliente YA entregó se usan tal cual, sin pedir confirmación. Tras llamar la tool responde SIEMPRE al cliente en ese mismo turno ${cierre} — JAMÁS dejes la respuesta vacía.\n` +
-      `- Si la derivación ya venía de un turno ANTERIOR (el anuncio de ${quien} ya está en el historial): NO vuelvas a llamar ${d.tool} ni repitas el anuncio — responde REACTIVO y agenda si el cliente lo pide.\n`
+      `- Si la derivación ya venía de un turno ANTERIOR (el anuncio de ${quien} ya está en el historial): NO vuelvas a llamar ${d.tool} ni repitas el anuncio — responde REACTIVO y agenda si el cliente lo pide.\n` +
+      // Lalo 01-oct (caso Ernesto/ITV Cambridge, y los mismos vicios en Chile):
+      // promesas que nadie cumple cuando el cliente insiste.
+      `- Si el cliente INSISTE en un precio o "un estimado": NUNCA ofrezcas ni prometas un estimado, un valor de referencia, "dame un minuto y te lo armo" ni que lo vas a calcular — para esa dotación el precio lo arma ${ejecArt} con descuento por volumen, y eso no cambia aunque insista. Dilo UNA vez, sin disculparte de más, y ofrece lo que sí puedes hacer: ${sinAgenda ? `que ${ejecArt} lo llame o coordinar la reunión` : "agendar la reunión HOY mismo si hay horario (consultar_disponibilidad_horario + agendar_reunion)"}.\n` +
+      `- Si el cliente ya ACEPTÓ la reunión ("sí", "esa", "dale", "ok") aunque en el mismo mensaje pida otra cosa: la reunión va primero — sigue el agendamiento en ese turno (pide el correo si falta, propón horario).\n` +
+      `- Si reclama que nadie lo ha contactado: JAMÁS digas "acabo de escalar", "lo escalé con prioridad", "te contactan en 15 minutos" ni "antes de las 18:00" — no controlas eso. Reconoce la demora sin inventar horas, dile que le avisas a ${ejecArt} (el sistema registra su reclamo y alerta al equipo de verdad) y ofrece la reunión.\n`
     )
   }
   return (
@@ -343,13 +348,35 @@ export function formatUmbralParaPrompt(
  * blandas — un teléfono, una hora o "COT575" jamás calzan.
  */
 const PATRONES_PRECIO = [
-  /\$\s*\d/, // $58.421, $ 40.000
+  /\$\s*\d/, // $58.421, $ 40.000 (CL, CO, MX, US$)
   /\d[\d.,]*\s*UF\b/i, // 1,5 UF · 0,35 UF
   /\bUF\s*[\d.,]*\d/i, // UF 1,5
+  // LOS CUATRO PAÍSES (Lalo 01-oct): la moneda de cada país, no solo la de
+  // Chile — un "S/ 2.310" en Perú pasaba el cinturón.
+  /\bS\/\s*\.?\s*\d/i, // S/ 2.310 · S/. 99
+  /\d[\d.,]*\s*(soles|pesos|PEN|COP|MXN|CLP|USD|d[oó]lares)\b/i, // 2.310 soles · 150.000 COP
+  /\b(PEN|COP|MXN|CLP|USD)\s*\$?\s*\d/i, // COP 150.000 · MXN $1,200
 ]
 
+/**
+ * PROMESA DE ESTIMADO (Lalo 01-oct, caso Ernesto/ITV Cambridge): sobre el
+ * umbral Vicky no tiene precio que dar, así que "te armo un estimado de
+ * referencia", "dame 30 segundos y te lo dejo listo" o "te preparo el valor"
+ * son promesas que jamás se cumplen — Ernesto recibió siete en una hora. Pasa
+ * igual en Chile cuando el cliente insiste. Mismo reemplazo que un precio.
+ */
+const PATRONES_PROMESA_ESTIMADO = [
+  /\b(te\s+)?(armo|preparo|dejo|calculo|paso|env[ií]o|doy)\b[^.?!]{0,40}\b(estimad|valor\s+(de\s+)?referencia|referencial|n[uú]mero\s+(de\s+)?referencia|aproximad)/i,
+  /\b(estimad[oa]|valor\s+(de\s+)?referencia|referencial)\b[^.?!]{0,40}\b(ahora\s+mismo|al\s+instante|listo|en\s+(un\s+)?(minuto|momento|segundos))/i,
+  /\bdame\s+(un|unos|\d+)\s+(minuto|minutos|segundos?|momento)\b[^.?!]{0,40}\b(te\s+(lo|la)\s+)?(dejo|armo|preparo|calculo|paso)/i,
+]
+
+export function prometeEstimado(reply: string): boolean {
+  return PATRONES_PROMESA_ESTIMADO.some((re) => re.test(String(reply || "")))
+}
+
 export function cinturonPrecioSobreUmbral(reply: string): { habiaPrecio: boolean; reemplazo: string } {
-  const habiaPrecio = PATRONES_PRECIO.some((re) => re.test(String(reply || "")))
+  const habiaPrecio = PATRONES_PRECIO.some((re) => re.test(String(reply || ""))) || prometeEstimado(reply)
   return {
     habiaPrecio,
     reemplazo:

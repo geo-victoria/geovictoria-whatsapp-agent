@@ -558,6 +558,18 @@ const SDR_INBOUND = (
  * falla, la entrega del lead igual se dio por buena.
  */
 async function moverPendientes(leadId: string, ownerId?: string, ownerEmail?: string): Promise<void> {
+  // MARCA "LO ASIGNÓ NUESTRA REGLA" (Lalo 01-oct, caso Ernesto/ITV Cambridge):
+  // toda entrega de lead pasa por acá. Si segundos u horas después el mismo
+  // lead se convierte por la escalera (documento + >20), el trato NO hereda a
+  // este dueño — lo sortea la tómbola de tratos en su tramo (crm-hitos lee la
+  // marca). Sin la marca, un lead de 420 personas quedó con Mónica (regla de
+  // leads) cuando la tómbola de tratos lo mandaba a Carrasco/Puente.
+  try {
+    const { setKvValue } = await import("./supabase-persistence-v3")
+    await setKvValue(`lead_regla_${leadId}`, JSON.stringify({ at: Date.now(), ownerId: ownerId || "", ownerEmail: ownerEmail || "" }))
+  } catch {
+    /* best-effort: sin marca, el trato hereda como antes */
+  }
   try {
     const { reasignarPendientesDelLead } = await import("./reasignar-pendientes-lead")
     await reasignarPendientesDelLead(leadId, { ownerId, ownerEmail })

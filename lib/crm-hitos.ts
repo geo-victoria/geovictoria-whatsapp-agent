@@ -334,6 +334,63 @@ function heredaGestionAlDeal(ownerId: string, territorio: string): boolean {
   if (esSdrHandoff(territorio, ownerId)) return false
   return true
 }
+
+/** ¿El dueño actual del lead lo puso NUESTRA regla de leads hace poco? (Lalo
+ * 01-oct, caso Ernesto/ITV Cambridge). Entonces no es gestión humana: si la
+ * escalera crea el trato, lo sortea la tómbola de tratos en su tramo. */
+async function duenoDeNuestraRegla(leadId: string, ownerId: string): Promise<boolean> {
+  if (!leadId || !ownerId) return false
+  try {
+    const { getKvValue } = await import("./supabase-persistence-v3")
+    const { duenoPuestoPorRegla, ventanaDuenoReglaMin } = await import("./dueno-por-regla")
+    return duenoPuestoPorRegla(await getKvValue(`lead_regla_${leadId}`), ownerId, Date.now(), ventanaDuenoReglaMin())
+  } catch {
+    return false
+  }
+}
+
+/** Tras la tómbola de un trato de la escalera, lee quién quedó (la regla de
+ * Zoho corre asíncrona) y lo deja listo para presentarlo: ejecutivo asignado
+ * para la tool que deriva y, si el cliente ya tenía un traspaso con OTRA
+ * persona (la que puso nuestra regla de leads), el traspaso pasa al dueño
+ * real con la presentación pendiente. */
+async function presentarDuenoSorteado(dealId: string, contact: string): Promise<void> {
+  try {
+    const { h, api } = await zohoHeaders()
+    let owner: { id?: string; name?: string; email?: string } | undefined
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 2000))
+      const r = await fetch(`${api}/crm/v3/Deals/${dealId}?fields=Owner`, { headers: h, cache: "no-store" })
+      owner = r.ok ? (((await r.json().catch(() => ({}))) as { data?: Array<{ Owner?: typeof owner }> }).data || [])[0]?.Owner : undefined
+      if (owner?.id && !INTERINOS.has(owner.id)) break
+      owner = undefined
+    }
+    if (!owner?.id) return
+    const clean = contact.replace(/\D/g, "")
+    await guardarEjecutivoAsignado(clean, { id: owner.id, nombre: owner.name || "", email: owner.email || "" })
+    const url = (process.env.SUPABASE_URL || "").trim()
+    const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "").trim()
+    if (!url || !key || !owner.email) return
+    const sh = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" }
+    await fetch(
+      `${url}/rest/v1/vic_ptv?contact=eq.${clean}&estado=eq.activo&vendedor_email=neq.${encodeURIComponent(owner.email)}`,
+      {
+        method: "PATCH",
+        headers: sh,
+        cache: "no-store",
+        body: JSON.stringify({
+          vendedor_email: owner.email,
+          vendedor_nombre: owner.name || "",
+          vendedor_zoho_id: owner.id,
+          presentado_al_prospecto: false,
+        }),
+      },
+    ).catch(() => null)
+    console.log(`[crm-hitos] deal ${dealId}: dueño sorteado ${owner.email} listo para presentar`)
+  } catch {
+    /* best-effort: el traspaso lo presenta igual con lo que haya */
+  }
+}
 const HOY_MAS_30 = () => new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
 
 function getEnv(name: string): string {
@@ -1013,6 +1070,9 @@ async function convertirConDeal(
   // LEAD a la tómbola de leads y NO crea trato. La REUNIÓN sí lo crea: ahí hay
   // un compromiso agendado y el deal nace con el host como dueño.
   entregarComoLead?: boolean,
+  // Lalo 01-oct: el dueño del lead lo puso nuestra regla hace poco → el trato
+  // no lo hereda, lo sortea la tómbola en su tramo.
+  noHeredarDueno?: boolean,
 ): Promise<string | null> {
   // CANDADO ANTI-CARRERA (25-ago): reservar la creación ANTES de convertir.
   // Si la emisión (u otro hito) ya está creando el deal de este fono, se
@@ -1071,7 +1131,16 @@ async function convertirConDeal(
   // después el ejecutivo cuando corresponda. Antes nacía un trato aunque
   // nadie hubiera hablado con el cliente. El owner sorteado se devuelve para
   // que Vicky pueda presentarlo y ofrecer reunión con él.
-  if (entregarComoLead && territorioConTombola(territorio)) {
+  // CON DOCUMENTO Y >20 = TRATO, NO LEAD (Lalo 01-oct, caso Ernesto/ITV
+  // Cambridge, Perú 420 personas): la escalera manda. Entregar primero el lead
+  // por la regla de leads y convertirlo segundos después dejaba el trato con
+  // el dueño de esa regla y la tómbola de tratos nunca corría en su tramo. El
+  // trato nace del lead convertido (más abajo) y lo sortea la tómbola.
+  const escaleraAqui = escaleraDealConRut(territorio, lead, {})
+  if (entregarComoLead && escaleraAqui) {
+    console.log(`[crm-hitos] +${contact}: sobre-umbral con documento y ${empleados} personas → trato + tómbola (no lead)`)
+  }
+  if (entregarComoLead && territorioConTombola(territorio) && !escaleraAqui) {
     // LAS SDR NO SE QUEDAN CON LO CALIFICADO (Lalo 10-sep): el candado de
     // "dueño humano previo" protege la cartera de los ejecutivos, pero una SDR
     // de calificación con un caso YA calificado debe devolverlo a la tómbola
@@ -1208,7 +1277,7 @@ async function convertirConDeal(
     // hasta el final (sin cambios de propietario — la formal NO lo traspasa).
     // Solo los registros que la formal CREA nacen con Gordillo.
     Owner: {
-      id: heredaGestionAlDeal(lead.ownerId, territorio)
+      id: heredaGestionAlDeal(lead.ownerId, territorio) && !noHeredarDueno
         ? lead.ownerId
         : TOMBOLA_DEALS_POR_TERRITORIO[territorio]
           ? VICKY_OWNER_ID
@@ -1329,7 +1398,7 @@ async function convertirConDeal(
       await registrarDealEnKv(contact.replace(/\D/g, ""), String(dealCreado), "hito")
       return String(dealCreado)
     }
-    const heredaDuenoHumano = heredaGestionAlDeal(lead.ownerId, territorio)
+    const heredaDuenoHumano = heredaGestionAlDeal(lead.ownerId, territorio) && !noHeredarDueno
     // TRASPASO VIGENTE MANDA (caso Ana/Daniela 04-ago): si el contacto tiene
     // vic_ptv activo, al cliente YA se le presentó ese ejecutivo (con nombre,
     // correo y WhatsApp) — sortear el deal a otra persona rompe la promesa.
@@ -1347,7 +1416,9 @@ async function convertirConDeal(
       try {
         const { vendedorTraspasado } = await import("./loop-v2")
         const v = await vendedorTraspasado(contact.replace(/\D/g, ""))
-        if (v?.zohoId) {
+        // El traspaso que armó NUESTRA regla de leads (misma persona que el
+        // dueño que no se hereda) no manda: ahí rige la tómbola de tratos.
+        if (v?.zohoId && !(noHeredarDueno && v.zohoId === lead.ownerId)) {
           await fetch(`${api}/crm/v3/Deals`, {
             method: "PUT",
             headers: h,
@@ -1382,6 +1453,9 @@ async function convertirConDeal(
           )
         } else {
           await aplicarTombolaDeals(String(dealCreado), territorio)
+          // El dueño sorteado se presenta (ejecutivo para la derivación y, si
+          // el traspaso nombraba a otra persona, el traspaso pasa a él).
+          if (escaleraAqui || noHeredarDueno) await presentarDuenoSorteado(String(dealCreado), contact)
         }
       } else {
         // Dueño humano heredado (caso Paola/Agrícola Vaticano 04-ago): sin
@@ -2293,7 +2367,14 @@ export async function sincronizarHitoCrm(
       // re-sortea — 04-ago). Cubre el retrofit de INTEXGROUP/Castro y el caso
       // "el cliente dio el RUT después de entregado el lead calificado".
       let ownerHeredado = ""
-      if (!esDeVicky && getEnv("VICKY_CRM_HITOS_CONVERTIR_AJENOS") !== "on") {
+      // Dueño puesto por NUESTRA regla de leads hace poco (Lalo 01-oct, caso
+      // Ernesto/ITV Cambridge): no es gestión humana — con escalera el trato
+      // nace del lead convertido y lo sortea la tómbola en su tramo.
+      const duenoDeRegla = escaleraExistente && !esDeVicky && (await duenoDeNuestraRegla(lead.id, lead.ownerId))
+      if (duenoDeRegla) {
+        console.log(`[crm-hitos] ${clean}: lead ${lead.id} lo asignó nuestra regla hace poco — el trato lo sortea la tómbola, no lo hereda`)
+      }
+      if (!esDeVicky && !duenoDeRegla && getEnv("VICKY_CRM_HITOS_CONVERTIR_AJENOS") !== "on") {
         // SDR DE CALIFICACIÓN (Lalo 10-sep): el lead está con ellas porque
         // Vicky NO había podido calificar. Si ya lo logró, el caso vuelve a la
         // tómbola de telemarketing: con RUT nace el deal y lo sortea la
@@ -2374,6 +2455,7 @@ export async function sincronizarHitoCrm(
         ownerForzadoId || ownerHeredado || undefined,
         opts.sorteoInmediato || (escaleraExistente && !ownerHeredado),
         opts.entregarComoLead,
+        duenoDeRegla,
       )
       if (dealNuevo) await actualizarNotaTranscripcion(dealNuevo, clean)
       return
