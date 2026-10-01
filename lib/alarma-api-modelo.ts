@@ -9,7 +9,7 @@
  * Best-effort: jamás lanza.
  */
 
-const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
 const DESTINOS = (process.env.VICKY_ALARMA_API_TO || process.env.VICKY_CIERRE_TO || "egomez@geovictoria.com,rlewit@geovictoria.com")
   .split(",")

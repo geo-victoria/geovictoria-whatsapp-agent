@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
 const CRON_SECRET = (process.env.CRON_SECRET || "").trim()
-const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const PAISES = ["cl", "pe", "co", "mx"]

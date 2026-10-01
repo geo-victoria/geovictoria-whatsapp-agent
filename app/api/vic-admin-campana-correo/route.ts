@@ -95,7 +95,7 @@ export async function POST(req: Request): Promise<Response> {
   if (testTo && /@/.test(testTo)) {
     const { getZohoAccessToken } = await import("@/lib/zoho-token")
     const token = await getZohoAccessToken()
-    const anchor = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+    const anchor = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
     const lineaEjemplo =
       "Cuando hablamos quedó dando vueltas cómo sumar a los subcontratados de Temple Norte: se puede, marcan igual que el resto y el plan se ajusta solo."
     const estilo = ((body as { estilo?: string }).estilo || "marketing").trim()

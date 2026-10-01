@@ -20,7 +20,7 @@ import { getZohoAccessToken } from "./zoho-token"
 
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
-const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
 // Manual vigente: el mismo que linkea la plantilla GeoAvanzado (override por env).
 const MANUAL_URL = (
   process.env.VICKY_MANUAL_ADMIN_URL ||

@@ -25,7 +25,7 @@ import { getZohoAccessToken } from "./zoho-token"
 
 const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
-const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
 
 /** Contraseña temporal FALSA con la pinta de las reales (v3QSDtQm?RA*T67U). */
 export function passwordSimulada(): string {

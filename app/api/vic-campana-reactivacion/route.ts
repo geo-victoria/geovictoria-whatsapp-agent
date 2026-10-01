@@ -179,7 +179,7 @@ async function contextoDelChat(contact: string, uf: number): Promise<{ precio: s
 }
 
 async function enviarCorreo(H: Record<string, string>, quoteId: string | null, to: string, subject: string, html: string): Promise<boolean> {
-  const anchor = quoteId ? `${QUOTE_MODULE}/${quoteId}` : (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+  const anchor = quoteId ? `${QUOTE_MODULE}/${quoteId}` : (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
   const r = await fetch(`${ZOHO_API}/crm/v3/${anchor}/actions/send_mail`, {
     method: "POST",
     headers: H,

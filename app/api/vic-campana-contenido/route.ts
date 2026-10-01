@@ -166,7 +166,7 @@ async function piezaViva(pieza: Pieza): Promise<{ ok: boolean; status: number; f
 }
 
 async function enviarCorreo(H: Record<string, string>, to: string, subject: string, html: string): Promise<boolean> {
-  const anchor = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+  const anchor = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
   const r = await fetch(`${ZOHO_API}/crm/v3/${anchor}/actions/send_mail`, {
     method: "POST",
     headers: H,

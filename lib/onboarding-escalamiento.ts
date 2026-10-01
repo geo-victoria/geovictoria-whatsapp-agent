@@ -28,7 +28,7 @@ import { getZohoAccessToken } from "./zoho-token"
 import { RELATORES_GV_AVANZADO } from "./implementacion-vicky"
 
 const ZOHO_API = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").replace(/\/+$/, "")
-const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
 const FROM_EMAIL = "vicky@geovictoria.com"
 const CANDADO_MS = 2 * 60 * 60 * 1000
 

@@ -24,7 +24,7 @@ const ZOHO_API_DOMAIN = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.co
 const FROM_EMAIL = (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim()
 // Registro interno que ancla el send_mail (Zoho solo manda correos "sobre" un
 // registro). Default: contacto interno de pruebas, creado por Vicky.
-const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000645054553").trim()
+const MAIL_ANCHOR = (process.env.VIC_DASH_MAIL_ANCHOR || "Contacts/3525045000667766136").trim()
 const ADMINS = (process.env.VIC_DASH_ADMINS || "egomez@geovictoria.com,rlewit@geovictoria.com")
   .toLowerCase()
   .split(",")
