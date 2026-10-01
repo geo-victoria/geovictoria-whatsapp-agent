@@ -16,9 +16,11 @@ import { getKvValue, setKvValue } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin } from "./alta-empresa"
 
-// URL de inicio de sesión de la plataforma para el instructivo post-alta.
-// Sin env, el copy dice "la plataforma GeoVictoria" sin link (jamás inventar).
-const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "").trim()
+// URL de inicio de sesión de la plataforma (GV Avanzado). Lalo 01-oct, caso
+// Franco: el mensaje de "cuenta creada" no traía dirección y el cliente entró
+// por costumbre a clients.geovictoria.com (la vieja). Es la MISMA que usan el
+// correo de bienvenida y el instructivo; env la pisa sin deploy.
+const LOGIN_URL = (process.env.VICKY_PLATAFORMA_LOGIN_URL || "https://advanced.geovictoria.com").trim()
 
 import { etiquetaFechaCL as etiquetaFecha, convertirHoraAgenda, TZ_AGENDA } from "./onboarding/agenda-capacitacion"
 import { lineaZonaHoraria } from "./paises/ficha-operativa"
@@ -31,6 +33,50 @@ async function tzClienteDe(contact: string): Promise<string> {
   } catch {
     return TZ_AGENDA
   }
+}
+
+/**
+ * ¿La capacitación de este contacto va por LINK de inscripción? (Sofía 01-oct:
+ * en Chile ya no se reserva con los relatores por Bookings). Solo Chile; vic_kv
+ * `capacitacion_por_link`="off" vuelve al agendamiento por Bookings sin deploy.
+ */
+export async function capacitacionPorLinkActiva(contact: string): Promise<boolean> {
+  const { paisConCapacitacionPorLink } = await import("./onboarding/capacitacion-link")
+  if (!paisConCapacitacionPorLink(await paisOnboardingDe(contact))) return false
+  const gate = ((await getKvValue("capacitacion_por_link").catch(() => null)) || "").trim().toLowerCase()
+  return gate !== "off"
+}
+
+/**
+ * Entrega el link de inscripción que corresponde (masiva APP / masiva BOX /
+ * individual) según la venta: dotación del trato y reloj en la cotización. Lo
+ * deja anotado en vic_kv para el insight de la implementación y el vigía.
+ */
+export async function entregarLinkCapacitacion(contact: string): Promise<{
+  tipo: import("./onboarding/capacitacion-link").TipoCapacitacion
+  url: string
+  mensajeParaProspecto: string
+}> {
+  const c = contact.replace(/\D/g, "")
+  const m = await import("./onboarding/capacitacion-link")
+  const previo = await getKvValue(m.claveCapacitacionLink(c)).catch(() => null)
+  let usuarios: number | null = null
+  let conEquipo = false
+  try {
+    const { contextoImplementacionDesdeVenta } = await import("./implementacion-vicky")
+    const ctx = await contextoImplementacionDesdeVenta(c)
+    usuarios = Number(ctx.usuarios) || null
+    conEquipo = (Number(ctx.equipos) || 0) > 0
+  } catch { /* sin Zoho: masiva APP, el caso por defecto de un alta por chat */ }
+  const tipo = m.tipoCapacitacion({ usuarios, conEquipo })
+  const url = m.linkCapacitacion(tipo)
+  if (!previo) {
+    await avisarEquipoInterno(
+      `🔗 Capacitación por link: a +${c} se le entregó la ${m.nombreTipo(tipo)} (${usuarios ?? "?"} usuarios${conEquipo ? ", con reloj" : ", solo app"}): ${url}`,
+    ).catch(() => {})
+  }
+  await setKvValue(m.claveCapacitacionLink(c), JSON.stringify({ tipo, url, usuarios, conEquipo, at: new Date().toISOString() })).catch(() => {})
+  return { tipo, url, mensajeParaProspecto: m.mensajeCapacitacionLink(tipo, url) }
 }
 
 /** Cupo dentro de 8:00-19:00 de la hora del cliente. */
@@ -247,6 +293,35 @@ export async function armarOnboarding(contact: string): Promise<{
             cuando?: string
           })
         : null
+      // ── CHILE: CAPACITACIÓN POR LINK (Sofía 01-oct) ──
+      // Sin reserva previa no se ofrecen horarios de relator: se entrega el link
+      // de inscripción que corresponde. Quien YA tiene una reserva hecha por
+      // Vicky la conserva (reagendar/cancelar siguen por Bookings).
+      if (!cap?.bookingId && (await capacitacionPorLinkActiva(contact))) {
+        const l = await entregarLinkCapacitacion(contact)
+        if (name === TOOL_REAGENDAR_CAPACITACION.name || name === TOOL_CANCELAR_CAPACITACION.name) {
+          return {
+            ok: false,
+            capacitacionPorLink: true,
+            url: l.url,
+            error:
+              "Este cliente no tiene una reserva hecha por ti: su capacitación es por inscripción en un link. " +
+              "Si ya se inscribió y quiere cambiarla o cancelarla, lo hace desde el correo de la invitación o inscribiéndose en otra sesión del mismo link. " +
+              "NO afirmes que la moviste ni que la cancelaste. Si necesita ayuda con eso, escalar_a_implementador.",
+          }
+        }
+        sincronizarInsight(true)
+        return {
+          ok: true,
+          capacitacionPorLink: true,
+          tipo: l.tipo,
+          url: l.url,
+          mensajeParaProspecto: l.mensajeParaProspecto,
+          instruccionObligatoria:
+            "Entrega el mensajeParaProspecto TAL CUAL, con el link. NO ofrezcas horarios ni nombres de relator: la capacitación se inscribe en ese link. " +
+            "NO digas que quedó agendada: se inscribe el cliente. Si dice que necesita capacitarse ANTES de la próxima sesión, escalar_a_implementador (urgencia_capacitacion).",
+        }
+      }
       if (!cap?.relator?.email) {
         // PEDIDO EN EL AIRE (14-sep, caso Gianella): pidió los horarios 4
         // SEGUNDOS antes de que su implementación terminara de escribirse, y
@@ -911,14 +986,19 @@ export async function armarOnboarding(contact: string): Promise<{
             // (llega antes) y el segundo lo entrega Vicky como su respuesta.
             const msgAcceso =
               `El acceso quedó a nombre de ${b.admin.nombre} ${b.admin.apellido}. ` +
-              `Le enviamos un correo a ${alta.workEmail} con su contraseña temporal.`
+              `Le enviamos un correo a ${alta.workEmail} con su contraseña temporal, y se ingresa en ${LOGIN_URL}`
             // Nómina Y capacitación en la misma oferta (Lalo 05-sep, caso
             // Maquinarias Santa Sara: el cliente aceptó cargar la nómina, no la
             // mandó y nadie le ofreció el curso). La capacitación no depende de
             // la nómina.
-            const msgNomina =
-              "Y por aquí mismo seguimos con dos cosas: recibir tu nómina de trabajadores (yo la guardo y tu implementador la sube en la capacitación, para que queden listos para marcar) y agendar esa capacitación " +
-              "(2 horas por videollamada con tu relator). ¿Partimos por la nómina o te muestro los horarios de la capacitación?"
+            // Chile: la capacitación es por inscripción en un link (Sofía 01-oct),
+            // ya no hay "horarios del relator" que mostrar.
+            const capPorLink = await capacitacionPorLinkActiva(contact)
+            const msgNomina = capPorLink
+              ? "Y por aquí mismo seguimos con dos cosas: recibir tu nómina de trabajadores (yo la guardo y tu implementador la sube en la capacitación, para que queden listos para marcar) y tu capacitación " +
+                "(por videollamada; te paso el link para que te inscribas en la sesión que te acomode). ¿Partimos por la nómina o te paso el link de la capacitación?"
+              : "Y por aquí mismo seguimos con dos cosas: recibir tu nómina de trabajadores (yo la guardo y tu implementador la sube en la capacitación, para que queden listos para marcar) y agendar esa capacitación " +
+                "(2 horas por videollamada con tu relator). ¿Partimos por la nómina o te muestro los horarios de la capacitación?"
             // Antes el del acceso se EMPUJABA aparte y Vicky entregaba solo el
             // de la nómina — pero el modelo volvía a contar el acceso en su
             // respuesta y el cliente recibía dos veces lo mismo (E8 05-sep:

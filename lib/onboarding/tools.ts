@@ -248,7 +248,9 @@ export const TOOL_VER_CUPOS_CAPACITACION = {
     "cada vez que pregunte por horarios aunque ya se los hayas mostrado: la agenda cambia y las horas vienen " +
     "convertidas a la hora local del cliente. Nunca repitas horarios del historial sin llamarla. " +
     "No recibe parámetros. Devuelve el nombre del relator y las fechas con sus horas libres. " +
-    "Ofrece SOLO estos horarios: no propongas ninguno que no venga en esta lista.",
+    "Ofrece SOLO estos horarios: no propongas ninguno que no venga en esta lista. " +
+    "EN CHILE la capacitación es por inscripción: la tool devuelve capacitacionPorLink=true con un link en " +
+    "mensajeParaProspecto (masiva APP, masiva con reloj o individual) — entrégalo tal cual, sin horarios ni relator.",
   input_schema: { type: "object" as const, properties: {}, required: [] as string[] },
 }
 

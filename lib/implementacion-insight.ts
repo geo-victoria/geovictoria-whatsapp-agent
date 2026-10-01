@@ -74,6 +74,8 @@ export type DatosInsight = {
   config: Configuracion
   esquema: EsquemaOperacion
   cap: Capacitacion | null
+  /** Capacitación por link (Chile, Sofía 01-oct): qué link se le entregó. */
+  capLink?: { tipo: string; url: string; at: string } | null
   items: ItemCot[]
   numeroCotizacion: string
   mensajes: Array<{ role: string; content: string; at?: string }>
@@ -111,13 +113,15 @@ async function itemsDeLaVenta(contact: string): Promise<{ items: ItemCot[]; nume
 
 export async function reunirDatosInsight(contact: string): Promise<DatosInsight> {
   const fono = (contact || "").replace(/\D/g, "")
-  const [borradorRaw, config, esquema, cap, venta, mensajes] = await Promise.all([
+  const { claveCapacitacionLink } = await import("./onboarding/capacitacion-link")
+  const [borradorRaw, config, esquema, cap, venta, mensajes, capLink] = await Promise.all([
     getKvValue(claveBorrador(fono)).catch(() => null),
     leerJson<Partial<Configuracion>>(claveConfiguracion(fono)),
     leerJson<EsquemaOperacion>(claveEsquema(fono)),
     leerJson<Capacitacion>(claveCapacitacion(fono)),
     itemsDeLaVenta(fono),
     fetchHistoryV3(fono, 80).catch(() => []),
+    leerJson<{ tipo: string; url: string; at: string }>(claveCapacitacionLink(fono)),
   ])
   let chatUrl = ""
   try {
@@ -136,6 +140,7 @@ export async function reunirDatosInsight(contact: string): Promise<DatosInsight>
     config: { ...configuracionVacia(), ...(config || {}) },
     esquema: esquema || {},
     cap,
+    capLink: capLink || null,
     items: venta.items,
     numeroCotizacion: venta.numero,
     mensajes: (mensajes as Array<{ role: string; content: string; at?: string }>) || [],
@@ -200,7 +205,9 @@ export function checklistInsight(d: DatosInsight, planillas?: { archivos: string
   L.push(
     d.cap?.bookingId
       ? `✅ Capacitación (Curso 1) agendada: ${d.cap.cuando || "fecha en Bookings"}${d.cap.relator ? ` con ${d.cap.relator.nombre}` : ""}`
-      : `❌ Capacitación: sin agendar${d.cap?.relator ? ` (relator asignado: ${d.cap.relator.nombre})` : ""}`,
+      : d.capLink?.url
+        ? `🔗 Capacitación: Vicky le entregó el link de inscripción (${d.capLink.tipo.replace("_", " ")}): ${d.capLink.url} — se inscribe él; confirmar en la lista de la sesión`
+        : `❌ Capacitación: sin agendar${d.cap?.relator ? ` (relator asignado: ${d.cap.relator.nombre})` : ""}`,
   )
   L.push(`• Vendido${d.numeroCotizacion ? ` (${d.numeroCotizacion})` : ""}: ${equiposVendidos(d.items)}`)
   const resp = respondidasEsquema(d.esquema)
@@ -378,7 +385,9 @@ export function notaParaImplementador(
   L.push(
     d.cap?.bookingId
       ? `Capacitación agendada: ${d.cap.cuando || "fecha en Bookings"}${d.cap.relator ? ` con ${d.cap.relator.nombre}` : ""}.`
-      : `Capacitación: sin agendar${d.cap?.relator ? ` (relator asignado: ${d.cap.relator.nombre})` : ""}. Vicky le ofrece cupos al cliente por el chat; si no agenda, el vigía avisa a las 72 h hábiles.`,
+      : d.capLink?.url
+        ? `Capacitación: se le entregó el link de inscripción (${d.capLink.tipo.replace("_", " ")}): ${d.capLink.url}. Se inscribe el cliente; Vicky no ve la inscripción.`
+        : `Capacitación: sin agendar${d.cap?.relator ? ` (relator asignado: ${d.cap.relator.nombre})` : ""}. Vicky le ofrece cupos al cliente por el chat; si no agenda, el vigía avisa a las 72 h hábiles.`,
   )
   L.push("Vicky no da soporte de la plataforma: si el cliente pide algo urgente, ella escala al relator por correo y nota acá.")
   if (d.chatUrl) L.push(`Chat completo: ${d.chatUrl}`)

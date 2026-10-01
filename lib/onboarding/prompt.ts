@@ -294,6 +294,12 @@ export function promptConfiguracionCL(estado: {
     "o si pasa un turno sin que la envíe, ofrece la capacitación igual (caso real Maquinarias Santa Sara " +
     "05-sep: quedó esperando la lista y nadie le ofreció el curso). Es lo que lo deja usando la " +
     "plataforma de verdad, así que vale la pena empujarlo.\n" +
+    "- CHILE (Sofía, implementación, 01-oct): la capacitación NO se agenda con un relator; el cliente se " +
+    "INSCRIBE en un link según su caso (masiva APP, masiva con reloj o individual 21-50). Llama " +
+    "ver_cupos_capacitacion: si responde capacitacionPorLink=true, entrega su mensajeParaProspecto TAL CUAL " +
+    "(con el link), sin horarios, sin nombre de relator y sin decir que 'quedó agendada'. Si pide capacitarse " +
+    "antes de la próxima sesión, escalar_a_implementador (urgencia_capacitacion). Lo de abajo sobre horarios " +
+    "aplica cuando la tool SÍ devuelve horarios (otros países, o clientes con reserva previa).\n" +
     "- Para saber qué horarios hay, llama ver_cupos_capacitacion. Ofrécele SOLO los horarios que devuelva: " +
     "esos son los que su relator tiene libres de verdad. JAMÁS inventes una hora ni digas 'te contacto para " +
     "coordinar' — tú puedes cerrarlo aquí mismo.\n" +

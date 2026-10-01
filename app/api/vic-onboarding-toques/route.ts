@@ -283,6 +283,27 @@ export async function GET(req: Request): Promise<Response> {
       // ── Regla 2: alta creada y sin capacitación ──
       if (!cap.bookingId) {
         const hh = horasHabilesDesde(altaAt, ahora, fichaPorTelefono(contact).tz)
+        // CHILE: capacitación por LINK (Sofía 01-oct). La inscripción la hace el
+        // cliente y no la vemos: si ya se le entregó el link no se le insiste;
+        // si no, el toque lleva el link de una vez (sin "te muestro horarios").
+        const { capacitacionPorLinkActiva } = await import("@/lib/onboarding-canal")
+        if (await capacitacionPorLinkActiva(contact).catch(() => false)) {
+          const { claveCapacitacionLink, linkCapacitacion, tipoCapacitacion, nombreTipo } = await import("@/lib/onboarding/capacitacion-link")
+          const ya = await getKvValue(claveCapacitacionLink(contact)).catch(() => null)
+          if (!ya && hh >= 24) {
+            let tipo = tipoCapacitacion({ usuarios: null, conEquipo: false })
+            if (!dry) {
+              const { entregarLinkCapacitacion } = await import("@/lib/onboarding-canal")
+              tipo = (await entregarLinkCapacitacion(contact).catch(() => null))?.tipo || tipo
+            }
+            await disparar(
+              "capacitacion_pendiente",
+              `onb_toque_cap_${contact}`,
+              `${saludo}tu cuenta ya está creada y nos falta tu capacitación: es la ${nombreTipo(tipo)}, por videollamada, y es lo que deja a tu equipo usando la plataforma de verdad. Te inscribes en la sesión que te acomode acá:\n${linkCapacitacion(tipo)}`,
+            )
+          }
+          continue
+        }
         if (hh >= 24) {
           await disparar(
             "capacitacion_pendiente",

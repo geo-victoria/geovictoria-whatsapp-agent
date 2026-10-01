@@ -45,6 +45,17 @@ export async function ofrecerCuposPendientes(contact: string): Promise<{ enviado
       await setKvValue(CLAVE(c), "").catch(() => {})
       return { enviado: false, motivo: "ya_agendada" }
     }
+    // Chile: capacitación por LINK (Sofía 01-oct) — sale el link, no horarios.
+    try {
+      const { capacitacionPorLinkActiva, entregarLinkCapacitacion } = await import("./onboarding-canal")
+      if (await capacitacionPorLinkActiva(c)) {
+        const l = await entregarLinkCapacitacion(c)
+        const { sendBotmakerMessage } = await import("./botmaker-push-v3")
+        const ok = await sendBotmakerMessage(c, `Ya quedó lista tu implementación 🙌\n\n${l.mensajeParaProspecto}`, undefined, { transaccional: true }).catch(() => false)
+        if (ok) await setKvValue(CLAVE(c), "").catch(() => {})
+        return { enviado: Boolean(ok), motivo: "link" }
+      }
+    } catch { /* cae al camino de Bookings */ }
     if (!cap?.relator?.email) return { enviado: false, motivo: "sin_relator" }
 
     const { servicioCurso1De, staffDe, fechasAgendables, aFormatoBookings, etiquetaFechaCL, convertirHoraAgenda, TZ_AGENDA } =
