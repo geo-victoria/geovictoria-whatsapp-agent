@@ -163,9 +163,9 @@ export async function GET(req: Request): Promise<Response> {
   // cortar limpio antes del límite de la función es mejor que morir a medias.
   const inicio = Date.now()
   let cortadoPorTiempo = false
-  for (const contact of contactos) {
-    if (internos.has(contact)) continue
-    if (!listar && Date.now() - inicio > 45_000) { cortadoPorTiempo = true; break }
+  const procesar = async (contact: string): Promise<void> => {
+    if (internos.has(contact)) return
+    if (!listar && Date.now() - inicio > 45_000) { cortadoPorTiempo = true; return }
     try {
       const [altaRaw, capRaw, cfgRaw, borradorRaw, ultimo] = await Promise.all([
         getKvValue(claveAltaSolicitada(contact)).catch(() => null),
@@ -231,7 +231,7 @@ export async function GET(req: Request): Promise<Response> {
                 ? `link de capacitación entregado (${link.tipo.replace("_", " ")})`
                 : "FALTA AGENDAR CAPACITACIÓN",
         })
-        continue
+        return
       }
 
       // Devuelve true SOLO si el toque salió de verdad.
@@ -294,7 +294,7 @@ export async function GET(req: Request): Promise<Response> {
             `⚠️ ONBOARDING: +${contact} pagó y lleva más de 24 h sin completar el alta por chat (Vicky ya le escribió una vez). Revisar y contactar.`,
           )
         }
-        continue
+        return
       }
 
       // ── Regla 2: alta creada y sin capacitación ──
@@ -325,7 +325,7 @@ export async function GET(req: Request): Promise<Response> {
             )
             if (salio && l) await registrarLinkEntregado(contact, l).catch(() => {})
           }
-          continue
+          return
         }
         if (hh >= 24) {
           await disparar(
@@ -341,7 +341,7 @@ export async function GET(req: Request): Promise<Response> {
             `⚠️ ONBOARDING: +${contact}${cap.numero ? ` (${cap.numero})` : ""} tiene la cuenta creada hace más de 72 h hábiles y NO ha agendado el Curso 1; Vicky ya se lo ofreció dos veces. Relator asignado: ${relator} — conviene que lo llame.`,
           )
         }
-        continue
+        return
       }
 
       // ── Regla 3: capacitación mañana y sin nómina ──
@@ -359,6 +359,13 @@ export async function GET(req: Request): Promise<Response> {
     } catch (e) {
       console.warn(`[onboarding-toques] ${contact} falló:`, e instanceof Error ? e.message : e)
     }
+  }
+  // Lotes en paralelo (01-oct): de a uno, 79 contactos no alcanzaban en la
+  // función y los últimos de la lista nunca se revisaban.
+  const LOTE = 8
+  for (let i = 0; i < contactos.length; i += LOTE) {
+    if (!listar && Date.now() - inicio > 45_000) { cortadoPorTiempo = true; break }
+    await Promise.all(contactos.slice(i, i + LOTE).map((c) => procesar(c)))
   }
 
   console.log(`[onboarding-toques] contactos=${contactos.length} toques=${toques} avisos=${avisos} horario=${enHorario ? "si" : "no"} dry=${dry}`)
