@@ -4028,6 +4028,50 @@ async function rescatarFormSinConversacion(ahora: Date): Promise<number> {
         continue
       }
     }
+    // CONVERSA CON OTRO NÚMERO (01-oct, caso Ernesto/ITV Cambridge): el
+    // primer mensaje de una conversación fue el prellenado del botón con este
+    // mismo nombre, minutos después del formulario → es la misma persona. Si
+    // ese chat ya tiene su propio lead, este es el duplicado y se cierra; si
+    // no, este lead pasa a ser el del chat. Nunca se rescata.
+    try {
+      const { conversacionDelFormPorNombre } = await import("@/lib/match-miniform")
+      const contactoChat = await conversacionDelFormPorNombre(String(l.First_Name || ""), creadoMs)
+      if (contactoChat) {
+        const fonoChat = contactoChat.replace(/\D/g, "")
+        const leadChat = String((await getKvValue(`zoho_lead_${fonoChat}`).catch(() => null)) || "")
+        const { agregarNotaLead } = await import("@/lib/zoho-leads")
+        if (leadChat && !leadChat.startsWith("creando:") && leadChat !== l.id) {
+          await setKvValue(`rescate_form_${l.id}`, `gemelo_chat:${leadChat}`).catch(() => {})
+          const cierre = await fetch(`${api}/crm/v3/Leads`, {
+            method: "PUT", headers: H, cache: "no-store",
+            body: JSON.stringify({
+              data: [{ id: l.id, Lead_Status: "No Calificado", Motivo_No_calificado: "Duplicado en otro canal" }],
+              trigger: ["blueprint"],
+              skip_feature_execution: [{ name: "assignment_rules" }],
+            }),
+          }).then((r) => r.ok).catch(() => false)
+          await agregarNotaLead(
+            l.id,
+            "Form Vicky — duplicado del lead de la conversación, cerrado",
+            `La misma persona conversó con Vicky por WhatsApp desde ${contactoChat} (el primer mensaje fue el texto del botón con este nombre) ` +
+              `y esa conversación ya tiene su lead (${leadChat}). ` +
+              `${cierre ? 'Queda "No Calificado / Duplicado en otro canal".' : 'No se pudo cerrar automáticamente: corresponde "No Calificado / Duplicado en otro canal".'}`,
+          ).catch(() => {})
+          console.log(`[rescate-form] lead ${l.id} = chat ${contactoChat} con lead ${leadChat} → cerrado=${cierre}`)
+        } else {
+          if (fonoChat) await setKvValue(`zoho_lead_${fonoChat}`, l.id).catch(() => {})
+          await setKvValue(`rescate_form_${l.id}`, `conversa:${contactoChat}`).catch(() => {})
+          await agregarNotaLead(
+            l.id,
+            "Mismo cliente que conversa con Vicky por WhatsApp",
+            `El primer mensaje por WhatsApp (${contactoChat}) fue el texto del botón del formulario con este nombre, minutos después de llenarlo. ` +
+              `Teléfono escrito en el formulario: ${l.Phone || "(vacío)"}. Este lead queda como el de la conversación.`,
+          ).catch(() => {})
+          console.log(`[rescate-form] lead ${l.id} = chat ${contactoChat} → adoptado`)
+        }
+        continue
+      }
+    } catch { /* sin match: sigue el rescate normal */ }
     // GEMELO YA ATENDIDO (28-ago, caso Aleydis/Maximiliano Varas): el form
     // crea leads SIN dedup, y muchos "mudos" son personas que YA existen como
     // CONTACTO en Zoho (las atendió un ejecutivo por otro registro). Entregar

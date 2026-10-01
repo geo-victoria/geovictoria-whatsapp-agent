@@ -1531,6 +1531,49 @@ async function createZohoLeadBase(input: CreateZohoLeadInput): Promise<CreateZoh
             }
           }
         }
+        // MATCH DEL MINI-FORM POR NOMBRE (01-oct, caso Ernesto/ITV Cambridge):
+        // el primer mensaje es el prellenado del botón "Hola, soy X, me
+        // gustaría cotizar…" y hay UN lead del formulario con ese nombre
+        // creado minutos antes → es la misma persona aunque el teléfono del
+        // formulario sea otro. Se ADOPTA ese lead (lib/match-miniform).
+        try {
+          const contactoChat = ((input.contactoWA || "").trim() || (input.telefono || "").trim())
+          if (contactoChat) {
+            const { leadDelFormPorPrefill } = await import("./match-miniform")
+            const leadForm = await leadDelFormPorPrefill(contactoChat)
+            if (leadForm) {
+              const { setKvValue } = await import("./supabase-persistence-v3")
+              await setKvValue(kvKeyLead, leadForm).catch(() => {})
+              await setKvValue(`rescate_form_${leadForm}`, `conversa:${contactoChat}`).catch(() => {})
+              const numerico = /^\d{8,15}$/.test(fonoCandado) && !/^[A-Z]{2}\./.test(contactoChat)
+              let telForm = ""
+              try {
+                const g = await fetch(`${apiDedup}/crm/v3/Leads/${leadForm}?fields=Phone`, {
+                  headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}` },
+                  cache: "no-store",
+                })
+                telForm = g.ok ? String(((await g.json().catch(() => ({}))) as { data?: Array<{ Phone?: string }> }).data?.[0]?.Phone || "") : ""
+              } catch { /* sin lectura: sigue */ }
+              if (numerico && telForm.replace(/\D/g, "") !== fonoCandado) {
+                await fetch(`${apiDedup}/crm/v3/Leads`, {
+                  method: "PUT",
+                  headers: { Authorization: `Zoho-oauthtoken ${accessTokenDedup}`, "Content-Type": "application/json" },
+                  cache: "no-store",
+                  body: JSON.stringify({ data: [{ id: leadForm, Phone: `+${fonoCandado}` }], trigger: ["blueprint"] }),
+                }).catch(() => {})
+              }
+              await agregarNotaLead(
+                leadForm,
+                "Mismo cliente que conversa con Vicky por WhatsApp",
+                `El primer mensaje por WhatsApp fue el texto del botón del formulario con el mismo nombre, minutos después de llenarlo. ` +
+                  `WhatsApp: ${numerico ? `+${fonoCandado}` : contactoChat}. Teléfono escrito en el formulario: ${telForm || "(vacío)"}. ` +
+                  `Se usa este lead para la conversación; no se creó otro.`,
+              ).catch(() => {})
+              console.log(`[zoho-leads] match mini-form por nombre: ${contactoChat} → lead ${leadForm} (tel. formulario ${telForm || "vacío"})`)
+              return { success: true, leadId: leadForm, entraATombola: false, ownerEmail: input.ownerEmail || VICKY_DEFAULT_OWNER_EMAIL }
+            }
+          }
+        } catch { /* best-effort: la creación sigue */ }
         // DEDUP POR EMPRESA/NOMBRE (Lalo 21-ago, botón WhatsApp de las
         // landings CL): el pre-formulario crea un lead SIN teléfono (nombre,
         // apellido, correo corporativo, empresa) y el mensaje prellenado del
