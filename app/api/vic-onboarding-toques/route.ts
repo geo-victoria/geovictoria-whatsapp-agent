@@ -204,6 +204,9 @@ export async function GET(req: Request): Promise<Response> {
       const relator = cap.relator?.nombre || "tu relator"
 
       if (listar) {
+        const { claveCapacitacionLink } = await import("@/lib/onboarding/capacitacion-link")
+        const linkRaw = await getKvValue(claveCapacitacionLink(contact)).catch(() => null)
+        const link = linkRaw ? (JSON.parse(linkRaw) as { tipo?: string; at?: string }) : null
         foto.push({
           contact,
           nombre: nombre || null,
@@ -214,7 +217,14 @@ export async function GET(req: Request): Promise<Response> {
           trabajadores,
           ultimoMensajeCliente: ultimo ? ultimo.toISOString() : null,
           ventanaWaAbierta: ventanaAbierta,
-          estado: !altaAt ? "falta el alta" : cap.bookingId ? "capacitación agendada" : "FALTA AGENDAR CAPACITACIÓN",
+          linkCapacitacion: link?.tipo || null,
+          estado: !altaAt
+            ? "falta el alta"
+            : cap.bookingId
+              ? "capacitación agendada"
+              : link?.tipo
+                ? `link de capacitación entregado (${link.tipo.replace("_", " ")})`
+                : "FALTA AGENDAR CAPACITACIÓN",
         })
         continue
       }

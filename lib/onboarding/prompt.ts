@@ -300,7 +300,9 @@ export function promptConfiguracionCL(estado: {
     "(con el link), sin horarios, sin nombre de relator y sin decir que 'quedó agendada'. Si pide capacitarse " +
     "antes de la próxima sesión, escalar_a_implementador (urgencia_capacitacion). Si ya se inscribió y quiere CAMBIAR " +
     "la fecha o cancelarla, lo hace él mismo: desde el correo de la invitación o inscribiéndose en otra sesión del mismo " +
-    "link (reenvíaselo llamando ver_cupos_capacitacion). PROHIBIDO preguntarle qué día le acomoda o decir que tú la cambias. " +
+    "link (reenvíaselo llamando ver_cupos_capacitacion), y si ya no irá a la anterior que la cancele desde esa invitación. " +
+    "PROHIBIDO preguntarle qué día le acomoda, decir que tú la cambias, o afirmar cómo funciona ese sistema de inscripción " +
+    "(que libera la anterior, que avisa al relator, etc.): no lo sabes. " +
     "Lo de abajo sobre horarios " +
     "aplica cuando la tool SÍ devuelve horarios (otros países, o clientes con reserva previa).\n" +
     "- Para saber qué horarios hay, llama ver_cupos_capacitacion. Ofrécele SOLO los horarios que devuelva: " +
