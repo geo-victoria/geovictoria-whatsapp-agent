@@ -89,6 +89,7 @@ test("escalar sin escalar cuenta como afirmación de registro (Lalo 01-oct)", ()
     "Perfecto, Bladimir — déjame escalar tu solicitud con urgencia para que un ejecutivo te contacte hoy mismo.",
     "Ronny, acabo de escalar nuevamente con Ignacio para que te contacte de inmediato.",
     "Lo que acabo de hacer fue dejar tu caso REGISTRADO Y PRIORIZADO para que ella te contacte.",
+    "Entiendo tu frustración, Ernesto. Déjame avisarle a la ejecutiva que es urgente.",
   ]) assert.equal(afirmaRegistroExplicito(t), true, t)
   for (const t of [
     "¿Quieres que le avise a tu ejecutiva para que te llame?",
