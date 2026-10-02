@@ -36,10 +36,10 @@ export const FICHA_CO: FichaPrompt = {
   zonaTz: "America/Bogota",
   gentilicio: "colombiana",
   ejemploDudaLegal: "si los aprendices del SENA deben registrar asistencia",
-  ejemploMonto: "$77.000/mes",
+  ejemploMonto: "$99.000/mes",
   ejemploDudaLegalCorto: "el registro de los aprendices",
   ejemploDudaLegalTema: "el tema del registro de los aprendices",
-  ejemploMontoApp: "$77.000/mes",
+  ejemploMontoApp: "$99.000/mes",
   advertenciaRelojExterno:
     ", y recuérdale que un huellero suelto sin respaldo en la nube deja las marcas atrapadas en el aparato — si se daña, se pierde o se lo roban, el registro se pierde con él.",
   vendedoraLocal: "vendedora colombiana",

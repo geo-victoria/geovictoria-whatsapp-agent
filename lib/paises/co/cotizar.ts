@@ -5,7 +5,7 @@
  * forma del resultado a la que esperan las tools y el cotizador (campos en COP).
  *
  * Datos de Colombia:
- *   - Plan (lista del 01-oct): 1-2 → $35.000 fijo · 3-10 → $77.000 fijo · 11-20 → $7.700/usuario · 21+ → $13.700 por usuario;
+ *   - Plan (lista del 02-oct): 1-2 → $59.000 fijo · 3-10 → $99.000 fijo · 11-20 → $9.000/usuario · 21+ → $13.700 por usuario;
  *     `tramoLegado` = tabla anterior (1-10 fijo) para quien ya vio precio con ella.
  *     RANGO DE VICKY = 1-20; el 21-50 del catálogo es solo excepción.
  *   - Equipo biométrico: alquiler $86.000/mes en la base (Bogotá y
