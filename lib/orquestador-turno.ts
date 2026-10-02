@@ -19,7 +19,7 @@ import { runAgentLoop, type ConversationMessage } from "./agent-loop"
 import { urlsDeToolsDelTurno, vieneDeUnaTool, curarPlaceholdersDeLink } from "./links-de-tools"
 import { partirEnBurbujas } from "./burbujas"
 import { faseDelContacto, armarOnboarding } from "./onboarding-canal"
-import { lineaZonaHoraria } from "./paises/ficha-operativa"
+import { lineaZonaHoraria, paisTieneProceso } from "./paises/ficha-operativa"
 import { honestarMencionesDeCorreo } from "./honestidad-entrega"
 import { corregirPedidoDeTelefono } from "./no-pedir-telefono"
 import { detectarProcesoHumano, directivaProcesoHumano } from "./proceso-humano"
@@ -402,7 +402,7 @@ export async function procesarTurno(
   try {
     // Tools del país (PE/CO/MX): el mismo set en el turno y en TODOS los
     // reintentos forzados. Chile (undefined) usa el set por defecto del loop.
-    const toolsPais = perfil.tools ? await perfil.tools(contact) : null
+    let toolsPais = perfil.tools ? await perfil.tools(contact) : null
     // 1. Cargar historial
     const history: ConversationMessage[] = await fetchHistoryV3(contact, 40)
 
@@ -510,8 +510,19 @@ export async function procesarTurno(
     // de la Mesa de Ayuda como si fuera el WhatsApp de la vendedora.
     const contextoEjecutivo = await (async () => {
       const { contextoEjecutivoAsignado } = await import("@/lib/ejecutivo-contexto")
-      return contextoEjecutivoAsignado(contact)
+      return contextoEjecutivoAsignado(contact, perfil.pais)
     })().catch(() => "")
+    // TRASPASO ESTRICTO (Perú, Lalo 02-oct): con la conversación traspasada,
+    // las tools de precio y cotización NO existen en el turno (ausencia
+    // estructural, no solo prohibición de prompt).
+    if (toolsPais && contextoEjecutivo && paisTieneProceso(perfil.pais, "traspasoSinPreciosNiCapacitacion")) {
+      const { TOOLS_PRECIO_TRASPASO } = await import("@/lib/traspaso-estricto")
+      const base = toolsPais
+      toolsPais = {
+        ...base,
+        schemas: (base.schemas as Array<{ name?: string }>).filter((t) => !TOOLS_PRECIO_TRASPASO.has(String(t?.name || ""))),
+      }
+    }
     // Líneas REALES de la cotización vigente (caso Irene 28-sep): sin ellas el
     // modelo inventaba qué incluía ("la instalación está desglosada"). Global.
     const contenidoCotizacion = quotePointer?.acceptanceUrl
@@ -2200,6 +2211,17 @@ export async function procesarTurno(
           `[umbral-cinturon] precio o promesa de rebaja con dotación ${dotacionDetectada} sobre el umbral para ${contact} — respuesta reemplazada`,
         )
         reply = cinturonPrevio.reemplazo
+      }
+    }
+
+    // TRASPASO ESTRICTO (Perú, Lalo 02-oct): con ejecutivo asignado, ni
+    // precios ni capacitación — el cinturón asegura lo que el prompt pide.
+    if (!enOnboarding && reply && contextoEjecutivo && paisTieneProceso(perfil.pais, "traspasoSinPreciosNiCapacitacion")) {
+      const { cinturonTraspasoEstricto } = await import("@/lib/traspaso-estricto")
+      const c = cinturonTraspasoEstricto(reply, nombreEjecutivo)
+      if (c.violacion) {
+        console.warn(`[traspaso-estricto] ${c.violacion} con conversación traspasada (${contact}, ${perfil.pais}) — respuesta reemplazada`)
+        reply = c.reemplazo
       }
     }
 

@@ -197,6 +197,14 @@ export type FichaOperativa = {
      * el lead de una SDR es de una persona y se respeta como el de cualquiera.
      */
     sdrEntregaAlCotizar: boolean
+    /**
+     * Con la conversación ya traspasada a un ejecutivo, Vicky NO habla de
+     * precios (ni los que ella misma dio antes) ni de capacitación /
+     * implementación: todo eso es del ejecutivo (Perú, Lalo 02-oct, caso
+     * Electric World / Mónica). Con prompt + tools de precio bloqueadas +
+     * cinturón de salida.
+     */
+    traspasoSinPreciosNiCapacitacion: boolean
   }
   /** Lo que la ficha declara que FALTA para este país (texto para una persona). */
   pendientes: string[]
@@ -277,7 +285,7 @@ const FICHA_CL: FichaOperativa = {
   },
   plantillas: { presentacionTraspaso: "vicky_traspaso_ejecutivo" },
   zoho: { reglaDeals: REGLA_DEALS_CHILE, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: false },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: false, traspasoSinPreciosNiCapacitacion: false },
   pendientes: [],
 }
 
@@ -341,7 +349,7 @@ const FICHA_PE: FichaOperativa = {
   },
   plantillas: { presentacionTraspaso: "vicky_pe_traspaso_ejecutivo" },
   zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: true, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: false },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: true, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: false, traspasoSinPreciosNiCapacitacion: true },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Perú (en Chile es Sebastián Silva): correo del revisor para avisarle y para el ticket ST la plantilla de equipos del país.",
     "Un aviso REAL de BBVA/BCP/Interbank en la casilla vicky@ para calibrar el parser (hoy formato genérico).",
@@ -424,7 +432,7 @@ const FICHA_CO: FichaOperativa = {
   // Sin plantilla propia: los bots están unificados (22-sep) y la chilena es neutra (sin RUT/UF).
   plantillas: { presentacionTraspaso: "" },
   zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: true },
+  procesos: { relojCalificacion24h: true, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: false, sdrEntregaAlCotizar: true, traspasoSinPreciosNiCapacitacion: false },
   pendientes: [
     "Quién revisa la Solicitud de Facturación en Colombia (su ST valida contra la Sales Order de Books, no contra la NDV) y la plantilla de equipos del país.",
     "Espejos del equipo CO: las 7 sesiones ya existen en el worker (26-sep); falta que cada uno escanee su QR.",
@@ -505,7 +513,7 @@ const FICHA_MX: FichaOperativa = {
   // Sin plantilla propia: los bots están unificados (22-sep) y la chilena es neutra (sin RUT/UF).
   plantillas: { presentacionTraspaso: "" },
   zoho: { reglaDeals: REGLA_DEALS_2026, reglaLeadsCalificado: REGLA_LEADS_TLMK, reglaLeadsSinCalificar: REGLA_LEADS_SDR },
-  procesos: { relojCalificacion24h: false, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: true, sdrEntregaAlCotizar: false },
+  procesos: { relojCalificacion24h: false, tombolaZoho: true, presentacionConGate: false, altaPorChat: true, leadNaceConSdr: true, sdrEntregaAlCotizar: false, traspasoSinPreciosNiCapacitacion: false },
   pendientes: [
     "Plantilla de equipos del país para el ticket ST.",
     "Espejos de Laura, Yahel y Pablo: la sesión ya existe en el worker (26-sep); falta que cada uno escanee su QR.",
@@ -800,6 +808,7 @@ const ENV_PROCESO: Record<keyof FichaOperativa["procesos"], string> = {
   altaPorChat: "VICKY_ALTA_POR_CHAT",
   leadNaceConSdr: "VICKY_LEAD_NACE_CON_SDR",
   sdrEntregaAlCotizar: "VICKY_SDR_ENTREGA_AL_COTIZAR",
+  traspasoSinPreciosNiCapacitacion: "VICKY_TRASPASO_SIN_PRECIOS",
 }
 
 /** ¿El país tiene el proceso encendido? env `<PROCESO>_<CC>`=on|off manda sobre la ficha. */

@@ -1,3 +1,5 @@
+import { paisTieneProceso } from "./paises/ficha-operativa"
+import { reglaTraspasoEstricto } from "./traspaso-estricto"
 /**
  * Bloque de prompt con los datos EXACTOS del ejecutivo asignado al contacto.
  *
@@ -72,7 +74,8 @@ async function telefonoPorFicha(zohoId: string, email: string): Promise<string> 
  * Bloque para el system prompt (o "" si el contacto no tiene ejecutivo
  * asignado). Va al inicio del contexto, junto a los demás bloques.
  */
-export async function contextoEjecutivoAsignado(contact: string): Promise<string> {
+export async function contextoEjecutivoAsignado(contact: string, pais?: string): Promise<string> {
+  const estricto = pais ? paisTieneProceso(pais, "traspasoSinPreciosNiCapacitacion") : false
   const clean = contact.replace(/\D/g, "")
   if (!clean || !SUPABASE_URL || !SUPABASE_KEY) return ""
   try {
@@ -106,18 +109,18 @@ export async function contextoEjecutivoAsignado(contact: string): Promise<string
       email = String(ejec.email || "").trim()
       zohoId = String(ejec.id || "").trim()
       if (ejec.telefono) {
-        return bloque(nombre, String(ejec.telefono).trim(), email)
+        return bloque(nombre, String(ejec.telefono).trim(), email, estricto)
       }
     }
     if (!nombre && !email) return ""
     const tel = telefonoPorEnv(email) || (await telefonoPorFicha(zohoId, email))
-    return bloque(nombre, tel, email)
+    return bloque(nombre, tel, email, estricto)
   } catch {
     return ""
   }
 }
 
-function bloque(nombre: string, tel: string, email: string): string {
+function bloque(nombre: string, tel: string, email: string, estricto = false): string {
   const quien = nombre || "su ejecutivo"
   const datos = [nombre || "nuestro ejecutivo", tel ? `WhatsApp ${tel}` : "", email]
     .filter(Boolean)
@@ -134,6 +137,7 @@ function bloque(nombre: string, tel: string, email: string): string {
     // volumen" y cerró con "la sorpresa va a ser a la baja". La clienta llamó
     // a la ejecutiva esperando un precio que nadie le ofreció.
     `EL PRECIO DE ESTE CLIENTE ES DE ${quien}: si pregunta cuánto va a pagar, te comparte una tabla, propuesta o contrato de ${quien}, o compara con lo que paga o pagaba en otro lado, NO calcules ni repitas montos, NO menciones descuentos (tampoco "por volumen"), NO digas que el valor puede bajar, ajustarse a su presupuesto o calzar con lo que paga o pagaba, y NO compares precios con otros proveedores. Dile que ese valor lo ve directamente con ${quien} y dale sus datos de contacto de arriba. NO digas "le aviso" ni "te contacta de inmediato": no tienes cómo avisarle ni controlas cuándo llama. Única excepción: precios que TÚ entregaste en esta conversación con tus tools.\n` +
-    `ANTES DEL PAGO no hay capacitación ni implementador: una reunión con ${quien} es una reunión COMERCIAL — llámala así, y jamás prometas que la cuenta queda activa ni que los trabajadores empiezan a marcar.`
+    `ANTES DEL PAGO no hay capacitación ni implementador: una reunión con ${quien} es una reunión COMERCIAL — llámala así, y jamás prometas que la cuenta queda activa ni que los trabajadores empiezan a marcar.` +
+    (estricto ? reglaTraspasoEstricto(quien) : "")
   )
 }
