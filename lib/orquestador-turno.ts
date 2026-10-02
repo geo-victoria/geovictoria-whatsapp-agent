@@ -60,7 +60,7 @@ import { sanitizarVoseo, normalizarFormatoWhatsApp, quitarSignosApertura, blinda
 import { directorioEjecutivos } from "./directorio-ejecutivos"
 import { marcarCotizacionRechazada } from "./zoho-quote-status"
 import { updateZohoLeadStatus } from "./zoho-leads"
-import { clasificarSenalEspera, enrolarEnLoop } from "./loop-v2"
+import { clasificarSenalEspera, enrolarEnLoop, pausarLoopHasta } from "./loop-v2"
 import { umbralPrecios, formatUmbralParaPrompt, dotacionSobreUmbral, formatDirectivaSobreUmbral, cinturonPrecioSobreUmbral, paisConUmbral, type DerivacionPais } from "./umbral-autonomia"
 import { prometeContactoSinRegistro } from "./promesa-contacto"
 
@@ -2427,6 +2427,7 @@ export async function procesarTurno(
         const senal = clasificarSenalEspera(message, perfil.pais, contact)
         if (senal) {
           await scheduleConsensualFollowup(contact, senal.cuando.toISOString(), perfil.pais)
+          await pausarLoopHasta(contact, senal.cuando).catch(() => {})
           console.log(
             `[v3-followup] señal de espera '${senal.tipo}' → toque único ${senal.cuando.toISOString()} contact=${contact}`,
           )
@@ -2462,6 +2463,7 @@ export async function procesarTurno(
         )?.cuandoIso
         if (cuandoIso) {
           await scheduleConsensualFollowup(contact, cuandoIso, perfil.pais)
+          await pausarLoopHasta(contact, new Date(cuandoIso)).catch(() => {})
           console.log(
             `[v3-followup] consensuado → toque único programado contact=${contact} cuando=${cuandoIso}`,
           )

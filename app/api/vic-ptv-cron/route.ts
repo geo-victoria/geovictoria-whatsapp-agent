@@ -35,7 +35,7 @@ import {
   sumarHorasHabiles,
 } from "@/lib/ptv"
 import { sendBotmakerMessage, sendBotmakerTemplate } from "@/lib/botmaker-push-v3"
-import { contactosAtendidosPorVendedor, pagoRegistradoReciente, enFaseOnboarding } from "@/lib/loop-v2"
+import { contactosAtendidosPorVendedor, pagoRegistradoReciente, enFaseOnboarding, pausaVigenteHasta } from "@/lib/loop-v2"
 import { appendAssistantV3, getFollowupCronSecret, getKvValue, getQuotePointers, setKvValue } from "@/lib/supabase-persistence-v3"
 import { avisarEquipoInterno } from "@/lib/alerta-interna"
 import { paisDeContacto } from "@/lib/botmaker-tags"
@@ -2715,6 +2715,19 @@ export async function GET(req: Request) {
       })
       continue
     }
+    // EL CLIENTE PIDIÓ ESPERAR (auditoría de reclamos 01-oct: Loreto, Ricardo,
+    // Nadia): "¿cómo te fue con X?" le llegaba el mismo día en que dijo "yo te
+    // aviso" o "el lunes tengo novedades". Con una pausa vigente el chequeo se
+    // corre a 2 horas hábiles después de que termine.
+    const pausaHasta = await pausaVigenteHasta(ch.contact, ahora).catch(() => null)
+    if (pausaHasta) {
+      const fer = await feriadosDePais(pais).catch(() => new Set<string>())
+      await supa(`vic_ptv?id=eq.${ch.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ chequeo_at: sumarHorasHabiles(pausaHasta, 2, pais, fer).toISOString() }),
+      })
+      continue
+    }
     const ventanaAbierta = Boolean(conv?.last_user_at && ahora.getTime() - new Date(conv.last_user_at).getTime() < VENTANA_META_MS)
     if (ventanaAbierta) {
       // Jamás un prefijo de correo en la cara del cliente: si no conocemos el
@@ -3056,6 +3069,14 @@ async function reintentarPresentacionesPendientes(
     const email = (f.vendedor_email || "").trim()
     if (!clean || !email || isTestContact(clean, tests)) continue
     if (soloContactos.size && !soloContactos.has(clean)) continue
+    // Pausa pedida por el cliente: la presentación espera a que termine (el
+    // traspaso en Zoho ya está hecho; solo se retiene el mensaje).
+    const pausaHasta = await pausaVigenteHasta(f.contact, ahora).catch(() => null)
+    if (pausaHasta) {
+      pendientes++
+      detalle.push(`${clean}: pausa pedida por el cliente hasta ${pausaHasta.toISOString()}`)
+      continue
+    }
     if (!enVentanaProactiva(clean, ahora)) {
       pendientes++
       continue
@@ -4320,8 +4341,8 @@ async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; rec
   ).catch(() => new Set<string>())
 
   const lista = vivos.map((r) => `"${r.contact}"`).join(",")
-  const loops = await supa<{ contact: string; estado: string; motivo_cierre: string | null }>(
-    `vic_loop?contact=in.(${lista})&select=contact,estado,motivo_cierre&limit=500`,
+  const loops = await supa<{ contact: string; estado: string; motivo_cierre: string | null; compromiso_at: string | null }>(
+    `vic_loop?contact=in.(${lista})&select=contact,estado,motivo_cierre,compromiso_at&limit=500`,
   ).catch(() => [])
 
   let reabiertos = 0
@@ -4346,12 +4367,15 @@ async function reconciliarSilencioTraspasos(): Promise<{ reabiertos: number; rec
       if (await enFaseOnboarding(l.contact)) continue
       // Escalonado: 20 min + 7 min por loop reabierto en este tick.
       const proximoToque = new Date(ahoraMs + 20 * 60_000 + reabiertos * 7 * 60_000).toISOString()
+      // Con pausa pedida por el cliente, el loop reabre PAUSADO hasta esa fecha
+      // (caso Diego 29-sep: "yo le hablo" y dos seguimientos al reabrirse).
+      const pausado = Boolean(l.compromiso_at && new Date(l.compromiso_at).getTime() > ahoraMs)
       await supa(`vic_loop?contact=eq.${encodeURIComponent(l.contact)}`, {
         method: "PATCH",
         body: JSON.stringify({
-          estado: "activo",
+          estado: pausado ? "pausado_compromiso" : "activo",
           motivo_cierre: null,
-          next_touch_at: proximoToque,
+          next_touch_at: pausado ? l.compromiso_at : proximoToque,
           updated_at: new Date().toISOString(),
         }),
       }).catch(() => {})

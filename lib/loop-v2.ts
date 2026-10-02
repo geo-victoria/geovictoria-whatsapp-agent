@@ -319,6 +319,7 @@ export type SenalEspera = {
     | "en_n_semanas"
     | "en_n_dias"
     | "en_n_horas"
+    | "queja_insistencia"
   cuando: Date
 }
 
@@ -363,13 +364,19 @@ const RE_LARGO =
   /\bmas (adelante|para adelante)\b|\ben unos meses\b|\ben un mes( mas)?\b|\bel (proximo|otro) mes\b|\ba fin(es)? de mes\b|\bcuando (parta|partamos|empiece|empecemos|inicie|iniciemos|arranque|comience)\b/
 // El cliente promete volver él ("te aviso", "me comunico", "apenas sepa").
 const RE_AVISO_PROPIO =
-  /\b(te|les?|los) (aviso|avisare|avisamos|escribo|escribire|contacto|contactare|llamo|llamare|confirmo|confirmare|cuento|contare|comento|comentare|digo|dire)\b|\bme comunico\b|\bnos comunicamos\b|\byo (me comunico|los? contacto|te contacto|te busco)\b|\bestamos en contacto\b|\bcuando tenga (novedades|respuesta|noticias|el ok)\b|\bapenas (sepa|tenga)\b/
+  /\b(te|les?|los) (aviso|avisare|avisamos|escribo|escribire|contacto|contactare|llamo|llamare|confirmo|confirmare|cuento|contare|comento|comentare|digo|dire|hablo|hablare|respondo|respondere|retomo)\b|\byo (te|les?|los) (hablo|escribo|aviso|llamo)\b|\b(si|cuando) (necesito|necesite|decid\w*|quiera|queramos) (algo )?(te|les?|los) (aviso|escribo|hablo|contacto|llamo)\b|\bme comunico\b|\bnos comunicamos\b|\byo (me comunico|los? contacto|te contacto|te busco)\b|\bestamos en contacto\b|\bcuando tenga (novedades|respuesta|noticias|el ok)\b|\bapenas (sepa|tenga)\b/
 // La decisión está en manos de un tercero (jefe, gerencia, socio…).
 const RE_TERCERO =
-  /\b(mi|el|la|nuestro|nuestra) (jefe|jefa|jefatura|gerente|dueno|duena|socio|socia|patron|senora|marido|esposo|esposa)\b|\bgerencia\b|\bdirectorio\b|\blos socios\b|\brecursos humanos\b|\ben manos de\b|\bno depende de mi\b|\bdepende de (el|ella|ellos|otra)\b/
+  /\b(mi|el|la|nuestro|nuestra) (jefe|jefa|jefatura|gerente|dueno|duena|socio|socia|patron|senora|marido|esposo|esposa)\b|\bgerencia\b|\bjefatura\b|\bdirectorio\b|\bcomite\b|\badministracion\b|\blos socios\b|\brecursos humanos\b|\ben manos de\b|\bno depende de mi\b|\bdepende de (el|ella|ellos|otra)\b/
 // El cliente pidió tiempo para evaluar/revisar (sin fecha).
 const RE_EVALUANDO =
-  /\b(lo|la|los) (voy|vamos) a (evaluar|revisar|analizar|conversar|presentar|estudiar|ver)\b|\b(lo|la) (tengo|tenemos) que (ver|revisar|evaluar|consultar|conversar|presentar)\b|\besta(mos|re)? evaluando\b|\bestoy evaluando\b|\bdejame (revisar|ver|evaluar)\w*\b|\b(lo|la) estoy (viendo|evaluando|revisando|analizando)\b|\btengo que (verlo|revisarlo|evaluarlo|consultarlo|conversarlo)\b/
+  /\b(lo|la|los|las) (comentare|comentaremos|vere|veremos|revisare|revisaremos|evaluare|evaluaremos|analizare|analizaremos|presentare|presentaremos|conversare|conversaremos|consultare|pensare|estudiare)\b|\b(voy|vamos) a (evaluar|revisar|analizar|pensar|estudiar|comparar)\b|\b(estoy|estamos|ando|andamos) (cotizando|comparando|viendo opciones|en cotizaciones)\b|\bpara (enviarla|enviarlo|mandarla|mandarlo|mostrarla|mostrarlo|presentarla|presentarlo|pasarla|pasarlo)\b|\b(dejame|deja|dejeme) (pensarlo|pensarla|verlo|verla)\b|\blo (voy a )?pienso\b|\b(lo|la) (voy|vamos) a (evaluar|revisar|analizar|conversar|presentar|estudiar|ver)\b|\b(lo|la) (tengo|tenemos) que (ver|revisar|evaluar|consultar|conversar|presentar)\b|\besta(mos|re)? evaluando\b|\bestoy evaluando\b|\bdejame (revisar|ver|evaluar)\w*\b|\b(lo|la) estoy (viendo|evaluando|revisando|analizando)\b|\btengo que (verlo|revisarlo|evaluarlo|consultarlo|conversarlo)\b/
+// QUEJA POR INSISTENCIA (auditoría 01-oct: "agradecería no tanta insistencia",
+// "calma, mañana tendremos reunión", "a cada rato el mismo mensaje"): el cliente
+// no se va, pero pide aire. Pausa de 5 días hábiles; si quiere, escribe él.
+const RE_QUEJA_INSISTENCIA =
+  /\binsisten(te|tes|cia)\b|\bcalma\b|\ba cada rato\b|\bdemasiad[oa]s? mensajes\b|\bmuchos mensajes\b|\bme (han )?(escrito|hablado) (demasiado|mucho)\b|\bno me (apuren|apures|presionen|presiones)\b|\bsin (apuro|presion)\b/
+
 // Promesa INMEDIATA ("te confirmo enseguida") → no es señal de espera; solo
 // suprime la categoría espera_tercero (las de fecha concreta ganan igual).
 const RE_INMEDIATO =
@@ -492,6 +499,12 @@ export function clasificarSenalEspera(
   }
   if (RE_MANANA.test(texto) || (/\bhoy\b/.test(texto) && RE_HOY_DEFINE.test(texto)))
     return { tipo: "manana", cuando: alas9En(1) }
+  if (RE_QUEJA_INSISTENCIA.test(texto)) {
+    return {
+      tipo: "queja_insistencia",
+      cuando: ajustarAHabil(sumarDiasHabiles(ahora, 5, tz), tz, contact, { t0: ahora }),
+    }
+  }
   if (RE_LARGO.test(texto)) return { tipo: "largo_plazo", cuando: alas9En(7) }
   if (
     !RE_INMEDIATO.test(texto) &&
@@ -503,6 +516,24 @@ export function clasificarSenalEspera(
     }
   }
   return null
+}
+
+// ── ¿El cliente retomó la compra? ───────────────────────────────────────────
+//
+// LA PAUSA NO SE BORRA CON UN "OK, GRACIAS" (auditoría de reclamos 01-oct):
+// hasta hoy cualquier mensaje del cliente posterior a "lo veo con los socios"
+// re-armaba el loop — una pregunta, un "gracias" — y los seguimientos volvían a
+// partir antes de la fecha que él mismo puso (caso Diego, Motel Status: "yo le
+// hablo" y dos seguimientos al día siguiente). La pausa termina solo si llega
+// su fecha o el cliente retoma la compra: quiere pagar, aceptar, avanzar,
+// manda su RUT o pide la cotización. Las preguntas y las cortesías NO la
+// terminan: Vicky las contesta igual (el turno reactivo nunca se corta).
+const RE_RETOMA_COMPRA =
+  /\b(pag(ar|o|ue|ar[eé]|amos)|transfer\w*|acept\w*|contrat(o|ar|amos|emos)|avanz\w*|avanc\w*|firm(o|ar|amos)|hagamoslo|vamos con|dale|lo tomo|la tomo|nos quedamos con|quiero (la|el|avanzar|contratar|partir|empezar|comenzar)|queremos (la|el|avanzar|contratar|partir|empezar|comenzar)|me la (envias|mandas|pasas)|mandame la cotizacion|enviame la cotizacion|ya (lo )?(decidimos|decidi|conversamos|hable|aprobaron|aprobo)|nos (dieron|dio) el (ok|visto bueno)|aprobad[oa])\b|\b\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]\b|\b(10|15|17|20)\d{9}\b|\b\d{3}\.?\d{3}\.?\d{3}-\d\b|\b[a-z&]{3,4}\d{6}[a-z0-9]{3}\b/
+
+export function retomaCompra(mensaje: string): boolean {
+  const t = (mensaje || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  return RE_RETOMA_COMPRA.test(t)
 }
 
 // ── Estado del loop por contacto ────────────────────────────────────────────
@@ -609,7 +640,7 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
   // Cliente en pleno alta de cuenta: sus mensajes son del onboarding, no de venta.
   if (await enFaseOnboarding(contact)) return
   const res = await supa(
-    `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado,stage,next_touch&limit=1`,
+    `vic_loop?contact=eq.${encodeURIComponent(contact)}&select=contact,country,estado,stage,next_touch,compromiso_at&limit=1`,
   )
   const rows = res.ok ? (((await res.json().catch(() => [])) as LoopRow[]) || []) : []
   const row = rows[0]
@@ -617,6 +648,14 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
   if (!["activo", "pausado_compromiso", "finalizado"].includes(row.estado || "")) return
   const ahora = new Date()
   const senal = mensaje ? clasificarSenalEspera(mensaje, row.country, contact, ahora) : null
+  // Pausa vigente + mensaje sin señal nueva y sin retomar la compra → la pausa
+  // se conserva tal cual (ver RE_RETOMA_COMPRA). Sin mensaje (enrolarEnLoop
+  // tras un turno) tampoco se toca: nadie retomó nada.
+  const compromisoVigente = row.compromiso_at && new Date(row.compromiso_at).getTime() > ahora.getTime()
+  if (compromisoVigente && !senal && !(mensaje && retomaCompra(mensaje))) {
+    console.log(`[loop-v2] pausa vigente hasta ${row.compromiso_at} se conserva contact=${contact}`)
+    return
+  }
   const t0 = senal ? new Date(senal.cuando.getTime() - 3600e3) : ahora
   // EL RELOJ SE REANCLA, EL CONTADOR NO RETROCEDE (04-sep, hallazgo de Rodrigo).
   //
@@ -675,6 +714,53 @@ export async function resetLoop(contact: string, mensaje?: string): Promise<void
       `[loop-v2] señal de espera '${senal.tipo}' → t0 anclado a ${t0.toISOString()} contact=${contact}`,
     )
   }
+}
+
+/**
+ * PAUSA ÚNICA (auditoría de reclamos 01-oct). El "yo te aviso" vivía en dos
+ * lugares que no se miraban: vic_loop.compromiso_at (detector automático) y
+ * vic_v3_conversations.followup_status='consensuado' (tool programar_seguimiento).
+ * La presentación del ejecutivo, la pregunta de las 9 horas y la reapertura del
+ * loop tras el traspaso no miraban ninguno. Desde hoy toda pausa se escribe
+ * también en vic_loop.compromiso_at y todos los envíos proactivos la leen con
+ * pausaVigenteHasta.
+ */
+export async function pausarLoopHasta(contact: string, cuando: Date): Promise<void> {
+  if (!loopV2Enabled() || !contact || !SUPABASE_URL || !SUPABASE_KEY) return
+  if (!(cuando instanceof Date) || Number.isNaN(cuando.getTime()) || cuando.getTime() <= Date.now()) return
+  const res = await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}&select=estado,compromiso_at&limit=1`)
+  const row = res.ok ? ((((await res.json().catch(() => [])) as LoopRow[]) || [])[0] ?? null) : null
+  if (!row) return
+  const cuerpo: Record<string, unknown> = { compromiso_at: cuando.toISOString(), updated_at: new Date().toISOString() }
+  // Un loop cerrado no se revive desde acá; solo queda anotada la pausa para
+  // que una reapertura posterior (traspaso) la respete.
+  if (row.estado !== "cerrado") {
+    cuerpo.estado = "pausado_compromiso"
+    cuerpo.next_touch_at = cuando.toISOString()
+  }
+  await supa(`vic_loop?contact=eq.${encodeURIComponent(contact)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify(cuerpo),
+  })
+  console.log(`[loop-v2] pausa hasta ${cuando.toISOString()} contact=${contact}`)
+}
+
+/** Fecha hasta la que el cliente pidió no ser contactado, o null. */
+export async function pausaVigenteHasta(contact: string, ahora: Date = new Date()): Promise<Date | null> {
+  if (!contact || !SUPABASE_URL || !SUPABASE_KEY) return null
+  const enc = encodeURIComponent(contact)
+  const [rl, rc] = await Promise.all([
+    supa(`vic_loop?contact=eq.${enc}&select=compromiso_at&limit=1`).catch(() => null),
+    supa(`vic_v3_conversations?contact=eq.${enc}&followup_status=eq.consensuado&select=followup_next_at&limit=1`).catch(() => null),
+  ])
+  const fechas: number[] = []
+  const l = rl && rl.ok ? (((await rl.json().catch(() => [])) as Array<{ compromiso_at?: string | null }>) || [])[0] : null
+  if (l?.compromiso_at) fechas.push(new Date(l.compromiso_at).getTime())
+  const c = rc && rc.ok ? (((await rc.json().catch(() => [])) as Array<{ followup_next_at?: string | null }>) || [])[0] : null
+  if (c?.followup_next_at) fechas.push(new Date(c.followup_next_at).getTime())
+  const max = Math.max(0, ...fechas.filter((n) => Number.isFinite(n)))
+  return max > ahora.getTime() ? new Date(max) : null
 }
 
 /**
@@ -1017,7 +1103,10 @@ export async function contactosEnLoop(
   // in.() de PostgREST con los contactos entre comillas (mismo patrón que la
   // consulta batch de vic-outbound-cadence-cron sobre vic_v3_conversations).
   const lista = contacts.map((c) => `"${c}"`).join(",")
-  const filtroEstado = opts.soloActivos ? "&estado=eq.activo" : ""
+  // Un loop PAUSADO también va a tocar al contacto (cuando llegue su fecha):
+  // si se excluyera, la reactivación mandaría el seguimiento consensuado y el
+  // loop despertaría con otro mensaje ese mismo día.
+  const filtroEstado = opts.soloActivos ? "&estado=in.(activo,pausado_compromiso)" : ""
   const res = await supa(`vic_loop?contact=in.(${lista})&select=contact${filtroEstado}`).catch(() => null)
   if (!res || !res.ok) return enLoop
   const rows = ((await res.json().catch(() => [])) as Array<{ contact: string }>) || []

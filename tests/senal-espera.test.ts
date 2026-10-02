@@ -10,7 +10,7 @@
 
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import { clasificarSenalEspera, tzDePais, PAUSA_MIN_MS } from "../lib/loop-v2.ts"
+import { clasificarSenalEspera, tzDePais, PAUSA_MIN_MS, retomaCompra } from "../lib/loop-v2.ts"
 
 const TZ_CL = tzDePais("cl")
 const CONTACTO = "56966432322" // Tamara
@@ -229,4 +229,47 @@ test("'mañana te confirmo' ahora SUPERA el umbral de pausa (antes solo >3 días
   const s = clasificarSenalEspera("mañana te confirmo", "cl", "56932011618", ahora)
   assert.ok(s)
   assert.ok(s!.cuando.getTime() - ahora.getTime() > PAUSA_MIN_MS)
+})
+
+// AUDITORÍA DE RECLAMOS (01-oct): frases reales de clientes que dijeron "yo
+// aviso" y el detector no reconoció — después reclamaron por insistencia.
+describe("frases reales que antes no pausaban", () => {
+  const ahora = new Date("2026-09-24T14:31:37Z")
+  const frases: [string, string][] = [
+    ["Nadia", "Gracias. la comentaré acá antes de tomar la decisión. pero por lo que he revisado ES la que más me gusta"],
+    ["Diego", "Yo le hablo"],
+    ["Carlos", "Le indique que estoy en cotizaciones"],
+    ["Valeska", "Voy a analizar bien Estoy cotizando"],
+    ["Edgardo", "Dame la cotización con el reloj, para enviarla a jefatura"],
+    ["Ricardo", "Tranquila que tengo que presentar al comite el gasto"],
+  ]
+  for (const [quien, frase] of frases) {
+    test(`${quien}: "${frase.slice(0, 40)}…" pausa más de 90 minutos`, () => {
+      const s = clasificarSenalEspera(frase, "cl", "569", ahora)
+      assert.ok(s, "debió detectar la señal")
+      assert.ok(s!.cuando.getTime() - ahora.getTime() > PAUSA_MIN_MS)
+    })
+  }
+  test("queja por insistencia pausa 5 días hábiles", () => {
+    const s = clasificarSenalEspera("Agradecería no tanta insistencia", "cl", "569", ahora)
+    assert.equal(s?.tipo, "queja_insistencia")
+    assert.ok(s!.cuando.getTime() - ahora.getTime() >= 5 * 24 * 3600e3)
+  })
+  test("una pregunta de producto o una cortesía NO es señal", () => {
+    assert.equal(clasificarSenalEspera("Cómo es el tema de las horas el máximo sería?", "cl", "569", ahora), null)
+    assert.equal(clasificarSenalEspera("Gracias muy amable", "cl", "569", ahora), null)
+  })
+})
+
+describe("retomaCompra: lo único que termina una pausa antes de su fecha", () => {
+  test("cortesías y preguntas NO la terminan", () => {
+    for (const t of ["ok gracias", "Gracias muy amable", "Cómo es el tema de las horas el máximo sería?", "y si se corta internet?"]) {
+      assert.equal(retomaCompra(t), false, t)
+    }
+  })
+  test("pagar, aceptar, avanzar o mandar el documento SÍ la terminan", () => {
+    for (const t of ["quiero pagar", "ya lo aprobaron, avancemos", "dale, vamos con la opción 1", "mi rut es 76.123.456-0", "ruc 20605842055", "mándame la cotización"]) {
+      assert.equal(retomaCompra(t), true, t)
+    }
+  })
 })
