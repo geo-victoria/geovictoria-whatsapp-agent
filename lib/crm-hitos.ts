@@ -2154,6 +2154,29 @@ export async function sincronizarHitoCrm(
         /* best-effort: sin historial, clasifica con lo que trajo la tool */
       }
     }
+    // DOTACIÓN DESDE EL HISTORIAL (caso La Birra, 01-oct): con documento y sin
+    // dotación, la escalera no sabe si es trato (>20) o lead, y una consulta
+    // de agenda entregaba el LEAD a un ejecutivo minutos antes de que el trato
+    // naciera y lo sorteara la tómbola a otro. Si el cliente ya la escribió
+    // ("de 200 a 400 personas"), se usa el piso antes de clasificar.
+    if (datos.rut && !datos.empleados && hito !== "aceptada" && hito !== "onboarding_listo") {
+      try {
+        const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
+        const historial = await fetchHistoryV3(clean, 40)
+        const soloCliente = historial
+          .filter((m) => m.role === "user")
+          .map((m) => String(m.content || ""))
+          .join("\n")
+        const { dotacionEnTexto } = await import("./dotacion-en-texto")
+        const n = dotacionEnTexto(soloCliente)
+        if (n) {
+          datos = { ...datos, empleados: n }
+          console.log(`[crm-hitos] ${clean}: dotación ${n} recuperada del historial para clasificar el hito "${hito}"`)
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
     // Flujo 21+ (Lalo 13-ago): con documento y sin nombre de empresa, la
     // razón social se resuelve del PADRÓN del país — SII por RUT, SUNAT por
     // RUC, RUES por NIT (28-sep, caso Edwin/CTEM: solo Chile la resolvía acá y

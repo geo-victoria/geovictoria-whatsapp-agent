@@ -26,7 +26,7 @@ export async function extraerDatosLeadDeChat(
           "Extrae datos del CLIENTE desde una conversación de ventas por WhatsApp. Responde SOLO un JSON válido con esta forma exacta: " +
           '{"nombre": string|null, "empresa": string|null, "email": string|null, "trabajadores": number|null}. ' +
           "Reglas: usa ÚNICAMENTE lo que el CLIENTE dijo explícitamente (nunca inventes ni infieras del contexto de Vicky); " +
-          "nombre = nombre de la persona (no de la empresa); trabajadores = cantidad de personas de su empresa si la dijo; " +
+          "nombre = nombre de la persona (no de la empresa); trabajadores = cantidad de personas de su empresa si la dijo (si dio un rango, el número MENOR); " +
           "null en todo campo que no aparezca claro. Sin texto adicional fuera del JSON.",
         messages: [{ role: "user", content: dialogo }],
       }),
@@ -83,14 +83,19 @@ export async function datosDelChat(contact: string, opts: { soloSiHayRut?: boole
       .join("\n")
       .slice(0, 6000)
     const ex = apiKey ? await extraerDatosLeadDeChat(dialogo, apiKey) : null
+    // La dotación escrita por el cliente manda sobre la del modelo: un rango
+    // ("de 200 a 400 personas") el modelo lo devolvía null y el trato no
+    // nacía (caso La Birra 01-oct). Piso del rango, última mención.
+    const { dotacionEnTexto } = await import("./dotacion-en-texto")
+    const empleados = dotacionEnTexto(soloCliente) ?? ex?.trabajadores
     const out: DatosDelChat = {
       nombre: ex?.nombre,
       empresa: ex?.empresa,
       email: ex?.email,
-      empleados: ex?.trabajadores,
+      empleados,
       rut,
       rutEnChat: Boolean(rut),
-      tieneAlgo: Boolean(rut || ex?.nombre || ex?.empresa || ex?.trabajadores || ex?.email),
+      tieneAlgo: Boolean(rut || ex?.nombre || ex?.empresa || empleados || ex?.email),
     }
     return out
   } catch (e) {
