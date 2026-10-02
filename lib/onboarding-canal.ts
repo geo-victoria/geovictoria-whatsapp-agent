@@ -15,6 +15,7 @@
 import { getKvValue, setKvValue } from "./supabase-persistence-v3"
 import { avisarEquipoInterno } from "./alerta-interna"
 import { altaApiConfigurada, existeEmpresa, crearEmpresaConAdmin, agregarUsuarioAlta } from "./alta-empresa"
+import { accionUsuarioFallido, textoPedirOtroCorreo, textoPedirDatosAdmin } from "./alta-decision"
 
 // URL de inicio de sesión de la plataforma (GV Avanzado): users.geovictoria.com
 // desde el 01-oct (desarrollo, vía Lalo). Lalo 01-oct, caso
@@ -916,18 +917,8 @@ export async function armarOnboarding(contact: string): Promise<{
           idInterno: b.admin.idInterno,
         }
         // Mensajes al cliente por `code` (decidir SIEMPRE por code, nunca por detail).
-        const pedirOtroCorreo = () => ({
-          ok: true as const,
-          mensajeParaProspecto:
-            `Tu empresa ya quedó creada en GeoVictoria 🙌 Pero el correo ${b.admin.email} ya tiene un usuario en la plataforma, así que no puedo usarlo ` +
-            "como acceso del administrador. ¿Me das otro correo para el administrador? Con ese le dejo el acceso al tiro.",
-        })
-        const pedirDatosAdmin = () => ({
-          ok: true as const,
-          mensajeParaProspecto:
-            "Tu empresa ya quedó creada en GeoVictoria 🙌 Pero la plataforma no aceptó los datos del administrador. " +
-            "¿Me confirmas su nombre, apellido, RUT y correo? Con eso le dejo el acceso al tiro.",
-        })
+        const pedirOtroCorreo = () => ({ ok: true as const, mensajeParaProspecto: textoPedirOtroCorreo(b.admin.email!) })
+        const pedirDatosAdmin = () => ({ ok: true as const, mensajeParaProspecto: textoPedirDatosAdmin(paisAltaChat) })
         const empresaSinAdmin = async (companyId: string, motivo: string) => {
           await setKvValue(`alta_409_${contact}`, `${b.admin.email} (${motivo}, ${new Date().toISOString()})`).catch(() => {})
           await avisarEquipoInterno(
@@ -998,7 +989,7 @@ export async function armarOnboarding(contact: string): Promise<{
             let code = alta.errorUsuario?.code || "internal_error"
             const sesionAlta = alta.sesionAlta
             // internal_error → se reintenta UNA vez con la sesión, al tiro.
-            if (code === "internal_error" && sesionAlta?.sessionId) {
+            if (sesionAlta?.sessionId && accionUsuarioFallido(code, true) === "reintentar") {
               const r = await agregarUsuarioAlta(sesionAlta.sessionId, adminAlta)
               if (r.ok) {
                 alta = { ...alta, usuarioCreado: true, loginUserCreated: true, workEmail: r.workEmail, errorUsuario: undefined }
@@ -1007,8 +998,8 @@ export async function armarOnboarding(contact: string): Promise<{
               }
             }
             if ("usuarioCreado" in alta && alta.usuarioCreado === false) {
-              const recuperable = (code === "user_already_exists" || code === "invalid_request") && !!sesionAlta?.sessionId
-              if (recuperable) {
+              const accion = accionUsuarioFallido(code, !!sesionAlta?.sessionId, true)
+              if (accion === "pedir_otro_correo" || accion === "pedir_datos_admin") {
                 await setKvValue(
                   claveSesion,
                   JSON.stringify({
@@ -1023,7 +1014,7 @@ export async function armarOnboarding(contact: string): Promise<{
                   `📧 ALTA ONBOARDING ${ETQ}: empresa creada (companyId ${alta.companyId}) pero el administrador NO (${code}). ` +
                     `Se le pidieron ${code === "user_already_exists" ? "otro correo" : "los datos del administrador"}; la sesión del alta vence ${sesionAlta!.expiresAtUtc}. Contacto +${contact}.\n${fichaAlta}`,
                 ).catch(() => {})
-                return code === "user_already_exists" ? pedirOtroCorreo() : pedirDatosAdmin()
+                return accion === "pedir_otro_correo" ? pedirOtroCorreo() : pedirDatosAdmin()
               }
               return await empresaSinAdmin(alta.companyId, `usuario no creado: ${code}`)
             }
