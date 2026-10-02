@@ -65,6 +65,59 @@ export function telefonoAlternativoEn(textosCliente: string[], contact: string):
   return null
 }
 
+export { clienteReclamaContacto } from "./reclamo-contacto"
+
+/** Correo al ejecutivo sobre SU trato: la alerta interna no le llega a él. */
+async function correoReclamoAlVendedor(
+  clean: string,
+  v: { vendedor_email: string; vendedor_nombre: string | null; traspasado_at: string },
+  textoCliente: string,
+): Promise<boolean> {
+  try {
+    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+    const candado = `reclamo_mail_${clean}`
+    const previo = await getKvValue(candado).catch(() => null)
+    if (previo && Date.now() - Date.parse(previo) < 2 * 3600e3) return false
+    const { dealActivoEnKv } = await import("./crm-hitos")
+    const dealId = await dealActivoEnKv(clean).catch(() => null)
+    if (!dealId) return false
+    const { getZohoAccessToken } = await import("./zoho-token")
+    const token = await getZohoAccessToken()
+    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
+    const nombre = v.vendedor_nombre || v.vendedor_email.split("@")[0]
+    const html =
+      `<p>Hola ${nombre},</p>` +
+      `<p>El cliente <b>+${clean}</b> le escribió a Vicky reclamando que nadie lo ha contactado. ` +
+      `Te fue traspasado el ${v.traspasado_at.slice(0, 16).replace("T", " ")} (UTC).</p>` +
+      `<p>Lo que escribió: <i>"${textoCliente.slice(0, 300).replace(/</g, "&lt;")}"</i></p>` +
+      `<p>Por favor llámalo o escríbele hoy. El trato está en Zoho: ` +
+      `<a href="https://crm.zoho.com/crm/org685875245/tab/Potentials/${dealId}">abrir el trato</a>.</p>`
+    const res = await fetch(`${api}/crm/v3/Deals/${encodeURIComponent(dealId)}/actions/send_mail`, {
+      method: "POST",
+      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        data: [{
+          from: { email: (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim() },
+          to: [{ email: v.vendedor_email }],
+          subject: `⚠️ Tu cliente +${clean} reclama que nadie lo ha contactado`,
+          content: html,
+          mail_format: "html",
+        }],
+      }),
+    })
+    if (!res.ok) {
+      console.error(`[rescate-callback] correo de reclamo ${res.status}:`, (await res.text().catch(() => "")).slice(0, 200))
+      return false
+    }
+    await setKvValue(candado, new Date().toISOString()).catch(() => {})
+    return true
+  } catch (e) {
+    console.error("[rescate-callback] correo de reclamo falló:", e)
+    return false
+  }
+}
+
 export type RescateCallback = {
   via: "reafirmacion" | "traspaso" | "promesa"
   reply: string | null
@@ -78,6 +131,8 @@ export async function rescatarCallback(opts: {
   motivo?: string
   /** Texto que el modelo iba a mandar (se conserva en la reafirmación). */
   replyModelo: string
+  /** Solo el caso A (cliente ya traspasado que reclama): nunca traspasa. */
+  soloReclamo?: boolean
 }): Promise<RescateCallback | null> {
   const clean = (opts.contact || "").replace(/\D/g, "")
   if (!clean) return null
@@ -92,6 +147,15 @@ export async function rescatarCallback(opts: {
     )
     if (activo.length) {
       const v = activo[0]
+      const vendedorRes = { nombre: v.vendedor_nombre || v.vendedor_email.split("@")[0], email: v.vendedor_email }
+      // Un reclamo = UNA alerta cada 30 min: lo pueden disparar en el mismo
+      // turno el reclamo del cliente y el cinturón de la promesa sin tool.
+      const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
+      const marca = await getKvValue(`reclamo_alerta_${clean}`).catch(() => null)
+      if (marca && Date.now() - Date.parse(marca) < 30 * 60e3) {
+        return { via: "reafirmacion", reply: null, vendedor: vendedorRes }
+      }
+      await setKvValue(`reclamo_alerta_${clean}`, new Date().toISOString()).catch(() => {})
       await registrarPromesa({
         contact: clean,
         tipo: "llamada_ejecutivo",
@@ -99,8 +163,9 @@ export async function rescatarCallback(opts: {
         vendedorEmail: v.vendedor_email,
         horasHabiles: 2,
       }).catch(() => false)
+      const correo = await correoReclamoAlVendedor(clean, v, opts.textosCliente.join(" / "))
       await avisarEquipoInterno(
-        `🚨 CLIENTE RECLAMA CONTACTO: +${clean} pide que lo llamen y sigue traspasado a ${v.vendedor_nombre || v.vendedor_email} desde ${v.traspasado_at.slice(0, 16)} sin gestión visible${fonoTxt}. Promesa registrada a su nombre (2 h hábiles).`,
+        `${correo ? "📧 (correo enviado al ejecutivo) " : ""}🚨 CLIENTE RECLAMA CONTACTO: +${clean} pide que lo llamen y sigue traspasado a ${v.vendedor_nombre || v.vendedor_email} desde ${v.traspasado_at.slice(0, 16)} sin gestión visible${fonoTxt}. Promesa registrada a su nombre (2 h hábiles).`,
       ).catch(() => {})
       return {
         via: "reafirmacion",
@@ -108,6 +173,8 @@ export async function rescatarCallback(opts: {
         vendedor: { nombre: v.vendedor_nombre || v.vendedor_email.split("@")[0], email: v.vendedor_email },
       }
     }
+
+    if (opts.soloReclamo) return null
 
     // B. Sin traspaso: lo hace el código (escalera, tómbola, vic_ptv, loop).
     const { traspasarAhora } = await import("@/app/api/vic-ptv-cron/route")

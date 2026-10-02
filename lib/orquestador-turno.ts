@@ -2167,6 +2167,22 @@ export async function procesarTurno(
       }
     }
 
+    // RECLAMO DEL CLIENTE (02-oct, caso Robin): "nadie se ha comunicado" con
+    // un traspaso activo → promesa a nombre del vendedor + correo a él +
+    // alerta. Antes solo corría si Vicky prometía un llamado sin tool.
+    {
+      const { clienteReclamaContacto, rescatarCallback } = await import("@/lib/rescate-callback")
+      if (clienteReclamaContacto(message)) {
+        void rescatarCallback({
+          contact,
+          pais: perfil.pais,
+          textosCliente: [message],
+          replyModelo: reply,
+          soloReclamo: true,
+        }).catch(() => null)
+      }
+    }
+
     // CINTURÓN DE PRECIOS SOBRE EL UMBRAL, ANTES DE PERSISTIR (02-oct, caso
     // Electric World): corría después de guardar el turno, así que el
     // historial mostraba el texto del modelo ("S/.418") y no lo que salió.
