@@ -2167,6 +2167,26 @@ export async function procesarTurno(
       }
     }
 
+    // CINTURÓN DE PRECIOS SOBRE EL UMBRAL, ANTES DE PERSISTIR (02-oct, caso
+    // Electric World): corría después de guardar el turno, así que el
+    // historial mostraba el texto del modelo ("S/.418") y no lo que salió.
+    // Con ejecutivo asignado, el reemplazo lo nombra y no promete rebajas.
+    const nombreEjecutivo = (() => {
+      const lineas = String(contextoEjecutivo || "").split("\n")
+      const i = lineas.findIndex((l) => l.startsWith("[EJECUTIVO ASIGNADO"))
+      const nombre = i >= 0 ? (lineas[i + 1] || "").split(" · ")[0].trim() : ""
+      return nombre && nombre !== "nuestro ejecutivo" ? nombre : ""
+    })()
+    if (dotacionDetectada && reply) {
+      const cinturonPrevio = cinturonPrecioSobreUmbral(reply, { ejecutivo: nombreEjecutivo })
+      if (cinturonPrevio.habiaPrecio) {
+        console.warn(
+          `[umbral-cinturon] precio o promesa de rebaja con dotación ${dotacionDetectada} sobre el umbral para ${contact} — respuesta reemplazada`,
+        )
+        reply = cinturonPrevio.reemplazo
+      }
+    }
+
     // 3. Persistir turno en Supabase
     // En el historial el turno queda como UN texto (el marcador de
     // multi-mensaje — [---] o una línea de solo guiones — se convierte en
@@ -2224,7 +2244,7 @@ export async function procesarTurno(
       // viejo) pese al bloque del prompt y la directiva — tercera capa
       // determinista: ningún mensaje con precio sale de acá.
       if (dotacionDetectada && replyFinal) {
-        const cinturon = cinturonPrecioSobreUmbral(replyFinal)
+        const cinturon = cinturonPrecioSobreUmbral(replyFinal, { ejecutivo: nombreEjecutivo })
         if (cinturon.habiaPrecio) {
           console.warn(
             `[umbral-cinturon] precio en texto con dotación ${dotacionDetectada} sobre el umbral para ${contact} — respuesta reemplazada`,

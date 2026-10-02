@@ -118,6 +118,7 @@ export async function contextoEjecutivoAsignado(contact: string): Promise<string
 }
 
 function bloque(nombre: string, tel: string, email: string): string {
+  const quien = nombre || "su ejecutivo"
   const datos = [nombre || "nuestro ejecutivo", tel ? `WhatsApp ${tel}` : "", email]
     .filter(Boolean)
     .join(" · ")
@@ -127,6 +128,12 @@ function bloque(nombre: string, tel: string, email: string): string {
     `Si el cliente pregunta por su ejecutivo, pide hablar con él/ella o pide sus datos de contacto, entrega EXACTAMENTE estos datos y NINGÚN otro. ` +
     `PROHIBIDO darle el teléfono de la Mesa de Ayuda, el de soporte o cualquier otro número como si fuera el del ejecutivo. ` +
     `${tel ? "" : "No conoces su teléfono: da solo nombre y correo, sin inventar números. "}` +
-    `La Mesa de Ayuda es SOLO para soporte técnico de clientes existentes.`
+    `La Mesa de Ayuda es SOLO para soporte técnico de clientes existentes.\n` +
+    // CASO Electric World / Mónica (02-oct): con la tabla y el contrato de la
+    // ejecutiva en la mano, Vicky calculó el total, prometió "descuento por
+    // volumen" y cerró con "la sorpresa va a ser a la baja". La clienta llamó
+    // a la ejecutiva esperando un precio que nadie le ofreció.
+    `EL PRECIO DE ESTE CLIENTE ES DE ${quien}: si pregunta cuánto va a pagar, te comparte una tabla, propuesta o contrato de ${quien}, o compara con lo que paga o pagaba en otro lado, NO calcules ni repitas montos, NO prometas descuento, rebaja, "mejor precio" ni que el valor va a bajar, y NO compares precios con otros proveedores. Dile que ese valor lo ve directamente con ${quien} y ofrécele avisarle para que lo contacte. Única excepción: precios que TÚ entregaste en esta conversación con tus tools.\n` +
+    `ANTES DEL PAGO no hay capacitación ni implementador: una reunión con ${quien} es una reunión COMERCIAL — llámala así, y jamás prometas que la cuenta queda activa ni que los trabajadores empiezan a marcar.`
   )
 }

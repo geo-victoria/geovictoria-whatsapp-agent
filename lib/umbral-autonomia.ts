@@ -375,13 +375,40 @@ export function prometeEstimado(reply: string): boolean {
   return PATRONES_PROMESA_ESTIMADO.some((re) => re.test(String(reply || "")))
 }
 
-export function cinturonPrecioSobreUmbral(reply: string): { habiaPrecio: boolean; reemplazo: string } {
-  const habiaPrecio = PATRONES_PRECIO.some((re) => re.test(String(reply || ""))) || prometeEstimado(reply)
+/**
+ * PROMESA DE REBAJA (02-oct, caso Electric World / Mónica): sobre el umbral
+ * el precio es del ejecutivo, y Vicky prometió en su nombre que bajaría ("la
+ * sorpresa va a ser a la baja", "tu mejor precio"). Mismo trato que un precio.
+ */
+const PATRONES_PROMESA_REBAJA = [
+  /\ba\s+la\s+baja\b/i,
+  /\b(tu|el|un)\s+mejor\s+(precio|valor)\b/i,
+  /\b(precio|valor|costo|monto)\s+m[aá]s\s+(bajo|conveniente|econ[oó]mico)\b/i,
+  /\b(te\s+)?(puede|podr[aá]|podr[ií]a|va\s+a)\s+(dejar|ofrecer|hacer|conseguir)\b[^.?!\n]{0,40}\b(menos|mejor\s+precio|rebaja|descuento)/i,
+  /\bdescuentos?\b[^.?!\n]{0,30}\bque\s+te\s+corresponde/i,
+  /\bcalificas\s+(para|a)\s+(un\s+|el\s+)?descuento/i,
+]
+
+export function prometeRebaja(reply: string): boolean {
+  return PATRONES_PROMESA_REBAJA.some((re) => re.test(String(reply || "")))
+}
+
+export function cinturonPrecioSobreUmbral(
+  reply: string,
+  opts: { ejecutivo?: string } = {},
+): { habiaPrecio: boolean; reemplazo: string } {
+  const habiaPrecio =
+    PATRONES_PRECIO.some((re) => re.test(String(reply || ""))) || prometeEstimado(reply) || prometeRebaja(reply)
+  const ejecutivo = (opts.ejecutivo || "").trim()
   return {
     habiaPrecio,
-    reemplazo:
-      // Framing ganador (Lalo 07-sep, punto 11 del cierre de objeciones): el
-      // ejecutivo entra por el DESCUENTO POR VOLUMEN, no porque Vicky "no pueda".
-      "Para esa dotación aplican descuentos por volumen, así que la propuesta te la arma directamente nuestro ejecutivo con el mejor valor para tu operación — te contacta hoy mismo si estamos en horario hábil. Aquí sigo yo para todo lo demás: ¿prefieres que te llame a este número o agendamos de una vez?",
+    reemplazo: ejecutivo
+      ? // El caso YA tiene ejecutivo (y casi siempre ya dio precio): el valor es
+        // suyo y Vicky no promete nada en su nombre.
+        `Ese valor lo ves directamente con ${ejecutivo}, que ya tiene tu caso: cualquier duda de precio, con ${ejecutivo} es lo más rápido 😊 ¿Quieres que le avise para que te contacte?`
+      : // Framing de Lalo 07-sep (punto 11 del cierre de objeciones): el
+        // ejecutivo entra por el DESCUENTO POR VOLUMEN, no porque Vicky "no
+        // pueda". Sin "mejor valor": eso ya es prometer un precio (02-oct).
+        "Para esa dotación aplican descuentos por volumen, así que la propuesta te la arma directamente nuestro ejecutivo según tu operación — te contacta hoy mismo si estamos en horario hábil. Aquí sigo yo para todo lo demás: ¿prefieres que te llame a este número o agendamos de una vez?",
   }
 }

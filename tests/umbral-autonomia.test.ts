@@ -259,10 +259,46 @@ describe("cinturón de precios sobre el umbral (Lalo 18-ago, caso David Oviedo)"
     // Los cuatro delegan el turno en el orquestador único (v3 desde el 22-sep,
     // PE/CO/MX desde el 26-sep): el cinturón vive ahí, una sola vez.
     const orq = readFileSync(new URL("../lib/orquestador-turno.ts", import.meta.url), "utf8")
-    assert.match(orq, /cinturonPrecioSobreUmbral\(replyFinal\)/)
+    assert.match(orq, /cinturonPrecioSobreUmbral\(replyFinal[,)]/)
     for (const [pais, perfil] of [["co", "PERFIL_TURNO_CO"], ["mx", "PERFIL_TURNO_MX"], ["pe", "PERFIL_TURNO_PE"]]) {
       const src = readFileSync(new URL(`../app/api/vic-botmaker-${pais}/route.ts`, import.meta.url), "utf8")
       assert.match(src, new RegExp(`procesarTurno\\(contact, combinado, apiKey, ${perfil}\\)`), `${pais} no delega el turno`)
     }
+  })
+})
+
+// CASO Electric World / Mónica (02-oct): Vicky prometió en nombre de la
+// ejecutiva que el precio bajaría. Las frases son las que salieron ese día.
+import { cinturonPrecioSobreUmbral as cinturonRebaja } from "../lib/umbral-autonomia.ts"
+
+describe("promesa de rebaja sobre el umbral (caso Electric World)", () => {
+  test("atrapa las promesas reales del 02-oct", () => {
+    for (const frase of [
+      "La sorpresa va a ser a la baja cuando veas el descuento por volumen 😊",
+      "ahí Mónica te presenta la cotización final con tu mejor precio 👍",
+      "con 76 trabajadores calificas para descuentos por volumen que Mónica puede ofrecerte",
+      "Mónica te puede dejar un precio con descuento",
+      "El descuento por volumen que te corresponde por 76 trabajadores",
+    ]) {
+      assert.equal(cinturonRebaja(frase).habiaPrecio, true, frase)
+    }
+  })
+  test("no atrapa lo que sí se puede decir", () => {
+    for (const frase of [
+      "Ese valor lo ves directamente con Mónica, que ya tiene tu caso.",
+      "La reunión comercial con Mónica es hoy a las 13:00.",
+    ]) {
+      assert.equal(cinturonRebaja(frase).habiaPrecio, false, frase)
+    }
+  })
+  test("con ejecutivo, el reemplazo lo nombra y no promete nada", () => {
+    const r = cinturonRebaja("La sorpresa va a ser a la baja", { ejecutivo: "Mónica Mendoza" }).reemplazo
+    assert.match(r, /Mónica Mendoza/)
+    assert.equal(cinturonRebaja(r).habiaPrecio, false)
+    assert.doesNotMatch(r, /descuento|mejor (precio|valor)/i)
+  })
+  test("el reemplazo sin ejecutivo tampoco se dispara a sí mismo", () => {
+    const r = cinturonRebaja("S/ 418").reemplazo
+    assert.equal(cinturonRebaja(r).habiaPrecio, false)
   })
 })
