@@ -302,6 +302,7 @@ describe("promesa de rebaja sobre el umbral (caso Electric World)", () => {
     for (const frase of [
       "Ella puede armar una propuesta que calce con lo que venías pagando, tomando en cuenta tu presupuesto.",
       "Para 76 trabajadores el precio lo arma Priscila Quispe con descuentos por volumen que aplican a tu dotación.",
+      "ella te presente opciones que se ajusten mejor. Así resuelven todo en la llamada.",
     ]) {
       assert.equal(cinturonRebaja(frase, op).habiaPrecio, true, frase)
     }

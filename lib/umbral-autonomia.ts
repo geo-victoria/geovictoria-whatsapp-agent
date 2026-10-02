@@ -402,6 +402,7 @@ export function prometeRebaja(reply: string): boolean {
 const PATRONES_CON_EJECUTIVO = [
   /\bdescuentos?\b/i,
   /\b(calce|calza|ajust\w*|iguale|igualar|mejore|mejorar)\b[^.?!\n]{0,50}\b(lo\s+que\s+(ven[ií]as|pagabas|pagas|pagaban)|tu\s+presupuesto)/i,
+  /\b(opciones|propuesta|precio|valor|condiciones)\b[^.?!\n]{0,30}\bse\s+(ajust\w*|acomod\w*)\s+mejor\b/i,
 ]
 
 export function prometeEnNombreDelEjecutivo(reply: string): boolean {
