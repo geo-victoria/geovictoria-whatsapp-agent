@@ -11,3 +11,12 @@ test("campaña externa: vigente, vencida, vacía e ilegible", () => {
   assert.equal(marcaVigente("no json", ahora), null)
   assert.equal(marcaVigente(JSON.stringify({ campana: "acrip", hasta: "2026-11-01T00:00:00Z" }), ahora), null)
 })
+
+test("marcaVigente conserva la línea de la campaña", async () => {
+  const { marcaVigente } = await import("../lib/campana-externa.ts")
+  const m = marcaVigente(
+    JSON.stringify({ campana: "x", agente: "a@b.c", hasta: "2099-01-01T00:00:00Z", linea: "+57 318 107 0737" }),
+    Date.now(),
+  )
+  if (m?.linea !== "573181070737") throw new Error(`linea: ${m?.linea}`)
+})

@@ -21,7 +21,10 @@ const kv = () => import("./supabase-persistence-v3")
 
 export const CAMPANA_EXTERNA_MAX_DIAS = 90
 
-export type MarcaCampanaExterna = { campana: string; agente: string; hasta: string; at: string }
+/** linea: número de la línea de WhatsApp de la campaña (ej. "573181070737").
+ *  El envío de apertura sale por ahí y la asignación busca el chat ahí — no
+ *  por el prefijo del contacto, que puede haber escrito antes a otra línea. */
+export type MarcaCampanaExterna = { campana: string; agente: string; hasta: string; at: string; linea?: string }
 
 const clave = (contact: string) => `campana_externa_${(contact || "").replace(/\D/g, "")}`
 
@@ -32,7 +35,8 @@ export function marcaVigente(valor: string | null | undefined, ahoraMs: number):
     const m = JSON.parse(valor) as Partial<MarcaCampanaExterna>
     const t = Date.parse(String(m.hasta || ""))
     if (!m.campana || !m.agente || !Number.isFinite(t) || t <= ahoraMs) return null
-    return { campana: m.campana, agente: m.agente, hasta: m.hasta!, at: m.at || "" }
+    const linea = String(m.linea || "").replace(/\D/g, "")
+    return { campana: m.campana, agente: m.agente, hasta: m.hasta!, at: m.at || "", ...(linea ? { linea } : {}) }
   } catch {
     return null
   }
@@ -52,13 +56,16 @@ export async function marcarCampanaExterna(
   campana: string,
   agente: string,
   dias: number,
+  linea?: string,
 ): Promise<MarcaCampanaExterna> {
   const d = Math.min(Math.max(Number(dias) || 30, 1), CAMPANA_EXTERNA_MAX_DIAS)
+  const l = String(linea || "").replace(/\D/g, "")
   const marca: MarcaCampanaExterna = {
     campana,
     agente: agente.trim().toLowerCase(),
     hasta: new Date(Date.now() + d * 86400e3).toISOString(),
     at: new Date().toISOString(),
+    ...(l ? { linea: l } : {}),
   }
   await (await kv()).setKvValue(clave(contact), JSON.stringify(marca))
   return marca
@@ -90,7 +97,7 @@ export async function atenderCampanaExterna(
     const prev = Date.parse((await getKvValue(candado).catch(() => "")) || "")
     if (Number.isFinite(prev) && Date.now() - prev < 12 * 3600e3) return
     const { asignarConversacionAlDueno } = await import("./botmaker-agentes")
-    const r = await asignarConversacionAlDueno(fono, marca.agente)
+    const r = await asignarConversacionAlDueno(fono, marca.agente, marca.linea ? `${marca.linea}:${fono}` : undefined)
     console.log(`[campana-externa] asignación ${fono} → ${marca.agente}: ${r.motivo}`)
     if (r.asignado || /asignada/.test(r.motivo)) await setKvValue(candado, new Date().toISOString()).catch(() => {})
   })

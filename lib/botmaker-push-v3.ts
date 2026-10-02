@@ -584,7 +584,10 @@ export async function sendBotmakerTemplate(
       .map((n) => (n || "").trim().replace(/\D/g, ""))
       .filter(Boolean),
   )
-  const origenTpl = internosTpl.has(cleanContact) ? "" : await canalDeOrigen(cleanContact)
+  // La apertura de una campaña externa sale por la línea PEDIDA: el origen
+  // guardado (otra línea a la que el contacto escribió antes) no la pisa.
+  const origenTpl =
+    internosTpl.has(cleanContact) || (opts.campanaExterna && channelId) ? "" : await canalDeOrigen(cleanContact)
   // Sin origen ni channelId, la línea del PAÍS del contacto (CO/MX/PE); CL
   // sigue con BOTMAKER_CHANNEL_NUMBER / la línea chilena (channelNumber).
   const lineaPais = origenTpl || channelId ? "" : lineaPorDefecto(cleanContact)

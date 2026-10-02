@@ -232,10 +232,13 @@ export type ResultadoAsignacion = {
 export async function asignarConversacionAlDueno(
   contact: string,
   ownerEmail: string,
+  // "<línea>:<contacto>" cuando se sabe en qué línea está el chat (campaña
+  // externa); sin él, la línea del país del prefijo.
+  chatRefForzado?: string,
 ): Promise<ResultadoAsignacion> {
   try {
     const correo = String(ownerEmail || "").trim().toLowerCase()
-    const chatRef = chatRefDeContacto(contact)
+    const chatRef = chatRefForzado || chatRefDeContacto(contact)
     if (!BM_TOKEN || !correo || !chatRef) return { asignado: false, motivo: "sin datos" }
     if (NO_ASIGNABLES.has(correo)) return { asignado: false, motivo: "dueño no asignable (bot/interino)" }
     const agentes = await correosDeAgentes()

@@ -53,6 +53,8 @@ export async function POST(req: Request): Promise<Response> {
     dias?: number
     dry?: boolean
     off?: boolean
+    /** Línea de WhatsApp de la campaña (número o channelId). */
+    linea?: string
   }
   const contactos = Array.from(new Set((body.contactos || []).map(limpiar).filter((c) => /^\d{10,13}$/.test(c))))
   if (!contactos.length) return NextResponse.json({ ok: false, error: "sin contactos válidos" }, { status: 400 })
@@ -74,12 +76,13 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const dias = Math.min(Math.max(Number(body.dias) || 30, 1), CAMPANA_EXTERNA_MAX_DIAS)
+  const linea = String(body.linea || "").replace(/\D/g, "") || undefined
   const dry = body.dry !== false
   const yaMarcados: string[] = []
   for (const c of contactos) {
     const prev = await campanaExternaDe(c)
     if (prev) yaMarcados.push(`${c} (${prev.campana})`)
-    if (!dry) await marcarCampanaExterna(c, campana, agente, dias)
+    if (!dry) await marcarCampanaExterna(c, campana, agente, dias, linea)
   }
   return NextResponse.json({
     ok: true,
@@ -87,6 +90,7 @@ export async function POST(req: Request): Promise<Response> {
     campana,
     agente: { email: agente, nombre: existe.name, id: existe.id },
     dias,
+    linea: linea || "(por prefijo)",
     contactos: contactos.length,
     yaMarcados,
   })
