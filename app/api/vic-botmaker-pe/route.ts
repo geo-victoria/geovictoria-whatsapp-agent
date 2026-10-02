@@ -31,6 +31,7 @@
  * (misma validación que la contención — la kv permite rotar sin deploy).
  */
 
+import { contactoEnMudo } from "@/lib/mudo-contacto"
 import { normalizarMensajeEntrante } from "@/lib/respuesta-boton"
 import { NextResponse, after } from "next/server"
 import { guardarOrigenAnuncio, guardarBsuid } from "@/lib/origen-anuncio"
@@ -401,6 +402,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       const neutro = "Te puedo ayudar con información sobre nuestro servicio de control de asistencia? 😊"
       if (simulacion) return NextResponse.json({ reply: neutro, pais: "pe", simulacion: true })
       await sendBotmakerMessage(contact, neutro, CANAL_PE()).catch(() => {})
+      return NextResponse.json({ reply: "" })
+    }
+
+    // MUDO (paridad con Chile, 02-oct, caso Electric World / Mónica): la
+    // orden admin de silenciar a Vicky con un contacto la respetaba solo el
+    // webhook chileno, y en las líneas de PE/CO/MX Vicky seguía contestando.
+    if (!simulacion && (await contactoEnMudo(contact))) {
+      await appendTurnV3(contact, message, "[Vicky en mudo: mensaje recibido y transcrito, sin respuesta]", "pe").catch(() => {})
+      console.log(`[vic-pe] contacto ${contact} EN MUDO — guardado sin responder (${message.length} chars)`)
       return NextResponse.json({ reply: "" })
     }
 
