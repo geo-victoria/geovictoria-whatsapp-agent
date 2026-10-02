@@ -77,3 +77,41 @@ export function paisConCapacitacionPorLink(pais: string): boolean {
 
 /** Llave kv donde queda el link entregado (no se mezcla con onboarding_capacitacion_, que escribe el job de la IMP). */
 export const claveCapacitacionLink = (contact: string) => `onb_cap_link_${String(contact).replace(/\D/g, "")}`
+
+/**
+ * SIN IMPLEMENTADOR NOMBRADO (Lalo 02-oct, "Vicky sigue presentando a Diego
+ * Alegre e Ignacio Salinas; debería mostrar solo los links de las
+ * capacitaciones masivas"): con la capacitación por link, el cliente no tiene
+ * un relator asignado al que conocer. El prompt de onboarding traía "tu
+ * implementador la sube en la capacitación" y "2 horas por videollamada con
+ * su relator", y el modelo terminaba presentando nombres. Este reemplazo
+ * reescribe esas frases del prompt; la regla dura va al final.
+ */
+const REEMPLAZOS_SIN_IMPLEMENTADOR: Array<[RegExp, string]> = [
+  [/su IMPLEMENTADOR \(su relator\)/g, "el EQUIPO DE IMPLEMENTACIÓN"],
+  [/tu implementador los sube y quedan listos para marcar en la capacitación/g, "el equipo de implementación los sube a la plataforma y quedan listos para marcar"],
+  [/para que tu implementador la suba y quede lista en tu capacitación/g, "para que el equipo de implementación la suba a la plataforma"],
+  [/la sube su implementador en la capacitación/g, "la sube el equipo de implementación"],
+  [/a la plataforma la sube su implementador en la capacitación/g, "a la plataforma la sube el equipo de implementación"],
+  [/\(Curso 1, 2 horas por videollamada con su relator\)/g, "(sesión online; el cliente se inscribe en el link de capacitación)"],
+  [/\(Curso 1, 2 horas por videollamada\)/g, "(sesión online; se inscribe en el link de capacitación)"],
+  [/\btu implementador\b/g, "el equipo de implementación"],
+  [/\bsu implementador\b/g, "el equipo de implementación"],
+  [/\bsu relator\b/g, "el equipo de implementación"],
+  [/\btu relator\b/g, "el equipo de implementación"],
+]
+
+export const REGLA_SIN_IMPLEMENTADOR =
+  "\n\n# REGLA DURA — CAPACITACIÓN POR LINK, SIN IMPLEMENTADOR NOMBRADO (Lalo 02-oct)\n" +
+  "- Este cliente NO tiene un implementador ni un relator asignado: se capacita en la sesión online a la que se inscribe por link. " +
+  "JAMÁS nombres a una persona del equipo de implementación (ni Diego Alegre ni Ignacio Salinas ni nadie), JAMÁS digas " +
+  "'tu implementador', 'tu relator', 'te contacta', 'te llama' ni ofrezcas una videollamada individual.\n" +
+  "- Cuando hables de la capacitación, llama ver_cupos_capacitacion y entrega el LINK que devuelve, tal cual.\n" +
+  "- Si necesita partir antes o algo no funciona, usa escalar_a_implementador y repite su mensajeParaProspecto tal cual: " +
+  "ese mensaje ya dice qué pasa sin nombrar a nadie."
+
+export function sinImplementadorNombrado(texto: string): string {
+  let t = String(texto || "")
+  for (const [re, por] of REEMPLAZOS_SIN_IMPLEMENTADOR) t = t.replace(re, por)
+  return t
+}

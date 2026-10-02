@@ -592,6 +592,11 @@ export async function armarOnboarding(contact: string): Promise<{
           return { ok: true, yaOfrecido: true, instruccion: "Ya se le ofrecieron antes: no repitas la lista completa. Si responde algo, guárdalo." }
         }
         await setKvValue(claveEsquemaOfrecido(contact), new Date().toISOString()).catch(() => {})
+        const capJ = capRaw ? (JSON.parse(capRaw) as { bookingId?: string }) : null
+        if (!capJ?.bookingId && (await capacitacionPorLinkActiva(contact))) {
+          const { sinImplementadorNombrado } = await import("./onboarding/capacitacion-link")
+          return { ok: true, mensajeParaProspecto: sinImplementadorNombrado(mensajeInvitacionEsquema(undefined)) }
+        }
         return { ok: true, mensajeParaProspecto: mensajeInvitacionEsquema(relator) }
       }
       const previo = (await getKvValue(claveEsquema(contact))
@@ -1023,8 +1028,8 @@ export async function armarOnboarding(contact: string): Promise<{
             // ya no hay "horarios del relator" que mostrar.
             const capPorLink = await capacitacionPorLinkActiva(contact)
             const msgNomina = capPorLink
-              ? "Y por aquí mismo seguimos con dos cosas: recibir tu nómina de trabajadores (yo la guardo y tu implementador la sube en la capacitación, para que queden listos para marcar) y tu capacitación " +
-                "(por videollamada; te paso el link para que te inscribas en la sesión que te acomode). ¿Partimos por la nómina o te paso el link de la capacitación?"
+              ? "Y por aquí mismo seguimos con dos cosas: recibir tu nómina de trabajadores (yo la guardo y el equipo de implementación la sube a la plataforma, para que queden listos para marcar) y tu capacitación " +
+                "(online; te paso el link para que te inscribas en la sesión que te acomode). ¿Partimos por la nómina o te paso el link de la capacitación?"
               : "Y por aquí mismo seguimos con dos cosas: recibir tu nómina de trabajadores (yo la guardo y tu implementador la sube en la capacitación, para que queden listos para marcar) y agendar esa capacitación " +
                 "(2 horas por videollamada con tu relator). ¿Partimos por la nómina o te muestro los horarios de la capacitación?"
             // Antes el del acceso se EMPUJABA aparte y Vicky entregaba solo el
@@ -1076,8 +1081,11 @@ export async function armarOnboarding(contact: string): Promise<{
             .catch(() => ({}))) as EsquemaOperacion
           const yaOfrecido = !!(await getKvValue(claveEsquemaOfrecido(contact)).catch(() => null))
           const capRaw = await getKvValue(claveCapacitacion(contact)).catch(() => null)
-          const nombreRelator = capRaw ? (JSON.parse(capRaw) as { relator?: { nombre?: string } }).relator?.nombre : undefined
-          return promptConfiguracionCL({
+          const capParsed = capRaw ? (JSON.parse(capRaw) as { relator?: { nombre?: string }; bookingId?: string }) : null
+          // Capacitación por link (CL): sin relator que presentar (Lalo 02-oct).
+          const sinRelator = !capParsed?.bookingId && (await capacitacionPorLinkActiva(contact))
+          const nombreRelator = sinRelator ? undefined : capParsed?.relator?.nombre
+          const p = promptConfiguracionCL({
             pais: paisCfg,
             hoy: hoyISOPais(paisCfg),
             resumen: resumenConfiguracion(cfg),
@@ -1087,8 +1095,16 @@ export async function armarOnboarding(contact: string): Promise<{
             bloqueEsquema: bloquePromptEsquema(esquema, { yaOfrecido, nombreRelator }),
             zonaHoraria: lineaZonaHoraria(paisCfg),
           })
+          if (!sinRelator) return p
+          const { sinImplementadorNombrado, REGLA_SIN_IMPLEMENTADOR } = await import("./onboarding/capacitacion-link")
+          return sinImplementadorNombrado(p) + REGLA_SIN_IMPLEMENTADOR
         })()
-      : promptOnboardingCL(borrador, { altaSolicitada, zonaHoraria: lineaZonaHoraria(borrador.pais) }),
+      : await (async () => {
+          const p = promptOnboardingCL(borrador, { altaSolicitada, zonaHoraria: lineaZonaHoraria(borrador.pais) })
+          if (!(await capacitacionPorLinkActiva(contact))) return p
+          const { sinImplementadorNombrado, REGLA_SIN_IMPLEMENTADOR } = await import("./onboarding/capacitacion-link")
+          return sinImplementadorNombrado(p) + REGLA_SIN_IMPLEMENTADOR
+        })(),
     tools: {
       schemas: (altaSolicitada
         ? [

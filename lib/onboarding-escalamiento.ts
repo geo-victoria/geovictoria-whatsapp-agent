@@ -58,6 +58,21 @@ const TITULOS: Record<MotivoEscalamiento, string> = {
   otro: "necesita a su implementador",
 }
 
+/** Texto al cliente con capacitación por link: sin nombres ni plazos que no controlamos. */
+function textoClientePorLink(motivo: MotivoEscalamiento, link: string): string {
+  const conLink = link ? `\n\nLa capacitación es online y te inscribes en la sesión que te acomode acá:\n${link}` : ""
+  if (motivo === "urgencia_capacitacion") {
+    return `Entiendo, necesitas partir antes. Ya le avisé al equipo de implementación que necesitas adelantar tu puesta en marcha. Mientras, yo dejo guardado todo lo que me mandes.${conLink}`
+  }
+  if (motivo === "problema_plataforma") {
+    return `Ya le pasé tu caso al equipo de implementación para que lo revise. Mientras, cualquier paso de la plataforma te lo voy guiando yo por acá.`
+  }
+  if (motivo === "reserva_fallida") {
+    return `Tu inscripción no la puedo confirmar desde acá: revísala en el correo de la invitación.${conLink}`
+  }
+  return `Ya le avisé al equipo de implementación para que lo revise.`
+}
+
 /** Ejecutiva comercial de las ventas autónomas (dueña del post-venta de Vicky). */
 const COMERCIAL_VENTA_AUTONOMA = { nombre: "Aleydis Araque", email: "aaraque@geovictoria.com" }
 
@@ -98,6 +113,17 @@ export async function escalarAImplementador(
     : cap?.relator?.email
       ? [{ nombre: cap.relator.nombre, email: cap.relator.email }]
       : RELATORES_GV_AVANZADO.map((r) => ({ nombre: r.nombre, email: r.email }))
+  // CAPACITACIÓN POR LINK (Chile, Lalo 02-oct): el cliente no tiene relator
+  // asignado y no se le presenta ningún implementador; el aviso interno sigue
+  // saliendo igual, pero el texto al cliente no nombra a nadie y le deja el
+  // link de la capacitación.
+  const porLink =
+    !esComercial &&
+    !(cap as { bookingId?: string } | null)?.bookingId &&
+    (await import("./onboarding-canal").then((m) => m.capacitacionPorLinkActiva(fono)).catch(() => false))
+  const linkCap = porLink
+    ? await import("./onboarding-canal").then((m) => m.resolverLinkCapacitacion(fono)).then((l) => l.url).catch(() => "")
+    : ""
   const relatorNombre = esComercial
     ? COMERCIAL_VENTA_AUTONOMA.nombre
     : cap?.relator?.nombre || "tu implementador"
@@ -109,7 +135,7 @@ export async function escalarAImplementador(
   try {
     const previo = await getKvValue(claveCandado)
     if (previo && Date.now() - Date.parse(previo) < CANDADO_MS) {
-      return { ok: true, yaAvisado: true, relator: relatorNombre, mensajeParaProspecto: textoCliente(relatorNombre, motivo) }
+      return { ok: true, yaAvisado: true, relator: porLink ? undefined : relatorNombre, mensajeParaProspecto: porLink ? textoClientePorLink(motivo, linkCap) : textoCliente(relatorNombre, motivo) }
     }
   } catch { /* sin candado legible, se avisa */ }
 
@@ -180,7 +206,7 @@ export async function escalarAImplementador(
     return { ok: false, error: "No pude avisar a nadie (correo y alerta fallaron). Dile al cliente que lo estás escalando y vuelve a intentar en el próximo mensaje." }
   }
   await setKvValue(claveCandado, new Date().toISOString()).catch(() => {})
-  return { ok: true, relator: relatorNombre, canales, mensajeParaProspecto: textoCliente(relatorNombre, motivo) }
+  return { ok: true, relator: porLink ? undefined : relatorNombre, canales, mensajeParaProspecto: porLink ? textoClientePorLink(motivo, linkCap) : textoCliente(relatorNombre, motivo) }
 }
 
 /**
