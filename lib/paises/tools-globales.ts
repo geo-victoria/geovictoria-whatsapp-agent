@@ -154,7 +154,7 @@ export async function despacharToolGlobal(ctx: ContextoGlobal, name: ToolGlobal,
   switch (name) {
     case "consultar_agente_soporte": {
       const { consultarAgenteSoporte } = await import("../tools/consultar-agente-soporte.ts")
-      return consultarAgenteSoporte({ ...(i as object), _pais: pais } as never)
+      return consultarAgenteSoporte({ ...(i as object), _pais: pais, _contact: contact } as never)
     }
     case "registrar_comprobante_transferencia": {
       const { registrarComprobanteTransferencia } = await import("../tools/registrar-comprobante-transferencia.ts")

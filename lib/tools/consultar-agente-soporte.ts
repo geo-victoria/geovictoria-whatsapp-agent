@@ -51,6 +51,8 @@ export const consultarAgenteSoporteSchema = {
 
 export type ConsultarAgenteSoporteInput = {
   mensajeProspecto: string
+  /** Contacto (lo inyecta el agent-loop): decide si es cliente de GV Avanzado. */
+  _contact?: string
   previousResponseId?: string
   /** País del contacto (lo inyecta el despacho, no el modelo). Sin él = Chile. */
   _pais?: string
@@ -132,6 +134,33 @@ export async function consultarAgenteSoporte(
 ): Promise<ConsultarAgenteSoporteResultado> {
   try {
     const { mensajeProspecto, previousResponseId } = args
+    // CLIENTE DE GV AVANZADO (02-oct, Lalo): el agente de Foundry conoce GV
+    // Portal y la Mesa de Ayuda no atiende GV Avanzado. A quien tiene su
+    // empresa creada por el alta por chat se le responde con el manual de GV
+    // Avanzado; si el manual no lo cubre, se avisa al equipo (sin tarjeta).
+    if (args._contact) {
+      const { esClienteGvAvanzado, consultarGuiaGva } = await import("@/lib/guia-gva")
+      if (await esClienteGvAvanzado(args._contact)) {
+        const g = await consultarGuiaGva(mensajeProspecto, { pais: args._pais })
+        if (g.ok && g.encontrado) {
+          return { ok: true, accion: "continuar", respuestaAgente: g.respuesta, previousResponseId: "" }
+        }
+        const { escalarAImplementador } = await import("@/lib/onboarding-escalamiento")
+        const esc = (await escalarAImplementador(args._contact, {
+          motivo: "problema_plataforma",
+          detalle: mensajeProspecto.slice(0, 500),
+        }).catch(() => null)) as { mensajeParaProspecto?: string } | null
+        return {
+          ok: true,
+          accion: "escalar_humano",
+          respuestaAgente: g.ok ? g.respuesta : "",
+          mensajeParaProspecto:
+            esc?.mensajeParaProspecto ||
+            "Eso no lo puedo resolver desde aquí: ya le avisé al equipo para que te contacte 🙌",
+          previousResponseId: "",
+        }
+      }
+    }
     const result = await callFirstResponseAgent(mensajeProspecto, previousResponseId)
     // Fuera de Chile: tarjeta y canales del país (datos de la ficha). Chile: null.
     const tarjeta = tarjetaSoportePais(args._pais)

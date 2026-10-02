@@ -222,7 +222,7 @@ export const TOOL_ESCALAR_A_IMPLEMENTADOR = {
     "(b) tiene un problema para entrar o usar la plataforma (no ve un menú, no le aparecen sus trabajadores, permisos, pantallas, contraseña); " +
     "(c) está molesto o frustrado; " +
     "(d) quiere COMPRAR más de lo que ya pagó (sumar trabajadores, otro reloj, otra sucursal, otro módulo) → motivo pedido_comercial, que avisa a la ejecutiva comercial y no al implementador. " +
-    "No lo mandes a la Mesa de Ayuda ni le expliques pasos de la plataforma: eso lo hace su implementador. " +
+    "No lo mandes a la Mesa de Ayuda (no atiende GV Avanzado). Para una duda de CÓMO SE USA la plataforma usa primero guia_gv_avanzado; escala solo si el manual no la cubre o si algo no funciona como dice el manual. " +
     "Copia el mensajeParaProspecto tal cual.",
   input_schema: {
     type: "object" as const,
@@ -237,6 +237,31 @@ export const TOOL_ESCALAR_A_IMPLEMENTADOR = {
       detalle: { type: "string", description: "Qué dijo el cliente, en sus palabras (1-2 frases)." },
     },
     required: ["motivo", "detalle"],
+  },
+}
+
+/**
+ * GUÍA DE GV AVANZADO (02-oct, Lalo: "no contamos con el implementador y
+ * soporte no atiende GV Avanzado. Vicky es la única que puede guiar al
+ * cliente"). Responde cómo se hace algo en la plataforma con el manual
+ * oficial de GV Avanzado como única fuente (lib/guia-gva.ts).
+ */
+export const TOOL_GUIA_GV_AVANZADO = {
+  name: "guia_gv_avanzado",
+  description:
+    "Explica paso a paso cómo se hace algo en la plataforma GV Avanzado (donde está la cuenta del cliente), con el manual oficial como única fuente: " +
+    "crear grupos y usuarios, cargar trabajadores por Excel, turnos, planificación, perfiles y permisos, feriados, reportes, marcas, inconsistencias, cuenta propia. " +
+    "Úsala SIEMPRE que el cliente pregunte cómo hacer algo en la plataforma, diga que no ve o no encuentra algo, o mande una captura preguntando qué hacer. " +
+    "Pasa su pregunta en sus palabras (si mandó una captura, súmale lo que se ve). " +
+    "Si encontrado=true, entrega los pasos tal cual (puedes acortar el saludo, nunca cambiar nombres de menús ni botones). " +
+    "Si encontrado=false, el manual no lo cubre: dilo con honestidad y no inventes pasos.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      pregunta: { type: "string", description: "La pregunta del cliente en sus palabras." },
+      contexto: { type: "string", description: "Opcional: lo que se ve en su captura o lo que ya intentó." },
+    },
+    required: ["pregunta"],
   },
 }
 

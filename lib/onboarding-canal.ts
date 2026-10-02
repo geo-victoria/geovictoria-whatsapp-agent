@@ -178,6 +178,7 @@ import {
   TOOL_REAGENDAR_CAPACITACION,
   TOOL_CANCELAR_CAPACITACION,
   TOOL_ESCALAR_A_IMPLEMENTADOR,
+  TOOL_GUIA_GV_AVANZADO,
 } from "./onboarding/tools"
 
 /**
@@ -282,6 +283,13 @@ export async function armarOnboarding(contact: string): Promise<{
   }
 
   const dispatch = async (name: string, input: unknown): Promise<unknown> => {
+    // ── GUÍA DE GV AVANZADO (02-oct): el manual es la fuente, no la memoria ─
+    if (name === TOOL_GUIA_GV_AVANZADO.name) {
+      const a = (input || {}) as { pregunta?: string; contexto?: string }
+      const { consultarGuiaGva } = await import("./guia-gva")
+      const pais = await paisOnboardingDe(contact).catch(() => "cl" as const)
+      return consultarGuiaGva(String(a.pregunta || ""), { pais, contexto: a.contexto })
+    }
     // ── ESCALAMIENTO AL IMPLEMENTADOR (09-sep, caso Lorena) ──────────────
     if (name === TOOL_ESCALAR_A_IMPLEMENTADOR.name) {
       const a = (input || {}) as { motivo?: string; detalle?: string }
@@ -1098,16 +1106,18 @@ export async function armarOnboarding(contact: string): Promise<{
             TOOL_AGENDAR_CAPACITACION,
             TOOL_REAGENDAR_CAPACITACION,
             TOOL_CANCELAR_CAPACITACION,
-            // Vicky NO da soporte de plataforma en onboarding (Lalo 09-sep):
-            // todo problema de uso/acceso y toda urgencia van al implementador.
+            // Dudas de uso: el manual de GV Avanzado (02-oct). Urgencias y lo
+            // que el manual no cubre: escalar.
+            TOOL_GUIA_GV_AVANZADO,
             TOOL_ESCALAR_A_IMPLEMENTADOR,
           ]
         : [
             TOOL_GUARDAR_DATOS_ONBOARDING,
             TOOL_CONFIRMAR_ALTA_EMPRESA,
             // Sin consultar_agente_soporte (02-oct): el agente de Foundry conoce
-            // GV Portal y la cuenta de estos clientes nace en GV Avanzado —
-            // sus pasos y menús no aplican. Las dudas de uso van a la capacitación.
+            // GV Portal y la cuenta de estos clientes nace en GV Avanzado. Las
+            // dudas de uso se responden con el manual de GV Avanzado.
+            TOOL_GUIA_GV_AVANZADO,
           ]) as unknown as unknown[],
       dispatch,
     },
