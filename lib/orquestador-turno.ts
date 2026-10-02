@@ -23,7 +23,7 @@ import { lineaZonaHoraria } from "./paises/ficha-operativa"
 import { honestarMencionesDeCorreo } from "./honestidad-entrega"
 import { corregirPedidoDeTelefono } from "./no-pedir-telefono"
 import { detectarProcesoHumano, directivaProcesoHumano } from "./proceso-humano"
-import { directivaRutSinCorreo } from "./rut-sin-correo"
+import { directivaRutSinCorreo, directivaNombreSinCorreo } from "./rut-sin-correo"
 import {
   getSystemPromptV3,
   getSystemPromptBaseV3,
@@ -551,7 +551,10 @@ export async function procesarTurno(
     // regla de los tres escenarios del prompt no aguantó el primer caso real
     // (dio el RUT y Vicky respondió "Y tu email?"). El guion pide RUT + email
     // en todas partes, así que la orden va al FINAL, en el contexto inmediato.
-    const directivaRutSolo = directivaRutSinCorreo(message || "", history, { documento: perfil.documento })
+    const directivaRutSolo =
+      directivaRutSinCorreo(message || "", history, { documento: perfil.documento }) +
+      // México (02-oct, cotizar sin RFC): respondido a nombre de quién va, se emite.
+      (perfil.documento === "RFC" ? directivaNombreSinCorreo(message || "", history) : "")
 
     // Directiva determinista POST-PAGO (Lalo 18-ago, caso +56978903360): el
     // pagador mandó el comprobante de COT339 y 11 minutos después Vicky le
