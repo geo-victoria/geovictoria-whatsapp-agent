@@ -2217,8 +2217,14 @@ export async function procesarTurno(
     // TRASPASO ESTRICTO (Perú, Lalo 02-oct): con ejecutivo asignado, ni
     // precios ni capacitación — el cinturón asegura lo que el prompt pide.
     if (!enOnboarding && reply && contextoEjecutivo && paisTieneProceso(perfil.pais, "traspasoSinPreciosNiCapacitacion")) {
-      const { cinturonTraspasoEstricto } = await import("@/lib/traspaso-estricto")
-      const c = cinturonTraspasoEstricto(reply, nombreEjecutivo)
+      const { cinturonTraspasoEstricto, yaRemitidoAlEjecutivo } = await import("@/lib/traspaso-estricto")
+      const lineasEj = String(contextoEjecutivo).split("\n")
+      const iEj = lineasEj.findIndex((l) => l.startsWith("[EJECUTIVO ASIGNADO"))
+      const ultimoVicky = [...history].reverse().find((m) => m.role === "assistant")
+      const c = cinturonTraspasoEstricto(reply, nombreEjecutivo, {
+        datos: iEj >= 0 ? lineasEj[iEj + 1] || "" : "",
+        yaRemitido: yaRemitidoAlEjecutivo(typeof ultimoVicky?.content === "string" ? ultimoVicky.content : ""),
+      })
       if (c.violacion) {
         console.warn(`[traspaso-estricto] ${c.violacion} con conversación traspasada (${contact}, ${perfil.pais}) — respuesta reemplazada`)
         reply = c.reemplazo

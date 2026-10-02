@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { cinturonTraspasoEstricto, hablaDePrecio, hablaDeCapacitacion, TOOLS_PRECIO_TRASPASO } from "../lib/traspaso-estricto.ts"
+import { cinturonTraspasoEstricto, hablaDePrecio, hablaDeCapacitacion, TOOLS_PRECIO_TRASPASO, yaRemitidoAlEjecutivo } from "../lib/traspaso-estricto.ts"
 
 test("precio tras el traspaso (frases reales Electric World)", () => {
   assert.ok(hablaDePrecio("Con 25 personas el total sería S/.418 al mes"))
@@ -37,4 +37,13 @@ test("tools de precio bloqueadas", () => {
   assert.ok(TOOLS_PRECIO_TRASPASO.has("cotizar_referencial"))
   assert.ok(TOOLS_PRECIO_TRASPASO.has("generar_link_cotizadora"))
   assert.ok(!TOOLS_PRECIO_TRASPASO.has("enviar_ficha_reloj"))
+})
+
+test("con datos del ejecutivo los entrega; si ya remitió, no repite el texto entero", () => {
+  const datos = "Mónica Mendoza · WhatsApp +51 906 239 544 · mmendozav@geovictoria.com"
+  const r1 = cinturonTraspasoEstricto("Serían S/ 418 al mes", "Mónica Mendoza", { datos })
+  assert.match(r1.reemplazo, /\+51 906 239 544/)
+  const r2 = cinturonTraspasoEstricto("Serían S/ 418 al mes", "Mónica Mendoza", { datos, yaRemitido: yaRemitidoAlEjecutivo(r1.reemplazo) })
+  assert.match(r2.reemplazo, /^Como te comenté/)
+  assert.equal(cinturonTraspasoEstricto(r2.reemplazo, "Mónica Mendoza").violacion, "")
 })

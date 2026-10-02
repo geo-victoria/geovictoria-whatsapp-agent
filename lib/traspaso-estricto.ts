@@ -63,18 +63,31 @@ export function hablaDeCapacitacion(texto: string): boolean {
 export function cinturonTraspasoEstricto(
   reply: string,
   ejecutivo: string,
+  opts: { datos?: string; yaRemitido?: boolean } = {},
 ): { violacion: "" | "precio" | "capacitacion"; reemplazo: string } {
   const precio = hablaDePrecio(reply)
   const cap = !precio && hablaDeCapacitacion(reply)
   if (!precio && !cap) return { violacion: "", reemplazo: reply }
   const quien = ejecutivo || "tu ejecutivo"
+  // Datos de contacto (línea del bloque del ejecutivo, sin el nombre).
+  const contacto = String(opts.datos || "")
+    .split(" · ")
+    .slice(1)
+    .filter(Boolean)
+    .join(" · ")
+  const conDatos = contacto ? ` (${contacto})` : ""
   const tema = precio ? "el valor y las condiciones" : "la capacitación y la puesta en marcha"
-  return {
-    violacion: precio ? "precio" : "capacitacion",
-    reemplazo:
-      `Eso lo ves directamente con ${quien}, que ya tiene tu caso: ${tema} los coordina contigo. ` +
-      `Sus datos de contacto te los dejé más arriba en este chat 😊 Si tienes otra duda del sistema o de cómo funciona, aquí estoy.`,
-  }
+  const reemplazo = opts.yaRemitido
+    ? `Como te comenté, ${tema} los ves directamente con ${quien}${conDatos}. Cualquier duda de cómo funciona el sistema, aquí estoy 😊`
+    : `Eso lo ves directamente con ${quien}, que ya tiene tu caso: ${tema} los coordina contigo. ` +
+      (contacto ? `Puedes escribirle o llamarle: ${contacto}. ` : `Sus datos de contacto te los dejé más arriba en este chat. `) +
+      `Si tienes otra duda del sistema o de cómo funciona, aquí estoy 😊`
+  return { violacion: precio ? "precio" : "capacitacion", reemplazo }
+}
+
+/** ¿Vicky ya remitió al ejecutivo en su último mensaje? (para no repetir el texto entero). */
+export function yaRemitidoAlEjecutivo(ultimoDeVicky: string): boolean {
+  return /\blo ves directamente con\b/i.test(String(ultimoDeVicky || ""))
 }
 
 /** Bloque extra del prompt (va dentro del bloque del ejecutivo asignado). */
