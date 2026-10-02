@@ -21,6 +21,7 @@
 import { NextResponse } from "next/server"
 import { getFollowupCronSecret } from "@/lib/supabase-persistence-v3"
 import { getZohoAccessToken } from "@/lib/zoho-token"
+import { camposUrgenciaAlEntregar } from "@/lib/urgencia-pendientes"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -47,6 +48,8 @@ type Actividad = {
   What_Id?: { id?: string; name?: string }
   $se_module?: string
   Created_Time?: string
+  Due_Date?: string | null
+  Call_Start_Time?: string | null
 }
 
 /** El despachador de huérfanos dispara por GET: misma pasada, sin parámetros. */
@@ -90,12 +93,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     // paréntesis — sin ellos la consulta falla en silencio y devuelve vacío
     // (la de tareas volvió con 0 hasta que se agruparon, 29-ago).
     Tasks: await coql(
-      `select id, What_Id, '$se_module', Created_Time from Tasks ` +
+      `select id, What_Id, '$se_module', Created_Time, Due_Date from Tasks ` +
         `where ((Owner in (${robots}) and Status = 'No iniciado') and Created_Time > '${desde}') ` +
         `order by Created_Time desc limit ${limite}`,
     ),
     Calls: await coql(
-      `select id, What_Id, '$se_module', Created_Time from Calls ` +
+      `select id, What_Id, '$se_module', Created_Time, Call_Start_Time from Calls ` +
         `where Owner in (${robots}) and Created_Time > '${desde}' ` +
         `order by Created_Time desc limit ${limite}`,
     ),
@@ -123,6 +126,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const porDueno = new Map<string, { modulo: "Tasks" | "Calls"; ids: string[]; email: string }>()
+  // Al entregarla a una persona, la actividad queda para HOY (caso Robin 02-oct).
+  const urgencia = new Map<string, Record<string, string>>()
   const ejemplos: Array<{ modulo: string; actividad: string; padre: string; dueno: string }> = []
   let sinDuenoHumano = 0
   for (const modulo of ["Tasks", "Calls"] as const) {
@@ -136,6 +141,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       const clave = `${modulo}:${ownerId}`
       const acc = porDueno.get(clave) || { modulo, ids: [], email: padre?.ownerEmail || ownerId }
       acc.ids.push(a.id)
+      urgencia.set(a.id, camposUrgenciaAlEntregar(modulo, a))
       porDueno.set(clave, acc)
       if (ejemplos.length < 12) {
         ejemplos.push({
@@ -171,7 +177,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         method: "PUT",
         headers: H,
         cache: "no-store",
-        body: JSON.stringify({ data: lote.map((id) => ({ id, Owner: { id: ownerId } })) }),
+        body: JSON.stringify({ data: lote.map((id) => ({ id, Owner: { id: ownerId }, ...(urgencia.get(id) || {}) })) }),
       })
       const resp = (await put.json().catch(() => ({}))) as { data?: Array<{ status?: string; message?: string }> }
       const ok = (resp.data || []).filter((r) => r?.status === "success").length

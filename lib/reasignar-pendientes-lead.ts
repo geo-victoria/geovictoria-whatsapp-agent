@@ -18,6 +18,7 @@
  * Best-effort puro: jamás lanza ni bloquea la conversación (principio 24-jul).
  */
 
+import { camposUrgenciaAlEntregar } from "./urgencia-pendientes"
 import { getZohoAccessToken } from "./zoho-token"
 
 /** Usuarios robot: Vicky y la cuenta de administración. Override por env. */
@@ -33,7 +34,7 @@ const EMAIL_ROBOT = /vicky@|info@geovictoria/i
 /** Una tarea ya cerrada no le sirve a nadie: solo se mueven las pendientes. */
 const ESTADO_CERRADO = /complet|cerrad|closed|cancel/i
 
-type Actividad = { id?: string; Status?: string; Owner?: { id?: string; name?: string } }
+type Actividad = { id?: string; Status?: string; Owner?: { id?: string; name?: string }; Due_Date?: string | null; Call_Start_Time?: string | null }
 
 export type PendientesReasignados = {
   tareas: number
@@ -79,7 +80,7 @@ export async function reasignarPendientesDelLead(
     for (const modulo of ["Tasks", "Calls"] as const) {
       // Las actividades del workflow cuelgan por What_Id (Who_Id llega null);
       // se piden por los dos campos para no depender de esa particularidad.
-      const campos = modulo === "Tasks" ? "id, Owner, Status" : "id, Owner"
+      const campos = modulo === "Tasks" ? "id, Owner, Status, Due_Date" : "id, Owner, Call_Start_Time"
       const q = await fetch(`${api}/crm/v8/coql`, {
         method: "POST",
         headers: H,
@@ -109,7 +110,10 @@ export async function reasignarPendientesDelLead(
         method: "PUT",
         headers: H,
         cache: "no-store",
-        body: JSON.stringify({ data: filas.map((a) => ({ id: a.id, Owner: { id: destinoId } })) }),
+        // Al entregarla a una persona, queda para HOY (caso Robin 02-oct).
+        body: JSON.stringify({
+          data: filas.map((a) => ({ id: a.id, Owner: { id: destinoId }, ...camposUrgenciaAlEntregar(modulo, a) })),
+        }),
       })
       const resp = (await put.json().catch(() => ({}))) as { data?: Array<{ status?: string }> }
       const ok = (resp.data || []).filter((r) => r?.status === "success").length

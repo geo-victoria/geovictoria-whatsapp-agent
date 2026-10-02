@@ -203,6 +203,20 @@ export async function vigilarPromesas(max = 15): Promise<{ revisadas: number; cu
       const desdeAlerta = Date.parse(String((p as { alertado_at?: string }).alertado_at || p.deadline_at))
       const vence = Number.isFinite(desdeAlerta) ? sumarHorasHabiles(new Date(desdeAlerta), HORAS_PARA_ESCALAR, fichaPorTelefono(p.contact).tz) : null
       if (!vence || vence.getTime() > Date.now()) continue
+      if (responsable) {
+        const { correoAlEjecutivo } = await import("./correo-ejecutivo")
+        const { ccLiderTraspaso } = await import("./cc-lider")
+        await correoAlEjecutivo({
+          contact: p.contact,
+          para: responsable,
+          cc: ccLiderTraspaso(p.contact),
+          asunto: `🚨 El cliente +${p.contact} sigue esperando tu ${etiqueta}`,
+          html:
+            `<p>Le prometimos al cliente <b>+${p.contact}</b> una ${etiqueta}${p.detalle ? ` (${p.detalle})` : ""} ` +
+            `y, ${HORAS_PARA_ESCALAR} horas hábiles después del primer aviso, no vemos contacto.</p>` +
+            `<p>Por favor tómalo ahora. Si ya lo contactaste por otro medio, deja una nota en el registro.</p>`,
+        }).catch(() => false)
+      }
       await avisarEquipoInterno(
         `🚨 ESCALAMIENTO — promesa incumplida hace ${HORAS_PARA_ESCALAR} h hábiles: ${etiqueta} a +${p.contact}` +
           (responsable ? ` · responsable: ${responsable}` : " · SIN RESPONSABLE ASIGNADO") +
@@ -219,6 +233,20 @@ export async function vigilarPromesas(max = 15): Promise<{ revisadas: number; cu
       continue
     }
 
+    // El aviso le llega TAMBIÉN al responsable (caso Robin 02-oct: las
+    // alertas iban solo a la bandeja interna y el ejecutivo no se enteraba).
+    if (responsable) {
+      const { correoAlEjecutivo } = await import("./correo-ejecutivo")
+      await correoAlEjecutivo({
+        contact: p.contact,
+        para: responsable,
+        asunto: `⏰ Pendiente: ${etiqueta} a +${p.contact}`,
+        html:
+          `<p>Le prometimos al cliente <b>+${p.contact}</b> una ${etiqueta}${p.detalle ? ` (${p.detalle})` : ""}, ` +
+          `y el plazo ya venció sin que veamos contacto.</p>` +
+          `<p>Por favor llámalo o escríbele hoy. Si ya lo contactaste por otro medio, deja una nota en el registro.</p>`,
+      }).catch(() => false)
+    }
     await avisarEquipoInterno(
       `🤝⏰ PROMESA VENCIDA sin evidencia de contacto: ${etiqueta} a +${p.contact}` +
         (responsable ? ` · RESPONSABLE: ${responsable}` : " · SIN RESPONSABLE ASIGNADO") +

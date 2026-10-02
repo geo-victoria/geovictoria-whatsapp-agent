@@ -256,6 +256,10 @@ export function formatDirectivaSobreUmbral(
       // Lalo 01-oct (caso Ernesto/ITV Cambridge, y los mismos vicios en Chile):
       // promesas que nadie cumple cuando el cliente insiste.
       `- Si el cliente INSISTE en un precio o "un estimado": NUNCA ofrezcas ni prometas un estimado, un valor de referencia, "dame un minuto y te lo armo" ni que lo vas a calcular — para esa dotación el precio lo arma ${ejecArt} con descuento por volumen, y eso no cambia aunque insista. Dilo UNA vez, sin disculparte de más, y ofrece lo que sí puedes hacer: ${sinAgenda ? `que ${ejecArt} lo llame o coordinar la reunión` : "agendar la reunión HOY mismo si hay horario (consultar_disponibilidad_horario + agendar_reunion)"}.\n` +
+      // Caso Robin (Perú, 02-oct): "para enviarte la propuesta formal necesito
+      // tu email" y "te va a contactar a la brevedad" — el cliente quedó
+      // esperando un correo de Vicky y una llamada inmediata que nadie hizo.
+      `- La propuesta la arma y la ENVÍA ${ejecArt}, no tú: JAMÁS digas "te envío la propuesta/cotización" ni pidas el correo "para enviártela" (si lo pides, es para que ${ejecArt} se la mande). JAMÁS prometas plazos de contacto ("a la brevedad", "en minutos", "hoy mismo", "lo antes posible", "normal que te llame"): di que ${ejecArt} lo va a contactar y deja sus datos de contacto.\n` +
       `- Si el cliente ya ACEPTÓ la reunión ("sí", "esa", "dale", "ok") aunque en el mismo mensaje pida otra cosa: la reunión va primero — sigue el agendamiento en ese turno (pide el correo si falta, propón horario).\n` +
       `- Si reclama que nadie lo ha contactado: JAMÁS digas "acabo de escalar", "lo escalé con prioridad", "te contactan en 15 minutos" ni "antes de las 18:00" — no controlas eso. Reconoce la demora sin inventar horas, dile que le avisas a ${ejecArt} (el sistema registra su reclamo y alerta al equipo de verdad) y ofrece la reunión.\n`
     )

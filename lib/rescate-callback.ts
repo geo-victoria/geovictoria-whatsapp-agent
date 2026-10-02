@@ -67,57 +67,6 @@ export function telefonoAlternativoEn(textosCliente: string[], contact: string):
 
 export { clienteReclamaContacto } from "./reclamo-contacto"
 
-/** Correo al ejecutivo sobre SU trato: la alerta interna no le llega a él. */
-async function correoReclamoAlVendedor(
-  clean: string,
-  v: { vendedor_email: string; vendedor_nombre: string | null; traspasado_at: string },
-  textoCliente: string,
-): Promise<boolean> {
-  try {
-    const { getKvValue, setKvValue } = await import("./supabase-persistence-v3")
-    const candado = `reclamo_mail_${clean}`
-    const previo = await getKvValue(candado).catch(() => null)
-    if (previo && Date.now() - Date.parse(previo) < 2 * 3600e3) return false
-    const { dealActivoEnKv } = await import("./crm-hitos")
-    const dealId = await dealActivoEnKv(clean).catch(() => null)
-    if (!dealId) return false
-    const { getZohoAccessToken } = await import("./zoho-token")
-    const token = await getZohoAccessToken()
-    const api = (process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com").trim()
-    const nombre = v.vendedor_nombre || v.vendedor_email.split("@")[0]
-    const html =
-      `<p>Hola ${nombre},</p>` +
-      `<p>El cliente <b>+${clean}</b> le escribió a Vicky reclamando que nadie lo ha contactado. ` +
-      `Te fue traspasado el ${v.traspasado_at.slice(0, 16).replace("T", " ")} (UTC).</p>` +
-      `<p>Lo que escribió: <i>"${textoCliente.slice(0, 300).replace(/</g, "&lt;")}"</i></p>` +
-      `<p>Por favor llámalo o escríbele hoy. El trato está en Zoho: ` +
-      `<a href="https://crm.zoho.com/crm/org685875245/tab/Potentials/${dealId}">abrir el trato</a>.</p>`
-    const res = await fetch(`${api}/crm/v3/Deals/${encodeURIComponent(dealId)}/actions/send_mail`, {
-      method: "POST",
-      headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        data: [{
-          from: { email: (process.env.VICKY_FROM_EMAIL || "vicky@geovictoria.com").trim() },
-          to: [{ email: v.vendedor_email }],
-          subject: `⚠️ Tu cliente +${clean} reclama que nadie lo ha contactado`,
-          content: html,
-          mail_format: "html",
-        }],
-      }),
-    })
-    if (!res.ok) {
-      console.error(`[rescate-callback] correo de reclamo ${res.status}:`, (await res.text().catch(() => "")).slice(0, 200))
-      return false
-    }
-    await setKvValue(candado, new Date().toISOString()).catch(() => {})
-    return true
-  } catch (e) {
-    console.error("[rescate-callback] correo de reclamo falló:", e)
-    return false
-  }
-}
-
 export type RescateCallback = {
   via: "reafirmacion" | "traspaso" | "promesa"
   reply: string | null
@@ -163,7 +112,20 @@ export async function rescatarCallback(opts: {
         vendedorEmail: v.vendedor_email,
         horasHabiles: 2,
       }).catch(() => false)
-      const correo = await correoReclamoAlVendedor(clean, v, opts.textosCliente.join(" / "))
+      const { correoAlEjecutivo } = await import("./correo-ejecutivo")
+      const textoCliente = opts.textosCliente.join(" / ").slice(0, 300).replace(/</g, "&lt;")
+      const correo = await correoAlEjecutivo({
+        contact: clean,
+        para: v.vendedor_email,
+        asunto: `⚠️ Tu cliente +${clean} reclama que nadie lo ha contactado`,
+        html:
+          `<p>Hola ${vendedorRes.nombre},</p>` +
+          `<p>El cliente <b>+${clean}</b> le escribió a Vicky reclamando que nadie lo ha contactado. ` +
+          `Te fue traspasado el ${v.traspasado_at.slice(0, 16).replace("T", " ")} (UTC).</p>` +
+          `<p>Lo que escribió: <i>"${textoCliente}"</i></p>` +
+          `<p>Por favor llámalo o escríbele hoy.</p>`,
+        candado: { clave: `reclamo_mail_${clean}`, horas: 2 },
+      })
       await avisarEquipoInterno(
         `${correo ? "📧 (correo enviado al ejecutivo) " : ""}🚨 CLIENTE RECLAMA CONTACTO: +${clean} pide que lo llamen y sigue traspasado a ${v.vendedor_nombre || v.vendedor_email} desde ${v.traspasado_at.slice(0, 16)} sin gestión visible${fonoTxt}. Promesa registrada a su nombre (2 h hábiles).`,
       ).catch(() => {})
