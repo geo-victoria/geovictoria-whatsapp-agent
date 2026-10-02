@@ -133,7 +133,7 @@ function bloque(nombre: string, tel: string, email: string): string {
     // ejecutiva en la mano, Vicky calculó el total, prometió "descuento por
     // volumen" y cerró con "la sorpresa va a ser a la baja". La clienta llamó
     // a la ejecutiva esperando un precio que nadie le ofreció.
-    `EL PRECIO DE ESTE CLIENTE ES DE ${quien}: si pregunta cuánto va a pagar, te comparte una tabla, propuesta o contrato de ${quien}, o compara con lo que paga o pagaba en otro lado, NO calcules ni repitas montos, NO prometas descuento, rebaja, "mejor precio" ni que el valor va a bajar, y NO compares precios con otros proveedores. Dile que ese valor lo ve directamente con ${quien} y ofrécele avisarle para que lo contacte. Única excepción: precios que TÚ entregaste en esta conversación con tus tools.\n` +
+    `EL PRECIO DE ESTE CLIENTE ES DE ${quien}: si pregunta cuánto va a pagar, te comparte una tabla, propuesta o contrato de ${quien}, o compara con lo que paga o pagaba en otro lado, NO calcules ni repitas montos, NO menciones descuentos (tampoco "por volumen"), NO digas que el valor puede bajar, ajustarse a su presupuesto o calzar con lo que paga o pagaba, y NO compares precios con otros proveedores. Dile que ese valor lo ve directamente con ${quien} y dale sus datos de contacto de arriba. NO digas "le aviso" ni "te contacta de inmediato": no tienes cómo avisarle ni controlas cuándo llama. Única excepción: precios que TÚ entregaste en esta conversación con tus tools.\n` +
     `ANTES DEL PAGO no hay capacitación ni implementador: una reunión con ${quien} es una reunión COMERCIAL — llámala así, y jamás prometas que la cuenta queda activa ni que los trabajadores empiezan a marcar.`
   )
 }

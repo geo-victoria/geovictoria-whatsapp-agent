@@ -297,6 +297,16 @@ describe("promesa de rebaja sobre el umbral (caso Electric World)", () => {
     assert.equal(cinturonRebaja(r).habiaPrecio, false)
     assert.doesNotMatch(r, /descuento|mejor (precio|valor)/i)
   })
+  test("con ejecutivo: descuentos y 'calzar con lo que pagabas' también se atajan (simulación 02-oct)", () => {
+    const op = { ejecutivo: "Priscila Quispe" }
+    for (const frase of [
+      "Ella puede armar una propuesta que calce con lo que venías pagando, tomando en cuenta tu presupuesto.",
+      "Para 76 trabajadores el precio lo arma Priscila Quispe con descuentos por volumen que aplican a tu dotación.",
+    ]) {
+      assert.equal(cinturonRebaja(frase, op).habiaPrecio, true, frase)
+    }
+    assert.equal(cinturonRebaja("La reunión con Priscila es comercial, para definir el precio.", op).habiaPrecio, false)
+  })
   test("el reemplazo sin ejecutivo tampoco se dispara a sí mismo", () => {
     const r = cinturonRebaja("S/ 418").reemplazo
     assert.equal(cinturonRebaja(r).habiaPrecio, false)

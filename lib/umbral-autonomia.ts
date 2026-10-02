@@ -393,19 +393,37 @@ export function prometeRebaja(reply: string): boolean {
   return PATRONES_PROMESA_REBAJA.some((re) => re.test(String(reply || "")))
 }
 
+/**
+ * Con EJECUTIVO ASIGNADO el precio es suyo: cualquier mención de descuento o
+ * de ajustar el valor a lo que el cliente paga o pagaba es una promesa en su
+ * nombre (simulación del caso Electric World, 02-oct: "ella puede armar una
+ * propuesta que calce con lo que venías pagando").
+ */
+const PATRONES_CON_EJECUTIVO = [
+  /\bdescuentos?\b/i,
+  /\b(calce|calza|ajust\w*|iguale|igualar|mejore|mejorar)\b[^.?!\n]{0,50}\b(lo\s+que\s+(ven[ií]as|pagabas|pagas|pagaban)|tu\s+presupuesto)/i,
+]
+
+export function prometeEnNombreDelEjecutivo(reply: string): boolean {
+  return PATRONES_CON_EJECUTIVO.some((re) => re.test(String(reply || "")))
+}
+
 export function cinturonPrecioSobreUmbral(
   reply: string,
   opts: { ejecutivo?: string } = {},
 ): { habiaPrecio: boolean; reemplazo: string } {
   const habiaPrecio =
-    PATRONES_PRECIO.some((re) => re.test(String(reply || ""))) || prometeEstimado(reply) || prometeRebaja(reply)
+    PATRONES_PRECIO.some((re) => re.test(String(reply || ""))) ||
+    prometeEstimado(reply) ||
+    prometeRebaja(reply) ||
+    (Boolean((opts.ejecutivo || "").trim()) && prometeEnNombreDelEjecutivo(reply))
   const ejecutivo = (opts.ejecutivo || "").trim()
   return {
     habiaPrecio,
     reemplazo: ejecutivo
       ? // El caso YA tiene ejecutivo (y casi siempre ya dio precio): el valor es
         // suyo y Vicky no promete nada en su nombre.
-        `Ese valor lo ves directamente con ${ejecutivo}, que ya tiene tu caso: cualquier duda de precio, con ${ejecutivo} es lo más rápido 😊 ¿Quieres que le avise para que te contacte?`
+        `Ese valor lo ves directamente con ${ejecutivo}, que ya tiene tu caso: cualquier duda de precio, con ${ejecutivo} es lo más rápido 😊 Sus datos de contacto te los dejé más arriba en este chat.`
       : // Framing de Lalo 07-sep (punto 11 del cierre de objeciones): el
         // ejecutivo entra por el DESCUENTO POR VOLUMEN, no porque Vicky "no
         // pueda". Sin "mejor valor": eso ya es prometer un precio (02-oct).
