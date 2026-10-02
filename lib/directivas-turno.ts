@@ -13,7 +13,7 @@
  * byte a byte el que tenía (tests/directivas-turno.test.ts lo fija).
  */
 
-import { directivaRutSinCorreo, type TurnoHistorial } from "./rut-sin-correo.ts"
+import { directivaRutSinCorreo, directivaNombreSinCorreo, type TurnoHistorial } from "./rut-sin-correo.ts"
 
 export type Turno = TurnoHistorial
 
@@ -208,6 +208,7 @@ export function directivasDeTurno(message: string, history: Turno[], ficha: Fich
     directivaMarcaje(message, ficha.zona) +
     directivaDatosYaDichos(message, history, ficha.zona) +
     (cotizarYa || directivaConsultiva(history)) +
-    directivaRutSinCorreo(message, history, { documento: ficha.documento })
+    directivaRutSinCorreo(message, history, { documento: ficha.documento }) +
+    (ficha.documento === "RFC" ? directivaNombreSinCorreo(message, history) : "")
   )
 }

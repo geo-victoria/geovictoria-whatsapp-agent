@@ -6,6 +6,7 @@ import { test, describe } from "node:test"
 import assert from "node:assert/strict"
 import {
   directivaRutSinCorreo,
+  directivaNombreSinCorreo,
   traeRutValido,
   clienteDioCorreo,
 } from "../lib/rut-sin-correo.ts"
@@ -84,5 +85,31 @@ describe("el correo no se vuelve a pedir (global, caso Rodrigo MX)", () => {
   })
   test("si el cliente dio correo, no dispara", () => {
     assert.equal(directivaRutSinCorreo("BIM011108DJ5 ro@bimbo.mx", rodrigoMX, { documento: "RFC" }), "")
+  })
+})
+
+describe("México: a nombre de quién va, sin correo → emite (02-oct)", () => {
+  const h = [
+    { role: "user", content: "Soy Antonio, somos 8 en un hotel, solo app" },
+    {
+      role: "assistant",
+      content:
+        "Resumen mensual recurrente:\n\n- Control de Asistencia: $499/mes\n\nTotal mensual: $499 + IVA\n\n[---]\n\nPara armar la cotización formal me falta solo esto:\n• A nombre de quién va (tu empresa o tú)\n• Tu email",
+    },
+  ]
+  test("responde el nombre sin correo → directiva de emitir", () => {
+    const d = directivaNombreSinCorreo("Hotel Las Palmas, mándamela", h)
+    assert.match(d, /Llama generar_link_cotizadora AHORA/)
+    assert.match(d, /NO pidas el RFC/)
+  })
+  test("con correo, pregunta o rechazo → nada", () => {
+    assert.equal(directivaNombreSinCorreo("Hotel Las Palmas, ana@palmas.mx", h), "")
+    assert.equal(directivaNombreSinCorreo("¿y eso incluye la app?", h), "")
+    assert.equal(directivaNombreSinCorreo("no gracias", h), "")
+  })
+  test("solo en México: directivasDeTurno con RUT no la agrega", async () => {
+    const { directivasDeTurno } = await import("../lib/directivas-turno.ts")
+    assert.doesNotMatch(directivasDeTurno("Hotel Las Palmas", h, { zona: "comuna", documento: "RUT" }), /a nombre de quién va la cotización y el cliente/)
+    assert.match(directivasDeTurno("Hotel Las Palmas", h, { zona: "ciudad", documento: "RFC" }), /a nombre de quién va la cotización y el cliente/)
   })
 })

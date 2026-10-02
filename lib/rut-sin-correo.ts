@@ -129,3 +129,28 @@ export function directivaRutSinCorreo(
     "de siempre (saludo + link); el PDF lo adjunta el sistema solo."
   )
 }
+
+/**
+ * MÉXICO (02-oct, cotizar sin RFC): el cierre pregunta "a nombre de quién va +
+ * email". Si el último mensaje de Vicky fue esa pregunta y el cliente contestó
+ * sin correo (ni rechazo), se emite en ese mismo turno — la simulación del
+ * 02-oct mostró a Vicky insistiendo con el correo tras "Hotel Las Palmas,
+ * mándamela". El correo nunca frena la emisión (regla global 24-sep).
+ */
+const RE_PREGUNTA_NOMBRE = /a nombre de qui[eé]n/i
+const RE_RECHAZO_CORTO = /\b(no gracias|no me interesa|lo pienso|lo voy a pensar|despu[eé]s te (aviso|digo)|m[aá]s adelante)\b/i
+
+export function directivaNombreSinCorreo(mensaje: string, history: TurnoHistorial[]): string {
+  const ultimoAsistente = [...history].reverse().find((m) => m.role === "assistant")
+  if (!ultimoAsistente || !RE_PREGUNTA_NOMBRE.test(String(ultimoAsistente.content || ""))) return ""
+  const t = String(mensaje || "").trim()
+  if (!t || RE_RECHAZO_CORTO.test(t) || /\?\s*$/.test(t)) return ""
+  if (clienteDioCorreo(mensaje, history)) return ""
+  if (!yaVioPrecio(history) || yaEmitioFormal(history)) return ""
+  return (
+    "\n\n[DIRECTIVA DEL TURNO — obligatoria] Le preguntaste a nombre de quién va la cotización y el cliente acaba de " +
+    "responder sin correo. El correo NO es necesario para emitir: PROHIBIDO pedirlo de nuevo o mencionarlo. Llama " +
+    "generar_link_cotizadora AHORA, en este mismo turno, OMITIENDO `contactoEmail`, con empresa = lo que el cliente " +
+    "dijo (si dijo \"a mi nombre\" o similar, su nombre). NO pidas el RFC: se pide al aceptar."
+  )
+}
