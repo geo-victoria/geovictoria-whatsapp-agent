@@ -91,6 +91,32 @@ export async function planillaIngresoDe(
     if (/^otro$/i.test(limpio(d.giro))) d.giro = ""
     if (!limpio(d.razonSocial) && limpio(b?.empresa?.nombre)) d.razonSocial = limpio(b?.empresa?.nombre)
     if (!limpio(d.documento) && limpio(b?.empresa?.identificador)) d.documento = limpio(b?.empresa?.identificador)
+    // PLANILLA DEL PROPIO CLIENTE EN EL CHAT (caso Palco Alto 02-oct): si el
+    // cliente mandó su planilla de ingreso, lo que declaró ahí manda sobre el
+    // nombre de la cuenta o del contacto (salía "Jose") y llena giro,
+    // dirección, comuna y rubro cuando el RUT no está en el padrón.
+    let planillaCliente: import("./planilla-cliente-chat").PlanillaCliente | null = null
+    try {
+      const { fetchHistoryV3 } = await import("./supabase-persistence-v3")
+      const { planillaClienteEnTexto } = await import("./planilla-cliente-chat")
+      const digs = (x: unknown) => String(x ?? "").replace(/[^\dkK]/g, "").toUpperCase()
+      const hist = await fetchHistoryV3(fono, 200)
+      for (const m of [...hist].reverse()) {
+        if (m.role !== "user") continue
+        const pc = planillaClienteEnTexto(String(m.content || ""))
+        if (!pc) continue
+        if (pc.rut && limpio(d.documento) && digs(pc.rut) !== digs(d.documento)) continue
+        planillaCliente = pc
+        break
+      }
+    } catch { /* historial ilegible */ }
+    if (planillaCliente) {
+      if (limpio(planillaCliente.razonSocial)) d.razonSocial = limpio(planillaCliente.razonSocial)
+      if (limpio(planillaCliente.giro)) d.giro = limpio(planillaCliente.giro)
+      if (limpio(planillaCliente.direccion)) d.direccion = limpio(planillaCliente.direccion)
+      if (limpio(planillaCliente.comuna)) d.comuna = limpio(planillaCliente.comuna)
+      if (!limpio(d.documento) && limpio(planillaCliente.rut)) d.documento = limpio(planillaCliente.rut)
+    }
     d = await completarDesdePadron("cl", limpio(d.documento), d)
     const admin = b?.admin
     const { armarPlanillaIngreso } = await import("./planilla-ingreso")
@@ -101,9 +127,20 @@ export async function planillaIngresoDe(
       giro: limpio(d.giro),
       direccion: limpio(d.direccion),
       comuna: limpio(d.comuna),
-      admins: admin && (admin.nombre || admin.email || admin.identificador)
-        ? [{ nombre: admin.nombre, apellido: admin.apellido, rut: admin.identificador, telefono: fono, correo: admin.email }]
-        : [],
+      nombreFantasia: limpio(planillaCliente?.nombreFantasia),
+      rubro: limpio(planillaCliente?.rubro),
+      admins: (() => {
+        const lista: Array<{ nombre?: string; apellido?: string; rut?: string; telefono?: string; correo?: string }> =
+          admin && (admin.nombre || admin.email || admin.identificador)
+            ? [{ nombre: admin.nombre, apellido: admin.apellido, rut: admin.identificador, telefono: fono, correo: admin.email }]
+            : []
+        const digs = (x: unknown) => String(x ?? "").replace(/[^\dkK]/g, "").toUpperCase()
+        for (const a of planillaCliente?.admins || []) {
+          if (a.rut && lista.some((x) => digs(x.rut) === digs(a.rut))) continue
+          lista.push(a)
+        }
+        return lista.slice(0, 4)
+      })(),
       trabajadores: trabajadores.map((t) => ({ rut: t.rut, correo: t.correo, nombres: t.nombres, apellidos: t.apellidos, grupo: t.grupo })),
     })
     return { tipo: "ingreso", filename: r.filename, buffer: r.buffer }

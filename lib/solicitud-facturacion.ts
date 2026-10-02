@@ -432,6 +432,22 @@ async function consolidarDatos(
         if (!limpio(d.documento) && cert.documento) d.documento = cert.documento
         break
       }
+      // La planilla de ingreso que el cliente mandó por el chat (caso Palco
+      // Alto 02-oct) también trae giro, dirección y comuna.
+      if (!limpio(d.giro) || !limpio(d.direccion) || !limpio(d.comuna)) {
+        const { planillaClienteEnTexto } = await import("./planilla-cliente-chat")
+        for (const m of [...hist].reverse()) {
+          if (m.role !== "user") continue
+          const pc = planillaClienteEnTexto(String(m.content || ""))
+          if (!pc) continue
+          if (pc.rut && limpio(d.documento) && digs(pc.rut) !== digs(d.documento)) continue
+          if (!limpio(d.giro) && pc.giro) d.giro = pc.giro
+          if (!limpio(d.direccion) && pc.direccion) d.direccion = pc.direccion
+          if (!limpio(d.comuna) && pc.comuna) d.comuna = pc.comuna
+          if (!limpio(d.razonSocial) && pc.razonSocial) d.razonSocial = pc.razonSocial
+          break
+        }
+      }
     } catch (e) {
       console.warn(`[solicitud-facturacion] certificado del chat ilegible contact=${c}: ${e instanceof Error ? e.message : e}`)
     }
