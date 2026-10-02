@@ -81,6 +81,15 @@ export const FICHA_MX: FichaPrompt = {
   cierreConFormulario:
     'petición de nombre + email en dos mensajes). Al cierre normalmente te faltará solo a nombre de quién va (el email ya vino en el formulario: confírmalo en una línea al usarlo, ej. "te la envío a maria@xyz.mx, ¿ok?").',
   peticionNombraAmbos: "(Y la petición nombra SIEMPRE los dos — a nombre de quién va y el email — aunque el correo no sea imprescindible,",
+  listaDatosCierre: `• A nombre de quién va (tu empresa o tú)
+   • Tu email`,
+  notaDatosCierre: `(Los pides así, juntos y una sola vez. El RFC NO va en esta lista: se pide al aceptar, con la constancia de situación fiscal. Si vuelve solo con el nombre, ese mensaje ya cumplió su trabajo: emites y sigues. Si no dice a nombre de quién, emites a nombre del contacto.)
+
+   (Nunca pidas ciudad ni teléfono.)`,
+  pedidoDatoCierre: "me dices a nombre de quién la hago",
+  bloqueDocumentoNoValida:
+    "RFC EN MÉXICO (Lalo 02-oct): el RFC NO es requisito para cotizar — jamás lo pidas ni lo conviertas en un muro. Si el cliente lo da por su cuenta y la tool no lo acepta, emites SIN RFC en ese mismo turno y no lo mencionas: el RFC real y la constancia de situación fiscal se piden al ACEPTAR, en la página de aceptación. TÚ NO VALIDAS EL RFC.",
+  faltaDatoMinimo: "no hay forma de saber a nombre de quién va ni siquiera el nombre del contacto",
   gatilloEmision: "el cliente dijo a nombre de quién va (o aceptó cotizar a su nombre) tras ver el precio → generas en ese turno, tenga correo o no.",
   datosMinimos: "YA tienes los datos mínimos (contacto y a nombre de quién va — el RFC, el email y la ciudad NO son requisito)",
   equipoNombre: "reloj checador",

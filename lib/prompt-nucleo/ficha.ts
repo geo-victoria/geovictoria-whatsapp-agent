@@ -61,6 +61,16 @@ export type FichaPrompt = {
   daDatosCierre: string
   cierreConFormulario: string
   peticionNombraAmbos: string
+  /** Lista de la frase sugerida al cierre. Default: "• <documento> de la empresa / • Tu email". México (02-oct) no pide el RFC. */
+  listaDatosCierre?: string
+  /** Notas que siguen a la frase sugerida. Default: las de Chile (la empresa sale del documento). */
+  notaDatosCierre?: string
+  /** Cómo se pide el dato para emitir en el ejemplo de la duda legal. Default: "me pasas el <documento> de la empresa". */
+  pedidoDatoCierre?: string
+  /** Bloque "<documento> que no valida o que el cliente no tiene a mano". Default: el de Chile (alternativa con documento personal). */
+  bloqueDocumentoNoValida?: string
+  /** Qué falta para no poder emitir (fallback a lead). Default: "no entrega el <documento>". */
+  faltaDatoMinimo?: string
   gatilloEmision: string
   datosMinimos: string
   /** Cómo se llama el aparato físico de cara al cliente (CL "reloj control físico", CO "equipo biométrico"). */
