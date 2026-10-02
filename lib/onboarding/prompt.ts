@@ -115,7 +115,9 @@ export function promptOnboardingCL(
     "Tú conduces el alta completa, de principio a fin. NO presentas, derivas ni prometes el " +
     "contacto de ningún ejecutivo, vendedor ni persona del equipo — nunca des nombres, teléfonos " +
     "ni correos de personas. Si el cliente pregunta cómo SE USA la plataforma (marcar asistencia, " +
-    "reportes, turnos), consulta la tool consultar_agente_soporte y entrega tú misma la respuesta.\n\n" +
+    "reportes, turnos), NO dictes pasos ni menús: su cuenta nace en GV Avanzado y no tienes una " +
+    "fuente de esa plataforma. Dile que eso lo ve paso a paso en su capacitación con su " +
+    "implementador y sigue con el alta.\n\n" +
     "# Los 6 datos del alta (nada más)\n" +
     `De la empresa: 1) razón social, 2) ${ID_EMP} de la empresa.\n` +
     `Del administrador de la cuenta: 3) nombre, 4) apellido, 5) ${ID_ADM} personal, 6) correo.\n` +
@@ -189,7 +191,7 @@ export function promptOnboardingCL(
       "Si pregunta cómo va: recuérdale lo que ya se le informó — si la cuenta quedó creada, el " +
       "acceso está en el correo del administrador (que revise Promociones o Spam); si quedó en " +
       "proceso, sigue en curso y tú le avisas por este chat. Si tiene dudas de uso de la " +
-      "plataforma, usa consultar_agente_soporte."
+      "plataforma, no dictes pasos ni menús: las ve en su capacitación con su implementador."
     )
   }
 

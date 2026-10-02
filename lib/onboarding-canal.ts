@@ -110,8 +110,6 @@ function horaRazonable(h: string): boolean {
   return hh >= 8 && hh < 19
 }
 export { entregarKickoffOnboarding } from "./onboarding-envio"
-import { dispatchTool } from "./tools"
-import { consultarAgenteSoporteSchema } from "./tools/consultar-agente-soporte"
 import { esContactoPiloto } from "./onboarding-piloto"
 import {
   onboardingEnabled,
@@ -1053,10 +1051,6 @@ export async function armarOnboarding(contact: string): Promise<{
       }
     }
 
-    // Dudas de uso de la plataforma: el oráculo de soporte de siempre.
-    if (name === consultarAgenteSoporteSchema.name)
-      return dispatchTool(name, (input || {}) as Record<string, unknown>)
-
     return { ok: false, error: `Tool desconocida en fase onboarding: ${name}` }
   }
 
@@ -1111,7 +1105,9 @@ export async function armarOnboarding(contact: string): Promise<{
         : [
             TOOL_GUARDAR_DATOS_ONBOARDING,
             TOOL_CONFIRMAR_ALTA_EMPRESA,
-            consultarAgenteSoporteSchema,
+            // Sin consultar_agente_soporte (02-oct): el agente de Foundry conoce
+            // GV Portal y la cuenta de estos clientes nace en GV Avanzado —
+            // sus pasos y menús no aplican. Las dudas de uso van a la capacitación.
           ]) as unknown as unknown[],
       dispatch,
     },
