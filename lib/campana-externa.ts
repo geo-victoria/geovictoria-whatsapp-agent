@@ -80,6 +80,13 @@ export async function desmarcarCampanaExterna(contact: string): Promise<void> {
  * mensaje SIN respuesta y asigna el chat a la persona dueña (una vez cada 12 h,
  * por si alguien lo desasignó). Devuelve la marca si lo atendió, null si no.
  */
+async function esAgente(agentId: string | null | undefined, correo: string): Promise<boolean> {
+  if (!agentId) return false
+  const { listarAgentes } = await import("./botmaker-agentes")
+  const a = (await listarAgentes().catch(() => [])).find((x) => x.id === agentId)
+  return String(a?.email || "").toLowerCase() === correo.toLowerCase()
+}
+
 export async function atenderCampanaExterna(
   contact: string,
   message: string,
@@ -97,9 +104,22 @@ export async function atenderCampanaExterna(
     const prev = Date.parse((await getKvValue(candado).catch(() => "")) || "")
     if (Number.isFinite(prev) && Date.now() - prev < 12 * 3600e3) return
     const { asignarConversacionAlDueno } = await import("./botmaker-agentes")
-    const r = await asignarConversacionAlDueno(fono, marca.agente, marca.linea ? `${marca.linea}:${fono}` : undefined)
-    console.log(`[campana-externa] asignación ${fono} → ${marca.agente}: ${r.motivo}`)
-    if (r.asignado || /asignada/.test(r.motivo)) await setKvValue(candado, new Date().toISOString()).catch(() => {})
+    const ref = marca.linea ? `${marca.linea}:${fono}` : undefined
+    // Prueba 02-oct (Juan Pablo): el primer intento corre mientras Botmaker
+    // abre la sesión del mensaje entrante y el flujo no mueve al agente; el
+    // mismo intento 2 min después sí. Se espera un poco y se reintenta.
+    for (const espera of [8_000, 20_000, 45_000]) {
+      await new Promise((res) => setTimeout(res, espera))
+      const r = await asignarConversacionAlDueno(fono, marca.agente, ref)
+      console.log(`[campana-externa] asignación ${fono} → ${marca.agente}: ${r.motivo}`)
+      // "asignada" o ya estaba con esa persona (el flujo no mueve lo que ya está bien).
+      const yaEra = r.agentIdPrevio && r.agentIdPrevio === r.agentIdNuevo && !r.asignado && (await esAgente(r.agentIdNuevo, marca.agente))
+      if (r.asignado || yaEra) {
+        await setKvValue(candado, new Date().toISOString()).catch(() => {})
+        return
+      }
+      if (!/no movió/.test(r.motivo)) return
+    }
   })
   return marca
 }
