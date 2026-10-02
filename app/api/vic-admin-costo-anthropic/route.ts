@@ -38,6 +38,7 @@ type BucketUso = {
   ending_at: string
   results: Array<{
     model?: string | null
+    api_key_id?: string | null
     uncached_input_tokens?: number
     cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number } | null
     cache_creation_input_tokens?: number
@@ -90,19 +91,28 @@ export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url)
   const dias = Math.min(31, Math.max(1, Number(url.searchParams.get("dias") || 30) || 30))
   const crudo = url.searchParams.get("crudo") === "1"
+  // ?horas=N → buckets de 1 hora de las últimas N horas (sirve para ver el día en curso).
+  // ?porLlave=1 → separa también por API key (demo vs agente vs cotizador).
+  const horas = Math.min(168, Math.max(0, Number(url.searchParams.get("horas") || 0) || 0))
+  const porLlave = url.searchParams.get("porLlave") === "1"
 
   const hasta = new Date()
   hasta.setUTCHours(0, 0, 0, 0)
   hasta.setUTCDate(hasta.getUTCDate() + 1) // incluye el día de hoy (parcial)
   const desde = new Date(hasta)
   desde.setUTCDate(desde.getUTCDate() - dias)
+  if (horas) {
+    hasta.setTime(Date.now()); hasta.setUTCMinutes(0, 0, 0); hasta.setUTCHours(hasta.getUTCHours() + 1)
+    desde.setTime(hasta.getTime() - horas * 3600_000)
+  }
 
   const usoUrl = new URL(`${API}/usage_report/messages`)
   usoUrl.searchParams.set("starting_at", desde.toISOString())
   usoUrl.searchParams.set("ending_at", hasta.toISOString())
-  usoUrl.searchParams.set("bucket_width", "1d")
+  usoUrl.searchParams.set("bucket_width", horas ? "1h" : "1d")
   usoUrl.searchParams.append("group_by[]", "model")
-  usoUrl.searchParams.set("limit", "31")
+  if (porLlave) usoUrl.searchParams.append("group_by[]", "api_key_id")
+  usoUrl.searchParams.set("limit", horas ? "168" : "31")
 
   const costoUrl = new URL(`${API}/cost_report`)
   costoUrl.searchParams.set("starting_at", desde.toISOString())
@@ -118,10 +128,10 @@ export async function GET(req: Request): Promise<NextResponse> {
   const porModelo: Record<string, Acum> = {}
   const porDia: Record<string, Acum & { modelos: Record<string, Acum> }> = {}
   for (const b of uso.data) {
-    const dia = isoDia(new Date(b.starting_at))
+    const dia = horas ? b.starting_at.slice(0, 13) + "h" : isoDia(new Date(b.starting_at))
     porDia[dia] ||= { ...nuevo(), modelos: {} }
     for (const r of b.results || []) {
-      const m = r.model || "(sin modelo)"
+      const m = (r.model || "(sin modelo)") + (porLlave ? " · " + (r.api_key_id || "sin llave") : "")
       const cw =
         (r.cache_creation?.ephemeral_5m_input_tokens || 0) +
         (r.cache_creation?.ephemeral_1h_input_tokens || 0) +
