@@ -81,7 +81,7 @@ test("forma chilena → motor mexicano: reloj y puntos (renta por defecto, auto-
   assert.deepEqual(aInputCotizarMX({ userCount: 8 }), { userCount: 8 })
 })
 
-test("descuento MX = Chile (Lalo 24-sep) y la formal exige razón social (sin padrón en México)", () => {
+test("descuento MX = Chile (Lalo 24-sep) y la formal NO exige RFC (Lalo 02-oct: se pide al aceptar)", () => {
   const porNombre = new Map(TOOL_SCHEMAS_MX_UNIFICADAS.map((t) => [t.name, t]))
   for (const n of ["cotizar_referencial", "consultar_descuento_referencial", "consultar_siguiente_descuento", "aplicar_siguiente_descuento", "generar_link_cotizadora"]) {
     const t = porNombre.get(n)
@@ -89,12 +89,14 @@ test("descuento MX = Chile (Lalo 24-sep) y la formal exige razón social (sin pa
     assert.doesNotMatch(t!.description, /NO hay (escalera de )?descuento|No existe descuento/i, n)
   }
   const link = porNombre.get("generar_link_cotizadora")!.input_schema as { required: string[]; properties: Record<string, unknown> }
-  assert.ok(link.required.includes("empresa"))
+  assert.ok(!link.required.includes("rutEmpresa"))
   assert.ok(!link.required.includes("contactoEmail"))
   assert.ok("escalonDescuento" in link.properties)
   const texto = textoNucleo(FICHA_MX, "")
   assert.match(texto, /10 % → 20 %/)
-  assert.match(texto, /RFC \+ razón social \+ email/)
+  assert.match(texto, /a nombre de quién va \+ email/)
+  assert.match(texto, /NO SE PIDE EL RFC PARA COTIZAR/)
+  assert.doesNotMatch(texto, /RFC \+ razón social \+ email/)
 })
 
 test("MX: la tool cotizar_referencial declara el umbral vivo, no 50", async () => {

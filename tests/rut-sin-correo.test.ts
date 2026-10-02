@@ -59,9 +59,11 @@ const rodrigoMX = [
 ]
 
 describe("el correo no se vuelve a pedir (global, caso Rodrigo MX)", () => {
-  test("MX: con el RFC y sin razón social, la única pregunta es la razón social", () => {
+  test("MX: con el RFC y sin razón social, emite igual a nombre del contacto (02-oct)", () => {
     const d = directivaRutSinCorreo("BIM011108DJ5", rodrigoMX, { documento: "RFC" })
-    assert.match(d, /ÚNICA pregunta de este turno es la razón social/)
+    assert.match(d, /Llama generar_link_cotizadora AHORA/)
+    assert.match(d, /nombre del contacto/)
+    assert.doesNotMatch(d, /ÚNICA pregunta/)
     assert.match(d, /PROHIBIDO volver a pedirlo/)
   })
   test("MX: el turno siguiente (razón social) emite sin correo", () => {

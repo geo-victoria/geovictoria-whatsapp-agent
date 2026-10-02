@@ -169,15 +169,15 @@ export const TOOL_SCHEMAS_MX_UNIFICADAS: Schema[] = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y, SI hay correo, se lo envía al cliente. `contactoEmail` es OPCIONAL: con el RFC y la razón social basta para emitir — sin correo la entrega corre por este mismo WhatsApp (tu mensaje con el link + el PDF que adjunta el sistema). Devuelve el link de aceptación. Úsala apenas el cliente entregue el RFC y la razón social tras mostrar el precio (con o sin correo): esa entrega ES la confirmación implícita — no hagas preguntas de confirmación adicionales. NO la uses si el cliente está rechazando ni antes de que haya visto un precio. Si la cotización incluye reloj, requiere el array 'puntosInstalacion' (uno por punto físico). En México: RFC en `rutEmpresa` (como venga: con o sin guiones o espacios) y la RAZÓN SOCIAL en `empresa` (en México no se resuelve sola desde el RFC: pídela al cierre junto con el RFC); PDF y link en MXN, pago por transferencia a BANORTE (o tarjeta cuando la página la ofrezca). Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
+      "Crea la cotización formal en Zoho CRM, genera el PDF de propuesta y, SI hay correo, se lo envía al cliente. En México el RFC NO se pide para cotizar (es dato de facturación): la formal va a nombre de quien diga el cliente — su empresa o él mismo — y el RFC real con la Constancia de Situación Fiscal los pide la página al ACEPTAR. `contactoEmail` y `rutEmpresa` son OPCIONALES (si el cliente ya dio el RFC, pásalo; si no, jamás lo pidas). Úsala apenas el cliente, tras ver el precio, elige la opción o pide la formal y sabes a nombre de quién va (si no lo sabes, pregúntalo en una frase y emite en el turno siguiente): esa respuesta ES la confirmación implícita — no hagas preguntas de confirmación adicionales. NO la uses si el cliente está rechazando ni antes de que haya visto un precio. Si la cotización incluye reloj, requiere el array 'puntosInstalacion' (uno por punto físico). PDF y link en MXN, pago por transferencia a BANORTE (o tarjeta cuando la página la ofrezca). Pasa el MISMO escalonDescuento que el cliente aceptó. Copia `mensajeParaProspecto` TAL CUAL; JAMÁS escribas un link de memoria.",
     input_schema: {
       type: "object" as const,
       properties: {
-        empresa: { type: "string" as const, description: "Razón social de la empresa (en México se pide al cierre junto con el RFC)." },
+        empresa: { type: "string" as const, description: "A nombre de quién va la cotización: la empresa (como la diga el cliente) o, si cotiza a su nombre, la persona. Si no lo dijo, se usa el nombre del contacto." },
         contacto: { type: "string" as const, description: "Nombre completo de la persona de contacto." },
         contactoEmail: { type: "string" as const, description: "Correo del contacto (opcional: sin correo la entrega va por este chat)." },
         contactoTelefono: { type: "string" as const, description: "Se completa solo con el WhatsApp del cliente; no lo pidas." },
-        rutEmpresa: { type: "string" as const, description: "RFC de la empresa o persona, como lo dio el cliente." },
+        rutEmpresa: { type: "string" as const, description: "RFC SOLO si el cliente ya lo dio (opcional). JAMÁS lo pidas para cotizar: se pide al aceptar." },
         userCount: { type: "number" as const, minimum: 1, maximum: 50 },
         modulos: { type: "array" as const, items: { type: "string" as const } },
         hardware: HARDWARE_MX,
@@ -185,7 +185,7 @@ export const TOOL_SCHEMAS_MX_UNIFICADAS: Schema[] = [
         escalonDescuento: { type: "number" as const, enum: [0, 1, 2], description: "El MISMO escalón que el cliente aceptó en el estimado (si lo omites se usa el último ofrecido en esta conversación): la formal nace con ese % en el plan por 6 meses." },
       },
       // Mismo contrato que Chile (Lalo 03-ago / 21-sep): el correo es OPCIONAL.
-      required: ["empresa", "contacto", "rutEmpresa", "userCount"],
+      required: ["contacto", "userCount"],
     },
   },
   SOPORTE_SCHEMA,
@@ -407,22 +407,31 @@ export function buildDispatchMXUnificado(contact: string) {
         const pref = await leerPref()
         const esc = Math.min(2, Math.max(0, Number(i.escalonDescuento ?? pref?.escalon ?? 0)))
         const hardware = i.hardware as HardwareIn[] | undefined
-        // México no tiene padrón que resuelva la razón social desde el RFC.
-        // Tampoco vale rellenarla con el RFC o con el nombre del contacto
-        // (batería MX 24-sep: la formal salió con razón social "XAXX010101000").
-        // Batería 26-sep: tampoco un PEDAZO del RFC ("GEO" de GEO150101AB1).
+        // COTIZAR SIN RFC (Lalo 02-oct, caso Antonio Vázquez): en México el
+        // RFC es dato de FACTURACIÓN. La formal nace a nombre de quien diga
+        // el cliente (empresa o persona) y, sin RFC, con el genérico del SAT;
+        // el RFC real y la constancia de situación fiscal los pide la página
+        // al ACEPTAR. La razón social mala (el RFC o un pedazo de él, baterías
+        // 24 y 26-sep) se descarta y la cotización va a nombre del contacto.
         const { razonSocialInvalidaMX } = await import("./razon-social.ts")
-        // Persona física (RFC 13): sin razón social declarada, factura a su nombre.
-        const rfcCompacto = String(i.rutEmpresa || i.rfc || "").replace(/[\s.\-_,]/g, "")
-        const empresaTxt = String(i.empresa || "").trim() || (rfcCompacto.length === 13 ? String(i.contacto || "").trim() : "")
-        if (!empresaTxt || razonSocialInvalidaMX(empresaTxt, i.rutEmpresa || i.rfc, i.contacto)) {
-          return { ok: false, error: "Falta la RAZÓN SOCIAL: en México no se resuelve desde el RFC. Pídesela al cliente en una frase corta (junto con el RFC si también falta) y vuelve a llamar la tool." }
+        // Un RFC dado por el cliente que no valida (o el genérico) no frena:
+        // se emite sin RFC y el real se pide al aceptar.
+        const { rfcValido, esRfcGenerico } = await import("./rfc.ts")
+        const rfcCrudo = String(i.rutEmpresa || i.rfc || "").trim()
+        const rfcTxt = rfcCrudo && rfcValido(rfcCrudo) && !esRfcGenerico(rfcCrudo) ? rfcCrudo : ""
+        const empresaDicha = String(i.empresa || "").trim()
+        const empresaTxt =
+          empresaDicha && !razonSocialInvalidaMX(empresaDicha, rfcTxt, rfcTxt ? i.contacto : "")
+            ? empresaDicha
+            : String(i.contacto || "").trim()
+        if (!empresaTxt) {
+          return { ok: false, error: "Falta a nombre de quién va la cotización: pregúntale en una frase corta si la dejas a nombre de su empresa o al suyo, y vuelve a llamar la tool. NO pidas el RFC: se pide al aceptar." }
         }
         return base("generar_link_cotizadora", {
           empresa: empresaTxt,
           contacto: i.contacto,
           email: i.contactoEmail || i.email,
-          rfc: i.rutEmpresa || i.rfc,
+          rfc: rfcTxt || undefined,
           ...aInputCotizarMX({
             userCount: Number(i.userCount || pref?.userCount || 0),
             hardware,

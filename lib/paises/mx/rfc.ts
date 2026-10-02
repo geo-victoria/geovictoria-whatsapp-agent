@@ -41,6 +41,17 @@ export function rfcValido(rfcRaw: string): boolean {
 }
 
 /**
+ * RFC genérico del SAT ("público en general" XAXX010101000 y extranjero
+ * XEXX010101000). Sirve para facturar sin RFC, pero NO identifica a nadie:
+ * no vale como RFC de una empresa en el alta ni en el CRM (02-oct, cotizar
+ * sin RFC: la emisión lo usa de relleno y el RFC real se pide al aceptar).
+ */
+export function esRfcGenerico(rfcRaw: string): boolean {
+  const r = normalizarRfc(rfcRaw)
+  return r === "XAXX010101000" || r === "XEXX010101000"
+}
+
+/**
  * Primer RFC con formato válido dentro de un texto libre del cliente (27-sep,
  * escalera RFC + dotación → trato como el RUT/RUC/NIT). Acepta separadores
  * entre bloques y minúsculas; devuelve el RFC normalizado o null. Un número

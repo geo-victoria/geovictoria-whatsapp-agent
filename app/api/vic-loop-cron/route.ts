@@ -110,10 +110,11 @@ const ACEPTADA_CELDA = tplCelda(
 const CO_PREFORM = "vicky_co_react_preform"
 const CO_CON_PRECIO = "vicky_loop_con_precio_co"
 // MX (25-jul, número +52 conectado en Dapta): reutiliza las neutras
-// multi-línea; con_precio pide RFC (vicky_loop_con_precio_mx, creada por
-// API); toque VI usa la corta mexicana existente.
+// multi-línea; toque VI usa la corta mexicana existente. con_precio (02-oct,
+// cotizar sin RFC): "¿A nombre de quién quieres que la hagamos?" — la vieja
+// vicky_loop_con_precio_mx pedía el RFC.
 const MX_SIN_PRECIO = "vicky_loop_sin_precio"
-const MX_CON_PRECIO = "vicky_loop_con_precio_mx"
+const MX_CON_PRECIO = "vicky_loop_con_precio_mx_v2"
 const PE_SIN_PRECIO = "vicky_pe_loop_sin_precio"
 const PE_CON_PRECIO = "vicky_pe_loop_con_precio"
 const PE_FORMAL = "vicky_pe_loop_formal"
@@ -199,6 +200,8 @@ const VARS_PLANTILLA: Record<string, readonly string[]> = {
   vicky_loop_con_precio: [],
   vicky_loop_con_precio_co: [],
   vicky_loop_con_precio_mx: [],
+  vicky_loop_con_precio_mx_v2: [],
+  vicky_loop_toque2_neutro: [],
   vicky_loop_pago: ["nombre"],
   // Gemela CON LINK (04-sep): la de arriba dice "¿te ayudo con el pago?" y no
   // lleva a ninguna parte — 28 toques salieron así a 14 clientes que YA habían
@@ -442,7 +445,7 @@ const TEXTOS: Record<LoopStage, { cl: string; co: string; mx: string; pe: string
     co:
       "Tu valor ya está listo — solo me falta el NIT (o tu ok) para dejarte la cotización formal.\nLa armamos de una?",
     mx:
-      "Tu valor ya está listo — solo me falta el RFC (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
+      "Tu valor ya está listo — solo me falta saber a nombre de quién la hago (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
     pe: "Tu valor ya está listo — solo me falta el RUC (o tu ok) para dejarte la cotización formal.\n¿Avanzamos?",
   },
   formal: {

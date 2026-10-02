@@ -20,7 +20,7 @@
 import { rutValido, formatearRut, rucValido, formatearRuc } from "../rut.ts"
 import { rutLegible } from "./plantilla.ts"
 import { nitValido, normalizarNit } from "../paises/co/nit.ts"
-import { rfcValido, normalizarRfc } from "../paises/mx/rfc.ts"
+import { rfcValido, normalizarRfc, esRfcGenerico } from "../paises/mx/rfc.ts"
 
 // PERÚ (21-sep, Lalo "básicamente es lo mismo que hace Vicky de Chile"): el
 // alta por chat corre igual, con RUC para la empresa y DNI para el
@@ -140,7 +140,8 @@ export function identificadorValido(valor: string, pais: PaisOnboarding): boolea
   if (pais === "cl") return rutValido(valor)
   if (pais === "co") return nitValido(valor)
   if (pais === "pe") return rucValido(valor)
-  return rfcValido(valor)
+  // El RFC genérico del SAT no es el de la empresa (cotizar sin RFC, 02-oct).
+  return rfcValido(valor) && !esRfcGenerico(valor)
 }
 
 /** true si el identificador PERSONAL del admin es válido para el país. */

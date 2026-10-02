@@ -195,7 +195,7 @@ export const TOOL_SCHEMAS_MX = [
   {
     name: "generar_link_cotizadora",
     description:
-      "Genera la COTIZACIÓN FORMAL de México en el sistema (registro en el CRM + PDF + link de aceptación online donde el cliente revisa, acepta y paga en línea). Úsala SOLO cuando el cliente ya vio el precio referencial, aceptó avanzar y te entregó los CUATRO datos: nombre completo, empresa, RFC (12 caracteres persona moral o 13 persona física, con o sin guiones o espacios) y correo. Pasa la MISMA configuración con que cotizaste (userCount, reloj, puntosInstalacion). Devuelve `mensajeParaProspecto` con el link — cópialo TAL CUAL. Si el RFC es inválido devuelve error: pídele al cliente confirmarlo y vuelve a llamar. UNA sola cotización formal por conversación.",
+      "Genera la COTIZACIÓN FORMAL de México en el sistema (registro en el CRM + PDF + link de aceptación online donde el cliente revisa, acepta y paga en línea). Úsala SOLO cuando el cliente ya vio el precio referencial, aceptó avanzar y sabes a nombre de quién va (empresa o persona). El RFC y el correo son opcionales: el RFC se pide al aceptar. Pasa la MISMA configuración con que cotizaste (userCount, reloj, puntosInstalacion). Devuelve `mensajeParaProspecto` con el link — cópialo TAL CUAL. Si el RFC es inválido devuelve error: pídele al cliente confirmarlo y vuelve a llamar. UNA sola cotización formal por conversación.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -228,7 +228,7 @@ export const TOOL_SCHEMAS_MX = [
           },
         },
       },
-      required: ["empresa", "contacto", "rfc", "email", "userCount"],
+      required: ["empresa", "contacto", "userCount"],
     },
   },
   {
@@ -431,7 +431,9 @@ export function buildDispatchMX(contact: string) {
         if (!SECRET_COTIZADORA_MX) {
           return { ok: false, error: "Cotizadora MX no configurada (secreto faltante). Deriva al ejecutivo." }
         }
-        if (!i.rfc || !rfcValido(i.rfc)) {
+        // El RFC es OPCIONAL (02-oct): sin él la formal nace con el genérico
+        // del SAT y el RFC real se pide al aceptar. Si vino, se valida.
+        if (i.rfc && !rfcValido(i.rfc)) {
           return {
             ok: false,
             error: `El RFC '${i.rfc || ""}' no tiene un formato válido (12 caracteres persona moral o 13 persona física, ej. CEC2005286R4). Pídele al cliente confirmarlo — sirve con o sin guiones o espacios — y vuelve a llamar la tool.`,
@@ -476,7 +478,7 @@ export function buildDispatchMX(contact: string) {
             empresa: i.empresa,
             contacto: i.contacto,
             contactoEmail: i.email || undefined,
-            rfc: normalizarRfc(i.rfc),
+            ...(i.rfc ? { rfc: normalizarRfc(i.rfc) } : {}),
             contactoTelefono: `+${contact}`,
             userCount: Number(i.userCount || 0),
             items: calculo.itemsCotizador,

@@ -87,8 +87,8 @@ function yaEmitioFormal(history: TurnoHistorial[]): boolean {
  * turno quemado por un dato que no hace falta para emitir). El documento puede
  * llegar en ESTE mensaje o en uno anterior: mientras la formal no esté
  * emitida y el cliente nunca haya dado correo, el correo no se menciona más.
- * En México (RFC) la razón social SÍ es obligatoria (no hay padrón que la
- * resuelva): si falta, es la ÚNICA pregunta del turno.
+ * En México (RFC) el RFC ni la razón social frenan (02-oct): sin razón social
+ * la formal va a nombre del contacto.
  */
 export function directivaRutSinCorreo(
   mensaje: string,
@@ -103,12 +103,14 @@ export function directivaRutSinCorreo(
   if (!yaVioPrecio(history)) return ""
   if (yaEmitioFormal(history)) return ""
   if (documento === "RFC") {
+    // México (Lalo 02-oct): el RFC NO es requisito para cotizar y la razón
+    // social tampoco frena — sin ella la formal va a nombre del contacto; el
+    // RFC y la constancia de situación fiscal se piden al aceptar.
     return (
       `\n\n[DIRECTIVA DEL TURNO — obligatoria] El cliente ya te entregó el RFC y en toda la conversación NO te ha ` +
       "dado un correo. El correo NO es necesario para emitir: PROHIBIDO volver a pedirlo o mencionarlo. " +
-      "Si ya tienes la RAZÓN SOCIAL (la dijo en este mensaje o antes), llama generar_link_cotizadora AHORA, en este " +
-      "mismo turno, OMITIENDO `contactoEmail`. Si todavía no la tienes, tu ÚNICA pregunta de este turno es la razón " +
-      "social, en una sola línea (\"Me confirmas la razón social de la empresa?\"), sin nombrar el correo."
+      "Llama generar_link_cotizadora AHORA, en este mismo turno, OMITIENDO `contactoEmail`, con empresa = la razón " +
+      "social si la dijo o, si no, el nombre del contacto. No pidas nada más."
     )
   }
   if (!enMensaje) {
