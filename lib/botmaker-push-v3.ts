@@ -554,7 +554,8 @@ export async function sendBotmakerTemplate(
   channelId?: string,
   // transaccional: ver sendBotmakerMessage — el kickoff del alta post-pago
   // y la bienvenida de pago no son proactividad y el gate no los frena.
-  opts: { transaccional?: boolean } = {},
+  // campanaExterna: el envío es la apertura de esa campaña externa (ver gate).
+  opts: { transaccional?: boolean; campanaExterna?: string } = {},
 ): Promise<boolean> {
   if (!BM_TOKEN) {
     console.error("[botmaker-template] BOTMAKER_ACCESS_TOKEN no configurado")
@@ -608,7 +609,12 @@ export async function sendBotmakerTemplate(
   // proactivo por excelencia — acá vive también el anti-repetición de HSM.
   {
     const { evaluarGateProactividad } = await import("./gate-proactividad")
-    const gate = await evaluarGateProactividad(cleanContact, { tipo: "plantilla", plantilla: templateName, transaccional: opts.transaccional })
+    const gate = await evaluarGateProactividad(cleanContact, {
+      tipo: "plantilla",
+      plantilla: templateName,
+      transaccional: opts.transaccional,
+      campanaExterna: opts.campanaExterna,
+    })
     if (!gate.permitir) return false
   }
   try {

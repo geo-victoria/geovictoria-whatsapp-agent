@@ -149,6 +149,13 @@ export async function evaluarGateProactividad(
      * que pagó se quedó sin su cuenta hasta que alguien lo re-disparó a mano.
      */
     transaccional?: boolean
+    /**
+     * El envío ES la campaña externa del contacto (02-oct): la plantilla de
+     * apertura que dispara la propia campaña. Si coincide con la marca, el
+     * bloqueo de campaña externa no aplica y el envío pasa por el resto del
+     * gate como cualquier plantilla (opt-out, ventana horaria, ráfaga).
+     */
+    campanaExterna?: string
   } = { tipo: "texto" },
 ): Promise<GateDecision> {
   const pasa: GateDecision = { permitir: true, motivos: [], reactivo: false }
@@ -176,7 +183,9 @@ export async function evaluarGateProactividad(
     if (!opts.transaccional) {
       const { campanaExternaDe } = await import("./campana-externa")
       const marca = await campanaExternaDe(clean)
-      if (marca) return { permitir: false, motivos: [`campana_externa_${marca.campana}`], reactivo: false }
+      if (marca && marca.campana !== opts.campanaExterna) {
+        return { permitir: false, motivos: [`campana_externa_${marca.campana}`], reactivo: false }
+      }
     }
 
     // Conversación: ¿turno reactivo? ¿cerrada por opt-out/perdido?

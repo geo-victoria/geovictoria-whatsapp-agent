@@ -71,6 +71,8 @@ export async function POST(req: Request): Promise<Response> {
     params?: Record<string, string>
     /** Línea por la que sale (channelId o número, ej. "573181070737"). Default: línea CL. */
     channel?: string
+    /** Nombre de la campaña externa cuya apertura es esta plantilla. */
+    campanaExterna?: string
     /** via="media": URL pública del archivo a enviar (debe ser descargable por Botmaker). */
     url?: string
     filename?: string
@@ -106,7 +108,12 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json({ ok: false, error: "contact y template requeridos" }, { status: 400 })
     }
     const channel = (body.channel || "").trim() || undefined
-    const ok = await sendBotmakerTemplate(contact, template, body.params || {}, channel).catch(() => false)
+    // campanaExterna: la apertura de una campaña externa (el contacto está
+    // marcado para que Vicky no le hable; esta plantilla es la campaña misma).
+    const campanaExterna = (body.campanaExterna || "").trim() || undefined
+    const ok = await sendBotmakerTemplate(contact, template, body.params || {}, channel, { campanaExterna }).catch(
+      () => false,
+    )
     return NextResponse.json(
       { ok, via: "template", contact, template, channel: channel || "default(CL)" },
       { status: ok ? 200 : 502 },
